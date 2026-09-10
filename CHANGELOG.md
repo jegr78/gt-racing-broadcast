@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.1](https://github.com/jegr78/gt-racing-broadcast/compare/v1.10.0...v1.10.1) (2026-09-10)
+
+
+### Bug Fixes
+
+* **cli:** open the browser without the frozen library path ([#579](https://github.com/jegr78/gt-racing-broadcast/issues/579)) ([f9aa243](https://github.com/jegr78/gt-racing-broadcast/commit/f9aa2434334e364290f66c5750eca80cd374ee80))
+
 ## [1.10.0](https://github.com/jegr78/gt-racing-broadcast/compare/v1.9.0...v1.10.0) (2026-08-28)
 
 
