@@ -145,11 +145,13 @@ def localize_discord_audio(collection, platform, web=False, browser="Firefox"):
 # of the same role ("Solo Capture" / "Solo Webcam") — mirroring the Discord precedent
 # (scene "Discord" wraps leaf "Discord Audio Capture"). A by-name lookup can therefore
 # never collide a device leaf with its wrapping scene.
+CAPTURE_DEVICE_NAME = "Solo Capture Device"
+TYRES_DEVICE_NAME = "Solo Tyres Capture Device"
 DEVICE_SOURCES = (
-    {"name": "Solo Capture Device", "env": "RACECAST_CAPTURE", "kind": "video"},
+    {"name": CAPTURE_DEVICE_NAME, "env": "RACECAST_CAPTURE", "kind": "video"},
     {"name": "Solo Webcam Device",  "env": "RACECAST_WEBCAM",  "kind": "video"},
     {"name": "Commentary Mic Device", "env": "RACECAST_MIC",   "kind": "audio"},
-    {"name": "Solo Tyres Capture Device", "env": "RACECAST_TYRES_CAPTURE", "kind": "video"},
+    {"name": TYRES_DEVICE_NAME, "env": "RACECAST_TYRES_CAPTURE", "kind": "video"},
 )
 DEVICE_VARIANTS = {
     "darwin": ("av_capture_input", "device"),        # AVFoundation device UID
@@ -189,14 +191,57 @@ def audio_variant(platform):
     return None
 
 
+def tyres_uses_capture(env):
+    """True when the tyres/fuel crop should reuse the capture card's source (#597):
+    RACECAST_TYRES_CAPTURE is empty or, trimmed, equal to RACECAST_CAPTURE. The common
+    setup has ONE card and the widget is a crop of the same PlayStation picture; on
+    Windows OBS cannot open one DirectShow device twice, so a second input on the
+    same card stays black. Only a different device value means a second card."""
+    env = env or {}
+    tyres = (env.get("RACECAST_TYRES_CAPTURE") or "").strip()
+    return not tyres or tyres == (env.get("RACECAST_CAPTURE") or "").strip()
+
+
+def share_tyres_capture(collection):
+    """Point every scene item that shows the tyres/fuel device leaf at the capture
+    device leaf instead, and drop the tyres leaf, so the card is opened once. The
+    crop lives on the Program scene item, so the layout and the HUD editor's
+    transform are unaffected. No-op (False) unless both leaves exist. Mutates."""
+    sources = collection.get("sources", [])
+    by_name = {s.get("name"): s for s in sources}
+    cap, tyres = by_name.get(CAPTURE_DEVICE_NAME), by_name.get(TYRES_DEVICE_NAME)
+    if cap is None or tyres is None:
+        return False
+    for s in sources:
+        for item in (s.get("settings") or {}).get("items") or []:
+            if (item.get("name") == TYRES_DEVICE_NAME
+                    or item.get("source_uuid") == tyres.get("uuid")):
+                item["name"] = CAPTURE_DEVICE_NAME
+                item["source_uuid"] = cap.get("uuid")
+    collection["sources"] = [s for s in sources if s is not tyres]
+    return True
+
+
+def tyres_capture_summary(env):
+    """One setup summary line naming the source the tyres/fuel crop uses."""
+    if tyres_uses_capture(env):
+        return f"Tyres/fuel crop: uses the capture card source ({CAPTURE_DEVICE_NAME})"
+    return (f"Tyres/fuel crop: separate device from RACECAST_TYRES_CAPTURE "
+            f"({TYRES_DEVICE_NAME})")
+
+
 def localize_device_sources(collection, platform, env):
     """Rebuild each DEVICE_SOURCES source's id/versioned_id/settings for `platform`,
     injecting env[<entry.env>] (default '') into the per-OS device-id key. Video
     entries use device_variant(); audio entries (the commentary mic) use
-    audio_variant(). Returns the names with an EMPTY device value (caller warns).
+    audio_variant(). When tyres_uses_capture(env), the tyres/fuel leaf is first
+    folded into the capture leaf (share_tyres_capture), so it is neither built nor
+    reported unset. Returns the names with an EMPTY device value (caller warns).
     Absent source -> skipped. Unknown platform -> sources left as-is, all treated as
     unset. Never raises (best-effort, same contract as localize_discord_audio)."""
     env = env or {}
+    if tyres_uses_capture(env):
+        share_tyres_capture(collection)
     variant_fn = {"video": device_variant, "audio": audio_variant}
     by_name = {s.get("name"): s for s in collection.get("sources", [])}
     unset = []
@@ -420,6 +465,7 @@ def main():
     browser = discord_web.resolve_browser(
         os.environ, discord_web.detect_running_browser() if web else None)
     swapped = localize_discord_audio(localized, sys.platform, web=web, browser=browser)
+    has_tyres = any(s.get("name") == TYRES_DEVICE_NAME for s in localized.get("sources", []))
     device_unset = localize_device_sources(localized, sys.platform, os.environ)
     apply_collection_name(localized, a.collection)
     if a.overlay_css and os.path.isfile(a.overlay_css):
@@ -459,6 +505,8 @@ def main():
         print(f"  NOTE: no Discord audio variant for {sys.platform} — macOS form kept.")
     else:
         print("  WARNING: Discord audio source not found in the collection.")
+    if has_tyres:
+        print("  " + tyres_capture_summary(os.environ))
     if device_unset:
         print("  WARNING: no device chosen for " + ", ".join(device_unset) +
               " — set RACECAST_CAPTURE / RACECAST_WEBCAM in .env (OBS shows black "

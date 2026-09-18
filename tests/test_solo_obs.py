@@ -423,6 +423,102 @@ def t_audio_variants_cross_check_obs_ws_audio_property():
         assert key == obs_ws.device_property_name(platform, kind="audio") == "device_id", platform
 
 
+
+# ---- One capture card for game + tyres/fuel crop (#597). OBS cannot open the same
+# DirectShow device twice on Windows, so an empty RACECAST_TYRES_CAPTURE, or one equal
+# to RACECAST_CAPTURE, must make the tyres/fuel crop reuse the Solo Capture Device
+# source instead of creating a second input on the same card.
+
+def _video_leaves(d):
+    return [s for s in d["sources"] if s.get("id") in ("av_capture_input", "dshow_input")]
+
+
+def _tyres_wrapper_item(d):
+    sc = next(s for s in d["sources"]
+              if s.get("name") == "Solo Tyres/Fuel Capture" and s.get("id") == "scene")
+    (item,) = sc["settings"]["items"]
+    return item
+
+
+def _assert_tyres_shares_capture(d):
+    names = {s["name"] for s in d["sources"]}
+    assert "Solo Tyres Capture Device" not in names
+    cap = _byname(d, "Solo Capture Device")
+    item = _tyres_wrapper_item(d)
+    assert item["name"] == "Solo Capture Device"
+    assert item["source_uuid"] == cap["uuid"]
+    assert "Solo Tyres Capture Device" not in json.dumps(d)
+
+
+def t_tyres_uses_capture_predicate():
+    assert sa.tyres_uses_capture({}) is True
+    assert sa.tyres_uses_capture({"RACECAST_CAPTURE": "CAP"}) is True
+    assert sa.tyres_uses_capture({"RACECAST_CAPTURE": "CAP", "RACECAST_TYRES_CAPTURE": "  "}) is True
+    assert sa.tyres_uses_capture({"RACECAST_CAPTURE": "CAP", "RACECAST_TYRES_CAPTURE": " CAP "}) is True
+    assert sa.tyres_uses_capture({"RACECAST_CAPTURE": "CAP", "RACECAST_TYRES_CAPTURE": "TYRE"}) is False
+    assert sa.tyres_uses_capture({"RACECAST_TYRES_CAPTURE": "TYRE"}) is False
+
+
+def t_localize_tyres_empty_shares_capture_device():
+    d = _load_solo("GT_Racing_Solo_Commentary.json")
+    unset = sa.localize_device_sources(
+        d, "win32", {"RACECAST_CAPTURE": "Elgato HD60 X:X", "RACECAST_WEBCAM": "CAM",
+                     "RACECAST_MIC": "MIC"})
+    assert unset == []
+    _assert_tyres_shares_capture(d)
+    leaves = _video_leaves(d)
+    assert [s["settings"] for s in leaves if s["name"] == "Solo Capture Device"] == [
+        {"video_device_id": "Elgato HD60 X:X"}]
+    # The card is opened exactly once: one input carries the capture device value.
+    assert sum(1 for s in leaves if "Elgato HD60 X:X" in s["settings"].values()) == 1
+
+
+def t_localize_tyres_equal_to_capture_shares_capture_device():
+    d = _load_solo("GT_Racing_Solo_Commentary.json")
+    unset = sa.localize_device_sources(
+        d, "win32", {"RACECAST_CAPTURE": "Elgato HD60 X:X", "RACECAST_WEBCAM": "CAM",
+                     "RACECAST_MIC": "MIC", "RACECAST_TYRES_CAPTURE": " Elgato HD60 X:X "})
+    assert unset == []
+    _assert_tyres_shares_capture(d)
+    assert sum(1 for s in _video_leaves(d)
+               if "Elgato HD60 X:X" in s["settings"].values()) == 1
+
+
+def t_localize_tyres_different_device_keeps_two_inputs():
+    d = _load_solo("GT_Racing_Solo_Commentary.json")
+    unset = sa.localize_device_sources(
+        d, "win32", {"RACECAST_CAPTURE": "CAP", "RACECAST_WEBCAM": "CAM",
+                     "RACECAST_MIC": "MIC", "RACECAST_TYRES_CAPTURE": "TYRE"})
+    assert unset == []
+    tyres = _byname(d, "Solo Tyres Capture Device")
+    assert tyres["id"] == "dshow_input"
+    assert tyres["settings"] == {"video_device_id": "TYRE"}
+    item = _tyres_wrapper_item(d)
+    assert item["name"] == "Solo Tyres Capture Device"
+    assert item["source_uuid"] == tyres["uuid"]
+
+
+def t_localize_capture_and_tyres_empty_warns_capture_only():
+    d = _load_solo("GT_Racing_Solo_Commentary.json")
+    unset = sa.localize_device_sources(
+        d, "win32", {"RACECAST_WEBCAM": "CAM", "RACECAST_MIC": "MIC"})
+    assert unset == ["Solo Capture Device"]
+    _assert_tyres_shares_capture(d)
+
+
+def t_localize_pov_template_without_tyres_is_untouched_by_sharing():
+    d = _load_solo("GT_Racing_Solo_POV.json")
+    before = {s["name"] for s in d["sources"]}
+    sa.localize_device_sources(d, "win32", {"RACECAST_CAPTURE": "CAP"})
+    assert {s["name"] for s in d["sources"]} == before
+
+
+def t_tyres_summary_line():
+    assert "Solo Capture Device" in sa.tyres_capture_summary({"RACECAST_CAPTURE": "CAP"})
+    assert "RACECAST_TYRES_CAPTURE" in sa.tyres_capture_summary(
+        {"RACECAST_CAPTURE": "CAP", "RACECAST_TYRES_CAPTURE": "TYRE"})
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
