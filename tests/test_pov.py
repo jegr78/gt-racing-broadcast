@@ -2119,6 +2119,16 @@ def t_pov_source_never_accepts_local():
                            allow_local=False)
     assert pov.inject_row(2, url="local:") is False
 
+def t_relay_builds_the_pov_source_without_local():
+    # The wiring main() uses: the POV tab never names the capture card, the
+    # qualifying tab (same structure as the Schedule) may.
+    pov = m.pov_schedule_source("SHEETID", "POV", LOGDIR)
+    assert pov.allow_local is False
+    assert "sheet=POV" in pov.csv_url and pov.cache_path.endswith("pov.cache.txt")
+    qual = m.qualifying_schedule_source("SHEETID", "Qualifying", LOGDIR)
+    assert qual.allow_local is True
+    assert "sheet=Qualifying" in qual.csv_url
+
 def t_inject_row_accepts_local_and_normalises():
     s = m.ScheduleSource("http://sched", os.path.join(LOGDIR, "sched-local.txt"), None)
     assert s.inject_row(3, url="Local:", name="Jens") is True

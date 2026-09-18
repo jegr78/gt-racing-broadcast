@@ -4753,6 +4753,24 @@ def sanitize_reason(text):
     return " ".join(kept.split())[:SUBSTITUTION_REASON_MAX].strip()
 
 
+def _sheet_tab_csv_url(sheet_id, tab):
+    return (f"https://docs.google.com/spreadsheets/d/{sheet_id}"
+            f"/gviz/tq?tqx=out:csv&sheet={quote(tab)}")
+
+
+def pov_schedule_source(sheet_id, tab, runtime):
+    """The POV tab's source. Never `local:` (#592): a POV pull must not take the
+    capture card from an on-air A/B feed."""
+    return ScheduleSource(_sheet_tab_csv_url(sheet_id, tab),
+                          os.path.join(runtime, "pov.cache.txt"), None, allow_local=False)
+
+
+def qualifying_schedule_source(sheet_id, tab, runtime):
+    """The Qualifying tab's source: the Schedule's structure, `local:` allowed."""
+    return ScheduleSource(_sheet_tab_csv_url(sheet_id, tab),
+                          os.path.join(runtime, "qualifying.cache.txt"), None)
+
+
 def pull_slots(rows):
     """Slot id per row: maximal runs of CONSECUTIVE rows with the same non-empty
     URL share one slot, so a single feed pull serves the whole run — a commentator
@@ -5141,7 +5159,7 @@ class ScheduleSource:
           the URL is filled (issue #137). A non-channel URL is treated as
           not-yet-filled (url -> "") so the feed never serves junk.
         - **Positional fallback** (no header row): the URL column is auto-detected
-          (most cells matching is_channel) and the streamer is the cell right of
+          (most cells matching `accept`) and the streamer is the cell right of
           it; no stint label exists in this layout (URL-bearing rows only).
         `local:` counts as a URL only with allow_local (#592)."""
         accept = is_feed_source if allow_local else is_channel
@@ -10154,10 +10172,7 @@ def main():
     # so a custom --sheet-csv-url disables POV (no tab to point at).
     pov_source = None
     if not args.no_pov and not args.sheet_csv_url:
-        pov_csv_url = (f"https://docs.google.com/spreadsheets/d/{args.sheet_id}"
-                       f"/gviz/tq?tqx=out:csv&sheet={quote(args.pov_tab)}")
-        pov_cache = os.path.join(runtime, "pov.cache.txt")
-        pov_source = ScheduleSource(pov_csv_url, pov_cache, None, allow_local=False)
+        pov_source = pov_schedule_source(args.sheet_id, args.pov_tab, runtime)
         pov_source.refresh()   # non-fatal: empty cell / unreachable = POV simply off
 
     # Qualifying source: own sheet tab, same parser/structure as the race
@@ -10165,10 +10180,7 @@ def main():
     # --sheet-csv-url disables it). Single stream -> served on Feed A.
     qual_source = None
     if not args.no_qualifying and not args.sheet_csv_url and not args.solo:
-        qual_csv_url = (f"https://docs.google.com/spreadsheets/d/{args.sheet_id}"
-                        f"/gviz/tq?tqx=out:csv&sheet={quote(args.qualifying_tab)}")
-        qual_cache = os.path.join(runtime, "qualifying.cache.txt")
-        qual_source = ScheduleSource(qual_csv_url, qual_cache, None)
+        qual_source = qualifying_schedule_source(args.sheet_id, args.qualifying_tab, runtime)
         qual_source.refresh()   # non-fatal: empty/unreachable = qualifying mode just idles
 
     # Crew roster (#216): Name | Director | Producer tab giving the director/
