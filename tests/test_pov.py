@@ -2281,31 +2281,42 @@ def t_obs_audio_plan_leaves_the_mic_alone_without_a_capture_card():
 
 def t_reflect_snapshots_the_mic_before_the_freed_feed_advances():
     # Stint 1 is local on A. At the handover the freed feed A is re-indexed to
-    # stint 3 right after _reflect; the OBS thread must still see A as the local
-    # slot it just cut away from, so the mic is planned off, not forgotten.
+    # stint 3 right after _reflect; the OBS thread, started only once next_auto()
+    # has returned, must still see A as the local slot it just cut away from.
     r = m.Relay(_StubSource(["local:", "https://youtu.be/b", "https://youtu.be/c"]),
                 (53001, 53002), LOGDIR)
     r._reflect_pov = lambda shown: None
-    seen, gate, done = [], threading.Event(), threading.Event()
+    seen, deferred = [], []
 
     class FakeObs:
         def reflect_feed_state(self, live, cut, audio=None, extra_mute=()):
-            gate.wait(2)                   # run only after next_auto() re-indexed A
             seen.append((live, cut, audio, list(extra_mute)))
-            done.set()
             return [], ""
 
-    orig_obs, orig_env = m._obs_ws, dict(os.environ)
+    class _Deferred:                        # holds _reflect's thread until we run it
+        def __init__(self, target=None, daemon=None, **_k):
+            self.target = target
+        def start(self):
+            deferred.append(self.target)
+
+    class _Threading:
+        Thread = _Deferred
+        def __getattr__(self, name):
+            return getattr(threading, name)
+
+    orig_obs, orig_thr, orig_env = m._obs_ws, m.threading, dict(os.environ)
     m._obs_ws = FakeObs()
     os.environ["RACECAST_CAPTURE"] = "/dev/video9"
     try:
         r.feeds["B"].phase = "serving"
+        m.threading = _Threading()
         r.next_auto()
+        m.threading = orig_thr
         assert r.A.current_channel()[0] != "local:"   # A has already moved on
-        gate.set()
-        assert done.wait(2)
+        for run in deferred:
+            run()
     finally:
-        m._obs_ws = orig_obs
+        m._obs_ws, m.threading = orig_obs, orig_thr
         os.environ.clear(); os.environ.update(orig_env)
     live, cut, audio, extra = seen[0]
     assert (live, cut) == ("B", True)
