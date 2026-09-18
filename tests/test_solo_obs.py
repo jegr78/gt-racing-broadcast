@@ -452,8 +452,10 @@ def _assert_tyres_shares_capture(d):
     wrapper = next(s for s in d["sources"]
                    if s.get("name") == "Solo Tyres/Fuel Capture" and s.get("id") == "scene")
     prog = next(s for s in d["sources"] if s.get("name") == "Program")
-    (crop_item,) = [it for it in prog["settings"]["items"]
-                    if it.get("name") == "Solo Tyres/Fuel Capture"]
+    crop_items = [it for it in prog["settings"]["items"]
+                  if it.get("name") == "Solo Tyres/Fuel Capture"]
+    assert len(crop_items) == 1, [it.get("name") for it in prog["settings"]["items"]]
+    crop_item = crop_items[0]
     assert crop_item["source_uuid"] == wrapper["uuid"]
     assert {k: crop_item[k] for k in ("crop_left", "crop_top", "crop_right", "crop_bottom")} == {
         "crop_left": 258, "crop_top": 950, "crop_right": 1336, "crop_bottom": 18}
