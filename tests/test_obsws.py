@@ -1622,6 +1622,17 @@ def t_apply_split_state_keeps_going_after_a_failed_step():
     assert ("mute", "Discord Audio Capture", True) in obs.calls
 
 
+def t_apply_split_in_solo_touches_nothing():
+    # Solo mode has no A/B feed on air (live_feed() is None). Both routes must
+    # answer that plainly instead of raising or muting inputs at random.
+    for apply in (irofeeds.apply_split_state, irofeeds.apply_split_audio):
+        obs = _SplitObs()
+        payload, status = apply(_LiveRelay(None), obs)
+        assert status == 409 and payload["ok"] is False, (apply.__name__, payload)
+        assert payload["error"] == "no on-air feed", payload
+        assert obs.calls == [], obs.calls
+
+
 def t_apply_split_state_no_obs_is_503():
     payload, status = irofeeds.apply_split_state(_LiveRelay("A"), None)
     assert status == 503 and payload == {"error": "obs unavailable"}, payload

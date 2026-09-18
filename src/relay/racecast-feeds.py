@@ -3660,10 +3660,13 @@ def _apply_split_intents(relay, obs_ws, audio_only):
     """Resolve the on-air feed and apply the Splitscreen intents via obs-websocket,
     one call per intent. Every intent is attempted even after one fails, so a
     collection without a Discord input still gets its feed audio right. Best-effort,
-    mirrors /obs/audio: obs unreachable -> ({"error":...}, 503); never raises."""
+    mirrors /obs/audio: obs unreachable -> ({"error":...}, 503), no on-air feed
+    (solo) -> 409; never raises."""
     if obs_ws is None:
         return {"error": "obs unavailable"}, 503
     live = relay.live_feed()
+    if live not in ("A", "B"):                 # solo: no feed pair, nothing to split
+        return {"ok": False, "error": "no on-air feed", "live": live}, 409
     intents = _OBS_WS_MODULE.split_state_intents(live, False)
     if audio_only:
         intents = [(v, t) for v, t in intents if v in ("mute", "unmute")]
