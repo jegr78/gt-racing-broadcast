@@ -3557,17 +3557,143 @@ def local_capture_cmd(input_args, encoder="x264", has_audio=True):
     return cmd + ["-f", "mpegts", "-"]
 
 
-def local_capture_setup(environ, platform, encoder):
-    """(argv, None) for the configured capture device, or (None, reason) when it
-    cannot be built. The device comes from the machine .env, never from the sheet."""
+# ---- Game audio: by default the capture card's OWN audio device ----
+# The card's HDMI audio is a separate device for ffmpeg, and a wrong `audio=` does not
+# degrade gracefully: ffmpeg aborts the whole capture (measured on the Windows streaming
+# PC: `audio=Elgato HD60 X` -> "Could not find output pin from audio only capture
+# device", I/O error). So the default is read from ffmpeg's own device list, never
+# guessed: the card's audio pin when it has one (a combined device, what OBS uses by
+# default), else the one audio device whose name contains the video device's name —
+# on that PC, video "Elgato HD60 X" + audio "Elgato HD60 X (Elgato HD60 X)". No unique
+# match -> picture only, said loudly (feed log + panel) with the devices to choose
+# from. RACECAST_CAPTURE_AUDIO overrides; `none` means deliberately picture-only.
+LOCAL_AUDIO_NONE = "none"
+_DSHOW_DEVICE_RE = re.compile(r'^\[[^\]]*\] "(.+)" \(([^()]*)\)\s*$')
+_AVF_DEVICE_RE = re.compile(r'^\[[^\]]*\] \[\d+\] (.+?)\s*$')
+_SOURCES_RE = re.compile(r'^[* ] (\S+) \[(.*)\] \([^()]*\)\s*$')
+
+
+def parse_dshow_device_list(text):
+    """[(name, pin types)] from `ffmpeg -list_devices true -f dshow -i dummy`, whose
+    device lines are `"<name>" (<type>[, <type>])` (libavdevice/dshow.c). Pure."""
+    out = []
+    for line in (text or "").splitlines():
+        mt = _DSHOW_DEVICE_RE.match(line)
+        if mt:
+            out.append((mt.group(1), tuple(t.strip() for t in mt.group(2).split(","))))
+    return out
+
+
+def parse_avfoundation_audio_devices(text):
+    """Audio device names from `ffmpeg -f avfoundation -list_devices true -i ""`. Pure."""
+    out, in_audio = [], False
+    for line in (text or "").splitlines():
+        if "AVFoundation audio devices:" in line:
+            in_audio = True
+        elif "AVFoundation video devices:" in line:
+            in_audio = False
+        elif in_audio:
+            mt = _AVF_DEVICE_RE.match(line)
+            if mt:
+                out.append(mt.group(1))
+    return out
+
+
+def parse_ffmpeg_sources(text):
+    """[(name, description)] from `ffmpeg -sources <fmt>`, whose lines are
+    `<*| > <name> [<description>] (<types>)` (fftools/opt_common.c). Pure."""
+    out = []
+    for line in (text or "").splitlines():
+        mt = _SOURCES_RE.match(line)
+        if mt:
+            out.append((mt.group(1), mt.group(2)))
+    return out
+
+
+def pick_capture_audio(video_name, video_has_audio, audio_devices):
+    """The capture card's own audio input, or None when there is no unique match.
+    `audio_devices` is [(value for ffmpeg, label to match)]. Pure."""
+    video_name = (video_name or "").strip()
+    if not video_name:
+        return None
+    if video_has_audio:
+        return video_name
+    want = video_name.lower()
+    hits = [value for value, label in audio_devices if want in (label or "").lower()]
+    return hits[0] if len(hits) == 1 else None
+
+
+def _no_audio_note(video_name, labels):
+    choices = ", ".join(labels) if labels else "none found"
+    return (f"local capture: no game-audio device found for '{video_name}' — picture "
+            f"only; set RACECAST_CAPTURE_AUDIO in .env (audio devices: {choices})")
+
+
+def dshow_audio_from_listing(video, listing):
+    """(audio device, None) or (None, note) for the dshow `video` (an OBS device id or
+    a bare name), from a `-list_devices` listing. Pure."""
+    name = dshow_device_name(video)
+    devices = parse_dshow_device_list(listing)
+    has_pin = any(n == name and "audio" in t for n, t in devices)
+    audio = [(n, n) for n, t in devices if "audio" in t and "video" not in t]
+    pick = pick_capture_audio(name, has_pin, audio)
+    return (pick, None) if pick else (None, _no_audio_note(name, [n for n, _ in audio]))
+
+
+def _ffmpeg_listing(args):
+    """ffmpeg's device listing (stdout + stderr), "" on any failure."""
+    try:
+        r = subprocess.run(["ffmpeg", "-hide_banner"] + args, capture_output=True,
+                           timeout=20, env=external_tool_env(), **_no_window_kwargs())
+    except Exception:                         # noqa: BLE001 — best-effort scan
+        return ""
+    return (r.stdout + r.stderr).decode("utf-8", "replace")
+
+
+def scan_capture_audio(platform, video):
+    """(audio device, None) or (None, note): the capture card's own audio input on this
+    machine, found by name in ffmpeg's device list (see LOCAL_AUDIO_NONE's comment)."""
+    if platform.startswith("win"):
+        return dshow_audio_from_listing(
+            video, _ffmpeg_listing(["-list_devices", "true", "-f", "dshow", "-i", "dummy"]))
+    if platform == "darwin":
+        names = parse_avfoundation_audio_devices(
+            _ffmpeg_listing(["-f", "avfoundation", "-list_devices", "true", "-i", ""]))
+        pick = pick_capture_audio(video, False, [(n, n) for n in names])
+        return (pick, None) if pick else (None, _no_audio_note(video, names))
+    if platform.startswith("linux"):
+        # v4l2 names the card "<card>: <node>"; the PulseAudio description carries the card.
+        try:
+            with open(f"/sys/class/video4linux/{os.path.basename(video)}/name",
+                      encoding="utf-8") as fh:
+                card = fh.read().split(":", 1)[0].strip()
+        except OSError:
+            card = ""
+        sources = parse_ffmpeg_sources(_ffmpeg_listing(["-sources", "pulse"]))
+        pick = pick_capture_audio(card, False, sources)
+        return (pick, None) if pick else (None, _no_audio_note(card or video,
+                                                               [d for _n, d in sources]))
+    return None, None
+
+
+def local_capture_setup(environ, platform, encoder, audio_scan=None):
+    """(argv, None, note) for the configured capture device, or (None, reason, None)
+    when it cannot be built. `note` is a non-fatal warning (no game audio found). The
+    device comes from the machine .env, never from the sheet."""
     video = (environ.get("RACECAST_CAPTURE") or "").strip()
     audio = (environ.get("RACECAST_CAPTURE_AUDIO") or "").strip()
     if not video:
-        return None, "local capture: RACECAST_CAPTURE is not set in .env"
+        return None, "local capture: RACECAST_CAPTURE is not set in .env", None
+    if local_capture_input_args(platform, video) is None:
+        return None, f"local capture is not supported on {platform}", None
+    note = None
+    if audio.lower() == LOCAL_AUDIO_NONE:
+        audio = ""
+    elif not audio:
+        audio, note = (audio_scan or scan_capture_audio)(platform, video)
+        audio = audio or ""
     args = local_capture_input_args(platform, video, audio)
-    if args is None:
-        return None, f"local capture is not supported on {platform}"
-    return local_capture_cmd(args, encoder, has_audio=bool(audio)), None
+    return local_capture_cmd(args, encoder, has_audio=bool(audio)), None, note
 
 
 _LOCAL_ENCODER = None
@@ -6431,7 +6557,7 @@ class Feed:
                 if self.ring is None:
                     local_err = LOCAL_NEEDS_FANOUT
                 else:
-                    local_cmd, local_err = local_capture_setup(
+                    local_cmd, local_err, local_note = local_capture_setup(
                         os.environ, sys.platform, local_encoder())
                 if local_err:
                     # A configuration problem, not a flaky source: idle with the reason
@@ -6443,7 +6569,9 @@ class Feed:
                         self.advance.wait(1.0)
                     self.advance.clear()
                     continue
-                self.last_error = None
+                if local_note:
+                    self.log.warning("%s", local_note)
+                self.last_error = local_note     # picture-only is shown, never silent
                 self.quality = None          # no stale remote resolution on the panel
                 token, target, serve_platform = None, None, "local"
             elif plat == "twitch":
