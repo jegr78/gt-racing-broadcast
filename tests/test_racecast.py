@@ -4642,7 +4642,7 @@ def t_smoke_apply_stint_is_one_relay_call():
     for label, feed in (("STINT A", "A"), ("STINT B", "B")):
         stub.posts.clear()
         step = next(s for s in m._sm().RUNDOWN if s.label == label)
-        _with_stub_http(stub, lambda: m._smoke_apply(step))
+        _with_stub_http(stub, lambda step=step: m._smoke_apply(step))
         paths = [url.rsplit(":8088/", 1)[-1] for url, _ in stub.posts]
         assert paths == ["obs/scene", "obs/stint"], (label, paths)
         assert stub.posts[1][1] == {"feed": feed}, stub.posts
