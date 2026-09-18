@@ -128,6 +128,19 @@ def t_tokenize_folds_a_localized_mic_back():
     assert tk.canonicalize_commentary_mic(d) is False
 
 
+def t_unset_warning_names_the_env_var_of_each_device():
+    line = sa.device_unset_warning([MIC, "Solo Webcam Device"], "solo", {})
+    assert "RACECAST_MIC" in line and "RACECAST_WEBCAM" in line, line
+    assert "RACECAST_CAPTURE" not in line, line
+
+
+def t_endurance_without_a_capture_card_does_not_warn_about_the_mic():
+    # No RACECAST_CAPTURE -> no local stint on this machine -> the mic is never opened.
+    assert sa.device_unset_warning([MIC], "endurance", {}) is None
+    line = sa.device_unset_warning([MIC], "endurance", {"RACECAST_CAPTURE": "Game Capture HD60 X"})
+    assert line and "RACECAST_MIC" in line, line
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

@@ -266,6 +266,25 @@ def localize_device_sources(collection, platform, env):
     return unset
 
 
+def device_unset_warning(unset, kind, env):
+    """The WARNING line for devices localize_device_sources left empty, naming each
+    one's .env variable, or None. An endurance machine without RACECAST_CAPTURE can
+    never put a local stint on air, so its commentary mic (#593) is never opened and
+    an empty RACECAST_MIC there is not worth a warning."""
+    env = env or {}
+    names = list(unset)
+    if (kind or "endurance").strip().lower() != "solo" and \
+            not (env.get("RACECAST_CAPTURE") or "").strip():
+        names = [n for n in names if n != "Commentary Mic Device"]
+    if not names:
+        return None
+    by_name = {e["name"]: e["env"] for e in DEVICE_SOURCES}
+    vars_ = " / ".join(dict.fromkeys(by_name.get(n, "?") for n in names))
+    return ("WARNING: no device chosen for " + ", ".join(names) + f" — set {vars_} in "
+            ".env (OBS shows black/silence until a device is selected; racecast "
+            "device-scan (#304) will fill these).")
+
+
 def apply_collection_name(collection, name):
     """Set the OBS collection's top-level display name to `name` (the active
     profile's OBS_COLLECTION). Blank/None -> leave the template name untouched.
@@ -512,10 +531,9 @@ def main():
     tyres_line = tyres_capture_summary(localized, os.environ)
     if tyres_line:
         print("  " + tyres_line)
-    if device_unset:
-        print("  WARNING: no device chosen for " + ", ".join(device_unset) +
-              " — set RACECAST_CAPTURE / RACECAST_WEBCAM in .env (OBS shows black "
-              "until a device is selected; racecast device-scan (#304) will fill these).")
+    device_line = device_unset_warning(device_unset, a.kind, os.environ)
+    if device_line:
+        print("  " + device_line)
     print(f"OBS: Scene Collection -> Import -> {a.out}")
     print("IMPORTANT: do NOT move this folder afterwards (OBS stores absolute paths).")
 
