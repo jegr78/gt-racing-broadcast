@@ -40,8 +40,9 @@ def main(src, dst):
     cfg = json.loads(raw.decode("utf-8"))
     blank(cfg)
     os.makedirs(os.path.dirname(dst), exist_ok=True)
-    with open(dst, "w", encoding="utf-8") as fh:
+    with open(dst, "w", encoding="utf-8", newline="\n") as fh:   # LF on every OS, like the repo
         json.dump(cfg, fh, indent=1)
+        fh.write("\n")                  # keep the committed file's trailing newline
     print(f"stripped {src}\n      -> {dst}")
 
 
