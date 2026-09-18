@@ -276,7 +276,7 @@ def t_committed_solo_json_matches_derive_output():
     """The committed solo collections MUST equal a fresh derive() — they are
     generated, never hand-edited (a hand-edit would be silently dropped by the
     next `derive-solo-templates.py` run). Commentary carries the tyres/fuel
-    second capture; POV does not. Guards the regen-safety of every solo-template
+    crop; POV does not. Guards the regen-safety of every solo-template
     change (#307 / commentary HUD)."""
     import importlib.util
     spec = importlib.util.spec_from_file_location(

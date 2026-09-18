@@ -2765,8 +2765,10 @@ def device_scan_cmd(rest):
     solo Commentary HUD plan). VAL is a 1-based list index (into its own list — video
     indices for --webcam/--capture/--tyres, mic indices for --mic), a case-insensitive
     name substring, or an exact device value; blank/omitted leaves that slot untouched.
-    --tyres resolves against the SAME enumerated video device list as --webcam/--capture
-    (it is a second video-capture card, not a distinct enumerated input). Without flags
+    --tyres resolves against the SAME enumerated video device list as --webcam/--capture.
+    Leave it unset, or pick the capture card itself, when one card carries the game:
+    setup-assets then crops the tyres/fuel widget from the capture card's source (#597);
+    only a different device creates a second input. Without flags
     and on a TTY it prompts interactively; headless it just lists the devices and hints
     at the flags (never blocks on input())."""
     import obs_ws
@@ -2796,7 +2798,8 @@ def device_scan_cmd(rest):
         webcam_tok = input("Webcam [index/name, blank=skip]: ")
         capture_tok = input("Capture [index/name, blank=skip]: ")
         mic_tok = input("Mic [index/name, blank=skip]: ")
-        tyres_tok = input("Tyres capture [index/name, blank=skip]: ")
+        tyres_tok = input("Tyres/fuel capture, only for a second card "
+                          "[index/name, blank=skip; unset = crop of the capture card]: ")
     errors = []
     webcam_val, werr = resolve_device_selection(devices, webcam_tok or "")
     if werr:
@@ -5060,7 +5063,8 @@ def ps_discover_data():
 def devices_write_data(webcam, capture, mic=None, tyres=None, path=None):
     """Upsert the chosen webcam/capture/mic/tyres device ids into the machine .env
     (RACECAST_WEBCAM/RACECAST_CAPTURE/RACECAST_MIC/RACECAST_TYRES_CAPTURE; mic added
-    #307, tyres/fuel second-capture added in the commentary-HUD work). A blank/None
+    #307, tyres/fuel capture added in the commentary-HUD work; unset or equal to the
+    capture card = the crop reuses the capture card's source, #597). A blank/None
     value leaves that key unchanged; all blank -> {ok:false, error} (nothing to
     save). `path` is a test seam (mirrors env_upsert_data's), unused in production
     (resolves the real machine .env)."""

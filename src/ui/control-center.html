@@ -1028,7 +1028,7 @@
             </select></div>
           <div class="row"><span class="name">Tyres/Fuel</span>
             <select id="dev-tyres" style="flex:1" aria-label="Tyres/fuel capture device" disabled>
-              <option value="">—</option>
+              <option value="">— same as capture card</option>
             </select></div>
           <p class="envhint" id="dev-hint">Loading devices…</p>
           <div class="row" style="margin-top:12px"><span class="name">PlayStation IP (GT7)</span>
@@ -2557,11 +2557,11 @@ async function loadDevices() {
   wSel.appendChild(deviceOption('—', ''));
   cSel.appendChild(deviceOption('—', ''));
   mSel.appendChild(deviceOption('—', ''));
-  tSel.appendChild(deviceOption('—', ''));
+  tSel.appendChild(deviceOption('— same as capture card', ''));
   devices.forEach(dev => {
     wSel.appendChild(deviceOption(dev.name, dev.value));
     cSel.appendChild(deviceOption(dev.name, dev.value));
-    tSel.appendChild(deviceOption(dev.name, dev.value));   // tyres/fuel = a 2nd video capture
+    tSel.appendChild(deviceOption(dev.name, dev.value));   // tyres/fuel: same video list (#597)
   });
   mics.forEach(dev => mSel.appendChild(deviceOption(dev.name, dev.value)));
   const ok = !!(d && d.ok) && devices.length > 0;
@@ -2569,7 +2569,9 @@ async function loadDevices() {
   wSel.disabled = cSel.disabled = tSel.disabled = !ok;
   mSel.disabled = !micOk;
   $('dev-hint').textContent = ok
-    ? 'Pick the webcam, capture-card, mic and/or tyres/fuel device, then Save. Shared machine-wide (not per-league).'
+    ? 'Pick the webcam, capture-card, mic and/or tyres/fuel device, then Save. Shared machine-wide (not per-league). '
+       + 'Tyres/Fuel: leave it on "same as capture card" when one card carries the game; the crop then reuses '
+       + 'the capture card. Pick a device only for a second card (or pick the capture card to go back to one).'
     : ((d && d.note) || 'Start OBS with obs-websocket enabled to list devices, or set '
        + 'RACECAST_CAPTURE/RACECAST_WEBCAM/RACECAST_MIC/RACECAST_TYRES_CAPTURE in the .env editor below.');
 }

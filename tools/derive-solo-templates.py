@@ -49,7 +49,7 @@ WEBCAM_TOKEN = "__RACECAST_WEBCAM__"
 MIC_TOKEN = "__RACECAST_MIC__"
 TYRES_TOKEN = "__RACECAST_TYRES_CAPTURE__"
 
-# The tyres/fuel second-capture crop (Commentary only): isolates GT7's bottom-left
+# The tyres/fuel crop (Commentary only): isolates GT7's bottom-left
 # tyre/fuel/sprint widget from a full-frame 1920x1080 capture. Values from a real
 # D-GT7-M export (kept fixed; the operator fine-tunes in OBS if their capture differs).
 TYRES_CROP = {"crop_left": 258, "crop_top": 950, "crop_right": 1336, "crop_bottom": 18}
@@ -149,7 +149,7 @@ def _program_item(template_item, name, src_uuid, pos, bounds, item_id):
 
 def derive(with_tyres=False):
     """Build the solo collection. `with_tyres=True` (Commentary only) adds the
-    second-capture 'Solo Tyres/Fuel Capture' source cropped to GT7's tyre/fuel
+    'Solo Tyres/Fuel Capture' source cropped to GT7's tyre/fuel
     widget, bottom-left; POV omits it (the driver's own feed already shows it)."""
     with open(os.path.join(OBS, "GT_Racing_Endurance.json"), encoding="utf-8") as fh:
         col = json.load(fh)
@@ -228,7 +228,8 @@ def derive(with_tyres=False):
                               U["cap_src"], "Solo Capture Device")
     cam_scene = _device_scene(discord_scene, U["cam_scene"], "Solo Webcam",
                               U["cam_src"], "Solo Webcam Device")
-    # Tyres/fuel second-capture leaf + wrapping scene (Commentary only). The leaf
+    # Tyres/fuel device leaf + wrapping scene (Commentary only). setup-assets folds
+    # the leaf into Solo Capture Device when one card carries both (#597). The leaf
     # inherits muted=True from the Feed POV template (video-only — the game audio
     # already comes from Solo Capture, so this must not double it).
     tyres_src = tyres_scene = None
