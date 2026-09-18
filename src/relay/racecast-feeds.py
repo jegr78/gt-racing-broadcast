@@ -3953,25 +3953,67 @@ def _apply_split_intents(relay, obs_ws, audio_only):
                                                  extra_mute=extra_mute)
     if audio_only:
         intents = [(v, t) for v, t in intents if v in ("mute", "unmute")]
-    ok_all = True
-    notes = []
+    payload, status = _apply_obs_intents(obs_ws, _OBS_WS_MODULE.SPLIT_SCENE, intents)
+    payload["live"] = live
+    if audio_only:
+        payload.pop("show", None)
+        payload.pop("hide", None)
+    else:
+        payload.pop("hide", None)                 # a Splitscreen hides nothing
+    return payload, status
+
+
+def _apply_obs_intents(obs_ws, scene, intents):
+    """Apply show/hide/mute/unmute intents in `scene`, one obs-websocket call each.
+    Every intent is attempted even after one fails, so a collection without a
+    Discord input or a commentary mic still gets its feed audio right. Returns
+    (payload, 200|503); a failed mic switch is also logged (_warn_if_mic_failed)."""
+    ok_all, notes = True, []
     for verb, target in intents:
-        if verb == "show":
-            ok, note = obs_ws.set_scene_item_enabled(_OBS_WS_MODULE.SPLIT_SCENE, target, True)
+        if verb in ("show", "hide"):
+            ok, note = obs_ws.set_scene_item_enabled(scene, target, verb == "show")
         else:
             ok, note = obs_ws.set_input_mute(target, verb == "mute")
         ok_all = ok_all and ok
         if note:
             notes.append(note)
-    payload = {"ok": bool(ok_all), "live": live,
+    payload = {"ok": bool(ok_all),
+               "show": [t for v, t in intents if v == "show"],
+               "hide": [t for v, t in intents if v == "hide"],
                "unmute": [t for v, t in intents if v == "unmute"],
                "mute": [t for v, t in intents if v == "mute"]}
-    if not audio_only:
-        payload["show"] = [t for v, t in intents if v == "show"]
     if notes:
         payload["note"] = "; ".join(str(n) for n in notes)
         _warn_if_mic_failed(payload["note"])
     return payload, (200 if ok_all else 503)
+
+
+# --- Relay-driven STINT A/B override (#593 follow-up) ---------------------------
+def apply_stint_state(relay, obs_ws, feed):
+    """GET /obs/stint/<A|B> (Companion) and POST /obs/stint {"feed"} (Director
+    Panel): make the Stint scene show `feed` — the director's pick, not necessarily
+    the relay's on-air feed — with its audio live and the rest muted, the Discord
+    bus included. The audio comes from the same plan as a handover
+    (relay.obs_audio_plan), so the producer's commentary mic opens only when the
+    pick is the local stint and closes when the other feed is. The relay's on-air
+    state is not touched, and the scene cut stays with the caller, so a STINT press
+    still cuts when the relay is down. Best effort, never raises: bad feed -> 400,
+    no feed pair (solo) -> 409, OBS unavailable -> 503."""
+    if obs_ws is None:
+        return {"error": "obs unavailable"}, 503
+    feed = str(feed or "").strip().upper()
+    if feed not in ("A", "B"):
+        return {"ok": False, "error": "feed must be A or B"}, 400
+    if getattr(relay, "solo", False):
+        return {"ok": False, "error": "no feed pair"}, 409
+    plan = getattr(relay, "obs_audio_plan", None)
+    audio, extra_mute = plan() if plan else (None, [])
+    intents = _OBS_WS_MODULE.feed_state_intents(
+        feed, False, audio=audio,
+        extra_mute=list(extra_mute) + [_OBS_WS_MODULE.SPLIT_DISCORD_INPUT])
+    payload, status = _apply_obs_intents(obs_ws, _OBS_WS_MODULE.STINT_SCENE, intents)
+    payload["feed"] = feed
+    return payload, status
 
 
 def apply_split_state(relay, obs_ws):
@@ -9275,6 +9317,9 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 if p == ["obs", "split"]:
                     payload, status = apply_split_state(relay, relay._obs)
                     return self._send(payload, status)
+                if len(p) == 3 and p[:2] == ["obs", "stint"]:
+                    payload, status = apply_stint_state(relay, relay._obs, p[2])
+                    return self._send(payload, status)
                 if p[:1] == ["chat"]:
                     if not chat_store:
                         return self._send({"error": "chat disabled"}, 404)
@@ -9842,6 +9887,9 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     return self._send(payload, status)
                 if p == ["obs", "split"]:
                     payload, status = apply_split_state(relay, relay._obs)
+                    return self._send(payload, status)
+                if p == ["obs", "stint"]:
+                    payload, status = apply_stint_state(relay, relay._obs, body.get("feed"))
                     return self._send(payload, status)
                 if p == ["obs", "stream"]:
                     if _obs_ws is None:

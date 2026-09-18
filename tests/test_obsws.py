@@ -1758,6 +1758,74 @@ def t_apply_split_state_logs_a_mic_it_could_not_open():
                for r in records if r.levelno == logging.WARNING), records
 
 
+# The STINT A/B override, resolved on the relay like SPLIT: both the Director Panel
+# and Companion call it, so there is one way a STINT press behaves.
+class _StintRelay(_LiveRelay):
+    def __init__(self, local=(), solo=False):
+        super().__init__("A")
+        self.local, self.solo = set(local), solo
+
+    def obs_audio_plan(self):
+        return irofeeds._OBS_WS_MODULE.feed_audio_plan(self.local, mic=MIC)
+
+
+def t_apply_stint_state_shows_the_pick_and_mutes_the_rest():
+    obs = _SplitObs()
+    payload, status = irofeeds.apply_stint_state(_StintRelay(), obs, "b")
+    assert status == 200 and payload["ok"] is True and payload["feed"] == "B", payload
+    assert obs.calls == [
+        ("item", "Stint", "Feed B", True), ("item", "Stint", "Feed A", False),
+        ("mute", "Feed B", False),
+        ("mute", "Feed A", True), ("mute", MIC, True), ("mute", "Discord Audio Capture", True),
+    ], obs.calls
+    assert payload["show"] == ["Feed B"] and payload["hide"] == ["Feed A"], payload
+
+
+def t_apply_stint_state_opens_the_mic_of_a_local_pick():
+    obs = _SplitObs()
+    payload, _ = irofeeds.apply_stint_state(_StintRelay(local={"A"}), obs, "A")
+    assert payload["unmute"] == ["Feed A", MIC], payload
+    assert ("mute", MIC, False) in obs.calls and ("mute", MIC, True) not in obs.calls
+
+
+def t_apply_stint_state_closes_the_mic_when_the_other_feed_is_local():
+    # Moving off a local stint by hand must never leave the producer's mic open
+    # on a remote commentator's stint.
+    obs = _SplitObs()
+    irofeeds.apply_stint_state(_StintRelay(local={"A"}), obs, "B")
+    assert ("mute", MIC, True) in obs.calls and ("mute", MIC, False) not in obs.calls
+
+
+def t_apply_stint_state_rejects_a_bad_feed_and_solo():
+    obs = _SplitObs()
+    payload, status = irofeeds.apply_stint_state(_StintRelay(), obs, "C")
+    assert status == 400 and payload["ok"] is False and "feed" in payload["error"], payload
+    payload, status = irofeeds.apply_stint_state(_StintRelay(solo=True), obs, "A")
+    assert status == 409 and payload["error"] == "no feed pair", payload
+    assert obs.calls == []
+    assert irofeeds.apply_stint_state(_StintRelay(), None, "A") == ({"error": "obs unavailable"}, 503)
+
+
+def t_apply_stint_state_keeps_going_and_warns_about_a_missing_mic():
+    import logging
+    records = []
+
+    class _Cap(logging.Handler):
+        def emit(self, rec):
+            records.append(rec)
+
+    cap = _Cap(level=logging.WARNING)
+    irofeeds.LOG.addHandler(cap)
+    obs = _SplitObs(fail={MIC})
+    try:
+        payload, status = irofeeds.apply_stint_state(_StintRelay(local={"A"}), obs, "A")
+    finally:
+        irofeeds.LOG.removeHandler(cap)
+    assert status == 503 and MIC in payload["note"], payload
+    assert ("mute", "Discord Audio Capture", True) in obs.calls   # later steps still ran
+    assert any("racecast setup" in r.getMessage() for r in records), records
+
+
 def t_apply_split_state_no_obs_is_503():
     payload, status = irofeeds.apply_split_state(_LiveRelay("A"), None)
     assert status == 503 and payload == {"error": "obs unavailable"}, payload
@@ -1806,6 +1874,59 @@ def t_companion_split_button_keeps_the_cut_and_race_control():
     urls = [a["options"]["url"]["value"] for a in downs if a.get("definitionId") == "get"]
     assert urls == ["http://127.0.0.1:8088/obs/split",
                     "http://127.0.0.1:8088/setup/set/racecontrol/Driver%20Swaps"], urls
+
+
+def _companion_stint_buttons():
+    """{label: down-actions} of the Companion STINT A/B buttons."""
+    path = os.path.join(ROOT, "src", "companion", "racecast-buttons.companionconfig")
+    with open(path, encoding="utf-8") as f:
+        cfg = json.load(f)
+    found = {}
+    for page in cfg["pages"].values():
+        for row in (page.get("controls") or {}).values():
+            for btn in (row or {}).values():
+                label = (btn.get("style") or {}).get("text", "")
+                if label in ("STINT\nA", "STINT\nB"):
+                    found[label] = ((btn.get("steps") or {}).get("0") or {}) \
+                        .get("action_sets", {}).get("down", [])
+    return found
+
+
+def t_companion_stint_buttons_end_on_the_relay_like_the_panel():
+    # The panel and Companion must behave the same: a STINT press ends with the
+    # relay (/obs/stint/<X>) setting visibility, audio and the producer's
+    # commentary mic, which only the relay can decide (it knows a stint is local).
+    # Companion keeps its direct OBS actions in front as the break-glass path for a
+    # relay that cannot reach OBS — they must set exactly what the relay sets for
+    # the feeds and never touch the mic, so the relay call has the last word.
+    buttons = _companion_stint_buttons()
+    assert set(buttons) == {"STINT\nA", "STINT\nB"}, buttons
+    for label, downs in buttons.items():
+        feed = label[-1]
+        other = "B" if feed == "A" else "A"
+        assert downs[0]["definitionId"] == "set_scene", downs[0]
+        assert downs[0]["options"]["scene"]["value"] == "Stint", downs[0]
+        direct = irofeeds._OBS_WS_MODULE.feed_state_intents(
+            feed, False, extra_mute=["Discord Audio Capture"])
+        got = []
+        for a in downs:
+            o = a.get("options", {})
+            if a.get("definitionId") == "toggle_scene_item":
+                got.append(("show" if o["visible"]["value"] == "true" else "hide",
+                            o["source"]["value"]))
+            elif a.get("definitionId") == "set_source_mute":
+                got.append(("mute" if o["mute"]["value"] == "true" else "unmute",
+                            o["source"]["value"]))
+        assert sorted(got) == sorted(direct), (label, got)
+        assert MIC not in [t for _, t in got], label
+        urls = [(i, a["options"]["url"]["value"]) for i, a in enumerate(downs)
+                if a.get("definitionId") == "get"]
+        assert [u for _, u in urls] == [f"http://127.0.0.1:8088/obs/stint/{feed}",
+                                        "http://127.0.0.1:8088/setup/clear/racecontrol"], urls
+        last_direct = max(i for i, a in enumerate(downs)
+                          if a.get("definitionId") in ("toggle_scene_item", "set_source_mute"))
+        assert urls[0][0] > last_direct, (label, "the relay call must come last")
+        assert other in {t[-1] for _, t in got}, label
 
 
 class _AliveFakeSock:

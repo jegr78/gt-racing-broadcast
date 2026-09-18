@@ -7336,14 +7336,16 @@ def _smoke_wait_bytes(which, say):
 
 def _smoke_apply(step):
     """Send one rundown step. Scene first, then visibility, then audio — the
-    order the panel's macros use. A relay-resolved SPLIT (#591) sends its
-    sources as one call, like the panel and the Companion SPLIT button."""
+    order the panel's macros use. A relay-resolved SPLIT (#591) or STINT sends its
+    sources as one call, like the panel and the Companion buttons."""
     if step.relay:
         return _smoke_relay_get(step.relay)
     if step.scene and step.kind == "macro":
         _smoke_relay_post("obs/scene", {"scene": step.scene})
     if step.relay_split:
         return _smoke_relay_post("obs/split", {})
+    if step.relay_stint:
+        return _smoke_relay_post("obs/stint", {"feed": step.relay_stint})
     for scene, source in step.show:
         _smoke_relay_post("obs/source", {"scene": scene, "source": source, "on": True})
     for scene, source in step.hide:

@@ -4635,6 +4635,19 @@ def t_smoke_apply_split_is_one_relay_call():
     assert stub.posts[0][1] == {"scene": "Splitscreen"}, stub.posts
 
 
+def t_smoke_apply_stint_is_one_relay_call():
+    """STINT A/B cut, then take visibility, audio and the commentary mic from the
+    relay (/obs/stint) — the same call the Director Panel and Companion make."""
+    stub = _StubHttp(post=b'{"ok": true}')
+    for label, feed in (("STINT A", "A"), ("STINT B", "B")):
+        stub.posts.clear()
+        step = next(s for s in m._sm().RUNDOWN if s.label == label)
+        _with_stub_http(stub, lambda step=step: m._smoke_apply(step))
+        paths = [url.rsplit(":8088/", 1)[-1] for url, _ in stub.posts]
+        assert paths == ["obs/scene", "obs/stint"], (label, paths)
+        assert stub.posts[1][1] == {"feed": feed}, stub.posts
+
+
 def t_smoke_relay_post_keeps_the_error_body_of_a_503():
     """The relay answers a dead OBS with 503 + {"error": "obs unavailable"}.
     urllib raises on 5xx, so without reading the body back the run only ever sees

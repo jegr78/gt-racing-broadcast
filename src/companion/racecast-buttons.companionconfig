@@ -221,6 +221,33 @@
            "type": "action"
           },
           {
+           "id": "if2uHpZlQ5Dqidpisl7_Y",
+           "definitionId": "get",
+           "connectionId": "BB0jmLMxj_0YwbhwslOiw",
+           "options": {
+            "url": {
+             "value": "http://127.0.0.1:8088/obs/stint/A",
+             "isExpression": false
+            },
+            "header": {
+             "isExpression": false,
+             "value": ""
+            },
+            "jsonResultDataVariable": {
+             "isExpression": false
+            },
+            "result_stringify": {
+             "isExpression": false,
+             "value": true
+            },
+            "statusCodeVariable": {
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 1,
+           "type": "action"
+          },
+          {
            "id": "WI3bVZE8mgITIEdIfdcw4",
            "definitionId": "get",
            "connectionId": "BB0jmLMxj_0YwbhwslOiw",
@@ -467,6 +494,33 @@
             }
            },
            "upgradeIndex": 8,
+           "type": "action"
+          },
+          {
+           "id": "uSk4sMMRUDvT_3FpCTMeP",
+           "definitionId": "get",
+           "connectionId": "BB0jmLMxj_0YwbhwslOiw",
+           "options": {
+            "url": {
+             "value": "http://127.0.0.1:8088/obs/stint/B",
+             "isExpression": false
+            },
+            "header": {
+             "isExpression": false,
+             "value": ""
+            },
+            "jsonResultDataVariable": {
+             "isExpression": false
+            },
+            "result_stringify": {
+             "isExpression": false,
+             "value": true
+            },
+            "statusCodeVariable": {
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 1,
            "type": "action"
           },
           {

@@ -56,8 +56,9 @@ connection — see [Relay Mode §4](Relay-Mode#4-control-it-companion--relay). E
 uses the OBS connection. Four combos sit on both: `RED FLAG` (Standby-Cover visibility
 through OBS, Race Control write through the relay), `SPLIT` (cuts to Splitscreen through
 OBS, then asks the relay's `/obs/split` to show both feeds and set the audio for the
-on-air feed, and sets Race Control to *Driver Swaps*) and `STINT A` / `STINT B` (clear
-Race Control). The `Feeds Next` handover
+on-air feed, and sets Race Control to *Driver Swaps*) and `STINT A` / `STINT B` (switch
+the feeds and their audio in OBS, then ask the relay's `/obs/stint/<A|B>` to do the same
+and set the commentary mic of a local stint, and clear Race Control). The `Feeds Next` handover
 also clears Race Control when it cuts back to the Stint scene, so a swap done purely with
 `SPLIT` → `Feeds Next` needs no `STINT A/B` press to wipe the banner. The Race Control
 writes go to `/setup/set/racecontrol/…` / `/setup/clear/racecontrol` and need the

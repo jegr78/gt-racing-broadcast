@@ -265,24 +265,35 @@ def t_program_preview_self_reschedules_no_wedge():
         "pvStop must clearTimeout the program-preview poll handle (no leaked poll after HIDE)"
 
 
-def t_stint_macros_resolve_the_commentary_mic_per_press():
-    # #593: STINT A/B are static, but the panel knows each feed's platform from
-    # /status. A press opens the producer's mic for a local feed, closes it when the
-    # OTHER feed is local (never a hot mic on a remote commentator) and leaves it
-    # alone when no feed is local (an older collection has no such input). A blanket
-    # mute would silence the producer at the start of their own stint (SPLIT -> NEXT
-    # -> STINT B with B local).
+def t_stint_macros_resolve_on_the_relay_like_companion():
+    # One behaviour for the panel and Companion: STINT A/B cut to Stint themselves
+    # and take visibility, audio and the producer's commentary mic from the relay
+    # (/obs/stint), which knows whether a stint is local. No static feed names and
+    # no client-side mic decision may remain in the macro.
     import re
     h = _html()
     for label, feed in (("STINT A", "A"), ("STINT B", "B")):
         m = re.search(r'\{label:"' + label + r'",[^}]*\}', h)
-        assert m and 'micFor:"' + feed + '"' in m.group(0), (label, m and m.group(0))
-        assert "Commentary Mic Device" not in m.group(0), label   # never static
-    assert 'const COMMENTARY_MIC = "Commentary Mic Device";' in h
-    assert "function stintMicIntent(feed, platforms)" in h
-    assert "stintMicIntent(m.micFor, feedPlatforms)" in h
-    assert '()=>obsMute(COMMENTARY_MIC, mic === "mute")' in h   # the step is actually run
-    assert "feedPlatforms = {A: d.feeds.A ? d.feeds.A.platform : null," in h
+        assert m, label
+        macro = m.group(0)
+        assert 'scene:"Stint"' in macro and 'relayStint:"' + feed + '"' in macro, macro
+        assert '"Feed A"' not in macro and '"Feed B"' not in macro, macro
+    # The PGM bus still tells STINT A from STINT B: with no static `show`, the air
+    # light and the state read-back take the picked feed from macroAirSources().
+    assert 'function macroAirSources(m){' in h
+    assert '[[m.scene, "Feed " + m.relayStint]]' in h           # one source of truth
+    # A relay-resolved step (SPLIT, STINT) answers with a note when an input is
+    # missing (e.g. the commentary mic of an older collection): it is logged, not
+    # just a red OBS LED.
+    assert "function relayStep(what, path, body){" in h
+    assert 'relayStep("stint " + m.relayStint, "stint", {feed: m.relayStint})' in h
+    assert 'relayStep("split (on-air)", "split", {})' in h
+    assert "const why = d && (d.note || (!d.ok && d.error));" in h   # a bare error too
+    assert 'if (why) log(`${what}: ${why}`, d.ok ? "warn" : "err");' in h
+    assert "for (const [sc, src] of macroAirSources(m))" in h
+    assert "if (air && req.length){" in h
+    for gone in ("stintMicIntent", "feedPlatforms", "micFor", "COMMENTARY_MIC"):
+        assert gone not in h, gone
 
 
 if __name__ == "__main__":
