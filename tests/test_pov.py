@@ -2106,9 +2106,20 @@ def t_schedule_parse_positional_counts_local_rows():
     assert [(r[0], r[1]) for r in rows] == [("local:", "Jens"), ("https://youtu.be/a", "Alice")]
 
 
+def t_pov_source_never_accepts_local():
+    # The POV tab reads through ScheduleSource too; it must not name the capture card,
+    # or a POV pull would take it from the on-air A/B feed.
+    text = "URL,Streamer,Stint\nlocal:,Jens,\nhttps://youtu.be/p,Bob,\n"
+    rows = m.ScheduleSource._parse_rows(text, allow_local=False)
+    assert [r[0] for r in rows] == ["", "https://youtu.be/p"]      # kept as not-yet-filled
+    assert m.ScheduleSource._parse_rows("local:,Jens\n", allow_local=False) is None
+    pov = m.ScheduleSource("http://pov", os.path.join(LOGDIR, "pov-local.txt"), None,
+                           allow_local=False)
+    assert pov.inject_row(2, url="local:") is False
+
 def t_inject_row_accepts_local_and_normalises():
     s = m.ScheduleSource("http://sched", os.path.join(LOGDIR, "sched-local.txt"), None)
-    assert s.inject_row(3, url="Local:", name="Jens") is not False
+    assert s.inject_row(3, url="Local:", name="Jens") is True
     assert s.get_rows() == [("local:", "Jens", "", 3)]
     assert s.inject_row(4, url="file:///etc/passwd") is False
 
@@ -2127,6 +2138,17 @@ def t_local_feed_never_steps_down_quality():
     g.dead_serves = 99
     assert g.maybe_step_down() == ("full", "robust")
 
+
+def t_local_feed_quality_click_does_not_restart_the_capture():
+    # A tier click on a local feed would restart ffmpeg (a black gap on air) for a
+    # setting a capture card ignores; the tier is kept for the next remote stint.
+    f = _local_feed(["local:"])
+    f.set_quality("robust", True)
+    assert not f.advance.is_set()
+    assert (f.quality_tier, f.quality_pinned) == ("robust", True)
+    g = _local_feed(["https://youtu.be/x"])
+    g.set_quality("robust", True)
+    assert g.advance.is_set()                       # a remote feed re-resolves at once
 
 def _run_feed_until(f, cond, timeout=5.0):
     t = threading.Thread(target=f.run, daemon=True)

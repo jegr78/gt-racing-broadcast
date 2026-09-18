@@ -3492,8 +3492,8 @@ LOCAL_ENCODER_ARGS = {
 }
 LOCAL_DEVICE_BUSY = ("capture device busy or missing — close any other program "
                      "using it (OBS capture source, Elgato utility); see feed log")
-LOCAL_NEEDS_FANOUT = ("local capture needs the feed fan-out — unset "
-                      "RACECAST_FEED_FANOUT=0 and restart the relay")
+LOCAL_NEEDS_FANOUT = ("local capture needs the feed fan-out — remove "
+                      "RACECAST_FEED_FANOUT=0 from .env and restart the relay")
 
 
 def dshow_device_name(value):
@@ -5103,10 +5103,13 @@ class SubmissionStore:
 
 class ScheduleSource:
     """Reads the schedule from the Google Sheet (CSV) with last-good + fallback."""
-    def __init__(self, csv_url, cache_path, local_fallback):
+    def __init__(self, csv_url, cache_path, local_fallback, allow_local=True):
         self.csv_url = csv_url
         self.cache_path = cache_path
         self.local_fallback = local_fallback
+        # #592: Schedule/Qualifying may name the capture card (`local:`); the POV tab
+        # may not — a POV pull must never take the card from an on-air A/B feed.
+        self.allow_local = allow_local
         self.lock = threading.Lock()
         self.items = []
         self.rows = []
@@ -5114,7 +5117,7 @@ class ScheduleSource:
         self.last_error = None
 
     @staticmethod
-    def _parse_rows(text):
+    def _parse_rows(text, allow_local=True):
         """CSV -> [(url, name, stint, line)] rows where *line* is the 1-based CSV
         line index of each accepted row (== physical sheet row when the Schedule
         tab starts at sheet row 1 with no leading blank rows — gviz export maps
@@ -5132,7 +5135,9 @@ class ScheduleSource:
           not-yet-filled (url -> "") so the feed never serves junk.
         - **Positional fallback** (no header row): the URL column is auto-detected
           (most cells matching is_channel) and the streamer is the cell right of
-          it; no stint label exists in this layout (URL-bearing rows only)."""
+          it; no stint label exists in this layout (URL-bearing rows only).
+        `local:` counts as a URL only with allow_local (#592)."""
+        accept = is_feed_source if allow_local else is_channel
         rows = list(csv.reader(io.StringIO(text)))
         if not rows:
             return None
@@ -5148,7 +5153,7 @@ class ScheduleSource:
                 url = feed_source_value(r[url_i]) if len(r) > url_i else ""
                 name = r[name_i].strip() if name_i is not None and len(r) > name_i else ""
                 stint = r[stint_i].strip() if stint_i is not None and len(r) > stint_i else ""
-                if not is_feed_source(url):
+                if not accept(url):
                     if not (name or stint):
                         continue                   # blank/spacer row -> not a stint
                     url = ""                        # planned stint, URL not yet provided
@@ -5159,7 +5164,7 @@ class ScheduleSource:
         ncols = max((len(r) for r in rows), default=0)
         best_col, best_cnt = None, 0
         for c in range(ncols):
-            cnt = sum(1 for r in rows if len(r) > c and is_feed_source(r[c]))
+            cnt = sum(1 for r in rows if len(r) > c and accept(r[c]))
             if cnt > best_cnt:
                 best_cnt, best_col = cnt, c
         if best_col is None or best_cnt == 0:
@@ -5169,7 +5174,7 @@ class ScheduleSource:
                 "",
                 line)
                for line, r in enumerate(rows, 1)
-               if len(r) > best_col and is_feed_source(r[best_col])]
+               if len(r) > best_col and accept(r[best_col])]
         return out or None
 
     @staticmethod
@@ -5185,7 +5190,7 @@ class ScheduleSource:
             req = Request(self.csv_url, headers={"User-Agent": "racecast-feeds/1.0"})
             with urlopen(req, timeout=timeout) as resp:
                 text = resp.read().decode("utf-8", "replace")
-            rows = self._parse_rows(text)
+            rows = self._parse_rows(text, self.allow_local)
             if not rows:
                 self.last_error = ("Sheet reachable, but no channel IDs found "
                                    "(correct tab name? a column with UC… IDs / watch URLs? sharing?)")
@@ -5265,7 +5270,7 @@ class ScheduleSource:
             new_u = cur_u if url is None else feed_source_value(url)
             new_n = cur_n if name is None else (name or "").strip()
             new_s = cur_s if stint is None else (stint or "").strip()
-            if new_u and not is_feed_source(new_u):
+            if new_u and not (is_feed_source(new_u) if self.allow_local else is_channel(new_u)):
                 return False
             rows = [r for r in self.rows if r[3] != physical_row]
             if new_u or new_n or new_s:        # keep planned stints (url may be "")
@@ -6257,6 +6262,8 @@ class Feed:
         takes effect immediately (brief reconnect — a deliberate director action)."""
         self.quality_tier = tier
         self.quality_pinned = pinned
+        if is_local_source(self.current_channel()[0]):
+            return      # #592: a capture card ignores tiers; a restart is a black gap on air
         self.advance.set(); self._kill_proc()
 
     def maybe_step_down(self):
@@ -10141,7 +10148,7 @@ def main():
         pov_csv_url = (f"https://docs.google.com/spreadsheets/d/{args.sheet_id}"
                        f"/gviz/tq?tqx=out:csv&sheet={quote(args.pov_tab)}")
         pov_cache = os.path.join(runtime, "pov.cache.txt")
-        pov_source = ScheduleSource(pov_csv_url, pov_cache, None)
+        pov_source = ScheduleSource(pov_csv_url, pov_cache, None, allow_local=False)
         pov_source.refresh()   # non-fatal: empty cell / unreachable = POV simply off
 
     # Qualifying source: own sheet tab, same parser/structure as the race
