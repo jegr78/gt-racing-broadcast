@@ -584,17 +584,104 @@ def t_local_bitrate_keeps_the_ring_window_well_above_the_trailing_mark():
     assert window_s >= 4 * m.DEFAULT_FEED_PREBUFFER_S, window_s
 
 
+def _no_scan(platform, video):
+    return None, "no game-audio device found"
+
+
 def t_local_capture_setup_reads_the_machine_env():
-    cmd, err = m.local_capture_setup({"RACECAST_CAPTURE": "/dev/video2"}, "linux", "x264")
+    cmd, err, note = m.local_capture_setup({"RACECAST_CAPTURE": "/dev/video2"}, "linux", "x264",
+                                           audio_scan=_no_scan)
     assert err is None and "-an" in cmd and "/dev/video2" in cmd
-    cmd, err = m.local_capture_setup({"RACECAST_CAPTURE": "/dev/video2",
-                                      "RACECAST_CAPTURE_AUDIO": "hw"}, "linux", "x264")
-    assert err is None and "-an" not in cmd
-    cmd, err = m.local_capture_setup({}, "linux", "x264")
+    assert "no game-audio device" in note                  # picture-only is never silent
+    cmd, err, note = m.local_capture_setup({"RACECAST_CAPTURE": "/dev/video2",
+                                            "RACECAST_CAPTURE_AUDIO": "hw"}, "linux", "x264",
+                                           audio_scan=_no_scan)
+    assert err is None and "-an" not in cmd and note is None
+    cmd, err, note = m.local_capture_setup({}, "linux", "x264", audio_scan=_no_scan)
     assert cmd is None and "RACECAST_CAPTURE" in err
-    cmd, err = m.local_capture_setup({"RACECAST_CAPTURE": "x"}, "sunos5", "x264")
+    cmd, err, note = m.local_capture_setup({"RACECAST_CAPTURE": "x"}, "sunos5", "x264",
+                                           audio_scan=_no_scan)
     assert cmd is None and "sunos5" in err
 
+
+# ---- game-audio default: the card's own audio device, found by name ----
+FIXTURES = os.path.join(HERE, "fixtures")
+# Verbatim `ffmpeg -list_devices true -f dshow -i dummy` from the Windows streaming PC
+# (ffmpeg 9.0.1, Elgato HD60 X + Facecam MK.2 attached).
+with open(os.path.join(FIXTURES, "dshow-list-devices-hd60x.txt"), encoding="utf-8") as _fh:
+    DSHOW_HD60X = _fh.read()
+HD60X_OBS_ID = ("Elgato HD60 X:\\\\?\\usb#22vid_0fd9&pid_008a&mi_00#226&2fc6a5e4&0&0000"
+                "#22{65e8773d-8f56-11d0-a3b9-00a0c9223196}\\global")
+
+
+def t_parse_dshow_device_list_reads_names_and_pin_types():
+    devs = m.parse_dshow_device_list(DSHOW_HD60X)
+    assert ("Elgato HD60 X", ("video",)) in devs
+    assert ("Elgato HD60 X (Elgato HD60 X)", ("audio",)) in devs
+    assert ("Streamlabs Desktop Virtual Webcam", ("none",)) in devs
+    assert ("Kopfh\u00f6rermikrofon (2- DualSense Wireless Controller)", ("audio",)) in devs
+    assert not any(n.startswith("@device") for n, _t in devs)   # alternative names skipped
+    assert m.parse_dshow_device_list(DSHOW_HD60X.replace("\n", "\r\n")) == devs
+
+
+def t_pick_capture_audio_prefers_the_cards_own_device():
+    audio = [("Mikrofon (K66)",) * 2, ("Elgato HD60 X (Elgato HD60 X)",) * 2]
+    assert m.pick_capture_audio("Elgato HD60 X", False, audio) == "Elgato HD60 X (Elgato HD60 X)"
+    # a combined device (audio pin on the video filter, OBS's default) uses itself
+    assert m.pick_capture_audio("Cam Link", True, audio) == "Cam Link"
+    assert m.pick_capture_audio("Elgato HD60 X", False, [("Mikrofon (K66)",) * 2]) is None
+    # two cards of the same model: ambiguous -> nothing guessed
+    two = [("HD60 X (HD60 X)",) * 2, ("HD60 X (2- HD60 X)",) * 2]
+    assert m.pick_capture_audio("HD60 X", False, two) is None
+    assert m.pick_capture_audio("", False, audio) is None
+
+
+def t_dshow_audio_scan_on_the_real_listing():
+    audio, note = m.dshow_audio_from_listing(HD60X_OBS_ID, DSHOW_HD60X)
+    assert audio == "Elgato HD60 X (Elgato HD60 X)" and note is None
+    audio, note = m.dshow_audio_from_listing("Elgato Facecam MK.2:x", DSHOW_HD60X)
+    assert audio is None
+    assert "Elgato Facecam MK.2" in note and "Mikrofon (K66)" in note   # names the choices
+
+
+def t_local_capture_setup_uses_the_detected_audio():
+    scans = []
+    def scan(platform, video):
+        scans.append((platform, video))
+        return "Elgato HD60 X (Elgato HD60 X)", None
+    cmd, err, note = m.local_capture_setup({"RACECAST_CAPTURE": HD60X_OBS_ID}, "win32", "x264",
+                                           audio_scan=scan)
+    assert err is None and note is None and scans == [("win32", HD60X_OBS_ID)]
+    assert cmd[cmd.index("-i") + 1] == "video=Elgato HD60 X:audio=Elgato HD60 X (Elgato HD60 X)"
+    assert "-c:a" in cmd
+    # explicit override wins without a scan; `none` means deliberately picture-only
+    scans.clear()
+    cmd, err, note = m.local_capture_setup({"RACECAST_CAPTURE": HD60X_OBS_ID,
+                                            "RACECAST_CAPTURE_AUDIO": "none"}, "win32", "x264",
+                                           audio_scan=scan)
+    assert scans == [] and "-an" in cmd and note is None
+
+
+def t_parse_avfoundation_audio_devices():
+    # verbatim `ffmpeg -f avfoundation -list_devices true -i ""` (ffmpeg 9.0.1, macOS)
+    text = ("[AVFoundation indev @ 0xcbf01c140] AVFoundation video devices:\n"
+            "[AVFoundation indev @ 0xcbf01c140] [0] FaceTime HD Camera\n"
+            "[AVFoundation indev @ 0xcbf01c140] [4] Capture screen 0\n"
+            "[AVFoundation indev @ 0xcbf01c140] AVFoundation audio devices:\n"
+            "[AVFoundation indev @ 0xcbf01c140] [0] VB-Cable\n"
+            "[AVFoundation indev @ 0xcbf01c140] [1] MacBook Air Microphone\n"
+            "[in#0 @ 0xcbf01c000] Error opening input: Input/output error\n")
+    assert m.parse_avfoundation_audio_devices(text) == ["VB-Cable", "MacBook Air Microphone"]
+
+
+def t_parse_ffmpeg_sources():
+    # the `ffmpeg -sources pulse` line shape from fftools/opt_common.c print_device_list
+    text = ("Auto-detected sources for pulse:\n"
+            "* alsa_input.usb-Elgato_HD60_X-02.analog-stereo [HD60 X Analog Stereo] (none)\n"
+            "  alsa_input.pci-0000_00_1f.3.analog-stereo [Built-in Audio Analog Stereo] (none)\n")
+    assert m.parse_ffmpeg_sources(text) == [
+        ("alsa_input.usb-Elgato_HD60_X-02.analog-stereo", "HD60 X Analog Stereo"),
+        ("alsa_input.pci-0000_00_1f.3.analog-stereo", "Built-in Audio Analog Stereo")]
 
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):

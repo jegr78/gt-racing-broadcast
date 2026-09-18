@@ -1,0 +1,22 @@
+[in#0 @ 0000018c83250d00] "Elgato Facecam MK.2" (video)
+[in#0 @ 0000018c83250d00]   Alternative name "@device_pnp_\\?\usb#vid_0fd9&pid_0094&mi_00#6&435638f&0&0000#{65e8773d-8f56-11d0-a3b9-00a0c9223196}\global"
+[in#0 @ 0000018c83250d00] "Elgato HD60 X" (video)
+[in#0 @ 0000018c83250d00]   Alternative name "@device_pnp_\\?\usb#vid_0fd9&pid_008a&mi_00#6&2fc6a5e4&0&0000#{65e8773d-8f56-11d0-a3b9-00a0c9223196}\global"
+[in#0 @ 0000018c83250d00] "EƖgato Virtual Camera" (video)
+[in#0 @ 0000018c83250d00]   Alternative name "@device_pnp_\\?\root#media#0001#{65e8773d-8f56-11d0-a3b9-00a0c9223196}\{45ab5b3b-2e15-4452-a2cb-87e5fdd026fb}"
+[in#0 @ 0000018c83250d00] "Streamlabs Desktop Virtual Webcam" (none)
+[in#0 @ 0000018c83250d00]   Alternative name "@device_sw_{860BB310-5D01-11D0-BD3B-00A0C911CE86}\{27B05C2D-93DC-474A-A5DA-9BBA34CB2A9C}"
+[in#0 @ 0000018c83250d00] "MirrorTo Virtual Camera64" (video)
+[in#0 @ 0000018c83250d00]   Alternative name "@device_sw_{860BB310-5D01-11D0-BD3B-00A0C911CE86}\{64AB6AAC-35F9-41B4-B308-05CA6070749B}"
+[in#0 @ 0000018c83250d00] "OBS Virtual Camera" (video)
+[in#0 @ 0000018c83250d00]   Alternative name "@device_sw_{860BB310-5D01-11D0-BD3B-00A0C911CE86}\{A3FCE0F5-3493-419F-958A-ABA1250EC20B}"
+[in#0 @ 0000018c83250d00] "Elgato Screen Link" (none)
+[in#0 @ 0000018c83250d00]   Alternative name "@device_sw_{860BB310-5D01-11D0-BD3B-00A0C911CE86}\{D2F41684-D46F-440B-8096-4FCD528ED5A3}"
+[in#0 @ 0000018c83250d00] "Mikrofon (K66)" (audio)
+[in#0 @ 0000018c83250d00]   Alternative name "@device_cm_{33D9A762-90C8-11D0-BD43-00A0C911CE86}\wave_{B38D1DCF-E23E-4F2E-82E8-1958666AB151}"
+[in#0 @ 0000018c83250d00] "Elgato HD60 X (Elgato HD60 X)" (audio)
+[in#0 @ 0000018c83250d00]   Alternative name "@device_cm_{33D9A762-90C8-11D0-BD43-00A0C911CE86}\wave_{048AF61C-FE96-4EBB-95D3-A711B26897C8}"
+[in#0 @ 0000018c83250d00] "Mikrofon (Voice Changer Virtual Audio Device (WDM))" (audio)
+[in#0 @ 0000018c83250d00]   Alternative name "@device_cm_{33D9A762-90C8-11D0-BD43-00A0C911CE86}\wave_{45115C3F-9254-4EED-8590-1C3C4BDB8E0E}"
+[in#0 @ 0000018c83250d00] "Kopfhörermikrofon (2- DualSense Wireless Controller)" (audio)
+[in#0 @ 0000018c83250d00]   Alternative name "@device_cm_{33D9A762-90C8-11D0-BD43-00A0C911CE86}\wave_{5AC8A685-A8FD-4149-B883-167C19492110}"

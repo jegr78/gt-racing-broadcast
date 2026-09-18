@@ -1638,6 +1638,10 @@ function healthLine(name, f){
     const h = qualityHeight(f.quality);               // FULL serving <1080 => the source caps here
     if (f.profile === "full" && h && h < 1080)
       s += ` · source max ${h}p — no 1080p`;
+    // #592: a local feed serving picture-only (no game-audio device found) must be
+    // visible on air, not just in the feed log.
+    if (f.platform === "local" && f.last_error)
+      return `<span class="warnline">${s} · ${escapeHtml(f.last_error)}</span>`;
     return s;
   }
   if (f.state === "connecting"){

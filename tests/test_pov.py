@@ -2212,11 +2212,14 @@ def t_local_feed_serves_ffmpeg_into_the_ring():
     os.environ["RACECAST_CAPTURE"] = "/dev/video9"
     os.environ.pop("RACECAST_CAPTURE_AUDIO", None)
     orig_enc, m._LOCAL_ENCODER = m._LOCAL_ENCODER, "x264"
+    orig_scan = m.scan_capture_audio
+    m.scan_capture_audio = lambda platform, video: ("Card Audio", None)
     try:
         ok = _run_feed_until(f, lambda: f.ring.live_offset() > 0)
     finally:
         m.subprocess.Popen = orig_popen
         m._LOCAL_ENCODER = orig_enc
+        m.scan_capture_audio = orig_scan
         os.environ.clear(); os.environ.update(orig_env)
     assert ok
     assert cmds and cmds[0][0] == "ffmpeg" and cmds[0][-3:] == ["-f", "mpegts", "-"]
@@ -2237,11 +2240,13 @@ def t_local_feed_idles_with_the_device_hint():
         return p
     orig = (m.subprocess.Popen, m.dead_serve_backoff, m._LOCAL_ENCODER, dict(os.environ))
     m.subprocess.Popen, m.dead_serve_backoff, m._LOCAL_ENCODER = busy, (lambda n: 0), "x264"
+    orig_scan, m.scan_capture_audio = m.scan_capture_audio, (lambda platform, video: (None, None))
     os.environ["RACECAST_CAPTURE"] = "/dev/video9"
     try:
         ok = _run_feed_until(f, lambda: f.phase == "idle" and "paused" in (f.last_error or ""))
     finally:
         m.subprocess.Popen, m.dead_serve_backoff, m._LOCAL_ENCODER = orig[:3]
+        m.scan_capture_audio = orig_scan
         os.environ.clear(); os.environ.update(orig[3])
     assert ok, (f.phase, f.last_error)
     assert m.LOCAL_DEVICE_BUSY in f.last_error, f.last_error
