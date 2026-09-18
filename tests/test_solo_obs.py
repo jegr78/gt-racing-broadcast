@@ -526,9 +526,18 @@ def t_localize_pov_template_without_tyres_is_untouched_by_sharing():
 
 
 def t_tyres_summary_line():
-    assert "Solo Capture Device" in sa.tyres_capture_summary({"RACECAST_CAPTURE": "CAP"})
-    assert "RACECAST_TYRES_CAPTURE" in sa.tyres_capture_summary(
-        {"RACECAST_CAPTURE": "CAP", "RACECAST_TYRES_CAPTURE": "TYRE"})
+    one = {"RACECAST_CAPTURE": "CAP"}
+    two = {"RACECAST_CAPTURE": "CAP", "RACECAST_TYRES_CAPTURE": "TYRE"}
+    d = _load_solo("GT_Racing_Solo_Commentary.json")
+    sa.localize_device_sources(d, "win32", one)       # summary runs after localization
+    assert sa.tyres_capture_summary(d, one) == (
+        "Tyres/fuel crop: uses the capture card source (Solo Capture Device)")
+    d = _load_solo("GT_Racing_Solo_Commentary.json")
+    sa.localize_device_sources(d, "win32", two)
+    assert "RACECAST_TYRES_CAPTURE" in sa.tyres_capture_summary(d, two)
+    pov = _load_solo("GT_Racing_Solo_POV.json")
+    sa.localize_device_sources(pov, "win32", one)
+    assert sa.tyres_capture_summary(pov, one) is None
 
 
 if __name__ == "__main__":

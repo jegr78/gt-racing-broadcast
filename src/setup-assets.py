@@ -147,6 +147,7 @@ def localize_discord_audio(collection, platform, web=False, browser="Firefox"):
 # never collide a device leaf with its wrapping scene.
 CAPTURE_DEVICE_NAME = "Solo Capture Device"
 TYRES_DEVICE_NAME = "Solo Tyres Capture Device"
+TYRES_SCENE_NAME = "Solo Tyres/Fuel Capture"     # wraps the tyres leaf; survives folding
 DEVICE_SOURCES = (
     {"name": CAPTURE_DEVICE_NAME, "env": "RACECAST_CAPTURE", "kind": "video"},
     {"name": "Solo Webcam Device",  "env": "RACECAST_WEBCAM",  "kind": "video"},
@@ -222,8 +223,12 @@ def share_tyres_capture(collection):
     return True
 
 
-def tyres_capture_summary(env):
-    """One setup summary line naming the source the tyres/fuel crop uses."""
+def tyres_capture_summary(collection, env):
+    """One setup summary line naming the source the tyres/fuel crop uses, or None
+    when `collection` has no tyres/fuel crop (Endurance, Solo POV). Reads the
+    wrapper scene, which survives localize_device_sources, so it runs afterwards."""
+    if not any(s.get("name") == TYRES_SCENE_NAME for s in collection.get("sources", [])):
+        return None
     if tyres_uses_capture(env):
         return f"Tyres/fuel crop: uses the capture card source ({CAPTURE_DEVICE_NAME})"
     return (f"Tyres/fuel crop: separate device from RACECAST_TYRES_CAPTURE "
@@ -465,7 +470,6 @@ def main():
     browser = discord_web.resolve_browser(
         os.environ, discord_web.detect_running_browser() if web else None)
     swapped = localize_discord_audio(localized, sys.platform, web=web, browser=browser)
-    has_tyres = any(s.get("name") == TYRES_DEVICE_NAME for s in localized.get("sources", []))
     device_unset = localize_device_sources(localized, sys.platform, os.environ)
     apply_collection_name(localized, a.collection)
     if a.overlay_css and os.path.isfile(a.overlay_css):
@@ -505,8 +509,9 @@ def main():
         print(f"  NOTE: no Discord audio variant for {sys.platform} — macOS form kept.")
     else:
         print("  WARNING: Discord audio source not found in the collection.")
-    if has_tyres:
-        print("  " + tyres_capture_summary(os.environ))
+    tyres_line = tyres_capture_summary(localized, os.environ)
+    if tyres_line:
+        print("  " + tyres_line)
     if device_unset:
         print("  WARNING: no device chosen for " + ", ".join(device_unset) +
               " — set RACECAST_CAPTURE / RACECAST_WEBCAM in .env (OBS shows black "
