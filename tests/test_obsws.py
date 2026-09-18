@@ -1528,6 +1528,49 @@ def t_apply_split_audio_no_obs_is_503():
     assert status == 503 and payload.get("ok") is not True
 
 
+def _companion_splitscreen_buttons():
+    """[(label, down-actions)] of every Companion button that cuts to Splitscreen.
+    A list, not a dict, so two buttons sharing a label are both checked."""
+    path = os.path.join(ROOT, "src", "companion", "racecast-buttons.companionconfig")
+    with open(path, encoding="utf-8") as f:
+        cfg = json.load(f)
+    found = []
+    for page in cfg["pages"].values():
+        for row in (page.get("controls") or {}).values():
+            for btn in (row or {}).values():
+                downs = ((btn.get("steps") or {}).get("0") or {}) \
+                    .get("action_sets", {}).get("down", [])
+                if any(a.get("definitionId") == "set_scene"
+                       and a["options"]["scene"]["value"] == "Splitscreen" for a in downs):
+                    found.append((btn["style"]["text"], downs))
+    return found
+
+
+def t_companion_split_buttons_resolve_audio_server_side():
+    # #589: #534 fixed the panel, but the board's SPLIT button kept its hardcoded
+    # "unmute Feed A / mute Feed B" and muted the on-air commentator whenever B
+    # was on air. Every Splitscreen button must take its audio from the relay.
+    buttons = _companion_splitscreen_buttons()
+    assert {"SPLIT", "Split Scene"} <= {label for label, _ in buttons}, buttons
+    for label, downs in buttons:
+        muted = [a["options"]["source"]["value"] for a in downs
+                 if a.get("definitionId") == "set_source_mute"]
+        assert muted == [], f"{label!r} hardcodes mutes {muted}"
+        urls = [a["options"]["url"]["value"] for a in downs if a.get("definitionId") == "get"]
+        assert "http://127.0.0.1:8088/obs/split-audio" in urls, (label, urls)
+
+
+def t_companion_split_button_keeps_visibility_and_race_control():
+    # #589 swaps only SPLIT's audio; its feed visibility and the Race Control write stay.
+    [downs] = [d for label, d in _companion_splitscreen_buttons() if label == "SPLIT"]
+    shown = [a["options"]["source"]["value"] for a in downs
+             if a.get("definitionId") == "toggle_scene_item"
+             and a["options"]["visible"]["value"] == "true"]
+    assert shown == ["Feed A", "Feed B"], shown
+    urls = [a["options"]["url"]["value"] for a in downs if a.get("definitionId") == "get"]
+    assert "http://127.0.0.1:8088/setup/set/racecontrol/Driver%20Swaps" in urls, urls
+
+
 class _AliveFakeSock:
     """Minimal socket stand-in for _Session.alive unit checks (#537 task 1).
     Distinct from _FakeSock above (that one tracks close()-handshake calls)."""
