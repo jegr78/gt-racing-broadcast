@@ -120,7 +120,7 @@ The Splitscreen's feed visibility now resolves on the relay as well. The pure
 to `feed_state_intents` and returns show / unmute / mute (/ cut) intents. `slots`
 maps A/B to `(scene item, [audio inputs])`, so a slot can be heard through more than
 one input (a local capture slot plus the commentary microphone, #590).
-`split_audio_targets` is now its audio half. `GET`/`POST /obs/split` applies the
+It replaces `split_audio_targets`, which is gone. `GET`/`POST /obs/split` applies the
 whole state (both feeds visible, audio as above) one intent at a time, continuing
 past a failed intent and reporting it. The Companion `SPLIT` and `Split Scene`
 buttons, the Director Panel `SPLIT` macro and the smoke-test rundown call it and

@@ -20,7 +20,7 @@ sys.path.insert(0, SCRIPTS)
 spec = importlib.util.spec_from_file_location("obs_ws", os.path.join(SCRIPTS, "obs_ws.py"))
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 
-# split_audio_targets/apply_split_audio (#534) live in the relay module (they
+# apply_split_audio/apply_split_state (#534, #591) live in the relay module (they
 # resolve relay.live_feed()), not in obs_ws.py — load it under the same
 # "irofeeds" alias used by tests/test_console_gate.py and tests/test_cockpit.py.
 _relay_spec = importlib.util.spec_from_file_location(
@@ -1534,18 +1534,9 @@ def t_set_stream_service_unreachable_is_note_not_crash():
 
 
 # --------------------------------------------------------------------------
-# #534: on-air-aware SPLIT audio (split_audio_targets / apply_split_audio,
-# defined in the relay module — see the "irofeeds" load above).
+# #534: on-air-aware SPLIT audio (apply_split_audio, defined in the relay
+# module — see the "irofeeds" load above).
 # --------------------------------------------------------------------------
-def t_split_audio_targets_A_on_air():
-    assert irofeeds.split_audio_targets("A") == ("Feed A", ["Feed B", "Discord Audio Capture"])
-
-
-def t_split_audio_targets_B_on_air():
-    # the Suzuka bug: B on air must unmute B and mute A (not the reverse)
-    assert irofeeds.split_audio_targets("B") == ("Feed B", ["Feed A", "Discord Audio Capture"])
-
-
 def t_apply_split_audio_mutes_offair_unmutes_onair():
     calls = []
 
@@ -1559,6 +1550,10 @@ def t_apply_split_audio_mutes_offair_unmutes_onair():
 
     payload, status = irofeeds.apply_split_audio(_Relay(), _Obs())
     assert status == 200 and payload["ok"] is True and payload["live"] == "B"
+    # Older boards read `unmute` as one name; #591 made it a list on /obs/split only.
+    assert payload["unmute"] == "Feed B", payload
+    assert payload["mute"] == ["Feed A", "Discord Audio Capture"], payload
+    assert "show" not in payload, payload
     assert ("Feed B", False) in calls          # on-air unmuted
     assert ("Feed A", True) in calls           # off-air muted
     assert ("Discord Audio Capture", True) in calls

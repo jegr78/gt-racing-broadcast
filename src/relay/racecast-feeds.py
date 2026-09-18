@@ -3645,17 +3645,6 @@ def _program_audio_stream_ring(handler, ring, content_type, service):
 
 
 # --- Relay-driven Splitscreen (#534 audio, #591 visibility) -------------------
-def split_audio_targets(live_feed):
-    """(unmute, mute) OBS inputs for a SPLIT given the on-air feed (#534): unmute the
-    on-air feed, mute the off-air feed + the Discord/interview bus. The audio half of
-    obs_ws.split_state_intents, kept in the shape /obs/split-audio has always
-    returned. Pure — the fix for the hardcoded 'unmute A / mute B' that muted the
-    live commentator on B-on-air handovers."""
-    intents = _OBS_WS_MODULE.split_state_intents(live_feed, False)
-    [on] = [t for v, t in intents if v == "unmute"]
-    return on, [t for v, t in intents if v == "mute"]
-
-
 def _apply_split_intents(relay, obs_ws, audio_only):
     """Resolve the on-air feed and apply the Splitscreen intents via obs-websocket,
     one call per intent. Every intent is attempted even after one fails, so a
@@ -3699,7 +3688,10 @@ def apply_split_state(relay, obs_ws):
 
 def apply_split_audio(relay, obs_ws):
     """GET/POST /obs/split-audio (#534): the audio half of apply_split_state, for
-    boards and panels that still set the Splitscreen visibility themselves."""
+    boards and panels that still set the Splitscreen visibility themselves. Its
+    `unmute` stays one name, as older boards expect. For a slot with several audio
+    inputs (a local slot plus its microphone) every input is still switched, but
+    only the first is reported."""
     payload, status = _apply_split_intents(relay, obs_ws, audio_only=True)
     if "unmute" in payload:
         payload["unmute"] = payload["unmute"][0]   # the route has always returned one name
