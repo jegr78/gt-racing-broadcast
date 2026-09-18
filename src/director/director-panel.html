@@ -890,9 +890,8 @@ const CONFIG = {
     {label:"STINT B", scene:"Stint",
      show:[["Stint","Feed B"]], hide:[["Stint","Feed A"]],
      unmute:["Feed B"], mute:["Feed A","Discord Audio Capture"], rc:""},
-    {label:"SPLIT", scene:"Splitscreen",
-     show:[["Splitscreen","Feed A"],["Splitscreen","Feed B"]], hide:[],
-     airAudio:true, rc:"Driver Swaps"},   // #534: audio resolved server-side (unmute on-air / mute off-air+Discord)
+    {label:"SPLIT", scene:"Splitscreen", show:[], hide:[],
+     relaySplit:true, rc:"Driver Swaps"},   // #591: the relay resolves visibility + audio from the on-air slot
     {label:"INTERVIEW", scene:"Interview", show:[], hide:[],
      unmute:["Discord Audio Capture"], mute:["Feed A","Feed B"]},
     {label:"STANDBY", scene:"Standby", show:[], hide:[],
@@ -1435,8 +1434,8 @@ async function runMacro(m){
     ["set scene", ()=>obsScene(m.scene)],
     ...m.show.map(([sc,src])=>[`show ${src}`,   ()=>obsSource(sc,src,true)]),
     ...m.hide.map(([sc,src])=>[`hide ${src}`,   ()=>obsSource(sc,src,false)]),
-    ...(m.airAudio                                    // #534: server resolves on-air; no static mutes
-        ? [[`split audio (on-air)`, ()=>obsPost("split-audio", {})]]
+    ...(m.relaySplit                                  // #591: server resolves the on-air slot; no static names
+        ? [[`split (on-air)`, ()=>obsPost("split", {})]]
         : [...(m.unmute||[]).map(i=>[`unmute ${i}`, ()=>obsMute(i,false)]),
            ...(m.mute||[]).map(i=>[`mute ${i}`,     ()=>obsMute(i,true)])]),
   ];

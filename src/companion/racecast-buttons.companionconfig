@@ -569,62 +569,12 @@
            "type": "action"
           },
           {
-           "id": "Pi2zPyEb-A8DbNR2yBlSf",
-           "definitionId": "toggle_scene_item",
-           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
-           "options": {
-            "scene": {
-             "value": "Splitscreen",
-             "isExpression": false
-            },
-            "all": {
-             "value": false,
-             "isExpression": false
-            },
-            "source": {
-             "value": "Feed A",
-             "isExpression": false
-            },
-            "visible": {
-             "value": "true",
-             "isExpression": false
-            }
-           },
-           "upgradeIndex": 8,
-           "type": "action"
-          },
-          {
-           "id": "knGFEQH9HVGaHiZXNoo1Y",
-           "definitionId": "toggle_scene_item",
-           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
-           "options": {
-            "scene": {
-             "value": "Splitscreen",
-             "isExpression": false
-            },
-            "all": {
-             "value": false,
-             "isExpression": false
-            },
-            "source": {
-             "value": "Feed B",
-             "isExpression": false
-            },
-            "visible": {
-             "value": "true",
-             "isExpression": false
-            }
-           },
-           "upgradeIndex": 8,
-           "type": "action"
-          },
-          {
            "id": "6yNrdFX8UwVYfS0yH0E_V",
            "definitionId": "get",
            "connectionId": "BB0jmLMxj_0YwbhwslOiw",
            "options": {
             "url": {
-             "value": "http://127.0.0.1:8088/obs/split-audio",
+             "value": "http://127.0.0.1:8088/obs/split",
              "isExpression": false
             },
             "header": {
@@ -1439,7 +1389,7 @@
            "connectionId": "BB0jmLMxj_0YwbhwslOiw",
            "options": {
             "url": {
-             "value": "http://127.0.0.1:8088/obs/split-audio",
+             "value": "http://127.0.0.1:8088/obs/split",
              "isExpression": false
             },
             "header": {

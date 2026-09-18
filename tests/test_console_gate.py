@@ -1111,6 +1111,64 @@ def t_obs_split_audio_get_route_for_companion():
         srv.shutdown()
 
 
+class _SplitFakeObs:
+    """Records the per-verb calls /obs/split makes. Swapped in for the real
+    obs_ws module: this Mac runs a real OBS on 4455 that a test must not drive."""
+
+    def __init__(self):
+        self.calls = []
+
+    def set_scene_item_enabled(self, scene, source, enabled):
+        self.calls.append(("item", scene, source, enabled)); return True, ""
+
+    def set_input_mute(self, name, muted):
+        self.calls.append(("mute", name, muted)); return True, ""
+
+
+def _split_with_b_on_air(fire):
+    srv = _serve(); port = srv.server_address[1]
+    fake = _SplitFakeObs()
+    orig_obs, m._obs_ws = m._obs_ws, fake
+    orig_live_feed = m.Relay.live_feed
+    m.Relay.live_feed = lambda self: "B"
+    try:
+        code, body = fire(port)
+        return code, body, fake.calls
+    finally:
+        m._obs_ws = orig_obs
+        m.Relay.live_feed = orig_live_feed
+        srv.shutdown()
+
+
+def _assert_split_b_on_air(code, body, calls):
+    assert code == 200, (code, body)
+    data = json.loads(body)
+    assert data["live"] == "B" and data["unmute"] == ["Feed B"], data
+    assert ("item", "Splitscreen", "Feed A", True) in calls, calls
+    assert ("item", "Splitscreen", "Feed B", True) in calls, calls
+    assert ("mute", "Feed B", False) in calls, calls       # on-air commentator stays live
+    assert ("mute", "Feed B", True) not in calls, calls
+    assert ("mute", "Feed A", True) in calls, calls
+    assert ("mute", "Discord Audio Capture", True) in calls, calls
+
+
+def t_console_obs_split_resolves_on_air_feed():
+    # #591: the director panel's SPLIT goes through /console, director-gated.
+    _assert_split_b_on_air(*_split_with_b_on_air(
+        lambda port: _post(port, "/console/obs/split", _tok("bob"))))
+
+
+def t_console_obs_split_forbidden_for_commentator():
+    code, _body, calls = _split_with_b_on_air(
+        lambda port: _post(port, "/console/obs/split", _tok("alice")))
+    assert code == 403 and calls == [], (code, calls)
+
+
+def t_obs_split_get_route_for_companion():
+    # #591: the Companion SPLIT button hits the tailnet-root GET route (no token).
+    _assert_split_b_on_air(*_split_with_b_on_air(lambda port: _get(port, "/obs/split")))
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

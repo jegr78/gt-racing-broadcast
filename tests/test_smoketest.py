@@ -409,6 +409,8 @@ def t_split_audio_expectation_follows_the_on_air_feed():
     split = next(s for s in st.RUNDOWN if s.label == "SPLIT")
     a = st.expected_after(split, on_air="Feed A")
     assert a["scene"] == "Splitscreen"
+    assert a["visible"] == {("Splitscreen", "Feed A"): True,
+                            ("Splitscreen", "Feed B"): True}, a["visible"]
     assert a["muted"]["Feed A"] is False
     assert a["muted"]["Feed B"] is True
     assert a["muted"]["Discord Audio Capture"] is True
@@ -489,13 +491,13 @@ def t_the_route_guard_actually_bites():
 
 def t_orchestrator_relay_paths_exist_in_the_relay():
     """The rundown is not the only caller: _smoke_apply/_observe hardcode
-    obs/scene, obs/source, obs/audio, obs/split-audio, obs/state and more. They
+    obs/scene, obs/source, obs/audio, obs/split, obs/state and more. They
     are exactly as rename-prone, so they are read straight out of the call sites
     rather than mirrored into a list that could drift."""
     with open(os.path.join(ROOT, "src", "racecast.py"), encoding="utf-8") as fh:
         orchestrator = fh.read()
     paths = set(re.findall(r'_smoke_relay_(?:get|post)\(\s*f?"([a-z0-9/_-]+)"', orchestrator))
-    assert {"obs/scene", "obs/source", "obs/audio", "obs/split-audio", "obs/state",
+    assert {"obs/scene", "obs/source", "obs/audio", "obs/split", "obs/state",
             "status"} <= paths, f"call sites changed shape: {sorted(paths)}"
     src = _relay_source()
     for path in sorted(paths):

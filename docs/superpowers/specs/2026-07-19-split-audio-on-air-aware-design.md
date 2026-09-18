@@ -112,3 +112,18 @@ screenshots are regenerated via `companion-screenshots` in the same change.
 
 The stutter/prebuffer work (#533, merged) and the other Suzuka findings
 (#535–#538).
+
+## Follow-up: visibility moved to the relay too (#591)
+
+The Splitscreen's feed visibility now resolves on the relay as well. The pure
+`split_state_intents(live, do_cut, slots=None)` in `src/scripts/obs_ws.py` sits next
+to `feed_state_intents` and returns show / unmute / mute (/ cut) intents. `slots`
+maps A/B to `(scene item, [audio inputs])`, so a slot can be heard through more than
+one input (a local capture slot plus the commentary microphone, #590).
+It replaces `split_audio_targets`, which is gone. `GET`/`POST /obs/split` applies the
+whole state (both feeds visible, audio as above) one intent at a time, continuing
+past a failed intent and reporting it. The Companion `SPLIT` and `Split Scene`
+buttons, the Director Panel `SPLIT` macro and the smoke-test rundown call it and
+name no source. They still cut to `Splitscreen` themselves, so the cut survives a
+relay outage. `/obs/split-audio` (sections 2 and 3) stays for boards imported
+before this change and keeps its payload.

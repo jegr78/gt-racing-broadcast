@@ -4624,6 +4624,17 @@ def _http_error(code, body):
                                   io.BytesIO(body))
 
 
+def t_smoke_apply_split_is_one_relay_call():
+    """#591: the rundown's SPLIT names no source. It cuts, then leaves the
+    visibility and the audio to the relay, exactly like the panel and board."""
+    stub = _StubHttp(post=b'{"ok": true}')
+    split = next(s for s in m._sm().RUNDOWN if s.label == "SPLIT")
+    _with_stub_http(stub, lambda: m._smoke_apply(split))
+    paths = [url.rsplit(":8088/", 1)[-1] for url, _ in stub.posts]
+    assert paths == ["obs/scene", "obs/split"], paths
+    assert stub.posts[0][1] == {"scene": "Splitscreen"}, stub.posts
+
+
 def t_smoke_relay_post_keeps_the_error_body_of_a_503():
     """The relay answers a dead OBS with 503 + {"error": "obs unavailable"}.
     urllib raises on 5xx, so without reading the body back the run only ever sees
@@ -4632,7 +4643,7 @@ def t_smoke_relay_post_keeps_the_error_body_of_a_503():
         def post_json(self, url, obj, *, headers=None, timeout=None):
             raise _http_error(503, b'{"error": "obs unavailable"}')
 
-    got = _with_stub_http(_Raiser(), lambda: m._smoke_relay_post("obs/split-audio", {}))
+    got = _with_stub_http(_Raiser(), lambda: m._smoke_relay_post("obs/split", {}))
     assert got["error"] == "obs unavailable", got
     assert m._sm().step_error_verdict(got["error"])[0] == m._sm().WARN
 

@@ -328,15 +328,15 @@ class Step:
     rename fails in CI instead of on air.
     """
     __slots__ = ("label", "kind", "scene", "show", "hide", "unmute", "mute",
-                 "air_audio", "relay", "wait_for_bytes", "check")
+                 "relay_split", "relay", "wait_for_bytes", "check")
 
     def __init__(self, label, kind, scene=None, show=(), hide=(), unmute=(),
-                 mute=(), air_audio=False, relay=None, wait_for_bytes=False,
+                 mute=(), relay_split=False, relay=None, wait_for_bytes=False,
                  check=None):
         self.label = label; self.kind = kind; self.scene = scene
         self.show = tuple(show); self.hide = tuple(hide)
         self.unmute = tuple(unmute); self.mute = tuple(mute)
-        self.air_audio = air_audio; self.relay = relay
+        self.relay_split = relay_split; self.relay = relay
         self.wait_for_bytes = wait_for_bytes; self.check = check
 
     def __repr__(self):                                   # pragma: no cover
@@ -367,17 +367,13 @@ RUNDOWN = (
     # The off-air feed is still paused: SPLIT against an unarmed feed would inspect
     # a black half, hence the arm plus the byte wait.
     Step("ARM B", "arm", relay="feed/B/activate", wait_for_bytes=True),
-    Step("SPLIT", "macro", scene="Splitscreen",
-         show=(("Splitscreen", "Feed A"), ("Splitscreen", "Feed B")),
-         air_audio=True),
+    Step("SPLIT", "macro", scene="Splitscreen", relay_split=True),
     Step("NEXT", "relay", relay="next"),
     Step("STINT B", "macro", scene="Stint",
          show=(("Stint", "Feed B"),), hide=(("Stint", "Feed A"),),
          unmute=("Feed B",), mute=("Feed A", DISCORD_AUDIO)),
     Step("ARM A", "arm", relay="feed/A/activate", wait_for_bytes=True),
-    Step("SPLIT", "macro", scene="Splitscreen",
-         show=(("Splitscreen", "Feed A"), ("Splitscreen", "Feed B")),
-         air_audio=True),
+    Step("SPLIT", "macro", scene="Splitscreen", relay_split=True),
     Step("INTERVIEW", "macro", scene="Interview",
          unmute=(DISCORD_AUDIO,), mute=_FEEDS),
     Step("OUTRO", "macro", scene="Outro", mute=(*_FEEDS, DISCORD_AUDIO)),
@@ -422,15 +418,17 @@ def arm_violations(rundown=RUNDOWN):
 
 def expected_after(step, on_air="Feed A"):
     """The OBS state a step must have produced, for the `POST /obs/state`
-    read-back. `air_audio` resolves like the relay does (#534): the ON-AIR feed
-    is live, the off-air feed and Discord are muted. Reading this back after
-    SPLIT on BOTH sides of the handover is the regression test for the Suzuka
-    bug, where SPLIT muted the on-air commentator on an even->odd handover."""
+    read-back. `relay_split` resolves like the relay does (#534, #591): both
+    feeds visible, the ON-AIR feed live, the off-air feed and Discord muted.
+    Reading this back after SPLIT on BOTH sides of the handover is the
+    regression test for the Suzuka bug, where SPLIT muted the on-air
+    commentator on an even->odd handover."""
     visible = {t: True for t in step.show}
     visible.update({t: False for t in step.hide})
     muted = {n: False for n in step.unmute}
     muted.update({n: True for n in step.mute})
-    if step.air_audio:
+    if step.relay_split:
+        visible.update({(step.scene, f): True for f in _FEEDS})
         off = [f for f in _FEEDS if f != on_air]
         muted[on_air] = False
         for f in off:
@@ -447,6 +445,8 @@ def rundown_obs_targets():
     out = set()
     for s in RUNDOWN:
         out.update(s.show); out.update(s.hide)
+        if s.relay_split:
+            out.update((s.scene, f) for f in _FEEDS)
     return out
 
 
@@ -454,7 +454,7 @@ def rundown_audio_inputs():
     out = set()
     for s in RUNDOWN:
         out.update(s.unmute); out.update(s.mute)
-        if s.air_audio:
+        if s.relay_split:
             out.update(_FEEDS); out.add(DISCORD_AUDIO)
     return out
 

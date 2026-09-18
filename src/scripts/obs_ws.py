@@ -43,6 +43,8 @@ STINT_SCENE = "Stint"                       # single-cam scene holding both feed
 INTERMISSION_SCENE = "Intermission"          # the safe holding scene (#371); auto-failover target (#378)
 POV_SOURCE = "Feed POV"                      # the Stint-scene driver-POV PiP scene item
 FEED_SOURCES = {"A": "Feed A", "B": "Feed B"}   # scene-item name == audio input name
+SPLIT_SCENE = "Splitscreen"                  # the handover layout: outgoing + incoming stint
+SPLIT_DISCORD_INPUT = "Discord Audio Capture"   # #534: interview/Discord bus muted during a SPLIT
 
 # The scene collection the broadcast assumes. Mirrors the "name" field of
 # src/obs/GT_Racing_Endurance.json (the name OBS shows after importing the localized
@@ -101,6 +103,24 @@ def feed_state_intents(live, do_cut, feeds=("A", "B"),
     others = [f for f in feeds if f != live]
     intents = [("show", sources[live])] + [("hide", sources[f]) for f in others]
     intents += [("unmute", sources[live])] + [("mute", sources[f]) for f in others]
+    if do_cut:
+        intents.append(("cut", scene))
+    return intents
+
+
+def split_state_intents(live, do_cut, slots=None, scene=SPLIT_SCENE):
+    """Pure: the OBS intent list for the Splitscreen with `live` (A/B) on air (#591).
+    Both slots are visible; the on-air slot's audio inputs are unmuted, the off-air
+    slot's and the Discord bus are muted; (do_cut) the program cut comes last.
+    `slots` maps A/B to (scene-item name, [audio input names]) — a list because a
+    local slot contributes its media source plus the commentary microphone. The
+    default derives both slots from FEED_SOURCES, one audio input each."""
+    slots = slots or {f: (src, [src]) for f, src in FEED_SOURCES.items()}
+    others = [f for f in slots if f != live]
+    intents = [("show", slots[f][0]) for f in slots]
+    intents += [("unmute", inp) for inp in slots[live][1]]
+    intents += [("mute", inp) for f in others for inp in slots[f][1]]
+    intents.append(("mute", SPLIT_DISCORD_INPUT))
     if do_cut:
         intents.append(("cut", scene))
     return intents
