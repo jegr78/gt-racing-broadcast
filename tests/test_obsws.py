@@ -1137,6 +1137,96 @@ class _FakeSession:
         self.sent.append(("close", {}))
 
 
+# #593: the commentary microphone of a local stint. It is live only while the
+# on-air slot is the local capture; in every other state it is muted.
+MIC = "Commentary Mic Device"
+
+
+def t_feed_audio_plan_without_a_managed_mic_is_one_input_per_feed():
+    assert m.feed_audio_plan({"A"}, mic=None) == (
+        {"A": ["Feed A"], "B": ["Feed B"]}, [])
+
+
+def t_feed_audio_plan_gives_the_mic_to_the_local_slot():
+    assert m.feed_audio_plan({"B"}, mic=MIC) == (
+        {"A": ["Feed A"], "B": ["Feed B", MIC]}, [MIC])
+    assert m.feed_audio_plan(set(), mic=MIC) == (
+        {"A": ["Feed A"], "B": ["Feed B"]}, [MIC])
+
+
+def t_feed_state_intents_local_on_air_opens_the_mic():
+    audio, extra = m.feed_audio_plan({"A"}, mic=MIC)
+    assert m.feed_state_intents("A", True, audio=audio, extra_mute=extra) == [
+        ("show", "Feed A"), ("hide", "Feed B"),
+        ("unmute", "Feed A"), ("unmute", MIC), ("mute", "Feed B"),
+        ("cut", "Stint"),
+    ]
+
+
+def t_feed_state_intents_local_off_air_mutes_the_mic_once():
+    audio, extra = m.feed_audio_plan({"A"}, mic=MIC)
+    assert m.feed_state_intents("B", False, audio=audio, extra_mute=extra) == [
+        ("show", "Feed B"), ("hide", "Feed A"),
+        ("unmute", "Feed B"), ("mute", "Feed A"), ("mute", MIC),
+    ]
+
+
+def t_feed_state_intents_no_local_slot_still_mutes_the_mic():
+    # The outgoing local stint may already have advanced to a remote row when the
+    # handover lands; the mic must close anyway.
+    audio, extra = m.feed_audio_plan(set(), mic=MIC)
+    intents = m.feed_state_intents("B", False, audio=audio, extra_mute=extra)
+    assert intents[-1] == ("mute", MIC), intents
+    assert ("unmute", MIC) not in intents
+
+
+def t_split_state_intents_mic_follows_the_on_air_slot():
+    audio, extra = m.feed_audio_plan({"B"}, mic=MIC)
+    slots = {f: (m.FEED_SOURCES[f], audio[f]) for f in ("A", "B")}
+    on = m.split_state_intents("B", False, slots=slots, extra_mute=extra)
+    assert on == [
+        ("show", "Feed A"), ("show", "Feed B"),
+        ("unmute", "Feed B"), ("unmute", MIC),
+        ("mute", "Feed A"), ("mute", "Discord Audio Capture"),
+    ]
+    off = m.split_state_intents("A", False, slots=slots, extra_mute=extra)
+    assert ("mute", MIC) in off and ("unmute", MIC) not in off
+    assert off.count(("mute", MIC)) == 1, off
+
+
+def t_split_state_intents_never_mutes_an_input_it_just_opened():
+    # Two back-to-back local stints put the mic in both slots; the on-air one wins.
+    audio, extra = m.feed_audio_plan({"A", "B"}, mic=MIC)
+    slots = {f: (m.FEED_SOURCES[f], audio[f]) for f in ("A", "B")}
+    intents = m.split_state_intents("A", False, slots=slots, extra_mute=extra)
+    assert ("unmute", MIC) in intents and ("mute", MIC) not in intents, intents
+
+
+class _MuteFailSession(_FakeSession):
+    """SetInputMute raises for the named inputs, like OBS for a missing input."""
+
+    def __init__(self, missing, responses=None):
+        super().__init__(responses)
+        self.missing = set(missing)
+
+    def request(self, request_type, request_data=None):
+        if request_type == "SetInputMute" and (request_data or {}).get("inputName") in self.missing:
+            self.sent.append((request_type, request_data))
+            raise ValueError(f"request SetInputMute failed: {request_data['inputName']} not found")
+        return super().request(request_type, request_data)
+
+
+def t_reflect_feed_state_cuts_even_without_the_mic_input():
+    # A collection imported before #593 has no mic: the handover cut must still land.
+    sess = _MuteFailSession({MIC}, {"GetSceneItemId": {"sceneItemId": 3}})
+    audio, extra = m.feed_audio_plan({"A"}, mic=MIC)
+    applied, note = m.reflect_feed_state("B", True, audio=audio, extra_mute=extra,
+                                         session=sess)
+    assert ("SetCurrentProgramScene", {"sceneName": "Stint"}) in sess.sent, sess.sent
+    assert ("cut", "Stint") in applied and ("mute", MIC) not in applied, applied
+    assert MIC in note, note
+
+
 def t_set_current_program_scene_sends_request():
     sess = _FakeSession()
     orig, m._connect = m._connect, lambda *a, **k: (sess, "")
@@ -1626,6 +1716,22 @@ def t_apply_split_in_solo_touches_nothing():
         assert status == 409 and payload["ok"] is False, (apply.__name__, payload)
         assert payload["error"] == "no on-air feed", payload
         assert obs.calls == [], obs.calls
+
+
+def t_apply_split_state_opens_the_mic_of_a_local_on_air_slot():
+    class _LocalRelay(_LiveRelay):
+        def obs_audio_plan(self):
+            return irofeeds._OBS_WS_MODULE.feed_audio_plan({"A"}, mic=MIC)
+
+    obs = _SplitObs()
+    payload, status = irofeeds.apply_split_state(_LocalRelay("A"), obs)
+    assert status == 200 and payload["unmute"] == ["Feed A", MIC], payload
+    assert ("mute", MIC, False) in obs.calls and ("mute", MIC, True) not in obs.calls
+    payload, _ = irofeeds.apply_split_audio(_LocalRelay("A"), _SplitObs())
+    assert payload["unmute"] == "Feed A", payload   # older boards still read one name
+    obs = _SplitObs()
+    irofeeds.apply_split_state(_LocalRelay("B"), obs)
+    assert ("mute", MIC, True) in obs.calls and ("mute", MIC, False) not in obs.calls
 
 
 def t_apply_split_state_no_obs_is_503():

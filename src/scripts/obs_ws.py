@@ -45,6 +45,9 @@ POV_SOURCE = "Feed POV"                      # the Stint-scene driver-POV PiP sc
 FEED_SOURCES = {"A": "Feed A", "B": "Feed B"}   # scene-item name == audio input name
 SPLIT_SCENE = "Splitscreen"                  # the handover layout: outgoing + incoming stint
 SPLIT_DISCORD_INPUT = "Discord Audio Capture"   # #534: interview/Discord bus muted during a SPLIT
+# #593: the producer's own commentary microphone for a local stint. The LEAF input:
+# its "Commentary Mic" wrapper scene carries no audio of its own, so muting it fails.
+COMMENTARY_MIC_INPUT = "Commentary Mic Device"
 
 # The scene collection the broadcast assumes. Mirrors the "name" field of
 # src/obs/GT_Racing_Endurance.json (the name OBS shows after importing the localized
@@ -94,33 +97,60 @@ def scene_collection_action(status, note, switch_enabled):
     return ("switch", status["expected"])
 
 
+def feed_audio_plan(local_feeds, mic=None):
+    """Pure: (audio, extra_mute) for the intent planners below (#593). `audio` maps
+    A/B to that slot's audio inputs: its media source, plus `mic` when the slot
+    carries the local capture. `extra_mute` lists `mic` again so it is muted even
+    when no slot is local any more (the outgoing local stint may already have
+    advanced to a remote row when a handover lands). mic=None leaves the mic alone:
+    a machine without a capture card never touches it."""
+    audio = {f: [src] + ([mic] if mic and f in local_feeds else [])
+             for f, src in FEED_SOURCES.items()}
+    return audio, ([mic] if mic else [])
+
+
+def _audio_intents(live_inputs, other_inputs):
+    """Unmute the on-air inputs, then mute every other input once, never one that
+    was just unmuted (two back-to-back local stints share the one microphone)."""
+    intents = [("unmute", i) for i in live_inputs]
+    for i in other_inputs:
+        if i not in live_inputs and ("mute", i) not in intents:
+            intents.append(("mute", i))
+    return intents
+
+
 def feed_state_intents(live, do_cut, feeds=("A", "B"),
-                       scene=STINT_SCENE, sources=None):
+                       scene=STINT_SCENE, sources=None, audio=None, extra_mute=()):
     """Pure: the OBS intent list that makes `live` (A/B) the on-air feed in the
     Stint scene. Visibility first, then audio, then (do_cut) the program cut.
+    `audio`/`extra_mute` come from feed_audio_plan(); the default is one audio
+    input per feed, named like its scene item.
     reflect_feed_state() turns each (verb, target) into obs-websocket requests."""
     sources = sources or FEED_SOURCES
+    audio = audio or {f: [sources[f]] for f in feeds}
     others = [f for f in feeds if f != live]
     intents = [("show", sources[live])] + [("hide", sources[f]) for f in others]
-    intents += [("unmute", sources[live])] + [("mute", sources[f]) for f in others]
+    intents += _audio_intents(audio[live],
+                              [i for f in others for i in audio[f]] + list(extra_mute))
     if do_cut:
         intents.append(("cut", scene))
     return intents
 
 
-def split_state_intents(live, do_cut, slots=None, scene=SPLIT_SCENE):
+def split_state_intents(live, do_cut, slots=None, scene=SPLIT_SCENE, extra_mute=()):
     """Pure: the OBS intent list for the Splitscreen with `live` (A/B) on air (#591).
     Both slots are visible; the on-air slot's audio inputs are unmuted, the off-air
-    slot's and the Discord bus are muted; (do_cut) the program cut comes last.
-    `slots` maps A/B to (scene-item name, [audio input names]) — a list because a
-    local slot contributes its media source plus the commentary microphone. The
-    default derives both slots from FEED_SOURCES, one audio input each."""
+    slot's, `extra_mute` and the Discord bus are muted; (do_cut) the program cut
+    comes last. `slots` maps A/B to (scene-item name, [audio input names]) — a list
+    because a local slot contributes its media source plus the commentary
+    microphone (#593). The default derives both slots from FEED_SOURCES, one audio
+    input each."""
     slots = slots or {f: (src, [src]) for f, src in FEED_SOURCES.items()}
     others = [f for f in slots if f != live]
     intents = [("show", slots[f][0]) for f in slots]
-    intents += [("unmute", inp) for inp in slots[live][1]]
-    intents += [("mute", inp) for f in others for inp in slots[f][1]]
-    intents.append(("mute", SPLIT_DISCORD_INPUT))
+    intents += _audio_intents(slots[live][1],
+                              [i for f in others for i in slots[f][1]]
+                              + list(extra_mute) + [SPLIT_DISCORD_INPUT])
     if do_cut:
         intents.append(("cut", scene))
     return intents
@@ -1290,20 +1320,24 @@ def read_obs_state(sources, inputs, host="127.0.0.1", port=None,
 
 def reflect_feed_state(live, do_cut, scene=STINT_SCENE, sources=None,
                        host="127.0.0.1", port=None, password=None, timeout=2.0,
-                       session=None):
+                       session=None, audio=None, extra_mute=()):
     """Reflect which feed (A/B) is on air into OBS: show/hide the Stint-scene
-    sources, mute/unmute the feed audio inputs, and (do_cut) cut the program to
-    Stint. Best effort by design: returns (applied_intents, note) and NEVER
-    raises — a handover must go through even if OBS is closed/locked. On any
-    failure the relay falls back to the manual panel/Companion controls."""
-    intents = feed_state_intents(live, do_cut, scene=scene, sources=sources)
+    sources, mute/unmute the feed audio inputs (and the commentary mic of a local
+    stint, see feed_audio_plan), and (do_cut) cut the program to Stint. Best effort
+    by design: returns (applied_intents, note) and NEVER raises — a handover must
+    go through even if OBS is closed/locked. A failed mute/unmute is noted and
+    skipped, so an input the collection lacks (a mic imported before #593) never
+    stops the cut; a failed show/hide still aborts, as before. On any failure the
+    relay falls back to the manual panel/Companion controls."""
+    intents = feed_state_intents(live, do_cut, scene=scene, sources=sources,
+                                 audio=audio, extra_mute=extra_mute)
     note = ""
     own = session is None
     if own:
         session, note = _connect(host, port, password, timeout)
     if session is None:
         return [], note
-    applied = []
+    applied, notes = [], []
     try:
         for verb, target in intents:
             if verb in ("show", "hide"):
@@ -1315,14 +1349,18 @@ def reflect_feed_state(live, do_cut, scene=STINT_SCENE, sources=None,
                                 {"sceneName": scene, "sceneItemId": sid,
                                  "sceneItemEnabled": verb == "show"})
             elif verb in ("mute", "unmute"):
-                session.request("SetInputMute",
-                                {"inputName": target, "inputMuted": verb == "mute"})
+                try:
+                    session.request("SetInputMute",
+                                    {"inputName": target, "inputMuted": verb == "mute"})
+                except Exception as exc:          # noqa: BLE001 — one input, not the handover
+                    notes.append(f"{verb} {target}: {exc or exc.__class__.__name__}")
+                    continue
             elif verb == "cut":
                 session.request("SetCurrentProgramScene", {"sceneName": target})
             applied.append((verb, target))
-        return applied, ""
+        return applied, "; ".join(notes)
     except Exception as exc:                         # noqa: BLE001 — best-effort contract
-        return applied, str(exc) or exc.__class__.__name__
+        return applied, "; ".join(notes + [str(exc) or exc.__class__.__name__])
     finally:
         if own:
             session.close()

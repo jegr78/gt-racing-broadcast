@@ -2251,6 +2251,68 @@ def t_local_feed_idles_with_the_device_hint():
     assert ok, (f.phase, f.last_error)
     assert m.LOCAL_DEVICE_BUSY in f.last_error, f.last_error
 
+
+# --- #593: the commentary mic follows the on-air local slot ---
+MIC = "Commentary Mic Device"
+
+
+def t_obs_audio_plan_gives_the_mic_to_the_local_feed():
+    r = _relay(["https://youtu.be/a", "local:", "https://youtu.be/c"])
+    orig = dict(os.environ)
+    os.environ["RACECAST_CAPTURE"] = "/dev/video9"
+    try:
+        audio, extra = r.obs_audio_plan()
+    finally:
+        os.environ.clear(); os.environ.update(orig)
+    assert audio == {"A": ["Feed A"], "B": ["Feed B", MIC]}, audio
+    assert extra == [MIC]
+
+
+def t_obs_audio_plan_leaves_the_mic_alone_without_a_capture_card():
+    r = _relay(["https://youtu.be/a", "local:"])
+    orig = dict(os.environ)
+    os.environ.pop("RACECAST_CAPTURE", None)
+    try:
+        audio, extra = r.obs_audio_plan()
+    finally:
+        os.environ.clear(); os.environ.update(orig)
+    assert audio == {"A": ["Feed A"], "B": ["Feed B"]} and extra == [], (audio, extra)
+
+
+def t_reflect_snapshots_the_mic_before_the_freed_feed_advances():
+    # Stint 1 is local on A. At the handover the freed feed A is re-indexed to
+    # stint 3 right after _reflect; the OBS thread must still see A as the local
+    # slot it just cut away from, so the mic is planned off, not forgotten.
+    r = m.Relay(_StubSource(["local:", "https://youtu.be/b", "https://youtu.be/c"]),
+                (53001, 53002), LOGDIR)
+    r._reflect_pov = lambda shown: None
+    seen, gate, done = [], threading.Event(), threading.Event()
+
+    class FakeObs:
+        def reflect_feed_state(self, live, cut, audio=None, extra_mute=()):
+            gate.wait(2)                   # run only after next_auto() re-indexed A
+            seen.append((live, cut, audio, list(extra_mute)))
+            done.set()
+            return [], ""
+
+    orig_obs, orig_env = m._obs_ws, dict(os.environ)
+    m._obs_ws = FakeObs()
+    os.environ["RACECAST_CAPTURE"] = "/dev/video9"
+    try:
+        r.feeds["B"].phase = "serving"
+        r.next_auto()
+        assert r.A.current_channel()[0] != "local:"   # A has already moved on
+        gate.set()
+        assert done.wait(2)
+    finally:
+        m._obs_ws = orig_obs
+        os.environ.clear(); os.environ.update(orig_env)
+    live, cut, audio, extra = seen[0]
+    assert (live, cut) == ("B", True)
+    assert audio == {"A": ["Feed A", MIC], "B": ["Feed B"]}, audio
+    assert m._OBS_WS_MODULE.feed_state_intents(live, cut, audio=audio, extra_mute=extra)[3:5] \
+        == [("mute", "Feed A"), ("mute", MIC)]
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

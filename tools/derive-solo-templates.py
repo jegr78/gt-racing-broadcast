@@ -41,7 +41,9 @@ U = {
 }
 
 DROP_SCENES = {"Stint", "Splitscreen"}
-DROP_SOURCES = {"Feed A", "Feed B"}
+# The endurance commentary mic (#593, tools/add_commentary_mic.py) is dropped with the
+# feeds and rebuilt below in the solo shape: hot, wrapped, wired into more scenes.
+DROP_SOURCES = {"Feed A", "Feed B", "Commentary Mic Device"}
 
 # Committed device tokens (localized per OS by setup-assets.localize_device_sources).
 CAPTURE_TOKEN = "__RACECAST_CAPTURE__"
@@ -167,6 +169,11 @@ def derive(with_tyres=False):
     items = program["settings"]["items"]
     # Drop the A/B feed items; keep Feed POV + HUD/overlays/graphics/flags/Discord/Standby.
     items = [it for it in items if it.get("name") not in DROP_SOURCES]
+    # ...and the dropped endurance mic item's show/hide hotkeys with it (#593).
+    for it in stint["settings"]["items"]:
+        if it.get("name") == "Commentary Mic Device":
+            for verb in ("show", "hide"):
+                program.get("hotkeys", {}).pop(f"libobs.{verb}_scene_item.{it['id']}", None)
 
     # The Feed POV item is the cleanest transform template for the two new PiP items.
     pov_item = next(it for it in items if it.get("name") == "Feed POV")

@@ -3934,7 +3934,12 @@ def _apply_split_intents(relay, obs_ws, audio_only):
     live = relay.live_feed()
     if live not in ("A", "B"):                 # solo: no feed pair, nothing to split
         return {"ok": False, "error": "no on-air feed", "live": live}, 409
-    intents = _OBS_WS_MODULE.split_state_intents(live, False)
+    plan = getattr(relay, "obs_audio_plan", None)
+    audio, extra_mute = plan() if plan else (None, ())
+    slots = ({f: (_OBS_WS_MODULE.FEED_SOURCES[f], audio[f]) for f in audio}
+             if audio else None)
+    intents = _OBS_WS_MODULE.split_state_intents(live, False, slots=slots,
+                                                 extra_mute=extra_mute)
     if audio_only:
         intents = [(v, t) for v, t in intents if v in ("mute", "unmute")]
     ok_all = True
@@ -7567,14 +7572,27 @@ class Relay:
             return None
         return live_schedule_row(self.source.get_rows(), self.on_air_row_idx())
 
+    def obs_audio_plan(self):
+        """(audio, extra_mute) for the OBS intent planners (#593): which feed carries
+        the local capture right now, and whether this machine manages the commentary
+        mic at all — only one with a capture card (RACECAST_CAPTURE) does."""
+        mic = (_OBS_WS_MODULE.COMMENTARY_MIC_INPUT
+               if (os.environ.get("RACECAST_CAPTURE") or "").strip() else None)
+        local = {f for f in ("A", "B")
+                 if is_local_source(self.feeds[f].current_channel()[0])}
+        return _OBS_WS_MODULE.feed_audio_plan(local, mic=mic)
+
     def _reflect(self, live, cut):
         """Push the on-air feed (A/B) into OBS off-thread; never blocks the HTTP
         response, never raises. Records the note for /status."""
         if _obs_ws is None:
             return
+        # Snapshot now: a handover re-indexes the freed feed right after this call.
+        audio, extra_mute = self.obs_audio_plan()
 
         def run():
-            _applied, note = self._obs.reflect_feed_state(live, cut)
+            _applied, note = self._obs.reflect_feed_state(
+                live, cut, audio=audio, extra_mute=extra_mute)
             self.obs_note = note or None
         threading.Thread(target=run, daemon=True).start()
 
