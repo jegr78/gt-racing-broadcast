@@ -1529,11 +1529,12 @@ def t_apply_split_audio_no_obs_is_503():
 
 
 def _companion_splitscreen_buttons():
-    """{label: down-actions} of every Companion button that cuts to Splitscreen."""
+    """[(label, down-actions)] of every Companion button that cuts to Splitscreen.
+    A list, not a dict, so two buttons sharing a label are both checked."""
     path = os.path.join(ROOT, "src", "companion", "racecast-buttons.companionconfig")
     with open(path, encoding="utf-8") as f:
         cfg = json.load(f)
-    found = {}
+    found = []
     for page in cfg["pages"].values():
         for row in (page.get("controls") or {}).values():
             for btn in (row or {}).values():
@@ -1541,7 +1542,7 @@ def _companion_splitscreen_buttons():
                     .get("action_sets", {}).get("down", [])
                 if any(a.get("definitionId") == "set_scene"
                        and a["options"]["scene"]["value"] == "Splitscreen" for a in downs):
-                    found[btn["style"]["text"]] = downs
+                    found.append((btn["style"]["text"], downs))
     return found
 
 
@@ -1550,8 +1551,8 @@ def t_companion_split_buttons_resolve_audio_server_side():
     # "unmute Feed A / mute Feed B" and muted the on-air commentator whenever B
     # was on air. Every Splitscreen button must take its audio from the relay.
     buttons = _companion_splitscreen_buttons()
-    assert {"SPLIT", "Split Scene"} <= set(buttons), sorted(buttons)
-    for label, downs in buttons.items():
+    assert {"SPLIT", "Split Scene"} <= {label for label, _ in buttons}, buttons
+    for label, downs in buttons:
         muted = [a["options"]["source"]["value"] for a in downs
                  if a.get("definitionId") == "set_source_mute"]
         assert muted == [], f"{label!r} hardcodes mutes {muted}"
@@ -1561,7 +1562,7 @@ def t_companion_split_buttons_resolve_audio_server_side():
 
 def t_companion_split_button_keeps_visibility_and_race_control():
     # #589 swaps only SPLIT's audio; its feed visibility and the Race Control write stay.
-    downs = _companion_splitscreen_buttons()["SPLIT"]
+    [downs] = [d for label, d in _companion_splitscreen_buttons() if label == "SPLIT"]
     shown = [a["options"]["source"]["value"] for a in downs
              if a.get("definitionId") == "toggle_scene_item"
              and a["options"]["visible"]["value"] == "true"]

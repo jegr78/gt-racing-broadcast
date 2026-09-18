@@ -42,6 +42,7 @@ def main(src, dst):
     os.makedirs(os.path.dirname(dst), exist_ok=True)
     with open(dst, "w", encoding="utf-8") as fh:
         json.dump(cfg, fh, indent=1)
+        fh.write("\n")                  # keep the committed file's trailing newline
     print(f"stripped {src}\n      -> {dst}")
 
 
