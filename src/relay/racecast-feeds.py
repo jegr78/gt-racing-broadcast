@@ -3644,41 +3644,63 @@ def _program_audio_stream_ring(handler, ring, content_type, service):
     return None
 
 
-# --- On-air-aware SPLIT audio (#534) ----------------------------------------
-SPLIT_DISCORD_INPUT = "Discord Audio Capture"   # #534: interview/Discord bus muted during a SPLIT
-
-
+# --- Relay-driven Splitscreen (#534 audio, #591 visibility) -------------------
 def split_audio_targets(live_feed):
     """(unmute, mute) OBS inputs for a SPLIT given the on-air feed (#534): unmute the
-    on-air feed, mute the off-air feed + the Discord/interview bus. Pure — the fix for
-    the hardcoded 'unmute A / mute B' that muted the live commentator on B-on-air handovers."""
-    on = "Feed A" if live_feed == "A" else "Feed B"
-    off = "Feed B" if live_feed == "A" else "Feed A"
-    return on, [off, SPLIT_DISCORD_INPUT]
+    on-air feed, mute the off-air feed + the Discord/interview bus. The audio half of
+    obs_ws.split_state_intents, kept in the shape /obs/split-audio has always
+    returned. Pure — the fix for the hardcoded 'unmute A / mute B' that muted the
+    live commentator on B-on-air handovers."""
+    intents = _OBS_WS_MODULE.split_state_intents(live_feed, False)
+    [on] = [t for v, t in intents if v == "unmute"]
+    return on, [t for v, t in intents if v == "mute"]
 
 
-def apply_split_audio(relay, obs_ws):
-    """Resolve the on-air feed and apply the SPLIT audio via obs-websocket (#534).
-    Best-effort, mirrors /obs/audio: obs unreachable -> ({"error":...}, 503); never raises."""
+def _apply_split_intents(relay, obs_ws, audio_only):
+    """Resolve the on-air feed and apply the Splitscreen intents via obs-websocket,
+    one call per intent. Every intent is attempted even after one fails, so a
+    collection without a Discord input still gets its feed audio right. Best-effort,
+    mirrors /obs/audio: obs unreachable -> ({"error":...}, 503); never raises."""
     if obs_ws is None:
         return {"error": "obs unavailable"}, 503
     live = relay.live_feed()
-    unmute, mute = split_audio_targets(live)
+    intents = _OBS_WS_MODULE.split_state_intents(live, False)
+    if audio_only:
+        intents = [(v, t) for v, t in intents if v in ("mute", "unmute")]
     ok_all = True
     notes = []
-    ok, note = obs_ws.set_input_mute(unmute, False)
-    ok_all = ok_all and ok
-    if note:
-        notes.append(note)
-    for name in mute:
-        ok, note = obs_ws.set_input_mute(name, True)
+    for verb, target in intents:
+        if verb == "show":
+            ok, note = obs_ws.set_scene_item_enabled(_OBS_WS_MODULE.SPLIT_SCENE, target, True)
+        else:
+            ok, note = obs_ws.set_input_mute(target, verb == "mute")
         ok_all = ok_all and ok
         if note:
             notes.append(note)
-    payload = {"ok": bool(ok_all), "live": live, "unmute": unmute, "mute": mute}
+    payload = {"ok": bool(ok_all), "live": live,
+               "unmute": [t for v, t in intents if v == "unmute"],
+               "mute": [t for v, t in intents if v == "mute"]}
+    if not audio_only:
+        payload["show"] = [t for v, t in intents if v == "show"]
     if notes:
         payload["note"] = "; ".join(str(n) for n in notes)
     return payload, (200 if ok_all else 503)
+
+
+def apply_split_state(relay, obs_ws):
+    """GET/POST /obs/split (#591): make the Splitscreen match the on-air slot —
+    both slots visible, the on-air slot's audio live, the rest muted. The scene cut
+    stays with the caller, so a SPLIT still cuts when the relay is down."""
+    return _apply_split_intents(relay, obs_ws, audio_only=False)
+
+
+def apply_split_audio(relay, obs_ws):
+    """GET/POST /obs/split-audio (#534): the audio half of apply_split_state, for
+    boards and panels that still set the Splitscreen visibility themselves."""
+    payload, status = _apply_split_intents(relay, obs_ws, audio_only=True)
+    if "unmute" in payload:
+        payload["unmute"] = payload["unmute"][0]   # the route has always returned one name
+    return payload, status
 
 
 def split_mjpeg_frames(buf):
@@ -8870,6 +8892,9 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 if p == ["obs", "split-audio"]:
                     payload, status = apply_split_audio(relay, relay._obs)
                     return self._send(payload, status)
+                if p == ["obs", "split"]:
+                    payload, status = apply_split_state(relay, relay._obs)
+                    return self._send(payload, status)
                 if p[:1] == ["chat"]:
                     if not chat_store:
                         return self._send({"error": "chat disabled"}, 404)
@@ -9434,6 +9459,9 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                       else {"ok": False, "error": note}, 200 if ok else 503)
                 if p == ["obs", "split-audio"]:
                     payload, status = apply_split_audio(relay, relay._obs)
+                    return self._send(payload, status)
+                if p == ["obs", "split"]:
+                    payload, status = apply_split_state(relay, relay._obs)
                     return self._send(payload, status)
                 if p == ["obs", "stream"]:
                     if _obs_ws is None:

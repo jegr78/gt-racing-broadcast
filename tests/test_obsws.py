@@ -1075,6 +1075,51 @@ def t_feed_state_intents_live_b_no_cut():
     ]
 
 
+# #591: the Splitscreen state, resolved from the on-air slot like the Stint scene.
+def t_split_state_intents_live_a():
+    assert m.split_state_intents("A", False) == [
+        ("show", "Feed A"), ("show", "Feed B"),
+        ("unmute", "Feed A"),
+        ("mute", "Feed B"), ("mute", "Discord Audio Capture"),
+    ]
+
+
+def t_split_state_intents_live_b():
+    # The Suzuka bug: B on air must keep B audible and mute A, never the reverse.
+    intents = m.split_state_intents("B", False)
+    assert intents == [
+        ("show", "Feed A"), ("show", "Feed B"),
+        ("unmute", "Feed B"),
+        ("mute", "Feed A"), ("mute", "Discord Audio Capture"),
+    ]
+    assert ("mute", "Feed B") not in intents and ("unmute", "Feed A") not in intents
+
+
+def t_split_state_intents_cut_is_last():
+    assert m.split_state_intents("A", True)[-1] == ("cut", "Splitscreen")
+    assert all(verb != "cut" for verb, _ in m.split_state_intents("A", False))
+
+
+def t_split_state_intents_slot_with_two_audio_inputs():
+    # A local slot contributes its media source plus the commentary microphone:
+    # both are audible while it is on air and both are muted while it is not.
+    slots = {"A": ("Feed Local", ["Feed Local", "Commentary Mic"]),
+             "B": ("Feed B", ["Feed B"])}
+    on = m.split_state_intents("A", False, slots=slots)
+    assert on == [
+        ("show", "Feed Local"), ("show", "Feed B"),
+        ("unmute", "Feed Local"), ("unmute", "Commentary Mic"),
+        ("mute", "Feed B"), ("mute", "Discord Audio Capture"),
+    ]
+    off = m.split_state_intents("B", False, slots=slots)
+    assert off == [
+        ("show", "Feed Local"), ("show", "Feed B"),
+        ("unmute", "Feed B"),
+        ("mute", "Feed Local"), ("mute", "Commentary Mic"),
+        ("mute", "Discord Audio Capture"),
+    ]
+
+
 # --------------------------------------------------------------------------
 # set_current_program_scene / set_input_volume / set_input_mute /
 # read_obs_state — relay-mediated OBS control helpers
@@ -1528,6 +1573,60 @@ def t_apply_split_audio_no_obs_is_503():
     assert status == 503 and payload.get("ok") is not True
 
 
+class _SplitObs:
+    """Records the per-verb obs_ws calls apply_split_state makes (#591)."""
+
+    def __init__(self, fail=()):
+        self.calls, self.fail = [], set(fail)
+
+    def set_scene_item_enabled(self, scene, source, enabled):
+        self.calls.append(("item", scene, source, enabled))
+        return (False, f"{source} missing") if source in self.fail else (True, "")
+
+    def set_input_mute(self, name, muted):
+        self.calls.append(("mute", name, muted))
+        return (False, f"{name} missing") if name in self.fail else (True, "")
+
+
+class _LiveRelay:
+    def __init__(self, live):
+        self.live = live
+
+    def live_feed(self):
+        return self.live
+
+
+def t_apply_split_state_b_on_air():
+    obs = _SplitObs()
+    payload, status = irofeeds.apply_split_state(_LiveRelay("B"), obs)
+    assert status == 200 and payload["ok"] is True and payload["live"] == "B", payload
+    assert payload["show"] == ["Feed A", "Feed B"], payload
+    assert payload["unmute"] == ["Feed B"], payload
+    assert payload["mute"] == ["Feed A", "Discord Audio Capture"], payload
+    assert obs.calls == [
+        ("item", "Splitscreen", "Feed A", True), ("item", "Splitscreen", "Feed B", True),
+        ("mute", "Feed B", False),
+        ("mute", "Feed A", True), ("mute", "Discord Audio Capture", True),
+    ], obs.calls
+
+
+def t_apply_split_state_keeps_going_after_a_failed_step():
+    # A missing Discord input must not stop the feed audio from landing, and the
+    # failure is reported rather than swallowed.
+    obs = _SplitObs(fail={"Feed A"})
+    payload, status = irofeeds.apply_split_state(_LiveRelay("A"), obs)
+    assert status == 503 and payload["ok"] is False, payload
+    assert "Feed A missing" in payload["note"], payload
+    assert ("mute", "Feed A", False) in obs.calls
+    assert ("mute", "Feed B", True) in obs.calls
+    assert ("mute", "Discord Audio Capture", True) in obs.calls
+
+
+def t_apply_split_state_no_obs_is_503():
+    payload, status = irofeeds.apply_split_state(_LiveRelay("A"), None)
+    assert status == 503 and payload == {"error": "obs unavailable"}, payload
+
+
 def _companion_splitscreen_buttons():
     """[(label, down-actions)] of every Companion button that cuts to Splitscreen.
     A list, not a dict, so two buttons sharing a label are both checked."""
@@ -1547,28 +1646,30 @@ def _companion_splitscreen_buttons():
 
 
 def t_companion_split_buttons_resolve_audio_server_side():
-    # #589: #534 fixed the panel, but the board's SPLIT button kept its hardcoded
-    # "unmute Feed A / mute Feed B" and muted the on-air commentator whenever B
-    # was on air. Every Splitscreen button must take its audio from the relay.
+    # #589 / #591: every Splitscreen button takes visibility AND audio from the
+    # relay. A button that names a feed itself cannot know which one is on air,
+    # or that a stint is local (the Suzuka failure was a hardcoded "unmute A").
     buttons = _companion_splitscreen_buttons()
     assert {"SPLIT", "Split Scene"} <= {label for label, _ in buttons}, buttons
     for label, downs in buttons:
         muted = [a["options"]["source"]["value"] for a in downs
                  if a.get("definitionId") == "set_source_mute"]
         assert muted == [], f"{label!r} hardcodes mutes {muted}"
+        toggled = [a["options"]["source"]["value"] for a in downs
+                   if a.get("definitionId") == "toggle_scene_item"]
+        assert toggled == [], f"{label!r} hardcodes visibility {toggled}"
         urls = [a["options"]["url"]["value"] for a in downs if a.get("definitionId") == "get"]
-        assert "http://127.0.0.1:8088/obs/split-audio" in urls, (label, urls)
+        assert "http://127.0.0.1:8088/obs/split" in urls, (label, urls)
 
 
-def t_companion_split_button_keeps_visibility_and_race_control():
-    # #589 swaps only SPLIT's audio; its feed visibility and the Race Control write stay.
+def t_companion_split_button_keeps_the_cut_and_race_control():
+    # #591 moves only the sources to the relay. SPLIT still cuts to Splitscreen
+    # itself (so the cut survives a relay outage) and still writes Race Control.
     [downs] = [d for label, d in _companion_splitscreen_buttons() if label == "SPLIT"]
-    shown = [a["options"]["source"]["value"] for a in downs
-             if a.get("definitionId") == "toggle_scene_item"
-             and a["options"]["visible"]["value"] == "true"]
-    assert shown == ["Feed A", "Feed B"], shown
+    assert downs[0]["definitionId"] == "set_scene", downs[0]
     urls = [a["options"]["url"]["value"] for a in downs if a.get("definitionId") == "get"]
-    assert "http://127.0.0.1:8088/setup/set/racecontrol/Driver%20Swaps" in urls, urls
+    assert urls == ["http://127.0.0.1:8088/obs/split",
+                    "http://127.0.0.1:8088/setup/set/racecontrol/Driver%20Swaps"], urls
 
 
 class _AliveFakeSock:
