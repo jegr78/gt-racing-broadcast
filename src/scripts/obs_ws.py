@@ -45,8 +45,8 @@ POV_SOURCE = "Feed POV"                      # the Stint-scene driver-POV PiP sc
 FEED_SOURCES = {"A": "Feed A", "B": "Feed B"}   # scene-item name == audio input name
 SPLIT_SCENE = "Splitscreen"                  # the handover layout: outgoing + incoming stint
 SPLIT_DISCORD_INPUT = "Discord Audio Capture"   # #534: interview/Discord bus muted during a SPLIT
-# #593: the producer's own commentary microphone for a local stint. The LEAF input:
-# its "Commentary Mic" wrapper scene carries no audio of its own, so muting it fails.
+# #593: the producer's own commentary microphone for a local stint. Always the LEAF
+# input, never a scene: a scene (the solo "Commentary Mic" wrapper) cannot be muted.
 COMMENTARY_MIC_INPUT = "Commentary Mic Device"
 
 # The scene collection the broadcast assumes. Mirrors the "name" field of
@@ -1353,7 +1353,7 @@ def reflect_feed_state(live, do_cut, scene=STINT_SCENE, sources=None,
                     session.request("SetInputMute",
                                     {"inputName": target, "inputMuted": verb == "mute"})
                 except Exception as exc:          # noqa: BLE001 — one input, not the handover
-                    notes.append(f"{verb} {target}: {exc or exc.__class__.__name__}")
+                    notes.append(f"{verb} {target}: {str(exc) or exc.__class__.__name__}")
                     continue
             elif verb == "cut":
                 session.request("SetCurrentProgramScene", {"sceneName": target})

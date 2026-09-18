@@ -7578,8 +7578,11 @@ class Relay:
         mic at all — only one with a capture card (RACECAST_CAPTURE) does."""
         mic = (_OBS_WS_MODULE.COMMENTARY_MIC_INPUT
                if (os.environ.get("RACECAST_CAPTURE") or "").strip() else None)
-        local = {f for f in ("A", "B")
-                 if is_local_source(self.feeds[f].current_channel()[0])}
+        try:
+            local = {f for f, feed in self.feeds.items()
+                     if is_local_source(feed.current_channel()[0])}
+        except Exception:                    # noqa: BLE001 — runs in the handover's caller
+            local = set()                    # unknown -> the mic stays closed
         return _OBS_WS_MODULE.feed_audio_plan(local, mic=mic)
 
     def _reflect(self, live, cut):

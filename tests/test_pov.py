@@ -2279,6 +2279,19 @@ def t_obs_audio_plan_leaves_the_mic_alone_without_a_capture_card():
     assert audio == {"A": ["Feed A"], "B": ["Feed B"]} and extra == [], (audio, extra)
 
 
+def t_obs_audio_plan_never_raises_and_keeps_the_mic_closed():
+    # _reflect now plans synchronously in the caller (a handover, an HTTP handler);
+    # a relay without the A/B pair (solo) or a broken feed must not raise there.
+    r = _relay(["local:", "https://youtu.be/b"])
+    orig = dict(os.environ)
+    os.environ["RACECAST_CAPTURE"] = "/dev/video9"
+    try:
+        r.feeds = {}
+        assert r.obs_audio_plan() == ({"A": ["Feed A"], "B": ["Feed B"]}, [MIC])
+    finally:
+        os.environ.clear(); os.environ.update(orig)
+
+
 def t_reflect_snapshots_the_mic_before_the_freed_feed_advances():
     # Stint 1 is local on A. At the handover the freed feed A is re-indexed to
     # stint 3 right after _reflect; the OBS thread, started only once next_auto()
