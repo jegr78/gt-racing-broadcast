@@ -2214,6 +2214,28 @@ def t_local_feed_serves_ffmpeg_into_the_ring():
     assert f.quality is None                         # no stale remote resolution shown
 
 
+
+def t_local_feed_idles_with_the_device_hint():
+    # Five immediate ffmpeg exits (card held by another program) idle the feed; the
+    # paused message must still name the device, not just "source unavailable".
+    f = _local_feed(["local:"])
+    f.ring = m.FeedRing(m.FANOUT_RING_BYTES)
+
+    def busy(cmd, **k):
+        p = _FakeProc(cmd, payload=b"")
+        p.returncode = 1
+        return p
+    orig = (m.subprocess.Popen, m.dead_serve_backoff, m._LOCAL_ENCODER, dict(os.environ))
+    m.subprocess.Popen, m.dead_serve_backoff, m._LOCAL_ENCODER = busy, (lambda n: 0), "x264"
+    os.environ["RACECAST_CAPTURE"] = "/dev/video9"
+    try:
+        ok = _run_feed_until(f, lambda: f.phase == "idle" and "paused" in (f.last_error or ""))
+    finally:
+        m.subprocess.Popen, m.dead_serve_backoff, m._LOCAL_ENCODER = orig[:3]
+        os.environ.clear(); os.environ.update(orig[3])
+    assert ok, (f.phase, f.last_error)
+    assert m.LOCAL_DEVICE_BUSY in f.last_error, f.last_error
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

@@ -6547,6 +6547,8 @@ class Feed:
                     self._set_phase("idle")
                     self.last_error = ("stint source unavailable — paused after "
                                        f"{self.dead_serves} attempts; /next or /reload to retry")
+                    if local_cmd:
+                        self.last_error += f" ({LOCAL_DEVICE_BUSY})"
                     # Stop hammering: wait for operator /next or /reload (which set
                     # advance) or shutdown (self.stop). advance wakes us instantly;
                     # the 1 s timeout bounds the stop-check latency.
