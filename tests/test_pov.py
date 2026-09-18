@@ -2084,9 +2084,11 @@ def t_local_source_token_predicates():
 
 
 def t_local_token_routes_to_the_local_platform():
-    assert m.channel_url(" Local: ") == "local:"      # never wrapped into a YouTube URL
-    assert m.platform_of(m.channel_url("local:")) == "local"
-    assert m.platform_of("https://www.twitch.tv/x") == "twitch"
+    assert m.feed_url(" Local: ") == "local:"         # never wrapped into a YouTube URL
+    assert m.feed_url("UCabcdefghijklmnopqrstuv") == m.channel_url("UCabcdefghijklmnopqrstuv")
+    assert m.feed_platform(m.feed_url("local:")) == "local"
+    assert m.feed_platform("https://www.twitch.tv/x") == "twitch"
+    assert m.feed_platform("https://youtu.be/x") == "youtube"
 
 
 def t_schedule_parse_keeps_and_normalises_local_rows():

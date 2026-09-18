@@ -1588,10 +1588,7 @@ def platform_of(url):
     """Which streaming platform a (possibly bare-ID-wrapped) URL targets.
     Host-based, reusing the userinfo-safe parse from _is_stream_url. Anything
     that is not a Twitch host (including bare UC ids, which channel_url wraps
-    into a youtube.com URL) is treated as YouTube -- the default path. The
-    `local:` token is its own platform (#592)."""
-    if is_local_source(url):
-        return "local"
+    into a youtube.com URL) is treated as YouTube -- the default path."""
     try:
         host = (urlparse(url).hostname or "").lower()
     except ValueError:
@@ -1599,6 +1596,18 @@ def platform_of(url):
     if host == "twitch.tv" or host.endswith(".twitch.tv"):
         return "twitch"
     return "youtube"
+
+def feed_platform(url):
+    """platform_of plus the relay-only `local:` capture source (#592). feed_platform and
+    feed_url are kept apart so platform_of/channel_url stay byte-identical to their
+    loopstream copies (test_streams)."""
+    return "local" if is_local_source(url) else platform_of(url)
+
+
+def feed_url(entry):
+    """channel_url, except that `local:` is never wrapped into a YouTube URL (#592)."""
+    return LOCAL_SOURCE_TOKEN if is_local_source(entry) else channel_url(entry)
+
 
 def asset_key(s):
     """Normalize free text (country/brand) to an asset filename stem."""
@@ -3397,8 +3406,6 @@ def twitch_oauth_from_cookies(path):
 
 def channel_url(entry: str) -> str:
     entry = entry.strip()
-    if is_local_source(entry):
-        return LOCAL_SOURCE_TOKEN          # never wrapped into a YouTube channel URL
     if entry.startswith("http://") or entry.startswith("https://"):
         return entry
     return f"https://www.youtube.com/channel/{entry}/live"
@@ -3911,8 +3918,8 @@ class _PreviewPullWorker:
             return self._level
 
     def _spawn_real(self, _worker):
-        url = channel_url(self.channel)
-        plat = platform_of(url)
+        url = feed_url(self.channel)
+        plat = feed_platform(url)
         if plat == "local":
             # Only reachable with fan-out off, which a local feed refuses anyway; a
             # second opener of the card would also steal it from the feed (#592).
@@ -6397,8 +6404,8 @@ class Feed:
                 self._set_phase("idle")
                 time.sleep(3); continue
             self._set_phase("connecting")
-            url = channel_url(ch)
-            plat = platform_of(url)
+            url = feed_url(ch)
+            plat = feed_platform(url)
             self.log.info("stint %d (%s) -> %s", i + 1, plat, url)
 
             local_cmd = None
@@ -7221,7 +7228,7 @@ class Relay:
             ch, i = f.current_channel()
             out["feeds"][k] = {"port": f.port, "index": i, "stint": i + 1,
                                "channel": ch,
-                               "platform": platform_of(channel_url(ch)) if ch else None,
+                               "platform": feed_platform(feed_url(ch)) if ch else None,
                                "state": "stopped" if f.paused else f.phase,
                                "armed": not f.paused,
                                "state_age_s": round(now - f.phase_since, 1),
