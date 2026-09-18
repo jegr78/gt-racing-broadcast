@@ -3479,8 +3479,9 @@ def streamlink_fanout_cmd(target, platform="youtube", twitch_token=None,
 # ring's time window is set by the bitrate (~12.8 s at 10 Mbps, 5.1 s at 25, 2.6 s at
 # 50), and the #533 trailing mark sits 3 s behind live. A generous local bitrate
 # (tempting, the source costs nothing) would push the mark past the oldest retained
-# byte and make the consumer snap continuously. 8 Mbps video keeps the window near
-# 15 s, still above the ~6 Mbps a remote feed delivers.
+# byte and make the consumer snap continuously. 8 Mbps video measured 9.3 Mbps on the
+# wire (audio + TS overhead), a window of about 14 s, still above the ~6 Mbps a remote
+# feed delivers.
 LOCAL_VIDEO_KBPS = 8000
 LOCAL_AUDIO_KBPS = 160
 LOCAL_KEYFRAME_S = 1            # a joining consumer has a picture within a second

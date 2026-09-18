@@ -579,7 +579,7 @@ def t_local_capture_cmd_is_mpegts_on_stdout_with_capped_bitrate():
 def t_local_bitrate_keeps_the_ring_window_well_above_the_trailing_mark():
     # The 16 MB ring's time window is set by the bitrate; the #533 trailing mark sits
     # 3 s behind live. The cap must leave the window several times that mark.
-    bps = (m.LOCAL_VIDEO_KBPS + m.LOCAL_AUDIO_KBPS) * 1000 * 1.1      # ~10% TS overhead
+    bps = (m.LOCAL_VIDEO_KBPS + m.LOCAL_AUDIO_KBPS) * 1000 * 1.15     # measured: 8160 kbps nominal -> 9.35 Mbps on the wire
     window_s = m.FANOUT_RING_BYTES * 8 / bps
     assert window_s >= 4 * m.DEFAULT_FEED_PREBUFFER_S, window_s
 
