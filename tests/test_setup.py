@@ -365,6 +365,19 @@ def t_schedule_set_clear_reflects_in_source():
         m.post_webhook = orig
 
 
+def t_schedule_set_accepts_local_but_pov_does_not():
+    # #592: the director may point a stint at the capture card (`local:`); the POV
+    # stays remote-only. The token is written normalised.
+    pushes = []
+    ctl, hs, orig = _ctl(pushes)
+    try:
+        r = ctl.schedule_set(2, url=" Local: ")
+        assert r.get("ok"), r
+        assert pushes[-1] == {"action": "schedule", "row": 2, "url": "local:"}
+        assert "error" in ctl.pov_set("local:")
+    finally:
+        m.post_webhook = orig
+
 def t_pov_set_pushes():
     pushes = []
     ctl, hs, orig = _ctl(pushes)

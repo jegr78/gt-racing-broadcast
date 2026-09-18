@@ -1560,11 +1560,38 @@ def is_channel(v: str) -> bool:
     v = v.strip()
     return bool(CHANNEL_RE.match(v)) or _is_stream_url(v)
 
+
+# #592: the Schedule URL cell `local:` means "this stint comes from the producer
+# machine's capture card" (RACECAST_CAPTURE in the machine .env). Only the bare token
+# is accepted — the sheet names no device, so nothing from the sheet reaches an argv.
+LOCAL_SOURCE_TOKEN = "local:"
+
+
+def is_local_source(v) -> bool:
+    return isinstance(v, str) and v.strip().lower() == LOCAL_SOURCE_TOKEN
+
+
+def is_feed_source(v) -> bool:
+    """What a Schedule/Qualifying row may carry: a remote stream or `local:`. The
+    commentator submit and POV paths deliberately stay on is_channel, so only the
+    director (panel) or the sheet can point a feed at the capture card."""
+    return is_local_source(v) or is_channel(v)
+
+
+def feed_source_value(v):
+    """A feed-source cell as stored: `local:` normalised, anything else stripped."""
+    v = (v or "").strip()
+    return LOCAL_SOURCE_TOKEN if is_local_source(v) else v
+
+
 def platform_of(url):
     """Which streaming platform a (possibly bare-ID-wrapped) URL targets.
     Host-based, reusing the userinfo-safe parse from _is_stream_url. Anything
     that is not a Twitch host (including bare UC ids, which channel_url wraps
-    into a youtube.com URL) is treated as YouTube -- the default path."""
+    into a youtube.com URL) is treated as YouTube -- the default path. The
+    `local:` token is its own platform (#592)."""
+    if is_local_source(url):
+        return "local"
     try:
         host = (urlparse(url).hostname or "").lower()
     except ValueError:
@@ -3370,6 +3397,8 @@ def twitch_oauth_from_cookies(path):
 
 def channel_url(entry: str) -> str:
     entry = entry.strip()
+    if is_local_source(entry):
+        return LOCAL_SOURCE_TOKEN          # never wrapped into a YouTube channel URL
     if entry.startswith("http://") or entry.startswith("https://"):
         return entry
     return f"https://www.youtube.com/channel/{entry}/live"
@@ -3438,6 +3467,121 @@ def streamlink_fanout_cmd(target, platform="youtube", twitch_token=None,
             base += ["--http-cookies-file", cookies]
         selector = "best"     # yt-dlp already resolved the capped rendition
     return base + ["--", target, selector]
+
+
+# --- Local capture source (#592): ffmpeg at the same fan-out seam ---
+# A `local:` stint is read from the producer machine's capture card by ffmpeg and
+# written as MPEG-TS to stdout, exactly the byte contract streamlink --stdout has, so
+# the ring, watchdog, prebuffer, health and preview need no local-specific path.
+# MPEG-TS on purpose: a mid-stream join resynchronises, fMP4 does not (#577).
+#
+# The bitrate is a constant, not a knob. FANOUT_RING_BYTES is 16 MB per feed, so the
+# ring's time window is set by the bitrate (~12.8 s at 10 Mbps, 5.1 s at 25, 2.6 s at
+# 50), and the #533 trailing mark sits 3 s behind live. A generous local bitrate
+# (tempting, the source costs nothing) would push the mark past the oldest retained
+# byte and make the consumer snap continuously. 8 Mbps video keeps the window near
+# 15 s, still above the ~6 Mbps a remote feed delivers.
+LOCAL_VIDEO_KBPS = 8000
+LOCAL_AUDIO_KBPS = 160
+LOCAL_KEYFRAME_S = 1            # a joining consumer has a picture within a second
+LOCAL_DSHOW_RTBUF = "512M"      # dshow's 3 MB default drops frames at 1080p60
+LOCAL_ENCODER_ARGS = {
+    "nvenc": ["-c:v", "h264_nvenc", "-preset", "p4", "-tune", "ll", "-rc", "cbr"],
+    "x264": ["-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency"],
+}
+LOCAL_DEVICE_BUSY = ("capture device busy or missing — close any other program "
+                     "using it (OBS capture source, Elgato utility); see feed log")
+LOCAL_NEEDS_FANOUT = ("local capture needs the feed fan-out — unset "
+                      "RACECAST_FEED_FANOUT=0 and restart the relay")
+
+
+def dshow_device_name(value):
+    """The DirectShow friendly name ffmpeg's `-f dshow` wants, from a RACECAST_CAPTURE
+    value. OBS stores a dshow device as "<name>:<path>" with '#' -> '#22' and ':' ->
+    '#3A' escaped in each half (obs-studio plugins/win-dshow/encode-dstr.hpp); a value
+    without ':' is taken as a bare name. Pure."""
+    v = (value or "").strip()
+    if ":" in v:
+        v = v.split(":", 1)[0].replace("#3A", ":").replace("#22", "#")
+    return v
+
+
+def local_capture_input_args(platform, video, audio=""):
+    """ffmpeg input argv for the capture device on `platform` (sys.platform), or None
+    when no video device is set or the platform is unknown. `video`/`audio` are the
+    machine .env values (RACECAST_CAPTURE / RACECAST_CAPTURE_AUDIO). Windows accepts
+    the OBS device id (see dshow_device_name); Linux takes /dev/videoN plus a
+    PulseAudio source; macOS AVFoundation takes a device name or index, NOT the UID
+    OBS stores, so there RACECAST_CAPTURE must hold the name. Pure."""
+    video, audio = (video or "").strip(), (audio or "").strip()
+    if not video:
+        return None
+    tq = ["-thread_queue_size", "1024"]
+    if platform.startswith("win"):
+        spec = "video=" + dshow_device_name(video)
+        if audio:
+            spec += ":audio=" + dshow_device_name(audio)
+        return tq + ["-f", "dshow", "-rtbufsize", LOCAL_DSHOW_RTBUF, "-i", spec]
+    if platform.startswith("linux"):
+        args = tq + ["-f", "v4l2", "-i", video]
+        if audio:
+            args += tq + ["-f", "pulse", "-i", audio]
+        return args
+    if platform == "darwin":
+        return tq + ["-f", "avfoundation", "-i", f"{video}:{audio or 'none'}"]
+    return None
+
+
+def local_capture_cmd(input_args, encoder="x264", has_audio=True):
+    """Argv for the local capture reader: the device in, H.264 at the capped bitrate
+    with one keyframe per LOCAL_KEYFRAME_S, AAC, MPEG-TS on stdout. Pure."""
+    kbps = LOCAL_VIDEO_KBPS
+    cmd = ["ffmpeg", "-hide_banner", "-nostdin", "-nostats", "-loglevel", "warning"]
+    cmd += list(input_args)
+    cmd += LOCAL_ENCODER_ARGS[encoder]
+    cmd += ["-b:v", f"{kbps}k", "-maxrate", f"{kbps}k", "-bufsize", f"{2 * kbps}k",
+            "-pix_fmt", "yuv420p",
+            "-force_key_frames", f"expr:gte(t,n_forced*{LOCAL_KEYFRAME_S})"]
+    if has_audio:
+        cmd += ["-c:a", "aac", "-b:a", f"{LOCAL_AUDIO_KBPS}k", "-ar", "48000"]
+    else:
+        cmd += ["-an"]
+    return cmd + ["-f", "mpegts", "-"]
+
+
+def local_capture_setup(environ, platform, encoder):
+    """(argv, None) for the configured capture device, or (None, reason) when it
+    cannot be built. The device comes from the machine .env, never from the sheet."""
+    video = (environ.get("RACECAST_CAPTURE") or "").strip()
+    audio = (environ.get("RACECAST_CAPTURE_AUDIO") or "").strip()
+    if not video:
+        return None, "local capture: RACECAST_CAPTURE is not set in .env"
+    args = local_capture_input_args(platform, video, audio)
+    if args is None:
+        return None, f"local capture is not supported on {platform}"
+    return local_capture_cmd(args, encoder, has_audio=bool(audio)), None
+
+
+_LOCAL_ENCODER = None
+
+
+def local_encoder():
+    """'nvenc' when ffmpeg can actually encode with NVENC here, else 'x264'. Listed is
+    not usable (Windows ffmpeg builds list h264_nvenc without an NVIDIA GPU), so this
+    runs one tiny encode with the exact encoder args, once, and caches the answer."""
+    global _LOCAL_ENCODER
+    if _LOCAL_ENCODER is None:
+        try:
+            rc = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "error",
+                 "-f", "lavfi", "-i", "color=c=black:s=256x144:d=0.2"]
+                + LOCAL_ENCODER_ARGS["nvenc"] + ["-f", "null", "-"],
+                capture_output=True, timeout=20, env=external_tool_env(),
+                **_no_window_kwargs()).returncode
+        except Exception:                     # noqa: BLE001 — best-effort probe
+            rc = 1
+        _LOCAL_ENCODER = "nvenc" if rc == 0 else "x264"
+    return _LOCAL_ENCODER
 
 
 # --- Director Panel off-air preview pull (decoupled from OBS / the loopback port) ---
@@ -3768,6 +3912,11 @@ class _PreviewPullWorker:
     def _spawn_real(self, _worker):
         url = channel_url(self.channel)
         plat = platform_of(url)
+        if plat == "local":
+            # Only reachable with fan-out off, which a local feed refuses anyway; a
+            # second opener of the card would also steal it from the feed (#592).
+            self.log.info("preview pull skipped for the local capture source")
+            return None, None, iter(())
         if plat == "twitch":
             target, quality = url, PREVIEW_QUALITY_TW
         else:
@@ -4995,10 +5144,10 @@ class ScheduleSource:
             for line, r in enumerate(rows, 1):
                 if line == 1:
                     continue                       # the header row itself
-                url = r[url_i].strip() if len(r) > url_i else ""
+                url = feed_source_value(r[url_i]) if len(r) > url_i else ""
                 name = r[name_i].strip() if name_i is not None and len(r) > name_i else ""
                 stint = r[stint_i].strip() if stint_i is not None and len(r) > stint_i else ""
-                if not is_channel(url):
+                if not is_feed_source(url):
                     if not (name or stint):
                         continue                   # blank/spacer row -> not a stint
                     url = ""                        # planned stint, URL not yet provided
@@ -5009,17 +5158,17 @@ class ScheduleSource:
         ncols = max((len(r) for r in rows), default=0)
         best_col, best_cnt = None, 0
         for c in range(ncols):
-            cnt = sum(1 for r in rows if len(r) > c and is_channel(r[c]))
+            cnt = sum(1 for r in rows if len(r) > c and is_feed_source(r[c]))
             if cnt > best_cnt:
                 best_cnt, best_col = cnt, c
         if best_col is None or best_cnt == 0:
             return None
-        out = [(r[best_col].strip(),
+        out = [(feed_source_value(r[best_col]),
                 (r[best_col + 1].strip() if len(r) > best_col + 1 else ""),
                 "",
                 line)
                for line, r in enumerate(rows, 1)
-               if len(r) > best_col and is_channel(r[best_col])]
+               if len(r) > best_col and is_feed_source(r[best_col])]
         return out or None
 
     @staticmethod
@@ -5112,10 +5261,10 @@ class ScheduleSource:
         with self.lock:
             existing = next((r for r in self.rows if r[3] == physical_row), None)
             cur_u, cur_n, cur_s = existing[:3] if existing else ("", "", "")
-            new_u = cur_u if url is None else (url or "").strip()
+            new_u = cur_u if url is None else feed_source_value(url)
             new_n = cur_n if name is None else (name or "").strip()
             new_s = cur_s if stint is None else (stint or "").strip()
-            if new_u and not is_channel(new_u):
+            if new_u and not is_feed_source(new_u):
                 return False
             rows = [r for r in self.rows if r[3] != physical_row]
             if new_u or new_n or new_s:        # keep planned stints (url may be "")
@@ -5839,9 +5988,9 @@ class SetupControl:
         if tab:
             payload["tab"] = tab        # webhook writes this tab (default: Schedule)
         if url is not None:
-            url = url.strip()
-            if url and not is_channel(url):
-                return {"error": "url must be a watch URL or UC… channel ID"}
+            url = feed_source_value(url)
+            if url and not is_feed_source(url):
+                return {"error": "url must be a watch URL, UC… channel ID or local:"}
             payload["url"] = url
         # Streamer + Stint are vocabulary-constrained, like the Setup fields:
         # a value picked in the Schedule editor must exist in the Configuration
@@ -6114,6 +6263,8 @@ class Feed:
         and return (from_tier, to_tier); else None. Leaves pinned False (still managed)."""
         if not feed_robust_auto_enabled(os.environ):
             return None
+        if is_local_source(self.current_channel()[0]):
+            return None       # #592: a capture card has no quality tiers
         if quality_step_down_due(self.quality_tier, self.quality_pinned,
                                  self.dead_serves, self.source_state):
             frm = self.quality_tier
@@ -6153,7 +6304,8 @@ class Feed:
         the ring reader."""
         threading.Thread(target=self._obs_reconnect_now, daemon=True).start()
 
-    def _serve_fanout(self, target, serve_platform, token, on_first_byte=None):
+    def _serve_fanout(self, target, serve_platform, token, on_first_byte=None,
+                      cmd=None, tool="streamlink"):
         """Fan-out serve: stream `streamlink --stdout` into self.ring, tracking
         last_byte_ts so the stall watchdog and EOF both surface. Returns
         (serve_elapsed, serve_rc) like the direct-serve proc.wait() so Feed.run's
@@ -6161,9 +6313,13 @@ class Feed:
         byte-stall (the reader is parked in read1() and can't self-check); stop /
         advance / EOF end the loop directly. `on_first_byte` (if given) is called
         once, right after the first byte reaches the ring — used to force OBS to
-        reconnect on a drop-recovery (see _obs_reconnect)."""
-        cmd = streamlink_fanout_cmd(target, serve_platform, token, cookies=self.cookies,
-                                    tier=self.quality_tier)
+        reconnect on a drop-recovery (see _obs_reconnect). A prebuilt `cmd` (the
+        local capture ffmpeg, #592) replaces the streamlink argv; `tool` tags its
+        stderr in feed_X.log, and only streamlink's lines feed the quality/source-
+        state observer."""
+        if cmd is None:
+            cmd = streamlink_fanout_cmd(target, serve_platform, token, cookies=self.cookies,
+                                        tier=self.quality_tier)
         # stdout is the raw video byte stream (read into the ring); stderr is
         # streamlink's ONLY diagnostic channel here, so it must be PIPEd and pumped
         # — unlike direct-serve (which merges stderr into a text stdout), discarding
@@ -6176,8 +6332,9 @@ class Feed:
         stderr_text = io.TextIOWrapper(self.proc.stderr, encoding="utf-8", errors="replace")
         threading.Thread(
             target=logsetup.pump_subprocess,
-            args=(stderr_text, self.log, "streamlink"),
-            kwargs={"on_line": self._observe_streamlink_line},
+            args=(stderr_text, self.log, tool),
+            kwargs={"on_line": (self._observe_streamlink_line
+                                if tool == "streamlink" else None)},
             daemon=True).start()
         self._set_phase("serving")
         self._clear_drop_health()
@@ -6236,7 +6393,27 @@ class Feed:
             plat = platform_of(url)
             self.log.info("stint %d (%s) -> %s", i + 1, plat, url)
 
-            if plat == "twitch":
+            local_cmd = None
+            if plat == "local":
+                if self.ring is None:
+                    local_err = LOCAL_NEEDS_FANOUT
+                else:
+                    local_cmd, local_err = local_capture_setup(
+                        os.environ, sys.platform, local_encoder())
+                if local_err:
+                    # A configuration problem, not a flaky source: idle with the reason
+                    # until the operator reloads/moves the feed, like dead-serve idle.
+                    self.log.error("%s", local_err)
+                    self.last_error = local_err
+                    self._set_phase("idle")
+                    while not self.stop and not self.advance.is_set():
+                        self.advance.wait(1.0)
+                    self.advance.clear()
+                    continue
+                self.last_error = None
+                self.quality = None          # no stale remote resolution on the panel
+                token, target, serve_platform = None, None, "local"
+            elif plat == "twitch":
                 token = twitch_oauth_from_cookies(
                     cookies_for("twitch", self.cookie_dir))      # None for public Twitch (no auth file)
                 target, serve_platform = url, "twitch"           # no yt-dlp hop
@@ -6272,11 +6449,13 @@ class Feed:
                 # stale one (the 2026-07-10 fan-out freeze-frame stutter). Not on the first
                 # serve or a seamless handover (should_obs_reconnect gates on self.dropped).
                 _recover = self._obs_reconnect if should_obs_reconnect(True, self.dropped) else None
+                tool = "ffmpeg" if local_cmd else "streamlink"
                 try:
                     serve_elapsed, serve_rc = self._serve_fanout(
-                        target, serve_platform, token, on_first_byte=_recover)
+                        target, serve_platform, token, on_first_byte=_recover,
+                        cmd=local_cmd, tool=tool)
                 except FileNotFoundError:
-                    self.log.warning("streamlink not found on PATH — retrying")
+                    self.log.warning("%s not found on PATH — retrying", tool)
                     self.proc = None
                     time.sleep(RETRY_SLEEP); continue
             else:
@@ -6330,6 +6509,12 @@ class Feed:
             # both handled above) means streamlink couldn't bind its port — surface
             # it so /status + the panel stop showing a silent 'connecting'.
             err = feed_fast_exit_error(serve_elapsed, serve_rc)
+            if err and local_cmd:
+                # The relay ffmpeg must own the card; a second opener (OBS, the Elgato
+                # utility, another feed) makes it exit at once. Say so, never go quiet.
+                err = LOCAL_DEVICE_BUSY
+                self.log.error("local capture: ffmpeg exited after %.1f s (rc=%s) — %s",
+                               serve_elapsed, serve_rc, LOCAL_DEVICE_BUSY)
             if err:
                 self.last_error = err
             if serve_elapsed < HEALTH_SERVED_OK_S:

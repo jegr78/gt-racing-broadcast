@@ -2069,6 +2069,127 @@ def t_maybe_auto_cover_never_lowers_manual_cover():
         m._obs_ws = saved
 
 
+# --- #592: the `local:` schedule token (a capture device as a feed) ---
+
+def t_local_source_token_predicates():
+    for v in ("local:", " LOCAL: ", "Local:"):
+        assert m.is_local_source(v) is True, v
+        assert m.is_feed_source(v) is True, v
+    for v in ("local", "local:elgato", "local:/dev/video0", "", None, "https://youtu.be/x"):
+        assert m.is_local_source(v) is False, v
+    assert m.is_feed_source("https://youtu.be/x") is True
+    # The commentator submit + POV guards stay on is_channel: a commentator must never
+    # be able to point a feed at the producer's capture card.
+    assert m.is_channel("local:") is False
+
+
+def t_local_token_routes_to_the_local_platform():
+    assert m.channel_url(" Local: ") == "local:"      # never wrapped into a YouTube URL
+    assert m.platform_of(m.channel_url("local:")) == "local"
+    assert m.platform_of("https://www.twitch.tv/x") == "twitch"
+
+
+def t_schedule_parse_keeps_and_normalises_local_rows():
+    text = ("URL,Streamer,Stint\n"
+            "https://youtu.be/a,Alice,Stint 1\n"
+            "LOCAL:,Jens,Stint 2\n"
+            "local:,Jens,Stint 3\n"
+            "https://youtu.be/b,Bob,Stint 4\n")
+    rows = m.ScheduleSource._parse_rows(text)
+    assert [r[0] for r in rows] == ["https://youtu.be/a", "local:", "local:", "https://youtu.be/b"]
+    # two back-to-back local stints are ONE continuous capture (one slot)
+    assert m.pull_slots(rows) == [0, 1, 1, 2]
+
+
+def t_schedule_parse_positional_counts_local_rows():
+    rows = m.ScheduleSource._parse_rows("local:,Jens\nhttps://youtu.be/a,Alice\n")
+    assert [(r[0], r[1]) for r in rows] == [("local:", "Jens"), ("https://youtu.be/a", "Alice")]
+
+
+def t_inject_row_accepts_local_and_normalises():
+    s = m.ScheduleSource("http://sched", os.path.join(LOGDIR, "sched-local.txt"), None)
+    assert s.inject_row(3, url="Local:", name="Jens") is not False
+    assert s.get_rows() == [("local:", "Jens", "", 3)]
+    assert s.inject_row(4, url="file:///etc/passwd") is False
+
+
+def _local_feed(sched):
+    return m.Feed("A", 53001, 0, lambda: list(sched), LOGDIR)
+
+
+def t_local_feed_never_steps_down_quality():
+    # A device-busy fast exit counts as a dead serve; the #493 FULL->ROBUST step-down is
+    # meaningless for a capture card and would page a nonsense @here.
+    f = _local_feed(["local:"])
+    f.dead_serves = 99
+    assert f.maybe_step_down() is None and f.quality_tier == "full"
+    g = _local_feed(["https://youtu.be/x"])
+    g.dead_serves = 99
+    assert g.maybe_step_down() == ("full", "robust")
+
+
+def _run_feed_until(f, cond, timeout=5.0):
+    t = threading.Thread(target=f.run, daemon=True)
+    t.start()
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline and not cond():
+        time.sleep(0.02)
+    f.stop = True
+    f.advance.set()
+    t.join(timeout=3)
+    return cond()
+
+
+def t_local_feed_refuses_direct_serve():
+    # Without fan-out (ring None) there is no stdout reader: the feed must idle with a
+    # clear reason, never hand `local:` to streamlink or yt-dlp.
+    f = _local_feed(["local:"])
+    spawned = []
+    orig = m.subprocess.Popen
+    m.subprocess.Popen = lambda *a, **k: spawned.append(a) or (_ for _ in ()).throw(AssertionError("spawned"))
+    try:
+        ok = _run_feed_until(f, lambda: f.phase == "idle" and f.last_error)
+    finally:
+        m.subprocess.Popen = orig
+    assert ok, (f.phase, f.last_error)
+    assert "RACECAST_FEED_FANOUT" in f.last_error and spawned == []
+
+
+class _FakeProc:
+    def __init__(self, cmd, payload=b"\x47" * 188 * 4):
+        import io as _io
+        self.cmd = cmd
+        self.stdout = _io.BufferedReader(_io.BytesIO(payload))
+        self.stderr = _io.BytesIO(b"")
+        self.returncode = 0
+    def poll(self): return self.returncode
+    def terminate(self): pass
+    def kill(self): pass
+    def wait(self, timeout=None): return 0
+
+
+def t_local_feed_serves_ffmpeg_into_the_ring():
+    f = _local_feed(["local:"])
+    f.ring = m.FeedRing(m.FANOUT_RING_BYTES)
+    f.quality = "1080p60"                     # left over from a previous remote stint
+    cmds = []
+    orig_popen, orig_env = m.subprocess.Popen, dict(os.environ)
+    m.subprocess.Popen = lambda cmd, **k: cmds.append(cmd) or _FakeProc(cmd)
+    os.environ["RACECAST_CAPTURE"] = "/dev/video9"
+    os.environ.pop("RACECAST_CAPTURE_AUDIO", None)
+    orig_enc, m._LOCAL_ENCODER = m._LOCAL_ENCODER, "x264"
+    try:
+        ok = _run_feed_until(f, lambda: f.ring.live_offset() > 0)
+    finally:
+        m.subprocess.Popen = orig_popen
+        m._LOCAL_ENCODER = orig_enc
+        os.environ.clear(); os.environ.update(orig_env)
+    assert ok
+    assert cmds and cmds[0][0] == "ffmpeg" and cmds[0][-3:] == ["-f", "mpegts", "-"]
+    assert all(c[0] == "ffmpeg" for c in cmds)       # no yt-dlp / streamlink hop
+    assert f.quality is None                         # no stale remote resolution shown
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
