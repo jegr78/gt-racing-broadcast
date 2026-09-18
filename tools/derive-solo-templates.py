@@ -231,7 +231,9 @@ def derive(with_tyres=False):
     # Tyres/fuel device leaf + wrapping scene (Commentary only). setup-assets folds
     # the leaf into Solo Capture Device when one card carries both (#597). The leaf
     # inherits muted=True from the Feed POV template (video-only — the game audio
-    # already comes from Solo Capture, so this must not double it).
+    # already comes from Solo Capture, so this must not double it). In the folded
+    # one-card case the capture leaf sits in two nested scenes; OBS >= 32.0 mixes a
+    # source that appears twice in the audio tree only once (libobs 50cdabbb5).
     tyres_src = tyres_scene = None
     if with_tyres:
         tyres_src = _device_leaf(pov_leaf, U["tyres_src"], "Solo Tyres Capture Device",

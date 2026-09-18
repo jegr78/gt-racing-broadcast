@@ -448,6 +448,15 @@ def _assert_tyres_shares_capture(d):
     assert item["name"] == "Solo Capture Device"
     assert item["source_uuid"] == cap["uuid"]
     assert "Solo Tyres Capture Device" not in json.dumps(d)
+    # The crop lives on the Program item, which still shows the wrapper scene.
+    wrapper = next(s for s in d["sources"]
+                   if s.get("name") == "Solo Tyres/Fuel Capture" and s.get("id") == "scene")
+    prog = next(s for s in d["sources"] if s.get("name") == "Program")
+    (crop_item,) = [it for it in prog["settings"]["items"]
+                    if it.get("name") == "Solo Tyres/Fuel Capture"]
+    assert crop_item["source_uuid"] == wrapper["uuid"]
+    assert {k: crop_item[k] for k in ("crop_left", "crop_top", "crop_right", "crop_bottom")} == {
+        "crop_left": 258, "crop_top": 950, "crop_right": 1336, "crop_bottom": 18}
 
 
 def t_tyres_uses_capture_predicate():
