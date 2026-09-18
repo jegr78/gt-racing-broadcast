@@ -278,11 +278,17 @@ def t_stint_macros_resolve_on_the_relay_like_companion():
         macro = m.group(0)
         assert 'scene:"Stint"' in macro and 'relayStint:"' + feed + '"' in macro, macro
         assert '"Feed A"' not in macro and '"Feed B"' not in macro, macro
-    assert 'obsPost("stint", {feed: m.relayStint})' in h
     # The PGM bus still tells STINT A from STINT B: with no static `show`, the air
     # light and the state read-back take the picked feed from macroAirSources().
     assert 'function macroAirSources(m){' in h
-    assert '[["Stint", "Feed " + m.relayStint]]' in h
+    assert '[[m.scene, "Feed " + m.relayStint]]' in h           # one source of truth
+    # A relay-resolved step (SPLIT, STINT) answers with a note when an input is
+    # missing (e.g. the commentary mic of an older collection): it is logged, not
+    # just a red OBS LED.
+    assert "function relayStep(what, path, body){" in h
+    assert 'relayStep("stint " + m.relayStint, "stint", {feed: m.relayStint})' in h
+    assert 'relayStep("split (on-air)", "split", {})' in h
+    assert "const why = d && (d.note || (!d.ok && d.error));" in h   # a bare error too
     assert "for (const [sc, src] of macroAirSources(m))" in h
     assert "if (air && req.length){" in h
     for gone in ("stintMicIntent", "feedPlatforms", "micFor", "COMMENTARY_MIC"):

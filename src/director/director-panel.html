@@ -1429,7 +1429,19 @@ function renderStreamBtn(s){
 /* The sources that must be visible for a macro to count as on air. A relay-driven
    STINT has no static `show`; the feed it picks is the one that must be visible. */
 function macroAirSources(m){
-  return m.relayStint ? [["Stint", "Feed " + m.relayStint]] : m.show;
+  return m.relayStint ? [[m.scene, "Feed " + m.relayStint]] : m.show;
+}
+
+/* A relay-resolved step (SPLIT, STINT). The relay applies several OBS changes and
+   answers with a note for any that failed (e.g. the commentary mic of an older
+   collection), so the director reads why the OBS light went red. */
+function relayStep(what, path, body){
+  return [what, async ()=>{
+    const d = await obsPost(path, body);
+    const why = d && (d.note || (!d.ok && d.error));
+    if (why) log(`${what}: ${why}`, d.ok ? "warn" : "err");
+    return d;
+  }];
 }
 
 /* One press = scene + visibility + mutes, exactly like the Companion macro.
@@ -1440,9 +1452,9 @@ async function runMacro(m){
     ...m.show.map(([sc,src])=>[`show ${src}`,   ()=>obsSource(sc,src,true)]),
     ...m.hide.map(([sc,src])=>[`hide ${src}`,   ()=>obsSource(sc,src,false)]),
     ...(m.relaySplit                                  // #591: server resolves the on-air slot; no static names
-        ? [[`split (on-air)`, ()=>obsPost("split", {})]]
+        ? [relayStep("split (on-air)", "split", {})]
         : m.relayStint                                // server resolves feeds + commentary mic, like Companion
-        ? [[`stint ${m.relayStint}`, ()=>obsPost("stint", {feed: m.relayStint})]]
+        ? [relayStep("stint " + m.relayStint, "stint", {feed: m.relayStint})]
         : [...(m.unmute||[]).map(i=>[`unmute ${i}`, ()=>obsMute(i,false)]),
            ...(m.mute||[]).map(i=>[`mute ${i}`,     ()=>obsMute(i,true)])]),
   ];

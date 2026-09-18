@@ -783,6 +783,22 @@ def t_obs_stint_routes_get_and_post():
         except urllib.error.HTTPError as e:
             assert e.code == 400
             assert "feed" in json.loads(e.read())["error"]
+        # A JSON body that is not an object, or a feed that is not a letter, never
+        # reaches OBS: 400 with the reason, and no call was made.
+        fo.calls.clear()
+        for raw, reason in ((b'["A"]', "body must be a JSON object"),
+                            (b'{"feed": 5}', "feed must be A or B"),
+                            (b'{"feed": null}', "feed must be A or B")):
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{port}/obs/stint", data=raw,
+                headers={"Content-Type": "application/json"}, method="POST")
+            try:
+                urllib.request.urlopen(req, timeout=5)
+                raise AssertionError(f"expected HTTP 400 for {raw!r}")
+            except urllib.error.HTTPError as e:
+                assert e.code == 400, raw
+                assert json.loads(e.read())["error"] == reason, raw
+        assert fo.calls == [], fo.calls
     finally:
         srv.shutdown(); m._obs_ws = old
 
