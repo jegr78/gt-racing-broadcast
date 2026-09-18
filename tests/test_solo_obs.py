@@ -276,7 +276,7 @@ def t_committed_solo_json_matches_derive_output():
     """The committed solo collections MUST equal a fresh derive() — they are
     generated, never hand-edited (a hand-edit would be silently dropped by the
     next `derive-solo-templates.py` run). Commentary carries the tyres/fuel
-    second capture; POV does not. Guards the regen-safety of every solo-template
+    crop; POV does not. Guards the regen-safety of every solo-template
     change (#307 / commentary HUD)."""
     import importlib.util
     spec = importlib.util.spec_from_file_location(
@@ -421,6 +421,123 @@ def t_audio_variants_cross_check_obs_ws_audio_property():
     obs_ws = _load("obs_ws", "src", "scripts", "obs_ws.py")
     for platform, (_src_id, key) in sa.AUDIO_VARIANTS.items():
         assert key == obs_ws.device_property_name(platform, kind="audio") == "device_id", platform
+
+
+
+# ---- One capture card for game + tyres/fuel crop (#597). OBS cannot open the same
+# DirectShow device twice on Windows, so an empty RACECAST_TYRES_CAPTURE, or one equal
+# to RACECAST_CAPTURE, must make the tyres/fuel crop reuse the Solo Capture Device
+# source instead of creating a second input on the same card.
+
+def _video_leaves(d):
+    return [s for s in d["sources"] if s.get("id") in ("av_capture_input", "dshow_input")]
+
+
+def _tyres_wrapper_item(d):
+    sc = next(s for s in d["sources"]
+              if s.get("name") == "Solo Tyres/Fuel Capture" and s.get("id") == "scene")
+    (item,) = sc["settings"]["items"]
+    return item
+
+
+def _assert_tyres_shares_capture(d):
+    names = {s["name"] for s in d["sources"]}
+    assert "Solo Tyres Capture Device" not in names
+    cap = _byname(d, "Solo Capture Device")
+    item = _tyres_wrapper_item(d)
+    assert item["name"] == "Solo Capture Device"
+    assert item["source_uuid"] == cap["uuid"]
+    assert "Solo Tyres Capture Device" not in json.dumps(d)
+    # The crop lives on the Program item, which still shows the wrapper scene.
+    wrapper = next(s for s in d["sources"]
+                   if s.get("name") == "Solo Tyres/Fuel Capture" and s.get("id") == "scene")
+    prog = next(s for s in d["sources"] if s.get("name") == "Program")
+    crop_items = [it for it in prog["settings"]["items"]
+                  if it.get("name") == "Solo Tyres/Fuel Capture"]
+    assert len(crop_items) == 1, [it.get("name") for it in prog["settings"]["items"]]
+    crop_item = crop_items[0]
+    assert crop_item["source_uuid"] == wrapper["uuid"]
+    assert {k: crop_item[k] for k in ("crop_left", "crop_top", "crop_right", "crop_bottom")} == {
+        "crop_left": 258, "crop_top": 950, "crop_right": 1336, "crop_bottom": 18}
+
+
+def t_tyres_uses_capture_predicate():
+    assert sa.tyres_uses_capture({}) is True
+    assert sa.tyres_uses_capture({"RACECAST_CAPTURE": "CAP"}) is True
+    assert sa.tyres_uses_capture({"RACECAST_CAPTURE": "CAP", "RACECAST_TYRES_CAPTURE": "  "}) is True
+    assert sa.tyres_uses_capture({"RACECAST_CAPTURE": "CAP", "RACECAST_TYRES_CAPTURE": " CAP "}) is True
+    assert sa.tyres_uses_capture({"RACECAST_CAPTURE": " CAP ", "RACECAST_TYRES_CAPTURE": "CAP"}) is True
+    assert sa.tyres_uses_capture({"RACECAST_CAPTURE": "CAP", "RACECAST_TYRES_CAPTURE": "TYRE"}) is False
+    assert sa.tyres_uses_capture({"RACECAST_TYRES_CAPTURE": "TYRE"}) is False
+
+
+def t_localize_tyres_empty_shares_capture_device():
+    d = _load_solo("GT_Racing_Solo_Commentary.json")
+    unset = sa.localize_device_sources(
+        d, "win32", {"RACECAST_CAPTURE": "Elgato HD60 X:X", "RACECAST_WEBCAM": "CAM",
+                     "RACECAST_MIC": "MIC"})
+    assert unset == []
+    _assert_tyres_shares_capture(d)
+    leaves = _video_leaves(d)
+    assert [s["settings"] for s in leaves if s["name"] == "Solo Capture Device"] == [
+        {"video_device_id": "Elgato HD60 X:X"}]
+    # The card is opened exactly once: one input carries the capture device value.
+    assert sum(1 for s in leaves if "Elgato HD60 X:X" in s["settings"].values()) == 1
+
+
+def t_localize_tyres_equal_to_capture_shares_capture_device():
+    d = _load_solo("GT_Racing_Solo_Commentary.json")
+    unset = sa.localize_device_sources(
+        d, "win32", {"RACECAST_CAPTURE": "Elgato HD60 X:X", "RACECAST_WEBCAM": "CAM",
+                     "RACECAST_MIC": "MIC", "RACECAST_TYRES_CAPTURE": " Elgato HD60 X:X "})
+    assert unset == []
+    _assert_tyres_shares_capture(d)
+    assert sum(1 for s in _video_leaves(d)
+               if "Elgato HD60 X:X" in s["settings"].values()) == 1
+
+
+def t_localize_tyres_different_device_keeps_two_inputs():
+    d = _load_solo("GT_Racing_Solo_Commentary.json")
+    unset = sa.localize_device_sources(
+        d, "win32", {"RACECAST_CAPTURE": "CAP", "RACECAST_WEBCAM": "CAM",
+                     "RACECAST_MIC": "MIC", "RACECAST_TYRES_CAPTURE": "TYRE"})
+    assert unset == []
+    tyres = _byname(d, "Solo Tyres Capture Device")
+    assert tyres["id"] == "dshow_input"
+    assert tyres["settings"] == {"video_device_id": "TYRE"}
+    item = _tyres_wrapper_item(d)
+    assert item["name"] == "Solo Tyres Capture Device"
+    assert item["source_uuid"] == tyres["uuid"]
+
+
+def t_localize_capture_and_tyres_empty_warns_capture_only():
+    d = _load_solo("GT_Racing_Solo_Commentary.json")
+    unset = sa.localize_device_sources(
+        d, "win32", {"RACECAST_WEBCAM": "CAM", "RACECAST_MIC": "MIC"})
+    assert unset == ["Solo Capture Device"]
+    _assert_tyres_shares_capture(d)
+
+
+def t_localize_pov_template_without_tyres_is_untouched_by_sharing():
+    d = _load_solo("GT_Racing_Solo_POV.json")
+    before = {s["name"] for s in d["sources"]}
+    sa.localize_device_sources(d, "win32", {"RACECAST_CAPTURE": "CAP"})
+    assert {s["name"] for s in d["sources"]} == before
+
+
+def t_tyres_summary_line():
+    one = {"RACECAST_CAPTURE": "CAP"}
+    two = {"RACECAST_CAPTURE": "CAP", "RACECAST_TYRES_CAPTURE": "TYRE"}
+    d = _load_solo("GT_Racing_Solo_Commentary.json")
+    sa.localize_device_sources(d, "win32", one)       # summary runs after localization
+    assert sa.tyres_capture_summary(d, one) == (
+        "Tyres/fuel crop: uses the capture card source (Solo Capture Device)")
+    d = _load_solo("GT_Racing_Solo_Commentary.json")
+    sa.localize_device_sources(d, "win32", two)
+    assert "RACECAST_TYRES_CAPTURE" in sa.tyres_capture_summary(d, two)
+    pov = _load_solo("GT_Racing_Solo_POV.json")
+    sa.localize_device_sources(pov, "win32", one)
+    assert sa.tyres_capture_summary(pov, one) is None
 
 
 if __name__ == "__main__":
