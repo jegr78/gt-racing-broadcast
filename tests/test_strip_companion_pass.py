@@ -23,11 +23,13 @@ def _run(src_bytes):
 
 
 def t_committed_config_round_trips_byte_identical():
-    # Re-stripping the committed config must reproduce it exactly, trailing newline
-    # included, so an import never shows up as a whole-file diff.
+    # Re-stripping the committed config must reproduce it exactly: LF endings on
+    # every OS and the trailing newline, so an import never shows up as a whole-file
+    # diff. The checkout itself may be CRLF (autocrlf on Windows), hence the normalise.
     with open(CONFIG, "rb") as fh:
-        committed = fh.read()
+        committed = fh.read().replace(b"\r\n", b"\n")
     out = _run(committed)
+    assert b"\r" not in out, "strip must write LF line endings"
     assert out.endswith(b"}\n"), out[-20:]
     assert out == committed
 
