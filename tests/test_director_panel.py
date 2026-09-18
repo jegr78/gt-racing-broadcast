@@ -289,6 +289,7 @@ def t_stint_macros_resolve_on_the_relay_like_companion():
     assert 'relayStep("stint " + m.relayStint, "stint", {feed: m.relayStint})' in h
     assert 'relayStep("split (on-air)", "split", {})' in h
     assert "const why = d && (d.note || (!d.ok && d.error));" in h   # a bare error too
+    assert 'if (why) log(`${what}: ${why}`, d.ok ? "warn" : "err");' in h
     assert "for (const [sc, src] of macroAirSources(m))" in h
     assert "if (air && req.length){" in h
     for gone in ("stintMicIntent", "feedPlatforms", "micFor", "COMMENTARY_MIC"):
