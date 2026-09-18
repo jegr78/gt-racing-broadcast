@@ -281,6 +281,7 @@ def t_stint_macros_resolve_the_commentary_mic_per_press():
     assert 'const COMMENTARY_MIC = "Commentary Mic Device";' in h
     assert "function stintMicIntent(feed, platforms)" in h
     assert "stintMicIntent(m.micFor, feedPlatforms)" in h
+    assert '()=>obsMute(COMMENTARY_MIC, mic === "mute")' in h   # the step is actually run
     assert "feedPlatforms = {A: d.feeds.A ? d.feeds.A.platform : null," in h
 
 
