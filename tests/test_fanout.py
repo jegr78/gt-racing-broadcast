@@ -640,7 +640,7 @@ def t_dshow_audio_scan_on_the_real_listing():
     audio, note = m.dshow_audio_from_listing(HD60X_OBS_ID, DSHOW_HD60X)
     assert audio == "Elgato HD60 X (Elgato HD60 X)" and note is None
     audio, note = m.dshow_audio_from_listing("Elgato Facecam MK.2:x", DSHOW_HD60X)
-    assert audio is None
+    assert audio is None and isinstance(note, str), note
     assert "Elgato Facecam MK.2" in note and "Mikrofon (K66)" in note   # names the choices
 
 
