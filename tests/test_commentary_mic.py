@@ -128,6 +128,14 @@ def t_tokenize_folds_a_localized_mic_back():
     assert tk.canonicalize_commentary_mic(d) is False
 
 
+def t_tokenize_leaves_a_solo_collection_alone():
+    with open(os.path.join(ROOT, "src", "obs", "GT_Racing_Solo_Commentary.json"), encoding="utf-8") as fh:
+        d = json.load(fh)
+    before = copy.deepcopy(d)
+    assert tk.canonicalize_commentary_mic(d) is False
+    assert d == before                               # the solo mic stays hot
+
+
 def t_unset_warning_names_the_env_var_of_each_device():
     line = sa.device_unset_warning([MIC, "Solo Webcam Device"], "solo", {})
     assert "RACECAST_MIC" in line and "RACECAST_WEBCAM" in line, line

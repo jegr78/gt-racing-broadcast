@@ -2281,13 +2281,28 @@ def t_obs_audio_plan_leaves_the_mic_alone_without_a_capture_card():
 
 def t_obs_audio_plan_never_raises_and_keeps_the_mic_closed():
     # _reflect now plans synchronously in the caller (a handover, an HTTP handler);
-    # a relay without the A/B pair (solo) or a broken feed must not raise there.
+    # a feed that fails to report its source must not raise there.
     r = _relay(["local:", "https://youtu.be/b"])
+
+    def broken():
+        raise RuntimeError("schedule gone")
+    r.feeds["A"].current_channel = broken
     orig = dict(os.environ)
     os.environ["RACECAST_CAPTURE"] = "/dev/video9"
     try:
-        r.feeds = {}
         assert r.obs_audio_plan() == ({"A": ["Feed A"], "B": ["Feed B"]}, [MIC])
+    finally:
+        os.environ.clear(); os.environ.update(orig)
+
+
+def t_obs_audio_plan_leaves_the_solo_mic_alone():
+    # Solo sets RACECAST_CAPTURE too, and there the mic ships hot as the main audio.
+    r = _relay(["https://youtu.be/a"])
+    r.solo, r.feeds = True, {}
+    orig = dict(os.environ)
+    os.environ["RACECAST_CAPTURE"] = "/dev/video9"
+    try:
+        assert r.obs_audio_plan() == ({"A": ["Feed A"], "B": ["Feed B"]}, [])
     finally:
         os.environ.clear(); os.environ.update(orig)
 

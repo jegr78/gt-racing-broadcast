@@ -7576,8 +7576,11 @@ class Relay:
         """(audio, extra_mute) for the OBS intent planners (#593): which feed carries
         the local capture right now, and whether this machine manages the commentary
         mic at all — only one with a capture card (RACECAST_CAPTURE) does."""
+        # Solo sets RACECAST_CAPTURE as well, but there the mic ships hot as the main
+        # audio and has no feed pair to follow: never manage it.
         mic = (_OBS_WS_MODULE.COMMENTARY_MIC_INPUT
-               if (os.environ.get("RACECAST_CAPTURE") or "").strip() else None)
+               if (os.environ.get("RACECAST_CAPTURE") or "").strip()
+               and not getattr(self, "solo", False) else None)
         try:
             local = {f for f, feed in self.feeds.items()
                      if is_local_source(feed.current_channel()[0])}
