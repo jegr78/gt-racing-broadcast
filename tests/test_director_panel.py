@@ -265,6 +265,25 @@ def t_program_preview_self_reschedules_no_wedge():
         "pvStop must clearTimeout the program-preview poll handle (no leaked poll after HIDE)"
 
 
+def t_stint_macros_resolve_the_commentary_mic_per_press():
+    # #593: STINT A/B are static, but the panel knows each feed's platform from
+    # /status. A press opens the producer's mic for a local feed, closes it when the
+    # OTHER feed is local (never a hot mic on a remote commentator) and leaves it
+    # alone when no feed is local (an older collection has no such input). A blanket
+    # mute would silence the producer at the start of their own stint (SPLIT -> NEXT
+    # -> STINT B with B local).
+    import re
+    h = _html()
+    for label, feed in (("STINT A", "A"), ("STINT B", "B")):
+        m = re.search(r'\{label:"' + label + r'",[^}]*\}', h)
+        assert m and 'micFor:"' + feed + '"' in m.group(0), (label, m and m.group(0))
+        assert "Commentary Mic Device" not in m.group(0), label   # never static
+    assert 'const COMMENTARY_MIC = "Commentary Mic Device";' in h
+    assert "function stintMicIntent(feed, platforms)" in h
+    assert "stintMicIntent(m.micFor, feedPlatforms)" in h
+    assert "feedPlatforms = {A: d.feeds.A ? d.feeds.A.platform : null," in h
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

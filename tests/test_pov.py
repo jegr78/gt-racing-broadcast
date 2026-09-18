@@ -2307,6 +2307,48 @@ def t_obs_audio_plan_leaves_the_solo_mic_alone():
         os.environ.clear(); os.environ.update(orig)
 
 
+def t_reflect_warns_when_the_mic_cannot_be_opened():
+    # A collection imported before #593 has no mic input. The OBS note is overwritten
+    # by the next probe and the panel shows only unreachable OBS, so the relay log is
+    # the one place the producer learns their local stint went out without commentary.
+    import logging
+    r = _relay(["local:", "https://youtu.be/b"])
+    records = []
+
+    class _Cap(logging.Handler):
+        def emit(self, rec):
+            records.append(rec)
+
+    class FakeObs:
+        def reflect_feed_state(self, live, cut, audio=None, extra_mute=()):
+            return [], f"unmute {MIC}: request SetInputMute failed: not found"
+
+    class _Now:                             # run _reflect's thread inline
+        def __init__(self, target=None, daemon=None, **_k):
+            self.target = target
+        def start(self):
+            self.target()
+
+    class _Threading:
+        Thread = _Now
+        def __getattr__(self, name):
+            return getattr(threading, name)
+
+    cap = _Cap(level=logging.WARNING)
+    m.LOG.addHandler(cap)
+    orig_obs, orig_thr, orig_env = m._obs_ws, m.threading, dict(os.environ)
+    m._obs_ws, m.threading = FakeObs(), _Threading()
+    os.environ["RACECAST_CAPTURE"] = "/dev/video9"
+    try:
+        m.Relay._reflect(r, "A", False)
+    finally:
+        m._obs_ws, m.threading = orig_obs, orig_thr
+        m.LOG.removeHandler(cap)
+        os.environ.clear(); os.environ.update(orig_env)
+    warns = [rec.getMessage() for rec in records if rec.levelno == logging.WARNING]
+    assert any(MIC in w and "racecast setup" in w for w in warns), warns
+
+
 def t_reflect_snapshots_the_mic_before_the_freed_feed_advances():
     # Stint 1 is local on A. At the handover the freed feed A is re-indexed to
     # stint 3 right after _reflect; the OBS thread, started only once next_auto()

@@ -361,8 +361,10 @@ no resolve, cookies or quality tiers, fan-out required. The producer's commentar
 for that stint is the OBS input `Commentary Mic Device` (#593, in `Stint` + `Splitscreen`,
 shipped muted, `RACECAST_MIC`): the relay opens it only while the local feed is on air
 and mutes it on every other handover/SPLIT (`obs_ws.feed_audio_plan`, snapshotted in
-`Relay.obs_audio_plan`; only on a machine with `RACECAST_CAPTURE`). The static
-STINT A/B macros (panel, Companion) do not touch it. Only the director/sheet can set
+`Relay.obs_audio_plan`; only on an endurance machine with `RACECAST_CAPTURE`, never in
+solo, where the mic ships hot). The Director Panel's STINT A/B decide per press from
+`/status` feed platforms (`stintMicIntent`); the static Companion STINT buttons do not
+touch it. A failed switch (collection imported before #593) is a relay-log WARNING. Only the director/sheet can set
 it (`is_feed_source`); the commentator submit and POV paths stay on `is_channel`. (`curl`-ing a feed port returns nothing — it serves a single
 consumer; that is not a failure.)
 

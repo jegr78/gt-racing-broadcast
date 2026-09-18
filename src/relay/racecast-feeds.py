@@ -3922,6 +3922,17 @@ def _program_audio_stream_ring(handler, ring, content_type, service):
     return None
 
 
+def _warn_if_mic_failed(note):
+    """Log a failed switch of the commentary mic (#593). The next OBS probe
+    overwrites obs_note within seconds and a Companion SPLIT shows no note at all,
+    so the relay log is where a local stint that went out without the producer's
+    commentary stays visible."""
+    mic = _OBS_WS_MODULE.COMMENTARY_MIC_INPUT if _OBS_WS_MODULE else None
+    if mic and note and mic in note:
+        LOG.warning("OBS: could not switch %s (%s) — this OBS collection predates the "
+                    "commentary mic; run `racecast setup` and re-import it", mic, note)
+
+
 # --- Relay-driven Splitscreen (#534 audio, #591 visibility) -------------------
 def _apply_split_intents(relay, obs_ws, audio_only):
     """Resolve the on-air feed and apply the Splitscreen intents via obs-websocket,
@@ -3959,6 +3970,7 @@ def _apply_split_intents(relay, obs_ws, audio_only):
         payload["show"] = [t for v, t in intents if v == "show"]
     if notes:
         payload["note"] = "; ".join(str(n) for n in notes)
+        _warn_if_mic_failed(payload["note"])
     return payload, (200 if ok_all else 503)
 
 
@@ -7600,6 +7612,7 @@ class Relay:
             _applied, note = self._obs.reflect_feed_state(
                 live, cut, audio=audio, extra_mute=extra_mute)
             self.obs_note = note or None
+            _warn_if_mic_failed(note)
         threading.Thread(target=run, daemon=True).start()
 
     def _maybe_probe_obs(self, now):

@@ -1734,6 +1734,30 @@ def t_apply_split_state_opens_the_mic_of_a_local_on_air_slot():
     assert ("mute", MIC, True) in obs.calls and ("mute", MIC, False) not in obs.calls
 
 
+def t_apply_split_state_logs_a_mic_it_could_not_open():
+    import logging
+
+    class _LocalRelay(_LiveRelay):
+        def obs_audio_plan(self):
+            return irofeeds._OBS_WS_MODULE.feed_audio_plan({"A"}, mic=MIC)
+
+    records = []
+
+    class _Cap(logging.Handler):
+        def emit(self, rec):
+            records.append(rec)
+
+    cap = _Cap(level=logging.WARNING)
+    irofeeds.LOG.addHandler(cap)
+    try:
+        payload, status = irofeeds.apply_split_state(_LocalRelay("A"), _SplitObs(fail={MIC}))
+    finally:
+        irofeeds.LOG.removeHandler(cap)
+    assert status == 503 and MIC in payload["note"], payload
+    assert any(MIC in r.getMessage() and "racecast setup" in r.getMessage()
+               for r in records if r.levelno == logging.WARNING), records
+
+
 def t_apply_split_state_no_obs_is_503():
     payload, status = irofeeds.apply_split_state(_LiveRelay("A"), None)
     assert status == 503 and payload == {"error": "obs unavailable"}, payload
