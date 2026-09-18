@@ -619,54 +619,30 @@
            "type": "action"
           },
           {
-           "id": "_uSY695OHLCzlQy68Ivn6",
-           "definitionId": "set_source_mute",
-           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "id": "6yNrdFX8UwVYfS0yH0E_V",
+           "definitionId": "get",
+           "connectionId": "BB0jmLMxj_0YwbhwslOiw",
            "options": {
-            "source": {
-             "value": "Feed A",
+            "url": {
+             "value": "http://127.0.0.1:8088/obs/split-audio",
              "isExpression": false
             },
-            "mute": {
-             "value": "false",
+            "header": {
+             "isExpression": false,
+             "value": ""
+            },
+            "jsonResultDataVariable": {
+             "isExpression": false
+            },
+            "result_stringify": {
+             "isExpression": false,
+             "value": true
+            },
+            "statusCodeVariable": {
              "isExpression": false
             }
            },
-           "upgradeIndex": 8,
-           "type": "action"
-          },
-          {
-           "id": "WQ59OBftvAyTNRPRSjBIK",
-           "definitionId": "set_source_mute",
-           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
-           "options": {
-            "source": {
-             "value": "Feed B",
-             "isExpression": false
-            },
-            "mute": {
-             "value": "true",
-             "isExpression": false
-            }
-           },
-           "upgradeIndex": 8,
-           "type": "action"
-          },
-          {
-           "id": "HQ7wJPQVlZ5mfpSyiakoq",
-           "definitionId": "set_source_mute",
-           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
-           "options": {
-            "source": {
-             "value": "Discord Audio Capture",
-             "isExpression": false
-            },
-            "mute": {
-             "value": "true",
-             "isExpression": false
-            }
-           },
-           "upgradeIndex": 8,
+           "upgradeIndex": 1,
            "type": "action"
           },
           {
