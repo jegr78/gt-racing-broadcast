@@ -354,7 +354,7 @@ YouTube's bot-check via `yt-cookies.txt` + deno JS challenge) → `streamlink
 --player-external-http` serves that URL to one OBS client. **Twitch** — routed directly
 through Streamlink's Twitch plugin (no yt-dlp hop); gated feeds optionally use
 `twitch-cookies.txt`. **Local** (#592) — a Schedule URL cell `local:` reads the
-producer machine's capture card (`RACECAST_CAPTURE` [+ `RACECAST_CAPTURE_AUDIO`] from the
+producer machine's capture card (`RACECAST_CAPTURE`; game audio defaults to the card's own audio device found by name in ffmpeg's device list — `scan_capture_audio`, override/`none` via `RACECAST_CAPTURE_AUDIO` — from the
 machine `.env`) with the relay's own `ffmpeg` writing MPEG-TS to stdout at the same fan-out
 seam (`local_capture_cmd`, bitrate capped by `LOCAL_VIDEO_KBPS` against the 16 MB ring);
 no resolve, cookies or quality tiers, fan-out required. Only the director/sheet can set
