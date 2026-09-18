@@ -455,6 +455,7 @@ def t_tyres_uses_capture_predicate():
     assert sa.tyres_uses_capture({"RACECAST_CAPTURE": "CAP"}) is True
     assert sa.tyres_uses_capture({"RACECAST_CAPTURE": "CAP", "RACECAST_TYRES_CAPTURE": "  "}) is True
     assert sa.tyres_uses_capture({"RACECAST_CAPTURE": "CAP", "RACECAST_TYRES_CAPTURE": " CAP "}) is True
+    assert sa.tyres_uses_capture({"RACECAST_CAPTURE": " CAP ", "RACECAST_TYRES_CAPTURE": "CAP"}) is True
     assert sa.tyres_uses_capture({"RACECAST_CAPTURE": "CAP", "RACECAST_TYRES_CAPTURE": "TYRE"}) is False
     assert sa.tyres_uses_capture({"RACECAST_TYRES_CAPTURE": "TYRE"}) is False
 
