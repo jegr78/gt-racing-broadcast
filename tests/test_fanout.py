@@ -532,6 +532,70 @@ def t_feed_stall_config():
     assert m.feed_stall_signal_enabled({"RACECAST_FEED_STALL_SIGNAL": "0"}) is False
 
 
+# --- #592: a local capture device as a feed (ffmpeg at the fan-out seam) ---
+
+def t_dshow_device_name_decodes_obs_id():
+    # OBS win-dshow stores "<name>:<path>" with '#'->'#22' and ':'->'#3A' escaped in
+    # both halves (plugins/win-dshow/encode-dstr.hpp). ffmpeg dshow wants the name.
+    obs_id = "Game Capture HD60 X:\\\\?\\usb#22vid_0fd9&pid_0082#22{65e8773d}"
+    assert m.dshow_device_name(obs_id) == "Game Capture HD60 X"
+    assert m.dshow_device_name("Cam#3A One#22A:\\\\?\\x") == "Cam: One#A"
+    assert m.dshow_device_name("  Plain Name  ") == "Plain Name"    # no ':' -> a bare name
+    assert m.dshow_device_name("") == ""
+
+
+def t_local_capture_input_args_per_platform():
+    win = m.local_capture_input_args("win32", "HD60 X:\\\\?\\usb#22x", "HD60 X Audio:\\\\?\\a")
+    assert win[win.index("-f") + 1] == "dshow"
+    assert win[-1] == "video=HD60 X:audio=HD60 X Audio"
+    assert "-rtbufsize" in win                       # dshow drops frames on the 3 MB default
+    assert m.local_capture_input_args("win32", "HD60 X:p", "")[-1] == "video=HD60 X"
+    lin = m.local_capture_input_args("linux", "/dev/video2", "alsa_input.usb-Elgato")
+    assert lin[lin.index("-f") + 1] == "v4l2" and "/dev/video2" in lin
+    assert lin[-4:] == ["-f", "pulse", "-i", "alsa_input.usb-Elgato"]
+    assert m.local_capture_input_args("linux", "/dev/video2", "")[-1] == "/dev/video2"
+    mac = m.local_capture_input_args("darwin", "Game Capture HD60 X", "")
+    assert mac[mac.index("-f") + 1] == "avfoundation" and mac[-1] == "Game Capture HD60 X:none"
+    assert m.local_capture_input_args("win32", "", "x") is None      # no device configured
+    assert m.local_capture_input_args("sunos5", "/dev/x", "") is None  # unknown platform
+
+
+def t_local_capture_cmd_is_mpegts_on_stdout_with_capped_bitrate():
+    inp = ["-f", "v4l2", "-i", "/dev/video0"]
+    cmd = m.local_capture_cmd(inp, "x264", has_audio=True)
+    assert cmd[0] == "ffmpeg" and cmd[-3:] == ["-f", "mpegts", "-"]
+    assert "-nostdin" in cmd and "-nostats" in cmd      # no progress flood into feed_X.log
+    assert cmd[cmd.index("-c:v") + 1] == "libx264"
+    assert cmd[cmd.index("-tune") + 1] == "zerolatency"
+    assert cmd[cmd.index("-b:v") + 1] == f"{m.LOCAL_VIDEO_KBPS}k"
+    assert cmd[cmd.index("-maxrate") + 1] == f"{m.LOCAL_VIDEO_KBPS}k"
+    assert cmd[cmd.index("-force_key_frames") + 1] == "expr:gte(t,n_forced*1)"
+    assert cmd[cmd.index("-c:a") + 1] == "aac" and "-an" not in cmd
+    assert cmd[cmd.index("-i") + 1] == "/dev/video0"
+    nv = m.local_capture_cmd(inp, "nvenc", has_audio=False)
+    assert nv[nv.index("-c:v") + 1] == "h264_nvenc" and "-an" in nv and "-c:a" not in nv
+
+
+def t_local_bitrate_keeps_the_ring_window_well_above_the_trailing_mark():
+    # The 16 MB ring's time window is set by the bitrate; the #533 trailing mark sits
+    # 3 s behind live. The cap must leave the window several times that mark.
+    bps = (m.LOCAL_VIDEO_KBPS + m.LOCAL_AUDIO_KBPS) * 1000 * 1.15     # measured: 8160 kbps nominal -> 9.35 Mbps on the wire
+    window_s = m.FANOUT_RING_BYTES * 8 / bps
+    assert window_s >= 4 * m.DEFAULT_FEED_PREBUFFER_S, window_s
+
+
+def t_local_capture_setup_reads_the_machine_env():
+    cmd, err = m.local_capture_setup({"RACECAST_CAPTURE": "/dev/video2"}, "linux", "x264")
+    assert err is None and "-an" in cmd and "/dev/video2" in cmd
+    cmd, err = m.local_capture_setup({"RACECAST_CAPTURE": "/dev/video2",
+                                      "RACECAST_CAPTURE_AUDIO": "hw"}, "linux", "x264")
+    assert err is None and "-an" not in cmd
+    cmd, err = m.local_capture_setup({}, "linux", "x264")
+    assert cmd is None and "RACECAST_CAPTURE" in err
+    cmd, err = m.local_capture_setup({"RACECAST_CAPTURE": "x"}, "sunos5", "x264")
+    assert cmd is None and "sunos5" in err
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

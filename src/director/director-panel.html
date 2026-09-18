@@ -754,7 +754,8 @@
         <table><tbody id="schedBody"></tbody></table>
         <button class="add" id="schedAdd">+ ADD ROW</button>
         <div class="hint">YouTube or Twitch — enter a full watch URL
-          (<code>youtube.com/watch?v=…</code> or <code>twitch.tv/&lt;channel&gt;</code>).
+          (<code>youtube.com/watch?v=…</code> or <code>twitch.tv/&lt;channel&gt;</code>),
+          or <code>local:</code> for this machine's capture card.
           Saves write the Google Sheet only — a feed picks the new URL up
           on RELOAD A/B / NEXT (rows marked <b>A</b>/<b>B</b> are live now). Each row's
           <b>Streamer</b> and <b>Stint</b> label (Configuration vocab) become the HUD's
@@ -1623,8 +1624,11 @@ function previewUrlOk(u){
            h === "youtu.be" || h === "twitch.tv" || h.endsWith(".twitch.tv");
   }catch(e){ return false; }
 }
+// #592: a `local:` stint is the producer's capture card — marked, so the director can tell
+// a deliberate local feed (no URL, no preview link, no quality label) from a broken one.
+const FEED_PLATFORM_TAG = {twitch: "TW", youtube: "YT", local: "LOCAL"};
 function healthLine(name, f){
-  const tag = f.platform ? ` [${f.platform === "twitch" ? "TW" : "YT"}]` : "";
+  const tag = f.platform ? ` [${FEED_PLATFORM_TAG[f.platform] || "YT"}]` : "";
   const what = f.stint ? "stint " + f.stint : "the POV stream";
   if (f.down)                       // lost a live serve — louder than 'connecting'
     return `<span class="downline">${name}${tag} · DOWN — lost ${what}; RELOAD it or cut to the other feed/Standby</span>`;
@@ -1757,7 +1761,8 @@ async function relayPoll(){
       // streamlink. Empty when unknown / feed idle (escaped like last_error).
       document.querySelectorAll("#feedQuality .qres").forEach(el => {
         const f = d.feeds[el.dataset.qres];
-        el.textContent = (f && f.quality) ? f.quality : "";
+        el.textContent = (f && f.platform === "local") ? "local capture"
+                       : (f && f.quality) ? f.quality : "";
       });
       // #493: preview buttons — stash each feed's current stream URL + enable only for a real
       // URL (absent when the feed is idle, or redacted for a non-director subject over Funnel).
