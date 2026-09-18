@@ -2251,6 +2251,149 @@ def t_local_feed_idles_with_the_device_hint():
     assert ok, (f.phase, f.last_error)
     assert m.LOCAL_DEVICE_BUSY in f.last_error, f.last_error
 
+
+# --- #593: the commentary mic follows the on-air local slot ---
+MIC = "Commentary Mic Device"
+
+
+def t_obs_audio_plan_gives_the_mic_to_the_local_feed():
+    r = _relay(["https://youtu.be/a", "local:", "https://youtu.be/c"])
+    orig = dict(os.environ)
+    os.environ["RACECAST_CAPTURE"] = "/dev/video9"
+    try:
+        audio, extra = r.obs_audio_plan()
+    finally:
+        os.environ.clear(); os.environ.update(orig)
+    assert audio == {"A": ["Feed A"], "B": ["Feed B", MIC]}, audio
+    assert extra == [MIC]
+
+
+def t_obs_audio_plan_leaves_the_mic_alone_without_a_capture_card():
+    r = _relay(["https://youtu.be/a", "local:"])
+    orig = dict(os.environ)
+    os.environ.pop("RACECAST_CAPTURE", None)
+    try:
+        audio, extra = r.obs_audio_plan()
+    finally:
+        os.environ.clear(); os.environ.update(orig)
+    assert audio == {"A": ["Feed A"], "B": ["Feed B"]} and extra == [], (audio, extra)
+
+
+def t_obs_audio_plan_never_raises_and_keeps_the_mic_closed():
+    # _reflect now plans synchronously in the caller (a handover, an HTTP handler);
+    # a feed that fails to report its source must not raise there.
+    r = _relay(["local:", "https://youtu.be/b"])
+
+    def broken():
+        raise RuntimeError("schedule gone")
+    r.feeds["A"].current_channel = broken
+    orig = dict(os.environ)
+    os.environ["RACECAST_CAPTURE"] = "/dev/video9"
+    try:
+        assert r.obs_audio_plan() == ({"A": ["Feed A"], "B": ["Feed B"]}, [MIC])
+    finally:
+        os.environ.clear(); os.environ.update(orig)
+
+
+def t_obs_audio_plan_leaves_the_solo_mic_alone():
+    # Solo sets RACECAST_CAPTURE too, and there the mic ships hot as the main audio.
+    r = _relay(["https://youtu.be/a"])
+    r.solo, r.feeds = True, {}
+    orig = dict(os.environ)
+    os.environ["RACECAST_CAPTURE"] = "/dev/video9"
+    try:
+        assert r.obs_audio_plan() == ({"A": ["Feed A"], "B": ["Feed B"]}, [])
+    finally:
+        os.environ.clear(); os.environ.update(orig)
+
+
+def t_reflect_warns_when_the_mic_cannot_be_opened():
+    # A collection imported before #593 has no mic input. The OBS note is overwritten
+    # by the next probe and the panel shows only unreachable OBS, so the relay log is
+    # the one place the producer learns their local stint went out without commentary.
+    import logging
+    r = _relay(["local:", "https://youtu.be/b"])
+    records = []
+
+    class _Cap(logging.Handler):
+        def emit(self, rec):
+            records.append(rec)
+
+    class FakeObs:
+        def reflect_feed_state(self, live, cut, audio=None, extra_mute=()):
+            return [], f"unmute {MIC}: request SetInputMute failed: not found"
+
+    class _Now:                             # run _reflect's thread inline
+        def __init__(self, target=None, daemon=None, **_k):
+            self.target = target
+        def start(self):
+            self.target()
+
+    class _Threading:
+        Thread = _Now
+        def __getattr__(self, name):
+            return getattr(threading, name)
+
+    cap = _Cap(level=logging.WARNING)
+    m.LOG.addHandler(cap)
+    orig_obs, orig_thr, orig_env = m._obs_ws, m.threading, dict(os.environ)
+    m._obs_ws, m.threading = FakeObs(), _Threading()
+    os.environ["RACECAST_CAPTURE"] = "/dev/video9"
+    try:
+        m.Relay._reflect(r, "A", False)
+    finally:
+        m._obs_ws, m.threading = orig_obs, orig_thr
+        m.LOG.removeHandler(cap)
+        os.environ.clear(); os.environ.update(orig_env)
+    warns = [rec.getMessage() for rec in records if rec.levelno == logging.WARNING]
+    assert any(MIC in w and "racecast setup" in w for w in warns), warns
+
+
+def t_reflect_snapshots_the_mic_before_the_freed_feed_advances():
+    # Stint 1 is local on A. At the handover the freed feed A is re-indexed to
+    # stint 3 right after _reflect; the OBS thread, started only once next_auto()
+    # has returned, must still see A as the local slot it just cut away from.
+    r = m.Relay(_StubSource(["local:", "https://youtu.be/b", "https://youtu.be/c"]),
+                (53001, 53002), LOGDIR)
+    r._reflect_pov = lambda shown: None
+    seen, deferred = [], []
+
+    class FakeObs:
+        def reflect_feed_state(self, live, cut, audio=None, extra_mute=()):
+            seen.append((live, cut, audio, list(extra_mute)))
+            return [], ""
+
+    class _Deferred:                        # holds _reflect's thread until we run it
+        def __init__(self, target=None, daemon=None, **_k):
+            self.target = target
+        def start(self):
+            deferred.append(self.target)
+
+    class _Threading:
+        Thread = _Deferred
+        def __getattr__(self, name):
+            return getattr(threading, name)
+
+    orig_obs, orig_thr, orig_env = m._obs_ws, m.threading, dict(os.environ)
+    m._obs_ws = FakeObs()
+    os.environ["RACECAST_CAPTURE"] = "/dev/video9"
+    try:
+        r.feeds["B"].phase = "serving"
+        m.threading = _Threading()
+        r.next_auto()
+        m.threading = orig_thr
+        assert r.A.current_channel()[0] != "local:"   # A has already moved on
+        for run in deferred:
+            run()
+    finally:
+        m._obs_ws, m.threading = orig_obs, orig_thr
+        os.environ.clear(); os.environ.update(orig_env)
+    live, cut, audio, extra = seen[0]
+    assert (live, cut) == ("B", True)
+    assert audio == {"A": ["Feed A", MIC], "B": ["Feed B"]}, audio
+    assert m._OBS_WS_MODULE.feed_state_intents(live, cut, audio=audio, extra_mute=extra)[3:5] \
+        == [("mute", "Feed A"), ("mute", MIC)]
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

@@ -357,7 +357,14 @@ through Streamlink's Twitch plugin (no yt-dlp hop); gated feeds optionally use
 producer machine's capture card (`RACECAST_CAPTURE`; game audio defaults to the card's own audio device found by name in ffmpeg's device list — `scan_capture_audio`, override/`none` via `RACECAST_CAPTURE_AUDIO` — from the
 machine `.env`) with the relay's own `ffmpeg` writing MPEG-TS to stdout at the same fan-out
 seam (`local_capture_cmd`, bitrate capped by `LOCAL_VIDEO_KBPS` against the 16 MB ring);
-no resolve, cookies or quality tiers, fan-out required. Only the director/sheet can set
+no resolve, cookies or quality tiers, fan-out required. The producer's commentary mic
+for that stint is the OBS input `Commentary Mic Device` (#593, in `Stint` + `Splitscreen`,
+shipped muted, `RACECAST_MIC`): the relay opens it only while the local feed is on air
+and mutes it on every other handover/SPLIT (`obs_ws.feed_audio_plan`, snapshotted in
+`Relay.obs_audio_plan`; only on an endurance machine with `RACECAST_CAPTURE`, never in
+solo, where the mic ships hot). The Director Panel's STINT A/B decide per press from
+`/status` feed platforms (`stintMicIntent`); the static Companion STINT buttons do not
+touch it. A failed switch (collection imported before #593) is a relay-log WARNING. Only the director/sheet can set
 it (`is_feed_source`); the commentator submit and POV paths stay on `is_channel`. (`curl`-ing a feed port returns nothing — it serves a single
 consumer; that is not a failure.)
 

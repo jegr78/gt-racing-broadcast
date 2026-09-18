@@ -3922,6 +3922,17 @@ def _program_audio_stream_ring(handler, ring, content_type, service):
     return None
 
 
+def _warn_if_mic_failed(note):
+    """Log a failed switch of the commentary mic (#593). The next OBS probe
+    overwrites obs_note within seconds and a Companion SPLIT shows no note at all,
+    so the relay log is where a local stint that went out without the producer's
+    commentary stays visible."""
+    mic = _OBS_WS_MODULE.COMMENTARY_MIC_INPUT if _OBS_WS_MODULE else None
+    if mic and note and mic in note:
+        LOG.warning("OBS: could not switch %s (%s) — this OBS collection predates the "
+                    "commentary mic; run `racecast setup` and re-import it", mic, note)
+
+
 # --- Relay-driven Splitscreen (#534 audio, #591 visibility) -------------------
 def _apply_split_intents(relay, obs_ws, audio_only):
     """Resolve the on-air feed and apply the Splitscreen intents via obs-websocket,
@@ -3934,7 +3945,12 @@ def _apply_split_intents(relay, obs_ws, audio_only):
     live = relay.live_feed()
     if live not in ("A", "B"):                 # solo: no feed pair, nothing to split
         return {"ok": False, "error": "no on-air feed", "live": live}, 409
-    intents = _OBS_WS_MODULE.split_state_intents(live, False)
+    plan = getattr(relay, "obs_audio_plan", None)
+    audio, extra_mute = plan() if plan else (None, ())
+    slots = ({f: (_OBS_WS_MODULE.FEED_SOURCES[f], audio[f]) for f in audio}
+             if audio else None)
+    intents = _OBS_WS_MODULE.split_state_intents(live, False, slots=slots,
+                                                 extra_mute=extra_mute)
     if audio_only:
         intents = [(v, t) for v, t in intents if v in ("mute", "unmute")]
     ok_all = True
@@ -3954,6 +3970,7 @@ def _apply_split_intents(relay, obs_ws, audio_only):
         payload["show"] = [t for v, t in intents if v == "show"]
     if notes:
         payload["note"] = "; ".join(str(n) for n in notes)
+        _warn_if_mic_failed(payload["note"])
     return payload, (200 if ok_all else 503)
 
 
@@ -7567,15 +7584,35 @@ class Relay:
             return None
         return live_schedule_row(self.source.get_rows(), self.on_air_row_idx())
 
+    def obs_audio_plan(self):
+        """(audio, extra_mute) for the OBS intent planners (#593): which feed carries
+        the local capture right now, and whether this machine manages the commentary
+        mic at all — only one with a capture card (RACECAST_CAPTURE) does."""
+        # Solo sets RACECAST_CAPTURE as well, but there the mic ships hot as the main
+        # audio and has no feed pair to follow: never manage it.
+        mic = (_OBS_WS_MODULE.COMMENTARY_MIC_INPUT
+               if (os.environ.get("RACECAST_CAPTURE") or "").strip()
+               and not getattr(self, "solo", False) else None)
+        try:
+            local = {f for f, feed in self.feeds.items()
+                     if is_local_source(feed.current_channel()[0])}
+        except Exception:                    # noqa: BLE001 — runs in the handover's caller
+            local = set()                    # unknown -> the mic stays closed
+        return _OBS_WS_MODULE.feed_audio_plan(local, mic=mic)
+
     def _reflect(self, live, cut):
         """Push the on-air feed (A/B) into OBS off-thread; never blocks the HTTP
         response, never raises. Records the note for /status."""
         if _obs_ws is None:
             return
+        # Snapshot now: a handover re-indexes the freed feed right after this call.
+        audio, extra_mute = self.obs_audio_plan()
 
         def run():
-            _applied, note = self._obs.reflect_feed_state(live, cut)
+            _applied, note = self._obs.reflect_feed_state(
+                live, cut, audio=audio, extra_mute=extra_mute)
             self.obs_note = note or None
+            _warn_if_mic_failed(note)
         threading.Thread(target=run, daemon=True).start()
 
     def _maybe_probe_obs(self, now):
