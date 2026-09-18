@@ -885,12 +885,10 @@ const CONFIG = {
     // rc: Race Control value written via the relay after the OBS steps
     // ("" clears). Unconditional, mirrors the Companion combos: SPLIT stamps
     // "Driver Swaps", cutting back to a stint clears whatever is shown.
-    {label:"STINT A", scene:"Stint",
-     show:[["Stint","Feed A"]], hide:[["Stint","Feed B"]],
-     unmute:["Feed A"], mute:["Feed B","Discord Audio Capture"], rc:"", micFor:"A"},
-    {label:"STINT B", scene:"Stint",
-     show:[["Stint","Feed B"]], hide:[["Stint","Feed A"]],
-     unmute:["Feed B"], mute:["Feed A","Discord Audio Capture"], rc:"", micFor:"B"},
+    // STINT A/B resolve on the relay like SPLIT, and exactly like the Companion
+    // buttons: visibility, audio and the producer's commentary mic of a local stint.
+    {label:"STINT A", scene:"Stint", show:[], hide:[], relayStint:"A", rc:""},
+    {label:"STINT B", scene:"Stint", show:[], hide:[], relayStint:"B", rc:""},
     {label:"SPLIT", scene:"Splitscreen", show:[], hide:[],
      relaySplit:true, rc:"Driver Swaps"},   // #591: the relay resolves visibility + audio from the on-air slot
     {label:"INTERVIEW", scene:"Interview", show:[], hide:[],
@@ -1428,32 +1426,25 @@ function renderStreamBtn(s){
   }
 }
 
-/* #593: the producer's commentary mic on a hand-picked STINT A/B. The relay
-   switches it on every handover and SPLIT; a static press decides here from the
-   feed platforms of the last /status: open it for a local feed, close it when the
-   other feed is local (never a hot mic on a remote commentator's stint), leave it
-   alone when no feed is local (an older collection has no such input). */
-const COMMENTARY_MIC = "Commentary Mic Device";
-let feedPlatforms = {A: null, B: null};
-function stintMicIntent(feed, platforms){
-  if (!feed || !platforms) return null;
-  if (platforms[feed] === "local") return "unmute";
-  return Object.values(platforms).includes("local") ? "mute" : null;
+/* The sources that must be visible for a macro to count as on air. A relay-driven
+   STINT has no static `show`; the feed it picks is the one that must be visible. */
+function macroAirSources(m){
+  return m.relayStint ? [["Stint", "Feed " + m.relayStint]] : m.show;
 }
 
 /* One press = scene + visibility + mutes, exactly like the Companion macro.
    Each step is independent; a failing step is logged and the rest still runs. */
 async function runMacro(m){
-  const mic = stintMicIntent(m.micFor, feedPlatforms);
   const steps = [
     ["set scene", ()=>obsScene(m.scene)],
     ...m.show.map(([sc,src])=>[`show ${src}`,   ()=>obsSource(sc,src,true)]),
     ...m.hide.map(([sc,src])=>[`hide ${src}`,   ()=>obsSource(sc,src,false)]),
     ...(m.relaySplit                                  // #591: server resolves the on-air slot; no static names
         ? [[`split (on-air)`, ()=>obsPost("split", {})]]
+        : m.relayStint                                // server resolves feeds + commentary mic, like Companion
+        ? [[`stint ${m.relayStint}`, ()=>obsPost("stint", {feed: m.relayStint})]]
         : [...(m.unmute||[]).map(i=>[`unmute ${i}`, ()=>obsMute(i,false)]),
            ...(m.mute||[]).map(i=>[`mute ${i}`,     ()=>obsMute(i,true)])]),
-    ...(mic ? [[`${mic} ${COMMENTARY_MIC}`, ()=>obsMute(COMMENTARY_MIC, mic === "mute")]] : []),
   ];
   for (const [what, fn] of steps){
     try{ await fn(); }
@@ -1532,7 +1523,7 @@ async function obsStatePoll(){
     }
     // Also include macro show-targets so the PGM bus highlights correctly.
     for (const m of activeConfig.macros){
-      for (const [sc, src] of m.show)
+      for (const [sc, src] of macroAirSources(m))
         sourcesSpec.push({scene: sc, source: src});
     }
     const inputsSpec = activeConfig.audio.map(a => a.input);
@@ -1570,8 +1561,9 @@ async function obsStatePoll(){
     for (const b of macroKeys){
       const m = b._m;
       let air = programScene === m.scene;
-      if (air && m.show.length){
-        for (const [sc,src] of m.show){
+      const req = macroAirSources(m);
+      if (air && req.length){
+        for (const [sc,src] of req){
           if (!visState[sc + "/" + src]) { air = false; break; }
         }
       }
@@ -1757,8 +1749,6 @@ async function relayPoll(){
     } else { $("#stPov").className = "st"; $("#stPov").innerHTML = "POV <b>—</b>"; }
     if (povVisBtn) povVisBtn.classList.toggle("on", !!(d.pov && d.pov.shown));
     if (!solo){
-      feedPlatforms = {A: d.feeds.A ? d.feeds.A.platform : null,
-                       B: d.feeds.B ? d.feeds.B.platform : null};
       const lines = [healthLine("A", d.feeds.A), healthLine("B", d.feeds.B)];
       if (d.pov && d.pov.state !== "stopped") lines.push(healthLine("POV", d.pov));
       // #493: auto-step-down alert — a managed feed (not pinned) that dropped to ROBUST.

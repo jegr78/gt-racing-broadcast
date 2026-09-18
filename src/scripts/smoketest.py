@@ -328,15 +328,18 @@ class Step:
     rename fails in CI instead of on air.
     """
     __slots__ = ("label", "kind", "scene", "show", "hide", "unmute", "mute",
-                 "relay_split", "relay", "wait_for_bytes", "check")
+                 "relay_split", "relay_stint", "relay", "wait_for_bytes", "check")
 
     def __init__(self, label, kind, scene=None, show=(), hide=(), unmute=(),
-                 mute=(), relay_split=False, relay=None, wait_for_bytes=False,
-                 check=None):
+                 mute=(), relay_split=False, relay_stint=None, relay=None,
+                 wait_for_bytes=False, check=None):
         self.label = label; self.kind = kind; self.scene = scene
         self.show = tuple(show); self.hide = tuple(hide)
         self.unmute = tuple(unmute); self.mute = tuple(mute)
         self.relay_split = relay_split; self.relay = relay
+        # A relay-resolved STINT (/obs/stint/<X>): the relay applies what show/hide/
+        # unmute/mute describe, so those stay as the expected read-back only.
+        self.relay_stint = relay_stint
         self.wait_for_bytes = wait_for_bytes; self.check = check
 
     def __repr__(self):                                   # pragma: no cover
@@ -353,7 +356,7 @@ RUNDOWN = (
     # `event start` arms neither — the director arms the one they are about to cut
     # to. Without this the whole first stint pulls nothing and STINT A shows black.
     Step("ARM A", "arm", relay="feed/A/activate", wait_for_bytes=True),
-    Step("STINT A", "macro", scene="Stint",
+    Step("STINT A", "macro", scene="Stint", relay_stint="A",
          show=(("Stint", "Feed A"),), hide=(("Stint", "Feed B"),),
          unmute=("Feed A",), mute=("Feed B", DISCORD_AUDIO)),
     Step("HUD ON", "graphic", scene="Stint", show=(("Stint", "Stint HUD"),)),
@@ -369,7 +372,7 @@ RUNDOWN = (
     Step("ARM B", "arm", relay="feed/B/activate", wait_for_bytes=True),
     Step("SPLIT", "macro", scene="Splitscreen", relay_split=True),
     Step("NEXT", "relay", relay="next"),
-    Step("STINT B", "macro", scene="Stint",
+    Step("STINT B", "macro", scene="Stint", relay_stint="B",
          show=(("Stint", "Feed B"),), hide=(("Stint", "Feed A"),),
          unmute=("Feed B",), mute=("Feed A", DISCORD_AUDIO)),
     Step("ARM A", "arm", relay="feed/A/activate", wait_for_bytes=True),

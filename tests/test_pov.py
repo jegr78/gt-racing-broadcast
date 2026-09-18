@@ -751,6 +751,42 @@ def t_preview_program_503_when_obs_down():
         srv.shutdown(); m._obs_ws = old
 
 
+def t_obs_stint_routes_get_and_post():
+    # GET /obs/stint/<X> is the Companion form, POST /obs/stint {"feed"} the panel's;
+    # both land in apply_stint_state.
+    r = m.Relay(_FakeSource(_URLS8), [53001, 53002], LOGDIR)
+
+    class FakeObs:
+        def __init__(self): self.calls = []
+        def set_scene_item_enabled(self, scene, source, on):
+            self.calls.append((scene, source, on)); return (True, "")
+        def set_input_mute(self, name, muted):
+            self.calls.append((name, muted)); return (True, "")
+
+    fo = FakeObs(); old = m._obs_ws; m._obs_ws = fo; srv = _serve(r)
+    try:
+        port = srv.server_address[1]
+        got = json.loads(urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/obs/stint/B", timeout=5).read())
+        assert got["ok"] is True and got["feed"] == "B", got
+        assert ("Stint", "Feed B", True) in fo.calls and ("Feed B", False) in fo.calls
+        fo.calls.clear()
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/obs/stint", data=b'{"feed": "A"}',
+            headers={"Content-Type": "application/json"}, method="POST")
+        got = json.loads(urllib.request.urlopen(req, timeout=5).read())
+        assert got["ok"] is True and got["feed"] == "A", got
+        assert ("Stint", "Feed A", True) in fo.calls and ("Feed A", False) in fo.calls
+        try:
+            urllib.request.urlopen(f"http://127.0.0.1:{port}/obs/stint/X", timeout=5)
+            raise AssertionError("expected HTTP 400")
+        except urllib.error.HTTPError as e:
+            assert e.code == 400
+            assert "feed" in json.loads(e.read())["error"]
+    finally:
+        srv.shutdown(); m._obs_ws = old
+
+
 def t_obs_stream_endpoint_starts_and_validates():
     r = m.Relay(_FakeSource(_URLS8), [53001, 53002], LOGDIR)
 
