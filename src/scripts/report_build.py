@@ -197,10 +197,12 @@ def _fmt_fps(v):
     return f"{v:g}"
 
 
-def _finding(backlog, quality, on_air_s, handovers):
+def _finding(backlog, quality, on_air_s, handovers, consumer_events=0):
     """#586: the report's verdict, backlog first. The backlog is what the audience and
     the commentators lived through; the frame rate is why. None when neither was
-    recorded. `level` is green/yellow/red for the page's colour only."""
+    recorded. `level` is green/yellow/red for the page's colour only. `consumer_events`
+    is how many OBS consumer events the report lists, the only lead when the frame
+    rate does not explain a backlog."""
     q = quality or {}
     fps, target, low = q.get("obs_fps_avg"), q.get("obs_fps_target"), q.get("obs_fps_low")
     rate = q.get("render_skip_rate_avg")
@@ -223,8 +225,10 @@ def _finding(backlog, quality, on_air_s, handovers):
         if low:
             skipped = f" and skipped {rate}% of its frames" if rate else ""
             cause = f"{fps_line}{skipped}, so the output fell behind real time."
-        else:
+        elif consumer_events:
             cause = f"{fps_line}; see the OBS consumer events below."
+        else:
+            cause = f"{fps_line}, so the frame rate does not explain the backlog."
     elif backlog is not None:
         level = "yellow" if low else "green"
         headline = (f"Output stayed at the live edge (peak {backlog['peak_s']:.1f} s "
@@ -435,7 +439,8 @@ def build_report(samples, events, name_for_stint, event_title, window, now,
         "incidents": [inc for g in groups for inc in hs.derive_incidents(g)],
         "quality": quality,
         "backlog": backlog,
-        "finding": _finding(backlog, quality, on_air_s, on_air["stint_handovers"]),
+        "finding": _finding(backlog, quality, on_air_s, on_air["stint_handovers"],
+                            len(obs_consumer)),
         "producer_handovers": handovers,
         "substitutions": substitutions,
         "recoveries": recoveries,
@@ -718,7 +723,7 @@ def render_summary_text(report):
              f"({_fmt_dur(hd['duration_s'])})",
              f"  Uptime {hd['uptime_pct']}% · {len(report['incidents'])} incident(s)"]
     if report.get("finding"):
-        lines.append(f"  {report['finding']['headline']}")
+        lines.append(f"  {report_finding_text(report)}")
     for f in report["feeds"]:
         lines.append(f"  Feed {f['feed']}: {f['drops']} drop(s), "
                      f"{_fmt_dur(f['downtime_s'])} down")
@@ -733,8 +738,10 @@ def report_filename(event_title, date_str):
 
 
 def report_finding_text(report):
-    """The finding's headline for the Discord embed description, or '' (#586)."""
-    return (report.get("finding") or {}).get("headline") or ""
+    """The finding's headline and cause, for the Discord embed description and the
+    CLI summary, or '' when the report has no finding (#586)."""
+    fd = report.get("finding") or {}
+    return " ".join(p for p in (fd.get("headline"), fd.get("cause")) if p)
 
 
 def report_discord_fields(report):

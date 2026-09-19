@@ -586,7 +586,18 @@ def t_finding_leads_with_the_backlog_then_the_frame_rate():
     html = rb.render_html(rep)
     assert f["headline"] in html and "Finding" in html
     assert html.index(f["headline"]) < html.index("On air per commentator")
-    assert f["headline"] in rb.render_summary_text(rep)
+    assert f"{f['headline']} {f['cause']}" in rb.render_summary_text(rep)
+
+
+def t_finding_points_at_consumer_events_only_when_the_report_lists_them():
+    samples = _broadcast(4, feed_a_backlog_s=19.0, obs_fps=60.0, obs_fps_target=60.0)
+    bare = rb.build_report(samples, [], {}, "E", (0.0, 90.0), now=1000.0)["finding"]
+    assert bare["cause"] == ("OBS held its configured frame rate (60 of 60 fps), so the "
+                             "frame rate does not explain the backlog."), bare
+    ev = [{"ts": 30.0, "type": "fanout_overflow", "metadata": {"feed": "A", "snaps": 2}}]
+    listed = rb.build_report(samples, ev, {}, "E", (0.0, 90.0), now=1000.0)
+    assert listed["finding"]["cause"].endswith("see the OBS consumer events below."), listed
+    assert "OBS consumer events" in rb.render_html(listed)
 
 
 def t_finding_frame_rate_only_when_no_backlog_recorded():
@@ -627,7 +638,8 @@ def t_finding_notes_the_handover_effect():
 def t_discord_payload_carries_the_finding():
     rep = rb.build_report(_broadcast(4, feed_a_backlog_s=19.0), [], {}, "E", (0.0, 90.0),
                           now=1000.0)
-    assert rb.report_finding_text(rep) == rep["finding"]["headline"]
+    f = rep["finding"]
+    assert rb.report_finding_text(rep) == f"{f['headline']} {f['cause']}"
     assert rb.report_finding_text(rb.build_report(_broadcast(2), [], {}, "E", (0.0, 30.0),
                                                   now=1000.0)) == ""
 

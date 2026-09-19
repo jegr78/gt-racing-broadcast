@@ -231,7 +231,7 @@ racecast report send [FILE]   # send the newest (or given) report to the league 
 **The finding.** The report opens with one verdict line, before any table. It leads with
 what the audience saw, then gives the reason:
 
-- *Output ran behind live for 41m of 56m on air, peak 19.0 s.* The time the **on-air**
+- *Output ran behind live for 41m 0s of 56m 0s on air, peak 19.0 s.* The time the **on-air**
   feed spent behind live by the same rule that turns the health badge yellow (more than
   `RACECAST_FEED_BACKLOG_WARN_S` beyond the `RACECAST_FEED_PREBUFFER_S` reserve, both read
   from the machine `.env`), and the worst value. Each value is the smallest backlog of its

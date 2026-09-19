@@ -92,6 +92,7 @@ def t_generate_leads_with_the_backlog_finding():
             (rc._health_db_path, rc._runtime_dir, rc._report_name_map,
              rc._report_event_title, rc._machine_env_value) = orig
         assert r["report"]["finding"]["headline"].startswith("Output ran behind live for 1m 30s")
+        assert "fell behind real time" in r["summary"]
         assert "45.8 of 60" in r["html"]
 
 
