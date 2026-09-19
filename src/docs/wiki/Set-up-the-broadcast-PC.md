@@ -101,19 +101,37 @@ racecast obs benchmark                 # ~2.5 minutes; add --json for machine-re
 It needs the relay running with a **live stint on Feed A or B** and OBS open with the
 league's collection. It switches OBS to the `Stint` scene (`--scene` picks another),
 starts a recording (render lag only shows while an output runs), reconnects the on-air
-feed at **FULL** (1080p) and then at **ROBUST** (720p), and samples each for 60 s
-(`--window`), after a 10 s settle (`--settle`). For each tier it reports the render
-time per frame, the frame rate, skipped frames, how fast the encoder keeps up, and how
-far OBS is behind the live edge and whether that gap grows. Afterwards it puts the
-scene, the feed's quality setting and the recording back as they were and deletes its
-own recording (`--keep-recording` keeps it).
+feed at **FULL** (1080p) and then at **ROBUST** (720p). After each switch it waits
+until the new feed connection has delivered its first seconds, then reconnects OBS to
+the feed, the same as the **RESET** button in the Director Panel. Otherwise OBS would
+play that delivered backlog and stay that far behind live, which says nothing about
+the machine. It then settles for 10 s (`--settle`, at least 3 s, so OBS has finished
+reconnecting) and samples for 60 s (`--window`).
+
+A tier keeps real time when OBS renders at its configured frame rate, the encoder keeps
+up with the clock, and the feed's picture in OBS actually advances at real time. The
+last point matters because the frame rate and a "playing" state stay normal while a
+feed's picture is frozen. The report also shows how far OBS was behind the live edge
+at the start and at the end of each window. That figure is for information and does
+not decide the verdict.
+
+A tier gives no verdict, and the run asks to be repeated, if during its window the
+feed dropped, OBS reconnected, the relay had to skip data because OBS fell too far
+behind, or the source stopped delivering (the picture in OBS stood still while OBS had
+already read everything the relay had). Those point at the source or the connection,
+not the machine.
+
+Afterwards it puts the scene, the feed's quality setting and the recording back as
+they were, reconnects OBS to the feed once more, and deletes its own recording
+(`--keep-recording` keeps it).
 
 It **refuses to run while OBS is streaming or already recording** — each tier switch
 reconnects the on-air feed, which is a visible dropout. Run it before you go live.
 
 The result is logged locally (the last 10 are kept). `racecast preflight` reports the
 latest one under *Hardware* and **warns** when FULL did not keep real time (saying
-whether 720p recovered it) or when the measurement is older than
+whether 720p recovered it), when the run was disturbed, or when the measurement is
+older than
 `RACECAST_OBS_BENCHMARK_MAX_AGE_DAYS` (default 30). Re-run it after changing the
 machine, OBS, or the scene collection. The ROBUST line also names the latency ROBUST
 adds *before* the relay: it starts two HLS segments further behind the source's live

@@ -443,8 +443,8 @@ def t_hardware_section_reports_the_obs_benchmark():
     line = [r for r in dict(m.gather(m.__file__, runtime_dir=d))["Hardware"]
             if r.name == "OBS benchmark"]
     assert len(line) == 1 and line[0].level == "INFO"     # nothing measured yet
-    full = {"fps_avg": 45.0, "encoder_speed": 1.0, "backlog_growth_s_per_min": 6.0}
-    robust = {"fps_avg": 60.0, "encoder_speed": 1.0, "backlog_growth_s_per_min": 0.0}
+    full = {"fps_avg": 45.0, "encoder_speed": 1.0, "playback_rate": 1.0, "stall_fraction": 0.0}
+    robust = {"fps_avg": 60.0, "encoder_speed": 1.0, "playback_rate": 1.0, "stall_fraction": 0.0}
     ob.append_record({"ts": int(time.time()) - 2 * 86_400, "feed": "A",
                       "full": full, "robust": robust,
                       "verdict": ob.verdict(full, robust, 60.0)}, d)

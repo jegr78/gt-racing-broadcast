@@ -2572,7 +2572,9 @@ def t_reflect_snapshots_the_mic_before_the_freed_feed_advances():
 class _BacklogSrv:
     """FeedFanoutServer stand-in for #583: a fixed interval floor and live backlog."""
     def __init__(self, floor, live=None):
-        self.floor = floor; self.live = live; self.takes = 0
+        self.floor = floor; self.live = live; self.takes = 0; self.snaps = 0
+    def consumer_health(self, now):
+        return None, self.snaps
     def take_backlog_floor(self, now):
         self.takes += 1
         return self.floor
@@ -2638,6 +2640,10 @@ def t_backlog_in_status_and_health_snapshot():
     # #587: the panel labels RESET with what a click right now throws away
     assert st["feeds"]["A"]["reset_discards_s"] == 9.3
     assert st["feeds"]["B"]["reset_discards_s"] is None
+    # #614: the cursor-snap count, so a measurement can tell a window the ring lapped
+    assert st["feeds"]["A"]["consumer_snaps"] == 0
+    r.A.fanout_server.snaps = 3
+    assert r.status()["feeds"]["A"]["consumer_snaps"] == 3
     # the pill follows the live value: recovered since the last heartbeat -> not amber
     r.A.fanout_server.live = 3.2
     assert r.status()["feeds"]["A"]["backlogged"] is False

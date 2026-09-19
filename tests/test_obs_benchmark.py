@@ -15,10 +15,13 @@ FULL_FLAGS = ["--ringbuffer-size", "64M", "--hls-live-edge", "4"]
 ROBUST_FLAGS = ["--ringbuffer-size", "128M", "--hls-live-edge", "6"]
 
 
-def _sample(t, fps=60.0, render_ms=4.0, rs=0, rt=0, os_=0, ot=0, rec_ms=0, backlog=3.0):
+def _sample(t, fps=60.0, render_ms=4.0, rs=0, rt=0, os_=0, ot=0, rec_ms=0, backlog=3.0,
+            cursor=None, state="serving", snaps=0):
     return {"t": t, "fps": fps, "render_ms": render_ms, "render_skipped": rs,
             "render_total": rt, "output_skipped": os_, "output_total": ot,
-            "rec_ms": rec_ms, "backlog_s": backlog}
+            "rec_ms": rec_ms, "backlog_s": backlog,
+            "cursor_ms": t * 1000 if cursor is None else cursor,
+            "state": state, "snaps": snaps}
 
 
 # --------------------------------------------------------------------------
@@ -50,11 +53,11 @@ def t_robust_extra_segments_is_the_difference():
 def t_summarize_derives_rates_over_the_window():
     samples = [
         _sample(0.0, fps=60.0, render_ms=4.0, rs=100, rt=1000, os_=10, ot=1000,
-                rec_ms=0, backlog=3.0),
+                rec_ms=0, backlog=3.0, cursor=10_000),
         _sample(30.0, fps=50.0, render_ms=8.0, rs=250, rt=2800, os_=10, ot=2800,
-                rec_ms=30_000, backlog=4.0),
+                rec_ms=30_000, backlog=4.0, cursor=40_000),
         _sample(60.0, fps=40.0, render_ms=12.0, rs=400, rt=4600, os_=46, ot=4600,
-                rec_ms=57_000, backlog=5.0),
+                rec_ms=57_000, backlog=5.0, cursor=67_000),
     ]
     s = m.summarize(samples)
     assert s["samples"] == 3
@@ -67,41 +70,79 @@ def t_summarize_derives_rates_over_the_window():
     assert s["encoder_skip_pct"] == 1.0
     # 57 s of recording in 60 s of wall clock
     assert s["encoder_speed"] == 0.95
-    assert s["backlog_start_s"] == 3.0 and s["backlog_end_s"] == 5.0
+    # OBS played 57 s of media in 60 s of wall clock; the second half was slow
+    assert s["playback_rate"] == 0.95 and s["stall_fraction"] == 0.0
+    assert s["backlog_floor_start_s"] == 3.0 and s["backlog_floor_end_s"] == 5.0
     assert s["backlog_max_s"] == 5.0
-    # +2 s over 60 s, least squares -> 2 s per minute
-    assert s["backlog_growth_s_per_min"] == 2.0
+    assert s["snaps"] == 0 and s["contaminated"] == []
+
+
+def t_summarize_counts_frozen_ticks_from_the_cursor():
+    # 60 fps and a PLAYING state say nothing about a frozen demuxer; the cursor does.
+    samples = [_sample(t, cursor=5000) for t in (0.0, 2.0, 4.0, 6.0)]
+    samples += [_sample(8.0, cursor=7000)]
+    s = m.summarize(samples)
+    assert s["stall_fraction"] == 0.75
+    assert s["playback_rate"] == 0.25
+
+
+def t_summarize_marks_a_disturbed_window():
+    lapped = [_sample(0.0, snaps=2), _sample(10.0, snaps=5)]
+    assert m.summarize(lapped)["contaminated"] == ["the ring lapped OBS 3 time(s)"]
+    rejoined = [_sample(0.0, cursor=9000), _sample(10.0, cursor=1000)]
+    assert m.summarize(rejoined)["contaminated"] == ["OBS reconnected the feed"]
+    dropped = [_sample(0.0), _sample(10.0, state="connecting")]
+    assert m.summarize(dropped)["contaminated"] == ["the feed left serving (connecting)"]
+    # a consumer that left and came back starts its count again: that is a reconnect too
+    restarted = [_sample(0.0, snaps=4), _sample(10.0, snaps=0)]
+    assert m.summarize(restarted)["contaminated"] == ["OBS reconnected the feed"]
+
+
+def t_summarize_blames_a_starved_consumer_on_the_source():
+    # The source stopped delivering: OBS has read everything (backlog at the live edge,
+    # 0.0) and its cursor stands still. That is not the host falling behind.
+    samples = [_sample(0.0, cursor=5000, backlog=2.8), _sample(2.0, cursor=7000, backlog=0.9),
+               _sample(4.0, cursor=7000, backlog=0.0), _sample(6.0, cursor=7000, backlog=0.0),
+               _sample(8.0, cursor=9000, backlog=2.5)]
+    s = m.summarize(samples)
+    assert s["contaminated"] == ["the source stopped delivering (4 s)"]
+
+
+def t_summarize_keeps_a_slow_consumer_with_data_waiting_on_the_host():
+    # Data is waiting (the backlog grows) while the cursor stands: OBS is not reading.
+    samples = [_sample(0.0, cursor=5000, backlog=3.0), _sample(2.0, cursor=5000, backlog=5.0),
+               _sample(4.0, cursor=5000, backlog=7.0)]
+    s = m.summarize(samples)
+    assert s["contaminated"] == [] and s["stall_fraction"] == 1.0
 
 
 def t_summarize_ignores_missing_values_instead_of_inventing_them():
-    samples = [_sample(0.0, fps=None, render_ms=None, backlog=None, rec_ms=None,
-                       rs=None, rt=None, os_=None, ot=None),
-               _sample(10.0, fps=None, render_ms=None, backlog=None, rec_ms=None,
-                       rs=None, rt=None, os_=None, ot=None)]
+    blank = dict(fps=None, render_ms=None, backlog=None, rec_ms=None, rs=None, rt=None,
+                 os_=None, ot=None, snaps=None)
+    samples = [_sample(0.0, **blank), _sample(10.0, **blank)]
+    for smp in samples:
+        smp["cursor_ms"] = None
     s = m.summarize(samples)
     assert s["samples"] == 2
     for key in ("render_ms_avg", "fps_avg", "fps_min", "render_skip_pct",
-                "encoder_skip_pct", "encoder_speed", "backlog_start_s",
-                "backlog_end_s", "backlog_max_s", "backlog_growth_s_per_min"):
+                "encoder_skip_pct", "encoder_speed", "playback_rate", "stall_fraction",
+                "backlog_floor_start_s", "backlog_floor_end_s", "backlog_max_s", "snaps"):
         assert s[key] is None, key
-
-
-def t_summarize_needs_two_backlog_points_for_a_growth_rate():
-    s = m.summarize([_sample(0.0, backlog=3.0), _sample(10.0, backlog=None)])
-    assert s["backlog_start_s"] == 3.0
-    assert s["backlog_growth_s_per_min"] is None
+    assert s["contaminated"] == []
 
 
 def t_summarize_of_nothing_is_empty_not_a_crash():
     s = m.summarize([])
     assert s["samples"] == 0 and s["duration_s"] is None and s["fps_avg"] is None
+    assert s["playback_rate"] is None and s["contaminated"] == []
 
 
 # --------------------------------------------------------------------------
-# real time: frame rate, encoder speed, and a backlog that does not grow
+# real time: frame rate, encoder speed and the media cursor
 # --------------------------------------------------------------------------
-def _summary(fps=60.0, speed=1.0, growth=0.0):
-    return {"fps_avg": fps, "encoder_speed": speed, "backlog_growth_s_per_min": growth}
+def _summary(fps=60.0, speed=1.0, rate=1.0, stall=0.0, contaminated=()):
+    return {"fps_avg": fps, "encoder_speed": speed, "playback_rate": rate,
+            "stall_fraction": stall, "contaminated": list(contaminated)}
 
 
 def t_keeps_real_time_on_a_healthy_window():
@@ -111,30 +152,33 @@ def t_keeps_real_time_on_a_healthy_window():
 def t_keeps_real_time_fails_on_each_failing_part():
     assert m.keeps_real_time(_summary(fps=50.0), 60.0) is False
     assert m.keeps_real_time(_summary(speed=0.9), 60.0) is False
-    assert m.keeps_real_time(_summary(growth=m.BACKLOG_GROWTH_WARN_S_PER_MIN + 0.5),
-                             60.0) is False
+    assert m.keeps_real_time(_summary(rate=0.8), 60.0) is False
+    assert m.keeps_real_time(_summary(stall=m.STALL_FRACTION_MAX + 0.05), 60.0) is False
 
 
 def t_keeps_real_time_at_the_thresholds_holds():
     assert m.keeps_real_time(_summary(fps=60.0 * m.REAL_TIME_FPS_RATIO,
                                       speed=m.ENCODER_SPEED_MIN,
-                                      growth=m.BACKLOG_GROWTH_WARN_S_PER_MIN), 60.0) is True
+                                      rate=m.PLAYBACK_RATE_MIN,
+                                      stall=m.STALL_FRACTION_MAX), 60.0) is True
 
 
-def t_keeps_real_time_without_a_frame_rate_is_unknown():
+def t_keeps_real_time_is_unknown_without_the_signals_it_needs():
     assert m.keeps_real_time(_summary(fps=None), 60.0) is None
     assert m.keeps_real_time(_summary(), None) is None
+    # without the cursor a frozen demuxer is indistinguishable from a healthy one
+    assert m.keeps_real_time(_summary(rate=None), 60.0) is None
 
 
-def t_keeps_real_time_without_a_backlog_judges_the_rest():
-    # No consumer attached (e.g. the feed was not on the program scene): the render
-    # and encoder numbers still answer the question for OBS itself.
-    assert m.keeps_real_time(_summary(growth=None), 60.0) is True
+def t_keeps_real_time_is_unknown_for_a_disturbed_window():
+    assert m.keeps_real_time(_summary(contaminated=["the ring lapped OBS 1 time(s)"]),
+                             60.0) is None
 
 
 def t_verdict_answers_the_calibration_question():
     v = m.verdict(_summary(fps=45.0), _summary(), 60.0)
-    assert v == {"full_real_time": False, "robust_real_time": True, "robust_recovers": True}
+    assert v["full_real_time"] is False and v["robust_real_time"] is True
+    assert v["robust_recovers"] is True and v["contaminated"] == {}
     v = m.verdict(_summary(fps=45.0), _summary(fps=45.0), 60.0)
     assert v["robust_recovers"] is False
     # FULL already holds real time: there is nothing for ROBUST to recover.
@@ -142,6 +186,12 @@ def t_verdict_answers_the_calibration_question():
     assert v["robust_recovers"] is None
     v = m.verdict(_summary(fps=45.0), _summary(fps=None), 60.0)
     assert v["robust_recovers"] is None
+
+
+def t_verdict_names_the_disturbed_tiers():
+    v = m.verdict(_summary(contaminated=["OBS reconnected the feed"]), _summary(), 60.0)
+    assert v["full_real_time"] is None
+    assert v["contaminated"] == {"full": ["OBS reconnected the feed"]}
 
 
 # --------------------------------------------------------------------------
@@ -216,11 +266,11 @@ def t_restore_tier_puts_a_pin_back_and_releases_an_unpinned_feed():
 # --------------------------------------------------------------------------
 # persisted result + preflight line
 # --------------------------------------------------------------------------
-def _record(ts=NOW, full_rt=True, robust_rt=True):
-    full = {**_summary(fps=60.0 if full_rt else 45.0), "render_ms_avg": 5.0,
-            "backlog_end_s": 3.1}
+def _record(ts=NOW, full_rt=True, robust_rt=True, contaminated=()):
+    full = {**_summary(fps=60.0 if full_rt else 45.0, contaminated=contaminated),
+            "render_ms_avg": 5.0, "backlog_floor_end_s": 3.1}
     robust = {**_summary(fps=60.0 if robust_rt else 45.0), "render_ms_avg": 4.0,
-              "backlog_end_s": 3.0}
+              "backlog_floor_end_s": 3.0}
     return {"ts": ts, "feed": "A", "platform": "youtube", "scene": "Stint",
             "fps_target": 60.0, "window_s": 60, "full": full, "robust": robust,
             "robust_extra_segments": 2,
@@ -273,9 +323,23 @@ def t_classify_respects_a_custom_max_age():
     assert r.level == m.WARN and "stale" in r.detail
 
 
-def t_render_names_both_tiers_and_the_upstream_cost():
+def t_classify_a_disturbed_run_warns_and_asks_for_a_rerun():
+    r = m.classify(_record(contaminated=["the ring lapped OBS 2 time(s)"]), NOW)
+    assert r.level == m.WARN
+    assert "disturbed" in r.detail and "ring lapped OBS" in r.detail
+
+
+def t_classify_reads_a_record_from_the_first_version():
+    # #613 records have no "contaminated" key in their verdict
+    old = _record()
+    del old["verdict"]["contaminated"]
+    assert m.classify(old, NOW).level == m.PASS
+
+
+def t_render_names_both_tiers_the_cursor_and_the_upstream_cost():
     text = m.render(_record(full_rt=False), NOW)
     assert "FULL" in text and "ROBUST" in text
+    assert "playback" in text
     assert "+2 HLS segments" in text
 
 
@@ -294,23 +358,31 @@ class _Clock:
 
 
 class _Relay:
-    """/status + POST /feed/<X>/quality. A tier switch starts a fresh serve that is
-    'connecting' for `reconnect_s`, then 'serving' from that moment on."""
-    def __init__(self, clock, status=None, reconnect_s=4.0, backlog=None, fail_on=None):
+    """/status + POST /feed/<X>/quality + POST /obs/feed-reset. A tier switch starts a
+    fresh serve that is 'connecting' for `reconnect_s`, then 'serving' from that moment
+    on. `snaps(tier, age)` is the cumulative consumer-snap count the relay reports."""
+    def __init__(self, clock, status=None, reconnect_s=4.0, backlog=None, fail_on=None,
+                 snaps=None):
         self.clock, self.reconnect_s, self.fail_on = clock, reconnect_s, fail_on
         self.st = status or _status()
         self.backlog = backlog or (lambda tier, t: 3.0)
-        self.calls, self.switched_at, self.tier = [], None, "full"
+        self.snaps = snaps or (lambda tier, t: 0)
+        self.calls, self.resets, self.switched_at, self.tier = [], [], None, "full"
+        self.switches = []
+        self.session = None                      # the OBS fake, rejoined by a reset
 
     def status(self):
         f = self.st["feeds"][self.st["live"]["feed"] or "A"]
+        f.setdefault("port", 53001)
+        f.setdefault("consumer_snaps", 0)
         if self.switched_at is not None:
             age = self.clock() - self.switched_at
             if age < self.reconnect_s:
                 f.update(state="connecting", state_age_s=age, backlog_s=None)
             else:
                 f.update(state="serving", state_age_s=age - self.reconnect_s,
-                         backlog_s=self.backlog(self.tier, age))
+                         backlog_s=self.backlog(self.tier, age),
+                         consumer_snaps=self.snaps(self.tier, age))
         return self.st
 
     def set_quality(self, feed, tier):
@@ -318,15 +390,41 @@ class _Relay:
         if self.fail_on == tier:
             raise RuntimeError("relay gone")
         self.tier, self.switched_at = tier, self.clock()
+        self.switches.append(self.switched_at)
         return {"feed": feed, "profile": tier, "pinned": tier != "auto"}
+
+    def feed_reset(self, feed):
+        self.resets.append((self.clock(), self.tier))
+        if self.session is not None:
+            self.session.rejoin()
+        return {"ok": True, "feed": feed}
 
 
 class _Session:
+    """obs-websocket stand-in. The "Feed A" media input on port 53001 plays at
+    `rate(tier)` of real time; a rejoin (feed reset) starts its cursor again at 0."""
     def __init__(self, clock, stream=False, recording=False, scene="Standby",
-                 fps=lambda tier: 60.0, relay=None, fail=None):
+                 fps=lambda tier: 60.0, relay=None, fail=None, rate=lambda tier: 1.0,
+                 inputs=None):
         self.clock, self.stream, self.recording, self.scene = clock, stream, recording, scene
         self.fps, self.relay, self.fail, self.sent = fps, relay, fail, []
-        self.rec_started, self.finalize_polls, self.active_at_remove = None, 0, None
+        self.rate, self.rec_started, self.finalize_polls = rate, None, 0
+        self.inputs = {"Feed A": "http://127.0.0.1:53001"} if inputs is None else inputs
+        self.cursor_ms, self.cursor_ts = 0.0, clock()
+        if relay is not None:
+            relay.session = self
+
+    def _tier(self):
+        return self.relay.tier if self.relay else "full"
+
+    def _advance(self):
+        now = self.clock()
+        self.cursor_ms += (now - self.cursor_ts) * 1000 * self.rate(self._tier())
+        self.cursor_ts = now
+
+    def rejoin(self):
+        self._advance()
+        self.cursor_ms = 0.0
 
     def request(self, kind, data=None):
         self.sent.append((kind, data or {}))
@@ -354,9 +452,15 @@ class _Session:
             # OBS answers StopRecord before the file is finalized (seen on 32.2.2)
             self.recording = "finalizing" if self.finalize_polls else False
             return {"outputPath": "/rec/benchmark.mkv"}
+        if kind == "GetInputList":
+            return {"inputs": [{"inputName": n} for n in self.inputs]}
+        if kind == "GetInputSettings":
+            return {"inputSettings": {"input": self.inputs[data["inputName"]]}}
+        if kind == "GetMediaInputStatus":
+            self._advance()
+            return {"mediaCursor": int(self.cursor_ms), "mediaState": "OBS_MEDIA_STATE_PLAYING"}
         if kind == "GetStats":
-            tier = self.relay.tier if self.relay else "full"
-            return {"activeFps": self.fps(tier), "averageFrameRenderTime": 5.0,
+            return {"activeFps": self.fps(self._tier()), "averageFrameRenderTime": 5.0,
                     "renderSkippedFrames": 0, "renderTotalFrames": int(self.clock() * 60),
                     "outputSkippedFrames": 0, "outputTotalFrames": int(self.clock() * 60)}
         return {}
@@ -389,15 +493,31 @@ def t_run_measures_both_tiers_and_restores_everything():
     assert ("SetCurrentProgramScene", {"sceneName": "Stint"}) in sess.sent
     assert removed == ["/rec/benchmark.mkv"]               # our own recording, not kept
     assert rec["full"]["fps_avg"] == 45.0 and rec["robust"]["fps_avg"] == 60.0
+    assert rec["full"]["playback_rate"] == 1.0 and rec["full"]["contaminated"] == []
     assert rec["full"]["reconnect_s"] == 4.0
     assert rec["verdict"] == {"full_real_time": False, "robust_real_time": True,
-                              "robust_recovers": True}
+                              "robust_recovers": True, "contaminated": {}}
     assert rec["robust_extra_segments"] == 2
     assert rec["fps_target"] == 60.0
     assert "recording" not in rec
 
 
-def t_run_samples_only_after_the_reconnect_and_the_settle():
+def t_run_rejoins_obs_after_each_switch_once_the_prefetch_has_landed():
+    # #614: a streamlink restart splices its HLS prefetch into OBS's open socket; OBS
+    # would play it and sit that far behind the live edge. The benchmark rejoins OBS
+    # after the prefetch has arrived, for each tier and again after restoring.
+    clock = _Clock()
+    relay = _Relay(clock)
+    sess = _Session(clock, relay=relay)
+    with tempfile.TemporaryDirectory() as d:
+        _run(d, clock, relay, sess)
+    assert [tier for _, tier in relay.resets] == ["full", "robust", "auto"]
+    for (at, _tier), switch in zip(relay.resets, relay.switches, strict=True):
+        # reconnect (4 s) + prefetch landing: never before the new serve has delivered
+        assert at >= switch + 4.0 + m.PREFETCH_LAND_S, (at, switch)
+
+
+def t_run_samples_only_after_the_reconnect_the_rejoin_and_the_settle():
     clock = _Clock()
     # the backlog reads as the serve's age, so the first sample shows when sampling began
     relay = _Relay(clock, backlog=lambda tier, age: round(age, 1))
@@ -405,8 +525,8 @@ def t_run_samples_only_after_the_reconnect_and_the_settle():
     with tempfile.TemporaryDirectory() as d:
         rec, _ = _run(d, clock, relay, sess)
     for tier in m.TIERS:
-        # reconnect (4 s) + settle (5 s): nothing from the rejoin transient
-        assert rec[tier]["backlog_start_s"] == 9.0, rec[tier]
+        # reconnect (4 s) + prefetch landing + settle (5 s)
+        assert rec[tier]["backlog_floor_start_s"] == 4.0 + m.PREFETCH_LAND_S + 5.0, rec[tier]
         assert rec[tier]["samples"] >= 10 and rec[tier]["duration_s"] >= 20.0
 
 
@@ -427,15 +547,43 @@ def t_run_accepts_a_serve_that_came_up_before_the_switch_reply():
     assert rec["full"]["reconnect_s"] == 0.5 and rec["robust"]["reconnect_s"] == 0.5
 
 
-def t_run_measures_the_backlog_growth_per_tier():
+def t_run_catches_a_frozen_demuxer_that_fps_and_encoder_miss():
     clock = _Clock()
-    relay = _Relay(clock, backlog=lambda tier, age: 3.0 + (age / 60.0 * 6 if tier == "full" else 0))
+    relay = _Relay(clock)
+    # FULL: OBS renders 60 fps and records in real time, but the feed's cursor stands still
+    sess = _Session(clock, relay=relay, rate=lambda tier: 0.0 if tier == "full" else 1.0)
+    with tempfile.TemporaryDirectory() as d:
+        rec, _ = _run(d, clock, relay, sess)
+    assert rec["full"]["fps_avg"] == 60.0 and rec["full"]["encoder_speed"] == 1.0
+    assert rec["full"]["playback_rate"] == 0.0 and rec["full"]["stall_fraction"] == 1.0
+    assert rec["verdict"]["full_real_time"] is False
+    assert rec["verdict"]["robust_real_time"] is True
+
+
+def t_run_marks_a_window_the_ring_lapped_as_disturbed():
+    clock = _Clock()
+    relay = _Relay(clock, snaps=lambda tier, age: int(age // 10) if tier == "full" else 0)
     sess = _Session(clock, relay=relay)
     with tempfile.TemporaryDirectory() as d:
         rec, _ = _run(d, clock, relay, sess)
-    assert rec["full"]["backlog_growth_s_per_min"] == 6.0
-    assert rec["robust"]["backlog_growth_s_per_min"] == 0.0
-    assert rec["verdict"]["full_real_time"] is False
+    assert rec["full"]["contaminated"] and "ring lapped OBS" in rec["full"]["contaminated"][0]
+    assert rec["verdict"]["full_real_time"] is None
+    assert rec["robust"]["contaminated"] == []
+
+
+def t_run_refuses_when_obs_has_no_input_on_the_feed_port():
+    clock = _Clock()
+    relay = _Relay(clock)
+    sess = _Session(clock, relay=relay, inputs={"Something": "http://127.0.0.1:9999"})
+    with tempfile.TemporaryDirectory() as d:
+        try:
+            _run(d, clock, relay, sess)
+        except m.BenchmarkRefused as exc:
+            assert "53001" in str(exc)
+        else:
+            raise AssertionError("expected BenchmarkRefused")
+    assert relay.calls == []
+    assert [k for k, _ in sess.sent if k.startswith(("Set", "Start", "Stop"))] == []
 
 
 def t_run_deletes_the_recording_only_after_obs_has_finished_it():
@@ -548,6 +696,31 @@ def t_run_restores_on_an_interrupt():
             raise AssertionError("expected KeyboardInterrupt")
     assert sess.recording is False and sess.scene == "Standby"
     assert relay.calls[-1] == ("A", "auto")
+
+
+def t_run_does_not_hold_an_interrupted_run_for_the_rejoin():
+    # Ctrl-C once: the cleanup restores everything but does not wait up to 95 s for the
+    # restored serve to rejoin OBS; it tells the operator to press RESET instead.
+    clock = _Clock()
+    relay = _Relay(clock)
+    sess = _Session(clock, relay=relay)
+    fired, said = [], []
+
+    def sleep(s):
+        if not fired:
+            fired.append(True)
+            raise KeyboardInterrupt
+        clock.sleep(s)
+
+    with tempfile.TemporaryDirectory() as d:
+        try:
+            m.run(relay, sess, d, flags=FLAGS, clock=clock, sleep=sleep, now=lambda: NOW,
+                  remove=lambda p: None, isfile=lambda p: True, progress=said.append)
+        except KeyboardInterrupt:
+            pass  # the interrupt must reach the caller after the restore
+    assert relay.calls[-1] == ("A", "auto")
+    assert relay.resets == []                              # no rejoin wait after Ctrl-C
+    assert any("RESET" in s for s in said), said
 
 
 def t_run_says_when_it_releases_an_automatic_step_down():

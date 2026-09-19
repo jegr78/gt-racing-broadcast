@@ -195,14 +195,15 @@ def t_parse_benchmark_args_defaults_and_flags():
     assert m._parse_benchmark_args([]) == {
         "window_s": ob.DEFAULT_WINDOW_S, "settle_s": ob.DEFAULT_SETTLE_S,
         "scene": obs_ws.STINT_SCENE, "keep_recording": False, "json": False}
-    o = m._parse_benchmark_args(["--window", "90", "--settle", "0", "--scene", "Split",
+    o = m._parse_benchmark_args(["--window", "90", "--settle", "3", "--scene", "Split",
                                  "--keep-recording", "--json"])
-    assert o == {"window_s": 90, "settle_s": 0, "scene": "Split",
+    assert o == {"window_s": 90, "settle_s": 3, "scene": "Split",
                  "keep_recording": True, "json": True}
 
 
 def t_parse_benchmark_args_rejects_bad_input():
-    for bad in (["--window"], ["--window", "x"], ["--window", "5"], ["--settle", "-1"],
+    # #618: OBS rebuilds its input after the rejoin; a settle below 3 s samples that
+    for bad in (["--window"], ["--window", "x"], ["--window", "5"], ["--settle", "2"],
                 ["--scene"], ["--bogus"]):
         try:
             m._parse_benchmark_args(bad)
@@ -238,6 +239,24 @@ def t_benchmark_relay_raises_when_the_relay_refuses_a_tier():
     finally:
         m._relay_post_json = old
     assert sent == [("http://relay/feed/A/quality", {"tier": "robust"})]
+
+
+def t_benchmark_relay_rejoins_obs_through_the_feed_reset():
+    old = m._relay_post_json
+    sent = []
+    m._relay_post_json = lambda url, body, timeout=3: sent.append((url, body)) or {
+        "ok": True, "feed": "A"}
+    try:
+        m._BenchmarkRelay("http://relay").feed_reset("A")
+        m._relay_post_json = lambda url, body, timeout=3: {"ok": False, "error": "no OBS"}
+        try:
+            m._BenchmarkRelay("http://relay").feed_reset("A")
+            raise AssertionError("expected RuntimeError")
+        except RuntimeError as exc:
+            assert "no OBS" in str(exc)
+    finally:
+        m._relay_post_json = old
+    assert sent == [("http://relay/obs/feed-reset", {"feed": "A"})]
 
 
 def t_obs_refresh_cmd_exits_when_relay_down():
