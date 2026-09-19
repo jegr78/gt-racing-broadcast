@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.11.0](https://github.com/jegr78/gt-racing-broadcast/compare/v1.10.0...v1.11.0) (2026-09-19)
+
+
+### Features
+
+* **obs:** add racecast obs benchmark for FULL vs ROBUST on the host ([#613](https://github.com/jegr78/gt-racing-broadcast/issues/613)) ([f5b758c](https://github.com/jegr78/gt-racing-broadcast/commit/f5b758caab0278cf431b36b9c968eb7854772cdc))
+* **obs:** open the commentary mic while a local stint is on air ([#604](https://github.com/jegr78/gt-racing-broadcast/issues/604)) ([9a46bb8](https://github.com/jegr78/gt-racing-broadcast/commit/9a46bb82830048b94365e2306c18f7d5e1f92ec1))
+* **obs:** resolve STINT A/B on the relay for the panel and Companion alike ([#605](https://github.com/jegr78/gt-racing-broadcast/issues/605)) ([15c0562](https://github.com/jegr78/gt-racing-broadcast/commit/15c0562d0eda0a02ed820fb0bb93c22ad8fa0930))
+* **obs:** resolve the Splitscreen's visibility and audio on the relay ([#601](https://github.com/jegr78/gt-racing-broadcast/issues/601)) ([e1e7d48](https://github.com/jegr78/gt-racing-broadcast/commit/e1e7d4810cf1b3632e9c41118c36c2551556b5ff))
+* **panel:** show the feed reset as the backlog fix, with its cost ([#612](https://github.com/jegr78/gt-racing-broadcast/issues/612)) ([00a2559](https://github.com/jegr78/gt-racing-broadcast/commit/00a25590f72b2172826ebeb53418ecb0092a36c1))
+* **relay:** measure how far OBS is behind the fan-out live edge ([#610](https://github.com/jegr78/gt-racing-broadcast/issues/610)) ([6d3ff55](https://github.com/jegr78/gt-racing-broadcast/commit/6d3ff55d05026f3865e2abe92071d5fd12e8ddd1))
+* **relay:** serve a local capture device as a feed ([#602](https://github.com/jegr78/gt-racing-broadcast/issues/602)) ([5c72e00](https://github.com/jegr78/gt-racing-broadcast/commit/5c72e00d12824ba43c8e727c34f97e284a097e87))
+
+
+### Bug Fixes
+
+* **cli:** open the browser without the frozen library path ([#579](https://github.com/jegr78/gt-racing-broadcast/issues/579)) ([f9aa243](https://github.com/jegr78/gt-racing-broadcast/commit/f9aa2434334e364290f66c5750eca80cd374ee80))
+* **companion:** resolve the SPLIT button's audio from the on-air feed ([#599](https://github.com/jegr78/gt-racing-broadcast/issues/599)) ([171ae9c](https://github.com/jegr78/gt-racing-broadcast/commit/171ae9c760805e01aa42b2fb557b84563b87873f))
+* **obs:** judge the benchmark by the media cursor and rejoin OBS after each restart ([#618](https://github.com/jegr78/gt-racing-broadcast/issues/618)) ([fe06176](https://github.com/jegr78/gt-racing-broadcast/commit/fe06176daaab5689a09176a5e81873d9dfcc6d1a))
+* **obs:** narrow the benchmark's final-rejoin catch to errors and Ctrl-C ([#620](https://github.com/jegr78/gt-racing-broadcast/issues/620)) ([b0c2987](https://github.com/jegr78/gt-racing-broadcast/commit/b0c298762ecb42aa677f6c5df607f91309dc8f1c))
+* **relay:** default a local feed's game audio to the capture card's own device ([#603](https://github.com/jegr78/gt-racing-broadcast/issues/603)) ([fe264e5](https://github.com/jegr78/gt-racing-broadcast/commit/fe264e50fb2b73fdda0fe080f8d401b46efa5b08))
+* **relay:** send the fMP4 init segment to every mid-stream feed consumer ([#607](https://github.com/jegr78/gt-racing-broadcast/issues/607)) ([3146724](https://github.com/jegr78/gt-racing-broadcast/commit/314672471a27bdaa361fc96e892d24ceb3df268d))
+* **relay:** stop repeating OBS rebuilds that do not help ([#609](https://github.com/jegr78/gt-racing-broadcast/issues/609)) ([86ff302](https://github.com/jegr78/gt-racing-broadcast/commit/86ff3020c7633a3e5d4c903eca795a2a995e1c82))
+* **report:** windowed render metric and a backlog-led finding ([#611](https://github.com/jegr78/gt-racing-broadcast/issues/611)) ([4694210](https://github.com/jegr78/gt-racing-broadcast/commit/4694210ca8a4a4154754eb7ef87c05ee8046c99c))
+* **setup:** share the capture card source for the tyres/fuel crop ([#600](https://github.com/jegr78/gt-racing-broadcast/issues/600)) ([4a98921](https://github.com/jegr78/gt-racing-broadcast/commit/4a98921a2e6fc68c6f530c52c958a26839c8c0f8))
+
 ## [1.10.0](https://github.com/jegr78/gt-racing-broadcast/compare/v1.9.0...v1.10.0) (2026-08-28)
 
 
