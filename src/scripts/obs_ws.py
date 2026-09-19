@@ -629,6 +629,18 @@ def parse_obs_stats(payload):
     }
 
 
+def parse_video_settings(payload):
+    """OBS's configured frame rate from a GetVideoSettings response (#586): the
+    reference the measured activeFps is judged against. fpsNumerator/fpsDenominator
+    (e.g. 60000/1001 -> 59.94); missing or non-positive -> None."""
+    p = payload or {}
+    num, den = p.get("fpsNumerator"), p.get("fpsDenominator")
+    if not isinstance(num, (int, float)) or not isinstance(den, (int, float)) \
+            or num <= 0 or den <= 0:
+        return {"obs_fps_target": None}
+    return {"obs_fps_target": round(num / den, 3)}
+
+
 def parse_stream_status(payload):
     """Flatten a GetStreamStatus response. outputBytes is returned raw (the caller
     derives kbps from successive samples); missing keys -> None."""
@@ -678,8 +690,9 @@ def stream_service_payload(platform, key):
 
 def get_health_stats(host="127.0.0.1", port=None, password=None, timeout=2.0, session=None):
     """One obs-websocket session -> (reachable, stats, note). `stats` is the merged
-    parse_obs_stats + parse_stream_status dict (empty {} when the requests fail but
-    the session opened). Best-effort: never raises (same contract as probe())."""
+    parse_obs_stats + parse_stream_status + parse_video_settings dict (empty {} when
+    the stats requests fail but the session opened). Best-effort: never raises (same
+    contract as probe())."""
     note = ""
     own = session is None
     if own:
@@ -687,11 +700,17 @@ def get_health_stats(host="127.0.0.1", port=None, password=None, timeout=2.0, se
     if session is None:
         return False, {}, note
     try:
-        stats = parse_obs_stats(session.request("GetStats", {}))
-        stats.update(parse_stream_status(session.request("GetStreamStatus", {})))
+        try:
+            stats = parse_obs_stats(session.request("GetStats", {}))
+            stats.update(parse_stream_status(session.request("GetStreamStatus", {})))
+        except Exception as exc:                     # noqa: BLE001 — best-effort contract
+            return True, {}, str(exc) or exc.__class__.__name__
+        try:
+            # Losing the fps reference must never lose the stats above (#586).
+            stats.update(parse_video_settings(session.request("GetVideoSettings", {})))
+        except Exception:                            # noqa: BLE001 — best-effort contract
+            stats["obs_fps_target"] = None
         return True, stats, ""
-    except Exception as exc:                         # noqa: BLE001 — best-effort contract
-        return True, {}, str(exc) or exc.__class__.__name__
     finally:
         if own:
             session.close()

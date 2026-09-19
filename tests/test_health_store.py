@@ -654,7 +654,7 @@ def t_migrate_adds_backlog_columns_v9_lossless_and_charted():
     conn = hs.open_db(path)
     try:
         hs.migrate(conn)
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == hs.SCHEMA_VERSION == 9
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == hs.SCHEMA_VERSION
         cols = {r[1] for r in conn.execute("PRAGMA table_info(samples)").fetchall()}
         assert {"feed_a_backlog_s", "feed_b_backlog_s", "pov_backlog_s"} <= cols, cols
         row = conn.execute("SELECT feed_a_max_gap_s, feed_a_backlog_s, feed_b_backlog_s, "
@@ -675,6 +675,51 @@ def t_migrate_adds_backlog_columns_v9_lossless_and_charted():
             assert f in series, f                    # NUMERIC_FIELDS wired
     finally:
         conn2.close()
+
+
+def t_migrate_adds_fps_target_column_v10_lossless():
+    # #586: the configured OBS frame rate, the reference the report judges obs_fps by.
+    import sqlite3
+    d = tempfile.mkdtemp()
+    path = os.path.join(d, "h.db")
+    c = sqlite3.connect(path)
+    try:
+        c.executescript("CREATE TABLE samples (ts REAL NOT NULL, kind TEXT NOT NULL, "
+                        "obs_fps REAL, feed_a_backlog_s REAL);")
+        c.execute("PRAGMA user_version=9")
+        c.execute("INSERT INTO samples (ts, kind, obs_fps) VALUES (?,?,?)", (1000.0, "tick", 45.8))
+        c.commit()
+    finally:
+        c.close()
+    conn = hs.open_db(path)
+    try:
+        hs.migrate(conn)
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == hs.SCHEMA_VERSION == 10
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(samples)").fetchall()}
+        assert "obs_fps_target" in cols, cols
+        row = conn.execute("SELECT obs_fps, obs_fps_target FROM samples").fetchone()
+        assert tuple(row) == (45.8, None)               # lossless; new column NULL
+    finally:
+        conn.close()
+    conn2 = hs.open_db(os.path.join(d, "fresh.db"))
+    try:
+        hs.migrate(conn2)
+        hs.record(conn2, {"ts": 2000.0, "obs_fps": 59.9, "obs_fps_target": 60.0}, "tick")
+        got = hs.query_range(conn2, 1500, 2500)[0]
+        assert (got["obs_fps"], got["obs_fps_target"]) == (59.9, 60.0)
+    finally:
+        conn2.close()
+
+
+def t_backlog_rule_is_shared_with_the_relay_definition():
+    # #586: the report's verdict and the relay's yellow reason apply one definition.
+    assert hs.feed_backlog_degraded(8.0, 3.0, 5.0) is False     # exactly at the threshold
+    assert hs.feed_backlog_degraded(8.1, 3.0, 5.0) is True
+    assert hs.feed_backlog_degraded(None, 3.0, 5.0) is False
+    assert hs.feed_prebuffer_s({}) == hs.DEFAULT_FEED_PREBUFFER_S == 3.0
+    assert hs.feed_backlog_warn_s({"RACECAST_FEED_BACKLOG_WARN_S": "8"}) == 8.0
+    assert hs.feed_backlog_warn_s({}) == hs.FEED_BACKLOG_WARN_S == 5.0
+
 
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):

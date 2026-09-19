@@ -488,5 +488,161 @@ def run():
     print("ALL PASS")
 
 
+
+# ---- #586: windowed render metric, fps against the configured rate, backlog verdict ----
+
+def _broadcast(n, **kw):
+    """n on-air samples, 30 s apart, on Feed A stint 1, with the given fields."""
+    return [_sample(i * 30.0, live_stint=1, live_feed="A", **kw) for i in range(n)]
+
+
+def t_quality_uses_the_windowed_render_skip_rate_not_the_cumulative_counter():
+    # 2026-08-28: OBS had run for 11 h before the broadcast, so the cumulative counter
+    # showed 1.8% while 23.5% of the broadcast's frames were skipped.
+    samples = _broadcast(4, obs_render_skipped_pct=1.8, obs_render_skip_rate_pct=23.5)
+    q = rb.build_report(samples, [], {}, "E", (0.0, 90.0), now=1000.0)["quality"]
+    assert (q["render_skip_rate_avg"], q["render_skip_rate_peak"]) == (23.5, 23.5), q
+    assert "render_skipped_pct_peak" not in q
+    html = rb.render_html(rb.build_report(samples, [], {}, "E", (0.0, 90.0), now=1000.0))
+    assert "23.5" in html and "1.8" not in html
+
+
+def t_quality_render_skip_rate_is_windowed_to_on_air():
+    # Off-air samples (before the part started) never enter the windowed figure.
+    samples = [_sample(0.0, obs_render_skip_rate_pct=90.0)] + \
+        [_sample(t, live_stint=1, live_feed="A", obs_render_skip_rate_pct=2.0)
+         for t in (100.0, 130.0, 160.0)]
+    events = [{"ts": 100.0, "type": "part_start"}, {"ts": 160.0, "type": "part_end"}]
+    q = rb.build_report(samples, events, {}, "E", (0.0, 160.0), now=1000.0)["quality"]
+    assert (q["render_skip_rate_avg"], q["render_skip_rate_peak"]) == (2.0, 2.0), q
+
+
+def t_quality_flags_fps_below_the_configured_rate():
+    q = rb.build_report(_broadcast(3, obs_fps=45.8, obs_fps_target=60.0), [], {}, "E",
+                        (0.0, 60.0), now=1000.0)["quality"]
+    assert (q["obs_fps_avg"], q["obs_fps_target"], q["obs_fps_low"]) == (45.8, 60.0, True), q
+
+
+def t_quality_does_not_flag_fps_at_the_configured_rate():
+    q = rb.build_report(_broadcast(3, obs_fps=59.9, obs_fps_target=60.0), [], {}, "E",
+                        (0.0, 60.0), now=1000.0)["quality"]
+    assert (q["obs_fps_target"], q["obs_fps_low"]) == (60.0, False), q
+
+
+def t_quality_without_a_recorded_target_does_not_flag():
+    # A DB from before v10 has no configured rate: no flag, and the page says why.
+    rep = rb.build_report(_broadcast(3, obs_fps=45.8), [], {}, "E", (0.0, 60.0), now=1000.0)
+    q = rep["quality"]
+    assert (q["obs_fps_target"], q["obs_fps_low"]) == (None, False), q
+    assert "so OBS FPS is not checked against it" in rb.render_html(rep)
+
+
+def t_render_html_shows_fps_against_the_target():
+    rep = rb.build_report(_broadcast(3, obs_fps=45.8, obs_fps_target=60.0), [], {}, "E",
+                          (0.0, 60.0), now=1000.0)
+    assert "45.8 of 60" in rb.render_html(rep)
+
+
+def t_backlog_counts_only_the_on_air_feed():
+    # Feed B lagging while Feed A is on air is invisible to the audience: 0 s behind.
+    samples = _broadcast(4, feed_a_backlog_s=3.1, feed_b_backlog_s=25.0)
+    b = rb.build_report(samples, [], {}, "E", (0.0, 90.0), now=1000.0)["backlog"]
+    assert (b["behind_s"], b["peak_s"]) == (0.0, 3.1), b
+
+
+def t_backlog_behind_live_duration_and_peak():
+    # Behind = floor beyond the reserve (3 s) by more than the threshold (5 s).
+    samples = [_sample(0.0, live_feed="A", live_stint=1, feed_a_backlog_s=3.0),
+               _sample(30.0, live_feed="A", live_stint=1, feed_a_backlog_s=12.0),
+               _sample(60.0, live_feed="A", live_stint=1, feed_a_backlog_s=19.0),
+               _sample(90.0, live_feed="A", live_stint=1, feed_a_backlog_s=3.2)]
+    b = rb.build_report(samples, [], {}, "E", (0.0, 90.0), now=1000.0)["backlog"]
+    assert (b["behind_s"], b["peak_s"]) == (60.0, 19.0), b
+
+
+def t_backlog_uses_the_given_thresholds():
+    samples = _broadcast(3, feed_a_backlog_s=10.0)
+    loose = rb.build_report(samples, [], {}, "E", (0.0, 60.0), now=1000.0,
+                            prebuffer_s=3.0, backlog_warn_s=8.0)["backlog"]
+    strict = rb.build_report(samples, [], {}, "E", (0.0, 60.0), now=1000.0,
+                             prebuffer_s=3.0, backlog_warn_s=5.0)["backlog"]
+    assert (loose["behind_s"], strict["behind_s"]) == (0.0, 60.0), (loose, strict)
+
+
+def t_backlog_none_when_never_recorded():
+    rep = rb.build_report(_broadcast(3), [], {}, "E", (0.0, 60.0), now=1000.0)
+    assert rep["backlog"] is None
+
+
+def t_finding_leads_with_the_backlog_then_the_frame_rate():
+    samples = _broadcast(4, feed_a_backlog_s=19.0, obs_fps=45.8, obs_fps_target=60.0,
+                         obs_render_skip_rate_pct=23.5)
+    rep = rb.build_report(samples, [], {}, "E", (0.0, 90.0), now=1000.0)
+    f = rep["finding"]
+    assert f["level"] == "red", f
+    assert f["headline"] == "Output ran behind live for 1m 30s of 1m 30s on air, peak 19.0 s.", f
+    assert f["cause"] == ("OBS rendered 45.8 of the configured 60 fps and skipped 23.5% of "
+                          "its frames, so the output fell behind real time."), f
+    html = rb.render_html(rep)
+    assert f["headline"] in html and "Finding" in html
+    assert html.index(f["headline"]) < html.index("On air per commentator")
+    assert f"{f['headline']} {f['cause']}" in rb.render_summary_text(rep)
+
+
+def t_finding_points_at_consumer_events_only_when_the_report_lists_them():
+    samples = _broadcast(4, feed_a_backlog_s=19.0, obs_fps=60.0, obs_fps_target=60.0)
+    bare = rb.build_report(samples, [], {}, "E", (0.0, 90.0), now=1000.0)["finding"]
+    assert bare["cause"] == ("OBS held its configured frame rate (60 of 60 fps), so the "
+                             "frame rate does not explain the backlog."), bare
+    ev = [{"ts": 30.0, "type": "fanout_overflow", "metadata": {"feed": "A", "snaps": 2}}]
+    listed = rb.build_report(samples, ev, {}, "E", (0.0, 90.0), now=1000.0)
+    assert listed["finding"]["cause"].endswith("see the OBS consumer events below."), listed
+    assert "OBS consumer events" in rb.render_html(listed)
+
+
+def t_finding_frame_rate_only_when_no_backlog_recorded():
+    rep = rb.build_report(_broadcast(3, obs_fps=45.8, obs_fps_target=60.0), [], {}, "E",
+                          (0.0, 60.0), now=1000.0)
+    f = rep["finding"]
+    assert f["level"] == "yellow", f
+    assert f["headline"] == "OBS rendered 45.8 of the configured 60 fps.", f
+    assert "not recorded" in f["cause"], f
+
+
+def t_finding_clean_session():
+    rep = rb.build_report(_broadcast(3, feed_a_backlog_s=3.1, obs_fps=60.0,
+                                     obs_fps_target=60.0), [], {}, "E", (0.0, 60.0),
+                          now=1000.0)
+    f = rep["finding"]
+    assert f["level"] == "green", f
+    assert f["headline"] == "Output stayed at the live edge (peak 3.1 s behind live).", f
+
+
+def t_finding_none_without_backlog_or_fps():
+    rep = rb.build_report(_broadcast(3), [], {}, "E", (0.0, 60.0), now=1000.0)
+    assert rep["finding"] is None
+    assert "Finding" not in rb.render_html(rep)
+
+
+def t_finding_notes_the_handover_effect():
+    # A backlog clears at every stint change; without one it only grows.
+    one = [_sample(0.0, live_feed="A", live_stint=1, feed_a_backlog_s=3.0),
+           _sample(30.0, live_feed="B", live_stint=2, feed_b_backlog_s=3.0)]
+    none_ = _broadcast(2, feed_a_backlog_s=3.0)
+    h1 = rb.build_report(one, [], {}, "E", (0.0, 30.0), now=1000.0)["finding"]["handover_note"]
+    h0 = rb.build_report(none_, [], {}, "E", (0.0, 30.0), now=1000.0)["finding"]["handover_note"]
+    assert "1 handover" in h1, h1
+    assert "no handover" in h0, h0
+
+
+def t_discord_payload_carries_the_finding():
+    rep = rb.build_report(_broadcast(4, feed_a_backlog_s=19.0), [], {}, "E", (0.0, 90.0),
+                          now=1000.0)
+    f = rep["finding"]
+    assert rb.report_finding_text(rep) == f"{f['headline']} {f['cause']}"
+    assert rb.report_finding_text(rb.build_report(_broadcast(2), [], {}, "E", (0.0, 30.0),
+                                                  now=1000.0)) == ""
+
+
 if __name__ == "__main__":
     run()

@@ -105,13 +105,31 @@ def _peak(xs):
     return round(max(xs), 1) if xs else None
 
 
+# #586: OBS counts as below its configured frame rate when the broadcast average falls
+# more than 2% short of it (60 -> under 58.8). A healthy OBS holds its rate to a
+# fraction of a frame, so this only catches a real shortfall.
+FPS_LOW_RATIO = 0.98
+
+
+def _fps_target(samples):
+    """The configured OBS frame rate over the window (the most frequent recorded value),
+    or None when no sample recorded one (a DB from before health-store v10)."""
+    targets = _num(samples, "obs_fps_target")
+    return max(set(targets), key=targets.count) if targets else None
+
+
 def _quality(samples):
     kbps = _num(samples, "stream_kbps")
     dropped = _num(samples, "stream_dropped_pct")
     cong = _num(samples, "stream_congestion")
     cpu = _num(samples, "obs_cpu_pct")
     fps = _num(samples, "obs_fps")
-    rskip = _num(samples, "obs_render_skipped_pct")
+    # #586: the per-interval render-skip rate, averaged over the on-air samples. NOT
+    # obs_render_skipped_pct: that counter runs from OBS start, so hours of idle OBS
+    # before a broadcast dilute it (1.8% shown for a 23.5% broadcast on 2026-08-28).
+    # The DB keeps no raw frame counts, so a mean of interval rates is the windowed
+    # figure. Every other metric here is instantaneous or resets with the output.
+    rskip = _num(samples, "obs_render_skip_rate_pct")
     # #536: host machine metrics (already sampled into health-history.db). Network is
     # stored as kbps -> shown as Mbps to match btop / readability.
     sys_cpu = _num(samples, "sys_cpu_pct")
@@ -123,16 +141,113 @@ def _quality(samples):
     gaps = _num(samples, "feed_a_max_gap_s") + _num(samples, "feed_b_max_gap_s")
     if not any([kbps, dropped, cong, cpu, fps, rskip, sys_cpu, sys_mem, net_down, net_up, gaps]):
         return None
+    fps_avg, target = _avg(fps), _fps_target(samples)
+    fps_low = fps_avg is not None and target is not None and fps_avg < target * FPS_LOW_RATIO
     return {"stream_kbps_avg": _avg(kbps), "stream_kbps_peak": _peak(kbps),
             "dropped_pct_avg": _avg(dropped), "dropped_pct_peak": _peak(dropped),
             "congestion_avg": _avg(cong),
             "obs_cpu_avg": _avg(cpu), "obs_cpu_peak": _peak(cpu),
-            "obs_fps_avg": _avg(fps), "render_skipped_pct_peak": _peak(rskip),
+            "obs_fps_avg": fps_avg, "obs_fps_target": target, "obs_fps_low": fps_low,
+            "render_skip_rate_avg": _avg(rskip), "render_skip_rate_peak": _peak(rskip),
             "sys_cpu_avg": _avg(sys_cpu), "sys_cpu_peak": _peak(sys_cpu),
             "sys_mem_avg": _avg(sys_mem), "sys_mem_peak": _peak(sys_mem),
             "net_down_avg": _avg(net_down), "net_down_peak": _peak(net_down),
             "net_up_avg": _avg(net_up), "net_up_peak": _peak(net_up),
             "inbound_gap_peak": _peak(gaps)}
+
+
+def _on_air_backlog(sample):
+    """The consumer backlog (s) of the feed that was on air in this sample, or None.
+    Only the on-air feed's backlog reaches the audience; the off-air feed is not
+    watched by anyone, whatever its ring holds."""
+    live = (sample.get("live_feed") or "").upper()
+    if live not in ("A", "B"):
+        return None
+    return sample.get(f"feed_{live.lower()}_backlog_s")
+
+
+def _backlog(sample_groups, prebuffer_s, warn_s):
+    """#586: how long the on-air output ran behind live, and the worst it got.
+
+    "Behind live" is the relay's own rule (health_store.feed_backlog_degraded), so the
+    report counts exactly the time the director saw the yellow reason. Durations are
+    built per on-air window like the other bands. The stored value is the smallest
+    backlog in each heartbeat interval, so the peak is a lower bound. None when no
+    sample recorded a backlog (fan-out off, or a relay from before #583)."""
+    floors = []
+    behind_s = 0.0
+    for samples in sample_groups:
+        pts = []
+        for s in samples:
+            fl = _on_air_backlog(s)
+            if fl is not None:
+                floors.append(fl)
+            pts.append((s["ts"], 1 if hs.feed_backlog_degraded(fl, prebuffer_s, warn_s)
+                        else 0))
+        bands = _fill_gaps(hs.collapse_bands(pts))
+        behind_s += sum(b["to"] - b["from"] for b in bands if b["state"])
+    if not floors:
+        return None
+    return {"behind_s": round(behind_s, 1), "peak_s": _peak(floors),
+            "prebuffer_s": prebuffer_s, "warn_s": warn_s}
+
+
+def _fmt_fps(v):
+    """60.0 -> '60', 59.94 -> '59.94', 45.8 -> '45.8'."""
+    return f"{v:g}"
+
+
+def _finding(backlog, quality, on_air_s, handovers, consumer_events=0):
+    """#586: the report's verdict, backlog first. The backlog is what the audience and
+    the commentators lived through; the frame rate is why. None when neither was
+    recorded. `level` is green/yellow/red for the page's colour only. `consumer_events`
+    is how many OBS consumer events the report lists, the only lead when the frame
+    rate does not explain a backlog."""
+    q = quality or {}
+    fps, target, low = q.get("obs_fps_avg"), q.get("obs_fps_target"), q.get("obs_fps_low")
+    rate = q.get("render_skip_rate_avg")
+    if backlog is None and fps is None:
+        return None
+    if low:
+        fps_line = f"OBS rendered {_fmt_fps(fps)} of the configured {_fmt_fps(target)} fps"
+    elif fps is not None and target is not None:
+        fps_line = (f"OBS held its configured frame rate ({_fmt_fps(fps)} of "
+                    f"{_fmt_fps(target)} fps)")
+    elif fps is not None:
+        fps_line = (f"OBS rendered {_fmt_fps(fps)} fps (its configured frame rate was "
+                    f"not recorded)")
+    else:
+        fps_line = "The OBS frame rate was not recorded"
+    if backlog is not None and backlog["behind_s"] > 0:
+        level = "red"
+        headline = (f"Output ran behind live for {_fmt_dur(backlog['behind_s'])} of "
+                    f"{_fmt_dur(on_air_s)} on air, peak {backlog['peak_s']:.1f} s.")
+        if low:
+            skipped = f" and skipped {rate}% of its frames" if rate else ""
+            cause = f"{fps_line}{skipped}, so the output fell behind real time."
+        elif consumer_events:
+            cause = f"{fps_line}; see the OBS consumer events below."
+        else:
+            cause = f"{fps_line}, so the frame rate does not explain the backlog."
+    elif backlog is not None:
+        level = "yellow" if low else "green"
+        headline = (f"Output stayed at the live edge (peak {backlog['peak_s']:.1f} s "
+                    f"behind live).")
+        cause = f"{fps_line}."
+    else:
+        level = "yellow" if low else "green"
+        headline = f"{fps_line}."
+        cause = ("How far the output ran behind live was not recorded (feed fan-out "
+                 "off, or a relay from before it was measured), so its effect on the "
+                 "audience is unknown.")
+    if handovers:
+        handover_note = (f"A backlog clears at every stint handover; this session had "
+                         f"{handovers} handover{'s' if handovers != 1 else ''}.")
+    else:
+        handover_note = ("A backlog clears at every stint handover; this session had no "
+                         "handover, so a backlog could only grow.")
+    return {"level": level, "headline": headline, "cause": cause,
+            "handover_note": handover_note}
 
 
 def _on_air(sample_groups, name_for_stint):
@@ -259,11 +374,13 @@ def broadcast_timeline(events):
 
 
 def build_report(samples, events, name_for_stint, event_title, window, now,
-                 host=None):
+                 host=None, prebuffer_s=hs.DEFAULT_FEED_PREBUFFER_S,
+                 backlog_warn_s=hs.FEED_BACKLOG_WARN_S):
     """Aggregate ONE session (already bucket-deduplicated) into the report dict.
     `window` = (from_ts, to_ts). `samples` is assumed non-empty (the caller guards).
     `host` is the producer machine's name, surfaced in the report so it is clear
-    which box produced it."""
+    which box produced it. `prebuffer_s`/`backlog_warn_s` are the relay's fan-out
+    reserve and backlog threshold, which decide when the output counts as behind live."""
     frm, to = window
     duration_s = max(0.0, (to or 0) - (frm or 0))
     windows = on_air_windows(events, to)
@@ -309,6 +426,8 @@ def build_report(samples, events, name_for_stint, event_title, window, now,
                                  "stint": md.get("stint"),
                                  "streamer": name_for_stint.get(md.get("stint")) or "",
                                  "what": _OBS_CONSUMER_EVENTS[e["type"]](md)})
+    quality = _quality(metric_samples)
+    backlog = _backlog(groups, prebuffer_s, backlog_warn_s)
     return {
         "header": {"event_title": event_title or "", "start": frm, "end": to,
                    "duration_s": round(duration_s, 1),
@@ -318,7 +437,10 @@ def build_report(samples, events, name_for_stint, event_title, window, now,
         "on_air": on_air,
         "feeds": feeds,
         "incidents": [inc for g in groups for inc in hs.derive_incidents(g)],
-        "quality": _quality(metric_samples),
+        "quality": quality,
+        "backlog": backlog,
+        "finding": _finding(backlog, quality, on_air_s, on_air["stint_handovers"],
+                            len(obs_consumer)),
         "producer_handovers": handovers,
         "substitutions": substitutions,
         "recoveries": recoveries,
@@ -403,7 +525,22 @@ th{color:#65676b;font-weight:600;font-size:12px;text-transform:uppercase;letter-
 .caveat{font-size:12px;color:#65676b;font-style:italic;margin-top:8px}
 .note{font-size:12px;color:#65676b;margin-top:6px}
 .sev-red{color:#c62828;font-weight:700}.sev-yellow{color:#b26a00;font-weight:600}
+.finding{border-left:4px solid #9e9e9e;background:#f5f6f8;border-radius:8px;
+ padding:12px 16px;margin:16px 0}
+.finding.lvl-green{border-color:#2e7d32}.finding.lvl-yellow{border-color:#f9a825}
+.finding.lvl-red{border-color:#c62828}
+.finding .head{font-size:16px;font-weight:700;margin:0 0 4px}
+.finding p{margin:4px 0;font-size:14px}.finding p.note{font-size:12px}
 """
+
+
+def _fps_cell(q):
+    """'45.8 of 60 ⚠' against the configured rate; the bare average when none is known."""
+    avg, target = q.get("obs_fps_avg"), q.get("obs_fps_target")
+    if avg is None or target is None:
+        return avg
+    return f"{_fmt_fps(avg)} of {_fmt_fps(target)}" + (" \u26a0 below" if q.get("obs_fps_low")
+                                                        else "")
 
 
 def render_html(report):
@@ -432,6 +569,23 @@ def render_html(report):
     strip = _svg_health_strip(report["health_bands"], hd["start"], hd["end"])
     if strip:
         parts.append(strip)
+
+    # Finding (#586): the verdict first, backlog before frame rate.
+    fd = report.get("finding")
+    if fd:
+        parts.append(f"<div class='finding lvl-{_esc(fd['level'])}'>"
+                     "<h2 style='border:0;margin:0 0 6px;padding:0'>Finding</h2>"
+                     f"<p class='head'>{_esc(fd['headline'])}</p>"
+                     f"<p>{_esc(fd['cause'])}</p>"
+                     f"<p class='note'>{_esc(fd['handover_note'])}</p>")
+        if report.get("backlog"):
+            bl = report["backlog"]
+            parts.append("<p class='note'>Behind live means more than "
+                         f"{_esc(_fmt_fps(bl['warn_s']))} s beyond the "
+                         f"{_esc(_fmt_fps(bl['prebuffer_s']))} s fan-out reserve, on the "
+                         "feed that was on air. Each value is the smallest backlog in its "
+                         "30 s interval, so the peak is a lower bound.</p>")
+        parts.append("</div>")
 
     # On air per commentator
     parts.append("<h2>On air per commentator</h2>")
@@ -537,8 +691,9 @@ def render_html(report):
                  ("Dropped frames (%)", q["dropped_pct_avg"], q["dropped_pct_peak"]),
                  ("Congestion", q["congestion_avg"], "—"),
                  ("OBS CPU (%)", q["obs_cpu_avg"], q["obs_cpu_peak"]),
-                 ("OBS FPS", q["obs_fps_avg"], "—"),
-                 ("Render skipped (%)", "—", q["render_skipped_pct_peak"]),
+                 ("OBS FPS", _fps_cell(q), "—"),
+                 ("Render skipped (% per interval)", q["render_skip_rate_avg"],
+                  q["render_skip_rate_peak"]),
                  ("Host CPU (%)", q["sys_cpu_avg"], q["sys_cpu_peak"]),
                  ("Host RAM (%)", q["sys_mem_avg"], q["sys_mem_peak"]),
                  ("Net down (Mbps)", q["net_down_avg"], q["net_down_peak"]),
@@ -547,6 +702,10 @@ def render_html(report):
         parts.append(_table(["Metric", "Average", "Peak"],
                             [(m, a if a is not None else "—", p if p is not None else "—")
                              for m, a, p in qrows]))
+        if q["obs_fps_avg"] is not None and q["obs_fps_target"] is None:
+            parts.append("<p class='note'>The configured frame rate was not recorded (a "
+                         "relay from before it was sampled), so OBS FPS is not checked "
+                         "against it.</p>")
 
     if report["overlap_approximate"]:
         parts.append("<p class='caveat'>A producer handover occurred during this session; "
@@ -563,6 +722,8 @@ def render_summary_text(report):
              f"  {_fmt_date(hd['start'])} {_fmt_clock(hd['start'])}–{_fmt_clock(hd['end'])} "
              f"({_fmt_dur(hd['duration_s'])})",
              f"  Uptime {hd['uptime_pct']}% · {len(report['incidents'])} incident(s)"]
+    if report.get("finding"):
+        lines.append(f"  {report_finding_text(report)}")
     for f in report["feeds"]:
         lines.append(f"  Feed {f['feed']}: {f['drops']} drop(s), "
                      f"{_fmt_dur(f['downtime_s'])} down")
@@ -574,6 +735,13 @@ def report_filename(event_title, date_str):
     slug = "".join(c if c.isalnum() else "-" for c in (event_title or "").lower())
     slug = "-".join(p for p in slug.split("-") if p)
     return f"{date_str}-{slug or 'report'}.html"
+
+
+def report_finding_text(report):
+    """The finding's headline and cause, for the Discord embed description and the
+    CLI summary, or '' when the report has no finding (#586)."""
+    fd = report.get("finding") or {}
+    return " ".join(p for p in (fd.get("headline"), fd.get("cause")) if p)
 
 
 def report_discord_fields(report):

@@ -96,15 +96,18 @@ def substitution_discord_payload(feed, stint, producer, event_title=""):
 COLOR_REPORT = 0x3B82F6        # blue — a post-event report
 
 
-def report_discord_payload(title, fields, host=None):
+def report_discord_payload(title, fields, host=None, description=""):
     """Post-event report embed: headline KPI fields as the useful inline content.
     `fields` is a list of (name, value) strings. `host`, when given, is the producer
-    machine's name shown in the embed footer (which box produced this report). Pure —
+    machine's name shown in the embed footer (which box produced this report).
+    `description`, when given, is the report's finding (#586), shown above the fields. Pure —
     the caller attaches the zipped HTML separately. Posts as GT Racecast; no @here
     (not time-critical)."""
     embed = {"title": f"📊 Post-event report — {title or 'Event'}",
              "color": COLOR_REPORT,
              "fields": [{"name": n, "value": v, "inline": True} for n, v in fields]}
+    if description:
+        embed["description"] = description
     if host:
         embed["footer"] = {"text": f"Produced on {host}"}
     return {"username": USERNAME, "embeds": [embed]}

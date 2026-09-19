@@ -66,7 +66,7 @@ Controls (HTTP, for Companion Generic-HTTP / browser / curl):
   Stop: Ctrl+C
 """
 
-import argparse, collections, csv, datetime, hmac, html, io, ipaddress, json, logging, math, os, random, re, secrets, shutil, signal, socket, ssl, subprocess, sys, threading, time
+import argparse, collections, csv, datetime, hmac, html, io, ipaddress, json, logging, os, random, re, secrets, shutil, signal, socket, ssl, subprocess, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, quote, unquote, parse_qs, urlencode
 from urllib.request import Request, urlopen
@@ -382,7 +382,7 @@ _HEALTH_LABEL = {"green": "OK", "yellow": "DEGRADED", "red": "CRITICAL"}
 FANOUT_STALL_S = 8.0   # seconds without a byte from streamlink before a fan-out reader is "stalled"
 FANOUT_RING_BYTES = 16 * 1024 * 1024  # per-feed ring window (bounded; ≈12 s at 10 Mbps). Not a safety lever (#581): a larger ring only delays a slow consumer's overflow and hides it longer.
 MARK_MIN_INTERVAL_S = 0.1        # #533: throttle the FeedRing time index to ~1 mark/100 ms
-DEFAULT_FEED_PREBUFFER_S = 3.0   # #533: seconds a broadcast consumer joins behind the fan-out live edge
+DEFAULT_FEED_PREBUFFER_S = health_store.DEFAULT_FEED_PREBUFFER_S   # #533: seconds a broadcast consumer joins behind the fan-out live edge
 REBUILD_GUARD_MAX_ATTEMPTS = 3  # #582: consecutive ineffective automatic OBS rebuilds before the relay stands down
 _FANOUT_FALSEY = {"0", "false", "no", "off"}
 
@@ -406,21 +406,7 @@ def feed_robust_auto_enabled(environ):
     return (environ.get("RACECAST_FEED_ROBUST_AUTO") or "").strip().lower() not in _FANOUT_FALSEY
 
 
-def feed_prebuffer_s(environ, default=DEFAULT_FEED_PREBUFFER_S):
-    """Seconds OBS and the program-audio monitor join behind the fan-out live edge
-    (#533). Absent/empty/non-numeric/non-finite -> default; a valid finite number
-    (incl. 0) is used as-is; negatives clamp to 0.0 (disabled = today's live-edge
-    join). Pure so the knob is unit-testable."""
-    raw = str(environ.get("RACECAST_FEED_PREBUFFER_S", "")).strip()
-    if raw == "":
-        return default
-    try:
-        v = float(raw)
-    except ValueError:
-        return default
-    if not math.isfinite(v):
-        return default                       # reject nan/inf -> default
-    return max(0.0, v)
+feed_prebuffer_s = health_store.feed_prebuffer_s   # #533; shared with the report (#586)
 
 
 def _env_float(environ, key, default):
@@ -447,20 +433,11 @@ def feed_stall_signal_enabled(environ):
     return str(environ.get("RACECAST_FEED_STALL_SIGNAL", "")).strip().lower() not in _FANOUT_FALSEY
 
 
-FEED_BACKLOG_WARN_S = 5.0         # #583: consumer backlog (s) beyond the #533 reserve that shows yellow
-
-
-def feed_backlog_warn_s(environ):
-    """#583 display threshold: seconds of consumer backlog beyond the fan-out reserve.
-    A placeholder until #581 stage 4 calibrates it on real hardware. Pure."""
-    return _env_float(environ, "RACECAST_FEED_BACKLOG_WARN_S", FEED_BACKLOG_WARN_S)
-
-
-def feed_backlog_degraded(floor_s, prebuffer_s, warn_s):
-    """#583: a consumer is falling behind the live edge when its interval floor (the
-    smallest backlog seen in one heartbeat interval) exceeds the #533 reserve by more
-    than warn_s. The reserve itself is the healthy baseline, not a backlog. Pure."""
-    return floor_s is not None and floor_s - prebuffer_s > warn_s
+# #583: the "behind live" rule lives in health_store so the post-event report (#586)
+# applies the same definition as the yellow health reason.
+FEED_BACKLOG_WARN_S = health_store.FEED_BACKLOG_WARN_S
+feed_backlog_warn_s = health_store.feed_backlog_warn_s
+feed_backlog_degraded = health_store.feed_backlog_degraded
 
 
 def fold_backlog_floor(prev, age):
@@ -7272,6 +7249,7 @@ class Relay:
                 "obs_cpu_pct": st.get("obs_cpu_pct"),
                 "obs_mem_mb": st.get("obs_mem_mb"),
                 "obs_fps": st.get("obs_fps"),
+                "obs_fps_target": st.get("obs_fps_target"),   # v10: the reference for obs_fps (#586)
                 "obs_render_skipped_pct": st.get("obs_render_skipped_pct"),
                 "obs_render_skip_rate_pct": (None if (_rsr := self._current_render_skip_rate())
                                              is None else round(_rsr * 100, 3)),

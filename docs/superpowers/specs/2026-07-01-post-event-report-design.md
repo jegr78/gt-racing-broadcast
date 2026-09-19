@@ -226,3 +226,18 @@ CLI / integration:
   in the overlap window, if "approximate overlap" ever proves insufficient.
 - Cross-event trends / a season dashboard aggregating multiple reports.
 - A PDF export (would reopen the rendering-engine question — deliberately deferred).
+
+## Update: windowed render metric and the finding (#586)
+
+- **Render skipped** is the per-interval rate `obs_render_skip_rate_pct` averaged over the
+  on-air samples. The cumulative `obs_render_skipped_pct` runs from OBS start and was
+  diluted 13-fold on 2026-08-28 (1.8% shown, 23.5% real). The other quality metrics are
+  instantaneous or reset with the output, so only this one changed.
+- **OBS FPS** is shown against the configured rate (`GetVideoSettings`, stored as
+  health-store v10 `obs_fps_target`) and flagged when the average is more than 2% below
+  it (`FPS_LOW_RATIO`). A DB without the column shows the bare average and says so.
+- **Finding** (`build_report(..., prebuffer_s, backlog_warn_s)` -> `report["finding"]`):
+  the on-air feed's backlog first (`health_store.feed_backlog_degraded`, the relay's own
+  rule), the frame rate as the cause, and the number of handovers, since each one clears a
+  backlog. Shown first in the HTML, in the CLI summary and as the Discord embed
+  description. No mode-dependent thresholds.

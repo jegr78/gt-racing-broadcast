@@ -13,13 +13,55 @@ import math
 import sqlite3
 import time
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 SAMPLE_INTERVAL_S = 30          # heartbeat tick = sample cadence
 LIVE_WINDOW_S = 900            # default range when no from/to given (15 min)
 GAP_S = 95                     # inter-sample gap > this = relay was down (no band spans it)
 DEFAULT_MAX_POINTS = 2000      # numeric-series downsample cap per metric
 DEFAULT_RETENTION_DAYS = 30
+
+# #583/#586: when a fan-out consumer counts as "behind live". Shared by the relay (the
+# yellow health reason) and the post-event report (the backlog verdict), so both apply
+# the one definition the director saw.
+DEFAULT_FEED_PREBUFFER_S = 3.0   # #533: seconds a broadcast consumer joins behind the fan-out live edge
+FEED_BACKLOG_WARN_S = 5.0        # #583: consumer backlog (s) beyond the #533 reserve that shows yellow
+
+
+def feed_prebuffer_s(environ, default=DEFAULT_FEED_PREBUFFER_S):
+    """Seconds OBS and the program-audio monitor join behind the fan-out live edge
+    (#533). Absent/empty/non-numeric/non-finite -> default; a valid finite number
+    (incl. 0) is used as-is; negatives clamp to 0.0 (disabled = today's live-edge
+    join). Pure so the knob is unit-testable."""
+    raw = str(environ.get("RACECAST_FEED_PREBUFFER_S", "")).strip()
+    if raw == "":
+        return default
+    try:
+        v = float(raw)
+    except ValueError:
+        return default
+    if not math.isfinite(v):
+        return default                       # reject nan/inf -> default
+    return max(0.0, v)
+
+
+def feed_backlog_warn_s(environ):
+    """#583 display threshold: seconds of consumer backlog beyond the fan-out reserve.
+    A placeholder until #581 stage 4 calibrates it on real hardware. Absent/empty/
+    non-numeric/<=0 -> default. Pure."""
+    try:
+        v = float(str(environ.get("RACECAST_FEED_BACKLOG_WARN_S", "")).strip())
+    except (TypeError, ValueError):
+        return FEED_BACKLOG_WARN_S
+    return v if v > 0 else FEED_BACKLOG_WARN_S
+
+
+def feed_backlog_degraded(floor_s, prebuffer_s, warn_s):
+    """#583: a consumer is falling behind the live edge when its interval floor (the
+    smallest backlog seen in one heartbeat interval) exceeds the #533 reserve by more
+    than warn_s. The reserve itself is the healthy baseline, not a backlog. Pure."""
+    return floor_s is not None and floor_s - prebuffer_s > warn_s
+
 
 # Column order is the insert order. NO url/channel/sheet columns (redaction).
 COLUMNS = (
@@ -46,6 +88,8 @@ COLUMNS = (
     "feed_a_max_gap_s", "feed_b_max_gap_s",
     # v9: fan-out consumer backlog behind the live edge, interval floor (#583)
     "feed_a_backlog_s", "feed_b_backlog_s", "pov_backlog_s",
+    # v10: OBS's configured frame rate, the reference obs_fps is judged against (#586)
+    "obs_fps_target",
 )
 
 BAND_FIELDS = ("health_level", "feed_a_state", "feed_b_state",
@@ -60,7 +104,8 @@ NUMERIC_FIELDS = ("source_last_ok_age_s", "cookies_age_h",
                   "sys_cpu_pct", "sys_mem_pct", "sys_net_up_kbps",
                   "sys_net_down_kbps", "sys_disk_free_mb",
                   "feed_a_max_gap_s", "feed_b_max_gap_s",
-                  "feed_a_backlog_s", "feed_b_backlog_s", "pov_backlog_s")
+                  "feed_a_backlog_s", "feed_b_backlog_s", "pov_backlog_s",
+                  "obs_fps_target")
 STATE_KEY_FIELDS = ("health_level", "feed_a_state", "feed_a_down",
                     "feed_b_state", "feed_b_down", "pov_state", "obs_reachable",
                     "timer_push",
@@ -89,7 +134,8 @@ CREATE TABLE IF NOT EXISTS samples (
     sys_cpu_pct REAL, sys_mem_pct REAL, sys_net_up_kbps REAL,
     sys_net_down_kbps REAL, sys_disk_free_mb REAL,
     feed_a_max_gap_s REAL, feed_b_max_gap_s REAL,
-    feed_a_backlog_s REAL, feed_b_backlog_s REAL, pov_backlog_s REAL
+    feed_a_backlog_s REAL, feed_b_backlog_s REAL, pov_backlog_s REAL,
+    obs_fps_target REAL
 );
 CREATE INDEX IF NOT EXISTS idx_samples_ts ON samples (ts);
 
@@ -141,6 +187,10 @@ _V9_COLUMNS = (
     ("pov_backlog_s", "REAL"),
 )
 
+_V10_COLUMNS = (
+    ("obs_fps_target", "REAL"),   # #586 configured OBS frame rate
+)
+
 
 def open_db(path):
     """Open (creating the file/dirs as needed) with WAL + a busy timeout so the
@@ -153,11 +203,12 @@ def open_db(path):
 
 
 def migrate(conn):
-    """Create the schema, add any missing v3, v5, v6, v7, v8 and v9 columns (lossless upgrade from v2/v3),
+    """Create the schema, add any missing v3, v5-v10 columns (lossless upgrade from v2/v3),
     and stamp user_version. Idempotent and version-agnostic."""
     conn.executescript(_CREATE)
     have = {r["name"] for r in conn.execute("PRAGMA table_info(samples)").fetchall()}
-    for name, decl in _V3_COLUMNS + _V5_COLUMNS + _V6_COLUMNS + _V7_COLUMNS + _V8_COLUMNS + _V9_COLUMNS:
+    for name, decl in (_V3_COLUMNS + _V5_COLUMNS + _V6_COLUMNS + _V7_COLUMNS + _V8_COLUMNS + _V9_COLUMNS
+                       + _V10_COLUMNS):
         if name not in have:
             conn.execute(f"ALTER TABLE samples ADD COLUMN {name} {decl}")
     conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")

@@ -1366,6 +1366,48 @@ def t_get_health_stats_merges_stats_and_stream_status():
     assert ("close", {}) in sess.sent
 
 
+def t_parse_video_settings_configured_fps():
+    # #586: the configured frame rate is the reference the measured activeFps is judged by.
+    assert m.parse_video_settings({"fpsNumerator": 60, "fpsDenominator": 1}) == \
+        {"obs_fps_target": 60.0}
+    assert m.parse_video_settings({"fpsNumerator": 60000, "fpsDenominator": 1001}) == \
+        {"obs_fps_target": 59.94}
+    for bad in ({}, None, {"fpsNumerator": 60, "fpsDenominator": 0},
+                {"fpsNumerator": 0, "fpsDenominator": 1},
+                {"fpsNumerator": "60", "fpsDenominator": 1}):
+        assert m.parse_video_settings(bad) == {"obs_fps_target": None}, bad
+
+
+def t_get_health_stats_carries_configured_fps():
+    sess = _FakeSession({"GetStats": {"activeFps": 45.8},
+                         "GetVideoSettings": {"fpsNumerator": 60, "fpsDenominator": 1}})
+    orig, m._connect = m._connect, lambda *a, **k: (sess, "")
+    try:
+        reachable, stats, _ = m.get_health_stats()
+    finally:
+        m._connect = orig
+    assert reachable is True
+    assert (stats["obs_fps"], stats["obs_fps_target"]) == (45.8, 60.0)
+
+
+def t_get_health_stats_keeps_stats_when_video_settings_fails():
+    # A failing GetVideoSettings loses only the fps reference, never the stats (#586).
+    class _Sess(_FakeSession):
+        def request(self, request_type, request_data=None):
+            if request_type == "GetVideoSettings":
+                raise RuntimeError("boom")
+            return super().request(request_type, request_data)
+    sess = _Sess({"GetStats": {"activeFps": 60.0, "cpuUsage": 5.0}})
+    orig, m._connect = m._connect, lambda *a, **k: (sess, "")
+    try:
+        reachable, stats, note = m.get_health_stats()
+    finally:
+        m._connect = orig
+    assert (reachable, note) == (True, "")
+    assert stats.get("obs_cpu_pct") == 5.0 and stats.get("obs_fps_target") is None
+    assert ("close", {}) in sess.sent
+
+
 def t_stream_kbps():
     # 125000 bytes over 1 s = 1000 kbps.
     assert m.stream_kbps(0, 100.0, 125000, 101.0, True) == 1000.0

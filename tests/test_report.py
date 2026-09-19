@@ -55,6 +55,47 @@ def t_generate_writes_file(monkeypatch=None):
         assert "Unit Event" in html and "Alice" in html
 
 
+def t_report_backlog_thresholds_follow_the_machine_env():
+    # #586: the report counts "behind live" with the relay's own reserve + threshold.
+    orig = rc._machine_env_value
+    vals = {"RACECAST_FEED_PREBUFFER_S": "4", "RACECAST_FEED_BACKLOG_WARN_S": "9"}
+    rc._machine_env_value = lambda k: vals.get(k, "")
+    try:
+        assert rc._report_backlog_thresholds() == {"prebuffer_s": 4.0, "backlog_warn_s": 9.0}
+        vals.clear()
+        assert rc._report_backlog_thresholds() == {"prebuffer_s": 3.0, "backlog_warn_s": 5.0}
+    finally:
+        rc._machine_env_value = orig
+
+
+def t_generate_leads_with_the_backlog_finding():
+    with tempfile.TemporaryDirectory() as d:
+        db = os.path.join(d, "health-history.db")
+        conn = hs.open_db(db)
+        hs.migrate(conn)
+        now = 1_700_000_000.0
+        for i in range(4):
+            hs.record(conn, {"ts": now + i * 30, "health_level": "yellow", "live_stint": 1,
+                             "live_feed": "A", "feed_a_backlog_s": 19.0, "obs_fps": 45.8,
+                             "obs_fps_target": 60.0, "health_reasons": []}, "periodic")
+        conn.close()
+        orig = (rc._health_db_path, rc._runtime_dir, rc._report_name_map,
+                rc._report_event_title, rc._machine_env_value)
+        rc._health_db_path = lambda: db
+        rc._runtime_dir = lambda: d
+        rc._report_name_map = lambda: {}
+        rc._report_event_title = lambda: "Unit Event"
+        rc._machine_env_value = lambda k: ""
+        try:
+            r = rc._build_report_file()
+        finally:
+            (rc._health_db_path, rc._runtime_dir, rc._report_name_map,
+             rc._report_event_title, rc._machine_env_value) = orig
+        assert r["report"]["finding"]["headline"].startswith("Output ran behind live for 1m 30s")
+        assert "fell behind real time" in r["summary"]
+        assert "45.8 of 60" in r["html"]
+
+
 def t_generate_no_data_exits():
     with tempfile.TemporaryDirectory() as d:
         db = os.path.join(d, "health-history.db")
@@ -159,11 +200,34 @@ def t_send_report_embed_zip():
         payload = json.loads(captured["fields"]["payload_json"])
         assert payload["username"] == "GT Racecast"
         assert payload["embeds"][0]["fields"][0]["name"] == "Uptime"
+        assert "description" not in payload["embeds"][0]     # no finding in this report
         fname, content, ctype = (captured["files"][0][1], captured["files"][0][2],
                                   captured["files"][0][3])
         assert fname.endswith(".zip") and ctype == "application/zip"
         names = zipfile.ZipFile(io.BytesIO(content)).namelist()
         assert any(n.endswith(".html") for n in names)
+
+
+def t_send_report_embed_leads_with_the_finding():
+    import json
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, "r.html")
+        with open(p, "w") as fh:
+            fh.write("<!doctype html><html>hi</html>")
+        captured = {}
+        orig_hook, orig_post = rc._active_discord_webhook, rc.http_util.post_multipart
+        rc._active_discord_webhook = lambda: ("https://discord.invalid/webhook", "L")
+        rc.http_util.post_multipart = lambda url, fields=None, files=None, **kw: \
+            captured.update(fields=fields)
+        try:
+            rc._send_report_core(p, report={
+                "header": {"uptime_pct": 99.0, "on_air_s": 60, "duration_s": 60,
+                           "start": 0, "end": 60}, "incidents": [],
+                "finding": {"headline": "Output ran behind live for 41m of 56m."}})
+        finally:
+            rc._active_discord_webhook, rc.http_util.post_multipart = orig_hook, orig_post
+        embed = json.loads(captured["fields"]["payload_json"])["embeds"][0]
+        assert embed.get("description") == "Output ran behind live for 41m of 56m."
 
 
 def t_send_bundles_sliced_logs_and_host():
