@@ -106,9 +106,10 @@ def _resolve_err(stderr, status_stdout="", status_exc=None):
     orig = m.subprocess.run
     m.subprocess.run = fake_run
     try:
-        return (*m.resolve_hls("https://yt.example/x", "/c/j.txt", _LOG), calls)
+        url, err, quality = m.resolve_hls("https://yt.example/x", "/c/j.txt", _LOG)
     finally:
         m.subprocess.run = orig
+    return url, err, quality, calls
 
 
 def t_resolve_hls_post_live_classifies_as_ended():
