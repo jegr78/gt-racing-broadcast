@@ -233,6 +233,17 @@ def t_cookies_fresh_with_marker():
         assert r.level == "PASS"
 
 
+def t_cookies_fresh_without_login_warns():
+    # #615: the anonymous jar (no login marker) is a WARN, not a PASS.
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, "cookies.txt")
+        with open(p, "w") as fh:
+            fh.write(".youtube.com\tTRUE\t/\tTRUE\t0\tPREF\tf6=40000000\n"
+                     ".youtube.com\tTRUE\t/\tTRUE\t0\tSOCS\tCAI\n")
+        r = m.cookies_status(p)
+        assert r.level == "WARN" and "no logged-in" in r.detail, r
+
+
 def t_main_returns_int():
     rc = m.main([])
     assert rc in (0, 1)
