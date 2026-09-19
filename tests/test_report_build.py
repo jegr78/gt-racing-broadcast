@@ -534,7 +534,7 @@ def t_quality_without_a_recorded_target_does_not_flag():
     rep = rb.build_report(_broadcast(3, obs_fps=45.8), [], {}, "E", (0.0, 60.0), now=1000.0)
     q = rep["quality"]
     assert (q["obs_fps_target"], q["obs_fps_low"]) == (None, False), q
-    assert "configured frame rate was not recorded" in rb.render_html(rep)
+    assert "so OBS FPS is not checked against it" in rb.render_html(rep)
 
 
 def t_render_html_shows_fps_against_the_target():
@@ -584,6 +584,7 @@ def t_finding_leads_with_the_backlog_then_the_frame_rate():
     assert f["cause"] == ("OBS rendered 45.8 of the configured 60 fps and skipped 23.5% of "
                           "its frames, so the output fell behind real time."), f
     html = rb.render_html(rep)
+    assert f["headline"] in html and "Finding" in html
     assert html.index(f["headline"]) < html.index("On air per commentator")
     assert f["headline"] in rb.render_summary_text(rep)
 

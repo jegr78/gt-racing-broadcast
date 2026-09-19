@@ -226,7 +226,7 @@ def t_send_report_embed_leads_with_the_finding():
         finally:
             rc._active_discord_webhook, rc.http_util.post_multipart = orig_hook, orig_post
         embed = json.loads(captured["fields"]["payload_json"])["embeds"][0]
-        assert embed["description"] == "Output ran behind live for 41m of 56m."
+        assert embed.get("description") == "Output ran behind live for 41m of 56m."
 
 
 def t_send_bundles_sliced_logs_and_host():

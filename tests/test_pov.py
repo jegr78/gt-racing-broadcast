@@ -1318,7 +1318,7 @@ def t_health_snapshot_carries_configured_fps():
     r = _make_min_relay()
     r.obs_stats = {"obs_fps": 45.8, "obs_fps_target": 60.0}
     snap = r._health_snapshot(1.0)
-    assert (snap["obs_fps"], snap["obs_fps_target"]) == (45.8, 60.0)
+    assert (snap.get("obs_fps"), snap.get("obs_fps_target")) == (45.8, 60.0)
 
 
 def t_health_snapshot_carries_new_fields():

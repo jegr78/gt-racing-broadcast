@@ -1373,6 +1373,7 @@ def t_parse_video_settings_configured_fps():
     assert m.parse_video_settings({"fpsNumerator": 60000, "fpsDenominator": 1001}) == \
         {"obs_fps_target": 59.94}
     for bad in ({}, None, {"fpsNumerator": 60, "fpsDenominator": 0},
+                {"fpsNumerator": 0, "fpsDenominator": 1},
                 {"fpsNumerator": "60", "fpsDenominator": 1}):
         assert m.parse_video_settings(bad) == {"obs_fps_target": None}, bad
 
@@ -1403,7 +1404,7 @@ def t_get_health_stats_keeps_stats_when_video_settings_fails():
     finally:
         m._connect = orig
     assert (reachable, note) == (True, "")
-    assert stats["obs_cpu_pct"] == 5.0 and stats["obs_fps_target"] is None
+    assert stats.get("obs_cpu_pct") == 5.0 and stats.get("obs_fps_target") is None
     assert ("close", {}) in sess.sent
 
 

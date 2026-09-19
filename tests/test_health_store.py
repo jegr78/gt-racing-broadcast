@@ -695,6 +695,8 @@ def t_migrate_adds_fps_target_column_v10_lossless():
     try:
         hs.migrate(conn)
         assert conn.execute("PRAGMA user_version").fetchone()[0] == hs.SCHEMA_VERSION == 10
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(samples)").fetchall()}
+        assert "obs_fps_target" in cols, cols
         row = conn.execute("SELECT obs_fps, obs_fps_target FROM samples").fetchone()
         assert tuple(row) == (45.8, None)               # lossless; new column NULL
     finally:
