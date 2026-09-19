@@ -261,7 +261,10 @@ class Pull:
             return None, False
         # stdout also carries the relay's "rcq …"/"rcs …" --print lines: take the URL.
         hls = [ln for ln in (res.stdout or "").splitlines() if ln.startswith("http")]
-        return (hls[0], True) if hls else (None, False)
+        if not hls:     # --ignore-no-formats-error: no selectable format exits 0
+            self._wlog(f"resolve-fail rc=0 {(res.stdout or '').split()}")
+            return None, False
+        return hls[0], True
 
     def _streamlink_cmd(self, target):
         cmd = self.fe.streamlink_fanout_cmd(

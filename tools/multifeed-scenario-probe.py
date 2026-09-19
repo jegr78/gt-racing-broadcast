@@ -172,7 +172,9 @@ class FeedWorker:
             self._wlog(f"resolve-fail {first}"); return None
         # stdout also carries the relay's "rcq …"/"rcs …" --print lines: take the URL.
         out = [ln for ln in (res.stdout or "").splitlines() if ln.startswith("http")]
-        return out[0] if out else None
+        if not out:     # --ignore-no-formats-error: no selectable format exits 0
+            self._wlog(f"resolve-fail {(res.stdout or '').split()}"); return None
+        return out[0]
 
     def _flag_429(self, detail):
         if not self.threw_429:
