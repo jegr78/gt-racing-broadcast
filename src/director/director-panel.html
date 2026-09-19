@@ -1194,7 +1194,7 @@ async function resyncTo(n){
 // Force OBS to reconnect ONE feed's source at a clean stream boundary. OBS rejoins at
 // the fan-out reserve behind the live edge, so the same button does two jobs: it fixes
 // a frozen/stuttering picture, and it is the director's deliberate way to drop a
-// backlog (BEHIND LIVE, #587). Nothing sheds a backlog automatically. Non-destructive
+// backlog (BEHIND LIVE, #587). Nothing resets a feed because of a backlog. Non-destructive
 // (re-applies the input's own settings); a brief black dropout if the feed is on air.
 // resetLabel() shows what a click would throw away, from every /status poll.
 const resetKeys = {};
