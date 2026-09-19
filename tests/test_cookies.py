@@ -103,14 +103,14 @@ def t_get_cookies_keeps_only_youtube_domains():
         # The raw export went to a private dir, never onto the jar the relay reads.
         assert os.path.dirname(fake.cookies_arg()) != d, fake.cookies_arg()
         assert os.listdir(d) == ["yt-cookies.txt"], os.listdir(d)
-        assert "dropped 3" in said and "logged-in session detected" in said, said
+        assert "dropped 3 other lines" in said and "logged-in session detected" in said, said
 
 
 def t_get_cookies_keeps_only_twitch_domains():
     with tempfile.TemporaryDirectory() as d:
         said, _ = _run_get_cookies(["firefox", "--runtime-dir", d, "--platform", "twitch"])
         assert _cookie_names(os.path.join(d, "twitch-cookies.txt")) == ["auth-token"]
-        assert "dropped 3" in said and "logged-in session detected" in said, said
+        assert "dropped 3 other lines" in said and "logged-in session detected" in said, said
 
 
 def t_relay_export_cookies_keeps_only_youtube_domains():

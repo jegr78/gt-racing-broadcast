@@ -10531,7 +10531,7 @@ def export_cookies(browser, out):
     *out* (#616), and a failed filter leaves the previous jar unchanged."""
     url = "https://www.youtube.com/watch?v=jNQXAC9IVRw"
     try:
-        with cookie_jar.private_export_path(out) as raw:
+        with cookie_jar.private_export_path(out, warn=LOG.warning) as raw:
             try:
                 proc = subprocess.run(["yt-dlp", "--cookies-from-browser", browser,
                                        "--cookies", raw, "--skip-download", "--no-warnings", url],
@@ -10560,8 +10560,8 @@ def export_cookies(browser, out):
         return False
     try: os.chmod(out, 0o600)   # live YouTube session — owner-only
     except OSError: pass        # best-effort hardening; never block the export
-    LOG.info("Cookie export from '%s': OK -> %s (dropped %d cookies of other sites)",
-             browser, out, dropped)
+    LOG.info("Cookie export from '%s': OK -> %s (kept only youtube.com cookies, dropped %d "
+             "other lines)", browser, out, dropped)
     return True
 
 def main():

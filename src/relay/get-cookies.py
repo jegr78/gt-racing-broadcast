@@ -74,7 +74,7 @@ def main():
     # set, ...). It writes into a private directory; only this platform's cookies
     # reach the real jar (#616).
     try:
-        with cookie_jar.private_export_path(out) as raw:
+        with cookie_jar.private_export_path(out, warn=lambda m: print(f"WARNING: {m}")) as raw:
             try:
                 proc = subprocess.run(["yt-dlp", "--cookies-from-browser", a.browser,
                                        "--cookies", raw, "--skip-download", "--no-warnings", url],
@@ -98,7 +98,7 @@ def main():
     try: os.chmod(out, 0o600)   # live session — owner-only
     except OSError: pass        # best-effort hardening; never block the export
     domains = ", ".join(cookie_jar.PLATFORM_COOKIE_DOMAINS[a.platform])
-    print(f"Kept only {domains} cookies (dropped {dropped} from other sites).")
+    print(f"Kept only {domains} cookies (dropped {dropped} other lines).")
     with open(out, encoding="utf-8", errors="replace") as fh:
         txt = fh.read()
     if a.platform == "twitch":

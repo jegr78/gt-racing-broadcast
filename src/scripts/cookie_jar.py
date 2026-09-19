@@ -17,6 +17,7 @@ import contextlib
 import os
 import shutil
 import tempfile
+import time
 
 COOKIE_MARKERS = ("SAPISID", "__Secure-3PSID", "__Secure-1PSID", "LOGIN_INFO")
 
@@ -50,9 +51,14 @@ PLATFORM_COOKIE_DOMAINS = {
 }
 
 _HTTPONLY_PREFIX = "#HttpOnly_"
-# Line breaks that str.splitlines() knows and yt-dlp's jar loader does not. A cookie
-# value may carry them, so a line holding one is dropped rather than split (#616).
-_FOREIGN_BREAKS = frozenset("\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029")
+# Line breaks str.splitlines() knows beyond the C0 controls. yt-dlp's loader reads the
+# jar in text mode and splits on "\n" and a lone "\r" only (our open() folds "\r" the
+# same way). A line holding one of these, or any other control character, is dropped
+# rather than split: otherwise a foreign cookie value could smuggle in a line (#616).
+_FOREIGN_BREAKS = frozenset("\x85\u2028\u2029")
+# Leftover raw-export dirs older than this are swept; an export times out at 120 s.
+_STALE_EXPORT_S = 600
+_EXPORT_PREFIX = ".cookie-export-"
 
 
 def _cookie_domain(line):
@@ -78,8 +84,8 @@ def filter_jar_text(text, platform):
     """(kept_text, dropped_count): the Netscape jar *text* with only *platform*'s
     cookies. Lines split on "\n" only, as yt-dlp's loader reads them: splitting on
     more would let a foreign cookie's value smuggle in a platform line. Comment and
-    blank lines stay; a cookie of another domain, a cookie line with a control
-    character, and any line that is neither a comment nor a cookie are dropped.
+    blank lines stay; a cookie of another domain, any line with a control character,
+    and any line that is neither a comment nor a cookie are dropped.
     Raises ValueError for an unknown platform rather than keeping everything."""
     if platform not in PLATFORM_COOKIE_DOMAINS:
         raise ValueError(f"no cookie domains known for platform {platform!r}")
@@ -90,31 +96,60 @@ def filter_jar_text(text, platform):
             continue
         line += "\n"
         domain = _cookie_domain(line)
-        if domain is None:
-            is_comment = line.startswith("#") and not line.startswith(_HTTPONLY_PREFIX)
-            if is_comment or not line.strip():
-                kept.append(line)
-            else:
-                dropped += 1
-        elif _domain_allowed(domain, allowed) and not _has_control_char(line):
+        if _has_control_char(line):
+            keep = False
+        elif domain is None:
+            keep = not line.strip() or (line.startswith("#")
+                                        and not line.startswith(_HTTPONLY_PREFIX))
+        else:
+            keep = _domain_allowed(domain, allowed)
+        if keep:
             kept.append(line)
         else:
             dropped += 1
     return "".join(kept), dropped
 
 
+def _sweep_stale_exports(parent, warn, now=None):
+    """Remove raw-export dirs a hard-killed export left in *parent* (its `finally`
+    never ran). Only dirs older than _STALE_EXPORT_S go, so a concurrent export
+    keeps its own. *warn* gets a message for each one that stays."""
+    now = time.time() if now is None else now
+    try:
+        names = os.listdir(parent)
+    except OSError:
+        return
+    for name in names:
+        path = os.path.join(parent, name)
+        if not name.startswith(_EXPORT_PREFIX) or not os.path.isdir(path):
+            continue
+        try:
+            if now - os.path.getmtime(path) < _STALE_EXPORT_S:
+                continue
+        except OSError:
+            continue   # gone in between
+        shutil.rmtree(path, ignore_errors=True)
+        if os.path.exists(path) and warn:
+            warn(f"could not remove an old cookie export holding every site's cookies: {path}")
+
+
 @contextlib.contextmanager
-def private_export_path(out):
+def private_export_path(out, warn=None):
     """A path for yt-dlp's raw browser export, inside a fresh owner-only directory
     next to the real jar *out*; the directory is removed on exit. The raw export
     holds every site's cookies, so it never lands on the jar the relay reads.
+    Old export dirs a killed run left behind are swept first. *warn* (optional)
+    gets a message for any export dir that could not be removed.
     Raises OSError when the directory cannot be created."""
-    tmpdir = tempfile.mkdtemp(prefix=".cookie-export-",
-                              dir=os.path.dirname(os.path.realpath(out)))
+    parent = os.path.dirname(os.path.realpath(out))
+    _sweep_stale_exports(parent, warn)
+    tmpdir = tempfile.mkdtemp(prefix=_EXPORT_PREFIX, dir=parent)
     try:
         yield os.path.join(tmpdir, os.path.basename(out))
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
+        if os.path.exists(tmpdir) and warn:
+            warn(f"could not remove the cookie export holding every site's cookies: {tmpdir}")
 
 
 def filter_jar(path, platform, dest=None):

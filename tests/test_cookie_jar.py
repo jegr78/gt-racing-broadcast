@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Stdlib unit checks for cookie_jar.py (#615). Run: python3 tests/test_cookie_jar.py"""
-import importlib.util, os, tempfile
+import importlib.util, os, tempfile, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -126,14 +126,14 @@ def t_filter_jar_is_none_without_a_jar():
 def t_filter_splits_lines_like_yt_dlp():
     # A foreign cookie value carrying U+2028 plus six tabs must not become a
     # youtube.com line: yt-dlp reads that whole line as one 13-field entry (#616).
-    for brk in (" ", " ", "\x85", "\x0b", "\x0c", "\x1c", "\r"):
+    for brk in ("\u2028", "\u2029", "\x85", "\x0b", "\x0c", "\x1c"):
         jar = f"evil.com\tTRUE\t/\tTRUE\t0\tx\ta{brk}.youtube.com\tTRUE\t/\tTRUE\t0\tSID\tattacker\n"
         kept, dropped = m.filter_jar_text(jar, "youtube")
         assert "attacker" not in kept and dropped == 1, (repr(brk), kept, dropped)
 
 
 def t_filter_drops_a_platform_cookie_with_a_control_character():
-    for ch in (" ", "\x85", "\x00", "\x1f"):
+    for ch in ("\u2028", "\x85", "\x00", "\x1f", "\r"):
         line = f".youtube.com\tTRUE\t/\tTRUE\t0\tSID\ta{ch}b\n"
         assert m.filter_jar_text(line, "youtube") == ("", 1), repr(ch)
 
@@ -217,6 +217,52 @@ def t_private_export_path_is_an_owner_only_dir_removed_after():
             with open(raw, "w", encoding="utf-8") as fh:
                 fh.write(BROWSER_JAR)
         assert not os.path.exists(tmpdir) and os.listdir(d) == []
+
+
+
+def t_filter_drops_a_comment_line_with_a_control_character():
+    # yt-dlp reads a lone "\r" as a line break, so a comment carrying one would
+    # still hand it a cookie line.
+    jar = "# note\tA\r.github.com\tTRUE\t/\tTRUE\t0\tgh_sess\tSECRET\n# Netscape HTTP Cookie File\n"
+    assert m.filter_jar_text(jar, "youtube") == ("# Netscape HTTP Cookie File\n", 1)
+
+
+def _stale_dir(parent, name, age_s):
+    path = os.path.join(parent, name); os.mkdir(path)
+    with open(os.path.join(path, "yt-cookies.txt"), "w", encoding="utf-8") as fh:
+        fh.write(BROWSER_JAR)
+    old = time.time() - age_s
+    os.utime(path, (old, old))
+    return path
+
+
+def t_private_export_path_sweeps_only_old_leftover_exports():
+    with tempfile.TemporaryDirectory() as d:
+        stale = _stale_dir(d, ".cookie-export-killed", 3600)
+        fresh = _stale_dir(d, ".cookie-export-running", 5)      # a concurrent export
+        other = _stale_dir(d, "graphics", 3600)
+        warnings = []
+        with m.private_export_path(os.path.join(d, "yt-cookies.txt"), warn=warnings.append):
+            pass
+        assert not os.path.exists(stale)
+        assert os.path.isdir(fresh) and os.path.isdir(other)
+        assert warnings == [], warnings
+
+
+def t_private_export_path_warns_when_a_dir_stays():
+    with tempfile.TemporaryDirectory() as d:
+        stale = _stale_dir(d, ".cookie-export-killed", 3600)
+        real = m.shutil.rmtree
+        m.shutil.rmtree = lambda *a, **k: None                   # e.g. a file held open
+        warnings = []
+        try:
+            with m.private_export_path(os.path.join(d, "yt-cookies.txt"),
+                                       warn=warnings.append) as raw:
+                own = os.path.dirname(raw)
+        finally:
+            m.shutil.rmtree = real
+        assert len(warnings) == 2, warnings
+        assert stale in warnings[0] and own in warnings[1], warnings
 
 
 if __name__ == "__main__":
