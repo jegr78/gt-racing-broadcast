@@ -51,16 +51,17 @@ def classify_source_state(text):
 Case-insensitive substring matching against a small, documented signature table. A 429/403
 or an unknown error returns None (the existing drop path is untouched).
 
-**Live status from the resolve (#621).** A YouTube broadcast in Post-Live Manifestless mode
-offers only DASH video-only/audio-only formats, so yt-dlp fails with `Requested format is
-not available`, the same text a logged-out cookie jar produces (#615). The text alone
-cannot tell them apart. The resolve therefore also runs with `--ignore-no-formats-error
---print "rcs %(live_status)s"`: when no format is selectable, yt-dlp exits 0 without a URL
-and prints the live status. `resolve_hls` turns that into the error
-`Requested format is not available (live_status <status>)`, and the signature table maps
+**Live status after a format error (#621).** A YouTube broadcast in Post-Live Manifestless
+mode offers only DASH video-only/audio-only formats, so yt-dlp fails with `Requested format is
+not available`, the same text a logged-out cookie jar produces (#615). The text alone cannot
+tell them apart. Only on that error, `resolve_hls` makes a second yt-dlp call
+(`ytdlp_live_status_cmd`: `--skip-download --ignore-no-formats-error --print "rcs
+%(live_status)s"`) and appends ` (live_status <status>)` to the error. The signature table maps
 `live_status post_live` / `live_status was_live` to `ended` and `live_status is_upcoming` to
-`not_live_yet`. `is_live` stays a generic drop. A successful resolve is not reclassified:
-a `was_live` recording that does resolve is still served, as before.
+`not_live_yet`; `is_live` stays a generic drop. The flag stays off the resolve itself: yt-dlp
+routes every playability reason (bot check, rate limit, "This live event has ended") through
+`raise_no_formats`, which the flag downgrades to a warning that `--no-warnings` hides. A
+successful resolve is not reclassified: a `was_live` recording that resolves is still served.
 
 ### 2. Feed carries `source_state`
 

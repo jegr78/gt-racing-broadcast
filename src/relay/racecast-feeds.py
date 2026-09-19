@@ -340,9 +340,9 @@ def serve_exit_is_drop(stopped, advancing):
 
 # Source-not-live signatures (#495) — matched case-insensitively as substrings against
 # the yt-dlp/streamlink diagnostic text. ENDED is checked first (more specific).
-# The "live_status …" entries match the error resolve_hls builds from yt-dlp's live
-# status when no format was selectable (#621): an ended broadcast in Post-Live
-# Manifestless mode only says "Requested format is not available", like a logged-out jar.
+# The "live_status …" entries match the suffix resolve_hls appends to a 'Requested
+# format is not available' error (#621): an ended broadcast in Post-Live Manifestless
+# mode fails with that text, like a logged-out jar, and only the live status differs.
 _SOURCE_ENDED = (
     "this live event has ended",
     "live_status post_live",         # yt-dlp: broadcast over, recording not processed yet
@@ -3459,11 +3459,22 @@ def ytdlp_resolve_cmd(url, cookies, fmt=YTDLP_FORMAT):
     is_channel host allow-list — yt-dlp's --exec etc. would be code execution)."""
     # -g yields the HLS URL; the extra --print emits a "rcq <height> <fps>" line so the
     # relay can show the ACTUALLY-served resolution (YouTube's streamlink only reports "live").
-    # "rcs <live_status>" tells an ended broadcast from a logged-out jar when no format is
-    # selectable (#621); --ignore-no-formats-error lets yt-dlp print it instead of aborting.
     cmd = ["yt-dlp", "-g", "-f", fmt, "--no-warnings", "--no-playlist",
-           "--ignore-no-formats-error",
-           "--print", "rcq %(height)s %(fps)s", "--print", "rcs %(live_status)s"]
+           "--print", "rcq %(height)s %(fps)s"]
+    if cookies:
+        cmd += ["--cookies", cookies]
+    cmd += ["--", url]
+    return cmd
+
+
+def ytdlp_live_status_cmd(url, cookies):
+    """Argv that prints only the video's live status as "rcs <live_status>" (#621). Run
+    ONLY after a resolve failed with 'Requested format is not available': the flag
+    --ignore-no-formats-error turns every playability reason (bot check, rate limit,
+    'This live event has ended') into a warning that --no-warnings hides, so it must
+    never be on the resolve itself. `--` precedes the URL, as in ytdlp_resolve_cmd."""
+    cmd = ["yt-dlp", "--skip-download", "--no-warnings", "--no-playlist",
+           "--ignore-no-formats-error", "--print", "rcs %(live_status)s"]
     if cookies:
         cmd += ["--cookies", cookies]
     cmd += ["--", url]
@@ -5043,16 +5054,30 @@ def resolve_hls(url, cookies, logger, fmt=YTDLP_FORMAT):
     out = [l for l in (r.stdout or "").splitlines() if l.startswith("http")]
     if out:
         return out[0], None, parse_ytdlp_quality(r.stdout)
-    status = parse_ytdlp_live_status(r.stdout)
-    if status is not None:
-        # yt-dlp read the video but selected no format (--ignore-no-formats-error): the
-        # live status says why, and classify_source_state reads it from this text (#621).
-        last = YTDLP_NO_FORMAT + (f" (live_status {status})" if status != "NA" else "")
-    else:
-        err = (r.stderr or "").strip().splitlines()
-        last = err[-1] if err else "not live?"
+    err = (r.stderr or "").strip().splitlines()
+    last = err[-1] if err else "not live?"
+    if YTDLP_NO_FORMAT.lower() in last.lower():
+        # An ended broadcast (Post-Live Manifestless) and a logged-out jar both end
+        # here; the live status tells them apart, and classify_source_state reads it
+        # from this text (#621).
+        status = ytdlp_live_status(url, cookies)
+        if status not in (None, "NA"):
+            last = f"{last} (live_status {status})"
     logger.warning("yt-dlp could not resolve %s (%s)", url, last)
     return None, last, None
+
+
+def ytdlp_live_status(url, cookies):
+    """The video's yt-dlp live status ('is_live', 'post_live', 'was_live', 'is_upcoming',
+    'NA'), or None when the call fails. Best-effort: a failure leaves the resolve error as
+    it was (#621)."""
+    try:
+        r = subprocess.run(ytdlp_live_status_cmd(url, cookies), capture_output=True,
+                           text=True, errors="replace", timeout=30,
+                           env=external_tool_env(), **_no_window_kwargs())
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return parse_ytdlp_live_status(r.stdout)
 
 
 def stint_start_indices(stint, schedule_len):

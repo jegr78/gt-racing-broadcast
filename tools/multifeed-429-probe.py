@@ -259,12 +259,9 @@ class Pull:
             first = (res.stderr or "").strip().splitlines()[:1]
             self._wlog(f"resolve-fail rc={res.returncode} {first}")
             return None, False
-        # stdout also carries the relay's "rcq …"/"rcs …" --print lines: take the URL.
+        # stdout also carries the relay's "rcq …" --print line: take the URL.
         hls = [ln for ln in (res.stdout or "").splitlines() if ln.startswith("http")]
-        if not hls:     # --ignore-no-formats-error: no selectable format exits 0
-            self._wlog(f"resolve-fail rc=0 {(res.stdout or '').split()}")
-            return None, False
-        return hls[0], True
+        return (hls[0], True) if hls else (None, False)
 
     def _streamlink_cmd(self, target):
         cmd = self.fe.streamlink_fanout_cmd(

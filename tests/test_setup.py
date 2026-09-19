@@ -1185,13 +1185,20 @@ def t_ytdlp_resolve_cmd_separates_url():
     assert cmd2[cmd2.index("--cookies") + 1] == "/c/cookies.txt"
 
 
-def t_ytdlp_resolve_cmd_prints_live_status():
-    # #621: the live status comes from the same resolve, so an ended broadcast
-    # without a playable format still reports it instead of aborting first.
-    cmd = m.ytdlp_resolve_cmd("https://youtu.be/AAA", None)
-    assert "--ignore-no-formats-error" in cmd[:cmd.index("--")], cmd
-    prints = [cmd[i + 1] for i, a in enumerate(cmd) if a == "--print"]
-    assert prints == ["rcq %(height)s %(fps)s", "rcs %(live_status)s"], prints
+def t_ytdlp_resolve_cmd_never_ignores_no_formats():
+    # #621: --ignore-no-formats-error would turn the bot-check / rate-limit reason into a
+    # hidden warning, so it belongs only on the separate live-status call.
+    assert "--ignore-no-formats-error" not in m.ytdlp_resolve_cmd("https://youtu.be/AAA", "/c/j.txt")
+
+
+def t_ytdlp_live_status_cmd():
+    cmd = m.ytdlp_live_status_cmd("https://youtu.be/AAA", "/c/j.txt")
+    assert cmd[-2:] == ["--", "https://youtu.be/AAA"], cmd
+    head = cmd[:cmd.index("--")]
+    assert "--ignore-no-formats-error" in head and "--skip-download" in head, cmd
+    assert head[head.index("--print") + 1] == "rcs %(live_status)s", cmd
+    assert head[head.index("--cookies") + 1] == "/c/j.txt", cmd
+    assert "--cookies" not in m.ytdlp_live_status_cmd("https://youtu.be/AAA", None)
 
 
 def t_streamlink_serve_cmd_separates_url():
