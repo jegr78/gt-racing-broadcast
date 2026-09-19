@@ -129,6 +129,12 @@ RACECAST_PROFILE=
   or black frame. It fires **once** and pings Discord (`@here`); the **return is manual** —
   the producer/director re-takes the feed when it recovers. It only fires while OBS is still
   on the on-air feed scene (it never yanks a program you already cut to Intermission/Intro).
+- **`RACECAST_CAPTURE`**, **`RACECAST_CAPTURE_AUDIO`**, **`RACECAST_MIC`** *(optional)* —
+  the capture card, its game-audio override and the commentary microphone of this
+  machine. Solo profiles use the capture card and mic for their OBS device sources; on an
+  endurance machine all three drive a
+  [local capture stint](Relay-Mode#local-capture-stint). `racecast device-scan` writes
+  the capture card and the mic.
 - **`RACECAST_UI_PASSWORD`** *(reserved)* — for the future Control-Center-over-Tailscale
   feature; not read by any current version, leave commented out.
 
