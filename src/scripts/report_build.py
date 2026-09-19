@@ -525,7 +525,7 @@ th{color:#65676b;font-weight:600;font-size:12px;text-transform:uppercase;letter-
 .finding.lvl-green{border-color:#2e7d32}.finding.lvl-yellow{border-color:#f9a825}
 .finding.lvl-red{border-color:#c62828}
 .finding .head{font-size:16px;font-weight:700;margin:0 0 4px}
-.finding p{margin:4px 0}
+.finding p{margin:4px 0;font-size:14px}.finding p.note{font-size:12px}
 """
 
 
