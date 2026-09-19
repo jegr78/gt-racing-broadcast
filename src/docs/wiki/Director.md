@@ -106,11 +106,13 @@ feed first (`A 3.1 s`; hover for every feed). It appears once a feed is serving 
 reserve on purpose. The pill turns amber when OBS falls more than 5 s behind that,
 which means OBS plays the feed slower than real time and the audience sees a growing
 delay with stuttering picture and distorted sound. The health pill then names the
-feed, e.g. `Feed A output 12 s behind live — OBS reads slower than real time; step the
-feed quality down to ROBUST` (POV and a `local:` capture stint have no quality tiers, so
-their line says `this source has no quality step-down` instead). A handover clears the delay because the incoming feed
+feed and the next step, e.g. `Feed A output 12 s behind live — OBS reads slower than real
+time; RESET A → LIVE drops it with a short black dropout` (POV has no reset, so its line
+states only the delay). A handover clears the delay because the incoming feed
 starts fresh; a single-feed session (qualifying, solo) keeps it until the cause is
-fixed. Nothing acts on this value automatically.
+fixed. Nothing acts on this value automatically. The full runbook, including why the
+line does not suggest ROBUST and what reaches Discord, is
+[The picture falls behind live](If-something-goes-wrong#the-picture-falls-behind-live).
 
 #### Dropping a backlog
 

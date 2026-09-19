@@ -93,6 +93,97 @@ never goes through yt-dlp).
 | Interview audio doubled / echo | Capture Discord only through that audio-capture source — not *also* via desktop audio. |
 | **ARM64 / no native Discord:** audio is silent or the capture source shows no target | Interview audio is captured from **Discord-web in a browser** on this platform. Make sure the browser is the one named by `RACECAST_DISCORD_WEB_BROWSER` (default Firefox), that Discord-web is open and in the voice channel, and that the **Discord Audio Capture** source's *TargetName* matches the browser's PipeWire node (check it in OBS → the source's properties). If still silent, try the other match (`RACECAST_DISCORD_WEB_BROWSER=Chromium`) or confirm the `obs-pipewire-audio-capture` plugin is installed. |
 
+## The picture falls behind live
+
+This is the runbook for a program that plays **later and later** behind the commentator's
+stream: slow picture, stuttering, distorted sound. It matters most when the producer
+machine runs remote (a [cloud box](Cloud-Producer)) with nobody in front of it, because
+then everything below happens from the Director Panel.
+
+### What a backlog is
+
+The relay holds every feed about **3 s** behind its live edge on purpose, a reserve that
+absorbs short gaps in the source (`RACECAST_FEED_PREBUFFER_S`). When OBS takes the feed
+in slower than real time, usually because the producer machine cannot render the program
+fast enough, the rest piles up in front of OBS. That pile is the **backlog**. It only
+grows while the cause lasts, and the audience sees the picture drift further behind.
+
+### Where it shows
+
+| Where | What you see |
+|---|---|
+| Director Panel header | The **BEHIND LIVE** pill, e.g. `A 12.4 s`; amber once OBS is more than 5 s beyond the reserve (`RACECAST_FEED_BACKLOG_WARN_S`). See [Status strip and feed health](Director#status-strip-and-feed-health). |
+| Health pill | A yellow line, e.g. `Feed A output 12 s behind live — OBS reads slower than real time; RESET A → LIVE drops it with a short black dropout`. The POV line names no control, because POV has no reset. |
+| Commentator Cockpit | `Program is 12 s behind live. The delay is on the producer side, not your stream.` |
+| Discord | **Nothing, on its own.** The backlog is uncalibrated, so it never pages. See [Escalation on a remote machine](#escalation-on-a-remote-machine). |
+| Afterwards | The [Health Monitor](Health-Monitor#output-backlog) chart and the post-event report's backlog finding. |
+
+### What to do
+
+1. **Drop it with RESET.** **RESET A → LIVE** / **RESET B → LIVE** makes OBS reconnect to
+   that feed at the 3 s reserve. The button shows the cost before you press it
+   (`discards 12 s backlog`), and the audience sees a short black dropout. Details:
+   [Dropping a backlog](Director#dropping-a-backlog).
+2. **Watch whether it comes back.** A reset removes the backlog, not its cause. If the
+   pill climbs again, the producer machine cannot keep up with the program.
+3. **Know what a handover does.** At every stint change the incoming feed starts fresh
+   at the reserve, so a backlog clears there by itself. A session without handovers
+   (qualifying, solo) keeps it until someone resets.
+4. **Check the machine before the next event.** `racecast obs benchmark` measures
+   whether it keeps real time; see
+   [Can this machine keep up?](Set-up-the-broadcast-PC#can-this-machine-keep-up--the-obs-benchmark).
+
+The health line does not suggest **ROBUST** (720p) for a backlog. Whether 720p gives a
+slow machine back enough render time is not measured yet. A tier change also restarts
+the feed's connection without reconnecting OBS, and for YouTube ROBUST starts two segments
+(about 10 s) further behind the live edge, so right after the change OBS can sit *further*
+behind than before. If you step down anyway, press **RESET** once the new connection is
+serving.
+
+### What the relay does on its own, and what it leaves to you
+
+| Automation | Acts on | Leaves alone |
+|---|---|---|
+| Auto OBS rebuild | A **frozen** picture (OBS stops advancing the feed). Stands down after three rebuilds that did not help, with a **RE-ARM** button. See [Automatic OBS rebuild](Director#through-the-broadcast-scene--hud-cues). | A picture that plays, however late. |
+| Auto step-down to ROBUST | A **source** that keeps dropping (two dead serves at full quality). | A slow producer machine. |
+| Standby cover and auto-failover | An on-air feed whose source is offline, not live yet or ended, or that stays down. | Everything that still delivers a picture. |
+
+Nothing resets a feed because of a backlog. Shedding one is always a jump forward, and a
+jump is a black dropout. The relay leaves that trade to the director, with the price on
+the button.
+
+### Why it cannot catch up the way YouTube or Twitch does
+
+A YouTube or Twitch player stacks buffers too, aiming a little behind the live edge. The
+difference is that the player owns both its playback clock and its download. When it
+falls behind it can skip to the live edge, play slightly faster, or switch to a lower
+quality until its buffer recovers.
+
+racecast hands OBS a plain byte stream. OBS plays it at its own clock and has no catch-up
+mode. A skip forward in that stream is not a seek: the decoder loses its place, and the
+audience sees black. Playing faster is no way out either: the setting sits on the OBS
+source, and changing it rebuilds the source, which is the same dropout, and a machine
+that already renders too slowly cannot play faster anyway. So the remedy here is to
+keep a backlog from building, and to drop one only when a director decides the dropout
+is worth it.
+
+### Escalation on a remote machine
+
+- **Discord** gets an `@here` post whenever the overall health **level** changes, from
+  green to yellow (DEGRADED), to red (CRITICAL), or back. The post lists every current
+  reason, so a backlog line rides along when something else changes the level, but a
+  backlog alone never triggers one. `Feed A rebuild ineffective — …` does trigger one,
+  and it is the usual sign that the producer machine is overloaded. Three events post
+  their own `@here` outside the health level: an auto-failover to Intermission, a feed
+  that keeps dropping and recovering (three times in 5 minutes), and an automatic
+  step-down to ROBUST.
+- **The Director Panel** is where the decision is made: the BEHIND LIVE pill, the health
+  pill with the next step, the RESET cost, and the feed-health area with **RE-ARM**.
+- **The [Health Monitor](Health-Monitor)** answers what happened afterwards: the backlog
+  per feed over time, OBS render time and frame rate, and the incident list. It is
+  reachable over the Funnel at `/console/health-monitor` by anyone signed in to the
+  [Console](Console).
+
 ## Everything is laggy
 
 | Problem | Fix |

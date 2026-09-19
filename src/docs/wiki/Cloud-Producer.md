@@ -166,6 +166,11 @@ everything from the browser **[Director Panel](Run-an-event#the-director-panel-r
 — including starting and stopping each **[broadcast Part](Run-an-event#broadcast-parts-director-panel)**.
 No RustDesk needed.
 
+Nobody watches the box itself during the event, so the Director Panel and Discord are the
+only places a problem shows. If the program starts falling behind the commentators'
+streams, follow [The picture falls behind live](If-something-goes-wrong#the-picture-falls-behind-live):
+what the panel shows, what reaches Discord, and what the director can do.
+
 When the event is over:
 
 ```bash

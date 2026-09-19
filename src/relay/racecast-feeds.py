@@ -903,9 +903,8 @@ def aggregate_health(facts):
         effectiveness guard stood the automatic OBS rebuild down on that feed),
     feeds_backlogged (optional dict feed name -> seconds behind live: OBS accepts that
         feed's bytes slower than real time, #583 — a quiet, display-only yellow that
-        is excluded from the notify-level facts until #581 stage 4 calibrates it),
-    backlog_no_step_down (optional list of those feed names without a quality tier: POV
-        and a `local:` capture stint, #592 — their reason names no ROBUST step).
+        is excluded from the notify-level facts until #581 stage 4 calibrates it; the
+        reason names the RESET for Feed A/B, the only feeds that have one, #588).
 
     red  = any feed down (a live picture was lost); or obs_reachable truthy and
            stream_active is False AND stream_expected (OBS connected and has
@@ -954,12 +953,14 @@ def aggregate_health(facts):
         renders = f" (producer host renders {fps:.0f} fps)" if fps is not None else ""
         yellow.append(f"Feed {name} rebuild ineffective — {REBUILD_GUARD_MAX_ATTEMPTS} OBS "
                       f"rebuilds did not clear the stall{renders}; auto-rebuild paused")
-    no_step = set(facts.get("backlog_no_step_down") or ())
+    # #588: the next step is the deliberate RESET (#587), with its cost. Not ROBUST: that
+    # tier restarts streamlink without rejoining OBS and, for YouTube, starts two segments
+    # further behind the live edge (#614), so it can grow the backlog it is meant to fix.
     for name, behind in (facts.get("feeds_backlogged") or {}).items():
-        step = ("this source has no quality step-down" if name in no_step
-                else "step the feed quality down to ROBUST")
+        step = (f"; RESET {name} → LIVE drops it with a short black dropout"
+                if name in ("A", "B") else "")
         yellow.append(f"Feed {name} output {behind:.0f} s behind live — OBS reads slower than "
-                      f"real time; {step}")
+                      f"real time{step}")
     reasons.extend(red)
     reasons.extend(yellow)
     level = "red" if red else ("yellow" if yellow else "green")
@@ -7093,7 +7094,6 @@ class Relay:
         self._backlog_warn_s = feed_backlog_warn_s(os.environ)      # #583
         self._interval_backlogs = {}      # #583: last heartbeat's per-feed consumer backlog floor
         self._backlogged_feeds = {}       # #583: feed -> floor (s) for feeds past the threshold
-        self._backlog_no_step_down = []   # #583: of those, the feeds without a quality tier
         self.program_audio = program_audio_enabled(os.environ)
         self._fanout_servers = []
         # Auto-failover to the Intermission scene on confirmed on-air feed loss
@@ -7234,8 +7234,7 @@ class Relay:
                 "feed_source_states": feed_source_states,
                 "feeds_jittery": list(self._jittery_feeds),
                 "rebuilds_stood_down": self._rebuilds_stood_down_fact(st.get("obs_fps")),
-                "feeds_backlogged": dict(self._backlogged_feeds),
-                "backlog_no_step_down": list(self._backlog_no_step_down)}
+                "feeds_backlogged": dict(self._backlogged_feeds)}
 
     def _refresh_health(self, now):
         """Recompute + store the DISPLAYED health (level/reasons/since). Does NOT
@@ -7433,9 +7432,6 @@ class Relay:
                 lagging[name] = floors[name]
         self._interval_backlogs = floors
         self._backlogged_feeds = lagging
-        # POV and a capture card have no quality tiers (#592): no ROBUST advice for them
-        self._backlog_no_step_down = [n for n in lagging if n == "POV" or is_local_source(
-            dict(live)[n].current_channel()[0])]
 
     def _backlog_status(self, name, f):
         """/status fields for one feed (#583): the live consumer backlog and whether it is

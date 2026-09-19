@@ -2606,13 +2606,13 @@ def t_heartbeat_backlog_sample_classifies_serving_feeds_only():
     assert r._backlogged_feeds == {}
 
 
-def t_backlog_on_a_local_stint_names_no_quality_step_down():
+def t_backlog_on_a_local_stint_names_the_reset():
+    # #592 capture card: no quality tiers, but it serves Feed A, so the RESET applies (#588)
     r = _backlog_relay(11.6)
-    r.A.current_channel = lambda: ("local:", 0)         # #592 capture card: no tiers
+    r.A.current_channel = lambda: ("local:", 0)
     r._sample_consumer_backlogs()
-    assert r._health_facts(2000.0)["backlog_no_step_down"] == ["A"]
-    assert ("Feed A output 12 s behind live — OBS reads slower than real time; this source "
-            "has no quality step-down") in r._refresh_health(2000.0)["reasons"]
+    assert ("Feed A output 12 s behind live — OBS reads slower than real time; RESET A → "
+            "LIVE drops it with a short black dropout") in r._refresh_health(2000.0)["reasons"]
 
 
 def t_backlog_yellow_shows_but_never_pages():
@@ -2621,8 +2621,8 @@ def t_backlog_yellow_shows_but_never_pages():
     r.obs_reachable = True
     r._sample_consumer_backlogs()
     h = r._refresh_health(2000.0)
-    assert ("Feed A output 12 s behind live — OBS reads slower than real time; step the "
-            "feed quality down to ROBUST") in h["reasons"]
+    assert ("Feed A output 12 s behind live — OBS reads slower than real time; RESET A → "
+            "LIVE drops it with a short black dropout") in h["reasons"]
     facts = r._health_facts(2000.0)
     assert facts["feeds_backlogged"] == {"A": 11.6}
     # the notify level is computed as if the backlog were absent
