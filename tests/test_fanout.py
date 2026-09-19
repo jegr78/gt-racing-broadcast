@@ -723,6 +723,18 @@ def _raw_http_get(port, want_body, deadline=2.0):
     return head, body
 
 
+def _wait_joined(srv, deadline=3.0):
+    """Block until a consumer has joined: `_serve` registers it only after the
+    join offset is fixed, so a write after this lands behind the join cursor."""
+    end = time.monotonic() + deadline
+    while time.monotonic() < end:
+        with srv._consumers_lock:
+            if srv._consumers:
+                return
+        time.sleep(0.01)
+    raise AssertionError("consumer never joined")
+
+
 def _serve_mid_stream_join(before, after):
     """Write `before`, connect a consumer (it joins at the live edge), write
     `after`, and return (headers, body) it received."""
@@ -735,7 +747,7 @@ def _serve_mid_stream_join(before, after):
         want = len(_INIT) + len(after)
         t = threading.Thread(target=lambda: body.update(b=_raw_http_get(srv.port, want)))
         t.start()
-        time.sleep(0.2)                               # joined before `after` arrives
+        _wait_joined(srv)                             # joined before `after` arrives
         ring.write(after)
         t.join(3)
         return body["b"]
@@ -765,7 +777,7 @@ def t_fanout_server_leaves_an_mpeg_ts_join_untouched():
         rest = ts[188 * 10 + 50:]
         t = threading.Thread(target=lambda: body.update(b=_raw_http_get(srv.port, len(rest))))
         t.start()
-        time.sleep(0.2)
+        _wait_joined(srv)
         ring.write(rest)
         t.join(3)
         head, got = body["b"]

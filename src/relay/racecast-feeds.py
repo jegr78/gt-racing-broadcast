@@ -3889,8 +3889,9 @@ class Fmp4Join:
     first, then every read passed through `take` until the first fragment
     boundary. Built from the ring's head at join time; on an MPEG-TS head `init`
     is b"" and `take` returns its input unchanged, so a TS feed keeps today's raw
-    path byte for byte. Every mid-stream consumer of a FeedRing goes through
-    this — the OBS serve, the preview tap and the program-audio tap (#577)."""
+    path byte for byte. Every mid-stream consumer of a feed's ring goes
+    through this: the OBS serve, the preview tap and the program-audio tap
+    (#577). The program-audio MP3 output ring does not need it; MP3 resyncs."""
 
     def __init__(self, head):
         self.init = fmp4_init_segment(head)

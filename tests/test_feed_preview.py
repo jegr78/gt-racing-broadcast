@@ -373,7 +373,8 @@ def t_preview_ring_tap_prepends_init_and_aligns_an_fmp4_join():
 
     w = m._PreviewRingTap(ring, "B", _quiet_log(), spawn=fake_spawn)
     w.start()
-    time.sleep(0.2)
+    _wait(lambda: len(written) >= len(init), 2.0)     # joined: the init segment is out
+    assert bytes(written) == init
     ring.write(frag1[100:] + frag2)
     _wait(lambda: len(written) >= len(init) + len(frag2), 2.0)
     w.stop()
