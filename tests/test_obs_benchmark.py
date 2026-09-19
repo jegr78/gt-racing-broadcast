@@ -390,16 +390,17 @@ def t_run_measures_both_tiers_and_restores_everything():
     assert "recording" not in rec
 
 
-def t_run_samples_only_the_serve_after_the_switch():
+def t_run_samples_only_after_the_reconnect_and_the_settle():
     clock = _Clock()
-    seen = []
-    relay = _Relay(clock, backlog=lambda tier, age: seen.append(age) or 3.0)
+    # the backlog reads as the serve's age, so the first sample shows when sampling began
+    relay = _Relay(clock, backlog=lambda tier, age: round(age, 1))
     sess = _Session(clock, relay=relay)
     with tempfile.TemporaryDirectory() as d:
         rec, _ = _run(d, clock, relay, sess)
-    # settle (5 s) after the reconnect (4 s): no backlog sample from before 9 s
-    assert min(seen) >= 4.0
-    assert rec["full"]["samples"] >= 10 and rec["full"]["duration_s"] >= 20.0
+    for tier in m.TIERS:
+        # reconnect (4 s) + settle (5 s): nothing from the rejoin transient
+        assert rec[tier]["backlog_start_s"] == 9.0, rec[tier]
+        assert rec[tier]["samples"] >= 10 and rec[tier]["duration_s"] >= 20.0
 
 
 def t_run_measures_the_backlog_growth_per_tier():
