@@ -308,7 +308,7 @@ def t_feed_reset_is_labelled_as_the_backlog_resolution():
     poll = poll[:poll.index("\n}\n")]
     assert "resetLabel(d);" in poll, "RESET labels re-rendered from every /status poll"
     assert "reset_discards_s" in h, "the label reads the relay's discard figure"
-    assert "discards " in h and " s backlog" in h, "the cost is spelled out on the button"
+    assert '"discards " + k.discards + " s backlog"' in h, "the cost is spelled out on the button"
 
 
 if __name__ == "__main__":
