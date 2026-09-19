@@ -262,7 +262,10 @@ def t_private_export_path_warns_when_a_dir_stays():
         finally:
             m.shutil.rmtree = real
         assert len(warnings) == 2, warnings
-        assert stale in warnings[0] and own in warnings[1], warnings
+        # Basenames: the warning carries the realpath, which differs from the temp
+        # dir's spelling on macOS (/private/var) and Windows (8.3 short names).
+        assert warnings[0].endswith(os.path.basename(stale)), warnings
+        assert warnings[1].endswith(os.path.basename(own)), warnings
 
 
 if __name__ == "__main__":
