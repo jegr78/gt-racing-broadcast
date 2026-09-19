@@ -999,41 +999,33 @@ def t_fanout_serve_measures_the_accepted_position_end_to_end():
         srv.stop()
 
 
-def t_fanout_serve_floor_rises_for_a_consumer_slower_than_real_time():
-    # The 2026-08-28 shape in miniature: OBS accepts bytes at a third of real time.
-    # Every read jumps the cursor to the trailing mark, so a floor sampled AFTER the read
-    # would stay at the reserve forever; sampled at the accepted position it climbs.
-    r = m.FeedRing(10_000_000)
-    srv = m.FeedFanoutServer("127.0.0.1", 0, r, m.logging.getLogger("t"), prebuffer_s=0.3)
-    rate = 20_000                                        # bytes per second, real time
-    stop = threading.Event()
+def t_fanout_serve_records_the_accepted_position_not_the_read_end():
+    # Each read takes everything up to the trailing mark and then blocks in sendall, so
+    # the cursor right after a read always sits prebuffer_s behind live, however slow the
+    # consumer is. While a chunk is being sent, the recorded position must still be the
+    # START of that chunk: only then does a slow consumer's backlog grow in the numbers.
+    # Deterministic: the fake consumer inspects the registry from inside sendall.
+    r = m.FeedRing(1_000_000)
+    r.write(b"x" * 1000, now=time.monotonic() - 5.0)
+    srv = m.FeedFanoutServer("127.0.0.1", 0, r, m.logging.getLogger("t"), prebuffer_s=0.0)
+    seen = []
 
-    def writer():
-        while not stop.is_set():
-            r.write(b"x" * (rate // 20), now=time.monotonic())
-            time.sleep(0.05)
-
-    class _SlowConn:
+    class _Conn:
+        calls = 0
         def recv(self, n): return b""
         def sendall(self, data):
-            if stop.is_set():
-                raise OSError("closed")
-            time.sleep(len(data) / (rate / 3))           # a third of real time
+            _Conn.calls += 1
+            if _Conn.calls == 1:                         # the HTTP header: new bytes arrive
+                r.write(b"y" * 500, now=time.monotonic())
+                return
+            with srv._consumers_lock:
+                seen.extend(st["cursor"] for st in srv._consumers.values())
+            seen.append(len(data))
+            raise OSError("consumer gone")               # ends _serve
         def close(self): pass
 
-    wt = threading.Thread(target=writer, daemon=True); wt.start()
-    time.sleep(0.5)
-    st = threading.Thread(target=srv._serve, args=(_SlowConn(),), daemon=True); st.start()
-    try:
-        time.sleep(2.0)
-        srv.take_backlog_floor(time.monotonic())         # drop the warm-up samples
-        time.sleep(1.5)
-        floor = srv.take_backlog_floor(time.monotonic())
-        # ~1.6 s: the reserve plus the deficit. Measured after the read it stays at the
-        # 0.3 s reserve, so 1.0 separates the two with room for a slow runner.
-        assert floor is not None and floor > 1.0, floor
-    finally:
-        stop.set(); srv._stop = True; r.close()
+    srv._serve(_Conn())
+    assert seen == [1000, 500], seen                     # chunk [1000, 1500) in flight
 
 
 def t_feed_backlog_degraded_is_relative_to_the_reserve():
