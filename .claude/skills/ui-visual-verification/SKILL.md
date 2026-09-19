@@ -92,7 +92,7 @@ state, never committed.
 
 ## Cleanup
 Tear down the demo build as in [wiki-screenshots](../wiki-screenshots/SKILL.md): `relay
-stop`, `pkill -f obs-sim.py`, remove the stub `runtime/yt-cookies.txt`, and
+stop`, `pkill -f obs-sim.py`, `rm -f runtime/demo/stub-cookies.txt` (the shared jar stays), and
 `git checkout -- profiles/demo/profile.env` (the auto-provisioned `CONSOLE_SECRET`). Delete
 any scratch PNGs from the repo root; only files under `src/docs/...` are committed.
 

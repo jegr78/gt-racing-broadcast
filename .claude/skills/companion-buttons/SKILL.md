@@ -81,8 +81,9 @@ normal, the buttons ARE there), then
 
 ## 4. Validate the button actually fires (do NOT skip)
 
-Rendering ≠ working. Start the relay the button targets, reset the target state, click the
-tile, and read the relay back:
+Rendering ≠ working. Start the relay the button targets (the demo relay as in
+[wiki-screenshots](../wiki-screenshots/SKILL.md) B1, with its stub `--cookies`), reset the
+target state, click the tile, and read the relay back:
 
 ```
 pg.locator(".button-control.clickable").nth(0).click()     # tile index = row*8 + col
@@ -92,7 +93,7 @@ then `curl <relay>/status` and assert the state changed (e.g. `feeds.A.profile =
 A POST-body button passes rendering but fails here — that is the tell to use a GET route (see top).
 
 ## Cleanup
-`racecast relay stop`; `pkill -f obs-sim.py`; remove the stub `runtime/yt-cookies.txt`;
+`racecast relay stop`; `pkill -f obs-sim.py`; `rm -f runtime/demo/stub-cookies.txt` (the shared jar stays);
 `git checkout -- profiles/<demo>/profile.env` (relay start writes CONSOLE_SECRET). Ask the
 operator before leaving/closing their Companion — you launched it.
 
