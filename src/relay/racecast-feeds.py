@@ -155,6 +155,7 @@ import install_apps       # companion_http_version for the buttons health probe 
 import companion_common   # companion config.json path for bind-address resolution (#236)
 import tailscale          # detect_tailscale_ip fallback for bind-address resolution (#236)
 import logsetup  # rotating per-feed/console loggers + streamlink pump (src/scripts on sys.path)
+import cookie_jar  # the shared "jar holds a YouTube login" rule, same as preflight (#615)
 import placeholders  # transparent-graphic placeholder path -> hide pure-placeholder assets from the browser
 import gt7_crypto      # GT7 UDP telemetry: Salsa20 decrypt (solo/POV only, #324)
 import gt7_telemetry   # GT7 UDP telemetry: packet parser + TelemetryStore (solo/POV only, #324)
@@ -5063,8 +5064,21 @@ def resolve_hls(url, cookies, logger, fmt=YTDLP_FORMAT):
         status = ytdlp_live_status(url, cookies)
         if status not in (None, "NA"):
             last = f"{last} (live_status {status})"
+        # A live (or unknown) video with a jar that holds no login: yt-dlp fell back to
+        # logged-out clients with no muxed rendition. Name the fix, not just the format
+        # (#615). An ended or upcoming source is already explained by its status.
+        if classify_source_state(last) is None and cookie_jar.jar_has_login(cookies) is False:
+            last = f"{last} — {cookie_jar.LOGGED_OUT_HINT}"
     logger.warning("yt-dlp could not resolve %s (%s)", url, last)
     return None, last, None
+
+
+def cookie_login_warning(cookies):
+    """The startup WARNING for a YouTube jar that holds no login, else None (no jar, no
+    file, or logged in). Same rule as `racecast preflight` (cookie_jar, #615)."""
+    if cookie_jar.jar_has_login(cookies) is False:
+        return f"Cookies: {cookie_jar.LOGGED_OUT_HINT} ({cookies})"
+    return None
 
 
 def ytdlp_live_status(url, cookies):
@@ -11190,6 +11204,9 @@ def main():
                  args.timer_tab, push)
     LOG.info("  Cookies (bot-check protection): %s",
              'ON — ' + cookies if cookies else 'off (no yt-cookies.txt)')
+    login_warning = cookie_login_warning(cookies)
+    if login_warning:
+        LOG.warning("  %s", login_warning)
     LOG.info("  Sheet poll every %ss.  Ctrl+C to stop.", args.poll)
     # Serve every bound address; keep the last on the main thread for signals.
     for httpd in servers[:-1]:

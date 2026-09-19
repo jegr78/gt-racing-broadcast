@@ -91,7 +91,7 @@ _NO_FORMAT_ERR = ("ERROR: [youtube] abc: Requested format is not available. "
                   "Use --list-formats for a list of available formats")
 
 
-def _resolve_err(stderr, status_stdout="", status_exc=None):
+def _resolve_err(stderr, status_stdout="", status_exc=None, cookies="/c/j.txt"):
     """resolve_hls against a failing resolve (`stderr`) and a live-status call that prints
     `status_stdout` (or raises `status_exc`). Returns (url, err, quality, argvs)."""
     calls = []
@@ -106,7 +106,7 @@ def _resolve_err(stderr, status_stdout="", status_exc=None):
     orig = m.subprocess.run
     m.subprocess.run = fake_run
     try:
-        url, err, quality = m.resolve_hls("https://yt.example/x", "/c/j.txt", _LOG)
+        url, err, quality = m.resolve_hls("https://yt.example/x", cookies, _LOG)
     finally:
         m.subprocess.run = orig
     return url, err, quality, calls
@@ -154,6 +154,67 @@ def t_resolve_hls_other_errors_skip_the_status_call():
               "ERROR: unable to download video data: HTTP Error 429: Too Many Requests"):
         _u, err, _q, calls = _resolve_err(e + "\n", "rcs post_live\n")
         assert err == e and len(calls) == 1, (e, err, calls)
+
+
+# #615: the anonymous jar from the 2026-09-19 incident (no login marker).
+_ANON_JAR = ("# Netscape HTTP Cookie File\n"
+             ".youtube.com\tTRUE\t/\tTRUE\t0\t__Secure-YNID\tv\n"
+             ".youtube.com\tTRUE\t/\tFALSE\t0\tPREF\tf6=40000000\n"
+             ".youtube.com\tTRUE\t/\tTRUE\t0\tSOCS\tCAI\n")
+_LOGGED_IN_JAR = _ANON_JAR + ".youtube.com\tTRUE\t/\tTRUE\t0\tSAPISID\tv\n"
+
+
+def _with_jar(text, fn):
+    with tempfile.TemporaryDirectory() as td:
+        path = os.path.join(td, "yt-cookies.txt")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        return fn(path)
+
+
+def t_resolve_hls_logged_out_jar_adds_the_cookie_hint():
+    # #615: a live video, no muxed format, a jar without login: the error that reaches
+    # last_error (and the panel) names the fix, and stays a generic drop.
+    for status in ("rcs is_live\n", "rcs NA\n", ""):
+        _u, err, _q, _c = _with_jar(_ANON_JAR, lambda p, s=status: _resolve_err(
+            _NO_FORMAT_ERR, s, cookies=p))
+        assert err.startswith(_NO_FORMAT_ERR), (status, err)
+        assert err.endswith(" — " + m.cookie_jar.LOGGED_OUT_HINT), (status, err)
+        assert m.classify_source_state(err) is None, (status, err)
+
+
+def t_resolve_hls_logged_in_or_missing_jar_gets_no_hint():
+    _u, err, _q, _c = _with_jar(_LOGGED_IN_JAR, lambda p: _resolve_err(
+        _NO_FORMAT_ERR, "rcs is_live\n", cookies=p))
+    assert err == _NO_FORMAT_ERR + " (live_status is_live)", err
+    for cookies in (None, "/c/j.txt"):             # no jar / no file: unknown, not logged out
+        _u, err, _q, _c = _resolve_err(_NO_FORMAT_ERR, "rcs is_live\n", cookies=cookies)
+        assert err == _NO_FORMAT_ERR + " (live_status is_live)", (cookies, err)
+
+
+def t_resolve_hls_ended_or_upcoming_source_gets_no_cookie_hint():
+    # #621 already explains these; a login hint would point the operator the wrong way.
+    for status, state in (("rcs post_live\n", "ended"), ("rcs was_live\n", "ended"),
+                          ("rcs is_upcoming\n", "not_live_yet")):
+        _u, err, _q, _c = _with_jar(_ANON_JAR, lambda p, s=status: _resolve_err(
+            _NO_FORMAT_ERR, s, cookies=p))
+        assert "racecast cookies" not in err, (status, err)
+        assert m.classify_source_state(err) == state, (status, err)
+
+
+def t_resolve_hls_other_errors_get_no_cookie_hint():
+    e = "ERROR: unable to download video data: HTTP Error 429: Too Many Requests"
+    _u, err, _q, calls = _with_jar(_ANON_JAR, lambda p: _resolve_err(e, cookies=p))
+    assert err == e and len(calls) == 1, (err, calls)
+
+
+def t_cookie_login_warning_only_for_a_logged_out_jar():
+    # #615: relay startup applies preflight's rule to the jar it will use.
+    msg = _with_jar(_ANON_JAR, m.cookie_login_warning)
+    assert msg is not None and m.cookie_jar.LOGGED_OUT_HINT in msg, msg
+    assert _with_jar(_LOGGED_IN_JAR, m.cookie_login_warning) is None
+    assert m.cookie_login_warning(None) is None
+    assert m.cookie_login_warning(os.path.join(HERE, "no-such-cookies.txt")) is None
 
 
 def t_parse_ytdlp_live_status():
