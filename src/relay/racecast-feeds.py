@@ -954,8 +954,8 @@ def aggregate_health(facts):
         yellow.append(f"Feed {name} rebuild ineffective — {REBUILD_GUARD_MAX_ATTEMPTS} OBS "
                       f"rebuilds did not clear the stall{renders}; auto-rebuild paused")
     # #588: the next step is the deliberate RESET (#587), with its cost. Not ROBUST: that
-    # tier restarts streamlink without rejoining OBS and, for YouTube, fetches two more
-    # segments ahead (#614), so it can grow the backlog it is meant to fix.
+    # tier restarts streamlink without rejoining OBS and, for YouTube, starts two segments
+    # further behind the live edge (#614), so it can grow the backlog it is meant to fix.
     for name, behind in (facts.get("feeds_backlogged") or {}).items():
         step = (f"; RESET {name} → LIVE drops it with a short black dropout"
                 if name in ("A", "B") else "")

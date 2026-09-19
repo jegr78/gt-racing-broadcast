@@ -1190,7 +1190,7 @@ def t_aggregate_health_backlog_is_a_yellow_reason_with_the_next_step():
     # #583: named after the measurement (any slow consumer), not a guessed cause, and
     # the line carries the operator's next step (#588): the RESET that drops the backlog,
     # with its cost. Not ROBUST: that tier restarts streamlink without rejoining OBS and,
-    # for YouTube, fetches two more segments ahead (#614), so it can grow the backlog.
+    # for YouTube, starts two segments further behind the live edge (#614).
     h = m.aggregate_health(_facts(feeds_backlogged={"A": 11.6, "B": 8.2}))
     assert h["level"] == "yellow", h
     assert h["reasons"] == ["Feed A output 12 s behind live — OBS reads slower than real "
