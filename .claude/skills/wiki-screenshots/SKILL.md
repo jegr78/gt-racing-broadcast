@@ -62,15 +62,17 @@ cards show live content instead of "relay offline".
 1. Start the dev-build Control Center on a **free** port (the real instance often owns 8089;
    `ui` on a taken port opens *that* instance, not the dev build):
    ```bash
-   python3 src/racecast.py profile use demo
-   RACECAST_UI_PORT=8090 python3 src/racecast.py ui --no-browser   # pick any free port
+   RACECAST_UI_PORT=8090 python3 src/racecast.py --profile demo ui --no-browser   # any free port
    ```
+   Use the global `--profile demo`, **never** `profile use demo`: `profile use` rewrites the
+   machine's `runtime/active-profile` pointer, and the next real `event start` would then run
+   the demo league. `--profile` applies to this one process only.
 2. Drive it with the Playwright MCP: `browser_navigate` → `http://127.0.0.1:8090/`, switch to
    the view, then **element-screenshot the card/modal** (not a full-window grab) so the
    framing matches the existing images — e.g. the overlay builder modal:
    `browser_take_screenshot` with `element` ref for `#ov-modal .ovmodal-card`.
 3. Save into `src/docs/wiki/images/cc-<view>.png` (and the slides copy if the deck uses it).
-4. Stop the UI: `pkill -f "racecast.py ui"`.
+4. Stop the UI: `pkill -f "racecast.py --profile demo ui"`.
 
 ---
 
@@ -201,7 +203,7 @@ copy to `src/docs/slides/assets/img/<name>.png`. Read the PNG back and eyeball i
 
 ```bash
 RACECAST_OBS_WS_HOST=127.0.0.1 RACECAST_OBS_WS_PORT=4466 python3 src/racecast.py relay stop  # sim env, or stop talks to a real OBS on 4455
-pkill -f "obs-sim.py" ; pkill -f "racecast.py ui"
+pkill -f "obs-sim.py" ; pkill -f "racecast.py --profile demo ui"
 rm -f runtime/demo/stub-cookies.txt                # the stub jar only, never the shared one
 # Seed block (B3): delete ONLY the lines you added — surgically, with an editor/Edit.
 # Do NOT `git checkout -- src/relay/racecast-feeds.py`: it wipes ALL uncommitted changes
