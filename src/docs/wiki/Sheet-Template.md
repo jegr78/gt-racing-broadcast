@@ -150,7 +150,7 @@ URL                                          | Streamer           | Stint
 https://www.youtube.com/watch?v=SAMPLE00001  | Sample Commentator | Stint 1
 https://www.twitch.tv/sample_channel         | Second Commentator | Stint 2
 UCSAMPLECHANNELID0000000  | Third Commentator | Stint 3
-local:                                       | Producer Commentator | Stint 4
+local:                                       | Fourth Commentator | Stint 4
 ```
 
 Feed A serves the odd stints, Feed B the even ones; at each handover the off-air feed
