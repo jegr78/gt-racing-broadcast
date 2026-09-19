@@ -126,6 +126,19 @@ def sample(session, width):
     return state, delta, luma(obs_ws.parse_screenshot_data_uri(resp.get("imageData")))
 
 
+def stop_process(proc, timeout=5.0):
+    """Terminate `proc` and wait for it, escalating to kill(), so no streamlink
+    is left behind as a zombie or still pulling."""
+    try:
+        proc.terminate()
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=timeout)
+    except OSError:
+        pass  # already gone
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Fan-out rejoin probe (#577), real OBS.")
     ap.add_argument("--source", required=True, help="LIVE stream URL (e.g. a Twitch channel)")
@@ -200,18 +213,24 @@ def main(argv=None):
             print(f"rejoin {n}: {verdict:40} state={state} cursor+{delta}ms yavg={yavg}")
             session.request("SetCurrentProgramScene", {"sceneName": SCENE_IDLE})
             time.sleep(args.off_air)
+    except ValueError as exc:
+        # An OBS request failed: a setup problem, not a measurement. Exit 1 is
+        # reserved for "no picture", so this must not end as a traceback.
+        print(f"OBS request failed: {exc}", file=sys.stderr)
+        return 2
     finally:
-        for req, data in (("SetCurrentProgramScene", {"sceneName": prev_scene}),
-                          ("RemoveInput", {"inputName": INPUT_NAME}),
-                          ("RemoveScene", {"sceneName": SCENE_FEED}),
-                          ("RemoveScene", {"sceneName": SCENE_IDLE})):
+        cleanup = [("RemoveInput", {"inputName": INPUT_NAME}),
+                   ("RemoveScene", {"sceneName": SCENE_FEED}),
+                   ("RemoveScene", {"sceneName": SCENE_IDLE})]
+        if prev_scene:
+            cleanup.insert(0, ("SetCurrentProgramScene", {"sceneName": prev_scene}))
+        for req, data in cleanup:
             try:
-                if data.get("sceneName") is not None or req != "SetCurrentProgramScene":
-                    session.request(req, data)
+                session.request(req, data)
             except Exception:                  # noqa: BLE001 — cleanup is best effort
                 pass  # already gone / never created
         session.close()
-        proc.terminate()
+        stop_process(proc)
         srv.stop()
     ok = bool(results) and all(r == "PICTURE" for r in results)
     print(f"RESULT: {sum(r == 'PICTURE' for r in results)}/{len(results)} rejoins with a picture")

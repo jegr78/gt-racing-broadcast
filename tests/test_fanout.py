@@ -822,6 +822,15 @@ def t_rejoin_probe_uses_feed_a_settings_with_close_when_inactive():
     assert st["close_when_inactive"] is True
     assert st["is_local_file"] is False
 
+
+def t_rejoin_probe_stop_process_reaps_the_child():
+    """A stopped streamlink must be waited for, not left as a zombie."""
+    import subprocess as _sp
+    import sys as _sys
+    proc = _sp.Popen([_sys.executable, "-c", "import time; time.sleep(30)"])
+    _rejoin_probe().stop_process(proc)
+    assert proc.returncode is not None
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
