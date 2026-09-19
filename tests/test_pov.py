@@ -1241,6 +1241,23 @@ def t_freeze_tick_stint_change_lifts_the_stand_down():
         m._obs_ws = old
 
 
+def t_freeze_tick_mode_switch_lifts_the_stand_down():
+    # A race <-> qualifying switch re-points Feed A without a new pull index: still a
+    # stint change for the guard.
+    old = m._obs_ws; m._obs_ws = object()
+    try:
+        r, obs, rebuilds = _freeze_relay()
+        for n in range(60):
+            r._freeze_tick(1000.0 + 3.0 * n)
+        assert r._rebuild_guard.stood_down and r.live_feed() == "A"
+        r.mode = "qualifying"
+        r._freeze_tick(2000.0)
+        assert not r._rebuild_guard.stood_down
+        assert r.health_store.events[-1]["type"] == "obs_rebuild_rearmed"
+    finally:
+        m._obs_ws = old
+
+
 def t_rebuild_rearm_endpoint_lifts_the_stand_down():
     # The director's control once a cause is found: POST /obs/rebuild-rearm.
     r, obs, rebuilds = _freeze_relay()

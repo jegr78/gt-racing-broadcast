@@ -6952,11 +6952,12 @@ class Relay:
         self._freeze_interval_s = feed_freeze_interval_s(os.environ)
         self._freeze_cooldown = feed_freeze_cooldown_s(os.environ)
         self._last_freeze_ts = None
-        self._fz_key = None               # (on-air feed, its pull index) the window belongs to
+        self._fz_key = None               # (mode, on-air feed, on-air row) the window belongs to
         self._fz_prev_cursor = None
         self._fz_ratios = []
         self._rebuild_guard = RebuildGuard()   # #582 effectiveness guard for that rebuild
         self._rebuild_stood_down_feed = None   # the feed the guard stood down on
+        self._rebuild_lock = threading.Lock()  # sampler thread vs. the director's re-arm
         self._prev_snaps = {}             # feed_key -> last consumer cursor-snap count
         # Live health heartbeat: displayed level (refreshed on every /status and
         # every tick) + the notification baseline (advanced ONLY by the heartbeat
@@ -7064,8 +7065,7 @@ class Relay:
                 "sheet_push_failing": (tpush == "failed"),
                 "feed_source_states": feed_source_states,
                 "feeds_jittery": list(self._jittery_feeds),
-                "rebuilds_stood_down": ({self._rebuild_stood_down_feed: st.get("obs_fps")}
-                                        if self._rebuild_guard.stood_down else {})}
+                "rebuilds_stood_down": self._rebuilds_stood_down_fact(st.get("obs_fps"))}
 
     def _refresh_health(self, now):
         """Recompute + store the DISPLAYED health (level/reasons/since). Does NOT
@@ -7295,17 +7295,25 @@ class Relay:
 
     def rebuild_guard_status(self):
         """The #582 stand-down state for /status and the Director Panel."""
-        stood = self._rebuild_guard.stood_down
-        return {"stood_down": stood, "feed": self._rebuild_stood_down_feed if stood else None}
+        with self._rebuild_lock:
+            stood = self._rebuild_guard.stood_down
+            return {"stood_down": stood,
+                    "feed": self._rebuild_stood_down_feed if stood else None}
+
+    def _rebuilds_stood_down_fact(self, fps):
+        """aggregate_health's `rebuilds_stood_down` fact: {feed: OBS fps} or {}."""
+        st = self.rebuild_guard_status()
+        return {st["feed"]: fps} if st["stood_down"] else {}
 
     def rearm_rebuild_guard(self, reason, now=None):
         """Lift a #582 stand-down (the next stint change, or the director once a cause is
         found). Returns True when a stand-down was lifted. Also clears a half-judged
         rebuild, so the new stint starts with a clean streak."""
-        was = self._rebuild_guard.stood_down
-        feed = self._rebuild_stood_down_feed
-        self._rebuild_guard.rearm()
-        self._rebuild_stood_down_feed = None
+        with self._rebuild_lock:
+            was = self._rebuild_guard.stood_down
+            feed = self._rebuild_stood_down_feed
+            self._rebuild_guard.rearm()
+            self._rebuild_stood_down_feed = None
         if was:
             now = time.time() if now is None else now
             live = self.live_feed()
@@ -7355,7 +7363,9 @@ class Relay:
             return
         live = self.live_feed()
         f = self.feeds.get(live)
-        key = (live, None if f is None else f.idx)
+        # The displayed on-air row, not the pull index: a same-URL continuation moves the
+        # row while the pull stays parked, and a mode switch re-points Feed A.
+        key = (self.mode, live, None if f is None else self.on_air_row_idx())
         if key != self._fz_key:                 # stint change -> fresh window, lift a stand-down
             self._fz_prev_cursor = None; self._fz_ratios = []; self._fz_key = key
             self.rearm_rebuild_guard("stint change", now)
@@ -7373,9 +7383,13 @@ class Relay:
         if len(self._fz_ratios) < self._freeze_window:
             return                              # debounce: judge full windows only
         frac = stall_fraction(self._fz_ratios, stall_ratio=self._freeze_stall_ratio)
-        if self._rebuild_guard.on_window(frac, frac_threshold=self._freeze_frac):
+        with self._rebuild_lock:
+            stood_down = self._rebuild_guard.on_window(frac, frac_threshold=self._freeze_frac)
+            if stood_down:
+                self._rebuild_stood_down_feed = live
             attempts = self._rebuild_guard.ineffective
-            self._rebuild_stood_down_feed = live
+            allowed = self._rebuild_guard.allows()
+        if stood_down:
             LOG.warning("Feed %s auto-rebuild stood down — %d OBS rebuilds did not clear the "
                         "stall (stall_fraction=%.2f); re-arms at the next stint change or "
                         "from the Director Panel (#582)", live, attempts, frac)
@@ -7383,7 +7397,7 @@ class Relay:
                                f"Feed {live} auto-rebuild stood down after {attempts} "
                                f"ineffective rebuilds",
                                {"feed": live, "stint": f.idx + 1, "attempts": attempts})
-        if not self._rebuild_guard.allows():
+        if not allowed:
             return
         since = None if self._last_freeze_ts is None else now - self._last_freeze_ts
         if not freeze_decision(frac, since, frac_threshold=self._freeze_frac,
@@ -7393,7 +7407,8 @@ class Relay:
                     "(#488)", live, frac)
         f._obs_reconnect()                      # the RESET primitive, threaded + best-effort
         self._last_freeze_ts = now
-        self._rebuild_guard.on_fire()
+        with self._rebuild_lock:
+            self._rebuild_guard.on_fire()
         self._record_event(now, "obs_rebuild",
                            f"Feed {live} OBS input rebuilt (stall fraction {frac:.2f})",
                            {"feed": live, "stint": f.idx + 1, "stall_fraction": round(frac, 2)})
