@@ -403,7 +403,7 @@ def run(relay, session, runtime_dir, *, flags, scene="Stint", window_s=DEFAULT_W
         settle_s=DEFAULT_SETTLE_S, sample_every_s=SAMPLE_EVERY_S,
         serving_timeout_s=SERVING_TIMEOUT_S, keep_recording=False,
         clock=time.monotonic, sleep=time.sleep, now=time.time, remove=os.remove,
-        isfile=os.path.isfile, progress=lambda _msg: None):
+        isfile=os.path.isfile, getmtime=os.path.getmtime, progress=lambda _msg: None):
     """Measure FULL then ROBUST on the on-air feed, persist the record, return it.
 
     `relay` has status() -> the /status dict and set_quality(feed, tier); `session`
@@ -422,10 +422,11 @@ def run(relay, session, runtime_dir, *, flags, scene="Stint", window_s=DEFAULT_W
     fps_target = _fps_target(session)
     cur = session.request("GetCurrentProgramScene", {}) or {}
     orig_scene = cur.get("currentProgramSceneName") or cur.get("sceneName")
-    results, recording, out_path = {}, False, None
+    results, recording, out_path, started = {}, False, None, None
     try:
         if scene and scene != orig_scene:
             session.request("SetCurrentProgramScene", {"sceneName": scene})
+        started = now()
         session.request("StartRecord", {})
         recording = True
         for tier in TIERS:
@@ -464,7 +465,14 @@ def run(relay, session, runtime_dir, *, flags, scene="Stint", window_s=DEFAULT_W
                 notes.append(f"OBS is still writing {out_path} — left in place")
         if out_path and not keep_recording and isfile(out_path):
             try:
-                remove(out_path)
+                # OBS names the path. Only a file written since StartRecord is ours:
+                # a remote OBS (RACECAST_OBS_WS_HOST) names a path on ITS disk.
+                if started is None or getmtime(out_path) < started - 1:
+                    keep_recording = True
+                    notes.append(f"{out_path} was not created by this benchmark — "
+                                 "not deleted")
+                else:
+                    remove(out_path)
             except OSError as exc:
                 keep_recording = True
                 notes.append(f"could not delete the benchmark recording {out_path} ({exc})")

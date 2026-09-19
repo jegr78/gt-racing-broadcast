@@ -367,6 +367,7 @@ FLAGS = {"youtube": (FULL_FLAGS, ROBUST_FLAGS)}
 
 def _run(d, clock, relay, sess, **kw):
     removed = []
+    kw.setdefault("getmtime", lambda p: NOW)
     rec = m.run(relay, sess, d, flags=FLAGS, window_s=20, settle_s=5,
                 clock=clock, sleep=clock.sleep, now=lambda: NOW,
                 remove=removed.append, isfile=lambda p: True, **kw)
@@ -432,7 +433,8 @@ def t_run_deletes_the_recording_only_after_obs_has_finished_it():
 
     with tempfile.TemporaryDirectory() as d:
         m.run(relay, sess, d, flags=FLAGS, window_s=20, settle_s=5, clock=clock,
-              sleep=clock.sleep, now=lambda: NOW, remove=remove, isfile=lambda p: True)
+              sleep=clock.sleep, now=lambda: NOW, remove=remove, isfile=lambda p: True,
+              getmtime=lambda p: NOW)
     assert removed == [("/rec/benchmark.mkv", False)]
 
 
@@ -449,6 +451,20 @@ def t_run_leaves_a_recording_obs_does_not_finish():
     assert removed == []
     assert any("/rec/benchmark.mkv" in s and "still" in s for s in said), said
     assert rec["recording"] == "/rec/benchmark.mkv"     # the report names the file
+
+
+def t_run_never_deletes_a_file_older_than_its_own_recording():
+    # OBS names the path; with a remote OBS it may name an unrelated local file.
+    clock = _Clock()
+    relay = _Relay(clock)
+    sess = _Session(clock, relay=relay)
+    said = []
+    with tempfile.TemporaryDirectory() as d:
+        rec, removed = _run(d, clock, relay, sess, getmtime=lambda p: NOW - 3600,
+                            progress=said.append)
+    assert removed == []
+    assert rec["recording"] == "/rec/benchmark.mkv"
+    assert any("not created by this benchmark" in s for s in said), said
 
 
 def t_run_keeps_a_pin_and_the_recording_on_request():
