@@ -107,7 +107,8 @@ reserve on purpose. The pill turns amber when OBS falls more than 5 s behind tha
 which means OBS plays the feed slower than real time and the audience sees a growing
 delay with stuttering picture and distorted sound. The health pill then names the
 feed, e.g. `Feed A output 12 s behind live — OBS reads slower than real time; step the
-feed quality down to ROBUST`. A handover clears the delay because the incoming feed
+feed quality down to ROBUST` (POV and a `local:` capture stint have no quality tiers, so
+their line says `this source has no quality step-down` instead). A handover clears the delay because the incoming feed
 starts fresh; a single-feed session (qualifying, solo) keeps it until the cause is
 fixed. Nothing acts on this value automatically.
 
