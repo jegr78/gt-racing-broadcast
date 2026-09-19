@@ -1197,23 +1197,24 @@ def t_freeze_tick_stands_down_after_three_ineffective_rebuilds():
 
 
 def t_freeze_tick_keeps_rebuilding_while_rebuilds_help():
-    # A rebuild that clears the stall is effective: a feed that relapses now and then
-    # keeps getting its rebuild and never trips the stand-down.
+    # A rebuild that clears the stall is effective and resets the streak. Each relapse
+    # here needs two rebuilds (the first one does not help, the second does), so without
+    # the reset the third relapse would reach three ineffective rebuilds and stand down.
     old = m._obs_ws; m._obs_ws = object()
     try:
         r, obs, rebuilds = _freeze_relay()
         t = 1000.0
-        for _ in range(6):                      # six freeze → rebuild → heal cycles
-            obs.step_ms = 0
-            for _i in range(20):                # bounded: a broken guard must not hang
-                if len(rebuilds) > _:
+        for cycle in range(4):
+            obs.step_ms = 0                     # frozen until the second rebuild of this cycle
+            for _i in range(40):                # bounded: a broken guard must not hang
+                if len(rebuilds) >= 2 * (cycle + 1) or r._rebuild_guard.stood_down:
                     break
                 r._freeze_tick(t); t += 3.0
-            obs.step_ms = 3000                  # the rebuild worked: real-time progress
+            obs.step_ms = 3000                  # that rebuild worked: real-time progress
             for _i in range(5):
                 r._freeze_tick(t); t += 3.0
-        assert len(rebuilds) == 6
         assert not r._rebuild_guard.stood_down
+        assert len(rebuilds) == 8, rebuilds
         assert "obs_rebuild_stood_down" not in r.health_store.types()
     finally:
         m._obs_ws = old
