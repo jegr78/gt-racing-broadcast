@@ -10,8 +10,8 @@ ROOT = os.path.dirname(HERE)
 SKILLS = os.path.join(ROOT, ".claude", "skills")
 
 JAR = r"runtime/(?:yt|twitch)-cookies\.txt"
-# A shell redirect into a shared jar, or a line that tells the reader to remove it.
-WRITES_JAR = re.compile(r">>?\s*['\"]?" + JAR)
+# A shell redirect, copy or move onto a shared jar, or a line that tells the reader to remove it.
+WRITES_JAR = re.compile(r">>?\s*['\"]?" + JAR + r"|\b(?:cp|mv|tee)\b[^\n]*" + JAR)
 REMOVES_JAR = re.compile(r"(?:\brm\b|remove|delete)[^\n]*" + JAR, re.IGNORECASE)
 # The CLI always injects the shared jar as --cookies; a demo relay must override it.
 DEMO_RELAY = re.compile(r"--profile demo relay (?:start|restart)\b")
@@ -32,6 +32,8 @@ def jar_violations(text):
 def t_detects_stub_written_over_the_shared_jar():
     text = "mkdir -p runtime && printf '# Netscape HTTP Cookie File\\n' > runtime/yt-cookies.txt\n"
     assert jar_violations(text) == [(1, text.rstrip("\n"))]
+    assert [n for n, _ in jar_violations("cp /tmp/stub runtime/yt-cookies.txt\n")] == [1]
+    assert [n for n, _ in jar_violations("x\nprintf x | tee runtime/twitch-cookies.txt\n")] == [2]
 
 
 def t_detects_removal_of_the_shared_jar():

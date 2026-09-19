@@ -89,7 +89,7 @@ python3 src/racecast.py --profile demo graphics      # -> runtime/demo/graphics/
 
 # 2) The relay refuses to boot without a cookie file; a stub is enough. Keep it in the
 #    demo runtime dir, NEVER at the shared runtime/yt-cookies.txt (see the warning below)
-printf '# Netscape HTTP Cookie File\n' > runtime/demo/stub-cookies.txt
+mkdir -p runtime/demo && printf '# Netscape HTTP Cookie File\n' > runtime/demo/stub-cookies.txt
 
 # 3) Start obs-sim serving a fixed program still (any demo graphic works)
 python3 tools/obs-sim.py --image runtime/demo/graphics/Standby.png --port 4466 &
@@ -200,7 +200,8 @@ copy to `src/docs/slides/assets/img/<name>.png`. Read the PNG back and eyeball i
 ## Cleanup & revert (do not skip — these touch git-tracked / shared state)
 
 ```bash
-python3 src/racecast.py relay stop ; pkill -f "obs-sim.py" ; pkill -f "racecast.py ui"
+RACECAST_OBS_WS_HOST=127.0.0.1 RACECAST_OBS_WS_PORT=4466 python3 src/racecast.py relay stop  # sim env, or stop talks to a real OBS on 4455
+pkill -f "obs-sim.py" ; pkill -f "racecast.py ui"
 rm -f runtime/demo/stub-cookies.txt                # the stub jar only, never the shared one
 # Seed block (B3): delete ONLY the lines you added — surgically, with an editor/Edit.
 # Do NOT `git checkout -- src/relay/racecast-feeds.py`: it wipes ALL uncommitted changes
