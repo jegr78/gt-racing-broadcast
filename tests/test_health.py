@@ -176,8 +176,8 @@ def t_resolve_hls_logged_out_jar_adds_the_cookie_hint():
     # #615: a live video, no muxed format, a jar without login: the error that reaches
     # last_error (and the panel) names the fix, and stays a generic drop.
     for status in ("rcs is_live\n", "rcs NA\n", ""):
-        _u, err, _q, _c = _with_jar(_ANON_JAR, lambda p: _resolve_err(
-            _NO_FORMAT_ERR, status, cookies=p))
+        _u, err, _q, _c = _with_jar(_ANON_JAR, lambda p, s=status: _resolve_err(
+            _NO_FORMAT_ERR, s, cookies=p))
         assert err.startswith(_NO_FORMAT_ERR), (status, err)
         assert err.endswith(" — " + m.cookie_jar.LOGGED_OUT_HINT), (status, err)
         assert m.classify_source_state(err) is None, (status, err)
@@ -196,8 +196,8 @@ def t_resolve_hls_ended_or_upcoming_source_gets_no_cookie_hint():
     # #621 already explains these; a login hint would point the operator the wrong way.
     for status, state in (("rcs post_live\n", "ended"), ("rcs was_live\n", "ended"),
                           ("rcs is_upcoming\n", "not_live_yet")):
-        _u, err, _q, _c = _with_jar(_ANON_JAR, lambda p: _resolve_err(
-            _NO_FORMAT_ERR, status, cookies=p))
+        _u, err, _q, _c = _with_jar(_ANON_JAR, lambda p, s=status: _resolve_err(
+            _NO_FORMAT_ERR, s, cookies=p))
         assert "racecast cookies" not in err, (status, err)
         assert m.classify_source_state(err) == state, (status, err)
 
