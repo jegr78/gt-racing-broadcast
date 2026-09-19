@@ -786,6 +786,42 @@ def t_fanout_server_leaves_an_mpeg_ts_join_untouched():
     finally:
         srv.stop()
 
+
+# --- tools/fanout-rejoin-probe.py pure helpers (#577) -------------------------
+
+def _rejoin_probe():
+    import importlib.util as _il
+    p = os.path.join(ROOT, "tools", "fanout-rejoin-probe.py")
+    s = _il.spec_from_file_location("rejoin_probe", p)
+    mod = _il.module_from_spec(s); s.loader.exec_module(mod)
+    return mod
+
+
+def t_rejoin_probe_container_of():
+    rp = _rejoin_probe()
+    assert rp.container_of(_INIT) == "fMP4"
+    assert rp.container_of(b"\x47" + b"\x00" * 187) == "TS"
+    assert rp.container_of(b"") == "unknown"
+    assert rp.container_of(None) == "unknown"
+
+
+def t_rejoin_probe_verdict_needs_state_cursor_and_luma():
+    """A picture needs all three: playing, an advancing cursor and a non-black
+    frame. The pre-#607 relay measured ENDED / no cursor / no frame on fMP4."""
+    rp = _rejoin_probe()
+    assert rp.rejoin_verdict("OBS_MEDIA_STATE_PLAYING", 1002, 63.0, 16.0) == "PICTURE"
+    v = rp.rejoin_verdict("OBS_MEDIA_STATE_ENDED", None, None, 16.0)
+    assert v.startswith("BLACK") and "state=OBS_MEDIA_STATE_ENDED" in v and "yavg=None" in v
+    assert rp.rejoin_verdict("OBS_MEDIA_STATE_PLAYING", 0, 63.0, 16.0).startswith("BLACK (cursor+0")
+    assert rp.rejoin_verdict("OBS_MEDIA_STATE_PLAYING", 1000, 12.0, 16.0) == "BLACK (yavg=12.0)"
+
+
+def t_rejoin_probe_uses_feed_a_settings_with_close_when_inactive():
+    """The probe source must be the shipped Feed A as fan-out runs it."""
+    st = _rejoin_probe().feed_a_settings()
+    assert st["close_when_inactive"] is True
+    assert st["is_local_file"] is False
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
