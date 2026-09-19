@@ -3884,6 +3884,33 @@ def fmp4_aligned_take(pending):
     return b"", pending
 
 
+class Fmp4Join:
+    """The #576 join repair for ONE ring consumer: the init segment to send
+    first, then every read passed through `take` until the first fragment
+    boundary. Built from the ring's head at join time; on an MPEG-TS head `init`
+    is b"" and `take` returns its input unchanged, so a TS feed keeps today's raw
+    path byte for byte. Every mid-stream consumer of a feed's ring goes
+    through this: the OBS serve, the preview tap and the program-audio tap
+    (#577). The program-audio MP3 output ring does not need it; MP3 resyncs."""
+
+    def __init__(self, head):
+        self.init = fmp4_init_segment(head)
+        self._pending = bytearray() if self.init else None
+
+    def take(self, data):
+        if self._pending is None or not data:
+            return data
+        self._pending += data
+        out, self._pending = fmp4_aligned_take(self._pending)
+        return out
+
+
+def ring_join(ring):
+    """A Fmp4Join for `ring`, or a pass-through one for a ring without a head
+    (test doubles)."""
+    return Fmp4Join(ring.head() if hasattr(ring, "head") else b"")
+
+
 def should_retarget(prev_live, cur_live, serving):
     """The program-audio encoder should re-point (restart ffmpeg on the new
     feed's ring) only when the on-air feed changed AND the new feed is actually
@@ -4249,11 +4276,17 @@ class _PreviewRingTap:
         self._kill()
 
     def _feed_stdin(self, stdin):
-        """Pump ring bytes into ffmpeg stdin; join at the current live edge."""
+        """Pump ring bytes into ffmpeg stdin; join at the current live edge
+        (with the fMP4 init segment first, #577)."""
         cursor = self.ring.live_offset() if hasattr(self.ring, "live_offset") else 0
+        join = ring_join(self.ring)
         try:
+            if join.init:
+                stdin.write(join.init)
+                stdin.flush()
             while not self._stop.is_set() and not self.ring.closed:
                 data, cursor = self.ring.read(cursor, 1.0)
+                data = join.take(data)
                 if data:
                     stdin.write(data)
                     stdin.flush()
@@ -4498,10 +4531,16 @@ class FeedFanoutServer:
         cid = None
         try:
             conn.recv(65536)                    # consume the request line/headers
-            conn.sendall(b"HTTP/1.0 200 OK\r\n"
-                         b"Content-Type: video/mp2t\r\n"
-                         b"Connection: close\r\n\r\n")
             cursor = self._join_offset(time.monotonic())   # #533: join prebuffer_s behind the live edge
+            # #577: OBS rejoins mid-stream at every activation (close_when_inactive),
+            # so an fMP4 feed needs its init segment and a fragment-aligned start.
+            # A cursor snap later is NOT re-aligned: the demuxer is mid-mdat by its
+            # own count, and the heal is the resync rebuild's fresh connection.
+            join = ring_join(self.ring)
+            ctype = b"video/mp4" if join.init else b"video/mp2t"
+            conn.sendall(b"HTTP/1.0 200 OK\r\n"
+                         b"Content-Type: " + ctype + b"\r\n"
+                         b"Connection: close\r\n\r\n" + join.init)
             cid = id(threading.current_thread())
             with self._consumers_lock:
                 self._consumers[cid] = {"cycle_ts": time.monotonic(), "snaps": 0}
@@ -4509,6 +4548,7 @@ class FeedFanoutServer:
                 prev = cursor
                 data, cursor = fanout_capped_read(self.ring, cursor, self.prebuffer_s)
                 skipped = snap_bytes(prev, cursor, len(data))
+                data = join.take(data)
                 with self._consumers_lock:
                     st = self._consumers.get(cid)
                     if st is not None:
@@ -4788,20 +4828,14 @@ class ProgramAudioService:
         cursor = self._join_offset(ring, time.monotonic())   # #533: match OBS's trailing join
         # #576: on an fMP4/CMAF feed the codec parameters exist only in the init
         # segment at the head of the stream, and the join lands inside an mdat.
-        # Send the init segment first, then skip to the first fragment boundary.
-        # A TS feed yields b"" here and takes the raw path unchanged.
-        head = ring.head() if hasattr(ring, "head") else b""
-        init = fmp4_init_segment(head)
-        pending = bytearray() if init else None
+        join = ring_join(ring)
         try:
-            if init:
-                stdin.write(init); stdin.flush()
+            if join.init:
+                stdin.write(join.init); stdin.flush()
             while not self._stop.is_set() and not getattr(ring, "closed", False):
                 data, cursor = fanout_capped_read(
                     ring, cursor, getattr(self.relay, "feed_prebuffer_s", 0.0))
-                if data and pending is not None:
-                    pending += data
-                    data, pending = fmp4_aligned_take(pending)
+                data = join.take(data)
                 if data:
                     stdin.write(data); stdin.flush()
                 if proc is None or proc.poll() is not None:

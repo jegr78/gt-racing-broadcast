@@ -683,6 +683,109 @@ def t_parse_ffmpeg_sources():
         ("alsa_input.usb-Elgato_HD60_X-02.analog-stereo", "HD60 X Analog Stereo"),
         ("alsa_input.pci-0000_00_1f.3.analog-stereo", "Built-in Audio Analog Stereo")]
 
+
+# --- fMP4/CMAF joins on the OBS serve (#577) ---------------------------------
+# #576 fixed the program-audio tap; the OBS serve had the same gap. With fan-out
+# on, OBS disconnects off-air (close_when_inactive) and rejoins mid-stream at
+# every activation — on an fMP4 feed that join lands inside an mdat with no
+# codec parameters, and ffmpeg refuses to open it.
+
+def _box(typ, payload=b""):
+    return (8 + len(payload)).to_bytes(4, "big") + typ + payload
+
+
+_INIT = _box(b"ftyp", b"mp42" + b"\x00" * 8) + _box(b"moov", b"\x11" * 200)
+
+
+def _fragment(payload):
+    return _box(b"moof", b"\x22" * 60) + _box(b"mdat", payload)
+
+
+def _raw_http_get(port, want_body, deadline=2.0):
+    """(headers, body) of one GET, reading until `want_body` body bytes."""
+    s = socket.create_connection(("127.0.0.1", port), timeout=deadline)
+    s.sendall(b"GET / HTTP/1.0\r\n\r\n")
+    buf = b""
+    try:
+        while True:
+            sep = buf.find(b"\r\n\r\n")
+            if sep >= 0 and len(buf) - sep - 4 >= want_body:
+                break
+            chunk = s.recv(4096)
+            if not chunk:
+                break
+            buf += chunk
+    except socket.timeout:
+        pass  # deadline hit: return what arrived
+    finally:
+        s.close()
+    head, _, body = buf.partition(b"\r\n\r\n")
+    return head, body
+
+
+def _wait_joined(srv, deadline=3.0):
+    """Block until a consumer has joined: `_serve` registers it only after the
+    join offset is fixed, so a write after this lands behind the join cursor."""
+    end = time.monotonic() + deadline
+    while time.monotonic() < end:
+        with srv._consumers_lock:
+            if srv._consumers:
+                return
+        time.sleep(0.01)
+    raise AssertionError("consumer never joined")
+
+
+def _serve_mid_stream_join(before, after):
+    """Write `before`, connect a consumer (it joins at the live edge), write
+    `after`, and return (headers, body) it received."""
+    ring = m.FeedRing(1 << 20)
+    ring.write(before)
+    srv = m.FeedFanoutServer("127.0.0.1", 0, ring, m.logging.getLogger("t577"))
+    srv.start()
+    try:
+        body = {}
+        want = len(_INIT) + len(after)
+        t = threading.Thread(target=lambda: body.update(b=_raw_http_get(srv.port, want)))
+        t.start()
+        _wait_joined(srv)                             # joined before `after` arrives
+        ring.write(after)
+        t.join(3)
+        return body["b"]
+    finally:
+        srv.stop()
+
+
+def t_fanout_server_prepends_init_and_aligns_an_fmp4_join():
+    """A mid-mdat join must reach OBS as ftyp+moov followed by the next moof —
+    never the raw bytes at the join cursor."""
+    frag1 = _fragment(b"\x33" * 400)
+    frag2 = _fragment(b"\x44" * 400)
+    head, got = _serve_mid_stream_join(_INIT + frag1[:100], frag1[100:] + frag2)
+    assert got == _INIT + frag2, (got[:40], len(got))
+    assert b"Content-Type: video/mp4\r\n" in head, head
+
+
+def t_fanout_server_leaves_an_mpeg_ts_join_untouched():
+    """The TS path stays byte-identical: no prefix, nothing held back."""
+    ts = b"".join(b"\x47" + bytes([i % 251]) * 187 for i in range(40))
+    ring = m.FeedRing(1 << 20)
+    ring.write(ts[:188 * 10 + 50])                    # join mid-packet, as today
+    srv = m.FeedFanoutServer("127.0.0.1", 0, ring, m.logging.getLogger("t577ts"))
+    srv.start()
+    try:
+        body = {}
+        rest = ts[188 * 10 + 50:]
+        t = threading.Thread(target=lambda: body.update(b=_raw_http_get(srv.port, len(rest))))
+        t.start()
+        _wait_joined(srv)
+        ring.write(rest)
+        t.join(3)
+        head, got = body["b"]
+        assert got == rest
+        assert b"Content-Type: video/mp2t\r\n" in head, head
+    finally:
+        srv.stop()
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

@@ -60,10 +60,13 @@ Consequences:
   must never strand a producer with no working transport.
 - **Transport: raw opaque byte-tee, minimal latency.** The relay passes
   streamlink's bytes through 1:1; a joining consumer starts at the live edge and
-  OBS's own ffmpeg demuxer resyncs forward. This is container-agnostic (MPEG-TS
-  for YouTube and fMP4/CMAF for Twitch travel the same opaque path) and adds the
-  least latency. We accept a small join-cleanliness risk (see the reserve lever
-  below) in exchange for low latency.
+  OBS's own ffmpeg demuxer resyncs forward. That holds for MPEG-TS, which
+  carries its own sync byte. It does **not** hold for fMP4/CMAF, which some Twitch
+  channels serve: the codec parameters live once, in the stream's `moov`, and a
+  mid-stream join lands inside an `mdat` that ffmpeg refuses to open (#577, R2
+  below). So the tee is opaque for TS and repairs the join for fMP4 only. It adds
+  the least latency. We accept a small join-cleanliness risk on TS (see the
+  reserve lever below) in exchange for low latency.
 
 ### Why the raw tee still fixes the glitch
 
@@ -102,7 +105,17 @@ pull.
    feed is unaffected.
 
 **Join model (v1, opaque).** A joining consumer starts at the live edge; bytes
-pass through 1:1; OBS's ffmpeg forward-syncs. Container-agnostic.
+pass through 1:1; OBS's ffmpeg forward-syncs. That is enough for MPEG-TS.
+
+**fMP4 join repair (#576, #577).** `FeedRing` keeps the first bytes of the
+current upstream process (`head()`, reset when the writer starts a new one). A
+consumer whose head is fMP4 is sent the initialization segment (`ftyp`…`moov`)
+first, and its read is held until the first `moof` box, so the demuxer starts at a
+fragment boundary. `Fmp4Join` does this for every mid-stream ring consumer: the
+OBS serve, the Director-Panel preview tap and the program-audio tap. A TS head
+yields no init segment and the bytes pass through unchanged. A cursor snap after
+the join is not re-aligned: the demuxer is mid-`mdat` by its own count, and the
+heal is the resync rebuild's fresh connection.
 
 **Reserve lever (only if the live join is visually too rough).** A *light* TS
 alignment: scan 188-byte packets and start the consumer at the most recent
@@ -255,7 +268,7 @@ turn one flag back.
 | # | Risk | Severity | Mitigation |
 |---|------|----------|------------|
 | R1 | TS passthrough to multiple consumers; a joining client must decode from a live-edge start | High | Ring with cursor-snap; live reader never blocks; opaque v1 + light-TS-alignment reserve lever |
-| R2 | Container variance YouTube (MPEG-TS) vs Twitch (fMP4/CMAF) | High / unknown | Opaque pass-through is format-agnostic; live-verify both platforms before ship |
+| R2 | Container variance YouTube (MPEG-TS) vs Twitch (fMP4/CMAF) | High | The opaque pass-through is NOT format-agnostic: a mid-stream fMP4 join does not open (measured, #577). Fixed by the fMP4 join repair above; verified through the real serve with ffmpeg as the OBS stand-in |
 | R3 | OBS reconnect with `close_when_inactive=True` — the glitch fix depends on it | Medium | Set live via obs-ws (reversible); proven by live-UAT |
 | R4 | Health/DROP logic must move off "process exit" | Medium | Pure functions reused with new inputs; add byte-stall watchdog; consumer presence decoupled from health |
 | R5 | Extra-hop latency (streamlink→relay→OBS) | Low | Commentator feeds are not frame-accurate; small buffering is fine |
