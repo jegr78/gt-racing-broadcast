@@ -62,15 +62,17 @@ cards show live content instead of "relay offline".
 1. Start the dev-build Control Center on a **free** port (the real instance often owns 8089;
    `ui` on a taken port opens *that* instance, not the dev build):
    ```bash
-   python3 src/racecast.py profile use demo
-   RACECAST_UI_PORT=8090 python3 src/racecast.py ui --no-browser   # pick any free port
+   RACECAST_UI_PORT=8090 python3 src/racecast.py --profile demo ui --no-browser   # any free port
    ```
+   Use the global `--profile demo`, **never** `profile use demo`: `profile use` rewrites the
+   machine's `runtime/active-profile` pointer, and the next real `event start` would then run
+   the demo league. `--profile` applies to this one process only.
 2. Drive it with the Playwright MCP: `browser_navigate` → `http://127.0.0.1:8090/`, switch to
    the view, then **element-screenshot the card/modal** (not a full-window grab) so the
    framing matches the existing images — e.g. the overlay builder modal:
    `browser_take_screenshot` with `element` ref for `#ov-modal .ovmodal-card`.
 3. Save into `src/docs/wiki/images/cc-<view>.png` (and the slides copy if the deck uses it).
-4. Stop the UI: `pkill -f "racecast.py ui"`.
+4. Stop the UI: `pkill -f "racecast.py --profile demo ui"`.
 
 ---
 
@@ -87,16 +89,25 @@ OBS that returns a fixed program still). This is fully reproducible and touches 
 # 1) Pull the demo graphics (gives us a real-looking still to use as the program image)
 python3 src/racecast.py --profile demo graphics      # -> runtime/demo/graphics/*.png
 
-# 2) The relay refuses to boot without yt-dlp/streamlink cookies present; a stub is enough
-mkdir -p runtime && printf '# Netscape HTTP Cookie File\n' > runtime/yt-cookies.txt
+# 2) The relay refuses to boot without a cookie file; a stub is enough. Keep it in the
+#    demo runtime dir, NEVER at the shared runtime/yt-cookies.txt (see the warning below)
+mkdir -p runtime/demo && printf '# Netscape HTTP Cookie File\n' > runtime/demo/stub-cookies.txt
 
 # 3) Start obs-sim serving a fixed program still (any demo graphic works)
 python3 tools/obs-sim.py --image runtime/demo/graphics/Standby.png --port 4466 &
 
-# 4) Start the relay pointed at obs-sim so /cockpit/program + the panel monitor render
+# 4) Start the relay pointed at obs-sim so /cockpit/program + the panel monitor render,
+#    and at the stub jar so it never reads or rewrites the real one
 RACECAST_OBS_WS_HOST=127.0.0.1 RACECAST_OBS_WS_PORT=4466 \
-  python3 src/racecast.py --profile demo relay start
+  python3 src/racecast.py --profile demo relay start --cookies "$PWD/runtime/demo/stub-cookies.txt"
 ```
+
+> ⚠️ **The shared jar `runtime/yt-cookies.txt` is the real YouTube login** on a machine that
+> also produces broadcasts. Never write a stub there and never clean it up. The CLI always
+> passes it to the relay as `--cookies`, and yt-dlp saves its cookie jar back to that file
+> on every resolve, so the demo relay must get its own `--cookies` on **every** `relay
+> start` / `relay restart`, or it runs on the real login and rewrites it. Checked by
+> `tests/test_skill_recipes.py` (#617).
 
 `tools/obs-sim.py` speaks just enough obs-websocket v5 (no-auth handshake +
 `GetCurrentProgramScene` + `GetSourceScreenshot`) to answer the relay's
@@ -184,15 +195,16 @@ copy to `src/docs/slides/assets/img/<name>.png`. Read the PNG back and eyeball i
 > The HTML pages (`cockpit.html`, `director-panel.html`, `race-control.html`,
 > `console.html`, `hud.html`) are read **per request** from disk — a browser reload picks up
 > an edit without restarting the relay. A change to relay **Python**, though, needs a
-> `relay stop && relay start`.
+> `relay stop` and the full B1 step 4 again (obs-sim env **and** the stub `--cookies`).
 
 ---
 
 ## Cleanup & revert (do not skip — these touch git-tracked / shared state)
 
 ```bash
-python3 src/racecast.py relay stop ; pkill -f "obs-sim.py" ; pkill -f "racecast.py ui"
-rm -f runtime/yt-cookies.txt                       # the stub cookies
+RACECAST_OBS_WS_HOST=127.0.0.1 RACECAST_OBS_WS_PORT=4466 python3 src/racecast.py relay stop  # sim env, or stop talks to a real OBS on 4455
+pkill -f "obs-sim.py" ; pkill -f "racecast.py --profile demo ui"
+rm -f runtime/demo/stub-cookies.txt                # the stub jar only, never the shared one
 # Seed block (B3): delete ONLY the lines you added — surgically, with an editor/Edit.
 # Do NOT `git checkout -- src/relay/racecast-feeds.py`: it wipes ALL uncommitted changes
 # in that file, including any relay edit you are screenshotting (see the ⚠️ in B3).
