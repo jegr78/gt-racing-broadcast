@@ -268,7 +268,7 @@ turn one flag back.
 | # | Risk | Severity | Mitigation |
 |---|------|----------|------------|
 | R1 | TS passthrough to multiple consumers; a joining client must decode from a live-edge start | High | Ring with cursor-snap; live reader never blocks; opaque v1 + light-TS-alignment reserve lever |
-| R2 | Container variance YouTube (MPEG-TS) vs Twitch (fMP4/CMAF) | High | The opaque pass-through is NOT format-agnostic: a mid-stream fMP4 join does not open (measured, #577). Fixed by the fMP4 join repair above; verified through the real serve with ffmpeg as the OBS stand-in |
+| R2 | Container variance YouTube (MPEG-TS) vs Twitch (fMP4/CMAF) | High | The opaque pass-through is NOT format-agnostic: a mid-stream fMP4 join does not open (measured, #577). Fixed by the fMP4 join repair above. Measured in real OBS on 2026-09-19 with `tools/fanout-rejoin-probe.py` against a live fMP4 Twitch channel (3 of 30 live sim-racing channels served fMP4 with the relay's default h264): 0/3 rejoins with a picture before the repair, 3/3 after; a TS channel 3/3 |
 | R3 | OBS reconnect with `close_when_inactive=True` — the glitch fix depends on it | Medium | Set live via obs-ws (reversible); proven by live-UAT |
 | R4 | Health/DROP logic must move off "process exit" | Medium | Pure functions reused with new inputs; add byte-stall watchdog; consumer presence decoupled from health |
 | R5 | Extra-hop latency (streamlink→relay→OBS) | Low | Commentator feeds are not frame-accurate; small buffering is fine |
