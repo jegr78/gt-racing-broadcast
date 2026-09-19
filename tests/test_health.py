@@ -1188,20 +1188,25 @@ def t_jitter_yellow_does_not_page_but_real_yellow_does():
 
 def t_aggregate_health_backlog_is_a_yellow_reason_with_the_next_step():
     # #583: named after the measurement (any slow consumer), not a guessed cause, and
-    # the line carries the operator's next step.
-    h = m.aggregate_health(_facts(feeds_backlogged={"A": 11.6}))
+    # the line carries the operator's next step (#588): the RESET that drops the backlog,
+    # with its cost. Not ROBUST: that tier restarts streamlink without rejoining OBS and,
+    # for YouTube, fetches two more segments ahead (#614), so it can grow the backlog.
+    h = m.aggregate_health(_facts(feeds_backlogged={"A": 11.6, "B": 8.2}))
     assert h["level"] == "yellow", h
     assert h["reasons"] == ["Feed A output 12 s behind live — OBS reads slower than real "
-                            "time; step the feed quality down to ROBUST"], h
+                            "time; RESET A → LIVE drops it with a short black dropout",
+                            "Feed B output 8 s behind live — OBS reads slower than real "
+                            "time; RESET B → LIVE drops it with a short black dropout"], h
     assert m.aggregate_health(_facts(feeds_backlogged={}))["level"] == "green"
 
 
-def t_aggregate_health_backlog_without_a_quality_tier_does_not_suggest_robust():
-    # POV and a local: capture stint have no quality tiers (#592), so ROBUST is no step.
-    h = m.aggregate_health(_facts(feeds_backlogged={"POV": 9.2},
-                                  backlog_no_step_down=["POV"]))
+def t_aggregate_health_backlog_on_pov_names_no_reset():
+    # The feed reset exists for Feed A and B only (feed_reset_target validates against
+    # relay.feeds), so a POV backlog states the fact and no control.
+    h = m.aggregate_health(_facts(feeds_backlogged={"POV": 9.2}))
     assert h["reasons"] == ["Feed POV output 9 s behind live — OBS reads slower than real "
-                            "time; this source has no quality step-down"], h
+                            "time"], h
+
 
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
