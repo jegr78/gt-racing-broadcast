@@ -1213,14 +1213,14 @@ const resetKeys = {};
   $("#feedsBus").appendChild(b);
 });
 // The relay reports reset_discards_s: the live backlog beyond the reserve a rejoin keeps.
-// Shown once it rounds to a whole second, below the warn line too: a 4 s cost is still
-// a cost. A stopped/connecting feed or an older relay reports none -> the plain label.
+// Shown from a whole second on, below the warn line too: a 4 s cost is still a cost.
+// Floored, so the button never claims more than the relay measured (0.5 s is no line). A stopped/connecting feed or an older relay reports none -> the plain label.
 // The live value moves with a bursty source, so the number can jitter between polls.
 function resetLabel(d){
   ["A","B"].forEach(f=>{
     const k = resetKeys[f];
     const v = d.feeds && d.feeds[f] && d.feeds[f].reset_discards_s;
-    k.discards = typeof v === "number" ? Math.round(v) : 0;
+    k.discards = typeof v === "number" ? Math.floor(v) : 0;
     k.cost.hidden = k.discards < 1;
     k.cost.textContent = k.discards < 1 ? "" : "discards " + k.discards + " s backlog";
   });

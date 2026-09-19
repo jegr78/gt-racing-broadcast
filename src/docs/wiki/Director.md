@@ -120,8 +120,8 @@ fallen behind beyond that is gone at once. The relay never resets a feed because
 backlog: the only way to shed one is a jump forward, and a jump is a short black dropout
 on air. You decide when that trade is worth it.
 
-The button shows the cost before you press it: once the reset would throw away at least a
-second, a second line appears, e.g. `discards 12 s backlog`. That is the part of the
+The button shows the cost before you press it, rounded down: once the reset would throw
+away at least a second, a second line appears, e.g. `discards 12 s backlog`. That is the part of the
 program the audience will never see. The number follows the live value and can move a
 little between polls on a bursty source. After the press the log records what was
 discarded. The same button also clears a frozen or stuttering picture on that feed; there
