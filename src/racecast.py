@@ -2735,10 +2735,11 @@ class _BenchmarkRelay:
 def _parse_benchmark_args(rest):
     """`obs benchmark` flags -> dict, or ValueError with the usage line."""
     import obs_benchmark as ob
+    import obs_ws
     usage = ("usage: racecast obs benchmark [--window S] [--settle S] [--scene NAME] "
              "[--keep-recording] [--json]")
     opts = {"window_s": ob.DEFAULT_WINDOW_S, "settle_s": ob.DEFAULT_SETTLE_S,
-            "scene": "Stint", "keep_recording": False, "json": False}
+            "scene": obs_ws.STINT_SCENE, "keep_recording": False, "json": False}
     it = iter(rest)
     for arg in it:
         if arg in ("--keep-recording", "--json"):

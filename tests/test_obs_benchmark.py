@@ -410,6 +410,23 @@ def t_run_samples_only_after_the_reconnect_and_the_settle():
         assert rec[tier]["samples"] >= 10 and rec[tier]["duration_s"] >= 20.0
 
 
+def t_run_accepts_a_serve_that_came_up_before_the_switch_reply():
+    # The relay can restart the serve before its reply to the tier switch arrives;
+    # that serve is already older than "now" when the client reads its clock.
+    class _SlowReplyRelay(_Relay):
+        def set_quality(self, feed, tier):
+            reply = super().set_quality(feed, tier)
+            self.clock.t += 0.5                     # the reply takes 0.5 s
+            return reply
+
+    clock = _Clock()
+    relay = _SlowReplyRelay(clock, reconnect_s=0.0)
+    sess = _Session(clock, relay=relay)
+    with tempfile.TemporaryDirectory() as d:
+        rec, _ = _run(d, clock, relay, sess, serving_timeout_s=30)
+    assert rec["full"]["reconnect_s"] == 0.5 and rec["robust"]["reconnect_s"] == 0.5
+
+
 def t_run_measures_the_backlog_growth_per_tier():
     clock = _Clock()
     relay = _Relay(clock, backlog=lambda tier, age: 3.0 + (age / 60.0 * 6 if tier == "full" else 0))

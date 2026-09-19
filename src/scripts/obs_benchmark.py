@@ -206,7 +206,7 @@ def serving_since_switch(feed_status, elapsed):
     """True once the feed serves again AFTER a tier switch `elapsed` seconds ago: a
     serving phase older than the switch is the old serve before its kill landed."""
     return (feed_status or {}).get("state") == "serving" and \
-        (feed_status.get("state_age_s") or 0.0) < elapsed
+        (feed_status.get("state_age_s") or 0.0) <= elapsed
 
 
 def restore_tier(orig):
@@ -384,8 +384,11 @@ def _record_finished(session, sleep, timeout_s):
 def _measure_tier(relay, session, feed, tier, *, clock, sleep, window_s, settle_s,
                   sample_every_s, serving_timeout_s, progress):
     progress(f"Feed {feed} → {tier.upper()}: reconnecting …")
+    # Clock the switch BEFORE the request: the relay may restart the serve before its
+    # reply arrives, and that serve must still count as the one after the switch.
+    t_switch = clock()
     relay.set_quality(feed, tier)
-    reconnect_s = _wait_serving(relay, feed, clock(), clock, sleep, serving_timeout_s)
+    reconnect_s = _wait_serving(relay, feed, t_switch, clock, sleep, serving_timeout_s)
     progress(f"  serving again after {reconnect_s} s; settling {settle_s} s, "
              f"then sampling {window_s} s")
     sleep(settle_s)

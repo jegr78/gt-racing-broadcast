@@ -191,9 +191,10 @@ def t_route_obs_benchmark():
 
 def t_parse_benchmark_args_defaults_and_flags():
     import obs_benchmark as ob
+    import obs_ws
     assert m._parse_benchmark_args([]) == {
         "window_s": ob.DEFAULT_WINDOW_S, "settle_s": ob.DEFAULT_SETTLE_S,
-        "scene": "Stint", "keep_recording": False, "json": False}
+        "scene": obs_ws.STINT_SCENE, "keep_recording": False, "json": False}
     o = m._parse_benchmark_args(["--window", "90", "--settle", "0", "--scene", "Split",
                                  "--keep-recording", "--json"])
     assert o == {"window_s": 90, "settle_s": 0, "scene": "Split",
