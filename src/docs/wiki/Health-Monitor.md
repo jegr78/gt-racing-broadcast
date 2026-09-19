@@ -130,7 +130,9 @@ The relay holds OBS about 3 s behind the live edge on purpose (the fan-out reser
 also sit lower. A line that climbs means OBS accepts the feed slower than real time,
 usually because the producer machine cannot render the program in real time. More
 than 5 s above the reserve turns the health badge yellow
-(`Feed A output 12 s behind live — …`); this yellow never posts to Discord.
+(`Feed A output 12 s behind live — …`); this yellow never posts to Discord. The director
+can drop the delay with **RESET A → LIVE**, at the cost of a short black dropout (see
+[Dropping a backlog](Director#dropping-a-backlog)).
 
 #### Legacy series (always present)
 

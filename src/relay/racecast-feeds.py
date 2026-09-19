@@ -782,6 +782,16 @@ def feed_reset_target(feed_key, valid_keys):
     return key if key in valid_keys else None
 
 
+def reset_discards_s(backlog_s, prebuffer_s):
+    """#587: seconds of output a feed reset throws away right now. The reset rebuilds the
+    OBS input and the new consumer joins prebuffer_s behind the live edge, so only the
+    backlog beyond that reserve is lost. None when no consumer has a backlog to measure.
+    Pure -> unit-tested."""
+    if backlog_s is None:
+        return None
+    return round(max(0.0, backlog_s - prebuffer_s), 1)
+
+
 # A fan-out/direct drop-recovery is recorded as a discrete health event EVERY time (so a
 # self-healed on-air blip is no longer invisible in the post-event report / health monitor).
 # A single recovery never pings Discord; sustained CHURN does — ≥ FEED_CHURN_THRESHOLD
@@ -7361,9 +7371,9 @@ class Relay:
     def _backlog_status(self, name, f):
         """/status fields for one feed (#583): the live consumer backlog and whether it is
         backlogged: the last heartbeat classified it AND the live value is still past the
-        threshold, so the panel pill stops being amber as soon as OBS has caught up. Only
-        a serving feed has a live edge to be behind; a stopped or connecting one reports
-        None."""
+        threshold, so the panel pill stops being amber as soon as OBS has caught up. Also
+        what a RESET would discard (#587), from the same live value. Only a serving feed
+        has a live edge to be behind; a stopped or connecting one reports None."""
         srv = getattr(f, "fanout_server", None)
         live = None
         if srv is not None and not f.paused and f.phase == "serving":
@@ -7373,7 +7383,8 @@ class Relay:
                 live = None
         return {"backlog_s": None if live is None else round(live, 1),
                 "backlogged": (name in self._backlogged_feeds and feed_backlog_degraded(
-                    live, self.feed_prebuffer_s, self._backlog_warn_s))}
+                    live, self.feed_prebuffer_s, self._backlog_warn_s)),
+                "reset_discards_s": reset_discards_s(live, self.feed_prebuffer_s)}
 
     def _current_render_skip_rate(self):
         """Per-interval OBS render-skip rate (0..1) from obs_stats vs the previous heartbeat's
@@ -10181,11 +10192,15 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     return self._send({"ok": True,
                                        "rearmed": relay.rearm_rebuild_guard("director")})
                 if p == ["obs", "feed-reset"]:
-                    # Manual: force OBS to reconnect ONE feed's media source — the clean,
-                    # targeted version of a /reload for the fan-out freeze-frame stutter
-                    # (rebuild that feed's OBS input so OBS re-joins with a fresh demuxer).
-                    # Same primitive the automatic drop-recovery uses (_obs_reconnect_now);
-                    # this is the director's manual override. Director-gated (p[0]=="obs").
+                    # Manual: force OBS to reconnect ONE feed's media source. The new
+                    # consumer re-joins with a fresh demuxer at prebuffer_s behind the
+                    # live edge, so this is both the targeted fix for a frozen/stuttering
+                    # picture and the director's deliberate backlog resolution (#587):
+                    # everything OBS lagged beyond the reserve is dropped, at the cost of
+                    # a short black dropout if the feed is on air. The panel shows that
+                    # cost (reset_discards_s on /status) before the click. Same primitive
+                    # the automatic drop-recovery uses (_obs_reconnect_now); only a human
+                    # triggers it to shed a backlog. Director-gated (p[0]=="obs").
                     if _obs_ws is None:
                         return self._send({"error": "obs unavailable"}, 503)
                     key = feed_reset_target(body.get("feed"), relay.feeds)

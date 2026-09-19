@@ -296,6 +296,22 @@ def t_stint_macros_resolve_on_the_relay_like_companion():
         assert gone not in h, gone
 
 
+def t_feed_reset_is_labelled_as_the_backlog_resolution():
+    # #587: the one RESET button per feed doubles as the deliberate backlog fix. It
+    # jumps OBS back to live, so it says so and shows the cost from /status each poll;
+    # no second button calls the same endpoint under another name.
+    h = _html()
+    assert '"RESET "+f+"→OBS"' not in h, "old RESET x→OBS label must be gone"
+    assert h.count('obsPost("feed-reset"') == 1, "exactly one control calls feed-reset"
+    assert "function resetLabel(" in h, "RESET label renderer"
+    poll = h[h.index("async function relayPoll("):]
+    poll = poll[:poll.index("\n}\n")]
+    assert "resetLabel(d);" in poll, "RESET labels re-rendered from every /status poll"
+    assert "reset_discards_s" in h, "the label reads the relay's discard figure"
+    assert "Math.floor(v)" in h, "floored: the button never overstates the cost"
+    assert '"discards " + k.discards + " s backlog"' in h, "the cost is spelled out on the button"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

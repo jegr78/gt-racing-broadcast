@@ -163,6 +163,7 @@
   button.k:active{transform:translateY(1px) scale(.99)}
   button.k:disabled{opacity:.35;cursor:not-allowed}
   button.k .tag{display:block;font-size:8px;letter-spacing:.22em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
+  button.k .cost{display:block;font-size:9px;font-weight:400;color:var(--amber);margin-top:3px}
   button.k.on{border-color:var(--live);background:linear-gradient(180deg,#15301f,#10261a);
     box-shadow:0 0 0 1px var(--live),0 0 18px var(--live-glow),inset 0 1px 0 rgba(255,255,255,.06)}
   button.k.on .tag{color:var(--live)}
@@ -1190,16 +1191,40 @@ async function resyncTo(n){
                "(No cut if that feed is already on air.)")) return;
   await relayCall("resync/stint/" + n);
 }
-// Force OBS to reconnect ONE feed's source at a clean stream boundary — the targeted
-// fix if a feed freezes/stutters (a fan-out restart spliced onto OBS's open socket).
-// Non-destructive (re-applies the input's own settings); brief reconnect if on air.
+// Force OBS to reconnect ONE feed's source at a clean stream boundary. OBS rejoins at
+// the fan-out reserve behind the live edge, so the same button does two jobs: it fixes
+// a frozen/stuttering picture, and it is the director's deliberate way to drop a
+// backlog (BEHIND LIVE, #587). Nothing resets a feed because of a backlog. Non-destructive
+// (re-applies the input's own settings); a brief black dropout if the feed is on air.
+// resetLabel() shows what a click would throw away, from every /status poll.
+const resetKeys = {};
 ["A","B"].forEach(f=>{
-  $("#feedsBus").appendChild(mkKey("RESET "+f+"→OBS", "obs", async ()=>{
+  const b = mkKey("RESET "+f+" → LIVE", "obs", async ()=>{
+    const cost = resetKeys[f].discards;         // what the button showed when clicked
     const d = await obsPost("feed-reset", {feed:f});
-    if (d && d.ok) log("OBS reconnected Feed "+f+" ("+(d.count||0)+" source)");
+    if (d && d.ok) log("OBS reconnected Feed "+f+" ("+(d.count||0)+" source)"
+                       + (cost ? ", discarded ~"+cost+" s backlog" : ""));
     else toast("Feed "+f+" reset failed: "+((d&&d.error)||"OBS unreachable"));
-  }, false));
+  }, false);
+  const cost = document.createElement("span");
+  cost.className = "cost"; cost.hidden = true;
+  b.appendChild(cost);
+  resetKeys[f] = {cost, discards: 0};
+  $("#feedsBus").appendChild(b);
 });
+// The relay reports reset_discards_s: the live backlog beyond the reserve a rejoin keeps.
+// Shown from a whole second on, below the warn line too: a 4 s cost is still a cost.
+// Floored, so the button never claims more than the relay measured (0.5 s is no line). A stopped/connecting feed or an older relay reports none -> the plain label.
+// The live value moves with a bursty source, so the number can jitter between polls.
+function resetLabel(d){
+  ["A","B"].forEach(f=>{
+    const k = resetKeys[f];
+    const v = d.feeds && d.feeds[f] && d.feeds[f].reset_discards_s;
+    k.discards = typeof v === "number" ? Math.floor(v) : 0;
+    k.cost.hidden = k.discards < 1;
+    k.cost.textContent = k.discards < 1 ? "" : "discards " + k.discards + " s backlog";
+  });
+}
 
 // #582: RE-ARM lives inside #feedHealth, which is re-rendered on every status poll,
 // so the click is delegated from the stable container.
@@ -1775,6 +1800,7 @@ async function relayPoll(){
     $("#stHealth").title = (d.health && d.health.reasons && d.health.reasons.length)
       ? d.health.reasons.join(" · ") : "all systems green";
     behindPill(d);
+    resetLabel(d);
     const n = d.schedule_len;
     if (!solo){
       statePill($("#stA"), "A", "S" + d.feeds.A.stint, n, d.feeds.A.state, d.feeds.A.down);

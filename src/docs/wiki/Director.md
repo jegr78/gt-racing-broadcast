@@ -42,7 +42,7 @@ one muscle memory:
 | Bus | What's on it |
 |---|---|
 | **PGM** | one-press program looks — `STINT A/B`, `SPLIT`, `INTERVIEW`, `STANDBY`, `INTRO`, `OUTRO`, `TRAILER`, `INTERMISSION`, `RED FLAG` (same behavior as the Companion combos below) |
-| **FEEDS** | `NEXT` (the handover), **`ARM A/B` / `STOP A/B`** (arm a feed's pull before a swap / stop it), per-feed reloads, POV reload/stop, `FEEDS → STINT…` |
+| **FEEDS** | `NEXT` (the handover), **`ARM A/B` / `STOP A/B`** (arm a feed's pull before a swap / stop it), per-feed reloads, `RESET A/B → LIVE` (reconnect OBS to one feed, see [Dropping a backlog](#dropping-a-backlog)), POV reload/stop, `FEEDS → STINT…` |
 | **HUD** | the Stint label, Streamer, Session and Race Control dropdowns — they update the HUD live and write back to the Setup tab |
 | **SCN·VIS** | raw scene switches and feed visibility toggles |
 | **TRANS** | transition selector for the next scene switch — **Cut**, **Fade** (default), or **Stinger** |
@@ -111,6 +111,22 @@ feed quality down to ROBUST` (POV and a `local:` capture stint have no quality t
 their line says `this source has no quality step-down` instead). A handover clears the delay because the incoming feed
 starts fresh; a single-feed session (qualifying, solo) keeps it until the cause is
 fixed. Nothing acts on this value automatically.
+
+#### Dropping a backlog
+
+**RESET A → LIVE** / **RESET B → LIVE** (FEEDS bus) makes OBS reconnect to that one
+feed. OBS rejoins at the normal ~3 s reserve behind the live edge, so everything it had
+fallen behind beyond that is gone at once. The relay never resets a feed because of a
+backlog: the only way to shed one is a jump forward, and a jump is a short black dropout
+on air. You decide when that trade is worth it.
+
+The button shows the cost before you press it, rounded down: once the reset would throw
+away at least a second, a second line appears, e.g. `discards 12 s backlog`. That is the part of the
+program the audience will never see. The number follows the live value and can move a
+little between polls on a bursty source. After the press the log records what was
+discarded. The same button also clears a frozen or stuttering picture on that feed; there
+is no separate control for that. A reset does not fix the cause: if OBS still reads slower
+than real time, the backlog builds up again.
 
 ### Event title
 
@@ -441,7 +457,7 @@ or clear it to show nothing. The whole run, in order:
   `RACECAST_OBS_AUTO_COVER=0`; the manual button is unaffected.
 - **Automatic OBS rebuild and its stand-down (#582).** When OBS stops advancing the
   on-air feed (a frozen or stuttering picture), the relay rebuilds that feed's OBS input on
-  its own, like **RESET A→OBS** / **RESET B→OBS**. Each rebuild is a short black dropout.
+  its own, like **RESET A → LIVE** / **RESET B → LIVE**. Each rebuild is a short black dropout.
   If three rebuilds in a row leave the picture stalled, the relay stops rebuilding: the
   health pill turns yellow (`Feed A rebuild ineffective — …`, with the frame rate OBS
   renders) and the feed-health area shows `⚠ Feed A · auto-rebuild paused` with a
