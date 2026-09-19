@@ -2756,8 +2756,9 @@ def _parse_benchmark_args(rest):
                 val = int(next(it))
             except (StopIteration, ValueError):
                 raise ValueError(usage) from None
-            if val < (10 if arg == "--window" else 0):
-                raise ValueError(f"{arg} must be at least {10 if arg == '--window' else 0} s")
+            floor = 10 if arg == "--window" else ob.MIN_SETTLE_S
+            if val < floor:
+                raise ValueError(f"{arg} must be at least {floor} s")
             opts["window_s" if arg == "--window" else "settle_s"] = val
         elif arg == "--scene":
             opts["scene"] = next(it, "") or ""

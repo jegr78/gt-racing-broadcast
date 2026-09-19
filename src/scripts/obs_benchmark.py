@@ -64,6 +64,9 @@ TIERS = ("full", "robust")
 # After the new serve delivers its first bytes, how long until the HLS prefetch burst
 # has landed in the ring. streamlink fetches it in one go; a few seconds covers it.
 PREFETCH_LAND_S = 5
+# The rejoin rebuilds the OBS input; OBS reconnects within a second or two. Sampling
+# before that would see the rebuild's cursor jump and mark every window disturbed.
+MIN_SETTLE_S = 3
 
 # Real time. Rendering, encoding and playback each have to keep up. Playback is judged
 # from the feed's mediaCursor: STALL_RATIO is the relay's freeze threshold
@@ -73,6 +76,9 @@ ENCODER_SPEED_MIN = 0.98
 PLAYBACK_RATE_MIN = 0.95
 STALL_RATIO = 0.25
 STALL_FRACTION_MAX = 0.10
+# A tick that stood still while OBS had read everything the ring held (backlog at the
+# live edge) is the source not delivering, not the host falling behind.
+STARVED_BACKLOG_S = 0.5
 
 _QUALITY_SOURCES = ("youtube", "twitch")
 
@@ -149,6 +155,22 @@ def _playback(samples):
     return round(rate, 3), round(stalled / len(pairs), 2), rejoined
 
 
+def _starved_s(samples):
+    """Seconds in which OBS's cursor stood still with nothing left to read: the source
+    stopped delivering. Needs the backlog of the later sample of each pair. Pure."""
+    pts = [s for s in samples if s.get("cursor_ms") is not None]
+    total = 0.0
+    for a, b in zip(pts, pts[1:], strict=False):
+        dt = b["t"] - a["t"]
+        if dt <= 0 or b["cursor_ms"] < a["cursor_ms"]:
+            continue
+        stalled = (b["cursor_ms"] - a["cursor_ms"]) / 1000.0 / dt < STALL_RATIO
+        backlog = b.get("backlog_s")
+        if stalled and backlog is not None and backlog <= STARVED_BACKLOG_S:
+            total += dt
+    return total
+
+
 def _floor(values):
     return min(values) if values else None
 
@@ -167,6 +189,9 @@ def _disturbances(samples, rejoined):
     left = [s["state"] for s in samples if s.get("state") not in (None, "serving")]
     if left:
         out.append(f"the feed left serving ({left[0]})")
+    starved = _starved_s(samples)
+    if starved > 0:
+        out.append(f"the source stopped delivering ({starved:.0f} s)")
     return out
 
 
@@ -528,6 +553,8 @@ def run(relay, session, runtime_dir, *, flags, scene="Stint", window_s=DEFAULT_W
     cur = session.request("GetCurrentProgramScene", {}) or {}
     orig_scene = cur.get("currentProgramSceneName") or cur.get("sceneName")
     results, recording, out_path, started = {}, False, None, None
+    settle_s = max(settle_s, MIN_SETTLE_S)
+    interrupted = False
     try:
         if scene and scene != orig_scene:
             session.request("SetCurrentProgramScene", {"sceneName": scene})
@@ -540,6 +567,9 @@ def run(relay, session, runtime_dir, *, flags, scene="Stint", window_s=DEFAULT_W
                 window_s=window_s,
                 settle_s=settle_s, sample_every_s=sample_every_s,
                 serving_timeout_s=serving_timeout_s, progress=progress)
+    except KeyboardInterrupt:
+        interrupted = True
+        raise
     finally:
         notes = []
         if recording:
@@ -585,7 +615,10 @@ def run(relay, session, runtime_dir, *, flags, scene="Stint", window_s=DEFAULT_W
             except OSError as exc:
                 keep_recording = True
                 notes.append(f"could not delete the benchmark recording {out_path} ({exc})")
-        if restored_at is not None:
+        if restored_at is not None and interrupted:
+            notes.append(f"interrupted — OBS was not rejoined to Feed {feed}; press RESET "
+                         f"for Feed {feed} in the Director Panel")
+        elif restored_at is not None:
             # The restore is a restart too: without a rejoin OBS keeps playing its
             # prefetch and the operator is left that far behind live (#614). Last, so
             # an interrupt here cannot keep the scene or the recording from coming back.

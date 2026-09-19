@@ -195,14 +195,15 @@ def t_parse_benchmark_args_defaults_and_flags():
     assert m._parse_benchmark_args([]) == {
         "window_s": ob.DEFAULT_WINDOW_S, "settle_s": ob.DEFAULT_SETTLE_S,
         "scene": obs_ws.STINT_SCENE, "keep_recording": False, "json": False}
-    o = m._parse_benchmark_args(["--window", "90", "--settle", "0", "--scene", "Split",
+    o = m._parse_benchmark_args(["--window", "90", "--settle", "3", "--scene", "Split",
                                  "--keep-recording", "--json"])
-    assert o == {"window_s": 90, "settle_s": 0, "scene": "Split",
+    assert o == {"window_s": 90, "settle_s": 3, "scene": "Split",
                  "keep_recording": True, "json": True}
 
 
 def t_parse_benchmark_args_rejects_bad_input():
-    for bad in (["--window"], ["--window", "x"], ["--window", "5"], ["--settle", "-1"],
+    # #618: OBS rebuilds its input after the rejoin; a settle below 3 s samples that
+    for bad in (["--window"], ["--window", "x"], ["--window", "5"], ["--settle", "2"],
                 ["--scene"], ["--bogus"]):
         try:
             m._parse_benchmark_args(bad)

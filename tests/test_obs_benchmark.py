@@ -98,6 +98,24 @@ def t_summarize_marks_a_disturbed_window():
     assert m.summarize(restarted)["contaminated"] == ["OBS reconnected the feed"]
 
 
+def t_summarize_blames_a_starved_consumer_on_the_source():
+    # The source stopped delivering: OBS has read everything (backlog at the live edge,
+    # 0.0) and its cursor stands still. That is not the host falling behind.
+    samples = [_sample(0.0, cursor=5000, backlog=2.8), _sample(2.0, cursor=7000, backlog=0.9),
+               _sample(4.0, cursor=7000, backlog=0.0), _sample(6.0, cursor=7000, backlog=0.0),
+               _sample(8.0, cursor=9000, backlog=2.5)]
+    s = m.summarize(samples)
+    assert s["contaminated"] == ["the source stopped delivering (4 s)"]
+
+
+def t_summarize_keeps_a_slow_consumer_with_data_waiting_on_the_host():
+    # Data is waiting (the backlog grows) while the cursor stands: OBS is not reading.
+    samples = [_sample(0.0, cursor=5000, backlog=3.0), _sample(2.0, cursor=5000, backlog=5.0),
+               _sample(4.0, cursor=5000, backlog=7.0)]
+    s = m.summarize(samples)
+    assert s["contaminated"] == [] and s["stall_fraction"] == 1.0
+
+
 def t_summarize_ignores_missing_values_instead_of_inventing_them():
     blank = dict(fps=None, render_ms=None, backlog=None, rec_ms=None, rs=None, rt=None,
                  os_=None, ot=None, snaps=None)
@@ -678,6 +696,31 @@ def t_run_restores_on_an_interrupt():
             raise AssertionError("expected KeyboardInterrupt")
     assert sess.recording is False and sess.scene == "Standby"
     assert relay.calls[-1] == ("A", "auto")
+
+
+def t_run_does_not_hold_an_interrupted_run_for_the_rejoin():
+    # Ctrl-C once: the cleanup restores everything but does not wait up to 95 s for the
+    # restored serve to rejoin OBS; it tells the operator to press RESET instead.
+    clock = _Clock()
+    relay = _Relay(clock)
+    sess = _Session(clock, relay=relay)
+    fired, said = [], []
+
+    def sleep(s):
+        if not fired:
+            fired.append(True)
+            raise KeyboardInterrupt
+        clock.sleep(s)
+
+    with tempfile.TemporaryDirectory() as d:
+        try:
+            m.run(relay, sess, d, flags=FLAGS, clock=clock, sleep=sleep, now=lambda: NOW,
+                  remove=lambda p: None, isfile=lambda p: True, progress=said.append)
+        except KeyboardInterrupt:
+            pass  # the interrupt must reach the caller after the restore
+    assert relay.calls[-1] == ("A", "auto")
+    assert relay.resets == []                              # no rejoin wait after Ctrl-C
+    assert any("RESET" in s for s in said), said
 
 
 def t_run_says_when_it_releases_an_automatic_step_down():
