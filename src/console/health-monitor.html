@@ -523,6 +523,9 @@ const NUMERIC_FIELDS = [
   ["sys_disk_free_mb", "Disk free (MB)", "System (machine)"],
   ["feed_a_max_gap_s", "Feed A max gap (s)", "Feed stalls"],
   ["feed_b_max_gap_s", "Feed B max gap (s)", "Feed stalls"],
+  ["feed_a_backlog_s", "Feed A behind live (s)", "Output backlog"],
+  ["feed_b_backlog_s", "Feed B behind live (s)", "Output backlog"],
+  ["pov_backlog_s", "POV behind live (s)", "Output backlog"],
 ];
 
 function renderCharts(series) {

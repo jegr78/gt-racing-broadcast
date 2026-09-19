@@ -56,6 +56,10 @@
   .tally.onair { background: #c1121f; color: #fff; box-shadow: 0 0 0 3px #ff4d5e inset; }
   .tally.next  { background: #1d4ed8; color: #fff; }
   .tally.idle  { background: #1b1f25; color: #9aa0a6; font-size: 18px; }
+  /* #583: shown only while the relay reports an output backlog, never as a counter */
+  .prog-behind { margin-top: 6px; padding: 7px 10px; border-radius: 6px; font-size: 13px;
+                 background: #3a2c05; color: #ffd361; border: 1px solid #a67c00; }
+  .prog-behind[hidden] { display: none; }
   .sub { font-size: 13px; font-weight: 500; opacity: .9; margin-top: 4px; }
   #program { width: 100%; display: block; background: #000; aspect-ratio: 16/9; object-fit: contain; }
   .progwrap { position: relative; }
@@ -285,6 +289,7 @@
       <div class="card progwrap">
         <span class="badge">PROGRAM</span>
         <img id="program" alt="program monitor">
+        <div id="progBehind" class="prog-behind" role="status" hidden></div>
         <div id="pgmAudioBar" style="display:none; align-items:center; gap:8px; margin-top:6px;">
           <button id="pgmAudioBtn" class="bcompose" type="button" aria-pressed="false" title="Listen to on-air audio">🔇 Audio</button>
           <input id="pgmAudioVol" type="range" min="0" max="1" step="0.05" value="0.8"
@@ -391,6 +396,16 @@ function renderTally(d) {
   $('eventTitle').textContent = title;
   document.title = title ? (title + ' · Commentator Cockpit') : 'Commentator Cockpit';
   $('who').textContent = d.me ? '· ' + d.me + (d.mode === 'qualifying' ? ' · QUALI' : '') : '';
+  // #583: a delayed program against the commentator's own voice is a producer-side
+  // backlog, not their stream. The relay sends a value only past its threshold.
+  const behind = $('progBehind');
+  if (typeof d.program_behind_s === 'number') {
+    behind.textContent = 'Program is ' + d.program_behind_s + ' s behind live. The delay is on ' +
+      'the producer side, not your stream.';
+    behind.hidden = false;
+  } else {
+    behind.hidden = true;
+  }
   const el = $('tally');
   if (d.syncing) {
     el.className = 'tally idle';

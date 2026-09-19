@@ -2577,9 +2577,10 @@ def t_heartbeat_backlog_sample_classifies_serving_feeds_only():
     r = _backlog_relay(11.6, 9.0)
     r.B.paused = True                                   # an off-air stopped feed never counts
     r._sample_consumer_backlogs()
-    assert r._interval_backlogs == {"A": 11.6, "B": 9.0}
+    assert r._interval_backlogs == {"A": 11.6, "B": None}   # a stopped feed records nothing
     assert r._backlogged_feeds == {"A": 11.6}
     assert r.A.fanout_server.takes == 1                 # read + reset exactly once per tick
+    assert r.B.fanout_server.takes == 1                 # the stopped feed is reset as well
     r.A.fanout_server.floor = 3.2                       # back inside the reserve
     r._sample_consumer_backlogs()
     assert r._backlogged_feeds == {}
@@ -2607,6 +2608,8 @@ def t_backlog_in_status_and_health_snapshot():
     st = r.status()
     assert st["feeds"]["A"]["backlog_s"] == 12.3 and st["feeds"]["A"]["backlogged"] is True
     assert st["feeds"]["B"]["backlog_s"] is None and st["feeds"]["B"]["backlogged"] is False
+    r.A.paused = True                                   # a stopped feed has no live edge
+    assert r.status()["feeds"]["A"]["backlog_s"] is None
     snap = r._health_snapshot(123.0)
     assert (snap["feed_a_backlog_s"], snap["feed_b_backlog_s"], snap["pov_backlog_s"]) == \
         (11.6, 3.1, None)

@@ -7351,20 +7351,23 @@ class Relay:
             srv = getattr(f, "fanout_server", None)
             if srv is None:
                 continue
-            fl = srv.take_backlog_floor()
+            fl = srv.take_backlog_floor()          # always take: a stopped feed resets too
+            if f.paused or f.phase != "serving":
+                floors[name] = None                  # no live edge to be behind
+                continue
             floors[name] = None if fl is None else round(fl, 1)
-            if (not f.paused and f.phase == "serving"
-                    and feed_backlog_degraded(fl, self.feed_prebuffer_s, self._backlog_warn_s)):
+            if feed_backlog_degraded(fl, self.feed_prebuffer_s, self._backlog_warn_s):
                 lagging[name] = floors[name]
         self._interval_backlogs = floors
         self._backlogged_feeds = lagging
 
     def _backlog_status(self, name, f):
         """/status fields for one feed (#583): the live consumer backlog and whether the
-        last heartbeat classified it past the threshold."""
+        last heartbeat classified it past the threshold. Only a serving feed has a live
+        edge to be behind; a stopped or connecting one reports None."""
         srv = getattr(f, "fanout_server", None)
         live = None
-        if srv is not None:
+        if srv is not None and not f.paused and f.phase == "serving":
             try:
                 live = srv.consumer_backlog(time.monotonic())
             except Exception:                   # noqa: BLE001 — best-effort
