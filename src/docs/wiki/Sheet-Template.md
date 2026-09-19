@@ -139,7 +139,7 @@ are found by name; without one, fixed positions apply (**A** = URL, **B** = Stre
 
 | Column header | Fallback col | Meaning |
 |---|---|---|
-| `URL` | A | The stint's live stream — a `youtube.com`/`twitch.tv` URL, or a bare YouTube channel id (`UC…`, public `/live` only) |
+| `URL` | A | The stint's live stream — a `youtube.com`/`twitch.tv` URL, or a bare YouTube channel id (`UC…`, public `/live` only) — or `local:` for a stint read from the producer machine's capture card ([local capture stint](Relay-Mode#local-capture-stint)) |
 | `Streamer` *(or `Name`)* | B | Commentator name (matched to the Crew/Configuration roster) |
 | `Stint` | C | Stint label shown on the HUD (optional) |
 
@@ -150,6 +150,7 @@ URL                                          | Streamer           | Stint
 https://www.youtube.com/watch?v=SAMPLE00001  | Sample Commentator | Stint 1
 https://www.twitch.tv/sample_channel         | Second Commentator | Stint 2
 UCSAMPLECHANNELID0000000  | Third Commentator | Stint 3
+local:                                       | Fourth Commentator | Stint 4
 ```
 
 Feed A serves the odd stints, Feed B the even ones; at each handover the off-air feed

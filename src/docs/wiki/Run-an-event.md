@@ -245,6 +245,14 @@ is fine.
 > A's tailnet. The tailnet form `racecast event takeover <A-tailscale-ip>` is unchanged.
 > Details: [Remote access](Remote-access#producer-takeover-over-the-funnel).
 
+> **A local stint cannot be taken over.** A Schedule row marked `local:` is read from the
+> outgoing producer's own capture card ([local capture stint](Relay-Mode#local-capture-stint)).
+> That picture exists only on that machine: if it dies during the local stint, the stint
+> goes down with it and no successor can pull it again. On the incoming machine the same
+> row means *its* capture card; without `RACECAST_CAPTURE` in its `.env` the feed stays
+> idle with *local capture: RACECAST_CAPTURE is not set in .env*. This is a deliberate
+> limit of the local setup, not a takeover fault.
+
 > **Takeover announcement.** A `racecast event takeover` posts a **Discord** alert (with an
 > `@here` ping) naming the incoming and outgoing producer and the stint, and drops a
 > **takeover** marker on the [Health Monitor](Health-Monitor#events) timeline of the

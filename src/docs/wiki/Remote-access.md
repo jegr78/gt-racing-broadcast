@@ -166,6 +166,8 @@ leave A's tailnet). A wrong secret aborts loudly; an unreachable host falls back
 `--stint N` bringup. The tailnet path (`racecast event takeover <100.x-ip>`) is unchanged
 and uses no step-up header. The operational handover steps (re-publishing links on the new
 machine) are in [Console & cockpit setup → producer handover](Console-Setup#producer-handover).
+Neither path can take over a [local capture stint](Relay-Mode#local-capture-stint): its
+picture exists only on the outgoing producer's machine.
 
 ## Companion web buttons over the Funnel (`/console/buttons`)
 
