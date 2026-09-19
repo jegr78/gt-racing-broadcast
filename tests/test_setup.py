@@ -1185,6 +1185,15 @@ def t_ytdlp_resolve_cmd_separates_url():
     assert cmd2[cmd2.index("--cookies") + 1] == "/c/cookies.txt"
 
 
+def t_ytdlp_resolve_cmd_prints_live_status():
+    # #621: the live status comes from the same resolve, so an ended broadcast
+    # without a playable format still reports it instead of aborting first.
+    cmd = m.ytdlp_resolve_cmd("https://youtu.be/AAA", None)
+    assert "--ignore-no-formats-error" in cmd[:cmd.index("--")], cmd
+    prints = [cmd[i + 1] for i, a in enumerate(cmd) if a == "--print"]
+    assert prints == ["rcq %(height)s %(fps)s", "rcs %(live_status)s"], prints
+
+
 def t_streamlink_serve_cmd_separates_url():
     cmd = m.streamlink_serve_cmd("http://hls.example/x.m3u8", 53001)
     assert cmd[-3:] == ["--", "http://hls.example/x.m3u8", "best"], cmd

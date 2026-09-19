@@ -340,11 +340,19 @@ def serve_exit_is_drop(stopped, advancing):
 
 # Source-not-live signatures (#495) — matched case-insensitively as substrings against
 # the yt-dlp/streamlink diagnostic text. ENDED is checked first (more specific).
-_SOURCE_ENDED = ("this live event has ended",)
+# The "live_status …" entries match the error resolve_hls builds from yt-dlp's live
+# status when no format was selectable (#621): an ended broadcast in Post-Live
+# Manifestless mode only says "Requested format is not available", like a logged-out jar.
+_SOURCE_ENDED = (
+    "this live event has ended",
+    "live_status post_live",         # yt-dlp: broadcast over, recording not processed yet
+    "live_status was_live",          # yt-dlp: broadcast over, recording available
+)
 _SOURCE_NOT_LIVE_YET = (
     "no playable streams found",     # Twitch: channel offline / not live yet
     "not currently live",            # yt-dlp YouTube: channel not live
     "will begin in",                 # YouTube: scheduled premiere not started
+    "live_status is_upcoming",       # yt-dlp: scheduled, not started
 )
 
 
@@ -355,7 +363,7 @@ def classify_source_state(text):
       "not_live_yet" — source offline / not started (Twitch 'No playable streams
                        found', yt-dlp 'not currently live').
       "ended"        — source's live broadcast is over (YouTube 'This live event has
-                       ended').
+                       ended', or a post-live / was-live status from the resolve).
       None           — anything else (429/403/network/generic) — unchanged behaviour."""
     if not text:
         return None
@@ -3451,8 +3459,11 @@ def ytdlp_resolve_cmd(url, cookies, fmt=YTDLP_FORMAT):
     is_channel host allow-list — yt-dlp's --exec etc. would be code execution)."""
     # -g yields the HLS URL; the extra --print emits a "rcq <height> <fps>" line so the
     # relay can show the ACTUALLY-served resolution (YouTube's streamlink only reports "live").
+    # "rcs <live_status>" tells an ended broadcast from a logged-out jar when no format is
+    # selectable (#621); --ignore-no-formats-error lets yt-dlp print it instead of aborting.
     cmd = ["yt-dlp", "-g", "-f", fmt, "--no-warnings", "--no-playlist",
-           "--print", "rcq %(height)s %(fps)s"]
+           "--ignore-no-formats-error",
+           "--print", "rcq %(height)s %(fps)s", "--print", "rcs %(live_status)s"]
     if cookies:
         cmd += ["--cookies", cookies]
     cmd += ["--", url]
@@ -5032,8 +5043,14 @@ def resolve_hls(url, cookies, logger, fmt=YTDLP_FORMAT):
     out = [l for l in (r.stdout or "").splitlines() if l.startswith("http")]
     if out:
         return out[0], None, parse_ytdlp_quality(r.stdout)
-    err = (r.stderr or "").strip().splitlines()
-    last = err[-1] if err else "not live?"
+    status = parse_ytdlp_live_status(r.stdout)
+    if status is not None:
+        # yt-dlp read the video but selected no format (--ignore-no-formats-error): the
+        # live status says why, and classify_source_state reads it from this text (#621).
+        last = YTDLP_NO_FORMAT + (f" (live_status {status})" if status != "NA" else "")
+    else:
+        err = (r.stderr or "").strip().splitlines()
+        last = err[-1] if err else "not live?"
     logger.warning("yt-dlp could not resolve %s (%s)", url, last)
     return None, last, None
 
@@ -6438,6 +6455,19 @@ def parse_stream_quality(line):
 
 
 _YTDLP_QUALITY_RE = re.compile(r"^rcq\s+(\d+)(?:\s+(\S+))?", re.M)
+_YTDLP_LIVE_STATUS_RE = re.compile(r"^rcs\s+(\S+)", re.M)
+YTDLP_NO_FORMAT = "Requested format is not available"
+
+
+def parse_ytdlp_live_status(text):
+    """The live status from a yt-dlp `--print "rcs %(live_status)s"` line ('is_live',
+    'post_live', 'was_live', 'is_upcoming', 'NA' when unknown), else None when the line is
+    absent (yt-dlp aborted before printing). Pure → unit-tested (#621)."""
+    if not text:
+        return None
+    m = _YTDLP_LIVE_STATUS_RE.search(text)
+    return m.group(1) if m else None
+
 
 
 def parse_ytdlp_quality(text):

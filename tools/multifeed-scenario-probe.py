@@ -170,7 +170,8 @@ class FeedWorker:
             if first and is_throttle(first[0]):
                 self._flag_429(f"resolve: {first[0][:80]}")
             self._wlog(f"resolve-fail {first}"); return None
-        out = (res.stdout or "").strip().splitlines()
+        # stdout also carries the relay's "rcq …"/"rcs …" --print lines: take the URL.
+        out = [ln for ln in (res.stdout or "").splitlines() if ln.startswith("http")]
         return out[0] if out else None
 
     def _flag_429(self, detail):

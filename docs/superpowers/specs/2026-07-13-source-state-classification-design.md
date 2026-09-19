@@ -51,6 +51,17 @@ def classify_source_state(text):
 Case-insensitive substring matching against a small, documented signature table. A 429/403
 or an unknown error returns None (the existing drop path is untouched).
 
+**Live status from the resolve (#621).** A YouTube broadcast in Post-Live Manifestless mode
+offers only DASH video-only/audio-only formats, so yt-dlp fails with `Requested format is
+not available`, the same text a logged-out cookie jar produces (#615). The text alone
+cannot tell them apart. The resolve therefore also runs with `--ignore-no-formats-error
+--print "rcs %(live_status)s"`: when no format is selectable, yt-dlp exits 0 without a URL
+and prints the live status. `resolve_hls` turns that into the error
+`Requested format is not available (live_status <status>)`, and the signature table maps
+`live_status post_live` / `live_status was_live` to `ended` and `live_status is_upcoming` to
+`not_live_yet`. `is_live` stays a generic drop. A successful resolve is not reclassified:
+a `was_live` recording that does resolve is still served, as before.
+
 ### 2. Feed carries `source_state`
 
 - New `Feed.source_state` field (default `None`).

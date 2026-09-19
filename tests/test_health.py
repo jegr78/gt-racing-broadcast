@@ -87,6 +87,62 @@ def t_resolve_hls_failure_without_stderr_says_not_live():
     assert url is None and err == "not live?"
 
 
+def _resolve_err(stdout, stderr=""):
+    orig = m.subprocess.run
+    m.subprocess.run = lambda *a, **k: _FakeRun(stdout=stdout, stderr=stderr)
+    try:
+        return m.resolve_hls("https://yt.example/x", None, _LOG)
+    finally:
+        m.subprocess.run = orig
+
+
+def t_resolve_hls_post_live_classifies_as_ended():
+    # #621: stdout captured from yt-dlp 2026.08.19 (with --ignore-no-formats-error) on a
+    # broadcast in Post-Live Manifestless mode: exit 0, no URL, no stderr.
+    url, err, q = _resolve_err("rcq NA NA\nrcs post_live\n")
+    assert url is None and q is None
+    assert err == "Requested format is not available (live_status post_live)", err
+    assert m.classify_source_state(err) == "ended"
+
+
+def t_resolve_hls_was_live_and_upcoming_classify():
+    _u, err, _q = _resolve_err("rcq NA NA\nrcs was_live\n")
+    assert m.classify_source_state(err) == "ended", err
+    _u, err, _q = _resolve_err("rcq NA NA\nrcs is_upcoming\n")
+    assert m.classify_source_state(err) == "not_live_yet", err
+
+
+def t_resolve_hls_live_without_format_stays_generic():
+    # #621/#615: a logged-out jar on a LIVE video yields the same format error. The
+    # live status keeps it apart from an ended broadcast: a generic drop, not "ended".
+    _u, err, _q = _resolve_err("rcq NA NA\nrcs is_live\n")
+    assert err == "Requested format is not available (live_status is_live)", err
+    assert m.classify_source_state(err) is None
+
+
+def t_resolve_hls_unknown_live_status_keeps_format_error():
+    _u, err, _q = _resolve_err("rcq NA NA\nrcs NA\n")
+    assert err == "Requested format is not available", err
+    assert m.classify_source_state(err) is None
+
+
+def t_resolve_hls_extractor_error_keeps_stderr_text():
+    # An extractor error still aborts before the --print lines: the stderr text stays
+    # the error and the text signatures remain the fallback classification.
+    _u, err, _q = _resolve_err("", "ERROR: [youtube] abc: This live event has ended.\n")
+    assert err == "ERROR: [youtube] abc: This live event has ended."
+    assert m.classify_source_state(err) == "ended"
+
+
+def t_parse_ytdlp_live_status():
+    assert m.parse_ytdlp_live_status("rcq NA NA\nrcs post_live\n") == "post_live"
+    assert m.parse_ytdlp_live_status("rcs is_live\nhttps://x.example/m3u8") == "is_live"
+    assert m.parse_ytdlp_live_status("rcs NA") == "NA"
+    assert m.parse_ytdlp_live_status("rcq 1080 60.0\nhttps://x.example/m3u8") is None
+    assert m.parse_ytdlp_live_status("") is None
+    assert m.parse_ytdlp_live_status(None) is None
+
+
 def t_feed_initial_phase_is_idle():
     # Feed now opens a per-feed log at init -> use a tempdir, not the repo tree.
     with tempfile.TemporaryDirectory() as td:
