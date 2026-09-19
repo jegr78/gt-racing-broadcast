@@ -570,6 +570,30 @@ def _speedtest_max_age():
     return value if value > 0 else 7.0
 
 
+def _obs_benchmark_max_age():
+    """Staleness window in days for the stored `racecast obs benchmark` result (#584).
+    RACECAST_OBS_BENCHMARK_MAX_AGE_DAYS overrides; bad/non-positive -> 30."""
+    raw = os.environ.get("RACECAST_OBS_BENCHMARK_MAX_AGE_DAYS", "")
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return 30.0
+    return value if value > 0 else 30.0
+
+
+def _obs_benchmark_line(preflight_file, runtime_dir):
+    """The last OBS benchmark and its age, or None when it cannot be read. Reported,
+    never run here: a 60-second test on every preflight gets clicked away."""
+    try:
+        import obs_benchmark as ob      # lazy, like speedtest: it defines its own Result
+        import speedtest as st
+        d = runtime_dir or st.default_runtime_dir(
+            os.path.dirname(os.path.abspath(preflight_file)))
+        return ob.classify(ob.load_latest(d), time.time(), _obs_benchmark_max_age())
+    except Exception:   # never let the benchmark read break the report
+        return None
+
+
 def gather(preflight_file, runtime_dir=None, cookies_opt=None):
     """Run every check and return a list of (section_title, [Result])."""
     hardware = [
@@ -578,6 +602,9 @@ def gather(preflight_file, runtime_dir=None, cookies_opt=None):
         classify_disk(disk_free_bytes(os.getcwd()) / 1024 ** 3),
         classify_swap(read_swap_used_bytes() / 1024 ** 3),
     ]
+    bench = _obs_benchmark_line(preflight_file, runtime_dir)
+    if bench is not None:
+        hardware.append(bench)
     tools = []
     for name in REQUIRED_TOOLS:
         version = tool_version(name)

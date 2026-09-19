@@ -423,6 +423,37 @@ def t_speedtest_max_age_env(monkeypatch=None):
     os.environ.pop("RACECAST_SPEEDTEST_MAX_AGE_DAYS", None)
 
 
+def t_obs_benchmark_max_age_env():
+    import os
+    os.environ.pop("RACECAST_OBS_BENCHMARK_MAX_AGE_DAYS", None)
+    assert m._obs_benchmark_max_age() == 30.0            # default
+    os.environ["RACECAST_OBS_BENCHMARK_MAX_AGE_DAYS"] = "5"
+    assert m._obs_benchmark_max_age() == 5.0
+    os.environ["RACECAST_OBS_BENCHMARK_MAX_AGE_DAYS"] = "junk"
+    assert m._obs_benchmark_max_age() == 30.0            # bad value -> default
+    os.environ["RACECAST_OBS_BENCHMARK_MAX_AGE_DAYS"] = "0"
+    assert m._obs_benchmark_max_age() == 30.0            # non-positive -> default
+    os.environ.pop("RACECAST_OBS_BENCHMARK_MAX_AGE_DAYS", None)
+
+
+def t_hardware_section_reports_the_obs_benchmark():
+    import tempfile, time
+    import obs_benchmark as ob
+    d = tempfile.mkdtemp()
+    line = [r for r in dict(m.gather(m.__file__, runtime_dir=d))["Hardware"]
+            if r.name == "OBS benchmark"]
+    assert len(line) == 1 and line[0].level == "INFO"     # nothing measured yet
+    full = {"fps_avg": 45.0, "encoder_speed": 1.0, "backlog_growth_s_per_min": 6.0}
+    robust = {"fps_avg": 60.0, "encoder_speed": 1.0, "backlog_growth_s_per_min": 0.0}
+    ob.append_record({"ts": int(time.time()) - 2 * 86_400, "feed": "A",
+                      "full": full, "robust": robust,
+                      "verdict": ob.verdict(full, robust, 60.0)}, d)
+    line = [r for r in dict(m.gather(m.__file__, runtime_dir=d))["Hardware"]
+            if r.name == "OBS benchmark"]
+    assert line[0].level == "WARN"
+    assert "ROBUST recovers" in line[0].detail and "2 d ago" in line[0].detail
+
+
 def t_network_section_has_bandwidth_and_advisory():
     import tempfile
     sections = dict(m.gather(m.__file__, runtime_dir=tempfile.mkdtemp()))

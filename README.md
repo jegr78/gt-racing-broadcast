@@ -150,6 +150,7 @@ racecast tailscale up         # connect Tailscale (event start does this automat
 racecast tailscale down       # disconnect Tailscale after the event
 racecast preflight            # check tools/hardware
 racecast speedtest            # opt-in Ookla bandwidth test; logs locally, preflight warns vs 25/10 Mbps
+racecast obs benchmark        # FULL vs ROBUST on the on-air feed with a recording running; logs locally, preflight reports it
 racecast relay start          # start the relay (background)
 racecast relay logs -f        # watch it live (console + feed_A/B/POV merged)
 racecast relay logs --list                  # list available archive dates

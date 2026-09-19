@@ -182,6 +182,64 @@ def t_sheet_url_cmd_prints_url(capsys=None):
         m._active_sheet_url, m._open_url = old_url, old_open
 
 
+def t_route_obs_benchmark():
+    action = m.route(["obs", "benchmark", "--window", "30"])
+    assert action["command"] == "obs" and action["verb"] == "benchmark"
+    assert action["rest"] == ["--window", "30"]
+    assert m.DISPATCH[("obs", "benchmark")] is m.obs_benchmark_cmd
+
+
+def t_parse_benchmark_args_defaults_and_flags():
+    import obs_benchmark as ob
+    import obs_ws
+    assert m._parse_benchmark_args([]) == {
+        "window_s": ob.DEFAULT_WINDOW_S, "settle_s": ob.DEFAULT_SETTLE_S,
+        "scene": obs_ws.STINT_SCENE, "keep_recording": False, "json": False}
+    o = m._parse_benchmark_args(["--window", "90", "--settle", "0", "--scene", "Split",
+                                 "--keep-recording", "--json"])
+    assert o == {"window_s": 90, "settle_s": 0, "scene": "Split",
+                 "keep_recording": True, "json": True}
+
+
+def t_parse_benchmark_args_rejects_bad_input():
+    for bad in (["--window"], ["--window", "x"], ["--window", "5"], ["--settle", "-1"],
+                ["--scene"], ["--bogus"]):
+        try:
+            m._parse_benchmark_args(bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"accepted {bad}")
+
+
+def t_obs_benchmark_cmd_exits_when_relay_down():
+    old = m._relay_http_ok
+    m._relay_http_ok = lambda: False
+    try:
+        try:
+            m.obs_benchmark_cmd([])
+            raise AssertionError("expected SystemExit")
+        except SystemExit as e:
+            assert "relay not responding" in str(e.code)
+    finally:
+        m._relay_http_ok = old
+
+
+def t_benchmark_relay_raises_when_the_relay_refuses_a_tier():
+    old = m._relay_post_json
+    sent = []
+    m._relay_post_json = lambda url, body, timeout=3: sent.append((url, body)) or {
+        "ok": False, "error": "unknown feed"}
+    try:
+        try:
+            m._BenchmarkRelay("http://relay").set_quality("A", "robust")
+            raise AssertionError("expected RuntimeError")
+        except RuntimeError as exc:
+            assert "unknown feed" in str(exc)
+    finally:
+        m._relay_post_json = old
+    assert sent == [("http://relay/feed/A/quality", {"tier": "robust"})]
+
+
 def t_obs_refresh_cmd_exits_when_relay_down():
     old = m._relay_http_ok
     m._relay_http_ok = lambda: False

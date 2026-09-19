@@ -86,6 +86,40 @@ on macOS and Linux. Ookla is closed-source and each run sends its result to Ookl
 - **The director's line is separate and light** — a browser panel over Tailscale plus
   watching the public broadcast — and is not part of these numbers.
 
+## Can this machine keep up? — the OBS benchmark
+
+A fast line is not enough: OBS on the producer machine has to decode the on-air feed,
+render the scene and encode the program in real time. When it cannot, it plays the feed
+slower than it arrives and the picture falls further and further **behind live** (the
+`BEHIND LIVE` pill in the Director Panel). `racecast obs benchmark` measures that before
+the event, once per machine:
+
+```bash
+racecast obs benchmark                 # ~2.5 minutes; add --json for machine-readable output
+```
+
+It needs the relay running with a **live stint on Feed A or B** and OBS open with the
+league's collection. It switches OBS to the `Stint` scene (`--scene` picks another),
+starts a recording (render lag only shows while an output runs), reconnects the on-air
+feed at **FULL** (1080p) and then at **ROBUST** (720p), and samples each for 60 s
+(`--window`), after a 10 s settle (`--settle`). For each tier it reports the render
+time per frame, the frame rate, skipped frames, how fast the encoder keeps up, and how
+far OBS is behind the live edge and whether that gap grows. Afterwards it puts the
+scene, the feed's quality setting and the recording back as they were and deletes its
+own recording (`--keep-recording` keeps it).
+
+It **refuses to run while OBS is streaming or already recording** — each tier switch
+reconnects the on-air feed, which is a visible dropout. Run it before you go live.
+
+The result is logged locally (the last 10 are kept). `racecast preflight` reports the
+latest one under *Hardware* and **warns** when FULL did not keep real time (saying
+whether 720p recovered it) or when the measurement is older than
+`RACECAST_OBS_BENCHMARK_MAX_AGE_DAYS` (default 30). Re-run it after changing the
+machine, OBS, or the scene collection. The ROBUST line also names the latency ROBUST
+adds *before* the relay: it starts two HLS segments further behind the source's live
+edge than FULL for YouTube (none for Twitch). That figure comes from the streamlink
+settings, it is not clocked.
+
 ## The easy way — the Control Center
 
 The release archive contains two binaries: **`racecast`** (the CLI used throughout this
