@@ -1610,6 +1610,16 @@ def t_feed_reset_target_validates_feed_key():
     assert m.feed_reset_target(None, feeds) is None
 
 
+def t_reset_discards_s_is_the_backlog_beyond_the_rejoin_reserve():
+    # #587: a reset rejoins OBS prebuffer_s behind live (_join_offset), so it throws away
+    # only what OBS lags beyond that reserve, never the reserve itself.
+    assert m.reset_discards_s(12.34, 3.0) == 9.3
+    assert m.reset_discards_s(3.0, 3.0) == 0.0
+    assert m.reset_discards_s(1.2, 3.0) == 0.0          # a bursty source sits below it
+    assert m.reset_discards_s(7.5, 0.0) == 7.5          # RACECAST_FEED_PREBUFFER_S=0
+    assert m.reset_discards_s(None, 3.0) is None        # no consumer: nothing to discard
+
+
 def t_streamlink_serve_tolerates_brief_gaps():
     # The give-up flag pushes streamlink's stop past the relay's 8 s watchdog. Hermetic:
     # drive the capability probe with a fixed modern help text.
@@ -2625,11 +2635,15 @@ def t_backlog_in_status_and_health_snapshot():
     st = r.status()
     assert st["feeds"]["A"]["backlog_s"] == 12.3 and st["feeds"]["A"]["backlogged"] is True
     assert st["feeds"]["B"]["backlog_s"] is None and st["feeds"]["B"]["backlogged"] is False
+    # #587: the panel labels RESET with what a click right now throws away
+    assert st["feeds"]["A"]["reset_discards_s"] == 9.3
+    assert st["feeds"]["B"]["reset_discards_s"] is None
     # the pill follows the live value: recovered since the last heartbeat -> not amber
     r.A.fanout_server.live = 3.2
     assert r.status()["feeds"]["A"]["backlogged"] is False
     r.A.paused = True                                   # a stopped feed has no live edge
     assert r.status()["feeds"]["A"]["backlog_s"] is None
+    assert r.status()["feeds"]["A"]["reset_discards_s"] is None
     snap = r._health_snapshot(123.0)
     assert (snap["feed_a_backlog_s"], snap["feed_b_backlog_s"], snap["pov_backlog_s"]) == \
         (11.6, 3.1, None)
