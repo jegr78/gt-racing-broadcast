@@ -3906,7 +3906,7 @@ class Fmp4Join:
 
 def ring_join(ring):
     """A Fmp4Join for `ring`, or a pass-through one for a ring without a head
-    (test doubles, the direct-serve path)."""
+    (test doubles)."""
     return Fmp4Join(ring.head() if hasattr(ring, "head") else b"")
 
 
@@ -4530,17 +4530,16 @@ class FeedFanoutServer:
         cid = None
         try:
             conn.recv(65536)                    # consume the request line/headers
-            conn.sendall(b"HTTP/1.0 200 OK\r\n"
-                         b"Content-Type: video/mp2t\r\n"
-                         b"Connection: close\r\n\r\n")
             cursor = self._join_offset(time.monotonic())   # #533: join prebuffer_s behind the live edge
             # #577: OBS rejoins mid-stream at every activation (close_when_inactive),
             # so an fMP4 feed needs its init segment and a fragment-aligned start.
             # A cursor snap later is NOT re-aligned: the demuxer is mid-mdat by its
             # own count, and the heal is the resync rebuild's fresh connection.
             join = ring_join(self.ring)
-            if join.init:
-                conn.sendall(join.init)
+            ctype = b"video/mp4" if join.init else b"video/mp2t"
+            conn.sendall(b"HTTP/1.0 200 OK\r\n"
+                         b"Content-Type: " + ctype + b"\r\n"
+                         b"Connection: close\r\n\r\n" + join.init)
             cid = id(threading.current_thread())
             with self._consumers_lock:
                 self._consumers[cid] = {"cycle_ts": time.monotonic(), "snaps": 0}
