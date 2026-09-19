@@ -1056,6 +1056,14 @@ def t_aggregate_health_backlog_is_a_yellow_reason_with_the_next_step():
                             "time; step the feed quality down to ROBUST"], h
     assert m.aggregate_health(_facts(feeds_backlogged={}))["level"] == "green"
 
+
+def t_aggregate_health_backlog_without_a_quality_tier_does_not_suggest_robust():
+    # POV and a local: capture stint have no quality tiers (#592), so ROBUST is no step.
+    h = m.aggregate_health(_facts(feeds_backlogged={"POV": 9.2},
+                                  backlog_no_step_down=["POV"]))
+    assert h["reasons"] == ["Feed POV output 9 s behind live — OBS reads slower than real "
+                            "time; this source has no quality step-down"], h
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

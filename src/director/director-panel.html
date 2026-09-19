@@ -1736,8 +1736,8 @@ $("#brandSubInput").addEventListener("keydown", async (e)=>{
 $("#brandSubInput").addEventListener("blur", ()=>{ if (editingTitle) stopEditTitle(); });
 
 // #583: how far OBS is behind the live edge, worst consumed feed first. The #533 reserve
-// (3 s by default) is the healthy baseline; amber only when the relay's heartbeat
-// classified a feed past its threshold. Shown only while a serving feed has a value (a
+// (3 s by default) is the healthy baseline; amber only while the relay reports the feed
+// backlogged (its heartbeat classified it and the live value is still past the threshold). Shown only while a serving feed has a value (a
 // seventh pill wraps the strip to a third row, so it stays out of the idle header);
 // an older relay without backlog_s never shows it.
 function behindPill(d){

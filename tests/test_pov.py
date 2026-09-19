@@ -2586,6 +2586,15 @@ def t_heartbeat_backlog_sample_classifies_serving_feeds_only():
     assert r._backlogged_feeds == {}
 
 
+def t_backlog_on_a_local_stint_names_no_quality_step_down():
+    r = _backlog_relay(11.6)
+    r.A.current_channel = lambda: ("local:", 0)         # #592 capture card: no tiers
+    r._sample_consumer_backlogs()
+    assert r._health_facts(2000.0)["backlog_no_step_down"] == ["A"]
+    assert ("Feed A output 12 s behind live — OBS reads slower than real time; this source "
+            "has no quality step-down") in r._refresh_health(2000.0)["reasons"]
+
+
 def t_backlog_yellow_shows_but_never_pages():
     # Uncalibrated until stage 4 of #581: display-only, like the #535 inbound stall.
     r = _backlog_relay(11.6)
@@ -2608,6 +2617,9 @@ def t_backlog_in_status_and_health_snapshot():
     st = r.status()
     assert st["feeds"]["A"]["backlog_s"] == 12.3 and st["feeds"]["A"]["backlogged"] is True
     assert st["feeds"]["B"]["backlog_s"] is None and st["feeds"]["B"]["backlogged"] is False
+    # the pill follows the live value: recovered since the last heartbeat -> not amber
+    r.A.fanout_server.live = 3.2
+    assert r.status()["feeds"]["A"]["backlogged"] is False
     r.A.paused = True                                   # a stopped feed has no live edge
     assert r.status()["feeds"]["A"]["backlog_s"] is None
     snap = r._health_snapshot(123.0)

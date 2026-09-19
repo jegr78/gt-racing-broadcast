@@ -986,7 +986,7 @@ def t_fanout_serve_measures_the_accepted_position_end_to_end():
 
 
 def t_fanout_serve_floor_rises_for_a_consumer_slower_than_real_time():
-    # The 2026-08-28 shape in miniature: OBS accepts bytes at half the real-time rate.
+    # The 2026-08-28 shape in miniature: OBS accepts bytes at a third of real time.
     # Every read jumps the cursor to the trailing mark, so a floor sampled AFTER the read
     # would stay at the reserve forever; sampled at the accepted position it climbs.
     r = m.FeedRing(10_000_000)
@@ -1004,7 +1004,7 @@ def t_fanout_serve_floor_rises_for_a_consumer_slower_than_real_time():
         def sendall(self, data):
             if stop.is_set():
                 raise OSError("closed")
-            time.sleep(len(data) / (rate / 2))           # half of real time
+            time.sleep(len(data) / (rate / 3))           # a third of real time
         def close(self): pass
 
     wt = threading.Thread(target=writer, daemon=True); wt.start()
@@ -1015,7 +1015,9 @@ def t_fanout_serve_floor_rises_for_a_consumer_slower_than_real_time():
         srv.take_backlog_floor()                         # drop the warm-up samples
         time.sleep(1.5)
         floor = srv.take_backlog_floor()
-        assert floor is not None and floor > 0.8, floor  # ~1.3 s: the reserve plus the deficit
+        # ~1.6 s: the reserve plus the deficit. Measured after the read it stays at the
+        # 0.3 s reserve, so 1.0 separates the two with room for a slow runner.
+        assert floor is not None and floor > 1.0, floor
     finally:
         stop.set(); srv._stop = True; r.close()
 

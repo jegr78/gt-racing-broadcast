@@ -907,7 +907,9 @@ def aggregate_health(facts):
         effectiveness guard stood the automatic OBS rebuild down on that feed),
     feeds_backlogged (optional dict feed name -> seconds behind live: OBS accepts that
         feed's bytes slower than real time, #583 — a quiet, display-only yellow that
-        is excluded from the notify-level facts until #581 stage 4 calibrates it).
+        is excluded from the notify-level facts until #581 stage 4 calibrates it),
+    backlog_no_step_down (optional list of those feed names without a quality tier: POV
+        and a `local:` capture stint, #592 — their reason names no ROBUST step).
 
     red  = any feed down (a live picture was lost); or obs_reachable truthy and
            stream_active is False AND stream_expected (OBS connected and has
@@ -956,9 +958,12 @@ def aggregate_health(facts):
         renders = f" (producer host renders {fps:.0f} fps)" if fps is not None else ""
         yellow.append(f"Feed {name} rebuild ineffective — {REBUILD_GUARD_MAX_ATTEMPTS} OBS "
                       f"rebuilds did not clear the stall{renders}; auto-rebuild paused")
+    no_step = set(facts.get("backlog_no_step_down") or ())
     for name, behind in (facts.get("feeds_backlogged") or {}).items():
+        step = ("this source has no quality step-down" if name in no_step
+                else "step the feed quality down to ROBUST")
         yellow.append(f"Feed {name} output {behind:.0f} s behind live — OBS reads slower than "
-                      f"real time; step the feed quality down to ROBUST")
+                      f"real time; {step}")
     reasons.extend(red)
     reasons.extend(yellow)
     level = "red" if red else ("yellow" if yellow else "green")
@@ -7024,6 +7029,7 @@ class Relay:
         self._backlog_warn_s = feed_backlog_warn_s(os.environ)      # #583
         self._interval_backlogs = {}      # #583: last heartbeat's per-feed consumer backlog floor
         self._backlogged_feeds = {}       # #583: feed -> floor (s) for feeds past the threshold
+        self._backlog_no_step_down = []   # #583: of those, the feeds without a quality tier
         self.program_audio = program_audio_enabled(os.environ)
         self._fanout_servers = []
         # Auto-failover to the Intermission scene on confirmed on-air feed loss
@@ -7164,7 +7170,8 @@ class Relay:
                 "feed_source_states": feed_source_states,
                 "feeds_jittery": list(self._jittery_feeds),
                 "rebuilds_stood_down": self._rebuilds_stood_down_fact(st.get("obs_fps")),
-                "feeds_backlogged": dict(self._backlogged_feeds)}
+                "feeds_backlogged": dict(self._backlogged_feeds),
+                "backlog_no_step_down": list(self._backlog_no_step_down)}
 
     def _refresh_health(self, now):
         """Recompute + store the DISPLAYED health (level/reasons/since). Does NOT
@@ -7361,11 +7368,16 @@ class Relay:
                 lagging[name] = floors[name]
         self._interval_backlogs = floors
         self._backlogged_feeds = lagging
+        # POV and a capture card have no quality tiers (#592): no ROBUST advice for them
+        self._backlog_no_step_down = [n for n in lagging if n == "POV" or is_local_source(
+            dict(live)[n].current_channel()[0])]
 
     def _backlog_status(self, name, f):
-        """/status fields for one feed (#583): the live consumer backlog and whether the
-        last heartbeat classified it past the threshold. Only a serving feed has a live
-        edge to be behind; a stopped or connecting one reports None."""
+        """/status fields for one feed (#583): the live consumer backlog and whether it is
+        backlogged: the last heartbeat classified it AND the live value is still past the
+        threshold, so the panel pill stops being amber as soon as OBS has caught up. Only
+        a serving feed has a live edge to be behind; a stopped or connecting one reports
+        None."""
         srv = getattr(f, "fanout_server", None)
         live = None
         if srv is not None and not f.paused and f.phase == "serving":
@@ -7374,7 +7386,8 @@ class Relay:
             except Exception:                   # noqa: BLE001 — best-effort
                 live = None
         return {"backlog_s": None if live is None else round(live, 1),
-                "backlogged": name in self._backlogged_feeds}
+                "backlogged": (name in self._backlogged_feeds and feed_backlog_degraded(
+                    live, self.feed_prebuffer_s, self._backlog_warn_s))}
 
     def _current_render_skip_rate(self):
         """Per-interval OBS render-skip rate (0..1) from obs_stats vs the previous heartbeat's
