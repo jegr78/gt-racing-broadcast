@@ -101,6 +101,17 @@ been connecting for more than ~30 seconds the line turns amber and warns
 the exact error from the producer's machine is appended when there is one.
 The POV feed joins the line while it is connecting or serving.
 
+**BEHIND LIVE** shows how far OBS is behind the live edge of the feeds it plays, worst
+feed first (`A 3.1 s`; hover for every feed). It appears once a feed is serving OBS. About 3 s is normal: the relay holds that
+reserve on purpose. The pill turns amber when OBS falls more than 5 s behind that,
+which means OBS plays the feed slower than real time and the audience sees a growing
+delay with stuttering picture and distorted sound. The health pill then names the
+feed, e.g. `Feed A output 12 s behind live — OBS reads slower than real time; step the
+feed quality down to ROBUST` (POV and a `local:` capture stint have no quality tiers, so
+their line says `this source has no quality step-down` instead). A handover clears the delay because the incoming feed
+starts fresh; a single-feed session (qualifying, solo) keeps it until the cause is
+fixed. Nothing acts on this value automatically.
+
 ### Event title
 
 The header subtitle shows the **event title** — a free-text label for this

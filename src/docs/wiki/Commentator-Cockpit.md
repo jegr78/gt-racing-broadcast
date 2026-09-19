@@ -12,6 +12,9 @@ Panel, but for the **commentators**. Each commentator opens the Console and sign
   Nürburgring 24h`) in the header, the same label the director and Discord see.
   Read-only here; the director sets it (see [Director](Director#event-title)).
 - **Live program monitor** — the actual broadcast output (low-bandwidth JPEG stills).
+  If the producer's machine falls behind, a yellow note under it says
+  `Program is 12 s behind live. The delay is on the producer side, not your stream.`
+  It appears only when the delay is past the relay's threshold.
 - **Tally** — a large **YOU ARE ON AIR** indicator plus an **UP NEXT · stint N · in
   X handovers** cue (and, while on air, their next own stint).
 - **Crew chat** — the same chat as the Director Panel, attributed to the commentator.

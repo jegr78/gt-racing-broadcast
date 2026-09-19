@@ -89,6 +89,7 @@
   .st{display:inline-flex;align-items:center;gap:6px;background:#0c0f13;border:1px solid var(--edge);
     border-radius:8px;padding:6px 10px;font-size:11px;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;white-space:nowrap}
   .st b{color:var(--ink);font-weight:600}
+  .st[hidden]{display:none}
   .st.air{border-color:var(--air);color:#ff8080;box-shadow:0 0 12px var(--air-glow)}
   .st.air b{color:#ffb3b3}
   .st.ok{border-color:var(--live);color:#8fe6b0}
@@ -539,6 +540,7 @@
     <div class="strip">
       <span class="st" id="stHealth" title="">HEALTH <b>—</b></span>
       <span class="st air" id="stAir">ON AIR <b>—</b></span>
+      <span class="st" id="stBehind" hidden title="How far OBS is behind the live edge of each fan-out feed">BEHIND LIVE <b>—</b></span>
       <span class="st" id="stA">A <b>—</b></span>
       <span class="st" id="stB">B <b>—</b></span>
       <span class="st" id="stPov">POV <b>—</b></span>
@@ -1733,6 +1735,26 @@ $("#brandSubInput").addEventListener("keydown", async (e)=>{
 });
 $("#brandSubInput").addEventListener("blur", ()=>{ if (editingTitle) stopEditTitle(); });
 
+// #583: how far OBS is behind the live edge, worst consumed feed first. The #533 reserve
+// (3 s by default) is the healthy baseline; amber only while the relay reports the feed
+// backlogged (its heartbeat classified it and the live value is still past the threshold). Shown only while a serving feed has a value (a
+// seventh pill wraps the strip to a third row, so it stays out of the idle header);
+// an older relay without backlog_s never shows it.
+function behindPill(d){
+  const el = $("#stBehind");
+  const rows = [["A", d.feeds && d.feeds.A], ["B", d.feeds && d.feeds.B], ["POV", d.pov]]
+    .filter(([, f]) => f && typeof f.backlog_s === "number");
+  el.hidden = !rows.length;
+  if (!rows.length) return;
+  rows.sort((x, y) => y[1].backlog_s - x[1].backlog_s);
+  const [name, f] = rows[0];
+  const warn = rows.some(([, g]) => g.backlogged);
+  el.className = "st" + (warn ? " warn" : "");
+  el.innerHTML = "BEHIND LIVE <b>" + escapeHtml(name) + " " + f.backlog_s.toFixed(1) + " s</b>";
+  el.title = rows.map(([n, g]) => n + " " + g.backlog_s.toFixed(1) + " s").join(" · ")
+    + (warn ? " — OBS reads slower than real time" : " — the fan-out reserve is the normal baseline");
+}
+
 async function relayPoll(){
   try{
     const r = await fetch("/status", {cache:"no-store"});
@@ -1752,6 +1774,7 @@ async function relayPoll(){
     $("#stHealth").innerHTML = "HEALTH <b>" + htxt + "</b>";
     $("#stHealth").title = (d.health && d.health.reasons && d.health.reasons.length)
       ? d.health.reasons.join(" · ") : "all systems green";
+    behindPill(d);
     const n = d.schedule_len;
     if (!solo){
       statePill($("#stA"), "A", "S" + d.feeds.A.stint, n, d.feeds.A.state, d.feeds.A.down);

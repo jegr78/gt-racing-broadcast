@@ -13,7 +13,7 @@ import math
 import sqlite3
 import time
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 SAMPLE_INTERVAL_S = 30          # heartbeat tick = sample cadence
 LIVE_WINDOW_S = 900            # default range when no from/to given (15 min)
@@ -44,6 +44,8 @@ COLUMNS = (
     "sys_cpu_pct", "sys_mem_pct", "sys_net_up_kbps", "sys_net_down_kbps",
     "sys_disk_free_mb",
     "feed_a_max_gap_s", "feed_b_max_gap_s",
+    # v9: fan-out consumer backlog behind the live edge, interval floor (#583)
+    "feed_a_backlog_s", "feed_b_backlog_s", "pov_backlog_s",
 )
 
 BAND_FIELDS = ("health_level", "feed_a_state", "feed_b_state",
@@ -57,7 +59,8 @@ NUMERIC_FIELDS = ("source_last_ok_age_s", "cookies_age_h",
                   "obs_disk_free_mb",
                   "sys_cpu_pct", "sys_mem_pct", "sys_net_up_kbps",
                   "sys_net_down_kbps", "sys_disk_free_mb",
-                  "feed_a_max_gap_s", "feed_b_max_gap_s")
+                  "feed_a_max_gap_s", "feed_b_max_gap_s",
+                  "feed_a_backlog_s", "feed_b_backlog_s", "pov_backlog_s")
 STATE_KEY_FIELDS = ("health_level", "feed_a_state", "feed_a_down",
                     "feed_b_state", "feed_b_down", "pov_state", "obs_reachable",
                     "timer_push",
@@ -85,7 +88,8 @@ CREATE TABLE IF NOT EXISTS samples (
     feed_a_quality TEXT, feed_b_quality TEXT, pov_quality TEXT,
     sys_cpu_pct REAL, sys_mem_pct REAL, sys_net_up_kbps REAL,
     sys_net_down_kbps REAL, sys_disk_free_mb REAL,
-    feed_a_max_gap_s REAL, feed_b_max_gap_s REAL
+    feed_a_max_gap_s REAL, feed_b_max_gap_s REAL,
+    feed_a_backlog_s REAL, feed_b_backlog_s REAL, pov_backlog_s REAL
 );
 CREATE INDEX IF NOT EXISTS idx_samples_ts ON samples (ts);
 
@@ -132,6 +136,11 @@ _V8_COLUMNS = (
     ("feed_a_max_gap_s", "REAL"), ("feed_b_max_gap_s", "REAL"),   # #535 inbound stall
 )
 
+_V9_COLUMNS = (
+    ("feed_a_backlog_s", "REAL"), ("feed_b_backlog_s", "REAL"),   # #583 consumer backlog
+    ("pov_backlog_s", "REAL"),
+)
+
 
 def open_db(path):
     """Open (creating the file/dirs as needed) with WAL + a busy timeout so the
@@ -144,11 +153,11 @@ def open_db(path):
 
 
 def migrate(conn):
-    """Create the schema, add any missing v3, v5, v6, v7 and v8 columns (lossless upgrade from v2/v3),
+    """Create the schema, add any missing v3, v5, v6, v7, v8 and v9 columns (lossless upgrade from v2/v3),
     and stamp user_version. Idempotent and version-agnostic."""
     conn.executescript(_CREATE)
     have = {r["name"] for r in conn.execute("PRAGMA table_info(samples)").fetchall()}
-    for name, decl in _V3_COLUMNS + _V5_COLUMNS + _V6_COLUMNS + _V7_COLUMNS + _V8_COLUMNS:
+    for name, decl in _V3_COLUMNS + _V5_COLUMNS + _V6_COLUMNS + _V7_COLUMNS + _V8_COLUMNS + _V9_COLUMNS:
         if name not in have:
             conn.execute(f"ALTER TABLE samples ADD COLUMN {name} {decl}")
     conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")

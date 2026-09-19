@@ -386,7 +386,7 @@ def _cockpit_client(secret="sek", rows=None, live_idx=0,
                     console_page_path=None, discord_client_id=None,
                     discord_client_secret=None, preview_manager=None,
                     cue_store=None, crew_source=None,
-                    program_audio_service=None, fanout=False):
+                    program_audio_service=None, fanout=False, backlogged=None):
     """Stand up make_handler over a real ThreadingHTTPServer on an ephemeral port.
     Returns (server, get, post); caller must srv.shutdown() in a finally block."""
     import threading as _t
@@ -414,6 +414,7 @@ def _cockpit_client(secret="sek", rows=None, live_idx=0,
             self.feeds = {"A": _Feed(live_idx), "B": _Feed(live_idx + 1)}
             self.fanout = fanout
             self._desync = {"active": False}
+            self._backlogged_feeds = dict(backlogged or {})
 
         def live_feed(self):
             return "A"
@@ -502,6 +503,32 @@ def t_data_authed_tally():
         assert "schedule_len" not in body.decode()
     finally:
         srv.shutdown()
+
+
+def t_data_program_behind_only_above_the_threshold():
+    # #583: the commentator hears a delayed program against their own voice. The
+    # cockpit says so only when the relay classified an output backlog, never as a
+    # permanent seconds counter.
+    tok = ca.mint_token("sek", "alpha-racing")
+    srv, get, _post = _cockpit_client()
+    try:
+        d = json.loads(get("/cockpit/data?t=" + tok)[2])
+        assert d["program_behind_s"] is None
+    finally:
+        srv.shutdown()
+    srv, get, _post = _cockpit_client(backlogged={"A": 11.6})
+    try:
+        d = json.loads(get("/cockpit/data?t=" + tok)[2])
+        assert d["program_behind_s"] == 12
+    finally:
+        srv.shutdown()
+
+
+def t_cockpit_program_behind_pure():
+    assert m.cockpit_program_behind(None) is None
+    assert m.cockpit_program_behind({}) is None
+    assert m.cockpit_program_behind({"A": 9.4}) == 9
+    assert m.cockpit_program_behind({"A": 9.4, "POV": 14.6}) == 15
 
 
 def t_rc_note_send_and_cockpit_read_round_trip():

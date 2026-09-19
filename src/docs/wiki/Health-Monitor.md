@@ -119,6 +119,19 @@ These metrics are sampled every ~30 s in the relay heartbeat alongside the
 [OBS Resources](#obs-resources) series. History recorded before this feature was
 added will show no data points for this group — that is expected.
 
+#### Output backlog
+
+| Chart | What it tracks |
+|---|---|
+| **Feed A / Feed B / POV behind live (s)** | How far OBS is behind the live edge of that feed, as the smallest value of each ~30 s interval |
+
+The relay holds OBS about 3 s behind the live edge on purpose (the fan-out reserve,
+`RACECAST_FEED_PREBUFFER_S`), so a flat line near 3 s is healthy; a bursty source can
+also sit lower. A line that climbs means OBS accepts the feed slower than real time,
+usually because the producer machine cannot render the program in real time. More
+than 5 s above the reserve turns the health badge yellow
+(`Feed A output 12 s behind live — …`); this yellow never posts to Discord.
+
 #### Legacy series (always present)
 
 | Chart | What it tracks |
