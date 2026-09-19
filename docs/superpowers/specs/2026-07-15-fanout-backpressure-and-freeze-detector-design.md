@@ -82,6 +82,29 @@ recording renderSkip for the health chart, just stop acting on it):
   the drift class (a jump in snaps ⇒ a discontinuity happened ⇒ reconnect), cheaper than
   the OBS round-trip.
 
+### Update (#582, 2026-09) — snaps are a record, and the rebuild has an effectiveness guard
+
+The Catalunya qualifying of 2026-08-28 showed the early trigger at its worst: OBS drained
+the ring about 20 % slower than real time, the ring lapped it every ~2 minutes, and each
+lap fired a rebuild. 26 rebuilds in 56 minutes, each a black dropout, none of which could
+help a consumer that is chronically slower than real time. So:
+
+- **`snap_early_trigger` is gone as a trigger.** Its successor `consumer_overflowed` is read
+  once per heartbeat and only records a `fanout_overflow` health event (health monitor +
+  post-event report). It never rebuilds.
+- **Every automatic rebuild is judged.** `RebuildGuard` (pure) looks at the first full
+  cursor window after a rebuild: a stall fraction below `RACECAST_FEED_FREEZE_FRAC` means
+  it helped and resets the streak; anything at or above it (including "better but still
+  stalling") counts as ineffective. After `REBUILD_GUARD_MAX_ATTEMPTS` (3) ineffective
+  rebuilds in a row the sampler stands down: a yellow health reason with the OBS frame
+  rate, an `obs_rebuild_stood_down` event, and no further rebuilds.
+- **Re-arm.** The next stint change (a new on-air feed or pull index) lifts the stand-down,
+  and so does the Director Panel's RE-ARM (`POST /obs/rebuild-rearm`, director-gated).
+- **Scope.** The guard covers the consumer-side rebuild only. The drop-recovery re-serve
+  (`should_obs_reconnect`) answers a dead streamlink on the input side, repeats legitimately
+  and already pages on churn; the #493 step-down, auto-cover and auto-failover fire once
+  per outage.
+
 ## Test strategy (TDD)
 
 Pure, unit-testable decision functions (like `render_drift_decision`):

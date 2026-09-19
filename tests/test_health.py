@@ -450,6 +450,19 @@ def t_aggregate_health_yellow_causes():
     assert m.aggregate_health(_facts(feeds_connecting_long=["B"]))["level"] == "yellow"
 
 
+def t_aggregate_health_yellow_when_rebuilds_stood_down():
+    # #582: a stood-down auto-rebuild is an honest yellow with plain text, naming the
+    # feed and, when OBS reports it, the frame rate the producer host renders.
+    h = m.aggregate_health(_facts(rebuilds_stood_down={"A": 44.2}))
+    assert h["level"] == "yellow"
+    assert h["reasons"] == ["Feed A rebuild ineffective — 3 OBS rebuilds did not clear "
+                            "the stall (producer host renders 44 fps); auto-rebuild paused"]
+    h = m.aggregate_health(_facts(rebuilds_stood_down={"B": None}))
+    assert h["reasons"] == ["Feed B rebuild ineffective — 3 OBS rebuilds did not clear "
+                            "the stall; auto-rebuild paused"]
+    assert m.aggregate_health(_facts(rebuilds_stood_down={}))["level"] == "green"
+
+
 def t_aggregate_health_obs_unknown_is_not_yellow():
     # obs_reachable None = not probed yet -> must not raise a false alarm
     assert m.aggregate_health(_facts(obs_reachable=None))["level"] == "green"

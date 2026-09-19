@@ -380,10 +380,10 @@ _HEALTH_LABEL = {"green": "OK", "yellow": "DEGRADED", "red": "CRITICAL"}
 
 # ---------- Feed fan-out stall detection (relay feed multiplexing, #358) --------
 FANOUT_STALL_S = 8.0   # seconds without a byte from streamlink before a fan-out reader is "stalled"
-FANOUT_RING_BYTES = 16 * 1024 * 1024  # per-feed ring window (bounded; ≈12 s at 10 Mbps). #488: 8→16 MB headroom so the auto-resync fires an orderly rebuild below the hard cursor-snap.
+FANOUT_RING_BYTES = 16 * 1024 * 1024  # per-feed ring window (bounded; ≈12 s at 10 Mbps). Not a safety lever (#581): a larger ring only delays a slow consumer's overflow and hides it longer.
 MARK_MIN_INTERVAL_S = 0.1        # #533: throttle the FeedRing time index to ~1 mark/100 ms
 DEFAULT_FEED_PREBUFFER_S = 3.0   # #533: seconds a broadcast consumer joins behind the fan-out live edge
-AUTORESYNC_DEBOUNCE_POLLS = 2  # #488: consecutive heartbeat polls over the skip-rate threshold before an auto-resync fires
+REBUILD_GUARD_MAX_ATTEMPTS = 3  # #582: consecutive ineffective automatic OBS rebuilds before the relay stands down
 _FANOUT_FALSEY = {"0", "false", "no", "off"}
 
 
@@ -398,14 +398,6 @@ def obs_ws_persist_enabled(environ):
     """Reuse two persistent obs-websocket connections instead of connect-per-call
     (#537). Default ON; a falsey RACECAST_OBS_WS_PERSIST restores connect-per-call. Pure."""
     return str(environ.get("RACECAST_OBS_WS_PERSIST", "")).strip().lower() not in _FANOUT_FALSEY
-
-
-def feed_autoresync_enabled(environ):
-    """True unless RACECAST_FEED_AUTORESYNC is an explicit falsey token. Default ON
-    (#488): the relay auto-rebuilds a feed's OBS input when it detects OBS drifting
-    behind the live edge (the proven manual "OBS Feed Reset", automated). Set
-    RACECAST_FEED_AUTORESYNC=0 to disable. Pure so the switch is unit-testable."""
-    return str(environ.get("RACECAST_FEED_AUTORESYNC", "")).strip().lower() not in _FANOUT_FALSEY
 
 
 def feed_robust_auto_enabled(environ):
@@ -468,19 +460,6 @@ def update_max_gap(prev_max, last_byte_ts, now):
     if last_byte_ts is None:
         return prev_max
     return max(prev_max, now - last_byte_ts)
-
-
-def feed_autoresync_skip_rate(environ):
-    """OBS render-skip rate (fraction of frames skipped per poll interval) above which the
-    relay auto-rebuilds the on-air feed's OBS input (#488). The socket send-block signal was
-    disproven by the repro study (OBS reads greedily regardless of render state); OBS's own
-    renderSkippedFrames rate is the signal that tracks the drift. Soak-tuned; start 0.02 (2%)."""
-    return _env_float(environ, "RACECAST_FEED_AUTORESYNC_SKIP_RATE", 0.02)
-
-
-def feed_autoresync_cooldown_s(environ):
-    """Min seconds between auto-resyncs (anti-loop). #488."""
-    return _env_float(environ, "RACECAST_FEED_AUTORESYNC_COOLDOWN_S", 60.0)
 
 
 def feed_freeze_detect_enabled(environ):
@@ -701,19 +680,6 @@ def snap_bytes(prev_cursor, new_cursor, data_len):
     return skipped if skipped > 0 else 0
 
 
-def render_drift_decision(skip_rate, since_last_reset_s, *, rate_threshold, cooldown_s):
-    """Whether to auto-rebuild the on-air feed's OBS input (#488). True when OBS's render-skip
-    rate for the last poll interval exceeds rate_threshold (OBS failing to render frames on
-    time = the visible drift) AND the cooldown since the last auto-reset has elapsed
-    (since_last_reset_s is None or >= cooldown_s). Pure — unit-tested. A None/<=0 skip_rate
-    never trips it. NB: the socket send-block ("stuck") signal was disproven by the repro
-    study (OBS reads the media socket greedily regardless of its render state); OBS's own
-    renderSkippedFrames rate (obs-ws GetStats) is what tracks the drift."""
-    if since_last_reset_s is not None and since_last_reset_s < cooldown_s:
-        return False
-    return skip_rate is not None and skip_rate > rate_threshold
-
-
 def should_obs_reconnect(fanout, dropped):
     """Whether a re-serve should force OBS to reconnect its feed input. Only in fan-out
     mode (the relay is the persistent server, so OBS's socket survives a streamlink
@@ -753,20 +719,60 @@ def stall_fraction(ratios, *, stall_ratio):
 def freeze_decision(frac, since_last_reset_s, *, frac_threshold, cooldown_s):
     """Whether to auto-reconnect the on-air feed's OBS input: True when the stall fraction
     (stall_fraction) is at/above frac_threshold AND the cooldown since the last reconnect has
-    elapsed. A None frac (no data) never trips it. Mirrors render_drift_decision's shape (#488).
-    Pure → unit-tested."""
+    elapsed. A None frac (no data) never trips it (#488). Pure → unit-tested."""
     if since_last_reset_s is not None and since_last_reset_s < cooldown_s:
         return False
     return frac is not None and frac >= frac_threshold
 
 
-def snap_early_trigger(prev_snaps, snaps):
-    """True when the fan-out consumer's cumulative cursor-snap count increased since the last
-    check — a ring overflow dropped bytes under OBS (the drift-class discontinuity): a cheap
-    relay-side early signal that needs no OBS round-trip. Pure → unit-tested."""
+def consumer_overflowed(prev_snaps, snaps):
+    """True when the fan-out consumer's cumulative cursor-snap count rose since the last
+    check: the ring lapped OBS and dropped bytes under it. An incident record only (#582):
+    by then the backlog has already destroyed itself, and a rebuild cannot fix a consumer
+    that is chronically slower than real time. A shrinking total (a consumer left) is not
+    an overflow. Pure → unit-tested."""
     if prev_snaps is None or snaps is None:
         return False
     return snaps > prev_snaps
+
+
+class RebuildGuard:
+    """Effectiveness guard for the automatic OBS-input rebuild (#582). Pure: no I/O, no
+    clock → unit-tested. A rebuild counts as ineffective when the first full detector
+    window after it still trips the detector (stall fraction at/above the threshold); a
+    window below it means the rebuild helped and resets the streak. "Better but still
+    stalling" is not an improvement. After `max_attempts` consecutive ineffective rebuilds
+    the guard stands down until rearm() (the next stint change or the director)."""
+
+    def __init__(self, max_attempts=REBUILD_GUARD_MAX_ATTEMPTS):
+        self.max_attempts = max_attempts
+        self.rearm()
+
+    def rearm(self):
+        self.ineffective = 0
+        self.pending = False
+        self.stood_down = False
+
+    def allows(self):
+        return not self.stood_down
+
+    def on_fire(self):
+        self.pending = True
+
+    def on_window(self, frac, *, frac_threshold):
+        """Judge the first full window after a rebuild. Returns True when this call stood
+        the guard down. No pending rebuild, or nothing measurable yet, changes nothing."""
+        if not self.pending or frac is None:
+            return False
+        self.pending = False
+        if frac < frac_threshold:
+            self.ineffective = 0
+            return False
+        self.ineffective += 1
+        if self.ineffective >= self.max_attempts:
+            self.stood_down = True
+            return True
+        return False
 
 
 def feed_reset_target(feed_key, valid_keys):
@@ -873,7 +879,9 @@ def aggregate_health(facts):
     feed_source_states (optional dict mapping feed name to source_state),
     feeds_jittery (list of feed names whose last heartbeat interval's max inbound
         gap exceeded the fan-out reserve — a quiet, display-only yellow (#535);
-        never included in the notify-level facts, so it never pages Discord).
+        never included in the notify-level facts, so it never pages Discord),
+    rebuilds_stood_down (optional dict feed name -> OBS fps or None: the #582
+        effectiveness guard stood the automatic OBS rebuild down on that feed).
 
     red  = any feed down (a live picture was lost); or obs_reachable truthy and
            stream_active is False AND stream_expected (OBS connected and has
@@ -882,7 +890,8 @@ def aggregate_health(facts):
            before OBS ever goes live, never alarms.
     yellow = OBS WebSocket unreachable · cookies stale · Tailscale down · a feed
              stuck connecting · stream_reconnecting · funnel_down ·
-             sheet_push_failing. A red result still lists the yellow issues under it.
+             sheet_push_failing · an auto-rebuild stood down. A red result still lists
+             the yellow issues under it.
     green = none of the above."""
     reasons, red, yellow = [], [], []
     sstates = facts.get("feed_source_states") or {}
@@ -917,6 +926,10 @@ def aggregate_health(facts):
             yellow.append(f"Feed {name} stuck connecting")
     for name in facts.get("feeds_jittery") or []:
         yellow.append(f"Feed {name} inbound stall — a gap exceeded the fan-out reserve (stutter risk)")
+    for name, fps in (facts.get("rebuilds_stood_down") or {}).items():
+        renders = f" (producer host renders {fps:.0f} fps)" if fps is not None else ""
+        yellow.append(f"Feed {name} rebuild ineffective — {REBUILD_GUARD_MAX_ATTEMPTS} OBS "
+                      f"rebuilds did not clear the stall{renders}; auto-rebuild paused")
     reasons.extend(red)
     reasons.extend(yellow)
     level = "red" if red else ("yellow" if yellow else "green")
@@ -4573,8 +4586,9 @@ class FeedFanoutServer:
                 pass  # already closed
 
     def consumer_health(self, now):
-        """Worst-case OBS-consumer health for the auto-resync sampler: the max send-block
-        age (now - cycle_ts) and the total cursor-snaps across active consumers. Returns
+        """Worst-case OBS-consumer health: the max send-block age (now - cycle_ts) and the
+        total cursor-snaps across active consumers, which the relay records as overflow
+        incidents (#582). Returns
         (max_stuck_s, total_snaps); (None, 0) when no consumer is attached. Thread-safe."""
         with self._consumers_lock:
             if not self._consumers:
@@ -6603,9 +6617,9 @@ class Feed:
             # (streamlink alive, zero bytes) can't be caught inline, so this
             # thread kills the proc when last_byte_ts goes stale, unblocking the
             # read with EOF. A never-produced byte (last_byte_ts None) is left to
-            # the existing dead_serves/EOF path, per the spec. (The OBS-drift
-            # auto-resync is NOT here — it lives in the heartbeat via GetStats,
-            # since the socket send-block signal was disproven; see _check_render_drift.)
+            # the existing dead_serves/EOF path, per the spec. (The consumer-side
+            # OBS rebuild is NOT here — it lives in the relay's cursor-progress
+            # freeze sampler; see Relay._freeze_tick.)
             while not watchdog_stop.wait(1.0):
                 if self.stop or self.advance.is_set():
                     return
@@ -6925,16 +6939,12 @@ class Relay:
         self.auto_cover = auto_cover_enabled(os.environ)
         self._cover_fired = False       # already raised the cover for the current outage
         self._cover_auto_owned = False  # auto raised the cover that is currently shown
-        # #488 render-drift auto-resync (heartbeat, obs-ws GetStats render-skip rate).
-        self.auto_resync = feed_autoresync_enabled(os.environ)
-        self._autoresync_skip_rate = feed_autoresync_skip_rate(os.environ)
-        self._autoresync_cooldown = feed_autoresync_cooldown_s(os.environ)
-        self._last_autoresync_ts = None
-        self._prev_render_counts = None   # (skipped, total) from the previous heartbeat poll
-        self._render_drift_streak = 0     # consecutive over-threshold polls (debounce)
+        # OBS render-skip counts from the previous heartbeat poll: a recorded diagnostic
+        # for the health chart, never a trigger (#582).
+        self._prev_render_counts = None   # (skipped, total)
         # #488 cursor-progress freeze detector (its own faster sampler, since a stutter's
-        # stall ticks recur every few seconds — finer than the 30 s heartbeat). Replaces the
-        # ACTION of the (blind) render-skip auto-resync; the render-skip rate is still recorded.
+        # stall ticks recur every few seconds — finer than the 30 s heartbeat). The only
+        # automatic consumer-side rebuild; #582 guards it against repeating uselessly.
         self._freeze_detect = feed_freeze_detect_enabled(os.environ)
         self._freeze_stall_ratio = feed_freeze_stall_ratio(os.environ)
         self._freeze_frac = feed_freeze_frac_threshold(os.environ)
@@ -6942,6 +6952,11 @@ class Relay:
         self._freeze_interval_s = feed_freeze_interval_s(os.environ)
         self._freeze_cooldown = feed_freeze_cooldown_s(os.environ)
         self._last_freeze_ts = None
+        self._fz_key = None               # (on-air feed, its pull index) the window belongs to
+        self._fz_prev_cursor = None
+        self._fz_ratios = []
+        self._rebuild_guard = RebuildGuard()   # #582 effectiveness guard for that rebuild
+        self._rebuild_stood_down_feed = None   # the feed the guard stood down on
         self._prev_snaps = {}             # feed_key -> last consumer cursor-snap count
         # Live health heartbeat: displayed level (refreshed on every /status and
         # every tick) + the notification baseline (advanced ONLY by the heartbeat
@@ -7048,7 +7063,9 @@ class Relay:
                 "funnel_down": funnel_down,
                 "sheet_push_failing": (tpush == "failed"),
                 "feed_source_states": feed_source_states,
-                "feeds_jittery": list(self._jittery_feeds)}
+                "feeds_jittery": list(self._jittery_feeds),
+                "rebuilds_stood_down": ({self._rebuild_stood_down_feed: st.get("obs_fps")}
+                                        if self._rebuild_guard.stood_down else {})}
 
     def _refresh_health(self, now):
         """Recompute + store the DISPLAYED health (level/reasons/since). Does NOT
@@ -7216,13 +7233,14 @@ class Relay:
                 self._send_health_webhook(h["notify_level"], self.health_reasons, self._notified_level)
                 self._notified_level = h["notify_level"]
             self._maybe_auto_failover(now)
-            self._check_render_drift(now)
+            self._record_render_counts()
+            self._record_consumer_overflows(now)
             self._hb_stop.wait(HEARTBEAT_INTERVAL_S)
 
     def _current_render_skip_rate(self):
         """Per-interval OBS render-skip rate (0..1) from obs_stats vs the previous heartbeat's
         raw counts, or None (no prev / no counts). Does NOT advance the prev counts — the
-        heartbeat's _check_render_drift advances them once per tick. The cumulative
+        heartbeat's _record_render_counts advances them once per tick. The cumulative
         obs_render_skipped_pct barely moves during a spike, so this delta rate is the signal
         the drift shows up in (#488) — recorded into the health history + charted."""
         st = self.obs_stats or {}
@@ -7236,45 +7254,68 @@ class Relay:
             return 0.0
         return (skipped - prev[0]) / d_total
 
-    def _check_render_drift(self, now):
-        """#488: derive OBS's per-interval render-skip rate (obs-ws GetStats, fetched into
-        self.obs_stats by _maybe_probe_obs) and auto-rebuild the ON-AIR feed's OBS input when
-        it stays above the threshold (debounced), cooldown-gated. The socket send-block signal
-        was disproven (OBS reads greedily regardless of render state); renderSkippedFrames is
-        the signal that tracks the visible drift. The rate is recorded every heartbeat (for the
-        health-history chart) even when the auto-resync ACTION is disabled. Best-effort."""
-        rate = self._current_render_skip_rate()
-        # Advance prev every heartbeat (also feeds the next _health_snapshot rate), regardless
-        # of the auto_resync action gate below.
+    def _record_render_counts(self):
+        """Advance the previous OBS render counts once per heartbeat, so the health
+        snapshot can derive the per-interval render-skip rate. A diagnostic only: the
+        rate never triggers an action (#582 removed the #488 render-skip auto-resync,
+        which had not run since the freeze detector became the default)."""
         st = self.obs_stats or {}
         skipped, total = st.get("obs_render_skipped_frames"), st.get("obs_render_total_frames")
         if skipped is not None and total is not None:
             self._prev_render_counts = (skipped, total)
-        if self._freeze_detect:
-            # The cursor-progress freeze detector (its own faster sampler) now owns
-            # auto-recovery; the render-skip rate stays recorded (above) for the health
-            # chart but no longer ACTS — it was blind to the source-demuxer freeze (#488).
-            self._render_drift_streak = 0
+
+    def _record_event(self, now, event_type, label, metadata):
+        """Record a discrete health event (health monitor + post-event report).
+        Best-effort; never raises into a sampler or the heartbeat."""
+        if self.health_store is None:
             return
-        if not self.auto_resync or _obs_ws is None or rate is None:
-            self._render_drift_streak = 0
-            return
-        if rate <= self._autoresync_skip_rate:
-            self._render_drift_streak = 0
-            return
-        self._render_drift_streak += 1         # sustained over-threshold (debounce)
-        if self._render_drift_streak < AUTORESYNC_DEBOUNCE_POLLS:
-            return
-        since = None if self._last_autoresync_ts is None else now - self._last_autoresync_ts
-        if not render_drift_decision(rate, since, rate_threshold=self._autoresync_skip_rate,
-                                     cooldown_s=self._autoresync_cooldown):
-            return
-        live = self.live_feed()
-        LOG.warning("auto-resync %s — OBS render-skip %.1f%% over the last interval — "
-                    "rebuilding OBS input (#488)", live, rate * 100)
-        self.feeds[live]._obs_reconnect()      # threaded, best-effort
-        self._last_autoresync_ts = now
-        self._render_drift_streak = 0
+        try:
+            self.health_store.record_event(now, event_type, label=label,
+                                           producer=self.producer_name, metadata=metadata)
+        except Exception:                       # noqa: BLE001 — best-effort
+            pass
+
+    def _record_consumer_overflows(self, now):
+        """Record each fan-out ring lap under OBS as a `fanout_overflow` incident (#582).
+        Once part of the freeze sampler's trigger (26 rebuilds on 2026-08-28); now a record
+        only, read once per heartbeat so it needs no OBS round-trip."""
+        for key, f in self.feeds.items():
+            snaps = self._feed_snaps(f)
+            prev = self._prev_snaps.get(key)
+            self._prev_snaps[key] = snaps
+            if not consumer_overflowed(prev, snaps):
+                continue
+            n = snaps - prev
+            LOG.warning("Feed %s consumer overflow — the ring lapped OBS %d time(s); "
+                        "OBS is reading slower than real time", key, n)
+            self._record_event(now, "fanout_overflow",
+                               f"Feed {key} consumer overflow — OBS fell a full ring behind "
+                               f"the live edge ({n}x)",
+                               {"feed": key, "stint": f.idx + 1, "snaps": n})
+
+    def rebuild_guard_status(self):
+        """The #582 stand-down state for /status and the Director Panel."""
+        stood = self._rebuild_guard.stood_down
+        return {"stood_down": stood, "feed": self._rebuild_stood_down_feed if stood else None}
+
+    def rearm_rebuild_guard(self, reason, now=None):
+        """Lift a #582 stand-down (the next stint change, or the director once a cause is
+        found). Returns True when a stand-down was lifted. Also clears a half-judged
+        rebuild, so the new stint starts with a clean streak."""
+        was = self._rebuild_guard.stood_down
+        feed = self._rebuild_stood_down_feed
+        self._rebuild_guard.rearm()
+        self._rebuild_stood_down_feed = None
+        if was:
+            now = time.time() if now is None else now
+            live = self.live_feed()
+            f = self.feeds.get(live)
+            LOG.info("auto-rebuild re-armed (%s; was stood down on Feed %s)", reason, feed)
+            self._record_event(now, "obs_rebuild_rearmed",
+                               f"Auto-rebuild re-armed ({reason})",
+                               {"feed": live, "stint": None if f is None else f.idx + 1,
+                                "reason": reason})
+        return was
 
     def _feed_snaps(self, f):
         """Total consumer cursor-snaps on a feed's fan-out server (the drift-class
@@ -7289,58 +7330,74 @@ class Relay:
             return None
 
     def _freeze_sampler_loop(self):
-        """#488 cursor-progress freeze detector: a faster-than-heartbeat sampler that watches
-        OBS's mediaCursor for the ON-AIR fan-out feed and auto-reconnects its OBS input when
-        the cursor stalls — a stale-demuxer freeze/stutter the render-skip signal is blind to
-        (measured live 2026-07-15). Best-effort daemon; any OBS/network error is swallowed so
-        the sampler never crashes the relay."""
-        prev_cursor = None
-        last_key = None
-        ratios = []
+        """#488 cursor-progress freeze detector: a faster-than-heartbeat sampler (see
+        _freeze_tick). Best-effort daemon; any OBS/network error is swallowed so the
+        sampler never crashes the relay."""
         while not self._hb_stop.is_set():
             self._hb_stop.wait(self._freeze_interval_s)
             if self._hb_stop.is_set():
                 break
-            if not self._freeze_detect or _obs_ws is None:
-                continue
             try:
-                live = self.live_feed()
-                f = self.feeds.get(live)
-                # Only judge a SERVING feed (bytes flowing). A stopped/connecting feed with a
-                # frozen cursor is expected, not a fault — reset the window and skip.
-                if f is None or f.paused or f.phase != "serving":
-                    prev_cursor = None; ratios = []; last_key = live
-                    continue
-                if live != last_key:            # handover -> fresh window for the new feed
-                    prev_cursor = None; ratios = []; last_key = live
-                cursors, _note = self._obs.feed_media_cursors(ports=[f.port])
-                cur = cursors.get(f.port)
-                ratio = cursor_progress_ratio(prev_cursor, cur, self._freeze_interval_s)
-                prev_cursor = cur
-                if ratio is not None:
-                    ratios.append(ratio)
-                    ratios = ratios[-self._freeze_window:]
-                snaps = self._feed_snaps(f)
-                early = snap_early_trigger(self._prev_snaps.get(live), snaps)
-                self._prev_snaps[live] = snaps
-                frac = stall_fraction(ratios, stall_ratio=self._freeze_stall_ratio)
-                since = (None if self._last_freeze_ts is None
-                         else time.time() - self._last_freeze_ts)
-                cooled = since is None or since >= self._freeze_cooldown
-                # Detector: a full window (debounce) whose stall fraction trips freeze_decision.
-                detector = (len(ratios) >= self._freeze_window
-                            and freeze_decision(frac, since, frac_threshold=self._freeze_frac,
-                                                cooldown_s=self._freeze_cooldown))
-                if detector or (early and cooled):
-                    why = "snap early-trigger" if (early and cooled and not detector) else \
-                          ("stall_fraction=%.2f" % frac if frac is not None else "stall")
-                    LOG.warning("freeze auto-reconnect %s — %s — rebuilding OBS input (#488)",
-                                live, why)
-                    f._obs_reconnect()          # the RESET primitive, threaded + best-effort
-                    self._last_freeze_ts = time.time()
-                    prev_cursor = None; ratios = []
+                self._freeze_tick(time.time())
             except Exception as exc:            # noqa: BLE001 — best-effort, never crash the sampler
                 LOG.debug("freeze sampler error (%s)", exc)
+
+    def _freeze_tick(self, now):
+        """One freeze-sampler step: watch OBS's mediaCursor for the ON-AIR fan-out feed and
+        rebuild its OBS input when the cursor stalls — a stale-demuxer freeze/stutter the
+        render-skip signal is blind to (measured live 2026-07-15).
+
+        #582 effectiveness guard: the first full window after a rebuild says whether it
+        helped. After REBUILD_GUARD_MAX_ATTEMPTS ineffective rebuilds in a row the sampler
+        stands down (yellow health, plain text) instead of rebuilding forever; the next
+        stint change or the director's re-arm lifts it."""
+        if not self._freeze_detect or _obs_ws is None:
+            return
+        live = self.live_feed()
+        f = self.feeds.get(live)
+        key = (live, None if f is None else f.idx)
+        if key != self._fz_key:                 # stint change -> fresh window, lift a stand-down
+            self._fz_prev_cursor = None; self._fz_ratios = []; self._fz_key = key
+            self.rearm_rebuild_guard("stint change", now)
+        # Only judge a SERVING feed (bytes flowing). A stopped/connecting feed with a
+        # frozen cursor is expected, not a fault — reset the window and skip.
+        if f is None or f.paused or f.phase != "serving":
+            self._fz_prev_cursor = None; self._fz_ratios = []
+            return
+        cursors, _note = self._obs.feed_media_cursors(ports=[f.port])
+        cur = cursors.get(f.port)
+        ratio = cursor_progress_ratio(self._fz_prev_cursor, cur, self._freeze_interval_s)
+        self._fz_prev_cursor = cur
+        if ratio is not None:
+            self._fz_ratios = (self._fz_ratios + [ratio])[-self._freeze_window:]
+        if len(self._fz_ratios) < self._freeze_window:
+            return                              # debounce: judge full windows only
+        frac = stall_fraction(self._fz_ratios, stall_ratio=self._freeze_stall_ratio)
+        if self._rebuild_guard.on_window(frac, frac_threshold=self._freeze_frac):
+            attempts = self._rebuild_guard.ineffective
+            self._rebuild_stood_down_feed = live
+            LOG.warning("Feed %s auto-rebuild stood down — %d OBS rebuilds did not clear the "
+                        "stall (stall_fraction=%.2f); re-arms at the next stint change or "
+                        "from the Director Panel (#582)", live, attempts, frac)
+            self._record_event(now, "obs_rebuild_stood_down",
+                               f"Feed {live} auto-rebuild stood down after {attempts} "
+                               f"ineffective rebuilds",
+                               {"feed": live, "stint": f.idx + 1, "attempts": attempts})
+        if not self._rebuild_guard.allows():
+            return
+        since = None if self._last_freeze_ts is None else now - self._last_freeze_ts
+        if not freeze_decision(frac, since, frac_threshold=self._freeze_frac,
+                               cooldown_s=self._freeze_cooldown):
+            return
+        LOG.warning("freeze auto-reconnect %s — stall_fraction=%.2f — rebuilding OBS input "
+                    "(#488)", live, frac)
+        f._obs_reconnect()                      # the RESET primitive, threaded + best-effort
+        self._last_freeze_ts = now
+        self._rebuild_guard.on_fire()
+        self._record_event(now, "obs_rebuild",
+                           f"Feed {live} OBS input rebuilt (stall fraction {frac:.2f})",
+                           {"feed": live, "stint": f.idx + 1, "stall_fraction": round(frac, 2)})
+        self._fz_prev_cursor = None; self._fz_ratios = []
 
     def _maybe_auto_failover(self, now):
         """Auto-switch OBS to the Intermission scene when the ON-AIR feed is
@@ -7504,6 +7561,7 @@ class Relay:
         out["health"] = {"level": self.health_level, "reasons": self.health_reasons,
                          "since_s": round(now - self.health_since, 1)}
         out["desync"] = self._desync
+        out["rebuild_guard"] = self.rebuild_guard_status()
         return out
 
     def _solo_status(self, now):
@@ -9959,6 +10017,11 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     return self._send({"ok": True, "count": len(names),
                                        "note": note or
                                        f"Refreshed {len(names)} browser source(s)"})
+                if p == ["obs", "rebuild-rearm"]:
+                    # #582: lift the auto-rebuild stand-down once the director has found
+                    # the cause. Needs no OBS call. Director-gated (p[0]=="obs").
+                    return self._send({"ok": True,
+                                       "rearmed": relay.rearm_rebuild_guard("director")})
                 if p == ["obs", "feed-reset"]:
                     # Manual: force OBS to reconnect ONE feed's media source — the clean,
                     # targeted version of a /reload for the fan-out freeze-frame stutter

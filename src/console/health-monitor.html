@@ -142,6 +142,7 @@
   .evt.takeover { background: #8b5cf6; }
   .evt.start { background: var(--green); color: #0a0c0f; }
   .evt.stop { background: var(--red); }
+  .evt.warn { background: var(--yellow); color: #0a0c0f; }
   #evtEmpty { padding: 16px 12px; color: var(--muted); font-size: 13px; }
   #evtEmpty:not(:empty) + table { display: none; }
 
@@ -264,6 +265,10 @@ function eventMeta(type) {
   if (type === "takeover") return { label: "Takeover", cls: "takeover", color: "#8b5cf6" };
   if (type === "obs_stream_start") return { label: "Stream start", cls: "start", color: "#16a34a" };
   if (type === "obs_stream_stop") return { label: "Stream stop", cls: "stop", color: "#dc2626" };
+  if (type === "fanout_overflow") return { label: "Ring overflow", cls: "warn", color: "#F1C40F" };
+  if (type === "obs_rebuild") return { label: "OBS rebuild", cls: "warn", color: "#F1C40F" };
+  if (type === "obs_rebuild_stood_down") return { label: "Rebuild stood down", cls: "stop", color: "#dc2626" };
+  if (type === "obs_rebuild_rearmed") return { label: "Rebuild re-armed", cls: "", color: "#3a6ea5" };
   return { label: type || "event", cls: "", color: "#3a6ea5" };
 }
 

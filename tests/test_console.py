@@ -184,7 +184,7 @@ def t_root_graphics_browser_is_any_authenticated():
 
 def t_obs_routes_require_director():
     for seg in (["obs", "scene"], ["obs", "source"], ["obs", "audio"],
-                ["obs", "state"], ["obs", "stream"]):
+                ["obs", "state"], ["obs", "stream"], ["obs", "rebuild-rearm"]):
         assert cp.min_capability(seg) == cp.Requirement(cp.DIRECTOR, False), seg
 
 

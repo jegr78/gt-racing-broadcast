@@ -221,6 +221,18 @@ def _sample_groups(samples, windows):
             for (lo, hi) in windows]
 
 
+# Consumer-side events on the OBS read path (#582): the ring lapping OBS, the automatic
+# OBS-input rebuild, and its effectiveness guard standing down / re-arming.
+_OBS_CONSUMER_EVENTS = {
+    "fanout_overflow": lambda md: f"Ring overflow under OBS ({md.get('snaps') or 1}x)",
+    "obs_rebuild": lambda md: ("Automatic OBS rebuild (stall fraction "
+                               f"{md.get('stall_fraction')})"),
+    "obs_rebuild_stood_down": lambda md: ("Auto-rebuild stood down after "
+                                          f"{md.get('attempts')} ineffective rebuilds"),
+    "obs_rebuild_rearmed": lambda md: f"Auto-rebuild re-armed ({md.get('reason') or ''})",
+}
+
+
 def broadcast_timeline(events):
     """Chronological part (preferred) or OBS-stream start/stop rows for the report's
     Broadcast-timeline section — the reference points for the OBS-downtime figures."""
@@ -273,6 +285,7 @@ def build_report(samples, events, name_for_stint, event_title, window, now,
     handovers = []
     substitutions = []
     recoveries = []
+    obs_consumer = []
     for e in events:
         if e.get("type") == "takeover":
             md = e.get("metadata") or {}
@@ -290,6 +303,12 @@ def build_report(samples, events, name_for_stint, event_title, window, now,
                                "stint": md.get("stint"),
                                "streamer": name_for_stint.get(md.get("stint")) or "",
                                "downtime_s": md.get("downtime_s") or 0})
+        elif e.get("type") in _OBS_CONSUMER_EVENTS:
+            md = e.get("metadata") or {}
+            obs_consumer.append({"ts": e.get("ts"), "feed": md.get("feed") or "",
+                                 "stint": md.get("stint"),
+                                 "streamer": name_for_stint.get(md.get("stint")) or "",
+                                 "what": _OBS_CONSUMER_EVENTS[e["type"]](md)})
     return {
         "header": {"event_title": event_title or "", "start": frm, "end": to,
                    "duration_s": round(duration_s, 1),
@@ -303,6 +322,7 @@ def build_report(samples, events, name_for_stint, event_title, window, now,
         "producer_handovers": handovers,
         "substitutions": substitutions,
         "recoveries": recoveries,
+        "obs_consumer": obs_consumer,
         "overlap_approximate": bool(handovers),
         "broadcast_timeline": broadcast_timeline(events),
         "health_bands": health_bands,
@@ -464,6 +484,20 @@ def render_html(report):
                   r["streamer"], _fmt_dur(r["downtime_s"]))
                  for r in report["recoveries"]]
         parts.append(_table(["Time", "Feed", "Stint", "Commentator", "Degraded"], rrows))
+
+    # OBS consumer events (#582): the relay could not keep OBS fed in real time, or had to
+    # rebuild OBS's input. A stood-down auto-rebuild means OBS itself could not keep up.
+    if report.get("obs_consumer"):
+        parts.append("<h2>OBS consumer events</h2>")
+        parts.append("<p class='note'>Ring overflows (OBS read slower than real time and "
+                     "lost bytes), automatic OBS input rebuilds (each a short black "
+                     "dropout) and the auto-rebuild stand-down after rebuilds stopped "
+                     "helping.</p>")
+        orows = [(_fmt_clock(o["ts"]), o["feed"],
+                  o["stint"] if o["stint"] is not None else "—",
+                  o["streamer"], o["what"])
+                 for o in report["obs_consumer"]]
+        parts.append(_table(["Time", "Feed", "Stint", "Commentator", "Event"], orows))
 
     # Feed reliability
     parts.append("<h2>Feed reliability</h2>")

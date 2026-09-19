@@ -3,10 +3,10 @@
 
 Drives the REAL relay FeedRing + FeedFanoutServer from a source (synthetic ffmpeg -re, or
 a real stream via streamlink) into your LOCAL OBS, so a long real-OBS soak can be run and
-observed. It SERVES + LOGS only — the OBS-drift auto-resync lives in the RELAY now (via the
-obs-ws GetStats render-skip rate), NOT here; the socket send-block "stuck"/snap logged below
-proved BLIND to render drift (see the spec's DESIGN PIVOT) and is kept only to confirm the
-ring is fed. Measure the actual render-skip signal directly off OBS (obs-ws GetStats).
+observed. It SERVES + LOGS only — the automatic OBS rebuild lives in the RELAY (its
+cursor-progress freeze detector, guarded by #582), NOT here; the socket send-block
+"stuck"/snap logged below proved BLIND to render drift (see the spec's DESIGN PIVOT) and is
+kept only to confirm the ring is fed. Measure render skip directly off OBS (obs-ws GetStats).
 
 No cloud box needed; a real stream needs streamlink but no cookies for a public live.
 
@@ -108,8 +108,8 @@ def main():
     srv = fe.FeedFanoutServer("127.0.0.1", args.port, ring, fe.logging.getLogger("soak"))
     srv.start()
     print(f"[soak] serving on http://127.0.0.1:{srv.port}  — point OBS Media Source at it")
-    print(f"[soak] ring={fe.FANOUT_RING_BYTES}B  (the OBS-drift auto-resync lives in the RELAY "
-          f"via GetStats render-skip rate; this harness only serves + logs the socket side)")
+    print(f"[soak] ring={fe.FANOUT_RING_BYTES}B  (the automatic OBS rebuild lives in the RELAY; "
+          f"this harness only serves + logs the socket side)")
 
     # Build initial source command
     source_cmd = _build_source_cmd(fe, args.source, args.quality, None, platform)
