@@ -137,8 +137,8 @@ The health line does not suggest **ROBUST** (720p) for a backlog. Whether 720p g
 slow machine back enough render time is not measured yet. A tier change also restarts
 the feed's connection without reconnecting OBS, and for YouTube ROBUST starts two segments
 (about 10 s) further behind the live edge, so right after the change OBS can sit *further*
-behind than before. If
-you step down anyway, press **RESET** once the new connection is serving.
+behind than before. If you step down anyway, press **RESET** once the new connection is
+serving.
 
 ### What the relay does on its own, and what it leaves to you
 
@@ -173,7 +173,10 @@ is worth it.
   green to yellow (DEGRADED), to red (CRITICAL), or back. The post lists every current
   reason, so a backlog line rides along when something else changes the level, but a
   backlog alone never triggers one. `Feed A rebuild ineffective — …` does trigger one,
-  and it is the usual sign that the producer machine is overloaded.
+  and it is the usual sign that the producer machine is overloaded. Three events post
+  their own `@here` outside the health level: an auto-failover to Intermission, a feed
+  that keeps dropping and recovering (three times in 5 minutes), and an automatic
+  step-down to ROBUST.
 - **The Director Panel** is where the decision is made: the BEHIND LIVE pill, the health
   pill with the next step, the RESET cost, and the feed-health area with **RE-ARM**.
 - **The [Health Monitor](Health-Monitor)** answers what happened afterwards: the backlog
