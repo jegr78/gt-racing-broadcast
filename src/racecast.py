@@ -2731,6 +2731,13 @@ class _BenchmarkRelay:
             raise RuntimeError(reply.get("error") or f"relay refused tier {tier!r}")
         return reply
 
+    def feed_reset(self, feed):
+        """Rejoin OBS to the feed (#614): the RESET primitive the Director Panel uses."""
+        reply = _relay_post_json(f"{self.base}/obs/feed-reset", {"feed": feed})
+        if not reply.get("ok"):
+            raise RuntimeError(reply.get("error") or f"relay refused the reset of Feed {feed}")
+        return reply
+
 
 def _parse_benchmark_args(rest):
     """`obs benchmark` flags -> dict, or ValueError with the usage line."""

@@ -10,8 +10,18 @@ FULL and then to ROBUST, and samples over the same window for each:
 - OBS `averageFrameRenderTime`, `activeFps` and the per-window render skip rate;
 - the encoder: skipped output frames and recorded seconds per wall-clock second
   (`renderSkippedFrames` is blind to encoder-side lag);
-- the fan-out consumer backlog behind the live edge (#583) and its growth rate,
-  the quantity that calibrates the #585 trigger.
+- the playback rate of the feed's OBS media input (mediaCursor over wall clock) and
+  the share of ticks where it stood still: fps and the encoder are blind to a frozen
+  demuxer, the cursor is not;
+- the fan-out consumer backlog behind the live edge (#583), as the floor at the start
+  and at the end of the window. Reported, not judged: on 5-s HLS segments the raw
+  value is a sawtooth, and after a restart it is dominated by the prefetch (#614).
+
+After each tier switch the new serve's HLS prefetch lands in one burst. OBS, still
+attached, would play that burst and sit its length behind the live edge (#614), so the
+benchmark rejoins OBS once the prefetch has arrived (`POST /obs/feed-reset`), then
+settles and samples. A window in which the ring lapped OBS, OBS reconnected, or the
+feed stopped serving is marked disturbed and gives no verdict.
 
 The upstream latency the ROBUST streamlink profile adds is a separate quantity. It
 is recorded as the extra HLS segments ROBUST holds back from the live edge, read
@@ -28,6 +38,7 @@ import json
 import os
 import tempfile
 import time
+import urllib.parse
 from collections import namedtuple
 
 # Same shape and level strings as preflight.Result, defined locally: preflight
@@ -50,12 +61,18 @@ SERVING_TIMEOUT_S = 90         # a re-resolve plus reconnect; a live source take
 RECORD_STOP_TIMEOUT_S = 30
 TIERS = ("full", "robust")
 
-# Real time. The fps ratio and the encoder speed are properties of OBS itself; the
-# backlog growth threshold is a placeholder until the calibration run on the retired
-# producer box exists (#584) — it is reported, never acted on.
+# After the new serve delivers its first bytes, how long until the HLS prefetch burst
+# has landed in the ring. streamlink fetches it in one go; a few seconds covers it.
+PREFETCH_LAND_S = 5
+
+# Real time. Rendering, encoding and playback each have to keep up. Playback is judged
+# from the feed's mediaCursor: STALL_RATIO is the relay's freeze threshold
+# (RACECAST_FEED_FREEZE_STALL_RATIO default), a tick below it counts as stood still.
 REAL_TIME_FPS_RATIO = 0.95
 ENCODER_SPEED_MIN = 0.98
-BACKLOG_GROWTH_WARN_S_PER_MIN = 1.0
+PLAYBACK_RATE_MIN = 0.95
+STALL_RATIO = 0.25
+STALL_FRACTION_MAX = 0.10
 
 _QUALITY_SOURCES = ("youtube", "twitch")
 
@@ -112,17 +129,45 @@ def _delta_pct(samples, part_key, total_key):
     return round((pts[-1][part_key] - pts[0][part_key]) / total * 100.0, 2)
 
 
-def _slope_per_min(points):
-    """Least-squares slope of (t, value) points, per minute. None below two points
-    or with no spread in t."""
-    if len(points) < 2:
-        return None
-    mt = _mean([t for t, _ in points])
-    mv = _mean([v for _, v in points])
-    den = sum((t - mt) ** 2 for t, _ in points)
-    if den <= 0:
-        return None
-    return sum((t - mt) * (v - mv) for t, v in points) / den * 60.0
+def _playback(samples):
+    """(rate, stall_fraction, rejoined) from the mediaCursor over the window. A cursor
+    that goes backwards is a rejoin: that pair is not measured and the window is
+    marked. Pure."""
+    pairs, rejoined = [], False
+    pts = [(s["t"], s.get("cursor_ms")) for s in samples if s.get("cursor_ms") is not None]
+    for (t0, c0), (t1, c1) in zip(pts, pts[1:], strict=False):
+        if t1 <= t0:
+            continue
+        if c1 < c0:
+            rejoined = True
+            continue
+        pairs.append(((c1 - c0) / 1000.0, t1 - t0))
+    if not pairs:
+        return None, None, rejoined
+    rate = sum(d for d, _ in pairs) / sum(dt for _, dt in pairs)
+    stalled = sum(1 for d, dt in pairs if d / dt < STALL_RATIO)
+    return round(rate, 3), round(stalled / len(pairs), 2), rejoined
+
+
+def _floor(values):
+    return min(values) if values else None
+
+
+def _disturbances(samples, rejoined):
+    """Why a window cannot be judged: the ring lapped OBS, OBS reconnected, or the feed
+    left serving. Pure."""
+    out = []
+    snaps = [s["snaps"] for s in samples if s.get("snaps") is not None]
+    if snaps and snaps[-1] < snaps[0]:
+        rejoined = True                  # a new consumer starts counting again
+    elif snaps and snaps[-1] > snaps[0]:
+        out.append(f"the ring lapped OBS {snaps[-1] - snaps[0]} time(s)")
+    if rejoined:
+        out.append("OBS reconnected the feed")
+    left = [s["state"] for s in samples if s.get("state") not in (None, "serving")]
+    if left:
+        out.append(f"the feed left serving ({left[0]})")
+    return out
 
 
 def summarize(samples):
@@ -135,7 +180,10 @@ def summarize(samples):
         speed = round((rec[-1]["rec_ms"] - rec[0]["rec_ms"]) / 1000.0
                       / (rec[-1]["t"] - rec[0]["t"]), 3)
     fps = _values(samples, "fps")
-    backlog = [(s["t"], s["backlog_s"]) for s in samples if s.get("backlog_s") is not None]
+    rate, stall, rejoined = _playback(samples)
+    backlog = _values(samples, "backlog_s")
+    third = max(1, len(samples) // 3)
+    snaps = _values(samples, "snaps")
     return {
         "samples": len(samples),
         "duration_s": round(ts[-1] - ts[0], 1) if ts else None,
@@ -145,18 +193,23 @@ def summarize(samples):
         "render_skip_pct": _delta_pct(samples, "render_skipped", "render_total"),
         "encoder_skip_pct": _delta_pct(samples, "output_skipped", "output_total"),
         "encoder_speed": speed,
-        "backlog_start_s": backlog[0][1] if backlog else None,
-        "backlog_end_s": backlog[-1][1] if backlog else None,
-        "backlog_max_s": max(v for _, v in backlog) if backlog else None,
-        "backlog_growth_s_per_min": _round(_slope_per_min(backlog), 2),
+        "playback_rate": rate,
+        "stall_fraction": stall,
+        "backlog_floor_start_s": _floor(_values(samples[:third], "backlog_s")),
+        "backlog_floor_end_s": _floor(_values(samples[-third:], "backlog_s")),
+        "backlog_max_s": max(backlog) if backlog else None,
+        "snaps": (snaps[-1] - snaps[0]) if len(snaps) >= 2 else None,
+        "contaminated": _disturbances(samples, rejoined),
     }
 
 
 def keeps_real_time(summary, fps_target):
-    """True when OBS renders at (nearly) its configured rate, the encoder keeps up
-    with the wall clock and the consumer backlog does not grow. None when the frame
-    rate or its reference is unknown. A missing backlog (no consumer attached) or
-    encoder speed does not decide the answer on its own."""
+    """True when OBS renders at (nearly) its configured rate, the encoder keeps up with
+    the wall clock and the feed's media cursor plays at real time without standing
+    still. None when a needed signal is missing or the window was disturbed. The
+    backlog is not a criterion (see the module docstring)."""
+    if summary.get("contaminated"):
+        return None
     fps = summary.get("fps_avg")
     if fps is None or not fps_target:
         return None
@@ -165,16 +218,23 @@ def keeps_real_time(summary, fps_target):
     speed = summary.get("encoder_speed")
     if speed is not None and speed < ENCODER_SPEED_MIN:
         return False
-    growth = summary.get("backlog_growth_s_per_min")
-    return not (growth is not None and growth > BACKLOG_GROWTH_WARN_S_PER_MIN)
+    rate = summary.get("playback_rate")
+    if rate is None:
+        return None
+    stall = summary.get("stall_fraction") or 0.0
+    return rate >= PLAYBACK_RATE_MIN and stall <= STALL_FRACTION_MAX
 
 
 def verdict(full, robust, fps_target):
     """The calibration answer: does ROBUST recover a host where FULL falls behind?
-    `robust_recovers` is None when FULL already keeps up or either side is unknown."""
+    `robust_recovers` is None when FULL already keeps up or either side is unknown.
+    `contaminated` names the disturbed tiers and why."""
     f, r = keeps_real_time(full, fps_target), keeps_real_time(robust, fps_target)
     recovers = r if (f is False and r is not None) else None
-    return {"full_real_time": f, "robust_real_time": r, "robust_recovers": recovers}
+    bad = {t: s["contaminated"] for t, s in (("full", full), ("robust", robust))
+           if s.get("contaminated")}
+    return {"full_real_time": f, "robust_real_time": r, "robust_recovers": recovers,
+            "contaminated": bad}
 
 
 def refusal(status, stream_active, record_active):
@@ -295,6 +355,11 @@ def classify(record, now, max_age_days=DEFAULT_MAX_AGE_DAYS):
     if age > max_age_days:
         return Result(WARN, "OBS benchmark",
                       f"{where} — stale (older than {int(max_age_days)} d); re-run it")
+    bad = v.get("contaminated") or {}
+    if bad:
+        why = "; ".join(f"{t.upper()}: {', '.join(r)}" for t, r in bad.items())
+        return Result(WARN, "OBS benchmark",
+                      f"measurement disturbed ({why}) · measured {_fmt_age(age)} — re-run it")
     if v.get("full_real_time") is False:
         return Result(WARN, "OBS benchmark", where)
     if v.get("full_real_time") is None:
@@ -312,7 +377,7 @@ def render(record, now):
              f"on '{record.get('scene')}', {record.get('window_s')} s per tier, "
              f"target {_fmt(record.get('fps_target'), ' fps', 2)}",
              "              render ms   fps avg/min   render skip   encoder skip/speed"
-             "   backlog start→end   growth"]
+             "   playback rate/stalled   backlog floor start→end"]
     for tier in TIERS:
         s = record.get(tier) or {}
         lines.append(
@@ -320,8 +385,12 @@ def render(record, now):
             f"{_fmt(s.get('fps_avg'))}/{_fmt(s.get('fps_min'))}   "
             f"{_fmt(s.get('render_skip_pct'), ' %', 2):>10}   "
             f"{_fmt(s.get('encoder_skip_pct'), ' %', 2)}/{_fmt(s.get('encoder_speed'), 'x', 3)}"
-            f"   {_fmt(s.get('backlog_start_s'), ' s')}→{_fmt(s.get('backlog_end_s'), ' s')}"
-            f"   {_fmt(s.get('backlog_growth_s_per_min'), ' s/min', 2)}")
+            f"   {_fmt(s.get('playback_rate'), 'x', 3)}/"
+            f"{_fmt(None if s.get('stall_fraction') is None else s['stall_fraction'] * 100, ' %', 0)}"
+            f"   {_fmt(s.get('backlog_floor_start_s'), ' s')}→"
+            f"{_fmt(s.get('backlog_floor_end_s'), ' s')}")
+        if s.get("contaminated"):
+            lines.append(f"              disturbed: {'; '.join(s['contaminated'])}")
     extra = record.get("robust_extra_segments")
     lines.append("  Upstream: ROBUST holds " + (
         "n/a" if extra is None else f"+{extra} HLS segments")
@@ -335,11 +404,32 @@ def render(record, now):
 # --------------------------------------------------------------------------
 # driver
 # --------------------------------------------------------------------------
-def _obs_sample(session, t, relay_status, feed):
+def feed_input_name(session, port):
+    """The OBS media input that plays the relay feed on `port`, or None."""
+    want = {f"127.0.0.1:{port}", f"localhost:{port}"}
+    inputs = (session.request("GetInputList", {"inputKind": "ffmpeg_source"}) or {}).get(
+        "inputs", [])
+    for inp in inputs:
+        name = inp.get("inputName")
+        if not name:
+            continue
+        settings = (session.request("GetInputSettings", {"inputName": name}) or {}).get(
+            "inputSettings", {})
+        url = settings.get("input")
+        if isinstance(url, str) and urllib.parse.urlsplit(url.strip()).netloc in want:
+            return name
+    return None
+
+
+def _obs_sample(session, t, relay_status, feed, input_name):
     stats = session.request("GetStats", {}) or {}
     rec = session.request("GetRecordStatus", {}) or {}
+    media = session.request("GetMediaInputStatus", {"inputName": input_name}) or {}
     f = ((relay_status or {}).get("feeds") or {}).get(feed) or {}
     return {"t": t, "fps": stats.get("activeFps"),
+            "cursor_ms": media.get("mediaCursor"),
+            "state": f.get("state"),
+            "snaps": f.get("consumer_snaps"),
             "render_ms": stats.get("averageFrameRenderTime"),
             "render_skipped": stats.get("renderSkippedFrames"),
             "render_total": stats.get("renderTotalFrames"),
@@ -381,21 +471,29 @@ def _record_finished(session, sleep, timeout_s):
     return True
 
 
-def _measure_tier(relay, session, feed, tier, *, clock, sleep, window_s, settle_s,
-                  sample_every_s, serving_timeout_s, progress):
+def _rejoin_after_prefetch(relay, feed, sleep):
+    """Let the new serve's HLS prefetch land, then reconnect OBS to the feed so it joins
+    at the live edge instead of playing the burst (#614)."""
+    sleep(PREFETCH_LAND_S)
+    relay.feed_reset(feed)
+
+
+def _measure_tier(relay, session, feed, tier, input_name, *, clock, sleep, window_s,
+                  settle_s, sample_every_s, serving_timeout_s, progress):
     progress(f"Feed {feed} → {tier.upper()}: reconnecting …")
     # Clock the switch BEFORE the request: the relay may restart the serve before its
     # reply arrives, and that serve must still count as the one after the switch.
     t_switch = clock()
     relay.set_quality(feed, tier)
     reconnect_s = _wait_serving(relay, feed, t_switch, clock, sleep, serving_timeout_s)
-    progress(f"  serving again after {reconnect_s} s; settling {settle_s} s, "
-             f"then sampling {window_s} s")
+    progress(f"  serving again after {reconnect_s} s; rejoining OBS after the prefetch, "
+             f"settling {settle_s} s, then sampling {window_s} s")
+    _rejoin_after_prefetch(relay, feed, sleep)
     sleep(settle_s)
     samples, t0 = [], clock()
     while True:
         t = clock() - t0
-        samples.append(_obs_sample(session, round(t, 2), relay.status(), feed))
+        samples.append(_obs_sample(session, round(t, 2), relay.status(), feed, input_name))
         if t >= window_s:
             break
         sleep(sample_every_s)
@@ -422,6 +520,10 @@ def run(relay, session, runtime_dir, *, flags, scene="Stint", window_s=DEFAULT_W
     feed = status["live"]["feed"]
     orig = status["feeds"][feed]
     platform = orig.get("platform")
+    input_name = feed_input_name(session, orig.get("port"))
+    if input_name is None:
+        raise BenchmarkRefused(f"OBS has no media input on the Feed {feed} port "
+                               f"({orig.get('port')}) — is the racecast collection loaded?")
     fps_target = _fps_target(session)
     cur = session.request("GetCurrentProgramScene", {}) or {}
     orig_scene = cur.get("currentProgramSceneName") or cur.get("sceneName")
@@ -434,7 +536,8 @@ def run(relay, session, runtime_dir, *, flags, scene="Stint", window_s=DEFAULT_W
         recording = True
         for tier in TIERS:
             results[tier] = _measure_tier(
-                relay, session, feed, tier, clock=clock, sleep=sleep, window_s=window_s,
+                relay, session, feed, tier, input_name, clock=clock, sleep=sleep,
+                window_s=window_s,
                 settle_s=settle_s, sample_every_s=sample_every_s,
                 serving_timeout_s=serving_timeout_s, progress=progress)
     finally:
@@ -444,8 +547,11 @@ def run(relay, session, runtime_dir, *, flags, scene="Stint", window_s=DEFAULT_W
                 out_path = (session.request("StopRecord", {}) or {}).get("outputPath")
             except Exception as exc:              # noqa: BLE001 — keep restoring
                 notes.append(f"stopping the recording failed ({exc}) — stop it in OBS")
+        restored_at = None
         try:
+            t_restore = clock()
             relay.set_quality(feed, restore_tier(orig))
+            restored_at = t_restore
             if not orig.get("pinned") and (orig.get("profile") or "full") != "full":
                 # the API can only pin a tier or release it; releasing ends the step-down
                 notes.append(f"Feed {feed} was on {orig.get('profile').upper()} from an "
@@ -479,6 +585,17 @@ def run(relay, session, runtime_dir, *, flags, scene="Stint", window_s=DEFAULT_W
             except OSError as exc:
                 keep_recording = True
                 notes.append(f"could not delete the benchmark recording {out_path} ({exc})")
+        if restored_at is not None:
+            # The restore is a restart too: without a rejoin OBS keeps playing its
+            # prefetch and the operator is left that far behind live (#614). Last, so
+            # an interrupt here cannot keep the scene or the recording from coming back.
+            try:
+                _wait_serving(relay, feed, restored_at, clock, sleep, serving_timeout_s)
+                _rejoin_after_prefetch(relay, feed, sleep)
+            except BaseException as exc:          # noqa: BLE001 — cleanup, report and go on
+                notes.append(f"Feed {feed} is back on its tier but OBS was not rejoined "
+                             f"({exc.__class__.__name__}: {exc}) — press RESET for "
+                             f"Feed {feed} in the Director Panel")
         for n in notes:
             progress("WARNING: " + n)
     full_flags, robust_flags = flags.get(platform, ([], []))

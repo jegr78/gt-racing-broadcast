@@ -240,6 +240,24 @@ def t_benchmark_relay_raises_when_the_relay_refuses_a_tier():
     assert sent == [("http://relay/feed/A/quality", {"tier": "robust"})]
 
 
+def t_benchmark_relay_rejoins_obs_through_the_feed_reset():
+    old = m._relay_post_json
+    sent = []
+    m._relay_post_json = lambda url, body, timeout=3: sent.append((url, body)) or {
+        "ok": True, "feed": "A"}
+    try:
+        m._BenchmarkRelay("http://relay").feed_reset("A")
+        m._relay_post_json = lambda url, body, timeout=3: {"ok": False, "error": "no OBS"}
+        try:
+            m._BenchmarkRelay("http://relay").feed_reset("A")
+            raise AssertionError("expected RuntimeError")
+        except RuntimeError as exc:
+            assert "no OBS" in str(exc)
+    finally:
+        m._relay_post_json = old
+    assert sent == [("http://relay/obs/feed-reset", {"feed": "A"})]
+
+
 def t_obs_refresh_cmd_exits_when_relay_down():
     old = m._relay_http_ok
     m._relay_http_ok = lambda: False

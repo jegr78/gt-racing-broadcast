@@ -7381,10 +7381,19 @@ class Relay:
                 live = srv.consumer_backlog(time.monotonic())
             except Exception:                   # noqa: BLE001 — best-effort
                 live = None
+        snaps = None
+        if srv is not None and hasattr(srv, "consumer_health"):
+            try:
+                snaps = srv.consumer_health(time.monotonic())[1]
+            except Exception:                   # noqa: BLE001 — best-effort
+                snaps = None
         return {"backlog_s": None if live is None else round(live, 1),
                 "backlogged": (name in self._backlogged_feeds and feed_backlog_degraded(
                     live, self.feed_prebuffer_s, self._backlog_warn_s)),
-                "reset_discards_s": reset_discards_s(live, self.feed_prebuffer_s)}
+                "reset_discards_s": reset_discards_s(live, self.feed_prebuffer_s),
+                # #614: cumulative cursor snaps of the attached consumers (the ring lapped
+                # them); `obs benchmark` marks a window with new snaps as contaminated
+                "consumer_snaps": snaps}
 
     def _current_render_skip_rate(self):
         """Per-interval OBS render-skip rate (0..1) from obs_stats vs the previous heartbeat's
