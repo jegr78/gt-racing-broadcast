@@ -4477,10 +4477,11 @@ class FeedRing:
         """Seconds since the byte at `offset` reached the ring: how far a consumer whose
         next unread byte is `offset` sits behind the live edge (#583). 0.0 at or past the
         live edge (a source stall is not a consumer backlog, and an empty ring has nothing
-        to be behind). Every write records or extends a mark, so a non-empty ring always
-        has one; the None return is defensive. The byte arrived no later than the first mark past it; an offset in the unmarked
-        tail uses the newest mark (<= MARK_MIN_INTERVAL_S early). A lapped consumer below
-        the retained window reports the oldest retained byte, an undercount. Pure."""
+        to be behind). Every write records a mark or lands within MARK_MIN_INTERVAL_S of
+        one, so a non-empty ring always has one; the None return is defensive. The byte
+        arrived no later than the first mark past it; an offset in the unmarked tail uses
+        the newest mark (<= MARK_MIN_INTERVAL_S early). A lapped consumer below the
+        retained window reports the oldest retained byte, an undercount. Pure."""
         with self._cond:
             if offset >= self._base + len(self._buf):
                 return 0.0
