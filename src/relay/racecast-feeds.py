@@ -66,7 +66,7 @@ Controls (HTTP, for Companion Generic-HTTP / browser / curl):
   Stop: Ctrl+C
 """
 
-import argparse, collections, csv, datetime, hmac, html, io, ipaddress, json, logging, math, os, random, re, secrets, shutil, signal, socket, ssl, subprocess, sys, threading, time
+import argparse, collections, csv, datetime, hmac, html, io, ipaddress, json, logging, os, random, re, secrets, shutil, signal, socket, ssl, subprocess, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, quote, unquote, parse_qs, urlencode
 from urllib.request import Request, urlopen
