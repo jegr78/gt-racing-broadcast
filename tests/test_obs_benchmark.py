@@ -736,6 +736,41 @@ def t_run_says_when_it_releases_an_automatic_step_down():
     assert any("automatic step-down" in s for s in said), said
 
 
+def t_run_lets_ctrl_c_skip_the_final_rejoin_but_not_other_exits():
+    # Ctrl-C during the final rejoin wait skips the rejoin and finishes the run; a
+    # SystemExit there is not swallowed (CodeQL py/catch-base-exception).
+    class _Relay2(_Relay):
+        def __init__(self, clock, exc):
+            super().__init__(clock)
+            self.exc = exc
+
+        def feed_reset(self, feed):
+            if self.tier == "auto":
+                raise self.exc
+            return super().feed_reset(feed)
+
+    clock = _Clock()
+    relay = _Relay2(clock, KeyboardInterrupt())
+    sess = _Session(clock, relay=relay)
+    said = []
+    with tempfile.TemporaryDirectory() as d:
+        rec, _ = _run(d, clock, relay, sess, progress=said.append)
+        assert m.load_latest(d)["ts"] == NOW
+    assert any("RESET" in s for s in said), said
+    assert rec["verdict"]["full_real_time"] is True
+
+    clock = _Clock()
+    relay = _Relay2(clock, SystemExit(3))
+    sess = _Session(clock, relay=relay)
+    with tempfile.TemporaryDirectory() as d:
+        try:
+            _run(d, clock, relay, sess)
+        except SystemExit as exc:
+            assert exc.code == 3
+        else:
+            raise AssertionError("SystemExit was swallowed")
+
+
 def t_run_reports_a_failed_restore_step_and_still_does_the_rest():
     clock = _Clock()
     relay = _Relay(clock, fail_on="auto")
