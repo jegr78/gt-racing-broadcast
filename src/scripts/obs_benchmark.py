@@ -442,6 +442,10 @@ def run(relay, session, runtime_dir, *, flags, scene="Stint", window_s=DEFAULT_W
                 notes.append(f"stopping the recording failed ({exc}) — stop it in OBS")
         try:
             relay.set_quality(feed, restore_tier(orig))
+            if not orig.get("pinned") and (orig.get("profile") or "full") != "full":
+                # the API can only pin a tier or release it; releasing ends the step-down
+                notes.append(f"Feed {feed} was on {orig.get('profile').upper()} from an "
+                             "automatic step-down; it is back on managed FULL now")
         except Exception as exc:                  # noqa: BLE001 — keep restoring
             notes.append(f"restoring Feed {feed}'s quality failed ({exc})")
         if orig_scene and scene and scene != orig_scene:

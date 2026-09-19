@@ -517,6 +517,19 @@ def t_run_restores_on_an_interrupt():
     assert relay.calls[-1] == ("A", "auto")
 
 
+def t_run_says_when_it_releases_an_automatic_step_down():
+    clock = _Clock()
+    st = _status()
+    st["feeds"]["A"].update(profile="robust", pinned=False)   # stepped down by the relay
+    relay = _Relay(clock, status=st)
+    sess = _Session(clock, relay=relay)
+    said = []
+    with tempfile.TemporaryDirectory() as d:
+        _run(d, clock, relay, sess, progress=said.append)
+    assert relay.calls[-1] == ("A", "auto")
+    assert any("automatic step-down" in s for s in said), said
+
+
 def t_run_reports_a_failed_restore_step_and_still_does_the_rest():
     clock = _Clock()
     relay = _Relay(clock, fail_on="auto")
