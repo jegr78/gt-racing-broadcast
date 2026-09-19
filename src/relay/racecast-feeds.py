@@ -447,6 +447,29 @@ def feed_stall_signal_enabled(environ):
     return str(environ.get("RACECAST_FEED_STALL_SIGNAL", "")).strip().lower() not in _FANOUT_FALSEY
 
 
+FEED_BACKLOG_WARN_S = 5.0         # #583: consumer backlog (s) beyond the #533 reserve that shows yellow
+
+
+def feed_backlog_warn_s(environ):
+    """#583 display threshold: seconds of consumer backlog beyond the fan-out reserve.
+    A placeholder until #581 stage 4 calibrates it on real hardware. Pure."""
+    return _env_float(environ, "RACECAST_FEED_BACKLOG_WARN_S", FEED_BACKLOG_WARN_S)
+
+
+def feed_backlog_degraded(floor_s, prebuffer_s, warn_s):
+    """#583: a consumer is falling behind the live edge when its interval floor (the
+    smallest backlog seen in one heartbeat interval) exceeds the #533 reserve by more
+    than warn_s. The reserve itself is the healthy baseline, not a backlog. Pure."""
+    return floor_s is not None and floor_s - prebuffer_s > warn_s
+
+
+def fold_backlog_floor(prev, age):
+    """Fold one per-cycle backlog sample into the interval floor (#583). None-safe. Pure."""
+    if age is None:
+        return prev
+    return age if prev is None else min(prev, age)
+
+
 def feed_inbound_degraded(max_gap_s, prebuffer_s, floor_s):
     """#535: an interval's max inbound inter-arrival gap is a stutter risk when it exceeds
     BOTH the #533 reserve (prebuffer_s — a gap the prebuffer absorbed is fine) and the floor
@@ -881,7 +904,10 @@ def aggregate_health(facts):
         gap exceeded the fan-out reserve — a quiet, display-only yellow (#535);
         never included in the notify-level facts, so it never pages Discord),
     rebuilds_stood_down (optional dict feed name -> OBS fps or None: the #582
-        effectiveness guard stood the automatic OBS rebuild down on that feed).
+        effectiveness guard stood the automatic OBS rebuild down on that feed),
+    feeds_backlogged (optional dict feed name -> seconds behind live: OBS accepts that
+        feed's bytes slower than real time, #583 — a quiet, display-only yellow that
+        is excluded from the notify-level facts until #581 stage 4 calibrates it).
 
     red  = any feed down (a live picture was lost); or obs_reachable truthy and
            stream_active is False AND stream_expected (OBS connected and has
@@ -890,7 +916,7 @@ def aggregate_health(facts):
            before OBS ever goes live, never alarms.
     yellow = OBS WebSocket unreachable · cookies stale · Tailscale down · a feed
              stuck connecting · stream_reconnecting · funnel_down ·
-             sheet_push_failing · an auto-rebuild stood down. A red result still lists
+             sheet_push_failing · an auto-rebuild stood down · a consumer backlog. A red result still lists
              the yellow issues under it.
     green = none of the above."""
     reasons, red, yellow = [], [], []
@@ -930,6 +956,9 @@ def aggregate_health(facts):
         renders = f" (producer host renders {fps:.0f} fps)" if fps is not None else ""
         yellow.append(f"Feed {name} rebuild ineffective — {REBUILD_GUARD_MAX_ATTEMPTS} OBS "
                       f"rebuilds did not clear the stall{renders}; auto-rebuild paused")
+    for name, behind in (facts.get("feeds_backlogged") or {}).items():
+        yellow.append(f"Feed {name} output {behind:.0f} s behind live — OBS reads slower than "
+                      f"real time; step the feed quality down to ROBUST")
     reasons.extend(red)
     reasons.extend(yellow)
     level = "red" if red else ("yellow" if yellow else "green")
@@ -4444,6 +4473,26 @@ class FeedRing:
                     break
             return min(max(self._base, chosen), live)
 
+    def age_at_offset(self, offset, now):
+        """Seconds since the byte at `offset` reached the ring: how far a consumer whose
+        next unread byte is `offset` sits behind the live edge (#583). 0.0 at or past the
+        live edge (a source stall is not a consumer backlog, and an empty ring has nothing
+        to be behind). Every write records or extends a mark, so a non-empty ring always
+        has one; the None return is defensive. The byte arrived no later than the first mark past it; an offset in the unmarked
+        tail uses the newest mark (<= MARK_MIN_INTERVAL_S early). A lapped consumer below
+        the retained window reports the oldest retained byte, an undercount. Pure."""
+        with self._cond:
+            if offset >= self._base + len(self._buf):
+                return 0.0
+            if not self._marks:
+                return None
+            ts = self._marks[-1][1]
+            for off, mts in self._marks:
+                if off > offset:
+                    ts = mts
+                    break
+            return max(0.0, now - ts)
+
     def trailing_offset(self, prebuffer_s, now):
         """The join offset prebuffer_s seconds behind the live edge (#533);
         the live edge itself when prebuffer_s <= 0 (today's behaviour)."""
@@ -4517,7 +4566,7 @@ class FeedFanoutServer:
         self.prebuffer_s = prebuffer_s        # #533: join OBS this far behind the live edge
         self._sock = None
         self._stop = False
-        self._consumers = {}            # id -> {"cycle_ts": float, "snaps": int}
+        self._consumers = {}            # id -> {"cycle_ts", "snaps", "cursor", "floor"} (#583)
         self._consumers_lock = threading.Lock()
 
     def _join_offset(self, now):
@@ -4558,6 +4607,9 @@ class FeedFanoutServer:
             with self._consumers_lock:
                 self._consumers[cid] = {"cycle_ts": time.monotonic(), "snaps": 0}
             while not self._stop and not self.ring.closed:
+                # #583: every byte before `cursor` was accepted by the consumer (the
+                # previous sendall returned), so this is where OBS actually is.
+                self._note_cycle(cid, cursor, time.monotonic())
                 prev = cursor
                 data, cursor = fanout_capped_read(self.ring, cursor, self.prebuffer_s)
                 skipped = snap_bytes(prev, cursor, len(data))
@@ -4584,6 +4636,39 @@ class FeedFanoutServer:
                 conn.close()
             except OSError:
                 pass  # already closed
+
+    def _note_cycle(self, cid, cursor, now):
+        """Record a consumer's accepted position at the start of a read cycle and fold its
+        backlog into the interval floor (#583). The read that follows jumps the cursor to
+        the trailing mark, so only this position shows a consumer that falls behind."""
+        age = self.ring.age_at_offset(cursor, now) if hasattr(self.ring, "age_at_offset") else None
+        with self._consumers_lock:
+            st = self._consumers.get(cid)
+            if st is not None:
+                st["cursor"] = cursor
+                st["floor"] = fold_backlog_floor(st.get("floor"), age)
+
+    def consumer_backlog(self, now):
+        """Seconds the worst consumer is behind the live edge right now, from its last
+        accepted position (#583). Grows while a consumer is blocked in sendall. None when
+        no consumer is attached or the ring has no time index. `now` is monotonic."""
+        with self._consumers_lock:
+            cursors = [st["cursor"] for st in self._consumers.values() if "cursor" in st]
+        if not cursors or not hasattr(self.ring, "age_at_offset"):
+            return None
+        ages = [a for a in (self.ring.age_at_offset(c, now) for c in cursors) if a is not None]
+        return max(ages) if ages else None
+
+    def take_backlog_floor(self):
+        """The worst consumer's smallest backlog since the last call, then reset (#583).
+        The floor is what a slow consumer pushes up; a bursty source's sawtooth above it
+        is not a backlog. Called once per heartbeat. None without a sample."""
+        with self._consumers_lock:
+            floors = [st.get("floor") for st in self._consumers.values()]
+            for st in self._consumers.values():
+                st["floor"] = None
+        floors = [f for f in floors if f is not None]
+        return max(floors) if floors else None
 
     def consumer_health(self, now):
         """Worst-case OBS-consumer health: the max send-block age (now - cycle_ts) and the
@@ -5181,6 +5266,15 @@ def redact_console_status(full, roles):
         if isinstance(lg, dict):
             out["league"] = {k: v for k, v in lg.items() if k != "sheet_id"}
     return out
+
+
+def cockpit_program_behind(backlogged):
+    """Whole seconds the program runs behind live for the cockpit banner (#583), or None
+    when no consumed feed is past the threshold. The commentator hears a delayed program
+    against their own voice; the banner says the delay is on the producer side. Pure."""
+    if not backlogged:
+        return None
+    return int(round(max(backlogged.values())))
 
 
 def cockpit_syncing(desync):
@@ -6926,6 +7020,9 @@ class Relay:
         self._stall_floor = feed_stall_floor_s(os.environ)           # #535
         self._interval_max_gaps = {}      # #535: last heartbeat's per-feed max inbound gap
         self._jittery_feeds = []          # #535: feeds whose last-interval gap tripped the signal
+        self._backlog_warn_s = feed_backlog_warn_s(os.environ)      # #583
+        self._interval_backlogs = {}      # #583: last heartbeat's per-feed consumer backlog floor
+        self._backlogged_feeds = {}       # #583: feed -> floor (s) for feeds past the threshold
         self.program_audio = program_audio_enabled(os.environ)
         self._fanout_servers = []
         # Auto-failover to the Intermission scene on confirmed on-air feed loss
@@ -7065,17 +7162,19 @@ class Relay:
                 "sheet_push_failing": (tpush == "failed"),
                 "feed_source_states": feed_source_states,
                 "feeds_jittery": list(self._jittery_feeds),
-                "rebuilds_stood_down": self._rebuilds_stood_down_fact(st.get("obs_fps"))}
+                "rebuilds_stood_down": self._rebuilds_stood_down_fact(st.get("obs_fps")),
+                "feeds_backlogged": dict(self._backlogged_feeds)}
 
     def _refresh_health(self, now):
         """Recompute + store the DISPLAYED health (level/reasons/since). Does NOT
         touch the notification baseline, so /status can refresh it every 2 s
         without stealing a transition from the heartbeat tick. Also returns a
-        `notify_level` with feeds_jittery excluded (#535: the inbound-stall signal
-        is a quiet, display-only yellow that must never page Discord)."""
+        `notify_level` with feeds_jittery and feeds_backlogged excluded (#535, #583:
+        quiet, display-only yellows that must never page Discord)."""
         facts = self._health_facts(now)
         h = aggregate_health(facts)
-        notify_level = aggregate_health({**facts, "feeds_jittery": []})["level"]  # #535: jitter never pages
+        notify_level = aggregate_health({**facts, "feeds_jittery": [],
+                                         "feeds_backlogged": {}})["level"]
         with self._health_lock:
             if h["level"] != self.health_level:
                 self.health_level = h["level"]
@@ -7128,6 +7227,9 @@ class Relay:
                 "feed_b_state": b_state, "feed_b_down": b_down, "feed_b_stint": b_stint,
                 "feed_a_max_gap_s": self._interval_max_gaps.get("A"),
                 "feed_b_max_gap_s": self._interval_max_gaps.get("B"),
+                "feed_a_backlog_s": self._interval_backlogs.get("A"),
+                "feed_b_backlog_s": self._interval_backlogs.get("B"),
+                "pov_backlog_s": self._interval_backlogs.get("POV"),
                 "pov_state": (None if not self.pov else
                               ("stopped" if self.pov.paused else self.pov.phase)),
                 "obs_reachable": (None if self.obs_reachable is None
@@ -7218,6 +7320,7 @@ class Relay:
                     jittery.append(_nm)
             self._interval_max_gaps = gaps
             self._jittery_feeds = jittery
+            self._sample_consumer_backlogs()
             h = self._refresh_health(now)
             if self.health_store is not None:
                 try:
@@ -7236,6 +7339,38 @@ class Relay:
             self._record_render_counts()
             self._record_consumer_overflows(now)
             self._hb_stop.wait(HEARTBEAT_INTERVAL_S)
+
+    def _sample_consumer_backlogs(self):
+        """#583: read+reset each fan-out server's interval backlog floor ONCE per heartbeat
+        (the 2 s /status poll reads the live value and never resets), and classify the
+        feeds whose consumer fell behind the live edge. Observability only: nothing acts
+        on it until #581 stage 4/5."""
+        floors, lagging = {}, {}
+        live = list(self.feeds.items()) + ([("POV", self.pov)] if self.pov else [])
+        for name, f in live:
+            srv = getattr(f, "fanout_server", None)
+            if srv is None:
+                continue
+            fl = srv.take_backlog_floor()
+            floors[name] = None if fl is None else round(fl, 1)
+            if (not f.paused and f.phase == "serving"
+                    and feed_backlog_degraded(fl, self.feed_prebuffer_s, self._backlog_warn_s)):
+                lagging[name] = floors[name]
+        self._interval_backlogs = floors
+        self._backlogged_feeds = lagging
+
+    def _backlog_status(self, name, f):
+        """/status fields for one feed (#583): the live consumer backlog and whether the
+        last heartbeat classified it past the threshold."""
+        srv = getattr(f, "fanout_server", None)
+        live = None
+        if srv is not None:
+            try:
+                live = srv.consumer_backlog(time.monotonic())
+            except Exception:                   # noqa: BLE001 — best-effort
+                live = None
+        return {"backlog_s": None if live is None else round(live, 1),
+                "backlogged": name in self._backlogged_feeds}
 
     def _current_render_skip_rate(self):
         """Per-interval OBS render-skip rate (0..1) from obs_stats vs the previous heartbeat's
@@ -7550,7 +7685,8 @@ class Relay:
                                "source_state": f.source_state,
                                "profile": f.quality_tier,
                                "pinned": f.quality_pinned,
-                               "quality": getattr(f, "quality", None)}
+                               "quality": getattr(f, "quality", None),
+                               **self._backlog_status(k, f)}
         if self.pov:
             raw = (self.pov_source.get()[:1] or [None])[0] if self.pov_source else None
             out["pov"] = {"port": self.pov.port, "url": raw,
@@ -7559,7 +7695,8 @@ class Relay:
                           "state": "stopped" if self.pov.paused else self.pov.phase,
                           "state_age_s": round(now - self.pov.phase_since, 1),
                           "down": self.pov.dropped and not self.pov.paused,
-                          "source": self.pov_source.health() if self.pov_source else None}
+                          "source": self.pov_source.health() if self.pov_source else None,
+                          **self._backlog_status("POV", self.pov)}
         out["obs"] = {"reachable": self.obs_reachable, "note": self.obs_note}
         # On-air feed/stint + league identity for producer takeover (#takeover):
         # the on-air feed is the lower-index one (live_feed); the stint is the
@@ -7592,7 +7729,8 @@ class Relay:
                           "state": "stopped" if self.pov.paused else self.pov.phase,
                           "state_age_s": round(now - self.pov.phase_since, 1),
                           "down": self.pov.dropped and not self.pov.paused,
-                          "source": self.pov_source.health() if self.pov_source else None}
+                          "source": self.pov_source.health() if self.pov_source else None,
+                          **self._backlog_status("POV", self.pov)}
         out["obs"] = {"reachable": self.obs_reachable, "note": self.obs_note}
         out["live"] = {"feed": None, "stint": None, "mode": "solo"}
         out["league"] = {"sheet_id": self.sheet_id, "name": self.league_name}
@@ -9524,6 +9662,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                       # right-column card (no stream URLs).
                                       "schedule": cockpit_schedule(rows, live_idx, me),
                                       "syncing": cockpit_syncing(relay._desync),
+                                      "program_behind_s": cockpit_program_behind(
+                                          getattr(relay, "_backlogged_feeds", None)),
                                       "my_pending": my_pending})
                         return self._send(tally)
                     if p == ["cockpit", "program"]:

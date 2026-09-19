@@ -868,6 +868,137 @@ def t_rejoin_probe_stop_process_reaps_the_child():
     _rejoin_probe().stop_process(proc)
     assert proc.returncode is not None
 
+
+# --- #583 fan-out consumer backlog behind the live edge (observability only) ---
+# 2026-08-28: OBS drained the ring ~20% slower than it filled and the relay could not
+# see it. The relay reads everything up to the trailing mark and then blocks in
+# sendall, so the cursor right after a read always sits ~prebuffer_s behind live;
+# the backlog is the age of the next byte OBS has NOT yet accepted.
+
+def _ring_1s(n=10):
+    """100 bytes/s, one write (and one mark) per second: marks (100,0) .. (1000,9)."""
+    r = m.FeedRing(1_000_000)
+    for i in range(n):
+        r.write(b"x" * 100, now=float(i))
+    return r
+
+
+def t_ring_age_at_offset_is_the_age_of_the_next_unread_byte():
+    r = _ring_1s()
+    # byte 650 arrived with the write that ended at 700 (t=6) -> 3 s behind at t=9
+    assert r.age_at_offset(650, now=9.0) == 3.0
+    # byte 700 is the first byte of the t=7 write
+    assert r.age_at_offset(700, now=9.0) == 2.0
+    # the value keeps growing while the consumer does not move
+    assert r.age_at_offset(650, now=15.0) == 9.0
+
+
+def t_ring_age_at_offset_is_zero_at_the_live_edge():
+    r = _ring_1s()
+    assert r.age_at_offset(r.live_offset(), now=50.0) == 0.0   # a source stall is not a backlog
+    assert r.age_at_offset(r.live_offset() + 5, now=50.0) == 0.0
+
+
+def t_ring_age_at_offset_empty_ring_has_nothing_to_be_behind():
+    assert m.FeedRing(1000).age_at_offset(0, now=5.0) == 0.0
+
+
+def t_ring_age_at_offset_unmarked_tail_uses_the_newest_mark():
+    r = m.FeedRing(1_000_000)
+    r.write(b"x" * 100, now=0.0)
+    r.write(b"x" * 100, now=0.05)           # throttled: no mark of its own
+    assert r.age_at_offset(150, now=5.0) == 5.0
+
+
+def t_ring_age_at_offset_overflowed_cursor_reports_the_oldest_retained_byte():
+    r = m.FeedRing(250)
+    for i in range(10):
+        r.write(b"x" * 100, now=float(i))
+    assert r.start_offset() == 750
+    # a lapped consumer is at least as far behind as the oldest retained byte (t=7)
+    assert r.age_at_offset(100, now=9.0) == 2.0
+
+
+def _backlog_server(ring):
+    return m.FeedFanoutServer("127.0.0.1", 0, ring, m.logging.getLogger("t"), prebuffer_s=3.0)
+
+
+def t_fanout_consumer_backlog_grows_while_the_consumer_does_not_accept():
+    r = _ring_1s()
+    srv = _backlog_server(r)
+    assert srv.consumer_backlog(9.0) is None                     # no consumer attached
+    with srv._consumers_lock:
+        srv._consumers[1] = {"cycle_ts": 0.0, "snaps": 0}
+        srv._consumers[2] = {"cycle_ts": 0.0, "snaps": 0}
+    srv._note_cycle(1, 650, now=9.0)
+    srv._note_cycle(2, 950, now=9.0)
+    assert srv.consumer_backlog(9.0) == 3.0                      # the worst consumer
+    assert srv.consumer_backlog(14.0) == 8.0                     # blocked in sendall: it grows
+
+
+def t_fanout_backlog_floor_is_the_interval_minimum_and_resets_on_take():
+    r = _ring_1s()
+    srv = _backlog_server(r)
+    assert srv.take_backlog_floor() is None
+    with srv._consumers_lock:
+        srv._consumers[1] = {"cycle_ts": 0.0, "snaps": 0}
+    srv._note_cycle(1, 650, now=9.0)                             # 3.0 s
+    srv._note_cycle(1, 450, now=9.5)                             # 5.5 s
+    srv._note_cycle(1, 550, now=9.5)                             # 4.5 s
+    assert srv.take_backlog_floor() == 3.0                       # a segment burst cannot inflate it
+    assert srv.take_backlog_floor() is None                      # reset by the take
+    srv._note_cycle(1, 450, now=9.5)
+    assert srv.take_backlog_floor() == 5.5
+
+
+def t_fanout_backlog_floor_reports_the_worst_consumer():
+    r = _ring_1s()
+    srv = _backlog_server(r)
+    with srv._consumers_lock:
+        srv._consumers[1] = {"cycle_ts": 0.0, "snaps": 0}
+        srv._consumers[2] = {"cycle_ts": 0.0, "snaps": 0}
+    srv._note_cycle(1, 850, now=9.0)                             # 1.0 s
+    srv._note_cycle(2, 350, now=9.0)                             # 6.0 s
+    assert srv.take_backlog_floor() == 6.0
+
+
+def t_fanout_serve_measures_the_accepted_position_end_to_end():
+    # Real socket: a consumer that connects and never reads still gets registered and
+    # its backlog is measured from the join cursor.
+    r = m.FeedRing(1_000_000)
+    t0 = time.monotonic()
+    for i in range(10):
+        r.write(b"x" * 100, now=t0 - 10.0 + i)
+    srv = m.FeedFanoutServer("127.0.0.1", 0, r, m.logging.getLogger("t"), prebuffer_s=3.0).start()
+    try:
+        c = socket.create_connection(("127.0.0.1", srv.port), timeout=2)
+        c.sendall(b"GET / HTTP/1.0\r\n\r\n")
+        deadline = time.monotonic() + 2.0
+        backlog = None
+        while time.monotonic() < deadline and backlog is None:
+            backlog = srv.consumer_backlog(time.monotonic())
+            time.sleep(0.02)
+        # joined at the trailing mark (t0-3); its next byte arrived with the t0-2 write
+        assert backlog is not None and 1.9 <= backlog <= 4.0, backlog
+        c.close()
+    finally:
+        srv.stop()
+
+
+def t_feed_backlog_degraded_is_relative_to_the_reserve():
+    assert m.feed_backlog_degraded(None, 3.0, 5.0) is False      # no consumer / no sample
+    assert m.feed_backlog_degraded(3.2, 3.0, 5.0) is False       # the #533 reserve itself
+    assert m.feed_backlog_degraded(8.0, 3.0, 5.0) is False       # exactly at the threshold
+    assert m.feed_backlog_degraded(8.1, 3.0, 5.0) is True
+    assert m.feed_backlog_degraded(5.1, 0.0, 5.0) is True        # prebuffer disabled
+
+
+def t_feed_backlog_warn_s_env():
+    assert m.feed_backlog_warn_s({}) == m.FEED_BACKLOG_WARN_S == 5.0
+    assert m.feed_backlog_warn_s({"RACECAST_FEED_BACKLOG_WARN_S": "8"}) == 8.0
+    assert m.feed_backlog_warn_s({"RACECAST_FEED_BACKLOG_WARN_S": "0"}) == 5.0
+    assert m.feed_backlog_warn_s({"RACECAST_FEED_BACKLOG_WARN_S": "x"}) == 5.0
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

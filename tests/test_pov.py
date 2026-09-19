@@ -2550,6 +2550,67 @@ def t_reflect_snapshots_the_mic_before_the_freed_feed_advances():
     assert m._OBS_WS_MODULE.feed_state_intents(live, cut, audio=audio, extra_mute=extra)[3:5] \
         == [("mute", "Feed A"), ("mute", MIC)]
 
+
+class _BacklogSrv:
+    """FeedFanoutServer stand-in for #583: a fixed interval floor and live backlog."""
+    def __init__(self, floor, live=None):
+        self.floor = floor; self.live = live; self.takes = 0
+    def take_backlog_floor(self):
+        self.takes += 1
+        return self.floor
+    def consumer_backlog(self, now):
+        return self.live
+
+
+def _backlog_relay(a_floor, b_floor=None, a_live=None):
+    r = _make_min_relay()
+    r.feed_prebuffer_s = 3.0
+    r._backlog_warn_s = 5.0
+    for f in r.feeds.values():
+        f.phase = "serving"; f.paused = False
+    r.A.fanout_server = _BacklogSrv(a_floor, a_live)
+    r.B.fanout_server = _BacklogSrv(b_floor)
+    return r
+
+
+def t_heartbeat_backlog_sample_classifies_serving_feeds_only():
+    r = _backlog_relay(11.6, 9.0)
+    r.B.paused = True                                   # an off-air stopped feed never counts
+    r._sample_consumer_backlogs()
+    assert r._interval_backlogs == {"A": 11.6, "B": 9.0}
+    assert r._backlogged_feeds == {"A": 11.6}
+    assert r.A.fanout_server.takes == 1                 # read + reset exactly once per tick
+    r.A.fanout_server.floor = 3.2                       # back inside the reserve
+    r._sample_consumer_backlogs()
+    assert r._backlogged_feeds == {}
+
+
+def t_backlog_yellow_shows_but_never_pages():
+    # Uncalibrated until stage 4 of #581: display-only, like the #535 inbound stall.
+    r = _backlog_relay(11.6)
+    r.obs_reachable = True
+    r._sample_consumer_backlogs()
+    h = r._refresh_health(2000.0)
+    assert ("Feed A output 12 s behind live — OBS reads slower than real time; step the "
+            "feed quality down to ROBUST") in h["reasons"]
+    facts = r._health_facts(2000.0)
+    assert facts["feeds_backlogged"] == {"A": 11.6}
+    # the notify level is computed as if the backlog were absent
+    assert h["notify_level"] == m.aggregate_health({**facts, "feeds_backlogged": {}})["level"]
+    r._backlogged_feeds = {}
+    assert r._refresh_health(2001.0)["notify_level"] == h["notify_level"]
+
+
+def t_backlog_in_status_and_health_snapshot():
+    r = _backlog_relay(11.6, 3.1, a_live=12.34)
+    r._sample_consumer_backlogs()
+    st = r.status()
+    assert st["feeds"]["A"]["backlog_s"] == 12.3 and st["feeds"]["A"]["backlogged"] is True
+    assert st["feeds"]["B"]["backlog_s"] is None and st["feeds"]["B"]["backlogged"] is False
+    snap = r._health_snapshot(123.0)
+    assert (snap["feed_a_backlog_s"], snap["feed_b_backlog_s"], snap["pov_backlog_s"]) == \
+        (11.6, 3.1, None)
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

@@ -636,6 +636,44 @@ def t_max_gap_columns_round_trip():
         conn.close()
 
 
+
+def t_migrate_adds_backlog_columns_v9_lossless_and_charted():
+    import sqlite3
+    d = tempfile.mkdtemp()
+    path = os.path.join(d, "h.db")
+    c = sqlite3.connect(path)
+    try:
+        c.executescript("CREATE TABLE samples (ts REAL NOT NULL, kind TEXT NOT NULL, "
+                        "health_level TEXT, feed_a_max_gap_s REAL);")
+        c.execute("PRAGMA user_version=8")
+        c.execute("INSERT INTO samples (ts, kind, feed_a_max_gap_s) VALUES (?,?,?)",
+                  (1000.0, "tick", 2.5))
+        c.commit()
+    finally:
+        c.close()
+    conn = hs.open_db(path)
+    try:
+        hs.migrate(conn)
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == hs.SCHEMA_VERSION == 9
+        row = conn.execute("SELECT feed_a_max_gap_s, feed_a_backlog_s, feed_b_backlog_s, "
+                           "pov_backlog_s FROM samples").fetchone()
+        assert tuple(row) == (2.5, None, None, None)    # lossless; new columns NULL
+    finally:
+        conn.close()
+    conn2 = hs.open_db(os.path.join(d, "fresh.db"))
+    try:
+        hs.migrate(conn2)
+        hs.record(conn2, {"ts": 2000.0, "feed_a_backlog_s": 11.6, "feed_b_backlog_s": 3.1,
+                          "pov_backlog_s": 0.4}, "tick")
+        got = hs.query_range(conn2, 1500, 2500)[0]
+        assert (got["feed_a_backlog_s"], got["feed_b_backlog_s"], got["pov_backlog_s"]) == \
+            (11.6, 3.1, 0.4)
+        series = hs.numeric_series([got])
+        for f in ("feed_a_backlog_s", "feed_b_backlog_s", "pov_backlog_s"):
+            assert f in series, f                    # NUMERIC_FIELDS wired
+    finally:
+        conn2.close()
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
