@@ -105,7 +105,8 @@ feed at **FULL** (1080p) and then at **ROBUST** (720p). After each switch it wai
 until the new feed connection has delivered its first seconds, then reconnects OBS to
 the feed, the same as the **RESET** button in the Director Panel. Otherwise OBS would
 play that delivered backlog and stay that far behind live, which says nothing about
-the machine. It then settles for 10 s (`--settle`) and samples for 60 s (`--window`).
+the machine. It then settles for 10 s (`--settle`, at least 3 s, so OBS has finished
+reconnecting) and samples for 60 s (`--window`).
 
 A tier keeps real time when OBS renders at its configured frame rate, the encoder keeps
 up with the clock, and the feed's picture in OBS actually advances at real time. The
@@ -115,8 +116,10 @@ at the start and at the end of each window. That figure is for information and d
 not decide the verdict.
 
 A tier gives no verdict, and the run asks to be repeated, if during its window the
-feed dropped, OBS reconnected, or the relay had to skip data because OBS fell too far
-behind. That usually means the source had a hiccup, not the machine.
+feed dropped, OBS reconnected, the relay had to skip data because OBS fell too far
+behind, or the source stopped delivering (the picture in OBS stood still while OBS had
+already read everything the relay had). Those point at the source or the connection,
+not the machine.
 
 Afterwards it puts the scene, the feed's quality setting and the recording back as
 they were, reconnects OBS to the feed once more, and deletes its own recording
