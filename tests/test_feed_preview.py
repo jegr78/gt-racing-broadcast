@@ -346,6 +346,39 @@ def t_manager_offair_uses_ring_tap_when_fanout():
     assert mgr.levels() == {"B": 0.8}
 
 
+
+def t_preview_ring_tap_prepends_init_and_aligns_an_fmp4_join():
+    """#577: the preview tap joins at the live edge like OBS does, so an fMP4
+    feed needs the same init segment + moof alignment before ffmpeg sees it."""
+    def box(typ, payload=b""):
+        return (8 + len(payload)).to_bytes(4, "big") + typ + payload
+    init = box(b"ftyp", b"mp42" + b"\x00" * 8) + box(b"moov", b"\x11" * 200)
+    frag1 = box(b"moof", b"\x22" * 60) + box(b"mdat", b"\x33" * 400)
+    frag2 = box(b"moof", b"\x22" * 60) + box(b"mdat", b"\x44" * 400)
+    ring = m.FeedRing(1 << 20)
+    ring.write(init + frag1[:100])                    # the tap joins mid-mdat
+    written = bytearray()
+
+    def fake_spawn(worker):
+        class _V:
+            @staticmethod
+            def read(n=65536):
+                time.sleep(0.05)
+                return b"" if worker._stop.is_set() else b"\x00"
+        class _Stdin:
+            def write(self, data): written.extend(data)
+            def flush(self): pass
+            def close(self): pass
+        return _FakeProc(), _Stdin(), _V(), iter([])
+
+    w = m._PreviewRingTap(ring, "B", _quiet_log(), spawn=fake_spawn)
+    w.start()
+    time.sleep(0.2)
+    ring.write(frag1[100:] + frag2)
+    _wait(lambda: len(written) >= len(init) + len(frag2), 2.0)
+    w.stop()
+    assert bytes(written) == init + frag2, (bytes(written[:40]), len(written))
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

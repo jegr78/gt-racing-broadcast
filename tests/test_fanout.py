@@ -683,6 +683,72 @@ def t_parse_ffmpeg_sources():
         ("alsa_input.usb-Elgato_HD60_X-02.analog-stereo", "HD60 X Analog Stereo"),
         ("alsa_input.pci-0000_00_1f.3.analog-stereo", "Built-in Audio Analog Stereo")]
 
+
+# --- fMP4/CMAF joins on the OBS serve (#577) ---------------------------------
+# #576 fixed the program-audio tap; the OBS serve had the same gap. With fan-out
+# on, OBS disconnects off-air (close_when_inactive) and rejoins mid-stream at
+# every activation — on an fMP4 feed that join lands inside an mdat with no
+# codec parameters, and ffmpeg refuses to open it.
+
+def _box(typ, payload=b""):
+    return (8 + len(payload)).to_bytes(4, "big") + typ + payload
+
+
+_INIT = _box(b"ftyp", b"mp42" + b"\x00" * 8) + _box(b"moov", b"\x11" * 200)
+
+
+def _fragment(payload):
+    return _box(b"moof", b"\x22" * 60) + _box(b"mdat", payload)
+
+
+def _serve_mid_stream_join(before, after):
+    """Write `before`, connect a consumer (it joins at the live edge), write
+    `after`, and return the body it received."""
+    ring = m.FeedRing(1 << 20)
+    ring.write(before)
+    srv = m.FeedFanoutServer("127.0.0.1", 0, ring, m.logging.getLogger("t577"))
+    srv.start()
+    try:
+        body = {}
+        want = len(_INIT) + len(after)
+        t = threading.Thread(target=lambda: body.update(b=_http_get_body(srv.port, want)))
+        t.start()
+        time.sleep(0.2)                               # joined before `after` arrives
+        ring.write(after)
+        t.join(3)
+        return body["b"]
+    finally:
+        srv.stop()
+
+
+def t_fanout_server_prepends_init_and_aligns_an_fmp4_join():
+    """A mid-mdat join must reach OBS as ftyp+moov followed by the next moof —
+    never the raw bytes at the join cursor."""
+    frag1 = _fragment(b"\x33" * 400)
+    frag2 = _fragment(b"\x44" * 400)
+    got = _serve_mid_stream_join(_INIT + frag1[:100], frag1[100:] + frag2)
+    assert got == _INIT + frag2, (got[:40], len(got))
+
+
+def t_fanout_server_leaves_an_mpeg_ts_join_untouched():
+    """The TS path stays byte-identical: no prefix, nothing held back."""
+    ts = b"".join(b"\x47" + bytes([i % 251]) * 187 for i in range(40))
+    ring = m.FeedRing(1 << 20)
+    ring.write(ts[:188 * 10 + 50])                    # join mid-packet, as today
+    srv = m.FeedFanoutServer("127.0.0.1", 0, ring, m.logging.getLogger("t577ts"))
+    srv.start()
+    try:
+        body = {}
+        rest = ts[188 * 10 + 50:]
+        t = threading.Thread(target=lambda: body.update(b=_http_get_body(srv.port, len(rest))))
+        t.start()
+        time.sleep(0.2)
+        ring.write(rest)
+        t.join(3)
+        assert body["b"] == rest
+    finally:
+        srv.stop()
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
