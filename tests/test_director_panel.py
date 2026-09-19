@@ -303,8 +303,10 @@ def t_feed_reset_is_labelled_as_the_backlog_resolution():
     h = _html()
     assert '"RESET "+f+"→OBS"' not in h, "old RESET x→OBS label must be gone"
     assert h.count('obsPost("feed-reset"') == 1, "exactly one control calls feed-reset"
-    assert "function resetLabel(" in h and "resetLabel(d)" in h, \
-        "RESET labels re-rendered from every /status poll"
+    assert "function resetLabel(" in h, "RESET label renderer"
+    poll = h[h.index("async function relayPoll("):]
+    poll = poll[:poll.index("\n}\n")]
+    assert "resetLabel(d);" in poll, "RESET labels re-rendered from every /status poll"
     assert "reset_discards_s" in h, "the label reads the relay's discard figure"
     assert "discards " in h and " s backlog" in h, "the cost is spelled out on the button"
 
