@@ -62,6 +62,9 @@ racecast cookies firefox
   **Full Disk Access**. (Firefox needs neither.)
 - Writes `runtime/yt-cookies.txt` (chmod 600), auto-detected and passed to yt-dlp.
   `/status` then shows `"cookies": true`. **Re-run before each event** — cookies rotate.
+- The export keeps only the `youtube.com` cookies. The browser's other sessions
+  (Google account, GitHub, Discord, …) are dropped, and the command prints how many.
+  A jar you drop in by hand is used as it is.
 - Alternative: let the relay export on start with `--cookies-from-browser firefox`, or
   drop any Netscape `yt-cookies.txt` next to the relay (a legacy `cookies.txt` is
   migrated automatically on first use).
@@ -79,7 +82,7 @@ racecast cookies twitch firefox
 
 - You must be **logged into Twitch** in that browser (not YouTube — a separate session).
 - Writes `runtime/twitch-cookies.txt` (chmod 600), auto-detected by the relay for
-  Twitch feeds. The `/status` `cookies` field shows whether the YouTube cookie jar is loaded.
+  Twitch feeds. Only the `twitch.tv` cookies are kept. The `/status` `cookies` field shows whether the YouTube cookie jar is loaded.
 - **Re-run before each event** alongside the YouTube refresh.
 
 ### Summary: which accounts the producer needs
