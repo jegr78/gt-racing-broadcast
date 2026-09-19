@@ -10541,6 +10541,9 @@ def export_cookies(browser, out):
     if ok:
         try: os.chmod(out, 0o600)   # live YouTube session — owner-only
         except OSError: pass        # best-effort hardening; never block the export
+        # yt-dlp writes the whole browser profile; keep only the YouTube cookies (#616).
+        if cookie_jar.filter_jar(out, "youtube") is None:
+            LOG.warning("Could not strip other sites' cookies from %s.", out)
         LOG.info("Cookie export from '%s': OK -> %s", browser, out)
     else:
         err = (proc.stderr or b"").decode("utf-8", errors="replace")

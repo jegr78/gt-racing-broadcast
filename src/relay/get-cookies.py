@@ -21,6 +21,7 @@ for _cand in (os.path.join(_HERE, "..", "scripts"),
     if os.path.isdir(_cand) and _cand not in sys.path:
         sys.path.insert(0, _cand)
 from services import external_tool_env  # de-PyInstaller the env for the yt-dlp spawn
+import cookie_jar  # the platform-domain filter + the shared login rule (#615, #616)
 
 
 def default_runtime_dir(here):
@@ -79,6 +80,13 @@ def main():
     if os.path.exists(out):
         try: os.chmod(out, 0o600)   # live session — owner-only
         except OSError: pass        # best-effort hardening; never block the export
+        # yt-dlp writes the whole browser profile; keep only this platform's cookies.
+        dropped = cookie_jar.filter_jar(out, a.platform)
+        if dropped:
+            domains = ", ".join(cookie_jar.PLATFORM_COOKIE_DOMAINS[a.platform])
+            print(f"Kept only {domains} cookies (dropped {dropped} from other sites).")
+        elif dropped is None:
+            print(f"WARNING: could not strip other sites' cookies from {out}.")
         with open(out, encoding="utf-8", errors="replace") as fh:
             txt = fh.read()
         if a.platform == "twitch":
@@ -88,7 +96,7 @@ def main():
                 print(f"WARNING: cookies written but no login found — log into Twitch in "
                       f"'{a.browser}' and re-run (racecast cookies twitch {a.browser}).")
         else:
-            if re.search(r"LOGIN_INFO|SAPISID|__Secure-[0-9]?PSID", txt):
+            if cookie_jar.text_has_login(txt):
                 print(f"OK -> {out}  (logged-in session detected)")
             else:
                 print(f"WARNING: cookies written but no login found — log into YouTube in "
