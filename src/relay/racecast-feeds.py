@@ -4665,15 +4665,23 @@ class FeedFanoutServer:
         ages = [a for a in (self.ring.age_at_offset(c, now) for c in cursors) if a is not None]
         return max(ages) if ages else None
 
-    def take_backlog_floor(self):
+    def take_backlog_floor(self, now):
         """The worst consumer's smallest backlog since the last call, then reset (#583).
         The floor is what a slow consumer pushes up; a bursty source's sawtooth above it
-        is not a backlog. Called once per heartbeat. None without a sample."""
+        is not a backlog. The live age of each accepted position counts too: a slow
+        consumer's sendall can outlast a whole heartbeat, and then no read cycle samples
+        the interval in which its backlog is largest. Called once per heartbeat; `now` is
+        monotonic. None when no consumer is attached."""
         with self._consumers_lock:
-            floors = [st.get("floor") for st in self._consumers.values()]
+            states = [(st.get("floor"), st.get("cursor")) for st in self._consumers.values()]
             for st in self._consumers.values():
                 st["floor"] = None
-        floors = [f for f in floors if f is not None]
+        floors = []
+        for floor, cursor in states:
+            if cursor is not None and hasattr(self.ring, "age_at_offset"):
+                floor = fold_backlog_floor(floor, self.ring.age_at_offset(cursor, now))
+            if floor is not None:
+                floors.append(floor)
         return max(floors) if floors else None
 
     def consumer_health(self, now):
@@ -7359,7 +7367,7 @@ class Relay:
             srv = getattr(f, "fanout_server", None)
             if srv is None:
                 continue
-            fl = srv.take_backlog_floor()          # always take: a stopped feed resets too
+            fl = srv.take_backlog_floor(time.monotonic())   # always take: a stopped feed resets too
             if f.paused or f.phase != "serving":
                 floors[name] = None                  # no live edge to be behind
                 continue

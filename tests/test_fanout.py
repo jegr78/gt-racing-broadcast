@@ -939,16 +939,30 @@ def t_fanout_consumer_backlog_grows_while_the_consumer_does_not_accept():
 def t_fanout_backlog_floor_is_the_interval_minimum_and_resets_on_take():
     r = _ring_1s()
     srv = _backlog_server(r)
-    assert srv.take_backlog_floor() is None
+    assert srv.take_backlog_floor(9.0) is None                   # no consumer attached
     with srv._consumers_lock:
         srv._consumers[1] = {"cycle_ts": 0.0, "snaps": 0}
     srv._note_cycle(1, 650, now=9.0)                             # 3.0 s
     srv._note_cycle(1, 450, now=9.5)                             # 5.5 s
     srv._note_cycle(1, 550, now=9.5)                             # 4.5 s
-    assert srv.take_backlog_floor() == 3.0                       # a segment burst cannot inflate it
-    assert srv.take_backlog_floor() is None                      # reset by the take
+    assert srv.take_backlog_floor(9.5) == 3.0                    # a segment burst cannot inflate it
+    # reset by the take: the next interval starts from the accepted position (550 -> 4.5 s)
+    assert srv.take_backlog_floor(9.5) == 4.5
     srv._note_cycle(1, 450, now=9.5)
-    assert srv.take_backlog_floor() == 5.5
+    assert srv.take_backlog_floor(9.5) == 5.5
+
+
+def t_fanout_backlog_floor_counts_a_consumer_blocked_all_interval():
+    # A slow consumer's sendall can outlast a heartbeat: no read cycle starts in that
+    # interval, and that is exactly when the backlog is largest. The take folds in the
+    # live age of the accepted position, so the interval is never empty.
+    r = _ring_1s()
+    srv = _backlog_server(r)
+    with srv._consumers_lock:
+        srv._consumers[1] = {"cycle_ts": 0.0, "snaps": 0}
+    srv._note_cycle(1, 650, now=9.0)
+    assert srv.take_backlog_floor(9.0) == 3.0
+    assert srv.take_backlog_floor(20.0) == 14.0                  # blocked since t=9
 
 
 def t_fanout_backlog_floor_reports_the_worst_consumer():
@@ -959,7 +973,7 @@ def t_fanout_backlog_floor_reports_the_worst_consumer():
         srv._consumers[2] = {"cycle_ts": 0.0, "snaps": 0}
     srv._note_cycle(1, 850, now=9.0)                             # 1.0 s
     srv._note_cycle(2, 350, now=9.0)                             # 6.0 s
-    assert srv.take_backlog_floor() == 6.0
+    assert srv.take_backlog_floor(9.0) == 6.0
 
 
 def t_fanout_serve_measures_the_accepted_position_end_to_end():
@@ -1012,9 +1026,9 @@ def t_fanout_serve_floor_rises_for_a_consumer_slower_than_real_time():
     st = threading.Thread(target=srv._serve, args=(_SlowConn(),), daemon=True); st.start()
     try:
         time.sleep(2.0)
-        srv.take_backlog_floor()                         # drop the warm-up samples
+        srv.take_backlog_floor(time.monotonic())         # drop the warm-up samples
         time.sleep(1.5)
-        floor = srv.take_backlog_floor()
+        floor = srv.take_backlog_floor(time.monotonic())
         # ~1.6 s: the reserve plus the deficit. Measured after the read it stays at the
         # 0.3 s reserve, so 1.0 separates the two with room for a slow runner.
         assert floor is not None and floor > 1.0, floor

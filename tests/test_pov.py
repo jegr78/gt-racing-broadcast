@@ -2555,7 +2555,7 @@ class _BacklogSrv:
     """FeedFanoutServer stand-in for #583: a fixed interval floor and live backlog."""
     def __init__(self, floor, live=None):
         self.floor = floor; self.live = live; self.takes = 0
-    def take_backlog_floor(self):
+    def take_backlog_floor(self, now):
         self.takes += 1
         return self.floor
     def consumer_backlog(self, now):
