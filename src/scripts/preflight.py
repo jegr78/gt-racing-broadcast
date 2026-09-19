@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 import http_util
+import cookie_jar
 
 from services import external_tool_env  # de-PyInstaller the env for spawned tool probes
 
@@ -267,7 +268,7 @@ def tool_version(name, run=subprocess.run, which=shutil.which):
 # --------------------------------------------------------------------------
 # Cookies
 # --------------------------------------------------------------------------
-COOKIE_MARKERS = ("SAPISID", "__Secure-3PSID", "__Secure-1PSID", "LOGIN_INFO")
+COOKIE_MARKERS = cookie_jar.COOKIE_MARKERS   # the one rule, shared with the relay (#615)
 
 
 def resolve_cookies_path(preflight_file, runtime_dir=None, cookies_opt=None):
@@ -319,7 +320,7 @@ def cookies_status(path, max_age_hours=12, now=None):
             text = fh.read()
     except OSError:
         text = ""
-    has_login = any(marker in text for marker in COOKIE_MARKERS)
+    has_login = cookie_jar.text_has_login(text)
     if age_h > max_age_hours:
         return Result(WARN, "yt-cookies.txt",
                       f"{age_h:.0f} h old — cookies rotate; re-run `racecast cookies firefox`")
