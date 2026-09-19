@@ -87,6 +87,83 @@ def t_resolve_hls_failure_without_stderr_says_not_live():
     assert url is None and err == "not live?"
 
 
+_NO_FORMAT_ERR = ("ERROR: [youtube] abc: Requested format is not available. "
+                  "Use --list-formats for a list of available formats")
+
+
+def _resolve_err(stderr, status_stdout="", status_exc=None):
+    """resolve_hls against a failing resolve (`stderr`) and a live-status call that prints
+    `status_stdout` (or raises `status_exc`). Returns (url, err, quality, argvs)."""
+    calls = []
+
+    def fake_run(cmd, *a, **k):
+        calls.append(cmd)
+        if "-g" in cmd:
+            return _FakeRun(stderr=stderr)
+        if status_exc is not None:
+            raise status_exc
+        return _FakeRun(stdout=status_stdout)
+    orig = m.subprocess.run
+    m.subprocess.run = fake_run
+    try:
+        return (*m.resolve_hls("https://yt.example/x", "/c/j.txt", _LOG), calls)
+    finally:
+        m.subprocess.run = orig
+
+
+def t_resolve_hls_post_live_classifies_as_ended():
+    # #621: yt-dlp 2026.08.19 on a broadcast in Post-Live Manifestless mode: the resolve
+    # fails with this stderr, the live-status call prints "rcs post_live" (both captured).
+    url, err, q, calls = _resolve_err(_NO_FORMAT_ERR + "\n", "rcs post_live\n")
+    assert url is None and q is None
+    assert err == _NO_FORMAT_ERR + " (live_status post_live)", err
+    assert m.classify_source_state(err) == "ended"
+    assert len(calls) == 2 and calls[1] == m.ytdlp_live_status_cmd("https://yt.example/x", "/c/j.txt")
+
+
+def t_resolve_hls_was_live_and_upcoming_classify():
+    _u, err, _q, _c = _resolve_err(_NO_FORMAT_ERR, "rcs was_live\n")
+    assert m.classify_source_state(err) == "ended", err
+    _u, err, _q, _c = _resolve_err(_NO_FORMAT_ERR, "rcs is_upcoming\n")
+    assert m.classify_source_state(err) == "not_live_yet", err
+
+
+def t_resolve_hls_live_without_format_stays_generic():
+    # #621/#615: a logged-out jar on a LIVE video fails with the same text. The live
+    # status keeps it apart from an ended broadcast: a generic drop, not "ended".
+    _u, err, _q, _c = _resolve_err(_NO_FORMAT_ERR, "rcs is_live\n")
+    assert err == _NO_FORMAT_ERR + " (live_status is_live)", err
+    assert m.classify_source_state(err) is None
+
+
+def t_resolve_hls_unknown_or_failed_live_status_keeps_error():
+    for kw in ({"status_stdout": "rcs NA\n"}, {"status_stdout": ""},
+               {"status_exc": m.subprocess.TimeoutExpired("yt-dlp", 30)},
+               {"status_exc": OSError("gone")}):
+        _u, err, _q, calls = _resolve_err(_NO_FORMAT_ERR, **kw)
+        assert err == _NO_FORMAT_ERR, (kw, err)
+        assert len(calls) == 2, kw
+
+
+def t_resolve_hls_other_errors_skip_the_status_call():
+    # The playability reasons (bot check, rate limit, ended text) must reach the panel
+    # verbatim: no second call, no suffix.
+    for e in ("ERROR: [youtube] abc: Sign in to confirm you're not a bot. Use --cookies",
+              "ERROR: [youtube] abc: This live event has ended.",
+              "ERROR: unable to download video data: HTTP Error 429: Too Many Requests"):
+        _u, err, _q, calls = _resolve_err(e + "\n", "rcs post_live\n")
+        assert err == e and len(calls) == 1, (e, err, calls)
+
+
+def t_parse_ytdlp_live_status():
+    assert m.parse_ytdlp_live_status("rcs post_live\n") == "post_live"
+    assert m.parse_ytdlp_live_status("rcs is_live") == "is_live"
+    assert m.parse_ytdlp_live_status("rcs NA") == "NA"
+    assert m.parse_ytdlp_live_status("https://x.example/m3u8") is None
+    assert m.parse_ytdlp_live_status("") is None
+    assert m.parse_ytdlp_live_status(None) is None
+
+
 def t_feed_initial_phase_is_idle():
     # Feed now opens a per-feed log at init -> use a tempdir, not the repo tree.
     with tempfile.TemporaryDirectory() as td:

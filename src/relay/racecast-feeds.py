@@ -340,11 +340,19 @@ def serve_exit_is_drop(stopped, advancing):
 
 # Source-not-live signatures (#495) — matched case-insensitively as substrings against
 # the yt-dlp/streamlink diagnostic text. ENDED is checked first (more specific).
-_SOURCE_ENDED = ("this live event has ended",)
+# The "live_status …" entries match the suffix resolve_hls appends to a 'Requested
+# format is not available' error (#621): an ended broadcast in Post-Live Manifestless
+# mode fails with that text, like a logged-out jar, and only the live status differs.
+_SOURCE_ENDED = (
+    "this live event has ended",
+    "live_status post_live",         # yt-dlp: broadcast over, recording not processed yet
+    "live_status was_live",          # yt-dlp: broadcast over, recording available
+)
 _SOURCE_NOT_LIVE_YET = (
     "no playable streams found",     # Twitch: channel offline / not live yet
     "not currently live",            # yt-dlp YouTube: channel not live
     "will begin in",                 # YouTube: scheduled premiere not started
+    "live_status is_upcoming",       # yt-dlp: scheduled, not started
 )
 
 
@@ -355,7 +363,7 @@ def classify_source_state(text):
       "not_live_yet" — source offline / not started (Twitch 'No playable streams
                        found', yt-dlp 'not currently live').
       "ended"        — source's live broadcast is over (YouTube 'This live event has
-                       ended').
+                       ended', or a post-live / was-live status from the resolve).
       None           — anything else (429/403/network/generic) — unchanged behaviour."""
     if not text:
         return None
@@ -3459,6 +3467,20 @@ def ytdlp_resolve_cmd(url, cookies, fmt=YTDLP_FORMAT):
     return cmd
 
 
+def ytdlp_live_status_cmd(url, cookies):
+    """Argv that prints only the video's live status as "rcs <live_status>" (#621). Run
+    ONLY after a resolve failed with 'Requested format is not available': the flag
+    --ignore-no-formats-error turns every playability reason (bot check, rate limit,
+    'This live event has ended') into a warning that --no-warnings hides, so it must
+    never be on the resolve itself. `--` precedes the URL, as in ytdlp_resolve_cmd."""
+    cmd = ["yt-dlp", "--skip-download", "--no-warnings", "--no-playlist",
+           "--ignore-no-formats-error", "--print", "rcs %(live_status)s"]
+    if cookies:
+        cmd += ["--cookies", cookies]
+    cmd += ["--", url]
+    return cmd
+
+
 def streamlink_serve_cmd(target, port, platform="youtube", twitch_token=None,
                          cookies=None, user_agent=STREAMLINK_YT_UA, tier="full"):
     """Argv for serving a stream to one OBS client. YouTube gets a resolved HLS
@@ -5034,8 +5056,28 @@ def resolve_hls(url, cookies, logger, fmt=YTDLP_FORMAT):
         return out[0], None, parse_ytdlp_quality(r.stdout)
     err = (r.stderr or "").strip().splitlines()
     last = err[-1] if err else "not live?"
+    if YTDLP_NO_FORMAT.lower() in last.lower():
+        # An ended broadcast (Post-Live Manifestless) and a logged-out jar both end
+        # here; the live status tells them apart, and classify_source_state reads it
+        # from this text (#621).
+        status = ytdlp_live_status(url, cookies)
+        if status not in (None, "NA"):
+            last = f"{last} (live_status {status})"
     logger.warning("yt-dlp could not resolve %s (%s)", url, last)
     return None, last, None
+
+
+def ytdlp_live_status(url, cookies):
+    """The video's yt-dlp live status ('is_live', 'post_live', 'was_live', 'is_upcoming',
+    'NA'), or None when the call fails. Best-effort: a failure leaves the resolve error as
+    it was (#621)."""
+    try:
+        r = subprocess.run(ytdlp_live_status_cmd(url, cookies), capture_output=True,
+                           text=True, errors="replace", timeout=30,
+                           env=external_tool_env(), **_no_window_kwargs())
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return parse_ytdlp_live_status(r.stdout)
 
 
 def stint_start_indices(stint, schedule_len):
@@ -6438,6 +6480,19 @@ def parse_stream_quality(line):
 
 
 _YTDLP_QUALITY_RE = re.compile(r"^rcq\s+(\d+)(?:\s+(\S+))?", re.M)
+_YTDLP_LIVE_STATUS_RE = re.compile(r"^rcs\s+(\S+)", re.M)
+YTDLP_NO_FORMAT = "Requested format is not available"
+
+
+def parse_ytdlp_live_status(text):
+    """The live status from a yt-dlp `--print "rcs %(live_status)s"` line ('is_live',
+    'post_live', 'was_live', 'is_upcoming', 'NA' when unknown), else None when the line is
+    absent (yt-dlp aborted before printing). Pure → unit-tested (#621)."""
+    if not text:
+        return None
+    m = _YTDLP_LIVE_STATUS_RE.search(text)
+    return m.group(1) if m else None
+
 
 
 def parse_ytdlp_quality(text):
