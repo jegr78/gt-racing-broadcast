@@ -176,7 +176,11 @@ def t_filter_jar_leaves_dest_unchanged_when_the_write_fails():
                 with open(raw, "w", encoding="utf-8") as fh:
                     fh.write(BROWSER_JAR)
                 out = _jar(d, "OLD JAR\n")
-                assert m.filter_jar(raw, "youtube", dest=out) is None, name
+                try:
+                    result = m.filter_jar(raw, "youtube", dest=out)
+                except OSError as exc:
+                    raise AssertionError(f"{name} failure escaped filter_jar: {exc}") from exc
+                assert result is None, name
                 with open(out, encoding="utf-8") as fh:
                     assert fh.read() == "OLD JAR\n", name
                 assert sorted(os.listdir(d)) == ["raw.txt", "yt-cookies.txt"], os.listdir(d)

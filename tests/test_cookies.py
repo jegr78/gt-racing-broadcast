@@ -79,7 +79,7 @@ def _cookie_names(path):
         return sorted(l.split("\t")[5] for l in fh.read().splitlines() if l.count("\t") == 6)
 
 
-def _run_get_cookies(argv, fake=None):
+def _run_get_cookies(argv, fake=None, expect_ok=True):
     fake = fake or _FakeYtDlp()
     real_run, real_argv = m.subprocess.run, sys.argv
     m.subprocess.run, sys.argv = fake, ["get-cookies.py"] + argv
@@ -87,6 +87,10 @@ def _run_get_cookies(argv, fake=None):
     try:
         with contextlib.redirect_stdout(out):
             m.main()
+    except SystemExit as exc:
+        if expect_ok:
+            raise AssertionError(f"the export failed: {exc.code}") from exc
+        raise
     finally:
         m.subprocess.run, sys.argv = real_run, real_argv
     return out.getvalue(), fake
@@ -134,9 +138,11 @@ def _old_jar(d):
 
 def _expect_exit(argv, fake=None):
     try:
-        said, _ = _run_get_cookies(argv, fake)
+        said, _ = _run_get_cookies(argv, fake, expect_ok=False)
     except SystemExit as exc:
         return str(exc.code)
+    except OSError as exc:
+        raise AssertionError(f"an OSError escaped instead of a clean exit: {exc}") from exc
     raise AssertionError(f"expected a failed export, got: {said}")
 
 
