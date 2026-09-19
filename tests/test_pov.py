@@ -1313,6 +1313,14 @@ def t_health_snapshot_carries_render_skip_rate():
     assert r._health_snapshot(2.0)["obs_render_skip_rate_pct"] == 5.0    # 5% per interval
 
 
+def t_health_snapshot_carries_configured_fps():
+    # #586: the configured frame rate is recorded next to obs_fps, so the report can flag it.
+    r = _make_min_relay()
+    r.obs_stats = {"obs_fps": 45.8, "obs_fps_target": 60.0}
+    snap = r._health_snapshot(1.0)
+    assert (snap["obs_fps"], snap["obs_fps_target"]) == (45.8, 60.0)
+
+
 def t_health_snapshot_carries_new_fields():
     relay = _make_min_relay()
     relay.obs_stats = {"obs_cpu_pct": 10.0, "obs_fps": 60.0, "stream_active": True,
