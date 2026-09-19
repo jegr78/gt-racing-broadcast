@@ -228,6 +228,27 @@ racecast report               # generate the report for the last session into ru
 racecast report send [FILE]   # send the newest (or given) report to the league Discord as an attachment
 ```
 
+**The finding.** The report opens with one verdict line, before any table. It leads with
+what the audience saw, then gives the reason:
+
+- *Output ran behind live for 41m of 56m on air, peak 19.0 s.* The time the **on-air**
+  feed spent behind live by the same rule that turns the health badge yellow (more than
+  `RACECAST_FEED_BACKLOG_WARN_S` beyond the `RACECAST_FEED_PREBUFFER_S` reserve, both read
+  from the machine `.env`), and the worst value. Each value is the smallest backlog of its
+  ~30 s interval, so the peak is a lower bound. A backlog on the off-air feed does not
+  count: nobody is watching it.
+- The next line explains it with the frame rate: *OBS rendered 45.8 of the configured 60 fps
+  and skipped 23.5% of its frames.* The configured rate comes from OBS's video settings; a
+  broadcast average more than 2% below it is flagged.
+- A backlog clears at every stint handover, so the report states how many handovers the
+  session had. A session without one (qualifying, solo) lets a backlog grow for its whole
+  length.
+
+A history recorded before the relay measured the backlog gets a frame-rate-only finding.
+**Render skipped** in the quality table is the per-interval rate over the on-air time.
+OBS's own counter runs from the moment OBS started, so hours of idle OBS before a
+broadcast would hide a bad one (1.8% shown for a broadcast that skipped 23.5%).
+
 **Name resolution:** commentator names in the report come from the running relay's schedule.
 If the relay is not running at generation time, the report falls back to stint indices.
 
