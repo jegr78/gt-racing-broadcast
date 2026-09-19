@@ -1199,6 +1199,19 @@ async function resyncTo(n){
   }, false));
 });
 
+// #582: RE-ARM lives inside #feedHealth, which is re-rendered on every status poll,
+// so the click is delegated from the stable container.
+$("#feedHealth").addEventListener("click", async (e)=>{
+  if (!e.target.closest("#rebuildRearm")) return;
+  try {
+    const r = await fetch(RC_API("/obs/rebuild-rearm"), {method:"POST", cache:"no-store",
+      headers:{"Content-Type":"application/json"}, body:"{}"});
+    const d = await r.json().catch(()=>({ok:false, error:"bad response"}));
+    if (r.ok && d.ok) log(d.rearmed ? "Auto-rebuild re-armed" : "Auto-rebuild was not paused");
+    else toast("Re-arm failed: " + (d.error || ("HTTP " + r.status)));
+  } catch (err) { toast("Re-arm failed: relay unreachable"); }
+});
+
 /* Solo-only: mirror POV RELOAD/STOP next to the POV editor (#povActionsBus,
    inside #urlsBox) since #feedsSec — where these normally render, unchanged,
    via FEED_ACTIONS above — is hidden wholesale in solo. Built (and un-hidden)
@@ -1773,6 +1786,12 @@ async function relayPoll(){
       // on-air source. The RED FLAG light already shows the cover is up; this line says WHY.
       if (d.auto_cover_active)
         lines.push('<span class="warnline">⚠ On-air source offline — Standby Cover auto-raised (RED FLAG to override)</span>');
+      // #582: three automatic OBS rebuilds did not clear the stall, so the relay stopped
+      // rebuilding. It re-arms at the next stint change; RE-ARM does it now, once the
+      // cause is found. Version-skew safe: an older relay has no rebuild_guard.
+      const rg = d.rebuild_guard;
+      if (rg && rg.stood_down)
+        lines.push(`<span class="warnline">⚠ Feed ${escapeHtml(rg.feed || "?")} · auto-rebuild paused — 3 OBS rebuilds did not clear the stall</span> <button class="qbtn" id="rebuildRearm" title="Resume automatic OBS rebuilds now">RE-ARM</button>`);
       // #493: highlight the active quality profile per feed (the pinned tier, or AUTO when managed).
       document.querySelectorAll("#feedQuality .qbtn:not(.qprev):not(.armbtn)").forEach(b => {
         const f = d.feeds[b.dataset.feed];

@@ -428,6 +428,15 @@ or clear it to show nothing. The whole run, in order:
   you raised or lowered by hand). This is the gentler rung below **auto-failover** (which
   switches to Intermission and loses the HUD). Disable only the automation with
   `RACECAST_OBS_AUTO_COVER=0`; the manual button is unaffected.
+- **Automatic OBS rebuild and its stand-down (#582).** When OBS stops advancing the
+  on-air feed (a frozen or stuttering picture), the relay rebuilds that feed's OBS input on
+  its own, like **RESET A→OBS** / **RESET B→OBS**. Each rebuild is a short black dropout.
+  If three rebuilds in a row leave the picture stalled, the relay stops rebuilding: the
+  health pill turns yellow (`Feed A rebuild ineffective — …`, with the frame rate OBS
+  renders) and the feed-health area shows `⚠ Feed A · auto-rebuild paused` with a
+  **RE-ARM** button. Repeating the rebuild would only add more dropouts; the cause is
+  usually the producer machine not keeping up. The automation re-arms by itself at the next
+  stint change; **RE-ARM** resumes it immediately. The manual RESET buttons always work.
 
 **Final lap** — once you're in the last stint and the leader starts the final lap:
 - HUD: **Race Control → Final Lap**. **Clear it** as soon as the race finishes.

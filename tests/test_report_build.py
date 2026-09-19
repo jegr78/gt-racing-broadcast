@@ -275,6 +275,39 @@ def t_report_collects_and_renders_substitutions():
     assert "Stream substitutions" not in rb.render_html(rep0)
 
 
+def t_report_collects_and_renders_obs_consumer_events():
+    # #582: ring laps under OBS, automatic OBS rebuilds and the guard's stand-down are
+    # facts the report must show; 26 rebuilds on 2026-08-28 were invisible afterwards.
+    samples = [_sample(100.0), _sample(160.0)]
+    events = [
+        {"ts": 110.0, "type": "fanout_overflow",
+         "metadata": {"feed": "A", "stint": 2, "snaps": 1}},
+        {"ts": 120.0, "type": "obs_rebuild",
+         "metadata": {"feed": "A", "stint": 2, "stall_fraction": 0.67}},
+        {"ts": 140.0, "type": "obs_rebuild_stood_down",
+         "metadata": {"feed": "A", "stint": 2, "attempts": 3}},
+        {"ts": 150.0, "type": "obs_rebuild_rearmed",
+         "metadata": {"feed": "B", "stint": 3, "reason": "stint change"}},
+        {"ts": 155.0, "type": "feed_recovery", "metadata": {"feed": "A", "stint": 2}},
+    ]
+    rep = rb.build_report(samples, events, {2: "Ann", 3: "Bob"}, "", (100.0, 160.0), now=200.0)
+    assert rep["obs_consumer"] == [
+        {"ts": 110.0, "feed": "A", "stint": 2, "streamer": "Ann",
+         "what": "Ring overflow under OBS (1x)"},
+        {"ts": 120.0, "feed": "A", "stint": 2, "streamer": "Ann",
+         "what": "Automatic OBS rebuild (stall fraction 0.67)"},
+        {"ts": 140.0, "feed": "A", "stint": 2, "streamer": "Ann",
+         "what": "Auto-rebuild stood down after 3 ineffective rebuilds"},
+        {"ts": 150.0, "feed": "B", "stint": 3, "streamer": "Bob",
+         "what": "Auto-rebuild re-armed (stint change)"},
+    ]
+    html = rb.render_html(rep)
+    assert "OBS consumer events" in html and "Auto-rebuild stood down" in html
+    rep0 = rb.build_report(samples, [], {}, "", (100.0, 160.0), now=200.0)
+    assert rep0["obs_consumer"] == []
+    assert "OBS consumer events" not in rb.render_html(rep0)
+
+
 def t_report_collects_and_renders_recoveries():
     # A self-healed feed drop (auto-recovery) must show in its own report section — the
     # 2026-07-10 gap where a ~10 s stutter left the report "all green".

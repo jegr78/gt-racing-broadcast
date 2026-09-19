@@ -1121,80 +1121,184 @@ def t_health_snapshot_carries_desync_active():
     assert r._health_snapshot(123.0)["desync_active"] == 0
 
 
-def t_check_render_drift_fires_on_sustained_skip_then_cooldown():
-    # #488: the GetStats render-skip rate over successive polls, debounced + cooldown-gated,
-    # rebuilds the on-air feed's OBS input. This is now the FALLBACK path (freeze detector
-    # off); the default cursor-progress detector supersedes it — see the suppression test.
+def t_record_render_counts_only_records():
+    # #582: the render-skip rate is a diagnostic. The heartbeat advances the counts the
+    # health chart derives the per-interval rate from, and never rebuilds anything.
     r = _make_min_relay()
-    r._freeze_detect = False            # exercise the renderSkip fallback (detector disabled)
-    r.auto_resync = True
-    r._autoresync_skip_rate = 0.02
-    r._autoresync_cooldown = 60.0
-    r._prev_render_counts = None; r._render_drift_streak = 0; r._last_autoresync_ts = None
     calls = []
-    live = r.live_feed()
-    r.feeds[live]._obs_reconnect = lambda: calls.append(1)
-    # poll 1: baseline (no prev -> no rate yet)
-    r.obs_stats = {"obs_render_skipped_frames": 0, "obs_render_total_frames": 1000}
-    r._check_render_drift(100.0)
-    # poll 2: +50/+1000 = 5% > 2% -> streak 1 (< debounce 2) -> no fire
-    r.obs_stats = {"obs_render_skipped_frames": 50, "obs_render_total_frames": 2000}
-    r._check_render_drift(130.0)
-    assert calls == [], "one over-threshold poll must not fire (debounce)"
-    # poll 3: another 5% -> streak 2 == AUTORESYNC_DEBOUNCE_POLLS -> fires on the on-air feed
-    r.obs_stats = {"obs_render_skipped_frames": 100, "obs_render_total_frames": 3000}
-    r._check_render_drift(160.0)
-    assert calls == [1], "sustained over-threshold must rebuild the on-air OBS input"
-    # cooldown: two more over-threshold polls, but within 60 s -> suppressed
-    r.obs_stats = {"obs_render_skipped_frames": 200, "obs_render_total_frames": 4000}
-    r._check_render_drift(170.0)   # streak 1
-    r.obs_stats = {"obs_render_skipped_frames": 300, "obs_render_total_frames": 5000}
-    r._check_render_drift(180.0)   # streak 2 but since=20 s < 60 s cooldown -> no fire
-    assert calls == [1], "within cooldown -> no second resync"
-
-
-def t_check_render_drift_quiet_when_healthy_or_disabled():
-    r = _make_min_relay()
-    r._freeze_detect = False            # fallback path under test (detector disabled)
-    r._autoresync_skip_rate = 0.02
-    r._autoresync_cooldown = 60.0
-    calls = []
-    live = r.live_feed()
-    r.feeds[live]._obs_reconnect = lambda: calls.append(1)
-    # healthy: ~0.5 % skip rate per interval, well below 2 % -> never fires
-    r.auto_resync = True
-    r._prev_render_counts = None; r._render_drift_streak = 0; r._last_autoresync_ts = None
-    for i in range(1, 7):
-        r.obs_stats = {"obs_render_skipped_frames": 5 * i, "obs_render_total_frames": 1000 * i}
-        r._check_render_drift(100.0 + 30 * i)
-    assert calls == [], "healthy low skip-rate must never trigger a resync"
-    # kill-switch: even a huge sustained spike does nothing when auto_resync is off
-    r.auto_resync = False
-    r._prev_render_counts = None; r._render_drift_streak = 0
-    for skip, tot, t in [(0, 1000, 400.0), (900, 2000, 430.0), (1800, 3000, 460.0)]:
+    r.feeds[r.live_feed()]._obs_reconnect = lambda: calls.append(1)
+    for skip, tot in [(0, 1000), (500, 2000), (1000, 3000)]:    # a 50 % skip spike
         r.obs_stats = {"obs_render_skipped_frames": skip, "obs_render_total_frames": tot}
-        r._check_render_drift(t)
-    assert calls == [], "kill-switch (auto_resync=False) disables the auto-resync"
-
-
-def t_check_render_drift_action_suppressed_when_freeze_detect_on():
-    # #488 new default: the cursor-progress freeze detector owns auto-recovery, so the (blind)
-    # render-skip auto-resync must NOT fire — but the rate is still recorded for the chart.
-    r = _make_min_relay()
-    r._freeze_detect = True             # the default
-    r.auto_resync = True
-    r._autoresync_skip_rate = 0.02
-    r._prev_render_counts = None; r._render_drift_streak = 0; r._last_autoresync_ts = None
-    calls = []
-    live = r.live_feed()
-    r.feeds[live]._obs_reconnect = lambda: calls.append(1)
-    # a sustained, well-over-threshold render-skip spike that WOULD fire the fallback
-    for skip, tot, t in [(0, 1000, 100.0), (500, 2000, 130.0), (1000, 3000, 160.0)]:
-        r.obs_stats = {"obs_render_skipped_frames": skip, "obs_render_total_frames": tot}
-        r._check_render_drift(t)
-    assert calls == [], "freeze detector on -> render-skip action is suppressed"
-    # the rate is still recorded (prev advanced) so the health chart keeps working
+        r._record_render_counts()
+    assert calls == [], "the render-skip rate must never trigger a rebuild"
     assert r._prev_render_counts == (1000, 3000)
+    r.obs_stats = {}                                            # no stats: keep the last
+    r._record_render_counts()
+    assert r._prev_render_counts == (1000, 3000)
+
+
+class _EventLog:
+    def __init__(self): self.events = []
+    def record_event(self, ts, event_type, label="", producer="", metadata=None):
+        self.events.append({"ts": ts, "type": event_type, "label": label,
+                            "metadata": metadata})
+    def types(self): return [e["type"] for e in self.events]
+
+
+class _CursorObs:
+    """feed_media_cursors stand-in: the cursor advances `step_ms` per call (0 = frozen)."""
+    def __init__(self): self.cursor = 0; self.step_ms = 0
+    def feed_media_cursors(self, ports=None):
+        self.cursor += self.step_ms
+        return {p: self.cursor for p in (ports or [])}, ""
+
+
+def _freeze_relay():
+    """A relay whose on-air Feed A is serving, a 3-sample freeze window, no cooldown,
+    a fake OBS cursor and an in-memory event log. Returns (relay, obs, rebuilds)."""
+    r = _make_min_relay()
+    r._freeze_detect = True
+    r._freeze_window = 3
+    r._freeze_cooldown = 0.0
+    r._freeze_interval_s = 3.0
+    r.health_store = _EventLog()
+    obs = _CursorObs()
+    r._obs = obs
+    rebuilds = []
+    for k, f in r.feeds.items():
+        f.phase = "serving"; f.paused = False
+        f._obs_reconnect = (lambda k=k: rebuilds.append(k))
+    return r, obs, rebuilds
+
+
+def t_freeze_tick_stands_down_after_three_ineffective_rebuilds():
+    # #582, the 2026-08-28 shape: OBS stays stalled whatever the relay does. Before the
+    # guard every window rebuilt the input again (26 black dropouts in 56 minutes). Now
+    # three ineffective rebuilds stand the automation down with an honest yellow.
+    old = m._obs_ws; m._obs_ws = object()
+    try:
+        r, obs, rebuilds = _freeze_relay()
+        assert r.live_feed() == "A"
+        for n in range(60):                     # 3 minutes of a frozen cursor
+            r._freeze_tick(1000.0 + 3.0 * n)
+        assert rebuilds == ["A", "A", "A"], rebuilds
+        assert r.health_store.types() == ["obs_rebuild"] * 3 + ["obs_rebuild_stood_down"]
+        assert r.health_store.events[0]["metadata"] == {
+            "feed": "A", "stint": 1, "stall_fraction": 1.0}
+        assert r.health_store.events[-1]["metadata"] == {"feed": "A", "stint": 1, "attempts": 3}
+        r.obs_stats = {"obs_fps": 44.0}
+        h = r._refresh_health(2000.0)
+        assert h["level"] in ("yellow", "red")
+        assert ("Feed A rebuild ineffective — 3 OBS rebuilds did not clear the stall "
+                "(producer host renders 44 fps); auto-rebuild paused") in h["reasons"]
+        assert r.status()["rebuild_guard"] == {"stood_down": True, "feed": "A"}
+    finally:
+        m._obs_ws = old
+
+
+def t_freeze_tick_keeps_rebuilding_while_rebuilds_help():
+    # A rebuild that clears the stall is effective and resets the streak. Each relapse
+    # here needs two rebuilds (the first one does not help, the second does), so without
+    # the reset the third relapse would reach three ineffective rebuilds and stand down.
+    old = m._obs_ws; m._obs_ws = object()
+    try:
+        r, obs, rebuilds = _freeze_relay()
+        t = 1000.0
+        for cycle in range(4):
+            obs.step_ms = 0                     # frozen until the second rebuild of this cycle
+            for _i in range(40):                # bounded: a broken guard must not hang
+                if len(rebuilds) >= 2 * (cycle + 1) or r._rebuild_guard.stood_down:
+                    break
+                r._freeze_tick(t); t += 3.0
+            obs.step_ms = 3000                  # that rebuild worked: real-time progress
+            for _i in range(5):
+                r._freeze_tick(t); t += 3.0
+        assert not r._rebuild_guard.stood_down
+        assert len(rebuilds) == 8, rebuilds
+        assert "obs_rebuild_stood_down" not in r.health_store.types()
+    finally:
+        m._obs_ws = old
+
+
+def t_freeze_tick_stint_change_lifts_the_stand_down():
+    old = m._obs_ws; m._obs_ws = object()
+    try:
+        r, obs, rebuilds = _freeze_relay()
+        for n in range(60):
+            r._freeze_tick(1000.0 + 3.0 * n)
+        assert r._rebuild_guard.stood_down
+        r.A.idx = 2                              # handover: B (stint 2) is now on air
+        assert r.live_feed() == "B"
+        r._freeze_tick(2000.0)
+        assert not r._rebuild_guard.stood_down
+        assert r.health_store.events[-1]["type"] == "obs_rebuild_rearmed"
+        assert r.health_store.events[-1]["metadata"] == {"feed": "B", "stint": 2,
+                                                         "reason": "stint change"}
+        for n in range(1, 5):                    # the guard acts again on the new stint
+            r._freeze_tick(2000.0 + 3.0 * n)
+        assert rebuilds[-1] == "B"
+    finally:
+        m._obs_ws = old
+
+
+def t_freeze_tick_mode_switch_lifts_the_stand_down():
+    # A race <-> qualifying switch re-points Feed A without a new pull index: still a
+    # stint change for the guard.
+    old = m._obs_ws; m._obs_ws = object()
+    try:
+        r, obs, rebuilds = _freeze_relay()
+        for n in range(60):
+            r._freeze_tick(1000.0 + 3.0 * n)
+        assert r._rebuild_guard.stood_down and r.live_feed() == "A"
+        r.mode = "qualifying"
+        r._freeze_tick(2000.0)
+        assert not r._rebuild_guard.stood_down
+        assert r.health_store.events[-1]["type"] == "obs_rebuild_rearmed"
+    finally:
+        m._obs_ws = old
+
+
+def t_rebuild_rearm_endpoint_lifts_the_stand_down():
+    # The director's control once a cause is found: POST /obs/rebuild-rearm.
+    r, obs, rebuilds = _freeze_relay()
+    for _ in range(3):
+        r._rebuild_guard.on_fire(); r._rebuild_guard.on_window(1.0, frac_threshold=0.3)
+    r._rebuild_stood_down_feed = "A"
+    srv = _serve(r)
+    try:
+        port = srv.server_address[1]
+        def post():
+            req = urllib.request.Request(f"http://127.0.0.1:{port}/obs/rebuild-rearm",
+                                         data=b"{}", method="POST",
+                                         headers={"Content-Type": "application/json"})
+            return json.loads(urllib.request.urlopen(req, timeout=5).read())
+        assert post() == {"ok": True, "rearmed": True}
+        assert r._rebuild_guard.allows()
+        assert r.health_store.events[-1]["metadata"]["reason"] == "director"
+        assert post() == {"ok": True, "rearmed": False}      # nothing was stood down
+        assert r.status()["rebuild_guard"] == {"stood_down": False, "feed": None}
+    finally:
+        srv.shutdown()
+
+
+def t_consumer_overflow_is_recorded_never_acted_on():
+    # #582: a ring lap under OBS (a cursor snap) is an incident record for the health
+    # history and the report. It no longer rebuilds the input.
+    r, obs, rebuilds = _freeze_relay()
+
+    class _Srv:
+        snaps = 0
+        def consumer_health(self, now): return 0.1, self.snaps
+
+    srv = _Srv()
+    r.A.fanout_server = srv
+    r._record_consumer_overflows(100.0)                # baseline
+    srv.snaps = 2
+    r._record_consumer_overflows(130.0)
+    r._record_consumer_overflows(160.0)                # no new snaps -> no new record
+    assert rebuilds == []
+    assert r.health_store.types() == ["fanout_overflow"]
+    assert r.health_store.events[0]["metadata"] == {"feed": "A", "stint": 1, "snaps": 2}
 
 
 def t_health_snapshot_carries_render_skip_rate():

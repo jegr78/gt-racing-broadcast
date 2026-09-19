@@ -621,9 +621,9 @@ def parse_obs_stats(payload):
         "obs_fps": p.get("activeFps"),
         "obs_render_skipped_pct": _pct(p.get("renderSkippedFrames"),
                                        p.get("renderTotalFrames")),
-        # Raw cumulative counts for the #488 render-drift auto-resync: the caller derives the
-        # per-interval skip RATE from successive samples (the cumulative pct barely moves
-        # during a spike). Frame counts, redaction-safe.
+        # Raw cumulative counts: the relay derives the per-interval render-skip RATE for the
+        # health chart from successive samples (the cumulative pct barely moves during a
+        # spike). A diagnostic, never a trigger (#582). Frame counts, redaction-safe.
         "obs_render_skipped_frames": p.get("renderSkippedFrames"),
         "obs_render_total_frames": p.get("renderTotalFrames"),
     }

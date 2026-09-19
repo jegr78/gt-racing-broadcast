@@ -1,6 +1,13 @@
 # Fan-out stutter: detection-driven auto-resync + graduated stall handling (#488)
 
 **Date:** 2026-07-13
+
+> **Superseded in part by #582 (2026-09).** The render-skip auto-resync this spec describes
+> (Component 1 and the DESIGN PIVOT's detection) was deleted: it had not acted since the
+> cursor-progress freeze detector became the default, and the render-skip rate stays a
+> recorded diagnostic only. The `RACECAST_FEED_AUTORESYNC*` knobs are gone. See
+> `2026-07-15-fanout-backpressure-and-freeze-detector-design.md` for the current detector
+> and its effectiveness guard.
 **Issue:** [#488](https://github.com/jegr78/gt-endurance-racing-broadcast/issues/488)
 **Scope:** `src/relay/racecast-feeds.py` (the fan-out `FeedRing` / `FeedFanoutServer` /
 byte-stall watchdog / `Feed` serve loop), a new pure `tests/test_fanout.py`, and a new

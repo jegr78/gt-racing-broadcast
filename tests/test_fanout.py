@@ -204,15 +204,6 @@ def t_fanout_watchdog_kill_condition_is_feed_stalled():
     # (racecast-local-uat skill), not a unit test — that is the honest boundary.
 
 
-def t_feed_autoresync_default_on_and_falsey_disables():
-    assert m.feed_autoresync_enabled({}) is True
-    assert m.feed_autoresync_enabled({"RACECAST_FEED_AUTORESYNC": ""}) is True
-    for v in ("0", "false", "OFF", "no"):
-        assert m.feed_autoresync_enabled({"RACECAST_FEED_AUTORESYNC": v}) is False, v
-    for v in ("1", "true", "on"):
-        assert m.feed_autoresync_enabled({"RACECAST_FEED_AUTORESYNC": v}) is True, v
-
-
 def t_env_float_defaults_and_guards():
     assert m._env_float({}, "K", 5.0) == 5.0
     assert m._env_float({"K": ""}, "K", 5.0) == 5.0
@@ -223,10 +214,7 @@ def t_env_float_defaults_and_guards():
 
 
 def t_feed_tuning_getter_defaults():
-    assert m.feed_autoresync_skip_rate({}) == 0.02
-    assert m.feed_autoresync_cooldown_s({}) == 60.0
     assert m.feed_stall_s({}) == 20.0
-    assert m.feed_autoresync_skip_rate({"RACECAST_FEED_AUTORESYNC_SKIP_RATE": "0.05"}) == 0.05
     assert m.feed_stall_s({"RACECAST_FEED_STALL_S": "30"}) == 30.0
 
 
@@ -252,20 +240,15 @@ def t_snap_bytes_counts_skipped_on_overflow():
     assert m.snap_bytes(100, 200, 20) == 80
 
 
-def t_render_drift_decision_rate_and_cooldown():
-    kw = dict(rate_threshold=0.02, cooldown_s=60.0)
-    # below threshold -> False
-    assert m.render_drift_decision(0.01, None, **kw) is False
-    # at threshold -> False (strict >)
-    assert m.render_drift_decision(0.02, None, **kw) is False
-    # above threshold -> True
-    assert m.render_drift_decision(0.05, None, **kw) is True
-    # within cooldown -> False even if over threshold
-    assert m.render_drift_decision(0.5, 10.0, **kw) is False
-    # cooldown elapsed -> True
-    assert m.render_drift_decision(0.05, 61.0, **kw) is True
-    # None rate never trips
-    assert m.render_drift_decision(None, None, **kw) is False
+def t_render_drift_action_path_is_gone():
+    # #582: the render-skip auto-resync never ran since #488 (freeze detection is the
+    # default and suppressed it). Deleted, not kept "in reserve": the rate stays a
+    # recorded diagnostic only.
+    for name in ("render_drift_decision", "feed_autoresync_enabled",
+                 "feed_autoresync_skip_rate", "feed_autoresync_cooldown_s",
+                 "AUTORESYNC_DEBOUNCE_POLLS"):
+        assert not hasattr(m, name), name
+    assert not hasattr(m.Relay, "_check_render_drift")
 
 
 def t_consumer_health_aggregates_registry():
@@ -338,11 +321,65 @@ def t_freeze_decision_threshold_and_cooldown():
     assert m.freeze_decision(None, None, **kw) is False      # no data
 
 
-def t_snap_early_trigger_on_increase():
-    assert m.snap_early_trigger(3, 5) is True     # new cursor-snaps since last check = a discontinuity
-    assert m.snap_early_trigger(5, 5) is False    # no new snaps
-    assert m.snap_early_trigger(None, 5) is False # no baseline yet
-    assert m.snap_early_trigger(5, None) is False
+def t_consumer_overflowed_on_increase():
+    assert m.consumer_overflowed(3, 5) is True     # new cursor-snaps since last check
+    assert m.consumer_overflowed(5, 5) is False    # no new snaps
+    assert m.consumer_overflowed(None, 5) is False # no baseline yet
+    assert m.consumer_overflowed(5, None) is False
+    assert m.consumer_overflowed(5, 2) is False    # a consumer left: the total shrank
+
+
+def t_rebuild_guard_stands_down_after_three_ineffective_rebuilds():
+    # #582: the 2026-08-28 shape. Every rebuild is followed by a window that still
+    # stalls, so the third ineffective one stands the automation down.
+    g = m.RebuildGuard()
+    assert m.REBUILD_GUARD_MAX_ATTEMPTS == 3
+    for n in (1, 2):
+        assert g.allows()
+        g.on_fire()
+        assert g.on_window(0.9, frac_threshold=0.3) is False
+        assert g.ineffective == n and not g.stood_down
+    g.on_fire()
+    assert g.on_window(0.9, frac_threshold=0.3) is True      # this call stood it down
+    assert g.stood_down and not g.allows() and g.ineffective == 3
+
+
+def t_rebuild_guard_healthy_window_resets_the_streak():
+    # A rebuild that cleared the stall (the next window is below the trip threshold)
+    # was effective, so a later relapse starts counting from zero again.
+    g = m.RebuildGuard()
+    g.on_fire(); g.on_window(0.9, frac_threshold=0.3)
+    g.on_fire(); g.on_window(0.9, frac_threshold=0.3)
+    assert g.ineffective == 2
+    g.on_fire()
+    assert g.on_window(0.1, frac_threshold=0.3) is False
+    assert g.ineffective == 0 and g.allows()
+    # "better but still stalling" is not an improvement: 0.5 is still over 0.3
+    g.on_fire()
+    g.on_window(0.5, frac_threshold=0.3)
+    assert g.ineffective == 1
+
+
+def t_rebuild_guard_judges_only_the_first_window_after_a_fire():
+    g = m.RebuildGuard()
+    assert g.on_window(0.9, frac_threshold=0.3) is False     # no fire pending
+    assert g.ineffective == 0
+    g.on_fire()
+    assert g.on_window(None, frac_threshold=0.3) is False    # nothing measurable yet
+    assert g.pending
+    g.on_window(0.9, frac_threshold=0.3)
+    assert not g.pending and g.ineffective == 1
+    g.on_window(0.9, frac_threshold=0.3)                     # later windows do not count
+    assert g.ineffective == 1
+
+
+def t_rebuild_guard_rearm_clears_the_stand_down():
+    g = m.RebuildGuard()
+    for _ in range(3):
+        g.on_fire(); g.on_window(1.0, frac_threshold=0.3)
+    assert g.stood_down
+    g.rearm()
+    assert g.allows() and g.ineffective == 0 and not g.pending
 
 
 def t_feed_freeze_detect_default_on_and_falsey_disables():

@@ -8,7 +8,7 @@ STALE ffmpeg demuxer in fan-out mode — the picture freezes at ~1 Hz) is INVISI
 to every metric #488 relies on: OBS's encoder FPS holds at 60, dropped/skipped
 frames stay flat, and OBS reads the feed socket greedily regardless of render
 state (all confirmed live). So `renderSkippedFrames` (a compositor render-timing
-metric) never trips the auto-resync.
+metric) never tripped the #488 render-skip auto-resync (removed in #582).
 
 We now have a DETERMINISTIC repro: ARM -> STOP -> ARM on the on-air feed
 (`/feed/<X>/activate` -> `/feed/<X>/deactivate` -> `/feed/<X>/activate`). This
@@ -130,7 +130,7 @@ def relay_feed_states(base, timeout=1.0):
 
 def render_skip_rate(stats, prev):
     """Per-interval render-skip fraction from successive GetStats samples (the
-    same delta the relay's #488 auto-resync uses), or None."""
+    same delta the relay records for its health chart), or None."""
     sk, tot = stats.get("obs_render_skipped_frames"), stats.get("obs_render_total_frames")
     if sk is None or tot is None or prev is None:
         return None
