@@ -5,6 +5,8 @@ YouTube (default): exports to <runtime>/yt-cookies.txt against a YouTube probe U
   (bypasses "Sign in to confirm you're not a bot" checks).
 Twitch (--platform twitch): exports to <runtime>/twitch-cookies.txt against twitch.tv
   (captures auth-token for gated/private feeds; public Twitch streams do not need this).
+The jar keeps only that platform's cookies (youtube.com or twitch.tv); the browser's
+other sessions never reach it (#616).
 
 Usage: python3 get-cookies.py [browser] [--runtime-dir DIR] [--platform youtube|twitch]
   browser: firefox | chrome | safari | edge | brave   (default: firefox)
@@ -21,6 +23,7 @@ for _cand in (os.path.join(_HERE, "..", "scripts"),
     if os.path.isdir(_cand) and _cand not in sys.path:
         sys.path.insert(0, _cand)
 from services import external_tool_env  # de-PyInstaller the env for the yt-dlp spawn
+import cookie_jar  # the platform-domain filter + the shared login rule (#615, #616)
 
 
 def default_runtime_dir(here):
@@ -67,38 +70,49 @@ def main():
     except OSError: pass                  # best-effort hardening; never block the export
     out, url = cookie_target(a.platform, a.runtime_dir)
     print(f"Exporting {a.platform} cookies from '{a.browser}' ...")
+    # yt-dlp writes the whole browser profile (GitHub, Discord, the Google account
+    # set, ...). It writes into a private directory; only this platform's cookies
+    # reach the real jar (#616).
     try:
-        proc = subprocess.run(["yt-dlp", "--cookies-from-browser", a.browser, "--cookies", out,
-                               "--skip-download", "--no-warnings", url],
-                              stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=120,
-                              env=external_tool_env())
-    except FileNotFoundError:
-        sys.exit("ERROR: yt-dlp not found (brew install yt-dlp / pip install -U yt-dlp).")
-    except subprocess.TimeoutExpired:
-        sys.exit("ERROR: cookie export timed out (approve the Keychain prompt?).")
-    if os.path.exists(out):
-        try: os.chmod(out, 0o600)   # live session — owner-only
-        except OSError: pass        # best-effort hardening; never block the export
-        with open(out, encoding="utf-8", errors="replace") as fh:
-            txt = fh.read()
-        if a.platform == "twitch":
-            if re.search(r"auth-token", txt):
-                print(f"OK -> {out}  (logged-in session detected)")
-            else:
-                print(f"WARNING: cookies written but no login found — log into Twitch in "
-                      f"'{a.browser}' and re-run (racecast cookies twitch {a.browser}).")
+        with cookie_jar.private_export_path(out, warn=lambda m: print(f"WARNING: {m}")) as raw:
+            try:
+                proc = subprocess.run(["yt-dlp", "--cookies-from-browser", a.browser,
+                                       "--cookies", raw, "--skip-download", "--no-warnings", url],
+                                      stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                                      timeout=120, env=external_tool_env())
+            except FileNotFoundError:
+                sys.exit("ERROR: yt-dlp not found (brew install yt-dlp / pip install -U yt-dlp).")
+            except subprocess.TimeoutExpired:
+                sys.exit("ERROR: cookie export timed out (approve the Keychain prompt?).")
+            if not os.path.exists(raw):
+                err = (proc.stderr or b"").decode("utf-8", errors="replace")
+                for line in [l for l in err.splitlines() if l.strip()][-3:]:
+                    print(line, file=sys.stderr)   # the real yt-dlp reason, not a guess
+                sys.exit(f"FAILED to export from '{a.browser}' — "
+                         + failure_hint(err, a.browser, a.platform))
+            dropped = cookie_jar.filter_jar(raw, a.platform, dest=out)
+    except OSError as exc:
+        sys.exit(f"ERROR: cannot prepare the cookie export next to {out}: {exc}")
+    if dropped is None:
+        sys.exit(f"FAILED to write the filtered cookies to {out}; the previous jar is unchanged.")
+    try: os.chmod(out, 0o600)   # live session — owner-only
+    except OSError: pass        # best-effort hardening; never block the export
+    domains = ", ".join(cookie_jar.PLATFORM_COOKIE_DOMAINS[a.platform])
+    print(f"Kept only {domains} cookies (dropped {dropped} other lines).")
+    with open(out, encoding="utf-8", errors="replace") as fh:
+        txt = fh.read()
+    if a.platform == "twitch":
+        if re.search(r"auth-token", txt):
+            print(f"OK -> {out}  (logged-in session detected)")
         else:
-            if re.search(r"LOGIN_INFO|SAPISID|__Secure-[0-9]?PSID", txt):
-                print(f"OK -> {out}  (logged-in session detected)")
-            else:
-                print(f"WARNING: cookies written but no login found — log into YouTube in "
-                      f"'{a.browser}' and re-run.")
+            print(f"WARNING: cookies written but no login found — log into Twitch in "
+                  f"'{a.browser}' and re-run (racecast cookies twitch {a.browser}).")
     else:
-        err = (proc.stderr or b"").decode("utf-8", errors="replace")
-        for line in [l for l in err.splitlines() if l.strip()][-3:]:
-            print(line, file=sys.stderr)   # the real yt-dlp reason, not a guess
-        sys.exit(f"FAILED to export from '{a.browser}' — "
-                 + failure_hint(err, a.browser, a.platform))
+        if cookie_jar.text_has_login(txt):
+            print(f"OK -> {out}  (logged-in session detected)")
+        else:
+            print(f"WARNING: cookies written but no login found — log into YouTube in "
+                  f"'{a.browser}' and re-run.")
 
 
 if __name__ == "__main__":

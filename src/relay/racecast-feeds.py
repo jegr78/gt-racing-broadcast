@@ -10526,29 +10526,43 @@ def _cookie_hint(stderr_text, browser):
 
 def export_cookies(browser, out):
     """Export YouTube cookies from a logged-in browser to a Netscape yt-cookies.txt
-    using yt-dlp. Best-effort: returns True on success."""
+    using yt-dlp. Best-effort: returns True on success. yt-dlp writes the whole
+    browser profile into a private directory; only the youtube.com cookies reach
+    *out* (#616), and a failed filter leaves the previous jar unchanged."""
     url = "https://www.youtube.com/watch?v=jNQXAC9IVRw"
     try:
-        proc = subprocess.run(["yt-dlp", "--cookies-from-browser", browser, "--cookies", out,
-                               "--skip-download", "--no-warnings", url],
-                              timeout=90, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-                              env=external_tool_env(), **_no_window_kwargs())
-    except FileNotFoundError:
-        LOG.warning("yt-dlp not found — cannot auto-export cookies."); return False
-    except subprocess.TimeoutExpired:
-        LOG.warning("cookie export timed out (Keychain prompt not approved?)."); return False
-    ok = os.path.exists(out)
-    if ok:
-        try: os.chmod(out, 0o600)   # live YouTube session — owner-only
-        except OSError: pass        # best-effort hardening; never block the export
-        LOG.info("Cookie export from '%s': OK -> %s", browser, out)
-    else:
-        err = (proc.stderr or b"").decode("utf-8", errors="replace")
-        for line in [l for l in err.splitlines() if l.strip()][-1:]:
-            LOG.warning("%s", line)   # the real yt-dlp reason, not a guess
-        LOG.warning("Cookie export from '%s': FAILED — %s", browser, _cookie_hint(err, browser))
-    return ok
-
+        with cookie_jar.private_export_path(out, warn=LOG.warning) as raw:
+            try:
+                proc = subprocess.run(["yt-dlp", "--cookies-from-browser", browser,
+                                       "--cookies", raw, "--skip-download", "--no-warnings", url],
+                                      timeout=90, stdout=subprocess.DEVNULL,
+                                      stderr=subprocess.PIPE, env=external_tool_env(),
+                                      **_no_window_kwargs())
+            except FileNotFoundError:
+                LOG.warning("yt-dlp not found — cannot auto-export cookies."); return False
+            except subprocess.TimeoutExpired:
+                LOG.warning("cookie export timed out (Keychain prompt not approved?)."); return False
+            if not os.path.exists(raw):
+                err = (proc.stderr or b"").decode("utf-8", errors="replace")
+                for line in [l for l in err.splitlines() if l.strip()][-1:]:
+                    LOG.warning("%s", line)   # the real yt-dlp reason, not a guess
+                LOG.warning("Cookie export from '%s': FAILED — %s", browser,
+                            _cookie_hint(err, browser))
+                return False
+            dropped = cookie_jar.filter_jar(raw, "youtube", dest=out)
+    except OSError as exc:
+        LOG.warning("Cookie export from '%s': FAILED — cannot prepare it next to %s: %s",
+                    browser, out, exc)
+        return False
+    if dropped is None:
+        LOG.warning("Cookie export from '%s': FAILED — could not write the filtered "
+                    "cookies to %s; the previous jar is unchanged.", browser, out)
+        return False
+    try: os.chmod(out, 0o600)   # live YouTube session — owner-only
+    except OSError: pass        # best-effort hardening; never block the export
+    LOG.info("Cookie export from '%s': OK -> %s (kept only youtube.com cookies, dropped %d "
+             "other lines)", browser, out, dropped)
+    return True
 
 def main():
     load_dotenv(os.path.dirname(os.path.abspath(__file__)))  # before defaults are read
