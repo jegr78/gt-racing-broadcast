@@ -19,12 +19,12 @@ DEMO_RELAY = re.compile(r"--profile demo relay (?:start|restart)\b")
 
 def jar_violations(text):
     """Return (line_no, line) for every line that writes to or removes a shared
-    jar, and every demo relay start/restart that does not pass its own --cookies."""
+    jar, and every demo relay start/restart that does not pass its own stub --cookies."""
     bad = []
     for no, line in enumerate(text.splitlines(), 1):
         if WRITES_JAR.search(line) or REMOVES_JAR.search(line):
             bad.append((no, line))
-        elif DEMO_RELAY.search(line) and "--cookies" not in line:
+        elif DEMO_RELAY.search(line) and ("--cookies" not in line or re.search(JAR, line)):
             bad.append((no, line))
     return bad
 
@@ -44,6 +44,8 @@ def t_detects_removal_of_the_shared_jar():
 def t_detects_demo_relay_without_its_own_jar():
     assert [n for n, _ in jar_violations("python3 src/racecast.py --profile demo relay start\n")] == [1]
     assert [n for n, _ in jar_violations("python3 src/racecast.py --profile demo relay restart\n")] == [1]
+    shared = "python3 src/racecast.py --profile demo relay start --cookies \"$PWD/runtime/yt-cookies.txt\"\n"
+    assert [n for n, _ in jar_violations(shared)] == [1]
 
 
 def t_accepts_a_stub_outside_the_shared_jar():
