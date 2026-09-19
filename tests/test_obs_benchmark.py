@@ -326,7 +326,7 @@ class _Session:
                  fps=lambda tier: 60.0, relay=None, fail=None):
         self.clock, self.stream, self.recording, self.scene = clock, stream, recording, scene
         self.fps, self.relay, self.fail, self.sent = fps, relay, fail, []
-        self.rec_started = None
+        self.rec_started, self.finalize_polls, self.active_at_remove = None, 0, None
 
     def request(self, kind, data=None):
         self.sent.append((kind, data or {}))
@@ -336,6 +336,11 @@ class _Session:
             return {"outputActive": self.stream}
         if kind == "GetRecordStatus":
             dur = 0 if self.rec_started is None else int((self.clock() - self.rec_started) * 1000)
+            if self.recording == "finalizing":
+                if self.finalize_polls > 0:
+                    self.finalize_polls -= 1
+                    return {"outputActive": True, "outputDuration": 0}
+                self.recording = False
             return {"outputActive": self.recording, "outputDuration": dur}
         if kind == "GetVideoSettings":
             return {"fpsNumerator": 60, "fpsDenominator": 1}
@@ -346,7 +351,8 @@ class _Session:
         if kind == "StartRecord":
             self.recording, self.rec_started = True, self.clock()
         if kind == "StopRecord":
-            self.recording = False
+            # OBS answers StopRecord before the file is finalized (seen on 32.2.2)
+            self.recording = "finalizing" if self.finalize_polls else False
             return {"outputPath": "/rec/benchmark.mkv"}
         if kind == "GetStats":
             tier = self.relay.tier if self.relay else "full"
@@ -412,6 +418,37 @@ def t_run_measures_the_backlog_growth_per_tier():
     assert rec["full"]["backlog_growth_s_per_min"] == 6.0
     assert rec["robust"]["backlog_growth_s_per_min"] == 0.0
     assert rec["verdict"]["full_real_time"] is False
+
+
+def t_run_deletes_the_recording_only_after_obs_has_finished_it():
+    clock = _Clock()
+    relay = _Relay(clock)
+    sess = _Session(clock, relay=relay)
+    sess.finalize_polls = 3
+    removed = []
+
+    def remove(p):
+        removed.append((p, sess.recording))
+
+    with tempfile.TemporaryDirectory() as d:
+        m.run(relay, sess, d, flags=FLAGS, window_s=20, settle_s=5, clock=clock,
+              sleep=clock.sleep, now=lambda: NOW, remove=remove, isfile=lambda p: True)
+    assert removed == [("/rec/benchmark.mkv", False)]
+
+
+def t_run_leaves_a_recording_obs_does_not_finish():
+    clock = _Clock()
+    relay = _Relay(clock)
+    sess = _Session(clock, relay=relay)
+    sess.finalize_polls = 10_000
+    removed, said = [], []
+    with tempfile.TemporaryDirectory() as d:
+        rec = m.run(relay, sess, d, flags=FLAGS, window_s=20, settle_s=5, clock=clock,
+                    sleep=clock.sleep, now=lambda: NOW, remove=removed.append,
+                    isfile=lambda p: True, progress=said.append)
+    assert removed == []
+    assert any("/rec/benchmark.mkv" in s and "still" in s for s in said), said
+    assert rec["recording"] == "/rec/benchmark.mkv"     # the report names the file
 
 
 def t_run_keeps_a_pin_and_the_recording_on_request():

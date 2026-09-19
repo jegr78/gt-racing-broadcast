@@ -45,6 +45,9 @@ DEFAULT_WINDOW_S = 60          # sampling window per tier
 DEFAULT_SETTLE_S = 10          # after a tier switch: let the rejoin transient pass
 SAMPLE_EVERY_S = 2.0
 SERVING_TIMEOUT_S = 90         # a re-resolve plus reconnect; a live source takes seconds
+# OBS answers StopRecord before the file is finalized (seen on 32.2.2). Deleting it
+# then works on macOS but fails on Windows, where the file is still open.
+RECORD_STOP_TIMEOUT_S = 30
 TIERS = ("full", "robust")
 
 # Real time. The fps ratio and the encoder speed are properties of OBS itself; the
@@ -367,6 +370,17 @@ def _wait_serving(relay, feed, t_switch, clock, sleep, timeout_s):
         sleep(1.0)
 
 
+def _record_finished(session, sleep, timeout_s):
+    """Wait until OBS reports the recording output inactive. False on timeout."""
+    waited = 0.0
+    while (session.request("GetRecordStatus", {}) or {}).get("outputActive"):
+        if waited >= timeout_s:
+            return False
+        sleep(1.0)
+        waited += 1.0
+    return True
+
+
 def _measure_tier(relay, session, feed, tier, *, clock, sleep, window_s, settle_s,
                   sample_every_s, serving_timeout_s, progress):
     progress(f"Feed {feed} → {tier.upper()}: reconnecting …")
@@ -435,10 +449,20 @@ def run(relay, session, runtime_dir, *, flags, scene="Stint", window_s=DEFAULT_W
                 session.request("SetCurrentProgramScene", {"sceneName": orig_scene})
             except Exception as exc:              # noqa: BLE001 — keep restoring
                 notes.append(f"switching back to '{orig_scene}' failed ({exc})")
+        finished = False
+        if out_path:
+            try:
+                finished = _record_finished(session, sleep, RECORD_STOP_TIMEOUT_S)
+            except Exception as exc:              # noqa: BLE001 — keep restoring
+                notes.append(f"reading the recording state failed ({exc})")
+            if not finished:
+                keep_recording = True
+                notes.append(f"OBS is still writing {out_path} — left in place")
         if out_path and not keep_recording and isfile(out_path):
             try:
                 remove(out_path)
             except OSError as exc:
+                keep_recording = True
                 notes.append(f"could not delete the benchmark recording {out_path} ({exc})")
         for n in notes:
             progress("WARNING: " + n)
