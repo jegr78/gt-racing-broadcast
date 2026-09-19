@@ -91,6 +91,14 @@ def t_report_payload():
     names = [f["name"] for f in p["embeds"][0]["fields"]]
     assert names == ["Uptime", "Incidents"]
     assert all(f["inline"] for f in p["embeds"][0]["fields"])
+    assert "description" not in p["embeds"][0]            # no finding -> no description
+
+
+def t_report_payload_carries_the_finding():
+    # #586: the report's verdict leads the embed.
+    p = n.report_discord_payload("E", [("Uptime", "98.0%")],
+                                 description="Output ran behind live for 41m of 56m.")
+    assert p["embeds"][0]["description"] == "Output ran behind live for 41m of 56m."
 
 
 if __name__ == "__main__":

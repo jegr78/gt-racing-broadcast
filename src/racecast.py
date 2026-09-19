@@ -1537,6 +1537,15 @@ def _report_name_map():
         return {}
 
 
+def _report_backlog_thresholds():
+    """The relay's fan-out reserve and backlog threshold from the machine .env, so the
+    report counts "behind live" exactly as the relay's yellow reason did (#586)."""
+    env = {k: _machine_env_value(k) for k in ("RACECAST_FEED_PREBUFFER_S",
+                                              "RACECAST_FEED_BACKLOG_WARN_S")}
+    return {"prebuffer_s": hsmod.feed_prebuffer_s(env),
+            "backlog_warn_s": hsmod.feed_backlog_warn_s(env)}
+
+
 def _build_report_file(frm=None, to=None, gap=None, out=None):
     """Core generator. Returns {'path','html','summary'}. Raises ValueError when the
     selected window has no samples."""
@@ -1567,7 +1576,8 @@ def _build_report_file(frm=None, to=None, gap=None, out=None):
     bucketed = rbuild.bucket_samples(samples)
     title = _qualifying_title(_report_event_title())
     report = rbuild.build_report(bucketed, events, _report_name_map(), title,
-                                 (frm, to), time.time(), host=_report_host())
+                                 (frm, to), time.time(), host=_report_host(),
+                                 **_report_backlog_thresholds())
     html = rbuild.render_html(report)
     os.makedirs(_reports_dir(), exist_ok=True)
     date_str = time.strftime("%Y-%m-%d", time.localtime(frm))
@@ -1601,7 +1611,9 @@ def _send_report_core(path, report=None, window=None):
     title = _qualifying_title(_report_event_title() or league or "Event")
     fields_kv = rbuild.report_discord_fields(report) if report else []
     host = (report.get("header", {}) if report else {}).get("host") or _report_host()
-    payload = notify.report_discord_payload(title, fields_kv, host=host)
+    payload = notify.report_discord_payload(
+        title, fields_kv, host=host,
+        description=rbuild.report_finding_text(report) if report else "")
     frm, to = window if window else (None, None)
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
