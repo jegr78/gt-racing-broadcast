@@ -268,9 +268,6 @@ def tool_version(name, run=subprocess.run, which=shutil.which):
 # --------------------------------------------------------------------------
 # Cookies
 # --------------------------------------------------------------------------
-COOKIE_MARKERS = cookie_jar.COOKIE_MARKERS   # the one rule, shared with the relay (#615)
-
-
 def resolve_cookies_path(preflight_file, runtime_dir=None, cookies_opt=None):
     """Locate yt-cookies.txt the way the relay does.
 
@@ -320,7 +317,7 @@ def cookies_status(path, max_age_hours=12, now=None):
             text = fh.read()
     except OSError:
         text = ""
-    has_login = cookie_jar.text_has_login(text)
+    has_login = cookie_jar.text_has_login(text)   # the one rule, shared with the relay (#615)
     if age_h > max_age_hours:
         return Result(WARN, "yt-cookies.txt",
                       f"{age_h:.0f} h old — cookies rotate; re-run `racecast cookies firefox`")

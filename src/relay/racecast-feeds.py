@@ -5077,7 +5077,7 @@ def cookie_login_warning(cookies):
     """The startup WARNING for a YouTube jar that holds no login, else None (no jar, no
     file, or logged in). Same rule as `racecast preflight` (cookie_jar, #615)."""
     if cookie_jar.jar_has_login(cookies) is False:
-        return f"Cookie jar {cookies} holds no YouTube login: {cookie_jar.LOGGED_OUT_HINT}"
+        return f"Cookies: {cookie_jar.LOGGED_OUT_HINT} ({cookies})"
     return None
 
 
