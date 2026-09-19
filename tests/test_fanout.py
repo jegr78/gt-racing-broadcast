@@ -985,6 +985,41 @@ def t_fanout_serve_measures_the_accepted_position_end_to_end():
         srv.stop()
 
 
+def t_fanout_serve_floor_rises_for_a_consumer_slower_than_real_time():
+    # The 2026-08-28 shape in miniature: OBS accepts bytes at half the real-time rate.
+    # Every read jumps the cursor to the trailing mark, so a floor sampled AFTER the read
+    # would stay at the reserve forever; sampled at the accepted position it climbs.
+    r = m.FeedRing(10_000_000)
+    srv = m.FeedFanoutServer("127.0.0.1", 0, r, m.logging.getLogger("t"), prebuffer_s=0.3)
+    rate = 20_000                                        # bytes per second, real time
+    stop = threading.Event()
+
+    def writer():
+        while not stop.is_set():
+            r.write(b"x" * (rate // 20), now=time.monotonic())
+            time.sleep(0.05)
+
+    class _SlowConn:
+        def recv(self, n): return b""
+        def sendall(self, data):
+            if stop.is_set():
+                raise OSError("closed")
+            time.sleep(len(data) / (rate / 2))           # half of real time
+        def close(self): pass
+
+    wt = threading.Thread(target=writer, daemon=True); wt.start()
+    time.sleep(0.5)
+    st = threading.Thread(target=srv._serve, args=(_SlowConn(),), daemon=True); st.start()
+    try:
+        time.sleep(2.0)
+        srv.take_backlog_floor()                         # drop the warm-up samples
+        time.sleep(1.5)
+        floor = srv.take_backlog_floor()
+        assert floor is not None and floor > 0.8, floor  # ~1.3 s: the reserve plus the deficit
+    finally:
+        stop.set(); srv._stop = True; r.close()
+
+
 def t_feed_backlog_degraded_is_relative_to_the_reserve():
     assert m.feed_backlog_degraded(None, 3.0, 5.0) is False      # no consumer / no sample
     assert m.feed_backlog_degraded(3.2, 3.0, 5.0) is False       # the #533 reserve itself

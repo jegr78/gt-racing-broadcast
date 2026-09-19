@@ -655,6 +655,8 @@ def t_migrate_adds_backlog_columns_v9_lossless_and_charted():
     try:
         hs.migrate(conn)
         assert conn.execute("PRAGMA user_version").fetchone()[0] == hs.SCHEMA_VERSION == 9
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(samples)").fetchall()}
+        assert {"feed_a_backlog_s", "feed_b_backlog_s", "pov_backlog_s"} <= cols, cols
         row = conn.execute("SELECT feed_a_max_gap_s, feed_a_backlog_s, feed_b_backlog_s, "
                            "pov_backlog_s FROM samples").fetchone()
         assert tuple(row) == (2.5, None, None, None)    # lossless; new columns NULL
