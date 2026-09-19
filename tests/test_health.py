@@ -1193,9 +1193,9 @@ def t_aggregate_health_backlog_is_a_yellow_reason_with_the_next_step():
     # for YouTube, starts two segments further behind the live edge (#614).
     h = m.aggregate_health(_facts(feeds_backlogged={"A": 11.6, "B": 8.2}))
     assert h["level"] == "yellow", h
-    step = "OBS reads slower than real time; RESET {0} → LIVE drops it with a short black dropout"
-    assert h["reasons"] == ["Feed A output 12 s behind live — " + step.format("A"),
-                            "Feed B output 8 s behind live — " + step.format("B")], h
+    tail = "OBS reads slower than real time; RESET {0} → LIVE drops it with a short black dropout"
+    assert h["reasons"] == ["Feed A output 12 s behind live — " + tail.format("A"),
+                            "Feed B output 8 s behind live — " + tail.format("B")], h
     assert m.aggregate_health(_facts(feeds_backlogged={}))["level"] == "green"
 
 
