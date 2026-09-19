@@ -122,6 +122,99 @@ def t_filter_jar_is_none_without_a_jar():
         assert m.filter_jar(None, "youtube") is None
 
 
+
+def t_filter_splits_lines_like_yt_dlp():
+    # A foreign cookie value carrying U+2028 plus six tabs must not become a
+    # youtube.com line: yt-dlp reads that whole line as one 13-field entry (#616).
+    for brk in (" ", " ", "\x85", "\x0b", "\x0c", "\x1c", "\r"):
+        jar = f"evil.com\tTRUE\t/\tTRUE\t0\tx\ta{brk}.youtube.com\tTRUE\t/\tTRUE\t0\tSID\tattacker\n"
+        kept, dropped = m.filter_jar_text(jar, "youtube")
+        assert "attacker" not in kept and dropped == 1, (repr(brk), kept, dropped)
+
+
+def t_filter_drops_a_platform_cookie_with_a_control_character():
+    for ch in (" ", "\x85", "\x00", "\x1f"):
+        line = f".youtube.com\tTRUE\t/\tTRUE\t0\tSID\ta{ch}b\n"
+        assert m.filter_jar_text(line, "youtube") == ("", 1), repr(ch)
+
+
+def t_filter_jar_keeps_the_bytes_of_a_kept_cookie():
+    raw = b".youtube.com\tTRUE\t/\tTRUE\t0\tPREF\tv\xff1\n.github.com\tTRUE\t/\tTRUE\t0\tx\ty\n"
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, "yt-cookies.txt")
+        with open(p, "wb") as fh:
+            fh.write(raw)
+        assert m.filter_jar(p, "youtube") == 1
+        with open(p, "rb") as fh:
+            assert fh.read() == b".youtube.com\tTRUE\t/\tTRUE\t0\tPREF\tv\xff1\n"
+
+
+def t_filter_jar_writes_to_dest():
+    with tempfile.TemporaryDirectory() as d:
+        raw = os.path.join(d, "raw.txt")
+        with open(raw, "w", encoding="utf-8") as fh:
+            fh.write(BROWSER_JAR)
+        out = os.path.join(d, "yt-cookies.txt")
+        assert m.filter_jar(raw, "youtube", dest=out) == 8
+        with open(out, encoding="utf-8") as fh:
+            assert _names(fh.read()) == ["LOGIN_INFO", "SAPISID", "VISITOR"]
+
+
+def _failing(exc_type):
+    def fail(*args, **kwargs):
+        raise exc_type("simulated failure")
+    return fail
+
+
+def t_filter_jar_leaves_dest_unchanged_when_the_write_fails():
+    for target, name in ((m.os, "replace"), (m.tempfile, "mkstemp")):
+        real = getattr(target, name)
+        setattr(target, name, _failing(OSError))
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                raw = os.path.join(d, "raw.txt")
+                with open(raw, "w", encoding="utf-8") as fh:
+                    fh.write(BROWSER_JAR)
+                out = _jar(d, "OLD JAR\n")
+                assert m.filter_jar(raw, "youtube", dest=out) is None, name
+                with open(out, encoding="utf-8") as fh:
+                    assert fh.read() == "OLD JAR\n", name
+                assert sorted(os.listdir(d)) == ["raw.txt", "yt-cookies.txt"], os.listdir(d)
+        finally:
+            setattr(target, name, real)
+
+
+def t_filter_jar_writes_through_a_symlinked_dest():
+    if os.name != "posix":
+        return
+    with tempfile.TemporaryDirectory() as d:
+        real_dir = os.path.join(d, "shared"); os.mkdir(real_dir)
+        target = _jar(real_dir, "OLD JAR\n")
+        link = os.path.join(d, "yt-cookies.txt")
+        os.symlink(target, link)
+        raw = os.path.join(d, "raw.txt")
+        with open(raw, "w", encoding="utf-8") as fh:
+            fh.write(BROWSER_JAR)
+        assert m.filter_jar(raw, "youtube", dest=link) == 8
+        assert os.path.islink(link)
+        with open(target, encoding="utf-8") as fh:
+            assert _names(fh.read()) == ["LOGIN_INFO", "SAPISID", "VISITOR"]
+
+
+def t_private_export_path_is_an_owner_only_dir_removed_after():
+    with tempfile.TemporaryDirectory() as d:
+        out = os.path.join(d, "yt-cookies.txt")
+        with m.private_export_path(out) as raw:
+            tmpdir = os.path.dirname(raw)
+            assert os.path.dirname(tmpdir) == os.path.realpath(d), tmpdir
+            assert raw != out and os.path.basename(raw) == "yt-cookies.txt"
+            if os.name == "posix":
+                assert os.stat(tmpdir).st_mode & 0o777 == 0o700
+            with open(raw, "w", encoding="utf-8") as fh:
+                fh.write(BROWSER_JAR)
+        assert not os.path.exists(tmpdir) and os.listdir(d) == []
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
