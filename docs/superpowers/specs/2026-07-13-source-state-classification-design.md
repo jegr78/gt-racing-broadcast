@@ -62,6 +62,10 @@ tell them apart. Only on that error, `resolve_hls` makes a second yt-dlp call
 routes every playability reason (bot check, rate limit, "This live event has ended") through
 `raise_no_formats`, which the flag downgrades to a warning that `--no-warnings` hides. A
 successful resolve is not reclassified: a `was_live` recording that resolves is still served.
+When the status is `is_live` or unknown and the cookie jar exists but holds no login marker
+(`cookie_jar.jar_has_login`, the rule `racecast preflight` uses), `resolve_hls` also appends
+` — <hint>` naming `racecast cookies <browser>` (#615). The hint carries no signature, so the
+feed stays a generic drop; an ended or upcoming source never gets it.
 
 ### 2. Feed carries `source_state`
 
