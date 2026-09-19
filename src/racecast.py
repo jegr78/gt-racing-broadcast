@@ -17,6 +17,7 @@
   racecast obs refresh                       # force-reload the relay-served OBS browser sources (HUD incl. timer)
   racecast obs collection [set]              # report the active OBS scene collection (set = switch to GT Racing Endurance)
   racecast obs stream-target <part>          # set OBS stream service+key for a Producer Part (OBS must be stopped)
+  racecast obs benchmark [--window S] [--settle S] [--scene NAME] [--keep-recording] [--json]   # FULL vs ROBUST on the on-air feed with a recording running; never while streaming
   racecast obs logs | tailscale logs         # tail OBS's log dir / the Tailscale status-snapshot log (same -f/--list/--archive flags)
   racecast sheet     url | open              # print / open the active league's Google Sheet (built from its SHEET_ID)
   racecast app launch|quit obs|discord|tailscale   # start / gracefully quit a GUI app (Control Center buttons)
@@ -974,7 +975,7 @@ HIDDEN_VERBS = {"streams": ("run-feed",)}
 ONESHOTS = ("preflight", "speedtest", "cookies", "graphics", "media", "brands", "setup", "install-tools", "install-apps", "obs-browser", "update")
 EVENT_VERBS = ("status", "start", "stop", "takeover")
 TAILSCALE_VERBS = ("up", "down", "status", "logs")
-OBS_VERBS = ("refresh", "collection", "logs", "stream-target")
+OBS_VERBS = ("refresh", "collection", "logs", "stream-target", "benchmark")
 SHEET_VERBS = ("url", "open")           # active league's Google Sheet (from SHEET_ID)
 APP_VERBS = ("launch", "quit")          # GUI app control for the Control Center
 APP_CONTROLLED = ("obs", "discord", "tailscale")   # GUI apps racecast can launch + quit
@@ -2715,6 +2716,86 @@ def obs_stream_target_cmd(rest):
     print(f"obs: {note} ✓")
 
 
+class _BenchmarkRelay:
+    """The two relay calls `obs benchmark` needs, over the loopback control port."""
+
+    def __init__(self, base=None):
+        self.base = base or f"http://127.0.0.1:{RELAY_PORT}"
+
+    def status(self):
+        return _relay_fetch_json(self.base + "/status")
+
+    def set_quality(self, feed, tier):
+        reply = _relay_post_json(f"{self.base}/feed/{feed}/quality", {"tier": tier})
+        if not reply.get("ok"):
+            raise RuntimeError(reply.get("error") or f"relay refused tier {tier!r}")
+        return reply
+
+
+def _parse_benchmark_args(rest):
+    """`obs benchmark` flags -> dict, or ValueError with the usage line."""
+    import obs_benchmark as ob
+    usage = ("usage: racecast obs benchmark [--window S] [--settle S] [--scene NAME] "
+             "[--keep-recording] [--json]")
+    opts = {"window_s": ob.DEFAULT_WINDOW_S, "settle_s": ob.DEFAULT_SETTLE_S,
+            "scene": "Stint", "keep_recording": False, "json": False}
+    it = iter(rest)
+    for arg in it:
+        if arg in ("--keep-recording", "--json"):
+            opts[arg[2:].replace("-", "_")] = True
+        elif arg in ("--window", "--settle"):
+            try:
+                val = int(next(it))
+            except (StopIteration, ValueError):
+                raise ValueError(usage) from None
+            if val < (10 if arg == "--window" else 0):
+                raise ValueError(f"{arg} must be at least {10 if arg == '--window' else 0} s")
+            opts["window_s" if arg == "--window" else "settle_s"] = val
+        elif arg == "--scene":
+            opts["scene"] = next(it, "") or ""
+            if not opts["scene"]:
+                raise ValueError(usage)
+        else:
+            raise ValueError(usage)
+    return opts
+
+
+def obs_benchmark_cmd(rest):
+    """`racecast obs benchmark` (#584): measure the on-air feed at FULL and at ROBUST
+    with a recording running, then persist the result for `racecast preflight`.
+    Refuses while OBS streams or records; restores scene, tier and recording after."""
+    import obs_benchmark as ob
+    import obs_ws
+    try:
+        opts = _parse_benchmark_args(rest)
+    except ValueError as exc:
+        sys.exit(str(exc))
+    if not _relay_http_ok():
+        sys.exit(f"obs: relay not responding on port {RELAY_PORT} — start it with a "
+                 "live stint first.")
+    session, note = obs_ws._connect("127.0.0.1", None, None, 10.0)
+    if session is None:
+        sys.exit(f"obs: benchmark needs OBS — {note}")
+    relay_mod = _load_relay_module("relay/racecast-feeds.py")
+    flags = {"youtube": (relay_mod.STREAMLINK_SERVE, relay_mod.STREAMLINK_SERVE_ROBUST),
+             "twitch": (relay_mod.STREAMLINK_TWITCH, relay_mod.STREAMLINK_TWITCH_ROBUST)}
+    total = 2 * (opts["window_s"] + opts["settle_s"])
+    print(f"obs: benchmark on the on-air feed — about {total} s plus two reconnects. "
+          "The feed reconnects twice; do not run this on air.")
+    try:
+        record = ob.run(_BenchmarkRelay(), session, _runtime_base_dir(), flags=flags,
+                        scene=opts["scene"], window_s=opts["window_s"],
+                        settle_s=opts["settle_s"], keep_recording=opts["keep_recording"],
+                        progress=print)
+    except ob.BenchmarkRefused as exc:
+        sys.exit(f"obs: benchmark refused — {exc}")
+    except Exception as exc:                          # noqa: BLE001 — operator-facing exit
+        sys.exit(f"obs: benchmark failed — {exc}")
+    finally:
+        session.close()
+    print(json.dumps(record, indent=2) if opts["json"] else ob.render(record, time.time()))
+
+
 def resolve_device_selection(devices, token):
     """Map a user token to a device value. token: "" -> (None,None) (skip/leave);
     a 1-based index; a case-insensitive name substring; or an exact value. Returns
@@ -4341,7 +4422,7 @@ DISPATCH = {
     ("tailscale", "up"): tailscale_up_cmd, ("tailscale", "down"): tailscale_down_cmd,
     ("tailscale", "status"): tailscale_status_cmd,
     ("obs", "refresh"): obs_refresh_cmd, ("obs", "collection"): obs_collection_cmd,
-    ("obs", "stream-target"): obs_stream_target_cmd,
+    ("obs", "stream-target"): obs_stream_target_cmd, ("obs", "benchmark"): obs_benchmark_cmd,
     ("obs", "logs"): obs_logs, ("tailscale", "logs"): tailscale_logs,
     ("sheet", "url"): sheet_url_cmd, ("sheet", "open"): sheet_open_cmd,
     ("app", "launch"): app_launch_cmd, ("app", "quit"): app_quit_cmd,

@@ -472,7 +472,7 @@ def t_run_restores_on_an_interrupt():
             m.run(relay, sess, d, flags=FLAGS, clock=clock, sleep=boom,
                   now=lambda: NOW, remove=lambda p: None, isfile=lambda p: True)
         except KeyboardInterrupt:
-            pass
+            pass  # the interrupt must reach the caller after the restore
         else:
             raise AssertionError("expected KeyboardInterrupt")
     assert sess.recording is False and sess.scene == "Standby"
