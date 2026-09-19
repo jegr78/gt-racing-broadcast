@@ -349,7 +349,9 @@ The producer's microphone is **not** part of the capture. It is the OBS input
 when you run `racecast setup` and re-import the collection in OBS. It ships muted.
 
 On a machine with `RACECAST_CAPTURE` set, the relay opens the mic while the local stint
-is on air and mutes it on every other handover and on `SPLIT`. `STINT A` / `STINT B`
+is on air and mutes it on every handover to a remote stint. `SPLIT` follows the on-air
+feed: the mic stays open while the local stint is the audible one and is muted when the
+remote feed is. `STINT A` / `STINT B`
 follow the same rule (the relay's `/obs/stint/<A|B>`): the mic opens only when the picked
 feed is the local one. The one gap is the break-glass case where the relay cannot reach
 OBS: the Companion STINT buttons still switch the feeds directly, but leave the mic as it
@@ -363,8 +365,8 @@ producer's commentary.
 
 ### Why there is no delay between the local stint and a remote feed
 
-A local stint reaches OBS in well under a second; a remote commentator's feed arrives
-about 30 seconds behind real time. That gap is not a problem to fix: each stint covers a
+A local stint reaches OBS a few seconds behind real time (the relay's 3 s playback
+margin); a remote commentator's feed arrives about 30 seconds behind. That gap is not a problem to fix: each stint covers a
 different GT7 lobby with different drivers, so two stints never share a race timeline.
 Cutting from one to the other, or showing both in the Splitscreen at a handover, puts
 two unrelated races next to each other, and a delay on the local side would align
