@@ -625,7 +625,7 @@ def run(relay, session, runtime_dir, *, flags, scene="Stint", window_s=DEFAULT_W
             try:
                 _wait_serving(relay, feed, restored_at, clock, sleep, serving_timeout_s)
                 _rejoin_after_prefetch(relay, feed, sleep)
-            except BaseException as exc:          # noqa: BLE001 — cleanup, report and go on
+            except (Exception, KeyboardInterrupt) as exc:  # noqa: BLE001 — cleanup: report, go on
                 notes.append(f"Feed {feed} is back on its tier but OBS was not rejoined "
                              f"({exc.__class__.__name__}: {exc}) — press RESET for "
                              f"Feed {feed} in the Director Panel")
