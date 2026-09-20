@@ -567,7 +567,8 @@ def t_inbound_gap_worst_ignores_the_reading_the_window_inherited():
     # started the count: the pre-restart reading, exactly what this guard excludes.
     # Measured against the shipped helper before the fix: 9.0 instead of 1.2.
     assert m._inbound_gap_worst(
-        w(None, None, None, 9.0, 9.0, 9.0, 0.4, 0.4, 1.2)) == 1.2
+        w(None, None, None, 9.0, 9.0, 9.0, 0.4, 0.4, 1.2)) == 1.2, \
+        "a leading None run must not make 9.0 look like an in-window reading"
     # Nothing but the inherited reading after the Nones: still nothing to say.
     assert m._inbound_gap_worst(w(None, None, 9.0, 9.0)) is None
     # The reading never changed: the window was shorter than a heartbeat, so nothing can
