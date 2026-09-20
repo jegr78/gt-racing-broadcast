@@ -50,6 +50,69 @@ def t_robust_extra_segments_is_the_difference():
 # --------------------------------------------------------------------------
 # one measurement window -> a summary
 # --------------------------------------------------------------------------
+def t_playback_treats_a_forward_cursor_jump_as_a_rejoin_too():
+    # An OBS media source that is rebuilt does not always restart its cursor at zero: it
+    # can resume on the new stream's own timestamps and jump FORWARD by hours. The guard
+    # only knew the backward jump, so such a pair was counted as playback and one of them
+    # dominated the whole window. Measured on the shipped helper before the fix: a jump to
+    # 11_000_000 ms reported 1374x and rejoined=False, and keeps_real_time said True on it.
+    # A broken measurement read as the healthiest possible answer.
+    def w(*pairs):
+        return [{"t": t, "cursor_ms": c} for t, c in pairs]
+    back = w((0, 10_000), (2, 12_000), (4, 1_000), (6, 3_000), (8, 5_000))
+    assert m._playback(back) == (1.0, 0.0, True), "the backward jump was always caught"
+    fwd = w((0, 10_000), (2, 12_000), (4, 11_000_000), (6, 11_002_000), (8, 11_004_000))
+    rate, stall, rejoined = m._playback(fwd)
+    assert rejoined is True, "a forward jump is a rejoin as much as a backward one"
+    assert rate == 1.0, rate            # the three sane pairs, the jump discarded
+    assert stall == 0.0
+    # The ceiling is the window's own wall time: OBS can outrun the wall clock only by
+    # what its own buffer holds (8 MB, about 9 s at 7 Mbps), never by a whole window.
+    # A pair inside that allowance stays playback, so draining a buffer is not a rejoin.
+    # The window is the benchmark's default 60 s; the ceiling tightens with shorter ones.
+    drain = w((0, 0), (2, 9_000)) + w(*[(t, 9_000 + (t - 2) * 1000) for t in range(4, 62, 2)])
+    assert m._playback(drain)[2] is False, "a buffer drain is not a discontinuity"
+
+
+def t_summary_says_when_the_source_outran_the_wall_clock():
+    # A fresh serve walks the CDN's DVR window at whatever rate it can fetch, so media
+    # arrives faster than real time. backlog_s ages by ARRIVAL, so it climbs while OBS
+    # plays at 1.0x and nothing downstream is slow. Measured live on the production host:
+    # the window reported 15.5 s -> 57.2 s, and three minutes later the steady state was
+    # 4.6 s. Whoever reads that column concludes the machine is broken.
+    # The consumer can only add (1 - playback_rate) * duration to a backlog. The rest came
+    # from the inbound side, and that is arithmetic, not a guess.
+    slow_consumer = [_sample(t, backlog=3.0 + t * 0.5, cursor=t * 500) for t in (0.0, 20.0, 40.0, 60.0)]
+    s = m.summarize(slow_consumer)
+    assert s["playback_rate"] == 0.5
+    assert s["source_ahead_s"] == 0.0, s["source_ahead_s"]   # all of it is the consumer
+    catching_up = [_sample(t, backlog=3.0 + t * 0.7, cursor=t * 1000) for t in (0.0, 20.0, 40.0, 60.0)]
+    s = m.summarize(catching_up)
+    assert s["playback_rate"] == 1.0
+    assert s["source_ahead_s"] == 42.0, s["source_ahead_s"]  # none of it is the consumer
+    # A steady feed: nothing to explain, so the field stays 0.0 rather than inventing one.
+    steady = [_sample(t, backlog=4.0, cursor=t * 1000) for t in (0.0, 20.0, 40.0, 60.0)]
+    assert m.summarize(steady)["source_ahead_s"] == 0.0
+    # Missing signals must not become a number.
+    assert m.summarize([_sample(0.0, backlog=None), _sample(2.0, backlog=None)])[
+        "source_ahead_s"] is None
+
+
+def t_render_explains_a_backlog_the_source_caused():
+    # The number is not hidden, it is named. Hiding it would also hide a real backlog.
+    rec = {"feed": "A", "platform": "youtube", "scene": "Stint", "window_s": 60,
+           "fps_target": 60.0, "ts": NOW,
+           "full": {"backlog_floor_start_s": 15.5, "backlog_floor_end_s": 57.2,
+                    "source_ahead_s": 41.7, "playback_rate": 0.99},
+           "robust": {"backlog_floor_start_s": 4.0, "backlog_floor_end_s": 4.2,
+                      "source_ahead_s": 0.0, "playback_rate": 1.0}}
+    text = m.render(rec, NOW)
+    assert "source was still catching up" in text, text
+    assert "41.7 s" in text, text
+    # The tier that did not catch up says nothing, or the note becomes noise.
+    assert text.count("source was still catching up") == 1, text
+
+
 def t_summarize_derives_rates_over_the_window():
     samples = [
         _sample(0.0, fps=60.0, render_ms=4.0, rs=100, rt=1000, os_=10, ot=1000,

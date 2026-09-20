@@ -58,6 +58,12 @@ HISTORY_LIMIT = 10
 # month-old number no longer describes the machine that goes on air tonight.
 DEFAULT_MAX_AGE_DAYS = 30
 
+# A backlog rise the SOURCE caused is only worth a line once it is large enough that the
+# column would otherwise alarm someone. This mirrors RACECAST_FEED_BACKLOG_WARN_S's
+# default (health_store.py), which is the repo's existing bar for "a backlog worth
+# naming". It is reused rather than tuned a second time here.
+SOURCE_AHEAD_NOTE_S = 5.0
+
 DEFAULT_WINDOW_S = 60          # sampling window per tier
 DEFAULT_SETTLE_S = 10          # after a tier switch: let the rejoin transient pass
 SAMPLE_EVERY_S = 2.0
@@ -159,14 +165,27 @@ def _delta_pct(samples, part_key, total_key):
 
 def _playback(samples):
     """(rate, stall_fraction, rejoined) from the mediaCursor over the window. A cursor
-    that goes backwards is a rejoin: that pair is not measured and the window is
-    marked. Pure."""
+    that jumps is a rejoin: that pair is not measured and the window is marked.
+
+    The jump test is symmetric, because a rebuilt OBS media source does not always
+    restart its cursor at zero. It can resume on the new stream's own timestamps and
+    jump FORWARD by hours. A one-sided test counted that pair as playback, and since the
+    rate is the summed media time over the summed wall time, the one pair swallowed the
+    window: a jump to 11_000_000 ms reported 1374x, left `rejoined` False so nothing
+    marked the window, and keeps_real_time answered True on it.
+
+    The forward ceiling is the window's own wall duration. OBS can outrun the wall clock
+    only by what it has already buffered (`buffering_mb` is 8 MB, about 9 s at 7 Mbps),
+    never by a whole window, while a rebuild jump is the stream's absolute timestamp. So
+    the window separates the two without a tuned constant. It does get tighter as the
+    window shrinks; below about 20 s a buffer drain could reach it. Pure."""
     pairs, rejoined = [], False
     pts = [(s["t"], s.get("cursor_ms")) for s in samples if s.get("cursor_ms") is not None]
+    ceiling = (pts[-1][0] - pts[0][0]) if len(pts) >= 2 else 0.0
     for (t0, c0), (t1, c1) in zip(pts, pts[1:], strict=False):
         if t1 <= t0:
             continue
-        if c1 < c0:
+        if c1 < c0 or (c1 - c0) / 1000.0 > ceiling:
             rejoined = True
             continue
         pairs.append(((c1 - c0) / 1000.0, t1 - t0))
@@ -175,6 +194,26 @@ def _playback(samples):
     rate = sum(d for d, _ in pairs) / sum(dt for _, dt in pairs)
     stalled = sum(1 for d, dt in pairs if d / dt < STALL_RATIO)
     return round(rate, 3), round(stalled / len(pairs), 2), rejoined
+
+
+def _source_ahead(backlog_start, backlog_end, rate, duration_s):
+    """Seconds of the window's backlog rise that the SOURCE caused, not the consumer.
+
+    `backlog_s` ages by the byte's ARRIVAL time, so it climbs whenever media arrives
+    faster than real time. A fresh serve does exactly that: it walks the CDN's DVR
+    window at whatever rate it can fetch. Measured live on the production host, a window
+    opened 10 s after the rejoin reported 15.5 s -> 57.2 s while OBS played at 0.99x and
+    rendered in 0.58 ms. Three minutes later the steady state was 4.6 s. Nothing was
+    wrong with the host; the column described the join.
+
+    A consumer can only add `(1 - rate) * duration` to a backlog. Whatever rose beyond
+    that arrived early. That is arithmetic over two numbers the window already has, not
+    an estimate. 0.0 when the consumer explains all of it, None when a part is missing.
+    Pure -> unit-tested."""
+    if None in (backlog_start, backlog_end, rate, duration_s):
+        return None
+    consumer = max(0.0, 1.0 - rate) * duration_s
+    return round(max(0.0, (backlog_end - backlog_start) - consumer), 1)
 
 
 def _inbound_gap_worst(samples):
@@ -282,6 +321,10 @@ def summarize(samples):
         "backlog_floor_start_s": _floor(_values(samples[:third], "backlog_s")),
         "backlog_floor_end_s": _floor(_values(samples[-third:], "backlog_s")),
         "backlog_max_s": max(backlog) if backlog else None,
+        "source_ahead_s": _source_ahead(
+            _floor(_values(samples[:third], "backlog_s")),
+            _floor(_values(samples[-third:], "backlog_s")),
+            rate, round(ts[-1] - ts[0], 1) if ts else None),
         "inbound_gap_worst_s": _inbound_gap_worst(samples),
         "snaps": (snaps[-1] - snaps[0]) if len(snaps) >= 2 else None,
         "contaminated": _disturbances(samples, rejoined),
@@ -477,6 +520,13 @@ def render(record, now):
             # Reported, not judged, following the backlog's rule. A bursty source is not
             # a verdict on the host, but without it a slow window has no stated cause.
             f"   {_fmt(s.get('inbound_gap_worst_s'), ' s')}")
+        ahead = s.get("source_ahead_s")
+        if ahead is not None and ahead >= SOURCE_AHEAD_NOTE_S:
+            # Named, not hidden. Hiding the column would hide a real backlog too, and
+            # the operator's question is "why did it climb", which this answers.
+            lines.append(f"              the source was still catching up to the live "
+                         f"edge: {_fmt(ahead, ' s')} of that rise arrived early, "
+                         f"not late")
         if s.get("contaminated"):
             lines.append(f"              disturbed: {'; '.join(s['contaminated'])}")
     extra = record.get("robust_extra_segments")
