@@ -6812,13 +6812,18 @@ class Feed:
                     return
             self._obs_reconnect_now()
         t = threading.Thread(target=_run, daemon=True)
-        t.start()
+        try:
+            t.start()
+        except RuntimeError as exc:    # out of threads: a cosmetic rejoin never kills a serve
+            self.log.debug("fan-out rejoin on %s not scheduled (%s)", self.name, exc)
+            return None
         return t                       # production ignores it; tests join on it
 
     def _obs_rejoin_hook(self, tool="streamlink"):
         """The `on_first_byte` hook Feed.run hands the fan-out serve: a prefetch-delayed
         rejoin when this re-serve would splice into an open OBS demuxer, else None."""
-        if not should_obs_reconnect(True, self.dropped, self.consumer_attached()):
+        if not should_obs_reconnect(self.ring is not None, self.dropped,
+                                    self.consumer_attached()):
             return None
         land_s = prefetch_land_s(tool)
         return lambda: self._obs_rejoin_after_prefetch(land_s)

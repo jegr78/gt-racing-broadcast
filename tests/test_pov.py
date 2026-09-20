@@ -1551,6 +1551,7 @@ def t_obs_rejoin_hook_covers_the_director_restart_paths():
         def __init__(self, stuck): self._stuck = stuck
         def consumer_health(self, now): return self._stuck, 0
     f = m.Feed("A", 53001, 0, lambda: [], LOGDIR)
+    f.ring = m.FeedRing(4096)                    # fan-out: the relay owns the socket
     f.fanout_server = _Srv(0.0)                  # OBS is reading this feed
     f.dropped = False
     assert f._obs_rejoin_hook() is not None              # /reload, tier change, solo /next
@@ -1558,6 +1559,46 @@ def t_obs_rejoin_hook_covers_the_director_restart_paths():
     assert f._obs_rejoin_hook() is None                  # ping-pong handover stays seamless
     f.dropped = True
     assert f._obs_rejoin_hook() is not None              # drop-recovery, unchanged
+    # Direct-serve (no ring): OBS holds the socket to streamlink and reconnects itself —
+    # rebuilding its input there would be a flicker for nothing.
+    f.ring = None
+    f.fanout_server = _Srv(0.0)
+    assert f._obs_rejoin_hook() is None
+
+
+def t_serve_fanout_bumps_the_generation_a_stale_rejoin_compares():
+    # rejoin_is_stale compares the generation the rejoin was scheduled under against the
+    # current one. If the serve never bumped it, a rejoin from the PREVIOUS serve would
+    # still fire and drop OBS onto the newest serve's prefetch burst. Driven through the
+    # real _serve_fanout with a fake process, because that is the only place it moves.
+    import io as _io, subprocess as _sp
+    class _Proc:
+        returncode = 0
+        def __init__(self):
+            self.stdout = _io.BytesIO(b"payload")
+            self.stderr = _io.BytesIO(b"")
+        def poll(self): return 0
+        def wait(self, timeout=None): return 0
+        def terminate(self): pass
+        def kill(self): pass
+    class _FakeSub:
+        PIPE = _sp.PIPE
+        TimeoutExpired = _sp.TimeoutExpired
+        @staticmethod
+        def Popen(*a, **k): return _Proc()
+    f = m.Feed("A", 53001, 0, lambda: [], LOGDIR)
+    f.ring = m.FeedRing(4096)
+    old = m.subprocess
+    m.subprocess = _FakeSub
+    try:
+        before = f.serve_generation
+        f._serve_fanout("t", "youtube", None, cmd=["ignored"], tool="ffmpeg")
+        assert f.serve_generation == before + 1, f.serve_generation
+        f._serve_fanout("t", "youtube", None, cmd=["ignored"], tool="ffmpeg")
+        assert f.serve_generation == before + 2, f.serve_generation
+    finally:
+        m.subprocess = old
+    assert f.ring.live_offset() > 0        # the fake bytes really went through the loop
 
 
 def t_prefetch_land_s_waits_only_for_an_hls_burst():
