@@ -3024,6 +3024,25 @@ def _backlog_relay(a_floor, b_floor=None, a_live=None):
     return r
 
 
+def t_every_text_subprocess_in_the_relay_decodes_leniently():
+    # A child's output is decoded with the console codepage unless told otherwise, and
+    # on a German Windows that is cp1252. `streamlink --help` carries a byte cp1252
+    # cannot decode, and because subprocess reads pipes in a THREAD the failure never
+    # reaches the caller's except: the relay prints a traceback and silently loses the
+    # output. Seen on the producer host 2026-09-20. One call site had drifted; this
+    # keeps all of them together.
+    import re
+    with open(os.path.join(ROOT, "src", "relay", "racecast-feeds.py"),
+              encoding="utf-8") as fh:
+        src = fh.read()
+    # Each subprocess.run(...) call, flattened, must pair text= with errors=.
+    calls = re.findall(r"subprocess\.run\((.*?)\)\s*(?:\.|$|\n)", src, re.S)
+    offenders = [c for c in calls
+                 if ("text=True" in c or "universal_newlines=True" in c)
+                 and "errors=" not in c]
+    assert not offenders, offenders
+
+
 def t_av_watcher_start_never_takes_the_relay_down_with_it():
     # This is the test the suite was missing. _start_av_watcher() runs only from
     # Relay.start(), which no unit test calls, so a wrong attribute inside it

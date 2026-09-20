@@ -208,9 +208,15 @@ def _streamlink_help():
     global _STREAMLINK_HELP
     if _STREAMLINK_HELP is None:
         try:
+            # errors="replace" like every other subprocess.run in this file: on a
+            # German Windows the console codepage is cp1252, streamlink's help text
+            # carries a byte it cannot decode, and the failure lands in subprocess's
+            # reader THREAD — so the `except` below never sees it and the relay just
+            # prints a traceback and loses the help text (and with it the queue
+            # deadline flag). Seen on the producer host 2026-09-20.
             _STREAMLINK_HELP = subprocess.run(
                 ["streamlink", "--help"], capture_output=True, text=True,
-                timeout=10, env=external_tool_env()).stdout or ""
+                errors="replace", timeout=10, env=external_tool_env()).stdout or ""
         except Exception:                     # noqa: BLE001 — best-effort probe
             _STREAMLINK_HELP = ""
     return _STREAMLINK_HELP
