@@ -161,6 +161,25 @@ help a consumer that is chronically slower than real time. So:
   the same too-short 5 s, so the ROBUST windows of a #584 run taken before this change
   may have sampled a backlog the benchmark caused itself.
 
+  **The benchmark's backlog column can describe the join rather than the host.** It
+  starts sampling `settle_s` after the rejoin, and on a *fresh* serve that still lands
+  inside the CDN's DVR walk: streamlink fetches as fast as it is allowed until it
+  reaches the live edge, so media arrives faster than real time and `backlog_s`, which
+  ages by ARRIVAL, climbs while nothing downstream is slow. Measured on the Windows
+  production host 2026-09-20: a window opened one minute after arming reported
+  15.5 s → 57.2 s with OBS at 0.99x playback, 60.0 fps and 0.58 ms render. Left
+  undisturbed for three minutes afterwards, the same feed sat flat at 3.7 to 4.6 s,
+  which matches the 4.5 to 5.7 s of #619 and the 0.2 to 1.9 s of the same run on the
+  Mac. The host was never behind. `summarize` therefore reports `source_ahead_s`, the
+  part of the rise the consumer cannot account for (a consumer adds at most
+  `(1 - playback_rate) * duration`), and the report names it. The verdict is unchanged:
+  the backlog stays out of `keeps_real_time`, and this run is why that is right.
+
+  `inbound_max_gap_s` does NOT settle this question, and reading it as a rate is a
+  mistake worth writing down: it is the interval's **maximum** gap, so a burst of
+  segments followed by one 5.3 s pause prints the same number as a steady 5.3 s cadence.
+  It bounds the worst stall; it says nothing about throughput.
+
 ## Test strategy (TDD)
 
 Pure, unit-testable decision functions (like `render_drift_decision`):
