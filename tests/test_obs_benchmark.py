@@ -561,6 +561,15 @@ def t_inbound_gap_worst_ignores_the_reading_the_window_inherited():
     # A later repeat of a value is real data, because two intervals may share a max.
     assert m._inbound_gap_worst(w(9.0, 0.4, 1.2, 1.2)) == 1.2
     assert m._inbound_gap_worst(w(0.4, 9.0, 0.4)) == 9.0   # a spike after the first change
+    # A window opens ON the restart, and the #614 rejoin rebuilds the OBS source, so the
+    # relay has no reading to give for the first samples. Anchoring the inherited value
+    # on samples[0] made those Nones the anchor, and the first real number after them
+    # started the count: the pre-restart reading, exactly what this guard excludes.
+    # Measured against the shipped helper before the fix: 9.0 instead of 1.2.
+    assert m._inbound_gap_worst(
+        w(None, None, None, 9.0, 9.0, 9.0, 0.4, 0.4, 1.2)) == 1.2
+    # Nothing but the inherited reading after the Nones: still nothing to say.
+    assert m._inbound_gap_worst(w(None, None, 9.0, 9.0)) is None
     # The reading never changed: the window was shorter than a heartbeat, so nothing can
     # be said, and reporting the inherited 9.0 would measure the old serve instead.
     assert m._inbound_gap_worst(w(9.0, 9.0, 9.0)) is None

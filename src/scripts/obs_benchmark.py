@@ -189,16 +189,25 @@ def _inbound_gap_worst(samples):
     and counts only what the relay produced afterwards. Later repeats are kept, because
     two intervals may legitimately share a max.
 
-    None when the reading never changed: the window was shorter than a heartbeat and
-    nothing can honestly be said. Nothing here is filled in. Pure -> unit-tested."""
+    The inherited reading is the first value that IS one, not samples[0]. A window opens
+    on a restart, and the relay answers None while it has no reading to give, so a window
+    can start with a run of Nones. Anchoring on samples[0] made every one of those Nones
+    "the inherited value", and the first real number after them started the count, which
+    is the pre-restart reading itself. Measured before the fix: the window
+    [None, None, None, 9.0, 9.0, 9.0, 0.4, 0.4, 1.2] reported 9.0 instead of 1.2.
+
+    None when nothing was produced after the inherited reading. Usually that means the
+    window was shorter than a heartbeat, but a longer window in which every heartbeat
+    reported the same value answers None too. Nothing here is filled in.
+    Pure -> unit-tested."""
     seen = [s.get("inbound_max_gap_s") for s in samples]
-    first = seen[0] if seen else None
+    inherited = next((v for v in seen if v is not None), None)
     rest = []
     started = False
     for v in seen:
         if not started:
-            if v == first:
-                continue            # still the reading the window inherited
+            if v is None or v == inherited:
+                continue            # no reading yet, or still the inherited one
             started = True
         if v is not None:
             rest.append(v)
