@@ -1623,8 +1623,13 @@ def t_prefetch_land_s_is_derived_from_the_burst_and_the_prebuffer():
     # No burst -> no wait: the local capture ffmpeg (#592) would only hold black open.
     assert m.prefetch_land_s(0, 3.0) == 0.0
     assert m.prefetch_land_s(-1, 3.0) == 0.0
-    # The measured worst case must fit inside the budget it was rounded up from.
-    assert 4.96 / 6 <= m.SEGMENT_FETCH_BUDGET_S
+    # Every measured worst case must fit inside the ceiling's per-segment budget
+    # (2026-09-20, YouTube and Twitch, FULL and ROBUST — see SEGMENT_FETCH_BUDGET_S).
+    for burst, segments in ((1.82, 4), (4.96, 6), (0.69, 2), (1.80, 2)):
+        assert burst / segments <= m.SEGMENT_FETCH_BUDGET_S, (burst, segments)
+    # And the burst-end detector's threshold must sit between the gaps INSIDE a burst
+    # and the slowest steady cadence, or it fires on the wrong one.
+    assert 0.78 < m.BURST_IDLE_S < 1.4, m.BURST_IDLE_S
 
 
 def t_serve_flags_is_the_single_source_for_a_serves_flags():
@@ -1701,7 +1706,8 @@ def t_obs_rejoin_hook_derives_the_wait_from_this_serves_flags():
     f.fanout_server = _Srv()
     f.dropped = True
     seen = []
-    f._obs_rejoin_after_prefetch = lambda land_s, **kw: seen.append(land_s)
+    f._obs_rejoin_after_prefetch = lambda segments, prebuffer, **kw: seen.append(
+        m.prefetch_land_s(segments, prebuffer))
     f._obs_rejoin_hook(m.STREAMLINK_SERVE)()            # FULL
     f._obs_rejoin_hook(m.STREAMLINK_SERVE_ROBUST)()     # ROBUST waits longer
     f._obs_rejoin_hook(m.STREAMLINK_TWITCH)()           # Twitch prefetches least
@@ -1727,51 +1733,113 @@ def t_obs_rejoin_hook_derives_the_wait_from_this_serves_flags():
     assert m.health_store.DEFAULT_FEED_PREBUFFER_S > 0
 
 
-_LAND_S = 7.0        # a representative derived wait: 4 segments + a 3 s prebuffer
+class _RejoinClock:
+    """Injected clock+sleep for the rejoin thread: time only moves when it sleeps, so a
+    test drives the inbound byte flow instead of waiting for a real one."""
+    def __init__(self, feed, byte_gaps):
+        self.t = 100.0
+        self.feed = feed
+        self.gaps = list(byte_gaps)   # seconds between the remaining inbound chunks
+        self.slept = []
+        feed.last_byte_ts = self.t
+
+    def clock(self):
+        return self.t
+
+    def sleep(self, s):
+        self.slept.append(round(s, 3))
+        self.t += s
+        while self.gaps and self.t - self.feed.last_byte_ts >= self.gaps[0]:
+            self.feed.last_byte_ts += self.gaps.pop(0)
 
 
-def t_prefetch_rejoin_waits_then_rebuilds_and_drops_a_stale_one():
-    # The threaded wait, driven with an injected sleep: it rebuilds only after the wait,
-    # and a serve that was superseded during it leaves OBS alone.
-    calls = []
+def _rejoin_feed(obs_calls):
+    f = m.Feed("A", 53001, 0, lambda: [], LOGDIR)
+    f.ring = m.FeedRing(4096)
+    f.serve_generation = 7
+    f.phase = "serving"
     class _FakeObs:
         def release_feed_inputs(self, ports=None, **k):
-            calls.append(ports); return (["Feed A"], "")
-    f = m.Feed("A", 53001, 0, lambda: [], LOGDIR)
-    f.serve_generation = 7
-    f.phase = "serving"                    # the rejoin only fires while bytes flow
-    waited = []
-    def _sleep(s):
-        waited.append(s)
-        assert calls == [], "rebuilt BEFORE the prefetch had landed"
+            obs_calls.append(ports); return (["Feed A"], "")
+    return f, _FakeObs()
+
+
+def t_prefetch_rejoin_measures_the_burst_instead_of_predicting_it():
+    # The burst's arrival span is a download duration (downlink, source bitrate, CDN), so
+    # a constant measured on one machine is wrong on every other. It is measured per
+    # serve: the first BURST_IDLE_S without a byte ends the burst, and only then does the
+    # prebuffer wait start — a fast link must not pay the ceiling.
+    calls = []
+    f, obs = _rejoin_feed(calls)
+    ck = _RejoinClock(f, [0.3, 0.3, 0.3])      # chunks inside the burst, then a pause
     old = m._obs_ws
-    m._obs_ws = _FakeObs()
+    m._obs_ws = obs
     try:
-        f._obs_rejoin_after_prefetch(_LAND_S, sleep=_sleep).join(5)
-        assert waited == [_LAND_S], waited
-        assert calls == [[53001]], calls
-        # A second serve started while the rejoin was waiting -> no rebuild.
-        calls.clear(); waited.clear()
-        def _sleep_then_supersede(s):
-            waited.append(s); f.serve_generation = 8
-        f._obs_rejoin_after_prefetch(_LAND_S,
-                                     sleep=_sleep_then_supersede).join(5)
-        assert waited == [_LAND_S], waited
-        assert calls == [], calls
-        # The serve died during the wait (phase left "serving"): no rebuild.
-        calls.clear(); waited.clear()
-        f.serve_generation = 8
-        def _sleep_then_die(s):
-            waited.append(s); f.phase = "connecting"
-        f._obs_rejoin_after_prefetch(_LAND_S, sleep=_sleep_then_die).join(5)
-        assert waited == [_LAND_S], waited
-        assert calls == [], calls
+        f._obs_rejoin_after_prefetch(4, 3.0, sleep=ck.sleep, clock=ck.clock).join(5)
+    finally:
+        m._obs_ws = old
+    assert calls == [[53001]], calls
+    assert 3.0 in ck.slept, ck.slept                 # the prebuffer wait happened
+    assert sum(ck.slept) < m.prefetch_land_s(4, 3.0), ck.slept   # and beat the ceiling
+
+
+def t_prefetch_rejoin_falls_back_to_the_ceiling_when_the_source_never_pauses():
+    # Twitch low-latency shows no inbound gap above ~1.4 s, so the detector alone would
+    # wait forever. The ceiling (segments x the per-segment budget) bounds it.
+    calls = []
+    f, obs = _rejoin_feed(calls)
+    ck = _RejoinClock(f, [0.05] * 400)
+    old = m._obs_ws
+    m._obs_ws = obs
+    try:
+        f._obs_rejoin_after_prefetch(2, 3.0, sleep=ck.sleep, clock=ck.clock).join(5)
+    finally:
+        m._obs_ws = old
+    assert calls == [[53001]], "the ceiling must rejoin anyway, not hang"
+    waited = round(sum(ck.slept), 3)
+    # It waited the whole per-segment ceiling for the burst, then the prebuffer — and no
+    # more than one extra poll beyond that. Rounded: the sum is accumulated in 0.1 steps.
+    assert waited >= 2 * m.SEGMENT_FETCH_BUDGET_S, waited
+    assert waited <= round(m.prefetch_land_s(2, 3.0) + m.BURST_POLL_S, 3), waited
+
+
+def t_prefetch_rejoin_drops_a_serve_superseded_during_the_burst_wait():
+    # The generation can move while the burst is still arriving, not only during the
+    # prebuffer wait. Rebuilding then would drop OBS onto the NEWEST serve's burst.
+    calls = []
+    f, obs = _rejoin_feed(calls)
+    ck = _RejoinClock(f, [0.05] * 400)
+    def _sleep(s):
+        ck.sleep(s)
+        if ck.t - 100.0 > 0.25:
+            f.serve_generation = 8           # a second restart took over mid-burst
+    old = m._obs_ws
+    m._obs_ws = obs
+    try:
+        f._obs_rejoin_after_prefetch(4, 3.0, sleep=_sleep, clock=ck.clock).join(5)
+    finally:
+        m._obs_ws = old
+    assert calls == [], calls
+    assert sum(ck.slept) < 1.0, "it must bail out during the burst, not after it"
+
+
+def t_prefetch_rejoin_skips_a_dead_serve_and_never_waits_for_a_local_one():
+    # A serve that died inside the wait (phase left "serving") must not be rebuilt, and a
+    # feed with no HLS prefetch rejoins at once with no wait at all.
+    calls = []
+    f, obs = _rejoin_feed(calls)
+    ck = _RejoinClock(f, [5.0])
+    f.phase = "connecting"
+    old = m._obs_ws
+    m._obs_ws = obs
+    try:
+        f._obs_rejoin_after_prefetch(4, 3.0, sleep=ck.sleep, clock=ck.clock).join(5)
+        assert calls == [], "a dead serve is not rebuilt"
         f.phase = "serving"
-        # A local capture feed has no burst: no wait at all, rebuild straight away.
-        waited.clear()
-        f._obs_rejoin_after_prefetch(m.prefetch_land_s(0, 3.0), sleep=_sleep).join(5)
-        assert waited == [], waited
+        ck2 = _RejoinClock(f, [])
+        f._obs_rejoin_after_prefetch(0, 3.0, sleep=ck2.sleep, clock=ck2.clock).join(5)
         assert calls == [[53001]], calls
+        assert ck2.slept == [], "a local capture feed has no burst and must not wait"
     finally:
         m._obs_ws = old
 

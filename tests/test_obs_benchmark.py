@@ -587,8 +587,10 @@ def t_prefetch_land_s_scales_with_the_burst_and_the_prebuffer():
     assert m.prefetch_land_s(4) == m.prefetch_land_s(4, m.DEFAULT_PREBUFFER_S)
     assert m.prefetch_land_s(0, 3.0) == 0.0
     assert m.prefetch_land_s(None, 3.0) == 0.0       # live_edge_segments found no flag
-    # The measured ROBUST worst case must fit the budget it was rounded up from.
-    assert 4.96 / 6 <= m.SEGMENT_FETCH_BUDGET_S
+    # Every measured worst case must fit the budget it was rounded up from (2026-09-20):
+    # YouTube FULL 1.82/4, YouTube ROBUST 4.96/6, Twitch FULL 0.69/2, Twitch ROBUST 1.80/2.
+    for burst, segments in ((1.82, 4), (4.96, 6), (0.69, 2), (1.80, 2)):
+        assert burst / segments <= m.SEGMENT_FETCH_BUDGET_S, (burst, segments)
 
 
 def t_run_samples_only_after_the_reconnect_the_rejoin_and_the_settle():

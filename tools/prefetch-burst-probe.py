@@ -43,6 +43,14 @@ ROOT = os.path.dirname(HERE)
 # The relay's own serve flags, kept literal so the probe cannot drift from production
 # silently. racecast-feeds.py is not importable by name (hyphen), so they are mirrored
 # here and checked against the source at startup.
+# The inter-arrival gap that ends the burst, per platform. There is NO single value:
+# MEASURED 2026-09-20, YouTube segments arrive every ~5 s with gaps of 0.58-0.78 s INSIDE
+# the burst, while Twitch low-latency runs a ~1.4-1.9 s cadence with <0.5 s inside it. A
+# 2.0 s threshold splits YouTube correctly but never fires on Twitch (the whole window
+# reads as one burst); 0.5 s splits Twitch correctly but chops YouTube's burst into
+# pieces. Both failures are silent, so the default follows the platform.
+GAP_S = {"youtube": 2.0, "twitch": 1.0}
+
 FLAGS = {
     ("youtube", "full"): ["--ringbuffer-size", "64M", "--hls-live-edge", "4"],
     ("youtube", "robust"): ["--ringbuffer-size", "128M", "--hls-live-edge", "6"],
@@ -182,8 +190,19 @@ def measure(target, platform, tier, gap_s, max_s):
     if first is None:
         return None
     span = (burst_end - first) if burst_end is not None else (prev - first)
+    # A usable run split the burst somewhere in the middle. The two degenerate outcomes
+    # both LOOK like measurements and are not: the threshold fired on the very first
+    # chunk (span 0, burst truncated), or it never fired (the whole window read as one
+    # burst). Both mean --gap does not match this source's cadence.
+    usable = burst_end is not None and span > 0.0
+    why = None
+    if burst_end is None:
+        why = "no gap seen — --gap is above this source's cadence, or it is not live"
+    elif span <= 0.0:
+        why = "the first gap came before the second chunk — --gap is below the burst's own jitter"
     return {"burst_span_s": round(span, 2), "burst_bytes": burst_bytes,
-            "burst_ended": burst_end is not None, "gaps": gaps[:6]}
+            "burst_ended": burst_end is not None, "usable": usable, "why": why,
+            "gaps": gaps[:6]}
 
 
 def main():
@@ -193,8 +212,9 @@ def main():
                     help="a LIVE YouTube or Twitch URL (https only)")
     ap.add_argument("--tier", default="full", choices=("full", "robust"))
     ap.add_argument("--runs", type=int, default=3, help="repeat the measurement N times")
-    ap.add_argument("--gap", type=float, default=0.5,
-                    help="inter-arrival gap (s) that ends the burst (default 0.5)")
+    ap.add_argument("--gap", type=float, default=None,
+                    help="inter-arrival gap (s) that ends the burst; default is "
+                         f"per platform ({GAP_S}) because no single value fits both")
     ap.add_argument("--max-s", type=float, default=45.0, help="seconds to observe per run")
     ap.add_argument("--cookies", help="path to the yt-cookies.txt jar (YouTube needs it "
                                       "for a muxed live rendition). The probe works on a "
@@ -239,22 +259,24 @@ def main():
 
 def _run_measurements(args, platform, target):
 
+    gap_s = args.gap if args.gap is not None else GAP_S[platform]
     results = []
     for i in range(args.runs):
         if not args.json:
-            print(f"run {i + 1}/{args.runs} ({platform}, {args.tier}) …", flush=True)
-        r = measure(target, platform, args.tier, args.gap, args.max_s)
+            print(f"run {i + 1}/{args.runs} ({platform}, {args.tier}, gap {gap_s} s) …",
+                  flush=True)
+        r = measure(target, platform, args.tier, gap_s, args.max_s)
         if r is None:
             print("ERROR: no bytes arrived — is the source live?", file=sys.stderr)
             return 2
         results.append(r)
         if not args.json:
-            end = "burst ended" if r["burst_ended"] else "NO GAP SEEN (VOD? not live?)"
+            note = "ok" if r["usable"] else f"UNUSABLE: {r['why']}"
             print(f"  burst {r['burst_span_s']:.2f} s, {r['burst_bytes'] / 1e6:.1f} MB "
-                  f"— {end}; later gaps {r['gaps']}")
+                  f"— {note}; later gaps {r['gaps']}")
 
-    spans = [r["burst_span_s"] for r in results if r["burst_ended"]]
-    out = {"url": args.url, "platform": platform, "tier": args.tier,
+    spans = [r["burst_span_s"] for r in results if r["usable"]]
+    out = {"url": args.url, "platform": platform, "tier": args.tier, "gap_s": gap_s,
            "flags": FLAGS[(platform, args.tier)], "runs": results,
            "burst_span_max_s": max(spans) if spans else None}
     if args.json:
@@ -265,9 +287,10 @@ def _run_measurements(args, platform, target):
             print(f"burst arrival span: max {max(spans):.2f} s over {len(spans)} clean run(s)")
             print("The rejoin must wait longer than this PLUS RACECAST_FEED_PREBUFFER_S.")
         else:
-            print("No run saw the burst end — the source is not behaving like a live "
-                  "stream, so this measurement says nothing.")
-    return 0
+            print("No usable run — every attempt hit one of the degenerate splits above, "
+                  f"so this says nothing. Try --gap around {gap_s / 2:.2f} or "
+                  f"{gap_s * 2:.1f}, and check the source is live.")
+    return 0 if spans else 1
 
 
 if __name__ == "__main__":

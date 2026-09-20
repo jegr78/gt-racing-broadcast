@@ -718,21 +718,42 @@ def should_obs_reconnect(fanout, dropped, consumer_attached=False):
     return bool(fanout and (dropped or consumer_attached))
 
 
-# Worst-case wall-clock seconds streamlink takes to fetch ONE prefetch segment, i.e. how
-# fast the initial --hls-live-edge burst arrives. MEASURED 2026-09-20 against a live
-# YouTube 1080p source with the relay's own serve flags
-# (tools/prefetch-burst-probe.py, 4 runs per tier):
-#   FULL   (--hls-live-edge 4): burst arrived in 0.82 / 0.99 / 1.45 / 0.82 s
-#   ROBUST (--hls-live-edge 6): burst arrived in 1.48 / 1.69 / 1.73 / 4.96 s
-# Worst per segment = 4.96 / 6 = 0.83 s; rounded up to 1.0 for headroom on a slower
-# uplink. Re-measure with the probe before changing it.
+# The OBS rejoin has to land after the new serve's HLS prefetch burst (#614). How long
+# that burst takes to ARRIVE is a download duration — it depends on the producer's
+# downlink, the source's bitrate and the CDN — so it cannot be a constant measured on one
+# machine. The relay therefore MEASURES it per serve: it watches the inbound byte flow and
+# treats the first pause as the burst's end. Only two things below are fixed, and both are
+# properties of the SOURCE's segment cadence rather than of the connection.
+
+# The inbound idle that marks the burst as over. It has to exceed the gaps that occur
+# INSIDE a burst and stay below the steady segment cadence. MEASURED 2026-09-20 with
+# tools/prefetch-burst-probe.py on a live YouTube 1080p source and a live Twitch channel:
+#
+#   platform  intra-burst gaps   steady cadence
+#   YouTube   up to 0.78 s       ~5 s
+#   Twitch    under 0.5 s        ~1.4-1.9 s   (--twitch-low-latency)
+#
+# so the usable window is about (0.78, 1.4) and 1.0 sits inside it for both. A slow link
+# widens the intra-burst gaps and can trip this early; the rejoin then lands in the tail
+# of the burst and sheds most of it — the same graceful degradation as a wait that is
+# slightly short, never the full backlog.
+BURST_IDLE_S = 1.0
+BURST_POLL_S = 0.1          # how often the rejoin thread samples last_byte_ts
+
+# A CEILING, not an estimate: some sources never pause long enough to be detected (a
+# Twitch low-latency feed shows no gap at all above ~1.4 s), so the wait for the burst
+# end is capped at this many seconds per prefetch segment and the rejoin happens anyway.
+# Same 2026-09-20 measurement, worst observed arrival per segment: YouTube FULL 0.46 s,
+# YouTube ROBUST 0.83 s, Twitch FULL 0.35 s, Twitch ROBUST 0.90 s. 1.0 covers all four,
+# and because it is only a ceiling a producer on a slower link simply hits it and rejoins
+# rather than getting a wrong answer.
 SEGMENT_FETCH_BUDGET_S = 1.0
 
 
 def live_edge_segments(flags):
     """The --hls-live-edge count in a streamlink flag list (the prefetch burst's size in
     segments). Returns 0 when the flag is absent, which makes the rejoin immediate — the
-    honest answer for a reader with no HLS prefetch. Pure → unit-tested."""
+    honest answer for a reader with no HLS prefetch. Pure -> unit-tested."""
     try:
         return max(0, int(flags[flags.index("--hls-live-edge") + 1]))
     except (ValueError, IndexError, TypeError):
@@ -740,21 +761,19 @@ def live_edge_segments(flags):
 
 
 def prefetch_land_s(segments, prebuffer_s, budget_s=SEGMENT_FETCH_BUDGET_S):
-    """How long the OBS rejoin waits for a new serve's HLS prefetch burst to land (#614).
+    """The CEILING on the OBS rejoin's wait: what it takes if the burst's end is never
+    observed (#614).
 
-    DERIVED, not tuned. The ring's time index is byte ARRIVAL time and OBS rejoins at
+    The ring's time index is byte ARRIVAL time and OBS rejoins at
     `trailing_offset(prebuffer_s)`, so the join lands past the burst only once the burst
-    is older than `prebuffer_s`. Hence: the burst's arrival span (`segments` x the
-    measured per-segment fetch budget) PLUS `prebuffer_s`.
-
-    Both inputs matter and a fixed number gets both wrong. `segments` differs per tier
-    and platform (YouTube FULL 4, ROBUST 6, Twitch 2), and `prebuffer_s` is an operator
-    setting — a hardcoded wait silently stops working the moment either moves, which is
-    exactly how a 5 s constant turned out to be ~3 s too short for ROBUST.
+    is older than `prebuffer_s`. Hence the burst's arrival span plus `prebuffer_s`. The
+    span is capped at `segments` x the per-segment budget because it is the one part that
+    depends on the producer's connection — the relay measures the real span instead and
+    only falls back to this bound (see Feed._obs_rejoin_after_prefetch).
 
     `segments == 0` (the local capture ffmpeg, #592, or a reader with no live-edge flag)
     means no burst and therefore no wait: waiting would only hold a black gap open on
-    air. Pure → unit-tested."""
+    air. Pure -> unit-tested."""
     if segments <= 0:
         return 0.0
     return segments * budget_s + max(0.0, prebuffer_s)
@@ -6831,24 +6850,50 @@ class Feed:
             return False
         return stuck is not None
 
-    def _obs_rejoin_after_prefetch(self, land_s, sleep=time.sleep):
-        """Rejoin OBS once this serve's HLS prefetch burst has landed (#614). Threaded:
-        the wait must never touch the ring reader, whose "never blocks" invariant is
-        load-bearing. Rejoining at the first byte would give OBS a clean demuxer and
-        still leave it at the START of the burst — see FEED_PREFETCH_LAND_S. `sleep` is
-        injected for tests. A serve that was superseded during the wait no-ops: its
-        rebuild would drop OBS onto the newest serve's burst."""
+    def _obs_rejoin_after_prefetch(self, segments, prebuffer_s,
+                                   sleep=time.sleep, clock=time.monotonic):
+        """Rejoin OBS once this serve's HLS prefetch burst has landed (#614).
+
+        The burst's arrival span is a download duration — it depends on the producer's
+        downlink, the source bitrate and the CDN — so it is MEASURED here rather than
+        predicted: the thread watches `last_byte_ts` and takes the first inbound idle of
+        `BURST_IDLE_S` as the burst's end. `prefetch_land_s` is only the ceiling, for a
+        source that never pauses that long (Twitch low-latency does not, above ~1.4 s).
+
+        Detecting the end costs `BURST_IDLE_S`, and that latency IS the safety margin:
+        the join has to be `prebuffer_s` past the burst, and it ends up
+        `BURST_IDLE_S + prebuffer_s` past it.
+
+        Threaded, because the wait must never touch the ring reader, whose "never
+        blocks" invariant is load-bearing. `sleep`/`clock` are injected for tests. A
+        serve that was superseded or died during the wait no-ops: its rebuild would drop
+        OBS onto the newest serve's burst, or onto a feed with no bytes at all."""
         gen = self.serve_generation
+        ceiling = max(0.0, prefetch_land_s(segments, 0.0))     # burst span only
+        def _stale():
+            return rejoin_is_stale(self.stop, self.advance.is_set(), gen,
+                                   self.serve_generation, self.phase == "serving")
+
         def _run():
-            if land_s > 0:
-                sleep(land_s)
-                if rejoin_is_stale(self.stop, self.advance.is_set(),
-                                   gen, self.serve_generation,
-                                   self.phase == "serving"):
-                    self.log.debug("fan-out rejoin on %s skipped — serve %d was "
-                                   "superseded during the prefetch wait", self.name, gen)
-                    return
+            if segments > 0:
+                started = clock()
+                while True:
+                    if _stale():
+                        return self._log_rejoin_skipped(gen)
+                    now = clock()
+                    if feed_stalled(self.last_byte_ts, now, stall_s=BURST_IDLE_S):
+                        break                      # the burst stopped arriving
+                    if now - started >= ceiling:
+                        self.log.debug("fan-out rejoin on %s — the source never paused "
+                                       "within %.1fs; rejoining on the ceiling",
+                                       self.name, ceiling)
+                        break
+                    sleep(BURST_POLL_S)
+                sleep(max(0.0, prebuffer_s))       # let the burst age past the join mark
+            if _stale():
+                return self._log_rejoin_skipped(gen)
             self._obs_reconnect_now()
+            return None
         t = threading.Thread(target=_run, daemon=True)
         try:
             t.start()
@@ -6856,6 +6901,11 @@ class Feed:
             self.log.debug("fan-out rejoin on %s not scheduled (%s)", self.name, exc)
             return None
         return t                       # production ignores it; tests join on it
+
+    def _log_rejoin_skipped(self, gen):
+        self.log.debug("fan-out rejoin on %s skipped — serve %d was superseded or ended "
+                       "during the prefetch wait", self.name, gen)
+        return None
 
     def _obs_rejoin_hook(self, flags):
         """The `on_first_byte` hook Feed.run hands the fan-out serve: a prefetch-delayed
@@ -6874,8 +6924,8 @@ class Feed:
         prebuffer = getattr(self.fanout_server, "prebuffer_s", None)
         if prebuffer is None:
             prebuffer = health_store.DEFAULT_FEED_PREBUFFER_S
-        land_s = prefetch_land_s(live_edge_segments(flags), prebuffer)
-        return lambda: self._obs_rejoin_after_prefetch(land_s)
+        segments = live_edge_segments(flags)
+        return lambda: self._obs_rejoin_after_prefetch(segments, prebuffer)
 
     def _serve_fanout(self, target, serve_platform, token, on_first_byte=None,
                       cmd=None, tool="streamlink"):

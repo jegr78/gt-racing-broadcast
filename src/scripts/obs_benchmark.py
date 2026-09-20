@@ -66,12 +66,18 @@ TIERS = ("full", "robust")
 # prebuffer_s behind the newest byte, so the join clears the burst only once the burst is
 # older than prebuffer_s — i.e. (segments x per-segment fetch budget) + prebuffer_s.
 #
-# A flat 5 s used to stand here and was measured wrong on 2026-09-20: a ROBUST burst
-# (--hls-live-edge 6) took up to 4.96 s to arrive, so with a 3 s prebuffer the rejoin
-# landed INSIDE the burst and the ROBUST windows of a #584 run could be sampling a
-# backlog the benchmark caused itself. Same rule and same budget as the relay's
-# `prefetch_land_s()`; keep the two in sync and re-measure with
-# tools/prefetch-burst-probe.py before changing the budget.
+# A flat 5 s used to stand here and was measured wrong on 2026-09-20: a YouTube ROBUST
+# burst (--hls-live-edge 6) took up to 4.96 s to arrive, so with a 3 s prebuffer the
+# rejoin landed INSIDE the burst and the ROBUST windows of a #584 run could be sampling a
+# backlog the benchmark caused itself.
+#
+# NOT parity with the relay: the relay measures the burst's end on the live byte flow and
+# only falls back to this bound, because the arrival span depends on the producer's
+# connection. The benchmark has no such signal from outside the relay, so it waits the
+# full ceiling — deliberately conservative, since over-waiting only lengthens a
+# measurement run while under-waiting corrupts it. Same formula and constant as the
+# relay's `prefetch_land_s()`; tests/test_obs_benchmark.py pins them to each other, and
+# tools/prefetch-burst-probe.py re-measures without a relay or a league.
 SEGMENT_FETCH_BUDGET_S = 1.0
 DEFAULT_PREBUFFER_S = 3.0      # RACECAST_FEED_PREBUFFER_S's own default (#533)
 # The rejoin rebuilds the OBS input; OBS reconnects within a second or two. Sampling
