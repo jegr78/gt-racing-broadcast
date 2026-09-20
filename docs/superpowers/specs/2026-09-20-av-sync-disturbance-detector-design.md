@@ -71,9 +71,12 @@ Two independent findings, and they must not be conflated:
 
 - **The audio repair follows the restart, not the output state.** Three of four restarts
   produced one, in both states. Every relay restart risks a brief audible audio gap.
-- **An active output stops the backlog from recovering.** Both runs with a recording
-  failed; both without one passed. No run fell in between. That is
-  a latency-to-live problem, not an A/V problem, and belongs in its own issue.
+- **The backlog behaved differently with a recording running, in these four runs.** Both
+  runs with one failed; both without one passed; no run fell in between. That is four
+  runs, once, never repeated, and the raw samples were not kept. It is a pattern worth
+  re-running, NOT an established finding, and this spec previously stated it as one.
+  Whatever it is, it is a latency-to-live problem rather than an A/V one and belongs in
+  its own issue.
 
 The producer confirmed by eye and ear: the short audio gaps were audible, and picture and
 sound stayed in sync afterwards. Their ranking is explicit — a standing A/V offset is far
@@ -200,10 +203,16 @@ detector attributed to Feed A with the right counts.
 
 ## Open
 
-- The active-output backlog failure (an active OBS output stops the backlog recovering
-  after a restart — both runs with a recording failed, both without one passed) is
-  unrelated to A/V sync and belongs to the
-  #619 chain review.
-- The `/status` backlog health reason still reads "OBS reads slower than real time" while
-  OBS was measured at exactly 1.000x for 60 s in that state. The attribution is wrong and
-  sends a director after the wrong component. Recorded in #619.
+- The post-restart backlog is unexplained, and unrelated to A/V sync. It belongs to the
+  #619 chain review. Two claims made here while investigating it are withdrawn:
+  - That an active OBS output *stops* the backlog recovering. The evidence is the four
+    runs above: one comparison, n=2 against n=2, no repeat, raw samples not kept.
+  - That the health reason's "OBS reads slower than real time" is a wrong attribution.
+    That rested on measuring OBS's media cursor at 1.000x. But `backlog_s` is the age of
+    the position OBS has READ, and a consumer can play at 1x while draining its own
+    buffer, so the two are not the same quantity and the measurement does not contradict
+    the reason. The wording stays until something actually measures the read rate.
+- The soak driver schedules a restart whose recovery window its own run length cannot
+  cover (`next_restart_at` does not compare against the end of the run), so the last
+  restart of a short run is unjudgeable. `recovery()` already refuses to judge it, so the
+  cost is a wasted restart rather than a wrong verdict.
