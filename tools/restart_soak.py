@@ -64,20 +64,32 @@ def recovery(samples, restart_t, base_s, reserve_s, deadline_s=RECOVERY_DEADLINE
     climbs is not a recovery, and that is exactly the shape a rejoin-then-drift would
     have. None when it never settled inside the deadline, which is also `ok` False.
 
-    `ok` is None, not False, when there is nothing to judge (no baseline, no samples)."""
+    The window starts STRICTLY after the restart. The driver samples and then reloads
+    inside one cycle, so a sample carrying `t == restart_t` was read before the request
+    went out; counting it made "back after" a pre-restart reading, reported as tenths of
+    a second.
+
+    `ok` is None, not False, when there is nothing to judge: no baseline, no samples, or
+    a window the run did not watch to its end. That last one is not pedantry. A restart
+    fired in the closing seconds of a soak leaves a handful of samples, and the same
+    shape produced a false PASS (the spike fell between two of them) and a false FAIL
+    (five seconds of evidence). Neither is an answer."""
     if base_s is None or reserve_s is None:
         return None, None, None
-    after = [s for s in _backlogs(samples) if restart_t <= s["t"] <= restart_t + deadline_s]
+    after = [s for s in _backlogs(samples) if restart_t < s["t"] <= restart_t + deadline_s]
     if not after:
         return None, None, None
-    peak = max(s["backlog_s"] for s in after)
+    peak = round(max(s["backlog_s"] for s in after), 1)
+    watched_to = max((s["t"] for s in samples if s.get("t") is not None), default=None)
+    if watched_to is None or watched_to < restart_t + deadline_s:
+        return peak, None, None
     limit = base_s + reserve_s
     settled = None
     for i, s in enumerate(after):
         if s["backlog_s"] <= limit and all(x["backlog_s"] <= limit for x in after[i:]):
             settled = round(s["t"] - restart_t, 1)
             break
-    return round(peak, 1), settled, settled is not None
+    return peak, settled, settled is not None
 
 
 DRIFT_MIN_POINTS = 4     # two halves of two: the fewest that can carry a trend
@@ -99,8 +111,8 @@ def drift(records, reserve_s, min_points=DRIFT_MIN_POINTS):
     bases = [r["baseline_s"] for r in records if r.get("baseline_s") is not None]
     if len(bases) < 2 or reserve_s is None:
         return None, None
-    half = len(bases) // 2
-    first, second = bases[:half] or bases[:1], bases[-half:] or bases[-1:]
+    half = len(bases) // 2          # >= 1: len(bases) >= 2 is established above
+    first, second = bases[:half], bases[-half:]
     amount = round(sum(second) / len(second) - sum(first) / len(first), 1)
     if len(bases) < min_points:
         return amount, None
@@ -155,7 +167,10 @@ def summarize(samples, restart_times, reserve_s):
 
 def verdict(summary):
     """PASS, FAIL or UNKNOWN with the reasons that decided it. UNKNOWN is a real answer:
-    a run that measured nothing must not read as a pass."""
+    a run that measured nothing must not read as a pass, and neither must a run that
+    measured only part of what it triggered. PASS means every restart was watched out
+    and came home; anything less is UNKNOWN, except a genuine failure, which outranks a
+    gap because it is the more actionable answer either way."""
     reasons, judged = [], False
     unseen = [r for r in summary["restarts"] if r.get("observed") is False]
     if unseen:
@@ -164,6 +179,7 @@ def verdict(summary):
                            f"the soak measured nothing there"]
     failed = [r for r in summary["restarts"] if r["recovered"] is False]
     graded = [r for r in summary["restarts"] if r["recovered"] is not None]
+    ungraded = [r for r in summary["restarts"] if r["recovered"] is None]
     if graded:
         judged = True
         if failed:
@@ -178,9 +194,18 @@ def verdict(summary):
         judged = True
         if not summary["snaps_ok"]:
             reasons.append(f"the ring lapped a consumer {summary['snaps']} time(s)")
+    # A real failure outranks a gap: it is the more actionable answer either way.
+    if reasons:
+        return "FAIL", reasons
+    if ungraded:
+        # One graded restart used to be enough to call the whole run a pass, so a soak
+        # could report PASS with most of its windows at n/a. Measured: three restarts
+        # spaced closer than the deadline produced one grade, two blanks and a PASS.
+        return "UNKNOWN", [f"{len(ungraded)} of {len(summary['restarts'])} restart "
+                           f"windows could not be judged"]
     if not judged:
         return "UNKNOWN", ["nothing was measured"]
-    return ("FAIL", reasons) if reasons else ("PASS", [])
+    return "PASS", []
 
 
 def relay_url(value):
@@ -192,13 +217,38 @@ def relay_url(value):
 
 
 
-def sample_of(status, t):
-    """One row from a /status payload: the on-air feed's backlog, inbound gap and snaps.
+def reload_path(feed):
+    """The /reload route for one feed, with the name quoted.
 
-    The feed is resolved per sample rather than pinned at the start, because a handover
-    or a takeover moves the on-air feed and the soak must follow it. Pure."""
+    The name comes from an operator flag or from the relay's own `/status`. Unquoted, a
+    stray space is enough for `http.client` to raise `InvalidURL` and kill the run, and
+    a `?` or `#` would change which endpoint is hit."""
+    return "/reload/" + urllib.parse.quote(str(feed), safe="")
+
+
+def planned_restarts(hours, every_min):
+    """How many restarts fit in a run, counting only those it can watch out.
+
+    A restart fired with less than the recovery deadline left is judged on whatever few
+    samples remain, and that shape produced both a false PASS and a false FAIL. The
+    driver does not fire one it cannot observe, so this is also what the operator is
+    asked to confirm."""
+    if every_min <= 0:
+        return 0
+    span = hours * 3600.0 - RECOVERY_DEADLINE_S
+    return max(0, int(span // (every_min * 60.0)))
+
+
+def sample_of(status, t, feed=None):
+    """One row from a /status payload: the measured feed's backlog, inbound gap and snaps.
+
+    Without `feed` the on-air one is resolved per sample rather than pinned at the start,
+    because a handover or a takeover moves it and the soak must follow. With `feed` the
+    measurement is pinned to the same feed the driver restarts: pinning only the restart
+    target left the numbers coming off a different feed, whose `state_age_s` never fell,
+    and the run said UNKNOWN for a reason that was not true. Pure."""
     live = (status or {}).get("live") or {}
-    name = live.get("feed")
+    name = feed or live.get("feed")
     feed = ((status or {}).get("feeds") or {}).get(name) or {}
     return {"t": round(t, 1), "feed": name, "state": feed.get("state"),
             "quality": feed.get("quality"), "platform": feed.get("platform"),
@@ -207,6 +257,27 @@ def sample_of(status, t):
             "gap_s": feed.get("inbound_max_gap_s"),
             "snaps": feed.get("consumer_snaps")}
 
+
+
+def _never_left_band(record, reserve_s):
+    """True when the peak stayed inside baseline + reserve, so no recovery took place."""
+    base, peak = record.get("baseline_s"), record.get("peak_s")
+    if base is None or peak is None or reserve_s is None:
+        return False
+    return peak <= base + reserve_s
+
+
+def split_replay(rows):
+    """A recorded run read back: (samples, restart_times).
+
+    The JSONL used to hold samples only, so the file never said WHEN a restart happened
+    and the analysis could not be reproduced from it — which also meant an interrupted
+    soak left hours of readings that nothing could turn into a verdict. The driver now
+    writes a marker row per restart and this splits the two apart again. Pure."""
+    samples = [r for r in rows if not r.get("event")]
+    restarts = [r["t"] for r in rows
+                if r.get("event") == "restart" and r.get("t") is not None]
+    return samples, restarts
 
 
 def render(summary, state, reasons):
@@ -218,8 +289,13 @@ def render(summary, state, reasons):
         def f(v, unit=" s"):
             return "n/a" if v is None else f"{v}{unit}"
         ok = {True: "yes", False: "NO", None: "n/a"}[r["recovered"]]
+        back = f(r["recovered_after_s"])
+        if r["recovered"] and _never_left_band(r, summary["reserve_s"]):
+            # Nothing to come back from. A number here reads as a measurement of the
+            # rejoin, and a near-zero one reads as a suspiciously good measurement.
+            back = "in band"
         out.append(f"   {r['restart_t']:>7.0f}s  {f(r['baseline_s']):>8}   "
-                   f"{f(r['peak_s']):>7}   {f(r['recovered_after_s']):>9}   {ok}")
+                   f"{f(r['peak_s']):>7}   {back:>9}   {ok}")
     out.append(f"   baseline drift over the run: "
                f"{'n/a' if summary['drift_s'] is None else str(summary['drift_s']) + ' s'}"
                f"   ring laps: {summary['snaps'] if summary['snaps'] is not None else 'n/a'}")

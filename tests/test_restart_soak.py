@@ -47,17 +47,20 @@ def t_baseline_does_not_reach_back_into_the_previous_restart():
     assert m.baseline_before(after_a_restart, 200.0, not_before=160.0) == 2.5
     # summarize clamps each baseline to after the previous restart's deadline.
     s = m.summarize(_run([(0, 2.5), (60, 2.6), (100, 4.4), (112, 0.0), (140, 1.4),
-                          (240, 2.5), (244, 4.2), (256, 2.6), (300, 2.5)]),
+                          (240, 2.5), (244, 4.2), (256, 2.6), (300, 2.5), (310, 2.5)]),
                     [100.0, 244.0], RESERVE)
     assert s["restarts"][1]["baseline_s"] == 2.5, s["restarts"][1]
     assert s["restarts"][1]["recovered"] is True, s["restarts"][1]
 
 
 def t_recovery_needs_the_backlog_to_STAY_down_not_just_touch_baseline():
+    # Every fixture here runs to the end of restart + deadline, because the analysis
+    # refuses to judge a window the run did not watch out.
     # The failure this guards is the one #619 is about: a rejoin drops the backlog, and
     # then it climbs again. A first-crossing test would call that a recovery and the
     # soak would pass on exactly the shape it exists to catch.
-    bounced = _run([(100, 30.0), (110, 4.5), (120, 12.0), (130, 20.0), (150, 28.0)])
+    bounced = _run([(100, 4.0), (105, 30.0), (110, 4.5), (120, 12.0), (130, 20.0),
+                    (150, 28.0), (160, 28.0)])
     peak, after, ok = m.recovery(bounced, 100.0, 4.0, RESERVE)
     assert peak == 30.0
     assert ok is False, "a dip that does not hold is not a recovery"
@@ -65,7 +68,8 @@ def t_recovery_needs_the_backlog_to_STAY_down_not_just_touch_baseline():
     # A real recovery: down and staying down. It counts from the FIRST sample inside the
     # reserve that holds, so t=110 at 6.0 (limit 4.0 + 3.0) is the moment, not the later
     # 4.2. Anything else would report the settling time of the noise, not of the rejoin.
-    healed = _run([(100, 30.0), (110, 6.0), (120, 4.2), (130, 4.3), (150, 4.1)])
+    healed = _run([(100, 4.0), (105, 30.0), (110, 6.0), (120, 4.2), (130, 4.3),
+                   (150, 4.1), (160, 4.1)])
     peak, after, ok = m.recovery(healed, 100.0, 4.0, RESERVE)
     assert (peak, after, ok) == (30.0, 10.0, True)
 
@@ -83,9 +87,9 @@ def t_recovery_is_unknown_rather_than_failed_when_nothing_was_measured():
 def t_recovery_allows_exactly_one_reserve_above_the_baseline():
     # The reserve is what the relay deliberately holds back, so it is the unit for
     # "back where it was". At the limit it counts as recovered; a hair above does not.
-    at = _run([(100, 20.0), (110, 7.0), (120, 7.0)])
+    at = _run([(100, 4.0), (105, 20.0), (110, 7.0), (120, 7.0), (160, 7.0)])
     assert m.recovery(at, 100.0, 4.0, RESERVE)[2] is True      # 7.0 == 4.0 + 3.0
-    over = _run([(100, 20.0), (110, 7.1), (120, 7.1)])
+    over = _run([(100, 4.0), (105, 20.0), (110, 7.1), (120, 7.1), (160, 7.1)])
     assert m.recovery(over, 100.0, 4.0, RESERVE)[2] is False
 
 
@@ -150,8 +154,8 @@ def t_verdict_fails_on_each_criterion_and_says_which():
     healthy = m.summarize(_run([(0, 4.0), (60, 4.0), (100, 20.0), (110, 4.2), (160, 4.1)]),
                           [100.0], RESERVE)
     assert m.verdict(healthy) == ("PASS", [])
-    bounced = m.summarize(_run([(0, 4.0), (60, 4.0), (100, 30.0), (140, 25.0)]),
-                          [100.0], RESERVE)
+    bounced = m.summarize(_run([(0, 4.0), (60, 4.0), (100, 30.0), (140, 25.0),
+                                (160, 25.0)]), [100.0], RESERVE)
     state, why = m.verdict(bounced)
     assert state == "FAIL" and "did not come back" in why[0], why
     lapped = m.summarize([_s(0, 4.0, 0), _s(60, 4.0, 0), _s(100, 4.0, 4)], [100.0], RESERVE)
@@ -198,7 +202,8 @@ def t_relay_url_refuses_a_scheme_that_is_not_http():
 
 
 def t_render_marks_a_restart_that_did_not_come_back():
-    s = m.summarize(_run([(0, 4.0), (60, 4.0), (100, 30.0), (140, 28.0)]), [100.0], RESERVE)
+    s = m.summarize(_run([(0, 4.0), (60, 4.0), (100, 30.0), (140, 28.0), (160, 28.0)]),
+                    [100.0], RESERVE)
     text = m.render(s, *m.verdict(s))
     assert "NO" in text, text                      # the per-restart column
     assert "FAIL" in text and "did not come back" in text, text
@@ -209,6 +214,114 @@ def t_render_marks_a_restart_that_did_not_come_back():
     # A missing reading prints n/a, never a number that looks measured.
     blank = m.summarize([], [100.0], RESERVE)
     assert "n/a" in m.render(blank, *m.verdict(blank))
+
+
+
+# --------------------------------------------------------------------------
+# what the analysis refuses to judge
+# --------------------------------------------------------------------------
+def t_recovery_excludes_the_sample_taken_before_the_reload():
+    # The driver samples and THEN reloads inside one cycle. If that sample carries
+    # t == restart_t it lands in the post-restart window, and "back after" is then read
+    # off a pre-restart reading: the live run reported tenths of a second that way.
+    # The window starts strictly after the restart.
+    rows = _run([(100, 1.4), (121, 1.4), (131, 4.4), (141, 2.0), (181, 1.5)])
+    peak, after, ok = m.recovery(rows, 121.0, 1.4, RESERVE)
+    assert peak == 4.4, peak
+    assert after != 0.0, "0.0 s means it read the sample taken before the reload"
+    assert ok is True
+
+
+def t_recovery_refuses_to_judge_a_window_the_run_outlived():
+    # A restart fired in the last seconds of a soak is judged on whatever few samples
+    # remain. Measured both ways on the same shape: a false PASS when the spike fell
+    # between two samples, and a false FAIL on five seconds of evidence. Neither is an
+    # answer. The rule is untuned: judge only a window the run actually watched to its
+    # end.
+    quiet = _run([(7180, 1.4), (7195, 1.5)])
+    assert m.recovery(quiet, 7190.0, 1.4, RESERVE) == (1.5, None, None)
+    spiked = _run([(7180, 1.4), (7195, 25.0)])
+    assert m.recovery(spiked, 7190.0, 1.4, RESERVE)[2] is None, "5 s is not a verdict"
+    # One sample past the deadline is enough: the run was still watching.
+    watched = _run([(100, 1.4), (110, 20.0), (130, 1.5), (160, 1.4)])
+    assert m.recovery(watched, 100.0, 1.4, RESERVE)[2] is True
+
+
+def t_verdict_is_unknown_when_a_window_could_not_be_judged():
+    # verdict() used to set judged=True on the first graded restart, so a run could
+    # report PASS with most of its windows at n/a. Measured: restarts spaced closer than
+    # the deadline run into the not_before clamp, get no baseline, and three restarts
+    # produced one grade and a PASS.
+    close = [{"t": float(t), "backlog_s": 4.0, "snaps": 0,
+              "age_s": 2.0 if t in (100, 145, 190) else 200.0 + t}
+             for t in range(0, 400, 10)]
+    s = m.summarize(close, [100.0, 145.0, 190.0], RESERVE)
+    ungraded = [r for r in s["restarts"] if r["recovered"] is None]
+    assert len(ungraded) == 2, s["restarts"]
+    state, why = m.verdict(s)
+    assert state == "UNKNOWN", (state, why)
+    assert "could not be judged" in " ".join(why), why
+    # Exactly one deadline apart is no better: the next baseline window opens where the
+    # restart already is, so it is empty. That is why the driver's floor is a recovery
+    # window PLUS a baseline window, not just the deadline.
+    exact = m.summarize(close, [100.0, 160.0], RESERVE)
+    assert exact["restarts"][1]["baseline_s"] is None, exact["restarts"][1]
+    assert m.verdict(exact)[0] == "UNKNOWN"
+    # A real failure still outranks a gap: FAIL is the more actionable answer.
+    mixed = m.summarize(_run([(0, 4.0), (60, 4.0), (100, 30.0), (140, 28.0), (170, 27.0)]),
+                        [100.0], RESERVE)
+    assert m.verdict(mixed)[0] == "FAIL"
+
+
+def t_sample_can_pin_a_feed_instead_of_following_the_on_air_one():
+    # --feed pinned the /reload target but not the sample, so the restarts hit one feed
+    # while the numbers came from another: state_age_s never fell and the run reported
+    # UNKNOWN with the wrong reason.
+    st = {"live": {"feed": "B"},
+          "feeds": {"A": {"state": "serving", "backlog_s": 9.9, "consumer_snaps": 1},
+                    "B": {"state": "serving", "backlog_s": 4.2, "consumer_snaps": 0}}}
+    assert m.sample_of(st, 1.0)["backlog_s"] == 4.2            # unchanged default
+    pinned = m.sample_of(st, 1.0, feed="A")
+    assert pinned["feed"] == "A" and pinned["backlog_s"] == 9.9
+
+
+def t_render_says_a_peak_that_never_left_the_band_instead_of_a_near_zero():
+    # "back after 0.0 s" reads as a measurement of the rejoin. When the peak never left
+    # baseline + reserve there was nothing to come back from, and saying so is honest.
+    s = m.summarize(_run([(0, 1.4), (60, 1.4), (110, 4.4), (140, 1.5), (170, 1.4)]),
+                    [100.0], RESERVE)
+    text = m.render(s, *m.verdict(s))
+    assert "in band" in text, text
+
+
+def t_replay_splits_a_jsonl_into_samples_and_restart_times():
+    # Hours of samples on disk were unreadable: the file never recorded WHEN a restart
+    # happened, so the analysis could not be reproduced from it.
+    rows = [{"t": 0.0, "backlog_s": 4.0}, {"t": 10.0, "error": "URLError: x"},
+            {"t": 100.0, "event": "restart"}, {"t": 110.0, "backlog_s": 20.0}]
+    samples, restarts = m.split_replay(rows)
+    assert restarts == [100.0]
+    assert [s["t"] for s in samples] == [0.0, 10.0, 110.0], samples
+    assert m.split_replay([]) == ([], [])
+
+
+def t_reload_path_quotes_the_feed_name():
+    # The name comes from a flag or from the relay's own /status. A stray space alone
+    # makes http.client raise InvalidURL, which derives from Exception and used to kill
+    # a run outright; a ? or # would silently change which endpoint is hit.
+    assert m.reload_path("A") == "/reload/A"
+    assert m.reload_path("A B") == "/reload/A%20B"
+    assert m.reload_path("x?y#z") == "/reload/x%3Fy%23z"
+    assert m.reload_path("../status") == "/reload/..%2Fstatus"
+
+
+def t_planned_restarts_counts_only_the_windows_a_run_can_watch_out():
+    # The last restart needs a full deadline after it or its window cannot be judged,
+    # so the run neither fires nor promises one it would have to blank out.
+    assert m.planned_restarts(1.0, 15.0) == 3        # 3600 - 60 = 3540 s -> 3 x 900 s
+    assert m.planned_restarts(2.0, 15.0) == 7
+    assert m.planned_restarts(0.02, 15.0) == 0       # 72 s: no room for one at all
+    assert m.planned_restarts(1.0, 0) == 0
 
 
 if __name__ == "__main__":
