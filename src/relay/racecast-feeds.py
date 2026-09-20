@@ -7588,6 +7588,13 @@ class Relay:
             ctx = dict(self._av["context"])
         return {"feeds": feeds, "context": ctx} if (feeds or ctx) else {}
 
+    def _av_totals(self):
+        """Running A/V disturbance totals for the health snapshot (#619)."""
+        with self._av_lock:
+            feeds = self._av["feeds"].values()
+            return {"av_repairs_total": sum(f["repairs"] for f in feeds),
+                    "av_unexplained_total": sum(f["unexplained"] for f in feeds)}
+
     def _av_health_fact(self):
         """feed -> magnitude in ms for feeds with a RECENT UNEXPLAINED repair. A repair
         right after a restart is the expected cost of that restart, so it never reaches
@@ -7679,6 +7686,9 @@ class Relay:
                 # pull index stays reconstructable from feed_a/b_stint + live_feed.
                 "live_feed": live, "live_stint": (None if self.solo else self.on_air_row_idx() + 1),
                 "desync_active": 1 if self._desync.get("active") else 0,
+                # v11 (#619): running totals, so the post-event report can say how
+                # often the chain was disturbed and how often nothing explained it.
+                **self._av_totals(),
                 # v3 OBS stats (already redacted: obs_stats never carries output_bytes)
                 "stream_active": _b(st.get("stream_active")),
                 "stream_reconnecting": _b(st.get("stream_reconnecting")),

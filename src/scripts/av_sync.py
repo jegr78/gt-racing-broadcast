@@ -39,10 +39,30 @@ Pure: no I/O, no threads, no clock of its own. The relay owns the tail thread an
 import re
 
 # How long after a feed entered `serving` a repair still counts as explained by that
-# restart. Measured 2026-09-20: repairs landed 6-10 s after the feed started serving
-# (three of four restarts produced one). 30 s matches the heartbeat and leaves room for
-# a slower host without swallowing a genuinely unexplained one an hour later.
-RESTART_WINDOW_S = 30.0
+# restart. Derived, not chosen: three legs stand between a feed serving and OBS being
+# able to log a repair at all, and every one of them is a value this repo pins.
+#
+#   relay waits out the HLS prefetch burst   up to  7 s  SEGMENT_FETCH_BUDGET_S (1.0)
+#                                                        x --hls-live-edge 4, + the 3 s
+#                                                        reserve (prefetch_land_s)
+#   OBS reconnects to the rebuilt input      up to 10 s  reconnect_delay_sec in
+#                                                        GT_Racing_Endurance.json
+#   OBS fills its buffer before divergence      about 9 s  buffering_mb 8 at the measured
+#                                                        7.2 Mbps of a YouTube 1080p60
+#                                                  -----
+#                                                     26 s floor
+#
+# Measured against that floor on the producer host 2026-09-20: repairs landed 6-14 s
+# after serving in three cases and 32 s in a fourth. A first attempt at 30 s classified
+# that fourth one as unexplained and turned the panel yellow for a repair a restart had
+# almost certainly caused — two seconds decided it.
+#
+# So the value is rounded up to two heartbeats, and the rounding is a deliberate
+# asymmetry rather than caution. Too NARROW cries wolf on every handover, and a detector
+# the director learns to ignore is worth nothing. Too WIDE misses an unexplained repair
+# in the first minute after a restart — when the director already knows the stream was
+# just disturbed, so the reason would tell them nothing they did not have.
+RESTART_WINDOW_S = 2 * 30.0     # two relay heartbeats
 
 # How long an unexplained repair keeps the health reason up. Long enough that a director
 # who looks away for a moment still sees it, short enough that one blip does not paint

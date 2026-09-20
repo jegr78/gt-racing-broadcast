@@ -173,9 +173,24 @@ def t_the_health_fact_ages_out_so_one_blip_does_not_stay_yellow_all_event():
     assert av.health_fact(st, now=1000.0 + av.HEALTH_HOLD_S + 1) == {}
 
 
-def t_the_window_is_a_named_constant_not_a_literal():
-    # The classification hinges on it, so it has to be reviewable in one place.
-    assert av.RESTART_WINDOW_S >= 20.0
+def t_the_window_covers_the_slowest_restart_actually_measured():
+    # The classification hinges on this one number, so the evidence lives with it.
+    # Three legs stand between a feed serving and OBS being ABLE to log a repair, all
+    # pinned in this repo: the relay's prefetch wait (up to 7 s), OBS's
+    # reconnect_delay_sec (10 s), and OBS filling buffering_mb (about 9 s at the
+    # measured 7.2 Mbps). That is a 26 s floor before the first repair is even possible.
+    # Measured on the producer host: 6-14 s in three cases and 32 s in a fourth, which a
+    # first attempt at 30 s wrongly called unexplained.
+    assert av.RESTART_WINDOW_S >= 26.0, "below the floor the reconnect path alone needs"
+    assert av.RESTART_WINDOW_S >= 32.0, "below the slowest repair actually observed"
+
+
+def t_the_slowest_measured_restart_is_classified_as_expected():
+    # The concrete case that broke the 30 s attempt, pinned so it cannot come back.
+    st = av.record(av.new_state(), av.parse_obs_log_line(REPAIR),
+                   now=1000.0, serving_age_s=32.0)
+    assert st["feeds"]["A"]["unexplained"] == 0
+    assert av.health_fact(st, now=1001.0) == {}
 
 
 if __name__ == "__main__":

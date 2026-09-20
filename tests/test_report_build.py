@@ -644,5 +644,52 @@ def t_discord_payload_carries_the_finding():
                                                   now=1000.0)) == ""
 
 
+def t_counter_increase_sums_a_running_total_across_a_relay_restart():
+    # #619: the A/V totals count from zero and start over when the relay restarts, so
+    # last-minus-first would report a negative for any event with a restart in it.
+    assert rb.counter_increase([]) == 0
+    assert rb.counter_increase([0, 0, 0]) == 0
+    assert rb.counter_increase([0, 1, 3, 3]) == 3
+    # A restart mid-event: 5 before, then the counter starts over and reaches 2.
+    assert rb.counter_increase([1, 5, 0, 2]) == 7
+    # A series that begins mid-event already carries what happened before it.
+    assert rb.counter_increase([4, 6]) == 6
+
+
+def t_counter_increase_skips_missing_samples_instead_of_reading_them_as_zero():
+    # A database written before v11 has NULL here, and a missed tick has nothing. Reading
+    # either as 0 would invent a reset and double the total.
+    assert rb.counter_increase([None, 2, None, 5]) == 5
+    assert rb.counter_increase([None, None]) == 0
+
+
+def t_report_counts_av_repairs_and_the_rendered_line_says_what_it_means():
+    # #619: OBS repaired each of these itself, so the line is a record, not an alarm.
+    # It must say so, or a producer reading the report will go looking for a fault.
+    samples = [_sample(0.0, live_stint=1, av_repairs_total=0, av_unexplained_total=0),
+               _sample(30.0, live_stint=1, av_repairs_total=2, av_unexplained_total=0),
+               _sample(60.0, live_stint=1, av_repairs_total=3, av_unexplained_total=1)]
+    rep = rb.build_report(samples, [], {1: "Alice"}, "E", (0.0, 60.0), now=1000.0)
+    assert rep["on_air"]["av_repairs"] == 3, rep["on_air"]
+    assert rep["on_air"]["av_unexplained"] == 1, rep["on_air"]
+    html = rb.render_html(rep)
+    assert "3 time(s)" in html
+    assert "1 of them with no feed restart to explain it" in html
+    assert "back in sync afterwards" in html
+
+    # All explained: the line still appears (it happened) but names no open question.
+    ok = [_sample(0.0, live_stint=1, av_repairs_total=0, av_unexplained_total=0),
+          _sample(30.0, live_stint=1, av_repairs_total=2, av_unexplained_total=0)]
+    html2 = rb.render_html(rb.build_report(ok, [], {1: "Alice"}, "E", (0.0, 30.0),
+                                           now=1000.0))
+    assert "every one right after a feed restart" in html2
+
+    # A clean event says nothing at all about A/V sync.
+    clean = [_sample(0.0, live_stint=1), _sample(30.0, live_stint=1)]
+    html3 = rb.render_html(rb.build_report(clean, [], {1: "Alice"}, "E", (0.0, 30.0),
+                                           now=1000.0))
+    assert "re-synced" not in html3
+
+
 if __name__ == "__main__":
     run()

@@ -677,6 +677,48 @@ def t_migrate_adds_backlog_columns_v9_lossless_and_charted():
         conn2.close()
 
 
+def t_migrate_adds_av_columns_v11_lossless():
+    # #619: an event's A/V sync disturbances belong in the history, so the post-event
+    # report can say how often the chain was disturbed and how often nothing explained
+    # it. Additive like every migration before it: an existing v10 database keeps its
+    # rows and gains two NULL columns.
+    import sqlite3
+    d = tempfile.mkdtemp()
+    path = os.path.join(d, "h.db")
+    c = sqlite3.connect(path)
+    try:
+        c.executescript("CREATE TABLE samples (ts REAL NOT NULL, kind TEXT NOT NULL, "
+                        "obs_fps REAL, obs_fps_target REAL);")
+        c.execute("PRAGMA user_version=10")
+        c.execute("INSERT INTO samples (ts, kind, obs_fps) VALUES (?,?,?)",
+                  (1000.0, "tick", 59.9))
+        c.commit()
+    finally:
+        c.close()
+    conn = hs.open_db(path)
+    try:
+        hs.migrate(conn)
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == hs.SCHEMA_VERSION == 11
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(samples)").fetchall()}
+        assert {"av_repairs_total", "av_unexplained_total"} <= cols, cols
+        row = conn.execute("SELECT obs_fps, av_repairs_total, av_unexplained_total "
+                           "FROM samples").fetchone()
+        assert tuple(row) == (59.9, None, None)         # lossless; new columns NULL
+    finally:
+        conn.close()
+    # Round-trip on a fresh database, which carries the full schema.
+    fresh = hs.open_db(os.path.join(d, "fresh.db"))
+    try:
+        hs.migrate(fresh)
+        hs.record(fresh, {"ts": 1001.0, "health_level": "yellow",
+                          "av_repairs_total": 3, "av_unexplained_total": 1}, "tick")
+        got = fresh.execute("SELECT av_repairs_total, av_unexplained_total "
+                            "FROM samples WHERE ts=1001.0").fetchone()
+        assert tuple(got) == (3, 1)
+    finally:
+        fresh.close()
+
+
 def t_migrate_adds_fps_target_column_v10_lossless():
     # #586: the configured OBS frame rate, the reference the report judges obs_fps by.
     import sqlite3
@@ -694,7 +736,7 @@ def t_migrate_adds_fps_target_column_v10_lossless():
     conn = hs.open_db(path)
     try:
         hs.migrate(conn)
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == hs.SCHEMA_VERSION == 10
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == hs.SCHEMA_VERSION
         cols = {r[1] for r in conn.execute("PRAGMA table_info(samples)").fetchall()}
         assert "obs_fps_target" in cols, cols
         row = conn.execute("SELECT obs_fps, obs_fps_target FROM samples").fetchone()

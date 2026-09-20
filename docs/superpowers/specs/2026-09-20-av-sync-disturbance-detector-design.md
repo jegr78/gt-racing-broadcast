@@ -94,53 +94,114 @@ relative to each other, nothing in OBS or the relay can know. Proving lip sync n
 content analysis or a person. The design must not imply otherwise, and must never print
 an all-clear it cannot support.
 
-## Design
+## Design (built; live-verified on the producer host 2026-09-20)
 
 ### Signals
-The CLI resolves OBS's log directory today (`logsetup.obs_log_dir`, used by `racecast obs
-logs`). The relay must not import shared modules, so the path is passed in as
-`--obs-log-dir`, the same way `--overlay-dir` already is. The relay tails the newest OBS
-log and matches three patterns, attributing each to a feed by the source name OBS prints
-(`Feed A`, `Feed B`, `Feed POV`):
+The relay resolves OBS's log directory itself with `logsetup.obs_log_dir`, which it
+already imports. An earlier draft of this spec claimed the relay may not import shared
+modules and therefore needed an `--obs-log-dir` flag; it imports `logsetup` at line 157,
+so the flag was dropped before it was ever written. `AvSyncWatcher` tails the newest log
+and matches three patterns:
 
-| Pattern | Meaning |
-|---|---|
-| `Source <name> audio is lagging (over by N ms)` | OBS repaired an audio timing break |
-| `DTS <a> < <b> out of order` | demuxer saw a backward timestamp |
-| `Packet corrupt (stream = N, ...)` | a spliced packet did not parse |
+| Pattern | Meaning | Carries a source? |
+|---|---|---|
+| `Source <name> audio is lagging (over by N ms)` | OBS repaired an audio timing break | yes |
+| `DTS <a> < <b> out of order` / `DTS discontinuity` | demuxer saw a backward timestamp | no |
+| `Packet corrupt (stream = N, ...)` | a spliced packet did not parse | no |
 
-Pure parsing (line → `{ts, source, kind, ms}`) belongs in `src/scripts/` with unit tests,
-like every other parser in this repo; the tail thread stays in the relay.
+Only the first names a source, so only it can be attributed to a feed. The other two are
+counted as unattributed context rather than guessed onto one.
 
-### Classification
-A repair **within a restart window** (the relay knows when it restarted a feed) is
-expected: count it, record it, do not page. A repair with **no restart nearby** is the
-interesting one — something disturbed the stream that the relay did not cause. That is
-the case that earns a yellow health reason.
+Only lines appended AFTER the watcher starts are read, which is what lets every event be
+stamped with the relay's own clock: OBS writes `HH:MM:SS.mmm` with no date, so parsing
+its timestamp would need the file's date plus midnight-rollover handling for a value the
+tail lag already gives to within a second. Both readers of that state take their own
+`time.monotonic()` rather than accepting the wall-clock `now` that /status and the
+heartbeat pass around; mixing the two would produce ages of about 1.8 billion seconds.
+
+Pure parsing, classification and aggregation: `src/scripts/av_sync.py`, tested in
+`tests/test_av_sync.py` against lines copied verbatim from a real OBS 32.2.2 log.
+
+### Classification, and how its window was set
+A repair within `RESTART_WINDOW_S` of the feed entering `serving` is EXPECTED: the relay
+caused it by splicing a new stream. Anything else is UNEXPLAINED, and only that earns a
+health reason.
+
+The window is derived, not chosen. Three legs stand between a feed serving and OBS being
+able to log a repair at all, and this repo pins every one:
+
+| Leg | Bound | Source |
+|---|---|---|
+| relay waits out the HLS prefetch burst | up to 7 s | `SEGMENT_FETCH_BUDGET_S` 1.0 x `--hls-live-edge 4`, plus the 3 s reserve |
+| OBS reconnects to the rebuilt input | up to 10 s | `reconnect_delay_sec: 10` in `GT_Racing_Endurance.json` |
+| OBS fills its buffer before divergence shows | about 9 s | `buffering_mb: 8` at the measured 7.2 Mbps |
+| | **26 s floor** | |
+
+Measured against that floor: repairs landed 6-14 s after serving in three cases and 32 s
+in a fourth. A first attempt at 30 s called that fourth one unexplained and turned the
+panel yellow for a repair a restart had almost certainly caused — two seconds decided it.
+The value is therefore rounded up to two heartbeats (60 s), and the rounding is a
+deliberate asymmetry: too narrow cries wolf on every handover, and a detector the
+director learns to ignore is worth nothing; too wide misses an unexplained repair in the
+first minute after a restart, when the director already knows the stream was disturbed.
 
 ### Publication
-- `/status`, per feed: `av: {repairs, last_ms, last_ts, unexplained}`.
-- A yellow health reason for an unexplained repair, worded so it does not blame a
-  component the way the current backlog reason wrongly blames OBS.
-- A `health-history.db` column, so the post-event report can state how many sync
-  disturbances an event had and whether any were unexplained.
-- Director Panel: a marker plus a prompt to **look at the program**, because only a
-  person can confirm lip sync. A prompt to check, never an automatic all-clear.
+- `/status` gains its own `av` block (`{feeds: {...}, context: {...}}`), absent until
+  something happens. Deliberately NOT part of `desync`: that is the ping-pong stint
+  mismatch of #494, and sharing a name would render one state under the other's label.
+- A yellow health reason for a recent unexplained repair, held for 5 minutes so one blip
+  does not paint the panel yellow all event. It is excluded from the Discord notify level
+  exactly like the #535 inbound stall and the #583 backlog — an `@here` for something OBS
+  has already repaired trains the crew to ignore the pings that matter.
+- The reason names no fix, because there is none left to apply, and asks for the only
+  check that can confirm lip sync:
+  `Feed A audio timing broke by 987 ms with no restart to explain it — OBS re-synced
+  itself; check the program picture and sound`
+- `health-history.db` v11 adds `av_repairs_total` / `av_unexplained_total` (running
+  totals, additive migration), and the post-event report states how often OBS re-synced a
+  feed's audio and how many of those nothing explained.
+- **No new UI surface.** The health reason already reaches the Director Panel through the
+  existing health block, so nothing under `src/ui/` or `src/director/` changed and no wiki
+  screenshot went stale.
 
-### Deliberately not doing
-- **Rebuilding the input on the message.** OBS already repaired; a rebuild would add a
-  second disturbance. Revisit only if measurements show repairs that leave a standing
-  offset.
-- **`SetInputAudioSyncOffset`.** It is a scalpel for a constant offset and the wrong tool
-  for a timestamp break. Available (verified: 5.7.4, currently 0 ms) if a constant
-  per-league offset ever turns out to be needed.
-- **Lowering OBS's audio buffering.** Withdrawn above — there is no millisecond threshold
-  to lower.
+### Deliberately not done
+- **Rebuilding the input on the message.** OBS has already repaired it; a rebuild would
+  add a second disturbance to a finished repair.
+- **`SetInputAudioSyncOffset`.** Verified available (obs-websocket 5.7.4, currently 0 ms)
+  and still the wrong tool: a scalpel for a constant offset, not a timestamp break.
+- **Lowering OBS's audio buffering.** Raised and withdrawn during design. There is no
+  millisecond threshold to lower: the condition is `audio_buffering_maxed()`, and the
+  logged value is only how far past the mix clock the source was. Measured the same
+  evening: 103, 170-190, 999-1009, 4717 and 5415 ms, all the same event.
+
+## What the live run found
+
+Running the relay from source against real OBS on the Windows producer host produced
+three defects that no local check had shown, which is the argument for doing it:
+
+1. `'Relay' object has no attribute 'log'` — the relay logs through a module-level `LOG`.
+   `_start_av_watcher()` runs only from `Relay.start()`, which no unit test called, so
+   the whole suite passed and the relay died on its first real start. Covered now.
+2. `UnicodeDecodeError` reading `streamlink --help` on a German Windows — pre-existing,
+   not part of this work, fixed alongside it. `subprocess` reads pipes in a THREAD, so
+   the surrounding `except` never saw it: the relay printed a traceback and silently lost
+   the help text and with it the queue-deadline flag. A test now keeps all seven
+   `subprocess.run` calls in the file decoding leniently.
+3. The health reason named the magnitude of the WRONG event: it read `997 ms` while the
+   unexplained repair had been `987 ms` and the 997 belonged to a later, explained one.
+   That is the same mis-attribution this detector exists to stop, one layer up. The
+   unexplained magnitude is tracked separately now.
+
+Verified on that host: the watcher opens OBS's **currently active** log while OBS holds
+it (a Windows file-sharing lock would have sunk the whole approach), a clean start
+publishes no `av` block and stays green, and a real `/reload/A` produced repairs the
+detector attributed to Feed A with the right counts.
 
 ## Open
 
-- The active-output backlog failure (runs 2 and 3) needs its own issue and its own
-  measurement. It is unrelated to A/V sync.
-- The `/status` backlog health reason currently reads "OBS reads slower than real time".
-  Measured against this host, OBS played at exactly 1.000× for 60 s while that reason was
-  live. The attribution is wrong and sends a director after the wrong component.
+- The active-output backlog failure (an active OBS output stops the backlog recovering
+  after a restart, 2/2 fail vs 2/2 pass) is unrelated to A/V sync and belongs to the
+  #619 chain review.
+- The `/status` backlog health reason still reads "OBS reads slower than real time" while
+  OBS was measured at exactly 1.000x for 60 s in that state. The attribution is wrong and
+  sends a director after the wrong component. Recorded in #619.
