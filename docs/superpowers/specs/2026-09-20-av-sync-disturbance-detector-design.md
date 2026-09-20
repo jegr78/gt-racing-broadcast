@@ -71,7 +71,8 @@ Two independent findings, and they must not be conflated:
 
 - **The audio repair follows the restart, not the output state.** Three of four restarts
   produced one, in both states. Every relay restart risks a brief audible audio gap.
-- **An active output stops the backlog from recovering** (2/2 fail vs 2/2 pass). That is
+- **An active output stops the backlog from recovering.** Both runs with a recording
+  failed; both without one passed. No run fell in between. That is
   a latency-to-live problem, not an A/V problem, and belongs in its own issue.
 
 The producer confirmed by eye and ear: the short audio gaps were audible, and picture and
@@ -200,7 +201,8 @@ detector attributed to Feed A with the right counts.
 ## Open
 
 - The active-output backlog failure (an active OBS output stops the backlog recovering
-  after a restart, 2/2 fail vs 2/2 pass) is unrelated to A/V sync and belongs to the
+  after a restart — both runs with a recording failed, both without one passed) is
+  unrelated to A/V sync and belongs to the
   #619 chain review.
 - The `/status` backlog health reason still reads "OBS reads slower than real time" while
   OBS was measured at exactly 1.000x for 60 s in that state. The attribution is wrong and
