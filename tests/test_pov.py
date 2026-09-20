@@ -1654,6 +1654,68 @@ def t_serve_flags_is_the_single_source_for_a_serves_flags():
             assert m.live_edge_segments(cmd) == m.live_edge_segments(want), (name, platform, tier)
 
 
+class _FanoutSrv:
+    """Minimal stand-in for a running FeedFanoutServer, enough for /status."""
+    prebuffer_s = 3.0
+    def consumer_backlog(self, now): return 1.0
+    def consumer_health(self, now): return 0.0, 0
+
+
+def _serving(feed):
+    """Put a feed in the one state that can carry an inbound reading: serving, armed and
+    fanned out. /status reports None for every other state, by design."""
+    feed.phase = "serving"
+    feed.paused = False
+    feed.fanout_server = _FanoutSrv()
+    return feed
+
+
+def t_status_publishes_the_inbound_gap_without_stealing_the_heartbeat_reset():
+    # #535's inbound max gap only ever reached health-history.db, so `racecast obs
+    # benchmark`, which polls /status, could not record it through a scripted restart
+    # (#619 step 2). It is now published, but from the HEARTBEAT's last reading and never
+    # by calling take_max_inbound_gap(): that read resets the accumulator, and a 2 s
+    # /status poll would swallow the interval the heartbeat is about to classify.
+    r = _relay(["s1", "s2"])
+    _serving(r.A)                                  # only a serving feed has a reading
+    _serving(r.B)
+    r.A._max_inbound_gap = 4.2                     # live accumulator, owned by the feed
+    r._interval_max_gaps = {"A": 1.5, "B": None}
+    st = r.status()
+    assert "inbound_max_gap_s" in st["feeds"]["A"], sorted(st["feeds"]["A"])
+    assert st["feeds"]["A"]["inbound_max_gap_s"] == 1.5
+    assert st["feeds"]["B"]["inbound_max_gap_s"] is None    # no reading yet, not 0.0
+    assert r.A._max_inbound_gap == 4.2, "status() must not consume the live accumulator"
+    assert r.status()["feeds"]["A"]["inbound_max_gap_s"] == 1.5, "polls stay stable"
+    # A feed the heartbeat has never sampled reports None rather than inventing a value.
+    r._interval_max_gaps = {}
+    assert r.status()["feeds"]["A"]["inbound_max_gap_s"] is None
+
+
+def t_status_inbound_gap_is_none_when_no_reading_is_possible():
+    # take_max_inbound_gap() returns the raw accumulator, which is 0.0 whenever nothing
+    # updated it: an idle feed, or any feed under RACECAST_FEED_FANOUT=0, where the
+    # update site lives inside the fan-out read loop. Publishing that 0.0 would read as
+    # "the source never stuttered", the healthiest possible answer, for a feed that was
+    # never measured. Its neighbour backlog_s already says None in exactly these cases;
+    # two adjacent fields must not use opposite words for "no reading".
+    r = _relay(["s1", "s2"])
+    r._interval_max_gaps = {n: f.take_max_inbound_gap() for n, f in r.feeds.items()}
+    st = r.status()["feeds"]["A"]
+    assert r.A.phase == "idle"
+    assert st["backlog_s"] is None                      # the neighbour's answer …
+    assert st["inbound_max_gap_s"] is None              # … and this one must match it
+    # Direct-serve (no fan-out server): nothing ever measures the gap.
+    r.A.phase = "serving"
+    r.A.fanout_server = None
+    assert r.status()["feeds"]["A"]["inbound_max_gap_s"] is None
+    # Serving with fan-out: the heartbeat's reading is published, 0.0 included. There it
+    # is a real measurement, "no gap this interval", not a missing one.
+    _serving(r.A)
+    r._interval_max_gaps = {"A": 0.0}
+    assert r.status()["feeds"]["A"]["inbound_max_gap_s"] == 0.0
+
+
 def t_status_publishes_the_prebuffer_the_benchmark_derives_from():
     # `racecast obs benchmark` reads feed_prebuffer_s off /status to compute the same
     # rejoin wait as the relay. Without this assert the field could vanish, every test

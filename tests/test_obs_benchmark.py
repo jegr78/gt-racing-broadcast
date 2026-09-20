@@ -524,6 +524,54 @@ def t_run_rejoins_obs_after_each_switch_once_the_prefetch_has_landed():
     assert waits[1] > waits[0]
 
 
+def t_sample_and_summary_carry_the_inbound_gap():
+    # #619 step 2: through one scripted restart the benchmark has to record the relay
+    # backlog, OBS mediaCursor, ring snaps AND the inbound gaps. The first three were
+    # already there. Without the fourth a slow window has no stated cause, because a
+    # bursty source and a consumer that fell behind look the same in backlog alone.
+    st = _status()
+    st["feeds"]["A"]["inbound_max_gap_s"] = 2.5
+    sess = _Session(_Clock())
+    smp = m._obs_sample(sess, 1.0, st, "A", "Feed A")
+    assert smp["inbound_max_gap_s"] == 2.5, smp     # named exactly as /status names it
+    # A relay that does not publish the field (an older one) reports None, never 0.0.
+    # "No reading" and "no gap" are different answers, and 0.0 would read as healthy.
+    st2 = _status()
+    st2["feeds"]["A"].pop("inbound_max_gap_s", None)
+    assert m._obs_sample(sess, 1.0, st2, "A", "Feed A")["inbound_max_gap_s"] is None
+    # It has to reach the operator's eyes, not just the JSONL.
+    rec = {"feed": "A", "platform": "youtube", "scene": "Stint", "window_s": 60,
+           "fps_target": 60.0, "ts": NOW,
+           "full": {"inbound_gap_worst_s": 2.5}, "robust": {"inbound_gap_worst_s": None}}
+    text = m.render(rec, NOW)
+    assert "src gap" in text, text
+    assert "2.5 s" in text, text
+    assert "n/a" in text.splitlines()[3], "a tier without a reading prints n/a, not 0.0"
+
+
+def t_inbound_gap_worst_ignores_the_reading_the_window_inherited():
+    # /status carries the heartbeat's last reading and the heartbeat runs every 30 s,
+    # while the benchmark samples every 2 s. The value present when a window opens
+    # describes an interval that began BEFORE the restart, so counting it would blame the
+    # old serve's jitter on the new one.
+    def w(*vals):
+        return [{"t": float(i), "inbound_max_gap_s": v} for i, v in enumerate(vals)]
+    # 9.0 is inherited from before the restart; only 0.4 and 1.2 were produced in-window.
+    assert m._inbound_gap_worst(w(9.0, 9.0, 9.0, 0.4, 0.4, 1.2, 1.2)) == 1.2
+    # A later repeat of a value is real data, because two intervals may share a max.
+    assert m._inbound_gap_worst(w(9.0, 0.4, 1.2, 1.2)) == 1.2
+    assert m._inbound_gap_worst(w(0.4, 9.0, 0.4)) == 9.0   # a spike after the first change
+    # The reading never changed: the window was shorter than a heartbeat, so nothing can
+    # be said, and reporting the inherited 9.0 would measure the old serve instead.
+    assert m._inbound_gap_worst(w(9.0, 9.0, 9.0)) is None
+    assert m._inbound_gap_worst(w()) is None
+    assert m._inbound_gap_worst(w(None, None)) is None
+    # An older relay publishes nothing at all: None throughout, never 0.0.
+    assert m._inbound_gap_worst(w(None, None, None)) is None
+    # And it is wired into the summary, not just defined.
+    assert m.summarize(w(9.0, 9.0, 0.4, 1.2))["inbound_gap_worst_s"] == 1.2
+
+
 def t_prefetch_wait_rule_has_not_drifted_from_the_relay():
     # prefetch_land_s and its budget exist twice (relay + benchmark) so the benchmark
     # stays importable on its own. A "keep in sync" comment is not a guard — the repo

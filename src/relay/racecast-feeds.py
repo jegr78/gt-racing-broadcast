@@ -7658,7 +7658,25 @@ class Relay:
                 "reset_discards_s": reset_discards_s(live, self.feed_prebuffer_s),
                 # #614: cumulative cursor snaps of the attached consumers (the ring lapped
                 # them); `obs benchmark` marks a window with new snaps as contaminated
-                "consumer_snaps": snaps}
+                "consumer_snaps": snaps,
+                # #619: the inbound side of the same interval (#535). This is the
+                # largest gap between bytes arriving from the source. With backlog_s and
+                # consumer_snaps, `obs benchmark` can tell a bursty source from a
+                # consumer that fell behind, through one scripted restart.
+                #
+                # This reads the heartbeat's last value, never take_max_inbound_gap().
+                # That call resets the accumulator, so a 2 s /status poll would swallow
+                # the interval the heartbeat is about to classify.
+                #
+                # Gated like backlog_s above. The accumulator is a float starting at 0.0
+                # that only the fan-out read loop advances. An idle feed, or any feed
+                # under RACECAST_FEED_FANOUT=0, would therefore report 0.0, which reads
+                # as "the source never stuttered". That is the healthiest answer possible
+                # for something nobody measured. POV is never in the map, because the
+                # heartbeat's gap loop walks self.feeds (A and B only), so it reports
+                # None here too.
+                "inbound_max_gap_s": (self._interval_max_gaps.get(name)
+                                      if live is not None else None)}
 
     def _current_render_skip_rate(self):
         """Per-interval OBS render-skip rate (0..1) from obs_stats vs the previous heartbeat's

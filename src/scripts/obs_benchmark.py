@@ -15,7 +15,13 @@ FULL and then to ROBUST, and samples over the same window for each:
   demuxer, the cursor is not;
 - the fan-out consumer backlog behind the live edge (#583), as the floor at the start
   and at the end of the window. Reported, not judged: on 5-s HLS segments the raw
-  value is a sawtooth, and after a restart it is dominated by the prefetch (#614).
+  value is a sawtooth, and after a restart it is dominated by the prefetch (#614);
+- the worst INBOUND gap between bytes arriving from the source (#535). Also reported, not
+  judged. It separates a source that delivered in bursts from a consumer that fell behind.
+  The backlog shows both the same way, and that ambiguity is why #619 asked for this.
+  Its resolution is the relay's 30 s heartbeat, not the 2 s sampling. The reading a window
+  inherits is dropped because it predates the restart, so a window shorter than one
+  heartbeat reports n/a instead of a number about the previous serve.
 
 After each tier switch the new serve's HLS prefetch lands in one burst. OBS, still
 attached, would play that burst and sit its length behind the live edge (#614), so the
@@ -171,6 +177,34 @@ def _playback(samples):
     return round(rate, 3), round(stalled / len(pairs), 2), rejoined
 
 
+def _inbound_gap_worst(samples):
+    """The worst inbound gap the relay reported DURING this window (#619).
+
+    /status carries the heartbeat's LAST reading, and the heartbeat runs every
+    HEARTBEAT_INTERVAL_S (30 s) while the benchmark samples every 2 s, so the same value
+    is read about fifteen times before it changes. Repeats do not disturb a max. But the
+    value already present when the window opens describes an interval that began BEFORE
+    it, that is, before the restart that was just triggered. Counting it would blame the
+    old serve's jitter on the new one. So this skips the leading run of that first value
+    and counts only what the relay produced afterwards. Later repeats are kept, because
+    two intervals may legitimately share a max.
+
+    None when the reading never changed: the window was shorter than a heartbeat and
+    nothing can honestly be said. Nothing here is filled in. Pure -> unit-tested."""
+    seen = [s.get("inbound_max_gap_s") for s in samples]
+    first = seen[0] if seen else None
+    rest = []
+    started = False
+    for v in seen:
+        if not started:
+            if v == first:
+                continue            # still the reading the window inherited
+            started = True
+        if v is not None:
+            rest.append(v)
+    return max(rest) if rest else None
+
+
 def _starved_s(samples):
     """Seconds in which OBS's cursor stood still with nothing left to read: the source
     stopped delivering. Needs the backlog of the later sample of each pair. Pure."""
@@ -239,6 +273,7 @@ def summarize(samples):
         "backlog_floor_start_s": _floor(_values(samples[:third], "backlog_s")),
         "backlog_floor_end_s": _floor(_values(samples[-third:], "backlog_s")),
         "backlog_max_s": max(backlog) if backlog else None,
+        "inbound_gap_worst_s": _inbound_gap_worst(samples),
         "snaps": (snaps[-1] - snaps[0]) if len(snaps) >= 2 else None,
         "contaminated": _disturbances(samples, rejoined),
     }
@@ -418,7 +453,7 @@ def render(record, now):
              f"on '{record.get('scene')}', {record.get('window_s')} s per tier, "
              f"target {_fmt(record.get('fps_target'), ' fps', 2)}",
              "              render ms   fps avg/min   render skip   encoder skip/speed"
-             "   playback rate/stalled   backlog floor start→end"]
+             "   playback rate/stalled   backlog floor start→end   src gap"]
     for tier in TIERS:
         s = record.get(tier) or {}
         lines.append(
@@ -429,7 +464,10 @@ def render(record, now):
             f"   {_fmt(s.get('playback_rate'), 'x', 3)}/"
             f"{_fmt(None if s.get('stall_fraction') is None else s['stall_fraction'] * 100, ' %', 0)}"
             f"   {_fmt(s.get('backlog_floor_start_s'), ' s')}→"
-            f"{_fmt(s.get('backlog_floor_end_s'), ' s')}")
+            f"{_fmt(s.get('backlog_floor_end_s'), ' s')}"
+            # Reported, not judged, following the backlog's rule. A bursty source is not
+            # a verdict on the host, but without it a slow window has no stated cause.
+            f"   {_fmt(s.get('inbound_gap_worst_s'), ' s')}")
         if s.get("contaminated"):
             lines.append(f"              disturbed: {'; '.join(s['contaminated'])}")
     extra = record.get("robust_extra_segments")
@@ -477,7 +515,14 @@ def _obs_sample(session, t, relay_status, feed, input_name):
             "output_skipped": stats.get("outputSkippedFrames"),
             "output_total": stats.get("outputTotalFrames"),
             "rec_ms": rec.get("outputDuration"),
-            "backlog_s": f.get("backlog_s")}
+            "backlog_s": f.get("backlog_s"),
+            # #619: the inbound side of the same interval (#535). backlog_s alone cannot
+            # tell a bursty SOURCE from a consumer that fell behind; this can. It is None
+            # whenever the relay has no reading to give: an older relay that does not
+            # publish the field, a feed that is not serving, or one running without
+            # fan-out. Never 0.0 in those cases. 0.0 is a measurement, "no gap this
+            # interval", and returning it for something nobody measured reads as healthy.
+            "inbound_max_gap_s": f.get("inbound_max_gap_s")}
 
 
 def _fps_target(session):
