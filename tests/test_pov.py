@@ -1671,14 +1671,16 @@ def t_obs_rejoin_hook_derives_the_wait_from_this_serves_flags():
     f._obs_rejoin_hook(m.STREAMLINK_SERVE_ROBUST)()     # ROBUST waits longer
     f._obs_rejoin_hook(m.STREAMLINK_TWITCH)()           # Twitch prefetches least
     f._obs_rejoin_hook([])()                            # local capture: no wait
-    assert seen == [m.prefetch_land_s(4, 3.0), m.prefetch_land_s(6, 3.0),
-                    m.prefetch_land_s(2, 3.0), 0.0], seen
+    # Spelled out rather than via prefetch_land_s: asserting against the same function
+    # the hook calls would pass no matter what that function does.
+    b = m.SEGMENT_FETCH_BUDGET_S
+    assert seen == [4 * b + 3.0, 6 * b + 3.0, 2 * b + 3.0, 0.0], seen
     assert seen[1] > seen[0] > seen[2] > seen[3], seen
-    # A different prebuffer must move the wait, so the two never drift apart.
+    # A different prebuffer must move the wait one-for-one, so the two never drift apart.
     _Srv.prebuffer_s = 8.0
     seen.clear()
     f._obs_rejoin_hook(m.STREAMLINK_SERVE)()
-    assert seen == [m.prefetch_land_s(4, 8.0)], seen
+    assert seen == [4 * b + 8.0], seen
 
 
 _LAND_S = 7.0        # a representative derived wait: 4 segments + a 3 s prebuffer
