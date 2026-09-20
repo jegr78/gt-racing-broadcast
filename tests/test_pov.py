@@ -3043,6 +3043,69 @@ def t_every_text_subprocess_in_the_relay_decodes_leniently():
     assert not offenders, offenders
 
 
+def t_av_watcher_joins_a_line_the_writer_split_across_two_polls():
+    # THE defect this watcher can have: OBS is still writing when we read, readline()
+    # hands back a fragment, and the repair parses to nothing twice. Demonstrated
+    # against a real file before the fix — both halves yielded None and the event was
+    # gone. The tail now holds the remainder until the newline arrives.
+    import tempfile
+    LINE = ("22:52:21.790: Source Feed A audio is lagging (over by 5415.66 ms) "
+            "at max audio buffering. Restarting source audio.\n")
+    r = _make_min_relay()
+    r.A.phase = "serving"; r.A.paused = False; r.A.phase_since = time.time() - 5.0
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, "obs.txt")
+        wtc = m.AvSyncWatcher(d, r._serving_age, r._av, r._av_lock, m.LOG)
+        with open(p, "w", encoding="utf-8") as w:
+            w.write(LINE[:40]); w.flush()
+            with open(p, encoding="utf-8") as fh:
+                # The REAL loop, not a copy of it: an earlier version of this test
+                # rebuilt run()'s body and therefore proved only its own copy — the
+                # guard stayed green with the fix removed.
+                wtc.drain(fh)
+                assert r._av["feeds"] == {}, "half a line is not an event yet"
+                w.write(LINE[40:]); w.flush()
+                wtc.drain(fh)
+                assert "A" in r._av["feeds"], (
+                    "the split line was lost: both halves parsed to nothing")
+                assert r._av["feeds"]["A"]["repairs"] == 1, r._av
+                assert r._av["feeds"]["A"]["last_ms"] == 5415.66
+
+
+def t_av_watcher_ignores_a_log_directory_entry_that_is_not_a_regular_file():
+    # A FIFO named *.txt would block open() and hang this thread for good; a symlink
+    # would point the parser somewhere else entirely. list_logs filters to real files.
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        fifo = os.path.join(d, "trap.txt")
+        try:
+            os.mkfifo(fifo)
+        except (AttributeError, OSError):
+            return                      # no FIFOs on this platform (Windows): nothing to prove
+        real = os.path.join(d, "obs.txt")
+        with open(real, "w", encoding="utf-8") as fh:
+            fh.write("22:00:00.000: hello\n")
+        os.utime(fifo, (time.time() + 60, time.time() + 60))   # the FIFO looks NEWEST
+        r = _make_min_relay()
+        wtc = m.AvSyncWatcher(d, r._serving_age, r._av, r._av_lock, m.LOG)
+        assert wtc._newest_log() == real, wtc._newest_log()
+
+
+def t_relay_shutdown_stops_the_av_watcher():
+    r = _make_min_relay()
+    orig = m.logsetup.obs_log_dir
+    try:
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            m.logsetup.obs_log_dir = lambda *a, **k: d
+            r._start_av_watcher()
+            assert r._av_watcher is not None and r._av_watcher.stop is False
+            r.shutdown()
+            assert r._av_watcher.stop is True
+    finally:
+        m.logsetup.obs_log_dir = orig
+
+
 def t_av_watcher_start_never_takes_the_relay_down_with_it():
     # This is the test the suite was missing. _start_av_watcher() runs only from
     # Relay.start(), which no unit test calls, so a wrong attribute inside it

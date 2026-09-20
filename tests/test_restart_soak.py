@@ -373,6 +373,28 @@ def t_the_driver_fires_one_restart_per_interval_not_one_per_sample():
     assert all(890 <= g <= 910 for g in gaps), gaps
 
 
+def t_relay_url_rejects_everything_that_is_not_a_bare_base():
+    import argparse
+    assert m.relay_url("http://100.64.0.1:8088") == "http://100.64.0.1:8088"
+    assert m.relay_url("http://100.64.0.1:8088/") == "http://100.64.0.1:8088"
+    for bad, why in (
+            ("ftp://host/x", "only http(s) may be fetched"),
+            ("/status", "no host at all"),
+            # base + path is how every request is built, so a base that already carries
+            # a path or query silently hits the wrong endpoint: with "http://h/?x=" the
+            # request goes to "/" and the soak reads a page that is not /status.
+            ("http://100.64.0.1:8088/?x=", "a query would swallow the endpoint"),
+            ("http://100.64.0.1:8088/relay", "a path would prefix every endpoint"),
+            ("http://100.64.0.1:8088/#f", "a fragment is not sent but hides the base"),
+            # Credentials would be written verbatim into the run's JSONL start record.
+            ("http://user:pass@100.64.0.1:8088", "credentials land in the recording")):
+        try:
+            m.relay_url(bad)
+        except argparse.ArgumentTypeError:
+            continue
+        raise AssertionError(f"{bad!r} must be refused: {why}")
+
+
 if __name__ == "__main__":
     for name, fn in sorted(list(globals().items())):
         if name.startswith("t_") and callable(fn):

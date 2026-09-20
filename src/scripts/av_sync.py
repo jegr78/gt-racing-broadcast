@@ -73,7 +73,10 @@ HEALTH_HOLD_S = 300.0
 # The name may contain spaces ("Feed POV"), so it is taken up to " audio is lagging".
 _REPAIR_RE = re.compile(
     r"^(?P<at>\d{2}:\d{2}:\d{2}\.\d{3}):\s+Source\s+(?P<source>.+?)\s+audio is lagging\s+"
-    r"\(over by\s+(?P<ms>[\d.]+)\s+ms\)")
+    # \d+(?:\.\d+)? and not [\d.]+: the loose class also matched "1.2.3", float()
+    # then raised ValueError out of the tail loop, and the relay's handler read that as
+    # "the file rotated". A parser bug filed as a rotation is invisible twice over.
+    r"\(over by\s+(?P<ms>\d+(?:\.\d+)?)\s+ms\)")
 # Two shapes, same meaning: a decode timestamp that did not move forward.
 _DTS_RE = re.compile(r"^(?P<at>\d{2}:\d{2}:\d{2}\.\d{3}):\s+warning:\s+DTS\s+"
                      r"(?:\d+\s+<\s+\d+\s+out of order|discontinuity\s+in\s+stream)")
@@ -115,7 +118,9 @@ def new_state():
 
 
 def record(state, event, now, serving_age_s, window_s=RESTART_WINDOW_S):
-    """Fold one parsed event into `state` and return it (mutated in place).
+    """Fold one parsed event into `state`, in place. Returns nothing: one contract, so
+    a caller that assigned the result and one that ignored it cannot look different
+    while doing the same thing.
 
     `serving_age_s` is how long the event's feed has been in the `serving` phase, or
     None when it is not serving. A repair within `window_s` of that feed starting to
@@ -123,12 +128,12 @@ def record(state, event, now, serving_age_s, window_s=RESTART_WINDOW_S):
     UNEXPLAINED, and that is the only kind worth a health reason: something disturbed
     the stream that the relay did not do. Pure."""
     if not event:
-        return state
+        return
     feed = feed_for_source(event.get("source"))
     if feed is None:
         kind = event.get("kind") or "unknown"
         state["context"][kind] = state["context"].get(kind, 0) + 1
-        return state
+        return
     expected = serving_age_s is not None and serving_age_s <= window_s
     f = state["feeds"].setdefault(
         feed, {"repairs": 0, "unexplained": 0, "last_ms": None,
@@ -146,7 +151,6 @@ def record(state, event, now, serving_age_s, window_s=RESTART_WINDOW_S):
         # 997 belonged to a LATER, expected one. Naming another event's magnitude is
         # the mis-attribution this detector exists to avoid.
         f["last_unexplained_ms"] = event.get("ms")
-    return state
 
 
 def status_block(state, now):

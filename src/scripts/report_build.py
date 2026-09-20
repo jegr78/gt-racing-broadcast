@@ -280,10 +280,12 @@ def _on_air(sample_groups, name_for_stint):
     commentators = sorted(
         ({"name": n, "seconds": round(v[0], 1), "stints": len(v[1])} for n, v in agg.items()),
         key=lambda c: -c["seconds"])
-    av_repairs = sum(counter_increase([s.get("av_repairs_total") for s in g])
-                     for g in sample_groups)
-    av_unexplained = sum(counter_increase([s.get("av_unexplained_total") for s in g])
-                         for g in sample_groups)
+    # ONE series across every window, not a sum per window. These are running totals,
+    # so summing per on-air window re-counted the whole counter at each part: a
+    # three-part event whose counter went 5 -> 9 reported 21 instead of 4.
+    ordered = [s for g in sample_groups for s in g]
+    av_repairs = counter_increase([s.get("av_repairs_total") for s in ordered])
+    av_unexplained = counter_increase([s.get("av_unexplained_total") for s in ordered])
     return {"commentators": commentators, "stint_handovers": handovers,
             "resolved": resolved, "desync_seconds": round(desync_seconds, 1),
             "av_repairs": av_repairs, "av_unexplained": av_unexplained}
@@ -297,12 +299,16 @@ def counter_increase(values):
     a restart in it. Each consecutive pair contributes its rise; a FALL means the
     counter started over, and then everything the new value holds is new. None samples
     (a database written before v11, or a tick that missed) are skipped rather than read
-    as zero, which would invent a reset. Pure."""
+    as zero, which would invent a reset.
+
+    The FIRST reading is a baseline and contributes nothing: whatever the counter
+    already held when the window opened happened before it. Counting it in full
+    attributed a relay's entire pre-event history to the event. Pure."""
     seen = [v for v in values if isinstance(v, (int, float)) and not isinstance(v, bool)]
     total = 0
     for i, v in enumerate(seen):
         if i == 0:
-            total += v
+            continue                  # baseline: the rise is measured FROM here
         elif v >= seen[i - 1]:
             total += v - seen[i - 1]
         else:

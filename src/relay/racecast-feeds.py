@@ -7234,14 +7234,39 @@ class AvSyncWatcher:
         self.log = log
         self.stop = False
         self._warned = False
+        # A tail reads a file another process is still writing, so the last read can end
+        # mid-line. readline() hands that fragment back as if it were a line, and the
+        # remainder arrives as another: a repair split across two polls parsed to
+        # nothing TWICE and was lost silently — the one event this exists to catch.
+        self._partial = ""
 
     def _newest_log(self):
-        try:
-            names = [os.path.join(self.log_dir, n) for n in os.listdir(self.log_dir)
-                     if n.endswith(".txt")]
-            return max(names, key=os.path.getmtime) if names else None
-        except OSError:
-            return None
+        # logsetup.list_logs filters to REGULAR files (newest first) — a FIFO named
+        # *.txt in the log directory would otherwise block open() and hang this thread
+        # for good, and a symlink would point the parser at an unrelated file.
+        for path in logsetup.list_logs(self.log_dir):
+            if path.endswith(".txt"):
+                return path
+        return None
+
+    def drain(self, fh):
+        """Read every COMPLETE line available right now and fold it in.
+
+        A tail reads a file another process is still writing, so the last read can end
+        mid-line: readline() hands that fragment back as if it were a line and the
+        remainder arrives as another, so a repair split across two polls parses to
+        nothing twice and is lost. The remainder is therefore held until its newline
+        arrives. Public because the test drives THIS loop — an earlier version of that
+        test rebuilt it and proved only its own copy."""
+        while True:
+            chunk = fh.readline()
+            if not chunk:
+                return
+            self._partial += chunk
+            if not self._partial.endswith("\n"):
+                return               # writer is mid-line; wait for the rest
+            line, self._partial = self._partial, ""
+            self._ingest(line, time.monotonic())
 
     def _ingest(self, line, now):
         ev = av_sync.parse_obs_log_line(line.rstrip("\n"))
@@ -7283,15 +7308,15 @@ class AvSyncWatcher:
                     opened_at = now
                 if fh is not None:
                     try:
-                        while True:
-                            line = fh.readline()
-                            if not line:
-                                break
-                            self._ingest(line, time.monotonic())
+                        self.drain(fh)
                     except (OSError, ValueError):
+                        # ONLY the file is allowed to end up here. A parse failure would
+                        # be filed as a rotation, skip the lines up to the reopen, and
+                        # hide itself — so parsing never raises (av_sync returns None).
                         try: fh.close()
                         except OSError: pass    # already gone; we reopen below
                         fh, path = None, None     # rotated or truncated: pick it up again
+                        self._partial = ""        # its tail belongs to the old file
                 time.sleep(self.POLL_S)
         except Exception:                          # noqa: BLE001 — a detector must never kill the relay
             self.log.exception("A/V sync watcher stopped")
@@ -8984,6 +9009,8 @@ class Relay:
         return {"feed": which, "profile": feed.quality_tier, "pinned": feed.quality_pinned}
 
     def shutdown(self):
+        if self._av_watcher is not None:
+            self._av_watcher.stop = True    # #619: ends the tail on the next poll
         for f in self.feeds.values(): f.shutdown()
         if self.pov: self.pov.shutdown()
         for srv in self._fanout_servers: srv.stop()

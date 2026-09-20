@@ -66,6 +66,32 @@ def t_dts_and_corrupt_lines_parse_but_name_no_source():
         assert ev["source"] is None and ev["ms"] is None
 
 
+def t_a_malformed_magnitude_is_not_an_event_instead_of_an_exception():
+    # [\d.]+ also matched "1.2.3", and float() then raised ValueError out of the tail
+    # loop into the handler that means "the file rotated" — so a parser bug was filed as
+    # a rotation, lines were skipped, and nobody saw it. A line OBS would never write
+    # must simply not be an event.
+    for bad in ("12:34:56.789: Source Feed A audio is lagging (over by 1.2.3 ms) "
+                "at max audio buffering. Restarting source audio.",
+                "12:34:56.789: Source Feed A audio is lagging (over by ... ms) "
+                "at max audio buffering. Restarting source audio.",
+                "12:34:56.789: Source Feed A audio is lagging (over by . ms)"):
+        try:
+            ev = av.parse_obs_log_line(bad)
+        except ValueError as exc:
+            raise AssertionError(
+                f"a malformed magnitude must not raise: {bad!r} -> {exc}") from None
+        assert ev is None, bad
+
+
+def t_record_only_mutates_and_says_so():
+    # One contract, not two: it folds the event into the state it was given. A caller
+    # that assigns the result and one that ignores it looked different and were not.
+    st = av.new_state()
+    assert av.record(st, av.parse_obs_log_line(REPAIR), now=1.0, serving_age_s=8.0) is None
+    assert st["feeds"]["A"]["repairs"] == 1
+
+
 def t_an_unrelated_line_is_not_an_event():
     assert av.parse_obs_log_line(NOISE) is None
     assert av.parse_obs_log_line("") is None
@@ -86,7 +112,7 @@ def t_feed_for_source():
 def t_a_repair_just_after_the_feed_started_serving_is_expected():
     # Measured on 2026-09-20: repairs landed 6-10 s after the feed entered `serving`.
     st = av.new_state()
-    st = av.record(st, av.parse_obs_log_line(REPAIR), now=1000.0, serving_age_s=8.0)
+    av.record(st, av.parse_obs_log_line(REPAIR), now=1000.0, serving_age_s=8.0)
     assert st["feeds"]["A"]["repairs"] == 1
     assert st["feeds"]["A"]["unexplained"] == 0
     assert st["feeds"]["A"]["last_ms"] == 5415.66
@@ -94,7 +120,7 @@ def t_a_repair_just_after_the_feed_started_serving_is_expected():
 
 def t_a_repair_with_no_recent_restart_is_unexplained():
     st = av.new_state()
-    st = av.record(st, av.parse_obs_log_line(REPAIR), now=1000.0, serving_age_s=600.0)
+    av.record(st, av.parse_obs_log_line(REPAIR), now=1000.0, serving_age_s=600.0)
     assert st["feeds"]["A"]["repairs"] == 1
     assert st["feeds"]["A"]["unexplained"] == 1
 
@@ -102,15 +128,15 @@ def t_a_repair_with_no_recent_restart_is_unexplained():
 def t_a_feed_that_is_not_serving_cannot_have_an_expected_repair():
     # serving_age_s None = the feed is not serving. Nothing the relay did explains a
     # repair then, so it must not be waved through as expected.
-    st = av.record(av.new_state(), av.parse_obs_log_line(REPAIR),
+    st = av.new_state(); av.record(st, av.parse_obs_log_line(REPAIR),
                    now=1000.0, serving_age_s=None)
     assert st["feeds"]["A"]["unexplained"] == 1
 
 
 def t_an_unattributed_event_is_counted_without_inventing_a_feed():
     st = av.new_state()
-    st = av.record(st, av.parse_obs_log_line(DTS_ORDER), now=1.0, serving_age_s=None)
-    st = av.record(st, av.parse_obs_log_line(CORRUPT), now=2.0, serving_age_s=None)
+    av.record(st, av.parse_obs_log_line(DTS_ORDER), now=1.0, serving_age_s=None)
+    av.record(st, av.parse_obs_log_line(CORRUPT), now=2.0, serving_age_s=None)
     assert st["feeds"] == {}
     assert st["context"] == {"dts_backward": 1, "packet_corrupt": 1}
 
@@ -120,7 +146,7 @@ def t_six_repairs_within_a_fifth_of_a_second_count_six_times():
     # would hide how hard that restart hit.
     st = av.new_state()
     for i in range(6):
-        st = av.record(st, av.parse_obs_log_line(REPAIR_SMALL),
+        av.record(st, av.parse_obs_log_line(REPAIR_SMALL),
                        now=1000.0 + i * 0.02, serving_age_s=14.0)
     assert st["feeds"]["A"]["repairs"] == 6 and st["feeds"]["A"]["unexplained"] == 0
 
@@ -132,7 +158,7 @@ def t_status_block_is_empty_until_something_happens():
 
 
 def t_status_block_reports_per_feed_counts_and_the_last_magnitude():
-    st = av.record(av.new_state(), av.parse_obs_log_line(REPAIR),
+    st = av.new_state(); av.record(st, av.parse_obs_log_line(REPAIR),
                    now=1000.0, serving_age_s=8.0)
     blk = av.status_block(st, now=1030.0)
     assert blk["A"] == {"repairs": 1, "unexplained": 0, "last_ms": 5415.66,
@@ -140,10 +166,10 @@ def t_status_block_reports_per_feed_counts_and_the_last_magnitude():
 
 
 def t_only_an_unexplained_repair_becomes_a_health_fact():
-    st = av.record(av.new_state(), av.parse_obs_log_line(REPAIR),
+    st = av.new_state(); av.record(st, av.parse_obs_log_line(REPAIR),
                    now=1000.0, serving_age_s=8.0)
     assert av.health_fact(st, now=1005.0) == {}
-    st = av.record(st, av.parse_obs_log_line(REPAIR), now=1100.0, serving_age_s=600.0)
+    av.record(st, av.parse_obs_log_line(REPAIR), now=1100.0, serving_age_s=600.0)
     assert av.health_fact(st, now=1105.0) == {"A": 5415.66}
 
 
@@ -153,10 +179,10 @@ def t_the_health_fact_reports_the_unexplained_repair_not_the_latest_one():
     # Naming another event's magnitude is exactly the mis-attribution this whole detector
     # exists to avoid.
     st = av.new_state()
-    st = av.record(st, {"at": "23:49:03.732", "kind": "audio_repair",
+    av.record(st, {"at": "23:49:03.732", "kind": "audio_repair",
                         "source": "Feed A", "ms": 987.3},
                    now=1000.0, serving_age_s=600.0)          # unexplained
-    st = av.record(st, {"at": "23:49:55.528", "kind": "audio_repair",
+    av.record(st, {"at": "23:49:55.528", "kind": "audio_repair",
                         "source": "Feed A", "ms": 996.79},
                    now=1052.0, serving_age_s=22.0)           # expected, right after a restart
     assert st["feeds"]["A"] == {"repairs": 2, "unexplained": 1, "last_ms": 996.79,
@@ -167,7 +193,7 @@ def t_the_health_fact_reports_the_unexplained_repair_not_the_latest_one():
 
 
 def t_the_health_fact_ages_out_so_one_blip_does_not_stay_yellow_all_event():
-    st = av.record(av.new_state(), av.parse_obs_log_line(REPAIR),
+    st = av.new_state(); av.record(st, av.parse_obs_log_line(REPAIR),
                    now=1000.0, serving_age_s=600.0)
     assert av.health_fact(st, now=1000.0 + av.HEALTH_HOLD_S - 1) == {"A": 5415.66}
     assert av.health_fact(st, now=1000.0 + av.HEALTH_HOLD_S + 1) == {}
@@ -187,7 +213,7 @@ def t_the_window_covers_the_slowest_restart_actually_measured():
 
 def t_the_slowest_measured_restart_is_classified_as_expected():
     # The concrete case that broke the 30 s attempt, pinned so it cannot come back.
-    st = av.record(av.new_state(), av.parse_obs_log_line(REPAIR),
+    st = av.new_state(); av.record(st, av.parse_obs_log_line(REPAIR),
                    now=1000.0, serving_age_s=32.0)
     assert st["feeds"]["A"]["unexplained"] == 0
     assert av.health_fact(st, now=1001.0) == {}

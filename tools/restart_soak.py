@@ -209,10 +209,22 @@ def verdict(summary):
 
 
 def relay_url(value):
-    """argparse type: a http(s) base URL, so a typo cannot become a file or ftp fetch."""
+    """argparse type: a BARE http(s) base, so a typo cannot become a file or ftp fetch
+    and cannot quietly redirect every request.
+
+    Every endpoint is built as `base + "/status"`, so a base that already carries a path
+    or a query hits something else entirely: `http://host/?x=` requests `/` and the soak
+    then judges whatever that page says. Credentials are refused because the base is
+    written verbatim into the run's JSONL start record, which lands in `runtime/`."""
     parts = urllib.parse.urlparse(value)
     if parts.scheme not in ("http", "https") or not parts.netloc:
         raise argparse.ArgumentTypeError(f"not an http(s) URL: {value!r}")
+    if parts.path.strip("/") or parts.params or parts.query or parts.fragment:
+        raise argparse.ArgumentTypeError(
+            f"give the relay's base only, no path or query: {value!r}")
+    if parts.username or parts.password:
+        raise argparse.ArgumentTypeError(
+            f"credentials in the URL would be written to the recording: {value!r}")
     return value.rstrip("/")
 
 
