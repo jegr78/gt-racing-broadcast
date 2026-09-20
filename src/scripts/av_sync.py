@@ -112,7 +112,8 @@ def record(state, event, now, serving_age_s, window_s=RESTART_WINDOW_S):
     expected = serving_age_s is not None and serving_age_s <= window_s
     f = state["feeds"].setdefault(
         feed, {"repairs": 0, "unexplained": 0, "last_ms": None,
-               "last_ts": None, "last_at": None, "last_unexplained_ts": None})
+               "last_ts": None, "last_at": None, "last_unexplained_ts": None,
+               "last_unexplained_ms": None})
     f["repairs"] += 1
     f["last_ms"] = event.get("ms")
     f["last_ts"] = now
@@ -120,6 +121,11 @@ def record(state, event, now, serving_age_s, window_s=RESTART_WINDOW_S):
     if not expected:
         f["unexplained"] += 1
         f["last_unexplained_ts"] = now
+        # Kept apart from last_ms on purpose. Live on the producer host the reason
+        # read "broke by 997 ms" for an unexplained repair that had been 987 ms; the
+        # 997 belonged to a LATER, expected one. Naming another event's magnitude is
+        # the mis-attribution this detector exists to avoid.
+        f["last_unexplained_ms"] = event.get("ms")
     return state
 
 
@@ -144,5 +150,5 @@ def health_fact(state, now, hold_s=HEALTH_HOLD_S):
     for feed, f in state["feeds"].items():
         ts = f.get("last_unexplained_ts")
         if ts is not None and (now - ts) <= hold_s:
-            out[feed] = f["last_ms"]
+            out[feed] = f.get("last_unexplained_ms")
     return out

@@ -147,6 +147,25 @@ def t_only_an_unexplained_repair_becomes_a_health_fact():
     assert av.health_fact(st, now=1105.0) == {"A": 5415.66}
 
 
+def t_the_health_fact_reports_the_unexplained_repair_not_the_latest_one():
+    # Seen live on the producer host 2026-09-20: the reason read "broke by 997 ms" while
+    # the UNEXPLAINED repair had been 987 ms — the 997 belonged to a later, expected one.
+    # Naming another event's magnitude is exactly the mis-attribution this whole detector
+    # exists to avoid.
+    st = av.new_state()
+    st = av.record(st, {"at": "23:49:03.732", "kind": "audio_repair",
+                        "source": "Feed A", "ms": 987.3},
+                   now=1000.0, serving_age_s=600.0)          # unexplained
+    st = av.record(st, {"at": "23:49:55.528", "kind": "audio_repair",
+                        "source": "Feed A", "ms": 996.79},
+                   now=1052.0, serving_age_s=22.0)           # expected, right after a restart
+    assert st["feeds"]["A"] == {"repairs": 2, "unexplained": 1, "last_ms": 996.79,
+                                "last_ts": 1052.0, "last_at": "23:49:55.528",
+                                "last_unexplained_ts": 1000.0,
+                                "last_unexplained_ms": 987.3}
+    assert av.health_fact(st, now=1060.0) == {"A": 987.3}
+
+
 def t_the_health_fact_ages_out_so_one_blip_does_not_stay_yellow_all_event():
     st = av.record(av.new_state(), av.parse_obs_log_line(REPAIR),
                    now=1000.0, serving_age_s=600.0)
