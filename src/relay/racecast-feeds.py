@@ -266,6 +266,15 @@ def streamlink_twitch_flags(tier):
     return STREAMLINK_TWITCH_ROBUST if tier in ("robust", "emergency") else STREAMLINK_TWITCH
 
 
+def serve_flags(platform, tier):
+    """The streamlink buffer/live-edge flags a serve actually runs with. THE one place
+    that decides it: both command builders and the rejoin's prefetch wait read it here,
+    so a new platform or tier can never hand the command one answer and the wait
+    another — and the wait's drift would be silent, since a wrong wait produces a
+    backlog rather than an error. Pure -> unit-tested."""
+    return streamlink_twitch_flags(tier) if platform == "twitch" else streamlink_serve_flags(tier)
+
+
 def parse_quality_tier(value):
     """Normalise an operator-supplied tier to one of full|robust|emergency|auto, else
     None (so the endpoint can 400). `auto` = release a manual pin. Pure → unit-tested."""
@@ -3563,13 +3572,12 @@ def streamlink_serve_cmd(target, port, platform="youtube", twitch_token=None,
     User-Agent (always) and the cookies file (when present) — or YouTube 403s a
     protected live manifest (#345). Twitch resolves in-process and gets neither."""
     base = ["streamlink", "--player-external-http", "--player-external-http-port", str(port)]
+    base += serve_flags(platform, tier)
     if platform == "twitch":
-        base += streamlink_twitch_flags(tier)
         if twitch_token:
             base += ["--twitch-api-header", f"Authorization=OAuth {twitch_token}"]
         selector = quality_twitch_selector(tier)
     else:
-        base += streamlink_serve_flags(tier)
         base += queue_deadline_args(_streamlink_help())   # version-safe: renamed in streamlink 8.1.0
         if user_agent:
             base += ["--http-header", f"User-Agent={user_agent}"]
@@ -3586,13 +3594,12 @@ def streamlink_fanout_cmd(target, platform="youtube", twitch_token=None,
     re-serves to many consumers) instead of --player-external-http. `--` guards
     the positional URL/stream."""
     base = ["streamlink", "--stdout"]
+    base += serve_flags(platform, tier)
     if platform == "twitch":
-        base += streamlink_twitch_flags(tier)
         if twitch_token:
             base += ["--twitch-api-header", f"Authorization=OAuth {twitch_token}"]
         selector = quality_twitch_selector(tier)
     else:
-        base += streamlink_serve_flags(tier)
         base += queue_deadline_args(_streamlink_help())   # version-safe: renamed in streamlink 8.1.0
         if user_agent:
             base += ["--http-header", f"User-Agent={user_agent}"]
@@ -6861,7 +6868,12 @@ class Feed:
         if not should_obs_reconnect(self.ring is not None, self.dropped,
                                     self.consumer_attached()):
             return None
-        prebuffer = getattr(self.fanout_server, "prebuffer_s", 0.0)
+        # consumer_attached() already proved the server exists; the default only covers
+        # a test double. It mirrors the relay's own default rather than 0, because 0 is
+        # the single value that makes the derived wait WRONG instead of conservative.
+        prebuffer = getattr(self.fanout_server, "prebuffer_s", None)
+        if prebuffer is None:
+            prebuffer = health_store.DEFAULT_FEED_PREBUFFER_S
         land_s = prefetch_land_s(live_edge_segments(flags), prebuffer)
         return lambda: self._obs_rejoin_after_prefetch(land_s)
 
@@ -7015,13 +7027,11 @@ class Feed:
                 # single-feed /next (#614). Not on the first serve, not on the ping-pong
                 # handover: there OBS has already dropped the off-air feed.
                 tool = "ffmpeg" if local_cmd else "streamlink"
-                # The rejoin's wait comes from THIS serve's prefetch size, so a tier
-                # switch changes it without a second place to keep in sync. A local
-                # capture serve has no streamlink flags and therefore no wait.
-                _flags = [] if local_cmd else (
-                    streamlink_twitch_flags(self.quality_tier)
-                    if serve_platform == "twitch"
-                    else streamlink_serve_flags(self.quality_tier))
+                # The rejoin's wait comes from THIS serve's prefetch size, read from the
+                # same serve_flags() the command builder uses — one place, so a tier or
+                # platform change can never move the command without moving the wait. A
+                # local capture serve has no streamlink flags and therefore no wait.
+                _flags = [] if local_cmd else serve_flags(serve_platform, self.quality_tier)
                 _recover = self._obs_rejoin_hook(_flags)
                 try:
                     serve_elapsed, serve_rc = self._serve_fanout(

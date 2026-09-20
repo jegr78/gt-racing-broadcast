@@ -535,7 +535,10 @@ def _rejoin_after_prefetch(relay, feed, sleep, tier_flags, prebuffer_s):
 
 def _measure_tier(relay, session, feed, tier, input_name, *, clock, sleep, window_s,
                   settle_s, sample_every_s, serving_timeout_s, progress,
-                  tier_flags=(), prebuffer_s=DEFAULT_PREBUFFER_S):
+                  tier_flags, prebuffer_s):
+    # tier_flags and prebuffer_s are REQUIRED: defaulting them would silently drop the
+    # rejoin's wait to zero, which looks like a clean run and measures a self-inflicted
+    # backlog instead.
     progress(f"Feed {feed} → {tier.upper()}: reconnecting …")
     # Clock the switch BEFORE the request: the relay may restart the serve before its
     # reply arrives, and that serve must still count as the one after the switch.
@@ -587,7 +590,12 @@ def run(relay, session, runtime_dir, *, flags, scene="Stint", window_s=DEFAULT_W
     # The rejoin wait is derived per tier from these (#614), so they are needed before
     # the loop, not only for the robust_extra_segments record at the end.
     tier_flags = dict(zip(TIERS, flags.get(platform, ([], [])), strict=False))
-    prebuffer_s = status.get("feed_prebuffer_s") or DEFAULT_PREBUFFER_S
+    # NOT `or`: RACECAST_FEED_PREBUFFER_S=0 is a documented value (".env.example": "=0
+    # restores the live-edge serve"), and 0.0 is falsy — `or` would silently wait 3 s
+    # too long against exactly the relay that turned the reserve off.
+    prebuffer_s = status.get("feed_prebuffer_s")
+    if not isinstance(prebuffer_s, (int, float)) or isinstance(prebuffer_s, bool):
+        prebuffer_s = DEFAULT_PREBUFFER_S
     settle_s = max(settle_s, MIN_SETTLE_S)
     interrupted = False
     try:

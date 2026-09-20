@@ -26,11 +26,16 @@ Refuses to run while a relay is up: a second puller on the same source is how a
 YouTube 429 starts. Exit 0 on a measurement, 2 on a setup error.
 """
 import argparse
+import ast
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
+import urllib.parse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -49,32 +54,76 @@ FLAGS = {
 RELAY_SRC = os.path.join(ROOT, "src", "relay", "racecast-feeds.py")
 
 
+def live_edge_of(flags):
+    """The --hls-live-edge value in a flag list, or None. Mirrors the relay's
+    live_edge_segments; the burst size is the only mirrored value that changes the
+    measurement, so it is what the drift check compares."""
+    try:
+        return int(flags[flags.index("--hls-live-edge") + 1])
+    except (ValueError, IndexError, TypeError):
+        return None
+
+
 def check_flags_match_relay():
-    """Fail loudly if the mirrored flags drifted from the relay's constants."""
+    """Fail loudly if the mirrored flags drifted from the relay's constants.
+
+    Compares the PARSED --hls-live-edge value, not substrings. A substring test is
+    useless here: `"4" in 'STREAMLINK_SERVE = [..., "64M", "--hls-live-edge", "4"]'` is
+    already satisfied by the "64M", so a drift from 4 to 9 would pass unnoticed — and
+    the relay's SEGMENT_FETCH_BUDGET_S is derived from this script's output.
+    """
     try:
         with open(RELAY_SRC, encoding="utf-8") as fh:
             src = fh.read()
     except OSError as exc:
         return [f"could not read {RELAY_SRC} ({exc})"]
+    # Each relay constant, and the FLAGS key it is mirrored into. The robust Twitch set
+    # is wrapped over two source lines, so the whole assignment is read, not one line.
     want = {
-        "STREAMLINK_SERVE = ": FLAGS[("youtube", "full")],
-        "STREAMLINK_SERVE_ROBUST = ": FLAGS[("youtube", "robust")],
-        "STREAMLINK_TWITCH = ": FLAGS[("twitch", "full")],
+        "STREAMLINK_SERVE": ("youtube", "full"),
+        "STREAMLINK_SERVE_ROBUST": ("youtube", "robust"),
+        "STREAMLINK_TWITCH": ("twitch", "full"),
+        "STREAMLINK_TWITCH_ROBUST": ("twitch", "robust"),
     }
     bad = []
-    for marker, flags in want.items():
-        line = next((ln for ln in src.splitlines() if ln.startswith(marker)), None)
-        if line is None:
-            bad.append(f"{marker.strip(' =')} not found in the relay")
+    for name, key in want.items():
+        m = re.search(rf"^{name} = (\[.*?\])", src, re.MULTILINE | re.DOTALL)
+        if m is None:
+            bad.append(f"{name} not found in the relay")
             continue
-        for f in flags:
-            if f not in line:
-                bad.append(f"{marker.strip(' =')} no longer contains {f!r}: {line.strip()}")
+        try:
+            relay_flags = ast.literal_eval(m.group(1))
+        except (ValueError, SyntaxError) as exc:
+            bad.append(f"{name} could not be parsed ({exc})")
+            continue
+        mine, theirs = live_edge_of(FLAGS[key]), live_edge_of(relay_flags)
+        if mine != theirs:
+            bad.append(f"{name}: the relay serves --hls-live-edge {theirs}, this probe "
+                       f"mirrors {mine}")
+        if FLAGS[key] != relay_flags:
+            bad.append(f"{name} drifted: relay {relay_flags}, probe {FLAGS[key]}")
     return bad
 
 
 def platform_of(url):
-    return "twitch" if "twitch.tv" in url else "youtube"
+    """Platform by HOST, not by substring — the relay does the same (is_channel /
+    _is_stream_url). `"twitch.tv" in url` would also match a query string or a value
+    crafted to look like a flag."""
+    host = (urllib.parse.urlparse(url).hostname or "").lower()
+    if host == "twitch.tv" or host.endswith(".twitch.tv"):
+        return "twitch"
+    return "youtube"
+
+
+def https_url(value):
+    """argparse type: accept only an https URL with a host. The probe hands this value
+    to streamlink as a POSITIONAL, where a leading '-' would become an option and
+    streamlink has options that run programs (--player, --ffmpeg-ffmpeg). Self-injection
+    only, but the guard is one line and matches the relay's `--` convention."""
+    u = urllib.parse.urlparse(value)
+    if u.scheme != "https" or not u.hostname:
+        raise argparse.ArgumentTypeError(f"expected an https:// URL with a host, got {value!r}")
+    return value
 
 
 def resolve(url, platform, cookies=None):
@@ -97,7 +146,8 @@ def resolve(url, platform, cookies=None):
 
 def measure(target, platform, tier, gap_s, max_s):
     """One run: timestamp stdout chunks, return (burst_span_s, burst_bytes, gaps)."""
-    cmd = ["streamlink", *FLAGS[(platform, tier)], "--stdout", target, "best"]
+    # `--` before the positional, the same guard streamlink_fanout_cmd uses.
+    cmd = ["streamlink", *FLAGS[(platform, tier)], "--stdout", "--", target, "best"]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     first = None
     prev = None
@@ -139,14 +189,17 @@ def measure(target, platform, tier, gap_s, max_s):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--url", required=True, help="a LIVE YouTube or Twitch URL")
+    ap.add_argument("--url", required=True, type=https_url,
+                    help="a LIVE YouTube or Twitch URL (https only)")
     ap.add_argument("--tier", default="full", choices=("full", "robust"))
     ap.add_argument("--runs", type=int, default=3, help="repeat the measurement N times")
     ap.add_argument("--gap", type=float, default=0.5,
                     help="inter-arrival gap (s) that ends the burst (default 0.5)")
     ap.add_argument("--max-s", type=float, default=45.0, help="seconds to observe per run")
-    ap.add_argument("--cookies", help="COPY of the yt-cookies.txt jar (YouTube needs it "
-                                      "for a muxed live rendition; never pass the relay's own file)")
+    ap.add_argument("--cookies", help="path to the yt-cookies.txt jar (YouTube needs it "
+                                      "for a muxed live rendition). The probe works on a "
+                                      "temporary COPY, so the relay's own jar is never "
+                                      "rewritten by yt-dlp.")
     ap.add_argument("--json", action="store_true", help="machine-readable result")
     args = ap.parse_args()
 
@@ -164,10 +217,27 @@ def main():
         return 2
 
     platform = platform_of(args.url)
-    target, err = resolve(args.url, platform, args.cookies)
-    if target is None:
-        print(f"ERROR: could not resolve {args.url}: {err}", file=sys.stderr)
-        return 2
+    # yt-dlp REWRITES the jar it is handed, so it never gets the real one: a probe run
+    # must not be able to log the relay's live session out. Copied into a private temp
+    # dir and discarded afterwards.
+    with tempfile.TemporaryDirectory(prefix="racecast-probe-") as tmp:
+        jar = None
+        if args.cookies:
+            jar = os.path.join(tmp, "cookies.txt")
+            try:
+                shutil.copy2(args.cookies, jar)
+                os.chmod(jar, 0o600)
+            except OSError as exc:
+                print(f"ERROR: could not copy the cookie jar ({exc})", file=sys.stderr)
+                return 2
+        target, err = resolve(args.url, platform, jar)
+        if target is None:
+            print(f"ERROR: could not resolve {args.url}: {err}", file=sys.stderr)
+            return 2
+        return _run_measurements(args, platform, target)
+
+
+def _run_measurements(args, platform, target):
 
     results = []
     for i in range(args.runs):

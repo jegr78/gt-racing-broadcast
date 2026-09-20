@@ -521,6 +521,32 @@ def t_run_rejoins_obs_after_each_switch_once_the_prefetch_has_landed():
     assert waits[1] > waits[0]
 
 
+def t_prefetch_wait_rule_has_not_drifted_from_the_relay():
+    # prefetch_land_s and its budget exist twice (relay + benchmark) so the benchmark
+    # stays importable on its own. A "keep in sync" comment is not a guard — the repo
+    # pins duplicated logic with a source comparison (tests/test_streams.py), and the
+    # two tools waiting different spans is exactly the divergence #614 closed.
+    import importlib.util, inspect
+    spec = importlib.util.spec_from_file_location(
+        "feeds_x", os.path.join(ROOT, "src", "relay", "racecast-feeds.py"))
+    feeds_x = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(feeds_x)
+    assert m.SEGMENT_FETCH_BUDGET_S == feeds_x.SEGMENT_FETCH_BUDGET_S
+    assert m.DEFAULT_PREBUFFER_S == feeds_x.health_store.DEFAULT_FEED_PREBUFFER_S
+    # Same rule, checked by behaviour rather than by text: the benchmark's copy carries
+    # a default the relay's does not, so the sources legitimately differ.
+    for segments in (0, 1, 2, 4, 6):
+        for prebuffer in (0.0, 3.0, 8.0):
+            assert m.prefetch_land_s(segments, prebuffer) == \
+                feeds_x.prefetch_land_s(segments, prebuffer), (segments, prebuffer)
+    assert m.prefetch_land_s(None, 3.0) == feeds_x.prefetch_land_s(0, 3.0)
+    # And the burst size is read the same way out of a flag list.
+    for flags in (FULL_FLAGS, ROBUST_FLAGS, [], ["--hls-live-edge"], ["--hls-live-edge", "x"]):
+        assert (m.live_edge_segments(flags) or 0) == feeds_x.live_edge_segments(flags), flags
+    assert inspect.signature(feeds_x.prefetch_land_s).parameters["prebuffer_s"].default \
+        is inspect.Parameter.empty, "the relay's copy must keep prebuffer_s required"
+
+
 def t_flags_for_tier_mirrors_the_relays_profile_rule():
     # The restore path hands back the feed's ORIGINAL tier, which is usually "auto".
     # Resolving that to no flags would silently skip the wait on the last rejoin.

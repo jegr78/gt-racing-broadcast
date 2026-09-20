@@ -1558,16 +1558,18 @@ def t_obs_rejoin_hook_covers_the_director_restart_paths():
     f.ring = m.FeedRing(4096)                    # fan-out: the relay owns the socket
     f.fanout_server = _Srv(0.0)                  # OBS is reading this feed
     f.dropped = False
-    assert f._obs_rejoin_hook("streamlink") is not None  # /reload, tier change, solo /next
+    # Flag LISTS, not a tool name: a string would fall through live_edge_segments'
+    # swallowed ValueError to a zero wait and quietly test a degenerate path.
+    assert f._obs_rejoin_hook(m.STREAMLINK_SERVE) is not None  # /reload, tier, solo /next
     f.fanout_server = _Srv(None)                 # off-air feed, OBS dropped it
-    assert f._obs_rejoin_hook("streamlink") is None      # ping-pong handover stays seamless
+    assert f._obs_rejoin_hook(m.STREAMLINK_SERVE) is None      # handover stays seamless
     f.dropped = True
-    assert f._obs_rejoin_hook("streamlink") is not None  # drop-recovery, unchanged
+    assert f._obs_rejoin_hook(m.STREAMLINK_SERVE) is not None  # drop-recovery, unchanged
     # Direct-serve (no ring): OBS holds the socket to streamlink and reconnects itself —
     # rebuilding its input there would be a flicker for nothing.
     f.ring = None
     f.fanout_server = _Srv(0.0)
-    assert f._obs_rejoin_hook("streamlink") is None
+    assert f._obs_rejoin_hook(m.STREAMLINK_SERVE) is None
 
 
 def t_serve_fanout_bumps_the_generation_a_stale_rejoin_compares():
@@ -1623,6 +1625,39 @@ def t_prefetch_land_s_is_derived_from_the_burst_and_the_prebuffer():
     assert m.prefetch_land_s(-1, 3.0) == 0.0
     # The measured worst case must fit inside the budget it was rounded up from.
     assert 4.96 / 6 <= m.SEGMENT_FETCH_BUDGET_S
+
+
+def t_serve_flags_is_the_single_source_for_a_serves_flags():
+    # One place decides which flag set a serve runs with. Before this, the two command
+    # builders and the rejoin's wait each branched on the platform themselves, and only
+    # the wait's drift would have been silent (a wrong wait makes backlog, not an error).
+    assert m.serve_flags("youtube", "full") == m.STREAMLINK_SERVE
+    assert m.serve_flags("youtube", "robust") == m.STREAMLINK_SERVE_ROBUST
+    assert m.serve_flags("youtube", "emergency") == m.STREAMLINK_SERVE_ROBUST
+    assert m.serve_flags("twitch", "full") == m.STREAMLINK_TWITCH
+    assert m.serve_flags("twitch", "robust") == m.STREAMLINK_TWITCH_ROBUST
+    # Both command builders must carry exactly what serve_flags says, or the wait the
+    # rejoin derives describes a different serve than the one that is running.
+    for platform, tier in (("youtube", "full"), ("youtube", "robust"),
+                           ("twitch", "full"), ("twitch", "robust")):
+        want = m.serve_flags(platform, tier)
+        fan = m.streamlink_fanout_cmd("t", platform, tier=tier)
+        srv = m.streamlink_serve_cmd("t", 53001, platform, tier=tier)
+        for cmd, name in ((fan, "fanout"), (srv, "serve")):
+            for flag in want:
+                assert flag in cmd, (name, platform, tier, flag)
+            assert m.live_edge_segments(cmd) == m.live_edge_segments(want), (name, platform, tier)
+
+
+def t_status_publishes_the_prebuffer_the_benchmark_derives_from():
+    # `racecast obs benchmark` reads feed_prebuffer_s off /status to compute the same
+    # rejoin wait as the relay. Without this assert the field could vanish, every test
+    # would stay green, and the benchmark would silently fall back to the default.
+    r = _relay(["s1", "s2"])
+    st = r.status()
+    assert "feed_prebuffer_s" in st, sorted(st)
+    assert st["feed_prebuffer_s"] == r.feed_prebuffer_s
+    assert isinstance(st["feed_prebuffer_s"], (int, float))
 
 
 def t_live_edge_segments_reads_the_relays_own_serve_flags():
