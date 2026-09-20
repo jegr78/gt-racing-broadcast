@@ -324,6 +324,55 @@ def t_planned_restarts_counts_only_the_windows_a_run_can_watch_out():
     assert m.planned_restarts(1.0, 0) == 0
 
 
+def t_next_restart_is_on_the_clock_the_loop_reads_not_the_recorded_offset():
+    # A restart is RECORDED relative to t0 so a recording can be replayed; the loop
+    # GATES on the raw monotonic clock. Adding the interval to the relative value gave
+    # a number near 1800 while the clock read six figures, so every following sample was
+    # overdue: a one-hour soak fired 257 restarts, one per sample, instead of three.
+    # Measured on the live run of 2026-09-20 before the fix.
+    t0 = 918_273.4                      # what time.monotonic() actually looks like
+    assert m.next_restart_at(t0, 901.0, 900.0) == t0 + 1801.0
+    # The trap: at t0 = 0 the buggy form and the correct one agree, so a test anchored
+    # there passes on both. This asserts they DISAGREE off zero.
+    assert m.next_restart_at(t0, 901.0, 900.0) != 901.0 + 900.0
+
+
+def t_the_driver_fires_one_restart_per_interval_not_one_per_sample():
+    # The loop itself was never exercised, which is how the unit mix-up shipped. Drive
+    # it with a fake clock and relay, and count. This is the regression that fails if
+    # next_restart is ever compared against the wrong clock again.
+    import importlib.util, json, tempfile
+    spec = importlib.util.spec_from_file_location(
+        "soak_driver", os.path.join(ROOT, "tools", "relay-restart-soak.py"))
+    drv = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(drv)
+
+    now = [918_273.4]                   # a realistic monotonic origin, never 0
+    reloads = []
+
+    def fake_get(base, path, timeout=8.0):
+        if path.startswith("/reload"):
+            reloads.append(now[0]); return {"ok": True}, None
+        return ({"feed_prebuffer_s": 3.0, "live": {"feed": "A"},
+                 "feeds": {"A": {"state": "serving", "backlog_s": 3.0,
+                                 "consumer_snaps": 0, "state_age_s": 42.0}}}, None)
+
+    drv.get_json = fake_get
+    with tempfile.TemporaryDirectory() as d:
+        out = os.path.join(d, "soak.jsonl")
+        drv.run("http://127.0.0.1:8088", 1.0, 15.0, 10.0, out,
+                clock=lambda: now[0],
+                sleep=lambda s: now.__setitem__(0, now[0] + s),
+                progress=lambda _m: None)
+        with open(out, encoding="utf-8") as fh:
+            rows = [json.loads(l) for l in fh if l.strip()]
+    events = [r for r in rows if r.get("event") == "restart"]
+    assert len(reloads) == 3, f"{len(reloads)} reloads in one hour at a 15 min cadence"
+    assert len(events) == 3, events
+    gaps = [b["t"] - a["t"] for a, b in zip(events, events[1:], strict=False)]
+    assert all(890 <= g <= 910 for g in gaps), gaps
+
+
 if __name__ == "__main__":
     for name, fn in sorted(list(globals().items())):
         if name.startswith("t_") and callable(fn):

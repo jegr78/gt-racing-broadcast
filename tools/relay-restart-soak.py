@@ -157,7 +157,9 @@ def run(base, hours, every_min, sample_every_s, out_path, feed=None,
                 fh.flush()
                 progress(f"  t+{at:6.0f}s  restart {len(restarts)} on {hit}"
                          + (f" (failed: {rwhy})" if rwhy else ""))
-                next_restart = at + every_min * 60.0
+                # t0 + at, not at: `at` is relative to the run, the gate above
+                # reads the raw clock. See analysis.next_restart_at.
+                next_restart = analysis.next_restart_at(t0, at, every_min * 60.0)
             sleep(sample_every_s)
 
     return report(samples, restarts, reserve, out_path, progress=progress)

@@ -217,6 +217,21 @@ def relay_url(value):
 
 
 
+def next_restart_at(t0, at_relative, every_s):
+    """When the NEXT restart is due, on the same clock the loop compares against.
+
+    This exists as a named function because the two quantities look alike and are not:
+    a restart is recorded RELATIVE to `t0` (so a recording replays), while the loop
+    gates on the raw monotonic clock. Adding the interval to the relative value once
+    produced a number near 1800 while the clock read six figures, so every following
+    sample was overdue: a one-hour soak fired 257 restarts, one per sample, instead of
+    three. The run still looked plausible until the restart list was read.
+
+    A test that starts its fake clock at 0 cannot catch that, because both readings
+    agree there. Pin the unit here instead. Pure."""
+    return t0 + at_relative + every_s
+
+
 def reload_path(feed):
     """The /reload route for one feed, with the name quoted.
 
