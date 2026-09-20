@@ -7290,6 +7290,7 @@ class Relay:
         self._stall_signal = feed_stall_signal_enabled(os.environ)   # #535
         self._stall_floor = feed_stall_floor_s(os.environ)           # #535
         self._interval_max_gaps = {}      # #535: last heartbeat's per-feed max inbound gap
+        self._served_max_gaps = {}        # #619: same, but None where nothing measured it
         self._jittery_feeds = []          # #535: feeds whose last-interval gap tripped the signal
         self._backlog_warn_s = feed_backlog_warn_s(os.environ)      # #583
         self._interval_backlogs = {}      # #583: last heartbeat's per-feed consumer backlog floor
@@ -7581,17 +7582,7 @@ class Relay:
             now = time.time()
             self._maybe_probe_obs(now)
             self._sample_connectivity()
-            # #535: read+reset each feed's interval max gap ONCE per tick (the
-            # 2 s /status poll must never steal the reset), classify jitter.
-            gaps, jittery = {}, []
-            for _nm, _f in self.feeds.items():
-                g = _f.take_max_inbound_gap()
-                gaps[_nm] = g
-                if (self._stall_signal and not _f.paused and _f.phase == "serving"
-                        and feed_inbound_degraded(g, self.feed_prebuffer_s, self._stall_floor)):
-                    jittery.append(_nm)
-            self._interval_max_gaps = gaps
-            self._jittery_feeds = jittery
+            self._sample_inbound_gaps()
             self._sample_consumer_backlogs()
             h = self._refresh_health(now)
             if self.health_store is not None:
@@ -7611,6 +7602,36 @@ class Relay:
             self._record_render_counts()
             self._record_consumer_overflows(now)
             self._hb_stop.wait(HEARTBEAT_INTERVAL_S)
+
+    def _sample_inbound_gaps(self):
+        """#535: read+reset each feed's interval max gap ONCE per heartbeat (the 2 s
+        /status poll must never steal the reset), and classify jitter.
+
+        Two maps come out of it, because two readers want different things:
+        `_interval_max_gaps` is the raw accumulator value and goes to health-history.db
+        unchanged, while `_served_max_gaps` (#619) is what /status may publish and is
+        None for an interval in which nothing could have measured anything. The
+        accumulator only advances inside the fan-out read loop, so an idle feed, or any
+        feed under RACECAST_FEED_FANOUT=0, reads 0.0. Publishing that would say "the
+        source never stuttered" about a feed nobody measured, and it would survive a
+        whole heartbeat after the feed goes on air.
+
+        A feed is judged by its state at the tick, which is the same approximation
+        _sample_consumer_backlogs makes: a feed that stopped just before the tick loses
+        its last reading, and one that started mid-interval publishes a partial one."""
+        gaps, served, jittery = {}, {}, []
+        for name, f in self.feeds.items():
+            g = f.take_max_inbound_gap()   # always take: a stopped feed resets too
+            gaps[name] = g
+            measured = (not f.paused and f.phase == "serving"
+                        and getattr(f, "fanout_server", None) is not None)
+            served[name] = g if measured else None
+            if (self._stall_signal and not f.paused and f.phase == "serving"
+                    and feed_inbound_degraded(g, self.feed_prebuffer_s, self._stall_floor)):
+                jittery.append(name)
+        self._interval_max_gaps = gaps
+        self._served_max_gaps = served
+        self._jittery_feeds = jittery
 
     def _sample_consumer_backlogs(self):
         """#583: read+reset each fan-out server's interval backlog floor ONCE per heartbeat
@@ -7640,8 +7661,9 @@ class Relay:
         what a RESET would discard (#587), from the same live value. Only a serving feed
         has a live edge to be behind; a stopped or connecting one reports None."""
         srv = getattr(f, "fanout_server", None)
+        serving = srv is not None and not f.paused and f.phase == "serving"
         live = None
-        if srv is not None and not f.paused and f.phase == "serving":
+        if serving:
             try:
                 live = srv.consumer_backlog(time.monotonic())
             except Exception:                   # noqa: BLE001 — best-effort
@@ -7658,7 +7680,29 @@ class Relay:
                 "reset_discards_s": reset_discards_s(live, self.feed_prebuffer_s),
                 # #614: cumulative cursor snaps of the attached consumers (the ring lapped
                 # them); `obs benchmark` marks a window with new snaps as contaminated
-                "consumer_snaps": snaps}
+                "consumer_snaps": snaps,
+                # #619: the inbound side of the same interval (#535). This is the
+                # largest gap between bytes arriving from the source. With backlog_s and
+                # consumer_snaps, `obs benchmark` can tell a bursty source from a
+                # consumer that fell behind, through one scripted restart.
+                #
+                # This reads the heartbeat's last value, never take_max_inbound_gap().
+                # That call resets the accumulator, so a 2 s /status poll would swallow
+                # the interval the heartbeat is about to classify.
+                #
+                # Gated on `serving`, NOT on `live is not None` like backlog_s. The two
+                # differ by one thing: consumer_backlog() answers None while no consumer
+                # is attached, which is every OBS source rebuild, including the #614
+                # rejoin after a restart. The gap is measured on the SOURCE side by the
+                # fan-out read loop, so it stays valid while OBS is away, and blanking it
+                # there would hand `obs benchmark` a run of Nones at the start of a
+                # window. Its guard skips a LEADING run, so that run would let the
+                # pre-restart reading through as if measured in-window.
+                # `_served_max_gaps` (not `_interval_max_gaps`) already answers None for
+                # an interval nothing measured. POV is in neither map, because the
+                # heartbeat walks self.feeds (A and B only), so it reports None here too.
+                "inbound_max_gap_s": (self._served_max_gaps.get(name)
+                                      if serving else None)}
 
     def _current_render_skip_rate(self):
         """Per-interval OBS render-skip rate (0..1) from obs_stats vs the previous heartbeat's
