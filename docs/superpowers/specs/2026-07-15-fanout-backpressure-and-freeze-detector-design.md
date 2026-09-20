@@ -100,10 +100,15 @@ help a consumer that is chronically slower than real time. So:
   rate, an `obs_rebuild_stood_down` event, and no further rebuilds.
 - **Re-arm.** The next stint change (a new on-air feed or pull index) lifts the stand-down,
   and so does the Director Panel's RE-ARM (`POST /obs/rebuild-rearm`, director-gated).
-- **Scope.** The guard covers the consumer-side rebuild only. The drop-recovery re-serve
-  (`should_obs_reconnect`) answers a dead streamlink on the input side, repeats legitimately
-  and already pages on churn; the #493 step-down, auto-cover and auto-failover fire once
-  per outage.
+- **Scope.** The guard covers the consumer-side rebuild only. The re-serve rejoin
+  (`should_obs_reconnect`) answers a restart on the input side, repeats legitimately and
+  already pages on churn; the #493 step-down, auto-cover and auto-failover fire once per
+  outage. Since #614 that rejoin covers two cases, not one: a dead streamlink (`dropped`)
+  and any restart with a consumer still attached to the ring — the director's `/reload`
+  or tier change, and a `set_index` on the feed OBS is on air with, which includes the
+  solo and qualifying single-feed `/next`. The ping-pong handover is still excluded, for
+  the original reason: `close_when_inactive` means OBS has already dropped the off-air
+  feed, so there is no open demuxer to splice into and nothing to rebuild.
 
 ## Test strategy (TDD)
 

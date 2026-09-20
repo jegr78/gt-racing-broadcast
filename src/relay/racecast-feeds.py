@@ -689,13 +689,24 @@ def snap_bytes(prev_cursor, new_cursor, data_len):
     return skipped if skipped > 0 else 0
 
 
-def should_obs_reconnect(fanout, dropped):
+def should_obs_reconnect(fanout, dropped, consumer_attached=False):
     """Whether a re-serve should force OBS to reconnect its feed input. Only in fan-out
-    mode (the relay is the persistent server, so OBS's socket survives a streamlink
-    restart) AND only after a real DROP (streamlink died unexpectedly). A normal handover
-    (advance) is seamless by design and must NOT trigger a reconnect flicker; the first
+    mode — the relay is the persistent server, so OBS's socket survives a streamlink
+    restart and the fresh stream is spliced into a stale demuxer. Direct-serve needs
+    nothing: OBS holds the socket to streamlink itself and reconnects on its own.
+
+    Within fan-out, two cases splice and therefore rejoin:
+      * `dropped` — streamlink died unexpectedly (the original #537 drop-recovery);
+      * `consumer_attached` — a consumer was still reading this feed's ring when the
+        restart happened. That is the director's restart in place (`/reload`, a tier
+        change) and a `set_index` on a feed OBS is on air with, including the solo and
+        qualifying single-feed `/next` (#614). Before this, all three left `dropped`
+        False (they go through `_clear_drop_health`) and handed OBS no rejoin at all.
+
+    The ping-pong handover stays seamless: with `close_when_inactive` OBS has dropped
+    the off-air feed, so no consumer is attached and nothing is rebuilt. The first
     serve is already a fresh OBS connection. Pure → unit-tested."""
-    return bool(fanout and dropped)
+    return bool(fanout and (dropped or consumer_attached))
 
 
 def cursor_progress_ratio(prev_cursor_ms, cursor_ms, dt_s):
@@ -6710,30 +6721,57 @@ class Feed:
         stale demuxer → the ~1 Hz freeze-frame stutter (2026-07-10). Rebuilding just this
         feed's OBS input (SetInputSettings, the proven relay-stop primitive, scoped by
         port) drops OBS's socket so it re-joins at the fresh stream with a clean demuxer —
-        exactly what a direct-serve streamlink restart does for free. Best-effort +
-        synchronous; returns the rebuilt input names (for the log + tests)."""
+        exactly what a direct-serve streamlink restart does for free. Callers: the
+        re-serve hook (_obs_rejoin_hook), the freeze detector and the director's RESET.
+        Best-effort + synchronous; returns the rebuilt input names (for the log + tests)."""
         if _obs_ws is None:
             return []
         try:
             # #537: deliberately NOT routed through relay._obs — the Feed holds no
-            # facade reference (it is built before/independent of Relay), and this
-            # drop-recovery reconnect is rare, so it stays a connect-per-call site.
+            # facade reference (it is built before/independent of Relay), and a rejoin
+            # is rare (a drop, a director click, a stint change), so it stays a
+            # connect-per-call site.
             names, note = _obs_ws.release_feed_inputs(ports=[self.port])
             if names:
-                self.log.info("fan-out recovery on %s — rebuilt OBS input(s) %s so OBS "
+                self.log.info("fan-out rejoin on %s — rebuilt OBS input(s) %s so OBS "
                               "reconnects cleanly", self.name, ", ".join(names))
             elif note:
-                self.log.debug("fan-out recovery on %s — OBS reconnect skipped (%s)",
+                self.log.debug("fan-out rejoin on %s — OBS reconnect skipped (%s)",
                                self.name, note)
             return names
         except Exception as exc:              # noqa: BLE001 — best-effort, never crash the serve
-            self.log.debug("fan-out recovery on %s — OBS reconnect error (%s)", self.name, exc)
+            self.log.debug("fan-out rejoin on %s — OBS reconnect error (%s)", self.name, exc)
             return []
 
     def _obs_reconnect(self):
         """Threaded wrapper so the reconnect (an obs-websocket round-trip) never blocks
         the ring reader."""
         threading.Thread(target=self._obs_reconnect_now, daemon=True).start()
+
+    def consumer_attached(self):
+        """True when a consumer is reading this feed's fan-out ring right now (#614).
+        The HTTP fan-out port serves OBS only — the Director-Panel preview
+        (_PreviewRingTap) and the program-audio encoder read the ring object
+        in-process — so this answers "would a restart splice into OBS's open
+        demuxer?". The OBS socket survives the streamlink kill (the ring is not
+        closed, its read just blocks), so it is still counted between the two
+        serves. Best-effort: no fan-out server, or a server that cannot answer,
+        means no rejoin — today's behaviour."""
+        srv = self.fanout_server
+        if srv is None:
+            return False
+        try:
+            stuck, _snaps = srv.consumer_health(time.monotonic())
+        except Exception:      # noqa: BLE001 — a health read must never break the serve loop
+            return False
+        return stuck is not None
+
+    def _obs_rejoin_hook(self):
+        """The `on_first_byte` hook Feed.run hands the fan-out serve: `_obs_reconnect`
+        when this re-serve would splice into an open OBS demuxer, else None."""
+        return (self._obs_reconnect
+                if should_obs_reconnect(True, self.dropped, self.consumer_attached())
+                else None)
 
     def _serve_fanout(self, target, serve_platform, token, on_first_byte=None,
                       cmd=None, tool="streamlink"):
@@ -6877,11 +6915,13 @@ class Feed:
                 except Exception:      # noqa: BLE001 — best-effort telemetry
                     pass
             if self.ring is not None:
-                # A drop-recovery re-serve: force OBS to reconnect once the fresh stream
-                # flows, so it re-joins with a clean demuxer instead of splicing onto the
-                # stale one (the 2026-07-10 fan-out freeze-frame stutter). Not on the first
-                # serve or a seamless handover (should_obs_reconnect gates on self.dropped).
-                _recover = self._obs_reconnect if should_obs_reconnect(True, self.dropped) else None
+                # Force OBS to reconnect once the fresh stream flows, so it re-joins with a
+                # clean demuxer instead of splicing onto the stale one (the 2026-07-10
+                # fan-out freeze-frame stutter). Fires after a drop AND on any restart with
+                # a consumer still attached — the director's /reload or tier change, and a
+                # single-feed /next (#614). Not on the first serve, not on the ping-pong
+                # handover: there OBS has already dropped the off-air feed.
+                _recover = self._obs_rejoin_hook()
                 tool = "ffmpeg" if local_cmd else "streamlink"
                 try:
                     serve_elapsed, serve_rc = self._serve_fanout(

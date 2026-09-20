@@ -1508,13 +1508,56 @@ def t_latest_and_annotate_substitution():
         r.health_store.close()
 
 
-def t_should_obs_reconnect_only_on_fanout_drop():
-    # OBS reconnect fires ONLY in fan-out mode AND after a real drop — never on the
-    # first serve or a seamless handover (both have dropped=False).
+def t_should_obs_reconnect_on_fanout_drop_or_attached_consumer():
+    # OBS reconnect fires only in fan-out mode, and there on a real drop OR whenever a
+    # consumer is still attached to this feed's ring — a restart under an attached
+    # consumer splices the new stream into OBS's open demuxer (#614).
     assert m.should_obs_reconnect(True, True) is True       # fan-out + drop-recovery
-    assert m.should_obs_reconnect(True, False) is False     # fan-out, first serve / handover
+    assert m.should_obs_reconnect(True, False) is False     # fan-out, first serve / off-air handover
     assert m.should_obs_reconnect(False, True) is False     # direct-serve: OBS reconnects itself
     assert m.should_obs_reconnect(False, False) is False
+    # #614: a director restart in place (/reload, tier change) and a single-feed
+    # advance (solo/qualifying) leave dropped=False while OBS keeps reading.
+    assert m.should_obs_reconnect(True, False, True) is True
+    assert m.should_obs_reconnect(True, True, True) is True
+    # No consumer attached (the ping-pong's off-air feed) stays seamless.
+    assert m.should_obs_reconnect(True, False, False) is False
+    # Direct-serve never rebuilds: OBS owns the socket to streamlink itself.
+    assert m.should_obs_reconnect(False, False, True) is False
+    assert m.should_obs_reconnect(False, True, True) is False
+
+
+def t_feed_consumer_attached_reads_the_fanout_server():
+    # The gate above is fed from the feed's own FeedFanoutServer: consumer_health
+    # returns (None, 0) with nobody attached, and a send-block age once OBS reads.
+    f = m.Feed("A", 53001, 0, lambda: [], LOGDIR)
+    assert f.consumer_attached() is False        # direct-serve / not started: no server
+    class _Srv:
+        def __init__(self, stuck): self._stuck = stuck
+        def consumer_health(self, now): return self._stuck, 0
+    f.fanout_server = _Srv(None)
+    assert f.consumer_attached() is False        # fan-out up, OBS not reading
+    f.fanout_server = _Srv(0.0)
+    assert f.consumer_attached() is True         # a consumer just completed a read cycle
+    f.fanout_server = _Srv(12.5)
+    assert f.consumer_attached() is True         # a stuck consumer is still attached
+
+
+def t_obs_rejoin_hook_covers_the_director_restart_paths():
+    # The serve loop's on_first_byte hook, driven exactly as Feed.run drives it. A
+    # /reload or a tier change clears `dropped` (both call _clear_drop_health), so
+    # before #614 these restarts handed OBS no hook at all.
+    class _Srv:
+        def __init__(self, stuck): self._stuck = stuck
+        def consumer_health(self, now): return self._stuck, 0
+    f = m.Feed("A", 53001, 0, lambda: [], LOGDIR)
+    f.fanout_server = _Srv(0.0)                  # OBS is reading this feed
+    f.dropped = False
+    assert f._obs_rejoin_hook() == f._obs_reconnect      # /reload, tier change, solo /next
+    f.fanout_server = _Srv(None)                 # off-air feed, OBS dropped it
+    assert f._obs_rejoin_hook() is None                  # ping-pong handover stays seamless
+    f.dropped = True
+    assert f._obs_rejoin_hook() == f._obs_reconnect      # drop-recovery, unchanged
 
 
 def t_obs_reconnect_rebuilds_only_this_feeds_port():
