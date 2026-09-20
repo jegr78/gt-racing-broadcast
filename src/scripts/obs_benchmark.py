@@ -61,13 +61,19 @@ SERVING_TIMEOUT_S = 90         # a re-resolve plus reconnect; a live source take
 RECORD_STOP_TIMEOUT_S = 30
 TIERS = ("full", "robust")
 
-# After the new serve delivers its first bytes, how long until the HLS prefetch burst
-# has landed in the ring. streamlink fetches it in one go; a few seconds covers it.
-# Since #614 the relay waits the same span before rejoining OBS by itself
-# (`FEED_PREFETCH_LAND_S` in the relay) — keep the two in sync. The benchmark keeps
-# issuing its own reset: it needs to know exactly when the rejoin happened to time the
-# settle window, and the relay's is best-effort and fires only with OBS attached.
-PREFETCH_LAND_S = 5
+# How long to let the new serve's HLS prefetch burst land before rejoining OBS. The wait
+# is DERIVED, not tuned: the ring indexes bytes by ARRIVAL time and OBS rejoins
+# prebuffer_s behind the newest byte, so the join clears the burst only once the burst is
+# older than prebuffer_s — i.e. (segments x per-segment fetch budget) + prebuffer_s.
+#
+# A flat 5 s used to stand here and was measured wrong on 2026-09-20: a ROBUST burst
+# (--hls-live-edge 6) took up to 4.96 s to arrive, so with a 3 s prebuffer the rejoin
+# landed INSIDE the burst and the ROBUST windows of a #584 run could be sampling a
+# backlog the benchmark caused itself. Same rule and same budget as the relay's
+# `prefetch_land_s()`; keep the two in sync and re-measure with
+# tools/prefetch-burst-probe.py before changing the budget.
+SEGMENT_FETCH_BUDGET_S = 1.0
+DEFAULT_PREBUFFER_S = 3.0      # RACECAST_FEED_PREBUFFER_S's own default (#533)
 # The rejoin rebuilds the OBS input; OBS reconnects within a second or two. Sampling
 # before that would see the rebuild's cursor jump and mark every window disturbed.
 MIN_SETTLE_S = 3
@@ -500,15 +506,36 @@ def _record_finished(session, sleep, timeout_s):
     return True
 
 
-def _rejoin_after_prefetch(relay, feed, sleep):
+def flags_for_tier(tier_flags, tier):
+    """The streamlink flag list a quality tier actually serves with, mirroring the
+    relay's `streamlink_serve_flags`: ROBUST and EMERGENCY take the robust profile,
+    everything else (full, auto, unset) the full one. `tier_flags` maps "full"/"robust"
+    to their lists. Pure -> unit-tested."""
+    key = "robust" if tier in ("robust", "emergency") else "full"
+    return tier_flags.get(key, ())
+
+
+def prefetch_land_s(segments, prebuffer_s=DEFAULT_PREBUFFER_S,
+                    budget_s=SEGMENT_FETCH_BUDGET_S):
+    """Seconds to wait for a `segments`-segment HLS prefetch to age past the join mark.
+    0 when there is no burst to wait out. Pure -> unit-tested."""
+    if not segments or segments <= 0:
+        return 0.0
+    return segments * budget_s + max(0.0, prebuffer_s)
+
+
+def _rejoin_after_prefetch(relay, feed, sleep, tier_flags, prebuffer_s):
     """Let the new serve's HLS prefetch land, then reconnect OBS to the feed so it joins
-    at the live edge instead of playing the burst (#614)."""
-    sleep(PREFETCH_LAND_S)
+    near the live edge instead of playing the burst (#614). The wait follows the tier's
+    own `--hls-live-edge`, so ROBUST (6 segments) waits longer than FULL (4) instead of
+    sharing one number that fits neither."""
+    sleep(prefetch_land_s(live_edge_segments(tier_flags), prebuffer_s))
     relay.feed_reset(feed)
 
 
 def _measure_tier(relay, session, feed, tier, input_name, *, clock, sleep, window_s,
-                  settle_s, sample_every_s, serving_timeout_s, progress):
+                  settle_s, sample_every_s, serving_timeout_s, progress,
+                  tier_flags=(), prebuffer_s=DEFAULT_PREBUFFER_S):
     progress(f"Feed {feed} → {tier.upper()}: reconnecting …")
     # Clock the switch BEFORE the request: the relay may restart the serve before its
     # reply arrives, and that serve must still count as the one after the switch.
@@ -517,7 +544,7 @@ def _measure_tier(relay, session, feed, tier, input_name, *, clock, sleep, windo
     reconnect_s = _wait_serving(relay, feed, t_switch, clock, sleep, serving_timeout_s)
     progress(f"  serving again after {reconnect_s} s; rejoining OBS after the prefetch, "
              f"settling {settle_s} s, then sampling {window_s} s")
-    _rejoin_after_prefetch(relay, feed, sleep)
+    _rejoin_after_prefetch(relay, feed, sleep, tier_flags, prebuffer_s)
     sleep(settle_s)
     samples, t0 = [], clock()
     while True:
@@ -557,6 +584,10 @@ def run(relay, session, runtime_dir, *, flags, scene="Stint", window_s=DEFAULT_W
     cur = session.request("GetCurrentProgramScene", {}) or {}
     orig_scene = cur.get("currentProgramSceneName") or cur.get("sceneName")
     results, recording, out_path, started = {}, False, None, None
+    # The rejoin wait is derived per tier from these (#614), so they are needed before
+    # the loop, not only for the robust_extra_segments record at the end.
+    tier_flags = dict(zip(TIERS, flags.get(platform, ([], [])), strict=False))
+    prebuffer_s = status.get("feed_prebuffer_s") or DEFAULT_PREBUFFER_S
     settle_s = max(settle_s, MIN_SETTLE_S)
     interrupted = False
     try:
@@ -570,7 +601,8 @@ def run(relay, session, runtime_dir, *, flags, scene="Stint", window_s=DEFAULT_W
                 relay, session, feed, tier, input_name, clock=clock, sleep=sleep,
                 window_s=window_s,
                 settle_s=settle_s, sample_every_s=sample_every_s,
-                serving_timeout_s=serving_timeout_s, progress=progress)
+                serving_timeout_s=serving_timeout_s, progress=progress,
+                tier_flags=flags_for_tier(tier_flags, tier), prebuffer_s=prebuffer_s)
     except KeyboardInterrupt:
         interrupted = True
         raise
@@ -628,7 +660,11 @@ def run(relay, session, runtime_dir, *, flags, scene="Stint", window_s=DEFAULT_W
             # an interrupt here cannot keep the scene or the recording from coming back.
             try:
                 _wait_serving(relay, feed, restored_at, clock, sleep, serving_timeout_s)
-                _rejoin_after_prefetch(relay, feed, sleep)
+                # The restore puts the feed back on its ORIGINAL tier — often "auto",
+                # which serves with the full profile. Resolve it the way the relay does.
+                _rejoin_after_prefetch(
+                    relay, feed, sleep,
+                    flags_for_tier(tier_flags, orig.get("quality_tier")), prebuffer_s)
             except (Exception, KeyboardInterrupt) as exc:  # noqa: BLE001 — cleanup: report, go on
                 notes.append(f"Feed {feed} is back on its tier but OBS was not rejoined "
                              f"({exc.__class__.__name__}: {exc}) — press RESET for "
