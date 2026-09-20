@@ -512,9 +512,38 @@ def t_run_rejoins_obs_after_each_switch_once_the_prefetch_has_landed():
     with tempfile.TemporaryDirectory() as d:
         _run(d, clock, relay, sess)
     assert [tier for _, tier in relay.resets] == ["full", "robust", "auto"]
-    for (at, _tier), switch in zip(relay.resets, relay.switches, strict=True):
-        # reconnect (4 s) + prefetch landing: never before the new serve has delivered
-        assert at >= switch + 4.0 + m.PREFETCH_LAND_S, (at, switch)
+    waits = [m.prefetch_land_s(4), m.prefetch_land_s(6), m.prefetch_land_s(4)]
+    for (at, _tier), switch, wait in zip(relay.resets, relay.switches, waits, strict=True):
+        # reconnect (4 s) + this tier's prefetch landing: never before it has delivered
+        assert at >= switch + 4.0 + wait, (at, switch, wait)
+    # ROBUST prefetches two more segments, so its rejoin must wait strictly longer than
+    # FULL's. A single constant for both was measured ~3 s short for ROBUST (#614).
+    assert waits[1] > waits[0]
+
+
+def t_flags_for_tier_mirrors_the_relays_profile_rule():
+    # The restore path hands back the feed's ORIGINAL tier, which is usually "auto".
+    # Resolving that to no flags would silently skip the wait on the last rejoin.
+    tf = {"full": FULL_FLAGS, "robust": ROBUST_FLAGS}
+    assert m.flags_for_tier(tf, "full") == FULL_FLAGS
+    assert m.flags_for_tier(tf, "auto") == FULL_FLAGS
+    assert m.flags_for_tier(tf, None) == FULL_FLAGS
+    assert m.flags_for_tier(tf, "robust") == ROBUST_FLAGS
+    assert m.flags_for_tier(tf, "emergency") == ROBUST_FLAGS
+    assert m.flags_for_tier({}, "full") == ()
+
+
+def t_prefetch_land_s_scales_with_the_burst_and_the_prebuffer():
+    # Mirrors the relay's rule so the two tools cannot drift into different waits.
+    assert m.prefetch_land_s(4, 3.0) == 4 * m.SEGMENT_FETCH_BUDGET_S + 3.0
+    assert m.prefetch_land_s(6, 3.0) == 6 * m.SEGMENT_FETCH_BUDGET_S + 3.0
+    assert m.prefetch_land_s(6, 3.0) > m.prefetch_land_s(4, 3.0)
+    assert m.prefetch_land_s(4, 8.0) - m.prefetch_land_s(4, 3.0) == 5.0
+    assert m.prefetch_land_s(4) == m.prefetch_land_s(4, m.DEFAULT_PREBUFFER_S)
+    assert m.prefetch_land_s(0, 3.0) == 0.0
+    assert m.prefetch_land_s(None, 3.0) == 0.0       # live_edge_segments found no flag
+    # The measured ROBUST worst case must fit the budget it was rounded up from.
+    assert 4.96 / 6 <= m.SEGMENT_FETCH_BUDGET_S
 
 
 def t_run_samples_only_after_the_reconnect_the_rejoin_and_the_settle():
@@ -525,8 +554,9 @@ def t_run_samples_only_after_the_reconnect_the_rejoin_and_the_settle():
     with tempfile.TemporaryDirectory() as d:
         rec, _ = _run(d, clock, relay, sess)
     for tier in m.TIERS:
-        # reconnect (4 s) + prefetch landing + settle (5 s)
-        assert rec[tier]["backlog_floor_start_s"] == 4.0 + m.PREFETCH_LAND_S + 5.0, rec[tier]
+        # reconnect (4 s) + this tier's prefetch landing + settle (5 s)
+        wait = m.prefetch_land_s(4 if tier == "full" else 6)
+        assert rec[tier]["backlog_floor_start_s"] == 4.0 + wait + 5.0, rec[tier]
         assert rec[tier]["samples"] >= 10 and rec[tier]["duration_s"] >= 20.0
 
 

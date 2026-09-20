@@ -109,17 +109,24 @@ help a consumer that is chronically slower than real time. So:
   solo and qualifying single-feed `/next`. The ping-pong handover is still excluded, for
   the original reason: `close_when_inactive` means OBS has already dropped the off-air
   feed, so there is no open demuxer to splice into and nothing to rebuild.
-  That rejoin is also **delayed** by `FEED_PREFETCH_LAND_S` (5 s, the value
-  `obs_benchmark.PREFETCH_LAND_S` already used for the #584 run). The ring's time index
-  is byte **arrival** time, so streamlink's HLS prefetch burst lands entirely inside the
-  3 s trailing mark and an immediate rejoin would put OBS at the burst's start — a clean
-  demuxer 10–19 s behind live. Waiting it out lets the burst age past the mark. The wait
-  is skipped for a local capture feed (#592), whose ffmpeg has no burst, and
-  `RACECAST_FEED_PREFETCH_LAND_S=0` restores the immediate rejoin for a source where the
-  wait is not worth it (Twitch low-latency, where the value is uncalibrated). A rejoin
-  that no longer belongs to the running serve no-ops (`rejoin_is_stale`): rebuilding
-  would drop OBS onto the newest serve's burst, or — when the serve died inside the wait
-  — onto a feed with no bytes at all.
+  That rejoin is also **delayed until the HLS prefetch burst has landed**. The ring's
+  time index is byte **arrival** time, so the burst lands entirely inside the trailing
+  mark and an immediate rejoin would put OBS at the burst's start — a clean demuxer
+  10–19 s behind live. The delay is **derived, not tuned**:
+  `prefetch_land_s(segments, prebuffer_s)` = the serve's own `--hls-live-edge` count
+  times `SEGMENT_FETCH_BUDGET_S` plus the prebuffer. Both inputs move in production and a
+  single number gets both wrong — measured 2026-09-20 with
+  `tools/prefetch-burst-probe.py` against a live YouTube 1080p source with the relay's
+  own flags: a FULL burst (4 segments) arrived in 0.82–1.45 s, a ROBUST burst (6) in
+  1.48–**4.96** s, so the flat 5 s that stood here first was about 3 s short for ROBUST —
+  the very tier the #493 auto step-down moves to. Worst per segment 4.96/6 = 0.83 s,
+  rounded up to 1.0 s for a slower uplink. A local capture feed (#592) has no
+  `--hls-live-edge` and never waits. A rejoin that no longer belongs to the running serve
+  no-ops (`rejoin_is_stale`): rebuilding would drop OBS onto the newest serve's burst,
+  or — when the serve died inside the wait — onto a feed with no bytes at all.
+  `racecast obs benchmark` derives the same wait from `/status`'s `feed_prebuffer_s`; it
+  carried the same too-short 5 s, so the ROBUST windows of a #584 run taken before this
+  change may have sampled a backlog the benchmark caused itself.
 
 ## Test strategy (TDD)
 

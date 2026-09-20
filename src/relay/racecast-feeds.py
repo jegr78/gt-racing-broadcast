@@ -709,37 +709,46 @@ def should_obs_reconnect(fanout, dropped, consumer_attached=False):
     return bool(fanout and (dropped or consumer_attached))
 
 
-# After the first byte of a new serve, how long until streamlink's HLS prefetch burst
-# has landed in the ring. The rejoin has to wait for it (#614): the ring's time index is
-# byte ARRIVAL time, so a burst that lands inside RACECAST_FEED_PREBUFFER_S sits entirely
-# above the trailing join mark, and OBS would rejoin at the burst's START — 4 x 5 s of
-# YouTube media, the 10-19 s backlog measured on 2026-09-19. Once the burst has aged past
-# the mark, the join lands near the live edge instead. Same value and same reasoning as
-# obs_benchmark.PREFETCH_LAND_S, which made this wait explicit for the #584 measurement
-# run; keep the two in sync.
-FEED_PREFETCH_LAND_S = 5.0
+# Worst-case wall-clock seconds streamlink takes to fetch ONE prefetch segment, i.e. how
+# fast the initial --hls-live-edge burst arrives. MEASURED 2026-09-20 against a live
+# YouTube 1080p source with the relay's own serve flags
+# (tools/prefetch-burst-probe.py, 4 runs per tier):
+#   FULL   (--hls-live-edge 4): burst arrived in 0.82 / 0.99 / 1.45 / 0.82 s
+#   ROBUST (--hls-live-edge 6): burst arrived in 1.48 / 1.69 / 1.73 / 4.96 s
+# Worst per segment = 4.96 / 6 = 0.83 s; rounded up to 1.0 for headroom on a slower
+# uplink. Re-measure with the probe before changing it.
+SEGMENT_FETCH_BUDGET_S = 1.0
 
 
-def feed_prefetch_land_s(environ, default=FEED_PREFETCH_LAND_S):
-    """Prefetch wait (s) before the OBS rejoin, overridable with
-    RACECAST_FEED_PREFETCH_LAND_S. **0 restores the immediate rejoin** (the behaviour
-    before #614's wait) — the right fallback for a source whose burst is not worth
-    waiting out, such as Twitch low-latency, where the 5 s default is uncalibrated.
-    Because 0 is a meaningful value here it is parsed with its own >= 0 rule rather
-    than _env_float's > 0. Pure → unit-tested."""
+def live_edge_segments(flags):
+    """The --hls-live-edge count in a streamlink flag list (the prefetch burst's size in
+    segments). Returns 0 when the flag is absent, which makes the rejoin immediate — the
+    honest answer for a reader with no HLS prefetch. Pure → unit-tested."""
     try:
-        v = float(str(environ.get("RACECAST_FEED_PREFETCH_LAND_S", "")).strip())
-    except (TypeError, ValueError):
-        return default
-    return v if v >= 0 else default
+        return max(0, int(flags[flags.index("--hls-live-edge") + 1]))
+    except (ValueError, IndexError, TypeError):
+        return 0
 
 
-def prefetch_land_s(tool, land_s=FEED_PREFETCH_LAND_S):
-    """How long a rejoin waits for the new serve's prefetch, decided by the tool that
-    produces the bytes. Only streamlink fetches an HLS burst; the local capture ffmpeg
-    (#592) writes continuously, so there is nothing to wait out and its rejoin is
-    immediate. Pure → unit-tested."""
-    return land_s if tool == "streamlink" else 0.0
+def prefetch_land_s(segments, prebuffer_s, budget_s=SEGMENT_FETCH_BUDGET_S):
+    """How long the OBS rejoin waits for a new serve's HLS prefetch burst to land (#614).
+
+    DERIVED, not tuned. The ring's time index is byte ARRIVAL time and OBS rejoins at
+    `trailing_offset(prebuffer_s)`, so the join lands past the burst only once the burst
+    is older than `prebuffer_s`. Hence: the burst's arrival span (`segments` x the
+    measured per-segment fetch budget) PLUS `prebuffer_s`.
+
+    Both inputs matter and a fixed number gets both wrong. `segments` differs per tier
+    and platform (YouTube FULL 4, ROBUST 6, Twitch 2), and `prebuffer_s` is an operator
+    setting — a hardcoded wait silently stops working the moment either moves, which is
+    exactly how a 5 s constant turned out to be ~3 s too short for ROBUST.
+
+    `segments == 0` (the local capture ffmpeg, #592, or a reader with no live-edge flag)
+    means no burst and therefore no wait: waiting would only hold a black gap open on
+    air. Pure → unit-tested."""
+    if segments <= 0:
+        return 0.0
+    return segments * budget_s + max(0.0, prebuffer_s)
 
 
 def rejoin_is_stale(stopped, advancing, gen_at_start, gen_now, serving=True):
@@ -6841,15 +6850,19 @@ class Feed:
             return None
         return t                       # production ignores it; tests join on it
 
-    def _obs_rejoin_hook(self, tool):
+    def _obs_rejoin_hook(self, flags):
         """The `on_first_byte` hook Feed.run hands the fan-out serve: a prefetch-delayed
         rejoin when this re-serve would splice into an open OBS demuxer, else None.
-        `tool` is required — defaulting it would hand a future caller the 5 s streamlink
-        wait for a source that has no burst."""
+
+        `flags` is the streamlink flag list this serve runs with — the wait is derived
+        from its `--hls-live-edge` count and the server's own prebuffer, so a tier switch
+        or a changed RACECAST_FEED_PREBUFFER_S moves it automatically. The local capture
+        ffmpeg (#592) passes no flags: no burst, no wait."""
         if not should_obs_reconnect(self.ring is not None, self.dropped,
                                     self.consumer_attached()):
             return None
-        land_s = prefetch_land_s(tool, feed_prefetch_land_s(os.environ))
+        prebuffer = getattr(self.fanout_server, "prebuffer_s", 0.0)
+        land_s = prefetch_land_s(live_edge_segments(flags), prebuffer)
         return lambda: self._obs_rejoin_after_prefetch(land_s)
 
     def _serve_fanout(self, target, serve_platform, token, on_first_byte=None,
@@ -7002,7 +7015,14 @@ class Feed:
                 # single-feed /next (#614). Not on the first serve, not on the ping-pong
                 # handover: there OBS has already dropped the off-air feed.
                 tool = "ffmpeg" if local_cmd else "streamlink"
-                _recover = self._obs_rejoin_hook(tool)
+                # The rejoin's wait comes from THIS serve's prefetch size, so a tier
+                # switch changes it without a second place to keep in sync. A local
+                # capture serve has no streamlink flags and therefore no wait.
+                _flags = [] if local_cmd else (
+                    streamlink_twitch_flags(self.quality_tier)
+                    if serve_platform == "twitch"
+                    else streamlink_serve_flags(self.quality_tier))
+                _recover = self._obs_rejoin_hook(_flags)
                 try:
                     serve_elapsed, serve_rc = self._serve_fanout(
                         target, serve_platform, token, on_first_byte=_recover,
@@ -7876,6 +7896,10 @@ class Relay:
         out = {"schedule_len": len(sched), "cookies": bool(self.cookies),
                "cookies_health": cookie_health(self.cookies, now=now),
                "mode": self.mode, "auto_cover_active": bool(self._cover_auto_owned),
+               # #614: the trailing join mark a consumer rejoins at. `racecast obs
+               # benchmark` derives its prefetch wait from it, so it must read the value
+               # this relay actually runs with, not assume the default.
+               "feed_prebuffer_s": self.feed_prebuffer_s,
                "source": self.source.health(), "feeds": {}}
         if self.qual_source:
             out["qualifying"] = {"active": self.mode == "qualifying",
