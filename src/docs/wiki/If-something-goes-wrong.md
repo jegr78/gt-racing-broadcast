@@ -134,17 +134,19 @@ grows while the cause lasts, and the audience sees the picture drift further beh
    [Can this machine keep up?](Set-up-the-broadcast-PC#can-this-machine-keep-up--the-obs-benchmark).
 
 The health line does not suggest **ROBUST** (720p) for a backlog. Whether 720p gives a
-slow machine back enough render time is not measured yet. A tier change also restarts
-the feed's connection without reconnecting OBS, and for YouTube ROBUST starts two segments
-(about 10 s) further behind the live edge, so right after the change OBS can sit *further*
-behind than before. If you step down anyway, press **RESET** once the new connection is
-serving.
+slow machine back enough render time is not measured yet, and a step-down buys delay of
+its own: for YouTube, ROBUST starts two segments (about 10 s) further behind the live
+edge than full quality, and it stays that far back for as long as the feed runs on
+ROBUST. That distance is upstream of the relay, so no button here shortens it. The
+restart itself needs nothing from you, because the relay reconnects OBS afterwards by
+itself (next table).
 
 ### What the relay does on its own, and what it leaves to you
 
 | Automation | Acts on | Leaves alone |
 |---|---|---|
 | Auto OBS rebuild | A **frozen** picture (OBS stops advancing the feed). Stands down after three rebuilds that did not help, with a **RE-ARM** button. See [Automatic OBS rebuild](Director#through-the-broadcast-scene--hud-cues). | A picture that plays, however late. |
+| Rejoin after a restart | Any restart of a feed OBS still holds: **RELOAD**, a quality change, `FEEDS → STINT…` onto the on-air feed, and a pull that died on its own. The relay waits for the new connection's first burst to arrive, then rebuilds the OBS source, so the picture resumes near the live edge instead of at the burst's start. It costs the same short black dropout as a RESET, and you do not press anything. | The stint handover. OBS has already let go of the off-air feed, so there is nothing to rebuild and the swap stays seamless. |
 | Auto step-down to ROBUST | A **source** that keeps dropping (two dead serves at full quality). | A slow producer machine. |
 | Standby cover and auto-failover | An on-air feed whose source is offline, not live yet or ended, or that stays down. | Everything that still delivers a picture. |
 
