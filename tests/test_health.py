@@ -1199,6 +1199,26 @@ def t_aggregate_health_backlog_is_a_yellow_reason_with_the_next_step():
     assert m.aggregate_health(_facts(feeds_backlogged={}))["level"] == "green"
 
 
+def t_aggregate_health_av_disturbance_reports_and_asks_for_eyes():
+    # #619: OBS had already repaired this by the time the relay read its log, so the
+    # reason must not name a fix the director should apply. It reports what happened and
+    # asks for the only check that can confirm lip sync: a person looking at the program.
+    h = m.aggregate_health(_facts(feeds_av_disturbed={"A": 5415.66}))
+    assert h["level"] == "yellow", h
+    assert h["reasons"] == ["Feed A audio timing broke by 5416 ms with no restart to "
+                            "explain it — OBS re-synced itself; check the program "
+                            "picture and sound"], h
+    assert m.aggregate_health(_facts(feeds_av_disturbed={}))["level"] == "green"
+
+
+def t_aggregate_health_av_disturbance_without_a_magnitude_still_reads():
+    # The magnitude comes from the log line; a future OBS wording could drop it. The
+    # reason must survive that instead of rendering "by None ms".
+    h = m.aggregate_health(_facts(feeds_av_disturbed={"B": None}))
+    assert h["reasons"] == ["Feed B audio timing broke with no restart to explain it — "
+                            "OBS re-synced itself; check the program picture and sound"], h
+
+
 def t_aggregate_health_backlog_on_pov_names_no_reset():
     # The feed reset exists for Feed A and B only (feed_reset_target validates against
     # relay.feeds), so a POV backlog states the fact and no control.

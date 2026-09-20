@@ -155,6 +155,7 @@ import install_apps       # companion_http_version for the buttons health probe 
 import companion_common   # companion config.json path for bind-address resolution (#236)
 import tailscale          # detect_tailscale_ip fallback for bind-address resolution (#236)
 import logsetup  # rotating per-feed/console loggers + streamlink pump (src/scripts on sys.path)
+import av_sync   # pure parser/classifier for the A/V sync disturbances OBS logs (#619)
 import cookie_jar  # the shared "jar holds a YouTube login" rule, same as preflight (#615)
 import placeholders  # transparent-graphic placeholder path -> hide pure-placeholder assets from the browser
 import gt7_crypto      # GT7 UDP telemetry: Salsa20 decrypt (solo/POV only, #324)
@@ -1057,6 +1058,13 @@ def aggregate_health(facts):
                 if name in ("A", "B") else "")
         yellow.append(f"Feed {name} output {behind:.0f} s behind live — OBS reads slower than "
                       f"real time{step}")
+    # #619: OBS already repaired this one by the time we read its log, so the reason
+    # reports it and asks for eyes instead of naming a fix. Only UNEXPLAINED repairs
+    # reach here; one right after a restart is that restart's expected cost.
+    for name, ms in (facts.get("feeds_av_disturbed") or {}).items():
+        amount = f" by {ms:.0f} ms" if ms is not None else ""
+        yellow.append(f"Feed {name} audio timing broke{amount} with no restart to explain "
+                      f"it — OBS re-synced itself; check the program picture and sound")
     reasons.extend(red)
     reasons.extend(yellow)
     level = "red" if red else ("yellow" if yellow else "green")
@@ -7191,6 +7199,102 @@ def should_probe_obs(last_ts, running, now, interval):
     return not running and (now - last_ts) >= interval
 
 
+class AvSyncWatcher:
+    """Tails OBS's own log and folds the A/V sync disturbances it reports into an
+    `av_sync` state (#619).
+
+    OBS is the only component that knows when a source's audio timing broke, and until
+    now it told nobody but its log file. This reads that file; it never writes to OBS
+    and never acts on what it finds — by the time the line exists OBS has already
+    repaired it (see av_sync's module docstring).
+
+    Only lines appended AFTER the watcher starts are read. That is what lets every event
+    be stamped with our own clock: OBS writes `HH:MM:SS.mmm` with no date, so parsing its
+    timestamp would need the file's date plus midnight-rollover handling for a value the
+    tail lag already gives to within a second.
+
+    Best-effort in the strong sense: no OBS, no log directory, a rotated or truncated
+    file, a permission error — each of those means no detector, never a broken relay.
+    """
+
+    POLL_S = 2.0        # how often new lines are read; a repair is not time-critical
+    RESCAN_S = 30.0     # how often to look for a newer log file (OBS opens one per run)
+
+    def __init__(self, log_dir, serving_age, state, lock, log):
+        self.log_dir = log_dir
+        self.serving_age = serving_age   # feed name -> seconds in `serving`, or None
+        self.state = state
+        self.lock = lock
+        self.log = log
+        self.stop = False
+        self._warned = False
+
+    def _newest_log(self):
+        try:
+            names = [os.path.join(self.log_dir, n) for n in os.listdir(self.log_dir)
+                     if n.endswith(".txt")]
+            return max(names, key=os.path.getmtime) if names else None
+        except OSError:
+            return None
+
+    def _ingest(self, line, now):
+        ev = av_sync.parse_obs_log_line(line.rstrip("\n"))
+        if ev is None:
+            return
+        feed = av_sync.feed_for_source(ev.get("source"))
+        age = self.serving_age(feed) if feed else None
+        with self.lock:
+            av_sync.record(self.state, ev, now, age)
+
+    def run(self):
+        path, fh, opened_at = None, None, 0.0
+        try:
+            while not self.stop:
+                now = time.monotonic()
+                if fh is None or (now - opened_at) >= self.RESCAN_S:
+                    newest = self._newest_log()
+                    if newest and newest != path:
+                        if fh is not None:
+                            # A NEW file was created after we started watching, so it
+                            # begins with this session: read it whole, not from the end.
+                            try: fh.close()
+                            except OSError: pass    # closing a rotated handle is best-effort
+                            fh = None
+                        try:
+                            # noqa SIM115: a tail holds its handle across loop turns;
+                            # a context manager would close it on every poll.
+                            fh = open(newest, encoding="utf-8", errors="replace")  # noqa: SIM115
+                            if path is None:
+                                fh.seek(0, os.SEEK_END)   # first open: skip the backlog
+                            path = newest
+                            self.log.info("A/V sync watcher reading %s", newest)
+                        except OSError as exc:
+                            if not self._warned:
+                                self.log.warning("A/V sync watcher cannot read %s (%s) "
+                                                 "— no sync disturbance reporting", newest, exc)
+                                self._warned = True
+                            fh = None
+                    opened_at = now
+                if fh is not None:
+                    try:
+                        while True:
+                            line = fh.readline()
+                            if not line:
+                                break
+                            self._ingest(line, time.monotonic())
+                    except (OSError, ValueError):
+                        try: fh.close()
+                        except OSError: pass    # already gone; we reopen below
+                        fh, path = None, None     # rotated or truncated: pick it up again
+                time.sleep(self.POLL_S)
+        except Exception:                          # noqa: BLE001 — a detector must never kill the relay
+            self.log.exception("A/V sync watcher stopped")
+        finally:
+            if fh is not None:
+                try: fh.close()
+                except OSError: pass    # shutting down; nothing left to salvage
+
+
 class Relay:
     def __init__(self, source, ports, logdir, cookies=None, pov_source=None,
                  pov_port=None, start_stint=1, cookie_dir=None,
@@ -7295,6 +7399,9 @@ class Relay:
         self._backlog_warn_s = feed_backlog_warn_s(os.environ)      # #583
         self._interval_backlogs = {}      # #583: last heartbeat's per-feed consumer backlog floor
         self._backlogged_feeds = {}       # #583: feed -> floor (s) for feeds past the threshold
+        self._av = av_sync.new_state()    # #619: A/V sync disturbances OBS reported
+        self._av_lock = threading.Lock()
+        self._av_watcher = None
         self.program_audio = program_audio_enabled(os.environ)
         self._fanout_servers = []
         # Auto-failover to the Intermission scene on confirmed on-air feed loss
@@ -7380,6 +7487,7 @@ class Relay:
             threading.Thread(target=self.pov.run, daemon=True).start()
         threading.Thread(target=self._heartbeat_loop, daemon=True).start()
         threading.Thread(target=self._auto_cover_loop, daemon=True).start()
+        self._start_av_watcher()
         if self.fanout:                   # #488 freeze detector only applies to the fan-out demuxer
             threading.Thread(target=self._freeze_sampler_loop, daemon=True).start()
 
@@ -7435,7 +7543,52 @@ class Relay:
                 "feed_source_states": feed_source_states,
                 "feeds_jittery": list(self._jittery_feeds),
                 "rebuilds_stood_down": self._rebuilds_stood_down_fact(st.get("obs_fps")),
-                "feeds_backlogged": dict(self._backlogged_feeds)}
+                "feeds_backlogged": dict(self._backlogged_feeds),
+                "feeds_av_disturbed": self._av_health_fact()}
+
+    def _serving_age(self, feed):
+        """How long that feed has been in the `serving` phase, or None when it is not
+        serving. This is what tells an EXPECTED sync disturbance (the relay spliced a
+        new stream into OBS's open socket) from an unexplained one (#619)."""
+        f = self.pov if feed == "POV" else self.feeds.get(feed)
+        if f is None or f.paused or f.phase != "serving":
+            return None
+        return time.time() - f.phase_since
+
+    def _start_av_watcher(self):
+        """Start the A/V sync watcher on OBS's own log directory. Entirely optional:
+        without OBS installed there is no directory and the relay simply runs without
+        the detector (#619)."""
+        try:
+            d = logsetup.obs_log_dir(sys.platform)
+            if not d or not os.path.isdir(d):
+                return
+            self._av_watcher = AvSyncWatcher(d, self._serving_age, self._av,
+                                             self._av_lock, LOG)
+            threading.Thread(target=self._av_watcher.run, daemon=True).start()
+        except Exception as exc:                 # noqa: BLE001 — a detector is never fatal
+            LOG.warning("A/V sync watcher not started (%s)", exc)
+
+    # The watcher stamps every event with time.monotonic(), so both readers below take
+    # their own monotonic reading rather than the wall-clock `now` the /status and
+    # heartbeat paths pass around. Mixing the two clocks would silently produce ages of
+    # about 1.8 billion seconds.
+    def _av_status(self):
+        """The /status `av` block: per-feed disturbance counts plus the unattributed
+        context lines. Empty when nothing has happened, so a clean event adds no noise."""
+        mono = time.monotonic()
+        with self._av_lock:
+            feeds = av_sync.status_block(self._av, mono)
+            ctx = dict(self._av["context"])
+        return {"feeds": feeds, "context": ctx} if (feeds or ctx) else {}
+
+    def _av_health_fact(self):
+        """feed -> magnitude in ms for feeds with a RECENT UNEXPLAINED repair. A repair
+        right after a restart is the expected cost of that restart, so it never reaches
+        the health block (#619)."""
+        mono = time.monotonic()
+        with self._av_lock:
+            return av_sync.health_fact(self._av, mono)
 
     def _refresh_health(self, now):
         """Recompute + store the DISPLAYED health (level/reasons/since). Does NOT
@@ -7446,7 +7599,8 @@ class Relay:
         facts = self._health_facts(now)
         h = aggregate_health(facts)
         notify_level = aggregate_health({**facts, "feeds_jittery": [],
-                                         "feeds_backlogged": {}})["level"]
+                                         "feeds_backlogged": {},
+                                         "feeds_av_disturbed": {}})["level"]
         with self._health_lock:
             if h["level"] != self.health_level:
                 self.health_level = h["level"]
@@ -8049,6 +8203,12 @@ class Relay:
         out["health"] = {"level": self.health_level, "reasons": self.health_reasons,
                          "since_s": round(now - self.health_since, 1)}
         out["desync"] = self._desync
+        # NOT part of `desync` above: that one is the ping-pong stint mismatch (#494).
+        # This is A/V sync (#619). Two different states, and sharing a name would make
+        # the panel show one under the other's label.
+        av = self._av_status()
+        if av:
+            out["av"] = av
         out["rebuild_guard"] = self.rebuild_guard_status()
         return out
 

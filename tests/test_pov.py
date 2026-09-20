@@ -3024,6 +3024,85 @@ def _backlog_relay(a_floor, b_floor=None, a_live=None):
     return r
 
 
+def t_av_watcher_start_never_takes_the_relay_down_with_it():
+    # This is the test the suite was missing. _start_av_watcher() runs only from
+    # Relay.start(), which no unit test calls, so a wrong attribute inside it
+    # (`self.log` — the relay logs through the module-level LOG) passed every local
+    # check and killed the relay on the first real start. Both branches are exercised
+    # here: no OBS directory at all, and one that exists.
+    import tempfile
+    r = _make_min_relay()
+    orig = m.logsetup.obs_log_dir
+    try:
+        m.logsetup.obs_log_dir = lambda *a, **k: "/definitely/not/an/obs/log/dir"
+        r._start_av_watcher()                       # missing dir: quietly no detector
+        assert r._av_watcher is None
+        m.logsetup.obs_log_dir = lambda *a, **k: None
+        r._start_av_watcher()
+        assert r._av_watcher is None
+        with tempfile.TemporaryDirectory() as d:
+            m.logsetup.obs_log_dir = lambda *a, **k: d
+            r._start_av_watcher()
+            assert r._av_watcher is not None
+            r._av_watcher.stop = True
+        # And a raising resolver must be swallowed, not propagated into start().
+        def _boom(*a, **k):
+            raise RuntimeError("no such platform")
+        m.logsetup.obs_log_dir = _boom
+        r._av_watcher = None
+        r._start_av_watcher()
+        assert r._av_watcher is None
+    finally:
+        m.logsetup.obs_log_dir = orig
+
+
+def t_av_serving_age_tells_an_expected_disturbance_from_an_unexplained_one():
+    # #619: the classification hinges on this one reading. A paused or connecting feed
+    # must return None, or a repair on a feed the relay is not even serving would be
+    # waved through as "explained by the restart".
+    import time as _t
+    r = _make_min_relay()
+    r.A.phase = "serving"; r.A.paused = False; r.A.phase_since = _t.time() - 8.0
+    assert 7.0 < r._serving_age("A") < 9.5
+    r.A.paused = True
+    assert r._serving_age("A") is None
+    r.A.paused = False; r.A.phase = "connecting"
+    assert r._serving_age("A") is None
+    assert r._serving_age("nope") is None
+
+
+def t_av_disturbance_reaches_health_but_never_the_discord_notify_level():
+    # Same contract as the #535 inbound stall and the #583 backlog: a display-only
+    # yellow. An @here for something OBS already repaired would train the crew to
+    # ignore the pings that matter.
+    import av_sync as _av
+    r = _make_min_relay()
+    r.obs_reachable = True
+    ev = _av.parse_obs_log_line("22:52:21.790: Source Feed A audio is lagging "
+                                "(over by 5415.66 ms) at max audio buffering. "
+                                "Restarting source audio.")
+    _av.record(r._av, ev, now=time.monotonic(), serving_age_s=None)   # no restart to explain it
+    facts = r._health_facts(2000.0)
+    assert facts["feeds_av_disturbed"] == {"A": 5415.66}
+    h = r._refresh_health(2000.0)
+    assert any("audio timing broke by 5416 ms" in x for x in h["reasons"]), h["reasons"]
+    assert h["level"] == "yellow"
+    assert h["notify_level"] == m.aggregate_health({**facts,
+                                                    "feeds_av_disturbed": {}})["level"]
+
+
+def t_av_status_block_is_absent_until_a_disturbance_happens():
+    import av_sync as _av
+    r = _make_min_relay()
+    assert r._av_status() == {}
+    _av.record(r._av, _av.parse_obs_log_line(
+        "22:25:48.729: warning: DTS 1258128000 < 1259016000 out of order"),
+        now=time.monotonic(), serving_age_s=None)
+    blk = r._av_status()
+    # An unattributed line is context, never a feed entry invented for it.
+    assert blk == {"feeds": {}, "context": {"dts_backward": 1}}
+
+
 def t_heartbeat_backlog_sample_classifies_serving_feeds_only():
     r = _backlog_relay(11.6, 9.0)
     r.B.paused = True                                   # an off-air stopped feed never counts
