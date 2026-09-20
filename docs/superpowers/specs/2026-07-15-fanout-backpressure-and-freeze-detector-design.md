@@ -109,17 +109,57 @@ help a consumer that is chronically slower than real time. So:
   solo and qualifying single-feed `/next`. The ping-pong handover is still excluded, for
   the original reason: `close_when_inactive` means OBS has already dropped the off-air
   feed, so there is no open demuxer to splice into and nothing to rebuild.
-  That rejoin is also **delayed** by `FEED_PREFETCH_LAND_S` (5 s, the value
-  `obs_benchmark.PREFETCH_LAND_S` already used for the #584 run). The ring's time index
-  is byte **arrival** time, so streamlink's HLS prefetch burst lands entirely inside the
-  3 s trailing mark and an immediate rejoin would put OBS at the burst's start — a clean
-  demuxer 10–19 s behind live. Waiting it out lets the burst age past the mark. The wait
-  is skipped for a local capture feed (#592), whose ffmpeg has no burst, and
-  `RACECAST_FEED_PREFETCH_LAND_S=0` restores the immediate rejoin for a source where the
-  wait is not worth it (Twitch low-latency, where the value is uncalibrated). A rejoin
-  that no longer belongs to the running serve no-ops (`rejoin_is_stale`): rebuilding
-  would drop OBS onto the newest serve's burst, or — when the serve died inside the wait
-  — onto a feed with no bytes at all.
+  That rejoin is also **delayed until the HLS prefetch burst has landed**. The ring's
+  time index is byte **arrival** time, so the burst lands entirely inside the trailing
+  mark and an immediate rejoin would put OBS at the burst's start — a clean demuxer
+  10–19 s behind live.
+
+  **How long the burst takes to arrive is a download duration**, set by the producer's
+  downlink, the source's bitrate and the CDN. A constant measured on one machine is
+  therefore wrong on every other, which is how a flat 5 s ended up about 3 s short for
+  YouTube ROBUST — the very tier the #493 auto step-down moves to. So the relay
+  **measures it per serve**: the rejoin thread watches `last_byte_ts` and takes the first
+  inbound idle of `BURST_IDLE_S` as the burst's end, then waits `prebuffer_s`, then
+  rebuilds. Detecting the end costs `BURST_IDLE_S`, and that latency is itself the safety
+  margin.
+
+  Two constants remain fixed, and both describe the **source's segment cadence** rather
+  than the connection. Measured 2026-09-20 with `tools/prefetch-burst-probe.py`, which
+  runs the relay's own serve flags against a live source and needs neither a relay nor a
+  league:
+
+  | platform | tier | segments | runs | burst arrival | worst per segment | gaps inside the burst | steady cadence |
+  |---|---|---|---|---|---|---|---|
+  | YouTube | FULL | 4 | 7 | 0.72–1.82 s | 0.46 s | ≤ 0.78 s | ~5 s |
+  | YouTube | ROBUST | 6 | 4 | 1.48–**4.96** s | 0.83 s | ≤ 0.78 s | ~5 s |
+  | Twitch | FULL | 2 | 6 | 0.45–0.69 s | 0.35 s | < 0.5 s | 1.4–1.9 s |
+  | Twitch | ROBUST | 2 | 9 | 0.50–**1.80** s | 0.90 s | < 0.5 s | 1.4–1.9 s |
+
+  - **`BURST_IDLE_S` = 1.0 s** — the idle that ends the burst. It has to exceed the gaps
+    *inside* a burst and stay below the steady cadence, so the usable window is about
+    (0.78, 1.4) and 1.0 fits both platforms. A slow link widens the intra-burst gaps and
+    can trip it early; the rejoin then lands in the burst's tail and sheds most of it,
+    the same graceful degradation as a wait that is slightly short.
+  - **`SEGMENT_FETCH_BUDGET_S` = 1.0 s** — a **ceiling**, not an estimate:
+    `prefetch_land_s(segments, prebuffer_s)` bounds the wait for a source that never
+    pauses long enough to be detected. Twitch low-latency is exactly that source: at a
+    2 s threshold it showed no gap in a 40 s window. 1.0 covers every measured worst
+    case; both ROBUST maxima are single outliers about 3× their own median (six further
+    Twitch ROBUST runs all landed at 0.50–0.55 s), so the ceiling is sized on the tail.
+
+  The probe's own burst-splitting threshold is **per platform** and cannot be one value:
+  2.0 s splits YouTube correctly and never fires on Twitch, 0.5 s splits Twitch correctly
+  and chops YouTube's burst apart. Both failures print a plausible number, so the probe
+  now picks the threshold by platform and reports a degenerate split as unusable.
+
+  A local capture feed (#592) has no `--hls-live-edge` and never waits. A rejoin that no
+  longer belongs to the running serve no-ops (`rejoin_is_stale`), checked during the
+  burst wait as well as after it: rebuilding would drop OBS onto the newest serve's
+  burst, or — when the serve died inside the wait — onto a feed with no bytes at all.
+  `racecast obs benchmark` has no live byte signal of its own, so it waits the full
+  ceiling and reads the real prebuffer from `/status`'s `feed_prebuffer_s`. It carried
+  the same too-short 5 s, so the ROBUST windows of a #584 run taken before this change
+  may have sampled a backlog the benchmark caused itself.
 
 ## Test strategy (TDD)
 

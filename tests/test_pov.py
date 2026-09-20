@@ -1558,16 +1558,18 @@ def t_obs_rejoin_hook_covers_the_director_restart_paths():
     f.ring = m.FeedRing(4096)                    # fan-out: the relay owns the socket
     f.fanout_server = _Srv(0.0)                  # OBS is reading this feed
     f.dropped = False
-    assert f._obs_rejoin_hook("streamlink") is not None  # /reload, tier change, solo /next
+    # Flag LISTS, not a tool name: a string would fall through live_edge_segments'
+    # swallowed ValueError to a zero wait and quietly test a degenerate path.
+    assert f._obs_rejoin_hook(m.STREAMLINK_SERVE) is not None  # /reload, tier, solo /next
     f.fanout_server = _Srv(None)                 # off-air feed, OBS dropped it
-    assert f._obs_rejoin_hook("streamlink") is None      # ping-pong handover stays seamless
+    assert f._obs_rejoin_hook(m.STREAMLINK_SERVE) is None      # handover stays seamless
     f.dropped = True
-    assert f._obs_rejoin_hook("streamlink") is not None  # drop-recovery, unchanged
+    assert f._obs_rejoin_hook(m.STREAMLINK_SERVE) is not None  # drop-recovery, unchanged
     # Direct-serve (no ring): OBS holds the socket to streamlink and reconnects itself —
     # rebuilding its input there would be a flicker for nothing.
     f.ring = None
     f.fanout_server = _Srv(0.0)
-    assert f._obs_rejoin_hook("streamlink") is None
+    assert f._obs_rejoin_hook(m.STREAMLINK_SERVE) is None
 
 
 def t_serve_fanout_bumps_the_generation_a_stale_rejoin_compares():
@@ -1605,17 +1607,79 @@ def t_serve_fanout_bumps_the_generation_a_stale_rejoin_compares():
     assert f.ring.live_offset() > 0        # the fake bytes really went through the loop
 
 
-def t_prefetch_land_s_waits_only_for_an_hls_burst():
-    # Only streamlink fetches a prefetch burst. The local capture ffmpeg (#592) writes
-    # continuously, so its rejoin must not sit on a 5 s wait with a black gap on air.
-    assert m.prefetch_land_s("streamlink") == m.FEED_PREFETCH_LAND_S
-    assert m.FEED_PREFETCH_LAND_S > 0                    # the wait is what shed the burst
-    assert m.prefetch_land_s("ffmpeg") == 0.0
-    assert m.prefetch_land_s("streamlink", land_s=9.0) == 9.0
+def t_prefetch_land_s_is_derived_from_the_burst_and_the_prebuffer():
+    # The wait is not a tuned number: the ring's index is byte ARRIVAL time and OBS joins
+    # at trailing_offset(prebuffer_s), so the join clears the burst only once the burst is
+    # older than prebuffer_s. Both inputs move in production, and a fixed value gets both
+    # wrong — a flat 5 s was ~3 s short for ROBUST (measured 2026-09-20).
+    assert m.prefetch_land_s(4, 3.0) == 4 * m.SEGMENT_FETCH_BUDGET_S + 3.0   # YouTube FULL
+    assert m.prefetch_land_s(6, 3.0) == 6 * m.SEGMENT_FETCH_BUDGET_S + 3.0   # YouTube ROBUST
+    assert m.prefetch_land_s(2, 3.0) == 2 * m.SEGMENT_FETCH_BUDGET_S + 3.0   # Twitch
+    # ROBUST must wait strictly longer than FULL: it prefetches two more segments.
+    assert m.prefetch_land_s(6, 3.0) > m.prefetch_land_s(4, 3.0)
+    # A changed prebuffer moves the wait with it, one-for-one.
+    assert m.prefetch_land_s(4, 8.0) - m.prefetch_land_s(4, 3.0) == 5.0
+    assert m.prefetch_land_s(4, 0.0) == 4 * m.SEGMENT_FETCH_BUDGET_S
+    # No burst -> no wait: the local capture ffmpeg (#592) would only hold black open.
+    assert m.prefetch_land_s(0, 3.0) == 0.0
+    assert m.prefetch_land_s(-1, 3.0) == 0.0
+    # Every measured worst case must fit inside the ceiling's per-segment budget
+    # (2026-09-20, YouTube and Twitch, FULL and ROBUST — see SEGMENT_FETCH_BUDGET_S).
+    for burst, segments in ((1.82, 4), (4.96, 6), (0.69, 2), (1.80, 2)):
+        assert burst / segments <= m.SEGMENT_FETCH_BUDGET_S, (burst, segments)
+    # And the burst-end detector's threshold must sit between the gaps INSIDE a burst
+    # and the slowest steady cadence, or it fires on the wrong one.
+    assert 0.78 < m.BURST_IDLE_S < 1.4, m.BURST_IDLE_S
+
+
+def t_serve_flags_is_the_single_source_for_a_serves_flags():
+    # One place decides which flag set a serve runs with. Before this, the two command
+    # builders and the rejoin's wait each branched on the platform themselves, and only
+    # the wait's drift would have been silent (a wrong wait makes backlog, not an error).
+    assert m.serve_flags("youtube", "full") == m.STREAMLINK_SERVE
+    assert m.serve_flags("youtube", "robust") == m.STREAMLINK_SERVE_ROBUST
+    assert m.serve_flags("youtube", "emergency") == m.STREAMLINK_SERVE_ROBUST
+    assert m.serve_flags("twitch", "full") == m.STREAMLINK_TWITCH
+    assert m.serve_flags("twitch", "robust") == m.STREAMLINK_TWITCH_ROBUST
+    # Both command builders must carry exactly what serve_flags says, or the wait the
+    # rejoin derives describes a different serve than the one that is running.
+    for platform, tier in (("youtube", "full"), ("youtube", "robust"),
+                           ("twitch", "full"), ("twitch", "robust")):
+        want = m.serve_flags(platform, tier)
+        fan = m.streamlink_fanout_cmd("t", platform, tier=tier)
+        srv = m.streamlink_serve_cmd("t", 53001, platform, tier=tier)
+        for cmd, name in ((fan, "fanout"), (srv, "serve")):
+            for flag in want:
+                assert flag in cmd, (name, platform, tier, flag)
+            assert m.live_edge_segments(cmd) == m.live_edge_segments(want), (name, platform, tier)
+
+
+def t_status_publishes_the_prebuffer_the_benchmark_derives_from():
+    # `racecast obs benchmark` reads feed_prebuffer_s off /status to compute the same
+    # rejoin wait as the relay. Without this assert the field could vanish, every test
+    # would stay green, and the benchmark would silently fall back to the default.
+    r = _relay(["s1", "s2"])
+    st = r.status()
+    assert "feed_prebuffer_s" in st, sorted(st)
+    assert st["feed_prebuffer_s"] == r.feed_prebuffer_s
+    assert isinstance(st["feed_prebuffer_s"], (int, float))
+
+
+def t_live_edge_segments_reads_the_relays_own_serve_flags():
+    # The burst size comes from the flags the serve actually runs with, so a tier switch
+    # needs no second place to keep in sync.
+    assert m.live_edge_segments(m.STREAMLINK_SERVE) == 4
+    assert m.live_edge_segments(m.STREAMLINK_SERVE_ROBUST) == 6
+    assert m.live_edge_segments(m.STREAMLINK_TWITCH) == 2
+    assert m.live_edge_segments(m.STREAMLINK_TWITCH_ROBUST) == 2
+    assert m.live_edge_segments(m.streamlink_serve_flags("emergency")) == 6
+    assert m.live_edge_segments([]) == 0                      # local capture: no flags
+    assert m.live_edge_segments(["--hls-live-edge"]) == 0      # truncated -> no wait
+    assert m.live_edge_segments(["--hls-live-edge", "x"]) == 0  # unparseable -> no wait
 
 
 def t_rejoin_is_stale_when_its_serve_was_superseded():
-    # The rejoin is scheduled at the first byte and fires FEED_PREFETCH_LAND_S later.
+    # The rejoin is scheduled at the first byte and fires one derived wait later.
     # If a second restart happened in between, rebuilding would drop OBS onto the NEWEST
     # serve's burst — the exact backlog the wait exists to avoid.
     assert m.rejoin_is_stale(False, False, 4, 4) is False    # same serve: fire
@@ -1628,84 +1692,154 @@ def t_rejoin_is_stale_when_its_serve_was_superseded():
     # OBS would be rebuilt against a feed with no bytes.
     assert m.rejoin_is_stale(False, False, 4, 4, False) is True
     assert m.rejoin_is_stale(False, False, 4, 4, True) is False
-    assert m.dead_serve_backoff(1) > m.FEED_PREFETCH_LAND_S   # that window really is open
+    assert m.dead_serve_backoff(1) > m.prefetch_land_s(6, 3.0)  # the window really is open
 
 
-def t_feed_prefetch_land_s_lets_zero_mean_rejoin_immediately():
-    # Unlike the other feed knobs, 0 is meaningful here: it restores the pre-#614
-    # immediate rejoin, the fallback for a source whose burst is not worth waiting out.
-    assert m.feed_prefetch_land_s({}) == m.FEED_PREFETCH_LAND_S
-    assert m.feed_prefetch_land_s({"RACECAST_FEED_PREFETCH_LAND_S": "0"}) == 0.0
-    assert m.feed_prefetch_land_s({"RACECAST_FEED_PREFETCH_LAND_S": "2.5"}) == 2.5
-    assert m.feed_prefetch_land_s({"RACECAST_FEED_PREFETCH_LAND_S": ""}) == m.FEED_PREFETCH_LAND_S
-    assert m.feed_prefetch_land_s({"RACECAST_FEED_PREFETCH_LAND_S": "x"}) == m.FEED_PREFETCH_LAND_S
-    assert m.feed_prefetch_land_s({"RACECAST_FEED_PREFETCH_LAND_S": "-1"}) == m.FEED_PREFETCH_LAND_S
-    # The override has to reach the hook, or it would be cosmetic.
+def t_obs_rejoin_hook_derives_the_wait_from_this_serves_flags():
+    # The hook must read the burst size off the serve's own flags and the prebuffer off
+    # the fan-out server, or the derivation would be cosmetic.
     class _Srv:
+        prebuffer_s = 3.0
         def consumer_health(self, now): return 0.0, 0
     f = m.Feed("A", 53001, 0, lambda: [], LOGDIR)
     f.ring = m.FeedRing(4096)
     f.fanout_server = _Srv()
     f.dropped = True
     seen = []
-    f._obs_rejoin_after_prefetch = lambda land_s, **kw: seen.append(land_s)
-    old = os.environ.get("RACECAST_FEED_PREFETCH_LAND_S")
-    try:
-        os.environ["RACECAST_FEED_PREFETCH_LAND_S"] = "0"
-        f._obs_rejoin_hook("streamlink")()
-        os.environ["RACECAST_FEED_PREFETCH_LAND_S"] = "2.5"
-        f._obs_rejoin_hook("streamlink")()
-        f._obs_rejoin_hook("ffmpeg")()       # a local feed has no burst: knob or not
-    finally:
-        if old is None:
-            os.environ.pop("RACECAST_FEED_PREFETCH_LAND_S", None)
-        else:
-            os.environ["RACECAST_FEED_PREFETCH_LAND_S"] = old
-    assert seen == [0.0, 2.5, 0.0], seen
+    f._obs_rejoin_after_prefetch = lambda segments, prebuffer, **kw: seen.append(
+        m.prefetch_land_s(segments, prebuffer))
+    f._obs_rejoin_hook(m.STREAMLINK_SERVE)()            # FULL
+    f._obs_rejoin_hook(m.STREAMLINK_SERVE_ROBUST)()     # ROBUST waits longer
+    f._obs_rejoin_hook(m.STREAMLINK_TWITCH)()           # Twitch prefetches least
+    f._obs_rejoin_hook([])()                            # local capture: no wait
+    # Spelled out rather than via prefetch_land_s: asserting against the same function
+    # the hook calls would pass no matter what that function does.
+    b = m.SEGMENT_FETCH_BUDGET_S
+    assert seen == [4 * b + 3.0, 6 * b + 3.0, 2 * b + 3.0, 0.0], seen
+    assert seen[1] > seen[0] > seen[2] > seen[3], seen
+    # A different prebuffer must move the wait one-for-one, so the two never drift apart.
+    _Srv.prebuffer_s = 8.0
+    seen.clear()
+    f._obs_rejoin_hook(m.STREAMLINK_SERVE)()
+    assert seen == [4 * b + 8.0], seen
+    # A server that cannot say falls back to the documented default, never to 0 — 0 is
+    # the one value that makes the derived wait wrong instead of conservative.
+    class _NoPrebuffer:
+        def consumer_health(self, now): return 0.0, 0
+    f.fanout_server = _NoPrebuffer()
+    seen.clear()
+    f._obs_rejoin_hook(m.STREAMLINK_SERVE)()
+    assert seen == [4 * b + m.health_store.DEFAULT_FEED_PREBUFFER_S], seen
+    assert m.health_store.DEFAULT_FEED_PREBUFFER_S > 0
 
 
-def t_prefetch_rejoin_waits_then_rebuilds_and_drops_a_stale_one():
-    # The threaded wait, driven with an injected sleep: it rebuilds only after the wait,
-    # and a serve that was superseded during it leaves OBS alone.
-    calls = []
+class _RejoinClock:
+    """Injected clock+sleep for the rejoin thread: time only moves when it sleeps, so a
+    test drives the inbound byte flow instead of waiting for a real one."""
+    def __init__(self, feed, byte_gaps):
+        self.t = 100.0
+        self.feed = feed
+        self.gaps = list(byte_gaps)   # seconds between the remaining inbound chunks
+        self.slept = []
+        feed.last_byte_ts = self.t
+
+    def clock(self):
+        return self.t
+
+    def sleep(self, s):
+        self.slept.append(round(s, 3))
+        self.t += s
+        while self.gaps and self.t - self.feed.last_byte_ts >= self.gaps[0]:
+            self.feed.last_byte_ts += self.gaps.pop(0)
+
+
+def _rejoin_feed(obs_calls):
+    f = m.Feed("A", 53001, 0, lambda: [], LOGDIR)
+    f.ring = m.FeedRing(4096)
+    f.serve_generation = 7
+    f.phase = "serving"
     class _FakeObs:
         def release_feed_inputs(self, ports=None, **k):
-            calls.append(ports); return (["Feed A"], "")
-    f = m.Feed("A", 53001, 0, lambda: [], LOGDIR)
-    f.serve_generation = 7
-    f.phase = "serving"                    # the rejoin only fires while bytes flow
-    waited = []
-    def _sleep(s):
-        waited.append(s)
-        assert calls == [], "rebuilt BEFORE the prefetch had landed"
+            obs_calls.append(ports); return (["Feed A"], "")
+    return f, _FakeObs()
+
+
+def t_prefetch_rejoin_measures_the_burst_instead_of_predicting_it():
+    # The burst's arrival span is a download duration (downlink, source bitrate, CDN), so
+    # a constant measured on one machine is wrong on every other. It is measured per
+    # serve: the first BURST_IDLE_S without a byte ends the burst, and only then does the
+    # prebuffer wait start — a fast link must not pay the ceiling.
+    calls = []
+    f, obs = _rejoin_feed(calls)
+    ck = _RejoinClock(f, [0.3, 0.3, 0.3])      # chunks inside the burst, then a pause
     old = m._obs_ws
-    m._obs_ws = _FakeObs()
+    m._obs_ws = obs
     try:
-        f._obs_rejoin_after_prefetch(m.FEED_PREFETCH_LAND_S, sleep=_sleep).join(5)
-        assert waited == [m.FEED_PREFETCH_LAND_S], waited
-        assert calls == [[53001]], calls
-        # A second serve started while the rejoin was waiting -> no rebuild.
-        calls.clear(); waited.clear()
-        def _sleep_then_supersede(s):
-            waited.append(s); f.serve_generation = 8
-        f._obs_rejoin_after_prefetch(m.FEED_PREFETCH_LAND_S,
-                                     sleep=_sleep_then_supersede).join(5)
-        assert waited == [m.FEED_PREFETCH_LAND_S], waited
-        assert calls == [], calls
-        # The serve died during the wait (phase left "serving"): no rebuild.
-        calls.clear(); waited.clear()
-        f.serve_generation = 8
-        def _sleep_then_die(s):
-            waited.append(s); f.phase = "connecting"
-        f._obs_rejoin_after_prefetch(m.FEED_PREFETCH_LAND_S, sleep=_sleep_then_die).join(5)
-        assert waited == [m.FEED_PREFETCH_LAND_S], waited
-        assert calls == [], calls
+        f._obs_rejoin_after_prefetch(4, 3.0, sleep=ck.sleep, clock=ck.clock).join(5)
+    finally:
+        m._obs_ws = old
+    assert calls == [[53001]], calls
+    assert 3.0 in ck.slept, ck.slept                 # the prebuffer wait happened
+    assert sum(ck.slept) < m.prefetch_land_s(4, 3.0), ck.slept   # and beat the ceiling
+
+
+def t_prefetch_rejoin_falls_back_to_the_ceiling_when_the_source_never_pauses():
+    # Twitch low-latency shows no inbound gap above ~1.4 s, so the detector alone would
+    # wait forever. The ceiling (segments x the per-segment budget) bounds it.
+    calls = []
+    f, obs = _rejoin_feed(calls)
+    ck = _RejoinClock(f, [0.05] * 400)
+    old = m._obs_ws
+    m._obs_ws = obs
+    try:
+        f._obs_rejoin_after_prefetch(2, 3.0, sleep=ck.sleep, clock=ck.clock).join(5)
+    finally:
+        m._obs_ws = old
+    assert calls == [[53001]], "the ceiling must rejoin anyway, not hang"
+    waited = round(sum(ck.slept), 3)
+    # It waited the whole per-segment ceiling for the burst, then the prebuffer — and no
+    # more than one extra poll beyond that. Rounded: the sum is accumulated in 0.1 steps.
+    assert waited >= 2 * m.SEGMENT_FETCH_BUDGET_S, waited
+    assert waited <= round(m.prefetch_land_s(2, 3.0) + m.BURST_POLL_S, 3), waited
+
+
+def t_prefetch_rejoin_drops_a_serve_superseded_during_the_burst_wait():
+    # The generation can move while the burst is still arriving, not only during the
+    # prebuffer wait. Rebuilding then would drop OBS onto the NEWEST serve's burst.
+    calls = []
+    f, obs = _rejoin_feed(calls)
+    ck = _RejoinClock(f, [0.05] * 400)
+    def _sleep(s):
+        ck.sleep(s)
+        if ck.t - 100.0 > 0.25:
+            f.serve_generation = 8           # a second restart took over mid-burst
+    old = m._obs_ws
+    m._obs_ws = obs
+    try:
+        f._obs_rejoin_after_prefetch(4, 3.0, sleep=_sleep, clock=ck.clock).join(5)
+    finally:
+        m._obs_ws = old
+    assert calls == [], calls
+    assert sum(ck.slept) < 1.0, "it must bail out during the burst, not after it"
+
+
+def t_prefetch_rejoin_skips_a_dead_serve_and_never_waits_for_a_local_one():
+    # A serve that died inside the wait (phase left "serving") must not be rebuilt, and a
+    # feed with no HLS prefetch rejoins at once with no wait at all.
+    calls = []
+    f, obs = _rejoin_feed(calls)
+    ck = _RejoinClock(f, [5.0])
+    f.phase = "connecting"
+    old = m._obs_ws
+    m._obs_ws = obs
+    try:
+        f._obs_rejoin_after_prefetch(4, 3.0, sleep=ck.sleep, clock=ck.clock).join(5)
+        assert calls == [], "a dead serve is not rebuilt"
         f.phase = "serving"
-        # A local capture feed has no burst: no wait at all, rebuild straight away.
-        waited.clear()
-        f._obs_rejoin_after_prefetch(m.prefetch_land_s("ffmpeg"), sleep=_sleep).join(5)
-        assert waited == [], waited
+        ck2 = _RejoinClock(f, [])
+        f._obs_rejoin_after_prefetch(0, 3.0, sleep=ck2.sleep, clock=ck2.clock).join(5)
         assert calls == [[53001]], calls
+        assert ck2.slept == [], "a local capture feed has no burst and must not wait"
     finally:
         m._obs_ws = old
 
