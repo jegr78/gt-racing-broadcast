@@ -1716,6 +1716,15 @@ def t_obs_rejoin_hook_derives_the_wait_from_this_serves_flags():
     seen.clear()
     f._obs_rejoin_hook(m.STREAMLINK_SERVE)()
     assert seen == [4 * b + 8.0], seen
+    # A server that cannot say falls back to the documented default, never to 0 — 0 is
+    # the one value that makes the derived wait wrong instead of conservative.
+    class _NoPrebuffer:
+        def consumer_health(self, now): return 0.0, 0
+    f.fanout_server = _NoPrebuffer()
+    seen.clear()
+    f._obs_rejoin_hook(m.STREAMLINK_SERVE)()
+    assert seen == [4 * b + m.health_store.DEFAULT_FEED_PREBUFFER_S], seen
+    assert m.health_store.DEFAULT_FEED_PREBUFFER_S > 0
 
 
 _LAND_S = 7.0        # a representative derived wait: 4 segments + a 3 s prebuffer

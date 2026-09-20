@@ -197,14 +197,17 @@ def t_verdict_names_the_disturbed_tiers():
 # --------------------------------------------------------------------------
 # the gate before anything touches OBS or a feed
 # --------------------------------------------------------------------------
-def _status(feed="A", state="serving", platform="youtube", backlog=3.0):
+def _status(feed="A", state="serving", platform="youtube", backlog=3.0, prebuffer=3.0):
     feeds = {"A": {"state": "serving", "platform": "youtube", "profile": "full",
                    "pinned": False, "backlog_s": 3.0, "state_age_s": 100.0},
              "B": {"state": "stopped", "platform": "youtube", "profile": "full",
                    "pinned": False, "backlog_s": None, "state_age_s": 100.0}}
     if feed:
         feeds[feed].update(state=state, platform=platform, backlog_s=backlog)
-    return {"live": {"feed": feed, "stint": 1, "mode": "race"}, "feeds": feeds}
+    out = {"live": {"feed": feed, "stint": 1, "mode": "race"}, "feeds": feeds}
+    if prebuffer is not None:
+        out["feed_prebuffer_s"] = prebuffer
+    return out
 
 
 def t_refusal_passes_a_serving_on_air_feed():
@@ -545,6 +548,22 @@ def t_prefetch_wait_rule_has_not_drifted_from_the_relay():
         assert (m.live_edge_segments(flags) or 0) == feeds_x.live_edge_segments(flags), flags
     assert inspect.signature(feeds_x.prefetch_land_s).parameters["prebuffer_s"].default \
         is inspect.Parameter.empty, "the relay's copy must keep prebuffer_s required"
+
+
+def t_run_honours_a_relay_that_reports_a_zero_prebuffer():
+    # RACECAST_FEED_PREBUFFER_S=0 is documented ("=0 restores the live-edge serve") and
+    # 0.0 is falsy, so a `status.get(...) or DEFAULT` waits 3 s too long against exactly
+    # the relay that turned the reserve off. An absent field still falls back.
+    for prebuffer, expected in ((0.0, 0.0), (3.0, 3.0), (None, m.DEFAULT_PREBUFFER_S)):
+        clock = _Clock()
+        relay = _Relay(clock, status=_status(prebuffer=prebuffer))
+        sess = _Session(clock, relay=relay)
+        with tempfile.TemporaryDirectory() as d:
+            _run(d, clock, relay, sess)
+        waits = [m.prefetch_land_s(4, expected), m.prefetch_land_s(6, expected),
+                 m.prefetch_land_s(4, expected)]
+        for (at, _tier), switch, wait in zip(relay.resets, relay.switches, waits, strict=True):
+            assert at == switch + 4.0 + wait, (prebuffer, at, switch, wait)
 
 
 def t_flags_for_tier_mirrors_the_relays_profile_rule():
