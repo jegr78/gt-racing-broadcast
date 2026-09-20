@@ -46,11 +46,14 @@ def t_a_small_repair_is_the_same_kind():
     # the number is only how far past the mix clock the source was. 174 ms and 5415 ms
     # are the same event, so neither may be filtered out here.
     ev = av.parse_obs_log_line(REPAIR_SMALL)
+    assert ev is not None, "a 174 ms repair must not be filtered out"
     assert ev["kind"] == "audio_repair" and ev["ms"] == 174.05
 
 
 def t_a_source_name_with_a_space_is_not_truncated():
-    assert av.parse_obs_log_line(REPAIR_POV)["source"] == "Feed POV"
+    ev = av.parse_obs_log_line(REPAIR_POV)
+    assert ev is not None, "a source name containing a space must still parse"
+    assert ev["source"] == "Feed POV"
 
 
 def t_dts_and_corrupt_lines_parse_but_name_no_source():
