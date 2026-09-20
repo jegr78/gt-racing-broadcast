@@ -1541,6 +1541,10 @@ def t_feed_consumer_attached_reads_the_fanout_server():
     assert f.consumer_attached() is True         # a consumer just completed a read cycle
     f.fanout_server = _Srv(12.5)
     assert f.consumer_attached() is True         # a stuck consumer is still attached
+    class _Broken:
+        def consumer_health(self, now): raise RuntimeError("server went away")
+    f.fanout_server = _Broken()
+    assert f.consumer_attached() is False        # a health read must never break the serve
 
 
 def t_obs_rejoin_hook_covers_the_director_restart_paths():
@@ -1554,16 +1558,16 @@ def t_obs_rejoin_hook_covers_the_director_restart_paths():
     f.ring = m.FeedRing(4096)                    # fan-out: the relay owns the socket
     f.fanout_server = _Srv(0.0)                  # OBS is reading this feed
     f.dropped = False
-    assert f._obs_rejoin_hook() is not None              # /reload, tier change, solo /next
+    assert f._obs_rejoin_hook("streamlink") is not None  # /reload, tier change, solo /next
     f.fanout_server = _Srv(None)                 # off-air feed, OBS dropped it
-    assert f._obs_rejoin_hook() is None                  # ping-pong handover stays seamless
+    assert f._obs_rejoin_hook("streamlink") is None      # ping-pong handover stays seamless
     f.dropped = True
-    assert f._obs_rejoin_hook() is not None              # drop-recovery, unchanged
+    assert f._obs_rejoin_hook("streamlink") is not None  # drop-recovery, unchanged
     # Direct-serve (no ring): OBS holds the socket to streamlink and reconnects itself —
     # rebuilding its input there would be a flicker for nothing.
     f.ring = None
     f.fanout_server = _Srv(0.0)
-    assert f._obs_rejoin_hook() is None
+    assert f._obs_rejoin_hook("streamlink") is None
 
 
 def t_serve_fanout_bumps_the_generation_a_stale_rejoin_compares():
@@ -1618,6 +1622,46 @@ def t_rejoin_is_stale_when_its_serve_was_superseded():
     assert m.rejoin_is_stale(False, False, 4, 5) is True     # another serve took over
     assert m.rejoin_is_stale(True, False, 4, 4) is True      # feed stopping
     assert m.rejoin_is_stale(False, True, 4, 4) is True      # a restart is under way
+    # The serve that scheduled the rejoin died inside the wait. stop, advance and the
+    # generation all still say "same serve" for the full window, because the next one
+    # starts only after dead_serve_backoff (>= RETRY_SLEEP). Without the serving check
+    # OBS would be rebuilt against a feed with no bytes.
+    assert m.rejoin_is_stale(False, False, 4, 4, False) is True
+    assert m.rejoin_is_stale(False, False, 4, 4, True) is False
+    assert m.dead_serve_backoff(1) > m.FEED_PREFETCH_LAND_S   # that window really is open
+
+
+def t_feed_prefetch_land_s_lets_zero_mean_rejoin_immediately():
+    # Unlike the other feed knobs, 0 is meaningful here: it restores the pre-#614
+    # immediate rejoin, the fallback for a source whose burst is not worth waiting out.
+    assert m.feed_prefetch_land_s({}) == m.FEED_PREFETCH_LAND_S
+    assert m.feed_prefetch_land_s({"RACECAST_FEED_PREFETCH_LAND_S": "0"}) == 0.0
+    assert m.feed_prefetch_land_s({"RACECAST_FEED_PREFETCH_LAND_S": "2.5"}) == 2.5
+    assert m.feed_prefetch_land_s({"RACECAST_FEED_PREFETCH_LAND_S": ""}) == m.FEED_PREFETCH_LAND_S
+    assert m.feed_prefetch_land_s({"RACECAST_FEED_PREFETCH_LAND_S": "x"}) == m.FEED_PREFETCH_LAND_S
+    assert m.feed_prefetch_land_s({"RACECAST_FEED_PREFETCH_LAND_S": "-1"}) == m.FEED_PREFETCH_LAND_S
+    # The override has to reach the hook, or it would be cosmetic.
+    class _Srv:
+        def consumer_health(self, now): return 0.0, 0
+    f = m.Feed("A", 53001, 0, lambda: [], LOGDIR)
+    f.ring = m.FeedRing(4096)
+    f.fanout_server = _Srv()
+    f.dropped = True
+    seen = []
+    f._obs_rejoin_after_prefetch = lambda land_s, **kw: seen.append(land_s)
+    old = os.environ.get("RACECAST_FEED_PREFETCH_LAND_S")
+    try:
+        os.environ["RACECAST_FEED_PREFETCH_LAND_S"] = "0"
+        f._obs_rejoin_hook("streamlink")()
+        os.environ["RACECAST_FEED_PREFETCH_LAND_S"] = "2.5"
+        f._obs_rejoin_hook("streamlink")()
+        f._obs_rejoin_hook("ffmpeg")()       # a local feed has no burst: knob or not
+    finally:
+        if old is None:
+            os.environ.pop("RACECAST_FEED_PREFETCH_LAND_S", None)
+        else:
+            os.environ["RACECAST_FEED_PREFETCH_LAND_S"] = old
+    assert seen == [0.0, 2.5, 0.0], seen
 
 
 def t_prefetch_rejoin_waits_then_rebuilds_and_drops_a_stale_one():
@@ -1629,6 +1673,7 @@ def t_prefetch_rejoin_waits_then_rebuilds_and_drops_a_stale_one():
             calls.append(ports); return (["Feed A"], "")
     f = m.Feed("A", 53001, 0, lambda: [], LOGDIR)
     f.serve_generation = 7
+    f.phase = "serving"                    # the rejoin only fires while bytes flow
     waited = []
     def _sleep(s):
         waited.append(s)
@@ -1647,9 +1692,17 @@ def t_prefetch_rejoin_waits_then_rebuilds_and_drops_a_stale_one():
                                      sleep=_sleep_then_supersede).join(5)
         assert waited == [m.FEED_PREFETCH_LAND_S], waited
         assert calls == [], calls
+        # The serve died during the wait (phase left "serving"): no rebuild.
+        calls.clear(); waited.clear()
+        f.serve_generation = 8
+        def _sleep_then_die(s):
+            waited.append(s); f.phase = "connecting"
+        f._obs_rejoin_after_prefetch(m.FEED_PREFETCH_LAND_S, sleep=_sleep_then_die).join(5)
+        assert waited == [m.FEED_PREFETCH_LAND_S], waited
+        assert calls == [], calls
+        f.phase = "serving"
         # A local capture feed has no burst: no wait at all, rebuild straight away.
         waited.clear()
-        f.serve_generation = 8
         f._obs_rejoin_after_prefetch(m.prefetch_land_s("ffmpeg"), sleep=_sleep).join(5)
         assert waited == [], waited
         assert calls == [[53001]], calls

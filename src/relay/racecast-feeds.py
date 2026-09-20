@@ -720,6 +720,20 @@ def should_obs_reconnect(fanout, dropped, consumer_attached=False):
 FEED_PREFETCH_LAND_S = 5.0
 
 
+def feed_prefetch_land_s(environ, default=FEED_PREFETCH_LAND_S):
+    """Prefetch wait (s) before the OBS rejoin, overridable with
+    RACECAST_FEED_PREFETCH_LAND_S. **0 restores the immediate rejoin** (the behaviour
+    before #614's wait) — the right fallback for a source whose burst is not worth
+    waiting out, such as Twitch low-latency, where the 5 s default is uncalibrated.
+    Because 0 is a meaningful value here it is parsed with its own >= 0 rule rather
+    than _env_float's > 0. Pure → unit-tested."""
+    try:
+        v = float(str(environ.get("RACECAST_FEED_PREFETCH_LAND_S", "")).strip())
+    except (TypeError, ValueError):
+        return default
+    return v if v >= 0 else default
+
+
 def prefetch_land_s(tool, land_s=FEED_PREFETCH_LAND_S):
     """How long a rejoin waits for the new serve's prefetch, decided by the tool that
     produces the bytes. Only streamlink fetches an HLS burst; the local capture ffmpeg
@@ -728,12 +742,19 @@ def prefetch_land_s(tool, land_s=FEED_PREFETCH_LAND_S):
     return land_s if tool == "streamlink" else 0.0
 
 
-def rejoin_is_stale(stopped, advancing, gen_at_start, gen_now):
+def rejoin_is_stale(stopped, advancing, gen_at_start, gen_now, serving=True):
     """Whether a scheduled prefetch rejoin must no-op once its wait is over: the feed is
-    stopping, a restart is already under way, or another serve has taken over since the
-    rejoin was scheduled. Rebuilding then would drop OBS onto the NEWEST serve's prefetch
-    burst — exactly what the wait exists to avoid. Pure → unit-tested."""
-    return bool(stopped or advancing or gen_now != gen_at_start)
+    stopping, a restart is already under way, another serve has taken over since the
+    rejoin was scheduled, or the feed is no longer serving.
+
+    The first three protect the NEWEST serve — rebuilding then would drop OBS onto its
+    prefetch burst, exactly what the wait exists to avoid. `serving` covers the case none
+    of them sees: a serve that delivered bytes and then died inside the wait leaves stop,
+    advance and the generation untouched for the whole window, because the next serve
+    only starts after dead_serve_backoff (>= RETRY_SLEEP, 10 s). Rebuilding OBS against a
+    feed with no bytes cannot help, and #581 rules out automation that acts without
+    improving the measured state. Pure → unit-tested."""
+    return bool(stopped or advancing or gen_now != gen_at_start or not serving)
 
 
 def cursor_progress_ratio(prev_cursor_ms, cursor_ms, dt_s):
@@ -6806,7 +6827,8 @@ class Feed:
             if land_s > 0:
                 sleep(land_s)
                 if rejoin_is_stale(self.stop, self.advance.is_set(),
-                                   gen, self.serve_generation):
+                                   gen, self.serve_generation,
+                                   self.phase == "serving"):
                     self.log.debug("fan-out rejoin on %s skipped — serve %d was "
                                    "superseded during the prefetch wait", self.name, gen)
                     return
@@ -6819,13 +6841,15 @@ class Feed:
             return None
         return t                       # production ignores it; tests join on it
 
-    def _obs_rejoin_hook(self, tool="streamlink"):
+    def _obs_rejoin_hook(self, tool):
         """The `on_first_byte` hook Feed.run hands the fan-out serve: a prefetch-delayed
-        rejoin when this re-serve would splice into an open OBS demuxer, else None."""
+        rejoin when this re-serve would splice into an open OBS demuxer, else None.
+        `tool` is required — defaulting it would hand a future caller the 5 s streamlink
+        wait for a source that has no burst."""
         if not should_obs_reconnect(self.ring is not None, self.dropped,
                                     self.consumer_attached()):
             return None
-        land_s = prefetch_land_s(tool)
+        land_s = prefetch_land_s(tool, feed_prefetch_land_s(os.environ))
         return lambda: self._obs_rejoin_after_prefetch(land_s)
 
     def _serve_fanout(self, target, serve_platform, token, on_first_byte=None,

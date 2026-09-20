@@ -114,9 +114,12 @@ help a consumer that is chronically slower than real time. So:
   is byte **arrival** time, so streamlink's HLS prefetch burst lands entirely inside the
   3 s trailing mark and an immediate rejoin would put OBS at the burst's start — a clean
   demuxer 10–19 s behind live. Waiting it out lets the burst age past the mark. The wait
-  is skipped for a local capture feed (#592), whose ffmpeg has no burst. A rejoin whose
-  serve was superseded during the wait no-ops (`rejoin_is_stale`), because rebuilding
-  then would drop OBS onto the newest serve's burst instead.
+  is skipped for a local capture feed (#592), whose ffmpeg has no burst, and
+  `RACECAST_FEED_PREFETCH_LAND_S=0` restores the immediate rejoin for a source where the
+  wait is not worth it (Twitch low-latency, where the value is uncalibrated). A rejoin
+  that no longer belongs to the running serve no-ops (`rejoin_is_stale`): rebuilding
+  would drop OBS onto the newest serve's burst, or — when the serve died inside the wait
+  — onto a feed with no bytes at all.
 
 ## Test strategy (TDD)
 
