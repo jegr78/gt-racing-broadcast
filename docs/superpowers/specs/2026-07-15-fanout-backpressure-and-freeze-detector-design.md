@@ -109,6 +109,14 @@ help a consumer that is chronically slower than real time. So:
   solo and qualifying single-feed `/next`. The ping-pong handover is still excluded, for
   the original reason: `close_when_inactive` means OBS has already dropped the off-air
   feed, so there is no open demuxer to splice into and nothing to rebuild.
+  That rejoin is also **delayed** by `FEED_PREFETCH_LAND_S` (5 s, the value
+  `obs_benchmark.PREFETCH_LAND_S` already used for the #584 run). The ring's time index
+  is byte **arrival** time, so streamlink's HLS prefetch burst lands entirely inside the
+  3 s trailing mark and an immediate rejoin would put OBS at the burst's start — a clean
+  demuxer 10–19 s behind live. Waiting it out lets the burst age past the mark. The wait
+  is skipped for a local capture feed (#592), whose ffmpeg has no burst. A rejoin whose
+  serve was superseded during the wait no-ops (`rejoin_is_stale`), because rebuilding
+  then would drop OBS onto the newest serve's burst instead.
 
 ## Test strategy (TDD)
 

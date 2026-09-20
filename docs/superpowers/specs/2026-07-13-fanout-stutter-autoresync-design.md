@@ -47,7 +47,9 @@ Two distinct triggers, same fix family:
   that drops OBS's socket so it re-joins the fan-out at the live edge with a clean demuxer.
   This is exactly what the manual "OBS Feed Reset" button and the re-serve
   `on_first_byte` hook already call (since #614 that hook fires on a drop **and** on any
-  restart with a consumer still attached). Best-effort, threaded, never crashes the serve.
+  restart with a consumer still attached, and it waits `FEED_PREFETCH_LAND_S` for the HLS
+  prefetch burst to land so the rejoin does not land on the burst's start). Best-effort,
+  threaded, never crashes the serve.
 - **The ring already tracks absolute offsets:** `FeedRing.live_offset()` = `_base + len(_buf)`;
   each consumer carries its own `cursor`. The cursor-snap (`if cursor < self._base`) is the
   exact data-loss event.

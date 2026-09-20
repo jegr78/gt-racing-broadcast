@@ -709,6 +709,33 @@ def should_obs_reconnect(fanout, dropped, consumer_attached=False):
     return bool(fanout and (dropped or consumer_attached))
 
 
+# After the first byte of a new serve, how long until streamlink's HLS prefetch burst
+# has landed in the ring. The rejoin has to wait for it (#614): the ring's time index is
+# byte ARRIVAL time, so a burst that lands inside RACECAST_FEED_PREBUFFER_S sits entirely
+# above the trailing join mark, and OBS would rejoin at the burst's START — 4 x 5 s of
+# YouTube media, the 10-19 s backlog measured on 2026-09-19. Once the burst has aged past
+# the mark, the join lands near the live edge instead. Same value and same reasoning as
+# obs_benchmark.PREFETCH_LAND_S, which made this wait explicit for the #584 measurement
+# run; keep the two in sync.
+FEED_PREFETCH_LAND_S = 5.0
+
+
+def prefetch_land_s(tool, land_s=FEED_PREFETCH_LAND_S):
+    """How long a rejoin waits for the new serve's prefetch, decided by the tool that
+    produces the bytes. Only streamlink fetches an HLS burst; the local capture ffmpeg
+    (#592) writes continuously, so there is nothing to wait out and its rejoin is
+    immediate. Pure → unit-tested."""
+    return land_s if tool == "streamlink" else 0.0
+
+
+def rejoin_is_stale(stopped, advancing, gen_at_start, gen_now):
+    """Whether a scheduled prefetch rejoin must no-op once its wait is over: the feed is
+    stopping, a restart is already under way, or another serve has taken over since the
+    rejoin was scheduled. Rebuilding then would drop OBS onto the NEWEST serve's prefetch
+    burst — exactly what the wait exists to avoid. Pure → unit-tested."""
+    return bool(stopped or advancing or gen_now != gen_at_start)
+
+
 def cursor_progress_ratio(prev_cursor_ms, cursor_ms, dt_s):
     """OBS mediaCursor advance rate for one heartbeat: (Δcursor seconds)/(Δwall seconds).
     1.0 = playing at real-time, 0.0 = frozen (no advance). None when it can't be measured: a
@@ -6599,6 +6626,7 @@ class Feed:
         self.quality = None               # last streamlink-selected quality (e.g. "720p")
         self.ring = None              # set by the relay when fan-out is enabled (#358); None → direct-serve
         self.fanout_server = None     # its FeedFanoutServer (fan-out on); the freeze detector reads its snap count (#488)
+        self.serve_generation = 0     # #614: bumped per fan-out serve, so a scheduled rejoin can tell it was superseded
         self.last_byte_ts = None      # monotonic ts of the last byte pumped into the ring (fan-out health)
         self._max_inbound_gap = 0.0   # #535: largest inter-arrival gap this heartbeat interval
         self.on_recovery = None       # relay-set callback(feed, stint, downtime_s, source_state) on a drop-recovery
@@ -6766,12 +6794,34 @@ class Feed:
             return False
         return stuck is not None
 
-    def _obs_rejoin_hook(self):
-        """The `on_first_byte` hook Feed.run hands the fan-out serve: `_obs_reconnect`
-        when this re-serve would splice into an open OBS demuxer, else None."""
-        return (self._obs_reconnect
-                if should_obs_reconnect(True, self.dropped, self.consumer_attached())
-                else None)
+    def _obs_rejoin_after_prefetch(self, land_s, sleep=time.sleep):
+        """Rejoin OBS once this serve's HLS prefetch burst has landed (#614). Threaded:
+        the wait must never touch the ring reader, whose "never blocks" invariant is
+        load-bearing. Rejoining at the first byte would give OBS a clean demuxer and
+        still leave it at the START of the burst — see FEED_PREFETCH_LAND_S. `sleep` is
+        injected for tests. A serve that was superseded during the wait no-ops: its
+        rebuild would drop OBS onto the newest serve's burst."""
+        gen = self.serve_generation
+        def _run():
+            if land_s > 0:
+                sleep(land_s)
+                if rejoin_is_stale(self.stop, self.advance.is_set(),
+                                   gen, self.serve_generation):
+                    self.log.debug("fan-out rejoin on %s skipped — serve %d was "
+                                   "superseded during the prefetch wait", self.name, gen)
+                    return
+            self._obs_reconnect_now()
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
+        return t                       # production ignores it; tests join on it
+
+    def _obs_rejoin_hook(self, tool="streamlink"):
+        """The `on_first_byte` hook Feed.run hands the fan-out serve: a prefetch-delayed
+        rejoin when this re-serve would splice into an open OBS demuxer, else None."""
+        if not should_obs_reconnect(True, self.dropped, self.consumer_attached()):
+            return None
+        land_s = prefetch_land_s(tool)
+        return lambda: self._obs_rejoin_after_prefetch(land_s)
 
     def _serve_fanout(self, target, serve_platform, token, on_first_byte=None,
                       cmd=None, tool="streamlink"):
@@ -6807,6 +6857,7 @@ class Feed:
             daemon=True).start()
         self._set_phase("serving")
         self._clear_drop_health()
+        self.serve_generation += 1    # #614: this serve owns OBS from here on
         self.last_byte_ts = None
         if self.ring is not None:
             self.ring.reset_head()     # #576: a new upstream = a new init segment
@@ -6921,8 +6972,8 @@ class Feed:
                 # a consumer still attached — the director's /reload or tier change, and a
                 # single-feed /next (#614). Not on the first serve, not on the ping-pong
                 # handover: there OBS has already dropped the off-air feed.
-                _recover = self._obs_rejoin_hook()
                 tool = "ffmpeg" if local_cmd else "streamlink"
+                _recover = self._obs_rejoin_hook(tool)
                 try:
                     serve_elapsed, serve_rc = self._serve_fanout(
                         target, serve_platform, token, on_first_byte=_recover,

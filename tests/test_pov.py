@@ -1553,11 +1553,67 @@ def t_obs_rejoin_hook_covers_the_director_restart_paths():
     f = m.Feed("A", 53001, 0, lambda: [], LOGDIR)
     f.fanout_server = _Srv(0.0)                  # OBS is reading this feed
     f.dropped = False
-    assert f._obs_rejoin_hook() == f._obs_reconnect      # /reload, tier change, solo /next
+    assert f._obs_rejoin_hook() is not None              # /reload, tier change, solo /next
     f.fanout_server = _Srv(None)                 # off-air feed, OBS dropped it
     assert f._obs_rejoin_hook() is None                  # ping-pong handover stays seamless
     f.dropped = True
-    assert f._obs_rejoin_hook() == f._obs_reconnect      # drop-recovery, unchanged
+    assert f._obs_rejoin_hook() is not None              # drop-recovery, unchanged
+
+
+def t_prefetch_land_s_waits_only_for_an_hls_burst():
+    # Only streamlink fetches a prefetch burst. The local capture ffmpeg (#592) writes
+    # continuously, so its rejoin must not sit on a 5 s wait with a black gap on air.
+    assert m.prefetch_land_s("streamlink") == m.FEED_PREFETCH_LAND_S
+    assert m.FEED_PREFETCH_LAND_S > 0                    # the wait is what shed the burst
+    assert m.prefetch_land_s("ffmpeg") == 0.0
+    assert m.prefetch_land_s("streamlink", land_s=9.0) == 9.0
+
+
+def t_rejoin_is_stale_when_its_serve_was_superseded():
+    # The rejoin is scheduled at the first byte and fires FEED_PREFETCH_LAND_S later.
+    # If a second restart happened in between, rebuilding would drop OBS onto the NEWEST
+    # serve's burst — the exact backlog the wait exists to avoid.
+    assert m.rejoin_is_stale(False, False, 4, 4) is False    # same serve: fire
+    assert m.rejoin_is_stale(False, False, 4, 5) is True     # another serve took over
+    assert m.rejoin_is_stale(True, False, 4, 4) is True      # feed stopping
+    assert m.rejoin_is_stale(False, True, 4, 4) is True      # a restart is under way
+
+
+def t_prefetch_rejoin_waits_then_rebuilds_and_drops_a_stale_one():
+    # The threaded wait, driven with an injected sleep: it rebuilds only after the wait,
+    # and a serve that was superseded during it leaves OBS alone.
+    calls = []
+    class _FakeObs:
+        def release_feed_inputs(self, ports=None, **k):
+            calls.append(ports); return (["Feed A"], "")
+    f = m.Feed("A", 53001, 0, lambda: [], LOGDIR)
+    f.serve_generation = 7
+    waited = []
+    def _sleep(s):
+        waited.append(s)
+        assert calls == [], "rebuilt BEFORE the prefetch had landed"
+    old = m._obs_ws
+    m._obs_ws = _FakeObs()
+    try:
+        f._obs_rejoin_after_prefetch(m.FEED_PREFETCH_LAND_S, sleep=_sleep).join(5)
+        assert waited == [m.FEED_PREFETCH_LAND_S], waited
+        assert calls == [[53001]], calls
+        # A second serve started while the rejoin was waiting -> no rebuild.
+        calls.clear(); waited.clear()
+        def _sleep_then_supersede(s):
+            waited.append(s); f.serve_generation = 8
+        f._obs_rejoin_after_prefetch(m.FEED_PREFETCH_LAND_S,
+                                     sleep=_sleep_then_supersede).join(5)
+        assert waited == [m.FEED_PREFETCH_LAND_S], waited
+        assert calls == [], calls
+        # A local capture feed has no burst: no wait at all, rebuild straight away.
+        waited.clear()
+        f.serve_generation = 8
+        f._obs_rejoin_after_prefetch(m.prefetch_land_s("ffmpeg"), sleep=_sleep).join(5)
+        assert waited == [], waited
+        assert calls == [[53001]], calls
+    finally:
+        m._obs_ws = old
 
 
 def t_obs_reconnect_rebuilds_only_this_feeds_port():
