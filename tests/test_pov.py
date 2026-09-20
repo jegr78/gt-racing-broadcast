@@ -1508,13 +1508,206 @@ def t_latest_and_annotate_substitution():
         r.health_store.close()
 
 
-def t_should_obs_reconnect_only_on_fanout_drop():
-    # OBS reconnect fires ONLY in fan-out mode AND after a real drop — never on the
-    # first serve or a seamless handover (both have dropped=False).
+def t_should_obs_reconnect_on_fanout_drop_or_attached_consumer():
+    # OBS reconnect fires only in fan-out mode, and there on a real drop OR whenever a
+    # consumer is still attached to this feed's ring — a restart under an attached
+    # consumer splices the new stream into OBS's open demuxer (#614).
     assert m.should_obs_reconnect(True, True) is True       # fan-out + drop-recovery
-    assert m.should_obs_reconnect(True, False) is False     # fan-out, first serve / handover
+    assert m.should_obs_reconnect(True, False) is False     # fan-out, first serve / off-air handover
     assert m.should_obs_reconnect(False, True) is False     # direct-serve: OBS reconnects itself
     assert m.should_obs_reconnect(False, False) is False
+    # #614: a director restart in place (/reload, tier change) and a single-feed
+    # advance (solo/qualifying) leave dropped=False while OBS keeps reading.
+    assert m.should_obs_reconnect(True, False, True) is True
+    assert m.should_obs_reconnect(True, True, True) is True
+    # No consumer attached (the ping-pong's off-air feed) stays seamless.
+    assert m.should_obs_reconnect(True, False, False) is False
+    # Direct-serve never rebuilds: OBS owns the socket to streamlink itself.
+    assert m.should_obs_reconnect(False, False, True) is False
+    assert m.should_obs_reconnect(False, True, True) is False
+
+
+def t_feed_consumer_attached_reads_the_fanout_server():
+    # The gate above is fed from the feed's own FeedFanoutServer: consumer_health
+    # returns (None, 0) with nobody attached, and a send-block age once OBS reads.
+    f = m.Feed("A", 53001, 0, lambda: [], LOGDIR)
+    assert f.consumer_attached() is False        # direct-serve / not started: no server
+    class _Srv:
+        def __init__(self, stuck): self._stuck = stuck
+        def consumer_health(self, now): return self._stuck, 0
+    f.fanout_server = _Srv(None)
+    assert f.consumer_attached() is False        # fan-out up, OBS not reading
+    f.fanout_server = _Srv(0.0)
+    assert f.consumer_attached() is True         # a consumer just completed a read cycle
+    f.fanout_server = _Srv(12.5)
+    assert f.consumer_attached() is True         # a stuck consumer is still attached
+    class _Broken:
+        def consumer_health(self, now): raise RuntimeError("server went away")
+    f.fanout_server = _Broken()
+    assert f.consumer_attached() is False        # a health read must never break the serve
+
+
+def t_obs_rejoin_hook_covers_the_director_restart_paths():
+    # The serve loop's on_first_byte hook, driven exactly as Feed.run drives it. A
+    # /reload or a tier change clears `dropped` (both call _clear_drop_health), so
+    # before #614 these restarts handed OBS no hook at all.
+    class _Srv:
+        def __init__(self, stuck): self._stuck = stuck
+        def consumer_health(self, now): return self._stuck, 0
+    f = m.Feed("A", 53001, 0, lambda: [], LOGDIR)
+    f.ring = m.FeedRing(4096)                    # fan-out: the relay owns the socket
+    f.fanout_server = _Srv(0.0)                  # OBS is reading this feed
+    f.dropped = False
+    assert f._obs_rejoin_hook("streamlink") is not None  # /reload, tier change, solo /next
+    f.fanout_server = _Srv(None)                 # off-air feed, OBS dropped it
+    assert f._obs_rejoin_hook("streamlink") is None      # ping-pong handover stays seamless
+    f.dropped = True
+    assert f._obs_rejoin_hook("streamlink") is not None  # drop-recovery, unchanged
+    # Direct-serve (no ring): OBS holds the socket to streamlink and reconnects itself —
+    # rebuilding its input there would be a flicker for nothing.
+    f.ring = None
+    f.fanout_server = _Srv(0.0)
+    assert f._obs_rejoin_hook("streamlink") is None
+
+
+def t_serve_fanout_bumps_the_generation_a_stale_rejoin_compares():
+    # rejoin_is_stale compares the generation the rejoin was scheduled under against the
+    # current one. If the serve never bumped it, a rejoin from the PREVIOUS serve would
+    # still fire and drop OBS onto the newest serve's prefetch burst. Driven through the
+    # real _serve_fanout with a fake process, because that is the only place it moves.
+    import io as _io, subprocess as _sp
+    class _Proc:
+        returncode = 0
+        def __init__(self):
+            self.stdout = _io.BytesIO(b"payload")
+            self.stderr = _io.BytesIO(b"")
+        def poll(self): return 0
+        def wait(self, timeout=None): return 0
+        def terminate(self): pass
+        def kill(self): pass
+    class _FakeSub:
+        PIPE = _sp.PIPE
+        TimeoutExpired = _sp.TimeoutExpired
+        @staticmethod
+        def Popen(*a, **k): return _Proc()
+    f = m.Feed("A", 53001, 0, lambda: [], LOGDIR)
+    f.ring = m.FeedRing(4096)
+    old = m.subprocess
+    m.subprocess = _FakeSub
+    try:
+        before = f.serve_generation
+        f._serve_fanout("t", "youtube", None, cmd=["ignored"], tool="ffmpeg")
+        assert f.serve_generation == before + 1, f.serve_generation
+        f._serve_fanout("t", "youtube", None, cmd=["ignored"], tool="ffmpeg")
+        assert f.serve_generation == before + 2, f.serve_generation
+    finally:
+        m.subprocess = old
+    assert f.ring.live_offset() > 0        # the fake bytes really went through the loop
+
+
+def t_prefetch_land_s_waits_only_for_an_hls_burst():
+    # Only streamlink fetches a prefetch burst. The local capture ffmpeg (#592) writes
+    # continuously, so its rejoin must not sit on a 5 s wait with a black gap on air.
+    assert m.prefetch_land_s("streamlink") == m.FEED_PREFETCH_LAND_S
+    assert m.FEED_PREFETCH_LAND_S > 0                    # the wait is what shed the burst
+    assert m.prefetch_land_s("ffmpeg") == 0.0
+    assert m.prefetch_land_s("streamlink", land_s=9.0) == 9.0
+
+
+def t_rejoin_is_stale_when_its_serve_was_superseded():
+    # The rejoin is scheduled at the first byte and fires FEED_PREFETCH_LAND_S later.
+    # If a second restart happened in between, rebuilding would drop OBS onto the NEWEST
+    # serve's burst — the exact backlog the wait exists to avoid.
+    assert m.rejoin_is_stale(False, False, 4, 4) is False    # same serve: fire
+    assert m.rejoin_is_stale(False, False, 4, 5) is True     # another serve took over
+    assert m.rejoin_is_stale(True, False, 4, 4) is True      # feed stopping
+    assert m.rejoin_is_stale(False, True, 4, 4) is True      # a restart is under way
+    # The serve that scheduled the rejoin died inside the wait. stop, advance and the
+    # generation all still say "same serve" for the full window, because the next one
+    # starts only after dead_serve_backoff (>= RETRY_SLEEP). Without the serving check
+    # OBS would be rebuilt against a feed with no bytes.
+    assert m.rejoin_is_stale(False, False, 4, 4, False) is True
+    assert m.rejoin_is_stale(False, False, 4, 4, True) is False
+    assert m.dead_serve_backoff(1) > m.FEED_PREFETCH_LAND_S   # that window really is open
+
+
+def t_feed_prefetch_land_s_lets_zero_mean_rejoin_immediately():
+    # Unlike the other feed knobs, 0 is meaningful here: it restores the pre-#614
+    # immediate rejoin, the fallback for a source whose burst is not worth waiting out.
+    assert m.feed_prefetch_land_s({}) == m.FEED_PREFETCH_LAND_S
+    assert m.feed_prefetch_land_s({"RACECAST_FEED_PREFETCH_LAND_S": "0"}) == 0.0
+    assert m.feed_prefetch_land_s({"RACECAST_FEED_PREFETCH_LAND_S": "2.5"}) == 2.5
+    assert m.feed_prefetch_land_s({"RACECAST_FEED_PREFETCH_LAND_S": ""}) == m.FEED_PREFETCH_LAND_S
+    assert m.feed_prefetch_land_s({"RACECAST_FEED_PREFETCH_LAND_S": "x"}) == m.FEED_PREFETCH_LAND_S
+    assert m.feed_prefetch_land_s({"RACECAST_FEED_PREFETCH_LAND_S": "-1"}) == m.FEED_PREFETCH_LAND_S
+    # The override has to reach the hook, or it would be cosmetic.
+    class _Srv:
+        def consumer_health(self, now): return 0.0, 0
+    f = m.Feed("A", 53001, 0, lambda: [], LOGDIR)
+    f.ring = m.FeedRing(4096)
+    f.fanout_server = _Srv()
+    f.dropped = True
+    seen = []
+    f._obs_rejoin_after_prefetch = lambda land_s, **kw: seen.append(land_s)
+    old = os.environ.get("RACECAST_FEED_PREFETCH_LAND_S")
+    try:
+        os.environ["RACECAST_FEED_PREFETCH_LAND_S"] = "0"
+        f._obs_rejoin_hook("streamlink")()
+        os.environ["RACECAST_FEED_PREFETCH_LAND_S"] = "2.5"
+        f._obs_rejoin_hook("streamlink")()
+        f._obs_rejoin_hook("ffmpeg")()       # a local feed has no burst: knob or not
+    finally:
+        if old is None:
+            os.environ.pop("RACECAST_FEED_PREFETCH_LAND_S", None)
+        else:
+            os.environ["RACECAST_FEED_PREFETCH_LAND_S"] = old
+    assert seen == [0.0, 2.5, 0.0], seen
+
+
+def t_prefetch_rejoin_waits_then_rebuilds_and_drops_a_stale_one():
+    # The threaded wait, driven with an injected sleep: it rebuilds only after the wait,
+    # and a serve that was superseded during it leaves OBS alone.
+    calls = []
+    class _FakeObs:
+        def release_feed_inputs(self, ports=None, **k):
+            calls.append(ports); return (["Feed A"], "")
+    f = m.Feed("A", 53001, 0, lambda: [], LOGDIR)
+    f.serve_generation = 7
+    f.phase = "serving"                    # the rejoin only fires while bytes flow
+    waited = []
+    def _sleep(s):
+        waited.append(s)
+        assert calls == [], "rebuilt BEFORE the prefetch had landed"
+    old = m._obs_ws
+    m._obs_ws = _FakeObs()
+    try:
+        f._obs_rejoin_after_prefetch(m.FEED_PREFETCH_LAND_S, sleep=_sleep).join(5)
+        assert waited == [m.FEED_PREFETCH_LAND_S], waited
+        assert calls == [[53001]], calls
+        # A second serve started while the rejoin was waiting -> no rebuild.
+        calls.clear(); waited.clear()
+        def _sleep_then_supersede(s):
+            waited.append(s); f.serve_generation = 8
+        f._obs_rejoin_after_prefetch(m.FEED_PREFETCH_LAND_S,
+                                     sleep=_sleep_then_supersede).join(5)
+        assert waited == [m.FEED_PREFETCH_LAND_S], waited
+        assert calls == [], calls
+        # The serve died during the wait (phase left "serving"): no rebuild.
+        calls.clear(); waited.clear()
+        f.serve_generation = 8
+        def _sleep_then_die(s):
+            waited.append(s); f.phase = "connecting"
+        f._obs_rejoin_after_prefetch(m.FEED_PREFETCH_LAND_S, sleep=_sleep_then_die).join(5)
+        assert waited == [m.FEED_PREFETCH_LAND_S], waited
+        assert calls == [], calls
+        f.phase = "serving"
+        # A local capture feed has no burst: no wait at all, rebuild straight away.
+        waited.clear()
+        f._obs_rejoin_after_prefetch(m.prefetch_land_s("ffmpeg"), sleep=_sleep).join(5)
+        assert waited == [], waited
+        assert calls == [[53001]], calls
+    finally:
+        m._obs_ws = old
 
 
 def t_obs_reconnect_rebuilds_only_this_feeds_port():

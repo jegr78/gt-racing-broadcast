@@ -63,6 +63,10 @@ TIERS = ("full", "robust")
 
 # After the new serve delivers its first bytes, how long until the HLS prefetch burst
 # has landed in the ring. streamlink fetches it in one go; a few seconds covers it.
+# Since #614 the relay waits the same span before rejoining OBS by itself
+# (`FEED_PREFETCH_LAND_S` in the relay) — keep the two in sync. The benchmark keeps
+# issuing its own reset: it needs to know exactly when the rejoin happened to time the
+# settle window, and the relay's is best-effort and fires only with OBS attached.
 PREFETCH_LAND_S = 5
 # The rejoin rebuilds the OBS input; OBS reconnects within a second or two. Sampling
 # before that would see the rebuild's cursor jump and mark every window disturbed.
