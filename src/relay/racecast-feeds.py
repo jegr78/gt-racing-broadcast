@@ -7931,8 +7931,12 @@ class Relay:
     def _sample_consumer_backlogs(self):
         """#583: read+reset each fan-out server's interval backlog floor ONCE per heartbeat
         (the 2 s /status poll reads the live value and never resets), and classify the
-        feeds whose consumer fell behind the live edge. Observability only: nothing acts
-        on it until #581 stage 4/5."""
+        feeds whose consumer fell behind the live edge.
+
+        `_backlogged_feeds` is no longer observability only: `_backlog_shed_tick` runs
+        immediately after this in the same heartbeat and rebuilds the on-air feed's OBS
+        input off it (2026-09-21). Keep the two adjacent and in this order — the shed reads
+        the classification this call just produced."""
         floors, lagging = {}, {}
         live = list(self.feeds.items()) + ([("POV", self.pov)] if self.pov else [])
         for name, f in live:

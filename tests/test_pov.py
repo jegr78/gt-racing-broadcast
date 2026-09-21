@@ -3175,12 +3175,18 @@ def t_backlog_shed_leaves_a_healthy_or_idle_feed_alone():
     r, f = _shed_relay()
     r._backlogged_feeds = {}                       # measured, not degraded
     r._backlog_shed_tick(1000.0)
-    assert r._rebuilds == [] and r._backlog_streak[r.live_feed()] == 0
-    r._backlogged_feeds = {r.live_feed(): 9.0}     # degraded but not serving
-    f.phase = "connecting"
+    assert r._rebuilds == [], "a feed that is not backlogged must be left alone"
+    assert r._backlog_streak.get(r.live_feed(), 0) == 0, "a healthy tick must clear the streak"
+    # Build a real streak first, or the reset below would pass without any reset at all.
+    r, f = _shed_relay()
+    r._backlog_shed_ticks = 3                      # so the streak grows instead of firing
     r._backlog_shed_tick(1000.0)
+    r._backlog_shed_tick(1100.0)
+    assert r._backlog_streak.get(r.live_feed(), 0) == 2 and r._rebuilds == []
+    f.phase = "connecting"                         # a handover: degraded, but not serving
+    r._backlog_shed_tick(1200.0)
     assert r._rebuilds == [], "a feed that is not serving has no live edge to be behind"
-    assert r._backlog_streak[r.live_feed()] == 0, "a handover must not carry a streak over"
+    assert r._backlog_streak.get(r.live_feed(), 0) == 0, "a handover must not carry a streak over"
 
 
 def t_backlog_shed_kill_switch_and_shared_cooldown_both_hold_it_off():
