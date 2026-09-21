@@ -1060,16 +1060,9 @@ def _srv_with(consumers):
 
 
 def t_an_abandoned_consumer_is_the_one_superseded_and_not_moving():
-    # Measured on the producer host 2026-09-21: after an OBS input rebuild OBS held TWO
-    # ESTABLISHED connections to one feed port for its single media source. It opens the
-    # new one and never closes the old, and since its process still owns that socket the
-    # peer never resets, so TCP cannot see the abandonment. The relay kept the handler in
-    # sendall with a frozen cursor and consumer_backlog takes max() over all consumers,
-    # so /status reported the DEAD connection's backlog forever.
-    #
-    # Being superseded alone must NOT condemn a consumer: this port is built to serve
-    # several at once (see t_fanout_server_streams_ring_to_two_consumers). What condemns
-    # one is superseded AND not having accepted a byte since.
+    # Windows OBS keeps the old connection after an input rebuild, so max() over all
+    # consumers reported a dead socket's backlog forever. Superseded alone must not
+    # condemn one — this port serves several at once.
     old, new = _FakeConn("old"), _FakeConn("new")
     srv = _srv_with({1: {"cursor": 100, "conn": old, "cycle_ts": 999.0, "snaps": 0},
                      2: {"cursor": 500, "conn": new, "cycle_ts": 999.0, "snaps": 0}})
@@ -1093,17 +1086,8 @@ def t_an_abandoned_consumer_is_the_one_superseded_and_not_moving():
 
 
 def t_a_merely_slow_consumer_is_never_judged_abandoned():
-    # Found by tools/slow-consumer-probe.py on the producer host, 2026-09-21, minutes
-    # after the staleness rule shipped. A consumer reading at 40% of real time held a
-    # steady 15.8 s backlog — and every time the shed fired, OBS reconnected, everyone
-    # got superseded, and the reported backlog collapsed to OBS's 2.9 s for a heartbeat
-    # or two. The relay briefly believed the backlog was gone while it plainly was not.
-    #
-    # The cause was the signal, not the rule: `cursor` only moves when a read CYCLE
-    # completes, and a slow consumer sits inside one for many seconds. `cycle_ts` is
-    # stamped whenever a read or a send completes, so it separates the two cases the way
-    # they actually differ — an abandoned socket blocks in sendall and never completes
-    # another one, while a slow consumer keeps completing them, just slowly.
+    # The signal must be cycle_ts, not cursor: the cursor only moves when a read cycle
+    # completes, and a slow consumer sits inside one for many seconds.
     srv = _srv_with({})
     late = m.FANOUT_STALE_GRACE_S + 1.0
 
@@ -1124,9 +1108,7 @@ def t_a_merely_slow_consumer_is_never_judged_abandoned():
 
 
 def t_a_stale_consumer_never_becomes_the_reported_backlog():
-    # The number is what the health reason, health-history and the automatic shed all
-    # read. While the dead connection counted, the shed judged its own rebuild useless
-    # and stood down after three tries.
+    # This number feeds the health reason, health-history and the shed alike.
     class _Ring:
         def age_at_offset(self, cursor, now):
             return {100: 26.0, 900: 3.0, 950: 2.4}.get(cursor)
@@ -1154,8 +1136,7 @@ def t_a_stale_consumer_never_becomes_the_reported_backlog():
 
 
 def t_reaping_never_raises_on_a_socket_the_peer_abandoned():
-    # It runs on the heartbeat. A raise here would take out the tick that also samples
-    # health, and the socket it touches is by definition one every call may fail on.
+    # On the heartbeat: a raise would take out the tick that also samples health.
     class _Hostile(_FakeConn):
         def shutdown(self, how):
             raise OSError("not connected")

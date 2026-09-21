@@ -387,9 +387,8 @@ def cleanup_old_binary(exe_dir, frozen=None, platform=None):
 
 
 def _force_utf8_io(streams=None):
-    """Issue #24, now one line: the implementation moved to logsetup.harden_stdio so
-    every entrypoint can reach it, not just the two binaries that go through
-    _bootstrap. The name stays because _BOOTSTRAP_STEPS pins this sequence."""
+    """Issue #24. Implementation lives in logsetup so every entrypoint can reach it; the
+    name stays because _BOOTSTRAP_STEPS pins this sequence."""
     import logsetup            # scripts/ is on sys.path (see the insert near line 49)
     logsetup.harden_stdio(streams)
 

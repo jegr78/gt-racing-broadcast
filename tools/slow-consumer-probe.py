@@ -1,59 +1,21 @@
 #!/usr/bin/env python3
-"""Force a SUSTAINED consumer backlog on a running relay — maintainer harness,
-NOT shipped, NOT run in CI.
+"""Force a SUSTAINED consumer backlog on a running relay — maintainer harness, not shipped.
 
-Why this exists
----------------
-The automatic backlog shed (2026-09-21) and the #583 backlog measurement both act on
-`consumer_backlog`, and neither could be proven end-to-end because **no reproducible way
-to create a real backlog existed**. Everything tried on the producer host failed, and the
-failures are informative:
+Attaches to a feed's fan-out port as an ordinary HTTP consumer and reads at a fixed
+fraction of real time, so `consumer_backlog` and everything downstream of it sees a real,
+sustained backlog.
 
-| lever | result |
-|---|---|
-| OBS pinned to one core, priority Idle | no backlog; 60.0 fps, 1.9 ms render |
-| plus four busy loops on that core | no backlog; 60.0 fps, render skip flat |
-| two 1080p60 feeds in Splitscreen + recording | no backlog; 60.0 fps, 0.84 ms, 1.1% CPU |
-| a VOD as the source | never serves: `yt-dlp -g` returns a progressive googlevideo URL and streamlink has no plugin for a bare media URL |
-| pausing the OBS media source | accepted and ignored; `mediaState` stays PLAYING |
-| `close_when_inactive=false` + scene away | works, but only TRANSIENTLY (see below) |
+It proves detection and the shed's lifecycle. It does NOT prove a rebuild removes OBS's
+own backlog: the rebuild targets OBS, and this consumer is not OBS, so a stand-down here
+is correct behaviour.
 
-The scene-away lever does produce a real backlog (3 -> 39 s, `backlogged=True`), but OBS
-**works it off again** once the source is active: the relay serves every consumer up to a
-trailing mark `RACECAST_FEED_PREBUFFER_S` behind the live edge, so a consumer that has
-fallen behind is free to sprint forward to that mark. The backlog then oscillates, the
-per-heartbeat FLOOR stays under the threshold, and the shed correctly declines to act.
+Levers that do NOT work, so nobody retries them: pinning OBS to one core (with or without
+busy loops on it), two 1080p60 feeds plus a recording, a VOD source (yt-dlp -g returns a
+progressive URL streamlink cannot open), and pausing the media input (ignored). Setting
+close_when_inactive=false and switching scene away works only transiently — the relay lets
+a consumer that fell behind sprint back to the trailing mark.
 
-That is the crux: on a host with headroom, OBS always catches up. A sustained backlog
-needs a consumer that *cannot* sprint. This tool is that consumer.
-
-What it proves, and what it does not
-------------------------------------
-It attaches to a feed's fan-out port as an ordinary HTTP consumer and reads at a fixed
-fraction of real time. It is a REAL consumer in the relay's own registry, so
-`consumer_backlog` (a max over consumers) reports it and every downstream reader — the
-`/status` pill, the health reason, health-history, the post-event report and the
-automatic shed — sees a genuine, sustained backlog.
-
-It therefore proves the DETECTION and the automation's full lifecycle: classify, fire,
-judge the rebuild, and stand down after three ineffective attempts with a plain warning.
-
-It does **not** prove that a rebuild removes OBS's own backlog. The rebuild targets OBS's
-media input; this consumer is not OBS, so the measured backlog survives it by
-construction — which is exactly why the run ends in a stand-down. Read a stand-down here
-as the automation behaving correctly, not as a failure.
-
-It also exercises the 2026-09-21 stale-consumer rule from the other side: this consumer is
-superseded whenever OBS reconnects, yet it keeps accepting bytes, so it must NEVER be
-judged abandoned. If it disappears from the backlog reading, that rule is too eager.
-
-Usage
------
-    python3 tools/slow-consumer-probe.py                       # feed A, 40% of real time
-    python3 tools/slow-consumer-probe.py --port 53002 --rate 0.25
-    python3 tools/slow-consumer-probe.py --seconds 300 --relay http://127.0.0.1:8088
-
-Ctrl+C stops it; the connection closes and the relay's reading returns to OBS alone.
+    python3 tools/slow-consumer-probe.py --port 53001 --rate 0.4 --seconds 300
 """
 import argparse
 import json
@@ -69,11 +31,8 @@ CHUNK = 16384
 
 
 def read_budget(elapsed_s, bytes_read, source_bps, rate):
-    """How many bytes this consumer is allowed to have read by now. Pure.
-
-    Pacing against the SOURCE's own rate is what makes the backlog grow linearly and
-    predictably: at rate=0.4 the consumer falls behind 0.6 s per second, so it crosses
-    any threshold at a time you can compute in advance instead of waiting to see."""
+    """How many bytes this consumer may have read by now. Paced against the source's own
+    rate, so the backlog grows linearly and predictably. Pure."""
     return max(0, int(source_bps * rate * elapsed_s) - bytes_read)
 
 

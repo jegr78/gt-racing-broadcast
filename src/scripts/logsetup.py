@@ -10,29 +10,12 @@ DEFAULT_RETENTION_DAYS = 7
 
 
 def harden_stdio(streams=None, environ=None):
-    """Make this process, and every child it spawns, survive a narrow console.
+    """Make this process and every child survive a narrow console (issue #24).
 
-    The in-process half is issue #24's `_force_utf8_io`, moved here verbatim in
-    behaviour so the relay and the helper scripts can reach it too — it used to live in
-    racecast.py, which the dependency-light scripts must not import, so only the CLI was
-    protected. That is why the relay crashed at startup on the German producer host
-    2026-09-21: its argparse help carries an arrow, the console was cp1252, and nothing
-    had reconfigured stdout.
-
-    UTF-8 rather than the console's own encoding, deliberately (#24): whenever stdout is
-    a PIPE — every Control Center job — Python picks the locale encoding, and those
-    captured bytes are rendered in a UTF-8 web UI. `errors="replace"` is the backstop so
-    an un-encodable character degrades to "?" instead of raising.
-
-    The child half is new and is what makes this stop recurring. Setting
-    `PYTHONIOENCODING` in our environment reaches every child whatever spawn site
-    creates it — 17 entrypoints under src/ and 124 LOG/print lines carrying non-ASCII,
-    none of which have to be edited or kept in sync. An operator who set it deliberately
-    keeps their value.
-
-    Best-effort throughout: it runs before anything else in main(), so it must not be
-    able to break a start. A stream that is None (a --windowed build has no stdout),
-    predates reconfigure(), or rejects it is silently skipped."""
+    utf-8 rather than the console's own encoding: a Control Center job's stdout is a PIPE
+    whose bytes are rendered in a UTF-8 web UI. PYTHONIOENCODING carries the same leniency
+    to children, whatever spawn site creates them. Best-effort; runs before anything in
+    main(), so it must not be able to break a start."""
     env = os.environ if environ is None else environ
     for stream in (streams if streams is not None else (sys.stdout, sys.stderr)):
         try:

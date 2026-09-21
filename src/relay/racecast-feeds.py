@@ -174,23 +174,9 @@ LOG = logging.getLogger("racecast.relay")
 # (no YouTube plugin involved, so no bot-check on the serving side).
 YTDLP_FORMAT = "b[height<=1080]/b"   # prefer <=1080p, auto-fall back to lower
 
-# yt-dlp player clients to union formats from, in order (2026-09-21).
-#
-# Every selector above asks for a MUXED format (`b` = best with video AND audio), because
-# the relay resolves ONE url with `-g` and hands it to a single streamlink process. A
-# separate video+audio pair would print two urls and break that pipeline.
-#
-# yt-dlp's default client does not always offer one. Measured on two ordinary live GT7
-# streams this morning, its `visionos` player returned only video-only (269/229/230/231/
-# 311/312) and audio-only (233/234) renditions, so `b[height<=1080]/b` matched nothing and
-# a perfectly normal YouTube live stream failed with "Requested format is not available" —
-# the relay could not pull it at all.
-#
-# yt-dlp collects formats from EVERY listed client and selects across the union, so
-# `default` stays first and keeps winning wherever it already offers a muxed format;
-# `mweb` only fills the gap. Both measured streams then resolved to format 301
-# (1920x1080@60) as one url. `mweb` over `android` deliberately: the android client is the
-# one YouTube bot-flags most readily, and a bot flag costs a feed (see #505).
+# Formats are unioned across these clients: the default one sometimes offers no MUXED
+# format at all, and the relay needs one url for one streamlink. `mweb` over `android`,
+# which YouTube bot-flags most readily.
 YTDLP_PLAYER_CLIENTS = "default,mweb"
 STREAMLINK_SERVE = ["--ringbuffer-size", "64M", "--hls-live-edge", "4"]
 # "Stop early on missing live segments" tolerance. Default 3 gave up at ~6 s
@@ -423,7 +409,9 @@ HEALTH_COLORS = {                # Discord embed sidebar colour per level
 _HEALTH_LABEL = {"green": "OK", "yellow": "DEGRADED", "red": "CRITICAL"}
 
 # ---------- Feed fan-out stall detection (relay feed multiplexing, #358) --------
-FANOUT_STALE_GRACE_S = 5.0   # superseded + not moving for this long = abandoned
+# Superseded + nothing completed for this long = abandoned. Must outlast the slowest
+# legitimate sendall to a slow consumer, hence well above RACECAST_FEED_STALL_S.
+FANOUT_STALE_GRACE_S = 30.0
 FANOUT_STALL_S = 8.0   # seconds without a byte from streamlink before a fan-out reader is "stalled"
 FANOUT_RING_BYTES = 16 * 1024 * 1024  # per-feed ring window (bounded; ≈12 s at 10 Mbps). Not a safety lever (#581): a larger ring only delays a slow consumer's overflow and hides it longer.
 MARK_MIN_INTERVAL_S = 0.1        # #533: throttle the FeedRing time index to ~1 mark/100 ms
@@ -877,18 +865,9 @@ def freeze_decision(frac, since_last_reset_s, *, frac_threshold, cooldown_s):
 
 
 def backlog_shed_decision(streak, since_last_reset_s, *, min_streak, cooldown_s):
-    """Whether to auto-rebuild the on-air feed's OBS input because its consumer is behind
-    the live edge: True when the feed has been classified backlogged for `min_streak`
-    consecutive heartbeats AND the cooldown since the last rebuild has elapsed.
-
-    Deliberately the same shape as `freeze_decision`, because the two are reasons for the
-    SAME control and a director reading the log should not have to learn two idioms.
-
-    `streak` counts heartbeats, not samples, and one is enough by default: the classified
-    value is `take_backlog_floor`, the MINIMUM backlog over the whole interval, so a
-    transient spike raises the peak and never the floor. A degraded floor therefore
-    already means the feed was late for the entire heartbeat. A None streak (nothing
-    measured) never trips it. Pure → unit-tested."""
+    """Whether to auto-rebuild the on-air feed's OBS input: True after `min_streak`
+    consecutive backlogged heartbeats, once the shared cooldown has elapsed. Same shape as
+    `freeze_decision` — both pull the same control. A None streak never trips it. Pure."""
     if since_last_reset_s is not None and since_last_reset_s < cooldown_s:
         return False
     return streak is not None and streak >= min_streak
@@ -926,14 +905,9 @@ class RebuildGuard:
         return not self.stood_down
 
     def on_fire(self, reason="freeze"):
-        """Arm the judgement for a rebuild this reason just fired.
-
-        A rebuild that is still awaiting judgement when the NEXT one fires did not end the
-        trouble — something pulled the same control again before the first verdict was in —
-        so it is counted as ineffective here instead of being silently overwritten. Without
-        that, two reasons sharing one `pending` slot would leak attempts out of the
-        three-strike budget and the guard would never stand down. Counting it errs toward
-        standing down sooner, which is the direction that costs the audience less."""
+        """Arm the judgement for a rebuild this reason just fired. A still-unjudged one
+        that the next rebuild supersedes did not end the trouble, so it counts as
+        ineffective rather than being overwritten out of the three-strike budget."""
         if self.pending is not None:
             self._count_ineffective()
         self.pending = reason
@@ -946,18 +920,9 @@ class RebuildGuard:
         return False
 
     def judge(self, still_bad, *, reason="freeze"):
-        """Judge the pending rebuild, but only if THIS reason fired it. Returns True when
-        this call stood the guard down.
-
-        The reason tag matters because the two reasons run on different threads at
-        different cadences: freeze on its own sampler, the backlog shed on the heartbeat.
-        With a single `pending` flag whichever judge ran first would consume and clear the
-        other's rebuild, so one reason's three-strike budget would never count down while
-        the other's would count rebuilds it did not fire.
-
-        `still_bad is None` (nothing measurable yet) consumes nothing. That is load-bearing
-        for the backlog: right after a rebuild OBS is detached for a stretch of the
-        interval, so its floor can be None for a whole heartbeat."""
+        """Judge the pending rebuild, but only if THIS reason fired it — the two judges run
+        on different threads, and either would otherwise consume the other's. True when
+        this call stood the guard down. `still_bad is None` consumes nothing."""
         if self.pending != reason or still_bad is None:
             return False
         self.pending = None
@@ -4794,58 +4759,31 @@ class FeedFanoutServer:
         return self
 
     def mark_superseded(self, now=None):
-        """Note that a NEW consumer just arrived, so every consumer already attached is a
-        candidate for having been abandoned. Records each one's position at this moment.
+        """A new consumer arrived: note where every attached one stands.
 
-        Measured on the producer host 2026-09-21: after an OBS input rebuild, OBS held
-        two ESTABLISHED connections to one feed port although it has a single media
-        source there. It opens the new one and never closes the old, and because its
-        process still owns that socket the peer never resets — TCP cannot see the
-        abandonment. The relay's handler therefore sat in sendall forever with a frozen
-        cursor, and `consumer_backlog` takes max() over all consumers, so /status
-        reported the DEAD connection's backlog and never stopped: the reset looked
-        ineffective, the automatic backlog shed judged itself useless and stood down
-        after three tries, and the health reason promised the director a remedy it then
-        showed as having failed. It also leaked a thread and a socket per rebuild.
-
-        Being superseded is NOT on its own a reason to drop a consumer — this port is
-        built to serve several at once (OBS and the Director-Panel preview), and a
-        second one arriving says nothing about the first. What identifies the abandoned
-        one is superseded AND not moving since: a live consumer keeps accepting bytes."""
+        Windows OBS leaves the old connection open on an input rebuild, and TCP cannot see
+        that. Being superseded alone condemns nobody — this port serves several consumers
+        by design; `_stale` adds the part that does."""
         now = time.monotonic() if now is None else now
         with self._consumers_lock:
             for st in self._consumers.values():
                 st["superseded"] = (st.get("cycle_ts"), now)
 
     def _stale(self, st, now, grace_s=FANOUT_STALE_GRACE_S):
-        """A superseded consumer that has completed nothing since, for longer than the
-        grace.
+        """A superseded consumer that has completed nothing since, past the grace.
 
-        The signal is `cycle_ts` — stamped whenever a read or a send COMPLETES — and not
-        `cursor`. A first version used the cursor and was wrong in a way that only a real
-        slow consumer showed (tools/slow-consumer-probe.py, producer host 2026-09-21): the
-        cursor advances once per read CYCLE, and a consumer reading at 40% of real time
-        sits inside one cycle for many seconds, so every shed rebuild made the relay
-        briefly report a 15.8 s backlog as gone. An abandoned socket blocks in sendall and
-        never completes another cycle; a slow consumer keeps completing them, just slowly.
-        That is the difference, and it is the only one that separates the two cases.
-
-        The grace is part of the judgement rather than only of the reaping: in the instant
-        a new consumer arrives nothing has completed yet, and without it every reader would
-        briefly see every consumer as abandoned and report no backlog at all."""
+        `cycle_ts` (a completed read or send), not `cursor`: the cursor only advances once
+        per read cycle, and a slow consumer sits inside one for many seconds. The grace
+        belongs in the judgement, not just the reaping — in the instant of the mark
+        nothing has completed yet."""
         mark = st.get("superseded")
         return (mark is not None and st.get("cycle_ts") == mark[0]
                 and (now - mark[1]) >= grace_s)
 
     def reap_superseded(self, now=None, grace_s=FANOUT_STALE_GRACE_S):
-        """Close consumers that were superseded and have not moved since, once the grace
-        has passed. Returns how many were closed. Called once per heartbeat, never from a
-        read path. The grace exists because a live consumer can sit between two accepted
-        positions for a moment; an abandoned one never moves again.
-
-        shutdown() before close(): the handler is blocked in sendall on a send buffer the
-        peer stopped draining, which is precisely what close() alone does not reliably
-        wake."""
+        """Close the abandoned consumers and return how many. Heartbeat only, never a read
+        path. shutdown() before close(): close alone does not reliably wake a handler
+        blocked in sendall."""
         now = time.monotonic() if now is None else now
         doomed = []
         with self._consumers_lock:
@@ -7759,30 +7697,16 @@ class Relay:
                 "feeds_av_disturbed": self._av_health_fact()}
 
     def _note_obs_splice(self, feed):
-        """Record that the relay itself just spliced this feed's stream into OBS, by
-        rebuilding the input rather than by restarting the feed. The freeze auto-rebuild
-        and the backlog shed both do that, and both produce exactly the disturbance the
-        A/V detector is built to notice — see _serving_age for why that matters.
-
-        It takes NO clock on purpose. The only reader is _serving_age, which compares
-        against `time.time()` and `Feed.phase_since`, so a caller passing its own `now` —
-        a monotonic reading, or a test's synthetic one — would store a value from a
-        different scale and the comparison would silently never fire. The callers do have
-        a `now` in hand, which is exactly why the parameter must not exist."""
+        """Record that the relay just spliced this feed into OBS by rebuilding the input.
+        Takes no clock on purpose: its only reader compares against time.time(), and a
+        caller passing a monotonic `now` would silently never match."""
         self._obs_splice_ts[feed] = time.time()
 
     def _serving_age(self, feed):
-        """How long ago the relay last spliced a new stream into OBS for that feed, or None
-        when it is not serving. This is what tells an EXPECTED sync disturbance from an
-        unexplained one (#619).
-
-        It is the age since the feed started serving OR since the relay last rebuilt that
-        feed's OBS input, whichever is more recent. A rebuild (the freeze auto-reconnect,
-        and since 2026-09-21 the automatic backlog shed) splices a new stream into OBS
-        without restarting the relay feed, so the serving age alone does not reset and the
-        audio repair OBS logs right afterwards would be reported as UNEXPLAINED — the panel
-        would turn yellow for a disturbance the relay caused on purpose. The shed makes
-        that routine; for the freeze rebuild it was already latent."""
+        """How long ago the relay last spliced a stream into OBS for that feed, or None
+        when it is not serving — what tells an EXPECTED sync disturbance from an
+        unexplained one (#619). An input rebuild counts: it splices without restarting the
+        feed, so the serving age alone would leave our own remedy looking unexplained."""
         f = self.pov if feed == "POV" else self.feeds.get(feed)
         if f is None or f.paused or f.phase != "serving":
             return None
@@ -8054,10 +7978,7 @@ class Relay:
             if srv is None:
                 continue
             try:
-                # Close the sockets OBS abandoned at a rebuild but never shut (see
-                # FeedFanoutServer.mark_superseded). Before the floor is taken, so a
-                # reaped consumer cannot contribute one last frozen reading.
-                reaped = srv.reap_superseded(time.monotonic())
+                reaped = srv.reap_superseded(time.monotonic())   # before the floor is taken
                 if reaped:
                     LOG.info("feed %s: closed %d abandoned consumer connection(s) "
                              "OBS left open after an input rebuild", name, reaped)
@@ -8302,39 +8223,21 @@ class Relay:
         self._fz_prev_cursor = None; self._fz_ratios = []
 
     def _backlog_shed_tick(self, now):
-        """Automatic backlog shed (2026-09-21): rebuild the ON-AIR feed's OBS input when its
-        consumer stays behind the live edge, so the picture returns to the live edge without
-        a director pressing RESET. Runs on the heartbeat, right after the classification it
-        reads; the heartbeat swallows any error it raises.
+        """Rebuild the ON-AIR feed's OBS input when its consumer stays behind the live
+        edge, so the picture returns without a director pressing RESET. Heartbeat only,
+        right after the classification it reads; errors are swallowed there.
 
-        #581 originally ruled this out ("only a human chooses it") after the Catalunya
-        qualifying broadcast, where an unguarded automation produced 26 black dropouts in
-        56 minutes. The producer overrode that on 2026-09-21 as a standing preference:
-        automatic recovery is the design, the manual reset is the fallback. Two things make
-        the override buildable rather than a repeat — RebuildGuard (#582) gives up after
-        three ineffective rebuilds, and the backlog is now measured (#583) long before the
-        ring overflows, instead of being noticed only once it destroyed itself.
-
-        It shares the control, the guard and the cooldown with the freeze detector on
-        purpose: two automations turning the same control is a race someone ends up
-        debugging mid-broadcast.
-
-        Scope is deliberately narrow. Only the ON-AIR feed: with fan-out OBS drops an
-        off-air feed (close_when_inactive), so an idle feed has no consumer and no backlog.
-        POV is out — it is a picture-in-picture, and giving it its own rebuild reason would
-        put a second actor on the same control after all. A backlog that keeps GROWING is
-        not fixed here: this sheds it, the host rebuilds it within a minute, and after three
-        attempts the guard stands down with a plain warning. That is the honest answer for
-        that cause; the remedy for it is #585 (step every feed down to ROBUST), which costs
-        no black at all."""
+        A second REASON on the freeze detector's control, not a second automation: same
+        rebuild, same RebuildGuard, same cooldown. On-air feed only (an off-air one has no
+        consumer under close_when_inactive); POV is out. A backlog that keeps GROWING is
+        not fixed here — three attempts, then the guard stands down. See
+        docs/superpowers/specs/2026-09-21-automatic-backlog-shed-design.md."""
         if not self._backlog_shed or _obs_ws is None or not self.fanout:
             return
         live = self.live_feed()
         f = self.feeds.get(live)
         degraded = live in self._backlogged_feeds
-        # Judge the PREVIOUS shed first, whatever we decide to do now: an unmeasurable
-        # round (floor None — OBS is detached for part of the interval after a rebuild)
-        # consumes nothing, so the verdict waits rather than counting as a success.
+        # An unmeasurable round consumes no verdict; it waits.
         measured = self._interval_backlogs.get(live) is not None or degraded
         with self._rebuild_lock:
             stood_down = self._rebuild_guard.judge(degraded if measured else None,
@@ -8343,11 +8246,6 @@ class Relay:
             allowed = self._rebuild_guard.allows()
         if stood_down:
             self._rebuild_stood_down_feed = live
-            # State what was measured and nothing else. An earlier version of this line
-            # blamed a host too slow to render; the first live run that reached the
-            # stand-down had OBS at exactly 60.0 fps, 0.87 ms average render time and 13
-            # skipped frames out of 185848, so the guessed cause was simply false and it
-            # would have sent a director after the wrong component mid-broadcast.
             LOG.warning("Feed %s backlog shed stood down — %d OBS rebuilds did not bring the "
                         "output back to the live edge, so the relay has stopped trying. The "
                         "picture stays behind live until the next stint change or a re-arm "
@@ -11319,11 +11217,7 @@ def export_cookies(browser, out):
     return True
 
 def main():
-    # BEFORE argparse: the help text carries non-ASCII, and on a cp1252 console building
-    # it raised UnicodeEncodeError before the relay did anything at all (German producer
-    # host, 2026-09-21). The CLI has had this since #24, but it lived in racecast.py, so
-    # the relay — which is also started directly — was never covered.
-    logsetup.harden_stdio()
+    logsetup.harden_stdio()    # before argparse builds help text that may be non-ASCII
     load_dotenv(os.path.dirname(os.path.abspath(__file__)))  # before defaults are read
     ap = argparse.ArgumentParser(description="GT Racing 2-feed relay with Google-Sheet schedule")
     ap.add_argument("--sheet-id", default=os.environ.get("RACECAST_SHEET_ID"),

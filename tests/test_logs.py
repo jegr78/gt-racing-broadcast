@@ -329,11 +329,7 @@ def t_throttle_periodic_summary_while_flooding():
 
 
 def t_harden_stdio_makes_a_narrow_console_survivable():
-    # The recurring Windows defect, hit three times in two days on the German producer
-    # host: the console codepage is cp1252, our own output carries characters like the
-    # arrow in the relay's argparse help, and Python raises UnicodeEncodeError instead of
-    # printing something imperfect. 124 LOG/print lines under src/ carry non-ASCII, so
-    # the fix has to be a net under all of them rather than a purge of each.
+    # A narrow console codepage makes our own non-ASCII output raise instead of print.
     class _Narrow:
         """A stream that mimics a cp1252 console: it records reconfigure() rather than
         applying it, because a real console stream is the thing we cannot change here."""
@@ -406,15 +402,9 @@ def _calls(src, pattern):
 
 
 def t_every_text_subprocess_under_src_decodes_leniently():
-    # A child's output is decoded with the locale codepage unless told otherwise, and on
-    # a German Windows that is cp1252. Because subprocess reads pipes in a THREAD the
-    # failure never reaches the caller's except: the process prints a traceback and
-    # silently loses the output.
-    #
-    # An earlier version of this guard covered ONLY racecast-feeds.py and ONLY
-    # subprocess.run. Five call sites in three other shipped files were therefore missed
-    # and one of them bit again the very next day. The scope is the whole shipped tree
-    # and every call form that decodes.
+    # subprocess reads pipes in a THREAD, so a decode failure never reaches the caller's
+    # except: a traceback, and the output silently lost. Scope is the whole shipped tree
+    # and every call form that decodes — a narrower guard missed five call sites.
     offenders = []
     for path in _shipped_sources():
         src = path.read_text(encoding="utf-8")
@@ -429,10 +419,8 @@ def t_every_text_subprocess_under_src_decodes_leniently():
 
 
 def t_no_argparse_help_string_carries_non_ascii():
-    # argparse builds the whole help text before printing it, so ONE non-ASCII character
-    # anywhere in it kills `--help` on a narrow console before the program does anything.
-    # harden_stdio is the net under this, but help text is read by operators on exactly
-    # those consoles, and "?" where an arrow should be is worse than "->".
+    # argparse builds the whole help before printing, so one non-ASCII character kills
+    # --help on a narrow console. "?" where an arrow should be is worse than "->".
     import re
     offenders = []
     for path in _shipped_sources():
@@ -445,9 +433,8 @@ def t_no_argparse_help_string_carries_non_ascii():
 
 
 def t_the_relay_hardens_stdio_before_it_builds_its_help():
-    # The relay is started directly as well as spawned, so inheriting the CLI's
-    # PYTHONIOENCODING is not enough. The ORDER is the whole point: it crashed while
-    # argparse was assembling the help, which happens inside main() before parse_args.
+    # Started directly as well as spawned, so inheriting PYTHONIOENCODING is not enough.
+    # The order is the point: it crashed while argparse assembled the help.
     with open(os.path.join(ROOT, "src", "relay", "racecast-feeds.py"),
               encoding="utf-8") as fh:
         src = fh.read()

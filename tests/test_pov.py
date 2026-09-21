@@ -3132,8 +3132,7 @@ def _shed_relay(backlog=9.0):
 
 
 def t_backlog_shed_rebuilds_the_on_air_feed_without_a_director():
-    # The 2026-09-21 override: the relay sheds the backlog itself. One heartbeat with a
-    # degraded FLOOR is enough, because the floor is already a whole-interval minimum.
+    # One heartbeat with a degraded FLOOR is enough: the floor is an interval minimum.
     r, _f = _shed_relay()
     r._backlog_shed_tick(1000.0)
     assert r._rebuilds == [1], "a backlogged on-air feed must be rebuilt automatically"
@@ -3142,8 +3141,7 @@ def t_backlog_shed_rebuilds_the_on_air_feed_without_a_director():
 
 
 def t_backlog_shed_registers_its_own_splice_with_the_av_detector():
-    # Without this the audio repair OBS logs right after our rebuild is UNEXPLAINED and
-    # the panel turns yellow for a disturbance the relay caused on purpose.
+    # Or the audio repair after our own rebuild reads as UNEXPLAINED.
     r, _f = _shed_relay()
     before = r._serving_age(r.live_feed())
     assert before > 500.0, "the feed has been serving for a while"
@@ -3186,8 +3184,7 @@ def t_backlog_shed_kill_switch_and_shared_cooldown_both_hold_it_off():
 
 
 def t_backlog_shed_stands_down_after_three_rebuilds_that_did_not_help():
-    # The epic's requirement, and the reason the override is buildable at all: three
-    # attempts, then stop and say so, instead of Catalunya's 26 black dropouts.
+    # Three attempts, then stop and say so.
     r, _f = _shed_relay()
     now = 1000.0
     for _ in range(3):
@@ -3202,7 +3199,7 @@ def t_backlog_shed_stands_down_after_three_rebuilds_that_did_not_help():
 
 
 def t_backlog_shed_does_not_consume_a_freeze_rebuild_or_an_unmeasured_round():
-    # Two judges on two threads share one guard. Each must only ever judge its own.
+    # Two judges on two threads share one guard; each judges only its own.
     r, _f = _shed_relay()
     r._rebuild_guard.on_fire("freeze")
     r._last_freeze_ts = 1000.0 - 5.0               # as the freeze path sets it when it fires
