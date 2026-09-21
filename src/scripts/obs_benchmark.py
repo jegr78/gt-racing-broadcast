@@ -216,6 +216,22 @@ def _source_ahead(backlog_start, backlog_end, rate, duration_s):
     return round(max(0.0, (backlog_end - backlog_start) - consumer), 1)
 
 
+def _backlog_growth(backlog_start, backlog_end, source_ahead, duration_s):
+    """Seconds per minute the backlog grew for a reason the HOST is responsible for.
+
+    This is the number #585's trigger is stated in ("the backlog grows by at least X
+    seconds per minute"), and it deliberately excludes the part `_source_ahead` attributes
+    to early arrival: a bursty CDN would otherwise step a healthy producer down, which is
+    the misattribution #634 exists to prevent. Reported, never judged — `keeps_real_time`
+    stays off the backlog.
+
+    Negative when the backlog shrank; clamping that would hide a recovery.
+    None when a part is missing or the window has no length. Pure -> unit-tested."""
+    if None in (backlog_start, backlog_end, source_ahead) or not duration_s:
+        return None
+    return round(((backlog_end - backlog_start) - source_ahead) / duration_s * 60.0, 1)
+
+
 def _inbound_gap_worst(samples):
     """The worst inbound gap the relay reported DURING this window (#619).
 
@@ -307,9 +323,13 @@ def summarize(samples):
     backlog = _values(samples, "backlog_s")
     third = max(1, len(samples) // 3)
     snaps = _values(samples, "snaps")
+    duration = round(ts[-1] - ts[0], 1) if ts else None
+    floor_start = _floor(_values(samples[:third], "backlog_s"))
+    floor_end = _floor(_values(samples[-third:], "backlog_s"))
+    source_ahead = _source_ahead(floor_start, floor_end, rate, duration)
     return {
         "samples": len(samples),
-        "duration_s": round(ts[-1] - ts[0], 1) if ts else None,
+        "duration_s": duration,
         "render_ms_avg": _round(_mean(_values(samples, "render_ms")), 2),
         "fps_avg": _round(_mean(fps), 2),
         "fps_min": _round(min(fps), 2) if fps else None,
@@ -318,13 +338,12 @@ def summarize(samples):
         "encoder_speed": speed,
         "playback_rate": rate,
         "stall_fraction": stall,
-        "backlog_floor_start_s": _floor(_values(samples[:third], "backlog_s")),
-        "backlog_floor_end_s": _floor(_values(samples[-third:], "backlog_s")),
+        "backlog_floor_start_s": floor_start,
+        "backlog_floor_end_s": floor_end,
         "backlog_max_s": max(backlog) if backlog else None,
-        "source_ahead_s": _source_ahead(
-            _floor(_values(samples[:third], "backlog_s")),
-            _floor(_values(samples[-third:], "backlog_s")),
-            rate, round(ts[-1] - ts[0], 1) if ts else None),
+        "source_ahead_s": source_ahead,
+        "backlog_growth_s_per_min": _backlog_growth(
+            floor_start, floor_end, source_ahead, duration),
         "inbound_gap_worst_s": _inbound_gap_worst(samples),
         "snaps": (snaps[-1] - snaps[0]) if len(snaps) >= 2 else None,
         "contaminated": _disturbances(samples, rejoined),
@@ -505,7 +524,7 @@ def render(record, now):
              f"on '{record.get('scene')}', {record.get('window_s')} s per tier, "
              f"target {_fmt(record.get('fps_target'), ' fps', 2)}",
              "              render ms   fps avg/min   render skip   encoder skip/speed"
-             "   playback rate/stalled   backlog floor start→end   src gap"]
+             "   playback rate/stalled   backlog floor start→end   host growth   src gap"]
     for tier in TIERS:
         s = record.get(tier) or {}
         lines.append(
@@ -517,6 +536,8 @@ def render(record, now):
             f"{_fmt(None if s.get('stall_fraction') is None else s['stall_fraction'] * 100, ' %', 0)}"
             f"   {_fmt(s.get('backlog_floor_start_s'), ' s')}→"
             f"{_fmt(s.get('backlog_floor_end_s'), ' s')}"
+            # The rise with the source's share removed (#585's trigger is stated in it).
+            f"   {_fmt(s.get('backlog_growth_s_per_min'), ' s/min')}"
             # Reported, not judged, following the backlog's rule. A bursty source is not
             # a verdict on the host, but without it a slow window has no stated cause.
             f"   {_fmt(s.get('inbound_gap_worst_s'), ' s')}")

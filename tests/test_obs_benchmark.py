@@ -98,6 +98,52 @@ def t_summary_says_when_the_source_outran_the_wall_clock():
         "source_ahead_s"] is None
 
 
+def t_summary_states_the_backlog_growth_rate_the_host_caused():
+    # #585's trigger is "the backlog grows by at least X seconds per minute", and #584
+    # promised this field as what calibrates it. The rate must exclude the source's early
+    # arrival, or a bursty CDN would step a healthy host down.
+    slow = [_sample(t, backlog=3.0 + t * 0.5, cursor=t * 500) for t in (0.0, 20.0, 40.0, 60.0)]
+    s = m.summarize(slow)
+    # 3.0 -> 33.0 s over 60 s, all of it the consumer's: 30 s of rise = 30 s/min.
+    assert s["backlog_growth_s_per_min"] == 30.0, s["backlog_growth_s_per_min"]
+    catching_up = [_sample(t, backlog=3.0 + t * 0.7, cursor=t * 1000) for t in (0.0, 20.0, 40.0, 60.0)]
+    s = m.summarize(catching_up)
+    # Same 42 s climb, but OBS played at 1.0x throughout, so the host caused none of it.
+    assert s["backlog_growth_s_per_min"] == 0.0, s["backlog_growth_s_per_min"]
+    # A shrinking backlog reports a negative rate; clamping it would hide a recovery.
+    recovering = [_sample(t, backlog=30.0 - t * 0.25, cursor=t * 1000) for t in (0.0, 20.0, 40.0, 60.0)]
+    g = m.summarize(recovering)["backlog_growth_s_per_min"]
+    assert g == -15.0, f"a shrinking backlog must report a negative rate, got {g}"
+    # Without a playback rate the split is unknowable, so the field stays None.
+    no_cursor = [_sample(t, backlog=3.0 + t * 0.5, cursor=None) for t in (0.0, 60.0)]
+    for smp in no_cursor:
+        smp["cursor_ms"] = None
+    g = m.summarize(no_cursor)["backlog_growth_s_per_min"]
+    assert g is None, f"no playback rate means no attribution, got {g}"
+
+
+def t_render_names_the_growth_rate_and_tolerates_a_record_without_it():
+    # Every cell carries a value, so the only "n/a" the row can show is the one under test.
+    def tier(growth):
+        return {"render_ms_avg": 1.4, "fps_avg": 60.0, "fps_min": 60.0,
+                "render_skip_pct": 0.0, "encoder_skip_pct": 0.0, "encoder_speed": 1.0,
+                "playback_rate": 1.0, "stall_fraction": 0.0, "backlog_floor_start_s": 2.9,
+                "backlog_floor_end_s": 38.8, "source_ahead_s": 0.0,
+                "inbound_gap_worst_s": 1.2, "backlog_growth_s_per_min": growth}
+    rec = {"feed": "A", "platform": "youtube", "scene": "Stint", "window_s": 60,
+           "fps_target": 60.0, "ts": NOW, "full": tier(47.9), "robust": tier(0.2)}
+    full_row = m.render(rec, NOW).splitlines()[2]
+    assert "host growth" in m.render(rec, NOW), m.render(rec, NOW)
+    assert "47.9 s/min" in full_row, full_row
+    assert full_row.count("n/a") == 0, full_row
+    # The history is append-only, so a record written before the field must still render —
+    # with that one cell empty and every other value untouched.
+    del rec["full"]["backlog_growth_s_per_min"]
+    full_row = m.render(rec, NOW).splitlines()[2]
+    assert full_row.count("n/a") == 1, full_row
+    assert "47.9 s/min" not in full_row and "2.9 s→38.8 s" in full_row, full_row
+
+
 def t_render_explains_a_backlog_the_source_caused():
     # The number is not hidden, it is named. Hiding it would also hide a real backlog.
     rec = {"feed": "A", "platform": "youtube", "scene": "Stint", "window_s": 60,
@@ -189,7 +235,8 @@ def t_summarize_ignores_missing_values_instead_of_inventing_them():
     assert s["samples"] == 2
     for key in ("render_ms_avg", "fps_avg", "fps_min", "render_skip_pct",
                 "encoder_skip_pct", "encoder_speed", "playback_rate", "stall_fraction",
-                "backlog_floor_start_s", "backlog_floor_end_s", "backlog_max_s", "snaps"):
+                "backlog_floor_start_s", "backlog_floor_end_s", "backlog_max_s",
+                "backlog_growth_s_per_min", "snaps"):
         assert s[key] is None, key
     assert s["contaminated"] == []
 
