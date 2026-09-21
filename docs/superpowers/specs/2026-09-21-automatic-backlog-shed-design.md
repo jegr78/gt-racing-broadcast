@@ -261,14 +261,45 @@ to the trailing mark — 96.6 s -> 1.8 s in about ten seconds, on one unchanged 
 (macOS behaves the same). In every run the picture would have returned without the
 shed. A transient OBS stall is therefore not what this automation is for.
 
-What it is for is a consumer that stays **below** real time, and that case could not be
-produced on healthy hardware. An apparent slow drift on macOS was the source's own
-sawtooth, named by `inbound_max_gap_s` at 5.1 s and not a slow consumer at all.
+What it is for is a consumer that stays **below** real time, and no healthy host produces
+one. An apparent slow drift on macOS was the source's own sawtooth, named by
+`inbound_max_gap_s` at 5.1 s and not a slow consumer at all.
+
+## The case it is for, produced and measured
+
+`jegr-linux-cachyos` is the host the field reports came from, kept as an analysis machine.
+Running OBS inside a transient scope with `CPUQuota=60%` starves it the way a broadcast
+does, and unlike suspending the process it stays responsive to obs-websocket throughout:
+
+| | measured |
+|---|---|
+| OBS under load | **10 fps instead of 60**, 100 ms frame render instead of 1.4 ms |
+| backlog | climbs **monotonically**, 2.9 s to 38.8 s over 45 s, no bursts |
+| shed fires | 14:54:57, at 21.5 s behind live |
+| OBS rebuilds | `[Media Source 'Feed A']: settings:` at 14:54:57.634, in OBS's own log |
+| the consumer socket | peer port **58904 to 50380** at 14:54:58: replaced, not resumed |
+| backlog after | **4.0 s**, and it holds |
+
+The peer port is the discriminator and the reason to trust this one. Correlating a drop
+with a log line is not enough: in an earlier run on this host the drop began three seconds
+**before** the shed fired, which is OBS bursting, and a shed landing mid-burst is credited
+for it. Here the climb is monotonic to the last sample before the rebuild, OBS logs the
+rebuild, and the socket is a different one afterwards.
+
+### What it costs on such a host
+
+The backlog regrows at the same rate after every shed. Counted over one 11-minute run on
+this host: **nine sheds, one every 75 seconds, every one effective, no stand-down.** Each
+rebuild is a visible cut. `RebuildGuard` does not stop this and should not: it judges each
+rebuild on its own, and each one **does** return the output to the reserve. The comparable
+field number is Catalunya's 26 rebuilds in 56 minutes, one every 129 seconds.
+
+So the automation keeps the picture near the live edge on a host that cannot keep up, and
+it pays for that in dropouts. Whether a run of effective sheds should also stand the
+automation down is a product decision, not one this spec takes. #585 remains the right
+remedy for the host itself.
 
 ## Open
 
-- A consumer that stays below real time remains unproduced, so the shed is insurance
-  rather than a routine mechanism. Its detection, decision, remedy and best-effort
-  contract are each measured above; what is unmeasured is a backlog OBS could not have
-  cleared by itself.
-- #585 remains the right remedy for a host that genuinely cannot keep up.
+- Whether N effective sheds within M minutes should stand the automation down, given the
+  cost above. Today only *ineffective* rebuilds do.

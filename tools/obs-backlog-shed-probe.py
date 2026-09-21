@@ -20,7 +20,9 @@ consumer that stays slower than real time, which this lever cannot simulate: use
 `--drift` to watch the organic backlog instead.
 
 Needs a LIVE source (a VOD races ahead through the ring and is not a valid test),
-a running OBS whose current scene shows Feed A, and no active OBS output.
+a running OBS whose current scene shows Feed A, and no active OBS output. The relay is
+started with the HUD served, because the HUD browser source is part of the render load
+a broadcast actually puts on OBS.
 
     python3 tools/obs-backlog-shed-probe.py --source https://www.youtube.com/@LofiGirl/live
 """
@@ -79,9 +81,43 @@ def status():
         return {}
 
 
+def feed_peer(port=53001):
+    """The consumer's ephemeral port on *port*, which is the discriminator that matters:
+    a rebuild gives OBS a NEW port, a burst keeps the old one. A count cannot tell those
+    apart, and correlating a backlog drop with a log line cannot either."""
+    # Arch ships no net-tools, macOS no iproute2, so try both rather than return None.
+    if os.name != "nt":
+        try:
+            out = subprocess.run(["ss", "-tnH", "state", "established",
+                                  f"sport = :{port}"], capture_output=True, text=True,
+                                 errors="replace").stdout
+        except OSError:
+            out = None
+        if out is not None:
+            peers = [line.split()[3].rsplit(":", 1)[-1] for line in out.splitlines()
+                     if len(line.split()) > 3]
+            return ",".join(sorted(peers)) or "-"
+    cmd = ["netstat", "-ano"] if os.name == "nt" else ["netstat", "-an"]
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True,
+                             errors="replace").stdout
+    except OSError:
+        return None
+    peers = []
+    for line in out.splitlines():
+        fields = [f for f in line.split() if _ADDR.match(f)]
+        if len(fields) < 2 or fields[0].rsplit(_SEP(fields[0]), 1)[-1] != str(port):
+            continue
+        peer = fields[1]
+        if peer.rsplit(_SEP(peer), 1)[-1] in ("0", "*"):
+            continue
+        peers.append(peer.rsplit(_SEP(peer), 1)[-1])
+    return ",".join(sorted(peers)) or "-"
+
+
 def feed_sockets(port=53001):
-    """ESTABLISHED connections on the feed port. A rebuild replaces OBS's socket, a
-    sprint keeps it, so this is what tells the two recoveries apart."""
+    """How many consumers are attached. Prefer feed_peer when the question is whether
+    the consumer was REPLACED."""
     cmd = ["netstat", "-ano"] if os.name == "nt" else ["netstat", "-an"]
     try:
         out = subprocess.run(cmd, capture_output=True, text=True,
@@ -184,6 +220,57 @@ def wait_for(predicate, timeout_s, label):
     return None
 
 
+def _obs_session():
+    sess, why = obs_ws._connect(None, None, None, 4.0)
+    if sess is None:
+        raise SystemExit(f"OBS WebSocket unreachable: {why}")
+    return sess
+
+
+def show_layers(scene, names, on):
+    """Show or hide scene items by name. Returns the ones actually switched."""
+    names = [n.strip() for n in (names or "").split(",") if n.strip()]
+    if not names:
+        return []
+    sess = _obs_session()
+    items = {i["sourceName"]: i["sceneItemId"]
+             for i in (sess.request("GetSceneItemList", {"sceneName": scene}) or {})
+             .get("sceneItems", [])}
+    done = []
+    for name in names:
+        if name in items:
+            sess.request("SetSceneItemEnabled",
+                         {"sceneName": scene, "sceneItemId": items[name],
+                          "sceneItemEnabled": on})
+            done.append(name)
+        else:
+            print(f"  no scene item {name!r} in {scene!r}")
+    return done
+
+
+def obs_render():
+    """(fps, avg render ms, cpu%) — what tells a slow host from a slow source."""
+    st = _obs_session().request("GetStats", {}) or {}
+    return (st.get("activeFps"), st.get("averageFrameRenderTime"), st.get("cpuUsage"))
+
+
+def start_recording():
+    """Start OBS recording: the render cliff this box shows needs an ACTIVE output."""
+    return (_obs_session().request("StartRecord", {}) or {}).get("outputPath", "started")
+
+
+def stop_recording():
+    """Stop it and wait for OBS to finish the file. StopRecord returns before the
+    muxer is done, so the path it hands back is not yet complete."""
+    sess = _obs_session()
+    path = (sess.request("StopRecord", {}) or {}).get("outputPath")
+    for _ in range(30):
+        time.sleep(1.0)
+        if not (sess.request("GetRecordStatus", {}) or {}).get("outputActive"):
+            break
+    return path
+
+
 def _sampler(hold_s):
     """Print the relay's view of Feed A every SAMPLE_S while OBS is held stopped."""
     t0 = time.monotonic()
@@ -191,7 +278,7 @@ def _sampler(hold_s):
         time.sleep(SAMPLE_S)
         f = feed_a(status())
         print(f"  {time.strftime('%H:%M:%S')} +{time.monotonic()-t0:5.0f}s  "
-              f"backlog {f.get('backlog_s')}  socks {feed_sockets()}")
+              f"backlog {f.get('backlog_s')}  peer {feed_peer()}")
 
 
 def main():
@@ -200,11 +287,17 @@ def main():
     ap.add_argument("--source", required=True, help="a LIVE YouTube/Twitch URL")
     ap.add_argument("--freeze", type=float, default=75.0,
                     help="seconds to hold OBS stopped (default 75)")
-    ap.add_argument("--mode", choices=("freeze", "reset"), default="freeze",
+    ap.add_argument("--mode", choices=("freeze", "reset", "load"), default="freeze",
                     help="freeze: stop OBS and watch the recovery. reset: trigger the "
                          "director's /obs/feed-reset and watch whether the socket OBS "
-                         "abandons is actually freed")
+                         "abandons is actually freed. load: put OBS under render load "
+                         "(an active output) and watch whether it falls behind on its "
+                         "own — the case a healthy host cannot produce")
     ap.add_argument("--relay-log", default="/tmp/shed-probe-relay.log")
+    ap.add_argument("--layers", default="",
+                    help="load mode: comma-separated scene items to show for the run and "
+                         "hide again afterwards, to reach the render load of a broadcast")
+    ap.add_argument("--scene", default="Stint", help="scene holding the feed and layers")
     ap.add_argument("--watch", type=float, default=240.0,
                     help="seconds to watch for the shed after SIGCONT")
     args = ap.parse_args()
@@ -225,7 +318,7 @@ def main():
         print(f"relay output -> {args.relay_log}")
         relay = subprocess.Popen(
             [sys.executable, os.path.join(ROOT, "src", "relay", "racecast-feeds.py"),
-             "--sheet-csv-url", csv_url, "--bind", "127.0.0.1", "--no-hud"],
+             "--sheet-csv-url", csv_url, "--bind", "127.0.0.1"],
             env=env, stdout=log, stderr=subprocess.STDOUT)
         try:
             print("waiting for Feed A to serve ...")
@@ -241,7 +334,14 @@ def main():
             base = feed_a(status()).get("backlog_s")
             print(f"  attached; backlog {base:.1f} s")
 
-            if args.mode == "reset":
+            if args.mode == "load":
+                shown = show_layers(args.scene, args.layers, True)
+                if shown:
+                    print("layers shown:", ", ".join(shown))
+                rec = start_recording()
+                print(f"recording started: {rec}\n"
+                      "watching whether OBS drains the ring slower than it fills.\n")
+            elif args.mode == "reset":
                 print(f"\nsockets on the feed port: {feed_sockets()}")
                 print("triggering /obs/feed-reset — OBS opens a new socket and leaves "
                       "the old one; only shutdown() wakes its blocked handler.")
@@ -261,15 +361,20 @@ def main():
                 print("OBS running again, and behind live.\n")
 
             print(f"{'clock':>8} {'t':>6}  {'backlog':>8}  {'flagged':>7}  "
-                  f"{'socks':>5}  stood_down")
+                  f"{'peer':>12}  stood_down")
             t0, fired, low = time.monotonic(), None, None
             while time.monotonic() - t0 < args.watch:
                 st = status()
                 f = feed_a(st)
                 b, flagged = f.get("backlog_s"), f.get("backlogged")
                 stood = (st.get("rebuild_guard") or {}).get("stood_down")
+                extra = ""
+                if args.mode == "load":
+                    fps, ms, _cpu = obs_render()
+                    extra = f"  fps {fps and round(fps, 1)}  render {ms and round(ms, 1)}"
                 print(f"{time.strftime('%H:%M:%S'):>8} {time.monotonic()-t0:6.0f}  "
-                  f"{str(b):>8}  {str(flagged):>7}  {str(feed_sockets()):>5}  {stood}")
+                      f"{str(b):>8}  {str(flagged):>7}  {str(feed_peer()):>12}  "
+                      f"{stood}{extra}")
                 if b is not None:
                     if fired is None and isinstance(low, float) and b < low - 5.0:
                         fired = time.monotonic() - t0
@@ -278,6 +383,12 @@ def main():
                 time.sleep(SAMPLE_S)
             return 0 if fired is not None else 1
         finally:
+            if args.mode == "load":
+                try:
+                    show_layers(args.scene, args.layers, False)
+                    print("recording stopped:", stop_recording())
+                except Exception as exc:        # noqa: BLE001 — cleanup reports
+                    print("could not stop the recording:", exc)
             relay.terminate()
             try:
                 relay.wait(timeout=15)
