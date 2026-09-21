@@ -1992,10 +1992,10 @@ def t_queue_deadline_args_picks_flag_by_capability():
 def t_queue_deadline_factor_outlasts_the_stall_watchdog():
     # streamlink stops a stream when nothing was queued for factor x the playlist's
     # targetduration. Under fan-out the relay's byte-stall watchdog must be the one that
-    # acts, or a gap it would have ridden out turns into a full re-resolve. Targetdurations
-    # measured on a live YouTube playlist: 5 s at normal latency, 2 s at low latency.
+    # acts, or a gap it would have ridden out turns into a full re-resolve. 5 and 6 were
+    # measured live (YouTube, Twitch); 1 is the smallest integer a playlist can advertise.
     for stall_s in (m.feed_stall_s({}), m.feed_stall_s({"RACECAST_FEED_STALL_S": "45"})):
-        for targetduration in (2.0, 5.0):
+        for targetduration in (1.0, 5.0, 6.0):
             deadline = float(m.queue_deadline_factor(stall_s)) * targetduration
             assert deadline > stall_s, (
                 f"targetduration {targetduration}s: streamlink gives up after "
@@ -2008,6 +2008,7 @@ def t_fanout_deadline_follows_the_watchdog_direct_serve_keeps_its_own():
     m._STREAMLINK_HELP = help_text
     try:
         fan = m.streamlink_fanout_cmd("https://hls.example/x.m3u8", "youtube")
+        fan_tw = m.streamlink_fanout_cmd("https://twitch.tv/foo", "twitch", twitch_token="tok")
         srv = m.streamlink_serve_cmd("https://hls.example/x.m3u8", 53001, "youtube")
     finally:
         m._STREAMLINK_HELP = old
@@ -2016,6 +2017,8 @@ def t_fanout_deadline_follows_the_watchdog_direct_serve_keeps_its_own():
     srv_factor = srv[srv.index("--stream-segmented-queue-deadline") + 1]
     assert fan_factor == derived, \
         f"fan-out must outlast its own watchdog, got factor {fan_factor}"
+    assert fan_tw[fan_tw.index("--stream-segmented-queue-deadline") + 1] == derived, \
+        "the watchdog is the authority for a Twitch fan-out serve too"
     assert srv_factor == m.QUEUE_DEADLINE_FACTOR, \
         "direct-serve has no byte watchdog, so streamlink's early stop stays the detector"
     assert fan_factor != srv_factor, \

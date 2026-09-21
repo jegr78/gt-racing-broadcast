@@ -188,21 +188,22 @@ STREAMLINK_SERVE = ["--ringbuffer-size", "64M", "--hls-live-edge", "4"]
 # feed never serve.
 QUEUE_DEADLINE_FACTOR = "5"
 
-# Shortest #EXT-X-TARGETDURATION measured on a live YouTube playlist (low latency; normal
-# latency serves 5 s). The broadcaster picks it, so it is a floor, not a constant.
-QUEUE_DEADLINE_MIN_TARGETDURATION_S = 2.0
+# Smallest #EXT-X-TARGETDURATION a playlist can advertise and still produce a deadline:
+# RFC 8216 makes it a decimal integer in seconds, and streamlink disables the check at 0.
+# Measured live 2026-09-21: YouTube 5, Twitch 6 (on 2 s segments).
+QUEUE_DEADLINE_MIN_TARGETDURATION_S = 1.0
 
 
 def queue_deadline_factor(stall_s, min_targetduration_s=QUEUE_DEADLINE_MIN_TARGETDURATION_S):
     """Multiplier for streamlink's early stop on the FAN-OUT path, derived so its deadline
     outlasts the relay's own byte-stall watchdog (RACECAST_FEED_STALL_S) and the watchdog
     stays the single authority on a dead source — a streamlink that quits first turns a gap
-    the watchdog would have ridden out into a full re-resolve. The targetduration the
-    deadline is multiplied by comes from the broadcaster, so a fixed factor cannot hold that
-    order; one targetduration of margin covers the segment still being written when the
+    the watchdog would have ridden out into a full re-resolve. The deadline is a multiple of
+    the playlist's targetduration, which the broadcaster picks, so a fixed factor cannot hold
+    that order; one targetduration of margin covers the segment still being written when the
     playlist stalls. Pure."""
     targetduration = max(0.1, float(min_targetduration_s))
-    return str(int(math.ceil(max(0.0, float(stall_s)) / targetduration)) + 1)
+    return str(math.ceil(max(0.0, float(stall_s)) / targetduration) + 1)
 
 
 def queue_deadline_args(help_text, factor=QUEUE_DEADLINE_FACTOR):
@@ -3711,15 +3712,18 @@ def streamlink_fanout_cmd(target, platform="youtube", twitch_token=None,
     the positional URL/stream."""
     base = ["streamlink", "--stdout"]
     base += serve_flags(platform, tier)
+    # version-safe: renamed in streamlink 8.1.0. Both platforms, because the factor follows
+    # the byte-stall watchdog this path has and direct-serve has not, so the watchdog acts
+    # first whatever the source is.
+    deadline = queue_deadline_args(
+        _streamlink_help(), factor=queue_deadline_factor(feed_stall_s(os.environ)))
     if platform == "twitch":
+        base += deadline
         if twitch_token:
             base += ["--twitch-api-header", f"Authorization=OAuth {twitch_token}"]
         selector = quality_twitch_selector(tier)
     else:
-        # version-safe: renamed in streamlink 8.1.0. The factor follows the byte-stall
-        # watchdog this path has and direct-serve has not, so the watchdog acts first.
-        base += queue_deadline_args(
-            _streamlink_help(), factor=queue_deadline_factor(feed_stall_s(os.environ)))
+        base += deadline
         if user_agent:
             base += ["--http-header", f"User-Agent={user_agent}"]
         if cookies:
