@@ -56,7 +56,7 @@ class JobManager:
             job = Job(uuid.uuid4().hex[:12], op, proc)
             self.jobs[job.id] = job
         if self.logger:
-            self.logger.info("[%s] action started — argv: %s", op, " ".join(argv))
+            self.logger.info("[%s] action started, argv: %s", op, " ".join(argv))
         reader = threading.Thread(target=self._reader, args=(job,), daemon=True)
         try:
             reader.start()
@@ -65,7 +65,7 @@ class JobManager:
                 job.exit_code = -1
                 job.lines.append(f"(could not start output reader: {exc})")
             if self.logger:
-                self.logger.warning("[%s] action finished — exit -1 (%s)", op, exc)
+                self.logger.warning("[%s] action finished, exit -1 (%s)", op, exc)
         return job.id, None
 
     def _reader(self, job):
@@ -85,7 +85,7 @@ class JobManager:
             job.exit_code = code
         if self.logger:
             log = self.logger.info if code == 0 else self.logger.warning
-            log("[%s] action finished — exit %s", job.op, code)
+            log("[%s] action finished, exit %s", job.op, code)
 
     def snapshot(self, job_id):
         """{'id','op','running','exit_code','cancelled'} or None for an unknown id."""

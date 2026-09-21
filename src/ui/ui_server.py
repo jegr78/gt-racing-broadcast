@@ -680,7 +680,7 @@ def make_handler(ctx):
                                        "note": "malformed request"}, code=400)
                 try:
                     result = ctx["obs_stream_target"]((body.get("part") or "").strip())
-                except Exception as exc:               # noqa: BLE001 — provider is best-effort
+                except Exception as exc:               # noqa: BLE001 (provider is best-effort)
                     return self._json({"ok": False, "note": str(exc)}, code=400)
                 return self._json(result, code=200 if result.get("ok") else 400)
             if path == "/api/report/generate":

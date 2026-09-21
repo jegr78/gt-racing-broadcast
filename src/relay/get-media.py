@@ -33,7 +33,7 @@ for _cand in (os.path.join(_HERE, "..", "scripts"),
     if os.path.isdir(_cand) and _cand not in sys.path:
         sys.path.insert(0, _cand)
 from services import external_tool_env  # de-PyInstaller the env for the yt-dlp spawn
-import placeholders  # noqa: E402  (pure stdlib helper — fills a missing clip)
+import placeholders  # noqa: E402  (pure stdlib helper, fills a missing clip)
 
 
 # Single muxed MP4 with audio, capped at 1080p (falls back to best available).

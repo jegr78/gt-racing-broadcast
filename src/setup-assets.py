@@ -14,8 +14,8 @@ import argparse, json, os, shutil, sys
 # not pull in the heavy resolver.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "scripts"))
 import discord_web  # noqa: E402
-import overlay_build  # noqa: E402  (pure stdlib helper — no heavy resolver pulled in)
-import placeholders  # noqa: E402  (pure stdlib helper — fills missing assets)
+import overlay_build  # noqa: E402  (pure stdlib helper, no heavy resolver pulled in)
+import placeholders  # noqa: E402  (pure stdlib helper, fills missing assets)
 
 POV_SOURCE_NAME = overlay_build.OVERLAY_SLOT_OBS_SOURCES["pov"]["source"]
 

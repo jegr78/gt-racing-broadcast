@@ -13,8 +13,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)            # import the sibling racecast module
 
-import racecast                         # noqa: E402 — after the path insert
-import native_dialog                    # noqa: E402 — from scripts/ (racecast added it to sys.path)
+import racecast                         # noqa: E402 (after the path insert)
+import native_dialog                    # noqa: E402  from scripts/ (racecast added it to sys.path)
 
 
 def _fatal(message):
