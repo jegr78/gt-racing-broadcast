@@ -1136,6 +1136,27 @@ def t_a_stale_consumer_never_becomes_the_reported_backlog():
         "same exclusion as the live value")
 
 
+def t_a_long_run_of_effective_sheds_never_stands_the_automation_down():
+    """An overloaded host is not a production machine, so the remedy must not be the
+    thing that gives up on it. Measured on jegr-linux-cachyos: nine effective sheds in
+    eleven minutes, one every 75 s. Only INEFFECTIVE rebuilds spend the budget."""
+    g = m.RebuildGuard()
+    for _ in range(50):
+        g.on_fire("backlog")
+        g.judge(False, reason="backlog")         # the output came back to the reserve
+        assert g.allows("backlog"), "an effective shed must never spend the budget"
+        assert not g.stood_down
+    assert g.ineffective("backlog") == 0
+
+    # And a stretch of effective ones must clear what earlier failures had accrued,
+    # so a host that recovers is not left one strike from standing down.
+    g.on_fire("backlog"); g.judge(True, reason="backlog")
+    g.on_fire("backlog"); g.judge(True, reason="backlog")
+    assert g.ineffective("backlog") == 2 and g.allows("backlog")
+    g.on_fire("backlog"); g.judge(False, reason="backlog")
+    assert g.ineffective("backlog") == 0, "one effective rebuild resets the streak"
+
+
 def t_windows_needs_close_to_wake_a_blocked_handler_posix_does_not():
     # Measured 2026-09-21, same script both hosts: a handler blocked in sendall wakes
     # on shutdown() alone on macOS (BrokenPipeError) but NOT on Windows, where it takes

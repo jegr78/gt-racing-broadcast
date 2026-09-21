@@ -295,11 +295,15 @@ rebuild on its own, and each one **does** return the output to the reserve. The 
 field number is Catalunya's 26 rebuilds in 56 minutes, one every 129 seconds.
 
 So the automation keeps the picture near the live edge on a host that cannot keep up, and
-it pays for that in dropouts. Whether a run of effective sheds should also stand the
-automation down is a product decision, not one this spec takes. #585 remains the right
-remedy for the host itself.
+it pays for that in dropouts.
 
-## Open
+### A run of effective sheds must NEVER stand the automation down
 
-- Whether N effective sheds within M minutes should stand the automation down, given the
-  cost above. Today only *ineffective* rebuilds do.
+This is a requirement, not a tuning knob. A host that needs a shed every 75 seconds cannot
+carry a production at all, and capping the remedy there would punish the automation for
+the host's fault while taking away the only thing keeping the picture near live. The
+budget is spent by **ineffective** rebuilds, which mean the remedy is not working; an
+effective one resets the streak however often it is needed. Pinned by
+`t_a_long_run_of_effective_sheds_never_stands_the_automation_down`.
+
+The answer to a host at 10 fps is #585 and different hardware, never a quieter relay.
