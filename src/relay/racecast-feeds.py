@@ -3715,15 +3715,13 @@ def streamlink_fanout_cmd(target, platform="youtube", twitch_token=None,
     # version-safe: renamed in streamlink 8.1.0. Both platforms, because the factor follows
     # the byte-stall watchdog this path has and direct-serve has not, so the watchdog acts
     # first whatever the source is.
-    deadline = queue_deadline_args(
+    base += queue_deadline_args(
         _streamlink_help(), factor=queue_deadline_factor(feed_stall_s(os.environ)))
     if platform == "twitch":
-        base += deadline
         if twitch_token:
             base += ["--twitch-api-header", f"Authorization=OAuth {twitch_token}"]
         selector = quality_twitch_selector(tier)
     else:
-        base += deadline
         if user_agent:
             base += ["--http-header", f"User-Agent={user_agent}"]
         if cookies:
