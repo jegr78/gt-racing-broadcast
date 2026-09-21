@@ -1273,7 +1273,7 @@ def t_rebuild_rearm_endpoint_lifts_the_stand_down():
                                          headers={"Content-Type": "application/json"})
             return json.loads(urllib.request.urlopen(req, timeout=5).read())
         assert post() == {"ok": True, "rearmed": True}
-        assert r._rebuild_guard.allows()
+        assert r._rebuild_guard.allows("backlog")
         assert r.health_store.events[-1]["metadata"]["reason"] == "director"
         assert post() == {"ok": True, "rearmed": False}      # nothing was stood down
         assert r.status()["rebuild_guard"] == {"stood_down": False, "feed": None}
@@ -3193,7 +3193,7 @@ def t_backlog_shed_stands_down_after_three_rebuilds_that_did_not_help():
         r._backlog_shed_tick(now)                  # judges: still backlogged
         now += r._freeze_cooldown
     assert len(r._rebuilds) == 3, f"expected exactly 3 attempts, got {len(r._rebuilds)}"
-    assert r._rebuild_guard.stood_down and not r._rebuild_guard.allows()
+    assert r._rebuild_guard.stood_down and not r._rebuild_guard.allows("backlog")
     r._backlog_shed_tick(now)
     assert len(r._rebuilds) == 3, "a stood-down guard must not rebuild a fourth time"
 
@@ -3205,7 +3205,7 @@ def t_backlog_shed_does_not_consume_a_freeze_rebuild_or_an_unmeasured_round():
     r._last_freeze_ts = 1000.0 - 5.0               # as the freeze path sets it when it fires
     r._backlog_shed_tick(1000.0)
     assert r._rebuild_guard.pending == "freeze", "the shed must not consume a freeze rebuild"
-    assert r._rebuild_guard.ineffective == 0
+    assert r._rebuild_guard.ineffective("backlog") == 0
     assert r._rebuilds == [], "and the shared cooldown holds it off while that verdict is out"
     # An interval nothing measured (OBS detached after a rebuild) consumes nothing either.
     r, _f = _shed_relay()
@@ -3213,7 +3213,7 @@ def t_backlog_shed_does_not_consume_a_freeze_rebuild_or_an_unmeasured_round():
     r._backlogged_feeds, r._interval_backlogs = {}, {r.live_feed(): None}
     r._backlog_shed_tick(1000.0)
     assert r._rebuild_guard.pending == "backlog", "an unmeasured round must not be a verdict"
-    assert r._rebuild_guard.ineffective == 0
+    assert r._rebuild_guard.ineffective("backlog") == 0
 
 
 def t_av_serving_age_tells_an_expected_disturbance_from_an_unexplained_one():

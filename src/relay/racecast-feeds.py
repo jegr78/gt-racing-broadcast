@@ -897,25 +897,39 @@ class RebuildGuard:
         self.rearm()
 
     def rearm(self):
-        self.ineffective = 0
+        self._ineffective = {}       # reason -> consecutive ineffective rebuilds
+        self._stood_down = set()     # reasons that gave up
         self.pending = None          # reason tag of the rebuild awaiting judgement
-        self.stood_down = False
 
-    def allows(self):
-        return not self.stood_down
+    def allows(self, reason="freeze"):
+        """Per reason: one giving up must not disable the other's remedy."""
+        return reason not in self._stood_down
+
+    def ineffective(self, reason="freeze"):
+        return self._ineffective.get(reason, 0)
+
+    @property
+    def stood_down(self):
+        """True when ANY reason gave up — the Director Panel reads this as a plain bool."""
+        return bool(self._stood_down)
+
+    @property
+    def stood_down_reasons(self):
+        return sorted(self._stood_down)
 
     def on_fire(self, reason="freeze"):
         """Arm the judgement for a rebuild this reason just fired. A still-unjudged one
         that the next rebuild supersedes did not end the trouble, so it counts as
         ineffective rather than being overwritten out of the three-strike budget."""
         if self.pending is not None:
-            self._count_ineffective()
+            self._count_ineffective(self.pending)
         self.pending = reason
 
-    def _count_ineffective(self):
-        self.ineffective += 1
-        if self.ineffective >= self.max_attempts:
-            self.stood_down = True
+    def _count_ineffective(self, reason):
+        n = self._ineffective.get(reason, 0) + 1
+        self._ineffective[reason] = n
+        if n >= self.max_attempts:
+            self._stood_down.add(reason)
             return True
         return False
 
@@ -927,9 +941,9 @@ class RebuildGuard:
             return False
         self.pending = None
         if not still_bad:
-            self.ineffective = 0
+            self._ineffective[reason] = 0
             return False
-        return self._count_ineffective()
+        return self._count_ineffective(reason)
 
     def on_window(self, frac, *, frac_threshold):
         """Judge the first full window after a FREEZE rebuild. "Better but still stalling"
@@ -4781,9 +4795,10 @@ class FeedFanoutServer:
                 and (now - mark[1]) >= grace_s)
 
     def reap_superseded(self, now=None, grace_s=FANOUT_STALE_GRACE_S):
-        """Close the abandoned consumers and return how many. Heartbeat only, never a read
-        path. shutdown() before close(): close alone does not reliably wake a handler
-        blocked in sendall."""
+        """Wake the abandoned consumers' handlers and return how many. Heartbeat only,
+        never a read path. shutdown() only: it is what unblocks a handler stuck in
+        sendall, and the descriptor belongs to that handler, which closes it in its own
+        finally. Closing it here could free a number the handler still writes to."""
         now = time.monotonic() if now is None else now
         doomed = []
         with self._consumers_lock:
@@ -4793,15 +4808,10 @@ class FeedFanoutServer:
         for conn in doomed:
             if conn is None:
                 continue
-            # shutdown THEN close, each guarded on its own: the peer stopped reading long
-            # ago, so either call may fail, and a raise here would take out the heartbeat
-            # tick that also samples health.
+            # The peer stopped reading long ago, so this may fail; a raise here would take
+            # out the heartbeat tick that also samples health.
             try:
                 conn.shutdown(socket.SHUT_RDWR)
-            except Exception:       # noqa: BLE001 — best-effort teardown
-                pass
-            try:
-                conn.close()
             except Exception:       # noqa: BLE001 — best-effort teardown
                 pass
         return len(doomed)
@@ -7354,9 +7364,9 @@ class AvSyncWatcher:
         self._partial = ""
 
     def _newest_log(self):
-        # logsetup.list_logs filters to REGULAR files (newest first) — a FIFO named
+        # logsetup.list_logs filters to regular files (newest first) — a FIFO named
         # *.txt in the log directory would otherwise block open() and hang this thread
-        # for good, and a symlink would point the parser at an unrelated file.
+        # for good. It follows symlinks, so a link to a regular file still passes.
         for path in logsetup.list_logs(self.log_dir):
             if path.endswith(".txt"):
                 return path
@@ -8194,8 +8204,14 @@ class Relay:
             stood_down = self._rebuild_guard.on_window(frac, frac_threshold=self._freeze_frac)
             if stood_down:
                 self._rebuild_stood_down_feed = live
-            attempts = self._rebuild_guard.ineffective
-            allowed = self._rebuild_guard.allows()
+            attempts = self._rebuild_guard.ineffective("freeze")
+            since = None if self._last_freeze_ts is None else now - self._last_freeze_ts
+            fire = (self._rebuild_guard.allows("freeze")
+                    and freeze_decision(frac, since, frac_threshold=self._freeze_frac,
+                                        cooldown_s=self._freeze_cooldown))
+            if fire:
+                self._last_freeze_ts = now      # claim the cooldown before releasing the lock
+                self._rebuild_guard.on_fire("freeze")
         if stood_down:
             LOG.warning("Feed %s auto-rebuild stood down — %d OBS rebuilds did not clear the "
                         "stall (stall_fraction=%.2f); re-arms at the next stint change or "
@@ -8204,19 +8220,12 @@ class Relay:
                                f"Feed {live} auto-rebuild stood down after {attempts} "
                                f"ineffective rebuilds",
                                {"feed": live, "stint": f.idx + 1, "attempts": attempts})
-        if not allowed:
-            return
-        since = None if self._last_freeze_ts is None else now - self._last_freeze_ts
-        if not freeze_decision(frac, since, frac_threshold=self._freeze_frac,
-                               cooldown_s=self._freeze_cooldown):
+        if not fire:
             return
         LOG.warning("freeze auto-reconnect %s — stall_fraction=%.2f — rebuilding OBS input "
                     "(#488)", live, frac)
         f._obs_reconnect()                      # the RESET primitive, threaded + best-effort
         self._note_obs_splice(live)             # so the A/V detector does not flag our own work
-        self._last_freeze_ts = now
-        with self._rebuild_lock:
-            self._rebuild_guard.on_fire("freeze")
         self._record_event(now, "obs_rebuild",
                            f"Feed {live} OBS input rebuilt (stall fraction {frac:.2f})",
                            {"feed": live, "stint": f.idx + 1, "stall_fraction": round(frac, 2)})
@@ -8242,8 +8251,7 @@ class Relay:
         with self._rebuild_lock:
             stood_down = self._rebuild_guard.judge(degraded if measured else None,
                                                    reason="backlog")
-            attempts = self._rebuild_guard.ineffective
-            allowed = self._rebuild_guard.allows()
+            attempts = self._rebuild_guard.ineffective("backlog")
         if stood_down:
             self._rebuild_stood_down_feed = live
             LOG.warning("Feed %s backlog shed stood down — %d OBS rebuilds did not bring the "
@@ -8258,27 +8266,26 @@ class Relay:
         if f is None or f.paused or f.phase != "serving" or not degraded:
             self._backlog_streak[live] = 0
             return
-        self._backlog_streak[live] = self._backlog_streak.get(live, 0) + 1
-        if not allowed:
+        streak = self._backlog_streak[live] = self._backlog_streak.get(live, 0) + 1
+        with self._rebuild_lock:
+            since = None if self._last_freeze_ts is None else now - self._last_freeze_ts
+            fire = (self._rebuild_guard.allows("backlog")
+                    and backlog_shed_decision(streak, since,
+                                              min_streak=self._backlog_shed_ticks,
+                                              cooldown_s=self._freeze_cooldown))
+            if fire:
+                self._last_freeze_ts = now      # claim the cooldown before releasing the lock
+                self._rebuild_guard.on_fire("backlog")
+        if not fire:
             return
-        since = None if self._last_freeze_ts is None else now - self._last_freeze_ts
-        if not backlog_shed_decision(self._backlog_streak[live], since,
-                                     min_streak=self._backlog_shed_ticks,
-                                     cooldown_s=self._freeze_cooldown):
-            return
-        behind = self._backlogged_feeds.get(live)
+        behind = self._backlogged_feeds[live]   # degraded, so the classification holds one
         LOG.warning("backlog shed %s — output %.1f s behind live — rebuilding OBS input",
-                    live, behind if behind is not None else -1.0)
+                    live, behind)
         f._obs_reconnect()                      # the RESET primitive, threaded + best-effort
         self._note_obs_splice(live)             # so the A/V detector does not flag our own work
-        self._last_freeze_ts = now
-        with self._rebuild_lock:
-            self._rebuild_guard.on_fire("backlog")
         self._backlog_streak[live] = 0
         self._record_event(now, "backlog_shed",
-                           f"Feed {live} OBS input rebuilt to shed a "
-                           f"{behind:.1f} s backlog" if behind is not None else
-                           f"Feed {live} OBS input rebuilt to shed a backlog",
+                           f"Feed {live} OBS input rebuilt to shed a {behind:.1f} s backlog",
                            {"feed": live, "backlog_s": behind})
 
     def _maybe_auto_failover(self, now):

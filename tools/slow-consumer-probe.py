@@ -24,6 +24,8 @@ import sys
 import time
 import urllib.request
 
+from restart_soak import relay_url
+
 DEFAULT_PORT = 53001
 DEFAULT_RATE = 0.40          # fraction of real time to read at
 SAMPLE_S = 10.0              # how often to print the relay's view
@@ -76,7 +78,7 @@ def main():
     ap.add_argument("--rate", type=float, default=DEFAULT_RATE,
                     help="read at this fraction of real time (default 0.40)")
     ap.add_argument("--seconds", type=float, default=240.0)
-    ap.add_argument("--relay", default="http://127.0.0.1:8088")
+    ap.add_argument("--relay", default="http://127.0.0.1:8088", type=relay_url)
     args = ap.parse_args()
     if not 0 < args.rate < 1:
         sys.exit("--rate must be between 0 and 1 (1.0 would not fall behind at all)")

@@ -283,6 +283,8 @@ def _on_air(sample_groups, name_for_stint):
     # ONE series across every window, not a sum per window. These are running totals,
     # so summing per on-air window re-counted the whole counter at each part: a
     # three-part event whose counter went 5 -> 9 reported 21 instead of 4.
+    # Chronological, because _pair_windows sorts the events it pairs — a fall in this
+    # series reads as a relay restart, so the order is load-bearing, not cosmetic.
     ordered = [s for g in sample_groups for s in g]
     av_repairs = counter_increase([s.get("av_repairs_total") for s in ordered])
     av_unexplained = counter_increase([s.get("av_unexplained_total") for s in ordered])

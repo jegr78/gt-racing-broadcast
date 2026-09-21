@@ -338,10 +338,10 @@ def t_rebuild_guard_stands_down_after_three_ineffective_rebuilds():
         assert g.allows()
         g.on_fire()
         assert g.on_window(0.9, frac_threshold=0.3) is False
-        assert g.ineffective == n and not g.stood_down
+        assert g.ineffective("freeze") == n and not g.stood_down
     g.on_fire()
     assert g.on_window(0.9, frac_threshold=0.3) is True      # this call stood it down
-    assert g.stood_down and not g.allows() and g.ineffective == 3
+    assert g.stood_down and not g.allows() and g.ineffective("freeze") == 3
 
 
 def t_rebuild_guard_healthy_window_resets_the_streak():
@@ -350,27 +350,27 @@ def t_rebuild_guard_healthy_window_resets_the_streak():
     g = m.RebuildGuard()
     g.on_fire(); g.on_window(0.9, frac_threshold=0.3)
     g.on_fire(); g.on_window(0.9, frac_threshold=0.3)
-    assert g.ineffective == 2
+    assert g.ineffective("freeze") == 2
     g.on_fire()
     assert g.on_window(0.1, frac_threshold=0.3) is False
-    assert g.ineffective == 0 and g.allows()
+    assert g.ineffective("freeze") == 0 and g.allows()
     # "better but still stalling" is not an improvement: 0.5 is still over 0.3
     g.on_fire()
     g.on_window(0.5, frac_threshold=0.3)
-    assert g.ineffective == 1
+    assert g.ineffective("freeze") == 1
 
 
 def t_rebuild_guard_judges_only_the_first_window_after_a_fire():
     g = m.RebuildGuard()
     assert g.on_window(0.9, frac_threshold=0.3) is False     # no fire pending
-    assert g.ineffective == 0
+    assert g.ineffective("freeze") == 0
     g.on_fire()
     assert g.on_window(None, frac_threshold=0.3) is False    # nothing measurable yet
     assert g.pending
     g.on_window(0.9, frac_threshold=0.3)
-    assert not g.pending and g.ineffective == 1
+    assert not g.pending and g.ineffective("freeze") == 1
     g.on_window(0.9, frac_threshold=0.3)                     # later windows do not count
-    assert g.ineffective == 1
+    assert g.ineffective("freeze") == 1
 
 
 def t_rebuild_guard_rearm_clears_the_stand_down():
@@ -379,7 +379,7 @@ def t_rebuild_guard_rearm_clears_the_stand_down():
         g.on_fire(); g.on_window(1.0, frac_threshold=0.3)
     assert g.stood_down
     g.rearm()
-    assert g.allows() and g.ineffective == 0 and not g.pending
+    assert g.allows() and g.ineffective("freeze") == 0 and not g.pending
 
 
 def t_feed_freeze_detect_default_on_and_falsey_disables():
@@ -1077,12 +1077,15 @@ def t_an_abandoned_consumer_is_the_one_superseded_and_not_moving():
     assert not srv._stale(srv._consumers[2], now=late), "a consumer that moved is alive"
 
     assert srv.reap_superseded(now=1000.0 + 1.0) == 0, "the grace must be respected"
-    assert not old.closed
+    assert not old.shutdown_calls
     assert srv.reap_superseded(now=1000.0 + m.FANOUT_STALE_GRACE_S) == 1
-    assert old.closed and old.shutdown_calls, (
+    assert old.shutdown_calls, (
         "close() alone does not unblock a handler stuck in sendall — the abandoned "
         "socket is exactly the one whose send buffer the peer stopped draining")
-    assert not new.closed, "the live consumer must be left alone"
+    assert not old.closed, (
+        "the reaper must not close a descriptor it does not own: the handler is inside "
+        "sendall on it and closes it in its own finally")
+    assert not new.shutdown_calls, "the live consumer must be left alone"
 
 
 def t_a_merely_slow_consumer_is_never_judged_abandoned():
@@ -1103,8 +1106,8 @@ def t_a_merely_slow_consumer_is_never_judged_abandoned():
 
     # And the cursor standing still must not condemn the slow one on its own.
     assert slow["cursor"] == 100, "the slow consumer is still inside the same read cycle"
-    assert srv.reap_superseded(now=late) == 1, "only the abandoned socket is closed"
-    assert dead["conn"].closed and not slow["conn"].closed
+    assert srv.reap_superseded(now=late) == 1, "only the abandoned socket is taken down"
+    assert dead["conn"].shutdown_calls and not slow["conn"].shutdown_calls
 
 
 def t_a_stale_consumer_never_becomes_the_reported_backlog():
@@ -1148,6 +1151,24 @@ def t_reaping_never_raises_on_a_socket_the_peer_abandoned():
     assert srv.reap_superseded(now=99.0) == 2     # must not raise
 
 
+def t_a_backlog_stand_down_leaves_the_freeze_remedy_armed():
+    # Both reasons pull one control, but they must not share one budget: three ineffective
+    # backlog sheds used to set a single stood_down flag, which also gated the freeze
+    # rebuild — so a backlog nobody could fix silently disabled the stutter remedy for the
+    # rest of the stint.
+    g = m.RebuildGuard()
+    for _ in range(m.REBUILD_GUARD_MAX_ATTEMPTS):
+        g.on_fire("backlog")
+        g.judge(True, reason="backlog")
+    assert not g.allows("backlog"), "the backlog shed gave up, as designed"
+    assert g.allows("freeze"), "the freeze rebuild must still be available"
+    assert g.ineffective("freeze") == 0, "and must not inherit the other's count"
+    assert g.stood_down, "the panel flag stays a plain bool: something stood down"
+
+    g.rearm()
+    assert g.allows("backlog") and g.allows("freeze") and not g.stood_down
+
+
 def t_backlog_shed_decision_needs_a_streak_and_respects_the_cooldown():
     # The automatic backlog shed (2026-09-21). Mirrors freeze_decision's shape so the
     # two reasons that pull the same control read the same way.
@@ -1170,16 +1191,16 @@ def t_rebuild_guard_routes_each_judgement_to_the_reason_that_fired():
     g = m.RebuildGuard()
     g.on_fire("backlog")
     assert g.on_window(0.9, frac_threshold=0.3) is False     # freeze must not consume it
-    assert g.pending == "backlog" and g.ineffective == 0
+    assert g.pending == "backlog" and g.ineffective("backlog") == 0
     assert g.judge(True, reason="backlog") is False
-    assert not g.pending and g.ineffective == 1              # the shed's own judge counts
+    assert not g.pending and g.ineffective("backlog") == 1   # the shed's own judge counts
 
     g2 = m.RebuildGuard()
     g2.on_fire()                                             # defaults to freeze
     assert g2.judge(True, reason="backlog") is False         # backlog must not consume it
-    assert g2.pending == "freeze" and g2.ineffective == 0
+    assert g2.pending == "freeze" and g2.ineffective("freeze") == 0
     g2.on_window(0.9, frac_threshold=0.3)
-    assert g2.ineffective == 1
+    assert g2.ineffective("freeze") == 1
 
 
 def t_backlog_judge_ignores_an_unmeasurable_round():
@@ -1188,9 +1209,9 @@ def t_backlog_judge_ignores_an_unmeasurable_round():
     g = m.RebuildGuard()
     g.on_fire("backlog")
     assert g.judge(None, reason="backlog") is False
-    assert g.pending == "backlog" and g.ineffective == 0
+    assert g.pending == "backlog" and g.ineffective("backlog") == 0
     assert g.judge(False, reason="backlog") is False         # it helped
-    assert not g.pending and g.ineffective == 0
+    assert not g.pending and g.ineffective("backlog") == 0
 
 
 def t_backlog_shed_stands_down_after_three_ineffective_rebuilds():
@@ -1200,10 +1221,10 @@ def t_backlog_shed_stands_down_after_three_ineffective_rebuilds():
     for n in (1, 2):
         g.on_fire("backlog")
         assert g.judge(True, reason="backlog") is False
-        assert g.ineffective == n and g.allows()
+        assert g.ineffective("backlog") == n and g.allows("backlog")
     g.on_fire("backlog")
     assert g.judge(True, reason="backlog") is True
-    assert g.stood_down and not g.allows()
+    assert g.stood_down and not g.allows("backlog")
 
 
 

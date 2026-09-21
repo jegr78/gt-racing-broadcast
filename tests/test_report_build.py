@@ -690,6 +690,22 @@ def t_a_repair_between_two_parts_is_still_part_of_the_event():
     assert rep["on_air"]["av_repairs"] == 3, rep["on_air"]
 
 
+def t_windows_out_of_order_do_not_read_as_a_counter_reset():
+    # counter_increase reads a FALL as a restart and counts the new value in full, so the
+    # series it gets must be chronological. The windows come from the event list in the
+    # order that list happens to have; nothing upstream promises it is sorted.
+    samples = []
+    for ts, total in ((0.0, 10), (10.0, 12), (100.0, 12), (110.0, 20)):
+        samples.append(_sample(ts, live_stint=1, av_repairs_total=total,
+                               av_unexplained_total=0))
+    events = [{"ts": 100.0, "type": "part_start"}, {"ts": 110.0, "type": "part_end"},
+              {"ts": 0.0, "type": "part_start"}, {"ts": 10.0, "type": "part_end"}]
+    rep = rb.build_report(samples, events, {1: "Alice"}, "E", (0.0, 110.0), now=200.0)
+    assert rep["on_air"]["av_repairs"] == 10, (
+        "the counter rose 10 -> 20; reading the later window first makes its 20 -> 10 "
+        "look like a relay restart and counts the whole counter a second time")
+
+
 def t_counter_increase_skips_missing_samples_instead_of_reading_them_as_zero():
     # A database written before v11 has NULL here, and a missed tick has nothing. Reading
     # either as 0 would invent a reset and double the total.
