@@ -3138,6 +3138,100 @@ def t_av_watcher_start_never_takes_the_relay_down_with_it():
         m.logsetup.obs_log_dir = orig
 
 
+def _shed_relay(backlog=9.0):
+    """A relay whose on-air feed is serving and classified backlogged this heartbeat."""
+    r = _make_min_relay()
+    f = r.feeds[r.live_feed()]
+    f.phase, f.phase_since, f.paused = "serving", time.time() - 600.0, False
+    r._backlogged_feeds = {r.live_feed(): backlog}
+    r._interval_backlogs = {r.live_feed(): backlog}
+    r._rebuilds = []
+    f._obs_reconnect = lambda: r._rebuilds.append(1)
+    return r, f
+
+
+def t_backlog_shed_rebuilds_the_on_air_feed_without_a_director():
+    # The 2026-09-21 override: the relay sheds the backlog itself. One heartbeat with a
+    # degraded FLOOR is enough, because the floor is already a whole-interval minimum.
+    r, _f = _shed_relay()
+    r._backlog_shed_tick(1000.0)
+    assert r._rebuilds == [1], "a backlogged on-air feed must be rebuilt automatically"
+    assert r._last_freeze_ts == 1000.0, "the shared cooldown must be armed"
+    assert r._rebuild_guard.pending == "backlog", "the guard must judge OUR rebuild"
+
+
+def t_backlog_shed_registers_its_own_splice_with_the_av_detector():
+    # Without this the audio repair OBS logs right after our rebuild is UNEXPLAINED and
+    # the panel turns yellow for a disturbance the relay caused on purpose.
+    r, _f = _shed_relay()
+    before = r._serving_age(r.live_feed())
+    assert before > 500.0, "the feed has been serving for a while"
+    r._backlog_shed_tick(1000.0)
+    after = r._serving_age(r.live_feed())
+    assert after < 5.0, f"the splice must reset the A/V explanation window, got {after}"
+
+
+def t_backlog_shed_leaves_a_healthy_or_idle_feed_alone():
+    r, f = _shed_relay()
+    r._backlogged_feeds = {}                       # measured, not degraded
+    r._backlog_shed_tick(1000.0)
+    assert r._rebuilds == [] and r._backlog_streak[r.live_feed()] == 0
+    r._backlogged_feeds = {r.live_feed(): 9.0}     # degraded but not serving
+    f.phase = "connecting"
+    r._backlog_shed_tick(1000.0)
+    assert r._rebuilds == [], "a feed that is not serving has no live edge to be behind"
+    assert r._backlog_streak[r.live_feed()] == 0, "a handover must not carry a streak over"
+
+
+def t_backlog_shed_kill_switch_and_shared_cooldown_both_hold_it_off():
+    r, _f = _shed_relay()
+    r._backlog_shed = False
+    r._backlog_shed_tick(1000.0)
+    assert r._rebuilds == [], "RACECAST_FEED_BACKLOG_SHED=0 must disable it"
+    # The cooldown is SHARED with the freeze detector, so the two reasons cannot
+    # rebuild the same input back to back.
+    r, _f = _shed_relay()
+    r._last_freeze_ts = 1000.0 - 5.0               # a freeze rebuild just happened
+    r._backlog_shed_tick(1000.0)
+    assert r._rebuilds == [], "a freeze rebuild must silence the shed for the cooldown"
+    r._backlog_shed_tick(1000.0 + r._freeze_cooldown)
+    assert r._rebuilds == [1], "and release it afterwards"
+
+
+def t_backlog_shed_stands_down_after_three_rebuilds_that_did_not_help():
+    # The epic's requirement, and the reason the override is buildable at all: three
+    # attempts, then stop and say so, instead of Catalunya's 26 black dropouts.
+    r, _f = _shed_relay()
+    now = 1000.0
+    for _ in range(3):
+        r._backlog_shed_tick(now)                  # fires
+        now += r._freeze_cooldown
+        r._backlog_shed_tick(now)                  # judges: still backlogged
+        now += r._freeze_cooldown
+    assert len(r._rebuilds) == 3, f"expected exactly 3 attempts, got {len(r._rebuilds)}"
+    assert r._rebuild_guard.stood_down and not r._rebuild_guard.allows()
+    r._backlog_shed_tick(now)
+    assert len(r._rebuilds) == 3, "a stood-down guard must not rebuild a fourth time"
+
+
+def t_backlog_shed_does_not_consume_a_freeze_rebuild_or_an_unmeasured_round():
+    # Two judges on two threads share one guard. Each must only ever judge its own.
+    r, _f = _shed_relay()
+    r._rebuild_guard.on_fire("freeze")
+    r._last_freeze_ts = 1000.0 - 5.0               # as the freeze path sets it when it fires
+    r._backlog_shed_tick(1000.0)
+    assert r._rebuild_guard.pending == "freeze", "the shed must not consume a freeze rebuild"
+    assert r._rebuild_guard.ineffective == 0
+    assert r._rebuilds == [], "and the shared cooldown holds it off while that verdict is out"
+    # An interval nothing measured (OBS detached after a rebuild) consumes nothing either.
+    r, _f = _shed_relay()
+    r._rebuild_guard.on_fire("backlog")
+    r._backlogged_feeds, r._interval_backlogs = {}, {r.live_feed(): None}
+    r._backlog_shed_tick(1000.0)
+    assert r._rebuild_guard.pending == "backlog", "an unmeasured round must not be a verdict"
+    assert r._rebuild_guard.ineffective == 0
+
+
 def t_av_serving_age_tells_an_expected_disturbance_from_an_unexplained_one():
     # #619: the classification hinges on this one reading. A paused or connecting feed
     # must return None, or a repair on a feed the relay is not even serving would be

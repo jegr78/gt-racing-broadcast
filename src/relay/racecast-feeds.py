@@ -495,6 +495,25 @@ def feed_freeze_detect_enabled(environ):
     return str(environ.get("RACECAST_FEED_FREEZE_DETECT", "")).strip().lower() not in _FANOUT_FALSEY
 
 
+def feed_backlog_shed_enabled(environ):
+    """True unless RACECAST_FEED_BACKLOG_SHED is an explicit falsey token. Default ON: the
+    relay rebuilds the on-air feed's OBS input by itself when its consumer stays behind
+    the live edge, instead of waiting for a director to press RESET.
+
+    This is its OWN switch rather than a mode of RACECAST_FEED_FREEZE_DETECT, because the
+    two detect different faults and a producer turning one off must not silently lose the
+    other. Pure so the switch is unit-testable."""
+    return str(environ.get("RACECAST_FEED_BACKLOG_SHED", "")).strip().lower() not in _FANOUT_FALSEY
+
+
+def feed_backlog_shed_ticks(environ):
+    """Consecutive heartbeats the on-air feed must be classified backlogged before the shed
+    acts. Default 1, because the classified value is the interval FLOOR (a minimum), so one
+    tick already means the feed was late for the whole 30 s. Raise it to trade reaction time
+    for certainty. Below 1 is meaningless and reads as the default. Pure."""
+    return max(1, int(_env_float(environ, "RACECAST_FEED_BACKLOG_SHED_TICKS", 1)))
+
+
 def feed_freeze_stall_ratio(environ):
     """Cursor-progress ratio (Δcursor/Δwall) below which a sample counts as a STALL tick.
     Default 0.25 (made <25% of real-time progress that tick). #488. Pure."""
@@ -887,7 +906,24 @@ class RebuildGuard:
         return not self.stood_down
 
     def on_fire(self, reason="freeze"):
+        """Arm the judgement for a rebuild this reason just fired.
+
+        A rebuild that is still awaiting judgement when the NEXT one fires did not end the
+        trouble — something pulled the same control again before the first verdict was in —
+        so it is counted as ineffective here instead of being silently overwritten. Without
+        that, two reasons sharing one `pending` slot would leak attempts out of the
+        three-strike budget and the guard would never stand down. Counting it errs toward
+        standing down sooner, which is the direction that costs the audience less."""
+        if self.pending is not None:
+            self._count_ineffective()
         self.pending = reason
+
+    def _count_ineffective(self):
+        self.ineffective += 1
+        if self.ineffective >= self.max_attempts:
+            self.stood_down = True
+            return True
+        return False
 
     def judge(self, still_bad, *, reason="freeze"):
         """Judge the pending rebuild, but only if THIS reason fired it. Returns True when
@@ -908,11 +944,7 @@ class RebuildGuard:
         if not still_bad:
             self.ineffective = 0
             return False
-        self.ineffective += 1
-        if self.ineffective >= self.max_attempts:
-            self.stood_down = True
-            return True
-        return False
+        return self._count_ineffective()
 
     def on_window(self, frac, *, frac_threshold):
         """Judge the first full window after a FREEZE rebuild. "Better but still stalling"
@@ -7461,6 +7493,12 @@ class Relay:
         self._served_max_gaps = {}        # #619: same, but None where nothing measured it
         self._jittery_feeds = []          # #535: feeds whose last-interval gap tripped the signal
         self._backlog_warn_s = feed_backlog_warn_s(os.environ)      # #583
+        # Automatic backlog shed (2026-09-21): a second reason to pull the SAME OBS-rebuild
+        # control the freeze detector owns. Shares _rebuild_guard and _last_freeze_ts.
+        self._backlog_shed = feed_backlog_shed_enabled(os.environ)
+        self._backlog_shed_ticks = feed_backlog_shed_ticks(os.environ)
+        self._backlog_streak = {}      # feed -> consecutive backlogged heartbeats
+        self._obs_splice_ts = {}       # feed -> when the relay last rebuilt its OBS input
         self._interval_backlogs = {}      # #583: last heartbeat's per-feed consumer backlog floor
         self._backlogged_feeds = {}       # #583: feed -> floor (s) for feeds past the threshold
         self._av = av_sync.new_state()    # #619: A/V sync disturbances OBS reported
@@ -7610,14 +7648,39 @@ class Relay:
                 "feeds_backlogged": dict(self._backlogged_feeds),
                 "feeds_av_disturbed": self._av_health_fact()}
 
+    def _note_obs_splice(self, feed):
+        """Record that the relay itself just spliced this feed's stream into OBS, by
+        rebuilding the input rather than by restarting the feed. The freeze auto-rebuild
+        and the backlog shed both do that, and both produce exactly the disturbance the
+        A/V detector is built to notice — see _serving_age for why that matters.
+
+        It takes NO clock on purpose. The only reader is _serving_age, which compares
+        against `time.time()` and `Feed.phase_since`, so a caller passing its own `now` —
+        a monotonic reading, or a test's synthetic one — would store a value from a
+        different scale and the comparison would silently never fire. The callers do have
+        a `now` in hand, which is exactly why the parameter must not exist."""
+        self._obs_splice_ts[feed] = time.time()
+
     def _serving_age(self, feed):
-        """How long that feed has been in the `serving` phase, or None when it is not
-        serving. This is what tells an EXPECTED sync disturbance (the relay spliced a
-        new stream into OBS's open socket) from an unexplained one (#619)."""
+        """How long ago the relay last spliced a new stream into OBS for that feed, or None
+        when it is not serving. This is what tells an EXPECTED sync disturbance from an
+        unexplained one (#619).
+
+        It is the age since the feed started serving OR since the relay last rebuilt that
+        feed's OBS input, whichever is more recent. A rebuild (the freeze auto-reconnect,
+        and since 2026-09-21 the automatic backlog shed) splices a new stream into OBS
+        without restarting the relay feed, so the serving age alone does not reset and the
+        audio repair OBS logs right afterwards would be reported as UNEXPLAINED — the panel
+        would turn yellow for a disturbance the relay caused on purpose. The shed makes
+        that routine; for the freeze rebuild it was already latent."""
         f = self.pov if feed == "POV" else self.feeds.get(feed)
         if f is None or f.paused or f.phase != "serving":
             return None
-        return time.time() - f.phase_since
+        since = f.phase_since
+        spliced = self._obs_splice_ts.get(feed)
+        if spliced is not None and spliced > since:
+            since = spliced
+        return time.time() - since
 
     def _start_av_watcher(self):
         """Start the A/V sync watcher on OBS's own log directory. Entirely optional:
@@ -7812,6 +7875,10 @@ class Relay:
             self._sample_connectivity()
             self._sample_inbound_gaps()
             self._sample_consumer_backlogs()
+            try:
+                self._backlog_shed_tick(now)    # reads the classification just sampled
+            except Exception as exc:            # noqa: BLE001 — a remedy never breaks the heartbeat
+                LOG.debug("backlog shed error (%s)", exc)
             h = self._refresh_health(now)
             if self.health_store is not None:
                 try:
@@ -8101,13 +8168,91 @@ class Relay:
         LOG.warning("freeze auto-reconnect %s — stall_fraction=%.2f — rebuilding OBS input "
                     "(#488)", live, frac)
         f._obs_reconnect()                      # the RESET primitive, threaded + best-effort
+        self._note_obs_splice(live)             # so the A/V detector does not flag our own work
         self._last_freeze_ts = now
         with self._rebuild_lock:
-            self._rebuild_guard.on_fire()
+            self._rebuild_guard.on_fire("freeze")
         self._record_event(now, "obs_rebuild",
                            f"Feed {live} OBS input rebuilt (stall fraction {frac:.2f})",
                            {"feed": live, "stint": f.idx + 1, "stall_fraction": round(frac, 2)})
         self._fz_prev_cursor = None; self._fz_ratios = []
+
+    def _backlog_shed_tick(self, now):
+        """Automatic backlog shed (2026-09-21): rebuild the ON-AIR feed's OBS input when its
+        consumer stays behind the live edge, so the picture returns to the live edge without
+        a director pressing RESET. Runs on the heartbeat, right after the classification it
+        reads; the heartbeat swallows any error it raises.
+
+        #581 originally ruled this out ("only a human chooses it") after the Catalunya
+        qualifying broadcast, where an unguarded automation produced 26 black dropouts in
+        56 minutes. The producer overrode that on 2026-09-21 as a standing preference:
+        automatic recovery is the design, the manual reset is the fallback. Two things make
+        the override buildable rather than a repeat — RebuildGuard (#582) gives up after
+        three ineffective rebuilds, and the backlog is now measured (#583) long before the
+        ring overflows, instead of being noticed only once it destroyed itself.
+
+        It shares the control, the guard and the cooldown with the freeze detector on
+        purpose: two automations turning the same control is a race someone ends up
+        debugging mid-broadcast.
+
+        Scope is deliberately narrow. Only the ON-AIR feed: with fan-out OBS drops an
+        off-air feed (close_when_inactive), so an idle feed has no consumer and no backlog.
+        POV is out — it is a picture-in-picture, and giving it its own rebuild reason would
+        put a second actor on the same control after all. A backlog that keeps GROWING is
+        not fixed here: this sheds it, the host rebuilds it within a minute, and after three
+        attempts the guard stands down with a plain warning. That is the honest answer for
+        that cause; the remedy for it is #585 (step every feed down to ROBUST), which costs
+        no black at all."""
+        if not self._backlog_shed or _obs_ws is None or not self.fanout:
+            return
+        live = self.live_feed()
+        f = self.feeds.get(live)
+        degraded = live in self._backlogged_feeds
+        # Judge the PREVIOUS shed first, whatever we decide to do now: an unmeasurable
+        # round (floor None — OBS is detached for part of the interval after a rebuild)
+        # consumes nothing, so the verdict waits rather than counting as a success.
+        measured = self._interval_backlogs.get(live) is not None or degraded
+        with self._rebuild_lock:
+            stood_down = self._rebuild_guard.judge(degraded if measured else None,
+                                                   reason="backlog")
+            attempts = self._rebuild_guard.ineffective
+            allowed = self._rebuild_guard.allows()
+        if stood_down:
+            self._rebuild_stood_down_feed = live
+            LOG.warning("Feed %s backlog shed stood down — %d OBS rebuilds did not bring the "
+                        "output back to the live edge; the host is most likely too slow to "
+                        "render in real time. Re-arms at the next stint change or from the "
+                        "Director Panel", live, attempts)
+            self._record_event(now, "backlog_shed_stood_down",
+                               f"Feed {live} backlog shed stood down after {attempts} "
+                               f"ineffective rebuilds", {"feed": live, "attempts": attempts})
+        # A feed that is not serving has no live edge to be behind: reset its streak so a
+        # handover does not carry an old one into the next stint.
+        if f is None or f.paused or f.phase != "serving" or not degraded:
+            self._backlog_streak[live] = 0
+            return
+        self._backlog_streak[live] = self._backlog_streak.get(live, 0) + 1
+        if not allowed:
+            return
+        since = None if self._last_freeze_ts is None else now - self._last_freeze_ts
+        if not backlog_shed_decision(self._backlog_streak[live], since,
+                                     min_streak=self._backlog_shed_ticks,
+                                     cooldown_s=self._freeze_cooldown):
+            return
+        behind = self._backlogged_feeds.get(live)
+        LOG.warning("backlog shed %s — output %.1f s behind live — rebuilding OBS input",
+                    live, behind if behind is not None else -1.0)
+        f._obs_reconnect()                      # the RESET primitive, threaded + best-effort
+        self._note_obs_splice(live)             # so the A/V detector does not flag our own work
+        self._last_freeze_ts = now
+        with self._rebuild_lock:
+            self._rebuild_guard.on_fire("backlog")
+        self._backlog_streak[live] = 0
+        self._record_event(now, "backlog_shed",
+                           f"Feed {live} OBS input rebuilt to shed a "
+                           f"{behind:.1f} s backlog" if behind is not None else
+                           f"Feed {live} OBS input rebuilt to shed a backlog",
+                           {"feed": live, "backlog_s": behind})
 
     def _maybe_auto_failover(self, now):
         """Auto-switch OBS to the Intermission scene when the ON-AIR feed is
