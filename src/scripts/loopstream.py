@@ -19,13 +19,13 @@ STREAMLINK_TWITCH = ["--ringbuffer-size", "64M", "--hls-live-edge", "2", "--twit
 
 def no_window_kwargs(os_name=None):
     """Popen/call kwargs that stop streamlink from flashing a terminal window on
-    Windows. A static feed runs DETACHED (no console — start-streams' spawn_kwargs),
-    so the streamlink child otherwise gets a fresh, PERSISTENT console window for
-    the whole stint (same class as the relay's per-feed spawn, issue #30). The
-    feed's stdout is redirected to a log file by start-streams, so CREATE_NO_WINDOW
-    suppresses the window without losing logged output. No-op (empty) off Windows.
-    Mirrors services.no_window_kwargs — duplicated so this standalone feed imports
-    nothing from its siblings."""
+    Windows. A static feed runs DETACHED (no console, see start-streams'
+    spawn_kwargs), so the streamlink child otherwise gets a fresh, PERSISTENT
+    console window for the whole stint (#30). The feed's stdout is redirected to a
+    log file by start-streams, so CREATE_NO_WINDOW suppresses the window without
+    losing logged output. No-op (empty) off Windows. Mirrors
+    services.no_window_kwargs, duplicated so this standalone feed imports nothing
+    from its siblings."""
     os_name = os.name if os_name is None else os_name
     if os_name == "nt":
         CREATE_NO_WINDOW = 0x08000000
@@ -86,16 +86,16 @@ def runtime_dir(here):
 
 def streamlink_argv(url, port, platform="youtube", twitch_token=None):
     """streamlink serve argv for one public channel. YouTube: prefer 1080p, fall to
-    720p (unchanged). Twitch: served via Streamlink's twitch plugin (low-latency,
-    automatic ad-filtering), mirroring the relay's Twitch serve; `--` hardens the
-    positional URL."""
+    720p. Twitch: served via Streamlink's twitch plugin (low-latency, automatic
+    ad-filtering), mirroring the relay's Twitch serve; `--` hardens the positional
+    URL."""
     base = ["streamlink", "--player-external-http", "--player-external-http-port", port]
     if platform == "twitch":
         base += STREAMLINK_TWITCH
         if twitch_token:
             base += ["--twitch-api-header", f"Authorization=OAuth {twitch_token}"]
         return base + ["--retry-streams", "15", "--retry-open", "5", "--", url, "best"]
-    # YouTube (unchanged): URL + quality positional, then options
+    # YouTube: URL + quality positional, then options
     return ["streamlink", url, "1080p60,1080p,720p60,720p",
             "--player-external-http", "--player-external-http-port", port,
             "--ringbuffer-size", "64M", "--hls-live-edge", "4",
@@ -149,7 +149,7 @@ def main():
             serve_once(url, port, plat, token, logger=logger)
         except FileNotFoundError:
             sys.exit("ERROR: streamlink not found (brew install streamlink / pip install -U streamlink).")
-        end = "stream ended or not live — retrying in 10s"
+        end = "stream ended or not live; retrying in 10s"
         logger.warning(end) if logger else print(f">> [{port}] {end}", flush=True)
         time.sleep(10)
 

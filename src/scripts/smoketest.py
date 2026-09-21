@@ -17,8 +17,6 @@ import re
 from urllib.parse import urlparse
 import urllib.parse
 
-# --------------------------------------------------------------- vocabulary
-
 # Game titles, not English words: a sim-racing stream is titled in the
 # streamer's own language but names the game the same way everywhere. Matched on
 # word boundaries so "lmu" never fires inside "alumni".
@@ -41,8 +39,6 @@ MIN_HEIGHT = 720                 # below this a feed is not a broadcast source
 MAX_ATTEMPTS_PER_PLATFORM = 3    # an uncapped walk is how an IP gets throttled
 DEFAULT_MINUTES = 5              # observation window
 SHEET_ROWS_TO_CLEAR = 4          # the sheet has 4 stint rows; we write 3
-
-# --------------------------------------------------------------- discovery
 
 # YouTube's own "Live" search filter (sp=EgJAAQ%3D%3D). Without it the result
 # set is dominated by VODs, and a VOD cannot prove the live path at all: its
@@ -77,11 +73,9 @@ def rank_by_viewers(candidates):
     return sorted(candidates, key=lambda c: -int(c.get("viewers") or 0))
 
 
-# ----------------------------------------------------------------- parsing
-
-# Mirrors the relay's _YTDLP_QUALITY_RE. Real output is `rcq 1080 60.0` — fps is
-# a FLOAT, is "NA" when unavailable, and can be absent entirely. Requiring an
-# integer fps here made every YouTube candidate look "not live".
+# Mirrors the relay's _YTDLP_QUALITY_RE. Real output is `rcq 1080 60.0`: fps is a
+# FLOAT, is "NA" when unavailable, and can be absent entirely. Requiring an integer
+# fps here would make every YouTube candidate look "not live".
 _RCQ_RE = re.compile(r"^rcq\s+(\d+)(?:\s+(\S+))?", re.MULTILINE)
 _JS_RUNTIME_RE = re.compile(r"JS runtimes:\s*(\S+)")
 _LADDER_RE = re.compile(r"^(\d+)p\d*$")
@@ -131,8 +125,6 @@ def topical_match(text, keywords=SIM_RACING_KEYWORDS):
                for k in keywords)
 
 
-# -------------------------------------------------------------- acceptance
-
 def accept_youtube(height, title, channel, keywords=SIM_RACING_KEYWORDS):
     """(ok, reason) for a YouTube candidate already resolved in the relay's own
     command form. Passing this IS the proof that the live path works, because it
@@ -158,9 +150,7 @@ def accept_twitch(plugin, qualities, category, categories=TWITCH_CATEGORIES):
     return True, ""
 
 
-# ------------------------------------------------------------- source plan
-
-# YouTube, Twitch, YouTube — NOT YouTube, YouTube, Twitch. Both orders exercise
+# YouTube, Twitch, YouTube, NOT YouTube, YouTube, Twitch. Both orders exercise
 # both transports in both roles; they differ only during SPLIT, where two feeds
 # pull at once. Two concurrent googlevideo connections are the known throttle
 # state (#505) and the relay's feed classifier cannot tell a 429 from a generic
@@ -170,10 +160,10 @@ SOURCE_PLAN = ("youtube", "twitch", "youtube")
 
 
 # Mirrors the relay's SCHEDULE_URL_HEADERS / _parse_rows layout detection. Row
-# numbers are PHYSICAL and 1-based, header included — the same key the relay uses
-# for /schedule/data ("keyed by physical sheet row"). Writing to a hardcoded row 1
-# overwrote a real sheet's `URL` header, which also knocked the tab out of header
-# mode, and the read-back then never saw the run's own writes.
+# numbers are PHYSICAL and 1-based, header included, the same key the relay uses for
+# /schedule/data ("keyed by physical sheet row"). Writing to a hardcoded row 1 would
+# overwrite a real sheet's `URL` header, knocking the tab out of header mode so the
+# read-back never sees the run's own writes.
 SCHEDULE_URL_HEADERS = ("url",)
 
 
@@ -209,7 +199,7 @@ def schedule_layout(rows):
 def writable_layout_note(rows):
     """"" when this tab can be written safely, else the reason it cannot.
 
-    The Apps Script writes `colOf('url') || 1` — with a `URL` header it writes
+    The Apps Script writes `colOf('url') || 1`: with a `URL` header it writes
     that header's column, WITHOUT one it always writes column A. Our positional
     detection can land on a different column, and reading one column while
     writing another would blank real data in A. Refuse before anything is
@@ -220,17 +210,17 @@ def writable_layout_note(rows):
         return "no URL column found in the Schedule tab"
     if not header and col != 0:
         return ("the Schedule tab has no `URL` header and its stream column is "
-                f"{chr(ord('A') + col)}, but the webhook can only write column A "
-                "— add a `URL` header row (wiki: Sheet-Template)")
+                f"{chr(ord('A') + col)}, but the webhook can only write column A. "
+                "Add a `URL` header row (wiki: Sheet-Template)")
     return ""
 
 
 def schedule_data_rows(rows):
-    """Physical rows the RELAY counts as stints — the only ones safe to write.
+    """Physical rows the RELAY counts as stints, the only ones safe to write.
 
     Mirrors `_parse_rows`. In header mode a row counts when it has a channel URL
     OR a Streamer OR a Stint label (a planned stint whose URL is not filled in
-    yet); a fully blank spacer does not — writing into one would invent a stint
+    yet); a fully blank spacer does not, since writing into one would invent a stint
     the league never planned. In positional mode only URL-bearing rows count, so
     a differently-named header row can never be targeted and overwritten.
     """
@@ -275,7 +265,7 @@ def rows_match(served, expected):
 
     Per row, not set inclusion: `want <= got` over all rows answered "are these
     URLs somewhere in the tab", which a repeat run against a DEAD webhook passes
-    without anything having been written — the previous run's identical URLs are
+    without anything having been written, because the previous run's identical URLs are
     still sitting there. Checking the row a value was written to, and checking
     the cleared rows are really empty, is what makes the transition observable.
     """
@@ -284,7 +274,7 @@ def rows_match(served, expected):
 
 def plan_rows(youtube_urls, twitch_urls, data_rows):
     """[(physical_row, url), …] for SOURCE_PLAN, or None when a slot or a sheet
-    row is missing — a short sheet must abort, never silently write fewer."""
+    row is missing: a short sheet must abort, never silently write fewer."""
     pools = {"youtube": list(youtube_urls or ()), "twitch": list(twitch_urls or ())}
     targets = list(data_rows or ())
     if len(targets) < len(SOURCE_PLAN):
@@ -304,8 +294,6 @@ def clear_rows(data_rows, total=SHEET_ROWS_TO_CLEAR):
     return list(data_rows or ())[:total]
 
 
-# ------------------------------------------------------------ confirmation
-
 def confirm_phrase(profile):
     """The phrase names the profile on purpose. The accident this guards against
     is the right command in the wrong league, and a bare YES would not catch it."""
@@ -313,11 +301,9 @@ def confirm_phrase(profile):
 
 
 def phrase_ok(profile, typed):
-    """Exact match after trimming — case-sensitive, so it cannot be muscle memory."""
+    """Exact match after trimming, case-sensitive so it cannot be muscle memory."""
     return (typed or "").strip() == confirm_phrase(profile)
 
-
-# ----------------------------------------------------------------- rundown
 
 class Step:
     """One director action plus the OBS state it must produce.
@@ -353,8 +339,8 @@ RUNDOWN = (
     Step("STANDBY", "macro", scene="Standby", mute=(*_FEEDS, DISCORD_AUDIO)),
     Step("INTRO", "macro", scene="Intro", mute=(*_FEEDS, DISCORD_AUDIO)),
     # Manual feed arm is default-on (#489/#505), so BOTH feeds start paused and
-    # `event start` arms neither — the director arms the one they are about to cut
-    # to. Without this the whole first stint pulls nothing and STINT A shows black.
+    # `event start` arms neither; the director arms the one they are about to cut to.
+    # Without this the whole first stint pulls nothing and STINT A shows black.
     Step("ARM A", "arm", relay="feed/A/activate", wait_for_bytes=True),
     Step("STINT A", "macro", scene="Stint", relay_stint="A",
          show=(("Stint", "Feed A"),), hide=(("Stint", "Feed B"),),
@@ -390,7 +376,7 @@ def arm_violations(rundown=RUNDOWN):
     Models the relay's manual-arm state machine (`RACECAST_MANUAL_FEED_ARM`, #492,
     default-on): both feeds start paused, `feed/X/activate` arms one,
     `feed/X/deactivate` disarms it, and a `next` handover disarms the OUTGOING feed
-    (`stop_freed = cut and self.manual_feed_arm` in the relay — the #489/#505
+    (`stop_freed = cut and self.manual_feed_arm` in the relay, the #489/#505
     single-puller rule). A feed is "on air" for a step when the step unmutes it or
     makes its source visible; showing a paused feed is a black frame, not a failure
     the smoke test could attribute to the toolchain.
@@ -423,9 +409,8 @@ def expected_after(step, on_air="Feed A"):
     """The OBS state a step must have produced, for the `POST /obs/state`
     read-back. `relay_split` resolves like the relay does (#534, #591): both
     feeds visible, the ON-AIR feed live, the off-air feed and Discord muted.
-    Reading this back after SPLIT on BOTH sides of the handover is the
-    regression test for the Suzuka bug, where SPLIT muted the on-air
-    commentator on an even->odd handover."""
+    Reading this back after SPLIT on BOTH sides of the handover is the regression
+    test for SPLIT muting the on-air commentator on an even->odd handover."""
     visible = {t: True for t in step.show}
     visible.update({t: False for t in step.hide})
     muted = {n: False for n in step.unmute}
@@ -502,15 +487,13 @@ def state_probe(step, on_air="Feed A"):
             "inputs": sorted(exp.get("muted") or {})}
 
 
-# ------------------------------------------------------- relay /status reads
-
 # The relay's /status shape (Relay.status): feeds is a DICT keyed "A"/"B"/"POV"
 # with state/armed/down per feed, and live={"feed": "A"|"B", "stint": N}. Reading
 # it through these helpers keeps the shape assumption in one tested place.
 
 def feed_serving(status, which):
     """True when feed A/B is actually delivering. With the fan-out, health means
-    "bytes are flowing", not "the process is alive" — `state == "serving"` is the
+    "bytes are flowing", not "the process is alive"; `state == "serving"` is the
     relay's own word for that, and `down` overrides it."""
     feed = ((status or {}).get("feeds") or {}).get(str(which).upper()) or {}
     return feed.get("state") == "serving" and not feed.get("down")
@@ -527,25 +510,22 @@ def health_level(status):
 
 
 # The relay's own vocabulary (_HEALTH_LABEL): green=OK, yellow=DEGRADED,
-# red=CRITICAL. Pinned by a test against that dict — an earlier version also
-# accepted "drop", a value the relay never emits, which reads like coverage
-# while checking nothing.
+# red=CRITICAL. Pinned by a test against that dict, so a value the relay never
+# emits cannot read as coverage.
 HEALTH_RED = "red"
 
 
 def is_drop_sample(status):
     """A CRITICAL health sample. A feed that just dropped is a SILENT blip until
     it stays down past the settle window, so a single reconnect that self-heals
-    must not count — only the level the relay itself has settled on. DEGRADED
+    must not count; only the level the relay itself has settled on counts. DEGRADED
     (yellow) is deliberately not a drop: it is the warning before the loss."""
     return health_level(status) == HEALTH_RED
 
 
-# ----------------------------------------------------------------- verdict
-
 PASS, WARN, FAIL, SKIP = "PASS", "WARN", "FAIL", "SKIP"
 
-# Hard failure is reserved for what is attributable to the TOOLCHAIN — the one
+# Hard failure is reserved for what is attributable to the TOOLCHAIN, the one
 # question this command exists to answer. Environment conditions degrade to WARN
 # because they can stem from a headless session and have nothing to do with
 # ffmpeg or yt-dlp, and a test that reddens for environmental reasons is a test
@@ -575,7 +555,7 @@ _CHANNEL_ID_RE = re.compile(r"^UC[A-Za-z0-9_\-]{20,}$")
 
 
 def stream_host(url):
-    """The supported streaming host of `url`, or "" — the SSRF gate for discovery.
+    """The supported streaming host of `url`, or "": the SSRF gate for discovery.
 
     The allow-list is deliberately duplicated from the relay's `_is_stream_url`
     rather than imported: this module is pure stdlib and is loaded standalone (by
@@ -589,7 +569,7 @@ def stream_host(url):
 
     Discovery hands its results to a local yt-dlp WITH the cookie jar attached
     and writes them into the league sheet through the webhook, which bypasses
-    `schedule_set`'s own `is_channel` check — so the allow-list has to be applied
+    `schedule_set`'s own `is_channel` check, so the allow-list has to be applied
     here too. Parsing the hostname (rather than testing a substring) is what
     makes `https://evil.example/twitch.tv` fail.
     """
@@ -610,14 +590,14 @@ def stream_host(url):
 
 def is_channel_value(value):
     """What the relay accepts in a Schedule URL cell: a stream URL or a bare
-    `UC…` id. Mirrors its `is_channel`; using only `stream_host` here made a
+    `UC…` id. Mirrors its `is_channel`; using only `stream_host` here would make a
     documented UC-id layout look like an empty schedule."""
     v = (value or "").strip()
     return bool(_CHANNEL_ID_RE.match(v)) or bool(stream_host(v))
 
 
 def platform_of(url):
-    """"twitch" | "youtube" | "" — by parsed hostname, never by substring."""
+    """"twitch" | "youtube" | "", by parsed hostname, never by substring."""
     host = stream_host(url)
     if host == "twitch.tv":
         return "twitch"
@@ -625,7 +605,7 @@ def platform_of(url):
 
 
 def twitch_login_ok(login):
-    """Twitch's own `[a-z0-9_]{1,25}` charset — mirrors `broadcast_chat.twitch_login`.
+    """Twitch's own `[a-z0-9_]{1,25}` charset, mirroring `broadcast_chat.twitch_login`.
 
     The login arrives verbatim from the public GQL reply and is interpolated into
     a URL that goes to streamlink and into the league sheet, so it is validated
@@ -640,7 +620,7 @@ OBS_UNREACHABLE_MARKERS = ("obs unavailable", "obs unreachable", "obs is not")
 def step_error_verdict(error):
     """(status, note) when a rundown step's own call reports an error.
 
-    An unreachable OBS is an environment fact, not a toolchain regression — and
+    An unreachable OBS is an environment fact, not a toolchain regression, and
     it already only WARNs on every read-back, so failing hard when the SPLIT
     audio call hits the same dead OBS would be the classification contradicting
     itself. Anything else is a real failure.
@@ -673,7 +653,7 @@ def program_audio_verdict(nbytes, note=""):
     """(status, note) for the program-audio tap. A 404 is NOT a toolchain defect.
 
     `/preview/program-audio` only exists when the feed fan-out is on and
-    `RACECAST_PROGRAM_AUDIO` is not 0 — both documented machine settings. Failing
+    `RACECAST_PROGRAM_AUDIO` is not 0, both documented machine settings. Failing
     the run there would blame ffmpeg for a config choice, so an absent endpoint
     skips. Anything else (a short read, a connection error) does mean the encoder
     did not produce frames, which is exactly what an ffmpeg major bump threatens.
@@ -681,7 +661,7 @@ def program_audio_verdict(nbytes, note=""):
     if nbytes > PROGRAM_AUDIO_MIN_BYTES:
         return PASS, ""
     if note.startswith("HTTP 404"):
-        return SKIP, "endpoint absent — feed fan-out or program audio is off"
+        return SKIP, "endpoint absent: feed fan-out or program audio is off"
     return FAIL, note or f"{nbytes} bytes"
 
 
@@ -714,16 +694,13 @@ def exit_code(verdict):
     return 1 if verdict == FAIL else 0
 
 
-# ----------------------------------------------------------------- history
-
 def history_entry(ts, verdict, tools, sources, minutes, results, cleared=None):
     """One JSONL line per run, mirroring runtime/speedtest-history.jsonl, so
-    comparing a red run against the last green one is a `tail -2` instead of a
-    feeling.
+    comparing a red run against the last green one is a `tail -2`.
 
     `cleared` carries the URL cells as they were BEFORE the run emptied them.
     The run does not restore them (the rows are meant to stay), so this file is
-    the only record of what was there — including the row that gets cleared but
+    the only record of what was there, including the row that gets cleared but
     never rewritten.
     """
     return {

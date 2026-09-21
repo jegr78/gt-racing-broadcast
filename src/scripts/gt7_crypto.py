@@ -8,11 +8,10 @@ community field docs. See docs/superpowers/specs/2026-07-08-gt7-telemetry-pov-hu
 """
 import struct
 
-# Key = first 32 bytes of the fixed interface string.
 KEY = b"Simulator Interface Packet GT7 ver 0.0"[:32]
 # Per-packet-version XOR constant for packet type 'A'.
 IV_XOR_A = 0xDEADBEAF
-# Decrypted magic (little-endian uint32 at offset 0) — "0S7G" bytes.
+# Decrypted magic (little-endian uint32 at offset 0), the "0S7G" bytes.
 MAGIC = 0x47375330
 
 _SIGMA = struct.unpack("<4I", b"expand 32-byte k")
@@ -68,10 +67,9 @@ def salsa20_xor(key, nonce8, data):
 
 # Minimum accepted packet length. The nonce is derived from offset 0x40, but the
 # parser (gt7_telemetry.parse_packet) reads fixed fields up to offset 0x92 (brake).
-# Requiring the full field span here means a short-but-valid-magic datagram — which
-# a LAN host can trivially forge, since the key is the fixed public string — is
-# dropped as None (→ relay `continue`, probe skip) instead of over-reading and
-# raising struct.error/IndexError deep in the parser.
+# Requiring the full field span drops a short datagram carrying a valid magic, which
+# any LAN host can forge because the key is the fixed public string, instead of
+# over-reading and raising struct.error/IndexError deep in the parser.
 MIN_PACKET_LEN = 0x94
 
 

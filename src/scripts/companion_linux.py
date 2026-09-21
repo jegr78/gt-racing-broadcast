@@ -4,7 +4,7 @@ companion-pi runs Bitfocus Companion as a systemd service (user `companion`,
 launched by /usr/local/src/companionpi/launch.sh, which passes no bind flag so
 Companion binds 0.0.0.0). Companion 3.x headless takes the bind only as the CLI
 flag `--admin-address`; config.json is ignored. To enforce the toolkit's
-"never 0.0.0.0 — Tailscale IP or 127.0.0.1" rule we override the service's
+"never 0.0.0.0, Tailscale IP or 127.0.0.1" rule we override the service's
 ExecStart via a systemd drop-in that reads the address from an EnvironmentFile,
 and set that file (per start) through a narrow root helper. enable_control()
 installs the drop-in, the helper, and a visudo-validated NOPASSWD sudoers rule.
@@ -13,7 +13,7 @@ Pure logic (content builders, validation, idempotency) is unit-tested; the I/O
 in enable_control() takes injected `run`/`read_text`/`write_temp` seams so the
 command sequence is testable without root.
 
-This module ships NO shell-script file — bind_helper_content() is a string
+This module ships NO shell-script file: bind_helper_content() is a string
 written to /usr/local/sbin at enable_control() time on the target machine.
 """
 import ipaddress, os, shutil, subprocess, sys, tempfile, getpass
@@ -67,7 +67,7 @@ def bind_dropin_content():
 def bind_helper_content():
     """Root helper (written to HELPER_PATH): validate an IP arg, pin it in the
     EnvironmentFile, restart Companion. The single privileged action behind the
-    NOPASSWD rule — it cannot do anything but set a validated bind + restart."""
+    NOPASSWD rule, and it cannot do anything but set a validated bind + restart."""
     return (
         "#!/bin/bash\n"
         "# Managed by racecast (companion enable-control). Sets the Companion admin\n"
@@ -95,7 +95,7 @@ def sudoers_dropin_content(user, systemctl_path):
 
 def control_commands(unit):
     """Start/quit/running argv for the companion-pi systemd service. `start` is a
-    template — the caller appends the validated bind IP (see racecast
+    template: the caller appends the validated bind IP (see racecast
     companion_start). `running`/`quit` are complete."""
     return {
         "start": ["sudo", "-n", HELPER_PATH],
@@ -136,12 +136,10 @@ def detect_unit(platform=None, which=None, run=None, exists=None):
 def _default_run(argv, **kwargs):
     """subprocess.run with the PyInstaller _MEIPASS scrubbed off LD_LIBRARY_PATH
     (external_tool_env). The frozen binary makes bare `systemctl` calls (cat,
-    is-active) that are NOT wrapped in sudo, so — unlike the sudo'd writes, where
-    sudo resets the env itself — they inherit our bundled libcrypto and die with
-    "OPENSSL_x.y.z not found". That made is-active exit non-zero, so enable-control
-    rolled back a service that had actually started, and `companion status`
-    reported a false "stopped". external_tool_env() is None off the frozen binary,
-    so dev/source runs inherit os.environ unchanged."""
+    is-active) that are not wrapped in sudo, so unlike the sudo'd writes, where sudo
+    resets the env itself, they would inherit our bundled libcrypto and die with
+    "OPENSSL_x.y.z not found". external_tool_env() is None off the frozen binary, so
+    dev/source runs inherit os.environ unchanged."""
     kwargs.setdefault("env", external_tool_env())
     return subprocess.run(argv, **kwargs)
 
@@ -192,7 +190,7 @@ def enable_control(platform=None, run=None, which=None, getuser=None,
     unit = detect_unit(platform=platform, which=which, run=run, exists=exists)
     if not unit:
         log("companion enable-control: no companion.service found on this Linux host "
-            "(WSL/host or manual install) — nothing to enable.")
+            "(WSL/host or manual install). Nothing to enable.")
         return 1
     if exists(LEGACY_2X_DIR):
         log("companion enable-control: companion-pi 2.x layout detected "

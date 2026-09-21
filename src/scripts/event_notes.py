@@ -5,8 +5,8 @@ Header-located like broadcast_chat.parse_channel_tab: a `Note` column is
 required; `Heading` and `Priority` are optional. Each data row with a non-empty
 Note becomes {"heading", "note", "priority"} with priority normalised to
 "important" (the only highlighted value) or "info" (empty/unknown). No header /
-no Note column / empty CSV -> [] (the modal then has nothing to show). No I/O,
-no network -- the relay's EventNotesSource does the fetch."""
+no Note column / empty CSV -> [] (the modal then has nothing to show). No I/O and
+no network; the relay's EventNotesSource does the fetch."""
 
 import csv
 import io

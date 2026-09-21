@@ -17,11 +17,11 @@ def spawn_kwargs(os_name):
     """Popen kwargs that launch a background daemon detached from our console per OS.
 
     Windows: CREATE_NO_WINDOW, NOT DETACHED_PROCESS. The frozen onefile relay is a
-    two-process tree — the PyInstaller bootloader spawns the real app as a child.
+    two-process tree: the PyInstaller bootloader spawns the real app as a child.
     Under DETACHED_PROCESS the bootloader has NO console, so when it starts the
     inner app Windows allocates a FRESH, VISIBLE console for it that stays open for
     the entire event (the relay never exits). CREATE_NO_WINDOW instead gives the
-    bootloader a HIDDEN console that the inner process inherits — no window. The
+    bootloader a HIDDEN console that the inner process inherits, so no window. The
     daemon still outlives us (Windows processes are independent) and
     CREATE_NEW_PROCESS_GROUP keeps it from catching the parent terminal's Ctrl+C.
     Mirrors no_window_kwargs' flag; kept separate because daemons also need the
@@ -38,9 +38,9 @@ def spawn_kwargs(os_name):
 def no_window_kwargs(os_name=None):
     """Popen/run kwargs that stop a console child from flashing its own terminal
     window on Windows. A frozen --windowed app (racecast-ui.exe) has NO console, so
-    every console subprocess it spawns — tasklist, the tailscale CLI, the sibling
-    racecast.exe — otherwise pops a transient terminal window, and the Control Center's
-    2-3 s status poll did it continuously (issue #23). CREATE_NO_WINDOW gives the
+    every console subprocess it spawns, such as tasklist, the tailscale CLI or the
+    sibling racecast.exe, otherwise pops a transient terminal window, and the Control
+    Center's 2-3 s status poll did it continuously (#23). CREATE_NO_WINDOW gives the
     child a hidden console instead; children of such a process inherit that hidden
     console, so applying it at the job root suppresses the whole tree. Harmless
     when a console already exists, and a no-op (empty kwargs) off Windows so the
@@ -52,25 +52,24 @@ def no_window_kwargs(os_name=None):
     return {}
 
 
-# The single source of truth — every spawn site imports this (relay scripts add
-# src/scripts to sys.path; scripts/ siblings import it directly). No duplication.
+# The single source of truth: every spawn site imports this (relay scripts add
+# src/scripts to sys.path; scripts/ siblings import it directly).
 def external_tool_env(frozen=None, environ=None):
     """Environment for spawning an EXTERNAL native tool (yt-dlp, streamlink,
     ffmpeg, deno, the tailscale CLI) from a possibly PyInstaller-frozen process.
 
     The onefile bootloader prepends its private _MEIPASS extraction dir to
     LD_LIBRARY_PATH (DYLD_LIBRARY_PATH on macOS) so the BUNDLED interpreter finds
-    its own shared libs. An external tool that links the SYSTEM libraries — e.g.
-    yt-dlp/streamlink running under the system Python, whose _ssl needs the system
-    libcrypto — then mis-loads our older bundled libcrypto and dies with
-    "version `OPENSSL_x.y.z' not found" (seen on ARM64 Linux with a system
-    Python 3.14). Strip every PyInstaller extraction dir from the path — this
-    process's _MEIPASS AND any parent's: a frozen Control Center that re-invokes
-    the frozen binary leaves the PARENT's _MEIPASS on the child's LD_LIBRARY_PATH,
-    and the bootloader's <VAR>_ORIG points at THAT, so merely restoring _ORIG is
-    not enough (it reintroduces a bundled libcrypto). Keep any genuinely external
-    entries; drop the var when nothing remains. Returns None when not frozen — the
-    caller then inherits os.environ unchanged, leaving dev/source runs untouched."""
+    its own shared libs. An external tool that links the SYSTEM libraries, such as
+    yt-dlp or streamlink running under the system Python, whose _ssl needs the system
+    libcrypto, then mis-loads our older bundled libcrypto and dies with
+    "version `OPENSSL_x.y.z' not found". Strip every PyInstaller extraction dir from
+    the path, this process's _MEIPASS AND any parent's: a frozen Control Center that
+    re-invokes the frozen binary leaves the PARENT's _MEIPASS on the child's
+    LD_LIBRARY_PATH, and the bootloader's <VAR>_ORIG points at THAT, so merely
+    restoring _ORIG reintroduces a bundled libcrypto. Keep any genuinely external
+    entries; drop the var when nothing remains. Returns None when not frozen, so the
+    caller inherits os.environ unchanged and dev/source runs stay untouched."""
     frozen = bool(getattr(sys, "frozen", False)) if frozen is None else frozen
     if not frozen:
         return None
@@ -104,10 +103,10 @@ def daemon_bundle_env(env, bundle_dir, os_name=None):
     after 10). A relay left running between two events therefore loses its HUD
     pages while looking perfectly healthy.
 
-    The bootloader honours TMPDIR/TMP/TEMP (measured, not assumed), and it reads
-    them BEFORE Python starts — which is why this can only be done for a child
-    we spawn, never for ourselves after the fact. It is free here: the child is
-    starting anyway and unpacks exactly once either way.
+    The bootloader honours TMPDIR/TMP/TEMP and reads them BEFORE Python starts,
+    which is why this can only be done for a child we spawn, never for ourselves
+    after the fact. It is free here: the child is starting anyway and unpacks
+    exactly once either way.
 
     An empty bundle_dir returns the environment unchanged, so a source run keeps
     the OS default.
@@ -122,7 +121,7 @@ def daemon_bundle_env(env, bundle_dir, os_name=None):
 
 def stop_commands(os_name, pid, force):
     """argv to stop a PID on Windows (taskkill), or None where POSIX signals apply.
-    /T kills the child tree — the relay's streamlink/yt-dlp children must not be
+    /T kills the child tree, so the relay's streamlink/yt-dlp children are not
     orphaned. The non-force form asks first (WM_CLOSE); console children usually
     ignore it, so stop_pid() falls through to the force form after the timeout."""
     if os_name != "nt":
@@ -150,7 +149,7 @@ def pid_alive(pid):
 
 
 def _pid_alive_windows(pid):
-    """ctypes probe — os.kill(pid, 0) is NOT safe on Windows: any signal other
+    """ctypes probe: os.kill(pid, 0) is NOT safe on Windows, where any signal other
     than CTRL_C/CTRL_BREAK unconditionally TerminateProcess()es the target."""
     import ctypes
     PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
@@ -188,7 +187,7 @@ def start_detached(argv, log_path, pid_path, env=None):
     os.makedirs(os.path.dirname(pid_path), exist_ok=True)
     kwargs = spawn_kwargs(os.name)
     # Open the log in a `with` so the parent's fd is closed after Popen dups it
-    # into the child — avoids a parent-side fd leak that would also pin the file.
+    # into the child, avoiding a parent-side fd leak that would also pin the file.
     with open(log_path, "ab") as log:
         proc = subprocess.Popen(argv, stdout=log, stderr=subprocess.STDOUT,
                                 stdin=subprocess.DEVNULL, env=env, **kwargs)
@@ -204,16 +203,16 @@ def _reap_zombie(pid):
     try:
         os.waitpid(pid, os.WNOHANG)
     except ChildProcessError:
-        pass  # not our child — nothing to reap
+        pass  # not our child, nothing to reap
     except OSError:
-        pass  # already reaped / gone — nothing to do
+        pass  # already reaped or gone
 
 
 def looks_like_relay(probe_output, windows=False):
     """True iff a ps/tasklist probe line describes our relay daemon: the frozen
     binary running `relay run`, or python running racecast-feeds.py. Guards a
-    stale/recycled PID file from making stop_pid signal an unrelated process —
-    mirrors stop-streams.py's looks_like_feed. On Windows tasklist returns only
+    stale/recycled PID file from making stop_pid signal an unrelated process,
+    mirroring stop-streams.py's looks_like_feed. On Windows tasklist returns only
     the image name (no argv), so we accept the binary and the python host."""
     text = probe_output.lower()
     if "racecast-feeds" in text:              # repo mode: python racecast-feeds.py
@@ -270,7 +269,7 @@ def stop_pid(pid, pid_path=None, timeout=10, is_target=None):
     impostor. Without it, behaviour is unchanged."""
     if pid_alive(pid):
         if is_target is not None and not is_target(pid):
-            # Recycled/foreign PID — our daemon is already gone; never kill it.
+            # Recycled or foreign PID: our daemon is already gone, never kill it.
             if pid_path and os.path.exists(pid_path):
                 os.remove(pid_path)
             return True
@@ -291,7 +290,7 @@ def stop_pid(pid, pid_path=None, timeout=10, is_target=None):
 
 def tail(log_path, follow=False, lines=40):
     """Print the last `lines` of log_path; if follow, stream new output until Ctrl+C.
-    Pure-Python (cross-platform — no system `tail`)."""
+    Pure Python and cross-platform, with no system `tail`."""
     if not os.path.exists(log_path):
         print(f"(no log yet at {log_path})")
         return
@@ -324,8 +323,8 @@ def tail_merged(paths, follow=False, lines=40, label_of=None):
         return label_of(p) if label_of else os.path.basename(p).split(".log")[0]
     # Re-open per read inside a `with` block, tracking a byte offset per file.
     # CodeQL's py/file-not-closed cannot trace a close through a handle list OR
-    # through contextlib.ExitStack (#217 alert 124/126), so a `with open()` is the
-    # only pattern it accepts as definitely-closed — and it suits a merged tail fine.
+    # through contextlib.ExitStack (#217), so a `with open()` is the only pattern it
+    # accepts as definitely-closed.
     pos = {}
     for p in paths:
         with open(p, "rb") as fh:

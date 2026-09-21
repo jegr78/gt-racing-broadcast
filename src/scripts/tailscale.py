@@ -3,17 +3,17 @@
 One home for everything Tailscale: CLI-binary discovery, BackendState-aware
 detection, and the argument-less `up`/`down` control behind `racecast tailscale ...`
 and `racecast event start`. A stopped/disconnected node keeps its assigned tailnet
-IP, so `tailscale ip -4` alone reports false positives — only BackendState
+IP, so `tailscale ip -4` alone reports false positives; only BackendState
 "Running" counts as connected.
 
-detect_tailscale_ip() is duplicated in src/relay/racecast-feeds.py (the relay is a
-standalone single file by design) — the project's bounded-duplication
+detect_tailscale_ip() is duplicated in src/relay/racecast-feeds.py, which is a
+standalone single file by design, following the project's bounded-duplication
 convention (cf. load_dotenv). Keep the two in sync.
 
 Spec: docs/superpowers/specs/2026-06-06-tailscale-connect-design.md.
 Tests: tests/test_tailscale.py."""
 import ipaddress, json, subprocess
-import services   # sibling module (scripts/ on sys.path) — no_window_kwargs (#23)
+import services   # sibling module (scripts/ on sys.path), for no_window_kwargs (#23)
 
 _CGNAT_NET = ipaddress.ip_network("100.64.0.0/10")  # Tailscale's IPv4 range
 # Candidate Tailscale CLI locations (PATH first, then the platform installers).
@@ -63,8 +63,8 @@ def parse_tailscale_status(output):
 
 def tailscale_backend(timeout=3):
     """(binary, BackendState, ip) via the first CLI whose backend answers
-    `status --json`; (None, None, None) when none does (CLI missing, or the
-    backend is not running — on macOS it only lives while the app runs)."""
+    `status --json`; (None, None, None) when none does, because the CLI is missing
+    or the backend is not running (on macOS it only lives while the app runs)."""
     for binary in _TAILSCALE_BINS:
         try:
             out = subprocess.run([binary, "status", "--json"], capture_output=True,
@@ -87,8 +87,8 @@ def detect_tailscale_ip():
 
 def parse_magicdns_name(output):
     """Self's MagicDNS name (e.g. 'host.tailnet.ts.net') from `tailscale status
-    --json`, trailing dot stripped, or '' when absent. Pure → unit-tested. Used to
-    build the public Funnel cockpit URL (#191) instead of a placeholder host."""
+    --json`, trailing dot stripped, or '' when absent. Pure. Used to build the
+    public Funnel cockpit URL (#191) instead of a placeholder host."""
     try:
         data = json.loads(output)
     except ValueError:
@@ -101,9 +101,9 @@ def parse_magicdns_name(output):
 
 def parse_funnel_capable(output):
     """True iff `tailscale status --json` shows this node carries the Funnel
-    capability — i.e. the tailnet policy granted it the 'funnel' nodeAttr (the
-    one-time admin step). Pure → unit-tested. Lets `racecast funnel on` fail fast
-    with guidance instead of hanging on the CLI's interactive enable prompt."""
+    capability: the tailnet policy granted it the 'funnel' nodeAttr in the
+    one-time admin step. Pure. Lets `racecast funnel on` fail fast with guidance
+    instead of hanging on the CLI's interactive enable prompt."""
     try:
         data = json.loads(output)
     except ValueError:
@@ -138,7 +138,7 @@ def funnel_capable(timeout=3):
 
 def parse_funnel_serving(output, path="/console"):
     """True iff `tailscale funnel status` shows *path* served via an ENABLED
-    Funnel. Pure → unit-tested. 'No serve config' or the path absent -> False.
+    Funnel. Pure. 'No serve config' or the path absent -> False.
     Best-effort text parse (the CLI has no stable JSON for funnel status)."""
     if not output:
         return False
@@ -182,10 +182,10 @@ def detect_magicdns_name(timeout=3):
 
 
 def magicdns_is_self(value, self_name):
-    """True when the Sheet `MagicDNS` cell `value` denotes THIS machine — an exact
+    """True when the Sheet `MagicDNS` cell `value` denotes THIS machine: an exact
     FQDN match against `self_name` (this node's `Self.DNSName`), case-insensitive
-    and ignoring a trailing dot. False when `self_name` is empty (own identity
-    unknown → the caller locks all takeover actions). Pure → unit-tested.
+    and ignoring a trailing dot. False when `self_name` is empty, meaning our own
+    identity is unknown and the caller locks all takeover actions. Pure.
 
     Exact FQDN by design: the producer schedule carries full `*.ts.net` names, so
     a bare hostname must NOT match (a short-name collision could otherwise disable
@@ -199,9 +199,9 @@ def magicdns_is_self(value, self_name):
 
 def parse_tailscale_peers(output):
     """Tailnet peers from `tailscale status --json`: a list of
-    {hostname, ip, online, os}, one per peer that has a CGNAT IPv4 (peers without
-    one are skipped — nothing to connect to). `[]` on unparseable/empty output.
-    Pure → unit-tested. Used to offer a device dropdown for the takeover IP."""
+    {hostname, ip, online, os}, one per peer that has a CGNAT IPv4; a peer without
+    one is skipped, there being nothing to connect to. `[]` on unparseable/empty
+    output. Pure. Used to offer a device dropdown for the takeover IP."""
     try:
         data = json.loads(output)
     except ValueError:
@@ -241,10 +241,10 @@ def tailscale_peers(timeout=3):
 
 def plan_tailscale_up(state):
     """Decision for an `up` request given a BackendState:
-    connected   : Running — nothing to do.
+    connected   : Running, nothing to do.
     needs-login : `up` would trigger the interactive browser login; hint only.
-    launch-app  : no backend answered — start the Tailscale app first.
-    run-up      : any other state (Stopped, Starting, ...) — run `up`."""
+    launch-app  : no backend answered, so start the Tailscale app first.
+    run-up      : any other state (Stopped, Starting, ...), run `up`."""
     if state == "Running":
         return "connected"
     if state in ("NeedsLogin", "NeedsMachineAuth"):
@@ -257,7 +257,7 @@ def plan_tailscale_up(state):
 def _run_verb(binary, verb, timeout):
     """Run an argument-less `tailscale up|down`; returns (ok, detail). The
     timeout is a backstop in case `up` unexpectedly enters the interactive
-    login flow — callers never invoke it in the NeedsLogin state."""
+    login flow; callers never invoke it in the NeedsLogin state."""
     try:
         out = subprocess.run([binary, verb], capture_output=True, text=True,
                              errors="replace", timeout=timeout,
@@ -275,7 +275,7 @@ def _run_verb(binary, verb, timeout):
 
 def tailscale_up(binary, timeout=15):
     """Argument-less `tailscale up`: brings the network online WITHOUT changing
-    any settings (per the CLI's own help — the opposite of `tailscale down`)."""
+    any settings, per the CLI's own help. The opposite of `tailscale down`."""
     return _run_verb(binary, "up", timeout)
 
 
@@ -286,9 +286,8 @@ def tailscale_down(binary, timeout=15):
 
 def funnel_args(path, target_port, enable):
     """Pure: the `tailscale funnel` argv to expose ONLY *path* (e.g. /console) on
-    public 443, reverse-proxied to the local relay, or to tear it down. Unit-
-    tested without shelling out. The target keeps the same path so /console/* maps
-    1:1 onto the relay's /console/* (#216).
+    public 443, reverse-proxied to the local relay, or to tear it down. The target
+    keeps the same path so /console/* maps 1:1 onto the relay's /console/* (#216).
 
     Teardown uses `funnel reset`, not the path-specific `--set-path=… off` form:
     that form silently failed with "handler does not exist" and left the public
@@ -309,7 +308,7 @@ def status_snapshot_text(output, ts):
 def funnel(binary, path, target_port, enable, timeout=20):
     """Run the funnel on/off command. Returns (ok, detail). Best-effort, mirrors
     _run_verb. NOTE: enabling requires MagicDNS + HTTPS + the 'funnel' nodeAttr in
-    the tailnet policy (a one-time admin step) — surface failures verbatim."""
+    the tailnet policy (a one-time admin step), so failures are surfaced verbatim."""
     args = funnel_args(path, target_port, enable)
     try:
         out = subprocess.run([binary, *args], capture_output=True, text=True,

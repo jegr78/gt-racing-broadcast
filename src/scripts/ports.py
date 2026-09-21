@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cross-platform port helpers for `racecast freeport` — find and kill whatever
+"""Cross-platform port helpers for `racecast freeport`: find and kill whatever
 *listens* on a feed port so the relay can bind it again.
 
 Only LISTENING sockets are reported: a listener is what blocks a fresh bind
@@ -13,10 +13,8 @@ real sockets/processes (mirrors stop-streams' `looks_like_feed` style)."""
 import os, re, shutil, signal, subprocess, time
 
 
-FEED_PORTS = (53001, 53002, 53003)   # Feed A / Feed B / POV — the freeport default
+FEED_PORTS = (53001, 53002, 53003)   # Feed A / Feed B / POV, the freeport default
 
-
-# ---- pure parsers ---------------------------------------------------------
 
 def parse_lsof_pids(out):
     """`lsof -t` prints one PID per line. -> sorted unique ints."""
@@ -36,15 +34,15 @@ def parse_fuser_pids(out):
 
 # A LISTENING TCP socket is the one whose FOREIGN address is the wildcard. We key
 # on that, NOT the State column: netstat localizes State ("LISTENING" on English
-# Windows, "ABHÖREN" on German, etc.), so matching the word made pids_on_port find
-# nothing — and thus every port-recovery path silently no-op — on non-English hosts.
+# Windows, "ABHÖREN" on German), so matching the word makes pids_on_port find
+# nothing on a non-English host and every port-recovery path silently no-op.
 _NETSTAT_LISTEN_FOREIGN = ("0.0.0.0:0", "[::]:0", "*:*")
 
 
 def parse_netstat_pids(out, port):
     """Windows `netstat -ano -p tcp`: columns are Proto / Local / Foreign / State /
     PID. Keep rows that LISTEN on the LOCAL address for this exact port, identified
-    by the wildcard FOREIGN address (locale-independent — see note above). A client
+    by the wildcard FOREIGN address, which is locale-independent. A client
     connected TO :port has a real foreign address and a localized non-listen state,
     so it is ignored; a longer port that merely shares the prefix is ignored too."""
     suffix = f":{port}"
@@ -57,8 +55,6 @@ def parse_netstat_pids(out, port):
             pids.add(int(col[4]))
     return sorted(pids)
 
-
-# ---- port -> pids ---------------------------------------------------------
 
 def _run_text(argv):
     """Run a probe and return its stdout text; never raises (missing tool / non-zero
@@ -94,8 +90,6 @@ def pids_on_port(port, *, os_name=None, run=None, which=None):
     return []
 
 
-# ---- decide + kill --------------------------------------------------------
-
 def decide_free(pids, owned, force):
     """Pure gate. ('clear', []) when nothing listens; ('refuse', pids) when a
     RUNNING racecast service legitimately owns the port and --force was not given
@@ -119,7 +113,7 @@ def _proc_alive(pid):
 
 def kill_pid(pid, *, os_name=None, call=None, kill=None, sleep=None, alive=None):
     """Terminate the single process holding a port (and reap its direct children),
-    escalating SIGTERM -> SIGKILL. Per-process by design — see module docstring.
+    escalating SIGTERM -> SIGKILL. Per-process by design; see the module docstring.
     Seams (`call`/`kill`/`sleep`/`alive`) make it testable without real processes."""
     os_name = os.name if os_name is None else os_name
     call = subprocess.call if call is None else call

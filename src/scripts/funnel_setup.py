@@ -1,14 +1,14 @@
 """Automate the one-time Tailscale-tailnet prerequisites for the Commentator
-Cockpit Funnel (issue #191), driven by `racecast cockpit setup-funnel`.
+Cockpit Funnel (#191), driven by `racecast cockpit setup-funnel`.
 
 What it does, via the Tailscale Admin API authenticated with an API access token:
-  1. enable MagicDNS                          (dns/preferences — a single, safe pref)
+  1. enable MagicDNS                          (dns/preferences, a single pref)
   2. add the `funnel` nodeAttr to the policy  (acl GET -> merge -> POST, ETag-guarded)
 HTTPS-certificate enablement has no reliable public API and stays a one-click
-admin step — we detect what we can and print the reminder.
+admin step, so we detect what we can and print the reminder.
 
 Split: the policy/preference reasoning is PURE (unit-tested below the API helpers);
-the HTTP is a thin stdlib layer. Stdlib only — no third-party deps.
+the HTTP is a thin stdlib layer. Stdlib only, no third-party deps.
 """
 import json
 import http_util
@@ -17,8 +17,6 @@ API = "https://api.tailscale.com/api/v2"
 FUNNEL_ATTR = "funnel"
 DEFAULT_TARGET = "autogroup:member"
 
-
-# ----------------------------- pure logic --------------------------------
 
 def magicdns_enabled(prefs):
     """True iff the tailnet DNS preferences have MagicDNS on. Pure."""
@@ -38,7 +36,7 @@ def acl_has_funnel(acl):
 def add_funnel_nodeattr(acl, target=DEFAULT_TARGET):
     """Return (new_acl, changed): a shallow copy of *acl* with a
     {"target":[target],"attr":["funnel"]} nodeAttr appended, unless a funnel grant
-    already exists. Preserves every other key. Pure — does not mutate the input."""
+    already exists. Preserves every other key. Pure: it does not mutate the input."""
     if acl_has_funnel(acl):
         return acl, False
     new = dict(acl or {})
@@ -57,8 +55,6 @@ def setup_plan(prefs, acl):
         steps.append("add the 'funnel' nodeAttr to the tailnet policy")
     return steps
 
-
-# ----------------------------- thin HTTP ---------------------------------
 
 def _req(token, method, path, body=None, etag=None, accept=None, timeout=20):
     headers = {"Authorization": "Bearer " + token}
@@ -87,7 +83,7 @@ def enable_magicdns(token, tailnet="-"):
 
 def get_acl(token, tailnet="-"):
     """(acl_dict, etag). Accept application/json so the HuJSON policy parses
-    cleanly (NOTE: this drops comments — callers back up before writing)."""
+    cleanly (NOTE: this drops comments, so callers back up before writing)."""
     _s, headers, body = _req(token, "GET", f"/tailnet/{tailnet}/acl",
                              accept="application/json")
     return json.loads(body), headers.get("ETag")

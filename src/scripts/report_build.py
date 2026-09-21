@@ -3,7 +3,7 @@
 
 Reads the Health-DB sample/event dicts (as returned by health_store.query_range /
 query_events), aggregates a session into a structured report dict, and renders a
-SELF-CONTAINED HTML document (all CSS inline, system fonts, inline SVG — no external
+SELF-CONTAINED HTML document (all CSS inline, system fonts, inline SVG, no external
 references, so it opens identically anywhere, offline). Redaction by construction:
 no stream URLs ever enter the report (name resolution passes in a stint->name map).
 """
@@ -14,8 +14,8 @@ import time
 import health_store as hs
 
 # Coarse session gap: separates DISTINCT events in a long-retention DB. Much larger
-# than health_store.GAP_S (95s, band continuity) so a producer handover — where B's
-# relay is already running and mirroring — never splits one event into two reports.
+# than health_store.GAP_S (95s, band continuity) so a producer handover, where B's
+# relay is already running and mirroring, never splits one event into two reports.
 SESSION_GAP_S = 1800
 
 
@@ -59,8 +59,8 @@ def bucket_samples(samples, bucket_s=hs.SAMPLE_INTERVAL_S):
 
 
 def _fill_gaps(bands, gap_s=hs.GAP_S):
-    """Return NEW bands where each band's end extends to the next band's start —
-    but only across a normal sampling interval. A hole larger than gap_s means the
+    """Return NEW bands where each band's end extends to the next band's start, but
+    only across a normal sampling interval. A hole larger than gap_s means the
     relay was down (collapse_bands split there); that gap is NOT bridged, so a
     blackout is correctly excluded from the pre-gap state's duration. Does not
     mutate the input."""
@@ -126,9 +126,9 @@ def _quality(samples):
     fps = _num(samples, "obs_fps")
     # #586: the per-interval render-skip rate, averaged over the on-air samples. NOT
     # obs_render_skipped_pct: that counter runs from OBS start, so hours of idle OBS
-    # before a broadcast dilute it (1.8% shown for a 23.5% broadcast on 2026-08-28).
-    # The DB keeps no raw frame counts, so a mean of interval rates is the windowed
-    # figure. Every other metric here is instantaneous or resets with the output.
+    # before a broadcast dilute it. The DB keeps no raw frame counts, so a mean of
+    # interval rates is the windowed figure. Every other metric here is instantaneous
+    # or resets with the output.
     rskip = _num(samples, "obs_render_skip_rate_pct")
     # #536: host machine metrics (already sampled into health-history.db). Network is
     # stored as kbps -> shown as Mbps to match btop / readability.
@@ -136,8 +136,9 @@ def _quality(samples):
     sys_mem = _num(samples, "sys_mem_pct")
     net_down = [v / 1000.0 for v in _num(samples, "sys_net_down_kbps")]
     net_up = [v / 1000.0 for v in _num(samples, "sys_net_up_kbps")]
-    # #535: worst inbound inter-arrival gap across both feeds (peak only — averaging a
-    # per-interval max is meaningless). Surfaces source jitter the drop/OBS detectors miss.
+    # #535: worst inbound inter-arrival gap across both feeds, peak only, because
+    # averaging a per-interval max is meaningless. Surfaces source jitter the drop and
+    # OBS detectors miss.
     gaps = _num(samples, "feed_a_max_gap_s") + _num(samples, "feed_b_max_gap_s")
     if not any([kbps, dropped, cong, cpu, fps, rskip, sys_cpu, sys_mem, net_down, net_up, gaps]):
         return None
@@ -270,7 +271,7 @@ def _on_air(sample_groups, name_for_stint):
             entry[0] += b["to"] - b["from"]
             entry[1].add(st)
         non_null += [int(b["state"]) for b in bands if b["state"] is not None]
-        # #500: total time a ping-pong desync (#494) was active within this window —
+        # #500: total time a ping-pong desync (#494) was active within this window;
         # the report flags it as an "attribution may be unreliable" caveat. NULL/missing
         # desync_active (old DBs) collapses to a non-active band -> contributes 0.
         dbands = _fill_gaps(hs.collapse_bands(
@@ -281,9 +282,8 @@ def _on_air(sample_groups, name_for_stint):
         ({"name": n, "seconds": round(v[0], 1), "stints": len(v[1])} for n, v in agg.items()),
         key=lambda c: -c["seconds"])
     # ONE series across every window, not a sum per window. These are running totals,
-    # so summing per on-air window re-counted the whole counter at each part: a
-    # three-part event whose counter went 5 -> 9 reported 21 instead of 4.
-    # Chronological, because _pair_windows sorts the events it pairs — a fall in this
+    # so summing per on-air window would re-count the whole counter at each part.
+    # Chronological, because _pair_windows sorts the events it pairs: a fall in this
     # series reads as a relay restart, so the order is load-bearing, not cosmetic.
     ordered = [s for g in sample_groups for s in g]
     av_repairs = counter_increase([s.get("av_repairs_total") for s in ordered])
@@ -304,8 +304,8 @@ def counter_increase(values):
     as zero, which would invent a reset.
 
     The FIRST reading is a baseline and contributes nothing: whatever the counter
-    already held when the window opened happened before it. Counting it in full
-    attributed a relay's entire pre-event history to the event. Pure."""
+    already held when the window opened happened before it. Counting it in full would
+    attribute the relay's entire pre-event history to the event. Pure."""
     seen = [v for v in values if isinstance(v, (int, float)) and not isinstance(v, bool)]
     total = 0
     for i, v in enumerate(seen):
@@ -384,7 +384,7 @@ _OBS_CONSUMER_EVENTS = {
 
 def broadcast_timeline(events):
     """Chronological part (preferred) or OBS-stream start/stop rows for the report's
-    Broadcast-timeline section — the reference points for the OBS-downtime figures."""
+    Broadcast-timeline section, the reference points for the OBS-downtime figures."""
     have_parts = any(e.get("type") in ("part_start", "part_end") for e in events)
     starts = ("part_start", "part_end") if have_parts else ("obs_stream_start", "obs_stream_stop")
     rows = []
@@ -422,8 +422,8 @@ def build_report(samples, events, name_for_stint, event_title, window, now,
     metric_samples = [s for g in groups for s in g]
     on_air_s = windows_total_s(windows) if windows else duration_s
     # Full-session health bands drive the SVG strip (off-air visible as context);
-    # the metric bands (on-air only, built PER WINDOW) drive Uptime — a band that
-    # spanned the off-air gap between two windows used to push uptime over 100%.
+    # the metric bands (on-air only, built PER WINDOW) drive Uptime; a band that
+    # spanned the off-air gap between two windows would push uptime over 100%.
     health_bands = _fill_gaps(hs.collapse_bands(
         [(s["ts"], s.get("health_level")) for s in samples]))
     metric_bands = [b for g in groups
@@ -484,8 +484,6 @@ def build_report(samples, events, name_for_stint, event_title, window, now,
         "health_bands": health_bands,
     }
 
-
-# ---- rendering ----
 
 _HEALTH_COLORS = {"green": "#2e7d32", "yellow": "#f9a825", "red": "#c62828"}
 
@@ -584,7 +582,7 @@ def render_html(report):
     oa = report["on_air"]
     parts = ["<!doctype html>", '<html lang="en"><head><meta charset="utf-8">',
              '<meta name="viewport" content="width=device-width,initial-scale=1">',
-             f"<title>Post-event report — {_esc(hd['event_title'] or 'Event')}</title>",
+             f"<title>Post-event report: {_esc(hd['event_title'] or 'Event')}</title>",
              f"<style>{_STYLE}</style></head><body><div class='wrap'>"]
     parts.append(f"<h1>{_esc(hd['event_title'] or 'Post-event report')}</h1>")
     host_sub = f" · {_esc(hd['host'])}" if hd.get("host") else ""
@@ -621,7 +619,6 @@ def render_html(report):
                          "30 s interval, so the peak is a lower bound.</p>")
         parts.append("</div>")
 
-    # On air per commentator
     parts.append("<h2>On air per commentator</h2>")
     rows = [(c["name"], _fmt_dur(c["seconds"]), c["stints"]) for c in oa["commentators"]]
     parts.append(_table(["Commentator", "On air", "Stints"], rows) if rows
@@ -632,7 +629,7 @@ def render_html(report):
                      f"could change them.</p>")
     else:
         parts.append("<p class='caveat'>Commentator names were unavailable (relay not "
-                     "running at report time) — shown by stint index.</p>")
+                     "running at report time), so they are shown by stint index.</p>")
     if oa.get("av_repairs", 0) > 0:
         # #619: OBS repaired each of these itself, so this is a record, not an alarm.
         # The unexplained ones are the only part worth a second look, and the line says
@@ -646,11 +643,10 @@ def render_html(report):
                      f"afterwards.</p>")
     if oa.get("desync_seconds", 0) > 0:
         parts.append(f"<p class='caveat'>&#9888; A ping-pong desync was active for "
-                     f"{_esc(_fmt_dur(oa['desync_seconds']))} of this event — "
+                     f"{_esc(_fmt_dur(oa['desync_seconds']))} of this event, so "
                      f"per-commentator attribution during those windows may be "
                      f"unreliable.</p>")
 
-    # Producer handovers
     if report["producer_handovers"]:
         parts.append("<h2>Producer handovers</h2>")
         hrows = [(_fmt_clock(h["ts"]), f"{h['from'] or '—'} → {h['to'] or '—'}",
@@ -658,7 +654,6 @@ def render_html(report):
                  for h in report["producer_handovers"]]
         parts.append(_table(["Time", "Handover", "Stint"], hrows))
 
-    # Stream substitutions
     if report.get("substitutions"):
         parts.append("<h2>Stream substitutions</h2>")
         parts.append("<p class='note'>Ad-hoc on-air stream swaps (the on-air feed was "
@@ -670,14 +665,14 @@ def render_html(report):
         parts.append(_table(["Time", "Feed", "Stint", "Commentator", "Reason"], srows))
 
     # Feed auto-recoveries: a feed dropped and self-healed BEFORE the 30 s outage
-    # threshold, so it is NOT counted in the Drops column below — but each was a brief
-    # on-air glitch (the class the 2026-07-10 report showed as "all green").
+    # threshold, so it is NOT counted in the Drops column below; each was still a brief
+    # on-air glitch.
     if report.get("recoveries"):
         parts.append("<h2>Feed auto-recoveries</h2>")
         parts.append("<p class='note'>Feeds that dropped and auto-recovered (stream restart / "
-                     "brief timeout) — self-healed, so not counted as Drops below, but each was "
-                     "a short on-air interruption. Repeated recoveries of one feed indicate an "
-                     "unstable source.</p>")
+                     "brief timeout). They self-healed, so they are not counted as Drops below, "
+                     "but each was a short on-air interruption. Repeated recoveries of one feed "
+                     "indicate an unstable source.</p>")
         rrows = [(_fmt_clock(r["ts"]), r["feed"],
                   r["stint"] if r["stint"] is not None else "—",
                   r["streamer"], _fmt_dur(r["downtime_s"]))
@@ -698,15 +693,14 @@ def render_html(report):
                  for o in report["obs_consumer"]]
         parts.append(_table(["Time", "Feed", "Stint", "Commentator", "Event"], orows))
 
-    # Feed reliability
     parts.append("<h2>Feed reliability</h2>")
     frows = [(f["feed"], f["drops"], _fmt_dur(f["downtime_s"]), _fmt_dur(f["longest_outage_s"]))
              for f in report["feeds"]]
     parts.append(_table(["Feed", "Drops", "Downtime", "Longest outage"], frows))
     parts.append("<p class='note'>POV (optional picture-in-picture) is not tracked for "
-                 "reliability — it has no drop signal and is paused by design.</p>")
+                 "reliability: it has no drop signal and is paused by design.</p>")
 
-    # Broadcast timeline (part / OBS-stream start & stop — context for downtime)
+    # Broadcast timeline (part / OBS-stream start & stop), context for downtime
     tl = report.get("broadcast_timeline") or []
     if tl:
         parts.append("<h2>Broadcast timeline</h2>")
@@ -716,7 +710,6 @@ def render_html(report):
                      "time only; intentional off-air (before start, between parts, "
                      "after the final stop) is excluded.</p>")
 
-    # Incident log
     parts.append("<h2>Incident log</h2>")
     if report["incidents"]:
         irows = []
@@ -726,9 +719,8 @@ def render_html(report):
                           sev.upper(), _fmt_dur(inc["duration_s"]), inc.get("label") or ""))
         parts.append(_table(["Window", "Severity", "Duration", "Reason"], irows))
     else:
-        parts.append("<p class='note'>No incidents — green the whole session.</p>")
+        parts.append("<p class='note'>No incidents; green the whole session.</p>")
 
-    # Stream & OBS quality
     q = report["quality"]
     if q is not None:
         parts.append("<h2>Stream &amp; OBS quality</h2>")
@@ -763,7 +755,7 @@ def render_html(report):
 def render_summary_text(report):
     """A short plaintext headline block for CLI stdout."""
     hd = report["header"]
-    lines = [f"Post-event report — {hd['event_title'] or 'Event'}",
+    lines = [f"Post-event report: {hd['event_title'] or 'Event'}",
              f"  {_fmt_date(hd['start'])} {_fmt_clock(hd['start'])}–{_fmt_clock(hd['end'])} "
              f"({_fmt_dur(hd['duration_s'])})",
              f"  Uptime {hd['uptime_pct']}% · {len(report['incidents'])} incident(s)"]
@@ -804,7 +796,7 @@ _LOG_TS_RE = re.compile(r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)")
 
 def _parse_log_ts(line):
     """Epoch seconds from a leading 'YYYY-MM-DD HH:MM:SS' log prefix, else None.
-    Interpreted in local time — the log formatter (logsetup) writes local time."""
+    Interpreted in local time, which is what the log formatter (logsetup) writes."""
     m = _LOG_TS_RE.match(line)
     if not m:
         return None
@@ -822,7 +814,7 @@ def slice_log_by_window(text, frm, to, margin_s=120.0):
     when either is None the text is returned unchanged (no window to clip to).
 
     A log whose format this parser doesn't recognise at all (no line carried a
-    parseable timestamp — e.g. OBS's time-only 'HH:MM:SS.mmm' prefix) is returned
+    parseable timestamp, e.g. OBS's time-only 'HH:MM:SS.mmm' prefix) is returned
     WHOLE rather than emptied: better to over-include a foreign-format log than to
     silently drop it. Such files are usually per-session already (OBS writes a fresh
     log per launch), so the whole file is roughly the event window anyway."""

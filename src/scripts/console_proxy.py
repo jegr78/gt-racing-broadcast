@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """Pure plumbing for the /console/buttons reverse proxy to Bitfocus Companion (#236).
 
-No I/O, no sockets — header/path transforms + address/version decisions the relay's
-_proxy_companion uses. Companion >= v4.1.0 serves its UI under a sub-path when the proxy
-injects the `Companion-custom-prefix` header WITHOUT a leading slash (bitfocus/companion
-#3503; validated on v4.3.4). Knowing nothing about tRPC/WebSocket framing, these helpers are
-unaffected by Companion upgrades. Tests: tests/test_console_proxy.py."""
+No I/O, no sockets: header/path transforms plus the address/version decisions the
+relay's _proxy_companion uses. Companion >= v4.1.0 serves its UI under a sub-path when
+the proxy injects the `Companion-custom-prefix` header WITHOUT a leading slash
+(bitfocus/companion #3503). These helpers know nothing about tRPC/WebSocket framing, so a
+Companion upgrade does not affect them. Tests: tests/test_console_proxy.py."""
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 
 MOUNT_PREFIX = "/console/buttons"          # the relay path prefix (strip / route)
 PREFIX_HEADER_VALUE = "console/buttons"    # the Companion-custom-prefix value (NO leading slash)
 COMPANION_PREFIX_HEADER = "Companion-custom-prefix"
-RELAY_COOKIE = "rc_console"               # the relay's auth cookie — must never reach Companion
+RELAY_COOKIE = "rc_console"               # the relay's auth cookie; must never reach Companion
 
-# RFC 7230 hop-by-hop headers (lowercase) — never forwarded on the HTTP path.
+# RFC 7230 hop-by-hop headers (lowercase), never forwarded on the HTTP path.
 HOP_BY_HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
               "te", "trailer", "trailers", "transfer-encoding", "upgrade"}
 
@@ -29,7 +29,7 @@ def scrub_relay_cookie(cookie_header):
 
 
 def strip_relay_token(request_path):
-    """Remove the relay's `t` auth-token query param before forwarding upstream — the relay
+    """Remove the relay's `t` auth-token query param before forwarding upstream: the relay
     credential must never reach Companion. Path and all other query params are preserved."""
     parts = urlsplit(request_path)
     if not parts.query:
@@ -53,7 +53,7 @@ def upstream_path(request_path):
 
 def forward_request_headers(headers, prefix=PREFIX_HEADER_VALUE, host="127.0.0.1:8000"):
     """Client headers to send upstream on the HTTP path: drop hop-by-hop, the original Host,
-    and Accept-Encoding (Companion then replies uncompressed — the proxy does not re-encode);
+    and Accept-Encoding (Companion then replies uncompressed; the proxy does not re-encode);
     set Host and inject the no-leading-slash sub-path prefix header. `headers` exposes
     .items() (a dict or http.server's email.message.Message)."""
     out = {}
@@ -65,7 +65,7 @@ def forward_request_headers(headers, prefix=PREFIX_HEADER_VALUE, host="127.0.0.1
             cleaned = scrub_relay_cookie(v)
             if cleaned:
                 out[k] = cleaned
-            # else: drop the header entirely — nothing useful remains
+            # else: drop the header entirely, nothing useful remains
             continue
         out[k] = v
     out["Host"] = host

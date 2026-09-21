@@ -5,12 +5,12 @@ toolkit (binary: racecast).
 Single source of truth for resolving which league ("profile") is active and
 loading its config. Two layers:
 
-  * machine .env  (repo root / next to the binary) — RACECAST_* vars, all leagues
-  * profiles/<name>/profile.env — the league: SHEET_ID, SHEET_PUSH_URL, NAME, ...
+  * machine .env (repo root / next to the binary): RACECAST_* vars, all leagues
+  * profiles/<name>/profile.env: the league's SHEET_ID, SHEET_PUSH_URL, NAME, ...
 
 The bounded .env loader here is the CANONICAL copy. The standalone scripts
 (relay/racecast-feeds.py, setup-assets.py, relay/get-media.py, relay/get-graphics.py)
-keep their own self-contained load_dotenv on purpose — the relay is deliberately
+keep their own self-contained load_dotenv on purpose: the relay is deliberately
 import-free (same rationale as its duplicated detect_tailscale_ip) and all four
 run in-process under the frozen binary. Keep the parsing/boundary rules in sync.
 """
@@ -21,12 +21,10 @@ from dataclasses import dataclass, field
 PROJECT_MARKERS = (".git", ".env.example")
 
 # Default OBS scene-collection name = product prefix + the league NAME, so several
-# leagues' collections group together in OBS. An explicit OBS_COLLECTION wins.
-# Endurance (#308): endurance profiles group under "GT Racing Endurance".
+# leagues' collections group together in OBS. An explicit OBS_COLLECTION wins. (#308)
 PRODUCT_COLLECTION_PREFIX = "GT Racing Endurance"
 
-# Solo (#303, #308): solo profiles group under "GT Racing Solo" so both endurance
-# and solo profiles are unified under the "GT Racing" product line.
+# Solo profiles group under their own prefix, inside the same product line. (#303)
 SOLO_COLLECTION_PREFIX = "GT Racing Solo"
 
 # Profile kind (#301): endurance = the classic feed-/sheet-driven league; solo =
@@ -79,7 +77,7 @@ def parse_env_text(text):
 
 def load_machine_env(start):
     """Read the machine .env (from `start` or the project root above it) into a
-    dict. Does NOT mutate os.environ — callers decide precedence. Bounded to the
+    dict. Does NOT mutate os.environ; callers decide precedence. Bounded to the
     project (same boundary as find_project_root). Returns {} if no .env."""
     candidates = [start]
     root = find_project_root(start)
@@ -102,7 +100,7 @@ def profiles_dir(root):
 
 def list_profiles(root):
     """Sorted names of profiles/<name>/ dirs that contain a profile.env.
-    'example' (the shipped template) is excluded — it is not a usable league."""
+    'example' (the shipped template) is excluded: it is not a usable league."""
     pdir = profiles_dir(root)
     if not os.path.isdir(pdir):
         return []
@@ -160,7 +158,7 @@ def resolve_active_profile(available, *, override=None, env_value=None,
         return available[0]
     if not available:
         raise ProfileError(
-            "no profiles found — create one under profiles/<name>/profile.env")
+            "no profiles found. Create one under profiles/<name>/profile.env")
     raise ProfileError(
         "multiple profiles exist; choose one with --profile or "
         f"'racecast profile use <name>' (available: {', '.join(available)})")

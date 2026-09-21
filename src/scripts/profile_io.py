@@ -31,7 +31,7 @@ MAX_BUNDLE_MEMBERS = 50_000
 
 def slugify(name):
     """Free-form league name -> directory-safe slug. Doubles as path-traversal
-    defense ('../etc' -> 'etc'). Mirrors profile_admin.slugify — keep in sync."""
+    defense ('../etc' -> 'etc'). Mirrors profile_admin.slugify; keep in sync."""
     return _SLUG_RE.sub("-", (name or "").strip().lower()).strip("-_")
 
 
