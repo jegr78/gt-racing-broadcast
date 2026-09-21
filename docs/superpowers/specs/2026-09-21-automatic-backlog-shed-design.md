@@ -129,7 +129,57 @@ fixed by the same change.
   after a restart reliably fixes the backlog, that is evidence #630's predicted landing is
   off, and that belongs in #630 rather than here.
 
+## Live result, 2026-09-21 on the producer host
+
+Run: one live YouTube 1080p60 feed, `/reload/A` with an OBS recording active, on
+`PC-JeGR-Streaming`.
+
+**The automation behaves exactly as designed.** It fired by itself three times, 60 s
+apart (the shared cooldown), and then gave up and said so:
+
+```
+08:59:06 WARNING backlog shed A — output 25.3 s behind live — rebuilding OBS input
+09:00:09 WARNING backlog shed A — output 26.3 s behind live — rebuilding OBS input
+09:01:11 WARNING backlog shed A — output 31.2 s behind live — rebuilding OBS input
+09:01:43 WARNING Feed A backlog shed stood down — 3 OBS rebuilds did not bring the
+                 output back to the live edge
+```
+
+The A/V detector attributed all of it: 9 repairs on Feed A, **0 unexplained**, so
+`_note_obs_splice` does keep the relay's own remedy from turning the panel yellow.
+
+**But the remedy does not work in this condition, and the reason is not what the code
+said.** The stand-down line originally blamed a host too slow to render in real time.
+Measured in that exact state, with the recording running and the output 25-31 s behind:
+
+| | |
+|---|---|
+| `activeFps` | 60.0000024 |
+| `averageFrameRenderTime` | 0.87 ms |
+| `renderSkippedFrames` | 13 of 185848 (0.007 %) |
+| `outputSkippedFrames` | 9 of 21809 (0.04 %) |
+| `cpuUsage` | 2.0 % |
+
+The host is not the bottleneck. The wording is corrected to state the fact and stop
+there.
+
+What the samples show instead: 15 s after a rebuild the backlog was already back at
+24.7 s. A host losing ground could not build 21 s of backlog in 15 s, so the rebuild is
+**landing late** rather than resetting to the prebuffer and then slipping. The same
+`/reload/A` with the output IDLE landed cleanly every time (1.4-3.1 s, measured in the
+same session an hour earlier). So an active OBS output changes where the rejoin lands —
+which is the #614/#630 landing calculation, not this change.
+
 ## Open
 
-- Whether the post-restart backlog step is even the same phenomenon as a growing one is
-  unmeasured. Both trip the same threshold; only a live run separates them.
+- **Why the rejoin lands late under an active output.** That is now the blocking
+  question for this feature: the shed calls the same `f._obs_reconnect()` primitive, so
+  until the landing is right the shed cannot work no matter how it is triggered. It
+  belongs to #630.
+- Whether the post-restart backlog step is the same phenomenon as a growing one is still
+  unmeasured. Both trip the same threshold; the run above produced the step, never a
+  growing one.
+- Note that this run **supports** #581's original reasoning in one respect: a rebuild did
+  not buy the picture back, which is what the epic predicted when it said the backlog must
+  never be allowed to build in the first place. The override stands (the guard makes the
+  attempt cheap and bounded), but #585 looks more load-bearing than it did this morning.

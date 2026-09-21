@@ -8243,10 +8243,15 @@ class Relay:
             allowed = self._rebuild_guard.allows()
         if stood_down:
             self._rebuild_stood_down_feed = live
+            # State what was measured and nothing else. An earlier version of this line
+            # blamed a host too slow to render; the first live run that reached the
+            # stand-down had OBS at exactly 60.0 fps, 0.87 ms average render time and 13
+            # skipped frames out of 185848, so the guessed cause was simply false and it
+            # would have sent a director after the wrong component mid-broadcast.
             LOG.warning("Feed %s backlog shed stood down — %d OBS rebuilds did not bring the "
-                        "output back to the live edge; the host is most likely too slow to "
-                        "render in real time. Re-arms at the next stint change or from the "
-                        "Director Panel", live, attempts)
+                        "output back to the live edge, so the relay has stopped trying. The "
+                        "picture stays behind live until the next stint change or a re-arm "
+                        "from the Director Panel", live, attempts)
             self._record_event(now, "backlog_shed_stood_down",
                                f"Feed {live} backlog shed stood down after {attempts} "
                                f"ineffective rebuilds", {"feed": live, "attempts": attempts})
