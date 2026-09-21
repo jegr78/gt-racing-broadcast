@@ -62,7 +62,7 @@ def summarize(results):
     for r in results:
         n[r.status] = n.get(r.status, 0) + 1
         mark = {"pass": "PASS", "fail": "FAIL", "skip": "SKIP"}[r.status]
-        lines.append(f"  [{mark}] {r.name}" + (f" — {r.message}" if r.message else ""))
+        lines.append(f"  [{mark}] {r.name}" + (f": {r.message}" if r.message else ""))
     lines.append(f"  {n['pass']} passed, {n['fail']} failed, {n['skip']} skipped")
     return "\n".join(lines)
 
