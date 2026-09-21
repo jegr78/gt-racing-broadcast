@@ -462,13 +462,14 @@ feed_prebuffer_s = health_store.feed_prebuffer_s   # #533; shared with the repor
 
 
 def _env_float(environ, key, default):
-    """Parse a positive float env override; fall back to `default` on absent/empty/
-    non-numeric/<=0. Pure."""
+    """Parse a positive, finite float env override; fall back to `default` on absent/empty/
+    non-numeric/<=0/infinite. An infinity parses and compares > 0, so without the finite
+    check it would pass as a duration and make whatever it tunes unreachable. Pure."""
     try:
         v = float(str(environ.get(key, "")).strip())
     except (TypeError, ValueError):
         return default
-    return v if v > 0 else default
+    return v if v > 0 and math.isfinite(v) else default
 
 
 FEED_STALL_FLOOR_S = 1.0          # #535: min inbound gap (s) that can count as a stall (prebuffer=0 guard)

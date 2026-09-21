@@ -2004,15 +2004,20 @@ def t_queue_deadline_factor_outlasts_the_stall_watchdog():
 
 def t_fanout_deadline_follows_the_watchdog_direct_serve_keeps_its_own():
     help_text = "  --stream-segmented-queue-deadline FACTOR\n"
-    old = m._STREAMLINK_HELP
+    old_help, old_stall = m._STREAMLINK_HELP, os.environ.get("RACECAST_FEED_STALL_S")
     m._STREAMLINK_HELP = help_text
-    try:
+    os.environ["RACECAST_FEED_STALL_S"] = "20"   # pinned: the machine's own value must not
+    try:                                         # decide whether the two factors differ
         fan = m.streamlink_fanout_cmd("https://hls.example/x.m3u8", "youtube")
         fan_tw = m.streamlink_fanout_cmd("https://twitch.tv/foo", "twitch", twitch_token="tok")
         srv = m.streamlink_serve_cmd("https://hls.example/x.m3u8", 53001, "youtube")
+        derived = m.queue_deadline_factor(m.feed_stall_s(os.environ))
     finally:
-        m._STREAMLINK_HELP = old
-    derived = m.queue_deadline_factor(m.feed_stall_s(os.environ))
+        m._STREAMLINK_HELP = old_help
+        if old_stall is None:
+            os.environ.pop("RACECAST_FEED_STALL_S", None)
+        else:
+            os.environ["RACECAST_FEED_STALL_S"] = old_stall
     fan_factor = fan[fan.index("--stream-segmented-queue-deadline") + 1]
     srv_factor = srv[srv.index("--stream-segmented-queue-deadline") + 1]
     assert fan_factor == derived, \
