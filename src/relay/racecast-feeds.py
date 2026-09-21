@@ -4815,16 +4815,26 @@ class FeedFanoutServer:
         now = time.monotonic() if now is None else now
         with self._consumers_lock:
             for st in self._consumers.values():
-                st["superseded"] = (st.get("cursor"), now)
+                st["superseded"] = (st.get("cycle_ts"), now)
 
     def _stale(self, st, now, grace_s=FANOUT_STALE_GRACE_S):
-        """A superseded consumer that has not accepted a byte since, for longer than the
-        grace. The grace is part of the judgement rather than only of the reaping: in the
-        instant a new consumer arrives NOTHING has moved yet, and without it every reader
-        would briefly see every consumer as abandoned and report no backlog at all. A live
-        consumer moves again within a read cycle; an abandoned one never does."""
+        """A superseded consumer that has completed nothing since, for longer than the
+        grace.
+
+        The signal is `cycle_ts` — stamped whenever a read or a send COMPLETES — and not
+        `cursor`. A first version used the cursor and was wrong in a way that only a real
+        slow consumer showed (tools/slow-consumer-probe.py, producer host 2026-09-21): the
+        cursor advances once per read CYCLE, and a consumer reading at 40% of real time
+        sits inside one cycle for many seconds, so every shed rebuild made the relay
+        briefly report a 15.8 s backlog as gone. An abandoned socket blocks in sendall and
+        never completes another cycle; a slow consumer keeps completing them, just slowly.
+        That is the difference, and it is the only one that separates the two cases.
+
+        The grace is part of the judgement rather than only of the reaping: in the instant
+        a new consumer arrives nothing has completed yet, and without it every reader would
+        briefly see every consumer as abandoned and report no backlog at all."""
         mark = st.get("superseded")
-        return (mark is not None and st.get("cursor") == mark[0]
+        return (mark is not None and st.get("cycle_ts") == mark[0]
                 and (now - mark[1]) >= grace_s)
 
     def reap_superseded(self, now=None, grace_s=FANOUT_STALE_GRACE_S):

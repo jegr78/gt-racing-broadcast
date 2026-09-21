@@ -1071,15 +1071,15 @@ def t_an_abandoned_consumer_is_the_one_superseded_and_not_moving():
     # several at once (see t_fanout_server_streams_ring_to_two_consumers). What condemns
     # one is superseded AND not having accepted a byte since.
     old, new = _FakeConn("old"), _FakeConn("new")
-    srv = _srv_with({1: {"cursor": 100, "conn": old, "cycle_ts": 0.0, "snaps": 0},
-                     2: {"cursor": 500, "conn": new, "cycle_ts": 0.0, "snaps": 0}})
+    srv = _srv_with({1: {"cursor": 100, "conn": old, "cycle_ts": 999.0, "snaps": 0},
+                     2: {"cursor": 500, "conn": new, "cycle_ts": 999.0, "snaps": 0}})
     srv.mark_superseded(now=1000.0)
 
     late = 1000.0 + m.FANOUT_STALE_GRACE_S
     assert not srv._stale(srv._consumers[1], now=1000.0), (
         "in the instant of the mark nothing has moved yet — the grace is part of the "
         "judgement, or every reader would briefly see every consumer as abandoned")
-    srv._consumers[2]["cursor"] = 900          # the live one keeps accepting bytes
+    srv._consumers[2]["cycle_ts"] = 1001.0     # the live one completes another cycle
     assert srv._stale(srv._consumers[1], now=late)
     assert not srv._stale(srv._consumers[2], now=late), "a consumer that moved is alive"
 
@@ -1092,6 +1092,37 @@ def t_an_abandoned_consumer_is_the_one_superseded_and_not_moving():
     assert not new.closed, "the live consumer must be left alone"
 
 
+def t_a_merely_slow_consumer_is_never_judged_abandoned():
+    # Found by tools/slow-consumer-probe.py on the producer host, 2026-09-21, minutes
+    # after the staleness rule shipped. A consumer reading at 40% of real time held a
+    # steady 15.8 s backlog — and every time the shed fired, OBS reconnected, everyone
+    # got superseded, and the reported backlog collapsed to OBS's 2.9 s for a heartbeat
+    # or two. The relay briefly believed the backlog was gone while it plainly was not.
+    #
+    # The cause was the signal, not the rule: `cursor` only moves when a read CYCLE
+    # completes, and a slow consumer sits inside one for many seconds. `cycle_ts` is
+    # stamped whenever a read or a send completes, so it separates the two cases the way
+    # they actually differ — an abandoned socket blocks in sendall and never completes
+    # another one, while a slow consumer keeps completing them, just slowly.
+    srv = _srv_with({})
+    late = m.FANOUT_STALE_GRACE_S + 1.0
+
+    slow = {"cursor": 100, "cycle_ts": 0.0, "conn": _FakeConn("slow"), "snaps": 0}
+    dead = {"cursor": 100, "cycle_ts": 0.0, "conn": _FakeConn("dead"), "snaps": 0}
+    srv._consumers = {1: slow, 2: dead}
+    srv.mark_superseded(now=0.0)
+
+    slow["cycle_ts"] = 3.0        # a send completed: still alive, still behind
+    assert not srv._stale(slow, now=late), (
+        "a consumer that completed a send is alive however far behind it is")
+    assert srv._stale(dead, now=late), "the one that completed nothing is abandoned"
+
+    # And the cursor standing still must not condemn the slow one on its own.
+    assert slow["cursor"] == 100, "the slow consumer is still inside the same read cycle"
+    assert srv.reap_superseded(now=late) == 1, "only the abandoned socket is closed"
+    assert dead["conn"].closed and not slow["conn"].closed
+
+
 def t_a_stale_consumer_never_becomes_the_reported_backlog():
     # The number is what the health reason, health-history and the automatic shed all
     # read. While the dead connection counted, the shed judged its own rebuild useless
@@ -1101,6 +1132,7 @@ def t_a_stale_consumer_never_becomes_the_reported_backlog():
             return {100: 26.0, 900: 3.0, 950: 2.4}.get(cursor)
     srv = _srv_with({1: {"cursor": 100, "conn": _FakeConn(), "cycle_ts": 0.0, "snaps": 0},
                      2: {"cursor": 900, "conn": _FakeConn(), "cycle_ts": 0.0, "snaps": 0}})
+    # consumer 1 is the abandoned one: it completes nothing after the mark.
     srv.ring = _Ring()
     assert srv.consumer_backlog(now=1.0) == 26.0, "before: max() over both"
 
@@ -1111,6 +1143,7 @@ def t_a_stale_consumer_never_becomes_the_reported_backlog():
         "the mark alone must condemn nobody — in that instant nothing has moved")
 
     srv._consumers[2]["cursor"] = 950          # the live consumer accepts more bytes
+    srv._consumers[2]["cycle_ts"] = 2.0        # ... and completes the cycle that did it
     late = 1.0 + m.FANOUT_STALE_GRACE_S
     assert srv.consumer_backlog(now=late) == 2.4, (
         "the abandoned consumer's frozen position must not be reported")
