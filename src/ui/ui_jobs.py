@@ -1,17 +1,16 @@
 """Control Center job manager: run one `racecast <args>` child per triggered
 operation, keep its combined stdout/stderr lines in memory for the web UI
 (poll or SSE), and refuse a second concurrent run of the same operation.
-Jobs are subprocesses (not threads) because sys.stdout is process-global —
-parallel in-process ops would interleave output — and a child can be killed.
+Jobs are subprocesses, not threads, because sys.stdout is process-global, so
+parallel in-process ops would interleave output, and a child can be killed.
 Spec: docs/superpowers/specs/2026-06-07-control-center-design.md."""
 import os, subprocess, threading, uuid
 
 # A frozen --windowed app (racecast-ui.exe) has no console, so spawning the console
-# sibling racecast.exe pops a terminal window per job (issue #23). CREATE_NO_WINDOW
-# gives the child a hidden console; its own subprocess children inherit it, so
-# this one flag at the job root suppresses the whole tree. (Mirrors
-# services.no_window_kwargs — ui_jobs is import-isolated from scripts/ in its
-# test, so the constant is inlined, as services.py inlines its own flags.)
+# sibling racecast.exe pops a terminal window per job (#23). CREATE_NO_WINDOW gives
+# the child a hidden console; its own subprocess children inherit it, so this one
+# flag at the job root suppresses the whole tree. The constant is inlined because
+# ui_jobs is import-isolated from scripts/ in its test.
 _NO_WINDOW = {"creationflags": 0x08000000} if os.name == "nt" else {}
 
 
@@ -19,7 +18,7 @@ class Job:
     def __init__(self, job_id, op, proc):
         self.id, self.op, self.proc = job_id, op, proc
         self.lines = []          # decoded output lines (head-trimmed, see dropped)
-        self.dropped = 0         # lines trimmed off the head — keeps indices stable
+        self.dropped = 0         # lines trimmed off the head; keeps indices stable
         self.exit_code = None
         self.cancelled = False   # cancel() was requested (exit code will be non-zero)
         self.lock = threading.Lock()
@@ -29,14 +28,14 @@ class JobManager:
     def __init__(self, argv_for, env=None, spawn=None, max_lines=5000, logger=None):
         """argv_for(op_args) -> child argv (see ui_ops.job_argv). env: full
         child environment or None (inherit). spawn: Popen-compatible test seam.
-        logger: optional logging.Logger — when set, the action's start marker,
-        each output line (prefixed `[op]`), and its exit code are logged (file
-        persistence; the in-memory buffer + SSE are unchanged). None -> silent."""
+        logger: optional logging.Logger. When set, the action's start marker, each
+        output line (prefixed `[op]`) and its exit code are written to the log file;
+        the in-memory buffer and SSE are unchanged. None means silent."""
         self.argv_for, self.env = argv_for, env
         self.spawn = spawn or self._spawn
         self.max_lines = max_lines
         self.logger = logger
-        self.jobs = {}           # job_id -> Job (kept for the session — the op set is finite)
+        self.jobs = {}           # job_id -> Job, kept for the session; the op set is finite
         self.lock = threading.Lock()
 
     def _spawn(self, argv):
@@ -61,7 +60,7 @@ class JobManager:
         reader = threading.Thread(target=self._reader, args=(job,), daemon=True)
         try:
             reader.start()
-        except RuntimeError as exc:      # OS thread exhaustion — unblock the op
+        except RuntimeError as exc:      # OS thread exhaustion; unblock the op
             with job.lock:
                 job.exit_code = -1
                 job.lines.append(f"(could not start output reader: {exc})")
@@ -90,7 +89,7 @@ class JobManager:
 
     def snapshot(self, job_id):
         """{'id','op','running','exit_code','cancelled'} or None for an unknown id."""
-        job = self.jobs.get(job_id)  # GIL-atomic dict read — no self.lock needed
+        job = self.jobs.get(job_id)  # GIL-atomic dict read; no self.lock needed
         if job is None:
             return None
         with job.lock:
@@ -100,9 +99,9 @@ class JobManager:
 
     def cancel(self, job_id):
         """Request termination of a running job. True = signalled, False =
-        already finished, None = unknown id. Terminates only the direct child
-        (a daemon the child already detached keeps running — by design: cancel
-        means 'stop this action', not 'tear down services')."""
+        already finished, None = unknown id. Terminates only the direct child, so
+        a daemon the child already detached keeps running: cancel means 'stop this
+        action', not 'tear down services'."""
         job = self.jobs.get(job_id)        # GIL-atomic dict read
         if job is None:
             return None
@@ -118,9 +117,9 @@ class JobManager:
 
     def lines_since(self, job_id, since):
         """(new lines from absolute index `since`, next index, exit_code).
-        (None, since, None) for an unknown id. Head-trimmed lines are skipped —
-        `since` stays an absolute position so SSE/poll clients never re-read."""
-        job = self.jobs.get(job_id)  # GIL-atomic dict read — no self.lock needed
+        (None, since, None) for an unknown id. Head-trimmed lines are skipped and
+        `since` stays an absolute position, so SSE/poll clients never re-read."""
+        job = self.jobs.get(job_id)  # GIL-atomic dict read; no self.lock needed
         if job is None:
             return None, since, None
         with job.lock:

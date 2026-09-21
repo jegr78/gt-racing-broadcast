@@ -5,11 +5,10 @@
 Each Brands row whose logo cell is a Google-Drive share link is downloaded as
 '<asset_key(brand)>.png' into the brands dir (repo: <repo>/runtime/brands ;
 distributed package: <package>/brands). The relay serves /hud/assets/brands/<key>
-OVERRIDE-FIRST: a file here wins over the committed src/assets/brands set, so a
-league can replace a built-in logo (e.g. bmw) or add a new manufacturer (e.g.
-cupra). The key is normalized with the SAME asset_key() the HUD uses on the
-Configuration-tab brand text, so the stem always lines up. Never stored under
-src/, never committed.
+override-first: a file here wins over the committed src/assets/brands set, so a
+league can replace a built-in logo or add a manufacturer. The key is normalized
+with the same asset_key() the HUD uses on the Configuration-tab brand text, so the
+stem always lines up. Never stored under src/, never committed.
 
 Usage: python3 get-brands.py [--out DIR] [--sheet-id ID] [--brands-tab NAME]
 """
@@ -17,16 +16,15 @@ import argparse, csv, io, os, re, sys
 from urllib.parse import quote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
-# Header names located case-insensitively (first match wins), mirroring the
-# relay's tab parsers. The KEY column holds the brand text; the LOGO column holds
-# the Drive share link.
+# Header names located case-insensitively, first match wins. The KEY column holds
+# the brand text; the LOGO column holds the Drive share link.
 BRAND_KEY_HEADERS = ("brand key", "brand", "brand name")
 BRAND_LOGO_HEADERS = ("logo", "logo url", "image")
 
 
 def load_dotenv(start):
     """Load KEY=VALUE pairs from a .env at the script dir or the project root into
-    os.environ (real env vars win). Bounded to the project (nearest ancestor with a
+    os.environ; real env vars win. Bounded to the project (nearest ancestor with a
     .git/.env.example marker). KEEP IN SYNC with the copies in racecast-feeds.py,
     setup-assets.py, get-media.py and get-graphics.py."""
     candidates, d = [start], start
@@ -123,8 +121,8 @@ def safe_filename(key):
 def brands_from_csv(rows):
     """Brands-tab rows -> {asset_key(brand): drive_url}. Columns are header-located
     (BRAND_KEY_HEADERS / BRAND_LOGO_HEADERS, first match wins, case-insensitive).
-    A row is kept only when its logo cell is a Google-Drive link. No header row ->
-    {} (we never positionally guess, to avoid mis-downloading)."""
+    A row is kept only when its logo cell is a Google-Drive link. A missing header
+    row returns {}: a positional guess would mis-download."""
     if not rows:
         return {}
     header = [(h or "").strip().lower() for h in rows[0]]
@@ -144,9 +142,8 @@ def brands_from_csv(rows):
 
 
 def brands_dir(here):
-    """Where brand overrides live when --out is not given. Mirrors
-    get-graphics.graphics_dir(): repo (src/relay) -> <repo>/runtime/brands ;
-    package (relay) -> <pkg>/brands."""
+    """Where brand overrides live when --out is not given:
+    repo (src/relay) -> <repo>/runtime/brands ; package (relay) -> <pkg>/brands."""
     if os.path.basename(here) == "relay" and os.path.basename(os.path.dirname(here)) == "src":
         return os.path.join(os.path.dirname(os.path.dirname(here)), "runtime", "brands")
     return os.path.join(os.path.dirname(here), "brands")
@@ -203,9 +200,9 @@ def main():
 
     brands = brands_from_csv(list(csv.reader(io.StringIO(csv_text))))
     if not brands:
-        # No Brands tab / no override rows is NOT an error: the committed base set
-        # is still served. Exit 0 so `racecast brands` is safe to run on any league.
-        print("No brand-override rows in the Brands tab — base logos unchanged.")
+        # No Brands tab or no override rows is not an error: the committed base set
+        # is still served. Exit 0 so `racecast brands` is safe on any league.
+        print("No brand-override rows in the Brands tab. Base logos unchanged.")
         return
 
     os.makedirs(a.out, exist_ok=True)
