@@ -1042,6 +1042,98 @@ def t_feed_backlog_warn_s_env():
     assert m.feed_backlog_warn_s({"RACECAST_FEED_BACKLOG_WARN_S": "0"}) == 5.0
     assert m.feed_backlog_warn_s({"RACECAST_FEED_BACKLOG_WARN_S": "x"}) == 5.0
 
+class _FakeConn:
+    """A socket stand-in that records how it was taken down."""
+    def __init__(self, name="c"):
+        self.name, self.shutdown_calls, self.closed = name, [], False
+    def shutdown(self, how):
+        self.shutdown_calls.append(how)
+    def close(self):
+        self.closed = True
+
+
+def _srv_with(consumers):
+    """A FeedFanoutServer with a hand-built consumer registry (no sockets, no ring)."""
+    srv = m.FeedFanoutServer("127.0.0.1", 0, object(), None, prebuffer_s=3.0)
+    srv._consumers = dict(consumers)
+    return srv
+
+
+def t_an_abandoned_consumer_is_the_one_superseded_and_not_moving():
+    # Measured on the producer host 2026-09-21: after an OBS input rebuild OBS held TWO
+    # ESTABLISHED connections to one feed port for its single media source. It opens the
+    # new one and never closes the old, and since its process still owns that socket the
+    # peer never resets, so TCP cannot see the abandonment. The relay kept the handler in
+    # sendall with a frozen cursor and consumer_backlog takes max() over all consumers,
+    # so /status reported the DEAD connection's backlog forever.
+    #
+    # Being superseded alone must NOT condemn a consumer: this port is built to serve
+    # several at once (see t_fanout_server_streams_ring_to_two_consumers). What condemns
+    # one is superseded AND not having accepted a byte since.
+    old, new = _FakeConn("old"), _FakeConn("new")
+    srv = _srv_with({1: {"cursor": 100, "conn": old, "cycle_ts": 0.0, "snaps": 0},
+                     2: {"cursor": 500, "conn": new, "cycle_ts": 0.0, "snaps": 0}})
+    srv.mark_superseded(now=1000.0)
+
+    late = 1000.0 + m.FANOUT_STALE_GRACE_S
+    assert not srv._stale(srv._consumers[1], now=1000.0), (
+        "in the instant of the mark nothing has moved yet — the grace is part of the "
+        "judgement, or every reader would briefly see every consumer as abandoned")
+    srv._consumers[2]["cursor"] = 900          # the live one keeps accepting bytes
+    assert srv._stale(srv._consumers[1], now=late)
+    assert not srv._stale(srv._consumers[2], now=late), "a consumer that moved is alive"
+
+    assert srv.reap_superseded(now=1000.0 + 1.0) == 0, "the grace must be respected"
+    assert not old.closed
+    assert srv.reap_superseded(now=1000.0 + m.FANOUT_STALE_GRACE_S) == 1
+    assert old.closed and old.shutdown_calls, (
+        "close() alone does not unblock a handler stuck in sendall — the abandoned "
+        "socket is exactly the one whose send buffer the peer stopped draining")
+    assert not new.closed, "the live consumer must be left alone"
+
+
+def t_a_stale_consumer_never_becomes_the_reported_backlog():
+    # The number is what the health reason, health-history and the automatic shed all
+    # read. While the dead connection counted, the shed judged its own rebuild useless
+    # and stood down after three tries.
+    class _Ring:
+        def age_at_offset(self, cursor, now):
+            return {100: 26.0, 900: 3.0, 950: 2.4}.get(cursor)
+    srv = _srv_with({1: {"cursor": 100, "conn": _FakeConn(), "cycle_ts": 0.0, "snaps": 0},
+                     2: {"cursor": 900, "conn": _FakeConn(), "cycle_ts": 0.0, "snaps": 0}})
+    srv.ring = _Ring()
+    assert srv.consumer_backlog(now=1.0) == 26.0, "before: max() over both"
+
+    srv.mark_superseded(now=1.0)
+    # In the instant of the mark nothing has moved yet, so the reading is unchanged and
+    # no consumer is condemned on the strength of the mark alone.
+    assert srv.consumer_backlog(now=1.0) == 26.0, (
+        "the mark alone must condemn nobody — in that instant nothing has moved")
+
+    srv._consumers[2]["cursor"] = 950          # the live consumer accepts more bytes
+    late = 1.0 + m.FANOUT_STALE_GRACE_S
+    assert srv.consumer_backlog(now=late) == 2.4, (
+        "the abandoned consumer's frozen position must not be reported")
+    # And the per-heartbeat floor, which is the value the shed actually classifies.
+    assert srv.take_backlog_floor(now=late) == 2.4, (
+        "the per-heartbeat floor feeds the shed and health-history, so it needs the "
+        "same exclusion as the live value")
+
+
+def t_reaping_never_raises_on_a_socket_the_peer_abandoned():
+    # It runs on the heartbeat. A raise here would take out the tick that also samples
+    # health, and the socket it touches is by definition one every call may fail on.
+    class _Hostile(_FakeConn):
+        def shutdown(self, how):
+            raise OSError("not connected")
+        def close(self):
+            raise RuntimeError("already gone")
+    srv = _srv_with({1: {"cursor": 7, "conn": _Hostile(), "cycle_ts": 0.0, "snaps": 0},
+                     2: {"cursor": 7, "conn": None, "cycle_ts": 0.0, "snaps": 0}})
+    srv.mark_superseded(now=0.0)
+    assert srv.reap_superseded(now=99.0) == 2     # must not raise
+
+
 def t_backlog_shed_decision_needs_a_streak_and_respects_the_cooldown():
     # The automatic backlog shed (2026-09-21). Mirrors freeze_decision's shape so the
     # two reasons that pull the same control read the same way.

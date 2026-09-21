@@ -423,6 +423,7 @@ HEALTH_COLORS = {                # Discord embed sidebar colour per level
 _HEALTH_LABEL = {"green": "OK", "yellow": "DEGRADED", "red": "CRITICAL"}
 
 # ---------- Feed fan-out stall detection (relay feed multiplexing, #358) --------
+FANOUT_STALE_GRACE_S = 5.0   # superseded + not moving for this long = abandoned
 FANOUT_STALL_S = 8.0   # seconds without a byte from streamlink before a fan-out reader is "stalled"
 FANOUT_RING_BYTES = 16 * 1024 * 1024  # per-feed ring window (bounded; ≈12 s at 10 Mbps). Not a safety lever (#581): a larger ring only delays a slow consumer's overflow and hides it longer.
 MARK_MIN_INTERVAL_S = 0.1        # #533: throttle the FeedRing time index to ~1 mark/100 ms
@@ -4778,6 +4779,7 @@ class FeedFanoutServer:
         self._stop = False
         self._consumers = {}            # id -> {"cycle_ts", "snaps", "cursor", "floor"} (#583)
         self._consumers_lock = threading.Lock()
+        self._current = None            # the one live consumer socket (see retire_previous)
 
     def _join_offset(self, now):
         return fanout_join_offset(self.ring, self.prebuffer_s, now)
@@ -4791,12 +4793,78 @@ class FeedFanoutServer:
         threading.Thread(target=self._accept_loop, daemon=True).start()
         return self
 
+    def mark_superseded(self, now=None):
+        """Note that a NEW consumer just arrived, so every consumer already attached is a
+        candidate for having been abandoned. Records each one's position at this moment.
+
+        Measured on the producer host 2026-09-21: after an OBS input rebuild, OBS held
+        two ESTABLISHED connections to one feed port although it has a single media
+        source there. It opens the new one and never closes the old, and because its
+        process still owns that socket the peer never resets — TCP cannot see the
+        abandonment. The relay's handler therefore sat in sendall forever with a frozen
+        cursor, and `consumer_backlog` takes max() over all consumers, so /status
+        reported the DEAD connection's backlog and never stopped: the reset looked
+        ineffective, the automatic backlog shed judged itself useless and stood down
+        after three tries, and the health reason promised the director a remedy it then
+        showed as having failed. It also leaked a thread and a socket per rebuild.
+
+        Being superseded is NOT on its own a reason to drop a consumer — this port is
+        built to serve several at once (OBS and the Director-Panel preview), and a
+        second one arriving says nothing about the first. What identifies the abandoned
+        one is superseded AND not moving since: a live consumer keeps accepting bytes."""
+        now = time.monotonic() if now is None else now
+        with self._consumers_lock:
+            for st in self._consumers.values():
+                st["superseded"] = (st.get("cursor"), now)
+
+    def _stale(self, st, now, grace_s=FANOUT_STALE_GRACE_S):
+        """A superseded consumer that has not accepted a byte since, for longer than the
+        grace. The grace is part of the judgement rather than only of the reaping: in the
+        instant a new consumer arrives NOTHING has moved yet, and without it every reader
+        would briefly see every consumer as abandoned and report no backlog at all. A live
+        consumer moves again within a read cycle; an abandoned one never does."""
+        mark = st.get("superseded")
+        return (mark is not None and st.get("cursor") == mark[0]
+                and (now - mark[1]) >= grace_s)
+
+    def reap_superseded(self, now=None, grace_s=FANOUT_STALE_GRACE_S):
+        """Close consumers that were superseded and have not moved since, once the grace
+        has passed. Returns how many were closed. Called once per heartbeat, never from a
+        read path. The grace exists because a live consumer can sit between two accepted
+        positions for a moment; an abandoned one never moves again.
+
+        shutdown() before close(): the handler is blocked in sendall on a send buffer the
+        peer stopped draining, which is precisely what close() alone does not reliably
+        wake."""
+        now = time.monotonic() if now is None else now
+        doomed = []
+        with self._consumers_lock:
+            for st in self._consumers.values():
+                if self._stale(st, now, grace_s):
+                    doomed.append(st.get("conn"))
+        for conn in doomed:
+            if conn is None:
+                continue
+            # shutdown THEN close, each guarded on its own: the peer stopped reading long
+            # ago, so either call may fail, and a raise here would take out the heartbeat
+            # tick that also samples health.
+            try:
+                conn.shutdown(socket.SHUT_RDWR)
+            except Exception:       # noqa: BLE001 — best-effort teardown
+                pass
+            try:
+                conn.close()
+            except Exception:       # noqa: BLE001 — best-effort teardown
+                pass
+        return len(doomed)
+
     def _accept_loop(self):
         while not self._stop:
             try:
                 conn, _ = self._sock.accept()
             except OSError:
                 return                          # socket closed by stop()
+            self.mark_superseded()
             threading.Thread(target=self._serve, args=(conn,), daemon=True).start()
 
     def _serve(self, conn):
@@ -4815,7 +4883,8 @@ class FeedFanoutServer:
                          b"Connection: close\r\n\r\n" + join.init)
             cid = id(threading.current_thread())
             with self._consumers_lock:
-                self._consumers[cid] = {"cycle_ts": time.monotonic(), "snaps": 0}
+                self._consumers[cid] = {"cycle_ts": time.monotonic(), "snaps": 0,
+                                        "conn": conn}
             while not self._stop and not self.ring.closed:
                 # #583: every byte before `cursor` was accepted by the consumer (the
                 # previous sendall returned), so this is where OBS actually is.
@@ -4861,9 +4930,16 @@ class FeedFanoutServer:
     def consumer_backlog(self, now):
         """Seconds the worst consumer is behind the live edge right now, from its last
         accepted position (#583). Grows while a consumer is blocked in sendall. None when
-        no consumer is attached or the ring has no time index. `now` is monotonic."""
+        no consumer is attached or the ring has no time index. `now` is monotonic.
+
+        A consumer that was superseded and has not moved since is left out: it is an
+        abandoned socket TCP still calls ESTABLISHED (see mark_superseded), and max()
+        over it reported a backlog that no longer existed for as long as the handler sat
+        there. That is excluded here rather than only in reap_superseded so the number
+        is right immediately, instead of after the reaper's grace."""
         with self._consumers_lock:
-            cursors = [st["cursor"] for st in self._consumers.values() if "cursor" in st]
+            cursors = [st["cursor"] for st in self._consumers.values()
+                       if "cursor" in st and not self._stale(st, now)]
         if not cursors or not hasattr(self.ring, "age_at_offset"):
             return None
         ages = [a for a in (self.ring.age_at_offset(c, now) for c in cursors) if a is not None]
@@ -4877,7 +4953,11 @@ class FeedFanoutServer:
         the interval in which its backlog is largest. Called once per heartbeat; `now` is
         monotonic. None when no consumer is attached."""
         with self._consumers_lock:
-            states = [(st.get("floor"), st.get("cursor")) for st in self._consumers.values()]
+            # Same exclusion as consumer_backlog: an abandoned socket's frozen position
+            # must not become the interval floor, which is what the health reason, the
+            # health-history row and the automatic shed all read.
+            states = [(st.get("floor"), st.get("cursor"))
+                      for st in self._consumers.values() if not self._stale(st, now)]
             for st in self._consumers.values():
                 st["floor"] = None
         floors = []
@@ -7963,6 +8043,16 @@ class Relay:
             srv = getattr(f, "fanout_server", None)
             if srv is None:
                 continue
+            try:
+                # Close the sockets OBS abandoned at a rebuild but never shut (see
+                # FeedFanoutServer.mark_superseded). Before the floor is taken, so a
+                # reaped consumer cannot contribute one last frozen reading.
+                reaped = srv.reap_superseded(time.monotonic())
+                if reaped:
+                    LOG.info("feed %s: closed %d abandoned consumer connection(s) "
+                             "OBS left open after an input rebuild", name, reaped)
+            except Exception as exc:    # noqa: BLE001 — a reaper never breaks the tick
+                LOG.debug("consumer reap on %s failed (%s)", name, exc)
             fl = srv.take_backlog_floor(time.monotonic())   # always take: a stopped feed resets too
             if f.paused or f.phase != "serving":
                 floors[name] = None                  # no live edge to be behind
