@@ -11219,6 +11219,11 @@ def export_cookies(browser, out):
     return True
 
 def main():
+    # BEFORE argparse: the help text carries non-ASCII, and on a cp1252 console building
+    # it raised UnicodeEncodeError before the relay did anything at all (German producer
+    # host, 2026-09-21). The CLI has had this since #24, but it lived in racecast.py, so
+    # the relay — which is also started directly — was never covered.
+    logsetup.harden_stdio()
     load_dotenv(os.path.dirname(os.path.abspath(__file__)))  # before defaults are read
     ap = argparse.ArgumentParser(description="GT Racing 2-feed relay with Google-Sheet schedule")
     ap.add_argument("--sheet-id", default=os.environ.get("RACECAST_SHEET_ID"),
@@ -11288,7 +11293,7 @@ def main():
     ap.add_argument("--overlay-tab", default="Overlay",
                     help="Google-Sheet tab with the live HUD values (default 'Overlay').")
     ap.add_argument("--config-tab", default="Configuration",
-                    help="Google-Sheet tab with the team→brand map (default 'Configuration').")
+                    help="Google-Sheet tab with the team-to-brand map (default 'Configuration').")
     ap.add_argument("--quali-times-tab", default=DEFAULT_QUALI_TIMES_TAB,
                     help="Google-Sheet tab with per-car qualifying best laps "
                          "(default 'Quali Times'). Absent tab = blank lap slots.")
@@ -11326,7 +11331,7 @@ def main():
                          "back to RACECAST_EVENT_TITLE.")
     ap.add_argument("--logdir", default="logs")
     ap.add_argument("--cookies", default=None,
-                    help="Path to yt-cookies.txt (Netscape format) for YouTube login — "
+                    help="Path to yt-cookies.txt (Netscape format) for YouTube login - "
                          "bypasses the 'Sign in to confirm you're not a bot' check. "
                          "Default: yt-cookies.txt next to this script, if present. "
                          "Twitch feeds use twitch-cookies.txt (picked up automatically "

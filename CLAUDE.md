@@ -55,6 +55,32 @@ no package manager); external runtime deps are `yt-dlp`, `streamlink`, `ffmpeg`,
   `windows-latest` — even though production only ever runs the helper on its own
   OS. Use `os.path.join` only for paths on the *current* machine; never run it on
   a path you already know belongs to a different OS. (Broke #97's Windows CI.)
+- **Console text encoding: the test matrix is not enough, the producer host is German
+  Windows.** Python picks the *locale* codepage for text I/O, which is `cp1252` there
+  (and plain ASCII under `LANG=C` on Linux). Two failure modes, both of which have cost
+  a live debugging session, twice within two days:
+  - **Encoding ours.** One non-ASCII character in an argparse `help=` string kills
+    `--help` with `UnicodeEncodeError` *before the program does anything* — argparse
+    assembles the whole text first. Keep help strings ASCII (`->`, not `→`); a guard test
+    enforces it.
+  - **Decoding a child's.** A text-mode `subprocess` call without `errors=` dies on the
+    first byte cp1252 cannot decode — and because subprocess reads pipes in a THREAD the
+    exception never reaches the caller's `except`: you get a traceback and silently lose
+    the output. Every text-mode call under `src/` must pass `errors="replace"`.
+
+  The net under both is `logsetup.harden_stdio()` (issue #24's `_force_utf8_io`, moved
+  out of `racecast.py` so the relay and the scripts can reach it — living there is why
+  only the CLI was protected). It reconfigures stdout/stderr to `utf-8`/`replace` — UTF-8
+  rather than the console's own encoding because a Control Center job's stdout is a PIPE
+  whose bytes are rendered in a UTF-8 web UI — and sets `PYTHONIOENCODING` so **every
+  child inherits the leniency whatever spawn site created it**. That one env var is what
+  covers all 17 entrypoints and the 124 `LOG`/`print` lines carrying non-ASCII without
+  editing any of them. Call it first in any new entrypoint's `main()`.
+
+  Three guard tests live in `tests/test_logs.py` and scan the whole of `src/`. An earlier
+  version covered only `racecast-feeds.py` and only `subprocess.run`; five call sites in
+  three other files slipped through and one bit again the next day. **Do not narrow
+  their scope.**
 - **Pipeline/permission problems (release-please, tokens, branch protection,
   Actions) are research-first:** map the complete lifecycle and requirement set
   (docs + known issues) before changing anything — one planned fix, not
