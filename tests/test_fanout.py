@@ -1042,6 +1042,65 @@ def t_feed_backlog_warn_s_env():
     assert m.feed_backlog_warn_s({"RACECAST_FEED_BACKLOG_WARN_S": "0"}) == 5.0
     assert m.feed_backlog_warn_s({"RACECAST_FEED_BACKLOG_WARN_S": "x"}) == 5.0
 
+def t_backlog_shed_decision_needs_a_streak_and_respects_the_cooldown():
+    # The automatic backlog shed (2026-09-21). Mirrors freeze_decision's shape so the
+    # two reasons that pull the same control read the same way.
+    assert m.backlog_shed_decision(1, None, min_streak=1, cooldown_s=120.0) is True
+    assert m.backlog_shed_decision(0, None, min_streak=1, cooldown_s=120.0) is False
+    # a streak below the minimum waits
+    assert m.backlog_shed_decision(1, None, min_streak=2, cooldown_s=120.0) is False
+    assert m.backlog_shed_decision(2, None, min_streak=2, cooldown_s=120.0) is True
+    # the cooldown is shared with the freeze path: a rebuild just happened, stay off it
+    assert m.backlog_shed_decision(5, 10.0, min_streak=1, cooldown_s=120.0) is False
+    assert m.backlog_shed_decision(5, 120.0, min_streak=1, cooldown_s=120.0) is True
+    # no measurement is never a reason to act
+    assert m.backlog_shed_decision(None, None, min_streak=1, cooldown_s=120.0) is False
+
+
+def t_rebuild_guard_routes_each_judgement_to_the_reason_that_fired():
+    # The two reasons run on different threads at different cadences. A single `pending`
+    # bool would let the freeze sampler's next window consume and clear a rebuild the
+    # backlog shed fired, so the shed's three-strike budget would never count down.
+    g = m.RebuildGuard()
+    g.on_fire("backlog")
+    assert g.on_window(0.9, frac_threshold=0.3) is False     # freeze must not consume it
+    assert g.pending == "backlog" and g.ineffective == 0
+    assert g.judge(True, reason="backlog") is False
+    assert not g.pending and g.ineffective == 1              # the shed's own judge counts
+
+    g2 = m.RebuildGuard()
+    g2.on_fire()                                             # defaults to freeze
+    assert g2.judge(True, reason="backlog") is False         # backlog must not consume it
+    assert g2.pending == "freeze" and g2.ineffective == 0
+    g2.on_window(0.9, frac_threshold=0.3)
+    assert g2.ineffective == 1
+
+
+def t_backlog_judge_ignores_an_unmeasurable_round():
+    # Right after a rebuild OBS is detached for a stretch of the interval, so the floor
+    # can be None for a whole heartbeat. That must not consume the pending judgement.
+    g = m.RebuildGuard()
+    g.on_fire("backlog")
+    assert g.judge(None, reason="backlog") is False
+    assert g.pending == "backlog" and g.ineffective == 0
+    assert g.judge(False, reason="backlog") is False         # it helped
+    assert not g.pending and g.ineffective == 0
+
+
+def t_backlog_shed_stands_down_after_three_ineffective_rebuilds():
+    # Same budget as the freeze path, and the epic's requirement: three attempts, then
+    # stand down and say so, instead of Catalunya's 26 black dropouts.
+    g = m.RebuildGuard()
+    for n in (1, 2):
+        g.on_fire("backlog")
+        assert g.judge(True, reason="backlog") is False
+        assert g.ineffective == n and g.allows()
+    g.on_fire("backlog")
+    assert g.judge(True, reason="backlog") is True
+    assert g.stood_down and not g.allows()
+
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

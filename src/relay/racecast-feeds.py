@@ -837,6 +837,24 @@ def freeze_decision(frac, since_last_reset_s, *, frac_threshold, cooldown_s):
     return frac is not None and frac >= frac_threshold
 
 
+def backlog_shed_decision(streak, since_last_reset_s, *, min_streak, cooldown_s):
+    """Whether to auto-rebuild the on-air feed's OBS input because its consumer is behind
+    the live edge: True when the feed has been classified backlogged for `min_streak`
+    consecutive heartbeats AND the cooldown since the last rebuild has elapsed.
+
+    Deliberately the same shape as `freeze_decision`, because the two are reasons for the
+    SAME control and a director reading the log should not have to learn two idioms.
+
+    `streak` counts heartbeats, not samples, and one is enough by default: the classified
+    value is `take_backlog_floor`, the MINIMUM backlog over the whole interval, so a
+    transient spike raises the peak and never the floor. A degraded floor therefore
+    already means the feed was late for the entire heartbeat. A None streak (nothing
+    measured) never trips it. Pure → unit-tested."""
+    if since_last_reset_s is not None and since_last_reset_s < cooldown_s:
+        return False
+    return streak is not None and streak >= min_streak
+
+
 def consumer_overflowed(prev_snaps, snaps):
     """True when the fan-out consumer's cumulative cursor-snap count rose since the last
     check: the ring lapped OBS and dropped bytes under it. An incident record only (#582):
@@ -862,22 +880,32 @@ class RebuildGuard:
 
     def rearm(self):
         self.ineffective = 0
-        self.pending = False
+        self.pending = None          # reason tag of the rebuild awaiting judgement
         self.stood_down = False
 
     def allows(self):
         return not self.stood_down
 
-    def on_fire(self):
-        self.pending = True
+    def on_fire(self, reason="freeze"):
+        self.pending = reason
 
-    def on_window(self, frac, *, frac_threshold):
-        """Judge the first full window after a rebuild. Returns True when this call stood
-        the guard down. No pending rebuild, or nothing measurable yet, changes nothing."""
-        if not self.pending or frac is None:
+    def judge(self, still_bad, *, reason="freeze"):
+        """Judge the pending rebuild, but only if THIS reason fired it. Returns True when
+        this call stood the guard down.
+
+        The reason tag matters because the two reasons run on different threads at
+        different cadences: freeze on its own sampler, the backlog shed on the heartbeat.
+        With a single `pending` flag whichever judge ran first would consume and clear the
+        other's rebuild, so one reason's three-strike budget would never count down while
+        the other's would count rebuilds it did not fire.
+
+        `still_bad is None` (nothing measurable yet) consumes nothing. That is load-bearing
+        for the backlog: right after a rebuild OBS is detached for a stretch of the
+        interval, so its floor can be None for a whole heartbeat."""
+        if self.pending != reason or still_bad is None:
             return False
-        self.pending = False
-        if frac < frac_threshold:
+        self.pending = None
+        if not still_bad:
             self.ineffective = 0
             return False
         self.ineffective += 1
@@ -885,6 +913,11 @@ class RebuildGuard:
             self.stood_down = True
             return True
         return False
+
+    def on_window(self, frac, *, frac_threshold):
+        """Judge the first full window after a FREEZE rebuild. "Better but still stalling"
+        is not an improvement, so the comparison is against the same trip threshold."""
+        return self.judge(None if frac is None else frac >= frac_threshold, reason="freeze")
 
 
 def feed_reset_target(feed_key, valid_keys):
