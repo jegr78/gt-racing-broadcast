@@ -268,6 +268,41 @@ def t_private_export_path_warns_when_a_dir_stays():
         assert warnings[1].endswith(os.path.basename(own)), warnings
 
 
+def t_the_export_stamp_survives_a_yt_dlp_rewrite_of_the_jar():
+    # yt-dlp --cookies writes the jar back on every resolve, so the jar's own mtime
+    # measures the last resolve, not the last export. The stamp is a separate file
+    # nothing but the export touches.
+    with tempfile.TemporaryDirectory() as d:
+        jar = os.path.join(d, "yt-cookies.txt")
+        open(jar, "w", encoding="utf-8").close()
+        assert m.export_age_h(jar) is None, "no stamp yet: the age is unknown, not zero"
+
+        m.record_export(jar, now=1000.0)
+        assert m.export_age_h(jar, now=1000.0 + 3 * 3600) == 3.0
+
+        os.utime(jar, (2000.0, 2000.0))          # a resolve rewrites the jar
+        assert m.export_age_h(jar, now=1000.0 + 3 * 3600) == 3.0, (
+            "the rewritten jar must not reset the export age")
+
+
+def t_a_damaged_or_missing_export_stamp_reads_as_unknown():
+    # Never "fresh": an unreadable stamp must not be read as an export just now.
+    with tempfile.TemporaryDirectory() as d:
+        jar = os.path.join(d, "yt-cookies.txt")
+        open(jar, "w", encoding="utf-8").close()
+        with open(m.export_stamp_path(jar), "w", encoding="utf-8") as fh:
+            fh.write("not a number")
+        assert m.export_age_h(jar) is None
+        assert m.export_age_h(None) is None
+
+
+def t_recording_an_export_never_raises_when_the_stamp_cannot_be_written():
+    # The export itself must not fail over its own bookkeeping.
+    with tempfile.TemporaryDirectory() as d:
+        jar = os.path.join(d, "sub", "yt-cookies.txt")   # the directory does not exist
+        assert m.record_export(jar) is False
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

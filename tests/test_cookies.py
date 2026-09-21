@@ -102,7 +102,11 @@ def t_get_cookies_keeps_only_youtube_domains():
         assert _cookie_names(os.path.join(d, "yt-cookies.txt")) == ["SAPISID"]
         # The raw export went to a private dir, never onto the jar the relay reads.
         assert os.path.dirname(fake.cookies_arg()) != d, fake.cookies_arg()
-        assert os.listdir(d) == ["yt-cookies.txt"], os.listdir(d)
+        # The jar plus its export stamp, and no leftover raw-export directory. The
+        # failed-export checks below still expect the jar alone: only a successful
+        # export stamps.
+        assert sorted(os.listdir(d)) == ["yt-cookies.txt",
+                                         "yt-cookies.txt.exported"], os.listdir(d)
         assert "dropped 3 other lines" in said and "logged-in session detected" in said, said
 
 

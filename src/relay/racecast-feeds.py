@@ -11155,19 +11155,25 @@ def _telemetry_loop(store, ps_ip, stop_evt):
 
 
 def cookie_health(path, now=None, max_age_hours=COOKIE_MAX_AGE_H):
-    """Cookie staleness for /status, computed on demand from the file mtime —
-    during a 24 h event the cookies age while the relay runs, so this must be
-    live, not a startup snapshot. Running cookie-less (path None / file gone)
-    is a legitimate configuration (public streams): present=False, stale=False
-    — the panel raises its cookie banner only on stale=True."""
+    """Cookie staleness for /status, computed on demand — during a 24 h event the
+    cookies age while the relay runs, so this must be live, not a startup snapshot.
+
+    The age is the EXPORT age (cookie_jar's stamp), not the jar's mtime: yt-dlp
+    rewrites the jar on every resolve, so mid-event its mtime is always minutes old
+    and the banner could never fire. A jar with no stamp reports age_h=None and is
+    not stale — unknown is never reported as old, and never as fresh either.
+    Running cookie-less (path None / file gone) is a legitimate configuration
+    (public streams): present=False, stale=False — the panel raises its cookie
+    banner only on stale=True."""
     try:
-        mtime = os.path.getmtime(path) if path and os.path.isfile(path) else None
+        present = bool(path) and os.path.isfile(path)
     except OSError:
-        mtime = None   # swapped/deleted between isfile and getmtime (cookie refresh)
-    if mtime is None:
+        present = False
+    if not present:
         return {"present": False, "age_h": None, "stale": False}
-    now = time.time() if now is None else now
-    age_h = round((now - mtime) / 3600, 1)
+    age_h = cookie_jar.export_age_h(path, now=now)
+    if age_h is None:
+        return {"present": True, "age_h": None, "stale": False}
     return {"present": True, "age_h": age_h, "stale": age_h > max_age_hours}
 
 
@@ -11219,6 +11225,7 @@ def export_cookies(browser, out):
         return False
     try: os.chmod(out, 0o600)   # live YouTube session — owner-only
     except OSError: pass        # best-effort hardening; never block the export
+    cookie_jar.record_export(out)
     LOG.info("Cookie export from '%s': OK -> %s (kept only youtube.com cookies, dropped %d "
              "other lines)", browser, out, dropped)
     return True

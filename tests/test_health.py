@@ -14,6 +14,9 @@ ROOT = os.path.dirname(HERE)
 spec = importlib.util.spec_from_file_location(
     "irofeeds", os.path.join(ROOT, "src", "relay", "racecast-feeds.py"))
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+_cj = importlib.util.spec_from_file_location(
+    "cookie_jar", os.path.join(ROOT, "src", "scripts", "cookie_jar.py"))
+cookie_jar = importlib.util.module_from_spec(_cj); _cj.loader.exec_module(cookie_jar)
 
 # Manual feed arm defaults ON (#492 follow-up): a bare Relay would start feeds
 # disarmed (paused). These checks exercise the legacy auto-pull path; pin the
@@ -36,12 +39,37 @@ def t_cookie_health_fresh_and_stale():
         path = os.path.join(td, "cookies.txt")
         with open(path, "w", encoding="utf-8") as fh:
             fh.write("# Netscape HTTP Cookie File\n")
-        mtime = os.path.getmtime(path)
-        fresh = m.cookie_health(path, now=mtime + 3600)
+        cookie_jar.record_export(path, now=1000.0)
+        fresh = m.cookie_health(path, now=1000.0 + 3600)
         assert fresh == {"present": True, "age_h": 1.0, "stale": False}, fresh
-        stale = m.cookie_health(path, now=mtime + 14 * 3600)
+        stale = m.cookie_health(path, now=1000.0 + 14 * 3600)
         assert stale["present"] is True and stale["stale"] is True
         assert round(stale["age_h"]) == 14
+
+
+def t_a_resolve_rewriting_the_jar_does_not_make_stale_cookies_look_fresh():
+    # The bug: cookie_health read the jar's mtime, and `yt-dlp --cookies` writes the
+    # jar back on every resolve. Mid-event the relay resolves constantly, so the age
+    # never passed 12 h and the amber banner could not fire at all.
+    with tempfile.TemporaryDirectory() as td:
+        path = os.path.join(td, "cookies.txt")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("# Netscape HTTP Cookie File\n")
+        cookie_jar.record_export(path, now=0.0)          # exported a day ago
+        now = 24 * 3600.0
+        os.utime(path, (now - 60, now - 60))             # a resolve, one minute ago
+        h = m.cookie_health(path, now=now)
+        assert h["stale"] is True and round(h["age_h"]) == 24, h
+
+
+def t_an_unstamped_jar_reports_an_unknown_age_rather_than_a_fresh_one():
+    # A jar from before the stamp existed: the honest answer is "unknown", and it must
+    # not be reported as stale either — only a known, old export is stale.
+    with tempfile.TemporaryDirectory() as td:
+        path = os.path.join(td, "cookies.txt")
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("# Netscape HTTP Cookie File\n")
+        assert m.cookie_health(path) == {"present": True, "age_h": None, "stale": False}
 
 
 def t_cookie_max_age_matches_preflight():
@@ -391,8 +419,7 @@ def t_status_cookies_health_stale_file():
         path = os.path.join(td, "cookies.txt")
         with open(path, "w", encoding="utf-8") as fh:
             fh.write("x\n")
-        old = os.path.getmtime(path) - 14 * 3600
-        os.utime(path, (old, old))
+        cookie_jar.record_export(path, now=time.time() - 14 * 3600)
         r = _mk_relay(td, ["https://youtu.be/a"], cookies=path)
         st = r.status()
         assert st["cookies_health"]["present"] is True

@@ -311,19 +311,24 @@ def cookies_status(path, max_age_hours=12, now=None):
     if not os.path.isfile(path):
         return Result(WARN, "yt-cookies.txt",
                       f"not found at {path} — run `racecast cookies firefox` before the event")
-    age_h = (now - os.path.getmtime(path)) / 3600
+    # The EXPORT age, not the jar's mtime: yt-dlp rewrites the jar on every resolve.
+    age_h = cookie_jar.export_age_h(path, now=now)
     try:
         with open(path, encoding="utf-8", errors="ignore") as fh:
             text = fh.read()
     except OSError:
         text = ""
     has_login = cookie_jar.text_has_login(text)   # the one rule, shared with the relay (#615)
-    if age_h > max_age_hours:
+    if age_h is not None and age_h > max_age_hours:
         return Result(WARN, "yt-cookies.txt",
                       f"{age_h:.0f} h old — cookies rotate; re-run `racecast cookies firefox`")
     if not has_login:
         return Result(WARN, "yt-cookies.txt",
                       "present but no logged-in YouTube session markers found")
+    if age_h is None:
+        return Result(WARN, "yt-cookies.txt",
+                      "logged-in markers found, but this jar predates export tracking "
+                      "and its age cannot be judged — re-run `racecast cookies firefox`")
     return Result(PASS, "yt-cookies.txt",
                   f"present, fresh ({age_h:.0f} h old), logged-in markers found")
 
