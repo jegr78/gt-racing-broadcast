@@ -173,6 +173,25 @@ LOG = logging.getLogger("racecast.relay")
 # cookies + JS-challenge solving) -> streamlink serves that direct URL to OBS
 # (no YouTube plugin involved, so no bot-check on the serving side).
 YTDLP_FORMAT = "b[height<=1080]/b"   # prefer <=1080p, auto-fall back to lower
+
+# yt-dlp player clients to union formats from, in order (2026-09-21).
+#
+# Every selector above asks for a MUXED format (`b` = best with video AND audio), because
+# the relay resolves ONE url with `-g` and hands it to a single streamlink process. A
+# separate video+audio pair would print two urls and break that pipeline.
+#
+# yt-dlp's default client does not always offer one. Measured on two ordinary live GT7
+# streams this morning, its `visionos` player returned only video-only (269/229/230/231/
+# 311/312) and audio-only (233/234) renditions, so `b[height<=1080]/b` matched nothing and
+# a perfectly normal YouTube live stream failed with "Requested format is not available" —
+# the relay could not pull it at all.
+#
+# yt-dlp collects formats from EVERY listed client and selects across the union, so
+# `default` stays first and keeps winning wherever it already offers a muxed format;
+# `mweb` only fills the gap. Both measured streams then resolved to format 301
+# (1920x1080@60) as one url. `mweb` over `android` deliberately: the android client is the
+# one YouTube bot-flags most readily, and a bot flag costs a feed (see #505).
+YTDLP_PLAYER_CLIENTS = "default,mweb"
 STREAMLINK_SERVE = ["--ringbuffer-size", "64M", "--hls-live-edge", "4"]
 # "Stop early on missing live segments" tolerance. Default 3 gave up at ~6 s
 # (targetduration ~2 s) — BELOW the relay's own 8 s byte-stall watchdog (FANOUT_STALL_S) —
@@ -3637,6 +3656,7 @@ def ytdlp_resolve_cmd(url, cookies, fmt=YTDLP_FORMAT):
     # -g yields the HLS URL; the extra --print emits a "rcq <height> <fps>" line so the
     # relay can show the ACTUALLY-served resolution (YouTube's streamlink only reports "live").
     cmd = ["yt-dlp", "-g", "-f", fmt, "--no-warnings", "--no-playlist",
+           "--extractor-args", f"youtube:player_client={YTDLP_PLAYER_CLIENTS}",
            "--print", "rcq %(height)s %(fps)s"]
     if cookies:
         cmd += ["--cookies", cookies]
