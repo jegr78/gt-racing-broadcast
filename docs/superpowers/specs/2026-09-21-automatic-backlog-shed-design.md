@@ -219,8 +219,10 @@ Being superseded does not condemn a consumer — this port is built to serve sev
 once and a test pins that. What identifies the abandoned one is **superseded AND not
 having accepted a byte since**, past a grace. Such a consumer is excluded from
 `consumer_backlog` and `take_backlog_floor` at once, and its socket is closed on the next
-heartbeat (`shutdown` before `close`: `close` alone does not reliably wake a handler
-blocked in `sendall`).
+heartbeat. Which call does the waking is per platform, measured with
+`tools/shutdown-wake-probe.py`: on macOS `shutdown` alone wakes a handler blocked in
+`sendall`, on Windows only `close` does. The reaper therefore always shuts down and
+closes only where that is not enough (`CLOSE_TO_WAKE`).
 
 ### Verified live, same host, same recording, same `/reload/A`
 
@@ -237,11 +239,36 @@ input rebuild`.
 
 **The program picture was at the live edge the whole time.** Nothing was ever behind.
 
+## Measured against a real OBS backlog
+
+`tools/obs-backlog-shed-probe.py` puts the running OBS behind the live edge by
+suspending the process: it keeps the feed socket open and stops draining it, the
+relay's `sendall` blocks and the accepted position freezes. On the Windows producer
+host, three runs against a live YouTube source, 100 s suspended each:
+
+| | measured |
+|---|---|
+| backlog while suspended | 0.4 s -> 102.3 s, 1:1 with the clock |
+| classification | `backlogged=True` on the real backlog |
+| shed fires | yes, logging the real number (47.2 / 56.2 / 46.1 s behind live) |
+| rebuild against a suspended OBS | a no-op, no crash, no stand-down |
+| shed's rebuild landing | 46.1 s -> 3.7 s within 2 s |
+| stand-down | never, across all three runs |
+
+**And the finding that matters more than the proof: OBS recovers on its own.** Once it
+runs again it reads the socket greedily rather than at playback rate and sprints back
+to the trailing mark — 96.6 s -> 1.8 s in about ten seconds, on one unchanged socket
+(macOS behaves the same). In every run the picture would have returned without the
+shed. A transient OBS stall is therefore not what this automation is for.
+
+What it is for is a consumer that stays **below** real time, and that case could not be
+produced on healthy hardware. An apparent slow drift on macOS was the source's own
+sawtooth, named by `inbound_max_gap_s` at 5.1 s and not a slow consumer at all.
+
 ## Open
 
-- Whether a real backlog (one the relay has never actually observed on a healthy host)
-  is shed successfully by this automation is still unproven: every backlog measured so
-  far was this artifact. The automation, its guard and its stand-down are unit-tested and
-  were exercised end-to-end on the producer host against the artifact, which is the
-  closest thing to a real one available.
+- A consumer that stays below real time remains unproduced, so the shed is insurance
+  rather than a routine mechanism. Its detection, decision, remedy and best-effort
+  contract are each measured above; what is unmeasured is a backlog OBS could not have
+  cleared by itself.
 - #585 remains the right remedy for a host that genuinely cannot keep up.
