@@ -211,6 +211,11 @@ def t_env_float_defaults_and_guards():
     assert m._env_float({"K": "0"}, "K", 5.0) == 5.0        # <=0 -> default
     assert m._env_float({"K": "-3"}, "K", 5.0) == 5.0
     assert m._env_float({"K": "12.5"}, "K", 5.0) == 12.5
+    # An infinity parses and is > 0, so it used to pass as a tuning value: it makes the
+    # watchdog it feeds silently unreachable, and arithmetic on it raises OverflowError.
+    for infinite in ("inf", "Infinity", "1e400", "-inf"):
+        assert m._env_float({"K": infinite}, "K", 5.0) == 5.0, \
+            f"{infinite} is not a duration"
 
 
 def t_feed_tuning_getter_defaults():
