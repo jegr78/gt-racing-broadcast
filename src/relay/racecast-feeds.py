@@ -411,6 +411,10 @@ _HEALTH_LABEL = {"green": "OK", "yellow": "DEGRADED", "red": "CRITICAL"}
 # ---------- Feed fan-out stall detection (relay feed multiplexing, #358) --------
 # Superseded + nothing completed for this long = abandoned. Must outlast the slowest
 # legitimate sendall to a slow consumer, hence well above RACECAST_FEED_STALL_S.
+# Measured on both hosts 2026-09-21: a handler blocked in sendall wakes on shutdown()
+# alone on macOS, but on Windows only on close(). Closing a descriptor another thread
+# owns is a last resort, so it is done only where shutdown does not do the job.
+CLOSE_TO_WAKE = os.name == "nt"
 FANOUT_STALE_GRACE_S = 30.0
 FANOUT_STALL_S = 8.0   # seconds without a byte from streamlink before a fan-out reader is "stalled"
 FANOUT_RING_BYTES = 16 * 1024 * 1024  # per-feed ring window (bounded; ≈12 s at 10 Mbps). Not a safety lever (#581): a larger ring only delays a slow consumer's overflow and hides it longer.
@@ -4796,9 +4800,11 @@ class FeedFanoutServer:
 
     def reap_superseded(self, now=None, grace_s=FANOUT_STALE_GRACE_S):
         """Wake the abandoned consumers' handlers and return how many. Heartbeat only,
-        never a read path. shutdown() only: it is what unblocks a handler stuck in
-        sendall, and the descriptor belongs to that handler, which closes it in its own
-        finally. Closing it here could free a number the handler still writes to."""
+        never a read path.
+
+        shutdown() is what unblocks a handler stuck in sendall — on POSIX. On Windows
+        it leaves the handler blocked for good and only close() wakes it, so only there
+        does the reaper close a descriptor the handler still owns (CLOSE_TO_WAKE)."""
         now = time.monotonic() if now is None else now
         doomed = []
         with self._consumers_lock:
@@ -4808,12 +4814,17 @@ class FeedFanoutServer:
         for conn in doomed:
             if conn is None:
                 continue
-            # The peer stopped reading long ago, so this may fail; a raise here would take
-            # out the heartbeat tick that also samples health.
+            # The peer stopped reading long ago, so either call may fail; a raise here
+            # would take out the heartbeat tick that also samples health.
             try:
                 conn.shutdown(socket.SHUT_RDWR)
             except Exception:       # noqa: BLE001 — best-effort teardown
                 pass
+            if CLOSE_TO_WAKE:
+                try:
+                    conn.close()
+                except Exception:   # noqa: BLE001 — best-effort teardown
+                    pass
         return len(doomed)
 
     def _accept_loop(self):

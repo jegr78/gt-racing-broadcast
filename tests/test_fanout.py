@@ -1082,9 +1082,7 @@ def t_an_abandoned_consumer_is_the_one_superseded_and_not_moving():
     assert old.shutdown_calls, (
         "close() alone does not unblock a handler stuck in sendall — the abandoned "
         "socket is exactly the one whose send buffer the peer stopped draining")
-    assert not old.closed, (
-        "the reaper must not close a descriptor it does not own: the handler is inside "
-        "sendall on it and closes it in its own finally")
+    # Whether close() follows is per platform; see the dedicated check below.
     assert not new.shutdown_calls, "the live consumer must be left alone"
 
 
@@ -1136,6 +1134,37 @@ def t_a_stale_consumer_never_becomes_the_reported_backlog():
     assert srv.take_backlog_floor(now=late) == 2.4, (
         "the per-heartbeat floor feeds the shed and health-history, so it needs the "
         "same exclusion as the live value")
+
+
+def t_windows_needs_close_to_wake_a_blocked_handler_posix_does_not():
+    # Measured 2026-09-21, same script both hosts: a handler blocked in sendall wakes
+    # on shutdown() alone on macOS (BrokenPipeError) but NOT on Windows, where it takes
+    # close() (WinError 10038). So the reaper closes only where shutdown is not enough;
+    # on POSIX the descriptor stays the handler's alone.
+    srv = _srv_with({1: {"cursor": 7, "conn": _FakeConn("dead"), "cycle_ts": 0.0,
+                         "snaps": 0}})
+    srv.mark_superseded(now=0.0)
+    conn = srv._consumers[1]["conn"]
+
+    real = m.CLOSE_TO_WAKE
+    try:
+        m.CLOSE_TO_WAKE = False                  # POSIX
+        assert srv.reap_superseded(now=99.0) == 1
+        assert conn.shutdown_calls and not conn.closed, (
+            "on POSIX shutdown() wakes the handler, so the reaper must not close a "
+            "descriptor the handler is still using")
+
+        srv._consumers = {1: {"cursor": 7, "conn": _FakeConn("dead"), "cycle_ts": 0.0,
+                              "snaps": 0}}
+        srv.mark_superseded(now=0.0)
+        conn = srv._consumers[1]["conn"]
+        m.CLOSE_TO_WAKE = True                   # Windows
+        assert srv.reap_superseded(now=99.0) == 1
+        assert conn.shutdown_calls and conn.closed, (
+            "on Windows shutdown() alone leaves the handler blocked in sendall for "
+            "good; without close() the abandoned consumer is never reaped")
+    finally:
+        m.CLOSE_TO_WAKE = real
 
 
 def t_reaping_never_raises_on_a_socket_the_peer_abandoned():
