@@ -66,7 +66,7 @@ Controls (HTTP, for Companion Generic-HTTP / browser / curl):
   Stop: Ctrl+C
 """
 
-import argparse, collections, csv, datetime, hmac, html, io, ipaddress, json, logging, os, random, re, secrets, shutil, signal, socket, ssl, subprocess, sys, threading, time
+import argparse, collections, csv, datetime, hmac, html, io, ipaddress, json, logging, math, os, random, re, secrets, shutil, signal, socket, ssl, subprocess, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, quote, unquote, parse_qs, urlencode
 from urllib.request import Request, urlopen
@@ -179,16 +179,30 @@ YTDLP_FORMAT = "b[height<=1080]/b"   # prefer <=1080p, auto-fall back to lower
 # which YouTube bot-flags most readily.
 YTDLP_PLAYER_CLIENTS = "default,mweb"
 STREAMLINK_SERVE = ["--ringbuffer-size", "64M", "--hls-live-edge", "4"]
-# "Stop early on missing live segments" tolerance. Default 3 gave up at ~6 s
-# (targetduration ~2 s) — BELOW the relay's own 8 s byte-stall watchdog (FANOUT_STALL_S) —
-# so a brief upstream hiccup made streamlink quit prematurely and forced a full re-serve
-# (the 2026-07-10 cascade). QUEUE_DEADLINE_FACTOR=5 pushes streamlink's give-up past the
-# watchdog: a sub-8 s gap self-heals with NO restart, a genuine stall is still caught by
-# the watchdog. The CLI flag was RENAMED in streamlink 8.1.0
-# (--hls-segment-queue-threshold -> --stream-segmented-queue-deadline), so the exact flag
-# is chosen per installed streamlink at serve time (queue_deadline_args) — an unknown flag
-# would make streamlink exit and the feed never serve.
+# "Stop early on missing live segments" tolerance, multiplied by the playlist's
+# targetduration. On the direct-serve path nothing else notices a source that went quiet,
+# so streamlink's own early stop is the detector and this value is its grace. The CLI flag
+# was RENAMED in streamlink 8.1.0 (--hls-segment-queue-threshold ->
+# --stream-segmented-queue-deadline), so the exact flag is chosen per installed streamlink
+# at serve time (queue_deadline_args) — an unknown flag would make streamlink exit and the
+# feed never serve.
 QUEUE_DEADLINE_FACTOR = "5"
+
+# Shortest #EXT-X-TARGETDURATION measured on a live YouTube playlist (low latency; normal
+# latency serves 5 s). The broadcaster picks it, so it is a floor, not a constant.
+QUEUE_DEADLINE_MIN_TARGETDURATION_S = 2.0
+
+
+def queue_deadline_factor(stall_s, min_targetduration_s=QUEUE_DEADLINE_MIN_TARGETDURATION_S):
+    """Multiplier for streamlink's early stop on the FAN-OUT path, derived so its deadline
+    outlasts the relay's own byte-stall watchdog (RACECAST_FEED_STALL_S) and the watchdog
+    stays the single authority on a dead source — a streamlink that quits first turns a gap
+    the watchdog would have ridden out into a full re-resolve. The targetduration the
+    deadline is multiplied by comes from the broadcaster, so a fixed factor cannot hold that
+    order; one targetduration of margin covers the segment still being written when the
+    playlist stalls. Pure."""
+    targetduration = max(0.1, float(min_targetduration_s))
+    return str(int(math.ceil(max(0.0, float(stall_s)) / targetduration)) + 1)
 
 
 def queue_deadline_args(help_text, factor=QUEUE_DEADLINE_FACTOR):
@@ -3702,7 +3716,10 @@ def streamlink_fanout_cmd(target, platform="youtube", twitch_token=None,
             base += ["--twitch-api-header", f"Authorization=OAuth {twitch_token}"]
         selector = quality_twitch_selector(tier)
     else:
-        base += queue_deadline_args(_streamlink_help())   # version-safe: renamed in streamlink 8.1.0
+        # version-safe: renamed in streamlink 8.1.0. The factor follows the byte-stall
+        # watchdog this path has and direct-serve has not, so the watchdog acts first.
+        base += queue_deadline_args(
+            _streamlink_help(), factor=queue_deadline_factor(feed_stall_s(os.environ)))
         if user_agent:
             base += ["--http-header", f"User-Agent={user_agent}"]
         if cookies:

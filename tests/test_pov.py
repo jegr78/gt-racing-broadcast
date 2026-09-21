@@ -1989,6 +1989,39 @@ def t_queue_deadline_args_picks_flag_by_capability():
     assert m.queue_deadline_args(new_help, factor="7") == ["--stream-segmented-queue-deadline", "7"]
 
 
+def t_queue_deadline_factor_outlasts_the_stall_watchdog():
+    # streamlink stops a stream when nothing was queued for factor x the playlist's
+    # targetduration. Under fan-out the relay's byte-stall watchdog must be the one that
+    # acts, or a gap it would have ridden out turns into a full re-resolve. Targetdurations
+    # measured on a live YouTube playlist: 5 s at normal latency, 2 s at low latency.
+    for stall_s in (m.feed_stall_s({}), m.feed_stall_s({"RACECAST_FEED_STALL_S": "45"})):
+        for targetduration in (2.0, 5.0):
+            deadline = float(m.queue_deadline_factor(stall_s)) * targetduration
+            assert deadline > stall_s, (
+                f"targetduration {targetduration}s: streamlink gives up after "
+                f"{deadline}s, before the {stall_s}s watchdog")
+
+
+def t_fanout_deadline_follows_the_watchdog_direct_serve_keeps_its_own():
+    help_text = "  --stream-segmented-queue-deadline FACTOR\n"
+    old = m._STREAMLINK_HELP
+    m._STREAMLINK_HELP = help_text
+    try:
+        fan = m.streamlink_fanout_cmd("https://hls.example/x.m3u8", "youtube")
+        srv = m.streamlink_serve_cmd("https://hls.example/x.m3u8", 53001, "youtube")
+    finally:
+        m._STREAMLINK_HELP = old
+    derived = m.queue_deadline_factor(m.feed_stall_s(os.environ))
+    fan_factor = fan[fan.index("--stream-segmented-queue-deadline") + 1]
+    srv_factor = srv[srv.index("--stream-segmented-queue-deadline") + 1]
+    assert fan_factor == derived, \
+        f"fan-out must outlast its own watchdog, got factor {fan_factor}"
+    assert srv_factor == m.QUEUE_DEADLINE_FACTOR, \
+        "direct-serve has no byte watchdog, so streamlink's early stop stays the detector"
+    assert fan_factor != srv_factor, \
+        "one shared factor is what let the watchdog change silently invert the order"
+
+
 def t_feed_recovery_churn():
     now = 1000.0
     # 3 recoveries within the 300 s window -> churn (would ping @here)
