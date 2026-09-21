@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""`racecast install-tools` — install the external runtime tools (yt-dlp, streamlink,
+"""`racecast install-tools` installs the external runtime tools (yt-dlp, streamlink,
 ffmpeg, deno) via the platform's package manager: winget (Windows), brew (macOS),
-apt (Linux). Never elevates privileges itself — the brew bootstrap and the
-package managers prompt for sudo on their own; failed installs end with a manual
-guide. Pure decision helpers up top (unit-tested); main() performs the installs."""
+apt (Linux). It never elevates privileges itself. The package managers prompt for
+sudo on their own, and a failed install ends with a manual guide. The decision
+helpers up top are pure; main() performs the installs."""
 import os, shutil, subprocess, sys
 import http_util
 
@@ -24,45 +24,31 @@ def _common():
 
 TOOLS = ("yt-dlp", "streamlink", "ffmpeg", "deno")
 
-# Minimum glibc: deno needs >= 2.35 (Ubuntu 22.04+) to run at all, so install-tools
-# hard-fails below it; the frozen racecast binary needs 2.38 (Ubuntu 24.04), which
-# preflight warns about. Two real failure points, one clear story (#409).
+# deno needs 2.35 to run at all, so install-tools hard-fails below it; the frozen
+# racecast binary needs 2.38, which preflight only warns about. (#409)
 MIN_GLIBC_TOOLS = (2, 35)
 MIN_GLIBC_BINARY = (2, 38)
 
 WINGET_IDS = {"yt-dlp": "yt-dlp.yt-dlp", "streamlink": "Streamlink.Streamlink",
               "ffmpeg": "Gyan.FFmpeg", "deno": "DenoLand.Deno"}
 APT_PACKAGES = {"ffmpeg": "ffmpeg"}
-# Arch (pacman) is the opposite case from apt: all four tools are in the official
-# `extra` repo and current — streamlink there is 8.4.0, above the 8.2.0 the relay
-# needs — so NONE of the managed installs below apply and the repo does the work.
+# Arch carries all four tools current in the official `extra` repo, so none of the
+# managed installs below apply there.
 PACMAN_PACKAGES = {"yt-dlp": "yt-dlp", "streamlink": "streamlink",
                    "ffmpeg": "ffmpeg", "deno": "deno"}
-# deno, yt-dlp, and streamlink get managed installs on Linux, NOT apt:
-#   * deno / yt-dlp — no usable apt package (pinned binary downloads; see
-#     install_deno_binary / install_ytdlp_binary).
-#   * streamlink — apt's 6.6.2 (Ubuntu 24.04) predates --http-cookies-file, which
-#     the relay's YouTube serve uses to hand yt-dlp's session cookies to
-#     streamlink (#350). So Linux gets a pinned streamlink in an isolated venv
-#     (install_streamlink_venv); brew/winget already ship streamlink 8.x.
+# deno, yt-dlp and streamlink get managed installs on Linux rather than apt: the
+# first two have no usable apt package, and apt's streamlink predates
+# --http-cookies-file, which the relay's YouTube serve needs. (#350)
 
-# The Ookla speedtest CLI (used by `racecast speedtest`). It is a first-class
-# tool the producer installs via `install-tools` / the Control Center "Install
-# all" button, but it is kept OUT of the TOOLS tuple so its absence never turns
-# the preflight tool-chain into a FAIL (a bandwidth check is advisory).
-#
-# Install is HYBRID (decided after Homebrew 6.x began refusing the teamookla
-# third-party tap as "untrusted"):
-#   * Windows  -> winget (Ookla.Speedtest.CLI, first-party).
-#   * mac/Linux -> direct download of Ookla's official CLI tarball, version-pinned
-#                  and SHA-256-verified, extracted into the racecast-managed bin
-#                  dir (no brew tap / apt repo, no trust bypass).
+# The Ookla speedtest CLI stays OUT of TOOLS so its absence never turns the
+# preflight tool-chain into a FAIL; a bandwidth check is advisory.
+# Windows takes it from winget; mac/Linux download the official tarball directly
+# because Homebrew refuses the teamookla tap as untrusted.
 SPEEDTEST_WINGET_ID = "Ookla.Speedtest.CLI"
 SPEEDTEST_BIN_NAME = "speedtest"
 SPEEDTEST_VERSION = "1.2.0"
 SPEEDTEST_URL_TMPL = "https://install.speedtest.net/app/cli/ookla-speedtest-{ver}-{tag}.tgz"
-# tag -> sha256 of the official v1.2.0 tarball (verified by download; the macOS +
-# linux-x86_64 values match the canonical teamookla Homebrew formula).
+# tag -> sha256 of the official tarball.
 SPEEDTEST_DOWNLOADS = {
     "macosx-universal": "c9f8192149ebc88f8699998cecab1ce144144045907ece6f53cf50877f4de66f",
     "linux-x86_64":     "5690596c54ff9bed63fa3732f818a05dbc2db19ad36ed68f21ca5f64d5cfeeb7",
@@ -71,10 +57,10 @@ SPEEDTEST_DOWNLOADS = {
 
 
 def speedtest_asset_tag(platform, machine):
-    """Map (sys.platform, platform.machine()) -> a SPEEDTEST_DOWNLOADS tag, or
-    None for Windows (winget handles it) and unsupported arches. Pure."""
+    """Map (sys.platform, platform.machine()) to a SPEEDTEST_DOWNLOADS tag, or
+    None for Windows (winget handles it) and unsupported arches."""
     if platform == "darwin":
-        return "macosx-universal"   # universal binary covers Intel + Apple Silicon
+        return "macosx-universal"   # covers Intel and Apple Silicon
     if platform.startswith("linux"):
         m = (machine or "").lower()
         if m in ("x86_64", "amd64"):
@@ -90,7 +76,7 @@ def speedtest_download_url(tag, ver=SPEEDTEST_VERSION):
 
 def speedtest_install_commands(manager):
     """Package-manager commands to install speedtest (Windows winget only). On
-    mac/Linux the install is a direct download — see install_speedtest_binary()."""
+    mac/Linux the install is a direct download; see install_speedtest_binary()."""
     if manager == "winget":
         return [["winget", "install", "--id", SPEEDTEST_WINGET_ID, "-e",
                  "--accept-package-agreements", "--accept-source-agreements"]]
@@ -106,10 +92,9 @@ def speedtest_update_commands(manager):
 
 def install_speedtest_binary(dest_dir, tag, opener=None, downloads=None):
     """Download Ookla's CLI tarball for `tag`, verify its SHA-256 against the
-    pinned value, extract just the `speedtest` binary into dest_dir, and make it
+    pinned value, extract the `speedtest` binary into dest_dir and make it
     executable. Returns the binary path. Raises on a checksum mismatch or an
-    unexpected archive layout. Pure-ish: `opener` (url -> bytes) is injectable for
-    tests; defaults to a stdlib HTTPS GET."""
+    unexpected archive layout. `opener` (url -> bytes) is injectable for tests."""
     import hashlib
     import io
     import tarfile
@@ -126,28 +111,23 @@ def install_speedtest_binary(dest_dir, tag, opener=None, downloads=None):
     os.makedirs(dest_dir, exist_ok=True)
     binpath = os.path.join(dest_dir, SPEEDTEST_BIN_NAME)
     with tarfile.open(fileobj=io.BytesIO(blob), mode="r:gz") as tf:
-        member = tf.getmember(SPEEDTEST_BIN_NAME)   # KeyError if the layout ever changes
+        member = tf.getmember(SPEEDTEST_BIN_NAME)   # KeyError if the layout changes
         if not member.isfile():
             raise RuntimeError("unexpected speedtest archive layout")
         src = tf.extractfile(member)
         with open(binpath, "wb") as out:
             shutil.copyfileobj(src, out)
-    os.chmod(binpath, 0o700)   # owner rwx only — racecast runs the binary as the producer
+    os.chmod(binpath, 0o700)   # owner rwx only; racecast runs it as the producer
     return binpath
 
 
-# deno on Linux has NO apt package, so — like the Ookla speedtest CLI — it is
-# installed via a pinned, SHA-256-verified direct download from deno's official
-# GitHub releases, extracted into the racecast-managed bin dir (runtime/bin) that
-# _ensure_tool_path() puts on PATH. Windows (winget) and macOS (brew) already ship
-# a deno package, so the direct download is Linux-only.
+# deno has no apt package, so Linux downloads a pinned, SHA-256-verified release
+# into the managed bin dir that _ensure_tool_path() puts on PATH.
 DENO_VERSION = "2.8.3"
 DENO_BIN_NAME = "deno"
 DENO_URL_TMPL = ("https://github.com/denoland/deno/releases/download/"
                  "v{ver}/deno-{tag}.zip")
-# tag -> sha256 of the official v2.8.3 linux release zip (each archive holds a
-# single top-level `deno` executable). Verified against deno's published
-# deno-<tag>.zip.sha256sum files.
+# tag -> sha256 of the official linux release zip.
 DENO_DOWNLOADS = {
     "x86_64-unknown-linux-gnu":  "30455b845ffa6082209c3590269c910ad3b7efdf28c9879afd4006c47ae54197",
     "aarch64-unknown-linux-gnu": "d4589cc1ffcbf1995c92a0127d932aaf832ac70cfdcc6d5b7bf38043cf303575",
@@ -155,9 +135,8 @@ DENO_DOWNLOADS = {
 
 
 def deno_asset_tag(platform, machine):
-    """Map (sys.platform, platform.machine()) -> a DENO_DOWNLOADS tag, or None for
-    Windows/macOS (their package managers handle deno) and unsupported arches.
-    Pure."""
+    """Map (sys.platform, platform.machine()) to a DENO_DOWNLOADS tag, or None for
+    Windows/macOS (their package managers handle deno) and unsupported arches."""
     if platform.startswith("linux"):
         m = (machine or "").lower()
         if m in ("x86_64", "amd64"):
@@ -175,8 +154,7 @@ def install_deno_binary(dest_dir, tag, opener=None, downloads=None):
     """Download deno's release zip for `tag`, verify its SHA-256 against the pinned
     value, extract the single `deno` executable into dest_dir, and make it
     executable. Returns the binary path. Raises on a checksum mismatch or an
-    unexpected archive layout. Mirrors install_speedtest_binary() but for deno's
-    .zip; `opener` (url -> bytes) is injectable for tests."""
+    unexpected archive layout. `opener` (url -> bytes) is injectable for tests."""
     import hashlib
     import io
     import zipfile
@@ -199,20 +177,17 @@ def install_deno_binary(dest_dir, tag, opener=None, downloads=None):
             raise RuntimeError("unexpected deno archive layout")
         with zf.open(member) as src, open(binpath, "wb") as out:
             shutil.copyfileobj(src, out)
-    os.chmod(binpath, 0o700)   # owner rwx only — racecast runs the binary as the producer
+    os.chmod(binpath, 0o700)   # owner rwx only; racecast runs it as the producer
     return binpath
 
 
-# yt-dlp on Linux: apt's package lags upstream badly and cannot pass YouTube's
-# current bot-check. So — like deno — Linux gets a pinned, SHA-256-verified
-# standalone binary straight from yt-dlp's GitHub releases, into the managed bin
-# dir. The release asset is a BARE executable (no archive), so there is no
-# extraction step. Windows (winget) and macOS (brew) keep their yt-dlp package.
+# apt's yt-dlp lags upstream and cannot pass YouTube's bot-check, so Linux pulls a
+# pinned release binary instead. The asset is bare, so there is no extraction step.
 YTDLP_VERSION = "2026.06.09"
 YTDLP_BIN_NAME = "yt-dlp"
 YTDLP_URL_TMPL = ("https://github.com/yt-dlp/yt-dlp/releases/download/"
                   "{ver}/yt-dlp_{tag}")
-# tag -> sha256 of the official release asset (from the release's SHA2-256SUMS).
+# tag -> sha256 of the official release asset.
 YTDLP_DOWNLOADS = {
     "linux":         "bf8aac79b72287a6d2043074415132558b43743a8f9461a22b0141e90f16ce66",
     "linux_aarch64": "cabd246445bdfde0eda0dfe68bbe90354be83f3fdbbf077df11a2ea55f41cdbd",
@@ -220,8 +195,8 @@ YTDLP_DOWNLOADS = {
 
 
 def ytdlp_asset_tag(platform, machine):
-    """Map (sys.platform, platform.machine()) -> a YTDLP_DOWNLOADS tag, or None for
-    Windows/macOS (their package managers ship yt-dlp) and unsupported arches. Pure."""
+    """Map (sys.platform, platform.machine()) to a YTDLP_DOWNLOADS tag, or None for
+    Windows/macOS (their package managers ship yt-dlp) and unsupported arches."""
     if platform.startswith("linux"):
         m = (machine or "").lower()
         if m in ("x86_64", "amd64"):
@@ -238,9 +213,8 @@ def ytdlp_download_url(tag, ver=YTDLP_VERSION):
 def install_ytdlp_binary(dest_dir, tag, opener=None, downloads=None):
     """Download yt-dlp's standalone Linux binary for `tag`, verify its SHA-256
     against the pinned value, write it to dest_dir/yt-dlp, and make it executable.
-    Returns the binary path. Raises on a checksum mismatch. The asset is a bare
-    executable (no archive) — simpler than install_deno_binary. `opener` (url ->
-    bytes) is injectable for tests; defaults to a stdlib HTTPS GET."""
+    Returns the binary path. Raises on a checksum mismatch. `opener` (url ->
+    bytes) is injectable for tests."""
     import hashlib
     downloads = downloads or YTDLP_DOWNLOADS
     want = downloads[tag]
@@ -256,32 +230,27 @@ def install_ytdlp_binary(dest_dir, tag, opener=None, downloads=None):
     binpath = os.path.join(dest_dir, YTDLP_BIN_NAME)
     with open(binpath, "wb") as out:
         out.write(blob)
-    os.chmod(binpath, 0o700)   # owner rwx only — racecast runs the binary as the producer
+    os.chmod(binpath, 0o700)   # owner rwx only; racecast runs it as the producer
     return binpath
 
 
-# streamlink on Linux: apt's package (6.6.2 on Ubuntu 24.04) is ~2 years stale and
-# lacks --http-cookies-file (added in streamlink 8.2.0, 2026-02-09), which the
-# relay's YouTube serve needs to pass yt-dlp's session cookies to streamlink's
-# manifest re-fetch (#350) — an older build aborts the feed with "unrecognized
-# arguments: --http-cookies-file". streamlink ships only as a PyPI package (no
-# standalone binary like deno/yt-dlp), so Linux installs a PINNED streamlink into
-# an isolated venv under the runtime dir and links its entrypoint into the managed
-# bin dir. macOS (brew) and Windows (winget) already ship streamlink 8.x.
-# The pin must stay at/above preflight.PF_MIN_STREAMLINK.
+# apt's streamlink lacks --http-cookies-file (added in 8.2.0), which the relay's
+# YouTube serve needs; an older build aborts the feed with "unrecognized arguments"
+# (#350). streamlink ships only as a PyPI package, so Linux installs the pin into an
+# isolated venv and links its entrypoint into the managed bin dir.
+# The pin must stay at or above preflight.PF_MIN_STREAMLINK.
 STREAMLINK_VERSION = "8.4.0"
 STREAMLINK_SPEC = "streamlink==" + STREAMLINK_VERSION
 
 
 def streamlink_needs_managed_install(manager):
-    """True only for apt (Linux): its streamlink is too old. brew/winget ship 8.x.
-    Pure — mirrors the deno/yt-dlp `manager == "apt"` gate."""
+    """True only for apt (Linux): its streamlink is too old. brew/winget ship 8.x."""
     return manager == "apt"
 
 
 def streamlink_venv_dir(runtime_dir):
-    """Where the isolated streamlink venv lives (a sibling of the managed bin dir,
-    not inside it — the bin dir holds loose executables/symlinks only)."""
+    """Where the isolated streamlink venv lives: a sibling of the managed bin dir,
+    which holds loose executables and symlinks only."""
     return os.path.join(runtime_dir, "streamlink-venv")
 
 
@@ -301,18 +270,16 @@ def _relink(src, link):
         if os.path.islink(link) or os.path.exists(link):
             os.remove(link)
     except OSError:
-        pass  # nothing to remove / racing re-run — os.symlink below is the real step
+        pass  # nothing to remove; os.symlink below is the real step
     os.symlink(src, link)
 
 
 def install_streamlink_venv(managed_bin, venv_dir, spec=STREAMLINK_SPEC,
                             python=None, run=None, symlink=None):
     """Build (or refresh) an isolated venv holding the pinned streamlink and link
-    its entrypoint into the managed bin dir (which racecast puts on PATH). Steps:
-    create the venv with the system python, pip-install the pinned spec via the
-    venv's own python, symlink <managed_bin>/streamlink -> the venv entrypoint.
-    Returns the link path. `python`/`run`/`symlink` are injectable seams for tests.
-    Raises RuntimeError when no system python3 is available (needs python3-venv)."""
+    its entrypoint into the managed bin dir, which racecast puts on PATH. Returns
+    the link path. `python`/`run`/`symlink` are injectable seams for tests. Raises
+    RuntimeError when no system python3 is available (needs python3-venv)."""
     python = python or system_python()
     if not python:
         raise RuntimeError("no system python3 found to build the streamlink venv "
@@ -330,8 +297,8 @@ def install_streamlink_venv(managed_bin, venv_dir, spec=STREAMLINK_SPEC,
 
 def glibc_version(libc_ver_output):
     """Parse platform.libc_ver()'s (lib, version) tuple into a (major, minor)
-    int pair, or None when the C library is not glibc (musl/unknown) or the
-    version does not parse. None means 'cannot tell' -> callers must not block."""
+    int pair, or None when the C library is not glibc or the version does not
+    parse. None means 'cannot tell', so callers must not block."""
     lib, ver = (libc_ver_output or ("", ""))
     if lib != "glibc" or not ver:
         return None
@@ -343,8 +310,8 @@ def glibc_version(libc_ver_output):
 
 
 def min_os_error(libc_tuple, floor=MIN_GLIBC_TOOLS):
-    """A clear multi-line 'unsupported OS' message when `libc_tuple` is below
-    `floor`, else None. None `libc_tuple` (undeterminable) -> None (never block)."""
+    """An 'unsupported OS' message when `libc_tuple` is below `floor`, else None.
+    An undeterminable `libc_tuple` returns None so it never blocks."""
     if libc_tuple is None or libc_tuple >= floor:
         return None
     have = f"{libc_tuple[0]}.{libc_tuple[1]}"
@@ -372,10 +339,9 @@ def missing_tools(which=shutil.which):
 
 
 def windows_fresh_path(read_values=None):
-    """The PATH a NEW shell would get (system + user, from the registry).
-    Installers (winget, Streamlink) update the registry, not running processes —
-    this process's PATH predates anything installed during or shortly before
-    this run. Returns None when there is nothing to read (non-Windows)."""
+    """The PATH a new shell would get, read from the registry. Installers update
+    the registry, not running processes, so this process's PATH predates anything
+    installed during this run. Returns None on non-Windows."""
     if read_values is None:
         if not sys.platform.startswith("win"):
             return None
@@ -394,14 +360,14 @@ def _registry_path_values():
             with winreg.OpenKey(root, key) as k:
                 values.append(winreg.QueryValueEx(k, "Path")[0])
         except OSError:
-            pass  # key/value absent (e.g. no user Path) — skip that hive
+            pass  # key absent (e.g. no user Path); skip that hive
     return values
 
 
 def install_commands(manager, tools, brew_path="brew", sudo=False):
     """The argv list(s) to install `tools` with `manager`. `sudo` prepends sudo to
-    the apt commands (Linux non-root) — apt-get needs root and, unlike winget/brew,
-    does NOT prompt for it (mirrors installer_common.install_remote_deb)."""
+    the apt commands: apt-get needs root and, unlike winget/brew, does not prompt
+    for it."""
     if manager == "winget":
         return [["winget", "install", "--id", WINGET_IDS[t], "-e",
                  "--accept-source-agreements", "--accept-package-agreements"]
@@ -413,8 +379,7 @@ def install_commands(manager, tools, brew_path="brew", sudo=False):
         if not pkgs:
             return []
         pre = ["sudo"] if sudo else []
-        # `apt-get update` first — a fresh/stale index (e.g. a just-created cloud
-        # VM) can't locate the packages otherwise (issue #408).
+        # A stale index cannot locate the packages. (#408)
         return [pre + ["apt-get", "update"],
                 pre + ["apt-get", "install", "-y"] + pkgs]
     if manager == "pacman":
@@ -422,20 +387,17 @@ def install_commands(manager, tools, brew_path="brew", sudo=False):
         if not pkgs:
             return []
         pre = ["sudo"] if sudo else []
-        # Deliberately NOT `-Sy`: refreshing the package list without upgrading the
-        # system is Arch's partial-upgrade trap (new packages link against libraries
-        # the machine doesn't have yet). `-S --needed` installs against the existing
-        # database; if that database is stale pacman says "target not found", and
-        # the fix is the operator's own `pacman -Syu` — never ours to force.
+        # Not `-Sy`: refreshing the list without upgrading is Arch's partial-upgrade
+        # trap. A stale database makes pacman say "target not found", and the fix is
+        # the operator's own `pacman -Syu`, never ours to force.
         return [pre + ["pacman", "-S", "--needed", "--noconfirm"] + pkgs]
     return []
 
 
 def update_commands(manager, tools, brew_path="brew", sudo=False):
-    """The argv list(s) to UPGRADE already-installed `tools` with `manager`.
+    """The argv list(s) to upgrade already-installed `tools` with `manager`.
     winget's "no applicable update" exit code is whitelisted in
-    installer_common.install_exit_ok; brew exits 0 for up-to-date formulae.
-    `sudo` prepends sudo to apt (Linux non-root) — same reason as install_commands."""
+    installer_common.install_exit_ok; brew exits 0 for up-to-date formulae."""
     if manager == "winget":
         return [["winget", "upgrade", "--id", WINGET_IDS[t], "-e",
                  "--accept-source-agreements", "--accept-package-agreements"]
@@ -447,14 +409,13 @@ def update_commands(manager, tools, brew_path="brew", sudo=False):
         if not pkgs:
             return []
         pre = ["sudo"] if sudo else []
-        # refresh the index before upgrading (issue #408, same reason as install)
+        # Refresh the index before upgrading. (#408)
         return [pre + ["apt-get", "update"],
                 pre + ["apt-get", "install", "-y", "--only-upgrade"] + pkgs]
     if manager == "pacman":
-        # Nothing to emit. Upgrading individual packages on a rolling release IS
-        # the partial upgrade we must avoid, and the correct action — `pacman -Syu`
-        # — upgrades the whole machine, which is the operator's call and not a side
-        # effect of `install-tools --update`. main() prints that pointer instead.
+        # Upgrading single packages on a rolling release is the partial upgrade we
+        # must avoid, and `pacman -Syu` upgrades the whole machine, which is the
+        # operator's call. main() prints that pointer instead.
         return []
     return []
 
@@ -463,10 +424,10 @@ def manual_guide(platform, manager=None):
     if manager == "pacman":
         pkgs = " ".join(PACMAN_PACKAGES[t] for t in TOOLS)
         return ("Install manually:  sudo pacman -S --needed " + pkgs + "\n"
-                "  (if pacman reports 'target not found', its package list is stale —\n"
+                "  (if pacman reports 'target not found', its package list is stale;\n"
                 "   run `sudo pacman -Syu` first; never `pacman -Sy` on its own)\n"
                 "bandwidth speed test (Ookla CLI): the distro package `speedtest-cli`\n"
-                "  installs a DIFFERENT tool under the same name — remove it and take\n"
+                "  installs a DIFFERENT tool under the same name. Remove it and take\n"
                 "  the Linux build from https://www.speedtest.net/apps/cli")
     if platform.startswith("win"):
         return ("Install manually with winget (one per line):\n"
@@ -477,7 +438,7 @@ def manual_guide(platform, manager=None):
                 "  bandwidth speed test (Ookla CLI): download the macOS build from\n"
                 "  https://www.speedtest.net/apps/cli and put `speedtest` on your PATH")
     return ("Install manually:  sudo apt-get update && sudo apt-get install -y ffmpeg\n"
-            "yt-dlp, deno, and streamlink are managed installs (apt's are too old) —\n"
+            "yt-dlp, deno, and streamlink are managed installs (apt's are too old);\n"
             "install-tools sets them up automatically. Manually:\n"
             "  yt-dlp:     https://github.com/yt-dlp/yt-dlp#installation\n"
             "  deno:       https://docs.deno.com/runtime/getting_started/installation/\n"
@@ -488,11 +449,10 @@ def manual_guide(platform, manager=None):
 
 
 def _which_with_managed_bin(managed_dir, brew=None):
-    """which() that also looks in the racecast-managed bin dir (the deno/speedtest
-    direct-download target — never on the user's shell PATH) and, on macOS, brew's
-    bin dir (not on PATH right after a fresh bootstrap). _ensure_tool_path() in
-    racecast.py puts managed_dir on PATH for the real runs; this probe lets
-    install-tools confirm the install without it."""
+    """which() that also looks in the racecast-managed bin dir, which is never on
+    the user's shell PATH, and on macOS in brew's bin dir, which is not on PATH
+    right after a fresh bootstrap. _ensure_tool_path() puts managed_dir on PATH for
+    the real runs; this probe lets install-tools confirm the install without it."""
     prefix_bin = os.path.dirname(brew) if brew else None
 
     def probe(name):
@@ -509,9 +469,8 @@ def _which_with_managed_bin(managed_dir, brew=None):
 
 
 def _which_with_fresh_path(fresh_path):
-    """which() that falls back to the registry PATH (Windows) — same idea as
-    _which_with_managed_bin: a just-installed tool is not on THIS process's
-    PATH yet, but a new shell will see it."""
+    """which() that falls back to the registry PATH on Windows: a just-installed
+    tool is not on this process's PATH yet, but a new shell will see it."""
     def probe(name):
         hit = shutil.which(name)
         if hit:
@@ -521,13 +480,13 @@ def _which_with_fresh_path(fresh_path):
 
 
 def _note_new_terminal(which=shutil.which):
-    """Tools installed/found may not be on this shell's PATH yet — installers
-    update the registry / shell profile, not running shells. `which` may resolve
-    via the managed bin dir (deno/speedtest) so those don't trigger the note —
-    racecast itself puts that dir on PATH (no new terminal needed for racecast)."""
+    """Installed tools may not be on this shell's PATH yet, because installers
+    update the registry or shell profile, not running shells. Tools resolved via
+    the managed bin dir do not trigger the note, since racecast puts that dir on
+    PATH itself."""
     not_on_path = [t for t in TOOLS if not which(t)]
     if not_on_path:
-        print("NOTE: open a NEW terminal before `racecast preflight` / `racecast relay start` —")
+        print("NOTE: open a NEW terminal before `racecast preflight` / `racecast relay start`.")
         print("      not on this shell's PATH yet:", ", ".join(not_on_path))
 
 
@@ -545,8 +504,7 @@ def main():
     a = ap.parse_args()
 
     import platform as _platform
-    # Fail fast on an OS too old to run the toolchain (deno's glibc floor) — a
-    # clear message beats a cryptic loader error mid-download (#409).
+    # A clear message beats a cryptic loader error mid-download. (#409)
     if sys.platform.startswith("linux"):
         err = min_os_error(glibc_version(_platform.libc_ver()))
         if err:
@@ -557,9 +515,8 @@ def main():
         os.path.dirname(os.path.abspath(__file__)))
 
     missing = missing_tools(which=_which_with_fresh_path(windows_fresh_path()))
-    # speedtest is provisioned here too — a setup whose core tools are already
-    # present can still get it. find_binary() looks on PATH (winget) AND in the
-    # managed bin dir (the mac/Linux direct download).
+    # find_binary() looks on PATH and in the managed bin dir, so a setup whose core
+    # tools are already present still gets speedtest.
     speedtest_missing = st.find_binary(runtime_dir) is None
     if not missing and not speedtest_missing and not a.update:
         print("All external tools already installed:", ", ".join(TOOLS) + ", speedtest")
@@ -582,8 +539,7 @@ def main():
         if manager is None:
             sys.exit("No supported package manager found.\n" + manual_guide(sys.platform))
 
-    # apt/pacman need root and (unlike winget/brew) won't prompt for it — prepend
-    # sudo on Linux when not already running as root.
+    # apt and pacman need root and, unlike winget/brew, do not prompt for it.
     sudo = manager in ("apt", "pacman") and hasattr(os, "geteuid") and os.geteuid() != 0
     cmds = []
     if a.update:
@@ -592,14 +548,14 @@ def main():
             print("Updating installed tools:", ", ".join(present))
             cmds += update_commands(manager, present, brew_path=brew or "brew", sudo=sudo)
         if manager == "pacman" and present:
-            # See update_commands(): a per-package upgrade would be the partial
-            # upgrade. Say so rather than silently doing nothing.
-            print("NOTE: on Arch these are repository packages — upgrade them with the")
+            # A per-package upgrade would be the partial upgrade; say so rather
+            # than silently doing nothing.
+            print("NOTE: on Arch these are repository packages. Upgrade them with the")
             print("      system:  sudo pacman -Syu   (a per-package upgrade would leave")
             print("      the machine in a partial-upgrade state)")
     cmds += install_commands(manager, missing, brew_path=brew or "brew", sudo=sudo)
-    # speedtest on Windows is a winget package; mac/Linux is a direct download
-    # (handled after the command loop). Best-effort, never blocks the core tools.
+    # mac/Linux take the direct download after the command loop. Best-effort: this
+    # never blocks the core tools.
     if manager == "winget":
         if speedtest_missing:
             cmds += speedtest_install_commands("winget")
@@ -612,12 +568,11 @@ def main():
         if not _common().install_exit_ok(manager, subprocess.call(cmd)):
             failed.append(" ".join(cmd))
 
-    # speedtest direct download (macOS/Linux) — a pinned, SHA-256-verified Ookla
-    # binary extracted into the managed bin dir. Windows got it via winget above.
+    # Windows already got speedtest via winget above.
     if manager != "winget" and (speedtest_missing or a.update):
         tag = speedtest_asset_tag(sys.platform, _platform.machine())
         if tag is None:
-            print("NOTE: no prebuilt Ookla speedtest CLI for this OS/arch — see")
+            print("NOTE: no prebuilt Ookla speedtest CLI for this OS/arch. See")
             print("      https://www.speedtest.net/apps/cli")
         else:
             dest = st.managed_bin_dir(runtime_dir)
@@ -625,15 +580,14 @@ def main():
             try:
                 install_speedtest_binary(dest, tag)
                 print("  speedtest installed.")
-            except Exception as exc:   # network/checksum/extract — report, don't crash
+            except Exception as exc:   # report, don't crash
                 failed.append(f"speedtest download ({exc})")
 
-    # deno on Linux: no apt package — direct pinned download into the managed bin
-    # dir (Windows=winget, macOS=brew already installed deno in the command loop).
+    # deno has no apt package; winget and brew already installed it above.
     if manager == "apt" and "deno" in missing:
         tag = deno_asset_tag(sys.platform, _platform.machine())
         if tag is None:
-            print("NOTE: no prebuilt deno for this OS/arch — install it manually:")
+            print("NOTE: no prebuilt deno for this OS/arch. Install it manually:")
             print("  https://docs.deno.com/runtime/getting_started/installation/")
         else:
             dest = st.managed_bin_dir(runtime_dir)
@@ -641,16 +595,14 @@ def main():
             try:
                 install_deno_binary(dest, tag)
                 print("  deno installed.")
-            except Exception as exc:   # network/checksum/extract — report, don't crash
+            except Exception as exc:   # report, don't crash
                 failed.append(f"deno download ({exc})")
 
-    # yt-dlp on Linux: current pinned binary, not apt (apt's lags upstream and
-    # fails YouTube's bot-check). Refreshed on --update too, so the before-event
-    # `install-tools --update` bumps it to the pinned-current version (#409).
+    # Refreshed on --update too, so the pre-event run bumps the pin. (#409)
     if manager == "apt" and ("yt-dlp" in missing or a.update):
         tag = ytdlp_asset_tag(sys.platform, _platform.machine())
         if tag is None:
-            print("NOTE: no prebuilt yt-dlp for this OS/arch — install it manually:")
+            print("NOTE: no prebuilt yt-dlp for this OS/arch. Install it manually:")
             print("  https://github.com/yt-dlp/yt-dlp#installation")
         else:
             dest = st.managed_bin_dir(runtime_dir)
@@ -658,12 +610,10 @@ def main():
             try:
                 install_ytdlp_binary(dest, tag)
                 print("  yt-dlp installed.")
-            except Exception as exc:   # network/checksum/write — report, don't crash
+            except Exception as exc:   # report, don't crash
                 failed.append(f"yt-dlp download ({exc})")
 
-    # streamlink on Linux: pinned venv, not apt (apt's 6.6.2 lacks --http-cookies-file,
-    # #350). Refreshed on --update too, so the pre-event `install-tools --update`
-    # bumps it to the pinned-current version alongside yt-dlp.
+    # Refreshed on --update too, alongside yt-dlp. (#350)
     if streamlink_needs_managed_install(manager) and ("streamlink" in missing or a.update):
         dest = st.managed_bin_dir(runtime_dir)
         venv = streamlink_venv_dir(runtime_dir)
@@ -671,16 +621,15 @@ def main():
         try:
             install_streamlink_venv(dest, venv)
             print("  streamlink installed.")
-        except Exception as exc:   # no python3-venv / pip / network — report, don't crash
+        except Exception as exc:   # report, don't crash
             failed.append(f"streamlink venv ({exc})")
 
     managed_bin = st.managed_bin_dir(runtime_dir)
     if manager == "winget":
-        # The installs just changed the registry PATH — re-read it for the check.
+        # The installs just changed the registry PATH; re-read it for the check.
         still = missing_tools(which=_which_with_fresh_path(windows_fresh_path()))
     else:
-        # _which_with_managed_bin also looks in runtime/bin (the deno/speedtest
-        # direct-download target) — never on the user's shell PATH.
+        # runtime/bin holds the direct downloads and is never on the shell PATH.
         still = missing_tools(which=_which_with_managed_bin(managed_bin, brew))
     if failed or still:
         parts = ["Some installs did not complete."]
@@ -689,9 +638,8 @@ def main():
         if still:
             parts.append("Still missing: " + ", ".join(still))
         sys.exit("\n".join(parts) + "\n" + manual_guide(sys.platform, manager))
-    # Tools may sit in brew's prefix / the registry / the managed bin dir but not
-    # THIS shell's PATH. (deno/speedtest resolve via the managed dir, which racecast
-    # itself adds to PATH — so they don't trip the note.)
+    # Tools may sit in brew's prefix, the registry or the managed bin dir without
+    # being on this shell's PATH.
     _note_new_terminal(
         _which_with_fresh_path(windows_fresh_path()) if manager == "winget"
         else _which_with_managed_bin(managed_bin, brew))
