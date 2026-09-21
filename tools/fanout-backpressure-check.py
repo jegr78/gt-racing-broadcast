@@ -1,26 +1,24 @@
 #!/usr/bin/env python3
-"""#533 fan-out trailing-cursor prebuffer — local back-pressure validation.
+"""#533 fan-out trailing-cursor prebuffer, local back-pressure validation.
 
-Proves the core assumption of approach A (spec §"Risk summary" R1): that a real
-1x-playout consumer — ffmpeg -re, standing in for an OBS ffmpeg media source —
-HOLDS the relay's trailing reserve at ~N seconds instead of reading ahead and
-draining it back to the live edge.
+Proves that a real 1x-playout consumer, an ffmpeg -re standing in for an OBS
+ffmpeg media source, HOLDS the relay's trailing reserve at ~N seconds instead of
+reading ahead and draining it back to the live edge.
 
-It exercises the REAL production join path — `fanout_join_offset` and
-`FeedRing` (its time index + `read`) from `src/relay/racecast-feeds.py` — with a
-real ffmpeg producer feeding the ring at ~1x and a real ffmpeg consumer reading
-at ~1x over loopback. The serve loop here is a byte-for-byte copy of
+It exercises the real production join path, `fanout_join_offset` and `FeedRing`
+with its time index and `read`, from `src/relay/racecast-feeds.py`, with a real
+ffmpeg producer feeding the ring at ~1x and a real ffmpeg consumer reading at ~1x
+over loopback. The serve loop here is a byte-for-byte copy of
 `FeedFanoutServer._serve`'s cursor/read/send core plus a `sent` counter so the
 reserve can be measured from outside; nothing about the join or the ring is
 re-implemented.
 
 Reserve is read straight off the ring's time index: the consumer's current byte
-(`join_offset + sent`) became live at some monotonic ts, so `now - that_ts` IS
-the reserve depth in seconds. If it holds ~N, a source gap shorter than N is
-provably absorbed (there are N seconds of already-buffered bytes ahead of the
-consumer). If it drains toward 0, approach A does not hold on this machine ->
-`RACECAST_FEED_PREBUFFER_S=0` reverts instantly and the spec's Fallback B (paced
-de-jitter) is the escalation.
+`join_offset + sent` became live at some monotonic ts, so `now - that_ts` is the
+reserve depth in seconds. If it holds ~N, a source gap shorter than N is absorbed,
+because N seconds of already-buffered bytes sit ahead of the consumer. If it drains
+toward 0, `RACECAST_FEED_PREBUFFER_S=0` reverts instantly and the spec's Fallback B,
+paced de-jitter, is the escalation.
 
 Maintainer-only: needs ffmpeg on PATH, NOT shipped, NOT run in CI.
 
@@ -54,11 +52,10 @@ def load_relay():
 
 def ts_at_offset(marks, off):
     """When the byte at absolute `off` became live: the ts of the smallest mark
-    whose offset >= off (the write that first reached it). marks is the ring's
-    (offset, ts) time index, ascending. None if `off` is past the newest mark
-    (consumer momentarily ahead of the last sampled mark — skip that sample);
-    the oldest ts if `off` scrolled out of retention (consumer fell fully
-    behind, i.e. max reserve)."""
+    whose offset >= off, the write that first reached it. marks is the ring's
+    (offset, ts) time index, ascending. Returns None when `off` is past the newest
+    mark, so the caller skips that sample, and the oldest ts when `off` scrolled out
+    of retention, which is the maximum reserve."""
     if not marks:
         return None
     if off < marks[0][0]:
@@ -80,12 +77,12 @@ class _Feed:
 def serve_once(conn, ring, prebuffer_s, feed, relay_mod, stop, mode):
     """Serve one consumer, driving the REAL production code from the relay module.
 
-    mode="cap":  the SHIPPED path — trailing START via `fanout_join_offset`, then
-      `fanout_capped_read` each cycle (the continuous wall-clock high-water cap).
+    mode="cap":  the SHIPPED path: trailing START via `fanout_join_offset`, then
+      `fanout_capped_read` each cycle, the continuous wall-clock high-water cap.
       This IS FeedFanoutServer._serve's read logic, so a PASS here validates the
       shipped function, not a re-implementation.
-    mode="join": the pre-fix behaviour for contrast — trailing start, then read to
-      the live edge (no cap), which a greedy consumer drains.
+    mode="join": the pre-fix behaviour for contrast: trailing start, then read to
+      the live edge with no cap, which a greedy consumer drains.
 
     `sent` is counted so the sampler can locate the consumer's cursor."""
     try:
@@ -107,7 +104,7 @@ def serve_once(conn, ring, prebuffer_s, feed, relay_mod, stop, mode):
                 with feed.lock:
                     feed.sent += len(data)
     except OSError:
-        pass                                  # consumer went away / socket closed — end this serve
+        pass                                  # consumer went away, end this serve
     finally:
         try:
             conn.close()
@@ -116,8 +113,7 @@ def serve_once(conn, ring, prebuffer_s, feed, relay_mod, stop, mode):
 
 
 def ffmpeg_producer_cmd(bitrate):
-    # A realistic ~1x live TS: -re paces lavfi to realtime; the ring writer
-    # therefore fills at ~1x, exactly like a live commentator stream.
+    # -re paces lavfi to realtime, so the ring fills at ~1x like a live stream.
     return [
         "ffmpeg", "-hide_banner", "-loglevel", "error",
         "-re",
@@ -131,9 +127,8 @@ def ffmpeg_producer_cmd(bitrate):
 
 
 def ffmpeg_consumer_cmd(url):
-    # -re makes ffmpeg read the network input at native (1x) rate — the OBS
-    # media-source behaviour under test. Small probe so the startup gulp is
-    # bounded; decode to null like OBS decodes.
+    # -re makes ffmpeg read the network input at native 1x rate, the OBS
+    # media-source behaviour under test. A small probe bounds the startup gulp.
     return [
         "ffmpeg", "-hide_banner", "-loglevel", "error",
         "-probesize", "1000000", "-analyzeduration", "2000000",
@@ -152,13 +147,13 @@ def main():
     ap.add_argument("--bitrate", default="2500k", help="producer video bitrate (default 2500k)")
     ap.add_argument("--port", type=int, default=0, help="loopback serve port (default: ephemeral)")
     ap.add_argument("--mode", choices=("join", "cap"), default="cap",
-                    help="cap (default) = the SHIPPED continuous trailing cap — validates "
+                    help="cap (default) = the SHIPPED continuous trailing cap, validates "
                          "production; join = the disproven static-start path, kept as the "
                          "failure-repro contrast (exits FAIL by design)")
     args = ap.parse_args()
 
     if not shutil.which("ffmpeg"):
-        print("SKIP: ffmpeg not found on PATH — this is a maintainer tool that needs ffmpeg.")
+        print("SKIP: ffmpeg not found on PATH; this is a maintainer tool that needs ffmpeg.")
         return 2
 
     m = load_relay()
@@ -166,7 +161,6 @@ def main():
     feed = _Feed()
     stop = threading.Event()
 
-    # --- producer: ffmpeg -> ring.write (real FeedRing + its time index) ------
     prod = subprocess.Popen(ffmpeg_producer_cmd(args.bitrate),
                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
 
@@ -178,10 +172,9 @@ def main():
                     break
                 ring.write(chunk)
         except (OSError, ValueError):
-            pass                              # producer pipe closed / ring closed on teardown
+            pass                              # producer pipe or ring closed on teardown
     threading.Thread(target=pump, daemon=True).start()
 
-    # --- server: real fanout_join_offset + ring.read, one consumer ------------
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     srv.bind(("127.0.0.1", args.port))
@@ -200,11 +193,11 @@ def main():
     print(f"mode={args.mode} | prebuffer under test: {args.prebuffer:.1f}s "
           f"| ring {m.FANOUT_RING_BYTES // (1024*1024)}MB | producer {args.bitrate} | serve {url}")
 
-    # Warm the ring so > prebuffer seconds of history exist before the consumer joins.
+    # The consumer must find more than `prebuffer` seconds of history to join at.
     warm_deadline = time.monotonic() + max(args.prebuffer + 3.0, 6.0)
     while time.monotonic() < warm_deadline and prod.poll() is None:
         time.sleep(0.25)
-    print(f"ring warmed ({ring.live_offset() // 1024} KiB retained); starting 1x consumer…")
+    print(f"ring warmed ({ring.live_offset() // 1024} KiB retained); starting 1x consumer...")
 
     cons = subprocess.Popen(ffmpeg_consumer_cmd(url), stdout=subprocess.DEVNULL,
                             stderr=subprocess.DEVNULL)
@@ -249,8 +242,7 @@ def main():
             pass                              # listener already closed
         ring.close()
 
-    # --- verdict --------------------------------------------------------------
-    steady = [r for (e, r) in samples if e >= args.warmup]
+    steady =[r for (e, r) in samples if e >= args.warmup]
     if len(steady) < 5:
         print(f"\nINCONCLUSIVE: only {len(steady)} steady-state samples "
               f"(needed >=5). Re-run with a longer --duration.")
@@ -262,7 +254,7 @@ def main():
     med_last = statistics.median(last_third)
 
     hold_floor = 0.6 * args.prebuffer      # median must stay above this
-    drain_floor = 0.5 * args.prebuffer     # end must not be trending to zero
+    drain_floor = 0.5 * args.prebuffer     # the last third must not trend to zero
     passed = med >= hold_floor and med_last >= drain_floor and lo >= 0.35 * args.prebuffer
 
     print("\n" + "=" * 64)
@@ -271,10 +263,10 @@ def main():
     print(f"  median   {med:5.2f}s   min {lo:5.2f}s   "
           f"last-third median {med_last:5.2f}s")
     if passed:
-        print("VERDICT: PASS — a real 1x consumer HELD the trailing reserve near N.")
+        print("VERDICT: PASS, a real 1x consumer HELD the trailing reserve near N.")
         print("  => the continuous cap holds on this machine; a source gap < N is absorbed.")
         return 0
-    print("VERDICT: FAIL — the reserve drained below the hold floor "
+    print("VERDICT: FAIL, the reserve drained below the hold floor "
           f"({hold_floor:.2f}s).")
     print("  => on this machine the 1x consumer reads ahead and empties the reserve.")
     print("  => set RACECAST_FEED_PREBUFFER_S=0 (instant revert) and escalate to")

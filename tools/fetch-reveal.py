@@ -2,12 +2,12 @@
 """Vendor the slide-deck runtime: a pinned Reveal.js dist subset + the two deck
 webfonts, both committed under src/docs/slides/ so Pages/build need no network.
 
-Mirror of tools/fetch-fonts.py / the deno pin: download a pinned, SHA-256-verified
-GitHub source zip of Reveal.js, extract only the dist + plugin files the decks load,
-and fetch the deck webfonts (Saira Condensed + IBM Plex Mono) as woff2.
+Downloads a pinned, SHA-256-verified GitHub source zip of Reveal.js, extracts only
+the dist + plugin files the decks load, and fetches the deck webfonts (Saira
+Condensed + IBM Plex Mono) as woff2.
 
-Maintainer tool — not shipped. Run after bumping REVEAL_TAG (first run with an empty
-REVEAL_SHA256 prints the computed digest to paste back in, then commit).
+Maintainer tool, not shipped. Run after bumping REVEAL_TAG; a first run with an
+empty REVEAL_SHA256 prints the computed digest to paste back in, then commit.
 
 Usage:
   python3 tools/fetch-reveal.py            # vendor reveal + fonts
@@ -92,7 +92,7 @@ def main():
     if a.print_sha:
         print(digest); return
     if not REVEAL_SHA256:
-        print(f"REVEAL_SHA256 not set; computed {digest} — paste it in and re-run.")
+        print(f"REVEAL_SHA256 not set; computed {digest}. Paste it in and re-run.")
         return
     vendor = os.path.join(ROOT, "src", "docs", "slides", "vendor", "reveal")
     written = extract_subset(zip_bytes, f"reveal.js-{REVEAL_TAG}/", vendor)

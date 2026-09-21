@@ -5,7 +5,7 @@ The trailer is an animated HTML page (``tools/trailer/trailer.html``) captured
 one crisp frame at a time by pausing every CSS animation and seeking its
 ``currentTime``, then muxed with a music bed via ffmpeg. Because every frame is
 a deterministic seek (not a real-time recording), the render is reproducible on
-any machine — same page + same music -> byte-stable video.
+any machine: same page + same music -> byte-stable video.
 
 The page pulls its screenshots from two places:
   * committed UI shots under ``/src/docs/...`` (served from the repo root), and
@@ -18,8 +18,8 @@ http.server`` is needed. Assemble the assets dir first with
 
 Dependencies (not vendored): the Playwright Python library + a Chromium build
 (the repo's ``.venv-pw`` venv) and ffmpeg/ffprobe on PATH. The music bed is NOT
-shipped in the repo — supply your own royalty-free clip with ``--music`` (e.g. a
-download from the YouTube Studio Audio Library).
+shipped in the repo; supply your own royalty-free clip with ``--music``, e.g. a
+download from the YouTube Studio Audio Library.
 
 Usage:
     .venv-pw/bin/python tools/build-trailer.py all \\
@@ -98,8 +98,8 @@ def capture(url, frames_dir, fps, duration, resume=False):
         page.goto(url, wait_until="networkidle")
         page.evaluate("() => document.fonts.ready")
         page.wait_for_timeout(800)
-        # pause every animation so seeking currentTime is deterministic. NB: do
-        # NOT screenshot with animations="disabled" — that fast-forwards every
+        # Pause every animation so seeking currentTime is deterministic. Do NOT
+        # screenshot with animations="disabled": that fast-forwards every
         # animation to its end state and overrides the seek.
         page.evaluate("() => document.getAnimations().forEach(a => a.pause())")
         step = 1000.0 / fps

@@ -2,7 +2,7 @@
 """Add the 'Feed POV' PiP source to an OBS scene-collection JSON (idempotent).
 
 It deep-copies the existing 'Feed A' source object and its Stint scene item as
-templates, then overrides only the POV-specific fields — so the result always
+templates, then overrides only the POV-specific fields, so the result always
 matches OBS's schema. Re-running is a no-op once 'Feed POV' exists.
 
 Usage: python3 tools/add_pov_source.py <collection.json>
@@ -21,15 +21,14 @@ def main(path):
         d = json.load(fh)
     srcs = d["sources"]
     if any(s.get("name") == POV_NAME for s in srcs):
-        print(f"{path}: '{POV_NAME}' already present — skip"); return
+        print(f"{path}: '{POV_NAME}' already present, skip"); return
     feedA = next(s for s in srcs if s.get("name") == "Feed A")
     stint = next(s for s in srcs if s.get("id") == "scene" and s.get("name") == "Stint")
 
-    # 1) source object (copy Feed A, override the few POV fields)
     src = copy.deepcopy(feedA)
     src["name"] = POV_NAME
     src["uuid"] = POV_UUID
-    src["muted"] = True                                  # default muted (switchable)
+    src["muted"] = True
     src["settings"] = dict(src.get("settings", {}))
     src["settings"]["input"] = POV_INPUT
     src["settings"]["close_when_inactive"] = True        # no decode while hidden
@@ -37,7 +36,7 @@ def main(path):
     src["settings"]["reconnect_delay_sec"] = 10
     srcs.append(src)
 
-    # 2) Stint scene item (front-most -> append; items are ordered back->front)
+    # Items are ordered back to front, so appending puts POV front-most.
     items = stint["settings"]["items"]
     tmpl = next(it for it in items if it.get("name") == "Feed A")
     item = copy.deepcopy(tmpl)

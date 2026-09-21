@@ -3,8 +3,8 @@
 
 A local stint (#592) carries the producer's own commentary: the capture card's game
 audio rides in the feed, the microphone is this separate OBS input. It is added as
-"Commentary Mic Device" — the same leaf name, uuid, token and macOS form the solo
-collections use, so setup-assets.localize_device_sources fills it from RACECAST_MIC —
+"Commentary Mic Device", the same leaf name, uuid, token and macOS form the solo
+collections use, so setup-assets.localize_device_sources fills it from RACECAST_MIC,
 and placed as a visible item in Stint and Splitscreen, the two scenes a local stint
 can be on air in.
 
@@ -13,11 +13,10 @@ Two deliberate differences from the solo collections:
   (obs_ws.feed_audio_plan); every other state keeps it closed.
 - It is a direct audio item, not the "Commentary Mic" wrapper scene. A visible
   nested scene is one more render layer in Stint, and a third layer tips a weak
-  host over the render cliff (PR #559). An audio input has nothing to render.
+  host over the render cliff (#559). An audio input has nothing to render.
 
 Deep-copies proven nodes as schema-correct templates (the Feed POV leaf, the Discord
-item already in Stint), like tools/add_intermission_scene.py. Re-running is a no-op
-once the leaf exists.
+item in Stint). Re-running is a no-op once the leaf exists.
 
 Usage: python3 tools/add_commentary_mic.py <collection.json>
 """
@@ -39,7 +38,7 @@ def add_commentary_mic(d):
     if any(s.get("name") == MIC_SOURCE for s in srcs):
         return False
 
-    # --- 1. The leaf: the macOS form the solo collections commit (coreaudio) ---
+    # The leaf is the macOS coreaudio form the solo collections commit.
     leaf = copy.deepcopy(next(s for s in srcs if s.get("name") == "Feed POV"))
     leaf["name"] = MIC_SOURCE
     leaf["uuid"] = MIC_UUID
@@ -49,7 +48,7 @@ def add_commentary_mic(d):
     leaf["monitoring_type"] = 0          # output only: no self-monitor, no echo
     srcs.append(leaf)
 
-    # --- 2. One audio item per target scene, cloned from its Discord item ---
+    # One audio item per target scene, cloned from its Discord item.
     for name in TARGET_SCENES:
         scene = _scene(srcs, name)
         st = scene["settings"]

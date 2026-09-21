@@ -2,12 +2,10 @@
 """Pure analysis for the relay restart soak (#619). Maintainer only, NOT shipped.
 
 `racecast obs benchmark` answers "does this host keep real time" over two restarts in
-140 s. #619 asks a different question that only time can answer: **does every restart
-heal itself, or does something accumulate over hours?** The producer's report is a
-picture that drifts further behind across an event night, and a restart is the event
-that was shown to park OBS deep in the ring (#614). Since #629/#630 the relay rejoins
-OBS after one. Whether that holds for the twentieth restart is not provable in a lab
-window of one minute.
+140 s. This asks what only time can answer: **does every restart heal itself, or does
+something accumulate over hours?** A restart parks OBS deep in the ring (#614) and the
+relay rejoins it afterwards (#629/#630), but whether that holds for the twentieth
+restart is not provable in a one-minute window.
 
 The driver (`tools/relay-restart-soak.py`) owns the polling and the `/reload` calls.
 Everything here is pure so it can be unit-tested without a relay, the same split as
@@ -44,10 +42,9 @@ def baseline_before(samples, t, window_s=BASELINE_WINDOW_S, not_before=None):
 
     `not_before` clamps the window so it cannot reach back into the PREVIOUS restart.
     Right after a rejoin the backlog dips to 0.0, because OBS sits at the live edge with
-    nothing buffered yet. A floor that swallowed that dip called 0.0 the settled state,
-    and then nothing could return to "within one reserve of 0.0". Measured on the
-    production host at a two-minute cadence: the second restart got a baseline of 0.0 s
-    and failed while it had in fact recovered. None when nothing was measured."""
+    nothing buffered yet. A floor that swallowed that dip would call 0.0 the settled
+    state, and then nothing could return to "within one reserve of 0.0". Returns None
+    when nothing was measured."""
     start = t - window_s
     if not_before is not None:
         start = max(start, not_before)
@@ -66,14 +63,12 @@ def recovery(samples, restart_t, base_s, reserve_s, deadline_s=RECOVERY_DEADLINE
 
     The window starts STRICTLY after the restart. The driver samples and then reloads
     inside one cycle, so a sample carrying `t == restart_t` was read before the request
-    went out; counting it made "back after" a pre-restart reading, reported as tenths of
-    a second.
+    went out, and counting it makes "back after" a pre-restart reading.
 
     `ok` is None, not False, when there is nothing to judge: no baseline, no samples, or
-    a window the run did not watch to its end. That last one is not pedantry. A restart
-    fired in the closing seconds of a soak leaves a handful of samples, and the same
-    shape produced a false PASS (the spike fell between two of them) and a false FAIL
-    (five seconds of evidence). Neither is an answer."""
+    a window the run did not watch to its end. A restart fired in the closing seconds of
+    a soak leaves a handful of samples, and that shape can produce a false PASS, when the
+    spike falls between two of them, as easily as a false FAIL."""
     if base_s is None or reserve_s is None:
         return None, None, None
     after = [s for s in _backlogs(samples) if restart_t < s["t"] <= restart_t + deadline_s]
@@ -97,13 +92,10 @@ DRIFT_MIN_POINTS = 4     # two halves of two: the fewest that can carry a trend
 
 def drift(records, reserve_s, min_points=DRIFT_MIN_POINTS):
     """(amount_s, ok) for the whole run: how much higher the run ENDED than it started.
-    This is the accumulation #619 asks about, and the reason the soak runs for hours. A
-    single restart that recovers tells you nothing about the twentieth.
+    This is the accumulation the soak runs for hours to find.
 
-    The two halves' means, not the first and last value. `backlog_s` saws with the
-    segment cadence, so two endpoints measure where the saw happened to be: a five-minute
-    live run with two restarts reported 3.2 s of "drift" between baselines of 1.4 and
-    4.6 s, both of which were the same healthy state.
+    The two halves' means, not the first and last value: `backlog_s` saws with the
+    segment cadence, so two endpoints measure where the saw happened to be.
 
     `ok` is None below `min_points`, because a trend needs more than two numbers and
     "not enough data" must not read as "no drift". The amount is still reported, and a
@@ -122,15 +114,15 @@ def drift(records, reserve_s, min_points=DRIFT_MIN_POINTS):
 def restart_observed(samples, restart_t, window_s=RECOVERY_DEADLINE_S):
     """Did the feed actually restart, or did the request do nothing?
 
-    This exists because a soak that triggers nothing passes. `Feed.reload()` today kills
-    the streamlink process even when the URL is unchanged, so a `/reload` is a real
-    restart. If that ever stops being true, every window would sit at its baseline and
-    the run would read PASS on a test that never ran.
+    A soak that triggers nothing would otherwise pass. `Feed.reload()` kills the
+    streamlink process even when the URL is unchanged, so a `/reload` is a real restart;
+    if that stops being true, every window sits at its baseline and the run reads PASS on
+    a test that never ran.
 
-    The signal is `state_age_s` falling, not the state string. A re-serve took 4.3 to
-    5.5 s on both measured hosts while the soak samples every 10 s by default, so the
-    `connecting` phase is easy to sample straight past. The age resets whatever the
-    cadence. None when the relay reported no age to compare."""
+    The signal is `state_age_s` falling, not the state string: a re-serve takes about
+    5 s while the soak samples every 10 s, so the `connecting` phase is easy to sample
+    straight past, but the age resets whatever the cadence. Returns None when the relay
+    reported no age to compare."""
     ages = [s for s in samples
             if s.get("age_s") is not None and restart_t <= s["t"] <= restart_t + window_s]
     before = [s for s in samples if s.get("age_s") is not None and s["t"] < restart_t]
@@ -147,7 +139,7 @@ def snap_growth(samples):
 
 
 def summarize(samples, restart_times, reserve_s):
-    """The whole run: one record per restart plus the run-level checks. Pure."""
+    """The whole run: one record per restart plus the run-level checks."""
     records = []
     prev_end = None
     for t in restart_times:
@@ -198,9 +190,8 @@ def verdict(summary):
     if reasons:
         return "FAIL", reasons
     if ungraded:
-        # One graded restart used to be enough to call the whole run a pass, so a soak
-        # could report PASS with most of its windows at n/a. Measured: three restarts
-        # spaced closer than the deadline produced one grade, two blanks and a PASS.
+        # One graded restart must not carry the whole run: restarts spaced closer than
+        # the deadline leave most windows blank and a PASS would rest on one of them.
         return "UNKNOWN", [f"{len(ungraded)} of {len(summary['restarts'])} restart "
                            f"windows could not be judged"]
     if not judged:
@@ -232,15 +223,13 @@ def relay_url(value):
 def next_restart_at(t0, at_relative, every_s):
     """When the NEXT restart is due, on the same clock the loop compares against.
 
-    This exists as a named function because the two quantities look alike and are not:
-    a restart is recorded RELATIVE to `t0` (so a recording replays), while the loop
-    gates on the raw monotonic clock. Adding the interval to the relative value once
-    produced a number near 1800 while the clock read six figures, so every following
-    sample was overdue: a one-hour soak fired 257 restarts, one per sample, instead of
-    three. The run still looked plausible until the restart list was read.
+    A named function because the two quantities look alike and are not: a restart is
+    recorded RELATIVE to `t0` so a recording replays, while the loop gates on the raw
+    monotonic clock. Adding the interval to the relative value leaves every following
+    sample overdue, so the soak fires one restart per sample.
 
     A test that starts its fake clock at 0 cannot catch that, because both readings
-    agree there. Pin the unit here instead. Pure."""
+    agree there. Pin the unit here instead."""
     return t0 + at_relative + every_s
 
 
@@ -257,9 +246,8 @@ def planned_restarts(hours, every_min):
     """How many restarts fit in a run, counting only those it can watch out.
 
     A restart fired with less than the recovery deadline left is judged on whatever few
-    samples remain, and that shape produced both a false PASS and a false FAIL. The
-    driver does not fire one it cannot observe, so this is also what the operator is
-    asked to confirm."""
+    samples remain, which can read either way. The driver does not fire one it cannot
+    observe, so this is also what the operator is asked to confirm."""
     if every_min <= 0:
         return 0
     span = hours * 3600.0 - RECOVERY_DEADLINE_S
@@ -271,9 +259,8 @@ def sample_of(status, t, feed=None):
 
     Without `feed` the on-air one is resolved per sample rather than pinned at the start,
     because a handover or a takeover moves it and the soak must follow. With `feed` the
-    measurement is pinned to the same feed the driver restarts: pinning only the restart
-    target left the numbers coming off a different feed, whose `state_age_s` never fell,
-    and the run said UNKNOWN for a reason that was not true. Pure."""
+    measurement is pinned to the same feed the driver restarts; pinning only the restart
+    target takes the numbers off a different feed, whose `state_age_s` never falls."""
     live = (status or {}).get("live") or {}
     name = feed or live.get("feed")
     feed = ((status or {}).get("feeds") or {}).get(name) or {}
@@ -297,10 +284,9 @@ def _never_left_band(record, reserve_s):
 def split_replay(rows):
     """A recorded run read back: (samples, restart_times).
 
-    The JSONL used to hold samples only, so the file never said WHEN a restart happened
-    and the analysis could not be reproduced from it — which also meant an interrupted
-    soak left hours of readings that nothing could turn into a verdict. The driver now
-    writes a marker row per restart and this splits the two apart again. Pure."""
+    The driver writes a marker row per restart alongside the samples, so the file says
+    WHEN each restart happened and an interrupted soak can still be judged. This splits
+    the two kinds of row apart again."""
     samples = [r for r in rows if not r.get("event")]
     restarts = [r["t"] for r in rows
                 if r.get("event") == "restart" and r.get("t") is not None]
@@ -318,8 +304,8 @@ def render(summary, state, reasons):
         ok = {True: "yes", False: "NO", None: "n/a"}[r["recovered"]]
         back = f(r["recovered_after_s"])
         if r["recovered"] and _never_left_band(r, summary["reserve_s"]):
-            # Nothing to come back from. A number here reads as a measurement of the
-            # rejoin, and a near-zero one reads as a suspiciously good measurement.
+            # Nothing to come back from, and a near-zero number here would read as a
+            # suspiciously good measurement of the rejoin.
             back = "in band"
         out.append(f"   {r['restart_t']:>7.0f}s  {f(r['baseline_s']):>8}   "
                    f"{f(r['peak_s']):>7}   {back:>9}   {ok}")

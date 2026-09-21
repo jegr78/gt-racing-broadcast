@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Simulated OBS WebSocket server — a stand-in OBS for reproducible screenshots.
+"""Simulated OBS WebSocket server: a stand-in OBS for reproducible screenshots.
 
-Speaks just enough obs-websocket v5 (no-auth handshake + GetCurrentProgramScene +
+Speaks just enough obs-websocket v5 (no-auth handshake, GetCurrentProgramScene,
 GetSourceScreenshot) to answer the relay's `get_program_screenshot`, serving a
-FIXED program image. This lets wiki / e2e captures show a simulated broadcast
-program WITHOUT touching — or even running — the producer's real OBS.
+FIXED program image. Wiki and e2e captures can then show a simulated broadcast
+program without touching, or even running, the producer's real OBS.
 
 Point the relay at it with the RACECAST_OBS_WS_* overrides (see obs_ws.py):
 
@@ -12,9 +12,9 @@ Point the relay at it with the RACECAST_OBS_WS_* overrides (see obs_ws.py):
     RACECAST_OBS_WS_HOST=127.0.0.1 RACECAST_OBS_WS_PORT=4466 \
         python3 src/racecast.py relay start
 
-Maintainer tool — not shipped in the distributable package. Reuses the WebSocket
-plumbing (accept_key / decode_frame) from src/scripts/obs_ws.py so the framing
-stays byte-identical to what the real client expects.
+Maintainer tool, not shipped. It reuses accept_key and decode_frame from
+src/scripts/obs_ws.py so the framing stays byte-identical to what the real
+client expects.
 """
 import argparse
 import base64
@@ -33,7 +33,7 @@ _spec.loader.exec_module(obs_ws)
 
 
 def _send_json(conn, obj):
-    """One UNMASKED server->client text frame (servers must not mask)."""
+    """One unmasked server->client text frame; servers must not mask."""
     payload = json.dumps(obj).encode()
     n = len(payload)
     if n < 126:
@@ -46,8 +46,9 @@ def _send_json(conn, obj):
 
 
 def _recv_json(conn, buf):
-    """Next text message as JSON; reuses obs_ws.decode_frame (handles the client's
-    masked frames). Raises on close/EOF. `buf` is a 1-element list (mutable)."""
+    """Next text message as JSON. Reuses obs_ws.decode_frame, which handles the
+    client's masked frames. Raises on close or EOF. `buf` is a mutable 1-element
+    list."""
     while True:
         frame = obs_ws.decode_frame(buf[0])
         if frame is None:
@@ -79,7 +80,7 @@ def _serve_one(conn, image_data_uri, scene):
                   "Upgrade: websocket\r\nConnection: Upgrade\r\n"
                   "Sec-WebSocket-Accept: " + obs_ws.accept_key(key) +
                   "\r\n\r\n").encode())
-    # Hello (no authentication field -> client skips auth) -> Identify -> Identified
+    # Hello has no authentication field, so the client skips auth, then Identify.
     _send_json(conn, {"op": 0, "d": {"obsWebSocketVersion": "5.5.0", "rpcVersion": 1}})
     buf = [b""]
     _recv_json(conn, buf)                              # Identify (op 1)
@@ -95,7 +96,7 @@ def _serve_one(conn, image_data_uri, scene):
             resp = {"currentProgramSceneName": scene, "sceneName": scene}
         elif rtype == "GetSourceScreenshot":
             resp = {"imageData": image_data_uri}
-        else:                                          # everything else: bland OK
+        else:                                          # everything else: bare OK
             resp = {}
         _send_json(conn, {"op": 7, "d": {
             "requestType": rtype, "requestId": rid,
@@ -112,7 +113,7 @@ def _safe_serve(conn, image_data_uri, scene):
         try:
             conn.close()
         except OSError:
-            pass  # socket already torn down — nothing to clean up
+            pass  # socket already torn down, nothing to clean up
 
 
 def main():

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Build the standalone `racecast` and `racecast-ui` binaries with PyInstaller
-and smoke-test both.  One pair of binaries per OS — run this on the OS you are
-targeting (CI runs a 3-OS matrix).
+and smoke-test both. One pair of binaries per OS, so run this on the OS you are
+targeting; CI runs a 3-OS matrix.
 Usage: python3 tools/build-binary.py [--version vX.Y.Z] [--skip-smoke]
-Output: dist/bin/racecast + dist/bin/racecast-ui (+ .exe on Windows;
-+ racecast-ui.app on macOS). The producer ZIP package is a separate artifact
+Output: dist/bin/racecast + dist/bin/racecast-ui (plus .exe on Windows and
+racecast-ui.app on macOS). The producer ZIP package is a separate artifact
 built by tools/build.py."""
 import argparse, os, shutil, subprocess, sys, tempfile
 
@@ -14,19 +14,16 @@ SRC = os.path.join(ROOT, "src")
 # path resolution (hud.html, assets/, OBS template) keeps working unchanged.
 DATA = ["relay", "scripts", "obs", "assets", "companion", "director", "cockpit", "console",
         "racecontrol", "ui", "setup-assets.py"]
-# Operator docs the Control Center's Help page serves (racecast.DOCS_FILES) — only
-# these, kept under src/docs/. The docs/wiki/ subtree stays on GitHub (Help links
-# to it); the onboarding decks under docs/slides ARE bundled (see SLIDES_DATA below)
-# so the Help page can open them offline.
+# The operator docs the Control Center's Help page serves (racecast.DOCS_FILES),
+# and only these. The docs/wiki/ subtree stays on GitHub and Help links to it.
 DOC_FILES = ["docs/Broadcast_Setup_Guide.md", "docs/README_SETUP.md"]
-# The onboarding decks (incl. the printable cheat sheet) ship as a static tree so
-# the Control Center serves them OFFLINE at /docs/slides/; the GitHub Pages copy is
-# the always-current online default.
+# The onboarding decks ship as a static tree so the Control Center serves them
+# offline at /docs/slides/; the GitHub Pages copy is the online default.
 SLIDES_DATA = "docs/slides"
 
-# The bundled scripts (relay, oneshots) are loaded at runtime via importlib, so
-# PyInstaller's static analyser cannot see their imports.  List every stdlib
-# module they use that is NOT already guaranteed by racecast.py's own imports.
+# The bundled scripts are loaded at runtime via importlib, so PyInstaller's static
+# analyser cannot see their imports. List every stdlib module they use that
+# racecast.py's own imports do not already guarantee.
 HIDDEN_STDLIB = [
     # racecast-feeds.py
     "http.server", "ipaddress",
@@ -43,10 +40,10 @@ HIDDEN_STDLIB = [
 
 def _icon_arg(platform=None, osname=None, exists=None):
     """PyInstaller --icon for the current OS, or [] when none applies. macOS uses
-    the .icns (the .app bundle/Dock icon), Windows the .ico (the .exe icon);
-    Linux can't embed an icon into an ELF, so it gets none. Pure-by-injection for
-    tests. Missing the committed icon file is non-fatal — the binary just builds
-    without one (regenerate with tools/make-icons.py). See issue #58."""
+    the .icns for the .app bundle and Dock, Windows the .ico for the .exe; Linux
+    cannot embed an icon into an ELF, so it gets none. A missing committed icon
+    file is non-fatal and the binary builds without one; regenerate it with
+    tools/make-icons.py. (#58)"""
     platform = sys.platform if platform is None else platform
     osname = os.name if osname is None else osname
     if platform == "darwin":
@@ -60,14 +57,14 @@ def _icon_arg(platform=None, osname=None, exists=None):
 
 
 def _pyinstaller_cmd():
-    """Return the PyInstaller invocation as a list.  Prefers the `pyinstaller`
-    executable on PATH; falls back to `python3 -m PyInstaller` when the module
-    is importable but the wrapper script is not on PATH (common after a
-    --user pip install on macOS)."""
+    """Return the PyInstaller invocation as a list. Prefers the `pyinstaller`
+    executable on PATH and falls back to `python3 -m PyInstaller` when the module
+    is importable but the wrapper script is not on PATH, which is common after a
+    --user pip install on macOS."""
     if shutil.which("pyinstaller"):
         return ["pyinstaller"]
     try:
-        import PyInstaller  # noqa: F401 — importability check only
+        import PyInstaller  # noqa: F401 (importability check only)
         return [sys.executable, "-m", "PyInstaller"]
     except ImportError:
         pass
@@ -75,19 +72,17 @@ def _pyinstaller_cmd():
 
 
 def build_target(launcher, workdir, version_file, sep, entry, name, windowed):
-    """Run PyInstaller for one entrypoint. `windowed` builds a no-console app
-    (Windows: no console window; macOS: an .app bundle; Linux: ignored). Returns
+    """Run PyInstaller for one entrypoint. `windowed` builds a no-console app: no
+    console window on Windows, an .app bundle on macOS, ignored on Linux. Returns
     the path to the built executable."""
     cmd = launcher + ["--onefile", "--name", name, "--clean", "--noconfirm",
            "--distpath", os.path.join(ROOT, "dist", "bin"),
            "--workpath", os.path.join(workdir, "build", name),
            "--specpath", workdir,
-           # services/companion_common/companion_linux/event (+ its imports
-           # preflight, install_apps)/tailscale are real frozen modules
-           # (racecast.py imports them, several only function-locally — PyInstaller's
-           # static scan misses those, so they MUST be listed here or the frozen
-           # binary raises ModuleNotFoundError at runtime). Guarded by
-           # tests/test_racecast.py::t_function_local_peer_imports_are_frozen.
+           # racecast.py imports these modules, several of them only
+           # function-locally, which PyInstaller's static scan misses. Without the
+           # listing the frozen binary raises ModuleNotFoundError at runtime.
+           # Guarded by tests/test_racecast.py::t_function_local_peer_imports_are_frozen.
            "--paths", os.path.join(SRC, "scripts"),
            "--hidden-import", "services", "--hidden-import", "companion_common",
            "--hidden-import", "companion_linux",
@@ -96,7 +91,7 @@ def build_target(launcher, workdir, version_file, sep, entry, name, windowed):
            "--hidden-import", "obs_benchmark",
            "--hidden-import", "install_apps", "--hidden-import", "obs_ws",
            "--hidden-import", "overlay_build",
-           # imported by src/ui/ui_server.py, which is itself loaded by path —
+           # Imported by src/ui/ui_server.py, which is itself loaded by path, so
            # PyInstaller's scan never sees it. Guarded by
            # tests/test_racecast.py::t_path_loaded_module_imports_are_frozen.
            "--hidden-import", "bundle_cache",
@@ -112,40 +107,39 @@ def build_target(launcher, workdir, version_file, sep, entry, name, windowed):
            "--hidden-import", "logsetup",
            "--hidden-import", "discord_rpc", "--hidden-import", "gt7_discovery",
            "--add-data", f"{version_file}{sep}src"]
-    cmd += _icon_arg()      # the racecast "rc" app icon (.icns/.ico), #58
+    cmd += _icon_arg()      # the racecast "rc" app icon (#58)
     if windowed:
         cmd += ["--windowed"]
     for mod in HIDDEN_STDLIB:
         cmd += ["--hidden-import", mod]
     for rel in DATA:
         path = os.path.join(SRC, rel)
-        # --add-data's DEST is always a target *directory*. A directory source
-        # mirrors into src/<rel>, but a FILE must target "src" — "src/<file>"
-        # would create a directory named like the file, and the frozen
-        # in-process import then dies with EACCES trying to open() it.
+        # --add-data's DEST is always a target directory. A directory source
+        # mirrors into src/<rel>, but a file must target "src": "src/<file>" would
+        # create a directory named like the file, and the frozen in-process import
+        # then dies with EACCES trying to open() it.
         dest = f"src/{rel}" if os.path.isdir(path) else "src"
         cmd += ["--add-data", f"{path}{sep}{dest}"]
-    # The Control Center's Help page serves these three docs (racecast.DOCS_FILES).
-    # Bundle them under src/docs/ (real dir DEST -> file lands inside) so
-    # resource_path("docs/<f>") finds them. The docs/wiki/ subtree is NOT bundled
-    # — it lives on GitHub and the Help page links to it.
+    # Bundle the Help page's docs under src/docs/, a real directory DEST the file
+    # lands inside, so resource_path("docs/<f>") finds them.
     for rel in DOC_FILES:
         cmd += ["--add-data", f"{os.path.join(SRC, rel)}{sep}src/docs"]
-    # The onboarding decks tree (dir DEST mirrors into src/docs/slides), so
+    # The onboarding decks tree mirrors into src/docs/slides, so
     # resource_path("docs/slides") resolves inside the frozen bundle and the
-    # Control Center can serve the decks + cheat sheet offline.
+    # Control Center can serve the decks offline.
     cmd += ["--add-data",
             f"{os.path.join(SRC, SLIDES_DATA)}{sep}src/docs/slides"]
     # profiles/example/ is the league template `racecast profile new` copies from.
-    # It lives at the repo root (a sibling of src/), not under src/, so bundle it
-    # explicitly to profiles/example — racecast.ensure_example_profile() unpacks it
-    # next to the binary on first run (the release archive ships only the binaries
-    # + .env.example, and `racecast update` swaps just the binary). See issue #45.
+    # It sits at the repo root rather than under src/, so it is bundled explicitly
+    # and racecast.ensure_example_profile() unpacks it next to the binary on first
+    # run. The release archive ships only the binaries and .env.example, and
+    # `racecast update` swaps just the binary. (#45)
     cmd += ["--add-data",
             f"{os.path.join(ROOT, 'profiles', 'example')}{sep}profiles/example"]
-    # fonts.zip carries the curated overlay-font set; racecast.ensure_bundled_fonts()
-    # extracts it into runtime/fonts/ on first start. Bundled to the _MEIPASS root,
-    # so it travels INSIDE the binary and survives `racecast update` (binary-only swap).
+    # fonts.zip carries the curated overlay-font set that
+    # racecast.ensure_bundled_fonts() extracts into runtime/fonts/ on first start.
+    # It goes to the _MEIPASS root so it travels inside the binary and survives the
+    # binary-only swap `racecast update` performs.
     fonts_zip = os.path.join(ROOT, "fonts.zip")
     if os.path.isfile(fonts_zip):
         cmd += ["--add-data", f"{fonts_zip}{sep}."]
@@ -176,10 +170,10 @@ def main():
     sep = ";" if os.name == "nt" else ":"
     fonts_zip = os.path.join(ROOT, "fonts.zip")
     if not os.path.isfile(fonts_zip):
-        print("fonts.zip missing — fetching the curated overlay-font set…", flush=True)
+        print("fonts.zip missing, fetching the curated overlay-font set...", flush=True)
         if subprocess.call([sys.executable, os.path.join(ROOT, "tools", "fetch-fonts.py"),
                             "--version", a.version]) != 0:
-            sys.exit("fetch-fonts failed (network?) — cannot bundle overlay fonts.")
+            sys.exit("fetch-fonts failed (network?), cannot bundle overlay fonts.")
     rc_bin = build_target(launcher, workdir, version_file, sep,
                            "racecast.py", "racecast", windowed=False)
     ui_bin = build_target(launcher, workdir, version_file, sep,
@@ -187,10 +181,10 @@ def main():
     if not a.skip_smoke:
         smoke(rc_bin, a.version)
         smoke_ui(ui_bin)
-        # macOS ships the windowed launcher as racecast-ui.app; smoke its INNER
-        # executable too. The .app nests the exe 3 levels deep, so sibling-racecast
-        # resolution differs — a job spawn through it is the regression guard for
-        # the "Contents/MacOS/racecast not found" bug (the plain ui_bin can't catch it).
+        # macOS ships the windowed launcher as racecast-ui.app, so smoke its inner
+        # executable too. The .app nests the exe three levels deep, which changes
+        # sibling-racecast resolution; a job spawn through it is the regression
+        # guard for "Contents/MacOS/racecast not found", which ui_bin cannot catch.
         app_exe = os.path.join(ROOT, "dist", "bin", "racecast-ui.app",
                                "Contents", "MacOS", "racecast-ui")
         if os.path.isfile(app_exe):
@@ -199,9 +193,10 @@ def main():
 
 def smoke_ui(binary):
     """The windowed launcher must bind, answer the ping with the Control Center
-    signature, run a job through the sibling `racecast` binary, and quit. No --version
-    check: a windowed Windows build has no stdout. The sibling `racecast` lives next
-    to this binary in dist/bin/, so the job spawn exercises _rc_job_executable."""
+    signature, run a job through the sibling `racecast` binary, and quit. There is
+    no --version check because a windowed Windows build has no stdout. The sibling
+    `racecast` sits next to this binary in dist/bin/, so the job spawn exercises
+    _rc_job_executable."""
     import json
     import time
     import urllib.request
@@ -233,11 +228,10 @@ def smoke_ui(binary):
             out = ui.stdout.read().decode("utf-8", "replace") if ui.poll() is not None else ""
             sys.exit(f"smoke racecast-ui FAILED: no Control Center ping on :8390 "
                      f"(rc={ui.poll()}) out={out!r}")
-        # Start a read-only job (preflight) and confirm it spawns + completes —
-        # this proves racecast-ui spawns the sibling `racecast` binary, not itself.
-        # snapshot() returns {"id","op","running","exit_code","cancelled"};
-        # /api/jobs/<id> returns {"ok": True, **snap}. A job is done when
-        # exit_code is not None (running == False); there is no "done" key.
+        # Start the read-only preflight job and confirm it spawns and completes,
+        # which proves racecast-ui spawns the sibling `racecast` binary, not itself.
+        # /api/jobs/<id> returns {"ok": True, **snapshot}, and a job is done when
+        # exit_code is not None; there is no "done" key.
         job = json.loads(_post("/api/op/preflight"))
         if not job.get("ok") or not job.get("job_id"):
             sys.exit(f"smoke racecast-ui FAILED: could not start preflight job ({job!r})")
@@ -247,7 +241,7 @@ def smoke_ui(binary):
             try:
                 snap = json.loads(_get(f"/api/jobs/{jid}"))
             except OSError:                  # transient localhost timeout on a busy
-                continue                     # runner — retry, don't abort the build
+                continue                     # runner; retry, don't abort the build
             if snap.get("exit_code") is not None:
                 break
         if snap.get("exit_code") is None:
@@ -261,8 +255,8 @@ def smoke_ui(binary):
 
 
 def smoke(binary, version):
-    """The binary must self-report the version, print aggregate status, and export
-    the Companion config — proves bundled data + frozen dispatch actually work."""
+    """The binary must self-report the version, print aggregate status and export
+    the Companion config, which proves bundled data and frozen dispatch work."""
     def run(args):
         return subprocess.run([binary] + args, capture_output=True, text=True, timeout=60)
 
@@ -281,8 +275,8 @@ def smoke(binary, version):
         ex = run(["export", "companion", "--out", dst])
         if ex.returncode != 0 or not os.path.isfile(dst):
             sys.exit(f"smoke export FAILED: rc={ex.returncode} err={ex.stderr!r}")
-        # `setup` loads the bundled setup-assets.py in-process — catches bundle
-        # layout regressions (e.g. --add-data turning the file into a directory).
+        # `setup` loads the bundled setup-assets.py in-process, which catches a
+        # bundle-layout regression such as --add-data turning the file into a dir.
         imp = os.path.join(td, "import.json")
         su = run(["setup", "--out", imp, "--sheet-id", "smoke"])
         if su.returncode != 0 or not os.path.isfile(imp):
@@ -291,8 +285,8 @@ def smoke(binary, version):
             if "_MEI" in fh.read():
                 sys.exit("smoke setup FAILED: the localized collection references "
                          "the throwaway _MEIPASS unpack dir (paths die with the process)")
-    # `ui` starts the Control Center server in-process from the bundled
-    # src/ui/ modules — catches a missing ui/ in DATA (ModuleNotFoundError).
+    # `ui` starts the Control Center server in-process from the bundled src/ui/
+    # modules, which catches a missing ui/ in DATA as a ModuleNotFoundError.
     import json
     import time
     import urllib.request
@@ -316,25 +310,24 @@ def smoke(binary, version):
             out = ui.stdout.read().decode("utf-8", "replace") if ui.poll() is not None else ""
             sys.exit(f"smoke ui FAILED: no Control Center ping on :8389 "
                      f"(rc={ui.poll()}) out={out!r}")
-        # Help page must expose the onboarding-decks link (Pages hub — the central
-        # place for the cheat sheet + role decks) and bundle the local setup docs.
+        # The Help page must expose the onboarding-decks link, the Pages hub that
+        # holds the cheat sheet and role decks, and bundle the local setup docs.
         with urllib.request.urlopen("http://127.0.0.1:8389/api/docs", timeout=2) as r:
             docs = json.loads(r.read())
         if "github.io" not in (docs.get("decks_url") or ""):
             sys.exit(f"smoke ui FAILED: no onboarding-decks URL (decks_url={docs.get('decks_url')!r})")
         if not any(d.get("key") == "setup-readme" for d in docs.get("local", [])):
             sys.exit(f"smoke ui FAILED: setup docs not bundled (local={docs.get('local')!r})")
-        # a markdown doc must come back RENDERED (mdrender bundled + working),
-        # not as raw text. The setup README is a wiki-pointer stub (heading +
-        # bullet list, no tables), so assert on the full-page wrapper + a list.
+        # A markdown doc must come back rendered, proving mdrender is bundled and
+        # working, not as raw text. The setup README is a wiki-pointer stub with no
+        # tables, so this asserts on the full-page wrapper and a list item.
         with urllib.request.urlopen("http://127.0.0.1:8389/api/docs/file/setup-readme",
                                     timeout=2) as r:
             md = r.read().decode("utf-8", "replace")
         if "<!doctype html>" not in md or "<li>" not in md:
             sys.exit("smoke ui FAILED: setup-readme markdown was not rendered to HTML")
-        # the onboarding decks (incl. the cheat sheet) must be bundled and serve
-        # OFFLINE at /docs/slides/ — catches a regression where the slides tree is
-        # missing from the frozen bundle.
+        # The onboarding decks must be bundled and serve offline at /docs/slides/,
+        # which catches a slides tree missing from the frozen bundle.
         if "/docs/slides/" not in (docs.get("decks_local_url") or ""):
             sys.exit(f"smoke ui FAILED: no offline decks URL (decks_local_url={docs.get('decks_local_url')!r})")
         with urllib.request.urlopen("http://127.0.0.1:8389/docs/slides/", timeout=2) as r:

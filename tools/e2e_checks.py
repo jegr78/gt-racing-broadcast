@@ -18,9 +18,9 @@ CheckResult = collections.namedtuple("CheckResult", "name status message")
 
 
 def http_request(url, method="GET", headers=None, data=None, timeout=10):
-    """GET/POST returning (status, body_bytes, headers_dict) WITHOUT raising on
-    4xx/5xx (urllib raises HTTPError there; we read it as a normal response so
-    auth-gating checks can assert 401/404)."""
+    """GET/POST returning (status, body_bytes, headers_dict) without raising on
+    4xx/5xx. urllib raises HTTPError there; this reads it as a normal response so
+    auth-gating checks can assert 401/404."""
     req = urllib.request.Request(url, method=method, data=data,
                                  headers=headers or {})
     try:
@@ -32,7 +32,7 @@ def http_request(url, method="GET", headers=None, data=None, timeout=10):
 
 def classify_capability(available, name):
     """Optional capability gate: when *available* is False, return a skip
-    CheckResult; when True, return None (run the real check)."""
+    CheckResult; when True, return None so the caller runs the real check."""
     if available:
         return None
     return CheckResult(name, "skip", f"{name} unavailable")
@@ -48,7 +48,7 @@ def run_checks(checks, ctx):
             if not isinstance(r, CheckResult):
                 r = CheckResult(getattr(fn, "__name__", "check"), "fail",
                                 f"check returned {type(r).__name__}, not CheckResult")
-        except Exception as exc:  # noqa: BLE001 — a crashing check is a failure
+        except Exception as exc:  # noqa: BLE001 (a crashing check is a failure)
             r = CheckResult(getattr(fn, "__name__", "check"), "fail",
                             f"{type(exc).__name__}: {exc}")
         results.append(r)
@@ -57,7 +57,7 @@ def run_checks(checks, ctx):
 
 
 def summarize(results):
-    """One-line-per-check text summary + a totals line."""
+    """One line per check plus a totals line."""
     lines, n = [], {"pass": 0, "fail": 0, "skip": 0}
     for r in results:
         n[r.status] = n.get(r.status, 0) + 1
@@ -71,9 +71,9 @@ SCHEDULE_HEADER = ("URL", "Streamer", "Stint")
 
 def build_schedule_csv(rows):
     """A header-mode schedule CSV (columns URL,Streamer,Stint) the relay's
-    ScheduleSource parses 1:1. *rows* = iterable of (url, streamer, stint).
-    URLs must be real YouTube/Twitch host URLs (is_channel() rejects
-    localhost/LAN/file)."""
+    ScheduleSource parses 1:1. *rows* is an iterable of (url, streamer, stint).
+    URLs must be real YouTube/Twitch host URLs: is_channel() rejects
+    localhost, LAN and file."""
     buf = _io.StringIO()
     w = _csv.writer(buf)
     w.writerow(SCHEDULE_HEADER)
@@ -83,9 +83,9 @@ def build_schedule_csv(rows):
 
 
 def free_port():
-    """An OS-assigned free TCP port on the loopback. Bind :0, read it back,
-    close — the caller hands it to a child immediately (small race window is
-    acceptable for a local harness)."""
+    """An OS-assigned free TCP port on the loopback. Binds :0, reads it back and
+    closes, so there is a small race window the caller closes by handing the port
+    to a child immediately."""
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         s.bind(("127.0.0.1", 0))
@@ -94,18 +94,14 @@ def free_port():
         s.close()
 
 
-# ---------------------------------------------------------------------------
-# Binary-mode launcher helpers (pure; tools/e2e.py --binary)
-# ---------------------------------------------------------------------------
-# Driving the FROZEN binary instead of `python src/racecast.py` is the
-# regression guard for binary-ONLY bugs — a file/import missing from the
-# PyInstaller bundle, or frozen path resolution — the class the src/ dev build
-# hides (e.g. the cockpit.html bundle omission). The argv assembly is pure so it
-# is unit-tested without building a binary.
+# Driving the frozen binary instead of `python src/racecast.py` guards the bugs
+# the src/ dev build hides: a file or import missing from the PyInstaller bundle,
+# and frozen path resolution. The argv assembly is pure so it is unit-tested
+# without building a binary.
 
 def binary_name(osname=None):
     """The racecast executable's filename for *osname* (os.name): 'racecast.exe'
-    on Windows ('nt'), else 'racecast'."""
+    on Windows ('nt'), otherwise 'racecast'."""
     osname = os.name if osname is None else osname
     return "racecast.exe" if osname == "nt" else "racecast"
 
@@ -117,25 +113,21 @@ def default_binary_path(root, osname=None):
 
 
 def service_launcher(binary, python=None, script=None):
-    """Argv PREFIX that invokes the racecast CLI. With *binary* set -> the frozen
-    binary ([binary]); otherwise the src/ dev path ([python, script]). Callers
-    append the subcommand + args (e.g. + ["relay", "run", "--bind", ...]); the
-    subcommand surface is identical either way, so the same checks run against
-    both. *python* defaults to the current interpreter."""
+    """Argv prefix that invokes the racecast CLI: [binary] when *binary* is set,
+    otherwise the src/ dev path [python, script]. Callers append the subcommand
+    and its args. The subcommand surface is identical either way, so the same
+    checks run against both. *python* defaults to the current interpreter."""
     if binary:
         return [binary]
     return [python or sys.executable, script]
 
 
-# ---------------------------------------------------------------------------
-# Check context + individual HTTP check callables
-# ---------------------------------------------------------------------------
 Ctx = collections.namedtuple(
     "Ctx",
     "relay_url disabled_relay_url ui_url token streamer_key expect own_stint"
     " fanout_feed_port fanout_relay_url")
-Ctx.__new__.__defaults__ = (None, None, None)  # own_stint, fanout_feed_port,
-                                                # fanout_relay_url optional
+Ctx.__new__.__defaults__ = (None, None, None)  # own_stint, fanout_feed_port and
+                                                # fanout_relay_url are optional
 
 
 def _get_json(url, headers=None):
@@ -144,14 +136,14 @@ def _get_json(url, headers=None):
 
 
 def first_roster_streamer(status, body_bytes):
-    """Given a `/schedule/data` HTTP response — the SAME (status, body_bytes)
-    shape http_request() returns (status int + raw body bytes) — return the
-    first roster streamer name, or None when the status is not 200, the body is
-    empty/unparseable, or no row carries a streamer name.
+    """Given a `/schedule/data` response in the (status, body_bytes) shape
+    http_request() returns, return the first roster streamer name, or None when
+    the status is not 200, the body is empty or unparseable, or no row carries a
+    streamer name.
 
-    The real relay serves /schedule/data as {"rows": [{"name": ...}, ...]}; this
-    is the pure decode + extract step that the real-league run uses to pick a
-    streamer to mint a cockpit token for, without hardcoding a name."""
+    The relay serves /schedule/data as {"rows": [{"name": ...}, ...]}. This is the
+    pure decode step the real-league run uses to pick a streamer to mint a cockpit
+    token for, without hardcoding a name."""
     if status != 200:
         return None
     try:
@@ -200,9 +192,8 @@ def check_cockpit_accepts_token(ctx):
 
 
 def check_cockpit_tally(ctx):
-    # /cockpit/data serves the cockpit_tally() fields FLAT at the top level
-    # (on_air/up_next/scheduled), merged with me/mode/my_stints/… — not nested
-    # under a "tally" key. Read whichever the server gives (real = flat).
+    # /cockpit/data serves the cockpit_tally() fields flat at the top level, not
+    # nested under a "tally" key. Read whichever the server gives.
     st, data = _get_json(f"{ctx.relay_url}/cockpit/data?t={ctx.token}")
     if st != 200:
         return CheckResult("cockpit_tally", "fail", f"HTTP {st}")
@@ -228,8 +219,8 @@ def check_cockpit_404_when_disabled(ctx):
 def check_cockpit_timer_renders(ctx):
     """#191 regression: /cockpit/timer must serve real timer fields so the page
     renders a clock, not the literal '—' placeholder. The page falls back to '—'
-    only when the JSON is absent / not visible / carries no duration, so assert a
-    200 with visible=True and a numeric remaining_s OR duration_s OR end."""
+    only when the JSON is absent, not visible or carries no duration, so this
+    asserts a 200 with visible=True and a numeric remaining_s, duration_s or end."""
     st, data = _get_json(f"{ctx.relay_url}/cockpit/timer?t={ctx.token}")
     if st != 200:
         return CheckResult("cockpit_timer_renders", "fail", f"HTTP {st}")
@@ -246,8 +237,8 @@ def check_cockpit_timer_renders(ctx):
 
 
 def check_chat_round_trip(ctx):
-    """POST /chat/send {user,text} then GET /chat/data must echo the message back
-    (the relay's in-memory ring buffer)."""
+    """POST /chat/send {user,text}, then GET /chat/data must echo the message back
+    from the relay's in-memory ring buffer."""
     marker = "e2e-chat-ping"
     payload = _json.dumps({"user": "e2e", "text": marker}).encode()
     st, body, _ = http_request(ctx.relay_url + "/chat/send", method="POST",
@@ -269,8 +260,8 @@ def check_chat_round_trip(ctx):
 
 
 def check_submission_pending(ctx):
-    """#193: an own-row POST /cockpit/submit (token-auth) lands as PENDING (never
-    auto-published) and the director's tailnet-only /submissions lists it."""
+    """#193: an own-row POST /cockpit/submit lands as pending, never
+    auto-published, and the director's tailnet-only /submissions lists it."""
     url = "https://www.youtube.com/watch?v=e2eee2eee2e"
     payload = _json.dumps({"url": url, "stint": ctx.own_stint}).encode()
     st, body, _ = http_request(
@@ -295,8 +286,8 @@ def check_submission_pending(ctx):
 
 def check_event_title_round_trip(ctx):
     """#207: POST /event/title sets the free-text event title; it must then surface
-    in BOTH /status (director panel) and /cockpit/data (commentator). Relay-local state
-    (event.json), no external push -> safe in synthetic AND real-league mode."""
+    in both /status and /cockpit/data. The state is relay-local (event.json) with no
+    external push, so this is safe in synthetic and real-league mode alike."""
     title = "E2E - Round 7 - Spa 24h"
     payload = _json.dumps({"title": title}).encode()
     st, body, _ = http_request(ctx.relay_url + "/event/title", method="POST",
@@ -320,10 +311,10 @@ def check_event_title_round_trip(ctx):
 
 
 def check_status_live(ctx):
-    """Relaxed real-league /status health: 200 + a non-empty schedule + a live
-    block, WITHOUT pinning exact counts (real schedule_len/live_stint are
-    unknown without the live Sheet, so check_status_ok's fixed assertions don't
-    apply). Structural health only."""
+    """Structural real-league /status health: 200, a non-empty schedule and a live
+    block, without pinning exact counts. The real schedule_len and live_stint are
+    unknown without the live Sheet, so check_status_ok's fixed assertions do not
+    apply."""
     st, data = _get_json(ctx.relay_url + "/status")
     if st != 200:
         return CheckResult("status_live", "fail", f"/status HTTP {st}")
@@ -337,8 +328,8 @@ def check_status_live(ctx):
 
 
 def check_cc_api_cockpit(ctx):
-    """Control Center /api/console/status responds 200 with sane JSON
-    (ok flag + a links list)."""
+    """Control Center /api/console/status responds 200 with an ok flag and a
+    links list."""
     if not ctx.ui_url:
         return CheckResult("cc_api_cockpit", "skip", "no ui_url")
     st, data = _get_json(ctx.ui_url + "/api/console/status")
@@ -350,9 +341,9 @@ def check_cc_api_cockpit(ctx):
 
 
 def _load_set_env_key():
-    """Import the REAL `_set_env_key` from src/racecast.py — the single-key
-    profile.env writer that the #191 fix lives in. racecast.py imports cleanly
-    as a module (no hyphen, no import-time side effects)."""
+    """Import the real `_set_env_key` from src/racecast.py, the single-key
+    profile.env writer the #191 fix lives in. racecast.py imports cleanly as a
+    module: no hyphen in the name, no import-time side effects."""
     import importlib
     here = os.path.dirname(os.path.abspath(__file__))
     src = os.path.join(here, "..", "src")
@@ -362,15 +353,14 @@ def _load_set_env_key():
 
 
 def check_enable_preserves_keys(_ctx=None):
-    """#191 regression: provisioning CONSOLE_SECRET must NOT wipe other profile.env
-    keys. The bug was a single-pair write through the full-set merge_env_text (any
-    key not re-passed was dropped). This is the exact seam the zero-config
-    auto-provision (`_ensure_active_console_secret`) uses —
-    `racecast._set_env_key(path, key, value)` — exercised against a temp profile.env
-    carrying several keys; assert every pre-existing key survives + CONSOLE_SECRET added.
+    """#191 regression: provisioning CONSOLE_SECRET must not wipe other profile.env
+    keys. The bug was a single-pair write through the full-set merge_env_text, which
+    dropped any key not re-passed. This exercises the same seam the zero-config
+    auto-provision uses, `racecast._set_env_key(path, key, value)`, against a temp
+    profile.env carrying several keys.
 
-    Self-contained: its own tempfile fixture, no relay, no repo profiles/, no
-    side effects — so it is safe to run anywhere (incl. SYNTHETIC_CHECKS)."""
+    Self-contained: its own tempfile fixture, no relay, no repo profiles/ and no
+    side effects, so it is safe to run anywhere."""
     import tempfile
     rc = _load_set_env_key()
     tmp = tempfile.mkdtemp(prefix="racecast-e2e-enable-")
@@ -407,11 +397,11 @@ def check_enable_preserves_keys(_ctx=None):
 
 
 def _fanout_http_ok(response_bytes):
-    """Pure: parse a raw HTTP/1.0 response (bytes) and return (ok, msg).
+    """Parse a raw HTTP/1.0 response and return (ok, msg).
 
-    ok=True iff the status line contains '200' AND a header line contains
-    'video/mp2t' (case-insensitive). Called by check_fanout_feed_port_bound so
-    the decision logic is unit-testable without a real socket."""
+    ok is True only when the status line contains '200' and a header line contains
+    'video/mp2t', case-insensitively. Split out of check_fanout_feed_port_bound so
+    the decision is unit-testable without a real socket."""
     text = response_bytes.decode("latin-1", errors="replace")
     lines = text.split("\r\n")
     if not lines or "200" not in lines[0]:
@@ -431,11 +421,11 @@ def check_fanout_feed_port_bound(ctx):
 
     Connects raw TCP to ctx.fanout_feed_port, sends a minimal GET, reads the
     response headers, and asserts the relay owns the port and emits the right
-    Content-Type.  The body will be empty (the no-op stub streamlink produces
-    no TS) — that is expected; the header proves ownership.
+    Content-Type. The body is expected to be empty, because the no-op stub
+    streamlink produces no TS; the header alone proves ownership.
 
-    Skips when ctx.fanout_feed_port is None (no fan-out relay in this run,
-    e.g. a stub-relay unit test that omits the field)."""
+    Skips when ctx.fanout_feed_port is None, meaning no fan-out relay in this
+    run."""
     port = getattr(ctx, "fanout_feed_port", None)
     if port is None:
         return CheckResult("fanout_feed_port_bound", "skip", "no fanout relay")
@@ -445,7 +435,7 @@ def check_fanout_feed_port_bound(ctx):
         try:
             s.connect(("127.0.0.1", port))
             s.sendall(b"GET / HTTP/1.0\r\n\r\n")
-            # Read until the header/body boundary; the body will be empty/minimal.
+            # Read until the header/body boundary; the body is empty or minimal.
             data = b""
             while len(data) < 4096:
                 chunk = s.recv(1024)
@@ -469,8 +459,8 @@ def check_fanout_feed_port_bound(ctx):
 def check_health_monitor_v3(ctx):
     """Health Monitor /health-monitor/data must include the v3 band + series fields.
 
-    In synthetic mode OBS, Tailscale, and Companion are absent so the values are
-    None/empty — but the KEYS must be present in the respective maps.
+    In synthetic mode OBS, Tailscale and Companion are absent, so the values are
+    None or empty, but the keys must be present in the respective maps.
 
     bands: stream_active, funnel_ok, tailscale_up, companion_ok
     series: stream_kbps, obs_cpu_pct
@@ -495,7 +485,7 @@ def check_health_monitor_v3(ctx):
 
 
 def check_intermission_page(ctx):
-    """GET /intermission serves the chat-box overlay page (id="ichat" marker)."""
+    """GET /intermission serves the chat-box overlay page, marked by id="ichat"."""
     st, body, _ = http_request(ctx.relay_url + "/intermission")
     ok = st == 200 and b'id="ichat"' in body
     if ok:
@@ -508,26 +498,22 @@ def check_intermission_page(ctx):
 
 
 def check_program_audio_stream(ctx):
-    """On-air program-audio monitor: assert the lightweight availability PROBE
-    (`GET /preview/program-audio?probe=1`) — NOT the real stream endpoint.
+    """On-air program-audio monitor: assert the availability probe
+    `GET /preview/program-audio?probe=1`, not the real stream endpoint.
 
-    The probe returns a FINITE JSON body `{"available": true}` (HTTP 200) when
-    the feature is available (service present AND fan-out on) without ever
-    starting the encoder or streaming. The real (non-probe) endpoint is an
-    ENDLESS audio/mpeg response — under the no-op streamlink stubs no audio
-    ever flows, so its body never ends; reading it would hang this harness.
-    Hence: probe only, never a body-read of the stream itself.
+    The probe returns a finite JSON body `{"available": true}` with HTTP 200 when
+    the service is present and fan-out is on, without starting the encoder. The
+    non-probe endpoint is an endless audio/mpeg response, and under the no-op
+    streamlink stubs no audio ever flows, so reading its body would hang this
+    harness.
 
-    The main synthetic relay (ctx.relay_url) runs direct-serve (fan-out off),
-    so its probe always 404s; this check instead targets the dedicated
-    fan-out relay (ctx.fanout_relay_url, fan-out on) where the feature is
-    genuinely available. Skips when that relay isn't part of this run (e.g. a
-    stub-relay unit test that omits the field).
+    The main synthetic relay runs direct-serve, so its probe always 404s. This
+    check targets the dedicated fan-out relay (ctx.fanout_relay_url) instead, and
+    skips when that relay is not part of the run.
 
-    The disabled/404 path (feature off, or fan-out off) is covered by the pure
-    unit tests in tests/test_program_audio.py (t_program_audio_is_probe_true_
-    only_for_one / t_program_audio_is_probe_false_otherwise) and the console-
-    auth tests in tests/test_console.py — not re-derived here."""
+    The disabled path is covered by the pure unit tests in
+    tests/test_program_audio.py and the console-auth tests in
+    tests/test_console.py."""
     base = getattr(ctx, "fanout_relay_url", None)
     if base is None:
         return CheckResult("program_audio_stream", "skip", "no fanout relay")
@@ -564,15 +550,12 @@ SYNTHETIC_CHECKS = [
     check_program_audio_stream,
 ]
 
-# Real-league mode (local only): the safe subset for a copied profile. Read-only
-# checks PLUS check_chat_round_trip and check_event_title_round_trip — both write
-# only relay-local state (the crew chat ring buffer -> chat.json; the event title
-# -> event.json), with no external push, so they are harmless against a throwaway
-# copy.
-# EXCLUDES check_submission_pending (POST /cockpit/submit could ping the league's
-# REAL Discord webhook) and check_cockpit_404_when_disabled (needs a second
-# disabled relay). Uses the relaxed check_status_live (real schedule_len/
-# live_stint are unknown without the live Sheet).
+# Real-league mode, local only: the safe subset for a copied profile. The two
+# round-trip checks write only relay-local state (chat.json, event.json) with no
+# external push, so they are harmless against a throwaway copy.
+# It excludes check_submission_pending, whose POST /cockpit/submit could ping the
+# league's real Discord webhook, and check_cockpit_404_when_disabled, which needs
+# a second disabled relay.
 REAL_LEAGUE_CHECKS = [
     check_status_live,
     check_cockpit_requires_token,

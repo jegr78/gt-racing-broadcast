@@ -1,27 +1,27 @@
 #!/usr/bin/env python3
-"""Multi-feed 429 probe (#505) — maintainer harness, NOT shipped, NOT run in CI.
+"""Multi-feed 429 probe (#505). Maintainer harness, NOT shipped, NOT run in CI.
 
-Measures how many DISTINCT sustained googlevideo (YouTube) / Twitch pulls a given IP
-tolerates before a 429, how long until it hits, and how it recovers — the empirical basis
-for the #489 hardening. It reuses the REAL relay resolve + streamlink flags (importlib-loads
-`src/relay/racecast-feeds.py`, exactly like `tools/fanout-soak.py`) so the measured behaviour
-matches production, not a synthetic approximation.
+Measures how many DISTINCT sustained googlevideo (YouTube) or Twitch pulls a given IP
+tolerates before a 429, how long until it hits, and how it recovers, which is the empirical
+basis for the #489 hardening. It reuses the REAL relay resolve and streamlink flags,
+importlib-loading `src/relay/racecast-feeds.py` the way `tools/fanout-soak.py` does, so the
+measured behaviour matches production rather than a synthetic approximation.
 
-It SERVES + LOGS only: it starts N `streamlink --stdout` pulls of N distinct live URLs, drains
-their bytes (continuously, no backpressure — same as the relay fan-out ring), scans streamlink
-stderr for 429/throttle markers, and writes per-pull logs + a machine-readable `results.jsonl`.
-It provokes nothing beyond the pulls themselves and is safe to Ctrl-C.
+It SERVES and LOGS only: it starts N `streamlink --stdout` pulls of N distinct live URLs,
+drains their bytes continuously with no backpressure, the same as the relay fan-out ring,
+scans streamlink stderr for 429/throttle markers, and writes per-pull logs plus a
+machine-readable `results.jsonl`. It is safe to Ctrl-C.
 
-HARD CONSTRAINT — OFF-EVENT ONLY. Deliberately provoking 429s against the googlevideo IP a live
-broadcast pulls from PROLONGS the very outage we are studying. This refuses to run while a relay
-is active (guard below) unless --force, and the on-box runbook stops at the first sign of event
-collision. See docs/superpowers/specs/2026-07-14-multifeed-429-viability-design.md.
+HARD CONSTRAINT, OFF-EVENT ONLY. Deliberately provoking 429s against the googlevideo IP a live
+broadcast pulls from prolongs the very outage under study. This refuses to run while a relay
+is active unless --force, and the on-box runbook stops at the first sign of event collision.
+See docs/superpowers/specs/2026-07-14-multifeed-429-viability-design.md.
 
 Usage (one cell at a time; see the runbook for the full matrix + cool-downs):
     # dry-run: print the resolve/pull commands + activation schedule, spawn nothing
     python3 tools/multifeed-429-probe.py --urls urls-yt.txt --n 2 --dry-run
 
-    # a real cell — YouTube, 2 distinct pullers, burst start, 20-min survival window
+    # a real cell: YouTube, 2 distinct pullers, burst start, 20-min survival window
     python3 tools/multifeed-429-probe.py --urls urls-yt.txt --n 2 \
         --activation burst --duration-s 1200 --cell-id yt-2-burst --out probe-runs
 
@@ -33,7 +33,7 @@ Usage (one cell at a time; see the runbook for the full matrix + cool-downs):
     python3 tools/multifeed-429-probe.py --urls urls-tw.txt --platform twitch --n 2 \
         --cell-id tw-2-burst --out probe-runs
 
-    # the recovery arm — provoke a 429 then observe clear time under fixed vs backoff retry
+    # the recovery arm: provoke a 429 then observe clear time under fixed vs backoff retry
     python3 tools/multifeed-429-probe.py --urls urls-yt.txt --n 2 --retry-mode backoff \
         --cell-id yt-2-recovery-backoff --out probe-runs
 
@@ -58,15 +58,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 
 
-# --------------------------------------------------------------------------------------
-# Pure helpers (no relay import — unit-tested in tests/test_multifeed_probe.py)
-# --------------------------------------------------------------------------------------
+# The pure helpers import no relay module, so tests/test_multifeed_probe.py can import
+# this file cheaply.
 
 def activation_delays(n, mode, stagger_s, jitter_s, rng):
-    """Per-pull start delay (seconds) for N pulls. Pure (rng injected for determinism).
+    """Per-pull start delay (seconds) for N pulls. `rng` is injected for determinism.
 
-    - burst: every pull starts at 0 (the current relay behaviour — all at once).
-    - staggered: pull i starts at i*stagger_s, each (i>0) nudged by +/- jitter_s, clamped >=0.
+    - burst: every pull starts at 0, which is the current relay behaviour.
+    - staggered: pull i starts at i*stagger_s, each i>0 nudged by +/- jitter_s, clamped >=0.
     """
     if mode == "burst":
         return [0.0] * n
@@ -79,11 +78,11 @@ def activation_delays(n, mode, stagger_s, jitter_s, rng):
 
 
 def backoff_delay(attempt, mode, base_s, cap_s, jitter_s, rng):
-    """Seconds to wait before re-launching a pull that exited (throttle/EOF). Pure.
+    """Seconds to wait before re-launching a pull that exited on a throttle or EOF.
 
-    - fixed: always `base_s` (the current ~15 s retry storm — RESOLVE_RETRY).
+    - fixed: always `base_s`, the relay's RESOLVE_RETRY cadence.
     - backoff: exponential base_s * 2**(attempt-1), capped at cap_s, plus [0, jitter_s) jitter.
-      `attempt` is 1-based (the 1st re-launch after the initial start is attempt=1).
+      `attempt` is 1-based: the first re-launch after the initial start is attempt=1.
     """
     if mode == "fixed":
         return float(base_s)
@@ -102,9 +101,9 @@ _RELOAD_RE = re.compile(
 
 
 def classify_pull_line(line):
-    """Classify one streamlink stderr line. Pure. Returns one of:
-    'throttle_429' (the per-IP throttle we study), 'http_403', 'reload_error', or None.
-    429 is checked first (most specific / the signal of record)."""
+    """Classify one streamlink stderr line as 'throttle_429', the per-IP throttle under
+    study, 'http_403', 'reload_error', or None. 429 is checked first, being the most
+    specific and the signal of record."""
     if _THROTTLE_RE.search(line):
         return "throttle_429"
     if _403_RE.search(line):
@@ -115,7 +114,7 @@ def classify_pull_line(line):
 
 
 def relay_running(pid_path, is_alive):
-    """True if a relay PID file exists and its PID is alive (is_alive injected). Pure-ish.
+    """True if a relay PID file exists and its PID is alive; `is_alive` is injected.
     The off-event guard: a live relay means the box may be pulling for a broadcast."""
     try:
         with open(pid_path, encoding="utf-8") as fh:
@@ -130,7 +129,7 @@ def _fmt_secs(v):
 
 
 def summarize_cells(records):
-    """Fold aggregate cell records (kind == 'cell') into markdown matrix rows. Pure.
+    """Fold aggregate cell records (kind == 'cell') into markdown matrix rows.
     Returns (header_line, sep_line, [row_line, ...])."""
     header = ("| cell | platform | N | activation | retry | 429? | "
               "t→first-429 (s) | sustained (s) | recovery (s) | agg Mbps |")
@@ -157,7 +156,7 @@ def summarize_cells(records):
 
 
 def read_url_list(path):
-    """Read a URL-list file: one URL per line, '#' comments and blanks skipped. Pure."""
+    """Read a URL-list file: one URL per line, '#' comments and blanks skipped."""
     urls = []
     with open(path, encoding="utf-8") as fh:
         for raw in fh:
@@ -168,9 +167,9 @@ def read_url_list(path):
 
 
 def apply_live_edge(cmd, edge):
-    """Return a copy of a streamlink argv with --hls-live-edge overridden to `edge`
-    (or appended if absent). Pure. The staggered arm raises the live edge for a gentler
-    reload cadence without forking the relay's flag builder."""
+    """Return a copy of a streamlink argv with --hls-live-edge overridden to `edge`, or
+    appended if absent. The staggered arm raises the live edge for a gentler reload
+    cadence without forking the relay's flag builder."""
     if edge is None:
         return list(cmd)
     out = list(cmd)
@@ -179,16 +178,14 @@ def apply_live_edge(cmd, edge):
         if i + 1 < len(out):
             out[i + 1] = str(edge)
         return out
-    # append before the trailing `-- <url> <selector>` if present, else at the end
+    # before the trailing `-- <url> <selector>` if present, else at the end
     if "--" in out:
         i = out.index("--")
         return out[:i] + ["--hls-live-edge", str(edge)] + out[i:]
     return out + ["--hls-live-edge", str(edge)]
 
 
-# --------------------------------------------------------------------------------------
-# Relay module (lazy — only the run path needs it, so tests import this file cheaply)
-# --------------------------------------------------------------------------------------
+# Loaded lazily: only the run path needs the relay module.
 
 def _load_relay():
     path = os.path.join(ROOT, "src", "relay", "racecast-feeds.py")
@@ -206,10 +203,6 @@ def _pid_alive(pid):
     return True
 
 
-# --------------------------------------------------------------------------------------
-# One pull worker
-# --------------------------------------------------------------------------------------
-
 class Pull:
     """One streamlink pull of one distinct live URL. Owns its own subprocess lifecycle,
     re-launching on exit per the retry policy, and records timestamps for the results."""
@@ -222,10 +215,9 @@ class Pull:
         self.log = log
         self.stop = stop_evt
         self.rng = rng
-        self.logfile = open(  # noqa: SIM115 — long-lived handle owned by this Pull, closed at teardown
+        self.logfile = open(  # noqa: SIM115 (owned by this Pull, closed at teardown)
             os.path.join(out_dir, f"pull_{idx}.log"), "a", encoding="utf-8")
         self.proc = None
-        # results
         self.t_start = None
         self.t_first_bytes = None
         self.t_first_429 = None
@@ -242,12 +234,12 @@ class Pull:
         self.log(line)
 
     def _resolve_target(self):
-        """YouTube: yt-dlp -g to an HLS URL (with the box PATH deno present). Twitch: the
-        channel URL itself (the Twitch plugin resolves in-process). Returns (target, ok)."""
+        """YouTube: yt-dlp -g to an HLS URL, with deno on PATH. Twitch: the channel URL
+        itself, since the Twitch plugin resolves in-process. Returns (target, ok)."""
         if self.args.platform == "twitch":
             return self.url, True
-        # tier drives the RESOLVE format too (robust=720p, emergency=480p) — mirrors the
-        # relay, so --quality robust actually pulls a ~3 Mbps 720p rendition, not 1080p.
+        # The tier drives the RESOLVE format too, mirroring the relay, so --quality
+        # robust really pulls a 720p rendition rather than 1080p.
         fmt = self.fe.quality_ytdlp_fmt(self.args.quality)
         cmd = self.fe.ytdlp_resolve_cmd(self.url, self.args.cookies, fmt=fmt)
         try:
@@ -259,8 +251,8 @@ class Pull:
             first = (res.stderr or "").strip().splitlines()[:1]
             self._wlog(f"resolve-fail rc={res.returncode} {first}")
             return None, False
-        # stdout also carries the relay's "rcq …" --print line: take the URL.
-        hls = [ln for ln in (res.stdout or "").splitlines() if ln.startswith("http")]
+        # stdout also carries the relay's "rcq" --print line, so take the URL.
+        hls =[ln for ln in (res.stdout or "").splitlines() if ln.startswith("http")]
         return (hls[0], True) if hls else (None, False)
 
     def _streamlink_cmd(self, target):
@@ -319,13 +311,11 @@ class Pull:
                 self._wlog(f"spawn-error {exc}")
                 self.stop.wait(self.args.retry_base_s)
                 continue
-            # stderr is text; reopen as text wrapper
             err = io_text(self.proc.stderr)
             t_out = threading.Thread(target=self._drain_stdout, args=(self.proc,), daemon=True)
             t_err = threading.Thread(target=self._drain_stderr, args=(_Proc(err),), daemon=True)
             t_out.start()
             t_err.start()
-            # wait for exit or global stop
             while self.proc.poll() is None and not self.stop.is_set() and time.time() < deadline:
                 time.sleep(0.5)
             if self.stop.is_set() or time.time() >= deadline:
@@ -350,7 +340,7 @@ class Pull:
                 except subprocess.TimeoutExpired:
                     self.proc.kill()
             except OSError:
-                pass  # process already gone / pipe closed — nothing to reap
+                pass  # process already gone or pipe closed
 
     def record(self, wall_s):
         sustained = None
@@ -391,10 +381,6 @@ def io_text(binary_stream):
     return io.TextIOWrapper(binary_stream, encoding="utf-8", errors="replace")
 
 
-# --------------------------------------------------------------------------------------
-# Run one cell
-# --------------------------------------------------------------------------------------
-
 def run_cell(args, urls):
     fe = _load_relay()
     out_dir = os.path.join(args.out, args.cell_id)
@@ -416,7 +402,7 @@ def run_cell(args, urls):
              for i, u in enumerate(urls)]
 
     def on_sigint(_sig, _frm):
-        log("# Ctrl-C — stopping all pulls…")
+        log("# Ctrl-C, stopping all pulls...")
         stop_evt.set()
     signal.signal(signal.SIGINT, on_sigint)
 
@@ -428,7 +414,6 @@ def run_cell(args, urls):
         t = threading.Thread(target=_delayed_run, args=(p, deadline, d, stop_evt), daemon=True)
         t.start()
         threads.append(t)
-    # wait until deadline or stop
     while time.time() < deadline and not stop_evt.is_set():
         time.sleep(1)
     stop_evt.set()
@@ -479,10 +464,6 @@ def _delayed_run(pull, deadline, delay, stop_evt):
         pull.run(deadline)
 
 
-# --------------------------------------------------------------------------------------
-# Dry-run + summarize
-# --------------------------------------------------------------------------------------
-
 def do_dry_run(args, urls):
     fe = _load_relay()
     rng = random.Random(args.seed)
@@ -492,7 +473,7 @@ def do_dry_run(args, urls):
     for i, (u, d) in enumerate(zip(urls, delays, strict=True)):
         if args.platform == "twitch":
             target = u
-            resolve = "(twitch plugin resolves in-process — no yt-dlp hop)"
+            resolve = "(twitch plugin resolves in-process, no yt-dlp hop)"
         else:
             target = "<HLS_URL from yt-dlp -g>"
             resolve = " ".join(fe.ytdlp_resolve_cmd(u, args.cookies))
@@ -524,12 +505,8 @@ def do_summarize(paths):
         print("| (no cell records found) |")
 
 
-# --------------------------------------------------------------------------------------
-# CLI
-# --------------------------------------------------------------------------------------
-
 def build_parser():
-    p = argparse.ArgumentParser(description="Multi-feed 429 probe (#505) — off-event only.")
+    p = argparse.ArgumentParser(description="Multi-feed 429 probe (#505), off-event only.")
     p.add_argument("--urls", help="file: one distinct live URL per line (# comments ok)")
     p.add_argument("--url", action="append", default=[], help="a distinct live URL (repeatable)")
     p.add_argument("--platform", choices=("youtube", "twitch"), default="youtube")
@@ -580,7 +557,6 @@ def main(argv=None):
         do_dry_run(args, urls)
         return 0
 
-    # off-event guard
     if relay_running(args.relay_pid, _pid_alive) and not args.force:
         print("REFUSING: a relay appears to be running (off-event guard). This probe "
               "provokes 429s and would prolong a live outage.\n"

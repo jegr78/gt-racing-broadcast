@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """Relay restart soak (#619). Maintainer diagnostic, NOT shipped, NOT run in CI.
 
-Answers the one question in #619 that needs hours rather than a window: **does every
-restart heal itself, or does something accumulate?** The producer's report is a picture
-that drifts further behind across an event night. A restart was shown to park OBS deep
-in the ring (#614); since #629/#630 the relay rejoins OBS after one. That the first
-restart recovers proves nothing about the twentieth.
+Answers the question that needs hours rather than a window: **does every restart heal
+itself, or does something accumulate?** A restart parks OBS deep in the ring (#614) and
+the relay rejoins it afterwards (#629/#630), but that the first restart recovers proves
+nothing about the twentieth.
 
 It drives a RUNNING relay over its control port and never touches OBS, so it can run
 from another machine over the tailnet while OBS keeps rendering on the producer host.
@@ -32,8 +31,8 @@ tighter cannot judge itself. It is refused rather than left to produce blanks.
 Every sample and every restart goes to the JSONL at `--out`, so an interrupted run can
 still be turned into a verdict with `--replay`. The verdict comes from
 `tools/restart_soak.py`, which is pure and unit-tested in `tests/test_restart_soak.py`;
-every threshold there is a quantity the relay already defines (the reserve from
-`/status`, the deadline from the heartbeat).
+every threshold there is a quantity the relay already defines, the reserve from
+`/status` and the deadline from the heartbeat.
 
 Exit code: 0 on PASS, 1 on FAIL, 2 on UNKNOWN or a setup error.
 """
@@ -71,12 +70,12 @@ OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirec
 
 def get_json(base, path, timeout=8.0):
     """GET one relay endpoint. Returns (payload, None) or (None, reason). Never raises:
-    a soak must survive a blip and say so in the sample, not die three hours in.
+    a soak must survive a blip and say so in the sample.
 
     `http.client.HTTPException` is in the tuple deliberately. urllib wraps only the
-    request in `URLError`; `getresponse()` and `read()` are not wrapped, so a truncated
-    body (`IncompleteRead`) or a garbled status line derives from `Exception` alone and
-    would kill a run that has already cut the live feed a dozen times."""
+    request in `URLError`; `getresponse()` and `read()` are not, so a truncated body
+    (`IncompleteRead`) or a garbled status line derives from `Exception` alone and would
+    kill the run."""
     try:
         req = urllib.request.Request(base + path, headers=UA)
         with OPENER.open(req, timeout=timeout) as resp:   # noqa: S310 (scheme checked)
@@ -99,8 +98,8 @@ def confirm(base, feed, restarts, ask=input, progress=print):
 def run(base, hours, every_min, sample_every_s, out_path, feed=None,
         clock=time.monotonic, sleep=time.sleep, progress=print):
     if os.path.exists(out_path):
-        # Checked before the relay is touched: a soak never overwrites a recorded run,
-        # and finding that out after the first restart would be a night's data too late.
+        # Checked before the relay is touched, so a recorded run is never overwritten
+        # after the first restart has already cut the feed.
         progress(f"{out_path} already exists; a soak never overwrites one. "
                  f"Pass a different --out.")
         return 2
@@ -139,18 +138,15 @@ def run(base, hours, every_min, sample_every_s, out_path, feed=None,
             samples.append(row)
             fh.write(json.dumps(row) + "\n"); fh.flush()
             if now >= next_restart and now <= last_restart_at:
-                # The feed this sample MEASURED, not the one resolved before the loop.
-                # A handover moves the on-air feed mid-soak, and reloading the boot-time
-                # one would restart an off-air feed while the numbers came from another:
-                # state_age_s never falls, the run says UNKNOWN for a reason that is not
-                # true, and on YouTube the pointless re-pulls invite a 429 as well.
+                # The feed this sample MEASURED, not the one resolved before the loop: a
+                # handover moves the on-air feed mid-soak, and restarting the other one
+                # judges a window nothing happened in.
                 hit = feed or row.get("feed") or target
                 _res, rwhy = get_json(base, analysis.reload_path(hit))
-                # AFTER the request, not before it: the sample above was read while the
-                # feed was still up, and timestamping the restart at that reading put a
-                # pre-restart value inside the recovery window. Rounded once and used
-                # for both the analysis and the record, so --replay judges the same
-                # windows the live run did.
+                # AFTER the request: the sample above was read while the feed was still
+                # up, so stamping the restart at that reading puts a pre-restart value
+                # inside the recovery window. Rounded once for both the analysis and the
+                # record, so --replay judges the same windows the live run did.
                 at = round(clock() - t0, 1)
                 restarts.append(at)
                 fh.write(json.dumps({"t": at, "event": "restart", "feed": hit}) + "\n")
@@ -176,8 +172,7 @@ def report(samples, restarts, reserve, out_path, progress=print):
 
 
 def replay(path, progress=print):
-    """Re-judge a recorded run. The reason this exists: the verdict used to appear only
-    when the loop ran to its end, so a Ctrl-C three hours in left a file nothing read."""
+    """Re-judge a recorded run, so a Ctrl-C hours in still yields a verdict."""
     rows, dropped = [], 0
     with open(path, encoding="utf-8") as fh:
         for line in fh:
@@ -187,9 +182,7 @@ def replay(path, progress=print):
             try:
                 rows.append(json.loads(line))
             except ValueError:
-                # A run killed mid-write leaves a half line, and that run is the whole
-                # reason this exists. Drop it and judge the rest.
-                dropped += 1
+                dropped += 1        # a run killed mid-write leaves a half line
     if dropped:
         progress(f"skipped {dropped} unreadable line(s) at the end of an interrupted run")
     reserve = next((r.get("reserve_s") for r in rows if r.get("event") == "start"), None)

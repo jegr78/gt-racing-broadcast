@@ -5,8 +5,8 @@ Maintainer script (NOT shipped). The wiki is generated from the repo: edit the
 Markdown under src/docs/wiki/, then run this to mirror it into the GitHub wiki.
 
 It derives the wiki remote from the repo's `origin` (`<origin>.wiki.git`), clones
-it into runtime/wiki/ (gitignored) or pulls if already there, mirrors the pages
-(add/update/delete), commits and pushes.
+it into runtime/wiki/ (gitignored) or pulls if already there, mirrors the pages,
+commits and pushes.
 
 Usage:
   python3 tools/sync-wiki.py                 # mirror + commit + push
@@ -47,9 +47,8 @@ def wiki_remote_from_origin():
 
 
 def run_link_check():
-    """Abort the sync when tools/check-wiki-links.py finds broken links.
-    (The test suite is the primary gate; this is the maintainer's last line
-    of defense before pages go public.)"""
+    """Abort the sync when tools/check-wiki-links.py finds broken links. The test
+    suite is the primary gate; this is the last check before pages go public."""
     import importlib.util
     path = os.path.join(ROOT, "tools", "check-wiki-links.py")
     spec = importlib.util.spec_from_file_location("check_wiki_links", path)
@@ -57,7 +56,7 @@ def run_link_check():
     spec.loader.exec_module(mod)
     errors = mod.check_wiki(WIKI_SRC)
     if errors:
-        sys.exit("ERROR: broken wiki links — fix before publishing:\n  "
+        sys.exit("ERROR: broken wiki links, fix before publishing:\n  "
                  + "\n  ".join(errors))
 
 
@@ -72,7 +71,7 @@ def ensure_clone(remote):
         branch = head.split("/")[-1]
         git(["checkout", branch], cwd=CLONE, check=False)
         git(["reset", "--hard", f"origin/{branch}"], cwd=CLONE)
-        git(["clean", "-fd"], cwd=CLONE)  # drop leftovers (e.g. from a prior --dry-run)
+        git(["clean", "-fd"], cwd=CLONE)  # drop leftovers, e.g. from a prior --dry-run
         return
     try:
         git(["clone", remote, CLONE], cwd=ROOT)
@@ -89,7 +88,7 @@ def ensure_clone(remote):
 
 def _rel_files(base):
     """Files to mirror, as paths relative to `base`: top-level *.md plus everything
-    under images/ (the wiki's binary assets, e.g. screenshots)."""
+    under images/, the wiki's binary assets."""
     files = []
     if os.path.isdir(base):
         for f in os.listdir(base):
@@ -104,9 +103,9 @@ def _rel_files(base):
 
 
 def mirror_pages():
-    """Make the clone's pages + images/ match src/docs/wiki exactly. Returns (added,
-    updated, removed) relative-path lists. Bytes are compared, so binary assets
-    (PNG/JPG/SVG) sync correctly alongside the Markdown."""
+    """Make the clone's pages and images/ match src/docs/wiki exactly. Returns
+    (added, updated, removed) relative-path lists. Bytes are compared, so binary
+    assets sync correctly alongside the Markdown."""
     src = _rel_files(WIKI_SRC)
     dst = set(_rel_files(CLONE))
     added, updated, removed = [], [], []
@@ -155,7 +154,7 @@ def main():
     added, updated, removed = mirror_pages()
     changes = [("added", added), ("updated", updated), ("removed", removed)]
     if not any(lst for _, lst in changes):
-        print("Wiki already up to date — nothing to do.")
+        print("Wiki already up to date, nothing to do.")
         return
     for label, lst in changes:
         for f in lst:

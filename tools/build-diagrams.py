@@ -7,7 +7,7 @@ browser (Playwright) over a tiny harness page that loads the pinned
 only), converts the Mermaid to Excalidraw elements, PINS every element seed so the
 hand-drawn 'rough' look is reproducible (quiet git diffs), and exports to SVG. The
 SVG is committed to assets/img/diagrams/<name>.svg; the shipped/published site stays
-JS-free for diagrams. Maintainer tool — not shipped.
+JS-free for diagrams. Maintainer tool, not shipped.
 
 Prereq: a venv with Playwright + chromium (see the racecast-e2e skill):
   python3 -m venv .venv-pw && . .venv-pw/bin/activate

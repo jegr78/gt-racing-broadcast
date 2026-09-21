@@ -2,7 +2,7 @@
 """Pure, import-testable core of the broadcast-asset renderer
 (tools/render-assets.py).
 
-An "asset kit" is a per-league folder — normally profiles/<name>/assets-src/ —
+An "asset kit" is a per-league folder, normally profiles/<name>/assets-src/,
 holding the design and the round's texts:
 
     kit.json      what to render: screen id -> filename, scene -> duration/audio
@@ -37,8 +37,6 @@ AUDIO_ARGS = ["-c:a", "aac", "-b:a", "192k"]
 class KitError(Exception):
     """A kit is missing, malformed, or asks for something that isn't there."""
 
-
-# --------------------------------------------------------------- kit loading
 
 def kit_dir(root, profile):
     """Where a profile's asset kit lives."""
@@ -77,8 +75,6 @@ def load_event_texts(path):
     return data
 
 
-# -------------------------------------------------------------------- stills
-
 def safe_output_name(name):
     """Guard a manifest-supplied filename.
 
@@ -109,8 +105,6 @@ def still_targets(kit, only=None):
         wanted = stills
     return [(sid, safe_output_name(wanted[sid])) for sid in sorted(wanted)]
 
-
-# -------------------------------------------------------------------- scenes
 
 def scene_names(kit, only=None):
     scenes = kit.get("scenes") or {}
@@ -144,8 +138,6 @@ def frame_name(index):
     return FRAME_PATTERN % index
 
 
-# --------------------------------------------------------------------- audio
-
 def _num(value):
     """Render a number without a trailing .0, so filters read like the docs."""
     f = float(value)
@@ -169,7 +161,7 @@ def audio_filter(audio):
 def mux_args(frames_dir, fps, out_path, audio_path=None, audio=None):
     """Full ffmpeg argv (without the leading 'ffmpeg') for one scene.
 
-    Returned as a list so every path stays one argv entry — a space or a quote
+    Returned as a list so every path stays one argv entry: a space or a quote
     in a filename can never split into extra arguments.
     """
     args = ["-hide_banner", "-v", "warning", "-y",
@@ -196,8 +188,6 @@ def mux_args(frames_dir, fps, out_path, audio_path=None, audio=None):
     args += ["-movflags", "+faststart", out_path]
     return args
 
-
-# ---------------------------------------------------------------------- text
 
 def text_config(kit, event, overrides):
     """The text config handed to window.applyText().

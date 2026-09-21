@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Add the 'Standby Cover' incident hold graphic to an OBS scene collection (idempotent).
 
-Mirrors tools/add_pov_source.py. It deep-copies the existing 'Thumbnail' image source
-(but pointing at the dedicated 'Standby Cover.png' graphic, distinct from the Standby
-scene's 'Standby.png' thumbnail) and the 'Standings' full-screen scene item as templates, so
-the result always matches OBS's schema. The cover sits BELOW the HUD group (Race Control
-banner + timer stay visible); the existing 'Feed POV' item is moved below the HUD too
-(directly after Feed B) so the cover hides the POV PiP as well. Re-running is a no-op
-once 'Standby Cover' exists.
+It deep-copies the existing 'Thumbnail' image source, pointing at the dedicated
+'Standby Cover.png' graphic rather than the Standby scene's 'Standby.png', and the
+'Standings' full-screen scene item as templates, so the result always matches OBS's
+schema. The cover sits BELOW the HUD group, so the Race Control banner and timer stay
+visible; the existing 'Feed POV' item is moved below the HUD too, directly after Feed B,
+so the cover hides the POV PiP as well. Re-running is a no-op once 'Standby Cover'
+exists.
 
 Usage: python3 tools/add_standby_cover.py <collection.json>
 """
@@ -15,7 +15,7 @@ import copy, json, sys
 
 COVER_NAME = "Standby Cover"
 COVER_UUID = "bbbbbbb1-0000-4000-8000-000000000001"   # A/B/POV use aaaaaaaN-; cover bbbbbbb1-
-COVER_FILE = "__RACECAST_GRAPHICS__/Standby Cover.png"      # dedicated neutral cover (tokenized)
+COVER_FILE = "__RACECAST_GRAPHICS__/Standby Cover.png"
 POV_NAME   = "Feed POV"
 
 
@@ -34,7 +34,6 @@ def add_standby_cover(d):
     stint = next(s for s in srcs if s.get("id") == "scene" and s.get("name") == "Stint")
     items = stint["settings"]["items"]
 
-    # 1) source object: copy Thumbnail (same image_source/file), override identity
     src = copy.deepcopy(thumb)
     src["name"] = COVER_NAME
     src["uuid"] = COVER_UUID
@@ -42,7 +41,7 @@ def add_standby_cover(d):
     src["settings"]["file"] = COVER_FILE
     srcs.append(src)
 
-    # 2) move existing 'Feed POV' (if present) to sit directly after Feed B
+    # A present 'Feed POV' moves to sit directly after Feed B.
     insert_at = _feedb_index(items) + 1
     pov = next((it for it in items if it.get("name") == POV_NAME
                 and not it.get("group_item_backup")), None)
@@ -52,7 +51,7 @@ def add_standby_cover(d):
         items.insert(insert_at, pov)
         insert_at += 1                            # cover goes after the moved POV
 
-    # 3) Stint scene item for the cover: copy the 'Standings' full-screen insert as template
+    # The cover's Stint item copies the 'Standings' full-screen insert.
     tmpl = next(it for it in items if it.get("name") == "Standings")
     item = copy.deepcopy(tmpl)
     item["name"] = COVER_NAME
@@ -72,7 +71,7 @@ def main(path):
     with open(path, encoding="utf-8") as fh:
         d = json.load(fh)
     if not add_standby_cover(d):
-        print(f"{path}: '{COVER_NAME}' already present — skip"); return
+        print(f"{path}: '{COVER_NAME}' already present, skip"); return
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(d, fh, ensure_ascii=False, indent=4)
     print(f"{path}: added '{COVER_NAME}' (hidden full-screen, below HUD) "

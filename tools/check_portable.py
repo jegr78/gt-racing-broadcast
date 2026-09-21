@@ -2,9 +2,9 @@
 """Edit-time portability guard (maintainer-only; not shipped).
 
 Wired as a PostToolUse Edit|Write hook in .claude/settings.json. Blocks an edit
-that bakes THIS machine's home directory into a repo file — the simplest, zero-
-false-positive signal that a machine-specific path leaked into committed code
-(CLAUDE.md: "Never hardcode machine paths"; "Tests must run on any machine").
+that bakes THIS machine's home directory into a repo file, which is the signal
+that a machine-specific path leaked into committed code (CLAUDE.md: "Never
+hardcode machine paths"; "Tests must run on any machine").
 
 It deliberately flags only the *current* user's home (e.g. /Users/<me>), never
 generic OS paths like /Applications/OBS.app or placeholder fixtures
@@ -13,7 +13,7 @@ generic OS paths like /Applications/OBS.app or placeholder fixtures
 Reads the hook JSON from stdin; exit 2 + stderr blocks the edit, exit 0 allows."""
 import json, os, sys
 
-# Files worth scanning — source, docs, config that ship or get read by others.
+# Files worth scanning: source, docs and config that ship or get read by others.
 _EXTS = (".py", ".md", ".json", ".html", ".css", ".txt", ".yml", ".yaml",
          ".companionconfig", ".env.example")
 
@@ -48,7 +48,7 @@ def main():
         sys.stderr.write(
             "portability guard: this file hardcodes a machine-specific path "
             f"({hits[0]}).\nUse os.path.expanduser('~'), a runtime-dir helper, or "
-            "a fixture/placeholder instead — committed files must work on any "
+            "a fixture/placeholder instead; committed files must work on any "
             "machine (CLAUDE.md: never hardcode machine paths).\n")
         return 2
     return 0

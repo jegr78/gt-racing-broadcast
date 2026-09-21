@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
-"""Prefetch-burst probe (#614) — maintainer diagnostic, NOT shipped, NOT run in CI.
+"""Prefetch-burst probe (#614). Maintainer diagnostic, NOT shipped, NOT run in CI.
 
 Measures the one number the relay's OBS rejoin needs: **how long streamlink takes to
 deliver the initial `--hls-live-edge N` burst**, in wall-clock seconds from the first
 byte.
 
 Why it matters. In fan-out the ring's time index is byte ARRIVAL time, and OBS rejoins
-at `trailing_offset(prebuffer_s)` — the mark `prebuffer_s` seconds before now. For that
+at `trailing_offset(prebuffer_s)`, the mark `prebuffer_s` seconds before now. For that
 join to land AFTER the prefetch instead of at its start, the rejoin has to wait longer
-than `burst_arrival_s + prebuffer_s`. The burst's MEDIA duration (N x segment length) is
+than `burst_arrival_s + prebuffer_s`. The burst's MEDIA duration, N x segment length, is
 irrelevant here; only how long the download occupies the wall clock is.
 
 Method. Run streamlink with the relay's exact serve flags, timestamp every chunk that
 reaches stdout, and split the arrival pattern at the first gap wider than --gap: the
 burst is everything before it. Reports the burst's arrival span and byte count, plus the
 first few steady-state inter-arrival gaps as a sanity check that the source really is
-live (a VOD has no gaps — it races ahead and the burst never ends).
+live. A VOD has no gaps: it races ahead and the burst never ends.
 
 Usage:
   python3 tools/prefetch-burst-probe.py --url https://www.twitch.tv/<login>
@@ -40,15 +40,12 @@ import urllib.parse
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 
-# The relay's own serve flags, kept literal so the probe cannot drift from production
-# silently. racecast-feeds.py is not importable by name (hyphen), so they are mirrored
-# here and checked against the source at startup.
-# The inter-arrival gap that ends the burst, per platform. There is NO single value:
-# MEASURED 2026-09-20, YouTube segments arrive every ~5 s with gaps of 0.58-0.78 s INSIDE
-# the burst, while Twitch low-latency runs a ~1.4-1.9 s cadence with <0.5 s inside it. A
-# 2.0 s threshold splits YouTube correctly but never fires on Twitch (the whole window
-# reads as one burst); 0.5 s splits Twitch correctly but chops YouTube's burst into
-# pieces. Both failures are silent, so the default follows the platform.
+# racecast-feeds.py is not importable by name (hyphen), so the relay's serve flags are
+# mirrored below and checked against the source at startup.
+# The inter-arrival gap that ends the burst. No single value fits both platforms:
+# YouTube's gaps INSIDE a burst reach 0.78 s, while Twitch low-latency's steady cadence
+# is only 1.4-1.9 s. A threshold that splits one never fires on the other, and both
+# failures are silent, so the default follows the platform.
 GAP_S = {"youtube": 2.0, "twitch": 1.0}
 
 FLAGS = {
@@ -77,16 +74,16 @@ def check_flags_match_relay():
 
     Compares the PARSED --hls-live-edge value, not substrings. A substring test is
     useless here: `"4" in 'STREAMLINK_SERVE = [..., "64M", "--hls-live-edge", "4"]'` is
-    already satisfied by the "64M", so a drift from 4 to 9 would pass unnoticed — and
-    the relay's SEGMENT_FETCH_BUDGET_S is derived from this script's output.
+    already satisfied by the "64M", so a drift from 4 to 9 would pass unnoticed, and the
+    relay's SEGMENT_FETCH_BUDGET_S is derived from this script's output.
     """
     try:
         with open(RELAY_SRC, encoding="utf-8") as fh:
             src = fh.read()
     except OSError as exc:
         return [f"could not read {RELAY_SRC} ({exc})"]
-    # Each relay constant, and the FLAGS key it is mirrored into. The robust Twitch set
-    # is wrapped over two source lines, so the whole assignment is read, not one line.
+    # The robust Twitch set wraps over two source lines, so the regex below reads the
+    # whole assignment rather than one line.
     want = {
         "STREAMLINK_SERVE": ("youtube", "full"),
         "STREAMLINK_SERVE_ROBUST": ("youtube", "robust"),
@@ -114,9 +111,9 @@ def check_flags_match_relay():
 
 
 def platform_of(url):
-    """Platform by HOST, not by substring — the relay does the same (is_channel /
-    _is_stream_url). `"twitch.tv" in url` would also match a query string or a value
-    crafted to look like a flag."""
+    """Platform by HOST, not by substring, the same way the relay does it.
+    `"twitch.tv" in url` would also match a query string or a value crafted to look
+    like a flag."""
     host = (urllib.parse.urlparse(url).hostname or "").lower()
     if host == "twitch.tv" or host.endswith(".twitch.tv"):
         return "twitch"
@@ -125,9 +122,8 @@ def platform_of(url):
 
 def https_url(value):
     """argparse type: accept only an https URL with a host. The probe hands this value
-    to streamlink as a POSITIONAL, where a leading '-' would become an option and
-    streamlink has options that run programs (--player, --ffmpeg-ffmpeg). Self-injection
-    only, but the guard is one line and matches the relay's `--` convention."""
+    to streamlink as a POSITIONAL, where a leading '-' would become an option, and
+    streamlink has options that run programs (--player, --ffmpeg-ffmpeg)."""
     u = urllib.parse.urlparse(value)
     if u.scheme != "https" or not u.hostname:
         raise argparse.ArgumentTypeError(f"expected an https:// URL with a host, got {value!r}")
@@ -138,8 +134,8 @@ def resolve(url, platform, cookies=None):
     """Twitch goes straight through streamlink's plugin; YouTube needs yt-dlp to hand
     over the live HLS URL, exactly as the relay does it. Without the cookie jar YouTube
     offers no MUXED rendition for a live stream, so `b[height<=1080]/b` fails and the
-    probe would measure nothing — pass a COPY of the jar, never the relay's own file
-    (yt-dlp rewrites it)."""
+    probe measures nothing. Pass a COPY of the jar, never the relay's own file, because
+    yt-dlp rewrites it."""
     if platform == "twitch":
         return url, None
     cmd = ["yt-dlp", "-g", "-f", "b[height<=1080]/b", "--no-warnings", "--no-playlist"]
@@ -190,16 +186,15 @@ def measure(target, platform, tier, gap_s, max_s):
     if first is None:
         return None
     span = (burst_end - first) if burst_end is not None else (prev - first)
-    # A usable run split the burst somewhere in the middle. The two degenerate outcomes
-    # both LOOK like measurements and are not: the threshold fired on the very first
-    # chunk (span 0, burst truncated), or it never fired (the whole window read as one
-    # burst). Both mean --gap does not match this source's cadence.
+    # A usable run split the burst somewhere in the middle. Two degenerate outcomes look
+    # like measurements and are not: the threshold fired on the very first chunk, or it
+    # never fired. Both mean --gap does not match this source's cadence.
     usable = burst_end is not None and span > 0.0
     why = None
     if burst_end is None:
-        why = "no gap seen — --gap is above this source's cadence, or it is not live"
+        why = "no gap seen; --gap is above this source's cadence, or it is not live"
     elif span <= 0.0:
-        why = "the first gap came before the second chunk — --gap is below the burst's own jitter"
+        why = "the first gap came before the second chunk; --gap is below the burst's own jitter"
     return {"burst_span_s": round(span, 2), "burst_bytes": burst_bytes,
             "burst_ended": burst_end is not None, "usable": usable, "why": why,
             "gaps": gaps[:6]}
@@ -227,19 +222,18 @@ def main():
     if drift:
         for d in drift:
             print(f"ERROR: {d}", file=sys.stderr)
-        print("The probe's mirrored flags no longer match the relay — fix them before "
+        print("The probe's mirrored flags no longer match the relay. Fix them before "
               "trusting a number from this run.", file=sys.stderr)
         return 2
 
     if os.path.exists(os.path.join(ROOT, "runtime", "relay.pid")):
         print("ERROR: a relay PID file exists. A second puller on the same source is how "
-              "a YouTube 429 starts — stop the relay first.", file=sys.stderr)
+              "a YouTube 429 starts. Stop the relay first.", file=sys.stderr)
         return 2
 
     platform = platform_of(args.url)
     # yt-dlp REWRITES the jar it is handed, so it never gets the real one: a probe run
-    # must not be able to log the relay's live session out. Copied into a private temp
-    # dir and discarded afterwards.
+    # must not be able to log the relay's live session out.
     with tempfile.TemporaryDirectory(prefix="racecast-probe-") as tmp:
         jar = None
         if args.cookies:
@@ -263,17 +257,17 @@ def _run_measurements(args, platform, target):
     results = []
     for i in range(args.runs):
         if not args.json:
-            print(f"run {i + 1}/{args.runs} ({platform}, {args.tier}, gap {gap_s} s) …",
+            print(f"run {i + 1}/{args.runs} ({platform}, {args.tier}, gap {gap_s} s) ...",
                   flush=True)
         r = measure(target, platform, args.tier, gap_s, args.max_s)
         if r is None:
-            print("ERROR: no bytes arrived — is the source live?", file=sys.stderr)
+            print("ERROR: no bytes arrived. Is the source live?", file=sys.stderr)
             return 2
         results.append(r)
         if not args.json:
             note = "ok" if r["usable"] else f"UNUSABLE: {r['why']}"
             print(f"  burst {r['burst_span_s']:.2f} s, {r['burst_bytes'] / 1e6:.1f} MB "
-                  f"— {note}; later gaps {r['gaps']}")
+                  f"| {note}; later gaps {r['gaps']}")
 
     spans = [r["burst_span_s"] for r in results if r["usable"]]
     out = {"url": args.url, "platform": platform, "tier": args.tier, "gap_s": gap_s,
@@ -287,7 +281,7 @@ def _run_measurements(args, platform, target):
             print(f"burst arrival span: max {max(spans):.2f} s over {len(spans)} clean run(s)")
             print("The rejoin must wait longer than this PLUS RACECAST_FEED_PREBUFFER_S.")
         else:
-            print("No usable run — every attempt hit one of the degenerate splits above, "
+            print("No usable run; every attempt hit one of the degenerate splits above, "
                   f"so this says nothing. Try --gap around {gap_s / 2:.2f} or "
                   f"{gap_s * 2:.1f}, and check the source is live.")
     return 0 if spans else 1

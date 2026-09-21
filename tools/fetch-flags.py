@@ -3,7 +3,7 @@
 
 Reads the Country column from the Google Sheet's Configuration tab (gviz CSV,
 no API key), then downloads any flag that is not already present into
-`src/assets/flags/<asset_key>.svg`. Existing flags are kept untouched — only
+`src/assets/flags/<asset_key>.svg`. Existing flags are kept untouched and only
 missing ones are added, so old seasons' flags survive and new seasons' countries
 are filled in automatically.
 
@@ -17,7 +17,7 @@ Usage:
   python3 tools/fetch-flags.py --force         # re-download even if present
   python3 tools/fetch-flags.py --sheet-id ID --config-tab Configuration
 
-Maintainer tool — not shipped in the distributable package.
+Maintainer tool, not shipped in the distributable package.
 """
 import argparse, csv, importlib.util, io, json, os, sys
 from urllib.parse import quote

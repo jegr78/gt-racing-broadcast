@@ -13,7 +13,7 @@ Network dependency: the build (CI included) reaches fonts.googleapis.com +
 fonts.gstatic.com. Missing families are skipped with a warning; the build only
 fails if NOTHING downloaded.
 
-Maintainer tool — not shipped in the distributable package.
+Maintainer tool, not shipped in the distributable package.
 
 Usage:
   python3 tools/fetch-fonts.py                  # build ./fonts.zip
@@ -42,9 +42,9 @@ def _http(url, headers=None, binary=False, timeout=30):
 def fetch_family(name, css_fetch=None, bin_fetch=None):
     """Return {filename: woff2-bytes} for a Google family: the four overlay cuts
     (regular/bold/italic/bold-italic, whichever the family has) so the bundled
-    baseline renders TRUE bold/italic — same self-host model as the live "add a font"
-    download. Falls back to a single base file when the cuts request yields no latin
-    face. Empty dict if the family yields no gstatic woff2. Fetchers injectable."""
+    baseline renders TRUE bold/italic. Falls back to a single base file when the
+    cuts request yields no latin face. Empty dict if the family yields no gstatic
+    woff2. Fetchers injectable."""
     css_fetch = css_fetch or (lambda u: _http(u, headers={"User-Agent": _UA}))
     bin_fetch = bin_fetch or (lambda u: _http(u, binary=True))
     out = {}

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Add the three weather graphic sources + hidden Stint items to an OBS collection.
 
-Idempotent (mirrors tools/add_standby_cover.py): deep-copies the 'Standings' image
-source and its full-screen Stint scene item as templates, so the result always matches
-OBS's schema. Re-running is a no-op once the sources exist. Files are tokenised as
-__RACECAST_GRAPHICS__/<name>.png (resolved by setup-assets.py).
+Idempotent: deep-copies the 'Standings' image source and its full-screen Stint scene
+item as templates, so the result always matches OBS's schema. Re-running is a no-op once
+the sources exist. Files are tokenised as __RACECAST_GRAPHICS__/<name>.png and resolved
+by setup-assets.py.
 
 Usage: python3 tools/add_weather_sources.py <collection.json>
 """
@@ -55,7 +55,7 @@ def main(path):
         d = json.load(fh)
     added = add_weather_sources(d)
     if not added:
-        print(f"{path}: weather sources already present — skip"); return
+        print(f"{path}: weather sources already present, skip"); return
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(d, fh, ensure_ascii=False, indent=4)
     print(f"{path}: added {', '.join(added)} (hidden full-screen Stint items)")

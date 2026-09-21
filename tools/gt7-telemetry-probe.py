@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Standalone GT7 telemetry probe (maintainer; not shipped). Heartbeat + decrypt +
+"""Standalone GT7 telemetry probe (maintainer, not shipped). Heartbeat, decrypt and
 field dump against a live PS4/PS5, the way to validate the real packet path and the
 struct offsets. Mirrors tools/broadcast-chat-probe.py.
 
@@ -7,10 +7,10 @@ struct offsets. Mirrors tools/broadcast-chat-probe.py.
     python3 tools/gt7-telemetry-probe.py --ps-ip 192.168.1.42  # explicit IP
     python3 tools/gt7-telemetry-probe.py --capture caps.hex -n 20   # save 20 raw packets
 
-The console IP is auto-discovered by default (a limited broadcast heartbeat; the
-first responder is latched), so no IP is needed on a flat home LAN. --capture writes
+The console IP is auto-discovered by default with a limited broadcast heartbeat,
+latching the first responder, so no IP is needed on a flat home LAN. --capture writes
 each RAW encrypted packet as one hex line, so a real packet can be baked into a CI
-fixture that validates the field offsets against reality (not just wiring).
+fixture that validates the field offsets against reality, not just the wiring.
 """
 import argparse
 import contextlib
@@ -49,7 +49,7 @@ def main():
     seen = 0
     print(f"listening on 33740 ({dest or 'auto-discovery'}); Ctrl-C to stop")
     with contextlib.ExitStack() as stack:
-        stack.enter_context(sock)   # close the socket on exit (Ctrl-C / error)
+        stack.enter_context(sock)   # close the socket on Ctrl-C or error
         cap = (stack.enter_context(open(args.capture, "a", encoding="utf-8"))
                if args.capture else None)
         while True:
