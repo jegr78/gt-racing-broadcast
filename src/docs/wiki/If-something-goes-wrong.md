@@ -62,6 +62,10 @@ never goes through yt-dlp).
 - Confirm cookies are fresh (`racecast cookies firefox`); a stale jar fails YouTube
   specifically. (The relay now hands streamlink the same User-Agent + cookies yt-dlp used,
   which closes the most common cause of this 403 — but the freeze rule above still stands.)
+- **`preflight` says the cookie age "cannot be judged".** The age comes from a stamp
+  written when you export, because `yt-dlp` rewrites the jar itself on every resolve and
+  its file date would only ever show the last handover. A jar exported before this
+  existed has no stamp. Run `racecast cookies firefox` once and the warning goes.
 
 ## The HUD / overlay is blank or stale
 

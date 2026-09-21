@@ -644,5 +644,108 @@ def t_discord_payload_carries_the_finding():
                                                   now=1000.0)) == ""
 
 
+def t_counter_increase_measures_the_rise_from_the_first_sample_not_its_value():
+    # The first sample is the BASELINE — whatever the counter already held when the
+    # window opened happened before it. Counting that value in full attributed a
+    # relay's whole pre-event history to the event.
+    assert rb.counter_increase([]) == 0
+    assert rb.counter_increase([7]) == 0          # one reading shows no rise at all
+    assert rb.counter_increase([0, 0, 0]) == 0
+    assert rb.counter_increase([0, 1, 3, 3]) == 3
+    assert rb.counter_increase([4, 6]) == 2       # not 6
+    # A restart mid-window: rise to 5, counter starts over, then 2 more.
+    assert rb.counter_increase([1, 5, 0, 2]) == 6
+
+
+def t_a_multi_part_event_counts_each_repair_once():
+    # The report summed counter_increase PER on-air window, so a running counter was
+    # re-counted in full at every part. A three-part event whose counter went 5 -> 9
+    # reported 21 instead of 4 — and a multi-part broadcast is the normal case.
+    samples = []
+    for ts, total in ((0.0, 5), (10.0, 5),          # Part 1
+                      (100.0, 5), (110.0, 7),       # Part 2
+                      (200.0, 7), (210.0, 9)):      # Part 3
+        samples.append(_sample(ts, live_stint=1, av_repairs_total=total,
+                               av_unexplained_total=0))
+    events = [{"ts": 0.0, "type": "part_start"}, {"ts": 10.0, "type": "part_end"},
+              {"ts": 100.0, "type": "part_start"}, {"ts": 110.0, "type": "part_end"},
+              {"ts": 200.0, "type": "part_start"}, {"ts": 210.0, "type": "part_end"}]
+    rep = rb.build_report(samples, events, {1: "Alice"}, "E", (0.0, 210.0), now=300.0)
+    assert rep["on_air"]["av_repairs"] == 4, rep["on_air"]
+
+
+def t_a_repair_between_two_parts_is_still_part_of_the_event():
+    # One series across every window, not a sum per window. Per-window, each part's
+    # first sample is its own baseline, so a rise that happened in the OFF-AIR gap
+    # between two parts vanished. The relay was up and the disturbance happened during
+    # the event, so it counts.
+    samples = [_sample(0.0, live_stint=1, av_repairs_total=0, av_unexplained_total=0),
+               _sample(10.0, live_stint=1, av_repairs_total=0, av_unexplained_total=0),
+               # nothing on air between 10 and 100; the counter rises to 3 meanwhile
+               _sample(100.0, live_stint=1, av_repairs_total=3, av_unexplained_total=0),
+               _sample(110.0, live_stint=1, av_repairs_total=3, av_unexplained_total=0)]
+    events = [{"ts": 0.0, "type": "part_start"}, {"ts": 10.0, "type": "part_end"},
+              {"ts": 100.0, "type": "part_start"}, {"ts": 110.0, "type": "part_end"}]
+    rep = rb.build_report(samples, events, {1: "Alice"}, "E", (0.0, 110.0), now=200.0)
+    assert rep["on_air"]["av_repairs"] == 3, rep["on_air"]
+
+
+def t_windows_out_of_order_do_not_read_as_a_counter_reset():
+    # counter_increase reads a FALL as a restart and counts the new value in full, so the
+    # series it gets must be chronological. The windows come from the event list in the
+    # order that list happens to have; nothing upstream promises it is sorted.
+    samples = []
+    for ts, total in ((0.0, 10), (10.0, 12), (100.0, 12), (110.0, 20)):
+        samples.append(_sample(ts, live_stint=1, av_repairs_total=total,
+                               av_unexplained_total=0))
+    events = [{"ts": 100.0, "type": "part_start"}, {"ts": 110.0, "type": "part_end"},
+              {"ts": 0.0, "type": "part_start"}, {"ts": 10.0, "type": "part_end"}]
+    rep = rb.build_report(samples, events, {1: "Alice"}, "E", (0.0, 110.0), now=200.0)
+    assert rep["on_air"]["av_repairs"] == 10, (
+        "the counter rose 10 -> 20; reading the later window first makes its 20 -> 10 "
+        "look like a relay restart and counts the whole counter a second time")
+
+
+def t_counter_increase_skips_missing_samples_instead_of_reading_them_as_zero():
+    # A database written before v11 has NULL here, and a missed tick has nothing. Reading
+    # either as 0 would invent a reset and double the total.
+    #
+    # The first ACTUAL reading is the baseline, so [None, 2, None, 5] is a rise of 3,
+    # not 5. Whether those first 2 happened inside the window is unknowable — the NULLs
+    # say nothing. Taking them as the baseline can under-count; counting them in full
+    # would over-count, and for a line a producer reads after the event, claiming more
+    # disturbances than happened is the worse of the two.
+    assert rb.counter_increase([None, 2, None, 5]) == 3
+    assert rb.counter_increase([None, None]) == 0
+
+
+def t_report_counts_av_repairs_and_the_rendered_line_says_what_it_means():
+    # #619: OBS repaired each of these itself, so the line is a record, not an alarm.
+    # It must say so, or a producer reading the report will go looking for a fault.
+    samples = [_sample(0.0, live_stint=1, av_repairs_total=0, av_unexplained_total=0),
+               _sample(30.0, live_stint=1, av_repairs_total=2, av_unexplained_total=0),
+               _sample(60.0, live_stint=1, av_repairs_total=3, av_unexplained_total=1)]
+    rep = rb.build_report(samples, [], {1: "Alice"}, "E", (0.0, 60.0), now=1000.0)
+    assert rep["on_air"]["av_repairs"] == 3, rep["on_air"]
+    assert rep["on_air"]["av_unexplained"] == 1, rep["on_air"]
+    html = rb.render_html(rep)
+    assert "3 time(s)" in html
+    assert "1 of them with no feed restart to explain it" in html
+    assert "back in sync afterwards" in html
+
+    # All explained: the line still appears (it happened) but names no open question.
+    ok = [_sample(0.0, live_stint=1, av_repairs_total=0, av_unexplained_total=0),
+          _sample(30.0, live_stint=1, av_repairs_total=2, av_unexplained_total=0)]
+    html2 = rb.render_html(rb.build_report(ok, [], {1: "Alice"}, "E", (0.0, 30.0),
+                                           now=1000.0))
+    assert "every one right after a feed restart" in html2
+
+    # A clean event says nothing at all about A/V sync.
+    clean = [_sample(0.0, live_stint=1), _sample(30.0, live_stint=1)]
+    html3 = rb.render_html(rb.build_report(clean, [], {1: "Alice"}, "E", (0.0, 30.0),
+                                           now=1000.0))
+    assert "re-synced" not in html3
+
+
 if __name__ == "__main__":
     run()

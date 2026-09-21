@@ -97,6 +97,7 @@ def main():
         sys.exit(f"FAILED to write the filtered cookies to {out}; the previous jar is unchanged.")
     try: os.chmod(out, 0o600)   # live session — owner-only
     except OSError: pass        # best-effort hardening; never block the export
+    cookie_jar.record_export(out)
     domains = ", ".join(cookie_jar.PLATFORM_COOKIE_DOMAINS[a.platform])
     print(f"Kept only {domains} cookies (dropped {dropped} other lines).")
     with open(out, encoding="utf-8", errors="replace") as fh:

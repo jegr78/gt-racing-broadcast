@@ -9,6 +9,25 @@ from logging.handlers import TimedRotatingFileHandler
 DEFAULT_RETENTION_DAYS = 7
 
 
+def harden_stdio(streams=None, environ=None):
+    """Make this process and every child survive a narrow console (issue #24).
+
+    utf-8 rather than the console's own encoding: a Control Center job's stdout is a PIPE
+    whose bytes are rendered in a UTF-8 web UI. PYTHONIOENCODING carries the same leniency
+    to children, whatever spawn site creates them. Best-effort; runs before anything in
+    main(), so it must not be able to break a start."""
+    env = os.environ if environ is None else environ
+    for stream in (streams if streams is not None else (sys.stdout, sys.stderr)):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            pass    # stream missing/old/non-reconfigurable — leave it as-is
+    try:
+        env.setdefault("PYTHONIOENCODING", "utf-8:replace")
+    except Exception:          # noqa: BLE001 — never fatal
+        pass
+
+
 class _ResilientTimedRotatingFileHandler(TimedRotatingFileHandler):
     """A TimedRotatingFileHandler whose midnight rollover never drops a log
     record. On Windows the rollover rename fails (PermissionError / WinError 32)

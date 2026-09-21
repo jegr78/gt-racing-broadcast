@@ -328,6 +328,122 @@ def t_throttle_periodic_summary_while_flooding():
     assert texts == ["boom", "(last line repeated ×2)"]
 
 
+def t_harden_stdio_makes_a_narrow_console_survivable():
+    # A narrow console codepage makes our own non-ASCII output raise instead of print.
+    class _Narrow:
+        """A stream that mimics a cp1252 console: it records reconfigure() rather than
+        applying it, because a real console stream is the thing we cannot change here."""
+        def __init__(self):
+            self.encoding, self.errors, self.calls = "cp1252", "strict", []
+        def reconfigure(self, **kw):
+            self.calls.append(kw)
+            self.errors = kw.get("errors", self.errors)
+
+    out, err = _Narrow(), _Narrow()
+    env = {}
+    lg.harden_stdio(streams=(out, err), environ=env)
+    for name, stream in (("stdout", out), ("stderr", err)):
+        assert stream.calls, f"{name} was never reconfigured"
+        assert stream.calls[-1].get("errors") == "replace", stream.calls
+        # utf-8, not the console's own encoding: issue #24 settled this. Whenever stdout
+        # is a PIPE — every Control Center job — Python picks the locale encoding and
+        # those captured bytes are rendered in a UTF-8 web UI.
+        assert stream.calls[-1].get("encoding") == "utf-8", stream.calls
+
+    # The same leniency must reach every CHILD process, whatever spawns it. Setting it
+    # in our own environment is what covers all 17 entrypoints at once instead of
+    # editing each spawn site.
+    assert env.get("PYTHONIOENCODING") == "utf-8:replace", env
+
+
+def t_harden_stdio_never_raises_and_never_overrides_the_operator():
+    # It runs before anything else in main(), so it must not be able to break a start.
+    class _Hostile:
+        encoding = "cp1252"
+        def reconfigure(self, **kw):
+            raise OSError("detached console")
+    lg.harden_stdio(streams=(_Hostile(),), environ={})            # must not raise
+
+    # An operator who set PYTHONIOENCODING deliberately keeps it.
+    env = {"PYTHONIOENCODING": "utf-8"}
+    lg.harden_stdio(streams=(), environ=env)
+    assert env["PYTHONIOENCODING"] == "utf-8", env
+
+
+SHIPPED = None          # filled by _shipped_sources()
+
+
+def _shipped_sources():
+    """Every shipped .py under src/. tools/ is maintainer-only and never runs on a
+    producer's console, so it is deliberately out of scope."""
+    global SHIPPED
+    if SHIPPED is None:
+        import pathlib
+        SHIPPED = sorted(pathlib.Path(ROOT, "src").rglob("*.py"))
+    return SHIPPED
+
+
+def _calls(src, pattern):
+    """Each call matching `pattern`, flattened to its full parenthesised span."""
+    import re
+    out = []
+    for m in re.finditer(pattern, src):
+        depth, i = 0, m.end() - 1
+        while i < len(src):
+            if src[i] == "(":
+                depth += 1
+            elif src[i] == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            i += 1
+        out.append((src[:m.start()].count("\n") + 1, src[m.start():i + 1]))
+    return out
+
+
+def t_every_text_subprocess_under_src_decodes_leniently():
+    # subprocess reads pipes in a THREAD, so a decode failure never reaches the caller's
+    # except: a traceback, and the output silently lost. Scope is the whole shipped tree
+    # and every call form that decodes — a narrower guard missed five call sites.
+    offenders = []
+    for path in _shipped_sources():
+        src = path.read_text(encoding="utf-8")
+        pattern = r"(?:subprocess\.(?:run|Popen|check_output)|\.communicate)\s*\("
+        for line, call in _calls(src, pattern):
+            decodes = ("text=True" in call or "universal_newlines=True" in call
+                       or "encoding=" in call)
+            if decodes and "errors=" not in call:
+                offenders.append(f"{path.name}:{line}")
+    assert not offenders, (
+        "text-mode subprocess calls without errors=: " + ", ".join(offenders))
+
+
+def t_no_argparse_help_string_carries_non_ascii():
+    # argparse builds the whole help before printing, so one non-ASCII character kills
+    # --help on a narrow console. "?" where an arrow should be is worse than "->".
+    import re
+    offenders = []
+    for path in _shipped_sources():
+        src = path.read_text(encoding="utf-8")
+        for m in re.finditer(r'help=(["\'])(.*?)\1', src, re.S):
+            bad = sorted({c for c in m.group(2) if ord(c) > 127})
+            if bad:
+                offenders.append(f"{path.name}:{src[:m.start()].count(chr(10)) + 1} {bad}")
+    assert not offenders, "non-ASCII in argparse help: " + ", ".join(offenders)
+
+
+def t_the_relay_hardens_stdio_before_it_builds_its_help():
+    # Started directly as well as spawned, so inheriting PYTHONIOENCODING is not enough.
+    # The order is the point: it crashed while argparse assembled the help.
+    with open(os.path.join(ROOT, "src", "relay", "racecast-feeds.py"),
+              encoding="utf-8") as fh:
+        src = fh.read()
+    body = src[src.index("\ndef main():"):]
+    harden = body.index("harden_stdio(")
+    parser = body.index("argparse.ArgumentParser(")
+    assert harden < parser, "harden_stdio() must run before the parser is built"
+
+
 if __name__ == "__main__":
     with tempfile.TemporaryDirectory() as tmp:
         for name, fn in sorted(globals().items()):

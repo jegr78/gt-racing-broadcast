@@ -338,10 +338,10 @@ def t_rebuild_guard_stands_down_after_three_ineffective_rebuilds():
         assert g.allows()
         g.on_fire()
         assert g.on_window(0.9, frac_threshold=0.3) is False
-        assert g.ineffective == n and not g.stood_down
+        assert g.ineffective("freeze") == n and not g.stood_down
     g.on_fire()
     assert g.on_window(0.9, frac_threshold=0.3) is True      # this call stood it down
-    assert g.stood_down and not g.allows() and g.ineffective == 3
+    assert g.stood_down and not g.allows() and g.ineffective("freeze") == 3
 
 
 def t_rebuild_guard_healthy_window_resets_the_streak():
@@ -350,27 +350,27 @@ def t_rebuild_guard_healthy_window_resets_the_streak():
     g = m.RebuildGuard()
     g.on_fire(); g.on_window(0.9, frac_threshold=0.3)
     g.on_fire(); g.on_window(0.9, frac_threshold=0.3)
-    assert g.ineffective == 2
+    assert g.ineffective("freeze") == 2
     g.on_fire()
     assert g.on_window(0.1, frac_threshold=0.3) is False
-    assert g.ineffective == 0 and g.allows()
+    assert g.ineffective("freeze") == 0 and g.allows()
     # "better but still stalling" is not an improvement: 0.5 is still over 0.3
     g.on_fire()
     g.on_window(0.5, frac_threshold=0.3)
-    assert g.ineffective == 1
+    assert g.ineffective("freeze") == 1
 
 
 def t_rebuild_guard_judges_only_the_first_window_after_a_fire():
     g = m.RebuildGuard()
     assert g.on_window(0.9, frac_threshold=0.3) is False     # no fire pending
-    assert g.ineffective == 0
+    assert g.ineffective("freeze") == 0
     g.on_fire()
     assert g.on_window(None, frac_threshold=0.3) is False    # nothing measurable yet
     assert g.pending
     g.on_window(0.9, frac_threshold=0.3)
-    assert not g.pending and g.ineffective == 1
+    assert not g.pending and g.ineffective("freeze") == 1
     g.on_window(0.9, frac_threshold=0.3)                     # later windows do not count
-    assert g.ineffective == 1
+    assert g.ineffective("freeze") == 1
 
 
 def t_rebuild_guard_rearm_clears_the_stand_down():
@@ -379,7 +379,7 @@ def t_rebuild_guard_rearm_clears_the_stand_down():
         g.on_fire(); g.on_window(1.0, frac_threshold=0.3)
     assert g.stood_down
     g.rearm()
-    assert g.allows() and g.ineffective == 0 and not g.pending
+    assert g.allows() and g.ineffective("freeze") == 0 and not g.pending
 
 
 def t_feed_freeze_detect_default_on_and_falsey_disables():
@@ -1041,6 +1041,242 @@ def t_feed_backlog_warn_s_env():
     assert m.feed_backlog_warn_s({"RACECAST_FEED_BACKLOG_WARN_S": "8"}) == 8.0
     assert m.feed_backlog_warn_s({"RACECAST_FEED_BACKLOG_WARN_S": "0"}) == 5.0
     assert m.feed_backlog_warn_s({"RACECAST_FEED_BACKLOG_WARN_S": "x"}) == 5.0
+
+class _FakeConn:
+    """A socket stand-in that records how it was taken down."""
+    def __init__(self, name="c"):
+        self.name, self.shutdown_calls, self.closed = name, [], False
+    def shutdown(self, how):
+        self.shutdown_calls.append(how)
+    def close(self):
+        self.closed = True
+
+
+def _srv_with(consumers):
+    """A FeedFanoutServer with a hand-built consumer registry (no sockets, no ring)."""
+    srv = m.FeedFanoutServer("127.0.0.1", 0, object(), None, prebuffer_s=3.0)
+    srv._consumers = dict(consumers)
+    return srv
+
+
+def t_an_abandoned_consumer_is_the_one_superseded_and_not_moving():
+    # Windows OBS keeps the old connection after an input rebuild, so max() over all
+    # consumers reported a dead socket's backlog forever. Superseded alone must not
+    # condemn one — this port serves several at once.
+    old, new = _FakeConn("old"), _FakeConn("new")
+    srv = _srv_with({1: {"cursor": 100, "conn": old, "cycle_ts": 999.0, "snaps": 0},
+                     2: {"cursor": 500, "conn": new, "cycle_ts": 999.0, "snaps": 0}})
+    srv.mark_superseded(now=1000.0)
+
+    late = 1000.0 + m.FANOUT_STALE_GRACE_S
+    assert not srv._stale(srv._consumers[1], now=1000.0), (
+        "in the instant of the mark nothing has moved yet — the grace is part of the "
+        "judgement, or every reader would briefly see every consumer as abandoned")
+    srv._consumers[2]["cycle_ts"] = 1001.0     # the live one completes another cycle
+    assert srv._stale(srv._consumers[1], now=late)
+    assert not srv._stale(srv._consumers[2], now=late), "a consumer that moved is alive"
+
+    assert srv.reap_superseded(now=1000.0 + 1.0) == 0, "the grace must be respected"
+    assert not old.shutdown_calls
+    assert srv.reap_superseded(now=1000.0 + m.FANOUT_STALE_GRACE_S) == 1
+    assert old.shutdown_calls, (
+        "close() alone does not unblock a handler stuck in sendall — the abandoned "
+        "socket is exactly the one whose send buffer the peer stopped draining")
+    # Whether close() follows is per platform; see the dedicated check below.
+    assert not new.shutdown_calls, "the live consumer must be left alone"
+
+
+def t_a_merely_slow_consumer_is_never_judged_abandoned():
+    # The signal must be cycle_ts, not cursor: the cursor only moves when a read cycle
+    # completes, and a slow consumer sits inside one for many seconds.
+    srv = _srv_with({})
+    late = m.FANOUT_STALE_GRACE_S + 1.0
+
+    slow = {"cursor": 100, "cycle_ts": 0.0, "conn": _FakeConn("slow"), "snaps": 0}
+    dead = {"cursor": 100, "cycle_ts": 0.0, "conn": _FakeConn("dead"), "snaps": 0}
+    srv._consumers = {1: slow, 2: dead}
+    srv.mark_superseded(now=0.0)
+
+    slow["cycle_ts"] = 3.0        # a send completed: still alive, still behind
+    assert not srv._stale(slow, now=late), (
+        "a consumer that completed a send is alive however far behind it is")
+    assert srv._stale(dead, now=late), "the one that completed nothing is abandoned"
+
+    # And the cursor standing still must not condemn the slow one on its own.
+    assert slow["cursor"] == 100, "the slow consumer is still inside the same read cycle"
+    assert srv.reap_superseded(now=late) == 1, "only the abandoned socket is taken down"
+    assert dead["conn"].shutdown_calls and not slow["conn"].shutdown_calls
+
+
+def t_a_stale_consumer_never_becomes_the_reported_backlog():
+    # This number feeds the health reason, health-history and the shed alike.
+    class _Ring:
+        def age_at_offset(self, cursor, now):
+            return {100: 26.0, 900: 3.0, 950: 2.4}.get(cursor)
+    srv = _srv_with({1: {"cursor": 100, "conn": _FakeConn(), "cycle_ts": 0.0, "snaps": 0},
+                     2: {"cursor": 900, "conn": _FakeConn(), "cycle_ts": 0.0, "snaps": 0}})
+    # consumer 1 is the abandoned one: it completes nothing after the mark.
+    srv.ring = _Ring()
+    assert srv.consumer_backlog(now=1.0) == 26.0, "before: max() over both"
+
+    srv.mark_superseded(now=1.0)
+    # In the instant of the mark nothing has moved yet, so the reading is unchanged and
+    # no consumer is condemned on the strength of the mark alone.
+    assert srv.consumer_backlog(now=1.0) == 26.0, (
+        "the mark alone must condemn nobody — in that instant nothing has moved")
+
+    srv._consumers[2]["cursor"] = 950          # the live consumer accepts more bytes
+    srv._consumers[2]["cycle_ts"] = 2.0        # ... and completes the cycle that did it
+    late = 1.0 + m.FANOUT_STALE_GRACE_S
+    assert srv.consumer_backlog(now=late) == 2.4, (
+        "the abandoned consumer's frozen position must not be reported")
+    # And the per-heartbeat floor, which is the value the shed actually classifies.
+    assert srv.take_backlog_floor(now=late) == 2.4, (
+        "the per-heartbeat floor feeds the shed and health-history, so it needs the "
+        "same exclusion as the live value")
+
+
+def t_a_long_run_of_effective_sheds_never_stands_the_automation_down():
+    """An overloaded host is not a production machine, so the remedy must not be the
+    thing that gives up on it. Measured on jegr-linux-cachyos: nine effective sheds in
+    eleven minutes, one every 75 s. Only INEFFECTIVE rebuilds spend the budget."""
+    g = m.RebuildGuard()
+    for _ in range(50):
+        g.on_fire("backlog")
+        g.judge(False, reason="backlog")         # the output came back to the reserve
+        assert g.allows("backlog"), "an effective shed must never spend the budget"
+        assert not g.stood_down
+    assert g.ineffective("backlog") == 0
+
+    # And a stretch of effective ones must clear what earlier failures had accrued,
+    # so a host that recovers is not left one strike from standing down.
+    g.on_fire("backlog"); g.judge(True, reason="backlog")
+    g.on_fire("backlog"); g.judge(True, reason="backlog")
+    assert g.ineffective("backlog") == 2 and g.allows("backlog")
+    g.on_fire("backlog"); g.judge(False, reason="backlog")
+    assert g.ineffective("backlog") == 0, "one effective rebuild resets the streak"
+
+
+def t_windows_needs_close_to_wake_a_blocked_handler_posix_does_not():
+    # Measured 2026-09-21, same script both hosts: a handler blocked in sendall wakes
+    # on shutdown() alone on macOS (BrokenPipeError) but NOT on Windows, where it takes
+    # close() (WinError 10038). So the reaper closes only where shutdown is not enough;
+    # on POSIX the descriptor stays the handler's alone.
+    srv = _srv_with({1: {"cursor": 7, "conn": _FakeConn("dead"), "cycle_ts": 0.0,
+                         "snaps": 0}})
+    srv.mark_superseded(now=0.0)
+    conn = srv._consumers[1]["conn"]
+
+    real = m.CLOSE_TO_WAKE
+    try:
+        m.CLOSE_TO_WAKE = False                  # POSIX
+        assert srv.reap_superseded(now=99.0) == 1
+        assert conn.shutdown_calls and not conn.closed, (
+            "on POSIX shutdown() wakes the handler, so the reaper must not close a "
+            "descriptor the handler is still using")
+
+        srv._consumers = {1: {"cursor": 7, "conn": _FakeConn("dead"), "cycle_ts": 0.0,
+                              "snaps": 0}}
+        srv.mark_superseded(now=0.0)
+        conn = srv._consumers[1]["conn"]
+        m.CLOSE_TO_WAKE = True                   # Windows
+        assert srv.reap_superseded(now=99.0) == 1
+        assert conn.shutdown_calls and conn.closed, (
+            "on Windows shutdown() alone leaves the handler blocked in sendall for "
+            "good; without close() the abandoned consumer is never reaped")
+    finally:
+        m.CLOSE_TO_WAKE = real
+
+
+def t_reaping_never_raises_on_a_socket_the_peer_abandoned():
+    # On the heartbeat: a raise would take out the tick that also samples health.
+    class _Hostile(_FakeConn):
+        def shutdown(self, how):
+            raise OSError("not connected")
+        def close(self):
+            raise RuntimeError("already gone")
+    srv = _srv_with({1: {"cursor": 7, "conn": _Hostile(), "cycle_ts": 0.0, "snaps": 0},
+                     2: {"cursor": 7, "conn": None, "cycle_ts": 0.0, "snaps": 0}})
+    srv.mark_superseded(now=0.0)
+    assert srv.reap_superseded(now=99.0) == 2     # must not raise
+
+
+def t_a_backlog_stand_down_leaves_the_freeze_remedy_armed():
+    # Both reasons pull one control, but they must not share one budget: three ineffective
+    # backlog sheds used to set a single stood_down flag, which also gated the freeze
+    # rebuild — so a backlog nobody could fix silently disabled the stutter remedy for the
+    # rest of the stint.
+    g = m.RebuildGuard()
+    for _ in range(m.REBUILD_GUARD_MAX_ATTEMPTS):
+        g.on_fire("backlog")
+        g.judge(True, reason="backlog")
+    assert not g.allows("backlog"), "the backlog shed gave up, as designed"
+    assert g.allows("freeze"), "the freeze rebuild must still be available"
+    assert g.ineffective("freeze") == 0, "and must not inherit the other's count"
+    assert g.stood_down, "the panel flag stays a plain bool: something stood down"
+
+    g.rearm()
+    assert g.allows("backlog") and g.allows("freeze") and not g.stood_down
+
+
+def t_backlog_shed_decision_needs_a_streak_and_respects_the_cooldown():
+    # The automatic backlog shed (2026-09-21). Mirrors freeze_decision's shape so the
+    # two reasons that pull the same control read the same way.
+    assert m.backlog_shed_decision(1, None, min_streak=1, cooldown_s=120.0) is True
+    assert m.backlog_shed_decision(0, None, min_streak=1, cooldown_s=120.0) is False
+    # a streak below the minimum waits
+    assert m.backlog_shed_decision(1, None, min_streak=2, cooldown_s=120.0) is False
+    assert m.backlog_shed_decision(2, None, min_streak=2, cooldown_s=120.0) is True
+    # the cooldown is shared with the freeze path: a rebuild just happened, stay off it
+    assert m.backlog_shed_decision(5, 10.0, min_streak=1, cooldown_s=120.0) is False
+    assert m.backlog_shed_decision(5, 120.0, min_streak=1, cooldown_s=120.0) is True
+    # no measurement is never a reason to act
+    assert m.backlog_shed_decision(None, None, min_streak=1, cooldown_s=120.0) is False
+
+
+def t_rebuild_guard_routes_each_judgement_to_the_reason_that_fired():
+    # The two reasons run on different threads at different cadences. A single `pending`
+    # bool would let the freeze sampler's next window consume and clear a rebuild the
+    # backlog shed fired, so the shed's three-strike budget would never count down.
+    g = m.RebuildGuard()
+    g.on_fire("backlog")
+    assert g.on_window(0.9, frac_threshold=0.3) is False     # freeze must not consume it
+    assert g.pending == "backlog" and g.ineffective("backlog") == 0
+    assert g.judge(True, reason="backlog") is False
+    assert not g.pending and g.ineffective("backlog") == 1   # the shed's own judge counts
+
+    g2 = m.RebuildGuard()
+    g2.on_fire()                                             # defaults to freeze
+    assert g2.judge(True, reason="backlog") is False         # backlog must not consume it
+    assert g2.pending == "freeze" and g2.ineffective("freeze") == 0
+    g2.on_window(0.9, frac_threshold=0.3)
+    assert g2.ineffective("freeze") == 1
+
+
+def t_backlog_judge_ignores_an_unmeasurable_round():
+    # Right after a rebuild OBS is detached for a stretch of the interval, so the floor
+    # can be None for a whole heartbeat. That must not consume the pending judgement.
+    g = m.RebuildGuard()
+    g.on_fire("backlog")
+    assert g.judge(None, reason="backlog") is False
+    assert g.pending == "backlog" and g.ineffective("backlog") == 0
+    assert g.judge(False, reason="backlog") is False         # it helped
+    assert not g.pending and g.ineffective("backlog") == 0
+
+
+def t_backlog_shed_stands_down_after_three_ineffective_rebuilds():
+    # Same budget as the freeze path, and the epic's requirement: three attempts, then
+    # stand down and say so, instead of Catalunya's 26 black dropouts.
+    g = m.RebuildGuard()
+    for n in (1, 2):
+        g.on_fire("backlog")
+        assert g.judge(True, reason="backlog") is False
+        assert g.ineffective("backlog") == n and g.allows("backlog")
+    g.on_fire("backlog")
+    assert g.judge(True, reason="backlog") is True
+    assert g.stood_down and not g.allows("backlog")
+
+
 
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):

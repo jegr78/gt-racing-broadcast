@@ -25,6 +25,42 @@ LOGGED_OUT_HINT = ("the YouTube cookie jar has no login; re-export it from a "
                    "logged-in browser with `racecast cookies <browser>`")
 
 
+def export_stamp_path(jar):
+    """The sidecar holding when *jar* was last exported from a browser."""
+    return jar + ".exported"
+
+
+def record_export(jar, now=None):
+    """Stamp *jar* as exported now. True when written. Best-effort: the export must
+    not fail over its own bookkeeping."""
+    if not jar:
+        return False
+    now = time.time() if now is None else now
+    try:
+        with open(export_stamp_path(jar), "w", encoding="utf-8") as fh:
+            fh.write(f"{now:.0f}\n")
+        return True
+    except OSError:
+        return False
+
+
+def export_age_h(jar, now=None):
+    """Hours since *jar* was exported from a browser, or None when that is unknown.
+
+    NOT the jar's mtime: `yt-dlp --cookies` writes the jar back on every resolve, so
+    during an event its mtime is minutes old however long ago the producer exported
+    it. Unknown is never reported as fresh."""
+    if not jar:
+        return None
+    try:
+        with open(export_stamp_path(jar), encoding="utf-8") as fh:
+            stamp = float(fh.read().strip())
+    except (OSError, ValueError):
+        return None
+    now = time.time() if now is None else now
+    return round((now - stamp) / 3600, 1)
+
+
 def text_has_login(text):
     """True when the Netscape jar *text* carries a logged-in YouTube session marker."""
     return any(marker in (text or "") for marker in COOKIE_MARKERS)

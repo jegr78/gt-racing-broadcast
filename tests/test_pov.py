@@ -1273,7 +1273,7 @@ def t_rebuild_rearm_endpoint_lifts_the_stand_down():
                                          headers={"Content-Type": "application/json"})
             return json.loads(urllib.request.urlopen(req, timeout=5).read())
         assert post() == {"ok": True, "rearmed": True}
-        assert r._rebuild_guard.allows()
+        assert r._rebuild_guard.allows("backlog")
         assert r.health_store.events[-1]["metadata"]["reason"] == "director"
         assert post() == {"ok": True, "rearmed": False}      # nothing was stood down
         assert r.status()["rebuild_guard"] == {"stood_down": False, "feed": None}
@@ -3022,6 +3022,245 @@ def _backlog_relay(a_floor, b_floor=None, a_live=None):
     r.A.fanout_server = _BacklogSrv(a_floor, a_live)
     r.B.fanout_server = _BacklogSrv(b_floor)
     return r
+
+
+def t_av_watcher_joins_a_line_the_writer_split_across_two_polls():
+    # THE defect this watcher can have: OBS is still writing when we read, readline()
+    # hands back a fragment, and the repair parses to nothing twice. Demonstrated
+    # against a real file before the fix — both halves yielded None and the event was
+    # gone. The tail now holds the remainder until the newline arrives.
+    import tempfile
+    LINE = ("22:52:21.790: Source Feed A audio is lagging (over by 5415.66 ms) "
+            "at max audio buffering. Restarting source audio.\n")
+    r = _make_min_relay()
+    r.A.phase = "serving"; r.A.paused = False; r.A.phase_since = time.time() - 5.0
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, "obs.txt")
+        wtc = m.AvSyncWatcher(d, r._serving_age, r._av, r._av_lock, m.LOG)
+        with open(p, "w", encoding="utf-8") as w:
+            w.write(LINE[:40]); w.flush()
+            with open(p, encoding="utf-8") as fh:
+                # The REAL loop, not a copy of it: an earlier version of this test
+                # rebuilt run()'s body and therefore proved only its own copy — the
+                # guard stayed green with the fix removed.
+                wtc.drain(fh)
+                assert r._av["feeds"] == {}, "half a line is not an event yet"
+                w.write(LINE[40:]); w.flush()
+                wtc.drain(fh)
+                assert "A" in r._av["feeds"], (
+                    "the split line was lost: both halves parsed to nothing")
+                assert r._av["feeds"]["A"]["repairs"] == 1, r._av
+                assert r._av["feeds"]["A"]["last_ms"] == 5415.66
+
+
+def t_av_watcher_ignores_a_log_directory_entry_that_is_not_a_regular_file():
+    # A FIFO named *.txt would block open() and hang this thread for good; a symlink
+    # would point the parser somewhere else entirely. list_logs filters to real files.
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        fifo = os.path.join(d, "trap.txt")
+        try:
+            os.mkfifo(fifo)
+        except (AttributeError, OSError):
+            return                      # no FIFOs on this platform (Windows): nothing to prove
+        real = os.path.join(d, "obs.txt")
+        with open(real, "w", encoding="utf-8") as fh:
+            fh.write("22:00:00.000: hello\n")
+        os.utime(fifo, (time.time() + 60, time.time() + 60))   # the FIFO looks NEWEST
+        r = _make_min_relay()
+        wtc = m.AvSyncWatcher(d, r._serving_age, r._av, r._av_lock, m.LOG)
+        assert wtc._newest_log() == real, wtc._newest_log()
+
+
+def t_relay_shutdown_stops_the_av_watcher():
+    r = _make_min_relay()
+    orig = m.logsetup.obs_log_dir
+    try:
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            m.logsetup.obs_log_dir = lambda *a, **k: d
+            r._start_av_watcher()
+            assert r._av_watcher is not None and r._av_watcher.stop is False
+            r.shutdown()
+            assert r._av_watcher.stop is True
+    finally:
+        m.logsetup.obs_log_dir = orig
+
+
+def t_av_watcher_start_never_takes_the_relay_down_with_it():
+    # This is the test the suite was missing. _start_av_watcher() runs only from
+    # Relay.start(), which no unit test calls, so a wrong attribute inside it
+    # (`self.log` — the relay logs through the module-level LOG) passed every local
+    # check and killed the relay on the first real start. Both branches are exercised
+    # here: no OBS directory at all, and one that exists.
+    import tempfile
+    r = _make_min_relay()
+    orig = m.logsetup.obs_log_dir
+    try:
+        m.logsetup.obs_log_dir = lambda *a, **k: "/definitely/not/an/obs/log/dir"
+        r._start_av_watcher()                       # missing dir: quietly no detector
+        assert r._av_watcher is None
+        m.logsetup.obs_log_dir = lambda *a, **k: None
+        r._start_av_watcher()
+        assert r._av_watcher is None
+        with tempfile.TemporaryDirectory() as d:
+            m.logsetup.obs_log_dir = lambda *a, **k: d
+            r._start_av_watcher()
+            assert r._av_watcher is not None
+            r._av_watcher.stop = True
+        # And a raising resolver must be swallowed, not propagated into start().
+        def _boom(*a, **k):
+            raise RuntimeError("no such platform")
+        m.logsetup.obs_log_dir = _boom
+        r._av_watcher = None
+        r._start_av_watcher()
+        assert r._av_watcher is None
+    finally:
+        m.logsetup.obs_log_dir = orig
+
+
+def _shed_relay(backlog=9.0):
+    """A relay whose on-air feed is serving and classified backlogged this heartbeat."""
+    r = _make_min_relay()
+    f = r.feeds[r.live_feed()]
+    f.phase, f.phase_since, f.paused = "serving", time.time() - 600.0, False
+    r._backlogged_feeds = {r.live_feed(): backlog}
+    r._interval_backlogs = {r.live_feed(): backlog}
+    r._rebuilds = []
+    f._obs_reconnect = lambda: r._rebuilds.append(1)
+    return r, f
+
+
+def t_backlog_shed_rebuilds_the_on_air_feed_without_a_director():
+    # One heartbeat with a degraded FLOOR is enough: the floor is an interval minimum.
+    r, _f = _shed_relay()
+    r._backlog_shed_tick(1000.0)
+    assert r._rebuilds == [1], "a backlogged on-air feed must be rebuilt automatically"
+    assert r._last_freeze_ts == 1000.0, "the shared cooldown must be armed"
+    assert r._rebuild_guard.pending == "backlog", "the guard must judge OUR rebuild"
+
+
+def t_backlog_shed_registers_its_own_splice_with_the_av_detector():
+    # Or the audio repair after our own rebuild reads as UNEXPLAINED.
+    r, _f = _shed_relay()
+    before = r._serving_age(r.live_feed())
+    assert before > 500.0, "the feed has been serving for a while"
+    r._backlog_shed_tick(1000.0)
+    after = r._serving_age(r.live_feed())
+    assert after < 5.0, f"the splice must reset the A/V explanation window, got {after}"
+
+
+def t_backlog_shed_leaves_a_healthy_or_idle_feed_alone():
+    r, f = _shed_relay()
+    r._backlogged_feeds = {}                       # measured, not degraded
+    r._backlog_shed_tick(1000.0)
+    assert r._rebuilds == [], "a feed that is not backlogged must be left alone"
+    assert r._backlog_streak.get(r.live_feed(), 0) == 0, "a healthy tick must clear the streak"
+    # Build a real streak first, or the reset below would pass without any reset at all.
+    r, f = _shed_relay()
+    r._backlog_shed_ticks = 3                      # so the streak grows instead of firing
+    r._backlog_shed_tick(1000.0)
+    r._backlog_shed_tick(1100.0)
+    assert r._backlog_streak.get(r.live_feed(), 0) == 2 and r._rebuilds == []
+    f.phase = "connecting"                         # a handover: degraded, but not serving
+    r._backlog_shed_tick(1200.0)
+    assert r._rebuilds == [], "a feed that is not serving has no live edge to be behind"
+    assert r._backlog_streak.get(r.live_feed(), 0) == 0, "a handover must not carry a streak over"
+
+
+def t_backlog_shed_kill_switch_and_shared_cooldown_both_hold_it_off():
+    r, _f = _shed_relay()
+    r._backlog_shed = False
+    r._backlog_shed_tick(1000.0)
+    assert r._rebuilds == [], "RACECAST_FEED_BACKLOG_SHED=0 must disable it"
+    # The cooldown is SHARED with the freeze detector, so the two reasons cannot
+    # rebuild the same input back to back.
+    r, _f = _shed_relay()
+    r._last_freeze_ts = 1000.0 - 5.0               # a freeze rebuild just happened
+    r._backlog_shed_tick(1000.0)
+    assert r._rebuilds == [], "a freeze rebuild must silence the shed for the cooldown"
+    r._backlog_shed_tick(1000.0 + r._freeze_cooldown)
+    assert r._rebuilds == [1], "and release it afterwards"
+
+
+def t_backlog_shed_stands_down_after_three_rebuilds_that_did_not_help():
+    # Three attempts, then stop and say so.
+    r, _f = _shed_relay()
+    now = 1000.0
+    for _ in range(3):
+        r._backlog_shed_tick(now)                  # fires
+        now += r._freeze_cooldown
+        r._backlog_shed_tick(now)                  # judges: still backlogged
+        now += r._freeze_cooldown
+    assert len(r._rebuilds) == 3, f"expected exactly 3 attempts, got {len(r._rebuilds)}"
+    assert r._rebuild_guard.stood_down and not r._rebuild_guard.allows("backlog")
+    r._backlog_shed_tick(now)
+    assert len(r._rebuilds) == 3, "a stood-down guard must not rebuild a fourth time"
+
+
+def t_backlog_shed_does_not_consume_a_freeze_rebuild_or_an_unmeasured_round():
+    # Two judges on two threads share one guard; each judges only its own.
+    r, _f = _shed_relay()
+    r._rebuild_guard.on_fire("freeze")
+    r._last_freeze_ts = 1000.0 - 5.0               # as the freeze path sets it when it fires
+    r._backlog_shed_tick(1000.0)
+    assert r._rebuild_guard.pending == "freeze", "the shed must not consume a freeze rebuild"
+    assert r._rebuild_guard.ineffective("backlog") == 0
+    assert r._rebuilds == [], "and the shared cooldown holds it off while that verdict is out"
+    # An interval nothing measured (OBS detached after a rebuild) consumes nothing either.
+    r, _f = _shed_relay()
+    r._rebuild_guard.on_fire("backlog")
+    r._backlogged_feeds, r._interval_backlogs = {}, {r.live_feed(): None}
+    r._backlog_shed_tick(1000.0)
+    assert r._rebuild_guard.pending == "backlog", "an unmeasured round must not be a verdict"
+    assert r._rebuild_guard.ineffective("backlog") == 0
+
+
+def t_av_serving_age_tells_an_expected_disturbance_from_an_unexplained_one():
+    # #619: the classification hinges on this one reading. A paused or connecting feed
+    # must return None, or a repair on a feed the relay is not even serving would be
+    # waved through as "explained by the restart".
+    import time as _t
+    r = _make_min_relay()
+    r.A.phase = "serving"; r.A.paused = False; r.A.phase_since = _t.time() - 8.0
+    assert 7.0 < r._serving_age("A") < 9.5
+    r.A.paused = True
+    assert r._serving_age("A") is None
+    r.A.paused = False; r.A.phase = "connecting"
+    assert r._serving_age("A") is None
+    assert r._serving_age("nope") is None
+
+
+def t_av_disturbance_reaches_health_but_never_the_discord_notify_level():
+    # Same contract as the #535 inbound stall and the #583 backlog: a display-only
+    # yellow. An @here for something OBS already repaired would train the crew to
+    # ignore the pings that matter.
+    import av_sync as _av
+    r = _make_min_relay()
+    r.obs_reachable = True
+    ev = _av.parse_obs_log_line("22:52:21.790: Source Feed A audio is lagging "
+                                "(over by 5415.66 ms) at max audio buffering. "
+                                "Restarting source audio.")
+    _av.record(r._av, ev, now=time.monotonic(), serving_age_s=None)   # no restart to explain it
+    facts = r._health_facts(2000.0)
+    assert facts["feeds_av_disturbed"] == {"A": 5415.66}
+    h = r._refresh_health(2000.0)
+    assert any("audio timing broke by 5416 ms" in x for x in h["reasons"]), h["reasons"]
+    assert h["level"] == "yellow"
+    assert h["notify_level"] == m.aggregate_health({**facts,
+                                                    "feeds_av_disturbed": {}})["level"]
+
+
+def t_av_status_block_is_absent_until_a_disturbance_happens():
+    import av_sync as _av
+    r = _make_min_relay()
+    assert r._av_status() == {}
+    _av.record(r._av, _av.parse_obs_log_line(
+        "22:25:48.729: warning: DTS 1258128000 < 1259016000 out of order"),
+        now=time.monotonic(), serving_age_s=None)
+    blk = r._av_status()
+    # An unattributed line is context, never a feed entry invented for it.
+    assert blk == {"feeds": {}, "context": {"dts_backward": 1}}
 
 
 def t_heartbeat_backlog_sample_classifies_serving_feeds_only():

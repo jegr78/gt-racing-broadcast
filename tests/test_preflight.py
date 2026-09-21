@@ -218,8 +218,7 @@ def t_cookies_old():
         p = os.path.join(d, "cookies.txt")
         with open(p, "w") as fh:
             fh.write("SAPISID\tval")
-        old = time.time() - 20 * 3600
-        os.utime(p, (old, old))
+        m.cookie_jar.record_export(p, now=time.time() - 20 * 3600)
         r = m.cookies_status(p)
         assert r.level == "WARN" and "old" in r.detail.lower()
 
@@ -229,8 +228,20 @@ def t_cookies_fresh_with_marker():
         p = os.path.join(d, "cookies.txt")
         with open(p, "w") as fh:
             fh.write("host\tTRUE\t/\tTRUE\t0\tSAPISID\tval")
+        m.cookie_jar.record_export(p)
         r = m.cookies_status(p)
         assert r.level == "PASS"
+
+
+def t_a_jar_without_an_export_stamp_cannot_be_called_fresh():
+    # Before the stamp existed the age came from the jar's mtime, which yt-dlp resets
+    # on every resolve. An unstamped jar's age is unknown, and unknown is not a PASS.
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, "cookies.txt")
+        with open(p, "w") as fh:
+            fh.write("host\tTRUE\t/\tTRUE\t0\tSAPISID\tval")
+        r = m.cookies_status(p)
+        assert r.level == "WARN" and "cannot be judged" in r.detail, r
 
 
 def t_cookies_fresh_without_login_warns():

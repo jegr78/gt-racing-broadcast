@@ -155,6 +155,7 @@ import install_apps       # companion_http_version for the buttons health probe 
 import companion_common   # companion config.json path for bind-address resolution (#236)
 import tailscale          # detect_tailscale_ip fallback for bind-address resolution (#236)
 import logsetup  # rotating per-feed/console loggers + streamlink pump (src/scripts on sys.path)
+import av_sync   # pure parser/classifier for the A/V sync disturbances OBS logs (#619)
 import cookie_jar  # the shared "jar holds a YouTube login" rule, same as preflight (#615)
 import placeholders  # transparent-graphic placeholder path -> hide pure-placeholder assets from the browser
 import gt7_crypto      # GT7 UDP telemetry: Salsa20 decrypt (solo/POV only, #324)
@@ -172,6 +173,11 @@ LOG = logging.getLogger("racecast.relay")
 # cookies + JS-challenge solving) -> streamlink serves that direct URL to OBS
 # (no YouTube plugin involved, so no bot-check on the serving side).
 YTDLP_FORMAT = "b[height<=1080]/b"   # prefer <=1080p, auto-fall back to lower
+
+# Formats are unioned across these clients: the default one sometimes offers no MUXED
+# format at all, and the relay needs one url for one streamlink. `mweb` over `android`,
+# which YouTube bot-flags most readily.
+YTDLP_PLAYER_CLIENTS = "default,mweb"
 STREAMLINK_SERVE = ["--ringbuffer-size", "64M", "--hls-live-edge", "4"]
 # "Stop early on missing live segments" tolerance. Default 3 gave up at ~6 s
 # (targetduration ~2 s) — BELOW the relay's own 8 s byte-stall watchdog (FANOUT_STALL_S) —
@@ -207,9 +213,15 @@ def _streamlink_help():
     global _STREAMLINK_HELP
     if _STREAMLINK_HELP is None:
         try:
+            # errors="replace" like every other subprocess.run in this file: on a
+            # German Windows the console codepage is cp1252, streamlink's help text
+            # carries a byte it cannot decode, and the failure lands in subprocess's
+            # reader THREAD — so the `except` below never sees it and the relay just
+            # prints a traceback and loses the help text (and with it the queue
+            # deadline flag). Seen on the producer host 2026-09-20.
             _STREAMLINK_HELP = subprocess.run(
                 ["streamlink", "--help"], capture_output=True, text=True,
-                timeout=10, env=external_tool_env()).stdout or ""
+                errors="replace", timeout=10, env=external_tool_env()).stdout or ""
         except Exception:                     # noqa: BLE001 — best-effort probe
             _STREAMLINK_HELP = ""
     return _STREAMLINK_HELP
@@ -397,6 +409,13 @@ HEALTH_COLORS = {                # Discord embed sidebar colour per level
 _HEALTH_LABEL = {"green": "OK", "yellow": "DEGRADED", "red": "CRITICAL"}
 
 # ---------- Feed fan-out stall detection (relay feed multiplexing, #358) --------
+# Superseded + nothing completed for this long = abandoned. Must outlast the slowest
+# legitimate sendall to a slow consumer, hence well above RACECAST_FEED_STALL_S.
+# Measured on both hosts 2026-09-21: a handler blocked in sendall wakes on shutdown()
+# alone on macOS, but on Windows only on close(). Closing a descriptor another thread
+# owns is a last resort, so it is done only where shutdown does not do the job.
+CLOSE_TO_WAKE = os.name == "nt"
+FANOUT_STALE_GRACE_S = 30.0
 FANOUT_STALL_S = 8.0   # seconds without a byte from streamlink before a fan-out reader is "stalled"
 FANOUT_RING_BYTES = 16 * 1024 * 1024  # per-feed ring window (bounded; ≈12 s at 10 Mbps). Not a safety lever (#581): a larger ring only delays a slow consumer's overflow and hides it longer.
 MARK_MIN_INTERVAL_S = 0.1        # #533: throttle the FeedRing time index to ~1 mark/100 ms
@@ -486,6 +505,25 @@ def feed_freeze_detect_enabled(environ):
     stale-demuxer freeze/stutter the renderSkip signal is blind to (#488, measured live
     2026-07-15). Pure so the switch is unit-testable."""
     return str(environ.get("RACECAST_FEED_FREEZE_DETECT", "")).strip().lower() not in _FANOUT_FALSEY
+
+
+def feed_backlog_shed_enabled(environ):
+    """True unless RACECAST_FEED_BACKLOG_SHED is an explicit falsey token. Default ON: the
+    relay rebuilds the on-air feed's OBS input by itself when its consumer stays behind
+    the live edge, instead of waiting for a director to press RESET.
+
+    This is its OWN switch rather than a mode of RACECAST_FEED_FREEZE_DETECT, because the
+    two detect different faults and a producer turning one off must not silently lose the
+    other. Pure so the switch is unit-testable."""
+    return str(environ.get("RACECAST_FEED_BACKLOG_SHED", "")).strip().lower() not in _FANOUT_FALSEY
+
+
+def feed_backlog_shed_ticks(environ):
+    """Consecutive heartbeats the on-air feed must be classified backlogged before the shed
+    acts. Default 1, because the classified value is the interval FLOOR (a minimum), so one
+    tick already means the feed was late for the whole 30 s. Raise it to trade reaction time
+    for certainty. Below 1 is meaningless and reads as the default. Pure."""
+    return max(1, int(_env_float(environ, "RACECAST_FEED_BACKLOG_SHED_TICKS", 1)))
 
 
 def feed_freeze_stall_ratio(environ):
@@ -830,6 +868,15 @@ def freeze_decision(frac, since_last_reset_s, *, frac_threshold, cooldown_s):
     return frac is not None and frac >= frac_threshold
 
 
+def backlog_shed_decision(streak, since_last_reset_s, *, min_streak, cooldown_s):
+    """Whether to auto-rebuild the on-air feed's OBS input: True after `min_streak`
+    consecutive backlogged heartbeats, once the shared cooldown has elapsed. Same shape as
+    `freeze_decision` — both pull the same control. A None streak never trips it. Pure."""
+    if since_last_reset_s is not None and since_last_reset_s < cooldown_s:
+        return False
+    return streak is not None and streak >= min_streak
+
+
 def consumer_overflowed(prev_snaps, snaps):
     """True when the fan-out consumer's cumulative cursor-snap count rose since the last
     check: the ring lapped OBS and dropped bytes under it. An incident record only (#582):
@@ -854,30 +901,58 @@ class RebuildGuard:
         self.rearm()
 
     def rearm(self):
-        self.ineffective = 0
-        self.pending = False
-        self.stood_down = False
+        self._ineffective = {}       # reason -> consecutive ineffective rebuilds
+        self._stood_down = set()     # reasons that gave up
+        self.pending = None          # reason tag of the rebuild awaiting judgement
 
-    def allows(self):
-        return not self.stood_down
+    def allows(self, reason="freeze"):
+        """Per reason: one giving up must not disable the other's remedy."""
+        return reason not in self._stood_down
 
-    def on_fire(self):
-        self.pending = True
+    def ineffective(self, reason="freeze"):
+        return self._ineffective.get(reason, 0)
 
-    def on_window(self, frac, *, frac_threshold):
-        """Judge the first full window after a rebuild. Returns True when this call stood
-        the guard down. No pending rebuild, or nothing measurable yet, changes nothing."""
-        if not self.pending or frac is None:
-            return False
-        self.pending = False
-        if frac < frac_threshold:
-            self.ineffective = 0
-            return False
-        self.ineffective += 1
-        if self.ineffective >= self.max_attempts:
-            self.stood_down = True
+    @property
+    def stood_down(self):
+        """True when ANY reason gave up — the Director Panel reads this as a plain bool."""
+        return bool(self._stood_down)
+
+    @property
+    def stood_down_reasons(self):
+        return sorted(self._stood_down)
+
+    def on_fire(self, reason="freeze"):
+        """Arm the judgement for a rebuild this reason just fired. A still-unjudged one
+        that the next rebuild supersedes did not end the trouble, so it counts as
+        ineffective rather than being overwritten out of the three-strike budget."""
+        if self.pending is not None:
+            self._count_ineffective(self.pending)
+        self.pending = reason
+
+    def _count_ineffective(self, reason):
+        n = self._ineffective.get(reason, 0) + 1
+        self._ineffective[reason] = n
+        if n >= self.max_attempts:
+            self._stood_down.add(reason)
             return True
         return False
+
+    def judge(self, still_bad, *, reason="freeze"):
+        """Judge the pending rebuild, but only if THIS reason fired it — the two judges run
+        on different threads, and either would otherwise consume the other's. True when
+        this call stood the guard down. `still_bad is None` consumes nothing."""
+        if self.pending != reason or still_bad is None:
+            return False
+        self.pending = None
+        if not still_bad:
+            self._ineffective[reason] = 0
+            return False
+        return self._count_ineffective(reason)
+
+    def on_window(self, frac, *, frac_threshold):
+        """Judge the first full window after a FREEZE rebuild. "Better but still stalling"
+        is not an improvement, so the comparison is against the same trip threshold."""
+        return self.judge(None if frac is None else frac >= frac_threshold, reason="freeze")
 
 
 def feed_reset_target(feed_key, valid_keys):
@@ -1057,6 +1132,13 @@ def aggregate_health(facts):
                 if name in ("A", "B") else "")
         yellow.append(f"Feed {name} output {behind:.0f} s behind live — OBS reads slower than "
                       f"real time{step}")
+    # #619: OBS already repaired this one by the time we read its log, so the reason
+    # reports it and asks for eyes instead of naming a fix. Only UNEXPLAINED repairs
+    # reach here; one right after a restart is that restart's expected cost.
+    for name, ms in (facts.get("feeds_av_disturbed") or {}).items():
+        amount = f" by {ms:.0f} ms" if ms is not None else ""
+        yellow.append(f"Feed {name} audio timing broke{amount} with no restart to explain "
+                      f"it — OBS re-synced itself; check the program picture and sound")
     reasons.extend(red)
     reasons.extend(yellow)
     level = "red" if red else ("yellow" if yellow else "green")
@@ -3558,6 +3640,7 @@ def ytdlp_resolve_cmd(url, cookies, fmt=YTDLP_FORMAT):
     # -g yields the HLS URL; the extra --print emits a "rcq <height> <fps>" line so the
     # relay can show the ACTUALLY-served resolution (YouTube's streamlink only reports "live").
     cmd = ["yt-dlp", "-g", "-f", fmt, "--no-warnings", "--no-playlist",
+           "--extractor-args", f"youtube:player_client={YTDLP_PLAYER_CLIENTS}",
            "--print", "rcq %(height)s %(fps)s"]
     if cookies:
         cmd += ["--cookies", cookies]
@@ -4679,6 +4762,7 @@ class FeedFanoutServer:
         self._stop = False
         self._consumers = {}            # id -> {"cycle_ts", "snaps", "cursor", "floor"} (#583)
         self._consumers_lock = threading.Lock()
+        self._current = None            # the one live consumer socket (see retire_previous)
 
     def _join_offset(self, now):
         return fanout_join_offset(self.ring, self.prebuffer_s, now)
@@ -4692,12 +4776,64 @@ class FeedFanoutServer:
         threading.Thread(target=self._accept_loop, daemon=True).start()
         return self
 
+    def mark_superseded(self, now=None):
+        """A new consumer arrived: note where every attached one stands.
+
+        Windows OBS leaves the old connection open on an input rebuild, and TCP cannot see
+        that. Being superseded alone condemns nobody — this port serves several consumers
+        by design; `_stale` adds the part that does."""
+        now = time.monotonic() if now is None else now
+        with self._consumers_lock:
+            for st in self._consumers.values():
+                st["superseded"] = (st.get("cycle_ts"), now)
+
+    def _stale(self, st, now, grace_s=FANOUT_STALE_GRACE_S):
+        """A superseded consumer that has completed nothing since, past the grace.
+
+        `cycle_ts` (a completed read or send), not `cursor`: the cursor only advances once
+        per read cycle, and a slow consumer sits inside one for many seconds. The grace
+        belongs in the judgement, not just the reaping — in the instant of the mark
+        nothing has completed yet."""
+        mark = st.get("superseded")
+        return (mark is not None and st.get("cycle_ts") == mark[0]
+                and (now - mark[1]) >= grace_s)
+
+    def reap_superseded(self, now=None, grace_s=FANOUT_STALE_GRACE_S):
+        """Wake the abandoned consumers' handlers and return how many. Heartbeat only,
+        never a read path.
+
+        shutdown() is what unblocks a handler stuck in sendall — on POSIX. On Windows
+        it leaves the handler blocked for good and only close() wakes it, so only there
+        does the reaper close a descriptor the handler still owns (CLOSE_TO_WAKE)."""
+        now = time.monotonic() if now is None else now
+        doomed = []
+        with self._consumers_lock:
+            for st in self._consumers.values():
+                if self._stale(st, now, grace_s):
+                    doomed.append(st.get("conn"))
+        for conn in doomed:
+            if conn is None:
+                continue
+            # The peer stopped reading long ago, so either call may fail; a raise here
+            # would take out the heartbeat tick that also samples health.
+            try:
+                conn.shutdown(socket.SHUT_RDWR)
+            except Exception:       # noqa: BLE001 — best-effort teardown
+                pass
+            if CLOSE_TO_WAKE:
+                try:
+                    conn.close()
+                except Exception:   # noqa: BLE001 — best-effort teardown
+                    pass
+        return len(doomed)
+
     def _accept_loop(self):
         while not self._stop:
             try:
                 conn, _ = self._sock.accept()
             except OSError:
                 return                          # socket closed by stop()
+            self.mark_superseded()
             threading.Thread(target=self._serve, args=(conn,), daemon=True).start()
 
     def _serve(self, conn):
@@ -4716,7 +4852,8 @@ class FeedFanoutServer:
                          b"Connection: close\r\n\r\n" + join.init)
             cid = id(threading.current_thread())
             with self._consumers_lock:
-                self._consumers[cid] = {"cycle_ts": time.monotonic(), "snaps": 0}
+                self._consumers[cid] = {"cycle_ts": time.monotonic(), "snaps": 0,
+                                        "conn": conn}
             while not self._stop and not self.ring.closed:
                 # #583: every byte before `cursor` was accepted by the consumer (the
                 # previous sendall returned), so this is where OBS actually is.
@@ -4762,9 +4899,16 @@ class FeedFanoutServer:
     def consumer_backlog(self, now):
         """Seconds the worst consumer is behind the live edge right now, from its last
         accepted position (#583). Grows while a consumer is blocked in sendall. None when
-        no consumer is attached or the ring has no time index. `now` is monotonic."""
+        no consumer is attached or the ring has no time index. `now` is monotonic.
+
+        A consumer that was superseded and has not moved since is left out: it is an
+        abandoned socket TCP still calls ESTABLISHED (see mark_superseded), and max()
+        over it reported a backlog that no longer existed for as long as the handler sat
+        there. That is excluded here rather than only in reap_superseded so the number
+        is right immediately, instead of after the reaper's grace."""
         with self._consumers_lock:
-            cursors = [st["cursor"] for st in self._consumers.values() if "cursor" in st]
+            cursors = [st["cursor"] for st in self._consumers.values()
+                       if "cursor" in st and not self._stale(st, now)]
         if not cursors or not hasattr(self.ring, "age_at_offset"):
             return None
         ages = [a for a in (self.ring.age_at_offset(c, now) for c in cursors) if a is not None]
@@ -4778,7 +4922,11 @@ class FeedFanoutServer:
         the interval in which its backlog is largest. Called once per heartbeat; `now` is
         monotonic. None when no consumer is attached."""
         with self._consumers_lock:
-            states = [(st.get("floor"), st.get("cursor")) for st in self._consumers.values()]
+            # Same exclusion as consumer_backlog: an abandoned socket's frozen position
+            # must not become the interval floor, which is what the health reason, the
+            # health-history row and the automatic shed all read.
+            states = [(st.get("floor"), st.get("cursor"))
+                      for st in self._consumers.values() if not self._stale(st, now)]
             for st in self._consumers.values():
                 st["floor"] = None
         floors = []
@@ -7191,6 +7339,127 @@ def should_probe_obs(last_ts, running, now, interval):
     return not running and (now - last_ts) >= interval
 
 
+class AvSyncWatcher:
+    """Tails OBS's own log and folds the A/V sync disturbances it reports into an
+    `av_sync` state (#619).
+
+    OBS is the only component that knows when a source's audio timing broke, and until
+    now it told nobody but its log file. This reads that file; it never writes to OBS
+    and never acts on what it finds — by the time the line exists OBS has already
+    repaired it (see av_sync's module docstring).
+
+    Only lines appended AFTER the watcher starts are read. That is what lets every event
+    be stamped with our own clock: OBS writes `HH:MM:SS.mmm` with no date, so parsing its
+    timestamp would need the file's date plus midnight-rollover handling for a value the
+    tail lag already gives to within a second.
+
+    Best-effort in the strong sense: no OBS, no log directory, a rotated or truncated
+    file, a permission error — each of those means no detector, never a broken relay.
+    """
+
+    POLL_S = 2.0        # how often new lines are read; a repair is not time-critical
+    RESCAN_S = 30.0     # how often to look for a newer log file (OBS opens one per run)
+
+    def __init__(self, log_dir, serving_age, state, lock, log):
+        self.log_dir = log_dir
+        self.serving_age = serving_age   # feed name -> seconds in `serving`, or None
+        self.state = state
+        self.lock = lock
+        self.log = log
+        self.stop = False
+        self._warned = False
+        # A tail reads a file another process is still writing, so the last read can end
+        # mid-line. readline() hands that fragment back as if it were a line, and the
+        # remainder arrives as another: a repair split across two polls parsed to
+        # nothing TWICE and was lost silently — the one event this exists to catch.
+        self._partial = ""
+
+    def _newest_log(self):
+        # logsetup.list_logs filters to regular files (newest first) — a FIFO named
+        # *.txt in the log directory would otherwise block open() and hang this thread
+        # for good. It follows symlinks, so a link to a regular file still passes.
+        for path in logsetup.list_logs(self.log_dir):
+            if path.endswith(".txt"):
+                return path
+        return None
+
+    def drain(self, fh):
+        """Read every COMPLETE line available right now and fold it in.
+
+        A tail reads a file another process is still writing, so the last read can end
+        mid-line: readline() hands that fragment back as if it were a line and the
+        remainder arrives as another, so a repair split across two polls parses to
+        nothing twice and is lost. The remainder is therefore held until its newline
+        arrives. Public because the test drives THIS loop — an earlier version of that
+        test rebuilt it and proved only its own copy."""
+        while True:
+            chunk = fh.readline()
+            if not chunk:
+                return
+            self._partial += chunk
+            if not self._partial.endswith("\n"):
+                return               # writer is mid-line; wait for the rest
+            line, self._partial = self._partial, ""
+            self._ingest(line, time.monotonic())
+
+    def _ingest(self, line, now):
+        ev = av_sync.parse_obs_log_line(line.rstrip("\n"))
+        if ev is None:
+            return
+        feed = av_sync.feed_for_source(ev.get("source"))
+        age = self.serving_age(feed) if feed else None
+        with self.lock:
+            av_sync.record(self.state, ev, now, age)
+
+    def run(self):
+        path, fh, opened_at = None, None, 0.0
+        try:
+            while not self.stop:
+                now = time.monotonic()
+                if fh is None or (now - opened_at) >= self.RESCAN_S:
+                    newest = self._newest_log()
+                    if newest and newest != path:
+                        if fh is not None:
+                            # A NEW file was created after we started watching, so it
+                            # begins with this session: read it whole, not from the end.
+                            try: fh.close()
+                            except OSError: pass    # closing a rotated handle is best-effort
+                            fh = None
+                        try:
+                            # noqa SIM115: a tail holds its handle across loop turns;
+                            # a context manager would close it on every poll.
+                            fh = open(newest, encoding="utf-8", errors="replace")  # noqa: SIM115
+                            if path is None:
+                                fh.seek(0, os.SEEK_END)   # first open: skip the backlog
+                            path = newest
+                            self.log.info("A/V sync watcher reading %s", newest)
+                        except OSError as exc:
+                            if not self._warned:
+                                self.log.warning("A/V sync watcher cannot read %s (%s) "
+                                                 "— no sync disturbance reporting", newest, exc)
+                                self._warned = True
+                            fh = None
+                    opened_at = now
+                if fh is not None:
+                    try:
+                        self.drain(fh)
+                    except (OSError, ValueError):
+                        # ONLY the file is allowed to end up here. A parse failure would
+                        # be filed as a rotation, skip the lines up to the reopen, and
+                        # hide itself — so parsing never raises (av_sync returns None).
+                        try: fh.close()
+                        except OSError: pass    # already gone; we reopen below
+                        fh, path = None, None     # rotated or truncated: pick it up again
+                        self._partial = ""        # its tail belongs to the old file
+                time.sleep(self.POLL_S)
+        except Exception:                          # noqa: BLE001 — a detector must never kill the relay
+            self.log.exception("A/V sync watcher stopped")
+        finally:
+            if fh is not None:
+                try: fh.close()
+                except OSError: pass    # shutting down; nothing left to salvage
+
+
 class Relay:
     def __init__(self, source, ports, logdir, cookies=None, pov_source=None,
                  pov_port=None, start_stint=1, cookie_dir=None,
@@ -7293,8 +7562,17 @@ class Relay:
         self._served_max_gaps = {}        # #619: same, but None where nothing measured it
         self._jittery_feeds = []          # #535: feeds whose last-interval gap tripped the signal
         self._backlog_warn_s = feed_backlog_warn_s(os.environ)      # #583
+        # Automatic backlog shed (2026-09-21): a second reason to pull the SAME OBS-rebuild
+        # control the freeze detector owns. Shares _rebuild_guard and _last_freeze_ts.
+        self._backlog_shed = feed_backlog_shed_enabled(os.environ)
+        self._backlog_shed_ticks = feed_backlog_shed_ticks(os.environ)
+        self._backlog_streak = {}      # feed -> consecutive backlogged heartbeats
+        self._obs_splice_ts = {}       # feed -> when the relay last rebuilt its OBS input
         self._interval_backlogs = {}      # #583: last heartbeat's per-feed consumer backlog floor
         self._backlogged_feeds = {}       # #583: feed -> floor (s) for feeds past the threshold
+        self._av = av_sync.new_state()    # #619: A/V sync disturbances OBS reported
+        self._av_lock = threading.Lock()
+        self._av_watcher = None
         self.program_audio = program_audio_enabled(os.environ)
         self._fanout_servers = []
         # Auto-failover to the Intermission scene on confirmed on-air feed loss
@@ -7380,6 +7658,7 @@ class Relay:
             threading.Thread(target=self.pov.run, daemon=True).start()
         threading.Thread(target=self._heartbeat_loop, daemon=True).start()
         threading.Thread(target=self._auto_cover_loop, daemon=True).start()
+        self._start_av_watcher()
         if self.fanout:                   # #488 freeze detector only applies to the fan-out demuxer
             threading.Thread(target=self._freeze_sampler_loop, daemon=True).start()
 
@@ -7435,7 +7714,70 @@ class Relay:
                 "feed_source_states": feed_source_states,
                 "feeds_jittery": list(self._jittery_feeds),
                 "rebuilds_stood_down": self._rebuilds_stood_down_fact(st.get("obs_fps")),
-                "feeds_backlogged": dict(self._backlogged_feeds)}
+                "feeds_backlogged": dict(self._backlogged_feeds),
+                "feeds_av_disturbed": self._av_health_fact()}
+
+    def _note_obs_splice(self, feed):
+        """Record that the relay just spliced this feed into OBS by rebuilding the input.
+        Takes no clock on purpose: its only reader compares against time.time(), and a
+        caller passing a monotonic `now` would silently never match."""
+        self._obs_splice_ts[feed] = time.time()
+
+    def _serving_age(self, feed):
+        """How long ago the relay last spliced a stream into OBS for that feed, or None
+        when it is not serving — what tells an EXPECTED sync disturbance from an
+        unexplained one (#619). An input rebuild counts: it splices without restarting the
+        feed, so the serving age alone would leave our own remedy looking unexplained."""
+        f = self.pov if feed == "POV" else self.feeds.get(feed)
+        if f is None or f.paused or f.phase != "serving":
+            return None
+        since = f.phase_since
+        spliced = self._obs_splice_ts.get(feed)
+        if spliced is not None and spliced > since:
+            since = spliced
+        return time.time() - since
+
+    def _start_av_watcher(self):
+        """Start the A/V sync watcher on OBS's own log directory. Entirely optional:
+        without OBS installed there is no directory and the relay simply runs without
+        the detector (#619)."""
+        try:
+            d = logsetup.obs_log_dir(sys.platform)
+            if not d or not os.path.isdir(d):
+                return
+            self._av_watcher = AvSyncWatcher(d, self._serving_age, self._av,
+                                             self._av_lock, LOG)
+            threading.Thread(target=self._av_watcher.run, daemon=True).start()
+        except Exception as exc:                 # noqa: BLE001 — a detector is never fatal
+            LOG.warning("A/V sync watcher not started (%s)", exc)
+
+    # The watcher stamps every event with time.monotonic(), so both readers below take
+    # their own monotonic reading rather than the wall-clock `now` the /status and
+    # heartbeat paths pass around. Mixing the two clocks would silently produce ages of
+    # about 1.8 billion seconds.
+    def _av_status(self):
+        """The /status `av` block: per-feed disturbance counts plus the unattributed
+        context lines. Empty when nothing has happened, so a clean event adds no noise."""
+        mono = time.monotonic()
+        with self._av_lock:
+            feeds = av_sync.status_block(self._av, mono)
+            ctx = dict(self._av["context"])
+        return {"feeds": feeds, "context": ctx} if (feeds or ctx) else {}
+
+    def _av_totals(self):
+        """Running A/V disturbance totals for the health snapshot (#619)."""
+        with self._av_lock:
+            feeds = self._av["feeds"].values()
+            return {"av_repairs_total": sum(f["repairs"] for f in feeds),
+                    "av_unexplained_total": sum(f["unexplained"] for f in feeds)}
+
+    def _av_health_fact(self):
+        """feed -> magnitude in ms for feeds with a RECENT UNEXPLAINED repair. A repair
+        right after a restart is the expected cost of that restart, so it never reaches
+        the health block (#619)."""
+        mono = time.monotonic()
+        with self._av_lock:
+            return av_sync.health_fact(self._av, mono)
 
     def _refresh_health(self, now):
         """Recompute + store the DISPLAYED health (level/reasons/since). Does NOT
@@ -7446,7 +7788,8 @@ class Relay:
         facts = self._health_facts(now)
         h = aggregate_health(facts)
         notify_level = aggregate_health({**facts, "feeds_jittery": [],
-                                         "feeds_backlogged": {}})["level"]
+                                         "feeds_backlogged": {},
+                                         "feeds_av_disturbed": {}})["level"]
         with self._health_lock:
             if h["level"] != self.health_level:
                 self.health_level = h["level"]
@@ -7519,6 +7862,9 @@ class Relay:
                 # pull index stays reconstructable from feed_a/b_stint + live_feed.
                 "live_feed": live, "live_stint": (None if self.solo else self.on_air_row_idx() + 1),
                 "desync_active": 1 if self._desync.get("active") else 0,
+                # v11 (#619): running totals, so the post-event report can say how
+                # often the chain was disturbed and how often nothing explained it.
+                **self._av_totals(),
                 # v3 OBS stats (already redacted: obs_stats never carries output_bytes)
                 "stream_active": _b(st.get("stream_active")),
                 "stream_reconnecting": _b(st.get("stream_reconnecting")),
@@ -7584,6 +7930,10 @@ class Relay:
             self._sample_connectivity()
             self._sample_inbound_gaps()
             self._sample_consumer_backlogs()
+            try:
+                self._backlog_shed_tick(now)    # reads the classification just sampled
+            except Exception as exc:            # noqa: BLE001 — a remedy never breaks the heartbeat
+                LOG.debug("backlog shed error (%s)", exc)
             h = self._refresh_health(now)
             if self.health_store is not None:
                 try:
@@ -7636,14 +7986,25 @@ class Relay:
     def _sample_consumer_backlogs(self):
         """#583: read+reset each fan-out server's interval backlog floor ONCE per heartbeat
         (the 2 s /status poll reads the live value and never resets), and classify the
-        feeds whose consumer fell behind the live edge. Observability only: nothing acts
-        on it until #581 stage 4/5."""
+        feeds whose consumer fell behind the live edge.
+
+        `_backlogged_feeds` is no longer observability only: `_backlog_shed_tick` runs
+        immediately after this in the same heartbeat and rebuilds the on-air feed's OBS
+        input off it (2026-09-21). Keep the two adjacent and in this order — the shed reads
+        the classification this call just produced."""
         floors, lagging = {}, {}
         live = list(self.feeds.items()) + ([("POV", self.pov)] if self.pov else [])
         for name, f in live:
             srv = getattr(f, "fanout_server", None)
             if srv is None:
                 continue
+            try:
+                reaped = srv.reap_superseded(time.monotonic())   # before the floor is taken
+                if reaped:
+                    LOG.info("feed %s: closed %d abandoned consumer connection(s) "
+                             "OBS left open after an input rebuild", name, reaped)
+            except Exception as exc:    # noqa: BLE001 — a reaper never breaks the tick
+                LOG.debug("consumer reap on %s failed (%s)", name, exc)
             fl = srv.take_backlog_floor(time.monotonic())   # always take: a stopped feed resets too
             if f.paused or f.phase != "serving":
                 floors[name] = None                  # no live edge to be behind
@@ -7854,8 +8215,14 @@ class Relay:
             stood_down = self._rebuild_guard.on_window(frac, frac_threshold=self._freeze_frac)
             if stood_down:
                 self._rebuild_stood_down_feed = live
-            attempts = self._rebuild_guard.ineffective
-            allowed = self._rebuild_guard.allows()
+            attempts = self._rebuild_guard.ineffective("freeze")
+            since = None if self._last_freeze_ts is None else now - self._last_freeze_ts
+            fire = (self._rebuild_guard.allows("freeze")
+                    and freeze_decision(frac, since, frac_threshold=self._freeze_frac,
+                                        cooldown_s=self._freeze_cooldown))
+            if fire:
+                self._last_freeze_ts = now      # claim the cooldown before releasing the lock
+                self._rebuild_guard.on_fire("freeze")
         if stood_down:
             LOG.warning("Feed %s auto-rebuild stood down — %d OBS rebuilds did not clear the "
                         "stall (stall_fraction=%.2f); re-arms at the next stint change or "
@@ -7864,22 +8231,73 @@ class Relay:
                                f"Feed {live} auto-rebuild stood down after {attempts} "
                                f"ineffective rebuilds",
                                {"feed": live, "stint": f.idx + 1, "attempts": attempts})
-        if not allowed:
-            return
-        since = None if self._last_freeze_ts is None else now - self._last_freeze_ts
-        if not freeze_decision(frac, since, frac_threshold=self._freeze_frac,
-                               cooldown_s=self._freeze_cooldown):
+        if not fire:
             return
         LOG.warning("freeze auto-reconnect %s — stall_fraction=%.2f — rebuilding OBS input "
                     "(#488)", live, frac)
         f._obs_reconnect()                      # the RESET primitive, threaded + best-effort
-        self._last_freeze_ts = now
-        with self._rebuild_lock:
-            self._rebuild_guard.on_fire()
+        self._note_obs_splice(live)             # so the A/V detector does not flag our own work
         self._record_event(now, "obs_rebuild",
                            f"Feed {live} OBS input rebuilt (stall fraction {frac:.2f})",
                            {"feed": live, "stint": f.idx + 1, "stall_fraction": round(frac, 2)})
         self._fz_prev_cursor = None; self._fz_ratios = []
+
+    def _backlog_shed_tick(self, now):
+        """Rebuild the ON-AIR feed's OBS input when its consumer stays behind the live
+        edge, so the picture returns without a director pressing RESET. Heartbeat only,
+        right after the classification it reads; errors are swallowed there.
+
+        A second REASON on the freeze detector's control, not a second automation: same
+        rebuild, same RebuildGuard, same cooldown. On-air feed only (an off-air one has no
+        consumer under close_when_inactive); POV is out. A backlog that keeps GROWING is
+        not fixed here — three attempts, then the guard stands down. See
+        docs/superpowers/specs/2026-09-21-automatic-backlog-shed-design.md."""
+        if not self._backlog_shed or _obs_ws is None or not self.fanout:
+            return
+        live = self.live_feed()
+        f = self.feeds.get(live)
+        degraded = live in self._backlogged_feeds
+        # An unmeasurable round consumes no verdict; it waits.
+        measured = self._interval_backlogs.get(live) is not None or degraded
+        with self._rebuild_lock:
+            stood_down = self._rebuild_guard.judge(degraded if measured else None,
+                                                   reason="backlog")
+            attempts = self._rebuild_guard.ineffective("backlog")
+        if stood_down:
+            self._rebuild_stood_down_feed = live
+            LOG.warning("Feed %s backlog shed stood down — %d OBS rebuilds did not bring the "
+                        "output back to the live edge, so the relay has stopped trying. The "
+                        "picture stays behind live until the next stint change or a re-arm "
+                        "from the Director Panel", live, attempts)
+            self._record_event(now, "backlog_shed_stood_down",
+                               f"Feed {live} backlog shed stood down after {attempts} "
+                               f"ineffective rebuilds", {"feed": live, "attempts": attempts})
+        # A feed that is not serving has no live edge to be behind: reset its streak so a
+        # handover does not carry an old one into the next stint.
+        if f is None or f.paused or f.phase != "serving" or not degraded:
+            self._backlog_streak[live] = 0
+            return
+        streak = self._backlog_streak[live] = self._backlog_streak.get(live, 0) + 1
+        with self._rebuild_lock:
+            since = None if self._last_freeze_ts is None else now - self._last_freeze_ts
+            fire = (self._rebuild_guard.allows("backlog")
+                    and backlog_shed_decision(streak, since,
+                                              min_streak=self._backlog_shed_ticks,
+                                              cooldown_s=self._freeze_cooldown))
+            if fire:
+                self._last_freeze_ts = now      # claim the cooldown before releasing the lock
+                self._rebuild_guard.on_fire("backlog")
+        if not fire:
+            return
+        behind = self._backlogged_feeds[live]   # degraded, so the classification holds one
+        LOG.warning("backlog shed %s — output %.1f s behind live — rebuilding OBS input",
+                    live, behind)
+        f._obs_reconnect()                      # the RESET primitive, threaded + best-effort
+        self._note_obs_splice(live)             # so the A/V detector does not flag our own work
+        self._backlog_streak[live] = 0
+        self._record_event(now, "backlog_shed",
+                           f"Feed {live} OBS input rebuilt to shed a {behind:.1f} s backlog",
+                           {"feed": live, "backlog_s": behind})
 
     def _maybe_auto_failover(self, now):
         """Auto-switch OBS to the Intermission scene when the ON-AIR feed is
@@ -8049,6 +8467,12 @@ class Relay:
         out["health"] = {"level": self.health_level, "reasons": self.health_reasons,
                          "since_s": round(now - self.health_since, 1)}
         out["desync"] = self._desync
+        # NOT part of `desync` above: that one is the ping-pong stint mismatch (#494).
+        # This is A/V sync (#619). Two different states, and sharing a name would make
+        # the panel show one under the other's label.
+        av = self._av_status()
+        if av:
+            out["av"] = av
         out["rebuild_guard"] = self.rebuild_guard_status()
         return out
 
@@ -8808,6 +9232,8 @@ class Relay:
         return {"feed": which, "profile": feed.quality_tier, "pinned": feed.quality_pinned}
 
     def shutdown(self):
+        if self._av_watcher is not None:
+            self._av_watcher.stop = True    # #619: ends the tail on the next poll
         for f in self.feeds.values(): f.shutdown()
         if self.pov: self.pov.shutdown()
         for srv in self._fanout_servers: srv.stop()
@@ -10740,19 +11166,25 @@ def _telemetry_loop(store, ps_ip, stop_evt):
 
 
 def cookie_health(path, now=None, max_age_hours=COOKIE_MAX_AGE_H):
-    """Cookie staleness for /status, computed on demand from the file mtime —
-    during a 24 h event the cookies age while the relay runs, so this must be
-    live, not a startup snapshot. Running cookie-less (path None / file gone)
-    is a legitimate configuration (public streams): present=False, stale=False
-    — the panel raises its cookie banner only on stale=True."""
+    """Cookie staleness for /status, computed on demand — during a 24 h event the
+    cookies age while the relay runs, so this must be live, not a startup snapshot.
+
+    The age is the EXPORT age (cookie_jar's stamp), not the jar's mtime: yt-dlp
+    rewrites the jar on every resolve, so mid-event its mtime is always minutes old
+    and the banner could never fire. A jar with no stamp reports age_h=None and is
+    not stale — unknown is never reported as old, and never as fresh either.
+    Running cookie-less (path None / file gone) is a legitimate configuration
+    (public streams): present=False, stale=False — the panel raises its cookie
+    banner only on stale=True."""
     try:
-        mtime = os.path.getmtime(path) if path and os.path.isfile(path) else None
+        present = bool(path) and os.path.isfile(path)
     except OSError:
-        mtime = None   # swapped/deleted between isfile and getmtime (cookie refresh)
-    if mtime is None:
+        present = False
+    if not present:
         return {"present": False, "age_h": None, "stale": False}
-    now = time.time() if now is None else now
-    age_h = round((now - mtime) / 3600, 1)
+    age_h = cookie_jar.export_age_h(path, now=now)
+    if age_h is None:
+        return {"present": True, "age_h": None, "stale": False}
     return {"present": True, "age_h": age_h, "stale": age_h > max_age_hours}
 
 
@@ -10804,11 +11236,13 @@ def export_cookies(browser, out):
         return False
     try: os.chmod(out, 0o600)   # live YouTube session — owner-only
     except OSError: pass        # best-effort hardening; never block the export
+    cookie_jar.record_export(out)
     LOG.info("Cookie export from '%s': OK -> %s (kept only youtube.com cookies, dropped %d "
              "other lines)", browser, out, dropped)
     return True
 
 def main():
+    logsetup.harden_stdio()    # before argparse builds help text that may be non-ASCII
     load_dotenv(os.path.dirname(os.path.abspath(__file__)))  # before defaults are read
     ap = argparse.ArgumentParser(description="GT Racing 2-feed relay with Google-Sheet schedule")
     ap.add_argument("--sheet-id", default=os.environ.get("RACECAST_SHEET_ID"),
@@ -10878,7 +11312,7 @@ def main():
     ap.add_argument("--overlay-tab", default="Overlay",
                     help="Google-Sheet tab with the live HUD values (default 'Overlay').")
     ap.add_argument("--config-tab", default="Configuration",
-                    help="Google-Sheet tab with the team→brand map (default 'Configuration').")
+                    help="Google-Sheet tab with the team-to-brand map (default 'Configuration').")
     ap.add_argument("--quali-times-tab", default=DEFAULT_QUALI_TIMES_TAB,
                     help="Google-Sheet tab with per-car qualifying best laps "
                          "(default 'Quali Times'). Absent tab = blank lap slots.")
@@ -10916,7 +11350,7 @@ def main():
                          "back to RACECAST_EVENT_TITLE.")
     ap.add_argument("--logdir", default="logs")
     ap.add_argument("--cookies", default=None,
-                    help="Path to yt-cookies.txt (Netscape format) for YouTube login — "
+                    help="Path to yt-cookies.txt (Netscape format) for YouTube login - "
                          "bypasses the 'Sign in to confirm you're not a bot' check. "
                          "Default: yt-cookies.txt next to this script, if present. "
                          "Twitch feeds use twitch-cookies.txt (picked up automatically "

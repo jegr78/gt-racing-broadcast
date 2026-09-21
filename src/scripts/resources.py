@@ -206,7 +206,7 @@ def _read_cpu():
             return ("counter", total - idle.value, total)
         if IS_MAC:
             out = subprocess.run(["top", "-l", "2", "-s", "1", "-n", "0"],
-                                 capture_output=True, text=True, timeout=6,
+                                 capture_output=True, text=True, errors="replace", timeout=6,
                                  **no_window_kwargs()).stdout
             pct = parse_top_cpu(out)
             return ("percent", pct, None) if pct is not None else None
@@ -223,7 +223,7 @@ def _read_net():
                 rx, tx = parse_proc_net_dev(fh.read())
             return ("counter", rx, tx)
         if IS_MAC:
-            out = subprocess.run(["netstat", "-ib"], capture_output=True, text=True,
+            out = subprocess.run(["netstat", "-ib"], capture_output=True, text=True, errors="replace",
                                  timeout=6, **no_window_kwargs()).stdout
             rx, tx = parse_netstat_ib(out)
             return ("counter", rx, tx)
@@ -231,7 +231,7 @@ def _read_net():
             out = subprocess.run(
                 ["typeperf", r"\Network Interface(*)\Bytes Received/sec",
                  r"\Network Interface(*)\Bytes Sent/sec", "-sc", "1"],
-                capture_output=True, text=True, timeout=10, **no_window_kwargs()).stdout
+                capture_output=True, text=True, errors="replace", timeout=10, **no_window_kwargs()).stdout
             got = parse_typeperf_net(out)
             return ("rate", got[0], got[1]) if got else None
     except (OSError, ValueError, subprocess.SubprocessError):
@@ -271,7 +271,7 @@ def _read_mem():
         if IS_MAC:
             total = int(subprocess.check_output(["sysctl", "-n", "hw.memsize"],
                                                 **no_window_kwargs()).strip())
-            out = subprocess.run(["vm_stat"], capture_output=True, text=True, timeout=6,
+            out = subprocess.run(["vm_stat"], capture_output=True, text=True, errors="replace", timeout=6,
                                  **no_window_kwargs()).stdout
             return (parse_vm_stat(out), total)
     except (OSError, ValueError, subprocess.SubprocessError):

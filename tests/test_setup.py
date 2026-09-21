@@ -1191,6 +1191,23 @@ def t_ytdlp_resolve_cmd_never_ignores_no_formats():
     assert "--ignore-no-formats-error" not in m.ytdlp_resolve_cmd("https://youtu.be/AAA", "/c/j.txt")
 
 
+def t_ytdlp_resolve_cmd_asks_for_a_muxed_capable_player_client():
+    # 2026-09-21, found on a live GT7 stream that racecast refused with "Requested format
+    # is not available": yt-dlp's default player client returned ONLY video-only and
+    # audio-only HLS renditions for it, while `b[height<=1080]/b` asks for a MUXED format.
+    # No muxed format existed, so a perfectly normal YouTube live stream could not be
+    # pulled at all. Listing a second client makes yt-dlp union both clients' formats, so
+    # the default path still wins whenever it already offers a muxed one.
+    cmd = m.ytdlp_resolve_cmd("https://youtu.be/AAA", None)
+    i = cmd.index("--extractor-args")
+    arg = cmd[i + 1]
+    assert arg.startswith("youtube:player_client="), arg
+    clients = arg.split("=", 1)[1].split(",")
+    assert clients[0] == "default", f"the default client must stay first, got {clients}"
+    assert len(clients) > 1, "a fallback client is the whole point"
+    assert i < cmd.index("--"), "it is an option, not part of the URL"
+
+
 def t_ytdlp_live_status_cmd():
     cmd = m.ytdlp_live_status_cmd("https://youtu.be/AAA", "/c/j.txt")
     assert cmd[-2:] == ["--", "https://youtu.be/AAA"], cmd

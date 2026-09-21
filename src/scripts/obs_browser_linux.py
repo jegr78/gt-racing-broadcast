@@ -325,7 +325,7 @@ def _detect_obs_version():
     """The installed OBS version string via dpkg, or None."""
     try:
         out = subprocess.run(["dpkg-query", "-W", "-f=${Version}", "obs-studio"],
-                             capture_output=True, text=True)
+                             capture_output=True, text=True, errors="replace")
         v = (out.stdout or "").strip()
         return v or None
     except Exception:

@@ -13,7 +13,7 @@ import math
 import sqlite3
 import time
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 SAMPLE_INTERVAL_S = 30          # heartbeat tick = sample cadence
 LIVE_WINDOW_S = 900            # default range when no from/to given (15 min)
@@ -90,6 +90,10 @@ COLUMNS = (
     "feed_a_backlog_s", "feed_b_backlog_s", "pov_backlog_s",
     # v10: OBS's configured frame rate, the reference obs_fps is judged against (#586)
     "obs_fps_target",
+    # v11: A/V sync disturbances OBS reported and repaired, running totals (#619).
+    # Totals, not per-interval: the post-event report needs "how often did this happen
+    # tonight", and a running total survives a sample the heartbeat missed.
+    "av_repairs_total", "av_unexplained_total",
 )
 
 BAND_FIELDS = ("health_level", "feed_a_state", "feed_b_state",
@@ -191,6 +195,10 @@ _V10_COLUMNS = (
     ("obs_fps_target", "REAL"),   # #586 configured OBS frame rate
 )
 
+_V11_COLUMNS = (
+    ("av_repairs_total", "INTEGER"), ("av_unexplained_total", "INTEGER"),   # #619
+)
+
 
 def open_db(path):
     """Open (creating the file/dirs as needed) with WAL + a busy timeout so the
@@ -203,12 +211,12 @@ def open_db(path):
 
 
 def migrate(conn):
-    """Create the schema, add any missing v3, v5-v10 columns (lossless upgrade from v2/v3),
+    """Create the schema, add any missing v3, v5-v11 columns (lossless upgrade from v2/v3),
     and stamp user_version. Idempotent and version-agnostic."""
     conn.executescript(_CREATE)
     have = {r["name"] for r in conn.execute("PRAGMA table_info(samples)").fetchall()}
     for name, decl in (_V3_COLUMNS + _V5_COLUMNS + _V6_COLUMNS + _V7_COLUMNS + _V8_COLUMNS + _V9_COLUMNS
-                       + _V10_COLUMNS):
+                       + _V10_COLUMNS + _V11_COLUMNS):
         if name not in have:
             conn.execute(f"ALTER TABLE samples ADD COLUMN {name} {decl}")
     conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
