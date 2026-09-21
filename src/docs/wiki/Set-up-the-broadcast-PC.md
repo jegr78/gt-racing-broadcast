@@ -112,8 +112,11 @@ A tier keeps real time when OBS renders at its configured frame rate, the encode
 up with the clock, and the feed's picture in OBS actually advances at real time. The
 last point matters because the frame rate and a "playing" state stay normal while a
 feed's picture is frozen. The report also shows how far OBS was behind the live edge
-at the start and at the end of each window. That figure is for information and does
-not decide the verdict.
+at the start and at the end of each window, and next to it, under **host growth**, how
+many seconds per minute that distance grew for a reason the machine is responsible for.
+A feed that is still catching up to the live edge also pushes the distance up, and that
+part is subtracted, so a bursty source does not read as a slow machine. Both figures are
+for information and do not decide the verdict.
 
 A tier gives no verdict, and the run asks to be repeated, if during its window the
 feed dropped, OBS reconnected, the relay had to skip data because OBS fell too far
