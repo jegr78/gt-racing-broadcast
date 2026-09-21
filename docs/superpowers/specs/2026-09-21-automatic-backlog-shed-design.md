@@ -170,16 +170,78 @@ What the samples show instead: 15 s after a rebuild the backlog was already back
 same session an hour earlier). So an active OBS output changes where the rejoin lands —
 which is the #614/#630 landing calculation, not this change.
 
+## Resolved: the backlog was a measurement of a dead socket
+
+The section above is kept as written because it shows how the wrong conclusion was
+reached. It is superseded by this.
+
+Asked why an automatic reset could not work when the director's manual one does, the
+answer turned out to be that **neither did — and neither needed to.**
+
+`Feed._obs_reconnect_now()` calls `release_feed_inputs()`, which is exactly what
+`POST /obs/feed-reset` calls. There is no rejoin wait in that path (the prefetch wait
+lives in the re-serve hook), so the claim above that the shed inherits #614/#630's
+landing was simply wrong. Measured directly: the manual reset reported success, OBS's own
+log confirmed it rebuilt the source, and the backlog did not move (26.1 -> 26.3 -> 24.7 ->
+27.5 -> 28.0 over a minute).
+
+Then `netstat -ano` on the producer host, one feed port, one OBS media source:
+
+```
+TCP 127.0.0.1:53001  127.0.0.1:61220  ESTABLISHED  4120   <- relay
+TCP 127.0.0.1:53001  127.0.0.1:61258  ESTABLISHED  4120
+TCP 127.0.0.1:61220  127.0.0.1:53001  ESTABLISHED  12616  <- obs64
+TCP 127.0.0.1:61258  127.0.0.1:53001  ESTABLISHED  12616
+```
+
+**OBS holds two connections for one media source.** On an input rebuild it opens the new
+one and never closes the old, and because its process still owns that socket the peer
+never resets, so TCP cannot see the abandonment. The relay's handler sat in `sendall`
+with a frozen cursor, and `consumer_backlog` takes `max()` over all consumers — so
+`/status` reported the abandoned connection's backlog, permanently.
+
+Every loose end of the day follows from that single reading:
+
+| Symptom | Cause |
+|---|---|
+| the manual reset "does not work" | it works; the number reported was the dead socket's |
+| the shed stands down after three tries | it judges itself on that number, which never improves |
+| the health reason promises RESET, then shows it failed | same number |
+| "an active output stops the backlog recovering" | the recording made the rebuild happen; the artifact did the rest |
+| the backlog cleared when the recording stopped | the abandoned socket finally died |
+
+macOS OBS does not do this: on the Mac the same reset leaves one connection and the
+backlog goes to 1.9 s. It is a Windows behaviour, i.e. exactly the producer host.
+
+### Fix
+
+Being superseded does not condemn a consumer — this port is built to serve several at
+once and a test pins that. What identifies the abandoned one is **superseded AND not
+having accepted a byte since**, past a grace. Such a consumer is excluded from
+`consumer_backlog` and `take_backlog_floor` at once, and its socket is closed on the next
+heartbeat (`shutdown` before `close`: `close` alone does not reliably wake a handler
+blocked in `sendall`).
+
+### Verified live, same host, same recording, same `/reload/A`
+
+| | before | after |
+|---|---|---|
+| double connection | 4 netstat lines | 4 (unchanged — it is OBS's doing) |
+| reported backlog | **26 s, permanently** | **1.1-2.8 s** |
+| abandoned socket | never released | reaped after ~40 s (4 lines -> 3) |
+
+With the shed re-enabled, a rebuild now produces `backlogged=False`, the guard stays
+armed, and **no shed fires at all** — the automation no longer triggers on a phantom.
+The relay logs `feed A: closed 1 abandoned consumer connection(s) OBS left open after an
+input rebuild`.
+
+**The program picture was at the live edge the whole time.** Nothing was ever behind.
+
 ## Open
 
-- **Why the rejoin lands late under an active output.** That is now the blocking
-  question for this feature: the shed calls the same `f._obs_reconnect()` primitive, so
-  until the landing is right the shed cannot work no matter how it is triggered. It
-  belongs to #630.
-- Whether the post-restart backlog step is the same phenomenon as a growing one is still
-  unmeasured. Both trip the same threshold; the run above produced the step, never a
-  growing one.
-- Note that this run **supports** #581's original reasoning in one respect: a rebuild did
-  not buy the picture back, which is what the epic predicted when it said the backlog must
-  never be allowed to build in the first place. The override stands (the guard makes the
-  attempt cheap and bounded), but #585 looks more load-bearing than it did this morning.
+- Whether a real backlog (one the relay has never actually observed on a healthy host)
+  is shed successfully by this automation is still unproven: every backlog measured so
+  far was this artifact. The automation, its guard and its stand-down are unit-tested and
+  were exercised end-to-end on the producer host against the artifact, which is the
+  closest thing to a real one available.
+- #585 remains the right remedy for a host that genuinely cannot keep up.
