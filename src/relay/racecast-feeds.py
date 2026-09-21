@@ -72,7 +72,7 @@ from urllib.parse import urlparse, quote, unquote, parse_qs, urlencode
 from urllib.request import Request, urlopen
 
 # OBS reflection (best effort). obs_ws lives in src/scripts (repo) or the
-# bundled tree (frozen). A missing client just disables reflection — it must
+# bundled tree (frozen). A missing client just disables reflection; it must
 # never break the relay.
 _REL_HERE = os.path.dirname(os.path.abspath(__file__))
 for _cand in (os.path.join(_REL_HERE, "..", "scripts"),
@@ -81,7 +81,7 @@ for _cand in (os.path.join(_REL_HERE, "..", "scripts"),
         sys.path.insert(0, _cand)
 try:
     import obs_ws as _obs_ws
-except Exception:                                # noqa: BLE001 — reflection is optional
+except Exception:                                # noqa: BLE001 (reflection is optional)
     _obs_ws = None
 # #537: a stable reference to the real module, captured at import time. Tests swap
 # the module-level `_obs_ws` name above to fakes/None to stub OBS calls; capturing a
@@ -136,9 +136,9 @@ import console_auth   # commentator-cockpit token auth (#191); pure, src/scripts
 import console_admin  # commentator-cockpit revocation version store (#191)
 import app_version   # shared build-version helper (single source of truth)
 import discord_oauth  # Discord OAuth2 helpers for /console/login
-import stream_target   # noqa: E402 — pure stream-target resolver (ref/platform/key response)
-import producer as producer_mod   # noqa: E402 — pure Producer-tab parser (name 'producer' is used as a local elsewhere)
-import parts as parts_mod         # noqa: E402 — pure Part view-model + validators (name 'parts' is a local elsewhere)
+import stream_target   # noqa: E402  pure stream-target resolver (ref/platform/key response)
+import producer as producer_mod   # noqa: E402  pure Producer-tab parser (name 'producer' is used as a local elsewhere)
+import parts as parts_mod         # noqa: E402  pure Part view-model + validators (name 'parts' is a local elsewhere)
 
 # Running build version, resolved like racecast.py: the VERSION file is stamped
 # into the source-tree root by tools/build-binary.py (frozen: <_MEIPASS>/src),
@@ -184,13 +184,12 @@ STREAMLINK_SERVE = ["--ringbuffer-size", "64M", "--hls-live-edge", "4"]
 # so streamlink's own early stop is the detector and this value is its grace. The CLI flag
 # was RENAMED in streamlink 8.1.0 (--hls-segment-queue-threshold ->
 # --stream-segmented-queue-deadline), so the exact flag is chosen per installed streamlink
-# at serve time (queue_deadline_args) — an unknown flag would make streamlink exit and the
+# at serve time (queue_deadline_args), an unknown flag would make streamlink exit and the
 # feed never serve.
 QUEUE_DEADLINE_FACTOR = "5"
 
 # Smallest #EXT-X-TARGETDURATION a playlist can advertise and still produce a deadline:
-# RFC 8216 makes it a decimal integer in seconds, and streamlink disables the check at 0.
-# Measured live 2026-09-21: YouTube 5, Twitch 6 (on 2 s segments).
+# RFC 8216 makes it an integer in seconds, and streamlink disables the check at 0.
 QUEUE_DEADLINE_MIN_TARGETDURATION_S = 1.0
 
 
@@ -228,23 +227,20 @@ def _streamlink_help():
     global _STREAMLINK_HELP
     if _STREAMLINK_HELP is None:
         try:
-            # errors="replace" like every other subprocess.run in this file: on a
-            # German Windows the console codepage is cp1252, streamlink's help text
-            # carries a byte it cannot decode, and the failure lands in subprocess's
-            # reader THREAD — so the `except` below never sees it and the relay just
-            # prints a traceback and loses the help text (and with it the queue
-            # deadline flag). Seen on the producer host 2026-09-20.
+            # errors="replace" like every other subprocess.run here: a cp1252 console
+            # cannot decode streamlink's help text, and the failure lands in
+            # subprocess's reader thread, where the except below never sees it.
             _STREAMLINK_HELP = subprocess.run(
                 ["streamlink", "--help"], capture_output=True, text=True,
                 errors="replace", timeout=10, env=external_tool_env()).stdout or ""
-        except Exception:                     # noqa: BLE001 — best-effort probe
+        except Exception:                     # noqa: BLE001 (best-effort probe)
             _STREAMLINK_HELP = ""
     return _STREAMLINK_HELP
 # yt-dlp resolves the YouTube manifest with a browser UA; streamlink then re-fetches
 # that URL in a SEPARATE process. YouTube 403s the bare re-fetch of a protected live
 # manifest unless it carries the same browser UA (and, for unlisted/members streams,
 # the same cookies). This is the canonical streamlink+YouTube remedy and matches the
-# UA the Innertube poller already uses (_YT_CHAT_UA). (#345 — first-live-event 403.)
+# UA the Innertube poller already uses (_YT_CHAT_UA). (#345)
 STREAMLINK_YT_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 # Twitch is served DIRECTLY by Streamlink's twitch plugin (no yt-dlp hop), so its
@@ -334,7 +330,7 @@ RESOLVE_RETRY = 15  # seconds between yt-dlp resolve attempts while a stint isn'
 COOKIE_MAX_AGE_H = 12   # keep in sync with preflight.py cookies_status(max_age_hours)
 RETRY_SLEEP = 10    # seconds after a stream ends / manifest expires before re-resolving
 FEED_FAST_EXIT_S = 3.0  # a serve proc dying faster than this (non-zero) = a bind/launch failure, not a stint
-DEAD_SERVE_BACKOFF_CAP = 300   # s — max delay between re-attempts of a fast-dying ("was live, now dead") serve
+DEAD_SERVE_BACKOFF_CAP = 300   # s; max delay between re-attempts of a fast-dying ("was live, now dead") serve
 DEAD_SERVE_IDLE_AFTER = 5      # consecutive dead serves -> go idle until the operator advances/reloads
 
 
@@ -375,7 +371,7 @@ def serve_exit_is_drop(stopped, advancing):
     return not stopped and not advancing
 
 
-# Source-not-live signatures (#495) — matched case-insensitively as substrings against
+# Source-not-live signatures (#495), matched case-insensitively as substrings against
 # the yt-dlp/streamlink diagnostic text. ENDED is checked first (more specific).
 # The "live_status …" entries match the suffix resolve_hls appends to a 'Requested
 # format is not available' error (#621): an ended broadcast in Post-Live Manifestless
@@ -418,7 +414,7 @@ HEARTBEAT_INTERVAL_S = 30        # how often the relay re-evaluates health
 HEALTH_CONNECTING_S = 45         # a feed connecting longer than this (not down) = yellow
 HEALTH_DROP_GRACE_S = 30         # a dropped feed must stay down this long (one heartbeat) before it escalates to red
 HEALTH_SERVED_OK_S = 10          # a serve must last this long to count as a stable live picture (turns served_ok sticky)
-HEALTH_CONNECTING_SETTLE_S = 15  # a just-dropped served feed must stay down this long before it's a NOTIFIABLE "stuck connecting" — a quicker reconnect (e.g. a fan-out EOF/stall re-serve) is a silent blip, no @here. Below the red grace so a longer stall still surfaces yellow before red.
+HEALTH_CONNECTING_SETTLE_S = 15  # a just-dropped served feed must stay down this long before it's a NOTIFIABLE "stuck connecting", a quicker reconnect (e.g. a fan-out EOF/stall re-serve) is a silent blip, no @here. Below the red grace so a longer stall still surfaces yellow before red.
 HEALTH_COLORS = {                # Discord embed sidebar colour per level
     "green": 0x2ECC71, "yellow": 0xF1C40F, "red": 0xE74C3C}
 _HEALTH_LABEL = {"green": "OK", "yellow": "DEGRADED", "red": "CRITICAL"}
@@ -426,9 +422,9 @@ _HEALTH_LABEL = {"green": "OK", "yellow": "DEGRADED", "red": "CRITICAL"}
 # ---------- Feed fan-out stall detection (relay feed multiplexing, #358) --------
 # Superseded + nothing completed for this long = abandoned. Must outlast the slowest
 # legitimate sendall to a slow consumer, hence well above RACECAST_FEED_STALL_S.
-# Measured on both hosts 2026-09-21: a handler blocked in sendall wakes on shutdown()
-# alone on macOS, but on Windows only on close(). Closing a descriptor another thread
-# owns is a last resort, so it is done only where shutdown does not do the job.
+# A handler blocked in sendall wakes on shutdown() alone on macOS, but on Windows only
+# on close(). Closing a descriptor another thread owns is a last resort, so it is done
+# only where shutdown does not do the job.
 CLOSE_TO_WAKE = os.name == "nt"
 FANOUT_STALE_GRACE_S = 30.0
 FANOUT_STALL_S = 8.0   # seconds without a byte from streamlink before a fan-out reader is "stalled"
@@ -690,13 +686,10 @@ def auto_cover_action(enabled, source_state, offline_since, now, settle_s,
     return None
 
 
-# The program monitor is the SAME image for every viewer, yet each open console
-# view (Director Panel /preview/program, Cockpit + Race-Control /cockpit/program)
-# polls it every ~1.5s and each poll previously opened its own obs-websocket
-# connection to screenshot OBS. With several views open that churned OBS at several
-# connect/close cycles per second (23k+ in one N24 session, bloating the OBS log).
-# A short server-side TTL cache coalesces those polls: OBS is screenshotted at most
-# once per TTL regardless of how many views are watching.
+# The program monitor is the SAME image for every viewer, yet each open console view
+# polls it every ~1.5 s. Without this cache each poll opened its own obs-websocket
+# connection, churning OBS at several connect/close cycles per second. The TTL cache
+# coalesces them: OBS is screenshotted at most once per TTL however many views watch.
 PROGRAM_SHOT_TTL_S = 1.0
 
 
@@ -730,7 +723,7 @@ class ProgramShotCache:
         return data, note
 
 
-# One shared cache instance — the program image is identical for every console view,
+# One shared cache instance; the program image is identical for every console view,
 # so the Director Panel and the Cockpit/Race-Control monitors all read through it.
 _program_shot_cache = ProgramShotCache()
 
@@ -773,34 +766,25 @@ def should_obs_reconnect(fanout, dropped, consumer_attached=False):
 
 
 # The OBS rejoin has to land after the new serve's HLS prefetch burst (#614). How long
-# that burst takes to ARRIVE is a download duration — it depends on the producer's
-# downlink, the source's bitrate and the CDN — so it cannot be a constant measured on one
+# that burst takes to ARRIVE is a download duration; it depends on the producer's
+# downlink, the source's bitrate and the CDN, so it cannot be a constant measured on one
 # machine. The relay therefore MEASURES it per serve: it watches the inbound byte flow and
 # treats the first pause as the burst's end. Only two things below are fixed, and both are
 # properties of the SOURCE's segment cadence rather than of the connection.
 
-# The inbound idle that marks the burst as over. It has to exceed the gaps that occur
-# INSIDE a burst and stay below the steady segment cadence. MEASURED 2026-09-20 with
-# tools/prefetch-burst-probe.py on a live YouTube 1080p source and a live Twitch channel:
-#
-#   platform  intra-burst gaps   steady cadence
-#   YouTube   up to 0.78 s       ~5 s
-#   Twitch    under 0.5 s        ~1.4-1.9 s   (--twitch-low-latency)
-#
-# so the usable window is about (0.78, 1.4) and 1.0 sits inside it for both. A slow link
-# widens the intra-burst gaps and can trip this early; the rejoin then lands in the tail
-# of the burst and sheds most of it — the same graceful degradation as a wait that is
-# slightly short, never the full backlog.
+# The inbound idle that marks the burst as over. It has to exceed the gaps INSIDE a
+# burst and stay below the steady segment cadence, a usable window of about
+# (0.78, 1.4) s across YouTube and Twitch. Re-measure with tools/prefetch-burst-probe.py.
+# A slow link widens the intra-burst gaps and can trip this early; the rejoin then lands
+# in the tail of the burst and sheds most of it, never the full backlog.
 BURST_IDLE_S = 1.0
 BURST_POLL_S = 0.1          # how often the rejoin thread samples last_byte_ts
 
-# A CEILING, not an estimate: some sources never pause long enough to be detected (a
-# Twitch low-latency feed shows no gap at all above ~1.4 s), so the wait for the burst
-# end is capped at this many seconds per prefetch segment and the rejoin happens anyway.
-# Same 2026-09-20 measurement, worst observed arrival per segment: YouTube FULL 0.46 s,
-# YouTube ROBUST 0.83 s, Twitch FULL 0.35 s, Twitch ROBUST 0.90 s. 1.0 covers all four,
-# and because it is only a ceiling a producer on a slower link simply hits it and rejoins
-# rather than getting a wrong answer.
+# A CEILING, not an estimate: some sources never pause long enough to be detected, so
+# the wait for the burst end is capped at this many seconds per prefetch segment and the
+# rejoin happens anyway. 1.0 covers the worst observed arrival per segment on both
+# platforms, and because it is only a ceiling a producer on a slower link hits it and
+# rejoins rather than getting a wrong answer.
 SEGMENT_FETCH_BUDGET_S = 1.0
 
 
@@ -858,7 +842,7 @@ def cursor_progress_ratio(prev_cursor_ms, cursor_ms, dt_s):
     if prev_cursor_ms is None or cursor_ms is None or dt_s is None or dt_s <= 0:
         return None
     delta_ms = cursor_ms - prev_cursor_ms
-    if delta_ms < 0:                       # cursor went backwards (RESET jump) — recovery, not a stall
+    if delta_ms < 0:                       # cursor went backwards (RESET jump); recovery, not a stall
         return None
     return (delta_ms / 1000.0) / dt_s
 
@@ -990,7 +974,7 @@ def reset_discards_s(backlog_s, prebuffer_s):
 
 # A fan-out/direct drop-recovery is recorded as a discrete health event EVERY time (so a
 # self-healed on-air blip is no longer invisible in the post-event report / health monitor).
-# A single recovery never pings Discord; sustained CHURN does — ≥ FEED_CHURN_THRESHOLD
+# A single recovery never pings Discord; sustained CHURN does, ≥ FEED_CHURN_THRESHOLD
 # recoveries of the SAME feed within FEED_CHURN_WINDOW_S. FEED_CHURN_COOLDOWN_S then
 # suppresses re-paging on every further recovery while the feed keeps churning.
 FEED_CHURN_WINDOW_S = 300      # 5 min
@@ -1111,7 +1095,7 @@ def aggregate_health(facts):
                        f"(no auto-recovery — switch source)")
         else:
             red.append(f"Feed {name} down — lost the live stream")
-    # OBS reachable but not streaming = off air — but only AFTER OBS has streamed
+    # OBS reachable but not streaming = off air, but only AFTER OBS has streamed
     # at least once this session (stream_expected latch), so starting the relay
     # pre-show, before OBS ever goes live, never fires a CRITICAL ping.
     if (facts.get("obs_reachable") and facts.get("stream_active") is False
@@ -1292,7 +1276,7 @@ def event_stop_argv(frozen, exe, rel_here):
     return [exe, os.path.join(rel_here, os.pardir, "racecast.py"), "event", "stop"]
 
 
-# Sheet ID is NOT hardcoded — it comes from RACECAST_SHEET_ID (injected by the CLI
+# Sheet ID is NOT hardcoded; it comes from RACECAST_SHEET_ID (injected by the CLI
 # from the active profile). Override per-run with --sheet-id.
 DEFAULT_SHEET_TAB = "Schedule"
 DEFAULT_POV_TAB = "POV"
@@ -1302,7 +1286,7 @@ DEFAULT_POV_TAB = "POV"
 DEFAULT_QUALIFYING_TAB = "Qualifying"
 # Quali Times tab (issue #555): per-car best lap shown in the race tiles. A
 # SEPARATE tab from DEFAULT_QUALIFYING_TAB above, which is the qualifying
-# SCHEDULE (URL/Streamer/Stint) — the two must never share a name.
+# SCHEDULE (URL/Streamer/Stint); the two must never share a name.
 DEFAULT_QUALI_TIMES_TAB = "Quali Times"
 # How often the Quali Times tab is re-read, on its OWN thread (quali_poller) and
 # entirely off the HUD refresh path. The laps are entered once between qualifying
@@ -1312,9 +1296,9 @@ QUALI_TIMES_POLL_S = 60
 
 # ---------- Network bind resolution (auto dual-bind: localhost + Tailscale) ----
 # OBS always reaches the control/HUD server on 127.0.0.1 (a fixed, machine-
-# independent address — never edit the OBS collection). With --bind auto
+# independent address, never edit the OBS collection). With --bind auto
 # (the default) the server ALSO binds the machine's Tailscale IP so remote
-# directors/tablets reach /panel + /hud over the tailnet — without exposing the
+# directors/tablets reach /panel + /hud over the tailnet, without exposing the
 # unauthenticated server on the local LAN the way 0.0.0.0 would.
 _CGNAT_NET = ipaddress.ip_network("100.64.0.0/10")  # Tailscale's IPv4 range
 # Candidate Tailscale CLI locations (PATH first, then the platform installers).
@@ -1523,7 +1507,7 @@ def resolve_brand_override(brands_dir, key):
 
 
 # Shared contract with get-graphics.py's MANIFEST_NAME (it writes this file). The two
-# cannot share code — the relay's downloaders are deliberately dependency-light — so keep
+# cannot share code; the relay's downloaders are deliberately dependency-light, so keep
 # the literal "manifest.json" in sync.
 GRAPHICS_MANIFEST_NAME = "manifest.json"
 
@@ -1627,7 +1611,7 @@ def resolve_graphic(graphics_dir, name):
 
 # Vendored uPlot assets (src/assets/vendor/uplot/) served at /health-monitor/assets/.
 # Identity allow-list: only these filenames resolve, and the Content-Type is the
-# constant map value (never request-derived) — same model as ASSET_CTYPES / FONT_CTYPES.
+# constant map value (never request-derived), same model as ASSET_CTYPES / FONT_CTYPES.
 UPLOT_CTYPES = {"uPlot.iife.min.js": "application/javascript", "uPlot.min.css": "text/css"}
 # Identity whitelist (same role as FONT_CTYPES_OUT): the handler re-derives the
 # Content-Type header value from this constant map, so a request-derived string
@@ -1700,7 +1684,7 @@ def resolve_overlay_font(overlay_dir, name):
 
 # HUD design-preview backdrop: a per-league Gran Turismo lobby/replay screenshot
 # at profiles/<name>/overlay/preview-bg.<ext>. Fixed basename (no request input),
-# so the only resolution is the extension fallback — content-type from the
+# so the only resolution is the extension fallback; content-type from the
 # ASSET_CTYPES identity map, never a request-derived string.
 PREVIEW_BG_EXTS = (("jpg", "image/jpeg"), ("jpeg", "image/jpeg"),
                    ("png", "image/png"), ("webp", "image/webp"))
@@ -1801,7 +1785,7 @@ def is_channel(v: str) -> bool:
 
 # #592: the Schedule URL cell `local:` means "this stint comes from the producer
 # machine's capture card" (RACECAST_CAPTURE in the machine .env). Only the bare token
-# is accepted — the sheet names no device, so nothing from the sheet reaches an argv.
+# is accepted; the sheet names no device, so nothing from the sheet reaches an argv.
 LOCAL_SOURCE_TOKEN = "local:"
 
 
@@ -1905,8 +1889,8 @@ def schedule_keys(rows):
 
 # No `\s*` adjacent to `(.*?)`: the two would both match a space, so a long space
 # run with no trailing '#<digits>' backtracks quadratically (CodeQL py/polynomial-
-# redos #170). The surrounding whitespace is already handled — the input is
-# `.strip()`-ed below and group(1) is `.strip()`-ed on return — so dropping the
+# redos #170). The surrounding whitespace is already handled; the input is
+# `.strip()`-ed below and group(1) is `.strip()`-ed on return, so dropping the
 # `\s*` neighbours is behaviour-preserving and makes the match linear.
 TEAM_NUMBER_RE = re.compile(r"^(.*?)#(\d+)$")
 
@@ -1984,7 +1968,7 @@ CREW_DIRECTOR_HEADERS = ("director",)
 CREW_PRODUCER_HEADERS = ("producer",)
 CREW_COMMENTATOR_HEADERS = ("commentator",)
 # Race Control (#244): a read-only monitoring desk role. Header-located only
-# (mirrors Commentator) — no positional fallback. NB: the role string is
+# (mirrors Commentator), no positional fallback. NB: the role string is
 # "race_control"; the unrelated director-only HUD banner is "racecontrol".
 CREW_RACE_CONTROL_HEADERS = ("race control", "race-control", "racecontrol", "rc")
 CREW_DISCORD_HEADERS = ("discord", "discord handle", "discord username")
@@ -2007,12 +1991,12 @@ TEAM_TEXT_COLOR_HEADERS = ("text color", "text colour", "fg color", "fg colour")
 # A plausible CSS colour token: #rgb/#rgba/#rrggbb/#rrggbbaa, an
 # rgb()/rgba()/hsl()/hsla() function, or a bare keyword. Anything else -> "". This
 # is the gate that keeps a sheet cell from smuggling a url() (a resource fetch)
-# into the custom property the HUD sets on its slots — the sheet is admin-managed,
+# into the custom property the HUD sets on its slots; the sheet is admin-managed,
 # but the overlay renders on air and a typo must never turn into a network request.
 # Letters are allowed INSIDE the function form so unit/keyword arguments pass
 # (`hsl(120deg 50% 50%)`, `rgb(0 0 0 / 50%)`); that keeps the security property
 # intact because the character class admits no parenthesis, semicolon, colon or
-# quote — so an accepted value can never nest a functional notation like url() nor
+# quote, so an accepted value can never nest a functional notation like url() nor
 # escape the custom-property value into a second declaration.
 CSS_COLOR_RE = re.compile(
     r"^(?:#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})"
@@ -2027,7 +2011,7 @@ def sanitize_css_color(v):
 
 
 # Quali Times tab (issue #555): Team | Best Lap, one row per car, maintained ONCE
-# between qualifying and the race. Deliberately NOT the 'Qualifying' tab — that
+# between qualifying and the race. Deliberately NOT the 'Qualifying' tab; that
 # name is the qualifying SCHEDULE (DEFAULT_QUALIFYING_TAB).
 # The lap header is deliberately NARROW: a bare "quali"/"lap" alias would happily
 # match an unrelated column (a fallback CSV, a renamed tab) and put plausible-
@@ -2162,7 +2146,7 @@ def parse_team_full_labels(text):
 
 
 # Configuration-tab vocabulary columns feeding the panel's Setup dropdowns
-# (strict: the panel offers ONLY these values — spec: panel-sheet-control).
+# (strict: the panel offers ONLY these values; spec: panel-sheet-control).
 # Dict KEYS are the API field names used by panel endpoints; VALUES are sheet headers (matched case-insensitively).
 VOCAB_COLUMNS = {"stint": "stints", "streamer": "streamers",
                  "session": "session", "racecontrol": "race control",
@@ -2283,7 +2267,7 @@ def build_hud_data(overlay, roster, quali=None):
 # drives the newest-wins merge between the local file and the Sheet tab.
 # Stopwatch semantics: START starts or resumes, STOP pauses (freezes the
 # remainder in "remaining"), RESET clears. "end" and "remaining" are mutually
-# exclusive — an anchor means running/finished, a remainder means paused.
+# exclusive, an anchor means running/finished, a remainder means paused.
 TIMER_DEFAULT_DURATION = 6 * 3600          # seconds, until the Director sets one
 DURATION_RE = re.compile(r"^(\d{1,2}):([0-5]\d):([0-5]\d)$")  # hours 1-2 digits (24h races OK)
 
@@ -2342,7 +2326,7 @@ def parse_timer_tab(text):
         st["duration"] = dur
     st["remaining"] = parse_duration(raw.get("remaining", ""))
     if st["end"] is not None:
-        st["remaining"] = None   # mutually exclusive — a set anchor wins
+        st["remaining"] = None   # mutually exclusive, a set anchor wins
     st["visible"] = raw.get("visible", "").upper() != "FALSE"
     st["updated"] = parse_utc_ts(raw.get("updated (utc)", "")) or 0.0
     return st
@@ -2438,7 +2422,7 @@ def push_webhook_retrying(url, payload, expected_action=None, *,
             break
         try:
             body = post(url, payload, timeout=timeout)
-        except Exception as e:            # noqa: BLE001 — network/timeout is retryable
+        except Exception as e:            # noqa: BLE001 (network/timeout is retryable)
             err = f"{type(e).__name__}: {e}"
             body = None
         else:
@@ -2470,14 +2454,14 @@ def apply_stream_service_for_ref(ref, channel_csv_url, push_url, set_service,
         return False, "no SHEET_PUSH_URL — the stream-key webhook is required"
     try:
         chan_rows = broadcast_chat.parse_channel_tab(fetch(channel_csv_url))
-    except Exception as exc:                            # noqa: BLE001 — tolerant fetch
+    except Exception as exc:                            # noqa: BLE001 (tolerant fetch)
         return False, "channel fetch failed: {}".format(type(exc).__name__)
     platform = stream_target.event_platform(chan_rows)
     if not platform:
         return False, "no channel/platform configured (Channel tab)"
     try:
         body = post(push_url, {"action": "get_stream_key", "ref": ref})
-    except Exception as exc:                            # noqa: BLE001 — tolerant webhook
+    except Exception as exc:                            # noqa: BLE001 (tolerant webhook)
         return False, "stream-key webhook failed: {}".format(type(exc).__name__)
     key, err = stream_target.parse_stream_key_response(body)
     if err:
@@ -2643,7 +2627,7 @@ class TimerStore:
             os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
         except OSError:
             # The runtime dir normally exists; a fresh layout must not break
-            # startup — _save_file() degrades per-write if the dir is missing.
+            # startup; _save_file() degrades per-write if the dir is missing.
             pass
         self._load_file()
 
@@ -2789,7 +2773,7 @@ class TimerStore:
         return self._apply(now=now, visible=False)
 
     def set_duration(self, seconds, now=None):
-        # Never re-anchors a running timer (spec §5) — corrections use adjust.
+        # Never re-anchors a running timer (spec §5); corrections use adjust.
         return self._apply(now=now, duration=int(seconds))
 
     def adjust(self, delta_s, now=None):
@@ -2873,7 +2857,7 @@ class ChatStore:
         """Re-read the local file into memory. A corrupt file keeps the current
         buffer (a bad reload must never wipe live chat). The CLI/UI surface the
         returned error, so it carries the exception message."""
-        # Read + validate outside the lock: a concurrent add() is safe — it has
+        # Read + validate outside the lock: a concurrent add() is safe; it has
         # already landed in memory and on disk; reload adopts the file as of now.
         try:
             with open(self.path, encoding="utf-8") as fh:
@@ -3113,7 +3097,7 @@ class ProducerSource:
             req = Request(self.csv_url, headers={"User-Agent": "racecast-feeds/1.0"})
             with urlopen(req, timeout=timeout) as resp:
                 return resp.read().decode("utf-8", "replace")
-        except Exception as e:                          # noqa: BLE001 — tolerant
+        except Exception as e:                          # noqa: BLE001 (tolerant)
             self.last_error = "{}: {}".format(type(e).__name__, e)
             return None
 
@@ -3239,7 +3223,7 @@ class _BroadcastReader:
             self.stop_evt.wait(min(max(wait_s, 1.0), 10.0))
 
 
-# Twitch IRC (Phase 2, #294): anonymous read-only chat — no API key / OAuth, just
+# Twitch IRC (Phase 2, #294): anonymous read-only chat, no API key / OAuth, just
 # a `justinfan` nick over TLS, JOIN #<login>, receive PRIVMSG. Pure stdlib.
 TWITCH_IRC_HOST = "irc.chat.twitch.tv"
 TWITCH_IRC_PORT = 6697
@@ -3567,7 +3551,7 @@ class CueStore:
 
 # HLS tags that signal server-side ad insertion (SCTE-35 splice cues or an
 # ad-classed date-range). Their PRESENCE in a YouTube manifest means the source
-# is stitching ads we cannot reliably strip — we warn, never skip.
+# is stitching ads we cannot reliably strip; we warn, never skip.
 _SSAI_RE = re.compile(r"#EXT-X-(?:CUE-OUT|SCTE35|DATERANGE:[^\n]*(?:CLASS=\"[^\"]*ad|SCTE35-OUT))",
                       re.IGNORECASE)
 
@@ -3738,12 +3722,10 @@ def streamlink_fanout_cmd(target, platform="youtube", twitch_token=None,
 # MPEG-TS on purpose: a mid-stream join resynchronises, fMP4 does not (#577).
 #
 # The bitrate is a constant, not a knob. FANOUT_RING_BYTES is 16 MB per feed, so the
-# ring's time window is set by the bitrate (~12.8 s at 10 Mbps, 5.1 s at 25, 2.6 s at
-# 50), and the #533 trailing mark sits 3 s behind live. A generous local bitrate
-# (tempting, the source costs nothing) would push the mark past the oldest retained
-# byte and make the consumer snap continuously. 8 Mbps video measured 9.3 Mbps on the
-# wire (audio + TS overhead), a window of about 14 s, still above the ~6 Mbps a remote
-# feed delivers.
+# bitrate sets the ring's time window, and the #533 trailing mark sits 3 s behind live.
+# A generous local bitrate would push the mark past the oldest retained byte and make
+# the consumer snap continuously. 8 Mbps video costs about 9.3 Mbps on the wire, a
+# window of roughly 14 s, still above what a remote feed delivers.
 LOCAL_VIDEO_KBPS = 8000
 LOCAL_AUDIO_KBPS = 160
 LOCAL_KEYFRAME_S = 1            # a joining consumer has a picture within a second
@@ -3814,14 +3796,12 @@ def local_capture_cmd(input_args, encoder="x264", has_audio=True):
 
 # ---- Game audio: by default the capture card's OWN audio device ----
 # The card's HDMI audio is a separate device for ffmpeg, and a wrong `audio=` does not
-# degrade gracefully: ffmpeg aborts the whole capture (measured on the Windows streaming
-# PC: `audio=Elgato HD60 X` -> "Could not find output pin from audio only capture
-# device", I/O error). So the default is read from ffmpeg's own device list, never
-# guessed: the card's audio pin when it has one (a combined device, what OBS uses by
-# default), else the one audio device whose name contains the video device's name —
-# on that PC, video "Elgato HD60 X" + audio "Elgato HD60 X (Elgato HD60 X)". No unique
-# match -> picture only, said loudly (feed log + panel) with the devices to choose
-# from. RACECAST_CAPTURE_AUDIO overrides; `none` means deliberately picture-only.
+# degrade gracefully: ffmpeg aborts the whole capture with "Could not find output pin
+# from audio only capture device". So the default is read from ffmpeg's own device list,
+# never guessed: the card's audio pin when it has one, else the one audio device whose
+# name contains the video device's name. No unique match means picture only, said loudly
+# in the feed log and panel with the devices to choose from. RACECAST_CAPTURE_AUDIO
+# overrides; `none` means deliberately picture-only.
 LOCAL_AUDIO_NONE = "none"
 _DSHOW_DEVICE_RE = re.compile(r'^\[[^\]]*\] "(.+)" \(([^()]*)\)\s*$')
 _AVF_DEVICE_RE = re.compile(r'^\[[^\]]*\] \[\d+\] (.+?)\s*$')
@@ -3900,7 +3880,7 @@ def _ffmpeg_listing(args):
     try:
         r = subprocess.run(["ffmpeg", "-hide_banner"] + args, capture_output=True,
                            timeout=20, env=external_tool_env(), **_no_window_kwargs())
-    except Exception:                         # noqa: BLE001 — best-effort scan
+    except Exception:                         # noqa: BLE001 (best-effort scan)
         return ""
     return (r.stdout + r.stderr).decode("utf-8", "replace")
 
@@ -3967,7 +3947,7 @@ def local_encoder():
                 + LOCAL_ENCODER_ARGS["nvenc"] + ["-f", "null", "-"],
                 capture_output=True, timeout=20, env=external_tool_env(),
                 **_no_window_kwargs()).returncode
-        except Exception:                     # noqa: BLE001 — best-effort probe
+        except Exception:                     # noqa: BLE001 (best-effort probe)
             rc = 1
         _LOCAL_ENCODER = "nvenc" if rc == 0 else "x264"
     return _LOCAL_ENCODER
@@ -4043,11 +4023,11 @@ def program_audio_ffmpeg_cmd():
 
 # #576: a Twitch feed can be fMP4/CMAF rather than MPEG-TS. TS carries its own
 # resync marker (the 0x47 sync byte), so a consumer joining mid-stream recovers on
-# its own — that is what makes the opaque fan-out tee work. fMP4 does not: the
+# its own; that is what makes the opaque fan-out tee work. fMP4 does not: the
 # codec parameters live once, in the `moov` of the initialization segment at the
 # very start of the stream, and a join lands inside an `mdat` where nothing is
-# parseable. Measured against a live Twitch capture, only the init segment PLUS a
-# `moof`-aligned join produced MP3 frames; either half alone produced none.
+# parseable. Only the init segment PLUS a `moof`-aligned join decodes; either half
+# alone produces nothing.
 FEED_HEAD_BYTES = 64 * 1024              # ample for ftyp+moov on every CMAF stream seen
 FMP4_ALIGN_SCAN_BYTES = 4 * 1024 * 1024  # search budget, then pass through raw
 FMP4_MAX_BOX_BYTES = 1024 * 1024         # a moof is ~1-2 KB; this is a sanity bound
@@ -4114,7 +4094,7 @@ def fmp4_fragment_start(buf, start=0):
         if 8 < size <= FMP4_MAX_BOX_BYTES:
             nxt = off + size
             if nxt + 8 > len(data):
-                return None              # not enough held to validate — read more
+                return None              # not enough held to validate; read more
             if bytes(data[nxt + 4:nxt + 8]) in FMP4_BOX_TYPES:
                 return off
         i = data.find(b"moof", i + 1)
@@ -4546,7 +4526,7 @@ class _PreviewRingTap:
                     stdin.write(data)
                     stdin.flush()
         except OSError:
-            pass  # ffmpeg stdin closed (process gone) — ring pump exits cleanly
+            pass  # ffmpeg stdin closed (process gone); ring pump exits cleanly
         finally:
             try:
                 stdin.close()
@@ -4726,7 +4706,7 @@ class FeedRing:
                 cursor = self._base
             # `limit` may be below `cursor` (e.g. a trailing `high` computed just
             # before `base` overflowed past it, #533): the empty return below guards
-            # it — the slice is never reached with a negative bound. Self-corrects
+            # it; the slice is never reached with a negative bound. Self-corrects
             # next cycle on a fresh `high`.
             if cursor >= limit:
                 return b"", cursor
@@ -4838,12 +4818,12 @@ class FeedFanoutServer:
             # would take out the heartbeat tick that also samples health.
             try:
                 conn.shutdown(socket.SHUT_RDWR)
-            except Exception:       # noqa: BLE001 — best-effort teardown
+            except Exception:       # noqa: BLE001 (best-effort teardown)
                 pass
             if CLOSE_TO_WAKE:
                 try:
                     conn.close()
-                except Exception:   # noqa: BLE001 — best-effort teardown
+                except Exception:   # noqa: BLE001 (best-effort teardown)
                     pass
         return len(doomed)
 
@@ -4999,7 +4979,7 @@ class PreviewManager:
                 target, channel, cookies, log).start())
         self._ring_factory = ring_factory or (
             lambda ring, target, log: _PreviewRingTap(ring, target, log).start())
-        self._obs_cache = {}              # source_name -> (monotonic_ts, jpeg); not locked — CPython GIL keeps dict ops atomic, a concurrent cold-miss only causes a benign double OBS fetch
+        self._obs_cache = {}              # source_name -> (monotonic_ts, jpeg); not locked. CPython GIL keeps dict ops atomic, a concurrent cold-miss only causes a benign double OBS fetch
         self._pull = None                 # current _PreviewPullWorker / _PreviewRingTap or None
         self._last_touch = 0.0
         self._lock = threading.Lock()
@@ -5026,7 +5006,7 @@ class PreviewManager:
         return self._pull_still(target)    # kind == "pull"
 
     def _obs_still(self, source_name):
-        now = time.monotonic()  # captured before the OBS call: TTL measured from fetch start, so a slow OBS response shortens the effective window — intentional, conservative
+        now = time.monotonic()  # captured before the OBS call: TTL measured from fetch start, so a slow OBS response shortens the effective window; intentional, conservative
         hit = self._obs_cache.get(source_name)
         if hit and now - hit[0] < self.obs_ttl:
             return hit[1], ""
@@ -5192,7 +5172,7 @@ class ProgramAudioService:
         self._enc_target = live
         # Pass THIS generation's proc into the pumps so a later handover
         # (which reassigns self._proc) can't blind the old pump to its own
-        # process dying — each pump checks the proc it was born with.
+        # process dying, each pump checks the proc it was born with.
         threading.Thread(target=self._feed_stdin, args=(stdin, ring, proc), daemon=True).start()
         threading.Thread(target=self._pump_stdout, args=(stdout, proc), daemon=True).start()
 
@@ -5279,7 +5259,7 @@ class ProgramAudioService:
             # TOCTOU guard: a listener can slip in via acquire() between the
             # supervisor's idle check and here (it saw _running True, so it did
             # NOT start a supervisor and got the still-live self._out). If so,
-            # DON'T finalize — keep the output ring and re-arm a fresh
+            # DON'T finalize, keep the output ring and re-arm a fresh
             # supervisor so that listener keeps a live encoder. Only a genuine
             # shutdown (self._stop set) or a truly idle service finalizes.
             if self._listeners > 0 and not self._stop.is_set():
@@ -5780,7 +5760,7 @@ class ScheduleSource:
         self.cache_path = cache_path
         self.local_fallback = local_fallback
         # #592: Schedule/Qualifying may name the capture card (`local:`); the POV tab
-        # may not — a POV pull must never take the card from an on-air A/B feed.
+        # may not, a POV pull must never take the card from an on-air A/B feed.
         self.allow_local = allow_local
         self.lock = threading.Lock()
         self.items = []
@@ -6417,7 +6397,7 @@ class HudSource:
 
 
 # Panel setup fields: URL segment -> (Setup-tab header, /hud/data key).
-# NOTE: the Setup "Stint" is the HUD display LABEL — it has no relationship
+# NOTE: the Setup "Stint" is the HUD display LABEL; it has no relationship
 # to the relay's feed stint index (/set/stint, NEXT).
 SETUP_FIELDS = {
     "stint": ("Stint", "stint"),
@@ -6503,7 +6483,7 @@ class SetupControl:
 
     def _push_team(self, slot, name):
         # Write the verbatim Configuration label (e.g. 'OVO eSports #111') the
-        # Setup dropdown lists, not the panel's stripped vocab name — the Setup
+        # Setup dropdown lists, not the panel's stripped vocab name; the Setup
         # cell then matches the dropdown exactly, like the other fields.
         full = self.hud.full_team_name(name)
         ok, _err = self._push({"action": "teams", "slot": slot, "name": full},
@@ -6687,7 +6667,7 @@ class SetupControl:
             payload["stint"] = stint
         ok, err = self._push(payload, "schedule")
         if ok and inject_source is not None:
-            # Reflect the write locally now — INCLUDING a URL clear (url="") — so
+            # Reflect the write locally now. INCLUDING a URL clear (url=""), so
             # /schedule/data + /cockpit/data don't show the stale link for a poll
             # interval. None for a field the write didn't touch leaves it as-is.
             inject_source.inject_row(row, payload.get("url"), payload.get("name"),
@@ -6820,14 +6800,14 @@ class Feed:
             f"racecast.feed.{name}", self.logfile, to_stdout=False)
         # Health for /status: phase ("idle" | "connecting" | "serving"),
         # since-when, and the last yt-dlp error line. Written by the run()
-        # thread, read by Relay.status() — a reader may briefly pair a new
+        # thread, read by Relay.status(), a reader may briefly pair a new
         # phase with a stale timestamp; tolerable for a 2 s-polled display
         # (same convention as self.proc).
         self.phase = "idle"
         self.phase_since = time.time()
         self.last_error = None
         # True after a live serve was lost unexpectedly (not a stop/handover) and
-        # not yet recovered or acknowledged — surfaced as feeds.<X>.down in
+        # not yet recovered or acknowledged; surfaced as feeds.<X>.down in
         # /status so the panel/Companion can raise a distinct alarm. Cleared on
         # recovery (re-serving) and on director intervention (reload/reposition).
         self.dropped = False
@@ -6839,7 +6819,7 @@ class Feed:
         self.dropped_since = None
         self.served_ok = False
         # Consecutive "was live, now dead" serves (resolved OK but died faster than
-        # HEALTH_SERVED_OK_S — the 403/expired-manifest case). Drives escalating
+        # HEALTH_SERVED_OK_S; the 403/expired-manifest case). Drives escalating
         # backoff and the idle-after-N give-up in run(). Reset on a real serve, on
         # operator advance, and in set_index()/reload(). NOT reset in
         # _clear_drop_health() (that runs every serve-start, which would zero it).
@@ -6903,7 +6883,7 @@ class Feed:
                 try: p.wait(timeout=5)
                 except subprocess.TimeoutExpired: p.kill()
             except Exception:
-                pass  # the process may already be gone — nothing left to kill
+                pass  # the process may already be gone, nothing left to kill
 
     def _clear_drop_health(self):
         """Reset the drop-debounce state: no active drop, and the new/reconnecting
@@ -6979,7 +6959,7 @@ class Feed:
         if _obs_ws is None:
             return []
         try:
-            # #537: deliberately NOT routed through relay._obs — the Feed holds no
+            # #537: deliberately NOT routed through relay._obs; the Feed holds no
             # facade reference (it is built before/independent of Relay), and a rejoin
             # is rare (a drop, a director click, a stint change), so it stays a
             # connect-per-call site.
@@ -6991,7 +6971,7 @@ class Feed:
                 self.log.debug("fan-out rejoin on %s — OBS reconnect skipped (%s)",
                                self.name, note)
             return names
-        except Exception as exc:              # noqa: BLE001 — best-effort, never crash the serve
+        except Exception as exc:              # noqa: BLE001 (best-effort, never crash the serve)
             self.log.debug("fan-out rejoin on %s — OBS reconnect error (%s)", self.name, exc)
             return []
 
@@ -7014,7 +6994,7 @@ class Feed:
             return False
         try:
             stuck, _snaps = srv.consumer_health(time.monotonic())
-        except Exception:      # noqa: BLE001 — a health read must never break the serve loop
+        except Exception:      # noqa: BLE001 (a health read must never break the serve loop)
             return False
         return stuck is not None
 
@@ -7112,8 +7092,8 @@ class Feed:
             cmd = streamlink_fanout_cmd(target, serve_platform, token, cookies=self.cookies,
                                         tier=self.quality_tier)
         # stdout is the raw video byte stream (read into the ring); stderr is
-        # streamlink's ONLY diagnostic channel here, so it must be PIPEd and pumped
-        # — unlike direct-serve (which merges stderr into a text stdout), discarding
+        # streamlink's ONLY diagnostic channel here, so it must be PIPEd and pumped.
+        # Unlike direct-serve, which merges stderr into a text stdout, discarding
         # it left every fan-out stall/EOF unexplained in feed_X.log. The pump thread
         # also keeps the stderr pipe drained so streamlink can never block on a full
         # pipe (parity with direct-serve; #294-class diagnostics).
@@ -7144,7 +7124,7 @@ class Feed:
             # thread kills the proc when last_byte_ts goes stale, unblocking the
             # read with EOF. A never-produced byte (last_byte_ts None) is left to
             # the existing dead_serves/EOF path, per the spec. (The consumer-side
-            # OBS rebuild is NOT here — it lives in the relay's cursor-progress
+            # OBS rebuild is NOT here; it lives in the relay's cursor-progress
             # freeze sampler; see Relay._freeze_tick.)
             while not watchdog_stop.wait(1.0):
                 if self.stop or self.advance.is_set():
@@ -7230,23 +7210,23 @@ class Feed:
             self.log.info("serving stint %d (%s)", i + 1, serve_platform)
             # This re-serve follows an unexpected DROP (not the first serve, not a handover):
             # record it as a discrete recovery event (report/health/log + churn Discord),
-            # mode-agnostic (fan-out AND direct-serve). Best-effort — never break the loop.
+            # mode-agnostic (fan-out AND direct-serve). Best-effort, never break the loop.
             if self.dropped and self.on_recovery is not None:
                 try:
                     down = (time.time() - self.dropped_since) if self.dropped_since else 0.0
                     self.on_recovery(self.name, i + 1, max(0.0, down), self.source_state)
-                except Exception:      # noqa: BLE001 — best-effort telemetry
+                except Exception:      # noqa: BLE001 (best-effort telemetry)
                     pass
             if self.ring is not None:
                 # Force OBS to reconnect once the fresh stream flows, so it re-joins with a
-                # clean demuxer instead of splicing onto the stale one (the 2026-07-10
-                # fan-out freeze-frame stutter). Fires after a drop AND on any restart with
-                # a consumer still attached — the director's /reload or tier change, and a
+                # clean demuxer instead of splicing onto the stale one, which showed up as
+                # a fan-out freeze-frame stutter. Fires after a drop AND on any restart with
+                # a consumer still attached; the director's /reload or tier change, and a
                 # single-feed /next (#614). Not on the first serve, not on the ping-pong
                 # handover: there OBS has already dropped the off-air feed.
                 tool = "ffmpeg" if local_cmd else "streamlink"
                 # The rejoin's wait comes from THIS serve's prefetch size, read from the
-                # same serve_flags() the command builder uses — one place, so a tier or
+                # same serve_flags() the command builder uses, one place, so a tier or
                 # platform change can never move the command without moving the wait. A
                 # local capture serve has no streamlink flags and therefore no wait.
                 _flags = [] if local_cmd else serve_flags(serve_platform, self.quality_tier)
@@ -7286,7 +7266,7 @@ class Feed:
                     self.proc = None
                     time.sleep(RETRY_SLEEP); continue
             self._set_phase("connecting")
-            # The just-ended serve "earned" served_ok if it lasted long enough —
+            # The just-ended serve "earned" served_ok if it lasted long enough, because
             # only then can a future drop be classified a genuine live-picture loss
             # (issue #278). A near-instant exit (demo/startup) leaves served_ok False.
             if serve_elapsed >= HEALTH_SERVED_OK_S:
@@ -7294,7 +7274,7 @@ class Feed:
                 self._set_source_state(None)   # confirmed live serve: the drop's cause no longer applies (#495)
                 self.dead_serves = 0               # stable live picture -> reset
             # A serving process just exited: flag an unexpected loss (DROP) so the
-            # panel/Companion alarm fires — but not on an intentional stop or a
+            # panel/Companion alarm fires, but not on an intentional stop or a
             # handover/reload (both handled just below). Stamp dropped_since on the
             # False->True edge so the heartbeat can apply the 30 s grace.
             was_dropped = self.dropped
@@ -7307,7 +7287,7 @@ class Feed:
                 self.dead_serves = 0               # operator moved/reloaded -> fresh source
                 continue
             # #143: an unexpected, near-instant non-zero exit (not a stop/handover,
-            # both handled above) means streamlink couldn't bind its port — surface
+            # both handled above) means streamlink couldn't bind its port; surface
             # it so /status + the panel stop showing a silent 'connecting'.
             err = feed_fast_exit_error(serve_elapsed, serve_rc)
             if err and local_cmd:
@@ -7327,7 +7307,7 @@ class Feed:
                 if stepped and self.on_step_down is not None:
                     try:
                         self.on_step_down(self.name, i + 1, stepped[0], stepped[1])
-                    except Exception:        # noqa: BLE001 — best-effort telemetry
+                    except Exception:        # noqa: BLE001 (best-effort telemetry)
                         pass
                 if should_idle_dead_serves(self.dead_serves):
                     self._set_phase("idle")
@@ -7391,11 +7371,11 @@ class AvSyncWatcher:
         # A tail reads a file another process is still writing, so the last read can end
         # mid-line. readline() hands that fragment back as if it were a line, and the
         # remainder arrives as another: a repair split across two polls parsed to
-        # nothing TWICE and was lost silently — the one event this exists to catch.
+        # nothing TWICE and was lost silently; the one event this exists to catch.
         self._partial = ""
 
     def _newest_log(self):
-        # logsetup.list_logs filters to regular files (newest first) — a FIFO named
+        # logsetup.list_logs filters to regular files (newest first), a FIFO named
         # *.txt in the log directory would otherwise block open() and hang this thread
         # for good. It follows symlinks, so a link to a regular file still passes.
         for path in logsetup.list_logs(self.log_dir):
@@ -7466,13 +7446,13 @@ class AvSyncWatcher:
                     except (OSError, ValueError):
                         # ONLY the file is allowed to end up here. A parse failure would
                         # be filed as a rotation, skip the lines up to the reopen, and
-                        # hide itself — so parsing never raises (av_sync returns None).
+                        # hide itself, so parsing never raises (av_sync returns None).
                         try: fh.close()
                         except OSError: pass    # already gone; we reopen below
                         fh, path = None, None     # rotated or truncated: pick it up again
                         self._partial = ""        # its tail belongs to the old file
                 time.sleep(self.POLL_S)
-        except Exception:                          # noqa: BLE001 — a detector must never kill the relay
+        except Exception:                          # noqa: BLE001 (a detector must never kill the relay)
             self.log.exception("A/V sync watcher stopped")
         finally:
             if fh is not None:
@@ -7490,7 +7470,7 @@ class Relay:
         self.qual_source = qual_source
         self.sheet_id = sheet_id          # league identity, surfaced in /status for takeover
         self.league_name = league_name    # display name injected from the active profile (#236)
-        self.producer_name = producer_name  # who runs this machine — on events/status (#317)
+        self.producer_name = producer_name  # who runs this machine; on events/status (#317)
         self.event_title_store = event_title_store   # free-text event title for Discord footers (#207)
         # Active schedule is race by default; qualifying only when a qual source
         # exists. self.source (property below) returns whichever is active, so
@@ -7528,7 +7508,7 @@ class Relay:
             self.B.on_step_down = self._record_feed_step_down
             self.feeds = {"A": self.A, "B": self.B}
             # Two-stage feed scheduling (#492): when RACECAST_MANUAL_FEED_ARM is set,
-            # both A/B feeds start DISARMED (paused) — a URL at the index does not pull
+            # both A/B feeds start DISARMED (paused), a URL at the index does not pull
             # until the director arms the feed. Default off = auto-pull unchanged.
             if self.manual_feed_arm:
                 self.A.paused = True
@@ -7548,7 +7528,7 @@ class Relay:
                                           # (off-air alarm only fires after this)
         self._stream_active_prev = None   # last bool stream_active, for start/stop events (#317)
         self._stream_started_ts = None    # when OBS last went live, for the stop-line uptime
-        # POV is a THIRD, independent feed — not part of the A/B index. Starts
+        # POV is a THIRD, independent feed, not part of the A/B index. Starts
         # paused (off) until the Director calls /pov/reload.
         self.pov_source = pov_source
         self.pov = None
@@ -7582,7 +7562,7 @@ class Relay:
         self._served_max_gaps = {}        # #619: same, but None where nothing measured it
         self._jittery_feeds = []          # #535: feeds whose last-interval gap tripped the signal
         self._backlog_warn_s = feed_backlog_warn_s(os.environ)      # #583
-        # Automatic backlog shed (2026-09-21): a second reason to pull the SAME OBS-rebuild
+        # Automatic backlog shed: a second reason to pull the SAME OBS-rebuild
         # control the freeze detector owns. Shares _rebuild_guard and _last_freeze_ts.
         self._backlog_shed = feed_backlog_shed_enabled(os.environ)
         self._backlog_shed_ticks = feed_backlog_shed_ticks(os.environ)
@@ -7610,7 +7590,7 @@ class Relay:
         # for the health chart, never a trigger (#582).
         self._prev_render_counts = None   # (skipped, total)
         # #488 cursor-progress freeze detector (its own faster sampler, since a stutter's
-        # stall ticks recur every few seconds — finer than the 30 s heartbeat). The only
+        # stall ticks recur every few seconds; finer than the 30 s heartbeat). The only
         # automatic consumer-side rebuild; #582 guards it against repeating uselessly.
         self._freeze_detect = feed_freeze_detect_enabled(os.environ)
         self._freeze_stall_ratio = feed_freeze_stall_ratio(os.environ)
@@ -7700,7 +7680,7 @@ class Relay:
                 feeds_down.append(name)
             elif state == "connecting":
                 # A just-dropped served feed is a silent blip until it has stayed
-                # down past the settle window — so a reconnect that self-heals
+                # down past the settle window, so a reconnect that self-heals
                 # within a heartbeat (fan-out EOF-churn / byte-stall re-serve on a
                 # VOD) never pages @here. A never-served connect is unchanged.
                 if drop_connecting_notifiable(f.dropped, f.dropped_since, now):
@@ -7711,7 +7691,7 @@ class Relay:
                 feed_source_states[name] = f.source_state
         try:
             ts_present = detect_tailscale_ip() is not None
-        except Exception:                                # noqa: BLE001 — best effort
+        except Exception:                                # noqa: BLE001 (best effort)
             ts_present = True
         st = self.obs_stats or {}
         cs = self.conn_state or {}
@@ -7721,7 +7701,7 @@ class Relay:
         if tstore is not None:
             try:
                 tpush = tstore.summary().get("push")
-            except Exception:                            # noqa: BLE001 — best-effort
+            except Exception:                            # noqa: BLE001 (best-effort)
                 tpush = None
         return {"feeds_down": feeds_down, "feeds_connecting_long": connecting_long,
                 "cookies_stale": cookie_health(self.cookies, now=now)["stale"],
@@ -7768,7 +7748,7 @@ class Relay:
             self._av_watcher = AvSyncWatcher(d, self._serving_age, self._av,
                                              self._av_lock, LOG)
             threading.Thread(target=self._av_watcher.run, daemon=True).start()
-        except Exception as exc:                 # noqa: BLE001 — a detector is never fatal
+        except Exception as exc:                 # noqa: BLE001 (a detector is never fatal)
             LOG.warning("A/V sync watcher not started (%s)", exc)
 
     # The watcher stamps every event with time.monotonic(), so both readers below take
@@ -7840,7 +7820,7 @@ class Relay:
             try:
                 summ = ts.summary()
                 tmode, tpush = summ.get("mode"), summ.get("push")
-            except Exception:  # noqa: BLE001 — sampling is best-effort
+            except Exception:  # noqa: BLE001 (sampling is best-effort)
                 pass
         st = self.obs_stats or {}
         cs = self.conn_state or {}
@@ -7877,7 +7857,7 @@ class Relay:
                 "timer_mode": tmode, "timer_push": tpush,
                 "mode": self.mode,
                 # live_stint = the DISPLAY stint (who is on screen), continuation-aware
-                # via on_air_row_idx() — NOT the physical pull index, so a same-URL
+                # via on_air_row_idx(). NOT the physical pull index, so a same-URL
                 # back-to-back counts as two distinct stints in the report (#500). The
                 # pull index stays reconstructable from feed_a/b_stint + live_feed.
                 "live_feed": live, "live_stint": (None if self.solo else self.on_air_row_idx() + 1),
@@ -7925,8 +7905,8 @@ class Relay:
             req = Request(url, data=data, method="POST",
                           headers={"Content-Type": "application/json",
                                    "User-Agent": "racecast-feeds/1.0"})
-            urlopen(req, timeout=5).read()   # noqa: S310 — operator-configured webhook
-        except Exception as e:                # noqa: BLE001 — best effort
+            urlopen(req, timeout=5).read()   # noqa: S310 (operator-configured webhook)
+        except Exception as e:                # noqa: BLE001 (best effort)
             LOG.warning("Discord %s webhook failed: %s: %s", what, type(e).__name__, e)
 
     def _event_title(self):
@@ -7952,18 +7932,18 @@ class Relay:
             self._sample_consumer_backlogs()
             try:
                 self._backlog_shed_tick(now)    # reads the classification just sampled
-            except Exception as exc:            # noqa: BLE001 — a remedy never breaks the heartbeat
+            except Exception as exc:            # noqa: BLE001 (a remedy never breaks the heartbeat)
                 LOG.debug("backlog shed error (%s)", exc)
             h = self._refresh_health(now)
             if self.health_store is not None:
                 try:
                     self.health_store.record_tick(self._health_snapshot(now), now)
-                except Exception:  # noqa: BLE001 — sampling is best-effort
+                except Exception:  # noqa: BLE001 (sampling is best-effort)
                     pass  # never let a store write break the heartbeat
             if self.health_store is not None and (now - self._last_prune) > 86400:
                 try:
                     self.health_store.prune(); self._last_prune = now
-                except Exception:  # noqa: BLE001 — best-effort
+                except Exception:  # noqa: BLE001 (best-effort)
                     pass
             if health_should_notify(self._notified_level, h["notify_level"]):
                 self._send_health_webhook(h["notify_level"], self.health_reasons, self._notified_level)
@@ -8023,7 +8003,7 @@ class Relay:
                 if reaped:
                     LOG.info("feed %s: closed %d abandoned consumer connection(s) "
                              "OBS left open after an input rebuild", name, reaped)
-            except Exception as exc:    # noqa: BLE001 — a reaper never breaks the tick
+            except Exception as exc:    # noqa: BLE001 (a reaper never breaks the tick)
                 LOG.debug("consumer reap on %s failed (%s)", name, exc)
             fl = srv.take_backlog_floor(time.monotonic())   # always take: a stopped feed resets too
             if f.paused or f.phase != "serving":
@@ -8047,13 +8027,13 @@ class Relay:
         if serving:
             try:
                 live = srv.consumer_backlog(time.monotonic())
-            except Exception:                   # noqa: BLE001 — best-effort
+            except Exception:                   # noqa: BLE001 (best-effort)
                 live = None
         snaps = None
         if srv is not None and hasattr(srv, "consumer_health"):
             try:
                 snaps = srv.consumer_health(time.monotonic())[1]
-            except Exception:                   # noqa: BLE001 — best-effort
+            except Exception:                   # noqa: BLE001 (best-effort)
                 snaps = None
         return {"backlog_s": None if live is None else round(live, 1),
                 "backlogged": (name in self._backlogged_feeds and feed_backlog_degraded(
@@ -8062,26 +8042,21 @@ class Relay:
                 # #614: cumulative cursor snaps of the attached consumers (the ring lapped
                 # them); `obs benchmark` marks a window with new snaps as contaminated
                 "consumer_snaps": snaps,
-                # #619: the inbound side of the same interval (#535). This is the
-                # largest gap between bytes arriving from the source. With backlog_s and
-                # consumer_snaps, `obs benchmark` can tell a bursty source from a
-                # consumer that fell behind, through one scripted restart.
+                # The largest gap between bytes arriving from the source. With backlog_s
+                # and consumer_snaps it lets `obs benchmark` tell a bursty source from a
+                # consumer that fell behind. (#619, #535)
                 #
-                # This reads the heartbeat's last value, never take_max_inbound_gap().
-                # That call resets the accumulator, so a 2 s /status poll would swallow
-                # the interval the heartbeat is about to classify.
+                # Reads the heartbeat's last value, never take_max_inbound_gap(), which
+                # resets the accumulator: a 2 s /status poll would swallow the interval
+                # the heartbeat is about to classify.
                 #
-                # Gated on `serving`, NOT on `live is not None` like backlog_s. The two
-                # differ by one thing: consumer_backlog() answers None while no consumer
-                # is attached, which is every OBS source rebuild, including the #614
-                # rejoin after a restart. The gap is measured on the SOURCE side by the
-                # fan-out read loop, so it stays valid while OBS is away, and blanking it
-                # there would hand `obs benchmark` a run of Nones at the start of a
-                # window. Its guard skips a LEADING run, so that run would let the
-                # pre-restart reading through as if measured in-window.
-                # `_served_max_gaps` (not `_interval_max_gaps`) already answers None for
-                # an interval nothing measured. POV is in neither map, because the
-                # heartbeat walks self.feeds (A and B only), so it reports None here too.
+                # Gated on `serving`, NOT on `live is not None` like backlog_s, because
+                # consumer_backlog() answers None while no consumer is attached, which is
+                # every OBS source rebuild. The gap is measured on the source side, so it
+                # stays valid while OBS is away; blanking it there would hand a leading
+                # run of Nones to a guard that skips exactly that, letting the pre-restart
+                # reading through as if measured in-window. `_served_max_gaps` already
+                # answers None for an interval nothing measured. POV is in neither map.
                 "inbound_max_gap_s": (self._served_max_gaps.get(name)
                                       if serving else None)}
 
@@ -8098,7 +8073,7 @@ class Relay:
         if skipped is None or total is None or prev is None:
             return None
         d_total = total - prev[1]
-        if d_total <= 0:                       # OBS idle/paused this interval — not drifting
+        if d_total <= 0:                       # OBS idle/paused this interval, not drifting
             return 0.0
         return (skipped - prev[0]) / d_total
 
@@ -8120,7 +8095,7 @@ class Relay:
         try:
             self.health_store.record_event(now, event_type, label=label,
                                            producer=self.producer_name, metadata=metadata)
-        except Exception:                       # noqa: BLE001 — best-effort
+        except Exception:                       # noqa: BLE001 (best-effort)
             pass
 
     def _record_consumer_overflows(self, now):
@@ -8182,7 +8157,7 @@ class Relay:
         try:
             _stuck, snaps = srv.consumer_health(time.time())
             return snaps
-        except Exception:                       # noqa: BLE001 — best-effort
+        except Exception:                       # noqa: BLE001 (best-effort)
             return None
 
     def _freeze_sampler_loop(self):
@@ -8195,7 +8170,7 @@ class Relay:
                 break
             try:
                 self._freeze_tick(time.time())
-            except Exception as exc:            # noqa: BLE001 — best-effort, never crash the sampler
+            except Exception as exc:            # noqa: BLE001 (best-effort, never crash the sampler)
                 LOG.debug("freeze sampler error (%s)", exc)
 
     def _freeze_tick(self, now):
@@ -8218,7 +8193,7 @@ class Relay:
             self._fz_prev_cursor = None; self._fz_ratios = []; self._fz_key = key
             self.rearm_rebuild_guard("stint change", now)
         # Only judge a SERVING feed (bytes flowing). A stopped/connecting feed with a
-        # frozen cursor is expected, not a fault — reset the window and skip.
+        # frozen cursor is expected, not a fault; reset the window and skip.
         if f is None or f.paused or f.phase != "serving":
             self._fz_prev_cursor = None; self._fz_ratios = []
             return
@@ -8338,10 +8313,10 @@ class Relay:
         intermission = getattr(_obs_ws, "INTERMISSION_SCENE", "Intermission")
         try:
             scene, note = self._obs.get_current_program_scene()
-        except Exception as e:                            # noqa: BLE001 — best effort
+        except Exception as e:                            # noqa: BLE001 (best effort)
             self.obs_note = f"{type(e).__name__}: {e}"
             return
-        if scene is None:                                 # OBS unreachable — one note, no crash
+        if scene is None:                                 # OBS unreachable, one note, no crash
             self.obs_note = note or self.obs_note
             return
         # Re-arm once the producer has manually returned to the on-air feed scene.
@@ -8370,7 +8345,7 @@ class Relay:
         while not self._hb_stop.is_set():
             try:
                 self._maybe_auto_cover(time.time())
-            except Exception as exc:  # noqa: BLE001 — best-effort; never break the tick loop
+            except Exception as exc:  # noqa: BLE001 (best-effort; never break the tick loop)
                 LOG.debug("auto-cover tick error (ignored): %s", exc, exc_info=True)
             self._hb_stop.wait(AUTO_COVER_POLL_S)
 
@@ -8394,7 +8369,7 @@ class Relay:
             return
         on_air_scene = getattr(_obs_ws, "STINT_SCENE", "Stint")
         state, note = self._obs.read_obs_state([(on_air_scene, STANDBY_COVER_SOURCE)], [])
-        if state is None:                    # OBS unreachable — one note, retry next tick
+        if state is None:                    # OBS unreachable, one note, retry next tick
             self.obs_note = note or self.obs_note
             return
         scene = state.get("scene")
@@ -8421,7 +8396,7 @@ class Relay:
             LOG.info("Auto-cover: on-air source recovered -> lowered Standby Cover (#495)")
         elif maybe_raise and cover_shown:
             # A cover is already up (the director raised it) during this outage. Adopt the
-            # outage as handled so we neither double-raise nor re-poll OBS every tick — but
+            # outage as handled so we neither double-raise nor re-poll OBS every tick, but
             # do NOT take ownership (auto never lowers a manually-raised cover).
             self._cover_fired = True
         # Recovery reconciliation: once the source is live again we own no cover, even if
@@ -8474,7 +8449,7 @@ class Relay:
         out["obs"] = {"reachable": self.obs_reachable, "note": self.obs_note}
         # On-air feed/stint + league identity for producer takeover (#takeover):
         # the on-air feed is the lower-index one (live_feed); the stint is the
-        # DISPLAY row (on_air_row_idx), not the feed's physical pull index — during
+        # DISPLAY row (on_air_row_idx), not the feed's physical pull index; during
         # a same-URL back-to-back continuation the display advances one row ahead
         # of the still-parked pull, and a takeover/health-monitor consumer must
         # resume/show that displayed stint, not the stale pull row.
@@ -8482,7 +8457,7 @@ class Relay:
         out["live"] = {"feed": live, "stint": self.on_air_row_idx() + 1, "mode": self.mode}
         out["manual_feed_arm"] = self.manual_feed_arm
         out["league"] = {"sheet_id": self.sheet_id, "name": self.league_name}
-        out["producer"] = self.producer_name   # who runs this machine (#317 — for takeover)
+        out["producer"] = self.producer_name   # who runs this machine (#317, for takeover)
         self._refresh_health(now)            # keep the displayed level fresh (2 s poll)
         out["health"] = {"level": self.health_level, "reasons": self.health_reasons,
                          "since_s": round(now - self.health_since, 1)}
@@ -8663,7 +8638,7 @@ class Relay:
         try:
             local = {f for f, feed in self.feeds.items()
                      if is_local_source(feed.current_channel()[0])}
-        except Exception:                    # noqa: BLE001 — runs in the handover's caller
+        except Exception:                    # noqa: BLE001 (runs in the handover's caller)
             local = set()                    # unknown -> the mic stays closed
         return _OBS_WS_MODULE.feed_audio_plan(local, mic=mic)
 
@@ -8739,7 +8714,7 @@ class Relay:
             # Health-Monitor marker.
             if transition:
                 self._on_stream_transition(transition, now, kbps=kbps)
-        except Exception:                                # noqa: BLE001 — best-effort
+        except Exception:                                # noqa: BLE001 (best-effort)
             with self._obs_lock:
                 self._obs_probe_running = False
 
@@ -8768,7 +8743,7 @@ class Relay:
                     now, "obs_stream_start" if started else "obs_stream_stop",
                     label="OBS stream started" if started else "OBS stream stopped",
                     producer=self.producer_name)
-            except Exception:    # noqa: BLE001 — best-effort
+            except Exception:    # noqa: BLE001 (best-effort)
                 pass
 
     def _spawn_event_stop(self):
@@ -8791,7 +8766,7 @@ class Relay:
                 kwargs["start_new_session"] = True
             subprocess.Popen(argv, **kwargs)
             LOG.info("Last part ended — spawned `event stop` (report + teardown).")
-        except Exception:      # noqa: BLE001 — best-effort
+        except Exception:      # noqa: BLE001 (best-effort)
             LOG.exception("failed to spawn event stop")
 
     def _sample_connectivity(self):
@@ -8799,7 +8774,7 @@ class Relay:
         latch funnel_expected. Best-effort: each probe defaults to None on failure."""
         try:
             funnel = tailscale.funnel_on("/console")
-        except Exception:                                # noqa: BLE001 — best-effort
+        except Exception:                                # noqa: BLE001 (best-effort)
             funnel = None
         try:
             ts_state = tailscale.tailscale_backend()[1]
@@ -8815,7 +8790,7 @@ class Relay:
         if funnel:
             self.funnel_expected = True
         # Tri-state: True = up; False = down AND was previously expected (real
-        # regression); None = down/absent but never seen up (neutral — renders
+        # regression); None = down/absent but never seen up (neutral; renders
         # grey in the health band, not red).
         if funnel:
             funnel_ok = True
@@ -8876,7 +8851,7 @@ class Relay:
         # and on manual arm (the legacy opt-out keeps its whole-stint pre-warm).
         stop_freed = cut and self.manual_feed_arm
         # Pause BEFORE re-indexing: set_index's advance.set() wakes the freed feed's run
-        # loop, so paused must already be True — otherwise the loop could spawn one
+        # loop, so paused must already be True, otherwise the loop could spawn one
         # throwaway resolve on the new slot in the window before we stop it.
         if stop_freed:
             self.feeds[freed].paused = True
@@ -8888,7 +8863,7 @@ class Relay:
         self.on_air_row = nxt
         nf = self.feeds[new_live]
         LOG.info("handover -> feed %s now on air (stint %d)", nf.name, nxt + 1)
-        # **self.status() spread FIRST, explicit keys last — see the continuation
+        # **self.status() spread FIRST, explicit keys last; see the continuation
         # branch above for why (uniform across all three next_auto branches).
         return {**self.status(), "changed": True, "feed": new_live,
                 "continuation": False, "obs_cut": cut}
@@ -9031,7 +9006,7 @@ class Relay:
         # NOTE: detection is index-scoped (URL changed at the on-air feed's index).
         # The documented flow edits the on-air URL cell in place; inserting/deleting
         # rows ABOVE the on-air row in the same reload shifts that index onto a
-        # different stint's URL and would read as a substitution — an accepted edge
+        # different stint's URL and would read as a substitution, an accepted edge
         # of the "URL change at unchanged stint index" definition, not the real flow.
         live = self.live_feed()
         old_url, old_idx = self.feeds[live].current_channel()
@@ -9070,7 +9045,7 @@ class Relay:
                 self.health_store.record_event(
                     time.time(), "feed_substitution", producer=self.producer_name,
                     metadata={"feed": feed, "stint": stint})
-            except Exception:                # noqa: BLE001 — best-effort
+            except Exception:                # noqa: BLE001 (best-effort)
                 pass
         self._discord_post(
             notify.substitution_discord_payload(feed, stint, self.producer_name,
@@ -9090,7 +9065,7 @@ class Relay:
                     now, "feed_recovery", producer=self.producer_name,
                     metadata={"feed": feed, "stint": stint,
                               "downtime_s": round(max(0.0, downtime_s), 1)})
-            except Exception:                # noqa: BLE001 — best-effort
+            except Exception:                # noqa: BLE001 (best-effort)
                 pass
         LOG.info("feed recovery recorded: Feed %s stint %d (~%.0fs degraded)",
                  feed, stint, max(0.0, downtime_s))
@@ -9107,9 +9082,9 @@ class Relay:
                     now, "feed_step_down", producer=self.producer_name,
                     metadata={"feed": feed, "stint": stint,
                               "from": from_tier, "to": to_tier})
-            except Exception:                # noqa: BLE001 — best-effort
+            except Exception:                # noqa: BLE001 (best-effort)
                 pass
-        # State the step-down fact only — do NOT claim the @here here: _discord_post is
+        # State the step-down fact only; do NOT claim the @here here: _discord_post is
         # best-effort and no-ops without a webhook, so an unconditional "posted" would
         # mislead incident triage (mirrors _record_feed_recovery, which makes no such claim).
         LOG.warning("feed step-down: Feed %s stint %d %s->%s — source can't sustain %s",
@@ -9119,7 +9094,7 @@ class Relay:
                 discord_step_down_payload(feed, stint, from_tier, to_tier,
                                           self._event_title(), self.producer_name),
                 "feed-step-down")
-        except Exception:                    # noqa: BLE001 — best-effort
+        except Exception:                    # noqa: BLE001 (best-effort)
             pass
 
     def _maybe_notify_recovery_churn(self, feed, now, source_state=None):
@@ -9135,7 +9110,7 @@ class Relay:
             return
         try:
             events = self.health_store.events(now - FEED_CHURN_WINDOW_S, now)
-        except Exception:                    # noqa: BLE001 — best-effort read
+        except Exception:                    # noqa: BLE001 (best-effort read)
             return
         ts = [e.get("ts") for e in events
               if e.get("type") == "feed_recovery"
@@ -9158,7 +9133,7 @@ class Relay:
             return None
         try:
             events = self.health_store.events(0, time.time())
-        except Exception:                    # noqa: BLE001 — best-effort read
+        except Exception:                    # noqa: BLE001 (best-effort read)
             return None
         subs = [e for e in events if e.get("type") == "feed_substitution"]
         if not subs:
@@ -9198,7 +9173,7 @@ class Relay:
 
     def feed_activate(self, which):
         """Arm Feed A/B: start pulling at its current index (two-stage scheduling,
-        #492). Mirrors pov_reload. Manual-mode only — an error otherwise so the auto
+        #492). Mirrors pov_reload. Manual-mode only, an error otherwise so the auto
         pre-warm/handover logic and manual arm never fight."""
         if not self.manual_feed_arm:
             return {"error": "manual feed arm disabled (set RACECAST_MANUAL_FEED_ARM=1)"}
@@ -9260,7 +9235,7 @@ class Relay:
         if getattr(self, "_obs", None) is not None:
             try:
                 self._obs.close()          # #537: clean 1000 on the persistent sessions
-            except Exception:  # noqa: BLE001 — best-effort
+            except Exception:  # noqa: BLE001 (best-effort)
                 pass
 
 
@@ -9307,7 +9282,7 @@ class QuietThreadingHTTPServer(ThreadingHTTPServer):
     floods the relay console with noise that looks like a crash."""
     def handle_error(self, request, client_address):
         if _benign_client_disconnect(sys.exc_info()[1]):
-            return                       # client went away — nothing to report
+            return                       # client went away, nothing to report
         super().handle_error(request, client_address)
 
 
@@ -9338,11 +9313,11 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
     # Shared across all H instances (one limiter per relay). The CHAT limiter is
     # keyed on the authenticated streamer (per-commentator). The AUTH-FAILURE
     # limiter is keyed on the source IP, which behind Tailscale Funnel collapses to
-    # the single proxy address — so it is a COARSE GLOBAL cap on failed cockpit
+    # the single proxy address, so it is a COARSE GLOBAL cap on failed cockpit
     # auths, not a per-client control. That is acceptable: valid tokens never reach
     # this limiter (only the failure branch does, so legit commentators are never locked
-    # out), and the 128-bit HMAC signature makes brute force infeasible regardless
-    # — this is pure defense-in-depth. X-Forwarded-For is deliberately NOT trusted
+    # out), and the 128-bit HMAC signature makes brute force infeasible regardless.
+    # This is pure defense-in-depth. X-Forwarded-For is deliberately NOT trusted
     # for the key (spoofable over the public ingress, which would weaken it).
     # Wire the health store onto the relay so the payload builders below read it
     # via relay.health_store (the canonical attribute; Task 13's bootstrap also
@@ -9354,7 +9329,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
     _cockpit_chat_rl = console_auth.RateLimiter(limit=10, window_s=60)
     # Submit is a PUBLIC write path (funnelled). Keyed on the authed identity
     # (not the shared proxy IP, like chat) so one commentator can't exhaust the
-    # crew's quota; a low cap — a human submits a link a handful of times, not
+    # crew's quota; a low cap, a human submits a link a handful of times, not
     # dozens per minute.
     _cockpit_submit_rl = console_auth.RateLimiter(limit=5, window_s=60)
     # Commentator ack is a funnelled write; key on the authed identity (like chat), not
@@ -9380,7 +9355,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             self.send_response(200)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
-            # The panel/HUD/timer pages change between releases — never let a
+            # The panel/HUD/timer pages change between releases, never let a
             # browser serve a stale copy (e.g. a panel without the latest JS).
             self.send_header("Cache-Control", "no-store")
             self.end_headers(); self.wfile.write(body)
@@ -9473,7 +9448,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 return self._send({"error": "font not found", "key": name}, 404)
             path, ctype = hit
             # Header value comes from the FONT_CTYPES_OUT constant, never from the
-            # request-derived tuple (defense vs. header injection) — mirrors _send_asset.
+            # request-derived tuple (defense vs. header injection), mirrors _send_asset.
             ctype = FONT_CTYPES_OUT.get(ctype)
             if not ctype:
                 return self._send({"error": "font not found", "key": name}, 404)
@@ -9809,15 +9784,15 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 self._send({"error": "not found"}, 404)
                 return None
             sub = p[1:]
-            # OAuth front door — bootstrap identity before the auth check.
+            # OAuth front door; bootstrap identity before the auth check.
             if sub == ["login"]:
                 return self._oauth_login()
             if sub == ["oauth", "callback"]:
                 return self._oauth_callback()
             # Producer-to-producer takeover pull (#216 Phase 7): authorized by the
             # shared per-league step-up secret ALONE. Producer B holds the league
-            # CONSOLE_SECRET (it signs every token) — NOT a per-person commentator
-            # token — so requiring an rc_console subject here would 401 a legitimate
+            # CONSOLE_SECRET (it signs every token). NOT a per-person commentator
+            # token, so requiring an rc_console subject here would 401 a legitimate
             # takeover even when the secret matches (the original bug). The secret is
             # producer-level and strictly stronger than any single token, so it is
             # sufficient. A missing/invalid secret is 403 (step-up required), NEVER
@@ -9842,13 +9817,13 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     self._send({"error": "not found"}, 404)
                     return None
                 return rewrite
-            # Authenticate (verify only — no response sent yet).
+            # Authenticate (verify only, no response sent yet).
             subject = self._console_subject()
             if subject is None:
                 # Human navigation to a console PAGE (launcher / cockpit / panel /
                 # health-monitor / race-control / buttons) with a MISSING OR INVALID
                 # token, and OAuth configured: serve the launcher so the visitor sees
-                # "Login with Discord" — NEVER a naked 401 JSON page. A stale cookie
+                # "Login with Discord". NEVER a naked 401 JSON page. A stale cookie
                 # from another profile, or a revoked/expired token, no longer
                 # dead-ends; the page itself degrades to the login button on whoami.
                 if (bool(discord_client_id and discord_client_secret)
@@ -9868,7 +9843,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 return None
             # Read-only broadcast-chat mirror (#294): any authenticated /console
             # subject (commentator, director, race_control) may read it. Funnelled
-            # under the existing /console mount — no new public surface. The data
+            # under the existing /console mount, no new public surface. The data
             # is already public on YouTube and is never persisted.
             if sub == ["broadcast-chat", "data"] and method == "GET":
                 if not broadcast_chat_store:
@@ -9877,7 +9852,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 self._send(broadcast_chat_store.data())
                 return None
             # Manual recovery (#294): re-arm a frozen reader. ANY authenticated
-            # /console subject may kick it (idempotent, read-only side effect) —
+            # /console subject may kick it (idempotent, read-only side effect), so there is
             # no new public surface beyond the existing /console mount.
             if sub == ["broadcast-chat", "reload"] and method == "GET":
                 if not broadcast_chat_store:
@@ -9906,7 +9881,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     return None
                 self._proxy_companion(method)
                 return None
-            # /console/logo — serve the league logo to any authenticated subject (#236).
+            # /console/logo; serve the league logo to any authenticated subject (#236).
             # Funnelled so it must live under /console; served locally from logo_path.
             if sub == ["logo"]:
                 if console_policy.decide(roles, sub, method, has_step_up) != console_policy.ALLOW:
@@ -9988,11 +9963,11 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 self._send_page(page, "/console", cookie_token=token, cookie_path="/console")
                 return None
             # console_policy.decide derives capability from the path; the `method`
-            # arg is plumbing for a future tightening — it is not a live check today.
+            # arg is plumbing for a future tightening; it is not a live check today.
             outcome = console_policy.decide(roles, sub, method, has_step_up)
             if outcome == console_policy.ALLOW:
                 # /console/status is Funnel-exposed: serve a role-redacted payload
-                # instead of full status — feed stream URLs (feeds[*].channel), pov.url
+                # instead of full status; feed stream URLs (feeds[*].channel), pov.url
                 # and sheet_id are kept only for director/producer and stripped for every
                 # other role (see redact_console_status). GET-only; a POST falls through
                 # to the root dispatch's 404.
@@ -10150,7 +10125,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     full, ctype = resolved
                     # Header value comes from the UPLOT_CTYPES_OUT constant, never
                     # from the request-derived tuple (defense vs. header injection)
-                    # — mirrors _send_asset / _send_font.
+                    # Mirrors _send_asset / _send_font.
                     ctype = UPLOT_CTYPES_OUT.get(ctype)
                     if not ctype:
                         return self._send({"error": "not found"}, 404)
@@ -10169,14 +10144,14 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     return self._send_text(self._health_raw_payload())
                 if p == ["takeover", "status"]:
                     # Funnel-exposed (producer + step-up via _console_gate). Redacted:
-                    # ONLY the fields a takeover needs — NEVER the feeds/pov stream URLs
+                    # ONLY the fields a takeover needs. NEVER the feeds/pov stream URLs
                     # that the tailnet /status carries (this leaves the tailnet).
                     full = relay.status()
                     return self._send({
                         "live": full.get("live"),
                         "league": full.get("league"),
                         "mode": full.get("mode"),
-                        "producer": full.get("producer"),   # #317 — name A for the takeover
+                        "producer": full.get("producer"),   # #317; name A for the takeover
                         "event_title": event_store.get() if event_store else "",
                         "timer": timer_store.summary() if timer_store else None,
                     })
@@ -10194,7 +10169,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     data["povActive"] = relay.pov_active()
                     data["povName"] = relay.pov_name()
                     # Race vs qualifying, so a profile's overlay CSS can gate on
-                    # body[data-mode] (issue #555). Relay state, like povActive —
+                    # body[data-mode] (#555). Relay state, like povActive, and
                     # deliberately not part of HudSource.
                     data["mode"] = relay.mode
                     return self._send(data)
@@ -10217,7 +10192,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 if p == ["hud", "override.css"]:
                     return self._send_css(read_overlay_css(overlay_dir, "hud"))
                 if p == ["hud", "logo"]:
-                    # League logo for the HUD overlay slot (#league-logo). Loopback —
+                    # League logo for the HUD overlay slot (#league-logo). Loopback only:
                     # OBS reads it on 127.0.0.1; served from the active profile's LOGO
                     # (logo_path). 404 when unset/non-image so the slot self-hides.
                     path = servable_logo_path(logo_path)
@@ -10510,7 +10485,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                             cue_store.list(), me)})
                     if p == ["cockpit", "versions"]:
                         # Producer-to-producer takeover pull. This path SITS UNDER
-                        # /cockpit, so it IS reachable via Funnel — it must therefore
+                        # /cockpit, so it IS reachable via Funnel; it must therefore
                         # authenticate, not rely on obscurity. Commentator tokens are
                         # per-commentator; this is gated on the shared league secret
                         # (every producer of the league holds it), constant-time.
@@ -10561,7 +10536,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     # director never edits a live pull's URL), which stays the
                     # slot-head row during a same-URL back-to-back continuation.
                     # Do not "unify" this with the display-row map used elsewhere
-                    # (RC/stint-plan/HUD) — that would regress the URL-edit safety.
+                    # (RC/stint-plan/HUD); that would regress the URL-edit safety.
                     live = {f.idx: k for k, f in relay.feeds.items()}
                     return self._send({"rows": [{"row": i + 1, "sheetRow": line,
                                                  "url": u, "name": n, "stint": st,
@@ -10575,7 +10550,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     # fall-through, so a director reaches it over the Funnel.
                     return self._send({"substitution": relay.latest_substitution()})
                 if p == ["crew", "data"]:
-                    # Tailnet-only crew roster view (#216 phase 5). A ROOT path —
+                    # Tailnet-only crew roster view (#216 phase 5). A ROOT path, and
                     # NOT under the funnelled /console prefix, so the public
                     # ingress never reaches it (same trust model as
                     # /schedule/data). Lets the `racecast links` CLI enumerate
@@ -10633,7 +10608,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         setup_ctl.set_field("racecontrol", "")
                     # Auto-follow the on-air stint's Streamer + Stint label from the
                     # Schedule (issue #112) on a real cut OR a same-URL continuation
-                    # — the DISPLAY stint advances on a continuation too, even
+                    # The DISPLAY stint advances on a continuation too, even
                     # though OBS doesn't cut, so the HUD label must follow it.
                     if should_push_live_schedule(result) and setup_ctl:
                         _push_live_schedule(relay, setup_ctl)
@@ -10649,7 +10624,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 if len(p)==3 and p[0]=="feed" and p[2]=="deactivate":
                     return self._send(relay.feed_deactivate(p[1]))
                 if len(p)==4 and p[0]=="feed" and p[2]=="quality":
-                    # #493 GET form of the quality switch (path tier) — for Companion's
+                    # #493 GET form of the quality switch (path tier), for Companion's
                     # generic-http GET buttons, mirroring /reload/A & /set/A/n. Loopback/
                     # tailnet only (NOT under the /console mount), so it never leaves the
                     # tailnet; directors over the Funnel use the POST /console form instead.
@@ -10678,7 +10653,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 if len(p)==3 and p[0]=="set":           return self._ok(relay.set_index(p[1], int(p[2])))
                 return self._send({"error":"unknown","path":self.path}, 404)
             except ConnectionError:
-                return None              # client hung up mid-response — benign (issue #25)
+                return None              # client hung up mid-response, benign (issue #25)
             except Exception as e:
                 try:
                     return self._send({"error": str(e)}, 500)
@@ -10724,7 +10699,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         # Public write path (issue #193): a commentator proposes a
                         # stream link for one of THEIR OWN stints. Token-auth +
                         # per-identity rate limit + is_channel() SSRF guard +
-                        # server-side ownership check. NEVER goes live here — it
+                        # server-side ownership check. NEVER goes live here; it
                         # lands as pending for director approval in /panel.
                         me = self._console_auth()
                         if me is None:
@@ -10863,7 +10838,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         if res.get("error"):
                             return self._send(res)
                         submission_store.pop(entry["id"], "approve")
-                        # Heads-up to the crew that the link is now scheduled —
+                        # Heads-up to the crew that the link is now scheduled, with
                         # deliberately no @here ping (no-op without a webhook).
                         self._notify_approval(entry)
                         return self._send({"ok": True, "id": entry["id"], **res})
@@ -10941,7 +10916,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     return self._send({"ok": True, **state})
                 if p == ["obs", "refresh"]:
                     # Reload the relay-served OBS browser sources (HUD / overlay /
-                    # timer) — the programmatic right-click -> Refresh. Unconditional
+                    # timer); the programmatic right-click -> Refresh. Unconditional
                     # force (no hash gate; the CLI owns obs-pages.hash): the director
                     # presses this precisely to clear stale caches. Best-effort like
                     # the other /obs/* branches. Auto director-gated by console_policy
@@ -11027,10 +11002,10 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                 label=f"{plabel} started",
                                 producer=relay.producer_name,
                                 metadata={"index": idx})
-                        except Exception:   # noqa: BLE001 — best-effort
+                        except Exception:   # noqa: BLE001 (best-effort)
                             pass
                     # Echo the applied part label + active mode so the panel/operator can
-                    # confirm WHICH part (and mode) went live — a race-vs-qualifying
+                    # confirm WHICH part (and mode) went live, a race-vs-qualifying
                     # mismatch (wrong stream key) is then obvious at the moment of Start.
                     return self._send({"ok": True, "index": idx,
                                        "part": plabel, "mode": relay.mode})
@@ -11059,7 +11034,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                 label=f"{plabel} ended",
                                 producer=relay.producer_name,
                                 metadata={"index": res})
-                        except Exception:   # noqa: BLE001 — best-effort
+                        except Exception:   # noqa: BLE001 (best-effort)
                             pass
                     if is_last:
                         self._send({"ok": True, "index": res, "final": True})
@@ -11091,7 +11066,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     return self._send(setup_ctl.set_teams(body.get("teams")))
                 return self._send({"error": "unknown", "path": self.path}, 404)
             except ConnectionError:
-                return None              # client hung up mid-response — benign (issue #25)
+                return None              # client hung up mid-response, benign (issue #25)
             except Exception as e:
                 try:
                     return self._send({"error": str(e)}, 500)
@@ -11165,7 +11140,7 @@ def _telemetry_loop(store, ps_ip, stop_evt):
                 tlog.info("GT7 console discovered at %s", dest)
             elif addr[0] != dest:
                 continue                      # ignore packets from any other host once the
-                                             # console is latched/pinned — a rogue LAN host can
+                                             # console is latched/pinned, a rogue LAN host can
                                              # forge valid telemetry (the key is fixed+public)
             plain = gt7_crypto.decrypt_packet(data)
             if plain is None:
@@ -11254,7 +11229,7 @@ def export_cookies(browser, out):
         LOG.warning("Cookie export from '%s': FAILED — could not write the filtered "
                     "cookies to %s; the previous jar is unchanged.", browser, out)
         return False
-    try: os.chmod(out, 0o600)   # live YouTube session — owner-only
+    try: os.chmod(out, 0o600)   # live YouTube session, owner-only
     except OSError: pass        # best-effort hardening; never block the export
     cookie_jar.record_export(out)
     LOG.info("Cookie export from '%s': OK -> %s (kept only youtube.com cookies, dropped %d "
@@ -11383,7 +11358,7 @@ def main():
     # line_buffering: show logs immediately. encoding="utf-8": the relay runs as a
     # daemon with stdout piped to a log file, so Python would otherwise use the
     # locale/ANSI codepage (cp1252 on Windows) and crash/mojibake on the non-ASCII
-    # glyphs in our banner (-> arrows, em dashes) — same class as issue #24.
+    # glyphs in our banner (-> arrows, em dashes), same class as issue #24.
     try: sys.stdout.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
     except Exception: pass   # not all stdout objects support reconfigure (e.g. pipes)
 
@@ -11406,7 +11381,7 @@ def main():
     here = os.path.dirname(os.path.abspath(__file__))
     runtime = os.path.abspath(args.runtime_dir) if args.runtime_dir else default_runtime_dir(here)
     os.makedirs(runtime, exist_ok=True)
-    try: os.chmod(runtime, 0o700)   # holds the cookie jar / caches — keep it private
+    try: os.chmod(runtime, 0o700)   # holds the cookie jar / caches, keep it private
     except OSError: pass            # best-effort hardening; never block startup
     logdir = args.logdir if os.path.isabs(args.logdir) else os.path.join(runtime, args.logdir)
     os.makedirs(logdir, exist_ok=True)
@@ -11429,7 +11404,7 @@ def main():
 
     # Fail fast: the loopback control port is mandatory (OBS always reaches the relay
     # on 127.0.0.1). If another relay already holds it, abort BEFORE the network
-    # refreshes below — otherwise the log reads like a successful start
+    # refreshes below, otherwise the log reads like a successful start
     # ("Schedule loaded …") right before the bind fails. The real bind later is the
     # authoritative guard; this just turns a slow, misleading failure into a fast,
     # clear one.
@@ -11524,7 +11499,7 @@ def main():
     if cookies and not os.path.exists(cookies):
         sys.exit(f"ERROR: cookies file not found: {cookies}")
     if cookies:
-        try: os.chmod(cookies, 0o600)   # contains a live YouTube session — owner-only
+        try: os.chmod(cookies, 0o600)   # contains a live YouTube session, owner-only
         except OSError: pass            # best-effort hardening; never block startup
     if cookies:
         _ch = cookie_health(cookies)
@@ -11646,7 +11621,7 @@ def main():
     def _flag_graphic_apply(scene, source, enabled):
         # Best-effort OBS apply; _obs_ws is None when the obs_ws import failed or
         # OBS is unreachable. Same contract as the POV/feed reflect calls.
-        # #537: deliberately NOT routed through relay._obs — reassert() below calls
+        # #537: deliberately NOT routed through relay._obs; reassert() below calls
         # this synchronously (to re-push a persisted flag on restart) before `relay`
         # is constructed; closing over `relay` here would NameError on that path
         # whenever a flag was left active across a restart. Stays connect-per-call.
@@ -11662,7 +11637,7 @@ def main():
                                           health_store.DEFAULT_RETENTION_DAYS)))
     try:
         _health_store_obj.prune()        # drop stale rows on start
-    except Exception:                     # noqa: BLE001 — best-effort
+    except Exception:                     # noqa: BLE001 (best-effort)
         pass
     # Free-text event title (#207): persisted runtime state (event.json), seeded
     # from the EVENT_TITLE default (profile.env). An explicit --event-title wins and
@@ -11734,7 +11709,7 @@ def main():
                          daemon=True).start()
     if hud_source and hud_source.quali_url:
         # Quali Times on its own slow thread (issue #555): entered once between
-        # qualifying and the race, so QUALI_TIMES_POLL_S — never args.hud_poll, and
+        # qualifying and the race, so QUALI_TIMES_POLL_S, never args.hud_poll, and
         # never inline in the HUD refresh, which must stay free of it.
         threading.Thread(target=quali_poller,
                          args=(hud_source, QUALI_TIMES_POLL_S, stop_evt),
@@ -11755,15 +11730,15 @@ def main():
                  float(os.environ.get("RACECAST_TELEMETRY_TYRE_HOT_HI", 95)))
         telemetry_store = gt7_telemetry.TelemetryStore(
             os.path.join(runtime, "telemetry.json"), units=_tunits, thresholds=_tthr,
-            reset=True)          # fresh reference each relay start (spec §D) — no stale cross-track lap
+            reset=True)          # fresh reference each relay start (spec §D), no stale cross-track lap
         threading.Thread(target=_telemetry_loop,
                          args=(telemetry_store, args.gt7_ps_ip, stop_evt), daemon=True).start()
         LOG.info("GT7 telemetry listener started (bind 0.0.0.0:33740, ps_ip=%s)",
                 args.gt7_ps_ip or "<discovery>")
 
     # Broadcast-chat reader (#294): resolve the channel's live videoId set and
-    # poll each stream's chat. Its own ~30 s resolve cadence (not args.poll —
-    # yt-dlp resolution is heavier than a CSV fetch). Best-effort daemon.
+    # poll each stream's chat. Its own ~30 s resolve cadence, not args.poll, because
+    # yt-dlp resolution is heavier than a CSV fetch. Best-effort daemon.
     _bc_supervisor = None
     if broadcast_chat_store is not None and channel_source is not None:
         _bc_supervisor = BroadcastChatSupervisor(
@@ -11771,7 +11746,7 @@ def main():
         threading.Thread(target=_bc_supervisor.run, daemon=True).start()
 
     # Commentator cockpit (#191): per-league secret (injected from profile.env,
-    # auto-provisioned by the CLI — zero-config). Present => /cockpit/* is served
+    # auto-provisioned by the CLI; zero-config). Present => /cockpit/* is served
     # (token-gated); absent => every /cockpit/* path 404s. PUBLIC exposure is the
     # separate Tailscale Funnel switch, never implied by the secret alone.
     console_secret = (os.environ.get("RACECAST_CONSOLE_SECRET") or "").strip() or None
@@ -11835,7 +11810,7 @@ def main():
             LOG.warning("could not bind %s:%s — %s", addr, args.http_port, e)
     # The loopback bind is mandatory when requested: OBS always reaches the relay
     # on 127.0.0.1. If it failed but (e.g.) the Tailscale IP bound, running on
-    # would be a silent split-brain — 127.0.0.1 stays served by the STALE relay
+    # would be a silent split-brain; 127.0.0.1 stays served by the STALE relay
     # that holds the port (issue #84). Abort loudly instead of half-starting.
     if not servers or loopback_bind_failed(bind_addrs, bound_addrs):
         for httpd in servers:
@@ -11847,7 +11822,7 @@ def main():
 
     def shutdown(*_):
         # IMPORTANT: do NOT call shutdown() from the thread running serve_forever()
-        # (deadlock). Stop the feeds and exit hard — the OS frees the sockets; the
+        # (deadlock). Stop the feeds and exit hard; the OS frees the sockets; the
         # streamlink subprocesses are cleanly terminated.
         LOG.info("Stopping feeds…")
         stop_evt.set(); relay.shutdown(); os._exit(0)
