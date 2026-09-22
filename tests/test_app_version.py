@@ -1,5 +1,5 @@
 """Unit tests for the shared build-version helper (src/scripts/app_version.py).
-Stdlib only; runnable as a script (repo convention). Mirrors racecast.version()."""
+Stdlib only, runnable as a script. Mirrors racecast.version()."""
 import os
 import sys
 import tempfile

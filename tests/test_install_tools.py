@@ -39,9 +39,7 @@ def t_install_commands_brew_single_batch():
 
 
 def t_install_commands_apt_updates_then_skips_managed():
-    # apt handles ONLY ffmpeg now. yt-dlp (bot-check-sensitive), deno, and
-    # streamlink (apt's 6.6.2 predates --http-cookies-file, #350) are managed
-    # installs, not apt packages.
+    # apt handles only ffmpeg. yt-dlp, deno and streamlink are managed installs.
     cmds = m.install_commands("apt", ["yt-dlp", "streamlink", "ffmpeg", "deno"])
     assert cmds == [["apt-get", "update"], ["apt-get", "install", "-y", "ffmpeg"]]
     assert m.install_commands("apt", ["yt-dlp"]) == []
@@ -52,11 +50,11 @@ def t_install_commands_apt_updates_then_skips_managed():
 
 
 def t_streamlink_managed_on_linux_only():
-    # apt's streamlink is too old (6.6.2 << 8.2.0) -> Linux gets a managed venv.
+    # apt's streamlink predates 8.2.0, so Linux gets a managed venv.
     assert m.streamlink_needs_managed_install("apt") is True
     assert m.streamlink_needs_managed_install("brew") is False    # brew ships 8.x
     assert m.streamlink_needs_managed_install("winget") is False  # winget ships 8.x
-    # the pinned spec must be at/above preflight's 8.2.0 floor.
+    # The pinned spec must be at or above preflight's 8.2.0 floor.
     assert m.STREAMLINK_VERSION >= "8.2.0"
     assert m.STREAMLINK_SPEC == "streamlink==" + m.STREAMLINK_VERSION
 
@@ -77,8 +75,7 @@ def t_install_streamlink_venv_orchestration():
         link = m.install_streamlink_venv(
             managed, venv, python="/usr/bin/python3",
             run=calls.append, symlink=rec_symlink)
-    # 1) build the venv with the *system* python, 2) pip-install the pinned spec
-    #    via the venv's own python, 3) link the entrypoint into the managed bin dir.
+    # System python builds the venv; the venv's own python installs the pin.
     assert calls[0] == ["/usr/bin/python3", "-m", "venv", venv]
     venv_py = os.path.join(venv, "bin", "python")
     assert calls[1] == [venv_py, "-m", "pip", "install", "--upgrade", m.STREAMLINK_SPEC]
@@ -90,7 +87,7 @@ def t_install_streamlink_venv_orchestration():
 def t_install_streamlink_venv_needs_python():
     import tempfile
     orig = m.system_python
-    m.system_python = lambda: None   # simulate a box with no python3 / no python3-venv
+    m.system_python = lambda: None   # a box with no python3 or python3-venv
     try:
         with tempfile.TemporaryDirectory() as td:
             try:
@@ -105,8 +102,7 @@ def t_install_streamlink_venv_needs_python():
 
 
 def t_pick_manager_pacman_on_arch():
-    # Arch has no apt-get; without pacman support install-tools used to abort with
-    # "No supported package manager found" and print an apt guide (issue #560).
+    # Arch has no apt-get, so without pacman support install-tools finds none. (#560)
     only = lambda have: (lambda n: "/usr/bin/" + n if n == have else None)
     assert m.pick_manager("linux", which=only("pacman")) == "pacman"
     assert m.pick_manager("linux", which=only("apt-get")) == "apt"
@@ -116,8 +112,8 @@ def t_pick_manager_pacman_on_arch():
 
 
 def t_install_commands_pacman_takes_all_four_from_the_repo():
-    # Unlike apt, Arch's repo versions are current enough for every tool, so
-    # nothing needs a managed install: one command, all four packages.
+    # Arch's repo versions are current enough for every tool, so nothing needs a
+    # managed install: one command, all four packages.
     cmds = m.install_commands("pacman", ["yt-dlp", "streamlink", "ffmpeg", "deno"],
                               sudo=True)
     assert cmds == [["sudo", "pacman", "-S", "--needed", "--noconfirm",
@@ -130,14 +126,14 @@ def t_install_commands_pacman_takes_all_four_from_the_repo():
 
 
 def t_install_commands_pacman_sudo_prefix():
-    # pacman needs root and does not prompt for it — same reason as apt.
+    # pacman needs root and does not prompt for it, same as apt.
     assert m.install_commands("pacman", ["ffmpeg"], sudo=False)[0][0] == "pacman"
     assert m.install_commands("pacman", ["ffmpeg"], sudo=True)[0][0] == "sudo"
 
 
 def t_update_commands_pacman_refuses_partial_upgrade():
-    # Upgrading single packages on a rolling release IS the partial upgrade.
-    # --update therefore emits no command; main() points at `pacman -Syu`.
+    # Upgrading single packages on a rolling release is the partial upgrade, so
+    # --update emits no command; main() points at `pacman -Syu`.
     assert m.update_commands("pacman", ["ffmpeg", "deno"]) == []
 
 
@@ -242,7 +238,7 @@ def _fake_tgz(binary_bytes=b"#!/bin/echo speedtest\n"):
         for name, data in (("speedtest", binary_bytes), ("speedtest.md", b"# doc\n")):
             ti = tarfile.TarInfo(name)
             ti.size = len(data)
-            ti.mtime = 0   # deterministic (Date.now()-free)
+            ti.mtime = 0   # deterministic
             tf.addfile(ti, io.BytesIO(data))
     return buf.getvalue()
 
@@ -283,8 +279,8 @@ def t_manual_guide_mentions_speedtest():
 
 
 def t_install_commands_apt_sudo_prefix():
-    # apt path = update then install; both get the sudo prefix (Linux non-root).
-    # ffmpeg is the only apt-managed tool left (streamlink is now a managed venv).
+    # apt updates then installs, and both get the sudo prefix. ffmpeg is the only
+    # apt-managed tool left.
     assert m.install_commands("apt", ["ffmpeg"]) == \
         [["apt-get", "update"], ["apt-get", "install", "-y", "ffmpeg"]]
     assert m.install_commands("apt", ["streamlink", "ffmpeg"], sudo=True) == \
@@ -321,8 +317,8 @@ def t_deno_download_url():
 
 
 def _fake_deno_zip(binary_bytes=b"#!/bin/echo deno\n"):
-    """Build an in-memory .zip holding a single top-level `deno` member —
-    matches the layout of deno's official linux release archive."""
+    """Build an in-memory .zip holding a single top-level `deno` member, the
+    layout of deno's official linux release archive."""
     import io, zipfile
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
@@ -406,7 +402,7 @@ def t_install_ytdlp_binary_rejects_bad_checksum():
 def t_glibc_version_parses_glibc_only():
     assert m.glibc_version(("glibc", "2.39")) == (2, 39)
     assert m.glibc_version(("glibc", "2.35")) == (2, 35)
-    # non-glibc (musl / undeterminable) -> None ("cannot tell, do not block")
+    # Non-glibc or undeterminable means "cannot tell, do not block".
     assert m.glibc_version(("", "")) is None
     assert m.glibc_version(("musl", "1.2.4")) is None
     assert m.glibc_version(("glibc", "")) is None
@@ -414,14 +410,14 @@ def t_glibc_version_parses_glibc_only():
 
 
 def t_min_os_error_below_at_above_floor():
-    # below the deno floor -> a clear, actionable message
+    # Below the deno floor the message names both versions.
     msg = m.min_os_error((2, 31))
     assert msg is not None
     assert "2.31" in msg and "2.35" in msg and "24.04" in msg
-    # at/above the floor -> None (no error)
+    # At or above the floor there is no error.
     assert m.min_os_error((2, 35)) is None
     assert m.min_os_error((2, 39)) is None
-    # undeterminable glibc must never block
+    # An undeterminable glibc must never block.
     assert m.min_os_error(None) is None
     assert m.MIN_GLIBC_TOOLS == (2, 35) and m.MIN_GLIBC_BINARY == (2, 38)
 

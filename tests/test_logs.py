@@ -16,7 +16,6 @@ def t_configure_logging_writes_timestamped_line(tmp):
         h.flush()
     with open(path, encoding="utf-8") as fh:
         line = fh.read().strip()
-    # "2026-06-18 12:00:00 INFO hello world"
     assert line.endswith("INFO hello world"), line
     assert line[:4].isdigit() and line[4] == "-", line   # leading ISO date
 
@@ -38,11 +37,11 @@ def t_configure_logging_idempotent(tmp):
 
 
 def t_rotation_survives_locked_file_no_line_lost(tmp):
-    """Windows: a rollover whose rename fails because another process holds the
-    file open (the Control Center tails relay.console.log / feed_*.log live —
-    WinError 32) must NOT drop the log record. The handler keeps writing to the
-    base file and defers the rollover instead of letting the line escape to
-    stderr. Simulated by forcing a rollover and making rotate() raise."""
+    """On Windows a rollover whose rename fails because another process holds the
+    file open must not drop the log record. The Control Center tails
+    relay.console.log and feed_*.log live, which is WinError 32. The handler keeps
+    writing to the base file and defers the rollover instead of letting the line
+    escape to stderr. Simulated by forcing a rollover and making rotate() raise."""
     path = os.path.join(tmp, "logs", "rot.log")
     log = lg.configure_logging("test.rotlock", path, to_stdout=False)
     handler = next(h for h in log.handlers if getattr(h, "_racecast", False))
@@ -68,29 +67,29 @@ def t_rotation_survives_locked_file_no_line_lost(tmp):
 
 
 def t_read_new_lines_incremental_and_rotation(tmp):
-    """The re-open-per-poll tail reader: returns whole lines appended since the
+    """The re-open-per-poll tail reader returns whole lines appended since the
     last byte offset, holds back a half-written trailing line, and restarts from
-    the top when the file is rotated/truncated (so it never keeps the file open
-    and blocks the writer's rename on Windows)."""
+    the top when the file is rotated or truncated. It never keeps the file open,
+    so it cannot block the writer's rename on Windows."""
     p = os.path.join(tmp, "rnl.log")
     with open(p, "wb") as fh:
         fh.write(b"alpha\nbeta\n")
     lines, pos = lg.read_new_lines(p, 0)
     assert lines == ["alpha", "beta"] and pos == 11, (lines, pos)
-    # nothing new -> empty, offset unchanged
+    # Nothing new: empty, offset unchanged.
     lines, pos2 = lg.read_new_lines(p, pos)
     assert lines == [] and pos2 == pos, (lines, pos2)
-    # a full line + a partial (no trailing newline) -> only the full line
+    # A full line plus a partial one without a newline yields only the full line.
     with open(p, "ab") as fh:
         fh.write(b"gamma\npar")
     lines, pos = lg.read_new_lines(p, pos)
     assert lines == ["gamma"], lines
-    # completing the partial line delivers it whole
+    # Completing the partial line delivers it whole.
     with open(p, "ab") as fh:
         fh.write(b"tial\n")
     lines, pos = lg.read_new_lines(p, pos)
     assert lines == ["partial"], lines
-    # rotation/truncation: file replaced by a shorter one -> re-read from the top
+    # A file replaced by a shorter one is re-read from the top.
     with open(p, "wb") as fh:
         fh.write(b"fresh\n")
     lines, pos = lg.read_new_lines(p, pos)
@@ -131,9 +130,9 @@ def t_shorten_urls_elides_long_url_keeps_itag():
            "itag/301/sig/SECRETSIG/lsig/SECRETLSIG/playlist/index.m3u8" + "z" * 120)
     line = "Unable to open URL: " + url + " (403 Forbidden)"
     out = lg.shorten_urls(line)
-    # Host kept, path+query (incl. the sig/lsig tokens) dropped. Asserted on a
-    # dotless fragment, not the full domain, so it is not an incomplete-URL-
-    # sanitization pattern (CodeQL py/incomplete-url-substring-sanitization).
+    # The host is kept and the path and query, including the sig/lsig tokens, are
+    # dropped. Asserted on a dotless fragment rather than the full domain so it is
+    # not a CodeQL py/incomplete-url-substring-sanitization pattern.
     assert "googlevideo" in out
     assert "itag 301" in out
     assert "SECRETSIG" not in out and "SECRETLSIG" not in out   # tokens elided
@@ -345,14 +344,14 @@ def t_harden_stdio_makes_a_narrow_console_survivable():
     for name, stream in (("stdout", out), ("stderr", err)):
         assert stream.calls, f"{name} was never reconfigured"
         assert stream.calls[-1].get("errors") == "replace", stream.calls
-        # utf-8, not the console's own encoding: issue #24 settled this. Whenever stdout
-        # is a PIPE — every Control Center job — Python picks the locale encoding and
-        # those captured bytes are rendered in a UTF-8 web UI.
+        # utf-8, not the console's own encoding: whenever stdout is a PIPE, as in
+        # every Control Center job, Python picks the locale encoding and those
+        # captured bytes are rendered in a UTF-8 web UI. (#24)
         assert stream.calls[-1].get("encoding") == "utf-8", stream.calls
 
-    # The same leniency must reach every CHILD process, whatever spawns it. Setting it
-    # in our own environment is what covers all 17 entrypoints at once instead of
-    # editing each spawn site.
+    # The same leniency must reach every child process, whatever spawns it. Setting
+    # it in our own environment covers every entrypoint at once instead of editing
+    # each spawn site.
     assert env.get("PYTHONIOENCODING") == "utf-8:replace", env
 
 
@@ -402,9 +401,9 @@ def _calls(src, pattern):
 
 
 def t_every_text_subprocess_under_src_decodes_leniently():
-    # subprocess reads pipes in a THREAD, so a decode failure never reaches the caller's
-    # except: a traceback, and the output silently lost. Scope is the whole shipped tree
-    # and every call form that decodes — a narrower guard missed five call sites.
+    # subprocess reads pipes in a thread, so a decode failure never reaches the
+    # caller's except: a traceback, and the output silently lost. The scope is the
+    # whole shipped tree and every call form that decodes. Do not narrow it.
     offenders = []
     for path in _shipped_sources():
         src = path.read_text(encoding="utf-8")
@@ -419,8 +418,8 @@ def t_every_text_subprocess_under_src_decodes_leniently():
 
 
 def t_no_argparse_help_string_carries_non_ascii():
-    # argparse builds the whole help before printing, so one non-ASCII character kills
-    # --help on a narrow console. "?" where an arrow should be is worse than "->".
+    # argparse builds the whole help before printing, so one non-ASCII character
+    # kills --help on a narrow console. Do not narrow this scope.
     import re
     offenders = []
     for path in _shipped_sources():
@@ -433,8 +432,9 @@ def t_no_argparse_help_string_carries_non_ascii():
 
 
 def t_the_relay_hardens_stdio_before_it_builds_its_help():
-    # Started directly as well as spawned, so inheriting PYTHONIOENCODING is not enough.
-    # The order is the point: it crashed while argparse assembled the help.
+    # The relay is started directly as well as spawned, so inheriting
+    # PYTHONIOENCODING is not enough, and the order is the point: argparse
+    # assembles the whole help before anything prints.
     with open(os.path.join(ROOT, "src", "relay", "racecast-feeds.py"),
               encoding="utf-8") as fh:
         src = fh.read()
@@ -451,7 +451,7 @@ if __name__ == "__main__":
                 import inspect
                 fn(tmp) if inspect.signature(fn).parameters else fn()
                 print("ok", name)
-        # Windows can't delete a file with an open handle — release every rotating
-        # handler this run attached before the temp dir is removed.
+        # Windows cannot delete a file with an open handle, so release every
+        # rotating handler this run attached before the temp dir goes.
         for _ln in list(logging.Logger.manager.loggerDict):
             lg.close_logging(_ln)

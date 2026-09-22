@@ -3,11 +3,11 @@
 
 Run: python3 tests/test_broadcast_chat.py
 
-Covers the PURE pieces only (no network): message sanitizer, the Innertube
-JSON parsers (page bootstrap + the get_live_chat continuation response),
-runs->text rendering, the channel `Channel` tab CSV parser, the live-set diff
-that drives the producer-handover start/stop of per-stream readers, and the
-small URL/body builders. The relay owns the yt-dlp subprocess + the HTTP fetch.
+Covers the pure pieces only, with no network: the message sanitizer, the
+Innertube JSON parsers for the page bootstrap and the get_live_chat continuation
+response, runs->text rendering, the `Channel` tab CSV parser, the live-set diff
+that drives the producer-handover start and stop of per-stream readers, and the
+URL and body builders. The relay owns the yt-dlp subprocess and the HTTP fetch.
 """
 import importlib.util
 import json
@@ -26,7 +26,7 @@ def _load(name, rel):
 bc = _load("broadcast_chat", ("src", "scripts", "broadcast_chat.py"))
 
 
-# --- sanitize_message -------------------------------------------------------
+# sanitize_message
 
 def t_sanitize_basic():
     m = bc.sanitize_message({"ts": 100.0, "user": "Bob", "text": "hi"}, source="vid1")
@@ -62,7 +62,7 @@ def t_sanitize_bool_ts_rejected():
     assert bc.sanitize_message({"ts": True, "user": "B", "text": "hi"}) is None
 
 
-# --- runs_to_text -----------------------------------------------------------
+# runs_to_text
 
 def t_runs_to_text_joins_text_runs():
     msg = {"runs": [{"text": "hello "}, {"text": "world"}]}
@@ -70,15 +70,15 @@ def t_runs_to_text_joins_text_runs():
 
 
 def t_runs_to_text_emoji_uses_shortcut():
-    # No emojiId glyph available -> fall back to the shortcut (current behaviour).
+    # With no emojiId glyph the shortcut is the fallback.
     msg = {"runs": [{"text": "gg "},
                     {"emoji": {"shortcuts": [":smile:"], "isCustomEmoji": False}}]}
     assert bc.runs_to_text(msg) == "gg :smile:"
 
 
 def t_runs_to_text_standard_emoji_uses_glyph():
-    # A standard emoji carries its Unicode glyph in emojiId -> render the glyph,
-    # not the :shortcut: text.
+    # A standard emoji carries its Unicode glyph in emojiId, so render the glyph
+    # rather than the :shortcut: text.
     msg = {"runs": [{"text": "low stigs "},
                     {"emoji": {"emojiId": "\U0001f605",
                                "shortcuts": [":grinning_face_with_sweat:"],
@@ -87,8 +87,8 @@ def t_runs_to_text_standard_emoji_uses_glyph():
 
 
 def t_runs_to_text_custom_emoji_keeps_shortcut():
-    # A custom channel emote has no Unicode glyph (emojiId is an internal id) ->
-    # keep the :shortcut: text.
+    # A custom channel emote has no Unicode glyph, since emojiId is an internal
+    # id, so the :shortcut: text stays.
     msg = {"runs": [{"emoji": {"emojiId": "UCabc123/deadbeef",
                                "shortcuts": [":pog:"],
                                "isCustomEmoji": True}}]}
@@ -104,7 +104,7 @@ def t_runs_to_text_empty():
     assert bc.runs_to_text(None) == ""
 
 
-# --- parse_chat_action ------------------------------------------------------
+# parse_chat_action
 
 def t_parse_chat_action_text_message():
     action = {"addChatItemAction": {"item": {"liveChatTextMessageRenderer": {
@@ -150,7 +150,7 @@ def t_parse_chat_action_paid_message_no_text_ok():
     assert "$2.00" in m["text"]
 
 
-# --- parse_live_chat (the get_live_chat POST response) ----------------------
+# parse_live_chat (the get_live_chat POST response)
 
 def _live_chat_payload(actions, continuation="CONT2", timeout=5000, kind="invalidationContinuationData"):
     return {"continuationContents": {"liveChatContinuation": {
@@ -199,12 +199,11 @@ def t_parse_live_chat_tolerates_garbage():
     assert out["continuation"] is None
 
 
-# --- classify_live_chat_poll (#294 freeze fix: transient != end) ------------
+# classify_live_chat_poll: a transient failure is not an end. (#294)
 
 def t_classify_none_is_transient():
-    # A failed POST (network/timeout/429/5xx/non-JSON) returns None. It must be
-    # TRANSIENT, never ENDED — this is the whole #294 bug: a hiccup froze the
-    # mirror for the rest of the stream.
+    # A failed POST returns None and must count as transient, never as ended: an
+    # ended verdict freezes the mirror for the rest of the stream. (#294)
     status, parsed = bc.classify_live_chat_poll(None)
     assert status == bc.POLL_TRANSIENT
     assert parsed["continuation"] is None
@@ -223,8 +222,8 @@ def t_classify_ok_when_continuation_present():
 
 
 def t_classify_ended_when_wellformed_without_continuation():
-    # A real HTTP 200 dict that carries no next continuation -> the live chat
-    # genuinely closed (stream over) -> ENDED, the reader may tombstone.
+    # A real HTTP 200 dict with no next continuation means the live chat closed,
+    # so the reader may tombstone it.
     payload = {"continuationContents": {"liveChatContinuation": {"actions": []}}}
     status, parsed = bc.classify_live_chat_poll(payload)
     assert status == bc.POLL_ENDED
@@ -232,12 +231,12 @@ def t_classify_ended_when_wellformed_without_continuation():
 
 
 def t_classify_distinguishes_transient_from_ended():
-    # The crux: a None and a well-formed-but-ended response are DIFFERENT now.
+    # A None and a well-formed but ended response are different verdicts.
     ended = {"continuationContents": {"liveChatContinuation": {"actions": []}}}
     assert bc.classify_live_chat_poll(None)[0] != bc.classify_live_chat_poll(ended)[0]
 
 
-# --- parse_bootstrap (the live_chat page HTML) ------------------------------
+# parse_bootstrap (the live_chat page HTML)
 
 SAMPLE_PAGE = (
     'junk before <script>var x="INNERTUBE_API_KEY":"AIzaTESTKEY123";'
@@ -261,18 +260,18 @@ def t_parse_bootstrap_missing_returns_none_fields():
     assert bs["continuation"] is None
 
 
-# --- build_get_live_chat_body ----------------------------------------------
+# build_get_live_chat_body
 
 def t_build_body_shape():
     body = bc.build_get_live_chat_body("CONTX", "2.20260101.00.00")
     assert body["continuation"] == "CONTX"
     assert body["context"]["client"]["clientVersion"] == "2.20260101.00.00"
     assert body["context"]["client"]["clientName"] == "WEB"
-    # must be JSON-serialisable
+    # The body must be JSON-serialisable.
     json.dumps(body)
 
 
-# --- URL builders -----------------------------------------------------------
+# URL builders
 
 def t_channel_live_url_from_id():
     assert bc.channel_live_url("UC123") == "https://www.youtube.com/channel/UC123/live"
@@ -300,7 +299,7 @@ def t_api_url_includes_key():
     assert "key=AIzaX" in bc.get_live_chat_api_url("AIzaX")
 
 
-# --- compose targets (popup) ------------------------------------------------
+# compose targets (popup)
 
 def t_youtube_video_id_valid():
     assert bc.youtube_video_id("dQw4w9WgXcQ") == "dQw4w9WgXcQ"
@@ -339,12 +338,12 @@ def t_primary_chat_target_empty_is_none():
 
 
 def t_primary_chat_target_skips_invalid_then_picks_next():
-    # a malformed first key (not 11-char videoId, not twitch:) is skipped
+    # A first key that is neither an 11-char videoId nor twitch: is skipped.
     t = bc.primary_chat_target(["bad/key", "twitch:gtmaster"])
     assert t["platform"] == "twitch"
 
 
-# --- live_set_diff (producer handover) --------------------------------------
+# live_set_diff (producer handover)
 
 def t_live_set_diff_start_and_stop():
     to_start, to_stop = bc.live_set_diff({"A"}, {"A", "B"})
@@ -353,7 +352,7 @@ def t_live_set_diff_start_and_stop():
 
 
 def t_live_set_diff_handover_overlap_then_drop():
-    # A on air, B comes up (overlap) -> start B; then A ends -> stop A
+    # A is on air, B comes up and starts, then A ends and stops.
     to_start, _ = bc.live_set_diff({"A"}, {"A", "B"})
     assert to_start == {"B"}
     _, to_stop = bc.live_set_diff({"A", "B"}, {"B"})
@@ -364,7 +363,7 @@ def t_live_set_diff_no_change():
     assert bc.live_set_diff({"A"}, {"A"}) == (set(), set())
 
 
-# --- parse_channel_tab ------------------------------------------------------
+# parse_channel_tab
 
 def t_parse_channel_tab_header_mode():
     csv_text = "Platform,Channel\nyoutube,https://www.youtube.com/@league\n"
@@ -395,7 +394,7 @@ def t_parse_channel_tab_empty():
     assert bc.parse_channel_tab("Platform,Channel\n") == []
 
 
-# --- twitch_login (Phase 2) -------------------------------------------------
+# twitch_login (Phase 2)
 
 def t_twitch_login_from_url():
     assert bc.twitch_login("https://www.twitch.tv/SomeCaster") == "somecaster"
@@ -424,7 +423,7 @@ def t_twitch_login_rejects_invalid():
 
 
 def t_twitch_login_rejects_crlf_injection():
-    # a channel value must never be able to inject IRC commands into the stream
+    # A channel value must never inject IRC commands into the stream.
     assert bc.twitch_login("foo\r\nJOIN #evil") is None
 
 
@@ -432,7 +431,7 @@ def t_twitch_login_rejects_too_long():
     assert bc.twitch_login("a" * 26) is None
 
 
-# --- parse_twitch_privmsg (Phase 2) -----------------------------------------
+# parse_twitch_privmsg (Phase 2)
 
 def t_parse_twitch_privmsg_tagged():
     line = ("@badge-info=;color=#1E90FF;display-name=CoolViewer;emotes=;id=abc-123;"
@@ -475,7 +474,7 @@ def t_parse_twitch_privmsg_garbage():
     assert bc.parse_twitch_privmsg(None) is None
 
 
-# --- image emotes: emote_url_ok (#351) --------------------------------------
+# image emotes: emote_url_ok (#351)
 
 def t_emote_url_ok_youtube_ggpht():
     assert bc.emote_url_ok("https://yt3.ggpht.com/abc/def-s48-w48") is True
@@ -501,7 +500,7 @@ def t_emote_url_ok_rejects_non_string():
     assert bc.emote_url_ok(123) is False
 
 
-# --- image emotes: runs_to_tokens (YouTube, #351) ---------------------------
+# image emotes: runs_to_tokens (YouTube, #351)
 
 def t_runs_to_tokens_none_for_plain_text():
     assert bc.runs_to_tokens({"runs": [{"text": "hello world"}]}) is None
@@ -512,7 +511,7 @@ def t_runs_to_tokens_none_for_simpletext():
 
 
 def t_runs_to_tokens_standard_emoji_stays_text():
-    # A standard emoji is a glyph (#345), not an image -> no tokens.
+    # A standard emoji is a glyph, not an image, so there are no tokens. (#345)
     msg = {"runs": [{"text": "gg "},
                     {"emoji": {"emojiId": "\U0001f605", "isCustomEmoji": False,
                                "shortcuts": [":sweat:"]}}]}
@@ -536,7 +535,7 @@ def t_runs_to_tokens_custom_emote_image():
 
 
 def t_runs_to_tokens_custom_emote_no_image_falls_back():
-    # No image thumbnail -> nothing to render as <img>, flat text suffices.
+    # With no image thumbnail there is nothing to render as <img>.
     msg = {"runs": [{"emoji": {"emojiId": "UCabc/x", "isCustomEmoji": True,
                                "shortcuts": [":_pog:"]}}]}
     assert bc.runs_to_tokens(msg) is None
@@ -558,7 +557,7 @@ def t_parse_chat_action_attaches_tokens_for_custom_emote():
         "t": "emote", "url": "https://yt3.ggpht.com/g", "alt": ":_go:"}
 
 
-# --- image emotes: splice_twitch_emotes (#351) ------------------------------
+# image emotes: splice_twitch_emotes (#351)
 
 def t_splice_twitch_emotes_none_without_tag():
     assert bc.splice_twitch_emotes("Kappa", "") is None
@@ -589,7 +588,7 @@ def t_splice_twitch_emotes_multiple_ranges_same_id():
 
 
 def t_splice_twitch_emotes_rejects_bad_id():
-    # An id outside [A-Za-z0-9_] would corrupt the CDN URL -> span stays text.
+    # An id outside [A-Za-z0-9_] would corrupt the CDN URL, so the span stays text.
     assert bc.splice_twitch_emotes("Kappa", "ev.il:0-4") is None
     assert bc.splice_twitch_emotes("Kappa", "a b:0-4") is None
 
@@ -615,7 +614,7 @@ def t_parse_twitch_privmsg_no_emotes_no_tokens():
     assert "tokens" not in bc.parse_twitch_privmsg(line)
 
 
-# --- image emotes: sanitize_message carries/validates tokens (#351) ----------
+# image emotes: sanitize_message carries/validates tokens (#351)
 
 def _emote_tok(url, alt):
     return {"t": "emote", "url": url, "alt": alt}
@@ -645,7 +644,7 @@ def t_sanitize_message_degrades_blocked_host_to_text():
     assert "tokens" not in bc.sanitize_message(raw, source="v")
 
 
-# --- relay BroadcastChatStore + endpoint -----------------------------------
+# relay BroadcastChatStore + endpoint
 
 m = _load("irofeeds_bc", ("src", "relay", "racecast-feeds.py"))
 
@@ -669,7 +668,7 @@ def t_store_dedup_by_id():
 
 
 def t_store_merges_two_streams_in_ts_order():
-    # producer handover: vidA and vidB overlap -> one merged, ts-ordered stream
+    # On a producer handover vidA and vidB overlap into one ts-ordered stream.
     s = m.BroadcastChatStore()
     s.add_many("vidA", [_raw("a1", "Al", "from A", 30.0)])
     s.add_many("vidB", [_raw("b1", "Bo", "from B", 20.0)])
@@ -696,8 +695,7 @@ def t_store_drops_unusable_rows():
 
 
 def _bc_client(broadcast_chat_store, supervisor=None):
-    """make_handler over a real ThreadingHTTPServer; returns (srv, get).
-    Mirrors tests/test_chat.py's fixture."""
+    """make_handler over a real ThreadingHTTPServer. Returns (srv, get)."""
     import json as _json
     import threading as _t
     import urllib.error
@@ -819,7 +817,7 @@ def t_supervisor_sets_primary_target():
     assert s.data()["target"]["platform"] == "youtube"   # YouTube key is first
 
 
-# --- rearm (#294 Refresh button: recover a frozen reader without waiting) ----
+# rearm: the Refresh button recovers a frozen reader without waiting. (#294)
 
 class _CountingReader:
     """A reader stub recording start()s; alive() follows the last start/stop."""
@@ -835,7 +833,7 @@ class _CountingReader:
 def t_rearm_clears_tombstones():
     s = m.BroadcastChatStore()
     sup = m.BroadcastChatSupervisor(s, None, None)
-    frozen = _CountingReader(ended=True)   # the #294 freeze: dead + tombstoned
+    frozen = _CountingReader(ended=True)   # dead and tombstoned (#294)
     frozen._alive = False
     sup._readers = {"vidAAAAAAAAA": frozen}
     sup.rearm()
@@ -849,7 +847,7 @@ def t_rearm_then_cycle_restarts_dead_reader():
     frozen._alive = False
     sup._readers = {"vidAAAAAAAAA": frozen}
     sup.rearm()
-    # The stream is still desired (live); the reconcile must now restart it.
+    # The stream is still live and desired, so the reconcile must restart it.
     sup.channel_source = type("C", (), {"refresh": lambda self: True})()
     fresh = _CountingReader(ended=False)
     sup._desired = lambda: {"vidAAAAAAAAA": (lambda: fresh)}

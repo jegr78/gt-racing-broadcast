@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Real-packet CI fixtures: genuine GT7 "A" packets captured live (2026-07-08) via
-`tools/gt7-telemetry-probe.py --capture` against an actual PS5 session. Decrypting and
-parsing them validates the field OFFSETS against reality (not just internal wiring),
-across distinct states: full throttle / no lap yet, hard braking, and a completed lap.
+"""Real-packet CI fixtures: genuine GT7 "A" packets captured from a PS5 session with
+`tools/gt7-telemetry-probe.py --capture`. Decrypting and parsing them validates the
+field offsets against reality rather than just the internal wiring, across three
+states: full throttle with no lap yet, hard braking, and a completed lap. A GT7
+packet-layout change fails these loudly.
 Run: python3 tests/test_gt7_fixture.py
 
-Provenance: game telemetry only (the car's own physics state) — no PII, no secrets; the
-Salsa20 key is a public constant. If GT7 ever changes the packet layout, these fail loudly.
+The packets carry game telemetry only, no PII and no secrets, and the Salsa20 key is
+a public constant.
 """
 import importlib.util
 import os
@@ -35,8 +36,8 @@ PKT_THROTTLE_HEX = (
     "12f39a48f539d708c478d7043f30999fb901192b251558d2a612203cba8283627f907a2a71"
     "1ef870b387617256ced231440f5b292407b918d3b2a5c5bd53f3fb13c57792552b17988fd1"
 )
-# Hard braking: brake == 255 with throttle == 0 (proves the two adjacent bytes are
-# read distinctly and not swapped).
+# Hard braking: brake == 255 with throttle == 0, so the two adjacent bytes are read
+# distinctly and not swapped.
 PKT_BRAKE_HEX = (
     "2c51d48c3dff46c5b99df06916e0c91d518df9561df81e23bebad8ded28b01d9c095d35198"
     "d4617b431eb915c2a00555eaeb58b8aaa481bfce236106ac06b367adb94fd8ddeeea07f816"

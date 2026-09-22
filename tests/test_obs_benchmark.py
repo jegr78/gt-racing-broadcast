@@ -24,9 +24,7 @@ def _sample(t, fps=60.0, render_ms=4.0, rs=0, rt=0, os_=0, ot=0, rec_ms=0, backl
             "state": state, "snaps": snaps}
 
 
-# --------------------------------------------------------------------------
 # upstream latency of the ROBUST profile: a segment count read from the flags
-# --------------------------------------------------------------------------
 def t_live_edge_segments_reads_the_flag():
     assert m.live_edge_segments(FULL_FLAGS) == 4
     assert m.live_edge_segments(ROBUST_FLAGS) == 6
@@ -47,16 +45,12 @@ def t_robust_extra_segments_is_the_difference():
     assert m.robust_extra_segments(["--x"], ROBUST_FLAGS) is None
 
 
-# --------------------------------------------------------------------------
 # one measurement window -> a summary
-# --------------------------------------------------------------------------
 def t_playback_treats_a_forward_cursor_jump_as_a_rejoin_too():
-    # An OBS media source that is rebuilt does not always restart its cursor at zero: it
-    # can resume on the new stream's own timestamps and jump FORWARD by hours. The guard
-    # only knew the backward jump, so such a pair was counted as playback and one of them
-    # dominated the whole window. Measured on the shipped helper before the fix: a jump to
-    # 11_000_000 ms reported 1374x and rejoined=False, and keeps_real_time said True on it.
-    # A broken measurement read as the healthiest possible answer.
+    # A rebuilt OBS media source does not always restart its cursor at zero: it can
+    # resume on the new stream's own timestamps and jump forward by hours. Counting
+    # such a pair as playback lets one sample dominate the whole window and reads as
+    # the healthiest possible answer.
     def w(*pairs):
         return [{"t": t, "cursor_ms": c} for t, c in pairs]
     back = w((0, 10_000), (2, 12_000), (4, 1_000), (6, 3_000), (8, 5_000))
@@ -66,22 +60,21 @@ def t_playback_treats_a_forward_cursor_jump_as_a_rejoin_too():
     assert rejoined is True, "a forward jump is a rejoin as much as a backward one"
     assert rate == 1.0, rate            # the three sane pairs, the jump discarded
     assert stall == 0.0
-    # The ceiling is the window's own wall time: OBS can outrun the wall clock only by
-    # what its own buffer holds (8 MB, about 9 s at 7 Mbps), never by a whole window.
-    # A pair inside that allowance stays playback, so draining a buffer is not a rejoin.
-    # The window is the benchmark's default 60 s; the ceiling tightens with shorter ones.
+    # The ceiling is the window's own wall time: OBS can outrun the wall clock only
+    # by what its own buffer holds, about 9 s, never by a whole window. A pair inside
+    # that allowance stays playback, so draining a buffer is not a rejoin. The
+    # ceiling tightens with a shorter window.
     drain = w((0, 0), (2, 9_000)) + w(*[(t, 9_000 + (t - 2) * 1000) for t in range(4, 62, 2)])
     assert m._playback(drain)[2] is False, "a buffer drain is not a discontinuity"
 
 
 def t_summary_says_when_the_source_outran_the_wall_clock():
-    # A fresh serve walks the CDN's DVR window at whatever rate it can fetch, so media
-    # arrives faster than real time. backlog_s ages by ARRIVAL, so it climbs while OBS
-    # plays at 1.0x and nothing downstream is slow. Measured live on the production host:
-    # the window reported 15.5 s -> 57.2 s, and three minutes later the steady state was
-    # 4.6 s. Whoever reads that column concludes the machine is broken.
-    # The consumer can only add (1 - playback_rate) * duration to a backlog. The rest came
-    # from the inbound side, and that is arithmetic, not a guess.
+    # A fresh serve walks the CDN's DVR window at whatever rate it can fetch, so
+    # media arrives faster than real time. backlog_s ages by arrival, so it climbs
+    # while OBS plays at 1.0x and nothing downstream is slow, and the column then
+    # reads as a broken machine. The consumer can only add
+    # (1 - playback_rate) * duration to a backlog; the rest came from the inbound
+    # side, which is arithmetic rather than a guess.
     slow_consumer = [_sample(t, backlog=3.0 + t * 0.5, cursor=t * 500) for t in (0.0, 20.0, 40.0, 60.0)]
     s = m.summarize(slow_consumer)
     assert s["playback_rate"] == 0.5
@@ -99,9 +92,9 @@ def t_summary_says_when_the_source_outran_the_wall_clock():
 
 
 def t_summary_states_the_backlog_growth_rate_the_host_caused():
-    # #585's trigger is "the backlog grows by at least X seconds per minute", and #584
-    # promised this field as what calibrates it. The rate must exclude the source's early
-    # arrival, or a bursty CDN would step a healthy host down.
+    # The step-down trigger is stated in seconds of backlog per minute, so this field
+    # calibrates it. The rate must exclude the source's early arrival, or a bursty CDN
+    # would step a healthy host down. (#584, #585)
     slow = [_sample(t, backlog=3.0 + t * 0.5, cursor=t * 500) for t in (0.0, 20.0, 40.0, 60.0)]
     s = m.summarize(slow)
     # 3.0 -> 33.0 s over 60 s, all of it the consumer's: 30 s of rise = 30 s/min.
@@ -136,7 +129,7 @@ def t_render_names_the_growth_rate_and_tolerates_a_record_without_it():
     assert "host growth" in m.render(rec, NOW), m.render(rec, NOW)
     assert "47.9 s/min" in full_row, full_row
     assert full_row.count("n/a") == 0, full_row
-    # The history is append-only, so a record written before the field must still render —
+    # The history is append-only, so a record written before the field still renders,
     # with that one cell empty and every other value untouched.
     del rec["full"]["backlog_growth_s_per_min"]
     full_row = m.render(rec, NOW).splitlines()[2]
@@ -247,9 +240,7 @@ def t_summarize_of_nothing_is_empty_not_a_crash():
     assert s["playback_rate"] is None and s["contaminated"] == []
 
 
-# --------------------------------------------------------------------------
 # real time: frame rate, encoder speed and the media cursor
-# --------------------------------------------------------------------------
 def _summary(fps=60.0, speed=1.0, rate=1.0, stall=0.0, contaminated=()):
     return {"fps_avg": fps, "encoder_speed": speed, "playback_rate": rate,
             "stall_fraction": stall, "contaminated": list(contaminated)}
@@ -304,9 +295,7 @@ def t_verdict_names_the_disturbed_tiers():
     assert v["contaminated"] == {"full": ["OBS reconnected the feed"]}
 
 
-# --------------------------------------------------------------------------
 # the gate before anything touches OBS or a feed
-# --------------------------------------------------------------------------
 def _status(feed="A", state="serving", platform="youtube", backlog=3.0, prebuffer=3.0):
     feeds = {"A": {"state": "serving", "platform": "youtube", "profile": "full",
                    "pinned": False, "backlog_s": 3.0, "state_age_s": 100.0},
@@ -376,9 +365,7 @@ def t_restore_tier_puts_a_pin_back_and_releases_an_unpinned_feed():
     assert m.restore_tier({"profile": "robust", "pinned": False}) == "auto"
 
 
-# --------------------------------------------------------------------------
 # persisted result + preflight line
-# --------------------------------------------------------------------------
 def _record(ts=NOW, full_rt=True, robust_rt=True, contaminated=()):
     full = {**_summary(fps=60.0 if full_rt else 45.0, contaminated=contaminated),
             "render_ms_avg": 5.0, "backlog_floor_end_s": 3.1}
@@ -456,9 +443,7 @@ def t_render_names_both_tiers_the_cursor_and_the_upstream_cost():
     assert "+2 HLS segments" in text
 
 
-# --------------------------------------------------------------------------
 # driver: fakes for the clock, the relay and the OBS session
-# --------------------------------------------------------------------------
 class _Clock:
     def __init__(self):
         self.t = 0.0
@@ -562,7 +547,7 @@ class _Session:
         if kind == "StartRecord":
             self.recording, self.rec_started = True, self.clock()
         if kind == "StopRecord":
-            # OBS answers StopRecord before the file is finalized (seen on 32.2.2)
+            # OBS answers StopRecord before the file is finalized
             self.recording = "finalizing" if self.finalize_polls else False
             return {"outputPath": "/rec/benchmark.mkv"}
         if kind == "GetInputList":
@@ -616,9 +601,9 @@ def t_run_measures_both_tiers_and_restores_everything():
 
 
 def t_run_rejoins_obs_after_each_switch_once_the_prefetch_has_landed():
-    # #614: a streamlink restart splices its HLS prefetch into OBS's open socket; OBS
+    # A streamlink restart splices its HLS prefetch into OBS's open socket, and OBS
     # would play it and sit that far behind the live edge. The benchmark rejoins OBS
-    # after the prefetch has arrived, for each tier and again after restoring.
+    # after the prefetch has arrived, per tier and again after restoring. (#614)
     clock = _Clock()
     relay = _Relay(clock)
     sess = _Session(clock, relay=relay)
@@ -629,16 +614,16 @@ def t_run_rejoins_obs_after_each_switch_once_the_prefetch_has_landed():
     for (at, _tier), switch, wait in zip(relay.resets, relay.switches, waits, strict=True):
         # reconnect (4 s) + this tier's prefetch landing: never before it has delivered
         assert at >= switch + 4.0 + wait, (at, switch, wait)
-    # ROBUST prefetches two more segments, so its rejoin must wait strictly longer than
-    # FULL's. A single constant for both was measured ~3 s short for ROBUST (#614).
+    # ROBUST prefetches two more segments, so its rejoin waits strictly longer than
+    # FULL's; a single constant for both is too short for ROBUST. (#614)
     assert waits[1] > waits[0]
 
 
 def t_sample_and_summary_carry_the_inbound_gap():
-    # #619 step 2: through one scripted restart the benchmark has to record the relay
-    # backlog, OBS mediaCursor, ring snaps AND the inbound gaps. The first three were
-    # already there. Without the fourth a slow window has no stated cause, because a
-    # bursty source and a consumer that fell behind look the same in backlog alone.
+    # Through one scripted restart the benchmark records the relay backlog, the OBS
+    # mediaCursor, the ring snaps and the inbound gaps. Without that last one a slow
+    # window has no stated cause, because a bursty source and a consumer that fell
+    # behind look the same in the backlog alone. (#619)
     st = _status()
     st["feeds"]["A"]["inbound_max_gap_s"] = 2.5
     sess = _Session(_Clock())
@@ -671,11 +656,10 @@ def t_inbound_gap_worst_ignores_the_reading_the_window_inherited():
     # A later repeat of a value is real data, because two intervals may share a max.
     assert m._inbound_gap_worst(w(9.0, 0.4, 1.2, 1.2)) == 1.2
     assert m._inbound_gap_worst(w(0.4, 9.0, 0.4)) == 9.0   # a spike after the first change
-    # A window opens ON the restart, and the #614 rejoin rebuilds the OBS source, so the
-    # relay has no reading to give for the first samples. Anchoring the inherited value
-    # on samples[0] made those Nones the anchor, and the first real number after them
-    # started the count: the pre-restart reading, exactly what this guard excludes.
-    # Measured against the shipped helper before the fix: 9.0 instead of 1.2.
+    # A window opens on the restart and the rejoin rebuilds the OBS source, so the
+    # relay has no reading for the first samples. The inherited value must be anchored
+    # on the first actual reading, not on samples[0], or that leading None run makes
+    # the pre-restart reading count as in-window. (#614)
     assert m._inbound_gap_worst(
         w(None, None, None, 9.0, 9.0, 9.0, 0.4, 0.4, 1.2)) == 1.2, \
         "a leading None run must not make 9.0 look like an in-window reading"
@@ -693,10 +677,9 @@ def t_inbound_gap_worst_ignores_the_reading_the_window_inherited():
 
 
 def t_prefetch_wait_rule_has_not_drifted_from_the_relay():
-    # prefetch_land_s and its budget exist twice (relay + benchmark) so the benchmark
-    # stays importable on its own. A "keep in sync" comment is not a guard — the repo
-    # pins duplicated logic with a source comparison (tests/test_streams.py), and the
-    # two tools waiting different spans is exactly the divergence #614 closed.
+    # prefetch_land_s and its budget exist twice, in the relay and in the benchmark,
+    # so the benchmark stays importable on its own. The repo pins duplicated logic
+    # with a comparison rather than a "keep in sync" comment. (#614)
     import importlib.util, inspect
     spec = importlib.util.spec_from_file_location(
         "feeds_x", os.path.join(ROOT, "src", "relay", "racecast-feeds.py"))
@@ -755,8 +738,7 @@ def t_prefetch_land_s_scales_with_the_burst_and_the_prebuffer():
     assert m.prefetch_land_s(4) == m.prefetch_land_s(4, m.DEFAULT_PREBUFFER_S)
     assert m.prefetch_land_s(0, 3.0) == 0.0
     assert m.prefetch_land_s(None, 3.0) == 0.0       # live_edge_segments found no flag
-    # Every measured worst case must fit the budget it was rounded up from (2026-09-20):
-    # YouTube FULL 1.82/4, YouTube ROBUST 4.96/6, Twitch FULL 0.69/2, Twitch ROBUST 1.80/2.
+    # Each measured worst case must fit the segment budget it was rounded up from.
     for burst, segments in ((1.82, 4), (4.96, 6), (0.69, 2), (1.80, 2)):
         assert burst / segments <= m.SEGMENT_FETCH_BUDGET_S, (burst, segments)
 

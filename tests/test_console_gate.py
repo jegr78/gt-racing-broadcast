@@ -11,9 +11,8 @@ spec = importlib.util.spec_from_file_location(
     "irofeeds", os.path.join(ROOT, "src", "relay", "racecast-feeds.py"))
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 
-# Manual feed arm defaults ON (#492 follow-up): a bare Relay would start feeds
-# disarmed (paused). These checks exercise the legacy auto-pull path; pin the
-# opt-out so they stay focused (same guard as tests/test_pov.py).
+# Manual feed arm defaults on, so a bare Relay starts its feeds paused. These
+# checks exercise the auto-pull path, so pin the opt-out. (#492)
 os.environ.setdefault("RACECAST_MANUAL_FEED_ARM", "0")
 
 SECRET = "s3cret-league"
@@ -194,7 +193,7 @@ def t_chat_send_forces_token_identity():
 
 def t_chat_send_ignores_client_supplied_user():
     # A client-supplied "user" field in the POST body must be overridden by the
-    # token identity — the stored speaker must be the token's key, never "bob".
+    # token identity, so the stored speaker is the token's key and never "bob".
     srv = _serve(); port = srv.server_address[1]
     try:
         url = f"http://127.0.0.1:{port}/console/chat/send?t=" + _tok("alice")
@@ -356,9 +355,9 @@ def t_console_launcher_links_are_mount_absolute():
 
 def t_takeover_status_needs_step_up_secret():
     # Producer-to-producer takeover is authorized by the shared step-up secret
-    # ALONE — producer B holds the league CONSOLE_SECRET, not a per-person
-    # commentator token. No secret -> 403 step-up (NEVER 401, which falsely
-    # implied a token problem); the SECRET with NO token -> 200 + a REDACTED body.
+    # alone, because producer B holds the league CONSOLE_SECRET rather than a
+    # per-person token. No secret is 403, never 401, which would point at the
+    # token instead. The secret with no token returns a redacted body.
     srv = _serve(); port = srv.server_address[1]
     try:
         code, _ = _get(port, "/console/takeover/status")                          # no auth at all
@@ -550,7 +549,7 @@ def _ws_echo_stub():
                         break
                     conn.sendall(b)
             except OSError:
-                pass  # client disconnected — normal echo-stub teardown
+                pass  # the client disconnected, which is normal teardown
             conn.close()
     threading.Thread(target=serve, daemon=True).start()
     return srv
@@ -656,8 +655,7 @@ def t_console_buttons_wrapper_page_director_only():
 
 def t_console_logo_served_any_auth():
     import tempfile
-    # Write a tiny valid PNG (8-byte signature + minimal IHDR would be complex; just
-    # use the minimal bytes that pass os.path.splitext extension check).
+    # The minimal bytes that pass the signature and extension checks.
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as fh:
         fh.write(b"\x89PNG\r\n\x1a\n" + b"\x00" * 20)
         logo_path = fh.name
@@ -689,7 +687,7 @@ def t_console_logo_404_when_unset():
         srv.shutdown()
 
 
-# ---------- helpers for OAuth endpoint tests ----------
+# Helpers for the OAuth endpoint tests.
 
 class _CrewWithDiscord(_Crew):
     """Extends _Crew with a discord_map() that returns a fixed handle->name mapping."""
@@ -731,8 +729,8 @@ _NO_REDIRECT_OPENER = urllib.request.build_opener(_NoRedirect)
 
 
 def _get_with_headers(port, path, extra_headers=None):
-    """Like _get but supports arbitrary request headers; no auth token.
-    Does NOT follow redirects — the 302 Location is returned as-is."""
+    """Like _get but supports arbitrary request headers and sends no auth token.
+    It does not follow redirects, so the 302 Location is returned as-is."""
     url = f"http://127.0.0.1:{port}{path}"
     req = urllib.request.Request(url)
     for k, v in (extra_headers or {}).items():
@@ -744,7 +742,7 @@ def _get_with_headers(port, path, extra_headers=None):
         return e.code, dict(e.headers), e.read()
 
 
-# ---------- OAuth endpoint tests ----------
+# OAuth endpoint tests.
 
 def t_console_login_redirects_when_oauth_configured():
     srv = _serve_oauth(); port = srv.server_address[1]
@@ -962,10 +960,9 @@ def t_console_status_keeps_sheet_id_and_feed_urls_for_director():
         code, body = _get(port, "/console/status", _tok("bob"))     # director
         assert code == 200, (code, body)
         d = json.loads(body)
-        # #493: feed stream URLs are KEPT for director/producer over the Funnel — the same
-        # boundary as /schedule/data (which already gives directors per-stint URLs); they
-        # power the Director-Panel Preview button. Stripped for every other role (see the
-        # commentator test above). redact_console_status is unit-tested in test_pov.py.
+        # Feed stream URLs are kept for director and producer over the Funnel, the
+        # same boundary as /schedule/data, because they power the Director-Panel
+        # Preview button. Every other role has them stripped. (#493)
         assert d["feeds"]["A"]["channel"] == "https://www.youtube.com/watch?v=stint1", d
         assert d["league"]["sheet_id"] == "SHEET-XYZ", d  # director keeps sheet id
     finally:
@@ -985,8 +982,8 @@ def t_console_schedule_data_is_director_only():
 
 
 def t_tailnet_status_is_unredacted():
-    # The plain tailnet /status (never through the /console gate) keeps the full
-    # payload incl. feed stream URLs — the tailnet is the trust boundary.
+    # The plain tailnet /status never passes the /console gate and keeps the full
+    # payload including feed stream URLs, because the tailnet is the boundary.
     srv = _serve(sheet_id="SHEET-XYZ"); port = srv.server_address[1]
     try:
         code, body = _get(port, "/status")                # no /console, no token
@@ -1001,7 +998,7 @@ def t_tailnet_status_is_unredacted():
 def t_console_health_monitor_page_any_authenticated():
     srv = _serve(); port = srv.server_address[1]
     try:
-        # alice=commentator, bob=director, dave=race_control — all may view.
+        # alice is a commentator, bob a director and dave race_control; all may view.
         for who in ("alice", "bob", "dave"):
             code, body = _get(port, "/console/health-monitor", _tok(who))
             assert code == 200, (who, code)
@@ -1034,7 +1031,7 @@ def t_takeover_health_requires_step_up_secret():
         code, body = _get(port, "/console/takeover/health", _tok("carol"),
                           headers={"X-Console-Secret": SECRET})
         assert code == 200, (code, body)
-        # JSON-Lines body (possibly empty) — every non-empty line parses.
+        # A possibly empty JSON-Lines body in which every non-empty line parses.
         for line in body.splitlines():
             if line.strip():
                 json.loads(line)
@@ -1055,10 +1052,10 @@ def t_health_monitor_assets_served():
 
 
 def t_console_obs_split_audio_resolves_on_air_feed():
-    # #534: SPLIT audio must resolve the ACTUAL on-air feed server-side — the
-    # Suzuka bug hardcoded "unmute A / mute B", muting the live commentator
-    # whenever B was on air. Force live_feed() -> "B" and assert B gets
-    # unmuted while A + the Discord bus get muted.
+    # SPLIT audio must resolve the actual on-air feed server-side; a hardcoded
+    # "unmute A, mute B" silences the live commentator whenever B is on air.
+    # Force live_feed() to "B" and assert B is unmuted while A and the Discord
+    # bus are muted. (#534)
     srv = _serve(); port = srv.server_address[1]
     calls = []
 
@@ -1084,9 +1081,9 @@ def t_console_obs_split_audio_resolves_on_air_feed():
 
 
 def t_obs_split_audio_get_route_for_companion():
-    # #534: the Companion "Split Scene" button hits the tailnet-root GET route
-    # (ungated, no token — like /obs/flag). Same handler, so B on air -> B
-    # unmuted, A + Discord muted.
+    # The Companion "Split Scene" button hits the ungated tailnet-root GET route,
+    # like /obs/flag. Same handler, so with B on air B is unmuted and A and
+    # Discord are muted. (#534)
     srv = _serve(); port = srv.server_address[1]
     calls = []
 
@@ -1113,7 +1110,8 @@ def t_obs_split_audio_get_route_for_companion():
 
 class _SplitFakeObs:
     """Records the per-verb calls /obs/split makes. Swapped in for the real
-    obs_ws module: this Mac runs a real OBS on 4455 that a test must not drive."""
+    obs_ws module, because a developer machine may run a real OBS on 4455 that a
+    test must not drive."""
 
     def __init__(self):
         self.calls = []
@@ -1153,7 +1151,7 @@ def _assert_split_b_on_air(code, body, calls):
 
 
 def t_console_obs_split_resolves_on_air_feed():
-    # #591: the director panel's SPLIT goes through /console, director-gated.
+    # The director panel's SPLIT goes through /console and is director-gated. (#591)
     _assert_split_b_on_air(*_split_with_b_on_air(
         lambda port: _post(port, "/console/obs/split", _tok("bob"))))
 
@@ -1165,7 +1163,7 @@ def t_console_obs_split_forbidden_for_commentator():
 
 
 def t_obs_split_get_route_for_companion():
-    # #591: the Companion SPLIT button hits the tailnet-root GET route (no token).
+    # The Companion SPLIT button hits the tailnet-root GET route with no token. (#591)
     _assert_split_b_on_air(*_split_with_b_on_air(lambda port: _get(port, "/obs/split")))
 
 

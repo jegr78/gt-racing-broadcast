@@ -205,12 +205,12 @@ def t_chatstore_reload_corrupt_keeps_current_buffer():
         assert cs.data()["messages"][0]["text"] == "live"   # buffer untouched
 
 
-# ---------- endpoint routing (real server, ephemeral port) ----------
+# Endpoint routing, against a real server on an ephemeral port.
 
 def _chat_client(chat_store, setup_ctl=None):
-    """Stand up make_handler over a real ThreadingHTTPServer (127.0.0.1, ephemeral port).
-    Returns (server, get, post) — caller must call srv.shutdown() in a finally block.
-    Mirrors the fixture pattern from tests/test_setup.py exactly.
+    """Stand up make_handler over a real ThreadingHTTPServer on 127.0.0.1 and an
+    ephemeral port. Returns (server, get, post); the caller must call
+    srv.shutdown() in a finally block.
     """
     import json as _json
     import threading as _t
@@ -312,7 +312,6 @@ def t_chat_endpoint_reload_adopts_external_write():
     with tempfile.TemporaryDirectory() as d:
         path = os.path.join(d, "chat.json")
         cs = m.ChatStore(path)
-        # Seed an initial message via the store.
         cs.add(user="Old", text="old message", now=1.0)
 
         srv, get, post = _chat_client(cs)
@@ -335,13 +334,12 @@ def t_chat_endpoint_reload_adopts_external_write():
 
 
 def t_chat_endpoint_send_works_without_setup_ctl():
-    """POST /chat/send works even when make_handler is built with setup_ctl=None.
-    Critical regression guard: the chat POST branch must sit ABOVE the
-    'if not setup_ctl' guard in do_POST.
+    """POST /chat/send works even when make_handler is built with setup_ctl=None,
+    which holds only while the chat POST branch sits above the 'if not setup_ctl'
+    guard in do_POST.
     """
     with tempfile.TemporaryDirectory() as d:
         cs = m.ChatStore(os.path.join(d, "chat.json"))
-        # Explicitly pass setup_ctl=None — this is the regression scenario.
         srv, get, post = _chat_client(cs, setup_ctl=None)
         try:
             r = post("/chat/send", {"user": "Crew", "text": "no setup ctl"})
@@ -359,14 +357,12 @@ def t_chat_endpoint_no_destructive_clear():
         cs = m.ChatStore(os.path.join(d, "chat.json"))
         srv, get, post = _chat_client(cs)
         try:
-            # Seed a message.
             post("/chat/send", {"user": "A", "text": "should survive"})
 
             # GET /chat/clear: must 404, not clear.
             r = get("/chat/clear")
             assert "error" in r, r
 
-            # Messages must still be there.
             d_resp = get("/chat/data")
             assert len(d_resp["messages"]) == 1
             assert d_resp["messages"][0]["text"] == "should survive"

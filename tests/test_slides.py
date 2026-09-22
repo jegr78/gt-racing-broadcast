@@ -19,7 +19,7 @@ fr = _load(os.path.join("tools", "fetch-reveal.py"), "fetch_reveal")
 
 def t_reveal_subset_maps_dist_and_plugins():
     sub = fr.reveal_subset("reveal.js-5.2.1/")
-    # every wanted file is mapped, rebased under vendor/reveal/
+    # Every wanted file is mapped, rebased under vendor/reveal/.
     assert sub["reveal.js-5.2.1/dist/reveal.js"] == "dist/reveal.js"
     assert sub["reveal.js-5.2.1/dist/reveal.css"] == "dist/reveal.css"
     assert sub["reveal.js-5.2.1/plugin/markdown/markdown.js"] == "plugin/markdown/markdown.js"
@@ -68,7 +68,7 @@ def t_harness_embeds_source_and_pinned_libs_and_seed():
     assert "flowchart LR" in html
     assert bd.MERMAID_TO_EXCALIDRAW in html
     assert bd.EXCALIDRAW in html
-    # deterministic seed pinning must be present so regenerated SVGs are stable
+    # The pinned seed is what keeps a regenerated SVG stable.
     assert "seed" in html and str(bd.SEED) in html
 
 
@@ -103,7 +103,7 @@ _DECK_ROLES = {
 
 
 def _decks():
-    # the role decks + the landing page, for wiki-link and asset scans
+    # The role decks plus the landing page, for the wiki-link and asset scans.
     return [os.path.join(SLIDES, f) for f in (*_DECK_ROLES, "index.html")]
 
 
@@ -134,12 +134,12 @@ def t_landing_links_every_deck():
 
 
 def t_cheatsheet_present_and_linked():
-    # the role cheat sheet lives in ONE place — the published Pages root
-    # (src/docs/slides); the landing page links it, and the Control Center Help
-    # page points here instead of serving a local copy.
+    # The cheat sheet lives only in the published Pages root, src/docs/slides.
+    # The landing page links it and the Control Center Help page points here
+    # rather than serving a local copy.
     assert os.path.isfile(os.path.join(SLIDES, "cheat_sheets.html")), \
         "missing slides/cheat_sheets.html"
-    # the old duplicate source must be gone (single source of truth)
+    # The old duplicate source must be gone.
     assert not os.path.isfile(os.path.join(ROOT, "src", "docs", "cheat_sheets.html")), \
         "src/docs/cheat_sheets.html should be removed — the slides copy is canonical"
     with open(os.path.join(SLIDES, "index.html"), encoding="utf-8") as fh:
@@ -206,8 +206,8 @@ def t_overflow_findings_flags_content_and_media():
 def t_reveal_decks_only_returns_reveal_pages():
     import tempfile
     with tempfile.TemporaryDirectory() as d:
-        # two real decks (carry the Reveal root), two non-deck pages that would
-        # otherwise hang wait_for_function('Reveal.isReady()').
+        # Two real decks carrying the Reveal root, and two non-deck pages that
+        # would otherwise hang wait_for_function('Reveal.isReady()').
         with open(os.path.join(d, "director.html"), "w") as fh:
             fh.write('<!doctype html><div class="reveal"><div class="slides"></div></div>')
         with open(os.path.join(d, "commentator.html"), "w") as fh:

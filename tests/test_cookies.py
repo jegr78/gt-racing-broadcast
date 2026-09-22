@@ -35,7 +35,7 @@ def t_hint_default_is_generic():
 
 def t_relay_cookie_hint_delegates_to_get_cookies():
     # The relay's export_cookies() reuses failure_hint from the sibling
-    # get-cookies.py — same hints in both flows, one source of truth.
+    # get-cookies.py, so both flows give the same hints.
     rspec = importlib.util.spec_from_file_location(
         "racecast_feeds", os.path.join(ROOT, "src", "relay", "racecast-feeds.py"))
     relay = importlib.util.module_from_spec(rspec); rspec.loader.exec_module(relay)
@@ -102,9 +102,9 @@ def t_get_cookies_keeps_only_youtube_domains():
         assert _cookie_names(os.path.join(d, "yt-cookies.txt")) == ["SAPISID"]
         # The raw export went to a private dir, never onto the jar the relay reads.
         assert os.path.dirname(fake.cookies_arg()) != d, fake.cookies_arg()
-        # The jar plus its export stamp, and no leftover raw-export directory. The
-        # failed-export checks below still expect the jar alone: only a successful
-        # export stamps.
+        # The jar plus its export stamp, and no leftover raw-export directory.
+        # Only a successful export stamps, so the failed-export checks below
+        # expect the jar alone.
         assert sorted(os.listdir(d)) == ["yt-cookies.txt",
                                          "yt-cookies.txt.exported"], os.listdir(d)
         assert "dropped 3 other lines" in said and "logged-in session detected" in said, said

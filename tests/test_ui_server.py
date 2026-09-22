@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Stdlib checks for the Control Center HTTP server (real server on an
-ephemeral port — no fixed ports, CI-safe). Run: python3 tests/test_ui_server.py"""
+"""Stdlib checks for the Control Center HTTP server, run against a real server on
+an ephemeral port so CI needs no fixed port.
+Run: python3 tests/test_ui_server.py"""
 import json, os, re, sys, tempfile, threading, time, urllib.error, urllib.parse, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -11,7 +12,7 @@ import ui_jobs
 import ui_server as us
 
 
-# ---------- pure helpers ----------
+# Pure helpers.
 
 def t_ui_port_default_and_override():
     assert us.ui_port({}) == 8089
@@ -32,7 +33,7 @@ def t_sse_frames():
     assert us.sse_done(3) == b"event: done\ndata: 3\n\n"
 
 
-# ---------- live server ----------
+# The live server.
 
 def _export_stub(name, assets):
     fd, p = tempfile.mkstemp(suffix=".zip")
@@ -248,13 +249,12 @@ _real_urlopen = urllib.request.urlopen
 
 
 def _urlopen(url_or_req, timeout=5, _tries=4):
-    """urlopen with a short retry on transient connection-abort errors. These
-    tests drive a real ThreadingHTTPServer, and Windows CI occasionally aborts the
-    client socket mid-handshake (ConnectionAbortedError / WinError 10053) — a
-    non-deterministic network flake, not a server bug (the relay treats the same
-    error as benign, issue #25). HTTPError (a real HTTP response) and any
-    non-transient error propagate immediately; the final attempt re-raises the
-    real exception rather than a sentinel, so there is no `raise None` path."""
+    """urlopen with a short retry on transient connection-abort errors. These tests
+    drive a real ThreadingHTTPServer and Windows CI occasionally aborts the client
+    socket mid-handshake with ConnectionAbortedError, which the relay also treats as
+    benign (#25). An HTTPError is a real response and any non-transient error
+    propagates at once; the final attempt re-raises the real exception rather than a
+    sentinel, so there is no `raise None` path."""
     for attempt in range(_tries):
         try:
             return _real_urlopen(url_or_req, timeout=timeout)
@@ -526,7 +526,7 @@ def t_job_stream_delivers_lines_then_done():
         raw = b""
         deadline = time.time() + 10
         while b"event: done\ndata: 0\n\n" not in raw and time.time() < deadline:
-            raw += req.read(1)                  # tiny reads — no buffering surprises
+            raw += req.read(1)                  # tiny reads, no buffering surprises
         req.close()
         assert b"data: hi from job\n\n" in raw
         assert b"event: done\ndata: 0\n\n" in raw
@@ -545,7 +545,7 @@ def t_job_stream_unknown_id_is_404():
 
 def _ctx_with_sources(tmp):
     """A ctx whose 'relay' log source points at tmp/logs, mirroring the
-    {files, dir, archives, read} shape of racecast._log_sources() — kept
+    {files, dir, archives, read} shape of racecast._log_sources(). Kept
     self-contained so this server test does not depend on racecast.py."""
     import re as _re
     d = os.path.join(tmp, "logs")
@@ -620,10 +620,10 @@ def t_log_file_rejects_traversal():
 
 
 def t_log_stream_tails_appended_lines_via_reopen():
-    """The live log SSE stream seeds with history and then delivers lines
-    appended after the client connected — exercising the re-open-per-poll
-    follow() (logsetup.read_new_lines), which never holds the file open and so
-    cannot block the relay's midnight rotation/rename on Windows."""
+    """The live log SSE stream seeds with history and then delivers lines appended
+    after the client connected, which exercises the re-open-per-poll follow()
+    (logsetup.read_new_lines). That never holds the file open, so it cannot block
+    the relay's midnight rotation on Windows."""
     tmp = tempfile.mkdtemp()
     d = os.path.join(tmp, "logs")
     os.makedirs(d)
@@ -637,7 +637,7 @@ def t_log_stream_tails_appended_lines_via_reopen():
         raw = b""
         deadline = time.time() + 10
         while b"seeded line one" not in raw and time.time() < deadline:
-            raw += req.read(1)                  # tiny reads — no buffering surprises
+            raw += req.read(1)                  # tiny reads, no buffering surprises
         assert b"seeded line one" in raw, raw
         # Append after the client is connected; the re-open poll must pick it up.
         with open(logf, "a", encoding="utf-8") as fh:
@@ -662,9 +662,8 @@ def t_root_serves_the_page():
 
 
 def t_page_survives_its_bundled_file_being_deleted():
-    # The 14-day-uptime failure: a frozen build unpacks the page into the OS
-    # temp dir, the OS reaps that dir under the running process, and every
-    # request answered "page not bundled". Serving from memory fixes it.
+    # A frozen build unpacks the page into the OS temp dir, and the OS can reap that
+    # dir under the running process. Serving from memory survives it.
     import shutil as _shutil
     tmp = tempfile.mkdtemp()
     page = os.path.join(tmp, "control-center.html")
@@ -685,7 +684,7 @@ def t_page_survives_its_bundled_file_being_deleted():
 
 
 def t_missing_page_reports_how_to_recover():
-    # Never read, never on disk: the operator must learn that a restart helps.
+    # Never read and never on disk, so the message must say that a restart helps.
     ctx = _ctx()
     ctx["page_path"] = os.path.join(tempfile.gettempdir(), "racecast-no-such.html")
     httpd, port = _serve(ctx)
@@ -698,9 +697,9 @@ def t_missing_page_reports_how_to_recover():
 
 
 def t_apps_view_hides_tailscale_gui_buttons_on_linux():
-    # Linux Tailscale has no GUI app — the apps view must drop the GUI-only
-    # Start/Stop there (via appActions, gated on lastStatus.os) and render via
-    # appActions, not the raw APP_ACTION map. Guards the misleading-launch fix.
+    # Linux Tailscale has no GUI app, so the apps view drops the GUI-only Start and
+    # Stop there through appActions, gated on lastStatus.os, and renders through
+    # appActions rather than the raw APP_ACTION map.
     httpd, port = _serve(_ctx())
     try:
         code, body = _get(port, "/")
@@ -709,15 +708,15 @@ def t_apps_view_hides_tailscale_gui_buttons_on_linux():
         assert "function appActions(" in text
         assert "guiApp" in text                       # Start/Stop tagged GUI-only
         assert "appActions(x.name)" in text           # render path uses the filter
-        # the filter keys off the OS the status payload now reports
+        # The filter keys off the OS the status payload reports.
         assert "lastStatus.os" in text
     finally:
         httpd.shutdown()
 
 
 def t_overlay_view_has_slot_picker():
-    # Regression for #140: a "jump to slot" dropdown wired to the editor selection,
-    # populated from the page's slot list, so operators don't hunt on the canvas.
+    # A "jump to slot" dropdown wired to the editor selection and populated from the
+    # page's slot list, so an operator does not hunt on the canvas. (#140)
     httpd, port = _serve(_ctx())
     try:
         code, body = _get(port, "/")
@@ -730,18 +729,17 @@ def t_overlay_view_has_slot_picker():
 
 
 def t_load_profiles_refreshes_asset_gallery():
-    # Regression for #162: a profile switch / fresh import reloads the profile list
-    # (loadProfiles) but the graphics/media gallery + count badges were loaded once
-    # at startup and never again, so an imported league's assets — present on disk
-    # and correctly served by /api/assets/files — never showed in the Control Center.
-    # loadProfiles must re-pull the gallery, like it does the profile.env/overlay/Looks.
+    # A profile switch or fresh import reloads the profile list through
+    # loadProfiles, so loadProfiles must also re-pull the graphics and media gallery
+    # and its count badges. Loading those once at startup hides an imported league's
+    # assets even though /api/assets/files serves them. (#162)
     httpd, port = _serve(_ctx())
     try:
         code, body = _get(port, "/")
         assert code == 200
         text = body.decode("utf-8")
         start = text.index("function loadProfiles(")
-        # the function body ends at the next top-level `async function ` declaration
+        # The function body ends at the next top-level `async function`.
         end = text.index("\nasync function ", start)
         assert "fetchAssetFiles(" in text[start:end], \
             "loadProfiles must refresh the asset gallery so a profile switch/import updates it"
@@ -750,8 +748,8 @@ def t_load_profiles_refreshes_asset_gallery():
 
 
 def t_page_sets_csp_header():
-    # The served page carries a Content-Security-Policy (defense-in-depth for any
-    # future XSS; the page is fully self-contained so 'self' + inline is enough).
+    # The served page carries a Content-Security-Policy. The page is fully
+    # self-contained, so 'self' plus inline is enough.
     httpd, port = _serve(_ctx())
     try:
         with _urlopen(f"http://127.0.0.1:{port}/", timeout=5) as r:
@@ -953,8 +951,8 @@ def t_api_speedtest_route_provider_error_is_500():
 
 
 def t_favicon_served_as_svg():
-    # #57: the Control Center serves a real favicon (the racecast "rc" mark)
-    # instead of the old empty data: URI placeholder.
+    # The Control Center serves a real favicon, the racecast "rc" mark, rather than
+    # an empty data: URI. (#57)
     httpd, port = _serve(_ctx())
     try:
         req = urllib.request.Request(f"http://127.0.0.1:{port}/favicon.svg")
@@ -963,11 +961,9 @@ def t_favicon_served_as_svg():
             assert r.status == 200
             assert r.headers.get("Content-Type") == "image/svg+xml"
             assert body.startswith(b"<svg") and b">rc<" in body
-            # Guard the exact regression that a bytes-only check missed: an XML
-            # comment must not contain "--", or the browser silently drops the
-            # favicon as malformed. (stdlib XML parsers carry an XXE/entity
-            # surface and the project is stdlib-only, so check the invariant
-            # directly rather than parsing.)
+            # An XML comment must not contain "--", or the browser silently drops
+            # the favicon as malformed. Checked directly rather than by parsing,
+            # because stdlib XML parsers carry an XXE surface.
             for comment in re.findall(rb"<!--.*?-->", body, re.DOTALL):
                 assert b"--" not in comment[4:-3], "XML comment contains '--'"
     finally:
@@ -1030,12 +1026,10 @@ def t_asset_file_missing_is_404():
 
 
 def t_asset_file_root_resolved_live_per_request():
-    # Regression for #55: serving must resolve the runtime root the SAME way the
-    # listing (/api/assets/files) does — LIVE, per request — not from a dict
-    # snapshotted at Control Center startup. A stale snapshot let the gallery list
-    # files (live, correct) that serving then 404'd (stale): the Finder-launched
-    # App-Translocated .app and the runtime profile-switch both hit it. asset_roots
-    # is therefore a zero-arg callable; serving follows its CURRENT return.
+    # Serving must resolve the runtime root live per request, the same way the
+    # /api/assets/files listing does, not from a dict snapshotted at startup: a
+    # stale snapshot 404s files the gallery correctly lists. asset_roots is
+    # therefore a zero-arg callable and serving follows its current return. (#55)
     empty = tempfile.mkdtemp()
     real = tempfile.mkdtemp()
     with open(os.path.join(real, "Overlay.png"), "wb") as f:
@@ -1131,8 +1125,8 @@ def t_get_devices_returns_enumerated_list():
         data = json.loads(body)
         assert code == 200 and data["ok"] is True
         assert data["devices"] == [{"name": "Cam", "value": "v0"}]
-        # #307: the shape also carries a separate mic list (audio devices differ
-        # from the video capture/webcam list).
+        # The shape carries a separate mic list, because audio devices differ from
+        # the video capture list. (#307)
         assert data["mic"] == [{"name": "Mic", "value": "m0"}]
     finally:
         httpd.shutdown()
@@ -1343,7 +1337,7 @@ def t_console_status_route_wraps_provider():
         data = json.loads(body)
         assert code == 200 and data["has_secret"] is True
         assert data["links"][0]["name"] == "Alpha"
-        # both the public Funnel link and the internal (tailnet/loopback) link ride through
+        # Both the public Funnel link and the internal tailnet link ride through.
         assert data["links"][0]["funnel"] == "https://h/console?t=x"
         assert data["links"][0]["internal"] == "http://127.0.0.1:8088/console?t=x"
     finally:
@@ -1700,7 +1694,7 @@ def t_profile_import_accepts_raw_body():
         httpd.shutdown()
 
 
-# ---------- request_csrf_ok: localhost trust-boundary guard (#1) ----------
+# request_csrf_ok: the localhost trust-boundary guard.
 
 def t_csrf_same_origin_loopback_ok():
     assert us.request_csrf_ok({"Host": "127.0.0.1:8089"})
@@ -1712,13 +1706,13 @@ def t_csrf_same_origin_loopback_ok():
 
 
 def t_csrf_foreign_host_blocked():
-    # DNS-rebinding: the browser connected to 127.0.0.1 but sent the attacker's name
+    # DNS rebinding: the browser connected to 127.0.0.1 but sent the attacker's name.
     assert not us.request_csrf_ok({"Host": "evil.example.com:8089"})
     assert not us.request_csrf_ok({"Host": "attacker.com"})
 
 
 def t_csrf_cross_origin_blocked():
-    # classic CSRF: a foreign page POSTing to the localhost API carries its Origin
+    # Classic CSRF: a foreign page POSTing to the localhost API carries its Origin.
     assert not us.request_csrf_ok({"Host": "127.0.0.1:8089",
                                    "Origin": "http://evil.example.com"})
     assert not us.request_csrf_ok({"Host": "127.0.0.1:8089",
@@ -1728,7 +1722,7 @@ def t_csrf_cross_origin_blocked():
 
 
 def t_csrf_guard_blocks_foreign_host_on_real_server():
-    # integration: a forged Host header is refused with 403 by the live server
+    # A forged Host header is refused with 403 by the live server.
     import http.client
     httpd, port = _serve(_ctx())
     try:
@@ -1778,8 +1772,8 @@ def t_event_title_post_route_saves():
     try:
         code, body = _post_json(port, "/api/event-title", {"title": " Round 5 "})
         d = json.loads(body)
-        # the route forwards the raw value (proven by `seen`) and relays the
-        # provider result verbatim; the strip lives in the provider/stub, not the route
+        # The route forwards the raw value, as `seen` proves, and relays the provider
+        # result verbatim. The strip lives in the provider, not the route.
         assert code == 200 and d["ok"] and d["title"] == "Round 5"
         assert seen == [" Round 5 "]
     finally:
@@ -1915,10 +1909,9 @@ def t_report_generate_and_send_routes():
 
 
 def t_panel_link_has_no_obs_credential_fragment():
-    # The Director Panel is relay-mediated — it no longer reads OBS-WS credentials
-    # from the URL fragment. The Control Center must therefore NOT append an
-    # `#ip=…&port=…&pw=…` fragment to the /panel link (it only leaked the OBS
-    # password into the address bar / shared links and was never stripped).
+    # The Director Panel is relay-mediated and reads no OBS-WS credentials from the
+    # URL fragment, so the Control Center must not append an `#ip=…&port=…&pw=…`
+    # fragment to the /panel link: it leaks the OBS password into the address bar.
     with open(os.path.join(ROOT, "src", "ui", "control-center.html"),
               encoding="utf-8") as fh:                # cp1252 on Windows would choke
         page = fh.read()
@@ -1959,13 +1952,9 @@ def t_api_ps_discover_route():
 
 def t_api_ps_save_route():
     saved = {}
-    # NOTE: dict.setdefault(k, v) returns v (truthy here), so the brief's
-    # literal `saved.setdefault("ip", ip) or {"ok": True}` never falls through
-    # to the dict and returns the bare ip string instead -> the route's
-    # `result.get("ok")` then raises AttributeError uncaught, dropping the
-    # connection (RemoteDisconnected) instead of asserting. dict.update()
-    # returns None (falsy), so this recreates the intended record-then-{ok}
-    # behavior.
+    # dict.update() returns None, so the `or` falls through to the dict.
+    # dict.setdefault() would return the bare ip string instead, and the route's
+    # `result.get("ok")` would then raise an uncaught AttributeError.
     ctx = _ctx(ps_write=lambda ip: saved.update(ip=ip) or {"ok": True})
     httpd, port = _serve(ctx)
     try:
