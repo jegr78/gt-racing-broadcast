@@ -17,11 +17,11 @@ def t_build_command_shape():
     assert "ubuntu:24.04" in cmd
     assert cmd[-3] == "bash" and cmd[-2] == "-lc"
     script = cmd[-1]
-    # Runs install_tools.py DIRECTLY (not via `racecast install-tools`): racecast
-    # forces its own --runtime-dir (RUNTIME_DIR_ONESHOTS), which would override ours
-    # and drop the tools in the mounted repo instead of the isolated runtime dir.
+    # Runs install_tools.py directly rather than through `racecast install-tools`,
+    # because racecast forces its own --runtime-dir and would drop the tools in the
+    # mounted repo instead of the isolated runtime dir.
     assert "python3 src/scripts/install_tools.py --runtime-dir /tmp/rt" in script
-    assert "src/racecast.py" not in script    # not the wrapper — it overrides --runtime-dir
+    assert "src/racecast.py" not in script    # not the wrapper: it overrides --runtime-dir
     assert "/tmp/rt/bin" in script            # managed bin on PATH for the asserts
     # asserts every tool is actually runnable
     for probe in ("yt-dlp --version", "deno --version",
@@ -39,15 +39,15 @@ def t_build_command_honours_podman():
 
 
 def t_build_command_platform_flag():
-    # default: no --platform (host arch — e.g. arm64 on an Apple Silicon Mac)
+    # by default no --platform, so the host arch
     default = m.build_container_command("docker", "ubuntu:24.04", "/repo")
     assert not any(a.startswith("--platform") for a in default)
-    # --amd64 path: force linux/amd64, placed right after `run` (before --rm)
+    # --amd64 forces linux/amd64, placed right after `run` and before --rm
     amd64 = m.build_container_command("docker", "ubuntu:24.04", "/repo",
                                       platform="linux/amd64")
     assert amd64[:3] == ["docker", "run", "--platform=linux/amd64"]
     assert "--rm" in amd64 and "/repo:/repo" in amd64
-    # the in-container script is unchanged (arch is decided by the emulated image)
+    # the in-container script is unchanged; the emulated image decides the arch
     assert amd64[-3:] == default[-3:]
 
 

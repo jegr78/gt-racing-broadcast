@@ -10,7 +10,7 @@ spec = importlib.util.spec_from_file_location(
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 
 
-# --- _in_cgnat: Tailscale uses the 100.64.0.0/10 CGNAT range -----------------
+# _in_cgnat: Tailscale uses the 100.64.0.0/10 CGNAT range.
 def t_cgnat_typical_tailscale_ip():
     assert m._in_cgnat("100.64.10.20") is True
 
@@ -29,9 +29,9 @@ def t_cgnat_rejects_lan_and_garbage():
     assert m._in_cgnat("") is False
 
 
-# --- parse_tailscale_status: CGNAT IPv4 from `tailscale status --json`, -------
-# --- but ONLY while the backend is actually Running (a stopped node still -----
-# --- has its assigned IP, so `tailscale ip -4` alone reports false positives) -
+# parse_tailscale_status takes the CGNAT IPv4 from `tailscale status --json`, but
+# only while the backend is Running. A stopped node keeps its assigned IP, so
+# `tailscale ip -4` alone reports false positives.
 def _status_json(state, ips):
     return json.dumps({"BackendState": state, "Self": {"TailscaleIPs": ips}})
 
@@ -47,7 +47,7 @@ def t_status_running_skips_ipv6_before_ipv4():
 
 
 def t_status_stopped_is_none_even_with_ip():
-    # The regression: a disconnected node keeps its assigned tailnet IP.
+    # A disconnected node keeps its assigned tailnet IP.
     out = _status_json("Stopped", ["100.64.10.20"])
     assert m.parse_tailscale_status(out) is None
 
@@ -67,7 +67,7 @@ def t_status_garbage_is_none():
     assert m.parse_tailscale_status("[1, 2]") is None
 
 
-# --- resolve_bind_addresses: bind arg + detected ip -> ordered address list ---
+# resolve_bind_addresses: bind arg + detected ip -> ordered address list.
 def t_auto_with_tailscale_ip():
     assert m.resolve_bind_addresses("auto", "100.64.10.20") == ["127.0.0.1", "100.64.10.20"]
 
@@ -86,12 +86,11 @@ def t_explicit_address_wins_over_auto_detection():
     assert m.resolve_bind_addresses("0.0.0.0", None) == ["0.0.0.0"]
 
 
-# --- loopback_bind_failed: the loopback bind is MANDATORY when requested. ------
-# OBS always reaches the relay on 127.0.0.1, so a relay that bound only the
-# Tailscale IP (because a STALE relay already holds the loopback port) is a
-# silent split-brain: 127.0.0.1 keeps serving the old relay's pages (e.g.
-# "hud disabled"), while the new relay hides on the tailnet. Treat a failed
-# loopback bind as fatal even when other addresses bound (issue #84).
+# loopback_bind_failed: the loopback bind is mandatory when requested. OBS always
+# reaches the relay on 127.0.0.1, so a relay that bound only the Tailscale IP
+# because a stale relay holds the loopback port is a silent split-brain: 127.0.0.1
+# keeps serving the old relay's pages while the new relay hides on the tailnet. A
+# failed loopback bind is fatal even when other addresses bound. (#84)
 def t_loopback_failed_when_requested_but_not_bound():
     # auto+Tailscale wanted [127.0.0.1, ts]; only the Tailscale IP bound.
     assert m.loopback_bind_failed(["127.0.0.1", "100.64.10.20"],
@@ -105,8 +104,8 @@ def t_loopback_ok_when_loopback_bound():
 
 
 def t_loopback_not_requested_is_never_fatal():
-    # Explicit --bind 0.0.0.0 / a specific IP never asked for loopback, so a
-    # missing 127.0.0.1 is not this rule's concern (0.0.0.0 covers it anyway).
+    # Explicit --bind 0.0.0.0 or a specific IP never asked for loopback, so a
+    # missing 127.0.0.1 is not this rule's concern.
     assert m.loopback_bind_failed(["0.0.0.0"], ["0.0.0.0"]) is False
     assert m.loopback_bind_failed(["100.64.10.20"], ["100.64.10.20"]) is False
     assert m.loopback_bind_failed(["0.0.0.0"], []) is False
@@ -117,7 +116,7 @@ def t_loopback_localhost_alias_counts():
     assert m.loopback_bind_failed(["localhost"], ["localhost"]) is False
 
 
-# --- control_port_available: early bind probe for the mandatory loopback port ----
+# control_port_available: early bind probe for the mandatory loopback port.
 def t_control_port_available_true_when_free_false_when_taken():
     import socket
     # A port we bind and hold -> reported unavailable.
@@ -135,12 +134,11 @@ def t_control_port_available_true_when_free_false_when_taken():
 
 
 def t_control_port_probe_sets_reuseaddr_on_posix():
-    # POSIX: the probe MUST set SO_REUSEADDR so it agrees with the authoritative
-    # HTTPServer bind (which sets allow_reuse_address). Without it, a port merely in
-    # TIME_WAIT after a prior relay's control-port connections is falsely reported
-    # "in use", so the relay aborts a startup bind that would actually succeed — the
-    # event-start-after-heal race. Windows deliberately OMITS it (there SO_REUSEADDR
-    # would let a bind succeed against a LIVE listener and miss a running relay).
+    # POSIX: the probe must set SO_REUSEADDR so it agrees with the authoritative
+    # HTTPServer bind, which sets allow_reuse_address. Without it a port merely in
+    # TIME_WAIT is falsely reported "in use" and the relay aborts a startup bind that
+    # would succeed. Windows deliberately omits it, because there SO_REUSEADDR would
+    # let a bind succeed against a live listener and miss a running relay.
     import socket, sys
     if sys.platform.startswith("win"):
         return
@@ -162,7 +160,7 @@ def t_control_port_probe_sets_reuseaddr_on_posix():
 def t_main_probes_control_port_before_refresh_and_logs_league():
     import inspect
     src = inspect.getsource(m.main)
-    assert "control_port_available(" in src                       # the early probe exists
+    assert "control_port_available(" in src
     assert src.index("control_port_available(") < src.index("pov_source")  # before the first refresh
     assert '(args.league_name or "?")' in src                    # start line uses the injected name
 

@@ -83,7 +83,7 @@ def t_query_range_filters_and_orders():
 
 
 def t_schema_has_no_url_columns():
-    # Redaction by construction: a stream URL / sheet_id must never be storable.
+    # Redaction by construction: a stream URL or sheet_id must never be storable.
     cols = " ".join(hs.COLUMNS).lower()
     for forbidden in ("url", "channel", "sheet_id", "http"):
         assert forbidden not in cols, forbidden
@@ -97,7 +97,7 @@ def t_collapse_bands_merges_equal_and_splits_on_change():
 
 
 def t_collapse_bands_breaks_on_gap_even_if_equal():
-    # A long gap (relay down) must end the band, not bridge it.
+    # A long gap, meaning the relay was down, must end the band rather than bridge it.
     pts = [(0.0, "green"), (30.0, "green"), (1000.0, "green")]
     bands = hs.collapse_bands(pts, gap_s=95)
     assert len(bands) == 2
@@ -229,7 +229,7 @@ def t_migrate_v2_to_v3_is_lossless():
     import tempfile, os, sqlite3
     d = tempfile.mkdtemp()
     path = os.path.join(d, "h.db")
-    # Build a v2 table by hand (old column set + user_version=2), insert one row.
+    # Build a v2 table by hand, with the old column set and user_version=2, one row.
     c = sqlite3.connect(path)
     try:
         c.executescript(
@@ -378,7 +378,7 @@ def t_v5_migration_adds_sys_columns_losslessly():
     import sqlite3
     with tempfile.TemporaryDirectory() as d:
         path = os.path.join(d, "old.db")
-        # simulate a pre-v5 DB: create samples WITHOUT the sys_* columns, one row
+        # a pre-v5 DB: samples without the sys_* columns, one row
         conn = sqlite3.connect(path)
         conn.execute("CREATE TABLE samples (ts REAL NOT NULL, kind TEXT NOT NULL, "
                      "health_level TEXT)")
@@ -419,7 +419,7 @@ _URLS = [f"https://www.youtube.com/watch?v=stint{i}" for i in range(1, 3)]
 
 
 class _FakeSrc:
-    """Minimal schedule source for _make_relay — two stints, no live pulls."""
+    """Minimal schedule source for _make_relay: two stints, no live pulls."""
     def __init__(self, items): self.items = list(items)
     def get(self): return self.items
     def get_rows(self): return [(u, "", "", i + 1) for i, u in enumerate(self.items)]
@@ -527,17 +527,17 @@ def t_healthstore_wrapper_annotate_latest_event():
 def t_incident_recovery_duration():
     def s(ts, lvl):
         return {"ts": ts, "health_level": lvl, "health_reasons": ["off air"] if lvl == "red" else []}
-    # single-sample red between greens -> lasts until recovery (30s), not 0s
+    # single-sample red between greens -> lasts until recovery, 30s, not 0s
     inc = hs.derive_incidents([s(1000, "green"), s(1030, "red"), s(1060, "green")])
     assert len(inc) == 1
     assert inc[0]["ts"] == 1030 and inc[0]["end"] == 1060 and inc[0]["duration_s"] == 30
     # multi-sample red -> extends to the recovering sample
     inc = hs.derive_incidents([s(1000, "green"), s(1030, "red"), s(1060, "red"), s(1090, "green")])
     assert inc[0]["duration_s"] == 60 and inc[0]["end"] == 1090
-    # trailing red with no recovery -> extend by one interval (not 0)
+    # trailing red with no recovery -> extend by one interval, not 0
     inc = hs.derive_incidents([s(1000, "green"), s(1030, "red")])
     assert inc[0]["duration_s"] == hs.SAMPLE_INTERVAL_S and inc[0]["end"] == 1030 + hs.SAMPLE_INTERVAL_S
-    # never bridge a relay-down hole (> GAP_S) to the next band
+    # never bridge a relay-down hole longer than GAP_S to the next band
     inc = hs.derive_incidents([s(1000, "red"), s(1000 + hs.GAP_S + 100, "green")])
     assert inc[0]["duration_s"] == hs.SAMPLE_INTERVAL_S
 
@@ -546,7 +546,7 @@ def t_migrate_adds_desync_active_v6_lossless():
     import tempfile, os, sqlite3
     d = tempfile.mkdtemp()
     path = os.path.join(d, "h.db")
-    # A v5 DB by hand: full column set MINUS desync_active, user_version=5, one row.
+    # A v5 DB by hand: the full column set minus desync_active, user_version=5, one row.
     c = sqlite3.connect(path)
     try:
         c.executescript(
@@ -609,7 +609,7 @@ def t_migrate_adds_render_skip_rate_v7_lossless_and_charted():
         assert "obs_render_skip_rate_pct" in hs.NUMERIC_FIELDS   # a charted #488 drift series
     finally:
         conn.close()
-    # round-trip on a FRESH (full-schema) migrated DB
+    # round-trip on a fresh, full-schema migrated DB
     conn2 = hs.open_db(os.path.join(d, "fresh.db"))
     try:
         hs.migrate(conn2)
@@ -678,10 +678,9 @@ def t_migrate_adds_backlog_columns_v9_lossless_and_charted():
 
 
 def t_migrate_adds_av_columns_v11_lossless():
-    # #619: an event's A/V sync disturbances belong in the history, so the post-event
-    # report can say how often the chain was disturbed and how often nothing explained
-    # it. Additive like every migration before it: an existing v10 database keeps its
-    # rows and gains two NULL columns.
+    # An event's A/V sync disturbances belong in the history, so the post-event report
+    # can say how often the chain was disturbed and how often nothing explained it.
+    # Additive: an existing v10 database keeps its rows and gains two NULL columns. (#619)
     import sqlite3
     d = tempfile.mkdtemp()
     path = os.path.join(d, "h.db")
@@ -720,7 +719,7 @@ def t_migrate_adds_av_columns_v11_lossless():
 
 
 def t_migrate_adds_fps_target_column_v10_lossless():
-    # #586: the configured OBS frame rate, the reference the report judges obs_fps by.
+    # The configured OBS frame rate, the reference the report judges obs_fps by. (#586)
     import sqlite3
     d = tempfile.mkdtemp()
     path = os.path.join(d, "h.db")
@@ -754,7 +753,7 @@ def t_migrate_adds_fps_target_column_v10_lossless():
 
 
 def t_backlog_rule_is_shared_with_the_relay_definition():
-    # #586: the report's verdict and the relay's yellow reason apply one definition.
+    # The report's verdict and the relay's yellow reason apply one definition. (#586)
     assert hs.feed_backlog_degraded(8.0, 3.0, 5.0) is False     # exactly at the threshold
     assert hs.feed_backlog_degraded(8.1, 3.0, 5.0) is True
     assert hs.feed_backlog_degraded(None, 3.0, 5.0) is False

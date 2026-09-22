@@ -10,7 +10,7 @@ def t_osascript_argv_quotes_and_titles():
     assert argv[0] == "osascript"
     joined = " ".join(argv)
     assert "racecast Control Center" in joined
-    # double quotes are neutralised so the AppleScript string can't break out
+    # double quotes are neutralised so the AppleScript string cannot break out
     assert '"now"' not in joined
 
 
@@ -28,7 +28,7 @@ def t_notify_windows_calls_msgbox():
 
 
 def t_notify_linux_falls_back_to_stderr():
-    # no run/msgbox invoked on linux; message goes to stderr
+    # neither run nor msgbox is invoked on linux; the message goes to stderr
     ran = []
     nd.notify("boom", platform="linux", run=ran.append,
               msgbox=ran.append)

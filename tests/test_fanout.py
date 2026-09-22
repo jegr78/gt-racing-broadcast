@@ -15,7 +15,7 @@ def t_fanout_enabled_truthy_tokens():
 
 
 def t_fanout_enabled_default_on():
-    # Default ON (#358 live-verified 2026-06-29): absent or empty -> fan-out.
+    # Default ON (#358): absent or empty -> fan-out.
     assert m.fanout_enabled({}) is True
     assert m.fanout_enabled({"RACECAST_FEED_FANOUT": ""}) is True
 
@@ -36,8 +36,8 @@ def t_feed_stalled_none_is_not_stall():
 
 
 def t_feed_stalled_honours_configured_grace():
-    # The graduated grace: at 20 s default, an 8 s gap is NOT a stall (streamlink's
-    # retry gets time); a 21 s gap is.
+    # At the 20 s default an 8 s gap is not a stall, so streamlink's retry gets time;
+    # a 21 s gap is.
     g = m.feed_stall_s({})                       # 20.0
     assert m.feed_stalled(100.0, 100.0 + 8.0, stall_s=g) is False
     assert m.feed_stalled(100.0, 100.0 + g + 0.1, stall_s=g) is True
@@ -109,7 +109,6 @@ def _http_get_body(port, nbytes, deadline=2.0):
             break
         buf += chunk
     s.close()
-    # strip headers
     sep = buf.find(b"\r\n\r\n")
     return buf[sep + 4:] if sep >= 0 else buf
 
@@ -180,10 +179,10 @@ def t_fanout_eof_is_drop_when_not_stopped_or_advancing():
 
 
 def t_fanout_fast_eof_counts_as_dead_serve():
-    # A fan-out reader that returns near-instantly (403 / expired manifest) is a
-    # fast exit: feed_fast_exit_error produces an error string, and
-    # should_idle_dead_serves trips once DEAD_SERVE_IDLE_AFTER consecutive fast
-    # exits accumulate — same dead-serve path as direct-serve.
+    # A fan-out reader that returns near-instantly (403, expired manifest) is a fast
+    # exit: feed_fast_exit_error produces an error string, and should_idle_dead_serves
+    # trips once DEAD_SERVE_IDLE_AFTER consecutive fast exits accumulate, the same
+    # dead-serve path as direct-serve.
     err = m.feed_fast_exit_error(0.2, 1)
     assert err                                           # non-empty error string
     assert m.should_idle_dead_serves(m.DEAD_SERVE_IDLE_AFTER) is True
@@ -198,10 +197,8 @@ def t_fanout_watchdog_kill_condition_is_feed_stalled():
     fresh_ts = now - m.FANOUT_STALL_S + 0.1   # bytes arrived recently
     assert m.feed_stalled(stale_ts, now) is True    # watchdog WOULD kill
     assert m.feed_stalled(fresh_ts, now) is False   # watchdog would NOT kill
-    # NOTE: The closure's wiring (predicate → _kill_proc) lives inside
-    # Feed._serve_fanout and is not separately callable without a live streamlink
-    # subprocess.  Integration coverage is provided by the live-UAT
-    # (racecast-local-uat skill), not a unit test — that is the honest boundary.
+    # The closure's wiring lives inside Feed._serve_fanout and is not callable without
+    # a live streamlink subprocess; the live UAT covers it instead of a unit test.
 
 
 def t_env_float_defaults_and_guards():
@@ -228,8 +225,8 @@ def t_ring_headroom_is_16mb():
 
 
 def t_relay_fanout_flag_from_env(monkeypatch=None):
-    # fanout_enabled drives Relay.fanout; verified via the pure helper to avoid
-    # constructing a full Relay (which needs sources). This guards the wiring contract.
+    # fanout_enabled drives Relay.fanout; checked through the pure helper to avoid
+    # constructing a full Relay, which needs sources.
     assert m.fanout_enabled({"RACECAST_FEED_FANOUT": "1"}) is True
     assert m.FANOUT_RING_BYTES >= 1 << 20      # bounded, at least 1 MB
 
@@ -246,9 +243,8 @@ def t_snap_bytes_counts_skipped_on_overflow():
 
 
 def t_render_drift_action_path_is_gone():
-    # #582: the render-skip auto-resync never ran since #488 (freeze detection is the
-    # default and suppressed it). Deleted, not kept "in reserve": the rate stays a
-    # recorded diagnostic only.
+    # The render-skip auto-resync never ran once freeze detection became the default,
+    # so it is deleted; the rate stays a recorded diagnostic only. (#582)
     for name in ("render_drift_decision", "feed_autoresync_enabled",
                  "feed_autoresync_skip_rate", "feed_autoresync_cooldown_s",
                  "AUTORESYNC_DEBOUNCE_POLLS"):
@@ -257,9 +253,8 @@ def t_render_drift_action_path_is_gone():
 
 
 def t_consumer_health_aggregates_registry():
-    # consumer_health aggregates the per-connection registry deterministically
-    # (max send-block age + total snaps). White-box: the socket-timing path is the
-    # soak's job, not a flaky unit test — the honest boundary.
+    # consumer_health aggregates the per-connection registry: max send-block age plus
+    # total snaps. The socket-timing path is the soak's job, not a unit test.
     ring = m.FeedRing(1 << 20)
     srv = m.FeedFanoutServer("127.0.0.1", 0, ring, m.logging.getLogger("t"))
     assert srv.consumer_health(1000.0) == (None, 0)          # no consumer attached
@@ -284,11 +279,11 @@ def t_soak_stall_active_schedule():
     assert soak.soak_stall_active(5.0, period_s=0, duration_s=3) is False    # disabled
 
 
-# --- #488 cursor-progress freeze/stutter detector (pure decision core) ---
-# The OBS render-skip signal is blind to a source-demuxer freeze/stutter (measured live
-# 2026-07-15: renderSkip 0% / fps 60 while the picture is frozen). The reliable signal is
-# OBS's mediaCursor progress: healthy ~1.0x, frozen 0x, stutter = choppy with frequent
-# zero-progress ticks (its window AVERAGE is still ~1x, so we count STALL TICKS, not the mean).
+# The cursor-progress freeze/stutter detector (#488). The OBS render-skip signal is
+# blind to a source-demuxer freeze: it reads 0% skip at 60 fps while the picture is
+# frozen. The reliable signal is OBS's mediaCursor progress: healthy ~1.0x, frozen 0x,
+# stutter = choppy with frequent zero-progress ticks, whose window average is still
+# ~1x, so the detector counts stall ticks rather than the mean.
 
 def t_cursor_progress_ratio_basic():
     assert m.cursor_progress_ratio(1000, 2000, 1.0) == 1.0        # +1000ms/1s = 1.0x (healthy)
@@ -335,8 +330,8 @@ def t_consumer_overflowed_on_increase():
 
 
 def t_rebuild_guard_stands_down_after_three_ineffective_rebuilds():
-    # #582: the 2026-08-28 shape. Every rebuild is followed by a window that still
-    # stalls, so the third ineffective one stands the automation down.
+    # Every rebuild is followed by a window that still stalls, so the third ineffective
+    # one stands the automation down. (#582)
     g = m.RebuildGuard()
     assert m.REBUILD_GUARD_MAX_ATTEMPTS == 3
     for n in (1, 2):
@@ -402,7 +397,6 @@ def t_feed_freeze_tuning_getter_defaults():
     assert m.feed_freeze_window({}) == 10
     assert m.feed_freeze_interval_s({}) == 3.0
     assert m.feed_freeze_cooldown_s({}) == 60.0
-    # overrides
     assert m.feed_freeze_stall_ratio({"RACECAST_FEED_FREEZE_STALL_RATIO": "0.4"}) == 0.4
     assert m.feed_freeze_window({"RACECAST_FEED_FREEZE_WINDOW": "20"}) == 20
     # invalid / <=0 falls back to the default
@@ -574,7 +568,7 @@ def t_feed_stall_config():
     assert m.feed_stall_signal_enabled({"RACECAST_FEED_STALL_SIGNAL": "0"}) is False
 
 
-# --- #592: a local capture device as a feed (ffmpeg at the fan-out seam) ---
+# A local capture device as a feed, ffmpeg at the fan-out seam. (#592)
 
 def t_dshow_device_name_decodes_obs_id():
     # OBS win-dshow stores "<name>:<path>" with '#'->'#22' and ':'->'#3A' escaped in
@@ -621,7 +615,7 @@ def t_local_capture_cmd_is_mpegts_on_stdout_with_capped_bitrate():
 def t_local_bitrate_keeps_the_ring_window_well_above_the_trailing_mark():
     # The 16 MB ring's time window is set by the bitrate; the #533 trailing mark sits
     # 3 s behind live. The cap must leave the window several times that mark.
-    bps = (m.LOCAL_VIDEO_KBPS + m.LOCAL_AUDIO_KBPS) * 1000 * 1.15     # measured: 8160 kbps nominal -> 9.35 Mbps on the wire
+    bps = (m.LOCAL_VIDEO_KBPS + m.LOCAL_AUDIO_KBPS) * 1000 * 1.15     # 8160 kbps nominal -> 9.35 Mbps on the wire
     window_s = m.FANOUT_RING_BYTES * 8 / bps
     assert window_s >= 4 * m.DEFAULT_FEED_PREBUFFER_S, window_s
 
@@ -646,10 +640,10 @@ def t_local_capture_setup_reads_the_machine_env():
     assert cmd is None and "sunos5" in err
 
 
-# ---- game-audio default: the card's own audio device, found by name ----
+# Game-audio default: the card's own audio device, found by name.
 FIXTURES = os.path.join(HERE, "fixtures")
-# Verbatim `ffmpeg -list_devices true -f dshow -i dummy` from the Windows streaming PC
-# (ffmpeg 9.0.1, Elgato HD60 X + Facecam MK.2 attached).
+# Verbatim `ffmpeg -list_devices true -f dshow -i dummy` from a Windows host with an
+# Elgato HD60 X and a Facecam MK.2 attached.
 with open(os.path.join(FIXTURES, "dshow-list-devices-hd60x.txt"), encoding="utf-8") as _fh:
     DSHOW_HD60X = _fh.read()
 HD60X_OBS_ID = ("Elgato HD60 X:\\\\?\\usb#22vid_0fd9&pid_008a&mi_00#226&2fc6a5e4&0&0000"
@@ -705,7 +699,7 @@ def t_local_capture_setup_uses_the_detected_audio():
 
 
 def t_parse_avfoundation_audio_devices():
-    # verbatim `ffmpeg -f avfoundation -list_devices true -i ""` (ffmpeg 9.0.1, macOS)
+    # verbatim `ffmpeg -f avfoundation -list_devices true -i ""` on macOS
     text = ("[AVFoundation indev @ 0xcbf01c140] AVFoundation video devices:\n"
             "[AVFoundation indev @ 0xcbf01c140] [0] FaceTime HD Camera\n"
             "[AVFoundation indev @ 0xcbf01c140] [4] Capture screen 0\n"
@@ -726,11 +720,10 @@ def t_parse_ffmpeg_sources():
         ("alsa_input.pci-0000_00_1f.3.analog-stereo", "Built-in Audio Analog Stereo")]
 
 
-# --- fMP4/CMAF joins on the OBS serve (#577) ---------------------------------
-# #576 fixed the program-audio tap; the OBS serve had the same gap. With fan-out
-# on, OBS disconnects off-air (close_when_inactive) and rejoins mid-stream at
-# every activation — on an fMP4 feed that join lands inside an mdat with no
-# codec parameters, and ffmpeg refuses to open it.
+# fMP4/CMAF joins on the OBS serve (#577). With fan-out on, OBS disconnects off-air
+# under close_when_inactive and rejoins mid-stream at every activation. On an fMP4
+# feed that join lands inside an mdat with no codec parameters, and ffmpeg refuses
+# to open it.
 
 def _box(typ, payload=b""):
     return (8 + len(payload)).to_bytes(4, "big") + typ + payload
@@ -798,8 +791,8 @@ def _serve_mid_stream_join(before, after):
 
 
 def t_fanout_server_prepends_init_and_aligns_an_fmp4_join():
-    """A mid-mdat join must reach OBS as ftyp+moov followed by the next moof —
-    never the raw bytes at the join cursor."""
+    """A mid-mdat join must reach OBS as ftyp+moov followed by the next moof, never
+    the raw bytes at the join cursor."""
     frag1 = _fragment(b"\x33" * 400)
     frag2 = _fragment(b"\x44" * 400)
     head, got = _serve_mid_stream_join(_INIT + frag1[:100], frag1[100:] + frag2)
@@ -829,7 +822,7 @@ def t_fanout_server_leaves_an_mpeg_ts_join_untouched():
         srv.stop()
 
 
-# --- tools/fanout-rejoin-probe.py pure helpers (#577) -------------------------
+# tools/fanout-rejoin-probe.py pure helpers (#577).
 
 def _rejoin_probe():
     import importlib.util as _il
@@ -848,8 +841,7 @@ def t_rejoin_probe_container_of():
 
 
 def t_rejoin_probe_verdict_needs_state_cursor_and_luma():
-    """A picture needs all three: playing, an advancing cursor and a non-black
-    frame. The pre-#607 relay measured ENDED / no cursor / no frame on fMP4."""
+    """A picture needs all three: playing, an advancing cursor and a non-black frame."""
     rp = _rejoin_probe()
     assert rp.rejoin_verdict("OBS_MEDIA_STATE_PLAYING", 1002, 63.0, 16.0) == "PICTURE"
     v = rp.rejoin_verdict("OBS_MEDIA_STATE_ENDED", None, None, 16.0)
@@ -874,11 +866,10 @@ def t_rejoin_probe_stop_process_reaps_the_child():
     assert proc.returncode is not None
 
 
-# --- #583 fan-out consumer backlog behind the live edge (observability only) ---
-# 2026-08-28: OBS drained the ring ~20% slower than it filled and the relay could not
-# see it. The relay reads everything up to the trailing mark and then blocks in
-# sendall, so the cursor right after a read always sits ~prebuffer_s behind live;
-# the backlog is the age of the next byte OBS has NOT yet accepted.
+# Fan-out consumer backlog behind the live edge (#583). The relay reads everything up
+# to the trailing mark and then blocks in sendall, so the cursor right after a read
+# always sits ~prebuffer_s behind live; the backlog is the age of the next byte OBS
+# has not yet accepted.
 
 def _ring_1s(n=10):
     """100 bytes/s, one write (and one mark) per second: marks (100,0) .. (1000,9)."""
@@ -1009,7 +1000,6 @@ def t_fanout_serve_records_the_accepted_position_not_the_read_end():
     # the cursor right after a read always sits prebuffer_s behind live, however slow the
     # consumer is. While a chunk is being sent, the recorded position must still be the
     # START of that chunk: only then does a slow consumer's backlog grow in the numbers.
-    # Deterministic: the fake consumer inspects the registry from inside sendall.
     r = m.FeedRing(1_000_000)
     r.write(b"x" * 1000, now=time.monotonic() - 5.0)
     srv = m.FeedFanoutServer("127.0.0.1", 0, r, m.logging.getLogger("t"), prebuffer_s=0.0)
@@ -1067,7 +1057,7 @@ def _srv_with(consumers):
 def t_an_abandoned_consumer_is_the_one_superseded_and_not_moving():
     # Windows OBS keeps the old connection after an input rebuild, so max() over all
     # consumers reported a dead socket's backlog forever. Superseded alone must not
-    # condemn one — this port serves several at once.
+    # condemn one, because this port serves several at once.
     old, new = _FakeConn("old"), _FakeConn("new")
     srv = _srv_with({1: {"cursor": 100, "conn": old, "cycle_ts": 999.0, "snaps": 0},
                      2: {"cursor": 500, "conn": new, "cycle_ts": 999.0, "snaps": 0}})
@@ -1143,8 +1133,7 @@ def t_a_stale_consumer_never_becomes_the_reported_backlog():
 
 def t_a_long_run_of_effective_sheds_never_stands_the_automation_down():
     """An overloaded host is not a production machine, so the remedy must not be the
-    thing that gives up on it. Measured on jegr-linux-cachyos: nine effective sheds in
-    eleven minutes, one every 75 s. Only INEFFECTIVE rebuilds spend the budget."""
+    thing that gives up on it. Only ineffective rebuilds spend the budget."""
     g = m.RebuildGuard()
     for _ in range(50):
         g.on_fire("backlog")
@@ -1163,10 +1152,9 @@ def t_a_long_run_of_effective_sheds_never_stands_the_automation_down():
 
 
 def t_windows_needs_close_to_wake_a_blocked_handler_posix_does_not():
-    # Measured 2026-09-21, same script both hosts: a handler blocked in sendall wakes
-    # on shutdown() alone on macOS (BrokenPipeError) but NOT on Windows, where it takes
-    # close() (WinError 10038). So the reaper closes only where shutdown is not enough;
-    # on POSIX the descriptor stays the handler's alone.
+    # A handler blocked in sendall wakes on shutdown() alone on macOS but not on
+    # Windows, where it takes close(). So the reaper closes only where shutdown is not
+    # enough; on POSIX the descriptor stays the handler's alone.
     srv = _srv_with({1: {"cursor": 7, "conn": _FakeConn("dead"), "cycle_ts": 0.0,
                          "snaps": 0}})
     srv.mark_superseded(now=0.0)
@@ -1209,8 +1197,8 @@ def t_reaping_never_raises_on_a_socket_the_peer_abandoned():
 def t_a_backlog_stand_down_leaves_the_freeze_remedy_armed():
     # Both reasons pull one control, but they must not share one budget: three ineffective
     # backlog sheds used to set a single stood_down flag, which also gated the freeze
-    # rebuild — so a backlog nobody could fix silently disabled the stutter remedy for the
-    # rest of the stint.
+    # rebuild, so a backlog nobody could fix silently disabled the stutter remedy for
+    # the rest of the stint.
     g = m.RebuildGuard()
     for _ in range(m.REBUILD_GUARD_MAX_ATTEMPTS):
         g.on_fire("backlog")
@@ -1225,8 +1213,8 @@ def t_a_backlog_stand_down_leaves_the_freeze_remedy_armed():
 
 
 def t_backlog_shed_decision_needs_a_streak_and_respects_the_cooldown():
-    # The automatic backlog shed (2026-09-21). Mirrors freeze_decision's shape so the
-    # two reasons that pull the same control read the same way.
+    # The automatic backlog shed mirrors freeze_decision's shape, so the two reasons
+    # that pull the same control read the same way.
     assert m.backlog_shed_decision(1, None, min_streak=1, cooldown_s=120.0) is True
     assert m.backlog_shed_decision(0, None, min_streak=1, cooldown_s=120.0) is False
     # a streak below the minimum waits
@@ -1270,8 +1258,7 @@ def t_backlog_judge_ignores_an_unmeasurable_round():
 
 
 def t_backlog_shed_stands_down_after_three_ineffective_rebuilds():
-    # Same budget as the freeze path, and the epic's requirement: three attempts, then
-    # stand down and say so, instead of Catalunya's 26 black dropouts.
+    # Same budget as the freeze path: three attempts, then stand down and say so.
     g = m.RebuildGuard()
     for n in (1, 2):
         g.on_fire("backlog")
@@ -1280,7 +1267,6 @@ def t_backlog_shed_stands_down_after_three_ineffective_rebuilds():
     g.on_fire("backlog")
     assert g.judge(True, reason="backlog") is True
     assert g.stood_down and not g.allows("backlog")
-
 
 
 if __name__ == "__main__":

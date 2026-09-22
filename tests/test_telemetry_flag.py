@@ -10,8 +10,8 @@ m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 
 
 def t_telemetry_enabled_default_on():
-    # Default ON: absent or empty -> the telemetry listener runs (solo idles
-    # harmlessly when no console answers).
+    # Default ON: absent or empty runs the telemetry listener, and solo idles
+    # harmlessly when no console answers.
     assert m.telemetry_enabled({}) is True
     assert m.telemetry_enabled({"RACECAST_GT7_TELEMETRY": ""}) is True
 
@@ -26,16 +26,16 @@ def t_telemetry_enabled_truthy_token():
 
 
 def t_telemetry_active_pov_only():
-    # POV solo (template=pov) -> telemetry runs.
+    # POV solo, template=pov, runs telemetry.
     assert m.telemetry_active(True, {"RACECAST_TEMPLATE": "pov"}) is True
     assert m.telemetry_active(True, {"RACECAST_TEMPLATE": "POV"}) is True
-    # Commentary solo -> NO telemetry (no console; the block must not show empty).
+    # Commentary solo has no console, so no telemetry and no empty block.
     assert m.telemetry_active(True, {"RACECAST_TEMPLATE": "commentary"}) is False
-    # Solo but template unset -> off (POV must be explicit).
+    # Solo with the template unset is off; POV must be explicit.
     assert m.telemetry_active(True, {}) is False
-    # Not solo (endurance) -> off regardless of template.
+    # Endurance is off whatever the template says.
     assert m.telemetry_active(False, {"RACECAST_TEMPLATE": "pov"}) is False
-    # POV solo but explicitly disabled -> off.
+    # POV solo, explicitly disabled, is off.
     assert m.telemetry_active(True, {"RACECAST_TEMPLATE": "pov",
                                      "RACECAST_GT7_TELEMETRY": "0"}) is False
 

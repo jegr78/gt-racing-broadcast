@@ -12,8 +12,6 @@ sys.path.insert(0, os.path.join(ROOT, "src", "ui"))
 import ui_ops
 
 
-# ---------- relay ----------
-
 def t_relay_status_data_running():
     d = rc.relay_status_data(read_pid=lambda p: 4242,
                               alive=lambda pid: True,
@@ -48,8 +46,6 @@ def t_relay_extra_text_ok_no_tailscale():
     assert rc._relay_extra_text(d, None) == "control http://127.0.0.1:8088/status OK"
 
 
-# ---------- companion ----------
-
 def t_companion_payload_running_with_config():
     d = rc.companion_status_payload(True, True,
                                      {"bind_ip": "100.64.0.7", "http_port": 8000})
@@ -68,8 +64,6 @@ def t_companion_payload_unsupported():
                  "why": "(manual on linux)"}
 
 
-# ---------- streams ----------
-
 def t_streams_status_data_labels(tmp):
     p1 = os.path.join(tmp, "feed_53001.pid")
     with open(p1, "w") as fh:
@@ -86,8 +80,6 @@ def t_streams_status_data_labels(tmp):
 def t_streams_status_data_empty():
     assert rc.streams_status_data(pidfiles=[]) == []
 
-
-# ---------- aggregate payload ----------
 
 def t_ui_status_payload_shape():
     payload = rc.ui_status_payload(
@@ -115,8 +107,6 @@ def t_running_apps_data_never_raises():
     assert d == {"obs": False, "discord": False}
 
 
-# ---------- ui_ops registry ----------
-
 def t_ops_registry_shape():
     assert ui_ops.OPS["relay-start"] == ["relay", "start"]
     assert ui_ops.OPS["obs-refresh"] == ["obs", "refresh"]
@@ -138,7 +128,7 @@ def t_job_argv_frozen_reinvokes_binary():
 
 def t_ops_registry_routes_in_rc():
     # every registry entry must be a valid racecast invocation (service verb,
-    # oneshot, export, or command group) — route() raises ValueError on anything unknown
+    # oneshot, export or command group); route() raises ValueError on anything else
     for name, argv in ui_ops.OPS.items():
         action = rc.route(list(argv))
         assert action["kind"] in ("service", "oneshot", "export", "chat", "discord",
@@ -200,8 +190,8 @@ def t_build_argv_event_takeover():
 
 
 def t_build_argv_event_takeover_funnel():
-    # --funnel flag rides through to the CLI (the per-league CONSOLE_SECRET is
-    # read server-side from the active profile, never sent from the UI).
+    # the --funnel flag rides through to the CLI; the per-league CONSOLE_SECRET is
+    # read server-side from the active profile, never sent from the UI
     assert ui_ops.build_argv("event-takeover", {"ip": "host-a.tail.ts.net", "funnel": True}) == \
         ["event", "takeover", "host-a.tail.ts.net", "--funnel"]
     # funnel + stint: host positional first, then the two flags
@@ -237,8 +227,8 @@ def t_build_argv_update():
 
 
 def t_build_argv_update_with_preview_tag():
-    # A preview install is the SAME op with a tag param (one op name -> the job
-    # manager serialises it against a concurrent regular update).
+    # A preview install is the same op with a tag param, so one op name lets the job
+    # manager serialise it against a concurrent regular update.
     assert ui_ops.build_argv("update", {"tag": "preview-pr-42"}) == \
         ["update", "--yes", "--tag", "preview-pr-42"]
     assert ui_ops.build_argv("update", {"tag": "preview-main"}) == \
@@ -251,8 +241,8 @@ def t_build_argv_update_empty_tag_omits_flag():
 
 
 def t_build_argv_update_rejects_non_preview_tag():
-    # The UI op installs PREVIEW tags only: stable v-tags (downgrade vector),
-    # junk, shell-metachars, whitespace and trailing-newline all rejected.
+    # The UI op installs preview tags only: stable v-tags are a downgrade vector, and
+    # junk, shell metacharacters, whitespace and a trailing newline are all rejected.
     for bad in ("v1.2.3", "preview-pr-42; rm -rf /", "../../etc", "weird tag",
                 "release", "preview-x\n"):
         try:
@@ -269,8 +259,6 @@ def t_build_argv_rejects_unknown_params():
     except ValueError:
         pass
 
-
-# ---------- readiness data ----------
 
 def t_cookies_status_data_shape():
     class R:
@@ -293,8 +281,8 @@ def t_assets_status_data_complete(tmp):
 
 
 def t_assets_status_data_missing_and_unverified(tmp):
-    # graphics: sheet readable, one file missing -> FAIL with the filename;
-    # media: sheet unreadable (None) + empty local dir -> its severity (WARN)
+    # graphics: sheet readable, one file missing -> FAIL with the filename.
+    # media: sheet unreadable (None) plus an empty local dir -> its severity, WARN
     d = rc.assets_status_data(state=lambda ev: (tmp, tmp, ["Overlay.png"], None))
     assert d["graphics"]["level"] == "FAIL"
     assert "Overlay.png" in d["graphics"]["detail"]
@@ -309,9 +297,9 @@ def t_assets_status_data_error():
 
 
 def t_assets_status_data_refreshes_active_profile_env():
-    # Same staleness as preflight: the sheet-driven asset check reads
-    # RACECAST_SHEET_ID, so a profile changed while the Control Center runs must
-    # be re-injected before _asset_state fetches the sheet.
+    # The sheet-driven asset check reads RACECAST_SHEET_ID, so a profile changed
+    # while the Control Center runs must be re-injected before _asset_state
+    # fetches the sheet.
     order = []
     def refresh():
         order.append("refresh")
@@ -321,8 +309,6 @@ def t_assets_status_data_refreshes_active_profile_env():
     rc.assets_status_data(state=state, refresh_env=refresh)
     assert order == ["refresh", "state"]       # env refreshed before the fetch
 
-
-# ---------- tools / apps / preflight readiness ----------
 
 def t_tools_status_data_mixed():
     d = rc.tools_status_data(
@@ -371,8 +357,8 @@ def t_apps_status_data_shape():
 
 
 def t_apps_status_data_includes_version():
-    # The Control Center renders a version next to each installed app (issue #91):
-    # present apps carry their probed version, absent apps carry None.
+    # The Control Center renders a version next to each installed app: present apps
+    # carry their probed version, absent apps carry None. (#91)
     d = rc.apps_status_data(present=lambda app: app in ("obs", "discord"),
                             version=lambda app: "31.0.2" if app == "obs" else None)
     by = {a["name"]: a for a in d["apps"]}
@@ -434,11 +420,9 @@ def t_preflight_data_error():
 
 def t_preflight_data_refreshes_active_profile_env():
     # The Control Center holds os.environ for the life of the process, but the
-    # active profile can change underneath it (a `racecast profile import`/`use`
-    # from the CLI, or the in-UI import/switch). preflight_data must re-inject the
-    # active profile's league env BEFORE the sheet probe, else it reads a stale
-    # (often empty) RACECAST_SHEET_ID and warns "not set" even though SHEET_ID is
-    # configured. The refresh must happen before gather() reads the environment.
+    # active profile can change underneath it. preflight_data must re-inject the
+    # active profile's league env before the sheet probe, or it reads a stale
+    # RACECAST_SHEET_ID and warns "not set" even though SHEET_ID is configured.
     order = []
     def refresh():
         order.append("refresh")
@@ -468,10 +452,9 @@ def t_assets_files_data_lists(tmp):
 
 
 def t_assets_files_data_media_includes_audio(tmp):
-    # #398: the Intermission Music mp3 lands in runtime/<profile>/media/ but the
-    # gallery only listed VIDEO extensions, so the audio file never appeared.
-    # Media now lists audio too, and tags each item kind=audio|video so the
-    # Control Center can render an <audio> vs a <video> tile.
+    # The Intermission Music mp3 lands in runtime/<profile>/media/, so the gallery
+    # lists audio as well as video and tags each item kind=audio|video, which is
+    # how the Control Center picks an <audio> over a <video> tile. (#398)
     m = os.path.join(tmp, "media398")
     os.makedirs(m)
     open(os.path.join(m, "intro.mp4"), "w").close()
@@ -485,10 +468,10 @@ def t_assets_files_data_media_includes_audio(tmp):
 
 
 def t_assets_files_data_cache_token(tmp):
-    # Each file carries a per-profile, per-mtime cache token so the Control
-    # Center gallery busts the browser <img> decode-cache on a profile switch
-    # or a re-download (#274). The token must change with BOTH the profile and
-    # the file's mtime (profiles typically share filenames with different bytes).
+    # Each file carries a per-profile, per-mtime cache token so the Control Center
+    # gallery busts the browser <img> decode-cache on a profile switch or a
+    # re-download. The token must change with both the profile and the file's mtime,
+    # because profiles usually share filenames with different bytes. (#274)
     g = os.path.join(tmp, "ct_graphics")
     os.makedirs(g)
     p = os.path.join(g, "Overlay.png")
@@ -514,8 +497,6 @@ def t_assets_files_data_error():
     d = rc.assets_files_data(roots={}, profile="x")  # missing keys -> KeyError, caught
     assert d["ok"] is False and "error" in d
 
-
-# ---------- .env settings editor ----------
 
 def t_env_entries_data_reads(tmp):
     p = os.path.join(tmp, ".env")
@@ -551,10 +532,10 @@ def t_env_write_preserves_comments_and_round_trips(tmp):
 
 
 def t_env_write_rejects_non_racecast_key(tmp):
-    # Defense-in-depth for #1: the machine .env editor only writes RACECAST_*
-    # knobs, so it can't set a process-loader var (LD_PRELOAD / DYLD_INSERT_
-    # LIBRARIES / PATH) that spawned children would inherit. (profile.env, edited
-    # via profile_env_write_data, still accepts un-prefixed league keys.)
+    # The machine .env editor writes only RACECAST_* knobs, so it cannot set a
+    # process-loader var such as LD_PRELOAD, DYLD_INSERT_LIBRARIES or PATH that
+    # spawned children would inherit. profile.env, edited via
+    # profile_env_write_data, still accepts un-prefixed league keys.
     p = os.path.join(tmp, "machine-reject.env")    # unique: shared tmp dir
     res = rc.env_write_data([{"key": "RACECAST_SHEET_ID", "value": "ok"},
                               {"key": "LD_PRELOAD", "value": "/tmp/evil.so"}], path=p)
@@ -584,11 +565,11 @@ def t_env_write_drops_blank_rows(tmp):
     assert rc.env_entries_data(path=p)["entries"] == [{"key": "RACECAST_A", "value": "1"}]
 
 
-# ---------- relay live stats (Home dashboard) ----------
+# Relay live stats (Home dashboard).
 
 def t_relay_live_data_safe_subset():
-    # The relay /status carries channel/url fields per feed; relay_live_data
-    # must surface ONLY the stint + state (screenshot/share safe).
+    # The relay /status carries channel and url fields per feed, so relay_live_data
+    # must surface only the stint and state, which is safe to screenshot or share.
     def fetch(url):
         if url.endswith("/status"):
             return {"schedule_len": 12,
@@ -620,7 +601,7 @@ def t_relay_live_data_never_raises_on_garbage():
     assert rc.relay_live_data(fetch=lambda url: "not-a-dict") == {"ok": False}
 
 
-# ---------- self-update check (UI wrapper over scripts/update.py) ----------
+# Self-update check (UI wrapper over scripts/update.py).
 
 def _release(tag, with_asset=True):
     """A GitHub latest-release payload shaped like update.classify expects."""
@@ -654,18 +635,17 @@ def t_update_check_up_to_date():
 
 
 def t_update_check_dev_build_skips():
-    # running from source (not frozen) with a non-semver version skips: a repo
-    # checkout cannot self-update (use `git pull`).
+    # running from source with a non-semver version skips, because a repo checkout
+    # cannot self-update
     d = rc.update_check_data(fetch=lambda: _release("v9.9.9"), current="dev",
                               frozen=False)
     assert d["ok"] and d["update_available"] is False and d["latest"] is None
 
 
 def t_update_check_frozen_preview_offers_latest():
-    # a frozen preview binary has a non-semver version ('preview-main-<sha>') but
-    # IS a real installable artifact -> offer the latest release, matching the
-    # CLI's `racecast update --check`. Regression for #70 (UI showed nothing
-    # while the CLI offered the update).
+    # a frozen preview binary has a non-semver version ('preview-main-<sha>') but is
+    # a real installable artifact, so it offers the latest release, matching the
+    # CLI's `racecast update --check` (#70)
     d = rc.update_check_data(fetch=lambda: _release("v0.1.0"),
                               current="preview-main-4c25fc8", platform="darwin",
                               frozen=True)
@@ -674,7 +654,7 @@ def t_update_check_frozen_preview_offers_latest():
 
 def t_update_check_frozen_dev_offers_latest():
     # a locally built frozen binary (version 'dev', no --version stamp) likewise
-    # jumps to the latest release rather than being told to `git pull`.
+    # jumps to the latest release rather than being told to run `git pull`
     d = rc.update_check_data(fetch=lambda: _release("v0.1.0"), current="dev",
                               platform="darwin", frozen=True)
     assert d["ok"] and d["update_available"] is True and d["latest"] == "v0.1.0"
@@ -691,16 +671,16 @@ def t_update_check_includes_release_notes():
     rel = {"tag_name": "v9.9.9", "body": "## What's new\n- stuff",
            "assets": [{"name": "racecast-macos.tar.gz", "browser_download_url": "https://x/m"}]}
     d = rc.update_check_data(fetch=lambda: rel, current="v1.0.0", platform="darwin")
-    # Release notes are GitHub-authored (untrusted) and shown as PLAINTEXT in the
-    # dialog (#101): the raw body is returned verbatim, no rendered-HTML field.
+    # Release notes are GitHub-authored, so untrusted, and shown as plaintext in the
+    # dialog: the raw body is returned verbatim with no rendered-HTML field. (#101)
     assert d["ok"] and d["notes"] == "## What's new\n- stuff"
     assert "notes_html" not in d
 
 
 def t_update_check_notes_carry_no_rendered_html():
-    # An untrusted body must never be turned into HTML server-side (the client
-    # renders it via textContent), so a script/javascript-link body is returned
-    # verbatim as plaintext with no notes_html field to inject.
+    # An untrusted body must never be turned into HTML server-side, because the
+    # client renders it via textContent, so a body carrying a script or a javascript
+    # link is returned verbatim as plaintext with no notes_html field to inject.
     rel = {"tag_name": "v9.9.9",
            "body": "[x](javascript:alert(1)) <script>alert(2)</script>",
            "assets": [{"name": "racecast-macos.tar.gz", "browser_download_url": "https://x/m"}]}
@@ -739,8 +719,6 @@ def t_preview_list_data_offline_returns_not_ok():
     d = rc.preview_list_data(fetch=boom, platform="darwin")
     assert d == {"ok": False, "previews": []}
 
-
-# ---------- static-streams config (Static Streams page) ----------
 
 def t_streams_config_defaults_when_absent():
     d = rc.streams_config_data(path="/nope/streams.json",
@@ -827,8 +805,8 @@ def t_docs_content_md_rendered(tmp):
 
 
 def t_docs_slides_serve_and_local_url(tmp):
-    # the bundled onboarding decks (offline copy) serve from src/docs/slides;
-    # resolve("docs/slides") -> base/slides in this fixture.
+    # the bundled offline copy of the onboarding decks serves from src/docs/slides;
+    # resolve("docs/slides") -> base/slides in this fixture
     base = os.path.join(tmp, "docs_slides")
     slides = os.path.join(base, "slides")
     os.makedirs(os.path.join(slides, "assets"), exist_ok=True)
@@ -855,8 +833,6 @@ def t_app_control_ops_route():
                  "tailscale-start", "tailscale-stop"):
         assert rc.route(list(ui_ops.OPS[name]))["kind"] == "service"
 
-
-# ---------- init wizard providers ----------
 
 def t_init_plan_data_shape_and_safety():
     steps = [
@@ -895,8 +871,8 @@ def t_init_step_action_rejects_job_steps():
 
 
 def t_wizard_job_ops_all_exist_in_registry():
-    # every kind=job wizard step must name an op the UI can actually run —
-    # a typo here would 404 the wizard's "Run" button at runtime
+    # every kind=job wizard step must name an op the UI can run; a typo here would
+    # 404 the wizard's "Run" button at runtime
     job_ops = [m["op"] for m in rc.ins.STEP_KINDS.values()
                if m["kind"] == "job"]
     assert job_ops                      # guard against an empty/renamed table
@@ -926,34 +902,30 @@ def t_app_home_plain_binary_is_dirname():
 
 
 def t_app_home_macos_app_resolves_next_to_bundle():
-    # inside a .app the real home is the folder CONTAINING the bundle (where the
-    # sibling racecast binary + runtime/.env live), not Contents/MacOS/
+    # inside a .app the real home is the folder containing the bundle, where the
+    # sibling racecast binary and runtime/.env live, not Contents/MacOS/
     exe = "/Users/x/racecast/racecast-ui.app/Contents/MacOS/racecast-ui"
     assert rc._app_home(exe) == "/Users/x/racecast"
 
 
 def t_rc_job_executable_macos_app_finds_sibling_next_to_bundle():
-    # the .app job-spawn bug: jobs must target <home>/racecast, not the missing
-    # Contents/MacOS/racecast inside the bundle
+    # jobs must target <home>/racecast, not the missing Contents/MacOS/racecast
+    # inside the bundle
     exe = "/Users/x/racecast/racecast-ui.app/Contents/MacOS/racecast-ui"
     assert rc._rc_job_executable(frozen=True, executable=exe,
                                    win=False) == "/Users/x/racecast/racecast"
 
 
-# ---------- obs scene collection ----------
-
 def t_obs_collection_set_op_builds_argv():
     assert ui_ops.build_argv("obs-collection-set") == ["obs", "collection", "set"]
 
-
-# ---------- crew chat ----------
 
 def t_chat_clear_op_builds_argv():
     assert ui_ops.build_argv("chat-clear") == ["chat", "clear"]
 
 
 def t_kill_relay_op_builds_argv():
-    # The "Kill stale relay" button force-frees the relay control port + feed ports.
+    # The "Kill stale relay" button force-frees the relay control port and the feed ports.
     assert ui_ops.OPS["kill-relay"] == [
         "freeport", "--force", "8088", "53001", "53002", "53003"]
     assert ui_ops.build_argv("kill-relay") == [
@@ -961,9 +933,9 @@ def t_kill_relay_op_builds_argv():
 
 
 def t_kill_relay_op_is_forceful_and_covers_feed_ports():
-    # The manual emergency brake must actually KILL the holder(s): without --force
-    # freeport refuses while a relay's PID file reports "alive", so it never reached
-    # a cross-profile orphan. Cover the control port AND the feed ports.
+    # The manual emergency brake must kill the holders: without --force, freeport
+    # refuses while a relay's PID file reports "alive", so it never reaches a
+    # cross-profile orphan. Cover the control port and the feed ports.
     assert ui_ops.OPS["kill-relay"] == [
         "freeport", "--force", "8088", "53001", "53002", "53003"]
 
@@ -1019,8 +991,6 @@ def t_cookies_twitch_op():
     assert argv == ["cookies", "twitch", "firefox"]
 
 
-# ---------- health export / import ops ----------
-
 def t_health_ops_in_registry():
     assert "health-export" in ui_ops.OPS
     assert "health-import" in ui_ops.OPS
@@ -1055,8 +1025,7 @@ def t_health_import_rejects_control_chars():
 
 
 def t_health_import_rejects_leading_dash():
-    # argv flag-smuggling guard: a path starting with '-' must never reach the
-    # child process as an option flag (e.g. '-rf' or '--out').
+    # A path starting with '-' must never reach the child process as an option flag.
     for bad in ("-rf", "--out", "-"):
         try:
             ui_ops.build_argv("health-import", {"file": bad})

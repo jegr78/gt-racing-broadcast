@@ -17,13 +17,13 @@ def _load(name, rel):
 ports = _load("ports", os.path.join("src", "scripts", "ports.py"))
 
 
-# ---- pure parsers ---------------------------------------------------------
+# Pure parsers.
 
 def t_parse_lsof_pids():
     assert ports.parse_lsof_pids("4321\n4322\n") == [4321, 4322]
     assert ports.parse_lsof_pids("") == []
     assert ports.parse_lsof_pids("  \n") == []
-    # dedupes + sorts, ignores non-numeric noise
+    # dedupes and sorts, ignoring non-numeric noise
     assert ports.parse_lsof_pids("9\n9\n3\noops\n") == [3, 9]
 
 
@@ -55,26 +55,26 @@ def t_parse_netstat_pids_windows():
     assert ports.parse_netstat_pids(out, 53001) == [4321]   # only LISTENING on local :53001
     assert ports.parse_netstat_pids(out, 53002) == [8888]
     assert ports.parse_netstat_pids(out, 53003) == []
-    # a port that is only a numeric prefix must not match (":5300" != ":53001")
+    # a port that is only a numeric prefix must not match: ":5300" is not ":53001"
     assert ports.parse_netstat_pids(out, 5300) == []
 
 
 def t_parse_netstat_pids_localized_state_column():
-    # Non-English Windows localizes the State column — German prints 'ABHÖREN'
-    # (LISTENING) and 'WARTEND' (TIME_WAIT). The parser must key on the wildcard
-    # FOREIGN address, never the localized word, or pids_on_port returns [] on
-    # every non-English host (it did: German Windows saw no listeners at all).
+    # Non-English Windows localizes the State column: German prints 'ABHÖREN' for
+    # LISTENING and 'WARTEND' for TIME_WAIT. The parser must key on the wildcard
+    # foreign address, never the localized word, or pids_on_port returns [] on every
+    # non-English host.
     out = (
         "  TCP    127.0.0.1:8088         0.0.0.0:0              ABHÖREN         34528\n"
         "  TCP    100.115.69.85:8088     0.0.0.0:0              ABHÖREN         34528\n"
         "  TCP    127.0.0.1:8088         127.0.0.1:49568        WARTEND         0\n"
         "  TCP    100.115.69.85:8088     100.115.69.85:49434    WARTEND         0\n"
     )
-    # only the two wildcard-foreign LISTENING rows count (deduped); WARTEND ignored
+    # only the two wildcard-foreign LISTENING rows count, deduped, and WARTEND is ignored
     assert ports.parse_netstat_pids(out, 8088) == [34528]
 
 
-# ---- pids_on_port (injected command runner + which) -----------------------
+# pids_on_port, with an injected command runner and which.
 
 def t_pids_on_port_posix_prefers_lsof():
     calls = []
@@ -107,7 +107,7 @@ def t_pids_on_port_windows_uses_netstat():
     assert pids == [2222]
 
 
-# ---- decide_free (pure safety gate) ---------------------------------------
+# decide_free, the pure safety gate.
 
 def t_decide_free_no_pids_is_clear():
     assert ports.decide_free([], owned=False, force=False)[0] == "clear"
@@ -127,7 +127,7 @@ def t_decide_free_kills_orphan():
     assert ports.decide_free([99], owned=False, force=False)[0] == "free"
 
 
-# ---- kill_pid (injected seams; no real processes) -------------------------
+# kill_pid, on injected seams, with no real processes.
 
 def t_kill_pid_posix_term_then_kill():
     if os.name == "nt":

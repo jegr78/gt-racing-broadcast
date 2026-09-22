@@ -9,8 +9,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 import walkthrough_core as w
 
 
-# ---- notes_from_markdown ---------------------------------------------------
-
 def t_notes_from_markdown_extracts_after_separator():
     tpl = "## Title\nSome slide body.\nNote: This is the spoken script."
     assert w.notes_from_markdown(tpl) == "This is the spoken script."
@@ -36,8 +34,6 @@ def t_notes_from_markdown_splits_only_on_first():
     assert w.notes_from_markdown(tpl) == "remember to note: the stream key."
 
 
-# ---- sanitize_note_text ----------------------------------------------------
-
 def t_sanitize_unwraps_markdown_link_to_text():
     assert w.sanitize_note_text("See [the wiki](https://x/y) now") == "See the wiki now"
 
@@ -58,42 +54,36 @@ def t_sanitize_empty_stays_empty():
     assert w.sanitize_note_text("   \n  ") == ""
 
 
-# ---- frame_lock ------------------------------------------------------------
-
 def t_frame_lock_rounds_up_to_whole_frames():
-    # 1.00s @30fps is already frame-aligned -> unchanged.
+    # 1.00s at 30fps is already frame-aligned, so it is unchanged.
     assert w.frame_lock(1.0, 30) == 1.0
-    # 1.01s -> 31 frames -> 31/30; rounds UP so no speech is clipped.
+    # 1.01s gives 31 frames, so 31/30: it rounds up so no speech is clipped.
     assert abs(w.frame_lock(1.01, 30) - 31 / 30) < 1e-9
 
 
 def t_frame_lock_minimum_one_frame():
-    # zero/empty audio still yields a single frame, never a 0-length segment.
+    # zero-length audio still yields a single frame, never a 0-length segment
     assert w.frame_lock(0.0, 30) == 1 / 30
 
-
-# ---- ffmpeg_slideshow_cmd --------------------------------------------------
 
 def t_ffmpeg_slideshow_cmd_single_pass_concat():
     slides = [("a.png", "a.mp3", 2.0), ("b.png", "b.mp3", 3.0)]
     cmd = w.ffmpeg_slideshow_cmd(slides, "out.mp4", width=1920, height=1080, fps=30)
     assert cmd[0] == "ffmpeg" and cmd[-1] == "out.mp4"
-    # each slide contributes a frame-locked image input (-loop 1 -t T -i img) + audio.
+    # each slide contributes a frame-locked image input, -loop 1 -t T -i img, plus audio
     assert cmd.count("-loop") == 2
     for f in ("a.png", "a.mp3", "b.png", "b.mp3"):
         assert f in cmd
     fc = cmd[cmd.index("-filter_complex") + 1]
-    # single-pass: scale+fps per video, apad+atrim per audio, one concat node.
+    # single pass: scale and fps per video, apad and atrim per audio, one concat node
     assert "scale=1920:1080" in fc and "fps=30" in fc
     assert "apad" in fc and "atrim=0:2.000000" in fc
     assert "concat=n=2:v=1:a=1[v][a]" in fc
-    # the mapped, re-encoded single timeline (no -c copy stream stitching).
+    # the mapped, re-encoded single timeline, with no -c copy stream stitching
     assert "[v]" in cmd and "[a]" in cmd
     assert "libx264" in cmd and "yuv420p" in cmd and "-c:a" in cmd
     assert "-shortest" not in cmd
 
-
-# ---- output_mp4_name -------------------------------------------------------
 
 def t_output_mp4_name_from_deck():
     assert w.output_mp4_name("producer.html") == "producer.mp4"
@@ -105,7 +95,7 @@ def t_thumbnail_name_from_deck():
     assert w.thumbnail_name("race-control") == "race-control-thumb.png"
 
 
-# ---- gcloud TTS request building -------------------------------------------
+# Gcloud TTS request building.
 
 def t_gcloud_language_code_from_voice():
     assert w.gcloud_language_code("en-US-Neural2-J") == "en-US"
@@ -116,7 +106,7 @@ def t_gcloud_tts_request_shape():
     body = w.gcloud_tts_request("Hello there.", "en-US-Neural2-J")
     assert body["input"] == {"text": "Hello there."}
     assert body["voice"] == {"languageCode": "en-US", "name": "en-US-Neural2-J"}
-    # default encoding is the unambiguous, self-describing MP3 (ffmpeg-friendly).
+    # the default encoding is MP3, which is self-describing and ffmpeg-friendly
     assert body["audioConfig"]["audioEncoding"] == "MP3"
 
 
@@ -133,8 +123,6 @@ def t_gcloud_tts_url_carries_key_and_path():
     assert "key=SECRET123" in url
 
 
-# ---- captions: split_sentences ---------------------------------------------
-
 def t_split_sentences_keeps_terminators():
     assert w.split_sentences("Go live. Then wait! Ready?") == \
         ["Go live.", "Then wait!", "Ready?"]
@@ -148,7 +136,7 @@ def t_split_sentences_empty():
     assert w.split_sentences("   ") == []
 
 
-# ---- captions: caption_cues (absolute timing) ------------------------------
+# Captions: caption_cues, absolute timing.
 
 def t_caption_cues_one_segment_one_sentence():
     cues = w.caption_cues([("Hello there.", 4.0)])
@@ -156,7 +144,7 @@ def t_caption_cues_one_segment_one_sentence():
 
 
 def t_caption_cues_splits_segment_time_by_sentence_length():
-    # two equal-length sentences share a 10s segment -> 5s each, back-to-back.
+    # two equal-length sentences share a 10s segment, so 5s each, back to back
     cues = w.caption_cues([("AAAA. BBBB.", 10.0)])
     assert len(cues) == 2
     assert cues[0] == (0.0, 5.0, "AAAA.")
@@ -168,8 +156,6 @@ def t_caption_cues_accumulates_across_segments():
     assert cues[0] == (0.0, 3.0, "One.")
     assert cues[1] == (3.0, 5.0, "Two.")
 
-
-# ---- captions: timestamp + SRT/VTT -----------------------------------------
 
 def t_format_ts_srt_and_vtt():
     assert w.format_ts(3661.5, ",") == "01:01:01,500"

@@ -53,7 +53,7 @@ def t_blank_spacer_rows_dropped():
 
 
 def t_missing_header_returns_empty():
-    # No recognizable header row -> empty (no positional fallback).
+    # No recognizable header row gives empty; there is no positional fallback.
     text = "1,Alice,a.ts.net\r\n2,Bob,b.ts.net\r\n"
     assert p.parse_producer_rows(text) == []
 
@@ -74,7 +74,7 @@ def t_resolve_producer_name_exact_fqdn_match():
         "1,Alice,producer-a.tail1234.ts.net\r\n"
         "2,Bob,producer-b.tail1234.ts.net\r\n")
     assert p.resolve_producer_name(rows, "producer-b.tail1234.ts.net") == "Bob"
-    # Case-insensitive + trailing-dot tolerant (mirrors magicdns_is_self).
+    # Case-insensitive and trailing-dot tolerant, like magicdns_is_self.
     assert p.resolve_producer_name(rows, "PRODUCER-A.tail1234.ts.net.") == "Alice"
 
 
@@ -121,7 +121,7 @@ def t_parse_producer_rows_stream_key_absent_defaults_blank():
 
 
 def t_parse_producer_rows_still_requires_core_trio():
-    # Missing MagicDNS header -> empty (unchanged behaviour), even with Stream Key.
+    # A missing MagicDNS header gives empty, even with a Stream Key present.
     text = "Part,Producer,Stream Key\r\n1,Alice,key1\r\n"
     assert p.parse_producer_rows(text) == []
 

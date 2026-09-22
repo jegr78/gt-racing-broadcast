@@ -2,13 +2,11 @@
 """Endpoint checks for the GT7 telemetry routes. Run: python3 tests/test_telemetry_endpoints.py
 
 Exercises the store contract behind /telemetry/data and /telemetry/trace: when
-telemetry_store is None (endurance / disabled) the routes 404; when a store exists
-they return its data()/trace() shape. The t_telemetry_* tests check the store
-directly (the same shape the do_GET routes hand back via self._send). The
-t_route_* tests go one level up and exercise the ACTUAL HTTP route dispatch —
-make_handler over a real ThreadingHTTPServer, mirroring tests/test_cockpit.py's
-harness — so a route typo or a missing None-guard on /telemetry/data or
-/telemetry/trace fails here, not just a store-shape check."""
+telemetry_store is None the routes 404, and when a store exists they return its
+data()/trace() shape. The t_telemetry_* tests check the store directly, which is
+the shape the do_GET routes hand back via self._send. The t_route_* tests exercise
+the HTTP route dispatch through make_handler over a real ThreadingHTTPServer, so a
+route typo or a missing None-guard fails here, not just a store-shape check."""
 import importlib.util, os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -60,7 +58,7 @@ def _serve(telemetry_store):
 
 
 def t_route_data_404_without_store():
-    # Endurance / non-solo: no telemetry_store -> route must 404 (no new surface).
+    # Endurance, meaning non-solo, has no telemetry_store, so the route must 404.
     srv, get = _serve(None)
     try:
         status, _, body = get("/telemetry/data")

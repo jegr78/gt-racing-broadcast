@@ -19,12 +19,12 @@ def t_default_binary_path_layout():
 
 
 def t_service_launcher_binary_vs_src():
-    # Binary mode -> just the binary; src mode -> [python, script]. Either way the
-    # caller appends the SAME subcommand, so the checks run unchanged against both.
+    # Binary mode gives just the binary, src mode [python, script]. Either way the
+    # caller appends the same subcommand, so the checks run unchanged against both.
     assert e.service_launcher("/tmp/app/racecast") == ["/tmp/app/racecast"]
     assert e.service_launcher(None, python="py3", script="src/racecast.py") == \
         ["py3", "src/racecast.py"]
-    # empty string (flag given without a path) is falsy -> src path, not binary.
+    # an empty string, the flag given without a path, is falsy -> src path, not binary
     assert e.service_launcher("", python="py3", script="s.py") == ["py3", "s.py"]
 
 
@@ -90,12 +90,12 @@ def t_check_status_and_auth_gating():
 
 
 def _stub_relay2():
-    """A stub that mirrors the REAL relay's flat /cockpit/data shape (tally fields
+    """A stub that mirrors the real relay's flat /cockpit/data shape (tally fields
     at the top level) plus /cockpit/timer, /chat/* round-trip and
     /cockpit/submit -> /submissions. Token-gated like the real relay."""
     import json, threading
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-    chat = []          # mutable closure state — the round-trip target
+    chat = []          # mutable closure state, the round-trip target
     pending = []
     event = {"title": ""}   # /event/title round-trip target (#207)
 
@@ -112,7 +112,7 @@ def _stub_relay2():
                 return self._send(200, {"schedule_len": 2, "event_title": event["title"]})
             if p == "/cockpit/data":
                 if not self._authed(): return self._send(401, {"error": "auth"})
-                # flat (real shape): tally fields merged at top level
+                # the real shape: tally fields merged at top level
                 return self._send(200, {"on_air": True, "up_next": None,
                                         "scheduled": True, "me": "alice",
                                         "event_title": event["title"]})
@@ -272,10 +272,9 @@ def t_run_checks_turns_exception_into_fail():
 
 
 def t_first_roster_streamer_picks_first():
-    # A well-formed /schedule/data body (the real relay's {"rows":[{"name":...}]}
-    # shape) -> the first non-empty streamer name. The bytes-decoding here is the
-    # SAME path the real-league run takes, so it covers the 3-tuple unpack +
-    # JSON decode that the old 2-tuple unpack broke.
+    # A well-formed /schedule/data body, the relay's {"rows":[{"name":...}]} shape,
+    # gives the first non-empty streamer name. The bytes decoding here is the same
+    # path the real-league run takes, so it covers the 3-tuple unpack and the decode.
     import json
     body = json.dumps({"rows": [
         {"row": 1, "name": "Alice", "stint": "Stint 1"},
@@ -295,7 +294,7 @@ def t_first_roster_streamer_empty_is_none():
 def t_first_roster_streamer_non_200_is_none():
     import json
     body = json.dumps({"rows": [{"name": "Alice"}]}).encode()
-    # Non-200 -> None even when the body would parse to a roster.
+    # Non-200 gives None even when the body would parse to a roster.
     assert e.first_roster_streamer(500, body) is None
     assert e.first_roster_streamer(404, b"") is None
 
@@ -415,14 +414,14 @@ def t_check_health_monitor_v3():
 
 
 def t_check_enable_preserves_keys_passes():
-    # The self-contained check uses its own tempfile fixture + the REAL
-    # racecast._set_env_key seam; it must pass with no relay and no side effects.
+    # The self-contained check uses its own tempfile fixture and the real
+    # racecast._set_env_key seam, so it passes with no relay and no side effects.
     assert e.check_enable_preserves_keys(None).status == "pass"
 
 
 def t_set_env_key_preserves_other_keys():
-    # Exercise the #191 seam directly against a temp profile.env: writing ONE key
-    # must not drop the others (the bug was a full-set merge clobbering them).
+    # The #191 seam against a temp profile.env: writing one key must not drop the
+    # others.
     import tempfile, shutil, importlib
     src = os.path.join(os.path.dirname(__file__), "..", "src")
     if src not in sys.path:
@@ -455,9 +454,9 @@ def _import_e2e():
 
 
 def t_rendered_checks_skip_without_browser():
-    # GATE test, NOT a browser test: when Playwright is unavailable, the gated
-    # dispatch must yield SKIP results (one per rendered check) and never try to
-    # launch a browser. We force unavailability instead of probing the host.
+    # A gate check, not a browser check: when Playwright is unavailable the gated
+    # dispatch yields one SKIP result per rendered check and never launches a browser.
+    # Unavailability is forced here rather than probed from the host.
     driver = _import_e2e()
     saved = driver._playwright_available
     driver._playwright_available = lambda: False
@@ -474,9 +473,9 @@ def t_rendered_checks_skip_without_browser():
 
 
 def t_capture_shots_skips_without_browser():
-    # GATE test: --shots must no-op (return [], never launch a browser or create
-    # the output dir) when Playwright is unavailable — same gate as the rendered
-    # checks. We force unavailability instead of probing the host.
+    # A gate check: with Playwright unavailable, --shots returns [] and never launches
+    # a browser or creates the output dir, the same gate as the rendered checks.
+    # Unavailability is forced here rather than probed from the host.
     driver = _import_e2e()
     saved = driver._playwright_available
     driver._playwright_available = lambda: False
@@ -491,8 +490,8 @@ def t_capture_shots_skips_without_browser():
 
 
 def t_rendered_skip_does_not_change_exit_code():
-    # The overall exit code is governed by the API checks: appending SKIP
-    # rendered results must keep a green run green (and a red run red).
+    # The API checks govern the exit code, so appending SKIP rendered results keeps a
+    # green run green and a red run red.
     driver = _import_e2e()
     saved = driver._playwright_available
     driver._playwright_available = lambda: False
@@ -500,7 +499,7 @@ def t_rendered_skip_does_not_change_exit_code():
         ctx = e.Ctx(relay_url="http://127.0.0.1:1", disabled_relay_url=None,
                     ui_url=None, token="tok", streamer_key="alice", expect={})
         rendered = driver.run_rendered_checks(ctx)
-        # API all pass -> combined stays 0 even with the SKIP rows appended.
+        # all API checks pass -> combined stays 0 even with the SKIP rows appended
         api_results, code = e.run_checks(
             [lambda _c: e.CheckResult("ok", "pass", "")], ctx)
         combined = api_results + rendered
@@ -576,7 +575,7 @@ def t_check_fanout_feed_port_bound_with_stub_server():
                          b"Connection: close\r\n\r\n")
             conn.close()
         except OSError:
-            pass  # client disconnected or timeout — nothing to do
+            pass  # client disconnected or timed out, nothing to do
         finally:
             srv_sock.close()
 
@@ -588,8 +587,9 @@ def t_check_fanout_feed_port_bound_with_stub_server():
 
 
 def t_check_fanout_feed_port_bound_fail_connect_refused():
-    """check_fanout_feed_port_bound returns fail (not exception) when no server listens."""
-    # Use a port that's free (nothing listening) so the connect is immediately refused.
+    """check_fanout_feed_port_bound returns fail, not an exception, when nothing
+    listens."""
+    # A free port, so the connect is refused immediately.
     port = e.free_port()   # port is released; nothing binds it before we call the check
     ctx = e.Ctx(relay_url=None, disabled_relay_url=None, ui_url=None,
                 token="t", streamer_key="alice", expect={}, fanout_feed_port=port)
@@ -611,15 +611,15 @@ def t_intermission_check_registered():
 
 
 def t_program_audio_check_registered():
-    """check_program_audio_stream is in SYNTHETIC_CHECKS (not REAL_LEAGUE_CHECKS —
-    only the dedicated synthetic fan-out relay exercises the probe)."""
+    """check_program_audio_stream is in SYNTHETIC_CHECKS, not REAL_LEAGUE_CHECKS: only
+    the dedicated synthetic fan-out relay exercises the probe."""
     names = [c.__name__ for c in e.SYNTHETIC_CHECKS]
     assert "check_program_audio_stream" in names
     assert e.check_program_audio_stream not in e.REAL_LEAGUE_CHECKS
 
 
 def t_check_program_audio_stream_skip_when_no_fanout_relay():
-    """No fanout_relay_url in ctx (e.g. a stub-relay unit test) -> skip, not fail."""
+    """No fanout_relay_url in ctx, as in a stub-relay unit test, means skip, not fail."""
     ctx = e.Ctx(relay_url=None, disabled_relay_url=None, ui_url=None,
                 token="t", streamer_key="alice", expect={})
     r = e.check_program_audio_stream(ctx)
@@ -628,10 +628,10 @@ def t_check_program_audio_stream_skip_when_no_fanout_relay():
 
 
 def t_check_program_audio_stream_passes_against_stub_probe():
-    """Stub server serving exactly the probe endpoint's finite JSON body
-    (`GET /preview/program-audio?probe=1` -> 200 {"available": true}) — the
-    real relay's probe route never starts the encoder, so this stub never
-    needs to simulate streaming."""
+    """Stub server serving exactly the probe endpoint's finite JSON body,
+    `GET /preview/program-audio?probe=1` -> 200 {"available": true}. The real
+    relay's probe route never starts the encoder, so this stub never needs to
+    simulate streaming."""
     import json, threading
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -661,9 +661,9 @@ def t_check_program_audio_stream_passes_against_stub_probe():
 
 
 def t_check_program_audio_stream_fails_when_unavailable():
-    """A 404 (feature disabled / fan-out off) is a fail CheckResult, never an
-    uncaught exception — the disabled-path 404 itself is unit-tested in
-    tests/test_program_audio.py + tests/test_console.py, not re-derived here."""
+    """A 404, meaning the feature is disabled or fan-out is off, is a fail
+    CheckResult, never an uncaught exception. The disabled-path 404 itself is
+    covered in tests/test_program_audio.py and tests/test_console.py."""
     import threading
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 

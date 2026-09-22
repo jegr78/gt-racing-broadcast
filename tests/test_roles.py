@@ -46,8 +46,8 @@ def t_parse_positional_fallback_no_header():
 
 
 def t_parse_positional_fallback_skips_headerlike_first_row():
-    # A header-like first row (col1/col2 are header words) is dropped even when
-    # the name header itself is unrecognized.
+    # A header-like first row, where col1 and col2 are header words, is dropped even
+    # when the name header itself is unrecognized.
     text = "Person?,Director,Producer\nAlice,X,\n"
     rows = m.CrewSource._parse_rows(text)
     assert rows == [("Alice", True, False)], rows
@@ -74,7 +74,7 @@ def t_crewsource_get_returns_snapshot_copy():
 
 
 def t_crewsource_get_full_returns_six_tuples():
-    # The canonical store is (name, dir, prod, commentator, race_control, discord) (#244).
+    # The canonical store is (name, dir, prod, commentator, race_control, discord). (#244)
     src = m.CrewSource(csv_url="")
     src.rows = [("Alice", True, False, True, False, "alice_d")]
     full = src.get_full()
@@ -90,24 +90,24 @@ def t_resolve_commentator_from_schedule_only():
 
 def t_resolve_director_and_producer_from_crew():
     crew = [("Alice", True, True), ("Bob", True, False)]
-    # Alice is producer -> producer implies director + race_control (additive).
+    # Alice is producer, and producer additively implies director and race_control.
     assert m.resolve_roles(crew, set(), "alice") == {
         "director", "producer", "race_control"}
     assert m.resolve_roles(crew, set(), "bob") == {"director"}
 
 
 def t_resolve_producer_implies_director_and_race_control():
-    # A pure producer (no Director/Race-Control Crew flag, not in the schedule)
-    # still oversees the whole event: producer grants director (control) and
-    # race_control (read-only monitoring) so they can follow and steer the
-    # broadcast from the /console pages.
+    # A pure producer, with no Director or Race Control crew flag and not in the
+    # schedule, still oversees the whole event: producer grants director for control
+    # and race_control for read-only monitoring, so they can steer the broadcast from
+    # the /console pages.
     crew = [("Alice", False, True)]
     assert m.resolve_roles(crew, set(), "alice") == {
         "producer", "director", "race_control"}
-    # A producer also in the schedule additionally keeps commentator.
+    # A producer who is also in the schedule keeps commentator as well.
     assert m.resolve_roles(crew, {"alice"}, "alice") == {
         "producer", "director", "race_control", "commentator"}
-    # A non-producer is unaffected (no implication leaks to plain directors).
+    # A non-producer is unaffected; no implication leaks to plain directors.
     assert m.resolve_roles([("Bob", True, False)], set(), "bob") == {"director"}
 
 
@@ -120,8 +120,7 @@ def t_resolve_name_normalized_via_asset_key():
     # "Alice O'Brien" normalizes to the same key the token carries.
     subject = m.asset_key("Alice O'Brien")
     crew = [("Alice O'Brien", False, True)]
-    # producer implies director + race_control (see
-    # t_resolve_producer_implies_director_and_race_control).
+    # producer implies director and race_control
     assert m.resolve_roles(crew, set(), subject) == {
         "producer", "director", "race_control"}
 
@@ -142,11 +141,11 @@ def t_schedule_keys_empty():
     assert m.schedule_keys([]) == set()
 
 
-# ---- live HTTP surface: /crew/data ------------------------------------------
+# The live HTTP surface, /crew/data.
 
 def _crew_client(crew_rows):
-    """make_handler over a real loopback server, wired with a fake crew_source
-    (or None). Returns (server, get)."""
+    """make_handler over a real loopback server, wired with a fake crew_source or
+    None. Returns (server, get)."""
     import threading as _t, json as _json
     from urllib.request import urlopen
 
@@ -217,8 +216,8 @@ def t_crew_source_inject_row_edit_append_and_delete():
 
 
 def t_crew_source_inject_row_commentator_discord_partial():
-    # commentator/race_control/discord follow the same applied-when-given,
-    # kept-when-None rule.
+    # commentator, race_control and discord follow the same applied-when-given,
+    # kept-when-None rule
     cs = m.CrewSource("http://crew")
     cs.rows = [("Alice", True, False, False, False, "")]
     cs.inject_row(2, name="Bob", commentator=True, discord="Bob.Handle")  # append
@@ -246,7 +245,7 @@ def t_crew_discord_and_commentator_columns():
                 "Bob,x,,,Bob.Handle\n"
                 "Carol,,,,\n")
     rows = m.CrewSource._parse_rows(csv_text)
-    # get() shape is unchanged: (name, is_dir, is_prod)
+    # the get() shape stays (name, is_dir, is_prod)
     assert ("Alice", True, False) in rows, rows
     assert ("Bob", False, False) in rows, rows
     src = m.CrewSource("")          # no URL; inject rows directly
@@ -259,24 +258,24 @@ def t_crew_discord_and_commentator_columns():
 
 def t_resolve_roles_a1_union_commentator_from_crew_flag():
     crew = [("Alice", True, False)]
-    # subject not in schedule, but IS in crew commentator set -> commentator
+    # subject not in the schedule, but in the crew commentator set -> commentator
     roles = m.resolve_roles(crew, set(), m.asset_key("Bob"),
                             crew_commentator_keys={m.asset_key("Bob")})
     assert roles == {"commentator"}, roles
-    # schedule still auto-grants (fallback intact)
+    # the schedule still auto-grants
     roles2 = m.resolve_roles(crew, {m.asset_key("Dan")}, m.asset_key("Dan"))
     assert roles2 == {"commentator"}, roles2
-    # director from crew flag, unioned with commentator from schedule
+    # director from the crew flag, unioned with commentator from the schedule
     roles3 = m.resolve_roles(crew, {m.asset_key("Alice")}, m.asset_key("Alice"),
                              crew_commentator_keys=set())
     assert roles3 == {"commentator", "director"}, roles3
 
 
-# ---- Race Control role (#244) ----------------------------------------------
+# The Race Control role (#244).
 
 def t_crew_race_control_column_parsed_and_keys():
-    # Header-mode parsing locates the "Race Control" column by name; the get()
-    # 3-tuple shape (name, dir, prod) is unchanged so existing callers are intact.
+    # Header-mode parsing locates the "Race Control" column by name, and the get()
+    # 3-tuple (name, dir, prod) is unchanged so existing callers keep working.
     csv_text = ("Name,Commentator,Director,Producer,Race Control,Discord\n"
                 "Alice,,x,,x,alice_d\n"
                 "Bob,x,,,,Bob.Handle\n"
@@ -302,11 +301,11 @@ def t_race_control_header_alias_columns():
 
 def t_resolve_roles_race_control_union_additive():
     crew = [("Alice", True, False)]   # Alice is a director
-    # Alice is ALSO race_control -> both roles (additive).
+    # Alice is also race_control, so she holds both roles.
     roles = m.resolve_roles(crew, set(), m.asset_key("Alice"),
                             crew_race_control_keys={m.asset_key("Alice")})
     assert roles == {"director", "race_control"}, roles
-    # A pure race-control desk operator (not in schedule, no other crew flag).
+    # A pure race-control desk operator: not in the schedule, no other crew flag.
     roles2 = m.resolve_roles([], set(), m.asset_key("Dana"),
                              crew_race_control_keys={m.asset_key("Dana")})
     assert roles2 == {"race_control"}, roles2
@@ -316,8 +315,8 @@ def t_resolve_roles_race_control_union_additive():
 
 
 def t_race_control_keys_positional_fallback_empty():
-    # No Name header -> positional fallback parses name/dir/prod only; there is no
-    # way to locate a Race Control column, so the set is empty (mirrors commentator).
+    # With no Name header the positional fallback parses name, dir and prod only, and
+    # nothing can locate a Race Control column, so the set is empty, as for commentator.
     src = m.CrewSource("")
     src.rows = m.CrewSource._parse_full("Alice,x,\nBob,,x\n")
     assert src.race_control_keys() == set(), src.race_control_keys()

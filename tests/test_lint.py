@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Unit checks for the in-house guards in tools/lint.py — the empty-except guard
-(mirrors CodeQL's py/empty-except) and the procedure-return-value guard (mirrors
-py/procedure-return-value-used) — so both fail the gate pre-push, not post-merge.
+"""Unit checks for the in-house guards in tools/lint.py: the empty-except guard,
+which mirrors CodeQL's py/empty-except, and the procedure-return-value guard, which
+mirrors py/procedure-return-value-used. Both fail the gate pre-push.
 Run: python3 tests/test_lint.py"""
 import importlib.util, os
 
@@ -10,7 +10,7 @@ ROOT = os.path.dirname(HERE)
 spec = importlib.util.spec_from_file_location("lintmod", os.path.join(ROOT, "tools", "lint.py"))
 lint = importlib.util.module_from_spec(spec); spec.loader.exec_module(lint)
 
-# Fixtures are SOURCE STRINGS (not live code) so this test file itself stays clean.
+# The fixtures are source strings, not live code, so this file itself stays clean.
 SWALLOW = "try:\n    f()\nexcept OSError:\n    pass\n"
 SWALLOW_ELLIPSIS = "try:\n    f()\nexcept OSError:\n    ...\n"
 COMMENT_INLINE = "try:\n    f()\nexcept OSError:\n    pass  # already gone\n"
@@ -18,9 +18,9 @@ COMMENT_LINE = "try:\n    f()\nexcept OSError:\n    # already gone\n    pass\n"
 NON_EMPTY = "try:\n    f()\nexcept OSError:\n    log()\n"
 RAISE_IN_TRY = "try:\n    f()\n    raise AssertionError\nexcept ValueError:\n    pass\n"
 BENIGN_IMPORT = "try:\n    import x\nexcept ImportError:\n    pass\n"
-# KeyboardInterrupt is NOT a blanket-benign type: CodeQL flags a silent Ctrl-C
-# swallow when the try can also exit normally (#217 alert 124). The gate therefore
-# requires an explanatory comment on it, like any other swallow.
+# KeyboardInterrupt is not blanket-benign: CodeQL flags a silent Ctrl-C swallow when
+# the try can also exit normally, so the gate requires an explanatory comment on it
+# like any other swallow. (#217)
 KBD_NO_COMMENT = "try:\n    loop()\nexcept KeyboardInterrupt:\n    pass\n"
 KBD_COMMENT = "try:\n    loop()\nexcept KeyboardInterrupt:\n    pass  # Ctrl-C\n"
 BARE_EXCEPT = "try:\n    f()\nexcept:\n    pass\n"
@@ -49,7 +49,7 @@ def t_non_empty_handler_not_flagged():
 
 
 def t_raise_in_try_is_excluded():
-    # assert-raises test idiom — CodeQL ignores it, so must we.
+    # the assert-raises test idiom, which CodeQL ignores, so the gate does too
     assert lint.find_empty_excepts(RAISE_IN_TRY) == []
 
 
@@ -58,7 +58,7 @@ def t_benign_caught_types_excluded():
 
 
 def t_keyboardinterrupt_swallow_needs_comment():
-    # CodeQL flags a comment-free Ctrl-C swallow (#217 alert 124); the gate mirrors that.
+    # CodeQL flags a comment-free Ctrl-C swallow, and the gate mirrors that. (#217)
     assert lint.find_empty_excepts(KBD_NO_COMMENT) == [3]
     assert lint.find_empty_excepts(KBD_COMMENT) == []
 
@@ -68,7 +68,7 @@ def t_bare_except_is_flagged():
 
 
 def t_mixed_benign_and_real_is_flagged():
-    # catches a real error type alongside a benign one -> still a silent swallow
+    # catching a real error type alongside a benign one is still a silent swallow
     assert lint.find_empty_excepts(MIXED_BENIGN) == [3]
 
 
@@ -81,23 +81,22 @@ def t_syntax_error_source_is_safe():
 
 
 def t_repo_is_clean():
-    # The whole repo must already satisfy the guard (this is the regression that
-    # would have caught the 5 alerts from #139/#142 before they reached CodeQL).
+    # The whole repo must already satisfy the guard. (#139, #142)
     assert lint.check_empty_excepts(ROOT) == [], lint.check_empty_excepts(ROOT)
 
 
-# --- procedure-return-value-used guard (CodeQL py/procedure-return-value-used) ---
-# A procedure (returns only None) whose result is USED.
+# The procedure-return-value-used guard (CodeQL py/procedure-return-value-used).
+# A procedure, which returns only None, whose result is used.
 PROC_USED_RETURN = "def p():\n    print(1)\n\ndef c():\n    return p()\n"
 PROC_USED_ASSIGN = "def p():\n    print(1)\n\ndef c():\n    x = p()\n    return x\n"
 PROC_BARE_RETURN = "def p():\n    if a:\n        return\n    print(1)\n\nx = p()\n"
-# Standalone call (result discarded) — fine.
+# A standalone call whose result is discarded is fine.
 PROC_STANDALONE = "def p():\n    print(1)\n\ndef c():\n    p()\n"
-# `return None` is a deliberate value -> NOT a procedure (CodeQL ignores it).
+# `return None` is a deliberate value, so not a procedure; CodeQL ignores it.
 RETURNS_NONE = "def p():\n    return None\n\ndef c():\n    return p()\n"
-# Returns a real value -> not a procedure.
+# Returns a real value, so not a procedure.
 RETURNS_VALUE = "def p():\n    return 5\n\ndef c():\n    x = p()\n"
-# Always raises / exits -> never returns None -> not a procedure.
+# Always raises or exits, so it never returns None and is not a procedure.
 ALWAYS_RAISES = "def p():\n    raise SystemExit(1)\n\ndef c():\n    return p()\n"
 ALWAYS_EXITS = "import sys\ndef p():\n    sys.exit(1)\n\ndef c():\n    return p()\n"
 # A generator is not a procedure.
@@ -142,8 +141,7 @@ def t_proc_return_syntax_error_source_is_safe():
 
 
 def t_proc_return_repo_is_clean():
-    # The whole repo must already satisfy this guard (would have caught alerts
-    # #117/#118/#120 — `return _cockpit_*(args)` to void helpers — pre-merge).
+    # The whole repo must already satisfy this guard. (#117, #118, #120)
     assert lint.check_proc_return_value_uses(ROOT) == [], lint.check_proc_return_value_uses(ROOT)
 
 

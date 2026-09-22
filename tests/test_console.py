@@ -65,9 +65,9 @@ def t_setup_data_and_timer_data_are_reads_not_director():
 
 
 def t_schedule_and_qualifying_data_are_director_reads():
-    # These return per-stint stream URLs, so over the Funnel they must NOT be
-    # any-auth (a commentator would otherwise read every feed's stream URL).
-    # Director-only, matching their sole consumer (the director panel).
+    # These return per-stint stream URLs, so over the Funnel they must not be
+    # any-auth, or a commentator could read every feed's stream URL. Director-only,
+    # matching their sole consumer, the director panel.
     assert _cap(["schedule", "data"]) == ("director", False)
     assert _cap(["qualifying", "data"]) == ("director", False)
 
@@ -80,10 +80,9 @@ def t_producer_stepup_irreversible_ops():
 
 
 def t_mode_switch_is_director_no_stepup():
-    # Switching race<->qualifying is a Director-Panel control (it runs auth-free on the
-    # tailnet), so over the Funnel it must be director-tier — NOT producer+step-up. As
-    # producer+step-up the panel's plain relayCall got "step-up required" 403 during the
-    # 2026-07-10 qualifying (it carries no X-Console-Secret). Decision: director tier.
+    # Switching race and qualifying is a Director-Panel control that runs auth-free on
+    # the tailnet, so over the Funnel it is director tier, not producer plus step-up:
+    # the panel's plain relayCall carries no X-Console-Secret and would get a 403.
     assert _cap(["mode", "race"]) == ("director", False)
     assert _cap(["mode", "qualifying"]) == ("director", False)
     assert cp.decide({"director"}, ["mode", "qualifying"]) == cp.ALLOW
@@ -142,7 +141,7 @@ def t_decide_producer_stepup_enforced():
 
 
 def t_decide_stepup_route_still_requires_the_role_first():
-    # A director (not producer) hitting a producer op is FORBIDDEN regardless of step-up.
+    # A director who is not a producer hitting a producer op is forbidden, step-up or not.
     assert cp.decide({"director"}, ["set", "stint", "4"]) == cp.FORBIDDEN
     assert cp.decide({"director"}, ["set", "stint", "4"], has_step_up=True) == cp.FORBIDDEN
 
@@ -160,22 +159,22 @@ def t_splitscreen_and_overlay_fonts_are_any_reads():
 
 
 def t_cockpit_chat_send_is_any_read():
-    # cockpit.html POSTs /cockpit/chat/send; under /console it must be allowed
-    # (any authenticated) -- identity is forced server-side by the cockpit handler.
+    # cockpit.html POSTs /cockpit/chat/send; under /console any authenticated subject
+    # may reach it, because the cockpit handler forces the identity server-side.
     assert _cap(["cockpit", "chat", "send"], "POST") == ("any", False)
 
 
 def t_program_audio_endpoints_are_any():
-    # Cockpit + Race Control desk stream (funnelled under /console/cockpit/...)
+    # Cockpit and Race Control desk stream, funnelled under /console/cockpit/...
     assert cp.min_capability(["cockpit", "program-audio"]) == cp.Requirement(cp.ANY, False)
-    # Director Panel stream (tailnet /preview/... and /console/preview/... via gate)
+    # Director Panel stream: tailnet /preview/... and /console/preview/... via the gate
     assert cp.min_capability(["preview", "program-audio"]) == cp.Requirement(cp.ANY, False)
 
 
 def t_root_graphics_browser_is_any_authenticated():
-    # The tailnet-open /graphics list + file endpoints are ALSO reachable via
-    # /console/graphics for any authenticated subject, so the console pages'
-    # graphics widget works both on the tailnet /panel and under the /console mount.
+    # The tailnet-open /graphics list and file endpoints are also reachable via
+    # /console/graphics for any authenticated subject, so the console pages' graphics
+    # widget works on the tailnet /panel and under the /console mount alike.
     assert _cap(["graphics"]) == ("any", False)
     assert _cap(["graphics", "Standings.png"]) == ("any", False)
     assert cp.decide(set(), ["graphics"]) == cp.ALLOW           # even with no roles
@@ -205,8 +204,8 @@ def t_logo_is_any_authenticated():
 
 
 def t_race_control_page_and_data_require_race_control():
-    # The monitoring desk page + its only new data endpoint are gated on the
-    # race_control capability (no step-up), mirroring the cockpit/panel pages (#244).
+    # The monitoring desk page and its one data endpoint are gated on the race_control
+    # capability with no step-up, like the cockpit and panel pages. (#244)
     assert cp.min_capability(["race-control"]) == cp.Requirement(cp.RACE_CONTROL, False)
     assert cp.min_capability(["race-control", "data"]) == cp.Requirement(cp.RACE_CONTROL, False)
 
@@ -214,7 +213,7 @@ def t_race_control_page_and_data_require_race_control():
 def t_decide_race_control_allowed_commentator_forbidden():
     assert cp.decide({cp.RACE_CONTROL}, ["race-control"]) == cp.ALLOW
     assert cp.decide({cp.RACE_CONTROL}, ["race-control", "data"]) == cp.ALLOW
-    # A plain commentator (or any other role) may not reach the desk.
+    # A plain commentator, or any other role, may not reach the desk.
     assert cp.decide({cp.COMMENTATOR}, ["race-control"]) == cp.FORBIDDEN
     assert cp.decide({cp.DIRECTOR}, ["race-control", "data"]) == cp.FORBIDDEN
     # Additive roles: holding race_control alongside another role still allows it.
@@ -222,8 +221,8 @@ def t_decide_race_control_allowed_commentator_forbidden():
 
 
 def t_race_control_cues_and_presets_require_race_control():
-    # RC -> commentator notes (#376): the send + preset endpoints sit under the
-    # race-control desk, gated on the race_control capability (no step-up).
+    # RC to commentator notes: the send and preset endpoints sit under the race-control
+    # desk, gated on the race_control capability with no step-up. (#376)
     for seg in (["race-control", "cues"], ["race-control", "presets"]):
         assert cp.min_capability(seg) == cp.Requirement(cp.RACE_CONTROL, False), seg
         assert cp.decide({cp.RACE_CONTROL}, seg, "POST", False) == cp.ALLOW, seg
@@ -232,8 +231,9 @@ def t_race_control_cues_and_presets_require_race_control():
 
 
 def t_cue_back_send_any_auth_read_director():
-    # Commentator -> director cue-back (#377): the commentator send is ANY-auth +
-    # identity-scoped; the director read sits under /cues, so it stays director-gated.
+    # Commentator to director cue-back: the commentator send is any-auth and
+    # identity-scoped, and the director read sits under /cues, so it stays
+    # director-gated. (#377)
     assert cp.min_capability(["cockpit", "cue-back"]) == cp.Requirement(cp.ANY, False)
     assert cp.decide({cp.COMMENTATOR}, ["cockpit", "cue-back"], "POST", False) == cp.ALLOW
     assert cp.decide(set(), ["cockpit", "cue-back"], "POST", False) == cp.ALLOW
@@ -243,8 +243,8 @@ def t_cue_back_send_any_auth_read_director():
 
 
 def t_policy_cockpit_rc_notes_any_auth():
-    # A commentator reads their RC notes via the identity-scoped cockpit endpoint;
-    # any authenticated subject may reach it (the read is target-scoped server-side).
+    # A commentator reads their RC notes via the identity-scoped cockpit endpoint, and
+    # any authenticated subject may reach it because the read is target-scoped.
     seg = ["cockpit", "rc-notes"]
     assert cp.min_capability(seg) == cp.Requirement(cp.ANY, False)
     assert cp.decide({cp.COMMENTATOR}, seg, "GET", False) == cp.ALLOW
@@ -252,7 +252,7 @@ def t_policy_cockpit_rc_notes_any_auth():
 
 
 def t_policy_cues_director_only():
-    # Director may send/read cues; a bare commentator may not.
+    # A director may send and read cues; a bare commentator may not.
     for seg in (["cues", "send"], ["cues", "data"], ["cues", "presets"], ["cues", "reload"]):
         assert cp.decide({"director"}, seg, "POST", False) == cp.ALLOW, seg
         assert cp.decide({"commentator"}, seg, "POST", False) == cp.FORBIDDEN, seg
@@ -282,7 +282,7 @@ def t_decide_health_monitor_allows_any_role():
     for role in (cp.COMMENTATOR, cp.DIRECTOR, cp.PRODUCER, cp.RACE_CONTROL):
         assert cp.decide({role}, ["health-monitor"]) == cp.ALLOW
         assert cp.decide({role}, ["health-monitor", "data"]) == cp.ALLOW
-    # An authenticated subject with no resolved role still reaches an ANY route.
+    # An authenticated subject with no resolved role still reaches an any-auth route.
     assert cp.decide(set(), ["health-monitor"]) == cp.ALLOW
 
 
@@ -298,10 +298,10 @@ def t_substitution_is_director_gated():
 
 
 def t_event_notes_any_authenticated():
-    # Any authenticated subject (even role-less) may read the notes...
+    # Any authenticated subject, even a role-less one, may read the notes
     assert cp.decide(set(), ["event-notes", "data"], "GET") == cp.ALLOW
     assert cp.decide({"commentator"}, ["event-notes", "data"], "GET") == cp.ALLOW
-    # ...and it is NOT a recognized POST/write route.
+    # and it is not a recognized POST or write route
     assert cp.decide({"director"}, ["event-notes", "send"], "GET") == cp.NOT_FOUND
 
 
@@ -323,17 +323,17 @@ def t_feed_arm_is_director_no_stepup():
 
 
 def t_feed_quality_is_director_no_stepup():
-    # #493: manual quality-profile control mirrors feed arm/disarm — director
-    # tier, no step-up, so a plain director token can pin a feed's quality.
+    # Manual quality-profile control mirrors feed arm and disarm: director tier, no
+    # step-up, so a plain director token can pin a feed's quality. (#493)
     assert cp.min_capability(["feed", "A", "quality"], "POST") == cp.Requirement(cp.DIRECTOR, False)
     assert cp.min_capability(["feed", "B", "quality"], "POST") == cp.Requirement(cp.DIRECTOR, False)
 
 
 
 def t_feed_quality_get_form_not_funnelled():
-    # #493: the GET path form /feed/<A|B>/quality/<tier> is a Companion (loopback) route,
-    # deliberately NOT a /console route -> min_capability returns None so it is NOT reachable
-    # over the Funnel (feed control stays the director-gated POST form there).
+    # The GET path form /feed/<A|B>/quality/<tier> is a Companion loopback route and
+    # deliberately not a /console route, so min_capability returns None and it is not
+    # reachable over the Funnel; there feed control stays the director-gated POST. (#493)
     assert cp.min_capability(["feed", "A", "quality", "robust"], "GET") is None
     assert cp.min_capability(["feed", "B", "quality", "auto"], "GET") is None
 

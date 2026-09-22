@@ -60,7 +60,7 @@ def t_missing_columns_and_empty_degrade():
 
 
 def _event_notes_client(event_notes_source):
-    """make_handler over a real ThreadingHTTPServer; returns (srv, get). Mirrors test_broadcast_chat._bc_client."""
+    """make_handler over a real ThreadingHTTPServer. Returns (srv, get)."""
     import json as _json
     import threading as _t
     import urllib.error

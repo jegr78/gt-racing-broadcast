@@ -25,8 +25,8 @@ def t_companion_has_intermission_button():
 
 
 def t_panel_intermission_macro_does_not_mute():
-    # The INTERMISSION macro is a PURE scene switch: the feeds/Discord are not in the
-    # scene, so muting them here would only force a manual reset on the next switch.
+    # The INTERMISSION macro is a pure scene switch: the feeds and Discord are not in
+    # the scene, so muting them here would only force a manual reset on the next switch.
     html = _read(os.path.join("src", "director", "director-panel.html"))
     i = html.index('{label:"INTERMISSION"')
     macro = html[i:html.index('}', i) + 1]    # the macro object only (before any trailing comment)
@@ -55,7 +55,7 @@ def t_companion_intermission_button_only_switches_scene():
                                                  if isinstance(a, dict)):
                     target = btn
     assert target is not None, "no Companion button switches to the Intermission scene"
-    # pure scene switch: it must NOT mute any source (no set_source_mute action)
+    # a pure scene switch must mute no source, so no set_source_mute action
     for a in downs(target):
         if isinstance(a, dict):
             assert (a.get("options") or {}).get("source") is None, \

@@ -4,9 +4,8 @@ error propagation, Feed phases, Relay.status() contract.
 Run: python3 tests/test_health.py"""
 import importlib.util, logging, os, tempfile, time
 
-# resolve_hls/ssai_warning now take a logger (per-feed logger in production),
-# not a path. A plain logging.Logger with no handlers is the test stand-in:
-# its .info/.warning/.error calls are no-ops without a handler.
+# resolve_hls/ssai_warning take a logger, not a path. A plain logging.Logger with no
+# handlers is the stand-in: its calls are no-ops without a handler.
 _LOG = logging.getLogger("test_health.resolve")
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -18,9 +17,8 @@ _cj = importlib.util.spec_from_file_location(
     "cookie_jar", os.path.join(ROOT, "src", "scripts", "cookie_jar.py"))
 cookie_jar = importlib.util.module_from_spec(_cj); _cj.loader.exec_module(cookie_jar)
 
-# Manual feed arm defaults ON (#492 follow-up): a bare Relay would start feeds
-# disarmed (paused). These checks exercise the legacy auto-pull path; pin the
-# opt-out so they stay focused (same guard as tests/test_pov.py).
+# Manual feed arm defaults ON (#492), so a bare Relay would start feeds paused. These
+# checks exercise the auto-pull path, so pin the opt-out.
 os.environ.setdefault("RACECAST_MANUAL_FEED_ARM", "0")
 
 
@@ -48,9 +46,8 @@ def t_cookie_health_fresh_and_stale():
 
 
 def t_a_resolve_rewriting_the_jar_does_not_make_stale_cookies_look_fresh():
-    # The bug: cookie_health read the jar's mtime, and `yt-dlp --cookies` writes the
-    # jar back on every resolve. Mid-event the relay resolves constantly, so the age
-    # never passed 12 h and the amber banner could not fire at all.
+    # `yt-dlp --cookies` writes the jar back on every resolve, so an mtime-based age
+    # never passed 12 h mid-event and the amber banner could not fire.
     with tempfile.TemporaryDirectory() as td:
         path = os.path.join(td, "cookies.txt")
         with open(path, "w", encoding="utf-8") as fh:
@@ -63,8 +60,8 @@ def t_a_resolve_rewriting_the_jar_does_not_make_stale_cookies_look_fresh():
 
 
 def t_an_unstamped_jar_reports_an_unknown_age_rather_than_a_fresh_one():
-    # A jar from before the stamp existed: the honest answer is "unknown", and it must
-    # not be reported as stale either — only a known, old export is stale.
+    # A jar from before the stamp existed is unknown, not stale: only a known, old
+    # export is stale.
     with tempfile.TemporaryDirectory() as td:
         path = os.path.join(td, "cookies.txt")
         with open(path, "w", encoding="utf-8") as fh:
@@ -141,8 +138,8 @@ def _resolve_err(stderr, status_stdout="", status_exc=None, cookies="/c/j.txt"):
 
 
 def t_resolve_hls_post_live_classifies_as_ended():
-    # #621: yt-dlp 2026.08.19 on a broadcast in Post-Live Manifestless mode: the resolve
-    # fails with this stderr, the live-status call prints "rcs post_live" (both captured).
+    # A broadcast in Post-Live Manifestless mode: the resolve fails with this stderr
+    # and the live-status call prints "rcs post_live". (#621)
     url, err, q, calls = _resolve_err(_NO_FORMAT_ERR + "\n", "rcs post_live\n")
     assert url is None and q is None
     assert err == _NO_FORMAT_ERR + " (live_status post_live)", err
@@ -158,8 +155,8 @@ def t_resolve_hls_was_live_and_upcoming_classify():
 
 
 def t_resolve_hls_live_without_format_stays_generic():
-    # #621/#615: a logged-out jar on a LIVE video fails with the same text. The live
-    # status keeps it apart from an ended broadcast: a generic drop, not "ended".
+    # A logged-out jar on a live video fails with the same text. The live status keeps
+    # it apart from an ended broadcast: a generic drop, not "ended". (#621, #615)
     _u, err, _q, _c = _resolve_err(_NO_FORMAT_ERR, "rcs is_live\n")
     assert err == _NO_FORMAT_ERR + " (live_status is_live)", err
     assert m.classify_source_state(err) is None
@@ -176,7 +173,7 @@ def t_resolve_hls_unknown_or_failed_live_status_keeps_error():
 
 def t_resolve_hls_other_errors_skip_the_status_call():
     # The playability reasons (bot check, rate limit, ended text) must reach the panel
-    # verbatim: no second call, no suffix.
+    # verbatim: no second call and no suffix.
     for e in ("ERROR: [youtube] abc: Sign in to confirm you're not a bot. Use --cookies",
               "ERROR: [youtube] abc: This live event has ended.",
               "ERROR: unable to download video data: HTTP Error 429: Too Many Requests"):
@@ -184,7 +181,7 @@ def t_resolve_hls_other_errors_skip_the_status_call():
         assert err == e and len(calls) == 1, (e, err, calls)
 
 
-# #615: the anonymous jar from the 2026-09-19 incident (no login marker).
+# An anonymous jar, with no login marker. (#615)
 _ANON_JAR = ("# Netscape HTTP Cookie File\n"
              ".youtube.com\tTRUE\t/\tTRUE\t0\t__Secure-YNID\tv\n"
              ".youtube.com\tTRUE\t/\tFALSE\t0\tPREF\tf6=40000000\n"
@@ -201,8 +198,8 @@ def _with_jar(text, fn):
 
 
 def t_resolve_hls_logged_out_jar_adds_the_cookie_hint():
-    # #615: a live video, no muxed format, a jar without login: the error that reaches
-    # last_error (and the panel) names the fix, and stays a generic drop.
+    # A live video, no muxed format, a jar without login: the error that reaches
+    # last_error names the fix and stays a generic drop. (#615)
     for status in ("rcs is_live\n", "rcs NA\n", ""):
         _u, err, _q, _c = _with_jar(_ANON_JAR, lambda p, s=status: _resolve_err(
             _NO_FORMAT_ERR, s, cookies=p))
@@ -221,7 +218,7 @@ def t_resolve_hls_logged_in_or_missing_jar_gets_no_hint():
 
 
 def t_resolve_hls_ended_or_upcoming_source_gets_no_cookie_hint():
-    # #621 already explains these; a login hint would point the operator the wrong way.
+    # The live status already explains these, so a login hint would mislead. (#621)
     for status, state in (("rcs post_live\n", "ended"), ("rcs was_live\n", "ended"),
                           ("rcs is_upcoming\n", "not_live_yet")):
         _u, err, _q, _c = _with_jar(_ANON_JAR, lambda p, s=status: _resolve_err(
@@ -237,7 +234,7 @@ def t_resolve_hls_other_errors_get_no_cookie_hint():
 
 
 def t_cookie_login_warning_only_for_a_logged_out_jar():
-    # #615: relay startup applies preflight's rule to the jar it will use.
+    # Relay startup applies preflight's rule to the jar it will use. (#615)
     msg = _with_jar(_ANON_JAR, m.cookie_login_warning)
     assert msg is not None and m.cookie_jar.LOGGED_OUT_HINT in msg, msg
     assert _with_jar(_LOGGED_IN_JAR, m.cookie_login_warning) is None
@@ -255,7 +252,7 @@ def t_parse_ytdlp_live_status():
 
 
 def t_feed_initial_phase_is_idle():
-    # Feed now opens a per-feed log at init -> use a tempdir, not the repo tree.
+    # Feed opens a per-feed log at init -> use a tempdir, not the repo tree.
     with tempfile.TemporaryDirectory() as td:
         f = m.Feed("A", 53001, 0, lambda: [], td)
     assert f.phase == "idle"
@@ -326,7 +323,7 @@ def t_status_league_sheet_id_none_when_unset():
 
 
 def t_status_includes_producer_name():
-    # #317: the takeover names the outgoing producer A from /status.
+    # The takeover names the outgoing producer A from /status. (#317)
     with tempfile.TemporaryDirectory() as td:
         r = _mk_relay(td, ["a", "b"])
         assert r.status()["producer"] == ""        # default: unset -> hostname elsewhere
@@ -344,8 +341,8 @@ def t_stream_transition_only_genuine_bool_changes():
 
 
 def t_stream_event_log_line_formats():
-    # Start: kbps appended when known (the first sample is a partial-window
-    # estimate → an approximate 'bytes are flowing' signal, hence the '~').
+    # Start: kbps appended when known. The first sample is a partial-window estimate,
+    # hence the '~'.
     assert m.stream_event_log_line(True) == "OBS stream output started"
     assert (m.stream_event_log_line(True, kbps=4520.4)
             == "OBS stream output started — upstream ~4520 kbps")
@@ -357,13 +354,13 @@ def t_stream_event_log_line_formats():
             == "OBS stream output stopped after 1h 01m 12s")
     assert (m.stream_event_log_line(False, uptime_s=42.0)
             == "OBS stream output stopped after 42s")
-    # Defensive: negative/None uptime is dropped, not rendered.
+    # Negative or None uptime is dropped, not rendered.
     assert m.stream_event_log_line(False, uptime_s=-3.0) == "OBS stream output stopped"
 
 
 def t_on_stream_transition_logs_relay_line_with_uptime():
-    # The transition is greppable in the relay log: a start line (upstream kbps)
-    # and a stop line (uptime start->stop), alongside the feed events.
+    # The transition is greppable in the relay log: a start line with upstream kbps
+    # and a stop line with the uptime.
     with tempfile.TemporaryDirectory() as td:
         r = _mk_relay(td, ["a", "b"])
         recs = []
@@ -436,8 +433,8 @@ def t_status_pov_stopped_when_paused_with_age():
 
 
 def t_cookie_health_vanished_file_treated_as_absent():
-    # The cookies file can be swapped/deleted mid-poll (racecast cookies refresh
-    # while the relay runs) — must degrade to absent, never raise.
+    # The cookies file can be swapped or deleted mid-poll, so this must degrade to
+    # absent and never raise.
     with tempfile.TemporaryDirectory() as td:
         gone = os.path.join(td, "soon-gone.txt")
         with open(gone, "w", encoding="utf-8") as fh:
@@ -446,9 +443,7 @@ def t_cookie_health_vanished_file_treated_as_absent():
         assert m.cookie_health(gone) == {"present": False, "age_h": None, "stale": False}
 
 
-# --------------------------------------------------------------------------
-# Live OBS-reachability probe behind /status's obs.reachable
-# --------------------------------------------------------------------------
+# Live OBS-reachability probe behind /status's obs.reachable.
 def t_should_probe_obs_throttles_and_respects_inflight():
     # first call (last_ts=0, idle) -> probe
     assert m.should_probe_obs(0.0, False, 1000.0, 5.0) is True
@@ -476,8 +471,8 @@ class _FakeObs:
 
 
 def t_status_obs_field_reports_probed_reachability():
-    # status() surfaces self.obs_reachable verbatim (the probe owns it), and the
-    # default before any probe is None ("unknown" -> panel shows no banner).
+    # status() surfaces self.obs_reachable verbatim; the default before any probe is
+    # None, which the panel renders as no banner.
     orig = m._obs_ws
     m._obs_ws = None                       # disable the live probe for determinism
     try:
@@ -537,7 +532,7 @@ def t_run_obs_probe_latches_stream_expected():
             r._obs_probe_running = True
             m._obs_ws = _FakeObs(True, "", {"stream_active": False})
             r._run_obs_probe()
-            assert r.stream_expected is True          # latched — survives going off air
+            assert r.stream_expected is True          # latched: survives going off air
     finally:
         m._obs_ws = orig
 
@@ -587,9 +582,7 @@ def t_maybe_probe_obs_disabled_returns_none_without_client():
         m._obs_ws = orig
 
 
-# --------------------------------------------------------------------------
-# Aggregate health (live heartbeat) — pure evaluation, transition, payload
-# --------------------------------------------------------------------------
+# Aggregate health on the heartbeat: pure evaluation, transition, payload.
 def _facts(**kw):
     base = {"feeds_down": [], "feeds_connecting_long": [], "cookies_stale": False,
             "obs_reachable": True, "tailscale_present": True}
@@ -617,8 +610,8 @@ def t_aggregate_health_yellow_causes():
 
 
 def t_aggregate_health_yellow_when_rebuilds_stood_down():
-    # #582: a stood-down auto-rebuild is an honest yellow with plain text, naming the
-    # feed and, when OBS reports it, the frame rate the producer host renders.
+    # A stood-down auto-rebuild is a yellow naming the feed and, when OBS reports it,
+    # the frame rate the producer host renders. (#582)
     h = m.aggregate_health(_facts(rebuilds_stood_down={"A": 44.2}))
     assert h["level"] == "yellow"
     assert h["reasons"] == ["Feed A rebuild ineffective — 3 OBS rebuilds did not clear "
@@ -642,23 +635,22 @@ def t_aggregate_health_red_lists_underlying_yellows():
 
 
 def t_feed_health_state_ok_when_not_dropped():
-    # A feed that is not dropped is never "down" — regardless of served/since.
+    # A feed that is not dropped is never "down", regardless of served/since.
     now = 1000.0
     assert m.feed_health_state(False, None, False, now) == "ok"
     assert m.feed_health_state(False, now - 999, True, now) == "ok"
 
 
 def t_feed_health_state_never_served_is_connecting():
-    # Never delivered a stable picture -> cannot have "lost" one. Even past the
-    # grace window it stays connecting (yellow), never down (red). Kills the
-    # startup/demo false CRITICAL.
+    # Never delivered a stable picture -> cannot have lost one. Even past the grace
+    # window it stays connecting (yellow), never down (red).
     now = 1000.0
     assert m.feed_health_state(True, now - 999, False, now) == "connecting"
 
 
 def t_feed_health_state_within_grace_is_connecting():
-    # Served, then dropped, but still inside the grace window -> connecting, not
-    # down. A self-healing reconnect blip never reaches CRITICAL.
+    # Served, then dropped, but still inside the grace window -> connecting, not down,
+    # so a self-healing reconnect blip never reaches CRITICAL.
     now = 1000.0
     assert m.feed_health_state(True, now - 5, True, now,
                                grace_s=m.HEALTH_DROP_GRACE_S) == "connecting"
@@ -668,28 +660,27 @@ def t_feed_health_state_within_grace_is_connecting():
 
 def t_feed_health_state_down_after_grace_when_served():
     # Served a stable picture, then dropped continuously past the grace window
-    # -> genuine loss -> down (red). The crew gets paged.
+    # -> genuine loss -> down (red), and the crew gets paged.
     now = 1000.0
     assert m.feed_health_state(True, now - (m.HEALTH_DROP_GRACE_S + 1), True, now) == "down"
 
 
 def t_health_grace_is_one_heartbeat_interval():
-    # Grace = 30 s = one heartbeat interval (scope-confirmed in the issue).
+    # Grace = 30 s = one heartbeat interval.
     assert m.HEALTH_DROP_GRACE_S == 30
     assert m.HEALTH_DROP_GRACE_S == m.HEARTBEAT_INTERVAL_S
     assert m.HEALTH_SERVED_OK_S == 10
 
 
 def t_connecting_settle_is_below_grace():
-    # The yellow "stuck connecting" settle window must sit BELOW the red grace so
-    # a drop still surfaces yellow before it escalates to red (settle < grace).
+    # The yellow "stuck connecting" settle window must sit below the red grace so a
+    # drop still surfaces yellow before it escalates to red.
     assert 0 < m.HEALTH_CONNECTING_SETTLE_S < m.HEALTH_DROP_GRACE_S
 
 
 def t_drop_connecting_notifiable_blip_suppressed():
-    # A served feed that JUST dropped is a silent blip — not yet a notifiable
-    # "stuck connecting" — until it has stayed down past the settle window. This
-    # is what stops a reconnect that self-heals within a heartbeat from pinging.
+    # A served feed that just dropped is a silent blip until it has stayed down past
+    # the settle window, so a reconnect that self-heals within a heartbeat never pings.
     now = 1000.0
     s = m.HEALTH_CONNECTING_SETTLE_S
     # within the settle window -> silent (NOT notifiable)
@@ -703,9 +694,8 @@ def t_drop_connecting_notifiable_blip_suppressed():
 
 
 def t_health_facts_quick_reconnect_blip_not_yellow():
-    # A served feed that dropped a few seconds ago (a reconnect in progress) must
-    # NOT surface as "stuck connecting" — so the heartbeat does not @here a blip
-    # that self-heals within a heartbeat (the VOD EOF-churn / fan-out case).
+    # A served feed that dropped a few seconds ago is reconnecting, so it must not
+    # surface as "stuck connecting" and make the heartbeat @here a blip that self-heals.
     orig = m.detect_tailscale_ip
     m.detect_tailscale_ip = lambda: "100.64.0.9"
     try:
@@ -725,9 +715,8 @@ def t_health_facts_quick_reconnect_blip_not_yellow():
 
 
 def t_health_facts_stuck_reconnect_past_settle_is_yellow():
-    # A served feed still not reconnected past the settle window (but inside the
-    # red grace) IS a genuine "stuck connecting" -> yellow (early warning before
-    # the loss escalates to red).
+    # A served feed still not reconnected past the settle window, but inside the red
+    # grace, is a genuine "stuck connecting" -> yellow before it escalates to red.
     orig = m.detect_tailscale_ip
     m.detect_tailscale_ip = lambda: "100.64.0.9"
     try:
@@ -749,7 +738,7 @@ def t_health_facts_stuck_reconnect_past_settle_is_yellow():
 
 def t_health_facts_demo_feed_never_red():
     # A feed whose serve never lasted long enough (served_ok False) and has been
-    # "dropped" for a long time must NOT land in feeds_down -> no CRITICAL.
+    # dropped for a long time must not land in feeds_down, so no CRITICAL.
     orig = m.detect_tailscale_ip
     m.detect_tailscale_ip = lambda: "100.64.0.9"
     try:
@@ -769,8 +758,8 @@ def t_health_facts_demo_feed_never_red():
 
 
 def t_health_facts_sustained_loss_is_red():
-    # A feed that DID serve a stable picture and then dropped past the grace
-    # window is a genuine loss -> feeds_down -> red.
+    # A feed that did serve a stable picture and then dropped past the grace window
+    # is a genuine loss -> feeds_down -> red.
     orig = m.detect_tailscale_ip
     m.detect_tailscale_ip = lambda: "100.64.0.9"
     try:
@@ -814,8 +803,8 @@ def t_discord_health_payload_shape_and_color():
 
 
 def t_discord_health_payload_event_title_footer():
-    # A non-empty event title (#207) rides along as the embed footer; empty -> no
-    # footer at all (the embed is byte-for-byte the pre-#207 shape).
+    # A non-empty event title rides along as the embed footer; empty means no footer
+    # at all. (#207)
     with_title = m.discord_health_payload("red", ["Feed A down"], prev_level="green",
                                           event_title="GTEC - Round 4")
     assert with_title["embeds"][0]["footer"] == {"text": "GTEC - Round 4"}
@@ -824,9 +813,8 @@ def t_discord_health_payload_event_title_footer():
 
 
 def t_discord_health_payload_pings_here_on_every_level():
-    # @here must live in top-level `content` (Discord ignores mentions inside
-    # embeds) and allowed_mentions must permit it — so a health change pings the
-    # crew even if the panel pill is missed. Fires on degraded AND recovery.
+    # @here must live in top-level `content` because Discord ignores mentions inside
+    # embeds, and allowed_mentions must permit it. Fires on degraded and on recovery.
     for level, prev in (("red", "green"), ("yellow", "green"), ("green", "red")):
         p = m.discord_health_payload(level, ["x"], prev_level=prev)
         assert p["content"] == "@here"
@@ -839,10 +827,9 @@ def t_status_includes_health():
     try:
         with tempfile.TemporaryDirectory() as td:
             r = _mk_relay(td, ["https://youtu.be/a", "https://youtu.be/b"])
-            # status() kicks off a throttled async OBS probe; on a loaded CI runner
-            # it can finish and overwrite obs_reachable=False before status() reads
-            # the health facts, flipping green->yellow. Disable it so the assertion
-            # reflects the value we set, not a probe race (flaky macos-3.12, #189 CI).
+            # status() kicks off a throttled async OBS probe that can finish and
+            # overwrite obs_reachable before status() reads the health facts. Disable
+            # it so the assertion reflects the value set here, not a probe race.
             r._maybe_probe_obs = lambda now: None
             r.obs_reachable = True
             h = r.status()["health"]
@@ -857,8 +844,8 @@ def t_status_includes_health():
 
 
 def t_status_refresh_does_not_consume_notification_baseline():
-    # /status refreshes the DISPLAYED level every 2 s but must never advance the
-    # webhook baseline — else the 30 s heartbeat would miss the transition.
+    # /status refreshes the displayed level every 2 s but must never advance the
+    # webhook baseline, or the 30 s heartbeat would miss the transition.
     orig = m.detect_tailscale_ip
     m.detect_tailscale_ip = lambda: "100.64.0.9"
     try:
@@ -886,8 +873,7 @@ def t_send_health_webhook_noop_without_url():
 
 def t_send_health_webhook_sets_user_agent():
     # Discord sits behind Cloudflare, which 403s the default "Python-urllib/x.y"
-    # User-Agent -> the POST silently never arrives. The request MUST carry an
-    # explicit User-Agent (the rest of the relay already does). Regression guard.
+    # User-Agent, so the POST silently never arrives without an explicit one.
     with tempfile.TemporaryDirectory() as td:
         r = _mk_relay(td, ["https://youtu.be/a"])
         r.discord_webhook_url = "https://discord.test/api/webhooks/1/abc"
@@ -910,11 +896,9 @@ def t_send_health_webhook_sets_user_agent():
         assert ua and "racecast" in ua.lower(), ua
 
 
-# --------------------------------------------------------------------------
-# Auto-failover to the Intermission scene on confirmed on-air feed loss (#378)
-# --------------------------------------------------------------------------
+# Auto-failover to the Intermission scene on confirmed on-air feed loss (#378).
 def t_auto_failover_disabled_by_default():
-    # Opt-in: absent / empty / falsey -> OFF; only an explicit truthy token arms it.
+    # Opt-in: absent, empty or falsey -> OFF; only an explicit truthy token arms it.
     assert m.auto_failover_enabled({}) is False
     assert m.auto_failover_enabled({"RACECAST_AUTO_FAILOVER": ""}) is False
     for off in ("0", "false", "no", "off", "  Off "):
@@ -941,8 +925,8 @@ def t_should_failover_quiet_when_on_air_not_down():
 
 
 def t_should_failover_quiet_when_obs_not_on_air_scene():
-    # Don't yank the program if the producer already moved OBS off the feed scene
-    # (Intermission/Intro/replay/…). This is also why a second tick won't re-fire.
+    # Do not yank the program if the producer already moved OBS off the feed scene.
+    # This is also why a second tick will not re-fire.
     assert m.should_failover(True, True, "Intermission",
                              on_air_scene="Stint", already_failed_over=False) is False
     assert m.should_failover(True, True, None,
@@ -1175,7 +1159,7 @@ def t_churn_at_here_suppressed_for_not_live_source():
         r._discord_post = lambda payload, what: posts.append(what)
         now = 1000.0
         try:
-            # Make Feed A churn: >= threshold feed_recovery events inside the window.
+            # Feed A churns: at least threshold feed_recovery events inside the window.
             for k in range(m.FEED_CHURN_THRESHOLD):
                 r.health_store.record_event(now - 10 + k, "feed_recovery",
                                             metadata={"feed": "A"})
@@ -1214,10 +1198,10 @@ def t_jitter_yellow_does_not_page_but_real_yellow_does():
 
 
 def t_aggregate_health_backlog_is_a_yellow_reason_with_the_next_step():
-    # #583: named after the measurement (any slow consumer), not a guessed cause, and
-    # the line carries the operator's next step (#588): the RESET that drops the backlog,
-    # with its cost. Not ROBUST: that tier restarts streamlink without rejoining OBS and,
-    # for YouTube, starts two segments further behind the live edge (#614).
+    # Named after the measurement, not a guessed cause, and the line carries the
+    # operator's next step: the RESET that drops the backlog, with its cost. Not
+    # ROBUST, which restarts streamlink without rejoining OBS and, on YouTube, starts
+    # two segments further behind the live edge. (#583, #588, #614)
     h = m.aggregate_health(_facts(feeds_backlogged={"A": 11.6, "B": 8.2}))
     assert h["level"] == "yellow", h
     tail = "OBS reads slower than real time; RESET {0} → LIVE drops it with a short black dropout"
@@ -1227,9 +1211,9 @@ def t_aggregate_health_backlog_is_a_yellow_reason_with_the_next_step():
 
 
 def t_aggregate_health_av_disturbance_reports_and_asks_for_eyes():
-    # #619: OBS had already repaired this by the time the relay read its log, so the
-    # reason must not name a fix the director should apply. It reports what happened and
-    # asks for the only check that can confirm lip sync: a person looking at the program.
+    # OBS has already repaired this by the time the relay reads its log, so the reason
+    # must not name a fix. It reports what happened and asks for the only check that
+    # can confirm lip sync: a person looking at the program. (#619)
     h = m.aggregate_health(_facts(feeds_av_disturbed={"A": 5415.66}))
     assert h["level"] == "yellow", h
     assert h["reasons"] == ["Feed A audio timing broke by 5416 ms with no restart to "

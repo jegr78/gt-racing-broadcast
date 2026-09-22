@@ -48,8 +48,8 @@ def _ok_decrypt(data):
 def t_latches_only_decryptable_and_dedupes():
     packets = [
         (b"OK1", ("192.168.1.42", 33740)),   # real console
-        (b"NO",  ("192.168.1.99", 33740)),   # foreign host — must be ignored
-        (b"OK2", ("192.168.1.42", 33740)),   # same console again — dedup
+        (b"NO",  ("192.168.1.99", 33740)),   # foreign host, must be ignored
+        (b"OK2", ("192.168.1.42", 33740)),   # same console again, dedup
     ]
     fake = _FakeSock(packets)
     out = disc.discover_consoles(
@@ -90,9 +90,9 @@ def t_socket_error_never_raises():
 
 
 def t_decrypt_raise_and_recv_oserror_are_skipped_not_fatal():
-    # recvfrom yields, in order: a packet whose decrypt RAISES (skipped), a non-timeout
-    # OSError from recvfrom itself (skipped), then a good decodable packet (latched).
-    # The scan must never raise, must still find the good console, and must close.
+    # recvfrom yields, in order: a packet whose decrypt raises, a non-timeout OSError
+    # from recvfrom itself, then a good decodable packet. The scan must never raise,
+    # must still find the good console, and must close.
     class _Sock:
         def __init__(self):
             self._script = ["raise-decrypt", "oserror",
