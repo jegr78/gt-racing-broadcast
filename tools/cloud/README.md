@@ -25,8 +25,8 @@ There are two boxes; both are controlled the same way once up (SSH in as `raceca
 (`aws-box.sh` / `gcp-box.sh` → `status` / `start` / `stop` / `ssh`).
 
 - **AWS** (current production box): `g4dn.xlarge` (Tesla T4) in `eu-central-1a`,
-  instance `i-04d70428c19a484ef`. You reach it **directly over SSH with a key pair**
-  — `ssh -i ~/.ssh/racecast-box.pem racecast@racecast-box-aws` (the tailnet MagicDNS
+  instance `i-04d70428c19a484ef`. You reach it **directly over SSH with a key pair**,
+  `ssh -i ~/.ssh/racecast-box.pem racecast@racecast-box-aws` (the tailnet MagicDNS
   host): not via `gcloud`. Everything below the create/login layer (provisioning
   the machine, onboarding a league, per-event prep, going live) is identical.
 - **GCP**: `g2-standard-8` (L4) in `europe-west4-b`, instance `racecast-box`. Login is
@@ -86,7 +86,7 @@ gcloud compute ssh racecast@racecast-box --zone=europe-west4-b
 
 The script also copies `prepare-event.sh` into `~racecast/` for per-event prep (§4b); in startup-script mode where the file is absent, you can `scp` it up manually.
 
-**Reproduction one-liner — unattended startup-script (any league, from scratch):**
+**Reproduction one-liner: unattended startup-script (any league, from scratch):**
 
 ```bash
 gcloud compute instances create racecast-box ... \
@@ -119,7 +119,7 @@ Optional env (never commit these):
 
 The script ends with a green/red verification block. A red line names the step to re-run.
 
-**Tailscale join — required, not optional.** The tailnet is the box's trust boundary (the
+**Tailscale join: required, not optional.** The tailnet is the box's trust boundary (the
 relay's control port is never public), so step 10 **joins the box**: with `TS_AUTHKEY` it is
 unattended; **run provision interactively** and step 10 executes `tailscale up` right there.
 It prints a `https://login.tailscale.com/…` URL you open in your **laptop browser** to
@@ -149,7 +149,7 @@ join is done.
   session on `:0`, the same one OBS runs in, so desktop, OBS and the install tree are all
   the one `racecast` user.
 
-- **Event day is SSH-only — no RustDesk needed.** The autologin xfce session
+- **Event day is SSH-only: no RustDesk needed.** The autologin xfce session
   comes up at boot (as `racecast`), and `provision.sh` installs autostart entries so OBS +
   Discord launch with it. From your laptop, `gcloud compute ssh racecast@racecast-box …`
   then plain `racecast preflight` and `racecast event start`. `event start` also
@@ -182,7 +182,7 @@ firefox`). No scp from the laptop, and the cookies are created and used on the s
 datacenter IP (no session-origin mismatch). The operator-facing walkthrough is the
 **Remote producer (cloud GPU box)** wiki page.
 
-**Discord voice-join (per league, once — a Developer-Portal step the scripts can't do).**
+**Discord voice-join (per league, once, a Developer-Portal step the scripts can't do).**
 The box auto-joins the league's Discord voice channel so OBS captures the commentary
 (`racecast discord join`, and the event-start auto-join). This drives the box's desktop
 Discord over its RPC socket using the league's `DISCORD_CLIENT_ID`, and Discord grants the
@@ -275,8 +275,8 @@ else is validatable without a GPU. De-risk in three tiers:
 ## Notes
 
 - `provision.sh` runs as root for the machine layer (driver, apt, sudoers) but installs
-  racecast **straight into the `racecast` login user's home** (`/home/racecast`, user-owned
-  — the binary at `/home/racecast/racecast`, no nested `racecast/` dir) and runs
+  racecast **straight into the `racecast` login user's home** (`/home/racecast`, user-owned,
+  the binary at `/home/racecast/racecast`, no nested `racecast/` dir) and runs
   `install-tools`/`install-apps` **as that user**. So every event operation. Profile
   switch, cookie refresh, relay runtime writes, `install-tools --update`. Runs without
   `sudo`. The apt steps inside `install-apps` use the passwordless sudo the script set up.

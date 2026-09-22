@@ -435,8 +435,8 @@ log "7/10  racecast binary (installed straight into the racecast user's home, us
 # The frozen binary resolves profiles/ + runtime/ next to itself, and the relay writes
 # runtime state, so the tree must be owned by the event user (NOT root). Extract the
 # tarball DIRECTLY into ~racecast (its top level is the `racecast` binary + .env.example,
-# so the binary lands at ~racecast/racecast, with profiles/ + runtime/ created alongside
-# — no redundant ~racecast/racecast/ nesting: the HOME is the install root). Steps 8-9
+# so the binary lands at ~racecast/racecast, with profiles/ + runtime/ created alongside,
+# no redundant ~racecast/racecast/ nesting: the HOME is the install root). Steps 8-9
 # run install-tools/install-apps as this user, so every event operation is sudo-free.
 if [ -z "$USER_NAME" ]; then
   warn "no login user detected. Racecast install deferred (re-run under sudo after first SSH)"
@@ -485,7 +485,7 @@ log "8/10  racecast install-tools (yt-dlp / streamlink / ffmpeg / deno). As $USE
 # re-run). The verification block below is the source of truth for tool presence.
 if [ -n "$USER_NAME" ] && have racecast; then
   sudo -u "$USER_NAME" -H racecast install-tools \
-    || warn "install-tools reported issues — see the verification block below"
+    || warn "install-tools reported issues: see the verification block below"
   ok "install-tools step done"
 else
   warn "racecast not installed / no login user. Skipping install-tools"
@@ -500,7 +500,7 @@ log "9/10  racecast install-apps (OBS + Browser Source + PipeWire audio plugin, 
 # steps are named in install-apps' own output and re-checked in the verification block.
 if [ -n "$USER_NAME" ] && have racecast; then
   sudo -u "$USER_NAME" -H racecast install-apps --yes \
-    || warn "install-apps reported issues — see the verification block below"
+    || warn "install-apps reported issues: see the verification block below"
   ok "install-apps step done"
   # Repair any root-owned droppings a sudo sub-step of install-apps may have left in
   # the racecast tree, so every later runtime write (relay, cookies, OBS config) stays
@@ -577,7 +577,7 @@ fi
 # ---------------------------------------------------------------------------
 log "verification: every REQUIRED component below must be PRESENT. There are no optional"
 log "steps: a red PRESENCE line means the box is NOT fully equipped. provision is idempotent"
-log "— fix the cause and re-run; nothing is skipped on a real (GPU) event box."
+log "Fix the cause and re-run; nothing is skipped on a real (GPU) event box."
 rc=0
 ldconfig 2>/dev/null || true   # settle the loader cache so the GPU/NVENC presence checks
                                # below are honest even if a dpkg ldconfig-trigger was deferred
