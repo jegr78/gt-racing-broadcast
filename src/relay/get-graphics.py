@@ -3,7 +3,7 @@
 
 Each Assets row whose value cell is a Google-Drive share link is downloaded as
 '<Label>.png' into the graphics dir (repo: <repo>/runtime/graphics ; distributed
-package: <package>/graphics). The Sheet label IS the filename — there is no mapping
+package: <package>/graphics). The Sheet label IS the filename; there is no mapping
 table, so keep Sheet labels filesystem-clean. YouTube rows (Intro/Outro) are skipped;
 those are handled by get-media.py. Never stored under src/, never committed.
 
@@ -14,9 +14,9 @@ import argparse, csv, io, json, os, re, sys
 from urllib.parse import quote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
-# Pure stdlib placeholder helper from src/scripts (resolved both from source and
-# the frozen bundle, mirroring get-media.py). It is NOT config.py, so the relay's
-# dependency-light contract holds.
+# Stdlib-only placeholder helper from src/scripts, resolved both from source and
+# from the frozen bundle. It is not config.py, so the dependency-light contract
+# holds.
 _HERE = os.path.dirname(os.path.abspath(__file__))
 for _cand in (os.path.join(_HERE, "..", "scripts"),
               os.path.join(getattr(sys, "_MEIPASS", _HERE), "src", "scripts")):
@@ -27,7 +27,7 @@ import placeholders  # noqa: E402
 
 def load_dotenv(start):
     """Load KEY=VALUE pairs from a .env at the script dir or the project root into
-    os.environ (real env vars win). Bounded to the project (nearest ancestor with a
+    os.environ; real env vars win. Bounded to the project (nearest ancestor with a
     .git/.env.example marker). KEEP IN SYNC with the copies in racecast-feeds.py,
     setup-assets.py and get-media.py."""
     candidates, d = [start], start
@@ -115,26 +115,25 @@ def safe_filename(label):
     return f"{name}.png"
 
 
-# Asset labels owned by get-media.py (downloaded as MP4/MP3, NOT graphics). They
-# must be skipped here even when their value cell is a Drive link: a Drive-hosted
-# Intermission Music MP3 would otherwise be downloaded as 'Intermission Music.png'
-# and fail the PNG signature check. Intro/Outro only escape incidentally when
-# YouTube-hosted. KEEP IN SYNC with MEDIA_LABELS + MUSIC_LABEL in get-media.py.
+# Asset labels owned by get-media.py, skipped here even when their value cell is a
+# Drive link: a Drive-hosted Intermission Music MP3 would otherwise be downloaded as
+# 'Intermission Music.png' and fail the PNG signature check.
+# KEEP IN SYNC with MEDIA_LABELS + MUSIC_LABEL in get-media.py.
 MEDIA_LABELS = {"intro video", "outro video", "trailer video", "intermission music"}
 
-# Assets tab "Internal" checkbox (OBS-only assets hidden from the console Graphics
-# browser). Located by header name — mirrors the Crew/Brand header lookup in
-# racecast-feeds.py; truthy tokens mirror its CREW_TRUTHY. A Google-Sheets checkbox
-# exports as TRUE/FALSE in the gviz CSV. Parsed independently of the download link so a
-# ticked row without a link (e.g. a placeholder-seeded graphic) is still marked. With no
-# header / no Internal column the set is empty and the browser shows everything.
+# Assets tab "Internal" checkbox: OBS-only assets hidden from the console Graphics
+# browser. Located by header name; the truthy tokens mirror racecast-feeds.py's
+# CREW_TRUTHY, and a Google-Sheets checkbox exports as TRUE/FALSE in the gviz CSV.
+# Parsed independently of the download link, so a ticked row without a link is still
+# marked. With no header or no Internal column the set is empty and the browser
+# shows everything.
 ASSET_NAME_HEADERS = ("name", "label", "asset")
 ASSET_INTERNAL_HEADERS = ("internal", "obs only", "obs-only")
 ASSET_TRUTHY = frozenset({"x", "yes", "true", "1", "y", "✓"})
 
 # Sidecar manifest the relay's list_graphics() reads to hide internal assets. The
-# filename is a shared contract with racecast-feeds.py (which cannot import this
-# dependency-light script) — keep the literal in sync.
+# filename is a shared contract with racecast-feeds.py, which cannot import this
+# dependency-light script, so keep the literal in sync.
 MANIFEST_NAME = "manifest.json"
 
 
@@ -145,8 +144,8 @@ def _asset_truthy(v):
 def internal_from_csv(rows):
     """Set of Assets-tab labels whose 'Internal' checkbox is ticked. Requires a header
     row with an ASSET_INTERNAL_HEADERS column; the label is read from the
-    ASSET_NAME_HEADERS column (default col 0). Empty set when there is no header / no
-    Internal column (backward compatible)."""
+    ASSET_NAME_HEADERS column (default col 0). Empty set when there is no header or no
+    Internal column."""
     if not rows:
         return set()
     header = [(h or "").strip().lower() for h in rows[0]]
@@ -200,7 +199,7 @@ def graphics_from_csv(rows):
 
 
 def graphics_dir(here):
-    """Where graphics live when --out is not given. Mirrors get-media.media_dir():
+    """Where graphics live when --out is not given:
     repo (src/relay) -> <repo>/runtime/graphics ; package (relay) -> <pkg>/graphics."""
     if os.path.basename(here) == "relay" and os.path.basename(os.path.dirname(here)) == "src":
         return os.path.join(os.path.dirname(os.path.dirname(here)), "runtime", "graphics")
@@ -215,12 +214,11 @@ def obs_template_dir(here):
 
 
 def unlinked_graphic_targets(expected, linked, only_labels=None):
-    """The OBS-referenced graphics the Sheet has NO link for -> reset to the
-    placeholder (issue #387). `expected` is the '<name>.png' list from the OBS
-    collection; `linked` is the Sheet's {label: url} for linked graphics; a
-    graphic counts as linked iff its '<label>.png' matches. When `only_labels`
-    is given (a --only run), the reset is scoped to those labels. Returns the
-    sorted target names."""
+    """The OBS-referenced graphics the Sheet has no link for, reset to the
+    placeholder (#387). `expected` is the '<name>.png' list from the OBS collection;
+    `linked` is the Sheet's {label: url} for linked graphics, and a graphic counts
+    as linked iff its '<label>.png' matches. When `only_labels` is given (a --only
+    run), the reset is scoped to those labels. Returns the sorted target names."""
     linked_names = {safe_filename(lbl) for lbl in linked}
     linked_names.discard(None)
     targets = [n for n in expected if n not in linked_names]
@@ -233,8 +231,8 @@ def unlinked_graphic_targets(expected, linked, only_labels=None):
 
 def reset_unlinked_graphics(out_dir, here, linked, only_labels=None):
     """Overwrite the transparent placeholder onto every OBS-referenced graphic the
-    Sheet has no link for, so a removed/absent link reverts a stale real graphic
-    (issue #387). Best-effort; returns the sorted names written."""
+    Sheet has no link for, so a removed link reverts a stale real graphic (#387).
+    Best-effort; returns the sorted names written."""
     tpl = placeholders.find_obs_template(obs_template_dir(here))
     if not tpl:
         return []
@@ -251,8 +249,8 @@ def reset_unlinked_graphics(out_dir, here, linked, only_labels=None):
 
 def seed_missing_graphics(out_dir, here):
     """Drop the transparent placeholder for any OBS-collection-referenced graphic
-    still missing in out_dir — covers graphics a league never put in the Sheet
-    (e.g. weather overlays). Best-effort; returns the sorted names written."""
+    still missing in out_dir, which covers graphics a league never put in the Sheet.
+    Best-effort; returns the sorted names written."""
     tpl = placeholders.find_obs_template(obs_template_dir(here))
     if not tpl:
         return []
@@ -344,10 +342,9 @@ def main():
             print(f"WARNING: download failed for {label}: {e}")
             failed.append(label)
 
-    # Reset any OBS-referenced graphic the Sheet no longer links to its placeholder,
-    # so a removed/absent link replaces a stale real graphic (issue #387). Download
-    # failures stay in `all_graphics` (they are linked) so a transient error never
-    # clobbers a good file; scoped to --only when that filter is active.
+    # Reset any OBS-referenced graphic the Sheet no longer links to its placeholder
+    # (#387). Download failures stay in `all_graphics` because they are linked, so a
+    # transient error never clobbers a good file.
     reset = reset_unlinked_graphics(a.out, here, all_graphics, wanted)
     if reset:
         print(f"Reset {len(reset)} graphic(s) with no Sheet link to the placeholder: "
