@@ -48,7 +48,7 @@ def run_checks(checks, ctx):
             if not isinstance(r, CheckResult):
                 r = CheckResult(getattr(fn, "__name__", "check"), "fail",
                                 f"check returned {type(r).__name__}, not CheckResult")
-        except Exception as exc:  # noqa: BLE001 (a crashing check is a failure)
+        except Exception as exc:  # noqa: BLE001  a crashing check is a failure
             r = CheckResult(getattr(fn, "__name__", "check"), "fail",
                             f"{type(exc).__name__}: {exc}")
         results.append(r)

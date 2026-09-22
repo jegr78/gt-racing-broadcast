@@ -32,7 +32,7 @@ def _spawn(argv, env, log, cwd=ROOT):
     """Spawn a child in its own process group so teardown kills the tree.
     stdout and stderr are captured to the file path *log*. *cwd* is ROOT for the
     src/ dev path; binary mode runs from the copied binary's isolated app dir."""
-    fh = open(log, "wb")  # noqa: SIM115 (handle outlives this fn; closed in _kill)
+    fh = open(log, "wb")  # noqa: SIM115  handle outlives this fn; closed in _kill
     kw = {}
     if os.name == "posix":
         kw["start_new_session"] = True
@@ -121,7 +121,7 @@ def _playwright_available():
     launches. A missing package, a missing browser binary or any launch failure
     all read as unavailable, so the rendered checks skip."""
     try:
-        from playwright.sync_api import sync_playwright  # noqa: PLC0415 (optional, lazy)
+        from playwright.sync_api import sync_playwright  # noqa: PLC0415  optional, lazy
     except Exception:
         return False
     try:
@@ -140,7 +140,7 @@ def _render_pill(ctx, name, selector, what, headed=False, slowmo=0):
     environment. *headed* makes the browser a visible window and *slowmo* slows
     each action in milliseconds so the run is watchable. When headed, the page is
     held briefly so it is seen before the browser closes."""
-    from playwright.sync_api import sync_playwright  # noqa: PLC0415 (optional, lazy)
+    from playwright.sync_api import sync_playwright  # noqa: PLC0415  optional, lazy
     url = ctx.relay_url + "/cockpit?t=" + ctx.token
     try:
         with sync_playwright() as pw:
@@ -155,7 +155,7 @@ def _render_pill(ctx, name, selector, what, headed=False, slowmo=0):
                     page.wait_for_timeout(2500)   # let a human see the rendered pill
             finally:
                 browser.close()
-    except Exception as exc:  # noqa: BLE001 (a render failure is a check failure)
+    except Exception as exc:  # noqa: BLE001  a render failure is a check failure
         return E.CheckResult(name, "fail", f"{what}: {type(exc).__name__}: {exc}")
     return E.CheckResult(name, "pass", "")
 
@@ -190,7 +190,7 @@ def run_rendered_checks(ctx, headed=False, slowmo=0):
             continue
         try:
             results.append(fn(ctx, headed=headed, slowmo=slowmo))
-        except Exception as exc:  # noqa: BLE001 (a crashing check is a failure)
+        except Exception as exc:  # noqa: BLE001  a crashing check is a failure
             results.append(E.CheckResult(fn.__name__, "fail",
                                          f"{type(exc).__name__}: {exc}"))
     return results
@@ -226,7 +226,7 @@ def _capture_shots(ctx, outdir, headed=False, slowmo=0):
     if not _playwright_available():
         print(f"--shots: Playwright/browser unavailable, nothing written to {outdir}.")
         return []
-    from playwright.sync_api import sync_playwright  # noqa: PLC0415 (optional, lazy)
+    from playwright.sync_api import sync_playwright  # noqa: PLC0415  optional, lazy
     os.makedirs(outdir, exist_ok=True)
     surfaces = [
         ("control-center", ctx.ui_url + "/"),
@@ -247,7 +247,7 @@ def _capture_shots(ctx, outdir, headed=False, slowmo=0):
                     page.screenshot(path=path, full_page=True)
                     written.append(path)
                     print(f"--shots: wrote {path}")
-                except Exception as exc:  # noqa: BLE001 (best-effort artifact)
+                except Exception as exc:  # noqa: BLE001  best-effort artifact
                     print(f"--shots: WARN could not capture {name}: "
                           f"{type(exc).__name__}: {exc}")
         finally:

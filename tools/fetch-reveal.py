@@ -36,7 +36,7 @@ _WANTED = (
 
 def _http(url, binary=True, timeout=60):
     req = Request(url, headers={"User-Agent": _UA})
-    with urlopen(req, timeout=timeout) as r:    # noqa: S310 (fixed GitHub/gstatic hosts)
+    with urlopen(req, timeout=timeout) as r:    # noqa: S310  fixed GitHub/gstatic hosts
         data = r.read()
     return data if binary else data.decode("utf-8", "replace")
 

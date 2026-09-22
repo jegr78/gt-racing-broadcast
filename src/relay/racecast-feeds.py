@@ -81,7 +81,7 @@ for _cand in (os.path.join(_REL_HERE, "..", "scripts"),
         sys.path.insert(0, _cand)
 try:
     import obs_ws as _obs_ws
-except Exception:                                # noqa: BLE001 (reflection is optional)
+except Exception:                                # noqa: BLE001  reflection is optional
     _obs_ws = None
 # #537: a stable reference to the real module, captured at import time. Tests swap
 # the module-level `_obs_ws` name above to fakes/None to stub OBS calls; capturing a
@@ -233,7 +233,7 @@ def _streamlink_help():
             _STREAMLINK_HELP = subprocess.run(
                 ["streamlink", "--help"], capture_output=True, text=True,
                 errors="replace", timeout=10, env=external_tool_env()).stdout or ""
-        except Exception:                     # noqa: BLE001 (best-effort probe)
+        except Exception:                     # noqa: BLE001  best-effort probe
             _STREAMLINK_HELP = ""
     return _STREAMLINK_HELP
 # yt-dlp resolves the YouTube manifest with a browser UA; streamlink then re-fetches
@@ -2422,7 +2422,7 @@ def push_webhook_retrying(url, payload, expected_action=None, *,
             break
         try:
             body = post(url, payload, timeout=timeout)
-        except Exception as e:            # noqa: BLE001 (network/timeout is retryable)
+        except Exception as e:            # noqa: BLE001  network/timeout is retryable
             err = f"{type(e).__name__}: {e}"
             body = None
         else:
@@ -2454,14 +2454,14 @@ def apply_stream_service_for_ref(ref, channel_csv_url, push_url, set_service,
         return False, "no SHEET_PUSH_URL — the stream-key webhook is required"
     try:
         chan_rows = broadcast_chat.parse_channel_tab(fetch(channel_csv_url))
-    except Exception as exc:                            # noqa: BLE001 (tolerant fetch)
+    except Exception as exc:                            # noqa: BLE001  tolerant fetch
         return False, "channel fetch failed: {}".format(type(exc).__name__)
     platform = stream_target.event_platform(chan_rows)
     if not platform:
         return False, "no channel/platform configured (Channel tab)"
     try:
         body = post(push_url, {"action": "get_stream_key", "ref": ref})
-    except Exception as exc:                            # noqa: BLE001 (tolerant webhook)
+    except Exception as exc:                            # noqa: BLE001  tolerant webhook
         return False, "stream-key webhook failed: {}".format(type(exc).__name__)
     key, err = stream_target.parse_stream_key_response(body)
     if err:
@@ -3097,7 +3097,7 @@ class ProducerSource:
             req = Request(self.csv_url, headers={"User-Agent": "racecast-feeds/1.0"})
             with urlopen(req, timeout=timeout) as resp:
                 return resp.read().decode("utf-8", "replace")
-        except Exception as e:                          # noqa: BLE001 (tolerant)
+        except Exception as e:                          # noqa: BLE001  tolerant
             self.last_error = "{}: {}".format(type(e).__name__, e)
             return None
 
@@ -3568,7 +3568,7 @@ def ssai_warning(hls_url, logger):
     failure returns None so the feed is never blocked by the probe."""
     try:
         import urllib.request
-        with urllib.request.urlopen(hls_url, timeout=10) as r:   # noqa: S310 (https HLS only)
+        with urllib.request.urlopen(hls_url, timeout=10) as r:   # noqa: S310  https HLS only
             body = r.read(65536).decode("utf-8", errors="replace")
     except Exception:
         return None   # probe is a bonus signal; never fail the resolve on it
@@ -3880,7 +3880,7 @@ def _ffmpeg_listing(args):
     try:
         r = subprocess.run(["ffmpeg", "-hide_banner"] + args, capture_output=True,
                            timeout=20, env=external_tool_env(), **_no_window_kwargs())
-    except Exception:                         # noqa: BLE001 (best-effort scan)
+    except Exception:                         # noqa: BLE001  best-effort scan
         return ""
     return (r.stdout + r.stderr).decode("utf-8", "replace")
 
@@ -3947,7 +3947,7 @@ def local_encoder():
                 + LOCAL_ENCODER_ARGS["nvenc"] + ["-f", "null", "-"],
                 capture_output=True, timeout=20, env=external_tool_env(),
                 **_no_window_kwargs()).returncode
-        except Exception:                     # noqa: BLE001 (best-effort probe)
+        except Exception:                     # noqa: BLE001  best-effort probe
             rc = 1
         _LOCAL_ENCODER = "nvenc" if rc == 0 else "x264"
     return _LOCAL_ENCODER
@@ -4818,12 +4818,12 @@ class FeedFanoutServer:
             # would take out the heartbeat tick that also samples health.
             try:
                 conn.shutdown(socket.SHUT_RDWR)
-            except Exception:       # noqa: BLE001 (best-effort teardown)
+            except Exception:       # noqa: BLE001  best-effort teardown
                 pass
             if CLOSE_TO_WAKE:
                 try:
                     conn.close()
-                except Exception:   # noqa: BLE001 (best-effort teardown)
+                except Exception:   # noqa: BLE001  best-effort teardown
                     pass
         return len(doomed)
 
@@ -6971,7 +6971,7 @@ class Feed:
                 self.log.debug("fan-out rejoin on %s — OBS reconnect skipped (%s)",
                                self.name, note)
             return names
-        except Exception as exc:              # noqa: BLE001 (best-effort, never crash the serve)
+        except Exception as exc:              # noqa: BLE001  best-effort, never crash the serve
             self.log.debug("fan-out rejoin on %s — OBS reconnect error (%s)", self.name, exc)
             return []
 
@@ -6994,7 +6994,7 @@ class Feed:
             return False
         try:
             stuck, _snaps = srv.consumer_health(time.monotonic())
-        except Exception:      # noqa: BLE001 (a health read must never break the serve loop)
+        except Exception:      # noqa: BLE001  a health read must never break the serve loop
             return False
         return stuck is not None
 
@@ -7215,7 +7215,7 @@ class Feed:
                 try:
                     down = (time.time() - self.dropped_since) if self.dropped_since else 0.0
                     self.on_recovery(self.name, i + 1, max(0.0, down), self.source_state)
-                except Exception:      # noqa: BLE001 (best-effort telemetry)
+                except Exception:      # noqa: BLE001  best-effort telemetry
                     pass
             if self.ring is not None:
                 # Force OBS to reconnect once the fresh stream flows, so it re-joins with a
@@ -7307,7 +7307,7 @@ class Feed:
                 if stepped and self.on_step_down is not None:
                     try:
                         self.on_step_down(self.name, i + 1, stepped[0], stepped[1])
-                    except Exception:        # noqa: BLE001 (best-effort telemetry)
+                    except Exception:        # noqa: BLE001  best-effort telemetry
                         pass
                 if should_idle_dead_serves(self.dead_serves):
                     self._set_phase("idle")
@@ -7452,7 +7452,7 @@ class AvSyncWatcher:
                         fh, path = None, None     # rotated or truncated: pick it up again
                         self._partial = ""        # its tail belongs to the old file
                 time.sleep(self.POLL_S)
-        except Exception:                          # noqa: BLE001 (a detector must never kill the relay)
+        except Exception:                          # noqa: BLE001  a detector must never kill the relay
             self.log.exception("A/V sync watcher stopped")
         finally:
             if fh is not None:
@@ -7691,7 +7691,7 @@ class Relay:
                 feed_source_states[name] = f.source_state
         try:
             ts_present = detect_tailscale_ip() is not None
-        except Exception:                                # noqa: BLE001 (best effort)
+        except Exception:                                # noqa: BLE001  best effort
             ts_present = True
         st = self.obs_stats or {}
         cs = self.conn_state or {}
@@ -7701,7 +7701,7 @@ class Relay:
         if tstore is not None:
             try:
                 tpush = tstore.summary().get("push")
-            except Exception:                            # noqa: BLE001 (best-effort)
+            except Exception:                            # noqa: BLE001  best-effort
                 tpush = None
         return {"feeds_down": feeds_down, "feeds_connecting_long": connecting_long,
                 "cookies_stale": cookie_health(self.cookies, now=now)["stale"],
@@ -7748,7 +7748,7 @@ class Relay:
             self._av_watcher = AvSyncWatcher(d, self._serving_age, self._av,
                                              self._av_lock, LOG)
             threading.Thread(target=self._av_watcher.run, daemon=True).start()
-        except Exception as exc:                 # noqa: BLE001 (a detector is never fatal)
+        except Exception as exc:                 # noqa: BLE001  a detector is never fatal
             LOG.warning("A/V sync watcher not started (%s)", exc)
 
     # The watcher stamps every event with time.monotonic(), so both readers below take
@@ -7820,7 +7820,7 @@ class Relay:
             try:
                 summ = ts.summary()
                 tmode, tpush = summ.get("mode"), summ.get("push")
-            except Exception:  # noqa: BLE001 (sampling is best-effort)
+            except Exception:  # noqa: BLE001  sampling is best-effort
                 pass
         st = self.obs_stats or {}
         cs = self.conn_state or {}
@@ -7905,8 +7905,8 @@ class Relay:
             req = Request(url, data=data, method="POST",
                           headers={"Content-Type": "application/json",
                                    "User-Agent": "racecast-feeds/1.0"})
-            urlopen(req, timeout=5).read()   # noqa: S310 (operator-configured webhook)
-        except Exception as e:                # noqa: BLE001 (best effort)
+            urlopen(req, timeout=5).read()   # noqa: S310  operator-configured webhook
+        except Exception as e:                # noqa: BLE001  best effort
             LOG.warning("Discord %s webhook failed: %s: %s", what, type(e).__name__, e)
 
     def _event_title(self):
@@ -7932,18 +7932,18 @@ class Relay:
             self._sample_consumer_backlogs()
             try:
                 self._backlog_shed_tick(now)    # reads the classification just sampled
-            except Exception as exc:            # noqa: BLE001 (a remedy never breaks the heartbeat)
+            except Exception as exc:            # noqa: BLE001  a remedy never breaks the heartbeat
                 LOG.debug("backlog shed error (%s)", exc)
             h = self._refresh_health(now)
             if self.health_store is not None:
                 try:
                     self.health_store.record_tick(self._health_snapshot(now), now)
-                except Exception:  # noqa: BLE001 (sampling is best-effort)
+                except Exception:  # noqa: BLE001  sampling is best-effort
                     pass  # never let a store write break the heartbeat
             if self.health_store is not None and (now - self._last_prune) > 86400:
                 try:
                     self.health_store.prune(); self._last_prune = now
-                except Exception:  # noqa: BLE001 (best-effort)
+                except Exception:  # noqa: BLE001  best-effort
                     pass
             if health_should_notify(self._notified_level, h["notify_level"]):
                 self._send_health_webhook(h["notify_level"], self.health_reasons, self._notified_level)
@@ -8003,7 +8003,7 @@ class Relay:
                 if reaped:
                     LOG.info("feed %s: closed %d abandoned consumer connection(s) "
                              "OBS left open after an input rebuild", name, reaped)
-            except Exception as exc:    # noqa: BLE001 (a reaper never breaks the tick)
+            except Exception as exc:    # noqa: BLE001  a reaper never breaks the tick
                 LOG.debug("consumer reap on %s failed (%s)", name, exc)
             fl = srv.take_backlog_floor(time.monotonic())   # always take: a stopped feed resets too
             if f.paused or f.phase != "serving":
@@ -8027,13 +8027,13 @@ class Relay:
         if serving:
             try:
                 live = srv.consumer_backlog(time.monotonic())
-            except Exception:                   # noqa: BLE001 (best-effort)
+            except Exception:                   # noqa: BLE001  best-effort
                 live = None
         snaps = None
         if srv is not None and hasattr(srv, "consumer_health"):
             try:
                 snaps = srv.consumer_health(time.monotonic())[1]
-            except Exception:                   # noqa: BLE001 (best-effort)
+            except Exception:                   # noqa: BLE001  best-effort
                 snaps = None
         return {"backlog_s": None if live is None else round(live, 1),
                 "backlogged": (name in self._backlogged_feeds and feed_backlog_degraded(
@@ -8095,7 +8095,7 @@ class Relay:
         try:
             self.health_store.record_event(now, event_type, label=label,
                                            producer=self.producer_name, metadata=metadata)
-        except Exception:                       # noqa: BLE001 (best-effort)
+        except Exception:                       # noqa: BLE001  best-effort
             pass
 
     def _record_consumer_overflows(self, now):
@@ -8157,7 +8157,7 @@ class Relay:
         try:
             _stuck, snaps = srv.consumer_health(time.time())
             return snaps
-        except Exception:                       # noqa: BLE001 (best-effort)
+        except Exception:                       # noqa: BLE001  best-effort
             return None
 
     def _freeze_sampler_loop(self):
@@ -8170,7 +8170,7 @@ class Relay:
                 break
             try:
                 self._freeze_tick(time.time())
-            except Exception as exc:            # noqa: BLE001 (best-effort, never crash the sampler)
+            except Exception as exc:            # noqa: BLE001  best-effort, never crash the sampler
                 LOG.debug("freeze sampler error (%s)", exc)
 
     def _freeze_tick(self, now):
@@ -8313,7 +8313,7 @@ class Relay:
         intermission = getattr(_obs_ws, "INTERMISSION_SCENE", "Intermission")
         try:
             scene, note = self._obs.get_current_program_scene()
-        except Exception as e:                            # noqa: BLE001 (best effort)
+        except Exception as e:                            # noqa: BLE001  best effort
             self.obs_note = f"{type(e).__name__}: {e}"
             return
         if scene is None:                                 # OBS unreachable, one note, no crash
@@ -8345,7 +8345,7 @@ class Relay:
         while not self._hb_stop.is_set():
             try:
                 self._maybe_auto_cover(time.time())
-            except Exception as exc:  # noqa: BLE001 (best-effort; never break the tick loop)
+            except Exception as exc:  # noqa: BLE001  best-effort; never break the tick loop
                 LOG.debug("auto-cover tick error (ignored): %s", exc, exc_info=True)
             self._hb_stop.wait(AUTO_COVER_POLL_S)
 
@@ -8638,7 +8638,7 @@ class Relay:
         try:
             local = {f for f, feed in self.feeds.items()
                      if is_local_source(feed.current_channel()[0])}
-        except Exception:                    # noqa: BLE001 (runs in the handover's caller)
+        except Exception:                    # noqa: BLE001  runs in the handover's caller
             local = set()                    # unknown -> the mic stays closed
         return _OBS_WS_MODULE.feed_audio_plan(local, mic=mic)
 
@@ -8714,7 +8714,7 @@ class Relay:
             # Health-Monitor marker.
             if transition:
                 self._on_stream_transition(transition, now, kbps=kbps)
-        except Exception:                                # noqa: BLE001 (best-effort)
+        except Exception:                                # noqa: BLE001  best-effort
             with self._obs_lock:
                 self._obs_probe_running = False
 
@@ -8743,7 +8743,7 @@ class Relay:
                     now, "obs_stream_start" if started else "obs_stream_stop",
                     label="OBS stream started" if started else "OBS stream stopped",
                     producer=self.producer_name)
-            except Exception:    # noqa: BLE001 (best-effort)
+            except Exception:    # noqa: BLE001  best-effort
                 pass
 
     def _spawn_event_stop(self):
@@ -8766,7 +8766,7 @@ class Relay:
                 kwargs["start_new_session"] = True
             subprocess.Popen(argv, **kwargs)
             LOG.info("Last part ended — spawned `event stop` (report + teardown).")
-        except Exception:      # noqa: BLE001 (best-effort)
+        except Exception:      # noqa: BLE001  best-effort
             LOG.exception("failed to spawn event stop")
 
     def _sample_connectivity(self):
@@ -8774,7 +8774,7 @@ class Relay:
         latch funnel_expected. Best-effort: each probe defaults to None on failure."""
         try:
             funnel = tailscale.funnel_on("/console")
-        except Exception:                                # noqa: BLE001 (best-effort)
+        except Exception:                                # noqa: BLE001  best-effort
             funnel = None
         try:
             ts_state = tailscale.tailscale_backend()[1]
@@ -9045,7 +9045,7 @@ class Relay:
                 self.health_store.record_event(
                     time.time(), "feed_substitution", producer=self.producer_name,
                     metadata={"feed": feed, "stint": stint})
-            except Exception:                # noqa: BLE001 (best-effort)
+            except Exception:                # noqa: BLE001  best-effort
                 pass
         self._discord_post(
             notify.substitution_discord_payload(feed, stint, self.producer_name,
@@ -9065,7 +9065,7 @@ class Relay:
                     now, "feed_recovery", producer=self.producer_name,
                     metadata={"feed": feed, "stint": stint,
                               "downtime_s": round(max(0.0, downtime_s), 1)})
-            except Exception:                # noqa: BLE001 (best-effort)
+            except Exception:                # noqa: BLE001  best-effort
                 pass
         LOG.info("feed recovery recorded: Feed %s stint %d (~%.0fs degraded)",
                  feed, stint, max(0.0, downtime_s))
@@ -9082,7 +9082,7 @@ class Relay:
                     now, "feed_step_down", producer=self.producer_name,
                     metadata={"feed": feed, "stint": stint,
                               "from": from_tier, "to": to_tier})
-            except Exception:                # noqa: BLE001 (best-effort)
+            except Exception:                # noqa: BLE001  best-effort
                 pass
         # State the step-down fact only; do NOT claim the @here here: _discord_post is
         # best-effort and no-ops without a webhook, so an unconditional "posted" would
@@ -9094,7 +9094,7 @@ class Relay:
                 discord_step_down_payload(feed, stint, from_tier, to_tier,
                                           self._event_title(), self.producer_name),
                 "feed-step-down")
-        except Exception:                    # noqa: BLE001 (best-effort)
+        except Exception:                    # noqa: BLE001  best-effort
             pass
 
     def _maybe_notify_recovery_churn(self, feed, now, source_state=None):
@@ -9110,7 +9110,7 @@ class Relay:
             return
         try:
             events = self.health_store.events(now - FEED_CHURN_WINDOW_S, now)
-        except Exception:                    # noqa: BLE001 (best-effort read)
+        except Exception:                    # noqa: BLE001  best-effort read
             return
         ts = [e.get("ts") for e in events
               if e.get("type") == "feed_recovery"
@@ -9133,7 +9133,7 @@ class Relay:
             return None
         try:
             events = self.health_store.events(0, time.time())
-        except Exception:                    # noqa: BLE001 (best-effort read)
+        except Exception:                    # noqa: BLE001  best-effort read
             return None
         subs = [e for e in events if e.get("type") == "feed_substitution"]
         if not subs:
@@ -9235,7 +9235,7 @@ class Relay:
         if getattr(self, "_obs", None) is not None:
             try:
                 self._obs.close()          # #537: clean 1000 on the persistent sessions
-            except Exception:  # noqa: BLE001 (best-effort)
+            except Exception:  # noqa: BLE001  best-effort
                 pass
 
 
@@ -11002,7 +11002,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                 label=f"{plabel} started",
                                 producer=relay.producer_name,
                                 metadata={"index": idx})
-                        except Exception:   # noqa: BLE001 (best-effort)
+                        except Exception:   # noqa: BLE001  best-effort
                             pass
                     # Echo the applied part label + active mode so the panel/operator can
                     # confirm WHICH part (and mode) went live, a race-vs-qualifying
@@ -11034,7 +11034,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                 label=f"{plabel} ended",
                                 producer=relay.producer_name,
                                 metadata={"index": res})
-                        except Exception:   # noqa: BLE001 (best-effort)
+                        except Exception:   # noqa: BLE001  best-effort
                             pass
                     if is_last:
                         self._send({"ok": True, "index": res, "final": True})
@@ -11637,7 +11637,7 @@ def main():
                                           health_store.DEFAULT_RETENTION_DAYS)))
     try:
         _health_store_obj.prune()        # drop stale rows on start
-    except Exception:                     # noqa: BLE001 (best-effort)
+    except Exception:                     # noqa: BLE001  best-effort
         pass
     # Free-text event title (#207): persisted runtime state (event.json), seeded
     # from the EVENT_TITLE default (profile.env). An explicit --event-title wins and

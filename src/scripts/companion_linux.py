@@ -128,7 +128,7 @@ def detect_unit(platform=None, which=None, run=None, exists=None):
         if run(["systemctl", "cat", UNIT], capture_output=True,
                text=True).returncode == 0:
             return UNIT
-    except Exception:    # noqa: BLE001 — systemctl missing/odd -> fall through to file check
+    except Exception:    # noqa: BLE001  systemctl missing/odd -> fall through to file check
         pass
     return UNIT if exists(SERVICE_UNIT_FILE) else None
 

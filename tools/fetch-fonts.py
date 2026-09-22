@@ -34,7 +34,7 @@ _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 
 def _http(url, headers=None, binary=False, timeout=30):
     req = Request(url, headers=headers or {})
-    with urlopen(req, timeout=timeout) as r:    # noqa: S310 (fixed Google hosts)
+    with urlopen(req, timeout=timeout) as r:    # noqa: S310  fixed Google hosts
         data = r.read()
     return data if binary else data.decode("utf-8", "replace")
 

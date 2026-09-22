@@ -228,7 +228,7 @@ def main(argv=None):
         for req, data in cleanup:
             try:
                 session.request(req, data)
-            except Exception:                  # noqa: BLE001 (cleanup is best effort)
+            except Exception:                  # noqa: BLE001  cleanup is best effort
                 pass  # already gone or never created
         session.close()
         stop_process(proc)
