@@ -1,9 +1,9 @@
-# Ruff lint config — catches the issue classes GitHub code scanning (CodeQL)
+# Ruff lint config: catches the issue classes GitHub code scanning (CodeQL)
 # flags, BEFORE they reach a PR. Run locally: python3 tools/lint.py [--fix]
 # (needs `ruff` on PATH: brew/winget install ruff). CI runs the same check.
 #
 # The rule set is deliberately narrow: this codebase intentionally uses compact
-# one-liners (`try: ... except OSError: pass` with an explanatory comment — the
+# one-liners (`try: ... except OSError: pass` with an explanatory comment, the
 # CodeQL convention), semicolons and grouped imports, so style rules (E1/E2/
 # E4/E7, line length) stay OFF. S110 (try/except/pass) also stays off: it
 # cannot see the explanatory comments CodeQL accepts and would re-flag every

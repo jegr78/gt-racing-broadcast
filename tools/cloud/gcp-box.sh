@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# gcp-box.sh — start / stop / status control wrapper for the GCP GPU box.
+# gcp-box.sh. Start / stop / status control wrapper for the GCP GPU box.
 #
 # Runs on YOUR laptop (not the box). A thin wrapper around the `gcloud` CLI so you
 # never have to remember the instance name or zone. Cost control: STOP the box
-# after every event — a running g2-standard-8 (L4) bills by the hour, a stopped
+# after every event: a running g2-standard-8 (L4) bills by the hour, a stopped
 # ("TERMINATED") one only its boot disk. The tailnet IP is stable across
 # stop/start (Tailscale), so the box keeps its `100.x` address after a restart.
 #
@@ -64,7 +64,7 @@ stop() {
   if [ "$st" = "TERMINATED" ]; then echo "already stopped (TERMINATED)."; return 0; fi
   echo "stopping $NAME …"
   gcloud compute instances stop "$NAME" --zone "$ZONE" ${PROJECT_ARG[@]+"${PROJECT_ARG[@]}"} >/dev/null
-  echo "stopped — billing drops to the boot disk only."
+  echo "stopped: billing drops to the boot disk only."
 }
 
 case "${1:-status}" in

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# iptest-regions.sh — orchestrator for the #505 YouTube-egress-IP test. Runs on YOUR laptop.
+# iptest-regions.sh. Orchestrator for the #505 YouTube-egress-IP test. Runs on YOUR laptop.
 #
 # For each AWS region it launches a THROWAWAY Ubuntu 24.04 t3.small (no GPU), uploads the
 # real yt-cookies.txt + provision-iptest.sh, runs the minimal provision (racecast install-tools
@@ -44,7 +44,7 @@ for R in $REGIONS; do
   AMI="$(aws ec2 describe-images --region "$R" --owners 099720109477 \
         --filters "Name=name,Values=ubuntu/images/hvm-ssd*/ubuntu-noble-24.04-amd64-server-*" "Name=state,Values=available" \
         --query 'reverse(sort_by(Images,&CreationDate))[0].ImageId' --output text 2>/dev/null)"
-  [ -n "$AMI" ] && [ "$AMI" != "None" ] || { echo "no Ubuntu 24.04 AMI in $R — skip"; continue; }
+  [ -n "$AMI" ] && [ "$AMI" != "None" ] || { echo "no Ubuntu 24.04 AMI in $R. Skip"; continue; }
 
   aws ec2 delete-key-pair --region "$R" --key-name "$KN" >/dev/null 2>&1
   aws ec2 import-key-pair --region "$R" --key-name "$KN" --public-key-material "fileb://$PUBKEY" >/dev/null 2>&1
@@ -63,7 +63,7 @@ for R in $REGIONS; do
   fi
   aws ec2 wait instance-running --region "$R" --instance-ids "$IID" 2>/dev/null
   IP="$(aws ec2 describe-instances --region "$R" --instance-ids "$IID" --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)"
-  echo "instance $IID @ $IP — waiting for SSH"
+  echo "instance $IID @ $IP. Waiting for SSH"
 
   up=0
   for _ in $(seq 1 12); do
