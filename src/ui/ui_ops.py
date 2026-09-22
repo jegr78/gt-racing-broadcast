@@ -1,7 +1,7 @@
 """Control Center operation registry: which `racecast` invocations the web UI may
-trigger, and how to build the child argv. Pure data + pure helpers (no I/O) —
-the UI server routes /api/op/<name> through this table and build_argv() only,
-so the HTTP surface can never run arbitrary commands or pass free-form args."""
+trigger, and how to build the child argv. The UI server routes /api/op/<name>
+through this table and build_argv() only, so the HTTP surface can never run
+arbitrary commands or pass free-form args."""
 import re
 
 # name -> base racecast argv. Installs always run with --yes: jobs have no stdin
@@ -31,7 +31,7 @@ OPS = {
     "event-stop": ["event", "stop"],
     "event-takeover": ["event", "takeover"],   # ip (+ optional stint) appended via PARAMS
     "free-ports": ["freeport"],   # kill orphaned holders of the feed ports (53001-53003)
-    "kill-relay": ["freeport", "--force", "8088", "53001", "53002", "53003"],   # force-free the relay control + feed ports: recover a stale/orphaned relay the Stop button can't reach
+    "kill-relay": ["freeport", "--force", "8088", "53001", "53002", "53003"],   # recovers a stale relay the Stop button cannot reach
     "cookies": ["cookies"],
     "cookies-twitch": ["cookies", "twitch"],
     "graphics": ["graphics"],
@@ -91,23 +91,21 @@ def _qualifying_flag(value):
 def _funnel_flag(value):
     """`--funnel` switches `event takeover` to pull A's handover state over the
     public Tailscale Funnel (host is A's MagicDNS name) instead of the tailnet IP.
-    The per-league CONSOLE_SECRET it steps up with is read server-side from the
-    active profile by the CLI — it is never collected or sent from the UI."""
+    The CLI reads the per-league CONSOLE_SECRET it steps up with server-side from
+    the active profile; the UI never collects or sends it."""
     return ["--funnel"] if value else []
 
 
-# The UI's `update` op only ever installs a PREVIEW build by tag (a regular
-# update sends no tag and goes to the latest release). Restricting the allowlist
-# to preview-* means a crafted /api/op/update {tag: "v1.0.0"} cannot silently
-# downgrade to an arbitrary stable release. (`racecast update --tag <vX.Y.Z>` on the
-# CLI is still free to pin/downgrade — that boundary is the shell, not the UI.)
+# The UI's `update` op only ever installs a preview build by tag; a regular update
+# sends no tag and goes to the latest release. Restricting the allowlist to
+# preview-* means a crafted /api/op/update {tag: "v1.0.0"} cannot silently
+# downgrade to an arbitrary stable release. `racecast update --tag` on the CLI may
+# still pin or downgrade; that boundary is the shell, not the UI.
 _TAG_RE = re.compile(r"^preview-[\w.-]+\Z")
 
 
 def _tag_arg(value):
-    """A preview release tag the UI may install. Allowlist: preview-* only.
-    Defends against argv junk and stable-tag downgrades (the UI only ever sends
-    a tag it got from /api/previews, which lists prereleases)."""
+    """A preview release tag the UI may install. Allowlist: preview-* only."""
     s = str(value)
     if not _TAG_RE.match(s):
         raise ValueError(f"invalid preview tag: {value!r}")
@@ -115,9 +113,9 @@ def _tag_arg(value):
 
 
 def _file_arg(value):
-    """A local file path the operator typed for `health import`. Reject empty /
-    control chars / a leading '-' (argv flag-smuggling: a path like '--out' must
-    never reach the child as an option); returned as a positional arg."""
+    """A local file path the operator typed for `health import`, returned as a
+    positional arg. Empty, control chars and a leading '-' are rejected, so a path
+    like '--out' can never reach the child as an option."""
     s = str(value).strip()
     if not s or s.startswith("-") or any(ord(c) < 0x20 for c in s):
         raise ValueError(f"invalid file path: {value!r}")
@@ -139,7 +137,7 @@ PARAMS = {
 }
 
 # op name -> tuple of param names that must be present (non-empty). Params not
-# listed here are optional (the existing build_argv contract: absent/empty = skipped).
+# listed here are optional; build_argv skips an absent or empty one.
 REQUIRED = {
     "health-import": ("file",),
 }
