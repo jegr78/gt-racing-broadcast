@@ -5,7 +5,7 @@ Endurance Racing Broadcast toolkit as a deterministic MP4. The trailer is an
 animated HTML page captured frame-by-frame (every CSS animation paused and
 seeked, so the render is reproducible) and muxed with a music bed.
 
-Not shipped to producers — `tools/` is maintainer-only.
+Not shipped to producers. `tools/` is maintainer-only.
 
 ## Files
 
@@ -19,11 +19,11 @@ Not shipped to producers — `tools/` is maintainer-only.
 
 - **Playwright venv** at `.venv-pw` (the repo's Playwright Python + Chromium).
 - **ffmpeg / ffprobe** on PATH.
-- **A music bed** — *not committed* (licensing). Download a royalty-free,
+- **A music bed**: *not committed* (licensing). Download a royalty-free,
   up-tempo clip from the [YouTube Studio Audio Library](https://studio.youtube.com/)
   (~2:57 to match the timeline) and save it locally, e.g.
   `runtime/trailer/assets/the-theme.mp3`.
-- **League graphics** — get a set with `racecast --profile demo graphics`
+- **League graphics**: get a set with `racecast --profile demo graphics`
   (writes `runtime/demo/graphics/`).
 
 ## Build
@@ -51,20 +51,20 @@ link it as the `Trailer Video` in the demo/testing Sheet's Assets tab.
 ### Modes
 
 `build-trailer.py` takes a mode: `all` (capture + mux), `capture` (fresh
-frames), `resume` (keep existing frames, render only the missing ones — a killed
+frames), `resume` (keep existing frames, render only the missing ones. A killed
 render recovers with this), `mux` (frames → mp4 only).
 
 ## Notes
 
 - **Determinism:** each frame is a `currentTime` seek on paused animations, not a
-  real-time recording — so the same page + music renders byte-stably anywhere. Do
+  real-time recording: so the same page + music renders byte-stably anywhere. Do
   NOT screenshot with `animations="disabled"`; it fast-forwards every animation to
   its end state and defeats the seek.
 - **Privacy:** `cc-home-crop.png` is regenerated from the committed
   `src/docs/slides/assets/img/cc-home.png` with the bottom MagicDNS rows cropped
-  and the Tailscale IP painted over — the trailer never leaks tailnet identity. If
+  and the Tailscale IP painted over. The trailer never leaks tailnet identity. If
   that source screenshot is re-captured at a different size, recheck the crop
   height / IP box constants in `prepare-assets.py`.
-- **Editing the design:** the HTML pages are plain files — edit `trailer.html`,
+- **Editing the design:** the HTML pages are plain files. Edit `trailer.html`,
   re-run `capture`, eyeball a few frames. The scene timeline (durations) lives in
   the `@keyframes`/`animation-delay` values; keep `--duration` in sync.

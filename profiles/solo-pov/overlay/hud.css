@@ -1,4 +1,4 @@
-/* GT Solo POV Demo — per-league overlay CSS.
+/* GT Solo POV Demo: per-league overlay CSS.
  *
  * Demo colour scheme (slate + light text: #eef0f2 / muted #9aa6b2 / dark chip
  * rgba(18,22,28) / teal accent #63a6b2) applied to the APPROVED POV telemetry
@@ -9,19 +9,19 @@
  *
  * Functional telemetry colours stay as designed and are NOT overridden here:
  * tyre-band gradients, the green/red delta sign, and the amber GT3-dash labels.
- * POV has no lower-third band — the in-game GT7 cockpit HUD stays visible.
+ * POV has no lower-third band. The in-game GT7 cockpit HUD stays visible.
  */
 
-/* League logo — top-right corner (same placement as the commentary demo). */
+/* League logo: top-right corner (same placement as the commentary demo). */
 #league-logo { left: 1790px; top: 6px; width: 124px; height: 124px; }
 
-/* Telemetry panel chrome — demo-dark fill with a teal accent border. */
+/* Telemetry panel chrome: demo-dark fill with a teal accent border. */
 #tele-panel { background: rgba(18,22,28,.72); border: 1px solid rgba(99,166,178,.45); }
 
-/* Webcam frame — demo teal accent (keeps the 3px frame + 16:9 locked size). */
+/* Webcam frame: demo teal accent (keeps the 3px frame + 16:9 locked size). */
 #webcam { border-color: #63a6b2; }
 
-/* Stream chat — POV: docked to the TOP edge and grows DOWN to the delta.
+/* Stream chat: POV: docked to the TOP edge and grows DOWN to the delta.
  * Left edge sits just right of the delta slot (delta: left 840 + width 240 =
  * right edge 1080, +12px margin); the box runs from the top edge (y14) down to
  * the delta's bottom line (delta: top 206 + height 32 = y238), and right up to
@@ -31,5 +31,5 @@
   align-items: stretch; }
 #chat #chat-log .msg { font-size: 16px; margin-top: 4px; line-height: 1.3; }
 
-/* POV has no session banner — hide the stray "Race" label. */
+/* POV has no session banner. Hide the stray "Race" label. */
 #session { display: none; }

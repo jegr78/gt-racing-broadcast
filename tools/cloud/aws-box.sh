@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# aws-box.sh — start / stop / status control wrapper for the AWS GPU box.
+# aws-box.sh. Start / stop / status control wrapper for the AWS GPU box.
 #
 # Runs on YOUR laptop (not the box). A thin wrapper around the `aws` CLI so you
 # never have to remember the instance id or region. Cost control: STOP the box
-# after every event — a running g4dn.xlarge bills ~$0.60/h, a stopped one only
+# after every event: a running g4dn.xlarge bills ~$0.60/h, a stopped one only
 # its EBS boot disk. The tailnet IP is stable across stop/start (Tailscale), so
 # `racecast-box-aws` keeps working after a restart.
 #
@@ -72,7 +72,7 @@ stop() {
   if [ "$st" = "stopped" ]; then echo "already stopped."; return 0; fi
   echo "stopping $BOX_ID …"
   aws ec2 stop-instances --instance-ids "$BOX_ID" --region "$REGION" >/dev/null
-  echo "stop requested — billing drops to the EBS boot disk once it reaches 'stopped'."
+  echo "stop requested: billing drops to the EBS boot disk once it reaches 'stopped'."
 }
 
 case "${1:-status}" in

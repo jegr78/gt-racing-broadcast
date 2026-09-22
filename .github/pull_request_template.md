@@ -1,4 +1,4 @@
-<!-- Keep changes under src/ — dist/ and runtime/ are generated and gitignored. -->
+<!-- Keep changes under src/. Dist/ and runtime/ are generated and gitignored. -->
 
 ## What & why
 
@@ -6,7 +6,7 @@
 
 ## Checklist
 
-- [ ] Edited only under `src/` (or `tools/` for maintainer scripts) — no hand edits to `dist/`/`runtime/`
+- [ ] Edited only under `src/` (or `tools/` for maintainer scripts). No hand edits to `dist/`/`runtime/`
 - [ ] English only in scripts and docs
 - [ ] No secrets or machine paths committed (secrets live in the gitignored `.env`)
 - [ ] Ran the relevant tests: `python3 tests/test_pov.py` (+ `test_hud` / `test_preflight` / `test_standby` as needed)

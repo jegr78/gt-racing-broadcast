@@ -42,7 +42,7 @@ regexes = [
 # tests/test_broadcast_chat.py's parse_bootstrap fixture is a fragment of a fake
 # YouTube live_chat page; its dummy INNERTUBE_API_KEY ("AIza…TESTKEY…") trips the
 # generic/Google API-key rule. It is an invented test vector, not a real key (a
-# real one is never committed — the relay reads it live from YouTube at runtime).
+# real one is never committed. The relay reads it live from YouTube at runtime).
 [[allowlists]]
 description = "Fake Innertube API key in the broadcast-chat bootstrap test fixture (#294)"
 condition = "AND"
@@ -52,7 +52,7 @@ regexes = [
 ]
 
 # The /console/buttons WebSocket-passthrough tests reuse the same RFC 6455
-# section 1.3 "sample nonce" Sec-WebSocket-Key as test_obsws.py — the relay and
+# section 1.3 "sample nonce" Sec-WebSocket-Key as test_obsws.py. The relay and
 # the raw-socket stub never validate it, so the value is arbitrary. The same
 # literal appears in the feature's plan doc (#236).
 [[allowlists]]

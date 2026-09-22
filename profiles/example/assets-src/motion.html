@@ -6,7 +6,7 @@
 
   The renderer drives time explicitly: for every frame it calls
   window.renderAt(scene, t) with t in seconds, then screenshots the element.
-  Do NOT use CSS animations or requestAnimationFrame — a frame must depend only
+  Do NOT use CSS animations or requestAnimationFrame. A frame must depend only
   on t, otherwise two runs of the same scene differ.
 
   Required globals:
@@ -35,7 +35,7 @@
 
 <script>
   const $ = id => document.getElementById(id);
-  // Eased 0..1 ramp between a and b — the only timing primitive needed.
+  // Eased 0..1 ramp between a and b. The only timing primitive needed.
   const ramp = (t, a, b) => {
     const x = Math.max(0, Math.min(1, (t - a) / (b - a)));
     return 1 - Math.pow(1 - x, 3);

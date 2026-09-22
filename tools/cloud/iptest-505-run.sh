@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# iptest-505-run.sh — laptop orchestrator for the #505 YouTube multi-feed CONCURRENCY
+# iptest-505-run.sh. Laptop orchestrator for the #505 YouTube multi-feed CONCURRENCY
 # measurement. Pairs with provision-iptest.sh (the on-box provisioner).
 #
-# Does the whole run deterministically — no ad-hoc SSH: launch a persistent throwaway box
+# Does the whole run deterministically. No ad-hoc SSH: launch a persistent throwaway box
 # (m5.large, non-burstable → no CPU-credit confound), provision it faithfully WITH the
 # harness (provision-iptest.sh IPTEST_HARNESS=1: real install-tools toolchain + real
 # cookies + racecast SSH key + tools/multifeed-429-probe.py + src/), then run the #505
@@ -11,13 +11,13 @@
 # folds every cell's results.jsonl into the matrix table and (optionally) tears the box down.
 #
 # Prereq: the YouTube AWS-range bot-check must be OFF (run provision-iptest first / a fresh
-# box resolves). If resolves BOT-CHECK, the concurrency question can't be reached — wait for
+# box resolves). If resolves BOT-CHECK, the concurrency question can't be reached. Wait for
 # an off window (see iptest-regions.sh).
 #
 # Config (env):
 #   IPTEST_COOKIES   local yt-cookies.txt (REQUIRED; from `racecast cookies`)
-#   IPTEST_HOST      racecast@<ip> of an ALREADY-provisioned box — skips launch+provision+teardown
-#   IPTEST_REGION    AWS region for a fresh box (default eu-central-1 — the real box's region)
+#   IPTEST_HOST      racecast@<ip> of an ALREADY-provisioned box. Skips launch+provision+teardown
+#   IPTEST_REGION    AWS region for a fresh box (default eu-central-1, the real box's region)
 #   IPTEST_TYPE      instance type (default m5.large)
 #   IPTEST_KEY       SSH private key (default ~/.ssh/racecast-box.pem)
 #   IPTEST_SURVIVAL  per-cell survival window seconds (default 1200 = 20 min)
@@ -67,7 +67,7 @@ launch_and_provision() {
   [[ "$IID" == i-* ]] || { echo "launch failed: $IID"; rm -f "$pub"; exit 1; }
   aws ec2 wait instance-running --region "$REGION" --instance-ids "$IID"
   local ip; ip="$(aws ec2 describe-instances --region "$REGION" --instance-ids "$IID" --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)"
-  echo "IID=$IID IP=$ip — waiting for SSH"
+  echo "IID=$IID IP=$ip: waiting for SSH"
   for _ in $(seq 1 15); do ssh "${SSHOPT[@]}" ubuntu@"$ip" true 2>/dev/null && break; sleep 10; done
   echo "=== provision (toolchain + cookies + racecast key + harness) ==="
   scp "${SSHOPT[@]}" "$COOKIES" ubuntu@"$ip":/tmp/yt-cookies.txt >/dev/null 2>&1
@@ -100,11 +100,11 @@ run_cell() {
   esac
 }
 
-trap 'echo "interrupted — box $IID left running for inspection"; exit 130' INT
+trap 'echo "interrupted: box $IID left running for inspection"; exit 130' INT
 
 [ -z "$HOST" ] && launch_and_provision || echo "using existing host $HOST"
 
-# (re)write the URL list on the box from IPTEST_URLS — covers both the fresh-launch and the
+# (re)write the URL list on the box from IPTEST_URLS. Covers both the fresh-launch and the
 # existing-IPTEST_HOST paths, so a re-run with new streams always uses the current list.
 ssh "${SSHOPT[@]}" "$HOST" "cd ~/iro505 && printf '%s\n' $URLS > urls-yt.txt && echo urls: \$(wc -l < urls-yt.txt)"
 

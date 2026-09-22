@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# prepare-event.sh — on-box, per-event racecast preparation for the cloud GPU box.
+# prepare-event.sh: on-box, per-event racecast preparation for the cloud GPU box.
 # Runs the recurring event-prep sequence to "ready" (no go-live) and reports which
 # one-time manual setup is still missing. Companion to tools/cloud/provision.sh.
 # Run as the `racecast` user on the box:  ./prepare-event.sh <league> [flags]
@@ -70,13 +70,13 @@ do_update() {
       log "update: preview build '$cur' kept (no TTY to confirm). Run interactively, or 'racecast update' to move to stable."
     fi
   else
-    log "update: stable build '$cur' — checking for a newer stable"
+    log "update: stable build '$cur'. Checking for a newer stable"
     racecast update || die "racecast update failed"
   fi
 }
 
 resolve_root() {
-  local bin; bin="$(command -v racecast)" || die "racecast not on PATH — is this the racecast user on a provisioned box?"
+  local bin; bin="$(command -v racecast)" || die "racecast not on PATH. Is this the racecast user on a provisioned box?"
   ROOT="$(dirname "$(readlink -f "$bin")")"
   RUNTIME="$ROOT/runtime"
   PROFILES="$ROOT/profiles"
@@ -89,12 +89,12 @@ run_prep_sequence() {
   racecast profile use "$LEAGUE" || die "racecast profile use '$LEAGUE' failed"
 
   log "refreshing YouTube cookies"
-  racecast cookies firefox || warn "YouTube cookie refresh failed — check the box's Firefox is signed in to YouTube"
+  racecast cookies firefox || warn "YouTube cookie refresh failed. Check the box's Firefox is signed in to YouTube"
   if [ "$NO_TWITCH" = 1 ]; then
     log "Twitch cookies: skipped (--no-twitch)"
   else
     log "refreshing Twitch cookies"
-    racecast cookies twitch firefox || warn "Twitch cookie refresh failed — sign in to Twitch in the box's Firefox, or pass --no-twitch"
+    racecast cookies twitch firefox || warn "Twitch cookie refresh failed. Sign in to Twitch in the box's Firefox, or pass --no-twitch"
   fi
 
   log "refreshing broadcast graphics"; racecast graphics || warn "graphics refresh failed (OBS shows black for missing files)"
@@ -134,37 +134,37 @@ league_uses_discord() { grep -q '^DISCORD_CLIENT_ID=' "$PROFILES/$LEAGUE/profile
 
 readiness_report() {
   local fail=0
-  log "readiness — one-time setup that neither provision.sh nor this script can do:"
+  log "readiness: one-time setup that neither provision.sh nor this script can do:"
 
   # go-live prerequisites (block the exit code)
   if tailnet_joined; then _ok "tailnet joined ($(tailscale ip -4 2>/dev/null | grep -E '^100\.' | head -1))"
-  else _bad "tailnet NOT joined — run:  sudo tailscale up --ssh --hostname racecast-box"; fail=1; fi
+  else _bad "tailnet NOT joined. Run:  sudo tailscale up --ssh --hostname racecast-box"; fail=1; fi
 
   if [ -s "$RUNTIME/$LEAGUE/GT_Racing_Endurance.import.json" ]; then _ok "OBS scene collection localized for '$LEAGUE'"
-  else _bad "OBS collection not localized — run 'racecast setup', then import it into OBS over RustDesk (once per league)"; fail=1; fi
+  else _bad "OBS collection not localized. Run 'racecast setup', then import it into OBS over RustDesk (once per league)"; fail=1; fi
 
   # advisory (surfaced, do NOT block the exit code)
   if [ -s "$RUNTIME/yt-cookies.txt" ]; then _ok "YouTube cookies present"
-  else _note "no YouTube cookies yet — sign in to YouTube in the box's Firefox, then re-run"; fi
+  else _note "no YouTube cookies yet. Sign in to YouTube in the box's Firefox, then re-run"; fi
 
   if league_uses_discord; then
     if [ -s "$RUNTIME/discord-rpc-token.json" ] || find "$RUNTIME" -name discord-rpc-token.json -type f 2>/dev/null | grep -q .; then
       _ok "Discord voice token cached"
     else
-      _note "league uses Discord but no voice token — run 'racecast discord join' once over RustDesk"
+      _note "league uses Discord but no voice token. Run 'racecast discord join' once over RustDesk"
     fi
   fi
 
   if [ "$PREFLIGHT_RC" -eq 0 ]; then _ok "preflight passed"
-  else _bad "preflight reported issues (exit $PREFLIGHT_RC) — see the preflight output above"; fail=1; fi
+  else _bad "preflight reported issues (exit $PREFLIGHT_RC). See the preflight output above"; fail=1; fi
 
   echo
   if [ "$fail" -eq 0 ]; then
-    log "READY — go live via Control Center 'Start event' or:  racecast event start"
-    [ "$SOFT_WARNINGS" -gt 0 ] && warn "$SOFT_WARNINGS soft warning(s) above — review before going live"
+    log "READY: go live via Control Center 'Start event' or:  racecast event start"
+    [ "$SOFT_WARNINGS" -gt 0 ] && warn "$SOFT_WARNINGS soft warning(s) above. Review before going live"
     exit 0
   else
-    die "NOT ready — fix the MISS lines above, then re-run:  ./prepare-event.sh $LEAGUE"
+    die "NOT ready: fix the MISS lines above, then re-run:  ./prepare-event.sh $LEAGUE"
   fi
 }
 

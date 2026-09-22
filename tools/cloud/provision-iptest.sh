@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# provision-iptest.sh — MINIMAL test-box provisioning, derived from provision.sh, for the
+# provision-iptest.sh: MINIMAL test-box provisioning, derived from provision.sh, for the
 # #505 YouTube-egress-IP investigation. It stands up JUST enough to answer one question
 # faithfully: does THIS box's egress IP get YouTube-bot-blocked the way the AWS event box
-# does?  It reuses the SAME layers a real box uses — a dedicated `racecast` user, the
-# racecast binary, and `racecast install-tools` (yt-dlp / streamlink / ffmpeg / deno) — plus
+# does?  It reuses the SAME layers a real box uses: a dedicated `racecast` user, the
+# racecast binary, and `racecast install-tools` (yt-dlp / streamlink / ffmpeg / deno). Plus
 # it copies the REAL YT cookies, then resolves the test URL(s) with the exact relay command
 # (`ytdlp_resolve_cmd`: yt-dlp -g -f b[height<=1080]/b --cookies … -- URL).
 #
@@ -16,7 +16,7 @@
 # Env:
 #   RACECAST_TAG    racecast release to install (default: latest). Use `preview-main`
 #                   only if a stable lacks the streamlink-venv fix and you also test PULLS.
-#   RACECAST_USER   event user to create/target (default: racecast — same as provision.sh).
+#   RACECAST_USER   event user to create/target (default: racecast, same as provision.sh).
 #   IPTEST_COOKIES  path on THIS box to the yt-cookies.txt to copy in (default /tmp/yt-cookies.txt).
 #                   The orchestrator scp's the real box cookies there BEFORE running this.
 #   IPTEST_URLS     space-separated YouTube URLs to resolve (default: one public live URL).
@@ -52,16 +52,16 @@ USER_HOME="$(getent passwd "$RACECAST_USER" | cut -d: -f6)"
 USER_GROUP="$(id -gn "$RACECAST_USER")"
 
 # Give racecast the SAME SSH key the box was launched with, so you log in DIRECTLY as
-# `racecast` (mirrors the real box, where OS-login/guest-agent does this) — no
+# `racecast` (mirrors the real box, where OS-login/guest-agent does this). No
 # `ssh ubuntu@… sudo -u racecast` dance. Copy from the invoking login user's authorized_keys.
 SSH_SRC_USER="${SUDO_USER:-ubuntu}"
 SRC_AK="$(getent passwd "$SSH_SRC_USER" 2>/dev/null | cut -d: -f6)/.ssh/authorized_keys"
 if [ -f "$SRC_AK" ]; then
   install -d -o "$RACECAST_USER" -g "$USER_GROUP" -m 0700 "$USER_HOME/.ssh"
   install -m 0600 -o "$RACECAST_USER" -g "$USER_GROUP" "$SRC_AK" "$USER_HOME/.ssh/authorized_keys"
-  ok "racecast SSH access enabled (key from $SSH_SRC_USER) — 'ssh racecast@<ip>' works directly"
+  ok "racecast SSH access enabled (key from $SSH_SRC_USER). 'ssh racecast@<ip>' works directly"
 else
-  warn "no authorized_keys at $SRC_AK — reach racecast via 'ssh $SSH_SRC_USER@<ip> sudo -u racecast …'"
+  warn "no authorized_keys at $SRC_AK. Reach racecast via 'ssh $SSH_SRC_USER@<ip> sudo -u racecast …'"
 fi
 
 # --- 1/4  APT base (the subset install-tools' streamlink venv needs; no desktop/GPU pkgs) ---
@@ -71,7 +71,7 @@ apt-get update -qq
 apt-get install -y curl python3 python3-venv python3-pip ca-certificates wget gnupg >/dev/null
 ok "base packages present"
 
-# --- 2/4  racecast binary (into the racecast user's home — user-owned tree, as provision.sh) ---
+# --- 2/4  racecast binary (into the racecast user's home, user-owned tree, as provision.sh) ---
 log "2/4  racecast binary"
 if have racecast; then
   ok "racecast already on PATH ($(sudo -u "$RACECAST_USER" racecast --version 2>/dev/null | head -1))"
@@ -94,7 +94,7 @@ else
 fi
 
 # --- 3/4  racecast install-tools: yt-dlp / streamlink / ffmpeg / deno (the feed toolchain) ---
-log "3/4  racecast install-tools (yt-dlp / streamlink / ffmpeg / deno) — as $RACECAST_USER"
+log "3/4  racecast install-tools (yt-dlp / streamlink / ffmpeg / deno). As $RACECAST_USER"
 sudo -u "$RACECAST_USER" -H racecast install-tools \
   || warn "install-tools reported issues — see the resolve step below"
 RTBIN="$USER_HOME/runtime/bin"
@@ -103,12 +103,12 @@ for t in yt-dlp streamlink deno; do
                      || warn "$t MISSING at $RTBIN — feed path will fail"
 done
 # streamlink MUST be the install-tools venv build (>=8.2.0 for --http-cookies-file). apt's
-# 6.6.2 is too old and every cookie'd YouTube feed would 403 — install-tools prints an
+# 6.6.2 is too old and every cookie'd YouTube feed would 403: install-tools prints an
 # "apt too old" note WHILE it builds the venv; THIS is the definitive post-check.
 if "$RTBIN/streamlink" --help 2>/dev/null | grep -q -- '--http-cookies-file'; then
-  ok "streamlink supports --http-cookies-file (venv build OK — the apt-too-old note above is expected)"
+  ok "streamlink supports --http-cookies-file (venv build OK, the apt-too-old note above is expected)"
 else
-  warn "streamlink lacks --http-cookies-file — YouTube pulls will 403 (venv build failed; re-run install-tools)"
+  warn "streamlink lacks --http-cookies-file: YouTube pulls will 403 (venv build failed; re-run install-tools)"
 fi
 
 # --- copy the REAL YT cookies (this is the whole point: mirror the relay's auth context) ---
@@ -118,7 +118,7 @@ if [ -f "$COOKIES_SRC" ]; then
   install -m 0600 -o "$RACECAST_USER" -g "$USER_GROUP" "$COOKIES_SRC" "$USER_HOME/runtime/yt-cookies.txt"
   ok "cookies copied -> $USER_HOME/runtime/yt-cookies.txt ($(wc -l <"$COOKIES_SRC") lines)"
 else
-  warn "no cookies at $COOKIES_SRC — resolve will run WITHOUT --cookies (still a valid IP test,"
+  warn "no cookies at $COOKIES_SRC. Resolve will run WITHOUT --cookies (still a valid IP test,"
   warn "  but not identical to the relay; stage the box's yt-cookies.txt there to be exact)"
 fi
 
@@ -152,10 +152,10 @@ if [ "${IPTEST_HARNESS:-0}" = "1" ]; then
         && tar xzf iro505.tgz \
         && ln -sfn \"\$(tar tzf iro505.tgz | head -1 | cut -d/ -f1)\" iro505 \
         && test -f iro505/tools/multifeed-429-probe.py"; then
-    ok "harness at $USER_HOME/iro505 (ref $ref) — src/ + tools/ present"
+    ok "harness at $USER_HOME/iro505 (ref $ref). Src/ + tools/ present"
   else
     warn "harness deploy failed (ref $ref)"
   fi
 fi
 
-log "provision-iptest.sh complete — resolve verdict(s) above are the #505 answer for this IP"
+log "provision-iptest.sh complete. Resolve verdict(s) above are the #505 answer for this IP"

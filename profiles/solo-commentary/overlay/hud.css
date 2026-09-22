@@ -1,4 +1,4 @@
-/* GT Solo Commentary Demo — per-league overlay CSS.
+/* GT Solo Commentary Demo: per-league overlay CSS.
  *
  * Styles the DYNAMIC HUD slots for a solo commentary broadcast in the shared
  * demo colour scheme (slate + light text: #eef0f2 / muted #9aa6b2 / dark chip
@@ -8,10 +8,10 @@
  * branding is the league's own Overlay.png (an OBS image source), NOT this CSS.
  */
 
-/* League logo — top-right corner (matches the D-GT7-M reference roundel). */
+/* League logo: top-right corner (matches the D-GT7-M reference roundel). */
 #league-logo { left: 1790px; top: 6px; width: 124px; height: 124px; }
 
-/* Round banner — top-centre pill, centred on x960 like the reference black
+/* Round banner: top-centre pill, centred on x960 like the reference black
  * banner (x698–1221). Taller so the session ("RACE") sits INSIDE the same black
  * box below the round title: the title is top-aligned, and #session is lifted
  * over the banner's dark fill via z-index (it precedes #round-top in the DOM,
@@ -23,14 +23,14 @@
   color: #9aa6b2; letter-spacing: .08em; text-transform: uppercase;
   justify-content: center; z-index: 3; }
 
-/* Stream chat — flush to the left edge, demo-dark rounded box. */
+/* Stream chat: flush to the left edge, demo-dark rounded box. */
 #chat { left: 6px; top: 690px; width: 300px; height: 220px;
   background: rgba(18,22,28,.72); border-radius: 10px; }
 
-/* Tyres/fuel capture box — bottom-left, flush (invisible; positions the OBS crop). */
+/* Tyres/fuel capture box: bottom-left, flush (invisible; positions the OBS crop). */
 #tyres-capture { left: 7px; top: 926px; width: 245px; height: 84px; }
 
-/* Race-control banner — demo palette, above the lower third (shown when active). */
+/* Race-control banner: demo palette, above the lower third (shown when active). */
 #race-control { left: 264px; top: 796px; width: 1392px; height: 55px; padding: 14px;
   font-size: 34px; border-radius: 8px; color: #eef0f2; background: #243039;
   justify-content: flex-start; }

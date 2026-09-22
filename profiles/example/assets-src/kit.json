@@ -1,5 +1,5 @@
 {
-  "_comment": "Minimal working asset kit — copy this folder into your own profile and restyle it. Screen ids match element ids in stage.html; scene names match window.SCENES in motion.html. Render with: python3 tools/render-assets.py --profile <name>",
+  "_comment": "Minimal working asset kit. Copy this folder into your own profile and restyle it. Screen ids match element ids in stage.html; scene names match window.SCENES in motion.html. Render with: python3 tools/render-assets.py --profile <name>",
 
   "stills": {
     "standby":      "Standby.png",
