@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """Probe the read-only broadcast-chat reader against a LIVE channel (#294).
 
-Maintainer / diagnostic tool — NOT shipped. Standalone (no Sheet, no relay, no UI),
+Maintainer diagnostic tool, NOT shipped. Standalone (no Sheet, no relay, no UI),
 it tails a live channel's chat exactly as the relay's readers do, to confirm the
-real path works (the part the unit suite can only fixture-test) before wiring a
-`Channel` tab:
-  * YouTube — resolve the currently-live videoId(s) via yt-dlp, then tail the
+real path works before wiring a `Channel` tab:
+  * YouTube: resolve the currently-live videoId(s) via yt-dlp, then tail the
     Innertube `get_live_chat` continuation.
-  * Twitch — connect anonymously over IRC and tail PRIVMSGs (no API key / OAuth).
+  * Twitch: connect anonymously over IRC and tail PRIVMSGs (no API key or OAuth).
 
 Usage:
     python3 tools/broadcast-chat-probe.py https://www.youtube.com/@LofiGirl
@@ -16,9 +15,8 @@ Usage:
     python3 tools/broadcast-chat-probe.py https://www.twitch.tv/SomeChannel
     python3 tools/broadcast-chat-probe.py --twitch SomeChannel
 
-The parsing reuses src/scripts/broadcast_chat.py (the SAME pure functions the relay
-uses); only the network (yt-dlp + Innertube HTTP, or the Twitch IRC socket) lives
-here. A reliable always-live YouTube target with active chat is e.g. a 24/7 stream.
+The parsing reuses src/scripts/broadcast_chat.py, the same pure functions the relay
+uses; only the network (yt-dlp + Innertube HTTP, or the Twitch IRC socket) lives here.
 """
 import argparse
 import importlib.util
@@ -46,8 +44,8 @@ def _load(name, rel):
 
 bc = _load("broadcast_chat", ("src", "scripts", "broadcast_chat.py"))
 
-# Innertube/live_chat 403 the default urllib UA — present a browser UA (matches
-# the relay's _YT_CHAT_UA). Public live chat needs no cookies.
+# Innertube and live_chat 403 the default urllib UA, so present a browser UA
+# (the relay's _YT_CHAT_UA). Public live chat needs no cookies.
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
 
@@ -84,8 +82,8 @@ def _ytdlp(cmd, timeout=40):
 
 
 def resolve_live_ids(channel, cookies):
-    """Currently-live videoId(s) for a channel: the /streams tab (catches several
-    concurrent live streams — the handover overlap), /live as the fallback."""
+    """Currently-live videoId(s) for a channel: the /streams tab, which catches
+    several concurrent live streams, with /live as the fallback."""
     cmd = ["yt-dlp", "--flat-playlist", "--no-warnings", "--playlist-items", "1-15", "-J"]
     if cookies:
         cmd += ["--cookies", cookies]
@@ -123,12 +121,12 @@ def tail_chat(video_id):
     bs = bc.parse_bootstrap(http_get(bc.live_chat_page_url(video_id)) or "")
     if not bs["api_key"] or not bs["continuation"]:
         print(f"  ! could not bootstrap chat for {video_id} "
-              f"(api_key={bool(bs['api_key'])}, continuation={bool(bs['continuation'])}) — "
+              f"(api_key={bool(bs['api_key'])}, continuation={bool(bs['continuation'])}); "
               "is the stream live with chat enabled, and public?", file=sys.stderr)
         return
     api_url = bc.get_live_chat_api_url(bs["api_key"])
     cont, ver = bs["continuation"], bs["client_version"]
-    print(f"  bootstrap OK (client {ver}); tailing live chat — Ctrl-C to stop\n")
+    print(f"  bootstrap OK (client {ver}); tailing live chat, Ctrl-C to stop\n")
     seen = set()
     while True:
         parsed = bc.parse_live_chat(http_post_json(api_url, bc.build_get_live_chat_body(cont, ver)))
@@ -140,7 +138,7 @@ def tail_chat(video_id):
             ts = time.strftime("%H:%M:%S", time.localtime(m["ts"])) if m.get("ts") else "--:--:--"
             print(f"  [{ts}] {m.get('user') or 'Viewer'}: {m.get('text')}")
         if not parsed["continuation"]:
-            print("\n  (continuation ended — stream / chat closed)")
+            print("\n  (continuation ended, stream or chat closed)")
             return
         cont = parsed["continuation"]
         time.sleep(min(max((parsed["timeout_ms"] or 5000) / 1000.0, 1.0), 8.0))
@@ -148,7 +146,7 @@ def tail_chat(video_id):
 
 def tail_twitch(login):
     """Connect to Twitch IRC as an anonymous justinfan nick, JOIN #login and
-    print PRIVMSGs — the same path as the relay's _TwitchReader, standalone."""
+    print PRIVMSGs. Standalone, on the same path as the relay's _TwitchReader."""
     raw = socket.create_connection(("irc.chat.twitch.tv", 6697), timeout=10)
     ctx = ssl.create_default_context()
     ctx.minimum_version = ssl.TLSVersion.TLSv1_2   # no legacy TLS 1.0/1.1
@@ -162,7 +160,7 @@ def tail_twitch(login):
     send("PASS SCHMOOPIIE")
     send("NICK justinfan%d" % random.randint(10000, 999999))
     send("JOIN #" + login)
-    print(f"  joined #{login}; tailing chat — Ctrl-C to stop\n")
+    print(f"  joined #{login}; tailing chat, Ctrl-C to stop\n")
     buf = b""
     while True:
         try:
@@ -189,7 +187,7 @@ def tail_twitch(login):
 def main():
     ap = argparse.ArgumentParser(
         description="Probe the broadcast-chat reader against a live channel (#294).")
-    ap.add_argument("channel", help="channel URL / @handle / UC… id (YouTube or Twitch)")
+    ap.add_argument("channel", help="channel URL / @handle / UC... id (YouTube or Twitch)")
     ap.add_argument("--twitch", action="store_true",
                     help="treat the argument as a Twitch channel (auto-detected for twitch.tv URLs)")
     ap.add_argument("--cookies", help="Netscape cookies.txt (only for gated YouTube streams)")
@@ -214,18 +212,18 @@ def main():
         return
 
     if not shutil.which("yt-dlp"):
-        sys.exit("ERROR: yt-dlp not on PATH — run `racecast install-tools`.")
+        sys.exit("ERROR: yt-dlp not on PATH. Run `racecast install-tools`.")
 
     print(f"Resolving live streams for {args.channel} …")
     ids = resolve_live_ids(args.channel, args.cookies)
     if not ids:
-        sys.exit("No live stream found — is the channel live right now "
+        sys.exit("No live stream found. Is the channel live right now "
                  "(public, with chat enabled)?")
     print(f"Live videoId(s): {', '.join(ids)}")
     if args.resolve_only:
         return
     if len(ids) > 1:
-        print(f"(note: {len(ids)} concurrent live streams — tailing the first; "
+        print(f"(note: {len(ids)} concurrent live streams; tailing the first, "
               "the relay merges them all)")
     try:
         tail_chat(ids[0])

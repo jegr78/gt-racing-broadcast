@@ -15,23 +15,22 @@ import placeholders  # noqa: E402  (pure stdlib helper; seeds neutral package pl
 
 
 def _is_placeholder(path, ph_path):
-    """True iff `path` exists and is byte-identical to the bundled placeholder
-    `ph_path` (so a placeholder is detected no matter which script wrote it)."""
+    """True when `path` exists and is byte-identical to the bundled placeholder
+    `ph_path`, so a placeholder is detected whichever script wrote it."""
     return bool(ph_path) and os.path.isfile(path) and filecmp.cmp(path, ph_path, shallow=False)
 
 
-# The SHEET_PUSH_URL (an Apps Script webhook) is the one league secret most
-# likely to leak into a committed artifact (e.g. the OBS json). The verify
-# allowlist below is per-pattern, so it would miss this *class*; catch the two
-# shapes — a /macros/.../exec endpoint and a ?key= query — explicitly (#103).
-# Scanned only against secret-free artifacts (OBS template / relay / companion),
-# never the docs, which legitimately document the webhook URL format.
+# The SHEET_PUSH_URL is the league secret most likely to leak into a committed
+# artifact. The verify allowlist below is per-pattern and would miss the class, so
+# both shapes are caught explicitly: a /macros/.../exec endpoint and a ?key= query
+# (#103). Scanned only against the secret-free artifacts, never the docs, which
+# legitimately document the webhook URL format.
 _APPSCRIPT_SECRET_RE = re.compile(r"/macros/|/exec\b|[?&]key=", re.IGNORECASE)
 
 
 def has_appscript_secret(text):
-    """True iff `text` contains an Apps Script webhook URL pattern (/macros/ or
-    /exec endpoint, or a ?key= query)."""
+    """True when `text` contains an Apps Script webhook URL pattern: a /macros/
+    or /exec endpoint, or a ?key= query."""
     return bool(_APPSCRIPT_SECRET_RE.search(text or ""))
 
 
@@ -61,12 +60,12 @@ def main():
         shutil.rmtree(PKG)
     os.makedirs(PKG)
 
-    # top-level docs + director panel + setup-assets. The role cheat sheet is NOT
-    # copied here — it ships inside docs/slides/ (one central place) and the Control
-    # Center Help page links to the published decks rather than serving it locally.
+    # Top-level docs, director panel and setup-assets. The role cheat sheet is not
+    # copied here: it ships inside docs/slides/ and the Control Center Help page
+    # links to the published decks rather than serving it locally.
     for f in ("Broadcast_Setup_Guide.md", "README_SETUP.md"):
         cp(f"docs/{f}", f)
-    cp("docs/slides", "docs/slides")   # onboarding decks + cheat sheet (vendored Reveal, static)
+    cp("docs/slides", "docs/slides")   # onboarding decks and cheat sheet, vendored Reveal
     cp("director/director-panel.html", "director-panel.html")
     cp("obs/hud.html", "hud.html")
     cp("obs/hud-preview.html", "hud-preview.html")
@@ -82,12 +81,12 @@ def main():
     cp("racecast_ui.py", "racecast_ui.py")   # windowed Control Center launcher (racecast-ui)
     cp("assets", "assets")
     cp("scripts", "scripts")
-    cp("relay", "relay")  # racecast-feeds.py + get-cookies.py
-    cp("ui", "ui")        # Control Center server + page
+    cp("relay", "relay")  # racecast-feeds.py and get-cookies.py
+    cp("ui", "ui")        # Control Center server and page
 
-    # intro/outro clips: download into the package so the artifact is self-contained.
-    # Best-effort — offline / code-only builds must still succeed (the shipped
-    # get-media.py lets a producer re-fetch on site if the sheet URLs change).
+    # Intro/outro clips: download into the package so the artifact is
+    # self-contained. Best-effort, because an offline or code-only build must still
+    # succeed; the shipped get-media.py lets a producer re-fetch on site.
     media_dst = os.path.join(PKG, "media")
     os.makedirs(media_dst, exist_ok=True)
     try:
@@ -96,9 +95,8 @@ def main():
     except Exception as e:
         print(f"  [WARN] intro/outro clip fetch skipped: {e}")
 
-    # broadcast graphics: download into the package so the artifact is self-contained.
-    # Best-effort (same policy as the clips) — get-graphics.py lets a producer re-fetch
-    # on site when the sheet graphics change.
+    # Broadcast graphics, same best-effort policy as the clips: get-graphics.py
+    # lets a producer re-fetch on site when the sheet graphics change.
     graphics_dst = os.path.join(PKG, "graphics")
     os.makedirs(graphics_dst, exist_ok=True)
     try:
@@ -110,15 +108,15 @@ def main():
     # .env template (repo root, not src/) so producers can set their own RACECAST_SHEET_ID
     shutil.copy2(os.path.join(ROOT, ".env.example"), os.path.join(PKG, ".env.example"))
 
-    # profiles/ (repo root, not src/): ship the committed leagues — `example`
-    # (the template `racecast profile new` copies from; without it the shipped
-    # package can't create a profile, #45) and `demo` (the directly-usable,
-    # public-Sheet demo league, #206).
+    # profiles/ lives at the repo root, not under src/. Ship both committed
+    # leagues: `example`, the template `racecast profile new` copies from and
+    # without which the package cannot create a profile (#45), and `demo`, the
+    # directly usable public-Sheet league (#206).
     for prof in ("example", "demo"):
         shutil.copytree(os.path.join(ROOT, "profiles", prof),
                         os.path.join(PKG, "profiles", prof))
 
-    # companion: copy + strip password (defense in depth)
+    # companion: copy and strip the password, defence in depth
     os.makedirs(os.path.join(PKG, "companion"))
     with open(os.path.join(SRC, "companion", "racecast-buttons.companionconfig"), encoding="utf-8") as fh:
         cfg = json.load(fh)
@@ -130,14 +128,14 @@ def main():
     os.makedirs(os.path.join(PKG, "obs"))
     shutil.copy2(os.path.join(SRC, "obs", "GT_Racing_Endurance.json"),
                  os.path.join(PKG, "obs", "GT_Racing_Endurance.template.json"))
-    # solo-mode collections (single-race/POV, #303): ship the same way, when present.
+    # solo-mode collections (#303): ship the same way, when present.
     for solo in ("GT_Racing_Solo_Commentary.json", "GT_Racing_Solo_POV.json"):
         solo_src = os.path.join(SRC, "obs", solo)
         if os.path.exists(solo_src):
             shutil.copy2(solo_src, os.path.join(
                 PKG, "obs", solo.replace(".json", ".template.json")))
-    # obs-browser source-build wrapper CMakeLists (used by `racecast obs-browser`
-    # on Linux to compile the Browser Source plugin against the distro libobs).
+    # obs-browser source-build wrapper CMakeLists, used by `racecast obs-browser`
+    # on Linux to compile the Browser Source plugin against the distro libobs.
     cp("obs/obs-browser-build", "obs/obs-browser-build")
 
     # drop any stray __pycache__ from copied trees
@@ -166,9 +164,9 @@ def main():
 
     with open(os.path.join(PKG, "obs", "GT_Racing_Endurance.template.json"), encoding="utf-8") as fh:
         tpl = fh.read()
-    # Seed neutral placeholders for any clip/graphic not fetched above, so the
-    # shipped artifact is never broken even before a producer downloads real
-    # assets. fill_missing only writes the ones still absent (real downloads win).
+    # Seed neutral placeholders for any clip or graphic not fetched above, so the
+    # artifact works before a producer downloads real assets. fill_missing writes
+    # only the ones still absent, so a real download always wins.
     placeholders.fill_missing(
         ["intro.mp4", "outro.mp4"], media_dst, placeholders.media_placeholder_path())
     placeholders.fill_missing(
@@ -176,8 +174,8 @@ def main():
         placeholders.graphic_placeholder_path())
     with open(os.path.join(PKG, "relay", "racecast-feeds.py"), encoding="utf-8") as fh:
         relay = fh.read()
-    # Re-read the SHIPPED companion config from disk (not the in-memory cfg) so the
-    # password check actually verifies what was written, not what we already blanked.
+    # Re-read the shipped companion config from disk rather than the in-memory cfg,
+    # so the password check verifies what was written, not what was blanked here.
     with open(os.path.join(PKG, "companion", "racecast-buttons.companionconfig"), encoding="utf-8") as fh:
         written = json.load(fh)
     blob = json.dumps(written)
@@ -190,11 +188,10 @@ def main():
         "companion password empty": not has_pw(written),
         "obs graphics tokenized": "__RACECAST_GRAPHICS__/" in tpl
             and "GoogleDrive" not in tpl and "drive.google.com" not in tpl,
-        # The HUD no longer embeds the sheet (the relay serves /hud), so the
-        # collection legitimately has no __RACECAST_SHEET__ token — just assert no raw
-        # sheet URL ever leaks in.
+        # The relay serves /hud, so the collection legitimately has no
+        # __RACECAST_SHEET__ token; only a raw sheet URL would be a leak.
         "obs no raw sheet url": not re.search(r"/spreadsheets/d/[A-Za-z0-9_-]{20,}/", tpl),
-        # No Apps Script SHEET_PUSH_URL leaked into the secret-free artifacts (#103).
+        # No Apps Script SHEET_PUSH_URL leaked into the secret-free artifacts. (#103)
         "obs no apps-script webhook": not has_appscript_secret(tpl),
         "relay no apps-script webhook": not has_appscript_secret(relay),
         "companion no apps-script webhook": not has_appscript_secret(blob),
@@ -218,8 +215,8 @@ def main():
             os.path.join(PKG, "profiles", "example", "profile.env")),
         "demo profile shipped": os.path.isfile(
             os.path.join(PKG, "profiles", "demo", "profile.env")),
-        # the public demo league must never carry a write credential / secret —
-        # the key= lines must stay blank (comments may document the URL format).
+        # The public demo league must never carry a write credential, so those
+        # key= lines stay blank. Comments may still document the URL format.
         "demo profile secret-free": not re.search(
             r"^[ \t]*(SHEET_PUSH_URL|CONSOLE_SECRET|DISCORD_WEBHOOK_URL)[ \t]*=[ \t]*\S",
             demo_env, re.MULTILINE),
@@ -249,8 +246,8 @@ def main():
         "slides cheat-sheet shipped": os.path.isfile(
             os.path.join(PKG, "docs", "slides", "cheat_sheets.html")),
     }
-    # solo-mode collections (single-race/POV, #303): same tokenized/secret-free
-    # verification as the endurance template above, when shipped.
+    # solo-mode collections (#303): the same tokenized, secret-free verification
+    # as the endurance template above, when shipped.
     for solo in ("GT_Racing_Solo_Commentary.template.json", "GT_Racing_Solo_POV.template.json"):
         sp = os.path.join(PKG, "obs", solo)
         if os.path.exists(sp):
@@ -268,7 +265,7 @@ def main():
     for clip in ("intro.mp4", "outro.mp4"):
         path = os.path.join(PKG, "media", clip)
         if _is_placeholder(path, m_ph):
-            print(f"  [placeholder] media {clip} (neutral placeholder — real clip not bundled)")
+            print(f"  [placeholder] media {clip} (neutral placeholder, real clip not bundled)")
         elif os.path.isfile(path):
             print(f"  [OK] media {clip} present")
         else:
@@ -277,7 +274,7 @@ def main():
     for fn in placeholders.expected_graphics_from_template(tpl):
         path = os.path.join(PKG, "graphics", fn)
         if _is_placeholder(path, g_ph):
-            print(f"  [placeholder] graphic {fn} (neutral placeholder — real asset not bundled)")
+            print(f"  [placeholder] graphic {fn} (neutral placeholder, real asset not bundled)")
         elif os.path.isfile(path):
             print(f"  [OK] graphic {fn} present")
         else:

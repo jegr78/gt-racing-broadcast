@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Local fan-out soak harness (#488) — maintainer, NOT shipped, NOT run in CI.
+"""Local fan-out soak harness (#488). Maintainer, NOT shipped, NOT run in CI.
 
-Drives the REAL relay FeedRing + FeedFanoutServer from a source (synthetic ffmpeg -re, or
-a real stream via streamlink) into your LOCAL OBS, so a long real-OBS soak can be run and
-observed. It SERVES + LOGS only — the automatic OBS rebuild lives in the RELAY (its
-cursor-progress freeze detector, guarded by #582), NOT here; the socket send-block
-"stuck"/snap logged below proved BLIND to render drift (see the spec's DESIGN PIVOT) and is
-kept only to confirm the ring is fed. Measure render skip directly off OBS (obs-ws GetStats).
+Drives the REAL relay FeedRing + FeedFanoutServer from a source, either a synthetic
+ffmpeg -re or a real stream via streamlink, into your LOCAL OBS, so a long real-OBS
+soak can be run and observed. It SERVES and LOGS only. The automatic OBS rebuild lives
+in the RELAY's cursor-progress freeze detector (#582), not here. The socket send-block
+"stuck"/snap logged below is blind to render drift and is kept only to confirm the ring
+is fed; measure render skip directly off OBS with obs-ws GetStats.
 
 No cloud box needed; a real stream needs streamlink but no cookies for a public live.
 
@@ -44,7 +44,7 @@ def _load(name, *rel):
 
 def soak_stall_active(elapsed_s, *, period_s, duration_s):
     """True during the injected-stall window (the last `duration_s` of every
-    `period_s`). period_s<=0 or duration_s<=0 disables. Pure — unit-tested."""
+    `period_s`). period_s<=0 or duration_s<=0 disables."""
     if period_s <= 0 or duration_s <= 0:
         return False
     return (elapsed_s % period_s) >= (period_s - duration_s)
@@ -60,12 +60,11 @@ FFMPEG_CMD = [
 
 
 def _build_source_cmd(fe, source, quality, tier, platform):
-    """Build a source command. `testsrc` -> the synthetic ffmpeg -re pipe. A real
-    URL with a `tier` (a --switch-to rebuild) delegates ENTIRELY to the relay's own
-    `streamlink_fanout_cmd` builder (#493) — the exact per-tier buffer/live-edge
-    profile (`streamlink_serve_flags`/`streamlink_twitch_flags`) and quality
-    selector a real feed would run, not a hand-rolled partial argv that silently
-    dropped the tier. Without a tier, use the plain --quality pull."""
+    """Build a source command. `testsrc` gives the synthetic ffmpeg -re pipe. A real
+    URL with a `tier`, meaning a --switch-to rebuild, delegates ENTIRELY to the relay's
+    own `streamlink_fanout_cmd` builder, so the per-tier buffer/live-edge profile and
+    quality selector are the ones a real feed would run (#493). Without a tier, use the
+    plain --quality pull."""
     if source == "testsrc":
         return FFMPEG_CMD
     if tier:
@@ -74,14 +73,12 @@ def _build_source_cmd(fe, source, quality, tier, platform):
 
 
 def main():
-    # Line-buffer our progress output so a `| tee runtime/soak.log` (or any redirect)
-    # captures each line immediately instead of block-buffering it — and so a Ctrl-C
-    # never loses the buffered tail. Without this, piped stdout is block-buffered and
-    # the log file looks empty for minutes.
+    # Piped stdout is block-buffered, so a `| tee runtime/soak.log` looks empty for
+    # minutes and a Ctrl-C loses the buffered tail.
     try:
         sys.stdout.reconfigure(line_buffering=True)
     except (AttributeError, OSError):
-        pass  # non-standard stdout — best effort
+        pass  # non-standard stdout, best effort
     ap = argparse.ArgumentParser(description="Fan-out soak harness (#488)")
     ap.add_argument("--port", type=int, default=53001)
     ap.add_argument("--stall-period", type=float, default=0.0, help="s between injected stalls (0=off)")
@@ -100,18 +97,16 @@ def main():
 
     fe = _load("irofeeds", "src", "relay", "racecast-feeds.py")
 
-    # Detect platform the same way the relay does (twitch.tv host vs default
-    # YouTube; used only for a --switch-to tier rebuild).
+    # Detected the way the relay does; used only for a --switch-to tier rebuild.
     platform = fe.platform_of(args.source) if args.source != "testsrc" else None
 
     ring = fe.FeedRing(fe.FANOUT_RING_BYTES)
     srv = fe.FeedFanoutServer("127.0.0.1", args.port, ring, fe.logging.getLogger("soak"))
     srv.start()
-    print(f"[soak] serving on http://127.0.0.1:{srv.port}  — point OBS Media Source at it")
+    print(f"[soak] serving on http://127.0.0.1:{srv.port}  Point OBS Media Source at it")
     print(f"[soak] ring={fe.FANOUT_RING_BYTES}B  (the automatic OBS rebuild lives in the RELAY; "
           f"this harness only serves + logs the socket side)")
 
-    # Build initial source command
     source_cmd = _build_source_cmd(fe, args.source, args.quality, None, platform)
     print(f"[soak] source: {args.source} ({' '.join(source_cmd[:2])}...)")
     if args.switch_to:
@@ -119,13 +114,13 @@ def main():
 
     proc = subprocess.Popen(source_cmd, stdout=subprocess.PIPE)
     stop = threading.Event()
-    rebuild_event = threading.Event()  # signal to rebuild the proc at new tier
+    rebuild_event = threading.Event()
     switched = threading.Event()       # latch: the tier switch fires AT MOST ONCE (#493)
     started = time.monotonic()
 
     def _reap(old_proc, timeout=5.0):
         """Wait for a terminated child to actually exit so it never lingers as a
-        zombie; escalate to kill() if terminate() didn't land in time. Best-effort."""
+        zombie, escalating to kill() if terminate() did not land in time."""
         try:
             old_proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
@@ -136,14 +131,13 @@ def main():
             try:
                 old_proc.wait(timeout=2.0)
             except subprocess.TimeoutExpired:
-                pass  # kill() didn't land in time either — give up, best-effort
+                pass  # kill() did not land either, give up
         except OSError:
-            pass  # process already reaped/gone
+            pass  # process already reaped or gone
 
     def _monitor():
-        # The socket send-block ("stuck") / cursor-snaps proved BLIND to OBS render drift
-        # (see the spec pivot) — logged here only to confirm the ring is fed. The render-skip
-        # signal is measured directly off OBS (obs-ws GetStats), not here.
+        # "stuck" and the cursor snaps are blind to OBS render drift; they confirm only
+        # that the ring is fed. Render skip is measured off OBS with obs-ws GetStats.
         while not stop.is_set():
             time.sleep(args.log_interval)
             now = time.monotonic()
@@ -151,12 +145,9 @@ def main():
             print(f"[soak] t={now-started:7.1f}s stuck={('-' if stuck_s is None else f'{stuck_s:.1f}')}s "
                   f"snaps={snaps}")
 
-            # Check if it's time to trigger the (one-shot) tier switch. `switched`
-            # latches permanently once fired — unlike `rebuild_event` (which the main
-            # loop clears after consuming it), this guard is never cleared, so a
-            # threshold that stays true forever (every log-interval tick after
-            # switch_after) cannot re-fire the rebuild (#493 — was killing/respawning
-            # the source every log-interval and leaking a zombie each time).
+            # `switched` latches permanently, unlike `rebuild_event`, which the main
+            # loop clears after consuming it. The threshold stays true on every later
+            # tick, so without the latch the rebuild re-fires forever (#493).
             if (args.switch_to and not switched.is_set() and
                 (now - started) >= args.switch_after):
                 print(f"[soak] triggering rebuild to tier '{args.switch_to}'")
@@ -168,27 +159,25 @@ def main():
                 except OSError:
                     pass  # process already gone
                 else:
-                    _reap(old_proc)   # avoid leaving a zombie behind
+                    _reap(old_proc)
 
     threading.Thread(target=_monitor, daemon=True).start()
     try:
         while True:
             chunk = proc.stdout.read(65536)
             if not chunk:
-                # EOF: check if we should rebuild at a new tier
                 if rebuild_event.is_set():
                     rebuild_event.clear()
                     new_cmd = _build_source_cmd(fe, args.source, args.quality, args.switch_to, platform)
                     print(f"[soak] rebuilding at tier '{args.switch_to}': {' '.join(new_cmd[:3])}...")
                     proc = subprocess.Popen(new_cmd, stdout=subprocess.PIPE)
                     continue
-                # No rebuild requested — we're done
-                break
+                break                          # EOF and no rebuild requested
             if not soak_stall_active(time.monotonic() - started,
                                      period_s=args.stall_period, duration_s=args.stall_duration):
                 ring.write(chunk)          # withhold during an injected stall
     except KeyboardInterrupt:
-        pass  # Ctrl-C → fall through to cleanup
+        pass  # Ctrl-C falls through to cleanup
     finally:
         stop.set()
         try:

@@ -2,7 +2,7 @@
 """Render a league's broadcast stills and intro/outro videos from an asset kit.
 
 A kit is a per-profile folder (profiles/<name>/assets-src/) holding the design
-as HTML plus the round's texts as JSON — see tools/assets_kit.py for the
+as HTML plus the round's texts as JSON. See tools/assets_kit.py for the
 contract and profiles/example/assets-src/ for a minimal working kit.
 
     python3 tools/render-assets.py --profile erf-wspc
@@ -126,8 +126,8 @@ def probe_scene(browser, kit_path, texts, scene, times, out_dir):
 def resolve_audio(kit_path, spec, override):
     """Absolute path of a scene's music, or None when there is none.
 
-    The track normally lives outside the repo (licensed material), so a
-    missing file is a warning and the scene renders silent.
+    Licensed tracks live outside the repo, so a missing file is a warning and
+    the scene renders silent.
     """
     if override:
         source = override
@@ -199,7 +199,7 @@ def main():
                 probe_scene(browser, kit_path, texts, scene, times, out_dir)
                 return
 
-            # No flags = everything; --stills or --scenes narrows it, and
+            # No flags renders everything; --stills or --scenes narrows it, and
             # giving both renders both.
             want_stills = args.stills or args.scenes is None
             want_scenes = args.scenes is not None or not args.stills

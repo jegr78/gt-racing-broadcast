@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""Fan-out REJOIN probe (#577) — maintainer diagnostic, NOT shipped, NOT run in CI.
+"""Fan-out REJOIN probe (#577). Maintainer diagnostic, NOT shipped, NOT run in CI.
 
 With fan-out on, the relay sets `close_when_inactive=True` on Feed A/B, so OBS drops
 an off-air feed and joins it again MID-STREAM on every scene activation. MPEG-TS
-survives that join on its own; fMP4/CMAF (served by some Twitch channels, decided
-per channel) only survives it with the relay's init-segment repair (#576/#577).
-Unit tests prove the bytes; this probe proves the PICTURE in real OBS.
+survives that join on its own; fMP4/CMAF, which some Twitch channels serve, only
+survives it with the relay's init-segment repair (#576/#577). Unit tests prove the
+bytes; this probe proves the PICTURE in real OBS.
 
 What it does:
   1. Pulls one live stream with `streamlink --stdout` into the REAL FeedRing +
-     FeedFanoutServer (loaded from --relay-file, so an older relay can be measured
-     for a before/after), on a loopback port that is not a relay feed port.
+     FeedFanoutServer, loaded from --relay-file so an older relay can be measured
+     for a before/after, on a loopback port that is not a relay feed port.
   2. Reports the stream's container from its first bytes (fMP4 = `ftyp` at 4).
   3. In the RUNNING OBS: adds two temporary scenes and one ffmpeg media source with
      the collection's Feed A settings plus `close_when_inactive=True`, exactly as
@@ -22,10 +22,11 @@ What it does:
   5. Removes the temporary scenes/source and restores the previous program scene.
 
 Refuses to run while an OBS output is active. Needs a LIVE stream: a VOD races
-ahead of real time through the ring (no backpressure) and is not a valid test.
+ahead of real time through the ring, which has no backpressure, so it is not a
+valid test.
 
-Find an fMP4 channel first (the relay passes no --twitch-supported-codecs, so
-streamlink's default h264 is what production gets):
+Find an fMP4 channel first. The relay passes no --twitch-supported-codecs, so
+streamlink's default h264 is what production gets:
   streamlink --stdout https://www.twitch.tv/<login> best | head -c 16 | xxd
   -> bytes 4..7 == "ftyp" means fMP4.
 
@@ -58,7 +59,7 @@ _YAVG_RE = re.compile(r"lavfi\.signalstats\.YAVG=([\d.]+)")
 
 
 def container_of(head):
-    """'fMP4' | 'TS' | 'unknown' from the first bytes of a stream. Pure."""
+    """'fMP4' | 'TS' | 'unknown' from the first bytes of a stream."""
     head = bytes(head or b"")
     if head[4:8] == b"ftyp":
         return "fMP4"
@@ -68,7 +69,7 @@ def container_of(head):
 
 
 def rejoin_verdict(state, cursor_delta_ms, yavg, black_luma):
-    """'PICTURE' or 'BLACK (<reasons>)' for one rejoin sample. Pure."""
+    """'PICTURE' or 'BLACK (<reasons>)' for one rejoin sample."""
     why = []
     if state != "OBS_MEDIA_STATE_PLAYING":
         why.append(f"state={state}")
@@ -157,7 +158,7 @@ def main(argv=None):
     try:
         sys.stdout.reconfigure(line_buffering=True)
     except (AttributeError, OSError):
-        pass  # non-standard stdout — best effort
+        pass  # non-standard stdout, best effort
 
     fe = load_relay(args.relay_file)
     session, note = obs_ws._connect("127.0.0.1", None, None, timeout=3.0)
@@ -227,8 +228,8 @@ def main(argv=None):
         for req, data in cleanup:
             try:
                 session.request(req, data)
-            except Exception:                  # noqa: BLE001 — cleanup is best effort
-                pass  # already gone / never created
+            except Exception:                  # noqa: BLE001 (cleanup is best effort)
+                pass  # already gone or never created
         session.close()
         stop_process(proc)
         srv.stop()

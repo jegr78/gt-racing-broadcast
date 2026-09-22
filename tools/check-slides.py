@@ -6,8 +6,8 @@ images or the Excalidraw SVGs silently overflow that box. This loads each deck i
 a headless browser, walks every slide (including vertical sub-slides), measures the
 content + each image/SVG against the box, and reports offenders with a screenshot.
 
-Maintainer/pre-publish gate (not CI) — same model as wiki-visual-test. Needs the
-Playwright venv (see the racecast-e2e skill).
+Maintainer pre-publish gate, not CI. Needs the Playwright venv (see the
+racecast-e2e skill).
 
 Usage:
   python3 tools/check-slides.py [--shots DIR]
@@ -106,7 +106,7 @@ def main():
         print(f'OVERFLOW {f["deck"]} slide {f["slide"]} [{f["kind"]}]: {f["detail"]}')
     if findings:
         sys.exit(f"{len(findings)} overflowing slide(s)")
-    print(f"OK — no overflow in {len(decks)} deck(s)")
+    print(f"OK, no overflow in {len(decks)} deck(s)")
 
 
 if __name__ == "__main__":

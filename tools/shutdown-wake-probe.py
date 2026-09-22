@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
-"""Does shutdown() alone wake a handler blocked in sendall? — maintainer, NOT shipped.
+"""Does shutdown() alone wake a handler blocked in sendall? Maintainer, NOT shipped.
 
 reap_superseded wakes the consumers OBS abandons, and which call does the waking is
 per platform. No relay, no OBS: a peer that stops reading, a writer blocked in sendall,
 then shutdown() and, if that was not enough, close().
 
-Measured 2026-09-21, this script on both hosts:
-  macOS 15    shutdown() alone wakes it (BrokenPipeError)
-  Windows 11  shutdown() alone does NOT; close() after it does (WinError 10038)
-
-Hence relay CLOSE_TO_WAKE. Re-run it on any host whose behaviour is in doubt; exit 0
-means something woke the writer, 1 means nothing did.
+On macOS shutdown() alone wakes it; on Windows it does not and close() after it does.
+That split is why the relay has CLOSE_TO_WAKE. Re-run this on any host whose behaviour
+is in doubt; exit 0 means something woke the writer, 1 means nothing did.
 """
 import socket, sys, threading, time
 
@@ -48,7 +45,7 @@ print("woken by shutdown() alone:", by_shutdown, "->", state.get("result"))
 if by_shutdown:
     sys.exit(0)
 
-conn.close()                                  # the second half the review removed
+conn.close()                                  # the second half, needed on Windows
 t.join(timeout=8)
 print("woken by close() after it:  ", not t.is_alive(), "->", state.get("result"))
 sys.exit(0 if not t.is_alive() else 1)

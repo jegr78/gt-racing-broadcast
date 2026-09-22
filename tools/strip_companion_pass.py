@@ -35,12 +35,12 @@ def main(src, dst):
                  f"Drop your Companion 'Export -> Full Configuration' there, then re-run.")
     with open(src, "rb") as fh:
         raw = fh.read()
-    if raw[:2] == b"\x1f\x8b":          # gzip magic — newer Companion compresses its exports
+    if raw[:2] == b"\x1f\x8b":          # gzip magic; newer Companion compresses its exports
         raw = gzip.decompress(raw)
     cfg = json.loads(raw.decode("utf-8"))
     blank(cfg)
     os.makedirs(os.path.dirname(dst), exist_ok=True)
-    with open(dst, "w", encoding="utf-8", newline="\n") as fh:   # LF on every OS, like the repo
+    with open(dst, "w", encoding="utf-8", newline="\n") as fh:   # LF on every OS
         json.dump(cfg, fh, indent=1)
         fh.write("\n")                  # keep the committed file's trailing newline
     print(f"stripped {src}\n      -> {dst}")

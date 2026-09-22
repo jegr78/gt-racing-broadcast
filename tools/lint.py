@@ -1,43 +1,38 @@
 #!/usr/bin/env python3
 """Run the ruff linter over the repo (config: ruff.toml at the repo root), plus two
-small in-house guards that mirror CodeQL classes ruff can't (see below).
+in-house guards that mirror CodeQL classes ruff has no rule for.
 
     python3 tools/lint.py          # check only (what CI runs)
     python3 tools/lint.py --fix    # auto-fix what ruff can (e.g. unused imports)
 
-Ruff is a single external binary, NOT vendored — install once:
+Ruff is a single external binary, not vendored. Install it once:
   macOS:  brew install ruff      Windows:  winget install astral-sh.ruff
   Linux:  pipx/pip install ruff (or the distro package)
-The rule set mirrors the GitHub code-scanning (CodeQL) classes — see ruff.toml.
+The rule set mirrors the GitHub code-scanning (CodeQL) classes; see ruff.toml.
 
-The empty-except guard exists because ruff's S110 stays OFF (it would re-flag the
-documented `except ...: pass  # reason` blocks CodeQL accepts). This guard
-reproduces CodeQL's actual behavior — flag an empty handler (`pass`/`...`) with NO
-explanatory comment, EXCEPT the benign idioms CodeQL also ignores (a deliberate
-`raise` in the try, or the optional-import idiom). So a missing comment fails the
-gate locally/pre-push instead of surfacing post-merge.
+The empty-except guard exists because ruff's S110 stays OFF: it would re-flag the
+documented `except ...: pass  # reason` blocks CodeQL accepts. This guard flags an
+empty handler (`pass`/`...`) with NO explanatory comment, except the benign idioms
+CodeQL also ignores: a deliberate `raise` in the try, or the optional-import idiom.
+A missing comment then fails the gate pre-push instead of post-merge.
 
-NOTE on KeyboardInterrupt: it is NOT blanket-exempt. CodeQL flags a silent Ctrl-C
-swallow when the protected try can also exit normally — which #217's `tail_merged`
-did (a `return` inside the try), landing alert 124 post-merge even though the gate
-had waved it through. The gate now requires a comment on it like any other swallow;
-that is at worst stricter than CodeQL (a one-line comment), never laxer.
+KeyboardInterrupt is NOT blanket-exempt. CodeQL flags a silent Ctrl-C swallow when
+the protected try can also exit normally (#217), so the gate requires a comment on
+it like any other swallow. That is at worst stricter than CodeQL, never laxer.
 
 The procedure-return-value guard (find_proc_return_value_uses) reproduces CodeQL's
-py/procedure-return-value-used, which ruff has NO equivalent for: flag `x = proc()`
-/ `return proc()` where the callee only ever returns None (a 'procedure'). It is
-scoped to same-file, bare-name calls — the recurring dispatcher shape — so it stays
-false-positive-free; cross-module/method cases stay CodeQL's job. (Three such alerts
-landed together once; this catches the next one pre-merge.)
+py/procedure-return-value-used: flag `x = proc()` / `return proc()` where the callee
+only ever returns None (a 'procedure'). It is scoped to same-file, bare-name calls,
+the recurring dispatcher shape, so it stays free of false positives; cross-module
+and method cases stay CodeQL's job.
 """
 import ast, io, os, shutil, subprocess, sys, tokenize
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Caught types for which a silent `pass` is an accepted idiom (CodeQL does not
-# flag these): optional imports and interpreter/iterator-control signals.
-# KeyboardInterrupt is deliberately NOT here — CodeQL flags a comment-free Ctrl-C
-# swallow when the try has a normal exit too (#217 alert 124); see module docstring.
+# Caught types for which a silent `pass` is an accepted idiom CodeQL does not flag:
+# optional imports and interpreter/iterator-control signals. KeyboardInterrupt is
+# deliberately NOT here; see the module docstring. (#217)
 _BENIGN_EXC = frozenset({"ImportError", "ModuleNotFoundError",
                          "SystemExit", "StopIteration", "GeneratorExit"})
 
@@ -50,7 +45,7 @@ def _comment_lines(source):
             if tok.type == tokenize.COMMENT:
                 lines.add(tok.start[0])
     except (tokenize.TokenError, IndentationError, SyntaxError):
-        pass  # tokenizer gave up; the ast.parse below is the authority anyway
+        pass  # tokenizer gave up; the ast.parse below is the authority
     return lines
 
 
@@ -70,12 +65,11 @@ def _caught_names(handler):
 
 
 def find_empty_excepts(source):
-    """Line numbers of `except` handlers that silently swallow — body is only
-    `pass`/`...` with no comment in the handler — EXCLUDING the idioms CodeQL
-    py/empty-except also ignores: a deliberate `raise` anywhere in the try body
-    (e.g. assert-raises tests) and handlers catching only benign types
-    (ImportError/KeyboardInterrupt/...). Returns [] for unparseable source.
-    Pure → unit-tested in tests/test_lint.py."""
+    """Line numbers of `except` handlers that silently swallow: the body is only
+    `pass`/`...` with no comment in the handler. Excludes the idioms CodeQL
+    py/empty-except also ignores, a deliberate `raise` anywhere in the try body
+    (e.g. assert-raises tests) and handlers catching only _BENIGN_EXC types.
+    Returns [] for unparseable source."""
     try:
         tree = ast.parse(source)
     except SyntaxError:
@@ -103,7 +97,7 @@ def find_empty_excepts(source):
                 continue                       # deliberate raise in try (assert-raises idiom)
             names = _caught_names(h)
             if names and names <= _BENIGN_EXC:
-                continue                       # optional-import / Ctrl-C style handler
+                continue
             hits.append(h.lineno)
     return hits
 
@@ -115,7 +109,7 @@ def _scope_returns_yields(fn):
     while stack:
         n = stack.pop()
         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
-            continue                       # nested scope — not ours
+            continue                       # nested scope, not ours
         if isinstance(n, ast.Return):
             rets.append(n)
         if isinstance(n, (ast.Yield, ast.YieldFrom)):
@@ -125,10 +119,10 @@ def _scope_returns_yields(fn):
 
 
 def _always_terminates(stmts):
-    """True iff this statement block can NOT fall through its end — it always
-    raises, returns, or sys.exit()s. Bounded (matches the trailing-raise / both-
-    branches-raise shapes CodeQL excludes); anything more exotic conservatively
-    counts as falling through. Used only for the no-`return` case below."""
+    """True iff this statement block can NOT fall through its end: it always
+    raises, returns, or sys.exit()s. It matches the trailing-raise and
+    both-branches-raise shapes CodeQL excludes; anything more exotic counts as
+    falling through. Used only for the no-`return` case below."""
     if not stmts:
         return False
     last = stmts[-1]
@@ -145,11 +139,11 @@ def _always_terminates(stmts):
 
 def _is_procedure(fn):
     """True iff *fn* is a 'procedure' in CodeQL's sense (py/procedure-return-value-
-    used): it only ever returns None *implicitly* — via a bare `return` or by
-    falling off the end. A `return <expr>` (INCLUDING an explicit `return None`,
-    which CodeQL treats as a deliberate value) or a yield disqualifies it; a
-    function that always raises/exits is not a procedure either (it never returns
-    None)."""
+    used): it only ever returns None implicitly, via a bare `return` or by falling
+    off the end. A `return <expr>` disqualifies it, including an explicit
+    `return None`, which CodeQL treats as a deliberate value; so does a yield. A
+    function that always raises or exits is not a procedure either, since it never
+    returns None."""
     rets, has_yield = _scope_returns_yields(fn)
     if has_yield:
         return False
@@ -161,13 +155,12 @@ def _is_procedure(fn):
 
 
 def find_proc_return_value_uses(source):
-    """(lineno, name) for every call whose result is USED but whose callee is a
-    same-file procedure (returns only None) — CodeQL's py/procedure-return-value-
-    used. Same-file, bare-name calls only (no cross-module / method resolution),
-    which is the recurring `return helper(args)` / `x = helper()` shape; this keeps
-    it precise (no false positives) and leaves anything deeper to CodeQL. A call is
-    'used' unless it is a statement on its own (`helper()` as an expression
-    statement). Returns [] for unparseable source. Pure -> unit-tested."""
+    """(lineno, name) for every call whose result is used but whose callee is a
+    same-file procedure, CodeQL's py/procedure-return-value-used. Same-file,
+    bare-name calls only, no cross-module or method resolution: that is the
+    recurring `return helper(args)` / `x = helper()` shape, and anything deeper
+    stays CodeQL's job. A call counts as 'used' unless it is a statement on its
+    own. Returns [] for unparseable source."""
     try:
         tree = ast.parse(source)
     except SyntaxError:
@@ -235,14 +228,14 @@ def main():
     rc = subprocess.call(["ruff", "check", ROOT] + sys.argv[1:])
     bad = check_empty_excepts(ROOT)
     if bad:
-        print("\nempty-except (CodeQL py/empty-except) — add a short reason in the "
+        print("\nempty-except (CodeQL py/empty-except): add a short reason in the "
               "handler body, e.g. `pass  # already gone`:")
         for relpath, lineno in bad:
             print(f"  {relpath}:{lineno}: except body is only pass/... with no comment")
         rc = rc or 1
     proc_bad = check_proc_return_value_uses(ROOT)
     if proc_bad:
-        print("\nprocedure-return-value-used (CodeQL py/procedure-return-value-used) — "
+        print("\nprocedure-return-value-used (CodeQL py/procedure-return-value-used): "
               "this callee only ever returns None; drop the assignment / `return`, or "
               "give the callee an explicit `return <value>`:")
         for relpath, lineno, name in proc_bad:

@@ -1,40 +1,22 @@
 #!/usr/bin/env python3
 """Freeze-detection signal probe (maintainer diagnostic, NOT shipped).
 
-Purpose
--------
-The recurring "OBS stutter/freeze" (a fresh streamlink stream spliced onto OBS's
-STALE ffmpeg demuxer in fan-out mode — the picture freezes at ~1 Hz) is INVISIBLE
-to every metric #488 relies on: OBS's encoder FPS holds at 60, dropped/skipped
-frames stay flat, and OBS reads the feed socket greedily regardless of render
-state (all confirmed live). So `renderSkippedFrames` (a compositor render-timing
-metric) never tripped the #488 render-skip auto-resync (removed in #582).
+An OBS freeze (a fresh streamlink stream spliced onto OBS's stale ffmpeg demuxer)
+leaves encoder FPS and dropped/skipped frames flat, so those metrics cannot detect
+it. This probe samples every candidate signal at once while you drive the repro,
+to see which one separates a frozen picture from a healthy live one.
 
-We now have a DETERMINISTIC repro: ARM -> STOP -> ARM on the on-air feed
-(`/feed/<X>/activate` -> `/feed/<X>/deactivate` -> `/feed/<X>/activate`). This
-probe samples every candidate detection signal SIMULTANEOUSLY while you drive
-that repro, so we can see which signal actually distinguishes a frozen picture
-from a healthy live one — before we wire a reliable check into the relay.
-
-Candidate signals sampled per tick, per relay feed input (A=53001, B=53002,
-POV=53003):
-  * IMG   — GetSourceScreenshot of the FEED SOURCE (not the program: the program
+Signals per tick, per relay feed input (A=53001, B=53002, POV=53003):
+  * IMG     GetSourceScreenshot of the FEED SOURCE, not the program: the program
             carries the live HUD timer, which changes every second and would mask
-            a frozen feed). Small lossless PNG -> sha1. Identical hash across ticks
-            == identical pixels == frozen source. This is the ground-truth signal;
-            it is cause-agnostic (catches ARM/STOP, drift, and unknown causes).
-  * CURSOR — GetMediaInputStatus mediaState + mediaCursor(ms). Cheap if it moves;
-            we do not yet know whether OBS advances the cursor for a live HLS
-            ffmpeg source or freezes it with the picture. The probe finds out.
-  * STATS — GetStats render-skip RATE (delta), activeFps, output-skipped. The
-            KNOWN-BLIND control: we expect these to stay flat through the freeze,
-            reproducing the "OBS stats looked fine" observation in-tool.
-Relay /status (best-effort) annotates each feed's serve state, so the log shows
-the smoking gun: feed SERVING (bytes flowing into the ring) while the picture is
-FROZEN and every OBS stat looks healthy.
+            a frozen feed. Small lossless PNG to sha1, so an identical hash across
+            ticks means identical pixels. Cause-agnostic ground truth.
+  * CURSOR  GetMediaInputStatus mediaState + mediaCursor(ms).
+  * STATS   GetStats render-skip RATE (delta), activeFps, output-skipped. The
+            known-blind control.
+Relay /status annotates each feed's serve state, best-effort, so the log can show a
+feed SERVING while the picture is FROZEN and every OBS stat looks healthy.
 
-Usage
------
   python3 tools/obs-freeze-probe.py               # 1 Hz, auto-discovers OBS + feeds
   python3 tools/obs-freeze-probe.py --interval 0.5 --width 96 --freeze-threshold 3
   python3 tools/obs-freeze-probe.py --no-relay    # skip the relay /status annotation
@@ -43,7 +25,7 @@ Then, in the Director Panel, do ARM -> STOP -> ARM on the on-air feed and watch
 which column flips. Ctrl-C prints a per-feed summary.
 
 Read-only against OBS (GetStats/GetInputList/GetInputSettings/GetSourceScreenshot/
-GetMediaInputStatus only — never SetInputSettings); the relay poll is a plain
+GetMediaInputStatus only, never SetInputSettings); the relay poll is a plain
 loopback GET. Nothing here changes broadcast state.
 """
 import argparse
@@ -55,7 +37,6 @@ import time
 import urllib.parse
 import urllib.request
 
-# Import the shipped obs-websocket client (stdlib-only) the same way tests do.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src", "scripts"))
 import obs_ws  # noqa: E402
 
@@ -91,9 +72,9 @@ def feed_inputs_by_label(session):
 
 
 def screenshot_hash(session, name, width):
-    """sha1 of a small lossless PNG of the source, or None on a request error
-    (e.g. the input is mid-rebuild during a RESET). PNG is lossless, so an
-    unchanged frame yields byte-identical data -> a stable hash."""
+    """sha1 of a small lossless PNG of the source, or None on a request error such
+    as an input mid-rebuild. PNG is lossless, so an unchanged frame yields
+    byte-identical data and a stable hash."""
     try:
         resp = session.request(
             "GetSourceScreenshot",
@@ -114,8 +95,8 @@ def media_status(session, name):
 
 
 def relay_feed_states(base, timeout=1.0):
-    """{label: state_str} from the relay /status feeds, best-effort ('' on any
-    failure). Loopback GET to our own relay — no external host, no UA needed."""
+    """{label: state_str} from the relay /status feeds, best-effort. Loopback GET
+    to our own relay, so no external host and no UA are needed."""
     try:
         with urllib.request.urlopen(base.rstrip("/") + "/status", timeout=timeout) as r:
             data = json.loads(r.read().decode("utf-8", "replace"))
@@ -129,8 +110,8 @@ def relay_feed_states(base, timeout=1.0):
 
 
 def render_skip_rate(stats, prev):
-    """Per-interval render-skip fraction from successive GetStats samples (the
-    same delta the relay records for its health chart), or None."""
+    """Per-interval render-skip fraction from successive GetStats samples, the
+    same delta the relay records for its health chart, or None."""
     sk, tot = stats.get("obs_render_skipped_frames"), stats.get("obs_render_total_frames")
     if sk is None or tot is None or prev is None:
         return None
@@ -181,7 +162,6 @@ def main(argv=None):
     last_change = {lbl: time.time() for lbl in order}
     prev_cursor = {lbl: None for lbl in order}
     prev_counts = None
-    # summary accounting
     freeze_episodes = {lbl: 0 for lbl in order}      # transitions into FROZEN while serving
     max_freeze = {lbl: 0.0 for lbl in order}
     was_frozen = {lbl: False for lbl in order}
@@ -192,7 +172,7 @@ def main(argv=None):
             now = time.time()
             try:
                 stats = obs_ws.parse_obs_stats(session.request("GetStats", {}))
-            except Exception:                        # session dropped (e.g. mid-RESET) -> reconnect
+            except Exception:                        # session dropped, reconnect
                 session.close()
                 session, note = obs_ws._connect(args.host, args.port, args.password, timeout=3.0)
                 if session is None:
@@ -217,7 +197,7 @@ def main(argv=None):
                 if h is not None:
                     prev_hash[lbl] = h
                 frozen_for = now - last_change[lbl]
-                # only call it a freeze when the feed is actually serving (bytes flowing)
+                # only a serving feed can be frozen; an idle one has no bytes to show
                 is_frozen = (frozen_for >= args.freeze_threshold
                              and (rstate.get(lbl) == "serving" if rstate else True))
                 if is_frozen and not was_frozen[lbl]:
@@ -245,7 +225,7 @@ def main(argv=None):
 
             time.sleep(max(0.05, args.interval))
     except KeyboardInterrupt:
-        pass  # Ctrl-C ends the run -> fall through to the summary
+        pass  # Ctrl-C ends the run and falls through to the summary
     finally:
         session.close()
 

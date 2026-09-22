@@ -5,18 +5,16 @@ proven src/obs/GT_Racing_Endurance.json so they stay OBS-valid and regenerable.
 Run: python3 tools/derive-solo-templates.py   (rewrites src/obs/GT_Racing_Solo_*.json)
 
 Strategy: deep-copy real nodes from the endurance collection and mutate minimally, so
-every OBS-required field shape is inherited from a proven-importable file. We never
-hand-author scaffold dicts (a missing key makes OBS refuse the import).
+every OBS-required field shape is inherited from a proven-importable file. Scaffold
+dicts are never hand-authored, because a missing key makes OBS refuse the import.
 
-Result per file: the A/B ping-pong is gone (Feed A/B and the Stint/Splitscreen scenes
-dropped). A "Program" scene keeps Feed POV + the HUD/graphics overlays and adds two new
-device inputs — "Solo Capture Device" (full-frame background) and "Solo Webcam Device"
-(bottom-left PiP) — each wrapped in its own scene ("Solo Capture" / "Solo Webcam", the
-Discord "scene wraps one source" model — mirroring how the Discord scene wraps the
-distinctly-named "Discord Audio Capture" leaf). The device leaf sources carry the
-tokens __RACECAST_CAPTURE__ / __RACECAST_WEBCAM__; the committed form is the macOS
-av_capture_input source, and setup-assets.py localizes the source type + device
-settings per OS at import time.
+Result per file: the A/B ping-pong is gone, with Feed A/B and the Stint/Splitscreen
+scenes dropped. A "Program" scene keeps Feed POV plus the HUD/graphics overlays and adds
+two device inputs, "Solo Capture Device" as a full-frame background and "Solo Webcam
+Device" as a bottom-left PiP, each wrapped in its own scene on the Discord "scene wraps
+one source" model. The device leaf sources carry the tokens __RACECAST_CAPTURE__ and
+__RACECAST_WEBCAM__; the committed form is the macOS av_capture_input source, and
+setup-assets.py localizes the source type and device settings per OS at import time.
 """
 import copy
 import json
@@ -26,8 +24,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 OBS = os.path.join(ROOT, "src", "obs")
 
-# Fixed UUIDs for the added sources/scenes — deterministic, so re-runs don't churn the
-# committed JSON (no uuid4()). They follow the endurance file's synthetic-uuid style.
+# Fixed UUIDs, never uuid4(), so re-runs do not churn the committed JSON.
 U = {
     "cap_src": "aaaaaaa4-0000-4000-8000-000000000004",
     "cam_src": "aaaaaaa5-0000-4000-8000-000000000005",
@@ -41,8 +38,8 @@ U = {
 }
 
 DROP_SCENES = {"Stint", "Splitscreen"}
-# The endurance commentary mic (#593, tools/add_commentary_mic.py) is dropped with the
-# feeds and rebuilt below in the solo shape: hot, wrapped, wired into more scenes.
+# The endurance commentary mic (#593) is dropped with the feeds and rebuilt below in
+# the solo shape: hot, wrapped, wired into more scenes.
 DROP_SOURCES = {"Feed A", "Feed B", "Commentary Mic Device"}
 
 # Committed device tokens (localized per OS by setup-assets.localize_device_sources).
@@ -51,13 +48,12 @@ WEBCAM_TOKEN = "__RACECAST_WEBCAM__"
 MIC_TOKEN = "__RACECAST_MIC__"
 TYRES_TOKEN = "__RACECAST_TYRES_CAPTURE__"
 
-# The tyres/fuel crop (Commentary only): isolates GT7's bottom-left
-# tyre/fuel/sprint widget from a full-frame 1920x1080 capture. Values from a real
-# D-GT7-M export (kept fixed; the operator fine-tunes in OBS if their capture differs).
+# Isolates GT7's bottom-left tyre/fuel/sprint widget from a full-frame 1920x1080
+# capture. Fixed values; the operator fine-tunes in OBS if their capture differs.
 TYRES_CROP = {"crop_left": 258, "crop_top": 950, "crop_right": 1336, "crop_bottom": 18}
 
-# Scenes the "Commentary Mic" nested scene is wired into as an item — audible
-# everywhere except the rendered Intro/Outro clips (which carry their own audio).
+# Scenes the "Commentary Mic" nested scene is wired into as an item. The rendered
+# Intro/Outro clips are excluded because they carry their own audio.
 MIC_TARGET_SCENES = ("Program", "Interview", "Standby", "Intermission", "Discord")
 
 # scene_order after derivation (drops Stint/Splitscreen, adds the device scenes).
@@ -76,10 +72,10 @@ def _by_name(sources):
 def _device_leaf(template_leaf, uuid, name, token, source_id="av_capture_input",
                   settings_key="device"):
     """Clone a proven leaf source and retarget it as a device source carrying the
-    given token. Only name/uuid/id/versioned_id/settings are overridden — every
-    other OBS-required field is inherited from the template. Defaults match the
-    committed macOS video-capture form (av_capture_input/device); the audio mic
-    leaf overrides source_id/settings_key to the macOS coreaudio form."""
+    given token. Only name/uuid/id/versioned_id/settings are overridden; every other
+    OBS-required field is inherited from the template. Defaults match the committed
+    macOS video-capture form, and the audio mic leaf overrides source_id/settings_key
+    to the macOS coreaudio form."""
     leaf = copy.deepcopy(template_leaf)
     leaf["name"] = name
     leaf["uuid"] = uuid
@@ -90,7 +86,7 @@ def _device_leaf(template_leaf, uuid, name, token, source_id="av_capture_input",
 
 
 def _device_scene(discord_scene, uuid, name, src_uuid, src_name):
-    """Clone the Discord scene (the 'scene wraps one source' model) and point its single
+    """Clone the Discord scene, the 'scene wraps one source' model, and point its single
     item at the given device leaf, rendered full-frame (bounds_type 2 = SCALE_INNER)."""
     scene = copy.deepcopy(discord_scene)
     scene["name"] = name
@@ -108,25 +104,23 @@ def _device_scene(discord_scene, uuid, name, src_uuid, src_name):
 
 
 def _nested_scene_item(template_item, name, src_uuid, item_id):
-    """Clone a proven audio-style scene item (bounds_type 0 — no visual footprint,
-    the shape already used to reference the "Discord" scene from other scenes) and
-    retarget it to point at a different nested scene. Used to wire the "Commentary
-    Mic" scene into the five target scenes."""
+    """Clone a proven audio-style scene item, bounds_type 0 with no visual footprint,
+    the shape already used to reference the "Discord" scene from other scenes, and
+    retarget it at a different nested scene. Wires the "Commentary Mic" scene into the
+    five target scenes."""
     it = copy.deepcopy(template_item)
     it["name"] = name
     it["source_uuid"] = src_uuid
     it["id"] = item_id
-    # Audio-only reference (no visual footprint) — carry no show/hide transition
-    # rather than inheriting the template item's 300 ms (cosmetic; the timing is
-    # meaningless for an item that never renders).
+    # An item that never renders has no use for the template's show/hide transition.
     it["show_transition"] = {"duration": 0}
     it["hide_transition"] = {"duration": 0}
     return it
 
 
 def _add_mic_reference(scene, mic_ref_template, mic_scene_uuid):
-    """Deep-copy `scene` and append a "Commentary Mic" nested-scene item — the
-    same pattern other scenes already use to reference "Discord"."""
+    """Deep-copy `scene` and append a "Commentary Mic" nested-scene item, the same
+    pattern other scenes already use to reference "Discord"."""
     scene = copy.deepcopy(scene)
     next_id = int(scene["settings"].get("id_counter", 0)) + 1
     item = _nested_scene_item(mic_ref_template, "Commentary Mic", mic_scene_uuid, next_id)
@@ -150,9 +144,9 @@ def _program_item(template_item, name, src_uuid, pos, bounds, item_id):
 
 
 def derive(with_tyres=False):
-    """Build the solo collection. `with_tyres=True` (Commentary only) adds the
-    'Solo Tyres/Fuel Capture' source cropped to GT7's tyre/fuel
-    widget, bottom-left; POV omits it (the driver's own feed already shows it)."""
+    """Build the solo collection. `with_tyres=True`, Commentary only, adds the
+    'Solo Tyres/Fuel Capture' source cropped to GT7's bottom-left tyre/fuel widget.
+    POV omits it, because the driver's own feed already shows it."""
     with open(os.path.join(OBS, "GT_Racing_Endurance.json"), encoding="utf-8") as fh:
         col = json.load(fh)
 
@@ -161,15 +155,14 @@ def derive(with_tyres=False):
     discord_scene = by["Discord"]
     pov_leaf = by["Feed POV"]
 
-    # Program scene: deep-copy Stint, rename, re-uuid.
     program = copy.deepcopy(stint)
     program["name"] = "Program"
     program["uuid"] = U["program"]
 
     items = program["settings"]["items"]
-    # Drop the A/B feed items; keep Feed POV + HUD/overlays/graphics/flags/Discord/Standby.
+    # Feed POV and the HUD/overlays/graphics/flags/Discord/Standby items stay.
     items = [it for it in items if it.get("name") not in DROP_SOURCES]
-    # ...and the dropped endurance mic item's show/hide hotkeys with it (#593).
+    # The dropped endurance mic item's show/hide hotkeys go with it (#593).
     for it in stint["settings"]["items"]:
         if it.get("name") == "Commentary Mic Device":
             for verb in ("show", "hide"):
@@ -177,32 +170,26 @@ def derive(with_tyres=False):
 
     # The Feed POV item is the cleanest transform template for the two new PiP items.
     pov_item = next(it for it in items if it.get("name") == "Feed POV")
-    # The existing "Discord" nested-scene reference is the template for wiring in
-    # the new "Commentary Mic" nested-scene reference (same bounds_type-0 shape).
+    # The "Discord" nested-scene reference is the template for the new "Commentary
+    # Mic" one: same bounds_type-0 shape.
     discord_ref_item = next(it for it in items if it.get("name") == "Discord")
-    # The endurance Stint scene hides Discord (it is only needed in Interview there, and
-    # a third layer tips a weak iGPU into a one-frame render stall). Solo has no such
-    # scene split — the commentator's Discord audio belongs on air in Program — so
-    # re-assert the visibility here instead of inheriting the endurance decision.
+    # The endurance Stint scene hides Discord, but solo has no such scene split and the
+    # commentator's Discord audio belongs on air in Program, so re-assert visibility.
     discord_ref_item["visible"] = True
 
-    # Every new Program item takes a genuinely-unused scene-item id, allocated
-    # just ABOVE the highest inherited id so later growth in the base Stint scene
-    # (e.g. the full-page Stint graphics, #2026-07-16) can never collide with the
-    # solo additions. OBS tolerates duplicate ids and resolves scene items by
-    # name, but unique ids keep the file clean.
+    # Allocated just ABOVE the highest inherited id, so later growth in the base Stint
+    # scene can never collide with the solo additions.
     base_max = max((int(it["id"]) for it in items
                     if isinstance(it.get("id"), int)), default=0)
     cap_id, cam_id, tyres_id, mic_id = (base_max + 1, base_max + 2,
                                         base_max + 3, base_max + 4)
-    # Solo Capture: full-frame background at the BOTTOM of the z-order (rendered first).
+    # Full-frame background at the BOTTOM of the z-order, so it renders first.
     cap_item = _program_item(pov_item, "Solo Capture", U["cap_scene"],
                              (0, 0), (1920, 1080), item_id=cap_id)
-    # Solo Webcam: bottom-left PiP, inserted right after Feed POV.
+    # Bottom-left PiP, inserted right after Feed POV.
     cam_item = _program_item(pov_item, "Solo Webcam", U["cam_scene"],
                              (24, 776), (384, 280), item_id=cam_id)
-    # Solo Tyres/Fuel Capture (Commentary only): the cropped tyre/fuel widget,
-    # bottom-left. Same PiP transform template as the webcam, plus the fixed crop.
+    # Commentary only: the same PiP transform template as the webcam, plus the crop.
     tyres_item = None
     if with_tyres:
         tyres_item = _program_item(pov_item, "Solo Tyres/Fuel Capture", U["tyres_scene"],
@@ -216,7 +203,7 @@ def derive(with_tyres=False):
             new_items.append(cam_item)
             if tyres_item is not None:
                 new_items.append(tyres_item)
-    # Commentary Mic: audible in Program (nested-scene reference, no visual footprint).
+    # Audible in Program via a nested-scene reference with no visual footprint.
     mic_item_program = _nested_scene_item(discord_ref_item, "Commentary Mic",
                                           U["mic_scene"], item_id=mic_id)
     new_items.append(mic_item_program)
@@ -224,48 +211,42 @@ def derive(with_tyres=False):
     program["settings"]["id_counter"] = max(
         int(program["settings"].get("id_counter", 0)), mic_id)
 
-    # Device leaf sources + wrapping scenes. The leaf is named distinctly from its
-    # wrapping scene ("Solo Capture Device" vs the "Solo Capture" scene) — mirroring
-    # the Discord precedent (scene "Discord" wraps leaf "Discord Audio Capture") — so
-    # setup-assets' by-name lookup in localize_device_sources can never collide a
-    # device leaf with its wrapping scene.
+    # Each leaf is named distinctly from its wrapping scene, mirroring the Discord
+    # precedent, so setup-assets' by-name lookup in localize_device_sources can never
+    # collide a device leaf with its wrapping scene.
     cap_src = _device_leaf(pov_leaf, U["cap_src"], "Solo Capture Device", CAPTURE_TOKEN)
     cam_src = _device_leaf(pov_leaf, U["cam_src"], "Solo Webcam Device", WEBCAM_TOKEN)
     cap_scene = _device_scene(discord_scene, U["cap_scene"], "Solo Capture",
                               U["cap_src"], "Solo Capture Device")
     cam_scene = _device_scene(discord_scene, U["cam_scene"], "Solo Webcam",
                               U["cam_src"], "Solo Webcam Device")
-    # Tyres/fuel device leaf + wrapping scene (Commentary only). setup-assets folds
-    # the leaf into Solo Capture Device when one card carries both (#597). The leaf
-    # inherits muted=True from the Feed POV template (video-only — the game audio
-    # already comes from Solo Capture, so this must not double it). In the folded
-    # one-card case the capture leaf sits in two nested scenes; OBS >= 32.0 mixes a
-    # source that appears twice in the audio tree only once (libobs 50cdabbb5).
+    # Commentary only. setup-assets folds the leaf into Solo Capture Device when one
+    # card carries both (#597). It inherits muted=True from the Feed POV template, since
+    # the game audio already comes from Solo Capture. In the folded one-card case the
+    # capture leaf sits in two nested scenes, and OBS >= 32.0 mixes a source that appears
+    # twice in the audio tree only once.
     tyres_src = tyres_scene = None
     if with_tyres:
         tyres_src = _device_leaf(pov_leaf, U["tyres_src"], "Solo Tyres Capture Device",
                                  TYRES_TOKEN)
         tyres_scene = _device_scene(discord_scene, U["tyres_scene"], "Solo Tyres/Fuel Capture",
                                     U["tyres_src"], "Solo Tyres Capture Device")
-    # Commentary Mic device leaf (macOS coreaudio_input_capture form) + its wrapping
-    # scene (cloned from Discord, the audio-scene precedent).
+    # The macOS coreaudio_input_capture form, wrapped in a scene cloned from Discord.
     mic_src = _device_leaf(pov_leaf, U["mic_src"], "Commentary Mic Device", MIC_TOKEN,
                            source_id="coreaudio_input_capture", settings_key="device_id")
-    # The commentary mic is the PRIMARY audio of a solo commentary broadcast, so it
-    # ships HOT (unmuted) — unlike the muted-by-default capture/webcam leaves. The
-    # operator can still mute it from the panel Audio bus.
+    # The PRIMARY audio of a solo commentary broadcast, so it ships HOT, unlike the
+    # muted-by-default capture and webcam leaves.
     mic_src["muted"] = False
     mic_scene = _device_scene(discord_scene, U["mic_scene"], "Commentary Mic",
                               U["mic_src"], "Commentary Mic Device")
 
-    # Wire the "Commentary Mic" scene into the remaining four target scenes (Program
-    # already got its reference above, built inline with the rest of its items).
+    # Program already got its reference above, inline with the rest of its items.
     other_targets = [n for n in MIC_TARGET_SCENES if n != "Program"]
     mic_targets = {name: _add_mic_reference(by[name], discord_ref_item, U["mic_scene"])
                    for name in other_targets}
 
-    # Remove the endurance-only scenes/sources, substitute the mic-wired scenes, then
-    # append the solo additions.
+    # Remove the endurance-only scenes and sources, substitute the mic-wired scenes,
+    # then append the solo additions.
     kept = []
     for s in col["sources"]:
         name = s.get("name")
@@ -286,25 +267,20 @@ def derive(with_tyres=False):
     # current_scene / current_program_scene are plain strings in this collection.
     col["current_scene"] = START_SCENE
     col["current_program_scene"] = START_SCENE
-    # Own display name (setup-assets still overrides it with the per-league name at
-    # localize time, but the committed artifact should be self-consistent rather than
-    # carrying the inherited endurance name).
+    # setup-assets overrides this with the per-league name at localize time, but the
+    # committed artifact must not carry the inherited endurance name.
     col["name"] = "GT Racing Solo"
 
-    # Prune Splitscreen-only leftovers (#304): the Splitscreen scene itself was already
-    # dropped above, but its "Split HUD" group (top-level col["groups"]) and its
-    # "Splitscreen Labels" leaf source (col["sources"]) were left orphaned -- neither is
-    # referenced by any scene item in the solo collections.
+    # The Splitscreen scene was dropped above, leaving its "Split HUD" group and
+    # "Splitscreen Labels" leaf referenced by nothing (#304).
     col["sources"] = [s for s in col["sources"] if s.get("name") != "Splitscreen Labels"]
     if col.get("groups"):
         col["groups"] = [g for g in col["groups"] if g.get("name") != "Split HUD"]
 
-    # Audio monitoring: the game/race + Discord + media must be audible AND streamed
-    # (monitoring_type 2 = MONITOR_AND_OUTPUT). The game capture ships hot (unmuted), so
-    # the commentator/driver hears the race in-headset and it lands in the stream mix.
-    # The mic stays output-only (monitoring_type 0 — no self-monitor, no echo); the webcam
-    # and the tyres second-capture stay muted (video-only — game audio already comes from
-    # Solo Capture). Applies to BOTH solo outputs (POV + Commentary).
+    # The game, Discord and media must be audible AND streamed (monitoring_type 2 =
+    # MONITOR_AND_OUTPUT), so the commentator hears the race in-headset and it lands in
+    # the stream mix. The mic stays output-only at monitoring_type 0 to avoid an echo,
+    # and the webcam and tyres captures stay muted. Applies to both solo outputs.
     cap_src["muted"] = False
     cap_src["monitoring_type"] = 2
     by_final = _by_name(col["sources"])

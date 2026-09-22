@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Check intra-wiki links and anchors in src/docs/wiki/.
 
-Heading renames silently break [text](Page#anchor) links (it happened: two
-`Director#the-button-board` links rotted when that heading was renamed).
-This tool builds the page -> anchors map with GitHub's anchor algorithm and
-reports links pointing at missing pages or anchors.
+Heading renames silently break [text](Page#anchor) links. This tool builds the
+page -> anchors map with GitHub's anchor algorithm and reports links pointing at
+missing pages or anchors.
 
 Checked:   [text](Page) · [text](Page#anchor) · [text](#anchor)
 Ignored:   schemes (https:, mailto:), image embeds ![…](…), and relative

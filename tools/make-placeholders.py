@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Generate the bundled neutral placeholder assets for missing broadcast graphics
-and Intro/Outro clips. Maintainer tool (not shipped): run it, commit the output.
+and Intro/Outro clips. Maintainer tool, not shipped: run it, commit the output.
 
 Outputs (committed product assets, like src/assets/flags/):
   src/assets/placeholders/transparent-1080p.png   fully transparent 1920x1080 RGBA
@@ -17,11 +17,11 @@ OUT_DIR = os.path.join(ROOT, "src", "assets", "placeholders")
 
 
 def transparent_png_bytes(width, height):
-    """A fully transparent (alpha 0) RGBA PNG, encoded with the stdlib."""
+    """A fully transparent RGBA PNG (alpha 0), encoded with the stdlib."""
     row = b"\x00" * (width * 4)
     raw = bytearray()
     for _ in range(height):
-        raw.append(0)            # filter type 0 (None) for the scanline
+        raw.append(0)            # PNG filter type 0 (None) for the scanline
         raw += row
     comp = zlib.compress(bytes(raw), 9)
 
@@ -56,8 +56,8 @@ def write_mp4(path, width, height, seconds):
 
 
 def write_music_loop(path, seconds=24):
-    """A seamless, low-volume synthetic ambient loop (royalty-free because
-    generated). Integer-Hz partials over an integer duration loop click-free."""
+    """A seamless, low-volume synthetic ambient loop, royalty-free because it is
+    generated. Integer-Hz partials over an integer duration loop click-free."""
     cmd = ["ffmpeg", "-y",
            "-f", "lavfi", "-i", f"sine=frequency=110:duration={seconds}",
            "-f", "lavfi", "-i", f"sine=frequency=164:duration={seconds}",

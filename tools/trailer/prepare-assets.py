@@ -10,7 +10,7 @@ those five files so ``tools/build-trailer.py --assets-dir`` can serve them:
     Standings.png, Schedule.png, Standby.png, Race Weather 1.png   (copied)
     cc-home-crop.png                                               (generated)
 
-The four graphics come from a profile's runtime graphics dir — get them with
+The four graphics come from a profile's runtime graphics dir. Get them with
 ``racecast --profile <name> graphics`` (writes ``runtime/<name>/graphics/``).
 ``cc-home-crop.png`` is derived from the committed Control-Center screenshot
 ``src/docs/slides/assets/img/cc-home.png``: the bottom rows (which show MagicDNS
@@ -30,7 +30,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(os.path.dirname(HERE))
 
-# league broadcast graphics the trailer montage/hero shots use (Sheet-label filenames)
+# League broadcast graphics the trailer shots use; the names are Sheet labels.
 GRAPHICS = ["Standings.png", "Schedule.png", "Standby.png", "Race Weather 1.png"]
 
 CC_HOME_SRC = os.path.join(REPO_ROOT, "src", "docs", "slides", "assets", "img", "cc-home.png")
@@ -59,7 +59,7 @@ def prepare(graphics_dir, out_dir):
     im.save(crop_path)
     print(f"generated  cc-home-crop.png (cropped + IP redacted) -> {crop_path}")
 
-    print(f"\nassets ready in {out_dir} — now supply --music and run tools/build-trailer.py")
+    print(f"\nassets ready in {out_dir}. Now supply --music and run tools/build-trailer.py")
 
 
 def main():

@@ -31,7 +31,7 @@ Every video is wrapped with a shared intro + outro title card
 for all decks. Disable with --no-bumpers; change length with --bumper-seconds.
 
 A matching <deck>.srt + <deck>.vtt caption sidecar is written next to each MP4
-(timed from the exact spoken text + per-slide durations — no transcription).
+(timed from the exact spoken text + per-slide durations, no transcription).
 Disable with --no-captions.
 
 A 1280x720 YouTube thumbnail (<deck>-thumb.png), colour-coded by the deck's role
@@ -61,14 +61,14 @@ import walkthrough_core as core
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))
-import http_util  # noqa: E402 — outbound HTTP funnels through here (UA rule)
+import http_util  # noqa: E402 (outbound HTTP funnels through here, UA rule)
 
 SLIDES = os.path.join(ROOT, "src", "docs", "slides")
 GCLOUD_KEY_ENV = "RACECAST_GCLOUD_TTS_KEY"
 DEFAULT_PIPER_VOICE = "en_US-lessac-medium"
 DEFAULT_GCLOUD_VOICE = "en-US-Studio-Q"
 
-# Shared intro/outro title cards — built ONCE per run and reused for every deck.
+# Shared intro/outro title cards, built ONCE per run and reused for every deck.
 INTRO_HTML = "walkthrough-intro.html"
 OUTRO_HTML = "walkthrough-outro.html"
 INTRO_TEXT = "GT Racing Broadcast. Onboarding."
@@ -198,9 +198,9 @@ def make_synth(args):
             "then create an API key restricted to that API.")
 
     def synth_gcloud(text, out_path):
-        # LINEAR16 returns a real WAV (RIFF header) with an EXACT duration, so
-        # frame-locking is precise — unlike MP3, whose ffprobe duration is only an
-        # estimate (off by ~100 ms from encoder padding) and would risk clipping.
+        # LINEAR16 returns a real WAV with an EXACT duration, so frame-locking is
+        # precise. An MP3's ffprobe duration is only an estimate, off by about
+        # 100 ms of encoder padding, and would risk clipping.
         body = core.gcloud_tts_request(text, voice, audio_encoding="LINEAR16",
                                        speaking_rate=args.speaking_rate)
         raw = http_util.post_json(core.gcloud_tts_url(key), body, timeout=60)
@@ -352,7 +352,7 @@ def build_deck(deck, slides_dir, out_dir, synth, audio_ext,
         segments.append((png, audio, t, note))
 
     if not segments:
-        sys.exit(f"{deck}: no narrated slides — author Note: blocks first")
+        sys.exit(f"{deck}: no narrated slides, author Note: blocks first")
 
     narrated = len(segments)
     # Wrap the deck's slides with the shared intro/outro (built once, reused).

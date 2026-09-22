@@ -5,13 +5,13 @@ Replaces the old chroma-keyed Google-Sheets-editor sources (Stint, Streamer,
 Session, Round Track/Flag/Country, Team 1-3 Brand/Name, Race Control) with a
 single 'HUD Overlay' browser source pointing at the relay (http://127.0.0.1:8088/hud,
 1920x1080), placed inside the existing 'HUD' group just above 'Overlay'. Keeps
-'Overlay' (the frame) and 'HUD Race Timer' (the stagetimer). The Director's single
+'Overlay', the frame, and 'HUD Race Timer', the stagetimer. The Director's single
 HUD group toggle is preserved.
 
 Edits all three places OBS keeps this state in sync:
-  1) d['sources']                      — source definitions
-  2) d['groups'][HUD].settings.items   — the group's children
-  3) each scene's settings.items       — the group_item_backup copies
+  1) d['sources']                      source definitions
+  2) d['groups'][HUD].settings.items   the group's children
+  3) each scene's settings.items       the group_item_backup copies
 
 Idempotent: re-running once 'HUD Overlay' exists is a no-op.
 
@@ -30,7 +30,7 @@ OLD_NAMES = {
 NEW_NAME = "HUD Overlay"
 NEW_UUID = "0ad0fee0-0000-4000-8000-000000000001"
 NEW_URL = "http://127.0.0.1:8088/hud"
-ANCHOR = "Overlay"   # insert the new source directly above this (the frame)
+ANCHOR = "Overlay"   # insert the new source directly above the frame
 
 
 def _scene_items(scene):
@@ -43,7 +43,7 @@ def main(path):
     sources = d["sources"]
 
     if any(s.get("name") == NEW_NAME for s in sources):
-        print(f"{path}: '{NEW_NAME}' already present — skip")
+        print(f"{path}: '{NEW_NAME}' already present, skip")
         return
 
     group = next((g for g in d.get("groups", []) if g.get("name") == "HUD"), None)
@@ -52,7 +52,7 @@ def main(path):
     gitems = group["settings"]["items"]
 
     # A stable id for the new child, unique across the group AND every scene that
-    # carries the group (group child id and scene backup id are kept identical).
+    # carries it. The group child id and the scene backup id are kept identical.
     scenes_with_hud = [s for s in sources if s.get("id") == "scene"
                        and any(it.get("name") == "HUD" for it in _scene_items(s))]
     max_id = max([it["id"] for it in gitems]
@@ -60,20 +60,20 @@ def main(path):
     new_id = max_id + 1
 
     # 1) source object: clone an old HUD browser source, drop the chroma key,
-    #    repoint at the relay. Capture the template BEFORE removing the old ones.
+    #    repoint at the relay. Capture the template before removing the old ones.
     template_src = next(s for s in sources if s.get("name") in OLD_NAMES
                         and s.get("id") == "browser_source")
     new_src = copy.deepcopy(template_src)
     new_src["name"] = NEW_NAME
     new_src["uuid"] = NEW_UUID
-    new_src["filters"] = []                       # no chroma key — our page is transparent
+    new_src["filters"] = []                       # no chroma key; the page is transparent
     new_src["settings"] = {"url": NEW_URL, "width": 1920, "height": 1080,
-                           "restart_when_active": True}   # reload on scene-activate: heals
-                                                          # a cold start (relay not yet up)
+                           "restart_when_active": True}   # reload on scene-activate
+                                                          # heals a cold start
     sources[:] = [s for s in sources if s.get("name") not in OLD_NAMES]
     sources.append(new_src)
 
-    # 2) group child item: clone the 'Overlay' child (full-canvas 1920x1080 @0,0).
+    # 2) group child item: clone the 'Overlay' child, full-canvas 1920x1080 at 0,0.
     ov_child = next(it for it in gitems if it.get("name") == ANCHOR)
     new_child = copy.deepcopy(ov_child)
     new_child["name"] = NEW_NAME

@@ -1,28 +1,25 @@
 #!/usr/bin/env python3
-"""Prove the automatic backlog shed on a REAL OBS backlog — maintainer, NOT shipped.
+"""Prove the automatic backlog shed on a REAL OBS backlog. Maintainer, NOT shipped.
 
-The shed's loop was only ever seen against a synthetic consumer
-(`tools/slow-consumer-probe.py`), which is not OBS, so a stand-down there was
-correct behaviour and proved nothing about the remedy. This probe puts the real
-OBS into the state the shed exists for and watches the whole loop: detect,
-decide, rebuild, recover.
+A synthetic consumer (`tools/slow-consumer-probe.py`) is not OBS, so a stand-down
+against it says nothing about the remedy. This probe puts the real OBS into the
+state the shed exists for and watches the whole loop: detect, decide, rebuild,
+recover.
 
 The lever is SIGSTOP on the OBS process. A stopped OBS keeps its feed socket open
 and stops draining it, so the relay's `sendall` blocks, the consumer's accepted
-position freezes and `consumer_backlog` grows in real time: measured 2.9 s -> 28.4 s
-over a 45 s freeze on this machine.
+position freezes and `consumer_backlog` grows in real time.
 
-MEASURED, and it is the point of the probe: SIGCONT heals it on its own. OBS reads
-the socket greedily, not at playback rate, so it sprints back to the trailing mark
-within one sample (28.4 s -> 2.6 s in under 10 s) and the shed has nothing to do.
-A transient OBS stall is therefore NOT what the shed is for. What it is for is a
-consumer that stays slower than real time, which this lever cannot simulate: use
-`--drift` to watch the organic backlog instead.
+SIGCONT then heals it on its own, and that is the point of the probe: OBS reads the
+socket greedily rather than at playback rate, so it sprints back to the trailing
+mark within one sample and the shed has nothing to do. A transient OBS stall is
+therefore NOT what the shed is for. What it is for is a consumer that stays slower
+than real time, which this lever cannot simulate.
 
-Needs a LIVE source (a VOD races ahead through the ring and is not a valid test),
-a running OBS whose current scene shows Feed A, and no active OBS output. The relay is
-started with the HUD served, because the HUD browser source is part of the render load
-a broadcast actually puts on OBS.
+Needs a LIVE source, since a VOD races ahead through the ring, a running OBS whose
+current scene shows Feed A, and no active OBS output. The relay is started with the
+HUD served, because the HUD browser source is part of the render load a broadcast
+actually puts on OBS.
 
     python3 tools/obs-backlog-shed-probe.py --source https://www.youtube.com/@LofiGirl/live
 """
@@ -77,7 +74,7 @@ def status():
     try:
         with urllib.request.urlopen(RELAY + "/status", timeout=4) as r:
             return json.loads(r.read().decode("utf-8", "replace"))
-    except Exception:                      # noqa: BLE001 — a probe never dies on this
+    except Exception:                      # noqa: BLE001 (a probe never dies on this)
         return {}
 
 
@@ -124,9 +121,8 @@ def feed_sockets(port=53001):
                              errors="replace").stdout
     except OSError:
         return None
-    # No state word: a German Windows console prints HERGESTELLT, not ESTABLISHED.
-    # A connection is a line naming the feed port on one side and a real peer on the
-    # other; the listener's peer is the wildcard.
+    # Matched without the state word, because a German Windows console prints
+    # HERGESTELLT, not ESTABLISHED. The listener is the line whose peer is a wildcard.
     n = 0
     for line in out.splitlines():
         fields = [f for f in line.split() if _ADDR.match(f)]
@@ -249,13 +245,13 @@ def show_layers(scene, names, on):
 
 
 def obs_render():
-    """(fps, avg render ms, cpu%) — what tells a slow host from a slow source."""
+    """(fps, avg render ms, cpu%), which tells a slow host from a slow source."""
     st = _obs_session().request("GetStats", {}) or {}
     return (st.get("activeFps"), st.get("averageFrameRenderTime"), st.get("cpuUsage"))
 
 
 def start_recording():
-    """Start OBS recording: the render cliff this box shows needs an ACTIVE output."""
+    """Start OBS recording: the render cliff only appears with an ACTIVE output."""
     return (_obs_session().request("StartRecord", {}) or {}).get("outputPath", "started")
 
 
@@ -292,7 +288,7 @@ def main():
                          "director's /obs/feed-reset and watch whether the socket OBS "
                          "abandons is actually freed. load: put OBS under render load "
                          "(an active output) and watch whether it falls behind on its "
-                         "own — the case a healthy host cannot produce")
+                         "own, the case a healthy host cannot produce")
     ap.add_argument("--relay-log", default="/tmp/shed-probe-relay.log")
     ap.add_argument("--layers", default="",
                     help="load mode: comma-separated scene items to show for the run and "
@@ -304,12 +300,12 @@ def main():
 
     pid = obs_pid()
     if pid is None:
-        sys.exit("OBS is not running — this probe measures the real consumer.")
+        sys.exit("OBS is not running; this probe measures the real consumer.")
     active = obs_output_active()
     if active is None:
         sys.exit("OBS WebSocket not reachable; the probe needs it to read the rebuild.")
     if active:
-        sys.exit("an OBS output is active — refusing to freeze OBS while it streams/records.")
+        sys.exit("an OBS output is active; refusing to freeze OBS while it streams/records.")
     print(f"OBS pid {pid}, no active output.")
 
     csv_url, httpd = serve_schedule(args.source)
@@ -343,7 +339,7 @@ def main():
                       "watching whether OBS drains the ring slower than it fills.\n")
             elif args.mode == "reset":
                 print(f"\nsockets on the feed port: {feed_sockets()}")
-                print("triggering /obs/feed-reset — OBS opens a new socket and leaves "
+                print("triggering /obs/feed-reset: OBS opens a new socket and leaves "
                       "the old one; only shutdown() wakes its blocked handler.")
                 req = urllib.request.Request(
                     RELAY + "/obs/feed-reset", method="POST",
@@ -352,10 +348,10 @@ def main():
                 try:
                     with urllib.request.urlopen(req, timeout=15) as r:
                         print("  ", r.read().decode("utf-8", "replace")[:200])
-                except Exception as exc:                # noqa: BLE001 — a probe reports
+                except Exception as exc:                # noqa: BLE001 (a probe reports)
                     print("  reset failed:", exc)
             else:
-                print(f"\nstopping OBS for {args.freeze:.0f} s — it stops draining "
+                print(f"\nstopping OBS for {args.freeze:.0f} s. It stops draining "
                       "the socket.")
                 suspend_obs(pid, functools.partial(_sampler, args.freeze))
                 print("OBS running again, and behind live.\n")
@@ -387,7 +383,7 @@ def main():
                 try:
                     show_layers(args.scene, args.layers, False)
                     print("recording stopped:", stop_recording())
-                except Exception as exc:        # noqa: BLE001 — cleanup reports
+                except Exception as exc:        # noqa: BLE001 (cleanup reports)
                     print("could not stop the recording:", exc)
             relay.terminate()
             try:

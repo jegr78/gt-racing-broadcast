@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Force a SUSTAINED consumer backlog on a running relay — maintainer harness, not shipped.
+"""Force a SUSTAINED consumer backlog on a running relay. Maintainer harness, not shipped.
 
 Attaches to a feed's fan-out port as an ordinary HTTP consumer and reads at a fixed
 fraction of real time, so `consumer_backlog` and everything downstream of it sees a real,
@@ -9,11 +9,8 @@ It proves detection and the shed's lifecycle. It does NOT prove a rebuild remove
 own backlog: the rebuild targets OBS, and this consumer is not OBS, so a stand-down here
 is correct behaviour.
 
-Levers that do NOT work, so nobody retries them: pinning OBS to one core (with or without
-busy loops on it), two 1080p60 feeds plus a recording, a VOD source (yt-dlp -g returns a
-progressive URL streamlink cannot open), and pausing the media input (ignored). Setting
-close_when_inactive=false and switching scene away works only transiently — the relay lets
-a consumer that fell behind sprint back to the trailing mark.
+Only a consumer that keeps reading slowly holds the backlog. The relay lets a consumer
+that merely paused sprint back to the trailing mark.
 
     python3 tools/slow-consumer-probe.py --port 53001 --rate 0.4 --seconds 300
 """
@@ -34,7 +31,7 @@ CHUNK = 16384
 
 def read_budget(elapsed_s, bytes_read, source_bps, rate):
     """How many bytes this consumer may have read by now. Paced against the source's own
-    rate, so the backlog grows linearly and predictably. Pure."""
+    rate, so the backlog grows linearly."""
     return max(0, int(source_bps * rate * elapsed_s) - bytes_read)
 
 
@@ -61,7 +58,7 @@ def relay_view(relay, feed):
     try:
         with urllib.request.urlopen(relay.rstrip("/") + "/status", timeout=5) as r:
             d = json.loads(r.read().decode("utf-8", "replace"))
-    except Exception:                      # noqa: BLE001 — a probe never dies on this
+    except Exception:                      # noqa: BLE001 (a probe never dies on this)
         return None, None, None
     f = (d.get("feeds") or {}).get(feed) or {}
     return (f.get("backlog_s"), f.get("backlogged"),
@@ -87,7 +84,7 @@ def main():
     print(f"measuring what feed {feed} delivers on :{args.port} ...")
     bps = measure_source_bps(args.port, args.host)
     if bps < 1000:
-        sys.exit(f"feed {feed} delivered {bps:.0f} B/s — is it serving? (racecast relay status)")
+        sys.exit(f"feed {feed} delivered {bps:.0f} B/s. Is it serving? (racecast relay status)")
     deficit = bps * (1 - args.rate)
     print(f"  {bps/1e6*8:.1f} Mbit/s; reading at {args.rate:.0%} loses "
           f"{deficit/bps:.1f} s of stream per second")
@@ -120,7 +117,7 @@ def main():
                           f"{str(flagged):>7}  {stood}")
         except KeyboardInterrupt:
             print("\nstopped")
-    print("connection closed — the relay's reading returns to OBS alone")
+    print("connection closed; the relay's reading returns to OBS alone")
 
 
 if __name__ == "__main__":

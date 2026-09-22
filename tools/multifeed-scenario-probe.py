@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Multi-feed SCENARIO probe (#505) — maintainer harness, NOT shipped, NOT run in CI.
+"""Multi-feed SCENARIO probe (#505). Maintainer harness, NOT shipped, NOT run in CI.
 
 Where multifeed-429-probe.py runs STATIC cells (fixed N, fixed quality), this runs a DYNAMIC
 timeline that mirrors a real broadcast: named feed SLOTS (A/B/POV) that get activated,
-quality-switched, and deactivated mid-run — on ONE continuous measurement — so it captures the
-transitions AND any throttle "memory" across them.
+quality-switched and deactivated mid-run, on ONE continuous measurement, so it captures the
+transitions and any throttle "memory" across them.
 
 The motivating scenario (driver-swap splitscreen + optional POV), default phases:
     1  A=full            180s   normal on-air, 1 feed @1080p
@@ -14,13 +14,13 @@ The motivating scenario (driver-swap splitscreen + optional POV), default phases
 
 It reuses the REAL relay resolve + streamlink builders (importlib-loads racecast-feeds.py) so a
 quality switch re-resolves at that tier's format (full=1080p, robust=720p, emergency=480p) and
-restarts streamlink — exactly as the relay does. Per phase it logs the active feeds, aggregate
-throughput, and any 429 (with the feed + seconds-into-phase). Serves+logs only, Ctrl-C safe.
+restarts streamlink, exactly as the relay does. Per phase it logs the active feeds, aggregate
+throughput, and any 429 with the feed and seconds-into-phase. Serves and logs only, Ctrl-C safe.
 
 Usage:
     python3 tools/multifeed-scenario-probe.py --urls urls.txt --cookies yt-cookies.txt --out runs
     python3 tools/multifeed-scenario-probe.py --urls urls.txt --dry-run
-    # custom timeline (feed=quality,… @seconds), repeatable, in order:
+    # custom timeline (feed=quality,... @seconds), repeatable, in order:
     python3 tools/multifeed-scenario-probe.py --urls urls.txt \
         --phase 'A=full@120' --phase 'A=robust,B=robust@300' --phase 'B=full@120'
 Feed slots map to --urls lines in order: A=line1, B=line2, POV=line3.
@@ -52,12 +52,12 @@ _THROTTLE_RE = re.compile(r"\b429\b|too many requests|sign in to confirm", re.IG
 
 
 def is_throttle(line):
-    """True if a streamlink/yt-dlp stderr line signals the per-IP 429 / bot-wall. Pure."""
+    """True if a streamlink/yt-dlp stderr line signals the per-IP 429 or bot-wall."""
     return bool(_THROTTLE_RE.search(line))
 
 
 def parse_phase(spec):
-    """'A=robust,B=robust@300' -> ({'A':'robust','B':'robust'}, 300.0). Pure."""
+    """'A=robust,B=robust@300' -> ({'A':'robust','B':'robust'}, 300.0)."""
     body, _, dur = spec.partition("@")
     feeds = {}
     for part in body.split(","):
@@ -102,7 +102,7 @@ class FeedWorker:
         self.cookies = cookies
         self.events = events           # shared list of (ts, slot, kind, detail)
         self.log = log
-        self.logfile = open(  # noqa: SIM115 — long-lived, closed at stop()
+        self.logfile = open(  # noqa: SIM115 (long-lived, closed at stop())
             os.path.join(out_dir, f"feed_{slot}.log"), "a", encoding="utf-8")
         self.quality = None
         self.proc = None
@@ -170,7 +170,7 @@ class FeedWorker:
             if first and is_throttle(first[0]):
                 self._flag_429(f"resolve: {first[0][:80]}")
             self._wlog(f"resolve-fail {first}"); return None
-        # stdout also carries the relay's "rcq …" --print line: take the URL.
+        # stdout also carries the relay's "rcq" --print line, so take the URL.
         out = [ln for ln in (res.stdout or "").splitlines() if ln.startswith("http")]
         return out[0] if out else None
 
@@ -239,7 +239,6 @@ def run_scenario(args, urls, phases):
 
     try:
         for idx, (feeds, dur) in enumerate(phases, 1):
-            # reconcile slots to this phase
             for s in SLOTS:
                 w = workers.get(s)
                 if w is None:
@@ -255,7 +254,6 @@ def run_scenario(args, urls, phases):
             p_start = time.time()
             bytes0 = {s: workers[s].bytes_total for s in workers}
             log(f"\n=== PHASE {idx}: {active}  {dur:.0f}s  (t+{p_start-t0:.0f}s) ===")
-            # monitor the phase
             while time.time() - p_start < dur:
                 time.sleep(5)
                 d = sample(bytes0)
@@ -264,7 +262,6 @@ def run_scenario(args, urls, phases):
                                      "active": active, "mbps": mbps,
                                      "n429": sum(1 for e in events if e[2] == "429")}) + "\n")
                 tl.flush()
-            # phase summary
             dur_real = time.time() - p_start
             p429 = [e for e in events if e[2] == "429" and p_start <= e[0] <= time.time()]
             agg = sum(workers[s].bytes_total - bytes0[s] for s in active) * 8 / 1e6 / max(1, dur_real)
@@ -276,7 +273,7 @@ def run_scenario(args, urls, phases):
             phase_recs.append(rec)
             log(f"    -> agg={rec['agg_mbps']}Mbps  429={'YES @%.0fs' % first429 if p429 else 'no'}")
     except KeyboardInterrupt:
-        log("Ctrl-C — stopping")
+        log("Ctrl-C, stopping")
     finally:
         for w in workers.values():
             w.stop()
@@ -297,7 +294,7 @@ def run_scenario(args, urls, phases):
 
 
 def do_dry_run(urls, phases):
-    print("SCENARIO dry-run — feed slots:", {SLOTS[i]: urls[i] for i in range(min(len(SLOTS), len(urls)))})
+    print("SCENARIO dry-run, feed slots:",{SLOTS[i]: urls[i] for i in range(min(len(SLOTS), len(urls)))})
     t = 0
     for idx, (feeds, dur) in enumerate(phases, 1):
         print(f"  phase {idx}: t+{t:>4.0f}s  {feeds}  for {dur:.0f}s")
@@ -318,7 +315,7 @@ def do_summarize(paths):
 
 
 def build_parser():
-    p = argparse.ArgumentParser(description="Multi-feed scenario probe (#505) — off-event only.")
+    p = argparse.ArgumentParser(description="Multi-feed scenario probe (#505), off-event only.")
     p.add_argument("--urls", help="file: distinct live URLs, one per line (A,B,POV = first 3)")
     p.add_argument("--cookies", default=None)
     p.add_argument("--phase", action="append", default=[],
