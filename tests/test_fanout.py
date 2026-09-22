@@ -1065,7 +1065,7 @@ def t_an_abandoned_consumer_is_the_one_superseded_and_not_moving():
 
     late = 1000.0 + m.FANOUT_STALE_GRACE_S
     assert not srv._stale(srv._consumers[1], now=1000.0), (
-        "in the instant of the mark nothing has moved yet — the grace is part of the "
+        "in the instant of the mark nothing has moved yet. The grace is part of the "
         "judgement, or every reader would briefly see every consumer as abandoned")
     srv._consumers[2]["cycle_ts"] = 1001.0     # the live one completes another cycle
     assert srv._stale(srv._consumers[1], now=late)
@@ -1075,7 +1075,7 @@ def t_an_abandoned_consumer_is_the_one_superseded_and_not_moving():
     assert not old.shutdown_calls
     assert srv.reap_superseded(now=1000.0 + m.FANOUT_STALE_GRACE_S) == 1
     assert old.shutdown_calls, (
-        "close() alone does not unblock a handler stuck in sendall — the abandoned "
+        "close() alone does not unblock a handler stuck in sendall. The abandoned "
         "socket is exactly the one whose send buffer the peer stopped draining")
     # Whether close() follows is per platform; see the dedicated check below.
     assert not new.shutdown_calls, "the live consumer must be left alone"
@@ -1118,7 +1118,7 @@ def t_a_stale_consumer_never_becomes_the_reported_backlog():
     # In the instant of the mark nothing has moved yet, so the reading is unchanged and
     # no consumer is condemned on the strength of the mark alone.
     assert srv.consumer_backlog(now=1.0) == 26.0, (
-        "the mark alone must condemn nobody — in that instant nothing has moved")
+        "the mark alone must condemn nobody. In that instant nothing has moved")
 
     srv._consumers[2]["cursor"] = 950          # the live consumer accepts more bytes
     srv._consumers[2]["cycle_ts"] = 2.0        # ... and completes the cycle that did it

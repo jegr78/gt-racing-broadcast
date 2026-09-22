@@ -507,7 +507,7 @@ PACMAN_APP_PACKAGES = {"obs": "obs-studio-browser", "tailscale": "tailscale",
 PACMAN_COMPANION_NOTE = (
     "Companion is in no Arch repository and not in the AUR under a usable name "
     "(`companion-satellite` is a different product). Install it by hand into the "
-    "companion-pi layout racecast controls. The wiki page 'Arch Linux — the "
+    "companion-pi layout racecast controls. The wiki page 'Arch Linux. The "
     "CachyOS example' has the exact steps, including the trap that "
     "`racecast companion enable-control` must run BEFORE `companion start`.")
 

@@ -1,7 +1,7 @@
 """Pure helpers for Director-Panel broadcast Part control (#395 follow-up).
 
 Broadcast Parts (from the Sheet `Producer` tab) are the coarse segments a long
-race is split into — each a separate YouTube broadcast with its own stream key.
+race is split into. Each a separate YouTube broadcast with its own stream key.
 This module holds the side-effect-free logic behind the panel's Part control:
 the typed-confirmation phrase, the /parts/data view model, and the request
 validators. All I/O (Sheet fetch, obs-websocket, the get_stream_key webhook)
@@ -57,7 +57,7 @@ def parts_view_model(producer_rows, state, stream_active=None):
     trust the stored flag). Pure. Never returns a stream key or ref.
 
     Semantics of {index, live}: `index` is 1-based into the Producer order and is
-    the Part to act on — the currently-live Part while live, or the next Part to
+    the Part to act on: the currently-live Part while live, or the next Part to
     start while offline. The End action advances `index`; Start marks it live."""
     rows = producer_rows or []
     count = len(rows)

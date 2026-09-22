@@ -420,14 +420,26 @@ def t_every_text_subprocess_under_src_decodes_leniently():
 def t_no_argparse_help_string_carries_non_ascii():
     # argparse builds the whole help before printing, so one non-ASCII character
     # kills --help on a narrow console. Do not narrow this scope.
-    import re
+    # Parsed, not matched: a regex sees only the first fragment of an implicitly
+    # concatenated help string, which is how an em-dash reached the fourth line
+    # of the relay's --cookies help and stayed there.
+    import ast
     offenders = []
     for path in _shipped_sources():
-        src = path.read_text(encoding="utf-8")
-        for m in re.finditer(r'help=(["\'])(.*?)\1', src, re.S):
-            bad = sorted({c for c in m.group(2) if ord(c) > 127})
-            if bad:
-                offenders.append(f"{path.name}:{src[:m.start()].count(chr(10)) + 1} {bad}")
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"), str(path))
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.keyword) and node.arg == "help"):
+                continue
+            for const in ast.walk(node):
+                if not (isinstance(const, ast.Constant)
+                        and isinstance(const.value, str)):
+                    continue
+                bad = sorted({c for c in const.value if ord(c) > 127})
+                if bad:
+                    offenders.append(f"{path.name}:{const.lineno} {bad}")
     assert not offenders, "non-ASCII in argparse help: " + ", ".join(offenders)
 
 

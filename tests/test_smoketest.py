@@ -39,7 +39,7 @@ def t_parse_rcq_agrees_with_the_relay_regex():
     with open(os.path.join(ROOT, "src", "relay", "racecast-feeds.py"),
               encoding="utf-8") as fh:
         m = re.search(r'_YTDLP_QUALITY_RE = re\.compile\(r"([^"]+)"', fh.read())
-    assert m, "the relay's rcq regex moved — re-point this guard"
+    assert m, "the relay's rcq regex moved: re-point this guard"
     relay_re = re.compile(m.group(1), re.M)
     for text in ("rcq 1080 60.0", "rcq 720 30", "rcq 480 NA", "rcq 1080",
                  "rcq NA NA", "", "rcq", "noise\nrcq 1440 50.0"):
@@ -230,7 +230,7 @@ def t_channel_id_regex_matches_the_relay():
     with open(os.path.join(ROOT, "src", "relay", "racecast-feeds.py"),
               encoding="utf-8") as fh:
         m = re.search(r"CHANNEL_RE = re\.compile\(r\"([^\"]+)\"\)", fh.read())
-    assert m, "the relay's CHANNEL_RE moved — re-point this guard"
+    assert m, "the relay's CHANNEL_RE moved: re-point this guard"
     relay_re = re.compile(m.group(1))
     for value in ("UC" + "a" * 20, "UC" + "b" * 30, "UCshort", "", "not-a-channel"):
         assert bool(relay_re.match(value)) == bool(st._CHANNEL_ID_RE.match(value)), value
@@ -381,7 +381,7 @@ def t_health_vocabulary_matches_the_relay():
     with open(os.path.join(ROOT, "src", "relay", "racecast-feeds.py"),
               encoding="utf-8") as fh:
         m = re.search(r"_HEALTH_LABEL = \{([^}]+)\}", fh.read())
-    assert m, "the relay's health labels moved — re-point this guard"
+    assert m, "the relay's health labels moved: re-point this guard"
     levels = set(re.findall(r'"([a-z]+)":', m.group(1)))
     assert levels == {"green", "yellow", "red"}, levels
     assert st.HEALTH_RED in levels

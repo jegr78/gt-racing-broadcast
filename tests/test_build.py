@@ -145,7 +145,7 @@ def t_no_orphaned_group_item_backup():
     orphaned = [f"{scene}/{it['name']}" for scene, it in items
                 if it.get("group_item_backup") and it["name"] not in members]
     assert not orphaned, (
-        "scene items flagged group_item_backup=true without a parent group — "
+        "scene items flagged group_item_backup=true without a parent group. "
         f"OBS drops these on import: {orphaned}")
 
 

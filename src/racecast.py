@@ -79,12 +79,12 @@ def resource_path(rel):
     return os.path.join(_src_base(IS_FROZEN, getattr(sys, "_MEIPASS", ""), HERE), rel)
 
 def _app_home(executable):
-    """Directory holding a frozen binary's siblings — the other binary, runtime/,
+    """Directory holding a frozen binary's siblings: the other binary, runtime/,
     .env. Normally dirname(executable). But inside a macOS .app bundle the
     executable lives at <home>/<Name>.app/Contents/MacOS/<exe>, so the real home
     (where the sibling `racecast` binary and runtime/.env sit, NEXT TO the .app) is
     three levels up from Contents/MacOS/. A .app bundle is a macOS construct, so
-    its layout is always POSIX ('/') — parse with '/' explicitly, never os.sep,
+    its layout is always POSIX ('/'). Parse with '/' explicitly, never os.sep,
     which would mis-split this path on a Windows test runner."""
     d = os.path.dirname(executable)
     parts = d.split("/")
@@ -97,7 +97,7 @@ def _sec_original_path(path):
     """Map a macOS App-Translocation path back to its original on-disk location
     via Security.framework's SecTranslocateCreateOriginalPathForURL (10.12+).
     Returns the original filesystem path, or None when the API is unavailable or
-    the lookup fails (caller falls back to the input). Pure ctypes — no new dep."""
+    the lookup fails (caller falls back to the input). Pure ctypes. No new dep."""
     import ctypes, ctypes.util
     sec_lib = ctypes.util.find_library("Security")
     cf_lib = ctypes.util.find_library("CoreFoundation")
@@ -136,13 +136,13 @@ def _sec_original_path(path):
 def _untranslocate(path, frozen=None, platform=None, resolver=None):
     """Guard against macOS App Translocation. A quarantined .app launched from
     Finder runs from a randomized read-only copy under
-    .../AppTranslocation/<uuid>/d/, so sys.executable — and every sibling path
-    derived from it (.env, runtime/, the sibling racecast binary) — points into that
+    .../AppTranslocation/<uuid>/d/, so sys.executable, and every sibling path
+    derived from it (.env, runtime/, the sibling racecast binary), points into that
     throwaway mount instead of the folder where the producer keeps the .app
     (issue #22: Settings showed .env under /private/var/.../AppTranslocation/).
     Map the path back to its real on-disk location. Translocation only affects a
-    frozen .app on macOS, so both guards short-circuit elsewhere; best-effort —
-    any failure returns `path` unchanged. Pure-by-injection for tests."""
+    frozen .app on macOS, so both guards short-circuit elsewhere; best-effort.
+    Any failure returns `path` unchanged. Pure-by-injection for tests."""
     frozen = IS_FROZEN if frozen is None else frozen
     platform = sys.platform if platform is None else platform
     if not frozen or not platform.startswith("darwin"):
@@ -260,7 +260,7 @@ def _env_file():
     return os.path.join(_env_base(IS_FROZEN, _real_executable(), HERE), ".env")
 
 def parse_env_text(text):
-    """Minimal .env parser (KEY=VALUE, '#' comments, optional quotes) — matches the
+    """Minimal .env parser (KEY=VALUE, '#' comments, optional quotes). Matches the
     semantics of the bounded load_dotenv() copies in the src/ scripts."""
     out = {}
     for line in text.splitlines():
@@ -288,10 +288,10 @@ def ensure_env_file(exe_dir, frozen=None):
     try:
         shutil.copyfile(example, env_path)
     except OSError as exc:
-        print(f"warning: could not create .env next to the binary ({exc}) — "
-              "copy .env.example to .env manually.", file=sys.stderr)
+        print(f"warning: could not create .env next to the binary ({exc}). "
+              "Copy .env.example to .env manually.", file=sys.stderr)
         return False
-    print("created .env next to the binary — fill in the required values "
+    print("created .env next to the binary. Fill in the required values "
           "(see the comments inside).", file=sys.stderr)
     return True
 
@@ -324,7 +324,7 @@ def ensure_example_profile(exe_dir, frozen=None, bundled=None):
         shutil.copytree(src, target)
     except OSError as exc:
         print(f"warning: could not seed profiles/example next to the binary "
-              f"({exc}) — `racecast profile new` will not find a template.",
+              f"({exc}). `racecast profile new` will not find a template.",
               file=sys.stderr)
         return False
     print("seeded profiles/example next to the binary (league template for "
@@ -395,8 +395,8 @@ def _force_utf8_io(streams=None):
 
 def _load_env_frozen():
     """Frozen binary: load <exe-dir>/.env into os.environ (existing env wins).
-    The scripts' own load_dotenv() can't find it — their marker walk starts in
-    the throwaway _MEIPASS dir — but they all let real env vars take precedence."""
+    The scripts' own load_dotenv() can't find it, their marker walk starts in
+    the throwaway _MEIPASS dir, but they all let real env vars take precedence."""
     if not IS_FROZEN:
         return
     # _app_home (not dirname): a macOS .app nests the exe under Contents/MacOS/,
@@ -467,12 +467,12 @@ def _ensure_tool_path():
     this process's PATH, so preflight AND the spawned relay resolve them.
 
     Two sources:
-    * The racecast-managed bin dir (runtime/bin) — where install-tools drops the
+    * The racecast-managed bin dir (runtime/bin). Where install-tools drops the
       direct-download tools (deno on Linux, the Ookla speedtest CLI on mac/Linux);
       it is NEVER on the user's shell PATH, so add it on every platform.
     * Frozen on macOS only: a binary launched from Finder/Dock inherits a truncated
       PATH (/usr/bin:/bin:/usr/sbin:/sbin) that omits Homebrew, so the brew-installed
-      yt-dlp/streamlink/ffmpeg/deno look missing (issue #38) — prepend the Homebrew
+      yt-dlp/streamlink/ffmpeg/deno look missing (issue #38). Prepend the Homebrew
       bin dirs too.
 
     Both only ever add genuinely-missing dirs that exist on disk (augment_path),
@@ -497,7 +497,7 @@ def _script_invocation(rel, args, frozen, base=None):
 def _run_module(path, args):
     """Load a bundled script by file path and run its main() with patched argv.
     Returns an exit code (SystemExit from argparse/sys.exit is translated; an int
-    return value from main() is honored — e.g. preflight returns 1 on failure)."""
+    return value from main() is honored, e.g. preflight returns 1 on failure)."""
     import importlib.util
     name = os.path.splitext(os.path.basename(path))[0].replace("-", "_")
     spec = importlib.util.spec_from_file_location(name, path)
@@ -676,7 +676,7 @@ def _write_part_reset(index):
     is the one reliable reset point (every event begins with it; a clean
     last-Part-stop / event stop can't be detected). A fresh relay adopts this on
     construction; writing while a relay already runs is inert (PartStore loads
-    once at start) — so a mid-event re-run does not disturb the live pointer, and
+    once at start): so a mid-event re-run does not disturb the live pointer, and
     recovery is `event start --part N` + a relay restart. Best-effort."""
     path = _part_path()
     try:
@@ -684,7 +684,7 @@ def _write_part_reset(index):
         with open(path, "w", encoding="utf-8") as fh:
             json.dump({"index": int(index), "live": False}, fh)
     except OSError as exc:
-        print("note: could not reset part.json ({}) — continuing.".format(exc))
+        print("note: could not reset part.json ({}). Continuing.".format(exc))
 
 
 def _relay_log_path():
@@ -734,7 +734,7 @@ def _append_tailscale_snapshot():
 
 def _relay_feed_logs():
     """The relay's per-feed logs (feed_A/B/POV.log) under the RUNNING relay's
-    profile logs dir (#273 — follows the relay, not the active profile)."""
+    profile logs dir (#273, follows the relay, not the active profile)."""
     d = os.path.join(_running_relay_dir(), "logs")
     return sorted(glob.glob(os.path.join(d, "feed_*.log")))
 
@@ -848,7 +848,7 @@ def _cookies_path():
 
 def _active_overlay_dir():
     """profiles/<active>/overlay for the active profile, or None when no profile
-    resolves. (Does not check existence — callers decide.)"""
+    resolves. (Does not check existence, callers decide.)"""
     active = _active_profile_name()
     if not active:
         return None
@@ -859,7 +859,7 @@ def _active_profile_graphics_dir():
     """profiles/<active>/graphics for the active profile, or None when no profile
     resolves. Committed per-profile graphics (e.g. a demo Overlay.png) that
     setup-assets seeds into the runtime graphics dir as a fallback. (Does not
-    check existence — callers decide.)"""
+    check existence, callers decide.)"""
     active = _active_profile_name()
     if not active:
         return None
@@ -1056,7 +1056,7 @@ def profile_switch_block_reason(relay_alive, streams_alive, force):
     """Which RUNNING services would be left serving the OLD league after a
     `profile use` switch (they bind the shared control/feed ports). Returns the
     list of running service names, or [] when nothing blocks (or --force). The
-    relay survives the switch — its PID is the singleton (#273) — but it keeps
+    relay survives the switch, its PID is the singleton (#273), but it keeps
     serving the previous profile, which is rarely what the operator intends, so
     refuse unless --force."""
     if force:
@@ -1151,7 +1151,7 @@ def _chat_path():
 
 def _chat_reload_if_running():
     """Best-effort: tell a running local relay to re-read chat.json. A relay
-    that is down is fine — it loads the file on next start."""
+    that is down is fine. It loads the file on next start."""
     try:
         _fetch_relay_page("/chat/reload")
         return True
@@ -1167,7 +1167,7 @@ HEALTH_VERBS = ("export", "import", "pull")
 
 
 def health_cmd(rest):
-    """`racecast health export|import|pull` — move health history across events/machines."""
+    """`racecast health export|import|pull`: move health history across events/machines."""
     verb = rest[0] if rest else None
     if verb not in HEALTH_VERBS:
         sys.exit(f"usage: racecast health {{{'|'.join(HEALTH_VERBS)}}}")
@@ -1233,10 +1233,10 @@ def health_cmd(rest):
         try:
             with http_util.open_url(url, timeout=5) as resp:
                 if resp.status != 200:
-                    sys.exit(f"racecast: pull failed — HTTP {resp.status} from {host}")
+                    sys.exit(f"racecast: pull failed. HTTP {resp.status} from {host}")
                 body = resp.read().decode("utf-8")
         except Exception as e:
-            sys.exit(f"racecast: pull failed — {type(e).__name__}: {e} (local history unchanged)")
+            sys.exit(f"racecast: pull failed. {type(e).__name__}: {e} (local history unchanged)")
         conn = hsmod.open_db(db)
         hsmod.migrate(conn)
         n = hsmod.import_jsonl(conn, body.splitlines())
@@ -1278,7 +1278,7 @@ DISCORD_VERBS = ("join", "leave", "status")
 
 
 def discord_cmd(rest):
-    """`racecast discord join|leave|status` — drive the desktop client's voice channel."""
+    """`racecast discord join|leave|status`: drive the desktop client's voice channel."""
     verb = rest[0] if rest else "status"
     if verb not in DISCORD_VERBS:
         sys.exit("usage: racecast discord {%s}" % "|".join(DISCORD_VERBS))
@@ -1309,7 +1309,7 @@ def _discord_autojoin_enabled(env):
 
 
 def _discord_autojoin():
-    """Best-effort voice join during event start — never fatal, secrets stay quiet."""
+    """Best-effort voice join during event start, never fatal, secrets stay quiet."""
     if not _discord_autojoin_enabled(os.environ):
         return
     if not (os.environ.get("RACECAST_DISCORD_CLIENT_ID") and
@@ -1324,7 +1324,7 @@ def _discord_autojoin():
         # never opens the interactive consent popup, so an unattended box can't hang.
         ok, note = client.join(*target, allow_consent=False)
         print("discord: " + note if ok
-              else "discord: voice auto-join skipped — " + note)
+              else "discord: voice auto-join skipped. " + note)
     except SystemExit:
         raise
     except Exception as exc:  # noqa: BLE001  auto-join must never break event start
@@ -1337,7 +1337,7 @@ def _discord_autoleave_enabled(env):
 
 
 def _discord_autoleave():
-    """Best-effort voice leave during event stop — the counterpart to the event-start
+    """Best-effort voice leave during event stop. The counterpart to the event-start
     auto-join. Never fatal. Unlike join it needs no channel target (leave just sends
     SELECT_VOICE_CHANNEL with a null channel)."""
     if not _discord_autoleave_enabled(os.environ):
@@ -1351,7 +1351,7 @@ def _discord_autoleave():
         # opens the interactive consent popup, so an unattended stop can't hang.
         ok, note = client.leave(allow_consent=False)
         print("discord: " + note if ok
-              else "discord: voice auto-leave skipped — " + note)
+              else "discord: voice auto-leave skipped. " + note)
     except SystemExit:
         raise
     except Exception as exc:  # noqa: BLE001  auto-leave must never break event stop
@@ -1376,7 +1376,7 @@ def _report_event_title():
 
 def _report_host():
     """This producer machine's hostname, surfaced in the report so it is clear which
-    box produced it. Best-effort — '' when the OS can't answer."""
+    box produced it. Best-effort. '' when the OS can't answer."""
     import socket
     try:
         return (socket.gethostname() or "").strip()
@@ -1393,21 +1393,21 @@ def _write_session_start(now=None):
     """Record when THIS event began, so the post-event report window starts at this
     event. Without it, a quick event restart within report_build.SESSION_GAP_S merges
     the previous event's health samples into this report's window (the window START
-    never resets). Overwritten on every `event start`. Best-effort — a write failure
+    never resets). Overwritten on every `event start`. Best-effort. A write failure
     just falls back to the sample-contiguity heuristic."""
     try:
         os.makedirs(_runtime_dir(), exist_ok=True)
         with open(_session_start_path(), "w", encoding="utf-8") as fh:
             json.dump({"start": time.time() if now is None else now}, fh)
     except OSError as exc:
-        print("note: could not write session.json ({}) — continuing.".format(exc))
+        print("note: could not write session.json ({}). Continuing.".format(exc))
 
 
 def _is_continuation_start(rest):
     """True when this `event start` continues an in-progress broadcast rather than
     beginning a fresh one: any --stint/--part flag marks a mid-event bring-up (a local
     recovery restart or a stint-corrected takeover). A continuation must NOT reset the
-    report session window — only a fresh `event start` (and never a takeover) does."""
+    report session window: only a fresh `event start` (and never a takeover) does."""
     for tok in rest:
         if tok in ("--stint", "--part") or tok.startswith(("--stint=", "--part=")):
             return True
@@ -1434,9 +1434,9 @@ def _report_log_is_fresh(mtime, since, grace_s=REPORT_LOG_FRESHNESS_GRACE_S):
     """Whether a bundled log file (mtime) belongs to the report session: True when
     `since` is None (no window -> keep everything, back-compat) or mtime is within
     `since - grace`. Excludes a stale leftover from a source that did not run this
-    session — e.g. a weeks-old runtime/static/logs/feed_*.log from a one-off `racecast
+    session: e.g. a weeks-old runtime/static/logs/feed_*.log from a one-off `racecast
     streams` test, which otherwise rode along in every unrelated event's report bundle
-    (#519). Pure — unit-tested."""
+    (#519). Pure: unit-tested."""
     if since is None:
         return True
     return mtime >= since - grace_s
@@ -1445,7 +1445,7 @@ def _report_log_is_fresh(mtime, since, grace_s=REPORT_LOG_FRESHNESS_GRACE_S):
 def _report_log_files(since=None):
     """Current (non-archive) log files to bundle with the report, as (source, path)
     pairs across ALL Control Center log sources (relay, streams, obs, companion,
-    tailscale, app) — the same live set the Control Center's "All (live)" view shows.
+    tailscale, app). The same live set the Control Center's "All (live)" view shows.
     When `since` (the report window start) is given, a file whose mtime predates the
     session (by more than the grace) is dropped, so a stale leftover from a source that
     did not run this session can't ride along (#519). Best-effort: [] when the registry
@@ -1480,7 +1480,7 @@ def _report_log_files(since=None):
 
 def _relay_mode():
     """The live relay's schedule mode ('race'/'qualifying') from /status, or None
-    when the relay is unreachable. Best-effort — the report title marker degrades
+    when the relay is unreachable. Best-effort. The report title marker degrades
     gracefully. Reuses the loopback JSON helper (no bare urllib)."""
     try:
         data = _relay_fetch_json(f"http://127.0.0.1:{RELAY_PORT}/status")
@@ -1492,13 +1492,13 @@ def _relay_mode():
 
 def qualifying_mode_mismatch_note(requested_qualifying, actual_mode):
     """Warning when `event start --qualifying` was requested but the live relay came up in
-    a different mode (actual_mode read from /status) — usually a missing Qualifying tab.
+    a different mode (actual_mode read from /status), usually a missing Qualifying tab.
     On 2026-07-10 this silently left the relay in race mode, so the Parts control pushed
     the wrong stream key and the stream went nowhere. Pure → unit-tested. None when the
     mode is consistent, was not requested, or the relay is unreachable (actual_mode None)."""
     if requested_qualifying and actual_mode is not None and actual_mode != "qualifying":
         return (f"event start --qualifying was requested but the relay came up in "
-                f"{actual_mode.upper()} mode — the Qualifying tab may be missing/unreadable. "
+                f"{actual_mode.upper()} mode. The Qualifying tab may be missing/unreadable. "
                 f"The Parts control will select the wrong stream key. Fix the Sheet's "
                 f"Qualifying tab, then re-run event start --qualifying.")
     return None
@@ -1514,7 +1514,7 @@ def _qualifying_title(base):
 
 def _report_name_map():
     """{stint_index (1-based): commentator name} from the LOCAL relay's /schedule/data
-    (which runs the canonical schedule parser). Only the `name` field is used — the
+    (which runs the canonical schedule parser). Only the `name` field is used. The
     `url` is ignored (redaction). Empty dict when the relay is unreachable."""
     try:
         data = _relay_fetch_json(f"http://127.0.0.1:{RELAY_PORT}/schedule/data")
@@ -1586,11 +1586,11 @@ def _latest_report():
 
 
 def _send_report_core(path, report=None, window=None):
-    """Post the report to the league Discord as a GT-Racecast embed with the HTML —
-    plus the session's relay logs, clipped to the report window — zipped as a
+    """Post the report to the league Discord as a GT-Racecast embed with the HTML.
+    Plus the session's relay logs, clipped to the report window. Zipped as a
     download-only attachment. Raises on any failure."""
     if not path:
-        raise ValueError("no report found — run `racecast report` first")
+        raise ValueError("no report found: run `racecast report` first")
     with open(path, "rb") as fh:
         content = fh.read()
     webhook, league = _active_discord_webhook()
@@ -1681,7 +1681,7 @@ def report_cmd(rest):
         except (OSError, ValueError) as exc:
             sys.exit(f"racecast: {exc}")
         except Exception as exc:  # noqa: BLE001  network/HTTP
-            sys.exit(f"racecast: Discord send failed — {type(exc).__name__}: {exc}")
+            sys.exit(f"racecast: Discord send failed. {type(exc).__name__}: {exc}")
         print(f"Sent {os.path.basename(path)} to the league Discord.")
         return None
 
@@ -1689,7 +1689,7 @@ def report_cmd(rest):
     try:
         result = _build_report_file(frm, to, gap, out)
     except (OSError, ValueError) as exc:
-        sys.exit(f"racecast: {exc} — nothing to report.")
+        sys.exit(f"racecast: {exc}. Nothing to report.")
     print(result["summary"])
     print(f"Report written -> {result['path']}")
     return None
@@ -1710,7 +1710,7 @@ def _cues_reload_if_running():
 
 
 def chat_cmd(rest):
-    """`racecast chat clear|pull|import|export` — manage the crew-chat history."""
+    """`racecast chat clear|pull|import|export`: manage the crew-chat history."""
     verb = rest[0] if rest else None
     if verb not in CHAT_VERBS:
         sys.exit(f"usage: racecast chat {{{'|'.join(CHAT_VERBS)}}}")
@@ -1721,7 +1721,7 @@ def chat_cmd(rest):
         ca.write_messages(path, [])
         running = _chat_reload_if_running()
         print("Chat cleared." + ("" if running else
-                                 " (relay not running — applies on next start.)"))
+                                 " (relay not running, applies on next start.)"))
         return None
 
     if verb == "export":
@@ -1754,7 +1754,7 @@ def chat_cmd(rest):
         try:
             n = ca.apply_pulled(path, payload)    # validates before writing
         except ValueError as e:
-            sys.exit(f"racecast: import failed — {e} (local chat unchanged)")
+            sys.exit(f"racecast: import failed. {e} (local chat unchanged)")
         running = _chat_reload_if_running()
         print(f"Imported {n} messages." + ("" if running else " (relay not running.)"))
         return None
@@ -1777,18 +1777,18 @@ def chat_cmd(rest):
         try:
             with http_util.open_url(url, timeout=5) as resp:
                 if resp.status != 200:
-                    sys.exit(f"racecast: pull failed — HTTP {resp.status} from {host}")
+                    sys.exit(f"racecast: pull failed. HTTP {resp.status} from {host}")
                 payload = json.loads(resp.read())
         except Exception as e:
-            sys.exit(f"racecast: pull failed — {type(e).__name__}: {e}"
+            sys.exit(f"racecast: pull failed. {type(e).__name__}: {e}"
                      " (local chat unchanged)")
         try:
             n = ca.apply_pulled(path, payload)
         except ValueError as e:
-            sys.exit(f"racecast: pull failed — {e} (local chat unchanged)")
+            sys.exit(f"racecast: pull failed. {e} (local chat unchanged)")
         running = _chat_reload_if_running()
         print(f"Pulled {n} messages from {host}." +
-              ("" if running else " (relay not running — applies on next start.)"))
+              ("" if running else " (relay not running, applies on next start.)"))
         return None
 
 
@@ -1796,7 +1796,7 @@ CONSOLE_VERBS = ("setup-funnel", "token", "pull-versions")
 
 
 def _console_versions_path():
-    """runtime/<active-profile>/console-versions.json — same dir the relay reads,
+    """runtime/<active-profile>/console-versions.json. Same dir the relay reads,
     matching _chat_path()."""
     return os.path.join(_runtime_dir(), "console-versions.json")
 
@@ -1836,7 +1836,7 @@ def _console_roster():
 
 def _crew_roster():
     """Distinct crew names (Director/Producer) from the running relay's
-    /crew/data (first-seen order). Raises on an unreachable relay — mirrors
+    /crew/data (first-seen order). Raises on an unreachable relay. Mirrors
     _console_roster. Empty list when the league has no Crew tab."""
     data = _relay_fetch_json(f"http://127.0.0.1:{RELAY_PORT}/crew/data")
     seen, roster = set(), []
@@ -1879,10 +1879,10 @@ def _post_chat_message(text):
 
 
 def funnel_cmd(rest):
-    """`racecast funnel on|off` — public ingress for ONLY /console via Tailscale
+    """`racecast funnel on|off`: public ingress for ONLY /console via Tailscale
     Funnel (the role-adaptive crew launcher; #216). Requires MagicDNS + HTTPS +
     the 'funnel' nodeAttr (one-time tailnet-admin step); funnel() surfaces the
-    verbatim error if missing. Only /console is mounted — root control endpoints
+    verbatim error if missing. Only /console is mounted. Root control endpoints
     stay tailnet/loopback-only (the security boundary)."""
     import tailscale as ts
     if not rest or rest[0] not in ("on", "off"):
@@ -1913,14 +1913,14 @@ def funnel_cmd(rest):
 
 
 def links_cmd(rest):
-    """`racecast links [--post]` — print one /console launcher link per person
+    """`racecast links [--post]`: print one /console launcher link per person
     (Crew tab ∪ live Schedule). Each link carries a signed identity token; the
     relay resolves the person's roles server-side, so one link adapts to
     commentator/director/producer. --post drops them into crew chat. (#216)"""
     _apply_active_profile_env()
     secret = _ensure_active_console_secret()
     if not secret:
-        sys.exit("racecast: no active league profile — create or select one first.")
+        sys.exit("racecast: no active league profile. Create or select one first.")
     try:
         roster = _links_roster()
     except Exception:
@@ -1954,10 +1954,10 @@ def links_cmd(rest):
 
 
 def _console_token(args):
-    """`racecast console token revoke <streamer>` — bump that streamer's version
+    """`racecast console token revoke <streamer>`. Bump that streamer's version
     so their current link stops validating; re-issue with 'racecast links'.
-    The relay reads console-versions.json per request, so the bump is immediate —
-    no relay reload needed."""
+    The relay reads console-versions.json per request, so the bump is immediate.
+    No relay reload needed."""
     if len(args) < 2 or args[0] != "revoke":
         sys.exit("usage: racecast console token revoke <streamer-name>")
     key = cpa.streamer_key(args[1])
@@ -1970,7 +1970,7 @@ def _console_token(args):
 
 
 def _console_pull_versions(args):
-    """`racecast console pull-versions <ip> [--port N]` — fetch producer A's
+    """`racecast console pull-versions <ip> [--port N]`. Fetch producer A's
     console-versions over the tailnet and adopt them locally (takeover). Mirrors
     `chat pull`: tailnet trust, best-effort."""
     if not args or args[0].startswith("-"):
@@ -2003,7 +2003,7 @@ def _ensure_active_console_secret():
     os.environ so a spawned relay inherits it. Generates a random per-league secret
     in profile.env on first use; idempotent; respects an already-set secret (so an
     exported/imported league keeps its tokens). Only provisions into a real, existing
-    profile — never the shipped 'example' profile and never a non-existent one.
+    profile: never the shipped 'example' profile and never a non-existent one.
     Best-effort: returns the secret or None and never raises."""
     try:
         env_val = (os.environ.get("RACECAST_CONSOLE_SECRET") or "").strip()
@@ -2029,7 +2029,7 @@ def _ensure_active_console_secret():
 
 
 def console_cmd(rest):
-    """`racecast console token|setup-funnel|pull-versions` — manage the
+    """`racecast console token|setup-funnel|pull-versions`: manage the
     Commentator Cockpit (issue #191). The console is zero-config: a per-league
     CONSOLE_SECRET is auto-generated on first relay start and the relay serves
     /cockpit whenever one exists (token-gated). PUBLIC exposure is the top-level
@@ -2058,7 +2058,7 @@ def _backup_sources():
 
 
 def backup_cmd(rest):
-    """`racecast backup create|list|restore|delete <label>` — named look snapshots
+    """`racecast backup create|list|restore|delete <label>`. Named look snapshots
     (overlay CSS + graphics + media) for the active profile."""
     import backup_admin as ba
     verb = rest[0] if rest else None
@@ -2117,7 +2117,7 @@ def backup_cmd(rest):
     try:
         ba.restore_backup(zip_path, src)
     except ValueError as e:
-        sys.exit(f"racecast: restore failed — {e} (live look unchanged)")
+        sys.exit(f"racecast: restore failed. {e} (live look unchanged)")
     print(f"Restored look '{args[0]}'.")
     _refresh_obs_pages(force=True)   # best-effort: reload the overlay browser sources
     print("Note: OBS graphics/media sources reload on the next scene activation "
@@ -2213,7 +2213,7 @@ def resolve_console(timeout=4.0, *, discover=None, relay_get=None):
 def _active_console_secret():
     """The active league's CONSOLE_SECRET from the resolved profile env ('' if unset).
     Same league = same secret (it travels with `profile export`), so producer B already
-    holds A's secret — no typing needed for a same-league takeover."""
+    holds A's secret: no typing needed for a same-league takeover."""
     _apply_active_profile_env()
     return (os.environ.get("RACECAST_CONSOLE_SECRET") or "").strip()
 
@@ -2254,7 +2254,7 @@ _EVENT_TITLE_SANITIZER = None
 
 def _event_title_sanitizer():
     """The relay's single sanitize_event_title rule (#207), loaded once and cached.
-    One source of truth for EVENT_TITLE_MAX/normalization — the Control Center must
+    One source of truth for EVENT_TITLE_MAX/normalization. The Control Center must
     not duplicate it (CLAUDE.md: keep the rule un-forked)."""
     global _EVENT_TITLE_SANITIZER
     if _EVENT_TITLE_SANITIZER is None:
@@ -2264,7 +2264,7 @@ def _event_title_sanitizer():
 
 
 def relay_status_data(read_pid=None, alive=None, http_ok=None):
-    """Structured relay state — one source for `racecast status` (text) and the
+    """Structured relay state: one source for `racecast status` (text) and the
     Control Center's /api/status (JSON). Injection points are for tests."""
     read_pid = read_pid or sv.read_pid
     alive = alive or sv.pid_alive
@@ -2296,14 +2296,14 @@ def _companion_tablet_port():
 def _frozen_child_env():
     """Env for daemon children spawned from the frozen --onefile binary.
     PyInstaller >= 6.10 treats a child running the SAME executable as a worker
-    that shares the parent's _MEIPASS extraction dir — which the parent deletes
+    that shares the parent's _MEIPASS extraction dir. Which the parent deletes
     on exit, killing the daemon ('Failed to import encodings module'). Setting
     PYINSTALLER_RESET_ENVIRONMENT=1 is the documented way to spawn an
     independent instance: the child extracts its own bundle and outlives us.
 
     The child also gets its extraction dir moved OUT of the OS temp dir into
     runtime/bundle. A daemon runs for days, and every OS reaps its temp dir on a
-    schedule without asking whether anything is still using it — a relay that
+    schedule without asking whether anything is still using it. A relay that
     stays up between two events otherwise loses its HUD pages mid-life while
     looking healthy (see services.daemon_bundle_env)."""
     if not IS_FROZEN:
@@ -2360,10 +2360,10 @@ RELAY_START_VERIFY_S = 15   # seconds to confirm the freshly spawned relay bound
 
 def _spawn_relay_verified(argv, attempts=2, verify_s=RELAY_START_VERIFY_S):
     """Spawn the relay daemon and CONFIRM it actually bound the control port, retrying
-    once. start_detached returns a PID the instant the child is forked — but the child
+    once. start_detached returns a PID the instant the child is forked, but the child
     fail-fast aborts if a just-killed holder's port is still clearing (the 2026-07-10
     event-start race), so a returned PID is NOT proof the relay is up. Poll /status; if
-    it never answers, respawn once — the port has had time to clear by then. Returns the
+    it never answers, respawn once. The port has had time to clear by then. Returns the
     live PID, or None after giving up. Never lets the caller announce 'relay started' for
     a dead child (which made the failed qualifying bring-up look green)."""
     for attempt in range(1, attempts + 1):
@@ -2372,10 +2372,10 @@ def _spawn_relay_verified(argv, attempts=2, verify_s=RELAY_START_VERIFY_S):
         if wait_for(_relay_http_ok, verify_s):
             return pid
         if attempt < attempts:
-            print(f"  relay not responding on port {RELAY_PORT} yet — the port may still "
+            print(f"  relay not responding on port {RELAY_PORT} yet. The port may still "
                   f"be clearing; retrying ({attempt + 1}/{attempts})…")
     print(f"  ERROR: relay failed to come up on port {RELAY_PORT} after {attempts} "
-          f"attempt(s) — check: racecast relay logs")
+          f"attempt(s). Check: racecast relay logs")
     return None
 
 
@@ -2397,7 +2397,7 @@ def relay_start(rest):
     if action == "running":
         print(f"relay already running (pid {pid}).")
         if stint:
-            print(f"  --stint ignored (relay keeps its position) — to reposition the "
+            print(f"  --stint ignored (relay keeps its position). To reposition the "
                   f"running relay open http://127.0.0.1:{RELAY_PORT}/set/stint/{stint[1]}")
         relay_status([])
         return None
@@ -2407,13 +2407,13 @@ def relay_start(rest):
         # refuses while a relay is alive, so a cross-profile or old-binary orphan
         # is actually cleared instead of deadlocking the start (#273 follow-up).
         print(f"relay: clearing stale holder(s) of port {RELAY_PORT} "
-              f"({reason}) — killing PID {', '.join(map(str, kill_pids))}, then restarting.")
+              f"({reason}). Killing PID {', '.join(map(str, kill_pids))}, then restarting.")
         for kpid in kill_pids:
             pt.kill_pid(kpid)
         left = sorted({p for p in pt.pids_on_port(RELAY_PORT)})
         if left:
             print(f"  WARNING: port {RELAY_PORT} STILL held by PID "
-                  f"{', '.join(map(str, left))} after kill — start may fail.")
+                  f"{', '.join(map(str, left))} after kill. Start may fail.")
         if os.path.exists(_relay_pid_path()):
             os.remove(_relay_pid_path())
         _clear_relay_profile_stamp()
@@ -2422,8 +2422,8 @@ def relay_start(rest):
     # streamlink) -> warn rather than letting Feed A loop silently in "connecting".
     busy = [p for p in pt.FEED_PORTS if pt.pids_on_port(p)]
     if busy:
-        print(f"WARNING: feed port(s) {', '.join(map(str, busy))} already in use — "
-              f"that feed may fail to bind. Free them first: racecast freeport")
+        print(f"WARNING: feed port(s) {', '.join(map(str, busy))} already in use. "
+              f"That feed may fail to bind. Free them first: racecast freeport")
     _ensure_active_console_secret()   # zero-config console: provision + inject the secret
     # Resolve + inject the producer name (#317) so the relay can tag its OBS-stream
     # events and /status; the child inherits it via the environment.
@@ -2441,7 +2441,7 @@ def relay_start(rest):
     holders = sorted({p for p in pt.pids_on_port(RELAY_PORT)})
     if len(holders) > 1:
         print(f"  WARNING: {len(holders)} processes listen on port {RELAY_PORT} "
-              f"(PID {', '.join(map(str, holders))}) — possible split-brain; "
+              f"(PID {', '.join(map(str, holders))}). Possible split-brain; "
               f"re-run 'racecast relay start' to reconcile.")
     return None
 
@@ -2452,11 +2452,11 @@ def _obs_pages_hash_path():
 def _sync_pov_transform(set_transform=None):
     """Best-effort live sibling of the setup-time POV/webcam bake: push every
     mapped overlay slot's box position/size onto its OBS scene item (see
-    overlay_build.OVERLAY_SLOT_OBS_SOURCES — 'pov' -> Stint/'Feed POV', 'webcam'
+    overlay_build.OVERLAY_SLOT_OBS_SOURCES, 'pov' -> Stint/'Feed POV', 'webcam'
     -> Program/'Solo Webcam'). Reads the hud.html base and the profile override
     CSS ONCE, then loops the slots, merging override over base per slot (so an
     override of only some props keeps the rest at the base) and calling
-    SetSceneItemTransform. Silent per-slot on any miss — OBS unreachable, no
+    SetSceneItemTransform. Silent per-slot on any miss. OBS unreachable, no
     overlay, no base rule for that slot, missing scene/source (e.g. no 'Solo
     Webcam' in an endurance collection). `set_transform` is a test seam
     (defaults to obs_ws.set_scene_item_transform)."""
@@ -2497,20 +2497,20 @@ def _sync_pov_transform(set_transform=None):
 
 def _refresh_obs_pages(force=False, wait=0):
     """Refresh the relay-served OBS browser sources (HUD, which includes the race timer) when
-    the pages changed since the last successful refresh — replaces the manual
+    the pages changed since the last successful refresh. Replaces the manual
     right-click → 'Refresh cache of current page' (OBS's CEF caches the page
     JS until then; a producer updating the package must never go on air with
     a stale page). Best effort like _release_obs_feeds: one notice, never an
     exception. wait: seconds to allow a just-spawned relay to open its control
-    port — never refresh against a closed port (the source would load a CEF
+    port: never refresh against a closed port (the source would load a CEF
     error page that does not self-recover)."""
     if not wait_for(_relay_http_ok, wait):
-        print(f"obs: page refresh skipped — relay not responding on port {RELAY_PORT}.")
+        print(f"obs: page refresh skipped. Relay not responding on port {RELAY_PORT}.")
         return
     served = served_pages_hash()
     decision = refresh_decision(served, read_pages_hash(_obs_pages_hash_path()), force)
     if decision == "skip-no-pages":
-        print("obs: page refresh skipped — could not read /hud from the relay.")
+        print("obs: page refresh skipped. Could not read /hud from the relay.")
         return
     if decision == "skip-unchanged":
         return                              # unchanged pages -> no on-air flicker
@@ -2518,14 +2518,14 @@ def _refresh_obs_pages(force=False, wait=0):
         import obs_ws
         names, note = obs_ws.refresh_browser_inputs(needle=f"127.0.0.1:{RELAY_PORT}")
         if note:
-            print(f"obs: page refresh skipped — {note}")
+            print(f"obs: page refresh skipped. {note}")
             return                          # hash kept -> retried on the next start
         write_pages_hash(_obs_pages_hash_path(), served)   # only confirmed refreshes advance the gate
     except Exception as exc:                # a start must never fail on this
         print(f"obs: page refresh skipped ({exc}).")
         return
     print(f"obs: refreshed browser sources {', '.join(names)}." if names
-          else "obs: no relay browser sources in OBS — nothing to refresh.")
+          else "obs: no relay browser sources in OBS. Nothing to refresh.")
     _sync_pov_transform()              # live POV-box position sibling (best effort)
     # Feed A/B ship close_when_inactive=False; fan-out needs True so OBS disconnects
     # off-air and no stale backlog forms. Track the flag unconditionally, so a
@@ -2542,7 +2542,7 @@ def _refresh_obs_pages(force=False, wait=0):
 
 
 def app_launch_cmd(rest):
-    """Launch a GUI app (obs|discord) detached — the same mechanism `racecast event
+    """Launch a GUI app (obs|discord) detached. The same mechanism `racecast event
     start` uses, exposed as a button so the Control Center can start each app
     individually. Best effort: a missing app or spawn error exits non-zero."""
     name = rest[0] if rest else None
@@ -2552,10 +2552,10 @@ def app_launch_cmd(rest):
     cmd = ev.launch_command(name, sys.platform)
     if cmd is None:
         if name == "tailscale" and sys.platform.startswith("linux"):
-            sys.exit("app: Tailscale on Linux has no GUI app to launch — it runs as "
+            sys.exit("app: Tailscale on Linux has no GUI app to launch. It runs as "
                      "a daemon. Connect with `racecast tailscale up` (first time: "
                      f"{_tailscale_login_hint()}).")
-        sys.exit(f"app: cannot launch {name} on this system — is it installed?")
+        sys.exit(f"app: cannot launch {name} on this system. Is it installed?")
     argv, cwd = cmd
     # Same environment handling as `event start`: this is the documented manual
     # fallback for launching OBS, so it must not fail in the ways event start no
@@ -2570,7 +2570,7 @@ def app_launch_cmd(rest):
 
 
 def app_quit_cmd(rest):
-    """Ask a GUI app (obs|discord) to quit — graceful where possible (macOS
+    """Ask a GUI app (obs|discord) to quit. Graceful where possible (macOS
     AppleScript quit, Windows taskkill, Linux pkill). The Control Center wraps
     this in a confirm dialog; quitting OBS mid-broadcast is the operator's call."""
     name = rest[0] if rest else None
@@ -2587,23 +2587,23 @@ def app_quit_cmd(rest):
     if rc == 0:
         print(f"Asked {name} to quit.")
     else:
-        sys.exit(f"app: {name} did not quit (exit {rc}) — it may not be running.")
+        sys.exit(f"app: {name} did not quit (exit {rc}). It may not be running.")
 
 
 def obs_refresh_cmd(_rest):
-    """Force-refresh every relay-served browser source — the scriptable
+    """Force-refresh every relay-served browser source. The scriptable
     right-click → Refresh (no staleness gate)."""
     # Upfront probe for a real exit code + directive message; _refresh_obs_pages
     # re-probes internally (best-effort, exit 0), an accepted localhost double GET.
     if not _relay_http_ok():
-        sys.exit(f"obs: relay not responding on port {RELAY_PORT} — start it first "
+        sys.exit(f"obs: relay not responding on port {RELAY_PORT}. Start it first "
                  "(refreshing against a dead relay loads an error page in OBS).")
     _refresh_obs_pages(force=True)
 
 
 def obs_collection_cmd(rest):
     """`racecast obs collection` reports the active OBS scene collection; add `set` to
-    switch OBS to the GT Racing Endurance collection. Best effort — OBS must be running
+    switch OBS to the GT Racing Endurance collection. Best effort. OBS must be running
     with obs-websocket reachable. A mismatch exits non-zero so scripts/CI notice;
     `set` exits non-zero on failure so the Control Center job shows red."""
     import obs_ws
@@ -2611,24 +2611,24 @@ def obs_collection_cmd(rest):
     if rest[:1] == ["set"] and len(rest) == 1:
         ok, note = obs_ws.set_scene_collection(name=expected)
         if not ok:
-            sys.exit(f"obs: scene collection switch failed — {note}")
+            sys.exit(f"obs: scene collection switch failed. {note}")
         print(f"obs: {note or 'scene collection switched to ' + expected}.")
         return
     if rest:
         sys.exit("usage: racecast obs collection [set]")
     status, note = obs_ws.get_scene_collection(expected=expected)
     if status is None:
-        sys.exit(f"obs: scene collection check skipped — {note}")
+        sys.exit(f"obs: scene collection check skipped. {note}")
     if status["match"]:
-        print(f"obs: scene collection '{status['current']}' active — correct.")
+        print(f"obs: scene collection '{status['current']}' active. Correct.")
         return
     if status["expected_present"]:
-        sys.exit(f"obs: scene collection '{status['current']}' active — expected "
+        sys.exit(f"obs: scene collection '{status['current']}' active. Expected "
                  f"'{status['expected']}'. Run `racecast obs collection set`.")
     if status["renamed_variant"]:
-        sys.exit(f"obs: scene collection '{status['current']}' active — looks renamed "
+        sys.exit(f"obs: scene collection '{status['current']}' active. Looks renamed "
                  f"from '{status['expected']}'; switch manually in OBS.")
-    sys.exit(f"obs: '{status['expected']}' collection not found in OBS — import it "
+    sys.exit(f"obs: '{status['expected']}' collection not found in OBS. Import it "
              f"with `racecast setup`.")
 
 
@@ -2646,7 +2646,7 @@ def _apply_stream_target(part, fetch=None, post=None, apply_obs=None,
     """Resolve a Producer Part -> (platform from Channel tab, key from the
     get_stream_key webhook) and apply it to OBS via set_stream_service. Returns
     (ok, note); `note` NEVER contains the key. Seams (fetch/post/apply_obs/
-    refresh_env) are test hooks — production uses http_util + obs_ws. The OBS
+    refresh_env) are test hooks. Production uses http_util + obs_ws. The OBS
     apply is only reached after a key is obtained; the stopped-stream guard lives
     in set_stream_service."""
     import producer as prod
@@ -2659,7 +2659,7 @@ def _apply_stream_target(part, fetch=None, post=None, apply_obs=None,
         return False, "no SHEET_ID set for the active profile"
     push_url = os.environ.get("RACECAST_SHEET_PUSH_URL") or ""
     if not push_url:
-        return False, ("no SHEET_PUSH_URL in the active profile — the stream-key "
+        return False, ("no SHEET_PUSH_URL in the active profile. The stream-key "
                        "webhook is required")
     fetch = fetch or (lambda u: http_util.get_bytes(u, timeout=15)
                       .decode("utf-8", "replace"))
@@ -2687,7 +2687,7 @@ def _apply_stream_target(part, fetch=None, post=None, apply_obs=None,
     del key  # drop our last named reference to the key (do not carry it into the return path)
     if not ok:
         return False, note
-    return True, f"stream target set for Part {part} on {platform} — stream key set"
+    return True, f"stream target set for Part {part} on {platform}. Stream key set"
 
 
 def obs_stream_target_cmd(rest):
@@ -2698,7 +2698,7 @@ def obs_stream_target_cmd(rest):
         sys.exit("usage: racecast obs stream-target <part>")
     ok, note = _apply_stream_target(rest[0])
     if not ok:
-        sys.exit(f"obs: stream target not set — {note}")
+        sys.exit(f"obs: stream target not set. {note}")
     print(f"obs: {note} ✓")
 
 
@@ -2766,16 +2766,16 @@ def obs_benchmark_cmd(rest):
     except ValueError as exc:
         sys.exit(str(exc))
     if not _relay_http_ok():
-        sys.exit(f"obs: relay not responding on port {RELAY_PORT} — start it with a "
+        sys.exit(f"obs: relay not responding on port {RELAY_PORT}. Start it with a "
                  "live stint first.")
     session, note = obs_ws._connect("127.0.0.1", None, None, 10.0)
     if session is None:
-        sys.exit(f"obs: benchmark needs OBS — {note}")
+        sys.exit(f"obs: benchmark needs OBS. {note}")
     relay_mod = _load_relay_module("relay/racecast-feeds.py")
     flags = {"youtube": (relay_mod.STREAMLINK_SERVE, relay_mod.STREAMLINK_SERVE_ROBUST),
              "twitch": (relay_mod.STREAMLINK_TWITCH, relay_mod.STREAMLINK_TWITCH_ROBUST)}
     total = 2 * (opts["window_s"] + opts["settle_s"])
-    print(f"obs: benchmark on the on-air feed — about {total} s plus two reconnects. "
+    print(f"obs: benchmark on the on-air feed, about {total} s plus two reconnects. "
           "The feed reconnects twice; do not run this on air.")
     try:
         record = ob.run(_BenchmarkRelay(), session, _runtime_base_dir(), flags=flags,
@@ -2783,9 +2783,9 @@ def obs_benchmark_cmd(rest):
                         settle_s=opts["settle_s"], keep_recording=opts["keep_recording"],
                         progress=print)
     except ob.BenchmarkRefused as exc:
-        sys.exit(f"obs: benchmark refused — {exc}")
+        sys.exit(f"obs: benchmark refused. {exc}")
     except Exception as exc:                          # noqa: BLE001  operator-facing exit
-        sys.exit(f"obs: benchmark failed — {exc}")
+        sys.exit(f"obs: benchmark failed. {exc}")
     finally:
         session.close()
     print(json.dumps(record, indent=2) if opts["json"] else ob.render(record, time.time()))
@@ -2845,12 +2845,12 @@ def _parse_device_scan_args(rest):
 
 
 def device_scan_cmd(rest):
-    """`racecast device-scan [--webcam VAL] [--capture VAL] [--mic VAL] [--tyres VAL]`
-    — enumerate the OBS video-capture devices and microphones available to this
+    """`racecast device-scan [--webcam VAL] [--capture VAL] [--mic VAL] [--tyres VAL]`.
+    Enumerate the OBS video-capture devices and microphones available to this
     machine (via a throwaway-scene OBS probe, no collection needs importing), then
     write the operator's picks to the machine .env as RACECAST_WEBCAM/RACECAST_CAPTURE/
     RACECAST_MIC/RACECAST_TYRES_CAPTURE (#304, mic added in #307, tyres added in the
-    solo Commentary HUD plan). VAL is a 1-based list index (into its own list — video
+    solo Commentary HUD plan). VAL is a 1-based list index (into its own list, video
     indices for --webcam/--capture/--tyres, mic indices for --mic), a case-insensitive
     name substring, or an exact device value; blank/omitted leaves that slot untouched.
     --tyres resolves against the SAME enumerated video device list as --webcam/--capture.
@@ -2868,8 +2868,8 @@ def device_scan_cmd(rest):
     devices, note = res["devices"], res["note"]
     mics, mic_note = res["mic"], res["mic_note"]
     if not devices and not mics:
-        sys.exit(f"device-scan: {note or mic_note or 'no devices found'} — "
-                 "start OBS with obs-websocket enabled, then retry.")
+        sys.exit(f"device-scan: {note or mic_note or 'no devices found'}. "
+                 "Start OBS with obs-websocket enabled, then retry.")
     if devices:
         print("Available video devices:")
         for i, d in enumerate(devices, start=1):
@@ -2891,16 +2891,16 @@ def device_scan_cmd(rest):
     errors = []
     webcam_val, werr = resolve_device_selection(devices, webcam_tok or "")
     if werr:
-        errors.append(f"webcam — {werr}")
+        errors.append(f"webcam: {werr}")
     capture_val, cerr = resolve_device_selection(devices, capture_tok or "")
     if cerr:
-        errors.append(f"capture — {cerr}")
+        errors.append(f"capture: {cerr}")
     mic_val, mierr = resolve_device_selection(mics, mic_tok or "")
     if mierr:
-        errors.append(f"mic — {mierr}")
+        errors.append(f"mic: {mierr}")
     tyres_val, terr = resolve_device_selection(devices, tyres_tok or "")
     if terr:
-        errors.append(f"tyres — {terr}")
+        errors.append(f"tyres: {terr}")
     if errors:
         sys.exit("device-scan: " + "; ".join(errors))
     updates = {}
@@ -2964,7 +2964,7 @@ def _parse_gt7_discover_args(rest):
 
 
 def gt7_discover_cmd(rest):
-    """`racecast gt7-discover [--save] [--print] [--timeout N] [--pick I]` — find the
+    """`racecast gt7-discover [--save] [--print] [--timeout N] [--pick I]`. Find the
     PS4/PS5 running GT7 on the LAN (reuses a running relay's latched console when up,
     else a broadcast scan) and write its IP to RACECAST_GT7_PS_IP. --save skips the
     prompt (for non-TTY); --print never writes; --pick selects when several are found."""
@@ -3028,7 +3028,7 @@ def _active_sheet_url():
 def _sheet_url_or_exit():
     url = _active_sheet_url()
     if not url:
-        sys.exit("sheet: no SHEET_ID set for the active profile — set it in "
+        sys.exit("sheet: no SHEET_ID set for the active profile. Set it in "
                  "profiles/<name>/profile.env (racecast profile show).")
     return url
 
@@ -3046,10 +3046,10 @@ def sheet_open_cmd(_rest):
 def _release_obs_feeds():
     """Make OBS (via obs-websocket) drop its connections to the just-killed
     feeds. Otherwise OBS keeps the half-dead connections and the kernel pins
-    the feed ports in FIN_WAIT_1 until OBS restarts — the next preflight then
+    the feed ports in FIN_WAIT_1 until OBS restarts. The next preflight then
     warns "port in use". Must run AFTER the kill: the rebuild would reconnect
-    to a still-live relay. Best effort: OBS closed, auth missing, anything —
-    print one notice and keep going."""
+    to a still-live relay. Best effort: OBS closed, auth missing, anything.
+    Print one notice and keep going."""
     try:
         import obs_ws
         names, note = obs_ws.release_feed_inputs()
@@ -3060,7 +3060,7 @@ def _release_obs_feeds():
         print(f"obs: released media inputs {', '.join(names)} "
               f"(frees the feed ports; they restart on scene activation).")
     elif note:
-        print(f"obs: feed release skipped — {note}")
+        print(f"obs: feed release skipped. {note}")
 
 def relay_stop(rest):
     pid = sv.read_pid(_relay_pid_path())
@@ -3100,7 +3100,7 @@ def _logs_cmd(source_name, rest):
     if "--archive" in rest:
         i = rest.index("--archive")
         if i + 1 >= len(rest):
-            print("(--archive needs a token — run with --list to see available ones)")
+            print("(--archive needs a token, run with --list to see available ones)")
             return
         tok = rest[i + 1]
         text = src["read"](tok)
@@ -3135,8 +3135,8 @@ def _companion_unsupported_msg():
                 "to its full path and retry.")
     if sys.platform == "darwin":
         return "companion: Companion control is unavailable on this macOS setup."
-    return ("companion: no companion.service found (WSL/host or manual install) — "
-            "run and bind Companion yourself.")
+    return ("companion: no companion.service found (WSL/host or manual install). "
+            "Run and bind Companion yourself.")
 
 def _companion_running(cc):
     cmds = _companion_cmds(cc)
@@ -3157,18 +3157,18 @@ def _companion_start_linux(cc, cl, unit, rest):
     service. No config.json editing (headless ignores it; the bind is the
     --admin-address flag injected via the systemd drop-in)."""
     if not os.path.exists(cl.HELPER_PATH):
-        sys.exit("companion: control not set up yet — run `racecast companion "
+        sys.exit("companion: control not set up yet. Run `racecast companion "
                  "enable-control` once (installs the systemd bind helper + sudoers).")
     bind_arg = rest[0] if rest else "auto"
     ts = _tailscale_ip()
     ip = cc.desired_bind_ip(bind_arg, ts)
     if bind_arg == "auto" and not ts:
-        print("companion: no Tailscale IP — binding 127.0.0.1 (this machine only).")
+        print("companion: no Tailscale IP. Binding 127.0.0.1 (this machine only).")
     if subprocess.run(["sudo", "-n", cl.HELPER_PATH, ip]).returncode != 0:
         sys.exit("companion: passwordless start failed. Run `racecast companion "
                  "enable-control`, or start manually: `sudo systemctl start companion`.")
     print(f"companion: started, admin/tablet bound to {ip}:8000.")
-    print("  Admin GUI shares this port — restrict who reaches it with a Tailscale ACL.")
+    print("  Admin GUI shares this port. Restrict who reaches it with a Tailscale ACL.")
 
 
 def _companion_stop_linux(cc, cl, unit):
@@ -3197,7 +3197,7 @@ def companion_start(rest):
     if not os.path.exists(cfg_path):
         # First launch: Companion creates its config on startup, so start it
         # plainly now, bind on the next run (the bind edit needs the file).
-        print(f"companion: first launch (no config at {cfg_path} yet) — starting Companion as-is.")
+        print(f"companion: first launch (no config at {cfg_path} yet). Starting Companion as-is.")
         print("  When it is up, run `racecast companion restart` to bind it to the Tailscale IP.")
         # Same frozen-environment handling as the other GUI launches (#572):
         # Companion links the system libraries too.
@@ -3211,7 +3211,7 @@ def companion_start(rest):
     ts = _tailscale_ip()
     desired = cc.desired_bind_ip(bind_arg, ts)
     if bind_arg == "auto" and not ts:
-        print("companion: no Tailscale IP — the tablet will be reachable on this machine only.")
+        print("companion: no Tailscale IP. The tablet will be reachable on this machine only.")
     plan = cc.plan_companion_action(current, desired, _companion_running(cc))
     if plan["stop_first"]:
         print("Stopping Companion to change its bind address…")
@@ -3239,7 +3239,7 @@ def companion_start(rest):
         print(f"Companion already bound to {desired} and running.")
     host = desired if desired != "0.0.0.0" else (ts or "<this-machine-ip>")
     print(f"Companion buttons (tablet): http://{host}:{port}/tablet")
-    print("  Admin GUI shares this port — restrict who reaches it with a Tailscale ACL.")
+    print("  Admin GUI shares this port. Restrict who reaches it with a Tailscale ACL.")
     return
 
 def companion_stop(rest):
@@ -3288,13 +3288,13 @@ def companion_status_payload(supported, running, cfg, why=""):
 
 
 def companion_status_data():
-    """Probe Companion and shape the result (best effort — a broken probe
+    """Probe Companion and shape the result (best effort, a broken probe
     reports as unsupported, never raises)."""
     try:
         cc = _companion()
         cmds = _companion_cmds(cc)
         if cmds is None:
-            why = ("(Companion.exe not found — set RACECAST_COMPANION_EXE in .env)"
+            why = ("(Companion.exe not found, set RACECAST_COMPANION_EXE in .env)"
                    if sys.platform.startswith("win") else f"(manual on {sys.platform})")
             return companion_status_payload(False, False, None, why)
         running = _companion_running(cc)
@@ -3395,7 +3395,7 @@ def url_opener_argv(platform, url, which=shutil.which):
 
     A frozen build cannot use `webbrowser.open()`: it starts the browser as a
     child of THIS process, which inherits the PyInstaller extraction dir on
-    LD_LIBRARY_PATH and dies in the dynamic linker before main() — the #572
+    LD_LIBRARY_PATH and dies in the dynamic linker before main(). The #572
     failure class, at a site #573 did not cover. Measured on the broadcast box:
     under `LD_LIBRARY_PATH=/tmp/_MEI…` even `/bin/bash` dies with "undefined
     symbol: rl_print_keybinding", so the browser never starts, and `webbrowser`
@@ -3403,8 +3403,8 @@ def url_opener_argv(platform, url, which=shutil.which):
     ourselves is what lets us hand it a de-PyInstaller environment.
 
     Only ever for a real http(s) URL: `open` and `gio open` launch a FILE with
-    its default application, so a caller handing over a path — or a `-`-leading
-    string an opener would read as a flag — must never reach them. Windows has
+    its default application, so a caller handing over a path, or a `-`-leading
+    string an opener would read as a flag, must never reach them. Windows has
     no library-path problem, so it returns None and keeps `webbrowser`, as does
     a box with none of these openers installed.
     """
@@ -3430,7 +3430,7 @@ def _spawn_url_opener(argv, env, popen=None, sleep=None):
     HANDS THE URL OVER AND EXITS, so every success would be reported as a death
     and would trigger a second browser. The exit CODE is the signal instead.
 
-    stderr is captured for the same reason `_gui_spawn` captures it — a silent
+    stderr is captured for the same reason `_gui_spawn` captures it. A silent
     dynamic-linker death on stderr=DEVNULL is exactly what kept #572 invisible,
     and this function exists because of that bug. Raises OSError like Popen.
     """
@@ -3468,7 +3468,7 @@ def _open_url(url, which=shutil.which, platform=None, popen=None, sleep=None,
         print(f"  {argv[0]}: {note}")
         # Last resort only. webbrowser starts the browser as OUR child, which is
         # the very thing that fails on a frozen build, so promise nothing.
-        print(f"  falling back to the default browser — if no window appears, "
+        print(f"  falling back to the default browser. If no window appears, "
               f"open {url} yourself")
     (browser or webbrowser.open)(url)
 
@@ -3502,7 +3502,7 @@ def companion_open_admin(rest):
 def _stint_args(rest):
     """Extract + validate a --stint flag ("--stint 4" or "--stint=4") from an
     argv. Returns the fragment to forward to the relay launch; exits on an
-    invalid value (fail fast BEFORE a detached daemon is spawned — its own
+    invalid value (fail fast BEFORE a detached daemon is spawned, its own
     error would only land in the log file)."""
     for i, tok in enumerate(rest):
         val = None
@@ -3518,7 +3518,7 @@ def _stint_args(rest):
 
 
 def _qualifying_args(rest):
-    """['--qualifying'] when the flag is present in argv, else [] — forwarded to
+    """['--qualifying'] when the flag is present in argv, else []. Forwarded to
     the relay launch so 'event start --qualifying' brings the stack up in
     qualifying mode (Feed A serves the Qualifying tab). Switch live afterwards via
     the panel / /mode endpoints."""
@@ -3527,7 +3527,7 @@ def _qualifying_args(rest):
 
 def _title_args(rest):
     """['--event-title', VALUE] when `event start` was given --title (or --title=),
-    else [] — forwarded to the relay launch so 'event start --title "…"' brings the
+    else []: forwarded to the relay launch so 'event start --title "…"' brings the
     stack up with that free-text event title and persists it (#207). Free text: no
     validation beyond presence (the relay sanitizes); an explicit empty value clears
     the title. A bare '--title' whose next token is another flag is NOT consumed."""
@@ -3549,7 +3549,7 @@ def _event_modules():
 
 def _load_relay_module(rel):
     """Load a relay script (hyphenated filename) as a module, repo + package +
-    frozen alike — module-level code only defines functions, no side effects."""
+    frozen alike: module-level code only defines functions, no side effects."""
     import importlib.util
     path = resource_path(rel)
     name = os.path.splitext(os.path.basename(path))[0].replace("-", "_")
@@ -3571,8 +3571,8 @@ def _asset_state(ev):
     """Sheet-driven asset facts shared by `racecast event status` and `racecast init`:
     (g_dir, m_dir, missing_g, missing_m). missing_* follow ev.check_assets()
     semantics and are None when the sheet could not be read (fetch_assets_rows
-    absorbs fetch errors into None — it never raises). Only module-load /
-    directory-resolution failures raise — callers classify/fall back.
+    absorbs fetch errors into None, it never raises). Only module-load /
+    directory-resolution failures raise: callers classify/fall back.
 
     Note: the CLI injects RACECAST_SHEET_ID from the active profile before this
     runs (get-graphics' load_dotenv still fills machine vars from .env)."""
@@ -3644,8 +3644,8 @@ def takeover_plan(status, stint_override=None, qualifying_flag=False):
     """Derive event-start params for a producer takeover from A's /status (a dict,
     or None when A was unreachable) plus operator overrides. Pure. Returns
     {stint, qualifying, source}: --stint always wins (source 'override'); else A's
-    live block (source 'relay'); else — no override and A unreachable / an older
-    relay without a live block — stint is None (source 'sheet') and the CLI asks
+    live block (source 'relay'); else, no override and A unreachable / an older
+    relay without a live block, stint is None (source 'sheet') and the CLI asks
     for --stint rather than silently starting at stint 1 mid-race. --qualifying
     forces qualifying regardless of A."""
     if stint_override is not None:
@@ -3666,13 +3666,13 @@ def league_guard(a_sheet_id, b_sheet_id, force):
     if force or not a_sheet_id or not b_sheet_id or a_sheet_id == b_sheet_id:
         return None
     return (f"league mismatch: producer A is league {a_sheet_id}, but your active "
-            f"profile is league {b_sheet_id} — wrong profile? re-run with --force "
+            f"profile is league {b_sheet_id}. Wrong profile? re-run with --force "
             f"to take over anyway")
 
 
 def _takeover_event_title(status):
     """Producer A's on-air event title (#207) to adopt at takeover, or None to leave
-    the local title untouched — A unreachable (status None) or an older relay whose
+    the local title untouched. A unreachable (status None) or an older relay whose
     /status omits the field. An empty string is a valid value (A has no title -> clear
     ours to match). Pure."""
     if not isinstance(status, dict) or "event_title" not in status:
@@ -3684,7 +3684,7 @@ def _takeover_event_title(status):
 def _announce_takeover(status, plan, a_title):
     """Announce a producer takeover (#317): a Discord push + a Health-Monitor marker
     on THIS machine, both naming the producers (B = us via _resolve_producer_name,
-    A = the outgoing one from /status). Fully best-effort — any failure prints one
+    A = the outgoing one from /status). Fully best-effort. Any failure prints one
     note and returns, never blocking the bring-up. Own function so the takeover
     tests stub its network/DB I/O."""
     try:
@@ -3704,14 +3704,14 @@ def _announce_takeover(status, plan, a_title):
                            metadata={"from": a_name, "stint": plan["stint"]})
         conn.close()
     except Exception as exc:  # noqa: BLE001  best-effort, never blocks the bring-up
-        print(f"note: takeover announcement failed ({type(exc).__name__}) — continuing.")
+        print(f"note: takeover announcement failed ({type(exc).__name__}). Continuing.")
 
 
 def _event_gate_results(ev, pf):
     """The static preconditions `racecast event start` cannot fix by launching
     services: the active league's .env/SHEET_ID, the broadcast graphics/media,
     and the YouTube cookies. (Relay/OBS/Companion/Tailscale are exactly what
-    event start brings up, so they are deliberately excluded — gating on them
+    event start brings up, so they are deliberately excluded, gating on them
     would abort every bring-up.) Mirrors the classifiers used in
     _event_sections so the gate and the readiness report agree."""
     results = [ev.classify_env(os.environ.get("RACECAST_SHEET_ID"),
@@ -3736,7 +3736,7 @@ def _gui_child_env(app, ev=None):
     headless session overrides on top.
 
     A GUI app links the SYSTEM libraries, so it must not inherit the frozen
-    binary's LD_LIBRARY_PATH — it points at our extracted _MEI bundle and the app
+    binary's LD_LIBRARY_PATH: it points at our extracted _MEI bundle and the app
     loads our libssl instead, dying with "version `OPENSSL_x.y.z' not found"
     (#572). `external_tool_env()` returns None off the frozen binary, so a source
     run is unchanged. Returns (env, overrides).
@@ -3755,7 +3755,7 @@ def _gui_spawn(argv, cwd, env, app, popen=None, sleep=None):
 
     stderr used to go straight to DEVNULL, so an app that died in the dynamic
     linker left no trace on any surface and the bring-up could only report
-    "still not up" — which is why #572 stayed invisible. Capture into a temp
+    "still not up": which is why #572 stayed invisible. Capture into a temp
     file and, if the process is already gone a moment later, print what it said.
     A survivor's buffer is dropped: a live GUI app's stderr is not ours to keep.
     Raises OSError like Popen; returns the note it printed ("" when the app is
@@ -3774,7 +3774,7 @@ def _gui_spawn(argv, cwd, env, app, popen=None, sleep=None):
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()][:3]
     note = " / ".join(lines)[:400]
     print(f"{app}: exited immediately"
-          + (f" — {note}" if note else " (no output)."))
+          + (f". {note}" if note else " (no output)."))
     return note
 
 
@@ -3783,13 +3783,13 @@ def _event_launch(ev, app, popen=None, sleep=None):
     Returns True iff a launch was actually attempted."""
     import install_apps
     if not install_apps.app_present(app, sys.platform):
-        print(f"{app}: not installed — run `racecast install-apps`.")
+        print(f"{app}: not installed. Run `racecast install-apps`.")
         return False
     cmd = ev.launch_command(app, sys.platform)
     if cmd is None:
         hint = ("run `sudo tailscale up`" if app == "tailscale"
                 else "launch it manually")
-        print(f"{app}: cannot launch automatically — {hint}.")
+        print(f"{app}: cannot launch automatically. {hint}.")
         return False
     argv, cwd = cmd
     child_env, overrides = _gui_child_env(app, ev)
@@ -3825,7 +3825,7 @@ def _tailscale_operator_hint(verb, platform=None):
     platform = sys.platform if platform is None else platform
     if not platform.startswith("linux"):
         return ""
-    return (f" — Linux needs root for this. One-time fix so up/down (and the "
+    return (f". Linux needs root for this. One-time fix so up/down (and the "
             f"Control Center buttons) work WITHOUT sudo: `sudo tailscale set "
             f"--operator=$USER`. Or run `sudo tailscale {verb}` now.")
 
@@ -3834,7 +3834,7 @@ def _tailscale_connect(ev=None):
     """Best-effort connect: argument-less `tailscale up` keeps all settings
     ("the opposite of tailscale down"). Launches the app first when no backend
     answers (macOS: the backend only lives while the app runs); never runs `up`
-    in NeedsLogin — that would trigger the interactive browser login. Shared by
+    in NeedsLogin: that would trigger the interactive browser login. Shared by
     `racecast tailscale up` and `racecast event start`; returns the tailnet IP or None."""
     import tailscale as ts
     binary, state, ip = ts.tailscale_backend()
@@ -3852,10 +3852,10 @@ def _tailscale_connect(ev=None):
         print(f"tailscale: already connected ({ip or 'no IPv4 yet'}).")
         return ip
     if action == "needs-login":
-        print(f"tailscale: logged out — {_tailscale_login_hint()}.")
+        print(f"tailscale: logged out. {_tailscale_login_hint()}.")
         return None
     if action == "launch-app":  # the backend never came up
-        print("tailscale: not running — start the Tailscale app manually.")
+        print("tailscale: not running. Start the Tailscale app manually.")
         return None
     ok, detail = ts.tailscale_up(binary)
     if not ok:
@@ -3891,13 +3891,13 @@ def tailscale_status_cmd(_rest):
     import tailscale as ts
     _binary, state, ip = ts.tailscale_backend()
     if state is None:
-        print("Tailscale: backend not running — `racecast tailscale up` starts and connects it.")
+        print("Tailscale: backend not running. `racecast tailscale up` starts and connects it.")
     elif state == "Running":
         print(f"Tailscale: connected ({ip or 'no IPv4 yet'}).")
     elif state in ("NeedsLogin", "NeedsMachineAuth"):
-        print(f"Tailscale: {state} — {_tailscale_login_hint()}.")
+        print(f"Tailscale: {state}. {_tailscale_login_hint()}.")
     else:
-        print(f"Tailscale: {state} — run `racecast tailscale up` to connect.")
+        print(f"Tailscale: {state}. Run `racecast tailscale up` to connect.")
     _append_tailscale_snapshot()
 
 
@@ -3914,8 +3914,8 @@ def _wait_for_obs_ready(timeout=OBS_READY_TIMEOUT_S):
         print(f"obs: readiness check skipped ({exc}).")
         return
     if not ok:
-        print(f"obs: not answering obs-websocket after {timeout:.0f}s — "
-              f"the scene collection, page refresh and Standby switch may be "
+        print(f"obs: not answering obs-websocket after {timeout:.0f}s. "
+              f"The scene collection, page refresh and Standby switch may be "
               f"skipped ({note}).")
 
 
@@ -3935,25 +3935,25 @@ def _check_scene_collection():
     action, detail = obs_ws.scene_collection_action(
         status, note, _collection_switch_enabled())
     if action == "skip":
-        print(f"obs: scene collection check skipped — {detail}.")
+        print(f"obs: scene collection check skipped. {detail}.")
     elif action == "ok":
-        print(f"obs: scene collection '{detail}' active — correct.")
+        print(f"obs: scene collection '{detail}' active. Correct.")
     elif action == "switch":
         ok, snote = obs_ws.set_scene_collection(name=detail)
         if ok:
             print(f"obs: scene collection switched to '{detail}' "
                   f"(was '{status['current']}').")
         else:
-            print(f"obs: WARNING — could not switch to scene collection '{detail}' — "
+            print(f"obs: WARNING. Could not switch to scene collection '{detail}'. "
                   f"{snote}. Switch with `racecast obs collection set` (or the OBS row "
                   f"in the Control Center) before going live.")
     elif action == "warn_present":
-        print(f"obs: WARNING — scene collection '{detail['current']}' active, expected "
+        print(f"obs: WARNING. Scene collection '{detail['current']}' active, expected "
               f"'{detail['expected']}'. Switch with `racecast obs collection set` (or the "
               f"OBS row in the Control Center) before going live.")
     else:  # warn_absent
-        print(f"obs: WARNING — scene collection '{detail['current']}' active, expected "
-              f"'{detail['expected']}' not found in OBS — import it with `racecast setup` "
+        print(f"obs: WARNING. Scene collection '{detail['current']}' active, expected "
+              f"'{detail['expected']}' not found in OBS. Import it with `racecast setup` "
               f"before going live.")
 
 
@@ -3971,11 +3971,11 @@ def _switch_to_standby():
         return
     action, note = obs_ws.switch_to_scene_if_idle(STANDBY_SCENE)
     if action == "switched":
-        print(f"obs: switched to the '{STANDBY_SCENE}' scene — ready to Start Streaming.")
+        print(f"obs: switched to the '{STANDBY_SCENE}' scene. Ready to Start Streaming.")
     elif action == "live":
-        print(f"obs: '{STANDBY_SCENE}' switch skipped — {note}.")
+        print(f"obs: '{STANDBY_SCENE}' switch skipped. {note}.")
     else:  # error
-        print(f"obs: '{STANDBY_SCENE}' switch skipped — {note}. "
+        print(f"obs: '{STANDBY_SCENE}' switch skipped. {note}. "
               f"Switch to Standby manually before going live.")
 
 
@@ -4004,7 +4004,7 @@ def event_start(rest, _autojoin=True, _new_session=True):
         blockers = ev.gate_blockers(_event_gate_results(ev, pf))
         if blockers:
             color = pf.enable_color("--no-color" in rest)
-            print("Pre-flight gate: cannot start the event — these must be fixed "
+            print("Pre-flight gate: cannot start the event. These must be fixed "
                   "first (or re-run with --force to start anyway):")
             for r in blockers:
                 print(pf.fmt_result(r, color))
@@ -4059,7 +4059,7 @@ def event_start(rest, _autojoin=True, _new_session=True):
         probes["companion"] = lambda: _companion_running(cc)
     print("\nWaiting for the launched services to come up (max 60 s)…")
     for name, up in sorted(ev.wait_until_up(probes).items()):
-        print(f"  {name}: {'up' if up else 'still not up — see the report below'}")
+        print(f"  {name}: {'up' if up else 'still not up: see the report below'}")
     # Funnel (opt-OUT via RACECAST_FUNNEL=false): publish /console publicly once
     # the relay is up. On by default, since the Funnel is the preferred path.
     # Best-effort: a funnel failure (e.g. missing nodeAttr) must never abort the
@@ -4069,7 +4069,7 @@ def event_start(rest, _autojoin=True, _new_session=True):
             funnel_cmd(["on"])
         except SystemExit as exc:
             msg = exc.code if isinstance(exc.code, str) else "failed"
-            print("funnel: skipped — " + msg.splitlines()[0])
+            print("funnel: skipped. " + msg.splitlines()[0])
     # OBS may not have been running when relay_start's refresh hook fired, since
     # event start launches OBS after the relay. Forced rather than hash-gated: a
     # re-run or takeover with unchanged page bytes must still clear OBS's cached
@@ -4094,19 +4094,19 @@ def event_start(rest, _autojoin=True, _new_session=True):
 
 
 def event_stop(rest):
-    """Stop racecast-managed services only — never the GUI apps (a mistyped command
+    """Stop racecast-managed services only, never the GUI apps (a mistyped command
     must not be able to kill a live broadcast). Generates + sends the post-event
-    report BEFORE the teardown (default-on; --no-report skips) — while the relay is
+    report BEFORE the teardown (default-on; --no-report skips). While the relay is
     still up, so commentator names resolve. Report failure is non-fatal.
 
-    Idempotent (#524): if the relay is already gone the event was already stopped —
-    e.g. the last-part auto-stop (STOP PART Q) already ran the report + teardown, and
+    Idempotent (#524): if the relay is already gone the event was already stopped.
+    E.g. the last-part auto-stop (STOP PART Q) already ran the report + teardown, and
     the operator then clicks Control Center "Stop Event" too. Regenerating the report
     now would resolve NO commentator names and drop the qualifying marker (both need
     the live relay), overwriting/re-sending a strictly worse report. So a stop with no
-    live relay is a no-op — the good report stands."""
+    live relay is a no-op. The good report stands."""
     if not _relay_is_alive():
-        print("Event already stopped — nothing to do "
+        print("Event already stopped: nothing to do "
               "(the last-part auto-stop already ran the report + teardown; the "
               "existing report stands). Stop any lingering app with `racecast "
               "companion stop` / `racecast relay stop`.")
@@ -4139,7 +4139,7 @@ def event_stop(rest):
     if glob.glob(os.path.join(_streams_static_dir(), "feed_*.pid")):
         streams_stop([])
     relay_stop([])
-    print("OBS/Discord/Tailscale keep running — quit them manually if needed.")
+    print("OBS/Discord/Tailscale keep running: quit them manually if needed.")
 
 
 def _takeover_port(args):
@@ -4156,8 +4156,8 @@ def _takeover_port(args):
 
 
 def event_takeover(rest):
-    """`racecast event takeover <A-ip> [--stint N] [--qualifying] [--port N] [--force]`
-    — take the broadcast over from another producer (A) in one step: read A's
+    """`racecast event takeover <A-ip> [--stint N] [--qualifying] [--port N] [--force]`.
+    Take the broadcast over from another producer (A) in one step: read A's
     on-air stint + league from /status, refuse a wrong-league takeover (unless
     --force), warn if the timer will not carry, pull A's chat, then bring the
     stack up at that stint via `event start`. The broadcast-output switch (stream
@@ -4187,12 +4187,12 @@ def event_takeover(rest):
         except Exception as exc:
             code = getattr(exc, "code", None)
             if code == 403:
-                sys.exit("racecast: producer A rejected the step-up secret (HTTP 403) "
-                         "— the league CONSOLE_SECRET in your active profile does not "
+                sys.exit("racecast: producer A rejected the step-up secret (HTTP 403). "
+                         "The league CONSOLE_SECRET in your active profile does not "
                          "match A's. Re-export the profile from A and import it here.")
             if code == 401:
-                sys.exit("racecast: producer A returned HTTP 401 for the takeover pull "
-                         "— A is running an older relay that still requires a console "
+                sys.exit("racecast: producer A returned HTTP 401 for the takeover pull. "
+                         "A is running an older relay that still requires a console "
                          "token. Update A to this version, or take over from the "
                          "tailnet IP instead (racecast event takeover <100.x-ip>).")
             status = None                 # network/unreachable -> fall back to --stint
@@ -4209,22 +4209,22 @@ def event_takeover(rest):
         sys.exit(f"racecast: {block}")
     if status is None:
         if funnel:
-            print(f"note: producer A at {host} not reachable via Funnel — relying on "
+            print(f"note: producer A at {host} not reachable via Funnel. Relying on "
                   f"--stint and the shared sheet.")
         else:
-            print(f"note: producer A at {host}:{port} not reachable — relying on "
+            print(f"note: producer A at {host}:{port} not reachable. Relying on "
                   f"--stint and the shared sheet.")
     elif not a_sheet:
-        print("note: could not verify A's league (older relay?) — proceeding.")
+        print("note: could not verify A's league (older relay?). Proceeding.")
 
     if not os.environ.get("RACECAST_SHEET_PUSH_URL"):
-        print("WARNING: no SHEET_PUSH_URL in the active profile — the race timer "
+        print("WARNING: no SHEET_PUSH_URL in the active profile. The race timer "
               "will NOT carry over from producer A. Set it for handover-safe timing.")
 
     plan = takeover_plan(status, stint_override, qualifying_flag)
     if plan["stint"] is None:
-        sys.exit("racecast: producer A is unreachable and no --stint was given — "
-                 "read the on-air stint off A's panel and re-run with --stint N.")
+        sys.exit("racecast: producer A is unreachable and no --stint was given. "
+                 "Read the on-air stint off A's panel and re-run with --stint N.")
 
     # best-effort: a chat failure must not abort the takeover. Per branch so the
     # tailnet path keeps its original `except SystemExit`-only contract (chat_cmd
@@ -4236,12 +4236,12 @@ def event_takeover(rest):
             _chat_reload_if_running()
             print(f"Pulled {n} messages from A (funnel).")
         except Exception as exc:
-            print(f"note: chat pull failed ({type(exc).__name__}) — continuing takeover.")
+            print(f"note: chat pull failed ({type(exc).__name__}). Continuing takeover.")
     else:
         try:
             chat_cmd(["pull", host, "--port", str(port)])
         except SystemExit:
-            print("note: chat pull failed — continuing takeover.")
+            print("note: chat pull failed. Continuing takeover.")
 
     # best-effort: a console-versions failure must not abort (same per-branch split).
     if funnel:
@@ -4250,12 +4250,12 @@ def event_takeover(rest):
             count = cpadm.apply_pulled(_console_versions_path(), payload)
             print(f"pulled {count} console version record(s) from A (funnel).")
         except Exception as exc:
-            print(f"note: console-versions pull failed ({type(exc).__name__}) — continuing.")
+            print(f"note: console-versions pull failed ({type(exc).__name__}). Continuing.")
     else:
         try:
             console_cmd(["pull-versions", host, "--port", str(port)])
         except SystemExit:
-            print("note: console-versions pull failed — continuing takeover.")
+            print("note: console-versions pull failed. Continuing takeover.")
 
     # Adopt A's active cues like the chat pull. Best-effort, never aborts. (#243)
     try:
@@ -4267,7 +4267,7 @@ def event_takeover(rest):
         _cues_reload_if_running()
         print(f"Pulled {n} cue(s) from A.")
     except Exception as exc:
-        print(f"note: cue pull failed ({type(exc).__name__}) — continuing takeover.")
+        print(f"note: cue pull failed ({type(exc).__name__}). Continuing takeover.")
 
     # Adopt A's health history like the chat pull. Best-effort, never aborts.
     try:
@@ -4280,7 +4280,7 @@ def event_takeover(rest):
         n = hsmod.import_jsonl(conn, body.splitlines()); conn.close()
         print(f"Pulled {n} health samples from A.")
     except Exception as exc:
-        print(f"note: health pull failed ({type(exc).__name__}) — continuing takeover.")
+        print(f"note: health pull failed ({type(exc).__name__}). Continuing takeover.")
 
     # Adopt A's on-air event title (#207), persisted to event.json BEFORE bring-up
     # so the new relay loads it (mirrors the chat pull). Best-effort, never aborts.
@@ -4294,10 +4294,10 @@ def event_takeover(rest):
             print(f"Adopted A's event title: “{a_title}”." if a_title
                   else "Cleared the event title to match producer A.")
         except OSError as exc:
-            print(f"note: could not persist A's event title ({exc}) — continuing.")
+            print(f"note: could not persist A's event title ({exc}). Continuing.")
 
     print(f"Taking over at stint {plan['stint']} (from A's "
-          f"{plan['source']})" + (" — qualifying mode" if plan["qualifying"] else "") + ".")
+          f"{plan['source']})" + (", qualifying mode" if plan["qualifying"] else "") + ".")
     print("When ready, switch the broadcast output (stream key) to this machine "
           "per your crew procedure.\n")
 
@@ -4354,7 +4354,7 @@ def freeport_owner(port, relay_alive, static_alive_ports):
 
 def freeport_cmd(rest):
     """Free stuck feed ports: kill whatever LISTENS on each, unless a running relay
-    or static-streams owns it (then refuse — stop that service, or --force). Default
+    or static-streams owns it (then refuse, stop that service, or --force). Default
     targets 53001-53003. Exit 1 if any port was refused, else 0."""
     try:
         chosen, force = parse_freeport_args(rest)
@@ -4375,7 +4375,7 @@ def freeport_cmd(rest):
             refused = True
             who = "relay" if owner == "relay" else "static streams"
             stop = "racecast relay stop" if owner == "relay" else "racecast streams stop"
-            print(f"port {port}: held by the running {who} (PID {shown}) — "
+            print(f"port {port}: held by the running {who} (PID {shown}). "
                   f"{stop}, or re-run with --force")
         else:
             for pid in found:
@@ -4446,7 +4446,7 @@ def _cookies_oneshot_args(rest):
 
 def _oneshot_code(command, rest):
     """Run a one-shot and return its exit code (the seam `racecast init` uses to
-    chain steps — oneshot() below keeps the exit-the-CLI behavior)."""
+    chain steps, oneshot() below keeps the exit-the-CLI behavior)."""
     if command == "preflight":
         # The sheet check reads RACECAST_SHEET_ID from the environment. Frozen mode
         # already loads .env (_load_env_frozen); in repo/package mode preflight
@@ -4478,14 +4478,14 @@ def version():
 
 def update_check_data(fetch=None, current=None, platform=None, frozen=None):
     """Check-only view of the self-updater for the Home dashboard: is a newer
-    GitHub release out? Thin wrapper over scripts/update.py — the single source
+    GitHub release out? Thin wrapper over scripts/update.py. The single source
     of truth for the version compare and release lookup (the `racecast update`
     command installs it). Never downloads or replaces anything here. Network
     call; served on demand via /api/update (cached), never from the status poll.
     Never raises; {"ok": False} when offline / rate-limited / the tag is
     malformed. A non-frozen 'dev' checkout reports ok with no update; a frozen
     binary with a non-semver version (a preview build, or a local 'dev' build) is
-    a real installable artifact, so — like the CLI — it gets the latest release
+    a real installable artifact, so, like the CLI, it gets the latest release
     offered (the `frozen` flag is what tells the two apart; see #70). `fetch`/
     `current`/`platform`/`frozen` are test seams."""
     import update as upd
@@ -4495,7 +4495,7 @@ def update_check_data(fetch=None, current=None, platform=None, frozen=None):
            "notes": "",
            "releases_url": f"https://github.com/{upd.REPO}/releases/latest"}
     if upd.parse_version(cur) is None and not frozen:   # source checkout, use `git pull`
-        out["note"] = "development build — update check skipped"
+        out["note"] = "development build: update check skipped"
         return out
     try:
         release = (fetch or upd.fetch_latest)()
@@ -4542,7 +4542,7 @@ def preview_list_data(fetch=None, platform=None):
 
 def export_companion(rest):
     """Write the bundled (password-stripped) Companion config for import.
-    Default: runtime/ — the same home as the localized OBS collection."""
+    Default: runtime/. The same home as the localized OBS collection."""
     out = None
     if rest[:1] == ["--out"] and len(rest) == 2:
         out = rest[1]
@@ -4553,7 +4553,7 @@ def export_companion(rest):
         dst = os.path.join(dst, "racecast-buttons.companionconfig")
     os.makedirs(os.path.dirname(os.path.abspath(dst)), exist_ok=True)
     shutil.copyfile(resource_path("companion/racecast-buttons.companionconfig"), dst)
-    print(f"Wrote {dst} — import it in Companion (Import / Export -> Import).")
+    print(f"Wrote {dst}: import it in Companion (Import / Export -> Import).")
 
 
 def aggregate_status(_rest=None):
@@ -4564,7 +4564,7 @@ def aggregate_status(_rest=None):
 
 def running_apps_data(probe=None):
     """OBS/Discord process running-state for the Event overview (cheap
-    pgrep/tasklist per app). Never raises — both False on any failure."""
+    pgrep/tasklist per app). Never raises. Both False on any failure."""
     try:
         if probe is None:
             probe = _event_modules()[0].app_running
@@ -4576,7 +4576,7 @@ def running_apps_data(probe=None):
 def relay_live_data(fetch=None, started=None):
     """Screenshot-safe live relay stats for the Home dashboard: race-timer
     state and each feed's stint + coarse phase, pulled from the relay control
-    server on localhost. Deliberately omits stream URLs/channels — only the
+    server on localhost. Deliberately omits stream URLs/channels, only the
     1-based stint index and the state label leave the process. Network call to
     localhost; served on demand via /api/relay-live, never from the status poll.
     Never raises; {"ok": False} when the relay is unreachable. `fetch`/`started`
@@ -4642,7 +4642,7 @@ def event_title_read_data(alive=None, fetch=None, path=None, default=None):
 
 def _profile_event_default():
     """The active profile's EVENT_TITLE default ("" when unset/unresolvable).
-    Best-effort — the Home field degrades to empty, never errors."""
+    Best-effort: the Home field degrades to empty, never errors."""
     try:
         root = _env_base(IS_FROZEN, _real_executable(), HERE)
         rc = pcfg.resolve_config(root, runtime_root=_runtime_base_dir())
@@ -4794,7 +4794,7 @@ def ui_status_payload(relay=None, companion=None, streams=None, tailscale=None,
                       cookies=None, apps_running=None):
     """Aggregate health for the Control Center dashboard (/api/status).
     Each parameter is an optional zero-arg callable override (None = real
-    probe). Cheap, local-only probes — the sheet-fetching asset check lives
+    probe). Cheap, local-only probes. The sheet-fetching asset check lives
     in assets_status_data() behind the on-demand /api/assets.
     apps_running: OBS/Discord running-state used by the Event overview."""
     return {"version": version(),
@@ -4832,8 +4832,8 @@ def resources_data():
 
 
 def cookies_status_data(status=None):
-    """Local cookie-jar freshness (no network — safe for the 3 s poll;
-    never raises — a broken probe must not 500 the status poll)."""
+    """Local cookie-jar freshness (no network, safe for the 3 s poll;
+    never raises, a broken probe must not 500 the status poll)."""
     try:
         if status is None:
             pf = _event_modules()[1]
@@ -4859,13 +4859,13 @@ def _producer_fetch(url):
 def producer_schedule_data(fetch=None, self_name=None, refresh_env=None):
     """Read-only producer handover schedule from the active league Sheet's
     `Producer` tab (`Part | Producer | MagicDNS`), for the Control Center Home
-    view. Network: a gviz CSV fetch (seconds) — served on demand via
+    view. Network: a gviz CSV fetch (seconds). Served on demand via
     /api/producer-schedule, never from the status poll (like assets_status_data).
 
     Each row is tagged `self` (exact-FQDN match of its MagicDNS against this
     machine's own MagicDNS name) so the Home view disables takeover against this
     machine. `self_known` is False when our own MagicDNS can't be detected
-    (Tailscale off/logged out) — the UI then locks ALL takeover actions.
+    (Tailscale off/logged out). The UI then locks ALL takeover actions.
 
     Tolerant: any fetch/parse failure returns empty rows (the card hides), never
     raises. `fetch`/`self_name`/`refresh_env` are test seams."""
@@ -4897,9 +4897,9 @@ def producer_schedule_data(fetch=None, self_name=None, refresh_env=None):
 
 def assets_status_data(state=None, refresh_env=None):
     """Sheet-driven graphics/media readiness (network: sheet fetch, takes
-    seconds — served on demand via /api/assets, never from the status poll).
+    seconds, served on demand via /api/assets, never from the status poll).
     Re-injects the active profile's league env first (RACECAST_SHEET_ID etc.) so a
-    profile changed while the Control Center runs is reflected — see preflight_data."""
+    profile changed while the Control Center runs is reflected. See preflight_data."""
     try:
         (refresh_env or _apply_active_profile_env)()
         ev = _event_modules()[0]
@@ -4916,13 +4916,13 @@ def assets_status_data(state=None, refresh_env=None):
 
 
 def assets_files_data(roots=None, profile=None):
-    """Local graphics/media files actually present in runtime/ (cheap listdir —
+    """Local graphics/media files actually present in runtime/ (cheap listdir,
     no sheet, no network). Returns {"ok": True, "profile": name, "graphics":
     [{name, v}], "media": [{name, v}]} with sorted basenames, or {"ok": False,
     "error": ...}; never raises. Each `v` is a per-profile, per-mtime cache token
     (`<profile>-<mtime>`) the Control Center appends to the gallery <img>/<video>
     src so the browser's decode-cache busts on a profile switch or a re-download
-    (#274 — profiles typically share filenames like Overlay.png with different
+    (#274, profiles typically share filenames like Overlay.png with different
     bytes). `roots` (a {"graphics": dir, "media": dir} dict) and `profile` are the
     test seams."""
     IMG = (".png", ".jpg", ".jpeg", ".webp", ".gif")
@@ -4967,7 +4967,7 @@ def asset_roots_data():
     """The active profile's graphics/media dirs the asset-file route serves from,
     resolved LIVE on every call (NOT snapshotted when the Control Center starts).
     /api/assets/files lists from the same _runtime_dir(); freezing this one at
-    startup let the two diverge — the gallery LISTED files (live, correct) that
+    startup let the two diverge: the gallery LISTED files (live, correct) that
     serving then 404'd from a stale root. That bit a Finder-launched (App-
     Translocated) .app, where early-startup path resolution differs from the
     settled per-request value, and would also bite a runtime profile switch (#55)."""
@@ -4982,7 +4982,7 @@ _ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 def env_entries_data(path=None):
     """The active .env as ordered {key, value} entries for the Settings editor.
-    Missing file -> empty list (not an error). Never raises. Writes nothing —
+    Missing file -> empty list (not an error). Never raises. Writes nothing.
     `path` is a test seam; production resolves _env_file()."""
     try:
         p = path or _env_file()
@@ -5007,7 +5007,7 @@ def _validate_env_entries(entries):
         if not key:
             continue
         if not _ENV_KEY_RE.match(key):
-            return None, (f"invalid key: {key!r} — use letters, digits and "
+            return None, (f"invalid key: {key!r}. Use letters, digits and "
                           "underscore, not starting with a digit")
         if "\n" in val or "\r" in val:
             return None, f"value for {key} must not contain line breaks"
@@ -5109,7 +5109,7 @@ def env_upsert_data(updates, path=None):
         return {"ok": False, "error": (
             "the machine .env contains a non-RACECAST_ key, so the device selection "
             "could not be saved (nothing was written); the machine .env must hold only "
-            f"RACECAST_* keys — fix it in the .env editor, then retry. [{res['error']}]")}
+            f"RACECAST_* keys: fix it in the .env editor, then retry. [{res['error']}]")}
     return res
 
 
@@ -5119,7 +5119,7 @@ def devices_enumerate_data():
     enumerated by a throwaway-scene OBS probe (no collection needs importing).
     {ok, devices:[{name,value}], note, mic:[{name,value}], mic_note}. ok reflects
     the video enumeration only (webcam/capture, unchanged contract); mic_note
-    explains a failed/empty mic list independently — the front-end disables each
+    explains a failed/empty mic list independently. The front-end disables each
     dropdown on its own signal. Never raises (obs_ws.probe_device_options is
     best-effort)."""
     import obs_ws
@@ -5164,7 +5164,7 @@ def devices_write_data(webcam, capture, mic=None, tyres=None, path=None):
 def _active_profile_env_strict():
     """(active_name, profile.env path) for the active profile, or (None, None)
     when no profile resolves. Distinct from _active_profile_env_path(), which
-    falls back to the machine .env — the Profile editor must never edit .env."""
+    falls back to the machine .env. The Profile editor must never edit .env."""
     active = _active_profile_name()
     if not active:
         return None, None
@@ -5178,7 +5178,7 @@ def profile_env_entries_data():
     try:
         active, path = _active_profile_env_strict()
         if not active:
-            return {"ok": False, "error": "no active profile — create or select one first"}
+            return {"ok": False, "error": "no active profile: create or select one first"}
         text = ""
         if os.path.exists(path):
             with open(path, encoding="utf-8") as fh:
@@ -5195,7 +5195,7 @@ def profile_env_write_data(entries):
     Server resolves the path from the active profile, never a client value."""
     active, path = _active_profile_env_strict()
     if not active:
-        return {"ok": False, "error": "no active profile — create or select one first"}
+        return {"ok": False, "error": "no active profile: create or select one first"}
     return _write_env_file(path, entries)
 
 
@@ -5241,11 +5241,11 @@ def _ts_api_err(exc):
 
 
 def _console_setup_funnel(args):
-    """`racecast console setup-funnel [--apply] [--target T]` — automate the
+    """`racecast console setup-funnel [--apply] [--target T]`. Automate the
     one-time tailnet prerequisites via the Tailscale Admin API: enable MagicDNS +
     add the 'funnel' nodeAttr. Auth via a Tailscale API access token
     (RACECAST_TS_API_KEY). Dry-run unless --apply. HTTPS certificate enablement has
-    no API — reminder only."""
+    no API: reminder only."""
     import funnel_setup as fset
     api_key = _machine_env_value("RACECAST_TS_API_KEY")
     if not api_key:
@@ -5269,16 +5269,16 @@ def _console_setup_funnel(args):
     plan = fset.setup_plan(prefs, acl)
     if not plan:
         print("Funnel prerequisites already satisfied: MagicDNS on, 'funnel' nodeAttr "
-              "present.\nReminder: also enable HTTPS Certificates (DNS page) — no API "
+              "present.\nReminder: also enable HTTPS Certificates (DNS page). No API "
               "for that.\nThen: racecast funnel on")
         return None
-    print("Funnel setup — changes needed:")
+    print("Funnel setup: changes needed:")
     for step in plan:
         print(f"  - {step}")
     if not apply:
         print("\n(dry-run) re-run with --apply to perform these via the Tailscale API.")
         print("Note: applying the nodeAttr rewrites the policy via the API, which "
-              "drops HuJSON comments — the current policy is backed up first.")
+              "drops HuJSON comments: the current policy is backed up first.")
         return None
     try:
         if not fset.magicdns_enabled(prefs):
@@ -5308,7 +5308,7 @@ def _funnel_auto_enabled():
     machine flag RACECAST_FUNNEL (legacy RACECAST_COCKPIT_FUNNEL still honored) is
     explicitly set to a falsey value (false/0/no/off); an absent/empty key means
     enabled. Still requires the cockpit actually usable (a per-league secret
-    exists) — reads on-disk truth via console_status_data()."""
+    exists): reads on-disk truth via console_status_data()."""
     flag = ""
     epath = _env_file()
     if os.path.exists(epath):
@@ -5366,7 +5366,7 @@ def crew_entries_data():
 def crew_write_data(row, name, director, producer, commentator=False,
                     race_control=False, discord=""):
     """Write one crew row via the relay's /crew/set (the relay holds the webhook
-    URL — the Control Center never POSTs to SHEET_PUSH_URL directly)."""
+    URL, the Control Center never POSTs to SHEET_PUSH_URL directly)."""
     try:
         return _relay_post_json(
             "http://127.0.0.1:%d/crew/set" % RELAY_PORT,
@@ -5391,7 +5391,7 @@ def crew_delete_data(row):
 
 def console_status_data():
     """Console state for the Control Center: per-league secret presence and the
-    per-commentator links. The console is zero-config — the secret is auto-provisioned
+    per-commentator links. The console is zero-config. The secret is auto-provisioned
     here so links populate without an explicit enable step. Reads on-disk truth so a
     profile switch reflects without a Control Center restart. {ok, ...}; never raises."""
     try:
@@ -5471,7 +5471,7 @@ def console_revoke_data(streamer):
 
 def _active_discord_webhook():
     """(webhook_url, league_name) for the active profile; ("","") on any
-    failure. Best-effort — the webhook stays server-side, never in the browser."""
+    failure. Best-effort: the webhook stays server-side, never in the browser."""
     try:
         root = _env_base(IS_FROZEN, _real_executable(), HERE)
         rc = pcfg.resolve_config(root, runtime_root=_runtime_base_dir())
@@ -5537,12 +5537,12 @@ def _post_discord_webhook(url, payload):
 
 def console_post_link_data():
     """Post the shared /console landing-page link to the league's Discord
-    webhook (with an @here ping). The link is computed server-side from MagicDNS
-    — never supplied by the client. {ok}|{ok:false,error}; never raises."""
+    webhook (with an @here ping). The link is computed server-side from MagicDNS.
+    Never supplied by the client. {ok}|{ok:false,error}; never raises."""
     try:
         magic = _tailscale_magicdns()
         if not magic:
-            return {"ok": False, "error": "MagicDNS unavailable — is Tailscale up?"}
+            return {"ok": False, "error": "MagicDNS unavailable: is Tailscale up?"}
         webhook, league = _active_discord_webhook()
         if not webhook:
             return {"ok": False,
@@ -5661,7 +5661,7 @@ def overlay_slots_data(page):
 def overlay_layout_read_data(page):
     """The active profile's layout-<page>.json for the builder. First use of a
     profile with a hand-written <page>.css and no layout imports that CSS verbatim
-    into customCss (migration — never reverse-parsed).
+    into customCss (migration, never reverse-parsed).
     {ok, page, active, layout, migrated} or {ok:false, error}."""
     try:
         active, lpath = _overlay_layout_path(page)
@@ -5896,7 +5896,7 @@ def overlay_asset_serve(sub, key):
     """(path, content_type) for a bundled HUD asset the builder canvas previews
     offline: src/assets/flags/<key>.<ext> or src/assets/brands/<key>.<ext> (tries
     known image extensions in order). None when the subdir/key is unsafe or no
-    file matches — never raises on a bad request."""
+    file matches: never raises on a bad request."""
     if sub not in ("flags", "brands") or not _OV_ASSET_KEY_RE.match(key or ""):
         return None
     base = os.path.realpath(resource_path(os.path.join("assets", sub)))
@@ -6159,7 +6159,7 @@ def _default_stream_feeds():
 def streams_config_data(path=None, default=None):
     """static-stream feeds for the Control Center: the saved streams.json, or the
     built-in defaults when none exists yet. {"ok": True, "path", "entries":
-    [{label, channel, port}]} — never raises. `path`/`default` are test seams."""
+    [{label, channel, port}]}, never raises. `path`/`default` are test seams."""
     try:
         p = path or _streams_config_path()
         if os.path.exists(p):
@@ -6248,7 +6248,7 @@ def tools_status_data(which=None, version=None):
 def _companion_version_cache_path():
     """Machine-wide cache of the last-seen Companion version (companion-version.json
     next to the cookie jar). Companion has no local version file on Linux/host
-    setups, so the running server is the only source — caching it lets the
+    setups, so the running server is the only source. Caching it lets the
     Control Center still show the last-known version while Companion is stopped."""
     return os.path.join(_runtime_base_dir(), "companion-version.json")
 
@@ -6275,8 +6275,8 @@ def apps_status_data(present=None, version=None):
     presence probe is instant (filesystem/PATH); the version probe is best-effort
     per OS (macOS Info.plist; Windows exe metadata/Squirrel folder; Linux
     dpkg-query/build_info + `tailscale version`; Companion also via its running
-    web server) and may shell out / make one localhost request on Windows/Linux —
-    fine for this on-demand route, not the status poll. The Companion version is
+    web server) and may shell out / make one localhost request on Windows/Linux.
+    Fine for this on-demand route, not the status poll. The Companion version is
     cached so it still shows while Companion is stopped. Returns {"ok": True,
     "apps":[...]} or {"ok": False, "error": ...}; never raises."""
     try:
@@ -6306,16 +6306,16 @@ def apps_status_data(present=None, version=None):
 
 def preflight_data(gather=None, refresh_env=None):
     """Full preflight checklist as structured sections (on-demand: runs hardware
-    probes, per-tool version calls, and a Google-Sheet fetch when configured —
-    can take several seconds). Returns {"ok": True, "sections":[{"title","results":
+    probes, per-tool version calls, and a Google-Sheet fetch when configured.
+    Can take several seconds). Returns {"ok": True, "sections":[{"title","results":
     [{"level","name","detail"}]}]} or {"ok": False, "error": ...}; never raises.
 
     Re-injects the active profile's league env first: the Control Center process
     holds os.environ for its whole lifetime, but the active profile can change
     underneath it (a `racecast profile import`/`use` from the CLI, or the in-UI
     import/switch). Without this refresh the sheet probe reads the RACECAST_SHEET_ID
-    captured at UI startup — empty on a fresh install whose profile was imported
-    afterwards — and warns "not set" though SHEET_ID is configured."""
+    captured at UI startup, empty on a fresh install whose profile was imported
+    afterwards, and warns "not set" though SHEET_ID is configured."""
     try:
         (refresh_env or _apply_active_profile_env)()
         pf = _event_modules()[1]
@@ -6370,7 +6370,7 @@ def _wiki_repo():
 
 def _pages_url():
     """The GitHub Pages root for the visual onboarding decks (incl. the role cheat
-    sheet) — `https://<owner>.github.io/<repo>/`. The decks are the central, always-
+    sheet): `https://<owner>.github.io/<repo>/`. The decks are the central, always-
     current entry point the Control Center links to instead of serving the cheat
     sheet locally."""
     owner, _, name = _wiki_repo().partition("/")
@@ -6444,7 +6444,7 @@ _SLIDES_CTYPES = {
 
 def docs_slides_serve(relpath, resolve=None):
     """(path, content_type) for a file in the bundled onboarding-decks tree
-    (`src/docs/slides` — the offline copy of the GitHub Pages hub, incl. the role
+    (`src/docs/slides`, the offline copy of the GitHub Pages hub, incl. the role
     cheat sheet). An empty/`/` path serves `index.html`. Returns None for a missing
     file or any path that escapes the slides dir (traversal guard). Never raises.
     `resolve` is a test seam."""
@@ -6467,7 +6467,7 @@ def docs_content(key, resolve=None):
     """(content_type, body_bytes) for an allowlisted Help doc, or None. HTML docs
     are served as-is; Markdown docs are rendered to a styled, self-contained HTML
     page (mdrender) so they read properly in a browser tab instead of as raw
-    text. Never raises — returns None on any failure."""
+    text. Never raises. Returns None on any failure."""
     path = docs_file_path(key, resolve)
     if not path:
         return None
@@ -6595,12 +6595,12 @@ def _init_env_run():
 
 def _init_cookies_run(browser):
     """Gate (YouTube login) + the cookies one-shot. The gate only fires when
-    the cookies are actually missing/stale — under --force a fresh cookie jar
+    the cookies are actually missing/stale. Under --force a fresh cookie jar
     skips the pause but still re-exports."""
     _pf = _event_modules()[1]
     res = _pf.cookies_status(_cookies_path())
     if ins.cookies_done(res.level, res.detail) is None:
-        _init_pause(f"Log in to YouTube in {browser} — the cookie export "
+        _init_pause(f"Log in to YouTube in {browser}. The cookie export "
                     "needs that browser session")
     return _oneshot_code("cookies", [browser])
 
@@ -6633,7 +6633,7 @@ def _init_export_run():
     return 0
 
 def _init_steps(opts):
-    """The full step list — `build_plan()` (honoring --skip-installs) selects
+    """The full step list: `build_plan()` (honoring --skip-installs) selects
     and orders the subset that runs."""
     pf = _event_modules()[1]
     import install_apps
@@ -6685,7 +6685,7 @@ def _init_steps(opts):
 def init_plan_data(steps, kinds, browser="firefox", next_steps=None):
     """Wizard plan for the Control Center: each step's current done/skip state
     plus how the UI runs it (kind/op/instruction from ins.STEP_KINDS). Pure +
-    never-raise — a broken done-probe reads as 'not done' (the step then runs
+    never-raise: a broken done-probe reads as 'not done' (the step then runs
     and surfaces its own error), never a 500. `steps` is the _init_steps()-shaped
     list; `next_steps` is the closing manual checklist."""
     out = []
@@ -6736,8 +6736,8 @@ def init_step_action_data(key):
 
 def _init_plan(browser="firefox"):
     """ctx['init_plan'] wrapper: the wizard's view of the init steps. Preflight is
-    dropped — the Control Center has a dedicated Preflight page, and as the one
-    step with no persistent done-state it only ever read as 'pending' here — and
+    dropped, the Control Center has a dedicated Preflight page, and as the one
+    step with no persistent done-state it only ever read as 'pending' here, and
     surfaced as a closing reminder instead. (The `racecast init` CLI still runs it.)"""
     opts = {"browser": browser or "firefox", "skip_installs": False, "force": False}
     steps = [s for s in _init_steps(opts) if s["key"] != "preflight"]
@@ -6749,7 +6749,7 @@ def _init_plan(browser="firefox"):
 
 
 def _ui_modules():
-    """src/ui modules — path-inserted like scripts/ (kept out of the module-level
+    """src/ui modules: path-inserted like scripts/ (kept out of the module-level
     insert: only `racecast ui` needs them)."""
     ui_dir = resource_path("ui")
     if ui_dir not in sys.path:
@@ -6792,12 +6792,12 @@ def run_ui(rest, fail=sys.exit, open_browser=True):
     port = srv.ui_port(os.environ)
     instance = srv.probe_instance("127.0.0.1", port)
     if instance == "ours":
-        print(f"Control Center already running on port {port} — opening the browser.")
+        print(f"Control Center already running on port {port}. Opening the browser.")
         if open_browser:
             _open_url(_http_url("127.0.0.1", port, "/"))
         return None
     if instance == "foreign":
-        return fail(f"racecast: port {port} is in use by another application — set "
+        return fail(f"racecast: port {port} is in use by another application. Set "
                     "RACECAST_UI_PORT in .env to a free port and retry.")
 
     # The GitHub release check is one network round-trip, so cache a good result
@@ -6933,7 +6933,7 @@ def run_ui(rest, fail=sys.exit, open_browser=True):
     try:
         httpd = srv.serve(ctx, "127.0.0.1", port)
     except OSError as exc:
-        return fail(f"racecast: could not bind port {port} ({exc}) — set RACECAST_UI_PORT "
+        return fail(f"racecast: could not bind port {port} ({exc}). Set RACECAST_UI_PORT "
                     "in .env to a free port and retry.")
     url = _http_url("127.0.0.1", port, "/")
     print(f"Control Center: {url}  (Ctrl+C or the Quit button stops it)")
@@ -6945,7 +6945,7 @@ def run_ui(rest, fail=sys.exit, open_browser=True):
         pass                    # Ctrl+C is the intended way to stop the server
     finally:
         httpd.server_close()
-    print("Control Center stopped — relay/companion/streams keep running.")
+    print("Control Center stopped: relay/companion/streams keep running.")
     return None
 
 
@@ -6969,7 +6969,7 @@ def init_cmd(rest):
 def _bootstrap(argv):
     """Shared process startup for BOTH binaries: the `racecast` CLI (main) and the
     windowed `racecast-ui` launcher (racecast_ui.main). It lives in one place on
-    purpose — the two used to duplicate this sequence and drifted, so the launcher
+    purpose: the two used to duplicate this sequence and drifted, so the launcher
     shipped without _ensure_tool_path (#46, tools shown missing) and then without
     _apply_active_profile_env (#54, the active profile's SHEET_ID was never injected
     so preflight/asset checks read an empty env). Runs UTF-8 IO setup, .env +
@@ -7016,7 +7016,7 @@ def _sm():
 
 def _smoke_post_json(url, obj, headers=None, timeout=20):
     """POST + parse. `http_util.post_json` returns the RAW body (only `get_json`
-    parses), so every POST site has to decode — the sibling of the existing
+    parses), so every POST site has to decode. The sibling of the existing
     `_relay_post_json`. Callers that treated the bytes as a dict silently turned
     every successful write into a reported failure."""
     body = http_util.post_json(url, obj, headers=headers, timeout=timeout)
@@ -7029,7 +7029,7 @@ def _smoke_capture(argv, timeout=90):
     `env=sv.external_tool_env()` is not optional here: yt-dlp and streamlink run
     under the SYSTEM python, and the frozen bootloader leaves our bundled
     libcrypto on their library path, so they die on import. Without it the
-    fingerprint reported both as missing on every frozen run — which is every
+    fingerprint reported both as missing on every frozen run. Which is every
     run that matters. Returns None off the frozen binary, leaving source runs
     untouched. Same call the preflight tool check and the daemon spawns make."""
     try:
@@ -7046,7 +7046,7 @@ def _smoke_capture(argv, timeout=90):
 
 
 def _smoke_fingerprint():
-    """Tool versions. Not a check — the note a red run gets compared against, so
+    """Tool versions. Not a check: the note a red run gets compared against, so
     "what moved since the last green run" is a diff instead of a guess. The
     JS-runtime line is filled in later by `_smoke_js_runtime`."""
     out = {}
@@ -7066,7 +7066,7 @@ def _smoke_js_runtime(url):
     """yt-dlp's `JS runtimes:` line, read off a stream we ALREADY know is live.
 
     Deno is the only JS challenge provider on the broadcast box, so if that line
-    changes or disappears the YouTube bot-check has no fallback — worth
+    changes or disappears the YouTube bot-check has no fallback. Worth
     recording. Reading it off a discovered URL rather than a hardcoded video id
     keeps the run from depending on one stranger's clip staying up, and spends no
     extra request when discovery found nothing."""
@@ -7078,7 +7078,7 @@ def _smoke_js_runtime(url):
 
 
 def _smoke_vocab(sheet_id):
-    """(queries, categories) — built-in defaults, overridden by an optional
+    """(queries, categories): built-in defaults, overridden by an optional
     `Smoke` tab (`Platform | Query`) so the vocabulary can change without a
     release. A missing tab is normal and silent."""
     sm = _sm()
@@ -7126,7 +7126,7 @@ def _smoke_yt_candidates(query):
 
 def _smoke_yt_probe(url, cookies):
     """Resolve a candidate in the relay's OWN command form. Passing this is the
-    proof that the live path works — it is the exact operation the relay runs on
+    proof that the live path works. It is the exact operation the relay runs on
     air. Returns (height, note)."""
     sm = _sm()
     cmd = ["yt-dlp", "-g", "-f", "b[height<=1080]/b", "--no-warnings",
@@ -7146,8 +7146,8 @@ def _smoke_yt_probe(url, cookies):
 
 
 def _smoke_twitch_candidates(category):
-    """Live channels in a Twitch category via the public web-player Client-ID —
-    the same one streamlink embeds, so this needs no API key and no new
+    """Live channels in a Twitch category via the public web-player Client-ID.
+    The same one streamlink embeds, so this needs no API key and no new
     dependency. yt-dlp has no Twitch directory extractor."""
     sm = _sm()
     try:
@@ -7170,7 +7170,7 @@ def _smoke_twitch_candidates(category):
 
 
 def _smoke_twitch_probe(login):
-    """streamlink's own view of a channel — plugin, quality ladder, category.
+    """streamlink's own view of a channel. Plugin, quality ladder, category.
     Pulls no bytes. Returns (plugin, qualities, category, note)."""
     rc, txt = _smoke_capture(
         ["streamlink", "--json", f"https://www.twitch.tv/{login}"], timeout=60)
@@ -7186,7 +7186,7 @@ def _smoke_twitch_probe(login):
 
 
 def _smoke_discover(cookies, queries, categories, say):
-    """(youtube_urls, twitch_urls, attempted_youtube) — at most
+    """(youtube_urls, twitch_urls, attempted_youtube). At most
     MAX_ATTEMPTS_PER_PLATFORM probes per platform. The cap is the brake: an
     uncapped walk down a poor result list is exactly how the IP gets throttled.
 
@@ -7217,7 +7217,7 @@ def _smoke_discover(cookies, queries, categories, say):
             # is not available" (the bot check hiding the formats) reads as "not
             # live" otherwise, and that cost a full diagnosis cycle on the box.
             say(f"  youtube {cand['title'][:44]!r}: "
-                + (f"accepted ({height}p)" if ok else f"rejected — {(note or why)!r}"))
+                + (f"accepted ({height}p)" if ok else f"rejected: {(note or why)!r}"))
             if ok:
                 yt_urls.append(cand["url"])
     tw_urls, attempts = [], 0
@@ -7232,7 +7232,7 @@ def _smoke_discover(cookies, queries, categories, say):
         ok, why = sm.accept_twitch(plugin, qualities, category)
         say(f"  twitch {cand['login']!r}: "
             + (f"accepted ({sm.ladder_max_height(qualities)}p, {category!r})"
-               if ok else f"rejected — {(note or why)!r}"))
+               if ok else f"rejected: {(note or why)!r}"))
         if ok:
             url = f"https://www.twitch.tv/{cand['login']}"
             if sm.stream_host(url):
@@ -7243,11 +7243,11 @@ def _smoke_discover(cookies, queries, categories, say):
 def _smoke_push(push_url, row, url):
     """One `schedule` webhook write. Its HTTP result is a WEAK signal: Apps
     Script answers through a redirect whose target 404s intermittently AFTER the
-    script has already run — observed on the box with the URL sitting in the
+    script has already run. Observed on the box with the URL sitting in the
     sheet afterwards. So callers must not treat a reported failure as proof that
     nothing was written; `_smoke_write_schedule` confirms against the sheet.
 
-    Writes the URL column ONLY — Streamer and Stint are never sent, mirroring the
+    Writes the URL column ONLY. Streamer and Stint are never sent, mirroring the
     panel's CLEAR URL button ("keep Streamer + Stint so the slot survives").
     Those fields are vocabulary-constrained against the Configuration tab, so a
     discovered channel name is not a legal value there."""
@@ -7272,7 +7272,7 @@ def _smoke_push(push_url, row, url):
 
 
 def _smoke_schedule_rows(sheet_id):
-    """The Schedule tab parsed by csv.reader — the shape smoketest's layout
+    """The Schedule tab parsed by csv.reader. The shape smoketest's layout
     helpers expect. Physical, header included; they locate the URL column."""
     import csv
     body = http_util.get_bytes(_gviz_csv_url(sheet_id, "Schedule"), timeout=20)
@@ -7284,7 +7284,7 @@ def _smoke_await_rows(sheet_id, expected, what):
 
     Returns (ok, note). Used twice: once after clearing (every target row must
     read back EMPTY) and once after writing (every row must carry ITS url). The
-    cleared-then-written transition is the point — a single end-state check
+    cleared-then-written transition is the point. A single end-state check
     cannot tell a successful write from a sheet that already happened to hold
     those URLs, which is what a repeat run against a dead webhook looks like.
     """
@@ -7310,7 +7310,7 @@ def _smoke_write_schedule(push_url, sheet_id, rows, clear, say):
     A reported push failure never aborts: the webhook's HTTP result does not say
     whether the write happened (Apps Script answers through a redirect that 404s
     intermittently after the script has run). The sheet is the authority, and it
-    is read twice — the cleared rows must come back empty before the write, and
+    is read twice: the cleared rows must come back empty before the write, and
     afterwards every row must carry its own URL. Anything less would let a run
     that changed nothing at all look successful.
 
@@ -7324,7 +7324,7 @@ def _smoke_write_schedule(push_url, sheet_id, rows, clear, say):
             # Kept as diagnostic detail, deliberately not retried, because the
             # confirmation below decides whether it actually mattered.
             push_notes.append(f"clear row {row}: {note}")
-            say(f"  clearing row {row} reported {note!r} — the sheet decides")
+            say(f"  clearing row {row} reported {note!r}. The sheet decides")
     ok, note = _smoke_await_rows(sheet_id, {row: "" for row in clear}, "cleared")
     if not ok:
         return False, _smoke_note_with(note, push_notes), push_notes
@@ -7333,7 +7333,7 @@ def _smoke_write_schedule(push_url, sheet_id, rows, clear, say):
         ok, note = _smoke_push(push_url, row, url)
         if not ok:
             push_notes.append(f"write row {row}: {note}")
-            say(f"  write of row {row} reported {note!r} — the sheet decides")
+            say(f"  write of row {row} reported {note!r}. The sheet decides")
     ok, note = _smoke_await_rows(sheet_id, dict(rows), "written")
     if not ok:
         return False, _smoke_note_with(note, push_notes), push_notes
@@ -7351,7 +7351,7 @@ def _smoke_error_payload(exc):
 
     It answers a dead OBS with 503 + `{"error": "obs unavailable"}`, but urllib
     raises on 5xx, so without reading the body back the run only ever sees
-    "HTTP Error 503" — and `step_error_verdict` could not tell an unreachable OBS
+    "HTTP Error 503": and `step_error_verdict` could not tell an unreachable OBS
     (a machine fact) from a real failure."""
     try:
         payload = json.loads(exc.read().decode("utf-8"))
@@ -7384,7 +7384,7 @@ def _smoke_relay_post(path, body, timeout=20):
 def _smoke_program_audio_sample(want=16384, timeout=25):
     """A BOUNDED read of the endless MP3 stream: enough bytes to prove the real
     ffmpeg encoder produced frames, then disconnect. Reading to EOF would never
-    return, and `?probe=1` only reports that the endpoint exists — it explicitly
+    return, and `?probe=1` only reports that the endpoint exists. It explicitly
     does not start the encoder, which is the thing an ffmpeg major bump puts in
     doubt. Returns (bytes, note)."""
     url = f"http://127.0.0.1:{RELAY_PORT}/preview/program-audio"
@@ -7414,7 +7414,7 @@ def _smoke_wait_bytes(which, say):
 
 
 def _smoke_apply(step):
-    """Send one rundown step. Scene first, then visibility, then audio — the
+    """Send one rundown step. Scene first, then visibility, then audio. The
     order the panel's macros use. A relay-resolved SPLIT (#591) or STINT sends its
     sources as one call, like the panel and the Companion buttons."""
     if step.relay:
@@ -7445,7 +7445,7 @@ def _smoke_rundown(say):
     # call is skipped and the byte wait alone decides. See sm.arm_verdict.
     manual_arm = bool(_smoke_relay_get("status").get("manual_feed_arm"))
     if not manual_arm:
-        say("  note: manual feed arm is off — feeds self-arm, ARM steps skip the call")
+        say("  note: manual feed arm is off. Feeds self-arm, ARM steps skip the call")
     for i, step in enumerate(sm.RUNDOWN, start=1):
         name = f"step{i:02d}_{step.label.lower().replace(' ', '_')}"
         if step.label == "STINT A":
@@ -7456,7 +7456,7 @@ def _smoke_rundown(say):
         if isinstance(res, dict) and res.get("error"):
             status, note = sm.step_error_verdict(res["error"])
             results.append(sm.Result(name, status, note))
-            say(f"  {step.label}: {status} — {note}")
+            say(f"  {step.label}: {status}. {note}")
             continue
         if step.wait_for_bytes:
             which = "B" if "B" in step.label else "A"
@@ -7493,7 +7493,7 @@ def _smoke_rundown(say):
         bad = sm.state_mismatches(sm.expected_after(step, on_air), observed)
         results.append(sm.Result(name, sm.PASS if not bad else sm.FAIL,
                                  "; ".join(bad)[:200]))
-        say(f"  {step.label}: " + ("ok" if not bad else "MISMATCH — " + "; ".join(bad)))
+        say(f"  {step.label}: " + ("ok" if not bad else "MISMATCH. " + "; ".join(bad)))
     return results
 
 
@@ -7563,7 +7563,7 @@ def _smoke_minutes(rest):
 def _smoke_confirm(profile, rest):
     """The typed phrase names the profile on purpose: the accident this guards
     against is the right command in the WRONG league. There is deliberately no
-    --yes bypass — a bypass flag lands in a wrapper script and the guard becomes
+    --yes bypass: a bypass flag lands in a wrapper script and the guard becomes
     ceremony."""
     sm = _sm()
     phrase = sm.confirm_phrase(profile)
@@ -7578,11 +7578,11 @@ def _smoke_confirm(profile, rest):
     except (EOFError, KeyboardInterrupt):
         typed = ""
     if not sm.phrase_ok(profile, typed):
-        sys.exit("racecast: not confirmed — nothing was changed.")
+        sys.exit("racecast: not confirmed. Nothing was changed.")
 
 
 def smoketest_cmd(rest):
-    """`racecast smoketest` — post-update verification of the event core.
+    """`racecast smoketest`: post-update verification of the event core.
 
     Stands up a real event on the active profile with discovered live sources,
     drives the director rundown against it and asserts every step, then tears the
@@ -7605,12 +7605,12 @@ def smoketest_cmd(rest):
         # fallback name would let you confirm "CLEAR SCHEDULE default" while
         # standing in a real league, which is the exact accident being guarded
         # against. No resolvable profile, no run.
-        sys.exit("racecast: no active league profile — pick one with "
+        sys.exit("racecast: no active league profile. Pick one with "
                  "`racecast profile use <name>` or --profile NAME.")
     sheet_id = os.environ.get("RACECAST_SHEET_ID") or ""
     push_url = os.environ.get("RACECAST_SHEET_PUSH_URL") or ""
     if not push_url:
-        sys.exit("racecast: this profile has no SHEET_PUSH_URL — the smoke test "
+        sys.exit("racecast: this profile has no SHEET_PUSH_URL. The smoke test "
                  "needs the webhook to place its discovered streams "
                  "(wiki: Sheet-Webhook).")
     # Never probe outward while a broadcast is live: the run pulls real streams
@@ -7618,7 +7618,7 @@ def smoketest_cmd(rest):
     if "--force" not in rest and (_relay_is_alive()
                                   or glob.glob(os.path.join(_streams_static_dir(),
                                                             "feed_*.pid"))):
-        sys.exit("racecast: a relay or static streams are running — refusing "
+        sys.exit("racecast: a relay or static streams are running. Refusing "
                  "(this would pull streams and switch OBS). Use --force if you "
                  "are sure nothing is on air.")
     _smoke_confirm(profile, rest)
@@ -7627,10 +7627,10 @@ def smoketest_cmd(rest):
     # have its schedule cleared.
     if "--force" not in rest and _relay_is_alive():
         sys.exit("racecast: a relay came up while the confirmation was pending "
-                 "— refusing to touch the schedule.")
+                 "and this run refuses to touch the schedule.")
 
     results = []
-    say(f"\nSmoke test — profile '{profile}', {minutes} min observation\n")
+    say(f"\nSmoke test: profile '{profile}', {minutes} min observation\n")
     say("Toolchain")
     tools = _smoke_fingerprint()
     for name, ver in tools.items():
@@ -7647,9 +7647,9 @@ def smoketest_cmd(rest):
         # fails as "not available", a setup fact worth naming before the run
         # spends its three attempts discovering it the hard way.
         results.append(sm.Result("cookies", sm.severity_for("cookies", False),
-                                 "no YouTube cookie jar — resolves will hit the "
+                                 "no YouTube cookie jar. Resolves will hit the "
                                  "bot check (racecast cookies firefox)"))
-        say("  note: no yt-cookies.txt — YouTube candidates will not resolve")
+        say("  note: no yt-cookies.txt. YouTube candidates will not resolve")
     queries, categories = _smoke_vocab(sheet_id)
     yt_urls, tw_urls, attempted_yt = _smoke_discover(cookies, queries, categories, say)
     # Read this BEFORE the skip branch: when YouTube found nothing, the JS runtime
@@ -7722,7 +7722,7 @@ def smoketest_cmd(rest):
     except Exception:                            # noqa: BLE001  best effort
         funnel_was_off = False
     title = "Smoketest " + time.strftime("%Y-%m-%d %H:%M")
-    say(f"\nEvent — starting as {title!r}")
+    say(f"\nEvent: starting as {title!r}")
     # The teardown below is UNCONDITIONAL: `event start` brings services up one by
     # one and exits non-zero when its readiness report has a FAIL, so a partial
     # stack is already live by then. Arming it only on a successful bring-up would
@@ -7740,7 +7740,7 @@ def smoketest_cmd(rest):
                 aborted = str(exc.code)[:160] or "NOT READY"
         if aborted:
             results.append(sm.Result("event_start", sm.FAIL, aborted))
-            say("  event start reported NOT READY — skipping the rundown")
+            say("  event start reported NOT READY. Skipping the rundown")
         else:
             say("\nRundown")
             results += _smoke_rundown(say)
@@ -7749,7 +7749,7 @@ def smoketest_cmd(rest):
     finally:
         # An aborted run must never leave a live relay, an open Funnel or a
         # switched OBS behind.
-        say("\nEvent — stopping")
+        say("\nEvent: stopping")
         try:
             event_stop(["--no-report"] if "--no-report" in rest else [])
         except (Exception, SystemExit) as exc:   # noqa: BLE001  SystemExit incl.
@@ -7787,7 +7787,7 @@ def _smoke_finish(results, tools, sources, minutes, as_json, lines, cleared=None
     else:
         print("\nChecks")
         for r in results:
-            print(f"  [{r.severity}] {r.name}" + (f" — {r.note}" if r.note else ""))
+            print(f"  [{r.severity}] {r.name}" + (f": {r.note}" if r.note else ""))
         c = summary["counts"]
         print(f"\nSummary: {c[sm.FAIL]} FAIL, {c[sm.WARN]} WARN, {c[sm.SKIP]} SKIP, "
               f"{c[sm.PASS]} PASS  ->  {summary['verdict']}")

@@ -282,7 +282,7 @@ def t_committed_solo_json_matches_derive_output():
     for fn, want in expected.items():
         with open(os.path.join(ROOT, "src", "obs", fn), encoding="utf-8") as fh:
             got = json.load(fh)
-        assert got == want, f"{fn} diverged from derive() — regenerate with tools/derive-solo-templates.py"
+        assert got == want, f"{fn} diverged from derive(). Regenerate with tools/derive-solo-templates.py"
 
 
 def _byname_map(d):
