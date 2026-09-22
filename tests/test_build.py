@@ -8,9 +8,9 @@ import importlib.util, json, os, re
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 
-# Issue #291: the POV feed + all toggled still-graphics in the Stint scene carry
-# a baked-in 300 ms Fade show/hide transition, so on-air elements ease in/out
-# instead of cutting hard on every obs-websocket visibility toggle.
+# The POV feed and every toggled still-graphic in the Stint scene carry a baked-in
+# 300 ms Fade show/hide transition, so on-air elements ease in and out instead of
+# cutting hard on each obs-websocket visibility toggle. (#291)
 OBS_COLLECTION = os.path.join(ROOT, "src", "obs", "GT_Racing_Endurance.json")
 FADE_ITEMS = [
     "Feed POV", "Standby Cover", "Standings", "Schedule", "Race Results",
@@ -69,11 +69,9 @@ def _wholedir_copies(build_src):
 
 
 def t_every_served_html_page_is_shipped():
-    # Each relay/Control-Center-served .html must be copied into the dist package,
-    # or the distributed package 404s that page. Sibling of test_build_binary's
-    # t_every_served_html_dir_is_bundled (which guards the standalone binary).
-    # Regression for the #216/#236 console.html + buttons.html omission found in
-    # the #244 release test (and the original cockpit.html one).
+    # Each relay/Control-Center-served .html must be copied into the dist package, or
+    # the distributed package 404s that page. The standalone binary has its own guard
+    # in test_build_binary's t_every_served_html_dir_is_bundled.
     build_src = _build_src()
     wholedirs = _wholedir_copies(build_src)
     missing = []
@@ -88,7 +86,7 @@ def t_every_served_html_page_is_shipped():
 
 
 def t_console_pages_are_shipped():
-    # Explicit pins for the omission found in the #244 release test.
+    # Explicit pins for the two pages a release test found missing. (#244)
     build_src = _build_src()
     assert 'cp("console/console.html"' in build_src, "console.html not shipped"
     assert 'cp("console/buttons.html"' in build_src, "buttons.html not shipped"
@@ -137,12 +135,10 @@ def _all_groups(coll):
 
 
 def t_no_orphaned_group_item_backup():
-    # OBS sets group_item_backup=true only on a scene item that belongs to a
-    # GROUP (it is the backup of that group membership). When the group is
-    # absent, OBS treats the item as an orphaned group backup and DROPS it on
-    # import — the "Splitscreen Labels" CURRENT/NEXT labels silently vanished
-    # from a fresh import this way (it carried the flag but was never a member of
-    # the HUD group). Every flagged item must be a member of some group.
+    # OBS sets group_item_backup=true only on a scene item that belongs to a GROUP,
+    # as the backup of that membership. When the group is absent, OBS treats the item
+    # as an orphaned backup and DROPS it on import, so every flagged item must be a
+    # member of some group.
     coll, items = _all_scene_items()
     members = {m["name"] for g in _all_groups(coll)
                for m in g.get("settings", {}).get("items", [])}
@@ -153,8 +149,8 @@ def t_no_orphaned_group_item_backup():
         f"OBS drops these on import: {orphaned}")
 
 
-# The per-scene HUD groups (issue: separate Stint/Splitscreen groups so the
-# Splitscreen group can carry the CURRENT/NEXT labels and the Stint one cannot).
+# The per-scene HUD groups are separate so the Splitscreen group can carry the
+# CURRENT/NEXT labels and the Stint one cannot.
 HUD_GROUPS = {
     "Stint HUD": {"Overlay", "HUD Overlay"},
     "Split HUD": {"Overlay", "HUD Overlay", "Splitscreen Labels"},
@@ -184,8 +180,8 @@ def t_director_panel_targets_existing_hud_groups():
 
 
 def t_all_scene_and_group_items_locked():
-    # Every source is edit-locked in the shipped collection so a producer can't
-    # nudge a placed source by accident; adopted as the standard going forward.
+    # Every source is edit-locked in the shipped collection so a producer cannot
+    # nudge a placed source by accident.
     coll, items = _all_scene_items()
     unlocked = [f"{scene}/{it['name']}" for scene, it in items if not it.get("locked")]
     for g in _all_groups(coll):

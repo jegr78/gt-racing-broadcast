@@ -2,12 +2,9 @@
 """Stdlib checks for the shared process bootstrap that BOTH binaries must run.
 
 The `racecast` CLI (racecast.main) and the windowed `racecast-ui` launcher
-(racecast_ui.main) used to duplicate their startup sequence and drifted: the
-launcher first shipped without _ensure_tool_path (#46 — tools shown missing) and
-then without _apply_active_profile_env (#54 — the active profile's SHEET_ID was
-never injected, so preflight/asset checks read an empty env). These tests lock in
-that both entrypoints route through one _bootstrap, so a step can never be added
-to one and forgotten in the other again.
+(racecast_ui.main) each used to carry their own startup sequence and drifted apart
+(#46, #54). These tests lock in that both entrypoints route through one _bootstrap,
+so a step can never be added to one and forgotten in the other.
 
 Run: python3 tests/test_bootstrap.py
 """
@@ -55,8 +52,8 @@ def t_bootstrap_runs_every_startup_step_in_order():
 
 
 def t_bootstrap_injects_profile_env_after_path_setup():
-    # The regression for #54: _apply_active_profile_env (which needs SHEET_ID etc.)
-    # must run, and only AFTER the PATH/env setup it depends on.
+    # _apply_active_profile_env reads SHEET_ID, so it must run AFTER the PATH/env
+    # setup it depends on. (#54)
     monkey, calls = {}, []
     _stub_bootstrap_helpers(monkey, calls)
     try:
@@ -109,8 +106,8 @@ def t_cli_main_delegates_to_bootstrap():
 
 
 def t_ui_launcher_delegates_to_bootstrap():
-    # racecast_ui.main must run the SAME _bootstrap, then serve. This is the lock
-    # that keeps the windowed launcher from drifting from the CLI again.
+    # racecast_ui.main must run the SAME _bootstrap, then serve, so the windowed
+    # launcher cannot drift from the CLI.
     real_boot, real_run = rc._bootstrap, rc.run_ui
     seen = {}
     rc._bootstrap = lambda argv: seen.setdefault("boot", argv) or ["--no-browser"]

@@ -8,7 +8,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 import restart_soak as m   # noqa: E402
 
-RESERVE = 3.0              # RACECAST_FEED_PREBUFFER_S on the measured hosts
+RESERVE = 3.0              # RACECAST_FEED_PREBUFFER_S
 
 
 def _s(t, backlog=4.0, snaps=0):
@@ -19,9 +19,6 @@ def _run(pairs, snaps=0):
     return [_s(t, b, snaps) for t, b in pairs]
 
 
-# --------------------------------------------------------------------------
-# baseline: the floor, because the raw value is a sawtooth
-# --------------------------------------------------------------------------
 def t_baseline_is_the_floor_of_the_window_not_its_mean():
     # On 5 s HLS segments backlog_s saws between the reserve and the next segment; the
     # floor is the part a slow consumer pushes up (#583). A mean would import the saw.
@@ -33,15 +30,11 @@ def t_baseline_is_the_floor_of_the_window_not_its_mean():
     assert m.baseline_before([{"t": 1.0, "backlog_s": None}], 50.0) is None
 
 
-# --------------------------------------------------------------------------
 # one restart
-# --------------------------------------------------------------------------
 def t_baseline_does_not_reach_back_into_the_previous_restart():
-    # Found by a live two-minute-cadence run on the production host, not by reading code.
     # Right after a rejoin the backlog dips to 0.0: OBS sits at the live edge with
-    # nothing buffered yet. A 60 s floor that swallowed that dip called 0.0 the settled
-    # state, and then nothing could come back to "within one reserve of 0.0". The second
-    # restart was reported FAIL although it had recovered exactly like the first.
+    # nothing buffered yet. A 60 s floor that swallowed that dip would call 0.0 the
+    # settled state, and nothing could then come back within one reserve of it.
     after_a_restart = _run([(100, 0.0), (110, 1.8), (150, 2.4), (170, 2.5), (190, 2.6)])
     assert m.baseline_before(after_a_restart, 200.0) == 2.4, "unclamped, the dip is inside"
     assert m.baseline_before(after_a_restart, 200.0, not_before=160.0) == 2.5
@@ -56,9 +49,8 @@ def t_baseline_does_not_reach_back_into_the_previous_restart():
 def t_recovery_needs_the_backlog_to_STAY_down_not_just_touch_baseline():
     # Every fixture here runs to the end of restart + deadline, because the analysis
     # refuses to judge a window the run did not watch out.
-    # The failure this guards is the one #619 is about: a rejoin drops the backlog, and
-    # then it climbs again. A first-crossing test would call that a recovery and the
-    # soak would pass on exactly the shape it exists to catch.
+    # A rejoin drops the backlog and then it climbs again. A first-crossing test would
+    # call that a recovery, the exact shape the soak exists to catch. (#619)
     bounced = _run([(100, 4.0), (105, 30.0), (110, 4.5), (120, 12.0), (130, 20.0),
                     (150, 28.0), (160, 28.0)])
     peak, after, ok = m.recovery(bounced, 100.0, 4.0, RESERVE)
@@ -93,16 +85,13 @@ def t_recovery_allows_exactly_one_reserve_above_the_baseline():
     assert m.recovery(over, 100.0, 4.0, RESERVE)[2] is False
 
 
-# --------------------------------------------------------------------------
 # the whole run
-# --------------------------------------------------------------------------
 def t_drift_compares_two_halves_and_refuses_a_trend_from_two_points():
     def r(*vals):
         return [{"baseline_s": v} for v in vals]
     # backlog_s saws with the segment cadence, so two endpoints measure where the saw
-    # happened to be. A live five-minute run with two restarts reported 3.2 s of "drift"
-    # between baselines of 1.4 and 4.6, both the same healthy state. Two points are not
-    # a trend, so the amount is reported and the judgement is withheld.
+    # happened to be: baselines of 1.4 and 4.6 are the same healthy state, 3.2 s apart.
+    # Two points are not a trend, so the amount is reported and the judgement withheld.
     assert m.drift(r(1.4, 4.6), RESERVE) == (3.2, None)
     # Four points carry two halves, which is the fewest that can.
     assert m.drift(r(4.0, 4.2, 4.6, 5.0), RESERVE) == (0.7, True)
@@ -115,12 +104,10 @@ def t_drift_compares_two_halves_and_refuses_a_trend_from_two_points():
 
 
 def t_restart_observed_watches_the_state_age_not_the_state_string():
-    # The hole this closes: a soak that triggers nothing passes, because every window
-    # sits at its baseline. Feed.reload() kills the streamlink process today, so the
-    # request is a real restart; if that ever changes, the run must say UNKNOWN.
-    # The signal is state_age_s falling. A re-serve took 4.3 to 5.5 s on both measured
-    # hosts while the soak samples every 10 s, so the `connecting` state is easy to
-    # sample straight past; the age resets whatever the cadence.
+    # A soak that triggers nothing would otherwise pass, because every window sits at
+    # its baseline. The signal is state_age_s falling, not the state string: a re-serve
+    # takes 4.3 to 5.5 s while the soak samples every 10 s, so `connecting` is easy to
+    # sample straight past, while the age resets whatever the cadence.
     def a(*pairs):
         return [{"t": float(t), "age_s": age} for t, age in pairs]
     restarted = a((80, 300.0), (90, 310.0), (100, 2.0), (110, 12.0))
@@ -164,15 +151,13 @@ def t_verdict_fails_on_each_criterion_and_says_which():
 
 
 def t_verdict_of_an_empty_run_is_unknown_not_pass():
-    # The trap this closes: a soak whose relay was unreachable produces no samples, and
-    # "no failures found" would read as a clean night.
+    # A soak whose relay was unreachable produces no samples, and "no failures found"
+    # would read as a clean night.
     assert m.verdict(m.summarize([], [], RESERVE)) == ("UNKNOWN", ["nothing was measured"])
     assert m.verdict(m.summarize([], [100.0], None))[0] == "UNKNOWN"
 
 
-# --------------------------------------------------------------------------
 # the pure helpers the driver uses
-# --------------------------------------------------------------------------
 def t_sample_follows_the_on_air_feed_instead_of_a_pinned_one():
     # A handover or a takeover moves the on-air feed mid-run. Pinning A at the start
     # would quietly measure an idle feed for the rest of the soak, and an idle feed
@@ -217,14 +202,11 @@ def t_render_marks_a_restart_that_did_not_come_back():
 
 
 
-# --------------------------------------------------------------------------
 # what the analysis refuses to judge
-# --------------------------------------------------------------------------
 def t_recovery_excludes_the_sample_taken_before_the_reload():
-    # The driver samples and THEN reloads inside one cycle. If that sample carries
-    # t == restart_t it lands in the post-restart window, and "back after" is then read
-    # off a pre-restart reading: the live run reported tenths of a second that way.
-    # The window starts strictly after the restart.
+    # The driver samples and THEN reloads inside one cycle. A sample carrying
+    # t == restart_t would land in the post-restart window, so "back after" would be
+    # read off a pre-restart reading. The window starts strictly after the restart.
     rows = _run([(100, 1.4), (121, 1.4), (131, 4.4), (141, 2.0), (181, 1.5)])
     peak, after, ok = m.recovery(rows, 121.0, 1.4, RESERVE)
     assert peak == 4.4, peak
@@ -233,11 +215,9 @@ def t_recovery_excludes_the_sample_taken_before_the_reload():
 
 
 def t_recovery_refuses_to_judge_a_window_the_run_outlived():
-    # A restart fired in the last seconds of a soak is judged on whatever few samples
-    # remain. Measured both ways on the same shape: a false PASS when the spike fell
-    # between two samples, and a false FAIL on five seconds of evidence. Neither is an
-    # answer. The rule is untuned: judge only a window the run actually watched to its
-    # end.
+    # A restart fired in the last seconds of a soak would be judged on whatever few
+    # samples remain: a false PASS when the spike falls between two of them, a false
+    # FAIL on five seconds of evidence. Judge only a window the run watched to its end.
     quiet = _run([(7180, 1.4), (7195, 1.5)])
     assert m.recovery(quiet, 7190.0, 1.4, RESERVE) == (1.5, None, None)
     spiked = _run([(7180, 1.4), (7195, 25.0)])
@@ -248,10 +228,8 @@ def t_recovery_refuses_to_judge_a_window_the_run_outlived():
 
 
 def t_verdict_is_unknown_when_a_window_could_not_be_judged():
-    # verdict() used to set judged=True on the first graded restart, so a run could
-    # report PASS with most of its windows at n/a. Measured: restarts spaced closer than
-    # the deadline run into the not_before clamp, get no baseline, and three restarts
-    # produced one grade and a PASS.
+    # Restarts spaced closer than the deadline run into the not_before clamp and get
+    # no baseline, so a run must not report PASS off the one window it could grade.
     close = [{"t": float(t), "backlog_s": 4.0, "snaps": 0,
               "age_s": 2.0 if t in (100, 145, 190) else 200.0 + t}
              for t in range(0, 400, 10)]
@@ -274,9 +252,8 @@ def t_verdict_is_unknown_when_a_window_could_not_be_judged():
 
 
 def t_sample_can_pin_a_feed_instead_of_following_the_on_air_one():
-    # --feed pinned the /reload target but not the sample, so the restarts hit one feed
-    # while the numbers came from another: state_age_s never fell and the run reported
-    # UNKNOWN with the wrong reason.
+    # --feed must pin the sample as well as the /reload target, or the restarts hit one
+    # feed while the numbers come from another and state_age_s never falls.
     st = {"live": {"feed": "B"},
           "feeds": {"A": {"state": "serving", "backlog_s": 9.9, "consumer_snaps": 1},
                     "B": {"state": "serving", "backlog_s": 4.2, "consumer_snaps": 0}}}
@@ -295,8 +272,8 @@ def t_render_says_a_peak_that_never_left_the_band_instead_of_a_near_zero():
 
 
 def t_replay_splits_a_jsonl_into_samples_and_restart_times():
-    # Hours of samples on disk were unreadable: the file never recorded WHEN a restart
-    # happened, so the analysis could not be reproduced from it.
+    # The recording must carry WHEN a restart happened, or the analysis cannot be
+    # reproduced from the file.
     rows = [{"t": 0.0, "backlog_s": 4.0}, {"t": 10.0, "error": "URLError: x"},
             {"t": 100.0, "event": "restart"}, {"t": 110.0, "backlog_s": 20.0}]
     samples, restarts = m.split_replay(rows)
@@ -307,8 +284,8 @@ def t_replay_splits_a_jsonl_into_samples_and_restart_times():
 
 def t_reload_path_quotes_the_feed_name():
     # The name comes from a flag or from the relay's own /status. A stray space alone
-    # makes http.client raise InvalidURL, which derives from Exception and used to kill
-    # a run outright; a ? or # would silently change which endpoint is hit.
+    # makes http.client raise InvalidURL, which derives from Exception and kills a run
+    # outright; a ? or # would silently change which endpoint is hit.
     assert m.reload_path("A") == "/reload/A"
     assert m.reload_path("A B") == "/reload/A%20B"
     assert m.reload_path("x?y#z") == "/reload/x%3Fy%23z"
@@ -325,11 +302,10 @@ def t_planned_restarts_counts_only_the_windows_a_run_can_watch_out():
 
 
 def t_next_restart_is_on_the_clock_the_loop_reads_not_the_recorded_offset():
-    # A restart is RECORDED relative to t0 so a recording can be replayed; the loop
-    # GATES on the raw monotonic clock. Adding the interval to the relative value gave
-    # a number near 1800 while the clock read six figures, so every following sample was
-    # overdue: a one-hour soak fired 257 restarts, one per sample, instead of three.
-    # Measured on the live run of 2026-09-20 before the fix.
+    # A restart is RECORDED relative to t0 so a recording can be replayed, but the loop
+    # GATES on the raw monotonic clock. Adding the interval to the relative value gives
+    # a number near 1800 while the clock reads six figures, so every following sample is
+    # overdue and the soak fires one restart per sample.
     t0 = 918_273.4                      # what time.monotonic() actually looks like
     assert m.next_restart_at(t0, 901.0, 900.0) == t0 + 1801.0
     # The trap: at t0 = 0 the buggy form and the correct one agree, so a test anchored
@@ -338,9 +314,8 @@ def t_next_restart_is_on_the_clock_the_loop_reads_not_the_recorded_offset():
 
 
 def t_the_driver_fires_one_restart_per_interval_not_one_per_sample():
-    # The loop itself was never exercised, which is how the unit mix-up shipped. Drive
-    # it with a fake clock and relay, and count. This is the regression that fails if
-    # next_restart is ever compared against the wrong clock again.
+    # Drive the loop with a fake clock and relay and count the restarts; this fails if
+    # next_restart is ever compared against the wrong clock.
     import importlib.util, json, tempfile
     spec = importlib.util.spec_from_file_location(
         "soak_driver", os.path.join(ROOT, "tools", "relay-restart-soak.py"))

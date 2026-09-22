@@ -3,9 +3,9 @@
 import importlib.util, json, os, tempfile, time
 import threading, urllib.request, urllib.error
 
-# Default flipped to manual-arm ON (#492 follow-up). These relay tests exercise the
-# legacy auto-pull machinery (index/dedup/qualifying); pin them to the opt-out path so
-# they stay focused. Tests that need manual mode set r.manual_feed_arm/paused explicitly.
+# Manual-arm is ON by default (#492). These tests exercise the legacy auto-pull
+# machinery (index/dedup/qualifying), so they pin the opt-out path. A test that needs
+# manual mode sets r.manual_feed_arm/paused explicitly.
 os.environ.setdefault("RACECAST_MANUAL_FEED_ARM", "0")
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -39,7 +39,7 @@ def _serve(relay):
 def t_benign_client_disconnect_classifies_aborts():
     # A browser source / panel tab that closes mid-response trips one of these;
     # they are the client's doing, never a relay fault, so they must be swallowed
-    # (ConnectionAbortedError == WinError 10053 from issue #25).
+    # (ConnectionAbortedError is WinError 10053, #25).
     assert m._benign_client_disconnect(ConnectionAbortedError())
     assert m._benign_client_disconnect(ConnectionResetError())
     assert m._benign_client_disconnect(BrokenPipeError())
@@ -51,7 +51,7 @@ def t_benign_client_disconnect_classifies_aborts():
 
 def t_no_window_kwargs_per_os():
     # The relay daemon runs DETACHED (no console), so its yt-dlp/streamlink/
-    # tailscale children would each pop a terminal window on Windows (issue #30).
+    # tailscale children would each pop a terminal window on Windows (#30).
     # CREATE_NO_WINDOW only on Windows; a no-op (empty kwargs) everywhere else so
     # the same spawn site stays cross-platform.
     assert m._no_window_kwargs("nt") == {"creationflags": 0x08000000}
@@ -109,8 +109,9 @@ def t_feed_has_fmt_attr():
 
 
 def t_feed_fast_exit_error_flags_immediate_bind_failure():
-    # #143: streamlink that dies almost instantly with a non-zero code = a failed
-    # --player-external-http bind (orphan holds the port). Surface it as last_error.
+    # A streamlink that dies almost instantly with a non-zero code is a failed
+    # --player-external-http bind, where an orphan holds the port. Surface it as
+    # last_error. (#143)
     msg = m.feed_fast_exit_error(0.2, 1)
     assert msg and "port in use" in msg
 
@@ -125,7 +126,7 @@ def t_feed_fast_exit_error_ignores_clean_and_long_exits():
 
 def t_status_surfaces_feed_last_error():
     # Once Feed.last_error is set, /status (per-feed payload) shows it so the panel
-    # stops displaying a silent 'connecting' (the #133 mystery).
+    # stops displaying a silent 'connecting'. (#133)
     r = _relay(["a", "b"])
     r.A.last_error = m.feed_fast_exit_error(0.2, 1)
     assert r.status()["feeds"]["A"]["last_error"] == "feed exited immediately — port in use? see feed log"
@@ -143,7 +144,7 @@ def t_status_exposes_feed_source_state():
 
 def t_serve_exit_is_drop():
     # A serving feed's process exited. It's an unexpected DROP (lost live picture)
-    # only when the exit was NOT intentional — not a relay stop, not a handover/
+    # only when the exit was NOT intentional: not a relay stop, not a handover or
     # reload (advance). This keeps the panel alert off during normal handovers.
     assert m.serve_exit_is_drop(stopped=False, advancing=False) is True
     assert m.serve_exit_is_drop(stopped=True, advancing=False) is False   # relay stopping
@@ -438,9 +439,9 @@ def t_back_to_back_manual_arm_full_sequence():
     # The DEFAULT workflow (manual feed arm ON): director arms the incoming feed,
     # then /next. Scenario: stint 1 = K1 (uA); stints 2 AND 3 = K2 on ONE stream
     # (uB, back-to-back); stint 4 = K4 (uD). Walk the whole sequence asserting the
-    # ARM state (paused) of BOTH feeds at every step — the same-URL continuation
-    # must be a pure label advance that touches NO feed (no arm, no stop, no cut),
-    # so only ONE feed ever pulls uB (the #491/#505 single-puller invariant).
+    # ARM state (paused) of BOTH feeds at every step. The same-URL continuation must
+    # be a pure label advance that touches NO feed (no arm, no stop, no cut), so only
+    # ONE feed ever pulls uB. (#491, #505)
     rows = [("uA", "K1", "Stint 1", 1), ("uB", "K2", "Stint 2", 2),
             ("uB", "K2", "Stint 3", 3), ("uD", "K4", "Stint 4", 4)]
     r = m.Relay(_StubSource(["uA", "uB", "uB", "uD"], rows), (53001, 53002), LOGDIR)
@@ -453,12 +454,12 @@ def t_back_to_back_manual_arm_full_sequence():
     assert r.on_air_row_idx() == 0 and r.live_feed() == "A"
     assert r.A.current_channel() == (None, 0)     # disarmed -> no pull, even with a URL present
 
-    # --- Stint 1 goes live: director ARMS Feed A --------------------------------
+    # Stint 1 goes live: the director ARMS Feed A.
     r.A.paused = False; r.A.phase = "serving"
     assert r.A.current_channel() == ("uA", 0)
     assert r.B.current_channel() == (None, 1)     # B still disarmed -> no second pull
 
-    # --- Handover stint 1 -> 2 (real, different URL): arm B, then /next ----------
+    # Handover stint 1 -> 2 (real, different URL): arm B, then /next.
     r.B.paused = False; r.B.phase = "serving"     # pre-roll uB on the off-air feed
     out1 = r.next_auto()
     assert out1["continuation"] is False and out1["obs_cut"] is True
@@ -468,8 +469,8 @@ def t_back_to_back_manual_arm_full_sequence():
     assert r.B.paused is False and r.B.current_channel() == ("uB", 1)
     assert r.A.current_channel() == (None, 3)     # disarmed -> no pull (single puller: only B on uB)
 
-    # --- Continuation stint 2 -> 3 (SAME URL): director just presses /next -------
-    # No arm, no stop, no cut — the LABEL advances and BOTH feeds are untouched.
+    # Continuation stint 2 -> 3 (SAME URL): the director just presses /next.
+    # No arm, no stop, no cut: the LABEL advances and BOTH feeds are untouched.
     out2 = r.next_auto()
     assert out2["continuation"] is True and out2["obs_cut"] is False
     assert r.on_air_row_idx() == 2 and r.live_feed() == "B"
@@ -477,7 +478,7 @@ def t_back_to_back_manual_arm_full_sequence():
     assert r.A.paused is True and r.A.idx == 3     # freed A stays disarmed & parked on uD
     assert r.live_schedule_row() == {"streamer": "K2", "stint": "Stint 3"}
 
-    # --- Handover stint 3 -> 4 (real, different URL): arm A (already on uD), /next
+    # Handover stint 3 -> 4 (real, different URL): arm A (already on uD), then /next.
     r.A.paused = False; r.A.phase = "serving"      # arm A on its parked uD slot
     out3 = r.next_auto()
     assert out3["continuation"] is False and out3["obs_cut"] is True
@@ -491,9 +492,9 @@ def t_back_to_back_manual_arm_full_sequence():
 def t_back_to_back_leading_manual_arm_no_predecessor():
     # LEADING back-to-back: stints 1 AND 2 share ONE stream (uA, same commentator)
     # right at the start. The very first /next therefore has NO predecessor feed to
-    # stop — and because it is a same-URL continuation it never even reaches the
-    # handover/STOP branch. This asserts nothing breaks: the first /next is a pure
-    # label advance, and the off-air feed is slot-parked past the uA run from t=0.
+    # stop, and because it is a same-URL continuation it never even reaches the
+    # handover/STOP branch. Nothing breaks: the first /next is a pure label advance,
+    # and the off-air feed is slot-parked past the uA run from t=0.
     rows = [("uA", "K1", "Stint 1", 1), ("uA", "K1", "Stint 2", 2),
             ("uC", "K3", "Stint 3", 3), ("uD", "K4", "Stint 4", 4)]
     r = m.Relay(_StubSource(["uA", "uA", "uC", "uD"], rows), (53001, 53002), LOGDIR)
@@ -511,7 +512,7 @@ def t_back_to_back_leading_manual_arm_no_predecessor():
     assert r.A.current_channel() == ("uA", 0)
     assert r.B.current_channel() == (None, 2)     # B disarmed, parked on uC
 
-    # --- First /next: stint 1 -> 2 is a CONTINUATION (same uA) ------------------
+    # First /next: stint 1 -> 2 is a CONTINUATION (same uA).
     # No predecessor to stop, no cut, no feed touched: it returns before the branch
     # that would ever call STOP. The "STOP finds nothing" case simply never runs.
     out1 = r.next_auto()
@@ -521,7 +522,7 @@ def t_back_to_back_leading_manual_arm_no_predecessor():
     assert r.B.paused is True and r.B.idx == 2     # untouched, still parked on uC
     assert r.live_schedule_row() == {"streamer": "K1", "stint": "Stint 2"}
 
-    # --- Second /next: stint 2 -> 3 (real handover, uA -> uC): NOW arm B + cut ---
+    # Second /next: stint 2 -> 3 (real handover, uA -> uC): NOW arm B and cut.
     r.B.paused = False; r.B.phase = "serving"
     out2 = r.next_auto()
     assert out2["continuation"] is False and out2["obs_cut"] is True
@@ -533,10 +534,9 @@ def t_back_to_back_leading_manual_arm_no_predecessor():
 
 
 def t_next_auto_real_handover_stop_freed_never_armed_is_noop():
-    # Robustness for the general case: even a REAL handover where the freed feed was
-    # never armed/serving must not break — STOP just disarms it and reload()->
-    # _kill_proc() is a no-op when there is no process. (All-distinct URLs, no
-    # continuation involved.)
+    # Even a REAL handover where the freed feed was never armed or serving must not
+    # break: STOP just disarms it, and reload() -> _kill_proc() is a no-op when there
+    # is no process. All URLs distinct, no continuation involved.
     rows = [("s1", "A", "Stint 1", 1), ("s2", "B", "Stint 2", 2),
             ("s3", "C", "Stint 3", 3), ("s4", "D", "Stint 4", 4)]
     r = m.Relay(_StubSource(["s1", "s2", "s3", "s4"], rows), (53001, 53002), LOGDIR)
@@ -558,8 +558,8 @@ def t_status_live_stint_reports_display_row_on_continuation():
     assert r.status()["live"]["stint"] == r.on_air_row_idx() + 1 == 2
 
     # Back-to-back continuation: the DISPLAY stint is one ahead of the still-parked
-    # physical pull — /status must report the display stint (issue: takeover/health
-    # monitor must not resume/show one stint behind).
+    # physical pull, and /status must report the display stint so a takeover or the
+    # health monitor does not resume one stint behind.
     rows = [("uA", "A", "Stint 1", 1), ("uB", "B", "Stint 2", 2),
             ("uB", "B", "Stint 3", 3), ("uD", "D", "Stint 4", 4)]
     rc = m.Relay(_StubSource(["uA", "uB", "uB", "uD"], rows), (53001, 53002), LOGDIR)
@@ -593,8 +593,8 @@ def t_health_snapshot_live_stint_is_display_row_on_continuation():
 
 def t_should_push_live_schedule_fires_on_cut_or_continuation():
     # A real cut (obs_cut) always advances the HUD label; a same-URL continuation
-    # advances the DISPLAY stint without a cut, so the HUD must advance too — only
-    # a plain idle over-press (neither) must be a no-op.
+    # advances the DISPLAY stint without a cut, so the HUD must advance too. Only a
+    # plain idle over-press, neither of the two, is a no-op.
     assert m.should_push_live_schedule({"obs_cut": True})
     assert m.should_push_live_schedule({"continuation": True, "obs_cut": False})
     assert not m.should_push_live_schedule({"obs_cut": False})
@@ -845,10 +845,10 @@ def t_director_panel_has_stream_button():
 
 def t_director_panel_chat_rail_fixed_height():
     # The desktop right-rail stacks the crew chat over the read-only broadcast chat.
-    # Both logs must have a *fixed* height (so the crew box never grows with messages
-    # and pushes into the broadcast box), and the two boxes must not flex-shrink
-    # (shrinking made the crew box spill its content over the broadcast box). Two
-    # 38vh logs + chrome also overflowed the rail and produced a second scrollbar.
+    # Both logs need a fixed height so the crew box cannot grow with messages and push
+    # into the broadcast box, and neither box may flex-shrink or the crew box spills
+    # over the broadcast one. Two 38vh logs plus chrome overflow the rail and produce a
+    # second scrollbar.
     path = os.path.join(ROOT, "src", "director", "director-panel.html")
     with open(path, encoding="utf-8") as fh:
         html = fh.read()
@@ -910,8 +910,8 @@ def t_preview_feed_onair_uses_obs_not_grab():
 
 def t_preview_feed_offair_uses_grab_not_obs():
     # Off-air feed, DIRECT-SERVE mode (fan-out off): PreviewManager uses the pull
-    # worker (not OBS); worker returns a frame. (Fan-out on routes to the ring tap —
-    # preview_source routing is covered in test_feed_preview.py.)
+    # worker (not OBS); worker returns a frame. Fan-out on routes to the ring tap, and
+    # preview_source routing is covered in test_feed_preview.py.
     import logging
     r = m.Relay(_FakeSource(_URLS8), [53001, 53002], LOGDIR)   # B off air (idx 1)
     r.fanout = False                                           # pin the direct-serve pull path
@@ -939,7 +939,8 @@ def t_preview_feed_offair_uses_grab_not_obs():
 
 
 def t_preview_feed_pov_paused_is_503():
-    # No POV configured: preview_source returns placeholder → still() → (None, "pov off") → 503.
+    # No POV configured: preview_source returns placeholder -> still() -> (None,
+    # "pov off") -> 503.
     import logging
     r = m.Relay(_FakeSource(_URLS8), [53001, 53002], LOGDIR)   # no POV configured
     lg = logging.getLogger("test.pov.pov"); lg.addHandler(logging.NullHandler())
@@ -1009,7 +1010,7 @@ def t_preview_feed_grab_failure_is_503():
 
 def t_aggregate_stream_not_active_is_red():
     # Off-air only escalates once OBS has streamed at least once (stream_expected
-    # latch) — a live broadcast that drops off air pages.
+    # latch), so a live broadcast that drops off air pages.
     h = m.aggregate_health({"obs_reachable": True, "stream_active": False,
                             "stream_expected": True})
     assert h["level"] == "red"
@@ -1051,7 +1052,7 @@ def t_parse_stream_quality():
 
 
 def t_parse_ytdlp_quality():
-    # yt-dlp `--print "rcq %(height)s %(fps)s"` output (verified shape: rcq line, then the -g URL).
+    # yt-dlp `--print "rcq %(height)s %(fps)s"` output: the rcq line, then the -g URL.
     assert m.parse_ytdlp_quality("rcq 854 30.0\nhttps://manifest.googlevideo.com/x") == "854p30"
     assert m.parse_ytdlp_quality("rcq 1080 60.0") == "1080p60"
     assert m.parse_ytdlp_quality("rcq 720 60") == "720p60"
@@ -1109,7 +1110,7 @@ def t_sample_connectivity_sets_state_and_expected():
 
 
 def _make_min_relay():
-    """Minimal Relay for snapshot/facts tests — two stints, temp log dir."""
+    """Minimal Relay for snapshot/facts tests: two stints, temp log dir."""
     return m.Relay(_FakeSource(_URLS8), [53001, 53002], LOGDIR)
 
 
@@ -1122,8 +1123,9 @@ def t_health_snapshot_carries_desync_active():
 
 
 def t_record_render_counts_only_records():
-    # #582: the render-skip rate is a diagnostic. The heartbeat advances the counts the
+    # The render-skip rate is a diagnostic. The heartbeat advances the counts the
     # health chart derives the per-interval rate from, and never rebuilds anything.
+    # (#582)
     r = _make_min_relay()
     calls = []
     r.feeds[r.live_feed()]._obs_reconnect = lambda: calls.append(1)
@@ -1172,9 +1174,9 @@ def _freeze_relay():
 
 
 def t_freeze_tick_stands_down_after_three_ineffective_rebuilds():
-    # #582, the 2026-08-28 shape: OBS stays stalled whatever the relay does. Before the
-    # guard every window rebuilt the input again (26 black dropouts in 56 minutes). Now
-    # three ineffective rebuilds stand the automation down with an honest yellow.
+    # OBS stays stalled whatever the relay does. Without the guard every window
+    # rebuilds the input again; three ineffective rebuilds now stand the automation
+    # down with a yellow. (#582)
     old = m._obs_ws; m._obs_ws = object()
     try:
         r, obs, rebuilds = _freeze_relay()
@@ -1282,8 +1284,8 @@ def t_rebuild_rearm_endpoint_lifts_the_stand_down():
 
 
 def t_consumer_overflow_is_recorded_never_acted_on():
-    # #582: a ring lap under OBS (a cursor snap) is an incident record for the health
-    # history and the report. It no longer rebuilds the input.
+    # A ring lap under OBS (a cursor snap) is an incident record for the health history
+    # and the report; it does not rebuild the input. (#582)
     r, obs, rebuilds = _freeze_relay()
 
     class _Srv:
@@ -1302,8 +1304,8 @@ def t_consumer_overflow_is_recorded_never_acted_on():
 
 
 def t_health_snapshot_carries_render_skip_rate():
-    # #488: the per-interval render-skip rate (delta, not the flat cumulative pct) is written
-    # into the health snapshot for the Health-Monitor chart + box-event validation.
+    # The per-interval render-skip rate, a delta rather than the flat cumulative pct,
+    # goes into the health snapshot for the Health-Monitor chart. (#488)
     r = _make_min_relay()
     r._prev_render_counts = None
     r.obs_stats = {"obs_render_skipped_frames": 10, "obs_render_total_frames": 1000}
@@ -1314,7 +1316,8 @@ def t_health_snapshot_carries_render_skip_rate():
 
 
 def t_health_snapshot_carries_configured_fps():
-    # #586: the configured frame rate is recorded next to obs_fps, so the report can flag it.
+    # The configured frame rate is recorded next to obs_fps, so the report can flag it.
+    # (#586)
     r = _make_min_relay()
     r.obs_stats = {"obs_fps": 45.8, "obs_fps_target": 60.0}
     snap = r._health_snapshot(1.0)
@@ -1359,7 +1362,7 @@ def t_health_facts_gate_funnel_and_push():
 def t_health_facts_stream_expected_gates_off_air():
     # _health_facts must propagate the stream_expected latch (off until OBS has
     # streamed, then on). The aggregate LEVEL mapping is covered by the
-    # t_aggregate_stream_not_active_* tests with EXPLICIT facts — we don't assert it
+    # t_aggregate_stream_not_active_* tests with EXPLICIT facts. It is not asserted
     # via _health_facts here, because _health_facts also samples ambient signals
     # (tailscale_present etc.) that would make a level assertion env-dependent.
     relay = _make_min_relay()
@@ -1510,14 +1513,14 @@ def t_latest_and_annotate_substitution():
 
 def t_should_obs_reconnect_on_fanout_drop_or_attached_consumer():
     # OBS reconnect fires only in fan-out mode, and there on a real drop OR whenever a
-    # consumer is still attached to this feed's ring — a restart under an attached
-    # consumer splices the new stream into OBS's open demuxer (#614).
+    # consumer is still attached to this feed's ring: a restart under an attached
+    # consumer splices the new stream into OBS's open demuxer. (#614)
     assert m.should_obs_reconnect(True, True) is True       # fan-out + drop-recovery
     assert m.should_obs_reconnect(True, False) is False     # fan-out, first serve / off-air handover
     assert m.should_obs_reconnect(False, True) is False     # direct-serve: OBS reconnects itself
     assert m.should_obs_reconnect(False, False) is False
-    # #614: a director restart in place (/reload, tier change) and a single-feed
-    # advance (solo/qualifying) leave dropped=False while OBS keeps reading.
+    # A director restart in place (/reload, tier change) and a single-feed advance
+    # (solo/qualifying) leave dropped=False while OBS keeps reading. (#614)
     assert m.should_obs_reconnect(True, False, True) is True
     assert m.should_obs_reconnect(True, True, True) is True
     # No consumer attached (the ping-pong's off-air feed) stays seamless.
@@ -1550,7 +1553,7 @@ def t_feed_consumer_attached_reads_the_fanout_server():
 def t_obs_rejoin_hook_covers_the_director_restart_paths():
     # The serve loop's on_first_byte hook, driven exactly as Feed.run drives it. A
     # /reload or a tier change clears `dropped` (both call _clear_drop_health), so
-    # before #614 these restarts handed OBS no hook at all.
+    # without this hook these restarts hand OBS nothing. (#614)
     class _Srv:
         def __init__(self, stuck): self._stuck = stuck
         def consumer_health(self, now): return self._stuck, 0
@@ -1565,8 +1568,8 @@ def t_obs_rejoin_hook_covers_the_director_restart_paths():
     assert f._obs_rejoin_hook(m.STREAMLINK_SERVE) is None      # handover stays seamless
     f.dropped = True
     assert f._obs_rejoin_hook(m.STREAMLINK_SERVE) is not None  # drop-recovery, unchanged
-    # Direct-serve (no ring): OBS holds the socket to streamlink and reconnects itself —
-    # rebuilding its input there would be a flicker for nothing.
+    # Direct-serve (no ring): OBS holds the socket to streamlink and reconnects itself,
+    # so rebuilding its input there would be a flicker for nothing.
     f.ring = None
     f.fanout_server = _Srv(0.0)
     assert f._obs_rejoin_hook(m.STREAMLINK_SERVE) is None
@@ -1611,7 +1614,7 @@ def t_prefetch_land_s_is_derived_from_the_burst_and_the_prebuffer():
     # The wait is not a tuned number: the ring's index is byte ARRIVAL time and OBS joins
     # at trailing_offset(prebuffer_s), so the join clears the burst only once the burst is
     # older than prebuffer_s. Both inputs move in production, and a fixed value gets both
-    # wrong — a flat 5 s was ~3 s short for ROBUST (measured 2026-09-20).
+    # wrong: a flat 5 s is about 3 s short for ROBUST.
     assert m.prefetch_land_s(4, 3.0) == 4 * m.SEGMENT_FETCH_BUDGET_S + 3.0   # YouTube FULL
     assert m.prefetch_land_s(6, 3.0) == 6 * m.SEGMENT_FETCH_BUDGET_S + 3.0   # YouTube ROBUST
     assert m.prefetch_land_s(2, 3.0) == 2 * m.SEGMENT_FETCH_BUDGET_S + 3.0   # Twitch
@@ -1624,7 +1627,7 @@ def t_prefetch_land_s_is_derived_from_the_burst_and_the_prebuffer():
     assert m.prefetch_land_s(0, 3.0) == 0.0
     assert m.prefetch_land_s(-1, 3.0) == 0.0
     # Every measured worst case must fit inside the ceiling's per-segment budget
-    # (2026-09-20, YouTube and Twitch, FULL and ROBUST — see SEGMENT_FETCH_BUDGET_S).
+    # (YouTube and Twitch, FULL and ROBUST; see SEGMENT_FETCH_BUDGET_S).
     for burst, segments in ((1.82, 4), (4.96, 6), (0.69, 2), (1.80, 2)):
         assert burst / segments <= m.SEGMENT_FETCH_BUDGET_S, (burst, segments)
     # And the burst-end detector's threshold must sit between the gaps INSIDE a burst
@@ -1633,9 +1636,9 @@ def t_prefetch_land_s_is_derived_from_the_burst_and_the_prebuffer():
 
 
 def t_serve_flags_is_the_single_source_for_a_serves_flags():
-    # One place decides which flag set a serve runs with. Before this, the two command
-    # builders and the rejoin's wait each branched on the platform themselves, and only
-    # the wait's drift would have been silent (a wrong wait makes backlog, not an error).
+    # One place decides which flag set a serve runs with. If the two command builders
+    # and the rejoin's wait each branched on the platform, the wait's drift would be
+    # the silent one: a wrong wait makes backlog, not an error.
     assert m.serve_flags("youtube", "full") == m.STREAMLINK_SERVE
     assert m.serve_flags("youtube", "robust") == m.STREAMLINK_SERVE_ROBUST
     assert m.serve_flags("youtube", "emergency") == m.STREAMLINK_SERVE_ROBUST
@@ -1677,11 +1680,11 @@ def _serving(feed, backlog=1.0):
 
 
 def t_status_publishes_the_inbound_gap_without_stealing_the_heartbeat_reset():
-    # #535's inbound max gap only ever reached health-history.db, so `racecast obs
-    # benchmark`, which polls /status, could not record it through a scripted restart
-    # (#619 step 2). It is now published, but from the HEARTBEAT's last reading and never
-    # by calling take_max_inbound_gap(): that read resets the accumulator, and a 2 s
-    # /status poll would swallow the interval the heartbeat is about to classify.
+    # The inbound max gap (#535) is published on /status so `racecast obs benchmark`
+    # can record it through a scripted restart, but from the HEARTBEAT's last reading
+    # and never by calling take_max_inbound_gap(): that read resets the accumulator,
+    # and a 2 s /status poll would swallow the interval the heartbeat is about to
+    # classify.
     r = _relay(["s1", "s2"])
     _serving(r.A)                                  # only a serving feed has a reading
     _serving(r.B)
@@ -1702,11 +1705,10 @@ def t_status_publishes_the_inbound_gap_while_obs_is_detached():
     # The gap is measured on the SOURCE side, by the fan-out read loop. Whether a
     # consumer happens to be attached says nothing about it, and OBS detaches on every
     # source rebuild, which is exactly what the #614 rejoin does after a restart. Gating
-    # this on consumer_backlog() (which answers None with nobody attached) would blank a
-    # valid reading precisely then, and `obs benchmark`'s guard against the inherited
-    # reading skips a LEADING run: a run of Nones lets the pre-restart value through as
-    # if it had been measured in-window. Measured before the fix: a window of
-    # [None, None, None, 9.0, 9.0, 9.0, 0.4, 0.4, 1.2] reported 9.0 instead of 1.2.
+    # this on consumer_backlog(), which answers None with nobody attached, would blank
+    # a valid reading precisely then, and `obs benchmark`'s guard against the inherited
+    # reading skips a LEADING run, so a run of Nones would let the pre-restart value
+    # through as if it had been measured in-window.
     r = _relay(["s1", "s2"])
     _serving(r.A, backlog=None)                    # serving, fanned out, nobody attached
     r._served_max_gaps = {"A": 7.3}
@@ -1785,7 +1787,7 @@ def t_live_edge_segments_reads_the_relays_own_serve_flags():
 def t_rejoin_is_stale_when_its_serve_was_superseded():
     # The rejoin is scheduled at the first byte and fires one derived wait later.
     # If a second restart happened in between, rebuilding would drop OBS onto the NEWEST
-    # serve's burst — the exact backlog the wait exists to avoid.
+    # serve's burst, the exact backlog the wait exists to avoid.
     assert m.rejoin_is_stale(False, False, 4, 4) is False    # same serve: fire
     assert m.rejoin_is_stale(False, False, 4, 5) is True     # another serve took over
     assert m.rejoin_is_stale(True, False, 4, 4) is True      # feed stopping
@@ -1826,8 +1828,8 @@ def t_obs_rejoin_hook_derives_the_wait_from_this_serves_flags():
     seen.clear()
     f._obs_rejoin_hook(m.STREAMLINK_SERVE)()
     assert seen == [4 * b + 8.0], seen
-    # A server that cannot say falls back to the documented default, never to 0 — 0 is
-    # the one value that makes the derived wait wrong instead of conservative.
+    # A server that cannot say falls back to the documented default, never to 0, the
+    # one value that makes the derived wait wrong instead of conservative.
     class _NoPrebuffer:
         def consumer_health(self, now): return 0.0, 0
     f.fanout_server = _NoPrebuffer()
@@ -1872,7 +1874,7 @@ def t_prefetch_rejoin_measures_the_burst_instead_of_predicting_it():
     # The burst's arrival span is a download duration (downlink, source bitrate, CDN), so
     # a constant measured on one machine is wrong on every other. It is measured per
     # serve: the first BURST_IDLE_S without a byte ends the burst, and only then does the
-    # prebuffer wait start — a fast link must not pay the ceiling.
+    # prebuffer wait start, so a fast link does not pay the ceiling.
     calls = []
     f, obs = _rejoin_feed(calls)
     ck = _RejoinClock(f, [0.3, 0.3, 0.3])      # chunks inside the burst, then a pause
@@ -1901,8 +1903,9 @@ def t_prefetch_rejoin_falls_back_to_the_ceiling_when_the_source_never_pauses():
         m._obs_ws = old
     assert calls == [[53001]], "the ceiling must rejoin anyway, not hang"
     waited = round(sum(ck.slept), 3)
-    # It waited the whole per-segment ceiling for the burst, then the prebuffer — and no
-    # more than one extra poll beyond that. Rounded: the sum is accumulated in 0.1 steps.
+    # It waits the whole per-segment ceiling for the burst, then the prebuffer, and no
+    # more than one extra poll beyond that. The sum accumulates in 0.1 steps, so the
+    # comparison is rounded.
     assert waited >= 2 * m.SEGMENT_FETCH_BUDGET_S, waited
     assert waited <= round(m.prefetch_land_s(2, 3.0) + m.BURST_POLL_S, 3), waited
 
@@ -1977,9 +1980,9 @@ def t_obs_reconnect_is_noop_without_obs():
 
 
 def t_queue_deadline_args_picks_flag_by_capability():
-    # C, version-safe: prefer the modern flag (streamlink 8.1.0+), fall back to the old
-    # one, and OMIT when neither exists — an unknown flag would abort streamlink and the
-    # feed would never serve (the concern that motivated this).
+    # Version-safe: prefer the modern flag (streamlink 8.1.0+), fall back to the old
+    # one, and OMIT when neither exists, because an unknown flag aborts streamlink and
+    # the feed never serves.
     new_help = "  --stream-segmented-queue-deadline FACTOR\n  --hls-live-edge NUM\n"
     old_help = "  --hls-segment-queue-threshold FACTOR\n  --hls-live-edge NUM\n"
     assert m.queue_deadline_args(new_help) == ["--stream-segmented-queue-deadline", "5"]
@@ -1993,7 +1996,7 @@ def t_queue_deadline_factor_outlasts_the_stall_watchdog():
     # streamlink stops a stream when nothing was queued for factor x the playlist's
     # targetduration. Under fan-out the relay's byte-stall watchdog must be the one that
     # acts, or a gap it would have ridden out turns into a full re-resolve. 5 and 6 were
-    # measured live (YouTube, Twitch); 1 is the smallest integer a playlist can advertise.
+    # measured on YouTube and Twitch; 1 is the smallest integer a playlist can advertise.
     for stall_s in (m.feed_stall_s({}), m.feed_stall_s({"RACECAST_FEED_STALL_S": "45"})):
         for targetduration in (1.0, 5.0, 6.0):
             deadline = float(m.queue_deadline_factor(stall_s)) * targetduration
@@ -2072,7 +2075,7 @@ def t_feed_recovery_records_always_and_pings_only_on_churn():
 
 
 def t_feed_reset_target_validates_feed_key():
-    # D: /obs/feed-reset accepts only a real feed key (case/space-insensitive), else None
+    # /obs/feed-reset accepts only a real feed key (case/space-insensitive), else None
     # -> 400. Never lets an arbitrary string through to release_feed_inputs.
     feeds = {"A": object(), "B": object()}
     assert m.feed_reset_target("A", feeds) == "A"
@@ -2083,8 +2086,8 @@ def t_feed_reset_target_validates_feed_key():
 
 
 def t_reset_discards_s_is_the_backlog_beyond_the_rejoin_reserve():
-    # #587: a reset rejoins OBS prebuffer_s behind live (_join_offset), so it throws away
-    # only what OBS lags beyond that reserve, never the reserve itself.
+    # A reset rejoins OBS prebuffer_s behind live (_join_offset), so it throws away
+    # only what OBS lags beyond that reserve, never the reserve itself. (#587)
     assert m.reset_discards_s(12.34, 3.0) == 9.3
     assert m.reset_discards_s(3.0, 3.0) == 0.0
     assert m.reset_discards_s(1.2, 3.0) == 0.0          # a bursty source sits below it
@@ -2249,7 +2252,7 @@ def t_resync_to_stint_no_op_when_no_feed_serves():
 
 
 def t_manual_feed_arm_enabled():
-    # Default-ON now: absent/empty ⇒ manual arm on.
+    # Default-ON: absent or empty means manual arm on.
     assert m.manual_feed_arm_enabled({}) is True
     assert m.manual_feed_arm_enabled({"RACECAST_MANUAL_FEED_ARM": ""}) is True
     for v in ("1", "true", "yes", "on", "TRUE", "On"):
@@ -2280,7 +2283,7 @@ def t_relay_manual_arm_starts_feeds_disarmed():
         r2 = m.Relay(_StubSource(["uA", "uB"], rows), (53003, 53004), LOGDIR)
         assert r2.manual_feed_arm is True and r2.A.paused is True
     finally:
-        # Restore the exact entry state (symmetric — not the post-del state).
+        # Restore the exact entry state, not the post-del state.
         if entry is None:
             os.environ.pop("RACECAST_MANUAL_FEED_ARM", None)
         else:
@@ -2331,7 +2334,7 @@ def t_desync_suppressed_in_manual_mode():
     r = m.Relay(_StubSource(["uA", "uB", "uC", "uD"], rows), (53001, 53002), LOGDIR)
     r._reflect = lambda live, cut: None
     # Construct a would-be desync: on-air feed A dropped, off-air feed B serving,
-    # past the settle window — in AUTO mode this fires the desync flag.
+    # past the settle window. In AUTO mode this fires the desync flag.
     r.A.phase = "connecting"; r.A.dropped = True
     r.B.phase = "serving"; r.B.dropped = False
     r._desync_since = time.time() - 20
@@ -2513,8 +2516,9 @@ def t_record_feed_step_down_records_event_and_pings():
 
 
 def t_redact_console_status_role_gates_feed_urls():
-    # #493: the Preview button needs feed URLs over the Funnel — director/producer keep
-    # feeds[*].channel (+ pov.url + sheet_id); every other role has them stripped.
+    # The Preview button needs feed URLs over the Funnel, so director and producer keep
+    # feeds[*].channel plus pov.url and sheet_id; every other role has them stripped.
+    # (#493)
     full = {"feeds": {"A": {"channel": "https://youtube.com/live/x", "stint": 1,
                             "profile": "full", "pinned": False},
                       "B": {"channel": "https://twitch.tv/y", "stint": 2}},
@@ -2715,7 +2719,7 @@ def t_maybe_auto_cover_never_lowers_manual_cover():
         m._obs_ws = saved
 
 
-# --- #592: the `local:` schedule token (a capture device as a feed) ---
+# The `local:` schedule token, a capture device as a feed. (#592)
 
 def t_local_source_token_predicates():
     for v in ("local:", " LOCAL: ", "Local:"):
@@ -2787,8 +2791,8 @@ def _local_feed(sched):
 
 
 def t_local_feed_never_steps_down_quality():
-    # A device-busy fast exit counts as a dead serve; the #493 FULL->ROBUST step-down is
-    # meaningless for a capture card and would page a nonsense @here.
+    # A device-busy fast exit counts as a dead serve, but the FULL->ROBUST step-down is
+    # meaningless for a capture card and would page a nonsense @here. (#493)
     f = _local_feed(["local:"])
     f.dead_serves = 99
     assert f.maybe_step_down() is None and f.quality_tier == "full"
@@ -2898,7 +2902,7 @@ def t_local_feed_idles_with_the_device_hint():
     assert m.LOCAL_DEVICE_BUSY in f.last_error, f.last_error
 
 
-# --- #593: the commentary mic follows the on-air local slot ---
+# The commentary mic follows the on-air local slot. (#593)
 MIC = "Commentary Mic Device"
 
 
@@ -3066,10 +3070,9 @@ def _backlog_relay(a_floor, b_floor=None, a_live=None):
 
 
 def t_av_watcher_joins_a_line_the_writer_split_across_two_polls():
-    # THE defect this watcher can have: OBS is still writing when we read, readline()
-    # hands back a fragment, and the repair parses to nothing twice. Demonstrated
-    # against a real file before the fix — both halves yielded None and the event was
-    # gone. The tail now holds the remainder until the newline arrives.
+    # The defect this watcher can have: OBS is still writing when we read, readline()
+    # hands back a fragment, and both halves parse to nothing, so the event is gone.
+    # The tail holds the remainder until the newline arrives.
     import tempfile
     LINE = ("22:52:21.790: Source Feed A audio is lagging (over by 5415.66 ms) "
             "at max audio buffering. Restarting source audio.\n")
@@ -3081,9 +3084,8 @@ def t_av_watcher_joins_a_line_the_writer_split_across_two_polls():
         with open(p, "w", encoding="utf-8") as w:
             w.write(LINE[:40]); w.flush()
             with open(p, encoding="utf-8") as fh:
-                # The REAL loop, not a copy of it: an earlier version of this test
-                # rebuilt run()'s body and therefore proved only its own copy — the
-                # guard stayed green with the fix removed.
+                # The REAL loop, not a copy of it: a test that rebuilds run()'s body
+                # proves only its own copy and stays green with the fix removed.
                 wtc.drain(fh)
                 assert r._av["feeds"] == {}, "half a line is not an event yet"
                 w.write(LINE[40:]); w.flush()
@@ -3129,11 +3131,10 @@ def t_relay_shutdown_stops_the_av_watcher():
 
 
 def t_av_watcher_start_never_takes_the_relay_down_with_it():
-    # This is the test the suite was missing. _start_av_watcher() runs only from
-    # Relay.start(), which no unit test calls, so a wrong attribute inside it
-    # (`self.log` — the relay logs through the module-level LOG) passed every local
-    # check and killed the relay on the first real start. Both branches are exercised
-    # here: no OBS directory at all, and one that exists.
+    # _start_av_watcher() runs only from Relay.start(), which no other unit test calls,
+    # so a wrong attribute inside it reaches production untested: the relay logs through
+    # the module-level LOG, not self.log. Both branches are exercised here, with no OBS
+    # directory at all and with one that exists.
     import tempfile
     r = _make_min_relay()
     orig = m.logsetup.obs_log_dir
@@ -3258,9 +3259,9 @@ def t_backlog_shed_does_not_consume_a_freeze_rebuild_or_an_unmeasured_round():
 
 
 def t_av_serving_age_tells_an_expected_disturbance_from_an_unexplained_one():
-    # #619: the classification hinges on this one reading. A paused or connecting feed
-    # must return None, or a repair on a feed the relay is not even serving would be
-    # waved through as "explained by the restart".
+    # The classification hinges on this one reading. A paused or connecting feed must
+    # return None, or a repair on a feed the relay is not even serving is waved through
+    # as "explained by the restart". (#619)
     import time as _t
     r = _make_min_relay()
     r.A.phase = "serving"; r.A.paused = False; r.A.phase_since = _t.time() - 8.0
@@ -3318,7 +3319,8 @@ def t_heartbeat_backlog_sample_classifies_serving_feeds_only():
 
 
 def t_backlog_on_a_local_stint_names_the_reset():
-    # #592 capture card: no quality tiers, but it serves Feed A, so the RESET applies (#588)
+    # A capture card has no quality tiers, but it serves Feed A, so the RESET applies.
+    # (#588, #592)
     r = _backlog_relay(11.6)
     r.A.current_channel = lambda: ("local:", 0)
     r._sample_consumer_backlogs()
@@ -3348,10 +3350,10 @@ def t_backlog_in_status_and_health_snapshot():
     st = r.status()
     assert st["feeds"]["A"]["backlog_s"] == 12.3 and st["feeds"]["A"]["backlogged"] is True
     assert st["feeds"]["B"]["backlog_s"] is None and st["feeds"]["B"]["backlogged"] is False
-    # #587: the panel labels RESET with what a click right now throws away
+    # The panel labels RESET with what a click right now throws away. (#587)
     assert st["feeds"]["A"]["reset_discards_s"] == 9.3
     assert st["feeds"]["B"]["reset_discards_s"] is None
-    # #614: the cursor-snap count, so a measurement can tell a window the ring lapped
+    # The cursor-snap count, so a measurement can tell a window the ring lapped. (#614)
     assert st["feeds"]["A"]["consumer_snaps"] == 0
     r.A.fanout_server.snaps = 3
     assert r.status()["feeds"]["A"]["consumer_snaps"] == 3
@@ -3371,9 +3373,8 @@ if __name__ == "__main__":
             # Re-pin the legacy-path guard before each test: some tests temporarily
             # mutate RACECAST_MANUAL_FEED_ARM to exercise the absent/default and the
             # explicit-value cases (they restore their own entry state in a finally).
-            # This setdefault is a defensive net — it only re-adds the guard when the
-            # var is actually missing, so it never clobbers a test that set an
-            # explicit value on purpose.
+            # The setdefault only re-adds the guard when the var is missing, so it
+            # never clobbers a test that set an explicit value on purpose.
             os.environ.setdefault("RACECAST_MANUAL_FEED_ARM", "0")
             fn(); print("ok", name)
     print("ALL PASS")

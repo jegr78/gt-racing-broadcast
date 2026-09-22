@@ -8,8 +8,8 @@ sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))
 import speedtest as m   # noqa: E402
 import preflight as pf  # noqa: E402
 
-# A captured `speedtest --format=json` payload (clean round numbers):
-#   download.bandwidth 6_000_000 B/s -> 48.0 Mbps ; upload 2_750_000 -> 22.0 Mbps
+# A captured `speedtest --format=json` payload:
+#   download.bandwidth 6_000_000 B/s -> 48.0 Mbps; upload 2_750_000 -> 22.0 Mbps
 OOKLA_JSON = json.dumps({
     "type": "result",
     "ping": {"jitter": 1.2, "latency": 11.5},
@@ -26,7 +26,7 @@ def t_run_argv_accepts_license_and_gdpr():
     argv = m.run_argv()
     assert argv[0] == "speedtest"
     assert "--format=json" in argv
-    # Regression guard: dropping these reintroduces the blocking first-run prompt.
+    # Dropping these reintroduces the blocking first-run prompt.
     assert "--accept-license" in argv and "--accept-gdpr" in argv
 
 

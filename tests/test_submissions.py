@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stdlib unit checks for the commentator stream-link submission flow (issue #193).
+"""Stdlib unit checks for the commentator stream-link submission flow (#193).
 Run: python3 tests/test_submissions.py
 
 Covers the pure pending store (src/scripts/cockpit_submissions.py), the relay's
@@ -35,8 +35,6 @@ def _rows():
             ("", "Alpha Racing", "S3", 4),
             ("u3", "Gamma", "S4", 5)]
 
-
-# ---- pure pending store -----------------------------------------------------
 
 def t_store_add_assigns_monotonic_ids():
     with tempfile.TemporaryDirectory() as d:
@@ -142,8 +140,6 @@ def t_audit_appends_jsonl():
         assert [r["event"] for r in lines] == ["submit", "approve"]
 
 
-# ---- own-row resolver (pure) ------------------------------------------------
-
 def t_resolve_by_stint_own_row():
     ok, target = m.own_submission_target(_rows(), "alpha-racing", stint="S3")
     assert ok is True
@@ -176,13 +172,10 @@ def t_own_stints_lists_only_mine_with_link_and_url():
     assert [s["stint"] for s in st] == ["S1", "S3"]
     assert st[0]["row"] == 1 and st[0]["has_link"] is True and st[0]["url"] == "u0"
     assert st[1]["row"] == 3 and st[1]["has_link"] is False and st[1]["url"] == ""
-    # carries ONLY the commentator's own URLs — a foreign row's url (u3, Gamma)
-    # is never included (so the cockpit can pre-fill own links without leaking
-    # anyone else's).
+    # Carries ONLY the commentator's own URLs, so the cockpit can pre-fill own
+    # links without leaking a foreign row's (u3, Gamma).
     assert all(s["url"] != "u3" for s in st)
 
-
-# ---- Discord payload (pure) -------------------------------------------------
 
 def t_submission_payload_shape():
     e = {"streamer_name": "Alpha Racing", "target_stint": "S3", "proposed_url": "u-new"}
@@ -194,9 +187,8 @@ def t_submission_payload_shape():
 
 
 def t_approval_payload_has_no_ping():
-    # The director-approval note is informational: it must NOT carry an @here
-    # mention (no top-level `content`, mentions suppressed) yet still name the
-    # commentator, the stint and the link that went live.
+    # The director-approval note is informational: no @here mention and no
+    # top-level `content`, but it still names the commentator, stint and link.
     e = {"streamer_name": "Alpha Racing", "target_stint": "S3", "proposed_url": "u-new"}
     payload = m.cockpit_approval_payload(e)
     assert "@here" not in json.dumps(payload)
@@ -207,10 +199,9 @@ def t_approval_payload_has_no_ping():
 
 
 def t_payloads_carry_event_title():
-    # A non-empty event title (#207) appears in both submission + approval embeds;
-    # the submission footer keeps its pending count alongside the title. Empty ->
-    # the pre-#207 shape is unchanged (submission keeps a count-only footer,
-    # approval has no footer).
+    # A non-empty event title appears in both the submission and approval embeds,
+    # and the submission footer keeps its pending count alongside it. An empty title
+    # leaves a count-only submission footer and no approval footer. (#207)
     e = {"streamer_name": "Alpha Racing", "target_stint": "S3", "proposed_url": "u-new"}
     sub = m.cockpit_submission_payload(e, pending_count=2, event_title="GTEC - Round 4")
     assert sub["embeds"][0]["footer"]["text"] == "GTEC - Round 4 · 2 pending"
@@ -220,8 +211,6 @@ def t_payloads_carry_event_title():
     assert app["embeds"][0]["footer"] == {"text": "GTEC - Round 4"}
     assert "footer" not in m.cockpit_approval_payload(e)["embeds"][0]
 
-
-# ---- live HTTP surface ------------------------------------------------------
 
 def _client(secret=SECRET, rows=None, live_idx=0,
             submission_path=None, audit_path=None, setup_ctl="default",
@@ -317,8 +306,8 @@ def t_cockpit_data_exposes_my_stints():
             data = json.loads(body)
             assert data["submit_enabled"] is True
             assert [s["stint"] for s in data["my_stints"]] == ["S1", "S3"]
-            # own-stint URL is now surfaced (approved) so the cockpit can pre-fill
-            # it; a foreign commentator's URL (Gamma's u3) is NEVER exposed.
+            # An own-stint URL is surfaced so the cockpit can pre-fill it; a
+            # foreign commentator's URL (Gamma's u3) is NEVER exposed.
             assert any(s.get("url") == "u0" for s in data["my_stints"])
             assert "u3" not in body.decode()
         finally:
@@ -326,9 +315,9 @@ def t_cockpit_data_exposes_my_stints():
 
 
 def t_cockpit_data_exposes_my_pending():
-    # After submitting, /cockpit/data surfaces the commentator's OWN pending
-    # entries (stint + id, never a URL) so the cockpit shows live status that
-    # clears once the director acts. A different commentator sees none.
+    # After submitting, /cockpit/data surfaces the commentator's OWN pending entries
+    # (stint and id, never a URL) so the cockpit shows a status that clears once the
+    # director acts. A different commentator sees none.
     with tempfile.TemporaryDirectory() as d:
         p = os.path.join(d, "p.json")
         srv, get, post, _c = _client(submission_path=p)
@@ -447,12 +436,10 @@ def t_approve_writes_schedule_and_clears():
 
 
 def t_approve_routes_by_entry_mode_qualifying_vs_race():
-    # The director's approve action must branch on the ENTRY's own recorded
-    # mode (not the relay's current mode): a qualifying submission writes to
-    # the Qualifying tab (setup_ctl.qualifying_set), a race submission writes
-    # to the Schedule tab (setup_ctl.schedule_set) — see the relay's
-    # /submissions/approve handler (racecast-feeds.py, "Branch on the ENTRY's
-    # recorded mode").
+    # Approve branches on the ENTRY's own recorded mode, not the relay's current
+    # one: a qualifying submission writes the Qualifying tab via
+    # setup_ctl.qualifying_set, a race submission the Schedule tab via
+    # setup_ctl.schedule_set.
     with tempfile.TemporaryDirectory() as d:
         p = os.path.join(d, "p.json")
         srv, _get, post, calls = _client(submission_path=p)
@@ -564,8 +551,8 @@ def t_reject_discards_without_writing():
 
 
 def t_submissions_list_is_not_under_cockpit_prefix():
-    # /submissions must NOT require a cockpit token (it is tailnet-only, never
-    # funnelled) and must work even when the cockpit is disabled.
+    # /submissions is tailnet-only and never funnelled, so it must not require a
+    # cockpit token and must work even when the cockpit is disabled.
     with tempfile.TemporaryDirectory() as d:
         srv, get, _post, _c = _client(secret="",
                                       submission_path=os.path.join(d, "p.json"))

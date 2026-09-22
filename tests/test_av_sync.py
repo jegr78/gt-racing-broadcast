@@ -2,9 +2,9 @@
 """Stdlib unit checks for the A/V sync disturbance detector.
 Run: python3 tests/test_av_sync.py
 
-Every sample line here is copied verbatim from a real OBS 32.2.2 log captured on the
-Windows producer host on 2026-09-20 while restarting a live feed. Inventing them would
-defeat the point: the parser's whole job is to match what OBS actually writes.
+Every sample line here is copied verbatim from a real OBS 32.2.2 log taken while
+restarting a live feed. The parser's job is to match what OBS actually writes, so an
+invented line proves nothing.
 """
 import importlib.util
 import os
@@ -34,8 +34,6 @@ CORRUPT = "22:48:26.627: warning: Packet corrupt (stream = 1, dts = 350908500)."
 NOISE = "22:10:21.725: \tpreset:       p5"
 
 
-# ---------------------------------------------------------------- parsing
-
 def t_parses_an_audio_repair_with_its_source_and_magnitude():
     assert av.parse_obs_log_line(REPAIR) == {
         "at": "22:52:21.790", "kind": "audio_repair", "source": "Feed A", "ms": 5415.66}
@@ -57,8 +55,8 @@ def t_a_source_name_with_a_space_is_not_truncated():
 
 
 def t_dts_and_corrupt_lines_parse_but_name_no_source():
-    # These carry no source name, so they can never be attributed to a feed. Recording
-    # them as context is honest; pretending they belong to a feed would not be.
+    # These carry no source name, so they can never be attributed to a feed and are
+    # recorded as context only.
     for line, kind in ((DTS_ORDER, "dts_backward"), (DTS_DISC, "dts_backward"),
                        (CORRUPT, "packet_corrupt")):
         ev = av.parse_obs_log_line(line)
@@ -67,10 +65,9 @@ def t_dts_and_corrupt_lines_parse_but_name_no_source():
 
 
 def t_a_malformed_magnitude_is_not_an_event_instead_of_an_exception():
-    # [\d.]+ also matched "1.2.3", and float() then raised ValueError out of the tail
-    # loop into the handler that means "the file rotated" — so a parser bug was filed as
-    # a rotation, lines were skipped, and nobody saw it. A line OBS would never write
-    # must simply not be an event.
+    # [\d.]+ also matches "1.2.3", and a float() ValueError escaping the tail loop
+    # lands in the handler that means "the file rotated", so lines are skipped
+    # silently. A line OBS would never write must not be an event.
     for bad in ("12:34:56.789: Source Feed A audio is lagging (over by 1.2.3 ms) "
                 "at max audio buffering. Restarting source audio.",
                 "12:34:56.789: Source Feed A audio is lagging (over by ... ms) "
@@ -85,8 +82,8 @@ def t_a_malformed_magnitude_is_not_an_event_instead_of_an_exception():
 
 
 def t_record_only_mutates_and_says_so():
-    # One contract, not two: it folds the event into the state it was given. A caller
-    # that assigns the result and one that ignores it looked different and were not.
+    # record folds the event into the state it was given and returns None, so
+    # assigning its result and ignoring it are the same thing.
     st = av.new_state()
     assert av.record(st, av.parse_obs_log_line(REPAIR), now=1.0, serving_age_s=8.0) is None
     assert st["feeds"]["A"]["repairs"] == 1
@@ -107,10 +104,8 @@ def t_feed_for_source():
     assert av.feed_for_source(None) is None
 
 
-# ---------------------------------------------------- classification + state
-
 def t_a_repair_just_after_the_feed_started_serving_is_expected():
-    # Measured on 2026-09-20: repairs landed 6-10 s after the feed entered `serving`.
+    # Repairs land 6-10 s after the feed enters `serving`.
     st = av.new_state()
     av.record(st, av.parse_obs_log_line(REPAIR), now=1000.0, serving_age_s=8.0)
     assert st["feeds"]["A"]["repairs"] == 1
@@ -142,16 +137,14 @@ def t_an_unattributed_event_is_counted_without_inventing_a_feed():
 
 
 def t_six_repairs_within_a_fifth_of_a_second_count_six_times():
-    # OBS logged six of these 170 ms apart on 2026-09-20 22:57:08. Collapsing them
-    # would hide how hard that restart hit.
+    # OBS logs these about 170 ms apart; collapsing them would hide how hard a
+    # restart hit.
     st = av.new_state()
     for i in range(6):
         av.record(st, av.parse_obs_log_line(REPAIR_SMALL),
                        now=1000.0 + i * 0.02, serving_age_s=14.0)
     assert st["feeds"]["A"]["repairs"] == 6 and st["feeds"]["A"]["unexplained"] == 0
 
-
-# ------------------------------------------------------ status + health fact
 
 def t_status_block_is_empty_until_something_happens():
     assert av.status_block(av.new_state(), now=10.0) == {}
@@ -174,9 +167,8 @@ def t_only_an_unexplained_repair_becomes_a_health_fact():
 
 
 def t_the_health_fact_reports_the_unexplained_repair_not_the_latest_one():
-    # Seen live on the producer host 2026-09-20: the reason read "broke by 997 ms" while
-    # the UNEXPLAINED repair had been 987 ms — the 997 belonged to a later, expected one.
-    # Naming another event's magnitude is exactly the mis-attribution this whole detector
+    # The fact must carry the UNEXPLAINED repair's magnitude. Reporting the latest one
+    # instead names a later, expected event, which is the mis-attribution this detector
     # exists to avoid.
     st = av.new_state()
     av.record(st, {"at": "23:49:03.732", "kind": "audio_repair",
@@ -200,19 +192,17 @@ def t_the_health_fact_ages_out_so_one_blip_does_not_stay_yellow_all_event():
 
 
 def t_the_window_covers_the_slowest_restart_actually_measured():
-    # The classification hinges on this one number, so the evidence lives with it.
-    # Three legs stand between a feed serving and OBS being ABLE to log a repair, all
-    # pinned in this repo: the relay's prefetch wait (up to 7 s), OBS's
-    # reconnect_delay_sec (10 s), and OBS filling buffering_mb (about 9 s at the
-    # measured 7.2 Mbps). That is a 26 s floor before the first repair is even possible.
-    # Measured on the producer host: 6-14 s in three cases and 32 s in a fourth, which a
-    # first attempt at 30 s wrongly called unexplained.
+    # The classification hinges on this one number. Three legs stand between a feed
+    # serving and OBS being ABLE to log a repair: the relay's prefetch wait (up to
+    # 7 s), OBS's reconnect_delay_sec (10 s), and OBS filling buffering_mb (about 9 s
+    # at 7.2 Mbps). That is a 26 s floor. The slowest repair measured was 32 s, which
+    # a first attempt at 30 s wrongly called unexplained.
     assert av.RESTART_WINDOW_S >= 26.0, "below the floor the reconnect path alone needs"
     assert av.RESTART_WINDOW_S >= 32.0, "below the slowest repair actually observed"
 
 
 def t_the_slowest_measured_restart_is_classified_as_expected():
-    # The concrete case that broke the 30 s attempt, pinned so it cannot come back.
+    # The 32 s case a 30 s window wrongly called unexplained.
     st = av.new_state(); av.record(st, av.parse_obs_log_line(REPAIR),
                    now=1000.0, serving_age_s=32.0)
     assert st["feeds"]["A"]["unexplained"] == 0

@@ -14,9 +14,9 @@ m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 
 
 def t_classify_ram_boundaries():
-    # FAIL below 8 GB, WARN below 12 GB, PASS from 12 GB up. Nominal modules
-    # report ~0.1-1.5 GB lower (firmware/iGPU reservations), so the boundaries
-    # carry RAM_SLACK_GB and real machines land in the intended bucket.
+    # FAIL below 8 GB, WARN below 12 GB, PASS from 12 GB up. A machine reports
+    # 0.1-1.5 GB less than its nominal modules because of firmware and iGPU
+    # reservations, so the boundaries carry RAM_SLACK_GB.
     assert m.classify_ram(6.4).level == "FAIL"
     assert m.classify_ram(6.5).level == "WARN"
     assert m.classify_ram(8).level == "WARN"       # 8 GB machine
@@ -38,8 +38,8 @@ def t_classify_cpu_boundaries():
 
 
 def t_classify_cpu_with_gpu_relaxes_floor():
-    # An NVENC GPU offloads the encode off the CPU, so the floor drops by 2:
-    # FAIL <2, WARN <4, PASS >=4 -> a g2-standard-4 (4 cores + L4) is green.
+    # An NVENC GPU offloads the encode, so the floor drops by 2: FAIL <2, WARN <4,
+    # PASS >=4, which makes a 4-core machine with an L4 green.
     assert m.classify_cpu(1, has_gpu=True).level == "FAIL"
     assert m.classify_cpu(2, has_gpu=True).level == "WARN"
     assert m.classify_cpu(3, has_gpu=True).level == "WARN"
@@ -119,8 +119,8 @@ def t_tool_version_missing():
 
 
 def t_parse_streamlink_version():
-    # `streamlink --version` prints "streamlink X.Y.Z"; a package build may add a
-    # suffix. Parse the leading X.Y.Z; anything unrecognizable -> None.
+    # `streamlink --version` prints "streamlink X.Y.Z" and a package build may add
+    # a suffix, so only the leading X.Y.Z is parsed.
     assert m.parse_streamlink_version("streamlink 8.4.0") == (8, 4, 0)
     assert m.parse_streamlink_version("streamlink 8.2.0") == (8, 2, 0)
     assert m.parse_streamlink_version("streamlink 6.6.2-1") == (6, 6, 2)
@@ -131,9 +131,9 @@ def t_parse_streamlink_version():
 
 
 def t_classify_streamlink_version_floor():
-    # 8.2.0 is the release that added --http-cookies-file (#350's YouTube serve
-    # relies on it). Below the floor is a FAIL; at/above is PASS; unparseable ->
-    # None (no extra row — the plain PASS from the tool loop stands).
+    # 8.2.0 added --http-cookies-file, which the YouTube serve relies on (#350).
+    # An unparseable version yields None, so no extra row is added and the plain
+    # PASS from the tool loop stands.
     assert m.classify_streamlink_version("streamlink 6.6.2-1").level == "FAIL"
     assert "8.2.0" in m.classify_streamlink_version("streamlink 6.6.2-1").detail
     assert m.classify_streamlink_version("streamlink 8.1.2").level == "FAIL"
@@ -145,19 +145,17 @@ def t_classify_streamlink_version_floor():
 
 
 def t_no_window_kwargs_per_os():
-    # CREATE_NO_WINDOW only on Windows; a no-op (empty kwargs) everywhere else so
-    # the same call site stays cross-platform (mirrors services.no_window_kwargs).
+    # CREATE_NO_WINDOW only on Windows, empty kwargs elsewhere, so the same call
+    # site stays cross-platform.
     assert m.no_window_kwargs("nt") == {"creationflags": 0x08000000}
     assert m.no_window_kwargs("posix") == {}
     assert m.no_window_kwargs("java") == {}
 
 
 def t_tool_version_hides_console_window():
-    # tool_version() runs in-process inside the console-less racecast-ui.exe
-    # (the `tools`/`preflight` status providers), so its `<tool> --version` probe
-    # MUST carry CREATE_NO_WINDOW or it flashes a terminal per tool on Windows
-    # (issue #23's class, missed for the --version probes). capture_output keeps
-    # the version text, so the flag is safe.
+    # tool_version() runs in-process inside the console-less racecast-ui.exe, so its
+    # `<tool> --version` probe MUST carry CREATE_NO_WINDOW or it flashes a terminal
+    # per tool on Windows. capture_output keeps the version text. (#23)
     captured = {}
 
     def fake_run(argv, **kw):
@@ -169,8 +167,8 @@ def t_tool_version_hides_console_window():
     assert captured["argv"] == ["ffmpeg", "--version"]
     for k, v in m.no_window_kwargs().items():   # whatever this OS resolves to
         assert captured["kw"].get(k) == v
-    # the probe carries a sanitized env so a frozen binary's bundled libs don't
-    # leak into the system-linked tool (the OPENSSL_3.3.0 / libcrypto crash).
+    # The probe carries a sanitized env so a frozen binary's bundled libs cannot
+    # leak into the system-linked tool and crash it on a libcrypto mismatch.
     assert "env" in captured["kw"]
     assert captured["kw"]["env"] == m.external_tool_env()
 
@@ -234,8 +232,8 @@ def t_cookies_fresh_with_marker():
 
 
 def t_a_jar_without_an_export_stamp_cannot_be_called_fresh():
-    # Before the stamp existed the age came from the jar's mtime, which yt-dlp resets
-    # on every resolve. An unstamped jar's age is unknown, and unknown is not a PASS.
+    # yt-dlp rewrites the jar on every resolve, so its mtime is not an age. An
+    # unstamped jar's age is unknown, and unknown is not a PASS.
     with tempfile.TemporaryDirectory() as d:
         p = os.path.join(d, "cookies.txt")
         with open(p, "w") as fh:
@@ -245,7 +243,7 @@ def t_a_jar_without_an_export_stamp_cannot_be_called_fresh():
 
 
 def t_cookies_fresh_without_login_warns():
-    # #615: the anonymous jar (no login marker) is a WARN, not a PASS.
+    # An anonymous jar, with no login marker, is a WARN rather than a PASS. (#615)
     with tempfile.TemporaryDirectory() as d:
         p = os.path.join(d, "cookies.txt")
         with open(p, "w") as fh:
@@ -305,8 +303,8 @@ def t_classify_pipewire_audio_linux_absent_warns():
 
 def t_pipewire_audio_candidates_cover_user_and_distro_paths():
     cands = m.pipewire_audio_candidates("/home/op", "aarch64")
-    # fixed Linux paths must stay forward-slash on every OS (incl. the Windows
-    # runner) — os.path.join would inject backslashes here (CLAUDE.md / #97).
+    # Fixed Linux paths must stay forward-slash on every OS, including the Windows
+    # runner, where os.path.join would inject backslashes. (#97)
     assert all("\\" not in c for c in cands)
     # per-user manual install (dimtpap release tarball layout)
     assert any("/home/op/.config/obs-studio/plugins/linux-pipewire-audio" in c
@@ -359,7 +357,7 @@ def t_classify_sheet_generic_error_fails_with_sharing_and_network_hint():
 
 
 def t_classify_sheet_network_warns_without_sharing_blame():
-    # Regression: a timeout is a NETWORK problem, not a sharing one — don't tell
+    # A timeout is a NETWORK problem, not a sharing one, so the detail must not tell
     # the operator to fix sharing that was never broken.
     r = m.classify_sheet("SHEET_ID", "network", "the read operation timed out")
     assert r.level == "WARN"
@@ -380,8 +378,8 @@ def t_classify_sheet_not_found_fails_with_wrong_id_hint():
 
 
 def t_fetch_sheet_csv_timeout_maps_to_network():
-    # The exact user-reported failure: urlopen raises TimeoutError. It must become
-    # a 'network' outcome (WARN, no sharing blame), not the generic sharing FAIL.
+    # A urlopen TimeoutError must map to a 'network' outcome (WARN, no sharing
+    # blame), not the generic sharing FAIL.
     def boom(*a, **k):
         raise TimeoutError("The read operation timed out")
     orig = http_util.urlopen
@@ -486,15 +484,15 @@ def t_network_section_has_bandwidth_and_advisory():
 
 
 def t_companion_probe_hosts_loopback_default():
-    # No bind_ip / no Tailscale IP known -> probe loopback only (current behaviour).
+    # No bind_ip and no Tailscale IP known -> probe loopback only.
     assert m.companion_probe_hosts(None, None) == ["127.0.0.1"]
     assert m.companion_probe_hosts("", "") == ["127.0.0.1"]
 
 
 def t_companion_probe_hosts_includes_bind_and_tailscale():
-    # racecast binds Companion to the Tailscale IP (tailnet-only, NOT loopback), so a
-    # 127.0.0.1-only probe false-negatives; the bind_ip + Tailscale IP must be probed too.
-    # (100.64.0.0/10 are Tailscale CGNAT test constants — never a real address.)
+    # racecast binds Companion to the Tailscale IP, not loopback, so a 127.0.0.1-only
+    # probe false-negatives and the bind_ip plus Tailscale IP must be probed too.
+    # 100.64.0.0/10 are Tailscale CGNAT test constants, never a real address.
     hosts = m.companion_probe_hosts("100.64.0.5", "100.64.0.7")
     assert hosts[0] == "100.64.0.5"
     assert "100.64.0.7" in hosts

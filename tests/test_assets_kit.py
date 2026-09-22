@@ -9,8 +9,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 import assets_kit as k
 
 
-# ---------------------------------------------------------------- kit loading
-
 MINIMAL = {
     "stills": {"standby": "Standby.png"},
     "scenes": {"intro": {"duration": 30, "fps": 30, "output": "Intro.mp4"}},
@@ -64,8 +62,6 @@ def t_load_kit_requires_stills_or_scenes():
             raise AssertionError("an empty kit must raise KitError")
 
 
-# ------------------------------------------------------------- still targets
-
 def t_still_targets_are_sorted_pairs():
     kit = {"stills": {"cover": "Cover.png", "standby": "Standby.png"}}
     assert k.still_targets(kit) == [("cover", "Cover.png"), ("standby", "Standby.png")]
@@ -86,8 +82,6 @@ def t_still_targets_unknown_screen_is_an_error():
         raise AssertionError("unknown screen id must raise KitError")
 
 
-# -------------------------------------------------- output-name path guarding
-
 def t_output_name_rejects_path_traversal():
     # kit.json is repo/profile data; a filename must never escape the out dir.
     for bad in ("../evil.png", "sub/dir.png", "/abs.png", "..\\evil.png", ""):
@@ -105,8 +99,6 @@ def t_output_name_allows_spaces_and_dashes():
     assert k.safe_output_name("Post-Race Interviews.png") == "Post-Race Interviews.png"
 
 
-# --------------------------------------------------------------- frame naming
-
 def t_frame_count_rounds_to_nearest():
     assert k.frame_count(30, 30) == 900
     assert k.frame_count(1.5, 30) == 45
@@ -118,8 +110,6 @@ def t_frame_name_is_zero_padded_and_matches_the_ffmpeg_pattern():
     assert k.frame_name(1234) == "f01234.jpg"
     assert k.FRAME_PATTERN == "f%05d.jpg"
 
-
-# --------------------------------------------------------------- audio filter
 
 def t_audio_filter_none_without_fades():
     assert k.audio_filter({}) is None
@@ -135,8 +125,6 @@ def t_audio_filter_handles_a_single_fade():
     assert k.audio_filter({"fadeOut": {"start": 5, "duration": 2}}) == \
         "afade=t=out:st=5:d=2"
 
-
-# ------------------------------------------------------------ ffmpeg mux args
 
 def t_mux_args_without_audio_have_no_audio_input():
     args = k.mux_args(frames_dir="/f", fps=30, out_path="/o/Intro.mp4",
@@ -167,8 +155,6 @@ def t_mux_args_are_a_list_not_a_shell_string():
     assert "/o/My Video.mp4" in args
 
 
-# -------------------------------------------------------------- text config
-
 def t_text_config_merges_event_over_kit_defaults():
     kit = {"text": {"title": "KIT", "date": "KITDATE"}}
     event = {"title": "EVENT"}
@@ -188,8 +174,6 @@ def t_text_config_drops_comment_keys():
 def t_text_config_ignores_empty_cli_values():
     assert k.text_config({"text": {"a": "kit"}}, {}, {"a": None}) == {"a": "kit"}
 
-
-# ------------------------------------------------------------ kit dir lookup
 
 def t_kit_dir_for_profile():
     p = k.kit_dir("/repo", "erf-wspc")
