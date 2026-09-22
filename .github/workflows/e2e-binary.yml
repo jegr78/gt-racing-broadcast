@@ -1,8 +1,8 @@
 name: e2e-binary
 
 # Binary-path regression guard. Builds the PyInstaller binary and runs the e2e
-# harness AGAINST IT (tools/e2e.py --binary), so binary-ONLY bugs surface here —
-# a file/import missing from the bundle, frozen path resolution — the class the
+# harness AGAINST IT (tools/e2e.py --binary), so binary-ONLY bugs surface here,
+# a file/import missing from the bundle, frozen path resolution, the class the
 # src/ dev build hides (e.g. the cockpit.html bundle omission that 404'd
 # /cockpit only in preview builds). The matrix `e2e` job covers the src/ path on
 # every PR; this is the heavier frozen counterpart.

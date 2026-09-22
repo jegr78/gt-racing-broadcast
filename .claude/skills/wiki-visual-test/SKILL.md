@@ -5,7 +5,7 @@ description: Visually verify the live GitHub wiki rendered correctly after publi
 
 # Wiki visual test
 
-Confirm the **published** GitHub wiki actually *renders* correctly — not just that the
+Confirm the **published** GitHub wiki actually *renders* correctly, not just that the
 raw markdown was pushed. A `curl` of the raw `.md` proves the text is there; it does **not**
 prove GitHub rendered the Mermaid diagrams or that the embedded PNGs resolve. This skill
 opens the live wiki pages in a headless browser (Playwright MCP), checks the render
@@ -17,7 +17,7 @@ Pairs with [companion-screenshots](../companion-screenshots/SKILL.md) and
 
 ## When to use
 
-After `python3 tools/sync-wiki.py` has pushed wiki changes — especially when the change
+After `python3 tools/sync-wiki.py` has pushed wiki changes: especially when the change
 touched a **Mermaid diagram**, an **embedded image** (e.g. a refreshed screenshot), or any
 page whose visual layout matters. Only check the page(s) you changed.
 
@@ -31,14 +31,14 @@ page whose visual layout matters. Only check the page(s) you changed.
 
 ## URL shapes
 
-Derive everything from the `origin` remote — **never hardcode owner/repo** (the project has
+Derive everything from the `origin` remote, **never hardcode owner/repo** (the project has
 been renamed before):
 ```bash
 git remote get-url origin    # -> https://github.com/<owner>/<repo>.git  (strip the .git)
 ```
 
 - **Rendered page:** `https://github.com/<owner>/<repo>/wiki/<Page>`
-  (e.g. `.../wiki/Run-an-event` — the page name is the file name without `.md`).
+  (e.g. `.../wiki/Run-an-event`: the page name is the file name without `.md`).
 - **Raw markdown** (for the curl smoke test): `https://raw.githubusercontent.com/wiki/<owner>/<repo>/<Page>.md`
 - **Embedded wiki image** (as the rendered page references it):
   `https://github.com/<owner>/<repo>/wiki/images/<file>.png`
@@ -56,7 +56,7 @@ Do this per changed page. Examples shown for `Run-an-event` (a Mermaid page) and
 
 3. **Check the render programmatically** with `mcp__…__browser_evaluate`.
 
-   For a **Mermaid** page — confirm GitHub turned the code fence into a diagram (the raw
+   For a **Mermaid** page: confirm GitHub turned the code fence into a diagram (the raw
    `flowchart`/`sequenceDiagram` text must be **gone**, a rendered container/SVG present):
    ```js
    () => {
@@ -71,9 +71,9 @@ Do this per changed page. Examples shown for `Run-an-event` (a Mermaid page) and
    ```
    Pass = `hasMermaidContainer:true`, `rawCodeStillVisible:false`, expected words present.
    (Mermaid renders node labels inside `<foreignObject>`/`<text>`, so an SVG's `textContent`
-   is often empty — don't assert on it; rely on "raw code gone" + the screenshot.)
+   is often empty: don't assert on it; rely on "raw code gone" + the screenshot.)
 
-   For an **embedded-image** page — confirm each image actually loaded (decoded, non-zero
+   For an **embedded-image** page: confirm each image actually loaded (decoded, non-zero
    natural size) and scroll the one you changed into view:
    ```js
    () => {
@@ -96,7 +96,7 @@ Do this per changed page. Examples shown for `Run-an-event` (a Mermaid page) and
    nodes/flow, or the embedded image shows the new content; layout/margins look sane.
 
 6. **Clean up** the scratch PNG(s) from the repo root: `rm -f wiki-*.png`. They are not wiki
-   content — never commit them.
+   content: never commit them.
 
 ## Optional: pair with the raw smoke test
 
@@ -114,9 +114,9 @@ live; the browser pass then confirms it actually *renders*.
 ## Notes / caveats
 
 - **Console errors are usually benign.** GitHub pages emit telemetry/CSP console errors that
-  have nothing to do with your content — don't treat `Console: N errors` as a failure. Judge
+  have nothing to do with your content, don't treat `Console: N errors` as a failure. Judge
   by the render checks and the screenshot.
-- **Don't screenshot an element** for Mermaid/markdown — screenshot the **viewport** after
+- **Don't screenshot an element** for Mermaid/markdown: screenshot the **viewport** after
   resizing/scrolling. The markdown wrappers can have odd computed heights.
 - **Wiki propagation is fast but not instant.** If a just-synced change isn't visible,
   re-navigate after a few seconds (GitHub may serve a cached render briefly).

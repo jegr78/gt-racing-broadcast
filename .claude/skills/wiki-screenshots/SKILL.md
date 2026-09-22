@@ -1,6 +1,6 @@
 ---
 name: wiki-screenshots
-description: Regenerate the wiki/slide screenshots of the relay- and UI-served pages — the Control Center (cc-*.png), the /console pages (launcher, cockpit, race-control, director panel) and the commentator cockpit. Use when a Control Center view, a /console page, the Director Panel, or the Commentator Cockpit changed and its image under src/docs/wiki/images/ (and src/docs/slides/assets/img/) is stale. Covers HOW to populate the pages with reproducible fake content via the demo profile + the obs-sim OBS stand-in (no real OBS, no real league). NOT for Companion buttons — see companion-screenshots.
+description: Regenerate the wiki/slide screenshots of the relay- and UI-served pages: the Control Center (cc-*.png), the /console pages (launcher, cockpit, race-control, director panel) and the commentator cockpit. Use when a Control Center view, a /console page, the Director Panel, or the Commentator Cockpit changed and its image under src/docs/wiki/images/ (and src/docs/slides/assets/img/) is stale. Covers HOW to populate the pages with reproducible fake content via the demo profile + the obs-sim OBS stand-in (no real OBS, no real league). NOT for Companion buttons, see companion-screenshots.
 ---
 
 # Wiki / slide screenshots (Control Center + /console pages)
@@ -9,14 +9,14 @@ Regenerate the screenshots of the **relay-served** and **Control-Center-served**
 the GT Racing Broadcast wiki and onboarding slides. This skill's real value is the
 **reproducible fake-content recipe**: how to make the pages show a believable broadcast
 (program monitor, schedule, on-air tally, chat) **without** a real OBS, real cookies, or a
-real league — using the shipped **`demo`** profile and the **`tools/obs-sim.py`** OBS
+real league: using the shipped **`demo`** profile and the **`tools/obs-sim.py`** OBS
 stand-in.
 
 Sibling skills: [companion-screenshots](../companion-screenshots/SKILL.md) for the Companion
-button board (different running service — not covered here), and
+button board (different running service: not covered here), and
 [wiki-visual-test](../wiki-visual-test/SKILL.md) to verify the published result renders.
 
-## Scope — which image goes with which surface
+## Scope, which image goes with which surface
 
 Every visible change to one of these surfaces makes its image stale. Capture from a
 **local dev build** (run from `src/`, no `VERSION` file) so the version badge stays the
@@ -32,18 +32,18 @@ uniform "dev build" across all shots.
 | Race Control desk | `/console/race-control?t=<token>` | `console-race-control.png` |
 
 Wiki screenshots live in **`src/docs/wiki/images/<name>.png`**. The onboarding slides reuse
-the **same images** in **`src/docs/slides/assets/img/<name>.png`** — when a shot is used by a
+the **same images** in **`src/docs/slides/assets/img/<name>.png`**: when a shot is used by a
 slide deck, write the **identical** file to both paths. Only refresh the surface(s) you
 changed.
 
 > The CLAUDE.md "refresh the screenshot in the same change" hard rule is blocking for the
 > **Control Center**, **Director Panel** and **Companion** surfaces. The commentator **Cockpit**
-> and **Race Control** pages are not covered by that rule — refresh them as good practice,
+> and **Race Control** pages are not covered by that rule: refresh them as good practice,
 > not as a release blocker.
 
 ## Prerequisites
 
-- **Playwright MCP** available (the `mcp__plugin_playwright_playwright__*` tools) — element
+- **Playwright MCP** available (the `mcp__plugin_playwright_playwright__*` tools): element
   and full-page screenshots are taken through it.
 - Working directory: the repo root. Run everything from `src/` (`python3 src/racecast.py …`)
   so the version badge reads **dev build**.
@@ -53,7 +53,7 @@ changed.
 
 ---
 
-## Part A — Control Center views (`cc-*.png`)
+## Part A: Control Center views (`cc-*.png`)
 
 These are the local web UI; most need only the UI server, but views that embed relay data
 (e.g. **Crew Console**, **Relay**, **Setup**) also want a running demo relay (Part B) so the
@@ -69,14 +69,14 @@ cards show live content instead of "relay offline".
    the demo league. `--profile` applies to this one process only.
 2. Drive it with the Playwright MCP: `browser_navigate` → `http://127.0.0.1:8090/`, switch to
    the view, then **element-screenshot the card/modal** (not a full-window grab) so the
-   framing matches the existing images — e.g. the overlay builder modal:
+   framing matches the existing images, e.g. the overlay builder modal:
    `browser_take_screenshot` with `element` ref for `#ov-modal .ovmodal-card`.
 3. Save into `src/docs/wiki/images/cc-<view>.png` (and the slides copy if the deck uses it).
 4. Stop the UI: `pkill -f "racecast.py --profile demo ui"`.
 
 ---
 
-## Part B — relay-served pages + the fake-content recipe (the important part)
+## Part B: relay-served pages + the fake-content recipe (the important part)
 
 `/console/*`, `/cockpit`, `/panel` and `/hud/preview` are served by the **relay**. To make
 them show a believable broadcast we run the relay on the **demo** profile (its public,
@@ -111,7 +111,7 @@ RACECAST_OBS_WS_HOST=127.0.0.1 RACECAST_OBS_WS_PORT=4466 \
 
 `tools/obs-sim.py` speaks just enough obs-websocket v5 (no-auth handshake +
 `GetCurrentProgramScene` + `GetSourceScreenshot`) to answer the relay's
-`get_program_screenshot` with that fixed image — so the program monitor in the cockpit /
+`get_program_screenshot` with that fixed image, so the program monitor in the cockpit /
 panel / race-control pages shows the still you passed, with **no real OBS running**.
 
 ### B2. Mint a console token (cockpit / launcher / race-control need auth)
@@ -150,9 +150,9 @@ flagged Race Control (the demo Crew tab "RC 2" has Race Control = TRUE).
        -d '{"user":"Director","text":"Welcome to the demo broadcast"}' >/dev/null
   ```
   (A form-encoded `name=…` is ignored and the message is stored as the generic "Crew".)
-- **Broadcast chat (read-only mirror):** there is **no write endpoint** — the store is
+- **Broadcast chat (read-only mirror):** there is **no write endpoint**, the store is
   in-memory and read-only. The demo `Channel` tab is `@LofiGirl` (always live), so a live
-  relay would fill the card with **real third-party viewers** — off-theme and inappropriate to
+  relay would fill the card with **real third-party viewers**: off-theme and inappropriate to
   commit. To seed fictional race-themed messages instead, add a **temporary** env-guarded
   block in `src/relay/racecast-feeds.py` right after `broadcast_chat_store = BroadcastChatStore()`
   that, under `RACECAST_SEED_BROADCAST=1`, sets `channel_source = None` (keeps the live reader
@@ -170,12 +170,12 @@ flagged Race Control (the demo Crew tab "RC 2" has Race Control = TRUE).
       ])
   ```
   Run the relay with `RACECAST_SEED_BROADCAST=1`, capture, then **revert the seed block
-  only** — delete exactly the lines you added (surgically, with an editor/`Edit`), NOT with
+  only**: delete exactly the lines you added (surgically, with an editor/`Edit`), NOT with
   a whole-file `git checkout`. (`add_many` takes `{id, ts, user, text}` dicts; ts as
   `time.time() - N`.)
 
   > ⚠️ **Never `git checkout -- src/relay/racecast-feeds.py` to drop this block.** A
-  > whole-file checkout discards **every** uncommitted change in that file — if you are
+  > whole-file checkout discards **every** uncommitted change in that file: if you are
   > also editing the relay (the common case: you changed a relay surface and are now
   > refreshing its screenshot), it silently destroys that work. Branch + commit before you
   > start so any slip is recoverable, and remove the temporary block with a targeted edit.
@@ -193,24 +193,24 @@ Write each to `src/docs/wiki/images/<name>.png` and, if a slide deck uses it, th
 copy to `src/docs/slides/assets/img/<name>.png`. Read the PNG back and eyeball it.
 
 > The HTML pages (`cockpit.html`, `director-panel.html`, `race-control.html`,
-> `console.html`, `hud.html`) are read **per request** from disk — a browser reload picks up
+> `console.html`, `hud.html`) are read **per request** from disk, a browser reload picks up
 > an edit without restarting the relay. A change to relay **Python**, though, needs a
 > `relay stop` and the full B1 step 4 again (obs-sim env **and** the stub `--cookies`).
 
 ---
 
-## Cleanup & revert (do not skip — these touch git-tracked / shared state)
+## Cleanup & revert (do not skip: these touch git-tracked / shared state)
 
 ```bash
 RACECAST_OBS_WS_HOST=127.0.0.1 RACECAST_OBS_WS_PORT=4466 python3 src/racecast.py relay stop  # sim env, or stop talks to a real OBS on 4455
 pkill -f "obs-sim.py" ; pkill -f "racecast.py --profile demo ui"
 rm -f runtime/demo/stub-cookies.txt                # the stub jar only, never the shared one
-# Seed block (B3): delete ONLY the lines you added — surgically, with an editor/Edit.
+# Seed block (B3): delete ONLY the lines you added: surgically, with an editor/Edit.
 # Do NOT `git checkout -- src/relay/racecast-feeds.py`: it wipes ALL uncommitted changes
 # in that file, including any relay edit you are screenshotting (see the ⚠️ in B3).
 git checkout -- profiles/demo/profile.env          # CONSOLE_SECRET gotcha (see below)
 ```
-(`git checkout -- profiles/demo/profile.env` is safe — that file is config you never edit
+(`git checkout -- profiles/demo/profile.env` is safe, that file is config you never edit
 here; the relay only injects a secret into it. The relay **source** file is the one to
 revert surgically.)
 
@@ -220,7 +220,7 @@ revert surgically.)
   the secret would be committed. **Always** `git checkout -- profiles/demo/profile.env` before
   committing.
 - The scratch `cc-*`/`console-*` viewport PNGs the MCP may drop in the repo root are not wiki
-  content — `rm` them; only the files under `src/docs/...` are committed.
+  content: `rm` them; only the files under `src/docs/...` are committed.
 
 ## Commit & publish
 
@@ -234,7 +234,7 @@ Publish the wiki only on the user's go-ahead: `python3 tools/sync-wiki.py` (prev
 ## Notes
 
 - **Why obs-sim, not real OBS:** the producer's real OBS may not be running, and even if it
-  is, its program is whatever they happen to have on screen — not reproducible. obs-sim pins a
+  is, its program is whatever they happen to have on screen, not reproducible. obs-sim pins a
   fixed program still so the same shot regenerates byte-stably on any machine (incl. Windows).
 - **Element vs full-page:** Control Center cards/modals → **element** screenshot (match the
   existing tight framing). The standalone `/console`/`/cockpit`/`/panel` pages → **full-page**.

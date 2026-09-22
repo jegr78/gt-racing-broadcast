@@ -7,7 +7,7 @@ name: Preview
 #
 # SECURITY (review #8): the `labeled` trigger runs PR-HEAD code (checkout +
 # build) with a write token (contents/pull-requests: write). This is safe ONLY
-# because the repo is collaborator-gated — a fork PR cannot add a label, and the
+# because the repo is collaborator-gated: a fork PR cannot add a label, and the
 # default `pull_request` token for fork PRs is read-only. The `preview` label is
 # therefore a code-exec-with-write-token grant: it MUST only be addable by
 # trusted maintainers. Do not loosen branch/label permissions for outside
@@ -178,7 +178,7 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
         with:
           python-version: "3.12"
-      - name: Run test suite (full gate — preview is green-built)
+      - name: Run test suite (full gate: preview is green-built)
         run: python tools/run-tests.py
       - name: Install PyInstaller
         run: python -m pip install pyinstaller
@@ -220,7 +220,7 @@ jobs:
           <!-- preview-build -->
           ### 🔬 Preview build \`$VERSION\`
 
-          Download (unsigned — one-time SmartScreen/Gatekeeper warning on first run):
+          Download (unsigned, one-time SmartScreen/Gatekeeper warning on first run):
 
           - **Windows:** $BASE/racecast-windows.zip
           - **macOS:** $BASE/racecast-macos.tar.gz

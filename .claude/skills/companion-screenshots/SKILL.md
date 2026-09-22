@@ -17,7 +17,7 @@ the Companion button board. Verify the published result with
 
 ## When to use
 
-After a Companion button is added, renamed, recolored, or moved — the wiki images in
+After a Companion button is added, renamed, recolored, or moved, the wiki images in
 `src/docs/wiki/images/` go stale and must be regenerated for the page(s) that changed.
 
 Pages and their files:
@@ -30,10 +30,10 @@ Only regenerate the page(s) you actually changed.
 ## Prerequisites
 
 - **Companion is running** with the current config imported (the button you just built
-  must be visible in its web UI). If it does not yet show your change, import it — the
+  must be visible in its web UI). If it does not yet show your change, import it, the
   **autonomous, non-destructive recipe is below** (you do NOT need the user to do it).
   **Bind address:** `racecast companion start` binds Companion to this machine's **Tailscale
-  IP**, not localhost — so the admin/web-buttons UI is at `http://<tailscale-ip>:8000`, and
+  IP**, not localhost, so the admin/web-buttons UI is at `http://<tailscale-ip>:8000`, and
   `http://localhost:8000` is often **not** bound. Find the real address with
   `lsof -nP -iTCP:8000 -sTCP:LISTEN` (the `100.64.0.0/10` address) and use it for every
   `browser_navigate` below.
@@ -45,9 +45,9 @@ Only regenerate the page(s) you actually changed.
 ## Getting the current config into Companion (autonomous, non-destructive)
 
 When the running Companion shows an **old** version of the page (your button change is not
-visible yet), import it yourself via the web UI — **page-scoped, preserving connections**.
+visible yet), import it yourself via the web UI: **page-scoped, preserving connections**.
 This was verified live on Companion **v4.3.4**. It does NOT reset the producer's
-connections (OBS-WebSocket etc.) or other pages — only the one destination page's buttons
+connections (OBS-WebSocket etc.) or other pages, only the one destination page's buttons
 are replaced.
 
 1. **Export** the repo config: `python3 src/racecast.py export companion` → it writes
@@ -58,17 +58,17 @@ are replaced.
 3. Click the **“Import configuration”** control (`browser_snapshot` to get its ref), which
    opens a file chooser (modal state) → `browser_file_upload` with the absolute path to the
    exported `.companionconfig`. (file_upload only works once the chooser modal is open.)
-4. In the import wizard, click the **“Buttons”** tab (NOT “Full Import” — Full Import
+4. In the import wizard, click the **“Buttons”** tab (NOT “Full Import”. Full Import
    replaces connections). The Buttons tab does a single-page import.
 5. Set **Source Page** to the page you changed (step the ▶ arrow until the label reads e.g.
    `3 (FLAGS)`) and **Destination Page** to the same live page (step its ▶ arrow; confirm the
    live label matches, e.g. `3 (FLAGS)`, so you replace the right page).
 6. The **“Import Connections Behavior”** table defaults each connection to **“Link to …”**
-   (links to the existing connection) — leave it; that is what preserves the producer's OBS
+   (links to the existing connection): leave it; that is what preserves the producer's OBS
    connection. Do **not** choose “Create new connection”.
 7. Click **“Replace page N with imported page”** (tag it first if the ref is unstable:
    `browser_evaluate` to set a known `id`, then `browser_click` that selector).
-8. The live page is updated instantly — proceed to capture (the `/tablet` view reflects it).
+8. The live page is updated instantly: proceed to capture (the `/tablet` view reflects it).
 
 The `.companionconfig` page indices are 1-based and match the page numbers
 (`1 PAGE 1`, `2 PAGE 2`, `3 FLAGS`).
@@ -83,7 +83,7 @@ In the web-buttons view at viewport **1280×720**:
   The board has **4 rows** per page → crop height **632**.
 
 Do **not** rely on the tile **count** (`.button-control` lazy-renders extra empty rows at
-taller viewports) — rely on the fixed top (56) and pitch (157), and the known **4 rows**.
+taller viewports): rely on the fixed top (56) and pitch (157), and the known **4 rows**.
 
 ## Procedure
 
@@ -105,12 +105,12 @@ Do this per page that changed. Example shown for **page 1**.
    ```
    Expect `top ≈ 56`.
 
-4. **Screenshot** the viewport (not an element — `.buttons-holder` has zero height and is
+4. **Screenshot** the viewport (not an element: `.buttons-holder` has zero height and is
    not screenshot-able):
    `mcp__…__browser_take_screenshot` → `type: png`, `filename: companion-vp.png`
    (it lands in the repo root / CWD).
 
-5. **Crop** the toolbar off with ffmpeg — `crop=W:H:X:Y`:
+5. **Crop** the toolbar off with ffmpeg, `crop=W:H:X:Y`:
    ```bash
    ffmpeg -y -loglevel error -i companion-vp.png \
      -vf "crop=1280:632:0:54" \
@@ -147,7 +147,7 @@ of the existing image for that page.** Observed forms:
 - `companion-page2-timer-audio.png` was shot with a left **UP / PAGE n / DOWN** nav column
   (buttons shifted one column right).
 - `?pages=3` on Companion **v4.3.4** renders the single page **without** a nav column (buttons
-  start in column 0), which matches the existing `companion-page3-flags.png` framing — so it
+  start in column 0), which matches the existing `companion-page3-flags.png` framing, so it
   is the correct URL for page 3.
 
 Before re-shooting a page, `Read` its existing image and reproduce the same framing (nav
@@ -157,5 +157,5 @@ column or not, buttons start column) and the same `1280×632` crop.
 
 - All three pages are shot with this recipe at `1280×632`.
 - Companion renders buttons as positioned `div`s (not `<img>`/`<canvas>`), and the
-  `.buttons-holder` wrapper has height 0 — that's why we screenshot the **viewport** and
+  `.buttons-holder` wrapper has height 0: that's why we screenshot the **viewport** and
   crop, rather than screenshotting an element.

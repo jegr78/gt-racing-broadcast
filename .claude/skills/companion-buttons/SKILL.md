@@ -1,9 +1,9 @@
 ---
 name: companion-buttons
-description: Add or change Companion buttons in src/companion/racecast-buttons.companionconfig and deploy+validate them autonomously — author the button JSON, export, import into a running Companion via Playwright, and click-test. Use when a relay control needs a Stream-Deck button. Pairs with companion-screenshots (screenshot geometry) — do the import here, then screenshot there.
+description: Add or change Companion buttons in src/companion/racecast-buttons.companionconfig and deploy+validate them autonomously: author the button JSON, export, import into a running Companion via Playwright, and click-test. Use when a relay control needs a Stream-Deck button. Pairs with companion-screenshots (screenshot geometry), do the import here, then screenshot there.
 ---
 
-# Companion buttons — author, import, validate
+# Companion buttons: author, import, validate
 
 Add/modify buttons on the Companion board **from the repo source** and get them live in a
 running Companion **without hand-clicking the UI**, then prove they fire. Learned the hard
@@ -15,7 +15,7 @@ export companion` writes the importable copy to `runtime/<profile>/racecast-butt
 ## Design the endpoint for a GET button first
 
 Every existing relay-control button is a generic-http **GET** with the whole request in the
-URL path (`/reload/A`, `/set/A/3`, `/feed/A/activate`). **Make the button hit a GET route** —
+URL path (`/reload/A`, `/set/A/3`, `/feed/A/activate`). **Make the button hit a GET route**,
 do NOT try to send a JSON body from a generic-http POST action. The generic-http v3 POST
 action's body-option schema is not reliably clonable by hand; a POST button imports and
 renders fine but silently sends an empty body (the relay gets `{}` → 400 → no-op). If the
@@ -40,13 +40,13 @@ a known-good GET button (e.g. page 1 "Feed A Reload") and change `style.text` + 
              "statusCodeVariable": {"isExpression": false}}, "upgradeIndex": 1, "type": "action"}
 ```
 
-**CRITICAL — preserve the file's formatting or the diff explodes.** The file is **1-space
+**CRITICAL: preserve the file's formatting or the diff explodes.** The file is **1-space
 indent** (`json.dumps(d, indent=1)`), keeps its trailing newline, and json.load preserves key
 order. Re-dumping with tabs reformats all 5000+ lines. Always: read raw → `json.loads` →
 insert your page/button → `json.dumps(d, indent=1)` (+ trailing "\n" if the original had one).
 Then `git diff --stat` must show **insertions only** (~60 lines/button). Generate unique ids
 with `secrets` (21 URL-safe chars). Keep `style.size` ≤ **14** for two-word labels like
-"FEED A\nROBUST" — size 18 clips the last character ("ROBUST"→"ROBUS") in a tile.
+"FEED A\nROBUST": size 18 clips the last character ("ROBUST"→"ROBUS") in a tile.
 
 Verify: `json.load` the result, then `racecast --profile <p> export companion` and confirm the
 exported file lists your new page/buttons.
@@ -54,27 +54,27 @@ exported file lists your new page/buttons.
 ## 2. Import into a running Companion (Playwright Python)
 
 Companion binds to the **Tailscale IP** from its `config.json` (`bind_ip`), e.g.
-`http://100.x.y.z:8000` — **not** localhost. Launch it with `open -a Companion` and poll that
+`http://100.x.y.z:8000`: **not** localhost. Launch it with `open -a Companion` and poll that
 address. Use a **persistent** context (`launch_persistent_context(user_data_dir=…)`) so the
 "What's New" modal stays dismissed. The working recipe:
 
 1. `goto <UI>/import-export`; if a "What's New in Companion" modal is present, press **Escape**
    a few times (it's a full-screen modal over the page).
-2. The **"Import configuration"** control is a `<label>` wrapping a **hidden `<input type=file>`**
-   — it is NOT a `<button>`, so text/role locators miss it. Set the file **directly on the input**:
+2. The **"Import configuration"** control is a `<label>` wrapping a **hidden `<input type=file>`**,
+   not a `<button>`, so text/role locators miss it. Set the file **directly on the input**:
    `pg.locator("input[type=file]").first.set_input_files(EXPORT)` (no chooser dance).
 3. The import wizard opens on the **Full Import** tab. Click the green
    **"Import Preserving Unselected"** button. This imports all button pages (including new
    ones) while **resetting only the selected components** (Buttons/Surfaces) and **preserving
-   the rest** (Settings) and **linking to existing connections** ("Link to …" is the default —
+   the rest** (Settings) and **linking to existing connections** ("Link to …" is the default,
    leave it). This is simpler and more robust than the Buttons-tab page-mapping.
 4. The page is live instantly. Verify: `goto <UI>/buttons` and read the Pages panel's name
-   inputs — your new page (e.g. "FEED QUALITY") must appear.
+   inputs: your new page (e.g. "FEED QUALITY") must appear.
 
 ## 3. Screenshot the page (for the wiki)
 
 Use **companion-screenshots** for the crop geometry. In short: `goto <UI>/tablet?pages=<N>`,
-viewport 1280×720 — the tiles render as **bitmaps** (element `innerText` is empty; that is
+viewport 1280×720: the tiles render as **bitmaps** (element `innerText` is empty; that is
 normal, the buttons ARE there), then
 `ffmpeg -i vp.png -vf "crop=1280:632:0:54" src/docs/wiki/images/companion-page<N>-<slug>.png`
 (1280×632, 4 rows). Read the PNG back and confirm the labels are complete (no clipping).
@@ -90,12 +90,12 @@ pg.locator(".button-control.clickable").nth(0).click()     # tile index = row*8 
 ```
 
 then `curl <relay>/status` and assert the state changed (e.g. `feeds.A.profile == "robust"`).
-A POST-body button passes rendering but fails here — that is the tell to use a GET route (see top).
+A POST-body button passes rendering but fails here, that is the tell to use a GET route (see top).
 
 ## Cleanup
 `racecast relay stop`; `pkill -f obs-sim.py`; `rm -f runtime/demo/stub-cookies.txt` (the shared jar stays);
 `git checkout -- profiles/<demo>/profile.env` (relay start writes CONSOLE_SECRET). Ask the
-operator before leaving/closing their Companion — you launched it.
+operator before leaving/closing their Companion: you launched it.
 
 ## Gotchas (all hit live)
 - POST generic-http action with a JSON body → silently empty body → 400. Use a **GET** route.

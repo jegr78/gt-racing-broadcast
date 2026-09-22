@@ -1,6 +1,6 @@
 ---
 name: walkthrough-videos
-description: Use when (re)building or updating the narrated MP4 onboarding walkthrough videos from the Reveal decks — e.g. a deck's slides or speaker notes changed, the voice/intro/outro needs refreshing, captions are wanted, or the videos must be re-rendered for the YouTube channel.
+description: Use when (re)building or updating the narrated MP4 onboarding walkthrough videos from the Reveal decks: e.g. a deck's slides or speaker notes changed, the voice/intro/outro needs refreshing, captions are wanted, or the videos must be re-rendered for the YouTube channel.
 ---
 
 # Build narrated walkthrough videos
@@ -8,7 +8,7 @@ description: Use when (re)building or updating the narrated MP4 onboarding walkt
 Renders one narrated 1080p MP4 per onboarding deck (`src/docs/slides/*.html`) for
 YouTube: Playwright screenshots each slide, a TTS engine voices the slide's
 `Note:` speaker note, ffmpeg muxes still+audio, and a shared intro/outro wraps
-every video. Local maintainer tool — **never CI** (needs a browser + TTS). Pure
+every video. Local maintainer tool: **never CI** (needs a browser + TTS). Pure
 logic is in `tools/walkthrough_core.py` (unit-tested in `tests/test_walkthrough.py`,
 which DO run in CI); the lifecycle is `tools/build-walkthrough-videos.py`. Design:
 `docs/superpowers/specs/2026-06-22-walkthrough-videos-design.md`.
@@ -43,7 +43,7 @@ the thumbnails (fast, no TTS/video/API key) with `--thumbnails-only`.
 ## Authoring speaker notes
 
 Each `<section data-markdown>` gets a `Note:` block (blank line, then `Note: …`)
-just before `</script>`. Plain spoken prose — no markdown/links — narrating ONLY
+just before `</script>`. Plain spoken prose, no markdown/links, narrating ONLY
 what the slide shows (repo rule: never invent facts). Notes are invisible in the
 live deck.
 
@@ -51,11 +51,11 @@ live deck.
 
 - **A/V sync:** each segment is frame-locked (audio==video length) and assembled
   in ONE pass via the ffmpeg `concat` filter. Never `-c copy`-concat per-slide
-  clips — the per-segment gap accumulates into seconds of drift.
+  clips: the per-segment gap accumulates into seconds of drift.
 - **gcloud audio = LINEAR16/WAV**, not MP3: MP3's ffprobe duration is only an
   estimate and would clip speech at the frame-lock step.
 - **Markdown `---` inside a template** makes Reveal split the slide into vertical
-  sub-slides — EACH half then needs its own `Note:`. `--list` counts templates and
+  sub-slides. EACH half then needs its own `Note:`. `--list` counts templates and
   under-reports this; trust the render's `N/N slides narrated` line (Reveal slide
   count), which loudly skips any un-narrated slide.
 - The intro/outro pages (`src/docs/slides/walkthrough-{intro,outro}.html`) must
