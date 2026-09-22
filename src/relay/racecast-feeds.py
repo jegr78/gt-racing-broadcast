@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
 """
-racecast-feeds.py — Relay mode for the GT Racing Broadcast (2-feed ping-pong)
+racecast-feeds.py. Relay mode for the GT Racing Broadcast (2-feed ping-pong)
 with a remotely-maintainable stint schedule from a Google Sheet.
 
 Concept: exactly one commentator stream per stint. Two fixed OBS feeds
 (Feed A = port 53001, Feed B = port 53002) "walk" along a stint schedule.
 Feed A serves the odd stints (1,3,5…), Feed B the even ones (2,4,6…) when
-starting from stint 1 — with `--stint N` (producer takeover) the same
+starting from stint 1, with `--stint N` (producer takeover) the same
 ping-pong simply starts at stint N on Feed A. At each handover the feed
 that is currently NOT on air advances to its next commentator.
 
 OBS stays untouched: the media sources keep pointing at
-http://127.0.0.1:53001 / :53002 — only the channel behind them changes.
+http://127.0.0.1:53001 / :53002, only the channel behind them changes.
 
 SCHEDULE SOURCE (Google Sheet, editable remotely by anyone):
   The "Schedule" tab of the shared HUD sheet is read via CSV export
   (no API key). Any column holds the channel IDs (UC…) OR full URLs in
-  stint order — the channel column is auto-detected (other columns such
+  stint order: the channel column is auto-detected (other columns such
   as stint number / commentator name are ignored).
   Requirement: the sheet is shared "Anyone with the link: Viewer"
   (same as the HUD sheet).
@@ -31,17 +31,17 @@ SCHEDULE SOURCE (Google Sheet, editable remotely by anyone):
 COOKIES:
   YouTube (required for unlisted/private streams): put a yt-cookies.txt
   (Netscape format, exported from a logged-in YouTube browser via
-  `racecast cookies firefox`) next to this script — it is auto-detected
+  `racecast cookies firefox`) next to this script. It is auto-detected
   and passed to yt-dlp. A legacy cookies.txt is migrated automatically.
   Or pass it explicitly: --cookies /path/to/yt-cookies.txt
   Twitch (optional): gated/follower-only feeds use twitch-cookies.txt
   (exported via `racecast cookies twitch firefox`); public Twitch streams
   need no cookies at all. The relay picks it up automatically for Twitch feeds.
 
-SCHEDULE ENTRIES — use a full watch URL for each stint:
+SCHEDULE ENTRIES, use a full watch URL for each stint:
   YouTube: https://www.youtube.com/watch?v=VIDEOID  (bare UC… channel IDs
     also work as a shorthand for YouTube public /live streams; unlisted streams
-    MUST use the full watch URL — the channel /live URL only works for public).
+    MUST use the full watch URL, the channel /live URL only works for public).
   Twitch:  https://www.twitch.tv/<channel>  (no bare-ID short form for Twitch).
 
 Controls (HTTP, for Companion Generic-HTTP / browser / curl):
@@ -50,7 +50,7 @@ Controls (HTTP, for Companion Generic-HTTP / browser / curl):
   GET /next/A | /B      -> advance Feed A or B specifically
   GET /prev/A | /B      -> step back one (correction)
   GET /set/A/<n> | /B   -> pin Feed A/B to schedule index <n>
-  GET /set/stint/<n>   -> producer takeover: stint <n> (1-based!) is on air now —
+  GET /set/stint/<n>   -> producer takeover: stint <n> (1-based!) is on air now.
                            Feed A serves it, Feed B preloads <n+1> (tears running feeds)
   GET /reload          -> reconnect both feeds (applies a sheet change to the
                            CURRENT channel immediately)
@@ -92,11 +92,11 @@ _OBS_WS_MODULE = _obs_ws
 
 class _RelayObsFacade:
     """Routes Relay/handler obs_ws.* calls (#537) through two persistent connection
-    holders — but ONLY when the module-level `_obs_ws` name currently refers to the
+    holders: but ONLY when the module-level `_obs_ws` name currently refers to the
     real obs_ws module (recognisable by its `route_kind` helper). Every lookup is
     late-bound to `_obs_ws` at CALL time (not frozen at Relay construction), so a
-    test that monkeypatches `_obs_ws` to a lightweight fake — before or after a Relay
-    already exists — still gets a direct, unwrapped call to that fake, exactly like
+    test that monkeypatches `_obs_ws` to a lightweight fake, before or after a Relay
+    already exists, still gets a direct, unwrapped call to that fake, exactly like
     the pre-#537 `_obs_ws.<fn>(...)` call sites (no surprise `session=` kwarg, no
     real socket connect attempt from a unit test). Only the real module's routed
     functions ever go through `_ObsConn`/`_PassthroughConn.run()`."""
@@ -196,7 +196,7 @@ QUEUE_DEADLINE_MIN_TARGETDURATION_S = 1.0
 def queue_deadline_factor(stall_s, min_targetduration_s=QUEUE_DEADLINE_MIN_TARGETDURATION_S):
     """Multiplier for streamlink's early stop on the FAN-OUT path, derived so its deadline
     outlasts the relay's own byte-stall watchdog (RACECAST_FEED_STALL_S) and the watchdog
-    stays the single authority on a dead source — a streamlink that quits first turns a gap
+    stays the single authority on a dead source. A streamlink that quits first turns a gap
     the watchdog would have ridden out into a full re-resolve. The deadline is a multiple of
     the playlist's targetduration, which the broadcaster picks, so a fixed factor cannot hold
     that order; one targetduration of margin covers the segment still being written when the
@@ -207,7 +207,7 @@ def queue_deadline_factor(stall_s, min_targetduration_s=QUEUE_DEADLINE_MIN_TARGE
 
 def queue_deadline_args(help_text, factor=QUEUE_DEADLINE_FACTOR):
     """Pick streamlink's 'stop early on missing live segments' flag by CAPABILITY, from
-    `streamlink --help` text — never by hardcoded version. Prefer the modern
+    `streamlink --help` text: never by hardcoded version. Prefer the modern
     --stream-segmented-queue-deadline (streamlink 8.1.0+), fall back to the older
     --hls-segment-queue-threshold, and OMIT entirely when neither exists (an unknown flag
     would abort streamlink → the feed never serves). Pure → unit-tested."""
@@ -293,7 +293,7 @@ def serve_flags(platform, tier):
     """The streamlink buffer/live-edge flags a serve actually runs with. THE one place
     that decides it: both command builders and the rejoin's prefetch wait read it here,
     so a new platform or tier can never hand the command one answer and the wait
-    another — and the wait's drift would be silent, since a wrong wait produces a
+    another: and the wait's drift would be silent, since a wrong wait produces a
     backlog rather than an error. Pure -> unit-tested."""
     return streamlink_twitch_flags(tier) if platform == "twitch" else streamlink_serve_flags(tier)
 
@@ -320,7 +320,7 @@ def quality_step_down_due(tier, pinned, dead_serves, source_state,
                           *, threshold=ROBUST_STEP_DOWN_AFTER):
     """True when a feed should auto-step-down FULL->ROBUST: only while not manually
     pinned, only from FULL (720p is the hard floor), only for a live-but-degraded
-    source (source_state None — an offline/not-live/ended source has no picture at any
+    source (source_state None, an offline/not-live/ended source has no picture at any
     rendition, so a lower cap cannot help), once dead (short) serves reach `threshold`.
     Pure → unit-tested."""
     return (not pinned) and tier == "full" and source_state is None \
@@ -351,7 +351,7 @@ def should_idle_dead_serves(count, limit=DEAD_SERVE_IDLE_AFTER):
 
 def feed_fast_exit_error(elapsed_s, returncode, fast_exit_s=FEED_FAST_EXIT_S):
     """A short last_error when a feed's streamlink exited almost immediately with a
-    non-zero code — almost always a failed --player-external-http bind (an orphan
+    non-zero code: almost always a failed --player-external-http bind (an orphan
     still holds the port; the #133 case). Returns None for a clean (rc 0), unknown
     (rc None), or long-lived exit, so the normal serving path never sets a spurious
     error. Pure → unit-tested in tests/test_pov.py (issue #143)."""
@@ -359,12 +359,12 @@ def feed_fast_exit_error(elapsed_s, returncode, fast_exit_s=FEED_FAST_EXIT_S):
         return None
     if elapsed_s is None or elapsed_s >= fast_exit_s:
         return None
-    return "feed exited immediately — port in use? see feed log"
+    return "feed exited immediately: port in use? see feed log"
 
 
 def serve_exit_is_drop(stopped, advancing):
-    """A serving feed's streamlink process exited. It is an unexpected DROP — the
-    live picture was lost — UNLESS the exit was intentional: a relay shutdown
+    """A serving feed's streamlink process exited. It is an unexpected DROP, the
+    live picture was lost, UNLESS the exit was intentional: a relay shutdown
     (`stopped`) or a director handover/reload (`advancing`). Drives the panel's
     feed-down alert so it fires on a real loss, not on every normal handover.
     Pure → unit-tested in tests/test_pov.py."""
@@ -498,7 +498,7 @@ def fold_backlog_floor(prev, age):
 
 def feed_inbound_degraded(max_gap_s, prebuffer_s, floor_s):
     """#535: an interval's max inbound inter-arrival gap is a stutter risk when it exceeds
-    BOTH the #533 reserve (prebuffer_s — a gap the prebuffer absorbed is fine) and the floor
+    BOTH the #533 reserve (prebuffer_s, a gap the prebuffer absorbed is fine) and the floor
     (so prebuffer=0 still needs a real gap). Pure."""
     return max_gap_s > max(prebuffer_s, floor_s)
 
@@ -513,7 +513,7 @@ def update_max_gap(prev_max, last_byte_ts, now):
 
 def feed_freeze_detect_enabled(environ):
     """True unless RACECAST_FEED_FREEZE_DETECT is an explicit falsey token. Default ON: the
-    relay auto-reconnects a feed's OBS input when OBS's mediaCursor stops advancing — a
+    relay auto-reconnects a feed's OBS input when OBS's mediaCursor stops advancing. A
     stale-demuxer freeze/stutter the renderSkip signal is blind to (#488, measured live
     2026-07-15). Pure so the switch is unit-testable."""
     return str(environ.get("RACECAST_FEED_FREEZE_DETECT", "")).strip().lower() not in _FANOUT_FALSEY
@@ -556,7 +556,7 @@ def feed_freeze_window(environ):
 
 
 def feed_freeze_interval_s(environ):
-    """Seconds between cursor samples — the freeze sampler cadence, finer than the 30 s
+    """Seconds between cursor samples: the freeze sampler cadence, finer than the 30 s
     heartbeat since stutter stalls recur every few seconds. Default 3.0. #488. Pure."""
     return _env_float(environ, "RACECAST_FEED_FREEZE_INTERVAL_S", 3.0)
 
@@ -590,7 +590,7 @@ _MANUAL_FEED_ARM_FALSEY = {"0", "false", "no", "off"}
 def manual_feed_arm_enabled(environ):
     """True unless RACECAST_MANUAL_FEED_ARM is an explicit falsey token. Default ON:
     feed URLs are entered into the schedule but do NOT pull until the director arms
-    the feed, and `/next` auto-stops the outgoing feed after a handover cut — the
+    the feed, and `/next` auto-stops the outgoing feed after a handover cut. The
     durable single-puller workflow (#489/#505). Set RACECAST_MANUAL_FEED_ARM=0 to
     restore the legacy auto-pull + seamless whole-stint pre-roll. Pure so the switch
     is unit-testable."""
@@ -698,7 +698,7 @@ class ProgramShotCache:
     returns a recent successful `(data, "")` without calling `fetcher` while the last
     frame is younger than `ttl_s`; otherwise it calls `fetcher()` (an obs-websocket
     screenshot), caches a successful frame, and returns it. A failed fetch is never
-    cached (the next caller retries) — same best-effort contract as the raw call.
+    cached (the next caller retries). Same best-effort contract as the raw call.
     The network fetch runs OUTSIDE the lock so pollers never serialize behind a slow
     screenshot; a rare concurrent miss just does one extra fetch (harmless)."""
 
@@ -730,7 +730,7 @@ _program_shot_cache = ProgramShotCache()
 
 def feed_stalled(last_byte_ts, now, stall_s=FANOUT_STALL_S):
     """True iff a fan-out live reader has produced bytes before but none for
-    `stall_s`. A None timestamp (never produced) is NOT a stall — that startup
+    `stall_s`. A None timestamp (never produced) is NOT a stall. That startup
     case is handled by the existing dead_serves path, not the watchdog."""
     return last_byte_ts is not None and (now - last_byte_ts) > stall_s
 
@@ -739,21 +739,21 @@ def snap_bytes(prev_cursor, new_cursor, data_len):
     """Bytes a fan-out consumer lost to a ring cursor-snap. FeedRing.read returns
     (data, new_cursor) with data == buf[cursor-base:], so the served bytes span
     [new_cursor-data_len, new_cursor). If that start ran past prev_cursor the ring had
-    overflowed the consumer and read() snapped it forward, skipping the gap. Pure —
-    returns the skipped byte count (0 when the consumer kept up)."""
+    overflowed the consumer and read() snapped it forward, skipping the gap. Pure.
+    Returns the skipped byte count (0 when the consumer kept up)."""
     skipped = (new_cursor - data_len) - prev_cursor
     return skipped if skipped > 0 else 0
 
 
 def should_obs_reconnect(fanout, dropped, consumer_attached=False):
     """Whether a re-serve should force OBS to reconnect its feed input. Only in fan-out
-    mode — the relay is the persistent server, so OBS's socket survives a streamlink
+    mode: the relay is the persistent server, so OBS's socket survives a streamlink
     restart and the fresh stream is spliced into a stale demuxer. Direct-serve needs
     nothing: OBS holds the socket to streamlink itself and reconnects on its own.
 
     Within fan-out, two cases splice and therefore rejoin:
-      * `dropped` — streamlink died unexpectedly (the original #537 drop-recovery);
-      * `consumer_attached` — a consumer was still reading this feed's ring when the
+      * `dropped`, streamlink died unexpectedly (the original #537 drop-recovery);
+      * `consumer_attached`, a consumer was still reading this feed's ring when the
         restart happened. That is the director's restart in place (`/reload`, a tier
         change) and a `set_index` on a feed OBS is on air with, including the solo and
         qualifying single-feed `/next` (#614). Before this, all three left `dropped`
@@ -790,7 +790,7 @@ SEGMENT_FETCH_BUDGET_S = 1.0
 
 def live_edge_segments(flags):
     """The --hls-live-edge count in a streamlink flag list (the prefetch burst's size in
-    segments). Returns 0 when the flag is absent, which makes the rejoin immediate — the
+    segments). Returns 0 when the flag is absent, which makes the rejoin immediate. The
     honest answer for a reader with no HLS prefetch. Pure -> unit-tested."""
     try:
         return max(0, int(flags[flags.index("--hls-live-edge") + 1]))
@@ -806,7 +806,7 @@ def prefetch_land_s(segments, prebuffer_s, budget_s=SEGMENT_FETCH_BUDGET_S):
     `trailing_offset(prebuffer_s)`, so the join lands past the burst only once the burst
     is older than `prebuffer_s`. Hence the burst's arrival span plus `prebuffer_s`. The
     span is capped at `segments` x the per-segment budget because it is the one part that
-    depends on the producer's connection — the relay measures the real span instead and
+    depends on the producer's connection. The relay measures the real span instead and
     only falls back to this bound (see Feed._obs_rejoin_after_prefetch).
 
     `segments == 0` (the local capture ffmpeg, #592, or a reader with no live-edge flag)
@@ -822,7 +822,7 @@ def rejoin_is_stale(stopped, advancing, gen_at_start, gen_now, serving=True):
     stopping, a restart is already under way, another serve has taken over since the
     rejoin was scheduled, or the feed is no longer serving.
 
-    The first three protect the NEWEST serve — rebuilding then would drop OBS onto its
+    The first three protect the NEWEST serve. Rebuilding then would drop OBS onto its
     prefetch burst, exactly what the wait exists to avoid. `serving` covers the case none
     of them sees: a serve that delivered bytes and then died inside the wait leaves stop,
     advance and the generation untouched for the whole window, because the next serve
@@ -835,7 +835,7 @@ def rejoin_is_stale(stopped, advancing, gen_at_start, gen_now, serving=True):
 def cursor_progress_ratio(prev_cursor_ms, cursor_ms, dt_s):
     """OBS mediaCursor advance rate for one heartbeat: (Δcursor seconds)/(Δwall seconds).
     1.0 = playing at real-time, 0.0 = frozen (no advance). None when it can't be measured: a
-    missing sample, dt<=0, or a BACKWARDS cursor (a RESET/demuxer-rebuild jump — recovery, not
+    missing sample, dt<=0, or a BACKWARDS cursor (a RESET/demuxer-rebuild jump, recovery, not
     a stall). #488 reliable freeze signal: renderSkippedFrames is a compositor render-timing
     metric, blind to a source-side demuxer freeze (measured live 2026-07-15, renderSkip 0% /
     fps 60 while the picture is frozen). Pure → unit-tested."""
@@ -849,8 +849,8 @@ def cursor_progress_ratio(prev_cursor_ms, cursor_ms, dt_s):
 
 def stall_fraction(ratios, *, stall_ratio):
     """Fraction of MEASURED ticks whose cursor-progress ratio is below stall_ratio (a stalled
-    tick). Skips None (unmeasurable) entries; returns None when nothing is measurable. This —
-    not the window mean — is the stutter signal: a choppy feed averages ~1x but has many
+    tick). Skips None (unmeasurable) entries; returns None when nothing is measurable. This.
+    Not the window mean. Is the stutter signal: a choppy feed averages ~1x but has many
     zero-progress ticks, while a healthy feed has none. Pure → unit-tested."""
     measured = [r for r in ratios if r is not None]
     if not measured:
@@ -871,7 +871,7 @@ def freeze_decision(frac, since_last_reset_s, *, frac_threshold, cooldown_s):
 def backlog_shed_decision(streak, since_last_reset_s, *, min_streak, cooldown_s):
     """Whether to auto-rebuild the on-air feed's OBS input: True after `min_streak`
     consecutive backlogged heartbeats, once the shared cooldown has elapsed. Same shape as
-    `freeze_decision` — both pull the same control. A None streak never trips it. Pure."""
+    `freeze_decision`: both pull the same control. A None streak never trips it. Pure."""
     if since_last_reset_s is not None and since_last_reset_s < cooldown_s:
         return False
     return streak is not None and streak >= min_streak
@@ -914,7 +914,7 @@ class RebuildGuard:
 
     @property
     def stood_down(self):
-        """True when ANY reason gave up — the Director Panel reads this as a plain bool."""
+        """True when ANY reason gave up. The Director Panel reads this as a plain bool."""
         return bool(self._stood_down)
 
     @property
@@ -938,7 +938,7 @@ class RebuildGuard:
         return False
 
     def judge(self, still_bad, *, reason="freeze"):
-        """Judge the pending rebuild, but only if THIS reason fired it — the two judges run
+        """Judge the pending rebuild, but only if THIS reason fired it. The two judges run
         on different threads, and either would otherwise consume the other's. True when
         this call stood the guard down. `still_bad is None` consumes nothing."""
         if self.pending != reason or still_bad is None:
@@ -985,7 +985,7 @@ FEED_CHURN_COOLDOWN_S = 300    # at most one churn @here per feed per 5 min
 def feed_recovery_churn(recovery_ts, now, window_s=FEED_CHURN_WINDOW_S,
                         threshold=FEED_CHURN_THRESHOLD):
     """True when at least `threshold` recovery timestamps fall within the last `window_s`
-    seconds — i.e. the feed is churning, not a one-off blip. Pure → unit-tested."""
+    seconds: i.e. the feed is churning, not a one-off blip. Pure → unit-tested."""
     recent = [t for t in recovery_ts if t is not None and 0 <= (now - t) <= window_s]
     return len(recent) >= threshold
 
@@ -1001,7 +1001,7 @@ def churn_at_here_suppressed(source_state):
 def feed_health_state(dropped, dropped_since, served_ok, now,
                       grace_s=HEALTH_DROP_GRACE_S):
     """Classify one feed's live health as 'down' / 'connecting' / 'ok' from its
-    drop flags + timestamps — debouncing the raw `dropped` flag so a brief blip
+    drop flags + timestamps. Debouncing the raw `dropped` flag so a brief blip
     or a never-served (demo/startup) feed never pages CRITICAL. Pure →
     unit-tested in tests/test_health.py.
 
@@ -1028,7 +1028,7 @@ def drop_connecting_notifiable(dropped, dropped_since, now,
     yet. Pure → unit-tested.
 
     A SERVED feed that just dropped is a silent blip until it has stayed down past
-    `settle_s` — so a reconnect that self-heals within a heartbeat (the fan-out
+    `settle_s`: so a reconnect that self-heals within a heartbeat (the fan-out
     EOF-churn / byte-stall re-serve on a VOD) never pages the crew. A feed that
     is not dropped (a never-served startup connect) is notifiable immediately, so
     this only changes the just-dropped case. Red escalation is unaffected: a drop
@@ -1048,7 +1048,7 @@ def qualifying_downgrade_note(requested_qualifying, has_qual_source, qual_tab):
     unit-tested. Returns the message, or None when there is nothing to warn about."""
     if requested_qualifying and not has_qual_source:
         return (f"--qualifying was requested but the Qualifying schedule source is "
-                f"UNAVAILABLE (tab '{qual_tab}') — the relay is running in RACE mode. The "
+                f"UNAVAILABLE (tab '{qual_tab}'). The relay is running in RACE mode. The "
                 f"Parts control will select the wrong Producer part / stream key. Fix the "
                 f"Sheet's '{qual_tab}' tab, then restart.")
     return None
@@ -1058,28 +1058,28 @@ def aggregate_health(facts):
     """Roll up the relay's live facts into one level + human reasons. Pure →
     unit-tested. `facts` keys: feeds_down (list of feed names with a lost live
     serve), feeds_connecting_long (list connecting past HEALTH_CONNECTING_S, not
-    down), cookies_stale (bool), obs_reachable (True/False/None — None = not yet
+    down), cookies_stale (bool), obs_reachable (True/False/None, None = not yet
     probed, never an alarm), tailscale_present (bool),
-    stream_active (True/False/None — OBS streaming state; None = not yet known),
-    stream_expected (bool — OBS has streamed at least once this session; the
+    stream_active (True/False/None, OBS streaming state; None = not yet known),
+    stream_expected (bool, OBS has streamed at least once this session; the
         off-air alarm latches on this so a pre-show relay start never pings),
-    stream_reconnecting (bool — OBS upstream unstable),
-    funnel_down (bool — Funnel was previously seen up but is now down),
-    sheet_push_failing (bool — Sheet webhook returning errors),
+    stream_reconnecting (bool, OBS upstream unstable),
+    funnel_down (bool, Funnel was previously seen up but is now down),
+    sheet_push_failing (bool, Sheet webhook returning errors),
     feed_source_states (optional dict mapping feed name to source_state),
     feeds_jittery (list of feed names whose last heartbeat interval's max inbound
-        gap exceeded the fan-out reserve — a quiet, display-only yellow (#535);
+        gap exceeded the fan-out reserve, a quiet, display-only yellow (#535);
         never included in the notify-level facts, so it never pages Discord),
     rebuilds_stood_down (optional dict feed name -> OBS fps or None: the #582
         effectiveness guard stood the automatic OBS rebuild down on that feed),
     feeds_backlogged (optional dict feed name -> seconds behind live: OBS accepts that
-        feed's bytes slower than real time, #583 — a quiet, display-only yellow that
+        feed's bytes slower than real time, #583, a quiet, display-only yellow that
         is excluded from the notify-level facts until #581 stage 4 calibrates it; the
         reason names the RESET for Feed A/B, the only feeds that have one, #588).
 
     red  = any feed down (a live picture was lost); or obs_reachable truthy and
            stream_active is False AND stream_expected (OBS connected and has
-           streamed before but is not streaming now — a live broadcast dropped
+           streamed before but is not streaming now, a live broadcast dropped
            off air). The stream_expected latch means starting the relay pre-show,
            before OBS ever goes live, never alarms.
     yellow = OBS WebSocket unreachable · cookies stale · Tailscale down · a feed
@@ -1091,38 +1091,38 @@ def aggregate_health(facts):
     sstates = facts.get("feed_source_states") or {}
     for name in facts.get("feeds_down") or []:
         if sstates.get(name) == "ended":
-            red.append(f"Feed {name} — source's live stream ENDED "
-                       f"(no auto-recovery — switch source)")
+            red.append(f"Feed {name}: source's live stream ENDED "
+                       f"(no auto-recovery, switch source)")
         else:
-            red.append(f"Feed {name} down — lost the live stream")
+            red.append(f"Feed {name} down: lost the live stream")
     # OBS reachable but not streaming = off air, but only AFTER OBS has streamed
     # at least once this session (stream_expected latch), so starting the relay
     # pre-show, before OBS ever goes live, never fires a CRITICAL ping.
     if (facts.get("obs_reachable") and facts.get("stream_active") is False
             and facts.get("stream_expected")):
-        red.append("OBS is not streaming — broadcast is off air")
+        red.append("OBS is not streaming. Broadcast is off air")
     if facts.get("obs_reachable") is False:
-        yellow.append("OBS WebSocket unreachable — no auto-cut")
+        yellow.append("OBS WebSocket unreachable: no auto-cut")
     if facts.get("obs_reachable") and facts.get("stream_reconnecting"):
-        yellow.append("OBS stream reconnecting — upstream unstable")
+        yellow.append("OBS stream reconnecting: upstream unstable")
     if facts.get("funnel_down"):
-        yellow.append("Funnel down — commentators cannot reach the cockpit")
+        yellow.append("Funnel down: commentators cannot reach the cockpit")
     if facts.get("sheet_push_failing"):
-        yellow.append("Sheet webhook failing — panel writes are not saved")
+        yellow.append("Sheet webhook failing: panel writes are not saved")
     if facts.get("cookies_stale"):
-        yellow.append("YouTube cookies stale — handovers may fail")
+        yellow.append("YouTube cookies stale: handovers may fail")
     if not facts.get("tailscale_present", True):
-        yellow.append("Tailscale not connected — directors cannot reach the panel")
+        yellow.append("Tailscale not connected: directors cannot reach the panel")
     for name in facts.get("feeds_connecting_long") or []:
         if sstates.get(name) == "not_live_yet":
-            yellow.append(f"Feed {name} — commentator source not live yet (connecting)")
+            yellow.append(f"Feed {name}: commentator source not live yet (connecting)")
         else:
             yellow.append(f"Feed {name} stuck connecting")
     for name in facts.get("feeds_jittery") or []:
-        yellow.append(f"Feed {name} inbound stall — a gap exceeded the fan-out reserve (stutter risk)")
+        yellow.append(f"Feed {name} inbound stall. A gap exceeded the fan-out reserve (stutter risk)")
     for name, fps in (facts.get("rebuilds_stood_down") or {}).items():
         renders = f" (producer host renders {fps:.0f} fps)" if fps is not None else ""
-        yellow.append(f"Feed {name} rebuild ineffective — {REBUILD_GUARD_MAX_ATTEMPTS} OBS "
+        yellow.append(f"Feed {name} rebuild ineffective: {REBUILD_GUARD_MAX_ATTEMPTS} OBS "
                       f"rebuilds did not clear the stall{renders}; auto-rebuild paused")
     # #588: the next step is the deliberate RESET (#587), with its cost. Not ROBUST: that
     # tier restarts streamlink without rejoining OBS and, for YouTube, starts two segments
@@ -1130,7 +1130,7 @@ def aggregate_health(facts):
     for name, behind in (facts.get("feeds_backlogged") or {}).items():
         step = (f"; RESET {name} → LIVE drops it with a short black dropout"
                 if name in ("A", "B") else "")
-        yellow.append(f"Feed {name} output {behind:.0f} s behind live — OBS reads slower than "
+        yellow.append(f"Feed {name} output {behind:.0f} s behind live. OBS reads slower than "
                       f"real time{step}")
     # #619: OBS already repaired this one by the time we read its log, so the reason
     # reports it and asks for eyes instead of naming a fix. Only UNEXPLAINED repairs
@@ -1138,7 +1138,7 @@ def aggregate_health(facts):
     for name, ms in (facts.get("feeds_av_disturbed") or {}).items():
         amount = f" by {ms:.0f} ms" if ms is not None else ""
         yellow.append(f"Feed {name} audio timing broke{amount} with no restart to explain "
-                      f"it — OBS re-synced itself; check the program picture and sound")
+                      f"it: OBS re-synced itself; check the program picture and sound")
     reasons.extend(red)
     reasons.extend(yellow)
     level = "red" if red else ("yellow" if yellow else "green")
@@ -1158,13 +1158,13 @@ def discord_health_payload(level, reasons, prev_level=None, event_title="", prod
     """Discord webhook JSON for a health transition. Pure → unit-tested. A return
     to green reads as a recovery; otherwise it announces the degraded state and
     lists the reasons. Every health change (degraded AND recovery) carries an
-    @here ping so the crew is pulled in even if the panel pill goes unnoticed —
-    the mention MUST sit in top-level `content` with allowed_mentions permitting
+    @here ping so the crew is pulled in even if the panel pill goes unnoticed.
+    The mention MUST sit in top-level `content` with allowed_mentions permitting
     it, because Discord ignores mentions inside an embed. The footer shows
-    `<event_title> · <producer>` (#207/#317 — which host raised it); empty -> no
+    `<event_title> · <producer>` (#207/#317, which host raised it); empty -> no
     footer."""
     if level == "green":
-        title = "✅ Broadcast health recovered — all systems green"
+        title = "✅ Broadcast health recovered. All systems green"
         desc = "Recovered from a previous issue." if prev_level and prev_level != "green" \
             else "All systems green."
     else:
@@ -1186,9 +1186,9 @@ def discord_failover_payload(on_air_feed, scene, event_title="", producer=""):
     mentions inside an embed) so the crew is pulled in the instant the program is
     auto-switched. The footer shows `<event_title> · <producer>` (#207/#317)."""
     desc = (f"The on-air feed (Feed {on_air_feed}) stayed down past the grace "
-            f"window — OBS was automatically switched to the **{scene}** scene. "
+            f"window: OBS was automatically switched to the **{scene}** scene. "
             "Return is manual: re-take the feed once it recovers.")
-    embed = {"title": "🛟 Auto-failover — switched to Intermission",
+    embed = {"title": "🛟 Auto-failover: switched to Intermission",
              "description": desc, "color": HEALTH_COLORS["red"]}
     footer = notify._footer(event_title, producer)
     if footer:
@@ -1201,13 +1201,13 @@ def discord_failover_payload(on_air_feed, scene, event_title="", producer=""):
 
 def discord_step_down_payload(feed, stint, from_tier, to_tier, event_title="", producer=""):
     """Discord webhook JSON for an auto quality step-down (#493). @here in top-level
-    content — actionable: the source is struggling and the director must decide the
+    content: actionable: the source is struggling and the director must decide the
     manual step-up. Pure → unit-tested."""
-    desc = (f"Feed {feed} (stint {stint}) could not sustain **{from_tier}** — the relay "
+    desc = (f"Feed {feed} (stint {stint}) could not sustain **{from_tier}**. The relay "
             f"automatically reduced it to **{to_tier}** (720p) to keep a continuous "
             "picture. Step-up is manual: raise it again from the Director Panel once the "
             "source recovers.")
-    embed = {"title": "📉 Quality step-down — source struggling",
+    embed = {"title": "📉 Quality step-down: source struggling",
              "description": desc, "color": HEALTH_COLORS["yellow"]}
     footer = notify._footer(event_title, producer)
     if footer:
@@ -1250,15 +1250,15 @@ def stream_event_log_line(started, kbps=None, uptime_s=None):
     unit-tested; the caller emits it via LOG.info so the event is greppable in
     `racecast relay logs` alongside the feed events (it complements the Discord
     push + Health-Monitor marker). On start it appends the upstream kbps when
-    known — the first sample is a partial-window estimate, so it is an approximate
+    known: the first sample is a partial-window estimate, so it is an approximate
     'bytes are flowing' signal (hence the '~'), not an exact bitrate. On stop it
     appends the stream uptime when known. Note: OBS-WebSocket only sees bytes going
-    to the ingest — it cannot know whether a YouTube/Twitch broadcast is bound, so
+    to the ingest: it cannot know whether a YouTube/Twitch broadcast is bound, so
     a healthy kbps confirms egress, never that a watchable broadcast exists."""
     if started:
         head = "OBS stream output started"
         if kbps is not None:
-            head += f" — upstream ~{kbps:.0f} kbps"
+            head += f": upstream ~{kbps:.0f} kbps"
         return head
     head = "OBS stream output stopped"
     dur = _fmt_uptime(uptime_s)
@@ -1270,7 +1270,7 @@ def stream_event_log_line(started, kbps=None, uptime_s=None):
 def event_stop_argv(frozen, exe, rel_here):
     """Argv to spawn a detached `racecast event stop`. Frozen: re-invoke the binary
     itself (like the relay/streams daemons). Source: python runs ../racecast.py
-    relative to the relay script dir. Pure — I/O is in Relay._spawn_event_stop."""
+    relative to the relay script dir. Pure. I/O is in Relay._spawn_event_stop."""
     if frozen:
         return [exe, "event", "stop"]
     return [exe, os.path.join(rel_here, os.pardir, "racecast.py"), "event", "stop"]
@@ -1339,13 +1339,13 @@ def parse_tailscale_status(output):
 def _no_window_kwargs(os_name=None):
     """Popen/run kwargs that stop a console child from flashing its own terminal
     window on Windows. The relay is spawned as a daemon with DETACHED_PROCESS
-    (services.spawn_kwargs), so it has NO console — every console subprocess it
+    (services.spawn_kwargs), so it has NO console. Every console subprocess it
     starts (yt-dlp, streamlink, the tailscale CLI) otherwise pops a transient
     window, and the per-feed yt-dlp resolve fires every ~15 s, so the desktop
     flickers continuously during an event (issue #30). CREATE_NO_WINDOW gives the
     child a hidden console instead; harmless when a console already exists (the
     foreground `racecast relay run`), and a no-op (empty kwargs) off Windows so the
-    same spawn site stays cross-platform. Mirrors services.no_window_kwargs — the
+    same spawn site stays cross-platform. Mirrors services.no_window_kwargs. The
     standalone relay imports nothing from scripts/, so the flag is duplicated here
     (same pattern as detect_tailscale_ip)."""
     os_name = os.name if os_name is None else os_name
@@ -1401,7 +1401,7 @@ def loopback_bind_failed(requested, bound):
     OBS always reaches the relay on 127.0.0.1, so binding the loopback is
     mandatory whenever it was requested (the 'auto'/'127.0.0.1' binds). If a
     stale relay already holds the loopback port, the dual-bind 'auto' path would
-    otherwise bind only the Tailscale IP and run on — a silent split-brain where
+    otherwise bind only the Tailscale IP and run on. A silent split-brain where
     127.0.0.1 keeps serving the OLD relay (e.g. 'hud disabled') while the new one
     hides on the tailnet (issue #84). An explicit --bind 0.0.0.0 / specific IP
     never requested loopback, so this rule does not apply there.
@@ -1417,7 +1417,7 @@ def control_port_available(host, port):
     On POSIX it sets SO_REUSEADDR so it agrees with the authoritative HTTPServer bind
     (which inherits allow_reuse_address=1). Without it, a port merely in TIME_WAIT after
     a prior relay's control-port connections is falsely reported "in use", so a fresh
-    start — e.g. `event start` right after clearing a stale holder — aborts a bind that
+    start, e.g. `event start` right after clearing a stale holder, aborts a bind that
     would actually succeed (the 2026-07-10 event-start race). A LIVE listener still fails
     the bind with EADDRINUSE even with SO_REUSEADDR on POSIX, so a genuinely running relay
     is still detected. On Windows SO_REUSEADDR is deliberately OMITTED: there it lets a
@@ -1436,7 +1436,7 @@ def control_port_available(host, port):
         s.close()
 
 SCHEDULE_TEMPLATE = (
-    "# racecast relay offline fallback schedule — used ONLY if the Google Sheet AND the\n"
+    "# racecast relay offline fallback schedule, used ONLY if the Google Sheet AND the\n"
     "# last-good cache are both unavailable. One entry per stint, in order:\n"
     "#   a YouTube channel ID (UC...) OR a full watch URL (https://www.youtube.com/watch?v=...).\n"
     "# Lines starting with # are ignored. The real schedule lives in the Sheet tab 'Schedule'.\n"
@@ -1462,7 +1462,7 @@ _LOGO_CTYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"
 
 def servable_logo_path(logo_path):
     """Return `logo_path` when it points at a web-image file (by extension),
-    else "". No filesystem check — extension whitelist only."""
+    else "". No filesystem check. Extension whitelist only."""
     if logo_path and os.path.splitext(logo_path)[1].lower() in _LOGO_EXTS:
         return logo_path
     return ""
@@ -1491,7 +1491,7 @@ def resolve_asset(assets_dir, sub, key):
 def resolve_brand_override(brands_dir, key):
     """Resolve a per-league brand-logo override by key (no extension) to
     (path, content_type), or None. Unlike resolve_asset, `brands_dir`
-    (runtime/<profile>/brands) is treated DIRECTLY as the base — there is no
+    (runtime/<profile>/brands) is treated DIRECTLY as the base. There is no
     'brands' sub-level. Same safety contract: strict key regex + the ASSET_EXTS
     extension whitelist + realpath containment (no path traversal)."""
     if not brands_dir or not ASSET_KEY_RE.match(key):
@@ -1564,7 +1564,7 @@ def list_graphics(graphics_dir):
     """Sorted list of the broadcast still-graphics (*.png) in graphics_dir as
     [{"name": <Sheet label>, "file": <label>.png}, ...] for the cockpit browser.
     Tolerant of an unset/missing/unreadable dir (returns []). Names are arbitrary
-    Sheet labels (mixed case, spaces) so there is no key regex here — listing is
+    Sheet labels (mixed case, spaces) so there is no key regex here. Listing is
     a plain directory read; the SECURITY check lives in resolve_graphic. Assets
     flagged internal in the graphics manifest, and pure-placeholder (blank) graphics,
     are omitted."""
@@ -1707,8 +1707,8 @@ def resolve_preview_bg(overlay_dir, assets_dir=None):
 
 def resolve_preview_frame(graphics_dir):
     """Resolve the broadcast Overlay.png frame (downloaded by get-graphics.py into
-    runtime/<profile>/graphics/) to (path, content_type), or None when absent —
-    the preview then renders the backdrop + HUD text without the frame."""
+    runtime/<profile>/graphics/) to (path, content_type), or None when absent.
+    The preview then renders the backdrop + HUD text without the frame."""
     if not graphics_dir:
         return None
     path = os.path.join(graphics_dir, "Overlay.png")
@@ -1726,7 +1726,7 @@ def default_runtime_dir(here):
 def load_dotenv(start):
     """Load KEY=VALUE pairs from a .env at the script dir or the project root
     into os.environ. Real environment variables win (setdefault). Returns the
-    path loaded, or None. Tiny on purpose — no python-dotenv dependency.
+    path loaded, or None. Tiny on purpose. No python-dotenv dependency.
 
     SECURITY: bounded to the project. The project root is the nearest ancestor
     holding a .git/.env.example marker; we only ever read a .env from `start`
@@ -2028,7 +2028,7 @@ def normalize_quali_lap(v):
     """A 'Best Lap' cell -> the HUD display string. Verbatim except two
     deterministic fixes: a comma decimal becomes a dot, and a ZERO hours group
     from a Sheets duration-formatted cell is dropped ('0:01:38,973' ->
-    '1:38.973'). A non-zero hour is left alone — implausible for a lap, but
+    '1:38.973'). A non-zero hour is left alone. Implausible for a lap, but
     showing the cell beats silently destroying it. No conversion to seconds and
     no reformatting: the sheet stays WYSIWYG, like every other HUD text field."""
     s = (v or "").strip().replace(",", ".")
@@ -2042,8 +2042,8 @@ def parse_quali_times(text):
     """Quali Times tab CSV -> {asset_key: display_lap}. Each row registers TWO
     keys, mirroring the two-step lookup the roster already uses (see
     parse_config_roster / team_entry): the asset_key of the VERBATIM cell (e.g.
-    'scuderia-adriatica-motorsport-14' — the per-CAR identity) and the asset_key of
-    the STRIPPED team name ('scuderia-adriatica-motorsport' — the whole team). So a
+    'scuderia-adriatica-motorsport-14', the per-CAR identity) and the asset_key of
+    the STRIPPED team name ('scuderia-adriatica-motorsport', the whole team). So a
     sheet that spells out '#14' and '#54' gives each car its own lap, while a sheet
     that writes only the bare team name still matches every car of that team.
     Both keys are setdefault'ed, so a generic row can never overwrite a specific
@@ -2077,7 +2077,7 @@ def parse_config_roster(text):
     """Configuration tab CSV -> roster {team_label: {"number": str, "brandKey": str,
     "brandName": str, "bgColor": str, "textColor": str}}. The dict KEY is the
     VERBATIM team label (e.g. 'Scuderia #14'), so two cars sharing a name but
-    differing in number stay distinct entries — the stripped name is NOT a unique
+    differing in number stay distinct entries. The stripped name is NOT a unique
     identity. The embedded '#NNN' is peeled off only to derive the fallback car
     number (split_team_label); the displayed name is stripped later, at HUD render
     time. brandName = the "Brand Name Override" cell or, when blank, the verbatim
@@ -2124,8 +2124,8 @@ def parse_team_full_labels(text):
     """Configuration tab CSV -> {stripped_team_name: verbatim_label}. The verbatim
     label (e.g. 'OVO eSports #111') is exactly what the Setup tab's team dropdowns
     list; the panel offers the stripped name (name/number split for the HUD), so
-    the relay maps it back to this verbatim value when writing the Setup cell —
-    keeping teams in lockstep with the dropdown, like the other Setup fields. Same
+    the relay maps it back to this verbatim value when writing the Setup cell.
+    Keeping teams in lockstep with the dropdown, like the other Setup fields. Same
     column-location rules as parse_config_roster; first occurrence wins."""
     rows = list(csv.reader(io.StringIO(text)))
     if not rows:
@@ -2224,11 +2224,11 @@ def team_entry(raw, roster, quali=None):
     'number'/logo come from the roster (Number column precedence already baked
     in), with the slot's own embedded #NNN as the fallback. 'label' carries the
     verbatim value (with #NNN) so the panel dropdown can offer/select the exact
-    car — the HUD ignores it. bgColor/textColor are the optional tile colours.
+    car: the HUD ignores it. bgColor/textColor are the optional tile colours.
     qualiLap uses the SAME two-step lookup as the roster: the verbatim label first
     (so two cars of one team keep their own lap) and the stripped name as the
     fallback (so a bare Quali Times row matches every car of that team, and
-    number/spelling variants between the two tabs still line up) — issue #555."""
+    number/spelling variants between the two tabs still line up). Issue #555."""
     raw = (raw or "").strip()
     name, embedded = split_team_label(raw)
     info = roster.get(raw) or roster.get(name) or {}
@@ -2305,7 +2305,7 @@ def parse_utc_ts(s):
 
 
 def iso_utc(epoch):
-    """Epoch seconds -> canonical ISO UTC string (whole-second precision —
+    """Epoch seconds -> canonical ISO UTC string (whole-second precision,
     a Sheet 'updated' stamp can therefore never out-rank the local stamp of
     the very write that produced it; the newest-wins merge stays correct)."""
     return datetime.datetime.fromtimestamp(
@@ -2314,7 +2314,7 @@ def iso_utc(epoch):
 
 def parse_timer_tab(text):
     """Timer tab CSV (label col A, value col B) -> state dict. Unknown labels
-    and unparseable values fall back to the defaults — never throws."""
+    and unparseable values fall back to the defaults, never throws."""
     raw = {}
     for row in csv.reader(io.StringIO(text or "")):
         if len(row) >= 2 and (row[0] or "").strip():
@@ -2334,7 +2334,7 @@ def parse_timer_tab(text):
 
 def timer_mode(state, now):
     """hidden | prestart | running | paused | finished (pure; the page renders
-    blank for hidden and finished — spec: no 0:00:00 left standing)."""
+    blank for hidden and finished, spec: no 0:00:00 left standing)."""
     if not state.get("visible", True):
         return "hidden"
     end = state.get("end")
@@ -2363,7 +2363,7 @@ def post_webhook(url, payload, timeout=10):
         return resp.read()
 
 
-WEBHOOK_OUTDATED_ERROR = ("webhook script outdated (no action echo) — redeploy "
+WEBHOOK_OUTDATED_ERROR = ("webhook script outdated (no action echo). Redeploy "
                           "the v2 script (wiki: Sheet-Webhook)")
 
 
@@ -2451,7 +2451,7 @@ def apply_stream_service_for_ref(ref, channel_csv_url, push_url, set_service,
     fetch = fetch or TimerStore._fetch
     post = post or post_webhook
     if not push_url:
-        return False, "no SHEET_PUSH_URL — the stream-key webhook is required"
+        return False, "no SHEET_PUSH_URL: the stream-key webhook is required"
     try:
         chan_rows = broadcast_chat.parse_channel_tab(fetch(channel_csv_url))
     except Exception as exc:                            # noqa: BLE001  tolerant fetch
@@ -2478,7 +2478,7 @@ EVENT_TITLE_MAX = 120
 
 def sanitize_event_title(raw):
     """Normalize a free-text event title (#207): coerce non-strings to "", drop
-    control chars (a title is one line — newlines/tabs/etc. are removed), trim, and
+    control chars (a title is one line, newlines/tabs/etc. are removed), trim, and
     cap at EVENT_TITLE_MAX chars. Pure → unit-tested. This is normalization only:
     every surface renders the title via textContent (Cockpit) / a text node
     (Panel), so it is never interpreted as HTML."""
@@ -2497,7 +2497,7 @@ class PartStore:
 
     State {"index": N (1-based into the Producer order), "live": bool}. Reset to
     Part 1 by `racecast event start`; End advances `index`; Start marks it live.
-    `live` is a written record only — the panel derives the authoritative live
+    `live` is a written record only. The panel derives the authoritative live
     state from OBS. Same best-effort, lock-guarded, type-checked-load contract as
     TimerStore/EventTitleStore (a hand-edited file must never crash later)."""
 
@@ -2550,7 +2550,7 @@ class PartStore:
             return dict(self.state)
 
     def reset(self):
-        """Reset the pointer to the first part, not-live — used by `event start`
+        """Reset the pointer to the first part, not-live. Used by `event start`
         (via the file) and on a live `/mode` switch so the mode-gated Parts
         control never carries a stale index into the other mode's subset."""
         with self.lock:
@@ -2612,7 +2612,7 @@ class TimerStore:
     """Race-timer state with three layers (spec §3): in-memory + local JSON
     file (restart-safe) + Sheet tab via CSV poll / Apps-Script webhook push
     (producer-handover-safe). Director actions apply locally first and push in
-    the background — a webhook failure degrades, never breaks."""
+    the background: a webhook failure degrades, never breaks."""
 
     def __init__(self, csv_url, push_url, path):
         self.csv_url = csv_url            # None -> local-only (no sheet poll)
@@ -2633,7 +2633,7 @@ class TimerStore:
 
     # -- persistence ------------------------------------------------------
     def _load_file(self):
-        """Adopt only known keys with sane types — a hand-edited timer.json
+        """Adopt only known keys with sane types. A hand-edited timer.json
         must never crash data()/timer_mode() later."""
         try:
             with open(self.path, encoding="utf-8") as fh:
@@ -2725,7 +2725,7 @@ class TimerStore:
 
     def start(self, now=None):
         """Start from prestart (full duration) or resume a paused remainder.
-        No-op while an anchor is set (running/finished) — RESET clears first."""
+        No-op while an anchor is set (running/finished). RESET clears first."""
         now = time.time() if now is None else now
         with self.lock:
             if self.state["end"] is not None:
@@ -2740,7 +2740,7 @@ class TimerStore:
                 anchored = False
             st = dict(self.state)
         if anchored:
-            return {"note": "already started — /timer/reset to clear", **self.data(now)}
+            return {"note": "already started: /timer/reset to clear", **self.data(now)}
         if self.push_url:
             self._spawn_push(self._payload(st))
         return self.data(now)
@@ -2757,7 +2757,7 @@ class TimerStore:
                 self._save_file()
             st = dict(self.state)
         if end is None:
-            return {"note": "not running — nothing to pause", **self.data(now)}
+            return {"note": "not running: nothing to pause", **self.data(now)}
         if self.push_url:
             self._spawn_push(self._payload(st))
         return self.data(now)
@@ -2778,7 +2778,7 @@ class TimerStore:
 
     def adjust(self, delta_s, now=None):
         """Shift whichever clock is relevant by ± seconds: a RUNNING anchor,
-        a paused remainder, or — before start — the configured duration.
+        a paused remainder, or, before start, the configured duration.
         Check-and-write under ONE lock so a concurrent stop/reset can never
         be overwritten."""
         now = time.time() if now is None else now
@@ -2824,7 +2824,7 @@ class ChatStore:
     (runtime/<profile>/chat.json), loaded on construction. The relay only ever
     APPENDS via add() (the one remote write path) or re-reads the file via
     reload(); clear/import/pull overwrite the file out-of-band (CLI) and call
-    reload(). ts is always the server clock — handover-safe across machines."""
+    reload(). ts is always the server clock: handover-safe across machines."""
 
     def __init__(self, path):
         self.path = path
@@ -2978,8 +2978,8 @@ def yt_live_video_ids(channel, cookies, timeout=25, logger=None):
 class BroadcastChatStore:
     """Read-only, in-memory mirror of the public broadcast chat (#294).
 
-    Unlike ChatStore this is EPHEMERAL (no file) and has no remote write path —
-    the relay's reader threads call add_many(); HTTP only ever reads data().
+    Unlike ChatStore this is EPHEMERAL (no file) and has no remote write path.
+    The relay's reader threads call add_many(); HTTP only ever reads data().
     Messages carry a `source` videoId so a producer-handover overlap (two live
     streams) renders as one merged, ts-ordered stream. Dedup is by the YouTube
     chat-item id (continuations re-deliver recent messages)."""
@@ -3325,10 +3325,10 @@ class BroadcastChatSupervisor:
 
     Each cycle reads the Channel tab and builds the DESIRED set of readers keyed by
     a stable id: for **YouTube**, one per currently-live videoId (resolved via
-    yt-dlp — the /streams tab catches the producer-handover overlap); for
+    yt-dlp, the /streams tab catches the producer-handover overlap); for
     **Twitch**, one per channel login (a persistent anonymous IRC connection,
     `twitch:<login>`). It then reconciles: readers no longer desired are stopped;
-    new ones are started; a reader that died is retried — except a YouTube reader
+    new ones are started; a reader that died is retried. Except a YouTube reader
     that ended genuinely (stream over) is tombstoned until its videoId leaves the
     live set, so it is not restarted in a loop. Best-effort throughout."""
 
@@ -3352,7 +3352,7 @@ class BroadcastChatSupervisor:
         reader's tombstone so the next reconcile restarts dead/ended ones, and
         wake the loop to run that reconcile NOW instead of waiting out the ~30 s
         cadence. A healthy live reader is left in place by the reconcile.
-        Best-effort and idempotent — safe to call when nothing is frozen."""
+        Best-effort and idempotent: safe to call when nothing is frozen."""
         with self._lock:
             for reader in self._readers.values():
                 reader.ended = False
@@ -3437,7 +3437,7 @@ class HealthStore:
 
     def record_event(self, ts, event_type, label="", producer="", metadata=None):
         """Persist a discrete annotation (takeover, OBS stream start/stop) to the
-        events table. Best-effort caller contract — guarded by the same lock."""
+        events table. Best-effort caller contract. Guarded by the same lock."""
         with self.lock:
             return health_store.record_event(self.conn, ts, event_type, label=label,
                                               producer=producer, metadata=metadata)
@@ -3583,7 +3583,7 @@ def cookies_for(platform, cookie_dir):
     """Resolve the cookie file for a platform inside the shared cookie dir.
     YouTube prefers yt-cookies.txt and falls back to the legacy cookies.txt;
     Twitch uses twitch-cookies.txt. Returns an existing path or None (public).
-    Pure (no migration side effects — see migrate_legacy_cookie)."""
+    Pure (no migration side effects, see migrate_legacy_cookie)."""
     if not cookie_dir:
         return None
     if platform == "twitch":
@@ -3636,7 +3636,7 @@ def channel_url(entry: str) -> str:
 def ytdlp_resolve_cmd(url, cookies, fmt=YTDLP_FORMAT):
     """Argv for resolving a live URL to an HLS manifest. `--` precedes the URL so
     a value can never be parsed as a yt-dlp flag (defense in depth on top of the
-    is_channel host allow-list — yt-dlp's --exec etc. would be code execution)."""
+    is_channel host allow-list, yt-dlp's --exec etc. would be code execution)."""
     # -g yields the HLS URL; the extra --print emits a "rcq <height> <fps>" line so the
     # relay can show the ACTUALLY-served resolution (YouTube's streamlink only reports "live").
     cmd = ["yt-dlp", "-g", "-f", fmt, "--no-warnings", "--no-playlist",
@@ -3670,8 +3670,8 @@ def streamlink_serve_cmd(target, port, platform="youtube", twitch_token=None,
     separates the positional URL/stream so neither can be parsed as a flag.
 
     For YouTube the resolved manifest is re-fetched by streamlink out-of-process,
-    so it must carry the same session context yt-dlp used on the resolve — a browser
-    User-Agent (always) and the cookies file (when present) — or YouTube 403s a
+    so it must carry the same session context yt-dlp used on the resolve, a browser
+    User-Agent (always) and the cookies file (when present), or YouTube 403s a
     protected live manifest (#345). Twitch resolves in-process and gets neither."""
     base = ["streamlink", "--player-external-http", "--player-external-http-port", str(port)]
     base += serve_flags(platform, tier)
@@ -3734,9 +3734,9 @@ LOCAL_ENCODER_ARGS = {
     "nvenc": ["-c:v", "h264_nvenc", "-preset", "p4", "-tune", "ll", "-rc", "cbr"],
     "x264": ["-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency"],
 }
-LOCAL_DEVICE_BUSY = ("capture device busy or missing — close any other program "
+LOCAL_DEVICE_BUSY = ("capture device busy or missing. Close any other program "
                      "using it (OBS capture source, Elgato utility); see feed log")
-LOCAL_NEEDS_FANOUT = ("local capture needs the feed fan-out — remove "
+LOCAL_NEEDS_FANOUT = ("local capture needs the feed fan-out. Remove "
                       "RACECAST_FEED_FANOUT=0 from .env and restart the relay")
 
 
@@ -3860,7 +3860,7 @@ def pick_capture_audio(video_name, video_has_audio, audio_devices):
 
 def _no_audio_note(video_name, labels):
     choices = ", ".join(labels) if labels else "none found"
-    return (f"local capture: no game-audio device found for '{video_name}' — picture "
+    return (f"local capture: no game-audio device found for '{video_name}'. Picture "
             f"only; set RACECAST_CAPTURE_AUDIO in .env (audio devices: {choices})")
 
 
@@ -4039,7 +4039,7 @@ FMP4_BOX_TYPES = frozenset((b"moof", b"mdat", b"styp", b"sidx", b"prft", b"emsg"
 def _iter_boxes(d):
     """(offset, size, type) for the top-level ISO-BMFF boxes in `d`, stopping at
     the first entry that is not a well-formed box header. Only valid from a real
-    box boundary — see `fmp4_fragment_start` for the mid-stream case."""
+    box boundary: see `fmp4_fragment_start` for the mid-stream case."""
     i = 0
     while i + 8 <= len(d):
         size = int.from_bytes(d[i:i + 4], "big")
@@ -4056,7 +4056,7 @@ def _iter_boxes(d):
 
 def fmp4_init_segment(head):
     """The fMP4 initialization segment (`ftyp`…`moov`) from the retained head of a
-    feed, or b"" when the head is not fMP4 — so an MPEG-TS feed keeps today's raw
+    feed, or b"" when the head is not fMP4, so an MPEG-TS feed keeps today's raw
     path byte for byte.
 
     Completes at the end of `moov` rather than waiting for the first `moof`: the
@@ -4082,8 +4082,8 @@ def fmp4_fragment_start(buf, start=0):
     A VALIDATED PATTERN SEARCH, not a box walk: a mid-stream join lands inside an
     `mdat`, where box sizes are meaningless, so there is no boundary to walk from.
     A candidate qualifies when the four bytes before the `moof` tag are a
-    plausible box size AND the box that size points at carries a known type —
-    media payload happening to contain the bytes "moof" fails that. A candidate
+    plausible box size AND the box that size points at carries a known type.
+    Media payload happening to contain the bytes "moof" fails that. A candidate
     that cannot be validated yet reads as "not found", so the caller keeps
     buffering instead of committing to a guess."""
     data = bytes(buf)
@@ -4104,12 +4104,12 @@ def fmp4_fragment_start(buf, start=0):
 def fmp4_aligned_take(pending):
     """(write_now, still_pending) while aligning a joined fMP4 stream to its first
     fragment boundary. b"" and the buffer while still searching; the aligned
-    payload and None once found — or, once the search budget is spent, the buffer
+    payload and None once found. Or, once the search budget is spent, the buffer
     unchanged, degrading to today's raw pass-through rather than stalling.
 
     That give-up path leaves ffmpeg alive but silent (it accepts the unaligned
     fMP4 and emits nothing) where the unfixed code had it die and respawn every
-    two seconds. Same end state — no audio — at less cost; worth knowing before
+    two seconds. Same end state, no audio, at less cost; worth knowing before
     reading "encoder up, output ring empty" as a different bug."""
     at = fmp4_fragment_start(pending)
     if at is not None:
@@ -4191,7 +4191,7 @@ def _warn_if_mic_failed(note):
     commentary stays visible."""
     mic = _OBS_WS_MODULE.COMMENTARY_MIC_INPUT if _OBS_WS_MODULE else None
     if mic and note and mic in note:
-        LOG.warning("OBS: could not switch %s (%s) — this OBS collection predates the "
+        LOG.warning("OBS: could not switch %s (%s). This OBS collection predates the "
                     "commentary mic; run `racecast setup` and re-import it", mic, note)
 
 
@@ -4253,8 +4253,8 @@ def _apply_obs_intents(obs_ws, scene, intents):
 # --- Relay-driven STINT A/B override (#593 follow-up) ---------------------------
 def apply_stint_state(relay, obs_ws, feed):
     """GET /obs/stint/<A|B> (Companion) and POST /obs/stint {"feed"} (Director
-    Panel): make the Stint scene show `feed` — the director's pick, not necessarily
-    the relay's on-air feed — with its audio live and the rest muted, the Discord
+    Panel): make the Stint scene show `feed`, the director's pick, not necessarily
+    the relay's on-air feed, with its audio live and the rest muted, the Discord
     bus included. The audio comes from the same plan as a handover
     (relay.obs_audio_plan), so the producer's commentary mic opens only when the
     pick is the local stint and closes when the other feed is. The relay's on-air
@@ -4279,8 +4279,8 @@ def apply_stint_state(relay, obs_ws, feed):
 
 
 def apply_split_state(relay, obs_ws):
-    """GET/POST /obs/split (#591): make the Splitscreen match the on-air slot —
-    both slots visible, the on-air slot's audio live, the rest muted. The scene cut
+    """GET/POST /obs/split (#591): make the Splitscreen match the on-air slot.
+    Both slots visible, the on-air slot's audio live, the rest muted. The scene cut
     stays with the caller, so a SPLIT still cuts when the relay is down."""
     return _apply_split_intents(relay, obs_ws, audio_only=False)
 
@@ -4448,8 +4448,8 @@ class _PreviewRingTap:
     """Preview worker that taps a FeedRing instead of spawning a second streamlink
     pull. One ffmpeg subprocess receives ring bytes on stdin; its stdout (MJPEG) and
     stderr (ebur128) are pumped by the same helpers as _PreviewPullWorker. The ring
-    is read from its current live edge so only recently-buffered data is consumed —
-    no rewinding to stream start. Best effort: any spawn/read failure leaves .ok
+    is read from its current live edge so only recently-buffered data is consumed.
+    No rewinding to stream start. Best effort: any spawn/read failure leaves .ok
     False and the manager shows the tile 'unavailable'; nothing here can affect the
     live feed workers. `spawn` is injectable for tests."""
 
@@ -4588,7 +4588,7 @@ def preview_source(target, live, pov_active, feed_keys, fanout=False):
 class FeedRing:
     """A bounded byte ring for one feed: a single live writer (the streamlink
     reader) and many readers (OBS, preview), each tracking its own absolute
-    offset. The writer NEVER blocks — when a reader falls behind the retained
+    offset. The writer NEVER blocks. When a reader falls behind the retained
     window, it snaps to the oldest retained byte, so it receives the full window
     and loses only overflowed bytes. Pure stdlib; unit-testable with no real stream."""
 
@@ -4628,7 +4628,7 @@ class FeedRing:
             self._marks.popleft()
 
     def head(self):
-        """The retained first bytes of the CURRENT upstream stream (#576) — the
+        """The retained first bytes of the CURRENT upstream stream (#576). The
         fMP4 initialization segment lives here and nowhere else."""
         with self._cond:
             return bytes(self._head)
@@ -4654,7 +4654,7 @@ class FeedRing:
         """The absolute offset that was the live edge ~age_s ago (the newest mark
         with ts <= now-age_s), clamped to the retained window. When the ring holds
         less than age_s of history it returns start_offset (serve the oldest
-        retained byte). Pure — now is injected."""
+        retained byte). Pure. Now is injected."""
         with self._cond:
             live = self._base + len(self._buf)
             target = now - age_s
@@ -4722,7 +4722,7 @@ class FeedRing:
 def fanout_join_offset(ring, prebuffer_s, now):
     """Absolute cursor a BROADCAST consumer (OBS, program-audio) joins at: prebuffer_s
     seconds behind the ring's live edge (#533), or the live edge when prebuffer_s <= 0
-    or the ring has no time index (direct-serve / test doubles). Pure — now injected."""
+    or the ring has no time index (direct-serve / test doubles). Pure. Now injected."""
     if hasattr(ring, "trailing_offset"):
         return ring.trailing_offset(prebuffer_s, now)
     if hasattr(ring, "live_offset"):
@@ -4780,7 +4780,7 @@ class FeedFanoutServer:
         """A new consumer arrived: note where every attached one stands.
 
         Windows OBS leaves the old connection open on an input rebuild, and TCP cannot see
-        that. Being superseded alone condemns nobody — this port serves several consumers
+        that. Being superseded alone condemns nobody. This port serves several consumers
         by design; `_stale` adds the part that does."""
         now = time.monotonic() if now is None else now
         with self._consumers_lock:
@@ -4792,7 +4792,7 @@ class FeedFanoutServer:
 
         `cycle_ts` (a completed read or send), not `cursor`: the cursor only advances once
         per read cycle, and a slow consumer sits inside one for many seconds. The grace
-        belongs in the judgement, not just the reaping — in the instant of the mark
+        belongs in the judgement, not just the reaping. In the instant of the mark
         nothing has completed yet."""
         mark = st.get("superseded")
         return (mark is not None and st.get("cycle_ts") == mark[0]
@@ -4802,7 +4802,7 @@ class FeedFanoutServer:
         """Wake the abandoned consumers' handlers and return how many. Heartbeat only,
         never a read path.
 
-        shutdown() is what unblocks a handler stuck in sendall — on POSIX. On Windows
+        shutdown() is what unblocks a handler stuck in sendall. On POSIX. On Windows
         it leaves the handler blocked for good and only close() wakes it, so only there
         does the reaper close a descriptor the handler still owns (CLOSE_TO_WAKE)."""
         now = time.monotonic() if now is None else now
@@ -5147,7 +5147,7 @@ class ProgramAudioService:
     def _encoder_tick(self, prev_live):
         """One supervisor step: (re)spawn the encoder for the current on-air feed
         when needed. Returns the feed name now encoding (or prev_live unchanged).
-        The test seam — pure of threads/sleeps."""
+        The test seam: pure of threads/sleeps."""
         live = self.relay.live_feed()
         feed = self.relay.feeds.get(live) if live else None
         ring = getattr(feed, "ring", None)
@@ -5189,7 +5189,7 @@ class ProgramAudioService:
     def _feed_stdin(self, stdin, ring, proc):
         """Pump on-air ring bytes into THIS encoder generation's ffmpeg stdin;
         join feed_prebuffer_s behind the live edge to match the broadcast (#533).
-        *proc* is the process this thread owns — checked instead of the shared
+        *proc* is the process this thread owns. Checked instead of the shared
         self._proc, which a handover reassigns to the NEXT generation."""
         cursor = self._join_offset(ring, time.monotonic())   # #533: match OBS's trailing join
         # #576: on an fMP4/CMAF feed the codec parameters exist only in the init
@@ -5281,8 +5281,8 @@ class ProgramAudioService:
 
 def resolve_hls(url, cookies, logger, fmt=YTDLP_FORMAT):
     """Resolve a YouTube live URL to a direct HLS manifest URL via yt-dlp (handles cookies +
-    the bot-check). Returns (url, None, quality) on success — `quality` is the served
-    resolution like '1080p60' (from yt-dlp's --print, None when unknown) — or
+    the bot-check). Returns (url, None, quality) on success, `quality` is the served
+    resolution like '1080p60' (from yt-dlp's --print, None when unknown), or
     (None, error_line, None). The error line feeds /status so the panel can show WHY a feed is
     stuck connecting (previously it only landed in feed_X.log)."""
     cmd = ytdlp_resolve_cmd(url, cookies, fmt)
@@ -5311,7 +5311,7 @@ def resolve_hls(url, cookies, logger, fmt=YTDLP_FORMAT):
         # logged-out clients with no muxed rendition. Name the fix, not just the format
         # (#615). An ended or upcoming source is already explained by its status.
         if classify_source_state(last) is None and cookie_jar.jar_has_login(cookies) is False:
-            last = f"{last} — {cookie_jar.LOGGED_OUT_HINT}"
+            last = f"{last}: {cookie_jar.LOGGED_OUT_HINT}"
     logger.warning("yt-dlp could not resolve %s (%s)", url, last)
     return None, last, None
 
@@ -5341,7 +5341,7 @@ def stint_start_indices(stint, schedule_len):
     """0-based (A, B) start indices for a producer takeover: 1-based stint
     <stint> is on air NOW -> Feed A serves it, Feed B preloads the NEXT slot.
     A is clamped to a real stint; B is always A+1 and may point past the end
-    (an empty/missing slot) — the off-air feed then idles (black) until that
+    (an empty/missing slot). The off-air feed then idles (black) until that
     stint's link appears, instead of duplicating A's stream."""
     stint = max(1, int(stint))
     hi = max(0, schedule_len - 1)
@@ -5354,7 +5354,7 @@ SUBSTITUTION_REASON_MAX = 200
 
 def is_substitution(served_url, served_idx, new_url, new_idx):
     """True when the on-air feed swaps to a DIFFERENT non-empty URL at the SAME
-    stint index (an operator reload after editing the on-air URL) — an ad-hoc
+    stint index (an operator reload after editing the on-air URL). An ad-hoc
     stream substitution. A same-URL reconnect or a stint change is not one. Pure."""
     return (bool(new_url) and bool(served_url)
             and new_idx == served_idx and new_url != served_url)
@@ -5391,7 +5391,7 @@ def qualifying_schedule_source(sheet_id, tab, runtime):
 
 def pull_slots(rows):
     """Slot id per row: maximal runs of CONSECUTIVE rows with the same non-empty
-    URL share one slot, so a single feed pull serves the whole run — a commentator
+    URL share one slot, so a single feed pull serves the whole run. A commentator
     keeping one stream across back-to-back stints. A blank/empty URL never merges
     (you cannot 'continue' a stream that has no link), so each blank row is its own
     slot and a blank breaks a run. *rows* are ScheduleSource 4-tuples
@@ -5503,7 +5503,7 @@ def live_schedule_row(rows, live_idx):
 
 def cockpit_tally(rows, live_idx, me_key):
     """Tally for a commentator identified by *me_key* (a streamer_key).
-    Pure — unit-testable without a running relay. *rows* are ScheduleSource
+    Pure: unit-testable without a running relay. *rows* are ScheduleSource
     4-tuples (url, streamer, stint, line); *live_idx* is the on-air feed's index.
       on_air   = the on-air row's streamer normalizes to me_key
       up_next  = the nearest FUTURE row that is me ->
@@ -5525,7 +5525,7 @@ def cockpit_tally(rows, live_idx, me_key):
 def race_control_schedule(rows, live_map):
     """Redacted schedule for the Race Control monitoring desk (#244): stint +
     streamer + live-feed marker per row, with NO stream URL. The redaction is the
-    same boundary as /console/takeover/status — feed URLs never leave the tailnet,
+    same boundary as /console/takeover/status. Feed URLs never leave the tailnet,
     and this desk is reachable over the public Funnel. Pure for unit testing.
     *rows* are ScheduleSource 4-tuples (url, streamer, stint, line); *live_map*
     maps a 0-based row index -> the feed key (A/B) currently serving it."""
@@ -5537,7 +5537,7 @@ def cockpit_schedule(rows, live_idx, me_key):
     """Redacted stint plan for the cockpit's read-only stint-plan card (right
     column, below the timer). Per row: stint + streamer, plus an on_air flag
     (row == live_idx) and a mine flag (asset_key match for the token's streamer).
-    NO stream URL — the cockpit is reachable over the public Funnel, so this stays
+    NO stream URL: the cockpit is reachable over the public Funnel, so this stays
     inside the /console/takeover/status redaction boundary. rows are
     ScheduleSource 4-tuples (url, streamer, stint, line). Pure."""
     return [{"stint": st, "streamer": n,
@@ -5549,7 +5549,7 @@ def cockpit_schedule(rows, live_idx, me_key):
 def redact_console_status(full, roles):
     """Redact the full /status for the Funnel-exposed /console mount, by role (#493).
     Feed stream URLs (feeds[*].channel), the POV stream URL, and the Sheet id are
-    director/producer-only — the same boundary as /schedule/data, which already exposes
+    director/producer-only: the same boundary as /schedule/data, which already exposes
     per-stint URLs to directors (the panel's Preview button + POV editor consume them
     over Funnel). They are KEPT for director/producer and stripped for every other role.
     The tailnet /status is unaffected (served verbatim). Pure → unit-tested."""
@@ -5578,14 +5578,14 @@ def cockpit_program_behind(backlogged):
 
 
 def cockpit_syncing(desync):
-    """True when the relay's desync block is active — the cockpit should show
+    """True when the relay's desync block is active. The cockpit should show
     'syncing…' instead of the (index-derived, possibly wrong) ON-AIR tally. Pure."""
     return bool(desync.get("active"))
 
 
 def ping_pong_desynced(live_serving, off_serving):
     """True when the index-designated on-air feed is NOT delivering a stable
-    picture while the OFF-air feed IS — the feed on screen and the feed derived as
+    picture while the OFF-air feed IS. The feed on screen and the feed derived as
     on-air disagree. Pure; the caller supplies each feed's 'serving a stable
     picture' boolean and applies the settle debounce. False whenever the on-air
     feed is fine, or the off-air feed is not itself delivering (a plain on-air
@@ -5633,7 +5633,7 @@ def cockpit_own_stints(rows, me_key):
 def own_submission_target(rows, me_key, stint=None, row=None):
     """Resolve the schedule row a commentator (*me_key*) may write via a cockpit
     submission. Returns (True, {target_line, target_stint, streamer_name,
-    prev_url}) on success, else (False, error_message). Pure — unit-tested.
+    prev_url}) on success, else (False, error_message). Pure: unit-tested.
 
     Ownership is enforced server-side: the target row's streamer must normalize
     to *me_key* (set-or-replace ANY of their own rows, per the approved design),
@@ -5697,8 +5697,8 @@ def cockpit_submission_payload(entry, pending_count, event_title=""):
 
 def cockpit_approval_payload(entry, event_title=""):
     """Discord webhook JSON announcing that the director APPROVED a stream-link
-    submission (follow-up to #193). Deliberately carries NO @here ping — it is a
-    heads-up that the link is now scheduled, not a call to action — so there is no
+    submission (follow-up to #193). Deliberately carries NO @here ping, it is a
+    heads-up that the link is now scheduled, not a call to action, so there is no
     top-level `content` and mentions are suppressed. Pure → unit-tested; the caller
     no-ops when no webhook is configured. A non-empty event_title (#207) is shown as
     the embed footer; empty -> no footer (unchanged)."""
@@ -5772,7 +5772,7 @@ class ScheduleSource:
     def _parse_rows(text, allow_local=True):
         """CSV -> [(url, name, stint, line)] rows where *line* is the 1-based CSV
         line index of each accepted row (== physical sheet row when the Schedule
-        tab starts at sheet row 1 with no leading blank rows — gviz export maps
+        tab starts at sheet row 1 with no leading blank rows, gviz export maps
         1:1).  Any row whose URL cell fails is_channel() (including a header row)
         is silently skipped; their line numbers are NOT remapped.
 
@@ -5781,7 +5781,7 @@ class ScheduleSource:
           the URL/Streamer/Stint columns are located by header text (so they may
           move and the per-stint *stint* label is read). A row counts as a
           (planned) stint when it has a channel URL OR a Stint label OR a
-          Streamer — a pre-planned stint whose URL is still blank is kept with an
+          Streamer: a pre-planned stint whose URL is still blank is kept with an
           empty URL so the panel shows all stints and the feed idles on it until
           the URL is filled (issue #137). A non-channel URL is treated as
           not-yet-filled (url -> "") so the feed never serves junk.
@@ -5908,7 +5908,7 @@ class ScheduleSource:
 
     def inject_row(self, physical_row, url=None, name=None, stint=None):
         """Optimistically merge a panel schedule write into the in-memory
-        schedule so an idling feed — and /schedule/data + /cockpit/data — reflect
+        schedule so an idling feed, and /schedule/data + /cockpit/data, reflect
         it before the next sheet poll. Keyed by physical sheet row (matches
         _parse_rows line numbers); the next poll reconciles against the sheet.
         Each of url/name/stint is applied when given and LEFT UNCHANGED when None,
@@ -6207,7 +6207,7 @@ class HudSource:
         """Fetch + parse the OPTIONAL Quali Times tab (issue #555) and commit the
         map. Deliberately NOT part of refresh(): quali times are entered once
         between qualifying and the race, so they need none of the HUD's 5 s
-        freshness — and keeping the fetch out of refresh() is what guarantees that
+        freshness: and keeping the fetch out of refresh() is what guarantees that
         no quali-tab state (missing, present, or unreachable) can ever add a round
         trip to an on-air HUD refresh or to the synchronous panel-push confirm that
         clears an optimistic override. Its own slow thread calls this (see
@@ -6224,7 +6224,7 @@ class HudSource:
             quali = parse_quali_times(self._fetch(self.quali_url, timeout))
         except Exception as e:
             if not self._quali_warned:
-                LOG.warning("quali times unavailable (%s: %s) — keeping the last "
+                LOG.warning("quali times unavailable (%s: %s). Keeping the last "
                             "known lap times", type(e).__name__, e)
                 self._quali_warned = True
             return False
@@ -6354,7 +6354,7 @@ class HudSource:
 
     def full_team_name(self, name):
         """The verbatim Configuration team label (e.g. 'OVO eSports #111') to write
-        into the Setup cell — what the Setup tab dropdown expects. The panel now
+        into the Setup cell. What the Setup tab dropdown expects. The panel now
         sends the verbatim label directly (a roster key), so it passes through
         unchanged; a bare name from an older panel is mapped back via roster_full,
         and an unknown value falls through to itself (never a KeyError)."""
@@ -6375,7 +6375,7 @@ class HudSource:
         """Optimistic echo for a BATCH panel team write: set multiple podium-slot
         overrides (0-based slot -> entry) under a SINGLE lock acquisition, so the
         /hud/data reader (same lock) never observes a partial top-3. The per-call
-        set_team_override would let a poll interleave between slots — the exact
+        set_team_override would let a poll interleave between slots. The exact
         duplication this batch path removes."""
         now = time.time() if now is None else now
         exp = now + OVERRIDE_TTL
@@ -6443,7 +6443,7 @@ class SetupControl:
             return {"error": f"unknown field: {key!r} "
                              f"(one of {', '.join(sorted(SETUP_FIELDS))})"}
         if not self.push_url:
-            return {"error": "webhook not configured — set RACECAST_SHEET_PUSH_URL "
+            return {"error": "webhook not configured: set RACECAST_SHEET_PUSH_URL "
                              "in the active profile or .env (wiki: Sheet-Webhook)"}
         header, hud_key = SETUP_FIELDS[key]
         if not value and key not in ("racecontrol", "flag"):
@@ -6469,7 +6469,7 @@ class SetupControl:
             return {"error": f"unknown team slot: {slot_key!r} "
                              f"(one of {', '.join(sorted(TEAM_SLOTS))})"}
         if not self.push_url:
-            return {"error": "webhook not configured — set RACECAST_SHEET_PUSH_URL "
+            return {"error": "webhook not configured: set RACECAST_SHEET_PUSH_URL "
                              "in the active profile or .env (wiki: Sheet-Webhook)"}
         name = (name or "").strip()
         if name not in self.hud.roster_names():
@@ -6501,7 +6501,7 @@ class SetupControl:
         if not isinstance(teams, dict):
             return {"error": "teams must be an object like {\"p1\":\"…\"}"}
         if not self.push_url:
-            return {"error": "webhook not configured — set RACECAST_SHEET_PUSH_URL "
+            return {"error": "webhook not configured: set RACECAST_SHEET_PUSH_URL "
                              "in the active profile or .env (wiki: Sheet-Webhook)"}
         roster = self.hud.roster_names()
         resolved = {}                       # 0-based slot index -> (slot_key, name)
@@ -6556,7 +6556,7 @@ class SetupControl:
                                     tab=None, inject_source=self.schedule_source)
 
     def qualifying_set(self, row, url=None, name=None, stint=None):
-        """Write the qualifying row — same payload, but targeting the Qualifying
+        """Write the qualifying row. Same payload, but targeting the Qualifying
         tab (issue #124) and echoing into the qualifying source. Kept separate so
         the race schedule is never touched by a qualifying edit and vice versa."""
         return self._schedule_write(row, url, name, stint,
@@ -6573,7 +6573,7 @@ class SetupControl:
         The webhook degrades gracefully if the Sheet Apps Script lacks the
         race_control column (it ignores the extra field)."""
         if not self.push_url:
-            return {"error": "webhook not configured — set RACECAST_SHEET_PUSH_URL "
+            return {"error": "webhook not configured: set RACECAST_SHEET_PUSH_URL "
                              "in the active profile or .env (wiki: Sheet-Webhook)"}
         rownum = self._crew_rownum(row)
         if isinstance(rownum, dict):
@@ -6597,7 +6597,7 @@ class SetupControl:
     def crew_delete(self, row):
         """Delete one Crew tab row by 1-based index via the webhook."""
         if not self.push_url:
-            return {"error": "webhook not configured — set RACECAST_SHEET_PUSH_URL "
+            return {"error": "webhook not configured: set RACECAST_SHEET_PUSH_URL "
                              "in the active profile or .env (wiki: Sheet-Webhook)"}
         rownum = self._crew_rownum(row)
         if isinstance(rownum, dict):
@@ -6624,7 +6624,7 @@ class SetupControl:
     def _schedule_write(self, row, url=None, name=None, stint=None,
                         tab=None, inject_source=None):
         if not self.push_url:
-            return {"error": "webhook not configured — set RACECAST_SHEET_PUSH_URL "
+            return {"error": "webhook not configured: set RACECAST_SHEET_PUSH_URL "
                              "in the active profile or .env (wiki: Sheet-Webhook)"}
         if isinstance(row, bool) or not isinstance(row, (int, str)):
             return {"error": "row must be a whole number (1-based)"}
@@ -6685,7 +6685,7 @@ class SetupControl:
 
     def pov_set(self, url, name=None):
         if not self.push_url:
-            return {"error": "webhook not configured — set RACECAST_SHEET_PUSH_URL "
+            return {"error": "webhook not configured: set RACECAST_SHEET_PUSH_URL "
                              "in the active profile or .env (wiki: Sheet-Webhook)"}
         if url is not None and not isinstance(url, str):
             return {"error": "url must be a string"}
@@ -6773,7 +6773,7 @@ def parse_ytdlp_quality(text):
 
 def quality_token_is_useful(q):
     """Whether a streamlink-reported quality token is worth keeping. YouTube serves a single-
-    variant HLS, so streamlink only ever reports 'live' (no resolution) — ignore it so the
+    variant HLS, so streamlink only ever reports 'live' (no resolution). Ignore it so the
     yt-dlp-resolved resolution stays; real labels (Twitch '1080p60'/'source'/…) are kept.
     Pure → unit-tested."""
     return bool(q) and q != "live"
@@ -6869,7 +6869,7 @@ class Feed:
         return bool(p and p.poll() is None)
 
     def _set_phase(self, phase):
-        """Phase + timestamp, updated only on change — so state_age_s keeps
+        """Phase + timestamp, updated only on change, so state_age_s keeps
         accumulating across resolve retries within one 'connecting' stretch."""
         if phase != self.phase:
             self.phase = phase
@@ -6925,7 +6925,7 @@ class Feed:
 
     def set_quality(self, tier, pinned):
         """Set the quality tier and pin state, then trigger a re-resolve so the change
-        takes effect immediately (brief reconnect — a deliberate director action)."""
+        takes effect immediately (brief reconnect, a deliberate director action)."""
         self.quality_tier = tier
         self.quality_pinned = pinned
         if is_local_source(self.current_channel()[0]):
@@ -6952,8 +6952,8 @@ class Feed:
         invisible to OBS: its socket stays open and the fresh stream is spliced into a
         stale demuxer → the ~1 Hz freeze-frame stutter (2026-07-10). Rebuilding just this
         feed's OBS input (SetInputSettings, the proven relay-stop primitive, scoped by
-        port) drops OBS's socket so it re-joins at the fresh stream with a clean demuxer —
-        exactly what a direct-serve streamlink restart does for free. Callers: the
+        port) drops OBS's socket so it re-joins at the fresh stream with a clean demuxer.
+        Exactly what a direct-serve streamlink restart does for free. Callers: the
         re-serve hook (_obs_rejoin_hook), the freeze detector and the director's RESET.
         Best-effort + synchronous; returns the rebuilt input names (for the log + tests)."""
         if _obs_ws is None:
@@ -6965,14 +6965,14 @@ class Feed:
             # connect-per-call site.
             names, note = _obs_ws.release_feed_inputs(ports=[self.port])
             if names:
-                self.log.info("fan-out rejoin on %s — rebuilt OBS input(s) %s so OBS "
+                self.log.info("fan-out rejoin on %s. Rebuilt OBS input(s) %s so OBS "
                               "reconnects cleanly", self.name, ", ".join(names))
             elif note:
-                self.log.debug("fan-out rejoin on %s — OBS reconnect skipped (%s)",
+                self.log.debug("fan-out rejoin on %s. OBS reconnect skipped (%s)",
                                self.name, note)
             return names
         except Exception as exc:              # noqa: BLE001  best-effort, never crash the serve
-            self.log.debug("fan-out rejoin on %s — OBS reconnect error (%s)", self.name, exc)
+            self.log.debug("fan-out rejoin on %s. OBS reconnect error (%s)", self.name, exc)
             return []
 
     def _obs_reconnect(self):
@@ -6982,13 +6982,13 @@ class Feed:
 
     def consumer_attached(self):
         """True when a consumer is reading this feed's fan-out ring right now (#614).
-        The HTTP fan-out port serves OBS only — the Director-Panel preview
+        The HTTP fan-out port serves OBS only, the Director-Panel preview
         (_PreviewRingTap) and the program-audio encoder read the ring object
-        in-process — so this answers "would a restart splice into OBS's open
+        in-process, so this answers "would a restart splice into OBS's open
         demuxer?". The OBS socket survives the streamlink kill (the ring is not
         closed, its read just blocks), so it is still counted between the two
         serves. Best-effort: no fan-out server, or a server that cannot answer,
-        means no rejoin — today's behaviour."""
+        means no rejoin: today's behaviour."""
         srv = self.fanout_server
         if srv is None:
             return False
@@ -7002,8 +7002,8 @@ class Feed:
                                    sleep=time.sleep, clock=time.monotonic):
         """Rejoin OBS once this serve's HLS prefetch burst has landed (#614).
 
-        The burst's arrival span is a download duration — it depends on the producer's
-        downlink, the source bitrate and the CDN — so it is MEASURED here rather than
+        The burst's arrival span is a download duration, it depends on the producer's
+        downlink, the source bitrate and the CDN, so it is MEASURED here rather than
         predicted: the thread watches `last_byte_ts` and takes the first inbound idle of
         `BURST_IDLE_S` as the burst's end. `prefetch_land_s` is only the ceiling, for a
         source that never pauses that long (Twitch low-latency does not, above ~1.4 s).
@@ -7032,7 +7032,7 @@ class Feed:
                     if feed_stalled(self.last_byte_ts, now, stall_s=BURST_IDLE_S):
                         break                      # the burst stopped arriving
                     if now - started >= ceiling:
-                        self.log.debug("fan-out rejoin on %s — the source never paused "
+                        self.log.debug("fan-out rejoin on %s. The source never paused "
                                        "within %.1fs; rejoining on the ceiling",
                                        self.name, ceiling)
                         break
@@ -7051,7 +7051,7 @@ class Feed:
         return t                       # production ignores it; tests join on it
 
     def _log_rejoin_skipped(self, gen):
-        self.log.debug("fan-out rejoin on %s skipped — serve %d was superseded or ended "
+        self.log.debug("fan-out rejoin on %s skipped. Serve %d was superseded or ended "
                        "during the prefetch wait", self.name, gen)
         return None
 
@@ -7059,7 +7059,7 @@ class Feed:
         """The `on_first_byte` hook Feed.run hands the fan-out serve: a prefetch-delayed
         rejoin when this re-serve would splice into an open OBS demuxer, else None.
 
-        `flags` is the streamlink flag list this serve runs with — the wait is derived
+        `flags` is the streamlink flag list this serve runs with. The wait is derived
         from its `--hls-live-edge` count and the server's own prebuffer, so a tier switch
         or a changed RACECAST_FEED_PREBUFFER_S moves it automatically. The local capture
         ffmpeg (#592) passes no flags: no burst, no wait."""
@@ -7083,7 +7083,7 @@ class Feed:
         classification tail is shared. A separate watchdog kills streamlink on a
         byte-stall (the reader is parked in read1() and can't self-check); stop /
         advance / EOF end the loop directly. `on_first_byte` (if given) is called
-        once, right after the first byte reaches the ring — used to force OBS to
+        once, right after the first byte reaches the ring. Used to force OBS to
         reconnect on a drop-recovery (see _obs_reconnect). A prebuilt `cmd` (the
         local capture ffmpeg, #592) replaces the streamlink argv; `tool` tags its
         stderr in feed_X.log, and only streamlink's lines feed the quality/source-
@@ -7130,7 +7130,7 @@ class Feed:
                 if self.stop or self.advance.is_set():
                     return
                 if feed_stalled(self.last_byte_ts, time.monotonic(), stall_s=stall_s):
-                    self.log.warning("fan-out stall on %s (>%.0fs) — killing reader",
+                    self.log.warning("fan-out stall on %s (>%.0fs). Killing reader",
                                      self.name, stall_s)
                     self._kill_proc()
                     return
@@ -7236,7 +7236,7 @@ class Feed:
                         target, serve_platform, token, on_first_byte=_recover,
                         cmd=local_cmd, tool=tool)
                 except FileNotFoundError:
-                    self.log.warning("%s not found on PATH — retrying", tool)
+                    self.log.warning("%s not found on PATH. Retrying", tool)
                     self.proc = None
                     time.sleep(RETRY_SLEEP); continue
             else:
@@ -7262,7 +7262,7 @@ class Feed:
                     serve_elapsed = time.monotonic() - serve_started
                     serve_rc = self.proc.returncode
                 except FileNotFoundError:
-                    self.log.warning("streamlink not found on PATH — retrying")
+                    self.log.warning("streamlink not found on PATH. Retrying")
                     self.proc = None
                     time.sleep(RETRY_SLEEP); continue
             self._set_phase("connecting")
@@ -7294,7 +7294,7 @@ class Feed:
                 # The relay ffmpeg must own the card; a second opener (OBS, the Elgato
                 # utility, another feed) makes it exit at once. Say so, never go quiet.
                 err = LOCAL_DEVICE_BUSY
-                self.log.error("local capture: ffmpeg exited after %.1f s (rc=%s) — %s",
+                self.log.error("local capture: ffmpeg exited after %.1f s (rc=%s). %s",
                                serve_elapsed, serve_rc, LOCAL_DEVICE_BUSY)
             if err:
                 self.last_error = err
@@ -7311,7 +7311,7 @@ class Feed:
                         pass
                 if should_idle_dead_serves(self.dead_serves):
                     self._set_phase("idle")
-                    self.last_error = ("stint source unavailable — paused after "
+                    self.last_error = ("stint source unavailable: paused after "
                                        f"{self.dead_serves} attempts; /next or /reload to retry")
                     if local_cmd:
                         self.last_error += f" ({LOCAL_DEVICE_BUSY})"
@@ -7345,7 +7345,7 @@ class AvSyncWatcher:
 
     OBS is the only component that knows when a source's audio timing broke, and until
     now it told nobody but its log file. This reads that file; it never writes to OBS
-    and never acts on what it finds — by the time the line exists OBS has already
+    and never acts on what it finds. By the time the line exists OBS has already
     repaired it (see av_sync's module docstring).
 
     Only lines appended AFTER the watcher starts are read. That is what lets every event
@@ -7354,7 +7354,7 @@ class AvSyncWatcher:
     tail lag already gives to within a second.
 
     Best-effort in the strong sense: no OBS, no log directory, a rotated or truncated
-    file, a permission error — each of those means no detector, never a broken relay.
+    file, a permission error: each of those means no detector, never a broken relay.
     """
 
     POLL_S = 2.0        # how often new lines are read; a repair is not time-critical
@@ -7390,7 +7390,7 @@ class AvSyncWatcher:
         mid-line: readline() hands that fragment back as if it were a line and the
         remainder arrives as another, so a repair split across two polls parses to
         nothing twice and is lost. The remainder is therefore held until its newline
-        arrives. Public because the test drives THIS loop — an earlier version of that
+        arrives. Public because the test drives THIS loop. An earlier version of that
         test rebuilt it and proved only its own copy."""
         while True:
             chunk = fh.readline()
@@ -7436,7 +7436,7 @@ class AvSyncWatcher:
                         except OSError as exc:
                             if not self._warned:
                                 self.log.warning("A/V sync watcher cannot read %s (%s) "
-                                                 "— no sync disturbance reporting", newest, exc)
+                                                 "so there is no sync disturbance reporting", newest, exc)
                                 self._warned = True
                             fh = None
                     opened_at = now
@@ -7725,7 +7725,7 @@ class Relay:
 
     def _serving_age(self, feed):
         """How long ago the relay last spliced a stream into OBS for that feed, or None
-        when it is not serving — what tells an EXPECTED sync disturbance from an
+        when it is not serving. What tells an EXPECTED sync disturbance from an
         unexplained one (#619). An input rebuild counts: it splices without restarting the
         feed, so the serving age alone would leave our own remedy looking unexplained."""
         f = self.pov if feed == "POV" else self.feeds.get(feed)
@@ -7801,7 +7801,7 @@ class Relay:
 
     def _health_snapshot(self, now):
         """A redacted, flat health sample (matches health_store.COLUMNS minus
-        ts/kind). No stream URLs / sheet_id — safe to persist and pull."""
+        ts/kind). No stream URLs / sheet_id. Safe to persist and pull."""
         def feed_fields(f):
             return ("stopped" if f.paused else f.phase,
                     1 if (f.dropped and not f.paused) else 0, f.idx + 1)
@@ -7895,7 +7895,7 @@ class Relay:
         """Best-effort fire-and-forget POST of a Discord webhook payload; a no-op
         when no webhook is configured. *what* names the event for the failure log.
         Discord is behind Cloudflare, which 403s the default urllib
-        "Python-urllib/x.y" User-Agent — without an explicit UA the post silently
+        "Python-urllib/x.y" User-Agent, without an explicit UA the post silently
         never arrives, so we match the UA the rest of the relay sends."""
         url = self.discord_webhook_url
         if not url:
@@ -7914,7 +7914,7 @@ class Relay:
         return self.event_title_store.get() if self.event_title_store else ""
 
     def _send_health_webhook(self, level, reasons, prev):
-        """POST a Discord health alert. Fully best-effort — never breaks the
+        """POST a Discord health alert. Fully best-effort, never breaks the
         heartbeat. The footer names this producer (#317)."""
         self._discord_post(
             discord_health_payload(level, reasons, prev, self._event_title(),
@@ -7990,7 +7990,7 @@ class Relay:
 
         `_backlogged_feeds` is no longer observability only: `_backlog_shed_tick` runs
         immediately after this in the same heartbeat and rebuilds the on-air feed's OBS
-        input off it (2026-09-21). Keep the two adjacent and in this order — the shed reads
+        input off it (2026-09-21). Keep the two adjacent and in this order. The shed reads
         the classification this call just produced."""
         floors, lagging = {}, {}
         live = list(self.feeds.items()) + ([("POV", self.pov)] if self.pov else [])
@@ -8062,10 +8062,10 @@ class Relay:
 
     def _current_render_skip_rate(self):
         """Per-interval OBS render-skip rate (0..1) from obs_stats vs the previous heartbeat's
-        raw counts, or None (no prev / no counts). Does NOT advance the prev counts — the
+        raw counts, or None (no prev / no counts). Does NOT advance the prev counts. The
         heartbeat's _record_render_counts advances them once per tick. The cumulative
         obs_render_skipped_pct barely moves during a spike, so this delta rate is the signal
-        the drift shows up in (#488) — recorded into the health history + charted."""
+        the drift shows up in (#488). Recorded into the health history + charted."""
         st = self.obs_stats or {}
         skipped = st.get("obs_render_skipped_frames")
         total = st.get("obs_render_total_frames")
@@ -8109,10 +8109,10 @@ class Relay:
             if not consumer_overflowed(prev, snaps):
                 continue
             n = snaps - prev
-            LOG.warning("Feed %s consumer overflow — the ring lapped OBS %d time(s); "
+            LOG.warning("Feed %s consumer overflow. The ring lapped OBS %d time(s); "
                         "OBS is reading slower than real time", key, n)
             self._record_event(now, "fanout_overflow",
-                               f"Feed {key} consumer overflow — OBS fell a full ring behind "
+                               f"Feed {key} consumer overflow. OBS fell a full ring behind "
                                f"the live edge ({n}x)",
                                {"feed": key, "stint": f.idx + 1, "snaps": n})
 
@@ -8175,7 +8175,7 @@ class Relay:
 
     def _freeze_tick(self, now):
         """One freeze-sampler step: watch OBS's mediaCursor for the ON-AIR fan-out feed and
-        rebuild its OBS input when the cursor stalls — a stale-demuxer freeze/stutter the
+        rebuild its OBS input when the cursor stalls. A stale-demuxer freeze/stutter the
         render-skip signal is blind to (measured live 2026-07-15).
 
         #582 effectiveness guard: the first full window after a rebuild says whether it
@@ -8219,7 +8219,7 @@ class Relay:
                 self._last_freeze_ts = now      # claim the cooldown before releasing the lock
                 self._rebuild_guard.on_fire("freeze")
         if stood_down:
-            LOG.warning("Feed %s auto-rebuild stood down — %d OBS rebuilds did not clear the "
+            LOG.warning("Feed %s auto-rebuild stood down. %d OBS rebuilds did not clear the "
                         "stall (stall_fraction=%.2f); re-arms at the next stint change or "
                         "from the Director Panel (#582)", live, attempts, frac)
             self._record_event(now, "obs_rebuild_stood_down",
@@ -8228,7 +8228,7 @@ class Relay:
                                {"feed": live, "stint": f.idx + 1, "attempts": attempts})
         if not fire:
             return
-        LOG.warning("freeze auto-reconnect %s — stall_fraction=%.2f — rebuilding OBS input "
+        LOG.warning("freeze auto-reconnect %s, stall_fraction=%.2f, rebuilding OBS input "
                     "(#488)", live, frac)
         f._obs_reconnect()                      # the RESET primitive, threaded + best-effort
         self._note_obs_splice(live)             # so the A/V detector does not flag our own work
@@ -8245,7 +8245,7 @@ class Relay:
         A second REASON on the freeze detector's control, not a second automation: same
         rebuild, same RebuildGuard, same cooldown. On-air feed only (an off-air one has no
         consumer under close_when_inactive); POV is out. A backlog that keeps GROWING is
-        not fixed here — three attempts, then the guard stands down. See
+        not fixed here: three attempts, then the guard stands down. See
         docs/superpowers/specs/2026-09-21-automatic-backlog-shed-design.md."""
         if not self._backlog_shed or _obs_ws is None or not self.fanout:
             return
@@ -8260,7 +8260,7 @@ class Relay:
             attempts = self._rebuild_guard.ineffective("backlog")
         if stood_down:
             self._rebuild_stood_down_feed = live
-            LOG.warning("Feed %s backlog shed stood down — %d OBS rebuilds did not bring the "
+            LOG.warning("Feed %s backlog shed stood down. %d OBS rebuilds did not bring the "
                         "output back to the live edge, so the relay has stopped trying. The "
                         "picture stays behind live until the next stint change or a re-arm "
                         "from the Director Panel", live, attempts)
@@ -8285,7 +8285,7 @@ class Relay:
         if not fire:
             return
         behind = self._backlogged_feeds[live]   # degraded, so the classification holds one
-        LOG.warning("backlog shed %s — output %.1f s behind live — rebuilding OBS input",
+        LOG.warning("backlog shed %s, output %.1f s behind live, rebuilding OBS input",
                     live, behind)
         f._obs_reconnect()                      # the RESET primitive, threaded + best-effort
         self._note_obs_splice(live)             # so the A/V detector does not flag our own work
@@ -8352,7 +8352,7 @@ class Relay:
     def _maybe_auto_cover(self, now):
         """Auto-raise the #378 Standby Cover over the ON-AIR picture when that feed's
         classified source_state (#502) is offline/ended, and lower it on confirmed-live
-        recovery — keeping the HUD. Default-on; fires once per outage, re-arms on
+        recovery: keeping the HUD. Default-on; fires once per outage, re-arms on
         recovery, never fights the manual RED FLAG. Best-effort: never raises."""
         if _obs_ws is None:
             return
@@ -8502,7 +8502,7 @@ class Relay:
         return "A" if self.A.idx <= self.B.idx else "B"
 
     def on_air_row_idx(self):
-        """0-based schedule row currently ON SCREEN — drives the HUD stint label
+        """0-based schedule row currently ON SCREEN. Drives the HUD stint label
         and the ON-AIR marker on the cockpit / stint-plan / Race Control views.
         Equals the on-air feed's pull index in normal operation; during a same-URL
         back-to-back continuation it sits one row ahead of the still-parked pull.
@@ -8564,7 +8564,7 @@ class Relay:
                 block["suggested_stint"] = self.feeds[off].idx + 1
             if active and not self._desync_active:
                 LOG.warning("ping-pong desync: on-air feed %s not delivering while %s "
-                            "serves stint %d — resync suggested", live, off,
+                            "serves stint %d: resync suggested", live, off,
                             self.feeds[off].idx + 1)
             elif not active and self._desync_active:
                 LOG.info("ping-pong desync cleared")
@@ -8583,8 +8583,8 @@ class Relay:
 
     def pov_active(self):
         """True when the POV PiP is shown on screen (relay-driven, reflected to
-        OBS by /pov/toggle|show|hide). Drives the HUD: the whole POV box — frame
-        and name — shows only while the PiP is on air."""
+        OBS by /pov/toggle|show|hide). Drives the HUD: the whole POV box, frame
+        and name, shows only while the PiP is on air."""
         return self.pov_shown
 
     def pov_name(self):
@@ -8629,7 +8629,7 @@ class Relay:
     def obs_audio_plan(self):
         """(audio, extra_mute) for the OBS intent planners (#593): which feed carries
         the local capture right now, and whether this machine manages the commentary
-        mic at all — only one with a capture card (RACECAST_CAPTURE) does."""
+        mic at all: only one with a capture card (RACECAST_CAPTURE) does."""
         # Solo sets RACECAST_CAPTURE as well, but there the mic ships hot as the main
         # audio and has no feed pair to follow: never manage it.
         mic = (_OBS_WS_MODULE.COMMENTARY_MIC_INPUT
@@ -8661,7 +8661,7 @@ class Relay:
         """Kick off a throttled, side-effect-free OBS reachability probe off-thread
         so /status reflects OBS's CURRENT state, not a value cached from the last
         handover. Makes the common 'relay started before OBS' case self-heal: the
-        banner clears within one probe interval once OBS is up — no restart, no
+        banner clears within one probe interval once OBS is up: no restart, no
         handover needed. Returns the spawned Thread (or None when throttled /
         disabled) so callers/tests can join it; status() ignores the return."""
         if _obs_ws is None:
@@ -8747,10 +8747,10 @@ class Relay:
                 pass
 
     def _spawn_event_stop(self):
-        """Detached `racecast event stop` — it generates+sends the report (we are
+        """Detached `racecast event stop`. It generates+sends the report (we are
         still up, so names resolve) then tears racecast down (kills us by PID).
         Detach into a new session so our own teardown cannot cascade-kill the child.
-        Best-effort — a spawn failure is logged, never raised."""
+        Best-effort: a spawn failure is logged, never raised."""
         try:
             frozen = bool(getattr(sys, "frozen", False))
             argv = event_stop_argv(frozen, sys.executable, _REL_HERE)
@@ -8765,7 +8765,7 @@ class Relay:
             else:
                 kwargs["start_new_session"] = True
             subprocess.Popen(argv, **kwargs)
-            LOG.info("Last part ended — spawned `event stop` (report + teardown).")
+            LOG.info("Last part ended: spawned `event stop` (report + teardown).")
         except Exception:      # noqa: BLE001  best-effort
             LOG.exception("failed to spawn event stop")
 
@@ -8916,7 +8916,7 @@ class Relay:
         Feed A serves the HEAD of that stint's slot (a takeover onto a back-to-back's
         second row still pulls the single stream once), Feed B preloads the next
         slot. The DISPLAY row is set to <stint>. Tears a running feed off its stream
-        (like /set) — use BEFORE going live, not mid-program."""
+        (like /set). Use BEFORE going live, not mid-program."""
         if self.solo:
             return {"error": "not available in solo mode", "solo": True}
         self.source.refresh(timeout=6)      # clamp against fresh sheet data
@@ -8955,8 +8955,8 @@ class Relay:
         if anchor is None:
             LOG.info("resync_to_stint -> stint %d not served by any feed; no-op "
                      "(use /set/stint for a takeover)", target + 1)
-            return {"error": f"no feed serves stint {target + 1} — "
-                             f"use /set/stint for a takeover"}
+            return {"error": f"no feed serves stint {target + 1}. "
+                             f"Use /set/stint for a takeover"}
         other = "B" if anchor == "A" else "A"
         slots = pull_slots(rows)
         # Place the other feed after BOTH the target row and the anchor's own pull
@@ -8974,8 +8974,8 @@ class Relay:
 
     def set_mode(self, mode):
         """Switch the active schedule between 'race' and 'qualifying'. Re-points
-        both feeds to the new schedule's stint 1 — for a single-stream qualifying
-        Feed A serves the one row and Feed B idles — and sets Feed-A visibility/
+        both feeds to the new schedule's stint 1, for a single-stream qualifying
+        Feed A serves the one row and Feed B idles, and sets Feed-A visibility/
         audio (cut=False; the director picks the scene). Tears a running pull off
         its stream like set_stint: an explicit between-session action, not for
         mid-program use. No-op-with-error when qualifying is unavailable."""
@@ -9056,7 +9056,7 @@ class Relay:
     def _record_feed_recovery(self, feed, stint, downtime_s, source_state=None):
         """Feed.on_recovery callback: a feed dropped and is recovering. Record it as a
         discrete `feed_recovery` health event ALWAYS (so a self-healed on-air blip shows in
-        the post-event report + health monitor + log — the 2026-07-10 'all green' gap), and
+        the post-event report + health monitor + log, the 2026-07-10 'all green' gap), and
         fire a Discord @here only on CHURN. Best-effort; never raises into the feed loop."""
         now = time.time()
         if self.health_store is not None:
@@ -9074,7 +9074,7 @@ class Relay:
     def _record_feed_step_down(self, feed, stint, from_tier, to_tier):
         """Feed.on_step_down callback: an auto quality step-down happened. Record a
         `feed_step_down` health incident (post-event report + health monitor) AND fire a
-        Discord @here — it is actionable. Best-effort; never raises into the feed loop."""
+        Discord @here: it is actionable. Best-effort; never raises into the feed loop."""
         now = time.time()
         if self.health_store is not None:
             try:
@@ -9087,7 +9087,7 @@ class Relay:
         # State the step-down fact only; do NOT claim the @here here: _discord_post is
         # best-effort and no-ops without a webhook, so an unconditional "posted" would
         # mislead incident triage (mirrors _record_feed_recovery, which makes no such claim).
-        LOG.warning("feed step-down: Feed %s stint %d %s->%s — source can't sustain %s",
+        LOG.warning("feed step-down: Feed %s stint %d %s->%s. Source can't sustain %s",
                     feed, stint, from_tier, to_tier, from_tier)
         try:
             self._discord_post(
@@ -9122,7 +9122,7 @@ class Relay:
             notify.feed_recovery_churn_payload(feed, len(ts), FEED_CHURN_WINDOW_S // 60,
                                                self.producer_name, self._event_title()),
             "feed-recovery-churn")
-        LOG.warning("feed churn: Feed %s recovered %d× in %d min — @here posted",
+        LOG.warning("feed churn: Feed %s recovered %d× in %d min. @here posted",
                     feed, len(ts), FEED_CHURN_WINDOW_S // 60)
 
     def latest_substitution(self):
@@ -9189,8 +9189,8 @@ class Relay:
         if this_url and other is not None and not other.paused:
             other_url = (other.current_channel()[0] or "").strip()
             if this_url == other_url:
-                return {"error": f"would duplicate feed {other_key}'s stream — "
-                                 f"disarm it or point this feed to a different stint"}
+                return {"error": f"would duplicate feed {other_key}'s stream. "
+                                 f"Disarm it or point this feed to a different stint"}
         f.paused = False
         f.reload()
         LOG.info("feed %s armed (manual)", which.upper())
@@ -9198,7 +9198,7 @@ class Relay:
 
     def feed_deactivate(self, which):
         """Disarm Feed A/B: stop its pull, kill the process, close the port (frees
-        bandwidth) — mirrors pov_stop. Manual-mode only (#492)."""
+        bandwidth): mirrors pov_stop. Manual-mode only (#492)."""
         if not self.manual_feed_arm:
             return {"error": "manual feed arm disabled (set RACECAST_MANUAL_FEED_ARM=1)"}
         f = self.feeds.get(which.upper())
@@ -9256,7 +9256,7 @@ def _push_live_schedule(relay, setup_ctl):
 
 def should_push_live_schedule(result):
     """True when a next_auto() result should trigger _push_live_schedule: a real
-    cut (obs_cut) OR a same-URL back-to-back continuation — the DISPLAY stint
+    cut (obs_cut) OR a same-URL back-to-back continuation. The DISPLAY stint
     advances on a continuation even though OBS doesn't cut, so the HUD label must
     follow it too. False only on a plain idle over-press (neither). Pure so the
     /next gate is unit-testable without a live relay."""
@@ -9264,7 +9264,7 @@ def should_push_live_schedule(result):
 
 
 def _benign_client_disconnect(exc):
-    """True when `exc` is a client hanging up mid-response — an OBS browser
+    """True when `exc` is a client hanging up mid-response. An OBS browser
     source closing, a panel tab refreshing, a director's tablet going to sleep.
     ConnectionError covers BrokenPipeError, ConnectionResetError and
     ConnectionAbortedError (WinError 10053, issue #25) on every platform. These
@@ -9625,7 +9625,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
         _STATE_COOKIE = "rc_oauth_state"
 
         def _state_clear_cookie(self):
-            """Per-request state cookie clear — mirrors the Secure flag when on HTTPS."""
+            """Per-request state cookie clear. Mirrors the Secure flag when on HTTPS."""
             secure = "; Secure" if self.headers.get("X-Forwarded-Proto") == "https" else ""
             return (f"{self._STATE_COOKIE}=; Path=/console; "
                     f"Max-Age=0; HttpOnly{secure}; SameSite=Lax")
@@ -10042,7 +10042,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             return frm, to, maxn, now
 
         def _health_current(self):
-            """Allowlist of the live health fields — NEVER the feed/pov stream URLs
+            """Allowlist of the live health fields, NEVER the feed/pov stream URLs
             that relay.status() carries (redaction boundary)."""
             full = relay.status()
             feeds = {}
@@ -10096,7 +10096,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             return base
         def _console_status_payload(self, roles):
             """Status for the Funnel-exposed /console mount. Feed stream URLs are
-            director/producer-only over the Funnel — the same boundary as
+            director/producer-only over the Funnel. The same boundary as
             /schedule/data, which already exposes per-stint URLs to directors (the
             panel's Preview button + POV editor consume them over Funnel). So
             feeds[*].channel, the POV stream URL, and the Sheet id are KEPT for
@@ -10979,7 +10979,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     if (isinstance(st, dict) and isinstance(st.get("stream"), dict)
                             and st["stream"].get("active")):
                         return self._send({"ok": False,
-                            "error": "already streaming — end the current Part first"}, 409)
+                            "error": "already streaming: end the current Part first"}, 409)
                     ref = (rows[idx - 1].get("stream_key") or "").strip()
                     if not ref:
                         return self._send({"ok": False,
@@ -11084,7 +11084,7 @@ def poller(source, interval, stop_evt):
         try:
             source.refresh()
         except Exception as e:
-            LOG.warning("sheet poll raised (%s: %s) — continuing",
+            LOG.warning("sheet poll raised (%s: %s). Continuing",
                         type(e).__name__, e)
 
 
@@ -11097,7 +11097,7 @@ def quali_poller(hud_source, interval, stop_evt):
         try:
             hud_source.refresh_quali()
         except Exception as e:
-            LOG.warning("quali times poll raised (%s: %s) — continuing",
+            LOG.warning("quali times poll raised (%s: %s). Continuing",
                         type(e).__name__, e)
 
 
@@ -11147,7 +11147,7 @@ def _telemetry_loop(store, ps_ip, stop_evt):
                 continue
             store.update(gt7_telemetry.parse_packet(plain), time.time())
         except OSError as e:
-            tlog.warning("telemetry socket error: %s — reopening", e)
+            tlog.warning("telemetry socket error: %s. Reopening", e)
             try:
                 if sock:
                     sock.close()
@@ -11161,15 +11161,15 @@ def _telemetry_loop(store, ps_ip, stop_evt):
 
 
 def cookie_health(path, now=None, max_age_hours=COOKIE_MAX_AGE_H):
-    """Cookie staleness for /status, computed on demand — during a 24 h event the
+    """Cookie staleness for /status, computed on demand. During a 24 h event the
     cookies age while the relay runs, so this must be live, not a startup snapshot.
 
     The age is the EXPORT age (cookie_jar's stamp), not the jar's mtime: yt-dlp
     rewrites the jar on every resolve, so mid-event its mtime is always minutes old
     and the banner could never fire. A jar with no stamp reports age_h=None and is
-    not stale — unknown is never reported as old, and never as fresh either.
+    not stale: unknown is never reported as old, and never as fresh either.
     Running cookie-less (path None / file gone) is a legitimate configuration
-    (public streams): present=False, stale=False — the panel raises its cookie
+    (public streams): present=False, stale=False. The panel raises its cookie
     banner only on stale=True."""
     try:
         present = bool(path) and os.path.isfile(path)
@@ -11184,7 +11184,7 @@ def cookie_health(path, now=None, max_age_hours=COOKIE_MAX_AGE_H):
 
 
 def _cookie_hint(stderr_text, browser):
-    """failure_hint() from the sibling get-cookies.py — one source of truth
+    """failure_hint() from the sibling get-cookies.py, one source of truth
     for the actionable export-failure hints (locked DB, no profile, DPAPI)."""
     import importlib.util
     here = os.path.dirname(os.path.abspath(__file__))
@@ -11210,23 +11210,23 @@ def export_cookies(browser, out):
                                       stderr=subprocess.PIPE, env=external_tool_env(),
                                       **_no_window_kwargs())
             except FileNotFoundError:
-                LOG.warning("yt-dlp not found — cannot auto-export cookies."); return False
+                LOG.warning("yt-dlp not found: cannot auto-export cookies."); return False
             except subprocess.TimeoutExpired:
                 LOG.warning("cookie export timed out (Keychain prompt not approved?)."); return False
             if not os.path.exists(raw):
                 err = (proc.stderr or b"").decode("utf-8", errors="replace")
                 for line in [l for l in err.splitlines() if l.strip()][-1:]:
                     LOG.warning("%s", line)   # the real yt-dlp reason, not a guess
-                LOG.warning("Cookie export from '%s': FAILED — %s", browser,
+                LOG.warning("Cookie export from '%s': FAILED. %s", browser,
                             _cookie_hint(err, browser))
                 return False
             dropped = cookie_jar.filter_jar(raw, "youtube", dest=out)
     except OSError as exc:
-        LOG.warning("Cookie export from '%s': FAILED — cannot prepare it next to %s: %s",
+        LOG.warning("Cookie export from '%s': FAILED. Cannot prepare it next to %s: %s",
                     browser, out, exc)
         return False
     if dropped is None:
-        LOG.warning("Cookie export from '%s': FAILED — could not write the filtered "
+        LOG.warning("Cookie export from '%s': FAILED. Could not write the filtered "
                     "cookies to %s; the previous jar is unchanged.", browser, out)
         return False
     try: os.chmod(out, 0o600)   # live YouTube session, owner-only
@@ -11349,7 +11349,7 @@ def main():
                          "bypasses the 'Sign in to confirm you're not a bot' check. "
                          "Default: yt-cookies.txt next to this script, if present. "
                          "Twitch feeds use twitch-cookies.txt (picked up automatically "
-                         "from the same directory — no separate flag needed).")
+                         "from the same directory, no separate flag needed).")
     ap.add_argument("--cookies-from-browser", default=None,
                     help="Auto-export YouTube cookies from this browser on startup via "
                          "yt-dlp (e.g. firefox, chrome, safari, edge, brave) and use them. "
@@ -11398,7 +11398,7 @@ def main():
         f"https://docs.google.com/spreadsheets/d/{args.sheet_id}"
         f"/gviz/tq?tqx=out:csv&sheet={quote(args.sheet_tab)}")
 
-    LOG.info("relay starting — profile=%s bind=%s ports=%s mode=%s schedule=%s",
+    LOG.info("relay starting: profile=%s bind=%s ports=%s mode=%s schedule=%s",
              (args.league_name or "?"), args.bind, args.ports,
              ("qualifying" if args.qualifying else "race"), csv_url)
 
@@ -11409,10 +11409,10 @@ def main():
     # authoritative guard; this just turns a slow, misleading failure into a fast,
     # clear one.
     if not control_port_available("127.0.0.1", args.http_port):
-        LOG.error("control port 127.0.0.1:%s already in use — another relay is "
+        LOG.error("control port 127.0.0.1:%s already in use. Another relay is "
                   "probably running; aborting before any startup work.", args.http_port)
-        sys.exit(f"Could not bind the control server on 127.0.0.1 port {args.http_port} "
-                 f"— another relay is probably already running. Stop it first "
+        sys.exit(f"Could not bind the control server on 127.0.0.1 port {args.http_port}. "
+                 f"Another relay is probably already running. Stop it first "
                  f"('racecast relay stop'), then check 'racecast status' / 'racecast preflight' "
                  f"to see what holds the port.")
 
@@ -11504,7 +11504,7 @@ def main():
     if cookies:
         _ch = cookie_health(cookies)
         if _ch["stale"]:
-            LOG.warning("yt-cookies.txt is %.0f h old — cookies rotate; "
+            LOG.warning("yt-cookies.txt is %.0f h old. Cookies rotate; "
                         "run 'racecast cookies firefox' before the event.", _ch['age_h'])
 
     # Locate the director panel (shipped in the package root, one level up from relay/)
@@ -11530,7 +11530,7 @@ def main():
         if os.path.exists(cand):
             splitscreen_path = os.path.abspath(cand); break
     if not splitscreen_path:
-        LOG.warning("splitscreen.html not found — /splitscreen will 404.")
+        LOG.warning("splitscreen.html not found. /splitscreen will 404.")
     intermission_path = None
     for cand in (os.path.join(here, "intermission.html"),
                  os.path.join(here, "..", "intermission.html"),
@@ -11538,7 +11538,7 @@ def main():
         if os.path.exists(cand):
             intermission_path = os.path.abspath(cand); break
     if not intermission_path:
-        LOG.warning("intermission.html not found — /intermission will 404.")
+        LOG.warning("intermission.html not found. /intermission will 404.")
     cockpit_page_path = None
     for cand in (os.path.join(here, "cockpit.html"),
                  os.path.join(here, "..", "cockpit.html"),
@@ -11593,7 +11593,7 @@ def main():
             if os.path.exists(cand):
                 hud_path = os.path.abspath(cand); break
         if not hud_path:
-            LOG.warning("hud.html not found — /hud will 404 (assets dir: %s).", assets_dir)
+            LOG.warning("hud.html not found. /hud will 404 (assets dir: %s).", assets_dir)
         for cand in (os.path.join(here, "hud-preview.html"),
                      os.path.join(here, "..", "hud-preview.html"),
                      os.path.join(here, "..", "obs", "hud-preview.html")):
@@ -11662,7 +11662,7 @@ def main():
                               crew_source=crew_source)
                  if hud_source else None)
     if source is not None and len(source.get()) < 2:
-        LOG.info("schedule has fewer than 2 stints — Feed B idles on the empty next "
+        LOG.info("schedule has fewer than 2 stints. Feed B idles on the empty next "
                  "slot (black) until that stint's link is added; Feed A keeps serving stint 1.")
 
     relay = Relay(source, ports, logdir, cookies,
@@ -11807,7 +11807,7 @@ def main():
             servers.append(QuietThreadingHTTPServer((addr, args.http_port), handler))
             bound_addrs.append(addr)
         except OSError as e:
-            LOG.warning("could not bind %s:%s — %s", addr, args.http_port, e)
+            LOG.warning("could not bind %s:%s. %s", addr, args.http_port, e)
     # The loopback bind is mandatory when requested: OBS always reaches the relay
     # on 127.0.0.1. If it failed but (e.g.) the Tailscale IP bound, running on
     # would be a silent split-brain; 127.0.0.1 stays served by the STALE relay
@@ -11815,8 +11815,8 @@ def main():
     if not servers or loopback_bind_failed(bind_addrs, bound_addrs):
         for httpd in servers:
             httpd.server_close()
-        sys.exit(f"Could not bind the control server on 127.0.0.1 port {args.http_port} "
-                 f"— another relay is probably already running. Stop it first "
+        sys.exit(f"Could not bind the control server on 127.0.0.1 port {args.http_port}. "
+                 f"Another relay is probably already running. Stop it first "
                  f"('racecast relay stop'), then check 'racecast status' / 'racecast preflight' "
                  f"to see what holds the port.")
 
@@ -11836,7 +11836,7 @@ def main():
              'CSV URL' if args.sheet_csv_url else f'sheet tab “{args.sheet_tab}”')
     if relay.qual_source:
         _qmode = "QUALIFYING (live)" if relay.mode == "qualifying" else "race"
-        LOG.info("  Qualifying tab '%s' available — mode: %s  "
+        LOG.info("  Qualifying tab '%s' available. Mode: %s  "
                  "(switch: /mode/qualifying | /mode/race)", args.qualifying_tab, _qmode)
     else:
         _dg = qualifying_downgrade_note(args.qualifying, bool(relay.qual_source),
@@ -11860,19 +11860,19 @@ def main():
         if remote_host:
             LOG.info("    remote (tailnet):      http://%s:%s/panel", remote_host, args.http_port)
         elif args.bind == "auto":
-            LOG.info("    (no Tailscale IP found — local only; start Tailscale for remote access)")
+            LOG.info("    (no Tailscale IP found, local only; start Tailscale for remote access)")
     if event_store.get():
         LOG.info("  Event title: “%s”  (panel/cockpit/Discord; edit live in the Director Panel)",
                  event_store.get())
     if console_secret:
         if cockpit_page_path:
-            LOG.info("  Commentator cockpit: /cockpit (auth) — links via 'racecast links'")
+            LOG.info("  Commentator cockpit: /cockpit (auth). Links via 'racecast links'")
         else:
-            LOG.warning("  cockpit secret set but cockpit.html not found — /cockpit will 404.")
+            LOG.warning("  cockpit secret set but cockpit.html not found. /cockpit will 404.")
         if race_control_page_path:
             LOG.info("  Race Control desk: /console/race-control (auth, role-gated)")
         else:
-            LOG.warning("  console secret set but race-control.html not found — "
+            LOG.warning("  console secret set but race-control.html not found. "
                         "/console/race-control will 404.")
     if hud_source and hud_path:
         LOG.info("  HUD overlay (OBS source): http://127.0.0.1:%s/hud  "
@@ -11890,7 +11890,7 @@ def main():
         LOG.info("  Timer controls: /timer/start | /timer/stop | /timer/reset (tab '%s', %s)",
                  args.timer_tab, push)
     LOG.info("  Cookies (bot-check protection): %s",
-             'ON — ' + cookies if cookies else 'off (no yt-cookies.txt)')
+             'ON. ' + cookies if cookies else 'off (no yt-cookies.txt)')
     login_warning = cookie_login_warning(cookies)
     if login_warning:
         LOG.warning("  %s", login_warning)

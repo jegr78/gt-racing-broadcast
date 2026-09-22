@@ -122,7 +122,7 @@ def t_kill_tree_reaps_grandchild_session():
                 break
             time.sleep(0.05)
         assert not alive(gc_pid), \
-            "grandchild survived kill_tree — only direct children were reaped (#133)"
+            "grandchild survived kill_tree: only direct children were reaped (#133)"
     finally:
         for pid in (gc_pid, leader.pid if leader else None):
             if pid:

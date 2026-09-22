@@ -204,7 +204,7 @@ def t_resolve_hls_logged_out_jar_adds_the_cookie_hint():
         _u, err, _q, _c = _with_jar(_ANON_JAR, lambda p, s=status: _resolve_err(
             _NO_FORMAT_ERR, s, cookies=p))
         assert err.startswith(_NO_FORMAT_ERR), (status, err)
-        assert err.endswith(" — " + m.cookie_jar.LOGGED_OUT_HINT), (status, err)
+        assert err.endswith(": " + m.cookie_jar.LOGGED_OUT_HINT), (status, err)
         assert m.classify_source_state(err) is None, (status, err)
 
 
@@ -345,7 +345,7 @@ def t_stream_event_log_line_formats():
     # hence the '~'.
     assert m.stream_event_log_line(True) == "OBS stream output started"
     assert (m.stream_event_log_line(True, kbps=4520.4)
-            == "OBS stream output started — upstream ~4520 kbps")
+            == "OBS stream output started: upstream ~4520 kbps")
     # Stop: uptime appended when known; H/M/S rollover + sub-minute forms.
     assert m.stream_event_log_line(False) == "OBS stream output stopped"
     assert (m.stream_event_log_line(False, uptime_s=1000.0)
@@ -375,7 +375,7 @@ def t_on_stream_transition_logs_relay_line_with_uptime():
         finally:
             m.LOG.removeHandler(handler)
             m.LOG.setLevel(prev_level)
-        assert recs == ["OBS stream output started — upstream ~4520 kbps",
+        assert recs == ["OBS stream output started: upstream ~4520 kbps",
                         "OBS stream output stopped after 16m 40s"], recs
 
 
@@ -614,10 +614,10 @@ def t_aggregate_health_yellow_when_rebuilds_stood_down():
     # the frame rate the producer host renders. (#582)
     h = m.aggregate_health(_facts(rebuilds_stood_down={"A": 44.2}))
     assert h["level"] == "yellow"
-    assert h["reasons"] == ["Feed A rebuild ineffective — 3 OBS rebuilds did not clear "
+    assert h["reasons"] == ["Feed A rebuild ineffective: 3 OBS rebuilds did not clear "
                             "the stall (producer host renders 44 fps); auto-rebuild paused"]
     h = m.aggregate_health(_facts(rebuilds_stood_down={"B": None}))
-    assert h["reasons"] == ["Feed B rebuild ineffective — 3 OBS rebuilds did not clear "
+    assert h["reasons"] == ["Feed B rebuild ineffective: 3 OBS rebuilds did not clear "
                             "the stall; auto-rebuild paused"]
     assert m.aggregate_health(_facts(rebuilds_stood_down={}))["level"] == "green"
 
@@ -1205,8 +1205,8 @@ def t_aggregate_health_backlog_is_a_yellow_reason_with_the_next_step():
     h = m.aggregate_health(_facts(feeds_backlogged={"A": 11.6, "B": 8.2}))
     assert h["level"] == "yellow", h
     tail = "OBS reads slower than real time; RESET {0} → LIVE drops it with a short black dropout"
-    assert h["reasons"] == ["Feed A output 12 s behind live — " + tail.format("A"),
-                            "Feed B output 8 s behind live — " + tail.format("B")], h
+    assert h["reasons"] == ["Feed A output 12 s behind live. " + tail.format("A"),
+                            "Feed B output 8 s behind live. " + tail.format("B")], h
     assert m.aggregate_health(_facts(feeds_backlogged={}))["level"] == "green"
 
 
@@ -1217,7 +1217,7 @@ def t_aggregate_health_av_disturbance_reports_and_asks_for_eyes():
     h = m.aggregate_health(_facts(feeds_av_disturbed={"A": 5415.66}))
     assert h["level"] == "yellow", h
     assert h["reasons"] == ["Feed A audio timing broke by 5416 ms with no restart to "
-                            "explain it — OBS re-synced itself; check the program "
+                            "explain it: OBS re-synced itself; check the program "
                             "picture and sound"], h
     assert m.aggregate_health(_facts(feeds_av_disturbed={}))["level"] == "green"
 
@@ -1226,7 +1226,7 @@ def t_aggregate_health_av_disturbance_without_a_magnitude_still_reads():
     # The magnitude comes from the log line; a future OBS wording could drop it. The
     # reason must survive that instead of rendering "by None ms".
     h = m.aggregate_health(_facts(feeds_av_disturbed={"B": None}))
-    assert h["reasons"] == ["Feed B audio timing broke with no restart to explain it — "
+    assert h["reasons"] == ["Feed B audio timing broke with no restart to explain it: "
                             "OBS re-synced itself; check the program picture and sound"], h
 
 
@@ -1234,7 +1234,7 @@ def t_aggregate_health_backlog_on_pov_names_no_reset():
     # The feed reset exists for Feed A and B only (feed_reset_target validates against
     # relay.feeds), so a POV backlog states the fact and no control.
     h = m.aggregate_health(_facts(feeds_backlogged={"POV": 9.2}))
-    assert h["reasons"] == ["Feed POV output 9 s behind live — OBS reads slower than real "
+    assert h["reasons"] == ["Feed POV output 9 s behind live. OBS reads slower than real "
                             "time"], h
 
 

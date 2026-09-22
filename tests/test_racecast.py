@@ -3971,7 +3971,7 @@ def t_check_scene_collection_warns_when_switch_fails():
             m._check_scene_collection()
         assert calls.get("name") == expected, calls
         out = buf.getvalue()
-        assert "could not switch" in out and "output active" in out, out
+        assert "Could not switch" in out and "output active" in out, out
     finally:
         (obs_ws.get_scene_collection, obs_ws.set_scene_collection,
          m._active_obs_collection, m._collection_switch_enabled) = saved
@@ -4851,7 +4851,7 @@ def t_smoketest_tears_down_even_when_event_start_aborts():
             else:
                 os.environ[k] = v
     assert "start" in calls, calls
-    assert "stop" in calls, "teardown skipped — services left running"
+    assert "stop" in calls, "teardown skipped: services left running"
     assert "history" in calls, "verdict/history lost"
     assert "exit1" in calls, calls
 

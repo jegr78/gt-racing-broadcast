@@ -141,7 +141,7 @@ def t_cheatsheet_present_and_linked():
         "missing slides/cheat_sheets.html"
     # The old duplicate source must be gone.
     assert not os.path.isfile(os.path.join(ROOT, "src", "docs", "cheat_sheets.html")), \
-        "src/docs/cheat_sheets.html should be removed — the slides copy is canonical"
+        "src/docs/cheat_sheets.html should be removed. The slides copy is canonical"
     with open(os.path.join(SLIDES, "index.html"), encoding="utf-8") as fh:
         assert 'href="cheat_sheets.html"' in fh.read(), "landing page does not link the cheat sheet"
 

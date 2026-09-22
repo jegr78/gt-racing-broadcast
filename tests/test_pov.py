@@ -129,7 +129,7 @@ def t_status_surfaces_feed_last_error():
     # stops displaying a silent 'connecting'. (#133)
     r = _relay(["a", "b"])
     r.A.last_error = m.feed_fast_exit_error(0.2, 1)
-    assert r.status()["feeds"]["A"]["last_error"] == "feed exited immediately — port in use? see feed log"
+    assert r.status()["feeds"]["A"]["last_error"] == "feed exited immediately: port in use? see feed log"
 
 
 def t_status_exposes_feed_source_state():
@@ -1190,7 +1190,7 @@ def t_freeze_tick_stands_down_after_three_ineffective_rebuilds():
         r.obs_stats = {"obs_fps": 44.0}
         h = r._refresh_health(2000.0)
         assert h["level"] in ("yellow", "red")
-        assert ("Feed A rebuild ineffective — 3 OBS rebuilds did not clear the stall "
+        assert ("Feed A rebuild ineffective: 3 OBS rebuilds did not clear the stall "
                 "(producer host renders 44 fps); auto-rebuild paused") in h["reasons"]
         assert r.status()["rebuild_guard"] == {"stood_down": True, "feed": "A"}
     finally:
@@ -3321,7 +3321,7 @@ def t_backlog_on_a_local_stint_names_the_reset():
     r = _backlog_relay(11.6)
     r.A.current_channel = lambda: ("local:", 0)
     r._sample_consumer_backlogs()
-    assert ("Feed A output 12 s behind live — OBS reads slower than real time; RESET A → "
+    assert ("Feed A output 12 s behind live. OBS reads slower than real time; RESET A → "
             "LIVE drops it with a short black dropout") in r._refresh_health(2000.0)["reasons"]
 
 
@@ -3331,7 +3331,7 @@ def t_backlog_yellow_shows_but_never_pages():
     r.obs_reachable = True
     r._sample_consumer_backlogs()
     h = r._refresh_health(2000.0)
-    assert ("Feed A output 12 s behind live — OBS reads slower than real time; RESET A → "
+    assert ("Feed A output 12 s behind live. OBS reads slower than real time; RESET A → "
             "LIVE drops it with a short black dropout") in h["reasons"]
     facts = r._health_facts(2000.0)
     assert facts["feeds_backlogged"] == {"A": 11.6}

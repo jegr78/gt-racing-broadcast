@@ -99,7 +99,7 @@ def t_pr_meta_with_base_version():
     assert out == {
         "tag": "preview-pr-42",                       # tag stays rolling-stable
         "version": "1.1.0-preview.pr42.0123abc",      # valid SemVer prerelease
-        "title": "Preview 1.1.0 — PR #42 (0123abc)",
+        "title": "Preview 1.1.0: PR #42 (0123abc)",
     }, out
 
 
@@ -109,7 +109,7 @@ def t_dispatch_meta_with_base_version():
     assert out == {
         "tag": "preview-main",
         "version": "1.1.0-preview.main.deadbee",
-        "title": "Preview 1.1.0 — main (deadbee)",
+        "title": "Preview 1.1.0: main (deadbee)",
     }, out
 
 
@@ -204,7 +204,7 @@ def t_main_pr_emits_base_version_from_release_pr():
     lines = buf.getvalue().strip().splitlines()
     assert "tag=preview-pr-5" in lines, lines
     assert "version=1.1.0-preview.pr5.1234567" in lines, lines
-    assert "title=Preview 1.1.0 — PR #5 (1234567)" in lines, lines
+    assert "title=Preview 1.1.0: PR #5 (1234567)" in lines, lines
 
 
 def t_main_falls_back_to_next_minor_without_release_pr():

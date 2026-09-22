@@ -344,7 +344,7 @@ def classify_assets(label, missing, count, severity, fix):
                           f"completeness not verified")
         return Result(severity, label, f"none present. {fix}")
     if missing:
-        return Result(severity, label, f"missing: {', '.join(missing)} — {fix}")
+        return Result(severity, label, f"missing: {', '.join(missing)}. {fix}")
     return Result(PASS, label, f"complete ({count} file(s))")
 
 
