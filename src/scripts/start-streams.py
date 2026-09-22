@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-"""Launch one streamlink server per channel (static/public mode), backgrounded,
-each with a log + PID file so stop-streams.py can shut them down.
-Feeds come from <state-dir>/streams.json (managed by the Control Center) when
-present, else the built-in FEEDS default below — (CHANNEL_ID_or_URL, PORT). Each
-channel may be a YouTube channel ID (UC…) or a full youtube.com / twitch.tv URL.
+"""Launch one backgrounded streamlink server per channel in static public mode,
+each with a log and PID file so stop-streams.py can shut them down.
+Feeds come from the Control-Center-managed <state-dir>/streams.json when present,
+else from the built-in FEEDS default below, as (CHANNEL_ID_or_URL, PORT). Each
+channel may be a YouTube channel ID (UC…) or a full youtube.com or twitch.tv URL.
 Ports must match the OBS media sources.
-NOTE: PUBLIC channels only. The real unlisted flow is the relay (`racecast relay start`).
+PUBLIC channels only. The unlisted flow is the relay (`racecast relay start`).
 """
 import argparse, json, os, re, shutil, subprocess, sys
 from urllib.parse import urlparse
 
 
 def state_dir(here):
-    """Where PID/log files live: repo (src/scripts/) -> <repo>/runtime/static (gitignored);
-    distributed package (scripts/) -> next to the script."""
+    """Where PID and log files live: from the repo (src/scripts/) it is
+    <repo>/runtime/static, from the distributed package next to the script."""
     if os.path.basename(here) == "scripts" and os.path.basename(os.path.dirname(here)) == "src":
         return os.path.join(os.path.dirname(os.path.dirname(here)), "runtime", "static")
     return here
@@ -28,9 +28,9 @@ def feed_argv(frozen, executable, loop_path, channel, port, log_path):
 
 def feed_env(frozen, base_env):
     """Env for frozen feed children. They re-run the racecast --onefile binary, and
-    PYINSTALLER_RESET_ENVIRONMENT=1 makes each an independent instance (own
-    _MEIPASS) that outlives this parent — same fix as racecast.py's
-    _frozen_child_env(); keep the two in sync. Repo mode: None (inherit)."""
+    PYINSTALLER_RESET_ENVIRONMENT=1 gives each its own _MEIPASS so it outlives this
+    parent. racecast.py's _frozen_child_env() does the same; keep the two in sync.
+    Repo mode returns None and the child inherits."""
     if not frozen:
         return None
     env = dict(base_env)
@@ -39,8 +39,8 @@ def feed_env(frozen, base_env):
 
 
 def _spawn_kwargs():
-    """services.py lives next to this script (repo + bundle); import lazily so
-    loading this file from elsewhere (tests) needs no path setup."""
+    """services.py lives next to this script in both the repo and the bundle.
+    Import it lazily so loading this file from a test needs no path setup."""
     import importlib.util
     here = os.path.dirname(os.path.abspath(__file__))
     spec = importlib.util.spec_from_file_location("services", os.path.join(here, "services.py"))
@@ -82,25 +82,23 @@ def is_channel(v: str) -> bool:
     return bool(CHANNEL_RE.match(v)) or _is_stream_url(v)
 
 
-# ---- channels ----  (CHANNEL_ID, PORT)
+# Channels as (CHANNEL_ID, PORT).
 FEEDS = [
     ("UCNye-wNBqNL5ZzHSJj3l8Bg", "53001"),   # Feed A - TEST: Al Jazeera English (24/7)
     ("UCknLrEdhRCp1aegoMqRaCZg", "53002"),   # Feed B - TEST: DW News (24/7)
     # Replace TEST IDs with the real streamer channel IDs before the event.
 ]
-# ------------------
 
 STREAMS_CONFIG = "streams.json"
 
 
 def load_feeds(state_dir):
-    """Feeds to serve: <state_dir>/streams.json (Control Center-managed) when it
+    """Feeds to serve: the Control-Center-managed <state_dir>/streams.json when it
     exists and parses, else the built-in FEEDS default. Returns a list of
-    (channel, port) string pairs; entries missing a channel or port are skipped;
-    entries with an invalid channel (neither a UC… id nor an allowed
-    youtube/twitch-host URL) are logged to stderr and skipped (SSRF-validation
-    gate); a malformed/empty file falls back to FEEDS so a bad edit never serves
-    nothing."""
+    (channel, port) string pairs. An entry missing a channel or port is skipped. An
+    entry whose channel is neither a UC… id nor an allowed youtube or twitch URL is
+    logged to stderr and skipped, which is the SSRF gate. A malformed or empty file
+    falls back to FEEDS so a bad edit never serves nothing."""
     path = os.path.join(state_dir, STREAMS_CONFIG)
     try:
         with open(path, encoding="utf-8") as fh:
@@ -111,8 +109,8 @@ def load_feeds(state_dir):
             if not (ch and port):
                 continue
             if not is_channel(ch):
-                print(f"WARN: skipping feed with invalid channel {ch!r} "
-                      f"(use a YouTube channel ID or a youtube/twitch URL)", file=sys.stderr)
+                print(f"WARN: skipping feed with invalid channel {ch!r}. "
+                      f"Use a YouTube channel ID or a youtube/twitch URL", file=sys.stderr)
                 continue
             feeds.append((ch, port))
         return feeds or FEEDS

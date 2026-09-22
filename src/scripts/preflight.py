@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Pre-flight readiness check for the GT Racing broadcast setup.
 
-Run before an event to confirm this machine can run OBS + the relay:
-hardware, tool chain, ports, and YouTube cookies. Prints a traffic-light
-report; exit code is 0 if nothing FAILs, 1 otherwise.
+Run before an event to confirm this machine can run OBS and the relay: hardware,
+tool chain, ports and YouTube cookies. Prints a traffic-light report; the exit
+code is 0 if nothing FAILs, 1 otherwise.
 
 Usage:  python3 scripts/preflight.py
-Pure Python 3 standard library — no third-party dependencies.
+Python 3 standard library only, no third-party dependencies.
 """
 import argparse
 import csv
@@ -37,54 +37,51 @@ class Result:
     detail: str
 
 
-# --------------------------------------------------------------------------
-# Classifiers (pure — raw number -> Result). Single source of truth for the
-# system-requirement thresholds.
-# --------------------------------------------------------------------------
-# Nominal 16/32 GB modules report ~0.1-1.5 GB lower (firmware/iGPU
-# reservations) — without slack a physical 32 GB machine could never PASS.
+# The classifiers below turn a raw number into a Result and are the single source
+# of truth for the system-requirement thresholds.
+# Firmware and iGPU reservations make a nominal 16 or 32 GB module report up to
+# 1.5 GB lower, and without slack a physical 32 GB machine could never PASS.
 RAM_SLACK_GB = 1.5
 
 
 def classify_ram(gb):
-    # The measured production footprint (OBS + up to three relay feeds + Discord +
-    # the control browser + a cloud desktop) is ~6-9 GB, so 12 GB is comfortable
-    # headroom and 8 GB the practical floor. A GPU cloud box with 16 GB is green.
+    # The production footprint is 6-9 GB, so 12 GB is comfortable headroom and 8 GB
+    # the practical floor. A GPU cloud box with 16 GB is green.
     if gb < 8 - RAM_SLACK_GB:
-        return Result(FAIL, "RAM", f"{gb:.1f} GB — below the 8 GB minimum")
+        return Result(FAIL, "RAM", f"{gb:.1f} GB, below the 8 GB minimum")
     if gb < 12 - RAM_SLACK_GB:
         return Result(WARN, "RAM",
-                      f"{gb:.1f} GB — works; 12 GB recommended "
-                      f"(OBS + the relay feeds are memory-heavy)")
+                      f"{gb:.1f} GB works; 12 GB recommended "
+                      f"(OBS and the relay feeds are memory-heavy)")
     return Result(PASS, "RAM", f"{gb:.1f} GB")
 
 
 def classify_cpu(n, has_gpu=False):
-    # The core hog is OBS's software (x264) encode. When an NVENC GPU is present
-    # the encode is offloaded to the GPU, so the CPU floor drops by 2: a
-    # g2-standard-4 (4 cores + L4) validated a real broadcast (spike #395).
+    # The core hog is OBS's software x264 encode. An NVENC GPU takes that off the
+    # CPU, so the floor drops by 2: four cores plus an L4 carried a real broadcast
+    # (#395).
     fail_floor, pass_floor = (2, 4) if has_gpu else (4, 6)
     reason = ("hardware NVENC offloads the encode"
-              if has_gpu else "software x264 encode + multiple feeds")
+              if has_gpu else "software x264 encode and multiple feeds")
     if n < fail_floor:
         return Result(FAIL, "CPU cores",
-                      f"{n} logical cores — below the {fail_floor}-core minimum")
+                      f"{n} logical cores, below the {fail_floor}-core minimum")
     if n < pass_floor:
         return Result(WARN, "CPU cores",
-                      f"{n} logical cores — works; {pass_floor}+ recommended ({reason})")
+                      f"{n} logical cores work; {pass_floor}+ recommended ({reason})")
     return Result(PASS, "CPU cores", f"{n} logical cores")
 
 
 def detect_nvidia_gpu(run=subprocess.run, which=shutil.which, os_name=None):
-    """Best-effort: is an NVIDIA GPU (NVENC hardware encoder) present? A GPU
-    offloads OBS's H.264/HEVC encode off the CPU, so classify_cpu relaxes the
-    core floor when this is True. Returns False on any error — an undetected
-    encoder simply falls back to the stricter software-encode thresholds, and
-    non-NVIDIA hardware encoders (Apple VideoToolbox, Intel QSV) are not probed
-    here. `run`/`which`/`os_name` are injectable seams for the unit test."""
+    """Best-effort: is an NVIDIA GPU with an NVENC hardware encoder present? A GPU
+    takes OBS's H.264/HEVC encode off the CPU, so classify_cpu relaxes the core
+    floor when this is True. Returns False on any error, and an undetected encoder
+    simply falls back to the stricter software-encode thresholds. Non-NVIDIA
+    encoders such as Apple VideoToolbox and Intel QSV are not probed here.
+    `run`, `which` and `os_name` are injectable seams for the unit test."""
     os_name = os.name if os_name is None else os_name
-    # nvidia-smi (driver + GPU) works on both Linux and Windows once the driver
-    # is installed — the production signal on the provisioned cloud box.
+    # nvidia-smi covers driver and GPU on Linux and Windows once the driver is
+    # installed, and is the production signal on the provisioned cloud box.
     if which("nvidia-smi"):
         try:
             r = run(["nvidia-smi", "-L"], capture_output=True, timeout=5,
@@ -106,23 +103,21 @@ def detect_nvidia_gpu(run=subprocess.run, which=shutil.which, os_name=None):
 
 def classify_disk(gb):
     if gb < 2:
-        return Result(FAIL, "Free disk", f"{gb:.1f} GB free — below the 2 GB minimum")
+        return Result(FAIL, "Free disk", f"{gb:.1f} GB free, below the 2 GB minimum")
     if gb < 5:
-        return Result(WARN, "Free disk", f"{gb:.1f} GB free — low; 5 GB+ recommended")
+        return Result(WARN, "Free disk", f"{gb:.1f} GB free is low; 5 GB+ recommended")
     return Result(PASS, "Free disk", f"{gb:.1f} GB free")
 
 
 def classify_swap(gb):
     if gb > 1:
         return Result(WARN, "Swap in use",
-                      f"{gb:.1f} GB swapped — not a fresh boot / under memory "
-                      f"pressure; reboot before the event")
+                      f"{gb:.1f} GB swapped, so this is not a fresh boot or the "
+                      f"machine is under memory pressure; reboot before the event")
     return Result(PASS, "Swap in use", f"{gb:.1f} GB swapped")
 
 
-# --------------------------------------------------------------------------
-# Platform readers (isolated per-OS; return raw numbers)
-# --------------------------------------------------------------------------
+# The per-OS platform readers below return raw numbers.
 class _MEMORYSTATUSEX(ctypes.Structure):
     _fields_ = [("dwLength", ctypes.c_ulong),
                 ("dwMemoryLoad", ctypes.c_ulong),
@@ -183,11 +178,8 @@ def disk_free_bytes(path):
     return shutil.disk_usage(path).free
 
 
-# --------------------------------------------------------------------------
-# Probes
-# --------------------------------------------------------------------------
 def port_free(port, host="127.0.0.1"):
-    """True if nothing is bound to host:port (a fresh socket can bind it)."""
+    """True if nothing is bound to host:port, so a fresh socket can bind it."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         sock.bind((host, port))
@@ -199,7 +191,7 @@ def port_free(port, host="127.0.0.1"):
 
 
 def port_reachable(host, port, timeout=0.5):
-    """True if a TCP connection to host:port succeeds (a service is listening)."""
+    """True if a TCP connection to host:port succeeds, so a service is listening."""
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.settimeout(timeout)
     try:
@@ -214,11 +206,11 @@ def port_reachable(host, port, timeout=0.5):
 def companion_probe_hosts(bind_ip=None, tailscale_ip=None):
     """Ordered, de-duplicated hosts to probe for a running Companion.
 
-    `racecast companion start` binds Companion to the Tailscale IP (tailnet-only, NOT
-    loopback), so a 127.0.0.1-only reachability probe false-negatives — Companion is up
-    but preflight reports "not reachable yet". Probe the config's `bind_ip` and the
-    Tailscale IP as well. An empty or 0.0.0.0 (wildcard) bind maps to loopback, and
-    127.0.0.1 is always kept as a fallback so behaviour is unchanged when neither is known.
+    `racecast companion start` binds Companion to the Tailscale IP, tailnet-only and
+    NOT loopback, so a 127.0.0.1-only reachability probe false-negatives: Companion
+    is up but preflight reports "not reachable yet". Probe the config's `bind_ip` and
+    the Tailscale IP as well. An empty or wildcard bind maps to loopback, and
+    127.0.0.1 is always kept as a fallback for when neither is known.
     """
     hosts = []
     for h in (bind_ip, tailscale_ip, "127.0.0.1"):
@@ -231,17 +223,15 @@ def companion_probe_hosts(bind_ip=None, tailscale_ip=None):
 
 
 def no_window_kwargs(os_name=None):
-    """Popen/run kwargs that stop a console child from flashing its own terminal
-    window on Windows. tool_version() is called IN-PROCESS by the Control Center's
-    `tools`/`preflight` status providers, and racecast-ui.exe is a --windowed
-    (console-less) app, so every `<tool> --version` probe otherwise pops a
-    transient terminal — one per tool (issue #23's class, missed for the version
-    probes). CREATE_NO_WINDOW gives the child a hidden console; capture_output
-    keeps the version text either way, so the flag is safe. Empty (no-op) off
-    Windows so the same call site stays cross-platform. Mirrors
-    services.no_window_kwargs — preflight imports nothing from its siblings (its
-    test loads it standalone), so the flag is duplicated here, like the relay's
-    racecast-feeds._no_window_kwargs copy."""
+    """Popen and run kwargs that stop a console child from flashing its own
+    terminal window on Windows. tool_version() is called IN-PROCESS by the Control
+    Center's status providers, and racecast-ui.exe is a console-less --windowed app,
+    so every `<tool> --version` probe otherwise pops one transient terminal per tool
+    (#23). CREATE_NO_WINDOW gives the child a hidden console, and capture_output
+    keeps the version text either way. It is a no-op off Windows so the call site
+    stays cross-platform. services.no_window_kwargs is the same helper: preflight
+    imports nothing from its siblings, because its test loads it standalone, so the
+    flag is duplicated here like the relay's own copy."""
     os_name = os.name if os_name is None else os_name
     if os_name == "nt":
         CREATE_NO_WINDOW = 0x08000000
@@ -251,7 +241,7 @@ def no_window_kwargs(os_name=None):
 
 def tool_version(name, run=subprocess.run, which=shutil.which):
     """Return the first line of `<name> --version`, or None if not on PATH.
-    `run`/`which` are injectable seams for the unit test."""
+    `run` and `which` are injectable seams for the unit test."""
     path = which(name)
     if not path:
         return None
@@ -265,16 +255,13 @@ def tool_version(name, run=subprocess.run, which=shutil.which):
         return path
 
 
-# --------------------------------------------------------------------------
-# Cookies
-# --------------------------------------------------------------------------
 def resolve_cookies_path(preflight_file, runtime_dir=None, cookies_opt=None):
     """Locate yt-cookies.txt the way the relay does.
 
-    Priority: explicit --cookies, then --runtime-dir/yt-cookies.txt, then the
-    first existing candidate (package layout scripts/+relay/, repo layout
-    src/scripts/+runtime/, or next to this script). Falls back to the
-    package-expected path so the report names a sensible location.
+    Priority: an explicit --cookies, then --runtime-dir/yt-cookies.txt, then the
+    first existing candidate in the package layout, the repo layout or next to this
+    script. Falls back to the package-expected path so the report names a sensible
+    location.
     """
     if cookies_opt:
         return cookies_opt
@@ -310,7 +297,7 @@ def cookies_status(path, max_age_hours=12, now=None):
     now = time.time() if now is None else now
     if not os.path.isfile(path):
         return Result(WARN, "yt-cookies.txt",
-                      f"not found at {path} — run `racecast cookies firefox` before the event")
+                      f"not found at {path}. Run `racecast cookies firefox` before the event")
     # The EXPORT age, not the jar's mtime: yt-dlp rewrites the jar on every resolve.
     age_h = cookie_jar.export_age_h(path, now=now)
     try:
@@ -321,29 +308,27 @@ def cookies_status(path, max_age_hours=12, now=None):
     has_login = cookie_jar.text_has_login(text)   # the one rule, shared with the relay (#615)
     if age_h is not None and age_h > max_age_hours:
         return Result(WARN, "yt-cookies.txt",
-                      f"{age_h:.0f} h old — cookies rotate; re-run `racecast cookies firefox`")
+                      f"{age_h:.0f} h old; cookies rotate, so re-run `racecast cookies firefox`")
     if not has_login:
         return Result(WARN, "yt-cookies.txt",
                       "present but no logged-in YouTube session markers found")
     if age_h is None:
         return Result(WARN, "yt-cookies.txt",
                       "logged-in markers found, but this jar predates export tracking "
-                      "and its age cannot be judged — re-run `racecast cookies firefox`")
+                      "and its age cannot be judged. Re-run `racecast cookies firefox`")
     return Result(PASS, "yt-cookies.txt",
                   f"present, fresh ({age_h:.0f} h old), logged-in markers found")
 
 
-# --------------------------------------------------------------------------
-# Google Sheet (the schedule/HUD source — a shared production resource)
-# --------------------------------------------------------------------------
+# The Google Sheet is the shared schedule and HUD source.
 SHEET_TAB = "Schedule"   # keep in sync with the relay's DEFAULT_SHEET_TAB
 
 
 def fetch_sheet_csv(sheet_id, tab=SHEET_TAB, timeout=10):
     """Network probe, kept apart from the pure classifier. Returns (kind, payload):
-    ('ok', body) | ('network', why) for a timeout/connection error (NOT a sharing
-    problem) | ('forbidden', why) for 401/403 | ('not_found', why) for 404 |
-    ('error', why) for anything else."""
+    ('ok', body); ('network', why) for a timeout or connection error, which is NOT
+    a sharing problem; ('forbidden', why) for 401 and 403; ('not_found', why) for
+    404; ('error', why) for anything else."""
     url = (f"https://docs.google.com/spreadsheets/d/{sheet_id}"
            f"/gviz/tq?tqx=out:csv&sheet={quote(tab)}")
     try:
@@ -357,7 +342,7 @@ def fetch_sheet_csv(sheet_id, tab=SHEET_TAB, timeout=10):
         return "error", f"HTTP {exc.code}"
     except TimeoutError:
         return "network", "the read operation timed out"
-    except URLError as exc:                  # DNS failure, connection refused, no route…
+    except URLError as exc:                  # DNS failure, connection refused, no route
         reason = getattr(exc, "reason", exc)
         if isinstance(reason, TimeoutError):
             return "network", "the read operation timed out"
@@ -367,43 +352,42 @@ def fetch_sheet_csv(sheet_id, tab=SHEET_TAB, timeout=10):
 
 
 def classify_sheet(sheet_id, outcome=None, payload=""):
-    """Pure classifier over the fetch outcome. An HTML body is Google's
-    sign-in page — the classic 'sheet not shared' case. A timeout/connection
-    error is a NETWORK problem (WARN), not a sharing one — don't conflate them."""
+    """Pure classifier over the fetch outcome. An HTML body is Google's sign-in
+    page, the classic 'sheet not shared' case. A timeout or connection error is a
+    NETWORK problem and only a WARN; do not conflate the two."""
     if not sheet_id:
         return Result(WARN, "Google Sheet",
-                      "RACECAST_SHEET_ID not set — set SHEET_ID in the active profile")
+                      "RACECAST_SHEET_ID not set. Set SHEET_ID in the active profile")
     if outcome == "network":
         return Result(WARN, "Google Sheet",
-                      f"could not reach Google Sheets ({payload}) — slow or no "
-                      f"network; retry. Sharing is fine if it loaded before.")
+                      f"could not reach Google Sheets ({payload}), so the "
+                      f"network is slow or down; retry. Sharing is fine if it "
+                      f"loaded before.")
     if outcome == "forbidden":
         return Result(FAIL, "Google Sheet",
-                      f"access denied ({payload}) — check sharing: Share -> "
+                      f"access denied ({payload}). Check sharing: Share -> "
                       f"'Anyone with the link: Viewer'")
     if outcome == "not_found":
         return Result(FAIL, "Google Sheet",
-                      f"not found ({payload}) — wrong Sheet ID in the active profile?")
+                      f"not found ({payload}). Wrong Sheet ID in the active profile?")
     if outcome == "error":
         return Result(FAIL, "Google Sheet",
-                      f"not readable ({payload}) — check sharing "
+                      f"not readable ({payload}). Check sharing "
                       f"('Anyone with the link: Viewer') or your network")
     head = (payload or "").lstrip("﻿ \t\r\n")[:200].lower()
     if head.startswith("<!doctype") or head.startswith("<html"):
         return Result(FAIL, "Google Sheet",
-                      "not readable (got a sign-in page) — check sharing: "
+                      "not readable (got a sign-in page). Check sharing: "
                       "Share -> 'Anyone with the link: Viewer'")
     rows = [r for r in csv.reader(io.StringIO(payload)) if any(c.strip() for c in r)]
     if not rows:
         return Result(FAIL, "Google Sheet",
-                      f"reachable but tab '{SHEET_TAB}' is empty — correct tab name?")
+                      f"reachable but tab '{SHEET_TAB}' is empty. Correct tab name?")
     return Result(PASS, "Google Sheet",
                   f"reachable ({len(rows)} row(s) in '{SHEET_TAB}')")
 
 
-# --------------------------------------------------------------------------
-# Applications installed? (presence only — `racecast event status` covers running)
-# --------------------------------------------------------------------------
+# Application presence only; `racecast event status` covers what is running.
 # (app key, display name, level when missing, consequence)
 APP_CHECKS = (
     ("obs", "OBS Studio", FAIL, "no broadcast without OBS"),
@@ -414,9 +398,8 @@ APP_CHECKS = (
 
 
 def _install_apps_module(here):
-    """Load sibling install_apps.py by path — works in repo, package and
-    frozen bundled-data modes alike (same pattern as install_apps' own
-    installer_common loader)."""
+    """Load sibling install_apps.py by path, which works in repo, package and
+    frozen bundled-data modes alike."""
     import importlib.util
     spec = importlib.util.spec_from_file_location(
         "install_apps", os.path.join(here, "install_apps.py"))
@@ -427,30 +410,30 @@ def _install_apps_module(here):
 
 def apps_section(present, web=False):
     """Classify each producer app given `present(app) -> bool`. On a web-variant
-    host (no native Discord — e.g. ARM64 Linux) a missing Discord client is
-    informational: interview audio comes from Discord-web in a browser."""
+    host, one without native Discord such as ARM64 Linux, a missing Discord client
+    is informational: interview audio comes from Discord-web in a browser."""
     results = []
     for app, pretty, miss_level, consequence in APP_CHECKS:
         if present(app):
             results.append(Result(PASS, pretty, "installed"))
         elif app == "discord" and web:
             results.append(Result(INFO, pretty,
-                                  "native client not installed — interview audio via "
-                                  "Discord-web in the browser (open it and join the "
-                                  "voice channel manually)"))
+                                  "native client not installed, so interview audio comes "
+                                  "from Discord-web in the browser. Open it and join the "
+                                  "voice channel manually"))
         else:
             results.append(Result(miss_level, pretty,
-                                  f"not installed — {consequence}; run `racecast install-apps`"))
+                                  f"not installed: {consequence}. Run `racecast install-apps`"))
     return results
 
 
-# The Discord audio source uses the obs-pipewire-audio-capture plugin on Linux
-# (pipewire_audio_application_capture — for native Discord AND the Discord-web
-# fallback). It is NOT part of OBS core, so it must be installed separately on
-# every Linux box, any architecture.
+# The Discord audio source uses the obs-pipewire-audio-capture plugin on Linux,
+# the pipewire_audio_application_capture source, for native Discord and the
+# Discord-web fallback alike. It is NOT part of OBS core, so every Linux box needs
+# it installed separately, on any architecture.
 #
-# Where its .so may live is owned by obs_pipewire_linux (the module that installs
-# it) so there is ONE list: preflight reads it, install-apps checks against it
+# Where its .so may live is owned by obs_pipewire_linux, the module that installs
+# it, so there is ONE list: preflight reads it, and install-apps checks against it
 # before downloading a copy the machine may already have from a distro package.
 from obs_pipewire_linux import (          # noqa: E402  (grouped with its users)
     pipewire_audio_candidates,
@@ -459,33 +442,32 @@ from obs_pipewire_linux import (          # noqa: E402  (grouped with its users)
 
 
 def classify_pipewire_audio(platform_name, present):
-    """Linux-only OBS-plugin gate (None on macOS/Windows — they use their own
-    native Discord capture source)."""
+    """Linux-only OBS-plugin gate. Returns None on macOS and Windows, which use
+    their own native Discord capture source."""
     if not platform_name.startswith("linux"):
         return None
     if present:
         return Result(PASS, "OBS PipeWire audio plugin", "installed")
     return Result(WARN, "OBS PipeWire audio plugin",
-                  "not found — the obs-pipewire-audio-capture plugin backs the Discord "
-                  "audio source on Linux; without it interview audio can't capture. "
-                  "Install it (see the OBS Setup wiki).")
+                  "not found. The obs-pipewire-audio-capture plugin backs the Discord "
+                  "audio source on Linux, and without it interview audio cannot "
+                  "capture. Install it (see the OBS Setup wiki).")
 
 
-# streamlink floor mirrors install_tools.MIN_STREAMLINK (kept in sync deliberately;
-# preflight must not import the installer module). 8.2.0 (2026-02-09) is the release
-# that added --http-cookies-file, which the relay's YouTube serve uses to pass
-# yt-dlp's session cookies to streamlink's manifest re-fetch (#350). An older
-# streamlink (e.g. Ubuntu 24.04's apt 6.6.2) makes every cookie'd YouTube feed abort
-# with "unrecognized arguments: --http-cookies-file".
+# The streamlink floor mirrors install_tools.MIN_STREAMLINK, kept in sync by hand
+# because preflight must not import the installer module. 8.2.0 added
+# --http-cookies-file, which the relay's YouTube serve uses to pass yt-dlp's session
+# cookies to streamlink's manifest re-fetch (#350). An older streamlink makes every
+# cookie'd YouTube feed abort with "unrecognized arguments: --http-cookies-file".
 PF_MIN_STREAMLINK = (8, 2, 0)
 
 _STREAMLINK_VER_RE = re.compile(r"streamlink\s+(\d+)\.(\d+)(?:\.(\d+))?")
 
 
 def parse_streamlink_version(version_line):
-    """Parse `streamlink --version` output ("streamlink X.Y.Z", a package build may
-    append "-N") into an (major, minor, patch) tuple. None if unrecognizable (a bare
-    path fallback, empty, or None)."""
+    """Parse `streamlink --version` output, "streamlink X.Y.Z" with an optional
+    "-N" package suffix, into a (major, minor, patch) tuple. None when it is
+    unrecognizable, empty or None."""
     if not version_line:
         return None
     match = _STREAMLINK_VER_RE.search(version_line)
@@ -495,9 +477,9 @@ def parse_streamlink_version(version_line):
 
 
 def classify_streamlink_version(version_line):
-    """Gate streamlink against the PF_MIN_STREAMLINK floor. FAIL below it (the
-    relay's cookie'd YouTube serve can't work), PASS at/above. None when the version
-    can't be parsed — the tool loop's plain PASS row stands, no second guess."""
+    """Gate streamlink against the PF_MIN_STREAMLINK floor: FAIL below it, where
+    the relay's cookie'd YouTube serve cannot work, PASS at or above. Returns None
+    when the version cannot be parsed, leaving the tool loop's plain PASS row."""
     have = parse_streamlink_version(version_line)
     if have is None:
         return None
@@ -505,37 +487,34 @@ def classify_streamlink_version(version_line):
     if have < PF_MIN_STREAMLINK:
         shown = ".".join(str(n) for n in have)
         return Result(FAIL, "streamlink version",
-                      f"{shown} — below {want}; the relay's YouTube feed passes cookies "
+                      f"{shown} is below {want}; the relay's YouTube feed passes cookies "
                       f"via --http-cookies-file (added in streamlink {want}). Update it: "
                       "`racecast install-tools --update`.")
     return Result(PASS, "streamlink version", ".".join(str(n) for n in have))
 
 
-# glibc floors mirror install_tools.MIN_GLIBC_TOOLS / MIN_GLIBC_BINARY (kept in
-# sync deliberately — preflight must not import the installer module).
+# The glibc floors mirror install_tools.MIN_GLIBC_TOOLS and MIN_GLIBC_BINARY, kept
+# in sync by hand because preflight must not import the installer module.
 PF_MIN_GLIBC_TOOLS = (2, 35)
 PF_MIN_GLIBC_BINARY = (2, 38)
 
 
 def classify_glibc(libc_tuple):
-    """Linux glibc gate. FAIL below 2.35 (deno won't run), WARN below 2.38 (the
-    racecast binary needs Ubuntu 24.04), else PASS. None (undeterminable / non-glibc)
-    -> None (no row)."""
+    """Linux glibc gate: FAIL below 2.35, where deno will not run, WARN below 2.38,
+    which the racecast binary needs, else PASS. An undeterminable or non-glibc
+    tuple returns None and emits no row."""
     if libc_tuple is None:
         return None
     have = f"{libc_tuple[0]}.{libc_tuple[1]}"
     if libc_tuple < PF_MIN_GLIBC_TOOLS:
-        return Result(FAIL, "glibc", f"{have} — below 2.35; deno/the toolchain "
-                      "won't run. Use Ubuntu 24.04 LTS.")
+        return Result(FAIL, "glibc", f"{have} is below 2.35, so deno and the "
+                      "toolchain will not run. Use Ubuntu 24.04 LTS.")
     if libc_tuple < PF_MIN_GLIBC_BINARY:
-        return Result(WARN, "glibc", f"{have} — works from source; the racecast "
+        return Result(WARN, "glibc", f"{have} works from source; the racecast "
                       "binary needs 2.38 (Ubuntu 24.04).")
     return Result(PASS, "glibc", have)
 
 
-# --------------------------------------------------------------------------
-# Reporter / CLI / orchestration
-# --------------------------------------------------------------------------
 COLORS = {PASS: "\033[32m", WARN: "\033[33m", FAIL: "\033[31m", INFO: "\033[36m"}
 RESET = "\033[0m"
 
@@ -564,7 +543,8 @@ def fmt_result(result, color):
 
 def _speedtest_max_age():
     """Staleness window in days for the stored speed-test result.
-    RACECAST_SPEEDTEST_MAX_AGE_DAYS overrides; bad/non-positive -> 7."""
+    RACECAST_SPEEDTEST_MAX_AGE_DAYS overrides; a bad or non-positive value gives
+    7."""
     raw = os.environ.get("RACECAST_SPEEDTEST_MAX_AGE_DAYS", "")
     try:
         value = float(raw)
@@ -574,8 +554,9 @@ def _speedtest_max_age():
 
 
 def _obs_benchmark_max_age():
-    """Staleness window in days for the stored `racecast obs benchmark` result (#584).
-    RACECAST_OBS_BENCHMARK_MAX_AGE_DAYS overrides; bad/non-positive -> 30."""
+    """Staleness window in days for the stored `racecast obs benchmark` result
+    (#584). RACECAST_OBS_BENCHMARK_MAX_AGE_DAYS overrides; a bad or non-positive
+    value gives 30."""
     raw = os.environ.get("RACECAST_OBS_BENCHMARK_MAX_AGE_DAYS", "")
     try:
         value = float(raw)
@@ -588,7 +569,7 @@ def _obs_benchmark_line(preflight_file, runtime_dir):
     """The last OBS benchmark and its age, or None when it cannot be read. Reported,
     never run here: a 60-second test on every preflight gets clicked away."""
     try:
-        import obs_benchmark as ob      # lazy, like speedtest: it defines its own Result
+        import obs_benchmark as ob      # lazy: it defines its own Result
         import speedtest as st
         d = runtime_dir or st.default_runtime_dir(
             os.path.dirname(os.path.abspath(preflight_file)))
@@ -612,15 +593,15 @@ def gather(preflight_file, runtime_dir=None, cookies_opt=None):
     for name in REQUIRED_TOOLS:
         version = tool_version(name)
         tools.append(Result(PASS, name, version) if version
-                     else Result(FAIL, name, "not found on PATH — required by the relay"))
+                     else Result(FAIL, name, "not found on PATH, required by the relay"))
         if name == "streamlink" and version:
             floor = classify_streamlink_version(version)
             if floor is not None:
                 tools.append(floor)
     py = sys.version.split()[0]
     tools.append(Result(PASS, "python3", py) if sys.version_info >= (3, 8)
-                 else Result(FAIL, "python3", f"{py} — need 3.8+"))
-    if sys.platform.startswith("linux"):   # OS floor (deno glibc 2.35 / binary 2.38)
+                 else Result(FAIL, "python3", f"{py}, need 3.8+"))
+    if sys.platform.startswith("linux"):   # OS floor: deno needs glibc 2.35
         try:
             import platform as _pf
             import install_tools as _it
@@ -637,7 +618,7 @@ def gather(preflight_file, runtime_dir=None, cookies_opt=None):
         apps = apps_section(lambda app: ia.app_present(app, sys.platform), web=web)
     except Exception as exc:  # never let a probe break the report
         apps = [Result(WARN, "applications", f"check failed: {exc}")]
-    if sys.platform.startswith("linux"):   # OBS PipeWire audio plugin (Discord audio source)
+    if sys.platform.startswith("linux"):   # the Discord audio source's OBS plugin
         try:
             pw = classify_pipewire_audio(sys.platform, pipewire_audio_present(
                 pipewire_audio_candidates(os.path.expanduser("~"), os.uname().machine)))
@@ -647,29 +628,30 @@ def gather(preflight_file, runtime_dir=None, cookies_opt=None):
             pass  # never let the plugin probe break the report
     ports = []
     for port in FEED_PORTS:
-        # "In use" is normal once the relay/feeds are running (e.g. after event
-        # start) — report it as INFO, not a warning. `racecast status` shows whether
-        # the occupant is the relay; only a foreign app is a real conflict.
+        # "In use" is normal once the relay and feeds are running, so report it as
+        # INFO rather than a warning. `racecast status` shows whether the occupant
+        # is the relay; only a foreign app is a real conflict.
         ports.append(Result(PASS, f"port {port}", "free") if port_free(port)
                      else Result(INFO, f"port {port}",
-                                 "in use — normal if the relay/feeds are running "
+                                 "in use, which is normal while the relay or feeds run "
                                  "(`racecast status` confirms); a conflict only if another app owns it"))
     for port, svc in SERVICE_PORTS:
         if svc == "OBS WebSocket":
             ports.append(Result(PASS, f"port {port}",
-                                "OBS WebSocket reachable — one-button handover ready")
+                                "OBS WebSocket reachable, one-button handover ready")
                          if port_reachable("127.0.0.1", port)
                          else Result(WARN, f"port {port}",
-                                     "OBS WebSocket not reachable — NEXT can't auto-cut; "
-                                     "enable obs-websocket in OBS "
+                                     "OBS WebSocket not reachable, so NEXT cannot auto-cut. "
+                                     "Enable obs-websocket in OBS "
                                      "(Tools -> WebSocket Server Settings)"))
         else:
-            # Companion: probe where it ACTUALLY binds. racecast binds Companion to the
-            # Tailscale IP (tailnet-only), so a loopback-only probe false-negatives — up
-            # but reported "not reachable". Resolve the config bind_ip + the Tailscale IP;
-            # any import/read failure degrades to loopback (companion_probe_hosts always
-            # keeps 127.0.0.1). Not reachable on ANY host just means it hasn't launched yet
-            # (event start does that) — INFO, not a warning the operator must chase down.
+            # Companion: probe where it ACTUALLY binds. racecast binds Companion to
+            # the tailnet-only Tailscale IP, so a loopback-only probe false-negatives
+            # and reports "not reachable" while it is up. Resolve the config bind_ip
+            # and the Tailscale IP; any failure degrades to loopback, since
+            # companion_probe_hosts always keeps 127.0.0.1. Not reachable on ANY host
+            # only means it has not launched yet, which event start does, so it is
+            # INFO rather than a warning the operator must chase down.
             bind_ip = None
             try:
                 import json as _json, companion_common as _cc
@@ -687,7 +669,7 @@ def gather(preflight_file, runtime_dir=None, cookies_opt=None):
             ports.append(Result(PASS, f"port {port}", f"{svc} reachable")
                          if reachable
                          else Result(INFO, f"port {port}",
-                                     f"{svc} not reachable yet — it is launched at event start"))
+                                     f"{svc} not reachable yet; it is launched at event start"))
     cookies = [cookies_status(resolve_cookies_path(preflight_file, runtime_dir, cookies_opt))]
     sheet_id = os.environ.get("RACECAST_SHEET_ID")
     if sheet_id:
@@ -700,7 +682,7 @@ def gather(preflight_file, runtime_dir=None, cookies_opt=None):
                       "3 live feeds. Use a wired connection with stable upload headroom "
                       "above your OBS bitrate.")
     try:
-        import speedtest as st          # lazy: avoids an import cycle (st imports Result from us)
+        import speedtest as st          # lazy: st imports Result from us
         st_dir = runtime_dir or st.default_runtime_dir(
             os.path.dirname(os.path.abspath(preflight_file)))
         network = [st.classify(st.load_latest(st_dir), time.time(), _speedtest_max_age()),
@@ -730,10 +712,10 @@ def report(sections, color):
                 warns += 1
     print(f"\nSummary: {fails} FAIL, {warns} WARN")
     if fails:
-        print("NOT READY — resolve the FAIL items above.")
+        print("NOT READY. Resolve the FAIL items above.")
     elif warns:
-        print("Usable, but review the WARN items "
-              "(reboot to clear swap; start OBS/Companion; refresh cookies).")
+        print("Usable, but review the WARN items: reboot to clear swap, start OBS "
+              "and Companion, refresh cookies.")
     else:
         print("READY.")
     return 1 if fails else 0

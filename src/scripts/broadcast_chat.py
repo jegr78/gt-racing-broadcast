@@ -1,43 +1,42 @@
-"""Pure logic for the read-only broadcast-chat reader (issue #294).
+"""Pure logic for the read-only broadcast-chat reader (#294).
 
 No network, no argv parsing. The relay (`src/relay/racecast-feeds.py`) owns the
 yt-dlp subprocess that resolves a channel to its currently-live videoId set and
 the Innertube HTTP fetch; this module holds everything that can be unit-tested
 without a live stream:
 
-  * the message sanitizer + caps (mirrors `chat_admin.py`),
-  * `runs_to_text` (YouTube's `message.runs[]` -> a single display string),
-  * `parse_chat_action` / `parse_live_chat` (the Innertube `get_live_chat`
-    continuation response -> messages + the next continuation + poll timeout),
-  * `parse_bootstrap` (the `live_chat` page HTML -> api key, client version,
-    first continuation) and `build_get_live_chat_body` (the POST body),
-  * `parse_channel_tab` (the Sheet `Channel` tab CSV -> [(platform, channel)]),
-  * `live_set_diff` (which readers to start/stop when the channel's live set
-    changes — the producer-handover case where two streams overlap briefly),
+  * the message sanitizer and its caps,
+  * `runs_to_text`, which flattens YouTube's `message.runs[]` to a display string,
+  * `parse_chat_action` and `parse_live_chat`, which turn the Innertube
+    `get_live_chat` response into messages, the next continuation and a timeout,
+  * `parse_bootstrap`, which reads the api key, client version and first
+    continuation out of the `live_chat` page HTML, plus `build_get_live_chat_body`,
+  * `parse_channel_tab`, the Sheet `Channel` tab CSV as [(platform, channel)],
+  * `live_set_diff`, which readers to start and stop when the channel's live set
+    changes, the producer handover where two streams overlap briefly,
   * the small URL builders.
 
 The reader is READ-ONLY and EPHEMERAL: unlike the crew chat there is no on-disk
 persistence and no send path. Broadcast chat is a situational-awareness panel,
-not broadcast-critical, so every parser degrades to "empty" rather than raising.
+not broadcast-critical, so every parser degrades to empty rather than raising.
 """
 import csv
 import io
 import re
 from urllib.parse import urlsplit
 
-MAX_MESSAGES = 500      # ring-buffer / display cap (oldest dropped)
+MAX_MESSAGES = 500      # ring-buffer and display cap, oldest dropped
 MAX_TEXT = 500          # per-message character cap
-MAX_NAME = 60           # author-name character cap (YT names run long)
-MAX_TOKENS = 80         # per-message token cap (#351); over it -> flat text only
-DEFAULT_NAME = "Viewer"  # fallback when no/blank author name is supplied
+MAX_NAME = 60           # author-name character cap; YouTube names run long
+MAX_TOKENS = 80         # per-message token cap (#351); beyond it, flat text only
+DEFAULT_NAME = "Viewer"  # fallback when no author name is supplied
 
-# --- image-emote URL allowlist (#351) ---------------------------------------
-# Inline emote <img> sources are validated against these hosts BEFORE they reach
-# the front-end (defense in depth alongside the page CSP). The YouTube emote URL
-# comes from Google's payload, so it must be checked; the Twitch URL is built
-# from a validated id but is checked the same way. The check parses the URL and
-# compares the host component structurally -- never a substring of the raw URL
-# (which would match an attacker's `https://evil/yt3.ggpht.com/...`).
+# Image-emote URL allowlist (#351). Inline emote <img> sources are validated
+# against these hosts BEFORE they reach the front-end, alongside the page CSP. The
+# YouTube emote URL comes from Google's payload, so it must be checked, and the
+# Twitch URL is built from a validated id but is checked the same way. The check
+# parses the URL and compares the host structurally, never a substring of the raw
+# URL, which would match an attacker's `https://evil/yt3.ggpht.com/...`.
 _EMOTE_HOST_EXACT = ("static-cdn.jtvnw.net",)   # Twitch CDN
 _EMOTE_HOST_SUFFIX = (".ggpht.com",)            # YouTube emote CDN (yt3/yt4.…)
 
@@ -60,8 +59,8 @@ DEFAULT_CLIENT_VERSION = "2.20240101.00.00"
 
 
 def _clean_text(value):
-    """Strip control characters; fold every line/paragraph separator to a single
-    space (chat is rendered in one row). Mirrors chat_admin._clean_text."""
+    """Strip control characters and fold every line separator to a single space,
+    because chat renders in one row."""
     if not isinstance(value, str):
         return ""
     line_breaks = ("\t", "\n", "\r", "\x85", "\u2028", "\u2029")
@@ -82,11 +81,11 @@ def _is_num(value):
 
 def sanitize_message(raw, source=None):
     """Coerce one raw message into {ts, user, text, source[, tokens]} or None.
-    ts must be numeric; text must be non-empty after cleaning; user falls back to
-    DEFAULT_NAME. `source` tags which live stream the message came from (the
-    videoId) so a handover overlap can be shown/merged. `tokens` (#351) is added
-    only when the message carries at least one valid image emote -- otherwise the
-    flat `text` is the whole display and no tokens are sent."""
+    ts must be numeric, text must be non-empty after cleaning, and user falls back
+    to DEFAULT_NAME. `source` tags which live stream the message came from, the
+    videoId, so a handover overlap can be merged. `tokens` (#351) is added only
+    when the message carries at least one valid image emote; otherwise the flat
+    `text` is the whole display."""
     if not isinstance(raw, dict) or not _is_num(raw.get("ts")):
         return None
     text = _clean_text(raw.get("text")).strip()
@@ -114,10 +113,11 @@ def _append_text(tokens, value):
 def sanitize_tokens(raw_tokens):
     """A raw token list -> a cleaned [{t:text,v}|{t:emote,url,alt}] list, or None.
 
-    Returns None unless the list contains at least one valid emote token (a flat
-    `text` field then suffices). An emote whose URL fails `emote_url_ok` degrades
-    to a text token of its `alt`; text tokens are control-stripped and merged.
-    Over MAX_TOKENS tokens -> None (the absurd case falls back to flat text)."""
+    Returns None unless the list contains at least one valid emote token, since a
+    flat `text` field then suffices. An emote whose URL fails `emote_url_ok`
+    degrades to a text token of its `alt`, and text tokens are control-stripped and
+    merged. More than MAX_TOKENS tokens also returns None and falls back to flat
+    text."""
     if not isinstance(raw_tokens, list):
         return None
     out = []
@@ -141,15 +141,13 @@ def sanitize_tokens(raw_tokens):
     return out
 
 
-# --- Innertube message rendering -------------------------------------------
-
 def runs_to_text(message):
-    """A YouTube chat `message` object -> a flat display string.
+    """A YouTube chat `message` object flattened to a display string.
 
-    Handles the `runs[]` form (text runs + emoji runs) and the `simpleText`
-    form. A STANDARD emoji is rendered as its Unicode glyph (carried in
-    `emojiId`); a CUSTOM channel emote (no Unicode equivalent) falls back to its
-    first shortcut like `:pog:`. Anything unexpected yields ""."""
+    Handles the `runs[]` form, text runs plus emoji runs, and the `simpleText`
+    form. A STANDARD emoji renders as the Unicode glyph carried in `emojiId`; a
+    CUSTOM channel emote has no Unicode equivalent and falls back to its first
+    shortcut, such as `:pog:`. Anything unexpected yields ""."""
     if not isinstance(message, dict):
         return ""
     if isinstance(message.get("simpleText"), str):
@@ -169,13 +167,13 @@ def runs_to_text(message):
 
 
 def _emoji_to_text(emoji):
-    """One YouTube emoji run -> its display string.
+    """One YouTube emoji run as its display string.
 
-    Prefers the Unicode glyph from `emojiId` for a standard emoji (not
-    `isCustomEmoji`, and the id is an actual glyph i.e. contains a non-ASCII
-    character). Otherwise falls back to the first `:shortcut:`, then to a bare
-    `emojiId` string. The non-ASCII guard keeps a custom emote's internal id
-    (e.g. `UCabc/def`) from leaking through as text."""
+    Prefers the Unicode glyph from `emojiId` for a standard emoji, meaning not
+    `isCustomEmoji` and an id that is an actual glyph, so it carries a non-ASCII
+    character. Otherwise it falls back to the first `:shortcut:`, then to a bare
+    `emojiId`. The non-ASCII guard keeps a custom emote's internal id from leaking
+    through as text."""
     emoji_id = emoji.get("emojiId")
     if (not emoji.get("isCustomEmoji")
             and isinstance(emoji_id, str)
@@ -190,8 +188,8 @@ def _emoji_to_text(emoji):
 
 
 def _emoji_image_url(emoji):
-    """The largest thumbnail URL of a YouTube emoji run, or "" if absent.
-    YouTube lists thumbnails smallest-first, so the last entry is the largest."""
+    """The largest thumbnail URL of a YouTube emoji run, or "" when absent.
+    YouTube lists thumbnails smallest first, so the last entry is the largest."""
     image = emoji.get("image")
     thumbs = image.get("thumbnails") if isinstance(image, dict) else None
     if isinstance(thumbs, list) and thumbs and isinstance(thumbs[-1], dict):
@@ -202,12 +200,12 @@ def _emoji_image_url(emoji):
 
 
 def _emoji_to_token(emoji):
-    """One YouTube emoji run -> a single token.
+    """One YouTube emoji run as a single token.
 
-    A STANDARD emoji is its Unicode glyph (a text token, matching #345). A CUSTOM
-    channel emote becomes an `emote` token from its image thumbnail when one
-    exists; without an image it degrades to a `:shortcut:` text token. The URL is
-    validated later (sanitize_tokens), so the host allowlist lives in one place."""
+    A STANDARD emoji is its Unicode glyph, a text token (#345). A CUSTOM channel
+    emote becomes an `emote` token from its image thumbnail when one exists, and
+    without an image it degrades to a `:shortcut:` text token. sanitize_tokens
+    validates the URL later, so the host allowlist lives in one place."""
     emoji_id = emoji.get("emojiId")
     if (not emoji.get("isCustomEmoji")
             and isinstance(emoji_id, str)
@@ -220,14 +218,14 @@ def _emoji_to_token(emoji):
 
 
 def runs_to_tokens(message):
-    """A YouTube chat `message` -> a token list [{t:text,v}|{t:emote,url,alt}],
-    or None when the message has no image emote (the flat text is the whole
-    display). Mirrors `runs_to_text` but preserves custom-emote image URLs."""
+    """A YouTube chat `message` as a token list [{t:text,v}|{t:emote,url,alt}], or
+    None when the message has no image emote and the flat text is the whole
+    display. Like `runs_to_text`, but it preserves custom-emote image URLs."""
     if not isinstance(message, dict):
         return None
     runs = message.get("runs")
     if not isinstance(runs, list):
-        return None        # simpleText / unexpected -> flat text suffices
+        return None        # simpleText or unexpected: flat text suffices
     tokens = []
     has_emote = False
     for run in runs:
@@ -249,12 +247,12 @@ _CHAT_RENDERERS = ("liveChatTextMessageRenderer", "liveChatPaidMessageRenderer")
 
 
 def parse_chat_action(action):
-    """One Innertube action -> a message dict {id, user, text, ts} or None.
+    """One Innertube action as a message dict {id, user, text, ts}, or None.
 
     Only addChatItemAction with a text or paid-message renderer yields a message;
-    system/engagement items, banners, deletions, etc. -> None. A paid
-    (Super Chat) message is prefixed with its amount. ts is seconds (from the
-    microsecond `timestampUsec`)."""
+    system items, banners and deletions return None. A paid Super Chat message is
+    prefixed with its amount. ts is in seconds, converted from the microsecond
+    `timestampUsec`."""
     if not isinstance(action, dict):
         return None
     item = (action.get("addChatItemAction") or {}).get("item")
@@ -307,7 +305,7 @@ _CONTINUATION_KEYS = (
 
 def _read_continuation(continuations):
     """First (continuation, timeout_ms) from a `continuations` list, across the
-    several continuation-data variants YouTube uses. (None, None) if absent."""
+    several continuation-data variants YouTube uses. (None, None) when absent."""
     if not isinstance(continuations, list):
         return None, None
     for cont in continuations:
@@ -321,11 +319,11 @@ def _read_continuation(continuations):
 
 
 def parse_live_chat(payload):
-    """An Innertube get_live_chat response -> {messages, continuation, timeout_ms}.
+    """An Innertube get_live_chat response as {messages, continuation, timeout_ms}.
 
-    messages is a list of {id, user, text, ts} (unsanitised — the store applies
-    `sanitize_message` with the source tag). Garbage/None -> empty result with
-    continuation None (the reader then backs off / re-bootstraps)."""
+    messages is a list of unsanitised {id, user, text, ts}; the store applies
+    `sanitize_message` with the source tag. Garbage or None gives an empty result
+    with continuation None, and the reader then backs off or re-bootstraps."""
     out = {"messages": [], "continuation": None, "timeout_ms": None}
     if not isinstance(payload, dict):
         return out
@@ -345,17 +343,15 @@ def parse_live_chat(payload):
     return out
 
 
-# --- get_live_chat poll classification (#294 freeze fix) --------------------
-# The reader must tell a TRANSIENT failure apart from a GENUINE stream end. The
-# POST helper returns None on EVERY error (network/timeout/429/5xx/non-JSON), so
-# a None must NOT tombstone the reader — the live chat is almost certainly still
-# going. Only a well-formed response that carries no next continuation is a real
-# end. Before this split a transient None and a real end both surfaced as
-# continuation=None, so a single hiccup set ended=True and froze the YouTube
-# mirror for the rest of the stream (no recovery, even on a page reload).
-POLL_TRANSIENT = "transient"   # no usable response -> retry, never tombstone
-POLL_OK = "ok"                 # messages + a next continuation to follow
-POLL_ENDED = "ended"           # well-formed, no continuation -> chat genuinely closed
+# get_live_chat poll classification (#294). The reader must tell a TRANSIENT
+# failure apart from a GENUINE stream end. The POST helper returns None on EVERY
+# error, from a timeout to non-JSON, so a None must NOT tombstone the reader: the
+# live chat is almost certainly still going. Only a well-formed response that
+# carries no next continuation is a real end. Without that split a single hiccup
+# set ended=True and froze the YouTube mirror for the rest of the stream.
+POLL_TRANSIENT = "transient"   # no usable response: retry, never tombstone
+POLL_OK = "ok"                 # messages and a next continuation to follow
+POLL_ENDED = "ended"           # well-formed with no continuation: chat closed
 
 # Consecutive transient misses a reader tolerates before giving up its
 # continuation and returning WITHOUT ending, so the supervisor re-bootstraps it.
@@ -363,18 +359,16 @@ MAX_POLL_MISSES = 5
 
 
 def classify_live_chat_poll(raw):
-    """(status, parsed) for one get_live_chat POST result — see POLL_* above.
+    """(status, parsed) for one get_live_chat POST result; see POLL_* above.
 
     `raw` is the decoded JSON dict, or None when the HTTP call failed. None is
-    TRANSIENT (retry, never tombstone). A dict is run through `parse_live_chat`:
-    a present next continuation -> OK, an absent one -> ENDED."""
+    TRANSIENT, so retry and never tombstone. A dict runs through `parse_live_chat`:
+    a present next continuation is OK, an absent one is ENDED."""
     if raw is None:
         return POLL_TRANSIENT, {"messages": [], "continuation": None, "timeout_ms": None}
     parsed = parse_live_chat(raw)
     return (POLL_OK if parsed["continuation"] else POLL_ENDED), parsed
 
-
-# --- page bootstrap + POST body --------------------------------------------
 
 _API_KEY_RE = re.compile(r'"INNERTUBE_API_KEY":"([^"]+)"')
 _CLIENT_VERSION_RE = re.compile(r'"INNERTUBE_CONTEXT_CLIENT_VERSION":"([^"]+)"')
@@ -382,12 +376,12 @@ _CONTINUATION_RE = re.compile(r'"continuation":"([^"]+)"')
 
 
 def parse_bootstrap(html):
-    """The live_chat page HTML -> {api_key, client_version, continuation}.
+    """The live_chat page HTML as {api_key, client_version, continuation}.
 
-    Extracts the Innertube API key + client version from ytcfg and the first
-    chat continuation from ytInitialData (searched from `liveChatRenderer` so an
-    unrelated earlier `"continuation"` token can't win). Missing pieces are None
-    (the reader treats a missing key/continuation as "not live yet")."""
+    Extracts the Innertube API key and client version from ytcfg, and the first
+    chat continuation from ytInitialData, searched from `liveChatRenderer` so an
+    unrelated earlier `"continuation"` token cannot win. A missing piece is None,
+    which the reader treats as "not live yet"."""
     if not isinstance(html, str):
         html = ""
     key_m = _API_KEY_RE.search(html)
@@ -412,15 +406,13 @@ def build_get_live_chat_body(continuation, client_version=None):
     }
 
 
-# --- URL builders -----------------------------------------------------------
-
 def _is_url(entry):
     return entry.startswith("http://") or entry.startswith("https://")
 
 
 def channel_live_url(entry):
-    """Channel id / handle URL -> its `/live` URL (resolves the current public
-    live stream via yt-dlp, exactly like the relay's feed path). A bare id
+    """A channel id or handle URL as its `/live` URL, which yt-dlp resolves to the
+    current public live stream exactly like the relay's feed path. A bare id
     becomes the canonical `/channel/<id>/live`."""
     e = (entry or "").strip()
     if _is_url(e):
@@ -430,8 +422,8 @@ def channel_live_url(entry):
 
 
 def channel_streams_url(entry):
-    """Channel -> its `/streams` tab URL (used to enumerate ALL currently-live
-    videos, which `/live` cannot — needed for the handover overlap)."""
+    """A channel as its `/streams` tab URL, which enumerates ALL currently-live
+    videos. `/live` cannot, and the handover overlap needs them all."""
     e = (entry or "").strip()
     if _is_url(e):
         base = e.rstrip("/")
@@ -443,7 +435,7 @@ def channel_streams_url(entry):
 
 
 def live_chat_page_url(video_id):
-    """The popout live-chat page for a videoId (carries the bootstrap)."""
+    """The popout live-chat page for a videoId; it carries the bootstrap."""
     return f"https://www.youtube.com/live_chat?is_popout=1&v={video_id}"
 
 
@@ -460,18 +452,18 @@ def youtube_video_id(value):
 
 
 def twitch_popout_chat_url(login):
-    """A validated Twitch login -> its popout chat URL (carries a compose box for
-    a signed-in user). `login` is constrained by twitch_login()."""
+    """A validated Twitch login as its popout chat URL, which carries a compose box
+    for a signed-in user. `login` is constrained by twitch_login()."""
     return f"https://www.twitch.tv/popout/{login}/chat"
 
 
 def primary_chat_target(keys):
-    """The first compose target from an ordered list of supervisor reader keys
-    (a YouTube videoId, or "twitch:<login>"), as {"platform", "url"}, or None.
+    """The first compose target from an ordered list of supervisor reader keys, a
+    YouTube videoId or "twitch:<login>", as {"platform", "url"}, or None.
 
-    KISS: a broadcast stays on one channel/platform; during an A->B producer
-    handover two YouTube videoIds are briefly live and the FIRST is used. Pure;
-    mirrors the key convention of BroadcastChatSupervisor._desired()."""
+    A broadcast stays on one channel, and during an A to B producer handover two
+    YouTube videoIds are briefly live, where the FIRST is used. It follows the key
+    convention of BroadcastChatSupervisor._desired()."""
     for key in keys or []:
         if not isinstance(key, str):
             continue
@@ -486,18 +478,14 @@ def primary_chat_target(keys):
     return None
 
 
-# --- live-set diff (producer handover) --------------------------------------
-
 def live_set_diff(prev_ids, cur_ids):
-    """(to_start, to_stop): which per-stream readers to spawn/retire when the
-    channel's currently-live videoId set changes. During an A->B producer
-    handover both are live for a window, so B starts while A still runs; when A
-    ends it is stopped — the merged buffer stays continuous throughout."""
+    """(to_start, to_stop): which per-stream readers to spawn and retire when the
+    channel's currently-live videoId set changes. During an A to B producer
+    handover both are live for a window, so B starts while A still runs and A is
+    stopped when it ends, keeping the merged buffer continuous."""
     prev, cur = set(prev_ids), set(cur_ids)
     return cur - prev, prev - cur
 
-
-# --- Channel tab CSV --------------------------------------------------------
 
 CHANNEL_PLATFORM_HEADERS = ("platform",)
 CHANNEL_CHANNEL_HEADERS = ("channel", "url")
@@ -511,12 +499,13 @@ def _infer_platform(channel):
 
 
 def parse_channel_tab(text):
-    """The Sheet `Channel` tab CSV -> [(platform, channel)].
+    """The Sheet `Channel` tab CSV as [(platform, channel)].
 
-    Header-located: a `Channel` (or `URL`) column is required; a `Platform`
-    column is optional and inferred from the URL when absent (twitch.tv ->
-    twitch, else youtube). Blank-channel rows are skipped. No header / no
-    Channel column -> [] (the reader simply has nothing to follow)."""
+    Header-located: a `Channel` or `URL` column is required, while a `Platform`
+    column is optional and inferred from the URL when absent, twitch.tv giving
+    twitch and anything else youtube. Blank-channel rows are skipped. Without a
+    header or a Channel column it returns [], and the reader has nothing to
+    follow."""
     rows = list(csv.reader(io.StringIO(text or "")))
     if not rows:
         return []
@@ -539,36 +528,34 @@ def parse_channel_tab(text):
     return out
 
 
-# --- Twitch (Phase 2) -------------------------------------------------------
-# Anonymous read-only chat over Twitch IRC needs no API key / OAuth: the relay
+# Anonymous read-only chat over Twitch IRC needs no API key or OAuth: the relay
 # connects to irc.chat.twitch.tv as a `justinfan` nick and JOINs #<login>. These
-# pure helpers extract the login and parse a PRIVMSG line; the socket lives in
-# the relay (like the YouTube network).
+# pure helpers extract the login and parse a PRIVMSG line; the socket lives in the
+# relay, like the YouTube network.
 
 _TWITCH_LOGIN_RE = re.compile(r"^[a-z0-9_]{1,25}$")
-# A YouTube videoId is interpolated into the popout URL handed to the browser,
-# so it is validated to YouTube's own 11-char id charset (defense vs. URL
-# injection, mirroring _TWITCH_LOGIN_RE).
+# A YouTube videoId is interpolated into the popout URL handed to the browser, so
+# it is validated to YouTube's own 11-character id charset against URL injection.
 _YT_VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 # An emote id is interpolated into a CDN URL, so it is validated to Twitch's own
-# id charset (digits, or the `emotesv2_<hex>` form) -- never a `/` or space.
+# id charset, digits or the `emotesv2_<hex>` form, never a `/` or a space.
 _TWITCH_EMOTE_ID_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
 
 def twitch_emote_url(emote_id):
-    """A validated Twitch emote id -> its 1.0 dark-theme CDN URL (#351)."""
+    """A validated Twitch emote id as its 1.0 dark-theme CDN URL (#351)."""
     return (f"https://static-cdn.jtvnw.net/emoticons/v2/{emote_id}"
             "/default/dark/1.0")
 
 
 def splice_twitch_emotes(text, emotes_tag):
-    """Twitch PRIVMSG text + its IRC `emotes` tag -> a token list, or None.
+    """Twitch PRIVMSG text plus its IRC `emotes` tag as a token list, or None.
 
-    The tag is `<id>:<s>-<e>[,<s>-<e>][/<id>:…]` with INCLUSIVE **codepoint**
-    offsets into `text` (Python str indexing counts codepoints the same way). The
-    spans are spliced in order; the gaps become text tokens and each span an
-    `emote` token (alt = the matched word). A malformed/out-of-range span, an id
-    outside `[A-Za-z0-9_]`, or an overlap is skipped. Returns None when no emote
+    The tag is `<id>:<s>-<e>[,<s>-<e>][/<id>:...]` with INCLUSIVE **codepoint**
+    offsets into `text`, which Python str indexing counts the same way. The spans
+    are spliced in order: the gaps become text tokens and each span an `emote`
+    token whose alt is the matched word. A malformed or out-of-range span, an id
+    outside `[A-Za-z0-9_]` and an overlap are skipped. Returns None when no emote
     parsed, so the caller keeps the flat text."""
     if not isinstance(text, str) or not isinstance(emotes_tag, str) or not emotes_tag:
         return None
@@ -595,7 +582,7 @@ def splice_twitch_emotes(text, emotes_tag):
     tokens = []
     cursor = 0
     for start, end, eid in spans:
-        if start < cursor:           # overlapping/duplicate span -> skip
+        if start < cursor:           # an overlapping or duplicate span
             continue
         _append_text(tokens, "".join(chars[cursor:start]))
         tokens.append({"t": "emote", "url": twitch_emote_url(eid),
@@ -606,11 +593,11 @@ def splice_twitch_emotes(text, emotes_tag):
 
 
 def twitch_login(channel):
-    """A Twitch channel URL / @handle / name -> its lowercase login, or None.
+    """A Twitch channel URL, @handle or name as its lowercase login, or None.
 
     SECURITY: the login is JOINed into the raw IRC stream, so it is strictly
-    validated to Twitch's own `[a-z0-9_]{1,25}` charset — a value containing
-    spaces or CRLF (which could inject IRC commands) returns None."""
+    validated to Twitch's own `[a-z0-9_]{1,25}` charset. A value containing spaces
+    or CRLF, which could inject IRC commands, returns None."""
     s = (channel or "").strip()
     if "/" in s:
         s = s.rstrip("/").split("/")[-1]
@@ -619,14 +606,14 @@ def twitch_login(channel):
 
 
 def parse_twitch_privmsg(line):
-    """One Twitch IRC line -> a message dict {id, user, text, ts} for a chat
-    PRIVMSG, else None (server notices, JOIN/PART, PING, …).
+    """One Twitch IRC line as a message dict {id, user, text, ts} for a chat
+    PRIVMSG, else None for a server notice, a JOIN, a PING and the rest.
 
     With the `twitch.tv/tags` capability a line is
-    `@k=v;…;display-name=Foo;id=…;tmi-sent-ts=<ms> :nick!… PRIVMSG #chan :text`;
-    the display name + message id + server timestamp come from the tags, falling
-    back to the prefix nick when untagged (ts is then None — the reader stamps
-    the receive time)."""
+    `@k=v;...;display-name=Foo;id=...;tmi-sent-ts=<ms> :nick!... PRIVMSG #chan :text`.
+    The display name, message id and server timestamp come from the tags, falling
+    back to the prefix nick when untagged; ts is then None and the reader stamps
+    the receive time."""
     if not isinstance(line, str) or not line:
         return None
     tags = {}

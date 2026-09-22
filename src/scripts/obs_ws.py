@@ -1,27 +1,26 @@
 #!/usr/bin/env python3
 """Minimal obs-websocket v5 client (stdlib only, all platforms).
 
-Why this exists: OBS's media sources hold an HTTP connection to the relay
-feeds (ports 53001-53003). When a feed source is not in the active scene OBS
-stops draining the socket, so killing the relay leaves an orphaned kernel
-socket stuck in FIN_WAIT_1 with the port still bound (preflight then warns
-"port in use"). `release_feed_inputs()` makes OBS drop exactly those
-connections AFTER the feeds were killed, so the ports tear down cleanly.
+OBS's media sources hold an HTTP connection to the relay feeds (ports
+53001-53003). When a feed source is not in the active scene OBS stops draining
+the socket, so killing the relay leaves an orphaned kernel socket stuck in
+FIN_WAIT_1 with the port still bound, and preflight then warns "port in use".
+`release_feed_inputs()` makes OBS drop exactly those connections AFTER the feeds
+were killed, so the ports tear down cleanly.
 
-How: re-applying an input's own settings (`SetInputSettings`, unchanged) is
-the one request that forces OBS to rebuild the ffmpeg source and close its
-socket. Media actions (STOP/RESTART) are ignored for sources that are not in
-the active scene — verified live against OBS 31. The rebuild must happen
-after the feed is dead: against a live relay an active source would simply
-reconnect. The sources keep `restart_on_activate`, so they come back on the
-next scene activation after a relay restart.
+Re-applying an input's own settings, an unchanged `SetInputSettings`, is the one
+request that forces OBS to rebuild the ffmpeg source and close its socket. Media
+STOP and RESTART actions are ignored for sources outside the active scene. The
+rebuild must happen after the feed is dead: against a live relay an active source
+would simply reconnect. The sources keep `restart_on_activate`, so they come back
+on the next scene activation after a relay restart.
 
-Everything is best effort: the entry point never raises — a stop must never
-hang or crash because OBS is closed, locked, or speaks a newer protocol.
+Everything is best effort and the entry point never raises: a stop must never hang
+or crash because OBS is closed, locked, or speaks a newer protocol.
 
 The WebSocket password is auto-discovered from OBS's own obs-websocket
-config.json (same machine, same user); `RACECAST_OBS_WS_PASSWORD` in the
-environment / .env overrides it for non-standard setups.
+config.json on the same machine and user; `RACECAST_OBS_WS_PASSWORD` in the
+environment or .env overrides it for a non-standard setup.
 """
 import base64
 import hashlib
@@ -40,29 +39,29 @@ RELAY_PORTS = (53001, 53002, 53003)
 CLOSE_DRAIN_TIMEOUT_S = 1.0   # max seconds to wait for OBS's close echo before closing the socket
 
 STINT_SCENE = "Stint"                       # single-cam scene holding both feeds
-INTERMISSION_SCENE = "Intermission"          # the safe holding scene (#371); auto-failover target (#378)
+INTERMISSION_SCENE = "Intermission"          # the safe holding scene and auto-failover target (#371, #378)
 POV_SOURCE = "Feed POV"                      # the Stint-scene driver-POV PiP scene item
 FEED_SOURCES = {"A": "Feed A", "B": "Feed B"}   # scene-item name == audio input name
 SPLIT_SCENE = "Splitscreen"                  # the handover layout: outgoing + incoming stint
-SPLIT_DISCORD_INPUT = "Discord Audio Capture"   # #534: interview/Discord bus muted during a SPLIT
-# #593: the producer's own commentary microphone for a local stint. Always the LEAF
-# input, never a scene: a scene (the solo "Commentary Mic" wrapper) cannot be muted.
+SPLIT_DISCORD_INPUT = "Discord Audio Capture"   # the interview bus, muted during a SPLIT (#534)
+# The producer's own commentary microphone for a local stint (#593). Always the
+# LEAF input, never a scene, because a scene wrapper cannot be muted.
 COMMENTARY_MIC_INPUT = "Commentary Mic Device"
 
 # The scene collection the broadcast assumes. Mirrors the "name" field of
-# src/obs/GT_Racing_Endurance.json (the name OBS shows after importing the localized
-# collection). Keep the two in sync. Not a secret, so the no-hardcoding rule
-# does not apply; not parsed at runtime because the file is renamed + tokenized
-# in the shipped package and bundled differently when frozen.
+# src/obs/GT_Racing_Endurance.json, the name OBS shows after importing the
+# localized collection, so keep the two in sync. It is not parsed at runtime
+# because the file is renamed and tokenized in the shipped package and bundled
+# differently when frozen.
 EXPECTED_SCENE_COLLECTION = "GT Racing Endurance"
 
 
 def scene_collection_status(current, available, expected=EXPECTED_SCENE_COLLECTION):
-    """Pure: classify the active OBS scene collection. `current` is OBS's
-    currentSceneCollectionName; `available` is the full list it reported.
-    Returns a dict (see keys below). The only "correct" state is match=True;
-    renamed_variant flags a non-exact "GT Racing Endurance*" (e.g. an import-renamed
-    'GT Racing Endurance 2'), which we never switch to automatically."""
+    """Classify the active OBS scene collection. `current` is OBS's
+    currentSceneCollectionName and `available` is the full list it reported.
+    The only correct state is match=True. renamed_variant flags a non-exact
+    "GT Racing Endurance*", such as an import-renamed 'GT Racing Endurance 2',
+    which is never switched to automatically."""
     available = list(available)
     # A correct collection wins: never flag a renamed variant when we already match.
     renamed = None if current == expected else next(
@@ -75,17 +74,18 @@ def scene_collection_status(current, available, expected=EXPECTED_SCENE_COLLECTI
 
 
 def scene_collection_action(status, note, switch_enabled):
-    """Pure: decide what `event start` should do about the OBS scene collection.
-    `status`/`note` are a get_scene_collection() result; `switch_enabled` is the
+    """Decide what `event start` should do about the OBS scene collection.
+    `status` and `note` are a get_scene_collection() result; `switch_enabled` is the
     RACECAST_OBS_COLLECTION_SWITCH gate. Returns (action, detail):
-      ("skip", note)            OBS unreachable / no status — print note, do nothing
+      ("skip", note)            OBS unreachable or no status: print the note
       ("ok", current)           already on the expected collection
-      ("switch", expected)      mismatch, expected present, switch on -> switch to it
-      ("warn_present", status)  mismatch, expected present, switch off -> warn
-      ("warn_absent", status)   mismatch, expected not imported (incl. a renamed-only
-                                variant — we never auto-switch to a renamed variant)
-    The executor requests the switch with the exact expected name; set_scene_collection
-    re-checks presence, so a renamed variant can never be selected."""
+      ("switch", expected)      mismatch, expected present, switch on
+      ("warn_present", status)  mismatch, expected present, switch off
+      ("warn_absent", status)   mismatch, expected not imported, including a
+                                renamed-only variant, which is never auto-selected
+    The executor requests the switch with the exact expected name, and
+    set_scene_collection re-checks presence, so a renamed variant can never be
+    selected."""
     if status is None:
         return ("skip", note)
     if status["match"]:
@@ -98,12 +98,12 @@ def scene_collection_action(status, note, switch_enabled):
 
 
 def feed_audio_plan(local_feeds, mic=None):
-    """Pure: (audio, extra_mute) for the intent planners below (#593). `audio` maps
-    A/B to that slot's audio inputs: its media source, plus `mic` when the slot
-    carries the local capture. `extra_mute` lists `mic` again so it is muted even
-    when no slot is local any more (the outgoing local stint may already have
-    advanced to a remote row when a handover lands). mic=None leaves the mic alone:
-    a machine without a capture card never touches it."""
+    """(audio, extra_mute) for the intent planners below (#593). `audio` maps A and
+    B to that slot's audio inputs: its media source, plus `mic` when the slot carries
+    the local capture. `extra_mute` lists `mic` again so it is muted even when no
+    slot is local any more, since the outgoing local stint may already have advanced
+    to a remote row when a handover lands. mic=None leaves the mic alone, so a
+    machine without a capture card never touches it."""
     audio = {f: [src] + ([mic] if mic and f in local_feeds else [])
              for f, src in FEED_SOURCES.items()}
     return audio, ([mic] if mic else [])
@@ -111,7 +111,7 @@ def feed_audio_plan(local_feeds, mic=None):
 
 def _audio_intents(live_inputs, other_inputs):
     """Unmute the on-air inputs, then mute every other input once, never one that
-    was just unmuted (two back-to-back local stints share the one microphone)."""
+    was just unmuted: two back-to-back local stints share the one microphone."""
     intents = [("unmute", i) for i in live_inputs]
     for i in other_inputs:
         if i not in live_inputs and ("mute", i) not in intents:
@@ -121,9 +121,9 @@ def _audio_intents(live_inputs, other_inputs):
 
 def feed_state_intents(live, do_cut, feeds=("A", "B"),
                        scene=STINT_SCENE, sources=None, audio=None, extra_mute=()):
-    """Pure: the OBS intent list that makes `live` (A/B) the on-air feed in the
-    Stint scene. Visibility first, then audio, then (do_cut) the program cut.
-    `audio`/`extra_mute` come from feed_audio_plan(); the default is one audio
+    """The OBS intent list that makes `live`, A or B, the on-air feed in the Stint
+    scene. Visibility first, then audio, then the program cut when do_cut is set.
+    `audio` and `extra_mute` come from feed_audio_plan(); the default is one audio
     input per feed, named like its scene item.
     reflect_feed_state() turns each (verb, target) into obs-websocket requests."""
     sources = sources or FEED_SOURCES
@@ -138,13 +138,13 @@ def feed_state_intents(live, do_cut, feeds=("A", "B"),
 
 
 def split_state_intents(live, do_cut, slots=None, scene=SPLIT_SCENE, extra_mute=()):
-    """Pure: the OBS intent list for the Splitscreen with `live` (A/B) on air (#591).
-    Both slots are visible; the on-air slot's audio inputs are unmuted, the off-air
-    slot's, `extra_mute` and the Discord bus are muted; (do_cut) the program cut
-    comes last. `slots` maps A/B to (scene-item name, [audio input names]) — a list
-    because a local slot contributes its media source plus the commentary
-    microphone (#593). The default derives both slots from FEED_SOURCES, one audio
-    input each."""
+    """The OBS intent list for the Splitscreen with `live`, A or B, on air (#591).
+    Both slots are visible; the on-air slot's audio inputs are unmuted, while the
+    off-air slot's, `extra_mute` and the Discord bus are muted; the program cut
+    comes last when do_cut is set. `slots` maps A and B to (scene-item name, [audio
+    input names]), a list because a local slot contributes its media source plus the
+    commentary microphone (#593). The default derives both slots from FEED_SOURCES
+    with one audio input each."""
     slots = slots or {f: (src, [src]) for f, src in FEED_SOURCES.items()}
     others = [f for f in slots if f != live]
     intents = [("show", slots[f][0]) for f in slots]
@@ -159,16 +159,14 @@ def split_state_intents(live, do_cut, slots=None, scene=SPLIT_SCENE, extra_mute=
 def pov_scene_item_transform(box):
     """Map a full POV box {left,top,width,height} to an obs-websocket
     sceneItemTransform. The Feed POV item is top-left anchored (alignment 5) with
-    SCALE_INNER bounds (boundsType 2); all fields are sent explicitly so the
-    result is idempotent regardless of the item's current bounds settings."""
+    SCALE_INNER bounds (boundsType 2). Every field is sent explicitly so the result
+    is idempotent whatever the item's current bounds settings are."""
     return {"positionX": box["left"], "positionY": box["top"],
             "boundsType": 2, "boundsAlignment": 0, "alignment": 5,
             "boundsWidth": box["width"], "boundsHeight": box["height"]}
 
 
-# --------------------------------------------------------------------------
-# WebSocket plumbing (RFC 6455) — pure functions, unit-tested
-# --------------------------------------------------------------------------
+# The RFC 6455 WebSocket plumbing below is pure and unit-tested.
 def accept_key(key):
     """Server's expected Sec-WebSocket-Accept for our Sec-WebSocket-Key."""
     return base64.b64encode(hashlib.sha1((key + WS_GUID).encode()).digest()).decode()
@@ -185,8 +183,8 @@ def handshake_request(host, port, key):
 
 
 def parse_handshake(response, key):
-    """Validate the 101 response; return any bytes past the headers (OBS sends
-    its Hello immediately, so the first frame may ride in with the response)."""
+    """Validate the 101 response and return any bytes past the headers. OBS sends
+    its Hello immediately, so the first frame may ride in with the response."""
     head, sep, rest = response.partition(b"\r\n\r\n")
     if not sep:
         raise ValueError("incomplete WebSocket handshake response")
@@ -251,9 +249,7 @@ def decode_frame(buf):
     return opcode, payload, buf[pos + length:]
 
 
-# --------------------------------------------------------------------------
-# obs-websocket v5 protocol helpers — pure functions, unit-tested
-# --------------------------------------------------------------------------
+# The obs-websocket v5 protocol helpers below are pure and unit-tested.
 def auth_token(password, salt, challenge):
     """The documented v5 answer: base64(sha256(base64(sha256(pw+salt)) + challenge))."""
     secret = base64.b64encode(hashlib.sha256((password + salt).encode()).digest()).decode()
@@ -263,7 +259,7 @@ def auth_token(password, salt, challenge):
 def identify_payload(hello, password):
     """Build the Identify (op 1) for a received Hello (op 0).
     Raises ValueError when OBS requires auth and we have no password."""
-    d = {"rpcVersion": 1, "eventSubscriptions": 0}   # requests only, no events
+    d = {"rpcVersion": 1, "eventSubscriptions": 0}   # requests only
     auth = hello.get("d", {}).get("authentication")
     if auth:
         if not password:
@@ -274,9 +270,9 @@ def identify_payload(hello, password):
 
 
 def feed_input_names(inputs, get_settings, ports=RELAY_PORTS):
-    """Which media inputs hold connections to the relay feed ports?
-    Matches ffmpeg sources whose network URL points at localhost:<feed port>;
-    local files and other URLs are left alone."""
+    """Which media inputs hold connections to the relay feed ports. Matches ffmpeg
+    sources whose network URL points at localhost:<feed port>; local files and
+    other URLs are left alone."""
     wanted = set()
     for port in ports:
         wanted.add(f"127.0.0.1:{port}")
@@ -299,9 +295,9 @@ def feed_input_names(inputs, get_settings, ports=RELAY_PORTS):
 
 
 def browser_input_names(inputs, get_settings, needle="127.0.0.1:8088"):
-    """Which browser sources show relay-served pages (HUD, race timer)?
-    Matches by URL substring so any future relay page is covered without a
-    name list; local-file pages and other URLs are left alone."""
+    """Which browser sources show relay-served pages such as the HUD. Matches by
+    URL substring so any future relay page is covered without a name list;
+    local-file pages and other URLs are left alone."""
     names = []
     for inp in inputs:
         if inp.get("inputKind") != "browser_source":
@@ -317,18 +313,16 @@ def browser_input_names(inputs, get_settings, needle="127.0.0.1:8088"):
     return names
 
 
-# --------------------------------------------------------------------------
-# Source screenshots (GetSourceScreenshot) — pure helpers, unit-tested
-# --------------------------------------------------------------------------
 def screenshot_request_data(source_name, width=640, fmt="jpg", quality=60):
-    """requestData for GetSourceScreenshot: a scaled still of a source/scene."""
+    """requestData for GetSourceScreenshot: a scaled still of a source or scene."""
     return {"sourceName": source_name, "imageFormat": fmt,
             "imageWidth": int(width), "imageCompressionQuality": int(quality)}
 
 
 def parse_screenshot_data_uri(data_uri):
-    """Decode a GetSourceScreenshot 'imageData' value
-    (data:image/<fmt>;base64,<payload>) to raw bytes; None on a malformed URI."""
+    """Decode a GetSourceScreenshot 'imageData' value, a
+    data:image/<fmt>;base64,<payload> URI, to raw bytes. None when it is
+    malformed."""
     if not isinstance(data_uri, str):
         return None
     head, sep, payload = data_uri.partition(",")
@@ -340,12 +334,10 @@ def parse_screenshot_data_uri(data_uri):
         return None
 
 
-# --------------------------------------------------------------------------
-# Password / port discovery from OBS's own obs-websocket config
-# --------------------------------------------------------------------------
+# Password and port discovery from OBS's own obs-websocket config.
 def obs_config_path(platform, env, home):
-    """Per-OS location of obs-websocket's config.json (explicit separators so
-    the pure function gives identical answers on every host OS)."""
+    """Per-OS location of obs-websocket's config.json. The separators are explicit
+    so the function gives identical answers on every host OS."""
     if platform == "darwin":
         return home + "/Library/Application Support/obs-studio/plugin_config/obs-websocket/config.json"
     if platform.startswith("win"):
@@ -372,7 +364,7 @@ def default_config_path():
 
 
 def find_password(env, config_path):
-    """RACECAST_OBS_WS_PASSWORD wins; else OBS's own stored server password."""
+    """RACECAST_OBS_WS_PASSWORD wins, else OBS's own stored server password."""
     override = env.get("RACECAST_OBS_WS_PASSWORD")
     if override:
         return override
@@ -380,11 +372,8 @@ def find_password(env, config_path):
     return cfg["password"] if cfg else None
 
 
-# --------------------------------------------------------------------------
-# Tiny request/response client
-# --------------------------------------------------------------------------
 class _Session:
-    """One identified obs-websocket connection; request() is synchronous."""
+    """One identified obs-websocket connection. request() is synchronous."""
 
     def __init__(self, sock, buf):
         self.sock = sock
@@ -393,7 +382,7 @@ class _Session:
         self.alive = True
 
     def next_json(self):
-        """Next text message as JSON; answers pings, raises on close/EOF."""
+        """Next text message as JSON. Answers pings, raises on close or EOF."""
         while True:
             frame = decode_frame(self.buf)
             if frame is None:
@@ -408,7 +397,7 @@ class _Session:
                 self.buf += chunk
                 continue
             opcode, payload, self.buf = frame
-            if opcode == 0x9:                       # ping -> pong
+            if opcode == 0x9:                       # answer a ping with a pong
                 self.sock.sendall(encode_frame(payload, opcode=0xA))
             elif opcode == 0x8:
                 self.alive = False
@@ -439,32 +428,32 @@ class _Session:
 
     def close(self):
         """Best-effort RFC 6455 closing handshake so OBS logs a clean 1000 close
-        instead of an abnormal 1006/EOF: send a status-1000 close frame, then briefly
-        read OBS's close echo / EOF (bounded by CLOSE_DRAIN_TIMEOUT_S) so OBS can
-        finish its side of the close before the socket goes away, then close it.
+        instead of an abnormal 1006: send a status-1000 close frame, then briefly
+        read OBS's close echo, bounded by CLOSE_DRAIN_TIMEOUT_S, so OBS can finish
+        its side before the socket goes away, then close it.
 
-        We deliberately do NOT shutdown(SHUT_WR): sending a TCP FIN right after the
-        close frame makes OBS's WebSocket server log the disconnect as 1006/"End of
-        File" instead of 1000 — verified empirically against a live OBS. Letting the
-        server send its close echo and close the TCP first (we read to EOF) yields a
-        clean 1000. Never raises; never blocks past the drain timeout."""
+        It deliberately does NOT shutdown(SHUT_WR): a TCP FIN right after the close
+        frame makes OBS's WebSocket server log the disconnect as 1006 "End of File"
+        instead of 1000. Letting the server send its close echo and close the TCP
+        first, which the read to EOF does, yields a clean 1000. Never raises and
+        never blocks past the drain timeout."""
         try:
             self.sock.sendall(encode_frame(struct.pack(">H", 1000), opcode=0x8))
         except OSError:
-            pass  # OBS may have dropped the socket first — the rest is courtesy only
+            pass  # OBS may have dropped the socket first; the rest is courtesy
         try:
             self.sock.settimeout(CLOSE_DRAIN_TIMEOUT_S)
-            while self.sock.recv(65536):   # drain OBS's close echo until EOF / timeout
+            while self.sock.recv(65536):   # drain OBS's close echo until EOF
                 pass
         except OSError:
-            pass  # timeout or reset — stop draining and close
+            pass  # timeout or reset: stop draining and close
         self.sock.close()
 
 
 def _open_session(host, port, password, timeout):
-    """Connect + WebSocket upgrade + obs-websocket identify. Returns an
-    identified _Session; raises on any failure (callers translate that into
-    their best-effort (names, note) contract)."""
+    """Connect, upgrade to WebSocket and run the obs-websocket identify. Returns an
+    identified _Session and raises on any failure; callers translate that into
+    their best-effort (names, note) contract."""
     sock = socket.create_connection((host, port), timeout=timeout)
     try:
         sock.settimeout(timeout)
@@ -489,10 +478,10 @@ def _open_session(host, port, password, timeout):
 
 
 def resolve_obs_target(host, port, env, cfg):
-    """Where to reach OBS. RACECAST_OBS_WS_HOST / RACECAST_OBS_WS_PORT override
-    everything — a test/proxy seam (point the relay at a simulated OBS for
-    reproducible screenshots, or at OBS on another host) — otherwise the host the
-    caller passed plus OBS's own config port (then the 4455 default)."""
+    """Where to reach OBS. RACECAST_OBS_WS_HOST and RACECAST_OBS_WS_PORT override
+    everything, a test and proxy seam that points the relay at a simulated OBS or at
+    OBS on another host. Otherwise it is the host the caller passed plus OBS's own
+    config port, falling back to the 4455 default."""
     host = env.get("RACECAST_OBS_WS_HOST") or host
     if port is None:
         p = (env.get("RACECAST_OBS_WS_PORT") or "").strip()
@@ -501,8 +490,9 @@ def resolve_obs_target(host, port, env, cfg):
 
 
 def _connect(host, port, password, timeout):
-    """(session, "") or (None, reason). Host/port/password fall back to the
-    RACECAST_OBS_WS_* overrides, then OBS's own obs-websocket config; never raises."""
+    """(session, "") or (None, reason). Host, port and password fall back to the
+    RACECAST_OBS_WS_* overrides, then OBS's own obs-websocket config. Never
+    raises."""
     cfg = read_ws_config(default_config_path())
     host, port = resolve_obs_target(host, port, os.environ, cfg)
     if password is None:
@@ -516,8 +506,8 @@ def _connect(host, port, password, timeout):
 
 
 class _ObsConn:
-    """One persistent, lock-guarded obs-websocket session, reused across calls with
-    transparent reconnect-and-retry-once (#537). Best-effort: never raises."""
+    """One persistent, lock-guarded obs-websocket session, reused across calls and
+    reconnecting with one retry (#537). Best-effort: never raises."""
 
     def __init__(self, host="127.0.0.1", port=None, password=None, timeout=2.0):
         self.host, self.port, self.password, self.timeout = host, port, password, timeout
@@ -543,11 +533,11 @@ class _ObsConn:
             for attempt in (0, 1):
                 sess = self._ensure()
                 if sess is None:
-                    return func(*args, **kwargs)      # OBS down -> per-call path -> clean note
+                    return func(*args, **kwargs)      # OBS down: per-call path, clean note
                 result = func(*args, session=sess, **kwargs)
                 if sess.alive:
                     return result                     # success OR request-level failure
-                self._drop()                          # socket died during the call
+                self._drop()                          # the socket died during the call
                 if attempt == 1:
                     return result                     # already retried once
             return result
@@ -558,18 +548,18 @@ class _ObsConn:
 
 
 class _PassthroughConn:
-    """Kill-switch OFF: connect-per-call, no session reuse (#537)."""
+    """Kill-switch off: connect per call, no session reuse (#537)."""
     def run(self, func, *args, **kwargs):
         return func(*args, **kwargs)
     def close(self):
         pass
 
 
-# The two routing registries the relay's _RelayObsFacade reads off this module
-# (via getattr(target, "_ROUTED_FNS"/"_SHOT_FNS")) to decide which calls go through
-# a persistent _ObsConn and which connection carries them (#537). _SHOT_FNS ride the
-# dedicated screenshot connection; the rest of _ROUTED_FNS ride the shared control
-# connection; everything else (constants, pure helpers) is a direct module call.
+# The two routing registries the relay's _RelayObsFacade reads off this module, by
+# getattr, to decide which calls go through a persistent _ObsConn and which
+# connection carries them (#537). _SHOT_FNS ride the dedicated screenshot
+# connection, the rest of _ROUTED_FNS ride the shared control connection, and
+# everything else, the constants and pure helpers, is a direct module call.
 _SHOT_FNS = frozenset({"get_program_screenshot", "get_source_screenshot"})
 _ROUTED_FNS = _SHOT_FNS | frozenset({
     "read_obs_state", "get_health_stats", "get_current_program_scene",
@@ -582,11 +572,11 @@ _ROUTED_FNS = _SHOT_FNS | frozenset({
 
 
 def route_kind(name):
-    """Which persistent connection carries the obs_ws call `name` (#537):
-    'shot' (dedicated screenshot connection), 'ctrl' (shared control connection),
-    or None (not routed — a constant or pure helper, called directly). The relay's
-    _RelayObsFacade consults this (on the real module) to place each call; keeping
-    the policy here co-locates it with the _SHOT_FNS/_ROUTED_FNS registries."""
+    """Which persistent connection carries the obs_ws call `name` (#537): 'shot'
+    for the dedicated screenshot connection, 'ctrl' for the shared control
+    connection, or None when it is not routed and is called directly. The relay's
+    _RelayObsFacade consults this on the real module to place each call, so the
+    policy sits next to the _SHOT_FNS and _ROUTED_FNS registries."""
     if name not in _ROUTED_FNS:
         return None
     return "shot" if name in _SHOT_FNS else "ctrl"
@@ -594,15 +584,15 @@ def route_kind(name):
 
 def _pct(part, total):
     """skipped/total as a rounded percentage, or None when either is missing or
-    total is zero (avoid a div-by-zero and a meaningless 0/0)."""
+    total is zero, which avoids a division by zero and a meaningless 0/0."""
     if part is None or not total:
         return None
     return round(part / total * 100.0, 2)
 
 
 def stream_kbps(prev_bytes, prev_ts, bytes_, ts, active):
-    """Upstream kbps from successive outputBytes samples. None resets the line on
-    stream stop/restart so no ghost spike appears."""
+    """Upstream kbps from successive outputBytes samples. None resets the line on a
+    stream stop or restart, so no ghost spike appears."""
     if not active or bytes_ is None or prev_bytes is None or prev_ts is None:
         return None
     dt = ts - prev_ts
@@ -612,7 +602,8 @@ def stream_kbps(prev_bytes, prev_ts, bytes_, ts, active):
 
 
 def parse_obs_stats(payload):
-    """Flatten a GetStats response into the health field names. Missing keys -> None."""
+    """Flatten a GetStats response into the health field names. A missing key gives
+    None."""
     p = payload or {}
     return {
         "obs_cpu_pct": p.get("cpuUsage"),
@@ -621,18 +612,19 @@ def parse_obs_stats(payload):
         "obs_fps": p.get("activeFps"),
         "obs_render_skipped_pct": _pct(p.get("renderSkippedFrames"),
                                        p.get("renderTotalFrames")),
-        # Raw cumulative counts: the relay derives the per-interval render-skip RATE for the
-        # health chart from successive samples (the cumulative pct barely moves during a
-        # spike). A diagnostic, never a trigger (#582). Frame counts, redaction-safe.
+        # Raw cumulative counts: the relay derives the per-interval render-skip RATE
+        # for the health chart from successive samples, because the cumulative
+        # percentage barely moves during a spike. A diagnostic, never a trigger (#582).
         "obs_render_skipped_frames": p.get("renderSkippedFrames"),
         "obs_render_total_frames": p.get("renderTotalFrames"),
     }
 
 
 def parse_video_settings(payload):
-    """OBS's configured frame rate from a GetVideoSettings response (#586): the
-    reference the measured activeFps is judged against. fpsNumerator/fpsDenominator
-    (e.g. 60000/1001 -> 59.94); missing or non-positive -> None."""
+    """OBS's configured frame rate from a GetVideoSettings response (#586), the
+    reference the measured activeFps is judged against. It divides fpsNumerator by
+    fpsDenominator, so 60000/1001 gives 59.94. Missing or non-positive gives
+    None."""
     p = payload or {}
     num, den = p.get("fpsNumerator"), p.get("fpsDenominator")
     if not isinstance(num, (int, float)) or not isinstance(den, (int, float)) \
@@ -642,8 +634,8 @@ def parse_video_settings(payload):
 
 
 def parse_stream_status(payload):
-    """Flatten a GetStreamStatus response. outputBytes is returned raw (the caller
-    derives kbps from successive samples); missing keys -> None."""
+    """Flatten a GetStreamStatus response. outputBytes is returned raw, since the
+    caller derives kbps from successive samples. A missing key gives None."""
     p = payload or {}
     active = p.get("outputActive")
     recon = p.get("outputReconnecting")
@@ -658,16 +650,16 @@ def parse_stream_status(payload):
     }
 
 
-# Single-channel event -> OBS rtmp_common service + server. Platform values come
-# from the Sheet `Channel` tab (broadcast_chat.parse_channel_tab), lowercased.
+# A single-channel event maps to an OBS rtmp_common service and server. The
+# platform values come from the Sheet `Channel` tab, lowercased.
 #
-# The `server` matters. YouTube's "YouTube - RTMPS" service has NO "auto" server
-# in OBS's services.json (only concrete ingest URLs), and YouTube — unlike Twitch —
-# has no ingest-auto-select plugin path. So sending "auto" for YouTube makes OBS
-# resolve an EMPTY stream URL and reject StartStream with "Invalid Path or
-# Connection URL" (OBS_OUTPUT_BAD_PATH). YouTube therefore needs its concrete
-# primary ingest URL. Twitch's rtmp-common plugin DOES resolve "auto" to the
-# nearest ingest, so "auto" is correct (and region-agnostic) there.
+# The `server` matters. YouTube's "YouTube - RTMPS" service has NO "auto" server in
+# OBS's services.json, only concrete ingest URLs, and unlike Twitch it has no
+# ingest-auto-select plugin path. Sending "auto" for YouTube makes OBS resolve an
+# EMPTY stream URL and reject StartStream with "Invalid Path or Connection URL"
+# (OBS_OUTPUT_BAD_PATH), so YouTube needs its concrete primary ingest URL. Twitch's
+# rtmp-common plugin DOES resolve "auto" to the nearest ingest, so "auto" is both
+# correct and region-agnostic there.
 OBS_STREAM_SERVICES = {
     "youtube": {"service": "YouTube - RTMPS",
                 "server": "rtmps://a.rtmps.youtube.com:443/live2"},
@@ -677,9 +669,9 @@ OBS_STREAM_SERVICES = {
 
 def stream_service_payload(platform, key):
     """Build SetStreamServiceSettings request data for a single-channel event.
-    `platform` is the Channel-tab value ('youtube'/'twitch', case-insensitive);
-    unknown -> ValueError (the caller turns it into a producer-facing note, never
-    a crash). The key is passed through verbatim and never logged."""
+    `platform` is the case-insensitive Channel-tab value, 'youtube' or 'twitch'; an
+    unknown one raises ValueError, which the caller turns into a producer-facing
+    note rather than a crash. The key is passed through verbatim and never logged."""
     svc = OBS_STREAM_SERVICES.get((platform or "").strip().lower())
     if not svc:
         raise ValueError(f"unknown stream platform: {platform!r}")
@@ -689,10 +681,9 @@ def stream_service_payload(platform, key):
 
 
 def get_health_stats(host="127.0.0.1", port=None, password=None, timeout=2.0, session=None):
-    """One obs-websocket session -> (reachable, stats, note). `stats` is the merged
-    parse_obs_stats + parse_stream_status + parse_video_settings dict (empty {} when
-    the stats requests fail but the session opened). Best-effort: never raises (same
-    contract as probe())."""
+    """One obs-websocket session to (reachable, stats, note). `stats` merges
+    parse_obs_stats, parse_stream_status and parse_video_settings, and is empty when
+    the stats requests fail but the session opened. Best-effort: never raises."""
     note = ""
     own = session is None
     if own:
@@ -718,10 +709,9 @@ def get_health_stats(host="127.0.0.1", port=None, password=None, timeout=2.0, se
 
 def probe(host="127.0.0.1", port=None, password=None, timeout=2.0):
     """Lightweight OBS reachability check used by the relay's /status: open an
-    obs-websocket session (handshake + auth) and close it at once, touching
-    nothing in OBS. Returns (reachable: bool, note: str) — (False, reason) when
-    OBS is closed/locked/mis-keyed, (True, "") on a full identify. Never raises
-    (same best-effort contract as the other entry points)."""
+    obs-websocket session, handshake and auth, and close it at once, touching
+    nothing in OBS. Returns (False, reason) when OBS is closed, locked or
+    mis-keyed, and (True, "") on a full identify. Never raises."""
     session, note = _connect(host, port, password, timeout)
     if session is None:
         return False, note
@@ -730,17 +720,18 @@ def probe(host="127.0.0.1", port=None, password=None, timeout=2.0):
 
 
 DEVICE_PROPERTY_NAMES = {"darwin": "device", "win": "video_device_id", "linux": "device_id"}
-# Audio (mic) device property — "device_id" on every OS. MUST match
-# setup-assets.AUDIO_VARIANTS (cross-checked by a test) — enumeration writes into
-# the same field localization later reads.
+# The audio device property is "device_id" on every OS. It MUST match
+# setup-assets.AUDIO_VARIANTS, which a test cross-checks, because enumeration writes
+# into the same field localization later reads.
 AUDIO_DEVICE_PROPERTY_NAMES = {"darwin": "device_id", "win": "device_id", "linux": "device_id"}
 
 
 def device_property_name(platform, kind="video"):
     """OBS input-settings property key holding the device id for `platform`, or
-    None if unknown. kind="video" (default) MUST match setup-assets.DEVICE_VARIANTS;
-    kind="audio" MUST match setup-assets.AUDIO_VARIANTS (both cross-checked by a
-    test) — enumeration writes into the same field localization later reads."""
+    None if unknown. The default kind="video" MUST match
+    setup-assets.DEVICE_VARIANTS and kind="audio" MUST match
+    setup-assets.AUDIO_VARIANTS, both cross-checked by a test, because enumeration
+    writes into the same field localization later reads."""
     names = AUDIO_DEVICE_PROPERTY_NAMES if kind == "audio" else DEVICE_PROPERTY_NAMES
     if platform.startswith("win"):
         return names["win"]
@@ -752,16 +743,16 @@ def device_property_name(platform, kind="video"):
 
 
 # Platform capture-input kinds, as OBS reports them in GetInputKindList. Matched by
-# substring (macOS reports av_capture_input_v2, so an exact-string match would miss it)
-# and tried in this order — a preferred matcher wins over a later one regardless of the
-# order OBS lists the kinds in. macOS is live-validated; Windows/Linux go through the
-# same mechanism (documented cross-platform assumption, see the design spec).
+# substring, because macOS reports av_capture_input_v2 and an exact match would miss
+# it, and tried in this order, so a preferred matcher wins over a later one whatever
+# order OBS lists the kinds in. Windows and Linux go through the same mechanism; see
+# the design spec for that assumption.
 VIDEO_INPUT_KIND_MATCHERS = ("av_capture_input", "dshow_input", "v4l2_input")
 AUDIO_INPUT_KIND_MATCHERS = ("coreaudio_input_capture", "wasapi_input_capture",
                              "pulse_input_capture")
 
-# Throwaway names for the device-enumeration probe (temp scene + disabled temp inputs;
-# never appear in program output; always removed after the probe).
+# Throwaway names for the device-enumeration probe: a temp scene plus disabled temp
+# inputs. They never appear in program output and are always removed afterwards.
 PROBE_SCENE_NAME = "__racecast_device_probe__"
 PROBE_VIDEO_INPUT = "__racecast_probe_video__"
 PROBE_MIC_INPUT = "__racecast_probe_mic__"
@@ -769,9 +760,9 @@ PROBE_MIC_INPUT = "__racecast_probe_mic__"
 
 def pick_input_kind(kind_list, matchers):
     """First kind in `kind_list` whose lowercased value contains a `matchers`
-    substring. Honors matcher order first (a preferred matcher wins even if a
-    less-preferred kind appears earlier in `kind_list`), then list order. Returns
-    None if nothing matches or `kind_list` is not a list/tuple. Case-insensitive."""
+    substring. Matcher order wins over list order, so a preferred matcher beats a
+    less-preferred kind that appears earlier in `kind_list`. Returns None if nothing
+    matches or `kind_list` is not a list or tuple. Case-insensitive."""
     if not isinstance(kind_list, (list, tuple)):
         return None
     lowered = [(k, str(k).lower()) for k in kind_list]
@@ -785,7 +776,7 @@ def pick_input_kind(kind_list, matchers):
 
 def parse_property_items(payload):
     """[{name,value,enabled}] from a GetInputPropertiesListPropertyItems response,
-    dropping items with an empty/None itemValue. Tolerant: bad shape -> []."""
+    dropping items with an empty itemValue. A bad shape returns []."""
     if not isinstance(payload, dict):
         return []
     items = payload.get("propertyItems")
@@ -805,24 +796,22 @@ def parse_property_items(payload):
 
 def probe_device_options(host="127.0.0.1", port=None, password=None, timeout=2.0):
     """Enumerate the local video-capture and microphone devices OBS offers, WITHOUT
-    any solo collection imported — exactly what OBS shows when you add a capture
-    source by hand. Opens one session, creates a throwaway scene plus a disabled
-    temp input of the platform capture kind, reads its device dropdown, then removes
-    both. Returns {"devices": [...], "note": str, "mic": [...], "mic_note": str}
-    (each list is [{name, value, enabled}] from parse_property_items).
+    any solo collection imported, which is exactly what OBS shows when you add a
+    capture source by hand. Opens one session, creates a throwaway scene plus a
+    disabled temp input of the platform capture kind, reads its device dropdown,
+    then removes both. Returns {"devices": [...], "note": str, "mic": [...],
+    "mic_note": str}, each list being [{name, value, enabled}].
 
-    Best-effort like release_feed_inputs: OBS unreachable / no capture kind /
-    protocol surprise -> empty list(s) + a human-readable note, NEVER raises. The
-    throwaway scene + inputs are ALWAYS removed (finally), including mid-probe, and
-    the current program scene is never switched (the temp input is created disabled).
+    Best-effort: an unreachable OBS, a missing capture kind or a protocol surprise
+    gives empty lists and a readable note, and NEVER raises. The throwaway scene and
+    inputs are ALWAYS removed, including mid-probe, and the current program scene is
+    never switched, because the temp input is created disabled.
 
-    Concurrency: the probe uses FIXED scene/input names, so two probes running at
-    once (e.g. a Control Center /api/devices poll and a CLI device-scan) contend on
-    the same throwaway objects — the loser degrades to an empty list + note. That is
-    the deliberate trade-off of fixed names: the blast radius is confined to the
-    throwaway scene (never the real collection, never the program), nothing is left
-    permanently leaked (the next probe's pre-clear RemoveScene reclaims any straggler),
-    and it still never raises."""
+    The probe uses FIXED scene and input names, so two probes running at once
+    contend on the same throwaway objects and the loser degrades to an empty list
+    plus a note. That is the trade-off of fixed names: the blast radius stays inside
+    the throwaway scene, never the real collection or the program, and the next
+    probe's pre-clear RemoveScene reclaims any straggler."""
     session, note = _connect(host, port, password, timeout)
     if session is None:
         return {"devices": [], "note": note, "mic": [], "mic_note": note}
@@ -832,8 +821,8 @@ def probe_device_options(host="127.0.0.1", port=None, password=None, timeout=2.0
 
     def read_options(input_name, kind, prop):
         # Track for cleanup BEFORE CreateInput: if OBS creates the input but the
-        # response is lost mid-exchange, the finally still attempts RemoveInput
-        # (a RemoveInput for a never-created input is harmless — it is guarded).
+        # response is lost mid-exchange, the finally still attempts RemoveInput. A
+        # RemoveInput for a never-created input is guarded and harmless.
         created.append(input_name)
         try:
             session.request("CreateInput", {"sceneName": PROBE_SCENE_NAME,
@@ -855,10 +844,10 @@ def probe_device_options(host="127.0.0.1", port=None, password=None, timeout=2.0
             pass
         session.request("CreateScene", {"sceneName": PROBE_SCENE_NAME})
         scene_made = True
-        # device_property_name(...) can be None on an unknown platform, but read_options
-        # is only reached when vid_kind/aud_kind is truthy — and the kind matchers also
-        # return None on an unknown platform, so a None property never reaches OBS. Keep
-        # that invariant if you ever add a matcher for an exotic platform.
+        # device_property_name(...) can be None on an unknown platform, but
+        # read_options is only reached when a kind matched, and the matchers also
+        # return None on an unknown platform, so a None property never reaches OBS.
+        # Keep that invariant if you add a matcher for an exotic platform.
         if vid_kind:
             out["devices"], out["note"] = read_options(
                 PROBE_VIDEO_INPUT, vid_kind, device_property_name(sys.platform))
@@ -891,13 +880,13 @@ def probe_device_options(host="127.0.0.1", port=None, password=None, timeout=2.0
 
 def release_feed_inputs(ports=RELAY_PORTS, host="127.0.0.1", port=None,
                         password=None, timeout=2.0, session=None):
-    """Make OBS drop its connections to the (just killed) relay feed ports by
-    re-applying each feed input's own settings — a forced source rebuild that
-    closes the socket without changing anything (see module docstring).
+    """Make OBS drop its connections to the just-killed relay feed ports by
+    re-applying each feed input's own settings, a forced source rebuild that closes
+    the socket without changing anything. See the module docstring.
 
-    Returns (released_input_names, note). Best effort by design: any failure —
-    OBS not running, wrong password, protocol surprise — yields ([], reason)
-    and NEVER an exception; stopping the relay must always go through.
+    Returns (released_input_names, note). Best effort by design: any failure, from
+    OBS not running to a protocol surprise, yields ([], reason) and NEVER an
+    exception, because stopping the relay must always go through.
     """
     note = ""
     own = session is None
@@ -917,7 +906,7 @@ def release_feed_inputs(ports=RELAY_PORTS, host="127.0.0.1", port=None,
 
         names = feed_input_names(inputs, get_settings, ports)
         for name in names:
-            session.request("SetInputSettings",      # unchanged -> rebuild only
+            session.request("SetInputSettings",      # unchanged: a rebuild only
                             {"inputName": name, "inputSettings": settings[name],
                              "overlay": True})
         return names, ""
@@ -930,10 +919,11 @@ def release_feed_inputs(ports=RELAY_PORTS, host="127.0.0.1", port=None,
 
 def feed_media_cursors(ports=RELAY_PORTS, host="127.0.0.1", port=None,
                        password=None, timeout=2.0, session=None):
-    """({feed_port: mediaCursor_ms or None}, note) for the relay feed media inputs OBS holds.
-    The #488 freeze detector uses whether the on-air feed's cursor ADVANCES to tell a live
-    demuxer from a stale/frozen one — a signal renderSkippedFrames is blind to. Best-effort:
-    OBS unreachable / protocol surprise -> ({}, reason), never an exception."""
+    """({feed_port: mediaCursor_ms or None}, note) for the relay feed media inputs
+    OBS holds. The freeze detector uses whether the on-air feed's cursor ADVANCES to
+    tell a live demuxer from a frozen one, a signal renderSkippedFrames is blind to
+    (#488). Best-effort: an unreachable OBS or a protocol surprise gives
+    ({}, reason), never an exception."""
     note = ""
     own = session is None
     if own:
@@ -981,12 +971,12 @@ def feed_media_cursors(ports=RELAY_PORTS, host="127.0.0.1", port=None,
 def refresh_browser_inputs(needle="127.0.0.1:8088", host="127.0.0.1", port=None,
                            password=None, timeout=2.0, session=None):
     """Press 'Refresh cache of current page' (refreshnocache) on every browser
-    source whose URL points at the relay — the programmatic right-click →
-    Refresh, used after the shipped HUD/timer pages changed (OBS's CEF caches
-    the page JS until then).
+    source whose URL points at the relay, the programmatic right-click -> Refresh,
+    used after a shipped overlay page changed. OBS's CEF caches the page JS until
+    then.
 
-    Returns (refreshed_input_names, note). Best effort like
-    release_feed_inputs(): any failure yields ([], reason), never an exception.
+    Returns (refreshed_input_names, note). Best effort like release_feed_inputs():
+    any failure yields ([], reason), never an exception.
     """
     note = ""
     own = session is None
@@ -1017,9 +1007,8 @@ def refresh_browser_inputs(needle="127.0.0.1:8088", host="127.0.0.1", port=None,
 def get_source_screenshot(source_name, width=640, fmt="jpg", quality=60,
                           host="127.0.0.1", port=None, password=None, timeout=2.0,
                           session=None):
-    """A scaled screenshot of an OBS source/scene as raw JPEG bytes.
-    Returns (bytes, "") or (None, note). Best effort — never raises (same
-    contract as release_feed_inputs/get_scene_collection)."""
+    """A scaled screenshot of an OBS source or scene as raw JPEG bytes.
+    Returns (bytes, "") or (None, note). Best effort: never raises."""
     note = ""
     own = session is None
     if own:
@@ -1044,9 +1033,9 @@ def get_source_screenshot(source_name, width=640, fmt="jpg", quality=60,
 def get_program_screenshot(width=640, fmt="jpg", quality=60,
                            host="127.0.0.1", port=None, password=None, timeout=2.0,
                            session=None):
-    """Screenshot the current OBS program scene (what viewers see) as raw JPEG
-    bytes. Resolves the active scene name, then screenshots it on the same
-    session. Returns (bytes, "") or (None, note). Best effort — never raises."""
+    """Screenshot the current OBS program scene, what viewers see, as raw JPEG
+    bytes. Resolves the active scene name, then screenshots it on the same session.
+    Returns (bytes, "") or (None, note). Best effort: never raises."""
     note = ""
     own = session is None
     if own:
@@ -1074,10 +1063,10 @@ def get_program_screenshot(width=640, fmt="jpg", quality=60,
 
 def get_current_program_scene(host="127.0.0.1", port=None,
                               password=None, timeout=2.0, session=None):
-    """The name of the current OBS program scene (what viewers see), or None.
-    Returns (scene_name, "") or (None, note). Best effort — never raises (same
-    contract as get_program_screenshot). Used by the auto-failover guard (#378)
-    to fire ONLY while OBS is still on the on-air feed scene."""
+    """The name of the current OBS program scene, what viewers see, or None.
+    Returns (scene_name, "") or (None, note). Best effort: never raises. The
+    auto-failover guard uses it to fire ONLY while OBS is still on the on-air feed
+    scene (#378)."""
     note = ""
     own = session is None
     if own:
@@ -1103,11 +1092,11 @@ _TRANSITION_NAME_FALLBACK = {"cut": "cut", "fade": "fade"}
 
 
 def resolve_transition(choice, transitions):
-    """Resolve a director choice ('cut'|'fade'|'stinger') to a concrete OBS
-    transition NAME, matched by kind against a GetSceneTransitionList payload
-    (list of {transitionName, transitionKind}); falls back to a case-insensitive
-    name match for cut/fade. Returns (name|None, note). Stinger with none
-    configured -> (None, note). Pure; never raises."""
+    """Resolve a director choice, 'cut', 'fade' or 'stinger', to a concrete OBS
+    transition NAME, matched by kind against a GetSceneTransitionList payload of
+    {transitionName, transitionKind}. Falls back to a case-insensitive name match
+    for cut and fade. Returns (name or None, note); a stinger with none configured
+    gives (None, note). Never raises."""
     kind = _TRANSITION_KIND.get(choice)
     for t in transitions or []:
         if kind and t.get("transitionKind") == kind:
@@ -1125,11 +1114,11 @@ def resolve_transition(choice, transitions):
 def set_current_program_scene(scene, host="127.0.0.1", port=None,
                               password=None, timeout=2.0,
                               transition=None, duration_ms=None, session=None):
-    """Switch the OBS program scene (best effort). When `transition`
-    ('cut'|'fade'|'stinger') is given, set that transition (resolved by kind via
-    GetSceneTransitionList) + duration first, then switch — so a director take
-    uses the chosen transition. Stinger with none configured degrades to Cut and
-    returns a note. (ok, note); never raises."""
+    """Switch the OBS program scene, best effort. When `transition` is given, it
+    sets that transition, resolved by kind via GetSceneTransitionList, and its
+    duration first, then switches, so a director take uses the chosen transition. A
+    stinger with none configured degrades to a cut and returns a note. Returns
+    (ok, note); never raises."""
     note = ""
     own = session is None
     if own:
@@ -1160,13 +1149,13 @@ def set_current_program_scene(scene, host="127.0.0.1", port=None,
 
 def switch_to_scene_if_idle(scene, host="127.0.0.1", port=None,
                             password=None, timeout=2.0, session=None):
-    """Switch OBS to `scene` ONLY when no stream output is active — never cut a
-    live program. Reads GetStreamStatus first; if the stream is live, leaves the
-    program scene untouched. Best effort — never raises (same contract as
-    get_program_screenshot). Returns (action, note) where action is one of:
-      "switched" — OBS was idle; SetCurrentProgramScene sent
-      "live"     — OBS is streaming; NO switch sent (note explains)
-      "error"    — could not reach OBS / a request failed (note has the reason)."""
+    """Switch OBS to `scene` ONLY when no stream output is active, so a live program
+    is never cut. Reads GetStreamStatus first and leaves the program scene untouched
+    while the stream is live. Best effort: never raises. Returns (action, note)
+    where action is one of:
+      "switched"  OBS was idle and SetCurrentProgramScene was sent
+      "live"      OBS is streaming and NO switch was sent; the note explains
+      "error"     OBS was unreachable or a request failed; the note has the reason."""
     note = ""
     own = session is None
     if own:
@@ -1176,7 +1165,7 @@ def switch_to_scene_if_idle(scene, host="127.0.0.1", port=None,
     try:
         status = parse_stream_status(session.request("GetStreamStatus", {}))
         if status.get("stream_active"):
-            return "live", "OBS is streaming — left the program scene untouched"
+            return "live", "OBS is streaming, so the program scene is untouched"
         session.request("SetCurrentProgramScene", {"sceneName": scene})
         return "switched", ""
     except Exception as exc:                          # noqa: BLE001 — best-effort contract
@@ -1188,7 +1177,7 @@ def switch_to_scene_if_idle(scene, host="127.0.0.1", port=None,
 
 def set_input_volume(input_name, volume_db, host="127.0.0.1", port=None,
                      password=None, timeout=2.0, session=None):
-    """Set an OBS audio input volume in dB (best effort). (ok, note)."""
+    """Set an OBS audio input volume in dB, best effort. Returns (ok, note)."""
     note = ""
     own = session is None
     if own:
@@ -1208,7 +1197,7 @@ def set_input_volume(input_name, volume_db, host="127.0.0.1", port=None,
 
 def set_input_mute(input_name, muted, host="127.0.0.1", port=None,
                    password=None, timeout=2.0, session=None):
-    """Set an OBS audio input mute state (best effort). (ok, note)."""
+    """Set an OBS audio input mute state, best effort. Returns (ok, note)."""
     note = ""
     own = session is None
     if own:
@@ -1228,10 +1217,10 @@ def set_input_mute(input_name, muted, host="127.0.0.1", port=None,
 
 def set_stream(active, host="127.0.0.1", port=None,
                password=None, timeout=2.0, session=None):
-    """Start or stop the OBS stream output (best effort). `active` True ->
-    StartStream, False -> StopStream. Idempotent: if OBS is ALREADY in the
-    requested state, returns (True, "") without sending a start/stop, so a
-    double-click or retry never surfaces OBS's "output already active" error.
+    """Start or stop the OBS stream output, best effort: `active` True sends
+    StartStream, False StopStream. Idempotent, so when OBS is ALREADY in the
+    requested state it returns (True, "") without sending anything and a
+    double-click never surfaces OBS's "output already active" error. Returns
     (ok, note); never raises."""
     note = ""
     own = session is None
@@ -1254,11 +1243,11 @@ def set_stream(active, host="127.0.0.1", port=None,
 
 def set_stream_service(platform, key, host="127.0.0.1", port=None,
                        password=None, timeout=2.0, session=None):
-    """Set OBS's stream service + key for a single-channel event (best effort).
-    HARD GUARD: refuses while OBS is streaming — a live service/key change is
-    unsafe — returning (False, "OBS is streaming — stop the broadcast before
-    changing the stream target."). Unknown platform / unreachable OBS -> (False,
-    note). The key is applied to OBS and NEVER logged. (ok, note); never raises."""
+    """Set OBS's stream service and key for a single-channel event, best effort.
+    HARD GUARD: it refuses while OBS is streaming, because a live service or key
+    change is unsafe, and returns (False, note). An unknown platform or an
+    unreachable OBS also returns (False, note). The key is applied to OBS and NEVER
+    logged. Returns (ok, note); never raises."""
     try:
         data = stream_service_payload(platform, key)
     except ValueError as exc:
@@ -1272,7 +1261,7 @@ def set_stream_service(platform, key, host="127.0.0.1", port=None,
     try:
         status = parse_stream_status(session.request("GetStreamStatus", {}))
         if status.get("stream_active"):
-            return False, ("OBS is streaming — stop the broadcast before "
+            return False, ("OBS is streaming. Stop the broadcast before "
                            "changing the stream target.")
         session.request("SetStreamServiceSettings", data)
         return True, ""
@@ -1285,11 +1274,11 @@ def set_stream_service(platform, key, host="127.0.0.1", port=None,
 
 def read_obs_state(sources, inputs, host="127.0.0.1", port=None,
                    password=None, timeout=2.0, session=None):
-    """One-session panel-refresh snapshot: current program scene + the enabled state
-    of each (scene, source) + the mute/volume of each audio input. `sources` =
-    [(scene, source), …]; `inputs` = [name, …]. Returns (state, "") or (None, note);
-    a per-item OBS error leaves that item's fields None rather than failing the whole
-    read. Best effort — never raises."""
+    """One-session panel-refresh snapshot: the current program scene, the enabled
+    state of each (scene, source) and the mute and volume of each audio input.
+    `sources` is [(scene, source), ...] and `inputs` is [name, ...]. Returns
+    (state, "") or (None, note); a per-item OBS error leaves that item's fields None
+    rather than failing the whole read. Best effort: never raises."""
     note = ""
     own = session is None
     if own:
@@ -1340,14 +1329,14 @@ def read_obs_state(sources, inputs, host="127.0.0.1", port=None,
 def reflect_feed_state(live, do_cut, scene=STINT_SCENE, sources=None,
                        host="127.0.0.1", port=None, password=None, timeout=2.0,
                        session=None, audio=None, extra_mute=()):
-    """Reflect which feed (A/B) is on air into OBS: show/hide the Stint-scene
-    sources, mute/unmute the feed audio inputs (and the commentary mic of a local
-    stint, see feed_audio_plan), and (do_cut) cut the program to Stint. Best effort
-    by design: returns (applied_intents, note) and NEVER raises — a handover must
-    go through even if OBS is closed/locked. A failed mute/unmute is noted and
-    skipped, so an input the collection lacks (a mic imported before #593) never
-    stops the cut; a failed show/hide still aborts, as before. On any failure the
-    relay falls back to the manual panel/Companion controls."""
+    """Reflect which feed, A or B, is on air into OBS: show and hide the Stint-scene
+    sources, mute and unmute the feed audio inputs plus the commentary mic of a local
+    stint (see feed_audio_plan), and cut the program to Stint when do_cut is set.
+    Best effort by design: it returns (applied_intents, note) and NEVER raises,
+    because a handover must go through even if OBS is closed. A failed mute is noted
+    and skipped, so an input the collection lacks never stops the cut, while a failed
+    show or hide still aborts. On any failure the relay falls back to the manual
+    panel and Companion controls."""
     intents = feed_state_intents(live, do_cut, scene=scene, sources=sources,
                                  audio=audio, extra_mute=extra_mute)
     note = ""
@@ -1387,12 +1376,10 @@ def reflect_feed_state(live, do_cut, scene=STINT_SCENE, sources=None,
 
 def set_feed_close_when_inactive(inputs, value=True, host="127.0.0.1", port=None,
                                   password=None, timeout=2.0):
-    """Set close_when_inactive on each named feed media input (best effort).
-    When fan-out is enabled, OBS disconnects off-air sources so no stale
-    backlog forms and the ~2 s stale-on-activation glitch is eliminated.
-    `inputs` is a list of OBS input names (e.g. FEED_SOURCES.values() +
-    [POV_SOURCE]). Returns "" on success or a short note on any failure;
-    never raises."""
+    """Set close_when_inactive on each named feed media input, best effort. When
+    fan-out is enabled OBS disconnects off-air sources, so no stale backlog forms
+    and the stale-on-activation glitch disappears. `inputs` is a list of OBS input
+    names. Returns "" on success or a short note on any failure; never raises."""
     session, note = _connect(host, port, password, timeout)
     if session is None:
         return note
@@ -1411,9 +1398,9 @@ def set_feed_close_when_inactive(inputs, value=True, host="127.0.0.1", port=None
 
 def set_scene_item_enabled(scene, source, enabled, host="127.0.0.1", port=None,
                            password=None, timeout=2.0, session=None):
-    """Enable/disable a scene item (best effort). Returns (ok, note); (False,
-    reason) on any failure — OBS closed, wrong password, item missing — NEVER an
-    exception (same contract as release_feed_inputs/get_scene_collection)."""
+    """Enable or disable a scene item, best effort. Returns (ok, note), with
+    (False, reason) on any failure, from a closed OBS to a missing item, and NEVER
+    an exception."""
     note = ""
     own = session is None
     if own:
@@ -1438,11 +1425,10 @@ def set_scene_item_enabled(scene, source, enabled, host="127.0.0.1", port=None,
 
 def set_scene_item_transform(scene, source, transform, host="127.0.0.1", port=None,
                              password=None, timeout=2.0, session=None):
-    """Set a scene item's transform (best effort). `transform` is the
-    obs-websocket sceneItemTransform dict (see pov_scene_item_transform).
-    Mirrors set_scene_item_enabled: GetSceneItemId -> SetSceneItemTransform.
-    Returns (ok, note); (False, reason) on any failure — OBS closed, wrong
-    password, item missing — NEVER an exception."""
+    """Set a scene item's transform, best effort. `transform` is the obs-websocket
+    sceneItemTransform dict (see pov_scene_item_transform), applied as
+    GetSceneItemId then SetSceneItemTransform. Returns (ok, note), with
+    (False, reason) on any failure and NEVER an exception."""
     note = ""
     own = session is None
     if own:
@@ -1469,9 +1455,9 @@ OBS_NOT_READY_CODE = 207
 
 
 def is_not_ready(note):
-    """True when a best-effort note is obs-websocket's "OBS is not ready to
-    perform the request" (code 207) — the window between OBS accepting the
-    connection and having finished loading. Pure."""
+    """True when a best-effort note is obs-websocket's "OBS is not ready to perform
+    the request" (code 207), the window between OBS accepting the connection and
+    having finished loading."""
     text = str(note or "")
     return str(OBS_NOT_READY_CODE) in text and "not ready" in text.lower()
 
@@ -1481,11 +1467,11 @@ def wait_until_ready(timeout=30.0, interval=1.0, host="127.0.0.1", port=None,
                      sleep=time.sleep):
     """Poll until obs-websocket can actually serve a request. Returns (ok, note).
 
-    `app_running("obs")` only proves the PROCESS exists. obs-websocket accepts
-    the connection several seconds earlier than OBS can answer, replying 207 in
-    between — so a bring-up that launched OBS itself ran the scene-collection
-    check, the page refresh and the Standby switch inside that window and
-    silently skipped all three. Best effort: never raises.
+    `app_running("obs")` only proves the PROCESS exists. obs-websocket accepts the
+    connection several seconds earlier than OBS can answer and replies 207 in
+    between, so a bring-up that launched OBS itself ran the scene-collection check,
+    the page refresh and the Standby switch inside that window and silently skipped
+    all three. Best effort: never raises.
     """
     probe = _probe_ready if probe is None else probe
     deadline = clock() + timeout
@@ -1501,7 +1487,7 @@ def wait_until_ready(timeout=30.0, interval=1.0, host="127.0.0.1", port=None,
 
 def _probe_ready(host, port, password):
     """(ready, note) from one cheap request. Not ready and unreachable are both
-    False — the caller only waits, it does not diagnose."""
+    False, because the caller only waits and does not diagnose."""
     session, note = _connect(host, port, password, 2.0)
     if session is None:
         return False, note
@@ -1516,11 +1502,10 @@ def _probe_ready(host, port, password):
 
 def get_scene_collection(host="127.0.0.1", port=None, password=None, timeout=2.0,
                          expected=EXPECTED_SCENE_COLLECTION, session=None):
-    """Ask OBS which scene collection is active and classify it against
-    `expected` (default EXPECTED_SCENE_COLLECTION). Returns (status_dict, note);
-    (None, reason) on any failure — OBS closed, wrong password, protocol
-    surprise — NEVER an exception (same best-effort contract as
-    release_feed_inputs/refresh_browser_inputs)."""
+    """Ask OBS which scene collection is active and classify it against `expected`,
+    which defaults to EXPECTED_SCENE_COLLECTION. Returns (status_dict, note), with
+    (None, reason) on any failure, from a closed OBS to a protocol surprise, and
+    NEVER an exception."""
     note = ""
     own = session is None
     if own:
@@ -1544,13 +1529,13 @@ def set_scene_collection(name=EXPECTED_SCENE_COLLECTION, host="127.0.0.1",
                          port=None, password=None, timeout=2.0, session=None):
     """Switch OBS to scene collection `name`. Returns (ok, note). Best effort:
     - already on `name`            -> (True, "already on '<name>'"), no switch
-    - `name` not in the live list  -> (False, "...not found...") — never creates
-    - OBS rejects (output active)  -> (False, <obs error>) — _Session.request
-      raises ValueError on a failed requestStatus; caught here, never re-raised
+    - `name` not in the live list  -> (False, "...not found..."), never created
+    - OBS rejects it, output active -> (False, <obs error>); _Session.request
+      raises ValueError on a failed requestStatus, caught here and never re-raised
     - OBS unreachable              -> (False, reason)
-    Heavyweight in OBS: the switch tears down and rebuilds ALL sources (incl. the
-    relay feeds). `racecast event start` calls this automatically to align OBS
-    with the active profile (best-effort, gated by RACECAST_OBS_COLLECTION_SWITCH);
+    The switch is heavyweight in OBS: it tears down and rebuilds ALL sources,
+    including the relay feeds. `racecast event start` calls it automatically to
+    align OBS with the active profile, gated by RACECAST_OBS_COLLECTION_SWITCH;
     `racecast obs collection set` is the manual path."""
     note = ""
     own = session is None

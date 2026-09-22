@@ -1,8 +1,8 @@
-"""Commentator stream-link submission store (issue #193), mirroring
-console_admin.py: pure validation + atomic JSON writes, best-effort reads that
-never throw. A commentator submits a YouTube/Twitch link from the (public,
-Funnel-exposed) cockpit; it lands here as a PENDING entry that the director
-approves/rejects from /panel (tailnet-only) — never auto-published.
+"""Commentator stream-link submission store (#193): pure validation, atomic JSON
+writes and best-effort reads that never throw. A commentator submits a
+YouTube/Twitch link from the Funnel-exposed cockpit; it lands here as a PENDING
+entry that the director approves or rejects from the tailnet-only /panel. It is
+never auto-published.
 
 State file: runtime/<profile>/cockpit-pending.json
     {"seq": <int>, "pending": [entry, ...]}
@@ -14,8 +14,7 @@ Each entry:
      "proposed_url", "prev_url", "ts", "mode"}
 
 An append-only audit log (cockpit-submissions.log, one JSON object per line)
-records every submit/approve/reject for the after-the-fact "who/what/when"
-required by the approved design.
+records every submit, approve and reject with who, what and when.
 """
 import json
 import os
@@ -55,7 +54,7 @@ def _validate_entry(e):
 
 def validate_pending(payload):
     """{"seq": int>=0, "pending": [entry,...]} -> (seq, [entry,...]). Raises
-    ValueError on any malformed shape (mirrors console_admin.validate_versions)."""
+    ValueError on any malformed shape."""
     if not isinstance(payload, dict):
         raise ValueError("payload must be an object")
     pending = payload.get("pending")
@@ -71,8 +70,8 @@ def validate_pending(payload):
 
 
 def _load(path):
-    """(seq, entries) from disk, or (0, []) when missing/corrupt — best-effort,
-    like console_admin.load_versions: a bad file must never wedge the relay."""
+    """(seq, entries) from disk, or (0, []) when missing or corrupt. Best-effort:
+    a bad file must never wedge the relay."""
     try:
         with open(path, encoding="utf-8") as fh:
             return validate_pending(json.load(fh))
@@ -81,8 +80,8 @@ def _load(path):
 
 
 def _write(path, seq, entries):
-    """Atomically persist {"seq", "pending"} (temp + replace), same-filesystem
-    rename, temp unlinked on failure — mirrors console_admin.write_versions."""
+    """Atomically persist {"seq", "pending"}: same-filesystem temp file plus
+    replace, with the temp unlinked on failure."""
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path) or ".", suffix=".tmp")
     try:
@@ -121,8 +120,9 @@ def add_pending(path, *, streamer_key, streamer_name, target_line, target_stint,
 
 
 def pop_pending(path, entry_id):
-    """Remove the entry whose id == *entry_id*; persist; return it (or None when
-    no such id exists — the list is left unchanged). seq is NEVER decreased."""
+    """Remove the entry whose id == *entry_id*, persist, and return it. Returns
+    None and leaves the list unchanged when no such id exists. seq is NEVER
+    decreased."""
     seq, entries = _load(path)
     keep, popped = [], None
     for e in entries:
@@ -136,8 +136,8 @@ def pop_pending(path, entry_id):
 
 
 def append_audit(path, record):
-    """Append one JSON line to the audit log (best-effort — a failed write must
-    never break a submit/approve/reject)."""
+    """Append one JSON line to the audit log. Best-effort: a failed write must
+    never break a submit, approve or reject."""
     try:
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         line = json.dumps(record, ensure_ascii=False)

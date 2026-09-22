@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Flag-status graphics (parallel to the flag-text chip): pure value->OBS-source
-mapping + mutual-exclusion intents + a small persisted store. No relay imports —
-the relay wires obs_ws in as the store's apply_fn (mirrors cue_admin / chat).
+"""Flag-status graphics, parallel to the flag-text chip: a pure value->OBS-source
+mapping, mutual-exclusion intents and a small persisted store. No relay imports;
+the relay wires obs_ws in as the store's apply_fn.
 
 Canonical keys are the slugified flag conditions; the OBS source name equals the
 Sheet Assets label equals the PNG basename (e.g. key 'safety-car' -> 'Flag Safety
@@ -31,8 +31,8 @@ FLAG_GRAPHIC_ALIASES = {"sc": "safety-car", "vsc": "virtual-safety-car"}
 
 def normalize_flag_value(raw):
     """Canonical key for *raw*, or '' for empty/clear, or None for an unknown
-    non-empty value. Lowercases, trims, and slugifies spaces to dashes, then
-    applies the alias map — so 'Safety Car', 'safety-car', and 'sc' all map to
+    non-empty value. Lowercases, trims and slugifies spaces to dashes, then
+    applies the alias map, so 'Safety Car', 'safety-car' and 'sc' all map to
     'safety-car'."""
     if raw is None:
         return ""
@@ -60,12 +60,12 @@ def _noop_apply(scene, source, enabled):
 
 
 class FlagGraphicStore:
-    """Active flag-graphic state: in-memory + JSON file (restart-safe) + OBS apply
-    via an injected apply_fn (the relay passes obs_ws.set_scene_item_enabled).
-    Mirrors EventTitleStore's local-file layer; NO sheet sync (this is OBS source
-    visibility, not a HUD value). Selecting a flag shows its source and hides the
-    other four in both scenes; clear hides all. Best-effort throughout: an OBS
-    failure degrades to a note, the state is still stored and persisted."""
+    """Active flag-graphic state: in memory, in a restart-safe JSON file, and
+    applied to OBS through an injected apply_fn (the relay passes
+    obs_ws.set_scene_item_enabled). There is NO sheet sync, because this is OBS
+    source visibility rather than a HUD value. Selecting a flag shows its source
+    and hides the other four in both scenes; clear hides all. Best-effort
+    throughout: an OBS failure degrades to a note and the state is still stored."""
 
     def __init__(self, path, apply_fn=None):
         self.path = path
@@ -78,7 +78,6 @@ class FlagGraphicStore:
             pass  # fresh layout; _save_file degrades per-write if the dir is missing
         self._load_file()
 
-    # -- persistence ------------------------------------------------------
     def _load_file(self):
         try:
             with open(self.path, encoding="utf-8") as fh:
@@ -95,7 +94,6 @@ class FlagGraphicStore:
         except OSError:
             pass  # best-effort, same contract as the timer/event caches
 
-    # -- read -------------------------------------------------------------
     def get(self):
         with self.lock:
             return self.active
@@ -103,7 +101,6 @@ class FlagGraphicStore:
     def data(self):
         return {"active": self.get()}
 
-    # -- write ------------------------------------------------------------
     def set(self, raw):
         key = normalize_flag_value(raw)
         if key is None:
@@ -119,10 +116,10 @@ class FlagGraphicStore:
         return self.set("")
 
     def reassert(self):
-        """Re-push the persisted active flag to OBS (best-effort)."""
+        """Re-push the persisted active flag to OBS. Best-effort."""
         with self.lock:
             self._apply_locked()
 
     def _apply_locked(self):
         for scene, source, enabled in flag_graphic_intents(self.active):
-            self.apply_fn(scene, source, enabled)   # (ok, note) ignored — best-effort
+            self.apply_fn(scene, source, enabled)   # (ok, note) ignored, best-effort
