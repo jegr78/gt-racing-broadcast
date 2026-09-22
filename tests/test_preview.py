@@ -10,7 +10,7 @@ spec = importlib.util.spec_from_file_location(
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 
 
-# --- compute_preview_meta: PR builds keyed by PR number ----------------------
+# compute_preview_meta: PR builds keyed by PR number.
 def t_pr_meta():
     out = m.compute_preview_meta("pull_request", pr_number=42,
                                  sha="0123abcdef9999")
@@ -28,7 +28,7 @@ def t_pr_meta_accepts_string_number():
     assert out["version"] == "preview-pr7-abcdef1"
 
 
-# --- compute_preview_meta: dispatch builds keyed by sanitized ref ------------
+# compute_preview_meta: dispatch builds keyed by sanitized ref.
 def t_dispatch_main():
     out = m.compute_preview_meta("workflow_dispatch", ref="main",
                                  sha="deadbeef0001")
@@ -58,7 +58,7 @@ def t_dispatch_empty_ref_defaults_main():
     assert out["tag"] == "preview-main"
 
 
-# --- base version: parse from the release-please PR, else next-minor ---------
+# Base version: parsed from the release-please PR, else next-minor.
 def t_parse_release_pr_version():
     assert m.parse_release_pr_version("chore(main): release 1.1.0") == "1.1.0"
     assert m.parse_release_pr_version("chore: release v2.3.4") == "2.3.4"
@@ -92,7 +92,7 @@ def t_resolve_base_version_none_when_nothing_known():
     assert m.resolve_base_version("", "") is None
 
 
-# --- compute_preview_meta: base_version embeds the target release version -----
+# compute_preview_meta: base_version embeds the target release version.
 def t_pr_meta_with_base_version():
     out = m.compute_preview_meta("pull_request", pr_number=42,
                                  sha="0123abcdef9999", base_version="1.1.0")
@@ -120,7 +120,7 @@ def t_meta_without_base_version_keeps_legacy_format():
     assert out["title"] == "Preview: PR #7 (abcdef1)"
 
 
-# --- guards ------------------------------------------------------------------
+# Guards.
 def t_pr_requires_number():
     try:
         m.compute_preview_meta("pull_request", pr_number=None, sha="abc1234")
@@ -137,7 +137,7 @@ def t_unknown_event_raises():
     raise AssertionError("expected ValueError for unsupported event")
 
 
-# --- format_preview_notes: changelog body for the pre-release ----------------
+# format_preview_notes: the changelog body for the pre-release.
 def t_notes_lists_commits():
     body = m.format_preview_notes(
         ["fix: thing (abc1234)", "feat: other (def5678)"], sha="0123abcdef")
@@ -183,7 +183,7 @@ def t_main_notes_mode_reads_stdin():
     assert "Built from commit `1234567`." in out
 
 
-# --- main(): emits GITHUB_OUTPUT key=value lines -----------------------------
+# main() emits GITHUB_OUTPUT key=value lines.
 def t_main_pr_emits_output_lines():
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):

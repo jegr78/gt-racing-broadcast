@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Unit tests for src/scripts/bundle_cache.py (stdlib, no pytest).
 
-The bug this guards: a PyInstaller onefile process extracts src/ into the OS
-temp dir, and the OS reaps that dir while the process still runs (macOS
-dirhelper after 3 days, systemd-tmpfiles after 10). Files read per request then
-vanish under a long-running Control Center.
+A PyInstaller onefile process extracts src/ into the OS temp dir, and the OS
+reaps that dir while the process still runs (macOS dirhelper after 3 days,
+systemd-tmpfiles after 10). Files read per request then vanish under a
+long-running Control Center.
 """
 import os
 import sys
@@ -30,7 +30,7 @@ def t_read_returns_file_bytes():
 
 
 def t_second_read_survives_the_file_being_deleted():
-    # The whole point: the OS reaped the extraction dir, we keep serving.
+    # The OS reaped the extraction dir; the cache keeps serving.
     path = _tmpfile(b"PAGE")
     cache = bc.BundleCache()
     assert cache.read(path) == b"PAGE"
@@ -43,7 +43,7 @@ def t_read_without_a_cached_copy_raises_oserror():
     try:
         cache.read(os.path.join(tempfile.gettempdir(), "racecast-not-here.html"))
     except OSError:
-        pass  # nothing cached and nothing on disk — the caller must handle it
+        pass  # nothing cached and nothing on disk, so the caller must handle it
     else:
         raise AssertionError("a missing, never-read file must raise")
 
@@ -94,7 +94,6 @@ def t_cached_reports_what_is_held():
 
 
 def t_eviction_hint_names_the_cause_and_the_cure():
-    # The old message was "page not bundled", which told an operator nothing.
     msg = bc.eviction_hint("/tmp/_MEIabc/src/ui/app.html")
     lowered = msg.lower()
     assert "restart" in lowered, msg

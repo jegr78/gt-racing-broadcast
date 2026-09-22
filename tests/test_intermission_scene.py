@@ -22,9 +22,9 @@ def _collection():
 
 
 # Sources the tool creates. The background image source is "Intermission
-# Background", NOT "Intermission" — OBS source/scene names share one global
-# namespace, so naming the image "Intermission" collided with the scene and made
-# SetCurrentProgramScene("Intermission") resolve to the image (error 602).
+# Background", NOT "Intermission", because OBS source and scene names share one
+# global namespace: naming the image "Intermission" collides with the scene and
+# makes SetCurrentProgramScene("Intermission") resolve to the image (error 602).
 _INTERMISSION_SOURCES = ("Intermission Background", "Intermission Chat", "Intermission Music")
 
 
@@ -54,9 +54,7 @@ def t_no_duplicate_scene_item_ids():
     # OBS requires per-scene-unique scene-item ids (the item `id` field == the
     # runtime sceneItemId). A collision makes SetSceneItemEnabled(id) toggle
     # whichever item OBS resolves, so two GFX/visibility toggles cross-fire.
-    # Regression for #478: the Stint scene shipped `Stint HUD` and `Race Weather 1`
-    # both on id 28 (and `Feed POV`/`Overlay` both on id 25) — pressing "HUD (Stint)"
-    # in the Director Panel fired "Race Weather 1" instead.
+    # (#478)
     offenders = {}
     for src in _collection()["sources"]:
         if src.get("id") != "scene":
@@ -93,7 +91,7 @@ def t_idempotent():
 
 
 def t_committed_collection_already_has_scene():
-    # after Step 4 regenerates + commits, the shipped template must contain it
+    # The shipped template must carry the scene, not just the tool's output.
     names = {s.get("name") for s in _collection()["sources"]}
     assert ({"Intermission"} | set(_INTERMISSION_SOURCES)) <= names
 

@@ -70,7 +70,7 @@ def t_stop_pid_skips_foreign_pid(tmp):
     try:
         assert sv.pid_alive(pid) is True
         assert sv.stop_pid(pid, pidf, timeout=5, is_target=lambda _p: False) is True
-        assert sv.pid_alive(pid) is True          # NOT killed — it wasn't ours
+        assert sv.pid_alive(pid) is True          # NOT killed, it was not ours
         assert not os.path.exists(pidf)           # stale pid file cleared
     finally:
         sv.stop_pid(pid, pidf, timeout=5)         # real cleanup
@@ -122,13 +122,12 @@ def t_external_tool_env_strips_single_meipass():
 
 
 def t_external_tool_env_strips_nested_and_parent_meipass():
-    # Regression for the Control Center crash: a frozen UI re-invokes the frozen
-    # binary, so the child's LD_LIBRARY_PATH carries BOTH _MEIPASS dirs and the
-    # bootloader's _ORIG points at the PARENT's _MEIPASS. Restoring _ORIG would
-    # reintroduce a bundled libcrypto; stripping every _MEI* dir keeps only the
-    # genuinely-external entry. Build the path with os.pathsep so the test matches
-    # the splitter on every OS (the code is POSIX-only in practice, but CI runs it
-    # on the Windows runner too).
+    # A frozen UI re-invokes the frozen binary, so the child's LD_LIBRARY_PATH
+    # carries BOTH _MEIPASS dirs and the bootloader's _ORIG points at the PARENT's
+    # _MEIPASS. Restoring _ORIG would reintroduce a bundled libcrypto; stripping
+    # every _MEI* dir keeps only the genuinely-external entry. Build the path with
+    # os.pathsep so the test matches the splitter on every OS (the code is
+    # POSIX-only in practice, but CI runs it on the Windows runner too).
     env = sv.external_tool_env(frozen=True, environ={
         "LD_LIBRARY_PATH": os.pathsep.join(["/tmp/_MEIchild", "/tmp/_MEIparent", "/usr/lib"]),
         "LD_LIBRARY_PATH_ORIG": "/tmp/_MEIparent",   # the trap _ORIG falls into
@@ -139,7 +138,7 @@ def t_external_tool_env_strips_nested_and_parent_meipass():
 
 def t_external_tool_env_strips_active_meipass_by_identity():
     # sys._MEIPASS (this process's bundle dir) is dropped even if its basename
-    # somehow does not match _MEI* — identity is the backstop.
+    # somehow does not match _MEI*; identity is the backstop.
     saved = getattr(sys, "_MEIPASS", None)
     sys._MEIPASS = "/opt/bundle/run123"
     try:
@@ -173,7 +172,7 @@ def t_start_detached_uses_boot_log_when_given(tmp):
     boot = os.path.join(tmp, "logs", "relay.boot.log")
     pidf = os.path.join(tmp, "relay.pid")
     # The child crashes to stderr; start_detached must capture that to the boot file
-    # the caller passes (the "boot file" contract — pre-logging crashes are visible).
+    # the caller passes (the "boot file" contract, so pre-logging crashes are visible).
     argv = [sys.executable, "-c", "import sys; sys.stderr.write('boom\\n')"]
     pid = sv.start_detached(argv, boot, pidf)
     # Let the short-lived child run to completion before we stop/clean up, so the
@@ -226,7 +225,7 @@ def t_stop_commands_per_os():
 
 def t_daemon_bundle_env_redirects_the_extraction_dir_posix():
     # A frozen daemon runs for days; /tmp gets reaped under it. Point the
-    # bootloader at a durable dir instead — free here, because the child is
+    # bootloader at a durable dir instead. It is free here, because the child is
     # starting anyway and unpacks exactly once either way.
     env = sv.daemon_bundle_env({"PATH": "/usr/bin", "TMPDIR": "/var/folders/x/T"},
                                "/opt/rc/runtime/bundle", os_name="posix")

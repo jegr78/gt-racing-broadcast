@@ -53,7 +53,7 @@ def t_read_overlay_css_present():
         assert feeds.read_overlay_css(od, "hud") == b"#stint{left:10px}"
 
 def t_read_overlay_css_timer_is_now_unknown():
-    # the timer page is merged into the HUD — "timer" is no longer an overlay page
+    # the timer page is merged into the HUD, so "timer" is no longer an overlay page
     with tempfile.TemporaryDirectory() as tmp:
         od = _mkoverlay(tmp, hud_css="#stint{left:10px}")
         assert feeds.read_overlay_css(od, "timer") == b""
@@ -83,8 +83,8 @@ def t_resolve_overlay_font_ok():
 def t_font_ctypes_out_is_identity_whitelist():
     # The handler re-derives the Content-Type header from this constant map
     # (defense vs. header injection, mirroring ASSET_CTYPES), so every ctype
-    # resolve_overlay_font can return must map back to itself — otherwise a valid
-    # font would 404 — and any unknown value must drop to None.
+    # resolve_overlay_font can return must map back to itself, or a valid font
+    # would 404, and any unknown value must drop to None.
     for ctype in feeds.FONT_CTYPES.values():
         assert feeds.FONT_CTYPES_OUT.get(ctype) == ctype
     assert feeds.FONT_CTYPES_OUT.get("text/html; charset=utf-8") is None
@@ -100,7 +100,7 @@ def t_resolve_overlay_font_rejects_traversal_and_bad_ext():
         assert feeds.resolve_overlay_font(od, ".woff2") is None
 
 
-# --- resolve_preview_bg: per-profile HUD-preview backdrop (overlay/preview-bg.*) ---
+# resolve_preview_bg: the per-profile HUD-preview backdrop (overlay/preview-bg.*).
 def t_resolve_preview_bg_present_jpg():
     with tempfile.TemporaryDirectory() as tmp:
         od = _mkoverlay(tmp)
@@ -158,13 +158,13 @@ def t_resolve_preview_bg_shared_default_only_when_no_overlay_dir():
 
 
 def t_resolve_preview_bg_ctypes_are_asset_whitelisted():
-    # The handler re-derives the header via ASSET_CTYPES[hit[1]] — every ctype the
-    # resolver can return must be a key there (else a KeyError at request time).
+    # The handler re-derives the header via ASSET_CTYPES[hit[1]], so every ctype
+    # the resolver can return must be a key there (else a KeyError at request time).
     for _ext, ctype in feeds.PREVIEW_BG_EXTS:
         assert ctype in feeds.ASSET_CTYPES
 
 
-# --- resolve_preview_frame: the Overlay.png broadcast frame from runtime graphics ---
+# resolve_preview_frame: the Overlay.png broadcast frame from runtime graphics.
 def t_resolve_preview_frame_present():
     with tempfile.TemporaryDirectory() as tmp:
         g = os.path.join(tmp, "graphics"); os.makedirs(g)
@@ -179,7 +179,7 @@ def t_resolve_preview_frame_absent_or_no_dir_is_none():
     assert feeds.resolve_preview_frame(None) is None
 
 
-# --- overlay_build: the pure WYSIWYG compiler (issue #114) ---
+# overlay_build: the pure WYSIWYG compiler. (#114)
 
 def t_ob_font_constants_match_relay():
     # Duplicated from the relay and pinned identical (anti-drift, like the
@@ -221,9 +221,9 @@ def t_ob_extract_slots_from_real_hud():
     with open(os.path.join(ROOT, "src", "obs", "hud.html"), encoding="utf-8") as f:
         slots = ob.extract_slots(f.read())
     ids = [s["id"] for s in slots]
-    # Each team is three independent slots (logo / number / name; issue #136),
-    # plus the POV placeholder box (issue #141), the POV name label (issue #130),
-    # the league-logo box (Solo Commentary HUD, epic #300), and the merged clock slot.
+    # Each team is three independent slots (logo, number, name), plus the POV
+    # placeholder box, the POV name label, the league-logo box (Solo Commentary
+    # HUD) and the merged clock slot. (#136, #141, #130, #300)
     assert ids == ["stint", "session", "streamer", "round-top", "round-flag",
                    "round-country",
                    "team1-bar", "team1-logo", "team1-num", "team1-name",
@@ -233,14 +233,14 @@ def t_ob_extract_slots_from_real_hud():
                    "team3-bar", "team3-logo", "team3-num", "team3-name",
                    "team3-brand", "team3-quali",
                    "race-control", "flag-status", "pov", "pov-name", "league-logo",
-                   # Stream-chat slot (Solo Commentary HUD, epic #300): self-gating
-                   # box rendering the read-only broadcast chat (issue #294),
-                   # hidden when /broadcast-chat/data is 404/empty.
+                   # Stream-chat slot (Solo Commentary HUD): a self-gating box
+                   # rendering the read-only broadcast chat, hidden when
+                   # /broadcast-chat/data is 404 or empty. (#300, #294)
                    "chat",
-                   # Solo-mode telemetry block (issue #324): self-gating,
+                   # Solo-mode telemetry block (#324): self-gating,
                    # hidden in endurance (no /telemetry/data there). The panel
                    # background and webcam frame are builder box slots too
-                   # (position/size only — the webcam box also drives the real
+                   # (position/size only; the webcam box also drives the real
                    # OBS "Solo Webcam" device transform, see
                    # OVERLAY_SLOT_OBS_SOURCES).
                    "tele-panel", "webcam",
@@ -254,14 +254,14 @@ def t_ob_extract_slots_from_real_hud():
                    # "tyres-capture" is a TOP-LEVEL slot (outside #tele) so it stays
                    # builder-editable in a Commentary profile that has no telemetry;
                    # it drives the "Solo Tyres/Fuel Capture" OBS device transform
-                   # (Task 4, epic #300).
+                   # (#300)
                    "tyres-capture", "clock"]
     by_id = {s["id"]: s for s in slots}
     assert by_id["stint"]["label"] == "Stint banner"
     # default props (no data-edit-props) include the text set, not the team-only keys
     assert "fontSize" in by_id["stint"]["props"]
     assert "teamNameMax" not in by_id["stint"]["props"]
-    # team name slot: the text kind + the auto-fit extras (issue #136)
+    # team name slot: the text kind plus the auto-fit extras (#136)
     assert by_id["team1-name"]["props"] == list(ob.KIND_TEXT) + [
         "teamNameMax", "teamNameMin"]
     # team number slot: the full text kind (standard props for all slots)
@@ -296,7 +296,7 @@ def t_ob_team_logo_alignment_compiles():
 
 
 def t_ob_team_logo_img_keeps_aspect_for_alignment():
-    # The logo <img> must NOT be forced to width:100% — otherwise object-fit
+    # The logo <img> must NOT be forced to width:100%, or object-fit
     # centers it and the box's justify-content can never move it. It keeps its
     # natural aspect (width:auto, capped at the box) and the box centers by default
     # so the pre-existing look is preserved until an operator overrides align.
@@ -332,8 +332,8 @@ def t_ob_hud_has_clock_slot():
     assert "left" in clock["props"] and "fontSize" in clock["props"]
 
 def t_ob_hud_clock_base_is_finite_positionable():
-    # Regression for #135 carried into the merged page: the clock hugs its digits,
-    # it is not a full-canvas centered box (dragging that moves nothing visibly).
+    # The clock hugs its digits; it is not a full-canvas centered box (dragging
+    # that moves nothing visibly). (#135)
     with open(os.path.join(ROOT, "src", "obs", "hud.html"), encoding="utf-8") as f:
         style = ob.base_style(f.read())
     clock_rule = re.search(r"#clock\s*\{[^}]*\}", style).group(0)
@@ -483,7 +483,7 @@ def t_ob_font_cut_recognizes_suffixes():
 
 def t_ob_compile_lone_font_unchanged():
     # A single file with no cut sibling stays the LEGACY descriptor-less face
-    # (byte-identical to before — no font-weight/font-style descriptors).
+    # (byte-identical to before, with no font-weight/font-style descriptors).
     css = ob.compile_overlay_css({"slots": {}, "fonts": ["League.woff2"]}, SLOTS)
     assert '@font-face { font-family: "League"; src: url(/overlay/fonts/League.woff2); }' in css
     assert "font-weight" not in css and "font-style" not in css
@@ -632,9 +632,9 @@ def t_obs_hud_overlay_renders_in_front():
 
 
 def t_ob_sample_has_flag_and_brand_images():
-    # The offline builder canvas must preview the image slots too (issue: flags +
-    # brand logos were blank without a relay). Sample carries a flag key for the
-    # round flag and a brand key for each team logo, resolvable to bundled assets.
+    # The offline builder canvas must preview the image slots too, so SAMPLE
+    # carries a flag key for the round flag and a brand key for each team logo,
+    # both resolvable to bundled assets.
     h = ob.SAMPLE["hud"]
     flag = h.get("round-flag", {})
     assert isinstance(flag, dict) and flag.get("flag")
@@ -647,7 +647,7 @@ def t_ob_sample_has_flag_and_brand_images():
     for tid in ("team1-logo", "team2-logo", "team3-logo"):
         assert os.path.exists(os.path.join(ROOT, "src", "assets", "brands",
                                            h[tid]["brand"] + ".png")), tid
-    # brand-name text slots preview with text (issue: brand name element)
+    # brand-name text slots preview with text
     for tid in ("team1-brand", "team2-brand", "team3-brand"):
         assert isinstance(h.get(tid), str) and h[tid], tid
 
@@ -782,7 +782,7 @@ def t_ob_visible_is_a_box_prop():
 def t_shipped_demo_overlay_css_matches_its_layout():
     # The demo profile ships a builder-authored HUD overlay: layout-hud.json is
     # the source, hud.css is its compiled output (what the relay serves). Guard
-    # that the committed pair stays in sync — a hand-edit of one must not drift.
+    # that the committed pair stays in sync; a hand-edit of one must not drift.
     import json
     def _read(*parts):
         with open(os.path.join(*parts), encoding="utf-8") as fh:
@@ -793,15 +793,14 @@ def t_shipped_demo_overlay_css_matches_its_layout():
     compiled = ob.compile_overlay_css(layout, slots)
     on_disk = _read(od, "hud.css")
     assert compiled == on_disk, "demo hud.css is out of sync with layout-hud.json"
-    # the race timer is an explicitly placed slot (issue: overlay needs a clock)
+    # the race timer is an explicitly placed slot
     assert "#clock" in on_disk, "demo overlay has no clock/timer slot"
 
 
 def t_hud_base_is_the_demo_standard():
-    # The repo BASE hud.html now ships the de-branded demo standard as its no-override
-    # default (issue #206): timer side-by-side with the stint, a fixed 54x48 dark
-    # number box, and the opaque race-control band. Locks those markers so the base
-    # cannot silently regress to the old IRO red-banner defaults.
+    # The repo BASE hud.html ships the de-branded demo standard as its no-override
+    # default: timer side-by-side with the stint, a fixed 54x48 dark number box and
+    # the opaque race-control band. Locks those markers. (#206)
     with open(os.path.join(ROOT, "src", "obs", "hud.html"), encoding="utf-8") as f:
         style = ob.base_style(f.read())
     clock = re.search(r"#clock\s*\{[^}]*\}", style).group(0)
@@ -817,8 +816,7 @@ def t_hud_base_is_the_demo_standard():
 def t_flag_status_default_is_top_centered():
     # The base default places the flag-status banner at the top edge, just below
     # the stint/clock row, horizontally centred on the 1920-wide frame (x=960 ->
-    # left 780 for the 360px box) with centred content. Locks the placement so it
-    # can't silently drift back to the old lower-left default.
+    # left 780 for the 360px box) with centred content. Locks the placement.
     with open(os.path.join(ROOT, "src", "obs", "hud.html"), encoding="utf-8") as f:
         style = ob.base_style(f.read())
     rule = re.search(r"#flag-status\s*\{[^}]*\}", style).group(0)
@@ -828,8 +826,8 @@ def t_flag_status_default_is_top_centered():
 
 def t_example_overlay_matches_demo_standard():
     # New leagues scaffold from `example` (profile_admin.create_profile), so the
-    # example overlay must carry the SAME standard as the demo — otherwise a stale
-    # example override would fight the new base on every new profile.
+    # example overlay must carry the SAME standard as the demo, or a stale example
+    # override would fight the new base on every new profile.
     def _read(*parts):
         with open(os.path.join(*parts), encoding="utf-8") as fh:
             return fh.read()
@@ -911,14 +909,14 @@ def t_box_from_css_tyres_capture_slot():
 
 
 def t_box_from_css_default_slot_is_pov():
-    # box_from_css defaults to slot_id="pov" — same result as pov_box_from_css.
+    # box_from_css defaults to slot_id="pov", the same result as pov_box_from_css.
     css = "#pov { left: 1516px; top: 600px; width: 384px; height: 216px; }"
     assert ob.box_from_css(css) == ob.pov_box_from_css(css)
 
 
 def t_pov_box_from_css_is_back_compat_wrapper():
-    # pov_box_from_css must keep working byte-identically post-generalization —
-    # released-product callers still import this exact name (#324).
+    # pov_box_from_css must keep working byte-identically after the
+    # generalization; released-product callers still import this exact name. (#324)
     css = "#pov { left: 1516px; top: 600px; }"
     assert ob.pov_box_from_css(css) == ob.box_from_css(css, "pov") == \
         {"left": 1516, "top": 600}
@@ -950,7 +948,7 @@ def t_ob_compile_slant_shear_gated_by_props():
 def t_ob_sample_covers_every_text_slot():
     """Every text-kind HUD slot has a non-empty SAMPLE entry so the builder
     canvas renders something for it. Box slots (images, the POV frame) are
-    exempt — they carry an asset sample or are a frame with no text."""
+    exempt: they carry an asset sample or are a frame with no text."""
     def _read(*parts):
         with open(os.path.join(*parts), encoding="utf-8") as fh:
             return fh.read()
@@ -996,7 +994,7 @@ def t_control_center_has_preview_data_panel():
 def t_preview_panel_is_outside_slot_panel():
     """#ov-panel is wiped by ovRenderPanel() (panel.textContent=''), so the
     session-only Preview-data panel must live OUTSIDE it or it is destroyed at
-    runtime. Regression guard for that placement bug."""
+    runtime."""
     def _read(*parts):
         with open(os.path.join(*parts), encoding="utf-8") as fh:
             return fh.read()
@@ -1037,8 +1035,8 @@ def t_intermission_page_polls_broadcast_chat_and_links_override():
 
 def t_ob_team_bar_is_a_box_slot_before_the_logo():
     # The tile colour bar must be the FIRST slot of its tile: the slots are
-    # absolutely-positioned siblings, so DOM order is the paint order — a bar
-    # after the logo would cover logo/number/model (issue #555).
+    # absolutely-positioned siblings, so DOM order is the paint order and a bar
+    # after the logo would cover logo/number/model. (#555)
     with open(os.path.join(ROOT, "src", "obs", "hud.html"), encoding="utf-8") as f:
         slots = ob.extract_slots(f.read())
     ids = [s["id"] for s in slots]
@@ -1051,13 +1049,13 @@ def t_ob_team_bar_is_a_box_slot_before_the_logo():
 
 def t_hud_page_publishes_team_colors_and_mode():
     # The base HUD must expose the colours as custom properties and the mode as a
-    # body attribute — and contain NO league colour literal of its own.
+    # body attribute, and contain NO league colour literal of its own.
     with open(os.path.join(ROOT, "src", "obs", "hud.html"), encoding="utf-8") as f:
         html = f.read()
     assert "--team-bg" in html and "--team-fg" in html
     assert "dataset.mode" in html
     assert "qualiLap" in html
-    # the bar carries no background in base — a profile decides
+    # the bar carries no background in base; a profile decides
     assert "background: var(--team-bg)" not in html
 
 

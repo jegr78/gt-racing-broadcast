@@ -2,7 +2,7 @@
 """Stdlib checks for the obs-browser (Linux source-build) decision helpers.
 Run: python3 tests/test_obs_browser_linux.py
 
-These cover the PURE logic only — arch/version resolution, the pinned CEF spec,
+These cover the PURE logic only: arch/version resolution, the pinned CEF spec,
 the download URL/hash, the OBS plugin/data dirs, browser-missing detection, the
 install-apps pointer, and the BrowserHWAccel global.ini transform. The heavy
 orchestration (clone/download/cmake/install) is not exercised in CI."""
@@ -17,7 +17,7 @@ spec = importlib.util.spec_from_file_location(
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 
 
-# --- arch normalization --------------------------------------------------
+# Arch normalization.
 def t_normalize_arch():
     assert m.normalize_arch("aarch64") == "aarch64"
     assert m.normalize_arch("arm64") == "aarch64"
@@ -32,7 +32,7 @@ def t_arch_triplet():
     assert m.arch_triplet("x86_64") == "x86_64-linux-gnu"
 
 
-# --- OBS version -> spec key ---------------------------------------------
+# OBS version -> spec key.
 def t_obs_version_key():
     assert m.obs_version_key("32.1.0") == "32.1"
     assert m.obs_version_key("32.1.0-0ubuntu3") == "32.1"
@@ -46,7 +46,7 @@ def t_resolve_spec_supported_and_not():
     assert m.resolve_spec("31.0.0") is None   # not in the pinned table
 
 
-# --- CEF asset: filename / url / hash ------------------------------------
+# CEF asset: filename, url and hash.
 def t_cef_filename_aarch64():
     s = m.resolve_spec("32.1.0")
     assert m.cef_filename(s, "aarch64") == "cef_binary_6533_linux_aarch64_v6.tar.xz"
@@ -79,7 +79,7 @@ def t_obs_browser_commit_pinned():
     assert s["obs_browser_commit"] == "ea04212e4bbadd077f9e6038758c4e4779c24fa3"
 
 
-# --- install locations + detection ---------------------------------------
+# Install locations and detection.
 def t_obs_plugins_dir():
     assert m.obs_plugins_dir("aarch64") == "/usr/lib/aarch64-linux-gnu/obs-plugins"
     assert m.obs_plugins_dir("x86_64") == "/usr/lib/x86_64-linux-gnu/obs-plugins"
@@ -94,9 +94,9 @@ def t_browser_plugin_installed():
 
 
 def t_browser_plugin_installed_uses_forward_slash():
-    # the OBS plugins dir is a fixed-OS Linux path — the lookup must use '/',
+    # The OBS plugins dir is a fixed-OS Linux path, so the lookup must use '/',
     # never os.path.join (which injects '\\' on the Windows CI runner). Capture
-    # the exact path queried so this regression is caught on any OS, not just Windows.
+    # the exact path queried so this is caught on any OS, not just Windows.
     seen = []
     m.browser_plugin_installed("/usr/lib/aarch64-linux-gnu/obs-plugins",
                                exists=lambda p: seen.append(p) or False)
@@ -108,7 +108,7 @@ def t_browser_plugin_installed_uses_forward_slash():
     assert seen == ["/usr/lib/aarch64-linux-gnu/obs-plugins/obs-browser.so"]
 
 
-# --- the install-apps pointer --------------------------------------------
+# The install-apps pointer.
 def t_install_hint_only_when_missing_on_supported_arch():
     # OBS present, browser missing, supported arch -> a pointer is shown
     hint = m.install_hint("aarch64", obs_present=True, browser_present=False)
@@ -123,14 +123,14 @@ def t_install_hint_only_when_missing_on_supported_arch():
 
 def t_pacman_hosts_get_the_package_not_a_source_build():
     # This command is an apt/dpkg path end to end (BUILD_APT_DEPS, dpkg-query).
-    # On Arch it used to fail as "OBS Studio not detected" even with OBS running,
-    # because dpkg-query isn't there — while the real fix is a package swap.
+    # Arch has no dpkg-query, so probing it there reports "OBS Studio not
+    # detected" even with OBS running; the real fix there is a package swap.
     note = m.pacman_redirect_note(has_pacman=True, has_apt=False)
     assert note and m.PACMAN_BROWSER_PACKAGE in note
     assert "pacman -S" in note
     assert "apt" not in note.lower().replace("adapt", "")   # no apt advice on Arch
     # Debian/Ubuntu (the intended audience) are untouched, and so is a box that
-    # carries both — apt wins there, exactly like install_tools.pick_manager.
+    # carries both, where apt wins exactly like install_tools.pick_manager.
     assert m.pacman_redirect_note(has_pacman=False, has_apt=True) is None
     assert m.pacman_redirect_note(has_pacman=True, has_apt=True) is None
     assert m.pacman_redirect_note(has_pacman=False, has_apt=False) is None
@@ -138,8 +138,8 @@ def t_pacman_hosts_get_the_package_not_a_source_build():
 
 def t_browser_plugin_found_in_the_non_multiarch_dir_too():
     # Debian puts OBS plugins under a multiarch triplet; Arch uses a plain
-    # /usr/lib/obs-plugins. Checking only the Debian path made install-apps
-    # report "no Browser Source" on a machine that had one.
+    # /usr/lib/obs-plugins, so checking only the Debian path reports "no Browser
+    # Source" on a machine that has one.
     dirs = m.obs_plugins_dirs("x86_64")
     assert "/usr/lib/x86_64-linux-gnu/obs-plugins" in dirs
     assert "/usr/lib/obs-plugins" in dirs
@@ -148,7 +148,7 @@ def t_browser_plugin_found_in_the_non_multiarch_dir_too():
     assert m.browser_plugin_present(dirs, exists=lambda p: False) is False
 
 
-# --- the PROJECT_ARCH fix is encoded in the CEF wrapper configure ---------
+# The PROJECT_ARCH fix is encoded in the CEF wrapper configure.
 def t_cef_configure_argv_sets_project_arch_on_aarch64():
     argv = m.cef_configure_argv("/src/cef", "/src/cef/build", "aarch64")
     assert "-DPROJECT_ARCH=arm64" in argv     # CEF cmake reads 'arm64', not 'aarch64'
@@ -158,7 +158,7 @@ def t_cef_configure_argv_sets_project_arch_on_aarch64():
     assert not any("PROJECT_ARCH=arm64" in a for a in argv64)
 
 
-# --- no-GPU / VM: BrowserHWAccel guidance + global.ini transform ----------
+# No-GPU and VM hosts: the BrowserHWAccel guidance and global.ini transform.
 def t_hwaccel_note_mentions_setting():
     note = m.browser_hwaccel_note()
     assert "BrowserHWAccel" in note

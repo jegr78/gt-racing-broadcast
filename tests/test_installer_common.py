@@ -125,7 +125,7 @@ def _capture_request(fn_name, *args):
 def t_install_remote_deb_sends_user_agent():
     # Discord's /api/download returns HTTP 403 to the default python-urllib
     # User-Agent; the vendor .deb fetch must carry a real one (any non-urllib UA
-    # works). Regression for install-apps failing on Linux.
+    # works).
     rc, req, cmd, call_kw = _capture_request(
         "install_remote_deb", "https://discord.com/api/download?platform=linux&format=deb")
     assert rc == 0

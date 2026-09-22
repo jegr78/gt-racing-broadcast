@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stdlib unit checks for the free-text event title (issue #207).
+"""Stdlib unit checks for the free-text event title. (#207)
 Run: python3 tests/test_event_title.py
 
 Covers the pure sanitizer, the EventTitleStore persistence + precedence
@@ -27,7 +27,7 @@ m = _load("irofeeds", ("src", "relay", "racecast-feeds.py"))
 SECRET = "sek"
 
 
-# ---- pure sanitizer ---------------------------------------------------------
+# The pure sanitizer.
 
 def t_sanitize_trims_and_passes_normal_text():
     assert m.sanitize_event_title("  GTEC - 2026 - Round 4  ") == "GTEC - 2026 - Round 4"
@@ -38,7 +38,7 @@ def t_sanitize_keeps_unicode():
 
 
 def t_sanitize_strips_control_chars():
-    # newlines/tabs/etc. collapse out — a title is one line.
+    # newlines, tabs and the rest collapse out; a title is one line.
     assert m.sanitize_event_title("Round\n4\tNürburgring\r") == "Round4Nürburgring"
 
 
@@ -53,7 +53,7 @@ def t_sanitize_none_and_nonstr_become_empty():
     assert m.sanitize_event_title("   ") == ""
 
 
-# ---- EventTitleStore --------------------------------------------------------
+# EventTitleStore.
 
 def t_store_uses_default_when_no_file():
     with tempfile.TemporaryDirectory() as d:
@@ -87,7 +87,7 @@ def t_store_file_present_overrides_default():
 
 
 def t_store_empty_file_title_overrides_default():
-    # A producer who cleared the title (file with "") wins over the env default —
+    # A producer who cleared the title (file with "") wins over the env default;
     # the live file is the source of truth once it exists.
     with tempfile.TemporaryDirectory() as d:
         path = os.path.join(d, "event.json")
@@ -106,7 +106,7 @@ def t_store_corrupt_file_falls_back_to_default():
         assert st.get() == "From env"
 
 
-# ---- live HTTP surface ------------------------------------------------------
+# The live HTTP surface.
 
 def _client(event_default="", event_title=None, rows=None):
     """make_handler over a real server with an EventTitleStore + a minimal relay

@@ -25,7 +25,7 @@ def t_parse_probe_posix_uses_returncode():
 
 
 def t_parse_probe_windows_matches_stdout():
-    # tasklist exits 0 even when nothing matches — only the output counts.
+    # tasklist exits 0 even when nothing matches, so only the output counts.
     assert m.parse_probe("win32", 0, "obs64.exe   1234 Console", "obs64.exe") is True
     assert m.parse_probe("win32", 0, "INFO: No tasks are running...", "obs64.exe") is False
     assert m.parse_probe("win32", 0, "OBS64.EXE 1", "obs64.exe") is True  # case-insensitive
@@ -80,7 +80,7 @@ def t_launch_command_linux():
     assert m.launch_command("obs", "linux", which=lambda n: "/usr/bin/obs") == \
         (["/usr/bin/obs"], None)
     assert m.launch_command("discord", "linux", which=lambda n: None) is None
-    # tailscale on Linux is a daemon — nothing to exec, hint instead.
+    # tailscale on Linux is a daemon, so there is nothing to exec; hint instead.
     assert m.launch_command("tailscale", "linux") is None
     assert m.launch_command("companion", "linux") is None   # not a PATH-launched app
 
@@ -279,9 +279,7 @@ def t_quit_command_unknown_app():
     assert m.quit_command("companion", "darwin") is None      # own stop path
 
 
-# --------------------------------------------------------------------------
-# OBS scene-collection readiness line
-# --------------------------------------------------------------------------
+# The OBS scene-collection readiness line.
 def t_classify_scene_collection_skipped_when_status_none():
     r = m.classify_scene_collection(None, "OBS WebSocket not reachable")
     assert r.level == m.WARN
@@ -326,9 +324,9 @@ def t_classify_scene_collection_absent_warns_import():
 
 
 def t_classify_scene_collection_overlap_prefers_switch_over_manual():
-    # expected_present must win over renamed_variant — the real collection is
-    # present, so the actionable advice is `racecast obs collection set`, matching
-    # the CLI and the Control Center.
+    # expected_present must win over renamed_variant: the real collection is
+    # present, so the advice is `racecast obs collection set`, matching the CLI
+    # and the Control Center.
     status = {"current": "GT Racing Endurance 2", "expected": "GT Racing Endurance",
               "available": ["GT Racing Endurance", "GT Racing Endurance 2"], "match": False,
               "expected_present": True, "renamed_variant": "GT Racing Endurance 2"}
@@ -385,7 +383,7 @@ def t_launch_env_noop_non_gui():
     assert m.launch_env("tailscale", "linux", {"HOME": "/h"}) == {}
 
 
-# --- session runtime dir: PipeWire audio + the Discord IPC socket live there ----------
+# The session runtime dir, where PipeWire audio and the Discord IPC socket live.
 # A GUI app started over SSH without XDG_RUNTIME_DIR cannot reach PipeWire (its socket is
 # $XDG_RUNTIME_DIR/pipewire-0), so OBS' Application Audio Capture silently fails to create
 # and racecast's Discord voice auto-join finds no IPC endpoint. Both fail without an error
@@ -418,7 +416,7 @@ def t_launch_env_keeps_inherited_runtime_dir():
 
 
 def t_launch_env_xauthority_from_runtime_dir():
-    # SDDM/GDM keep the X cookie in the runtime dir, NOT in ~/.Xauthority — without
+    # SDDM/GDM keep the X cookie in the runtime dir, NOT in ~/.Xauthority. Without
     # this fall-back OBS does not start at all over SSH on a KDE/GNOME box.
     seen = []
 
@@ -449,8 +447,8 @@ def t_launch_env_no_runtime_dir_at_all():
 
 
 def t_launch_env_builds_linux_paths_with_forward_slashes():
-    # CLAUDE cross-platform rule: these are fixed-OS Linux paths, so they must never
-    # be assembled with os.path.join (backslashes on the Windows CI runner).
+    # These are fixed-OS Linux paths, so they must never be assembled with
+    # os.path.join (backslashes on the Windows CI runner).
     out = m.launch_env("obs", "linux", {"HOME": "/h"},
                        exists=lambda p: p in ("/run/user/1000", "/run/user/1000/bus"),
                        uid=1000, glob_paths=lambda pat: [])

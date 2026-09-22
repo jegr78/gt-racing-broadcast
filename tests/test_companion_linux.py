@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))
 import companion_linux as cl
 
 
-# --- is_valid_bind_ip --------------------------------------------------------
+# is_valid_bind_ip.
 def t_valid_ipv4():
     assert cl.is_valid_bind_ip("100.64.10.20") is True
     assert cl.is_valid_bind_ip("127.0.0.1") is True
@@ -26,7 +26,7 @@ def t_invalid_ip_rejected():
     assert cl.is_valid_bind_ip("") is False
 
 
-# --- bind_env_content --------------------------------------------------------
+# bind_env_content.
 def t_bind_env_content_writes_var():
     assert cl.bind_env_content("100.64.10.20") == "RACECAST_ADMIN_ADDRESS=100.64.10.20\n"
 
@@ -40,7 +40,7 @@ def t_bind_env_content_rejects_bad_ip():
     assert raised
 
 
-# --- bind_dropin_content -----------------------------------------------------
+# bind_dropin_content.
 def t_dropin_resets_and_sets_execstart_with_admin_address():
     c = cl.bind_dropin_content()
     assert "[Service]\n" in c
@@ -51,7 +51,7 @@ def t_dropin_resets_and_sets_execstart_with_admin_address():
     assert "--extra-module-path /opt/companion-module-dev" in c
 
 
-# --- sudoers_dropin_content --------------------------------------------------
+# sudoers_dropin_content.
 def t_sudoers_content_narrow_nopasswd():
     c = cl.sudoers_dropin_content("jegr", "/usr/bin/systemctl")
     assert c.endswith(
@@ -59,7 +59,7 @@ def t_sudoers_content_narrow_nopasswd():
         "/usr/bin/systemctl stop companion\n")
 
 
-# --- bind_helper_content -----------------------------------------------------
+# bind_helper_content.
 def t_helper_validates_and_restarts():
     c = cl.bind_helper_content()
     assert c.startswith("#!/bin/bash\n")
@@ -78,7 +78,7 @@ def t_helper_ipv6_branch_requires_colon():
     assert ":[0-9A-Fa-f:]" in c             # a colon is now required in the IPv6 branch
 
 
-# --- control_commands --------------------------------------------------------
+# control_commands.
 def t_control_commands_shape():
     c = cl.control_commands("companion")
     assert c["start"] == ["sudo", "-n", cl.HELPER_PATH]      # caller appends the ip
@@ -86,7 +86,7 @@ def t_control_commands_shape():
     assert c["running"] == ["systemctl", "is-active", "companion"]
 
 
-# --- detect_unit -------------------------------------------------------------
+# detect_unit.
 def t_detect_unit_none_on_windows_or_macos():
     assert cl.detect_unit(platform="win32") is None
     assert cl.detect_unit(platform="darwin") is None
@@ -120,7 +120,7 @@ def t_detect_unit_none_when_absent():
                           run=lambda *a, **k: P(), exists=lambda p: False) is None
 
 
-# --- is_enabled (idempotency) ------------------------------------------------
+# is_enabled, and its idempotency.
 def _reader_for(files):
     return files.get
 
@@ -147,7 +147,7 @@ def t_is_enabled_false_when_sudoers_user_differs():
     assert cl.is_enabled(_reader_for(files), "jegr", "/usr/bin/systemctl") is False
 
 
-# --- enable_control ----------------------------------------------------------
+# enable_control.
 class _FakeRun:
     """Records argv and returns a scripted returncode per matched command."""
     def __init__(self, rc_for=None):
@@ -239,12 +239,12 @@ def t_enable_control_visudo_failure_aborts_with_no_installs():
     assert not any("daemon-reload" in c for c in cmds)
 
 
-# --- frozen-binary env scrubbing for the bare `systemctl` calls --------------
-# The default run must hand subprocess.run the de-PyInstaller'd env: under the
-# frozen binary a bare `systemctl` (is-active / cat — the non-sudo ones) would
-# otherwise inherit _MEIPASS on LD_LIBRARY_PATH, load our bundled libcrypto, and
-# exit non-zero ("OPENSSL_x.y.z not found"), so enable-control rolls back a
-# service that actually started and `companion status` reports a false "stopped".
+# Frozen-binary env scrubbing for the bare `systemctl` calls. The default run
+# must hand subprocess.run the de-PyInstaller'd env: under the frozen binary a
+# bare `systemctl` (is-active and cat, the non-sudo ones) would otherwise inherit
+# _MEIPASS on LD_LIBRARY_PATH, load our bundled libcrypto and exit non-zero
+# ("OPENSSL_x.y.z not found"), so enable-control rolls back a service that
+# actually started and `companion status` reports a false "stopped".
 class _RecordingSub:
     def __init__(self):
         self.calls = []
