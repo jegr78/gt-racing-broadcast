@@ -34,8 +34,8 @@ def t_links():
 
 
 def t_autolink_angle_brackets():
-    # The bundled operator docs link via <https://...> (Markdown autolinks), which
-    # must become a clickable anchor — not show the literal &lt;...&gt; text (#48).
+    # The bundled operator docs link via <https://...> autolinks, which must become a
+    # clickable anchor rather than literal &lt;...&gt; text. (#48)
     h = md.render("Open <https://example.com/wiki/Run-an-event> now.")
     assert ('<a href="https://example.com/wiki/Run-an-event" target="_blank" '
             'rel="noopener">https://example.com/wiki/Run-an-event</a>') in h
@@ -123,9 +123,8 @@ def t_page_is_self_contained():
 
 
 def t_renders_real_docs_without_crashing():
-    # the actual bundled docs (wiki-pointer stubs) must render cleanly — a
-    # heading and a list, with no leftover code placeholders. Table rendering is
-    # covered by the t_table_* tests above.
+    # The bundled docs must render cleanly: a heading, a list and no leftover code
+    # placeholders.
     for rel in ("docs/README_SETUP.md", "docs/Broadcast_Setup_Guide.md"):
         with open(os.path.join(ROOT, "src", rel), encoding="utf-8") as fh:
             h = md.render(fh.read())

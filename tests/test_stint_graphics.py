@@ -2,9 +2,9 @@
 """Structural guard for the 12 added Stint full-page graphics (info + grid).
 Run: python3 tests/test_stint_graphics.py
 
-Asserts the three hardcoded surfaces agree on the exact scene/source strings:
-OBS collection (this task), Director Panel (Task 2), Companion (Task 3). A
-name-drift between them fails silently in production, so it is pinned here."""
+Asserts the three hardcoded surfaces agree on the exact scene/source strings: the
+OBS collection, the Director Panel and Companion. A name drift between them fails
+silently in production, so it is pinned here."""
 import json
 import os
 
@@ -59,12 +59,10 @@ def t_obs_stint_scene_items_present():
 def t_panel_lists_new_graphics():
     with open(PANEL, encoding="utf-8") as fh:
         html = fh.read()
-    # Two new config arrays + two new bus containers exist.
     assert "graphicsPreRace" in html, "missing CONFIG.graphicsPreRace"
     assert "graphicsGrid" in html, "missing CONFIG.graphicsGrid"
     assert 'id="gfxPreRaceBus"' in html
     assert 'id="gfxGridBus"' in html
-    # Every new source is wired with scene:"Stint" in a CONFIG entry.
     for label in NEW_GRAPHICS:
         assert f'source:"{label}"' in html, f"panel missing source: {label}"
 
@@ -89,10 +87,9 @@ def t_companion_toggles_new_graphics():
     walk(cfg)
     for label in NEW_GRAPHICS:
         assert label in toggled, f"companion missing toggle for: {label}"
-    # Page 1 is a hardware-clean 8x4 — no unreachable 5th row. The info + grid
-    # graphics moved onto the dedicated graphics page (see Director.md).
+    # Page 1 is 8x4, so a 5th row would be unreachable; the info and grid graphics
+    # live on the dedicated graphics page instead.
     assert cfg["pages"]["1"]["gridSize"]["maxRow"] <= 3
-    # The grid/info toggles live on a page that advertises the graphics section.
     names = [(p.get("name") or "").upper() for p in cfg["pages"].values()]
     assert any("GRAPHIC" in n for n in names), f"no graphics page (pages: {names})"
 

@@ -58,10 +58,8 @@ def t_companion_has_trailer_button():
 
 
 def t_companion_red_flag_on_reachable_row():
-    # RED FLAG vacated PAGE 1 slot 0/7 (now TRAILER). It moved onto slot 1/7
-    # (replacing the low-value Feeds Status) so it sits on a hardware-reachable
-    # row — a Stream Deck XL is 8x4, so the old 4/3 slot lived on an unreachable
-    # 5th row. Verify the relocation and that it kept its two-step toggle.
+    # RED FLAG sits at page 1 slot 1/7 because a Stream Deck XL is 8x4, so its old
+    # 4/3 slot lived on an unreachable 5th row. TRAILER took the vacated 0/7.
     cfg = json.loads(_read(os.path.join("src", "companion", "racecast-buttons.companionconfig")))
     controls = cfg["pages"]["1"]["controls"]
     assert controls["0"]["7"]["style"]["text"] == "TRAILER", "slot 0/7 should now be TRAILER"

@@ -91,7 +91,7 @@ def t_device_localize_env_none_is_safe():
     assert sorted(sa.localize_device_sources(c, "darwin", None)) == ["Solo Capture Device", "Solo Webcam Device"]
 
 
-# --- Structural checks on the two committed solo templates (#303) ---
+# Structural checks on the two committed solo templates.
 
 SOLO_FILES = ("GT_Racing_Solo_Commentary.json", "GT_Racing_Solo_POV.json")
 
@@ -137,9 +137,9 @@ def t_program_scene_references_device_scenes_and_pov():
 
 
 def t_solo_templates_scene_and_source_references_resolve():
-    """Every scene item's source_uuid resolves to a real source, and scene_order /
-    current_scene name real scenes — the importability integrity the committed file
-    must guarantee (OBS resolves references by uuid)."""
+    """Every scene item's source_uuid resolves to a real source, and scene_order and
+    current_scene name real scenes. OBS resolves references by uuid, so the committed
+    file must guarantee this to stay importable."""
     for fn in SOLO_FILES:
         d = _load_solo(fn)
         uuids = {s.get("uuid") for s in d["sources"]}
@@ -158,12 +158,10 @@ def t_solo_templates_scene_and_source_references_resolve():
 
 def t_localize_preserves_solo_scenes():
     """setup-assets.localize_device_sources must localize the device LEAF sources
-    (id/settings -> per-OS device) while leaving the distinctly-named wrapping SCENES
-    intact (still id=='scene' with their items). Scene and leaf are named distinctly
-    ("Solo Capture" scene vs "Solo Capture Device" leaf, mirroring the Discord
-    precedent), so the by-name lookup in localize_device_sources can never collide
-    them — no ordering contract required. Covers the video (capture/webcam) AND
-    audio (commentary mic, #307) device leaves."""
+    (id/settings -> per-OS device) while leaving the wrapping SCENES intact. Scene
+    and leaf carry distinct names ("Solo Capture" scene vs "Solo Capture Device"
+    leaf), so the by-name lookup can never collide them and no ordering contract is
+    needed. Covers the video (capture/webcam) and audio (mic) device leaves."""
     d = _load_solo("GT_Racing_Solo_Commentary.json")
     unset = sa.localize_device_sources(
         d, "darwin", {"RACECAST_CAPTURE": "CAPDEV", "RACECAST_WEBCAM": "CAMDEV",
@@ -201,12 +199,10 @@ def t_solo_templates_device_leaves_are_distinctly_named():
 
 
 def t_solo_templates_have_own_name_and_no_splitscreen_leftovers():
-    """#304: the derived collections carry their own display name (not the inherited
-    endurance one -- setup-assets overrides it at localize time, but the committed
-    artifact should already be self-consistent) and no orphaned Splitscreen-only
-    leftovers (the Splitscreen scene itself was already dropped in #303, but the
-    derive script only pruned `sources`, leaving the `Split HUD` group and the
-    `Splitscreen Labels` leaf source behind)."""
+    """The derived collections carry their own display name rather than the inherited
+    endurance one, and no orphaned Splitscreen-only leftovers. setup-assets overrides
+    the name at localize time anyway, but the committed artifact must already be
+    self-consistent. (#304)"""
     for fn in SOLO_FILES:
         d = _load_solo(fn)
         assert d["name"] == "GT Racing Solo", fn
@@ -220,7 +216,7 @@ def t_solo_templates_no_scene_source_name_collision():
     """Collision guard: no source `name` is shared between a scene and a non-scene
     source. "Solo Capture"/"Solo Webcam" must each resolve to exactly one scene, and
     the device leaves ("Solo Capture Device"/"Solo Webcam Device") must not collide
-    with any scene name — the bug this fix removes."""
+    with any scene name."""
     for fn in SOLO_FILES:
         d = _load_solo(fn)
         scene_names = [s.get("name") for s in d["sources"] if s.get("id") == "scene"]
@@ -231,10 +227,10 @@ def t_solo_templates_no_scene_source_name_collision():
 
 
 def t_solo_templates_have_commentary_mic_scene():
-    """#307: both solo templates carry a "Commentary Mic" scene wrapping the
-    distinctly-named "Commentary Mic Device" leaf (macOS coreaudio_input_capture
-    form, tokenized __RACECAST_MIC__), included as a nested-scene item in exactly
-    Program/Interview/Standby/Intermission/Discord — never Intro/Outro."""
+    """Both solo templates carry a "Commentary Mic" scene wrapping the distinctly
+    named "Commentary Mic Device" leaf (macOS coreaudio_input_capture form, tokenized
+    __RACECAST_MIC__), included as a nested-scene item in exactly
+    Program/Interview/Standby/Intermission/Discord and never Intro/Outro. (#307)"""
     for fn in SOLO_FILES:
         d = _load_solo(fn)
         by = _byname_map(d)
@@ -260,8 +256,8 @@ def t_solo_templates_have_commentary_mic_scene():
 
 
 def t_solo_templates_regeneration_is_deterministic():
-    """Running the derive script twice must yield byte-identical output — the
-    #303/#307 no-uuid4()/no-timestamp determinism contract."""
+    """Running the derive script twice must yield byte-identical output: the derive
+    script uses no uuid4() and no timestamp."""
     import importlib.util
     spec = importlib.util.spec_from_file_location(
         "derive_solo_templates", os.path.join(ROOT, "tools", "derive-solo-templates.py"))
@@ -273,11 +269,9 @@ def t_solo_templates_regeneration_is_deterministic():
 
 
 def t_committed_solo_json_matches_derive_output():
-    """The committed solo collections MUST equal a fresh derive() — they are
-    generated, never hand-edited (a hand-edit would be silently dropped by the
-    next `derive-solo-templates.py` run). Commentary carries the tyres/fuel
-    crop; POV does not. Guards the regen-safety of every solo-template
-    change (#307 / commentary HUD)."""
+    """The committed solo collections MUST equal a fresh derive(): they are generated,
+    and a hand-edit would be dropped by the next `derive-solo-templates.py` run.
+    Commentary carries the tyres/fuel crop, POV does not."""
     import importlib.util
     spec = importlib.util.spec_from_file_location(
         "derive_solo_templates", os.path.join(ROOT, "tools", "derive-solo-templates.py"))
@@ -295,7 +289,7 @@ def _byname_map(d):
     return {s.get("name"): s for s in d["sources"]}
 
 
-# --- #307: audio (mic) device localization ---
+# Audio (mic) device localization. (#307)
 
 def _mic_coll():
     return {"sources": [
@@ -358,11 +352,10 @@ def t_seed_committed_graphics_fills_only_missing():
 
 
 def t_solo_program_scene_item_ids_unique():
-    """#324 review: each solo-ADDED Program item (Solo Capture/Webcam/Mic/Tyres)
-    takes a genuinely-free scene-item id — unique among itself and NOT colliding
-    with any other Program item. (The base Program items inherited from the Stint
-    scene carry their own pre-existing duplicates from the shipping endurance
-    collection; those are out of scope — we only guard the solo additions.)"""
+    """Each solo-ADDED Program item (Solo Capture/Webcam/Mic/Tyres) takes a genuinely
+    free scene-item id: unique among itself and not colliding with any other Program
+    item. The base Program items inherited from the Stint scene carry their own
+    duplicates from the shipping endurance collection and are out of scope. (#324)"""
     solo_names = {"Solo Capture", "Solo Webcam", "Commentary Mic", "Solo Tyres/Fuel Capture"}
     for fn in ("GT_Racing_Solo_Commentary.json", "GT_Racing_Solo_POV.json"):
         with open(os.path.join(ROOT, "src", "obs", fn), encoding="utf-8") as fh:
@@ -416,18 +409,18 @@ def t_seed_committed_graphics_no_profile_dir_is_noop():
 
 def t_audio_variants_cross_check_obs_ws_audio_property():
     """AUDIO_VARIANTS' settings-key must agree with obs_ws's audio device property
-    name on every platform — enumeration writes into the same field localization
-    later reads (mirrors the existing video DEVICE_VARIANTS cross-check)."""
+    name on every platform, because enumeration writes into the same field
+    localization later reads."""
     obs_ws = _load("obs_ws", "src", "scripts", "obs_ws.py")
     for platform, (_src_id, key) in sa.AUDIO_VARIANTS.items():
         assert key == obs_ws.device_property_name(platform, kind="audio") == "device_id", platform
 
 
 
-# ---- One capture card for game + tyres/fuel crop (#597). OBS cannot open the same
+# One capture card for the game and the tyres/fuel crop. OBS cannot open the same
 # DirectShow device twice on Windows, so an empty RACECAST_TYRES_CAPTURE, or one equal
 # to RACECAST_CAPTURE, must make the tyres/fuel crop reuse the Solo Capture Device
-# source instead of creating a second input on the same card.
+# source instead of creating a second input on the same card. (#597)
 
 def _video_leaves(d):
     return [s for s in d["sources"] if s.get("id") in ("av_capture_input", "dshow_input")]

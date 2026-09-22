@@ -9,7 +9,6 @@ spec = importlib.util.spec_from_file_location(
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 
 
-# --- parse_version ------------------------------------------------------------
 def t_parse_version_good():
     assert m.parse_version("v0.1.0") == (0, 1, 0)
     assert m.parse_version("v12.34.56") == (12, 34, 56)
@@ -20,7 +19,6 @@ def t_parse_version_bad():
         assert m.parse_version(bad) is None, bad
 
 
-# --- asset_name ----------------------------------------------------------------
 def t_asset_name_per_platform():
     assert m.asset_name("win32") == "racecast-windows.zip"
     assert m.asset_name("darwin") == "racecast-macos.tar.gz"
@@ -31,7 +29,6 @@ def t_asset_name_per_platform():
     assert m.asset_name("linux", "arm64") == "racecast-linux-arm64.tar.gz"
 
 
-# --- classify: the whole decision in one pure function --------------------------
 REL = {"tag_name": "v0.2.0",
        "assets": [{"name": "racecast-macos.tar.gz", "browser_download_url": "https://x/m"},
                   {"name": "racecast-windows.zip", "browser_download_url": "https://x/w"}]}
@@ -76,7 +73,6 @@ def t_classify_bad_tag_is_error():
     assert m.classify({"tag_name": "nightly", "assets": []}, "darwin", "v0.1.0")[0] == "error"
 
 
-# --- swap_plan -------------------------------------------------------------------
 def t_swap_plan_posix_inplace():
     assert m.swap_plan("darwin", "/app/racecast", "/tmp/new/racecast") == \
         [("replace", "/tmp/new/racecast", "/app/racecast"), ("chmod", "/app/racecast")]
@@ -89,7 +85,6 @@ def t_swap_plan_windows_rename_trick():
                     ("move", r"C:\tmp\racecast.exe", r"C:\racecast\racecast.exe")]
 
 
-# --- safe_member: archive extraction guard ----------------------------------------
 def t_safe_member():
     assert m.safe_member("racecast") and m.safe_member(".env.example")
     assert m.safe_member("sub/racecast")
@@ -100,7 +95,6 @@ def t_safe_member():
     assert not m.safe_member("")
 
 
-# --- fetch_latest: parsing with an injected opener ---------------------------------
 def t_fetch_latest_parses_json():
     import io, json
     body = json.dumps(REL).encode()
@@ -108,14 +102,13 @@ def t_fetch_latest_parses_json():
     assert rel["tag_name"] == "v0.2.0"
 
 
-# --- ui_asset_name: the racecast-ui artifact name in the archive, per platform -----------
 def t_ui_asset_name_per_platform():
     assert m.ui_asset_name("win32") == "racecast-ui.exe"
     assert m.ui_asset_name("darwin") == "racecast-ui.app"
     assert m.ui_asset_name("linux") == "racecast-ui"
 
 
-# --- install_ui: place the sibling racecast-ui next to the racecast binary ----------
+# install_ui places the sibling racecast-ui next to the racecast binary.
 def _write(path, text):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
@@ -168,13 +161,10 @@ def t_ui_old_path_naming():
 
 
 def t_install_ui_renames_locked_running_exe_aside_on_windows():
-    # The GUI launcher is RUNNING when it self-updates (the Control Center fires
-    # the update), so on Windows racecast-ui.exe is locked against deletion.
-    # install_ui must rename it aside (racecast-ui-old.exe) instead of failing —
-    # the same trick swap_plan uses for racecast-old.exe; cleanup_old_binary
-    # removes it on the next launch. (Previously the locked remove raised and the
-    # caller swallowed it best-effort, so the UI was never updated — issue: the
-    # in-app preview/update silently left the old racecast-ui.exe in place.)
+    # The GUI launcher is RUNNING when it self-updates, so on Windows racecast-ui.exe
+    # is locked against deletion. install_ui must rename it aside to
+    # racecast-ui-old.exe instead of failing, the same trick swap_plan uses for
+    # racecast-old.exe; cleanup_old_binary removes it on the next launch.
     import tempfile
     with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as tgt:
         _write(os.path.join(src, "racecast-ui.exe"), "new")
@@ -194,8 +184,8 @@ def t_install_ui_renames_locked_running_exe_aside_on_windows():
 
 
 def t_install_ui_non_windows_remove_failure_propagates():
-    # POSIX can unlink a running binary, so a remove failure there is a real
-    # error — don't paper over it with a Windows-only rename.
+    # POSIX can unlink a running binary, so a remove failure there is a real error
+    # and must not be papered over with the Windows-only rename.
     import tempfile
     with tempfile.TemporaryDirectory() as src, tempfile.TemporaryDirectory() as tgt:
         _write(os.path.join(src, "racecast-ui"), "new")
@@ -212,7 +202,7 @@ def t_install_ui_non_windows_remove_failure_propagates():
         assert raised, "expected the OSError to propagate on non-Windows"
 
 
-# --- classify_tag: install exactly one named release (no semver compare) -------
+# classify_tag installs exactly one named release, with no semver compare.
 TAGREL = {"tag_name": "preview-pr-42",
           "assets": [{"name": "racecast-macos.tar.gz", "browser_download_url": "https://x/m"},
                      {"name": "racecast-windows.zip", "browser_download_url": "https://x/w"}]}
@@ -231,7 +221,6 @@ def t_classify_tag_error_on_missing_tag():
     assert m.classify_tag({"assets": []}, "darwin") == ("error", "release has no tag_name", None)
 
 
-# --- fetch_release_by_tag: parsing with an injected opener -------------------------
 def t_fetch_release_by_tag_parses_json():
     import io, json
     body = json.dumps(TAGREL).encode()
@@ -239,7 +228,7 @@ def t_fetch_release_by_tag_parses_json():
     assert rel["tag_name"] == "preview-pr-42"
 
 
-# --- classify_prereleases: the UI's installable-previews list ------------------
+# classify_prereleases builds the UI's installable-previews list.
 RELEASES = [
     {"tag_name": "v1.2.2", "prerelease": False, "name": "1.2.2",
      "assets": [{"name": "racecast-macos.tar.gz", "browser_download_url": "https://x/stable"}]},
@@ -249,7 +238,7 @@ RELEASES = [
      "assets": [{"name": "racecast-macos.tar.gz", "browser_download_url": "https://x/p42"}]},
     {"tag_name": "preview-main", "prerelease": True, "name": "Preview: main (deadbee)",
      "target_commitish": "", "published_at": "2026-06-09T08:00:00Z", "body": "notes main",
-     "assets": []},   # still building — no platform asset yet
+     "assets": []},   # still building, no platform asset yet
 ]
 
 
@@ -290,9 +279,9 @@ def t_classify_prereleases_empty():
 
 
 def t_commit_of_rejects_branch_name_target_commitish():
-    # GitHub sets target_commitish to a branch name (e.g. 'main') for
-    # branch-targeted releases — that is not a commit SHA. Fall back to the
-    # SHA embedded in the name instead of showing 'main' as the commit.
+    # GitHub sets target_commitish to a branch name for branch-targeted releases,
+    # which is not a commit SHA. Fall back to the SHA embedded in the name instead
+    # of showing 'main' as the commit.
     rel = {"target_commitish": "main", "name": "preview-main-cafe123",
            "tag_name": "preview-main"}
     assert m._commit_of(rel) == "cafe123"
@@ -311,8 +300,6 @@ def t_find_asset_url():
     assert m._find_asset_url(rel, "win32") == "https://x/w"
     assert m._find_asset_url(rel, "linux") is None
 
-
-# ---------- download integrity verification (#2) ------------------------------
 
 def t_expected_digest_reads_sha256():
     rel = {"assets": [{"name": "racecast-macos.tar.gz", "digest": "sha256:" + "a" * 64},
@@ -349,7 +336,7 @@ def t_download_rejects_non_https():
     assert raised
 
 
-# --- extraction hardening (#99): symlink members + decompression caps ---------
+# Extraction hardening: symlink members and decompression caps. (#99)
 def _raises_value_error(fn):
     try:
         fn()

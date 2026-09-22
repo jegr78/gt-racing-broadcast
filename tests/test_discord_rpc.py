@@ -172,7 +172,7 @@ def t_client_join_returns_false_on_closed_socket():
 
 def t_client_autojoin_no_consent_skips_authorize():
     # allow_consent=False (auto-join): with no cached token, join must NOT open the
-    # interactive AUTHORIZE popup — it returns (False, note) and posts nothing.
+    # interactive AUTHORIZE popup. It returns (False, note) and posts nothing.
     import tempfile
     path = os.path.join(tempfile.mkdtemp(), "tok.json")   # empty cache
     conn = _fake_conn([(m.OP_FRAME, {"evt": "READY", "data": {}})])   # only handshake is read
@@ -190,7 +190,7 @@ def t_client_autojoin_no_consent_skips_authorize():
 
 def t_client_read_frame_times_out_instead_of_hanging():
     # A Discord that accepts the socket but never answers must not hang: the read is
-    # bounded (watchdog for a pipe-like conn), so join returns (False, note).
+    # bounded by a watchdog for a pipe-like conn, so join returns (False, note).
     import tempfile
     import threading as _t
     path = os.path.join(tempfile.mkdtemp(), "tok.json")
@@ -211,8 +211,8 @@ def t_client_read_frame_times_out_instead_of_hanging():
 
 def t_client_authorize_error_surfaces_message_not_code():
     # If AUTHORIZE returns an ERROR frame (e.g. invalid_scope because the logged-in
-    # account is not an App Tester), the numeric RPC error code must NOT be mis-sent
-    # to the token endpoint. The join fails with Discord's message, and nothing is POSTed.
+    # account is not an App Tester), the numeric RPC error code must NOT be sent to
+    # the token endpoint. The join fails with Discord's message and posts nothing.
     import tempfile
     path = os.path.join(tempfile.mkdtemp(), "tok.json")   # empty cache -> reaches AUTHORIZE
     script = [(m.OP_FRAME, {"evt": "READY", "data": {}}),
@@ -232,9 +232,9 @@ def t_client_authorize_error_surfaces_message_not_code():
 
 def t_default_post_form_surfaces_discord_error_body():
     # A 400 from Discord's token endpoint must surface the response body's reason
-    # (e.g. a missing http://localhost redirect, or a bad client secret) instead of
-    # a bare "HTTP Error 400: Bad Request" — the detail is what tells the operator
-    # how to fix it. The client secret is never echoed by Discord, so this is safe.
+    # (e.g. a missing http://localhost redirect, or a bad client secret) instead of a
+    # bare "HTTP Error 400: Bad Request", which tells the operator nothing. Discord
+    # never echoes the client secret, so surfacing the body is safe.
     import io, urllib.error
     body = (b'{"error":"invalid_request",'
             b'"error_description":"Invalid \\"redirect_uri\\" in request."}')

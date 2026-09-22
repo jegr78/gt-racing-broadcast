@@ -23,7 +23,7 @@ class FakeProc:
 
 
 class FakeLogger:
-    """Captures (level, formatted-message) tuples — no disk IO."""
+    """Captures (level, formatted-message) tuples, no disk IO."""
     def __init__(self):
         self.calls = []
     def _rec(self, level, msg, args):
@@ -160,7 +160,7 @@ def t_logs_nonzero_exit_is_warning():
 
 
 def t_no_logger_is_silent():
-    # Default logger=None must behave exactly as before — no crash, full output.
+    # Default logger=None must not crash and must keep the full output.
     jm = ui_jobs.JobManager(lambda a: ["x"], spawn=lambda argv: FakeProc())
     job_id, err = jm.start("op", [])
     assert err is None

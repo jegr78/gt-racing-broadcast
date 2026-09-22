@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Unit checks for the relay's program-monitor screenshot TTL cache (issue: the OBS
-obs-websocket connection storm — every console view polling /preview/program and
-/cockpit/program every ~1.5s used to open its own obs-websocket connection to
-screenshot the SAME program image). Run: python3 tests/test_program_shot.py"""
+"""Unit checks for the relay's program-monitor screenshot TTL cache. Without it each
+console view polling /preview/program and /cockpit/program opened its own
+obs-websocket connection for the same program image.
+Run: python3 tests/test_program_shot.py"""
 import importlib.util
 import os
 
@@ -45,7 +45,7 @@ def t_refetches_after_ttl():
 
 
 def t_many_concurrent_views_share_one_fetch():
-    # The real win: N views polling in the same TTL window collapse to one OBS hit.
+    # N views polling inside one TTL window collapse to a single OBS hit.
     c = m.ProgramShotCache(ttl_s=1.0)
     f = _Counter()
     for i in range(20):
@@ -57,7 +57,7 @@ def t_failed_fetch_is_not_cached():
     c = m.ProgramShotCache(ttl_s=1.0)
     fail = _Counter(data=None, note="obs unreachable")
     assert c.fetch(fail, now=100.0) == (None, "obs unreachable")
-    # a None result must not be served from cache — the next poll retries OBS
+    # a None result must not be served from cache; the next poll retries OBS
     ok = _Counter(data=b"JPEG")
     assert c.fetch(ok, now=100.1) == (b"JPEG", "")
     assert fail.calls == 1 and ok.calls == 1

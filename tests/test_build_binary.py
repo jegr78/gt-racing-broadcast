@@ -21,7 +21,7 @@ def t_icon_windows_uses_ico():
 
 
 def t_icon_linux_has_none():
-    # PyInstaller can't embed an icon into an ELF — Linux gets no --icon.
+    # PyInstaller cannot embed an icon into an ELF, so Linux gets no --icon.
     assert bb._icon_arg(platform="linux", osname="posix", exists=lambda p: True) == []
 
 
@@ -33,9 +33,8 @@ def t_icon_missing_file_is_skipped():
 
 def t_every_served_html_dir_is_bundled():
     # Each src/ subdir that holds a relay/Control-Center-served .html page must be
-    # listed in DATA, or the frozen binary 404s that page (its here-relative lookup
-    # finds nothing under _MEIPASS/src/). Regression for the cockpit.html omission
-    # that made /cockpit return "cockpit page not found" in preview builds.
+    # listed in DATA, or the frozen binary 404s that page: its here-relative lookup
+    # finds nothing under _MEIPASS/src/.
     src = os.path.join(ROOT, "src")
     served = set()
     for dirpath, _dirs, files in os.walk(src):
@@ -49,8 +48,8 @@ def t_every_served_html_dir_is_bundled():
 
 
 def t_committed_icons_exist_and_are_valid():
-    # The committed icons must be present and well-formed (regenerated from the
-    # SVG by tools/make-icons.py) so release builds actually embed an icon.
+    # A release build embeds an icon only if the committed files are present and
+    # well-formed. Regenerate them from the SVG with tools/make-icons.py.
     import struct
     icns = os.path.join(ROOT, "src", "assets", "app-icon.icns")
     ico = os.path.join(ROOT, "src", "assets", "app-icon.ico")

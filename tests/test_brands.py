@@ -25,8 +25,7 @@ def t_asset_key_matches_brand_text():
 
 
 def t_asset_key_pinned_to_relay():
-    """Drift guard: the duplicated asset_key must stay byte-identical to the relay's
-    (mirrors the STREAMLINK_TWITCH pin in test_streams.py)."""
+    """Drift guard: the duplicated asset_key must stay byte-identical to the relay's."""
     norm = lambda fn: inspect.getsource(fn).strip()
     assert norm(m.asset_key) == norm(feeds.asset_key)
 

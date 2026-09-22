@@ -56,10 +56,10 @@ def t_decrypt_packet_rejects_garbage():
 
 
 def t_decrypt_packet_rejects_short_valid_magic():
-    """#324 review: a short packet that decrypts to the correct magic (a LAN host
-    can forge one — the key is fixed+public) must be dropped BEFORE the parser
-    over-reads its fixed offsets (up to 0x92). Length below MIN_PACKET_LEN → None."""
-    plain = bytearray(0x80)                                # 128 B: past old 0x44 min, below MIN_PACKET_LEN
+    """A short packet that decrypts to the correct magic must be dropped BEFORE the
+    parser over-reads its fixed offsets (up to 0x92); the key is fixed and public, so
+    a LAN host can forge one. Length below MIN_PACKET_LEN returns None. (#324)"""
+    plain = bytearray(0x80)                                # 128 B: below MIN_PACKET_LEN
     struct.pack_into("<I", plain, 0x00, 0x47375330)       # valid magic
     ct = _encrypted(0x0BADF00D, bytes(plain))
     assert len(ct) < gt7.MIN_PACKET_LEN

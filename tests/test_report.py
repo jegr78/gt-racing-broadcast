@@ -56,7 +56,7 @@ def t_generate_writes_file(monkeypatch=None):
 
 
 def t_report_backlog_thresholds_follow_the_machine_env():
-    # #586: the report counts "behind live" with the relay's own reserve + threshold.
+    # The report counts "behind live" with the relay's own reserve and threshold. (#586)
     orig = rc._machine_env_value
     vals = {"RACECAST_FEED_PREBUFFER_S": "4", "RACECAST_FEED_BACKLOG_WARN_S": "9"}
     rc._machine_env_value = lambda k: vals.get(k, "")
@@ -296,11 +296,9 @@ def t_send_bundles_sliced_logs_and_host():
 
 
 def t_report_includes_teardown_events_after_last_sample():
-    # #523: part_end / obs_stream_stop are recorded during teardown, a few seconds
-    # AFTER the last health sample. The report's event query must extend past the
-    # last sample (to + session gap) so they still land in the Broadcast timeline —
-    # otherwise "Part ended" (and the OBS stop) silently vanish, as in the 2026-07-17
-    # Suzuka qualifying report.
+    # part_end and obs_stream_stop are recorded during teardown, a few seconds AFTER
+    # the last health sample. The report's event query must extend past the last
+    # sample (to + session gap), or they vanish from the Broadcast timeline. (#523)
     with tempfile.TemporaryDirectory() as d:
         db = os.path.join(d, "health-history.db")
         conn = hs.open_db(db)
@@ -313,7 +311,7 @@ def t_report_includes_teardown_events_after_last_sample():
         last_sample = base + 90
         hs.record_event(conn, base, "part_start", label="Q started",
                         metadata={"index": 1})
-        # 4 s after the last sample — the teardown tail the old window dropped.
+        # 4 s after the last sample, the teardown tail the old window dropped.
         hs.record_event(conn, last_sample + 4, "part_end", label="Q ended",
                         metadata={"index": 1})
         conn.close()

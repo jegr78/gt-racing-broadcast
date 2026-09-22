@@ -31,8 +31,8 @@ def t_install_commands_winget_one_per_app():
 
 
 def t_install_commands_companion_is_interactive():
-    # Companion's NSIS installer writes NOTHING without admin in silent mode
-    # yet exits 0 — only the interactive wizard (with its UAC prompt) works.
+    # Companion's NSIS installer writes NOTHING without admin in silent mode yet
+    # exits 0. Only the interactive wizard, with its UAC prompt, works.
     (cmd,) = m.app_install_commands("winget", ["companion"])
     assert cmd[3] == "Bitfocus.Companion" and "--interactive" in cmd
 
@@ -58,8 +58,8 @@ def t_app_present_windows_paths():
     env = {"ProgramFiles": r"C:\Program Files", "LOCALAPPDATA": r"C:\Users\x\AppData\Local"}
     assert m.app_present("obs", "win32", env=env, exists=lambda p: p == hit,
                          which=lambda n: None)
-    # 32-bit-installer registrations land OBS in Program Files (x86) — seen on a
-    # real producer machine; without this candidate install-apps re-"installs" it.
+    # A 32-bit installer registration lands OBS in Program Files (x86); without
+    # this candidate install-apps re-"installs" it.
     x86 = r"C:\Program Files (x86)\obs-studio\bin\64bit\obs64.exe"
     env_x86 = dict(env, **{"ProgramFiles(x86)": r"C:\Program Files (x86)"})
     assert m.app_present("obs", "win32", env=env_x86, exists=lambda p: p == x86,
@@ -83,7 +83,7 @@ def t_app_present_linux_companion_service():
 
 
 def t_app_present_discord_paths():
-    # Windows: Squirrel per-user install — Update.exe is the version-stable path
+    # Windows: on a Squirrel per-user install, Update.exe is the version-stable path
     env = {"ProgramFiles": r"C:\Program Files",
            "LOCALAPPDATA": r"C:\Users\x\AppData\Local"}
     hit = r"C:\Users\x\AppData\Local\Discord\Update.exe"
@@ -104,8 +104,8 @@ def t_app_present_discord_paths():
 
 
 def t_manual_guide_has_urls_per_os():
-    # Compare URL HOSTS, not substrings — '"x.com" in guide' would also match
-    # an unrelated URL like https://evil.example/?x.com.
+    # Compare URL HOSTS, not substrings: '"x.com" in guide' would also match an
+    # unrelated URL like https://evil.example/?x.com.
     for plat in ("win32", "darwin", "linux"):
         guide = m.apps_manual_guide(plat)
         urls = [u.rstrip("'\"),:") for u in re.findall(r"https?://\S+", guide)]
@@ -124,8 +124,8 @@ def t_linux_plan_obs_with_ppa():
 
 
 def t_linux_plan_obs_without_ppa_tool():
-    # Debian (no add-apt-repository): still refresh the index before installing so
-    # a fresh/stale apt cache can locate obs-studio (issue #408 symmetry).
+    # Debian has no add-apt-repository, but the index still needs a refresh so a
+    # stale apt cache can locate obs-studio. (#408)
     no_ppa = lambda n: None if n == "add-apt-repository" else "/usr/bin/" + n
     assert m.linux_install_steps(["obs"], which=no_ppa) == [
         ("run", ["sudo", "apt-get", "update"]),
@@ -136,8 +136,8 @@ def t_linux_plan_obs_without_ppa_tool():
 def t_linux_plan_scripts():
     steps = m.linux_install_steps(["tailscale", "companion"], which=lambda n: "/usr/bin/" + n)
     # companion-pi's bundled node needs libatomic.so.1, absent on a fresh minimal
-    # Ubuntu 24.04 — install it (after refreshing the index) BEFORE the vendor
-    # installer so node can start and the service comes up (issue #413).
+    # Ubuntu 24.04. Install it after the index refresh and BEFORE the vendor
+    # installer, so node can start and the service comes up. (#413)
     assert steps == [
         ("script", "https://tailscale.com/install.sh", ["sh"]),
         ("run", ["sudo", "apt-get", "update"]),
@@ -154,7 +154,7 @@ def t_linux_plan_companion_libatomic1_precedes_installer():
     lib = steps.index(("run", ["sudo", "apt-get", "install", "-y", "libatomic1"]))
     script = next(i for i, s in enumerate(steps) if s[0] == "script")
     assert lib < script
-    # and it is preceded by an index refresh (fresh-image safety, issue #408/#413)
+    # and it is preceded by an index refresh, for a fresh image. (#408, #413)
     assert ("run", ["sudo", "apt-get", "update"]) in steps[:lib]
 
 
@@ -181,8 +181,8 @@ def t_linux_plan_discord_deb_on_amd64():
 
 
 def t_linux_plan_discord_note_on_arm64():
-    # Discord has no native ARM64 Linux .deb — the amd64 one is unsatisfiable, so
-    # emit an informational note instead of a futile (scary-erroring) deb step.
+    # Discord has no native ARM64 Linux .deb and the amd64 one is unsatisfiable, so
+    # emit a note instead of a deb step that would error.
     for arch in ("aarch64", "arm64", "armv7l"):
         steps = m.linux_install_steps(["discord"], which=lambda n: "/usr/bin/" + n,
                                       machine=arch)
@@ -291,8 +291,8 @@ def t_app_version_windows_dispatch():
 
 
 def t_companion_http_version_reads_sentry_release():
-    # The frontend bundle embeds the release as SENTRY_RELEASE={id:"<ver>+..."};
-    # the shell names the (content-hashed) bundle, picking the modern, not -legacy.
+    # The frontend bundle embeds the release as SENTRY_RELEASE={id:"<ver>+..."}; the
+    # shell names the content-hashed bundle, and the modern one wins over -legacy.
     shell = ('<script src="/assets/index-CLsR4s7-.js"></script>'
              '<script src="/assets/index-legacy-B9pHCpUc.js"></script>')
     head = 'var t;e.SENTRY_RELEASE={id:"4.3.4+9244-stable-c14e5e3334"};more'
@@ -307,9 +307,9 @@ def t_companion_http_version_reads_sentry_release():
 
 
 def t_companion_http_version_reads_backtick_marker():
-    # Companion v5 embeds the release as a template literal (backtick), not a
-    # double-quoted string: SENTRY_RELEASE={id:`5.0.1+9649-stable-<sha>`}.
-    # The parser must accept both quote styles (live-observed on v5.0.1).
+    # Companion v5 embeds the release as a template literal rather than a
+    # double-quoted string: SENTRY_RELEASE={id:`5.0.1+9649-stable-<sha>`}. The parser
+    # must accept both quote styles.
     shell = '<script src="/assets/index-Bp0gTa-1.js"></script>'
     head = 'var t;e.SENTRY_RELEASE={id:`5.0.1+9649-stable-6acd549dd5`};more'
     fetch = lambda u, r: shell if u.endswith("/") else head
@@ -407,9 +407,9 @@ def t_app_update_commands_apt_is_manual_guide():
 
 
 def t_partition_brew_updatable_skips_apps_outside_brew():
-    # OBS present on disk but NOT a brew cask (installed manually) -> 'elsewhere'.
-    # brew upgrade --cask obs would error 'Cask obs is not installed' and fail
-    # the whole batch, so it must be skipped, not upgraded (issue #92).
+    # OBS present on disk but NOT a brew cask goes to 'elsewhere': brew upgrade
+    # --cask obs would error 'Cask obs is not installed' and fail the whole batch,
+    # so it must be skipped rather than upgraded. (#92)
     managed = {"companion", "tailscale-app", "discord"}   # BREW_CASKS values
     to_up, elsewhere = m.partition_brew_updatable(
         ["obs", "companion", "tailscale", "discord"], managed)
@@ -418,8 +418,8 @@ def t_partition_brew_updatable_skips_apps_outside_brew():
 
 
 def t_partition_brew_updatable_probe_failed_keeps_all():
-    # managed_casks=None (the `brew list` probe failed) -> preserve the old
-    # best-effort behavior: attempt every present app, skip nothing.
+    # managed_casks=None means the `brew list` probe failed, so attempt every
+    # present app and skip nothing.
     to_up, elsewhere = m.partition_brew_updatable(["obs", "discord"], None)
     assert to_up == ["obs", "discord"] and elsewhere == []
 
@@ -430,16 +430,15 @@ def t_partition_brew_updatable_none_managed():
 
 
 def t_should_enable_companion_control_only_on_companion_linux():
-    # pure decision: companion present in the just-installed set, no failed steps
+    # True only when companion is in the just-installed set and no step failed.
     assert m.should_enable_companion_control(["companion"], failed=[]) is True
     assert m.should_enable_companion_control(["obs"], failed=[]) is False
     assert m.should_enable_companion_control(["companion"], failed=["companion ..."]) is False
 
 
-# --- Arch / pacman (issue #560) -------------------------------------------
 def t_pacman_plan_installs_the_browser_capable_obs():
-    # The whole point: plain obs-studio has no CEF, so the relay's HUD/timer
-    # Browser Sources stay black. install-apps must not hand an operator that.
+    # Plain obs-studio has no CEF, so the relay's HUD/timer Browser Sources stay
+    # black. install-apps must not hand an operator that. (#560)
     steps = m.pacman_install_steps(["obs"])
     assert steps == [("run", ["sudo", "pacman", "-S", "--needed", "--noconfirm",
                               "obs-studio-browser"])]
@@ -447,8 +446,8 @@ def t_pacman_plan_installs_the_browser_capable_obs():
 
 
 def t_pacman_plan_tailscale_also_enables_the_service():
-    # Parity with the apt path: tailscale's install.sh enables the daemon, the
-    # Arch package does not — without this, `tailscale up` fails after a reboot.
+    # tailscale's install.sh enables the daemon on the apt path; the Arch package
+    # does not, so without this `tailscale up` fails after a reboot.
     steps = m.pacman_install_steps(["tailscale"])
     assert steps[0] == ("run", ["sudo", "pacman", "-S", "--needed", "--noconfirm",
                                 "tailscale"])
@@ -463,8 +462,8 @@ def t_pacman_plan_batches_repo_packages_into_one_call():
 
 
 def t_pacman_plan_companion_is_a_note_not_a_step():
-    # Companion is in no Arch repository and not in the AUR under a usable name.
-    # Say so; never pretend to install it.
+    # Companion is in no Arch repository and not in the AUR under a usable name,
+    # so the plan says so instead of pretending to install it.
     steps = m.pacman_install_steps(["companion"])
     assert [s[0] for s in steps] == ["note"]
     assert "companion" not in m.PACMAN_APP_PACKAGES
