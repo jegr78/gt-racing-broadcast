@@ -796,8 +796,8 @@ def t_build_hud_data_carries_colors_and_quali():
     # OVERLAY_CSV puts 'OVO eSports #111' in P1; the roster here is keyed bare.
     assert d["teams"][0]["qualiLap"] == "1:38.973"
     assert d["teams"][0]["bgColor"] == "#FFFFFF"
-    # a team with no quali row keeps a blank slot (the HUD hides it)
-    assert d["teams"][2]["qualiLap"] == ""
+    assert d["teams"][2]["qualiLap"] == "", \
+        "a team with no quali row keeps a blank slot (the HUD hides it)"
 
 
 def _quali_hud(quali_text=None, quali_boom=False):

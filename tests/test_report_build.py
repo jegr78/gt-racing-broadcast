@@ -54,8 +54,8 @@ def t_select_session_floor_discards_earlier_event():
     # normally merge them into one window, so a floor at this event's start clamps it
     ts = [100.0, 130.0, 400.0, 430.0]
     assert rb.select_session(ts, gap_s=1800, floor=400.0) == (400.0, 430.0)
-    # floor between samples keeps only those at/after it
-    assert rb.select_session(ts, gap_s=1800, floor=350.0) == (400.0, 430.0)
+    assert rb.select_session(ts, gap_s=1800, floor=350.0) == (400.0, 430.0), \
+        "floor between samples keeps only those at/after it"
 
 
 def t_select_session_floor_none_is_unchanged():

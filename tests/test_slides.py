@@ -68,8 +68,8 @@ def t_harness_embeds_source_and_pinned_libs_and_seed():
     assert "flowchart LR" in html
     assert bd.MERMAID_TO_EXCALIDRAW in html
     assert bd.EXCALIDRAW in html
-    # The pinned seed is what keeps a regenerated SVG stable.
-    assert "seed" in html and str(bd.SEED) in html
+    assert "seed" in html and str(bd.SEED) in html, \
+        "the pinned seed is what keeps a regenerated SVG stable"
 
 
 def t_discover_mmd_finds_sources(tmp=None):

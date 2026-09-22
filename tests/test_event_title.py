@@ -38,8 +38,8 @@ def t_sanitize_keeps_unicode():
 
 
 def t_sanitize_strips_control_chars():
-    # newlines, tabs and the rest collapse out; a title is one line.
-    assert m.sanitize_event_title("Round\n4\tNürburgring\r") == "Round4Nürburgring"
+    assert m.sanitize_event_title("Round\n4\tNürburgring\r") == "Round4Nürburgring", \
+        "newlines, tabs and the rest collapse out; a title is one line"
 
 
 def t_sanitize_caps_length():

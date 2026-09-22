@@ -34,8 +34,7 @@ def t_frozen_child_env_moves_the_extraction_dir_out_of_os_temp():
 
 
 def t_frozen_child_env_is_none_when_not_frozen():
-    # Source runs must inherit the environment untouched.
-    assert m._frozen_child_env() is None
+    assert m._frozen_child_env() is None, "source runs must inherit the environment untouched"
 
 
 def t_service_start():
@@ -729,8 +728,8 @@ def t_update_routes_as_oneshot():
 
 
 def t_update_oneshot_extra_injects_nothing():
-    # update needs no runtime-dir/--out injection; --current is added in oneshot()
-    assert m._oneshot_extra("update", [], "/rt/demo", "/rt") == []
+    assert m._oneshot_extra("update", [], "/rt/demo", "/rt") == [], \
+        "update needs no runtime-dir/--out injection; --current is added in oneshot()"
 
 
 def t_event_routes():
@@ -777,8 +776,8 @@ def t_title_args_extraction():
     assert m._title_args(["--stint", "3", "--title", "GTEC R4"]) == \
         ["--event-title", "GTEC R4"]
     assert m._title_args(["--title="]) == ["--event-title", ""]   # explicit clear
-    # bare --title followed by another flag is NOT consumed as the value
-    assert m._title_args(["--title", "--qualifying"]) == []
+    assert m._title_args(["--title", "--qualifying"]) == [], \
+        "bare --title followed by another flag is NOT consumed as the value"
 
 
 def t_takeover_event_title_extracts():
@@ -921,8 +920,8 @@ def t_relay_stop_releases_obs_feeds_after_kill():
     try:
         with contextlib.redirect_stdout(io.StringIO()):
             m.relay_stop([])
-        # the relay stop must verify process identity before killing (#102)
-        assert calls == [("stop_pid", m.sv.pid_is_relay), "obs"]
+        assert calls == [("stop_pid", m.sv.pid_is_relay), "obs"], \
+            "the relay stop must verify process identity before killing (#102)"
     finally:
         m.sv.read_pid, m.sv.pid_alive, m.sv.stop_pid, m._release_obs_feeds = old
 
@@ -1200,8 +1199,8 @@ def t_brands_oneshot_mapping_and_out():
     assert "brands" in m.ONESHOTS
     extra = m._oneshot_extra("brands", [], os.path.join("/rt", "demo"), "/rt")
     assert extra == ["--out", os.path.join("/rt", "demo", "brands")], extra
-    # an explicit --out from the user wins (no injected default)
-    assert m._oneshot_extra("brands", ["--out", "/x"], os.path.join("/rt", "demo"), "/rt") == []
+    assert m._oneshot_extra("brands", ["--out", "/x"], os.path.join("/rt", "demo"), "/rt") == [], \
+        "an explicit --out from the user wins (no injected default)"
 
 
 def t_profile_env_vars_filters_empty():
@@ -1547,8 +1546,8 @@ def t_profile_env_write_data_no_profile_is_error():
         finally:
             m._env_base, m._runtime_base_dir = orig_b, orig_r
         assert d["ok"] is False and d["error"]
-        # the machine .env must never be touched when no profile is active
-        assert not os.path.exists(os.path.join(td, ".env"))
+        assert not os.path.exists(os.path.join(td, ".env")), \
+            "the machine .env must never be touched when no profile is active"
 
 
 def t_overlay_read_absent_ok_empty():
@@ -2758,8 +2757,7 @@ def t_cookies_twitch_routing():
     # no leading "twitch" -> YouTube flow unchanged (no --platform injected)
     args2 = m._cookies_oneshot_args(["firefox"])
     assert "--platform" not in args2 and "firefox" in args2
-    # empty list is unchanged
-    assert m._cookies_oneshot_args([]) == []
+    assert m._cookies_oneshot_args([]) == [], "empty list is unchanged"
 
 
 def t_freeport_route():
@@ -4573,8 +4571,8 @@ def t_smoke_push_reads_the_webhook_ok_flag():
     stub = _StubHttp(post=b'{"ok": true}')
     ok, note = _with_stub_http(stub, lambda: m._smoke_push("https://example.invalid/w", 1, "u"))
     assert ok and note == "", note
-    # Column A only: Streamer and Stint must never be sent.
-    assert stub.posts[0][1] == {"action": "schedule", "row": 1, "url": "u"}
+    assert stub.posts[0][1] == {"action": "schedule", "row": 1, "url": "u"}, \
+        "column A only: Streamer and Stint must never be sent"
 
 
 def t_smoke_push_reports_a_rejected_write():
@@ -5003,10 +5001,10 @@ def t_url_opener_argv_refuses_anything_but_http():
 
 
 def t_url_opener_argv_none_when_there_is_nothing_to_spawn():
-    # Windows has no library-path problem, so there is nothing to fix there.
-    assert m.url_opener_argv("win32", "http://h/", which=lambda t: "C:/x") is None
-    # A Linux box without any opener: fall back rather than invent one.
-    assert m.url_opener_argv("linux", "http://h/", which=lambda t: None) is None
+    assert m.url_opener_argv("win32", "http://h/", which=lambda t: "C:/x") is None, \
+        "windows has no library-path problem, so there is nothing to fix there"
+    assert m.url_opener_argv("linux", "http://h/", which=lambda t: None) is None, \
+        "a Linux box without any opener: fall back rather than invent one"
 
 
 class _FakeOpenerProc:

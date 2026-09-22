@@ -29,12 +29,12 @@ def t_telemetry_active_pov_only():
     # POV solo, template=pov, runs telemetry.
     assert m.telemetry_active(True, {"RACECAST_TEMPLATE": "pov"}) is True
     assert m.telemetry_active(True, {"RACECAST_TEMPLATE": "POV"}) is True
-    # Commentary solo has no console, so no telemetry and no empty block.
-    assert m.telemetry_active(True, {"RACECAST_TEMPLATE": "commentary"}) is False
-    # Solo with the template unset is off; POV must be explicit.
-    assert m.telemetry_active(True, {}) is False
-    # Endurance is off whatever the template says.
-    assert m.telemetry_active(False, {"RACECAST_TEMPLATE": "pov"}) is False
+    assert m.telemetry_active(True, {"RACECAST_TEMPLATE": "commentary"}) is False, \
+        "commentary solo has no console, so no telemetry and no empty block"
+    assert m.telemetry_active(True, {}) is False, \
+        "solo with the template unset is off; POV must be explicit"
+    assert m.telemetry_active(False, {"RACECAST_TEMPLATE": "pov"}) is False, \
+        "endurance is off whatever the template says"
     # POV solo, explicitly disabled, is off.
     assert m.telemetry_active(True, {"RACECAST_TEMPLATE": "pov",
                                      "RACECAST_GT7_TELEMETRY": "0"}) is False

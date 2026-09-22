@@ -59,8 +59,8 @@ def t_adds_source():
     assert src["id"] == "image_source"
     assert src["uuid"] == m.COVER_UUID
     assert src["settings"]["file"] == m.COVER_FILE
-    # dedicated graphic, NOT the Standby scene's thumbnail (Standby.png)
-    assert m.COVER_FILE == "__RACECAST_GRAPHICS__/Standby Cover.png"
+    assert m.COVER_FILE == "__RACECAST_GRAPHICS__/Standby Cover.png", \
+        "dedicated graphic, NOT the Standby scene's thumbnail (Standby.png)"
 
 
 def t_cover_item_hidden_fullscreen():

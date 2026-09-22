@@ -235,8 +235,8 @@ def t_loop_channel_url_and_platform():
 
 
 def t_loop_crosscheck_relay():
-    # The duplicated Twitch bits must stay equal to the relay's.
-    assert loop.STREAMLINK_TWITCH == feeds_x.STREAMLINK_TWITCH
+    assert loop.STREAMLINK_TWITCH == feeds_x.STREAMLINK_TWITCH, \
+        "the duplicated Twitch bits must stay equal to the relay's"
     for u in ["https://www.youtube.com/watch?v=a", "https://youtu.be/a",
               "https://www.twitch.tv/c", "https://m.twitch.tv/c", "https://twitch.tv@evil.com/"]:
         assert loop.platform_of(u) == feeds_x.platform_of(u)

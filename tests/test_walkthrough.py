@@ -55,15 +55,15 @@ def t_sanitize_empty_stays_empty():
 
 
 def t_frame_lock_rounds_up_to_whole_frames():
-    # 1.00s at 30fps is already frame-aligned, so it is unchanged.
-    assert w.frame_lock(1.0, 30) == 1.0
+    assert w.frame_lock(1.0, 30) == 1.0, \
+        "1.00s at 30fps is already frame-aligned, so it is unchanged"
     # 1.01s gives 31 frames, so 31/30: it rounds up so no speech is clipped.
     assert abs(w.frame_lock(1.01, 30) - 31 / 30) < 1e-9
 
 
 def t_frame_lock_minimum_one_frame():
-    # zero-length audio still yields a single frame, never a 0-length segment
-    assert w.frame_lock(0.0, 30) == 1 / 30
+    assert w.frame_lock(0.0, 30) == 1 / 30, \
+        "zero-length audio still yields a single frame, never a 0-length segment"
 
 
 def t_ffmpeg_slideshow_cmd_single_pass_concat():
@@ -106,15 +106,14 @@ def t_gcloud_tts_request_shape():
     body = w.gcloud_tts_request("Hello there.", "en-US-Neural2-J")
     assert body["input"] == {"text": "Hello there."}
     assert body["voice"] == {"languageCode": "en-US", "name": "en-US-Neural2-J"}
-    # the default encoding is MP3, which is self-describing and ffmpeg-friendly
-    assert body["audioConfig"]["audioEncoding"] == "MP3"
+    assert body["audioConfig"]["audioEncoding"] == "MP3", \
+        "the default encoding is MP3, which is self-describing and ffmpeg-friendly"
 
 
 def t_gcloud_tts_request_optional_prosody():
     body = w.gcloud_tts_request("Hi.", "en-US-Neural2-J", speaking_rate=0.95)
     assert body["audioConfig"]["speakingRate"] == 0.95
-    # pitch omitted when not given
-    assert "pitch" not in body["audioConfig"]
+    assert "pitch" not in body["audioConfig"], "pitch omitted when not given"
 
 
 def t_gcloud_tts_url_carries_key_and_path():

@@ -885,8 +885,8 @@ def t_ring_age_at_offset_is_the_age_of_the_next_unread_byte():
     assert r.age_at_offset(650, now=9.0) == 3.0
     # byte 700 is the first byte of the t=7 write
     assert r.age_at_offset(700, now=9.0) == 2.0
-    # the value keeps growing while the consumer does not move
-    assert r.age_at_offset(650, now=15.0) == 9.0
+    assert r.age_at_offset(650, now=15.0) == 9.0, \
+        "the value keeps growing while the consumer does not move"
 
 
 def t_ring_age_at_offset_is_zero_at_the_live_edge():
@@ -911,8 +911,8 @@ def t_ring_age_at_offset_overflowed_cursor_reports_the_oldest_retained_byte():
     for i in range(10):
         r.write(b"x" * 100, now=float(i))
     assert r.start_offset() == 750
-    # a lapped consumer is at least as far behind as the oldest retained byte (t=7)
-    assert r.age_at_offset(100, now=9.0) == 2.0
+    assert r.age_at_offset(100, now=9.0) == 2.0, \
+        "a lapped consumer is at least as far behind as the oldest retained byte (t=7)"
 
 
 def _backlog_server(ring):
@@ -1223,8 +1223,8 @@ def t_backlog_shed_decision_needs_a_streak_and_respects_the_cooldown():
     # the cooldown is shared with the freeze path: a rebuild just happened, stay off it
     assert m.backlog_shed_decision(5, 10.0, min_streak=1, cooldown_s=120.0) is False
     assert m.backlog_shed_decision(5, 120.0, min_streak=1, cooldown_s=120.0) is True
-    # no measurement is never a reason to act
-    assert m.backlog_shed_decision(None, None, min_streak=1, cooldown_s=120.0) is False
+    assert m.backlog_shed_decision(None, None, min_streak=1, cooldown_s=120.0) is False, \
+        "no measurement is never a reason to act"
 
 
 def t_rebuild_guard_routes_each_judgement_to_the_reason_that_fired():

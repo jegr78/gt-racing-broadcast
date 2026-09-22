@@ -59,8 +59,8 @@ def t_does_not_fire_on_a_heredoc_body():
 
 
 def t_still_fires_for_a_command_after_the_heredoc_ends():
-    # Only the heredoc BODY is dropped, not the rest of the command.
-    assert _fires("cat <<'EOF'\nnothing to see\nEOF\ngh pr merge 19")
+    assert _fires("cat <<'EOF'\nnothing to see\nEOF\ngh pr merge 19"), \
+        "only the heredoc BODY is dropped, not the rest of the command"
 
 
 def t_an_arithmetic_shift_does_not_open_a_heredoc():

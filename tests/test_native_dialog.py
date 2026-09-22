@@ -10,8 +10,8 @@ def t_osascript_argv_quotes_and_titles():
     assert argv[0] == "osascript"
     joined = " ".join(argv)
     assert "racecast Control Center" in joined
-    # double quotes are neutralised so the AppleScript string cannot break out
-    assert '"now"' not in joined
+    assert '"now"' not in joined, \
+        "double quotes are neutralised so the AppleScript string cannot break out"
 
 
 def t_notify_darwin_runs_osascript():

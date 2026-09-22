@@ -85,8 +85,8 @@ def t_version_ge():
 
 
 def t_resolve_companion_base():
-    # A specific bind_ip is authoritative (Companion bound to the Tailscale IP, not loopback).
-    assert cp.resolve_companion_base("100.81.0.4", None) == "http://100.81.0.4:8000"
+    assert cp.resolve_companion_base("100.81.0.4", None) == "http://100.81.0.4:8000", \
+        "a specific bind_ip is authoritative (Companion bound to the Tailscale IP, not loopback)"
     # 0.0.0.0 (all interfaces) -> loopback works.
     assert cp.resolve_companion_base("0.0.0.0", "100.81.0.4") == "http://127.0.0.1:8000"
     # missing bind_ip -> Tailscale IP if known, else loopback.

@@ -107,8 +107,8 @@ def t_resolve_producer_implies_director_and_race_control():
     # A producer who is also in the schedule keeps commentator as well.
     assert m.resolve_roles(crew, {"alice"}, "alice") == {
         "producer", "director", "race_control", "commentator"}
-    # A non-producer is unaffected; no implication leaks to plain directors.
-    assert m.resolve_roles([("Bob", True, False)], set(), "bob") == {"director"}
+    assert m.resolve_roles([("Bob", True, False)], set(), "bob") == {"director"}, \
+        "a non-producer is unaffected; no implication leaks to plain directors"
 
 
 def t_resolve_multi_role_union_commentator_plus_director():

@@ -282,8 +282,8 @@ def t_decide_health_monitor_allows_any_role():
     for role in (cp.COMMENTATOR, cp.DIRECTOR, cp.PRODUCER, cp.RACE_CONTROL):
         assert cp.decide({role}, ["health-monitor"]) == cp.ALLOW
         assert cp.decide({role}, ["health-monitor", "data"]) == cp.ALLOW
-    # An authenticated subject with no resolved role still reaches an any-auth route.
-    assert cp.decide(set(), ["health-monitor"]) == cp.ALLOW
+    assert cp.decide(set(), ["health-monitor"]) == cp.ALLOW, \
+        "an authenticated subject with no resolved role still reaches an any-auth route"
 
 
 def t_takeover_health_is_producer_step_up():
@@ -301,7 +301,7 @@ def t_event_notes_any_authenticated():
     # Any authenticated subject, even a role-less one, may read the notes
     assert cp.decide(set(), ["event-notes", "data"], "GET") == cp.ALLOW
     assert cp.decide({"commentator"}, ["event-notes", "data"], "GET") == cp.ALLOW
-    # and it is not a recognized POST or write route
+    # And it is not a recognized POST or write route.
     assert cp.decide({"director"}, ["event-notes", "send"], "GET") == cp.NOT_FOUND
 
 

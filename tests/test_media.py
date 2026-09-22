@@ -372,8 +372,8 @@ def t_resolve_trailer_priority_cli_then_env():
 
 
 def t_graphics_skip_set_includes_trailer():
-    # get-graphics must skip the Trailer row so it is not downloaded as a PNG.
-    assert "trailer video" in graphics.MEDIA_LABELS
+    assert "trailer video" in graphics.MEDIA_LABELS, \
+        "get-graphics must skip the Trailer row so it is not downloaded as a PNG"
 
 
 if __name__ == "__main__":

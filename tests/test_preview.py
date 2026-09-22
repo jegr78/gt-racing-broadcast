@@ -77,8 +77,8 @@ def t_next_minor():
 
 
 def t_resolve_base_version_prefers_release_pr():
-    # release-please PR wins over the tag-derived fallback
-    assert m.resolve_base_version("chore(main): release 1.1.0", "v1.0.1") == "1.1.0"
+    assert m.resolve_base_version("chore(main): release 1.1.0", "v1.0.1") == "1.1.0", \
+        "release-please PR wins over the tag-derived fallback"
 
 
 def t_resolve_base_version_falls_back_to_next_minor():
