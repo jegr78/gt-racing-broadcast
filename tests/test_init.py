@@ -56,8 +56,8 @@ def t_every_step_has_a_label():
 
 
 def t_step_kinds_cover_every_step():
-    # every ordered step has a kind descriptor; kinds are the three the UI knows
-    assert set(m.STEP_KINDS) == set(m.STEP_ORDER)
+    assert set(m.STEP_KINDS) == set(m.STEP_ORDER), \
+        "every ordered step has a kind descriptor; kinds are the three the UI knows"
     for _key, meta in m.STEP_KINDS.items():
         assert meta["kind"] in ("gate", "job", "action")
         assert set(meta) <= {"kind", "op", "instruction"}

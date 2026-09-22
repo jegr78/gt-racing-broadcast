@@ -58,7 +58,7 @@ def relay_view(relay, feed):
     try:
         with urllib.request.urlopen(relay.rstrip("/") + "/status", timeout=5) as r:
             d = json.loads(r.read().decode("utf-8", "replace"))
-    except Exception:                      # noqa: BLE001 (a probe never dies on this)
+    except Exception:                      # noqa: BLE001  a probe never dies on this
         return None, None, None
     f = (d.get("feeds") or {}).get(feed) or {}
     return (f.get("backlog_s"), f.get("backlogged"),

@@ -984,8 +984,8 @@ def t_push_team_sends_verbatim_label_with_number():
 def t_full_team_name_falls_back_for_unknown_team():
     ctl, hs, orig = _team_ctl_embedded([])
     try:
-        # An unknown team returns the given name, stripped, never a KeyError.
-        assert hs.full_team_name("Mystery Crew") == "Mystery Crew"
+        assert hs.full_team_name("Mystery Crew") == "Mystery Crew", \
+            "an unknown team returns the given name, stripped, never a KeyError"
     finally:
         m.post_webhook = orig
 

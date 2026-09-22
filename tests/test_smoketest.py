@@ -111,8 +111,7 @@ def t_youtube_live_search_url():
     u = st.youtube_live_search_url("sim racing live")
     assert u.startswith("https://www.youtube.com/results?")
     assert "search_query=sim+racing+live" in u
-    # The live filter is what keeps VODs out of the result set.
-    assert st.YOUTUBE_LIVE_FILTER in u
+    assert st.YOUTUBE_LIVE_FILTER in u, "the live filter is what keeps VODs out of the result set"
 
 
 def t_twitch_query_shape():
@@ -202,10 +201,10 @@ def t_rows_match_is_per_row_not_set_inclusion():
     # A row that should have been cleared still carries the old value.
     stale = {**want, 3: "https://www.youtube.com/watch?v=old"}
     assert st.rows_match(stale, want) is False
-    # A row the sheet does not answer at all is not a match either.
-    assert st.rows_match({2: want[2], 3: ""}, want) is False
-    # Rows outside `expected` are none of its business.
-    assert st.rows_match({**want, 9: "https://www.twitch.tv/z"}, want)
+    assert st.rows_match({2: want[2], 3: ""}, want) is False, \
+        "a row the sheet does not answer at all is not a match either"
+    assert st.rows_match({**want, 9: "https://www.twitch.tv/z"}, want), \
+        "rows outside `expected` are none of its business"
     # None and "" mean the same empty cell on both sides.
     assert st.rows_match({3: None}, {3: ""})
 
@@ -516,8 +515,8 @@ def t_state_mismatches():
     # A wrong scene is reported on its own.
     assert any("scene expected" in m
                for m in st.state_mismatches(exp, {**good, "scene": "Stint"}))
-    # An unreadable item is reported, never counted as a match.
-    assert st.state_mismatches(exp, {"scene": "Splitscreen"})
+    assert st.state_mismatches(exp, {"scene": "Splitscreen"}), \
+        "an unreadable item is reported, never counted as a match"
 
 
 def t_state_probe():

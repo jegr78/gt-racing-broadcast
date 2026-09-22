@@ -22,6 +22,14 @@ def is_prose(value):
 
 
 class Blank(ast.NodeTransformer):
+    def visit_Assert(self, node):
+        """An assertion message is prose, so adding or rewording one is not logic."""
+        if (isinstance(node.msg, ast.Constant) and isinstance(node.msg.value, str)
+                and is_prose(node.msg.value)):
+            node.msg = None
+        self.generic_visit(node)
+        return node
+
     def visit_Constant(self, node):
         if isinstance(node.value, str) and is_prose(node.value):
             return ast.copy_location(ast.Constant(value=PROSE), node)
@@ -45,9 +53,12 @@ def strip_docstrings(tree):
 
 def analyse(src, name):
     tree, docs = strip_docstrings(ast.parse(src, name))
+    # Assert messages are excluded: adding one shifts every later string and would
+    # drown the positional diff. They are prose by definition, read in the diff.
+    msgs = {id(n.msg) for n in ast.walk(tree) if isinstance(n, ast.Assert) and n.msg}
     prose = [n.value for n in ast.walk(tree)
              if isinstance(n, ast.Constant) and isinstance(n.value, str)
-             and is_prose(n.value)]
+             and is_prose(n.value) and id(n) not in msgs]
     return ast.dump(Blank().visit(tree)), prose, docs
 
 

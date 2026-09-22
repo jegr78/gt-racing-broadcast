@@ -61,7 +61,7 @@ import walkthrough_core as core
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))
-import http_util  # noqa: E402 (outbound HTTP funnels through here, UA rule)
+import http_util  # noqa: E402  outbound HTTP funnels through here, UA rule
 
 SLIDES = os.path.join(ROOT, "src", "docs", "slides")
 GCLOUD_KEY_ENV = "RACECAST_GCLOUD_TTS_KEY"

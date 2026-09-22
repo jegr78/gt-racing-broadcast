@@ -70,8 +70,8 @@ def t_parse_netstat_pids_localized_state_column():
         "  TCP    127.0.0.1:8088         127.0.0.1:49568        WARTEND         0\n"
         "  TCP    100.115.69.85:8088     100.115.69.85:49434    WARTEND         0\n"
     )
-    # only the two wildcard-foreign LISTENING rows count, deduped, and WARTEND is ignored
-    assert ports.parse_netstat_pids(out, 8088) == [34528]
+    assert ports.parse_netstat_pids(out, 8088) == [34528], \
+        "only the two wildcard-foreign LISTENING rows count, deduped, and WARTEND is ignored"
 
 
 # pids_on_port, with an injected command runner and which.

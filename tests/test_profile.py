@@ -140,8 +140,7 @@ def t_create_profile_copies_example():
         target = m.create_profile(root, "erf")
         assert target == os.path.join(root, "profiles", "erf")
         assert os.path.isfile(os.path.join(target, "profile.env"))
-        # config now lists it (example stays excluded)
-        assert m.cfg.list_profiles(root) == ["erf"]
+        assert m.cfg.list_profiles(root) == ["erf"], "config now lists it (example stays excluded)"
 
 
 def t_create_profile_from_other_profile():
@@ -187,8 +186,8 @@ def t_create_profile_accepts_spaces_via_slug_and_sets_display_name():
         target = m.create_profile(root, "Demo League")
         assert target == os.path.join(root, "profiles", "demo-league")   # slugged dir
         assert m.cfg.list_profiles(root) == ["demo-league"]
-        # the typed name is preserved as the league display NAME, not the slug
-        assert m.cfg.parse_profile(root, "demo-league")["NAME"] == "Demo League"
+        assert m.cfg.parse_profile(root, "demo-league")["NAME"] == "Demo League", \
+            "the typed name is preserved as the league display NAME, not the slug"
 
 
 def t_create_profile_rejects_unsluggable_existing_and_missing_source():

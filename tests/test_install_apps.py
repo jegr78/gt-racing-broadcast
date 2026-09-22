@@ -154,7 +154,7 @@ def t_linux_plan_companion_libatomic1_precedes_installer():
     lib = steps.index(("run", ["sudo", "apt-get", "install", "-y", "libatomic1"]))
     script = next(i for i, s in enumerate(steps) if s[0] == "script")
     assert lib < script
-    # and it is preceded by an index refresh, for a fresh image. (#408, #413)
+    # And it is preceded by an index refresh, for a fresh image. (#408, #413)
     assert ("run", ["sudo", "apt-get", "update"]) in steps[:lib]
 
 
@@ -302,8 +302,8 @@ def t_companion_http_version_reads_sentry_release():
         calls.append((url, range_bytes))
         return shell if url.endswith("/") else head
     assert m.companion_http_version("http://127.0.0.1:8000", fetch=fetch) == "4.3.4"
-    # the modern bundle was fetched with a bounded Range (not the legacy one, not full)
-    assert calls[1][0].endswith("/assets/index-CLsR4s7-.js") and calls[1][1] == 65536
+    assert calls[1][0].endswith("/assets/index-CLsR4s7-.js") and calls[1][1] == 65536, \
+        "the modern bundle was fetched with a bounded Range (not the legacy one, not full)"
 
 
 def t_companion_http_version_reads_backtick_marker():

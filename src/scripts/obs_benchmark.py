@@ -727,7 +727,7 @@ def run(relay, session, runtime_dir, *, flags, scene="Stint", window_s=DEFAULT_W
         if recording:
             try:
                 out_path = (session.request("StopRecord", {}) or {}).get("outputPath")
-            except Exception as exc:              # noqa: BLE001 — keep restoring
+            except Exception as exc:              # noqa: BLE001  keep restoring
                 notes.append(f"stopping the recording failed ({exc}); stop it in OBS")
         restored_at = None
         try:
@@ -738,18 +738,18 @@ def run(relay, session, runtime_dir, *, flags, scene="Stint", window_s=DEFAULT_W
                 # the API can only pin a tier or release it; releasing ends the step-down
                 notes.append(f"Feed {feed} was on {orig.get('profile').upper()} from an "
                              "automatic step-down; it is back on managed FULL now")
-        except Exception as exc:                  # noqa: BLE001 — keep restoring
+        except Exception as exc:                  # noqa: BLE001  keep restoring
             notes.append(f"restoring Feed {feed}'s quality failed ({exc})")
         if orig_scene and scene and scene != orig_scene:
             try:
                 session.request("SetCurrentProgramScene", {"sceneName": orig_scene})
-            except Exception as exc:              # noqa: BLE001 — keep restoring
+            except Exception as exc:              # noqa: BLE001  keep restoring
                 notes.append(f"switching back to '{orig_scene}' failed ({exc})")
         finished = False
         if out_path:
             try:
                 finished = _record_finished(session, sleep, RECORD_STOP_TIMEOUT_S)
-            except Exception as exc:              # noqa: BLE001 — keep restoring
+            except Exception as exc:              # noqa: BLE001  keep restoring
                 notes.append(f"reading the recording state failed ({exc})")
             if not finished:
                 keep_recording = True
@@ -781,7 +781,7 @@ def run(relay, session, runtime_dir, *, flags, scene="Stint", window_s=DEFAULT_W
                 _rejoin_after_prefetch(
                     relay, feed, sleep,
                     flags_for_tier(tier_flags, orig.get("quality_tier")), prebuffer_s)
-            except (Exception, KeyboardInterrupt) as exc:  # noqa: BLE001 — cleanup: report, go on
+            except (Exception, KeyboardInterrupt) as exc:  # noqa: BLE001  cleanup: report, go on
                 notes.append(f"Feed {feed} is back on its tier but OBS was not rejoined "
                              f"({exc.__class__.__name__}: {exc}); press RESET for "
                              f"Feed {feed} in the Director Panel")

@@ -161,8 +161,7 @@ def t_dead_serve_backoff_escalates_and_caps():
     # capped at DEAD_SERVE_BACKOFF_CAP (300)
     assert m.dead_serve_backoff(6) == 300
     assert m.dead_serve_backoff(100) == 300
-    # count below 1 falls back to the base (defensive)
-    assert m.dead_serve_backoff(0) == 10
+    assert m.dead_serve_backoff(0) == 10, "count below 1 falls back to the base (defensive)"
     # explicit base/cap honoured
     assert m.dead_serve_backoff(3, base=5, cap=15) == 15   # 5*4=20 -> capped to 15
 
@@ -852,8 +851,8 @@ def t_director_panel_chat_rail_fixed_height():
     path = os.path.join(ROOT, "src", "director", "director-panel.html")
     with open(path, encoding="utf-8") as fh:
         html = fh.read()
-    # The unbounded grow-to-38vh cap is gone (it was the only 38vh in the file).
-    assert "38vh" not in html
+    assert "38vh" not in html, \
+        "the unbounded grow-to-38vh cap is gone (it was the only 38vh in the file)"
     # Logs get a stable, viewport-aware fixed height (clamped), not max-height growth.
     assert "details.chat#chatBox .chatlog,details.chat#bchatBox .chatlog{height:clamp(" in html
     # Boxes do not shrink below their content (flex:0 0 auto, not 0 1 auto).
@@ -1413,8 +1412,7 @@ def t_slot_start_indices():
     assert m.slot_start_indices(3, rows(["a", "b", "b", "d"])) == (1, 3)
     # takeover onto the FIRST b (stint 2): A row1, B skips the duplicate -> row3
     assert m.slot_start_indices(2, rows(["a", "b", "b", "d"])) == (1, 3)
-    # empty schedule falls back
-    assert m.slot_start_indices(1, []) == (0, 1)
+    assert m.slot_start_indices(1, []) == (0, 1), "empty schedule falls back"
 
 
 def t_dedupe_pull_index():
@@ -1427,8 +1425,8 @@ def t_dedupe_pull_index():
     assert m.dedupe_pull_index(2, 1, rows) == (3, True)
     # Collision at the slot head: target row1 uB vs other row2 uB -> row3.
     assert m.dedupe_pull_index(1, 2, rows) == (3, True)
-    # Idle/blank target (idx == len) never collides.
-    assert m.dedupe_pull_index(4, 0, rows) == (4, False)
+    assert m.dedupe_pull_index(4, 0, rows) == (4, False), \
+        "idle/blank target (idx == len) never collides"
     # Other feed idle -> no collision.
     assert m.dedupe_pull_index(1, 4, rows) == (1, False)
     # Non-contiguous repeated URL: loop past it.
@@ -1523,8 +1521,8 @@ def t_should_obs_reconnect_on_fanout_drop_or_attached_consumer():
     # (solo/qualifying) leave dropped=False while OBS keeps reading. (#614)
     assert m.should_obs_reconnect(True, False, True) is True
     assert m.should_obs_reconnect(True, True, True) is True
-    # No consumer attached (the ping-pong's off-air feed) stays seamless.
-    assert m.should_obs_reconnect(True, False, False) is False
+    assert m.should_obs_reconnect(True, False, False) is False, \
+        "no consumer attached (the ping-pong's off-air feed) stays seamless"
     # Direct-serve never rebuilds: OBS owns the socket to streamlink itself.
     assert m.should_obs_reconnect(False, False, True) is False
     assert m.should_obs_reconnect(False, True, True) is False
@@ -1618,8 +1616,8 @@ def t_prefetch_land_s_is_derived_from_the_burst_and_the_prebuffer():
     assert m.prefetch_land_s(4, 3.0) == 4 * m.SEGMENT_FETCH_BUDGET_S + 3.0   # YouTube FULL
     assert m.prefetch_land_s(6, 3.0) == 6 * m.SEGMENT_FETCH_BUDGET_S + 3.0   # YouTube ROBUST
     assert m.prefetch_land_s(2, 3.0) == 2 * m.SEGMENT_FETCH_BUDGET_S + 3.0   # Twitch
-    # ROBUST must wait strictly longer than FULL: it prefetches two more segments.
-    assert m.prefetch_land_s(6, 3.0) > m.prefetch_land_s(4, 3.0)
+    assert m.prefetch_land_s(6, 3.0) > m.prefetch_land_s(4, 3.0), \
+        "ROBUST must wait strictly longer than FULL: it prefetches two more segments"
     # A changed prebuffer moves the wait with it, one-for-one.
     assert m.prefetch_land_s(4, 8.0) - m.prefetch_land_s(4, 3.0) == 5.0
     assert m.prefetch_land_s(4, 0.0) == 4 * m.SEGMENT_FETCH_BUDGET_S
@@ -2403,8 +2401,7 @@ def t_quality_step_down_due():
     # fires: unpinned, FULL, live-but-degraded, enough dead serves
     assert m.quality_step_down_due("full", False, 2, None) is True
     assert m.quality_step_down_due("full", False, 5, None) is True
-    # not yet enough dead serves
-    assert m.quality_step_down_due("full", False, 1, None) is False
+    assert m.quality_step_down_due("full", False, 1, None) is False, "not yet enough dead serves"
     # pinned suppresses auto
     assert m.quality_step_down_due("full", True, 9, None) is False
     # already below full -> never auto-descend further
@@ -2749,8 +2746,8 @@ def t_schedule_parse_keeps_and_normalises_local_rows():
             "https://youtu.be/b,Bob,Stint 4\n")
     rows = m.ScheduleSource._parse_rows(text)
     assert [r[0] for r in rows] == ["https://youtu.be/a", "local:", "local:", "https://youtu.be/b"]
-    # two back-to-back local stints are ONE continuous capture (one slot)
-    assert m.pull_slots(rows) == [0, 1, 1, 2]
+    assert m.pull_slots(rows) == [0, 1, 1, 2], \
+        "two back-to-back local stints are ONE continuous capture (one slot)"
 
 
 def t_schedule_parse_positional_counts_local_rows():
@@ -3301,8 +3298,8 @@ def t_av_status_block_is_absent_until_a_disturbance_happens():
         "22:25:48.729: warning: DTS 1258128000 < 1259016000 out of order"),
         now=time.monotonic(), serving_age_s=None)
     blk = r._av_status()
-    # An unattributed line is context, never a feed entry invented for it.
-    assert blk == {"feeds": {}, "context": {"dts_backward": 1}}
+    assert blk == {"feeds": {}, "context": {"dts_backward": 1}}, \
+        "an unattributed line is context, never a feed entry invented for it"
 
 
 def t_heartbeat_backlog_sample_classifies_serving_feeds_only():
@@ -3338,8 +3335,8 @@ def t_backlog_yellow_shows_but_never_pages():
             "LIVE drops it with a short black dropout") in h["reasons"]
     facts = r._health_facts(2000.0)
     assert facts["feeds_backlogged"] == {"A": 11.6}
-    # the notify level is computed as if the backlog were absent
-    assert h["notify_level"] == m.aggregate_health({**facts, "feeds_backlogged": {}})["level"]
+    assert h["notify_level"] == m.aggregate_health({**facts, "feeds_backlogged": {}})["level"], \
+        "the notify level is computed as if the backlog were absent"
     r._backlogged_feeds = {}
     assert r._refresh_health(2001.0)["notify_level"] == h["notify_level"]
 

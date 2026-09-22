@@ -65,8 +65,8 @@ def t_classify_update_with_url():
 
 
 def t_classify_building_window():
-    # newer release exists but the platform asset is not uploaded yet
-    assert m.classify(REL, "linux", "v0.1.0") == ("building", "v0.2.0", None)
+    assert m.classify(REL, "linux", "v0.1.0") == ("building", "v0.2.0", None), \
+        "newer release exists but the platform asset is not uploaded yet"
 
 
 def t_classify_bad_tag_is_error():

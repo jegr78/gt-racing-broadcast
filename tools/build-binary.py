@@ -64,7 +64,7 @@ def _pyinstaller_cmd():
     if shutil.which("pyinstaller"):
         return ["pyinstaller"]
     try:
-        import PyInstaller  # noqa: F401 (importability check only)
+        import PyInstaller  # noqa: F401  importability check only
         return [sys.executable, "-m", "PyInstaller"]
     except ImportError:
         pass

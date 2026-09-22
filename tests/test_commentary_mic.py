@@ -143,8 +143,8 @@ def t_unset_warning_names_the_env_var_of_each_device():
 
 
 def t_endurance_without_a_capture_card_does_not_warn_about_the_mic():
-    # Without RACECAST_CAPTURE there is no local stint here, so the mic never opens.
-    assert sa.device_unset_warning([MIC], "endurance", {}) is None
+    assert sa.device_unset_warning([MIC], "endurance", {}) is None, \
+        "without RACECAST_CAPTURE there is no local stint here, so the mic never opens"
     line = sa.device_unset_warning([MIC], "endurance", {"RACECAST_CAPTURE": "Game Capture HD60 X"})
     assert line and "RACECAST_MIC" in line, line
 

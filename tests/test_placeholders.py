@@ -191,8 +191,8 @@ def t_get_media_seeds_placeholder_clip():
         assert sorted(seeded) == ["intro.mp4", "outro.mp4", "trailer.mp4"]
         with open(MP4, "rb") as a, open(os.path.join(tmp, "intro.mp4"), "rb") as b:
             assert a.read() == b.read()
-        # An already-present clip is not overwritten or re-listed.
-        assert gm.seed_missing_media(tmp, {"intro"}) == []
+        assert gm.seed_missing_media(tmp, {"intro"}) == [], \
+            "an already-present clip is not overwritten or re-listed"
 
 
 def t_build_binary_freezes_placeholders():

@@ -501,10 +501,10 @@ def t_annotate_latest_event():
             subs = [e for e in evs if e["type"] == "feed_substitution"]
             assert subs[0]["metadata"] == {"feed": "A", "stint": 2}       # no reason
             assert subs[1]["metadata"].get("reason") == "A dropped"
-            # the takeover event is untouched
-            assert [e for e in evs if e["type"] == "takeover"][0]["metadata"] == {"stint": 5}
-            # None when no such event
-            assert hs.annotate_latest_event(conn, "nope", {"reason": "x"}) is None
+            assert [e for e in evs if e["type"] == "takeover"][0]["metadata"] == {"stint": 5}, \
+                "the takeover event is untouched"
+            assert hs.annotate_latest_event(conn, "nope", {"reason": "x"}) is None, \
+                "none when no such event"
         finally:
             conn.close()
 

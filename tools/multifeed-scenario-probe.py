@@ -102,7 +102,7 @@ class FeedWorker:
         self.cookies = cookies
         self.events = events           # shared list of (ts, slot, kind, detail)
         self.log = log
-        self.logfile = open(  # noqa: SIM115 (long-lived, closed at stop())
+        self.logfile = open(  # noqa: SIM115  long-lived, closed at stop()
             os.path.join(out_dir, f"feed_{slot}.log"), "a", encoding="utf-8")
         self.quality = None
         self.proc = None

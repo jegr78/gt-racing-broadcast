@@ -145,8 +145,8 @@ def t_plugin_present_sees_a_system_wide_install():
     multiarch_so = "/usr/lib/x86_64-linux-gnu/obs-plugins/" + m.PLUGIN_SO
     assert m.plugin_present(home, "x86_64", exists=lambda p: p == multiarch_so) is True
     assert m.plugin_present(home, exists=lambda p: False) is False
-    # the narrow per-user check stays available and unchanged
-    assert m.plugin_installed(home, exists=lambda p: p == sys_so) is False
+    assert m.plugin_installed(home, exists=lambda p: p == sys_so) is False, \
+        "the narrow per-user check stays available and unchanged"
 
 
 if __name__ == "__main__":

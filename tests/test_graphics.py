@@ -117,8 +117,8 @@ def t_internal_from_csv_various_truthy_and_header_aliases():
 
 
 def t_internal_from_csv_no_header_or_no_column_is_empty():
-    # A header-less sheet has no Internal column.
-    assert m.internal_from_csv([["Standings", "https://drive.google.com/file/d/S/view"]]) == set()
+    assert m.internal_from_csv([["Standings", "https://drive.google.com/file/d/S/view"]]) == set(), \
+        "a header-less sheet has no Internal column"
     # Header present, Internal column absent.
     assert m.internal_from_csv([["Name", "Link"], ["Standings", "x"]]) == set()
     assert m.internal_from_csv([]) == set()

@@ -93,8 +93,8 @@ def t_drift_compares_two_halves_and_refuses_a_trend_from_two_points():
     # happened to be: baselines of 1.4 and 4.6 are the same healthy state, 3.2 s apart.
     # Two points are not a trend, so the amount is reported and the judgement withheld.
     assert m.drift(r(1.4, 4.6), RESERVE) == (3.2, None)
-    # Four points carry two halves, which is the fewest that can.
-    assert m.drift(r(4.0, 4.2, 4.6, 5.0), RESERVE) == (0.7, True)
+    assert m.drift(r(4.0, 4.2, 4.6, 5.0), RESERVE) == (0.7, True), \
+        "four points carry two halves, which is the fewest that can"
     creep = r(4.0, 4.4, 12.0, 14.0)
     assert m.drift(creep, RESERVE) == (8.8, False)
     # A run that ends lower is information, not a failure.

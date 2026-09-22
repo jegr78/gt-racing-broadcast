@@ -126,7 +126,7 @@ def darwin_app_version(app, exists=os.path.exists, read_plist=_read_plist):
             continue
         try:
             data = read_plist(plist)
-        except Exception:   # noqa: BLE001 — unreadable/corrupt plist -> no version, never raise
+        except Exception:   # noqa: BLE001  unreadable/corrupt plist -> no version, never raise
             return None
         return (data.get("CFBundleShortVersionString")
                 or data.get("CFBundleVersion") or None)
@@ -146,7 +146,7 @@ def _run(argv, run=None, timeout=8):
     try:
         import services
         nw = services.no_window_kwargs()
-    except Exception:   # noqa: BLE001 — services optional (standalone) / probe is best-effort
+    except Exception:   # noqa: BLE001  services optional (standalone) / probe is best-effort
         nw = {}
     try:
         return run(argv, capture_output=True, text=True, errors="replace",
@@ -236,7 +236,7 @@ def windows_file_version(path):
             block, ctypes.POINTER(ctypes.c_uint * (length.value // 4))).contents
         ms, ls = words[2], words[3]       # dwFileVersionMS, dwFileVersionLS
         return f"{ms >> 16}.{ms & 0xFFFF}.{ls >> 16}.{ls & 0xFFFF}"
-    except Exception:   # noqa: BLE001 — any API/format hiccup -> no version, never raise
+    except Exception:   # noqa: BLE001  any API/format hiccup -> no version, never raise
         return None
 
 
@@ -313,7 +313,7 @@ def companion_http_version(base_url="http://127.0.0.1:8000", fetch=_http_fetch):
         head = fetch(base + bundle, 65536)
         marker = re.search(r'SENTRY_RELEASE=\{id:["\'`](\d+\.\d+\.\d+)', head)
         return marker.group(1) if marker else None
-    except Exception:   # noqa: BLE001 — Companion unreachable / markup changed -> unknown
+    except Exception:   # noqa: BLE001  Companion unreachable / markup changed -> unknown
         return None
 
 

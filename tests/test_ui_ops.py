@@ -318,8 +318,8 @@ def t_tools_status_data_mixed():
     by = {t["name"]: t for t in d["tools"]}
     assert by["yt-dlp"]["installed"] is True and by["yt-dlp"]["version"] == "yt-dlp 1.2.3"
     assert by["streamlink"]["installed"] is False and by["streamlink"]["version"] is None
-    # every canonical tool is represented
-    assert {t["name"] for t in d["tools"]} >= {"yt-dlp", "streamlink", "ffmpeg", "deno"}
+    assert {t["name"] for t in d["tools"]} >= {"yt-dlp", "streamlink", "ffmpeg", "deno"}, \
+        "every canonical tool is represented"
 
 
 def t_tools_status_data_includes_speedtest():
@@ -364,8 +364,8 @@ def t_apps_status_data_includes_version():
     by = {a["name"]: a for a in d["apps"]}
     assert by["obs"]["version"] == "31.0.2"
     assert by["discord"]["installed"] is True and by["discord"]["version"] is None
-    # an app that isn't installed is never version-probed
-    assert by["companion"]["installed"] is False and by["companion"]["version"] is None
+    assert by["companion"]["installed"] is False and by["companion"]["version"] is None, \
+        "an app that isn't installed is never version-probed"
 
 
 def t_apps_status_data_error():

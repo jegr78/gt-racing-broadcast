@@ -291,8 +291,8 @@ def t_send_bundles_sliced_logs_and_host():
         assert "inside the session" in relay
         assert "way before the event" not in relay
         assert "long after the event" not in relay
-        # foreign-format obs log kept whole (not emptied by the window clip)
-        assert "obs boot line" in zf.read("logs/obs/obs.log").decode()
+        assert "obs boot line" in zf.read("logs/obs/obs.log").decode(), \
+            "foreign-format obs log kept whole (not emptied by the window clip)"
 
 
 def t_report_includes_teardown_events_after_last_sample():

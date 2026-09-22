@@ -474,8 +474,8 @@ def t_localize_tyres_empty_shares_capture_device():
     leaves = _video_leaves(d)
     assert [s["settings"] for s in leaves if s["name"] == "Solo Capture Device"] == [
         {"video_device_id": "Elgato HD60 X:X"}]
-    # The card is opened exactly once: one input carries the capture device value.
-    assert sum(1 for s in leaves if "Elgato HD60 X:X" in s["settings"].values()) == 1
+    assert sum(1 for s in leaves if "Elgato HD60 X:X" in s["settings"].values()) == 1, \
+        "the card is opened exactly once: one input carries the capture device value"
 
 
 def t_localize_tyres_equal_to_capture_shares_capture_device():

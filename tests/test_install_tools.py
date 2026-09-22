@@ -50,12 +50,12 @@ def t_install_commands_apt_updates_then_skips_managed():
 
 
 def t_streamlink_managed_on_linux_only():
-    # apt's streamlink predates 8.2.0, so Linux gets a managed venv.
-    assert m.streamlink_needs_managed_install("apt") is True
+    assert m.streamlink_needs_managed_install("apt") is True, \
+        "apt's streamlink predates 8.2.0, so Linux needs a managed venv"
     assert m.streamlink_needs_managed_install("brew") is False    # brew ships 8.x
     assert m.streamlink_needs_managed_install("winget") is False  # winget ships 8.x
-    # The pinned spec must be at or above preflight's 8.2.0 floor.
-    assert m.STREAMLINK_VERSION >= "8.2.0"
+    assert m.STREAMLINK_VERSION >= "8.2.0", \
+        "the pinned streamlink must stay at or above preflight's 8.2.0 floor"
     assert m.STREAMLINK_SPEC == "streamlink==" + m.STREAMLINK_VERSION
 
 
@@ -107,8 +107,8 @@ def t_pick_manager_pacman_on_arch():
     assert m.pick_manager("linux", which=only("pacman")) == "pacman"
     assert m.pick_manager("linux", which=only("apt-get")) == "apt"
     assert m.pick_manager("linux", which=lambda n: None) is None
-    # A box carrying both (a pacman port on Debian) keeps its existing apt path.
-    assert m.pick_manager("linux", which=lambda n: "/usr/bin/" + n) == "apt"
+    assert m.pick_manager("linux", which=lambda n: "/usr/bin/" + n) == "apt", \
+        "a box carrying both managers keeps its existing apt path"
 
 
 def t_install_commands_pacman_takes_all_four_from_the_repo():
@@ -126,8 +126,8 @@ def t_install_commands_pacman_takes_all_four_from_the_repo():
 
 
 def t_install_commands_pacman_sudo_prefix():
-    # pacman needs root and does not prompt for it, same as apt.
-    assert m.install_commands("pacman", ["ffmpeg"], sudo=False)[0][0] == "pacman"
+    assert m.install_commands("pacman", ["ffmpeg"], sudo=False)[0][0] == "pacman", \
+        "pacman needs root and does not prompt for it, same as apt"
     assert m.install_commands("pacman", ["ffmpeg"], sudo=True)[0][0] == "sudo"
 
 
@@ -138,8 +138,8 @@ def t_update_commands_pacman_refuses_partial_upgrade():
 
 
 def t_streamlink_not_managed_on_pacman():
-    # Arch ships streamlink 8.x, so the apt-only venv workaround stays off.
-    assert m.streamlink_needs_managed_install("pacman") is False
+    assert m.streamlink_needs_managed_install("pacman") is False, \
+        "arch ships streamlink 8.x, so the apt-only venv workaround stays off"
     assert m.streamlink_needs_managed_install("apt") is True
 
 
@@ -155,8 +155,8 @@ def t_manual_guide_pacman_variant():
     assert "apt-get" not in guide          # the apt text is actively wrong on Arch
     for tool in m.TOOLS:
         assert tool in guide
-    # unchanged for everyone else
-    assert "apt-get" in m.manual_guide("linux")
+    assert "apt-get" in m.manual_guide("linux"), \
+        "the manual guide is unchanged for everyone else"
 
 
 def t_windows_fresh_path_joins_registry_values():
@@ -414,11 +414,9 @@ def t_min_os_error_below_at_above_floor():
     msg = m.min_os_error((2, 31))
     assert msg is not None
     assert "2.31" in msg and "2.35" in msg and "24.04" in msg
-    # At or above the floor there is no error.
-    assert m.min_os_error((2, 35)) is None
+    assert m.min_os_error((2, 35)) is None, "at or above the floor there is no error"
     assert m.min_os_error((2, 39)) is None
-    # An undeterminable glibc must never block.
-    assert m.min_os_error(None) is None
+    assert m.min_os_error(None) is None, "an undeterminable glibc must never block"
     assert m.MIN_GLIBC_TOOLS == (2, 35) and m.MIN_GLIBC_BINARY == (2, 38)
 
 
