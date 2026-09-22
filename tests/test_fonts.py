@@ -9,7 +9,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))
 import fonts_bundle as fb
 
-# tools/fetch-fonts.py has a hyphen -> load it by path.
+# tools/fetch-fonts.py has a hyphen in its name, so it is loaded by path.
 _spec = importlib.util.spec_from_file_location(
     "fetch_fonts", os.path.join(ROOT, "tools", "fetch-fonts.py"))
 fetch_fonts = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(fetch_fonts)
@@ -105,8 +105,8 @@ def t_fetch_family_returns_empty_without_woff2():
 
 
 def t_fetch_family_returns_all_cuts():
-    # A css2 response with the four latin cuts -> the four self-host files (so the
-    # bundled baseline renders true bold/italic, not synthesized).
+    # A css2 response with the four latin cuts gives the four self-host files, so the
+    # bundled baseline renders true bold and italic rather than synthesizing them.
     def cut(style, weight, fn, latin=True):
         ur = "U+0000-00FF, U+0131" if latin else "U+0400-045F"
         return ("@font-face { font-family:'Nunito Sans'; font-style:%s; font-weight:%s;"
@@ -124,7 +124,7 @@ def t_fetch_family_returns_all_cuts():
 
 
 def t_fetch_family_single_cut_fallback():
-    # A response without latin subset blocks still yields one base file (back-compat).
+    # A response without latin subset blocks still yields one base file.
     files = fetch_fonts.fetch_family(
         "Oswald", css_fetch=lambda u: "url(https://fonts.gstatic.com/x.woff2)",
         bin_fetch=lambda u: b"DATA")

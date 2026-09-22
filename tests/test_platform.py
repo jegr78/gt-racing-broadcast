@@ -13,9 +13,9 @@ def t_platform_of():
     assert feeds.platform_of("https://www.twitch.tv/somechannel") == "twitch"
     assert feeds.platform_of("https://TWITCH.TV/Chan") == "twitch"      # case-insensitive
     assert feeds.platform_of("https://m.twitch.tv/chan") == "twitch"    # subdomain
-    # bare UC id (channel_url turns it into a youtube URL) -> youtube
+    # a bare UC id, which channel_url turns into a youtube URL -> youtube
     assert feeds.platform_of("UC1234567890123456789012") == "youtube"
-    # userinfo trick must NOT be seen as twitch
+    # the userinfo trick must not be seen as twitch
     assert feeds.platform_of("https://twitch.tv@evil.com/") == "youtube"
 
 
@@ -27,10 +27,9 @@ def t_serve_cmd_youtube():
 
 
 def t_serve_cmd_youtube_browser_ua():
-    # streamlink re-fetches the yt-dlp-resolved manifest in a SEPARATE process; it must
-    # carry a browser User-Agent or YouTube 403s the bare re-fetch of a protected live
-    # manifest (the #345 first-live-event failure — yt-dlp resolved itag 301 fine, then
-    # streamlink got 403). yt-dlp sends a browser UA on the resolve; streamlink must too.
+    # streamlink re-fetches the yt-dlp-resolved manifest in a separate process, so it
+    # must carry a browser User-Agent or YouTube 403s the bare re-fetch of a protected
+    # live manifest. yt-dlp sends a browser UA on the resolve; streamlink must too. (#345)
     cmd = feeds.streamlink_serve_cmd("https://hls.example/x.m3u8", 53001)
     i = cmd.index("--http-header")
     assert cmd[i + 1].startswith("User-Agent=")
@@ -40,20 +39,21 @@ def t_serve_cmd_youtube_browser_ua():
 
 def t_serve_cmd_youtube_cookies():
     # the same cookies yt-dlp authenticated the resolve with must be handed to
-    # streamlink's fetch (unlisted/members streams bind the manifest to the session).
+    # streamlink's fetch, because unlisted and members streams bind the manifest to
+    # the session
     cmd = feeds.streamlink_serve_cmd("https://hls.example/x.m3u8", 53001,
                                      cookies="/tmp/yt-cookies.txt")
     i = cmd.index("--http-cookies-file")
     assert cmd[i + 1] == "/tmp/yt-cookies.txt"
     assert i < cmd.index("--")                          # option before the URL
-    # absent when there is no cookies file (public stream, no auth)
+    # absent when there is no cookies file, as for a public stream
     cmd2 = feeds.streamlink_serve_cmd("https://hls.example/x.m3u8", 53001)
     assert "--http-cookies-file" not in cmd2
 
 
 def t_serve_cmd_twitch_no_youtube_context():
-    # the Twitch plugin resolves and fetches in-process; it must NOT inherit the
-    # YouTube browser-UA override or the yt cookies file.
+    # the Twitch plugin resolves and fetches in-process, so it must not inherit the
+    # YouTube browser-UA override or the yt cookies file
     cmd = feeds.streamlink_serve_cmd("https://www.twitch.tv/chan", 53002,
                                      platform="twitch", cookies="/tmp/yt-cookies.txt")
     assert "--http-cookies-file" not in cmd
@@ -89,19 +89,18 @@ def t_ssai_markers():
 
 def t_cookies_for():
     d = tempfile.mkdtemp()
-    # nothing present -> None for both
+    # nothing present gives None for both
     assert feeds.cookies_for("youtube", d) is None
     assert feeds.cookies_for("twitch", d) is None
     assert feeds.cookies_for("youtube", None) is None
-    # legacy cookies.txt is still picked up for youtube
+    # the legacy cookies.txt is still picked up for youtube
     legacy = os.path.join(d, "cookies.txt")
     with open(legacy, "w") as f: f.write("x")
     assert feeds.cookies_for("youtube", d) == legacy
-    # new yt-cookies.txt wins over legacy
+    # yt-cookies.txt wins over the legacy name
     new = os.path.join(d, "yt-cookies.txt")
     with open(new, "w") as f: f.write("x")
     assert feeds.cookies_for("youtube", d) == new
-    # twitch file
     tw = os.path.join(d, "twitch-cookies.txt")
     with open(tw, "w") as f: f.write("x")
     assert feeds.cookies_for("twitch", d) == tw
@@ -109,14 +108,14 @@ def t_cookies_for():
 
 def t_migrate_legacy():
     d = tempfile.mkdtemp()
-    # no files: no-op, returns the canonical path
+    # no files: a no-op that returns the canonical path
     assert feeds.migrate_legacy_cookie(d).endswith("yt-cookies.txt")
     # legacy present, new absent: renamed
     legacy = os.path.join(d, "cookies.txt")
     with open(legacy, "w") as f: f.write("x")
     p = feeds.migrate_legacy_cookie(d)
     assert p.endswith("yt-cookies.txt") and os.path.isfile(p) and not os.path.isfile(legacy)
-    # both present: legacy left as-is, new wins
+    # both present: the legacy file is left alone and the new one wins
     with open(legacy, "w") as f: f.write("y")
     p2 = feeds.migrate_legacy_cookie(d)
     assert os.path.isfile(p2) and os.path.isfile(legacy)
@@ -148,7 +147,7 @@ def _load_getcookies():
 def t_cookie_target():
     gc = _load_getcookies()
     out_yt, url_yt = gc.cookie_target("youtube", "/run")
-    # exact URL match (not a substring check — avoids py/incomplete-url-substring-sanitization)
+    # an exact URL match, not a substring check, so py/incomplete-url-substring-sanitization stays quiet
     assert out_yt.endswith("yt-cookies.txt")
     assert url_yt == "https://www.youtube.com/watch?v=jNQXAC9IVRw"
     out_tw, url_tw = gc.cookie_target("twitch", "/run")
@@ -184,7 +183,7 @@ def t_failure_hint_youtube_decrypt_keeps_original_command():
 
 
 def t_failure_hint_default_platform_is_youtube():
-    # Two-arg call (as used by racecast-feeds._cookie_hint) must still mention YouTube.
+    # The two-arg call, as racecast-feeds._cookie_hint makes it, must still say YouTube.
     gc = _load_getcookies()
     hint = gc.failure_hint("", "brave")
     assert "YouTube" in hint

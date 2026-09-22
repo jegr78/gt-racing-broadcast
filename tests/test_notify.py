@@ -73,8 +73,8 @@ def t_substitution_payload():
 
 
 def t_feed_recovery_churn_payload():
-    # A CHURN alert DOES ping @here (a single self-healed drop is recorded silently and
-    # never posts — that's handled relay-side, not here).
+    # A churn alert does ping @here. A single self-healed drop is recorded silently
+    # and never posts, which the relay handles, not this builder.
     p = n.feed_recovery_churn_payload("A", 4, 5, "JeGr", event_title="6h Spa")
     assert p["username"] == n.USERNAME
     assert p.get("content") == "@here"               # churn pings
@@ -95,7 +95,7 @@ def t_report_payload():
 
 
 def t_report_payload_carries_the_finding():
-    # #586: the report's verdict leads the embed.
+    # The report's verdict leads the embed. (#586)
     p = n.report_discord_payload("E", [("Uptime", "98.0%")],
                                  description="Output ran behind live for 41m of 56m.")
     assert p["embeds"][0].get("description") == "Output ran behind live for 41m of 56m."

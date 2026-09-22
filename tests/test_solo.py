@@ -59,7 +59,7 @@ def t_solo_heartbeat_paths_never_crash():
     import time as _t
     r = _solo_relay()
     now = _t.time()
-    # the heartbeat body constituents must not raise in solo (no A/B feeds)
+    # the heartbeat body constituents must not raise in solo, where there are no A/B feeds
     r._sample_connectivity()
     r._refresh_health(now)
     snap = r._health_snapshot(now)          # feed fields NULL, POV/system fields present

@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))
 import parts as m  # pure module
 import producer as pm  # pure Producer-tab classifier (same sys.path as parts)
 
-# relay module (hyphenated filename -> load by path); used from Task 2 on.
+# The relay module has a hyphenated filename, so it is loaded by path.
 _rspec = importlib.util.spec_from_file_location(
     "irofeeds", os.path.join(ROOT, "src", "relay", "racecast-feeds.py"))
 R = importlib.util.module_from_spec(_rspec); _rspec.loader.exec_module(R)
@@ -50,8 +50,8 @@ def t_view_model_qualifying_confirm_phrase():
 
 
 def t_stream_active_param():
-    # Client passes the OBS truth it already polled -> /parts/data skips its own
-    # obs-ws read. Absent/unknown -> None (relay falls back to reading OBS).
+    # The client passes the OBS truth it already polled, so /parts/data skips its own
+    # obs-ws read. Absent or unknown gives None and the relay reads OBS itself.
     assert m.stream_active_param("1") is True
     assert m.stream_active_param("true") is True
     assert m.stream_active_param("0") is False
@@ -70,7 +70,7 @@ def t_view_model_ready_offers_start():
 
 
 def t_view_model_live_offers_end_from_obs():
-    # file says not live, OBS says active -> OBS wins (authoritative)
+    # file says not live, OBS says active -> OBS wins, it is authoritative
     vm = m.parts_view_model(ROWS3, {"index": 1, "live": False}, stream_active=True)
     assert vm["live"] is True and vm["action"] == "end"
     assert vm["confirm_phrase"] == "END PART 1"
@@ -229,8 +229,8 @@ def t_producer_source_parses_on_refresh():
 
 
 def t_last_part_condition():
-    # The relay's /parts/end branch detects "this was the last part" with
-    # live and index == count — used to decide whether to spawn `event stop`.
+    # The relay's /parts/end branch detects "this was the last part" from live plus
+    # index == count, which decides whether to spawn `event stop`.
     rows = [{"part": "P1"}, {"part": "P2"}]
     vm = m.parts_view_model(rows, {"index": 2, "live": True}, stream_active=True)
     assert vm["live"] and vm["index"] == vm["count"]      # last part is live
@@ -256,7 +256,7 @@ def t_active_producer_rows_filters_by_mode():
     assert [r["part"] for r in race] == ["Part 1", "Part 2"]
     qual = pm.active_producer_rows(rows, "qualifying")
     assert [r["part"] for r in qual] == ["Q"]
-    # unknown mode -> race subset; empty/None -> []
+    # unknown mode -> race subset; empty or None -> []
     assert [r["part"] for r in pm.active_producer_rows(rows, "x")] == ["Part 1", "Part 2"]
     assert pm.active_producer_rows([], "race") == []
     assert pm.active_producer_rows(None, "qualifying") == []

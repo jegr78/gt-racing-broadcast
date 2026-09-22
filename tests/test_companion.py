@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))
 import companion_common as cc
 
 
-# --- desired_bind_ip: single bind value for Companion (auto -> Tailscale) -----
+# desired_bind_ip: one bind value for Companion, auto -> Tailscale.
 def t_desired_auto_uses_tailscale_when_present():
     assert cc.desired_bind_ip("auto", "100.64.10.20") == "100.64.10.20"
 
@@ -23,7 +23,7 @@ def t_desired_explicit_overrides_detection():
     assert cc.desired_bind_ip("127.0.0.1", None) == "127.0.0.1"
 
 
-# --- config_with_bind_ip: edit only bind_ip, keep every other key -------------
+# config_with_bind_ip: edit only bind_ip, keep every other key.
 def t_config_updates_bind_ip_preserving_other_keys():
     src = '{"bind_ip": "127.0.0.1", "http_port": 8000, "syslog_port": 514}'
     d = json.loads(cc.config_with_bind_ip(src, "100.64.10.20"))
@@ -40,7 +40,7 @@ def t_config_invalid_json_raises_valueerror():
     assert raised
 
 
-# --- plan_companion_action: stop-before-edit, start-at-end decision -----------
+# plan_companion_action: the stop-before-edit, start-at-end decision.
 def t_plan_change_while_running_stops_first():
     assert cc.plan_companion_action("127.0.0.1", "100.64.10.20", True) == \
         {"edit": True, "stop_first": True, "start": True}
@@ -61,15 +61,15 @@ def t_plan_already_correct_but_stopped_starts():
         {"edit": False, "stop_first": False, "start": True}
 
 
-# --- companion_config_path: per-OS location of config.json -------------------
+# companion_config_path: the per-OS location of config.json.
 def t_config_path_macos():
-    # normalize separators: expanduser+join mix / and \ when run on Windows
+    # normalize separators: expanduser and join mix / and \ on Windows
     p = cc.companion_config_path("darwin", env={}).replace(os.sep, "/")
     assert p.endswith("Library/Application Support/companion/config.json"), p
 
 
 def t_config_path_linux_xdg():
-    # expected via os.path.join: separators differ when this test runs on Windows
+    # built with os.path.join, since the separators differ on Windows
     assert cc.companion_config_path("linux", env={"XDG_CONFIG_HOME": "/x/cfg"}) == \
         os.path.join("/x/cfg", "companion", "config.json")
 
@@ -79,7 +79,7 @@ def t_config_path_windows_appdata():
     assert p == os.path.join(r"C:\Roaming", "companion", "config.json")
 
 
-# --- companion_control_commands: macOS start/quit/running, else None ----------
+# companion_control_commands: macOS start, quit and running, else None.
 def t_control_commands_macos():
     c = cc.companion_control_commands("darwin")
     assert c["start"][0] == "open" and c["quit"][0] == "osascript" and "running" in c
@@ -89,7 +89,6 @@ def t_control_commands_unsupported_is_none():
     assert cc.companion_control_commands("sunos5") is None
 
 
-# --- Windows control commands ------------------------------------------------
 def t_control_commands_windows():
     exe = os.path.join("C:" + os.sep, "Apps", "Companion.exe")
     cmds = cc.companion_control_commands("win32", exe=exe)
@@ -111,7 +110,6 @@ def t_control_commands_darwin_unchanged():
     assert cmds["start"] == ["open", "-a", "Companion"]
 
 
-# --- find_companion_exe ------------------------------------------------------
 def t_find_companion_exe_override_wins():
     path = os.path.join("D:" + os.sep, "Tools", "Companion.exe")
     assert cc.find_companion_exe({"RACECAST_COMPANION_EXE": path}, exists=lambda p: True) == path
@@ -125,7 +123,6 @@ def t_find_companion_exe_candidates():
     assert cc.find_companion_exe({}, exists=lambda p: False) is None
 
 
-# --- parse_running -----------------------------------------------------------
 def t_parse_running():
     assert cc.parse_running("win32", 0, "INFO: No tasks are running ...") is False
     assert cc.parse_running("win32", 0, '"Companion.exe","4242","Console"') is True
@@ -133,7 +130,7 @@ def t_parse_running():
     assert cc.parse_running("darwin", 1, "") is False
 
 
-# --- companion_reachable: TCP health probe ------------------------------------
+# companion_reachable, the TCP health probe.
 def t_companion_reachable():
     import socket
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -144,7 +141,7 @@ def t_companion_reachable():
         assert cc.companion_reachable("127.0.0.1", port, 1.0) is True
     finally:
         srv.close()
-    # Closed port -> False (no exception).
+    # A closed port gives False rather than an exception.
     assert cc.companion_reachable("127.0.0.1", port, 0.5) is False
 
 

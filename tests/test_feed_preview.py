@@ -169,7 +169,7 @@ def t_manager_placeholder_when_pov_off():
 
 
 def _make_min_relay_for_preview():
-    """Minimal Relay for endpoint tests — two stints, temp log dir."""
+    """Minimal Relay for endpoint tests: two stints, temp log dir."""
     return _FakeRelay(live="A")
 
 
@@ -230,16 +230,16 @@ def t_endpoint_feed_b_returns_jpeg():
         srv.shutdown()
 
 
-# ── Task 8: fan-out ring-tap routing and worker ─────────────────────────────
+# Fan-out ring-tap routing and worker.
 
 def t_preview_source_ring_when_fanout_and_offair():
-    """Off-air feed with fan-out on → ('ring', key), not ('pull', key)."""
+    """Off-air feed with fan-out on gives ('ring', key), not ('pull', key)."""
     kind, ref = m.preview_source("B", "A", False, {"A", "B"}, fanout=True)
     assert (kind, ref) == ("ring", "B")
 
 
 def t_preview_source_pull_when_fanout_off():
-    """Fan-out off → classic ('pull', key) for the off-air feed."""
+    """Fan-out off gives the classic ('pull', key) for the off-air feed."""
     kind, ref = m.preview_source("B", "A", False, {"A", "B"}, fanout=False)
     assert (kind, ref) == ("pull", "B")
 
@@ -348,8 +348,8 @@ def t_manager_offair_uses_ring_tap_when_fanout():
 
 
 def t_preview_ring_tap_prepends_init_and_aligns_an_fmp4_join():
-    """#577: the preview tap joins at the live edge like OBS does, so an fMP4
-    feed needs the same init segment + moof alignment before ffmpeg sees it."""
+    """The preview tap joins at the live edge like OBS does, so an fMP4 feed needs
+    the same init segment and moof alignment before ffmpeg sees it. (#577)"""
     def box(typ, payload=b""):
         return (8 + len(payload)).to_bytes(4, "big") + typ + payload
     init = box(b"ftyp", b"mp42" + b"\x00" * 8) + box(b"moov", b"\x11" * 200)

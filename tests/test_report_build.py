@@ -50,8 +50,8 @@ def t_select_session_empty():
 
 
 def t_select_session_floor_discards_earlier_event():
-    # a previous event (100-130) then this one (400-430) — a 270s gap < 1800s would
-    # normally merge them into one window. A floor at this event's start clamps it.
+    # a previous event (100-130) then this one (400-430): a 270s gap < 1800s would
+    # normally merge them into one window, so a floor at this event's start clamps it
     ts = [100.0, 130.0, 400.0, 430.0]
     assert rb.select_session(ts, gap_s=1800, floor=400.0) == (400.0, 430.0)
     # floor between samples keeps only those at/after it
@@ -69,7 +69,7 @@ def t_select_session_floor_after_all_samples_empty():
 
 
 def t_quality_includes_host_metrics():
-    # #536: host CPU/RAM/network (already sampled) surface in the report quality section.
+    # Host CPU, RAM and network surface in the report quality section. (#536)
     samples = [_sample(0.0, sys_cpu_pct=20.0, sys_mem_pct=60.0,
                        sys_net_down_kbps=3000.0, sys_net_up_kbps=10000.0),
                _sample(30.0, sys_cpu_pct=40.0, sys_mem_pct=70.0,
@@ -86,14 +86,14 @@ def t_quality_includes_host_metrics():
 
 
 def t_quality_host_absent_degrades_to_dashes():
-    # OBS-only samples (no sys_*) still build; host cells fall back to "—".
+    # OBS-only samples, with no sys_*, still build; host cells fall back to a dash.
     samples = [_sample(0.0, obs_cpu_pct=5.0), _sample(30.0, obs_cpu_pct=6.0)]
     q = rb._quality(samples)
     assert q["sys_cpu_avg"] is None and q["net_down_avg"] is None, q
 
 
 def t_quality_includes_inbound_gap_peak():
-    # #535: the worst inbound inter-arrival gap across both feeds surfaces as a peak row.
+    # The worst inbound inter-arrival gap across both feeds surfaces as a peak row. (#535)
     samples = [_sample(0.0, feed_a_max_gap_s=0.5, feed_b_max_gap_s=0.0),
                _sample(30.0, feed_a_max_gap_s=3.4, feed_b_max_gap_s=2.1)]
     q = rb._quality(samples)
@@ -131,8 +131,8 @@ def t_slice_log_by_window_keeps_in_window_and_continuations():
 
 
 def t_slice_log_by_window_foreign_format_kept_whole():
-    # a log with no parseable 'YYYY-MM-DD HH:MM:SS' prefix (e.g. OBS time-only) is
-    # returned whole rather than emptied
+    # a log with no parseable 'YYYY-MM-DD HH:MM:SS' prefix, such as OBS's time-only
+    # form, is returned whole rather than emptied
     obs = "21:24:32.456: Loaded scene\n21:40:00.000: Something later\n"
     assert rb.slice_log_by_window(obs, 1.0, 2.0) == obs
 
@@ -172,9 +172,8 @@ def t_build_report_on_air_names_and_fallback():
 
 
 def t_on_air_back_to_back_same_url_counts_two_stints():
-    # Display-stint samples: stint 1 then stint 2, the SAME commentator across a
-    # same-URL back-to-back -> credited as TWO stints for that commentator, full
-    # duration preserved (#500 Problem 1).
+    # Display-stint samples: stint 1 then stint 2, the same commentator across a
+    # same-URL back-to-back, credited as two stints with the full duration. (#500)
     samples = [_sample(0.0, live_stint=1), _sample(30.0, live_stint=1),
                _sample(60.0, live_stint=2), _sample(90.0, live_stint=2)]
     rep = rb.build_report(samples, [], {1: "Alice", 2: "Alice"},
@@ -210,8 +209,8 @@ def t_render_html_is_self_contained():
     assert html.startswith("<!doctype html>")
     assert "Grand Prix" in html
     assert "Alice" in html
-    # self-contained: no external references (dotless marker avoids the CodeQL
-    # incomplete-url-substring rule that has bitten test asserts before)
+    # self-contained, with no external references; the marker is dotless to stay
+    # clear of CodeQL's incomplete-url-substring rule
     assert "http" + "://" not in html, "external URL leaked into report"
     assert "https" + "://" not in html
     assert "Feed reliability" in html
@@ -244,12 +243,12 @@ def t_feed_stats_interval_weighted_downtime():
 
 def t_fill_gaps_does_not_bridge_relay_down_gap():
     # Contiguous green [0,30], then a ~11-min relay-down hole, then green [700,730],
-    # all within one session. The hole must NOT count as green -> uptime well below 100%.
+    # all within one session. The hole must not count as green.
     samples = [_sample(0.0), _sample(30.0),
                _sample(700.0), _sample(730.0)]
     rep = rb.build_report(samples, [], {}, "E", (0.0, 730.0), now=1000.0)
     assert rep["header"]["uptime_pct"] < 100.0, rep["header"]
-    # green wall-clock is the two contiguous 30s intervals (~60s of 730s), NOT the whole span
+    # green wall-clock is the two contiguous 30s intervals, ~60s of 730s, not the whole span
     assert rep["header"]["uptime_pct"] <= 20.0, rep["header"]
 
 
@@ -276,8 +275,8 @@ def t_report_collects_and_renders_substitutions():
 
 
 def t_report_collects_and_renders_obs_consumer_events():
-    # #582: ring laps under OBS, automatic OBS rebuilds and the guard's stand-down are
-    # facts the report must show; 26 rebuilds on 2026-08-28 were invisible afterwards.
+    # Ring laps under OBS, automatic OBS rebuilds and the guard's stand-down are facts
+    # the report must show. (#582)
     samples = [_sample(100.0), _sample(160.0)]
     events = [
         {"ts": 110.0, "type": "fanout_overflow",
@@ -309,8 +308,8 @@ def t_report_collects_and_renders_obs_consumer_events():
 
 
 def t_report_collects_and_renders_recoveries():
-    # A self-healed feed drop (auto-recovery) must show in its own report section — the
-    # 2026-07-10 gap where a ~10 s stutter left the report "all green".
+    # A self-healed feed drop must show in its own report section, or a short stutter
+    # leaves the report reading "all green".
     samples = [_sample(100.0), _sample(160.0)]
     events = [
         {"ts": 130.0, "type": "feed_recovery",
@@ -333,7 +332,7 @@ def t_report_collects_and_renders_recoveries():
 
 def t_build_report_no_mutation_on_repeated_call():
     # build_report must not mutate shared state: two calls on the same samples must
-    # yield identical health_bands (no accumulating dict mutation).
+    # yield identical health_bands.
     samples = [_sample(0.0), _sample(30.0, health_level="yellow"),
                _sample(60.0, health_level="green"), _sample(90.0)]
     rep1 = rb.build_report(samples, [], {}, "E", (0.0, 90.0), now=1000.0)
@@ -373,7 +372,7 @@ def t_build_report_excludes_off_air():
     def s(ts, lvl):
         return {"ts": ts, "health_level": lvl, "health_reasons": [],
                 "live_stint": 1, "feed_a_down": 0, "feed_b_down": 0}
-    # off-air red BEFORE the part window must not count; in-window green = 100% uptime
+    # off-air red before the part window must not count; in-window green = 100% uptime
     samples = [s(50, "red"), s(100, "green"), s(130, "green"), s(160, "green")]
     events = [{"ts": 100, "type": "part_start", "metadata": {"index": 1}},
               {"ts": 160, "type": "part_end", "metadata": {"index": 1}}]
@@ -390,11 +389,10 @@ def t_build_report_excludes_off_air():
 
 
 def t_build_report_multi_window_uptime_not_over_100():
-    # A stop/restart splits the session into TWO on-air windows with an off-air gap
-    # (< GAP_S) between them (exactly the N24 false-start: OBS started, stopped 47s
-    # later, restarted). Health is green throughout on-air. The off-air gap must NOT
-    # be bridged/counted as green -> uptime stays <= 100% (regression for the 100.3%
-    # seen in the N24 report; the band that spanned the gap over-counted vs on_air_s).
+    # A stop and restart splits the session into two on-air windows with an off-air
+    # gap shorter than GAP_S between them. Health is green throughout on air, and the
+    # off-air gap must not be bridged or counted as green, or a band spanning the gap
+    # over-counts against on_air_s and uptime passes 100%.
     def s(ts, **kw):
         return {"ts": ts, "health_level": "green", "health_reasons": [],
                 "live_stint": 1, "feed_a_down": 0, "feed_b_down": 0, **kw}
@@ -410,7 +408,7 @@ def t_build_report_multi_window_uptime_not_over_100():
     # the 40s off-air gap must not inflate green past the on-air total
     assert rep["header"]["uptime_pct"] == 100.0, rep["header"]
     assert rep["incidents"] == [], rep["incidents"]     # off-air red excluded
-    # commentator on-air likewise must not exceed the on-air total (was 160s > 120s)
+    # commentator on-air likewise must not exceed the on-air total
     alice = next(c for c in rep["on_air"]["commentators"] if c["name"] == "Alice")
     assert alice["seconds"] <= 120, rep["on_air"]
 
@@ -438,13 +436,13 @@ def t_report_discord_fields():
 
 
 def t_on_air_desync_seconds_from_desync_active_bands():
-    # A desync_active band contributes its (gap-filled) duration; a clean event -> 0;
-    # old samples without the key -> 0 (NULL-tolerant).
+    # A desync_active band contributes its gap-filled duration; a clean event and
+    # old samples without the key both give 0.
     samples = [_sample(0.0, live_stint=1, desync_active=1),
                _sample(30.0, live_stint=1, desync_active=1),
                _sample(60.0, live_stint=1, desync_active=0)]
     rep = rb.build_report(samples, [], {1: "Alice"}, "E", (0.0, 60.0), now=1000.0)
-    # gap-filled active band [0,60] -> exactly 60.0s (30->60 gap < GAP_S is bridged).
+    # gap-filled active band [0,60] -> exactly 60.0s, because a 30->60 gap < GAP_S is bridged
     assert rep["on_air"]["desync_seconds"] == 60.0, rep["on_air"]
 
     clean = [_sample(0.0, live_stint=1), _sample(30.0, live_stint=1)]
@@ -465,10 +463,9 @@ def t_render_html_shows_desync_caveat_when_present():
 
 
 def t_timeline_prefers_event_label_over_part_index():
-    # #523: the relay stores the real part label — a qualifying part is
-    # label="Q started"/"Q ended" (metadata.index is just the pointer position, 1).
-    # broadcast_timeline must show the LABEL, not "Part 1", so qualifying reports
-    # don't mislabel the Q part.
+    # The relay stores the real part label, so a qualifying part is "Q started" or
+    # "Q ended" while metadata.index is only the pointer position. broadcast_timeline
+    # must show the label, not "Part 1". (#523)
     events = [{"ts": 100, "type": "part_start", "label": "Q started",
                "metadata": {"index": 1}},
               {"ts": 160, "type": "part_end", "label": "Q ended",
@@ -489,7 +486,7 @@ def run():
 
 
 
-# ---- #586: windowed render metric, fps against the configured rate, backlog verdict ----
+# Windowed render metric, fps against the configured rate, backlog verdict. (#586)
 
 def _broadcast(n, **kw):
     """n on-air samples, 30 s apart, on Feed A stint 1, with the given fields."""
@@ -497,8 +494,8 @@ def _broadcast(n, **kw):
 
 
 def t_quality_uses_the_windowed_render_skip_rate_not_the_cumulative_counter():
-    # 2026-08-28: OBS had run for 11 h before the broadcast, so the cumulative counter
-    # showed 1.8% while 23.5% of the broadcast's frames were skipped.
+    # OBS can have run for hours before the broadcast, so the cumulative counter reads
+    # far lower than the share of the broadcast's own frames that were skipped.
     samples = _broadcast(4, obs_render_skipped_pct=1.8, obs_render_skip_rate_pct=23.5)
     q = rb.build_report(samples, [], {}, "E", (0.0, 90.0), now=1000.0)["quality"]
     assert (q["render_skip_rate_avg"], q["render_skip_rate_peak"]) == (23.5, 23.5), q
@@ -508,7 +505,7 @@ def t_quality_uses_the_windowed_render_skip_rate_not_the_cumulative_counter():
 
 
 def t_quality_render_skip_rate_is_windowed_to_on_air():
-    # Off-air samples (before the part started) never enter the windowed figure.
+    # Off-air samples, taken before the part started, never enter the windowed figure.
     samples = [_sample(0.0, obs_render_skip_rate_pct=90.0)] + \
         [_sample(t, live_stint=1, live_feed="A", obs_render_skip_rate_pct=2.0)
          for t in (100.0, 130.0, 160.0)]
@@ -645,8 +642,8 @@ def t_discord_payload_carries_the_finding():
 
 
 def t_counter_increase_measures_the_rise_from_the_first_sample_not_its_value():
-    # The first sample is the BASELINE — whatever the counter already held when the
-    # window opened happened before it. Counting that value in full attributed a
+    # The first sample is the baseline: whatever the counter already held when the
+    # window opened happened before it. Counting that value in full attributes the
     # relay's whole pre-event history to the event.
     assert rb.counter_increase([]) == 0
     assert rb.counter_increase([7]) == 0          # one reading shows no rise at all
@@ -658,9 +655,8 @@ def t_counter_increase_measures_the_rise_from_the_first_sample_not_its_value():
 
 
 def t_a_multi_part_event_counts_each_repair_once():
-    # The report summed counter_increase PER on-air window, so a running counter was
-    # re-counted in full at every part. A three-part event whose counter went 5 -> 9
-    # reported 21 instead of 4 — and a multi-part broadcast is the normal case.
+    # Summing counter_increase per on-air window re-counts a running counter in full
+    # at every part: a three-part event whose counter went 5 -> 9 reports 21, not 4.
     samples = []
     for ts, total in ((0.0, 5), (10.0, 5),          # Part 1
                       (100.0, 5), (110.0, 7),       # Part 2
@@ -675,10 +671,9 @@ def t_a_multi_part_event_counts_each_repair_once():
 
 
 def t_a_repair_between_two_parts_is_still_part_of_the_event():
-    # One series across every window, not a sum per window. Per-window, each part's
-    # first sample is its own baseline, so a rise that happened in the OFF-AIR gap
-    # between two parts vanished. The relay was up and the disturbance happened during
-    # the event, so it counts.
+    # One series across every window, not a sum per window. Per window, each part's
+    # first sample is its own baseline, so a rise in the off-air gap between two parts
+    # vanishes even though the relay was up and it happened during the event.
     samples = [_sample(0.0, live_stint=1, av_repairs_total=0, av_unexplained_total=0),
                _sample(10.0, live_stint=1, av_repairs_total=0, av_unexplained_total=0),
                # nothing on air between 10 and 100; the counter rises to 3 meanwhile
@@ -691,9 +686,9 @@ def t_a_repair_between_two_parts_is_still_part_of_the_event():
 
 
 def t_windows_out_of_order_do_not_read_as_a_counter_reset():
-    # counter_increase reads a FALL as a restart and counts the new value in full, so the
-    # series it gets must be chronological. The windows come from the event list in the
-    # order that list happens to have; nothing upstream promises it is sorted.
+    # counter_increase reads a fall as a restart and counts the new value in full, so
+    # the series it gets must be chronological. The windows come from the event list in
+    # whatever order that list has, and nothing upstream promises it is sorted.
     samples = []
     for ts, total in ((0.0, 10), (10.0, 12), (100.0, 12), (110.0, 20)):
         samples.append(_sample(ts, live_stint=1, av_repairs_total=total,
@@ -707,21 +702,18 @@ def t_windows_out_of_order_do_not_read_as_a_counter_reset():
 
 
 def t_counter_increase_skips_missing_samples_instead_of_reading_them_as_zero():
-    # A database written before v11 has NULL here, and a missed tick has nothing. Reading
-    # either as 0 would invent a reset and double the total.
-    #
-    # The first ACTUAL reading is the baseline, so [None, 2, None, 5] is a rise of 3,
-    # not 5. Whether those first 2 happened inside the window is unknowable — the NULLs
-    # say nothing. Taking them as the baseline can under-count; counting them in full
-    # would over-count, and for a line a producer reads after the event, claiming more
-    # disturbances than happened is the worse of the two.
+    # A database written before v11 has NULL here, and a missed tick has nothing.
+    # Reading either as 0 would invent a reset and double the total. The first actual
+    # reading is the baseline, so [None, 2, None, 5] is a rise of 3, not 5: whether
+    # those first 2 happened inside the window is unknowable, and over-counting is the
+    # worse error in a line a producer reads after the event.
     assert rb.counter_increase([None, 2, None, 5]) == 3
     assert rb.counter_increase([None, None]) == 0
 
 
 def t_report_counts_av_repairs_and_the_rendered_line_says_what_it_means():
-    # #619: OBS repaired each of these itself, so the line is a record, not an alarm.
-    # It must say so, or a producer reading the report will go looking for a fault.
+    # OBS repaired each of these itself, so the line is a record, not an alarm. It must
+    # say so, or a producer reading the report goes looking for a fault. (#619)
     samples = [_sample(0.0, live_stint=1, av_repairs_total=0, av_unexplained_total=0),
                _sample(30.0, live_stint=1, av_repairs_total=2, av_unexplained_total=0),
                _sample(60.0, live_stint=1, av_repairs_total=3, av_unexplained_total=1)]
@@ -733,7 +725,7 @@ def t_report_counts_av_repairs_and_the_rendered_line_says_what_it_means():
     assert "1 of them with no feed restart to explain it" in html
     assert "back in sync afterwards" in html
 
-    # All explained: the line still appears (it happened) but names no open question.
+    # All explained: the line still appears but names no open question.
     ok = [_sample(0.0, live_stint=1, av_repairs_total=0, av_unexplained_total=0),
           _sample(30.0, live_stint=1, av_repairs_total=2, av_unexplained_total=0)]
     html2 = rb.render_html(rb.build_report(ok, [], {1: "Alice"}, "E", (0.0, 30.0),
