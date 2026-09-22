@@ -20,18 +20,16 @@ sys.path.insert(0, SCRIPTS)
 spec = importlib.util.spec_from_file_location("obs_ws", os.path.join(SCRIPTS, "obs_ws.py"))
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 
-# apply_split_audio/apply_split_state (#534, #591) live in the relay module (they
-# resolve relay.live_feed()), not in obs_ws.py — load it under the same
-# "irofeeds" alias used by tests/test_console_gate.py and tests/test_cockpit.py.
+# apply_split_audio and apply_split_state live in the relay module rather than in
+# obs_ws.py, because they resolve relay.live_feed(). Load it under the same
+# "irofeeds" alias the other relay tests use. (#534, #591)
 _relay_spec = importlib.util.spec_from_file_location(
     "irofeeds", os.path.join(ROOT, "src", "relay", "racecast-feeds.py"))
 irofeeds = importlib.util.module_from_spec(_relay_spec)
 _relay_spec.loader.exec_module(irofeeds)
 
 
-# --------------------------------------------------------------------------
 # WebSocket plumbing (RFC 6455)
-# --------------------------------------------------------------------------
 def t_accept_key_rfc6455_vector():
     # Known vector straight from RFC 6455 section 1.3.
     assert m.accept_key("dGhlIHNhbXBsZSBub25jZQ==") == "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
@@ -107,9 +105,7 @@ def t_decode_frame_16bit_length():
     assert (op, got, rest) == (0x1, payload, b"")
 
 
-# --------------------------------------------------------------------------
 # obs-websocket v5 protocol helpers
-# --------------------------------------------------------------------------
 AUTH_SALT = "lM1GncleQOaCu9lT1yeUZhFYnqhsLLP1G5lAGo3ixaI="
 AUTH_CHALLENGE = "ztTBnnuqrqaKDzRM3xcVdbYm"
 # Independently computed from the documented formula:
@@ -143,9 +139,7 @@ def t_identify_payload_auth_required_but_no_password():
     _raises(lambda: m.identify_payload(hello, ""))
 
 
-# --------------------------------------------------------------------------
 # Which OBS inputs hold relay-feed connections?
-# --------------------------------------------------------------------------
 def t_feed_input_names_picks_relay_fed_inputs():
     inputs = [{"inputName": "Feed A", "inputKind": "ffmpeg_source"},
               {"inputName": "Feed B", "inputKind": "ffmpeg_source"},
@@ -174,9 +168,7 @@ def t_feed_input_names_tolerates_settings_failure():
     assert m.feed_input_names(inputs, boom, ports=(53001,)) == []
 
 
-# --------------------------------------------------------------------------
 # Which OBS browser sources show relay-served pages?
-# --------------------------------------------------------------------------
 def t_browser_input_names_picks_relay_pages():
     inputs = [{"inputName": "HUD Lower Third", "inputKind": "browser_source"},
               {"inputName": "HUD Race Timer", "inputKind": "browser_source"},
@@ -205,9 +197,7 @@ def t_browser_input_names_ignores_local_file_pages():
         inputs, lambda n: {"local_file": "/x/p.html"}) == []
 
 
-# --------------------------------------------------------------------------
 # Password discovery (env override, else OBS's own websocket config)
-# --------------------------------------------------------------------------
 def t_obs_config_path_per_platform():
     env = {"APPDATA": r"C:\Users\x\AppData\Roaming"}
     assert m.obs_config_path("darwin", env, "/Users/x") == \
@@ -244,9 +234,7 @@ def t_find_password_env_overrides_config():
         assert m.find_password({}, os.path.join(tmp, "nope.json")) is None
 
 
-# --------------------------------------------------------------------------
-# release_feed_inputs — the best-effort entry point used by `racecast ... stop`
-# --------------------------------------------------------------------------
+# release_feed_inputs, the best-effort entry point behind `racecast ... stop`.
 def t_release_feed_inputs_unreachable_is_quiet():
     # Nothing listens on this port: must return a note, never raise.
     sock = socket.socket()
@@ -255,12 +243,10 @@ def t_release_feed_inputs_unreachable_is_quiet():
     sock.close()
     names, note = m.release_feed_inputs(port=free_port, password="x", timeout=0.5)
     assert names == []
-    assert note                                    # human-readable reason
+    assert note
 
 
-# --------------------------------------------------------------------------
 # Screenshot request shape + data-URI decode (pure)
-# --------------------------------------------------------------------------
 def t_screenshot_request_data_shape():
     d = m.screenshot_request_data("Feed A", width=480, fmt="jpg", quality=55)
     assert d == {"sourceName": "Feed A", "imageFormat": "jpg",
@@ -280,7 +266,7 @@ def t_parse_screenshot_data_uri_rejects_garbage():
     assert m.parse_screenshot_data_uri(12345) is None
 
 
-# ---- fake obs-websocket v5 server (loopback, one connection) --------------
+# fake obs-websocket v5 server (loopback, one connection)
 def _srv_recv_frame(conn):
     """Read one masked client frame; return (opcode, payload)."""
     head = _srv_read(conn, 2)
@@ -394,9 +380,9 @@ def _fake_obs_server(server_sock, password, state):
             resp = {"imageData": "data:image/jpg;base64," + base64.b64encode(raw).decode()}
         elif rtype == "PressInputPropertiesButton":
             # The refresh presses OBS's own 'Refresh cache of current page'
-            # button — never anything else. Answer a wrong button with a
-            # failed requestStatus (an assert would die silently in this
-            # daemon thread and hang the client into its timeout).
+            # button and nothing else. A wrong button gets a failed requestStatus,
+            # because an assert would die silently in this daemon thread and hang
+            # the client into its timeout.
             if rdata["propertyName"] != "refreshnocache":
                 _srv_send_json(conn, {"op": 7, "d": {
                     "requestType": rtype, "requestId": rid,
@@ -408,8 +394,8 @@ def _fake_obs_server(server_sock, password, state):
         elif rtype == "GetInputSettings":
             resp = {"inputSettings": settings[rdata["inputName"]]}
         elif rtype == "SetInputSettings":
-            # The release re-applies the input's OWN settings (a forced source
-            # rebuild) — it must never change them.
+            # The release re-applies the input's own settings to force a source
+            # rebuild, so it must never change them.
             assert rdata["inputSettings"] == settings[rdata["inputName"]]
             assert rdata["overlay"] is True
             state["released"].append(rdata["inputName"])
@@ -511,10 +497,8 @@ def t_release_feed_inputs_wrong_password_is_note_not_crash():
     server_sock.close()
 
 
-# --------------------------------------------------------------------------
-# set_stream — Director Panel broadcast start/stop (#295)
-# (uses the shared _start_fake_obs helper defined further down)
-# --------------------------------------------------------------------------
+# set_stream, the Director Panel's broadcast start and stop, over the shared
+# _start_fake_obs helper defined further down. (#295)
 def t_set_stream_starts_when_offline():
     state = {"stream_active": False}
     port, srv = _start_fake_obs(state)
@@ -540,7 +524,7 @@ def t_set_stream_is_idempotent_noop_when_already_live():
     port, srv = _start_fake_obs(state)
     ok, note = m.set_stream(True, port=port, password="supersecret", timeout=5)
     assert ok and note == "", note
-    assert "stream_calls" not in state          # no StartStream sent
+    assert "stream_calls" not in state
     srv.close()
 
 
@@ -551,7 +535,7 @@ def t_set_stream_unreachable_is_note_not_crash():
     sock.close()
     ok, note = m.set_stream(True, port=free_port, password="x", timeout=0.5)
     assert ok is False
-    assert note                                 # human-readable reason
+    assert note
 
 
 def t_parse_stream_status_includes_timecode():
@@ -574,9 +558,7 @@ def t_read_obs_state_includes_stream():
     srv.close()
 
 
-# --------------------------------------------------------------------------
-# refresh_browser_inputs — the auto-refresh used by `racecast relay|event start`
-# --------------------------------------------------------------------------
+# refresh_browser_inputs, the auto-refresh behind `racecast relay|event start`.
 def t_refresh_browser_inputs_end_to_end_against_fake_server():
     server_sock = socket.socket()
     server_sock.bind(("127.0.0.1", 0))
@@ -603,12 +585,10 @@ def t_refresh_browser_inputs_unreachable_is_quiet():
     names, note = m.refresh_browser_inputs(port=free_port, password="x",
                                            timeout=0.5)
     assert names == []
-    assert note                                    # human-readable reason
+    assert note
 
 
-# --------------------------------------------------------------------------
-# probe — the side-effect-free reachability check behind /status's obs.reachable
-# --------------------------------------------------------------------------
+# probe, the side-effect-free reachability check behind /status's obs.reachable.
 def t_probe_unreachable_is_quiet():
     # Nothing listens here: (False, note), never an exception.
     sock = socket.socket()
@@ -617,7 +597,7 @@ def t_probe_unreachable_is_quiet():
     sock.close()
     reachable, note = m.probe(port=free_port, password="x", timeout=0.5)
     assert reachable is False
-    assert note                                    # human-readable reason
+    assert note
 
 
 def t_probe_end_to_end_against_fake_server():
@@ -641,9 +621,7 @@ def t_probe_wrong_password_is_not_reachable():
     srv.close()
 
 
-# --------------------------------------------------------------------------
-# set_scene_item_enabled — relay-driven POV PiP show/hide (#130)
-# --------------------------------------------------------------------------
+# set_scene_item_enabled, the relay-driven POV PiP show and hide. (#130)
 def t_set_scene_item_enabled_end_to_end_against_fake_server():
     server_sock = socket.socket()
     server_sock.bind(("127.0.0.1", 0))
@@ -672,9 +650,7 @@ def t_set_scene_item_enabled_unreachable_is_quiet():
     assert note
 
 
-# --------------------------------------------------------------------------
-# get_scene_collection / set_scene_collection — best-effort, like the others
-# --------------------------------------------------------------------------
+# get_scene_collection and set_scene_collection, best-effort like the others.
 def _start_fake_obs(state, password="supersecret"):
     """Spin up the loopback fake OBS server; return its port (daemon thread)."""
     server_sock = socket.socket()
@@ -736,7 +712,7 @@ def t_set_scene_collection_noop_when_already_correct():
     ok, note = m.set_scene_collection(port=port, password="supersecret", timeout=5)
     assert ok is True
     assert "already" in note
-    assert "set_collection" not in state          # no switch request issued
+    assert "set_collection" not in state
     srv.close()
 
 
@@ -769,9 +745,8 @@ def t_set_scene_collection_unreachable_is_quiet():
     assert note
 
 
-# --------------------------------------------------------------------------
-# switch_to_scene_if_idle — park OBS on Standby at `event start` (never cut live)
-# --------------------------------------------------------------------------
+# switch_to_scene_if_idle parks OBS on Standby at `event start`, never cutting a
+# live program.
 def t_switch_to_scene_if_idle_switches_when_offline():
     state = {"stream_active": False, "program_scene": "Stint"}
     port, srv = _start_fake_obs(state)
@@ -779,7 +754,7 @@ def t_switch_to_scene_if_idle_switches_when_offline():
                                              password="supersecret", timeout=5)
     assert action == "switched", (action, note)
     assert note == "", note
-    assert state["set_scene"] == "Standby"       # SetCurrentProgramScene was sent
+    assert state["set_scene"] == "Standby"
     srv.close()
 
 
@@ -789,9 +764,9 @@ def t_switch_to_scene_if_idle_skips_when_live():
     action, note = m.switch_to_scene_if_idle("Standby", port=port,
                                              password="supersecret", timeout=5)
     assert action == "live", (action, note)
-    assert note                                  # explains why it was skipped
+    assert note
     assert "set_scene" not in state              # SAFETY: no scene switch sent while live
-    assert state["program_scene"] == "Stint"     # program untouched
+    assert state["program_scene"] == "Stint"
     srv.close()
 
 
@@ -803,12 +778,10 @@ def t_switch_to_scene_if_idle_unreachable_is_note_not_crash():
     action, note = m.switch_to_scene_if_idle("Standby", port=free_port,
                                              password="x", timeout=0.5)
     assert action == "error", (action, note)
-    assert note                                  # human-readable reason, did not raise
+    assert note
 
 
-# --------------------------------------------------------------------------
-# get_source_screenshot / get_program_screenshot — best-effort fetchers
-# --------------------------------------------------------------------------
+# get_source_screenshot and get_program_screenshot, best-effort fetchers.
 def t_get_source_screenshot_returns_bytes():
     state = {"shot_bytes": b"\xff\xd8hello\xff\xd9"}
     srv = socket.socket(); srv.bind(("127.0.0.1", 0)); srv.listen(1)
@@ -841,9 +814,7 @@ def t_get_source_screenshot_unreachable_is_quiet():
     assert data is None and note
 
 
-# --------------------------------------------------------------------------
-# get_current_program_scene / set_current_program_scene — auto-failover (#378)
-# --------------------------------------------------------------------------
+# get_current_program_scene and set_current_program_scene, the auto-failover. (#378)
 def t_get_current_program_scene_reads_current():
     state = {"program_scene": "Intermission"}
     port, srv = _start_fake_obs(state)
@@ -870,9 +841,7 @@ def t_set_current_program_scene_switches_to_intermission():
     assert m.INTERMISSION_SCENE == "Intermission"
 
 
-# --------------------------------------------------------------------------
-# Pure scene-collection classifier — scene_collection_status
-# --------------------------------------------------------------------------
+# The pure scene-collection classifier, scene_collection_status.
 def t_scene_collection_status_match():
     s = m.scene_collection_status("GT Racing Endurance", ["GT Racing Endurance", "Other"])
     assert s == {"current": "GT Racing Endurance", "expected": "GT Racing Endurance",
@@ -897,8 +866,8 @@ def t_scene_collection_status_renamed_variant():
 
 
 def t_scene_collection_status_match_suppresses_renamed_variant():
-    # A correct collection plus an old import-renamed duplicate must NOT report
-    # a renamed_variant — match wins, no false "looks renamed" warning.
+    # A correct collection plus an old import-renamed duplicate must not report a
+    # renamed_variant: the match wins, with no false "looks renamed" warning.
     s = m.scene_collection_status("GT Racing Endurance",
                                   ["GT Racing Endurance", "GT Racing Endurance 2"])
     assert s["match"] is True
@@ -906,8 +875,8 @@ def t_scene_collection_status_match_suppresses_renamed_variant():
 
 
 def t_scene_collection_status_overlap_present_and_renamed():
-    # A renamed duplicate is active while the real collection ALSO exists:
-    # both flags are truthy — consumers must prefer the switchable case.
+    # A renamed duplicate is active while the real collection also exists, so both
+    # flags are truthy and consumers must prefer the switchable case.
     s = m.scene_collection_status("GT Racing Endurance 2",
                                   ["GT Racing Endurance", "GT Racing Endurance 2"])
     assert s["match"] is False
@@ -930,9 +899,7 @@ def t_scene_collection_status_empty_current():
     assert s["current"] is None
 
 
-# --------------------------------------------------------------------------
-# Pure event-start decision — scene_collection_action
-# --------------------------------------------------------------------------
+# The pure event-start decision, scene_collection_action.
 def t_scene_collection_action_skip_when_no_status():
     assert m.scene_collection_action(None, "OBS closed", True) == ("skip", "OBS closed")
 
@@ -1013,13 +980,13 @@ def t_close_sends_status_1000_then_drains_then_close():
     sess.close()
     opcode, payload = _unmask_client_frame(sock.sent)
     assert opcode == 0x8, opcode                  # close frame
-    assert payload == struct.pack(">H", 1000), payload   # status 1000
+    assert payload == struct.pack(">H", 1000), payload
     assert "close" in sock.calls
-    # Regression guard: close() must NOT shutdown(SHUT_WR). An early TCP FIN makes
-    # OBS log the disconnect as 1006/"End of File" instead of 1000 (verified live).
+    # close() must not shutdown(SHUT_WR): an early TCP FIN makes OBS log the
+    # disconnect as 1006 "End of File" instead of 1000.
     assert "shutdown" not in sock.calls, sock.calls
     assert sock.timeout == m.CLOSE_DRAIN_TIMEOUT_S
-    # settimeout must precede the draining recv (no-hang guarantee)
+    # settimeout must precede the draining recv, or the drain can hang.
     if "recv" in sock.calls:
         assert sock.calls.index("settimeout") < sock.calls.index("recv")
 
@@ -1057,9 +1024,7 @@ def _raises(fn, exc=ValueError):
     raise AssertionError(f"expected {exc.__name__}")
 
 
-# --------------------------------------------------------------------------
-# Pure intent planner — feed_state_intents
-# --------------------------------------------------------------------------
+# The pure intent planner, feed_state_intents.
 def t_feed_state_intents_live_a_with_cut():
     assert m.feed_state_intents("A", True) == [
         ("show", "Feed A"), ("hide", "Feed B"),
@@ -1075,7 +1040,7 @@ def t_feed_state_intents_live_b_no_cut():
     ]
 
 
-# #591: the Splitscreen state, resolved from the on-air slot like the Stint scene.
+# The Splitscreen state, resolved from the on-air slot like the Stint scene. (#591)
 def t_split_state_intents_live_a():
     assert m.split_state_intents("A", False) == [
         ("show", "Feed A"), ("show", "Feed B"),
@@ -1085,7 +1050,7 @@ def t_split_state_intents_live_a():
 
 
 def t_split_state_intents_live_b():
-    # The Suzuka bug: B on air must keep B audible and mute A, never the reverse.
+    # B on air must keep B audible and mute A, never the reverse.
     intents = m.split_state_intents("B", False)
     assert intents == [
         ("show", "Feed A"), ("show", "Feed B"),
@@ -1120,10 +1085,8 @@ def t_split_state_intents_slot_with_two_audio_inputs():
     ]
 
 
-# --------------------------------------------------------------------------
-# set_current_program_scene / set_input_volume / set_input_mute /
-# read_obs_state — relay-mediated OBS control helpers
-# --------------------------------------------------------------------------
+# The relay-mediated OBS control helpers: set_current_program_scene,
+# set_input_volume, set_input_mute and read_obs_state.
 class _FakeSession:
     def __init__(self, responses=None):
         self.sent = []
@@ -1137,8 +1100,8 @@ class _FakeSession:
         self.sent.append(("close", {}))
 
 
-# #593: the commentary microphone of a local stint. It is live only while the
-# on-air slot is the local capture; in every other state it is muted.
+# The commentary microphone of a local stint is live only while the on-air slot is
+# the local capture, and muted in every other state. (#593)
 MIC = "Commentary Mic Device"
 
 
@@ -1173,7 +1136,7 @@ def t_feed_state_intents_local_off_air_mutes_the_mic_once():
 
 def t_feed_state_intents_no_local_slot_still_mutes_the_mic():
     # The outgoing local stint may already have advanced to a remote row when the
-    # handover lands; the mic must close anyway.
+    # handover lands, and the mic must close anyway.
     audio, extra = m.feed_audio_plan(set(), mic=MIC)
     intents = m.feed_state_intents("B", False, audio=audio, extra_mute=extra)
     assert intents[-1] == ("mute", MIC), intents
@@ -1217,7 +1180,8 @@ class _MuteFailSession(_FakeSession):
 
 
 def t_reflect_feed_state_cuts_even_without_the_mic_input():
-    # A collection imported before #593 has no mic: the handover cut must still land.
+    # A collection imported before the mic existed has no mic input, and the
+    # handover cut must still land. (#593)
     sess = _MuteFailSession({MIC}, {"GetSceneItemId": {"sceneItemId": 3}})
     audio, extra = m.feed_audio_plan({"A"}, mic=MIC)
     applied, note = m.reflect_feed_state("B", True, audio=audio, extra_mute=extra,
@@ -1278,24 +1242,22 @@ def t_obs_helpers_unreachable_return_failure_not_raise():
 
 
 def t_resolve_obs_target_env_overrides_then_config():
-    # RACECAST_OBS_WS_HOST/PORT override the discovered target (proxy/remote seam).
+    # RACECAST_OBS_WS_HOST and _PORT override the discovered target.
     env = {"RACECAST_OBS_WS_HOST": "100.64.0.5", "RACECAST_OBS_WS_PORT": "4466"}
     assert m.resolve_obs_target("127.0.0.1", None, env, {"port": 4455}) == ("100.64.0.5", 4466)
-    # no overrides -> caller host + OBS's own config port
+    # With no override: the caller's host and OBS's own config port.
     assert m.resolve_obs_target("127.0.0.1", None, {}, {"port": 4455}) == ("127.0.0.1", 4455)
-    # no overrides, no config -> the 4455 default
+    # With no override and no config: the 4455 default.
     assert m.resolve_obs_target("127.0.0.1", None, {}, None) == ("127.0.0.1", m.DEFAULT_PORT)
-    # a non-numeric port override is ignored (falls back to config/default)
+    # A non-numeric port override is ignored and falls back to config or default.
     assert m.resolve_obs_target(
         "127.0.0.1", None, {"RACECAST_OBS_WS_PORT": "x"}, {"port": 4455}) == ("127.0.0.1", 4455)
-    # host override alone still resolves the port via config/default
+    # A host override alone still resolves the port via config or default.
     assert m.resolve_obs_target("127.0.0.1", None, {"RACECAST_OBS_WS_HOST": "100.64.0.9"},
                                 {"port": 4455}) == ("100.64.0.9", 4455)
 
 
-# --------------------------------------------------------------------------
 # parse_obs_stats / parse_stream_status / get_health_stats
-# --------------------------------------------------------------------------
 def t_parse_obs_stats():
     p = {"cpuUsage": 12.5, "memoryUsage": 910.0, "availableDiskSpace": 51200.0,
          "activeFps": 60.0, "renderSkippedFrames": 3, "renderTotalFrames": 1000}
@@ -1305,9 +1267,10 @@ def t_parse_obs_stats():
     assert out["obs_disk_free_mb"] == 51200.0
     assert out["obs_fps"] == 60.0
     assert out["obs_render_skipped_pct"] == 0.3
-    # #488: raw cumulative counts carried through for the render-drift rate derivation.
+    # The raw cumulative counts carry through for the render-drift rate. (#488)
     assert out["obs_render_skipped_frames"] == 3 and out["obs_render_total_frames"] == 1000
-    # Missing fields -> None, never KeyError; zero total -> None (no div by zero).
+    # A missing field gives None rather than a KeyError, and a zero total gives
+    # None rather than a division by zero.
     out2 = m.parse_obs_stats({"renderSkippedFrames": 0, "renderTotalFrames": 0})
     assert out2["obs_cpu_pct"] is None and out2["obs_render_skipped_pct"] is None
     assert out2["obs_render_skipped_frames"] == 0 and out2["obs_render_total_frames"] == 0
@@ -1335,7 +1298,7 @@ def t_get_health_stats_unreachable_is_quiet():
     reachable, stats, note = m.get_health_stats(port=free_port, password="x", timeout=0.5)
     assert reachable is False
     assert stats == {}
-    assert note                                    # human-readable reason
+    assert note
 
 
 def t_get_health_stats_merges_stats_and_stream_status():
@@ -1367,7 +1330,8 @@ def t_get_health_stats_merges_stats_and_stream_status():
 
 
 def t_parse_video_settings_configured_fps():
-    # #586: the configured frame rate is the reference the measured activeFps is judged by.
+    # The configured frame rate is the reference the measured activeFps is judged
+    # against. (#586)
     assert m.parse_video_settings({"fpsNumerator": 60, "fpsDenominator": 1}) == \
         {"obs_fps_target": 60.0}
     assert m.parse_video_settings({"fpsNumerator": 60000, "fpsDenominator": 1001}) == \
@@ -1391,7 +1355,7 @@ def t_get_health_stats_carries_configured_fps():
 
 
 def t_get_health_stats_keeps_stats_when_video_settings_fails():
-    # A failing GetVideoSettings loses only the fps reference, never the stats (#586).
+    # A failing GetVideoSettings loses the fps reference, never the stats. (#586)
     class _Sess(_FakeSession):
         def request(self, request_type, request_data=None):
             if request_type == "GetVideoSettings":
@@ -1459,9 +1423,7 @@ def t_set_scene_item_transform_unreachable():
         m._connect = orig
 
 
-# --------------------------------------------------------------------------
-# set_feed_close_when_inactive — fan-out: tell OBS to drop off-air feeds
-# --------------------------------------------------------------------------
+# set_feed_close_when_inactive tells OBS to drop off-air feeds under fan-out.
 def t_set_feed_close_when_inactive_builds_setinputsettings():
     sess = _FakeSession()
     orig, m._connect = m._connect, lambda *a, **k: (sess, "")
@@ -1506,21 +1468,19 @@ def t_set_feed_close_when_inactive_unreachable_is_note_not_crash():
     assert note == "OBS not running"
 
 
-# --------------------------------------------------------------------------
-# resolve_transition — director transition choice resolver (Task 1)
-# --------------------------------------------------------------------------
+# resolve_transition, the director's transition-choice resolver.
 def t_resolve_transition_by_kind_and_fallback():
     tlist = [{"transitionName": "Cut", "transitionKind": "cut_transition"},
              {"transitionName": "Fade", "transitionKind": "fade_transition"},
              {"transitionName": "My Wipe", "transitionKind": "stinger_transition"}]
     assert m.resolve_transition("cut", tlist) == ("Cut", "")
     assert m.resolve_transition("fade", tlist) == ("Fade", "")
-    # stinger resolves by KIND regardless of the name
+    # A stinger resolves by kind regardless of the name.
     assert m.resolve_transition("stinger", tlist) == ("My Wipe", "")
-    # name fallback when kind missing (older OBS payloads without kinds)
+    # Older OBS payloads carry no kind, so the name is the fallback.
     nokind = [{"transitionName": "Fade", "transitionKind": ""}]
     assert m.resolve_transition("fade", nokind) == ("Fade", "")
-    # stinger absent -> None + note
+    # An absent stinger gives None plus a note.
     name, note = m.resolve_transition("stinger", [{"transitionName": "Cut",
                                                    "transitionKind": "cut_transition"}])
     assert name is None and "Stinger" in note
@@ -1537,7 +1497,7 @@ def t_set_scene_with_fade_sets_transition_then_switches():
         m._connect = orig
     assert ok is True and note == ""
     types = [t for t, _ in sess.sent]
-    # order: list transitions, set transition, set duration, then switch
+    # The order is: list transitions, set transition, set duration, then switch.
     assert types.index("SetCurrentSceneTransition") < types.index("SetCurrentProgramScene")
     assert ("SetCurrentSceneTransition", {"transitionName": "Fade"}) in sess.sent
     assert ("SetCurrentSceneTransitionDuration", {"transitionDuration": 500}) in sess.sent
@@ -1553,7 +1513,7 @@ def t_set_scene_cut_sets_cut_no_duration():
     finally:
         m._connect = orig
     assert ("SetCurrentSceneTransition", {"transitionName": "Cut"}) in sess.sent
-    # cut is instant — no duration call
+    # A cut is instant, so there is no duration call.
     assert all(t != "SetCurrentSceneTransitionDuration" for t, _ in sess.sent)
 
 
@@ -1583,14 +1543,12 @@ def t_set_scene_no_transition_is_plain_switch():
     assert ("SetCurrentProgramScene", {"sceneName": "Stint"}) in sess.sent
 
 
-# --------------------------------------------------------------------------
-# stream_service_payload — Sheet-driven OBS stream target (per Producer Part)
-# --------------------------------------------------------------------------
+# stream_service_payload, the Sheet-driven OBS stream target per Producer Part.
 def t_stream_service_payload_youtube():
-    # YouTube's "YouTube - RTMPS" service has NO "auto" server in OBS's
-    # services.json, so "auto" resolves to an empty URL and OBS rejects
-    # StartStream with "Invalid Path or Connection URL" (OBS_OUTPUT_BAD_PATH).
-    # The payload must carry YouTube's concrete primary ingest URL.
+    # YouTube's "YouTube - RTMPS" service has no "auto" server in OBS's
+    # services.json, so "auto" resolves to an empty URL and OBS rejects StartStream
+    # with "Invalid Path or Connection URL". The payload must carry YouTube's
+    # concrete primary ingest URL.
     d = m.stream_service_payload("youtube", "live_abc")
     assert d == {"streamServiceType": "rtmp_common",
                  "streamServiceSettings": {
@@ -1600,9 +1558,8 @@ def t_stream_service_payload_youtube():
 
 
 def t_stream_service_payload_youtube_server_is_never_auto():
-    # Regression guard for the "Invalid Path or Connection URL" bug: YouTube must
-    # never be sent "auto" (OBS cannot resolve it → empty stream URL → StartStream
-    # fails). Twitch's plugin DOES resolve "auto", so only YouTube is guarded here.
+    # YouTube must never be sent "auto", which OBS cannot resolve, leaving an empty
+    # stream URL. Twitch's plugin does resolve "auto", so only YouTube is guarded.
     assert m.stream_service_payload("youtube", "k")[
         "streamServiceSettings"]["server"] != "auto"
 
@@ -1624,9 +1581,7 @@ def t_stream_service_payload_unknown_platform_raises():
         raise AssertionError("expected ValueError")
 
 
-# --------------------------------------------------------------------------
-# set_stream_service — Sheet-driven OBS stream target (guarded)
-# --------------------------------------------------------------------------
+# set_stream_service, the guarded Sheet-driven OBS stream target.
 def t_set_stream_service_applies_when_offline():
     state = {"stream_active": False}
     port, srv = _start_fake_obs(state)
@@ -1647,7 +1602,7 @@ def t_set_stream_service_refused_while_streaming():
                                     password="supersecret", timeout=5)
     assert ok is False
     assert "streaming" in note
-    assert "service_settings" not in state          # nothing applied
+    assert "service_settings" not in state
     srv.close()
 
 
@@ -1665,10 +1620,8 @@ def t_set_stream_service_unreachable_is_note_not_crash():
     assert ok is False and note
 
 
-# --------------------------------------------------------------------------
-# #534: on-air-aware SPLIT audio (apply_split_audio, defined in the relay
-# module — see the "irofeeds" load above).
-# --------------------------------------------------------------------------
+# On-air-aware SPLIT audio: apply_split_audio, defined in the relay module loaded
+# as "irofeeds" above. (#534)
 def t_apply_split_audio_mutes_offair_unmutes_onair():
     calls = []
 
@@ -1682,7 +1635,8 @@ def t_apply_split_audio_mutes_offair_unmutes_onair():
 
     payload, status = irofeeds.apply_split_audio(_Relay(), _Obs())
     assert status == 200 and payload["ok"] is True and payload["live"] == "B"
-    # Older boards read `unmute` as one name; #591 made it a list on /obs/split only.
+    # Older boards read `unmute` as one name, and it is a list on /obs/split only.
+    # (#591)
     assert payload["unmute"] == "Feed B", payload
     assert payload["mute"] == ["Feed A", "Discord Audio Capture"], payload
     assert "show" not in payload, payload
@@ -1750,7 +1704,7 @@ def t_apply_split_state_keeps_going_after_a_failed_step():
 
 
 def t_apply_split_in_solo_touches_nothing():
-    # Solo mode has no A/B feed on air (live_feed() is None). Both routes must
+    # Solo mode has no A/B feed on air, so live_feed() is None. Both routes must
     # answer that plainly instead of raising or muting inputs at random.
     for apply in (irofeeds.apply_split_state, irofeeds.apply_split_audio):
         obs = _SplitObs()
@@ -1892,9 +1846,9 @@ def _companion_splitscreen_buttons():
 
 
 def t_companion_split_buttons_resolve_audio_server_side():
-    # #589 / #591: every Splitscreen button takes visibility AND audio from the
-    # relay. A button that names a feed itself cannot know which one is on air,
-    # or that a stint is local (the Suzuka failure was a hardcoded "unmute A").
+    # Every Splitscreen button takes visibility and audio from the relay. A button
+    # that names a feed itself cannot know which one is on air, nor that a stint is
+    # local. (#589, #591)
     buttons = _companion_splitscreen_buttons()
     assert {"SPLIT", "Split Scene"} <= {label for label, _ in buttons}, buttons
     for label, downs in buttons:
@@ -1909,8 +1863,8 @@ def t_companion_split_buttons_resolve_audio_server_side():
 
 
 def t_companion_split_button_keeps_the_cut_and_race_control():
-    # #591 moves only the sources to the relay. SPLIT still cuts to Splitscreen
-    # itself (so the cut survives a relay outage) and still writes Race Control.
+    # Only the sources moved to the relay. SPLIT still cuts to Splitscreen itself,
+    # so the cut survives a relay outage, and still writes Race Control. (#591)
     [downs] = [d for label, d in _companion_splitscreen_buttons() if label == "SPLIT"]
     assert downs[0]["definitionId"] == "set_scene", downs[0]
     urls = [a["options"]["url"]["value"] for a in downs if a.get("definitionId") == "get"]
@@ -1935,12 +1889,12 @@ def _companion_stint_buttons():
 
 
 def t_companion_stint_buttons_end_on_the_relay_like_the_panel():
-    # The panel and Companion must behave the same: a STINT press ends with the
-    # relay (/obs/stint/<X>) setting visibility, audio and the producer's
-    # commentary mic, which only the relay can decide (it knows a stint is local).
+    # The panel and Companion behave the same: a STINT press ends with the relay's
+    # /obs/stint/<X> setting visibility, audio and the producer's commentary mic,
+    # which only the relay can decide because only it knows a stint is local.
     # Companion keeps its direct OBS actions in front as the break-glass path for a
-    # relay that cannot reach OBS — they must set exactly what the relay sets for
-    # the feeds and never touch the mic, so the relay call has the last word.
+    # relay that cannot reach OBS, so they must set exactly what the relay sets for
+    # the feeds, never touch the mic, and leave the relay call the last word.
     buttons = _companion_stint_buttons()
     assert set(buttons) == {"STINT\nA", "STINT\nB"}, buttons
     for label, downs in buttons.items():
@@ -1972,8 +1926,8 @@ def t_companion_stint_buttons_end_on_the_relay_like_the_panel():
 
 
 class _AliveFakeSock:
-    """Minimal socket stand-in for _Session.alive unit checks (#537 task 1).
-    Distinct from _FakeSock above (that one tracks close()-handshake calls)."""
+    """Minimal socket stand-in for the _Session.alive checks. Distinct from
+    _FakeSock above, which tracks the close() handshake calls. (#537)"""
 
     def __init__(self, recv_chunks=None, send_raises=False):
         self._recv = list(recv_chunks or [])
@@ -2007,7 +1961,7 @@ def t_session_send_marks_dead_on_oserror():
     try:
         s.send_json({"x": 1})
     except OSError:
-        pass  # expected — asserting alive below is the point of this test
+        pass  # expected; the point is the alive assertion below
     assert s.alive is False, "send failure must flag the session dead"
 
 
@@ -2016,14 +1970,12 @@ def t_session_next_json_marks_dead_on_eof():
     try:
         s.next_json()
     except ConnectionError:
-        pass  # expected — asserting alive below is the point of this test
+        pass  # expected; the point is the alive assertion below
     assert s.alive is False
 
 
-# --------------------------------------------------------------------------
-# session= reuse (#537 task 2) — a passed-in session skips connect/close;
-# an omitted one keeps today's own-connect-own-close behavior byte-identical.
-# --------------------------------------------------------------------------
+# session= reuse: a passed-in session skips connect and close, while an omitted
+# one keeps the own-connect, own-close behaviour unchanged. (#537)
 class _ReuseFakeSession:
     def __init__(self, responses):
         self.responses = dict(responses)   # request_type -> responseData
@@ -2085,8 +2037,8 @@ def t_get_program_screenshot_uses_passed_session_no_connect_no_close():
 
 
 def t_omitting_session_still_connects_and_closes():
-    # Default path: a stub _connect returns a fake session; the function must
-    # still own the connect + close it — byte-identical to pre-#537 behavior.
+    # On the default path a stub _connect returns a fake session, and the function
+    # must still own the connect and close it. (#537)
     fs = _ReuseFakeSession({"SetInputMute": {}})
     orig = m._connect
     m._connect = lambda *a, **k: (fs, "")
@@ -2098,14 +2050,12 @@ def t_omitting_session_still_connects_and_closes():
     assert fs.closed is True, "own-session path must close"
 
 
-# --------------------------------------------------------------------------
-# _ObsConn / _PassthroughConn — persistent session holder + kill-switch-off
-# connect-per-call passthrough (#537 task 3)
-# --------------------------------------------------------------------------
+# _ObsConn is the persistent session holder and _PassthroughConn the
+# connect-per-call passthrough used when the holder is off. (#537)
 class _ConnFakeSession:
-    """Distinct from the _FakeSession above (that one tracks .sent for the
-    set_current_program_scene-family tests); this one models .alive/.closed/
-    .requests for the _ObsConn holder tests (#537 task 3)."""
+    """Distinct from the _FakeSession above, which tracks .sent for the
+    set_current_program_scene family. This one models .alive, .closed and
+    .requests for the _ObsConn holder tests. (#537)"""
 
     def __init__(self, responses=None):
         self.responses = dict(responses or {})   # request_type -> responseData
@@ -2127,7 +2077,7 @@ def _script_conn(sessions):
     seq = list(sessions)
     def fake_connect(*a, **k):
         return (seq.pop(0), "") if seq else (None, "OBS down")
-    c._connect_fn = fake_connect      # test seam (see implement note)
+    c._connect_fn = fake_connect      # test seam
     return c
 
 
@@ -2155,7 +2105,7 @@ def t_obsconn_reconnects_and_retries_once_on_death():
         session.request("GetVersion", {})
         return "ok", ""
     assert c.run(fn) == ("ok", "")         # retried on the fresh (good) session
-    assert dead.closed is True             # dead one was dropped/closed
+    assert dead.closed is True
 
 
 def t_obsconn_no_retry_on_request_level_failure():
@@ -2210,8 +2160,8 @@ def t_route_kind_classifies_calls():
     assert m.route_kind("get_source_screenshot") == "shot"
     assert m.route_kind("set_input_mute") == "ctrl"
     assert m.route_kind("feed_media_cursors") == "ctrl"
-    assert m.route_kind("stream_kbps") is None          # pure helper — not routed
-    assert m.route_kind("STINT_SCENE") is None          # constant — not routed
+    assert m.route_kind("stream_kbps") is None          # a pure helper, not routed
+    assert m.route_kind("STINT_SCENE") is None          # a constant, not routed
 
 
 def t_relay_facade_routes_screenshot_vs_control():
@@ -2228,7 +2178,7 @@ def t_relay_facade_passes_through_non_routed_attrs():
     fac = irofeeds._RelayObsFacade(shot, ctrl)
     assert fac.STINT_SCENE is _RMOD.STINT_SCENE          # constant pass-through
     assert fac.stream_kbps is _RMOD.stream_kbps          # pure helper pass-through (not routed)
-    assert not shot.calls and not ctrl.calls             # neither holder was used
+    assert not shot.calls and not ctrl.calls
 
 
 def t_relay_facade_close_closes_both():
@@ -2238,8 +2188,8 @@ def t_relay_facade_close_closes_both():
 
 
 def t_relay_facade_direct_call_when_module_swapped_to_fake():
-    # A fake _obs_ws (no _ROUTED_FNS) -> the facade calls it DIRECTLY (no session=,
-    # no holder.run) — the safeguard that keeps unit tests off a real OBS socket.
+    # A fake _obs_ws has no _ROUTED_FNS, so the facade calls it directly, with no
+    # session= and no holder.run. That is what keeps unit tests off a real OBS.
     shot, ctrl = _RecordConn("shot"), _RecordConn("ctrl")
     fac = irofeeds._RelayObsFacade(shot, ctrl)
     class _FakeMod:
@@ -2251,12 +2201,12 @@ def t_relay_facade_direct_call_when_module_swapped_to_fake():
     finally:
         irofeeds._obs_ws = orig
     assert got == ("fake", {}), got                      # direct call, NO session= injected
-    assert not shot.calls and not ctrl.calls             # holders untouched
+    assert not shot.calls and not ctrl.calls
 
 
 def t_feed_media_cursors_accepts_session():
-    # #537: feed_media_cursors is in _ROUTED_FNS, so it must accept a passed session
-    # (skip _connect/close) — regression guard for the Task 2 gap.
+    # feed_media_cursors is in _ROUTED_FNS, so it must accept a passed session and
+    # skip _connect and close. (#537)
     fs = _ConnFakeSession({"GetInputList": {"inputs": []}})
     orig = m._connect
     m._connect = lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not connect"))
@@ -2265,8 +2215,9 @@ def t_feed_media_cursors_accepts_session():
     finally:
         m._connect = orig
     assert out == {} and note == "" and fs.closed is False
-# Device enumeration (#304) — pure parser + per-OS property-name map
-# --------------------------------------------------------------------------
+
+
+# Device enumeration: a pure parser plus the per-OS property-name map. (#304)
 def t_parse_property_items_basic():
     payload = {"propertyItems": [
         {"itemName": "FaceTime HD", "itemEnabled": True, "itemValue": "0x14000000"},
@@ -2294,8 +2245,8 @@ def t_device_property_name_per_platform():
 
 
 def t_device_property_name_matches_setup_assets_variants():
-    # cross-check: obs_ws (enumeration) and setup-assets (localization) must agree on
-    # the per-OS device-id settings key, or a scanned value lands in the wrong field.
+    # obs_ws enumeration and setup-assets localization must agree on the per-OS
+    # device-id settings key, or a scanned value lands in the wrong field.
     spec_sa = importlib.util.spec_from_file_location(
         "setup_assets_x", os.path.join(ROOT, "src", "setup-assets.py"))
     sa = importlib.util.module_from_spec(spec_sa); spec_sa.loader.exec_module(sa)
@@ -2312,8 +2263,8 @@ def t_device_property_name_audio_kind_per_platform():
 
 
 def t_device_property_name_audio_matches_setup_assets_audio_variants():
-    # cross-check: obs_ws (enumeration) and setup-assets (localization) must agree on
-    # the mic settings key, or a scanned value lands in the wrong field (#307).
+    # obs_ws enumeration and setup-assets localization must agree on the mic
+    # settings key, or a scanned value lands in the wrong field. (#307)
     spec_sa = importlib.util.spec_from_file_location(
         "setup_assets_y", os.path.join(ROOT, "src", "setup-assets.py"))
     sa = importlib.util.module_from_spec(spec_sa); spec_sa.loader.exec_module(sa)
@@ -2330,9 +2281,8 @@ def t_pick_input_kind_finds_macos_v2_via_substring():
 
 
 def t_pick_input_kind_honors_matcher_priority_over_list_order():
-    # dshow appears BEFORE v4l2 in the list, but the matcher order is
-    # (av_capture, dshow, v4l2); dshow's matcher outranks v4l2's regardless of
-    # list position — assert the preferred matcher wins.
+    # dshow appears before v4l2 in the list, but the matcher order is av_capture,
+    # dshow, v4l2, so dshow's matcher outranks v4l2's whatever the list position.
     kinds = ["v4l2_input", "dshow_input"]
     assert m.pick_input_kind(kinds, m.VIDEO_INPUT_KIND_MATCHERS) == "dshow_input"
 
@@ -2356,12 +2306,12 @@ def t_probe_device_options_lists_video_and_mic_and_cleans_up():
         out = m.probe_device_options(port=port, password="supersecret", timeout=5)
     finally:
         srv.close()
-    # NOTE: value-carrying assertions rely on the probe running on macOS (device props).
-    # The lifecycle assertions below are platform-independent.
+    # The value-carrying assertions rely on the probe running on macOS, where those
+    # device property names apply. The lifecycle assertions below do not.
     assert isinstance(out["devices"], list) and isinstance(out["mic"], list)
-    # A throwaway scene was created and then removed (cleanup guarantee). The
-    # defensive pre-clear RemoveScene (before CreateScene) AND the finally
-    # block's own RemoveScene must both fire -> exactly 2 removals.
+    # A throwaway scene is created and then removed. The pre-clear RemoveScene
+    # before CreateScene and the finally block's own RemoveScene both fire, which
+    # is exactly two removals.
     assert m.PROBE_SCENE_NAME in state.get("created_scenes", [])
     assert state.get("removed_scenes", []).count(m.PROBE_SCENE_NAME) == 2
     # Every temp input created was also removed.
@@ -2389,9 +2339,9 @@ def t_probe_device_options_cleans_up_even_when_read_raises():
 
 
 def t_probe_device_options_removes_input_even_if_create_response_fails():
-    # OBS creates the input but the CreateInput response fails mid-exchange. Because the
-    # probe tracks the input for cleanup BEFORE calling CreateInput, the finally still
-    # removes every input OBS actually created — no leak on a lost create response.
+    # OBS creates the input but the CreateInput response fails mid-exchange. The
+    # probe tracks the input for cleanup before calling CreateInput, so the finally
+    # block still removes every input OBS actually created.
     state = {"create_raises": True,
              "prop_items": {"device": _VIDEO_ITEMS, "device_id": _MIC_ITEMS}}
     port, srv = _start_fake_obs(state)
@@ -2406,8 +2356,8 @@ def t_probe_device_options_removes_input_even_if_create_response_fails():
 
 
 def t_probe_device_options_no_capture_kind_is_note_not_crash():
-    # OBS reports no capture kinds at all -> empty lists + explanatory notes, no crash,
-    # scene still created and removed.
+    # With no capture kinds at all the result is empty lists plus explanatory notes,
+    # no crash, and the scene is still created and removed.
     state = {"input_kinds": ["image_source", "color_source"], "prop_items": {}}
     port, srv = _start_fake_obs(state)
     try:
@@ -2416,7 +2366,7 @@ def t_probe_device_options_no_capture_kind_is_note_not_crash():
         srv.close()
     assert out["devices"] == [] and out["note"]
     assert out["mic"] == [] and out["mic_note"]
-    assert state.get("created_inputs", []) == []     # nothing to create
+    assert state.get("created_inputs", []) == []
     assert state.get("removed_scenes", []).count(m.PROBE_SCENE_NAME) == 2
 
 
@@ -2430,12 +2380,12 @@ def t_probe_device_options_unreachable_is_quiet():
     assert out["note"] and out["mic_note"]           # both carry the connect reason
 
 
-# ------------------------------------------------------------ readiness
+# readiness
 
 def t_is_not_ready_recognises_the_207_note():
     """obs-websocket answers 207 between accepting the socket and being able to
-    serve — the window that silently swallowed the scene-collection check, the
-    page refresh and the Standby switch on a just-launched OBS."""
+    serve. That window silently swallows the scene-collection check, the page
+    refresh and the Standby switch on a just-launched OBS."""
     note = ("GetSceneCollectionList failed: {'code': 207, 'comment': "
             "'OBS is not ready to perform the request.', 'result': False}")
     assert m.is_not_ready(note)

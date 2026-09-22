@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Stdlib checks that GitHub Actions workflows are supply-chain hardened (#100):
-every third-party action is pinned to a full commit SHA (a moving tag could be
-repointed by a compromised upstream and would run in CI with the job's token),
-and gitleaks is pinned to a version + checksum rather than 'latest'.
+"""Stdlib checks that every third-party GitHub Actions step is pinned to a full
+commit SHA and that gitleaks is pinned to a version plus checksum rather than
+'latest'. A moving tag can be repointed upstream and would then run in CI with
+the job's token. (#100)
 Run: python3 tests/test_workflows.py"""
 import glob, os, re
 
@@ -37,8 +37,8 @@ def t_all_third_party_actions_are_sha_pinned():
 
 
 def t_pinned_actions_keep_a_version_comment():
-    # A SHA is opaque; the trailing `# vX` comment is how a human (and Dependabot)
-    # tracks which version the SHA represents.
+    # A SHA is opaque, so the trailing `# vX` comment is how a human and
+    # Dependabot track which version it represents.
     missing = [f"{base}:{ln} {ref}"
                for base, ln, ref, line in _uses_lines()
                if _SHA_RE.search(ref) and "#" not in line.split(ref, 1)[1]]

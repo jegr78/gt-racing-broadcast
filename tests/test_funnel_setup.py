@@ -4,8 +4,8 @@ import importlib.util, os, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-# funnel_setup imports its sibling `http_util`; in production scripts/ is always
-# on sys.path, so mirror that for the loader.
+# funnel_setup imports its sibling `http_util`, which is always on sys.path in
+# production, so mirror that for the loader.
 sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))
 
 

@@ -17,8 +17,8 @@ def _load(name, rel):
 
 
 import sys as _sys
-_sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))  # for graphics load
-media = m  # alias for the intermission-music tests below
+_sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))  # for the graphics load
+media = m
 graphics = _load("get_graphics", os.path.join("src", "relay", "get-graphics.py"))
 brands = _load("get_brands", os.path.join("src", "relay", "get-brands.py"))
 
@@ -26,9 +26,8 @@ DRIVE = "https://drive.google.com/file/d/ABC123def456/view?usp=sharing"
 YT = "https://www.youtube.com/watch?v=abc12345"
 
 # A modern Google-Drive large-file interstitial: a <form> that GETs the
-# drive.usercontent.google.com/download endpoint with hidden inputs. The old
-# code looked for a `confirm=<token>` query param, which this format lacks
-# (`confirm` is a hidden input valued "t") — the #386 failure mode.
+# drive.usercontent.google.com/download endpoint with hidden inputs. It carries no
+# `confirm=<token>` query param; `confirm` is a hidden input valued "t". (#386)
 FORM_INTERSTITIAL = (
     b"<!DOCTYPE html><html><head><title>Google Drive - Virus scan warning</title>"
     b"</head><body>"
@@ -51,7 +50,7 @@ def t_urls_basic():
 
 
 def t_urls_label_case_and_gap():
-    # label match is case/space-insensitive; URL is the next NON-empty cell
+    # The label match ignores case and spaces, and the URL is the next non-empty cell.
     rows = [["  intro video ", "", "https://youtu.be/AAA"]]
     assert m.media_urls_from_csv(rows) == {"intro": "https://youtu.be/AAA"}
 
@@ -71,7 +70,7 @@ def t_urls_empty():
 
 
 def t_media_dir_repo():
-    # expected via os.path.join: separators differ when this test runs on Windows
+    # Built with os.path.join because the separator differs on Windows.
     got = m.media_dir(os.path.join("/x", "src", "relay"))
     assert got == os.path.join("/x", "runtime", "media"), got
 
@@ -99,13 +98,11 @@ def t_resolve_missing_is_none():
     assert out == {"intro": None}, out
 
 
-# ---------- download argv separator + scheme guard (sheet arg-injection #3) ----
+# Download argv separator and scheme guard.
 
 def t_cookies_path_cli_override_wins():
-    # The racecast CLI passes --cookies with the REAL runtime path. In a frozen
-    # binary `here` points into the ephemeral PyInstaller bundle, so the explicit
-    # override MUST win over the here-relative fallback (regression for the box's
-    # Intro/Outro 403: get-media resolved cookies into <_MEIPASS>/runtime).
+    # In a frozen binary `here` points into the ephemeral PyInstaller bundle, so
+    # the CLI's explicit --cookies path must win over the here-relative fallback.
     assert m.cookies_path("/real/runtime/yt-cookies.txt", "/bundle/src/relay") \
         == "/real/runtime/yt-cookies.txt"
 
@@ -138,14 +135,13 @@ def t_download_cmd_separates_url():
 
 
 def t_download_cmd_forces_overwrite():
-    # A clip must always be re-fetched to match the currently-resolved URL: yt-dlp's
-    # default skips an existing output file ("has already been downloaded"), which
-    # left a placeholder/stale trailer.mp4 (or a changed URL) frozen. --force-overwrites
-    # (and no partial-resume) makes the on-disk file always match the resolved URL.
+    # yt-dlp skips an existing output file by default, which would freeze a stale
+    # clip in place. --force-overwrites plus no partial resume keeps the on-disk
+    # file matching the resolved URL.
     cmd = m.build_download_cmd("https://youtu.be/AAA", "/tmp/trailer.mp4")
     assert "--force-overwrites" in cmd, cmd
     assert "--no-continue" in cmd, cmd
-    # the overwrite flags stay options, before the `--` URL separator
+    # The overwrite flags stay options, before the `--` URL separator.
     assert cmd.index("--force-overwrites") < cmd.index("--"), cmd
 
 
@@ -170,11 +166,11 @@ def t_download_rejects_non_http_url():
         assert raised, bad
 
 
-# ---------- transient-403 retry loop (#344) -------------------------------------
+# The transient-403 retry loop. (#344)
 
 class _Runner:
-    """Fake subprocess.run: each call pops the next item from `results`; an
-    Exception is raised, anything else is returned (success)."""
+    """Fake subprocess.run: each call pops the next item from `results`. An
+    Exception is raised, anything else is returned as a success."""
     def __init__(self, results):
         self.results = list(results)
         self.calls = 0
@@ -205,7 +201,7 @@ def t_run_download_retries_then_succeeds():
     err = subprocess.CalledProcessError(1, "yt-dlp")
     run, sl = _Runner([err, "OK"]), _Sleeper()
     assert m.run_download(["yt-dlp"], runner=run, sleeper=sl) == "OK"
-    # one failed attempt -> one retry -> one backoff sleep
+    # One failed attempt means one retry and one backoff sleep.
     assert run.calls == 2 and len(sl.calls) == 1, (run.calls, sl.calls)
 
 
@@ -217,7 +213,7 @@ def t_run_download_gives_up_after_attempts():
         m.run_download(["yt-dlp"], attempts=3, runner=run, sleeper=sl)
     except subprocess.CalledProcessError:
         raised = True
-    # all attempts used, a sleep between each (attempts-1), error re-raised
+    # All attempts are used, with a sleep between each, and the error re-raised.
     assert raised and run.calls == 3 and len(sl.calls) == 2, (run.calls, sl.calls)
 
 
@@ -241,7 +237,7 @@ def t_run_download_does_not_retry_timeout():
     assert raised and run.calls == 1 and sl.calls == [], (run.calls, sl.calls)
 
 
-# ---------- intermission-music helpers (Task B3) ---------------------------------
+# Intermission-music helpers.
 
 def t_music_url_from_csv_picks_value():
     rows = [["Overlay", "https://drive.google.com/file/d/x/view"],
@@ -278,9 +274,8 @@ def _read(path):
 
 
 def t_reset_unlinked_media_overwrites_stale_clip():
-    # A stale intro.mp4 (from a prior download) must be replaced by the neutral
-    # placeholder when the Sheet no longer links it (issue #387); a not-requested
-    # clip (outro) is left alone.
+    # A stale intro.mp4 must be replaced by the neutral placeholder once the Sheet
+    # stops linking it, while a clip nobody asked for is left alone. (#387)
     import tempfile
     with tempfile.TemporaryDirectory() as tmp:
         with open(os.path.join(tmp, "intro.mp4"), "wb") as fh:
@@ -316,8 +311,8 @@ def t_drive_helpers_match_get_brands():
 
 
 def t_drive_confirm_url_form_interstitial():
-    """The modern <form> interstitial resolves to a usercontent GET with all
-    hidden inputs carried through (the #386 fix)."""
+    """The modern <form> interstitial resolves to a usercontent GET with every
+    hidden input carried through. (#386)"""
     from urllib.parse import urlparse, parse_qs
     url = media.to_download_url("FILEID123")
     got = media.drive_confirm_url(url, FORM_INTERSTITIAL)
@@ -332,7 +327,7 @@ def t_drive_confirm_url_form_interstitial():
 
 
 def t_drive_confirm_url_legacy_token():
-    """The legacy inline `confirm=<token>` link still resolves (back-compat)."""
+    """The legacy inline `confirm=<token>` link still resolves."""
     url = media.to_download_url("XYZ")
     body = b'<a href="/uc?export=download&confirm=AbC_9-tok&id=XYZ">Download</a>'
     assert media.drive_confirm_url(url, body) == url + "&confirm=AbC_9-tok"
@@ -343,7 +338,7 @@ def t_drive_confirm_url_none_when_neither():
 
 
 def t_drive_confirm_url_input_attr_order_independent():
-    """value-before-name inputs still parse (attribute order must not matter)."""
+    """A value-before-name input still parses, so attribute order does not matter."""
     from urllib.parse import urlparse, parse_qs
     body = (
         b'<form action="https://drive.usercontent.google.com/download">'

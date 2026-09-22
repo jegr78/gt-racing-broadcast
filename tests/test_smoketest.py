@@ -18,15 +18,12 @@ def _load(name, rel):
 st = _load("smoketest", ("src", "scripts", "smoketest.py"))
 
 
-# ---------------------------------------------------------------- parsing
+# Parsing.
 
 def t_parse_rcq_reads_what_yt_dlp_actually_prints():
-    """Real output carries a FLOAT fps: `rcq 1080 60.0`, the relay's own example.
-
-    The first version required an integer fps, required it to be present, and
-    anchored to end-of-line — so it matched nothing yt-dlp ever emits, and every
-    YouTube candidate on the box was rejected as "not live". The unit test hid it
-    because its vector ("rcq 1080 60") was invented rather than observed.
+    """Real output carries a float fps, `rcq 1080 60.0`, which is the relay's own
+    example. The fps may also be absent or NA, so requiring an integer fps
+    anchored to end-of-line matches nothing yt-dlp emits.
     """
     assert st.parse_rcq("rcq 1080 60.0")[0] == 1080
     assert st.parse_rcq("some noise\nrcq 720 30.0\nmore")[0] == 720
@@ -80,7 +77,7 @@ def t_topical_match():
     assert not st.topical_match("alumni reunion stream")
 
 
-# ------------------------------------------------------------- acceptance
+# Acceptance.
 
 def t_accept_youtube():
     ok, why = st.accept_youtube(1080, "GT7 Daily Races", "SomeChannel")
@@ -108,7 +105,7 @@ def t_accept_twitch():
     assert not ok and "plugin" in why.lower()
 
 
-# -------------------------------------------------------------- discovery
+# Discovery.
 
 def t_youtube_live_search_url():
     u = st.youtube_live_search_url("sim racing live")
@@ -136,7 +133,7 @@ def t_rank_twitch_candidates():
     assert len(st.rank_by_viewers(cands)) == 3
 
 
-# ------------------------------------------------------------ source plan
+# Source plan.
 
 _HEADED = [["URL", "Streamer", "Stint"],
            ["https://www.youtube.com/watch?v=a", "JeGr", "Stint 1"],
@@ -148,12 +145,12 @@ _HEADLESS = [["https://www.youtube.com/watch?v=a", "JeGr"],
 
 
 def t_schedule_data_rows_mirrors_what_the_relay_calls_a_stint():
-    """Physical, 1-based, header included — the relay keys /schedule/data the
-    same way ("keyed by physical sheet row"). Assuming data starts at row 1
-    overwrote a live sheet's `URL` header and knocked the tab out of header mode.
+    """Physical, 1-based and header included, the way the relay keys
+    /schedule/data. Assuming data starts at row 1 writes over a headed tab's `URL`
+    cell and knocks the tab out of header mode.
     """
-    # Row 3 is a planned stint (name + label, URL still blank) and counts; row 4
-    # is a blank spacer and does NOT — writing there invents a stint.
+    # Row 3 is a planned stint, named and labelled with the URL still blank, and
+    # counts. Row 4 is a blank spacer and does not: writing there invents a stint.
     assert st.schedule_data_rows(_HEADED) == [2, 3, 5]
     assert st.schedule_data_rows(_HEADLESS) == [1, 2]
     assert st.schedule_data_rows([]) == []
@@ -169,15 +166,15 @@ def t_headless_tab_never_targets_a_foreign_header():
 
 
 def t_uc_channel_ids_count_as_stints():
-    """`UC…` is a documented Schedule value (Sheet-Template); the relay's
-    is_channel accepts it. Only matching stream URLs made such a tab look empty."""
+    """`UC…` is a documented Schedule value that the relay's is_channel accepts.
+    Matching only stream URLs would make such a tab look empty."""
     rows = [["UC" + "a" * 22, "JeGr"], ["UC" + "b" * 22, "Second Commentator"]]
     assert st.schedule_data_rows(rows) == [1, 2]
 
 
 def t_writable_layout_refuses_what_the_webhook_cannot_address():
-    """The Apps Script writes `colOf('url') || 1` — without a `URL` header that
-    is ALWAYS column A. Detecting column B and writing A would blank real data."""
+    """The Apps Script writes `colOf('url') || 1`, which without a `URL` header is
+    always column A. Detecting column B and writing A would blank real data."""
     assert st.writable_layout_note(_HEADED) == ""
     assert st.writable_layout_note(_HEADLESS) == ""            # URLs are in A
     shifted = [["Team", "https://www.youtube.com/watch?v=a"],
@@ -196,7 +193,7 @@ def t_schedule_urls_reads_the_stint_rows_only():
 
 def t_rows_match_is_per_row_not_set_inclusion():
     """A dead webhook leaves the previous run's identical URLs in place. Only a
-    per-row comparison — including the rows that must now be EMPTY — notices."""
+    per-row comparison, including the rows that must now be empty, notices."""
     want = {2: "https://www.youtube.com/watch?v=a", 3: "", 5: "https://www.twitch.tv/b"}
     assert st.rows_match(dict(want), want)
     # Same URLs, wrong rows: the write went somewhere else.
@@ -214,9 +211,8 @@ def t_rows_match_is_per_row_not_set_inclusion():
 
 
 def t_stream_host_matches_the_relay_allow_list():
-    """Drift guard: the relay's _is_stream_url is the reference. An earlier copy
-    accepted *.youtu.be, which the relay rejects — exactly the drift a comment
-    claimed was pinned while no such test existed."""
+    """Drift guard: the relay's _is_stream_url is the reference. It rejects
+    *.youtu.be, which a hand-written copy easily accepts."""
     with open(os.path.join(ROOT, "src", "relay", "racecast-feeds.py"),
               encoding="utf-8") as fh:
         src = fh.read()
@@ -242,7 +238,7 @@ def t_channel_id_regex_matches_the_relay():
 
 
 def t_source_plan_is_yt_twitch_yt():
-    # Two concurrent googlevideo pullers throttle (#505); SPLIT must never see two.
+    # Two concurrent googlevideo pullers throttle, so SPLIT must never see two. (#505)
     assert st.SOURCE_PLAN == ("youtube", "twitch", "youtube")
     rows = st.plan_rows(["yt1", "yt2"], ["tw1"], [2, 3, 4])
     assert rows == [(2, "yt1"), (3, "tw1"), (4, "yt2")]
@@ -260,11 +256,11 @@ def t_clear_rows_covers_more_than_it_writes():
     assert st.clear_rows([2, 3], total=4) == [2, 3]        # never invents rows
 
 
-# ----------------------------------------------------------- confirmation
+# Confirmation.
 
 def t_confirm_phrase_names_the_profile():
-    # Naming the profile is the guard against running the right command on the
-    # wrong league — a bare "YES" would not catch that.
+    # Naming the profile guards against running the right command on the wrong
+    # league, which a bare "YES" would not catch.
     assert st.confirm_phrase("testing") == "CLEAR SCHEDULE testing"
     assert st.confirm_phrase("iro-gtec") == "CLEAR SCHEDULE iro-gtec"
     assert st.phrase_ok("testing", "CLEAR SCHEDULE testing")
@@ -274,7 +270,7 @@ def t_confirm_phrase_names_the_profile():
     assert not st.phrase_ok("testing", "CLEAR SCHEDULE iro-gtec")
 
 
-# --------------------------------------------------------------- rundown
+# Rundown.
 
 def t_rundown_shape():
     labels = [s.label for s in st.RUNDOWN]
@@ -286,7 +282,8 @@ def t_rundown_shape():
 
 
 def t_arm_precedes_every_split():
-    """A SPLIT against an unarmed feed shows a black half — manual arm is default-on."""
+    """A SPLIT against an unarmed feed shows a black half, and manual arm is on by
+    default."""
     labels = [s.label for s in st.RUNDOWN]
     for i, lab in enumerate(labels):
         if lab == "SPLIT":
@@ -298,17 +295,15 @@ def t_arm_precedes_every_split():
 
 
 def t_no_step_puts_an_unarmed_feed_on_air():
-    """Both feeds start paused under manual arm and `event start` arms neither.
-
-    Caught the real thing: the rundown cut to STINT A without ever arming Feed A,
-    so the whole first stint pulled nothing and the run went red for a reason that
-    had nothing to do with ffmpeg/yt-dlp/deno.
+    """Both feeds start paused under manual arm and `event start` arms neither, so
+    a rundown that cuts to STINT A without arming Feed A pulls nothing for the
+    whole stint and reddens the run for an unrelated-looking reason.
     """
     assert st.arm_violations() == []
 
 
 def t_arm_violations_sees_a_missing_arm():
-    """The guard must actually bite — the same rundown minus its first ARM."""
+    """The guard must bite: the same rundown minus its first ARM."""
     stripped = tuple(s for s in st.RUNDOWN if s.relay != "feed/A/activate")
     assert "STINT A" in st.arm_violations(stripped)
 
@@ -358,11 +353,11 @@ def t_platform_of_reads_the_hostname():
 def t_twitch_login_is_no_looser_than_the_canonical_validator():
     """The GQL login lands in a URL and in the sheet, so it is charset-checked.
 
-    `broadcast_chat.twitch_login` EXTRACTS a login from a URL or @handle; this one
-    VALIDATES an already-bare login from the API reply. So the invariant is not
-    equality but strictness: whatever this accepts, the canonical one accepts
-    unchanged. (Equality would fail on "../etc", which the canonical extractor
-    happily reduces to "etc".)
+    `broadcast_chat.twitch_login` extracts a login from a URL or @handle, while
+    this one validates an already-bare login from the API reply. The invariant is
+    strictness, not equality: whatever this accepts, the canonical one accepts
+    unchanged. Equality would fail on "../etc", which the canonical extractor
+    reduces to "etc".
     """
     bc = _load("broadcast_chat", ("src", "scripts", "broadcast_chat.py"))
     for value in ("someone", "Some_One", "a" * 25):
@@ -405,7 +400,7 @@ def t_program_audio_skips_when_the_endpoint_is_absent():
 
 
 def t_split_audio_expectation_follows_the_on_air_feed():
-    """The Suzuka regression: SPLIT muted the on-air commentator on even->odd."""
+    """SPLIT must not mute the on-air commentator on an even-to-odd handover."""
     split = next(s for s in st.RUNDOWN if s.label == "SPLIT")
     a = st.expected_after(split, on_air="Feed A")
     assert a["scene"] == "Splitscreen"
@@ -465,9 +460,8 @@ def _assert_route_exists(src, path, where):
 def t_rundown_relay_paths_exist_in_the_relay():
     """Drift guard: a renamed relay route must fail here, not mid-rundown.
 
-    Checks EVERY segment as a quoted literal. The first version only tested the
-    leading segment ("/feed" in src), which even the invented route
-    feed/B/voellig-erfunden passed — it guarded nothing.
+    Every segment is checked as a quoted literal. Testing only the leading segment
+    would pass an invented route such as feed/B/voellig-erfunden.
     """
     src = _relay_source()
     for step in st.RUNDOWN:
@@ -490,10 +484,10 @@ def t_the_route_guard_actually_bites():
 
 
 def t_orchestrator_relay_paths_exist_in_the_relay():
-    """The rundown is not the only caller: _smoke_apply/_observe hardcode
-    obs/scene, obs/source, obs/audio, obs/split, obs/state and more. They
-    are exactly as rename-prone, so they are read straight out of the call sites
-    rather than mirrored into a list that could drift."""
+    """The rundown is not the only caller: _smoke_apply and _observe hardcode
+    obs/scene, obs/source, obs/audio, obs/split, obs/state and more. They are read
+    straight out of the call sites rather than mirrored into a list that could
+    drift."""
     with open(os.path.join(ROOT, "src", "racecast.py"), encoding="utf-8") as fh:
         orchestrator = fh.read()
     paths = set(re.findall(r'_smoke_relay_(?:get|post)\(\s*f?"([a-z0-9/_-]+)"', orchestrator))
@@ -514,7 +508,7 @@ def t_state_mismatches():
                       {"input": "Feed B", "muted": False},
                       {"input": "Discord Audio Capture", "muted": True}]}
     assert st.state_mismatches(exp, good) == []
-    # The Suzuka failure mode: on-air feed silently muted by the macro.
+    # The on-air feed silently muted by the macro.
     bad = json.loads(json.dumps(good))
     bad["audio"][1]["muted"] = True
     msgs = st.state_mismatches(exp, bad)
@@ -533,7 +527,7 @@ def t_state_probe():
     assert "Discord Audio Capture" in body["inputs"]
 
 
-# ---------------------------------------------------------------- verdict
+# Verdict.
 
 def t_hard_and_soft_classification():
     """Environment problems must not redden a run about the toolchain."""
@@ -588,7 +582,7 @@ def t_status_readers_match_the_relay_shape():
     assert st.is_drop_sample({"health": {"level": "RED"}})
 
 
-# ---------------------------------------------------------------- history
+# History.
 
 def t_history_entry():
     e = st.history_entry("2026-08-27T18:00:00Z", st.PASS,

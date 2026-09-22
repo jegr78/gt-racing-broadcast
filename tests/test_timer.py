@@ -29,7 +29,7 @@ def t_format_duration():
 
 
 def t_parse_utc_ts():
-    # canonical ISO, Apps Script toISOString (fractional), gviz-reformatted
+    # Canonical ISO, Apps Script toISOString with a fraction, and gviz-reformatted.
     assert m.parse_utc_ts("2026-06-13T20:00:00Z") == 1781380800.0
     assert m.parse_utc_ts("2026-06-13T20:00:00.000Z") == 1781380800.0
     assert m.parse_utc_ts("2026-06-13 20:00:00") == 1781380800.0
@@ -62,14 +62,14 @@ def t_parse_timer_tab():
 def t_parse_timer_tab_remaining():
     st = m.parse_timer_tab("Duration,6:00:00\nRemaining,1:30:00\n")
     assert st["end"] is None and st["remaining"] == 5400
-    # end and remaining are mutually exclusive — a set anchor wins
+    # end and remaining are mutually exclusive, and a set anchor wins.
     st = m.parse_timer_tab(
         "Race End (UTC),2026-06-13T20:00:00Z\nRemaining,1:30:00\n")
     assert st["end"] == 1781380800.0 and st["remaining"] is None
 
 
 def t_parse_timer_tab_defaults_and_garbage():
-    # empty/missing values fall back to the default state fields; never throws
+    # Empty or missing values fall back to the default state fields.
     st = m.parse_timer_tab("Race End (UTC),\nDuration,\nVisible,\n")
     assert st["end"] is None and st["duration"] == 21600
     assert st["visible"] is True and st["updated"] == 0.0
@@ -77,7 +77,7 @@ def t_parse_timer_tab_defaults_and_garbage():
     assert st["end"] is None
     st = m.parse_timer_tab("garbage,x\nmore,y\n")
     assert st["end"] is None and st["visible"] is True
-    # label match is case-insensitive; gviz may reformat the ISO timestamp
+    # The label match is case-insensitive, and gviz may reformat the timestamp.
     st = m.parse_timer_tab("race end (utc),2026-06-13 20:00:00\n")
     assert st["end"] == 1781380800.0
 
@@ -102,7 +102,7 @@ def t_merge_timer_states_newest_wins():
     sheet = {"end": 2.0, "duration": 90, "visible": False, "updated": 200.0}
     assert m.merge_timer_states(local, sheet) == sheet
     assert m.merge_timer_states(sheet, local) == sheet     # order-insensitive
-    # tie -> first arg (local) wins; sheet None -> local
+    # On a tie the first argument wins, and a None sheet keeps local.
     tie = dict(sheet, updated=100.0)
     assert m.merge_timer_states(local, tie) == local
     assert m.merge_timer_states(local, None) == local
@@ -242,7 +242,7 @@ def t_timerstore_push_payload_and_status():
 
 
 def t_timerstore_push_unconfirmed_is_failed():
-    # Apps Script answers HTTP 200 even for errors — only {"ok": true} counts.
+    # Apps Script answers HTTP 200 even for errors, so only {"ok": true} counts.
     ts, _ = _store(push_url="http://push?key=k")
     ts._spawn_push = ts._push
     orig = m.post_webhook
@@ -283,7 +283,7 @@ def t_timerstore_summary():
     assert ts.summary() == {"mode": "prestart", "visible": True,
                             "remaining_s": None, "push": "disabled"}
     ts.set_duration(60, now=10.0); ts.start(now=10.0)
-    # anchor is long past against the real clock -> finished, clamped to 0
+    # The anchor is long past against the real clock, so it clamps to 0.
     s = ts.summary()
     assert s["mode"] == "finished" and s["remaining_s"] == 0
     ts.start(now=10.0)                          # still running per state -> note

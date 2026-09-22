@@ -48,10 +48,9 @@ def t_graphics_from_csv_picks_drive_skips_youtube():
 
 
 def t_graphics_from_csv_excludes_media_labels():
-    # Media rows (handled by get-media.py) must NOT be grabbed as PNG graphics —
-    # a Drive-hosted Intermission Music MP3 would otherwise be downloaded as
-    # 'Intermission Music.png' and fail the PNG signature check (#368 follow-up).
-    # Intro/Outro escape only when YouTube-hosted; a Drive-hosted clip would break too.
+    # get-media.py owns these rows. A Drive-hosted Intermission Music MP3 grabbed
+    # here would be saved as 'Intermission Music.png' and fail the PNG signature
+    # check. Intro/Outro escape only when YouTube-hosted. (#368)
     rows = [["Intermission Music", "https://drive.google.com/file/d/MUS/view"],
             ["Intro Video", "https://drive.google.com/file/d/INTRO/view"],
             ["Outro Video", "https://drive.google.com/file/d/OUTRO/view"],
@@ -69,8 +68,8 @@ def t_graphics_from_csv_label_verbatim_and_empty():
 
 
 def t_unlinked_targets_are_expected_minus_linked():
-    # Sheet links Overlay + Standings; the OBS collection also expects the three
-    # weather overlays. The unlinked ones (no Sheet link) reset to the placeholder.
+    # The Sheet links Overlay and Standings, while the OBS collection also expects
+    # the three weather overlays. An unlinked one resets to the placeholder.
     expected = ["Overlay.png", "Standings.png", "Race Weather 1.png",
                 "Race Weather 2.png", "Quali Weather.png"]
     linked = {"Overlay": "u1", "Standings": "u2"}
@@ -92,7 +91,7 @@ def t_unlinked_targets_scoped_to_only():
 
 
 def t_graphics_dir_repo():
-    # expected via os.path.join: separators differ when this test runs on Windows
+    # Built with os.path.join because the separator differs on Windows.
     got = m.graphics_dir(os.path.join("/x", "src", "relay"))
     assert got == os.path.join("/x", "runtime", "graphics"), got
 
@@ -118,9 +117,9 @@ def t_internal_from_csv_various_truthy_and_header_aliases():
 
 
 def t_internal_from_csv_no_header_or_no_column_is_empty():
-    # header-less (today's sheets) -> no Internal column -> empty
+    # A header-less sheet has no Internal column.
     assert m.internal_from_csv([["Standings", "https://drive.google.com/file/d/S/view"]]) == set()
-    # header present but no Internal column -> empty
+    # Header present, Internal column absent.
     assert m.internal_from_csv([["Name", "Link"], ["Standings", "x"]]) == set()
     assert m.internal_from_csv([]) == set()
 
@@ -135,7 +134,7 @@ def t_write_manifest_shape():
 
 
 def t_graphics_from_csv_ignores_header_row():
-    # A header row must not become a bogus graphic: "Link" is not a Drive URL -> skipped.
+    # A header row must not become a graphic: "Link" is not a Drive URL.
     rows = [["Name", "Link", "Internal"],
             ["Standings", "https://drive.google.com/file/d/S/view", "FALSE"]]
     assert m.graphics_from_csv(rows) == {

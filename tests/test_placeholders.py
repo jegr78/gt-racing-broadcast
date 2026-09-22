@@ -48,9 +48,8 @@ def t_expected_graphics_empty_when_no_refs():
 
 
 def t_expected_graphics_rejects_path_traversal_refs():
-    """#324 review: a ref name must be a bare basename — a '/'-bearing (traversing)
-    ref is NOT captured, so no consumer can join it into a path that escapes the
-    graphics dir (fill_missing writes, seed_committed_graphics reads+copies)."""
+    """A ref name must be a bare basename. A '/'-bearing ref is not captured, so no
+    consumer can join it into a path that escapes the graphics dir. (#324)"""
     text = ('{"a":"__RACECAST_GRAPHICS__/../../etc/evil.png",'
             '"b":"__RACECAST_GRAPHICS__/sub/dir/x.png",'
             '"c":"__RACECAST_GRAPHICS__/Overlay.png"}')
@@ -77,7 +76,7 @@ def t_fill_missing_writes_only_absent_byte_identical():
     with tempfile.TemporaryDirectory() as tmp:
         with open(PNG, "rb") as fh:
             src_bytes = fh.read()
-        # one already present -> must not be touched / re-listed
+        # An already-present file must not be touched or re-listed.
         with open(os.path.join(tmp, "Overlay.png"), "wb") as fh:
             fh.write(b"REAL")
         written = ph.fill_missing(["Overlay.png", "Weather Sunny.png"], tmp, PNG)
@@ -104,8 +103,8 @@ def t_fill_missing_tolerates_absent_source():
 
 
 def t_reset_placeholders_overwrites_existing_byte_identical():
-    # Unlike fill_missing, reset_placeholders REPLACES a stale real asset with the
-    # placeholder (issue #387): a removed Sheet link must not leave the old file.
+    # Unlike fill_missing, reset_placeholders replaces a stale real asset with the
+    # placeholder, so a removed Sheet link does not leave the old file. (#387)
     with tempfile.TemporaryDirectory() as tmp:
         with open(PNG, "rb") as fh:
             src_bytes = fh.read()
@@ -128,8 +127,8 @@ def t_reset_placeholders_tolerates_absent_source():
 
 def t_setup_assets_fills_placeholders_for_missing():
     # Template-driven scan: each __RACECAST_MEDIA__/<name> reference gets the
-    # correct placeholder (video for .mp4, ambient loop for .mp3). intro.mp4
-    # and outro.mp4 still get the neutral clip; intermission.mp3 gets the loop.
+    # placeholder its extension picks, the neutral clip for .mp4 and the ambient
+    # loop for .mp3.
     import json, subprocess
     with tempfile.TemporaryDirectory() as tmp:
         tpl = os.path.join(tmp, "tpl.json")
@@ -192,7 +191,7 @@ def t_get_media_seeds_placeholder_clip():
         assert sorted(seeded) == ["intro.mp4", "outro.mp4", "trailer.mp4"]
         with open(MP4, "rb") as a, open(os.path.join(tmp, "intro.mp4"), "rb") as b:
             assert a.read() == b.read()
-        # already-present clip is not overwritten / re-listed
+        # An already-present clip is not overwritten or re-listed.
         assert gm.seed_missing_media(tmp, {"intro"}) == []
 
 

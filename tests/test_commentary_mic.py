@@ -68,7 +68,7 @@ def t_adds_a_muted_tokenized_mic_to_stint_and_splitscreen():
 
 def t_the_mic_is_a_direct_audio_item_not_a_nested_scene():
     # A visible nested scene is one more render layer in Stint, which tips a weak
-    # host over the render cliff (PR #559). The leaf input has no video to render.
+    # host over the render cliff (#559). The leaf input has no video to render.
     d = _without_mic(_collection())
     tool.add_commentary_mic(d)
     assert not any(s.get("name") == "Commentary Mic" for s in d["sources"])
@@ -143,7 +143,7 @@ def t_unset_warning_names_the_env_var_of_each_device():
 
 
 def t_endurance_without_a_capture_card_does_not_warn_about_the_mic():
-    # No RACECAST_CAPTURE -> no local stint on this machine -> the mic is never opened.
+    # Without RACECAST_CAPTURE there is no local stint here, so the mic never opens.
     assert sa.device_unset_warning([MIC], "endurance", {}) is None
     line = sa.device_unset_warning([MIC], "endurance", {"RACECAST_CAPTURE": "Game Capture HD60 X"})
     assert line and "RACECAST_MIC" in line, line

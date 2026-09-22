@@ -18,12 +18,12 @@ def _write(directory, name, text):
 
 def t_anchor_basic():
     assert m.github_anchor("Run an event") == "run-an-event"
-    # em-dash and dots drop, backticks are decoration, parens drop:
+    # Em-dash, dots, backticks and parens all drop.
     assert m.github_anchor("4 — Add your secrets (`.env`)") == "4--add-your-secrets-env"
 
 
 def t_anchor_double_dash_from_dropped_plus():
-    # F2 regression case: the removed '+' sits between two spaces -> double dash.
+    # The removed '+' sits between two spaces, which yields a double dash.
     assert (m.github_anchor("Through the broadcast (scene + sheet cues)")
             == "through-the-broadcast-scene--sheet-cues")
 

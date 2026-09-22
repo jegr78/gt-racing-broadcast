@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Unit checks for the #505 multi-feed 429 probe pure helpers (tools/multifeed-429-probe.py).
+"""Unit checks for the pure helpers of tools/multifeed-429-probe.py (#505).
 
-Runnable script, stdlib only (repo convention — no pytest). Only the PURE helpers are
-exercised; the relay module is lazy-loaded in the probe's run path, so importing the tool
-here is cheap and does not pull in racecast-feeds.py."""
+Runnable script, stdlib only. Only the pure helpers are exercised. The relay module
+is lazy-loaded in the probe's run path, so importing the tool here is cheap and does
+not pull in racecast-feeds.py."""
 import importlib.util
 import os
 import random

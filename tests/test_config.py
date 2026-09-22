@@ -30,7 +30,7 @@ def t_find_project_root_returns_none_when_no_marker_within_bound():
     with tempfile.TemporaryDirectory() as td:
         deep = os.path.join(td, "a", "b", "c", "d", "e")
         os.makedirs(deep)
-        # no marker anywhere -> None (bounded walk, never an unrelated parent)
+        # The walk is bounded, so it never reaches an unrelated parent.
         assert m.find_project_root(deep, max_levels=4) is None
 
 
@@ -298,7 +298,7 @@ def t_resolve_config_obs_collection_falls_back_to_name():
         root = _mkroot(td)
         _mkprofile(root, "erf", "NAME=ERF Endurance\nSHEET_ID=abc\n")
         cfg = m.resolve_config(root, environ={})
-        # default = product prefix + the league NAME (em-dash separator)
+        # The default is the product prefix plus the league NAME, em-dash joined.
         assert cfg.obs_collection == "GT Racing Endurance — ERF Endurance"
 
 
@@ -307,7 +307,7 @@ def t_resolve_config_obs_collection_falls_back_to_profile_dir_when_no_name():
         root = _mkroot(td)
         _mkprofile(root, "erf", "SHEET_ID=abc\n")   # no NAME, no OBS_COLLECTION
         cfg = m.resolve_config(root, environ={})
-        # falls back to cfg.name (= profile dir name), still prefixed
+        # Falls back to cfg.name, the profile dir name, still prefixed.
         assert cfg.obs_collection == "GT Racing Endurance — erf"
 
 
@@ -404,9 +404,9 @@ def t_sheet_edit_url_empty_when_unset():
     assert m.sheet_edit_url("   ") == ""
 
 
-# --- The SHIPPED profiles (profiles/ in the repo root) -----------------------
-# 'demo' is the committed, directly-usable public-Sheet demo league (#206);
-# 'example' is the copy-from template and must stay out of the league list.
+# The shipped profiles under profiles/ in the repo root. 'demo' is the committed,
+# directly usable public-Sheet demo league (#206); 'example' is the copy-from
+# template and must stay out of the league list.
 
 def t_shipped_demo_profile_is_listed_and_example_is_not():
     listed = m.list_profiles(ROOT)
@@ -416,11 +416,11 @@ def t_shipped_demo_profile_is_listed_and_example_is_not():
 
 def t_shipped_demo_profile_env_is_complete_and_secret_free():
     env = m.parse_profile(ROOT, "demo")
-    # directly usable: a name + a real (public, read-only) Sheet id + a collection
+    # Directly usable: a name, a real public read-only Sheet id, and a collection.
     assert env.get("NAME"), env
     assert env.get("SHEET_ID"), env
     assert env.get("OBS_COLLECTION"), env
-    # no write credential / secret ever ships in git
+    # No write credential or secret is ever committed.
     assert env.get("SHEET_PUSH_URL", "") == "", env
     assert env.get("CONSOLE_SECRET", "") == "", env
     assert env.get("DISCORD_WEBHOOK_URL", "") == "", env

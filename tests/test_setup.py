@@ -10,7 +10,7 @@ spec = importlib.util.spec_from_file_location(
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 
 
-# ---------- webhook response check (v2 action echo) ----------
+# Webhook response check: the v2 action echo.
 
 def t_webhook_ok_plain():
     ok, err = m.check_webhook_response(b'{"ok": true}')
@@ -24,7 +24,8 @@ def t_webhook_ok_with_echo():
 
 
 def t_webhook_v1_script_is_outdated_for_actions():
-    # a v1 timer-only script answers ok WITHOUT the action echo -> not a success
+    # A v1 timer-only script answers ok without the action echo, which is not a
+    # success.
     ok, err = m.check_webhook_response(b'{"ok": true}', expected_action="setup")
     assert not ok and "outdated" in err
 
@@ -41,7 +42,7 @@ def t_webhook_garbage_body():
     assert not ok
 
 
-# ---------- schedule rows (url + name) ----------
+# Schedule rows: url plus name.
 
 SCHED_CSV = ('"https://www.youtube.com/watch?v=abc",Matt\n'
              '"UCLA_DiR1FfKNvjuUpBHmylQ",NASA\n'
@@ -86,16 +87,15 @@ def _sched_with_rows(rows):
 
 
 def t_inject_row_clears_url_keeps_name_stint():
-    # A URL clear (url="") must update the in-memory row to url="" while KEEPING
-    # streamer+stint, so /schedule/data + /cockpit/data reflect it before the next
-    # sheet poll (bug: the cockpit "(replace)" tag lingered until a browser reload).
+    # A URL clear must update the in-memory row while keeping streamer and stint,
+    # so /schedule/data and /cockpit/data reflect it before the next sheet poll.
     s = _sched_with_rows([("https://www.youtube.com/watch?v=x", "JeGr", "Stint 1", 2)])
     assert s.inject_row(2, url="", name="JeGr", stint="Stint 1") is True
     assert s.get_rows() == [("", "JeGr", "Stint 1", 2)]
 
 
 def t_inject_row_url_none_leaves_url_untouched():
-    # url=None means "leave the URL alone"; only the name changes here.
+    # url=None means "leave the URL alone", so only the name changes here.
     s = _sched_with_rows([("https://www.youtube.com/watch?v=x", "JeGr", "Stint 1", 2)])
     assert s.inject_row(2, name="GT45") is True
     assert s.get_rows() == [("https://www.youtube.com/watch?v=x", "GT45", "Stint 1", 2)]
@@ -108,8 +108,8 @@ def t_inject_row_rejects_junk_url():
 
 
 def t_inject_row_fully_empty_drops_row():
-    # Clearing every cell drops the row, matching the parser (which skips blank
-    # rows) so the in-memory schedule never diverges from a re-poll.
+    # Clearing every cell drops the row, matching the parser's blank-row skip, so
+    # the in-memory schedule never diverges from a re-poll.
     s = _sched_with_rows([("https://www.youtube.com/watch?v=x", "JeGr", "Stint 1", 2),
                           ("https://www.youtube.com/watch?v=y", "GT45", "Stint 2", 3)])
     assert s.inject_row(2, url="", name="", stint="") is True
@@ -124,8 +124,8 @@ def t_parse_rows_url_not_first_column():
 
 
 def t_parse_rows_with_header_line():
-    # No 'URL' header -> positional fallback; the header row fails is_channel and
-    # is skipped, physical line numbers preserved, no stint label.
+    # Without a 'URL' header the parser falls back to positions. The header row
+    # fails is_channel and is skipped, physical line numbers survive, no stint label.
     text = "Channel,Name\nUCaaaaaaaaaaaaaaaaaaaaa1,Alpha\nUCbbbbbbbbbbbbbbbbbbbbb2,Beta\n"
     rows = m.ScheduleSource._parse_rows(text)
     assert rows == [("UCaaaaaaaaaaaaaaaaaaaaa1", "Alpha", "", 2),
@@ -133,8 +133,8 @@ def t_parse_rows_with_header_line():
 
 
 def t_parse_rows_header_mode_reads_stint():
-    # A recognized 'URL' header opts into header mode: URL/Streamer/Stint located
-    # by name (in any order), the per-stint label read, line numbers physical.
+    # A recognized 'URL' header opts into header mode, which locates URL, Streamer
+    # and Stint by name in any order and keeps physical line numbers.
     text = ("Stint,URL,Streamer\n"
             "Opening,UCaaaaaaaaaaaaaaaaaaaaa1,JeGr\n"
             "Closing,UCbbbbbbbbbbbbbbbbbbbbb2,GT45\n")
@@ -144,16 +144,16 @@ def t_parse_rows_header_mode_reads_stint():
 
 
 def t_parse_rows_header_mode_missing_stint_column():
-    # Header mode with only URL + Streamer -> stint label is "" (column absent).
+    # Header mode with only URL and Streamer leaves the stint label empty.
     text = "URL,Streamer\nUCaaaaaaaaaaaaaaaaaaaaa1,JeGr\n"
     rows = m.ScheduleSource._parse_rows(text)
     assert rows == [("UCaaaaaaaaaaaaaaaaaaaaa1", "JeGr", "", 2)], rows
 
 
 def t_parse_rows_header_mode_keeps_planned_stints_without_url():
-    # #137: in header mode a pre-planned stint (Stint label and/or Streamer set,
-    # URL still blank) is a REAL stint slot — kept with an empty URL (feed idles
-    # until filled) so the panel shows all planned stints, not just URL-bearing ones.
+    # In header mode a pre-planned stint, with a Stint label or a Streamer but no
+    # URL yet, is a real stint slot. It is kept with an empty URL so the feed idles
+    # until filled and the panel shows every planned stint. (#137)
     text = ("Stint,URL,Streamer\n"
             "Opening,UCaaaaaaaaaaaaaaaaaaaaa1,JeGr\n"   # live: has URL
             "Mid,,GT45\n"                                # planned: stint + streamer, no URL
@@ -173,16 +173,15 @@ def t_parse_rows_header_mode_planned_streamer_only():
 
 
 def t_parse_rows_reads_name_header_for_pov_tab():
-    # The POV tab uses a 'name' column (no 'streamer'); header mode reads it into
-    # the row's name field so the relay can surface the POV name.
+    # The POV tab uses a 'name' column rather than 'streamer', and header mode reads
+    # it into the row's name field so the relay can surface the POV name.
     text = "url,name\nhttps://www.youtube.com/watch?v=p,JeGr\n"
     rows = m.ScheduleSource._parse_rows(text)
     assert rows == [("https://www.youtube.com/watch?v=p", "JeGr", "", 2)], rows
 
 
 def t_parse_rows_streamer_still_wins_over_name():
-    # Additive change must not regress the Schedule tab: when both 'streamer' and
-    # 'name' headers exist, 'streamer' is the one read (first match wins).
+    # When both 'streamer' and 'name' headers exist, 'streamer' is the one read.
     text = ("url,streamer,name\n"
             "https://www.youtube.com/watch?v=p,RealStreamer,SomethingElse\n")
     rows = m.ScheduleSource._parse_rows(text)
@@ -190,16 +189,16 @@ def t_parse_rows_streamer_still_wins_over_name():
 
 
 def t_parse_rows_header_mode_drops_invalid_url_keeps_planned():
-    # A non-channel URL on an otherwise-planned row is treated as not-yet-filled
-    # (url -> ""), so the feed never tries to serve junk but the row still shows.
+    # A non-channel URL on an otherwise-planned row reads as not yet filled, so the
+    # feed never serves junk and the row still shows.
     text = "Stint,URL,Streamer\nMid,not-a-url,GT45\n"
     rows = m.ScheduleSource._parse_rows(text)
     assert rows == [("", "GT45", "Mid", 2)], rows
 
 
 def t_items_idle_on_planned_rows_without_url():
-    # The feed URL list stays parallel to the rows: a planned (URL-less) stint is
-    # an empty slot, so the feed idles on it instead of breaking the indexing.
+    # The feed URL list stays parallel to the rows, so a planned stint without a URL
+    # is an empty slot the feed idles on rather than a hole in the indexing.
     import tempfile, os as _os
     text = "Stint,URL,Streamer\nOpening,UCaaaaaaaaaaaaaaaaaaaaa1,JeGr\nMid,,GT45\n"
     s = m.ScheduleSource("http://sched",
@@ -209,7 +208,7 @@ def t_items_idle_on_planned_rows_without_url():
     assert s.get() == ["UCaaaaaaaaaaaaaaaaaaaaa1", ""]   # planned stint = idle slot
 
 
-# ---------- SetupControl ----------
+# SetupControl.
 
 OVERLAY_CSV = (",Stint,Intro,,,,,,,\n,Streamer,JeGr,,,,,,,\n"
                ",Session,Warmup,,,,,,,\n,Race Control,,,,,,,,\n")
@@ -325,8 +324,8 @@ def t_schedule_set_validates_and_pushes():
 
 
 def t_schedule_set_validates_streamer_and_stint_vocab():
-    # Streamer + Stint are vocabulary-constrained, like the Setup fields:
-    # an off-vocab value is rejected before any webhook call (no free text).
+    # Streamer and Stint are vocabulary-constrained like the Setup fields, so an
+    # off-vocab value is rejected before any webhook call.
     pushes = []
     ctl, hs, orig = _ctl(pushes)
     try:
@@ -344,9 +343,8 @@ def t_schedule_set_validates_streamer_and_stint_vocab():
 
 
 def t_schedule_set_clear_reflects_in_source():
-    # End-to-end: a panel CLEAR URL (url="") writes the sheet AND updates the
-    # in-memory schedule immediately (name/stint kept), so consumers don't show
-    # the stale link for a poll interval.
+    # A panel CLEAR URL writes the sheet and updates the in-memory schedule at once,
+    # keeping name and stint, so no consumer shows the stale link for a poll.
     pushes = []
     hs = _hs_stub()
     s = _sched_with_rows([("https://www.youtube.com/watch?v=x", "JeGr", "Stint 1", 2)])
@@ -366,8 +364,8 @@ def t_schedule_set_clear_reflects_in_source():
 
 
 def t_schedule_set_accepts_local_but_pov_does_not():
-    # #592: the director may point a stint at the capture card (`local:`); the POV
-    # stays remote-only. The token is written normalised.
+    # The director may point a stint at the capture card with `local:`, while the
+    # POV stays remote-only. The token is written normalised. (#592)
     pushes = []
     ctl, hs, orig = _ctl(pushes)
     try:
@@ -474,7 +472,7 @@ def t_push_failure_keeps_override_until_ttl():
         m.WEBHOOK_RETRY_BASE_S = _base
 
 
-# ---------- endpoint routing (real server, ephemeral port) ----------
+# Endpoint routing, against a real server on an ephemeral port.
 
 def _client(setup_ctl, next_result=None, rows=None, live_idx=0, qual_rows=None):
     import json as _json, threading as _t, urllib.error
@@ -521,7 +519,7 @@ def _client(setup_ctl, next_result=None, rows=None, live_idx=0, qual_rows=None):
     base = f"http://127.0.0.1:{srv.server_address[1]}"
 
     def _read(req):
-        # error endpoints answer 404 etc. with a JSON body -> read it either way
+        # An error endpoint answers with a JSON body too, so read it either way.
         try:
             with urlopen(req, timeout=5) as r:
                 return _json.loads(r.read())
@@ -566,8 +564,8 @@ def t_endpoints_setup_set_urlencoded_value():
 
 
 def t_next_handover_clears_racecontrol_on_cut():
-    # One-button handover: /next cuts OBS back to Stint, so no STINT macro press
-    # follows -> the relay must clear Race Control itself (mirrors rc:"").
+    # On a one-button handover /next cuts OBS back to Stint with no STINT macro
+    # press following, so the relay clears Race Control itself.
     pushes = []
     ctl, hs, orig = _ctl(pushes)
     srv, get, post = _client(ctl, next_result={"obs_cut": True})
@@ -582,7 +580,7 @@ def t_next_handover_clears_racecontrol_on_cut():
 
 
 def t_next_handover_keeps_racecontrol_without_cut():
-    # No real cut (incoming feed not yet serving) -> leave Race Control untouched.
+    # Without a real cut, the incoming feed is not serving and Race Control stays.
     pushes = []
     ctl, hs, orig = _ctl(pushes)
     srv, get, post = _client(ctl, next_result={"obs_cut": False})
@@ -596,7 +594,7 @@ def t_next_handover_keeps_racecontrol_without_cut():
 
 
 def t_next_handover_keeps_flag_on_cut():
-    # A track condition (flag) outlives a commentator handover -> NOT cleared on cut.
+    # A track condition outlives a commentator handover, so a cut does not clear it.
     pushes = []
     ctl, hs, orig = _ctl(pushes)
     srv, get, post = _client(ctl, next_result={"obs_cut": True})
@@ -610,8 +608,8 @@ def t_next_handover_keeps_flag_on_cut():
 
 
 def t_next_handover_writes_schedule_streamer_and_stint_on_cut():
-    # On a real cut the HUD follows the on-air stint's Streamer + Stint label
-    # from the Schedule (issue #112), via the async-optimistic set_field path.
+    # On a real cut the HUD follows the on-air stint's Streamer and Stint label from
+    # the Schedule, through the async-optimistic set_field path. (#112)
     pushes = []
     ctl, hs, orig = _ctl(pushes)
     live = [("https://www.youtube.com/watch?v=a", "GT45", "Stint 2", 2)]
@@ -626,8 +624,8 @@ def t_next_handover_writes_schedule_streamer_and_stint_on_cut():
 
 
 def t_next_handover_skips_off_vocab_schedule_values():
-    # A schedule streamer/stint outside the Configuration vocab is rejected by
-    # set_field and silently skipped — the HUD keeps its prior value, no crash.
+    # A schedule streamer or stint outside the Configuration vocab is rejected by
+    # set_field and skipped, so the HUD keeps its prior value.
     pushes = []
     ctl, hs, orig = _ctl(pushes)
     assert hs.data()["streamer"] == "JeGr"          # baseline from OVERLAY_CSV
@@ -641,7 +639,8 @@ def t_next_handover_skips_off_vocab_schedule_values():
 
 
 def t_next_handover_no_write_without_cut():
-    # No real cut -> no schedule-driven HUD write (the new feed isn't on air yet).
+    # Without a real cut there is no schedule-driven HUD write, since the new feed
+    # is not on air yet.
     pushes = []
     ctl, hs, orig = _ctl(pushes)
     live = [("https://www.youtube.com/watch?v=a", "GT45", "Stint 2", 2)]
@@ -655,9 +654,9 @@ def t_next_handover_no_write_without_cut():
 
 
 def t_next_handover_writes_schedule_on_continuation_without_cut():
-    # A same-URL back-to-back continuation does NOT cut OBS, but the DISPLAY
-    # stint still advances -> the HUD label must follow it (review fix: gate on
-    # should_push_live_schedule, not obs_cut alone).
+    # A same-URL back-to-back continuation does not cut OBS, but the display stint
+    # still advances, so the HUD label follows it. The gate is
+    # should_push_live_schedule, not obs_cut alone.
     pushes = []
     ctl, hs, orig = _ctl(pushes)
     live = [("https://www.youtube.com/watch?v=a", "GT45", "Stint 2", 2)]
@@ -673,8 +672,8 @@ def t_next_handover_writes_schedule_on_continuation_without_cut():
 
 
 def t_set_stint_writes_schedule_streamer_and_stint():
-    # Producer takeover (/set/stint) puts a fresh stint on air -> same auto-write
-    # as /next, unconditionally (the director picks the scene).
+    # A producer takeover via /set/stint puts a fresh stint on air, so it does the
+    # same auto-write as /next, unconditionally: the director picks the scene.
     pushes = []
     ctl, hs, orig = _ctl(pushes)
     live = [("https://www.youtube.com/watch?v=a", "GT45", "Stint 2", 2)]
@@ -713,7 +712,7 @@ def t_endpoints_qualifying_data_unavailable():
 
 def t_endpoint_mode_switch_writes_qualifying_hud():
     # GET /mode/qualifying switches the active schedule and auto-fills the HUD
-    # Streamer/Stint from the now-on-air qualifying row (issue #112 path).
+    # Streamer and Stint from the now-on-air qualifying row. (#112)
     pushes = []
     ctl, hs, orig = _ctl(pushes)
     qrows = [("https://www.youtube.com/watch?v=q", "GT45", "Stint 2", 2)]
@@ -819,9 +818,8 @@ def t_inject_row_replaces_same_physical_row():
 
 
 def t_inject_row_empty_url_with_name_is_a_clear():
-    # An empty URL is a valid CLEAR when a name/stint is present (the slot
-    # survives as a planned stint with url=""); only a non-empty NON-channel URL
-    # is rejected as junk.
+    # An empty URL is a valid clear when a name or stint is present, since the slot
+    # survives as a planned stint. Only a non-empty non-channel URL is junk.
     s = m.ScheduleSource(csv_url=None, cache_path=os.path.join(HERE, "_x.cache"),
                          local_fallback=None)
     s.items = ["s1"]; s.rows = [("s1", "Ann", "", 1)]
@@ -855,7 +853,7 @@ def t_schedule_set_no_inject_on_push_failure():
     assert src.get() == ["s1"]                            # nothing injected on failure
 
 
-# ---------- qualifying (issue #124): separate tab, own source, Feed A ----------
+# Qualifying: a separate tab, its own source, Feed A. (#124)
 
 def _qctl(pushes):
     """A SetupControl wired with BOTH a race schedule source and a qualifying
@@ -882,11 +880,11 @@ def t_qualifying_set_targets_qualifying_tab_and_injects_qual_source():
         r = ctl.qualifying_set(2, url="https://www.youtube.com/watch?v=q",
                                name="GT45", stint="Stint 2")
         assert r.get("ok"), r
-        # webhook payload carries the Qualifying tab target + the schedule action
+        # The webhook payload carries the Qualifying tab target and the action.
         assert pushes[-1] == {"action": "schedule", "row": 2, "tab": "Qualifying",
                               "url": "https://www.youtube.com/watch?v=q",
                               "name": "GT45", "stint": "Stint 2"}
-        # optimistic echo lands in the qualifying source, NOT the race schedule
+        # The optimistic echo lands in the qualifying source, not the race schedule.
         assert qsrc.get() == ["https://www.youtube.com/watch?v=q"]
         assert ssrc.get() == []
     finally:
@@ -905,7 +903,7 @@ def t_qualifying_set_validates_vocab():
 
 
 def t_schedule_set_has_no_tab_key():
-    # The race schedule_set must NOT carry a tab (writes the default Schedule tab).
+    # The race schedule_set carries no tab, so it writes the default Schedule tab.
     pushes = []
     ctl, qsrc, ssrc, orig = _qctl(pushes)
     try:
@@ -972,8 +970,8 @@ def _team_ctl_embedded(pushes):
     return ctl, hs, orig
 
 def t_push_team_sends_verbatim_label_with_number():
-    # Panel offers the stripped name; the relay writes the verbatim '#NNN' label
-    # the Setup dropdown lists.
+    # The panel offers the stripped name, and the relay writes the verbatim '#NNN'
+    # label the Setup dropdown lists.
     pushes = []
     ctl, hs, orig = _team_ctl_embedded(pushes)
     try:
@@ -986,7 +984,7 @@ def t_push_team_sends_verbatim_label_with_number():
 def t_full_team_name_falls_back_for_unknown_team():
     ctl, hs, orig = _team_ctl_embedded([])
     try:
-        # unknown team -> the given name, stripped; never a KeyError
+        # An unknown team returns the given name, stripped, never a KeyError.
         assert hs.full_team_name("Mystery Crew") == "Mystery Crew"
     finally:
         m.post_webhook = orig
@@ -1010,9 +1008,9 @@ def _team_ctl_dup(pushes, overlay):
     return ctl, hs, orig
 
 def t_setup_data_keeps_duplicate_team_numbers_in_dropdown():
-    # Same name, different number: the dropdown must keep BOTH verbatim options
-    # (regression — they collapsed to one, losing the #4 car), and the current
-    # slot value must be the verbatim label so the <select> selects it.
+    # Two cars of one team differ only by number, so the dropdown must keep both
+    # verbatim options, and the slot value must be the verbatim label for the
+    # <select> to select it.
     pushes = []
     ctl, hs, orig = _team_ctl_dup(
         pushes, ",Teams P1,Track Design Racing #4,,\n,Teams P2,,,\n,Teams P3,,,\n")
@@ -1082,7 +1080,7 @@ def t_set_teams_validates_all_or_nothing():
     pushes = []
     ctl, hs, orig = _team_ctl(pushes)
     try:
-        # one bad value in the batch -> nothing applied, nothing written
+        # One bad value in the batch applies nothing and writes nothing.
         r = ctl.set_teams({"p1": "OVO eSports", "p2": "Not A Team"}, now=1000.0)
         assert "error" in r
         assert hs.team_pending(now=1001.0) == set()
@@ -1115,9 +1113,8 @@ def t_set_teams_atomic_echo_and_pushes():
 
 
 def t_push_teams_partial_failure_marks_failed():
-    # A later slot's success must not mask an earlier slot's failed Sheet write
-    # (without the explicit override push_status would read "ok" and the panel
-    # would show "sheet sync OK" while slot 1 silently reverts after the TTL).
+    # A later slot's success must not mask an earlier slot's failed Sheet write, or
+    # the panel reads "sheet sync OK" while that slot reverts after the TTL.
     pushes = []
     ctl, hs, orig = _team_ctl(pushes)
     def fake_post(url, payload, timeout=10):
@@ -1148,7 +1145,7 @@ def t_endpoints_setup_teams_post():
         srv.shutdown(); m.post_webhook = orig
 
 
-# ---------- is_channel host allow-list + argv separators (SSRF/arg-injection #4) ----
+# The is_channel host allow-list and the argv separators.
 
 def t_is_channel_accepts_youtube_and_twitch():
     for good in ("https://www.youtube.com/watch?v=abc",
@@ -1186,18 +1183,17 @@ def t_ytdlp_resolve_cmd_separates_url():
 
 
 def t_ytdlp_resolve_cmd_never_ignores_no_formats():
-    # #621: --ignore-no-formats-error would turn the bot-check / rate-limit reason into a
-    # hidden warning, so it belongs only on the separate live-status call.
+    # --ignore-no-formats-error would turn the bot-check or rate-limit reason into a
+    # hidden warning, so it belongs only on the separate live-status call. (#621)
     assert "--ignore-no-formats-error" not in m.ytdlp_resolve_cmd("https://youtu.be/AAA", "/c/j.txt")
 
 
 def t_ytdlp_resolve_cmd_asks_for_a_muxed_capable_player_client():
-    # 2026-09-21, found on a live GT7 stream that racecast refused with "Requested format
-    # is not available": yt-dlp's default player client returned ONLY video-only and
-    # audio-only HLS renditions for it, while `b[height<=1080]/b` asks for a MUXED format.
-    # No muxed format existed, so a perfectly normal YouTube live stream could not be
-    # pulled at all. Listing a second client makes yt-dlp union both clients' formats, so
-    # the default path still wins whenever it already offers a muxed one.
+    # yt-dlp's default player client can return only video-only and audio-only HLS
+    # renditions, while `b[height<=1080]/b` asks for a muxed format, so a normal live
+    # stream fails with "Requested format is not available". Listing a second client
+    # unions both clients' formats, and the default path still wins when it already
+    # offers a muxed one.
     cmd = m.ytdlp_resolve_cmd("https://youtu.be/AAA", None)
     i = cmd.index("--extractor-args")
     arg = cmd[i + 1]
@@ -1235,11 +1231,10 @@ def _panel_details_classes(html, box_id):
 
 
 def t_panel_qualifying_section_is_styled():
-    """#134 (superseded by the race/qualifying schedule-mode merge): the Qualifying
-    region is no longer a standalone <details id="qualBox"> — it is the `#qualSched`
-    div nested inside the single merged `#urlsBox` (class="bus urls"), so it inherits
-    the schedule section's table/input/select/button styling automatically. Guards
-    against a regression back to an unstyled standalone qualifying block."""
+    """The Qualifying region is the `#qualSched` div nested inside the merged
+    `#urlsBox` (class="bus urls"), not a standalone <details id="qualBox">, so it
+    inherits the schedule section's table, input, select and button styling. Guards
+    against a regression back to an unstyled standalone block. (#134)"""
     with open(os.path.join(ROOT, "src", "director", "director-panel.html"),
               encoding="utf-8") as fh:
         html = fh.read()
@@ -1252,11 +1247,10 @@ def t_panel_qualifying_section_is_styled():
 
 
 def t_panel_schedule_qualifying_selects_are_styled():
-    """#152: the Streamer/Stint <select> dropdowns in the Schedule and Qualifying
-    tables must carry the same dark dropdown styling as the HUD section's `.fld
-    select`. Without a dedicated rule the `.nm` selects fall back to bare browser
-    defaults and the `.st` selects even inherit the unrelated status-pill (`.st`)
-    look. Guard a `.urls select` rule that matches the HUD dropdown style."""
+    """The Streamer and Stint <select> dropdowns in the Schedule and Qualifying
+    tables carry the same dark styling as the HUD section's `.fld select`. Without a
+    dedicated rule the `.nm` selects fall back to browser defaults and the `.st`
+    selects inherit the unrelated status-pill look. (#152)"""
     import re
     with open(os.path.join(ROOT, "src", "director", "director-panel.html"),
               encoding="utf-8") as fh:
@@ -1267,10 +1261,10 @@ def t_panel_schedule_qualifying_selects_are_styled():
     rule = re.search(r"\.urls\s+select\s*\{([^}]*)\}", css)
     assert rule, ".urls select rule missing -> schedule/qualifying dropdowns unstyled (#152)"
     body = rule.group(1)
-    # mirror the HUD dropdown look (.fld select): dark fill + edge border + mono font
+    # Mirror the HUD dropdown look: dark fill, edge border, mono font.
     assert "background" in body and "border" in body and "font-family" in body, \
         ".urls select rule must set background/border/font-family like .fld select (#152)"
-    # focus affordance, matching the HUD dropdowns
+    # The focus ring matches the HUD dropdowns.
     assert re.search(r"\.urls\s+select:focus\s*\{", css), \
         ".urls select:focus rule missing -> no focus affordance like the HUD dropdowns (#152)"
 
@@ -1327,8 +1321,8 @@ def t_crew_requires_webhook():
 
 
 def t_crew_set_reflects_in_crew_source():
-    # End-to-end echo: a successful write updates the in-memory CrewSource so
-    # /crew/data shows it before the next poll (name/flags), like schedule.
+    # A successful write updates the in-memory CrewSource, so /crew/data shows the
+    # name and flags before the next poll, the same way the schedule does.
     pushes = []
     hs = _hs_stub()
     cs = m.CrewSource("http://crew")
@@ -1351,13 +1345,11 @@ def t_crew_set_reflects_in_crew_source():
         m.post_webhook = orig
 
 
-# ---------- Apps Script <-> relay SETUP_FIELDS parity (#331 follow-up) ----------
-# Every setup-write field the relay can push (the SETUP_FIELDS header strings)
-# must appear in the deployed Apps Script's SETUP_FIELDS allowlist, or
-# writeSetup() throws "unknown setup field: <name>" and the webhook write
-# silently fails. The reference script lives only as a code block in the wiki, so
-# nothing enforced parity -- #331 added the Flag setup field to the relay but not
-# to the script, shipping the Sheet write path dead. This couples the two lists.
+# Apps Script to relay SETUP_FIELDS parity. Every setup-write field the relay can
+# push must appear in the deployed Apps Script's SETUP_FIELDS allowlist, or
+# writeSetup() throws "unknown setup field: <name>" and the webhook write fails
+# silently. The reference script lives only as a wiki code block, so this couples
+# the two lists. (#331)
 SHEET_WEBHOOK_DOC = os.path.join(ROOT, "src", "docs", "wiki", "Sheet-Webhook.md")
 
 
@@ -1380,7 +1372,7 @@ def t_setup_fields_parity_relay_vs_apps_script():
         "array in src/docs/wiki/Sheet-Webhook.md and redeploy the script.")
 
 
-# ---------- webhook push retry + permanent-error predicate ----------
+# The webhook push retry and its permanent-error predicate.
 
 def t_webhook_error_permanent_predicate():
     assert m.webhook_error_permanent(m.WEBHOOK_OUTDATED_ERROR) is True
@@ -1389,7 +1381,7 @@ def t_webhook_error_permanent_predicate():
 
 
 def t_push_retry_succeeds_after_transient():
-    # Two transient failures (a raise, then a 'did not confirm' body), then ok.
+    # Two transient failures, a raise then a 'did not confirm' body, then ok.
     calls = []
     ok_body = b'{"ok": true, "action": "setup"}'
     seq = [Exception("timeout"), b'{"ok": false}', ok_body]
@@ -1437,7 +1429,7 @@ def t_push_retry_budget_cap_stops_early():
     def fake_post(url, payload, timeout=10):
         calls.append(1)
         raise OSError("slow")
-    # now() jumps past the budget after the first attempt -> no 2nd attempt.
+    # now() jumps past the budget after the first attempt, so there is no second.
     ticks = iter([0.0, 999.0, 999.0, 999.0])
     ok, err, _ = m.push_webhook_retrying(
         "http://push", {"a": 1}, None, attempts=3,
@@ -1446,7 +1438,7 @@ def t_push_retry_budget_cap_stops_early():
     assert len(calls) == 1                            # budget cap stopped further attempts
 
 
-# ---------- setup-assets media fill: template-driven scan ----------
+# setup-assets media fill: the template-driven scan.
 
 def t_setup_media_fill_uses_template_scan():
     import placeholders as ph

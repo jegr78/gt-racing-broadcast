@@ -4,8 +4,8 @@ import importlib.util, os, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-# loopstream.py imports its sibling `services` (external_tool_env); in production
-# scripts/ is always sys.path[0] for these modules, so mirror that for the loader.
+# loopstream.py imports its sibling `services` for external_tool_env, which is
+# always on sys.path in production, so mirror that for the loader.
 sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))
 
 
@@ -64,12 +64,11 @@ def t_feed_process_matchers():
 
 
 def t_kill_tree_reaps_grandchild_session():
-    """#133: a static feed is spawned as a session leader (services.spawn_kwargs ->
-    start_new_session=True). In the frozen binary the tree is
-    bootloader(leader) -> app-child -> streamlink, so streamlink is a GRANDCHILD.
-    kill_tree must reap the whole process GROUP, not just direct children, or the
-    grandchild orphans (PPID 1) and keeps its port — which blocked the relay's
-    Feed A. POSIX-only: Windows `taskkill /T` already kills the tree."""
+    """A static feed is spawned as a session leader (start_new_session=True). In
+    the frozen binary the tree is bootloader(leader) -> app-child -> streamlink,
+    so streamlink is a grandchild. kill_tree must reap the whole process group,
+    or the grandchild orphans and keeps its port. POSIX-only: Windows
+    `taskkill /T` already kills the tree. (#133)"""
     import sys, time, tempfile, subprocess, signal, shutil
     if os.name == "nt":
         return
@@ -88,8 +87,9 @@ def t_kill_tree_reaps_grandchild_session():
     try:
         tree = os.path.join(d, "tree.py")
         stamp = os.path.join(d, "gc.pid")
-        # Recursive tree: depth>0 re-spawns itself one level deeper; depth 0 is the
-        # grandchild — it records its PID and sleeps. depth 2 => leader/child/grandchild.
+        # Recursive tree: depth>0 re-spawns itself one level deeper, and depth 0
+        # is the grandchild, which records its PID and sleeps. Depth 2 gives
+        # leader, child, grandchild.
         with open(tree, "w") as f:
             f.write("import os, sys, subprocess, time\n"
                     "depth = int(sys.argv[1]); stamp = sys.argv[2]\n"
@@ -98,8 +98,8 @@ def t_kill_tree_reaps_grandchild_session():
                     "else:\n"
                     "    open(stamp, 'w').write(str(os.getpid()))\n"
                     "    time.sleep(30)\n")
-        # start_new_session mirrors services.spawn_kwargs('posix'): the leader is its
-        # own session/group leader, exactly like a spawned static feed.
+        # start_new_session mirrors services.spawn_kwargs('posix'), so the leader
+        # is its own session and group leader, like a spawned static feed.
         leader = subprocess.Popen([sys.executable, tree, "2", stamp], start_new_session=True)
         for _ in range(200):                       # up to ~10 s for the grandchild to start
             try:
@@ -108,7 +108,7 @@ def t_kill_tree_reaps_grandchild_session():
                 if txt:
                     gc_pid = int(txt); break
             except (OSError, ValueError):
-                pass  # stamp not written yet / partial — the retry loop reads it next tick
+                pass  # not written yet or partial; the next tick reads it
             time.sleep(0.05)
         assert gc_pid is not None, "grandchild never started"
         ppid = int(subprocess.check_output(["ps", "-o", "ppid=", "-p", str(gc_pid)]).strip())
@@ -129,7 +129,7 @@ def t_kill_tree_reaps_grandchild_session():
                 try:
                     os.kill(pid, signal.SIGKILL)
                 except (ProcessLookupError, PermissionError):
-                    pass  # best-effort teardown — process already gone
+                    pass  # best-effort teardown; the process is already gone
         if leader:
             try:
                 leader.wait(timeout=2)
@@ -169,9 +169,9 @@ def t_load_feeds_skips_incomplete_and_bad_json():
 
 
 def t_loop_no_window_kwargs_per_os():
-    # A static feed runs DETACHED (no console — start_streams' spawn_kwargs), so
-    # its streamlink child would otherwise pop a PERSISTENT terminal window on
-    # Windows. CREATE_NO_WINDOW only on Windows; no-op elsewhere.
+    # A static feed runs detached with no console, so on Windows its streamlink
+    # child would otherwise pop a persistent terminal window. CREATE_NO_WINDOW
+    # applies there only.
     assert loop.no_window_kwargs("nt") == {"creationflags": 0x08000000}
     assert loop.no_window_kwargs("posix") == {}
     assert loop.no_window_kwargs("java") == {}
@@ -198,7 +198,7 @@ def t_loop_serve_once_passes_no_window():
     for k, v in loop.no_window_kwargs().items():
         assert captured["kw"].get(k) == v
     # streamlink is spawned with a sanitized env so a frozen binary's bundled
-    # libs don't leak into the system-linked tool (the OPENSSL_3.3.0 crash).
+    # libs do not leak into the system-linked tool.
     assert "env" in captured["kw"]
     assert captured["kw"]["env"] == loop.external_tool_env()
 
@@ -235,7 +235,7 @@ def t_loop_channel_url_and_platform():
 
 
 def t_loop_crosscheck_relay():
-    # anti-divergence: the duplicated Twitch bits must equal the relay's
+    # The duplicated Twitch bits must stay equal to the relay's.
     assert loop.STREAMLINK_TWITCH == feeds_x.STREAMLINK_TWITCH
     for u in ["https://www.youtube.com/watch?v=a", "https://youtu.be/a",
               "https://www.twitch.tv/c", "https://m.twitch.tv/c", "https://twitch.tv@evil.com/"]:
