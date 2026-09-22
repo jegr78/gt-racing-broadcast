@@ -20,7 +20,7 @@ You start and stop the show and keep the machine healthy.
 The director runs everything in between.
 [Who does what](https://github.com/jegr78/gt-racing-broadcast/wiki/Who-does-what)
 
-Note: Welcome to the producer onboarding. As producer, your role is simple but vital. You start and stop the show, and you keep the technical machine healthy throughout. Everything in between — the actual broadcast — is run by the director.
+Note: Welcome to the producer onboarding. As producer, your role is simple but vital. You start and stop the show, and you keep the technical machine healthy throughout. Everything in between. The actual broadcast. Is run by the director.
 </script></section>
 
 <section data-markdown><script type="text/template">
@@ -42,7 +42,7 @@ Note: This is the shape of an event from the producer's point of view. You handl
 
 <section data-markdown><script type="text/template">
 ## One-click bring-up
-Open the **Control Center**, confirm the **active league**, and press **Start event** — it launches Tailscale, Discord, relay, OBS and Companion in order.
+Open the **Control Center**, confirm the **active league**, and press **Start event**. It launches Tailscale, Discord, relay, OBS and Companion in order.
 
 ![Control Center Home](assets/img/cc-home.png)
 
@@ -57,27 +57,27 @@ Plan about 30 minutes for these steps (all from the Control Center):
 
 1. Confirm the active league profile.
 2. Apply any available tool update; then **reboot** the PC.
-3. **Tools → Update all** — outdated tools are the #1 cause of feed failures.
+3. **Tools → Update all**: outdated tools are the #1 cause of feed failures.
 4. **Assets** → refresh **Cookies** (log into YouTube first), and **Media / Graphics** if they changed.
 5. Confirm OBS is on **your league's scene collection** (`GT Racing Endurance — <league>`).
-6. **Preflight → Run** — fix anything it flags.
-7. **Home → Start event** — confirm each feed shows up in OBS.
+6. **Preflight → Run**: fix anything it flags.
+7. **Home → Start event**: confirm each feed shows up in OBS.
 8. Enter the league's **stream key** in OBS (Settings → Stream).
 
 [Run an event](https://github.com/jegr78/gt-racing-broadcast/wiki/Run-an-event)
 
-Note: Plan about thirty minutes before you go live, all from the Control Center. Confirm the active league profile. Apply any available tool update, then reboot the PC. Run Tools, Update all — outdated tools are the number one cause of feed failures. Refresh your cookies after logging into YouTube, and refresh media and graphics if they changed. Confirm OBS is on your league's scene collection. Run Preflight, and fix anything it flags. Press Start event and confirm each feed shows up in OBS. Finally, enter the league's stream key in OBS, under Settings, Stream.
+Note: Plan about thirty minutes before you go live, all from the Control Center. Confirm the active league profile. Apply any available tool update, then reboot the PC. Run Tools, Update all. Outdated tools are the number one cause of feed failures. Refresh your cookies after logging into YouTube, and refresh media and graphics if they changed. Confirm OBS is on your league's scene collection. Run Preflight, and fix anything it flags. Press Start event and confirm each feed shows up in OBS. Finally, enter the league's stream key in OBS, under Settings, Stream.
 </script></section>
 
 <section data-markdown><script type="text/template">
 ## Go live
 - In OBS, switch to the **Standby** scene, then click **Start Streaming**.
-- From here the **director runs the show** — you just watch the machine.
+- From here the **director runs the show**. You just watch the machine.
 - The director opens with **Intro**, then cuts into the race look.
 
-You should see: OBS on Standby with **Stop Streaming** showing — confirming the stream is running.
+You should see: OBS on Standby with **Stop Streaming** showing. Confirming the stream is running.
 
-Note: To go live, switch OBS to the Standby scene, then click Start Streaming. From here the director runs the show — you just watch the machine. The director opens with the Intro and then cuts into the race look. You should see OBS on Standby with a Stop Streaming button showing, which confirms the stream is running.
+Note: To go live, switch OBS to the Standby scene, then click Start Streaming. From here the director runs the show. You just watch the machine. The director opens with the Intro and then cuts into the race look. You should see OBS on Standby with a Stop Streaming button showing, which confirms the stream is running.
 </script></section>
 
 <section data-markdown><script type="text/template">
@@ -96,14 +96,14 @@ Note: Here is who does what during the race. The director presses Feeds Next at 
 ## Producer handover (12h / 24h events)
 Each part has its own producer + stream key; viewers follow the channel redirect.
 
-On the incoming machine's Control Center **Home**, use **Take over** — point it at producer A. It pulls A's on-air stint, chat and revocations and brings your station up there.
+On the incoming machine's Control Center **Home**, use **Take over**. Point it at producer A. It pulls A's on-air stint, chat and revocations and brings your station up there.
 
 - **Standard:** over the public **Funnel** (no shared Tailscale account needed).
 - **Alternative:** the same **tailnet** (A's `100.x` address).
 
 *CLI: `racecast event takeover <A-host> --funnel` (or `<A-tailscale-ip>`).*
 
-Then verify Feed A, start your OBS stream — the redirect carries viewers over.
+Then verify Feed A, start your OBS stream. The redirect carries viewers over.
 
 [Run an event](https://github.com/jegr78/gt-racing-broadcast/wiki/Run-an-event) · [Remote access](https://github.com/jegr78/gt-racing-broadcast/wiki/Remote-access)
 
@@ -112,19 +112,19 @@ Note: On twelve and twenty-four hour events, each part has its own producer and 
 
 <section data-markdown><script type="text/template">
 ## Interviews + Outro
-- **Final-part producer only:** join the Discord **"Interviews"** voice channel personally, before race end — OBS captures audio from your local Discord.
+- **Final-part producer only:** join the Discord **"Interviews"** voice channel personally, before race end. OBS captures audio from your local Discord.
 - Stay muted until the director cuts to the Interview scene; joining early is harmless.
-- When the director is done, they press **OUTRO** — the outro clip plays.
+- When the director is done, they press **OUTRO**. The outro clip plays.
 - After the on-air wrap-up you can **Stop Streaming** in OBS at any time.
 
 [Run an event](https://github.com/jegr78/gt-racing-broadcast/wiki/Run-an-event)
 
-Note: For the interviews and outro: only the final-part producer joins the Discord Interviews voice channel personally, before the race ends — OBS captures the audio from your local Discord. Stay muted until the director cuts to the Interview scene; joining early is harmless. When the director is done, they press Outro and the outro clip plays. After the on-air wrap-up, you can Stop Streaming in OBS at any time.
+Note: For the interviews and outro: only the final-part producer joins the Discord Interviews voice channel personally, before the race ends. OBS captures the audio from your local Discord. Stay muted until the director cuts to the Interview scene; joining early is harmless. When the director is done, they press Outro and the outro clip plays. After the on-air wrap-up, you can Stop Streaming in OBS at any time.
 </script></section>
 
 <section data-markdown><script type="text/template">
 ## When things go wrong
-Run `racecast preflight` first — it names the exact fix command for anything missing.
+Run `racecast preflight` first. It names the exact fix command for anything missing.
 
 Common live fixes:
 - **Feed won't start** → refresh cookies; confirm `deno` is installed.
@@ -133,24 +133,24 @@ Common live fixes:
 
 [If something goes wrong](https://github.com/jegr78/gt-racing-broadcast/wiki/If-something-goes-wrong)
 
-Note: When things go wrong, run racecast preflight first — it names the exact fix command for anything missing. The common live fixes are these. If a feed won't start, refresh your cookies and confirm deno is installed. If the HUD is blank, check that the relay is running from the Home dashboard. And if a port is in use, run racecast freeport, or use the free-ports action in the Control Center.
+Note: When things go wrong, run racecast preflight first. It names the exact fix command for anything missing. The common live fixes are these. If a feed won't start, refresh your cookies and confirm deno is installed. If the HUD is blank, check that the relay is running from the Home dashboard. And if a port is in use, run racecast freeport, or use the free-ports action in the Control Center.
 </script></section>
 
 <section data-markdown><script type="text/template">
 ## Stop + recap
-Press **Stop event** — stops the relay and Companion; OBS, Discord and Tailscale keep running.
+Press **Stop event**. Stops the relay and Companion; OBS, Discord and Tailscale keep running.
 
 Three producer beats:
-1. **Before** — update, reboot, cookies, graphics, preflight, start.
-2. **During** — watch the machine; run `racecast preflight` at the first sign of trouble.
-3. **After** — Stop Streaming in OBS, then Stop event.
+1. **Before**: update, reboot, cookies, graphics, preflight, start.
+2. **During**: watch the machine; run `racecast preflight` at the first sign of trouble.
+3. **After**: Stop Streaming in OBS, then Stop event.
 
 Go deeper:
 [Run an event](https://github.com/jegr78/gt-racing-broadcast/wiki/Run-an-event) ·
 [Control Center](https://github.com/jegr78/gt-racing-broadcast/wiki/Control-Center) ·
 [Who does what](https://github.com/jegr78/gt-racing-broadcast/wiki/Who-does-what)
 
-Note: To finish, press Stop event — it stops the relay and Companion, while OBS, Discord and Tailscale keep running. Remember the three producer beats. Before: update, reboot, cookies, graphics, preflight, start. During: watch the machine, and run preflight at the first sign of trouble. After: Stop Streaming in OBS, then Stop event. That is the whole job.
+Note: To finish, press Stop event. It stops the relay and Companion, while OBS, Discord and Tailscale keep running. Remember the three producer beats. Before: update, reboot, cookies, graphics, preflight, start. During: watch the machine, and run preflight at the first sign of trouble. After: Stop Streaming in OBS, then Stop event. That is the whole job.
 </script></section>
 
 </div></div>
