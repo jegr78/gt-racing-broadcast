@@ -1,9 +1,9 @@
-# Sheet template — per-tab CSV stubs
+# Sheet template: per-tab CSV stubs
 
 These CSV files are a starting point for the Google Sheet that drives a league. One
 file per tab; the column/row contract each one follows is documented in the wiki page
-[Sheet-Template](../wiki/Sheet-Template.md). All data is **generic placeholder** content
-— replace it with your league's real teams, schedule and graphics links.
+[Sheet-Template](../wiki/Sheet-Template.md). All data is **generic placeholder** content.
+Replace it with your league's real teams, schedule and graphics links.
 
 To use them: create a Google Sheet, add one tab per file (named exactly as the file,
 without `.csv`), and **File → Import → Upload** each CSV into its tab (import location:

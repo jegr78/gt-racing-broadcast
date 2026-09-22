@@ -13,18 +13,18 @@ Install it first per [Set up the broadcast PC](Set-up-the-broadcast-PC).
 
 1. Start Companion: `racecast companion start` (Windows/macOS: the first run just
    launches Companion; native Linux with the companion-pi systemd service: works after a
-   one-time `racecast companion enable-control` — `install-apps` runs this automatically;
+   one-time `racecast companion enable-control`: `install-apps` runs this automatically;
    other Linux setups: start it manually). In the launcher press **Launch GUI**.
 2. In the admin: **Import/Export → Import** → the file `racecast export companion` writes
    (the active profile's `runtime/<profile>/racecast-buttons.companionconfig`). The import dialog offers two paths:
    - **First import on a fresh machine:** confirm **"Replace current
      configuration"**. Afterwards enter the OBS WebSocket password once (next
-     section) — the shipped config is password-stripped.
+     section): the shipped config is password-stripped.
    - **Re-import (button update):** choose **"Import, Resetting only Selected
-     Components"** and keep the **default checkboxes** — this preserves
+     Components"** and keep the **default checkboxes**, this preserves
      Companion's settings, **including the stored OBS WebSocket password**;
      nothing needs re-typing.
-3. Bind the board to the tailnet: `racecast companion restart` — sets Companion's bind
+3. Bind the board to the tailnet: `racecast companion restart`: sets Companion's bind
    address to this machine's Tailscale IP. (Other Linux setups without the companion-pi
    systemd service: set the launcher's **GUI Interface** to the Tailscale IP manually.)
 
@@ -34,25 +34,25 @@ Install it first per [Set up the broadcast PC](Set-up-the-broadcast-PC).
 
 ## Connect to OBS
 
-The **OBS connection** (`127.0.0.1:4455`) comes with the config — **but without the
+The **OBS connection** (`127.0.0.1:4455`) comes with the config, **but without the
 password** (removed for security). After a **first import**: → **Connections** → open
 the OBS entry → **enter your OBS WebSocket password** (the one you set in
 [Set up the broadcast PC](Set-up-the-broadcast-PC)) → the connection turns green.
 (A re-import via **"Resetting only Selected Components"** keeps the stored
-password — nothing to do.)
+password: nothing to do.)
 
 ## The button board
 
-The board has three pages — **show control** (scenes & feeds), **race timer & audio**,
+The board has three pages: **show control** (scenes & feeds), **race timer & audio**,
 and **flags & graphics**. The full layout, what each
-button does, and the screenshots live in the [Director guide](Director#the-companion-web-buttons-board) —
+button does, and the screenshots live in the [Director guide](Director#the-companion-web-buttons-board),
 that's the operator's reference for actually using the board.
 
 This page covers only how the board is wired up. The relay buttons (`Feeds Next`,
 `Feeds Reload`, `Feed A Reload`, `Feed B Reload`, `POV Reload`, `POV Stop`,
 `POV Toggle` → `/pov/toggle`, and the `FEED A/B ROBUST/AUTO` quality switches → `/feed/<A|B>/quality/<tier>`)
 use the **Generic HTTP Requests**
-connection — see [Relay Mode §4](Relay-Mode#4-control-it-companion--relay). Everything else
+connection: see [Relay Mode §4](Relay-Mode#4-control-it-companion--relay). Everything else
 uses the OBS connection. Four combos sit on both: `RED FLAG` (Standby-Cover visibility
 through OBS, Race Control write through the relay), `SPLIT` (cuts to Splitscreen through
 OBS, then asks the relay's `/obs/split` to show both feeds and set the audio for the
@@ -75,7 +75,7 @@ Buttons page.
 ### Over the Funnel (no Tailscale account needed)
 
 With Companion ≥ v4.1.0 running and `racecast funnel on` active, a director can open the
-web-buttons page at `https://<magicdns-host>/console/buttons` — shown as a card on the
+web-buttons page at `https://<magicdns-host>/console/buttons`: shown as a card on the
 `/console` launcher. The relay reverse-proxies the request (HTTP for the page and assets,
 plus a transparent WebSocket passthrough for Companion's realtime channel) behind the
 **director token gate**. No Tailscale account or extra configuration is needed on the
@@ -93,6 +93,6 @@ a button → OBS reacts. For remote directors, see [Director (Remote)](Director)
 
 A button can light up when its scene/source is live: in the button editor → **Add
 feedback** → **Source Visible** / **Scene Active** → pick a highlight color. Now the
-director always sees what's on air. A button can also hold **multiple stacked actions** —
+director always sees what's on air. A button can also hold **multiple stacked actions**,
 e.g. one "Go to Interview" that switches scene *and* shows the lower-third *and* unmutes
 Discord (this is how the row-0 combos work).

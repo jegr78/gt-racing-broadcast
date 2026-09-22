@@ -9,7 +9,7 @@ How the broadcast station fits together, in four views: the **system topology**,
 
 **Source switching keeps full buffering.** Each commentator stream is pulled by the
 producer station and served on a *fixed local port*. OBS points at those fixed ports
-and never changes URL. The director only switches **scenes/sources** — no URLs are
+and never changes URL. The director only switches **scenes/sources**, no URLs are
 ever typed, no processes restarted. This gives Streamlink's ring buffer **and** OBS's
 own network buffer **and** full remote switching at once.
 
@@ -23,9 +23,9 @@ generates both a 1080p and a 720p rendition; the pull side prefers
 
 Streamers push to their own YouTube channels; the producer station pulls them in, composes
 the show with overlays and Discord audio, and pushes one broadcast to the league's channel.
-Remote directors drive it from a browser over Tailscale — or, without a Tailscale account,
+Remote directors drive it from a browser over Tailscale, or, without a Tailscale account,
 over the public [Funnel](Remote-access). One station can serve several
-leagues — each is a **profile** (its own sheet, graphics, overlay CSS and OBS collection);
+leagues: each is a **profile** (its own sheet, graphics, overlay CSS and OBS collection);
 a resolver picks the active one (`--profile` > `RACECAST_PROFILE` > `runtime/active-profile`
 pointer > sole profile).
 
@@ -48,7 +48,7 @@ flowchart LR
   end
 
   SHEET["Active profile's Google Sheet<br/>Schedule, POV, Overlay, Configuration tabs"]
-  YT["YouTube — the league's channel"]
+  YT["YouTube: the league's channel"]
   DIR["Remote Director(s)<br/>browser over Tailscale"]
 
   S1 --> RELAY
@@ -80,24 +80,24 @@ URL. A third **POV** feed is an optional driver picture-in-picture.
 
 ```mermaid
 flowchart TB
-  SCH["Google Sheet — tab 'Schedule'<br/>one watch URL per stint, in order"]
-  POVT["Google Sheet — tab 'POV'<br/>url + name (row 2)"]
+  SCH["Google Sheet: tab 'Schedule'<br/>one watch URL per stint, in order"]
+  POVT["Google Sheet: tab 'POV'<br/>url + name (row 2)"]
 
   SCH --> A
   SCH --> B
   POVT --> P
 
   subgraph Feeds["Relay feeds on the producer station"]
-    A["Feed A — :53001<br/>odd stints 1,3,5…"]
-    B["Feed B — :53002<br/>even stints 2,4,6…"]
-    P["POV — :53003<br/>optional PiP, capped 720p"]
+    A["Feed A, :53001<br/>odd stints 1,3,5…"]
+    B["Feed B, :53002<br/>even stints 2,4,6…"]
+    P["POV, :53003<br/>optional PiP, capped 720p"]
   end
 
   A -->|"on air: stint n"| OBSA["OBS Media Source 'Feed A'"]
   B -->|"pre-loaded: stint n+1"| OBSB["OBS Media Source 'Feed B'"]
   P -.->|"hidden until POV Toggle"| OBSP["PiP, bottom-right of Stint scene"]
 
-  NEXT(["/next — handover"]) -->|"off-air feed advances<br/>to the next stint"| Feeds
+  NEXT(["/next: handover"]) -->|"off-air feed advances<br/>to the next stint"| Feeds
 ```
 
 A running feed is **never** torn off mid-stint. Sheet edits apply on the next `/next`
@@ -110,18 +110,18 @@ The relay reads the **Overlay** tab (live values: streamer, session, round, top-
 teams, race control) and the **Configuration** tab (team → manufacturer via a
 `Brand Name` column) as gviz CSV, and serves:
 
-- `GET /hud` — a single transparent overlay page (one OBS Browser Source at
+- `GET /hud`: a single transparent overlay page (one OBS Browser Source at
   `http://127.0.0.1:8088/hud`),
-- `GET /hud/data` — the live values as JSON (the page polls it every ~2.5 s, so sheet
+- `GET /hud/data`: the live values as JSON (the page polls it every ~2.5 s, so sheet
   edits appear with no manual reload),
-- `GET /hud/assets/{flags,brands}/<key>` — bundled flag/brand logos, resolved from text.
+- `GET /hud/assets/{flags,brands}/<key>`: bundled flag/brand logos, resolved from text.
 
 The `/hud` and `/splitscreen` pages are restyled **per league**: the relay serves the
 active profile's `profiles/<name>/overlay/hud.css` (+ an optional `splitscreen.css` and
 `overlay/fonts/`) on top of the shared page, so each league can have its own look without
 forking the HTML.
 
-The race timer is **part of the HUD** — the clock is drawn inside the `/hud` page (it
+The race timer is **part of the HUD**, the clock is drawn inside the `/hud` page (it
 polls `/timer/data`), so OBS needs only the one HUD Browser Source, not a separate timer
 source. Timer state: Sheet tab `Timer` + the active profile's
 `runtime/<profile>/timer.json`, Director-controlled via the `/timer/*` JSON endpoints.
@@ -134,11 +134,11 @@ The director never touches the producer machine directly. The **director panel**
 primary control surface (organized as mixer-bus rows); it talks **only to the relay** over
 plain HTTP. Scene switches, source visibility and audio are **relay-mediated**: the panel
 calls `/obs/{scene,source,audio,state}` and the relay drives OBS over the WebSocket **on the
-producer's own machine** — so the panel needs **no OBS IP, port or password**, and the OBS
+producer's own machine**, so the panel needs **no OBS IP, port or password**, and the OBS
 password never leaves the producer station. Companion offers the same action set as a
 hardware-style button board; running on the producer station, it talks to OBS over its
 WebSocket directly and to the relay over plain HTTP GETs. Directors can also reach
-Companion's web-buttons page at `/console/buttons` over the Funnel (Companion ≥ v4.1.0) —
+Companion's web-buttons page at `/console/buttons` over the Funnel (Companion ≥ v4.1.0),
 the relay reverse-proxies it (HTTP + WebSocket) behind the director gate; see
 [Remote access](Remote-access#companion-web-buttons-over-the-funnel-consolebuttons).
 
@@ -160,15 +160,15 @@ flowchart LR
 
 The relay's **root** control surface (`/panel`, `/status`, `/next`, `/set/*`, the feed
 ports, `/obs/*`) is **unauthenticated** and bound to `127.0.0.1` plus the Tailscale IP by
-default (`--bind auto`) — never `0.0.0.0`, because `/status` reveals stream URLs. The
+default (`--bind auto`): never `0.0.0.0`, because `/status` reveals stream URLs. The
 **tailnet is the trust boundary** for that surface.
 
 For crew who are **not** on the tailnet, the relay also serves an authenticated,
-role-gated **`/console`** mirror — the *only* path exposed over the public Tailscale Funnel.
+role-gated **`/console`** mirror, the *only* path exposed over the public Tailscale Funnel.
 One signed link per person, roles resolved live from the Crew tab ∪ Schedule, with a
 step-up secret on the few irreversible producer ops. OBS-WebSocket is never funnelled.
 Companion's web-buttons page is reachable over the Funnel at `/console/buttons` (director
-gate, relay-proxied — a sub-path of the single `/console` mount). See
+gate, relay-proxied: a sub-path of the single `/console` mount). See
 [Remote access & the Funnel boundary](Remote-access) for the full model.
 
 ---
@@ -187,14 +187,14 @@ sequenceDiagram
   participant B as Feed B :53002
   participant O as OBS
 
-  Note over A,B: Stint n on air via Feed A — Feed B idle
+  Note over A,B: Stint n on air via Feed A: Feed B idle
   D->>O: cut to Splitscreen (≈10-min handover window)
   Note over B: incoming streamer goes live on their channel
   D->>R: GET /next
   R->>B: advance to stint n+1 commentator (yt-dlp → streamlink)
   B-->>R: serving on :53002
   D->>O: cut to Stint scene, Feed B on air
-  Note over A: Feed A now off-air — will pre-load stint n+2
+  Note over A: Feed A now off-air: will pre-load stint n+2
 ```
 
 ---

@@ -22,7 +22,7 @@
 
 **Technical reference**
 - [Architecture](Architecture)
-- [Relay — how the feeds work](Relay-Mode)
+- [Relay: how the feeds work](Relay-Mode)
 - [Race Timer](Race-Timer)
 - [Sheet template (read path)](Sheet-Template)
 - [Sheet-Webhook (write path)](Sheet-Webhook)

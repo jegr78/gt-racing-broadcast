@@ -1,4 +1,4 @@
-# GT Racing Broadcast — Setup Guide
+# GT Racing Broadcast: Setup Guide
 
 This guide has moved to the project wiki, which is always current:
 
@@ -8,7 +8,7 @@ This guide has moved to the project wiki, which is always current:
   <https://github.com/jegr78/gt-racing-broadcast/wiki/Set-up-the-broadcast-PC>
 - **Run an event** (the producer's checklist):
   <https://github.com/jegr78/gt-racing-broadcast/wiki/Run-an-event>
-- **The relay — how the feeds work:**
+- **The relay, how the feeds work:**
   <https://github.com/jegr78/gt-racing-broadcast/wiki/Relay-Mode>
 - **If something goes wrong:**
   <https://github.com/jegr78/gt-racing-broadcast/wiki/If-something-goes-wrong>

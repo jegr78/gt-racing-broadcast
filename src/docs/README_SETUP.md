@@ -1,14 +1,14 @@
-# GT Racing Broadcast — Setup Package
+# GT Racing Broadcast: Setup Package
 
 This package sets up a complete producer station for the GT Racing
 broadcast: OBS scenes + HUD, the Companion button board, the director panel,
 and the relay that pulls each commentator's stream into OBS.
 
 **Quickest start:** double-click **`racecast-ui`** to open the **Control
-Center** — a local web dashboard that runs setup and event day from your browser,
+Center**, a local web dashboard that runs setup and event day from your browser,
 no terminal needed. The `racecast …` commands below are the CLI alternative.
 
-**The documentation lives in the project wiki** — always current, written for
+**The documentation lives in the project wiki**, always current, written for
 first-time producers:
 
 - **The Control Center:**
@@ -22,7 +22,7 @@ first-time producers:
 
 ## Quickstart
 
-First-time setup — one guided command. It creates or selects a **league
+First-time setup: one guided command. It creates or selects a **league
 profile** (and fills in that league's Google Sheet ID), then installs everything
 and skips whatever is already done:
 
@@ -43,7 +43,7 @@ On event day:
 anything missing.
 
 The visual **onboarding decks** (one short walkthrough per role) and the printable
-**role cheat sheet** are the central reference — one place for every role:
+**role cheat sheet** are the central reference, one place for every role:
 <https://jegr78.github.io/gt-racing-broadcast/>. A local copy of the cheat
 sheet also ships at `docs/slides/cheat_sheets.html` (open it in a browser and print).
 In the Control Center, **Help & Docs → Onboarding decks** opens the same hub.
