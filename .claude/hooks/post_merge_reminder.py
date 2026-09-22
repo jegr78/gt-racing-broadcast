@@ -3,13 +3,13 @@
 repository security follow-up reminder.
 
 Self-gates on the Bash command string. The settings.json `if` field
-(`"if": "Bash(gh pr merge*)"`) is not honored in every Claude Code build — when
+(`"if": "Bash(gh pr merge*)"`) is not honored in every Claude Code build: when
 it is ignored the reminder fires on *every* Bash call (curl, ls, git …), which
 is noise and, worse, injects a "a merge just completed" instruction when nothing
 was merged. Deciding here on `.tool_input.command` is version-independent.
 
 Two things stand between the phrase and the reminder, and both were measured
-rather than feared — each is the same false trigger the paragraph above rejects
+rather than feared: each is the same false trigger the paragraph above rejects
 the `if` field for, one level further down.
 
 A plain `"gh pr merge" in cmd` fires for any command that merely QUOTES the
@@ -32,7 +32,7 @@ import json
 import re
 import sys
 
-# Start of string, or after a shell separator — never inside a quoted string.
+# Start of string, or after a shell separator, never inside a quoted string.
 MERGE_RE = re.compile(r"(?:^|[;&|(]\s*|\n\s*)gh\s+pr\s+merge\b")
 # `<<WORD`, `<<'WORD'`, `<<"WORD"`, `<<-WORD`. A digit-led token is excluded so
 # an arithmetic left-shift (`1 << 3`) is not read as opening a heredoc.
@@ -76,7 +76,7 @@ def main():
     try:
         data = json.load(sys.stdin)
     except Exception:
-        # A missing/malformed payload — nothing to react to.
+        # A missing/malformed payload: nothing to react to.
         return 0
     cmd = (data.get("tool_input") or {}).get("command") or ""
     # Only fire for an actual PR merge, not every Bash call.

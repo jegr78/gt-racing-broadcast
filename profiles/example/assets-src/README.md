@@ -2,7 +2,7 @@
 
 A kit renders a league's broadcast stills (Standby, Intermission, …) and its
 intro/outro videos from HTML, so a new race weekend is a text edit rather than a
-session in a graphics program. This folder is a minimal working example — copy
+session in a graphics program. This folder is a minimal working example: copy
 it into your own profile and restyle it.
 
 ```bash
@@ -29,9 +29,9 @@ the live broadcast graphics under the names the Sheet's Assets tab expects.
 
 Texts merge in this order, each layer overriding the one before it:
 
-1. `kit.json` → `text` — defaults that rarely change
-2. `event.json` — this weekend's title, date, credits
-3. `--set key=value` — a one-off override on the command line
+1. `kit.json` → `text`: defaults that rarely change
+2. `event.json`: this weekend's title, date, credits
+3. `--set key=value`: a one-off override on the command line
 
 The merged object is handed to `window.applyText(cfg)` on both pages before
 anything is captured. Keys starting with `_` are treated as documentation and
@@ -39,7 +39,7 @@ never reach the page.
 
 ## Writing a scene
 
-The renderer sets time explicitly — for every frame it calls
+The renderer sets time explicitly: for every frame it calls
 `window.renderAt(scene, t)` and screenshots the element. A frame must therefore
 depend **only** on `t`: no CSS animations, no `requestAnimationFrame`, no
 `Date.now()`. That is what makes a re-render byte-comparable and lets `--probe`
@@ -49,7 +49,7 @@ show you second 24 without rendering the 23 seconds before it.
 
 `kit.json` may point a scene at an audio file, with the cut expressed as
 `start` / `duration` and optional fades. The path is relative to the kit, and
-licensed music is normally kept **outside** the repository — when the file is
+licensed music is normally kept **outside** the repository: when the file is
 missing the scene simply renders silent, and `--audio PATH` overrides it per
 run.
 
@@ -61,4 +61,4 @@ one and you have to move the other, or picture and sound drift apart.
 
 The Playwright Python package (same optional dependency as
 `tools/e2e.py --playwright`) and `ffmpeg` on `PATH`. Neither is needed to run
-racecast itself — this is maintainer tooling.
+racecast itself: this is maintainer tooling.

@@ -7,13 +7,13 @@ holds the deep architecture reference.
 
 ## Ground rules
 
-- **Edit only under `src/`.** `dist/` and `runtime/` are generated and gitignored — never
+- **Edit only under `src/`.** `dist/` and `runtime/` are generated and gitignored, never
   hand-edit them. `tools/` are maintainer scripts (build, tokenize, sync, helpers) and are
   **not shipped** to producers.
 - **English only** in all scripts and docs (the team is international).
 - **Never hardcode secrets or machine paths.** Secrets come from `.env` / `profile.env`;
   the OBS collection and scripts are deliberately path/secret-free in git.
-- **Python-only tooling** — no `.sh`/`.bat` (the build fails if any are shipped).
+- **Python-only tooling**, no `.sh`/`.bat` (the build fails if any are shipped).
 - Changed a UI surface? Refresh its wiki screenshot under `src/docs/wiki/images/` in the
   **same** change (see `CLAUDE.md`).
 

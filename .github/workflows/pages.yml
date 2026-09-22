@@ -2,7 +2,7 @@ name: Publish Slides to Pages
 
 # Dispatch-only by design: publishing the onboarding decks is a deliberate
 # maintainer action, mirroring wiki.yml. The artifact root is src/docs/slides/
-# (vendored Reveal + committed diagram SVGs make it fully static — no build step).
+# (vendored Reveal + committed diagram SVGs make it fully static, no build step).
 # One-time prerequisite: repo Settings -> Pages -> Source = "GitHub Actions".
 on:
   workflow_dispatch:

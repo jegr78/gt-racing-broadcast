@@ -1,30 +1,30 @@
-# GT Racing Broadcast — Repository
+# GT Racing Broadcast: Repository
 
 Single-source repo for the GT Racing broadcast producer station.
 **Edit only under `src/`.** `dist/` and `runtime/` are generated and gitignored.
 
 📖 **Operator docs & onboarding:** see the [project wiki](https://github.com/jegr78/gt-racing-broadcast/wiki)
 (architecture diagrams, setup, runbook, troubleshooting) and the visual
-[onboarding decks](https://jegr78.github.io/gt-racing-broadcast/) — one short
+[onboarding decks](https://jegr78.github.io/gt-racing-broadcast/), one short
 walkthrough per role.
 
 🛠️ **Building from source or contributing?** See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Layout
-- `src/` — source of truth: `relay/`, `obs/`, `companion/`, `director/`, `assets/`, `scripts/`, `docs/`, `setup-assets.py`
-- `profiles/` — one directory per league (`profiles/<name>/profile.env` + `overlay/`); `profiles/example/` ships as the template
-- `.env` — machine-local config (gitignored; copy from `.env.example`)
-- `tools/` — maintainer scripts (build, tokenize, sync, helpers) — not shipped
-- `tests/` — stdlib test suite (run all with `python3 tools/run-tests.py`)
-- `runtime/` — cookies/logs/caches + per-profile state (gitignored)
-- `dist/` — built distributable + ZIP (gitignored)
-- `docs/superpowers/` — specs & plans
+- `src/`, source of truth: `relay/`, `obs/`, `companion/`, `director/`, `assets/`, `scripts/`, `docs/`, `setup-assets.py`
+- `profiles/`: one directory per league (`profiles/<name>/profile.env` + `overlay/`); `profiles/example/` ships as the template
+- `.env`: machine-local config (gitignored; copy from `.env.example`)
+- `tools/`: maintainer scripts (build, tokenize, sync, helpers), not shipped
+- `tests/`: stdlib test suite (run all with `python3 tools/run-tests.py`)
+- `runtime/`: cookies/logs/caches + per-profile state (gitignored)
+- `dist/`: built distributable + ZIP (gitignored)
+- `docs/superpowers/`: specs & plans
 
-## Configuration model — machine vs. league
+## Configuration model: machine vs. league
 
 Two layers, kept deliberately separate so one machine can run several leagues:
 
-- **Machine config — `.env`** (copy from `.env.example`, gitignored, repo root).
+- **Machine config: `.env`** (copy from `.env.example`, gitignored, repo root).
   Holds only machine-local values, never league secrets:
   `RACECAST_OBS_WS_PASSWORD`, `RACECAST_COMPANION_EXE`, `RACECAST_UI_PORT`,
   `RACECAST_UI_PASSWORD` (reserved), and `RACECAST_PROFILE` (the default active
@@ -32,14 +32,14 @@ Two layers, kept deliberately separate so one machine can run several leagues:
   ```bash
   cp .env.example .env
   ```
-- **League config — `profiles/<name>/profile.env`.** Each league is a profile
+- **League config: `profiles/<name>/profile.env`.** Each league is a profile
   directory with **un-prefixed** keys: `NAME`, `SHEET_ID`, `SHEET_PUSH_URL`,
   `INTRO_URL`, `OUTRO_URL`, `LOGO`, `OBS_COLLECTION`. The Google Sheet that
-  drives the HUD + relay schedule comes from this file's `SHEET_ID` — **not**
+  drives the HUD + relay schedule comes from this file's `SHEET_ID`, **not**
   from `.env`. `profiles/example/` is the copy-from template; copy it with
   `racecast profile new <name> --from example`. To **try the toolkit
   immediately**, the shipped `profiles/demo/` league points at a public, read-only
-  demo Sheet — `racecast profile use demo` then `racecast graphics && racecast
+  demo Sheet: `racecast profile use demo` then `racecast graphics && racecast
   relay start` runs out of the box (Sheet layout: [Sheet template wiki page][sheet-tpl]).
 
 [sheet-tpl]: https://github.com/jegr78/gt-racing-broadcast/wiki/Sheet-Template
@@ -60,18 +60,18 @@ racecast sheet open              # open the active league's Google Sheet (built 
 Active-profile precedence: `--profile` > `RACECAST_PROFILE` (in `.env`) >
 `runtime/active-profile` pointer > the sole profile if only one exists. Each
 league keeps its own OBS scene collection, graphics/media, and HUD overlay, so
-switching leagues is a profile switch — no editing of `.env` or the collection.
+switching leagues is a profile switch: no editing of `.env` or the collection.
 
 ### Per-league HUD overlays
-Each profile can restyle the relay-served overlay pages (the HUD — which includes the
-race timer — and the splitscreen) via `profiles/<name>/overlay/hud.css` (plus an optional
+Each profile can restyle the relay-served overlay pages (the HUD, which includes the
+race timer: and the splitscreen) via `profiles/<name>/overlay/hud.css` (plus an optional
 `splitscreen.css` and `overlay/fonts/`). These override the bundled defaults per league
 and are editable in the Control Center's visual overlay builder.
 The first override on a profile whose `overlay/` did not exist when the relay
 started needs one `racecast relay restart`; later edits apply live (Apply in OBS).
 See the [HUD overlays](https://github.com/jegr78/gt-racing-broadcast/wiki/HUD-Overlays) wiki page.
 
-## Get started — the Control Center
+## Get started: the Control Center
 
 Download the latest release for your platform from
 [**GitHub Releases**](https://github.com/jegr78/gt-racing-broadcast/releases/latest)
@@ -81,7 +81,7 @@ extract it into **its own folder**. The archive holds two binaries side by side:
 **`racecast`** (the CLI) and **`racecast-ui`** (the Control Center).
 
 **Double-click `racecast-ui`** (`racecast-ui.exe` / `racecast-ui.app`; Linux:
-`./racecast-ui`) to open the **Control Center** at `http://127.0.0.1:8089/` — a
+`./racecast-ui`) to open the **Control Center** at `http://127.0.0.1:8089/`, a
 local web dashboard that runs the whole station (setup wizard, service control,
 logs, the Profile view, and General Settings) from your browser. The first launch
 creates a `.env` next to the binaries for your machine config. Full step-by-step:
@@ -95,14 +95,14 @@ flags, written back to the Sheet's Crew tab). **General Settings** holds the mac
 `.env` and cookies.
 
 > **First start:** Windows SmartScreen / macOS Gatekeeper show a one-time warning for
-> unsigned binaries — choose "Run anyway" / right-click → Open. On macOS, clearing
+> unsigned binaries: choose "Run anyway" / right-click → Open. On macOS, clearing
 > the quarantine once (`xattr -dr com.apple.quarantine racecast racecast-ui.app`)
 > also avoids App Translocation (which can break the Control Center's asset
 > previews). See the setup guide.
 
 ## The CLI (alternative)
 
-Everything the Control Center does is also a `racecast …` command — the terminal
+Everything the Control Center does is also a `racecast …` command, the terminal
 stays a first-class option (and the only one on headless Linux). Run `racecast`
 once to create the `.env`, then update later with `racecast update`.
 
@@ -110,7 +110,7 @@ once to create the `.env`, then update later with `racecast update`.
 ```
 racecast init         # guided setup: picks/creates a league profile (fills its
                       # SHEET_ID), installs tools+apps, cookies, graphics, media,
-                      # OBS collection, Companion config, preflight — skips what is
+                      # OBS collection, Companion config, preflight: skips what is
                       # already done; re-run any time
 ```
 
@@ -143,9 +143,9 @@ racecast event start          # bring everything up: Tailscale, Discord, relay, 
 racecast event start --stint 4 # take over mid-event (12h/24h): stint 4 is on air now
 racecast event start --title "GTEC - 2026 - Round 4 - Nürburgring 24h"  # set the event title (Panel/Cockpit/Discord); also editable live in the Panel
 racecast event takeover <A-ip>                       # take over from A over the tailnet (reads on-air stint, pulls chat + console token revocations)
-racecast event takeover <A-magicdns-host> --funnel  # same but over A's public Funnel — no Tailscale account on B; needs `racecast funnel on` running on A and the league CONSOLE_SECRET in B's profile
+racecast event takeover <A-magicdns-host> --funnel  # same but over A's public Funnel, no Tailscale account on B; needs `racecast funnel on` running on A and the league CONSOLE_SECRET in B's profile
 racecast event status         # event-day readiness report (apps, services, cookies, graphics, media, config)
-racecast event stop           # stop relay/Companion/streams — OBS & friends keep running
+racecast event stop           # stop relay/Companion/streams. OBS & friends keep running
 racecast tailscale up         # connect Tailscale (event start does this automatically)
 racecast tailscale down       # disconnect Tailscale after the event
 racecast preflight            # check tools/hardware
@@ -160,7 +160,7 @@ racecast companion enable-control  # Linux only: one-time setup so companion sta
 racecast companion start      # bind Companion to Tailscale, start it
 racecast status               # all services at a glance
 racecast relay stop           # stop the relay
-racecast freeport             # free a stuck feed port (53001-53003) — kills an orphaned holder so a feed can bind (refuses a running relay/streams)
+racecast freeport             # free a stuck feed port (53001-53003): kills an orphaned holder so a feed can bind (refuses a running relay/streams)
 racecast obs refresh          # force-reload the relay-served OBS browser sources (HUD/timer)
 racecast obs collection       # check the active OBS scene collection
 racecast obs collection set   # switch OBS to this league's scene collection
@@ -189,5 +189,5 @@ For live debugging, run the relay in the foreground: `racecast relay run`.
 
 Editing the toolkit, running the tests and lint, building the distributable and the
 standalone binaries, and the maintainer workflows (OBS-collection round-trip, wiki and
-Pages publishing) all live in **[CONTRIBUTING.md](CONTRIBUTING.md)** — with `CLAUDE.md`
+Pages publishing) all live in **[CONTRIBUTING.md](CONTRIBUTING.md)**: with `CLAUDE.md`
 as the deep-architecture reference.

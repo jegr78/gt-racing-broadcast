@@ -10,7 +10,7 @@ verified, it blocks with exit code 2 and a checklist.
 "Verified" = the `ui-visual-verification` skill's procedure was run and its final
 step recorded the file's current content hash into the marker
 `runtime/ui-visual-verified.json`. Re-editing a verified file changes its hash, so
-the marker goes stale and the gate blocks again — verification is per content, not
+the marker goes stale and the gate blocks again: verification is per content, not
 once-per-file-forever.
 
 Reads the Stop hook JSON payload on stdin (unused fields ignored); writes the
@@ -71,7 +71,7 @@ def _content_hash(path):
         with open(path, "rb") as fh:
             return hashlib.sha256(fh.read()).hexdigest()
     except OSError:
-        # Deleted UI file — nothing to look at; treat as verified.
+        # Deleted UI file: nothing to look at; treat as verified.
         return None
 
 
