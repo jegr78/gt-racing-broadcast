@@ -1,28 +1,26 @@
 #!/usr/bin/env python3
-"""`racecast obs-browser` — build & install OBS Studio's Browser Source plugin
-(obs-browser + its bundled Chromium Embedded Framework) from source on Linux.
+"""`racecast obs-browser` builds and installs OBS Studio's Browser Source plugin,
+obs-browser plus its bundled Chromium Embedded Framework, from source on Linux.
 
-Why this exists: the distro `obs-studio` package on Ubuntu is built with the
-browser plugin DISABLED (no CEF), and there is no prebuilt OBS-with-browser for
-**aarch64** anywhere (the OBS PPA is amd64-only, Flathub has no aarch64 build, no
-arm64 snap). Without a Browser Source, the relay-served HUD/timer overlays cannot
-be added to OBS. This command builds the plugin against the distro's `libobs-dev`
-(ABI-matched) plus OBS's own patched CEF for the platform, and installs it next to
-the distro OBS.
+The distro `obs-studio` package on Ubuntu is built with the browser plugin
+DISABLED, and no prebuilt OBS-with-browser exists for **aarch64**: the OBS PPA is
+amd64-only, Flathub has no aarch64 build and there is no arm64 snap. Without a
+Browser Source the relay-served HUD and timer overlays cannot be added to OBS. This
+command builds the plugin against the distro's ABI-matched `libobs-dev` plus OBS's
+own patched CEF, and installs it next to the distro OBS.
 
-The CEF version + per-arch download hash are pinned per OBS major.minor (read from
-OBS's `CMakePresets.json` for that release tag); the obs-browser source is pulled
-at the submodule commit obs-studio pins for the same release. This module keeps the
-pure decision logic (arch/version/asset resolution, detection, the BrowserHWAccel
-guidance) separate from the heavy orchestration so the former stays unit-tested.
+The CEF version and per-arch download hash are pinned per OBS major.minor, read
+from OBS's `CMakePresets.json` for that release tag; the obs-browser source is
+pulled at the submodule commit obs-studio pins for the same release. The pure
+decision logic stays separate from the orchestration so it can be unit-tested.
 
 Tests: tests/test_obs_browser_linux.py
 """
 import hashlib, os, shutil, subprocess, sys, tempfile
 import http_util
 
-# --- pinned build spec, keyed by OBS "<major>.<minor>" -------------------
-# Values taken from obs-studio's CMakePresets.json (configurePresets[dependencies]
+# Pinned build spec, keyed by OBS "<major>.<minor>". The values come from
+# obs-studio's CMakePresets.json (configurePresets[dependencies]
 # .vendor["obsproject.com/obs-studio"].dependencies.cef) at the matching release
 # tag, and the obs-browser submodule commit at that tag. CEF lives on OBS's CDN.
 CEF_BASE_URL = "https://cdn-fastly.obsproject.com/downloads"
@@ -43,8 +41,8 @@ CEF_SPECS = {
     },
 }
 
-# apt build dependencies (the distro ships an ABI-matched libobs-dev + the OBS
-# CMake config packages that export OBS::libobs / OBS::obs-frontend-api / …).
+# apt build dependencies. The distro ships an ABI-matched libobs-dev plus the OBS
+# CMake config packages that export OBS::libobs and OBS::obs-frontend-api.
 BUILD_APT_DEPS = (
     "cmake", "ninja-build", "pkg-config", "build-essential",
     "libobs-dev", "qt6-base-dev", "nlohmann-json3-dev",
@@ -52,8 +50,8 @@ BUILD_APT_DEPS = (
     "libxfixes-dev", "libgles2-mesa-dev", "libegl1-mesa-dev", "libdrm-dev",
 )
 
-# obs-studio finder modules fetched at build time (not vendored: GPL + must match
-# the release tag). Placed on the wrapper's CMAKE_MODULE_PATH.
+# obs-studio finder modules fetched at build time rather than vendored: they are
+# GPL and must match the release tag. Placed on the wrapper's CMAKE_MODULE_PATH.
 OBS_FINDERS = ("FindCEF.cmake", "FindLibdrm.cmake")
 
 OBS_BROWSER_GIT = "https://github.com/obsproject/obs-browser.git"
@@ -63,7 +61,6 @@ _AARCH64 = ("aarch64", "arm64")
 _X86_64 = ("x86_64", "amd64")
 
 
-# --- pure helpers --------------------------------------------------------
 def normalize_arch(machine):
     """Map a platform.machine() value to the canonical CEF arch key, or None."""
     m = (machine or "").lower()
@@ -100,8 +97,8 @@ def _target(spec, arch):
 
 
 def cef_filename(spec, arch):
-    """The CEF archive name, e.g. cef_binary_6533_linux_aarch64_v6.tar.xz.
-    Mirrors obs-studio's setup_ubuntu naming (ubuntu-<arch> -> linux_<arch>)."""
+    """The CEF archive name, e.g. cef_binary_6533_linux_aarch64_v6.tar.xz,
+    following obs-studio's setup_ubuntu naming (ubuntu-<arch> -> linux_<arch>)."""
     t = _target(spec, arch)
     linux_target = t["obs_target"].replace("ubuntu-", "linux_")
     rev = f"_v{t['revision']}" if t.get("revision") else ""
@@ -127,7 +124,7 @@ OBS_PLUGINS_DIR_PLAIN = "/usr/lib/obs-plugins"
 
 def obs_plugins_dirs(arch):
     """Every directory a distro may place OBS plugins in, for presence checks.
-    Fixed-OS Linux paths — built with explicit '/' (CLAUDE.md cross-platform rule)."""
+    These are fixed-OS Linux paths, built with an explicit '/'."""
     return [obs_plugins_dir(arch), OBS_PLUGINS_DIR_PLAIN]
 
 
@@ -140,43 +137,42 @@ def browser_plugin_present(plugins_dirs, exists=os.path.exists):
 def browser_plugin_installed(plugins_dir, exists=os.path.exists):
     """True iff obs-browser.so is present in the OBS plugins dir. plugins_dir is a
     fixed-OS Linux path, so join with an explicit '/': os.path.join would inject a
-    backslash on the Windows test runner (CLAUDE.md cross-platform rule)."""
+    backslash on the Windows test runner."""
     return exists(plugins_dir.rstrip("/") + "/obs-browser.so")
 
 
 def install_hint(machine, obs_present, browser_present):
     """The one-line pointer install-apps prints when OBS is installed on a
-    supported Linux arch but its Browser Source plugin is missing — else None."""
+    supported Linux arch but its Browser Source plugin is missing, else None."""
     arch = normalize_arch(machine)
     if arch not in CEF_SPECS["32.1"]["targets"]:
         return None
     if not obs_present or browser_present:
         return None
-    return ("OBS has no Browser Source plugin (needed for the relay HUD/timer "
-            "overlays) — run `racecast obs-browser` to build & install it.")
+    return ("OBS has no Browser Source plugin, which the relay HUD and timer "
+            "overlays need. Run `racecast obs-browser` to build and install it.")
 
 
 PACMAN_BROWSER_PACKAGE = "obs-studio-browser"
 
 
 def pacman_redirect_note(has_pacman, has_apt):
-    """Operator note for Arch-based hosts, or None when this isn't one.
+    """Operator note for Arch-based hosts, or None when this is not one.
 
-    Everything below (BUILD_APT_DEPS, _detect_obs_version's dpkg-query, the
-    Debian multiarch plugin path) is apt-specific: this command exists because
-    Debian/Ubuntu ship no browser plugin for aarch64 and there is nothing to
-    install. Arch is the opposite — a prebuilt CEF-enabled OBS is one package
-    away — so a source build here would be slow, unnecessary, and would fail
-    anyway. `has_apt` wins when both are present, mirroring
+    Everything below, BUILD_APT_DEPS, _detect_obs_version's dpkg-query and the
+    Debian multiarch plugin path, is apt-specific: this command exists because
+    Debian and Ubuntu ship no browser plugin for aarch64. On Arch a prebuilt
+    CEF-enabled OBS is one package away, so a source build here would be slow and
+    would fail anyway. `has_apt` wins when both are present, matching
     install_tools.pick_manager so one host never gets two answers."""
     if not has_pacman or has_apt:
         return None
     return (
         "On Arch the Browser Source comes as a package, not a source build.\n"
         f"  sudo pacman -S {PACMAN_BROWSER_PACKAGE}\n"
-        "It replaces the plain obs-studio package (which is built without CEF, so "
-        "every Browser Source is missing and the relay's HUD/timer overlays stay "
-        "black). Verify afterwards with:\n"
+        "It replaces the plain obs-studio package, which is built without CEF, so "
+        "every Browser Source is missing and the relay's HUD and timer overlays "
+        "stay black. Verify afterwards with:\n"
         f"  pacman -Ql {PACMAN_BROWSER_PACKAGE} | grep obs-browser.so\n"
         "This command is for Debian/Ubuntu, where no prebuilt plugin exists.")
 
@@ -201,18 +197,19 @@ def plugin_configure_argv(standalone_src, build_dir, obs_browser_src, cef_root):
 
 
 def browser_hwaccel_note():
-    """Operator guidance for no-GPU / VM hosts where CEF's GPU subprocess crashes
-    ('Unable to open DRM render node') unless hardware acceleration is disabled."""
-    return ("On a host without a GPU (a VM, headless/no DRM render node), CEF's GPU "
-            "subprocess crashes. If the Browser Source stays black or OBS is "
-            "unstable, disable browser hardware acceleration: OBS → Settings → "
-            "Advanced → uncheck 'Browser Source Hardware Acceleration' "
-            "(or set BrowserHWAccel=false in ~/.config/obs-studio/global.ini).")
+    """Operator guidance for no-GPU and VM hosts, where CEF's GPU subprocess
+    crashes with 'Unable to open DRM render node' unless hardware acceleration is
+    disabled."""
+    return ("On a host without a GPU, a VM or a headless box with no DRM render "
+            "node, CEF's GPU subprocess crashes. If the Browser Source stays black "
+            "or OBS is unstable, disable browser hardware acceleration: OBS > "
+            "Settings > Advanced > uncheck 'Browser Source Hardware Acceleration', "
+            "or set BrowserHWAccel=false in ~/.config/obs-studio/global.ini.")
 
 
 def set_browser_hwaccel(global_ini_text, enabled):
     """Return global.ini text with [General] BrowserHWAccel set to enabled.
-    Idempotent; adds the key (and a [General] section) if absent."""
+    Idempotent; adds the key, and a [General] section, if absent."""
     value = "true" if enabled else "false"
     lines = global_ini_text.splitlines()
     out, seen, in_general, general_at = [], False, False, None
@@ -235,9 +232,9 @@ def set_browser_hwaccel(global_ini_text, enabled):
     return "\n".join(out) + ("\n" if global_ini_text.endswith("\n") or not global_ini_text else "")
 
 
-# --- orchestration (not run in CI) ---------------------------------------
+# Orchestration below; not exercised in CI.
 def _wrapper_dir():
-    """The shipped wrapper CMakeLists dir (repo src/ or frozen bundle)."""
+    """The shipped wrapper CMakeLists dir, in repo src/ or the frozen bundle."""
     here = os.path.dirname(os.path.abspath(__file__))
     return os.path.normpath(os.path.join(here, "..", "obs", "obs-browser-build"))
 
@@ -262,7 +259,7 @@ def _sha256(path):
 
 
 def main(argv=None):
-    """CLI entry: build & install obs-browser for the current Linux host."""
+    """CLI entry: build and install obs-browser for the current Linux host."""
     import argparse, platform
     p = argparse.ArgumentParser(prog="racecast obs-browser",
                                 description="Build & install the OBS Browser Source plugin from source (Linux).")
@@ -272,10 +269,10 @@ def main(argv=None):
     args = p.parse_args(argv)
 
     if sys.platform != "linux":
-        print("obs-browser source build is Linux-only "
-              "(Windows/macOS OBS ship the Browser Source already).")
+        print("obs-browser source build is Linux-only; "
+              "Windows and macOS OBS ship the Browser Source already.")
         return 1
-    # Before any dpkg/apt work: on Arch this whole path is the wrong tool.
+    # Before any dpkg work: on Arch this whole path is the wrong tool.
     note = pacman_redirect_note(bool(shutil.which("pacman")),
                                 bool(shutil.which("apt-get")))
     if note:
@@ -290,7 +287,7 @@ def main(argv=None):
         print(f"Unsupported architecture: {platform.machine()!r}.")
         return 1
     if obs_version is None:
-        print("OBS Studio not detected (install it first: `racecast install-apps`).")
+        print("OBS Studio not detected. Install it first: `racecast install-apps`.")
         return 1
     if spec is None:
         print(f"No pinned CEF spec for OBS {obs_version}. Supported: "
@@ -299,11 +296,11 @@ def main(argv=None):
 
     plugins = obs_plugins_dir(arch)
     if browser_plugin_installed(plugins):
-        print(f"obs-browser.so already present in {plugins} — nothing to do.")
+        print(f"obs-browser.so already present in {plugins}, nothing to do.")
         print(browser_hwaccel_note())
         return 0
 
-    print(f"Will build obs-browser {spec['obs_browser_commit'][:10]} + CEF "
+    print(f"Will build obs-browser {spec['obs_browser_commit'][:10]} and CEF "
           f"{spec['cef_version']} ({arch}) against the distro libobs, and install into\n"
           f"  {plugins}\nThis downloads ~340 MB of CEF and compiles for several minutes.")
     if not args.yes:
@@ -340,7 +337,7 @@ def _build_and_install(arch, spec, plugins, workdir):
     print("== installing build dependencies (sudo apt)")
     _run(["sudo", "apt-get", "install", "-y", "--no-install-recommends", *BUILD_APT_DEPS])
 
-    # 2) CEF: download + verify + extract
+    # 2) CEF: download, verify, extract
     cef_tar = os.path.join(workdir, cef_filename(spec, arch))
     _download(cef_url(spec, arch), cef_tar)
     got = _sha256(cef_tar)
@@ -351,7 +348,7 @@ def _build_and_install(arch, spec, plugins, workdir):
     shutil.rmtree(cef_dir, ignore_errors=True); os.makedirs(cef_dir)
     _run(["tar", "--strip-components", "1", "-xJf", cef_tar, "-C", cef_dir])
 
-    # 3) CEF dll wrapper (PROJECT_ARCH fix for aarch64)
+    # 3) CEF dll wrapper
     cef_build = os.path.join(cef_dir, "build")
     shutil.rmtree(cef_build, ignore_errors=True)
     _run(cef_configure_argv(cef_dir, cef_build, arch))
@@ -364,7 +361,7 @@ def _build_and_install(arch, spec, plugins, workdir):
     _run(["git", "clone", "--quiet", OBS_BROWSER_GIT, obs_browser])
     _run(["git", "-C", obs_browser, "checkout", "--quiet", spec["obs_browser_commit"]])
 
-    # 5) assemble the standalone build tree: our wrapper CMakeLists + obs finders
+    # 5) assemble the standalone build tree: wrapper CMakeLists plus obs finders
     standalone = os.path.join(workdir, "standalone")
     shutil.rmtree(standalone, ignore_errors=True); os.makedirs(os.path.join(standalone, "finders"))
     shutil.copy(os.path.join(_wrapper_dir(), "CMakeLists.txt"),
@@ -379,10 +376,10 @@ def _build_and_install(arch, spec, plugins, workdir):
     _run(plugin_configure_argv(standalone, plug_build, obs_browser, cef_dir))
     _run(["cmake", "--build", plug_build, "-j", str(os.cpu_count() or 2)])
 
-    # 7) install plugin + CEF runtime + data
+    # 7) install plugin, CEF runtime and data
     _install_artifacts(arch, spec, plugins, cef_dir, plug_build, obs_browser)
-    print("\nDone. obs-browser installed. Restart OBS — a 'Browser' source type "
-          "is now available.")
+    print("\nDone. obs-browser installed. Restart OBS and a 'Browser' source type "
+          "is available.")
     print(browser_hwaccel_note())
     return 0
 

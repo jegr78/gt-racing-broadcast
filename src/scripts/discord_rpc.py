@@ -2,10 +2,10 @@
 """Discord voice-channel join via the local desktop-client RPC IPC socket.
 
 Pure helpers (socket-path candidates, frame codec, message builders, the
-channel-link parser, the Sheet->env target resolver, and token-cache logic) plus
-a thin DiscordVoiceClient that ties them to a real socket + http_util OAuth token
-exchange. The desktop client is driven so its audio plays on the machine's audio
-device, where OBS's PipeWire plugin captures it. Feasibility proven live — see
+channel-link parser, the Sheet->env target resolver and token-cache logic) plus a
+thin DiscordVoiceClient that ties them to a real socket and the http_util OAuth
+token exchange. The desktop client is driven so its audio plays on the machine's
+audio device, where OBS's PipeWire plugin captures it. Spec:
 docs/superpowers/specs/2026-07-04-discord-voice-join-design.md.
 
 Secrets (client_secret, tokens) are never logged, printed, or returned."""
@@ -34,11 +34,11 @@ CONSENT_TIMEOUT_S = 120
 
 def ipc_candidates(os_name, env):
     """Ordered IPC endpoints where a running Discord client may listen. Both
-    branches build fixed-OS paths with explicit separators, NOT os.path.join:
-    os.path.join uses the RUNNING OS's separator, so on the Windows CI runner it
-    would turn the POSIX candidates into backslash paths (breaking the unit test
-    and the intent). Windows = a fixed named-pipe string; POSIX = '/'-joined
-    runtime bases + the socket name (incl. snap/flatpak subdirs)."""
+    branches build fixed-OS paths with explicit separators, NOT os.path.join,
+    which uses the RUNNING OS's separator and would turn the POSIX candidates into
+    backslash paths on the Windows runner. Windows is a fixed named-pipe string;
+    POSIX joins the runtime bases with the socket name, including the snap and
+    flatpak subdirs."""
     if os_name == "nt":
         return [r"\\?\pipe\discord-ipc-{}".format(n) for n in range(10)]
     bases = [env.get(k) for k in ("XDG_RUNTIME_DIR", "TMPDIR", "TMP", "TEMP")]
@@ -91,7 +91,7 @@ def msg_leave():
 
 def parse_channel_link(link):
     """'https://discord.com/channels/<guild>/<channel>' (or discord://) ->
-    (guild, channel) of digit strings, else None. Structural parse — no host
+    (guild, channel) of digit strings, else None. A structural parse, with no host
     substring check (CodeQL py/incomplete-url-substring-sanitization)."""
     if not link:
         return None
@@ -191,7 +191,7 @@ class _PipeConn:
         try:
             self._f.close()
         except OSError:
-            pass  # already closed/gone — close() is best-effort
+            pass  # already closed; close() is best-effort
 
 
 def _default_connect(endpoint):
@@ -212,10 +212,10 @@ def _default_post_form(url, form):
                 headers={"Content-Type": "application/x-www-form-urlencoded"}) as r:
             return json.loads(r.read().decode("utf-8"))
     except http_util.HTTPError as exc:
-        # Surface Discord's error body (e.g. an unregistered http://localhost
-        # redirect, or a bad client secret) instead of a bare "HTTP Error 400" —
-        # the detail is what tells the operator how to fix it. Discord never echoes
-        # the client secret, so this is safe to log.
+        # Surface Discord's error body instead of a bare "HTTP Error 400": the
+        # detail is what tells the operator how to fix it, for instance an
+        # unregistered http://localhost redirect. Discord never echoes the client
+        # secret, so this is safe to log.
         detail = ""
         try:
             payload = json.loads(exc.read().decode("utf-8"))
@@ -228,8 +228,8 @@ def _default_post_form(url, form):
 
 
 class DiscordVoiceClient:
-    """Drives the local Discord desktop client into/out of a voice channel.
-    Every failure path returns (False, note) — never raises to the caller."""
+    """Drives the local Discord desktop client into and out of a voice channel.
+    Every failure path returns (False, note) and never raises to the caller."""
 
     def __init__(self, client_id, client_secret, cache_path,
                  *, connect=None, http_post_form=None, now=None, endpoints=None,
@@ -243,9 +243,9 @@ class DiscordVoiceClient:
         self._consent_timeout = CONSENT_TIMEOUT_S if consent_timeout is None else consent_timeout
 
     def _endpoints(self):
-        """Candidate IPC endpoints to try. POSIX filters to existing sockets;
-        Windows keeps every pipe path (existence isn't reliably checkable) and
-        the connect attempt in _open picks the one that opens."""
+        """Candidate IPC endpoints to try. POSIX filters to existing sockets.
+        Windows keeps every pipe path, because existence is not reliably
+        checkable, and the connect attempt in _open picks the one that opens."""
         if self._endpoints_override is not None:
             return self._endpoints_override
         cands = ipc_candidates(os.name, os.environ)
@@ -305,11 +305,11 @@ class DiscordVoiceClient:
         conn.sendall(encode_frame(*msg))
 
     def _access_token(self, conn, allow_consent):
-        """Return a usable access token, cheapest first: cached -> refresh ->
-        (only when allow_consent) the interactive AUTHORIZE consent flow. Auto-join
+        """Return a usable access token, cheapest first: cached, then refresh, then
+        the interactive AUTHORIZE consent flow when allow_consent is set. Auto-join
         passes allow_consent=False, so an unattended box never blocks on a consent
-        popup nobody will click. Raises RuntimeError with a friendly, secret-free
-        message on failure."""
+        popup nobody will click. Raises RuntimeError with a secret-free message on
+        failure."""
         cache = load_cache(self.cache_path)
         now = self._now()
         if token_valid(cache, now):
@@ -321,20 +321,19 @@ class DiscordVoiceClient:
                 return resp["access_token"]
         if not allow_consent:
             raise RuntimeError(
-                "no cached Discord authorization — run `racecast discord join` once to grant it")
-        # Interactive consent (attended first run): the AUTHORIZE response waits for
-        # the human to click, so it gets the longer consent timeout.
+                "no cached Discord authorization. Run `racecast discord join` once to grant it")
+        # The AUTHORIZE response waits for the human to click, so it gets the
+        # longer consent timeout.
         self._send(conn, msg_authorize(self.cid))
         _op, msg = self._read_frame(conn, self._consent_timeout)
         data = msg.get("data") or {}
         if msg.get("evt") == "ERROR":
-            # AUTHORIZE itself failed — most commonly invalid_scope, because the `rpc`
-            # scope is gated to the app's Owner + App Testers and the logged-in Discord
-            # account is not on the App Testers list (owner status alone is NOT enough:
-            # add the account under Dev Portal → App Testers, then restart Discord).
-            # data["code"] here is a NUMERIC RPC error code, NOT an OAuth code — never
-            # forward it to the token endpoint (doing so produced a misleading
-            # "400 Invalid code" that hid the real cause).
+            # AUTHORIZE itself failed, most commonly invalid_scope: the `rpc` scope
+            # is gated to the app's Owner and App Testers, and owner status alone is
+            # NOT enough. Add the account under Dev Portal, App Testers, then restart
+            # Discord. data["code"] here is a NUMERIC RPC error code, not an OAuth
+            # code; forwarding it to the token endpoint yields a misleading
+            # "400 Invalid code".
             raise RuntimeError(
                 "Discord AUTHORIZE failed: "
                 + str(data.get("message") or data.get("code") or "unknown error"))

@@ -1,9 +1,9 @@
 """Discord OAuth2 (Authorization Code, scope=identify) helpers for /console login.
 
-Pure + stdlib only. The relay (src/relay/racecast-feeds.py) calls these to build
-the authorize redirect, sign/verify a stateless CSRF `state`, and resolve a Discord
-username to a Crew member. The two network calls (code->token, /users/@me) are a
-thin wrapper the relay owns; response PARSING stays here so tests run offline.
+Pure and stdlib only. The relay (src/relay/racecast-feeds.py) calls these to build
+the authorize redirect, sign and verify a stateless CSRF `state`, and resolve a
+Discord username to a Crew member. The two network calls (code->token, /users/@me)
+are a thin wrapper the relay owns; response PARSING stays here so tests run offline.
 
 This is NOT a bot: scope is strictly `identify` (no email, guilds, or message
 access). The app is registered per-league in the Discord Developer Portal; the
@@ -78,7 +78,7 @@ def state_nonce(state):
 
 def parse_identity(user_json):
     """Lowercased Discord `username` from a /users/@me dict, or "" on anything
-    unexpected. Pure — the relay passes the already-parsed JSON."""
+    unexpected. The relay passes the already-parsed JSON."""
     if not isinstance(user_json, dict):
         return ""
     return (user_json.get("username") or "").strip().lower()
@@ -94,7 +94,7 @@ def match_subject(username, discord_map):
 
 
 def valid_redirect_host(host):
-    """True iff host is a bare MagicDNS name safe to build a redirect_uri from
-    (defense vs. a forged Host header injecting CR-LF or an off-tailnet redirect;
-    Discord's exact registered-redirect match is the real guard)."""
+    """True iff host is a bare MagicDNS name safe to build a redirect_uri from.
+    It blocks a forged Host header injecting CR-LF or an off-tailnet redirect;
+    Discord's exact registered-redirect match is the real guard."""
     return bool(host) and bool(_HOST_RE.fullmatch(host))

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Machine resource sampling — CPU %, RAM, network throughput, free disk (stdlib only).
+"""Machine resource sampling, stdlib only: CPU %, RAM, network throughput, free disk.
 
-Pure parsers + delta math are unit-tested with fixture strings; `ResourceSampler` owns the
-previous cumulative counters and computes deltas; `ResourceMonitor` runs a sampler on a
-background thread and caches the latest snapshot. Per-OS reads mirror preflight.py (Linux
-/proc, Windows ctypes, macOS subprocess). Never raises — an unreadable metric is None.
+The pure parsers and delta math are unit-tested with fixture strings.
+`ResourceSampler` owns the previous cumulative counters and computes deltas;
+`ResourceMonitor` runs a sampler on a background thread and caches the latest
+snapshot. Per-OS reads mirror preflight.py: Linux /proc, Windows ctypes, macOS
+subprocess. Nothing raises; an unreadable metric is None.
 """
 import re
 import shutil
@@ -26,8 +27,6 @@ IS_WIN = sys.platform.startswith("win")
 IS_MAC = sys.platform == "darwin"
 IS_LINUX = sys.platform.startswith("linux")
 
-
-# ---------- pure parsers ----------
 
 def parse_proc_stat_cpu(text):
     """First 'cpu ' line of /proc/stat -> (busy, total) jiffies, or None."""
@@ -57,7 +56,8 @@ def parse_proc_net_dev(text):
 
 
 def parse_netstat_ib(text):
-    """macOS `netstat -ib` -> (rx_bytes, tx_bytes) over non-lo0 ifaces (one row per iface)."""
+    """macOS `netstat -ib` -> (rx_bytes, tx_bytes) over the non-lo0 interfaces, one
+    row each."""
     lines = text.splitlines()
     if not lines:
         return (0, 0)
@@ -95,7 +95,8 @@ def parse_top_cpu(text):
 
 
 def parse_vm_stat(text):
-    """macOS `vm_stat` -> bytes in use ((active+wired+compressor) * page_size), or None."""
+    """macOS `vm_stat` -> bytes in use, (active+wired+compressor) * page_size, or
+    None."""
     m = re.search(r"page size of (\d+) bytes", text)
     page = int(m.group(1)) if m else 4096
 
@@ -139,10 +140,9 @@ def parse_typeperf_net(text):
     return (up, down) if got else None
 
 
-# ---------- pure delta math ----------
-
 def cpu_pct_from_delta(prev, cur):
-    """(busy,total) pairs -> percent, or None (no prev / non-positive dt / counter reset)."""
+    """(busy,total) pairs -> percent. None without a previous pair, on a
+    non-positive dt, or after a counter reset."""
     if not prev or not cur:
         return None
     db = cur[0] - prev[0]
@@ -153,13 +153,12 @@ def cpu_pct_from_delta(prev, cur):
 
 
 def rate_from_delta(prev, cur, dt):
-    """Cumulative byte counters -> bytes/sec, or None (no prev / dt<=0 / reset)."""
+    """Cumulative byte counters -> bytes/sec. None without a previous value, on
+    dt <= 0, or after a counter reset."""
     if prev is None or cur is None or dt <= 0 or cur < prev:
         return None
     return (cur - prev) / dt
 
-
-# ---------- color levels ----------
 
 def cpu_level(pct):
     if pct is None:
@@ -174,21 +173,21 @@ def mem_level(pct):
 
 
 def disk_level(free_bytes):
-    """Mirrors preflight.classify_disk thresholds (2 GB / 5 GB)."""
+    """Uses preflight.classify_disk's thresholds of 2 GB and 5 GB."""
     if free_bytes is None:
         return None
     gb = free_bytes / (1024 ** 3)
     return "red" if gb < 2 else "yellow" if gb < 5 else "green"
 
 
-# ---------- per-OS real readers (OS-gated; not unit-tested with real calls) ----------
+# The per-OS readers below are OS-gated, so their real calls are not unit-tested.
 
 def _read_cpu():
     """-> ('counter', busy, total) | ('percent', pct, None) | None.
 
-    All tuple returns are length 3 (the 'percent' variant pads a None) so the
-    shape is uniform — CodeQL's py/mixed-tuple-returns; the consumer (_cpu)
-    keys off element [0] and never reads the pad."""
+    Every tuple return has length 3, the 'percent' variant padding with a None, so
+    the shape stays uniform for CodeQL's py/mixed-tuple-returns. The consumer keys
+    off element [0] and never reads the pad."""
     try:
         if IS_LINUX:
             with open("/proc/stat") as fh:
@@ -290,12 +289,11 @@ def _default_readers():
     return {"cpu": _read_cpu, "net": _read_net, "mem": _read_mem, "disk": _read_disk_free}
 
 
-# ---------- sampler + monitor ----------
-
 class ResourceSampler:
-    """Owns the previous cumulative CPU + net counters; each sample() computes deltas
-    since the last call. Never raises — a failed metric is None. Inject `readers` (the
-    default = the real per-OS readers) to unit-test the delta logic without OS calls."""
+    """Owns the previous cumulative CPU and net counters; each sample() computes
+    deltas since the last call. Nothing raises: a failed metric is None. Inject
+    `readers`, which defaults to the real per-OS readers, to unit-test the delta
+    logic without OS calls."""
 
     def __init__(self, readers=None):
         self.readers = readers or _default_readers()
@@ -397,8 +395,8 @@ class ResourceMonitor:
 
 
 def to_health_fields(snap):
-    """Map a ResourceSampler snapshot to the health_store sys_* columns (%, kbps, MB).
-    None-safe."""
+    """Map a ResourceSampler snapshot to the health_store sys_* columns, in percent,
+    kbps and MB. None-safe."""
     def kbps(bps):
         return round(bps / 1000.0, 1) if bps is not None else None
 

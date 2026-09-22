@@ -2,19 +2,18 @@
 """Install the obs-pipewire-audio-capture plugin (dimtpap) on Linux.
 
 The plugin backs OBS's PipeWire audio-capture source, which is how the Discord
-interview audio is captured on Linux (native Discord AND Discord-web). OBS's
-apt/PPA package does NOT bundle it, so a fresh Linux box has no Discord audio path
-until it is installed — the relay/OBS otherwise render a silent interview.
+interview audio is captured on Linux, for native Discord and Discord-web alike.
+OBS's apt and PPA packages do NOT bundle it, so a fresh Linux box has no Discord
+audio path until it is installed and the interview stays silent.
 
-Unlike the Browser Source plugin (obs_browser_linux, a from-source CEF build), this
-plugin ships a prebuilt .so in an upstream release tarball, so the install is a
-pinned, SHA-256-verified download extracted into the per-user OBS plugins dir
-(`~/.config/obs-studio/plugins/`) — the dimtpap release layout preflight already
-probes (preflight.pipewire_audio_candidates). x86_64 only (the release has no
-aarch64 build); flatpak OBS must use the Flathub plugin instead.
+This plugin ships a prebuilt .so in an upstream release tarball, so the install is
+a pinned, SHA-256-verified download extracted into the per-user OBS plugins dir
+`~/.config/obs-studio/plugins/`, the dimtpap release layout that
+preflight.pipewire_audio_candidates already probes. x86_64 only, since the release
+has no aarch64 build; a flatpak OBS must use the Flathub plugin instead.
 
-Pure helpers (paths, arch/flatpak gating, the pinned asset, the install hint) are
-unit-tested; the heavy download is behind an injectable `opener` seam."""
+The pure helpers are unit-tested and the download sits behind an injectable
+`opener` seam."""
 import hashlib
 import io
 import os
@@ -31,23 +30,22 @@ PLUGIN_VERSION = "1.2.1"
 PLUGIN_ASSET = f"linux-pipewire-audio-{PLUGIN_VERSION}.tar.gz"   # non-flatpak variant
 PLUGIN_URL_TMPL = ("https://github.com/dimtpap/obs-pipewire-audio-capture/"
                    "releases/download/{ver}/{asset}")
-# sha256 of the official 1.2.1 non-flatpak tarball (verified by download).
+# sha256 of the official non-flatpak tarball.
 PLUGIN_SHA256 = "9e2842ea850a61609021e7efeb5af7d95effd30ec1476e4b23d8437485aa8d12"
 PLUGIN_SO = "linux-pipewire-audio.so"
 
 _X86_64 = ("x86_64", "amd64")
 
 
-# --- pure helpers --------------------------------------------------------
 def user_plugins_dir(home):
-    """The per-user OBS plugins dir. A fixed POSIX path -> build it with explicit
-    forward slashes, never os.path.join (backslashes on the Windows CI runner;
-    CLAUDE.md cross-platform rule)."""
+    """The per-user OBS plugins dir. A fixed POSIX path, so build it with explicit
+    forward slashes; os.path.join would inject backslashes on the Windows
+    runner."""
     return home.replace("\\", "/").rstrip("/") + "/.config/obs-studio/plugins"
 
 
 def plugin_so_path(home):
-    """Where the plugin .so lands — must equal preflight.pipewire_audio_candidates()[0]."""
+    """Where the plugin .so lands. Must equal pipewire_audio_candidates()[0]."""
     return user_plugins_dir(home) + "/linux-pipewire-audio/bin/64bit/" + PLUGIN_SO
 
 
@@ -61,16 +59,14 @@ _MULTIARCH = {"x86_64": "x86_64-linux-gnu", "amd64": "x86_64-linux-gnu",
 
 
 def pipewire_audio_candidates(home, machine):
-    """Every filesystem location the plugin .so may occupy on Linux (pure — builds
-    path strings only): the per-user manual install (this module's own layout, the
-    dimtpap release tarball) plus the distro/package plugin dirs. Debian uses a
-    multiarch triplet, Arch and others a plain /usr/lib/obs-plugins.
+    """Every filesystem location the plugin .so may occupy on Linux: the per-user
+    manual install this module writes, plus the distro package plugin dirs. Debian
+    uses a multiarch triplet, Arch and others a plain /usr/lib/obs-plugins.
 
-    Fixed Linux (POSIX) paths, so build them with explicit forward slashes — never
-    os.path.join, which injects backslashes on the Windows test runner and makes a
-    passing-on-Linux test fail there (see CLAUDE.md / #97).
+    These are fixed POSIX paths, so build them with explicit forward slashes;
+    os.path.join injects backslashes on the Windows test runner (#97).
 
-    This lives here rather than in preflight because this module owns the install;
+    This lives here rather than in preflight because this module owns the install.
     preflight imports it, so there is exactly one list."""
     user = home.replace("\\", "/").rstrip("/") + "/.config/obs-studio/plugins/linux-pipewire-audio"
     cands = [f"{user}/bin/64bit/{PLUGIN_SO}", f"{user}/bin/{PLUGIN_SO}"]
@@ -87,22 +83,22 @@ def pipewire_audio_present(candidates, exists=os.path.exists):
 
 
 def plugin_present(home, machine=None, exists=os.path.exists):
-    """True iff the plugin is present ANYWHERE OBS would load it from — the
-    per-user install AND the distro package dirs. Distro packages exist on Arch
-    (AUR) and elsewhere; judging only the per-user path made install-apps fetch a
-    second copy of a plugin the machine already had."""
+    """True iff the plugin is present ANYWHERE OBS would load it from: the per-user
+    install and the distro package dirs. Distro packages exist on Arch and
+    elsewhere, and judging only the per-user path made install-apps fetch a second
+    copy of a plugin the machine already had."""
     return pipewire_audio_present(pipewire_audio_candidates(home, machine), exists)
 
 
 def is_prebuilt_arch(machine):
-    """The release ships a 64bit (x86_64) .so only — no aarch64 prebuilt. Pure."""
+    """The release ships a 64bit x86_64 .so only; there is no aarch64 prebuilt."""
     return (machine or "").lower() in _X86_64
 
 
 def is_flatpak_obs(home, exists=os.path.exists):
-    """True when OBS is a flatpak install (its tree lives under
-    ~/.var/app/com.obsproject.Studio) — those must use the Flathub plugin, not this
-    tarball. Fixed POSIX path -> explicit '/'."""
+    """True when OBS is a flatpak install, with its tree under
+    ~/.var/app/com.obsproject.Studio. Those must use the Flathub plugin rather than
+    this tarball. A fixed POSIX path, so join with an explicit '/'."""
     base = home.replace("\\", "/").rstrip("/") + "/.var/app/com.obsproject.Studio"
     return exists(base)
 
@@ -112,7 +108,7 @@ def download_url(ver=PLUGIN_VERSION):
 
 
 def _safe_members(tf, dest):
-    """Yield tar members whose resolved path stays within dest (zip/tar-slip guard)."""
+    """Yield tar members whose resolved path stays within dest, a tar-slip guard."""
     dest_abs = os.path.realpath(dest)
     for member in tf.getmembers():
         target = os.path.realpath(os.path.join(dest, member.name))
@@ -124,8 +120,8 @@ def _safe_members(tf, dest):
 def install_pipewire_audio(home, opener=None, sha256=PLUGIN_SHA256):
     """Download the pinned plugin tarball, verify its SHA-256, and extract it into
     the per-user OBS plugins dir. Returns the installed .so path. Raises on a
-    checksum mismatch or an unsafe (path-traversal) archive. `opener` (url -> bytes)
-    is injectable for tests; defaults to a stdlib HTTPS GET."""
+    checksum mismatch or a path-traversing archive. `opener` (url -> bytes) is
+    injectable for tests."""
     if opener is None:
         def opener(url):
             return http_util.get_bytes(url, timeout=120)   # nosec - pinned GitHub host, checksum-verified
@@ -142,16 +138,16 @@ def install_pipewire_audio(home, opener=None, sha256=PLUGIN_SHA256):
 
 
 def install_hint(machine, obs_present, plugin_present, is_flatpak):
-    """One-line guidance for install-apps when the plugin can't be auto-installed,
-    or None when there is nothing to say (no OBS, or already installed)."""
+    """One-line guidance for install-apps when the plugin cannot be auto-installed,
+    or None when there is nothing to say, such as no OBS or an existing install."""
     if not obs_present or plugin_present:
         return None
     if is_flatpak:
-        return ("OBS PipeWire audio plugin: your OBS is a Flatpak — install the plugin "
-                "from Flathub (com.obsproject.Studio.Plugin.PipeWireAudioCapture); the "
-                "Discord interview audio source needs it.")
+        return ("OBS PipeWire audio plugin: your OBS is a Flatpak, so install the "
+                "plugin from Flathub (com.obsproject.Studio.Plugin.PipeWireAudioCapture). "
+                "The Discord interview audio source needs it.")
     if not is_prebuilt_arch(machine):
         return ("OBS PipeWire audio plugin: no prebuilt build for this arch "
-                f"({machine}) — build obs-pipewire-audio-capture from source; the "
+                f"({machine}), so build obs-pipewire-audio-capture from source. The "
                 "Discord interview audio source needs it.")
     return None

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Pure authorization policy for the funnelled /console namespace (#216 phase 2).
+"""Pure authorization policy for the funnelled /console namespace (#216).
 
-Identity != authorization (locked decision #3): a verified token proves *who*
-(see console_auth), the live roster resolves *roles* (see resolve_roles in the
-relay), and THIS module decides whether a given role set may reach a given
-/console subpath. No I/O, no token/crypto logic, no routes -- the Phase 3
-_console_auth handler wires identity -> roles -> decide().
+Identity is not authorization: a verified token proves *who* (see console_auth),
+the live roster resolves *roles* (see resolve_roles in the relay), and THIS module
+decides whether a given role set may reach a given /console subpath. No I/O, no
+token or crypto logic, no routes. The _console_auth handler wires identity to
+roles to decide().
 
 The matrix mirrors the relay's real segment-list routes (do_GET/do_POST in
 src/relay/racecast-feeds.py); keep the two in sync. Spec: the
@@ -15,14 +15,14 @@ role-based-funnel-access design, sections C (matrix) and D (step-up).
 import collections
 
 # Capabilities. A resolved role set is a subset of {COMMENTATOR, DIRECTOR,
-# PRODUCER}. ANY is the policy keyword meaning "any authenticated identity,
-# regardless of roles" -- it is never a member of a role set.
+# PRODUCER}. ANY is the policy keyword for "any authenticated identity, whatever
+# its roles"; it is never a member of a role set.
 COMMENTATOR = "commentator"
 DIRECTOR = "director"
 PRODUCER = "producer"
-# Race Control (#244): a read-only monitoring desk (program/schedule/timer/chat).
-# Distinct from the director-only HUD `racecontrol` banner Setup field — the role
-# string is "race_control", the banner is "racecontrol"; they never collide.
+# Race Control (#244): a read-only monitoring desk. The role string is
+# "race_control" and the director-only HUD Setup banner is "racecontrol", so the
+# two never collide.
 RACE_CONTROL = "race_control"
 ANY = "any"
 
@@ -42,26 +42,25 @@ def min_capability(segments, method="GET"):
     most-specific-first, matching the relay's own dispatch."""
     p = list(segments)
 
-    # --- producer + step-up: irreversible broadcast-control ops (spec D) ---
+    # Producer plus step-up: irreversible broadcast-control ops (spec D).
     if len(p) == 3 and p[:2] == ["set", "stint"]:
         return Requirement(PRODUCER, True)
-    # NOTE: takeover/* are the Phase 7 producer-takeover PULL endpoints
-    # (/console/takeover/*, spec section H) -- console-only, not current relay
-    # routes (the live takeover today is /set/stint/<n>, mapped below).
+    # takeover/* are the producer-takeover PULL endpoints (spec section H). They
+    # are console-only, not relay routes; the live takeover is /set/stint/<n>.
     if p and p[0] == "takeover" and len(p) >= 2:
         return Requirement(PRODUCER, True)
     if p == ["cockpit", "versions"]:
         return Requirement(PRODUCER, True)
 
-    # --- producer view (no step-up to merely open the page) ---
+    # Producer view; opening the page alone needs no step-up.
     if p == ["prod"]:
         return Requirement(PRODUCER, False)
 
-    # --- director: feed / schedule / timer / setup / pov control ---
-    # Switching race<->qualifying is a Director-Panel control (auth-free on the tailnet),
-    # so over the Funnel it is director-tier, no step-up — as producer+step-up the panel's
-    # plain relayCall got a "step-up required" 403 (2026-07-10 qualifying). `["mode"]`
-    # alone (len 1) is not a route -> falls through to NOT_FOUND.
+    # Director: feed, schedule, timer, setup and pov control.
+    # Switching race against qualifying is a Director-Panel control, auth-free on the
+    # tailnet, so over the Funnel it is director-tier without step-up: as
+    # producer plus step-up the panel's plain relayCall got a 403. `["mode"]` alone
+    # is not a route and falls through to NOT_FOUND.
     if len(p) == 2 and p[0] == "mode":
         return Requirement(DIRECTOR, False)
     if p == ["next"]:
@@ -82,7 +81,7 @@ def min_capability(segments, method="GET"):
         return Requirement(DIRECTOR, False)
     if len(p) == 3 and p[0] == "feed" and p[2] in ("activate", "deactivate", "quality"):
         return Requirement(DIRECTOR, False)   # feed arm/disarm (#492) + quality profile (#493)
-    if p and p[0] == "obs":                     # all /obs/* are relay-mediated OBS control (scene/source/audio/stream/state/refresh)
+    if p and p[0] == "obs":                     # all /obs/* are relay-mediated OBS control
         return Requirement(DIRECTOR, False)
     if p and p[0] == "parts":                   # relay-mediated broadcast Part control (#395)
         return Requirement(DIRECTOR, False)
@@ -95,8 +94,8 @@ def min_capability(segments, method="GET"):
     if p == ["schedule", "set"] or p == ["qualifying", "set"]:
         return Requirement(DIRECTOR, False)
     if p == ["schedule", "data"] or p == ["qualifying", "data"]:
-        # These carry per-stint stream URLs; director-only (the panel's sole
-        # consumer) so a commentator can't read every feed's URL over the Funnel.
+        # These carry per-stint stream URLs, so a commentator must not read them
+        # over the Funnel. The panel is the sole consumer.
         return Requirement(DIRECTOR, False)
     if p == ["event", "title"]:
         return Requirement(DIRECTOR, False)
@@ -107,37 +106,33 @@ def min_capability(segments, method="GET"):
     if p and p[0] == "substitution":            # /substitution/latest (GET) + /note (POST)
         return Requirement(DIRECTOR, False)
 
-    # --- race control: read-only monitoring desk (#244) + RC->commentator notes (#376) ---
-    # Page + its redacted-schedule data endpoint, plus the #376 quick-note send
-    # (POST cues) and its presets. The desk reuses the ANY cockpit monitors
-    # (program/timer/chat) below; only these are race_control-gated.
+    # Race control: the page, its redacted-schedule data endpoint, and the
+    # quick-note send plus presets (#244, #376). The desk reuses the ANY cockpit
+    # monitors below; only these are race_control-gated.
     if p == ["race-control"] or (len(p) == 2 and p[0] == "race-control"
                                  and p[1] in ("data", "cues", "presets")):
         return Requirement(RACE_CONTROL, False)
 
-    # --- health monitor: read-only dashboard, any authenticated subject (#health) ---
-    # Page + its combined data endpoint. Redacted by construction (no stream URLs),
-    # so any authenticated console subject may view it — same tier as the cockpit
-    # monitors. Takeover/health is the producer+step-up pull, already matched by the
-    # generic takeover/* rule above.
+    # Health monitor: the page and its combined data endpoint. It carries no stream
+    # URLs, so any authenticated console subject may view it, the same tier as the
+    # cockpit monitors. takeover/health is the producer step-up pull, already
+    # matched above.
     if p == ["health-monitor"] or p == ["health-monitor", "data"] or \
        (len(p) == 3 and p[:2] == ["health-monitor", "assets"]):
         return Requirement(ANY, False)
 
-    # --- event notes: read-only league-owner notes, any authenticated subject ---
-    # One shared list for Director/Commentator/Race Control. Read-only, no stream
-    # URLs -> same tier as the cockpit monitors. Mirrored from the root branch via
-    # the gate's generic ALLOW fall-through (return sub).
+    # Event notes: one shared read-only list for director, commentator and race
+    # control. No stream URLs, so the same tier as the cockpit monitors.
     if p == ["event-notes", "data"]:
         return Requirement(ANY, False)
 
-    # --- commentator: own-row stream-link submission ---
+    # Commentator: own-row stream-link submission.
     if p == ["submit"] or p == ["cockpit", "submit"]:
         return Requirement(COMMENTATOR, False)
 
-    # --- any authenticated: read-only monitors + identity-forced chat ---
-    # ["console"], ["data"], ["program"] are console-only shell/landing pages (Phase 3),
-    # not relay-route mirrors.
+    # Any authenticated subject: read-only monitors and identity-forced chat.
+    # ["console"], ["data"] and ["program"] are console-only shell and landing
+    # pages, not relay-route mirrors.
     if p == ["logo"]:
         return Requirement(ANY, False)
     if p in ([], ["status"], ["console"], ["data"], ["program"]):
@@ -151,7 +146,7 @@ def min_capability(segments, method="GET"):
     if p in (["chat", "data"], ["chat", "reload"], ["chat", "send"]):
         return Requirement(ANY, False)
     if p in (["cockpit"], ["cockpit", "data"], ["cockpit", "program"],
-             ["cockpit", "program-audio"],  # on-air program-audio MP3 stream (ANY, read-only)
+             ["cockpit", "program-audio"],  # on-air program-audio MP3 stream
              ["cockpit", "timer"], ["cockpit", "chat", "data"],
              ["cockpit", "chat", "send"],
              ["cockpit", "cues"], ["cockpit", "cues", "ack"],
@@ -159,22 +154,19 @@ def min_capability(segments, method="GET"):
              ["cockpit", "cue-back"]):     # commentator->director cue-back send (#377)
         return Requirement(ANY, False)
 
-    # Cockpit graphics browser: read-only list + file serve, any authenticated
-    # subject (same tier as /cockpit/program). The file route is 3 segments
-    # (["cockpit","graphics",<filename>]); the filename is validated server-side
-    # by resolve_graphic, not here.
+    # Cockpit graphics browser: read-only list plus file serve, the same tier as
+    # /cockpit/program. The file route is 3 segments; resolve_graphic validates
+    # the filename server-side, not here.
     if p == ["cockpit", "graphics"]:
         return Requirement(ANY, False)
     if len(p) == 3 and p[:2] == ["cockpit", "graphics"]:
         return Requirement(ANY, False)
 
-    # Root graphics browser: the same read-only list + file serve as
-    # /cockpit/graphics, but reached as the tailnet-open /graphics (no /cockpit
-    # prefix) so the Director Panel widget also loads on the token-less tailnet
-    # /panel. Under /console it must be ANY (like the cockpit graphics routes) so
-    # the gate's generic ALLOW fall-through serves it for any authenticated subject.
-    # The file route is 2 segments (["graphics",<filename>]); the filename is
-    # validated server-side by resolve_graphic, not here.
+    # Root graphics browser: the same read-only list and file serve as
+    # /cockpit/graphics, reached without the /cockpit prefix so the Director Panel
+    # widget also loads on the token-less tailnet /panel. Under /console it must be
+    # ANY so the gate's generic ALLOW fall-through serves any authenticated
+    # subject. The file route is 2 segments, validated by resolve_graphic.
     if p == ["graphics"]:
         return Requirement(ANY, False)
     if len(p) == 2 and p[0] == "graphics":

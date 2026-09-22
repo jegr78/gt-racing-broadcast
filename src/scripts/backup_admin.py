@@ -1,7 +1,6 @@
 """Pure logic for per-league look backups: zip overlay/+graphics/+media/ into a
 named snapshot, list them, restore (full replace), delete. No argv parsing, no
 network. Imported by the `racecast backup` CLI and the Control Center providers.
-Mirrors chat_admin's discipline: validate before writing, atomic, fail-safe.
 
 A snapshot is runtime/<profile>/backups/<slug>.zip with members:
   manifest.json   {label, slug, profile, created (ISO-UTC), files:[...], counts}
@@ -18,9 +17,9 @@ import tempfile
 import zipfile
 
 SECTIONS = ("overlay", "graphics", "media")   # zip top-level dirs, in order
-# Defense-in-depth (#99): reject a decompression-bomb archive before extraction.
-# A look snapshot is overlay CSS + graphics + the Intro/Outro clips, so 1 GiB /
-# 50k members sits far above any legitimate backup.
+# Reject a decompression-bomb archive before extraction. A look snapshot is
+# overlay CSS, graphics and the Intro/Outro clips, so these limits sit far above
+# any legitimate backup. (#99)
 MAX_BUNDLE_BYTES = 1024 * 1024 * 1024
 MAX_BUNDLE_MEMBERS = 50_000
 
@@ -59,7 +58,7 @@ def _add_tree(zf, src_dir, arc_prefix):
 def _safe_members(zf):
     """Validate every zip member name: no absolute paths, no '..' traversal, only
     manifest.json or a known SECTION/ subtree. Returns the member list or raises
-    ValueError. (Defends a restore the same way the relay's asset resolver does.)"""
+    ValueError."""
     members = zf.namelist()
     if len(members) > MAX_BUNDLE_MEMBERS:
         raise ValueError(f"backup has too many members (> {MAX_BUNDLE_MEMBERS})")

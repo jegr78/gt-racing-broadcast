@@ -2,22 +2,16 @@
 """Keep bundled, immutable files readable for the life of the process.
 
 A PyInstaller onefile binary extracts the whole `src/` tree into the OS temp
-directory and reads from there at runtime. Every OS reaps that directory on a
-schedule, and none of them check whether a process still has it in use:
+directory and reads from there at runtime. macOS (dirhelper) and Linux
+(systemd-tmpfiles) reap that directory on a schedule without checking whether a
+process still has it in use. The age is per FILE and counted from last access,
+so the interpreter's shared libraries survive because they stay mapped, while a
+page that is only read when somebody opens it does not. A long-running Control
+Center then answers every request with "file not found" although nothing crashed.
 
-    macOS    com.apple.bsd.dirhelper, daily 03:35, CLEAN_FILES_OLDER_THAN_DAYS=3
-    Linux    systemd-tmpfiles-clean.timer, /tmp default age 10d
-    Windows  Storage Sense — off by default, so rarely a problem there
-
-The age is per FILE and counted from last access, so the interpreter's shared
-libraries survive (they stay mapped) while a page that is only read when
-somebody opens it does not. A Control Center left running for a few days then
-answers every request with "file not found" even though nothing crashed —
-observed after 14 days of uptime, with the whole extracted `src/` emptied.
-
-Reading such a file ONCE into memory removes the failure entirely. That is only
-correct for bundle content, which cannot change while we run. Anything meant to
-pick up edits — a profile's overlay CSS, downloaded graphics, the Sheet cache —
+Reading such a file ONCE into memory removes the failure. That is only correct
+for bundle content, which cannot change while we run. Anything meant to pick up
+edits, such as a profile's overlay CSS, downloaded graphics or the Sheet cache,
 must keep reading per request and must NOT go through this cache.
 """
 import os
@@ -32,8 +26,8 @@ class BundleCache:
     def read(self, path):
         """Bytes of *path*, from memory once it has been read successfully.
 
-        Raises OSError only when the file was never read AND is not on disk —
-        that is a genuinely missing resource, not an evicted one.
+        Raises OSError only when the file was never read AND is not on disk,
+        which is a genuinely missing resource rather than an evicted one.
         """
         hit = self._data.get(path)
         if hit is not None:
@@ -65,6 +59,6 @@ class BundleCache:
 
 def eviction_hint(path):
     """Operator-facing message for a bundled file that is gone at runtime."""
-    return (f"bundled file unavailable: {os.path.basename(path)} — the OS "
+    return (f"bundled file unavailable: {os.path.basename(path)}. The OS "
             "cleaned up this build's temporary extraction directory. "
             "Restart racecast to unpack it again.")

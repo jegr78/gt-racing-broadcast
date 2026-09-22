@@ -1,6 +1,6 @@
 """Pure logic for the crew-chat history file (runtime/<profile>/chat.json).
 
-No network, no argv parsing — message sanitization, the pull/import validation
+No network, no argv parsing: message sanitization, the pull/import validation
 gate, and an atomic file write/load. Imported by the relay (ChatStore) and the
 `racecast chat` CLI so both agree on the on-disk shape and the size/length caps.
 """
@@ -15,11 +15,10 @@ DEFAULT_NAME = "Crew"   # fallback when no/blank name is supplied
 
 
 def _clean_text(value):
-    """Strip control characters (keep normal spaces/tabs as one space), collapse
-    nothing else. Returns a str; caller enforces non-empty / length caps. Chat
-    messages are single-line (rendered in one row), so every line/paragraph
-    separator is folded to a space — ASCII CR/LF/TAB plus the Unicode line
-    breaks NEL/LS/PS (U+0085/U+2028/U+2029)."""
+    """Strip control characters and fold every line separator to a space.
+    Returns a str; the caller enforces the non-empty and length caps. Chat
+    messages render in one row, so ASCII CR/LF/TAB and the Unicode line breaks
+    NEL/LS/PS (U+0085/U+2028/U+2029) all become spaces."""
     if not isinstance(value, str):
         return ""
     line_breaks = ("\t", "\n", "\r", "\x85", "\u2028", "\u2029")
@@ -54,8 +53,8 @@ def sanitize_message(raw):
 def validate_payload(payload):
     """Validate a /chat/data-shaped object for pull/import. Returns the cleaned,
     ts-sorted, capped message list. A well-formed but empty list is valid. Raises
-    ValueError ONLY on a malformed shape (not a dict, or 'messages' not a list) —
-    individual bad entries are dropped, not fatal."""
+    ValueError ONLY on a malformed shape (not a dict, or 'messages' not a list).
+    Individual bad entries are dropped, not fatal."""
     if not isinstance(payload, dict) or not isinstance(payload.get("messages"), list):
         raise ValueError("expected an object with a 'messages' list")
     clean = [m for m in (sanitize_message(x) for x in payload["messages"]) if m]

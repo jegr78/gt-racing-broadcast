@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Pure logic for the relay health-history time-series (runtime/<profile>/health-history.db).
 
-SQLite-backed (stdlib `sqlite3`) — the only non-JSON store in the repo. No network,
-no argv parsing: schema/migrations, sample insert, range query, the band/incident/
-numeric-series derivations, retention pruning, and JSON-Lines export/import-merge.
-Imported by the relay (HealthStore wrapper) and the `racecast health` CLI so both
-agree on the on-disk shape. Redaction by construction: there is NO stream-URL or
-sheet_id column, so the DB is safe to expose, export, and pull over Funnel.
+SQLite-backed (stdlib `sqlite3`), the only non-JSON store in the repo. No network,
+no argv parsing: schema and migrations, sample insert, range query, the band,
+incident and numeric-series derivations, retention pruning, and JSON-Lines export
+and import-merge. Imported by the relay (HealthStore wrapper) and the `racecast
+health` CLI so both agree on the on-disk shape. Redaction by construction: there
+is NO stream-URL or sheet_id column, so the DB is safe to expose, export and pull
+over Funnel.
 """
 import json
 import math
@@ -21,18 +22,18 @@ GAP_S = 95                     # inter-sample gap > this = relay was down (no ba
 DEFAULT_MAX_POINTS = 2000      # numeric-series downsample cap per metric
 DEFAULT_RETENTION_DAYS = 30
 
-# #583/#586: when a fan-out consumer counts as "behind live". Shared by the relay (the
-# yellow health reason) and the post-event report (the backlog verdict), so both apply
-# the one definition the director saw.
-DEFAULT_FEED_PREBUFFER_S = 3.0   # #533: seconds a broadcast consumer joins behind the fan-out live edge
-FEED_BACKLOG_WARN_S = 5.0        # #583: consumer backlog (s) beyond the #533 reserve that shows yellow
+# When a fan-out consumer counts as "behind live". The relay's yellow health reason
+# and the post-event report's backlog verdict share this one definition, so both say
+# what the director saw. (#583, #586)
+DEFAULT_FEED_PREBUFFER_S = 3.0   # seconds a consumer joins behind the fan-out live edge (#533)
+FEED_BACKLOG_WARN_S = 5.0        # backlog (s) beyond that reserve that shows yellow (#583)
 
 
 def feed_prebuffer_s(environ, default=DEFAULT_FEED_PREBUFFER_S):
     """Seconds OBS and the program-audio monitor join behind the fan-out live edge
-    (#533). Absent/empty/non-numeric/non-finite -> default; a valid finite number
-    (incl. 0) is used as-is; negatives clamp to 0.0 (disabled = today's live-edge
-    join). Pure so the knob is unit-testable."""
+    (#533). An absent, empty, non-numeric or non-finite value falls back to the
+    default; a finite number including 0 is used as-is; a negative clamps to 0.0,
+    which is the live-edge join."""
     raw = str(environ.get("RACECAST_FEED_PREBUFFER_S", "")).strip()
     if raw == "":
         return default
@@ -41,14 +42,14 @@ def feed_prebuffer_s(environ, default=DEFAULT_FEED_PREBUFFER_S):
     except ValueError:
         return default
     if not math.isfinite(v):
-        return default                       # reject nan/inf -> default
+        return default                       # reject nan and inf
     return max(0.0, v)
 
 
 def feed_backlog_warn_s(environ):
-    """#583 display threshold: seconds of consumer backlog beyond the fan-out reserve.
-    A placeholder until #581 stage 4 calibrates it on real hardware. Absent/empty/
-    non-numeric/<=0 -> default. Pure."""
+    """Display threshold: seconds of consumer backlog beyond the fan-out reserve
+    (#583). It is a placeholder until it is calibrated on real hardware. An absent,
+    empty, non-numeric or non-positive value falls back to the default."""
     try:
         v = float(str(environ.get("RACECAST_FEED_BACKLOG_WARN_S", "")).strip())
     except (TypeError, ValueError):
@@ -57,9 +58,10 @@ def feed_backlog_warn_s(environ):
 
 
 def feed_backlog_degraded(floor_s, prebuffer_s, warn_s):
-    """#583: a consumer is falling behind the live edge when its interval floor (the
-    smallest backlog seen in one heartbeat interval) exceeds the #533 reserve by more
-    than warn_s. The reserve itself is the healthy baseline, not a backlog. Pure."""
+    """A consumer is falling behind the live edge when its interval floor, the
+    smallest backlog seen in one heartbeat interval, exceeds the prebuffer reserve
+    by more than warn_s. The reserve itself is the healthy baseline, not a
+    backlog. (#583)"""
     return floor_s is not None and floor_s - prebuffer_s > warn_s
 
 
@@ -74,15 +76,15 @@ COLUMNS = (
     "cookies_present", "cookies_age_h", "cookies_stale",
     "timer_mode", "timer_push",
     "mode", "live_feed", "live_stint", "desync_active",
-    # v3: OBS stats + connectivity + feed quality (redaction-safe: no URLs)
+    # v3: OBS stats, connectivity and feed quality. No URLs.
     "stream_active", "stream_reconnecting", "funnel_ok", "sheet_push_ok",
     "tailscale_up", "companion_ok",
     "stream_kbps", "stream_dropped_pct", "stream_congestion",
     "obs_cpu_pct", "obs_mem_mb", "obs_fps", "obs_render_skipped_pct",
-    "obs_render_skip_rate_pct",   # v7: per-interval render-skip rate (#488 drift signal)
+    "obs_render_skip_rate_pct",   # v7: per-interval render-skip rate (#488)
     "obs_disk_free_mb",
     "feed_a_quality", "feed_b_quality", "pov_quality",
-    # v5: machine (host) resources — distinct from the obs_* process stats above
+    # v5: host resources, distinct from the obs_* process stats above
     "sys_cpu_pct", "sys_mem_pct", "sys_net_up_kbps", "sys_net_down_kbps",
     "sys_disk_free_mb",
     "feed_a_max_gap_s", "feed_b_max_gap_s",
@@ -90,9 +92,9 @@ COLUMNS = (
     "feed_a_backlog_s", "feed_b_backlog_s", "pov_backlog_s",
     # v10: OBS's configured frame rate, the reference obs_fps is judged against (#586)
     "obs_fps_target",
-    # v11: A/V sync disturbances OBS reported and repaired, running totals (#619).
-    # Totals, not per-interval: the post-event report needs "how often did this happen
-    # tonight", and a running total survives a sample the heartbeat missed.
+    # v11: A/V sync disturbances OBS reported and repaired (#619). Running totals
+    # rather than per-interval counts, so a sample the heartbeat missed costs
+    # nothing.
     "av_repairs_total", "av_unexplained_total",
 )
 
@@ -201,8 +203,9 @@ _V11_COLUMNS = (
 
 
 def open_db(path):
-    """Open (creating the file/dirs as needed) with WAL + a busy timeout so the
-    heartbeat writer and request-thread readers don't trip over each other."""
+    """Open, creating the file and dirs as needed, with WAL and a busy timeout so
+    the heartbeat writer and the request-thread readers do not trip over each
+    other."""
     conn = sqlite3.connect(path, check_same_thread=False, timeout=5.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
@@ -211,8 +214,8 @@ def open_db(path):
 
 
 def migrate(conn):
-    """Create the schema, add any missing v3, v5-v11 columns (lossless upgrade from v2/v3),
-    and stamp user_version. Idempotent and version-agnostic."""
+    """Create the schema, add any missing v3 and v5-v11 columns as a lossless
+    upgrade, and stamp user_version. Idempotent and version-agnostic."""
     conn.executescript(_CREATE)
     have = {r["name"] for r in conn.execute("PRAGMA table_info(samples)").fetchall()}
     for name, decl in (_V3_COLUMNS + _V5_COLUMNS + _V6_COLUMNS + _V7_COLUMNS + _V8_COLUMNS + _V9_COLUMNS
@@ -261,10 +264,10 @@ def _event_row_to_dict(row):
 
 
 def record_event(conn, ts, event_type, label="", producer="", metadata=None):
-    """Insert one discrete annotation into the `events` table (producer takeover,
-    OBS stream start/stop) — separate from the numeric `samples` series. metadata
-    (a dict) is JSON-encoded; an empty/None metadata stores NULL. Returns the
-    stored row as a dict (metadata parsed back)."""
+    """Insert one discrete annotation, such as a producer takeover or an OBS stream
+    start, into the `events` table, separate from the numeric `samples` series.
+    `metadata` is JSON-encoded; an empty or None metadata stores NULL. Returns the
+    stored row as a dict with metadata parsed back."""
     meta_json = json.dumps(metadata) if metadata else None
     conn.execute("INSERT INTO events (ts, type, label, producer, metadata) "
                  "VALUES (?,?,?,?,?)",
@@ -275,7 +278,7 @@ def record_event(conn, ts, event_type, label="", producer="", metadata=None):
 
 
 def query_events(conn, frm, to):
-    """Events with frm <= ts <= to, ascending. metadata parsed back to a dict/None."""
+    """Events with frm <= ts <= to, ascending, with metadata parsed back."""
     cur = conn.execute("SELECT ts, type, label, producer, metadata FROM events "
                        "WHERE ts>=? AND ts<=? ORDER BY ts ASC", (frm, to))
     return [_event_row_to_dict(r) for r in cur.fetchall()]
@@ -283,9 +286,9 @@ def query_events(conn, frm, to):
 
 def annotate_latest_event(conn, event_type, patch):
     """Merge dict `patch` into the metadata of the MOST RECENT event of
-    `event_type` (by ts, then rowid). Returns the updated event as a dict (metadata
-    parsed back), or None when no such event exists. Used to attach a reason to the
-    latest stream substitution."""
+    `event_type`, by ts then rowid. Returns the updated event as a dict with
+    metadata parsed back, or None when no such event exists. Used to attach a
+    reason to the latest stream substitution."""
     row = conn.execute(
         "SELECT rowid, ts, type, label, producer, metadata FROM events "
         "WHERE type=? ORDER BY ts DESC, rowid DESC LIMIT 1", (event_type,)).fetchone()
@@ -310,7 +313,8 @@ def query_range(conn, frm, to):
 def collapse_bands(points, gap_s=GAP_S):
     """Collapse [(ts, value), ...] (ascending) into contiguous bands
     {from,to,state}. A new band starts when the value changes OR the gap to the
-    previous sample exceeds gap_s (the relay was down — never bridge it)."""
+    previous sample exceeds gap_s, which means the relay was down; never bridge
+    that."""
     bands = []
     for ts, val in points:
         if bands and bands[-1]["state"] == val and (ts - bands[-1]["to"]) <= gap_s:
@@ -334,9 +338,9 @@ def _incident_label(level, reasons):
 
 def derive_incidents(samples, gap_s=GAP_S):
     """Every non-green aggregate-health band becomes an incident. Its duration runs
-    until recovery: the next band's start (the recovering sample) when that gap is
+    until recovery: the next band's start, the recovering sample, when that gap is
     <= gap_s, else the band is extended by one SAMPLE_INTERVAL_S. This never bridges
-    a relay-down hole (> gap_s) and never reports a zero-width single-sample blip."""
+    a relay-down hole and never reports a zero-width single-sample blip."""
     reasons_at = {s["ts"]: s.get("health_reasons") or [] for s in samples}
     bands = collapse_bands([(s["ts"], s.get("health_level")) for s in samples], gap_s)
     out = []
@@ -356,7 +360,7 @@ def derive_incidents(samples, gap_s=GAP_S):
 
 def downsample(pairs, max_points):
     """Bucket [(ts,val), ...] to <= max_points, taking the last point in each
-    time-bucket (cheap, monotonic-x safe). The newest point is always retained."""
+    time bucket. The newest point is always retained."""
     n = len(pairs)
     if max_points <= 0 or n <= max_points:
         return list(pairs)
@@ -397,7 +401,7 @@ def export_jsonl_line(row):
 
 def export_event_jsonl_line(row):
     """Serialize one event dict to a JSON line tagged `"_kind":"event"` so
-    import_jsonl routes it to the events table (one body carries samples + events)."""
+    import_jsonl routes it to the events table. One body carries both kinds."""
     return json.dumps({"_kind": "event", "ts": row.get("ts"), "type": row.get("type"),
                        "label": row.get("label") or "",
                        "producer": row.get("producer") or "",
@@ -412,8 +416,8 @@ def export_events_jsonl(conn, frm=0):
 
 
 def export_jsonl(conn, frm=0):
-    """All samples with ts >= frm as JSON lines (ascending), FOLLOWED BY the events
-    (tagged `_kind=event`) so a single body carries both for takeover/export."""
+    """All samples with ts >= frm as ascending JSON lines, FOLLOWED BY the events
+    tagged `_kind=event`, so a single body carries both for takeover and export."""
     cur = conn.execute("SELECT * FROM samples WHERE ts>=? ORDER BY ts ASC", (frm,))
     out = [export_jsonl_line(_row_to_dict(row)) for row in cur.fetchall()]
     out.extend(export_events_jsonl(conn, frm))
@@ -421,10 +425,10 @@ def export_jsonl(conn, frm=0):
 
 
 def import_jsonl(conn, lines):
-    """Merge JSON-Lines into the DB. Sample lines dedup by (ts, kind); event lines
-    (tagged `"_kind":"event"`) route to the events table, dedup by (ts, type).
-    Malformed lines are skipped (never fatal). Returns the number of rows newly
-    inserted (samples + events)."""
+    """Merge JSON-Lines into the DB. Sample lines dedup by (ts, kind); lines tagged
+    `"_kind":"event"` route to the events table and dedup by (ts, type). A
+    malformed line is skipped, never fatal. Returns the number of rows newly
+    inserted."""
     inserted = 0
     placeholders = ",".join("?" for _ in COLUMNS)
     for line in lines:

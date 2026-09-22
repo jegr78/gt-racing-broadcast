@@ -6,7 +6,7 @@ Google Fonts, some vendor endpoints) reject the default `Python-urllib/x.y` UA w
 HTTP 403, so a bare urllib call silently fails. Routing all covered-module HTTP
 through here makes "forgetting the UA" structurally impossible (enforced by
 tests/test_http_util.py). The relay and the self-contained get-*/setup-assets
-scripts keep their own UA — they are intentionally dependency-light and excluded."""
+scripts are excluded and keep their own UA, because they stay dependency-light."""
 import json
 import uuid
 import urllib.error
@@ -47,9 +47,9 @@ def post_json(url, obj, *, headers=None, timeout=DEFAULT_TIMEOUT):
 
 
 def post_multipart(url, fields=None, files=None, *, headers=None, timeout=DEFAULT_TIMEOUT):
-    """POST a multipart/form-data body (RACECAST_UA always set — Discord is
-    Cloudflare-fronted and 403s the default urllib UA). `fields` is {name: str};
-    `files` is [(field_name, filename, content_bytes_or_str, content_type)]."""
+    """POST a multipart/form-data body with RACECAST_UA always set. `fields` is
+    {name: str}; `files` is
+    [(field_name, filename, content_bytes_or_str, content_type)]."""
     boundary = "----racecast" + uuid.uuid4().hex
     body = bytearray()
 
