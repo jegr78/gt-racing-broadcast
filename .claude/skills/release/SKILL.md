@@ -1,6 +1,6 @@
 ---
 name: release
-description: Cut and publish a GT Racing Broadcast release end-to-end — local gates, release-please version control, Release PR merge, binary watch. Use when the user wants to release a version (e.g. "release 1.1.0", "cut the next release", "merge the release PR").
+description: Cut and publish a GT Racing Broadcast release end-to-end: local gates, release-please version control, Release PR merge, binary watch. Use when the user wants to release a version (e.g. "release 1.1.0", "cut the next release", "merge the release PR").
 ---
 
 # GT Racing Broadcast Release
@@ -15,13 +15,13 @@ research-first).
 - **release-please** keeps a standing Release PR on `main` (branch
   `release-please--branches--main`); merging it creates the `v*` tag.
 - release-please tags via `GITHUB_TOKEN`, which **cannot** trigger on-tag
-  workflows — `release-please.yml` therefore dispatches `release.yml`
+  workflows: `release-please.yml` therefore dispatches `release.yml`
   explicitly. A manually pushed `v*` tag also triggers `release.yml` directly.
 - `release.yml` checks out **the tag**, runs the test suite, builds the
   PyInstaller binary per OS (`tools/build-binary.py --version <tag>`), and
-  uploads **4 assets** — `racecast-windows.zip` / `racecast-macos.tar.gz` /
+  uploads **4 assets**: `racecast-windows.zip` / `racecast-macos.tar.gz` /
   `racecast-linux.tar.gz` / `racecast-linux-arm64.tar.gz` (the two Linux archives
-  build on the `ubuntu-latest` + `ubuntu-24.04-arm` matrix runners) — to the
+  build on the `ubuntu-latest` + `ubuntu-24.04-arm` matrix runners): to the
   GitHub release (`--clobber`, create is idempotent).
 - The version is derived from conventional commits. To force a specific
   version: empty commit with a `Release-As: X.Y.Z` footer on `main`.
@@ -36,7 +36,7 @@ research-first).
    python3 tools/build-binary.py --version local-check   # same step release.yml runs
    ```
    The last one is the step that broke v1.0.0 (stale CLI flag only exercised at
-   release time) — never skip it.
+   release time): never skip it.
 
 2. **State check:** `git status` clean, `main` synced with origin,
    `gh pr list` → note the standing Release PR number and its current version.
@@ -53,7 +53,7 @@ research-first).
    `CHANGELOG.md`, `version.txt`).
 
 4. **Merge gate:** CI on `main` green (`gh run list --workflow=ci.yml`)?
-   Then — with explicit user OK — `gh pr merge <n> --squash`.
+   Then, with explicit user OK, `gh pr merge <n> --squash`.
 
 5. **Watch the pipeline** (background until-loop, not polling chat):
    release done when `gh release view vX.Y.Z` shows **4 assets**; abort-signal
@@ -61,7 +61,7 @@ research-first).
 
 6. **If a build job fails:** read `--log-failed` for the failing *step* first,
    fix on `main`, verify with the local `build-binary` gate, then re-point the
-   tag — `git tag -f vX.Y.Z <fix-sha> && git push origin vX.Y.Z --force` —
+   tag with `git tag -f vX.Y.Z <fix-sha> && git push origin vX.Y.Z --force`,
    **only with explicit user approval** (it rewrites a published ref; safe
    while the release has no assets/consumers).
 
@@ -73,8 +73,8 @@ research-first).
 ## Known failure points
 
 - **Stale required-check contexts** in branch protection block merges after CI
-  job renames — fix the ruleset, don't bypass.
+  job renames: fix the ruleset, don't bypass.
 - **Tag builds, not main builds:** a fix pushed to `main` after tagging does
   NOT reach the release until the tag moves.
-- **SmartScreen/Gatekeeper:** unsigned binaries warn on first run — expected,
+- **SmartScreen/Gatekeeper:** unsigned binaries warn on first run: expected,
   documented, not a release blocker.

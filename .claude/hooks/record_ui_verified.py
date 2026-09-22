@@ -11,7 +11,7 @@ Usage:
     python3 .claude/hooks/record_ui_verified.py src/director/director-panel.html [more…]
 
 Re-editing a file changes its hash and re-arms the gate, so run this after your
-final edit. The marker lives under runtime/ (gitignored) — local session state,
+final edit. The marker lives under runtime/ (gitignored): local session state,
 never committed.
 """
 import hashlib

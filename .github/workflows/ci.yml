@@ -3,11 +3,11 @@ name: CI
 # Test gate. Runs the stdlib test suite + build self-verify (tokenization,
 # blanked password, no secrets shipped). Two orthogonal axes, NOT a full cross
 # product: the Python-version axis (3.12/3.13) runs on ubuntu only (fast/free,
-# catches version-specific stdlib drift), while the OS axis (Windows/macOS —
+# catches version-specific stdlib drift), while the OS axis (Windows/macOS,
 # the binary ships for all three) runs on the pinned ship version (3.12) only,
 # catching OS-specific path/process bugs (#97). macOS runners are the slow,
 # scarce ones, so they get exactly one job, not three. NB: the matrix job names
-# below ("test (<os>, <ver>)") are the ruleset's required status checks — if you
+# below ("test (<os>, <ver>)") are the ruleset's required status checks: if you
 # change a combo, update Protect main's required checks to match or PRs deadlock.
 on:
   push:
@@ -67,8 +67,8 @@ jobs:
 
   build:
     # Build self-verify (tokenization, blanked password, no secrets shipped, no
-    # shell scripts). OS-independent — it asserts the assembled dist/ contents,
-    # not runtime behaviour — so one ubuntu job suffices instead of re-running it
+    # shell scripts). OS-independent: it asserts the assembled dist/ contents,
+    # not runtime behaviour: so one ubuntu job suffices instead of re-running it
     # inside every test-matrix job. A required check (gates merges like the tests).
     runs-on: ubuntu-latest
     steps:
@@ -83,7 +83,7 @@ jobs:
     # CI must exercise everything the release pipeline exercises: release.yml
     # builds the PyInstaller binary and runs the build-binary smoke test, so a
     # PR that breaks either (e.g. a removed CLI flag still passed by the smoke)
-    # must go red here — not at the v* tag. One OS is enough: the smoke covers
+    # must go red here, not at the v* tag. One OS is enough: the smoke covers
     # frozen dispatch + bundled data, which drift OS-independently; the release
     # still builds all three.
     runs-on: ubuntu-latest
@@ -100,10 +100,10 @@ jobs:
   e2e:
     # Integration outer loop: stand up the relay + Control Center from src/ and
     # assert the live HTTP surface (cockpit auth gating, tally, chat round-trip,
-    # /api/console/status, …) — the end-to-end behaviour run-tests.py's unit
+    # /api/console/status, …): the end-to-end behaviour run-tests.py's unit
     # suite can't cover. Synthetic mode only: no real Sheet/cookies/OBS/Tailscale
     # and no yt-dlp/streamlink/ffmpeg/deno (the relay's feed pulls are best-effort
-    # daemon threads, so the control server still comes up). Stdlib only — NO
+    # daemon threads, so the control server still comes up). Stdlib only. NO
     # --playwright, so the optional rendered checks always skip here. One OS is
     # enough; the synthetic surface is OS-independent.
     runs-on: ubuntu-latest
