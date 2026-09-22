@@ -78,7 +78,7 @@ def get_json(base, path, timeout=8.0):
     kill the run."""
     try:
         req = urllib.request.Request(base + path, headers=UA)
-        with OPENER.open(req, timeout=timeout) as resp:   # noqa: S310 (scheme checked)
+        with OPENER.open(req, timeout=timeout) as resp:   # noqa: S310  scheme checked
             return json.loads(resp.read().decode("utf-8", "replace")), None
     except (urllib.error.URLError, OSError, ValueError,
             http.client.HTTPException) as exc:

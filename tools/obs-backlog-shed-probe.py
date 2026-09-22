@@ -74,7 +74,7 @@ def status():
     try:
         with urllib.request.urlopen(RELAY + "/status", timeout=4) as r:
             return json.loads(r.read().decode("utf-8", "replace"))
-    except Exception:                      # noqa: BLE001 (a probe never dies on this)
+    except Exception:                      # noqa: BLE001  a probe never dies on this
         return {}
 
 
@@ -348,7 +348,7 @@ def main():
                 try:
                     with urllib.request.urlopen(req, timeout=15) as r:
                         print("  ", r.read().decode("utf-8", "replace")[:200])
-                except Exception as exc:                # noqa: BLE001 (a probe reports)
+                except Exception as exc:                # noqa: BLE001  a probe reports
                     print("  reset failed:", exc)
             else:
                 print(f"\nstopping OBS for {args.freeze:.0f} s. It stops draining "
@@ -383,7 +383,7 @@ def main():
                 try:
                     show_layers(args.scene, args.layers, False)
                     print("recording stopped:", stop_recording())
-                except Exception as exc:        # noqa: BLE001 (cleanup reports)
+                except Exception as exc:        # noqa: BLE001  cleanup reports
                     print("could not stop the recording:", exc)
             relay.terminate()
             try:

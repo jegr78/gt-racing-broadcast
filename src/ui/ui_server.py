@@ -1,8 +1,8 @@
 """Control Center HTTP server: serves the static page, the JSON status API,
 job control, and SSE streams (job output + service log tails) on localhost.
 Same construction as the relay's control server (ThreadingHTTPServer +
-make_handler closure). v1 binds 127.0.0.1 only; the bind/auth seams for the
-v2 Tailscale+password feature are this module's serve() and _allowed().
+make_handler closure). It binds 127.0.0.1 only; serve() and _allowed() are the
+bind and auth seams.
 Spec: docs/superpowers/specs/2026-06-07-control-center-design.md."""
 import json, os, queue, shutil, tempfile, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -15,8 +15,8 @@ import bundle_cache
 APP_ID = "racecast-control-center"
 DEFAULT_PORT = 8089
 TAIL_LINES = 40          # how much history a log stream starts with
-MAX_IMPORT_BYTES = 2 * 1024 * 1024 * 1024   # 2 GiB — profile bundles include media
-MAX_FONT_BYTES = 8 * 1024 * 1024            # 8 MiB — an overlay font is tiny
+MAX_IMPORT_BYTES = 2 * 1024 * 1024 * 1024   # 2 GiB; profile bundles include media
+MAX_FONT_BYTES = 8 * 1024 * 1024            # 8 MiB; an overlay font is tiny
 
 
 def ui_port(env):
@@ -42,8 +42,8 @@ def probe_instance(host, port, fetch=None):
     try:
         body = fetch(host, port)
     except Exception:
-        # a foreign server that errors on /api/ping reads as 'free' — the
-        # subsequent bind then fails with OSError and prints the RACECAST_UI_PORT hint
+        # A foreign server that errors on /api/ping reads as 'free'; the bind then
+        # fails with OSError and prints the RACECAST_UI_PORT hint.
         return "free"
     return classify_ping(body)
 
@@ -61,8 +61,8 @@ def sse_done(exit_code):
 
 
 def _allowed(_handler):
-    """Auth seam: always allowed in v1 (localhost-only bind is the boundary).
-    v2 (Tailscale + RACECAST_UI_PASSWORD session cookie) changes only this."""
+    """Auth seam: always allowed, because the localhost-only bind is the
+    boundary."""
     return True
 
 
@@ -84,13 +84,13 @@ def _host_label(value):
 
 
 def request_csrf_ok(headers):
-    """Reject cross-origin / DNS-rebind requests at the localhost trust boundary.
-    The UI binds 127.0.0.1 only and has no auth, so a malicious web page the
-    operator merely visits must not be able to drive the API (write .env, switch
-    profile, run ops). A foreign Host header (DNS-rebinding away from a loopback
-    name) or a cross-origin Origin/Referer (classic CSRF) is refused. Browsers
-    always attach Origin to cross-origin POSTs; a non-browser client (no Origin)
-    still has to carry a loopback Host. Pure — `headers` is any .get()-able map."""
+    """Reject cross-origin and DNS-rebind requests at the localhost trust boundary.
+    The UI binds 127.0.0.1 only and has no auth, so a malicious web page the operator
+    merely visits must not be able to drive the API: write .env, switch profile, run
+    ops. A foreign Host header (DNS-rebinding away from a loopback name) or a
+    cross-origin Origin/Referer (classic CSRF) is refused. Browsers always attach Origin to
+    cross-origin POSTs; a client that sends none still has to carry a loopback Host.
+    `headers` is any .get()-able map."""
     host = _host_label(headers.get("Host"))
     if host and host not in LOOPBACK_HOSTS:
         return False
@@ -124,9 +124,9 @@ def make_handler(ctx):
     favicon_path (the brand SVG served at /favicon.svg),
     shutdown() (installed by serve())."""
 
-    # Read the bundled page ONCE, now, while the extraction dir is certain to
-    # exist. Lazy caching would not save a page that nobody opens before the
-    # OS temp-dir cleaner runs — and this server is meant to be left running.
+    # Read the bundled page once, now, while the extraction dir is certain to exist.
+    # Lazy caching would not save a page that nobody opens before the OS temp-dir
+    # cleaner runs, and this server is meant to be left running.
     _pages = bundle_cache.BundleCache()
     _pages.prewarm([ctx["page_path"]])
 
@@ -145,7 +145,7 @@ def make_handler(ctx):
                    ".txt": "text/plain; charset=utf-8"}
 
         def log_message(self, *args):
-            pass                                  # quiet — one consumer, localhost
+            pass                                  # quiet: one consumer, localhost
 
         def _json(self, obj, code=200):
             body = json.dumps(obj).encode("utf-8")
@@ -195,7 +195,8 @@ def make_handler(ctx):
             return None
 
         def _download_file(self, full, filename, cleanup=False):
-            """Stream a file back as an attachment. Deletes it after (cleanup)."""
+            """Stream a file back as an attachment, deleting it afterwards when
+            `cleanup`."""
             try:
                 size = os.path.getsize(full)
             except OSError:
@@ -241,7 +242,7 @@ def make_handler(ctx):
         def _body_to_tempfile(self, max_bytes):
             """Stream the request body to a temp file in chunks. Returns the path,
             or None when there is no body, it exceeds max_bytes, or the client sent
-            fewer bytes than Content-Length (a truncated upload — never handed on)."""
+            fewer bytes than Content-Length. A truncated upload is never handed on."""
             try:
                 length = int(self.headers.get("Content-Length") or 0)
             except ValueError:
@@ -320,21 +321,17 @@ def make_handler(ctx):
                 rest = path[len("/api/assets/file/"):]
                 kind, _, raw = rest.partition("/")
                 name = unquote(raw)
-                # Resolved LIVE per request (a callable, not a startup snapshot):
-                # the listing route /api/assets/files resolves the runtime dir on
-                # every call, so serving must too, or the two diverge (#55 — the
-                # gallery listed files that serving then 404'd).
+                # Resolved per request like /api/assets/files, or the two diverge. (#55)
                 roots = ctx["asset_roots"]()
                 # Reject traversal: name must be a bare basename within the root.
                 if (kind not in roots or not name
                         or name != os.path.basename(name)
                         or name in (".", "..")):
                     return self._not_found("asset not found")
-                # Resolve, then require the normalized path to stay inside the
-                # trusted root before it reaches any filesystem call. The guard
-                # is its own statement (realpath normalize + startswith barrier —
-                # the sanitizer CodeQL recognizes; a compound `or` condition
-                # defeats that recognition).
+                # Require the normalized path to stay inside the trusted root
+                # before it reaches any filesystem call. The realpath + startswith
+                # guard is its own statement because a compound `or` condition
+                # defeats CodeQL's sanitizer recognition.
                 root = os.path.realpath(roots[kind])
                 full = os.path.realpath(os.path.join(root, name))
                 if not full.startswith(root + os.sep):
@@ -423,8 +420,8 @@ def make_handler(ctx):
                                        "error": f"docs listing failed: {exc}"},
                                       code=500)
             if path.startswith("/api/docs/file/"):
-                # key is looked up in an allowlist (docs_content -> None for
-                # anything unknown), so no path can be traversed out of the doc
+                # The key is looked up in an allowlist (docs_content returns None
+                # for anything unknown), so no path can be traversed out of the doc
                 # set. Markdown is rendered to HTML; HTML is served as-is.
                 key = unquote(path[len("/api/docs/file/"):])
                 doc = ctx["docs_content"](key)
@@ -439,8 +436,8 @@ def make_handler(ctx):
                 self.wfile.write(body)
                 return None
             if path == "/docs/slides" or path.startswith("/docs/slides/"):
-                # static, read-only serve of the bundled onboarding decks (incl. the
-                # cheat sheet) so they open OFFLINE; docs_slides_serve guards traversal.
+                # Static, read-only serve of the bundled onboarding decks so they
+                # open offline; docs_slides_serve guards traversal.
                 rel = unquote(path[len("/docs/slides"):]).lstrip("/")
                 serve = ctx.get("docs_slides_serve")
                 hit = serve(rel) if serve else None
@@ -597,7 +594,7 @@ def make_handler(ctx):
                 snap = ctx["jobs"].snapshot(job_id) if job_id else None
                 return self._json({"ok": True, **snap}) if snap else self._not_found("unknown job")
             if path.startswith("/api/logs/") and path.endswith("/stream"):
-                name = path.split("/")[3]   # "aggregate" is just another registry source
+                name = path.split("/")[3]   # "aggregate" is another registry source
                 return self._stream_log(name) if name else self._not_found("unknown log")
             if path.startswith("/api/logs/") and path.endswith("/archives"):
                 name = path.split("/")[3]
@@ -684,7 +681,7 @@ def make_handler(ctx):
                                        "note": "malformed request"}, code=400)
                 try:
                     result = ctx["obs_stream_target"]((body.get("part") or "").strip())
-                except Exception as exc:               # noqa: BLE001 — provider is best-effort
+                except Exception as exc:               # noqa: BLE001  provider is best-effort
                     return self._json({"ok": False, "note": str(exc)}, code=400)
                 return self._json(result, code=200 if result.get("ok") else 400)
             if path == "/api/report/generate":
@@ -954,18 +951,16 @@ def make_handler(ctx):
                 return self._json({"ok": True, "job_id": job_id})
             if path == "/api/quit":
                 self._json({"ok": True})
-                # shutdown() blocks until serve_forever() returns — never call
-                # it from a request thread directly.
+                # shutdown() blocks until serve_forever() returns, so never call it
+                # from a request thread directly.
                 threading.Thread(target=ctx["shutdown"], daemon=True).start()
                 return None
             return self._not_found()
 
         def _page(self):
-            # Served from memory after the first read: a frozen build unpacks
-            # this page into the OS temp dir, which the OS reaps on a schedule
-            # while we keep running (macOS after 3 days). Reading per request
-            # made a Control Center that had been up for two weeks answer every
-            # request with an error although nothing had crashed.
+            # Served from memory after the first read: a frozen build unpacks this
+            # page into the OS temp dir, which the OS reaps on a schedule while we
+            # keep running, so reading per request eventually fails.
             try:
                 body = _pages.read(ctx["page_path"])
             except OSError:
@@ -973,10 +968,10 @@ def make_handler(ctx):
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Cache-Control", "no-store")
-            # Defense-in-depth (#101): the page is fully self-contained (inline
-            # CSS/JS, same-origin assets), so a strict-ish CSP costs nothing and
-            # contains any future XSS — blocks external/object script loads and
-            # <base> hijacking. 'unsafe-inline' is required by the inline app code.
+            # The page is fully self-contained (inline CSS/JS, same-origin assets),
+            # so a strict CSP costs nothing and blocks external/object script loads
+            # and <base> hijacking. 'unsafe-inline' is required by the inline app
+            # code. (#101)
             self.send_header(
                 "Content-Security-Policy",
                 "default-src 'self'; script-src 'self' 'unsafe-inline'; "
@@ -1000,8 +995,8 @@ def make_handler(ctx):
                         self.wfile.write(sse_frame(line))
                     if chunk:
                         self.wfile.flush()
-                    # when the last lines and the exit code arrive together, the
-                    # done frame fires one iteration later (empty-chunk pass)
+                    # When the last lines and the exit code arrive together, the
+                    # done frame fires one iteration later, on the empty-chunk pass.
                     if code is not None and not chunk:
                         self.wfile.write(sse_done(code))
                         self.wfile.flush()
@@ -1024,15 +1019,15 @@ def make_handler(ctx):
             src = self._src(name)
             if src is None:
                 return self._not_found(f"unknown log: {name}")
-            # Structural guard up front (defense-in-depth; the source read() guards too).
+            # Structural guard up front; the source read() guards too.
             if not token or "/" in token or "\\" in token or ".." in token:
                 return self._json({"ok": False, "error": "bad token"}, code=400)
             text = src["read"](token)
             return self._json({"ok": True, "text": text or ""})
 
         def _tail_files(self, files, label_of):
-            """Yield (label, line) for the last TAIL_LINES of each file then new
-            lines as they arrive (arrival order). Used by single-source + aggregate.
+            """Yield (label, line) for the last TAIL_LINES of each file, then new
+            lines in arrival order. Used by the single-source and aggregate streams.
             Returns (queue, stop); the caller sets stop['v'] = True on disconnect so
             the daemon reader threads exit."""
             q = queue.Queue(maxsize=2000)   # bounded: a stalled (not-yet-closed) client
@@ -1041,13 +1036,11 @@ def make_handler(ctx):
                 try:
                     q.put_nowait(item)
                 except queue.Full:
-                    pass  # consumer stalled — drop the line rather than grow unbounded
+                    pass  # consumer stalled: drop the line rather than grow unbounded
             def follow(path):
-                # Seed with the last TAIL_LINES of history, then poll for new
-                # lines by RE-OPENING the file each pass (logsetup.read_new_lines)
-                # — never holding it open. A continuously-held read handle blocks
-                # the relay's midnight rollover on Windows (rename of an open file
-                # fails), which silently breaks logging; see logsetup.read_new_lines.
+                # Seed with the last TAIL_LINES of history, then poll by re-opening
+                # the file each pass (logsetup.read_new_lines). A held read handle
+                # blocks the relay's midnight rename on Windows.
                 pos = 0
                 try:
                     with open(path, "rb") as fh:
@@ -1056,7 +1049,7 @@ def make_handler(ctx):
                     for ln in data.decode("utf-8", "replace").splitlines()[-TAIL_LINES:]:
                         emit((label_of(path), ln))
                 except OSError:
-                    pos = 0  # not there yet — start from the top once it appears
+                    pos = 0  # not there yet; start from the top once it appears
                 while not stop["v"]:
                     lines, pos = logsetup.read_new_lines(path, pos)
                     if lines:
@@ -1071,7 +1064,7 @@ def make_handler(ctx):
         def _stream_source(self, files, label_of):
             self._sse_headers()
             if not files:
-                self.wfile.write(sse_frame("(no log yet — waiting)")); self.wfile.flush()
+                self.wfile.write(sse_frame("(no log yet, waiting)")); self.wfile.flush()
             q, stop = self._tail_files(files, label_of)
             try:
                 while True:
@@ -1083,10 +1076,10 @@ def make_handler(ctx):
                         self.wfile.write(b": ping\n\n"); self.wfile.flush()
             except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                 stop["v"] = True                  # browser tab closed mid-stream
-                return None                        # ConnectionAbortedError = Windows (WinError 10053)
+                return None                        # ConnectionAbortedError is Windows (WinError 10053)
 
         def _stream_log(self, name):
-            # "aggregate" is just another registry source (its files = the union).
+            # "aggregate" is another registry source; its files are the union.
             src = self._src(name)
             if src is None:
                 return self._not_found(f"unknown log: {name}")
@@ -1098,7 +1091,7 @@ def make_handler(ctx):
 
 def serve(ctx, host, port):
     """Build the server (caller runs serve_forever) and install ctx['shutdown'].
-    Raises OSError when the port is taken — callers turn that into the
+    Raises OSError when the port is taken; callers turn that into the
     RACECAST_UI_PORT hint."""
     httpd = ThreadingHTTPServer((host, port), make_handler(ctx))
     httpd.daemon_threads = True                  # SSE threads die with the process

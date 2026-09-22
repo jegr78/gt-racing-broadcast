@@ -215,7 +215,7 @@ class Pull:
         self.log = log
         self.stop = stop_evt
         self.rng = rng
-        self.logfile = open(  # noqa: SIM115 (owned by this Pull, closed at teardown)
+        self.logfile = open(  # noqa: SIM115  owned by this Pull, closed at teardown
             os.path.join(out_dir, f"pull_{idx}.log"), "a", encoding="utf-8")
         self.proc = None
         self.t_start = None

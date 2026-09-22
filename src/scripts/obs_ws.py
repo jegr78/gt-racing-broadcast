@@ -501,7 +501,7 @@ def _connect(host, port, password, timeout):
         return _open_session(host, port, password, timeout), ""
     except OSError:
         return None, f"OBS WebSocket not reachable on {host}:{port} (OBS not running?)"
-    except Exception as exc:                         # noqa: BLE001 — best-effort contract
+    except Exception as exc:                         # noqa: BLE001  best-effort contract
         return None, str(exc) or exc.__class__.__name__
 
 
@@ -694,12 +694,12 @@ def get_health_stats(host="127.0.0.1", port=None, password=None, timeout=2.0, se
         try:
             stats = parse_obs_stats(session.request("GetStats", {}))
             stats.update(parse_stream_status(session.request("GetStreamStatus", {})))
-        except Exception as exc:                     # noqa: BLE001 — best-effort contract
+        except Exception as exc:                     # noqa: BLE001  best-effort contract
             return True, {}, str(exc) or exc.__class__.__name__
         try:
             # Losing the fps reference must never lose the stats above (#586).
             stats.update(parse_video_settings(session.request("GetVideoSettings", {})))
-        except Exception:                            # noqa: BLE001 — best-effort contract
+        except Exception:                            # noqa: BLE001  best-effort contract
             stats["obs_fps_target"] = None
         return True, stats, ""
     finally:
@@ -831,7 +831,7 @@ def probe_device_options(host="127.0.0.1", port=None, password=None, timeout=2.0
             payload = session.request("GetInputPropertiesListPropertyItems",
                                       {"inputName": input_name, "propertyName": prop})
             return parse_property_items(payload), ""
-        except Exception as exc:                     # noqa: BLE001 — best-effort contract
+        except Exception as exc:                     # noqa: BLE001  best-effort contract
             return [], (str(exc) or exc.__class__.__name__)
 
     try:
@@ -840,7 +840,7 @@ def probe_device_options(host="127.0.0.1", port=None, password=None, timeout=2.0
         aud_kind = pick_input_kind(kinds, AUDIO_INPUT_KIND_MATCHERS)
         try:                                         # clear a stale scene from a crash
             session.request("RemoveScene", {"sceneName": PROBE_SCENE_NAME})
-        except Exception:                            # noqa: BLE001 — best-effort contract
+        except Exception:                            # noqa: BLE001  best-effort contract
             pass
         session.request("CreateScene", {"sceneName": PROBE_SCENE_NAME})
         scene_made = True
@@ -859,7 +859,7 @@ def probe_device_options(host="127.0.0.1", port=None, password=None, timeout=2.0
                 device_property_name(sys.platform, kind="audio"))
         else:
             out["mic_note"] = "no audio capture input kind in this OBS"
-    except Exception as exc:                         # noqa: BLE001 — best-effort contract
+    except Exception as exc:                         # noqa: BLE001  best-effort contract
         reason = str(exc) or exc.__class__.__name__
         out["note"] = out["note"] or reason
         out["mic_note"] = out["mic_note"] or reason
@@ -867,12 +867,12 @@ def probe_device_options(host="127.0.0.1", port=None, password=None, timeout=2.0
         for name in created:
             try:
                 session.request("RemoveInput", {"inputName": name})
-            except Exception:                        # noqa: BLE001 — best-effort contract
+            except Exception:                        # noqa: BLE001  best-effort contract
                 pass
         if scene_made:
             try:
                 session.request("RemoveScene", {"sceneName": PROBE_SCENE_NAME})
-            except Exception:                        # noqa: BLE001 — best-effort contract
+            except Exception:                        # noqa: BLE001  best-effort contract
                 pass
         session.close()
     return out
@@ -910,7 +910,7 @@ def release_feed_inputs(ports=RELAY_PORTS, host="127.0.0.1", port=None,
                             {"inputName": name, "inputSettings": settings[name],
                              "overlay": True})
         return names, ""
-    except Exception as exc:                         # noqa: BLE001 — see docstring
+    except Exception as exc:                         # noqa: BLE001  see docstring
         return [], str(exc) or exc.__class__.__name__
     finally:
         if own:
@@ -945,7 +945,7 @@ def feed_media_cursors(ports=RELAY_PORTS, host="127.0.0.1", port=None,
             try:
                 settings = session.request(
                     "GetInputSettings", {"inputName": name}).get("inputSettings", {})
-            except Exception:                        # noqa: BLE001 — one bad input mustn't stop the rest
+            except Exception:                        # noqa: BLE001  one bad input mustn't stop the rest
                 continue
             if settings.get("is_local_file"):
                 continue
@@ -958,10 +958,10 @@ def feed_media_cursors(ports=RELAY_PORTS, host="127.0.0.1", port=None,
             try:
                 out[fp] = session.request(
                     "GetMediaInputStatus", {"inputName": name}).get("mediaCursor")
-            except Exception:                        # noqa: BLE001 — a source with no media status
+            except Exception:                        # noqa: BLE001  a source with no media status
                 out[fp] = None
         return out, ""
-    except Exception as exc:                         # noqa: BLE001 — best-effort contract
+    except Exception as exc:                         # noqa: BLE001  best-effort contract
         return {}, str(exc) or exc.__class__.__name__
     finally:
         if own:
@@ -997,7 +997,7 @@ def refresh_browser_inputs(needle="127.0.0.1:8088", host="127.0.0.1", port=None,
             session.request("PressInputPropertiesButton",
                             {"inputName": name, "propertyName": "refreshnocache"})
         return names, ""
-    except Exception as exc:                         # noqa: BLE001 — see docstring
+    except Exception as exc:                         # noqa: BLE001  see docstring
         return [], str(exc) or exc.__class__.__name__
     finally:
         if own:
@@ -1023,7 +1023,7 @@ def get_source_screenshot(source_name, width=640, fmt="jpg", quality=60,
         if data is None:
             return None, "OBS returned no image data"
         return data, ""
-    except Exception as exc:                          # noqa: BLE001 — best-effort contract
+    except Exception as exc:                          # noqa: BLE001  best-effort contract
         return None, str(exc) or exc.__class__.__name__
     finally:
         if own:
@@ -1054,7 +1054,7 @@ def get_program_screenshot(width=640, fmt="jpg", quality=60,
         if data is None:
             return None, "OBS returned no image data"
         return data, ""
-    except Exception as exc:                          # noqa: BLE001 — best-effort contract
+    except Exception as exc:                          # noqa: BLE001  best-effort contract
         return None, str(exc) or exc.__class__.__name__
     finally:
         if own:
@@ -1079,7 +1079,7 @@ def get_current_program_scene(host="127.0.0.1", port=None,
         if not scene:
             return None, "OBS returned no program scene"
         return scene, ""
-    except Exception as exc:                          # noqa: BLE001 — best-effort contract
+    except Exception as exc:                          # noqa: BLE001  best-effort contract
         return None, str(exc) or exc.__class__.__name__
     finally:
         if own:
@@ -1140,7 +1140,7 @@ def set_current_program_scene(scene, host="127.0.0.1", port=None,
                                     {"transitionDuration": int(duration_ms)})
         session.request("SetCurrentProgramScene", {"sceneName": scene})
         return True, out_note
-    except Exception as exc:                          # noqa: BLE001 — best-effort contract
+    except Exception as exc:                          # noqa: BLE001  best-effort contract
         return False, str(exc) or exc.__class__.__name__
     finally:
         if own:
@@ -1168,7 +1168,7 @@ def switch_to_scene_if_idle(scene, host="127.0.0.1", port=None,
             return "live", "OBS is streaming, so the program scene is untouched"
         session.request("SetCurrentProgramScene", {"sceneName": scene})
         return "switched", ""
-    except Exception as exc:                          # noqa: BLE001 — best-effort contract
+    except Exception as exc:                          # noqa: BLE001  best-effort contract
         return "error", str(exc) or exc.__class__.__name__
     finally:
         if own:
@@ -1188,7 +1188,7 @@ def set_input_volume(input_name, volume_db, host="127.0.0.1", port=None,
         session.request("SetInputVolume",
                         {"inputName": input_name, "inputVolumeDb": float(volume_db)})
         return True, ""
-    except Exception as exc:                          # noqa: BLE001 — best-effort contract
+    except Exception as exc:                          # noqa: BLE001  best-effort contract
         return False, str(exc) or exc.__class__.__name__
     finally:
         if own:
@@ -1208,7 +1208,7 @@ def set_input_mute(input_name, muted, host="127.0.0.1", port=None,
         session.request("SetInputMute",
                         {"inputName": input_name, "inputMuted": bool(muted)})
         return True, ""
-    except Exception as exc:                          # noqa: BLE001 — best-effort contract
+    except Exception as exc:                          # noqa: BLE001  best-effort contract
         return False, str(exc) or exc.__class__.__name__
     finally:
         if own:
@@ -1234,7 +1234,7 @@ def set_stream(active, host="127.0.0.1", port=None,
             return True, ""                       # already in the desired state
         session.request("StartStream" if active else "StopStream", {})
         return True, ""
-    except Exception as exc:                       # noqa: BLE001 — best-effort contract
+    except Exception as exc:                       # noqa: BLE001  best-effort contract
         return False, str(exc) or exc.__class__.__name__
     finally:
         if own:
@@ -1265,7 +1265,7 @@ def set_stream_service(platform, key, host="127.0.0.1", port=None,
                            "changing the stream target.")
         session.request("SetStreamServiceSettings", data)
         return True, ""
-    except Exception as exc:                       # noqa: BLE001 — best-effort contract
+    except Exception as exc:                       # noqa: BLE001  best-effort contract
         return False, str(exc) or exc.__class__.__name__
     finally:
         if own:
@@ -1297,7 +1297,7 @@ def read_obs_state(sources, inputs, host="127.0.0.1", port=None,
                 enabled = session.request(
                     "GetSceneItemEnabled",
                     {"sceneName": sc, "sceneItemId": sid}).get("sceneItemEnabled")
-            except Exception:                         # noqa: BLE001 — per-item best effort
+            except Exception:                         # noqa: BLE001  per-item best effort
                 enabled = None
             src_out.append({"scene": sc, "source": src, "enabled": enabled})
         aud_out = []
@@ -1307,7 +1307,7 @@ def read_obs_state(sources, inputs, host="127.0.0.1", port=None,
                     "GetInputMute", {"inputName": name}).get("inputMuted")
                 vol = session.request(
                     "GetInputVolume", {"inputName": name}).get("inputVolumeDb")
-            except Exception:                         # noqa: BLE001 — per-item best effort
+            except Exception:                         # noqa: BLE001  per-item best effort
                 muted, vol = None, None
             aud_out.append({"input": name, "muted": muted, "volumeDb": vol})
         try:
@@ -1315,11 +1315,11 @@ def read_obs_state(sources, inputs, host="127.0.0.1", port=None,
             stream = {"active": st.get("stream_active"),
                       "reconnecting": st.get("stream_reconnecting"),
                       "timecode": st.get("stream_timecode")}
-        except Exception:                         # noqa: BLE001 — per-item best effort
+        except Exception:                         # noqa: BLE001  per-item best effort
             stream = None
         return {"scene": scene, "sources": src_out,
                 "audio": aud_out, "stream": stream}, ""
-    except Exception as exc:                          # noqa: BLE001 — best-effort contract
+    except Exception as exc:                          # noqa: BLE001  best-effort contract
         return None, str(exc) or exc.__class__.__name__
     finally:
         if own:
@@ -1360,14 +1360,14 @@ def reflect_feed_state(live, do_cut, scene=STINT_SCENE, sources=None,
                 try:
                     session.request("SetInputMute",
                                     {"inputName": target, "inputMuted": verb == "mute"})
-                except Exception as exc:          # noqa: BLE001 — one input, not the handover
+                except Exception as exc:          # noqa: BLE001  one input, not the handover
                     notes.append(f"{verb} {target}: {str(exc) or exc.__class__.__name__}")
                     continue
             elif verb == "cut":
                 session.request("SetCurrentProgramScene", {"sceneName": target})
             applied.append((verb, target))
         return applied, "; ".join(notes)
-    except Exception as exc:                         # noqa: BLE001 — best-effort contract
+    except Exception as exc:                         # noqa: BLE001  best-effort contract
         return applied, "; ".join(notes + [str(exc) or exc.__class__.__name__])
     finally:
         if own:
@@ -1390,7 +1390,7 @@ def set_feed_close_when_inactive(inputs, value=True, host="127.0.0.1", port=None
                              "inputSettings": {"close_when_inactive": bool(value)},
                              "overlay": True})
         return ""
-    except Exception as exc:                         # noqa: BLE001 — best-effort contract
+    except Exception as exc:                         # noqa: BLE001  best-effort contract
         return str(exc) or exc.__class__.__name__
     finally:
         session.close()
@@ -1416,7 +1416,7 @@ def set_scene_item_enabled(scene, source, enabled, host="127.0.0.1", port=None,
                         {"sceneName": scene, "sceneItemId": sid,
                          "sceneItemEnabled": bool(enabled)})
         return True, ""
-    except Exception as exc:                         # noqa: BLE001 — best-effort contract
+    except Exception as exc:                         # noqa: BLE001  best-effort contract
         return False, str(exc) or exc.__class__.__name__
     finally:
         if own:
@@ -1444,7 +1444,7 @@ def set_scene_item_transform(scene, source, transform, host="127.0.0.1", port=No
                         {"sceneName": scene, "sceneItemId": sid,
                          "sceneItemTransform": dict(transform)})
         return True, ""
-    except Exception as exc:                         # noqa: BLE001 — best-effort contract
+    except Exception as exc:                         # noqa: BLE001  best-effort contract
         return False, str(exc) or exc.__class__.__name__
     finally:
         if own:
@@ -1494,7 +1494,7 @@ def _probe_ready(host, port, password):
     try:
         session.request("GetVersion", {})
         return True, ""
-    except Exception as exc:                         # noqa: BLE001 — best effort
+    except Exception as exc:                         # noqa: BLE001  best effort
         return False, str(exc) or exc.__class__.__name__
     finally:
         session.close()
@@ -1518,7 +1518,7 @@ def get_scene_collection(host="127.0.0.1", port=None, password=None, timeout=2.0
                                          resp.get("sceneCollections", []),
                                          expected=expected)
         return status, ""
-    except Exception as exc:                         # noqa: BLE001 — best-effort contract
+    except Exception as exc:                         # noqa: BLE001  best-effort contract
         return None, str(exc) or exc.__class__.__name__
     finally:
         if own:
@@ -1554,7 +1554,7 @@ def set_scene_collection(name=EXPECTED_SCENE_COLLECTION, host="127.0.0.1",
                            f"(import it with `racecast setup`)")
         session.request("SetCurrentSceneCollection", {"sceneCollectionName": name})
         return True, ""
-    except Exception as exc:                         # noqa: BLE001 — best-effort contract
+    except Exception as exc:                         # noqa: BLE001  best-effort contract
         return False, str(exc) or exc.__class__.__name__
     finally:
         if own:
