@@ -96,11 +96,11 @@ fi
 # --- 3/4  racecast install-tools: yt-dlp / streamlink / ffmpeg / deno (the feed toolchain) ---
 log "3/4  racecast install-tools (yt-dlp / streamlink / ffmpeg / deno). As $RACECAST_USER"
 sudo -u "$RACECAST_USER" -H racecast install-tools \
-  || warn "install-tools reported issues — see the resolve step below"
+  || warn "install-tools reported issues: see the resolve step below"
 RTBIN="$USER_HOME/runtime/bin"
 for t in yt-dlp streamlink deno; do
   [ -x "$RTBIN/$t" ] && ok "$t present ($("$RTBIN/$t" --version 2>/dev/null | head -1))" \
-                     || warn "$t MISSING at $RTBIN — feed path will fail"
+                     || warn "$t MISSING at $RTBIN: feed path will fail"
 done
 # streamlink MUST be the install-tools venv build (>=8.2.0 for --http-cookies-file). apt's
 # 6.6.2 is too old and every cookie'd YouTube feed would 403: install-tools prints an
