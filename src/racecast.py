@@ -6999,6 +6999,7 @@ def _bootstrap(argv):
 # rather than re-implementing the relay's tool invocations, because a
 # re-implementation would only ever test itself. Pure logic lives in
 # scripts/smoketest.py. (#570)
+# Spec: docs/superpowers/specs/2026-08-27-post-update-smoketest-design.md
 
 SMOKE_TAB = "Smoke"                 # optional sheet tab overriding the vocabulary
 SMOKE_ARM_WAIT_S = 60               # a feed must deliver bytes within this after ARM
