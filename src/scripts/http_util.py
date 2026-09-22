@@ -25,7 +25,7 @@ def open_url(url, *, data=None, headers=None, method=None, timeout=DEFAULT_TIMEO
     if headers:
         merged.update(headers)
     req = Request(url, data=data, headers=merged, method=method)
-    return urlopen(req, timeout=timeout)        # noqa: S310 (UA-stamped; covered-module HTTP funnels here)
+    return urlopen(req, timeout=timeout)        # noqa: S310  UA-stamped; covered-module HTTP funnels here
 
 
 def get_bytes(url, *, headers=None, timeout=DEFAULT_TIMEOUT):

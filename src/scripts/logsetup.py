@@ -24,7 +24,7 @@ def harden_stdio(streams=None, environ=None):
             pass    # stream missing, old or non-reconfigurable; leave it as-is
     try:
         env.setdefault("PYTHONIOENCODING", "utf-8:replace")
-    except Exception:          # noqa: BLE001 (never fatal)
+    except Exception:          # noqa: BLE001  never fatal
         pass
 
 
@@ -273,13 +273,13 @@ def pump_subprocess(stream, logger, tag, on_line=None, now=time.monotonic):
             if on_line is not None:
                 try:
                     on_line(line)
-                except Exception:                # noqa: BLE001 (observer is best-effort)
+                except Exception:                # noqa: BLE001  observer is best-effort
                     pass
             try:
                 level = classify_subproc_line(line)   # classify the ORIGINAL line
                 for lvl, text in throttle.emit(level, shorten_urls(line), now()):
                     logger.log(lvl, "[%s] %s", tag, text)
-            except Exception:                    # noqa: BLE001 (throttling must never break the pump)
+            except Exception:                    # noqa: BLE001  throttling must never break the pump
                 # Fallback logs the raw line at a fixed level: re-classifying here
                 # could raise again (if classify was the failing call) and break the
                 # pump thread, defeating the best-effort contract.
@@ -290,7 +290,7 @@ def pump_subprocess(stream, logger, tag, on_line=None, now=time.monotonic):
         try:
             for lvl, text in throttle.flush(now()):   # surface a trailing flood's count
                 logger.log(lvl, "[%s] %s", tag, text)
-        except Exception:                        # noqa: BLE001 (flush is best-effort too)
+        except Exception:                        # noqa: BLE001  flush is best-effort too
             pass
 
 

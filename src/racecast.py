@@ -1268,7 +1268,7 @@ def _discord_voice_target():
         try:
             sheet_val = discord_rpc.discord_voice_from_csv(
                 http_util.get_bytes(url, timeout=8).decode("utf-8"))
-        except Exception:  # noqa: BLE001 (Sheet unreachable -> fall back to env)
+        except Exception:  # noqa: BLE001  Sheet unreachable -> fall back to env
             sheet_val = ""
     return discord_rpc.resolve_voice_target(
         sheet_val, os.environ.get("RACECAST_DISCORD_VOICE_URL", ""))
@@ -1327,7 +1327,7 @@ def _discord_autojoin():
               else "discord: voice auto-join skipped — " + note)
     except SystemExit:
         raise
-    except Exception as exc:  # noqa: BLE001 (auto-join must never break event start)
+    except Exception as exc:  # noqa: BLE001  auto-join must never break event start
         print("discord: voice auto-join skipped ({})".format(type(exc).__name__))
 
 
@@ -1354,7 +1354,7 @@ def _discord_autoleave():
               else "discord: voice auto-leave skipped — " + note)
     except SystemExit:
         raise
-    except Exception as exc:  # noqa: BLE001 (auto-leave must never break event stop)
+    except Exception as exc:  # noqa: BLE001  auto-leave must never break event stop
         print("discord: voice auto-leave skipped ({})".format(type(exc).__name__))
 
 
@@ -1455,7 +1455,7 @@ def _report_log_files(since=None):
     feed_*.log) don't collide. Archives (rotated older files) are left out."""
     try:
         reg = _log_sources()
-    except Exception:  # noqa: BLE001 (bundling logs must never break the report send)
+    except Exception:  # noqa: BLE001  bundling logs must never break the report send
         return []
     pairs = []
     for source in ("relay", "streams", "obs", "companion", "tailscale", "app"):
@@ -1473,7 +1473,7 @@ def _report_log_files(since=None):
                     except OSError:
                         pass  # can't stat -> keep it (conservative, matches old behavior)
                 pairs.append((source, fp))
-        except Exception:  # noqa: BLE001 (one flaky source must not drop the others)
+        except Exception:  # noqa: BLE001  one flaky source must not drop the others
             continue
     return pairs
 
@@ -1486,7 +1486,7 @@ def _relay_mode():
         data = _relay_fetch_json(f"http://127.0.0.1:{RELAY_PORT}/status")
         mode = data.get("mode")
         return mode if mode in ("race", "qualifying") else None
-    except Exception:  # noqa: BLE001 (best-effort)
+    except Exception:  # noqa: BLE001  best-effort
         return None
 
 
@@ -1521,7 +1521,7 @@ def _report_name_map():
         return {r["row"]: (r.get("name") or "").strip()
                 for r in (data.get("rows") or [])
                 if isinstance(r.get("row"), int) and (r.get("name") or "").strip()}
-    except Exception:  # noqa: BLE001 (best-effort; names degrade gracefully)
+    except Exception:  # noqa: BLE001  best-effort; names degrade gracefully
         return {}
 
 
@@ -1625,7 +1625,7 @@ def report_generate_data():
     try:
         r = _build_report_file()
         return {"ok": True, "path": r["path"], "html": r["html"], "summary": r["summary"]}
-    except Exception as exc:  # noqa: BLE001 (surface the message to the UI)
+    except Exception as exc:  # noqa: BLE001  surface the message to the UI
         return {"ok": False, "error": str(exc)}
 
 
@@ -1633,7 +1633,7 @@ def report_send_data(path=None):
     try:
         _send_report_core(path or _latest_report())
         return {"ok": True}
-    except Exception as exc:  # noqa: BLE001 (surface the message to the UI)
+    except Exception as exc:  # noqa: BLE001  surface the message to the UI
         return {"ok": False, "error": str(exc)}
 
 
@@ -1680,7 +1680,7 @@ def report_cmd(rest):
             _send_report_core(path)
         except (OSError, ValueError) as exc:
             sys.exit(f"racecast: {exc}")
-        except Exception as exc:  # noqa: BLE001 (network/HTTP)
+        except Exception as exc:  # noqa: BLE001  network/HTTP
             sys.exit(f"racecast: Discord send failed — {type(exc).__name__}: {exc}")
         print(f"Sent {os.path.basename(path)} to the league Discord.")
         return None
@@ -2490,7 +2490,7 @@ def _sync_pov_transform(set_transform=None):
             if ok:
                 print(f"obs: {slot_id} box synced to '{tgt['source']}' "
                       f"({box['left']},{box['top']} {box['width']}x{box['height']}).")
-    except Exception as exc:  # noqa: BLE001 (best-effort contract)
+    except Exception as exc:  # noqa: BLE001  best-effort contract
         print(f"obs: box sync skipped ({exc}).")
         return
 
@@ -2537,7 +2537,7 @@ def _refresh_obs_pages(force=False, wait=0):
         note = obs_ws.set_feed_close_when_inactive(list(obs_ws.FEED_SOURCES.values()), _fanout)
         if note:
             print("obs: " + note)
-    except Exception as exc:  # noqa: BLE001 (best-effort contract)
+    except Exception as exc:  # noqa: BLE001  best-effort contract
         print(f"obs: close_when_inactive skipped ({exc}).")
 
 
@@ -2668,7 +2668,7 @@ def _apply_stream_target(part, fetch=None, post=None, apply_obs=None,
     try:
         prod_rows = prod.parse_producer_rows(fetch(_gviz_csv_url(sheet_id, PRODUCER_TAB)))
         chan_rows = bc.parse_channel_tab(fetch(_gviz_csv_url(sheet_id, CHANNEL_TAB)))
-    except Exception as exc:                           # noqa: BLE001 (tolerant fetch)
+    except Exception as exc:                           # noqa: BLE001  tolerant fetch
         return False, f"sheet fetch failed: {type(exc).__name__}"
     ref = st.resolve_part_ref(prod_rows, part)
     if not ref:
@@ -2678,7 +2678,7 @@ def _apply_stream_target(part, fetch=None, post=None, apply_obs=None,
         return False, "no channel/platform configured (Channel tab)"
     try:
         body = post(push_url, {"action": "get_stream_key", "ref": ref})
-    except Exception as exc:                           # noqa: BLE001 (tolerant webhook)
+    except Exception as exc:                           # noqa: BLE001  tolerant webhook
         return False, f"stream-key webhook failed: {type(exc).__name__}"
     key, err = st.parse_stream_key_response(body)
     if err:
@@ -2784,7 +2784,7 @@ def obs_benchmark_cmd(rest):
                         progress=print)
     except ob.BenchmarkRefused as exc:
         sys.exit(f"obs: benchmark refused — {exc}")
-    except Exception as exc:                          # noqa: BLE001 (operator-facing exit)
+    except Exception as exc:                          # noqa: BLE001  operator-facing exit
         sys.exit(f"obs: benchmark failed — {exc}")
     finally:
         session.close()
@@ -3603,7 +3603,7 @@ def _event_sections(ev, pf):
             import obs_ws
             status, note = obs_ws.get_scene_collection(expected=_active_obs_collection())
             apps.append(ev.classify_scene_collection(status, note))
-        except Exception as exc:                     # noqa: BLE001 (best effort)
+        except Exception as exc:                     # noqa: BLE001  best effort
             apps.append(ev.Result(ev.WARN, "OBS scene collection",
                                   f"check failed: {exc}"))
     # Services
@@ -3703,7 +3703,7 @@ def _announce_takeover(status, plan, a_title):
                            producer=b_name,
                            metadata={"from": a_name, "stint": plan["stint"]})
         conn.close()
-    except Exception as exc:  # noqa: BLE001 (best-effort, never blocks the bring-up)
+    except Exception as exc:  # noqa: BLE001  best-effort, never blocks the bring-up
         print(f"note: takeover announcement failed ({type(exc).__name__}) — continuing.")
 
 
@@ -3723,7 +3723,7 @@ def _event_gate_results(ev, pf):
                                        ev.FAIL, "run `racecast graphics`"),
                     ev.classify_assets("Media", missing_m, ev.local_count(m_dir),
                                        ev.WARN, "run `racecast media`")]
-    except Exception as exc:                          # noqa: BLE001 (best effort)
+    except Exception as exc:                          # noqa: BLE001  best effort
         results.append(ev.Result(ev.WARN, "Graphics/Media", f"check failed: {exc}"))
     return results
 
@@ -3910,7 +3910,7 @@ def _wait_for_obs_ready(timeout=OBS_READY_TIMEOUT_S):
     try:
         import obs_ws
         ok, note = obs_ws.wait_until_ready(timeout=timeout)
-    except Exception as exc:                         # noqa: BLE001 (best effort)
+    except Exception as exc:                         # noqa: BLE001  best effort
         print(f"obs: readiness check skipped ({exc}).")
         return
     if not ok:
@@ -3929,7 +3929,7 @@ def _check_scene_collection():
     try:
         import obs_ws
         status, note = obs_ws.get_scene_collection(expected=_active_obs_collection())
-    except Exception as exc:                         # noqa: BLE001 (best effort)
+    except Exception as exc:                         # noqa: BLE001  best effort
         print(f"obs: scene collection check skipped ({exc}).")
         return
     action, detail = obs_ws.scene_collection_action(
@@ -3966,7 +3966,7 @@ def _switch_to_standby():
         return
     try:
         import obs_ws
-    except Exception as exc:                          # noqa: BLE001 (best effort)
+    except Exception as exc:                          # noqa: BLE001  best effort
         print(f"obs: standby switch skipped ({exc}).")
         return
     action, note = obs_ws.switch_to_scene_if_idle(STANDBY_SCENE)
@@ -4119,9 +4119,9 @@ def event_stop(rest):
                 _send_report_core(r["path"], report=r.get("report"),
                                   window=r.get("window"))
                 print("Report sent to Discord.")
-            except Exception as exc:  # noqa: BLE001 (best-effort; still tear down)
+            except Exception as exc:  # noqa: BLE001  best-effort; still tear down
                 print(f"report: Discord send failed ({exc}).")
-        except Exception as exc:  # noqa: BLE001 (no health data etc.; still tear down)
+        except Exception as exc:  # noqa: BLE001  no health data etc.; still tear down
             print(f"report: skipped ({exc}).")
     # Leave the Discord voice channel we auto-joined at event start (default on,
     # RACECAST_DISCORD_AUTOLEAVE=0 kills it). Best-effort, never blocks teardown.
@@ -4625,7 +4625,7 @@ def event_title_read_data(alive=None, fetch=None, path=None, default=None):
             if isinstance(st, dict) and isinstance(st.get("event_title"), str):
                 return {"ok": True, "title": st["event_title"],
                         "source": "relay", "relay_alive": True}
-        except Exception:  # noqa: BLE001 (relay reachable check is best-effort)
+        except Exception:  # noqa: BLE001  relay reachable check is best-effort
             pass           # fall through to the persisted file / default
     try:
         with open(path, encoding="utf-8") as fh:
@@ -4647,7 +4647,7 @@ def _profile_event_default():
         root = _env_base(IS_FROZEN, _real_executable(), HERE)
         rc = pcfg.resolve_config(root, runtime_root=_runtime_base_dir())
         return rc.event_title or ""
-    except Exception:  # noqa: BLE001 (best effort)
+    except Exception:  # noqa: BLE001  best effort
         return ""
 
 
@@ -4668,7 +4668,7 @@ def event_title_write_data(value, alive=None, post=None, path=None, sanitize=Non
             res = post(f"http://127.0.0.1:{RELAY_PORT}/event/title", {"title": title})
             stored = res.get("title", title) if isinstance(res, dict) else title
             return {"ok": True, "title": stored, "applied": "relay"}
-        except Exception as exc:  # noqa: BLE001 (surface as a clean error to the UI)
+        except Exception as exc:  # noqa: BLE001  surface as a clean error to the UI
             return {"ok": False, "error": f"relay rejected the title: {exc}"}
     try:
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
@@ -4690,7 +4690,7 @@ def obs_collection_data(get=None):
             expected = _active_obs_collection()
             def get():
                 return obs_ws.get_scene_collection(expected=expected)
-        except Exception as exc:                     # noqa: BLE001 (best effort)
+        except Exception as exc:                     # noqa: BLE001  best effort
             return {"ok": False, "note": str(exc)}
     status, note = get()
     if status is None:
@@ -4726,7 +4726,7 @@ def profile_logo():
         root = _env_base(IS_FROZEN, _real_executable(), HERE)
         rc = pcfg.resolve_config(root, runtime_root=_runtime_base_dir())
         return servable_logo_path(rc.logo_path) or None
-    except Exception:  # noqa: BLE001 (best effort)
+    except Exception:  # noqa: BLE001  best effort
         return None
 
 
@@ -5476,7 +5476,7 @@ def _active_discord_webhook():
         root = _env_base(IS_FROZEN, _real_executable(), HERE)
         rc = pcfg.resolve_config(root, runtime_root=_runtime_base_dir())
         return rc.discord_webhook_url or "", rc.name or ""
-    except Exception:  # noqa: BLE001 (best effort)
+    except Exception:  # noqa: BLE001  best effort
         return "", ""
 
 
@@ -5500,7 +5500,7 @@ def _resolve_producer_name():
             if r.get("self") and r.get("producer"):
                 name = r["producer"]
                 break
-    except Exception:  # noqa: BLE001 (best-effort (no sheet / Tailscale down))
+    except Exception:  # noqa: BLE001  best-effort (no sheet / Tailscale down)
         name = ""
     if not name:
         name = (os.environ.get("RACECAST_PRODUCER_NAME") or "").strip()
@@ -5550,7 +5550,7 @@ def console_post_link_data():
         payload = cpadm.console_link_discord_payload(f"https://{magic}/console", league)
         _post_discord_webhook(webhook, payload)
         return {"ok": True}
-    except Exception as exc:  # noqa: BLE001 (best effort, surface the message)
+    except Exception as exc:  # noqa: BLE001  best effort, surface the message
         return {"ok": False, "error": str(exc)}
 
 
@@ -6334,7 +6334,7 @@ def speedtest_data(base_dir=None):
     """Latest + recent speed-test history for the Control Center Preflight view.
     Read-only (the *run* goes through the `speedtest` op/job). Never raises."""
     try:
-        import speedtest as st  # noqa: PLC0415 (lazy to mirror preflight_data pattern)
+        import speedtest as st  # noqa: PLC0415  lazy to mirror preflight_data pattern
         base = base_dir or _runtime_base_dir()
         # Ship the thresholds so the UI badge never drifts from the documented
         # constants (single source: speedtest.py mirrors the wiki table).
@@ -7040,7 +7040,7 @@ def _smoke_capture(argv, timeout=90):
         return 127, f"{argv[0]}: not found"
     except subprocess.TimeoutExpired:
         return 124, f"{argv[0]}: timed out after {timeout}s"
-    except OSError as exc:                       # noqa: BLE001 (probe, never fatal)
+    except OSError as exc:                       # noqa: BLE001  probe, never fatal
         return 1, f"{argv[0]}: {exc}"
 
 
@@ -7088,7 +7088,7 @@ def _smoke_vocab(sheet_id):
     try:
         body = http_util.get_bytes(_gviz_csv_url(sheet_id, SMOKE_TAB), timeout=15)
         rows = list(csv.reader(io.StringIO(body.decode("utf-8", "replace"))))
-    except Exception:                            # noqa: BLE001 (optional tab)
+    except Exception:                            # noqa: BLE001  optional tab
         return queries, categories
     yt, tw = [], []
     for row in rows[1:]:
@@ -7154,7 +7154,7 @@ def _smoke_twitch_candidates(category):
                                 headers={"Client-ID": sm.TWITCH_CLIENT_ID})
         game = ((data or {}).get("data") or {}).get("game") or {}
         edges = (game.get("streams") or {}).get("edges") or []
-    except Exception:                            # noqa: BLE001 (discovery is best effort)
+    except Exception:                            # noqa: BLE001  discovery is best effort
         return []
     out = []
     for edge in edges:
@@ -7259,7 +7259,7 @@ def _smoke_push(push_url, row, url):
         # A Google error page instead of JSON: its body can carry script ids and
         # would land in stdout, --json and the history file. Report the shape.
         return False, "webhook did not answer with JSON"
-    except Exception as exc:                     # noqa: BLE001 (reported, not raised)
+    except Exception as exc:                     # noqa: BLE001  reported, not raised
         # The CLASS only, never str(exc): http.client.InvalidURL puts the whole
         # Apps Script path, the sheet's write capability, into its message, and
         # it does not inherit from ValueError, so the guard above misses it.
@@ -7294,7 +7294,7 @@ def _smoke_await_rows(sheet_id, expected, what):
             served = sm.schedule_urls(_smoke_schedule_rows(sheet_id))
             if sm.rows_match(served, expected):
                 return True, ""
-        except Exception:                        # noqa: BLE001 (transient, keep polling)
+        except Exception:                        # noqa: BLE001  transient, keep polling
             pass
         if time.time() >= deadline:
             return False, (f"the sheet did not serve the {what} rows after "
@@ -7354,7 +7354,7 @@ def _smoke_error_payload(exc):
     (a machine fact) from a real failure."""
     try:
         payload = json.loads(exc.read().decode("utf-8"))
-    except Exception:                            # noqa: BLE001 (not JSON, use the code)
+    except Exception:                            # noqa: BLE001  not JSON, use the code
         payload = None
     if isinstance(payload, dict) and payload.get("error"):
         return {"error": str(payload["error"])[:160]}
@@ -7366,7 +7366,7 @@ def _smoke_relay_get(path, timeout=15):
         return http_util.get_json(f"http://127.0.0.1:{RELAY_PORT}/{path}", timeout=timeout)
     except http_util.HTTPError as exc:
         return _smoke_error_payload(exc)
-    except Exception as exc:                     # noqa: BLE001 (reported as a check)
+    except Exception as exc:                     # noqa: BLE001  reported as a check
         return {"error": str(exc)[:160]}
 
 
@@ -7376,7 +7376,7 @@ def _smoke_relay_post(path, body, timeout=20):
                                 timeout=timeout)
     except http_util.HTTPError as exc:
         return _smoke_error_payload(exc)
-    except Exception as exc:                     # noqa: BLE001 (reported as a check)
+    except Exception as exc:                     # noqa: BLE001  reported as a check
         return {"error": str(exc)[:160]}
 
 
@@ -7392,7 +7392,7 @@ def _smoke_program_audio_sample(want=16384, timeout=25):
             return resp.read(want) or b"", ""
     except http_util.HTTPError as exc:
         return b"", f"HTTP {exc.code}"
-    except Exception as exc:                     # noqa: BLE001 (reported as a check)
+    except Exception as exc:                     # noqa: BLE001  reported as a check
         return b"", str(exc)[:120]
 
 
@@ -7539,7 +7539,7 @@ def _smoke_append_history(entry):
         os.makedirs(os.path.dirname(_smoke_history_path()), exist_ok=True)
         with open(_smoke_history_path(), "a", encoding="utf-8") as fh:
             fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
-    except OSError as exc:                       # noqa: BLE001 (never fatal)
+    except OSError as exc:                       # noqa: BLE001  never fatal
         print(f"smoketest: history not written ({exc})")
 
 
@@ -7662,7 +7662,7 @@ def smoketest_cmd(rest):
     try:
         schedule_rows = _smoke_schedule_rows(sheet_id)
         data_rows = sm.schedule_data_rows(schedule_rows)
-    except Exception as exc:                     # noqa: BLE001 (reported as a check)
+    except Exception as exc:                     # noqa: BLE001  reported as a check
         results.append(sm.Result("sheet_layout", sm.FAIL, str(exc)[:160]))
         return _smoke_finish(results, tools, [], minutes, as_json, lines)
     if len(data_rows) < len(sm.SOURCE_PLAN):
@@ -7718,7 +7718,7 @@ def smoketest_cmd(rest):
     try:
         import tailscale as _ts
         funnel_was_off = not _ts.funnel_on()
-    except Exception:                            # noqa: BLE001 (best effort)
+    except Exception:                            # noqa: BLE001  best effort
         funnel_was_off = False
     title = "Smoketest " + time.strftime("%Y-%m-%d %H:%M")
     say(f"\nEvent — starting as {title!r}")
@@ -7751,7 +7751,7 @@ def smoketest_cmd(rest):
         say("\nEvent — stopping")
         try:
             event_stop(["--no-report"] if "--no-report" in rest else [])
-        except (Exception, SystemExit) as exc:   # noqa: BLE001 (SystemExit incl.)
+        except (Exception, SystemExit) as exc:   # noqa: BLE001  SystemExit incl.
             # A teardown failure has to reach the VERDICT, not just the console:
             # say() is suppressed under --json, so reporting it there alone let a
             # run print PASS and exit 0 with the relay still pulling streams.
@@ -7769,7 +7769,7 @@ def smoketest_cmd(rest):
                 if _ts.funnel_on():
                     funnel_cmd(["off"])
                     say("  funnel closed again (this run had opened it)")
-            except (Exception, SystemExit) as exc:   # noqa: BLE001 (best effort)
+            except (Exception, SystemExit) as exc:   # noqa: BLE001  best effort
                 say(f"  funnel note: {exc}")
     return _smoke_finish(results, tools, sources, minutes, as_json, lines, cleared)
 
