@@ -88,7 +88,7 @@ def detect_nvidia_gpu(run=subprocess.run, which=shutil.which, os_name=None):
                     **no_window_kwargs(os_name))
             if r.returncode == 0 and b"GPU" in (r.stdout or b""):
                 return True
-        except Exception:  # noqa: BLE001 — detection is best-effort, never fatal
+        except Exception:  # noqa: BLE001 (detection is best-effort, never fatal)
             pass
     # Linux fallback: the card is on the PCI bus even before the driver loads.
     if os_name == "posix" and which("lspci"):
@@ -347,7 +347,7 @@ def fetch_sheet_csv(sheet_id, tab=SHEET_TAB, timeout=10):
         if isinstance(reason, TimeoutError):
             return "network", "the read operation timed out"
         return "network", f"{reason}"
-    except Exception as exc:  # noqa: BLE001 — anything else is a generic read failure
+    except Exception as exc:  # noqa: BLE001 (anything else is a generic read failure)
         return "error", f"{type(exc).__name__}: {exc}"
 
 

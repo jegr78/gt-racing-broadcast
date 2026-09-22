@@ -182,7 +182,7 @@ def save_cache(path, cache):
 class _PipeConn:
     """Windows named-pipe wrapper exposing the same sendall/recv/close as a socket."""
     def __init__(self, path):
-        self._f = open(path, "r+b", buffering=0)   # noqa: SIM115 — kept open across sendall/recv calls
+        self._f = open(path, "r+b", buffering=0)   # noqa: SIM115 (kept open across sendall/recv calls)
     def sendall(self, data):
         self._f.write(data); self._f.flush()
     def recv(self, n):
@@ -220,7 +220,7 @@ def _default_post_form(url, form):
         try:
             payload = json.loads(exc.read().decode("utf-8"))
             detail = payload.get("error_description") or payload.get("error") or ""
-        except Exception:  # noqa: BLE001 — the body may be empty or non-JSON
+        except Exception:  # noqa: BLE001 (the body may be empty or non-JSON)
             pass
         raise RuntimeError(
             "Discord token endpoint returned HTTP %s%s"
@@ -281,7 +281,7 @@ class DiscordVoiceClient:
     def _safe_close(conn):
         try:
             conn.close()
-        except Exception:  # noqa: BLE001 — watchdog close is best-effort
+        except Exception:  # noqa: BLE001 (watchdog close is best-effort)
             pass
 
     @staticmethod
