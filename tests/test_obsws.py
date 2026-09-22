@@ -1245,10 +1245,10 @@ def t_resolve_obs_target_env_overrides_then_config():
     # RACECAST_OBS_WS_HOST and _PORT override the discovered target.
     env = {"RACECAST_OBS_WS_HOST": "100.64.0.5", "RACECAST_OBS_WS_PORT": "4466"}
     assert m.resolve_obs_target("127.0.0.1", None, env, {"port": 4455}) == ("100.64.0.5", 4466)
-    # With no override: the caller's host and OBS's own config port.
-    assert m.resolve_obs_target("127.0.0.1", None, {}, {"port": 4455}) == ("127.0.0.1", 4455)
-    # With no override and no config: the 4455 default.
-    assert m.resolve_obs_target("127.0.0.1", None, {}, None) == ("127.0.0.1", m.DEFAULT_PORT)
+    assert m.resolve_obs_target("127.0.0.1", None, {}, {"port": 4455}) == ("127.0.0.1", 4455), \
+        "with no override: the caller's host and OBS's own config port"
+    assert m.resolve_obs_target("127.0.0.1", None, {}, None) == ("127.0.0.1", m.DEFAULT_PORT), \
+        "with no override and no config: the 4455 default"
     # A non-numeric port override is ignored and falls back to config or default.
     assert m.resolve_obs_target(
         "127.0.0.1", None, {"RACECAST_OBS_WS_PORT": "x"}, {"port": 4455}) == ("127.0.0.1", 4455)
@@ -1513,8 +1513,8 @@ def t_set_scene_cut_sets_cut_no_duration():
     finally:
         m._connect = orig
     assert ("SetCurrentSceneTransition", {"transitionName": "Cut"}) in sess.sent
-    # A cut is instant, so there is no duration call.
-    assert all(t != "SetCurrentSceneTransitionDuration" for t, _ in sess.sent)
+    assert all(t != "SetCurrentSceneTransitionDuration" for t, _ in sess.sent), \
+        "a cut is instant, so there is no duration call"
 
 
 def t_set_scene_stinger_absent_degrades_to_cut_with_note():
@@ -2318,8 +2318,8 @@ def t_probe_device_options_lists_video_and_mic_and_cleans_up():
     created = [n for (_s, n, _k, _e) in state.get("created_inputs", [])]
     assert created, "expected at least one temp input"
     assert sorted(created) == sorted(state.get("removed_inputs", []))
-    # Temp inputs were created DISABLED (never enter program output).
-    assert all(enabled is False for (_s, _n, _k, enabled) in state["created_inputs"])
+    assert all(enabled is False for (_s, _n, _k, enabled) in state["created_inputs"]), \
+        "temp inputs were created DISABLED (never enter program output)"
 
 
 def t_probe_device_options_cleans_up_even_when_read_raises():

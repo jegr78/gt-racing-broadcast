@@ -78,8 +78,8 @@ def t_prewarm_loads_everything_it_can():
 
 
 def t_prewarm_never_raises_on_a_missing_file():
-    # Called at startup; a kit/build without one optional page must not crash.
-    assert bc.BundleCache().prewarm(["/definitely/not/here"]) == 0
+    assert bc.BundleCache().prewarm(["/definitely/not/here"]) == 0, \
+        "called at startup; a kit/build without one optional page must not crash"
 
 
 def t_cached_reports_what_is_held():

@@ -146,8 +146,8 @@ def t_resolve_preview_bg_profile_overrides_shared_default():
         with open(os.path.join(od, "preview-bg.png"), "wb") as f: f.write(b"\x89PNG")
         assets = os.path.join(tmp, "assets"); os.makedirs(assets)
         with open(os.path.join(assets, "preview-bg.jpg"), "wb") as f: f.write(b"\xff\xd8\xff")
-        # per-profile (overlay_dir) wins over the shared default
-        assert feeds.resolve_preview_bg(od, assets)[0].endswith(os.path.join("overlay", "preview-bg.png"))
+        assert feeds.resolve_preview_bg(od, assets)[0].endswith(os.path.join("overlay", "preview-bg.png")), \
+            "per-profile (overlay_dir) wins over the shared default"
 
 
 def t_resolve_preview_bg_shared_default_only_when_no_overlay_dir():
@@ -212,8 +212,8 @@ def t_ob_extract_slots_kind_derives_props():
     by = {s["id"]: s for s in ob.extract_slots(html)}
     assert by["a"]["props"] == list(ob.KIND_TEXT)
     assert by["b"]["props"] == list(ob.KIND_BOX)
-    # extras are appended after the kind set, de-duplicated
-    assert by["c"]["props"] == list(ob.KIND_TEXT) + ["teamNameMax", "teamNameMin"]
+    assert by["c"]["props"] == list(ob.KIND_TEXT) + ["teamNameMax", "teamNameMin"], \
+        "extras are appended after the kind set, de-duplicated"
     # no kind + explicit props -> the explicit list (back-compat fallback)
     assert by["d"]["props"] == ["left", "top"]
 
@@ -270,15 +270,15 @@ def t_ob_extract_slots_from_real_hud():
     # left/right/top/bottom-position the brand mark inside its box (the img keeps
     # its aspect ratio and is placed by the box's flex alignment).
     assert by_id["team1-logo"]["props"] == list(ob.KIND_BOX) + ["align", "valign"]
-    # the round flag stays the plain box kind (already left-aligned by natural width)
-    assert by_id["round-flag"]["props"] == list(ob.KIND_BOX)
+    assert by_id["round-flag"]["props"] == list(ob.KIND_BOX), \
+        "the round flag stays the plain box kind (already left-aligned by natural width)"
     # POV box: the box kind (still carries background/border via the kind)
     assert by_id["pov"]["props"] == list(ob.KIND_BOX)
     for p in ("background", "borderStyle", "borderColor", "borderWidth"):
         assert p in by_id["pov"]["props"], p
     assert by_id["pov"]["label"] == "POV box"
-    # POV name label is a text slot (its old hand-curated set is now the kind)
-    assert by_id["pov-name"]["props"] == list(ob.KIND_TEXT)
+    assert by_id["pov-name"]["props"] == list(ob.KIND_TEXT), \
+        "POV name label is a text slot (its old hand-curated set is now the kind)"
 
 
 def t_ob_team_logo_alignment_compiles():
@@ -516,8 +516,8 @@ def t_ob_font_families_collapses_cut_siblings():
     fams = ob.font_families(["NunitoSans.woff2", "NunitoSans-Italic.woff2",
                              "NunitoSans-Bold.woff2", "League.woff2"])
     assert fams == ["League", "NunitoSans"]          # siblings collapsed, sorted
-    # a lone sibling with no base is kept (still selectable)
-    assert ob.font_families(["Solo-Italic.woff2"]) == ["Solo-Italic"]
+    assert ob.font_families(["Solo-Italic.woff2"]) == ["Solo-Italic"], \
+        "a lone sibling with no base is kept (still selectable)"
 
 
 def t_ob_google_font_cuts_url():
@@ -713,8 +713,8 @@ def t_ob_compile_slant_clip_path():
     # inclusive ±400 boundary is ACCEPTED (the mirror-critical clamp edge)
     assert "polygon(400px 0," in _css_x({"slant": 400})
     assert "100%, 400px 100%)" in _css_x({"slant": -400})
-    # a fractional slant keeps its decimals (no spurious .0 normalization)
-    assert "polygon(40.5px 0," in _css_x({"slant": 40.5})
+    assert "polygon(40.5px 0," in _css_x({"slant": 40.5}), \
+        "a fractional slant keeps its decimals (no spurious .0 normalization)"
 
 
 def t_ob_compile_slant_rejects():
@@ -1055,8 +1055,8 @@ def t_hud_page_publishes_team_colors_and_mode():
     assert "--team-bg" in html and "--team-fg" in html
     assert "dataset.mode" in html
     assert "qualiLap" in html
-    # the bar carries no background in base; a profile decides
-    assert "background: var(--team-bg)" not in html
+    assert "background: var(--team-bg)" not in html, \
+        "the bar carries no background in base; a profile decides"
 
 
 if __name__ == "__main__":

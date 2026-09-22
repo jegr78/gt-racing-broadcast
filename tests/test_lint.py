@@ -68,8 +68,8 @@ def t_bare_except_is_flagged():
 
 
 def t_mixed_benign_and_real_is_flagged():
-    # catching a real error type alongside a benign one is still a silent swallow
-    assert lint.find_empty_excepts(MIXED_BENIGN) == [3]
+    assert lint.find_empty_excepts(MIXED_BENIGN) == [3], \
+        "catching a real error type alongside a benign one is still a silent swallow"
 
 
 def t_dotted_exception_name_uses_attr():

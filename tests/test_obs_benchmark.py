@@ -267,8 +267,8 @@ def t_keeps_real_time_at_the_thresholds_holds():
 def t_keeps_real_time_is_unknown_without_the_signals_it_needs():
     assert m.keeps_real_time(_summary(fps=None), 60.0) is None
     assert m.keeps_real_time(_summary(), None) is None
-    # without the cursor a frozen demuxer is indistinguishable from a healthy one
-    assert m.keeps_real_time(_summary(rate=None), 60.0) is None
+    assert m.keeps_real_time(_summary(rate=None), 60.0) is None, \
+        "without the cursor a frozen demuxer is indistinguishable from a healthy one"
 
 
 def t_keeps_real_time_is_unknown_for_a_disturbed_window():
@@ -651,8 +651,8 @@ def t_inbound_gap_worst_ignores_the_reading_the_window_inherited():
     # old serve's jitter on the new one.
     def w(*vals):
         return [{"t": float(i), "inbound_max_gap_s": v} for i, v in enumerate(vals)]
-    # 9.0 is inherited from before the restart; only 0.4 and 1.2 were produced in-window.
-    assert m._inbound_gap_worst(w(9.0, 9.0, 9.0, 0.4, 0.4, 1.2, 1.2)) == 1.2
+    assert m._inbound_gap_worst(w(9.0, 9.0, 9.0, 0.4, 0.4, 1.2, 1.2)) == 1.2, \
+        "9.0 is inherited from before the restart; only 0.4 and 1.2 were produced in-window"
     # A later repeat of a value is real data, because two intervals may share a max.
     assert m._inbound_gap_worst(w(9.0, 0.4, 1.2, 1.2)) == 1.2
     assert m._inbound_gap_worst(w(0.4, 9.0, 0.4)) == 9.0   # a spike after the first change
@@ -670,8 +670,8 @@ def t_inbound_gap_worst_ignores_the_reading_the_window_inherited():
     assert m._inbound_gap_worst(w(9.0, 9.0, 9.0)) is None
     assert m._inbound_gap_worst(w()) is None
     assert m._inbound_gap_worst(w(None, None)) is None
-    # An older relay publishes nothing at all: None throughout, never 0.0.
-    assert m._inbound_gap_worst(w(None, None, None)) is None
+    assert m._inbound_gap_worst(w(None, None, None)) is None, \
+        "an older relay publishes nothing at all: None throughout, never 0.0"
     # And it is wired into the summary, not just defined.
     assert m.summarize(w(9.0, 9.0, 0.4, 1.2))["inbound_gap_worst_s"] == 1.2
 
@@ -869,8 +869,8 @@ def t_run_keeps_a_pin_and_the_recording_on_request():
         rec, removed = _run(d, clock, relay, sess, keep_recording=True)
     assert relay.calls[-1] == ("A", "robust")
     assert removed == [] and rec["recording"] == "/rec/benchmark.mkv"
-    # already on the target scene: no switch there and none back
-    assert not [k for k, _ in sess.sent if k == "SetCurrentProgramScene"]
+    assert not [k for k, _ in sess.sent if k == "SetCurrentProgramScene"], \
+        "already on the target scene: no switch there and none back"
 
 
 def t_run_refuses_before_touching_anything():

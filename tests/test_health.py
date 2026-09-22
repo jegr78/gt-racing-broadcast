@@ -23,8 +23,8 @@ os.environ.setdefault("RACECAST_MANUAL_FEED_ARM", "0")
 
 
 def t_cookie_health_no_path():
-    # Running cookie-less (public streams) is legitimate: never stale.
-    assert m.cookie_health(None) == {"present": False, "age_h": None, "stale": False}
+    assert m.cookie_health(None) == {"present": False, "age_h": None, "stale": False}, \
+        "running cookie-less (public streams) is legitimate: never stale"
 
 
 def t_cookie_health_missing_file():
@@ -354,8 +354,8 @@ def t_stream_event_log_line_formats():
             == "OBS stream output stopped after 1h 01m 12s")
     assert (m.stream_event_log_line(False, uptime_s=42.0)
             == "OBS stream output stopped after 42s")
-    # Negative or None uptime is dropped, not rendered.
-    assert m.stream_event_log_line(False, uptime_s=-3.0) == "OBS stream output stopped"
+    assert m.stream_event_log_line(False, uptime_s=-3.0) == "OBS stream output stopped", \
+        "negative or None uptime is dropped, not rendered"
 
 
 def t_on_stream_transition_logs_relay_line_with_uptime():
@@ -654,8 +654,8 @@ def t_feed_health_state_within_grace_is_connecting():
     now = 1000.0
     assert m.feed_health_state(True, now - 5, True, now,
                                grace_s=m.HEALTH_DROP_GRACE_S) == "connecting"
-    # missing timestamp is treated as just-dropped (within grace)
-    assert m.feed_health_state(True, None, True, now) == "connecting"
+    assert m.feed_health_state(True, None, True, now) == "connecting", \
+        "missing timestamp is treated as just-dropped (within grace)"
 
 
 def t_feed_health_state_down_after_grace_when_served():
@@ -687,8 +687,8 @@ def t_drop_connecting_notifiable_blip_suppressed():
     assert m.drop_connecting_notifiable(True, now - (s - 1), now) is False
     # past the settle window -> a genuinely stuck reconnect -> notifiable
     assert m.drop_connecting_notifiable(True, now - (s + 1), now) is True
-    # a never-served / not-yet-dropped connecting feed is unchanged (notifiable)
-    assert m.drop_connecting_notifiable(False, None, now) is True
+    assert m.drop_connecting_notifiable(False, None, now) is True, \
+        "a never-served / not-yet-dropped connecting feed is unchanged (notifiable)"
     # missing timestamp is treated as just-dropped -> still a blip
     assert m.drop_connecting_notifiable(True, None, now) is False
 

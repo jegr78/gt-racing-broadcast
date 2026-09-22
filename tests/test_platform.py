@@ -15,8 +15,8 @@ def t_platform_of():
     assert feeds.platform_of("https://m.twitch.tv/chan") == "twitch"    # subdomain
     # a bare UC id, which channel_url turns into a youtube URL -> youtube
     assert feeds.platform_of("UC1234567890123456789012") == "youtube"
-    # the userinfo trick must not be seen as twitch
-    assert feeds.platform_of("https://twitch.tv@evil.com/") == "youtube"
+    assert feeds.platform_of("https://twitch.tv@evil.com/") == "youtube", \
+        "the userinfo trick must not be seen as twitch"
 
 
 def t_serve_cmd_youtube():
@@ -108,8 +108,8 @@ def t_cookies_for():
 
 def t_migrate_legacy():
     d = tempfile.mkdtemp()
-    # no files: a no-op that returns the canonical path
-    assert feeds.migrate_legacy_cookie(d).endswith("yt-cookies.txt")
+    assert feeds.migrate_legacy_cookie(d).endswith("yt-cookies.txt"), \
+        "no files: a no-op that returns the canonical path"
     # legacy present, new absent: renamed
     legacy = os.path.join(d, "cookies.txt")
     with open(legacy, "w") as f: f.write("x")

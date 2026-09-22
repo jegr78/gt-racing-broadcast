@@ -47,8 +47,8 @@ def t_build_command_platform_flag():
                                       platform="linux/amd64")
     assert amd64[:3] == ["docker", "run", "--platform=linux/amd64"]
     assert "--rm" in amd64 and "/repo:/repo" in amd64
-    # the in-container script is unchanged; the emulated image decides the arch
-    assert amd64[-3:] == default[-3:]
+    assert amd64[-3:] == default[-3:], \
+        "the in-container script is unchanged; the emulated image decides the arch"
 
 
 if __name__ == "__main__":

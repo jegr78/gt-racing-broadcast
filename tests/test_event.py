@@ -39,8 +39,8 @@ def t_process_names_cover_obs_and_discord():
 
 
 def t_app_running_returns_bool():
-    # Smoke on the current platform: must not raise, must return a bool.
-    assert m.app_running("obs") in (True, False)
+    assert m.app_running("obs") in (True, False), \
+        "smoke on the current platform: must not raise, must return a bool"
 
 
 def t_launch_command_darwin():
@@ -428,8 +428,8 @@ def t_launch_env_xauthority_from_runtime_dir():
                        exists=lambda p: p == "/run/user/1000",
                        uid=1000, glob_paths=globber)
     assert seen == ["/run/user/1000/xauth_*"]
-    # deterministic pick (sorted), so two runs never disagree
-    assert out["XAUTHORITY"] == "/run/user/1000/xauth_AAAAAA"
+    assert out["XAUTHORITY"] == "/run/user/1000/xauth_AAAAAA", \
+        "deterministic pick (sorted), so two runs never disagree"
 
 
 def t_launch_env_home_xauthority_wins_over_runtime_dir():

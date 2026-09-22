@@ -129,8 +129,8 @@ def t_control_port_available_true_when_free_false_when_taken():
         assert m.control_port_available("127.0.0.1", port) is False
     finally:
         held.close()
-    # Once freed, the same port is available again.
-    assert m.control_port_available("127.0.0.1", port) is True
+    assert m.control_port_available("127.0.0.1", port) is True, \
+        "once freed, the same port is available again"
 
 
 def t_control_port_probe_sets_reuseaddr_on_posix():
