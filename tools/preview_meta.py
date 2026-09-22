@@ -107,7 +107,7 @@ def compute_preview_meta(event_name, pr_number=None, ref=None, sha=None,
             return {
                 "tag": f"preview-pr-{n}",
                 "version": f"{base_version}-preview.pr{n}.{short}",
-                "title": f"Preview {base_version} — PR #{n} ({short})",
+                "title": f"Preview {base_version}: PR #{n} ({short})",
             }
         return {
             "tag": f"preview-pr-{n}",
@@ -120,7 +120,7 @@ def compute_preview_meta(event_name, pr_number=None, ref=None, sha=None,
             return {
                 "tag": f"preview-{r}",
                 "version": f"{base_version}-preview.{r}.{short}",
-                "title": f"Preview {base_version} — {r} ({short})",
+                "title": f"Preview {base_version}: {r} ({short})",
             }
         return {
             "tag": f"preview-{r}",
