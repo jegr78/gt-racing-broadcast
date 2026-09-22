@@ -86,8 +86,9 @@ def _host_label(value):
 def request_csrf_ok(headers):
     """Reject cross-origin and DNS-rebind requests at the localhost trust boundary.
     The UI binds 127.0.0.1 only and has no auth, so a malicious web page the operator
-    merely visits must not be able to drive the API. A foreign Host header or a
-    cross-origin Origin/Referer is refused. Browsers always attach Origin to
+    merely visits must not be able to drive the API: write .env, switch profile, run
+    ops. A foreign Host header (DNS-rebinding away from a loopback name) or a
+    cross-origin Origin/Referer (classic CSRF) is refused. Browsers always attach Origin to
     cross-origin POSTs; a client that sends none still has to carry a loopback Host.
     `headers` is any .get()-able map."""
     host = _host_label(headers.get("Host"))

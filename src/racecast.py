@@ -7761,8 +7761,8 @@ def smoketest_cmd(rest):
                                      or "event stop failed"))
             say(f"  teardown FAILED: {exc}")
         # `event start` turns the Funnel on by default, and no stop path turns it
-        # off, because a maintenance command must not leave public ingress behind that
-        # it opened itself. Only revert what THIS run switched on.
+        # off. A maintenance command must not leave public ingress behind that it
+        # opened itself, so revert only what THIS run switched on.
         if funnel_was_off:
             try:
                 import tailscale as _ts

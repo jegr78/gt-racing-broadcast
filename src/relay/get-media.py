@@ -308,7 +308,7 @@ def run_download(cmd, *, attempts=DOWNLOAD_ATTEMPTS, backoff=RETRY_BACKOFF_SECON
 def download(url, out_path, cookies=None):
     """Download `url` to `out_path` as a single muxed MP4 (audio included).
     Uses yt-cookies.txt if it exists (YouTube bot-check parity with the relay).
-    The URL comes from the multi-editor Sheet Assets tab, so it must be a real
+    The URL comes from the multi-editor, semi-trusted Sheet Assets tab, so it must be a real
     http(s) URL, never a file:// path or a flag-like value. Retries a transient
     yt-dlp failure."""
     if not (url.startswith("http://") or url.startswith("https://")):

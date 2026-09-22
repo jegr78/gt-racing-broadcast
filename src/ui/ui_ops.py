@@ -105,7 +105,9 @@ _TAG_RE = re.compile(r"^preview-[\w.-]+\Z")
 
 
 def _tag_arg(value):
-    """A preview release tag the UI may install. Allowlist: preview-* only."""
+    """A preview release tag the UI may install. Allowlist: preview-* only.
+    Defends against argv junk and stable-tag downgrades: the UI only ever sends a
+    tag it got from /api/previews, which lists prereleases."""
     s = str(value)
     if not _TAG_RE.match(s):
         raise ValueError(f"invalid preview tag: {value!r}")
