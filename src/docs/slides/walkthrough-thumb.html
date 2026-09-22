@@ -4,10 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- YouTube thumbnail template (1280x720) for the narrated walkthrough videos
-     (tools/build-walkthrough-videos.py). Plain HTML still, NOT a Reveal deck (it
-     has no reveal root marker), so it is excluded from the deck list and the
-     overflow guard. The builder sets body[data-role] (drives the accent colour
-     via deck.css) plus #title / #sub text per video. Reuses the deck fonts. -->
+     (tools/build-walkthrough-videos.py). A plain HTML still, not a Reveal deck: it
+     carries no reveal root marker, so the deck list and the overflow guard skip it.
+     The builder sets body[data-role], which drives the accent colour via deck.css,
+     plus the #title and #sub text per video. -->
 <link rel="stylesheet" href="assets/deck.css">
 <style>
   html,body{margin:0;width:1280px;height:720px;background:#fff;overflow:hidden}

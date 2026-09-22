@@ -18,10 +18,9 @@
     var _f = window.fetch;
     window.fetch = function (u, o) { return _f(window.RC_API(u), o); };
   })();
-  // The auth cookie was set by the response that served this page, so the token
-  // in the URL (`?t=…` from the racecast-links launcher) is no longer needed —
-  // strip it from the address bar + history so it does not linger in
-  // screen-shares / browser history. Sub-requests use the cookie.
+  // The response that served this page set the auth cookie, so the token in the
+  // URL is no longer needed. Strip it from the address bar and history so it does
+  // not linger in a screen-share. Sub-requests use the cookie.
   if (location.search) {
     try { history.replaceState({}, '', location.pathname); } catch (e) { /* noop */ }
   }
@@ -84,8 +83,8 @@
       menu.innerHTML = out.join('') ||
         '<div class="empty">No surfaces are available for your role.</div>';
     }
-    // Health Monitor (any authenticated subject) is always the LAST card — appended
-    // after the optional, async Web Buttons card so it stays at the bottom of the list.
+    // Health Monitor is always the last card, appended after the optional async
+    // Web Buttons card so it stays at the bottom of the list.
     function finish() {
       out.push(card(RC_API('/health-monitor'), 'Health Monitor',
         'Relay health over time: status bands, charts & incidents'));

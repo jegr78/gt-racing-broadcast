@@ -3,8 +3,8 @@
 <head>
 <script>
   // /console base-path shim (#216): the server replaces __RC_API_BASE__ with the
-  // active mount ("/console" behind Funnel — this page is only served there). Used
-  // for the iframe src and the "← Console" back link so both resolve under the mount.
+  // active mount, "/console" behind Funnel, the only place this page is served.
+  // The iframe src and the back link both resolve under it.
   window.RC_API_BASE = "__RC_API_BASE__";
   window.RC_API = function (p) {
     var b = window.RC_API_BASE || "";
@@ -12,10 +12,9 @@
     if (p.indexOf(b + "/") === 0 || p === b) return p;   // already prefixed
     return b + p;
   };
-  // The auth cookie was set by the response that served this page, so a token in
-  // the URL (`?t=…` on a /console/buttons link) is no longer needed — strip it
-  // from the address bar + history so it does not linger in screen-shares /
-  // browser history. Sub-requests use the cookie.
+  // The response that served this page set the auth cookie, so the token in the
+  // URL is no longer needed. Strip it from the address bar and history so it does
+  // not linger in a screen-share. Sub-requests use the cookie.
   if (location.search) {
     try { history.replaceState({}, '', location.pathname); } catch (e) { /* noop */ }
   }

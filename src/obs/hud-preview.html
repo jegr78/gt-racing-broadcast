@@ -4,15 +4,14 @@
 <meta charset="utf-8">
 <title>GT Racing HUD — Preview</title>
 <style>
-  /* HUD design preview. Composites, at the real OBS 1920x1080 canvas size, the
-     three layers an OBS scene stacks so a producer can judge the overlay against
-     real game footage while editing the per-league CSS in the Control Center:
+  /* HUD design preview. Stacks the three layers of an OBS scene at the real
+     1920x1080 canvas size so a producer can judge the overlay against game
+     footage while editing the per-league CSS:
        1. a Gran Turismo lobby/replay screenshot  (/hud/preview/bg)
        2. the Overlay.png broadcast frame graphic (/hud/preview/frame)
        3. the live HUD text + override CSS         (/hud, in an iframe)
-     The whole stage scales uniformly to fit the window. Missing bg/frame degrade
-     gracefully (placeholder backdrop / no frame); the HUD layer carries the CSS
-     you are designing, with live sheet data. */
+     The stage scales uniformly to fit the window. A missing screenshot falls back
+     to the placeholder backdrop, a missing frame to none. */
   :root { --s: 1; }
   html, body { margin: 0; height: 100%; background: #06080b; overflow: hidden;
     font-family: "Saira Condensed", system-ui, sans-serif; color: #cdd6e0; }
@@ -28,9 +27,9 @@
   .bar button:hover { border-color: #3aa0ff; }
 
   .viewport { position: fixed; inset: 40px 0 0 0; overflow: hidden; }
-  /* Fixed broadcast canvas; centered and uniformly scaled to the viewport via
-     --s (set by JS). translate(-50%,-50%) centers the 1920x1080 layout box, then
-     scale shrinks it about its center — reliable for an oversized element. */
+  /* Fixed broadcast canvas, centred and uniformly scaled to the viewport via --s
+     (set by JS). translate(-50%,-50%) centres the 1920x1080 layout box, then scale
+     shrinks it about its centre, which works for an oversized element. */
   .stage { position: absolute; top: 50%; left: 50%; width: 1920px; height: 1080px;
     transform: translate(-50%, -50%) scale(var(--s)); transform-origin: center center;
     box-shadow: 0 0 0 1px #1b222c, 0 30px 90px rgba(0,0,0,.6); background: #000; }
@@ -88,8 +87,8 @@
   }
   addEventListener('resize', fit);
 
-  // Cache-bust each layer on (re)load so a freshly saved CSS / swapped screenshot
-  // / re-downloaded Overlay.png shows without a manual browser cache clear.
+  // Cache-bust each layer on reload so a freshly saved CSS, screenshot or frame
+  // shows without a manual browser cache clear.
   function load() {
     const v = '?t=' + Date.now();
     const shot = document.getElementById('shot');

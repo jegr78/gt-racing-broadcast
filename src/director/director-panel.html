@@ -17,10 +17,9 @@
     var _f = window.fetch;
     window.fetch = function (u, o) { return _f(window.RC_API(u), o); };
   })();
-  // The auth cookie was set by the response that served this page, so a token in
-  // the URL (`?t=…` on a /console/panel link) is no longer needed — strip it from
-  // the address bar + history so it does not linger in screen-shares / browser
-  // history. Sub-requests use the cookie.
+  // The response that served this page set the auth cookie, so the token in the
+  // URL is no longer needed. Strip it from the address bar and history so it does
+  // not linger in a screen-share. Sub-requests use the cookie.
   if (location.search) {
     try { history.replaceState({}, '', location.pathname); } catch (e) { /* noop */ }
   }
@@ -28,17 +27,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>GT Racing · Director Console</title>
-<!-- Inline "D" favicon (drawn as a path, so it renders without a font); dark tile + live-green letter to match the console theme. -->
+<!-- Inline "D" favicon drawn as a path so it renders without a font. -->
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230a0c0f'/%3E%3Cpath fill-rule='evenodd' d='M8 6h9a10 10 0 0 1 0 20H8zM13 11h4a5 5 0 0 1 0 10h-4z' fill='%232bd66a'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-  /* =========================================================
-     GT RACING DIRECTOR CONSOLE — vision-mixer busses
-     Horizontal action rows mirroring the Companion pages.
-     Dark, high-contrast, glanceable. Built for tablet + desktop.
-     ========================================================= */
+  /* Vision-mixer busses: horizontal action rows mirroring the Companion pages. */
   :root{
     --bg:#0a0c0f; --panel:#13171c; --panel-2:#171c22; --edge:#272f38;
     --ink:#e8edf2; --muted:#7b8794; --mono:'IBM Plex Mono',ui-monospace,monospace;
@@ -61,7 +56,7 @@
   }
   .wrap{max-width:1240px;margin:0 auto}
 
-  /* ---------- header: brand + status strip + LEDs ---------- */
+  /* Header: brand, status strip, LEDs */
   header{
     position:sticky;top:0;z-index:50;
     display:flex;align-items:center;gap:14px;flex-wrap:wrap;
@@ -101,7 +96,7 @@
   .dot.on{background:var(--live);box-shadow:0 0 14px var(--live-glow),0 0 0 3px rgba(43,214,106,.12)}
   .dot.err{background:var(--air);box-shadow:0 0 14px var(--air-glow),0 0 0 3px rgba(255,45,45,.12)}
 
-  /* ---------- connection row ---------- */
+  /* Connection row */
   .conn{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;
     border:1px solid var(--edge);background:var(--panel);border-radius:14px;padding:12px 14px;margin-bottom:12px}
   .fld{display:flex;flex-direction:column;gap:5px}
@@ -115,7 +110,7 @@
   .pill.stop{border-color:var(--air);color:var(--air)}
   .pill:disabled{opacity:.45;cursor:not-allowed}
 
-  /* ---------- busses (compact cards: top label, stacked) ---------- */
+  /* Busses: compact cards with a top label, stacked */
   .bus{display:flex;flex-direction:column;gap:8px;align-items:stretch;
     border:1px solid var(--edge);background:linear-gradient(180deg,var(--panel-2),var(--panel));
     border-radius:12px;padding:9px 12px;margin-bottom:12px;
@@ -132,7 +127,7 @@
   .grp{display:flex;flex-direction:column;gap:5px}
   .glbl{font-size:8px;letter-spacing:.22em;text-transform:uppercase;color:var(--muted)}
 
-  /* ---------- layout: deck + two-column control blocks ---------- */
+  /* Layout: deck plus two-column control blocks */
   /* deck groups the program preview + PGM bus at the top, full width */
   .deck{border:1px solid var(--edge);background:linear-gradient(180deg,var(--panel-2),var(--panel));
     border-radius:12px;padding:10px 12px;margin-bottom:12px;
@@ -151,7 +146,7 @@
     border:1px solid var(--edge);border-radius:8px;padding:7px 10px;white-space:nowrap}
   .txarmed:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 
-  /* ---------- keys ---------- */
+  /* Keys */
   button.k{
     appearance:none;cursor:pointer;color:var(--ink);font-family:var(--mono);font-weight:500;
     font-size:12px;letter-spacing:.04em;padding:7px 9px;border-radius:10px;flex:0 0 auto;
@@ -181,7 +176,7 @@
   button.k.stream.recon{border-color:#d68910;background:linear-gradient(180deg,#332611,#261d10);
     color:#ffcf80;box-shadow:0 0 0 1px #d68910,0 0 18px rgba(214,137,16,.35)}
   .pgm button.k{min-width:98px;min-height:48px;font-weight:600;font-size:12px}
-  /* NEXT — the handover: primary green emphasis (matches the approved mockup) */
+  /* NEXT, the handover: primary green emphasis */
   button.k.next{border-color:var(--live);background:linear-gradient(180deg,#17351f,#0f2717);
     box-shadow:0 0 0 1px var(--live),0 0 18px var(--live-glow);font-weight:600}
   button.k.next .tag{color:var(--live)}
@@ -194,9 +189,9 @@
   #txBar .txdur input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(58,160,255,.18)}
   #txBar .txdur input:disabled{opacity:.4;cursor:not-allowed}
 
-  /* ---------- audio rows ---------- */
-  /* dB rows: a fixed 5-col grid (name · slider · dB · reset · mute) so nothing
-     overflows the half-width Audio card (mockup layout). */
+  /* Audio rows */
+  /* dB rows: a fixed 5-column grid (name, slider, dB, reset, mute) so nothing
+     overflows the half-width Audio card. */
   .arow{display:grid;grid-template-columns:60px minmax(0,1fr) 58px auto auto;align-items:center;gap:8px;
     padding:6px 0;border-top:1px dashed var(--edge)}
   .arow:first-child{border-top:0}
@@ -213,7 +208,7 @@
   #feedHealth .warnline{color:#ffd361}
   #feedHealth .downline{color:#ff8080;font-weight:600}
 
-  /* ---------- setup dropdowns (sheet-backed) ---------- */
+  /* Setup dropdowns (sheet-backed) */
   .setrow{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
   .setrow + .setrow{margin-top:10px}
   .fld select{background:#0c0f13;border:1px solid var(--edge);color:var(--ink);
@@ -230,10 +225,10 @@
   #hudBus .setrow .fld select{width:100%;min-width:0;font-size:12px;padding:8px 9px;border-radius:8px}
   #hudBus #teamRow .fld:last-child{flex:0 0 auto}
 
-  /* ---------- URLs section ---------- */
+  /* URLs section */
   details.urls{display:block}
-  /* honor the hidden attribute despite the display:block above (author rule
-     beats the UA [hidden] rule) — else #urlsBox stays shown in qualifying mode */
+  /* Honour the hidden attribute despite the display:block above, whose author rule
+     beats the UA [hidden] rule; else #urlsBox stays shown in qualifying mode. */
   details.urls[hidden]{display:none}
   details.urls summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;
     font-family:var(--head);font-weight:700;letter-spacing:.12em;font-size:14px;text-transform:uppercase}
@@ -273,11 +268,11 @@
   .urls .add{display:inline-block;width:auto;margin-top:8px;font-size:10px;padding:6px 10px;border-radius:7px;
     border:1px dashed var(--edge);background:#141a21;color:var(--ink);cursor:pointer;letter-spacing:.04em}
 
-  /* ---------- log ---------- */
+  /* Log */
   #log{font-size:11px;color:var(--muted);margin-top:2px;max-height:90px;overflow:auto;
     border:1px solid var(--edge);background:#0c0f13;border-radius:10px;padding:10px;white-space:pre-wrap}
 
-  /* ---------- state banners (persistent) + toasts (one-off) ---------- */
+  /* State banners (persistent) and toasts (one-off) */
   #banners{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
   #banners:empty{display:none}
   .banner{border-radius:10px;padding:10px 14px;font-size:13px;font-weight:600;
@@ -288,7 +283,7 @@
              background:transparent;color:inherit;font-weight:700;cursor:pointer;font-size:12px}
   .armbtn{padding:5px 8px;border-radius:7px;border:1px solid var(--edge);
           background:#141a21;color:var(--ink);font-weight:500;cursor:pointer;font-size:10px}
-  /* ARM (data-on=1) reads go/green, STOP (data-on=0) reads stop/red — mockup */
+  /* ARM (data-on=1) reads green, STOP (data-on=0) reads red */
   .qbtn.armbtn[data-on="1"]{border-color:var(--live);color:#9fe9bd}
   .qbtn.armbtn[data-on="0"]{border-color:var(--air);color:#ffb0b0}
   .armbtn.armed{border-color:var(--live);color:#9fe9bd}
@@ -302,7 +297,7 @@
         background:#141a21;color:var(--ink);font-weight:500;cursor:pointer;font-size:10px;min-height:28px}
   .qbtn:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
   .qbtn.active{border-color:var(--blue);color:#bfe0ff}
-  /* EMERGENCY reads loud when active — a feed pinned below 720p must not be missed */
+  /* EMERGENCY reads loud when active: a feed pinned below 720p must not be missed */
   .qbtn[data-tier="emergency"].active{border-color:var(--air);color:#ff9d9d;
         background:#330f0f}
   /* preview: open the feed's current stream in a new tab (inline, right after AUTO) */
@@ -314,7 +309,7 @@
   .toast{background:#330f0f;border:1px solid var(--air);color:#ff9d9d;border-radius:10px;
     padding:10px 14px;font-size:12px;font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,.6)}
 
-  /* ---------- small screens ---------- */
+  /* Small screens */
   @media(max-width:760px){
     body{padding:10px}
     .bus{flex-direction:column;gap:8px}
@@ -325,7 +320,7 @@
     .arow .nm{flex:0 0 64px}
   }
 
-  /* ---------- cues section ---------- */
+  /* Cues section */
   .cue-compose{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;margin-bottom:10px}
   .cue-compose select,.cue-compose input[type=text]{
     background:#0c0f13;border:1px solid var(--edge);color:var(--ink);
@@ -364,11 +359,11 @@
   #cueBackList li .who{color:#7fb2ff;font-weight:700}
   #cueBackList li .ts{color:var(--muted);font-size:10px;margin-right:6px;font-variant-numeric:tabular-nums}
 
-  /* ---------- two-pane layout: scrolling controls + persistent chat ------- */
+  /* Two-pane layout: scrolling controls, persistent chat */
   .panes{display:block}
   details.chat{display:block}
 
-  /* ---------- chat ---------- */
+  /* Chat */
   details.chat summary{cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;
     font-family:var(--head);font-weight:700;letter-spacing:.12em;font-size:14px;text-transform:uppercase}
   details.chat summary::before{content:"";width:6px;height:16px;background:var(--amber);
@@ -397,7 +392,7 @@
   .bcompose { float: right; font: inherit; font-size: 11px; line-height: 1.4;
     padding: 2px 8px; border: 1px solid #3a4250; border-radius: 5px;
     background: #1f2630; color: #cdd3da; cursor: pointer;
-    pointer-events: auto; }  /* the #bchatBox summary sets pointer-events:none (no collapse) — re-enable it on the button so it stays clickable */
+    pointer-events: auto; }  /* the #bchatBox summary sets pointer-events:none, so re-enable it on the button */
   .bcompose:hover { background: #2a323d; }
   .bcompose[hidden] { display: none; }
   .chatname{display:flex;align-items:center;gap:8px;margin-bottom:6px}
@@ -409,7 +404,7 @@
   .chatsend input{flex:1;min-width:0;background:#0c0f13;border:1px solid var(--edge);color:var(--ink);
     font-family:var(--mono);font-size:13px;padding:10px 12px;border-radius:9px;outline:none}
   .chatsend input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(58,160,255,.18)}
-  /* SEND: a real accent button (was an unstyled default button outside .urls) */
+  /* SEND: an accent button, since it sits outside .urls */
   .chatsend .save{flex:0 0 auto;padding:10px 18px;font-family:var(--head);font-weight:700;
     letter-spacing:.14em;font-size:13px;text-transform:uppercase;border-radius:9px;cursor:pointer;
     border:1px solid var(--live);color:#07140c;
@@ -421,32 +416,23 @@
   .chatsend .save:disabled{opacity:.5;cursor:not-allowed;filter:grayscale(.3)}
   .unread{background:#c33;color:#fff;border-radius:9px;padding:0 6px;font-size:11px;margin-left:6px}
 
-  /* Desktop: the chat becomes a persistent right column (YouTube-style), always
-     visible — force the <details> body open and turn the summary into a static
-     caption — while the controls scroll on the left. Narrow screens keep the
-     single-column flow with the chat as a native collapsible <details>. */
+  /* Desktop: the chat becomes a persistent right column. The <details> body is
+     forced open and its summary turned into a static caption, while the controls
+     scroll on the left. Narrow screens keep the single-column flow with the chat as
+     a native collapsible <details>. */
   @media(min-width:900px){
     .panes{display:grid;grid-template-columns:minmax(0,1fr) clamp(280px,26vw,360px);
            gap:14px;align-items:start}
     .mainpane{min-width:0}
-    /* Right rail: a sticky column with the crew chat (top) and the read-only
-       broadcast chat (below) stacked, both always visible (#294). Each chat log is
-       a *fixed*-height scroll region (YouTube/Twitch-style) — a stable height from
-       the start, scrolling internally; it must NOT grow with its messages, or the
-       crew box pushes down into the broadcast box. NB: a <details> does not
-       propagate a definite height to its descendants via flex-grow OR flex-shrink
-       (Chromium quirk — verified live: a flex:1 fill chain collapses the log to ~0),
-       so the height is pinned directly rather than flexed. The two logs share the
-       rail: each is calc(50vh - 232px), i.e. (rail-height − chrome)/2, where the
-       ~400px of chrome (two summaries, the name+send row, both hints, the gap) is
-       measured at the narrowest rail (clamp floor 280px); clamped to [88px, 360px]
-       so it stays usable on short windows and bounded on tall ones. With this the
-       two boxes + chrome fit the rail at every realistic director window
-       (≥1280×720, all common laptops), so the rail's own overflow-y:auto scrollbar
-       (the reported "second scrollbar") never appears — it remains only as a
-       fallback for a pathologically small window. Boxes are flex:0 0 auto: they
-       take exactly their content height and never shrink, so the crew box can no
-       longer spill its content over the broadcast box below it. */
+    /* Right rail: a sticky column stacking the crew chat over the read-only
+       broadcast chat, both always visible (#294). Each log is a fixed-height scroll
+       region and must not grow with its messages, or the crew box pushes down into
+       the broadcast box. A <details> does not propagate a definite height to its
+       descendants through flex-grow or flex-shrink in Chromium, where a flex:1 fill
+       chain collapses the log to nothing, so each height is pinned rather than
+       flexed and the boxes are flex:0 0 auto. Together the two boxes and the chrome
+       fit the rail at any realistic director window, so the rail's own
+       overflow-y:auto scrollbar stays a fallback for a very small window. */
     .rail{position:sticky;top:18px;align-self:start;display:flex;flex-direction:column;
            gap:14px;max-height:calc(100vh - 36px);overflow-y:auto}
     details.chat#chatBox,details.chat#bchatBox{margin-bottom:0;min-height:0;flex:0 0 auto;
@@ -460,13 +446,12 @@
            overflow-y:auto;min-height:0;margin-top:0}
     details.chat#chatBox .hint,details.chat#bchatBox .hint{margin-top:6px}
   }
-  /* Live Preview stacks as a full-width column: the label + SHOW/HIDE + stream
-     button sit on their own top row and the program/feeds body renders as a
-     clean row beneath — not the default .bus side-by-side, whose fixed-width
-     cap let its buttons overflow onto the body. */
+  /* Live Preview stacks as a full-width column: the label, SHOW/HIDE and stream
+     button take their own top row and the program/feeds body renders beneath. The
+     default .bus side-by-side caps the width and let its buttons overflow the body. */
   .bus.preview{flex-direction:column;align-items:stretch}
   .bus.preview>.cap{flex:0 0 auto;width:100%;padding-top:0}
-  /* 4-up preview: PROGRAM + FEED A/B/POV as equal 16:9 tiles, audio monitor below */
+  /* 4-up preview: PROGRAM and FEED A/B/POV as equal 16:9 tiles, audio below */
   .preview .pvbody{margin-top:6px;display:grid;grid-template-columns:1.6fr 1fr 1fr 1fr;gap:8px;align-items:start}
   .pvfeeds{display:contents}
   #pgmAudioBar{grid-column:1 / -1}
@@ -480,7 +465,7 @@
   .pvph svg{width:22px;height:22px;opacity:.6}
   .pvph.err{color:#c98a8a}
   .pvlabel{font-size:10px;opacity:.85;margin-top:3px;display:flex;justify-content:space-between;align-items:center;gap:6px}
-  /* compact per-tile PAUSE toggle (small pill, not a full key) */
+  /* compact per-tile PAUSE toggle */
   button.k.pvtoggle{min-width:0;min-height:0;padding:3px 9px;font-size:10px;box-shadow:none}
   .pvtile.onair .pvframe{outline:2px solid var(--live);outline-offset:-1px}
   .pvbar{height:5px;background:#1a1f27;border-radius:3px;margin-top:4px;overflow:hidden}
@@ -512,9 +497,9 @@
     background: #0d0f14; color: #e8eaed; border: 1px solid #3a3f4a; border-radius: 6px; }
   #partModalConfirm:disabled { opacity: .4; cursor: not-allowed; }
 
-  /* Kind-conditional cut (#307): hide A/B feed + schedule + submission surfaces
-     in solo; reveal the POV editor (which lives inside #urlsBox) as its own card.
-     Endurance = no `.solo` class → byte-identical. */
+  /* Kind-conditional cut (#307): in solo, hide the A/B feed, schedule and
+     submission surfaces and reveal the POV editor, which lives inside #urlsBox, as
+     its own card. Endurance sets no `.solo` class and is unaffected. */
   body.solo #feedsSec,
   body.solo #stA,
   body.solo #stB,
@@ -558,8 +543,8 @@
     </div>
   </header>
   <script>
-    // Show the "← Console" back link only under the /console mount (RC_API_BASE set);
-    // at the tailnet root (/panel) there is no launcher to return to.
+    // Show the back link only under the /console mount; at the tailnet root (/panel)
+    // there is no launcher to return to.
     (function () {
       var b = window.RC_API_BASE;
       if (b) { var a = document.getElementById('backConsole'); a.href = b; a.hidden = false; }
@@ -637,8 +622,8 @@
       <div class="keys" id="feedsBus"></div>
       <div class="hint" id="feedHealth"></div>
       <!-- per-feed quality profile (#493): FULL(<=1080p) / ROBUST(720p) / EMERGENCY(<=480p) / AUTO -->
-      <!-- per feed: ARM/STOP pull (#492, manual-arm only) · quality profile (#493) · Preview.
-           ARM/STOP are `armbtn` (shown only when manual_feed_arm); the tier handler excludes them. -->
+      <!-- Per feed: ARM/STOP pull (#492, manual-arm only), quality profile (#493)
+           and Preview. ARM/STOP are `armbtn`; the tier handler excludes them. -->
       <div id="feedQuality">
         <div class="qrow" data-qfeed="A">
           <span class="qlabel">Feed A</span>
@@ -784,7 +769,7 @@
           this row.</div>
       </div>
 
-      <!-- POV (shown in BOTH modes — POV is a separate, mode-independent feed) -->
+      <!-- POV, shown in both modes: it is a separate, mode-independent feed -->
       <table><tbody>
         <tr><td class="rn">POV</td>
             <td><input id="povName" maxlength="20" placeholder="name (max 20)"></td>
@@ -794,9 +779,9 @@
       <div class="hint">POV — a full watch URL (<code>youtube.com/watch?v=…</code> or
         <code>twitch.tv/&lt;channel&gt;</code>). The POV URL applies on <b>POV RELOAD</b>.
         Available in both race and qualifying.</div>
-      <!-- Solo-only: POV RELOAD/STOP, kept reachable here since #feedsSec (where
-           these actions normally live) is hidden in solo. Built only under solo
-           (see buildPovActions()) — empty/hidden in endurance. -->
+      <!-- Solo-only: POV RELOAD/STOP, kept reachable here because #feedsSec, where
+           these actions normally live, is hidden in solo. Built only under solo, see
+           buildPovActions(); empty and hidden in endurance. -->
       <div class="keys" id="povActionsBus" hidden></div>
     </div>
   </details>
@@ -871,29 +856,26 @@
 </div>
 
 <script>
-/* =======================================================================
-   CONFIG — mirrors the Companion button config (src/companion/) and the
-   OBS collection (src/obs/GT_Racing_Endurance.json). Edit here if scenes/sources
-   are renamed in OBS; keep Companion and this file in sync.
-   - macros:   PGM bus, exact Companion page-1 row-0 semantics
+/* CONFIG mirrors the Companion button config (src/companion/) and the OBS
+   collection (src/obs/GT_Racing_Endurance.json). Edit here if scenes or sources
+   are renamed in OBS, and keep Companion and this file in sync.
+   - macros:   PGM bus, the Companion page-1 row-0 semantics
    - scenes:   raw scene switches
    - vis:      feed visibility toggles (scene items)
-   - graphics: overlay toggles (scene items; "Stint HUD"/"Split HUD" are the
-               per-scene OBS groups that hold Overlay + HUD Overlay (+ the
-               Splitscreen Labels in Splitscreen) — toggling the group hides all)
-   - audio:    OBS audio inputs for the dB rows
-   ======================================================================= */
+   - graphics: overlay toggles. "Stint HUD" and "Split HUD" are the per-scene OBS
+               groups holding Overlay and HUD Overlay, so toggling one hides all.
+   - audio:    OBS audio inputs for the dB rows */
 const CONFIG = {
   macros: [
-    // rc: Race Control value written via the relay after the OBS steps
-    // ("" clears). Unconditional, mirrors the Companion combos: SPLIT stamps
-    // "Driver Swaps", cutting back to a stint clears whatever is shown.
-    // STINT A/B resolve on the relay like SPLIT, and exactly like the Companion
-    // buttons: visibility, audio and the producer's commentary mic of a local stint.
+    // rc: the Race Control value written via the relay after the OBS steps, ""
+    // clearing it. Unconditional, mirroring the Companion combos: SPLIT stamps
+    // "Driver Swaps" and cutting back to a stint clears whatever is shown.
+    // STINT A/B resolve on the relay like SPLIT and like the Companion buttons:
+    // visibility, audio and the producer's commentary mic of a local stint.
     {label:"STINT A", scene:"Stint", show:[], hide:[], relayStint:"A", rc:""},
     {label:"STINT B", scene:"Stint", show:[], hide:[], relayStint:"B", rc:""},
     {label:"SPLIT", scene:"Splitscreen", show:[], hide:[],
-     relaySplit:true, rc:"Driver Swaps"},   // #591: the relay resolves visibility + audio from the on-air slot
+     relaySplit:true, rc:"Driver Swaps"},   // the relay resolves visibility and audio from the on-air slot (#591)
     {label:"INTERVIEW", scene:"Interview", show:[], hide:[],
      unmute:["Discord Audio Capture"], mute:["Feed A","Feed B"]},
     {label:"STANDBY", scene:"Standby", show:[], hide:[],
@@ -905,8 +887,8 @@ const CONFIG = {
     {label:"TRAILER", scene:"Trailer", show:[], hide:[],
      unmute:[], mute:["Feed A","Feed B","Discord Audio Capture"]},
     {label:"INTERMISSION", scene:"Intermission", show:[], hide:[],
-     unmute:[], mute:[]},   // pure scene switch: feeds/Discord aren't in this scene,
-                            // so muting them here would only force a manual reset later
+     unmute:[], mute:[]},   // A pure scene switch: the feeds and Discord are not in
+                            // this scene, so muting them forces a manual reset later.
   ],
   scenes: ["Stint","Splitscreen","Interview","Standby"],
   vis: [
@@ -952,11 +934,10 @@ const CONFIG = {
   ],
 };
 
-/* CONFIG_SOLO — the solo OBS control set (#307 Increment 2 §A), derived 1:1
-   from the `GT Racing Solo` collection (#303). No A/B feeds, no macros (solo
-   has no feed-swap workflow). Rebuilt onto the busses in place of CONFIG the
-   first time /status reports solo (see applySolo()'s builtSolo latch) — the
-   endurance default build from CONFIG is never affected. */
+/* CONFIG_SOLO is the solo OBS control set, derived from the `GT Racing Solo`
+   collection (#303). No A/B feeds and no macros, because solo has no feed-swap
+   workflow. It is built onto the busses in place of CONFIG the first time /status
+   reports solo (see applySolo()'s builtSolo latch); endurance is unaffected. */
 const CONFIG_SOLO = {
   macros: [],
   scenes: ["Program","Interview","Standby","Intermission","Intro","Outro","Discord"],
@@ -984,13 +965,13 @@ const CONFIG_SOLO = {
     {label:"Discord",      input:"Discord Audio Capture"},
     {label:"Intermission", input:"Intermission Music"},
   ],
-  // Solo's Standby Cover lives in the Program scene (not a Stint scene), so the
-  // RED FLAG button retargets there. Endurance CONFIG has no redFlag key -> the
-  // hardcoded {Stint, Standby Cover} default stands (byte-identical).
+  // Solo's Standby Cover lives in the Program scene, so the RED FLAG button
+  // retargets there. Endurance CONFIG has no redFlag key, so its hardcoded
+  // {Stint, Standby Cover} default stands.
   redFlag: {scene:"Program", source:"Standby Cover"},
 };
 
-/* Relay endpoints (same origin as this page; Companion uses the same set). */
+/* Relay endpoints, same origin as this page. Companion uses the same set. */
 const FEED_ACTIONS = [
   ["NEXT",       "next",       "handover"],
   ["RELOAD ALL", "reload",     "relay"],
@@ -999,25 +980,24 @@ const FEED_ACTIONS = [
   ["POV RELOAD", "pov/reload", "relay"],
   ["POV STOP",   "pov/stop",   "relay"],
 ];
-/* Solo-only duplicate of the two POV entries above (#307): #feedsSec (where
-   FEED_ACTIONS renders, endurance unchanged) is hidden wholesale in solo, so
-   POV RELOAD/STOP are re-rendered into #povActionsBus (next to the POV editor,
-   which stays visible in solo) by buildPovActions() — built only under solo. */
+/* Solo-only duplicate of the two POV entries above (#307). #feedsSec, where
+   FEED_ACTIONS renders, is hidden wholesale in solo, so buildPovActions()
+   re-renders POV RELOAD/STOP into #povActionsBus next to the POV editor. */
 const POV_ACTIONS = [
   ["POV RELOAD", "pov/reload", "relay"],
   ["POV STOP",   "pov/stop",   "relay"],
 ];
 const TIMER_ACTIONS = [
-  // stopwatch semantics: START starts or resumes, PAUSE pauses, RESET clears.
-  // adjust shifts whatever is relevant: running anchor / paused remainder /
-  // the configured duration before start.
+  // Stopwatch semantics: START starts or resumes, PAUSE pauses, RESET clears.
+  // adjust shifts whatever is relevant: the running anchor, the paused remainder,
+  // or the configured duration before the start.
   ["START","timer/start"], ["PAUSE","timer/stop"], ["RESET","timer/reset"],
   ["SHOW","timer/show"],   ["HIDE","timer/hide"],
   ["+1 MIN","timer/adjust/60"],  ["−1 MIN","timer/adjust/-60"],
   ["+10 S","timer/adjust/10"],   ["−10 S","timer/adjust/-10"],
 ];
 
-/* ---------- plumbing ---------- */
+/* Plumbing */
 let obsState = {scene:"", sources:[], audio:[]};  // last snapshot from /obs/state
 let programScene = "", refreshing = false;
 const $ = s => document.querySelector(s);
@@ -1029,10 +1009,10 @@ function log(m, kind){
 function obsLed(state){ $("#ledObs").className = "dot" + (state==="ok"?" on":state==="err"?" err":""); }
 function relayLed(ok){ $("#ledRelay").className = "dot" + (ok?" on":" err"); }
 
-/* ---------- state banners (persistent conditions) + toasts (one-off) ----
-   Banners reflect ONGOING conditions; they appear while the condition holds
-   and clear themselves when it resolves — not dismissible by design. Toasts
-   announce one-off action failures (~6 s); the log keeps the history. */
+/* State banners and toasts. A banner reflects an ongoing condition: it appears
+   while the condition holds and clears itself when it resolves, and is not
+   dismissible by design. A toast announces a one-off action failure for about 6 s;
+   the log keeps the history. */
 const banners = {};   // id -> {level: "red"|"amber", msg, action?: {label, fn}}
 function setBanner(id, level, msg, action){
   const prev = banners[id];
@@ -1062,7 +1042,7 @@ function toast(msg){
 }
 
 
-/* ---------- build the busses ---------- */
+/* Build the busses */
 function mkKey(label, tag, onClick){
   const b = document.createElement("button");
   b.className = "k";
@@ -1073,11 +1053,10 @@ function mkKey(label, tag, onClick){
 const macroKeys = [], sceneKeys = {}, toggleKeys = [];
 let povVisBtn = null;                 // the relay-driven POV visibility button (#130)
 
-/* RED FLAG — toggles the Standby Cover via the relay's /obs/source endpoint,
-   using the last-known state from /obs/state. Built once and re-appended to
-   #pgmBus by every buildControls() call (so a solo rebuild never drops it);
-   buildControls retargets redFlagItem from cfg.redFlag when present (solo puts
-   Standby Cover in the Program scene). Endurance keeps this hardcoded default. */
+/* RED FLAG toggles the Standby Cover through the relay's /obs/source endpoint,
+   using the last-known state from /obs/state. Built once and re-appended to #pgmBus
+   by every buildControls() call, so a solo rebuild never drops it; buildControls
+   retargets redFlagItem from cfg.redFlag when that is present. */
 const redFlagItem = {scene:"Stint", source:"Standby Cover"};
 const redFlagBtn = mkKey("RED FLAG", "alarm", async ()=>{
   const last = obsState.sources.find(s=>s.scene===redFlagItem.scene && s.source===redFlagItem.source);
@@ -1090,16 +1069,13 @@ const redFlagBtn = mkKey("RED FLAG", "alarm", async ()=>{
 redFlagBtn.classList.add("redflag");
 redFlagBtn._item = redFlagItem;
 
-/* Builds the Scn·Vis (#scnBus) / Gfx (#gfxBus) / Audio (#audio) busses, plus
-   the Program-bus (#pgmBus) macros, from cfg. Clears each target bus first
-   (.replaceChildren()) and resets the module-level arrays it populates so a
-   rebuild never duplicates buttons. Called once at load with CONFIG — same
-   DOM/order/handlers as before #307 extracted this into a function — and
-   again, once, with CONFIG_SOLO the first time /status reports a solo relay
-   (see applySolo()'s builtSolo latch). Endurance never triggers the second
-   call, so its build stays byte-identical. */
-let activeConfig = CONFIG;   // the cfg buildControls last ran with; obsStatePoll
-                             // reads it (not CONFIG) so the solo mixer/macros sync.
+/* Builds the Scn/Vis (#scnBus), Gfx (#gfxBus) and Audio (#audio) busses plus the
+   Program-bus (#pgmBus) macros from cfg. Each target bus is cleared first and the
+   module-level arrays it populates are reset, so a rebuild never duplicates
+   buttons. Called once at load with CONFIG, and once more with CONFIG_SOLO the
+   first time /status reports a solo relay (see applySolo()'s builtSolo latch). */
+let activeConfig = CONFIG;   // the cfg buildControls last ran with. obsStatePoll
+                             // reads this, not CONFIG, so a solo build stays in sync.
 function buildControls(cfg){
   activeConfig = cfg;
   $("#pgmBus").replaceChildren();
@@ -1166,7 +1142,7 @@ buildControls(CONFIG);
 
 FEED_ACTIONS.forEach(([label, path, tag])=>{
   const b = mkKey(label, tag, ()=>{
-    // RELOAD tears the running pull -> brief dead air if that feed is on air.
+    // RELOAD tears the running pull, so an on-air feed goes briefly dead.
     if (label.startsWith("RELOAD") &&
         !confirm(label + ": reconnect the feed — brief interruption if it is on air. Continue?"))
       return;
@@ -1176,7 +1152,7 @@ FEED_ACTIONS.forEach(([label, path, tag])=>{
     }
     relayCall(path);
   }, false);
-  if (label === "NEXT") b.classList.add("next");   // primary handover emphasis (matches mockup)
+  if (label === "NEXT") b.classList.add("next");
   $("#feedsBus").appendChild(b);
 });
 $("#feedsBus").appendChild(mkKey("FEEDS → STINT…", "correction", ()=>{
@@ -1191,11 +1167,10 @@ async function resyncTo(n){
                "(No cut if that feed is already on air.)")) return;
   await relayCall("resync/stint/" + n);
 }
-// Force OBS to reconnect ONE feed's source at a clean stream boundary. OBS rejoins at
-// the fan-out reserve behind the live edge, so the same button does two jobs: it fixes
-// a frozen/stuttering picture, and it is the director's deliberate way to drop a
-// backlog (BEHIND LIVE, #587). Nothing resets a feed because of a backlog. Non-destructive
-// (re-applies the input's own settings); a brief black dropout if the feed is on air.
+// Force OBS to reconnect one feed's source at a clean stream boundary. OBS rejoins
+// at the fan-out reserve behind the live edge, so the button both fixes a frozen
+// picture and is the director's deliberate way to drop a backlog (#587). It only
+// re-applies the input's own settings, but an on-air feed goes briefly black.
 // resetLabel() shows what a click would throw away, from every /status poll.
 const resetKeys = {};
 ["A","B"].forEach(f=>{
@@ -1212,10 +1187,11 @@ const resetKeys = {};
   resetKeys[f] = {cost, discards: 0};
   $("#feedsBus").appendChild(b);
 });
-// The relay reports reset_discards_s: the live backlog beyond the reserve a rejoin keeps.
-// Shown from a whole second on, below the warn line too: a 4 s cost is still a cost.
-// Floored, so the button never claims more than the relay measured (0.5 s is no line). A stopped/connecting feed or an older relay reports none -> the plain label.
-// The live value moves with a bursty source, so the number can jitter between polls.
+// The relay reports reset_discards_s: the live backlog beyond the reserve a rejoin
+// keeps. Shown from a whole second on, below the warn line too, and floored so the
+// button never claims more than the relay measured. A stopped or connecting feed,
+// and an older relay, report none and get the plain label. The live value moves
+// with a bursty source, so the number can jitter between polls.
 function resetLabel(d){
   ["A","B"].forEach(f=>{
     const k = resetKeys[f];
@@ -1226,8 +1202,8 @@ function resetLabel(d){
   });
 }
 
-// #582: RE-ARM lives inside #feedHealth, which is re-rendered on every status poll,
-// so the click is delegated from the stable container.
+// RE-ARM lives inside #feedHealth, which is re-rendered on every status poll, so the
+// click is delegated from the stable container. (#582)
 $("#feedHealth").addEventListener("click", async (e)=>{
   if (!e.target.closest("#rebuildRearm")) return;
   try {
@@ -1239,11 +1215,9 @@ $("#feedHealth").addEventListener("click", async (e)=>{
   } catch (err) { toast("Re-arm failed: relay unreachable"); }
 });
 
-/* Solo-only: mirror POV RELOAD/STOP next to the POV editor (#povActionsBus,
-   inside #urlsBox) since #feedsSec — where these normally render, unchanged,
-   via FEED_ACTIONS above — is hidden wholesale in solo. Built (and un-hidden)
-   only from applySolo()'s solo latch; never called for endurance, so
-   #povActionsBus stays empty/hidden there — no visible change. */
+/* Solo-only: mirror POV RELOAD/STOP next to the POV editor in #povActionsBus,
+   because #feedsSec, where FEED_ACTIONS renders them, is hidden wholesale in solo.
+   Built and un-hidden only from applySolo()'s solo latch. */
 function buildPovActions(){
   const bus = $("#povActionsBus");
   if (!bus || bus.dataset.built) return;
@@ -1265,11 +1239,10 @@ CONFIG.graphicsGrid.forEach(item=>{
   $(item.top ? "#gfxGridTopBus" : "#gfxGridBus").appendChild(b);
 });
 
-/* ---------- Flag-status GRAPHIC bus (#flag-graphic) ----------
-   Exactly-one-active OBS overlay toggle, PARALLEL to the flag-TEXT chip on
-   #condRow. Drives /obs/flag/* (relay-mediated OBS visibility); the active flag
-   is highlighted from /obs/flag/data. Distinct from the Gfx bus (independent
-   toggles) — these five are mutually exclusive. */
+/* Flag-status graphic bus (#flag-graphic): an exactly-one-active OBS overlay
+   toggle, parallel to the flag-text chip on #condRow. It drives /obs/flag/* and
+   highlights the active flag from /obs/flag/data. Unlike the Gfx bus, whose
+   toggles are independent, these five are mutually exclusive. */
 const FLAG_GFX = [
   ["GREEN","green"], ["YELLOW","yellow"], ["RED","red"],
   ["SAFETY CAR","safety-car"], ["VSC","virtual-safety-car"],
@@ -1308,7 +1281,7 @@ $("#timerBus").appendChild(mkKey("SET…", "duration", ()=>{
   if (v) timerCall("timer/set/" + v.trim());   // ':' is path-safe; encoding it would 400
 }, false));
 
-/* ---------- OBS helpers (relay-mediated; no browser→OBS-WS) ---------- */
+/* OBS helpers, relay-mediated: the browser never opens an OBS WebSocket. */
 async function obsPost(path, body){
   const r = await fetch(RC_API("/obs/" + path), {method:"POST", cache:"no-store",
     headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
@@ -1356,13 +1329,13 @@ const obsStream = (on)              => obsPost("stream", {on});
     else log("OBS refresh failed" + (d && d.error ? ": " + d.error : ""), "warn");
   }); }
 
-/* Broadcast Part control (#395). When a Producer tab exists (/parts/data.enabled),
+/* Broadcast Part control (#395). With a Producer tab present (/parts/data.enabled)
    the Part-aware button supersedes the generic GO-LIVE button; otherwise the panel
-   keeps the plain #obsStreamBtn (backward-compatible fallback). Every live-state
-   change is gated by a typed-confirmation modal; the stream key never reaches here. */
+   keeps the plain #obsStreamBtn. Every live-state change is gated by a typed
+   confirmation, and the stream key never reaches here. */
 let partsEnabled = false, partsState = null, partModalData = null;
-// OBS stream truth that obsStatePoll already fetched; forwarded to /parts/data so
-// it reuses it instead of opening a second obs-websocket connection (null = unknown).
+// The OBS stream truth obsStatePoll already fetched, forwarded to /parts/data so it
+// reuses it instead of opening a second obs-websocket connection. null is unknown.
 let lastStreamActive = null;
 const normIntent = s => (s || "").trim().replace(/\s+/g, " ").toUpperCase();
 
@@ -1440,17 +1413,17 @@ async function submitPart(){
     status.textContent = "Event ending — report sent, services stopping…";
     status.className = "partstatus done";
     $("#partActionBtn").hidden = true;
-    return;   // the relay is tearing down; further polling will fail (expected)
+    return;   // the relay is tearing down, so further polling will fail
   }
-  // After a transition, drop the cached OBS state so the next /parts/data
-  // self-reads the fresh stream truth instead of the pre-action value (N2).
+  // After a transition, drop the cached OBS state so the next /parts/data reads
+  // the fresh stream truth instead of the pre-action value.
   lastStreamActive = null;
   obsStatePoll(); partsPoll();
 }
 
-/* Reflect the real OBS stream state on the broadcast button. `s` is d.stream
-   from /obs/state ({active,reconnecting,timecode}) or null when OBS is
-   unreachable. dataset.live drives the click handler's start-vs-stop choice. */
+/* Reflect the real OBS stream state on the broadcast button. `s` is d.stream from
+   /obs/state, or null when OBS is unreachable. dataset.live drives the click
+   handler's start-versus-stop choice. */
 function renderStreamBtn(s){
   const b = $("#obsStreamBtn");
   if (partsEnabled){ b.hidden = true; return; }   // Part control owns the stream button
@@ -1473,8 +1446,8 @@ function macroAirSources(m){
 }
 
 /* A relay-resolved step (SPLIT, STINT). The relay applies several OBS changes and
-   answers with a note for any that failed (e.g. the commentary mic of an older
-   collection), so the director reads why the OBS light went red. */
+   answers with a note for any that failed, so the director reads why the OBS light
+   went red. */
 function relayStep(what, path, body){
   return [what, async ()=>{
     const d = await obsPost(path, body);
@@ -1484,14 +1457,14 @@ function relayStep(what, path, body){
   }];
 }
 
-/* One press = scene + visibility + mutes, exactly like the Companion macro.
-   Each step is independent; a failing step is logged and the rest still runs. */
+/* One press sets scene, visibility and mutes, like the Companion macro. Each step
+   is independent: a failing step is logged and the rest still runs. */
 async function runMacro(m){
   const steps = [
     ["set scene", ()=>obsScene(m.scene)],
     ...m.show.map(([sc,src])=>[`show ${src}`,   ()=>obsSource(sc,src,true)]),
     ...m.hide.map(([sc,src])=>[`hide ${src}`,   ()=>obsSource(sc,src,false)]),
-    ...(m.relaySplit                                  // #591: server resolves the on-air slot; no static names
+    ...(m.relaySplit                                  // the server resolves the on-air slot (#591)
         ? [relayStep("split (on-air)", "split", {})]
         : m.relayStint                                // server resolves feeds + commentary mic, like Companion
         ? [relayStep("stint " + m.relayStint, "stint", {feed: m.relayStint})]
@@ -1515,7 +1488,7 @@ async function toggleSource(item, btn){
   }catch(e){ log(`Toggle "${item.source}" in "${item.scene}" failed: ${e.message||e}`, "err"); }
 }
 
-/* ---------- relay actions (no OBS needed) ---------- */
+/* Relay actions, no OBS needed */
 async function relayCall(path){
   try{
     const r = await fetch("/" + path, {cache:"no-store"});
@@ -1528,7 +1501,7 @@ async function relayCall(path){
   }catch(e){ log("Relay /" + path + " failed (relay reachable?): " + e, "err"); toast("Relay /" + path + " failed — relay unreachable"); }
 }
 
-// Manual feed-arm mode (#492): explicit ARM/STOP-PULL per feed, shown only
+// Manual feed-arm mode (#492): an explicit ARM/STOP-PULL per feed, shown only
 // when the relay reports manual_feed_arm on /status.
 function feedArm(which, on){
   relayCall("feed/" + which + "/" + (on ? "activate" : "deactivate"));
@@ -1536,8 +1509,8 @@ function feedArm(which, on){
 document.querySelectorAll("#feedQuality .armbtn").forEach(b =>
   b.addEventListener("click", () => feedArm(b.dataset.feed, b.dataset.on === "1")));
 
-// Per-feed quality profile (#493): FULL/ROBUST/EMERGENCY pin the tier; AUTO releases the
-// pin (managed, auto-step-down re-armed). POST /feed/<A|B>/quality — director-gated, no URL.
+// Per-feed quality profile (#493): FULL/ROBUST/EMERGENCY pin the tier, AUTO
+// releases the pin and re-arms the auto step-down. POST /feed/<A|B>/quality.
 async function feedQuality(which, tier){
   try{
     const r = await fetch(RC_API("/feed/" + which + "/quality"), {method:"POST", cache:"no-store",
@@ -1553,21 +1526,21 @@ async function feedQuality(which, tier){
 document.querySelectorAll("#feedQuality .qbtn:not(.qprev):not(.armbtn)").forEach(b =>
   b.addEventListener("click", () => feedQuality(b.dataset.feed, b.dataset.tier)));
 
-// #493: Preview — open a feed's current source stream (YT/Twitch) in a new tab. The URL is
-// stashed on the button each poll (see relayPoll), so window.open runs synchronously in the
-// click handler (no popup-blocker) and the raw URL never rides in the DOM as a link.
+// Preview opens a feed's current source stream in a new tab. The URL is stashed on
+// the button each poll (see relayPoll), so window.open runs synchronously in the
+// click handler, past the popup blocker, and the raw URL never sits in the DOM. (#493)
 document.querySelectorAll("#feedQuality .qprev").forEach(b =>
   b.addEventListener("click", () => {
     const u = b.dataset.url || "";
     if (previewUrlOk(u)) window.open(u, "_blank", "noopener");
   }));
 
-/* ---------- OBS state poll (relay-mediated; replaces browser obs.call reads) -- */
+/* OBS state poll, relay-mediated */
 async function obsStatePoll(){
   if (refreshing) return;
   refreshing = true;
   try{
-    // Build the state request from the CONFIG button maps (single source of truth).
+    // Build the state request from the CONFIG button maps, the single source.
     const sourcesSpec = [];
     for (const b of toggleKeys){
       if (b._item && !b._item.relay)
@@ -1582,8 +1555,8 @@ async function obsStatePoll(){
 
     const d = await obsPost("state", {sources: sourcesSpec, inputs: inputsSpec});
     if (!d.ok){ obsLed("err"); renderStreamBtn(null); lastStreamActive = null; return; }
-    // Share this OBS stream read with partsPoll (N1): its next /parts/data call
-    // forwards it instead of triggering a second obs-websocket round-trip.
+    // Share this OBS stream read with partsPoll: its next /parts/data call forwards it
+    // instead of triggering a second obs-websocket round-trip.
     lastStreamActive = d.stream ? !!d.stream.active : null;
 
     obsState = {
@@ -1594,22 +1567,19 @@ async function obsStatePoll(){
     programScene = obsState.scene;
     renderStreamBtn(d.stream);
 
-    // Scene buttons — highlight current program scene.
     Object.entries(sceneKeys).forEach(([n,b])=>b.classList.toggle("air", n===programScene));
 
-    // Build a quick lookup for source enabled state.
     const visState = {};
     for (const s of obsState.sources)
       visState[s.scene + "/" + s.source] = s.enabled;
 
-    // Vis/graphics toggle buttons.
     for (const b of toggleKeys){
       if (!b._item || b._item.relay) continue;
       const key = b._item.scene + "/" + b._item.source;
       if (key in visState) b.classList.toggle("on", visState[key]);
     }
 
-    // Macro (PGM) bus — light when scene is active AND all required sources are visible.
+    // Macro (PGM) bus: light when the scene is active and every required source is visible.
     for (const b of macroKeys){
       const m = b._m;
       let air = programScene === m.scene;
@@ -1622,7 +1592,6 @@ async function obsStatePoll(){
       b.classList.toggle("air", !!air);
     }
 
-    // Audio rows.
     for (const row of document.querySelectorAll(".arow")){
       const input = row.querySelector("input[type=range]").dataset.input;
       const a = obsState.audio.find(x=>x.input===input);
@@ -1656,9 +1625,9 @@ function renderAir(visState){
 }
 
 
-/* ---------- relay status strip (works without OBS) ---------- */
-/* state -> [pill suffix, pill css class]; durations/staleness come from the
-   relay (state_age_s, cookies_health) — this file only renders. */
+/* Relay status strip, which works without OBS */
+/* state -> [pill suffix, pill css class]. Durations and staleness come from the
+   relay (state_age_s, cookies_health); this file only renders. */
 const FEED_STATE = {serving:["LIVE","ok"], connecting:["CONN","warn"],
                     idle:["IDLE",""], stopped:["STOPPED",""]};
 function fmtDur(s){
@@ -1671,9 +1640,9 @@ function qualityHeight(q){
   const m = /(\d{3,4})p/.exec(q || "");
   return m ? parseInt(m[1], 10) : null;
 }
-// #493: only open a real https youtube/twitch stream URL in a new tab. Like bchatUrlOk, but
-// without a platform arg — the button doesn't know the feed's platform up front, so it accepts
-// either platform family (an intentional divergence, not an oversight).
+// Only open a real https youtube or twitch stream URL in a new tab. Like bchatUrlOk
+// but without a platform argument: the button does not know the feed's platform up
+// front, so it accepts either family. (#493)
 function previewUrlOk(u){
   try{
     const url = new URL(u);
@@ -1683,22 +1652,23 @@ function previewUrlOk(u){
            h === "youtu.be" || h === "twitch.tv" || h.endsWith(".twitch.tv");
   }catch(e){ return false; }
 }
-// #592: a `local:` stint is the producer's capture card — marked, so the director can tell
-// a deliberate local feed (no URL, no preview link, no quality label) from a broken one.
+// A `local:` stint is the producer's capture card. It is marked so the director can
+// tell a deliberate local feed, with no URL, preview or quality label, from a broken
+// one. (#592)
 const FEED_PLATFORM_TAG = {twitch: "TW", youtube: "YT", local: "LOCAL"};
 function healthLine(name, f){
   const tag = f.platform ? ` [${FEED_PLATFORM_TAG[f.platform] || "YT"}]` : "";
   const what = f.stint ? "stint " + f.stint : "the POV stream";
-  if (f.down)                       // lost a live serve — louder than 'connecting'
+  if (f.down)                       // lost a live serve, louder than 'connecting'
     return `<span class="downline">${name}${tag} · DOWN — lost ${what}; RELOAD it or cut to the other feed/Standby</span>`;
   if (f.state === "serving"){
     let s = `${name}${tag} · serving ${what} (since ${fmtDur(f.state_age_s)})`;
-    if (f.quality) s += ` · ${escapeHtml(f.quality)}`;   // #493: actually-served resolution (escaped like last_error)
-    const h = qualityHeight(f.quality);               // FULL serving <1080 => the source caps here
+    if (f.quality) s += ` · ${escapeHtml(f.quality)}`;   // actually-served resolution, escaped like last_error (#493)
+    const h = qualityHeight(f.quality);               // FULL serving below 1080 means the source caps here
     if (f.profile === "full" && h && h < 1080)
       s += ` · source max ${h}p — no 1080p`;
-    // #592: a local feed serving picture-only (no game-audio device found) must be
-    // visible on air, not just in the feed log.
+    // A local feed serving picture only, because no game-audio device was found,
+    // must be visible on air rather than only in the feed log. (#592)
     if (f.platform === "local" && f.last_error)
       return `<span class="warnline">${s} · ${escapeHtml(f.last_error)}</span>`;
     return s;
@@ -1720,7 +1690,7 @@ function statePill(el, label, stint, n, state, down){
   el.className = "st" + (cls ? " " + cls : "");
   el.innerHTML = label + " <b>" + stint + "</b>" + (n ? "/" + n : "") + (txt ? " · " + txt : "");
 }
-/* ---------- event title (#207) — header display + inline editor ---------- */
+/* Event title (#207): header display and inline editor */
 const BRAND_SUB_STATIC = "GT RACING BROADCAST";
 let eventTitle = "", editingTitle = false;
 function renderEventTitle(title){
@@ -1737,7 +1707,7 @@ function startEditTitle(){
   $("#brandSubText").hidden = true; $("#brandSubEdit").hidden = true;
   inp.hidden = false; inp.focus(); inp.select();
 }
-function stopEditTitle(){                    // restore the display (Esc / blur / post-save)
+function stopEditTitle(){                    // restore the display on Esc, blur or a save
   editingTitle = false;
   $("#brandSubInput").hidden = true;
   $("#brandSubText").hidden = false; $("#brandSubEdit").hidden = false;
@@ -1760,11 +1730,10 @@ $("#brandSubInput").addEventListener("keydown", async (e)=>{
 });
 $("#brandSubInput").addEventListener("blur", ()=>{ if (editingTitle) stopEditTitle(); });
 
-// #583: how far OBS is behind the live edge, worst consumed feed first. The #533 reserve
-// (3 s by default) is the healthy baseline; amber only while the relay reports the feed
-// backlogged (its heartbeat classified it and the live value is still past the threshold). Shown only while a serving feed has a value (a
-// seventh pill wraps the strip to a third row, so it stays out of the idle header);
-// an older relay without backlog_s never shows it.
+// How far OBS is behind the live edge, worst consumed feed first. The reserve
+// (#533, 3 s by default) is the healthy baseline; it goes amber only while the relay
+// reports the feed backlogged. Shown only while a serving feed has a value, because
+// a seventh pill wraps the strip to a third row; an older relay never shows it. (#583)
 function behindPill(d){
   const el = $("#stBehind");
   const rows = [["A", d.feeds && d.feeds.A], ["B", d.feeds && d.feeds.B], ["POV", d.pov]]
@@ -1791,8 +1760,8 @@ async function relayPoll(){
     // On-air feed = the lower stint index (mirrors the relay's live_feed()).
     pvMarkOnAir(!solo && d.feeds && d.feeds.A
       ? (d.feeds.A.index <= d.feeds.B.index ? "A" : "B") : null);
-    // Aggregate health pill (relay heartbeat). Version-skew safe: an older relay
-    // without d.health shows '—'.
+    // Aggregate health pill from the relay heartbeat. An older relay without d.health
+    // shows a dash.
     const HP = {green:["OK","ok"], yellow:["DEGRADED","warn"], red:["CRITICAL","air"]};
     const [htxt, hcls] = HP[d.health && d.health.level] || ["—", ""];
     $("#stHealth").className = "st" + (hcls ? " " + hcls : "");
@@ -1805,8 +1774,8 @@ async function relayPoll(){
     if (!solo){
       statePill($("#stA"), "A", "S" + d.feeds.A.stint, n, d.feeds.A.state, d.feeds.A.down);
       statePill($("#stB"), "B", "S" + d.feeds.B.stint, n, d.feeds.B.state, d.feeds.B.down);
-      // #492: ARM/STOP live in each feed row now — show them only in manual-arm mode, and
-      // green-highlight the ARM button of a feed that is currently armed.
+      // ARM/STOP live in each feed row: show them only in manual-arm mode, and
+      // green-highlight the ARM button of a feed that is currently armed. (#492)
       document.querySelectorAll("#feedQuality .armbtn").forEach(b => {
         b.style.display = d.manual_feed_arm ? "" : "none";
         const f = d.feeds[b.dataset.feed];
@@ -1825,38 +1794,38 @@ async function relayPoll(){
     if (!solo){
       const lines = [healthLine("A", d.feeds.A), healthLine("B", d.feeds.B)];
       if (d.pov && d.pov.state !== "stopped") lines.push(healthLine("POV", d.pov));
-      // #493: auto-step-down alert — a managed feed (not pinned) that dropped to ROBUST.
+      // Auto-step-down alert: a managed, unpinned feed that dropped to ROBUST. (#493)
       ["A","B"].forEach(k => {
         const f = d.feeds[k];
         if (f && f.profile === "robust" && !f.pinned)
           lines.push(`<span class="warnline">⚠ Feed ${k} · auto-dropped to ROBUST (720p) — source struggling; raise it again when it recovers</span>`);
       });
-      // #495: auto-cover alert — the relay auto-raised the Standby Cover over an offline
-      // on-air source. The RED FLAG light already shows the cover is up; this line says WHY.
+      // Auto-cover alert: the relay raised the Standby Cover over an offline on-air
+      // source. The RED FLAG light shows the cover is up; this line says why. (#495)
       if (d.auto_cover_active)
         lines.push('<span class="warnline">⚠ On-air source offline — Standby Cover auto-raised (RED FLAG to override)</span>');
-      // #582: three automatic OBS rebuilds did not clear the stall, so the relay stopped
-      // rebuilding. It re-arms at the next stint change; RE-ARM does it now, once the
-      // cause is found. Version-skew safe: an older relay has no rebuild_guard.
+      // Three automatic OBS rebuilds did not clear the stall, so the relay stopped
+      // rebuilding. It re-arms at the next stint change, and RE-ARM does it now. An
+      // older relay has no rebuild_guard. (#582)
       const rg = d.rebuild_guard;
       if (rg && rg.stood_down)
         lines.push(`<span class="warnline">⚠ Feed ${escapeHtml(rg.feed || "?")} · auto-rebuild paused — 3 OBS rebuilds did not clear the stall</span> <button class="qbtn" id="rebuildRearm" title="Resume automatic OBS rebuilds now">RE-ARM</button>`);
-      // #493: highlight the active quality profile per feed (the pinned tier, or AUTO when managed).
+      // Highlight the active quality profile per feed: the pinned tier, or AUTO. (#493)
       document.querySelectorAll("#feedQuality .qbtn:not(.qprev):not(.armbtn)").forEach(b => {
         const f = d.feeds[b.dataset.feed];
         if (!f) return;
         const active = f.pinned ? (b.dataset.tier === f.profile) : (b.dataset.tier === "auto");
         b.classList.toggle("active", active);
       });
-      // Actually-served resolution per feed (e.g. 1080p60); YouTube from yt-dlp, Twitch from
-      // streamlink. Empty when unknown / feed idle (escaped like last_error).
+      // Actually-served resolution per feed, from yt-dlp on YouTube and streamlink on
+      // Twitch. Empty when unknown or the feed is idle, escaped like last_error.
       document.querySelectorAll("#feedQuality .qres").forEach(el => {
         const f = d.feeds[el.dataset.qres];
         el.textContent = (f && f.platform === "local") ? "local capture"
                        : (f && f.quality) ? f.quality : "";
       });
-      // #493: preview buttons — stash each feed's current stream URL + enable only for a real
-      // URL (absent when the feed is idle, or redacted for a non-director subject over Funnel).
+      // Preview buttons: stash each feed's current stream URL and enable only for a real
+      // one. It is absent when the feed is idle, and redacted for a non-director. (#493)
       document.querySelectorAll("#feedQuality .qprev").forEach(b => {
         const f = d.feeds[b.dataset.feed];
         const u = (f && f.channel) || "";
@@ -1865,15 +1834,15 @@ async function relayPoll(){
       });
       if (d.mode === "qualifying")
         lines.unshift('<span class="warnline">QUALIFYING MODE — Feed A serves the Qualifying tab (race schedule paused)</span>');
-      // One mode-aware schedule block: applyMode toggles the race/qualifying
-      // regions + the mode chip + the switch label. POV stays visible in both.
+      // One mode-aware schedule block: applyMode toggles the race and qualifying
+      // regions, the mode chip and the switch label. POV stays visible in both.
       applyMode(d.mode === "qualifying");
       $("#feedHealth").innerHTML = lines.filter(Boolean).join("<br>");
     } else {
       $("#feedHealth").innerHTML = "";
     }
-    // Feed-down alarm: a feed that was live and dropped unexpectedly (not a
-    // handover). Distinct red banner so the director acts (RELOAD or cut away).
+    // Feed-down alarm: a feed that was live and dropped outside a handover. It gets
+    // its own red banner so the director acts, with RELOAD or a cut away.
     const downNames = [];
     if (!solo){
       if (d.feeds.A.down) downNames.push("A");
@@ -1907,7 +1876,8 @@ async function relayPoll(){
   }catch(e){
     relayLed(false);
     setBanner("relay", "red", "RELAY UNREACHABLE — feed & timer buttons will not work");
-    // cookies banner intentionally persists: last-known state, can't improve while relay is down
+    // The cookies banner persists on purpose: it is the last-known state and cannot
+    // improve while the relay is down.
     for (const [sel, label] of [["#stHealth","HEALTH"],["#stA","A"],["#stB","B"],["#stPov","POV"]]){
       $(sel).className = "st"; $(sel).innerHTML = label + " <b>—</b>";
     }
@@ -1917,7 +1887,7 @@ async function relayPoll(){
 }
 
 
-/* ---------- race timer (relay-served; works without the OBS connection) --- */
+/* Race timer, relay-served, which works without the OBS connection */
 async function timerCall(path){
   try{
     const r = await fetch("/" + path, {cache:"no-store"});
@@ -1965,31 +1935,30 @@ async function timerPoll(){
   }
 }
 
-/* ---------- HUD row (sheet-backed dropdowns; relay-only) ----------
-   The "STINT" here is the HUD display LABEL (Setup tab). On a handover
-   (NEXT / FEEDS → STINT) the relay now drives this label and the STREAMER
-   from the Schedule row that just went on air — the Schedule's per-row Stint
-   and Streamer dropdowns share this same Configuration vocabulary, so the
-   on-air stint sets the HUD label automatically. These manual dropdowns stay
-   as a live-correction override; the next handover re-asserts the schedule. */
+/* HUD row: sheet-backed dropdowns, relay only. The "STINT" here is the HUD display
+   label on the Setup tab, not a feed index. On a handover the relay drives this
+   label and the STREAMER from the Schedule row that just went on air, because the
+   Schedule's per-row dropdowns share this Configuration vocabulary. These manual
+   dropdowns are a live-correction override; the next handover re-asserts the
+   schedule. */
 const SETUP_FIELDS = [
   ["stint","STINT LABEL"], ["streamer","STREAMER"], ["session","SESSION"],
-  // Race-condition controls share their own row (#condRow), in this order:
-  // FLAG, RACE CONTROL, then the CLEAR RC button (appended after the loop) so
-  // CLEAR RC stays paired with its Race Control dropdown.
+  // Race-condition controls share their own row (#condRow) in this order: FLAG, RACE
+  // CONTROL, then the CLEAR RC button, appended after the loop so it stays paired with
+  // its Race Control dropdown.
   ["flag","FLAG"], ["racecontrol","RACE CONTROL"],
 ];
 // Keys that render on the dedicated race-condition row instead of the main HUD row.
 const COND_KEYS = new Set(["flag","racecontrol"]);
-// Configuration vocab for the Schedule editor's Streamer/Stint dropdowns,
-// cached from /setup/data (the same lists the Setup dropdowns use).
+// Configuration vocabulary for the Schedule editor's Streamer and Stint dropdowns,
+// cached from /setup/data. The Setup dropdowns use the same lists.
 let schedOptions = {streamer: [], stint: []};
 function escapeHtml(s){
   return String(s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 }
 const TEAM_FIELDS = [["p1","P1"], ["p2","P2"], ["p3","P3"]];
 
-/* ---------- Crew chat ---------- */
+/* Crew chat */
 const CHAT_NAME_KEY = "racecast.chat.name";
 const CHAT_SEEN_KEY = "racecast.chat.lastSeenTs";
 let chatSeenTs = parseFloat(localStorage.getItem(CHAT_SEEN_KEY) || "0") || 0;
@@ -2058,17 +2027,17 @@ $("#chatInput").addEventListener("keydown", e=>{ if (e.key === "Enter") chatSend
 $("#chatBox").addEventListener("toggle", ()=>{ if ($("#chatBox").open) chatMarkSeen(); });
 $("#chatLog").addEventListener("scroll", ()=>{ if ($("#chatBox").open && chatAtBottom()) chatMarkSeen(); });
 
-/* ---------- Broadcast chat (#294): read-only mirror of the public stream chat ---------- */
+/* Broadcast chat (#294): read-only mirror of the public stream chat */
 let bchatTimer = null;
-// Platform-aware source label for the handover overlap badge: "TW:<login>" for
-// Twitch (source "twitch:<login>"), "YT:<last4>" for a YouTube videoId.
+// Source label for the handover overlap badge: "TW:<login>" for Twitch,
+// "YT:<last4>" for a YouTube videoId.
 function bchatSrcBadge(source){
   const s = String(source || "");
   return s.indexOf("twitch:") === 0 ? "TW:" + s.slice(7) : "YT:" + s.slice(-4);
 }
 function bchatBody(parent, msg){
-  // Render an image-emote message (#351): text nodes + <img> emotes, no innerHTML.
-  // Falls back to the flat text when no tokens are present or an emote fails to load.
+  // Render an image-emote message (#351) as text nodes and <img>, never innerHTML.
+  // Falls back to the flat text when there are no tokens or an emote fails to load.
   const toks = Array.isArray(msg.tokens) ? msg.tokens : null;
   if (!toks){ parent.appendChild(document.createTextNode(msg.text || "")); return; }
   for (const tk of toks){
@@ -2109,9 +2078,8 @@ function bchatRender(messages){
   if (stick) el.scrollTop = el.scrollHeight;
 }
 function bchatUrlOk(url, platform) {
-  // Defense-in-depth (mirrors emote_url_ok): only https on the expected
-  // platform host reaches window.open — rejects javascript:/data: and
-  // off-platform hosts even though target.url is server-built.
+  // Defence in depth, mirroring emote_url_ok: only https on the expected platform
+  // host reaches window.open, even though target.url is server-built.
   try {
     const u = new URL(url);
     if (u.protocol !== 'https:') return false;
@@ -2136,7 +2104,7 @@ function bchatTarget(target) {
 async function bchatPoll(){
   try{
     const r = await fetch("/broadcast-chat/data", {cache:"no-store"});
-    if (r.status === 404){                      // reader disabled — remove the panel
+    if (r.status === 404){                      // reader disabled, remove the panel
       const b = $("#bchatBox"); if (b) b.style.display = "none";
       if (bchatTimer) clearInterval(bchatTimer);
       return;
@@ -2146,9 +2114,9 @@ async function bchatPoll(){
     bchatTarget(d.target);
   }catch(e){ /* relay unreachable: leave the last view in place */ }
 }
-// Manual refresh (#294): a transient hiccup can freeze the server-side YouTube
-// reader so the store stops updating — a page reload alone won't recover it.
-// This kicks /broadcast-chat/reload to re-arm the reader, then re-renders now.
+// Manual refresh (#294). A transient hiccup can freeze the server-side reader so
+// the store stops updating, which a page reload cannot recover. This kicks
+// /broadcast-chat/reload to re-arm it, then re-renders at once.
 async function bchatRefresh(e){
   if (e){ e.preventDefault(); e.stopPropagation(); }   // don't toggle the <details>
   const btn = $("#bchatRefresh"); if (btn){ btn.disabled = true; btn.textContent = "⟳ Refreshing…"; }
@@ -2159,7 +2127,7 @@ async function bchatRefresh(e){
       if (!d.error){ bchatRender(d.messages || []); bchatTarget(d.target); }
     }
   }catch(e){ /* relay unreachable: leave the last view in place */ }
-  // Restore after a short min-visible delay so the label doesn't flicker.
+  // Restore after a short delay so the label does not flicker.
   if (btn) setTimeout(()=>{ btn.disabled = false; btn.textContent = "⟳ Refresh"; }, 600);
 }
 { const br = $("#bchatRefresh"); if (br) br.addEventListener("click", bchatRefresh); }
@@ -2174,15 +2142,14 @@ SETUP_FIELDS.forEach(([key,label])=>{
   b.className = "pill stop"; b.textContent = "CLEAR RC"; b.id = "clearRc";
   b.addEventListener("click", ()=>setupSet("racecontrol",""));
   $("#condRow").appendChild(b); }
-/* ---------- Top-3 teams: batch (default) vs live single-slot ----------
-   Batch ON (default): a dropdown change only STAGES locally; "Apply Top 3"
-   commits all three atomically via POST /setup/teams (one relay request -> the
-   HUD never shows a transient duplicate). Batch OFF: each dropdown pushes live
-   through teamSet (the pre-existing behavior). */
+/* Top-3 teams: batch (the default) versus live single-slot. With batch on, a
+   dropdown change only stages locally and "Apply Top 3" commits all three in one
+   POST /setup/teams, so the HUD never shows a transient duplicate. With batch off,
+   each dropdown pushes live through teamSet. */
 const TOP3_BATCH_KEY = "racecast.top3.batch";
 let top3Batch = (localStorage.getItem(TOP3_BATCH_KEY) ?? "1") !== "0";   // default ON
 let lastSetupRO = false;                  // read-only state from the last setup poll
-const top3Staged = {};                    // slot key -> staged (unapplied) value
+const top3Staged = {};                    // slot key -> staged, unapplied value
 
 TEAM_FIELDS.forEach(([key,label])=>{
   const w = document.createElement("div"); w.className = "fld";
@@ -2206,7 +2173,7 @@ $("#top3Apply").addEventListener("click", top3Apply);
 
 function top3SyncControls(){
   const dirty = Object.keys(top3Staged).length > 0;
-  $("#top3BatchTgl").disabled = lastSetupRO;   // spec §4: toggle + Apply both off in read-only
+  $("#top3BatchTgl").disabled = lastSetupRO;   // toggle and Apply are both off in read-only
   $("#top3Apply").hidden = !top3Batch;
   $("#top3Apply").disabled = lastSetupRO || !dirty;
   for (const [key] of TEAM_FIELDS){
@@ -2308,8 +2275,8 @@ async function setupPoll(){
     }
     sel.disabled = ro;
     if (key in top3Staged){                   // staged-but-unapplied: keep the pick
-      // If the option list was just rebuilt, the <select> reset to option 0;
-      // re-assert the staged value so the dropdown still shows what's staged.
+      // If the option list was just rebuilt the <select> reset to option 0, so re-assert
+      // the staged value and the dropdown still shows what is staged.
       if ([...sel.options].some(o=>o.value===top3Staged[key])) sel.value = top3Staged[key];
       continue;
     }
@@ -2330,15 +2297,15 @@ async function setupPoll(){
      : "sheet sync not yet attempted");
 }
 
-/* ---------- URLs section (Schedule rows + POV; sheet writes, no reloads) -- */
+/* URLs section: Schedule rows and POV. Sheet writes, no reloads. */
 const SAVE_GUARD_MS = 30000;   // a just-saved value wins over a stale CSV poll
 function rowBusy(tr){
   return tr.dataset.dirty ||
          tr.contains(document.activeElement) ||
          Date.now() - Number(tr.dataset.saved||0) < SAVE_GUARD_MS;
 }
-// Fill a Schedule-editor dropdown from a vocab list, preserving an open menu
-// and a just-picked value (cur=null leaves the current selection untouched).
+// Fill a Schedule-editor dropdown from a vocab list, preserving an open menu and a
+// just-picked value. cur=null leaves the current selection untouched.
 function fillSchedSelect(sel, opts, cur){
   if (!sel || sel === document.activeElement) return;
   const full = [""].concat(opts || []);
@@ -2366,13 +2333,11 @@ function schedRow(i){
   });
   tr.querySelector(".save").addEventListener("click", ()=>schedSave(tr, i));
   tr.querySelector(".clear").addEventListener("click", ()=>{
-    // Clear the URL ONLY — keep Streamer + Stint so the slot survives. Emptying
-    // all three cells makes the relay's CSV parser drop the now-blank row, which
-    // collapses the 1-based schedule index this panel keys rows by; the next poll
-    // then re-stamps this in-progress row's sheetRow from the shifted neighbour,
-    // so a later SAVE writes to the WRONG physical line (a cleared row clobbered
-    // its neighbour). Streamer/Stint stay editable via the dropdowns; clear the
-    // whole row in the Sheet directly if you really need to.
+    // Clear the URL only and keep Streamer and Stint, so the slot survives. Emptying
+    // all three cells makes the relay's CSV parser drop the blank row, which collapses
+    // the 1-based schedule index this panel keys rows by: the next poll re-stamps this
+    // row's sheetRow from the shifted neighbour and a later SAVE writes to the wrong
+    // physical line. Clear a whole row in the Sheet directly instead.
     const live = tr.querySelector(".livebadge").textContent;
     if (!confirm("Clear the stream link (URL) for row " + i + " in the sheet?" +
                  " Streamer + Stint stay." +
@@ -2386,8 +2351,8 @@ function schedRow(i){
 async function schedSave(tr, row){
   const btn = tr.querySelector(".save");
   btn.disabled = true; btn.textContent = "…"; btn.classList.remove("ok");
-  // Use the physical sheet row stamped by schedPoll; fall back to the stint
-  // number only for rows the poll hasn't stamped yet (e.g. a new ADD ROW).
+  // Use the physical sheet row stamped by schedPoll; fall back to the stint number
+  // only for a row the poll has not stamped yet, such as a new ADD ROW.
   const sheetRow = Number(tr.dataset.sheetRow || row);
   try{
     const r = await fetch("/schedule/set", {method:"POST", cache:"no-store",
@@ -2409,9 +2374,9 @@ async function schedSave(tr, row){
   }
 }
 $("#schedAdd").addEventListener("click", ()=>{
-  // Compute next physical sheet row from the max of existing sheetRow stamps
-  // (so the new row appends after the last known physical row, not just the
-  // last tr in the table — important when the Schedule tab has a header row).
+  // Take the next physical sheet row from the max of the existing sheetRow stamps, so
+  // the new row appends after the last known physical row rather than the last tr in
+  // the table. That matters when the Schedule tab has a header row.
   let maxSheet = 0;
   document.querySelectorAll("#schedBody tr").forEach(r=>{
     const v = Number(r.dataset.sheetRow || r.dataset.row || 0);
@@ -2457,8 +2422,8 @@ async function schedPoll(){
       tr.dataset.sheetRow = row.sheetRow;
       tr.querySelector(".livebadge").textContent = row.live || "";
       const busy = rowBusy(tr);
-      // Keep the dropdown options fresh always; only adopt the sheet's saved
-      // selection when the row isn't being edited (cur=null leaves it alone).
+      // Keep the dropdown options fresh always, but adopt the sheet's saved selection
+      // only when the row is not being edited. cur=null leaves it alone.
       fillSchedSelect(tr.querySelector(".nm"), schedOptions.streamer, busy ? null : (row.name || ""));
       fillSchedSelect(tr.querySelector(".st"), schedOptions.stint, busy ? null : (row.stint || ""));
       if (busy) return;
@@ -2480,11 +2445,11 @@ async function schedPoll(){
 }
 $("#urlsBox").addEventListener("toggle", ()=>{ schedPoll(); qualPoll(); });
 
-/* ---------- Qualifying (issue #124): separate tab, one stream on Feed A ---- */
-/* ---------- Mode (race / qualifying): one block, one switch ---------------
-   relay.mode has one value with two setters (event start --qualifying, or the
-   live switch here). applyMode() renders that single value; the switch calls
-   /mode/*. POV is a separate feed and stays visible in both modes. */
+/* Qualifying (#124): a separate tab, one stream on Feed A */
+/* Mode (race or qualifying): one block, one switch. relay.mode is one value with
+   two setters, `event start --qualifying` and the live switch here. applyMode()
+   renders that value and the switch calls /mode/*. POV is a separate feed and stays
+   visible in both modes. */
 let qualAvailable = false;
 let relayMode = "race";
 function applyMode(qualifying){
@@ -2495,18 +2460,17 @@ function applyMode(qualifying){
   $("#modeChip").classList.toggle("qual", qualifying);
   $("#modeSwitch").textContent = qualifying ? "switch → RACE" : "switch → QUALIFYING";
 }
-// Kind-conditional cut (#307): a feed-less solo relay reports {solo:true}. Hide
-// the A/B feed + schedule + submission affordances and reveal the POV editor as
-// its own card. Endurance (solo=false) is byte-identical — no class is set.
+// Kind-conditional cut (#307): a feed-less solo relay reports {solo:true}. Hide the
+// A/B feed, schedule and submission affordances and reveal the POV editor as its own
+// card. Endurance reports solo=false and no class is set.
 function applySolo(isSolo){
   document.body.classList.toggle("solo", !!isSolo);
   const box = $("#urlsBox");
   if (box && isSolo) box.open = true;   // POV lives in the schedule <details>;
                                         // force it open so the POV card shows.
-  // One-time rebuild of the OBS-control busses for the solo collection
-  // (#307 Increment 2 §A): the panel builds CONFIG's endurance buttons at
-  // load, before the first /status — this poll is the first point solo is
-  // knowable. Endurance never sets the latch, so its build stays untouched.
+  // One-time rebuild of the OBS-control busses for the solo collection (#307). The
+  // panel builds CONFIG's endurance buttons at load, before the first /status, so this
+  // poll is the first point at which solo is knowable.
   if (isSolo && !window.__builtSolo){
     window.__builtSolo = true;
     buildControls(CONFIG_SOLO);
@@ -2549,7 +2513,7 @@ $("#qualRow").querySelectorAll("input,select").forEach(el=>{
   el.addEventListener("change", ()=>$("#qualRow").dataset.dirty = 1);
 });
 $("#modeSwitch").addEventListener("click", async (e)=>{
-  e.preventDefault(); e.stopPropagation();   // it lives in the <summary>; don't toggle the details
+  e.preventDefault(); e.stopPropagation();   // it lives in the <summary>, so do not toggle the details
   if (relayMode === "qualifying"){
     if (!confirm("Switch the relay back to RACE MODE? Feeds re-point to the race schedule (interrupts a running pull).")) return;
     await relayCall("mode/race");
@@ -2583,11 +2547,11 @@ async function qualPoll(){
   }catch(e){}
 }
 
-/* ---------- Pending stream submissions (#193) --------------------------------
-   Commentators submit their own stream link from the cockpit; each lands here
-   pending. APPROVE writes the Schedule via /schedule/set (the feed picks it up
-   on RELOAD A/B / NEXT); REJECT discards. Polled always so the count badge
-   surfaces even while the section is collapsed. */
+/* Pending stream submissions (#193). A commentator submits their own stream link
+   from the cockpit and it lands here pending. APPROVE writes the Schedule via
+   /schedule/set, which the feed picks up on the next RELOAD or NEXT; REJECT
+   discards. Polled even while the section is collapsed, so the count badge stays
+   current. */
 let subsBusy = null;     // id currently being approved/rejected (guards double-clicks)
 function subRow(e){
   const tr = document.createElement("tr"); tr.dataset.id = e.id;
@@ -2642,12 +2606,12 @@ async function subsPoll(){
 }
 $("#subsBox").addEventListener("toggle", ()=>subsPoll());
 
-/* ---------- Director cues (#243) -----------------------------------------
+/* Director cues (#243).
    loadCuePresets: fills clickable shorthand buttons from /cues/presets
    loadCueTargets: populates the target <select> with schedule names
    sendCue:        POST /cues/send {target, level, text}
    pollCueRecent:  GET /cues/data -> recent list with ack status
-   Plain fetch() throughout — the global patch already prefixes RC_API_BASE. */
+   Plain fetch() throughout; the global patch already prefixes RC_API_BASE. */
 
 async function loadCuePresets(){
   try{
@@ -2664,7 +2628,7 @@ async function loadCuePresets(){
       });
       box.appendChild(b);
     });
-  }catch(e){ /* presets optional (--no-hud); degrade to free-text only */ }
+  }catch(e){ /* presets are optional (--no-hud); degrade to free text only */ }
 }
 
 async function loadCueTargets(){
@@ -2717,8 +2681,8 @@ async function pollCueRecent(){
     const d = await r.json();
     const ul = document.getElementById("cueRecent");
     ul.replaceChildren();
-    // Only the director's OWN sent cues here — inbound RC notes (#376) and
-    // commentator cue-backs (#377) carry an `origin` and have their own surfaces.
+    // Only the director's own sent cues here. Inbound RC notes (#376) and commentator
+    // cue-backs (#377) carry an `origin` and have their own surfaces.
     (d.cues || []).filter(c => !c.origin).slice(-12).reverse().forEach(c=>{
       const li = document.createElement("li");
       const seen = c.ack ? " ✓ seen" : (c.level === "critical" ? " …pending" : "");
@@ -2729,12 +2693,13 @@ async function pollCueRecent(){
   }catch(e){ /* transient; next poll retries */ }
 }
 
-// Commentator -> director cue-backs (#377): incoming commentator replies. Hidden
-// until at least one arrives; survives reload + takeover (server-side store).
+// Commentator to director cue-backs (#377): incoming replies, hidden until the
+// first one arrives. The store is server-side, so they survive a reload and a
+// takeover.
 async function pollCueBacks(){
   try{
     const r = await fetch("/cues/back", {cache:"no-store"});
-    if(!r.ok) return;                       // disabled/forbidden — leave hidden
+    if(!r.ok) return;                       // disabled or forbidden, leave hidden
     const d = await r.json();
     const wrap = document.getElementById("cueBackWrap");
     const ul = document.getElementById("cueBackList");
@@ -2760,13 +2725,11 @@ document.getElementById("cueText").addEventListener("keydown", e=>{
   if (e.key === "Enter") sendCue();
 });
 
-/* ---------- Ad-hoc stream substitution -------------------------------------
+/* Ad-hoc stream substitution.
    GET /substitution/latest -> {substitution:{ts,feed,stint,reason}|null}
    POST /substitution/note {reason} -> re-poll to reflect the saved value.
-   Plain fetch() throughout — the global patch already prefixes RC_API_BASE
-   (mirrors pollCueRecent/sendCue above). Self-hides like the broadcast-chat
-   card when there is nothing to show; never overwrites the reason input
-   while the director is actively typing in it. */
+   Self-hides like the broadcast-chat card when there is nothing to show, and never
+   overwrites the reason input while the director is typing in it. */
 async function substitutionPoll(){
   try{
     const r = await fetch("/substitution/latest", {cache:"no-store"});
@@ -2797,7 +2760,7 @@ document.getElementById("subSave").addEventListener("click", async ()=>{
   finally{ btn.disabled = false; }
 });
 
-// ---- Live Preview ---------------------------------------------------------
+// Live Preview
 const PV_KEY = "rc_preview_open";
 const PV_FEED_MS = 1000;
 const pvFeedTimers = {};
@@ -2806,14 +2769,12 @@ let pvLevelTimer = null;
 function pvSetProgram(){
   const frame = $("#pvProgramFrame"), img = $("#pvProgram");
   const ph = frame.querySelector(".pvph"), txt = ph.querySelector(".pvphtxt");
-  // Probe with a FRESH image each cycle and reschedule only AFTER it resolves —
-  // never re-assign the visible <img>'s src while a request is in flight. Doing so
-  // aborts the pending load, which fires NEITHER onload nor onerror, so the frame
-  // and the error state never land and the tile wedges on "Program loading …"
-  // forever with no recovery (the /preview/program screenshot can take up to the
-  // obs-ws 2 s timeout, longer than the old 1.5 s setInterval). Mirrors the
-  // cockpit/race-control pollProgram: it cannot overlap and auto-recovers once OBS
-  // delivers. (#520)
+  // Probe with a fresh image each cycle and reschedule only after it resolves. Never
+  // re-assign the visible <img>'s src while a request is in flight: that aborts the
+  // pending load, which fires neither onload nor onerror, so the tile wedges on
+  // "Program loading" with no recovery. A /preview/program screenshot can take up to
+  // the obs-ws 2 s timeout, longer than a fixed poll interval. Mirrors the cockpit and
+  // race-control pollProgram: it cannot overlap and recovers once OBS delivers. (#520)
   const next = new Image();
   next.onload = () => { img.src = next.src; frame.classList.add("loaded");
     ph.classList.remove("err"); pvTimer = setTimeout(pvSetProgram, 1500); };
@@ -2828,9 +2789,8 @@ function pgmAudioInit(endpoint) {
   var au  = document.getElementById('pgmAudio');
   if (!bar || !btn || !au) return;
   var url = RC_API(endpoint);
-  // Probe: show the control only if the endpoint reports available (feature on +
-  // fan-out on). GET ?probe=1 returns 200 without acquiring/streaming (HEAD is
-  // unsupported by the relay's control server).
+  // GET ?probe=1 returns 200 without acquiring or streaming; the relay's control
+  // server does not support HEAD.
   var probeUrl = url + (url.indexOf('?') < 0 ? '?' : '&') + 'probe=1';
   fetch(probeUrl).then(function (r) { if (r.ok) bar.style.display = 'flex'; }).catch(function () { /* leave hidden */ });
   au.volume = parseFloat(vol.value);
@@ -2917,7 +2877,7 @@ function pvMarkOnAir(feed){
 if((localStorage.getItem(PV_KEY) || "1") === "1"){ pvStart(); }
 pgmAudioInit("/preview/program-audio");
 
-/* ---------- Graphics browser (read-only Sheet-assets list) ---------- */
+/* Graphics browser: a read-only list of the Sheet assets */
 async function loadGraphics() {
   const box = document.getElementById('gfxList');
   if (!box) return;
@@ -2949,9 +2909,9 @@ async function loadGraphics() {
 { const gr = document.getElementById('gfxRefresh');
   if (gr) gr.addEventListener('click', loadGraphics); }
 
-/* ---------- single-content layout (PROGRAM/SETUP tabs removed) ----------
-   updateSetupBadge() is kept as a safe no-op: its #setupBadge target no longer
-   exists, so it returns early; callers (subs/substitution polls) stay untouched. */
+/* Single-content layout: the PROGRAM and SETUP tabs are gone. updateSetupBadge()
+   is kept as a no-op, because its #setupBadge target no longer exists and it
+   returns early, so its callers stay untouched. */
 function updateSetupBadge(){
   const badge = document.getElementById("setupBadge");
   if(!badge) return;
@@ -2963,7 +2923,7 @@ function updateSetupBadge(){
   else { badge.hidden = true; }
 }
 
-/* ---------- boot ---------- */
+/* Boot */
 renderAir({});
 relayPoll(); timerPoll();
 setInterval(relayPoll, 2000);
@@ -3016,7 +2976,7 @@ flagGfxPoll(); setInterval(flagGfxPoll, 2000);
     try {
       const r = await fetch('/event-notes/data', { cache: 'no-store' });
       if (r.ok) renderNotes(await r.json());
-    } catch (e) { /* transient — keep last state */ }
+    } catch (e) { /* transient; keep last state */ }
     setTimeout(pollNotes, 30000);
   }
   pollNotes();

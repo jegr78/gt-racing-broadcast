@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""racecast operator CLI: one entrypoint for every service and setup action.
+"""racecast operator CLI — one entrypoint for every service and setup action.
 
   python3 src/racecast.py relay start        # repo
   python3 racecast.py     relay start        # shipped package
@@ -9,10 +9,10 @@
   racecast streams   start|stop|restart|status|logs
   racecast <svc> logs [-f] [--list] [--archive YYYY-MM-DD]   # tail merged live logs; --list archives; --archive reads one (svc: relay|streams|companion|obs|tailscale)
   racecast event     status|start|stop      # event-day readiness: check / bring-up / wind-down
-  racecast event start --stint N             # takeover: stint N is on air now, so the relay starts there
+  racecast event start --stint N             # takeover: stint N is on air now — the relay starts there
   racecast event start --qualifying          # bring up in qualifying mode (Feed A serves the Qualifying tab)
   racecast event start --force               # skip the pre-flight gate (start despite missing SHEET_ID/graphics)
-  racecast event takeover <A-ip> [--funnel] [--stint N]  # take over from another producer: read A's on-air stint+league, pull chat, bring up at that stint. --funnel <magicdns-host> pulls state over the public Funnel using the league CONSOLE_SECRET
+  racecast event takeover <A-ip> [--funnel] [--stint N]  # take over from another producer: read A's on-air stint+league, pull chat, bring up at that stint; --funnel <magicdns-host> pulls state over the public Funnel using the league CONSOLE_SECRET
   racecast tailscale up|down|status          # connect / disconnect / inspect Tailscale
   racecast obs refresh                       # force-reload the relay-served OBS browser sources (HUD incl. timer)
   racecast obs collection [set]              # report the active OBS scene collection (set = switch to GT Racing Endurance)
@@ -227,7 +227,7 @@ def _profile_env_vars(rc):
              ("RACECAST_EVENT_TITLE", rc.event_title),
              ("RACECAST_PROFILE_NAME", rc.name),
              ("RACECAST_LOGO", rc.logo_path),
-             ("RACECAST_KIND", rc.kind),   # endurance|solo; relay's --solo default
+             ("RACECAST_KIND", rc.kind),   # endurance|solo — relay's --solo default
              ("RACECAST_TEMPLATE", rc.template))  # solo starter template (commentary|pov)
     return {k: v for k, v in pairs if v}
 
@@ -382,7 +382,7 @@ def cleanup_old_binary(exe_dir, frozen=None, platform=None):
                 os.remove(old)
                 removed = True
         except OSError:
-            pass  # still locked by a lingering process; retried on the next run
+            pass  # still locked by a lingering process — retried on the next run
     return removed
 
 
@@ -401,7 +401,7 @@ def _load_env_frozen():
         return
     # _app_home (not dirname): a macOS .app nests the exe under Contents/MacOS/,
     # so .env lives next to the bundle, not inside it; _real_executable also maps
-    # out of any App-Translocation mount. (#22)
+    # out of any App-Translocation mount (issue #22).
     path = os.path.join(_app_home(_real_executable()), ".env")
     try:
         with open(path, encoding="utf-8") as fh:
@@ -445,7 +445,7 @@ def _ensure_ssl_certs():
 
 # Where `racecast install-tools` (brew) drops yt-dlp/streamlink/ffmpeg/deno on macOS:
 # Apple-silicon Homebrew, then Intel Homebrew. A Finder/Dock launch omits these
-# from PATH. (#38)
+# from PATH (issue #38).
 TOOL_PATH_DIRS = ("/opt/homebrew/bin", "/usr/local/bin")
 
 
@@ -598,11 +598,12 @@ def _relay_script():
     return os.path.join(HERE, "relay", "racecast-feeds.py")
 
 def _relay_pid_path():
-    # Singleton: the relay binds the shared control port 8088 plus the feed ports,
-    # so only one can run per machine. Its PID therefore lives at the un-scoped
-    # runtime/ top level, not under runtime/<profile>/, so stop/status/restart find
-    # the one running relay whatever profile is active. A per-profile PID let a
-    # `profile use` orphan it on 8088. (#273)
+    # Singleton: the relay binds the SHARED control port (8088) + feed ports, so
+    # only ONE can run per machine. Its PID therefore lives at the un-scoped
+    # runtime/ TOP LEVEL (like the active-profile pointer) — NOT under
+    # runtime/<profile>/ — so stop/status/restart find the one running relay
+    # regardless of which profile is active. A per-profile PID let a `profile use`
+    # while the relay ran orphan it on port 8088 (#273).
     return os.path.join(_runtime_base_dir(), "relay.pid")
 
 def _relay_profile_path():
@@ -639,7 +640,7 @@ def _clear_relay_profile_stamp():
     try:
         os.remove(_relay_profile_path())
     except OSError:
-        pass  # no stamp to clear, already gone
+        pass  # no stamp to clear — already gone
 
 def _event_title_path():
     """The active profile's persisted event-title file (#207). The relay's
@@ -724,7 +725,7 @@ def _append_tailscale_snapshot():
         ts_str = time.strftime("%Y-%m-%d %H:%M:%S")
         path = _tailscale_snapshot_path()
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        # append-only and small per entry, so no rotation is needed (prune_old_logs is
+        # append-only; small per entry — no rotation needed (prune_old_logs is
         # mtime-based and won't touch it while the relay is in regular use).
         with open(path, "a", encoding="utf-8") as fh:
             fh.write(_ts.status_snapshot_text(text, ts_str))
@@ -1268,7 +1269,7 @@ def _discord_voice_target():
         try:
             sheet_val = discord_rpc.discord_voice_from_csv(
                 http_util.get_bytes(url, timeout=8).decode("utf-8"))
-        except Exception:  # noqa: BLE001 (Sheet unreachable -> fall back to env)
+        except Exception:  # noqa: BLE001 — Sheet unreachable -> fall back to env
             sheet_val = ""
     return discord_rpc.resolve_voice_target(
         sheet_val, os.environ.get("RACECAST_DISCORD_VOICE_URL", ""))
@@ -1327,7 +1328,7 @@ def _discord_autojoin():
               else "discord: voice auto-join skipped — " + note)
     except SystemExit:
         raise
-    except Exception as exc:  # noqa: BLE001 (auto-join must never break event start)
+    except Exception as exc:  # noqa: BLE001 — auto-join must never break event start
         print("discord: voice auto-join skipped ({})".format(type(exc).__name__))
 
 
@@ -1354,7 +1355,7 @@ def _discord_autoleave():
               else "discord: voice auto-leave skipped — " + note)
     except SystemExit:
         raise
-    except Exception as exc:  # noqa: BLE001 (auto-leave must never break event stop)
+    except Exception as exc:  # noqa: BLE001 — auto-leave must never break event stop
         print("discord: voice auto-leave skipped ({})".format(type(exc).__name__))
 
 
@@ -1455,7 +1456,7 @@ def _report_log_files(since=None):
     feed_*.log) don't collide. Archives (rotated older files) are left out."""
     try:
         reg = _log_sources()
-    except Exception:  # noqa: BLE001 (bundling logs must never break the report send)
+    except Exception:  # noqa: BLE001 — bundling logs must never break the report send
         return []
     pairs = []
     for source in ("relay", "streams", "obs", "companion", "tailscale", "app"):
@@ -1473,7 +1474,7 @@ def _report_log_files(since=None):
                     except OSError:
                         pass  # can't stat -> keep it (conservative, matches old behavior)
                 pairs.append((source, fp))
-        except Exception:  # noqa: BLE001 (one flaky source must not drop the others)
+        except Exception:  # noqa: BLE001 — one flaky source must not drop the others
             continue
     return pairs
 
@@ -1486,7 +1487,7 @@ def _relay_mode():
         data = _relay_fetch_json(f"http://127.0.0.1:{RELAY_PORT}/status")
         mode = data.get("mode")
         return mode if mode in ("race", "qualifying") else None
-    except Exception:  # noqa: BLE001 (best-effort)
+    except Exception:  # noqa: BLE001 — best-effort
         return None
 
 
@@ -1521,7 +1522,7 @@ def _report_name_map():
         return {r["row"]: (r.get("name") or "").strip()
                 for r in (data.get("rows") or [])
                 if isinstance(r.get("row"), int) and (r.get("name") or "").strip()}
-    except Exception:  # noqa: BLE001 (best-effort; names degrade gracefully)
+    except Exception:  # noqa: BLE001 — best-effort; names degrade gracefully
         return {}
 
 
@@ -1554,7 +1555,7 @@ def _build_report_file(frm=None, to=None, gap=None, out=None):
         samples = hsmod.query_range(conn, frm, to)
         # Events (part_end, obs_stream_stop) are recorded during teardown, a few
         # seconds AFTER the last health sample that sets `to`. Query the event tail
-        # up to `to + gap` so they still land in the timeline. The next session is
+        # up to `to + gap` so they still land in the timeline — the next session is
         # >= gap away by construction, so this can't pull in a later session's events.
         events = hsmod.query_events(conn, frm, to + gap)
     finally:
@@ -1625,7 +1626,7 @@ def report_generate_data():
     try:
         r = _build_report_file()
         return {"ok": True, "path": r["path"], "html": r["html"], "summary": r["summary"]}
-    except Exception as exc:  # noqa: BLE001 (surface the message to the UI)
+    except Exception as exc:  # noqa: BLE001 — surface the message to the UI
         return {"ok": False, "error": str(exc)}
 
 
@@ -1633,7 +1634,7 @@ def report_send_data(path=None):
     try:
         _send_report_core(path or _latest_report())
         return {"ok": True}
-    except Exception as exc:  # noqa: BLE001 (surface the message to the UI)
+    except Exception as exc:  # noqa: BLE001 — surface the message to the UI
         return {"ok": False, "error": str(exc)}
 
 
@@ -1680,7 +1681,7 @@ def report_cmd(rest):
             _send_report_core(path)
         except (OSError, ValueError) as exc:
             sys.exit(f"racecast: {exc}")
-        except Exception as exc:  # noqa: BLE001 (network/HTTP)
+        except Exception as exc:  # noqa: BLE001 — network/HTTP
             sys.exit(f"racecast: Discord send failed — {type(exc).__name__}: {exc}")
         print(f"Sent {os.path.basename(path)} to the league Discord.")
         return None
@@ -2314,7 +2315,7 @@ def _frozen_child_env():
     try:
         os.makedirs(bundle_dir, exist_ok=True)
     except OSError:
-        return env  # unwritable install dir; keep the OS default, don't fail
+        return env  # unwritable install dir — keep the OS default, don't fail
     return sv.daemon_bundle_env(env, bundle_dir)
 
 
@@ -2403,8 +2404,8 @@ def relay_start(rest):
         return None
     if action == "heal":
         # Self-heal a defect (orphan / split-brain / wrong-profile / dead-PID /
-        # unresponsive). Kill by port, not via the PID file or `freeport`, which
-        # refuses while a relay is alive, so a cross-profile or old-binary orphan
+        # unresponsive). Kill BY PORT — not via the PID file or `freeport` (which
+        # refuses while "a relay is alive") — so a cross-profile/old-binary orphan
         # is actually cleared instead of deadlocking the start (#273 follow-up).
         print(f"relay: clearing stale holder(s) of port {RELAY_PORT} "
               f"({reason}) — killing PID {', '.join(map(str, kill_pids))}, then restarting.")
@@ -2432,7 +2433,7 @@ def relay_start(rest):
     argv = _relay_daemon_argv(rest, IS_FROZEN)
     newpid = _spawn_relay_verified(argv)
     if newpid is None:
-        return None                   # honest failure already reported; never claim success
+        return None                   # honest failure already reported — never claim success
     print(f"relay started (pid {newpid}). Watch it: racecast relay logs -f")
     _append_tailscale_snapshot()
     _refresh_obs_pages(wait=0)    # relay already confirmed up -> refresh OBS pages now
@@ -2490,7 +2491,7 @@ def _sync_pov_transform(set_transform=None):
             if ok:
                 print(f"obs: {slot_id} box synced to '{tgt['source']}' "
                       f"({box['left']},{box['top']} {box['width']}x{box['height']}).")
-    except Exception as exc:  # noqa: BLE001 (best-effort contract)
+    except Exception as exc:  # noqa: BLE001 — best-effort contract
         print(f"obs: box sync skipped ({exc}).")
         return
 
@@ -2527,17 +2528,18 @@ def _refresh_obs_pages(force=False, wait=0):
     print(f"obs: refreshed browser sources {', '.join(names)}." if names
           else "obs: no relay browser sources in OBS — nothing to refresh.")
     _sync_pov_transform()              # live POV-box position sibling (best effort)
-    # Feed A/B ship close_when_inactive=False; fan-out needs True so OBS disconnects
-    # off-air and no stale backlog forms. Track the flag unconditionally, so a
-    # fallback to direct-serve reverts A/B to False. POV ships True, correct in both
-    # modes, and is left untouched. Best effort.
-    # Mirror of fanout_enabled in racecast-feeds.py.
+    # Feed A/B ship close_when_inactive=False; fan-out needs True (OBS disconnects
+    # off-air so no stale backlog forms → kills the ~2 s stale-on-activation glitch).
+    # Set it to track the flag UNCONDITIONALLY so a fallback to direct-serve (flag
+    # off) reverts A/B to False — the coexistence guarantee. POV ships True (correct
+    # in both modes) and is deliberately left untouched. Best effort.
+    # Default ON, set =0 to fall back (mirror of fanout_enabled in racecast-feeds.py).
     _fanout = _machine_env_value("RACECAST_FEED_FANOUT").strip().lower() not in {"0", "false", "no", "off"}
     try:
         note = obs_ws.set_feed_close_when_inactive(list(obs_ws.FEED_SOURCES.values()), _fanout)
         if note:
             print("obs: " + note)
-    except Exception as exc:  # noqa: BLE001 (best-effort contract)
+    except Exception as exc:  # noqa: BLE001 — best-effort contract
         print(f"obs: close_when_inactive skipped ({exc}).")
 
 
@@ -2559,7 +2561,7 @@ def app_launch_cmd(rest):
     argv, cwd = cmd
     # Same environment handling as `event start`: this is the documented manual
     # fallback for launching OBS, so it must not fail in the ways event start no
-    # longer does (#572): the frozen library path, and no session overrides
+    # longer does (#572) — the frozen library path, and no session overrides
     # when run over SSH.
     child_env, _overrides = _gui_child_env(name, ev)
     try:
@@ -2594,7 +2596,7 @@ def obs_refresh_cmd(_rest):
     """Force-refresh every relay-served browser source — the scriptable
     right-click → Refresh (no staleness gate)."""
     # Upfront probe for a real exit code + directive message; _refresh_obs_pages
-    # re-probes internally (best-effort, exit 0), an accepted localhost double GET.
+    # re-probes internally (best-effort, exit 0) — accepted localhost double GET.
     if not _relay_http_ok():
         sys.exit(f"obs: relay not responding on port {RELAY_PORT} — start it first "
                  "(refreshing against a dead relay loads an error page in OBS).")
@@ -2668,7 +2670,7 @@ def _apply_stream_target(part, fetch=None, post=None, apply_obs=None,
     try:
         prod_rows = prod.parse_producer_rows(fetch(_gviz_csv_url(sheet_id, PRODUCER_TAB)))
         chan_rows = bc.parse_channel_tab(fetch(_gviz_csv_url(sheet_id, CHANNEL_TAB)))
-    except Exception as exc:                           # noqa: BLE001 (tolerant fetch)
+    except Exception as exc:                           # noqa: BLE001 — tolerant fetch
         return False, f"sheet fetch failed: {type(exc).__name__}"
     ref = st.resolve_part_ref(prod_rows, part)
     if not ref:
@@ -2678,7 +2680,7 @@ def _apply_stream_target(part, fetch=None, post=None, apply_obs=None,
         return False, "no channel/platform configured (Channel tab)"
     try:
         body = post(push_url, {"action": "get_stream_key", "ref": ref})
-    except Exception as exc:                           # noqa: BLE001 (tolerant webhook)
+    except Exception as exc:                           # noqa: BLE001 — tolerant webhook
         return False, f"stream-key webhook failed: {type(exc).__name__}"
     key, err = st.parse_stream_key_response(body)
     if err:
@@ -2784,7 +2786,7 @@ def obs_benchmark_cmd(rest):
                         progress=print)
     except ob.BenchmarkRefused as exc:
         sys.exit(f"obs: benchmark refused — {exc}")
-    except Exception as exc:                          # noqa: BLE001 (operator-facing exit)
+    except Exception as exc:                          # noqa: BLE001 — operator-facing exit
         sys.exit(f"obs: benchmark failed — {exc}")
     finally:
         session.close()
@@ -3073,7 +3075,7 @@ def relay_stop(rest):
     if sv.stop_pid(pid, _relay_pid_path(), is_target=sv.pid_is_relay):
         _clear_relay_profile_stamp()
         print("relay stopped.")
-        _release_obs_feeds()                # AFTER the kill, see docstring
+        _release_obs_feeds()                # AFTER the kill — see docstring
     else:
         print("relay may still be running.")
 
@@ -3142,11 +3144,13 @@ def _companion_running(cc):
     cmds = _companion_cmds(cc)
     if not cmds:
         return False
-    # errors="replace": tasklist writes OEM-codepage output that the ANSI codepage
-    # Python uses for text=True cannot decode. The matched token is pure ASCII.
-    # env=external_tool_env(): the frozen binary must not leak its _MEIPASS onto
-    # LD_LIBRARY_PATH, else systemctl loads our bundled libcrypto, exits non-zero,
-    # and Companion is misreported as stopped.
+    # errors="replace": tasklist writes OEM-codepage console output (e.g. German
+    # "ausgeführt" = 0x81), which is NOT decodable as the ANSI codepage Python
+    # uses for text=True. The matched token (Companion.exe) is pure ASCII.
+    # env=external_tool_env(): on Linux cmds["running"] is a bare `systemctl
+    # is-active` (no sudo to reset the env), so the frozen binary must not leak
+    # its _MEIPASS onto LD_LIBRARY_PATH — else systemctl loads our bundled
+    # libcrypto, exits non-zero, and Companion is misreported as stopped.
     probe = subprocess.run(cmds["running"], capture_output=True, text=True,
                            errors="replace", env=sv.external_tool_env(),
                            **sv.no_window_kwargs())
@@ -3195,7 +3199,7 @@ def companion_start(rest):
     bind_arg = rest[0] if rest else "auto"
     cfg_path = cc.companion_config_path(sys.platform)
     if not os.path.exists(cfg_path):
-        # First launch: Companion creates its config on startup, so start it
+        # First launch: Companion creates its config on startup — start it
         # plainly now, bind on the next run (the bind edit needs the file).
         print(f"companion: first launch (no config at {cfg_path} yet) — starting Companion as-is.")
         print("  When it is up, run `racecast companion restart` to bind it to the Tailscale IP.")
@@ -3341,13 +3345,13 @@ def streams_start(rest):
 
 def streams_stop(rest):
     # Static feeds serve the same OBS media sources as the relay (same ports),
-    # so OBS must drop them here too, but only if feeds actually ran.
+    # so OBS must drop them here too — but only if feeds actually ran.
     had_feeds = bool(glob.glob(os.path.join(_streams_static_dir(), "feed_*.pid")))
     # No SystemExit: streams_restart() must continue into streams_start().
     _run_script("scripts/stop-streams.py",
                 ["--state-dir", _streams_static_dir()] + rest)
     if had_feeds:
-        _release_obs_feeds()                # AFTER the kill, see the helper
+        _release_obs_feeds()                # AFTER the kill — see the helper
 
 def streams_run_feed(rest):
     raise SystemExit(_run_script("scripts/loopstream.py", rest))
@@ -3467,7 +3471,7 @@ def _open_url(url, which=shutil.which, platform=None, popen=None, sleep=None,
             return
         print(f"  {argv[0]}: {note}")
         # Last resort only. webbrowser starts the browser as OUR child, which is
-        # the very thing that fails on a frozen build, so promise nothing.
+        # the very thing that fails on a frozen build — so promise nothing.
         print(f"  falling back to the default browser — if no window appears, "
               f"open {url} yourself")
     (browser or webbrowser.open)(url)
@@ -3483,7 +3487,7 @@ def relay_open_status(rest):
     _open_url(_http_url("127.0.0.1", RELAY_PORT, "/status"))
 
 def _companion_open(path):
-    # Companion listens on its bind_ip (the Tailscale IP), not 127.0.0.1. Open that.
+    # Companion listens on its bind_ip (the Tailscale IP), not 127.0.0.1 — open that.
     cc = _companion()
     cfg_path = cc.companion_config_path(sys.platform)
     if not os.path.exists(cfg_path):
@@ -3595,7 +3599,7 @@ def _event_sections(ev, pf):
     apps = [ev.classify_app("obs", obs_running),
             ev.classify_app("discord", ev.app_running("discord"), web=discord_web_mode),
             ev.classify_tailscale(_tailscale_ip())]
-    # Scene-collection line: only probe obs-websocket when OBS is actually up
+    # Scene-collection line — only probe obs-websocket when OBS is actually up
     # (no point paying the connect timeout otherwise). Best effort: a broken
     # probe must never traceback the readiness report.
     if obs_running:
@@ -3603,7 +3607,7 @@ def _event_sections(ev, pf):
             import obs_ws
             status, note = obs_ws.get_scene_collection(expected=_active_obs_collection())
             apps.append(ev.classify_scene_collection(status, note))
-        except Exception as exc:                     # noqa: BLE001 (best effort)
+        except Exception as exc:                     # noqa: BLE001 — best effort
             apps.append(ev.Result(ev.WARN, "OBS scene collection",
                                   f"check failed: {exc}"))
     # Services
@@ -3618,7 +3622,7 @@ def _event_sections(ev, pf):
             "" if supported else _companion_unsupported_msg()))
     except Exception as exc:
         services.append(ev.Result(ev.WARN, "Companion", f"check failed: {exc}"))
-    # Assets: a broken probe must never traceback the report.
+    # Assets — a broken probe must never traceback the report (spec: error behaviour).
     assets = [pf.cookies_status(_cookies_path())]
     try:
         g_dir, m_dir, missing_g, missing_m = _asset_state(ev)
@@ -3703,7 +3707,7 @@ def _announce_takeover(status, plan, a_title):
                            producer=b_name,
                            metadata={"from": a_name, "stint": plan["stint"]})
         conn.close()
-    except Exception as exc:  # noqa: BLE001 (best-effort, never blocks the bring-up)
+    except Exception as exc:  # noqa: BLE001 — best-effort, never blocks the bring-up
         print(f"note: takeover announcement failed ({type(exc).__name__}) — continuing.")
 
 
@@ -3723,7 +3727,7 @@ def _event_gate_results(ev, pf):
                                        ev.FAIL, "run `racecast graphics`"),
                     ev.classify_assets("Media", missing_m, ev.local_count(m_dir),
                                        ev.WARN, "run `racecast media`")]
-    except Exception as exc:                          # noqa: BLE001 (best effort)
+    except Exception as exc:                          # noqa: BLE001 — best effort
         results.append(ev.Result(ev.WARN, "Graphics/Media", f"check failed: {exc}"))
     return results
 
@@ -3768,7 +3772,7 @@ def _gui_spawn(argv, cwd, env, app, popen=None, sleep=None):
                      stderr=fh, **sv.spawn_kwargs(os.name))
         sleep(GUI_LAUNCH_GRACE_S)
         if proc is None or proc.poll() is None:
-            return ""                    # still running, nothing to report
+            return ""                    # still running — nothing to report
         fh.seek(0)
         text = fh.read().decode("utf-8", "replace")
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()][:3]
@@ -3910,7 +3914,7 @@ def _wait_for_obs_ready(timeout=OBS_READY_TIMEOUT_S):
     try:
         import obs_ws
         ok, note = obs_ws.wait_until_ready(timeout=timeout)
-    except Exception as exc:                         # noqa: BLE001 (best effort)
+    except Exception as exc:                         # noqa: BLE001 — best effort
         print(f"obs: readiness check skipped ({exc}).")
         return
     if not ok:
@@ -3929,7 +3933,7 @@ def _check_scene_collection():
     try:
         import obs_ws
         status, note = obs_ws.get_scene_collection(expected=_active_obs_collection())
-    except Exception as exc:                         # noqa: BLE001 (best effort)
+    except Exception as exc:                         # noqa: BLE001 — best effort
         print(f"obs: scene collection check skipped ({exc}).")
         return
     action, detail = obs_ws.scene_collection_action(
@@ -3966,7 +3970,7 @@ def _switch_to_standby():
         return
     try:
         import obs_ws
-    except Exception as exc:                          # noqa: BLE001 (best effort)
+    except Exception as exc:                          # noqa: BLE001 — best effort
         print(f"obs: standby switch skipped ({exc}).")
         return
     action, note = obs_ws.switch_to_scene_if_idle(STANDBY_SCENE)
@@ -3995,7 +3999,7 @@ def event_start(rest, _autojoin=True, _new_session=True):
     rather than resetting it; a mid-event recovery restart (--stint/--part) keeps
     it too (see `_is_continuation_start`)."""
     ev, pf = _event_modules()
-    # 0. Pre-flight gate: refuse to bring the stack up when a static
+    # 0. Pre-flight gate — refuse to bring the stack up when a static
     # precondition is broken (missing SHEET_ID, missing graphics): those never
     # self-heal and would otherwise surface as black sources / unresolved feeds
     # mid-broadcast. WARNs (stale cookies, missing media) do not block. `--force`
@@ -4009,7 +4013,7 @@ def event_start(rest, _autojoin=True, _new_session=True):
             for r in blockers:
                 print(pf.fmt_result(r, color))
             raise SystemExit(1)
-    # 1. Tailscale: connect a stopped backend; launch the app when needed.
+    # 1. Tailscale — connect a stopped backend; launch the app when needed.
     if _tailscale_connect(ev) is None:
         print("tailscale: continuing local-only (OBS keeps working).")
     # 2. Discord
@@ -4017,15 +4021,19 @@ def event_start(rest, _autojoin=True, _new_session=True):
         print("discord: already running.")
     else:
         _event_launch(ev, "discord")
-    # 3. Relay (before OBS, see docstring). A takeover forwards --stint so the feeds
-    # start at the stint on air right now, --qualifying brings the stack up in
-    # qualifying mode, and --title sets the event title. Reset the broadcast-Part
-    # pointer before the relay starts, so its PartStore comes up on the right Part.
+    # 3. Relay (before OBS — see docstring). A takeover bring-up forwards
+    # --stint so the feeds start at the stint that is on air right now;
+    # --qualifying brings the stack up in qualifying mode (Feed A on the
+    # Qualifying tab); --title sets the free-text event title (#207). Reset the
+    # broadcast-Part pointer to Part 1 (or --part N for a mid-event recovery
+    # restart) BEFORE the relay starts, so its PartStore comes up on the right
+    # Part.
     _write_part_reset(_part_index(rest))
-    # Mark THIS event's start so the report window begins here: a restart within
-    # report_build.SESSION_GAP_S must not merge the previous event's health samples
-    # into this report. A fresh broadcast only, since a takeover or a mid-event
-    # recovery restart keeps the existing window so the report stays continuous.
+    # Mark THIS event's start so the post-event report window begins here — a quick
+    # event restart within report_build.SESSION_GAP_S must not merge the previous
+    # event's health samples into this report (the window START used to never reset).
+    # A fresh broadcast ONLY: a takeover (_new_session=False) or a mid-event recovery
+    # restart (--stint/--part) keeps the existing window so the report stays continuous.
     if _new_session and not _is_continuation_start(rest):
         _write_session_start()
     relay_start(_stint_args(rest) + _qualifying_args(rest) + _title_args(rest))
@@ -4038,7 +4046,7 @@ def event_start(rest, _autojoin=True, _new_session=True):
         print("obs: already running.")
     else:
         _event_launch(ev, "obs")
-    # 5. Companion (companion_start sys.exits on unsupported setups, keep going)
+    # 5. Companion (companion_start sys.exits on unsupported setups — keep going)
     try:
         companion_start(["auto"])
     except SystemExit as exc:
@@ -4046,12 +4054,12 @@ def event_start(rest, _autojoin=True, _new_session=True):
               else f"companion: start failed (exit {exc.code}).")
     # Give the launches time to settle: OBS and the relay take a few seconds,
     # and a too-early report shows FAILs that are already resolving. Only the
-    # dynamic probes are waited on; static problems never self-heal.
+    # dynamic probes are waited on — static problems never self-heal.
     import install_apps
     probes = {"relay": _relay_http_ok}
     if install_apps.app_present("obs", sys.platform):
         probes["obs"] = lambda: ev.app_running("obs")
-    # Companion is an Electron app, so its HTTP server takes a few seconds to
+    # Companion is an Electron app — its HTTP server takes a few seconds to
     # come up. Wait for it too, or the readiness report below races the launch
     # and prints a spurious "Companion: not running" right after starting it.
     cc = _companion()
@@ -4061,8 +4069,8 @@ def event_start(rest, _autojoin=True, _new_session=True):
     for name, up in sorted(ev.wait_until_up(probes).items()):
         print(f"  {name}: {'up' if up else 'still not up — see the report below'}")
     # Funnel (opt-OUT via RACECAST_FUNNEL=false): publish /console publicly once
-    # the relay is up. On by default, since the Funnel is the preferred path.
-    # Best-effort: a funnel failure (e.g. missing nodeAttr) must never abort the
+    # the relay is up. On by default — the Funnel is the preferred produce path.
+    # Best-effort — a funnel failure (e.g. missing nodeAttr) must never abort the
     # event; print one concise line.
     if _funnel_auto_enabled():
         try:
@@ -4070,13 +4078,16 @@ def event_start(rest, _autojoin=True, _new_session=True):
         except SystemExit as exc:
             msg = exc.code if isinstance(exc.code, str) else "failed"
             print("funnel: skipped — " + msg.splitlines()[0])
-    # OBS may not have been running when relay_start's refresh hook fired, since
-    # event start launches OBS after the relay. Forced rather than hash-gated: a
-    # re-run or takeover with unchanged page bytes must still clear OBS's cached
-    # browser sources. This also guarantees _sync_pov_transform runs.
-    # OBS accepts the WebSocket several seconds before it can answer a request,
-    # replying 207 "not ready" meanwhile, and the three steps below skip silently
-    # inside that window. (#572)
+    # OBS may not have been running when relay_start's refresh hook fired
+    # (event start launches OBS AFTER the relay) — retry now that both sides
+    # are up. Forced (not hash-gated): a re-run / takeover where the served
+    # page bytes are unchanged must still clear OBS's cached browser sources,
+    # otherwise stale HUD/overlay pages survive the bring-up. Also guarantees
+    # _sync_pov_transform runs (it is nested inside the refresh).
+    # OBS accepts the WebSocket several seconds before it can answer a request
+    # (obs-websocket replies 207 "not ready" meanwhile). Running the three steps
+    # below inside that window skips all three silently — which is exactly what
+    # happened once launching OBS actually started working (#572).
     _wait_for_obs_ready()
     _check_scene_collection()
     _refresh_obs_pages(force=True)
@@ -4085,7 +4096,7 @@ def event_start(rest, _autojoin=True, _new_session=True):
     for line in ev.director_urls(_tailscale_ip(), _companion_tablet_port(),
                                  relay_port=RELAY_PORT):
         print(line)
-    # Discord voice auto-join (default on, RACECAST_DISCORD_AUTOJOIN=0 kills it):
+    # Discord voice auto-join (default on, RACECAST_DISCORD_AUTOJOIN=0 kills it) —
     # best-effort, only for the top-level `event start` verb (see _autojoin docstring).
     if _autojoin:
         _discord_autojoin()
@@ -4119,16 +4130,16 @@ def event_stop(rest):
                 _send_report_core(r["path"], report=r.get("report"),
                                   window=r.get("window"))
                 print("Report sent to Discord.")
-            except Exception as exc:  # noqa: BLE001 (best-effort; still tear down)
+            except Exception as exc:  # noqa: BLE001 — best-effort; still tear down
                 print(f"report: Discord send failed ({exc}).")
-        except Exception as exc:  # noqa: BLE001 (no health data etc.; still tear down)
+        except Exception as exc:  # noqa: BLE001 — no health data etc.; still tear down
             print(f"report: skipped ({exc}).")
     # Leave the Discord voice channel we auto-joined at event start (default on,
-    # RACECAST_DISCORD_AUTOLEAVE=0 kills it). Best-effort, never blocks teardown.
+    # RACECAST_DISCORD_AUTOLEAVE=0 kills it) — best-effort, never blocks teardown.
     _discord_autoleave()
     # Tear down companion + streams BEFORE the relay. On Windows the panel-spawned
     # `event stop` is a child of the relay process, and relay_stop runs
-    # `taskkill /F /T`, which walks the parent-PID tree and would kill this very
+    # `taskkill /F /T` which walks the parent-PID tree — that would kill this very
     # process mid-teardown. Stopping the relay LAST means companion/streams cleanup
     # has already run; report generation above still saw the relay up (for names).
     try:
@@ -4257,7 +4268,7 @@ def event_takeover(rest):
         except SystemExit:
             print("note: console-versions pull failed — continuing takeover.")
 
-    # Adopt A's active cues like the chat pull. Best-effort, never aborts. (#243)
+    # Adopt A's active cues (#243), like the chat pull — best-effort, never aborts.
     try:
         if funnel:
             payload = _takeover_get(base + "/cues", secret)
@@ -4269,7 +4280,7 @@ def event_takeover(rest):
     except Exception as exc:
         print(f"note: cue pull failed ({type(exc).__name__}) — continuing takeover.")
 
-    # Adopt A's health history like the chat pull. Best-effort, never aborts.
+    # Adopt A's health history (#health), like the chat pull — best-effort, never aborts.
     try:
         if funnel:
             body = _takeover_get_text(base + "/health", secret)
@@ -4308,7 +4319,7 @@ def event_takeover(rest):
     es_args = ["--stint", str(plan["stint"])]
     if plan["qualifying"]:
         es_args.append("--qualifying")
-    # _new_session=False: a takeover continues A's broadcast, so keep the report window
+    # _new_session=False: a takeover continues A's broadcast — keep the report window
     # (B's local health DB starts fresh, so its contiguity heuristic covers B's part).
     event_start(es_args, _autojoin=False, _new_session=False)   # bring-up; exits with readiness code
 
@@ -4450,7 +4461,7 @@ def _oneshot_code(command, rest):
     if command == "preflight":
         # The sheet check reads RACECAST_SHEET_ID from the environment. Frozen mode
         # already loads .env (_load_env_frozen); in repo/package mode preflight
-        # runs as a subprocess, which inherits os.environ, so merge the .env file
+        # runs as a subprocess, which inherits os.environ — merge the .env file
         # in (real environment wins, same semantics as the scripts' load_dotenv).
         for key, val in _read_env_file().items():
             os.environ.setdefault(key, val)
@@ -4494,7 +4505,7 @@ def update_check_data(fetch=None, current=None, platform=None, frozen=None):
     out = {"ok": True, "current": cur, "latest": None, "update_available": False,
            "notes": "",
            "releases_url": f"https://github.com/{upd.REPO}/releases/latest"}
-    if upd.parse_version(cur) is None and not frozen:   # source checkout, use `git pull`
+    if upd.parse_version(cur) is None and not frozen:   # source checkout — `git pull`
         out["note"] = "development build — update check skipped"
         return out
     try:
@@ -4625,7 +4636,7 @@ def event_title_read_data(alive=None, fetch=None, path=None, default=None):
             if isinstance(st, dict) and isinstance(st.get("event_title"), str):
                 return {"ok": True, "title": st["event_title"],
                         "source": "relay", "relay_alive": True}
-        except Exception:  # noqa: BLE001 (relay reachable check is best-effort)
+        except Exception:  # noqa: BLE001 — relay reachable check is best-effort
             pass           # fall through to the persisted file / default
     try:
         with open(path, encoding="utf-8") as fh:
@@ -4647,7 +4658,7 @@ def _profile_event_default():
         root = _env_base(IS_FROZEN, _real_executable(), HERE)
         rc = pcfg.resolve_config(root, runtime_root=_runtime_base_dir())
         return rc.event_title or ""
-    except Exception:  # noqa: BLE001 (best effort)
+    except Exception:  # noqa: BLE001 — best effort
         return ""
 
 
@@ -4668,7 +4679,7 @@ def event_title_write_data(value, alive=None, post=None, path=None, sanitize=Non
             res = post(f"http://127.0.0.1:{RELAY_PORT}/event/title", {"title": title})
             stored = res.get("title", title) if isinstance(res, dict) else title
             return {"ok": True, "title": stored, "applied": "relay"}
-        except Exception as exc:  # noqa: BLE001 (surface as a clean error to the UI)
+        except Exception as exc:  # noqa: BLE001 — surface as a clean error to the UI
             return {"ok": False, "error": f"relay rejected the title: {exc}"}
     try:
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
@@ -4690,7 +4701,7 @@ def obs_collection_data(get=None):
             expected = _active_obs_collection()
             def get():
                 return obs_ws.get_scene_collection(expected=expected)
-        except Exception as exc:                     # noqa: BLE001 (best effort)
+        except Exception as exc:                     # noqa: BLE001 — best effort
             return {"ok": False, "note": str(exc)}
     status, note = get()
     if status is None:
@@ -4726,7 +4737,7 @@ def profile_logo():
         root = _env_base(IS_FROZEN, _real_executable(), HERE)
         rc = pcfg.resolve_config(root, runtime_root=_runtime_base_dir())
         return servable_logo_path(rc.logo_path) or None
-    except Exception:  # noqa: BLE001 (best effort)
+    except Exception:  # noqa: BLE001 — best effort
         return None
 
 
@@ -5318,7 +5329,7 @@ def _funnel_auto_enabled():
     if flag.strip().lower() in ("0", "false", "no", "off"):
         return False
     st = console_status_data()
-    # Zero-config console has no separate "enable" flag: usability == a league
+    # Zero-config console has no separate "enable" flag — usability == a league
     # secret exists. (console_status_data() returns ok/has_secret, never an
     # "enabled" key; gating on the latter silently dead-ended this path. #216.)
     return bool(st.get("ok") and st.get("has_secret"))
@@ -5350,7 +5361,7 @@ def crew_entries_data():
         return {"ok": False,
                 "error": "relay not reachable (start the relay): %s" % exc}
     # Each entry carries its 1-based crew DATA-row index (the Crew tab order, header
-    # excluded) so the editor can address it on Save/Delete. The relay's /crew/data
+    # excluded) so the editor can address it on Save/Delete — the relay's /crew/data
     # is index-free, and crew_set/crew_delete are keyed by this row.
     entries = [{"row": i,
                 "name": row.get("name", ""),
@@ -5476,7 +5487,7 @@ def _active_discord_webhook():
         root = _env_base(IS_FROZEN, _real_executable(), HERE)
         rc = pcfg.resolve_config(root, runtime_root=_runtime_base_dir())
         return rc.discord_webhook_url or "", rc.name or ""
-    except Exception:  # noqa: BLE001 (best effort)
+    except Exception:  # noqa: BLE001 — best effort
         return "", ""
 
 
@@ -5500,7 +5511,7 @@ def _resolve_producer_name():
             if r.get("self") and r.get("producer"):
                 name = r["producer"]
                 break
-    except Exception:  # noqa: BLE001 (best-effort (no sheet / Tailscale down))
+    except Exception:  # noqa: BLE001 — best-effort (no sheet / Tailscale down)
         name = ""
     if not name:
         name = (os.environ.get("RACECAST_PRODUCER_NAME") or "").strip()
@@ -5525,7 +5536,7 @@ def _post_discord_webhook(url, payload):
     """POST a Discord incoming-webhook JSON body. Raises on HTTP/network error
     (callers catch and report)."""
     # Discord sits behind Cloudflare, which 403s the default urllib
-    # "Python-urllib/x.y" User-Agent. Without an explicit UA the POST is
+    # "Python-urllib/x.y" User-Agent — without an explicit UA the POST is
     # rejected and the link never arrives (matches the relay's health-alert
     # poster).
     with http_util.open_url(url, data=json.dumps(payload).encode(),
@@ -5550,7 +5561,7 @@ def console_post_link_data():
         payload = cpadm.console_link_discord_payload(f"https://{magic}/console", league)
         _post_discord_webhook(webhook, payload)
         return {"ok": True}
-    except Exception as exc:  # noqa: BLE001 (best effort, surface the message)
+    except Exception as exc:  # noqa: BLE001 — best effort, surface the message
         return {"ok": False, "error": str(exc)}
 
 
@@ -6016,7 +6027,7 @@ def machine_font_delete_data(name):
 
 
 # Keyless full Google-fonts family list (the metadata endpoint the fonts.google.com
-# site itself uses, so no API key and no secret to manage). Powers the Settings
+# site itself uses — no API key, so no secret to manage). Powers the Settings
 # free-text typeahead; cached by the caller and falling back to the curated list.
 _GOOGLE_FONTS_METADATA_URL = "https://fonts.google.com/metadata/fonts"
 
@@ -6236,7 +6247,7 @@ def tools_status_data(which=None, version=None):
         import speedtest as st
         st_bin = st.find_binary(_runtime_base_dir(), which)
         # Probe the resolved binary BY PATH (tool_version's which() accepts an
-        # absolute path), so a managed-dir install, which is not on PATH, still
+        # absolute path), so a managed-dir install — which is not on PATH — still
         # reports its version, like the PATH-installed tools above.
         tools.append({"name": "speedtest", "installed": bool(st_bin),
                       "version": version(st_bin) if st_bin else None})
@@ -6334,7 +6345,7 @@ def speedtest_data(base_dir=None):
     """Latest + recent speed-test history for the Control Center Preflight view.
     Read-only (the *run* goes through the `speedtest` op/job). Never raises."""
     try:
-        import speedtest as st  # noqa: PLC0415 (lazy to mirror preflight_data pattern)
+        import speedtest as st  # noqa: PLC0415 — lazy to mirror preflight_data pattern
         base = base_dir or _runtime_base_dir()
         # Ship the thresholds so the UI badge never drifts from the documented
         # constants (single source: speedtest.py mirrors the wiki table).
@@ -6346,7 +6357,7 @@ def speedtest_data(base_dir=None):
         return {"ok": False, "error": f"speedtest read failed: {exc}"}
 
 
-# Bundled operator docs the Control Center's Help page can open (allowlist:
+# Bundled operator docs the Control Center's Help page can open (allowlist —
 # only these keys map to a file, so the HTTP layer can serve nothing else).
 # The role cheat sheet + the visual onboarding decks live on GitHub Pages (one
 # central place) and are reached via `decks_url`, not served locally.
@@ -6387,7 +6398,7 @@ def _resolve_doc(rel, resolve):
             if os.path.isfile(p):
                 return p
         except Exception:
-            pass                # this candidate didn't resolve; try the next
+            pass                # this candidate didn't resolve — try the next
     return None
 
 
@@ -6675,7 +6686,7 @@ def _init_steps(opts):
         "export-companion": {"done": lambda: ins.export_done(
                                  os.path.exists(_init_companion_cfg())),
                              "run": _init_export_run},
-        "preflight": {"done": lambda: None,   # always runs; it IS the verification
+        "preflight": {"done": lambda: None,   # always runs — it IS the verification
                       "run": lambda: _oneshot_code("preflight", [])},
     }
     return [{"key": k, "label": ins.STEP_LABELS[k], **by_key[k]}
@@ -6800,7 +6811,7 @@ def run_ui(rest, fail=sys.exit, open_browser=True):
         return fail(f"racecast: port {port} is in use by another application — set "
                     "RACECAST_UI_PORT in .env to a free port and retry.")
 
-    # The GitHub release check is one network round-trip, so cache a good result
+    # The GitHub release check is one network round-trip — cache a good result
     # for an hour so the Home dashboard can call it freely (and so we never spam
     # the unauthenticated API into a rate limit). Failures aren't cached.
     _upd = {"at": 0.0, "data": None}
@@ -6958,7 +6969,7 @@ def init_cmd(rest):
     except ValueError as e:
         sys.exit(f"racecast: {e}")
     code, finished = ins.run_wizard(_init_steps(opts), opts["force"], print)
-    if finished:   # incl. a preflight FAIL; the machine is set up either way
+    if finished:   # incl. a preflight FAIL — the machine is set up either way
         print("\nManual next steps:")
         for i, line in enumerate(ins.manual_next_steps(
                 _init_import_json(), _init_companion_cfg()), 1):
@@ -6994,11 +7005,13 @@ def _bootstrap(argv):
     return argv
 
 
-# Post-update smoke test: verifies the event core still works after a toolchain
-# update. It drives a real event through the normal event_start/event_stop path
-# rather than re-implementing the relay's tool invocations, because a
-# re-implementation would only ever test itself. Pure logic lives in
-# scripts/smoketest.py. (#570)
+# ==================== post-update smoke test (#570) ====================
+# Verifies that the event core still works after a toolchain update (ffmpeg,
+# yt-dlp, streamlink, deno). It drives a REAL event through the normal
+# event_start/event_stop path rather than re-implementing the relay's tool
+# invocations — a re-implementation would only ever test itself. Pure logic
+# (acceptance, the rundown table, verdicts) lives in scripts/smoketest.py.
+# Design: docs/superpowers/specs/2026-08-27-post-update-smoketest-design.md
 
 SMOKE_TAB = "Smoke"                 # optional sheet tab overriding the vocabulary
 SMOKE_ARM_WAIT_S = 60               # a feed must deliver bytes within this after ARM
@@ -7040,7 +7053,7 @@ def _smoke_capture(argv, timeout=90):
         return 127, f"{argv[0]}: not found"
     except subprocess.TimeoutExpired:
         return 124, f"{argv[0]}: timed out after {timeout}s"
-    except OSError as exc:                       # noqa: BLE001 (probe, never fatal)
+    except OSError as exc:                       # noqa: BLE001 — probe, never fatal
         return 1, f"{argv[0]}: {exc}"
 
 
@@ -7088,7 +7101,7 @@ def _smoke_vocab(sheet_id):
     try:
         body = http_util.get_bytes(_gviz_csv_url(sheet_id, SMOKE_TAB), timeout=15)
         rows = list(csv.reader(io.StringIO(body.decode("utf-8", "replace"))))
-    except Exception:                            # noqa: BLE001 (optional tab)
+    except Exception:                            # noqa: BLE001 — optional tab
         return queries, categories
     yt, tw = [], []
     for row in rows[1:]:
@@ -7154,7 +7167,7 @@ def _smoke_twitch_candidates(category):
                                 headers={"Client-ID": sm.TWITCH_CLIENT_ID})
         game = ((data or {}).get("data") or {}).get("game") or {}
         edges = (game.get("streams") or {}).get("edges") or []
-    except Exception:                            # noqa: BLE001 (discovery is best effort)
+    except Exception:                            # noqa: BLE001 — discovery is best effort
         return []
     out = []
     for edge in edges:
@@ -7259,9 +7272,9 @@ def _smoke_push(push_url, row, url):
         # A Google error page instead of JSON: its body can carry script ids and
         # would land in stdout, --json and the history file. Report the shape.
         return False, "webhook did not answer with JSON"
-    except Exception as exc:                     # noqa: BLE001 (reported, not raised)
+    except Exception as exc:                     # noqa: BLE001 — reported, not raised
         # The CLASS only, never str(exc): http.client.InvalidURL puts the whole
-        # Apps Script path, the sheet's write capability, into its message, and
+        # Apps Script path — the sheet's write capability — into its message, and
         # it does not inherit from ValueError, so the guard above misses it.
         return False, type(exc).__name__
     if isinstance(body, dict) and body.get("ok"):
@@ -7294,7 +7307,7 @@ def _smoke_await_rows(sheet_id, expected, what):
             served = sm.schedule_urls(_smoke_schedule_rows(sheet_id))
             if sm.rows_match(served, expected):
                 return True, ""
-        except Exception:                        # noqa: BLE001 (transient, keep polling)
+        except Exception:                        # noqa: BLE001 — transient, keep polling
             pass
         if time.time() >= deadline:
             return False, (f"the sheet did not serve the {what} rows after "
@@ -7320,7 +7333,7 @@ def _smoke_write_schedule(push_url, sheet_id, rows, clear, say):
     for row in clear:
         ok, note = _smoke_push(push_url, row, "")
         if not ok:
-            # Kept as diagnostic detail, deliberately not retried, because the
+            # Kept as diagnostic detail, deliberately not retried — the
             # confirmation below decides whether it actually mattered.
             push_notes.append(f"clear row {row}: {note}")
             say(f"  clearing row {row} reported {note!r} — the sheet decides")
@@ -7354,7 +7367,7 @@ def _smoke_error_payload(exc):
     (a machine fact) from a real failure."""
     try:
         payload = json.loads(exc.read().decode("utf-8"))
-    except Exception:                            # noqa: BLE001 (not JSON, use the code)
+    except Exception:                            # noqa: BLE001 — not JSON, use the code
         payload = None
     if isinstance(payload, dict) and payload.get("error"):
         return {"error": str(payload["error"])[:160]}
@@ -7366,7 +7379,7 @@ def _smoke_relay_get(path, timeout=15):
         return http_util.get_json(f"http://127.0.0.1:{RELAY_PORT}/{path}", timeout=timeout)
     except http_util.HTTPError as exc:
         return _smoke_error_payload(exc)
-    except Exception as exc:                     # noqa: BLE001 (reported as a check)
+    except Exception as exc:                     # noqa: BLE001 — reported as a check
         return {"error": str(exc)[:160]}
 
 
@@ -7376,7 +7389,7 @@ def _smoke_relay_post(path, body, timeout=20):
                                 timeout=timeout)
     except http_util.HTTPError as exc:
         return _smoke_error_payload(exc)
-    except Exception as exc:                     # noqa: BLE001 (reported as a check)
+    except Exception as exc:                     # noqa: BLE001 — reported as a check
         return {"error": str(exc)[:160]}
 
 
@@ -7392,7 +7405,7 @@ def _smoke_program_audio_sample(want=16384, timeout=25):
             return resp.read(want) or b"", ""
     except http_util.HTTPError as exc:
         return b"", f"HTTP {exc.code}"
-    except Exception as exc:                     # noqa: BLE001 (reported as a check)
+    except Exception as exc:                     # noqa: BLE001 — reported as a check
         return b"", str(exc)[:120]
 
 
@@ -7441,7 +7454,7 @@ def _smoke_rundown(say):
     results, on_air = [], "Feed A"
     # Manual arm is a machine setting (`RACECAST_MANUAL_FEED_ARM`). With it off the
     # feeds pre-warm themselves and the relay REFUSES feed/X/activate, so the arm
-    # call is skipped and the byte wait alone decides. See sm.arm_verdict.
+    # call is skipped and the byte wait alone decides — see sm.arm_verdict.
     manual_arm = bool(_smoke_relay_get("status").get("manual_feed_arm"))
     if not manual_arm:
         say("  note: manual feed arm is off — feeds self-arm, ARM steps skip the call")
@@ -7465,7 +7478,7 @@ def _smoke_rundown(say):
             say(f"  {step.label}: " + ("ok" if ok else "NO BYTES"))
             # An ARM step is fully judged here. Falling through reached the
             # scene-less branch below and appended a SECOND result under the same
-            # name: every arm was counted twice, and a failing one would have
+            # name — every arm was counted twice, and a failing one would have
             # been half-reported as a PASS.
             continue
         if step.label == "NEXT":
@@ -7539,7 +7552,7 @@ def _smoke_append_history(entry):
         os.makedirs(os.path.dirname(_smoke_history_path()), exist_ok=True)
         with open(_smoke_history_path(), "a", encoding="utf-8") as fh:
             fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
-    except OSError as exc:                       # noqa: BLE001 (never fatal)
+    except OSError as exc:                       # noqa: BLE001 — never fatal
         print(f"smoketest: history not written ({exc})")
 
 
@@ -7600,7 +7613,7 @@ def smoketest_cmd(rest):
 
     profile = _active_profile_name()
     if not profile:
-        # The typed phrase names the profile; that IS the guard. A generic
+        # The typed phrase names the profile — that IS the guard. A generic
         # fallback name would let you confirm "CLEAR SCHEDULE default" while
         # standing in a real league, which is the exact accident being guarded
         # against. No resolvable profile, no run.
@@ -7643,7 +7656,7 @@ def smoketest_cmd(rest):
     cookies = _cookies_path()
     if not os.path.isfile(cookies):
         # Without the jar YouTube's bot check hides every format and each probe
-        # fails as "not available", a setup fact worth naming before the run
+        # fails as "not available" — a setup fact worth naming before the run
         # spends its three attempts discovering it the hard way.
         results.append(sm.Result("cookies", sm.severity_for("cookies", False),
                                  "no YouTube cookie jar — resolves will hit the "
@@ -7662,7 +7675,7 @@ def smoketest_cmd(rest):
     try:
         schedule_rows = _smoke_schedule_rows(sheet_id)
         data_rows = sm.schedule_data_rows(schedule_rows)
-    except Exception as exc:                     # noqa: BLE001 (reported as a check)
+    except Exception as exc:                     # noqa: BLE001 — reported as a check
         results.append(sm.Result("sheet_layout", sm.FAIL, str(exc)[:160]))
         return _smoke_finish(results, tools, [], minutes, as_json, lines)
     if len(data_rows) < len(sm.SOURCE_PLAN):
@@ -7686,15 +7699,16 @@ def smoketest_cmd(rest):
     say("\nSheet")
     # The webhook writes `colOf('url') || 1`: with a `URL` header its column,
     # WITHOUT one always column A. A tab whose stream column is elsewhere would
-    # get column A blanked, real data, while the read-back watches the other
+    # get column A blanked — real data — while the read-back watches the other
     # column and never matches. Refuse before anything is written.
     layout_note = sm.writable_layout_note(schedule_rows)
     if layout_note:
         results.append(sm.Result("sheet_layout", sm.FAIL, layout_note))
         return _smoke_finish(results, tools, [], minutes, as_json, lines)
     clearing = sm.clear_rows(data_rows)
-    # Nothing is restored, and the cleared cells are gone for good, so print them
-    # and put them in the history to make a manual restore possible.
+    # The rows are meant to STAY after a run, so nothing is restored — but the
+    # cleared cells are gone for good (one row is cleared and never rewritten).
+    # Print them and put them in the history so a manual restore is possible.
     served = sm.schedule_urls(schedule_rows)
     cleared = {r: served.get(r, "") for r in clearing if served.get(r)}
     if cleared:
@@ -7718,21 +7732,22 @@ def smoketest_cmd(rest):
     try:
         import tailscale as _ts
         funnel_was_off = not _ts.funnel_on()
-    except Exception:                            # noqa: BLE001 (best effort)
+    except Exception:                            # noqa: BLE001 — best effort
         funnel_was_off = False
     title = "Smoketest " + time.strftime("%Y-%m-%d %H:%M")
     say(f"\nEvent — starting as {title!r}")
     # The teardown below is UNCONDITIONAL: `event start` brings services up one by
     # one and exits non-zero when its readiness report has a FAIL, so a partial
-    # stack is already live by then. Arming it only on a successful bring-up would
-    # leave the public Funnel running with no verdict printed.
+    # stack (relay, Companion, an enabled Funnel) is already live by then. Arming
+    # the teardown only on a successful bring-up once left all three running —
+    # including the PUBLIC Funnel — with no verdict printed at all.
     aborted = ""
     try:
         try:
             event_start(["--title", title])
         except SystemExit as exc:
             # event_start ALWAYS ends through event_status, which exits 0 when the
-            # stack is ready and 1 when FAILs remain, so only a NON-ZERO code is
+            # stack is ready and 1 when FAILs remain — so only a NON-ZERO code is
             # an aborted bring-up. Treating every SystemExit as one skipped the
             # entire rundown on a perfectly healthy stack.
             if exc.code not in (0, None):
@@ -7751,17 +7766,17 @@ def smoketest_cmd(rest):
         say("\nEvent — stopping")
         try:
             event_stop(["--no-report"] if "--no-report" in rest else [])
-        except (Exception, SystemExit) as exc:   # noqa: BLE001 (SystemExit incl.)
+        except (Exception, SystemExit) as exc:   # noqa: BLE001 — SystemExit incl.
             # A teardown failure has to reach the VERDICT, not just the console:
             # say() is suppressed under --json, so reporting it there alone let a
             # run print PASS and exit 0 with the relay still pulling streams.
-            # KeyboardInterrupt is deliberately NOT caught: Ctrl+C during a
+            # KeyboardInterrupt is deliberately NOT caught — Ctrl+C during a
             # hung teardown must abort, not turn into a note.
             results.append(sm.Result("teardown", sm.FAIL, str(exc)[:160]
                                      or "event stop failed"))
             say(f"  teardown FAILED: {exc}")
         # `event start` turns the Funnel on by default, and no stop path turns it
-        # off, because a maintenance command must not leave public ingress behind that
+        # off — a maintenance command must not leave public ingress behind that
         # it opened itself. Only revert what THIS run switched on.
         if funnel_was_off:
             try:
@@ -7769,7 +7784,7 @@ def smoketest_cmd(rest):
                 if _ts.funnel_on():
                     funnel_cmd(["off"])
                     say("  funnel closed again (this run had opened it)")
-            except (Exception, SystemExit) as exc:   # noqa: BLE001 (best effort)
+            except (Exception, SystemExit) as exc:   # noqa: BLE001 — best effort
                 say(f"  funnel note: {exc}")
     return _smoke_finish(results, tools, sources, minutes, as_json, lines, cleared)
 
@@ -7792,7 +7807,7 @@ def _smoke_finish(results, tools, sources, minutes, as_json, lines, cleared=None
               f"{c[sm.PASS]} PASS  ->  {summary['verdict']}")
         print(f"History: {_smoke_history_path()}")
     # main() does not act on a returned value (see `oneshot`, which raises), so a
-    # FAIL has to exit non-zero itself; a check that always exits 0 is not a check.
+    # FAIL has to exit non-zero itself — a check that always exits 0 is not a check.
     raise SystemExit(sm.exit_code(summary["verdict"]))
 
 
