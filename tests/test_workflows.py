@@ -52,6 +52,44 @@ def t_gitleaks_is_pinned_with_checksum():
     assert re.search(r"[0-9a-f]{64}", text), "gitleaks download must be checksum-verified (sha256)"
 
 
+# An unquoted YAML scalar may not contain ": ": the parser reads the second
+# colon as a new mapping key and the whole workflow fails to load.
+_SCALAR_RE = re.compile(r"^(\s*)(?:-\s+)?([\w.-]+):[ \t]+(?!$)(.*)$")
+_BLOCK_RE = re.compile(r"^(\s*)(?:-\s+)?[\w.-]+:[ \t]*[|>][-+0-9]*\s*$")
+
+
+def _unquoted_scalars():
+    """Yield (basename, line_no, key, value) for plain scalars, skipping block bodies."""
+    for path in sorted(glob.glob(os.path.join(WF_DIR, "*.yml"))):
+        block_indent = None
+        with open(path, encoding="utf-8") as fh:
+            for i, raw in enumerate(fh, 1):
+                line = raw.rstrip("\n")
+                if block_indent is not None:
+                    if not line.strip() or len(line) - len(line.lstrip()) > block_indent:
+                        continue
+                    block_indent = None
+                if _BLOCK_RE.match(line):
+                    block_indent = len(line) - len(line.lstrip())
+                    continue
+                m = _SCALAR_RE.match(line)
+                if not m:
+                    continue
+                value = m.group(3).strip()
+                if not value or value[0] in "\"'#|>&*[{":
+                    continue
+                yield os.path.basename(path), i, m.group(2), value
+
+
+def t_plain_scalars_have_no_bare_colon():
+    offenders = [f"{base}:{ln} {key}: {val}"
+                 for base, ln, key, val in _unquoted_scalars()
+                 if ": " in val.split(" #")[0]]
+    assert not offenders, ("an unquoted value containing ': ' breaks the YAML parser "
+                           "and the workflow never runs; quote it or reword: "
+                           + "; ".join(offenders))
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
