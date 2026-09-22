@@ -1,15 +1,15 @@
 # Build & maintenance
 
-> Technical reference — for the maintainer.
+> Technical reference: for the maintainer.
 
 How the repository is built, kept secret-free, and how this wiki is published. Everything
 here is **maintainer-only** (not shipped in the operator package).
 
 ## Single source: edit only `src/`
 
-`src/` is the only source of truth. `dist/` and `runtime/` are generated and gitignored —
+`src/` is the only source of truth. `dist/` and `runtime/` are generated and gitignored,
 never hand-edit them. `tools/` holds maintainer scripts. After any change that ships, run
-`python3 tools/build.py` — its verify step is the closest thing to CI.
+`python3 tools/build.py`: its verify step is the closest thing to CI.
 
 ## Build the distributable
 
@@ -25,10 +25,10 @@ shipped, and preflight + `.env.example` are included.
 
 Operators download `racecast` from GitHub Releases and never need Python.
 
-**Primary flow — merge the Release PR:** a release-please bot maintains a
+**Primary flow, merge the Release PR:** a release-please bot maintains a
 standing PR that collects every `feat:`/`fix:` commit since the last release,
 with the computed next version and changelog. When an event approaches and
-`main` is in a good state, **merge that PR** — this creates the `vX.Y.Z` tag,
+`main` is in a good state, **merge that PR**, this creates the `vX.Y.Z` tag,
 the GitHub release with notes, and kicks off the binary build that uploads
 `racecast-windows.zip` / `racecast-macos.tar.gz` / `racecast-linux.tar.gz` /
 `racecast-linux-arm64.tar.gz` (each contains
@@ -36,10 +36,10 @@ the `racecast` + `racecast-ui` binaries plus `.env.example`; on first run the bi
 copies it to `.env`). The two Linux archives come from the x86-64 (`ubuntu-latest`)
 and ARM64 (`ubuntu-24.04-arm`) runners in the build matrix.
 No Release PR open = nothing release-worthy happened (`docs:`/`ci:` commits
-don't count). The binaries are unsigned — operators see a one-time
+don't count). The binaries are unsigned: operators see a one-time
 SmartScreen/Gatekeeper warning (documented on the setup page).
 
-**Escape hatch — manual tag:** pushing a semver tag still works exactly as
+**Escape hatch, manual tag:** pushing a semver tag still works exactly as
 before and skips the bot:
 
 ```bash
@@ -52,7 +52,7 @@ at build time).
 
 ## Preview builds (test before releasing)
 
-Sometimes a build must be tested *before* a real release — a single PR, or
+Sometimes a build must be tested *before* a real release, a single PR, or
 `main` after several PRs merged with no release yet. The **Preview** workflow
 publishes real, downloadable binaries as a GitHub **pre-release** (public
 download URLs, but never the "Latest" slot), built green (full test gate runs
@@ -66,11 +66,11 @@ first).
 
 Preview tags are `preview-*`, never `v*`, so they never trigger `release.yml` or
 disturb the release-please Release PR. The version a preview binary reports leads
-with the **probable next release version** — read from the open release-please
+with the **probable next release version**: read from the open release-please
 Release PR title, or, if none is open yet, the next minor after the latest `v*`
-tag — so a tester can tell which release base a preview belongs to. `racecast
+tag: so a tester can tell which release base a preview belongs to. `racecast
 --version` prints e.g. `1.1.0-preview.pr42.0123abc` (a valid SemVer prerelease)
-and the pre-release is titled `Preview 1.1.0 — PR #42 (0123abc)`; the trailing
+and the pre-release is titled `Preview 1.1.0. PR #42 (0123abc)`; the trailing
 short SHA still pins the exact commit. (Without any version source it degrades to
 the bare `preview-pr42-0123abc` form.) The GitHub releases list orders by
 `created_at`, which for a release is the date of the *tagged commit* (not the
@@ -78,7 +78,7 @@ build time); because a preview's rolling tag is force-moved to each build's
 commit, a fresh preview sorts to the top as expected. Preview binaries are
 unsigned, same one-time SmartScreen/Gatekeeper warning as releases.
 
-> One-time setup: the `preview` label must exist in the repo —
+> One-time setup: the `preview` label must exist in the repo,
 > `gh label create preview --color FFA500 --description "Build a downloadable preview binary"`.
 >
 > Fork PRs cannot publish previews (GitHub gives fork-PR workflows a read-only
@@ -118,7 +118,7 @@ then run `sync-wiki.py` to overwrite it with the real pages.
 - Link by page name, no extension: `[Run an event](Run-an-event)`. Spaces in a title map to
   `-` in the file name.
 - Diagrams are **Mermaid** in ```` ```mermaid ```` fences. GitHub renders them in a
-  sandboxed iframe. **Pitfall:** never put a `;` inside a node/edge/note label — Mermaid
+  sandboxed iframe. **Pitfall:** never put a `;` inside a node/edge/note label. Mermaid
   treats it as a statement separator and the diagram fails with *"Unable to render rich
   display."* After publishing, spot-check the rendered pages.
 - Screenshots live in `src/docs/wiki/images/`, referenced relatively:

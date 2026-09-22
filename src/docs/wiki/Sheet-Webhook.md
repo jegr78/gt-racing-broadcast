@@ -1,10 +1,10 @@
-# Sheet-Webhook — the write path back into the Google Sheet
+# Sheet-Webhook: the write path back into the Google Sheet
 
 > This is the **write** path. For the tab/column layout the relay **reads** (and a
 > ready-to-copy demo Sheet), see [Sheet template](Sheet-Template).
 
-The relay reads the Sheet via CSV export (no key needed). Writing back —
-race-timer sync and the director panel's HUD/Schedule/POV controls — goes
+The relay reads the Sheet via CSV export (no key needed). Writing back,
+race-timer sync and the director panel's HUD/Schedule/POV controls: goes
 through **one** Google Apps Script web app deployed inside the broadcast
 Sheet. One URL + key in the active profile's `profile.env` powers all of it:
 
@@ -19,21 +19,21 @@ machine and the panel's HUD row + URLs section are display-only.
 
 | Action (sent by the relay) | Sheet target |
 |---|---|
-| `timer` | Timer tab (race-timer state — see [Race-Timer](Race-Timer)) |
-| `setup` | Setup tab: the cell **below** a header (`Stint`, `Streamer`, `Session`, `Race Control`, `Flag`) — found by text, so the tab layout may move. The set of accepted headers is the script's `SETUP_FIELDS` allowlist; a value for a header not in it is rejected (`unknown setup field`), so a new setup field needs the header in the Setup tab **and** in `SETUP_FIELDS` (redeploy) |
-| `schedule` | **Schedule** tab (or the **Qualifying** tab when the payload carries `"tab":"Qualifying"`), **physical row N** (the panel sends the CSV line number automatically): URL + Streamer + Stint label, located by the `URL`/`Streamer`/`Stint` headers in row 1 (falls back to fixed cols A/B with no header row); row `last+1` appends. The Stint cell is only written when a `Stint` header exists. The Qualifying tab has the **same structure** as the Schedule tab. **Neither tab may have leading blank rows** — the gviz CSV export maps physical sheet rows to CSV lines 1:1 when the tab starts at row 1. A header row is silently skipped when reading but its physical line number is still used when writing. |
+| `timer` | Timer tab (race-timer state: see [Race-Timer](Race-Timer)) |
+| `setup` | Setup tab: the cell **below** a header (`Stint`, `Streamer`, `Session`, `Race Control`, `Flag`): found by text, so the tab layout may move. The set of accepted headers is the script's `SETUP_FIELDS` allowlist; a value for a header not in it is rejected (`unknown setup field`), so a new setup field needs the header in the Setup tab **and** in `SETUP_FIELDS` (redeploy) |
+| `schedule` | **Schedule** tab (or the **Qualifying** tab when the payload carries `"tab":"Qualifying"`), **physical row N** (the panel sends the CSV line number automatically): URL + Streamer + Stint label, located by the `URL`/`Streamer`/`Stint` headers in row 1 (falls back to fixed cols A/B with no header row); row `last+1` appends. The Stint cell is only written when a `Stint` header exists. The Qualifying tab has the **same structure** as the Schedule tab. **Neither tab may have leading blank rows**, the gviz CSV export maps physical sheet rows to CSV lines 1:1 when the tab starts at row 1. A header row is silently skipped when reading but its physical line number is still used when writing. |
 | `pov` | POV tab **row 2**: the `url` and/or `name` cell, located by header text (so the columns may move) |
-| `teams` | Setup tab: the cell **below** the `Team <slot>` header (slot 1–3 → `A6`/`B6`/`C6` in the shipped layout) — found by text, same as the other Setup fields. The Overlay tab only mirrors them read-only |
-| `crew` | **Crew** tab (`Name \| Commentator \| Director \| Producer \| Race Control \| Discord`, header in row 1). `{"action":"crew","row":N,"name":..,"commentator":bool,"director":bool,"producer":bool,"race_control":bool,"discord":".."}` writes **data row N** (sheet row N+1; `row last+1` appends). Columns are located **by header text** (any order; extra columns are ignored), so a pre-existing `Name\|Director\|Producer` tab is auto-extended with the `Commentator`, `Race Control` and `Discord` columns on first write. `commentator`/`director`/`producer`/`race_control` are written as **`TRUE`/`FALSE` booleans** (checkbox-compatible — never the string `X`, which would break a Google Sheets checkbox cell); `discord` is the verbatim username. `{"action":"crew","row":N,"delete":true}` deletes data row N (rows shift up). The tab must start at row 1 with the header and have no interior blank rows (the Control Center editor maintains this). |
+| `teams` | Setup tab: the cell **below** the `Team <slot>` header (slot 1–3 → `A6`/`B6`/`C6` in the shipped layout): found by text, same as the other Setup fields. The Overlay tab only mirrors them read-only |
+| `crew` | **Crew** tab (`Name \| Commentator \| Director \| Producer \| Race Control \| Discord`, header in row 1). `{"action":"crew","row":N,"name":..,"commentator":bool,"director":bool,"producer":bool,"race_control":bool,"discord":".."}` writes **data row N** (sheet row N+1; `row last+1` appends). Columns are located **by header text** (any order; extra columns are ignored), so a pre-existing `Name\|Director\|Producer` tab is auto-extended with the `Commentator`, `Race Control` and `Discord` columns on first write. `commentator`/`director`/`producer`/`race_control` are written as **`TRUE`/`FALSE` booleans** (checkbox-compatible, never the string `X`, which would break a Google Sheets checkbox cell); `discord` is the verbatim username. `{"action":"crew","row":N,"delete":true}` deletes data row N (rows shift up). The tab must start at row 1 with the header and have no interior blank rows (the Control Center editor maintains this). |
 
 The relay only sends Setup values that exist in the Configuration tab's
-vocabulary columns — the same lists the sheet's own dropdowns use.
+vocabulary columns: the same lists the sheet's own dropdowns use.
 
 > **Crew-tab coordination:** the `crew` action requires a **Crew** tab in the league's
 > Sheet (columns `Name | Commentator | Director | Producer | Race Control | Discord`,
 > header in row 1) **and** the redeployed script that handles `crew`. Without it,
-> director/producer/race-control roles simply resolve to empty — commentators still
-> work from the Schedule — and the Control Center crew editor surfaces an
+> director/producer/race-control roles simply resolve to empty: commentators still
+> work from the Schedule: and the Control Center crew editor surfaces an
 > *outdated-script* error. Nothing crashes. A script predating the **Race Control**
 > column ignores the extra `race_control` field and the column is appended on the next
 > write, so older deployments degrade gracefully.
@@ -43,7 +43,7 @@ vocabulary columns — the same lists the sheet's own dropdowns use.
 > place together: a `Flag` header in the **Setup** tab, a `Flag` row in the
 > **Overlay** tab that mirrors it (the relay only ever reads Overlay), and `'Flag'`
 > in the script's `SETUP_FIELDS` allowlist with the script **redeployed** (new
-> version under the same `/exec` URL — not a new deployment, which changes the URL).
+> version under the same `/exec` URL: not a new deployment, which changes the URL).
 > A script predating `Flag` rejects the write with `unknown setup field: Flag`; the
 > HUD then shows the flag only for the ~30 s optimistic-override window and drops it.
 
@@ -56,17 +56,17 @@ vocabulary columns — the same lists the sheet's own dropdowns use.
 A `teams` write sends `{"action":"teams","slot":1|2|3,"name":"<team>"}`. The
 relay validates the panel's choice against the Configuration tab's roster and
 sends the **verbatim** Configuration team label (e.g. `Example Team #111`), so the
-Setup cell matches the tab's team dropdown exactly — just like Streamer/Session.
+Setup cell matches the tab's team dropdown exactly: just like Streamer/Session.
 The script locates the `Team <slot>` header in the **Setup** tab (case-insensitive)
 and writes the name into the cell **below** it (`A6`/`B6`/`C6` in the shipped
 layout). The v2 script responds `{"ok":true,"action":"teams","v":2}`. **Never
-write the Overlay tab** — it mirrors the Setup teams read-only, and writing there
+write the Overlay tab**, it mirrors the Setup teams read-only, and writing there
 overwrites the mirror formula (the bug this corrects).
 
-### Configuration tab — team-name and Number columns
+### Configuration tab: team-name and Number columns
 
 The team-name column in the Configuration tab may be headed **`Teams`** or
-**`Team Name`** — the relay accepts either. An optional **`Number`** column
+**`Team Name`**, the relay accepts either. An optional **`Number`** column
 holds the car number. The relay strips a trailing `#NNN` token from the team
 name field and treats the `Number` column as the canonical car number if
 present (it takes precedence over the embedded `#NNN`). This means a row like
@@ -74,18 +74,18 @@ present (it takes precedence over the embedded `#NNN`). This means a row like
 `Example Team` and car number `111` without duplication. The panel's P1/P2/P3
 podium dropdowns offer the bare team name, but write the **verbatim**
 Configuration label (with the `#NNN` if that is how the column reads) into the
-Setup tab's `Team 1`/`Team 2`/`Team 3` cells — so the value matches the tab's
+Setup tab's `Team 1`/`Team 2`/`Team 3` cells, so the value matches the tab's
 own dropdown. The Overlay tab's `Teams P1/P2/P3` rows mirror those Setup cells
 read-only.
 
 ## Crew
 
-The `crew` action maintains the **Crew** tab — the per-person roster used by the relay
+The `crew` action maintains the **Crew** tab, the per-person roster used by the relay
 to resolve `/console` roles (commentator/director/producer/**race control**) and to match
 a Discord login to a crew member. The Control Center's crew editor reads the tab via the
 relay (`/crew/data`) and writes changes back through the `crew` webhook action
 (`/api/crew`, `/api/crew/delete` in the Control Center API, which POST to the relay, which
-forwards to the webhook). The script responds `{"ok":true,"action":"crew","v":7}` —
+forwards to the webhook). The script responds `{"ok":true,"action":"crew","v":7}`,
 accepted by the relay's `check_webhook_response`.
 
 The **Race Control** column flags a person for the read-only [Race Control](Console)
@@ -96,32 +96,32 @@ banner is `racecontrol`, and they never collide.
 
 **Tab structure:** one header row
 (`Name | Commentator | Director | Producer | Race Control | Discord`) at row 1; data rows
-below it; no interior blank rows. Both the read and write paths are **header-aware** —
+below it; no interior blank rows. Both the read and write paths are **header-aware**,
 they locate each column by its header text, so the columns may sit in any order and extra
 columns are ignored. The Control Center editor maintains the no-blank-rows invariant.
 
 **Write a row:** `{"action":"crew","row":N,"name":"Alice","commentator":false,"director":true,"producer":false,"race_control":false,"discord":"alice_d"}`
 writes or overwrites data row N (sheet row N+1, skipping the header). `row last+1`
 appends a new person. `commentator`/`director`/`producer`/`race_control` are written as
-`TRUE`/`FALSE` booleans (checkbox-compatible — never the string `X`, which would break a
+`TRUE`/`FALSE` booleans (checkbox-compatible, never the string `X`, which would break a
 Google Sheets checkbox cell); `discord` writes the verbatim username (empty clears it). A
 pre-existing `Name | Director | Producer` tab is auto-extended with the `Commentator`,
-`Race Control` and `Discord` columns on the first write — existing data is untouched.
+`Race Control` and `Discord` columns on the first write: existing data is untouched.
 
 **Delete a row:** `{"action":"crew","row":N,"delete":true}` deletes data row N
 (sheet row N+1); all rows below shift up. The Control Center re-numbers its in-memory
 roster after the delete.
 
 > **Graceful degradation:** without a Crew tab or an up-to-date script, director,
-> producer and race-control roles resolve to empty — commentators still reach
-> `/console/cockpit` from the Schedule — and the editor surfaces an *outdated-script*
+> producer and race-control roles resolve to empty: commentators still reach
+> `/console/cockpit` from the Schedule: and the editor surfaces an *outdated-script*
 > banner. A script predating the **Race Control** column ignores the extra field and
 > appends the column on the next write. Nothing crashes.
 
 ## Stream keys (per Producer Part)
 
 > **This is a read action, not a write.** `get_stream_key` fetches a stream key
-> from the Apps Script's **Script Properties** on demand — the key never lands in
+> from the Apps Script's **Script Properties** on demand, the key never lands in
 > any Sheet cell or CSV export. The existing `SHEET_PUSH_URL` credential is reused;
 > no new secret is needed.
 
@@ -130,11 +130,11 @@ For events where different producers use different OBS stream keys (e.g. a 12 h 
 service and key automatically when the producer selects their Part on the Control
 Center Home view.
 
-### Producer tab — optional `Stream Key` column
+### Producer tab: optional `Stream Key` column
 
 Add an optional **`Stream Key`** column to the **Producer** tab
-(see [Sheet template — Producer tab](Sheet-Template#producer-tab)). Each cell holds
-a short **reference label** (`key1`, `key2`, …) — **never the real key**. The relay
+(see [Sheet template: Producer tab](Sheet-Template#producer-tab)). Each cell holds
+a short **reference label** (`key1`, `key2`, …), **never the real key**. The relay
 reads only the reference; the real key stays in Script Properties where viewers
 cannot see it.
 
@@ -153,14 +153,14 @@ Q     | Sample Producer A | producer-a.tailnet-demo.ts.net  | key1
 ```
 
 A Part whose label starts with **`Q`** (e.g. `Q`) is the **qualifying** broadcast. Its
-`Stream Key` cell may reference **any existing key** — commonly the **same** ref as race
+`Stream Key` cell may reference **any existing key**: commonly the **same** ref as race
 Part 1 (`key1` above), since qualifying runs on a separate day and can reuse the same
 ingest target; no new Script Property is needed in that case. Reference a distinct ref
 (and add a matching property below) only if qualifying streams to a different broadcast.
 The Director-Panel Parts control shows the numeric parts in race mode and the single `Q`
 part in qualifying mode (`racecast event start --qualifying`, or the Control Center
 **Qualifying** toggle). Qualifying is a single part, so ending it stops the OBS stream and
-auto-generates the post-event report — a clean, separate session from the race.
+auto-generates the post-event report: a clean, separate session from the race.
 
 ### Store the real keys in Script Properties
 
@@ -175,14 +175,14 @@ property per reference:
 Add one more property (e.g. `keyQ`) **only** if the qualifying `Q` row references a
 distinct key; when the `Q` row reuses `key1` (the common case) there is nothing extra to add.
 
-Script Properties are visible only to Sheet **editors** (the league owner) — viewers
+Script Properties are visible only to Sheet **editors** (the league owner): viewers
 cannot see them, and they never appear in any CSV export or gviz fetch. The relay
 retrieves the key at switch time over HTTPS and passes it straight to OBS; it is
 never logged or written back to any cell.
 
 ### Apps Script handler
 
-`get_stream_key` is one clause in the main `doPost` dispatcher — it already ships in
+`get_stream_key` is one clause in the main `doPost` dispatcher, it already ships in
 the [One-time setup](#one-time-setup-per-sheet) script below (alongside `timer`,
 `schedule`, `crew`, …). If you paste that script fresh, there is nothing extra to do.
 
@@ -200,7 +200,7 @@ else if (action === 'get_stream_key') {
 }
 ```
 
-The response always echoes `action`, and the key is returned only over HTTPS — it is
+The response always echoes `action`, and the key is returned only over HTTPS, it is
 never written back to any cell.
 
 **Request / response contract:**
@@ -222,17 +222,17 @@ populated, the producer sets OBS's stream target before going live:
 - **CLI:** `racecast obs stream-target <part>` (e.g.
   `racecast obs stream-target 1`).
 
-> **OBS must not be streaming.** `set target` only works while OBS is not live —
+> **OBS must not be streaming.** `set target` only works while OBS is not live,
 > it writes the service and key to OBS's stream settings. To switch between two
 > back-to-back Parts: **stop the broadcast** → set the target for the next Part →
 > go live again.
 
 A Part with no `Stream Key` reference (blank cell) reports "no reference for
-this Part" — OBS's current stream settings are left unchanged. This is normal for
+this Part": OBS's current stream settings are left unchanged. This is normal for
 events where all Parts share one key already configured in OBS.
 
 > The relay also calls `get_stream_key` server-side when the Director Panel starts a
-> broadcast Part (#395) — the key is applied to OBS over localhost and never reaches
+> broadcast Part (#395): the key is applied to OBS over localhost and never reaches
 > the browser.
 
 ## One-time setup (per sheet)
@@ -293,7 +293,7 @@ events where all Parts share one key already configured in OBS.
    }
 
    function writeSetup(ss, fields) {
-     // Locate every header first, then write — an unknown/renamed header
+     // Locate every header first, then write: an unknown/renamed header
      // aborts the whole write with a clear error.
      const sheet = tab(ss, TABS.setup);
      const grid = sheet.getDataRange().getValues();
@@ -353,7 +353,7 @@ events where all Parts share one key already configured in OBS.
 
    function writeTeams(ss, p) {
      // Each podium slot is the cell below its header, located by text so the
-     // layout may move. Write only the Setup tab — the mirror elsewhere is
+     // layout may move. Write only the Setup tab, the mirror elsewhere is
      // read-only and must not be overwritten.
      const slot = Number(p.slot);
      if (!(slot >= 1 && slot <= 3)) throw 'slot out of range: ' + p.slot;
@@ -412,12 +412,12 @@ events where all Parts share one key already configured in OBS.
    ```
 
 3. **Choose one random secret** and use the **same value** in two places: the script's
-   `KEY = '…'` (step 2) **and** the `?key=…` in the URL (step 4). They must match exactly —
+   `KEY = '…'` (step 2) **and** the `?key=…` in the URL (step 4). They must match exactly,
    the `key` is the *only* thing protecting the webhook (see [Security](#security) below),
    because **access: Anyone** means anyone with the URL could otherwise write to your Sheet.
 4. **Deploy → New deployment → Web app**, execute as **Me**, access:
    **Anyone**. Copy the `/exec` URL.
-5. In the league's `profiles/<name>/profile.env` on every producer machine — append your
+5. In the league's `profiles/<name>/profile.env` on every producer machine: append your
    secret as `?key=…` so it matches the script's `KEY`:
 
    ```
@@ -430,22 +430,22 @@ events where all Parts share one key already configured in OBS.
 ## Updating the script later
 
 **Manage deployments → ✎ Edit → Version: New version → Deploy.** This keeps
-the `/exec` URL — no `profile.env` change on any machine. (A *New deployment*
+the `/exec` URL: no `profile.env` change on any machine. (A *New deployment*
 instead creates a NEW URL and every `profile.env` must be updated.)
 
 The relay detects an outdated (v1, timer-only) script: panel writes then
-report *"webhook script outdated — redeploy"* instead of failing silently.
+report *"webhook script outdated: redeploy"* instead of failing silently.
 
 The current script is **v7** (v3 added the Schedule `Stint` column; v4 lets the
 `schedule` action target the **Qualifying** tab via `"tab":"Qualifying"`; v5 added
 `teams`; v6 added the `crew` action and the `Crew` tab; v7 makes `crew` header-aware
 and adds the `Commentator` + `Discord` columns). The relay does not enforce the
 version, so an older script degrades gracefully: a v2 script ignores Stint
-write-back; v2/v3 scripts ignore the `tab` field and write the **Schedule** tab —
+write-back; v2/v3 scripts ignore the `tab` field and write the **Schedule** tab,
 qualifying-row edits would land on the race Schedule until you redeploy; a v5 script
 ignores the `crew` action, so the Control Center crew editor surfaces an
 *outdated-script* error and leaves the Sheet unchanged. A **v6** script writes only
-the `Name | Director | Producer` columns positionally — on a 5-column tab it would
+the `Name | Director | Producer` columns positionally: on a 5-column tab it would
 write the Director flag into the `Commentator` column, so **redeploy v7 before using
 the crew editor against a tab that has the `Commentator`/`Discord` columns** (v7 is
 header-aware and writes each column by its header). The relay still reads the Crew tab
@@ -458,7 +458,7 @@ header in row 1) and redeploy to enable the crew editor's write-back.
 
 ## Security
 
-The URL+key is a write credential for the Sheet — treat it like the other
+The URL+key is a write credential for the Sheet: treat it like the other
 `profile.env` secrets (never commit it). The endpoints the panel uses sit on the
 relay's unauthenticated control server: the tailnet is the trust boundary,
 same as all other `/panel` controls.

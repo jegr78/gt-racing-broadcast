@@ -1,20 +1,20 @@
-# Sheet-Template — the Google Sheet that drives a league
+# Sheet-Template: the Google Sheet that drives a league
 
 Every league is driven by **one Google Sheet**. The relay reads it over the public
-CSV export (no API key, no login) — you only need the long `SHEET_ID` from the URL
+CSV export (no API key, no login): you only need the long `SHEET_ID` from the URL
 in your profile's `profile.env` (see [League profiles](Profiles)). This page is the
 **read contract**: every tab, its columns, and a sample row. The **write** path (the
 optional Apps Script that lets the Director Panel and race timer write back) is the
 separate [Sheet-Webhook](Sheet-Webhook) page.
 
 > **Just want to try it?** The shipped `demo` profile already points at a public,
-> read-only demo Sheet built to this spec — `racecast profile use demo` and you are
+> read-only demo Sheet built to this spec: `racecast profile use demo` and you are
 > running. To build your own, copy that Sheet (**File → Make a copy**) or recreate the
 > tabs below, then put your copy's ID in `profile.env`.
 
 CSV stubs for every tab live next to this page under
-[`src/docs/sheet-template/`](https://github.com/jegr78/gt-racing-broadcast/tree/main/src/docs/sheet-template)
-— import them as a starting point.
+[`src/docs/sheet-template/`](https://github.com/jegr78/gt-racing-broadcast/tree/main/src/docs/sheet-template),
+import them as a starting point.
 
 ## How the relay reads it
 
@@ -50,13 +50,13 @@ with **no leading blank rows**. Most tabs locate their columns **by header text*
 The live lower-third values. Read **by label**: column **A** holds the label, and the
 value is the **first non-empty cell from column C onward** (column B is a spacer). In a
 league with the write webhook the Director Panel writes the Setup tab and the Overlay
-tab mirrors it with a formula — but the relay only ever **reads** Overlay.
+tab mirrors it with a formula: but the relay only ever **reads** Overlay.
 
 | Label (col A) | Meaning |
 |---|---|
 | `Stint` | Current stint number/label shown on the HUD |
 | `Streamer` | Current commentator name |
-| `Session` | Session label (e.g. `Race — Hour 3`) |
+| `Session` | Session label (e.g. `Race: Hour 3`) |
 | `Round Top` | Event / round title (top line) |
 | `Round Bottom` | Country name (bottom line; normalised to look up the flag) |
 | `Race Control` | Text for the race-control banner |
@@ -69,8 +69,8 @@ Sample:
               | (B) |
 Stint         |     | 5
 Streamer      |     | Sample Commentator
-Session       |     | Race — Hour 3
-Round Top     |     | Demo Series — Round 1
+Session       |     | Race: Hour 3
+Round Top     |     | Demo Series: Round 1
 Round Bottom  |     | Germany
 Race Control  |     | GREEN
 Flag          |     | Green Flag
@@ -81,7 +81,7 @@ Teams P3      |     | Sample Team Charlie #33
 
 The team name and country resolve to a bundled logo/flag by a normalised key
 (lowercase, spaces → `-`): `Germany` → `germany.png`, `Sample Team Alpha` →
-`sample-team-alpha` — matched against the team's **brand key** (next tab) and the
+`sample-team-alpha`: matched against the team's **brand key** (next tab) and the
 bundled `flags/`/`brands/` images. See [HUD overlays](HUD-Overlays).
 
 ---
@@ -103,7 +103,7 @@ A header row (row 1) plus one row per team. Columns are located **by header text
 | `Race Control` | optional | Dropdown options for the panel's **Race Control** field |
 | `Flag` | optional | Dropdown options for the panel/Companion **race-condition flag** (Green/Yellow/Safety Car/Full Course Yellow/Red/…). Shown color-coded in the HUD; hidden when unset. Distinct from the country flag (which derives from `Round Bottom`/Country) |
 | `Cue Preset` | optional | Quick-cue presets for the director text-cue channel |
-| `BG Color` *(or `BG Colour`/`Background Color`/`Background Colour`)* | optional | Per-team tile background colour — any plain CSS colour (`#C00000`, `rgb(0,80,160)`, `white`); implausible values are ignored |
+| `BG Color` *(or `BG Colour`/`Background Color`/`Background Colour`)* | optional | Per-team tile background colour: any plain CSS colour (`#C00000`, `rgb(0,80,160)`, `white`); implausible values are ignored |
 | `Text Color` *(or `Text Colour`/`FG Color`/`FG Colour`)* | optional | Per-team tile text colour, same rules as `BG Color` |
 
 Sample:
@@ -116,8 +116,8 @@ Sample Team Charlie #33| 33     | ferrari   | Stint 3 |                    | Rac
 ```
 
 The vocabulary columns (`Stints`/`Streamers`/`Session`/`Race Control`/`Flag`/`Cue Preset`)
-are independent lists — blanks are skipped and duplicates dropped. See
-[Configuration](Configuration#google-sheet--configuration-tab-columns).
+are independent lists: blanks are skipped and duplicates dropped. See
+[Configuration](Configuration#google-sheet-configuration-tab-columns).
 
 The canonical flag states ship default HUD colors: `Green Flag`, `Yellow Flag`,
 `Double Yellow`, `Safety Car`, `Full Course Yellow`, `Code 60`, `Red Flag`,
@@ -126,7 +126,7 @@ renders in a neutral default style and can be colored per-league via the overlay
 `customCss`.
 
 `BG Color`/`Text Color` publish as the `--team-bg`/`--team-fg` custom properties on the
-HUD's team tiles — a per-league overlay decides what to do with them. See
+HUD's team tiles: a per-league overlay decides what to do with them. See
 [HUD overlays](HUD-Overlays#team-colours-and-qualifying-lap).
 
 ---
@@ -139,7 +139,7 @@ are found by name; without one, fixed positions apply (**A** = URL, **B** = Stre
 
 | Column header | Fallback col | Meaning |
 |---|---|---|
-| `URL` | A | The stint's live stream — a `youtube.com`/`twitch.tv` URL, or a bare YouTube channel id (`UC…`, public `/live` only) — or `local:` for a stint read from the producer machine's capture card ([local capture stint](Relay-Mode#local-capture-stint)) |
+| `URL` | A | The stint's live stream: a `youtube.com`/`twitch.tv` URL, or a bare YouTube channel id (`UC…`, public `/live` only), or `local:` for a stint read from the producer machine's capture card ([local capture stint](Relay-Mode#local-capture-stint)) |
 | `Streamer` *(or `Name`)* | B | Commentator name (matched to the Crew/Configuration roster) |
 | `Stint` | C | Stint label shown on the HUD (optional) |
 
@@ -154,8 +154,8 @@ local:                                       | Fourth Commentator | Stint 4
 ```
 
 Feed A serves the odd stints, Feed B the even ones; at each handover the off-air feed
-advances to the next row. See [Relay — how the feeds work](Relay-Mode). Edits apply on
-the next `/next` or `/reload` — a running stint is never cut mid-feed.
+advances to the next row. See [Relay: how the feeds work](Relay-Mode). Edits apply on
+the next `/next` or `/reload`: a running stint is never cut mid-feed.
 
 ---
 
@@ -176,17 +176,17 @@ https://www.youtube.com/watch?v=SAMPLE0QUAL  | Sample Commentator | Qualifying
 ## Quali Times tab
 
 Optional. One row per car, giving that car's qualifying best lap for display on the race
-tiles — **not** the `Qualifying` tab above, which is the qualifying *schedule*
+tiles: **not** the `Qualifying` tab above, which is the qualifying *schedule*
 (URL/Streamer/Stint). Maintained **once** between qualifying and the race; no live typing
 during the show.
 
 | Column header | Required? | Meaning |
 |---|---|---|
-| `Team` *(or `Teams` / `Team Name`)* | yes | Matched to a car by the **exact** label first, then by the team name with a trailing `#NNN` stripped. So `Tavernello Racing #6` and `Tavernello Racing` both match that car — and a team fielding **two** cars gives each its own lap by writing both rows with their numbers (`… #14`, `… #54`) |
+| `Team` *(or `Teams` / `Team Name`)* | yes | Matched to a car by the **exact** label first, then by the team name with a trailing `#NNN` stripped. So `Tavernello Racing #6` and `Tavernello Racing` both match that car, and a team fielding **two** cars gives each its own lap by writing both rows with their numbers (`… #14`, `… #54`) |
 | `Best Lap` *(or `Best-Lap` / `Bestlap` / `Quali Time`)* | yes | The car's qualifying best lap |
 
 **Format the `Best Lap` column as plain text** (`Format → Number → Plain text`) before
-typing lap times — otherwise Google Sheets parses `1:38.973` as a duration (38.973
+typing lap times, otherwise Google Sheets parses `1:38.973` as a duration (38.973
 *minutes*), and the CSV export the relay reads already carries the mangled value. A
 single already-mangled cell can be rescued with a leading apostrophe: `'1:38.973`.
 
@@ -195,7 +195,7 @@ single already-mangled cell can be rescued with a leading apostrophe: `'1:38.973
 | `1:38.973` | `1:38.973` |
 | `1:38,973` | `1:38.973` |
 | `0:01:38,973` | `1:38.973` |
-| `1:01:38.973` *(a non-zero hour)* | `1:01:38.973` — passed through unchanged; a >1h lap is nonsense, but showing the cell beats guessing |
+| `1:01:38.973` *(a non-zero hour)* | `1:01:38.973`: passed through unchanged; a >1h lap is nonsense, but showing the cell beats guessing |
 | *(empty, or team not found)* | *(lap slot stays hidden)* |
 
 Sample:
@@ -206,7 +206,7 @@ Tavernello Racing #6   | 1:38.973
 ```
 
 Because the laps are entered once and never change during the show, the relay reads this
-tab on **its own slow cycle** (once at startup, then about once a minute) — completely
+tab on **its own slow cycle** (once at startup, then about once a minute): completely
 separate from the HUD's own refresh. Nothing on air ever waits for it: whether the tab is
 missing, present, or unreachable, the lower third and the panel's write-confirmations
 carry on at full speed.
@@ -214,11 +214,11 @@ carry on at full speed.
 This tab can fail to show a lap in three different ways, and the relay handles each
 differently:
 
-- **The tab was never created** — every lap slot stays empty; nothing was ever fetched.
+- **The tab was never created**: every lap slot stays empty; nothing was ever fetched.
 - **The tab exists, but the `Team` or `Best Lap` header is gone** (e.g. renamed or
-  deleted) — the whole map is replaced with empty, so every lap slot blanks.
+  deleted): the whole map is replaced with empty, so every lap slot blanks.
 - **The fetch itself fails** (a transient network blip, or a tab that existed and was
-  removed mid-event) — the **last successfully fetched** lap times keep showing; the
+  removed mid-event): the **last successfully fetched** lap times keep showing; the
   relay logs a warning once and keeps retrying on the next cycle.
 
 ---
@@ -238,7 +238,7 @@ https://www.youtube.com/watch?v=SAMPLE00POV  | Driver Cam
 
 ## Setup tab
 
-The Director Panel's **write** target (it needs the webhook — see
+The Director Panel's **write** target (it needs the webhook: see
 [Sheet-Webhook](Sheet-Webhook)). The relay does not read it; the Overlay tab mirrors it
 read-only. Header row in row 1, values written in the cell **below** each header
 (located by text):
@@ -315,21 +315,21 @@ Control Center crew editor) is detailed in [Sheet-Webhook](Sheet-Webhook).
 The producer-handover schedule shown on the **Control Center Home** view. Each row
 represents one production segment and identifies the producer responsible for it by their
 machine's Tailscale MagicDNS name. The Control Center renders each row as a one-click
-**Funnel takeover** button — except your own machine's row, which is shown but
+**Funnel takeover** button: except your own machine's row, which is shown but
 disabled (the Control Center matches the row's MagicDNS against this machine's own full
 FQDN, displayed as "Your MagicDNS: …" so you know exactly what to enter). There is no
 CLI flag; this tab is read directly by the Control Center on demand using the active
 profile's `SHEET_ID`.
 
 The tab is **read-only / admin-owned**: the league owner maintains it per event directly
-in the Sheet — no write-back from the app.
+in the Sheet: no write-back from the app.
 
 | Column header | Meaning |
 |---|---|
 | `Part` | Human label for the segment (e.g. `1`, `2`, `Night 1`) |
 | `Producer` | The producer's name |
-| `MagicDNS` | That producer's machine's **full Tailscale MagicDNS FQDN** (e.g. `producer-a.tailXXXX.ts.net`). Must be the full `*.ts.net` name — a bare hostname will not match the self-guard |
-| `Stream Key` | **Optional.** A short reference label (e.g. `key1`) for the OBS stream key to use during this Part — the real key is stored as a Script Property, never in a cell. See [Sheet-Webhook — Stream keys](Sheet-Webhook#stream-keys-per-producer-part). |
+| `MagicDNS` | That producer's machine's **full Tailscale MagicDNS FQDN** (e.g. `producer-a.tailXXXX.ts.net`). Must be the full `*.ts.net` name, a bare hostname will not match the self-guard |
+| `Stream Key` | **Optional.** A short reference label (e.g. `key1`) for the OBS stream key to use during this Part: the real key is stored as a Script Property, never in a cell. See [Sheet-Webhook, Stream keys](Sheet-Webhook#stream-keys-per-producer-part). |
 
 Duplicate rows are allowed and meaningful: a producer covering two consecutive segments
 → repeat the row with the same Producer and MagicDNS.
@@ -345,12 +345,12 @@ Part    | Producer          | MagicDNS
 
 ## Assets tab
 
-Where the broadcast **graphics** and **intro/outro/trailer clips** are linked — read by
+Where the broadcast **graphics** and **intro/outro/trailer clips** are linked: read by
 `racecast graphics` and `racecast media`, **not** the relay. Each row: a **label** in
 column A and a link in the first non-empty cell to its right.
 
 - A **Google-Drive** share link is downloaded by `racecast graphics` as
-  `runtime/<profile>/graphics/<Label>.png` — **the label is the filename**, so keep it
+  `runtime/<profile>/graphics/<Label>.png`: **the label is the filename**, so keep it
   filesystem-clean and matching the OBS scene's image name.
 - The rows labelled **`Intro Video`** / **`Outro Video`** / **`Trailer Video`** hold a
   **YouTube** URL and are downloaded by `racecast media` into `runtime/<profile>/media/`
@@ -389,23 +389,23 @@ Intermission Music   | <Drive link or YouTube URL>
 The five **`Flag …`** rows are **optional**. Each is a full-screen transparent 1080p PNG
 placed as an image source in the **Stint** and **Splitscreen** OBS scenes. They are the
 *graphic* alternative to the flag-status **text** chip in the HUD (`Flag` field in the
-Setup tab): the text chip and the graphic overlay are independent controls — you can use
+Setup tab): the text chip and the graphic overlay are independent controls: you can use
 one, both, or neither depending on your broadcast design. Exactly one flag graphic is
 active at a time (or none); switching to a new one hides the previous. The director
 controls them from the panel's **Flag Gfx** row or the Companion **FLAGS** page's
 graphic row (see [Director](Director#the-companion-web-buttons-board)). A missing
-graphic file is non-fatal — OBS shows a transparent placeholder until you fetch it.
+graphic file is non-fatal: OBS shows a transparent placeholder until you fetch it.
 
 ### Hiding OBS-only assets from the crew Graphics browser (optional)
 
 The **cockpit**, **Director Panel**, and **Race Control** pages each show a read-only
-**Graphics** browser — a click-to-open list of the downloaded still-graphics so the crew
+**Graphics** browser, a click-to-open list of the downloaded still-graphics so the crew
 can reference them on air. Some assets are **OBS-internal** (the `Overlay` HUD frame, the
 weather overlays, backgrounds, the flag graphics) and only clutter that list. Mark them
 with an **`Internal`** column so they are hidden from the browser but **still downloaded
 for OBS**.
 
-To use it, give the Assets tab a **header row** and add an `Internal` column — a
+To use it, give the Assets tab a **header row** and add an `Internal` column, a
 Google-Sheets **checkbox** (`Insert → Checkbox`), the same style as the Crew-tab role
 boxes:
 
@@ -424,11 +424,11 @@ Flag Green           | <Drive link>  | ☑
   (`Name`/`Label`).
 - Fully optional and backward compatible: an Assets tab with **no header row / no
   `Internal` column** shows **every** graphic in the browser (the previous behaviour).
-- Re-run `racecast graphics` after changing the column — the flag is captured into
+- Re-run `racecast graphics` after changing the column, the flag is captured into
   `runtime/<profile>/graphics/manifest.json` at download time (the same cadence as the
   graphics themselves).
 
-A missing graphic is non-fatal — `racecast setup` warns and OBS shows black until you
+A missing graphic is non-fatal: `racecast setup` warns and OBS shows black until you
 run `racecast graphics`. The graphics/clips are **never committed**; they always come
 from the Sheet. See [Configuration](Configuration#sheet-driven-graphics).
 
@@ -457,7 +457,7 @@ Cupra   | https://drive.google.com/file/d/<ID>/view?usp=sharing
 
 ## Event Notes tab
 
-**Optional.** League-owner notes shown as a toggleable `📋 Notes` modal in the Director Panel, Commentator Cockpit, and Race Control desk. The tab is read-only / admin-owned — the league owner maintains it directly in the Sheet per event, and it is never written from the consoles. If the tab is absent or contains no notes, the modal button self-hides.
+**Optional.** League-owner notes shown as a toggleable `📋 Notes` modal in the Director Panel, Commentator Cockpit, and Race Control desk. The tab is read-only / admin-owned, the league owner maintains it directly in the Sheet per event, and it is never written from the consoles. If the tab is absent or contains no notes, the modal button self-hides.
 
 Header row in row 1, three columns:
 
@@ -480,8 +480,8 @@ The relay reads this tab via `--event-notes-tab` (default `Event Notes`). Disabl
 
 ## See also
 
-- [League profiles](Profiles) — where `SHEET_ID` lives and how leagues switch
-- [Configuration & secrets](Configuration) — the full `profile.env` key reference
-- [Sheet-Webhook](Sheet-Webhook) — the optional Apps Script **write** path
-- [HUD overlays](HUD-Overlays) — how Overlay/Configuration values become the lower-third
-- [Race Timer](Race-Timer) — the Timer tab in depth
+- [League profiles](Profiles), where `SHEET_ID` lives and how leagues switch
+- [Configuration & secrets](Configuration): the full `profile.env` key reference
+- [Sheet-Webhook](Sheet-Webhook): the optional Apps Script **write** path
+- [HUD overlays](HUD-Overlays): how Overlay/Configuration values become the lower-third
+- [Race Timer](Race-Timer): the Timer tab in depth

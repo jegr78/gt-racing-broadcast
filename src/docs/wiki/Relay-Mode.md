@@ -10,8 +10,8 @@ The recommended flow for endurance racing: **one commentator per stint**, stream
 
 The relay supports **YouTube and Twitch** feeds (YouTube via yt-dlp, Twitch direct via Streamlink).
 
-**YouTube feeds:** the relay uses **yt-dlp to resolve** each live HLS URL — this is what
-passes YouTube's bot-check, via `yt-cookies.txt` + deno JS-challenge solving — and
+**YouTube feeds:** the relay uses **yt-dlp to resolve** each live HLS URL, this is what
+passes YouTube's bot-check, via `yt-cookies.txt` + deno JS-challenge solving, and
 **streamlink to serve** that direct URL to OBS. So `yt-cookies.txt` and `deno` are both
 required for reliable YouTube pulls. Streamlink alone, even with cookies, is blocked by
 the bot-check.
@@ -23,7 +23,7 @@ cookies; gated (subscriber/follower-only) channels need `twitch-cookies.txt`
 (see [§2 below](#2-producer-accounts-and-cookies-before-each-event)).
 
 A running feed is **never** torn off mid-stint. Sheet edits apply on the next `/next`
-(handover) or `/reload`. Curling a feed port returns nothing — each port serves a single
+(handover) or `/reload`. Curling a feed port returns nothing, each port serves a single
 consumer (OBS); that is not a failure.
 
 ## 1. The schedule (Google Sheet tab `Schedule`)
@@ -31,11 +31,11 @@ consumer (OBS); that is not a failure.
 - One column holds the entries **in stint order**; other columns (stint number / name)
   are ignored. Editable remotely by anyone with sheet access.
 - **Enter full watch URLs** for each stint:
-  - YouTube: `https://www.youtube.com/watch?v=VIDEOID` — **unlisted streams must use
+  - YouTube: `https://www.youtube.com/watch?v=VIDEOID`: **unlisted streams must use
     this form**; the channel `/live` URL only works for public streams. A bare
     `UC…` channel ID is also accepted as a shorthand for YouTube streams.
-  - Twitch: `https://www.twitch.tv/<channel>` — there is no bare-ID short form for Twitch.
-  - `local:` — the stint comes from a capture card on the producer machine, not from a
+  - Twitch: `https://www.twitch.tv/<channel>`: there is no bare-ID short form for Twitch.
+  - `local:`: the stint comes from a capture card on the producer machine, not from a
     stream. See [Local capture stint](#local-capture-stint).
 - The streamer/director enters their watch URL shortly before their stint.
 - Default sheet = the shared HUD sheet (the active profile's `SHEET_ID`). Override with
@@ -45,7 +45,7 @@ consumer (OBS); that is not a failure.
 
 ### YouTube login (required)
 
-Against YouTube's *"Sign in to confirm you're not a bot"*. Easiest — auto-export from
+Against YouTube's *"Sign in to confirm you're not a bot"*. Easiest: auto-export from
 your **logged-in** browser:
 
 ```bash
@@ -54,14 +54,14 @@ racecast cookies firefox
 ```
 
 - You must be **logged into YouTube** in that browser.
-- **Firefox is the recommended source on every OS** — no prompts, and it works even
+- **Firefox is the recommended source on every OS**, no prompts, and it works even
   while Firefox is running.
-- **Windows**: Chrome/Edge/Brave **cannot** be exported — their cookies are app-bound
+- **Windows**: Chrome/Edge/Brave **cannot** be exported: their cookies are app-bound
   encrypted (Chrome 127+); use Firefox.
 - macOS **Chrome/Edge**: approve the Keychain prompt. **Safari**: grant your terminal
   **Full Disk Access**. (Firefox needs neither.)
 - Writes `runtime/yt-cookies.txt` (chmod 600), auto-detected and passed to yt-dlp.
-  `/status` then shows `"cookies": true`. **Re-run before each event** — cookies rotate.
+  `/status` then shows `"cookies": true`. **Re-run before each event**: cookies rotate.
 - The export keeps only the `youtube.com` cookies. The browser's other sessions
   (Google account, GitHub, Discord, …) are dropped, and the command prints how many.
   A jar you drop in by hand is used as it is, and so is a jar exported by an older
@@ -81,7 +81,7 @@ racecast cookies twitch firefox
 # browsers: firefox | chrome | safari | edge | brave   (Firefox recommended)
 ```
 
-- You must be **logged into Twitch** in that browser (not YouTube — a separate session).
+- You must be **logged into Twitch** in that browser (not YouTube, a separate session).
 - Writes `runtime/twitch-cookies.txt` (chmod 600), auto-detected by the relay for
   Twitch feeds. Only the `twitch.tv` cookies are kept. The `/status` `cookies` field
   shows whether the YouTube cookie jar is loaded.
@@ -91,7 +91,7 @@ racecast cookies twitch firefox
 
 | Account | When needed | Cookie file |
 |---|---|---|
-| **YouTube** (logged in) | Always — needed for the bot-check on any YouTube feed | `yt-cookies.txt` |
+| **YouTube** (logged in) | Always: needed for the bot-check on any YouTube feed | `yt-cookies.txt` |
 | **Twitch** (logged in) | Only if any stint uses a gated (sub/follower-only) Twitch feed | `twitch-cookies.txt` |
 
 The cookies are shared across all leagues on the machine and live at the top-level
@@ -102,7 +102,7 @@ The cookies are shared across all leagues on the machine and live at the top-lev
 - **YouTube server-side ads (DAI/SSAI):** if the streamer's channel serves server-side
   inserted ads, the relay detects the ad marker in the stream and reports it in
   `/status` (surfaced as the feed's `last_error` in `/status`, and shown on the director panel).
-  The relay cannot remove them — there is no reliable skip mechanism. The clean solution
+  The relay cannot remove them: there is no reliable skip mechanism. The clean solution
   is an ad-free source: league-owned, unlisted, unmonetized stint streams have no server-side ads.
 - **Twitch ad filtering:** handled automatically by Streamlink's current built-in
   behavior. Coverage depends on Streamlink's version and Twitch's current serving
@@ -118,25 +118,25 @@ racecast relay run          # foreground/debug mode
 ```
 
 Stop with `racecast relay stop` (or Ctrl+C in foreground mode). For remote
-directors, bind the control server to the producer's **Tailscale IP** (not `0.0.0.0`) —
+directors, bind the control server to the producer's **Tailscale IP** (not `0.0.0.0`),
 see [Director](Director) and the security note below.
 (Developers running from the repo: python3 src/racecast.py works the same everywhere.)
 
 **Taking over mid-event (multi-part broadcasts):** start the relay at the stint
-that is on air right now —
+that is on air right now,
 
 ```bash
 racecast relay start --stint 4   # stint 4 is live: Feed A serves it, Feed B preloads stint 5
 ```
 
-`--stint` puts that stint on Feed A and preloads the next one on Feed B — there
+`--stint` puts that stint on Feed A and preloads the next one on Feed B: there
 is no need to continue the previous producer's A/B order; `/next` works as
 usual from there. Full checklist:
 [Run an event → Producer handover](Run-an-event#producer-handover-12h24h-multi-part-events).
 
 > With manual feed-arm (**the default**), "preloads" means Feed B's index is *positioned*
-> on the next stint — it does **not** pull until you **arm** it before the swap, and
-> `/next` auto-stops the outgoing feed after it cuts (the single-puller flow — see
+> on the next stint: it does **not** pull until you **arm** it before the swap, and
+> `/next` auto-stops the outgoing feed after it cuts (the single-puller flow: see
 > [At a driver change](Director#at-a-driver-change)). Set `RACECAST_MANUAL_FEED_ARM=0`
 > to restore immediate pre-warm pulling (home producers on a residential IP).
 
@@ -153,18 +153,18 @@ Companion connection **"Generic HTTP Requests"**, action **GET**:
 
 **Feeds Next (`/next`)** now also drives OBS over obs-websocket: it makes the new
 commentator visible in the **Stint** scene, switches the feed audio, and cuts the
-program to **Stint** (only once the incoming feed is actually serving — never to a
+program to **Stint** (only once the incoming feed is actually serving, never to a
 black/buffering feed). No Feed A/B choice and no special case for starting with one
 link. Requires obs-websocket reachable (see Pre-flight); otherwise the manual
 panel/Companion FEED + scene buttons remain the fallback.
 
-Works for remote directors too — Companion makes the request locally on the producer
+Works for remote directors too: Companion makes the request locally on the producer
 station.
 
-One more endpoint for the browser (not a Companion button — it needs a number):
+One more endpoint for the browser (not a Companion button, it needs a number):
 `http://127.0.0.1:8088/set/stint/<n>` positions BOTH feeds for a producer
 takeover (1-based: stint n on Feed A, n+1 preloaded on Feed B). It tears
-running feeds — use it before going live, never mid-program.
+running feeds: use it before going live, never mid-program.
 
 ---
 
@@ -175,20 +175,20 @@ Schedule rows carry the **same URL**. The relay treats a run of consecutive same
 as **one slot = one feed pull**: the stream is pulled once, and the on-screen **stint
 label** advances on each `/next` with **no re-pull and no program cut**. The off-air feed
 always skips a same-URL run and parks on the next *distinct* slot, so two feeds never pull
-the identical stream — the single-puller rule that keeps a cloud producer under YouTube's
+the identical stream: the single-puller rule that keeps a cloud producer under YouTube's
 per-IP limit (see [Why arm?](Director#at-a-driver-change)).
 
 So `/next` decides per press:
 
-- **Continuation** — the next row repeats the on-air URL → **label only**: the displayed
+- **Continuation**, the next row repeats the on-air URL → **label only**: the displayed
   stint advances; nothing is armed, stopped or cut.
-- **Real handover** — the next row is a new URL → the pre-armed off-air feed is cut in,
+- **Real handover**, the next row is a new URL → the pre-armed off-air feed is cut in,
   and the outgoing feed is auto-stopped and advanced past the run to the next distinct slot.
 
 In the tables below, `LIVE` = on air + pulling · `off`/`STOP` = disarmed (no pull) ·
 `idle` = parked past the schedule end · `idxN` = the feed's pull row (0-based).
 
-### Scenario A — back-to-back in the middle
+### Scenario A: back-to-back in the middle
 
 Stint 1 = commentator **K1** (`uA`) · **stints 2 + 3 = commentator K2 on one stream
 (`uB`)** · stint 4 = **K4** (`uD`) → slots `[0, 1, 1, 2]`.
@@ -201,13 +201,13 @@ sequenceDiagram
     Note over R,O: A LIVE uA (stint 1) · B off, parked on uB
     D->>R: ARM B (pre-roll uB)
     D->>R: /next
-    R->>O: CUT to Feed B — uB (stint 2)
+    R->>O: CUT to Feed B: uB (stint 2)
     R->>R: stop freed A, park on uD (next distinct slot)
     D->>R: /next
-    Note over R: continuation (same uB) — label to stint 3, no cut
+    Note over R: continuation (same uB): label to stint 3, no cut
     D->>R: ARM A (pre-roll uD)
     D->>R: /next
-    R->>O: CUT to Feed A — uD (stint 4)
+    R->>O: CUT to Feed A: uD (stint 4)
     R->>R: stop freed B, go idle
 ```
 
@@ -216,18 +216,18 @@ sequenceDiagram
 | 0 | Start (both disarmed) | — | idx0 off | idx1 off | Stint 1 · A | — |
 | 1 | **ARM A** | Feed A pulls `uA` | idx0 **LIVE** | idx1 off | Stint 1 · A | — |
 | 2 | **ARM B**, then `/next` | real handover; freed A stopped, skips the `uB` run to `uD` | idx0→**3** STOP | idx1 **LIVE** | Stint 2 · B | yes |
-| 3 | `/next` | **continuation** — label only, both feeds untouched | idx3 STOP | idx1 **LIVE** | **Stint 3 · B** | no |
+| 3 | `/next` | **continuation**: label only, both feeds untouched | idx3 STOP | idx1 **LIVE** | **Stint 3 · B** | no |
 | 4 | **ARM A**, then `/next` | real handover; freed B stopped, goes idle | idx3 **LIVE** | idx1→**4** idle | Stint 4 · A | yes |
 
-Only one feed ever pulls `uB` (Feed B) — the freed feed jumps straight past the run to
+Only one feed ever pulls `uB` (Feed B): the freed feed jumps straight past the run to
 `uD`, never onto a second `uB` pull.
 
-### Scenario B — back-to-back at the very start
+### Scenario B: back-to-back at the very start
 
 Stints 1 + 2 = commentator **K1 on one stream (`uA`)** · stint 3 = **K3** (`uC`) · stint 4
 = **K4** (`uD`) → slots `[0, 0, 1, 2]`.
 
-Here the **first `/next` has no predecessor feed to stop** — and because stint 1 → 2 is
+Here the **first `/next` has no predecessor feed to stop**, and because stint 1 → 2 is
 itself a continuation, the handover/stop path is **never even reached**: the first `/next`
 just advances the label. Feed B is parked on the next distinct slot (`uC`) from the start,
 not on the continuation row, so there is no leading double-pull either. Nothing special is
@@ -241,14 +241,14 @@ sequenceDiagram
     participant O as OBS
     Note over R,O: A LIVE uA (stint 1) · B off, parked on uC
     D->>R: /next
-    Note over R: continuation (same uA) — label to stint 2, no cut, stop path not reached
+    Note over R: continuation (same uA): label to stint 2, no cut, stop path not reached
     D->>R: ARM B (pre-roll uC)
     D->>R: /next
-    R->>O: CUT to Feed B — uC (stint 3)
+    R->>O: CUT to Feed B: uC (stint 3)
     R->>R: stop freed A, park on uD
     D->>R: ARM A (pre-roll uD)
     D->>R: /next
-    R->>O: CUT to Feed A — uD (stint 4)
+    R->>O: CUT to Feed A: uD (stint 4)
     R->>R: stop freed B, go idle
 ```
 
@@ -256,12 +256,12 @@ sequenceDiagram
 |---|---|---|---|---|---|---|
 | 0 | Start (both disarmed) | — | idx0 off | idx2 off (`uC`) | Stint 1 · A | — |
 | 1 | **ARM A** | Feed A pulls `uA` | idx0 **LIVE** | idx2 off | Stint 1 · A | — |
-| 2 | `/next` | **continuation** — label only; no predecessor to stop | idx0 **LIVE** | idx2 off | **Stint 2 · A** | no |
+| 2 | `/next` | **continuation**: label only; no predecessor to stop | idx0 **LIVE** | idx2 off | **Stint 2 · A** | no |
 | 3 | **ARM B**, then `/next` | real handover; freed A stopped, advances to `uD` | idx0→**3** STOP | idx2 **LIVE** | Stint 3 · B | yes |
 | 4 | **ARM A**, then `/next` | real handover; freed B stopped, goes idle | idx3 **LIVE** | idx2→**4** idle | Stint 4 · A | yes |
 
 > **Trap to avoid.** During a continuation, do **not** try to activate the next stint
-> directly on the *other* feed (e.g. `/set/A/<n>`, or arming Feed A onto the on-air URL) —
+> directly on the *other* feed (e.g. `/set/A/<n>`, or arming Feed A onto the on-air URL),
 > that would put **both** feeds on the same stream and trip the per-IP rate limit at once.
 > The relay refuses such a duplicate pull, but the intended path is simply `/next`.
 
@@ -336,7 +336,7 @@ armed. A second program on the same card makes one of the two fail at once, so c
 everything else that could open it: a capture source for the same device in any OBS
 collection, Streamlabs, and the card vendor's capture utility. When the relay cannot
 open the card, `ffmpeg` exits immediately and the feed shows *capture device busy or
-missing — close any other program using it*, with the full ffmpeg line in the feed log.
+missing: close any other program using it*, with the full ffmpeg line in the feed log.
 After five failed attempts the feed pauses until `/next` or `/reload`.
 
 A failure in the middle of a local stint takes no special path: the same stall watchdog
@@ -402,11 +402,11 @@ The relay also serves the lower-third HUD, so it must be running for the HUD to 
 It reads the **Overlay** tab (live values) and the **Configuration** tab (team →
 manufacturer via a `Brand Name` column) and exposes:
 
-- `GET /hud` — the overlay page; point one OBS Browser Source at
+- `GET /hud`: the overlay page; point one OBS Browser Source at
   `http://127.0.0.1:8088/hud` (1920×1080, transparent).
-- `GET /hud/data` — the live values as JSON; the page polls it every ~2.5 s, so editing
+- `GET /hud/data`: the live values as JSON; the page polls it every ~2.5 s, so editing
   the sheet updates the overlay with **no manual reload**.
-- `GET /intermission` — a read-only broadcast-chat panel for the **Intermission** OBS
+- `GET /intermission`: a read-only broadcast-chat panel for the **Intermission** OBS
   scene: always-visible, auto-scrolling, mirrors the same public YouTube/Twitch broadcast
   chat as the crew console's broadcast-chat card. Point the Intermission scene's chat
   Browser Source at `http://127.0.0.1:8088/intermission`. The relay must be running for
@@ -428,7 +428,7 @@ A third relay feed on port **53003** (capped at 720p), independent of the A/B pi
 serves an ad-hoc driver POV as a small picture-in-picture (bottom-right) over the active
 feed in the **Stint** scene. The driver's live **watch URL** comes from the Google Sheet
 tab **`POV`** (row 2; columns `url` and `name`, where `name` is an optional on-screen
-label ≤20 chars — empty `url` = POV off), set there directly or from the panel's POV row.
+label ≤20 chars: empty `url` = POV off), set there directly or from the panel's POV row.
 
 The relay resolves and serves it on **POV Reload** (`/pov/reload`); `/status` reports the
 `pov` block (`state: connecting` while resolving or waiting for the driver, `serving`
@@ -437,10 +437,10 @@ once ready). **POV Toggle** (`/pov/toggle`) is a **relay action**: it flips the 
 box (frame + name) follows it. The PiP lives only in the Stint scene, so switching to
 Splitscreen/Interview/Standby auto-hides and auto-silences it; audio is muted by default.
 
-**Lead time:** the PiP is not instant — plan roughly **5 minutes** from "driver starts
+**Lead time:** the PiP is not instant: plan roughly **5 minutes** from "driver starts
 streaming" to "PiP on air" (resolve ~10–30 s, plus the 15 s retry loop while the driver
-isn't live yet, plus OBS connecting on first show). The operator walkthrough — including
-the order of the button presses — is in the
+isn't live yet, plus OBS connecting on first show). The operator walkthrough: including
+the order of the button presses: is in the
 [Director guide](Director#showing-a-driver-pov-plan-ahead).
 
 ---
@@ -448,7 +448,7 @@ the order of the button presses — is in the
 ## Security note
 
 The relay's control server (`:8088`) is **unauthenticated**. By default it binds to
-`127.0.0.1` (local only). For remote directors use `--bind <tailscale-ip>` — **prefer the
+`127.0.0.1` (local only). For remote directors use `--bind <tailscale-ip>`: **prefer the
 Tailscale IP over `0.0.0.0`**, because the endpoints have no auth and `/status` reveals
 stream URLs. `--no-panel` disables the served director panel.
 

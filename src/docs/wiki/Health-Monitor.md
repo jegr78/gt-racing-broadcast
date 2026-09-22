@@ -1,25 +1,25 @@
 # Health Monitor
 
-![Health Monitor — aggregate health badge, status-band timelines, numeric charts and incident list](images/health-monitor.png)
+![Health Monitor: aggregate health badge, status-band timelines, numeric charts and incident list](images/health-monitor.png)
 
 The **Health Monitor** is a read-only dashboard served by the relay that lets any
-authenticated crew member see how the relay has been performing — live and over time.
+authenticated crew member see how the relay has been performing: live and over time.
 It is a passive observer: it never changes what is on air or pings Discord.
 
 ## How to open it
 
-**From the `/console` launcher** — the recommended path. Any crew member who has
+**From the `/console` launcher**, the recommended path. Any crew member who has
 signed in to the [Console](Console) launcher sees a **Health Monitor** card; clicking
 it opens `/console/health-monitor` over the Funnel (public HTTPS) or the tailnet,
-depending on how you reached the Console. No extra password or role is required — the
+depending on how you reached the Console. No extra password or role is required, the
 same token that opens your cockpit or the director panel also opens the Health Monitor.
 
-**Direct tailnet access** — on the tailnet, `http://<tailscale-ip>:8088/health-monitor`
+**Direct tailnet access**, on the tailnet, `http://<tailscale-ip>:8088/health-monitor`
 also works. The page is not exposed publicly on its own; only `/console` (including
 `/console/health-monitor`) is Funnel-mounted.
 
-> **Access level:** any authenticated `/console` subject — commentators, directors,
-> Race Control, producers — can open it. It is read-only and triggers no broadcast
+> **Access level:** any authenticated `/console` subject: commentators, directors,
+> Race Control, producers: can open it. It is read-only and triggers no broadcast
 > actions.
 
 ## What the dashboard shows
@@ -45,7 +45,7 @@ visible to the whole crew through the aggregate badge.
 | Band | What it tracks |
 |---|---|
 | **Health** | Aggregate relay health (the badge above, over time) |
-| **Stream active** | Whether OBS is actively streaming to the broadcast platform. Red (and alerting) only once OBS has streamed at least once this session and then stops — so a live broadcast dropping off air pages, but starting the relay before you go live does not. |
+| **Stream active** | Whether OBS is actively streaming to the broadcast platform. Red (and alerting) only once OBS has streamed at least once this session and then stops, so a live broadcast dropping off air pages, but starting the relay before you go live does not. |
 | **Reconnecting** | Whether the OBS output is in a reconnect loop. Yellow when reconnecting. |
 | **Funnel** | Whether Tailscale Funnel is up (required for `/console` to be reachable publicly). Red when expected but down. |
 | **Sheet push** | Whether the relay's last write to the Google Sheet webhook succeeded. Yellow on repeated failure. |
@@ -60,7 +60,7 @@ visible to the whole crew through the aggregate badge.
 
 #### Connectivity
 
-These are **observational** — a problem here turns yellow and is noted, but it does not
+These are **observational**, a problem here turns yellow and is noted, but it does not
 necessarily drive the aggregate to red on its own.
 
 | Band | What it tracks |
@@ -74,10 +74,10 @@ necessarily drive the aggregate to red on its own.
 > **Critical vs. observational:** Critical bands (`stream_active`, `funnel_ok`,
 > `sheet_push_ok`, `stream_reconnecting`) contribute to the aggregate health level when
 > they fault. Connectivity bands (`tailscale_up`, `companion_ok`, `obs_reachable`) are
-> informational — they record what happened without necessarily escalating the aggregate.
+> informational: they record what happened without necessarily escalating the aggregate.
 >
 > **Off-air alarm latches on the first stream:** the off-air CRITICAL only fires after
-> OBS has gone live at least once this relay session and *then* stops streaming — so a
+> OBS has gone live at least once this relay session and *then* stops streaming, so a
 > live broadcast that drops off air pages the crew, while simply starting the relay
 > before the show never sends a confusing pre-show ping. (The **Stream active** band
 > itself still shows the honest current state; it is the aggregate health + Discord
@@ -117,7 +117,7 @@ Line charts plot scalar metrics over time, grouped by subsystem:
 
 These metrics are sampled every ~30 s in the relay heartbeat alongside the
 [OBS Resources](#obs-resources) series. History recorded before this feature was
-added will show no data points for this group — that is expected.
+added will show no data points for this group, that is expected.
 
 #### Output backlog
 
@@ -130,7 +130,7 @@ The relay holds OBS about 3 s behind the live edge on purpose (the fan-out reser
 also sit lower. A line that climbs means OBS accepts the feed slower than real time,
 usually because the producer machine cannot render the program in real time. More
 than 5 s above the reserve turns the health badge yellow
-(`Feed A output 12 s behind live — …`); this yellow never posts to Discord. The director
+(`Feed A output 12 s behind live: …`); this yellow never posts to Discord. The director
 can drop the delay with **RESET A → LIVE**, at the cost of a short black dropout (see
 [Dropping a backlog](Director#dropping-a-backlog)).
 
@@ -143,7 +143,7 @@ can drop the delay with **RESET A → LIVE**, at the cost of a short black dropo
 
 > **Synthetic / no-OBS mode:** when OBS is not reachable (obs-websocket unavailable),
 > the OBS Output and OBS Resources series are empty. The charts render but show no data
-> points — that is correct and expected before an event when OBS is not yet open.
+> points, that is correct and expected before an event when OBS is not yet open.
 
 ### Incident timeline
 
@@ -154,8 +154,8 @@ reason list at that moment.
 
 ### Events
 
-Below the incidents, an **Events** list records discrete moments — not health-level
-changes, but notable actions — with the time, an event badge, a short detail, and the
+Below the incidents, an **Events** list records discrete moments, not health-level
+changes, but notable actions: with the time, an event badge, a short detail, and the
 **producer** (which host/operator triggered it). Each event is also drawn as a thin
 dashed vertical line across the numeric charts, so you can line a takeover or a stream
 start/stop up against the metrics.
@@ -194,7 +194,7 @@ historical view.
 The relay samples its own health every ~30 seconds into a per-profile SQLite database
 at `runtime/<profile>/health-history.db`. Samples are retained for **30 days** by
 default; set `RACECAST_HEALTH_RETENTION_DAYS` in your `.env` to a different number.
-The history belongs to the active profile — switching profiles shows the new profile's
+The history belongs to the active profile: switching profiles shows the new profile's
 own history.
 
 ## Export, import, and producer handover
@@ -208,19 +208,19 @@ racecast health pull <ip> [--port N] [--from TS]  # pull another producer's hist
 ```
 
 During `racecast event takeover`, health history is pulled automatically from the
-outgoing producer — the same pattern as `chat pull` and `console pull-versions`. The
+outgoing producer: the same pattern as `chat pull` and `console pull-versions`. The
 `--funnel` takeover path also carries health over the step-up-authenticated
 `/console/takeover/health` endpoint.
 
 ## Setup
 
-No setup is required. The Health Monitor is active whenever the relay is running —
+No setup is required. The Health Monitor is active whenever the relay is running,
 there is no enable/disable command. The SQLite database is created automatically on
 the first relay start.
 
 ## Post-Event Report
 
-The relay's health history also powers a **post-event report** — a static, self-contained
+The relay's health history also powers a **post-event report**, a static, self-contained
 HTML file summarising the last broadcast session: commentators per stint, Feed A / Feed B
 activity, incidents and quality metrics. It can be generated and sent to Discord from the
 [Control Center Report view](Control-Center#post-event-report) or via the CLI:
@@ -254,17 +254,17 @@ broadcast would hide a bad one (1.8% shown for a broadcast that skipped 23.5%).
 **Name resolution:** commentator names in the report come from the running relay's schedule.
 If the relay is not running at generation time, the report falls back to stint indices.
 
-**Discord:** `report send` requires `DISCORD_WEBHOOK_URL` in the active league's `profile.env`
-— the same key that health alerts use. See [Configuration](Configuration) or [Profiles](Profiles)
+**Discord:** `report send` requires `DISCORD_WEBHOOK_URL` in the active league's `profile.env`,
+the same key that health alerts use. See [Configuration](Configuration) or [Profiles](Profiles)
 for how to add it.
 
 The dashboard depends on no external services: it reads only from the local DB and the
 relay's live `/health-monitor/data` endpoint. The charting library
 ([uPlot](https://github.com/leeoniya/uPlot), MIT licence) is bundled with the relay
-(`src/assets/vendor/uplot/`) — no internet connection is needed to render the charts.
+(`src/assets/vendor/uplot/`): no internet connection is needed to render the charts.
 
 ---
 
 > This page is generated from `src/docs/wiki/` in the
-> [main repository](https://github.com/jegr78/gt-racing-broadcast) — don't edit it
+> [main repository](https://github.com/jegr78/gt-racing-broadcast): don't edit it
 > here by hand. See [Build & maintenance](Build-and-maintenance).
