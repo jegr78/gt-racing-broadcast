@@ -16,7 +16,7 @@
 <section data-markdown><script type="text/template">
 <span class="role-tag">Overlay Package Designer · Onboarding</span>
 # Overlay Package Designer
-Restyle the on-screen HUD — including the race timer and POV frame — per league.
+Restyle the on-screen HUD. Including the race timer and POV frame. Per league.
 Visually, no CSS required.
 
 Note: Welcome to the Overlay Package Designer onboarding. Your role is to restyle the on-screen HUD for each league, including the race timer and the POV frame. The best part is that you can do all of this visually, with no CSS required.
@@ -26,13 +26,13 @@ Note: Welcome to the Overlay Package Designer onboarding. Your role is to restyl
 ## One shared page, per-league look
 The relay serves the same `hud.html` for every league.
 A profile ships a small CSS override in `profiles/<name>/overlay/` that
-**wins the cascade** — no forking the page, no separate copy to maintain.
+**wins the cascade**: no forking the page, no separate copy to maintain.
 
 Go deeper:
 [HUD Overlays](https://github.com/jegr78/gt-racing-broadcast/wiki/HUD-Overlays) ·
 [League profiles](https://github.com/jegr78/gt-racing-broadcast/wiki/Profiles)
 
-Note: The relay serves the same H U D page for every league. Each profile ships a small CSS override that wins the cascade, so it restyles the shared page without forking it. That means there is no separate copy to maintain — one page, but a per-league look.
+Note: The relay serves the same H U D page for every league. Each profile ships a small CSS override that wins the cascade, so it restyles the shared page without forking it. That means there is no separate copy to maintain, one page, but a per-league look.
 </script></section>
 
 <section data-markdown><script type="text/template">
@@ -45,26 +45,26 @@ property panel (fields **pre-fill** with the real template values).
 
 [HUD Overlays](https://github.com/jegr78/gt-racing-broadcast/wiki/HUD-Overlays) · [Control Center](https://github.com/jegr78/gt-racing-broadcast/wiki/Control-Center)
 
-Note: This is the visual Overlay Builder. Open the Control Center, go to Profile, then Overlay Builder. From there you click a slot, drag it to move, and drag the handles to resize it. In the property panel you set position, font, color and background — and the fields pre-fill with the real template values, so you are always editing from a known starting point.
+Note: This is the visual Overlay Builder. Open the Control Center, go to Profile, then Overlay Builder. From there you click a slot, drag it to move, and drag the handles to resize it. In the property panel you set position, font, color and background, and the fields pre-fill with the real template values, so you are always editing from a known starting point.
 </script></section>
 
 <section data-markdown><script type="text/template">
 ### Live preview with a running relay
 **Save** writes the generated CSS to `profiles/<name>/overlay/`.
 **Apply in OBS** reloads the browser source (same as `racecast obs refresh`).
-**Preview ↗** opens the live `/hud/preview` — the real base page with live Sheet
+**Preview ↗** opens the live `/hud/preview`. The real base page with live Sheet
 data rendered over your `Overlay.png` frame.
 
 ![Live HUD preview](assets/img/overlay-live-preview.jpg)
 
 [HUD Overlays](https://github.com/jegr78/gt-racing-broadcast/wiki/HUD-Overlays)
 
-Note: With a running relay you get a live preview. Save writes the generated CSS into your profile's overlay folder. Apply in O B S reloads the browser source, the same as running the obs refresh command. And Preview opens the live H U D preview — the real base page, with live Sheet data rendered over your own Overlay image frame.
+Note: With a running relay you get a live preview. Save writes the generated CSS into your profile's overlay folder. Apply in O B S reloads the browser source, the same as running the obs refresh command. And Preview opens the live H U D preview: the real base page, with live Sheet data rendered over your own Overlay image frame.
 </script></section>
 
 <section data-markdown><script type="text/template">
 ## Fonts
-A curated set of broadcast-friendly Google Fonts **ships with every install** —
+A curated set of broadcast-friendly Google Fonts **ships with every install**,
 available in the Overlay Builder's font pickers with no download step.
 
 Need a font that is not in the set? Type its name in
@@ -76,7 +76,7 @@ When a league's design uses a font it is copied into `overlay/fonts/` on save, s
 
 [HUD Overlays](https://github.com/jegr78/gt-racing-broadcast/wiki/HUD-Overlays)
 
-Note: A curated set of broadcast-friendly Google Fonts ships with every install, so they appear in the Overlay Builder's font pickers with no download step. If you need a font that is not in the set, type its name in General Settings, under Overlay fonts — it is self-hosted once into the machine-wide library and shared across all leagues. And when a league's design uses a font, it is copied into the profile's fonts folder on save, so a profile export stays self-contained and works offline.
+Note: A curated set of broadcast-friendly Google Fonts ships with every install, so they appear in the Overlay Builder's font pickers with no download step. If you need a font that is not in the set, type its name in General Settings, under Overlay fonts. It is self-hosted once into the machine-wide library and shared across all leagues. And when a league's design uses a font, it is copied into the profile's fonts folder on save, so a profile export stays self-contained and works offline.
 </script></section>
 
 <section data-markdown><script type="text/template">
@@ -84,7 +84,7 @@ Note: A curated set of broadcast-friendly Google Fonts ships with every install,
 The relay only loads `--overlay-dir` when that directory **existed at startup**.
 So the **very first** override on a profile whose `overlay/` did not yet exist
 needs **one relay restart** (Control Center **Relay → Restart**) to activate.
-After that, every later edit applies live via **Apply in OBS** — no restart.
+After that, every later edit applies live via **Apply in OBS**. No restart.
 
 The **advanced CSS** box is a raw escape hatch: whatever you type there is appended
 verbatim after the generated rules. Pairs naturally with a per-league OBS collection
@@ -93,12 +93,12 @@ verbatim after the generated rules. Pairs naturally with a per-league OBS collec
 [HUD Overlays](https://github.com/jegr78/gt-racing-broadcast/wiki/HUD-Overlays) ·
 [League profiles](https://github.com/jegr78/gt-racing-broadcast/wiki/Profiles)
 
-Note: One important caveat about the first override. The relay only loads the overlay directory if it existed at startup, so the very first override on a profile that had no overlay folder yet needs one relay restart to activate — use Relay, then Restart, in the Control Center. After that, every later edit applies live through Apply in O B S, with no restart. There is also an advanced CSS box, a raw escape hatch where whatever you type is appended verbatim after the generated rules — and it pairs naturally with a per-league O B S collection.
+Note: One important caveat about the first override. The relay only loads the overlay directory if it existed at startup, so the very first override on a profile that had no overlay folder yet needs one relay restart to activate. Use Relay, then Restart, in the Control Center. After that, every later edit applies live through Apply in O B S, with no restart. There is also an advanced CSS box, a raw escape hatch where whatever you type is appended verbatim after the generated rules, and it pairs naturally with a per-league O B S collection.
 </script></section>
 
 <section data-markdown><script type="text/template">
 ## Recap / go deeper
-1. Drag the slots, resize, set colors — **Save**.
+1. Drag the slots, resize, set colors. **Save**.
 2. **Apply in OBS** to reload the browser source.
 3. **Preview ↗** to confirm it looks right against your `Overlay.png`.
 4. Ship it: Control Center **Profile → Export** keeps fonts + CSS self-contained.
@@ -108,7 +108,7 @@ Go deeper:
 [Control Center](https://github.com/jegr78/gt-racing-broadcast/wiki/Control-Center) ·
 [League profiles](https://github.com/jegr78/gt-racing-broadcast/wiki/Profiles)
 
-Note: To recap the workflow. Drag the slots, resize them, set your colors, and Save. Use Apply in O B S to reload the browser source. Use Preview to confirm it looks right against your Overlay image. And when you are happy, ship it — Control Center, Profile, Export keeps the fonts and CSS self-contained.
+Note: To recap the workflow. Drag the slots, resize them, set your colors, and Save. Use Apply in O B S to reload the browser source. Use Preview to confirm it looks right against your Overlay image. And when you are happy, ship it. Control Center, Profile, Export keeps the fonts and CSS self-contained.
 </script></section>
 
 </div></div>

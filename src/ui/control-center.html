@@ -464,7 +464,7 @@
   <nav class="sidebar">
     <div class="brand">
       <div><div class="brandname">Control Center</div>
-        <div class="brandsub" id="active-profile-badge" title="Active league profile — click to manage" onclick="showView('profile')"><img id="active-profile-logo" class="pflogo" alt="" hidden onerror="this.hidden=true"><span id="active-profile-name">—</span></div>
+        <div class="brandsub" id="active-profile-badge" title="Active league profile. Click to manage" onclick="showView('profile')"><img id="active-profile-logo" class="pflogo" alt="" hidden onerror="this.hidden=true"><span id="active-profile-name">—</span></div>
         <span class="ver" id="ver"></span>
         <span class="ver-note" id="ver-note" onclick="checkUpdate(true)" title="Check for updates"></span></div></div>
     <div class="nav">
@@ -522,11 +522,11 @@
               <svg viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Restart</button>
             <a class="linkbtn" id="rel-panel-open" target="_blank" rel="noopener" hidden>Open panel ↗</a></div>
           <div class="row"><span class="name">Stale relay</span>
-            <span class="dim grow">control port 8088 — force-free a stale/orphaned relay the Stop button can't reach (unknown PID); a healthy relay is left untouched</span>
+            <span class="dim grow">control port 8088: force-free a stale/orphaned relay the Stop button can't reach (unknown PID); a healthy relay is left untouched</span>
             <button class="danger" onclick="op('kill-relay', true)">
               <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg>Kill stale relay</button></div>
           <div class="row"><span class="name">Feed ports</span>
-            <span class="dim grow">53001–53003 — clear a port a stale/orphaned process is holding so a feed can bind</span>
+            <span class="dim grow">53001–53003: clear a port a stale/orphaned process is holding so a feed can bind</span>
             <button class="danger" onclick="op('free-ports', true)">
               <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg>Free feed ports</button></div>
           <div class="row"><span class="name">Crew chat</span>
@@ -538,7 +538,7 @@
             <button onclick="op('health-export')">Export history</button>
             <button onclick="importHealth()">Import history…</button></div>
         </section>
-        <p class="envhint">The relay reads its <b>schedule and HUD data from the Google Sheet</b> and is configured through <b>Settings</b>: <span class="mono">RACECAST_SHEET_ID</span> (the sheet) and <span class="mono">RACECAST_SHEET_PUSH_URL</span> (write-back for the timer + panel). There are no other local relay settings — tab names, ports and the bind mode use safe defaults.</p>
+        <p class="envhint">The relay reads its <b>schedule and HUD data from the Google Sheet</b> and is configured through <b>Settings</b>: <span class="mono">RACECAST_SHEET_ID</span> (the sheet) and <span class="mono">RACECAST_SHEET_PUSH_URL</span> (write-back for the timer + panel). There are no other local relay settings. Tab names, ports and the bind mode use safe defaults.</p>
       </div>
 
       <!-- Static Streams -->
@@ -551,7 +551,7 @@
             <svg viewBox="0 0 24 24"><polygon points="6 3 20 12 6 21 6 3"/></svg>Start all</button>
           <button class="danger" onclick="op('streams-stop', true)">
             <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="1"/></svg>Stop all</button></div>
-        <div class="note-warn"><b>Fallback only.</b> The <b>relay</b> is the normal way to serve the commentator feeds (unlisted streams, automatic per-stint handover). Use Static Streams <b>only when the relay isn't working</b> — and only with <b>public</b> YouTube or Twitch channels.</div>
+        <div class="note-warn"><b>Fallback only.</b> The <b>relay</b> is the normal way to serve the commentator feeds (unlisted streams, automatic per-stint handover). Use Static Streams <b>only when the relay isn't working</b>, and only with <b>public</b> YouTube or Twitch channels.</div>
         <div class="enverr" id="streams-err" hidden></div>
         <div class="envpath" id="streams-path"></div>
         <section>
@@ -564,7 +564,7 @@
           <button onclick="loadStreams(true)">
             <svg viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Reload</button></div>
         </section>
-        <p class="envhint">One streamlink server per row, served on its <b>Port</b> (must match the OBS media source). Saved to <span class="mono">runtime/static/streams.json</span> — <b>Save, then Start all</b> to apply. A channel can be a YouTube channel ID (<span class="mono">UCxxxxxxxxxxxxxxxxxxxxxx</span>) or a full watch URL (<span class="mono">youtube.com/watch?v=…</span> or <span class="mono">twitch.tv/&lt;channel&gt;</span>).</p>
+        <p class="envhint">One streamlink server per row, served on its <b>Port</b> (must match the OBS media source). Saved to <span class="mono">runtime/static/streams.json</span>. <b>Save, then Start all</b> to apply. A channel can be a YouTube channel ID (<span class="mono">UCxxxxxxxxxxxxxxxxxxxxxx</span>) or a full watch URL (<span class="mono">youtube.com/watch?v=…</span> or <span class="mono">twitch.tv/&lt;channel&gt;</span>).</p>
       </div>
 
       <!-- Home -->
@@ -587,8 +587,8 @@
           <input id="takeover-funnel-host" type="text" hidden
                  placeholder="producer MagicDNS host"
                  aria-label="Producer's MagicDNS host to take over from over the public Funnel"
-                 title="A's MagicDNS host (e.g. producer-a.tailnet-xyz.ts.net) — used when you are not on the tailnet">
-          <label class="fnltog" title="Take over over the public Funnel (you are not on A's tailnet). Steps up with this league's CONSOLE_SECRET from your active profile — read locally, never sent from the browser.">
+                 title="A's MagicDNS host (e.g. producer-a.tailnet-xyz.ts.net). Used when you are not on the tailnet">
+          <label class="fnltog" title="Take over over the public Funnel (you are not on A's tailnet). Steps up with this league's CONSOLE_SECRET from your active profile. Read locally, never sent from the browser.">
             <input type="checkbox" id="takeover-funnel" onchange="toggleFunnelTakeover()">Funnel</label>
           <button id="takeover-btn" onclick="opTakeover()"
                   title="Take over the broadcast from the selected producer at their current stint (the stint field overrides if set)">Take over</button></div>
@@ -668,7 +668,7 @@
           <div class="row"><span class="name">Disk free</span>
             <span class="badge" id="sys-disk"><span class="dot"></span><span>…</span></span></div>
         </section>
-        <p class="evnote">Start brings up Tailscale, Discord, OBS, relay and Companion (optional stint = mid-event takeover). Stop only stops the racecast services — OBS, Discord and Tailscale keep running; quit them manually if needed. Use <b>Copy link</b> to share the Companion tablet and Director panel URLs with your directors (they reach them over Tailscale).</p>
+        <p class="evnote">Start brings up Tailscale, Discord, OBS, relay and Companion (optional stint = mid-event takeover). Stop only stops the racecast services. OBS, Discord and Tailscale keep running; quit them manually if needed. Use <b>Copy link</b> to share the Companion tablet and Director panel URLs with your directors (they reach them over Tailscale).</p>
       </div>
 
       <!-- Profile (active league: config + assets) -->
@@ -690,7 +690,7 @@
             <span class="dim grow" id="profile-hint"></span></div>
           <div class="enverr" id="profile-switch-note" hidden></div>
           <p class="envhint">Export a profile to share the whole league (settings, overlay, and
-            optionally graphics/media) with another producer — they import the zip here.</p>
+            optionally graphics/media) with another producer. They import the zip here.</p>
           <div id="profile-list"></div>
         </section>
 
@@ -731,7 +731,7 @@
           <div id="penvrows"></div>
           <div class="addrow"><button onclick="addProfileEnvRow()">
             <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Add entry</button></div>
-          <p class="envhint">League config for the <b>active profile</b> — Sheet ID, push URL, intro/outro, logo, and the OBS scene-collection name (<b>OBS_COLLECTION</b>). Stored in <b>profiles/&lt;active&gt;/profile.env</b>. Values are masked; click the eye to reveal. <b>Open Sheet ↗</b> opens this league's Google Sheet (built from <b>SHEET_ID</b>) in a new tab. Changes apply when you next (re)start the relay.</p>
+          <p class="envhint">League config for the <b>active profile</b>: Sheet ID, push URL, intro/outro, logo, and the OBS scene-collection name (<b>OBS_COLLECTION</b>). Stored in <b>profiles/&lt;active&gt;/profile.env</b>. Values are masked; click the eye to reveal. <b>Open Sheet ↗</b> opens this league's Google Sheet (built from <b>SHEET_ID</b>) in a new tab. Changes apply when you next (re)start the relay.</p>
         </section>
 
         <section>
@@ -761,7 +761,7 @@
               <svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>Save</button>
             <button id="overlay-apply" onclick="applyOverlay()" title="Reload the relay-served HUD/timer browser sources in OBS (needs the relay up + obs-websocket)">
               <svg viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Apply in OBS</button>
-            <button id="overlay-preview" onclick="openHudPreview()" title="Open the HUD design preview in a new tab — live sheet data + your override CSS over a Gran Turismo backdrop (needs the relay running)">
+            <button id="overlay-preview" onclick="openHudPreview()" title="Open the HUD design preview in a new tab. Live sheet data + your override CSS over a Gran Turismo backdrop (needs the relay running)">
               <svg viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>Preview ↗</button></div>
           <div class="ovgridbar">
             <label><input type="checkbox" id="ov-grid-show" onchange="ovGridToggle(this.checked)"> Grid</label>
@@ -791,7 +791,7 @@
           </div>
           <details class="ovprev" id="ov-preview">
             <summary>Preview data</summary>
-            <p class="envhint" style="margin:.3em 0">Session-only — try how your own content looks. Not saved to the profile; verify live in OBS with Preview.</p>
+            <p class="envhint" style="margin:.3em 0">Session-only. Try how your own content looks. Not saved to the profile; verify live in OBS with Preview.</p>
             <div id="ov-preview-states"></div>
             <div id="ov-preview-fields"></div>
             <button type="button" class="ov-gpreset" onclick="ovPreviewReset()">Reset preview data</button>
@@ -809,13 +809,13 @@
             <div class="envpath" id="overlay-path"></div>
             <textarea id="overlayCss" class="css-editor" rows="8" spellcheck="false"
               aria-label="Advanced overlay CSS"
-              placeholder="Raw CSS appended verbatim AFTER the generated rules — the pro escape hatch. Existing hand-written CSS is imported here on first use."></textarea>
+              placeholder="Raw CSS appended verbatim AFTER the generated rules. The pro escape hatch. Existing hand-written CSS is imported here on first use."></textarea>
           </details>
           <p class="envhint ovhint">The builder writes the generated <b>profiles/&lt;active&gt;/overlay/&lt;page&gt;.css</b>
             plus a <b>layout-&lt;page&gt;.json</b> it owns. <b>Save</b> writes both; <b>Apply in OBS</b> reloads the
             HUD/Timer browser sources (needs the relay up + obs-websocket). First override on a profile that had no
             overlay yet? Restart the relay once (<b>racecast relay restart</b>) to activate it; later edits apply
-            live via Apply in OBS. The canvas shows your editable <b>Preview data</b> over your <b>Overlay.png</b> frame — verify live in OBS with Preview.</p>
+            live via Apply in OBS. The canvas shows your editable <b>Preview data</b> over your <b>Overlay.png</b> frame. Verify live in OBS with Preview.</p>
         </section>
 
         <section>
@@ -939,12 +939,12 @@
           </div>
           <div id="st-history" class="dim"></div>
           <p class="envhint">Runs the <b>Ookla speedtest CLI</b> (install via <b>install-tools</b>).
-            It measures the line <b>idle</b> — a capability check; the true under-load picture is OBS's
+            It measures the line <b>idle</b>: a capability check; the true under-load picture is OBS's
             live stats while streaming. Ookla is closed-source and each run sends its result to Ookla
             (like a speedtest.net run in a browser).</p>
         </section>
         <div id="pf-body">
-          <section><div class="row"><span class="dim">Not run yet — press Run.</span></div></section>
+          <section><div class="row"><span class="dim">Not run yet. Press Run.</span></div></section>
         </div>
       </div>
 
@@ -957,7 +957,7 @@
             <svg viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Reload</button>
           <button id="env-save" onclick="saveSettings()">
             <svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>Save</button></div>
-        <div class="viewhead"><h3>Cookies</h3><span class="sub">YouTube login (required) + Twitch login (optional) — shared across all leagues</span></div>
+        <div class="viewhead"><h3>Cookies</h3><span class="sub">YouTube login (required) + Twitch login (optional). Shared across all leagues</span></div>
         <section>
           <div class="row"><span class="name">Cookies</span>
             <span class="badge" id="b-cookies"><span class="dot"></span><span>…</span></span>
@@ -983,7 +983,7 @@
             <button onclick="op('cookies-twitch', false, {browser: $('browser-tw').value})">
               <svg viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Refresh Twitch login</button></div>
         </section>
-        <div class="viewhead"><h3>Overlay fonts</h3><span class="sub">machine-wide font library for the Overlay Builder — shared across all leagues</span>
+        <div class="viewhead"><h3>Overlay fonts</h3><span class="sub">machine-wide font library for the Overlay Builder. Shared across all leagues</span>
           <span class="spacer"></span>
           <button onclick="window.open('https://fonts.google.com/', '_blank', 'noopener')" title="Browse the Google Fonts catalog in a new tab, then add a family by name below">
             <svg viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>Browse Google Fonts ↗</button></div>
@@ -1000,7 +1000,7 @@
               <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Add</button></div>
           <div id="font-lib-list"></div>
           <p class="envhint">A curated set of free Google Fonts ships with every install and is offered in the
-            Overlay Builder's font pickers. Add any other family by name above — it is downloaded once into
+            Overlay Builder's font pickers. Add any other family by name above. It is downloaded once into
             <b>runtime/fonts/</b>. When a league's design uses a font, it is copied into that league's
             <b>overlay/fonts/</b> on save, so the overlay works offline and <b>profile export</b> stays self-contained.</p>
         </section>
@@ -1045,19 +1045,19 @@
           <div class="addrow"><button onclick="addSettingsRow()">
             <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Add entry</button></div>
         </section>
-        <p class="envhint">Machine-level <b>.env</b> on this computer (ports, OBS-WebSocket password, Companion path) — shared across all leagues. League config (Sheet, OBS collection, …) lives under <b>Profile</b>. Values are masked; comments are preserved. Changes apply when you next (re)start the affected service.</p>
+        <p class="envhint">Machine-level <b>.env</b> on this computer (ports, OBS-WebSocket password, Companion path). Shared across all leagues. League config (Sheet, OBS collection, …) lives under <b>Profile</b>. Values are masked; comments are preserved. Changes apply when you next (re)start the affected service.</p>
       </div>
 
       <!-- Crew Console -->
       <div class="view" data-view="console" hidden>
         <div class="viewhead"><h2>Crew Console</h2>
-          <span class="sub">role-adaptive crew links — commentator, director &amp; producer</span>
+          <span class="sub">role-adaptive crew links: commentator, director &amp; producer</span>
           <span class="spacer"></span>
           <button onclick="loadConsole()">Reload</button></div>
         <div class="enverr" id="cp-err" hidden></div>
         <section>
           <p class="sub">Zero-config: the relay serves the role-adaptive <code>/console</code>
-            launcher automatically — a per-league secret is generated on first relay start.
+            launcher automatically. A per-league secret is generated on first relay start.
             Every request is token-gated (links below). It is exposed <b>publicly</b>
             only when you also turn the Funnel on.</p>
         </section>
@@ -1076,7 +1076,7 @@
           </div>
           <p class="sub">Exposes only <code>/console</code> publicly. Needs MagicDNS + HTTPS
             + the <code>funnel</code> nodeAttr in the tailnet policy (one-time admin step).
-            Auto-enable is <b>on by default</b> (opt-out) — the Funnel is the preferred
+            Auto-enable is <b>on by default</b> (opt-out). The Funnel is the preferred
             produce path; uncheck to keep the relay tailnet/loopback-only.</p>
         </section>
         <section>
@@ -1084,7 +1084,7 @@
           <p class="sub"><b>Funnel link</b> is the public HTTPS link (needs the Funnel ON
             above). <b>Internal link</b> reaches the relay over Tailscale (the producer's
             tailnet IP, or <code>127.0.0.1</code> when the tailnet is down) without the
-            Funnel — same rule as the producer panel link.</p>
+            Funnel. Same rule as the producer panel link.</p>
           <div id="cp-links"></div>
         </section>
       </div>
@@ -1116,10 +1116,10 @@
         <section>
           <h2>Crew onboarding — start here</h2>
           <div class="row"><span class="docname">Onboarding decks</span>
-            <span class="dim grow">Short visual walkthrough per role (director, commentator, producer, race control) plus the printable cheat sheet — one central hub.</span>
+            <span class="dim grow">Short visual walkthrough per role (director, commentator, producer, race control) plus the printable cheat sheet, one central hub.</span>
             <a class="linkbtn" id="decks-open" target="_blank" rel="noopener">Open online ↗</a></div>
           <div class="row" id="decks-local-row" hidden><span class="docname">Onboarding decks (offline)</span>
-            <span class="dim grow">The same decks + cheat sheet, bundled on this machine — open them without internet.</span>
+            <span class="dim grow">The same decks + cheat sheet, bundled on this machine. Open them without internet.</span>
             <a class="linkbtn" id="decks-local-open" target="_blank" rel="noopener">Open ↗</a></div>
         </section>
         <section>
@@ -1143,7 +1143,7 @@
           <h2>Preview / testing builds</h2>
           <label class="prevtoggle">
             <input type="checkbox" id="prevopt" onchange="togglePreviews()">
-            Show preview builds (pre-release CI binaries — for testing)
+            Show preview builds (pre-release CI binaries, for testing)
           </label>
           <p class="envhint" id="prevhint" hidden>
             Preview builds come from open PRs and branches. They are not version-ordered —

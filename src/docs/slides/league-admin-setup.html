@@ -16,7 +16,7 @@
 <section data-markdown><script type="text/template">
 <span class="role-tag">League Admin · Onboarding</span>
 # League Admin setup
-You own the Sheet, the crew roster and Discord login —
+You own the Sheet, the crew roster and Discord login,
 so producers just run the show.
 
 Note: Welcome to the league admin onboarding. As league admin, you own the Sheet, the crew roster, and the Discord login. You do the setup once so that your producers can simply run the show.
@@ -28,18 +28,18 @@ Every league lives in `profiles/<name>/profile.env`. One machine can host severa
 
 Key fields: `SHEET_ID`, `SHEET_PUSH_URL` (the Apps Script webhook), `CONSOLE_SECRET` (auto-generated).
 
-Hand a league to a new producer from the Control Center **Profile** view — **Export** (bundles `profile.env` + `CONSOLE_SECRET`), then **Import profile** on the target machine. *CLI: `racecast profile export` / `import`.*
+Hand a league to a new producer from the Control Center **Profile** view. **Export** (bundles `profile.env` + `CONSOLE_SECRET`), then **Import profile** on the target machine. *CLI: `racecast profile export` / `import`.*
 
 More: [Profiles](https://github.com/jegr78/gt-racing-broadcast/wiki/Profiles)
 
-Note: A league is a profile. Every league lives in its own profile dot env file, and one machine can host several leagues, with switching just one click away. The key fields are the sheet ID, the sheet push URL — which is the Apps Script webhook — and the console secret, which is auto-generated. To hand a league to a new producer, open the Profile view in the Control Center, press Export to bundle the profile and its console secret, and then press Import profile on the target machine.
+Note: A league is a profile. Every league lives in its own profile dot env file, and one machine can host several leagues, with switching just one click away. The key fields are the sheet ID, the sheet push URL. Which is the Apps Script webhook, and the console secret, which is auto-generated. To hand a league to a new producer, open the Profile view in the Control Center, press Export to bundle the profile and its console secret, and then press Import profile on the target machine.
 </script></section>
 
 <section data-markdown><script type="text/template">
 ## The Sheet drives everything
 The relay reads the shared Google Sheet for the stint schedule, HUD overlay, and race timer.
 
-**Required:** deploy the **Apps Script webhook** and set `SHEET_PUSH_URL` — it is the write-back path the race-timer sync and the Director Panel's HUD / Schedule / POV / crew controls depend on.
+**Required:** deploy the **Apps Script webhook** and set `SHEET_PUSH_URL`. It is the write-back path the race-timer sync and the Director Panel's HUD / Schedule / POV / crew controls depend on.
 
 More: [Sheet-Template](https://github.com/jegr78/gt-racing-broadcast/wiki/Sheet-Template) ·
 [Sheet-Webhook](https://github.com/jegr78/gt-racing-broadcast/wiki/Sheet-Webhook)
@@ -52,7 +52,7 @@ Note: The Sheet drives everything. The relay reads your shared Google Sheet for 
 
 ![Crew editor](assets/img/cc-crew-editor.png)
 
-`Name | Commentator | Director | Producer | Race Control | Discord` — each flag grants `/console` access. Edit by hand in the Sheet, or in the Control Center crew editor.
+`Name | Commentator | Director | Producer | Race Control | Discord`. Each flag grants `/console` access. Edit by hand in the Sheet, or in the Control Center crew editor.
 
 More: [League-Owner-Setup](https://github.com/jegr78/gt-racing-broadcast/wiki/League-Owner-Setup) · [Control-Center](https://github.com/jegr78/gt-racing-broadcast/wiki/Control-Center)
 
@@ -65,7 +65,7 @@ Note: Maintain the Crew tab. Its columns are Name, Commentator, Director, Produc
 
 ![Console login](assets/img/console-login.png)
 
-**Recommended (optional)** — with it crew sign in with Discord; without it signed `racecast links` are the only way in.  ↓ how to set it up
+**Recommended (optional)**, with it crew sign in with Discord; without it signed `racecast links` are the only way in.  ↓ how to set it up
 
 Note: Discord login for the slash console is recommended but optional. With it set up, your crew can sign in with Discord. Without it, the signed links from racecast links are the only way in. The next slide shows how to set it up.
 </script></section>
@@ -73,26 +73,26 @@ Note: Discord login for the slash console is recommended but optional. With it s
 ### Set up the OAuth app
 Create a Discord OAuth app (scope `identify`, **not** a bot), add `DISCORD_CLIENT_ID` / `DISCORD_CLIENT_SECRET` to `profile.env`, and register the redirect `https://<magicdns>/console/oauth/callback`.
 
-**One redirect line per producer host** — `<magicdns>` is each producer's Tailscale MagicDNS name; ask them, or have them run `racecast links` (it prints the exact URI).
+**One redirect line per producer host**: `<magicdns>` is each producer's Tailscale MagicDNS name; ask them, or have them run `racecast links` (it prints the exact URI).
 
 More: [League-Owner-Setup](https://github.com/jegr78/gt-racing-broadcast/wiki/League-Owner-Setup)
 
-Note: To set up the OAuth app, create a Discord OAuth app with the identify scope — not a bot — then add the Discord client ID and client secret to your profile dot env, and register the redirect ending in slash console slash oauth slash callback. You need one redirect line per producer host, where the magic D N S part is each producer's Tailscale MagicDNS name. Ask them for it, or have them run racecast links, which prints the exact URI.
+Note: To set up the OAuth app, create a Discord OAuth app with the identify scope, not a bot, then add the Discord client ID and client secret to your profile dot env, and register the redirect ending in slash console slash oauth slash callback. You need one redirect line per producer host, where the magic D N S part is each producer's Tailscale MagicDNS name. Ask them for it, or have them run racecast links, which prints the exact URI.
 </script></section>
 </section>
 
 <section data-markdown><script type="text/template">
 ## Share one URL
-In the Control Center **Crew Console** view, use **Copy Link** or **Post to Discord** to hand out the single generic `…/console` link — no terminal needed.
+In the Control Center **Crew Console** view, use **Copy Link** or **Post to Discord** to hand out the single generic `…/console` link. No terminal needed.
 
-Roles resolve live on every request — add or remove a person on the Crew tab and it takes effect immediately, no relay restart.
+Roles resolve live on every request. Add or remove a person on the Crew tab and it takes effect immediately, no relay restart.
 
-Create a **crew Discord channel** with a **webhook**, and put that webhook URL in `profile.env` as `DISCORD_WEBHOOK_URL` — the relay posts stream-link submissions and health alerts there.
+Create a **crew Discord channel** with a **webhook**, and put that webhook URL in `profile.env` as `DISCORD_WEBHOOK_URL`. The relay posts stream-link submissions and health alerts there.
 
 More: [Console](https://github.com/jegr78/gt-racing-broadcast/wiki/Console) ·
 [League-Owner-Setup](https://github.com/jegr78/gt-racing-broadcast/wiki/League-Owner-Setup)
 
-Note: Share one URL. In the Crew Console view of the Control Center, use Copy Link or Post to Discord to hand out the single generic slash console link — no terminal needed. Roles resolve live on every request, so adding or removing a person on the Crew tab takes effect immediately, with no relay restart. Create a crew Discord channel with a webhook, and put that webhook URL in your profile dot env as the Discord webhook URL — the relay posts stream-link submissions and health alerts there.
+Note: Share one URL. In the Crew Console view of the Control Center, use Copy Link or Post to Discord to hand out the single generic slash console link. No terminal needed. Roles resolve live on every request, so adding or removing a person on the Crew tab takes effect immediately, with no relay restart. Create a crew Discord channel with a webhook, and put that webhook URL in your profile dot env as the Discord webhook URL. The relay posts stream-link submissions and health alerts there.
 </script></section>
 
 <section data-markdown><script type="text/template">
@@ -100,7 +100,7 @@ Note: Share one URL. In the Crew Console view of the Control Center, use Copy Li
 
 | What to revoke | How |
 |---|---|
-| A person's access | Blank their Crew row — takes effect immediately |
+| A person's access | Blank their Crew row, takes effect immediately |
 | A leaked link | Crew Console → **Revoke** *(CLI: `racecast console token revoke <name>`)* |
 
 **Recap:** own the Sheet · maintain the Crew tab · wire Discord login · share one URL.
@@ -110,7 +110,7 @@ Go deeper:
 [Profiles](https://github.com/jegr78/gt-racing-broadcast/wiki/Profiles) ·
 [Sheet-Webhook](https://github.com/jegr78/gt-racing-broadcast/wiki/Sheet-Webhook)
 
-Note: Revocation, and a recap. To revoke a person's access, blank their Crew row — it takes effect immediately. To revoke a leaked link, use Revoke in the Crew Console, or run racecast console token revoke with the person's name. To recap the whole role: own the Sheet, maintain the Crew tab, wire up Discord login, and share one URL.
+Note: Revocation, and a recap. To revoke a person's access, blank their Crew row. It takes effect immediately. To revoke a leaked link, use Revoke in the Crew Console, or run racecast console token revoke with the person's name. To recap the whole role: own the Sheet, maintain the Crew tab, wire up Discord login, and share one URL.
 </script></section>
 
 </div></div>

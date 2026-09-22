@@ -23,64 +23,64 @@ Note: Welcome to producer setup. This is a one-time job per machine. Plan about 
 
 <section data-markdown><script type="text/template">
 ## What you need
-- A modern PC — **macOS, Windows, or Linux**. 16 GB RAM is tight (reboot before events); 32 GB is comfortable.
-- A **wired** internet connection — at least **25 Mbps down / 10 Mbps up** (50 / 20 recommended).
+- A modern PC. **MacOS, Windows, or Linux**. 16 GB RAM is tight (reboot before events); 32 GB is comfortable.
+- A **wired** internet connection. At least **25 Mbps down / 10 Mbps up** (50 / 20 recommended).
 - A **YouTube login** (always required for cookies); a **Twitch login** too if any stint uses a gated Twitch feed.
-- Your league **profile** — its `SHEET_ID` rides along, so open the Sheet straight from the Control Center (**Open Sheet ↗**); no link to keep around.
+- Your league **profile**: its `SHEET_ID` rides along, so open the Sheet straight from the Control Center (**Open Sheet ↗**); no link to keep around.
 
 Details: [Set up the broadcast PC](https://github.com/jegr78/gt-racing-broadcast/wiki/Set-up-the-broadcast-PC)
 
-Note: Here's what you need. A modern PC running macOS, Windows or Linux — sixteen gigabytes of RAM is tight, so reboot before events, while thirty-two is comfortable. A wired internet connection of at least twenty-five megabits down and ten up, with fifty and twenty recommended. A YouTube login is always required for cookies, plus a Twitch login if any stint uses a gated Twitch feed. And your league profile, which carries its own Sheet ID — so you can open the Sheet straight from the Control Center with Open Sheet, no link to keep around.
+Note: Here's what you need. A modern PC running macOS, Windows or Linux. Sixteen gigabytes of RAM is tight, so reboot before events, while thirty-two is comfortable. A wired internet connection of at least twenty-five megabits down and ten up, with fifty and twenty recommended. A YouTube login is always required for cookies, plus a Twitch login if any stint uses a gated Twitch feed. And your league profile, which carries its own Sheet ID, so you can open the Sheet straight from the Control Center with Open Sheet, no link to keep around.
 </script></section>
 
 <section data-markdown><script type="text/template">
 ## Why download matters too
-This station **pulls in** as much as it **pushes out** — on the same line, at the same time.
+This station **pulls in** as much as it **pushes out**. On the same line, at the same time.
 
 - **Feed A** (on-air pull): ~5–6 Mbps
 - **Feed B** (pre-rolling during a handover): ~5–6 Mbps
 - **POV** (optional driver picture-in-picture): ~3–6 Mbps
 - **Program out** to the league channel: ~6–9 Mbps
 
-The handover worst case is Feed A + B + POV **down** and program **up** at once. **Wired only** — a Wi-Fi jitter spike at a driver change is the classic failure.
+The handover worst case is Feed A + B + POV **down** and program **up** at once. **Wired only**. A Wi-Fi jitter spike at a driver change is the classic failure.
 
 Details: [Set up the broadcast PC](https://github.com/jegr78/gt-racing-broadcast/wiki/Set-up-the-broadcast-PC)
 
-Note: Download matters as much as upload, because this station pulls in as much as it pushes out, on the same line at the same time. Feed A, the on-air pull, takes about five to six megabits, and Feed B, pre-rolling during a handover, takes the same. The optional POV picture-in-picture takes about three to six, and the program going out to the league channel takes about six to nine. The worst case is a handover where Feed A, B and POV come down while the program goes up all at once. So use wired only — a Wi-Fi jitter spike at a driver change is the classic failure.
+Note: Download matters as much as upload, because this station pulls in as much as it pushes out, on the same line at the same time. Feed A, the on-air pull, takes about five to six megabits, and Feed B, pre-rolling during a handover, takes the same. The optional POV picture-in-picture takes about three to six, and the program going out to the league channel takes about six to nine. The worst case is a handover where Feed A, B and POV come down while the program goes up all at once. So use wired only. A Wi-Fi jitter spike at a driver change is the classic failure.
 </script></section>
 
 <section data-markdown><script type="text/template">
 ## The easy way — the Setup wizard
-Double-click **`racecast-ui`** — it opens in your browser and walks every step with a progress checklist. `racecast init` is the CLI equivalent.
+Double-click **`racecast-ui`**. It opens in your browser and walks every step with a progress checklist. `racecast init` is the CLI equivalent.
 
 ![Setup wizard](assets/img/cc-setup.png)
 
 Details: [Control Center](https://github.com/jegr78/gt-racing-broadcast/wiki/Control-Center) · [Set up the broadcast PC](https://github.com/jegr78/gt-racing-broadcast/wiki/Set-up-the-broadcast-PC)
 
-Note: The easy way is the Setup wizard. Just double-click racecast U I — it opens in your browser and walks you through every step with a progress checklist. If you prefer the command line, racecast init is the equivalent.
+Note: The easy way is the Setup wizard. Just double-click racecast U I. It opens in your browser and walks you through every step with a progress checklist. If you prefer the command line, racecast init is the equivalent.
 </script></section>
 
 <section data-markdown><script type="text/template">
 ## The steps — the Setup view
 Run them in the Control Center **Setup** view (CLI equivalents italic):
 
-1. **Get the tool** — download your OS's archive, extract into its own folder, double-click `racecast-ui`.
-2. **Install tools + apps** — yt-dlp / streamlink / ffmpeg / **deno** and OBS / Companion / Tailscale / Discord. *CLI: `racecast install-tools`, `install-apps`.*
-3. **Import your league profile** — **Profile → Import profile** (carries `SHEET_ID` + secrets); creating one is the exception. *CLI: `racecast profile import <file>`.*
-4. **Build the OBS + Companion configs** — Setup generates them; import into OBS + Companion. *CLI: `racecast setup`, `export companion`.*
+1. **Get the tool**: download your OS's archive, extract into its own folder, double-click `racecast-ui`.
+2. **Install tools + apps**: yt-dlp / streamlink / ffmpeg / **deno** and OBS / Companion / Tailscale / Discord. *CLI: `racecast install-tools`, `install-apps`.*
+3. **Import your league profile**: **Profile → Import profile** (carries `SHEET_ID` + secrets); creating one is the exception. *CLI: `racecast profile import <file>`.*
+4. **Build the OBS + Companion configs**: Setup generates them; import into OBS + Companion. *CLI: `racecast setup`, `export companion`.*
 
 Details: [Set up the broadcast PC](https://github.com/jegr78/gt-racing-broadcast/wiki/Set-up-the-broadcast-PC)
 
-Note: Here are the steps, run from the Control Center Setup view. First, get the tool — download your operating system's archive, extract it into its own folder, and double-click racecast U I. Second, install the tools and apps: yt-dlp, streamlink, ffmpeg and deno, along with O B S, Companion, Tailscale and Discord. Third, import your league profile from the Profile view — it carries the Sheet ID and secrets, and creating one from scratch is the exception. Fourth, build the O B S and Companion configs, which Setup generates for you to import into each app.
+Note: Here are the steps, run from the Control Center Setup view. First, get the tool. Download your operating system's archive, extract it into its own folder, and double-click racecast U I. Second, install the tools and apps: yt-dlp, streamlink, ffmpeg and deno, along with O B S, Companion, Tailscale and Discord. Third, import your league profile from the Profile view. It carries the Sheet ID and secrets, and creating one from scratch is the exception. Fourth, build the O B S and Companion configs, which Setup generates for you to import into each app.
 </script></section>
 
 <section data-markdown><script type="text/template">
 ## Let Companion control OBS
-In OBS: **Tools → WebSocket Server Settings** — enable it (port `4455`), turn on authentication, set a password.
+In OBS: **Tools → WebSocket Server Settings**. Enable it (port `4455`), turn on authentication, set a password.
 
 Enter that **same** password in **two** places:
 - **Companion** → Connections → the OBS connection.
-- **racecast** → Control Center **General Settings** (`RACECAST_OBS_WS_PASSWORD`) — so the Director Panel's relay-mediated OBS control works.
+- **racecast** → Control Center **General Settings** (`RACECAST_OBS_WS_PASSWORD`), so the Director Panel's relay-mediated OBS control works.
 
 **You should see:** the OBS connection **green** under Companion → Connections.
 
@@ -96,7 +96,7 @@ Your **station** still needs Tailscale (it provides the MagicDNS host + Funnel).
 - **macOS / Windows:** open the Tailscale app and sign in (free account).
 - **Linux:** `sudo tailscale up` (open the printed login URL), then `sudo tailscale set --operator=$USER`.
 
-With the **public Funnel** on, crew reach `/console` over the internet — **no Tailscale account needed on their side**. Inviting directors onto your tailnet (free, up to 6) is now only the **fallback**.
+With the **public Funnel** on, crew reach `/console` over the internet. **No Tailscale account needed on their side**. Inviting directors onto your tailnet (free, up to 6) is now only the **fallback**.
 
 Details: [Set up the broadcast PC](https://github.com/jegr78/gt-racing-broadcast/wiki/Set-up-the-broadcast-PC) · [Director Setup](https://github.com/jegr78/gt-racing-broadcast/wiki/Director-Setup)
 
@@ -109,7 +109,7 @@ Before your first event, run the hardware + tool check in the Control Center: **
 
 Fix anything flagged. Once everything is green, you're ready.
 
-Note: Finally, preflight and recap. Before your first event, run the hardware and tool check in the Control Center under Preflight, Run — or racecast preflight on the command line. Fix anything it flags, and once everything is green, you're ready.
+Note: Finally, preflight and recap. Before your first event, run the hardware and tool check in the Control Center under Preflight, Run, or racecast preflight on the command line. Fix anything it flags, and once everything is green, you're ready.
 
 ---
 

@@ -536,7 +536,7 @@
     <div class="led"><span class="dot" id="ledRelay"></span>Relay</div>
     <div class="appmeta">
       <a class="ver" href="https://github.com/jegr78/gt-racing-broadcast/releases"
-         target="_blank" rel="noopener" title="Running racecast version — view releases">__RC_VERSION__ ↗</a>
+         target="_blank" rel="noopener" title="Running racecast version. View releases">__RC_VERSION__ ↗</a>
       <button type="button" id="notesBtn" class="notesbtn" hidden onclick="openNotes()">📋 Notes</button>
       <a class="help" href="https://jegr78.github.io/gt-racing-broadcast/director.html"
          target="_blank" rel="noopener">? Help</a>
@@ -603,7 +603,7 @@
 
   <section class="bus pgm"><div class="cap">PGM</div><div class="keys" id="pgmBus"></div><button
     class="txarmed" id="txArmed" type="button"
-    title="Armed transition — change it in the Utilities section">TX: FADE</button></section>
+    title="Armed transition. Change it in the Utilities section">TX: FADE</button></section>
   </div>
 
   <section class="bus" id="hudBus"><div class="cap">HUD</div>
@@ -671,7 +671,7 @@
     </div>
   </div>
 
-  <div id="log">Ready. All controls work relay-only — no OBS connection needed.</div>
+  <div id="log">Ready. All controls work relay-only. No OBS connection needed.</div>
 
   <section class="bus" id="cuesBus"><div class="cap">Cues</div>
     <div class="cues2">
@@ -710,7 +710,7 @@
       <div class="keys" id="gfxGridTopBus"></div>
       <div class="keys" id="gfxGridBus"></div>
     </div>
-    <div class="grp"><span class="glbl">Flag graphic — one active</span><div class="keys" id="flagGfxBus"></div></div>
+    <div class="grp"><span class="glbl">Flag graphic, one active</span><div class="keys" id="flagGfxBus"></div></div>
   </section>
     </div>
     <div class="colstack">
@@ -741,10 +741,10 @@
       <div id="raceSched">
         <table><tbody id="schedBody"></tbody></table>
         <button class="add" id="schedAdd">+ ADD ROW</button>
-        <div class="hint">YouTube or Twitch — enter a full watch URL
+        <div class="hint">YouTube or Twitch. Enter a full watch URL
           (<code>youtube.com/watch?v=…</code> or <code>twitch.tv/&lt;channel&gt;</code>),
           or <code>local:</code> for this machine's capture card.
-          Saves write the Google Sheet only — a feed picks the new URL up
+          Saves write the Google Sheet only. A feed picks the new URL up
           on RELOAD A/B / NEXT (rows marked <b>A</b>/<b>B</b> are live now). Each row's
           <b>Streamer</b> and <b>Stint</b> label (Configuration vocab) become the HUD's
           STREAMER/STINT when that row goes on air. <b>CLEAR URL</b> removes only the
@@ -764,7 +764,7 @@
           </tr>
         </tbody></table>
         <div class="hint" id="qualInfo">Qualifying: one stream, served on <b>Feed A</b>.
-          Edits write the <b>Qualifying</b> tab in the Sheet — the feed picks it up on
+          Edits write the <b>Qualifying</b> tab in the Sheet. The feed picks it up on
           RELOAD A / NEXT (or on the mode switch). On switch the HUD STREAMER/STINT follow
           this row.</div>
       </div>
@@ -776,7 +776,7 @@
             <td><input id="povUrl" placeholder="youtube.com/watch?v=… · twitch.tv/<channel> · UC…"></td>
             <td class="act"><button class="save" id="povSave">SAVE</button></td></tr>
       </tbody></table>
-      <div class="hint">POV — a full watch URL (<code>youtube.com/watch?v=…</code> or
+      <div class="hint">POV. A full watch URL (<code>youtube.com/watch?v=…</code> or
         <code>twitch.tv/&lt;channel&gt;</code>). The POV URL applies on <b>POV RELOAD</b>.
         Available in both race and qualifying.</div>
       <!-- Solo-only: POV RELOAD/STOP, kept reachable here because #feedsSec, where
@@ -792,7 +792,7 @@
       <table><tbody id="subsBody"></tbody></table>
       <div class="hint" id="subsEmpty">No pending submissions. Commentators can submit
         their own stream link from the cockpit; approvals here write the Schedule
-        (Sheet) — the feed picks it up on RELOAD A/B / NEXT. Nothing a commentator
+        (Sheet). The feed picks it up on RELOAD A/B / NEXT. Nothing a commentator
         submits goes on air without an approval.</div>
     </div>
   </details>

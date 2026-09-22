@@ -77,12 +77,12 @@
         <h3>Settings (set once)</h3>
         <ul>
           <li>Stream to <span class="k">your own fixed channel</span>, same one every event, set to <span class="k">Unlisted</span> (the league tells you which channel).</li>
-          <li>Latency: <span class="k">Low</span> — <span class="warn">not Ultra-low</span> (unless your line is rock-solid).</li>
+          <li>Latency: <span class="k">Low</span>, <span class="warn">not Ultra-low</span> (unless your line is rock-solid).</li>
           <li>Resolution: <span class="k">1080p target, never below 720p</span>.</li>
           <li>Encoder: <span class="k">hardware</span> (NVENC / QuickSync / AMF). CBR, keyframe <span class="k">2 s</span>.</li>
           <li>Audio: 128–160 kbps AAC, 48 kHz, stereo.</li>
-          <li><span class="k">No</span> personal overlays/graphics — added centrally.</li>
-          <li><span class="k">PlayStation direct</span> works (PS5 1080p / base PS4 720p, Unlisted on-console). The console <span class="warn">can't set latency</span> — set <span class="k">Low</span> beforehand in YouTube Studio / Twitch dashboard.</li>
+          <li><span class="k">No</span> personal overlays/graphics. Added centrally.</li>
+          <li><span class="k">PlayStation direct</span> works (PS5 1080p / base PS4 720p, Unlisted on-console). The console <span class="warn">can't set latency</span>: set <span class="k">Low</span> beforehand in YouTube Studio / Twitch dashboard.</li>
         </ul>
 
         <h3>Bitrate</h3>
@@ -114,9 +114,9 @@
           <li>Update: <code>racecast update</code>, then <code>racecast install-tools --update</code>.</li>
           <li>Update GPU driver; <span class="k">reboot</span> the PC.</li>
           <li>Refresh cookies: <code>racecast cookies firefox</code> (log into YouTube in Firefox first). If any stint uses a gated Twitch feed, also run <code>racecast cookies twitch firefox</code>.</li>
-          <li>Check the machine: <code>racecast preflight</code> — fix anything it flags.</li>
-          <li>Bring everything up: <span class="k">racecast event start</span> — Tailscale, Discord, relay, OBS, Companion.</li>
-          <li>Public crew access: <span class="k">racecast funnel on</span> (one-time first: <code>racecast console setup-funnel --apply</code>). Then share each person's <span class="k">Console link</span> — <code>racecast links --post</code> drops them into crew chat, or copy them from the Control Center <span class="k">Crew Console</span>.</li>
+          <li>Check the machine: <code>racecast preflight</code>. Fix anything it flags.</li>
+          <li>Bring everything up: <span class="k">racecast event start</span>. Tailscale, Discord, relay, OBS, Companion.</li>
+          <li>Public crew access: <span class="k">racecast funnel on</span> (one-time first: <code>racecast console setup-funnel --apply</code>). Then share each person's <span class="k">Console link</span>. <code>racecast links --post</code> drops them into crew chat, or copy them from the Control Center <span class="k">Crew Console</span>.</li>
           <li>Companion green; a Director confirms access. Test the Discord audio source.</li>
           <li>Enter the <span class="k">league's stream key</span> in OBS.</li>
         </ol>
@@ -124,7 +124,7 @@
         <h3>Run</h3>
         <p class="big">▶ Start Streaming</p>
         <ul>
-          <li>Hand the show to the Director — you don't touch scenes.</li>
+          <li>Hand the show to the Director. You don't touch scenes.</li>
           <li>Guest feed needed? <code>yt-dlp -g "URL"</code> → give the link to the Director.</li>
         </ul>
 
@@ -132,7 +132,7 @@
         <ul>
           <li>Interviews run <span class="k">at the end</span> of the broadcast over Discord voice.</li>
           <li>Only the <span class="k">producer of the LAST part</span> does this. <span class="warn">8 h event = 1 part = always the last part → that producer always joins.</span> 12 h / 24 h: only the final-part producer; earlier producers skip Discord entirely.</li>
-          <li>The capture taps <span class="k">your local Discord app</span>, so <span class="warn">you must join the "Interviews" voice channel yourself</span> — the Director can't do this remotely.</li>
+          <li>The capture taps <span class="k">your local Discord app</span>, so <span class="warn">you must join the "Interviews" voice channel yourself</span>: the Director can't do this remotely.</li>
           <li>Join <span class="k">before race end</span> (you stay muted in OBS until the Director fires <code>→ INTERVIEW</code>). Keep <span class="warn">Discord windowed, not fullscreen</span>.</li>
         </ul>
 
@@ -152,8 +152,8 @@
 
         <h3>Connect</h3>
         <ol>
-          <li><span class="k">Standard:</span> open the personal <span class="k">Console link</span> your producer sends (e.g. <code>https://&lt;host&gt;.ts.net/console?t=…</code>) — works over the internet, <span class="warn">no Tailscale account, IP or password needed</span>. It opens your <span class="k">Director Panel</span>; the Console launcher also has a <span class="k">Web Buttons</span> card.</li>
-          <li>Scene / source / audio control runs <span class="k">through the relay</span> — the panel needs no OBS IP, port or WebSocket password.</li>
+          <li><span class="k">Standard:</span> open the personal <span class="k">Console link</span> your producer sends (e.g. <code>https://&lt;host&gt;.ts.net/console?t=…</code>). Works over the internet, <span class="warn">no Tailscale account, IP or password needed</span>. It opens your <span class="k">Director Panel</span>; the Console launcher also has a <span class="k">Web Buttons</span> card.</li>
+          <li>Scene / source / audio control runs <span class="k">through the relay</span>: the panel needs no OBS IP, port or WebSocket password.</li>
           <li><span class="k">On the tailnet (fallback):</span> Panel <code>http://&lt;producer-tailscale-ip&gt;:8088/panel</code>, Web Buttons <code>http://&lt;producer-tailscale-ip&gt;:8000/tablet</code>.</li>
         </ol>
 
@@ -161,7 +161,7 @@
         <ul>
           <li>Scene <span class="k">Stint</span>, correct feed up, <span class="k">HUD</span> on.</li>
           <li>Toggle graphics &amp; volumes as needed.</li>
-          <li>Weather: <code>Weather Race (1) Toggle</code> / <code>Weather Race (2) Toggle</code> / <code>Weather Quali Toggle</code> — full-screen overlays, each an independent toggle.</li>
+          <li>Weather: <code>Weather Race (1) Toggle</code> / <code>Weather Race (2) Toggle</code> / <code>Weather Quali Toggle</code>: full-screen overlays, each an independent toggle.</li>
         </ul>
 
         <h3>Handover (every 2 h)</h3>
@@ -180,13 +180,13 @@
 
         <h3>Intro / Outro</h3>
         <ul>
-          <li><code>INTRO</code> / <code>OUTRO</code> (Page 1, top row) — plays the looping intro/outro clip with audio; press another scene button to leave.</li>
+          <li><code>INTRO</code> / <code>OUTRO</code> (Page 1, top row). Plays the looping intro/outro clip with audio; press another scene button to leave.</li>
         </ul>
 
         <h3>Interview</h3>
         <ul>
           <li>Fire <code>→ INTERVIEW</code> (scene <span class="k">Interview</span> + Discord audio up, feeds down).</li>
-          <li><span class="warn">Producer must be joined to the Discord "Interviews" voice channel</span> for audio — confirm with them before you cut.</li>
+          <li><span class="warn">Producer must be joined to the Discord "Interviews" voice channel</span> for audio. Confirm with them before you cut.</li>
         </ul>
 
         <h3>If a feed stalls</h3>
@@ -204,22 +204,22 @@
 
         <h3>Connect</h3>
         <ol>
-          <li>Open the personal <span class="k">Console link</span> your producer sends — your launcher shows a <span class="k">Race Control</span> card.</li>
+          <li>Open the personal <span class="k">Console link</span> your producer sends. Your launcher shows a <span class="k">Race Control</span> card.</li>
         </ol>
 
         <h3>What you see</h3>
         <ul>
           <li>Live <span class="k">program preview</span> of what's on air.</li>
-          <li>The <span class="k">schedule</span> — streamer per stint (no stream URLs).</li>
+          <li>The <span class="k">schedule</span>: streamer per stint (no stream URLs).</li>
           <li>The <span class="k">race timer</span>.</li>
         </ul>
 
         <h3>Post to crew chat</h3>
         <ul>
           <li>Race-control facts: <span class="k">DSQ / drive-through</span>, <span class="k">rejoin time</span>, no driver for next stint, a team <span class="k">retiring</span>.</li>
-          <li><span class="k">Direct the commentators</span> — e.g. "cut to car #7, P3".</li>
+          <li><span class="k">Direct the commentators</span>, e.g. "cut to car #7, P3".</li>
         </ul>
-        <p class="sub" style="margin-top:9px">Read-only on the broadcast: <span class="warn">no</span> scenes, graphics or feeds — but the chat is yours.</p>
+        <p class="sub" style="margin-top:9px">Read-only on the broadcast: <span class="warn">no</span> scenes, graphics or feeds, but the chat is yours.</p>
       </div>
     </section>
 
@@ -231,19 +231,19 @@
       <p class="role">Control Center <span class="num">racecast-ui</span></p>
       <p class="sub" style="margin:3px 0 0">Run the whole station from your browser. <span class="k">Launch:</span> double-click <code>racecast-ui</code> (Linux <code>./racecast-ui</code>) → <code>http://127.0.0.1:8089</code>. Every action is also a <code>racecast …</code> command.</p>
       <div class="vmap">
-        <div><span class="vn">Home</span> — status; Start/Stop event</div>
-        <div><span class="vn">Setup</span> — first-time wizard</div>
-        <div><span class="vn">Preflight</span> — machine &amp; tool check</div>
-        <div><span class="vn">Relay</span> — start/stop the feeds</div>
-        <div><span class="vn">Static Streams</span> — public-channel fallback</div>
-        <div><span class="vn">Apps</span> — OBS/Companion/Tailscale/Discord</div>
-        <div><span class="vn">Tools</span> — yt-dlp/streamlink/ffmpeg/deno</div>
-        <div><span class="vn">Assets</span> — graphics, media, cookies</div>
-        <div><span class="vn">Profile</span> — leagues, overlay builder, crew editor</div>
-        <div><span class="vn">Crew Console</span> — share/revoke <code>/console</code> links</div>
-        <div><span class="vn">Settings</span> — the <code>.env</code> (masked)</div>
-        <div><span class="vn">Logs</span> — live service logs</div>
-        <div><span class="vn">Help &amp; Docs</span> — onboarding decks &amp; guides</div>
+        <div><span class="vn">Home</span>: status; Start/Stop event</div>
+        <div><span class="vn">Setup</span>: first-time wizard</div>
+        <div><span class="vn">Preflight</span>: machine &amp; tool check</div>
+        <div><span class="vn">Relay</span>: start/stop the feeds</div>
+        <div><span class="vn">Static Streams</span>: public-channel fallback</div>
+        <div><span class="vn">Apps</span>: OBS/Companion/Tailscale/Discord</div>
+        <div><span class="vn">Tools</span>: yt-dlp/streamlink/ffmpeg/deno</div>
+        <div><span class="vn">Assets</span>: graphics, media, cookies</div>
+        <div><span class="vn">Profile</span>: leagues, overlay builder, crew editor</div>
+        <div><span class="vn">Crew Console</span>: share/revoke <code>/console</code> links</div>
+        <div><span class="vn">Settings</span>: the <code>.env</code> (masked)</div>
+        <div><span class="vn">Logs</span>: live service logs</div>
+        <div><span class="vn">Help &amp; Docs</span>: onboarding decks &amp; guides</div>
       </div>
     </div>
   </section>
