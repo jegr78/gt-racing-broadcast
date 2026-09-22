@@ -68,7 +68,7 @@ DEFAULT_WINDOW_S = 60          # sampling window per tier
 DEFAULT_SETTLE_S = 10          # after a tier switch: let the rejoin transient pass
 SAMPLE_EVERY_S = 2.0
 SERVING_TIMEOUT_S = 90         # a re-resolve plus reconnect; a live source takes seconds
-# OBS answers StopRecord before the file is finalized (seen on 32.2.2). Deleting it
+# OBS answers StopRecord before the file is finalized (OBS 32.2.2). Deleting it
 # then works on macOS but fails on Windows, where the file is still open.
 RECORD_STOP_TIMEOUT_S = 30
 TIERS = ("full", "robust")
@@ -76,20 +76,14 @@ TIERS = ("full", "robust")
 # How long to let the new serve's HLS prefetch burst land before rejoining OBS. The wait
 # is DERIVED, not tuned: the ring indexes bytes by ARRIVAL time and OBS rejoins
 # prebuffer_s behind the newest byte, so the join clears the burst only once the burst is
-# older than prebuffer_s — i.e. (segments x per-segment fetch budget) + prebuffer_s.
-#
-# A flat 5 s used to stand here and was measured wrong on 2026-09-20: a YouTube ROBUST
-# burst (--hls-live-edge 6) took up to 4.96 s to arrive, so with a 3 s prebuffer the
-# rejoin landed INSIDE the burst and the ROBUST windows of a #584 run could be sampling a
-# backlog the benchmark caused itself.
+# older than prebuffer_s, that is (segments x per-segment fetch budget) + prebuffer_s.
 #
 # NOT parity with the relay: the relay measures the burst's end on the live byte flow and
 # only falls back to this bound, because the arrival span depends on the producer's
-# connection. The benchmark has no such signal from outside the relay, so it waits the
-# full ceiling — deliberately conservative, since over-waiting only lengthens a
-# measurement run while under-waiting corrupts it. Same formula and constant as the
-# relay's `prefetch_land_s()`; tests/test_obs_benchmark.py pins them to each other, and
-# tools/prefetch-burst-probe.py re-measures without a relay or a league.
+# connection. The benchmark has no such signal, so it waits the full ceiling.
+# Over-waiting only lengthens a run while under-waiting corrupts it. Same formula and
+# constant as the relay's `prefetch_land_s()`; tests/test_obs_benchmark.py pins them to
+# each other, and tools/prefetch-burst-probe.py re-measures without a relay or a league.
 SEGMENT_FETCH_BUDGET_S = 1.0
 DEFAULT_PREBUFFER_S = 3.0      # RACECAST_FEED_PREBUFFER_S's own default (#533)
 # The rejoin rebuilds the OBS input; OBS reconnects within a second or two. Sampling
@@ -119,9 +113,6 @@ class BenchmarkFailed(RuntimeError):
     """The benchmark started but could not complete a measurement."""
 
 
-# --------------------------------------------------------------------------
-# pure core
-# --------------------------------------------------------------------------
 def live_edge_segments(flags):
     """The `--hls-live-edge` value of a streamlink flag list, or None."""
     try:
@@ -169,10 +160,8 @@ def _playback(samples):
 
     The jump test is symmetric, because a rebuilt OBS media source does not always
     restart its cursor at zero. It can resume on the new stream's own timestamps and
-    jump FORWARD by hours. A one-sided test counted that pair as playback, and since the
-    rate is the summed media time over the summed wall time, the one pair swallowed the
-    window: a jump to 11_000_000 ms reported 1374x, left `rejoined` False so nothing
-    marked the window, and keeps_real_time answered True on it.
+    jump FORWARD by hours, and the rate is the summed media time over the summed wall
+    time, so one such pair would swallow the window.
 
     The forward ceiling is the window's own wall duration. OBS can outrun the wall clock
     only by what it has already buffered (`buffering_mb` is 8 MB, about 9 s at 7 Mbps),
@@ -201,15 +190,13 @@ def _source_ahead(backlog_start, backlog_end, rate, duration_s):
 
     `backlog_s` ages by the byte's ARRIVAL time, so it climbs whenever media arrives
     faster than real time. A fresh serve does exactly that: it walks the CDN's DVR
-    window at whatever rate it can fetch. Measured live on the production host, a window
-    opened 10 s after the rejoin reported 15.5 s -> 57.2 s while OBS played at 0.99x and
-    rendered in 0.58 ms. Three minutes later the steady state was 4.6 s. Nothing was
-    wrong with the host; the column described the join.
+    window at whatever rate it can fetch, and the column then describes the join rather
+    than the host.
 
     A consumer can only add `(1 - rate) * duration` to a backlog. Whatever rose beyond
     that arrived early. That is arithmetic over two numbers the window already has, not
     an estimate. 0.0 when the consumer explains all of it, None when a part is missing.
-    Pure -> unit-tested."""
+    Pure."""
     if None in (backlog_start, backlog_end, rate, duration_s):
         return None
     consumer = max(0.0, 1.0 - rate) * duration_s
@@ -222,11 +209,11 @@ def _backlog_growth(backlog_start, backlog_end, source_ahead, duration_s):
     This is the number #585's trigger is stated in ("the backlog grows by at least X
     seconds per minute"), and it deliberately excludes the part `_source_ahead` attributes
     to early arrival: a bursty CDN would otherwise step a healthy producer down, which is
-    the misattribution #634 exists to prevent. Reported, never judged — `keeps_real_time`
+    the misattribution #634 exists to prevent. Reported, never judged; `keeps_real_time`
     stays off the backlog.
 
     Negative when the backlog shrank; clamping that would hide a recovery.
-    None when a part is missing or the window has no length. Pure -> unit-tested."""
+    None when a part is missing or the window has no length. Pure."""
     if None in (backlog_start, backlog_end, source_ahead) or not duration_s:
         return None
     return round(((backlog_end - backlog_start) - source_ahead) / duration_s * 60.0, 1)
@@ -246,15 +233,13 @@ def _inbound_gap_worst(samples):
 
     The inherited reading is the first value that IS one, not samples[0]. A window opens
     on a restart, and the relay answers None while it has no reading to give, so a window
-    can start with a run of Nones. Anchoring on samples[0] made every one of those Nones
-    "the inherited value", and the first real number after them started the count, which
-    is the pre-restart reading itself. Measured before the fix: the window
-    [None, None, None, 9.0, 9.0, 9.0, 0.4, 0.4, 1.2] reported 9.0 instead of 1.2.
+    can start with a run of Nones. Anchoring on samples[0] would make every one of those
+    Nones "the inherited value", and the first real number after them would start the
+    count, which is the pre-restart reading itself.
 
     None when nothing was produced after the inherited reading. Usually that means the
     window was shorter than a heartbeat, but a longer window in which every heartbeat
-    reported the same value answers None too. Nothing here is filled in.
-    Pure -> unit-tested."""
+    reported the same value answers None too. Nothing here is filled in. Pure."""
     seen = [s.get("inbound_max_gap_s") for s in samples]
     inherited = next((v for v in seen if v is not None), None)
     rest = []
@@ -388,18 +373,18 @@ def refusal(status, stream_active, record_active):
     """Why the benchmark must not run, or None. Checked before anything touches OBS
     or a feed. `status` is the relay's /status; the two flags come from OBS."""
     if stream_active is None or record_active is None:
-        return "OBS output state unknown — is obs-websocket reachable?"
+        return "OBS output state unknown. Is obs-websocket reachable?"
     if stream_active:
-        return ("OBS is streaming — the benchmark switches scenes and reconnects the "
-                "on-air feed; run it before the broadcast")
+        return ("OBS is streaming, and the benchmark switches scenes and reconnects "
+                "the on-air feed; run it before the broadcast")
     if record_active:
-        return "OBS is already recording — stop that recording first"
+        return "OBS is already recording; stop that recording first"
     feed = ((status or {}).get("live") or {}).get("feed")
     if not feed:
-        return "no on-air feed — start the relay with a live stint first"
+        return "no on-air feed; start the relay with a live stint first"
     f = ((status or {}).get("feeds") or {}).get(feed) or {}
     if "backlog_s" not in f:
-        return ("the relay runs without feed fan-out (RACECAST_FEED_FANOUT=0) — "
+        return ("the relay runs without feed fan-out (RACECAST_FEED_FANOUT=0), so "
                 "there is no consumer backlog to measure")
     if f.get("platform") not in _QUALITY_SOURCES:
         return (f"Feed {feed} carries a {f.get('platform') or 'unknown'} source, which "
@@ -422,9 +407,7 @@ def restore_tier(orig):
     return (orig.get("profile") or "full") if orig.get("pinned") else "auto"
 
 
-# --------------------------------------------------------------------------
-# history (machine-level JSONL, like speedtest-history.jsonl)
-# --------------------------------------------------------------------------
+# History: a machine-level JSONL, like speedtest-history.jsonl.
 def history_path(runtime_dir):
     return os.path.join(runtime_dir, HISTORY_NAME)
 
@@ -468,9 +451,6 @@ def append_record(record, runtime_dir):
     return record
 
 
-# --------------------------------------------------------------------------
-# preflight line + CLI rendering
-# --------------------------------------------------------------------------
 def _fmt_age(age_days):
     if age_days < 1 / 24:
         return "just now"
@@ -487,7 +467,7 @@ def _outcome(v):
     if v.get("robust_recovers"):
         return "FULL falls behind, ROBUST recovers"
     if v.get("robust_recovers") is False:
-        return "FULL falls behind, ROBUST does not recover — this host is unsuitable"
+        return "FULL falls behind, ROBUST does not recover; this host is unsuitable"
     return "FULL falls behind, ROBUST not determined"
 
 
@@ -495,18 +475,18 @@ def classify(record, now, max_age_days=DEFAULT_MAX_AGE_DAYS):
     """Latest record -> a preflight Result. Stale or behind real time WARN; never FAIL."""
     if not record:
         return Result(INFO, "OBS benchmark",
-                      "not measured yet — run `racecast obs benchmark` before the event")
+                      "not measured yet; run `racecast obs benchmark` before the event")
     age = max(0.0, (now - record.get("ts", now)) / 86_400.0)
     v = record.get("verdict") or {}
     where = f"{_outcome(v)} · measured {_fmt_age(age)}"
     if age > max_age_days:
         return Result(WARN, "OBS benchmark",
-                      f"{where} — stale (older than {int(max_age_days)} d); re-run it")
+                      f"{where}, stale (older than {int(max_age_days)} d); re-run it")
     bad = v.get("contaminated") or {}
     if bad:
         why = "; ".join(f"{t.upper()}: {', '.join(r)}" for t, r in bad.items())
         return Result(WARN, "OBS benchmark",
-                      f"measurement disturbed ({why}) · measured {_fmt_age(age)} — re-run it")
+                      f"measurement disturbed ({why}) · measured {_fmt_age(age)}; re-run it")
     if v.get("full_real_time") is False:
         return Result(WARN, "OBS benchmark", where)
     if v.get("full_real_time") is None:
@@ -520,7 +500,7 @@ def _fmt(x, unit="", nd=1):
 
 def render(record, now):
     """Human-readable summary for the CLI."""
-    lines = [f"OBS benchmark — Feed {record.get('feed')} ({record.get('platform')}) "
+    lines = [f"OBS benchmark: Feed {record.get('feed')} ({record.get('platform')}) "
              f"on '{record.get('scene')}', {record.get('window_s')} s per tier, "
              f"target {_fmt(record.get('fps_target'), ' fps', 2)}",
              "              render ms   fps avg/min   render skip   encoder skip/speed"
@@ -560,9 +540,6 @@ def render(record, now):
     return "\n".join(lines)
 
 
-# --------------------------------------------------------------------------
-# driver
-# --------------------------------------------------------------------------
 def feed_input_name(session, port):
     """The OBS media input that plays the relay feed on `port`, or None."""
     want = {f"127.0.0.1:{port}", f"localhost:{port}"}
@@ -641,7 +618,7 @@ def flags_for_tier(tier_flags, tier):
     """The streamlink flag list a quality tier actually serves with, mirroring the
     relay's `streamlink_serve_flags`: ROBUST and EMERGENCY take the robust profile,
     everything else (full, auto, unset) the full one. `tier_flags` maps "full"/"robust"
-    to their lists. Pure -> unit-tested."""
+    to their lists. Pure."""
     key = "robust" if tier in ("robust", "emergency") else "full"
     return tier_flags.get(key, ())
 
@@ -649,7 +626,7 @@ def flags_for_tier(tier_flags, tier):
 def prefetch_land_s(segments, prebuffer_s=DEFAULT_PREBUFFER_S,
                     budget_s=SEGMENT_FETCH_BUDGET_S):
     """Seconds to wait for a `segments`-segment HLS prefetch to age past the join mark.
-    0 when there is no burst to wait out. Pure -> unit-tested."""
+    0 when there is no burst to wait out. Pure."""
     if not segments or segments <= 0:
         return 0.0
     return segments * budget_s + max(0.0, prebuffer_s)
@@ -713,7 +690,7 @@ def run(relay, session, runtime_dir, *, flags, scene="Stint", window_s=DEFAULT_W
     input_name = feed_input_name(session, orig.get("port"))
     if input_name is None:
         raise BenchmarkRefused(f"OBS has no media input on the Feed {feed} port "
-                               f"({orig.get('port')}) — is the racecast collection loaded?")
+                               f"({orig.get('port')}). Is the racecast collection loaded?")
     fps_target = _fps_target(session)
     cur = session.request("GetCurrentProgramScene", {}) or {}
     orig_scene = cur.get("currentProgramSceneName") or cur.get("sceneName")
@@ -722,8 +699,8 @@ def run(relay, session, runtime_dir, *, flags, scene="Stint", window_s=DEFAULT_W
     # the loop, not only for the robust_extra_segments record at the end.
     tier_flags = dict(zip(TIERS, flags.get(platform, ([], [])), strict=False))
     # NOT `or`: RACECAST_FEED_PREBUFFER_S=0 is a documented value (".env.example": "=0
-    # restores the live-edge serve"), and 0.0 is falsy — `or` would silently wait 3 s
-    # too long against exactly the relay that turned the reserve off.
+    # restores the live-edge serve"), and 0.0 is falsy, so `or` would silently wait
+    # 3 s too long against exactly the relay that turned the reserve off.
     prebuffer_s = status.get("feed_prebuffer_s")
     if not isinstance(prebuffer_s, (int, float)) or isinstance(prebuffer_s, bool):
         prebuffer_s = DEFAULT_PREBUFFER_S
@@ -751,7 +728,7 @@ def run(relay, session, runtime_dir, *, flags, scene="Stint", window_s=DEFAULT_W
             try:
                 out_path = (session.request("StopRecord", {}) or {}).get("outputPath")
             except Exception as exc:              # noqa: BLE001 — keep restoring
-                notes.append(f"stopping the recording failed ({exc}) — stop it in OBS")
+                notes.append(f"stopping the recording failed ({exc}); stop it in OBS")
         restored_at = None
         try:
             t_restore = clock()
@@ -776,22 +753,22 @@ def run(relay, session, runtime_dir, *, flags, scene="Stint", window_s=DEFAULT_W
                 notes.append(f"reading the recording state failed ({exc})")
             if not finished:
                 keep_recording = True
-                notes.append(f"OBS is still writing {out_path} — left in place")
+                notes.append(f"OBS is still writing {out_path}, left in place")
         if out_path and not keep_recording and isfile(out_path):
             try:
                 # OBS names the path. Only a file written since StartRecord is ours:
                 # a remote OBS (RACECAST_OBS_WS_HOST) names a path on ITS disk.
                 if started is None or getmtime(out_path) < started - 1:
                     keep_recording = True
-                    notes.append(f"{out_path} was not created by this benchmark — "
-                                 "not deleted")
+                    notes.append(f"{out_path} was not created by this benchmark, "
+                                 "so it was not deleted")
                 else:
                     remove(out_path)
             except OSError as exc:
                 keep_recording = True
                 notes.append(f"could not delete the benchmark recording {out_path} ({exc})")
         if restored_at is not None and interrupted:
-            notes.append(f"interrupted — OBS was not rejoined to Feed {feed}; press RESET "
+            notes.append(f"interrupted: OBS was not rejoined to Feed {feed}; press RESET "
                          f"for Feed {feed} in the Director Panel")
         elif restored_at is not None:
             # The restore is a restart too: without a rejoin OBS keeps playing its
@@ -799,14 +776,14 @@ def run(relay, session, runtime_dir, *, flags, scene="Stint", window_s=DEFAULT_W
             # an interrupt here cannot keep the scene or the recording from coming back.
             try:
                 _wait_serving(relay, feed, restored_at, clock, sleep, serving_timeout_s)
-                # The restore puts the feed back on its ORIGINAL tier — often "auto",
+                # The restore puts the feed back on its ORIGINAL tier, often "auto",
                 # which serves with the full profile. Resolve it the way the relay does.
                 _rejoin_after_prefetch(
                     relay, feed, sleep,
                     flags_for_tier(tier_flags, orig.get("quality_tier")), prebuffer_s)
             except (Exception, KeyboardInterrupt) as exc:  # noqa: BLE001 — cleanup: report, go on
                 notes.append(f"Feed {feed} is back on its tier but OBS was not rejoined "
-                             f"({exc.__class__.__name__}: {exc}) — press RESET for "
+                             f"({exc.__class__.__name__}: {exc}); press RESET for "
                              f"Feed {feed} in the Director Panel")
         for n in notes:
             progress("WARNING: " + n)

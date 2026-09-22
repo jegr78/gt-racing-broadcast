@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Pure helpers for the bundled overlay-font set: assemble a fonts.zip at build
-time and extract it into runtime/fonts/ at app start. No network — fetching the
+time and extract it into runtime/fonts/ at app start. No network: fetching the
 fonts is the maintainer tool's job (tools/fetch-fonts.py); this module only zips
 bytes it is handed and unzips them safely. Stdlib only, unit-tested in
 tests/test_fonts.py.

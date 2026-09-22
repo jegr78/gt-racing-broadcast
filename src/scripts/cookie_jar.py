@@ -79,8 +79,7 @@ def jar_has_login(path):
 
 
 # The domains a platform's jar keeps, each with its subdomains. YouTube needs only
-# youtube.com: requests to youtube.com never carry .google.com cookies, and a live
-# resolve with the youtube.com cookies alone was measured to work (#616).
+# youtube.com, because requests to youtube.com never carry .google.com cookies. (#616)
 PLATFORM_COOKIE_DOMAINS = {
     "youtube": ("youtube.com",),
     "twitch": ("twitch.tv",),

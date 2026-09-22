@@ -6,7 +6,7 @@ small record, appends that record to a machine-level JSONL history (trimmed to t
 last HISTORY_LIMIT runs), and classifies the latest record against the documented
 minimum/recommended bandwidth for `racecast preflight`.
 
-NEVER runs automatically — it is invoked only by `racecast speedtest` and the
+NEVER runs automatically: it is invoked only by `racecast speedtest` and the
 Control Center button. Pure Python 3 standard library (the `speedtest` binary is
 the only external dependency, installed via `racecast install-tools`).
 """
@@ -20,8 +20,8 @@ from collections import namedtuple
 
 # Level constants + a Result shape compatible with preflight.Result (same
 # .level/.name/.detail fields, identical level strings). Defined locally rather
-# than imported from preflight so this module does NOT depend on preflight —
-# preflight imports US (lazily, in gather()); importing it back would be a cycle.
+# than imported from preflight so this module does NOT depend on preflight:
+# preflight imports US (lazily, in gather()), and importing it back would be a cycle.
 PASS, WARN, INFO = "PASS", "WARN", "INFO"
 Result = namedtuple("Result", ("level", "name", "detail"))
 
@@ -136,8 +136,8 @@ def load_latest(runtime_dir):
 
 def append_record(record, runtime_dir):
     """Append one record and rewrite the file trimmed to the last HISTORY_LIMIT.
-    Writes to a temp file and os.replace()s it in — the atomic-rewrite pattern the
-    rest of the project uses (chat_admin/backup_admin/profile_io) so a crash
+    Writes to a temp file and os.replace()s it in, the atomic-rewrite pattern the
+    rest of the project uses (chat_admin/backup_admin/profile_io), so a crash
     mid-write can't truncate the history."""
     os.makedirs(runtime_dir, exist_ok=True)
     kept = (_read_all(runtime_dir) + [record])[-HISTORY_LIMIT:]
@@ -177,7 +177,7 @@ def classify(record, now, max_age_days=DEFAULT_MAX_AGE_DAYS):
     (never FAIL); the worse of download/upload governs the level."""
     if not record:
         return Result(INFO, "bandwidth",
-                      "not measured yet — run `racecast speedtest` "
+                      "not measured yet; run `racecast speedtest` "
                       "(or the Control Center's Speed test button)")
     dl = record.get("download_mbps", 0.0)
     ul = record.get("upload_mbps", 0.0)
@@ -185,18 +185,18 @@ def classify(record, now, max_age_days=DEFAULT_MAX_AGE_DAYS):
     where = _summary(record, age)
     if age > max_age_days:
         return Result(WARN, "bandwidth",
-                      f"{where} — stale (older than {int(max_age_days)} d); "
+                      f"{where}, stale (older than {int(max_age_days)} d); "
                       "re-measure before the event")
     if dl < MIN_DOWN_MBPS or ul < MIN_UP_MBPS:
         return Result(WARN, "bandwidth",
-                      f"{where} — below the {MIN_DOWN_MBPS:.0f}/{MIN_UP_MBPS:.0f} "
+                      f"{where}, below the {MIN_DOWN_MBPS:.0f}/{MIN_UP_MBPS:.0f} "
                       "Mbps minimum")
     if dl < REC_DOWN_MBPS or ul < REC_UP_MBPS:
         return Result(WARN, "bandwidth",
-                      f"{where} — meets the minimum, below the "
+                      f"{where}, meets the minimum but is below the "
                       f"{REC_DOWN_MBPS:.0f}/{REC_UP_MBPS:.0f} Mbps recommended")
     return Result(PASS, "bandwidth",
-                  f"{where} — meets the recommended "
+                  f"{where}, meets the recommended "
                   f"{REC_DOWN_MBPS:.0f}/{REC_UP_MBPS:.0f} Mbps")
 
 
@@ -216,7 +216,7 @@ def run(now, runtime_dir, runner=subprocess.run, which=shutil.which):
     binary = find_binary(runtime_dir, which)
     if binary is None:
         raise SpeedtestUnavailable(
-            "Ookla speedtest CLI not found — run `racecast install-tools` "
+            "Ookla speedtest CLI not found. Run `racecast install-tools` "
             "(or install it manually).")
     proc = runner(run_argv(binary), capture_output=True, text=True)
     out = (proc.stdout or "").strip()
@@ -266,7 +266,7 @@ def main(argv=None):
     a = ap.parse_args(argv)
     runtime_dir = a.runtime_dir or default_runtime_dir(
         os.path.dirname(os.path.abspath(__file__)))
-    print("Running Ookla speed test — this takes ~20–30 s…")
+    print("Running Ookla speed test; this takes 20-30 s.")
     try:
         rec = run(time.time(), runtime_dir)
     except SpeedtestUnavailable as exc:

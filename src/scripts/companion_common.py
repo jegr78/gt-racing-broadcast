@@ -5,15 +5,15 @@ Tailscale IP (plug & play) so a tablet can open http://<tailscale-ip>:<port>/tab
 over the tailnet, without exposing Companion on the local LAN the way 0.0.0.0 would.
 
 Tailscale detection lives in scripts/tailscale.py; racecast.py passes the detected
-IP into desired_bind_ip() — this module holds Companion logic only.
+IP into desired_bind_ip(). This module holds Companion logic only.
 
 NOTE: this binds *where* Companion listens; it does NOT separate /tablet from the
 admin GUI (Companion serves both on one port + one shared socket API). Restrict WHO
 reaches the port with a Tailscale ACL.
 
-Platform support: Windows and macOS are automated. Linux is manual by design —
-in WSL/Docker setups Companion runs on the HOST, so local automation would target
-the wrong machine. Linux users should set Companion's bind address manually and
+Platform support: Windows and macOS are automated. Linux is manual by design,
+because in WSL/Docker setups Companion runs on the HOST and local automation would
+target the wrong machine. Linux users set Companion's bind address manually and
 start it themselves.
 """
 import json, os, socket
@@ -70,8 +70,8 @@ def companion_config_path(platform, env=None):
     return os.path.join(base, "companion", "config.json")
 
 
-# Default install locations of Companion.exe — a heuristic, validated on the
-# Windows streaming PC before the first release. RACECAST_COMPANION_EXE overrides.
+# Default install locations of Companion.exe, a heuristic that
+# RACECAST_COMPANION_EXE overrides.
 WINDOWS_COMPANION_CANDIDATES = (
     r"%LOCALAPPDATA%\Programs\companion\Companion.exe",
     r"C:\Program Files\Companion\Companion.exe",
@@ -94,8 +94,8 @@ def find_companion_exe(env=None, exists=os.path.exists):
 
 def companion_control_commands(platform, exe=None):
     """Start/quit/running argv per platform. Windows needs the discovered exe.
-    Returns None for Linux here — native-Linux companion-pi control lives in
-    companion_linux.py (systemd); this module stays Windows/macOS only."""
+    Returns None for Linux: native-Linux companion-pi control lives in
+    companion_linux.py (systemd), so this module stays Windows/macOS only."""
     if platform == "darwin":
         return {
             "start": ["open", "-a", "Companion"],

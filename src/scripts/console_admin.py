@@ -1,4 +1,4 @@
-"""Console revocation store (issue #191), mirroring chat_admin.py:
+"""Console revocation store (#191), mirroring chat_admin.py:
 pure validation + atomic JSON writes, no side effects until validation passes.
 
 State file: runtime/<profile>/console-versions.json == {"versions": {key: int}}.
@@ -31,8 +31,8 @@ def validate_versions(payload):
 
 
 def load_versions(path):
-    """{key: version} from disk, or {} when missing/corrupt (best-effort, like
-    chat_admin.load_messages — a bad file must never lock everyone out)."""
+    """{key: version} from disk, or {} when missing/corrupt. Best-effort like
+    chat_admin.load_messages: a bad file must never lock everyone out."""
     try:
         with open(path, encoding="utf-8") as fh:
             return validate_versions(json.load(fh))
@@ -48,7 +48,7 @@ def current_version(versions, key):
 def write_versions(path, versions):
     """Atomically persist {key: version} as {"versions": {...}} (temp + replace).
     Uses mkstemp in the target directory so the rename is same-filesystem, and
-    unlinks the temp file on any failure — mirroring chat_admin.write_messages."""
+    unlinks the temp file on any failure, mirroring chat_admin.write_messages."""
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path) or ".", suffix=".tmp")
     try:
@@ -85,7 +85,7 @@ def console_link_discord_payload(console_url, league_name=""):
     every racecast post reads alike: it posts as "GT Racecast", the @here mention
     sits in top-level `content` (Discord ignores mentions inside an embed), the
     link rides in a titled embed, and a non-empty `league_name` shows as the embed
-    footer. Pure — no I/O."""
+    footer. Pure, no I/O."""
     league = (league_name or "").strip()
     desc = ("Open the launcher and sign in with Discord or your personal "
             f"link:\n{console_url}")

@@ -197,12 +197,12 @@ def split_profile_flag(argv):
 def _solo_profile_env_text(display, template):
     """The generated profile.env for a solo profile (#301): a single-event
     commentary/POV broadcast whose main program is a local capture card + webcam
-    (no A/B stint feeds), carrying the chosen starter TEMPLATE. Sheet-always
-    (#302 design): a solo profile still uses a Google Sheet — the same tabs as
-    endurance MINUS the Schedule/Qualifying tabs — so it carries SHEET_ID. The
-    matching OBS scene-collection source is materialized by `racecast setup` (#303)."""
+    (no A/B stint feeds), carrying the chosen starter TEMPLATE. A solo profile
+    still uses a Google Sheet, the same tabs as endurance MINUS the
+    Schedule/Qualifying ones, so it carries SHEET_ID (#302). The matching OBS
+    scene-collection source is materialized by `racecast setup` (#303)."""
     return (
-        "# Solo profile (kind=solo) — a single-event commentary/POV broadcast.\n"
+        "# Solo profile (kind=solo): a single-event commentary/POV broadcast.\n"
         "# The main program is a local capture card + webcam in OBS (no A/B stint\n"
         "# feeds). It still uses a Google Sheet (below). Created by `racecast profile new`.\n"
         "\n"
@@ -251,7 +251,7 @@ def create_profile(root, name, source="example", kind=cfg.DEFAULT_KIND,
 
     kind == "endurance" (default): copy profiles/<source>/ verbatim.
     kind == "solo" (#301): generate a fresh, sheet-less profile.env carrying the
-    chosen starter `template` (default: the first SOLO_TEMPLATES entry) — no
+    chosen starter `template` (default: the first SOLO_TEMPLATES entry); no
     `source` is copied.
 
     Raises ValueError when the name has no sluggable characters, the slug is
@@ -300,7 +300,7 @@ def set_active_profile(root, runtime_root, name):
 def format_profile_list(names, active):
     """One profile per line, the active one marked with '* '. ASCII only."""
     if not names:
-        return "no profiles -- create one with `racecast profile new <name>`"
+        return "no profiles; create one with `racecast profile new <name>`"
     return "\n".join(("* " if n == active else "  ") + n for n in names)
 
 

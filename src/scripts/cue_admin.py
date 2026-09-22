@@ -1,6 +1,6 @@
 """Pure logic for the director text-cue channel (runtime/<profile>/cues.json).
 
-No network, no argv parsing — cue sanitization, the active-set filter, prune,
+No network, no argv parsing: cue sanitization, the active-set filter, prune,
 the takeover validation gate, and an atomic file write/load. Imported by the
 relay (CueStore) and the `racecast event takeover` cue pull so both agree on the
 on-disk shape and the caps. Mirrors chat_admin.py.
@@ -104,7 +104,7 @@ def resolve_target(raw_target, on_air_key, normalize):
 
 def active_cues_for(cues, streamer_key, now, info_ttl=INFO_CUE_TTL_S):
     """The cues a given commentator should currently see: target is their key or
-    'all', and the cue is still active — info while now < ts+ttl, critical while
+    'all', and the cue is still active: info while now < ts+ttl, critical while
     unacked."""
     out = []
     for c in cues:
@@ -122,7 +122,7 @@ def active_cues_for(cues, streamer_key, now, info_ttl=INFO_CUE_TTL_S):
 
 def race_control_notes_for(cues, streamer_key, limit=RC_NOTE_SHOW):
     """The Race Control notes a given commentator should see: origin
-    'race_control', target their key or 'all'. Reference context (no TTL) — the
+    'race_control', target their key or 'all'. Reference context (no TTL): the
     most-recent *limit*, in id order. Backs the cockpit's rolling RC card."""
     out = [c for c in cues
            if c.get("origin") == ORIGIN_RACE_CONTROL
@@ -142,7 +142,7 @@ def prune(cues, now, info_ttl=INFO_CUE_TTL_S):
     """Drop expired info + acked critical cues; bound to MAX_CUES. Applied on
     load and on a takeover pull (a restart/handover carries no stale cues).
     Note-style cues (RC notes, cue-backs) are reference context, so they survive
-    the TTL — each origin kept as its OWN rolling window of the most-recent
+    the TTL, each origin kept as its OWN rolling window of the most-recent
     RC_NOTE_KEEP, in original order (a flood of one origin never evicts another)."""
     per_origin = {}
     for c in cues:

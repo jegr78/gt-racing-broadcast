@@ -1,5 +1,5 @@
 """Reusable, mostly-pure logging helpers for the racecast daemons and log surface.
-stdlib-only by design — DO NOT import config.py here (the relay stays
+stdlib-only by design: DO NOT import config.py here (the relay stays
 dependency-light, like the other self-contained scripts). Covers: rotating
 timestamped loggers, the single log-prune authority, subprocess line
 classification + a pump, external-app log discovery, and archive resolution."""
@@ -10,7 +10,7 @@ DEFAULT_RETENTION_DAYS = 7
 
 
 def harden_stdio(streams=None, environ=None):
-    """Make this process and every child survive a narrow console (issue #24).
+    """Make this process and every child survive a narrow console (#24).
 
     utf-8 rather than the console's own encoding: a Control Center job's stdout is a PIPE
     whose bytes are rendered in a UTF-8 web UI. PYTHONIOENCODING carries the same leniency
@@ -21,7 +21,7 @@ def harden_stdio(streams=None, environ=None):
         try:
             stream.reconfigure(encoding="utf-8", errors="replace")
         except (AttributeError, ValueError, OSError):
-            pass    # stream missing/old/non-reconfigurable — leave it as-is
+            pass    # stream missing, old or non-reconfigurable; leave it as-is
     try:
         env.setdefault("PYTHONIOENCODING", "utf-8:replace")
     except Exception:          # noqa: BLE001 — never fatal
@@ -31,14 +31,13 @@ def harden_stdio(streams=None, environ=None):
 class _ResilientTimedRotatingFileHandler(TimedRotatingFileHandler):
     """A TimedRotatingFileHandler whose midnight rollover never drops a log
     record. On Windows the rollover rename fails (PermissionError / WinError 32)
-    while another process holds the file open — the Control Center tails
-    relay.console.log and feed_*.log live, and Windows forbids renaming an open
-    file. The stock handler lets that exception escape emit(), so every line is
-    lost to stderr and NOTHING reaches the timestamped log. Here a failed
-    rollover re-opens the still-present base file (so the in-flight record is
-    written) and pushes the next attempt forward one interval (so we don't
-    re-attempt — and re-fail — on every subsequent emit). POSIX is unaffected: it
-    can rename an open file, so the rollover succeeds and this path never runs."""
+    while another process holds the file open, and the Control Center tails
+    relay.console.log and feed_*.log live. The stock handler lets that exception
+    escape emit(), so every line is lost to stderr and NOTHING reaches the
+    timestamped log. Here a failed rollover re-opens the still-present base file,
+    so the in-flight record is written, and pushes the next attempt forward one
+    interval so it does not re-fail on every subsequent emit. POSIX can rename an
+    open file, so the rollover succeeds there and this path never runs."""
     def doRollover(self):
         try:
             super().doRollover()
@@ -53,7 +52,7 @@ class _ResilientTimedRotatingFileHandler(TimedRotatingFileHandler):
 def read_new_lines(path, pos):
     """Read whole lines appended to `path` since byte offset `pos`, returning
     (lines, new_pos). RE-OPENS AND CLOSES the file each call so a concurrent
-    writer can rotate/rename it on Windows — a continuously-held read handle is
+    writer can rotate/rename it on Windows: a continuously-held read handle is
     exactly what blocks the relay's midnight rollover. A half-written trailing
     line (no terminating newline yet) is held back for the next poll. On
     rotation/truncation (file now shorter than `pos`) it restarts from offset 0.
@@ -62,11 +61,11 @@ def read_new_lines(path, pos):
         with open(path, "rb") as fh:
             fh.seek(0, os.SEEK_END)
             if fh.tell() < pos:
-                pos = 0                  # rotated or truncated — re-read from top
+                pos = 0                  # rotated or truncated, re-read from top
             fh.seek(pos)
             data = fh.read()
     except OSError:
-        return [], pos                   # vanished mid-rotation — retry next poll
+        return [], pos                   # vanished mid-rotation; retry next poll
     nl = data.rfind(b"\n")
     if nl == -1:
         return [], pos                   # no complete line yet
@@ -78,8 +77,8 @@ def configure_logging(name, log_path, level=logging.INFO, to_stdout=None):
     """A logging.Logger writing timestamped, leveled lines to log_path with daily
     midnight rotation (archive suffix `.YYYY-MM-DD`). backupCount=0 -> the handler
     never deletes; prune_old_logs is the sole deletion authority. A stdout
-    StreamHandler is added only on a TTY (foreground run) — a daemon whose stdout is
-    a redirected file must not double-write. Idempotent per `name`."""
+    StreamHandler is added only on a TTY (foreground run), because a daemon whose
+    stdout is a redirected file must not double-write. Idempotent per `name`."""
     logger = logging.getLogger(name)
     logger.setLevel(level)
     logger.propagate = False
@@ -117,7 +116,7 @@ def close_logging(name):
 
 def prune_old_logs(log_dir, keep_days=DEFAULT_RETENTION_DAYS, now_ts=None):
     """Delete files in log_dir whose mtime is older than keep_days; return the
-    removed paths. The ONLY log-deletion path — covers every log type (rotated
+    removed paths. The ONLY log-deletion path, covering every log type (rotated
     console/feed logs, *.boot.log, the Tailscale snapshot, any local OBS copies).
     `now_ts` is injectable for deterministic tests. Best-effort: unreadable dir or
     a vanishing file is skipped, never raised."""
@@ -135,7 +134,7 @@ def prune_old_logs(log_dir, keep_days=DEFAULT_RETENTION_DAYS, now_ts=None):
                 os.remove(p)
                 removed.append(p)
         except OSError:
-            pass  # file vanished between listdir and remove — skip it
+            pass  # file vanished between listdir and remove; skip it
     return sorted(removed)
 
 
@@ -264,7 +263,7 @@ def pump_subprocess(stream, logger, tag, on_line=None, now=time.monotonic):
     level, prefixed `[tag]`. Repeated lines are throttled and long URLs shortened
     (LineThrottle + shorten_urls) so a stuck retry loop can't flood the log; the
     first occurrence and periodic counts survive. When on_line is given, call it per
-    (stripped) ORIGINAL line for side-channel parsing (e.g. feed quality) — a failing
+    (stripped) ORIGINAL line for side-channel parsing (e.g. feed quality); a failing
     callback never breaks the pump. Runs to EOF; swallows read errors. Designed for a
     daemon thread."""
     throttle = LineThrottle()
@@ -286,7 +285,7 @@ def pump_subprocess(stream, logger, tag, on_line=None, now=time.monotonic):
                 # pump thread, defeating the best-effort contract.
                 logger.log(logging.ERROR, "[%s] %s", tag, line)
     except (ValueError, OSError):
-        pass  # pipe closed mid-read — end the thread, never the daemon
+        pass  # pipe closed mid-read; end the thread, never the daemon
     finally:
         try:
             for lvl, text in throttle.flush(now()):   # surface a trailing flood's count
@@ -296,8 +295,9 @@ def pump_subprocess(stream, logger, tag, on_line=None, now=time.monotonic):
 
 
 def obs_log_dir(platform, home=None, env=None):
-    """OBS Studio's log directory for a platform. Fixed-OS path -> string concat
-    with '/', never os.path.join (see plan note). Returns the dir (may not exist)."""
+    """OBS Studio's log directory for a platform. A fixed-OS path is built with '/'
+    concatenation, never os.path.join, which injects backslashes on the Windows
+    runner. Returns the dir, which may not exist."""
     home = os.path.expanduser("~") if home is None else home
     env = os.environ if env is None else env
     if platform == "darwin":

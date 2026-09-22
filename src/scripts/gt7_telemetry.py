@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """GT7 telemetry: pure packet parsing + the derived-metrics engine.
 
-No sockets — the relay owns the UDP thread and feeds decrypted packets here. All
+No sockets: the relay owns the UDP thread and feeds decrypted packets here. All
 functions are deterministic (timestamps are injected) so the engine is unit-tested
-without a console. Offsets: community packet-'A' layout, validated live via
-tools/gt7-telemetry-probe.py. See the design spec.
+without a console. Offsets follow the community packet-'A' layout;
+tools/gt7-telemetry-probe.py checks them against a live console. See the design spec.
 """
 import json
 import os
@@ -12,7 +12,7 @@ import struct
 import threading
 from collections import deque, namedtuple
 
-# --- Packet 'A' field offsets (little-endian) ---
+# Packet 'A' field offsets (little-endian).
 OFF_MAGIC = 0x00
 OFF_SPEED = 0x4C        # metres/second (float)
 OFF_FUEL_LEVEL = 0x44   # litres in tank (float)
@@ -29,38 +29,35 @@ OFF_FLAGS = 0x8E        # simulator flags (uint16 bitfield)
 OFF_THROTTLE = 0x91     # 0-255 (uint8)
 OFF_BRAKE = 0x92        # 0-255 (uint8)
 
-# --- Simulator flag bits (subset we use) ---
+# Simulator flag bits, the subset we use.
 FLAG_ON_TRACK = 1 << 0
 FLAG_PAUSED = 1 << 1
 FLAG_LOADING = 1 << 2   # loading / processing (menu / replay transitions)
 
-# --- Trace buffer (throttle/brake) ---
+# Trace buffer (throttle/brake).
 TRACE_WINDOW_S = 15.0
 TRACE_MIN_DT = 1.0 / 30      # decimate 60 Hz -> ~30 Hz
 
-# --- Tyre rolling-average window ---
 TYRE_AVG_WINDOW_S = 30.0
 
-# --- Delta trend (which way the gap to best is moving) ---
+# Delta trend: which way the gap to best is moving.
 DELTA_TREND_WINDOW_S = 1.5    # compare current delta vs this-many-seconds-ago
 DELTA_TREND_DEADBAND = 0.02   # s; |change| below this reads as "flat" (anti-jitter)
 
-# --- Lap validity guards ---
 # A lap only becomes a completed/reference lap if it was opened AT a lap-change
 # edge (not the first accumulator, which starts mid-lap when the relay connects
 # while the driver is already on track) AND ran a plausible minimum length. This
-# stops a partial "connect mid-lap" lap or a menu/out-lap blip (lapCount → 0/-1)
+# stops a partial "connect mid-lap" lap or a menu/out-lap blip (lapCount -> 0/-1)
 # from being installed as the reference and permanently corrupting delta/predicted.
-MIN_LAP_S = 5.0           # seconds; a loose floor below any real circuit lap — the
-MIN_LAP_DIST = 100.0      # metres; started_at_boundary is the primary guard, this
-                          # just drops the shortest menu/blip laps that slip through clean
+MIN_LAP_S = 5.0           # seconds, a loose floor below any real circuit lap
+MIN_LAP_DIST = 100.0      # metres; started_at_boundary is the primary guard, so these
+                          # two only drop the shortest blips that slip through clean
 # Cap the per-lap distance/time sample list so a same-lap packet flood (lap held
 # constant, distance forced up) cannot grow it without bound. Normal laps decimate
-# to a few hundred samples; a lap that exceeds the cap is bogus → marked unclean.
+# to a few hundred samples; a lap that exceeds the cap is bogus and marked unclean.
 SAMPLE_MIN_DIST = 4.0     # metres between retained samples
-MAX_SAMPLES = 4000        # ~16 km at 4 m spacing — far past any real lap
+MAX_SAMPLES = 4000        # ~16 km at 4 m spacing, far past any real lap
 
-# --- Pit-lap guards ---
 # A pit (in/out) lap is not representative: its time is inflated by the pit-lane
 # transit and the stationary service, and a refuel makes its fuel delta negative.
 # GT7 sends no pit flag, so we derive one: a sustained standstill (the car must
@@ -107,8 +104,8 @@ class _LapAccumulator:
     """Accumulates time + distance samples within one lap.
 
     started_at_boundary is False for the first accumulator (opened mid-lap when
-    the relay connects), True for accumulators opened at a real lap-change edge —
-    only the latter may become a completed/reference lap (see _finalise_lap)."""
+    the relay connects), True for accumulators opened at a real lap-change edge.
+    Only the latter may become a completed/reference lap (see _finalise_lap)."""
     __slots__ = ("t0", "elapsed", "distance", "samples", "clean", "last_t",
                  "fuel_start", "fuel_end", "started_at_boundary", "pit", "stopped_s")
 
@@ -157,8 +154,8 @@ class _LapAccumulator:
 class TelemetryEngine:
     """Consumes GT7Packets (timestamp injected) and derives lap/delta/predicted.
 
-    Fuel + input trace are added in Task 4/6. Lap detection uses the packet lap
-    counter; menu/replay/paused activity never finalises a lap. The reference is
+    Lap detection uses the packet lap counter; menu/replay/paused activity never
+    finalises a lap. The reference is
     the fastest clean completed lap, stored as time-vs-distance samples.
     """
 
@@ -248,8 +245,8 @@ class TelemetryEngine:
         if acc.pit:                       # in/out lap (standstill or refuel): never a
             return                        # reference, and out of the time/fuel averages
         # Only a lap that opened at a real lap-change edge and ran a plausible
-        # minimum length counts — rejects the mid-lap-connect partial and menu/
-        # out-lap blips that would otherwise poison the reference + fuel/time avgs.
+        # minimum length counts. That rejects the mid-lap-connect partial and the
+        # menu/out-lap blips, which would poison the reference and the averages.
         if not acc.started_at_boundary or acc.elapsed < MIN_LAP_S or acc.distance < MIN_LAP_DIST:
             return
         if self._ref is None or acc.elapsed < self._ref["time"]:
@@ -513,4 +510,4 @@ class TelemetryStore:
                 ref["samples"] = [(float(d), float(t)) for d, t in ref["samples"]]
                 self._eng._ref = ref
         except (OSError, ValueError, TypeError):
-            pass  # no/invalid reference file yet -- start without one
+            pass  # no valid reference file yet; start without one

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""`racecast install-apps` — install the producer APPLICATIONS (OBS Studio, Bitfocus
+"""`racecast install-apps` installs the producer APPLICATIONS (OBS Studio, Bitfocus
 Companion, Tailscale) via winget (Windows) / brew casks (macOS) / official vendor
 paths (Linux, apt-based distros). Linux is automated after an explicit operator
 confirmation (sudo prompts surface to the operator); other distros get the manual
-guide. Never elevates privileges itself — the vendor installers and package
+guide. It never elevates privileges itself. The vendor installers and package
 managers prompt for sudo on their own. The required CLI tools live in
 install_tools.py."""
 import os, shutil, subprocess, sys
@@ -31,23 +31,22 @@ WINGET_APP_IDS = {"obs": "OBSProject.OBSStudio",
                   "tailscale": "Tailscale.Tailscale",
                   "discord": "Discord.Discord"}
 # The tailscale-app CASK is the GUI app; the plain `tailscale` formula is the
-# bare daemon — producers need the app.
+# bare daemon, and producers need the app.
 BREW_CASKS = {"obs": "obs", "companion": "companion",
               "tailscale": "tailscale-app", "discord": "discord"}
 
-# Default install locations per app — heuristics like companion_common's
-# WINDOWS_COMPANION_CANDIDATES (keep the Companion entries in sync with it).
+# Default install locations per app, heuristics like companion_common's
+# WINDOWS_COMPANION_CANDIDATES. Keep the Companion entries in sync with it.
 _WINDOWS_APP_PATHS = {
-    # OBS lands in Program Files (x86) when a 32-bit installer registered it —
-    # seen on a real producer machine.
+    # OBS lands in Program Files (x86) when a 32-bit installer registered it.
     "obs": (r"%ProgramFiles%\obs-studio\bin\64bit\obs64.exe",
             r"%ProgramFiles(x86)%\obs-studio\bin\64bit\obs64.exe"),
     "companion": (r"%LOCALAPPDATA%\Programs\companion\Companion.exe",
                   r"C:\Program Files\Companion\Companion.exe",
                   r"C:\Program Files (x86)\Companion\Companion.exe"),
     "tailscale": (r"C:\Program Files\Tailscale\tailscale.exe",),
-    # Discord is a Squirrel per-user install — the versioned app-x.y.z\Discord.exe
-    # folder moves on every update; Update.exe is the version-stable path.
+    # Discord is a Squirrel per-user install: the versioned app-x.y.z\Discord.exe
+    # folder moves on every update, so Update.exe is the version-stable path.
     "discord": (r"%LOCALAPPDATA%\Discord\Update.exe",),
 }
 _DARWIN_APP_PATHS = {
@@ -56,7 +55,7 @@ _DARWIN_APP_PATHS = {
     "tailscale": ("/Applications/Tailscale.app",),
     "discord": ("/Applications/Discord.app",),
 }
-# companion-pi installs a systemd service, not a `companion` binary on PATH —
+# companion-pi installs a systemd service, not a `companion` binary on PATH;
 # without these candidates the post-install re-check would call a successful
 # install "still missing".
 _LINUX_APP_PATHS = {
@@ -64,21 +63,20 @@ _LINUX_APP_PATHS = {
     "discord": ("/usr/share/discord", "/usr/bin/discord"),
 }
 
-# Official Linux install paths (verified against vendor docs). The two installer
-# scripts are downloaded over HTTPS (cert-verified) to a temp file and executed
-# VISIBLY — never via shell pipes — after an explicit operator confirmation.
+# Official Linux install paths. The two installer scripts are downloaded over
+# HTTPS (cert-verified) to a temp file and executed VISIBLY, never via a shell
+# pipe, after an explicit operator confirmation.
 OBS_PPA = "ppa:obsproject/obs-studio"
 TAILSCALE_INSTALLER = "https://tailscale.com/install.sh"          # escalates itself
 COMPANION_INSTALLER = \
     "https://raw.githubusercontent.com/bitfocus/companion-pi/main/install.sh"  # needs root
 # Discord's official Linux .deb (the snap is community-maintained, not Discord Inc.)
 DISCORD_DEB = "https://discord.com/api/download?platform=linux&format=deb"
-# Discord ships an amd64 .deb only (verified June 2026: both the stable and canary
-# Linux .deb report Architecture: amd64; the download API ignores an arch param).
-# Discord's native ARM64 push so far is Windows-on-ARM, not Linux. On arm64 the
-# amd64 .deb is unsatisfiable (its amd64 deps aren't installable), so skip it.
+# Discord ships an amd64 .deb only, and the download API ignores an arch param.
+# On arm64 that .deb is unsatisfiable (its amd64 deps aren't installable), so it
+# is skipped.
 DISCORD_NO_ARM64_NOTE = (
-    "Discord: no official ARM64 Linux .deb (stable and canary are amd64-only) — "
+    "Discord: no official ARM64 Linux .deb (stable and canary are amd64-only), "
     "skipping. Use the web app (https://discord.com/app) or a browser.")
 AMD64_MACHINES = ("x86_64", "amd64")
 
@@ -91,8 +89,8 @@ def _expand_windows(path, env):
 
 
 def app_path_candidates(app, platform, env=None):
-    """Expanded well-known install paths for `app` on `platform` (may be empty —
-    Linux mostly relies on the PATH fallback in app_present)."""
+    """Expanded well-known install paths for `app` on `platform`. May be empty:
+    Linux mostly relies on the PATH fallback in app_present."""
     env = os.environ if env is None else env
     if platform.startswith("win"):
         return [_expand_windows(p, env) for p in _WINDOWS_APP_PATHS.get(app, ())]
@@ -143,7 +141,7 @@ def _read_text(path):
 def _run(argv, run=None, timeout=8):
     """subprocess.run() wrapper that hides the Windows console window and turns
     any spawn failure into None. Used only for TRUE CLIs (tailscale, dpkg-query),
-    never GUI app binaries — exec'ing those could pop a window."""
+    never GUI app binaries, because exec'ing those could pop a window."""
     run = subprocess.run if run is None else run
     try:
         import services
@@ -218,7 +216,7 @@ def discord_squirrel_version(local_appdata, listdir=os.listdir):
 
 def windows_file_version(path):
     """Numeric FileVersion from a Windows PE binary's VERSIONINFO resource
-    (e.g. obs64.exe -> '32.1.2.0'), or None. Reads metadata only — never
+    (e.g. obs64.exe -> '32.1.2.0'), or None. Reads metadata only and never
     executes the binary. No-op (None) off Windows."""
     try:
         import ctypes
@@ -254,14 +252,14 @@ def _windows_app_version(app, env, exists, listdir, run, file_version):
         local = env.get("LOCALAPPDATA", "")
         return discord_squirrel_version(local, listdir=listdir) if local else None
     cands = app_path_candidates(app, "win32", env)
-    if app == "tailscale":   # a real CLI — `tailscale version` is safe
+    if app == "tailscale":   # a real CLI, so `tailscale version` is safe
         exe = _first_existing(cands, exists) or "tailscale"
         return cli_version([exe, "version"], run=run)
     exe = _first_existing(cands, exists)   # obs64.exe / Companion.exe
     return file_version(exe) if exe else None
 
 
-# Discord's bundled build_info.json — the .deb (/usr/share) and tarball (/opt).
+# Discord's bundled build_info.json: the .deb (/usr/share) and tarball (/opt).
 _LINUX_DISCORD_BUILD_INFO = ("/usr/share/discord/resources/build_info.json",
                              "/opt/discord/resources/build_info.json")
 
@@ -278,9 +276,9 @@ def _linux_app_version(app, exists, read_text, run):
                 if v:
                     return v
         return dpkg_version("discord", run=run)
-    # companion-pi (service install) exposes no stable version file we can rely
-    # on — the running web server is the source instead (companion_http_version,
-    # tried as a fallback in app_version).
+    # companion-pi (service install) exposes no stable version file, so the
+    # running web server is the source instead (companion_http_version, tried as
+    # a fallback in app_version).
     return None
 
 
@@ -298,10 +296,10 @@ def companion_http_version(base_url="http://127.0.0.1:8000", fetch=_http_fetch):
     serves no version REST endpoint, but its built frontend embeds the release as
     `SENTRY_RELEASE={id:"<ver>+<build>-<channel>-<sha>"}` in the first ~1 KB of
     its main bundle (Companion v5 switched the quote to a backtick template literal,
-    `id:`<ver>+…``; both are accepted). Fetch the SPA shell to find the content-hashed bundle name,
-    then a small Range GET of its head to read the marker. This is the only version
-    source for the companion-pi Linux service and for WSL/Docker setups where
-    Companion runs on another host — it works wherever Companion is reachable.
+    `id:`<ver>+…``; both are accepted). Fetch the SPA shell to find the
+    content-hashed bundle name, then a small Range GET of its head to read the
+    marker. This is the only version source for the companion-pi Linux service and
+    for WSL/Docker setups where Companion runs on another host.
     `fetch(url, range_bytes)` returns the body (range_bytes=None = whole shell)
     and raises on failure; the default uses urllib with a short timeout."""
     import re
@@ -330,7 +328,7 @@ def app_version(app, platform=None, *, exists=os.path.exists, read_plist=_read_p
     build_info.json, and `tailscale version`. Companion has no local version file
     on Linux, so when the local probe comes back empty its running web server is
     queried (companion_http_version). Anything unavailable -> None, so the surfaces
-    show presence without a version, never an error (issue #91)."""
+    show presence without a version, never an error (#91)."""
     platform = sys.platform if platform is None else platform
     env = os.environ if env is None else env
     if platform == "darwin":
@@ -347,16 +345,16 @@ def app_version(app, platform=None, *, exists=os.path.exists, read_plist=_read_p
 def installed_apps_report(apps, version_fn):
     """Aligned 'name  version' lines for already-installed `apps` (version_fn(app)
     -> str|None). Apps with no probed version show '(version unavailable)' rather
-    than an empty column (issue #91)."""
+    than an empty column (#91)."""
     width = max((len(a) for a in apps), default=0)
     return [f"  {a.ljust(width)}  {version_fn(a) or '(version unavailable)'}"
             for a in apps]
 
 
-# Apps whose winget SILENT install is broken: Companion's NSIS installer
-# writes NOTHING without admin yet exits 0, so winget reports success while
-# nothing was installed (seen live). --interactive runs the UI wizard, whose
-# UAC prompt the operator can actually answer.
+# Apps whose winget SILENT install is broken: Companion's NSIS installer writes
+# NOTHING without admin yet exits 0, so winget reports success while nothing was
+# installed. --interactive runs the UI wizard, whose UAC prompt the operator can
+# answer.
 WINGET_INTERACTIVE = ("companion",)
 
 
@@ -375,8 +373,8 @@ def app_install_commands(manager, apps, brew_path="brew"):
 
 def app_update_commands(manager, apps, brew_path="brew"):
     """The argv list(s) to UPGRADE already-installed `apps` with `manager`.
-    brew skips self-updating casks (Discord/Tailscale update themselves) —
-    that is fine, not a failure. Linux: see apps_update_guide()."""
+    brew skips self-updating casks (Discord/Tailscale update themselves), which
+    is fine, not a failure. Linux: see apps_update_guide()."""
     if manager == "winget":
         return [["winget", "upgrade", "--id", WINGET_APP_IDS[a], "-e",
                  "--accept-source-agreements", "--accept-package-agreements"]
@@ -394,8 +392,8 @@ def partition_brew_updatable(present, managed_casks):
     `brew upgrade --cask` only works on casks brew tracks; an app present on disk
     but installed manually (or a self-updating cask brew never recorded) is not
     one, so it is reported and left alone instead of failing the whole upgrade
-    batch (issue #92). managed_casks=None means the probe failed -> treat every
-    present app as managed, preserving the old best-effort behavior."""
+    batch (#92). managed_casks=None means the probe failed, so every present app
+    is treated as managed."""
     if managed_casks is None:
         return list(present), []
     managed = [a for a in present if BREW_CASKS[a] in managed_casks]
@@ -419,7 +417,7 @@ def apps_manual_guide(platform, manager=None):
     if manager == "pacman":
         return "\n".join([
             "Install the apps manually:",
-            "  OBS Studio — the CEF-enabled build, NOT plain obs-studio:",
+            "  OBS Studio, the CEF-enabled build, NOT plain obs-studio:",
             f"    sudo pacman -S {PACMAN_APP_PACKAGES['obs']}",
             "    (plain obs-studio has no Browser Source, so the HUD/timer stay black)",
             "  Tailscale:",
@@ -427,7 +425,7 @@ def apps_manual_guide(platform, manager=None):
             "    sudo systemctl enable --now tailscaled && sudo tailscale up",
             "  Discord:",
             f"    sudo pacman -S {PACMAN_APP_PACKAGES['discord']}",
-            "  Companion — not packaged:",
+            "  Companion, not packaged:",
             "    " + PACMAN_COMPANION_NOTE.split(". ", 1)[-1],
         ])
     lines = ["Install the apps manually:"]
@@ -440,7 +438,7 @@ def apps_manual_guide(platform, manager=None):
         lines.append("  Tailscale  (https://tailscale.com/download):")
         lines.append("    curl -fsSL https://tailscale.com/install.sh | sh")
         lines.append("    sudo tailscale up")
-        lines.append("  Companion  (https://bitfocus.io/companion) — headless/service, Debian/Ubuntu x64/arm64:")
+        lines.append("  Companion  (https://bitfocus.io/companion): headless/service, Debian/Ubuntu x64/arm64:")
         lines.append("    sudo apt-get install -y libatomic1   # companion-pi's node needs it (missing on minimal 24.04)")
         lines.append("    curl -fsSL https://raw.githubusercontent.com/bitfocus/companion-pi/main/install.sh | sudo bash")
         lines.append("  Discord  (https://discord.com/download):")
@@ -452,7 +450,7 @@ def apps_manual_guide(platform, manager=None):
         lines.append("  Tailscale  : https://tailscale.com/download")
         lines.append("  Discord    : https://discord.com/download")
     if platform.startswith("win"):
-        lines.append("NOTE: approve the UAC (admin) prompts — Companion's installer "
+        lines.append("NOTE: approve the UAC (admin) prompts. Companion's installer "
                      "writes nothing without admin yet still reports success.")
     return "\n".join(lines)
 
@@ -472,7 +470,7 @@ def linux_install_steps(apps, which=shutil.which, machine=None):
 
     def _ensure_update():
         # A fresh image (empty/stale index) can't locate a package otherwise
-        # (issue #408); refresh once and let later apt-get installs reuse it.
+        # (#408); refresh once and let later apt-get installs reuse it.
         if not updated[0]:
             steps.append(("run", ["sudo", "apt-get", "update"]))
             updated[0] = True
@@ -488,7 +486,7 @@ def linux_install_steps(apps, which=shutil.which, machine=None):
     if "companion" in apps:
         # companion-pi's bundled node needs libatomic.so.1, which is absent on a
         # fresh minimal Ubuntu 24.04, so its node can't start and no service is
-        # created. Install libatomic1 BEFORE the vendor installer (issue #413).
+        # created. Install libatomic1 BEFORE the vendor installer (#413).
         _ensure_update()
         steps.append(("run", ["sudo", "apt-get", "install", "-y", "libatomic1"]))
         steps.append(("script", COMPANION_INSTALLER, ["sudo", "bash"]))
@@ -500,7 +498,7 @@ def linux_install_steps(apps, which=shutil.which, machine=None):
     return steps
 
 
-# Arch (pacman). Three of the four apps are packaged; Companion is not — see
+# Arch (pacman). Three of the four apps are packaged; Companion is not, see
 # PACMAN_COMPANION_NOTE. `obs` deliberately maps to obs-studio-browser: the plain
 # obs-studio package is built WITHOUT CEF, so every Browser Source is missing and
 # the relay's HUD/timer overlays render black with no error anywhere.
@@ -509,14 +507,14 @@ PACMAN_APP_PACKAGES = {"obs": "obs-studio-browser", "tailscale": "tailscale",
 PACMAN_COMPANION_NOTE = (
     "Companion is in no Arch repository and not in the AUR under a usable name "
     "(`companion-satellite` is a different product). Install it by hand into the "
-    "companion-pi layout racecast controls — the wiki page 'Arch Linux — the "
+    "companion-pi layout racecast controls. The wiki page 'Arch Linux — the "
     "CachyOS example' has the exact steps, including the trap that "
     "`racecast companion enable-control` must run BEFORE `companion start`.")
 
 
 def pacman_install_steps(apps):
-    """Ordered (kind, ...) steps to install `apps` with pacman — same step shapes
-    as linux_install_steps so _install_linux can execute either plan.
+    """Ordered (kind, ...) steps to install `apps` with pacman, in the same step
+    shapes as linux_install_steps so _install_linux can execute either plan.
 
     Repository packages go in ONE `pacman -S` call. Deliberately no `-Sy`:
     refreshing the package list without upgrading the system is Arch's
@@ -529,7 +527,7 @@ def pacman_install_steps(apps):
     if "tailscale" in apps:
         # Parity with the apt path, where tailscale's own install.sh enables the
         # daemon. The Arch package ships the unit disabled, so without this the
-        # tailnet is down after the next reboot — and the relay's `--bind auto`
+        # tailnet is down after the next reboot, and the relay's `--bind auto`
         # would silently fall back to localhost-only.
         steps.append(("run", ["sudo", "systemctl", "enable", "--now", "tailscaled"]))
     if "companion" in apps:
@@ -558,11 +556,11 @@ def _install_linux(missing, assume_yes):
     elif shutil.which("pacman"):
         manager, steps = "pacman", pacman_install_steps(missing)
     else:
-        print("No supported package manager detected — install manually:")
+        print("No supported package manager detected. Install manually:")
         print(apps_manual_guide(sys.platform))
         return 0
     if not steps:
-        print("Nothing to install here — see the manual guide:")
+        print("Nothing to install here. See the manual guide:")
         print(apps_manual_guide(sys.platform, manager))
         return 0
     print("Planned steps (sudo will prompt for your password; any installer")
@@ -581,7 +579,7 @@ def _install_linux(missing, assume_yes):
         return 0
     failed = []
     for step in steps:
-        if step[0] == "note":          # informational only — not an install, not a failure
+        if step[0] == "note":          # informational only, not an install or a failure
             print(step[1])
             continue
         label = " ".join(step[1]) if step[0] == "run" else step[1]  # argv vs URL
@@ -595,8 +593,8 @@ def _install_linux(missing, assume_yes):
                 rc = _run_remote_script(step[1], step[2])
         except Exception as exc:                      # noqa: BLE001
             # A download/timeout/HTTP error on ONE vendor (e.g. Discord's CDN)
-            # must not abort the remaining apps or crash with a traceback — the
-            # other installs already ran. Record it and carry on.
+            # must not abort the remaining apps or crash with a traceback, since
+            # the other installs already ran. Record it and carry on.
             print(f"  ! step failed: {exc}")
             rc = 1
         if rc != 0:
@@ -619,7 +617,7 @@ def _install_linux(missing, assume_yes):
     _obs_browser_notice()
     _pipewire_audio_setup(failed)
     if failed:
-        print("\nThese steps failed — re-run `racecast install-apps` to retry them:")
+        print("\nThese steps failed; re-run `racecast install-apps` to retry them:")
         for f in failed:
             print("  -", f)
     return 1 if failed else 0
@@ -629,8 +627,8 @@ def _pipewire_audio_setup(failed):
     """On Linux, install the obs-pipewire-audio-capture plugin (the Discord audio
     source's backend) into the per-user OBS plugins dir when OBS is present, the
     plugin is missing, and this is a prebuilt (x86_64, non-flatpak) target. Prints a
-    Flathub / source-build hint otherwise. Best-effort — a download failure is
-    recorded in `failed`, never crashes the install."""
+    Flathub / source-build hint otherwise. Best-effort: a download failure is
+    recorded in `failed` and never crashes the install."""
     if not sys.platform.startswith("linux"):
         return
     import platform
@@ -639,9 +637,9 @@ def _pipewire_audio_setup(failed):
         home = os.path.expanduser("~")
         obs_present = app_present("obs", sys.platform)
         machine = platform.machine()
-        # ANY location OBS loads from, not just the per-user one — a distro
-        # package (Arch/AUR et al.) already satisfies this, and downloading a
-        # second copy would leave OBS with two builds of the same plugin.
+        # ANY location OBS loads from, not just the per-user one: a distro
+        # package already satisfies this, and downloading a second copy would
+        # leave OBS with two builds of the same plugin.
         plugin_present = opw.plugin_present(home, machine)
         flatpak = opw.is_flatpak_obs(home)
         if obs_present and not plugin_present and not flatpak and opw.is_prebuilt_arch(machine):
@@ -660,7 +658,7 @@ def _pipewire_audio_setup(failed):
 def _obs_browser_notice():
     """On a supported Linux arch where OBS is installed but its Browser Source
     plugin is missing (the distro/PPA ships none on aarch64), point at the
-    source-build command — the relay HUD/timer overlays need a Browser Source."""
+    source-build command; the relay HUD/timer overlays need a Browser Source."""
     if not sys.platform.startswith("linux"):
         return
     import platform
@@ -670,8 +668,8 @@ def _obs_browser_notice():
         hint = obl.install_hint(
             platform.machine(),
             obs_present=app_present("obs", sys.platform),
-            # Check every plugin dir, not only Debian's multiarch one — Arch keeps
-            # them in a plain /usr/lib/obs-plugins and was reported as "missing".
+            # Check every plugin dir, not only Debian's multiarch one: Arch keeps
+            # them in a plain /usr/lib/obs-plugins.
             browser_present=obl.browser_plugin_present(obl.obs_plugins_dirs(arch)),
         )
     except Exception:                                  # noqa: BLE001
@@ -730,14 +728,14 @@ def main():
         if present and manager == "brew":
             # brew can only upgrade casks it tracks. An app present on disk but
             # installed outside Homebrew makes `brew upgrade --cask` error and
-            # fail the whole batch — skip those with a note instead (issue #92).
+            # fail the whole batch, so those are skipped with a note (#92).
             managed = _common().brew_installed_casks(brew_path)
             to_update, elsewhere = partition_brew_updatable(present, managed)
             if to_update:
                 print("Updating Homebrew-managed apps:", ", ".join(to_update))
                 cmds += app_update_commands(manager, to_update, brew_path=brew_path)
             if elsewhere:
-                print("Not updating (installed outside Homebrew — they self-update "
+                print("Not updating (installed outside Homebrew; they self-update "
                       "or were installed manually):", ", ".join(elsewhere))
         elif present:
             print("Updating installed apps:", ", ".join(present))
@@ -769,7 +767,7 @@ def main():
           "network (your invited account).")
     print("  Companion: launch once, then `racecast export companion` + import the config.")
     print("  OBS: run `racecast setup` and import the localized collection.")
-    print("  Discord: sign in — used for the interview audio (OBS app-audio capture).")
+    print("  Discord: sign in; it carries the interview audio (OBS app-audio capture).")
 
 
 if __name__ == "__main__":

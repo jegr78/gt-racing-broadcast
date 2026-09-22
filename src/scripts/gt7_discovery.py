@@ -1,15 +1,15 @@
-"""GT7 console (PlayStation) discovery over the LAN — the explicit, operator-facing
+"""GT7 console (PlayStation) discovery over the LAN: the explicit, operator-facing
 scan behind `racecast gt7-discover` and the Control Center "Discover PlayStation"
-button. Reuses the proven GT7 heartbeat: bind 0.0.0.0:33740, broadcast a heartbeat
-byte to 255.255.255.255:33739, and latch a responder ONLY when its reply decrypts —
-which proves it is a real GT7 console emitting valid telemetry, not any LAN host that
+button. Reuses the GT7 heartbeat: bind 0.0.0.0:33740, broadcast a heartbeat byte to
+255.255.255.255:33739, and latch a responder ONLY when its reply decrypts, which
+proves it is a real GT7 console emitting valid telemetry, not any LAN host that
 happens to sit on that port.
 
 Pure-ish + best-effort: socket / clock / decrypt are injectable seams (unit-tested with
 a fake socket) and the function NEVER raises. The relay (racecast-feeds.py) is
 deliberately import-free, so the port constants below (GT7_RECV_PORT / GT7_SEND_PORT)
-are DUPLICATED there (racecast-feeds.py also carries GT7_HEARTBEAT_S for its own loop) —
-keep the shared copies in sync.
+are DUPLICATED there (racecast-feeds.py also carries GT7_HEARTBEAT_S for its own loop).
+Keep the shared copies in sync.
 """
 import importlib.util
 import os
@@ -83,6 +83,6 @@ def discover_consoles(timeout=4.0, *, sock_factory=None, decrypt=None, now=None,
         try:
             sock.close()
         except OSError:
-            pass  # already closed / never opened — best-effort cleanup
+            pass  # already closed or never opened; cleanup is best-effort
     consoles = sorted(found)
     return {"consoles": consoles, "note": "" if consoles else NO_CONSOLE_NOTE}

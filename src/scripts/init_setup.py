@@ -1,7 +1,7 @@
 """First-time setup wizard logic behind `racecast init`.
 
 Pure building blocks wired by racecast.py: the ordered step plan, done-detection
-predicates (every probe is injected — tests never touch the system), the gate
+predicates (every probe is injected, so tests never touch the system), the gate
 pause (interactive vs non-TTY checkpoint-and-exit), the wizard loop, and the
 closing manual-next-steps text. The wizard only orchestrates the existing
 one-shots; it owns no install/download logic.
@@ -39,13 +39,13 @@ STEP_KINDS = {
                 "instruction": "Create or select a league profile and set its "
                                "SHEET_ID (profiles/<name>/profile.env). Then re-check. "
                                "For a zero-config smoke test, run "
-                               "`racecast profile use demo` — the shipped demo league "
-                               "points at a public read-only Sheet."},
+                               "`racecast profile use demo`. The shipped demo "
+                               "league points at a public read-only Sheet."},
     "env": {"kind": "action", "op": None},
     "install-tools": {"kind": "job", "op": "install-tools"},
     "install-apps": {"kind": "job", "op": "install-apps"},
     "cookies": {"kind": "job", "op": "cookies",
-                "instruction": "Log in to YouTube in {browser} first — the "
+                "instruction": "Log in to YouTube in {browser} first. The "
                                "cookie export reads that browser's session."},
     "graphics": {"kind": "job", "op": "graphics"},
     "media": {"kind": "job", "op": "media"},
@@ -85,10 +85,8 @@ def build_plan(skip_installs=False):
             if not (skip_installs and k in INSTALL_STEPS)]
 
 
-# ---------------------------------------------------------------------------
 # Done-detection: each predicate returns the skip-reason string when the step
 # is already done, or None when it must run. All probes are injected.
-# ---------------------------------------------------------------------------
 
 def profile_done(active, sheet_id):
     """The profile step is done when a league profile is active and its SHEET_ID
@@ -123,14 +121,14 @@ def apps_done(present, apps):
 
 
 def cookies_done(level, detail):
-    """level/detail from preflight.cookies_status() — PASS means fresh +
-    logged-in markers found; anything else (missing/stale/anonymous) runs."""
+    """level/detail from preflight.cookies_status(): PASS means fresh, with
+    logged-in markers found. Anything else (missing/stale/anonymous) runs."""
     return f"yt-cookies.txt {detail}" if level == "PASS" else None
 
 
 def assets_done(missing, count):
     """`missing` is event.check_assets()' list when the sheet was readable,
-    or None when it was not — then the step runs and produces the real,
+    or None when it was not, in which case the step runs and produces the real,
     actionable error itself (spec: probe failure counts as not done)."""
     if missing == []:
         return f"complete ({count} file(s))"
@@ -152,19 +150,17 @@ def export_done(exists):
     return "config already exported" if exists else None
 
 
-# ---------------------------------------------------------------------------
 # Wizard: gates, loop, output. The step dicts are built by racecast.py:
 #   {"key": str, "label": str, "done": () -> str|None, "run": () -> int}
-# ---------------------------------------------------------------------------
 
 def gate_pause(message, isatty, ask=input):
     """A manual gate. Interactive: block until the operator presses Enter.
-    Non-TTY (CI/pipe): degrade to checkpoint-and-exit — SystemExit(str) prints
-    the instruction to stderr and exits 1 (Python semantics)."""
+    Non-TTY (CI/pipe): degrade to checkpoint-and-exit, where SystemExit(str)
+    prints the instruction to stderr and exits 1 (Python semantics)."""
     if not isatty:
-        raise SystemExit(f"{message}\nThen run `racecast init` again — completed "
+        raise SystemExit(f"{message}\nThen run `racecast init` again; completed "
                          "steps are skipped.")
-    ask(f"{message} — press Enter to continue: ")
+    ask(f"{message}. Press Enter to continue: ")
 
 
 def fmt_step(idx, total, label, verdict):
@@ -173,7 +169,7 @@ def fmt_step(idx, total, label, verdict):
 
 def run_wizard(steps, force, echo):
     """Run the plan: skip done steps (unless --force), stop on the first hard
-    error. Returns (exit_code, finished) — finished=False means the wizard
+    error. Returns (exit_code, finished), where finished=False means the wizard
     stopped early; a non-zero code from the LAST step (preflight's verdict)
     still counts as finished. Gate SystemExits propagate to the caller."""
     code, total = 0, len(steps)
@@ -186,14 +182,14 @@ def run_wizard(steps, force, echo):
         code = step["run"]()
         if code and idx < total:
             echo(f"\nStep '{step['label']}' failed (exit {code}). Fix the "
-                 "issue above, then run `racecast init` again — completed steps "
+                 "issue above, then run `racecast init` again; completed steps "
                  "are skipped.")
             return code, False
     return code, True
 
 
 def manual_next_steps(import_json, companion_cfg):
-    """The closing checklist — the things no script can do."""
+    """The closing checklist: the things no script can do."""
     return [
         f"Import the OBS scene collection: {import_json} "
         "(OBS: Scene Collection -> Import; do not move the file afterwards).",
