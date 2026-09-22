@@ -119,7 +119,7 @@
         render(Array.isArray(d.messages) ? d.messages : []);
       }
       // 404 (reader disabled) -> leave the box empty; NO auto-hide.
-    } catch (e) { /* transient — keep the last render */ }
+    } catch (e) { /* transient; keep the last render */ }
     setTimeout(poll, POLL_MS);
   }
   poll();

@@ -4,10 +4,8 @@
 <meta charset="utf-8">
 <title>GT Racing HUD</title>
 <style>
-  /* Positions match the old per-cell OBS browser sources 1:1 (align = top-left,
-     canvas 1920x1080). The Overlay.png frame stays its own OBS source; this page
-     only renders the text/flag/brand that used to be the 13 chroma-keyed sheet
-     sources. Tweak coordinates here to fine-tune live. */
+  /* Canvas 1920x1080, every slot positioned from the top left. The Overlay.png
+     frame stays its own OBS source; this page renders only text, flags and brands. */
   html, body { margin: 0; width: 1920px; height: 1080px;
     background: transparent; overflow: hidden;
     font-family: "Arial Narrow", "Arial", sans-serif; }
@@ -18,7 +16,7 @@
   .white { color: #ffffff; text-shadow: 0 2px 4px rgba(0,0,0,.55); }
   .black { color: #111111; }
 
-  /* Top module — stint label, side-by-side with the clock */
+  /* Top module: stint label, side-by-side with the clock */
   #stint { left: 712px; top: 40px; width: 236px; height: 46px;
     justify-content: center; font-size: 30px; letter-spacing: 1px; color: #eef0f2; }
 
@@ -37,15 +35,13 @@
   #round-country { left: 1144px; top: 958px; width: 450px; height: 39px;
     font-size: 26px; color: #eef0f2; }
 
-  /* Team podium row: each car is THREE independently positionable slots —
-     brand logo, number badge, auto-fit name (issue #136). The overlay builder
-     can place/restyle each on its own; --team-name-max/min bound the auto-fit. */
+  /* Team podium row: each car is three independently positionable slots, the
+     brand logo, the number badge and the auto-fit name (#136). The overlay builder
+     places and restyles each on its own; --team-name-max/min bound the auto-fit. */
   .team-logo { height: 50px; width: 54px; justify-content: center; }
-  /* The logo keeps its aspect ratio (never forced to fill the box), so the box's
-     justify-content/align-items actually position it — the overlay builder exposes
-     align/valign on these slots. Centered by default (see .team-logo above) to
-     preserve the pre-existing look; object-fit: contain guarantees it is never
-     clipped. */
+  /* object-fit: contain keeps the logo's aspect ratio instead of filling the box,
+     so the box's justify-content/align-items position it and the builder's
+     align/valign on these slots take effect. */
   .team-logo img { height: 100%; width: auto; max-width: 100%; object-fit: contain; }
   .team-num { width: 54px; height: 48px; background: #12161c; color: #fff;
     font-size: 20px; padding: 4px; border-radius: 3px; justify-content: center; }
@@ -67,13 +63,11 @@
   #team2-brand { left: 896px; top: 1064px; }
   #team3-brand { left: 1340px; top: 1064px; }
 
-  /* Tile colour bar + quali lap (issue #555). The bar is a plain box slot with
-     NO background in base — a profile paints it with var(--team-bg), which
-     setTeam() publishes from the sheet's per-team colours. It is the FIRST slot
-     of its tile in the DOM so it paints behind logo/number/name. The quali lap
-     shares the brand row's box but is right-aligned, so brand text (left) and
-     lap time (right) coexist on one line. Positions here are the provisional
-     default look; a league places them in the overlay builder. */
+  /* Tile colour bar + quali lap (#555). The bar carries no background in base; a
+     profile paints it with var(--team-bg), which setTeam() publishes from the
+     sheet. It is the first slot of its tile in the DOM so it paints behind the
+     logo, number and name. The quali lap shares the brand row's box but is
+     right-aligned, so brand text and lap time coexist on one line. */
   .team-bar { width: 391px; height: 60px; }
   #team1-bar { left: 318px; top: 1006px; }
   #team2-bar { left: 762px; top: 1006px; }
@@ -84,14 +78,13 @@
   #team2-quali { left: 896px; top: 1064px; }
   #team3-quali { left: 1340px; top: 1064px; }
 
-  /* POV picture-in-picture frame (issue #141): aligned to the OBS "Feed POV"
-     scene item (pos 1496,644, bounds 384x216). Transparent by default — set a
-     background/border in the overlay builder to frame the PiP on air. */
+  /* POV picture-in-picture frame (#141), aligned to the OBS "Feed POV" scene
+     item. Transparent by default; give it a background or border in the overlay
+     builder to frame the PiP on air. */
   #pov { left: 1496px; top: 644px; width: 384px; height: 216px; }
 
-  /* POV name label — top-right of the POV frame, splitscreen-label look (#130).
-     A normal builder box (left/top/width/height + text props); grey-pill look is
-     the default fill. Shown only while the POV feed is on air (see tick()). */
+  /* POV name label, top-right of the POV frame (#130). A normal builder box.
+     Shown only while the POV feed is on air (see tick()). */
   #pov-name { left: 1592px; top: 618px; width: 288px; height: 38px;
     justify-content: flex-end;
     background: rgba(38,44,52,.92); border: 1px solid #4a5560; border-radius: 7px;
@@ -99,17 +92,15 @@
     font-family: "IBM Plex Mono", ui-monospace, monospace;
     font-weight: 600; font-size: 22px; letter-spacing: .04em; }
 
-  /* League logo box (Solo Commentary HUD, epic #300): a plain builder box slot,
-     top-right, provisional position — fed by the relay's /hud/logo route. */
+  /* League logo box (#300): a builder box slot fed by the relay's /hud/logo route. */
   #league-logo { left: 1792px; top: 12px; width: 112px; height: 112px; }
   #league-logo img { max-width: 100%; max-height: 100%; object-fit: contain; }
 
-  /* Stream-chat box (Solo Commentary HUD, epic #300): renders the read-only
-     broadcast chat (issue #294) onto the program overlay. Self-hides when
-     /broadcast-chat/data is 404 (reader disabled) or has no messages, so
-     endurance and any event with no Channel tab stay byte-identical.
-     Provisional box, left side — tuned later; --chat-* vars mirror the
-     intermission page's --ichat-* so a league can restyle via override CSS. */
+  /* Stream-chat box (#300): renders the read-only broadcast chat (#294) onto the
+     program overlay. Self-hides when /broadcast-chat/data is 404 or carries no
+     messages, so endurance and any event without a Channel tab stay unchanged.
+     The --chat-* vars mirror the intermission page's --ichat-* so a league can
+     restyle via override CSS. */
   #chat{left:6px;top:690px;width:290px;height:220px;flex-direction:column;align-items:stretch;
     overflow:hidden;border-radius:12px;background:rgba(12,16,22,.55);color:#eef2f6;
     font-family:-apple-system,"Segoe UI",Roboto,Arial,sans-serif;padding:10px 12px}
@@ -117,21 +108,19 @@
   #chat-log .msg{margin-top:6px;line-height:1.32;font-size:19px;overflow-wrap:anywhere}
   #chat-log .u{font-weight:700;color:#f0a868;margin-right:6px}
 
-  /* Solo-mode telemetry block (issue #324): tyre-temp bands, an input trace
-     (throttle/brake), delta/predicted (hidden until a reference lap exists),
-     and fuel. Approved POV layout (visual review loop, #324): a GT3-dash
-     style panel bottom-right, the delta centred between the in-game timers,
-     and a webcam frame bottom-left. */
+  /* Solo-mode telemetry block (#324): tyre-temp bands, a throttle/brake trace,
+     delta and predicted lap (hidden until a reference lap exists), and fuel. The
+     panel sits bottom-right, the delta between the in-game timers, the webcam
+     frame bottom-left. */
 
-  /* Delta: centred BETWEEN the two in-game timers; green negative / red
-     positive is set in JS from the numeric sign. */
+  /* Delta: centred between the two in-game timers. Green negative and red
+     positive are set in JS from the numeric sign. */
   #tele-delta{left:840px;top:206px;width:240px;height:32px;
     justify-content:center;font-size:30px;font-family:"SF Mono","Consolas",monospace;
     text-shadow:0 2px 6px rgba(0,0,0,.85)}
 
-  /* GT3-dash telemetry panel, bottom-right: labels sit above the values as
-     separate slots (amber, small-caps letter-spaced) so the value itself
-     stays big and each label is independently editable. */
+  /* Telemetry panel, bottom-right. Each label is its own slot above its value so
+     the value stays large and the label stays independently editable. */
   #tele-pred,#tele-fuel,#tele-top,#tele-clock,#tele-avg,#tele-dist{line-height:1.05;
     font-family:"SF Mono","Consolas",monospace;color:#eef2f6}
   #tele-pred-lbl,#tele-fuel-lbl,#tele-top-lbl,#tele-avg-lbl,#tele-dist-lbl{font:700 11px "SF Mono","Consolas",monospace;
@@ -146,14 +135,12 @@
   #tele-avg{left:1650px;top:809px;font-size:18px}
   #tele-dist-lbl{left:1770px;top:792px}
   #tele-dist{left:1770px;top:809px;font-size:18px;width:120px}
-  /* Time of day (on-track clock): top-left, centred in the gap between GT7's
-     lap-count header and its standings tower, on a dark translucent bar that
-     echoes the tower's name rows; left-aligned to the driver-name column.
-     No label (reads as a clock in context). */
+  /* Time of day (on-track clock): top-left, in the gap between GT7's lap-count
+     header and its standings tower, left-aligned to the driver-name column. */
   #tele-clock{left:80px;top:120px;font-size:26px;padding:2px 11px;border-radius:3px;
     background:rgba(24,26,29,.66);text-shadow:0 1px 3px rgba(0,0,0,.55)}
 
-  /* Tyre blocks: colour-filled 2x2 grid, band gradients per GT3-dash look. */
+  /* Tyre blocks: a 2x2 grid with one gradient per temperature band. */
   #tele-tyres{left:1522px;top:856px;width:356px;height:94px;
     display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:8px}
   .tw{min-width:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;
@@ -164,53 +151,48 @@
   .tw[data-band="hot"]{background:linear-gradient(180deg,#e6c352,#c99a2e);color:#2a2205}
   .tw[data-band="critical"]{background:linear-gradient(180deg,#ff7a7c,#e23d40);color:#2b0708}
 
-  /* Trace: iRacing-style panel look (faint grid + dark gradient). */
+  /* Trace: a faint grid over a dark gradient. */
   #tele-trace{left:1522px;top:960px;width:356px;height:92px;
     border-radius:9px;border:1px solid rgba(130,150,170,.35);
     background:repeating-linear-gradient(90deg,rgba(255,255,255,.05) 0 1px,transparent 1px 44px),
                repeating-linear-gradient(0deg,rgba(255,255,255,.05) 0 1px,transparent 1px 23px),
                linear-gradient(180deg,#0c1622,#0a0f18)}
 
-  /* Wide telemetry panel background, behind the values above (it is the
-     first child of #tele in the markup; these z-indexes keep the values on
-     top of it regardless of paint order). */
+  /* Telemetry panel background. It is the first child of #tele, so these
+     z-indexes are what keep the values on top of it. */
   #tele-panel{position:absolute;left:1500px;top:702px;width:398px;height:362px;
     background:rgba(9,12,17,.7);border:1px solid rgba(120,132,146,.42);border-radius:14px;z-index:0}
   #tele-tyres,#tele-trace,#tele-delta,#tele-pred,#tele-fuel,#tele-top,#tele-clock,
   #tele-pred-lbl,#tele-fuel-lbl,#tele-top-lbl,#tele-avg-lbl,#tele-dist-lbl,#tele-avg,#tele-dist{z-index:1}
 
-  /* Webcam frame, bottom-left: 16:9, bottom-aligned at y=884. Transparent
-     interior — the OBS webcam source sits inside; no label text. */
+  /* Webcam frame, bottom-left, 16:9. The interior stays transparent so the OBS
+     webcam source shows through. */
   #webcam{position:absolute;left:14px;top:695px;width:336px;height:189px;
     border:3px solid #cfd6df;border-radius:10px;box-shadow:0 6px 22px rgba(0,0,0,.55);z-index:2}
 
-  /* Tyres/fuel capture box: an INVISIBLE positioning box, same pattern as the
-     POV placeholder above — no border/background/shadow of its own. The
-     cropped "Solo Tyres/Fuel Capture" OBS source shows through from beneath
-     this HUD overlay; this box only drives that source's transform (see
-     OVERLAY_SLOT_OBS_SOURCES, Task 4, epic #300). Provisional bottom-left
-     placement, tuned later. */
+  /* Tyres/fuel capture: an invisible positioning box, like the POV placeholder
+     above. The cropped "Solo Tyres/Fuel Capture" OBS source shows through from
+     beneath this overlay; the box only drives that source's transform (see
+     OVERLAY_SLOT_OBS_SOURCES). */
   #tyres-capture{left:7px;top:926px;width:245px;height:84px}
 
   .ta{font-size:.6em;opacity:.75;margin-left:.15em}
 
-  /* Race-timer clock, merged in from the old separate timer source. Sits at the
-     top band at the clock's true on-air size/position (was OBS crop y[217..895]
-     + scale 0.0854 + pos 880,98). Tune live via the builder. */
+  /* Race-timer clock, in the top band. Tune live via the builder. */
   #clock { left: 986px; top: 34px; width: 236px; height: 56px;
     display: flex; align-items: center; justify-content: center; white-space: nowrap;
     font-family: "SF Mono", "Cascadia Mono", "Consolas", "Menlo", monospace;
     font-weight: 700; font-size: 46px; color: #eef0f2;
     text-shadow: 0 2px 6px rgba(0,0,0,.6); font-variant-numeric: tabular-nums; }
 
-  /* Race control banner (status line, hidden when empty). Opaque dark band
-     above the lower-third block of the Overlay.png frame (x 264..1594). */
+  /* Race control banner, hidden when empty. Sits above the lower-third block of
+     the Overlay.png frame. */
   #race-control { left: 264px; top: 864px; width: 1330px; height: 55px;
     font-size: 34px; background: #243039; padding: 14px; border-radius: 8px;
     color: #eef0f2; }
 
-  /* Race-condition flag (Yellow / Safety Car / FCY / …). Hidden when empty;
-     color-coded per state via data-state. Builder-positionable. */
+  /* Race-condition flag. Hidden when empty, colour-coded per state via
+     data-state. */
   #flag-status { left: 780px; top: 96px; width: 360px; height: 50px;
     justify-content: center; font-size: 28px; font-weight: 700; background: #243039;
     padding: 10px; border-radius: 8px; color: #eef0f2; }
@@ -222,13 +204,11 @@
   #flag-status[data-state="safety-car"],
   #flag-status[data-state="virtual-safety-car"],
   #flag-status[data-state="full-course-yellow"] { background: #f2c014; color: #111; }
-  /* Code 60: the pink Code-60 flag rendered as a left emblem (white ring carrying
-     "60" over a white diagonal cross) next to the label. The emblem is an inline
-     SVG, so the ring, cross and "60" scale crisply together. align-self:stretch +
-     aspect-ratio:1 size it to the box height, and the reduced vertical padding sets
-     a constant top/bottom gap — so it adapts to any per-league box height (e.g. a
-     slim 34px box) with no override needed. data-state is removed when empty (see
-     setFlag), so display:flex here never defeats `.el.empty { display:none }`. */
+  /* Code 60: an inline-SVG emblem left of the label. align-self:stretch +
+     aspect-ratio:1 size it to the box height and the reduced vertical padding sets
+     a constant top/bottom gap, so it adapts to any per-league box height with no
+     override. data-state is removed when empty (see setFlag), so display:flex here
+     never defeats `.el.empty { display:none }`. */
   #flag-status[data-state="code-60"] {
     color: #fff;
     background-color: #d6177e;
@@ -244,10 +224,10 @@
       center/contain no-repeat;
   }
   #flag-status[data-state="red-flag"] { background: #c62121; color: #fff; }
-  /* Checkered flag: a checkered emblem (inline SVG, sized to the box like the Code
-     60 emblem) next to the label on a dark ground — keeps the text legible instead
-     of fighting a full-box checkerboard. data-state is removed when empty (see
-     setFlag), so display:flex here never defeats `.el.empty { display:none }`. */
+  /* Checkered flag: an inline-SVG emblem next to the label on a dark ground, which
+     keeps the text legible instead of fighting a full-box checkerboard. data-state
+     is removed when empty (see setFlag), so display:flex here never defeats
+     `.el.empty { display:none }`. */
   #flag-status[data-state="checkered-flag"] {
     color: #fff;
     background-color: #171717;
@@ -265,9 +245,9 @@
 <link rel="stylesheet" href="/hud/override.css">
 </head>
 <body>
-  <!-- data-edit="<label>" marks a builder slot; data-edit-kind="text|box" sets
-       its property set (KIND_PROPS in overlay_build.py — the single source).
-       data-edit-props adds slot-specific extras (e.g. team-name auto-fit). -->
+  <!-- data-edit="<label>" marks a builder slot; data-edit-kind="text|box" picks
+       its property set (KIND_PROPS in overlay_build.py, the single source).
+       data-edit-props adds slot-specific extras, e.g. team-name auto-fit. -->
   <div id="stint" class="el white" data-edit="Stint banner" data-edit-kind="text"></div>
   <div id="session" class="el black" data-edit="Session" data-edit-kind="text"></div>
   <div id="streamer" class="el black" data-edit="Streamer" data-edit-kind="text"></div>
@@ -300,13 +280,12 @@
   <div id="chat" class="el" data-edit="Stream chat" data-edit-kind="box" style="display:none">
     <div id="chat-log"></div>
   </div>
-  <!-- Solo-mode telemetry block (issue #324): self-gating on /telemetry/data 200
-       vs 404, so it stays invisible in endurance (no such endpoint there). -->
+  <!-- Solo-mode telemetry block (#324): self-gating on /telemetry/data 200 vs 404,
+       so it stays invisible in endurance, which has no such endpoint. -->
   <div id="tele" style="display:none">
-    <!-- Panel background + webcam frame: builder box slots (position/size only —
-         the border/background/shadow/radius/z-index look stays in the CSS rules
-         above). "webcam" also drives the real OBS "Solo Webcam" device transform
-         on export + live, mirroring #pov -> "Feed POV" (issue #324). -->
+    <!-- Panel background + webcam frame: builder box slots for position and size
+         only, the look stays in the CSS rules above. "webcam" also drives the OBS
+         "Solo Webcam" transform on export and live, mirroring #pov (#324). -->
     <div id="tele-panel" class="el" data-edit="Telemetry panel" data-edit-kind="box"></div>
     <div id="webcam" class="el" data-edit="Webcam" data-edit-kind="box"></div>
     <div id="tele-tyres" class="el" data-edit="Tyre temps" data-edit-kind="box">
@@ -327,12 +306,11 @@
     <div id="tele-dist-lbl" class="el" data-edit="Distance label" data-edit-kind="text">DISTANCE</div>
     <div id="tele-dist" class="el white" data-edit="Distance" data-edit-kind="text">--</div>
   </div>
-  <!-- Tyres/fuel capture: a top-level builder box slot (position/size only, no visible
-       chrome) driving the real OBS "Solo Tyres/Fuel Capture" device transform on export +
-       live, like the webcam slot. Kept OUTSIDE the telemetry block so it stays
-       builder-editable in a Commentary profile (which has no telemetry -> #tele hidden).
-       Commentary-only in effect: the OBS source exists only in the Commentary collection,
-       so the box->OBS map entry is a no-op elsewhere (Task 4/epic #300). -->
+  <!-- Tyres/fuel capture: a top-level builder box slot driving the OBS "Solo
+       Tyres/Fuel Capture" transform, like the webcam slot. Kept outside the
+       telemetry block so it stays builder-editable in a Commentary profile, where
+       #tele is hidden. The OBS source exists only in the Commentary collection, so
+       the box to OBS map entry is a no-op elsewhere (#300). -->
   <div id="tyres-capture" class="el" data-edit="Tyres/Fuel capture" data-edit-kind="box"></div>
   <div id="clock" class="el white" data-edit="Clock" data-edit-kind="text"></div>
 
@@ -345,8 +323,8 @@
     s = Math.max(0, Math.ceil(s));
     const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
     const mm = h ? String(m).padStart(2, "0") : String(m);
-    // A zero hour is dropped (12:10, not 0:12:10) — short sessions read as
-    // mm:ss on air, and so does the final hour of a race (issue #555).
+    // A zero hour is dropped (12:10, not 0:12:10), so a short session and the
+    // final hour of a race both read as mm:ss on air. (#555)
     return (h ? h + ":" : "") + mm + ":" + String(x).padStart(2, "0");
   }
   function renderClock() {
@@ -408,15 +386,12 @@
       el.style.fontSize = size + "px";
     }
   }
-  // Per-tile colours (issue #555) are published as CUSTOM PROPERTIES on the
-  // tile's own slots, so one generic profile rule serves all three tiles and no
-  // colour literal lives in the base HUD. Set via style.setProperty (never string
-  // concatenation into CSS text), so a sheet value cannot escape into a new
-  // declaration; the relay already rejects implausible colours server-side.
-  // KEEP IN SYNC with the teamN-* slot block in the markup above (the
-  // team1-bar … team1-quali divs, and their team2-/team3- twins): every part
-  // listed here gets --team-bg/--team-fg, and a tile slot missing from this list
-  // silently gets no colours. Add a 7th tile slot -> add its suffix here.
+  // Per-tile colours (#555) are published as custom properties on the tile's own
+  // slots, so one generic profile rule serves all three tiles. Set via
+  // style.setProperty, never string concatenation into CSS text, so a sheet value
+  // cannot escape into a new declaration.
+  // KEEP IN SYNC with the teamN-* slot block in the markup above: a tile slot
+  // missing from this list silently gets no colours.
   const TEAM_PARTS = ["bar", "logo", "num", "name", "brand", "quali"];
   function setTeamColors(n, bg, fg) {
     for (const part of TEAM_PARTS) {
@@ -453,8 +428,8 @@
     fitName(nameEl);
   }
 
-  // Solo-mode telemetry (issue #324): self-gating on /telemetry/data 200 vs
-  // 404, so it stays hidden in endurance where the endpoint does not exist.
+  // Solo-mode telemetry (#324): self-gating on /telemetry/data 200 vs 404, so it
+  // stays hidden in endurance, where the endpoint does not exist.
   (function () {
     const tele = document.getElementById("tele");
     const ctx = document.getElementById("tele-trace").getContext("2d");
@@ -547,9 +522,8 @@
     pollData();
   })();
 
-  // Stream-chat box (Solo Commentary HUD, epic #300): renders the read-only
-  // broadcast chat (issue #294). Self-gates on 404/empty, mirroring the
-  // telemetry block's self-hide contract above.
+  // Stream-chat box (#300): renders the read-only broadcast chat (#294). Self-gates
+  // on 404 or empty, mirroring the telemetry block above.
   (function chatPoll() {
     const box = document.getElementById("chat"), log = document.getElementById("chat-log");
     async function tick() {
@@ -583,18 +557,16 @@
       setText("round-top", d.round && d.round.top);
       setText("round-country", d.round && d.round.country);
       setImg("round-flag", d.round && d.round.flagKey, "flags");
-      // Always process all three team slots (not just the present ones): an
-      // absent team must get setTeam's `.empty` class so its lower-third box
-      // hides. Iterating only d.teams left empty slots visible when a race has
-      // < 3 cars, or in solo POV/Commentary where there is no team lower-third.
+      // Always process all three team slots, not just the present ones: an absent
+      // team needs setTeam's `.empty` class so its lower-third box hides.
       { const _teams = d.teams || []; for (let i = 0; i < 3; i++) setTeam(i, _teams[i]); }
       setText("race-control", d.raceControl);
       setFlag("flag-status", d.flag);
       const povOn = !!d.povActive;
       document.getElementById("pov").classList.toggle("empty", !povOn);
       setText("pov-name", povOn ? (d.povName || "") : "");
-      // Race vs qualifying for the profile CSS (e.g. hide the quali lap during
-      // qualifying itself). Absent/unknown -> attribute cleared.
+      // Race vs qualifying for the profile CSS, e.g. hiding the quali lap during
+      // qualifying itself. Absent or unknown clears the attribute.
       if (d.mode) document.body.dataset.mode = d.mode;
       else delete document.body.dataset.mode;
     } catch (e) { /* keep last good frame on transient errors */ }

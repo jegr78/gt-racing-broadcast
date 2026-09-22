@@ -9,7 +9,7 @@ next non-empty cell to its right).
 Intermission Music (--music-url / env RACECAST_INTERMISSION_MUSIC_URL / Assets tab
 label 'Intermission Music') is downloaded as intermission.mp3. Accepts a Google
 Drive share link (direct download) or any http(s) URL (yt-dlp audio extraction).
-A missing music URL is a WARNING, not a failure; the neutral ambient-loop
+A missing music URL is a WARNING, not a failure — the neutral ambient-loop
 placeholder is seeded instead.
 
 Clips are written as intro.mp4 / outro.mp4 / trailer.mp4 / intermission.mp3 into
@@ -33,15 +33,17 @@ for _cand in (os.path.join(_HERE, "..", "scripts"),
     if os.path.isdir(_cand) and _cand not in sys.path:
         sys.path.insert(0, _cand)
 from services import external_tool_env  # de-PyInstaller the env for the yt-dlp spawn
-import placeholders  # noqa: E402  (pure stdlib helper, fills a missing clip)
+import placeholders  # noqa: E402  (pure stdlib helper — fills a missing clip)
 
 
 # Single muxed MP4 with audio, capped at 1080p (falls back to best available).
 YTDLP_FORMAT = "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b"
 
-# Transient-failure retry (#344). YouTube intermittently throws "HTTP Error 403"
-# on the media-data fetch. A fresh yt-dlp invocation re-extracts new signed URLs,
-# which is what clears the 403, so retry the whole download rather than skip the clip.
+# Transient-failure retry (#344). YouTube intermittently throws "HTTP Error 403:
+# Forbidden" on the media-data fetch (throttling / an expired signed format URL),
+# preferentially on the 2nd clip of a batch. A *fresh* yt-dlp invocation
+# re-extracts new signed URLs, which is what actually clears the 403, so we retry
+# the whole download a few times with a short backoff rather than skipping the clip.
 DOWNLOAD_ATTEMPTS = 3                 # total yt-dlp invocations before giving up
 RETRY_BACKOFF_SECONDS = (3, 8)        # sleep before retry 2, retry 3, then last value
 
@@ -56,8 +58,8 @@ MUSIC_KEY = "intermission"           # output basename stem -> intermission.mp3
 
 def load_dotenv(start):
     """Load KEY=VALUE pairs from a .env at the script dir or the project root into
-    os.environ; real env vars win. Bounded to the project (nearest ancestor with a
-    .git/.env.example marker). KEEP IN SYNC with the copies in racecast-feeds.py and
+    os.environ (real env vars win). Bounded to the project (nearest ancestor with
+    a .git/.env.example marker). KEEP IN SYNC with the copies in racecast-feeds.py and
     setup-assets.py."""
     candidates, d = [start], start
     for _ in range(4):
@@ -82,9 +84,9 @@ def load_dotenv(start):
     return None
 
 
-# Drive helpers, copied verbatim from get-graphics.py; the test
-# t_drive_helpers_match_get_graphics asserts byte-identical source. Do NOT move them
-# into src/scripts/: these scripts stay dependency-light, like the load_dotenv copies.
+# Drive helpers — copied verbatim from get-graphics.py (kept in sync; the test
+# t_drive_helpers_match_get_graphics asserts byte-identical source). Do NOT move
+# these into src/scripts/ — see the "duplicated load_dotenv ×4" philosophy.
 
 def is_drive_url(url):
     """True iff the URL's HOST is drive.google.com (or a subdomain). A plain
@@ -194,12 +196,14 @@ def build_music_cmd(url, out_path, cookies=None):
 def cookies_path(cli, here):
     """Resolve the YouTube cookie jar for the yt-dlp download.
 
-    An explicit `cli` path always wins; the racecast CLI passes it because it knows
-    the real runtime dir even inside a frozen binary. The fallback next to the
-    default runtime media dir is right for a source run but wrong under PyInstaller,
-    where `here` is the ephemeral bundle, so it would point at a cookies file that
-    never exists and Intro/Outro would 403. Legacy `cookies.txt` is the last resort
-    on not-yet-migrated installs."""
+    An explicit `cli` path (passed by the racecast CLI, which knows the real
+    runtime dir even inside a frozen PyInstaller binary) always wins. Otherwise
+    fall back to the jar next to the DEFAULT runtime media dir — correct for a
+    source run, but WRONG under PyInstaller where `here` is the ephemeral bundle
+    (`<_MEIPASS>/src/relay`), so the fallback would point at a cookies file that
+    never exists and Intro/Outro 403 on YouTube. That is exactly why the CLI now
+    passes `--cookies`. Legacy `cookies.txt` is the last resort on not-yet-migrated
+    installs."""
     if cli:
         return cli
     rt = os.path.dirname(media_dir(here))
@@ -208,7 +212,7 @@ def cookies_path(cli, here):
 
 
 def media_dir(here):
-    """Where clips live when --out is not given:
+    """Where clips live when --out is not given. Mirrors default_runtime_dir():
     repo layout (src/relay/) -> <repo>/runtime/media ; package (relay/) -> <pkg>/media."""
     if os.path.basename(here) == "relay" and os.path.basename(os.path.dirname(here)) == "src":
         return os.path.join(os.path.dirname(os.path.dirname(here)), "runtime", "media")
@@ -231,9 +235,9 @@ def seed_missing_media(out_dir, which, want_music=False):
 
 def reset_unlinked_media(out_dir, which, want_music=False):
     """Overwrite the neutral placeholder onto intro.mp4/outro.mp4 (in `which`) and
-    intermission.mp3 (when want_music) that the Sheet no longer links, so a removed
-    link reverts a stale clip (#387). Unlike seed_missing_media this REPLACES an
-    existing file. Returns sorted names."""
+    intermission.mp3 (when want_music) that the Sheet no longer links, so a
+    removed/absent link reverts a stale clip (issue #387). Unlike
+    seed_missing_media this REPLACES an existing file. Returns sorted names."""
     written = []
     for k in sorted(which):
         written += placeholders.reset_placeholders(
@@ -271,9 +275,11 @@ def build_download_cmd(url, out_path, cookies=None):
     would be arbitrary command execution). Cookies are inserted before the
     separator so they stay an option."""
     # --force-overwrites + --no-continue: always re-fetch to match the currently
-    # resolved URL. yt-dlp's default skips an existing output file and exits 0, which
-    # silently froze a clip whenever one was already there, such as a placeholder
-    # written before the URL was set.
+    # resolved URL. yt-dlp's default skips an existing output file ("has already
+    # been downloaded", exit 0), which silently froze a clip whenever one already
+    # existed — a placeholder written before the URL was set, or a changed URL —
+    # and made get-media print a misleading "OK". (music uses an atomic os.replace,
+    # so it was always fresh; this brings the yt-dlp path to parity.)
     cmd = ["yt-dlp", "-f", YTDLP_FORMAT, "--merge-output-format", "mp4",
            "--no-warnings", "--force-overwrites", "--no-continue", "-o", out_path]
     if cookies and os.path.exists(cookies):
@@ -284,13 +290,13 @@ def build_download_cmd(url, out_path, cookies=None):
 
 def run_download(cmd, *, attempts=DOWNLOAD_ATTEMPTS, backoff=RETRY_BACKOFF_SECONDS,
                  runner=None, sleeper=time.sleep, timeout=600, env=None):
-    """Run the yt-dlp download `cmd`, retrying a transient non-zero exit such as
-    YouTube's intermittent 'HTTP Error 403' on the media data; each fresh invocation
-    re-extracts new signed format URLs, which clears the 403. `FileNotFoundError`
-    (yt-dlp not installed) and `TimeoutExpired` are NOT retried, the latter because
-    it would mean up to attempts x timeout of stall. Returns the runner's result and
-    re-raises the last error after the final attempt. `runner`/`sleeper` are
-    injectable for tests."""
+    """Run the yt-dlp download `cmd`, retrying a transient failure (a non-zero
+    exit such as YouTube's intermittent 'HTTP Error 403' on the media data —
+    each fresh invocation re-extracts new signed format URLs, which is what
+    clears the 403). `FileNotFoundError` (yt-dlp not installed) and
+    `TimeoutExpired` are NOT retried (the latter would mean up to attempts×timeout
+    of stall). Returns the runner's result; re-raises the last error after the
+    final attempt. `runner`/`sleeper` are injectable for tests."""
     runner = runner or subprocess.run
     for i in range(attempts):
         try:
@@ -308,9 +314,9 @@ def run_download(cmd, *, attempts=DOWNLOAD_ATTEMPTS, backoff=RETRY_BACKOFF_SECON
 def download(url, out_path, cookies=None):
     """Download `url` to `out_path` as a single muxed MP4 (audio included).
     Uses yt-cookies.txt if it exists (YouTube bot-check parity with the relay).
-    The URL comes from the multi-editor Sheet Assets tab, so it must be a real
-    http(s) URL, never a file:// path or a flag-like value. Retries a transient
-    yt-dlp failure."""
+    The URL comes from the (multi-editor, semi-trusted) Sheet Assets tab, so it
+    must be a real http(s) URL — never a file:// path or a flag-like value.
+    Retries a transient yt-dlp failure (e.g. an intermittent HTTP 403)."""
     if not (url.startswith("http://") or url.startswith("https://")):
         raise ValueError(f"refusing non-http(s) media URL: {url!r}")
     cmd = build_download_cmd(url, out_path, cookies)
@@ -319,7 +325,7 @@ def download(url, out_path, cookies=None):
 
 def download_drive_file(url, out_path, timeout=120):
     """GET a Drive file to out_path (binary). Handles the large-file confirm
-    interstitial. Atomic write. Unlike get-graphics.download there is no PNG check."""
+    interstitial. Atomic write. (Music variant of get-graphics.download — no PNG check.)"""
     req = Request(url, headers={"User-Agent": "racecast-media/1.0"})
     with urlopen(req, timeout=timeout) as resp:
         ctype = resp.headers.get("Content-Type", "")
@@ -377,6 +383,7 @@ def main():
                          "real path so a frozen binary does not 403 on Intro/Outro.")
     a = ap.parse_args()
 
+    # Determine video clip set and music flag.
     if a.which == "all":
         which = {"intro", "outro", "trailer"}
     elif a.which == "both":
@@ -411,8 +418,9 @@ def main():
     urls = resolve_urls(which, cli, os.environ, csv_text)
     os.makedirs(a.out, exist_ok=True)
     # yt-cookies.txt lives in the runtime dir, independent of --out. An explicit
-    # --cookies wins because a frozen binary's here-relative fallback points into
-    # the PyInstaller bundle and would 403 Intro/Outro.
+    # --cookies (passed by the racecast CLI with the REAL runtime path) wins — a
+    # frozen binary's here-relative fallback points into the PyInstaller bundle
+    # and would 403 Intro/Outro. Legacy cookies.txt is the last resort.
     cookies = cookies_path(a.cookies, here)
 
     failed = []
@@ -460,9 +468,10 @@ def main():
             except Exception as e:
                 print(f"WARNING: intermission music download failed: {e}")
 
-    # Reset unlinked assets to their placeholder, then backfill any still-missing
-    # one. Download failures are NOT reset, so a transient error never clobbers a
-    # good clip.
+    # Reset unlinked assets to their placeholder (overwrites a stale clip), then
+    # backfill any still-missing one (e.g. a linked clip whose download failed).
+    # Download failures are NOT reset, so a transient error never clobbers a good
+    # clip.
     reset = reset_unlinked_media(a.out, unlinked, want_music=music_unlinked)
     if reset:
         print(f"Reset {len(reset)} asset(s) with no link to the placeholder: "

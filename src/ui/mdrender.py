@@ -1,9 +1,9 @@
 """Minimal, dependency-free Markdown -> HTML for the Control Center's Help page.
 
 Renders the bundled operator docs (headings, tables, ordered/unordered lists,
-fenced code, blockquotes, inline bold/italic/code/links) as a styled page so they
-read like a document instead of raw text in a browser tab. Stdlib only. The input
-is trusted (our own docs), but text is still HTML-escaped.
+fenced code, blockquotes, inline bold/italic/code/links) as a styled page so
+they read like a real document instead of raw text in a browser tab. Stdlib
+only; the input is trusted (our own docs) but text is still HTML-escaped.
 Tests: tests/test_mdrender.py."""
 import html
 import re
@@ -16,7 +16,7 @@ def _safe_href(url):
     """Sanitize a link target for untrusted Markdown (e.g. GitHub release notes).
     Returns the href to emit, or '' to drop the link. Allows http(s)/mailto and
     relative/anchor targets; rejects javascript:/data:/other schemes. The URL has
-    already been HTML-escaped with quote=False, so `&<>` are safe here; only the
+    already been HTML-escaped with quote=False, so `&<>` are safe here — only the
     attribute-breakout char `\"` must still be neutralised."""
     low = url.strip().lower()
     safe = low.startswith(_SAFE_SCHEMES) or ":" not in low.split("/", 1)[0]
@@ -34,8 +34,8 @@ def _link(m):
 
 def _autolink(m):
     """Markdown autolink <url>: the URL is both the target and the link text. By
-    this point '<'/'>' are already escaped to &lt;/&gt;; group 1 is the inner URL,
-    still HTML-escaped."""
+    this point '<'/'>' are already escaped to &lt;/&gt; (group 1 is the inner URL,
+    still HTML-escaped)."""
     url = m.group(1)
     href = _safe_href(url)
     if not href:                                 # unsafe scheme -> leave as written
@@ -81,7 +81,7 @@ def _aligns(sep):
     out = []
     for c in _row_cells(sep):
         left, right = c.startswith(":"), c.endswith(":")
-        # left is the default, so only center/right get an explicit style
+        # left is the default -> no explicit style; only center/right are emitted
         out.append("center" if left and right else "right" if right else "")
     return out
 
@@ -101,8 +101,8 @@ def _table(header, aligns, rows):
 
 
 def _parse_list_items(lines):
-    """Flatten a list block into [indent, ordered, content]. Continuation lines
-    fold into the preceding item."""
+    """Flatten a list block into [indent, ordered, content] (continuation lines
+    fold into the preceding item)."""
     items = []
     for ln in lines:
         m = _LIST_RE.match(ln)

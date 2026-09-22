@@ -147,7 +147,7 @@ def t_logs_start_lines_and_exit():
                and "racecast relay start" in x for x in msgs)
     assert "[relay-start] line1" in msgs
     assert "[relay-start] line2" in msgs
-    assert ("INFO", "[relay-start] action finished, exit 0") in log.calls
+    assert ("INFO", "[relay-start] action finished — exit 0") in log.calls
 
 
 def t_logs_nonzero_exit_is_warning():
@@ -156,7 +156,7 @@ def t_logs_nonzero_exit_is_warning():
                             spawn=lambda argv: FakeProc(code=3), logger=log)
     job_id, _ = jm.start("op", [])
     _wait_done(jm, job_id)
-    assert ("WARNING", "[op] action finished, exit 3") in log.calls
+    assert ("WARNING", "[op] action finished — exit 3") in log.calls
 
 
 def t_no_logger_is_silent():

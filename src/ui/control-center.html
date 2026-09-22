@@ -1,14 +1,12 @@
 <!DOCTYPE html>
-<!-- racecast Control Center — producer web UI served by `racecast ui` (ui_server.py).
-     Single static file, inline CSS/JS, no framework, no build step (same
-     model as director-panel.html). All state lives server-side; this page
-     only polls /api/status and renders SSE streams.
-     Design: "Ops Console" — slate dark + status colors, sans for labels,
-     monospace for data. Offline-safe: system fonts only, inline SVG icons.
-     Layout: a fixed left sidebar switches between views (Dashboard / Preflight
-     / Event / Apps / Tools / Assets / Logs); a docked, collapsible console at
-     the bottom of the workspace streams every job's live output — always in
-     the same place, visible no matter which view triggered it. -->
+<!-- racecast Control Center: the producer web UI served by `racecast ui`
+     (ui_server.py). One static file with inline CSS and JS, no framework and no
+     build step, like director-panel.html. All state lives server-side; this page
+     only polls /api/status and renders SSE streams. It uses system fonts and
+     inline SVG icons, so it works offline.
+     Layout: a fixed left sidebar switches between views, and a docked,
+     collapsible console at the bottom of the workspace streams every job's live
+     output in the same place whichever view triggered it. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -32,10 +30,10 @@
   body { margin:0; font:14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
          background:var(--bg); color:var(--txt); overflow:hidden; }
 
-  /* ---------- app shell ---------- */
+  /* App shell */
   .app { display:grid; grid-template-columns:var(--nav) 1fr; height:100dvh; }
 
-  /* ---------- sidebar ---------- */
+  /* Sidebar */
   .sidebar { display:flex; flex-direction:column; gap:6px; padding:16px 12px;
              background:var(--card2); border-right:1px solid var(--line); }
   .brand { display:flex; align-items:center; gap:10px; padding:4px 8px 14px; }
@@ -63,7 +61,7 @@
   .navitem.danger { color:#FCA5A5; }
   .navitem.danger:hover { background:rgba(239,68,68,.12); }
 
-  /* ---------- workspace (views + console) ---------- */
+  /* Workspace (views + console) */
   .workspace { display:flex; flex-direction:column; min-width:0; height:100dvh;
                background-image:radial-gradient(1100px 380px at 60% -200px,
                                 #1E293B 0%, var(--bg) 70%); }
@@ -160,9 +158,9 @@
            font:13px var(--mono); min-height:34px; }
   input[type=number]:focus-visible { outline:2px solid var(--accent);
            outline-offset:2px; }
-  /* Top-level text inputs (e.g. the Home event-title editor) — bare inputs
-     without a type attr aren't matched by input[type=text], so include
-     input:not([type]). More specific .envrow/.ovpanel rules still win. */
+  /* Top-level text inputs, e.g. the Home event-title editor. A bare input with no
+     type attribute is not matched by input[type=text], so include
+     input:not([type]). The more specific .envrow/.ovpanel rules still win. */
   input[type=text], input:not([type]) { background:#232C42; color:var(--txt);
            border:1px solid var(--line); border-radius:8px; padding:7px 10px;
            font:13px var(--mono); min-height:34px; box-sizing:border-box; }
@@ -202,7 +200,7 @@
   #pf-body section { margin-bottom:14px; }
   #pf-body section:last-child { margin-bottom:0; }
 
-  /* ---------- docked console ---------- */
+  /* Docked console */
   .console { border-top:1px solid var(--line); background:var(--card2);
              flex:0 0 auto; display:flex; flex-direction:column; }
   .console-head { display:flex; align-items:center; gap:10px; cursor:pointer;
@@ -234,9 +232,9 @@
   .thumb img, .thumb video { width:100%; height:78px; object-fit:cover;
            display:block; background:#000; }
   .thumb video { cursor:default; }
-  /* audio media (e.g. Intermission Music) — native controls, no cropping.
+  /* Audio media such as Intermission Music: native controls, no cropping.
      color-scheme:dark renders the browser's control chrome dark so it fits the
-     panel instead of showing a white pill (the #397 dark-theme smell). */
+     panel instead of showing a white pill (#397). */
   .thumb audio { width:100%; height:78px; display:block; cursor:default;
            color-scheme:dark; background:#0B1120; padding:0 6px;
            box-sizing:border-box; }
@@ -438,7 +436,7 @@
   .updwarn { color: #FCD34D; background: rgba(245,158,11,.1);
            border: 1px solid rgba(245,158,11,.32); border-radius: 8px; padding: 9px 13px; }
   .updactions { display:flex; align-items:center; gap:10px; }
-  /* generic confirm/alert modal body — preserves the \n line breaks some messages carry */
+  /* generic confirm/alert modal body; preserves the \n breaks some messages carry */
   .cmodal-body { font-size:13px; line-height:1.55; margin:8px 0 16px; white-space:pre-line; }
   button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
   button.primary:hover { background: color-mix(in srgb, var(--accent) 82%, #000); border-color: color-mix(in srgb, var(--accent) 82%, #000); }
@@ -507,7 +505,7 @@
 
   <div class="workspace">
     <main>
-      <!-- ===== Relay ===== -->
+      <!-- Relay -->
       <div class="view" data-view="services" hidden>
         <div class="viewhead"><h2>Relay</h2>
           <span class="spacer"></span>
@@ -543,7 +541,7 @@
         <p class="envhint">The relay reads its <b>schedule and HUD data from the Google Sheet</b> and is configured through <b>Settings</b>: <span class="mono">RACECAST_SHEET_ID</span> (the sheet) and <span class="mono">RACECAST_SHEET_PUSH_URL</span> (write-back for the timer + panel). There are no other local relay settings — tab names, ports and the bind mode use safe defaults.</p>
       </div>
 
-      <!-- ===== Static Streams ===== -->
+      <!-- Static Streams -->
       <div class="view" data-view="streams" hidden>
         <div class="viewhead"><h2>Static Streams</h2>
           <span class="badge" id="b-streams"><span class="dot"></span><span>…</span></span>
@@ -569,7 +567,7 @@
         <p class="envhint">One streamlink server per row, served on its <b>Port</b> (must match the OBS media source). Saved to <span class="mono">runtime/static/streams.json</span> — <b>Save, then Start all</b> to apply. A channel can be a YouTube channel ID (<span class="mono">UCxxxxxxxxxxxxxxxxxxxxxx</span>) or a full watch URL (<span class="mono">youtube.com/watch?v=…</span> or <span class="mono">twitch.tv/&lt;channel&gt;</span>).</p>
       </div>
 
-      <!-- ===== Home ===== -->
+      <!-- Home -->
       <div class="view" data-view="home">
         <div class="viewhead"><h2>Home</h2>
           <span class="sub" id="home-summary"></span>
@@ -673,7 +671,7 @@
         <p class="evnote">Start brings up Tailscale, Discord, OBS, relay and Companion (optional stint = mid-event takeover). Stop only stops the racecast services — OBS, Discord and Tailscale keep running; quit them manually if needed. Use <b>Copy link</b> to share the Companion tablet and Director panel URLs with your directors (they reach them over Tailscale).</p>
       </div>
 
-      <!-- ===== Profile (active league: config + assets) ===== -->
+      <!-- Profile (active league: config + assets) -->
       <div class="view" data-view="profile" hidden>
         <div class="viewhead"><h2>Profile</h2>
           <span class="sub" id="profile-active-sub">…</span>
@@ -869,7 +867,7 @@
         </section>
       </div>
 
-      <!-- ===== Apps ===== -->
+      <!-- Apps -->
       <div class="view" data-view="apps" hidden>
         <div class="viewhead"><h2>Apps</h2>
           <span class="sub" id="d-apps"></span>
@@ -883,7 +881,7 @@
         <p class="envhint">The badge shows whether each app is running. Start or stop any app here; OBS and Discord are also brought up automatically by <b>Start event</b> on Home. OBS additionally exports the scene collection and refreshes its browser sources. For Tailscale, <b>Start/Stop</b> launches or quits the app, while <b>Connect/Disconnect</b> brings the tunnel up or down.</p>
       </div>
 
-      <!-- ===== Tools ===== -->
+      <!-- Tools -->
       <div class="view" data-view="tools" hidden>
         <div class="viewhead"><h2>Tools</h2>
           <span class="sub" id="d-tools"></span>
@@ -895,7 +893,7 @@
         </div></section>
       </div>
 
-      <!-- ===== Setup wizard ===== -->
+      <!-- Setup wizard -->
       <div class="view" data-view="wizard" hidden>
         <div class="viewhead"><h2>Setup</h2>
           <p class="sub">First-time setup, step by step. Already-completed
@@ -924,7 +922,7 @@
         </section>
       </div>
 
-      <!-- ===== Preflight ===== -->
+      <!-- Preflight -->
       <div class="view" data-view="preflight" hidden>
         <div class="viewhead"><h2>Preflight</h2>
           <span class="sub" id="pf-summary"></span>
@@ -950,7 +948,7 @@
         </div>
       </div>
 
-      <!-- ===== General Settings (.env) ===== -->
+      <!-- General Settings (.env) -->
       <div class="view" data-view="settings" hidden>
         <div class="viewhead"><h2>General Settings</h2>
           <span class="sub">.env</span>
@@ -1050,7 +1048,7 @@
         <p class="envhint">Machine-level <b>.env</b> on this computer (ports, OBS-WebSocket password, Companion path) — shared across all leagues. League config (Sheet, OBS collection, …) lives under <b>Profile</b>. Values are masked; comments are preserved. Changes apply when you next (re)start the affected service.</p>
       </div>
 
-      <!-- ===== Crew Console ===== -->
+      <!-- Crew Console -->
       <div class="view" data-view="console" hidden>
         <div class="viewhead"><h2>Crew Console</h2>
           <span class="sub">role-adaptive crew links — commentator, director &amp; producer</span>
@@ -1091,7 +1089,7 @@
         </section>
       </div>
 
-      <!-- ===== Logs ===== -->
+      <!-- Logs -->
       <div class="view" data-view="logs" hidden>
         <div class="viewhead"><h2>Logs</h2>
           <span class="spacer"></span>
@@ -1110,7 +1108,7 @@
         <pre id="svclog"></pre>
       </div>
 
-      <!-- ===== Help & Docs ===== -->
+      <!-- Help & Docs -->
       <div class="view" data-view="help" hidden>
         <div class="viewhead"><h2>Help &amp; Docs</h2>
           <span class="spacer"></span>
@@ -1156,7 +1154,7 @@
         </section>
       </div>
 
-      <!-- ===== Post-Event Report ===== -->
+      <!-- Post-Event Report -->
       <div class="view" data-view="report" hidden>
         <div class="viewhead"><h2>Post-Event Report</h2></div>
         <p class="muted">Generate a report of the last session from the health history —
@@ -1174,7 +1172,7 @@
       </div>
     </main>
 
-    <!-- ===== docked console (job output) ===== -->
+    <!-- docked console (job output) -->
     <aside class="console collapsed" id="console">
       <div class="console-head" role="button" tabindex="0" aria-expanded="false"
            aria-controls="joblog" onclick="toggleConsole()"
@@ -1198,9 +1196,9 @@
   <img id="lightbox-img" alt=""><span class="cap" id="lightbox-cap"></span>
 </div>
 
-<!-- Overlay-builder modal: a focused overlay (editor canvas + property panel)
-     laid over the Control Center. The real #overlay-section is MOVED into the
-     body here on open and moved back on close — no duplicated builder DOM/JS. -->
+<!-- Overlay-builder modal: the editor canvas and property panel laid over the
+     Control Center. The real #overlay-section is moved into the body here on open
+     and moved back on close, so no builder DOM or JS is duplicated. -->
 <div class="ovmodal" id="ov-modal" hidden>
   <div class="ovmodal-card">
     <div class="ovmodal-head">
@@ -1221,9 +1219,9 @@ let jobES = null, logES = null;
 let setupLoaded = false, preflightRun = false, assetsLoaded = false,
     settingsLoaded = false, streamsLoaded = false, docsLoaded = false,
     wizardLoaded = false, profilesLoaded = false, logsLoaded = false;
-// op name -> last job exit code (string) run from the wizard. Lets a step that
-// has no persistent "done" state (preflight) — or a failed job — show its real
-// outcome instead of a misleading "pending".
+// op name -> the last job exit code run from the wizard, as a string. It lets a
+// step with no persistent "done" state, and a failed job, show its real outcome
+// instead of a misleading "pending".
 let wizardJobResults = {};
 let currentView = 'home', lastStatus = null;
 
@@ -1249,24 +1247,20 @@ function showView(name) {
   if (name === 'preflight') loadSpeedtest();
   if (name === 'settings' && !settingsLoaded) { settingsLoaded = true; loadSettings(); }
   if (name === 'console') loadConsole();   // reload each visit: reflects toggles/links
-  // First open only: start the default "All (live)" stream. Guarded by a dedicated
-  // flag (not !logES) so returning to Logs after picking an archive — where logES is
-  // null because archives use fetch, not SSE — does not silently clobber the selection.
+  // First open only: start the default "All (live)" stream. The guard is its own
+  // flag rather than !logES, because an archive selection leaves logES null (an
+  // archive uses fetch, not SSE) and returning to Logs would clobber it.
   if (name === 'logs' && !logsLoaded) { logsLoaded = true; onLogSourceChange(); }
   if (name === 'streams' && !streamsLoaded) { streamsLoaded = true; loadStreams(); }
   if (name === 'help' && !docsLoaded) { docsLoaded = true; fetchDocs(); }
-  // preview list (opt-in) lives in Help — load it lazily on each visit so a
+  // The opt-in preview list lives in Help. Load it lazily on each visit so a
   // newly-pushed preview shows up, but never at startup or when opted out.
   if (name === 'help' && previewsOptedIn()) loadPreviews();
   if (name === 'wizard' && !wizardLoaded) { wizardLoaded = true; fetchWizard(); }
-  // entering Home: refresh the live relay stats right away (don't wait for the poll)
   if (name === 'home' && lastStatus && lastStatus.relay
       && lastStatus.relay.alive && lastStatus.relay.http_ok) fetchRelayLive();
-  // entering Home: refresh the takeover device dropdown from the tailnet
   if (name === 'home') loadTakeoverPeers();
-  // entering Home: load the producer schedule card (Sheet fetch, on-demand)
   if (name === 'home') fetchProducerSchedule();
-  // entering Home: load the current event title (works relay up or down)
   if (name === 'home') fetchEventTitle();
 }
 
@@ -1354,11 +1348,11 @@ function updateHome(s) {
   const panelShare = (relayUp && s.relay.http_ok)
     ? 'http://' + (s.tailscale_ip || '127.0.0.1') + ':' + s.relay.port + '/panel'
     : '';
-  // Both Open and Copy prefer the Tailscale host so the producer lands on the
-  // same relay endpoint the directors use (shared chat) — see panelOpenUrl.
+  // Both Open and Copy prefer the Tailscale host so the producer lands on the same
+  // relay endpoint the directors use, sharing the chat. See panelOpenUrl.
   setShareLink('h-relay-open', 'h-relay-copy', panelShare,
                panelShare ? panelOpenUrl(s.relay.port, s.tailscale_ip) : '');
-  // Cookies readiness tile — short label only (full detail lives on Assets).
+  // Cookies readiness tile: a short label only; the detail lives on Assets.
   if (s.cookies) setTile('cookies',
       s.cookies.level === 'PASS' ? 'ok' : (s.cookies.level === 'FAIL' ? 'bad' : 'warn'),
       s.cookies.level === 'PASS' ? 'fresh'
@@ -1378,7 +1372,7 @@ function updateHome(s) {
   }
 }
 
-// ----- per-app running status on the Apps view (updated from the poll) -----
+// Per-app running status on the Apps view (updated from the poll)
 function updateAppStatus(s) {
   const ar = s.apps_running || {};
   setAppStat('obs', !!ar.obs, 'RUNNING', 'stopped');
@@ -1389,7 +1383,7 @@ function updateAppStatus(s) {
 
 function setAppStat(key, on, onText, offText) {
   const b = $('appstat-' + key);
-  if (!b) return;                        // Apps view not rendered yet — nothing to update
+  if (!b) return;                        // Apps view not rendered yet, nothing to update
   b.classList.toggle('on', on);
   b.lastElementChild.textContent = on ? onText : offText;
 }
@@ -1403,13 +1397,13 @@ function setTile(key, cls, text) {
   t.textContent = text;
 }
 
-// ----- live relay stats (timer + feeds), fetched while Home is open -----
+// Live relay stats (timer + feeds), fetched while Home is open
 let liveTimer = null;                    // {t: timerPayload, at: clientEpochSeconds}
 
 async function fetchRelayLive() {
   let d;
   try { d = await (await fetch('/api/relay-live', {cache: 'no-store'})).json(); }
-  catch (e) { return; }                  // server gone — keep last state
+  catch (e) { return; }                  // server gone, keep last state
   if (!d || !d.ok) return;
   const parts = (d.feeds || []).map(f =>
     'Feed ' + f.feed + ' · Stint ' + (f.stint == null ? '?' : f.stint) +
@@ -1431,7 +1425,7 @@ async function fetchRelayLive() {
   renderTimer();
 }
 
-// ----- event title (Home; #207 follow-up) -----
+// Event title (Home; #207 follow-up)
 let evtTitle = '', evtEditing = false;
 function renderEventTitle(title) {
   evtTitle = (title || '').trim();
@@ -1443,7 +1437,7 @@ function renderEventTitle(title) {
 async function fetchEventTitle() {
   let d;
   try { d = await (await fetch('/api/event-title', {cache: 'no-store'})).json(); }
-  catch (e) { return; }                    // server gone — keep last state
+  catch (e) { return; }                    // server gone, keep last state
   if (d && d.ok) renderEventTitle(d.title);
 }
 function startEditEventTitle() {
@@ -1520,7 +1514,7 @@ function fmtDur(s) {
   return s + 's';
 }
 
-// ----- preview builds opt-in (Help view) -----
+// Preview builds opt-in (Help view)
 const PREV_OPT_KEY = 'rc.previews.optin';
 
 function escapeHtml(s) {
@@ -1584,12 +1578,12 @@ async function loadPreviews() {
   });
 }
 
-// ----- update release-notes modal -----
+// Update release-notes modal
 // Open the update dialog for either the latest release (tag omitted) or a
-// specific preview build (tag set). Both run the SAME 'update' op — one op name
-// means the job manager refuses a second concurrent run, so a regular update
-// and a preview install can never swap the binary at the same time. Renders the
-// notes (sanitised HTML from the server, plaintext fallback) and a non-blocking
+// specific preview build (tag set). Both run the same 'update' op, and one op name
+// means the job manager refuses a second concurrent run, so a regular update and a
+// preview install can never swap the binary at the same time. It renders the notes
+// (sanitised HTML from the server, with a plaintext fallback) and a non-blocking
 // "services running" warning, then runs the streamed job.
 // Status payload shape (see updateHome/onStatus): s.relay.alive,
 // s.companion.running, and s.streams is an ARRAY of feeds each with .alive.
@@ -1629,7 +1623,7 @@ function openUpdModal(opts) {
 
 function closeUpdModal() { $('updmodal').close(); }
 
-// ----- self-update check (GitHub latest release, check-only) -----
+// Self-update check (GitHub latest release, check-only)
 // Always reflects the version state in the sidebar (click to re-check); the
 // amber Home banner appears only when a newer release is actually out.
 async function checkUpdate(force) {
@@ -1673,8 +1667,8 @@ function setShareLink(openId, copyId, url, openUrl) {
 // Producer panel link. Prefers the Tailscale IP when the tailnet is up so the
 // producer opens the SAME relay endpoint as the remote directors (shared chat),
 // falling back to 127.0.0.1 when Tailscale is down. The Director Panel is
-// relay-mediated — it controls OBS through the relay's /obs/* endpoints and needs
-// no OBS ip/port/password from the browser, so the link carries no credentials.
+// relay-mediated: it controls OBS through the relay's /obs/* endpoints and needs no
+// OBS ip, port or password from the browser, so the link carries no credentials.
 function panelOpenUrl(relayPort, host) {
   return 'http://' + (host || '127.0.0.1') + ':' + relayPort + '/panel';
 }
@@ -1684,7 +1678,7 @@ async function copyLink(btn) {
   if (!url) return;
   try {
     await navigator.clipboard.writeText(url);
-  } catch (e) {                          // clipboard API blocked — textarea fallback
+  } catch (e) {                          // clipboard API blocked, textarea fallback
     const ta = document.createElement('textarea');
     ta.value = url; ta.style.position = 'fixed'; ta.style.opacity = '0';
     document.body.appendChild(ta); ta.focus(); ta.select();
@@ -1700,8 +1694,8 @@ async function refresh() {
   let s;
   try {
     s = await (await fetch('/api/status', {cache: 'no-store'})).json();
-  } catch (e) { return; }            // server gone (quit) — keep the last state
-  if (!s.ok) return;                 // status provider error — keep the last state
+  } catch (e) { return; }            // server gone (quit), keep the last state
+  if (!s.ok) return;                 // status provider error, keep the last state
   lastStatus = s;
   $('ver').textContent = s.version;
   const relayUp = s.relay.alive;
@@ -1709,8 +1703,8 @@ async function refresh() {
     relayUp ? (s.relay.http_ok ? 'control OK on port ' + s.relay.port
                                : 'port ' + s.relay.port + ' not responding') : '');
   const panelUp = relayUp && s.relay.http_ok;
-  // The sidebar quick-link and the Relay-page Open are the producer's own links
-  // — prefer the Tailscale host so the producer shares the directors' endpoint.
+  // The sidebar quick-link and the Relay-page Open are the producer's own links, so
+  // prefer the Tailscale host and the producer shares the directors' endpoint.
   const panelHref = panelOpenUrl(s.relay.port, s.tailscale_ip);
   $('panel-link').hidden = !panelUp;
   $('panel-link').href = panelHref;
@@ -1728,13 +1722,13 @@ async function refresh() {
       s.cookies.level === 'PASS' ? 'FRESH' : s.cookies.level, s.cookies.detail);
   updateHome(s);
   updateAppStatus(s);
-  // Live relay stats are a separate localhost round-trip — only while Home is
-  // open and the relay control server is actually answering.
+  // Live relay stats are a separate localhost round-trip, so fetch them only while
+  // Home is open and the relay control server is answering.
   if (currentView === 'home' && relayUp && s.relay.http_ok) fetchRelayLive();
   if (currentView === 'home') fetchEventTitle();
 }
 
-// ----- Setup wizard (on-demand /api/init/plan) -----
+// Setup wizard (on-demand /api/init/plan)
 function setWizSummary(text) {
   const el = $('wiz-summary');
   if (el) el.textContent = text;
@@ -1755,8 +1749,8 @@ async function fetchWizard() {
 }
 
 // "Re-check all" re-reads every step's state from the server (it does NOT re-run
-// anything). Show a brief busy state so a fast, unchanged re-check still visibly
-// registers — otherwise an already-complete plan looks like a dead button.
+// anything). Show a brief busy state so a fast, unchanged re-check still registers;
+// otherwise an already-complete plan looks like a dead button.
 async function recheckWizard(btn) {
   const label = btn ? btn.textContent : '';
   if (btn) { btn.disabled = true; btn.textContent = 'Checking…'; }
@@ -1772,10 +1766,8 @@ function renderWizard(plan) {
     const row = document.createElement('div');
     row.className = 'item ' + (s.done ? 'ok' : 'miss');
 
-    // left cluster: number + label + done/pending chip + skip_reason dim + instruction warn
     const nameSpan = document.createElement('span');
     nameSpan.className = 'iname grow';
-    // build label text node with step number
     const labelNode = document.createTextNode((i + 1) + '. ');
     nameSpan.appendChild(labelNode);
     const labelStrong = document.createElement('b');
@@ -1799,7 +1791,6 @@ function renderWizard(plan) {
       chip.textContent = 'pending';
     }
     nameSpan.appendChild(chip);
-    // skip_reason (dim, when done)
     if (s.done && s.skip_reason) {
       const dim = document.createElement('span');
       dim.className = 'dim';
@@ -1807,7 +1798,6 @@ function renderWizard(plan) {
       dim.textContent = s.skip_reason;
       nameSpan.appendChild(dim);
     }
-    // instruction callout (amber, when not done)
     if (!s.done && s.instruction) {
       const instr = document.createElement('div');
       instr.className = 'note-warn';
@@ -1817,7 +1807,6 @@ function renderWizard(plan) {
     }
     row.appendChild(nameSpan);
 
-    // right cluster: action button(s)
     if (!s.done) {
       if (s.kind === 'job') {
         const btn = document.createElement('button');
@@ -1909,9 +1898,9 @@ function opEventStart() {
   op('event-start', true, params);
 }
 
-// Funnel takeover: B is not on A's tailnet, so the peer dropdown is useless —
-// swap it for a free-text MagicDNS-host field. The CONSOLE_SECRET step-up is read
-// server-side from B's active profile by the CLI, never collected here.
+// Funnel takeover: B is not on A's tailnet, so the peer dropdown is useless and is
+// swapped for a free-text MagicDNS-host field. The CLI reads the CONSOLE_SECRET
+// step-up server-side from B's active profile; it is never collected here.
 function toggleFunnelTakeover() {
   const on = $('takeover-funnel').checked;
   $('takeover-host').hidden = on;
@@ -1935,8 +1924,8 @@ function opTakeover() {
 }
 
 // Producer schedule (read-only league Sheet tab) on the Home view. On-demand
-// (network: a Sheet fetch), loaded when Home opens and on manual Refresh — never
-// from the 3s status poll. Each row offers a one-click Funnel takeover against
+// (it fetches the Sheet), loaded when Home opens and on manual Refresh, never from
+// the 3 s status poll. Each row offers a one-click Funnel takeover against
 // that machine's MagicDNS; your OWN row(s) are disabled (server-tagged `self`),
 // and ALL rows lock when our own MagicDNS is unknown (Tailscale offline).
 async function fetchProducerSchedule() {
@@ -2033,7 +2022,7 @@ function watchJob(name, id, onDone) {
   if (jobES) jobES.close();
   jobId = id;
   jobCancelled = false;
-  toggleConsole(true);                 // reveal the docked console for this job
+  toggleConsole(true);
   const title = $('jobtitle');
   title.textContent = name;
   title.classList.remove('idle');
@@ -2071,14 +2060,14 @@ function watchJob(name, id, onDone) {
     if (name === 'update' && ok && $('joblog').textContent.indexOf('updated to ') >= 0) {
       alertModal('Update installed. Quit and reopen the Control Center to use the new version.');
     }
-    if (onDone) onDone(e.data);          // resolve runOpAndWait() with the exit code
+    if (onDone) onDone(e.data);
   });
 }
 
-// Dispatch an op and resolve once its job finishes — reuses the op-dispatch POST
-// + watchJob console wiring instead of duplicating EventSource handling. Resolves
-// with the job's exit code (a string, '0' = success); rejects if the dispatch
-// itself fails (server unreachable / op rejected).
+// Dispatch an op and resolve once its job finishes, reusing the op-dispatch POST and
+// the watchJob console wiring instead of duplicating EventSource handling. It
+// resolves with the job's exit code as a string, '0' for success, and rejects when
+// the dispatch itself fails.
 function runOpAndWait(name, params) {
   return new Promise(async (resolve, reject) => {
     let r;
@@ -2130,7 +2119,7 @@ async function checkAssets() {
                 a.media.detail);
 }
 
-// ----- Tools / Apps per-item status (on-demand /api/setup) -----
+// Tools / Apps per-item status (on-demand /api/setup)
 const APP_LABEL = {obs: 'OBS', companion: 'Companion',
                    tailscale: 'Tailscale', discord: 'Discord'};
 // app-specific actions live on the app's own row (each an array of buttons).
@@ -2159,8 +2148,9 @@ const APP_ACTION = {
                title: 'tailscale down — drop the tunnel'}]
 };
 
-// Linux Tailscale has no GUI app — only the daemon + `tailscale up/down`. Drop the
-// GUI-only Start/Stop there (they can't launch/quit anything); keep Connect/Disconnect.
+// Linux Tailscale has no GUI app, only the daemon and `tailscale up/down`. Drop the
+// GUI-only Start and Stop there, since they cannot launch or quit anything, and keep
+// Connect and Disconnect.
 function appActions(name) {
   const acts = APP_ACTION[name];
   if (!acts) return acts;
@@ -2217,7 +2207,7 @@ function renderItemList(containerId, summaryId, items, kind) {
                            (list.length - have) + ' missing';
 }
 
-// ----- Asset preview galleries (on-demand /api/assets/files) -----
+// Asset preview galleries (on-demand /api/assets/files)
 function setCountBadge(key, n, noun) {
   const b = $('b-' + key);
   b.classList.remove('on', 'warn', 'fail');
@@ -2234,7 +2224,7 @@ async function fetchObsCollection() {
   if (!el) return;
   let d;
   try { d = await (await fetch('/api/obs-collection', {cache: 'no-store'})).json(); }
-  catch (e) { return; }                  // server gone — keep last state
+  catch (e) { return; }                  // server gone, keep last state
   el.textContent = 'OBS scene collection: ';
   if (!d.ok) {
     const s = document.createElement('span');
@@ -2272,7 +2262,7 @@ async function fetchObsCollection() {
 async function fetchAssetFiles() {
   let d;
   try { d = await (await fetch('/api/assets/files', {cache: 'no-store'})).json(); }
-  catch (e) { return; }                  // server gone — keep last state
+  catch (e) { return; }                  // server gone, keep last state
   if (!d.ok) return;
   setCountBadge('graphics', d.graphics.length, d.graphics.length === 1 ? 'file' : 'files');
   setCountBadge('media', d.media.length, d.media.length === 1 ? 'file' : 'files');
@@ -2294,10 +2284,10 @@ function renderGallery(containerId, kind, items, isVideo) {
     return;
   }
   items.forEach(item => {
-    // Server sends {name, v}; v = "<profile>-<mtime>" busts the browser's <img>
-    // decode-cache on a profile switch / re-download — the URL is otherwise
-    // identical across profiles that share filenames (#274). Tolerate a bare
-    // string for safety.
+    // The server sends {name, v}, where v is "<profile>-<mtime>" and busts the
+    // browser's <img> decode cache on a profile switch or a re-download: the URL is
+    // otherwise identical across profiles that share filenames (#274). A bare string
+    // is tolerated.
     const name = (typeof item === 'string') ? item : item.name;
     const ver = (typeof item === 'string') ? '' : item.v;
     let url = '/api/assets/file/' + kind + '/' + encodeURIComponent(name);
@@ -2347,13 +2337,13 @@ document.addEventListener('keydown', e => {
 async function fetchSetup() {
   let d;
   try { d = await (await fetch('/api/setup', {cache: 'no-store'})).json(); }
-  catch (e) { return; }                  // server gone — keep last state
+  catch (e) { return; }                  // server gone, keep last state
   renderItemList('toollist', 'd-tools', d.tools, 'tools');
   renderItemList('applist', 'd-apps', d.apps, 'apps');
-  if (lastStatus) updateAppStatus(lastStatus);   // fill running badges right away
+  if (lastStatus) updateAppStatus(lastStatus);
 }
 
-// ----- Bandwidth speed test card (/api/speedtest, refreshed after each run) -----
+// Bandwidth speed test card (/api/speedtest, refreshed after each run)
 async function loadSpeedtest() {
   let d;
   try { d = await (await fetch('/api/speedtest', {cache: 'no-store'})).json(); }
@@ -2383,11 +2373,11 @@ async function loadSpeedtest() {
 }
 
 async function runSpeedtest() {
-  await op('speedtest', false);   // streams the Ookla output into the console job
+  await op('speedtest', false);
   loadSpeedtest();
 }
 
-// ----- Preflight checklist (on-demand /api/preflight) -----
+// Preflight checklist (on-demand /api/preflight)
 async function runPreflight() {
   const body = $('pf-body'), btn = $('pf-run'), sum = $('pf-summary');
   btn.disabled = true;
@@ -2451,7 +2441,7 @@ function renderPreflight(sections) {
           f > 0 ? f + ' fail' : (w > 0 ? w + ' warn' : 'all pass'));
 }
 
-// ----- Settings (.env) editor -----
+// Settings (.env) editor
 const EYE_SVG = '<svg viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>';
 const EYE_OFF_SVG = '<svg viewBox="0 0 24 24"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
 const X_SVG = '<svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
@@ -2462,9 +2452,8 @@ function showEnvErr(msg) {
   e.hidden = false;
 }
 
-// Shared masked KEY/value editor row — used by both the machine .env editor
-// (#envrows) and the profile.env editor (#penvrows). Identical component; only
-// the container id differs.
+// Shared masked KEY/value editor row, used by both the machine .env editor
+// (#envrows) and the profile.env editor (#penvrows). Only the container id differs.
 function envEditorRow(key, value) {
   const r = document.createElement('div');
   r.className = 'envrow';
@@ -2518,8 +2507,8 @@ function collectSettings() { return collectEnvEditor('envrows'); }
 async function loadSettings(force) {
   if (force && !(await confirmModal('Reload from disk and discard any unsaved edits?'))) return;
   $('env-err').hidden = true;
-  loadFontLibrary();                       // machine-wide overlay font library
-  loadDevices();                           // solo-mode webcam/capture pickers
+  loadFontLibrary();
+  loadDevices();
   let d;
   try { d = await (await fetch('/api/env', {cache: 'no-store'})).json(); }
   catch (e) { showEnvErr('Control Center not reachable.'); return; }
@@ -2530,7 +2519,7 @@ async function loadSettings(force) {
   d.entries.forEach(e => c.appendChild(settingsRow(e.key, e.value)));
 }
 
-// ----- Solo devices (General Settings): webcam + capture-card + mic pickers -----
+// Solo devices (General Settings): webcam + capture-card + mic pickers
 // Webcam/Capture share the same OBS video-device list (the "Solo Capture Device"
 // input enumerates whatever this platform's video-capture API sees); Mic has its
 // own audio-device list (#307, the "Commentary Mic Device" input). A blank
@@ -2602,7 +2591,7 @@ async function saveDevices() {
   // selection persisted; keep it shown (do not reload → would reset the dropdowns)
 }
 
-// ----- PlayStation (GT7 console) discovery -----
+// PlayStation (GT7 console) discovery
 async function discoverPs(){
   const hint = document.getElementById('ps-hint');
   const list = document.getElementById('ps-list');
@@ -2612,7 +2601,7 @@ async function discoverPs(){
     const r = await fetch('/api/ps/discover', {method:'POST'});
     const d = await r.json();
     const consoles = d.consoles || [];
-    list.replaceChildren();                 // clear any stale list from a prior scan
+    list.replaceChildren();
     if(!consoles.length){ list.hidden = true; hint.textContent = d.note || 'No PlayStation found.'; return; }
     if(consoles.length === 1){
       list.hidden = true;
@@ -2648,7 +2637,7 @@ async function savePsIp(){
   }catch(e){ hint.textContent = 'Save failed: ' + e; }
 }
 
-// ----- Machine-wide overlay font library (General Settings) -----
+// Machine-wide overlay font library (General Settings)
 // Free Google Fonts downloaded once into runtime/fonts/; the Overlay Builder
 // offers them, and a used font is copied into the league's profile on save.
 function showFontErr(msg) { const e = $('font-err'); e.textContent = msg; e.hidden = false; }
@@ -2671,32 +2660,32 @@ async function loadFontCatalog() {
 
 async function loadFontLibrary() {
   $('font-err').hidden = true;
-  loadFontCatalog();                       // fill the typeahead datalist (once)
+  loadFontCatalog();
   let d;
   try { d = await (await fetch('/api/fonts', {cache: 'no-store'})).json(); }
   catch (e) { showFontErr('Control Center not reachable.'); return; }
   if (!d.ok) { showFontErr(d.error || 'could not list font library'); return; }
-  ovInjectDocFonts(d.fonts || []);             // so each row can preview in its own font
+  ovInjectDocFonts(d.fonts || []);
   const list = $('font-lib-list'); list.textContent = '';
   if (!d.fonts || !d.fonts.length) {
     const p = document.createElement('p'); p.className = 'envhint'; p.style.margin = '8px 2px';
     p.textContent = 'No fonts in the library yet — add one above.'; list.appendChild(p);
     return;
   }
-  // One row per BASE family — a downloaded family is up to four cut files
-  // (-Bold/-Italic/-BoldItalic); collapse them so the list shows the family once.
-  // Remove deletes the whole family server-side (any member filename works).
+  // One row per base family. A downloaded family is up to four cut files
+  // (-Bold/-Italic/-BoldItalic), collapsed so the list shows the family once.
+  // Remove deletes the whole family server-side; any member filename works.
   ovFontFamilies(d.fonts).forEach(fam => {
     const file = d.fonts.find(n => {
       const stem = n.replace(/\.[^.]+$/, ''), c = ovFontCut(stem);
       return (c ? c.base : stem) === fam;
     }) || (fam + '.woff2');
     const row = document.createElement('div'); row.className = 'row';
-    // One column: the family name rendered IN its own font (issue #145) — no
-    // separate plain-text name column to overlap it. The plain name stays
-    // available on hover for hard-to-read display faces.
+    // One column: the family name rendered in its own font (#145), with no separate
+    // plain-text column to overlap it. The plain name stays available on hover for a
+    // hard-to-read display face.
     const prev = document.createElement('span'); prev.className = 'fontprev grow';
-    prev.textContent = fam; prev.style.fontFamily = '"' + fam + '"';   // live preview
+    prev.textContent = fam; prev.style.fontFamily = '"' + fam + '"';
     prev.title = fam;
     const del = document.createElement('button'); del.className = 'danger';
     del.textContent = 'Remove'; del.onclick = () => deleteLibFont(file);
@@ -2756,10 +2745,10 @@ async function saveSettings() {
   loadSettings();                        // reflect the canonical file (masked again)
 }
 
-// ----- Profile (league) view: switcher + new-profile + profile.env editor -----
+// Profile (league) view: switcher + new-profile + profile.env editor
 // The /api/profile/* POST routes return HTTP 400 on a {ok:false} result (same
 // as /api/env), so every fetch here parses the JSON body regardless of status
-// and branches on d.ok — never on r.ok.
+// and branches on d.ok, never on r.ok.
 let activeProfile = null;
 
 function showProfileErr(elId, msg) {
@@ -2768,14 +2757,13 @@ function showProfileErr(elId, msg) {
   e.hidden = false;
 }
 
-// ===== Crew Console (issue #191; role-adaptive links #216) =====
+// Crew Console (issue #191; role-adaptive links #216)
 async function loadConsole() {
   let d;
   try { d = await (await fetch('/api/console/status', {cache: 'no-store'})).json(); }
   catch (e) { showProfileErr('cp-err', 'Control Center not reachable.'); return; }
   if (!d.ok) { showProfileErr('cp-err', d.error || 'console status failed'); return; }
   $('cp-err').hidden = true;
-  // Funnel state pill + controls
   const pill = $('cp-funnel-state'), txt = $('cp-funnel-state-txt');
   pill.classList.remove('on', 'warn', 'fail');
   if (!d.funnel_capable) { pill.classList.add('warn'); txt.textContent = 'not authorized'; }
@@ -2824,7 +2812,7 @@ async function consoleFunnel(on) {
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({on})})).json();
   if (!r.ok) showProfileErr('cp-err', r.error || 'funnel command failed');
-  loadConsole();   // refresh the ON/OFF state pill
+  loadConsole();
 }
 async function copyConsoleLink(btn) {
   if (!window._consoleUrl) return;
@@ -2888,7 +2876,6 @@ async function loadProfiles(force) {
   $('profile-hint').hidden = true;
   $('profile-hint').textContent = '';
   const profiles = d.profiles || [];
-  // active-profile switcher
   const sel = $('profile-select');
   sel.textContent = '';
   profiles.forEach(p => {
@@ -2915,7 +2902,6 @@ async function loadProfiles(force) {
   const nameEl = $('active-profile-name');
   if (nameEl) nameEl.textContent = label;
   setHeaderLogo(d.active, d.logo);
-  // per-profile export rows
   const plist = $('profile-list');
   plist.textContent = '';
   profiles.forEach(p => {
@@ -2939,11 +2925,11 @@ async function loadProfiles(force) {
     row.append(lbl, slug, exAssets, exLbl, exBtn);
     plist.appendChild(row);
   });
-  loadProfileEnv();                       // editor reflects the now-active profile
-  loadOverlay();                          // overlay-CSS editor for the active profile
-  loadCrew();                             // Crew editor for the active profile
-  loadBackups();                          // Looks card for the active profile
-  fetchAssetFiles();                      // graphics/media gallery for the active profile
+  loadProfileEnv();
+  loadOverlay();
+  loadCrew();
+  loadBackups();
+  fetchAssetFiles();
   applyKindGating(d);
 }
 
@@ -2972,21 +2958,21 @@ async function useProfile(name) {
   }
   if (!d.ok) {
     showProfileErr('profile-switch-note', d.error || 'could not switch profile');
-    $('profile-select').value = activeProfile || '';   // revert the dropdown
+    $('profile-select').value = activeProfile || '';
     return;
   }
   $('profile-switch-note').hidden = true;
   activeProfile = d.active || name;
   loadProfiles();
   loadProfileEnv();
-  refresh();                              // pull fresh status (badges, services)
+  refresh();
   offerRestart();                         // running services still serve the old league
 }
 
 function onKindChange() {
   const solo = $('newprofile-kind').value === 'solo';
-  // Solo generates a fresh sheet-less profile — Copy-from is not applicable
-  // (the CLI forbids --from with --kind solo).
+  // Solo generates a fresh sheet-less profile, so Copy-from does not apply: the CLI
+  // forbids --from with --kind solo.
   $('newprofile-template').hidden = !solo;
   $('newprofile-template-label').hidden = !solo;
   $('newprofile-from').hidden = solo;
@@ -3010,7 +2996,7 @@ async function newProfile() {
   $('newprofile-err').hidden = true;
   $('newprofile-name').value = '';
   loadProfiles();
-  // Creation never auto-switches — tell the producer to select it to activate.
+  // Creation never auto-switches, so tell the producer to select it to activate.
   const hint = $('profile-hint');
   hint.hidden = false;
   hint.textContent = "created '" + name + "' — select it above to activate";
@@ -3057,17 +3043,16 @@ async function importProfile(input, force) {
   loadProfiles();
 }
 
-// After a profile switch, the relay still serves the previous league until
-// restarted — it is the profile-scoped singleton. Offer a one-click restart when
-// it is running; nothing restarts without the producer clicking. Companion is
-// deliberately NOT offered here: its config is machine-global (one config.json,
-// only bind_ip; the buttons are shared across leagues), so a profile switch never
-// changes what it serves and restarting it is a no-op for the league. Best-effort
-// against the cached status.
+// After a profile switch the relay still serves the previous league until it is
+// restarted, being the profile-scoped singleton. Offer a one-click restart while it
+// runs; nothing restarts without the producer clicking. Companion is deliberately not
+// offered: its config is machine-global (one config.json, only bind_ip, and the
+// buttons are shared across leagues), so a profile switch never changes what it
+// serves. Best-effort against the cached status.
 function offerRestart() {
   const note = $('profile-switch-note');
   const s = lastStatus;
-  if (!s) {                               // status unknown — generic hint only
+  if (!s) {                               // status unknown, generic hint only
     note.hidden = false;
     note.textContent = 'Switched. If the relay is running, restart it to apply the new league.';
     return;
@@ -3082,7 +3067,7 @@ function offerRestart() {
   note.appendChild(btn);
 }
 
-// profile.env editor — mirrors the machine-.env editor, on #penvrows.
+// profile.env editor, mirroring the machine-.env editor, on #penvrows.
 async function loadProfileEnv(force) {
   if (force && !(await confirmModal('Reload from disk and discard any unsaved edits?'))) return;
   let d;
@@ -3105,8 +3090,8 @@ async function loadProfileEnv(force) {
 function addProfileEnvRow() { addEnvEditorRow('penvrows'); }
 
 // Open the active league's Google Sheet in a new tab. The URL is derived from
-// the SHEET_ID currently in the editor (so unsaved edits are honoured too) —
-// same construction as `racecast sheet open`. SHEET_ID is not a secret.
+// the SHEET_ID currently in the editor, so unsaved edits are honoured too. Same
+// construction as `racecast sheet open`; SHEET_ID is not a secret.
 function openActiveSheet() {
   $('penv-err').hidden = true;
   const row = collectEnvEditor('penvrows').find(e => e.key.trim() === 'SHEET_ID');
@@ -3136,19 +3121,19 @@ async function saveProfileEnv() {
     .then(d => { if (d.ok) setHeaderLogo(d.active, d.logo); }).catch(() => {});
 }
 
-// Visual Overlay Builder (issue #114) — a same-origin WYSIWYG positioner for the
-// HUD/Timer slots. The Control Center renders the base page's <style> + slot
-// markup in a Shadow-DOM canvas (style isolation) over the league's Overlay.png,
-// filled with sample data; drag/resize edits an in-memory layout model that the
-// server compiles into the override.css the relay already serves. Drag/resize is
-// vanilla pointer events — no vendored dependency (the repo ships no JS libs).
-// Loads with the Profile view (via loadProfiles) and on every profile switch.
+// Visual Overlay Builder (#114): a same-origin WYSIWYG positioner for the HUD slots.
+// The Control Center renders the base page's <style> and slot markup in a Shadow-DOM
+// canvas, for style isolation, over the league's Overlay.png and filled with sample
+// data. Drag and resize edit an in-memory layout model that the server compiles into
+// the override.css the relay already serves, and they use vanilla pointer events
+// because the repo ships no JS libraries. Loads with the Profile view (via
+// loadProfiles) and on every profile switch.
 let overlayPage = 'hud';
-// Canvas is a fixed 1920x1080 design space (origin top-left); single source for
-// the align toolbar and the snap grid.
+// The canvas is a fixed 1920x1080 design space with the origin top-left, and the
+// single source for the align toolbar and the snap grid.
 const OV_CANVAS_W = 1920, OV_CANVAS_H = 1080;
-// Zoom rungs the −/+ buttons step through. The labelled toolbar buttons
-// (50/100/150/200%) are a subset — keep them in sync with this ladder.
+// Zoom rungs the minus and plus buttons step through. The labelled toolbar buttons
+// (50/100/150/200%) are a subset, so keep them in sync with this ladder.
 const OV_ZOOM_LADDER = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2];
 const ovState = {page: 'hud', active: '', slots: [], sample: {}, flagPresets: [], preview: null,
                  baseCss: '', body: '',
@@ -3210,7 +3195,7 @@ async function loadOverlay() {
   if (!ovState.layout.slots) ovState.layout.slots = {};
   ovState.fonts = (fontsR && fontsR.ok && fontsR.fonts) || [];
   ovState.library = (fontsR && fontsR.ok && fontsR.library) || [];
-  ovInjectDocFonts(ovState.fonts.concat(ovState.library));   // for dropdown/swatch preview
+  ovInjectDocFonts(ovState.fonts.concat(ovState.library));
   ovState.sel = null;
   $('overlayCss').value = ovState.layout.customCss || '';
   $('overlay-path').textContent = '';
@@ -3247,10 +3232,10 @@ function ovPopulateSlotPicker() {
   sp.value = ovState.sel || '';
 }
 
-// --- Self-hosted font cuts (mirror of overlay_build.font_cut / _font_faces — keep
-// in sync). A downloaded Google family lands as up to four files: <Stem>.woff2 plus
-// -Bold/-Italic/-BoldItalic. They group under the base family with style/weight
-// descriptors so the canvas preview and the picker match the relay-served CSS. ---
+// Self-hosted font cuts, mirroring overlay_build.font_cut and _font_faces. Keep them
+// in sync. A downloaded Google family lands as up to four files: <Stem>.woff2 plus
+// -Bold, -Italic and -BoldItalic. They group under the base family with style and
+// weight descriptors, so the canvas preview and the picker match the served CSS.
 const OV_CUT_RE = /-(bolditalic|italic|bold)$/i;
 function ovFontCut(stem) {                 // -> {base, style, weight} | null
   const m = stem.match(OV_CUT_RE);
@@ -3394,9 +3379,9 @@ function ovFillSample() {
   });
 }
 
-// Mirror of hud.html::fitName — shrink a team name from --team-name-max toward
-// --team-name-min until it fits, so the canvas previews a long name the way the
-// live overlay renders it (not as raw overflow).
+// Mirror of hud.html::fitName: shrink a team name from --team-name-max toward
+// --team-name-min until it fits, so the canvas previews a long name the way the live
+// overlay renders it rather than as raw overflow.
 function ovFitName(el) {
   const cs = getComputedStyle(el);
   const max = parseFloat(cs.getPropertyValue('--team-name-max')) || 30;
@@ -3407,8 +3392,8 @@ function ovFitName(el) {
 }
 
 // Session-only preview model: an editable copy of the server SAMPLE defaults,
-// mirrored to localStorage per profile+page. NEVER written to profile files —
-// it only changes what content the offline canvas shows.
+// mirrored to localStorage per profile and page. It is never written to a profile
+// file; it only changes what content the offline canvas shows.
 function ovPreviewKey() { return 'overlay-preview:' + (ovState.active || '') + ':' + ovState.page; }
 
 function ovPreviewDefaults() {
@@ -3519,9 +3504,9 @@ function ovApplyProp(el, prop, value) {
   if (!el) return;
   const name = OV_CSSNAME[prop];
   const nameEl = el.querySelector ? el.querySelector('.name') : null;
-  // textShadow is a compound prop (not in OV_CSSNAME): handle it — set AND clear
-  // — before the generic unset path, which would no-op on removeProperty(undefined)
-  // and leave a stale shadow on the canvas.
+  // textShadow is a compound prop and not in OV_CSSNAME, so set and clear it before
+  // the generic unset path, which would no-op on removeProperty(undefined) and leave
+  // a stale shadow on the canvas.
   if (prop === 'textShadow') {
     el.style.textShadow = (value && value.color)
       ? ((value.x || 0) + 'px ' + (value.y || 0) + 'px ' + (value.blur || 0) + 'px ' + value.color)
@@ -3574,11 +3559,11 @@ function ovSetProp(id, prop, value) {
   ovPositionSel();
 }
 
-// ----- Undo/redo (issue: builder editor aids) -----
-// Snapshot stacks of the in-memory layout. VISUAL edits only — the Advanced-CSS
-// textarea keeps its own native browser undo and is never tracked here. Invariant:
-// ovState.undo's top always equals the last committed layout, so undo reverts to
-// the new top and redo reapplies — no per-prop inverse operations.
+// Undo/redo (issue: builder editor aids)
+// Snapshot stacks of the in-memory layout, for visual edits only: the Advanced-CSS
+// textarea keeps its own native browser undo and is never tracked here. The invariant
+// is that ovState.undo's top always equals the last committed layout, so undo reverts
+// to the new top and redo reapplies, with no per-prop inverse operations.
 function ovHistSnap_() { return JSON.parse(JSON.stringify(ovState.layout || {})); }
 
 function ovHistInit() { ovState.undo = [ovHistSnap_()]; ovState.redo = []; ovHistButtons(); }
@@ -3617,7 +3602,7 @@ function ovHistButtons() {
   if (r) r.disabled = !ovState.redo || !ovState.redo.length;
 }
 
-// ----- Reference grid (editor aid; NEVER serialised into the layout/override.css) -----
+// Reference grid (editor aid; NEVER serialised into the layout/override.css)
 function ovGridLoad() {
   const g = {show: false, size: 10, snap: false};
   try { Object.assign(g, JSON.parse(localStorage.getItem('rc.ov.grid') || '{}')); }
@@ -3629,7 +3614,7 @@ function ovGridLoad() {
 function ovGridSave() {
   try { localStorage.setItem('rc.ov.grid', JSON.stringify(ovState.grid)); } catch (e) {}
 }
-// Grid spacing in px — parsed/clamped identically to the write sites (one source).
+// Grid spacing in px, parsed and clamped exactly as at the write sites.
 function ovGridSize() { return Math.max(1, parseInt(ovState.grid.size, 10) || 1); }
 function ovUpdateGrid() {
   const g = ovState.gridEl;
@@ -3663,9 +3648,9 @@ function ovGridSyncControls() {
 
 function ovApplyZoom() {
   const wrap = $('ov-stage').parentElement;
-  // The Profile view starts display:none (clientWidth 0); a ResizeObserver
-  // refits the instant it becomes visible — but only while in Fit mode (a numeric
-  // zoom is a fixed scale; a wrap resize there just changes what scrolls into view).
+  // The Profile view starts display:none with clientWidth 0, so a ResizeObserver
+  // refits the instant it becomes visible. Only in Fit mode: a numeric zoom is a
+  // fixed scale, where a wrap resize just changes what scrolls into view.
   if (!ovState.ro && 'ResizeObserver' in window) {
     ovState.ro = new ResizeObserver(() => {
       if (wrap.clientWidth && ovState.zoom === 'fit') { ovApplyZoom(); ovPositionSel(); }
@@ -3673,17 +3658,16 @@ function ovApplyZoom() {
     ovState.ro.observe(wrap);
   }
   const fit = ovState.zoom === 'fit';
-  // Fit scales the whole canvas to sit inside the wrap, so nothing ever needs to
-  // scroll — keep overflow hidden there. Otherwise a sub-pixel rounding of the
-  // exact-fit sizer flashes a scrollbar; on Windows (classic, space-consuming
-  // scrollbars — worse at 125% display scaling) that shrinks the content box, the
-  // ResizeObserver re-fits to the narrower width, the scrollbar vanishes, the width
-  // grows back… an infinite jitter loop. macOS overlay scrollbars take no layout
-  // width, so it never starts there. A numeric zoom keeps overflow:auto to pan the
-  // enlarged canvas (its scale is fixed, so the observer above can't loop).
+  // Fit scales the whole canvas to sit inside the wrap, so nothing needs to scroll
+  // and overflow stays hidden. Without that, a sub-pixel rounding of the exact-fit
+  // sizer flashes a scrollbar; where scrollbars take layout width, as on Windows,
+  // that shrinks the content box, the ResizeObserver re-fits to the narrower width,
+  // the scrollbar vanishes and the width grows back, an endless jitter loop. A
+  // numeric zoom keeps overflow:auto to pan the enlarged canvas, and its scale is
+  // fixed so the observer above cannot loop.
   wrap.style.overflow = fit ? 'hidden' : 'auto';
-  // Contain-fit on both axes (the wrap is 16:9 like the canvas, so they're ~equal;
-  // min() just guarantees the hidden overflow never clips a stray sub-pixel edge).
+  // Contain-fit on both axes. The wrap is 16:9 like the canvas, so the two are close
+  // and min() only guarantees the hidden overflow never clips a sub-pixel edge.
   const s = fit
     ? Math.min((wrap.clientWidth || 1) / OV_CANVAS_W,
                (wrap.clientHeight || 1) / OV_CANVAS_H)
@@ -3739,10 +3723,9 @@ function ovSelect(id) {
   ovRenderPanel();          // shows the "click a slot…" hint when nothing is selected
 }
 
-// Back to the initial "nothing selected" state (empty properties panel, no
-// selection box). Reachable via Esc, a click on empty canvas, or the slot
-// picker's placeholder — a slot selection is no longer sticky (issue: could not
-// deselect once a slot was picked).
+// Back to the initial "nothing selected" state: an empty properties panel and no
+// selection box. Reachable with Esc, a click on empty canvas, or the slot picker's
+// placeholder, so a slot selection is not sticky.
 function ovDeselect() { ovSelect(null); }
 
 function ovStartDrag(e) {
@@ -3786,10 +3769,10 @@ function ovStartResize(e) {
   window.addEventListener('pointerup', up);
 }
 
-// Inject @font-face for the given font files into the MAIN document head (merged,
-// never clobbered) so the font dropdowns + preview swatches can render each family
-// — the canvas itself uses its own shadow @font-face. Served same-origin by
-// /api/overlay/font/<file> (profile dir first, then the machine library).
+// Inject @font-face for the given font files into the main document head, merging
+// rather than clobbering, so the font dropdowns and preview swatches can render each
+// family. The canvas itself uses its own shadow @font-face. Served same-origin by
+// /api/overlay/font/<file>, profile dir first and then the machine library.
 const ovDocFontSet = new Set();
 function ovInjectDocFonts(filenames) {
   (filenames || []).forEach(n => ovDocFontSet.add(n));
@@ -3816,7 +3799,7 @@ function ovPopulateFontSelect(sel, current, emptyLabel, onpick) {
     (parent || sel).appendChild(o);
   };
   add('', emptyLabel);
-  // Offer only BASE families — cut siblings (-Bold/-Italic) live under the base and
+  // Offer only base families: a cut sibling (-Bold/-Italic) lives under the base and
   // would be unmatchable if picked directly (see ovFontFamilies / _font_faces).
   const uploaded = ovFontFamilies(ovState.fonts);
   if (uploaded.length) {
@@ -3929,9 +3912,9 @@ function ovSetShadow(id, key, raw) {
   ovPositionSel();
 }
 
-// Compound text-shadow editor (offset X/Y, blur, color). Deliberately does NOT
-// register in ovState.fields — textShadow is written via ovSetShadow (not the
-// scalar ovSetProp path), and ovRenderPanel rebuilds these inputs on every slot
+// Compound text-shadow editor (offset X/Y, blur, colour). It deliberately does not
+// register in ovState.fields: textShadow is written via ovSetShadow rather than the
+// scalar ovSetProp path, and ovRenderPanel rebuilds these inputs on every slot
 // change, so there is no external value to sync back.
 function ovShadowField(ov) {
   const s = ov.textShadow || {};
@@ -4206,17 +4189,17 @@ async function saveOverlay() {
   setTimeout(() => { b.innerHTML = orig; b.disabled = false; }, 1800);
 }
 
-// Refit the scaled canvas to the (now resized) container; keep the selection box
-// aligned. Registered once — harmless when the builder isn't on screen.
+// Refit the scaled canvas to the resized container and keep the selection box
+// aligned. Registered once, and harmless when the builder is not on screen.
 window.addEventListener('resize', () => {
   // Only Fit mode re-derives scale from the wrap width; a numeric zoom is a fixed
   // factor, so a window resize there just changes what scrolls into view.
   if (ovState.shadow && ovState.zoom === 'fit') { ovApplyZoom(); ovPositionSel(); }
 });
 
-// Pop the builder into a modal laid over the Control Center for more room than
-// the Profile view gives. The real #overlay-section is MOVED into the modal body
-// (and back on close) — no duplicated builder DOM/JS, so nothing drifts.
+// Pop the builder into a modal laid over the Control Center, for more room than the
+// Profile view gives. The real #overlay-section is moved into the modal body and back
+// on close, so no builder DOM or JS is duplicated and nothing drifts.
 const ovModalHome = {parent: null, next: null};
 
 function openBuilderModal() {
@@ -4238,9 +4221,9 @@ function closeBuilderModal() {
   setTimeout(() => { if (ovState.shadow) { ovApplyZoom(); ovPositionSel(); } }, 0);
 }
 
-// Esc: first blur an active field, then drop the slot selection (back to the
-// initial "nothing selected" state); only when nothing is selected does Esc close
-// the pop-out modal.
+// Esc first blurs an active field, then drops the slot selection back to the initial
+// "nothing selected" state. Only when nothing is selected does Esc close the pop-out
+// modal.
 window.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
   const tn = e.target && e.target.tagName;
@@ -4250,13 +4233,14 @@ window.addEventListener('keydown', e => {
   if (!$('ov-modal').hidden) closeBuilderModal();
 });
 
-// Undo/redo shortcuts — only when the builder canvas exists and focus is NOT in a
-// form field (so number/color inputs and the Advanced-CSS textarea keep native undo).
+// Undo and redo shortcuts, only when the builder canvas exists and focus is not in a
+// form field, so number and colour inputs and the Advanced-CSS textarea keep their
+// native undo.
 window.addEventListener('keydown', e => {
   if (!ovState.shadow) return;
-  // Only when the builder is actually on screen (Profile view active or the
-  // pop-out modal open) — otherwise Ctrl/Cmd-Z on another view would silently
-  // mutate the hidden builder's layout.
+  // Only when the builder is on screen, meaning the Profile view is active or the
+  // pop-out modal is open. Otherwise Ctrl/Cmd-Z on another view would silently mutate
+  // the hidden builder's layout.
   if (currentView !== 'profile' && $('ov-modal').hidden) return;
   const tn = e.target && e.target.tagName;
   if (tn === 'INPUT' || tn === 'TEXTAREA' || tn === 'SELECT') return;
@@ -4266,9 +4250,9 @@ window.addEventListener('keydown', e => {
   else if ((k === 'z' && e.shiftKey) || k === 'y') { e.preventDefault(); ovRedo(); }
 });
 
-// Reuse the exact OBS browser-source refresh the Apps view uses (obs-refresh op,
-// === `racecast obs refresh`): reloads the relay-served HUD/Timer pages so a
-// saved CSS change shows. Best-effort — needs the relay up + obs-websocket; the
+// Reuse the OBS browser-source refresh the Apps view uses (the obs-refresh op, the
+// same as `racecast obs refresh`): it reloads the relay-served overlay pages so a
+// saved CSS change shows. Best-effort, needing the relay and obs-websocket up; the
 // job console surfaces the result.
 function applyOverlay() { op('obs-refresh'); }
 
@@ -4278,15 +4262,15 @@ function importHealth() {
   op('health-import', false, {file: path.trim()});
 }
 
-// Open the relay's HUD design preview (/hud/preview) in a new tab. Served by the
-// relay on the fixed loopback (the producer designs locally), so it needs the
-// relay running — if it is down the new tab shows the relay's own error page.
+// Open the relay's HUD design preview (/hud/preview) in a new tab. The relay serves
+// it on the fixed loopback, because the producer designs locally, so the relay must
+// be running; if it is down the new tab shows the relay's own error page.
 function openHudPreview() {
   const port = (lastStatus && lastStatus.relay && lastStatus.relay.port) || 8088;
   window.open('http://127.0.0.1:' + port + '/hud/preview', '_blank', 'noopener');
 }
 
-// ----- Crew editor card (issue #216) -----
+// Crew editor card (issue #216)
 // Loaded with the Profile view (via loadProfiles) and on every profile switch.
 // Consumes GET /api/crew and POST /api/crew (save) / /api/crew/delete.
 // Errors surface inline on #crew-err; user-controlled text goes through
@@ -4405,7 +4389,7 @@ function crewAddRow() {
   c.appendChild(crewRow(newRow, '', false, false, false, false, ''));
 }
 
-// ----- Looks card (named look backups: overlay + graphics + media) -----
+// Looks card (named look backups: overlay + graphics + media)
 // Loaded with the Profile view (via loadProfiles) and on every profile switch.
 // Errors surface inline on #backup-err, mirroring the overlay-err pattern.
 
@@ -4489,7 +4473,7 @@ async function deleteBackup(slug, label) {
   loadBackups();
 }
 
-// ----- Static Streams feed editor (runtime/static/streams.json) -----
+// Static Streams feed editor (runtime/static/streams.json)
 function showStreamsErr(msg) {
   const e = $('streams-err');
   e.textContent = msg;
@@ -4566,7 +4550,7 @@ async function saveStreams() {
   loadStreams();                         // reflect the canonical file
 }
 
-// ----- Help & Docs (local docs + wiki links) -----
+// Help & Docs (local docs + wiki links)
 async function fetchDocs() {
   let d;
   try { d = await (await fetch('/api/docs', {cache: 'no-store'})).json(); }
@@ -4657,13 +4641,13 @@ function watchLog(name) {
   };
 }
 
-// Custom replacements for the native confirm()/alert() — promise-based and styled
-// like the rest of the Control Center modals (#221 quit dialog pattern), backed by
-// one reusable <dialog id="cmodal">. confirmModal() resolves true (OK) / false
-// (Cancel or ESC); alertModal() hides Cancel and resolves when dismissed. The
-// <form method="dialog"> closes with the clicked button's value, so a single
-// 'close' listener covers buttons + ESC (returnValue '' -> false). Wired lazily on
-// first use because the dialog markup is parsed after this script block.
+// Custom replacements for the native confirm() and alert(): promise-based and styled
+// like the rest of the Control Center modals (#221), backed by one reusable
+// <dialog id="cmodal">. confirmModal() resolves true for OK and false for Cancel or
+// Esc; alertModal() hides Cancel and resolves when dismissed. The
+// <form method="dialog"> closes with the clicked button's value, so one 'close'
+// listener covers both the buttons and Esc (returnValue '' is false). Wired lazily on
+// first use, because the dialog markup is parsed after this script block.
 let cmodalResolve = null, cmodalWired = false;
 function customModal(opts) {
   const dlg = $('cmodal');
@@ -4690,7 +4674,7 @@ function confirmModal(body, opts) { return customModal({body, ...(opts || {})});
 function alertModal(body, opts) { return customModal({body, isAlert: true, ...(opts || {})}); }
 
 function quitUi() {
-  // Default OFF on every open (no persistence) — quitting must never kill a live
+  // Default off on every open, with no persistence: quitting must never kill a live
   // broadcast unless the operator opts in this time.
   $('quit-stop-event').checked = false;
   quitStopToggle();
@@ -4717,7 +4701,7 @@ async function blankAndQuit() {
 }
 
 async function quitConfirm() {
-  if (!$('quit-stop-event').checked) {     // plain quit — unchanged behaviour
+  if (!$('quit-stop-event').checked) {     // plain quit
     closeQuitModal();
     blankAndQuit();
     return;
@@ -4733,7 +4717,7 @@ async function quitConfirm() {
     code = await runOpAndWait('event-stop');
   } catch (e) {
     alertModal(e.message || 'Could not start the event stop.');
-    return;                                // dispatch failed — leave the CC open
+    return;                                // dispatch failed, leave the CC open
   }
   if (code !== '0') return;                // failed: keep the CC open, error stays in the console
   blankAndQuit();
