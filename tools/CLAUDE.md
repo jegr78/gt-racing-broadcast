@@ -79,6 +79,25 @@ tear down) is captured in the **`racecast-e2e`** skill, which builds on the
 **`racecast-local-uat`** skill's data copy-in. Spec/plan:
 `docs/superpowers/{specs,plans}/2026-06-17-e2e-regression-harness*.md`.
 
+## Prove a text-only change (`tools/ast-gate.py` + `tools/html-gate.py`)
+Two maintainer gates for a pass that is supposed to touch comments and prose only.
+Both compare the working tree against a base ref and are read-only.
+
+`ast-gate.py <base-ref> [paths]` parses each Python file, drops docstrings and blanks
+prose string constants, then requires the rest to be identical. A changed string
+without whitespace is never prose, so a mangled flag, digest or dict key counts as a
+logic change rather than a rewording. Strings are compared positionally, so two
+swapped ones cannot cancel out, and a file that mentions `__doc__` also reports
+docstring changes, because there the module docstring is CLI output.
+
+`html-gate.py <base-ref> <files>` does the same for a page: it strips HTML, CSS and JS
+comments and requires everything else to be byte-identical, then syntax-checks every
+inline `<script>` with `node --check`. Its comment stripper knows string and regex
+literals. Without that it desynchronises on a class like `/[&<>"']/g` and reports every
+later comment as a change, which once nearly cost a correct batch.
+
+Neither gate judges wording. Both list what changed so a human reads it.
+
 ## Broadcast-asset renderer (`tools/render-assets.py` + `tools/assets_kit.py`)
 
 Renders a league's stills (Standby, Intermission, …) and intro/outro clips from
