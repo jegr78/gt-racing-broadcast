@@ -16,8 +16,8 @@ m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 def t_start_from_one():
     assert m.stint_start_indices(1, 8) == (0, 1)
     assert m.stint_start_indices(1, 2) == (0, 1)
-    assert m.stint_start_indices(1, 1) == (0, 1)   # was (0,0): B idles on the empty slot 2
-    assert m.stint_start_indices(1, 0) == (0, 1)   # was (0,0): empty schedule, both idle
+    assert m.stint_start_indices(1, 1) == (0, 1)   # B idles on the empty slot 2
+    assert m.stint_start_indices(1, 0) == (0, 1)   # empty schedule, both idle
 
 
 def t_takeover_midschedule():
@@ -26,8 +26,8 @@ def t_takeover_midschedule():
 
 
 def t_takeover_last_stint_b_idles():
-    assert m.stint_start_indices(9, 8) == (7, 8)   # was (7,7): clamp A to last; B idles (no next)
-    assert m.stint_start_indices(8, 8) == (7, 8)   # was (7,7): last stint live; B idles
+    assert m.stint_start_indices(9, 8) == (7, 8)   # clamp A to last; B idles, there is no next
+    assert m.stint_start_indices(8, 8) == (7, 8)   # last stint live; B idles
 
 
 def t_takeover_below_one_clamps_to_one():

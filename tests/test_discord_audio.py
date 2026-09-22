@@ -144,7 +144,7 @@ def t_canonicalize_name_resets_to_constant():
 
 def _coll_with_pov(pos=(1496.0, 644.0), bounds=(384.0, 216.0)):
     # Scenes are stored as `sources` entries with id "scene"; their items
-    # (carrying pos/bounds) live in settings.items — mirrors GT_Racing_Endurance.json.
+    # (carrying pos/bounds) live in settings.items, mirroring GT_Racing_Endurance.json.
     return {"sources": [
         {"name": "Stint", "id": "scene", "settings": {"items": [
             {"name": "Feed POV",
@@ -194,7 +194,7 @@ def t_apply_pov_transform_no_pov_item_is_noop():
 
 def _coll_with_webcam(pos=(14.0, 695.0), bounds=(336.0, 189.0)):
     # Mirrors _coll_with_pov, but for the solo-mode "Solo Webcam" device item
-    # (scene "Program") — see GT_Racing_Solo_POV.json / GT_Racing_Solo_Commentary.json.
+    # in scene "Program". See GT_Racing_Solo_POV.json and GT_Racing_Solo_Commentary.json.
     return {"sources": [
         {"name": "Program", "id": "scene", "settings": {"items": [
             {"name": "Solo Webcam",
@@ -224,10 +224,9 @@ def t_apply_box_transform_webcam_empty_is_noop():
 
 
 def t_apply_box_transform_webcam_scene_scoped_program_only():
-    # Jens's requirement: the webcam bake must reposition the 'Solo Webcam' item
-    # ONLY where it is embedded in 'Program' — never a same-named item in the
-    # standalone fullscreen 'Solo Webcam' scene. A decoy same-name item in the
-    # 'Solo Webcam' scene must stay untouched even though it shares the name.
+    # The webcam bake must reposition the 'Solo Webcam' item ONLY where it is
+    # embedded in 'Program', never a same-named item in the standalone fullscreen
+    # 'Solo Webcam' scene. A decoy there must stay untouched.
     coll = {"sources": [
         {"name": "Solo Webcam", "id": "scene", "settings": {"items": [
             {"name": "Solo Webcam",                       # decoy in its own scene
@@ -252,10 +251,10 @@ def t_apply_box_transform_webcam_scene_scoped_program_only():
 
 
 def t_apply_box_transform_tyres_capture_scene_scoped_program_only():
-    # Mirrors t_apply_box_transform_webcam_scene_scoped_program_only: the tyres/fuel
-    # capture bake must reposition the 'Solo Tyres/Fuel Capture' item ONLY where it
-    # is embedded in 'Program' — a same-named decoy item in another scene must stay
-    # untouched even though it shares the name.
+    # Mirrors t_apply_box_transform_webcam_scene_scoped_program_only: the
+    # tyres/fuel capture bake must reposition the 'Solo Tyres/Fuel Capture' item
+    # ONLY where it is embedded in 'Program'. A same-named decoy in another scene
+    # must stay untouched.
     coll = {"sources": [
         {"name": "Other Scene", "id": "scene", "settings": {"items": [
             {"name": "Solo Tyres/Fuel Capture",           # decoy in another scene

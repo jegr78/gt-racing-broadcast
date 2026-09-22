@@ -10,7 +10,7 @@ spec = importlib.util.spec_from_file_location(
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 
 
-# --- program_audio_enabled: default ON, explicit falsey token disables --------
+# program_audio_enabled: default ON, an explicit falsey token disables.
 def t_program_audio_default_on():
     assert m.program_audio_enabled({}) is True
     assert m.program_audio_enabled({"RACECAST_PROGRAM_AUDIO": ""}) is True
@@ -23,7 +23,7 @@ def t_program_audio_killswitch():
         assert m.program_audio_enabled({"RACECAST_PROGRAM_AUDIO": tok}) is False
 
 
-# --- program_audio_ffmpeg_cmd: audio-only MP3 to stdout, params from consts ---
+# program_audio_ffmpeg_cmd: audio-only MP3 to stdout, params from the constants.
 def t_program_audio_ffmpeg_cmd_shape():
     cmd = m.program_audio_ffmpeg_cmd()
     assert cmd[0] == "ffmpeg"
@@ -43,7 +43,7 @@ def t_program_audio_defaults_are_mp3():
     assert m.PROGRAM_AUDIO_CONTENT_TYPE == "audio/mpeg"
 
 
-# --- should_retarget: re-point the encoder only on a real, serving handover ---
+# should_retarget: re-point the encoder only on a real, serving handover.
 def t_should_retarget_on_handover():
     assert m.should_retarget("A", "B", True) is True
     assert m.should_retarget("B", "A", True) is True
@@ -59,7 +59,7 @@ def t_should_retarget_guards():
     assert m.should_retarget(None, "A", True) is True     # first target counts
 
 
-# --- ProgramAudioService: refcount, idle reaper, handover restart (thread-free) --
+# ProgramAudioService: refcount, idle reaper and handover restart, thread-free.
 class _FakeRing:
     def __init__(self):
         self.closed = False
@@ -179,7 +179,7 @@ def t_encoder_tick_respawns_dead_proc():
     svc.shutdown()
 
 
-# --- Fix wave: teardown re-arm race (Finding 1) + per-generation stdin (Finding 2) --
+# The teardown re-arm race and the per-generation stdin.
 def t_teardown_rearms_when_listener_slips_in():
     # A listener slipped in during the idle-reap window: teardown must NOT close
     # the output ring and must re-arm a fresh supervisor. relay.live_feed()=None
@@ -191,7 +191,7 @@ def t_teardown_rearms_when_listener_slips_in():
     svc._running = True
     svc._listeners = 1
     svc._teardown()
-    assert svc._out is out               # ring kept — same object, not nulled
+    assert svc._out is out               # the same ring object, not nulled
     assert out.closed is False           # and NOT closed
     assert svc._running is True          # re-armed, still running
     svc.shutdown()
@@ -222,7 +222,7 @@ def t_feed_stdin_exits_on_own_dead_proc_after_reassign():
     assert svc._proc.poll() is None           # the reassigned proc is untouched/alive
 
 
-# --- _program_audio_stream_ring: header contract + streaming loop (thread-free) --
+# _program_audio_stream_ring: the header contract and streaming loop, thread-free.
 class _CapturingWFile:
     def __init__(self):
         self.chunks = []
@@ -278,7 +278,7 @@ def t_stream_ring_headers_and_body():
     assert b"".join(h.wfile.chunks) == b"MP3aMP3b"
 
 
-# --- _program_audio_is_probe: ?probe=1 availability check (no acquire) ---------
+# _program_audio_is_probe: the ?probe=1 availability check, with no acquire.
 def t_program_audio_is_probe_true_only_for_one():
     assert m._program_audio_is_probe("/preview/program-audio?probe=1") is True
     assert m._program_audio_is_probe("/cockpit/program-audio?probe=1&ts=9") is True
@@ -291,7 +291,7 @@ def t_program_audio_is_probe_false_otherwise():
     assert m._program_audio_is_probe("/preview/program-audio?probe=") is False
 
 
-# --- ProgramAudioService._join_offset: joins the trailing offset (#533) --------
+# ProgramAudioService._join_offset joins at the trailing offset. (#533)
 def t_program_audio_join_offset_uses_relay_prebuffer():
     r = m.FeedRing(1_000_000)
     for i in range(10):
@@ -313,11 +313,10 @@ def t_program_audio_join_offset_defaults_when_relay_lacks_attr():
     assert svc._join_offset(r, now=5.0) == 500   # getattr default 0.0 -> live edge
 
 
-# --- fMP4/CMAF joins (#576) --------------------------------------------------
-# A Twitch feed can be fMP4/CMAF rather than MPEG-TS. A mid-stream join then
-# lands inside an `mdat` with no ftyp/moov, so ffmpeg has no codec parameters and
-# cannot resync — measured against a live capture, only the initialization
-# segment PLUS a moof-aligned join produced MP3 frames.
+# fMP4/CMAF joins. A Twitch feed can be fMP4/CMAF rather than MPEG-TS. A
+# mid-stream join then lands inside an `mdat` with no ftyp/moov, so ffmpeg has no
+# codec parameters and cannot resync. Only the initialization segment PLUS a
+# moof-aligned join yields MP3 frames. (#576)
 
 def _box(typ, payload=b""):
     return (8 + len(payload)).to_bytes(4, "big") + typ + payload
@@ -338,7 +337,7 @@ def t_fmp4_init_segment_ends_after_moov():
 
 
 def t_fmp4_init_segment_without_a_fragment_yet():
-    """The head can be captured before the first moof arrives — the init segment
+    """The head can be captured before the first moof arrives: the init segment
     is complete at the end of moov and must not wait for one."""
     assert m.fmp4_init_segment(_INIT) == _INIT
 
@@ -349,7 +348,7 @@ def t_fmp4_init_segment_refuses_a_truncated_moov():
 
 
 def t_fmp4_init_segment_is_empty_for_mpeg_ts():
-    """The TS path must stay byte-identical to today — no prefix, no alignment."""
+    """The TS path must stay byte-identical: no prefix, no alignment."""
     ts = b"".join(b"\x47" + bytes([i % 251]) * 187 for i in range(20))
     assert m.fmp4_init_segment(ts) == b""
     assert m.fmp4_init_segment(b"") == b""
@@ -364,9 +363,10 @@ def t_fmp4_fragment_start_finds_the_first_moof():
 
 
 def t_fmp4_fragment_start_skips_a_moof_inside_mdat_payload():
-    """The search is a validated pattern scan, not a box walk — a mid-stream join
-    lands inside an mdat where sizes are meaningless. Media payload containing
-    the four bytes 'moof' must not be mistaken for a box start."""
+    """The search is a validated pattern scan, not a box walk, because a
+    mid-stream join lands inside an mdat where sizes are meaningless. Media
+    payload containing the four bytes 'moof' must not be mistaken for a box
+    start."""
     decoy = b"\x00\x00\x00\x40" + b"moof" + b"\x55" * 300
     stream = _fragment(decoy) + _fragment(b"\x66" * 400)
     at = m.fmp4_fragment_start(stream)
@@ -376,8 +376,8 @@ def t_fmp4_fragment_start_skips_a_moof_inside_mdat_payload():
 
 
 def t_fmp4_fragment_start_waits_for_enough_bytes_to_validate():
-    """A candidate that cannot be validated yet is 'not found' — the caller keeps
-    buffering rather than committing to a guess."""
+    """A candidate that cannot be validated yet is 'not found', so the caller
+    keeps buffering rather than committing to a guess."""
     stream = _INIT + _box(b"moof", b"\x22" * 60)
     assert m.fmp4_fragment_start(stream) is None
 
@@ -401,8 +401,8 @@ def t_fmp4_aligned_take_gives_up_and_passes_through():
 
 def t_feed_ring_keeps_and_resets_the_stream_head():
     """The ring is created ONCE in Relay.start() and outlives every streamlink
-    process, so the head must be dropped when the writer starts a new one —
-    otherwise the next stream is served the previous stream's init segment."""
+    process, so the head must be dropped when the writer starts a new one.
+    Otherwise the next stream is served the previous stream's init segment."""
     r = m.FeedRing(1024)                      # smaller than the head budget
     r.write(_INIT)
     r.write(b"\x77" * 4096)                    # scrolls the ring, not the head

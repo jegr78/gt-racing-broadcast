@@ -132,8 +132,8 @@ def t_post_multipart_frames_body_and_ua():
     assert b"<!doctype html>" in body
 
 
-# The covered modules must not issue a bare urllib request — everything goes
-# through http_util so the User-Agent can never be forgotten. urllib.parse /
+# The covered modules must not issue a bare urllib request. Everything goes
+# through http_util so the User-Agent can never be forgotten. urllib.parse and
 # urllib.error stay allowed; only `urlopen` and `urllib.request` are banned.
 _COVERED = [
     ("src", "racecast.py"),

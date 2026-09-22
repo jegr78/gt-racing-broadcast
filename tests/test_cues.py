@@ -183,7 +183,7 @@ def t_cuestore_rejects_bad_level():
         assert "error" in store.add(target="max", level="loud", text="x")
 
 
-# --- Race Control -> commentator notes (#376) ---
+# Race Control -> commentator notes. (#376)
 # RC notes ride the same cue store but carry origin="race_control"; a director cue
 # keeps the exact 7-key shape (no origin key) so the on-disk shape is unchanged.
 
@@ -275,7 +275,7 @@ def t_parse_rc_note_presets_absent_column():
     assert _relay.parse_rc_note_presets("Stints,Streamers\nStint 1,JeGr\n") == []
 
 
-# --- Commentator -> director cue-back (#377) ---
+# Commentator -> director cue-back. (#377)
 # The reverse direction: origin="commentator", shown only on the Director Panel.
 
 def t_active_cues_excludes_every_non_director_origin():

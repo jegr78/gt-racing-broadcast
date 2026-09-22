@@ -17,9 +17,9 @@ spec = importlib.util.spec_from_file_location(
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 
 
-# --- pure path helpers ---------------------------------------------------
+# Pure path helpers.
 def t_user_plugins_dir_posix():
-    # fixed POSIX path — explicit '/', never os.path.join (Windows CI runner).
+    # A fixed POSIX path: explicit '/', never os.path.join (Windows CI runner).
     assert m.user_plugins_dir("/home/op") == "/home/op/.config/obs-studio/plugins"
     assert m.user_plugins_dir("/home/op/") == "/home/op/.config/obs-studio/plugins"
 
@@ -38,7 +38,7 @@ def t_plugin_installed_detects_so():
 
 
 def t_is_prebuilt_arch_x86_64_only():
-    # the release ships a 64bit (x86_64) .so only — aarch64 has no prebuilt.
+    # the release ships a 64bit (x86_64) .so only; aarch64 has no prebuilt.
     assert m.is_prebuilt_arch("x86_64") is True
     assert m.is_prebuilt_arch("amd64") is True
     assert m.is_prebuilt_arch("aarch64") is False
@@ -52,7 +52,7 @@ def t_is_flatpak_obs_detects_var_app():
     assert m.is_flatpak_obs("/h", exists=lambda p: False) is False
 
 
-# --- pinned asset --------------------------------------------------------
+# The pinned asset.
 def t_download_url_is_github_non_flatpak():
     url = m.download_url()
     p = urlparse(url)
@@ -62,7 +62,7 @@ def t_download_url_is_github_non_flatpak():
     assert len(m.PLUGIN_SHA256) == 64
 
 
-# --- SHA-verified download + extract -------------------------------------
+# SHA-verified download and extract.
 def _fake_tarball():
     import io, tarfile
     buf = io.BytesIO()
@@ -118,7 +118,7 @@ def t_install_pipewire_audio_rejects_path_traversal():
             assert "unsafe" in str(exc).lower() or "traversal" in str(exc).lower()
 
 
-# --- install-apps decision hint ------------------------------------------
+# The install-apps decision hint.
 def t_install_hint_paths():
     # nothing to say when OBS is absent or the plugin is already there.
     assert m.install_hint("x86_64", obs_present=False, plugin_present=False,
@@ -134,10 +134,10 @@ def t_install_hint_paths():
 
 
 def t_plugin_present_sees_a_system_wide_install():
-    # On Arch the plugin comes from the AUR and lands system-wide. Checking only
-    # the per-user dir made install-apps download a SECOND copy into ~/.config,
-    # leaving OBS with two builds of the same plugin. plugin_present() delegates
-    # to preflight's candidate list rather than keeping a second copy in sync.
+    # On Arch the plugin comes from the AUR and lands system-wide, so checking
+    # only the per-user dir downloads a SECOND copy into ~/.config and leaves OBS
+    # with two builds of it. plugin_present() delegates to preflight's candidate
+    # list rather than keeping a second copy in sync.
     home = "/home/u"
     assert m.plugin_present(home, exists=lambda p: p == m.plugin_so_path(home)) is True
     sys_so = "/usr/lib/obs-plugins/" + m.PLUGIN_SO

@@ -7,18 +7,17 @@ ROOT = os.path.dirname(HERE)
 spec = importlib.util.spec_from_file_location("racecast", os.path.join(ROOT, "src", "racecast.py"))
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 
-# The takeover announcement (#317) does real network/DB I/O (sheet fetch, Discord,
-# health DB). No existing takeover test exercises it, so default it to a no-op for
-# the whole file (keeps the suite offline + hermetic); the saved original is verified
-# in its own seam-isolated test below.
+# The takeover announcement does real network and DB I/O (sheet fetch, Discord,
+# health DB), so it is a no-op for the whole file and the suite stays offline. The
+# saved original is verified in its own seam-isolated test below. (#317)
 _ORIG_ANNOUNCE_TAKEOVER = m._announce_takeover
 m._announce_takeover = lambda *a, **k: None
 
 
 def t_frozen_child_env_moves_the_extraction_dir_out_of_os_temp():
     # A frozen daemon lives for days; the OS reaps its temp dir underneath it.
-    # The child must unpack into runtime/bundle instead — the parent is the only
-    # one who can decide this, because the bootloader reads TMPDIR before Python.
+    # The child must unpack into runtime/bundle instead, and only the parent can
+    # decide this, because the bootloader reads TMPDIR before Python.
     with tempfile.TemporaryDirectory() as tmp:
         orig_frozen, orig_base = m.IS_FROZEN, m._runtime_base_dir
         try:
@@ -105,10 +104,10 @@ def t_tailscale_bad_verb_raises():
 
 
 def t_tailscale_login_hint_linux_points_to_cli_not_a_gui_app():
-    # Linux has no Tailscale GUI app — the first sign-in is `sudo tailscale up`
-    # + the printed browser URL, NOT "open the app". Regression for the misleading
-    # "open the Tailscale app and sign in" on Linux. (Whole-string equality, not a
-    # substring `in` check — the latter trips CodeQL's URL-sanitization query.)
+    # Linux has no Tailscale GUI app: the first sign-in is `sudo tailscale up`
+    # plus the printed browser URL, NOT "open the app". Whole-string equality, not
+    # a substring `in` check, because the latter trips CodeQL's URL-sanitization
+    # query.
     hint = m._tailscale_login_hint("linux")
     assert hint == ("run `sudo tailscale up` in a terminal, then open the printed "
                     "https://login.tailscale.com/… URL in a browser to sign in")
@@ -202,7 +201,7 @@ def t_parse_benchmark_args_defaults_and_flags():
 
 
 def t_parse_benchmark_args_rejects_bad_input():
-    # #618: OBS rebuilds its input after the rejoin; a settle below 3 s samples that
+    # OBS rebuilds its input after the rejoin; a settle below 3 s samples that (#618)
     for bad in (["--window"], ["--window", "x"], ["--window", "5"], ["--settle", "2"],
                 ["--scene"], ["--bogus"]):
         try:
@@ -322,8 +321,8 @@ def t_force_utf8_io_reconfigures_and_is_safe():
     class Raises:
         def reconfigure(self, **kw):
             raise OSError("console detached")
-    # None models a --windowed app whose PyInstaller build has no stdout — must
-    # never raise; non-reconfigurable / raising streams are skipped, not fatal.
+    # None models a --windowed app whose PyInstaller build has no stdout. It must
+    # never raise; non-reconfigurable or raising streams are skipped, not fatal.
     m._force_utf8_io([Stream(), NoReconfigure(), Raises(), None, Stream()])
     assert calls == [{"encoding": "utf-8", "errors": "replace"}] * 2
 
@@ -474,9 +473,9 @@ def t_augment_path():
 
 def t_ensure_tool_path_adds_managed_bin():
     """install-tools drops direct-download tools (deno on Linux, the Ookla
-    speedtest CLI on mac/Linux) into runtime/bin — never on the user's shell
-    PATH. _ensure_tool_path() must prepend it so preflight + the spawned relay
-    resolve them."""
+    speedtest CLI on mac/Linux) into runtime/bin, never on the user's shell PATH.
+    _ensure_tool_path() must prepend it so preflight and the spawned relay resolve
+    them."""
     import tempfile
     td = tempfile.mkdtemp()
     binr = os.path.join(td, "runtime", "bin")
@@ -534,15 +533,15 @@ def t_relay_daemon_argv():
 
 
 def t_oneshot_extra():
-    # new signature: (command, rest, runtime_dir, base_dir)
-    # --out is always injected now (profile-scoped, not only when frozen)
+    # Signature: (command, rest, runtime_dir, base_dir). --out is always injected,
+    # profile-scoped, not only when frozen.
     R = os.path.join("x", "runtime", "demo")   # profile runtime
     B = os.path.join("x", "runtime")           # base runtime
     assert m._oneshot_extra("preflight", [], R, B) == ["--runtime-dir", B]
     assert m._oneshot_extra("graphics", [], R, B) == \
         ["--out", os.path.join(R, "graphics")]
     assert m._oneshot_extra("media", [], R, B) == ["--out", os.path.join(R, "media")]
-    # setup INJECTS media/graphics dirs into the collection -- always profile-scoped.
+    # setup INJECTS media/graphics dirs into the collection, always profile-scoped.
     assert m._oneshot_extra("setup", [], R, B) == \
         ["--out", os.path.join(R, "GT_Racing_Endurance.import.json"),
          "--media", os.path.join(R, "media"),
@@ -591,7 +590,7 @@ def t_oneshot_extra():
 def t_sync_pov_transform_calls_setter_with_merged_box():
     # All three mapped slots ("pov" -> Stint/"Feed POV", "webcam" -> Program/"Solo
     # Webcam", "tyres-capture" -> Program/"Solo Tyres/Fuel Capture") must be synced
-    # from one call — capture every set_transform call.
+    # from one call, so capture every set_transform call.
     import tempfile
     calls = []
 
@@ -706,7 +705,7 @@ def t_export_companion_writes_file():
 
 def t_export_companion_default_into_runtime():
     # No --out -> runtime/ (same home as the localized OBS collection), and the
-    # dir is created on demand — NOT the caller's cwd.
+    # dir is created on demand, NOT in the caller's cwd.
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         old = m._runtime_dir
@@ -873,8 +872,8 @@ def t_qualifying_mode_mismatch_note():
 def t_relay_start_retries_when_first_spawn_not_up():
     # The event-start race: the freshly spawned relay aborts on a still-clearing port,
     # so start_detached returns a PID for a child that died. relay_start must NOT claim
-    # success on the first (failed) verify — it respawns once, and the port has cleared
-    # by then. Regression guard for the 2026-07-10 qualifying "relay not running".
+    # success on the first (failed) verify. It respawns once, and the port has
+    # cleared by then.
     import io, contextlib
     restore, calls = _relay_spawn_stubs([False, True])   # down, then up on retry
     try:
@@ -891,8 +890,8 @@ def t_relay_start_retries_when_first_spawn_not_up():
 
 def t_relay_start_reports_failure_when_relay_never_comes_up():
     # If the relay never binds the control port, relay_start must report an HONEST
-    # failure — never print "relay started" for a dead child (which made event-start
-    # look green while the relay was down and the producer had to start it by hand).
+    # failure, never "relay started" for a dead child, which would make event-start
+    # look green while the relay is down.
     import io, contextlib
     restore, calls = _relay_spawn_stubs([False, False])   # down on both attempts
     try:
@@ -1078,7 +1077,7 @@ def t_profile_routing():
     assert m.route(["profile", "new", "erf", "--from", "example"]) == {
         "kind": "profile", "rest": ["new", "erf", "--from", "example"]}
     # an unknown profile verb is NOT validated at the route seam (parse_profile_args
-    # does that) — route just hands the rest through:
+    # does that); route just hands the rest through:
     assert m.route(["profile", "bogus"]) == {"kind": "profile", "rest": ["bogus"]}
 
 
@@ -1131,7 +1130,7 @@ def t_oneshot_extra_media_no_cookies_when_absent_or_user_supplied():
         assert m._oneshot_extra("media", ["--cookies", "/my/jar"], rd, base) == [
             "--out", os.path.join(rd, "media")]
 def t_oneshot_extra_setup_out_is_kind_aware():
-    # #304: the `setup` default --out filename depends on the active profile kind.
+    # The `setup` default --out filename depends on the active profile kind. (#304)
     # endurance (explicit or the default when unset) keeps the byte-identical name;
     # solo gets its own template basename. An explicit --out always wins regardless.
     rd = os.path.join("R", "demo")
@@ -1145,7 +1144,7 @@ def t_oneshot_extra_setup_out_is_kind_aware():
         "--media", os.path.join(rd, "media"),
         "--graphics", os.path.join(rd, "graphics")]
     # no kind passed -> falls back to RACECAST_KIND from the environment (endurance
-    # when unset/blank/unknown -- matches setup-assets' own default).
+    # when unset/blank/unknown, matching setup-assets' own default).
     saved = os.environ.pop("RACECAST_KIND", None)
     try:
         assert m._oneshot_extra("setup", [], rd, base) == [
@@ -1168,19 +1167,19 @@ def t_oneshot_extra_setup_out_is_kind_aware():
 
 
 def t_setup_import_name_by_kind():
-    # #304 follow-up: the kind-aware setup import filename is shared logic --
-    # both _oneshot_extra and the init wizard's "is setup already done?" probe
-    # (_init_import_json) must resolve to the SAME basename for a given kind.
+    # The kind-aware setup import filename is shared logic: both _oneshot_extra and
+    # the init wizard's "is setup already done?" probe (_init_import_json) must
+    # resolve to the SAME basename for a given kind. (#304)
     assert m._setup_import_name("solo") == "GT_Racing_Solo.import.json"
     assert m._setup_import_name("endurance") == "GT_Racing_Endurance.import.json"
     assert m._setup_import_name("") == "GT_Racing_Endurance.import.json"
 
 
 def t_init_import_json_is_kind_aware():
-    # #304: _init_import_json used to hardcode GT_Racing_Endurance.import.json, so for
-    # a solo profile (whose setup writes GT_Racing_Solo.import.json) the init wizard
-    # never detected setup as done and kept re-running it. It must follow
-    # RACECAST_KIND the same way _oneshot_extra's setup default does.
+    # _init_import_json must follow RACECAST_KIND the same way _oneshot_extra's
+    # setup default does, or a solo profile (whose setup writes
+    # GT_Racing_Solo.import.json) never reads as done and the wizard re-runs it.
+    # (#304)
     saved = os.environ.pop("RACECAST_KIND", None)
     try:
         os.environ["RACECAST_KIND"] = "solo"
@@ -1719,7 +1718,7 @@ def t_overlay_layout_ignores_comment_only_timer_css():
         # Write a layout-hud.json
         with open(os.path.join(od, "layout-hud.json"), "w", encoding="utf-8") as fh:
             _json.dump({"page": "hud", "slots": {}, "fonts": [], "customCss": ""}, fh)
-        # Write a comment-only timer.css (default scaffold — no real rules)
+        # Write a comment-only timer.css (the default scaffold, no real rules)
         with open(os.path.join(od, "timer.css"), "w", encoding="utf-8") as fh:
             fh.write("/* just the template, no rules */\n")
         try:
@@ -1831,7 +1830,7 @@ def t_machine_font_download_saves_all_cuts():
 
 def t_machine_font_download_single_cut_fallback():
     # A response without latin subset blocks (the legacy/stub shape) still self-hosts
-    # one file — back-compat for families the cuts request can't satisfy.
+    # one file, back-compat for families the cuts request cannot satisfy.
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         orig = _mk_active_profile(td)
@@ -1848,7 +1847,7 @@ def t_machine_font_download_single_cut_fallback():
 
 def t_machine_font_delete_removes_whole_family():
     # Deleting a base family also removes its cut siblings (else a half-deleted family
-    # would break — a slot referencing it loses its bold/italic faces).
+    # would break: a slot referencing it loses its bold/italic faces).
     import tempfile
     with tempfile.TemporaryDirectory() as td:
         orig = _mk_active_profile(td)
@@ -2006,8 +2005,8 @@ def t_obs_page_paths_relay_mirror_in_sync():
 
 
 def t_obs_ws_persist_default_on():
-    # #537: persistent obs-websocket connections default ON; a falsey
-    # RACECAST_OBS_WS_PERSIST restores connect-per-call. Pure -> unit-tested.
+    # Persistent obs-websocket connections default ON; a falsey
+    # RACECAST_OBS_WS_PERSIST restores connect-per-call. (#537)
     spec2 = importlib.util.spec_from_file_location(
         "feeds_persist", os.path.join(ROOT, "src", "relay", "racecast-feeds.py"))
     feeds = importlib.util.module_from_spec(spec2); spec2.loader.exec_module(feeds)
@@ -2302,8 +2301,8 @@ def t_event_takeover_funnel_requires_secret():
 
 
 def t_event_takeover_funnel_auth_rejected_aborts():
-    # A 403/401 from the funnel endpoint means a bad/missing secret — abort, do NOT
-    # silently fall back (unlike a network failure).
+    # A 403/401 from the funnel endpoint means a bad or missing secret, so abort
+    # rather than silently falling back the way a network failure does.
     import urllib.error
     def fake_get(url, secret=None, timeout=5):
         raise urllib.error.HTTPError(url, 403, "forbidden", {}, None)
@@ -2325,8 +2324,7 @@ def t_event_takeover_funnel_auth_rejected_aborts():
 
 def t_event_takeover_funnel_401_blames_old_relay_not_secret():
     # A 401 (not 403) means A is an OLDER relay that still requires a console
-    # token — the abort message must NOT blame the secret (that misled operators
-    # whose secrets matched). Distinct, actionable wording.
+    # token, so the abort message must NOT blame the secret.
     import urllib.error
     def fake_get(url, secret=None, timeout=5):
         raise urllib.error.HTTPError(url, 401, "unauthorized", {}, None)
@@ -2404,8 +2402,8 @@ def t_discord_routing():
 
 
 def t_discord_voice_target_sheet_failure_falls_back_to_env():
-    # Any Sheet-fetch failure (network, 4xx, bad CSV, ...) must be swallowed and
-    # never propagate -- the env RACECAST_DISCORD_VOICE_URL is the fallback target.
+    # Any Sheet-fetch failure (network, 4xx, bad CSV) must be swallowed and never
+    # propagate; the env RACECAST_DISCORD_VOICE_URL is the fallback target.
     import http_util as _hu
     saved = dict(os.environ)
     orig_get_bytes = _hu.get_bytes
@@ -2555,8 +2553,8 @@ def t_discord_cmd_requires_client_credentials():
 
 
 def t_discord_cmd_status_without_credentials_is_readonly():
-    # status must never require creds / sys.exit — it reports the target and a
-    # note that the Discord app is not configured (F2).
+    # status must never require creds or sys.exit; it reports the target and a
+    # note that the Discord app is not configured.
     import io, contextlib
     orig_target = m._discord_voice_target
     m._discord_voice_target = lambda: None
@@ -2586,9 +2584,8 @@ def t_main_dispatches_discord_join_leave_status():
 
 
 def t_set_env_key_preserves_other_keys():
-    """_set_env_key must NOT drop other keys/comments (regression: cockpit
-    enable/disable wiped SHEET_ID etc. by passing a single pair to the
-    full-set _write_env_file)."""
+    """_set_env_key must NOT drop other keys or comments: passing a single pair to
+    the full-set _write_env_file wipes everything else."""
     import tempfile
     with tempfile.TemporaryDirectory() as d:
         p = os.path.join(d, "profile.env")
@@ -2616,8 +2613,8 @@ def t_set_env_key_preserves_other_keys():
 def t_route_cockpit():
     assert m.route(["console", "token", "revoke", "Alpha"]) == {
         "kind": "console", "rest": ["token", "revoke", "Alpha"]}
-    # `links` is now a top-level command (#216); `funnel` was removed earlier;
-    # like the removed enable/disable verbs both are rejected at route() time.
+    # `links` is a top-level command and `funnel` no longer exists, so like the
+    # removed enable/disable verbs both are rejected at route() time. (#216)
     for bad in (["console"], ["console", "bogus"], ["console", "enable"],
                 ["console", "disable"], ["console", "funnel", "on"],
                 ["console", "links"]):
@@ -2699,9 +2696,9 @@ def t_funnel_auto_enabled_gate():
     # OPT-OUT: it auto-enables by default and only stays down when the machine
     # flag RACECAST_FUNNEL (legacy RACECAST_COCKPIT_FUNNEL) is explicitly falsey
     # (false/0/no/off). It still requires a usable cockpit. The gate reads
-    # console_status_data(), whose real shape is {ok, has_secret, ...} — there is
-    # NO "enabled" key (#216 fix: a stale gate on st["enabled"] made the whole
-    # auto-enable path dead).
+    # console_status_data(), whose real shape is {ok, has_secret, ...} with NO
+    # "enabled" key; a gate on st["enabled"] makes the whole auto-enable path dead.
+    # (#216)
     import tempfile
     orig_env_file = m._env_file
     orig_status = m.console_status_data
@@ -2982,8 +2979,8 @@ def t_function_local_peer_imports_are_frozen():
     """Every peer module racecast.py imports INSIDE a function (lazy import) must be
     declared as a PyInstaller --hidden-import in tools/build-binary.py. PyInstaller's
     static scan misses function-local imports, so a missing one makes the frozen
-    binary raise ModuleNotFoundError at runtime — and binary-smoke won't catch a
-    lazily-imported, error-swallowed path (this is how companion_linux slipped)."""
+    binary raise ModuleNotFoundError at runtime, and binary-smoke does not catch a
+    lazily-imported, error-swallowed path."""
     import ast
     src_dir = os.path.join(ROOT, "src")
     scripts_dir = os.path.join(src_dir, "scripts")
@@ -3010,11 +3007,9 @@ def t_function_local_peer_imports_are_frozen():
 
 def t_path_loaded_module_imports_are_frozen():
     """src/ui/*.py is loaded by PATH, not imported as a package, so PyInstaller's
-    scan never walks it — a peer module imported there is invisible to the build
+    scan never walks it, so a peer module imported there is invisible to the build
     even at module level. It must be a --hidden-import unless racecast.py already
-    imports it at module level (then the scan picks it up via that route).
-    Adding bundle_cache to ui_server.py broke the frozen binary exactly this way;
-    the older guard only covered function-local imports in racecast.py."""
+    imports it at module level, where the scan picks it up via that route."""
     import ast
     src_dir = os.path.join(ROOT, "src")
     scripts_dir = os.path.join(src_dir, "scripts")
@@ -3049,7 +3044,7 @@ def t_path_loaded_module_imports_are_frozen():
                          f"not --hidden-import in tools/build-binary.py: {sorted(missing)}")
 
 
-# ---- event title providers (Control Center Home; #207 follow-up) ----
+# Event-title providers for the Control Center Home. (#207)
 
 def t_event_title_read_from_relay_when_alive():
     d = m.event_title_read_data(alive=lambda: True,
@@ -3225,9 +3220,9 @@ def t_relay_start_spawns_to_boot_log_not_console():
     # The relay daemon attaches its own rotating handler to relay.console.log; the
     # detached spawn MUST capture raw stdout/stderr to a separate boot file, or the
     # two writers corrupt midnight rotation (the inherited fd keeps writing to the
-    # renamed inode). Guards against reintroducing the #-final-review bug.
+    # renamed inode).
     import inspect
-    # The spawn (with retry) moved into _spawn_relay_verified — the guard follows it.
+    # The spawn and its retry live in _spawn_relay_verified, so the guard does too.
     src = inspect.getsource(m._spawn_relay_verified)
     assert "_relay_boot_log_path()" in src
     assert "_relay_log_path()" not in src   # never hand the console log to start_detached
@@ -3352,10 +3347,9 @@ def t_console_post_link_reports_post_failure():
 def t_post_discord_webhook_sets_user_agent():
     # Discord sits behind Cloudflare, which 403s the default urllib
     # "Python-urllib/x.y" User-Agent. The poster MUST send an explicit UA or the
-    # link never arrives (the 403 a UAT surfaced). Capture the Request instead of
-    # hitting the network. Patch http_util.urlopen — the name bound at import time
-    # in the helper module (urllib.request.urlopen is a different binding after
-    # the http_util migration).
+    # link never arrives. Capture the Request instead of hitting the network, and
+    # patch http_util.urlopen, the name bound at import time in the helper module
+    # (urllib.request.urlopen is a different binding after the http_util migration).
     import http_util as _hu
     captured = {}
 
@@ -3399,8 +3393,8 @@ def t_crew_entries_data_maps_relay_rows():
         m._relay_fetch_json = orig
     assert out["ok"] is True, out
     # Each entry carries a 1-based crew DATA-row index so the editor can Save/Delete
-    # a sheet-loaded row (regression: /crew/data is index-free — without this the UI
-    # sends row=undefined and every edit of an existing person fails).
+    # a sheet-loaded row. /crew/data is index-free, so without it the UI sends
+    # row=undefined and every edit of an existing person fails.
     assert out["entries"] == [
         {"row": 1, "name": "Dana", "director": True, "producer": False,
          "commentator": False, "race_control": False, "discord": "dana_d"},
@@ -3443,13 +3437,13 @@ def t_crew_write_and_delete_post_to_relay():
     assert posts[1][0].endswith("/crew/delete") and posts[1][1] == {"row": 3}
 
 
-# ---------- singleton relay control port / profile-switch guard (#273) ----------
+# The singleton relay control port and the profile-switch guard. (#273)
 
 def t_relay_pid_is_singleton_top_level():
     # The relay binds the SHARED control port (8088) + feed ports, so only ONE
-    # can run per machine. Its PID lives at the un-scoped runtime/ top level —
-    # NOT runtime/<profile>/ — so stop/status find the one relay regardless of
-    # the active profile (#273).
+    # can run per machine. Its PID lives at the un-scoped runtime/ top level, NOT
+    # under runtime/<profile>/, so stop/status find the one relay regardless of the
+    # active profile. (#273)
     orig_base, orig_active = m._runtime_base_dir, m._active_profile_name
     base = os.path.join("X", "runtime")
     m._runtime_base_dir = lambda: base
@@ -3591,7 +3585,7 @@ def t_health_export_import_roundtrip():
             m._health_db_path = orig_path
 
 
-# --- producer_schedule_data: tolerant provider with seams ---------------------
+# producer_schedule_data, a tolerant provider with seams.
 _PRODUCER_CSV = ("Part,Producer,MagicDNS\r\n"
                  "1,Alice,producer-a.tail1234.ts.net\r\n"
                  "2,Bob,producer-b.tail1234.ts.net\r\n")
@@ -3641,8 +3635,7 @@ def t_producer_schedule_pins_gviz_header_row():
     # parse_producer_rows finds no header and returns [] -> the Home "Producer
     # schedule" card AND the relay Parts control silently come up empty (the
     # stream keys never resolve). The fetch MUST pin headers=1 so gviz always
-    # treats sheet row 1 as the header. Regression for the erf-nls case where 4
-    # real producer rows were invisible.
+    # treats sheet row 1 as the header.
     os.environ["RACECAST_SHEET_ID"] = "SHEET123"
     seen = {}
     def capture(url):
@@ -3653,7 +3646,7 @@ def t_producer_schedule_pins_gviz_header_row():
     assert "headers=1" in seen["url"], seen["url"]
 
 
-# --- producer identity for events (#317) --------------------------------------
+# Producer identity for events. (#317)
 def t_takeover_producer_extracts_name():
     assert m._takeover_producer({"producer": "Alice"}) == "Alice"
     assert m._takeover_producer({"producer": "  Bob  "}) == "Bob"
@@ -4007,7 +4000,7 @@ def t_event_stop_reports_then_tears_down():
         assert "build" in calls and "relay_stop" in calls
         # relay is stopped LAST: on Windows the spawned `event stop` is a child of
         # the relay and relay_stop's `taskkill /T` would kill it mid-teardown, so
-        # companion/streams cleanup must finish first (#Windows PPID-tree).
+        # companion/streams cleanup must finish first.
         assert calls.index("companion_stop") < calls.index("relay_stop")
 
         calls.clear()
@@ -4091,12 +4084,12 @@ def t_event_stop_calls_discord_autoleave():
 
 
 def t_event_stop_noop_when_already_stopped():
-    # #524: the last-part auto-stop (STOP PART Q) already fired `event stop` (report
-    # + teardown). A SECOND stop — e.g. clicking Control Center "Stop Event" after —
-    # runs with the relay already gone. It MUST NOT regenerate + re-send a report
-    # (relay down => no commentator names, no qualifying marker => a strictly worse
-    # report overwriting/duplicating the good one). With no live relay, event stop is
-    # a no-op: no report, no send, no teardown, no autoleave.
+    # The last-part auto-stop (STOP PART Q) already fired `event stop` with its
+    # report and teardown. A SECOND stop, such as Control Center "Stop Event"
+    # afterwards, runs with the relay already gone and MUST NOT regenerate and
+    # re-send a report: relay down means no commentator names and no qualifying
+    # marker, a worse report overwriting the good one. With no live relay, event
+    # stop is a no-op: no report, no send, no teardown, no autoleave. (#524)
     calls = []
     saved = (m._relay_is_alive, m._build_report_file, m._send_report_core,
              m.relay_stop, m.companion_stop, m.streams_stop, m._discord_autoleave)
@@ -4130,8 +4123,8 @@ def t_qualifying_title_marks_when_qualifying():
 
 
 def t_report_log_is_fresh_window_gate():
-    # #519: the freshness gate keeps a file only if its mtime is within the report
-    # session (>= start - grace). since=None keeps everything (back-compat).
+    # The freshness gate keeps a file only if its mtime is within the report
+    # session (>= start - grace). since=None keeps everything. (#519)
     g = m.REPORT_LOG_FRESHNESS_GRACE_S
     assert m._report_log_is_fresh(0.0, None) is True            # no window -> keep all
     assert m._report_log_is_fresh(1000.0, 1000.0) is True       # exactly at start
@@ -4190,7 +4183,7 @@ def t_profile_env_vars_includes_template():
 
 
 def t_env_upsert_preserves_other_keys():
-    # env_upsert_data must overlay ONLY the given keys — env_write_data (the
+    # env_upsert_data must overlay ONLY the given keys. env_write_data (the
     # underlying writer) treats its entries as the complete set and drops any
     # unlisted real key, which would silently delete e.g. RACECAST_OBS_WS_PASSWORD
     # if a naive two-key write were used to persist device selection (#304).
@@ -4226,7 +4219,7 @@ def t_env_upsert_updates_existing_key_in_place():
 def t_env_upsert_rejects_foreign_key_clearly():
     # A machine .env that already holds a non-RACECAST_ key (should never happen,
     # but the editor/device-scan must not blow up with the raw env_write_data
-    # wording) gets a clear, device-context error and writes nothing (#304 review).
+    # wording) gets a clear, device-context error and writes nothing. (#304)
     import tempfile, os as _os
     d = tempfile.mkdtemp(prefix="racecast-envupsert-foreign-")
     p = _os.path.join(d, ".env")
@@ -4257,8 +4250,8 @@ def t_resolve_device_selection_by_index_and_id():
 
 
 def t_parse_device_scan_args_mic():
-    # #307: --mic is a third recognized flag alongside --webcam/--capture, mapping
-    # to writing RACECAST_MIC via env_upsert_data (preserves other keys).
+    # --mic is a third recognized flag alongside --webcam/--capture, mapping to
+    # writing RACECAST_MIC via env_upsert_data, which preserves other keys. (#307)
     assert m._parse_device_scan_args([]) == (None, None, None, None)
     assert m._parse_device_scan_args(["--mic", "2"]) == (None, None, "2", None)
     assert m._parse_device_scan_args(
@@ -4271,7 +4264,7 @@ def t_parse_device_scan_args_mic():
 
 
 def t_parse_device_scan_args_tyres():
-    # Task 6: --tyres is a fourth recognized flag (VIDEO device, resolves against
+    # --tyres is a fourth recognized flag (VIDEO device, resolves against
     # the same enumerated video list as --webcam/--capture), mapping to writing
     # RACECAST_TYRES_CAPTURE.
     assert m._parse_device_scan_args(["--tyres", "2"]) == (None, None, None, "2")
@@ -4426,7 +4419,7 @@ def t_gt7_discover_cmd_single_save(capsys=None):
     assert writes["ip"] == "192.168.1.42"
 
 
-# ------------------------------------------------- GUI launch environment
+# The GUI launch environment.
 
 
 class _FakeApp:
@@ -4453,8 +4446,8 @@ class _FakeProc:
 
 
 def _launch(ev, popen, app="obs"):
-    """Drive _event_launch through its seams — no stdlib module is mutated. The
-    house style injects the same way (preflight.tool_version(run=…))."""
+    """Drive _event_launch through its seams, mutating no stdlib module. The house
+    style injects the same way (preflight.tool_version(run=…))."""
     import install_apps
     saved = install_apps.app_present
     try:
@@ -4465,10 +4458,10 @@ def _launch(ev, popen, app="obs"):
 
 
 def t_event_launch_strips_the_pyinstaller_library_path():
-    """OBS and Discord link the SYSTEM libraries. Handing them the frozen
-    binary's LD_LIBRARY_PATH makes them load our bundled libssl and die with
-    "version `OPENSSL_3.2.0' not found" before they can even write a log — and
-    stderr=DEVNULL hid it, so `event start` only ever said "still not up" (#572).
+    """OBS and Discord link the SYSTEM libraries. Handing them the frozen binary's
+    LD_LIBRARY_PATH makes them load our bundled libssl and die with "version
+    `OPENSSL_3.2.0' not found" before they can even write a log, and stderr=DEVNULL
+    hides it so `event start` only says "still not up". (#572)
     """
     seen = {}
     saved_env = m.sv.external_tool_env
@@ -4480,7 +4473,7 @@ def t_event_launch_strips_the_pyinstaller_library_path():
         m.sv.external_tool_env = saved_env
     assert ok is True
     env = seen.get("env") or {}
-    # NB: never assert with `env` as the message — it would dump the whole
+    # Never assert with `env` as the message: it would dump the whole
     # process environment (tokens included) into the test output on failure.
     assert "LD_LIBRARY_PATH" not in env, "LD_LIBRARY_PATH reached the GUI app"
     # The session overrides still have to reach the app (PR #560).
@@ -4527,7 +4520,7 @@ def t_event_launch_reports_an_app_that_dies_immediately():
 
 
 def t_gui_spawn_keeps_quiet_about_a_healthy_app():
-    """A live GUI app's stderr is not ours to keep — no note, nothing printed."""
+    """A live GUI app's stderr is not ours to keep: no note, nothing printed."""
     out = io.StringIO()
     saved_stdout = sys.stdout
     sys.stdout = out
@@ -4538,10 +4531,10 @@ def t_gui_spawn_keeps_quiet_about_a_healthy_app():
         sys.stdout = saved_stdout
     assert note == ""
     assert out.getvalue() == "", out.getvalue()
-# --------------------------------------------------------- smoke-test glue
-# http_util.post_json returns the RAW BODY (unlike get_json, which parses), so
-# every POST site has to decode it. The pure smoketest module cannot catch that
-# — these exercise the glue in racecast.py itself, with the network stubbed.
+# Smoke-test glue. http_util.post_json returns the RAW BODY (unlike get_json,
+# which parses), so every POST site has to decode it. The pure smoketest module
+# cannot catch that, so these exercise the glue in racecast.py itself with the
+# network stubbed.
 
 class _StubHttp:
     """Records calls and replays canned bodies, in http_util's own return shapes."""
@@ -4600,8 +4593,8 @@ def _write_schedule(pushes, sheets, clear=(2,), rows=None):
     last = [sheets[-1]]
     m._smoke_push = pushes
     m._smoke_schedule_rows = lambda sheet_id: next(seen, last[0])
-    # 0 s: each phase gets exactly one poll — the deadline is checked AFTER the
-    # match attempt, so the loop never reaches its sleep. Keeps the suite fast.
+    # 0 s: each phase gets exactly one poll, because the deadline is checked AFTER
+    # the match attempt, so the loop never reaches its sleep. Keeps the suite fast.
     m.SMOKE_READBACK_S = 0
     try:
         return m._smoke_write_schedule("https://example.invalid/w", "sheet",
@@ -4624,7 +4617,7 @@ def t_smoke_write_schedule_confirms_the_clear_then_the_write():
 
 def t_smoke_write_schedule_survives_a_push_that_reported_an_error():
     """The webhook's HTTP result is not proof; the sheet is. A reported failure
-    must not abort when the sheet ends up right — and it is NOT retried."""
+    must not abort when the sheet ends up right, and it is NOT retried."""
     sheets = [[["URL", "Streamer"], ["", "A"]],
               [["URL", "Streamer"], ["https://www.youtube.com/watch?v=1", "A"]]]
     (ok, _note, notes), said = _write_schedule(
@@ -4656,8 +4649,8 @@ def t_smoke_write_schedule_fails_when_a_url_lands_in_the_wrong_row():
 
 
 def t_smoke_push_never_reports_the_webhook_url():
-    """http.client.InvalidURL carries the whole Apps Script path — the sheet's
-    write capability — and does NOT inherit from ValueError, so it slipped past
+    """http.client.InvalidURL carries the whole Apps Script path, which is the
+    sheet's write capability, and does NOT inherit from ValueError, so it passes
     the JSON guard into stdout, --json and the history file."""
     import http.client
 
@@ -4714,7 +4707,7 @@ def t_smoke_apply_split_is_one_relay_call():
 
 def t_smoke_apply_stint_is_one_relay_call():
     """STINT A/B cut, then take visibility, audio and the commentary mic from the
-    relay (/obs/stint) — the same call the Director Panel and Companion make."""
+    relay (/obs/stint), the same call the Director Panel and Companion make."""
     stub = _StubHttp(post=b'{"ok": true}')
     for label, feed in (("STINT A", "A"), ("STINT B", "B")):
         stub.posts.clear()
@@ -4728,7 +4721,7 @@ def t_smoke_apply_stint_is_one_relay_call():
 def t_smoke_relay_post_keeps_the_error_body_of_a_503():
     """The relay answers a dead OBS with 503 + {"error": "obs unavailable"}.
     urllib raises on 5xx, so without reading the body back the run only ever sees
-    "HTTP Error 503" — and the SPLIT step fails hard instead of warning."""
+    "HTTP Error 503" and the SPLIT step fails hard instead of warning."""
     class _Raiser(_StubHttp):
         def post_json(self, url, obj, *, headers=None, timeout=None):
             raise _http_error(503, b'{"error": "obs unavailable"}')
@@ -4749,12 +4742,10 @@ def t_smoke_relay_post_falls_back_to_the_status_code():
 
 
 def t_smoke_capture_de_pyinstallers_the_child_environment():
-    """yt-dlp and streamlink run under the SYSTEM python, and the frozen
-    bootloader puts our bundled libcrypto on their library path — they then die
-    and the fingerprint reports them as missing tools. Found on the box: the
-    first real run said "yt-dlp: not on PATH" while /usr/bin/yt-dlp worked fine.
-    services.external_tool_env() is the house fix and is None off the frozen
-    binary, so a source run is unaffected."""
+    """yt-dlp and streamlink run under the SYSTEM python, and the frozen bootloader
+    puts our bundled libcrypto on their library path, so they die and the
+    fingerprint reports them as missing tools. services.external_tool_env() is the
+    house fix and is None off the frozen binary, so a source run is unaffected."""
     seen = {}
     saved_run, saved_env = m.subprocess.run, m.sv.external_tool_env
     sentinel = {"LD_LIBRARY_PATH": "/usr/lib"}
@@ -4773,7 +4764,7 @@ def t_smoke_capture_de_pyinstallers_the_child_environment():
 
 
 def t_smoke_capture_separates_a_missing_tool_from_a_broken_one():
-    """'not on PATH' sent me chasing a PATH problem that did not exist."""
+    """'not on PATH' must not be reported for a tool that is present but broken."""
     saved = m.subprocess.run
 
     def _boom(argv, **kw):
@@ -4789,9 +4780,9 @@ def t_smoke_capture_separates_a_missing_tool_from_a_broken_one():
 
 
 def t_rundown_reports_each_step_once():
-    """Seen on a green run: every ARM step appeared twice. The byte-wait branch
-    fell through into the scene-less branch and appended a second result under
-    the same name — inflating the count and half-reporting a failing arm."""
+    """An ARM step must appear once. If the byte-wait branch falls through into the
+    scene-less branch it appends a second result under the same name, inflating
+    the count and half-reporting a failing arm."""
     saved = {name: getattr(m, name) for name in
              ("_smoke_relay_get", "_smoke_relay_post", "_smoke_apply",
               "_smoke_wait_bytes")}
@@ -4814,10 +4805,10 @@ def t_rundown_reports_each_step_once():
     assert len(names) == len(m._sm().RUNDOWN), (len(names), len(m._sm().RUNDOWN))
 
 def t_smoketest_tears_down_even_when_event_start_aborts():
-    """`event start` exits non-zero when its readiness report has a FAIL — but by
+    """`event start` exits non-zero when its readiness report has a FAIL, but by
     then the relay, Companion and a PUBLIC Funnel are already up. Arming the
-    teardown only on a successful bring-up left all three running on the box,
-    with no verdict printed at all."""
+    teardown only on a successful bring-up leaves all three running, with no
+    verdict printed at all."""
     calls = []
     saved = {name: getattr(m, name) for name in
              ("_active_profile_name", "_relay_is_alive", "_smoke_confirm",
@@ -4870,8 +4861,8 @@ def t_smoketest_tears_down_even_when_event_start_aborts():
 
 def t_smoketest_runs_the_rundown_when_event_start_exits_zero():
     """`event start` ends through event_status, which exits 0 when the stack is
-    ready. Treating every SystemExit as an abort skipped the whole rundown on a
-    healthy bring-up — seen on the box with OBS, Discord and the relay all up."""
+    ready. Treating every SystemExit as an abort skips the whole rundown on a
+    healthy bring-up."""
     calls = []
     saved = {name: getattr(m, name) for name in
              ("_active_profile_name", "_relay_is_alive", "_smoke_confirm",
@@ -4920,9 +4911,9 @@ def t_smoketest_runs_the_rundown_when_event_start_exits_zero():
     assert calls == ["rundown", "observe", "stop"], calls
 
 def t_smoketest_teardown_failure_reaches_the_verdict():
-    """A failing `event stop` used to be a say() note only — suppressed entirely
-    under --json — so a run could print PASS, exit 0 and leave the relay pulling
-    two strangers' streams. It has to become a check."""
+    """A failing `event stop` has to be a check, not a say() note: a note is
+    suppressed entirely under --json, so a run prints PASS, exits 0 and leaves the
+    relay pulling two strangers' streams."""
     seen = {}
     saved = {name: getattr(m, name) for name in
              ("_active_profile_name", "_relay_is_alive", "_smoke_confirm",
@@ -4974,15 +4965,14 @@ def t_smoketest_teardown_failure_reaches_the_verdict():
     names = [c["name"] for c in (seen.get("entry") or {}).get("checks", [])]
     assert "teardown" in names, names
     assert code == 1, code
-    # The URLs the run blanked are recorded — nothing restores them.
+    # The URLs the run blanked are recorded; nothing restores them.
     assert (seen.get("entry") or {}).get("cleared"), "pre-run URLs not recorded"
 
 
-# --- _open_url: the browser must not inherit the frozen library path ---------
-# Same failure class as #572/#573 at a site that fix did not cover. Measured on
-# the box: under LD_LIBRARY_PATH=/tmp/_MEI… even /bin/bash dies with "undefined
-# symbol: rl_print_keybinding", so google-chrome never starts — and webbrowser
-# sends the child's stderr to devnull, so nothing says why.
+# _open_url: the browser must not inherit the frozen library path. Under
+# LD_LIBRARY_PATH=/tmp/_MEI… even /bin/bash dies with "undefined symbol:
+# rl_print_keybinding", so google-chrome never starts, and webbrowser sends the
+# child's stderr to devnull so nothing says why. (#572, #573)
 
 def t_url_opener_argv_prefers_xdg_open():
     got = m.url_opener_argv("linux", "http://127.0.0.1:8089/",
@@ -5005,8 +4995,8 @@ def t_url_opener_argv_macos_uses_open():
 
 def t_url_opener_argv_refuses_anything_but_http():
     """`open`/`gio open` launch a FILE with its default application. Only ever
-    spawn them for a real http(s) URL, so a future caller handing over a path —
-    or a `-`-leading string — can never reach them."""
+    spawn them for a real http(s) URL, so a future caller handing over a path, or
+    a `-`-leading string, can never reach them."""
     for plat in ("linux", "darwin"):
         for bad in ("/etc/passwd", "-x", "file:///etc/passwd", "javascript:x", ""):
             assert m.url_opener_argv(plat, bad, which=lambda t: "/usr/bin/" + t) is None, (plat, bad)
@@ -5067,23 +5057,23 @@ def t_open_url_hands_the_opener_a_de_pyinstaller_env():
     # Detached via the repo's own per-OS helper, not a hardcoded flag. Asserting
     # the helper's OWN answer, never `start_new_session is True`: on the Windows
     # runner that key does not exist (creationflags does), so pinning one OS's
-    # answer here goes green on macOS/Linux and red on windows-latest — the same
+    # answer here goes green on macOS/Linux and red on windows-latest, the same
     # cross-platform trap CLAUDE.md records for os.path.join.
     for key, val in m.sv.spawn_kwargs(os.name).items():
         assert kw.get(key) == val, (key, kw)
-    # stderr is CAPTURED, never DEVNULL — a silent linker death is what hid #572.
+    # stderr is CAPTURED, never DEVNULL; a silent linker death is invisible. (#572)
     assert kw["stderr"] is not m.subprocess.DEVNULL, kw
 
 
 def t_url_opener_detaches_per_os():
-    """Both branches of the detach helper, checked from any OS — the matrix runs
+    """Both branches of the detach helper, checked from any OS. The matrix runs
     this file on Windows too, where the POSIX answer is simply absent."""
     assert m.sv.spawn_kwargs("posix") == {"start_new_session": True}
     assert "creationflags" in m.sv.spawn_kwargs("nt")
 
 
 def t_open_url_treats_a_clean_exit_as_success():
-    """A URL opener HANDS OVER and exits — unlike a GUI app, being gone is the
+    """A URL opener HANDS OVER and exits. Unlike a GUI app, being gone is the
     normal case, so the exit CODE decides, not whether it is still running."""
     _popen, wb_calls, _out = _capture_open_url({"PATH": "/usr/bin"}, rc=0)
     assert not wb_calls, "a successful xdg-open must not also open a second browser"
@@ -5106,7 +5096,7 @@ def t_open_url_reports_a_bare_exit_code_when_the_opener_said_nothing():
 
 
 def t_open_url_falls_back_when_the_opener_cannot_start():
-    """Popen itself raising — the opener vanished between which() and the spawn."""
+    """Popen itself raises when the opener vanishes between which() and the spawn."""
     _p, wb_calls, out = _capture_open_url({"PATH": "/usr/bin"},
                                           raises=OSError("No such file"))
     assert wb_calls == ["http://127.0.0.1:8089/"], wb_calls
@@ -5114,7 +5104,7 @@ def t_open_url_falls_back_when_the_opener_cannot_start():
 
 
 def t_open_url_uses_webbrowser_off_the_frozen_build():
-    """external_tool_env() returns None when not frozen — a source run must keep
+    """external_tool_env() returns None when not frozen, so a source run must keep
     webbrowser's own browser discovery, unchanged."""
     popen_calls, wb_calls, _out = _capture_open_url(None)
     assert wb_calls == ["http://127.0.0.1:8089/"], wb_calls

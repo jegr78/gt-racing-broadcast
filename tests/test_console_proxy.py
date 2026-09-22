@@ -38,7 +38,8 @@ def t_filter_response_headers_drops_framing_and_hop_by_hop():
 
 def t_filter_response_headers_drops_x_frame_options_for_iframe():
     # The /console/buttons wrapper embeds Companion in a same-origin iframe, so the
-    # upstream X-Frame-Options must not survive (any casing) — but unrelated headers do.
+    # upstream X-Frame-Options must not survive in any casing, while unrelated
+    # headers do.
     kept = dict((k.lower(), v) for k, v in cp.filter_response_headers(
         [("X-Frame-Options", "SAMEORIGIN"), ("x-frame-options", "DENY"),
          ("X-Content-Type-Options", "nosniff")]))

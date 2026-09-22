@@ -156,8 +156,8 @@ def t_import_rejects_foreign_top():
 
 
 def t_import_rejects_decompression_bomb_bytes():
-    """Defense-in-depth (#99): a bundle whose members decompress past the cap is
-    rejected BEFORE extraction."""
+    """A bundle whose members decompress past the cap is rejected BEFORE
+    extraction. (#99)"""
     d = tempfile.mkdtemp()
     bad = _bundle_with(d, {"profile/profile.env": b"x" * 1000},
                        manifest={"kind": "profile-export", "name": "z"})

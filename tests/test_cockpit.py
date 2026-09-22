@@ -206,7 +206,7 @@ def t_display_name_maps_key_to_name():
 
 def t_race_control_schedule_redacts_url():
     # The Race Control desk (#244) sees stint + streamer + a live-feed marker, but
-    # NEVER a stream URL — the same redaction boundary as /console/takeover/status.
+    # NEVER a stream URL, the same redaction boundary as /console/takeover/status.
     sched = m.race_control_schedule(_rows(), {0: "A", 1: "B"})
     assert sched == [
         {"stint": "S1", "streamer": "Alpha Racing", "live": "A"},
@@ -506,9 +506,9 @@ def t_data_authed_tally():
 
 
 def t_data_program_behind_only_above_the_threshold():
-    # #583: the commentator hears a delayed program against their own voice. The
-    # cockpit says so only when the relay classified an output backlog, never as a
-    # permanent seconds counter.
+    # The commentator hears a delayed program against their own voice. The cockpit
+    # says so only when the relay classified an output backlog, never as a
+    # permanent seconds counter. (#583)
     tok = ca.mint_token("sek", "alpha-racing")
     srv, get, _post = _cockpit_client()
     try:
@@ -684,8 +684,8 @@ def _launcher_page(d):
 
 def t_console_page_login_fallback_on_invalid_token():
     # A human /console PAGE GET with a MISSING or INVALID token, and OAuth
-    # configured, must serve the launcher (Login with Discord) — NEVER a naked
-    # 401 JSON page. A stale cookie from another profile must not dead-end.
+    # configured, must serve the launcher (Login with Discord), NEVER a naked 401
+    # JSON page. A stale cookie from another profile must not dead-end.
     with tempfile.TemporaryDirectory() as d:
         page = _launcher_page(d)
         srv, get, _post = _cockpit_client(console_page_path=page,
@@ -708,7 +708,7 @@ def t_console_page_login_fallback_on_invalid_token():
 
 def t_console_data_endpoint_still_401_on_invalid_token():
     # Only human PAGE GETs fall back to the launcher; API/data/identity routes stay
-    # hard-gated (401) even with OAuth configured — no data leaks to a bad token.
+    # hard-gated (401) even with OAuth configured, so no data leaks to a bad token.
     with tempfile.TemporaryDirectory() as d:
         page = _launcher_page(d)
         srv, get, _post = _cockpit_client(console_page_path=page,
@@ -876,7 +876,7 @@ def t_console_preview_levels_any_auth():
 
     class _MinRelay:
         """Minimal stub: PreviewManager.__init__ stores relay but levels()
-        returns {} immediately when no pull worker is active — no methods called."""
+        returns {} immediately when no pull worker is active, calling nothing."""
 
     pm = m.PreviewManager(_MinRelay(), lambda: None, _logging.getLogger("test"))
     srv, get, _post = _cockpit_client(preview_manager=pm)
@@ -898,8 +898,7 @@ def t_all_console_pages_strip_token_from_url():
     # `/console?t=…`); the response sets the rc_console cookie, so the page must
     # then strip the token from the address bar + history (no lingering auth token
     # in screen-shares / browser history). All token-bearing pages must keep this
-    # in lock-step — the launcher, director panel and Companion-buttons wrapper
-    # used to drift from their three siblings.
+    # in lock-step.
     pages = [
         ("console", "console.html"),          # the racecast-links launcher target
         ("cockpit", "cockpit.html"),

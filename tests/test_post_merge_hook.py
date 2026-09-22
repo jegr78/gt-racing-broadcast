@@ -1,10 +1,9 @@
-"""Unit tests for .claude/hooks/post_merge_reminder.py — which command strings
+"""Unit tests for .claude/hooks/post_merge_reminder.py: which command strings
 count as a merge. Stdlib only; runnable as a script (repo convention).
 
 The hook injects "a merge to main just completed" into the transcript, so a
 false positive tells Claude to do a security follow-up for a merge that never
-happened. Substring matching produced exactly that: the hook's own manual test
-payload, an `echo` of a JSON string, fired it.
+happened.
 """
 import importlib.util
 import io
@@ -42,8 +41,6 @@ def t_fires_after_a_shell_separator():
 
 
 def t_does_not_fire_when_the_phrase_is_merely_quoted():
-    # The measured false positive: no merge happened, and the reminder used to
-    # claim one had.
     assert not _fires('echo "{\\"command\\":\\"gh pr merge 19\\"}" | cat')
     assert not _fires('grep -rn "gh pr merge" .claude/')
 
@@ -54,16 +51,15 @@ def t_does_not_fire_on_an_unrelated_command():
 
 
 def t_does_not_fire_on_a_heredoc_body():
-    # The second measured false positive: a commit message and a PR body that
-    # quote the compound form as an EXAMPLE. Shell syntax does not apply inside
-    # a heredoc, so anchoring to a separator cannot help here.
+    # Shell syntax does not apply inside a heredoc, so anchoring to a separator
+    # cannot help here.
     assert not _fires("git commit -F - <<'MSG'\nSee `cd x && gh pr merge`.\nMSG")
     assert not _fires('gh pr create --body-file - <<"BODY"\n'
                       "set -e; gh pr merge 1\nBODY")
 
 
 def t_still_fires_for_a_command_after_the_heredoc_ends():
-    # The over-dropping guard: only the BODY goes, not the rest of the command.
+    # Only the heredoc BODY is dropped, not the rest of the command.
     assert _fires("cat <<'EOF'\nnothing to see\nEOF\ngh pr merge 19")
 
 

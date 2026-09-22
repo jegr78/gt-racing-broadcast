@@ -92,10 +92,10 @@ def t_engine_reference_after_clean_lap():
 
 
 def t_engine_midlap_connect_partial_not_reference():
-    """#324 review Critical: the FIRST lap after the relay connects is a mid-lap
-    partial (not opened at the start/finish line) and must NEVER become the
-    reference — otherwise a 3-second partial locks best/delta/predicted for the
-    whole broadcast. The first FULL lap opened at a boundary becomes the reference."""
+    """The FIRST lap after the relay connects is a mid-lap partial (not opened at
+    the start/finish line) and must NEVER become the reference, or a 3-second
+    partial locks best/delta/predicted for the whole broadcast. The first FULL
+    lap opened at a boundary becomes the reference. (#324)"""
     eng = tm.TelemetryEngine()
     # Connect ~3 s before the line, then cross it: a short partial lap.
     t = 100.0
@@ -240,7 +240,7 @@ def t_engine_fuel_none_before_two_laps():
 
 def t_engine_stall_at_lap_start_marks_unclean():
     # A >2s stall right at the start of a lap (before any elapsed accumulates) must
-    # still invalidate the lap — it must NOT silently become the reference.
+    # still invalidate the lap; it must NOT become the reference.
     eng = tm.TelemetryEngine()
     t = 100.0
     eng.update(tm.parse_packet(_packet(speed_mps=50.0, lap=1)), t)   # opens the accumulator
@@ -267,10 +267,8 @@ def t_engine_fuel_continuous_decay():
 
 
 def t_engine_fuel_per_lap_is_whole_session_not_last3():
-    # Twin of t_engine_avg_lap_is_whole_session_not_last3, for the fuel side.
     # Four completed fuel laps with burns 6/2/2/2 L: the whole-session mean is
-    # 3.0 L, while a rolling last-3 window would give 2.0 L. Proves fuel per-lap
-    # averages the WHOLE session (the old 3-lap window is gone). fuel_start drops
+    # 3.0 L, while a rolling last-3 window would give 2.0 L. fuel_start drops
     # 60->54 (6 L burn), then 54->52->50->48 (2 L each); the 5th feed only closes
     # lap 4 (its own burn is non-positive and excluded).
     eng = tm.TelemetryEngine()
@@ -361,10 +359,8 @@ def t_engine_tyre_avg_windowed():
     for _ in range(100):
         eng.update(tm.parse_packet(_packet(tyre_temp=(100.0, 100.0, 100.0, 100.0), lap=1)), t); t += 0.1
     avg_fl = eng.snapshot()["tyre_temp_avg"][0]
-    # With a 30s window, only the trailing 20s of the 60C block + the 10s of 100C
-    # block remain (~73.3C) -- above the naive full-history average (68.0C), proving
-    # the window pulls the average toward the recent block rather than diluting it
-    # over the whole 50s history.
+    # With a 30s window, only the trailing 20s of the 60C block and the 10s of the
+    # 100C block remain (~73.3C), above the naive full-history average (68.0C).
     assert avg_fl > 70.0, avg_fl          # window no longer contains the old 60s block fully
 
 
@@ -406,9 +402,9 @@ def t_store_roundtrips_reference(tmp_path=None):
 
 
 def t_store_reset_drops_persisted_reference():
-    """#324 review: the relay constructs the store with reset=True — a fresh
-    session must NOT load a stale reference from a previous (possibly different
-    track) run, and the stale file is removed."""
+    """The relay constructs the store with reset=True: a fresh session must NOT
+    load a stale reference from a previous (possibly different track) run, and
+    the stale file is removed. (#324)"""
     import tempfile, json as _json
     d = tempfile.mkdtemp()
     path = os.path.join(d, "telemetry.json")
@@ -420,9 +416,9 @@ def t_store_reset_drops_persisted_reference():
 
 
 def t_engine_samples_capped_under_flood():
-    """#324 review: a same-lap packet flood (lap held constant, distance forced
-    up) must not grow _LapAccumulator.samples without bound — the cap marks the
-    lap unclean so it can't become a reference and memory stays bounded."""
+    """A same-lap packet flood (lap held constant, distance forced up) must not
+    grow _LapAccumulator.samples without bound. The cap marks the lap unclean so
+    it cannot become a reference and memory stays bounded. (#324)"""
     eng = tm.TelemetryEngine()
     t = 100.0
     eng.update(tm.parse_packet(_packet(speed_mps=90.0, lap=1)), t); t += 0.1
@@ -435,7 +431,7 @@ def t_engine_samples_capped_under_flood():
 
 
 def t_band_critical_strictly_above_threshold():
-    """#324 review: critical is >crit, so exactly at the threshold reads 'hot'."""
+    """critical is >crit, so exactly at the threshold reads 'hot'. (#324)"""
     assert tm._band(95.0, (70, 85, 95)) == "hot"
     assert tm._band(95.01, (70, 85, 95)) == "critical"
     assert tm._band(85.0, (70, 85, 95)) == "optimal"
@@ -657,12 +653,9 @@ def t_engine_session_distance_accumulates_incl_pit():
     assert d2 > d1
     assert eng._lap_time_n == 2   # both laps 1+2 are clean and admitted to the average
 
-    # lap 3: a genuine PIT lap -- ~8 s driving (~400 m), then a sustained standstill
-    # past PIT_STOP_MIN_S (same construction as t_engine_pit_lap_via_standstill_excluded,
-    # the existing working pit-lap test in this file). It must be EXCLUDED from the
-    # lap-time/fuel averages (acc.pit) -- but its driven distance must STILL be banked
-    # into session_dist_m. This is the binding "pit distance is included" constraint;
-    # the assertions below fail if pit-lap distance were (wrongly) excluded.
+    # lap 3: a genuine PIT lap, ~8 s driving (~400 m) then a sustained standstill
+    # past PIT_STOP_MIN_S. It must be EXCLUDED from the lap-time/fuel averages
+    # (acc.pit), while its driven distance is STILL banked into session_dist_m.
     t = 120.0
     for _ in range(80):                                   # ~8 s driving
         eng.update(tm.parse_packet(_packet(speed_mps=50.0, lap=3)), t); t += 0.1
@@ -683,10 +676,10 @@ def t_engine_session_distance_resets_on_session_boundary():
     t = _feed_lap(eng, 100.0, 1, duration=10.0, speed=50.0)   # banks lap 1 (~500 m); now on lap 2
     d_after_lap1 = eng.snapshot()["session_dist_m"]
     assert d_after_lap1 > 100
-    # Drive several more packets on the now-LIVE (unfinished) lap 2 so it accumulates
-    # clearly non-zero distance -- right at the edge the live lap is empty (0 m), which
-    # can't distinguish a real reset from a coincidentally-empty live lap. Proving the
-    # total visibly grows with the live lap first makes the reset below meaningful.
+    # Drive several more packets on the now-LIVE (unfinished) lap 2 so it
+    # accumulates clearly non-zero distance. An empty live lap (0 m) cannot tell a
+    # real reset apart from a coincidentally-empty one, so the total has to grow
+    # visibly first for the reset below to mean anything.
     for _ in range(50):                                        # ~5 s @ 50 m/s -> ~250 m live
         eng.update(tm.parse_packet(_packet(speed_mps=50.0, lap=2)), t); t += 0.1
     d_with_live = eng.snapshot()["session_dist_m"]

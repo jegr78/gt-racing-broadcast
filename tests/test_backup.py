@@ -58,7 +58,7 @@ def t_create_duplicate_needs_force():
         ba.create_backup("dup", src, profile="x"); raise AssertionError()
     except FileExistsError:
         pass
-    ba.create_backup("dup", src, profile="x", force=True)   # ok
+    ba.create_backup("dup", src, profile="x", force=True)
 
 
 def t_list_reads_manifests():
@@ -81,8 +81,8 @@ def t_restore_full_replace():
         f.write("CHANGED")
     ba.restore_backup(os.path.join(src["backups"], "snap.zip"), src)
     with open(os.path.join(src["overlay"], "hud.css")) as f:
-        assert f.read() == "body{}"                                           # restored
-    assert not os.path.exists(os.path.join(src["graphics"], "Extra.png"))     # dropped
+        assert f.read() == "body{}"
+    assert not os.path.exists(os.path.join(src["graphics"], "Extra.png"))
     assert os.path.exists(os.path.join(src["graphics"], "Overlay.png"))
 
 
@@ -100,8 +100,8 @@ def t_restore_rejects_traversal():
 
 
 def t_restore_rejects_decompression_bomb_bytes():
-    """Defense-in-depth (#99): a backup whose members decompress past the cap is
-    rejected BEFORE extraction."""
+    """A backup whose members decompress past the cap is rejected BEFORE
+    extraction. (#99)"""
     d = tempfile.mkdtemp(); src = _sources(d)
     bad = os.path.join(src["backups"], "bomb.zip"); os.makedirs(src["backups"], exist_ok=True)
     with zipfile.ZipFile(bad, "w") as zf:
@@ -163,18 +163,16 @@ def t_restore_unsafe_archive_leaves_live_untouched():
     except ValueError:
         pass
     with open(os.path.join(src["overlay"], "hud.css")) as f:
-        assert f.read() == "LIVE"                                             # untouched
+        assert f.read() == "LIVE"
 
 
 def t_list_sorted_newest_first():
     d = tempfile.mkdtemp(); src = _sources(d)
     p1 = ba.create_backup("Old", src, profile="x")
     p2 = ba.create_backup("New", src, profile="x")
-    # force distinct created stamps via the manifest order is hard; instead set mtimes
+    # list_backups sorts on the manifest's `created`, so pin two distinct stamps.
     import json as _j, zipfile as _z
-    # rewrite manifests with explicit created times
     def stamp(path, created):
-        # read, then rewrite the zip's manifest.json with a fixed created
         with _z.ZipFile(path) as z:
             data = {n: z.read(n) for n in z.namelist()}
         man = _j.loads(data["manifest.json"]); man["created"] = created

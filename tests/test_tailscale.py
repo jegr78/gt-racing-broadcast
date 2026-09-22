@@ -13,7 +13,7 @@ def _status_json(state, ips):
     return json.dumps({"BackendState": state, "Self": {"TailscaleIPs": ips}})
 
 
-# --- _in_cgnat: Tailscale uses the 100.64.0.0/10 CGNAT range -----------------
+# _in_cgnat: Tailscale uses the 100.64.0.0/10 CGNAT range.
 def t_cgnat_range():
     assert ts._in_cgnat("100.64.10.20") is True
     assert ts._in_cgnat("100.63.255.255") is False
@@ -21,14 +21,14 @@ def t_cgnat_range():
     assert ts._in_cgnat("not-an-ip") is False
 
 
-# --- parse_tailscale_backend: (BackendState, ip) from `status --json` ---------
+# parse_tailscale_backend: (BackendState, ip) from `status --json`.
 def t_backend_running_returns_state_and_ip():
     out = _status_json("Running", ["fd7a:115c:a1e0::1", "100.64.10.20"])
     assert ts.parse_tailscale_backend(out) == ("Running", "100.64.10.20")
 
 
 def t_backend_stopped_keeps_state_but_no_ip():
-    # A disconnected node keeps its assigned tailnet IP — never report it.
+    # A disconnected node keeps its assigned tailnet IP, so never report it.
     out = _status_json("Stopped", ["100.64.10.20"])
     assert ts.parse_tailscale_backend(out) == ("Stopped", None)
 
@@ -49,7 +49,7 @@ def t_backend_garbage_is_none_none():
     assert ts.parse_tailscale_backend('{"Self": {}}') == (None, None)
 
 
-# --- parse_tailscale_status: Running IP only (detection compat wrapper) -------
+# parse_tailscale_status: the Running IP only, a detection compat wrapper.
 def t_status_wrapper_running_vs_stopped():
     assert ts.parse_tailscale_status(_status_json("Running", ["100.64.10.20"])) == \
         "100.64.10.20"
@@ -57,7 +57,7 @@ def t_status_wrapper_running_vs_stopped():
     assert ts.parse_tailscale_status(_status_json("NeedsLogin", ["100.64.10.20"])) is None
 
 
-# --- plan_tailscale_up: decision for an `up` request given a BackendState -----
+# plan_tailscale_up: the decision for an `up` request given a BackendState.
 def t_plan_running_is_connected():
     assert ts.plan_tailscale_up("Running") == "connected"
 
@@ -78,7 +78,7 @@ def t_plan_no_backend_launches_app():
     assert ts.plan_tailscale_up(None) == "launch-app"
 
 
-# --- parse_tailscale_peers: tailnet device list for the takeover dropdown ----
+# parse_tailscale_peers: the tailnet device list for the takeover dropdown.
 def t_parse_peers_extracts_hostname_ip_online_os():
     data = {"Peer": {
         "k1": {"HostName": "producer-b", "TailscaleIPs": ["100.64.0.5", "fd7a::1"],
@@ -105,10 +105,10 @@ def t_parse_peers_garbage_and_empty():
 def t_parse_funnel_serving():
     on = ("https://rig.tail1234.ts.net (Funnel on)\n"
           "|-- /console proxy http://127.0.0.1:8088/console\n")
-    # Default path is now /console (the #216 migration).
+    # The default path is /console. (#216)
     assert ts.parse_funnel_serving(on) is True
     assert ts.parse_funnel_serving(on, "/console") is True
-    # Still parameterizable — an explicit foreign path is not matched.
+    # Still parameterizable. An explicit foreign path is not matched.
     assert ts.parse_funnel_serving(on, "/cockpit") is False
     assert ts.parse_funnel_serving("nothing here") is False
     assert ts.parse_funnel_serving("") is False
@@ -136,20 +136,20 @@ def t_funnel_args():
     on = ts.funnel_args(path="/console", target_port=8088, enable=True)
     assert on == ["funnel", "--bg", "--set-path=/console",
                   "http://127.0.0.1:8088/console"]
-    # Teardown ignores path/port and resets the funnel config wholesale: the
-    # path-specific `--set-path=… off` form silently failed with "handler does
-    # not exist" (#200). `funnel reset` is the only form Tailscale verifiably
-    # tears down across the versions we target.
+    # Teardown ignores path and port and resets the funnel config wholesale. The
+    # path-specific `--set-path=… off` form fails with "handler does not exist",
+    # so `funnel reset` is the only form that tears down across the versions we
+    # target. (#200)
     off = ts.funnel_args(path="/console", target_port=8088, enable=False)
     assert off == ["funnel", "reset"]
 
 
 def t_funnel_args_mounts_only_console():
-    # Boundary invariant (#216): the public Funnel exposes ONLY /console. The
-    # enable argv must mount exactly one path-prefix, that prefix must be
-    # /console, the reverse-proxy target must stay under /console, and nothing
-    # may mount the root ("/") or the old /cockpit prefix. Root control
-    # endpoints therefore remain unreachable from the public internet.
+    # Boundary invariant: the public Funnel exposes ONLY /console. The enable
+    # argv must mount exactly one path-prefix, that prefix must be /console, the
+    # reverse-proxy target must stay under /console, and nothing may mount the
+    # root ("/") or the old /cockpit prefix, so root control endpoints stay
+    # unreachable from the public internet. (#216)
     argv = ts.funnel_args(path="/console", target_port=8088, enable=True)
     set_paths = [a for a in argv if a.startswith("--set-path=")]
     assert set_paths == ["--set-path=/console"], set_paths
@@ -166,7 +166,7 @@ def t_status_snapshot_text_shape():
     assert out.endswith("\n")
 
 
-# --- magicdns_is_self: exact-FQDN takeover self-guard --------------------------
+# magicdns_is_self: the exact-FQDN takeover self-guard.
 def t_magicdns_is_self_exact_fqdn():
     me = "producer-b.tail1234.ts.net"
     assert ts.magicdns_is_self("producer-b.tail1234.ts.net", me) is True

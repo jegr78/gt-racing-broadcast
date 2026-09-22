@@ -12,7 +12,7 @@ spec = importlib.util.spec_from_file_location(
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 
 
-# ---------------------------------------------------------------- arg parsing
+# Arg parsing.
 
 def t_parse_defaults():
     assert m.parse_init_args([]) == \
@@ -36,7 +36,7 @@ def t_parse_unknown_raises():
     _raises(lambda: m.parse_init_args(["--browser="]))  # empty value
 
 
-# ------------------------------------------------------------------ step plan
+# The step plan.
 
 def t_plan_full_order():
     assert m.build_plan() == ["profile", "env", "install-tools", "install-apps",
@@ -78,12 +78,12 @@ def t_step_kinds_jobs_name_a_real_op():
 
 def t_profile_step_points_at_demo_for_a_smoke_test():
     # the profile gate offers the shipped `demo` profile as a zero-config
-    # smoke-test path (public read-only Sheet pre-filled) — issue #206 item 6.
+    # smoke-test path with a public read-only Sheet pre-filled. (#206)
     instr = m.STEP_KINDS["profile"]["instruction"]
     assert "demo" in instr
 
 
-# ------------------------------------------------------------- done-detection
+# Done-detection.
 
 def t_tools_done():
     tools = ("yt-dlp", "ffmpeg")
@@ -123,7 +123,7 @@ def t_export_done():
     assert m.export_done(False) is None
 
 
-# ------------------------------------------------------- gate + wizard + text
+# Gate, wizard and text.
 
 def t_gate_pause_interactive_prompts():
     seen = []
@@ -177,7 +177,7 @@ def t_wizard_stops_on_failure():
 
 
 def t_wizard_last_step_failure_finishes():
-    # preflight (last step) may exit 1 — that is a verdict, not an abort
+    # preflight (last step) may exit 1; that is a verdict, not an abort
     steps = [_step("a"), _step("preflight", code=1)]
     assert m.run_wizard(steps, False, lambda s: None) == (1, True)
 
