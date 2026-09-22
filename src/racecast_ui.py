@@ -26,7 +26,10 @@ def _fatal(message):
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     # One shared _bootstrap with the `racecast` CLI, so the windowed launcher can
-    # never skip a startup step the CLI runs.
+    # never skip a startup step the CLI runs (#46, #54). _bootstrap handles
+    # _app_home/_real_executable (resolving a macOS .app out of an App-Translocation
+    # mount, #22), the .env and example-profile seeding, the frozen env and SSL
+    # certs, the tool PATH, and the active profile's league env.
     try:
         argv = racecast._bootstrap(argv)
     except ValueError as exc:
