@@ -413,6 +413,48 @@ def t_extract_binary_enforces_byte_cap_zip():
         m.MAX_EXTRACT_BYTES = orig
 
 
+def t_download_and_swap_stages_via_staging_dir():
+    # A TemporaryDirectory stages the new binaries under a private Windows ACL
+    # they keep after the swap. After an update run over SSH (elevated token)
+    # that locked the desktop user out of racecast.exe.
+    import inspect
+    src = inspect.getsource(m._download_and_swap)
+    assert "staging_dir(" in src
+    assert "TemporaryDirectory" not in src and "mkdtemp" not in src
+
+
+def t_windows_swapped_binary_inherits_install_acl():
+    if os.name != "nt":
+        return
+    import shutil, subprocess, tempfile, uuid
+
+    def aces(path):
+        out = subprocess.run(["icacls", path], capture_output=True, text=True,
+                             errors="replace").stdout
+        lines = [ln for ln in out.splitlines() if ":(" in ln]
+        lines[0] = lines[0][len(path):]
+        return sorted(ln.strip() for ln in lines)
+
+    # A plain root inheriting %TEMP%'s ACL: a mkdtemp root would hide the bug.
+    root = os.path.join(tempfile.gettempdir(), "rc-acl-" + uuid.uuid4().hex[:8])
+    os.mkdir(root)
+    try:
+        placed = os.path.join(root, "racecast.exe")
+        with open(placed, "w") as fh:
+            fh.write("old")
+        td = m.staging_dir(root, ".racecast-update-")
+        staged = os.path.join(td, "racecast.exe")
+        with open(staged, "w") as fh:
+            fh.write("new")
+        m.perform(m.swap_plan("win32", placed, staged))
+        fresh = os.path.join(root, "fresh.txt")
+        with open(fresh, "w") as fh:
+            fh.write("x")
+        assert aces(placed) == aces(fresh), (aces(placed), aces(fresh))
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

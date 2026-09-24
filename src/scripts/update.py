@@ -4,7 +4,7 @@ Checks /releases/latest, compares semver tags, downloads the platform archive an
 swaps the running binary. Windows needs the rename trick, since a running exe can
 be renamed but not overwritten. Frozen-only: a repo checkout updates with
 `git pull`. Design: docs/superpowers/specs/2026-06-05-self-update-design.md."""
-import argparse, hashlib, json, os, platform as _platform, shutil, sys, tarfile, tempfile
+import argparse, hashlib, json, os, platform as _platform, secrets, shutil, sys, tarfile, tempfile
 import urllib.error, urllib.parse, urllib.request, zipfile
 
 # Renamed from gt-endurance-racing-broadcast; GitHub redirects the old slug (web,
@@ -350,6 +350,28 @@ def install_ui(src_dir, target_dir, platform, remove=os.remove):
     return dst
 
 
+def staging_dir(parent, prefix, nt=None):
+    """A fresh directory inside `parent` to stage content in before it is moved
+    into place; the caller removes it. On Windows it is a plain directory, so
+    everything staged in it inherits `parent`'s ACL. tempfile.mkdtemp would give
+    it a private ACL there instead (SYSTEM, Administrators and the owner only,
+    Python >= 3.12.4), every file moved out keeps that ACL, and under an elevated
+    token (an SSH session) the owner is Administrators: the desktop user is then
+    locked out of the binary or profile. Elsewhere mkdtemp's owner-only mode stays.
+    Keep the copies in update.py, profile_io.py and backup_admin.py identical."""
+    os.makedirs(parent, exist_ok=True)
+    if not (os.name == "nt" if nt is None else nt):
+        return tempfile.mkdtemp(prefix=prefix, dir=parent)
+    for _ in range(100):
+        path = os.path.join(parent, prefix + secrets.token_hex(4))
+        try:
+            os.mkdir(path)
+        except FileExistsError:
+            continue
+        return path
+    raise FileExistsError(f"no free staging dir name in {parent}")
+
+
 def perform(plan):
     """Execute a swap_plan. The steps are tiny on purpose: the logic lives in
     swap_plan(), where it is unit-tested."""
@@ -377,12 +399,14 @@ def _download_and_swap(url, tag, digest=None):
     # rename: a system tempdir can be another filesystem (EXDEV) and a
     # copy-overwrite of a running ELF fails with ETXTBSY. If that dir is not
     # writable, fail with a clear message rather than an opaque traceback.
+    # staging_dir, not a tempfile dir: on Windows the swapped-in binaries
+    # must inherit the install folder's ACL.
     try:
-        td_ctx = tempfile.TemporaryDirectory(dir=os.path.dirname(exe))
+        td = staging_dir(os.path.dirname(exe), ".racecast-update-")
     except OSError as exc:
         sys.exit(f"update: cannot write next to the binary ({exc}). "
                  "Move racecast to a writable folder and retry.")
-    with td_ctx as td:
+    try:
         archive = os.path.join(td, asset_name(sys.platform))
         print("Downloading:", url)
         download(url, archive)
@@ -409,6 +433,8 @@ def _download_and_swap(url, tag, digest=None):
             ui_path = None
             print(f"update: note, racecast-ui not installed ({exc}). "
                   "Use `racecast ui` from the CLI, or reinstall the archive.")
+    finally:
+        shutil.rmtree(td, ignore_errors=True)
     print(f"updated to {tag}. Restart racecast to use it.")
     if ui_path:
         print(f"installed {os.path.basename(ui_path)} next to racecast.")
