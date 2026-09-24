@@ -1321,6 +1321,92 @@ def t_backlog_shed_stands_down_after_three_ineffective_rebuilds():
     assert g.stood_down and not g.allows("backlog")
 
 
+
+# --- #670: the commentary mic is mixed into the local capture, on one timeline ---
+def _game(platform, video):
+    return "Elgato HD60 X (Elgato HD60 X)", None
+
+
+def _mic_env(**extra):
+    return {"RACECAST_CAPTURE": HD60X_OBS_ID, "RACECAST_MIC_NAME": "Mikrofon (K66)", **extra}
+
+
+def t_dshow_mic_available_reads_the_device_listing():
+    assert m.dshow_mic_available("Mikrofon (K66)", DSHOW_HD60X)
+    assert not m.dshow_mic_available("Mikrofon (Gone)", DSHOW_HD60X)
+    assert not m.dshow_mic_available("Elgato HD60 X", DSHOW_HD60X)      # a video pin
+    assert not m.dshow_mic_available("", DSHOW_HD60X)
+
+
+def t_mic_inputs_share_one_clock_origin():
+    # Measured on the reference PC: each dshow input rebased to its own start put the
+    # mic 1.5 s off; the dshow graph clock on both inputs plus one launch origin put it
+    # within 7 ms. The card's video must use the graph clock too, not the device clock.
+    args = m.local_capture_input_args("win32", HD60X_OBS_ID, "Elgato HD60 X (Elgato HD60 X)",
+                                      mic="Mikrofon (K66)", origin=123.4567)
+    card_i = args.index("video=Elgato HD60 X:audio=Elgato HD60 X (Elgato HD60 X)")
+    mic_i = args.index("audio=Mikrofon (K66)")
+    card, mic = args[:card_i], args[card_i + 1:mic_i]
+    assert card[card.index("-use_video_device_timestamps") + 1] == "0"
+    assert card[card.index("-itsoffset") + 1] == "-123.457"
+    assert mic[mic.index("-itsoffset") + 1] == "-123.457"
+    assert mic[mic.index("-f") + 1] == "dshow"
+    plain = m.local_capture_input_args("win32", HD60X_OBS_ID, "Elgato HD60 X (Elgato HD60 X)")
+    assert "-itsoffset" not in plain and "-use_video_device_timestamps" not in plain
+
+
+def t_mic_mix_pads_both_tracks_to_the_common_zero_before_amix():
+    # amix mixes frame by frame and ignores pts, so both tracks are padded from the
+    # shared zero first (aresample first_pts=0), and -copyts keeps that zero.
+    inp = ["-i", "card", "-i", "mic"]
+    cmd = m.local_capture_cmd(inp, "nvenc", has_audio=True, has_mic=True, mic_gain_db=3.0)
+    assert "-copyts" in cmd
+    fc = cmd[cmd.index("-filter_complex") + 1]
+    assert "[0:a]aresample=48000:async=1:first_pts=0" in fc
+    assert "[1:a]aresample=48000:async=1:first_pts=0" in fc and "volume=3.0dB" in fc
+    assert "amix=inputs=2:normalize=0" in fc
+    assert cmd[cmd.index("-map") + 1] == "0:v" and "[a]" in cmd
+    assert cmd[cmd.index("-c:a") + 1] == "aac" and "-an" not in cmd
+    solo = m.local_capture_cmd(inp, "x264", has_audio=False, has_mic=True)
+    sfc = solo[solo.index("-filter_complex") + 1]
+    assert "amix" not in sfc and "[1:a]aresample=48000:async=1:first_pts=0" in sfc
+    plain = m.local_capture_cmd(inp, "x264", has_audio=True)
+    assert "-copyts" not in plain and "-filter_complex" not in plain   # unchanged path
+
+
+def t_local_capture_setup_mixes_the_mic_on_windows():
+    cmd, err, note = m.local_capture_setup(_mic_env(RACECAST_MIC_GAIN_DB="-2"), "win32",
+                                           "nvenc", audio_scan=_game,
+                                           mic_scan=lambda name: True, clock=lambda: 50.0)
+    assert err is None and note is None
+    assert "audio=Mikrofon (K66)" in cmd and "-copyts" in cmd
+    assert "volume=-2.0dB" in cmd[cmd.index("-filter_complex") + 1]
+    assert cmd[cmd.index("-itsoffset") + 1] == "-50.000"
+
+
+def t_local_capture_setup_never_loses_the_picture_over_the_mic():
+    cmd, err, note = m.local_capture_setup(_mic_env(), "win32", "x264", audio_scan=_game,
+                                           mic_scan=lambda name: False, clock=lambda: 1.0)
+    assert err is None and "audio=Mikrofon (K66)" not in cmd
+    assert "Mikrofon (K66)" in note and "not found" in note
+    cmd, err, note = m.local_capture_setup(_mic_env(), "win32", "x264", audio_scan=_game,
+                                           mic_scan=lambda name: True, clock=lambda: 1.0,
+                                           with_mic=False)
+    assert "audio=Mikrofon (K66)" not in cmd and "without the commentary mic" in note
+    # no name stored, or not Windows (other clocks, unmeasured): today's path
+    for env, plat in ((_mic_env(RACECAST_MIC_NAME=""), "win32"), (_mic_env(), "linux")):
+        cmd, err, note = m.local_capture_setup(env, plat, "x264", audio_scan=_game,
+                                               mic_scan=lambda name: True, clock=lambda: 1.0)
+        assert "-copyts" not in (cmd or []), plat
+
+
+def t_mic_gain_db_parses_leniently():
+    assert m.mic_gain_db({}) == 0.0
+    assert m.mic_gain_db({"RACECAST_MIC_GAIN_DB": " 4.5 "}) == 4.5
+    assert m.mic_gain_db({"RACECAST_MIC_GAIN_DB": "loud"}) == 0.0
+    assert m.mic_gain_db({"RACECAST_MIC_GAIN_DB": "99"}) == 20.0      # clamped
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
