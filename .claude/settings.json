@@ -7,13 +7,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 -c 'import json,sys,subprocess\nd=json.load(sys.stdin)\np=(d.get(\"tool_input\") or {}).get(\"file_path\",\"\")\nif not p.endswith(\".py\"): sys.exit(0)\nr=subprocess.run([\"python3\",\"tools/lint.py\"],capture_output=True,text=True)\nif r.returncode:\n    sys.stderr.write(r.stdout+r.stderr); sys.exit(2)'",
+            "command": "py=$(for c in python3 python; do \"$c\" -c '' >/dev/null 2>&1 && { echo \"$c\"; break; }; done); \"$py\" -c 'import json,sys,subprocess\nd=json.load(sys.stdin)\np=(d.get(\"tool_input\") or {}).get(\"file_path\",\"\")\nif not p.endswith(\".py\"): sys.exit(0)\nr=subprocess.run([sys.executable,\"tools/lint.py\"],capture_output=True,text=True)\nif r.returncode:\n    sys.stderr.write(r.stdout+r.stderr); sys.exit(2)'",
             "timeout": 60,
             "statusMessage": "ruff lint (tools/lint.py)"
           },
           {
             "type": "command",
-            "command": "python3 tools/check_portable.py",
+            "command": "py=$(for c in python3 python; do \"$c\" -c '' >/dev/null 2>&1 && { echo \"$c\"; break; }; done); \"$py\" tools/check_portable.py",
             "timeout": 10,
             "statusMessage": "portability guard (no machine paths)"
           }
@@ -24,7 +24,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 .claude/hooks/post_merge_reminder.py",
+            "command": "py=$(for c in python3 python; do \"$c\" -c '' >/dev/null 2>&1 && { echo \"$c\"; break; }; done); \"$py\" .claude/hooks/post_merge_reminder.py",
             "timeout": 10,
             "statusMessage": "post-merge security-alert reminder"
           }
@@ -36,7 +36,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 .claude/hooks/ui_visual_verify_gate.py",
+            "command": "py=$(for c in python3 python; do \"$c\" -c '' >/dev/null 2>&1 && { echo \"$c\"; break; }; done); \"$py\" .claude/hooks/ui_visual_verify_gate.py",
             "timeout": 20,
             "statusMessage": "UI visual-verification gate"
           }
