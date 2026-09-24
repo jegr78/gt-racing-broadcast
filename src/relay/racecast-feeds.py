@@ -3730,8 +3730,12 @@ LOCAL_VIDEO_KBPS = 8000
 LOCAL_AUDIO_KBPS = 160
 LOCAL_KEYFRAME_S = 1            # a joining consumer has a picture within a second
 LOCAL_DSHOW_RTBUF = "512M"      # dshow's 3 MB default drops frames at 1080p60
+# -forced-idr 1: every consumer joins the ring mid-stream, and without it h264_nvenc
+# makes a forced keyframe a non-IDR I-frame with no SPS/PPS in band, so OBS never
+# decodes a picture (#666). libx264 already emits an IDR with headers.
 LOCAL_ENCODER_ARGS = {
-    "nvenc": ["-c:v", "h264_nvenc", "-preset", "p4", "-tune", "ll", "-rc", "cbr"],
+    "nvenc": ["-c:v", "h264_nvenc", "-preset", "p4", "-tune", "ll", "-rc", "cbr",
+              "-forced-idr", "1"],
     "x264": ["-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency"],
 }
 LOCAL_DEVICE_BUSY = ("capture device busy or missing. Close any other program "
