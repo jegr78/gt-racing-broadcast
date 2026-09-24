@@ -149,6 +149,76 @@ def t_endurance_without_a_capture_card_does_not_warn_about_the_mic():
     assert line and "RACECAST_MIC" in line, line
 
 
+
+# --- #668: a stale mic device id is resolved by the stored device name ---
+K66 = {"name": "Mikrofon (K66)", "value": "{0.0.1.00000000}.{new}", "enabled": True}
+VOICE = {"name": "Mikrofon (Voice Changer)", "value": "{0.0.1.00000000}.{vc}", "enabled": True}
+
+
+def t_resolve_keeps_a_present_device_id():
+    assert obs_ws.resolve_mic_device([K66, VOICE], K66["value"], "Mikrofon (K66)") \
+        == ("ok", K66["value"], "Mikrofon (K66)")
+    # the name is optional while the id still exists
+    assert obs_ws.resolve_mic_device([K66], K66["value"], "") == ("ok", K66["value"], "Mikrofon (K66)")
+
+
+def t_resolve_repoints_a_stale_id_to_the_unique_name_match():
+    got = obs_ws.resolve_mic_device([VOICE, K66], "{0.0.1.00000000}.{old}", " mikrofon (k66) ")
+    assert got == ("repoint", K66["value"], "Mikrofon (K66)"), got
+
+
+def t_resolve_reports_missing_and_ambiguous_instead_of_guessing():
+    stale = "{0.0.1.00000000}.{old}"
+    assert obs_ws.resolve_mic_device([K66], stale, "") == ("missing", None, None)
+    assert obs_ws.resolve_mic_device([VOICE], stale, "Mikrofon (K66)") == ("missing", None, "Mikrofon (K66)")
+    twin = dict(K66, value="{0.0.1.00000000}.{twin}")
+    assert obs_ws.resolve_mic_device([K66, twin], stale, "Mikrofon (K66)") \
+        == ("ambiguous", None, "Mikrofon (K66)")
+
+
+class _MicSession:
+    def __init__(self, current, items, has_input=True):
+        self.current, self.items, self.has_input, self.calls = current, items, has_input, []
+
+    def request(self, rt, rd=None):
+        self.calls.append((rt, rd))
+        if not self.has_input:
+            raise ValueError("GetInputSettings failed: {'code': 600}")
+        if rt == "GetInputSettings":
+            return {"inputKind": "wasapi_input_capture", "inputSettings": {"device_id": self.current}}
+        if rt == "GetInputPropertiesListPropertyItems":
+            return {"propertyItems": [{"itemName": d["name"], "itemValue": d["value"],
+                                       "itemEnabled": True} for d in self.items]}
+        if rt == "SetInputSettings":
+            return {}
+        raise AssertionError(rt)
+
+
+def t_ensure_repoints_the_obs_input_through_set_input_settings():
+    s = _MicSession("{0.0.1.00000000}.{old}", [VOICE, K66])
+    res = obs_ws.ensure_mic_device(MIC, "Mikrofon (K66)", prop="device_id", session=s)
+    assert res["state"] == "repointed" and res["device"] == "Mikrofon (K66)", res
+    sets = [rd for rt, rd in s.calls if rt == "SetInputSettings"]
+    assert sets == [{"inputName": MIC, "inputSettings": {"device_id": K66["value"]},
+                     "overlay": True}], sets
+
+
+def t_ensure_check_only_never_writes():
+    s = _MicSession("{0.0.1.00000000}.{old}", [K66])
+    res = obs_ws.ensure_mic_device(MIC, "Mikrofon (K66)", prop="device_id", fix=False, session=s)
+    assert res["state"] == "repoint", res
+    assert not [rt for rt, _ in s.calls if rt == "SetInputSettings"]
+
+
+def t_ensure_reports_a_collection_without_the_mic_input():
+    res = obs_ws.ensure_mic_device(MIC, "x", prop="device_id", session=_MicSession("", [], has_input=False))
+    assert res["state"] == "no_input" and "racecast setup" in res["note"], res
+
+
+def t_ensure_is_routed_over_the_persistent_control_connection():
+    assert obs_ws.route_kind("ensure_mic_device") == "ctrl"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

@@ -2576,6 +2576,9 @@ async function saveDevices() {
         body: JSON.stringify({webcam: $('dev-webcam').value,
                               capture: $('dev-capture').value,
                               mic: $('dev-mic').value,
+                              // #668: the name lets the relay re-find a mic whose OS id changed
+                              mic_name: $('dev-mic').value
+                                ? $('dev-mic').selectedOptions[0].textContent : '',
                               tyres: $('dev-tyres').value})})).json();
   } catch (e) {
     $('dev-err').textContent = 'Control Center not reachable.'; $('dev-err').hidden = false;

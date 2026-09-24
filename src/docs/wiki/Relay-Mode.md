@@ -368,6 +368,25 @@ A collection imported before this feature has no mic input. The relay then logs 
 WARNING (run `racecast setup` and re-import) and the local stint goes out without the
 producer's commentary.
 
+**When the mic's device id changes.** OBS and `RACECAST_MIC` identify the microphone by
+the id the operating system gives it. On Windows a USB microphone without a serial
+number gets a new id after a port change or a driver reset, although the hardware is the
+same. `racecast device-scan --mic` and the Control Center therefore also store the
+device name as `RACECAST_MIC_NAME`. At start, and every 30 seconds after that, the relay
+checks `Commentary Mic Device` against the devices OBS offers:
+
+- the id still exists: nothing to do;
+- the id is gone and exactly one device carries the stored name: the relay points the
+  OBS source at that device and logs it (no re-scan, no re-import);
+- the id is gone and no device, or more than one, carries the name: a WARNING in the
+  relay log and, while the Schedule or Qualifying tab holds a `local:` stint, a yellow
+  reason on the Director Panel (it does not page Discord), so a dead mic is visible
+  before the local stint. The log notes when the device is found again.
+  `racecast preflight` shows the same check.
+
+A machine configured before this check has no `RACECAST_MIC_NAME`: run
+`racecast device-scan --mic` once to store it.
+
 ### Why there is no delay between the local stint and a remote feed
 
 A local stint reaches OBS a few seconds behind real time (the relay's 3 s playback

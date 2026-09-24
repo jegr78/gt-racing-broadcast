@@ -1238,6 +1238,76 @@ def t_aggregate_health_backlog_on_pov_names_no_reset():
                             "time"], h
 
 
+
+def t_a_dead_commentary_mic_is_a_quiet_yellow():
+    # #668: the relay found no device for the commentary mic. Yellow on the panel so the
+    # producer sees it before the local stint, but display-only: it never pages Discord.
+    h = m.aggregate_health({"mic_problem": "commentary mic: device 'Mikrofon (K66)' not found"})
+    assert h["level"] == "yellow" and any("Mikrofon (K66)" in r for r in h["reasons"]), h
+    assert m.aggregate_health({"mic_problem": None})["level"] == "green"
+
+
+def t_mic_problem_and_log_lines_follow_the_check_result():
+    missing = {"state": "missing", "device": "Mikrofon (K66)", "note": "no match"}
+    assert "Mikrofon (K66)" in m.mic_health_problem(missing)
+    assert m.mic_health_problem({"state": "ok", "device": "Mikrofon (K66)", "note": ""}) is None
+    assert m.mic_health_problem({"state": "repointed", "device": "K66", "note": ""}) is None
+    assert m.mic_health_problem(None) is None                     # OBS not reachable: no alarm
+    # a log line only when the state changes, so a 30 s re-check does not flood the log
+    lvl, msg = m.mic_check_log(None, missing)
+    assert lvl == logging.WARNING and "RACECAST_MIC" in msg, msg
+    assert m.mic_check_log(missing, dict(missing)) is None
+    lvl, msg = m.mic_check_log(None, {"state": "repointed", "device": "Mikrofon (K66)",
+                                      "note": "{old} -> {new}"})
+    assert lvl == logging.INFO and "Mikrofon (K66)" in msg, msg
+    assert m.mic_check_log(None, {"state": "ok", "device": "K66", "note": ""}) is None
+
+
+
+def t_mic_check_is_throttled_and_keeps_the_last_real_answer():
+    import types
+    calls = []
+    answers = [{"state": "missing", "device": "K66", "note": ""},
+               {"state": None, "device": None, "note": "OBS gone"}]
+
+    class Obs:
+        def ensure_mic_device(self, name, want):
+            calls.append((name, want)); return answers[len(calls) - 1]
+    stub = types.SimpleNamespace(_obs=Obs(), mic_device=None, _mic_check_ts=None,
+                                 manages_mic=lambda: True)
+    saved = m._obs_ws
+    m._obs_ws = types.SimpleNamespace(COMMENTARY_MIC_INPUT="Commentary Mic Device")
+    try:
+        m.Relay._maybe_check_mic(stub, 100.0)
+        m.Relay._maybe_check_mic(stub, 100.0 + m.MIC_CHECK_INTERVAL_S - 1)   # throttled
+        assert len(calls) == 1 and stub.mic_device["state"] == "missing"
+        m.Relay._maybe_check_mic(stub, 100.0 + m.MIC_CHECK_INTERVAL_S)
+        assert len(calls) == 2 and stub.mic_device["state"] == "missing"     # None ignored
+        stub.manages_mic = lambda: False
+        m.Relay._maybe_check_mic(stub, 1e6)
+        assert len(calls) == 2                                               # solo / no card
+    finally:
+        m._obs_ws = saved
+
+
+
+def t_mic_yellow_only_matters_with_a_local_stint_in_the_schedule():
+    # review of #669: without a local: row the mic never opens, so a dead mic is not a
+    # reason to show yellow all evening. The rows are (url, name, stint, line).
+    assert m.schedule_has_local([("https://www.twitch.tv/x", "A", "1", 2),
+                                 ("local:", "B", "2", 3)])
+    assert not m.schedule_has_local([("https://www.twitch.tv/x", "A", "1", 2)])
+    assert not m.schedule_has_local([])
+
+
+def t_mic_recovery_is_logged_once():
+    missing = {"state": "missing", "device": "Mikrofon (K66)", "note": ""}
+    lvl, msg = m.mic_check_log(missing, {"state": "ok", "device": "Mikrofon (K66)", "note": ""})
+    assert lvl == logging.INFO and "found again" in msg and "Mikrofon (K66)" in msg, msg
+    ok = {"state": "ok", "device": "K66", "note": ""}
+    assert m.mic_check_log(ok, dict(ok)) is None
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

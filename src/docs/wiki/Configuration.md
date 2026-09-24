@@ -135,6 +135,11 @@ RACECAST_PROFILE=
   endurance machine all three drive a
   [local capture stint](Relay-Mode#local-capture-stint). `racecast device-scan` writes
   the capture card and the mic.
+- **`RACECAST_MIC_NAME`** *(optional)*: the microphone's device name, written together
+  with `RACECAST_MIC` by `racecast device-scan --mic` and the Control Center. When the
+  operating system gives the same microphone a new id (common for USB mics without a
+  serial number on Windows), the relay uses the name to find it again
+  ([details](Relay-Mode#the-commentary-microphone)).
 - **`RACECAST_UI_PASSWORD`** *(reserved)*: for the future Control-Center-over-Tailscale
   feature; not read by any current version, leave commented out.
 

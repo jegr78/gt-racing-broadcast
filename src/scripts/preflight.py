@@ -524,6 +524,28 @@ SERVICE_PORTS = ((4455, "OBS WebSocket"), (8000, "Companion"))
 REQUIRED_TOOLS = ("streamlink", "yt-dlp", "ffmpeg", "deno")
 
 
+def classify_mic_device(result):
+    """Result line for the commentary mic device check (#668), or None when this
+    machine has no local capture and so never opens the mic. `result` is
+    obs_ws.ensure_mic_device(..., fix=False). Pure."""
+    if result is None:
+        return None
+    state, dev = result.get("state"), result.get("device")
+    note = result.get("note") or ""
+    if state == "ok":
+        return Result(PASS, "commentary mic", f"{dev or 'device'} present in OBS")
+    if state == "repoint":
+        return Result(PASS, "commentary mic",
+                      f"{dev}: device id changed; the relay re-points OBS at start")
+    if state is None:
+        return Result(INFO, "commentary mic", f"not checked: {note}")
+    what = {"missing": "device not found", "ambiguous": "device name is ambiguous",
+            "no_input": "input missing from the OBS collection"}.get(state, state)
+    return Result(WARN, "commentary mic",
+                  f"{what}{f' ({note})' if note else ''}. A local stint would go out "
+                  "without it: check the mic, then `racecast device-scan --mic`")
+
+
 def enable_color(no_color):
     if no_color or not sys.stdout.isatty():
         return False
@@ -689,6 +711,16 @@ def gather(preflight_file, runtime_dir=None, cookies_opt=None):
                    advisory]
     except Exception:   # never let the speed-test read break the report
         network = [advisory]
+    if (os.environ.get("RACECAST_CAPTURE") or "").strip():
+        try:
+            import obs_ws
+            mic = classify_mic_device(obs_ws.ensure_mic_device(
+                obs_ws.COMMENTARY_MIC_INPUT,
+                (os.environ.get("RACECAST_MIC_NAME") or "").strip(), fix=False))
+            if mic is not None:
+                ports.append(mic)
+        except Exception:
+            pass  # never let the mic probe break the report
     return [
         ("Hardware", hardware),
         ("Tool chain", tools),

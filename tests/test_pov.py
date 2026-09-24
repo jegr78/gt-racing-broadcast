@@ -3364,6 +3364,16 @@ def t_backlog_in_status_and_health_snapshot():
     assert (snap["feed_a_backlog_s"], snap["feed_b_backlog_s"], snap["pov_backlog_s"]) == \
         (11.6, 3.1, None)
 
+
+def t_redact_console_status_reduces_the_mic_block_to_its_state():
+    # review of #669: device name and OS endpoint ids are producer detail.
+    full = {"feeds": {}, "mic": {"state": "repointed", "device": "Mikrofon (K66)",
+                                 "note": "{old} -> {new}"}}
+    assert m.redact_console_status(full, ["commentator"])["mic"] == {"state": "repointed"}
+    assert m.redact_console_status(full, ["producer"])["mic"] == full["mic"]
+    assert "mic" not in m.redact_console_status({"feeds": {}}, ["commentator"])
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
