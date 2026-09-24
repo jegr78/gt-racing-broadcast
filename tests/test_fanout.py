@@ -612,6 +612,17 @@ def t_local_capture_cmd_is_mpegts_on_stdout_with_capped_bitrate():
     assert nv[nv.index("-c:v") + 1] == "h264_nvenc" and "-an" in nv and "-c:a" not in nv
 
 
+def t_local_nvenc_forced_keyframes_are_idr():
+    # #666: every consumer joins the fan-out ring mid-stream. h264_nvenc turns a forced
+    # keyframe into a non-IDR I-frame without in-band SPS/PPS unless -forced-idr is set,
+    # so OBS decoded nothing. x264 emits an IDR with headers on its own.
+    nv = m.local_capture_cmd(["-i", "x"], "nvenc", has_audio=True)
+    assert nv[nv.index("-forced-idr") + 1] == "1"
+    assert nv.index("-forced-idr") > nv.index("-c:v")       # an encoder option
+    x = m.local_capture_cmd(["-i", "x"], "x264", has_audio=True)
+    assert "-forced-idr" not in x          # x264 already writes IDR + headers (UAT repro)
+
+
 def t_local_bitrate_keeps_the_ring_window_well_above_the_trailing_mark():
     # The 16 MB ring's time window is set by the bitrate; the #533 trailing mark sits
     # 3 s behind live. The cap must leave the window several times that mark.
