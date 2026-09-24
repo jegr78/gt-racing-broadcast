@@ -1,6 +1,6 @@
 ---
 name: walkthrough-videos
-description: Use when (re)building or updating the narrated MP4 onboarding walkthrough videos from the Reveal decks: e.g. a deck's slides or speaker notes changed, the voice/intro/outro needs refreshing, captions are wanted, or the videos must be re-rendered for the YouTube channel.
+description: "Use when (re)building or updating the narrated MP4 onboarding walkthrough videos from the Reveal decks: e.g. a deck's slides or speaker notes changed, the voice/intro/outro needs refreshing, captions are wanted, or the videos must be re-rendered for the YouTube channel."
 ---
 
 # Build narrated walkthrough videos

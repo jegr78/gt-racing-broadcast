@@ -124,3 +124,24 @@ you:
   lives in `assets_kit.py` and is covered by `tests/test_assets_kit.py`; the
   browser/process layer stays in the script, the same split as
   `e2e_checks.py` vs `e2e.py`.
+
+## Maintainer probes and scripts (moved from the root CLAUDE.md)
+```bash
+python3 tools/e2e.py --real-league NAME   # local-only: drive the copied real-league dev build (refuses under CI)
+python3 tools/e2e.py --playwright [--headed] [--shots DIR]  # optional rendered checks / visible browser / MCP-free screenshot tour
+
+# Fetch any missing HUD country flags from the sheet's Configuration tab
+python3 tools/fetch-flags.py            # adds missing -> src/assets/flags/ (keeps old)
+
+# Probe the broadcast-chat reader (#294) against a LIVE channel: standalone, no
+# Sheet/relay/UI. YouTube: resolve the live videoId via yt-dlp + tail Innertube chat.
+# Twitch: anonymous IRC (auto-detected for twitch.tv URLs, or --twitch for a bare name).
+python3 tools/broadcast-chat-probe.py https://www.youtube.com/@SomeChannel  # --resolve-only / --cookies
+python3 tools/broadcast-chat-probe.py https://www.twitch.tv/SomeChannel     # or: --twitch SomeChannel
+
+# Probe GT7 UDP telemetry (#324) against a LIVE PS4/PS5: standalone, no relay/Sheet.
+python3 tools/gt7-telemetry-probe.py --ps-ip 192.168.1.42   # heartbeat + decrypt + field dump
+
+# Publish the GitHub wiki from src/docs/wiki/ (maintainer; --dry-run to preview)
+python3 tools/sync-wiki.py
+```

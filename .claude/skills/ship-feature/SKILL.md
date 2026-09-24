@@ -1,6 +1,6 @@
 ---
 name: ship-feature
-description: Take a feature or GitHub issue from understanding to a merged PR the way this repo expects: branch, TDD, local gates, one PR per issue, green CI, squash-merge. Use when asked to "implement this issue", "fix these issues as PRs", "build and ship feature X", or "address the open issues".
+description: "Take a feature or GitHub issue from understanding to a merged PR the way this repo expects: branch, TDD, local gates, one PR per issue, green CI, squash-merge. Use when asked to \"implement this issue\", \"fix these issues as PRs\", \"build and ship feature X\", or \"address the open issues\"."
 ---
 
 # Ship a feature / issue end-to-end

@@ -1,6 +1,6 @@
 ---
 name: companion-buttons
-description: Add or change Companion buttons in src/companion/racecast-buttons.companionconfig and deploy+validate them autonomously: author the button JSON, export, import into a running Companion via Playwright, and click-test. Use when a relay control needs a Stream-Deck button. Pairs with companion-screenshots (screenshot geometry), do the import here, then screenshot there.
+description: "Add or change Companion buttons in src/companion/racecast-buttons.companionconfig and deploy+validate them autonomously: author the button JSON, export, import into a running Companion via Playwright, and click-test. Use when a relay control needs a Stream-Deck button. Pairs with companion-screenshots (screenshot geometry), do the import here, then screenshot there."
 ---
 
 # Companion buttons: author, import, validate
