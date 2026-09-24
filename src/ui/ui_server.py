@@ -637,7 +637,8 @@ def make_handler(ctx):
                                       code=400)
                 try:
                     result = ctx["devices_write"](body.get("webcam"), body.get("capture"),
-                                                  body.get("mic"), body.get("tyres"))
+                                                  body.get("mic"), body.get("tyres"),
+                                                  mic_name=body.get("mic_name"))
                 except Exception as exc:
                     return self._json({"ok": False,
                                        "error": f"could not save device selection: {exc}"},

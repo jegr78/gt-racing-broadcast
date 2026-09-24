@@ -5116,6 +5116,26 @@ def t_open_url_falls_back_when_there_is_no_opener():
     assert not popen_calls, popen_calls
 
 
+
+def t_device_name_for_maps_a_picked_value_to_its_name():
+    devs = [{"name": "Mikrofon (K66)", "value": "{a}"}, {"name": "Default", "value": "default"}]
+    assert m.device_name_for(devs, "{a}") == "Mikrofon (K66)"
+    assert m.device_name_for(devs, "{gone}") is None
+    assert m.device_name_for(devs, None) is None
+
+
+def t_devices_write_data_stores_the_mic_name():
+    # #668: the name lets the relay re-find a mic whose OS id changed.
+    import tempfile, os as _os
+    p = _os.path.join(tempfile.mkdtemp(prefix="racecast-devwrite-micname-"), ".env")
+    open(p, "w", encoding="utf-8").close()
+    res = m.devices_write_data(None, None, "MIC-ID", mic_name="Mikrofon (K66)", path=p)
+    assert res["ok"], res
+    with open(p, encoding="utf-8") as fh:
+        text = fh.read()
+    assert "RACECAST_MIC=MIC-ID" in text and "RACECAST_MIC_NAME=Mikrofon (K66)" in text, text
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

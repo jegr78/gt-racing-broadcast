@@ -1139,6 +1139,10 @@ def aggregate_health(facts):
         amount = f" by {ms:.0f} ms" if ms is not None else ""
         yellow.append(f"Feed {name} audio timing broke{amount} with no restart to explain "
                       f"it: OBS re-synced itself; check the program picture and sound")
+    # #668: the commentary mic has no device, so a local stint would go out without
+    # the producer's commentary. Quiet, like the jitter yellow: never pages Discord.
+    if facts.get("mic_problem"):
+        yellow.append(facts["mic_problem"])
     reasons.extend(red)
     reasons.extend(yellow)
     level = "red" if red else ("yellow" if yellow else "green")
@@ -4197,6 +4201,47 @@ def _warn_if_mic_failed(note):
     if mic and note and mic in note:
         LOG.warning("OBS: could not switch %s (%s). This OBS collection predates the "
                     "commentary mic; run `racecast setup` and re-import it", mic, note)
+
+
+# --- Commentary mic device check (#668) --------------------------------------
+# A USB mic without a serial number gets a new OS endpoint id when Windows
+# re-enumerates it, so the id baked into the collection goes stale while the
+# hardware is unchanged. The relay re-finds it by RACECAST_MIC_NAME (obs_ws.
+# ensure_mic_device), at start and then every MIC_CHECK_INTERVAL_S, which also
+# covers a replug during the event.
+MIC_CHECK_INTERVAL_S = 30.0
+
+
+def mic_health_problem(result):
+    """The health reason for a mic check result, or None. Only a mic that would
+    open silently is a problem; an unreachable OBS (state None) is reported by the
+    OBS reason already. Pure."""
+    state = (result or {}).get("state")
+    if state not in ("missing", "ambiguous", "no_input"):
+        return None
+    dev = (result or {}).get("device")
+    what = f"device {dev!r} not found" if dev and state == "missing" else         f"device {dev!r} is ambiguous" if state == "ambiguous" else         "no device configured or found" if state == "missing" else         "input missing from the OBS collection"
+    return f"Commentary mic: {what}. The local stint would go out without it"
+
+
+def mic_check_log(prev, result):
+    """(level, message) to log for a mic check, or None. Logs only when the state
+    changes, so the periodic re-check stays quiet while nothing moves. Pure."""
+    state = (result or {}).get("state")
+    if state is None:
+        return None
+    if state == (prev or {}).get("state") and state != "repointed":
+        return None
+    dev, note = (result or {}).get("device"), (result or {}).get("note") or ""
+    if state == "repointed":
+        return logging.INFO, (f"OBS: commentary mic re-found by name {dev!r} after its "
+                              f"device id changed ({note}); input updated")
+    if state in ("missing", "ambiguous", "no_input"):
+        why = f" ({note})" if note else ""
+        return logging.WARNING, (f"OBS: {mic_health_problem(result)}{why}. Check the mic "
+                                 "and RACECAST_MIC / RACECAST_MIC_NAME in .env "
+                                 "(`racecast device-scan --mic`)")
+    return None
 
 
 # --- Relay-driven Splitscreen (#534 audio, #591 visibility) -------------------
@@ -7523,6 +7568,8 @@ class Relay:
         self._obs_probe_running = False
         self._obs_lock = threading.Lock()
         self.obs_stats = {}               # last redacted OBS GetStats/GetStreamStatus
+        self.mic_device = None            # #668: last commentary-mic device check
+        self._mic_check_ts = None
         self._obs_last_bytes = None       # for stream_kbps derivation
         self._obs_last_bytes_ts = None
         self.conn_state = {"funnel_ok": None, "tailscale_up": None,
@@ -7719,7 +7766,8 @@ class Relay:
                 "feeds_jittery": list(self._jittery_feeds),
                 "rebuilds_stood_down": self._rebuilds_stood_down_fact(st.get("obs_fps")),
                 "feeds_backlogged": dict(self._backlogged_feeds),
-                "feeds_av_disturbed": self._av_health_fact()}
+                "feeds_av_disturbed": self._av_health_fact(),
+                "mic_problem": mic_health_problem(self.mic_device)}
 
     def _note_obs_splice(self, feed):
         """Record that the relay just spliced this feed into OBS by rebuilding the input.
@@ -7793,7 +7841,8 @@ class Relay:
         h = aggregate_health(facts)
         notify_level = aggregate_health({**facts, "feeds_jittery": [],
                                          "feeds_backlogged": {},
-                                         "feeds_av_disturbed": {}})["level"]
+                                         "feeds_av_disturbed": {},
+                                         "mic_problem": None})["level"]
         with self._health_lock:
             if h["level"] != self.health_level:
                 self.health_level = h["level"]
@@ -8460,6 +8509,8 @@ class Relay:
         live = self.live_feed()
         out["live"] = {"feed": live, "stint": self.on_air_row_idx() + 1, "mode": self.mode}
         out["manual_feed_arm"] = self.manual_feed_arm
+        if self.mic_device is not None:
+            out["mic"] = dict(self.mic_device)          # #668: commentary mic device check
         out["league"] = {"sheet_id": self.sheet_id, "name": self.league_name}
         out["producer"] = self.producer_name   # who runs this machine (#317, for takeover)
         self._refresh_health(now)            # keep the displayed level fresh (2 s poll)
@@ -8630,15 +8681,40 @@ class Relay:
             return None
         return live_schedule_row(self.source.get_rows(), self.on_air_row_idx())
 
+    def manages_mic(self):
+        """True when this relay opens and closes the commentary mic (#593): an
+        endurance machine with a capture card. Solo sets RACECAST_CAPTURE as well, but
+        there the mic ships hot as the main audio and has no feed pair to follow."""
+        return bool((os.environ.get("RACECAST_CAPTURE") or "").strip())             and not getattr(self, "solo", False)
+
+    def _maybe_check_mic(self, now):
+        """Every MIC_CHECK_INTERVAL_S, check the commentary mic's OBS device and
+        repoint a stale id by name (#668). Runs on the OBS probe thread; never
+        raises."""
+        if not self.manages_mic() or _obs_ws is None or (
+                self._mic_check_ts is not None
+                and now - self._mic_check_ts < MIC_CHECK_INTERVAL_S):
+            return
+        self._mic_check_ts = now
+        try:
+            res = self._obs.ensure_mic_device(
+                _obs_ws.COMMENTARY_MIC_INPUT,
+                (os.environ.get("RACECAST_MIC_NAME") or "").strip())
+        except Exception:                                # noqa: BLE001  best-effort
+            return
+        line = mic_check_log(self.mic_device, res)
+        if line:
+            LOG.log(*line)
+        if res.get("state") is not None:                 # keep the last real answer
+            self.mic_device = res
+
     def obs_audio_plan(self):
         """(audio, extra_mute) for the OBS intent planners (#593): which feed carries
         the local capture right now, and whether this machine manages the commentary
         mic at all: only one with a capture card (RACECAST_CAPTURE) does."""
         # Solo sets RACECAST_CAPTURE as well, but there the mic ships hot as the main
         # audio and has no feed pair to follow: never manage it.
-        mic = (_OBS_WS_MODULE.COMMENTARY_MIC_INPUT
-               if (os.environ.get("RACECAST_CAPTURE") or "").strip()
-               and not getattr(self, "solo", False) else None)
+        mic = _OBS_WS_MODULE.COMMENTARY_MIC_INPUT if self.manages_mic() else None
         try:
             local = {f for f, feed in self.feeds.items()
                      if is_local_source(feed.current_channel()[0])}
@@ -8718,6 +8794,8 @@ class Relay:
             # Health-Monitor marker.
             if transition:
                 self._on_stream_transition(transition, now, kbps=kbps)
+            if reachable:
+                self._maybe_check_mic(now)
         except Exception:                                # noqa: BLE001  best-effort
             with self._obs_lock:
                 self._obs_probe_running = False

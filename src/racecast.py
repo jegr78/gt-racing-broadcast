@@ -2814,6 +2814,16 @@ def resolve_device_selection(devices, token):
     return None, f"{token!r} is ambiguous ({len(matches)} matches)"
 
 
+def device_name_for(devices, value):
+    """The listed name of the device whose value is `value`, or None. device-scan and
+    the Control Center store it as RACECAST_MIC_NAME so the relay can re-find a mic
+    whose OS id changed (#668). Pure."""
+    for d in devices or ():
+        if value and d.get("value") == value:
+            return d.get("name") or None
+    return None
+
+
 def _parse_device_scan_args(rest):
     """(webcam_token_or_None, capture_token_or_None, mic_token_or_None,
     tyres_token_or_None). Only --webcam/--capture/--mic/--tyres are recognized;
@@ -2910,6 +2920,9 @@ def device_scan_cmd(rest):
         updates["RACECAST_CAPTURE"] = capture_val
     if mic_val is not None:
         updates["RACECAST_MIC"] = mic_val
+        mic_name = device_name_for(mics, mic_val)
+        if mic_name:
+            updates["RACECAST_MIC_NAME"] = mic_name
     if tyres_val is not None:
         updates["RACECAST_TYRES_CAPTURE"] = tyres_val
     if not updates:
@@ -5139,7 +5152,7 @@ def ps_discover_data():
             "note": res["note"], "from_relay": res["from_relay"]}
 
 
-def devices_write_data(webcam, capture, mic=None, tyres=None, path=None):
+def devices_write_data(webcam, capture, mic=None, tyres=None, path=None, mic_name=None):
     """Upsert the chosen webcam/capture/mic/tyres device ids into the machine .env
     (RACECAST_WEBCAM/RACECAST_CAPTURE/RACECAST_MIC/RACECAST_TYRES_CAPTURE; mic added
     #307, tyres/fuel capture added in the commentary-HUD work; unset or equal to the
@@ -5154,6 +5167,8 @@ def devices_write_data(webcam, capture, mic=None, tyres=None, path=None):
         updates["RACECAST_CAPTURE"] = capture.strip()
     if (mic or "").strip():
         updates["RACECAST_MIC"] = mic.strip()
+        if (mic_name or "").strip():                  # #668: re-find a changed OS id
+            updates["RACECAST_MIC_NAME"] = mic_name.strip()
     if (tyres or "").strip():
         updates["RACECAST_TYRES_CAPTURE"] = tyres.strip()
     if not updates:

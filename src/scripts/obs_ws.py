@@ -567,7 +567,7 @@ _ROUTED_FNS = _SHOT_FNS | frozenset({
     "set_scene_item_transform", "set_input_volume", "set_input_mute", "set_stream",
     "set_stream_service", "reflect_feed_state", "refresh_browser_inputs",
     "release_feed_inputs", "feed_media_cursors", "get_scene_collection",
-    "set_scene_collection",
+    "set_scene_collection", "ensure_mic_device",
 })
 
 
@@ -876,6 +876,74 @@ def probe_device_options(host="127.0.0.1", port=None, password=None, timeout=2.0
                 pass
         session.close()
     return out
+
+
+def resolve_mic_device(items, current, want_name):
+    """(state, value, name) for a mic input whose device is `current`, given OBS's
+    device list `items` ([{name, value}], parse_property_items) and the stored device
+    name (RACECAST_MIC_NAME, #668). The OS endpoint id of a USB mic without a serial
+    number changes when Windows re-enumerates it, while its name does not.
+      ok        `current` is still offered; value/name are that device
+      repoint   `current` is gone and exactly one device carries `want_name`
+      ambiguous `current` is gone and several devices carry `want_name`
+      missing   `current` is gone and nothing carries `want_name` (or no name stored)
+    Names compare trimmed and case-insensitively. Pure."""
+    for d in items:
+        if current and d.get("value") == current:
+            return "ok", current, d.get("name")
+    want = (want_name or "").strip()
+    if not want:
+        return "missing", None, None
+    hits = [d for d in items if (d.get("name") or "").strip().lower() == want.lower()]
+    if len(hits) == 1:
+        return "repoint", hits[0]["value"], hits[0].get("name")
+    return ("ambiguous" if hits else "missing"), None, want
+
+
+def ensure_mic_device(input_name, want_name, prop=None, fix=True, host="127.0.0.1",
+                      port=None, password=None, timeout=2.0, session=None):
+    """Check that the OBS audio input `input_name` is bound to a device OBS still
+    offers and, when `fix`, point it at the device carrying `want_name` if its id went
+    stale (#668). Returns {"state", "device", "note"}: state is resolve_mic_device's,
+    "repointed" after a successful fix, "no_input" when the collection has no such
+    input, or None when OBS could not be asked (never an alarm). Never raises."""
+    prop = prop or device_property_name(sys.platform, kind="audio")
+    own = session is None
+    if own:
+        session, note = _connect(host, port, password, timeout)
+        if session is None:
+            return {"state": None, "device": None, "note": note}
+    try:
+        try:
+            settings = session.request("GetInputSettings", {"inputName": input_name})
+        except Exception as exc:                     # noqa: BLE001  best-effort contract
+            return {"state": "no_input", "device": None,
+                    "note": f"no OBS input {input_name!r} ({exc}); run `racecast setup` "
+                            "and re-import the collection"}
+        current = (settings.get("inputSettings") or {}).get(prop) or ""
+        items = parse_property_items(session.request(
+            "GetInputPropertiesListPropertyItems",
+            {"inputName": input_name, "propertyName": prop}))
+        state, value, name = resolve_mic_device(items, current, want_name)
+        note = ""
+        if state == "repoint":
+            note = f"{current or '(none)'} -> {value}"
+            if fix:
+                session.request("SetInputSettings", {"inputName": input_name,
+                                                     "inputSettings": {prop: value},
+                                                     "overlay": True})
+                state = "repointed"
+        elif state == "missing":
+            note = ("no device with the stored name" if name
+                    else "no RACECAST_MIC_NAME stored; run `racecast device-scan --mic` once")
+        elif state == "ambiguous":
+            note = "several devices carry this name"
+        return {"state": state, "device": name, "note": note}
+    except Exception as exc:                         # noqa: BLE001  best-effort contract
+        return {"state": None, "device": None, "note": str(exc) or exc.__class__.__name__}
+    finally:
+        if own:
+            session.close()
 
 
 def release_feed_inputs(ports=RELAY_PORTS, host="127.0.0.1", port=None,

@@ -505,6 +505,20 @@ def t_companion_probe_hosts_wildcard_and_dedup():
     assert m.companion_probe_hosts("100.64.0.5", "100.64.0.5") == ["100.64.0.5", "127.0.0.1"]
 
 
+
+def t_classify_mic_device():
+    # #668: preflight reads the same check the relay runs, without repointing anything.
+    assert m.classify_mic_device(None) is None                    # no local capture here
+    assert m.classify_mic_device({"state": "ok", "device": "K66", "note": ""}).level == m.PASS
+    r = m.classify_mic_device({"state": "repoint", "device": "K66", "note": ""})
+    assert r.level == m.PASS and "relay" in r.detail, r
+    for bad in ("missing", "ambiguous", "no_input"):
+        r = m.classify_mic_device({"state": bad, "device": "K66", "note": "why"})
+        assert r.level == m.WARN, (bad, r)
+    r = m.classify_mic_device({"state": None, "device": None, "note": "OBS not running?"})
+    assert r.level == m.INFO, r
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
