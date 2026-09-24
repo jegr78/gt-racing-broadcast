@@ -1,6 +1,6 @@
 ---
 name: release
-description: Cut and publish a GT Racing Broadcast release end-to-end: local gates, release-please version control, Release PR merge, binary watch. Use when the user wants to release a version (e.g. "release 1.1.0", "cut the next release", "merge the release PR").
+description: "Cut and publish a GT Racing Broadcast release end-to-end: local gates, release-please version control, Release PR merge, binary watch. Use when the user wants to release a version (e.g. \"release 1.1.0\", \"cut the next release\", \"merge the release PR\")."
 ---
 
 # GT Racing Broadcast Release
