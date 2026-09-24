@@ -196,6 +196,50 @@ def t_delete_backup():
     assert ba.delete_backup(src["backups"], "gone") is False   # already gone
 
 
+def t_restore_stages_beside_backups_and_cleans_up():
+    d = tempfile.mkdtemp(); src = _sources(d)
+    ba.create_backup("snap", src, profile="x")
+    seen = []
+    real = ba.staging_dir
+    ba.staging_dir = lambda parent, prefix: seen.append(parent) or real(parent, prefix)
+    try:
+        ba.restore_backup(os.path.join(src["backups"], "snap.zip"), src)
+    finally:
+        ba.staging_dir = real
+    assert seen == [src["backups"]], seen
+    assert os.listdir(src["backups"]) == ["snap.zip"], os.listdir(src["backups"])
+
+
+def t_restore_inherits_install_acl_on_windows():
+    # A restore staged in a tempfile.mkdtemp dir left the live files with that
+    # dir's private ACL; after an elevated (SSH) run the desktop user was locked out.
+    if os.name != "nt":
+        return
+    import shutil, subprocess, uuid
+
+    def aces(path):
+        out = subprocess.run(["icacls", path], capture_output=True, text=True,
+                             errors="replace").stdout
+        lines = [ln for ln in out.splitlines() if ":(" in ln]
+        lines[0] = lines[0][len(path):]
+        return sorted(ln.strip() for ln in lines)
+
+    d = os.path.join(tempfile.gettempdir(), "rc-acl-" + uuid.uuid4().hex[:8])
+    os.mkdir(d)   # plain root, inherits %TEMP%'s ACL
+    try:
+        src = _sources(d)
+        ba.create_backup("snap", src, profile="x")
+        ba.restore_backup(os.path.join(src["backups"], "snap.zip"), src)
+        fresh = os.path.join(d, "fresh.txt")
+        with open(fresh, "w") as fh:
+            fh.write("x")
+        for p in (os.path.join(src["overlay"], "hud.css"),
+                  os.path.join(src["media"], "Intro.mp4")):
+            assert aces(p) == aces(fresh), (p, aces(p), aces(fresh))
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

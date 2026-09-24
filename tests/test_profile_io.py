@@ -214,6 +214,113 @@ def t_export_without_brands_dir_is_fine():
         assert json.loads(z.read("manifest.json"))["counts"].get("brands", 0) == 0
 
 
+# --- #staging-acl: staged content must inherit the destination's ACL on Windows ---
+def t_staging_dir_windows_is_plain_dir_in_parent():
+    import shutil
+    d = tempfile.mkdtemp()
+    try:
+        a = pio.staging_dir(d, ".stage-", nt=True)
+        b = pio.staging_dir(d, ".stage-", nt=True)
+        assert a != b
+        for p in (a, b):
+            assert os.path.isdir(p) and os.path.dirname(p) == d
+            assert os.path.basename(p).startswith(".stage-")
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def t_staging_dir_posix_is_in_parent():
+    import shutil
+    d = tempfile.mkdtemp()
+    try:
+        p = pio.staging_dir(d, ".stage-", nt=False)
+        assert os.path.isdir(p) and os.path.dirname(p) == d
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def t_staging_dir_copies_identical():
+    # Three standalone modules carry this helper (none may import a sibling);
+    # a fix to one must land in all three.
+    import inspect
+    srcs = []
+    for mod in ("update", "profile_io", "backup_admin"):
+        sp = importlib.util.spec_from_file_location(
+            mod, os.path.join(ROOT, "src", "scripts", mod + ".py"))
+        mm = importlib.util.module_from_spec(sp); sp.loader.exec_module(mm)
+        srcs.append(inspect.getsource(mm.staging_dir))
+    assert srcs[0] == srcs[1] == srcs[2], "staging_dir copies drifted"
+
+
+def _aces(path):
+    import subprocess
+    out = subprocess.run(["icacls", path], capture_output=True, text=True,
+                         errors="replace").stdout
+    lines = [ln for ln in out.splitlines() if ":(" in ln]
+    lines[0] = lines[0][len(path):] if lines and lines[0].startswith(path) else lines[0]
+    return sorted(ln.strip() for ln in lines)
+
+
+def _acl_matches_fresh(path, root):
+    """True when path carries the same ACL as a file freshly created in root,
+    the install folder that existed before the operation. A file staged in a tempfile.mkdtemp dir
+    instead keeps that dir's private one (SYSTEM, Administrators, owner rights,
+    no user), which locks the desktop user out after an elevated (SSH) run."""
+    fresh = os.path.join(root, ".acl-probe")
+    with open(fresh, "w") as fh:
+        fh.write("x")
+    try:
+        return _aces(path) == _aces(fresh)
+    finally:
+        os.remove(fresh)
+
+
+def _plain_tmp_root():
+    """A temp root that inherits the user's %TEMP% ACL. tempfile.mkdtemp would
+    give it the private ACL this test is about and hide the bug."""
+    import uuid
+    root = os.path.join(tempfile.gettempdir(), "rc-acl-" + uuid.uuid4().hex[:8])
+    os.mkdir(root)
+    return root
+
+
+def t_import_stages_next_to_install_not_system_temp():
+    d = tempfile.mkdtemp(); sources, _ = _profile(d)
+    bundle = pio.export_profile("iro-gtec", sources, include_assets=True, dest=d)
+    e = tempfile.mkdtemp()
+    roots = {"profiles_root": os.path.join(e, "profiles"),
+             "runtime_root": os.path.join(e, "runtime")}
+    seen = []
+    real = pio.staging_dir
+    pio.staging_dir = lambda parent, prefix: seen.append(parent) or real(parent, prefix)
+    try:
+        pio.import_profile(bundle, roots)
+    finally:
+        pio.staging_dir = real
+    assert seen == [e], seen
+    assert sorted(os.listdir(e)) == ["profiles", "runtime"], os.listdir(e)   # staging cleaned
+
+
+def t_import_files_inherit_parent_acl_on_windows():
+    if os.name != "nt":
+        return
+    import shutil
+    d = tempfile.mkdtemp(); sources, _ = _profile(d)
+    bundle = pio.export_profile("iro-gtec", sources, include_assets=True, dest=d)
+    e = _plain_tmp_root()
+    roots = {"profiles_root": os.path.join(e, "profiles"),
+             "runtime_root": os.path.join(e, "runtime")}
+    pio.import_profile(bundle, roots)
+    for p in (os.path.join(e, "profiles", "iro-gtec", "profile.env"),
+              os.path.join(e, "runtime", "iro-gtec", "media", "Intro.mp4")):
+        try:
+            assert _acl_matches_fresh(p, e), p
+        except AssertionError:
+            shutil.rmtree(e, ignore_errors=True)
+            raise
+    shutil.rmtree(e, ignore_errors=True)
+
+
 if __name__ == "__main__":
     for n, fn in sorted(globals().items()):
         if n.startswith("t_") and callable(fn):
