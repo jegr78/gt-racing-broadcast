@@ -623,6 +623,47 @@ def t_local_nvenc_forced_keyframes_are_idr():
     assert "-forced-idr" not in x          # x264 already writes IDR + headers (UAT repro)
 
 
+def _decoded_frames_after_join(encoder, tmpdir):
+    """Encode 3 s of a test pattern with the relay's own argv, drop the first half of
+    the MPEG-TS (on a 188-byte packet boundary) the way a consumer joining the ring
+    mid-stream sees it, and count the frames ffmpeg can decode from the rest."""
+    import re, subprocess
+    src = ["-f", "lavfi", "-i", "testsrc2=size=320x180:rate=60",
+           "-f", "lavfi", "-i", "sine=r=44100"]
+    cmd = m.local_capture_cmd(src, encoder, has_audio=True)
+    full = os.path.join(tmpdir, f"{encoder}.ts")
+    cmd = cmd[:-3] + ["-t", "3", "-f", "mpegts", "-y", full]
+    subprocess.run(cmd, check=True, capture_output=True, text=True, errors="replace",
+                   timeout=60)
+    with open(full, "rb") as fh:
+        data = fh.read()
+    cut = (len(data) // 2) // 188 * 188
+    joined = os.path.join(tmpdir, f"{encoder}.join.ts")
+    with open(joined, "wb") as fh:
+        fh.write(data[cut:])
+    out = subprocess.run(["ffmpeg", "-hide_banner", "-nostdin", "-i", joined,
+                          "-map", "0:v", "-f", "null", "-"],
+                         capture_output=True, text=True, errors="replace", timeout=60)
+    found = re.findall(r"frame=\s*(\d+)", out.stderr)
+    return int(found[-1]) if found else 0
+
+
+def t_local_capture_stream_decodes_after_a_mid_stream_join():
+    # #666: the property behind -forced-idr, checked with a real encode where the tools
+    # exist. CI has no ffmpeg and no NVIDIA GPU, so there it skips; on a producer machine
+    # it covers NVENC exactly as local_encoder() would pick it.
+    import shutil, tempfile
+    if not shutil.which("ffmpeg"):
+        print("  skip: no ffmpeg on PATH"); return
+    encoders = ["x264"] + (["nvenc"] if m.local_encoder() == "nvenc" else [])
+    with tempfile.TemporaryDirectory(prefix="racecast-join-") as tmpdir:
+        for enc in encoders:
+            frames = _decoded_frames_after_join(enc, tmpdir)
+            # 1.5 s remain after the cut and a keyframe comes every second, so at
+            # least the last half second (30 frames at 60 fps) must decode.
+            assert frames >= 30, (enc, frames)
+
+
 def t_local_bitrate_keeps_the_ring_window_well_above_the_trailing_mark():
     # The 16 MB ring's time window is set by the bitrate; the #533 trailing mark sits
     # 3 s behind live. The cap must leave the window several times that mark.
