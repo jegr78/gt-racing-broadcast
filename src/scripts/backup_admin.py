@@ -12,6 +12,7 @@ import datetime
 import json
 import os
 import re
+import secrets
 import shutil
 import tempfile
 import zipfile
@@ -78,6 +79,28 @@ def _safe_members(zf):
     return members
 
 
+def staging_dir(parent, prefix, nt=None):
+    """A fresh directory inside `parent` to stage content in before it is moved
+    into place; the caller removes it. On Windows it is a plain directory, so
+    everything staged in it inherits `parent`'s ACL. tempfile.mkdtemp would give
+    it a private ACL there instead (SYSTEM, Administrators and the owner only,
+    Python >= 3.12.4), every file moved out keeps that ACL, and under an elevated
+    token (an SSH session) the owner is Administrators: the desktop user is then
+    locked out of the binary or profile. Elsewhere mkdtemp's owner-only mode stays.
+    Keep the copies in update.py, profile_io.py and backup_admin.py identical."""
+    os.makedirs(parent, exist_ok=True)
+    if not (os.name == "nt" if nt is None else nt):
+        return tempfile.mkdtemp(prefix=prefix, dir=parent)
+    for _ in range(100):
+        path = os.path.join(parent, prefix + secrets.token_hex(4))
+        try:
+            os.mkdir(path)
+        except FileExistsError:
+            continue
+        return path
+    raise FileExistsError(f"no free staging dir name in {parent}")
+
+
 def restore_backup(zip_path, sources):
     """Full-replace the three live look dirs with the snapshot's contents. Atomic
     per section: extract to a temp dir, validate, then for each section swap the
@@ -85,7 +108,8 @@ def restore_backup(zip_path, sources):
     on a malformed/unsafe archive BEFORE touching any live dir."""
     if not os.path.exists(zip_path):
         raise ValueError(f"backup not found: {zip_path}")
-    tmp = tempfile.mkdtemp(prefix="restore-")
+    # Staged beside the backups, not in the system temp: see staging_dir.
+    tmp = staging_dir(os.path.dirname(os.path.abspath(zip_path)), ".restore-")
     try:
         with zipfile.ZipFile(zip_path) as zf:
             _safe_members(zf)                 # raises before any extract

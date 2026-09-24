@@ -14,6 +14,7 @@ import datetime
 import json
 import os
 import re
+import secrets
 import shutil
 import tempfile
 import zipfile
@@ -141,6 +142,28 @@ def _safe_members(zf, manifest):
     return members
 
 
+def staging_dir(parent, prefix, nt=None):
+    """A fresh directory inside `parent` to stage content in before it is moved
+    into place; the caller removes it. On Windows it is a plain directory, so
+    everything staged in it inherits `parent`'s ACL. tempfile.mkdtemp would give
+    it a private ACL there instead (SYSTEM, Administrators and the owner only,
+    Python >= 3.12.4), every file moved out keeps that ACL, and under an elevated
+    token (an SSH session) the owner is Administrators: the desktop user is then
+    locked out of the binary or profile. Elsewhere mkdtemp's owner-only mode stays.
+    Keep the copies in update.py, profile_io.py and backup_admin.py identical."""
+    os.makedirs(parent, exist_ok=True)
+    if not (os.name == "nt" if nt is None else nt):
+        return tempfile.mkdtemp(prefix=prefix, dir=parent)
+    for _ in range(100):
+        path = os.path.join(parent, prefix + secrets.token_hex(4))
+        try:
+            os.mkdir(path)
+        except FileExistsError:
+            continue
+        return path
+    raise FileExistsError(f"no free staging dir name in {parent}")
+
+
 def _swap_dir(staged, live):
     """Replace live with staged atomically-ish via an .old backup."""
     parent = os.path.dirname(live)
@@ -173,7 +196,9 @@ def import_profile(src_zip, roots, force=False):
     runtime/<slug>/graphics|media untouched rather than wiping them."""
     if not os.path.exists(src_zip):
         raise ValueError(f"bundle not found: {src_zip}")
-    tmp = tempfile.mkdtemp(prefix="profimport-")
+    # Staged next to the install, not in the system temp: see staging_dir.
+    tmp = staging_dir(os.path.dirname(os.path.abspath(roots["profiles_root"])),
+                      ".profimport-")
     try:
         with zipfile.ZipFile(src_zip) as zf:
             manifest = _read_manifest_from(zf)
