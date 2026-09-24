@@ -1290,6 +1290,24 @@ def t_mic_check_is_throttled_and_keeps_the_last_real_answer():
         m._obs_ws = saved
 
 
+
+def t_mic_yellow_only_matters_with_a_local_stint_in_the_schedule():
+    # review of #669: without a local: row the mic never opens, so a dead mic is not a
+    # reason to show yellow all evening. The rows are (url, name, stint, line).
+    assert m.schedule_has_local([("https://www.twitch.tv/x", "A", "1", 2),
+                                 ("local:", "B", "2", 3)])
+    assert not m.schedule_has_local([("https://www.twitch.tv/x", "A", "1", 2)])
+    assert not m.schedule_has_local([])
+
+
+def t_mic_recovery_is_logged_once():
+    missing = {"state": "missing", "device": "Mikrofon (K66)", "note": ""}
+    lvl, msg = m.mic_check_log(missing, {"state": "ok", "device": "Mikrofon (K66)", "note": ""})
+    assert lvl == logging.INFO and "found again" in msg and "Mikrofon (K66)" in msg, msg
+    ok = {"state": "ok", "device": "K66", "note": ""}
+    assert m.mic_check_log(ok, dict(ok)) is None
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

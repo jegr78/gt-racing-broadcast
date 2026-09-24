@@ -4224,15 +4224,25 @@ def mic_health_problem(result):
     return f"Commentary mic: {what}. The local stint would go out without it"
 
 
+def schedule_has_local(rows):
+    """True when any schedule row is a local capture stint, the only case in which
+    the relay ever opens the commentary mic. `rows` are (url, name, stint, line)
+    tuples as Source.get_rows() returns them. Pure."""
+    return any(is_local_source(r[0]) for r in rows or () if r)
+
+
 def mic_check_log(prev, result):
     """(level, message) to log for a mic check, or None. Logs only when the state
     changes, so the periodic re-check stays quiet while nothing moves. Pure."""
     state = (result or {}).get("state")
     if state is None:
         return None
-    if state == (prev or {}).get("state") and state != "repointed":
+    prev_state = (prev or {}).get("state")
+    if state == prev_state and state != "repointed":
         return None
     dev, note = (result or {}).get("device"), (result or {}).get("note") or ""
+    if state == "ok" and prev_state in ("missing", "ambiguous", "no_input"):
+        return logging.INFO, f"OBS: commentary mic device {dev!r} found again"
     if state == "repointed":
         return logging.INFO, (f"OBS: commentary mic re-found by name {dev!r} after its "
                               f"device id changed ({note}); input updated")
@@ -5614,6 +5624,9 @@ def redact_console_status(full, roles):
         lg = full.get("league")
         if isinstance(lg, dict):
             out["league"] = {k: v for k, v in lg.items() if k != "sheet_id"}
+        mic = full.get("mic")
+        if isinstance(mic, dict):                     # #669: device name + OS ids stay home
+            out["mic"] = {"state": mic.get("state")}
     return out
 
 
@@ -7767,7 +7780,8 @@ class Relay:
                 "rebuilds_stood_down": self._rebuilds_stood_down_fact(st.get("obs_fps")),
                 "feeds_backlogged": dict(self._backlogged_feeds),
                 "feeds_av_disturbed": self._av_health_fact(),
-                "mic_problem": mic_health_problem(self.mic_device)}
+                "mic_problem": (mic_health_problem(self.mic_device)
+                                if self._schedule_has_local() else None)}
 
     def _note_obs_splice(self, feed):
         """Record that the relay just spliced this feed into OBS by rebuilding the input.
@@ -8686,6 +8700,17 @@ class Relay:
         endurance machine with a capture card. Solo sets RACECAST_CAPTURE as well, but
         there the mic ships hot as the main audio and has no feed pair to follow."""
         return bool((os.environ.get("RACECAST_CAPTURE") or "").strip())             and not getattr(self, "solo", False)
+
+    def _schedule_has_local(self):
+        """True when the race or the qualifying schedule carries a local: stint.
+        Best-effort: an unreadable source counts as none."""
+        try:
+            rows = list(self.source.get_rows())
+            if getattr(self, "qual_source", None) is not None:
+                rows += list(self.qual_source.get_rows())
+        except Exception:                                # noqa: BLE001  best-effort
+            return False
+        return schedule_has_local(rows)
 
     def _maybe_check_mic(self, now):
         """Every MIC_CHECK_INTERVAL_S, check the commentary mic's OBS device and

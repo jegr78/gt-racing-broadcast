@@ -379,8 +379,10 @@ checks `Commentary Mic Device` against the devices OBS offers:
 - the id is gone and exactly one device carries the stored name: the relay points the
   OBS source at that device and logs it (no re-scan, no re-import);
 - the id is gone and no device, or more than one, carries the name: a WARNING in the
-  relay log and a yellow reason on the Director Panel (it does not page Discord), so a
-  dead mic is visible before the local stint. `racecast preflight` shows the same check.
+  relay log and, while the Schedule or Qualifying tab holds a `local:` stint, a yellow
+  reason on the Director Panel (it does not page Discord), so a dead mic is visible
+  before the local stint. The log notes when the device is found again.
+  `racecast preflight` shows the same check.
 
 A machine configured before this check has no `RACECAST_MIC_NAME`: run
 `racecast device-scan --mic` once to store it.
