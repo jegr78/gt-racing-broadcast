@@ -985,6 +985,67 @@ def release_feed_inputs(ports=RELAY_PORTS, host="127.0.0.1", port=None,
             session.close()
 
 
+# #673: the feed media sources read the relay on loopback, where the relay's ring is
+# the buffer. For a local stint OBS's own probe and network buffer are pure latency
+# (measured: ~2 s of the producer-monitor-to-OBS delay), so they are cut while the
+# feed carries one; a remote stint gets the collection's values back.
+LOCAL_FEED_OBS_SETTINGS = {
+    "ffmpeg_options": "fflags=nobuffer analyzeduration=500000 probesize=500000",
+    "buffering_mb": 1,
+}
+REMOTE_FEED_OBS_SETTINGS = {"ffmpeg_options": "", "buffering_mb": 8}
+
+
+def feed_obs_tuning(is_local):
+    """A copy of the media-source settings a feed port needs for its stint content
+    (#673). Pure."""
+    return dict(LOCAL_FEED_OBS_SETTINGS if is_local else REMOTE_FEED_OBS_SETTINGS)
+
+
+def _setting_differs(current, key, want):
+    have = current.get(key)
+    if isinstance(want, str):
+        return (have or "") != want
+    return have != want
+
+
+def tune_feed_inputs(patch, ports=RELAY_PORTS, host="127.0.0.1", port=None,
+                     password=None, timeout=2.0, session=None):
+    """Apply `patch` (feed_obs_tuning) to the feed media sources on `ports`, but only
+    to a source whose settings differ: a change restarts the source, so an already
+    tuned one is left alone. Returns (changed_input_names, note). Best effort: never
+    raises (#673)."""
+    note = ""
+    own = session is None
+    if own:
+        session, note = _connect(host, port, password, timeout)
+    if session is None:
+        return [], note
+    try:
+        inputs = session.request("GetInputList",
+                                 {"inputKind": "ffmpeg_source"}).get("inputs", [])
+        settings = {}
+
+        def get_settings(name):
+            settings[name] = session.request(
+                "GetInputSettings", {"inputName": name}).get("inputSettings", {})
+            return settings[name]
+
+        changed = []
+        for name in feed_input_names(inputs, get_settings, ports):
+            if any(_setting_differs(settings[name], k, v) for k, v in patch.items()):
+                session.request("SetInputSettings", {"inputName": name,
+                                                     "inputSettings": dict(patch),
+                                                     "overlay": True})
+                changed.append(name)
+        return changed, ""
+    except Exception as exc:                         # noqa: BLE001  best-effort contract
+        return [], str(exc) or exc.__class__.__name__
+    finally:
+        if own:
+            session.close()
+
+
 def feed_media_cursors(ports=RELAY_PORTS, host="127.0.0.1", port=None,
                        password=None, timeout=2.0, session=None):
     """({feed_port: mediaCursor_ms or None}, note) for the relay feed media inputs

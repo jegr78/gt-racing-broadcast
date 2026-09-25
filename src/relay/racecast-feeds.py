@@ -3749,6 +3749,11 @@ LOCAL_ENCODER_ARGS = {
 # (seconds since boot), one launch origin subtracted from both, and both tracks padded
 # from that zero before amix (which mixes frame by frame, ignoring pts): within 7 ms.
 LOCAL_MIC_GAIN_MAX_DB = 20.0
+# #673: the trailing reserve (#533) a broadcast consumer keeps behind the live edge of a
+# LOCAL stint. The 3 s default absorbs bursty remote HLS; a local capture is a steady
+# CBR stream produced on this machine, and every second of reserve is a second the
+# producer's own picture lags their monitor.
+LOCAL_FEED_PREBUFFER_S = 0.5
 LOCAL_DEVICE_BUSY = ("capture device busy or missing. Close any other program "
                      "using it (OBS capture source, Elgato utility); see feed log")
 LOCAL_NEEDS_FANOUT = ("local capture needs the feed fan-out. Remove "
@@ -3798,6 +3803,14 @@ def local_capture_input_args(platform, video, audio="", mic="", origin=None):
     if platform == "darwin":
         return tq + ["-f", "avfoundation", "-i", f"{video}:{audio or 'none'}"]
     return None
+
+
+def serve_prebuffer_s(is_local, base):
+    """The reserve a feed's broadcast consumer keeps for this stint (#673): the
+    configured `base` for a remote stint, at most LOCAL_FEED_PREBUFFER_S for a local
+    one. Never longer than the operator's own setting. Pure."""
+    base = max(0.0, float(base or 0.0))
+    return min(base, LOCAL_FEED_PREBUFFER_S) if is_local else base
 
 
 def local_mic_filter(has_game, gain_db=0.0):
@@ -4905,6 +4918,7 @@ class FeedFanoutServer:
         self.ring = ring
         self.log = log
         self.prebuffer_s = prebuffer_s        # #533: join OBS this far behind the live edge
+        self.base_prebuffer_s = prebuffer_s   # #673: the configured value; prebuffer_s follows the stint
         self._sock = None
         self._stop = False
         self._consumers = {}            # id -> {"cycle_ts", "snaps", "cursor", "floor"} (#583)
@@ -7096,6 +7110,35 @@ class Feed:
             return (frm, "robust")
         return None
 
+    def _tune_for_content(self, is_local):
+        """Fit this feed to its stint content (#673): the fan-out reserve now, and the
+        OBS media source off-thread (a settings change restarts it, so it runs only when
+        the source differs). Best-effort; returns the OBS thread or None."""
+        srv = self.fanout_server
+        if srv is not None:
+            srv.prebuffer_s = serve_prebuffer_s(
+                is_local, getattr(srv, "base_prebuffer_s", srv.prebuffer_s))
+        if _obs_ws is None or srv is None:
+            return None
+        patch = _obs_ws.feed_obs_tuning(is_local)
+
+        def _run():
+            try:
+                names, note = _obs_ws.tune_feed_inputs(patch, ports=[self.port])
+                if names:
+                    self.log.info("feed %s: OBS input(s) %s tuned for a %s stint", self.name,
+                                  ", ".join(names), "local" if is_local else "remote")
+                elif note:
+                    self.log.debug("feed %s: OBS tuning skipped (%s)", self.name, note)
+            except Exception as exc:          # noqa: BLE001  best-effort
+                self.log.debug("feed %s: OBS tuning error (%s)", self.name, exc)
+        t = threading.Thread(target=_run, daemon=True)
+        try:
+            t.start()
+        except RuntimeError:                  # out of threads: tuning is never critical
+            return None
+        return t
+
     def _obs_reconnect_now(self):
         """Force OBS to reconnect its media source for THIS feed's port (fan-out only).
         In fan-out the RELAY is the persistent HTTP server, so a streamlink restart is
@@ -7316,6 +7359,7 @@ class Feed:
             self.log.info("stint %d (%s) -> %s", i + 1, plat, url)
 
             local_cmd = None
+            self._tune_for_content(plat == "local")      # #673
             if plat == "local":
                 if self.ring is None:
                     local_err = LOCAL_NEEDS_FANOUT
@@ -8135,7 +8179,7 @@ class Relay:
                         and getattr(f, "fanout_server", None) is not None)
             served[name] = g if measured else None
             if (self._stall_signal and not f.paused and f.phase == "serving"
-                    and feed_inbound_degraded(g, self.feed_prebuffer_s, self._stall_floor)):
+                    and feed_inbound_degraded(g, self._prebuffer_of(f), self._stall_floor)):
                 jittery.append(name)
         self._interval_max_gaps = gaps
         self._served_max_gaps = served
@@ -8168,10 +8212,17 @@ class Relay:
                 floors[name] = None                  # no live edge to be behind
                 continue
             floors[name] = None if fl is None else round(fl, 1)
-            if feed_backlog_degraded(fl, self.feed_prebuffer_s, self._backlog_warn_s):
+            if feed_backlog_degraded(fl, self._prebuffer_of(f), self._backlog_warn_s):
                 lagging[name] = floors[name]
         self._interval_backlogs = floors
         self._backlogged_feeds = lagging
+
+    def _prebuffer_of(self, f):
+        """The reserve feed `f` runs with right now (#673: shorter for a local stint),
+        the relay-wide value when it has no fan-out server."""
+        srv = getattr(f, "fanout_server", None)
+        return getattr(srv, "prebuffer_s", self.feed_prebuffer_s) if srv is not None \
+            else self.feed_prebuffer_s
 
     def _backlog_status(self, name, f):
         """/status fields for one feed (#583): the live consumer backlog and whether it is
@@ -8195,8 +8246,8 @@ class Relay:
                 snaps = None
         return {"backlog_s": None if live is None else round(live, 1),
                 "backlogged": (name in self._backlogged_feeds and feed_backlog_degraded(
-                    live, self.feed_prebuffer_s, self._backlog_warn_s)),
-                "reset_discards_s": reset_discards_s(live, self.feed_prebuffer_s),
+                    live, self._prebuffer_of(f), self._backlog_warn_s)),
+                "reset_discards_s": reset_discards_s(live, self._prebuffer_of(f)),
                 # #614: cumulative cursor snaps of the attached consumers (the ring lapped
                 # them); `obs benchmark` marks a window with new snaps as contaminated
                 "consumer_snaps": snaps,
