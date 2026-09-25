@@ -1377,7 +1377,8 @@ def t_mic_mix_pads_both_tracks_to_the_common_zero_before_amix():
 def t_local_capture_setup_mixes_the_mic_on_windows():
     cmd, err, note = m.local_capture_setup(_mic_env(RACECAST_MIC_GAIN_DB="-2"), "win32",
                                            "nvenc", audio_scan=_game,
-                                           mic_scan=lambda name: True, clock=lambda: 50.0)
+                                           mic_scan=lambda platform, mic: True, clock=lambda: 50.0,
+                                           clock_detect=lambda platform, args: 'monotonic')
     assert err is None and note is None
     assert "audio=Mikrofon (K66)" in cmd and "-copyts" in cmd
     assert "volume=-2.0dB" in cmd[cmd.index("-filter_complex") + 1]
@@ -1386,17 +1387,19 @@ def t_local_capture_setup_mixes_the_mic_on_windows():
 
 def t_local_capture_setup_never_loses_the_picture_over_the_mic():
     cmd, err, note = m.local_capture_setup(_mic_env(), "win32", "x264", audio_scan=_game,
-                                           mic_scan=lambda name: False, clock=lambda: 1.0)
+                                           mic_scan=lambda platform, mic: False, clock=lambda: 1.0,
+                                           clock_detect=lambda platform, args: 'monotonic')
     assert err is None and "audio=Mikrofon (K66)" not in cmd
     assert "Mikrofon (K66)" in note and "not found" in note
     cmd, err, note = m.local_capture_setup(_mic_env(), "win32", "x264", audio_scan=_game,
-                                           mic_scan=lambda name: True, clock=lambda: 1.0,
-                                           with_mic=False)
+                                           mic_scan=lambda platform, mic: True, clock=lambda: 1.0,
+                                           with_mic=False, clock_detect=lambda platform, args: 'monotonic')
     assert "audio=Mikrofon (K66)" not in cmd and "without the commentary mic" in note
-    # no name stored, or not Windows (other clocks, unmeasured): today's path
+    # no mic identity stored for this platform: today's path, no mix
     for env, plat in ((_mic_env(RACECAST_MIC_NAME=""), "win32"), (_mic_env(), "linux")):
         cmd, err, note = m.local_capture_setup(env, plat, "x264", audio_scan=_game,
-                                               mic_scan=lambda name: True, clock=lambda: 1.0)
+                                               mic_scan=lambda platform, mic: True,
+                                               clock=lambda: 1.0, clock_detect=lambda platform, args: 'monotonic')
         assert "-copyts" not in (cmd or []), plat
 
 
@@ -1462,6 +1465,89 @@ def t_feed_tunes_its_obs_source_off_thread():
         assert calls == [({"local": True}, [53002])], calls
     finally:
         m._obs_ws = saved
+
+
+
+# --- #675: the mic mix on every platform, guarded by a capture-clock check ---
+DUMP = """Input #0, dshow, from 'video=Elgato HD60 X:audio=Elgato HD60 X (Elgato HD60 X)':
+  Duration: N/A, start: 356298.223000, bitrate: N/A
+  Stream #0:0: Video: rawvideo (YUY2 / 0x32595559), yuyv422, 1920x1080, 60 fps
+Input #1, dshow, from 'audio=Mikrofon (K66)':
+  Duration: N/A, start: 356299.750000, bitrate: 1411 kb/s
+"""
+
+
+def t_parse_input_starts_reads_each_inputs_start():
+    assert m.parse_input_starts(DUMP) == [356298.223, 356299.75]
+    assert m.parse_input_starts("no inputs here") == []
+
+
+def t_pick_capture_clock_needs_all_inputs_on_one_clock():
+    mono, wall = 356300.0, 1_790_000_000.0
+    assert m.pick_capture_clock([356298.2, 356299.7], mono, wall) == "monotonic"
+    assert m.pick_capture_clock([wall - 1.0, wall - 0.5], mono, wall) == "wall"
+    assert m.pick_capture_clock([356298.2, wall - 0.5], mono, wall) is None   # mixed clocks
+    assert m.pick_capture_clock([12.0, 13.0], mono, wall) is None             # graph-relative
+    assert m.pick_capture_clock([356298.2], mono, wall) is None               # need card + mic
+
+
+def t_capture_clock_is_probed_once_per_input_set():
+    calls = []
+    def probe(args):
+        calls.append(tuple(args)); return "monotonic"
+    m._CAPTURE_CLOCKS.clear()
+    a = ["-f", "dshow", "-itsoffset", "-0.000", "-i", "x"]
+    assert m.capture_clock("win32", a, probe=probe) == "monotonic"
+    assert m.capture_clock("win32", a, probe=probe) == "monotonic"
+    assert len(calls) == 1
+    m._CAPTURE_CLOCKS.clear()
+
+
+def t_linux_mixes_three_inputs_on_the_wall_clock():
+    args, game, mic = m.local_capture_inputs("linux", "/dev/video2", "alsa_input.card",
+                                             mic="alsa_input.usb-mic", origin=1790000000.5)
+    assert (game, mic) == ("1:a", "2:a")
+    v = args[:args.index("/dev/video2")]
+    assert v[v.index("-f") + 1] == "v4l2" and v[v.index("-ts") + 1] == "abs"
+    assert args.count("-itsoffset") == 3 and args.count("-1790000000.500") == 3
+    assert args[-1] == "alsa_input.usb-mic"
+    plain, g, mm = m.local_capture_inputs("linux", "/dev/video2", "alsa_input.card")
+    assert "-itsoffset" not in plain and "-ts" not in plain and (g, mm) == ("1:a", None)
+
+
+def t_macos_adds_the_mic_as_a_second_avfoundation_input():
+    args, game, mic = m.local_capture_inputs("darwin", "Game Capture HD60 X", "HD60 X Audio",
+                                             mic="USB Microphone", origin=1234.5)
+    assert (game, mic) == ("0:a", "1:a")
+    assert args[args.index("-i") + 1] == "Game Capture HD60 X:HD60 X Audio"
+    assert args[-2:] == ["-i", ":USB Microphone"] and args.count("-itsoffset") == 2
+
+
+def t_mic_filter_uses_the_given_stream_specs():
+    fc = m.local_mic_filter(True, 1.5, game_spec="1:a", mic_spec="2:a")
+    assert fc.startswith("[1:a]aresample=48000:async=1:first_pts=0[g];[2:a]aresample")
+    assert "volume=1.5dB" in fc
+    cmd = m.local_capture_cmd(["-i", "v", "-i", "g", "-i", "mic"], "x264", has_audio=True,
+                              has_mic=True, game_spec="1:a", mic_spec="2:a")
+    assert "[2:a]aresample" in cmd[cmd.index("-filter_complex") + 1]
+
+
+def t_setup_mixes_on_linux_with_the_pulse_source_and_wall_origin():
+    env = {"RACECAST_CAPTURE": "/dev/video2", "RACECAST_CAPTURE_AUDIO": "alsa_input.card",
+           "RACECAST_MIC": "alsa_input.usb-mic"}
+    cmd, err, note = m.local_capture_setup(env, "linux", "x264", mic_scan=lambda p, mic: True,
+                                           clock_detect=lambda p, a: "wall",
+                                           clock=lambda: 5.0, wall=lambda: 1790000000.25)
+    assert err is None and note is None and "alsa_input.usb-mic" in cmd
+    assert cmd[cmd.index("-itsoffset") + 1] == "-1790000000.250"
+
+
+def t_setup_never_mixes_on_unaligned_clocks():
+    cmd, err, note = m.local_capture_setup(_mic_env(), "win32", "x264", audio_scan=_game,
+                                           mic_scan=lambda p, mic: True,
+                                           clock_detect=lambda p, a: None)
+    assert err is None and "-copyts" not in cmd and "audio=Mikrofon (K66)" not in cmd
+    assert "clock" in note and "Mikrofon (K66)" in note
 
 
 if __name__ == "__main__":

@@ -3771,38 +3771,59 @@ def dshow_device_name(value):
     return v
 
 
-def local_capture_input_args(platform, video, audio="", mic="", origin=None):
-    """ffmpeg input argv for the capture device on `platform` (sys.platform), or None
-    when no video device is set or the platform is unknown. `video`/`audio` are the
-    machine .env values (RACECAST_CAPTURE / RACECAST_CAPTURE_AUDIO). Windows accepts
-    the OBS device id (see dshow_device_name); Linux takes /dev/videoN plus a
+def local_capture_inputs(platform, video, audio="", mic="", origin=None):
+    """(argv, game_spec, mic_spec) for the capture inputs on `platform` (sys.platform),
+    or None when no video device is set or the platform is unknown. `video`/`audio`
+    are the machine .env values (RACECAST_CAPTURE / RACECAST_CAPTURE_AUDIO). Windows
+    accepts the OBS device id (see dshow_device_name); Linux takes /dev/videoN plus a
     PulseAudio source; macOS AVFoundation takes a device name or index, NOT the UID
-    OBS stores, so there RACECAST_CAPTURE must hold the name. `mic` (Windows only,
-    #670) adds the commentary mic as a second dshow input; both inputs then run on the
-    dshow graph clock shifted by `origin` (time.monotonic() at launch). Pure."""
+    OBS stores, so there RACECAST_CAPTURE must hold the name.
+
+    `mic` adds the commentary mic as one more input (#670, every platform since #675):
+    every input is then shifted by the same `origin` (the capture clock at launch, see
+    capture_clock) so -copyts keeps them on one timeline. Windows switches the card's
+    video to the dshow graph clock; Linux stamps v4l2 with the wall clock like
+    PulseAudio. The specs name the game and mic audio streams for local_mic_filter
+    (None when absent). Pure."""
     video, audio = (video or "").strip(), (audio or "").strip()
     mic = (mic or "").strip()
     if not video:
         return None
     tq = ["-thread_queue_size", "1024"]
+    shift = ["-itsoffset", f"-{origin or 0.0:.3f}"] if mic else []
     if platform.startswith("win"):
         spec = "video=" + dshow_device_name(video)
         if audio:
             spec += ":audio=" + dshow_device_name(audio)
         card = tq + ["-f", "dshow", "-rtbufsize", LOCAL_DSHOW_RTBUF]
+        game = "0:a" if audio else None
         if not mic:
-            return card + ["-i", spec]
-        shift = ["-itsoffset", f"-{origin or 0.0:.3f}"]
+            return card + ["-i", spec], game, None
         return (card + ["-use_video_device_timestamps", "0"] + shift + ["-i", spec]
-                + tq + ["-f", "dshow"] + shift + ["-i", "audio=" + mic])
+                + tq + ["-f", "dshow"] + shift + ["-i", "audio=" + mic]), game, "1:a"
     if platform.startswith("linux"):
-        args = tq + ["-f", "v4l2", "-i", video]
+        clock = ["-ts", "abs"] if mic else []
+        args = tq + ["-f", "v4l2"] + clock + shift + ["-i", video]
+        idx, game = 1, None
         if audio:
-            args += tq + ["-f", "pulse", "-i", audio]
-        return args
+            args += tq + ["-f", "pulse"] + shift + ["-i", audio]
+            game, idx = "1:a", 2
+        if not mic:
+            return args, game, None
+        return args + tq + ["-f", "pulse"] + shift + ["-i", mic], game, f"{idx}:a"
     if platform == "darwin":
-        return tq + ["-f", "avfoundation", "-i", f"{video}:{audio or 'none'}"]
+        args = tq + ["-f", "avfoundation"] + shift + ["-i", f"{video}:{audio or 'none'}"]
+        game = "0:a" if audio else None
+        if not mic:
+            return args, game, None
+        return args + tq + ["-f", "avfoundation"] + shift + ["-i", f":{mic}"], game, "1:a"
     return None
+
+
+def local_capture_input_args(platform, video, audio="", mic="", origin=None):
+    """The argv part of local_capture_inputs (None when it is None). Pure."""
+    built = local_capture_inputs(platform, video, audio, mic=mic, origin=origin)
+    return None if built is None else built[0]
 
 
 def serve_prebuffer_s(is_local, base):
@@ -3813,19 +3834,20 @@ def serve_prebuffer_s(is_local, base):
     return min(base, LOCAL_FEED_PREBUFFER_S) if is_local else base
 
 
-def local_mic_filter(has_game, gain_db=0.0):
-    """filter_complex for the commentary mic (#670): input 1 is the mic, input 0's
-    audio the game. Both are padded from the shared zero, then mixed without
-    normalization so neither drops in level. Output label [a]. Pure."""
+def local_mic_filter(has_game, gain_db=0.0, game_spec="0:a", mic_spec="1:a"):
+    """filter_complex for the commentary mic (#670): `mic_spec` is the mic's stream,
+    `game_spec` the game audio's. Both are padded from the shared zero, then mixed
+    without normalization so neither drops in level. Output label [a]. Pure."""
     pad = "aresample=48000:async=1:first_pts=0"
-    mic = f"[1:a]{pad},volume={float(gain_db):.1f}dB"
+    mic = f"[{mic_spec}]{pad},volume={float(gain_db):.1f}dB"
     if not has_game:
         return mic + "[a]"
-    return f"[0:a]{pad}[g];{mic}[m];[g][m]amix=inputs=2:normalize=0:duration=longest[a]"
+    return (f"[{game_spec}]{pad}[g];{mic}[m];"
+            "[g][m]amix=inputs=2:normalize=0:duration=longest[a]")
 
 
 def local_capture_cmd(input_args, encoder="x264", has_audio=True, has_mic=False,
-                      mic_gain_db=0.0):
+                      mic_gain_db=0.0, game_spec="0:a", mic_spec="1:a"):
     """Argv for the local capture reader: the device in, H.264 at the capped bitrate
     with one keyframe per LOCAL_KEYFRAME_S, AAC, MPEG-TS on stdout. With `has_mic`
     the input args carry the mic as input 1 and the audio is local_mic_filter's mix;
@@ -3834,7 +3856,9 @@ def local_capture_cmd(input_args, encoder="x264", has_audio=True, has_mic=False,
     cmd = ["ffmpeg", "-hide_banner", "-nostdin", "-nostats", "-loglevel", "warning"]
     cmd += list(input_args)
     if has_mic:
-        cmd += ["-copyts", "-filter_complex", local_mic_filter(has_audio, mic_gain_db),
+        cmd += ["-copyts", "-filter_complex",
+                local_mic_filter(has_audio, mic_gain_db, game_spec or "0:a",
+                                 mic_spec or "1:a"),
                 "-map", "0:v", "-map", "[a]"]
     cmd += LOCAL_ENCODER_ARGS[encoder]
     cmd += ["-b:v", f"{kbps}k", "-maxrate", f"{kbps}k", "-bufsize", f"{2 * kbps}k",
@@ -3972,10 +3996,82 @@ def dshow_mic_available(name, listing):
                               for n, t in parse_dshow_device_list(listing))
 
 
-def scan_mic(name):
-    """True when the commentary mic `name` is present for ffmpeg right now (Windows)."""
-    return dshow_mic_available(
-        name, _ffmpeg_listing(["-list_devices", "true", "-f", "dshow", "-i", "dummy"]))
+def scan_mic(platform, mic):
+    """True when the commentary mic `mic` is present for ffmpeg right now."""
+    if platform.startswith("win"):
+        return dshow_mic_available(
+            mic, _ffmpeg_listing(["-list_devices", "true", "-f", "dshow", "-i", "dummy"]))
+    if platform == "darwin":
+        return mic in parse_avfoundation_audio_devices(
+            _ffmpeg_listing(["-f", "avfoundation", "-list_devices", "true", "-i", ""]))
+    if platform.startswith("linux"):
+        return any(n == mic for n, _d in
+                   parse_ffmpeg_sources(_ffmpeg_listing(["-sources", "pulse"])))
+    return False
+
+
+# #675: the mix needs every capture input on ONE clock, and the launch origin on that
+# clock. Windows dshow stamps the system monotonic clock (measured, #670); Linux v4l2
+# with -ts abs and PulseAudio stamp the wall clock; macOS AVFoundation stamps host time.
+# Instead of trusting that table, a short probe reads each input's start timestamp and
+# picks the clock they all sit on. No common clock: no mix (a wrong origin would pad
+# minutes of silence in front of the audio).
+LOCAL_CLOCK_TOLERANCE_S = 60.0
+_START_RE = re.compile(r"^\s*Duration: .*?, start: (-?\d+(?:\.\d+)?)", re.MULTILINE)
+_CAPTURE_CLOCKS = {}
+
+
+def parse_input_starts(text):
+    """Each input's start timestamp from ffmpeg's input dump, in input order. Pure."""
+    return [float(v) for v in _START_RE.findall(text or "")]
+
+
+def pick_capture_clock(starts, mono, wall, tol=LOCAL_CLOCK_TOLERANCE_S):
+    """'monotonic' or 'wall' when every start (card and mic, so at least two) lies
+    within `tol` of that clock's reading, else None. Pure."""
+    if len(starts) < 2:
+        return None
+    for name, now in (("monotonic", mono), ("wall", wall)):
+        if all(abs(v - now) <= tol for v in starts):
+            return name
+    return None
+
+
+def probe_capture_clock(input_args):
+    """Open the capture inputs for a moment and return the clock their timestamps are
+    on (pick_capture_clock), or None. Best-effort."""
+    cmd = (["ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "info"] + list(input_args)
+           + ["-t", "1", "-f", "null", "-"])
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=30, env=external_tool_env(),
+                           **_no_window_kwargs())
+    except Exception:                         # noqa: BLE001  best-effort probe
+        return None
+    text = (r.stdout + r.stderr).decode("utf-8", "replace")
+    return pick_capture_clock(parse_input_starts(text), time.monotonic(), time.time())
+
+
+def capture_clock(platform, input_args, probe=None):
+    """The capture clock for these inputs, probed once per relay run. Only a found
+    clock is cached: a probe that failed (card busy) is retried next time."""
+    key = (platform, tuple(a for a in input_args if not a.startswith("-0.")))
+    if key not in _CAPTURE_CLOCKS:
+        found = (probe or probe_capture_clock)(input_args)
+        if found is None:
+            return None
+        _CAPTURE_CLOCKS[key] = found
+    return _CAPTURE_CLOCKS[key]
+
+
+def mic_device_for(environ, platform):
+    """The commentary mic as ffmpeg opens it on `platform`: the dshow/AVFoundation
+    device NAME (RACECAST_MIC_NAME) on Windows/macOS, the PulseAudio source
+    (RACECAST_MIC, what OBS stores) on Linux; "" when unknown. Pure."""
+    if platform.startswith("linux"):
+        return (environ.get("RACECAST_MIC") or "").strip()
+    if platform.startswith("win") or platform == "darwin":
+        return (environ.get("RACECAST_MIC_NAME") or "").strip()
+    return ""
 
 
 def mic_gain_db(environ):
@@ -3989,13 +4085,11 @@ def mic_gain_db(environ):
 
 
 def mixes_mic_env(environ, platform, solo):
-    """True when the local capture carries the commentary mic (#670): an endurance
-    machine on Windows with a capture card and RACECAST_MIC_NAME (the mic's dshow name,
-    written by device-scan). Other platforms use other clocks and are unmeasured, so
-    they keep the separate OBS mic input (#593). Pure."""
-    return (platform.startswith("win") and not solo
-            and bool((environ.get("RACECAST_CAPTURE") or "").strip())
-            and bool((environ.get("RACECAST_MIC_NAME") or "").strip()))
+    """True when the local capture carries the commentary mic (#670, every platform
+    since #675): an endurance machine with a capture card and a mic ffmpeg can open
+    (mic_device_for). Then the OBS mic input only stays muted. Pure."""
+    return (not solo and bool((environ.get("RACECAST_CAPTURE") or "").strip())
+            and bool(mic_device_for(environ, platform)))
 
 
 def _join_notes(a, b):
@@ -4003,13 +4097,14 @@ def _join_notes(a, b):
 
 
 def local_capture_setup(environ, platform, encoder, audio_scan=None, mic_scan=None,
-                        clock=None, with_mic=True):
+                        clock=None, with_mic=True, clock_detect=None, wall=None):
     """(argv, None, note) for the configured capture device, or (None, reason, None)
     when it cannot be built. `note` is a non-fatal warning (no game audio found, mic
     missing). The device comes from the machine .env, never from the sheet. The mic
     is mixed in when mixes_mic_env() holds, the device is present and `with_mic`; a
-    mic problem never costs the picture. `clock` gives the launch origin, taken per
-    call, so every spawn gets a fresh one."""
+    mic problem never costs the picture. The origin comes from the clock the capture
+    inputs actually stamp (capture_clock; `clock`/`wall` read the monotonic and wall
+    clocks, test seams), taken per call, so every spawn gets a fresh one."""
     video = (environ.get("RACECAST_CAPTURE") or "").strip()
     audio = (environ.get("RACECAST_CAPTURE_AUDIO") or "").strip()
     if not video:
@@ -4024,20 +4119,31 @@ def local_capture_setup(environ, platform, encoder, audio_scan=None, mic_scan=No
         audio = audio or ""
     mic = ""
     if mixes_mic_env(environ, platform, solo=False):
-        name = environ["RACECAST_MIC_NAME"].strip()
+        name = mic_device_for(environ, platform)
         if not with_mic:
             note = _join_notes(note, f"local capture: running without the commentary mic "
                                      f"'{name}' after a failed start with it")
-        elif (mic_scan or scan_mic)(name):
-            mic = name
-        else:
+        elif not (mic_scan or scan_mic)(platform, name):
             note = _join_notes(note, f"local capture: commentary mic '{name}' not found; "
                                      "the stint runs without it (check the mic, then "
                                      "`racecast device-scan --mic`)")
-    origin = (clock or time.monotonic)() if mic else None
-    args = local_capture_input_args(platform, video, audio, mic=mic, origin=origin)
+        else:
+            probe_args = local_capture_input_args(platform, video, audio, mic=name, origin=0)
+            found = (clock_detect or capture_clock)(platform, probe_args)
+            if found is None:
+                note = _join_notes(note, f"local capture: commentary mic '{name}' not mixed: "
+                                         "the capture inputs do not share a clock here, so "
+                                         "voice and picture could not be aligned")
+            else:
+                mic = name
+    origin = None
+    if mic:
+        origin = (wall or time.time)() if found == "wall" else (clock or time.monotonic)()
+    built = local_capture_inputs(platform, video, audio, mic=mic, origin=origin)
+    args, game_spec, mic_spec = built
     return (local_capture_cmd(args, encoder, has_audio=bool(audio), has_mic=bool(mic),
-                              mic_gain_db=mic_gain_db(environ)), None, note)
+                              mic_gain_db=mic_gain_db(environ), game_spec=game_spec,
+                              mic_spec=mic_spec), None, note)
 
 
 _LOCAL_ENCODER = None
