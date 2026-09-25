@@ -320,8 +320,17 @@ The relay's own `ffmpeg` opens the card, encodes H.264 at a fixed **8 Mbps** (ab
 9.3 Mbps on the wire with audio) with a keyframe every second, and writes MPEG-TS into the
 feed's buffer. It uses NVENC when a test encode succeeds on this machine, otherwise x264
 `veryfast`. The bitrate is deliberately not a setting: the feed buffer is a fixed 16 MB,
-so a higher bitrate shrinks the time it holds and would push the 3 s playback margin past
+so a higher bitrate shrinks the time it holds and would push the playback margin past
 the oldest retained byte. At 8 Mbps the buffer holds about 14 seconds.
+
+**Latency.** A remote feed is played 3 s behind the newest byte the relay has
+(`RACECAST_FEED_PREBUFFER_S`): that margin absorbs the bursts of a remote HLS stream. A
+local capture is a steady stream from this machine, so while a feed carries a local stint
+the margin is **0.5 s**. On that feed's OBS media source the relay also sets
+low-latency FFmpeg options and a 1 MB network buffer; it puts the collection's values back
+(8 MB, no options) when the feed moves on to a remote stint, and it touches a source only
+when its settings differ. The producer's own picture then reaches OBS about 2 to 3
+seconds after their monitor, instead of about 5.
 
 There is no yt-dlp resolve, no cookies and no quality tiers for a local stint. The
 Director Panel marks the feed `LOCAL` and shows *local capture* where a remote feed shows
@@ -413,8 +422,8 @@ A machine configured before this check has no `RACECAST_MIC_NAME`: run
 
 ### Why there is no delay between the local stint and a remote feed
 
-A local stint reaches OBS a few seconds behind real time (the relay's 3 s playback
-margin); a remote commentator's feed arrives about 30 seconds behind. That gap is not a problem to fix: each stint covers a
+A local stint reaches OBS a couple of seconds behind real time (see *Latency* above); a
+remote commentator's feed arrives about 30 seconds behind. That gap is not a problem to fix: each stint covers a
 different GT7 lobby with different drivers, so two stints never share a race timeline.
 Cutting from one to the other, or showing both in the Splitscreen at a handover, puts
 two unrelated races next to each other, and a delay on the local side would align

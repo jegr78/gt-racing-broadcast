@@ -2416,6 +2416,50 @@ def t_wait_until_ready_gives_up_and_says_why():
     assert not ok and note == "still loading", note
 
 
+
+# --- #673: per-content tuning of the feed media sources ---
+def t_feed_obs_tuning_is_low_latency_for_a_local_stint():
+    loc, rem = m.feed_obs_tuning(True), m.feed_obs_tuning(False)
+    assert "nobuffer" in loc["ffmpeg_options"] and loc["buffering_mb"] == 1
+    assert rem == {"ffmpeg_options": "", "buffering_mb": 8}      # the collection's own
+    loc["buffering_mb"] = 99
+    assert m.feed_obs_tuning(True)["buffering_mb"] == 1         # a copy, not the constant
+
+
+class _TuneSession:
+    def __init__(self, settings):
+        self.settings, self.sets = settings, []
+
+    def request(self, rt, rd=None):
+        if rt == "GetInputList":
+            return {"inputs": [{"inputName": n, "inputKind": "ffmpeg_source"} for n in self.settings]}
+        if rt == "GetInputSettings":
+            return {"inputSettings": dict(self.settings[rd["inputName"]])}
+        if rt == "SetInputSettings":
+            self.sets.append(rd); return {}
+        raise AssertionError(rt)
+
+
+def t_tune_feed_inputs_changes_only_differing_sources_on_the_port():
+    s = _TuneSession({
+        "Feed A": {"input": "http://127.0.0.1:53001", "is_local_file": False, "buffering_mb": 8},
+        "Feed B": {"input": "http://127.0.0.1:53002", "is_local_file": False, "buffering_mb": 8},
+    })
+    patch = m.feed_obs_tuning(True)
+    names, note = m.tune_feed_inputs(patch, ports=[53002], session=s)
+    assert names == ["Feed B"] and note == "", (names, note)
+    assert s.sets == [{"inputName": "Feed B", "inputSettings": patch, "overlay": True}]
+    # already tuned: no rebuild, so a retry of the same stint never blips the source
+    s2 = _TuneSession({"Feed B": {"input": "http://127.0.0.1:53002", "is_local_file": False,
+                                  **patch}})
+    assert m.tune_feed_inputs(patch, ports=[53002], session=s2) == ([], "")
+    assert s2.sets == []
+    # a collection without ffmpeg_options counts as "" for the remote defaults
+    s3 = _TuneSession({"Feed B": {"input": "http://127.0.0.1:53002", "is_local_file": False,
+                                  "buffering_mb": 8}})
+    assert m.tune_feed_inputs(m.feed_obs_tuning(False), ports=[53002], session=s3) == ([], "")
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

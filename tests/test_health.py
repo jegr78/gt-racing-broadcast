@@ -1341,6 +1341,18 @@ def t_mixes_mic_needs_windows_a_card_and_a_mic_name():
     assert not m.mixes_mic_env({"RACECAST_CAPTURE": "card"}, "win32", solo=False)
 
 
+
+def t_health_reads_each_feeds_own_reserve():
+    # #673: a local stint runs with a 0.5 s reserve; the backlog/jitter signals must
+    # judge it against that, not the relay-wide 3 s.
+    import types
+    stub = types.SimpleNamespace(feed_prebuffer_s=3.0)
+    local = types.SimpleNamespace(fanout_server=types.SimpleNamespace(prebuffer_s=0.5))
+    bare = types.SimpleNamespace(fanout_server=None)
+    assert m.Relay._prebuffer_of(stub, local) == 0.5
+    assert m.Relay._prebuffer_of(stub, bare) == 3.0
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

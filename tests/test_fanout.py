@@ -1407,6 +1407,63 @@ def t_mic_gain_db_parses_leniently():
     assert m.mic_gain_db({"RACECAST_MIC_GAIN_DB": "99"}) == 20.0      # clamped
 
 
+
+# --- #673: a local stint joins OBS closer to the live edge ---
+def t_serve_prebuffer_is_short_for_a_local_stint_only():
+    # Measured: the 3 s reserve (#533) is there for bursty remote HLS; a local capture
+    # delivers a steady CBR stream from this machine, so 0.5 s is enough.
+    assert m.serve_prebuffer_s(True, 3.0) == m.LOCAL_FEED_PREBUFFER_S == 0.5
+    assert m.serve_prebuffer_s(False, 3.0) == 3.0
+    assert m.serve_prebuffer_s(True, 0.2) == 0.2        # never longer than the operator's
+    assert m.serve_prebuffer_s(True, 0.0) == 0.0
+    assert m.serve_prebuffer_s(False, None) == 0.0
+
+
+def t_fanout_server_remembers_its_configured_reserve():
+    srv = m.FeedFanoutServer("127.0.0.1", 0, m.FeedRing(1024), None, prebuffer_s=3.0)
+    assert srv.base_prebuffer_s == 3.0 and srv.prebuffer_s == 3.0
+
+
+def t_feed_tunes_its_reserve_to_the_stint_content():
+    import types
+    srv = types.SimpleNamespace(prebuffer_s=3.0, base_prebuffer_s=3.0)
+    feed = types.SimpleNamespace(fanout_server=srv, port=53002, name="B", log=None)
+    saved = m._obs_ws
+    m._obs_ws = None                                     # no OBS: reserve only
+    try:
+        m.Feed._tune_for_content(feed, True)
+        assert srv.prebuffer_s == 0.5
+        m.Feed._tune_for_content(feed, False)
+        assert srv.prebuffer_s == 3.0
+    finally:
+        m._obs_ws = saved
+
+
+def t_feed_tunes_its_obs_source_off_thread():
+    import types
+    calls = []
+
+    class Obs:
+        @staticmethod
+        def feed_obs_tuning(local):
+            return {"local": local}
+
+        @staticmethod
+        def tune_feed_inputs(patch, ports):
+            calls.append((patch, ports)); return ["Feed B"], ""
+    srv = types.SimpleNamespace(prebuffer_s=3.0, base_prebuffer_s=3.0)
+    log = types.SimpleNamespace(info=lambda *a: None, debug=lambda *a: None)
+    feed = types.SimpleNamespace(fanout_server=srv, port=53002, name="B", log=log)
+    saved = m._obs_ws
+    m._obs_ws = Obs
+    try:
+        t = m.Feed._tune_for_content(feed, True)
+        t.join(5)
+        assert calls == [({"local": True}, [53002])], calls
+    finally:
+        m._obs_ws = saved
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
