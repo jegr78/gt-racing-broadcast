@@ -3742,6 +3742,13 @@ LOCAL_ENCODER_ARGS = {
               "-forced-idr", "1"],
     "x264": ["-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency"],
 }
+# #670: the producer's commentary mic is mixed into the local capture, so voice,
+# picture and game audio share one timeline through the relay (OBS gets them ~3 s late,
+# together). Each dshow input would otherwise be rebased to its own start, and the mic
+# opens after the card: measured 1.5 s off. With the dshow graph clock on both inputs
+# (seconds since boot), one launch origin subtracted from both, and both tracks padded
+# from that zero before amix (which mixes frame by frame, ignoring pts): within 7 ms.
+LOCAL_MIC_GAIN_MAX_DB = 20.0
 LOCAL_DEVICE_BUSY = ("capture device busy or missing. Close any other program "
                      "using it (OBS capture source, Elgato utility); see feed log")
 LOCAL_NEEDS_FANOUT = ("local capture needs the feed fan-out. Remove "
@@ -3759,14 +3766,17 @@ def dshow_device_name(value):
     return v
 
 
-def local_capture_input_args(platform, video, audio=""):
+def local_capture_input_args(platform, video, audio="", mic="", origin=None):
     """ffmpeg input argv for the capture device on `platform` (sys.platform), or None
     when no video device is set or the platform is unknown. `video`/`audio` are the
     machine .env values (RACECAST_CAPTURE / RACECAST_CAPTURE_AUDIO). Windows accepts
     the OBS device id (see dshow_device_name); Linux takes /dev/videoN plus a
     PulseAudio source; macOS AVFoundation takes a device name or index, NOT the UID
-    OBS stores, so there RACECAST_CAPTURE must hold the name. Pure."""
+    OBS stores, so there RACECAST_CAPTURE must hold the name. `mic` (Windows only,
+    #670) adds the commentary mic as a second dshow input; both inputs then run on the
+    dshow graph clock shifted by `origin` (time.monotonic() at launch). Pure."""
     video, audio = (video or "").strip(), (audio or "").strip()
+    mic = (mic or "").strip()
     if not video:
         return None
     tq = ["-thread_queue_size", "1024"]
@@ -3774,7 +3784,12 @@ def local_capture_input_args(platform, video, audio=""):
         spec = "video=" + dshow_device_name(video)
         if audio:
             spec += ":audio=" + dshow_device_name(audio)
-        return tq + ["-f", "dshow", "-rtbufsize", LOCAL_DSHOW_RTBUF, "-i", spec]
+        card = tq + ["-f", "dshow", "-rtbufsize", LOCAL_DSHOW_RTBUF]
+        if not mic:
+            return card + ["-i", spec]
+        shift = ["-itsoffset", f"-{origin or 0.0:.3f}"]
+        return (card + ["-use_video_device_timestamps", "0"] + shift + ["-i", spec]
+                + tq + ["-f", "dshow"] + shift + ["-i", "audio=" + mic])
     if platform.startswith("linux"):
         args = tq + ["-f", "v4l2", "-i", video]
         if audio:
@@ -3785,17 +3800,34 @@ def local_capture_input_args(platform, video, audio=""):
     return None
 
 
-def local_capture_cmd(input_args, encoder="x264", has_audio=True):
+def local_mic_filter(has_game, gain_db=0.0):
+    """filter_complex for the commentary mic (#670): input 1 is the mic, input 0's
+    audio the game. Both are padded from the shared zero, then mixed without
+    normalization so neither drops in level. Output label [a]. Pure."""
+    pad = "aresample=48000:async=1:first_pts=0"
+    mic = f"[1:a]{pad},volume={float(gain_db):.1f}dB"
+    if not has_game:
+        return mic + "[a]"
+    return f"[0:a]{pad}[g];{mic}[m];[g][m]amix=inputs=2:normalize=0:duration=longest[a]"
+
+
+def local_capture_cmd(input_args, encoder="x264", has_audio=True, has_mic=False,
+                      mic_gain_db=0.0):
     """Argv for the local capture reader: the device in, H.264 at the capped bitrate
-    with one keyframe per LOCAL_KEYFRAME_S, AAC, MPEG-TS on stdout. Pure."""
+    with one keyframe per LOCAL_KEYFRAME_S, AAC, MPEG-TS on stdout. With `has_mic`
+    the input args carry the mic as input 1 and the audio is local_mic_filter's mix;
+    -copyts keeps the timestamps the inputs were aligned on. Pure."""
     kbps = LOCAL_VIDEO_KBPS
     cmd = ["ffmpeg", "-hide_banner", "-nostdin", "-nostats", "-loglevel", "warning"]
     cmd += list(input_args)
+    if has_mic:
+        cmd += ["-copyts", "-filter_complex", local_mic_filter(has_audio, mic_gain_db),
+                "-map", "0:v", "-map", "[a]"]
     cmd += LOCAL_ENCODER_ARGS[encoder]
     cmd += ["-b:v", f"{kbps}k", "-maxrate", f"{kbps}k", "-bufsize", f"{2 * kbps}k",
             "-pix_fmt", "yuv420p",
             "-force_key_frames", f"expr:gte(t,n_forced*{LOCAL_KEYFRAME_S})"]
-    if has_audio:
+    if has_audio or has_mic:
         cmd += ["-c:a", "aac", "-b:a", f"{LOCAL_AUDIO_KBPS}k", "-ar", "48000"]
     else:
         cmd += ["-an"]
@@ -3919,10 +3951,52 @@ def scan_capture_audio(platform, video):
     return None, None
 
 
-def local_capture_setup(environ, platform, encoder, audio_scan=None):
+def dshow_mic_available(name, listing):
+    """True when `name` is an audio-only dshow device in the `-list_devices` listing.
+    Pure."""
+    name = (name or "").strip()
+    return bool(name) and any(n == name and "audio" in t and "video" not in t
+                              for n, t in parse_dshow_device_list(listing))
+
+
+def scan_mic(name):
+    """True when the commentary mic `name` is present for ffmpeg right now (Windows)."""
+    return dshow_mic_available(
+        name, _ffmpeg_listing(["-list_devices", "true", "-f", "dshow", "-i", "dummy"]))
+
+
+def mic_gain_db(environ):
+    """RACECAST_MIC_GAIN_DB as a float clamped to +-LOCAL_MIC_GAIN_MAX_DB; 0 when unset
+    or unreadable. The mic's level in the local mix, relative to the game audio."""
+    try:
+        v = float((environ.get("RACECAST_MIC_GAIN_DB") or "0").strip())
+    except ValueError:
+        return 0.0
+    return max(-LOCAL_MIC_GAIN_MAX_DB, min(LOCAL_MIC_GAIN_MAX_DB, v))
+
+
+def mixes_mic_env(environ, platform, solo):
+    """True when the local capture carries the commentary mic (#670): an endurance
+    machine on Windows with a capture card and RACECAST_MIC_NAME (the mic's dshow name,
+    written by device-scan). Other platforms use other clocks and are unmeasured, so
+    they keep the separate OBS mic input (#593). Pure."""
+    return (platform.startswith("win") and not solo
+            and bool((environ.get("RACECAST_CAPTURE") or "").strip())
+            and bool((environ.get("RACECAST_MIC_NAME") or "").strip()))
+
+
+def _join_notes(a, b):
+    return f"{a}; {b}" if a else b
+
+
+def local_capture_setup(environ, platform, encoder, audio_scan=None, mic_scan=None,
+                        clock=None, with_mic=True):
     """(argv, None, note) for the configured capture device, or (None, reason, None)
-    when it cannot be built. `note` is a non-fatal warning (no game audio found). The
-    device comes from the machine .env, never from the sheet."""
+    when it cannot be built. `note` is a non-fatal warning (no game audio found, mic
+    missing). The device comes from the machine .env, never from the sheet. The mic
+    is mixed in when mixes_mic_env() holds, the device is present and `with_mic`; a
+    mic problem never costs the picture. `clock` gives the launch origin, taken per
+    call, so every spawn gets a fresh one."""
     video = (environ.get("RACECAST_CAPTURE") or "").strip()
     audio = (environ.get("RACECAST_CAPTURE_AUDIO") or "").strip()
     if not video:
@@ -3935,8 +4009,22 @@ def local_capture_setup(environ, platform, encoder, audio_scan=None):
     elif not audio:
         audio, note = (audio_scan or scan_capture_audio)(platform, video)
         audio = audio or ""
-    args = local_capture_input_args(platform, video, audio)
-    return local_capture_cmd(args, encoder, has_audio=bool(audio)), None, note
+    mic = ""
+    if mixes_mic_env(environ, platform, solo=False):
+        name = environ["RACECAST_MIC_NAME"].strip()
+        if not with_mic:
+            note = _join_notes(note, f"local capture: running without the commentary mic "
+                                     f"'{name}' after a failed start with it")
+        elif (mic_scan or scan_mic)(name):
+            mic = name
+        else:
+            note = _join_notes(note, f"local capture: commentary mic '{name}' not found; "
+                                     "the stint runs without it (check the mic, then "
+                                     "`racecast device-scan --mic`)")
+    origin = (clock or time.monotonic)() if mic else None
+    args = local_capture_input_args(platform, video, audio, mic=mic, origin=origin)
+    return (local_capture_cmd(args, encoder, has_audio=bool(audio), has_mic=bool(mic),
+                              mic_gain_db=mic_gain_db(environ)), None, note)
 
 
 _LOCAL_ENCODER = None
@@ -7232,8 +7320,11 @@ class Feed:
                 if self.ring is None:
                     local_err = LOCAL_NEEDS_FANOUT
                 else:
+                    # #670: after a fast failure with the mic, try once without it,
+                    # so a broken mic can never cost the picture.
                     local_cmd, local_err, local_note = local_capture_setup(
-                        os.environ, sys.platform, local_encoder())
+                        os.environ, sys.platform, local_encoder(),
+                        with_mic=self.dead_serves % 2 == 0)
                 if local_err:
                     # A configuration problem, not a flaky source: idle with the reason
                     # until the operator reloads/moves the feed, like dead-serve idle.
@@ -8699,7 +8790,13 @@ class Relay:
         """True when this relay opens and closes the commentary mic (#593): an
         endurance machine with a capture card. Solo sets RACECAST_CAPTURE as well, but
         there the mic ships hot as the main audio and has no feed pair to follow."""
-        return bool((os.environ.get("RACECAST_CAPTURE") or "").strip())             and not getattr(self, "solo", False)
+        return (bool((os.environ.get("RACECAST_CAPTURE") or "").strip())
+                and not getattr(self, "solo", False))
+
+    def mixes_mic(self):
+        """True when the mic travels inside the local capture instead (#670); then the
+        OBS mic input only has to stay muted."""
+        return mixes_mic_env(os.environ, sys.platform, getattr(self, "solo", False))
 
     def _schedule_has_local(self):
         """True when the race or the qualifying schedule carries a local: stint.
@@ -8716,7 +8813,7 @@ class Relay:
         """Every MIC_CHECK_INTERVAL_S, check the commentary mic's OBS device and
         repoint a stale id by name (#668). Runs on the OBS probe thread; never
         raises."""
-        if not self.manages_mic() or _obs_ws is None or (
+        if not self.manages_mic() or self.mixes_mic() or _obs_ws is None or (
                 self._mic_check_ts is not None
                 and now - self._mic_check_ts < MIC_CHECK_INTERVAL_S):
             return
@@ -8740,6 +8837,11 @@ class Relay:
         # Solo sets RACECAST_CAPTURE as well, but there the mic ships hot as the main
         # audio and has no feed pair to follow: never manage it.
         mic = _OBS_WS_MODULE.COMMENTARY_MIC_INPUT if self.manages_mic() else None
+        if mic and self.mixes_mic():
+            # #670: the voice is inside the local feed; the OBS input would double it,
+            # ~3 s early, so it only ever gets muted.
+            audio, _ = _OBS_WS_MODULE.feed_audio_plan(set(), mic=None)
+            return audio, [mic]
         try:
             local = {f for f, feed in self.feeds.items()
                      if is_local_source(feed.current_channel()[0])}

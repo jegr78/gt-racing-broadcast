@@ -349,11 +349,34 @@ session next to the capture and broadcast encodes.
 
 ### The commentary microphone
 
-The producer's microphone is **not** part of the capture. It is the OBS input
+**On Windows the mic is part of the capture.** The picture of a local stint reaches OBS
+a few seconds late, through the relay. A mic going straight into OBS would put the
+producer's voice those seconds *ahead* of the picture it describes. So on Windows, with
+`RACECAST_CAPTURE` and `RACECAST_MIC_NAME` set, the relay's `ffmpeg` records the mic
+together with the card and mixes it into the local feed's audio: voice, game sound and
+picture travel one path and stay in sync (measured within a few milliseconds).
+
+- The mic is audible exactly when the local feed is audible: on air in `Stint`, and in
+  `Splitscreen` while the local stint is the audible side. Nothing switches it
+  separately, and the OBS input `Commentary Mic Device` stays muted on this machine
+  (unmuting it would double the voice, early).
+- The OBS fader and mute of the local feed move game sound and voice together. The mic's
+  level relative to the game is `RACECAST_MIC_GAIN_DB` in `.env` (dB, default `0`, range
+  -20 to +20), read at the next start of the local stint.
+- `RACECAST_MIC_NAME` is the device name `racecast device-scan --mic` writes; it is also
+  the name `ffmpeg` opens.
+- A missing mic never costs the picture: if the device is not found, or a start with it
+  fails, the stint runs without the mic and says so in `feed_A.log`/`feed_B.log` and on
+  the Director Panel's feed line.
+
+**On macOS and Linux** (not yet measured there) the mic stays a separate OBS input, as
+described below, with the voice ahead of the picture by the relay's delay.
+
+The producer's microphone is then **not** part of the capture. It is the OBS input
 `Commentary Mic Device` in the `Stint` and `Splitscreen` scenes, set from `RACECAST_MIC`
 when you run `racecast setup` and re-import the collection in OBS. It ships muted.
 
-On a machine with `RACECAST_CAPTURE` set, the relay opens the mic while the local stint
+On such a machine with `RACECAST_CAPTURE` set, the relay opens the mic while the local stint
 is on air and mutes it on every handover to a remote stint. `SPLIT` follows the on-air
 feed: the mic stays open while the local stint is the audible one and is muted when the
 remote feed is. `STINT A` / `STINT B`
@@ -368,7 +391,8 @@ A collection imported before this feature has no mic input. The relay then logs 
 WARNING (run `racecast setup` and re-import) and the local stint goes out without the
 producer's commentary.
 
-**When the mic's device id changes.** OBS and `RACECAST_MIC` identify the microphone by
+**When the mic's device id changes** (separate OBS mic input only). OBS and
+`RACECAST_MIC` identify the microphone by
 the id the operating system gives it. On Windows a USB microphone without a serial
 number gets a new id after a port change or a driver reset, although the hardware is the
 same. `racecast device-scan --mic` and the Control Center therefore also store the

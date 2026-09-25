@@ -1274,7 +1274,7 @@ def t_mic_check_is_throttled_and_keeps_the_last_real_answer():
         def ensure_mic_device(self, name, want):
             calls.append((name, want)); return answers[len(calls) - 1]
     stub = types.SimpleNamespace(_obs=Obs(), mic_device=None, _mic_check_ts=None,
-                                 manages_mic=lambda: True)
+                                 manages_mic=lambda: True, mixes_mic=lambda: False)
     saved = m._obs_ws
     m._obs_ws = types.SimpleNamespace(COMMENTARY_MIC_INPUT="Commentary Mic Device")
     try:
@@ -1286,6 +1286,9 @@ def t_mic_check_is_throttled_and_keeps_the_last_real_answer():
         stub.manages_mic = lambda: False
         m.Relay._maybe_check_mic(stub, 1e6)
         assert len(calls) == 2                                               # solo / no card
+        stub.manages_mic, stub.mixes_mic = (lambda: True), (lambda: True)
+        m.Relay._maybe_check_mic(stub, 2e6)
+        assert len(calls) == 2              # #670: the mic is in the feed, not in OBS
     finally:
         m._obs_ws = saved
 
@@ -1306,6 +1309,36 @@ def t_mic_recovery_is_logged_once():
     assert lvl == logging.INFO and "found again" in msg and "Mikrofon (K66)" in msg, msg
     ok = {"state": "ok", "device": "K66", "note": ""}
     assert m.mic_check_log(ok, dict(ok)) is None
+
+
+
+def t_a_mixing_relay_keeps_the_obs_mic_muted():
+    # #670: the mic travels inside the local feed; the OBS input would double the
+    # voice ~3 s early, so it is muted on every plan and never unmuted.
+    import types
+    saved = m._OBS_WS_MODULE
+    try:
+        m._OBS_WS_MODULE = m._obs_ws or saved
+        feed = types.SimpleNamespace(current_channel=lambda: ("local:", 1))
+        remote = types.SimpleNamespace(current_channel=lambda: ("https://www.twitch.tv/x", 2))
+        stub = types.SimpleNamespace(feeds={"A": feed, "B": remote},
+                                     manages_mic=lambda: True, mixes_mic=lambda: True)
+        audio, extra = m.Relay.obs_audio_plan(stub)
+        mic = m._OBS_WS_MODULE.COMMENTARY_MIC_INPUT
+        assert all(mic not in ins for ins in audio.values()) and mic in extra, (audio, extra)
+        stub.mixes_mic = lambda: False                     # #593 behaviour unchanged
+        audio, extra = m.Relay.obs_audio_plan(stub)
+        assert mic in audio["A"] and mic in extra
+    finally:
+        m._OBS_WS_MODULE = saved
+
+
+def t_mixes_mic_needs_windows_a_card_and_a_mic_name():
+    env = {"RACECAST_CAPTURE": "card", "RACECAST_MIC_NAME": "Mikrofon (K66)"}
+    assert m.mixes_mic_env(env, "win32", solo=False)
+    assert not m.mixes_mic_env(env, "linux", solo=False)
+    assert not m.mixes_mic_env(env, "win32", solo=True)
+    assert not m.mixes_mic_env({"RACECAST_CAPTURE": "card"}, "win32", solo=False)
 
 
 if __name__ == "__main__":
