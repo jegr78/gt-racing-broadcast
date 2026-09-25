@@ -1,5 +1,50 @@
 # Changelog
 
+## [1.11.0](https://github.com/jegr78/gt-racing-broadcast/compare/v1.10.0...v1.11.0) (2026-09-25)
+
+
+### Features
+
+* **obs:** add racecast obs benchmark for FULL vs ROBUST on the host ([#613](https://github.com/jegr78/gt-racing-broadcast/issues/613)) ([f5b758c](https://github.com/jegr78/gt-racing-broadcast/commit/f5b758caab0278cf431b36b9c968eb7854772cdc))
+* **obs:** open the commentary mic while a local stint is on air ([#604](https://github.com/jegr78/gt-racing-broadcast/issues/604)) ([9a46bb8](https://github.com/jegr78/gt-racing-broadcast/commit/9a46bb82830048b94365e2306c18f7d5e1f92ec1))
+* **obs:** report the backlog growth rate the host caused in the benchmark ([#637](https://github.com/jegr78/gt-racing-broadcast/issues/637)) ([3de7ae0](https://github.com/jegr78/gt-racing-broadcast/commit/3de7ae05f9b97f67880b97f8716df31ead386982))
+* **obs:** resolve STINT A/B on the relay for the panel and Companion alike ([#605](https://github.com/jegr78/gt-racing-broadcast/issues/605)) ([15c0562](https://github.com/jegr78/gt-racing-broadcast/commit/15c0562d0eda0a02ed820fb0bb93c22ad8fa0930))
+* **obs:** resolve the Splitscreen's visibility and audio on the relay ([#601](https://github.com/jegr78/gt-racing-broadcast/issues/601)) ([e1e7d48](https://github.com/jegr78/gt-racing-broadcast/commit/e1e7d4810cf1b3632e9c41118c36c2551556b5ff))
+* **panel:** show the feed reset as the backlog fix, with its cost ([#612](https://github.com/jegr78/gt-racing-broadcast/issues/612)) ([00a2559](https://github.com/jegr78/gt-racing-broadcast/commit/00a25590f72b2172826ebeb53418ecb0092a36c1))
+* **relay:** cut the local feed's latency to OBS ([#674](https://github.com/jegr78/gt-racing-broadcast/issues/674)) ([a016fed](https://github.com/jegr78/gt-racing-broadcast/commit/a016fedd633ad400e795941c007fc10ec4d6aa8d)), closes [#673](https://github.com/jegr78/gt-racing-broadcast/issues/673)
+* **relay:** measure how far OBS is behind the fan-out live edge ([#610](https://github.com/jegr78/gt-racing-broadcast/issues/610)) ([6d3ff55](https://github.com/jegr78/gt-racing-broadcast/commit/6d3ff55d05026f3865e2abe92071d5fd12e8ddd1))
+* **relay:** mix the commentary mic on macOS and Linux too, with a capture-clock check ([#676](https://github.com/jegr78/gt-racing-broadcast/issues/676)) ([1ae5f00](https://github.com/jegr78/gt-racing-broadcast/commit/1ae5f006e7885d819b5cf712ce34012b26151123)), closes [#675](https://github.com/jegr78/gt-racing-broadcast/issues/675)
+* **relay:** publish each feed's inbound gap so the benchmark can record it ([#632](https://github.com/jegr78/gt-racing-broadcast/issues/632)) ([289dfb2](https://github.com/jegr78/gt-racing-broadcast/commit/289dfb2092d1c3df9f53ad99f6773b0bac60273c))
+* **relay:** serve a local capture device as a feed ([#602](https://github.com/jegr78/gt-racing-broadcast/issues/602)) ([5c72e00](https://github.com/jegr78/gt-racing-broadcast/commit/5c72e00d12824ba43c8e727c34f97e284a097e87))
+* **relay:** shed a stale backlog automatically, and report the A/V repairs OBS makes ([#635](https://github.com/jegr78/gt-racing-broadcast/issues/635)) ([ca92f19](https://github.com/jegr78/gt-racing-broadcast/commit/ca92f19a424e2b6a59c91fbd8325ed21eb67f7d6))
+
+
+### Bug Fixes
+
+* **ci:** un-break preview.yml and guard the YAML class that broke it ([#658](https://github.com/jegr78/gt-racing-broadcast/issues/658)) ([cfa4c11](https://github.com/jegr78/gt-racing-broadcast/commit/cfa4c113d59c22dc9a495e8307beaf2f919979ff)), closes [#638](https://github.com/jegr78/gt-racing-broadcast/issues/638)
+* **cli:** open the browser without the frozen library path ([#579](https://github.com/jegr78/gt-racing-broadcast/issues/579)) ([f9aa243](https://github.com/jegr78/gt-racing-broadcast/commit/f9aa2434334e364290f66c5750eca80cd374ee80))
+* **companion:** resolve the SPLIT button's audio from the on-air feed ([#599](https://github.com/jegr78/gt-racing-broadcast/issues/599)) ([171ae9c](https://github.com/jegr78/gt-racing-broadcast/commit/171ae9c760805e01aa42b2fb557b84563b87873f))
+* **cookies:** keep only the platform's domains in the exported cookie jar ([#626](https://github.com/jegr78/gt-racing-broadcast/issues/626)) ([8720a92](https://github.com/jegr78/gt-racing-broadcast/commit/8720a9221494a256c69b98f7bf06b9d466542cd3))
+* **obs:** catch a forward cursor jump and name a backlog the source caused ([#634](https://github.com/jegr78/gt-racing-broadcast/issues/634)) ([bf451a7](https://github.com/jegr78/gt-racing-broadcast/commit/bf451a70442ce0167eb03b0957d88588076cb056))
+* **obs:** judge the benchmark by the media cursor and rejoin OBS after each restart ([#618](https://github.com/jegr78/gt-racing-broadcast/issues/618)) ([fe06176](https://github.com/jegr78/gt-racing-broadcast/commit/fe06176daaab5689a09176a5e81873d9dfcc6d1a))
+* **obs:** narrow the benchmark's final-rejoin catch to errors and Ctrl-C ([#620](https://github.com/jegr78/gt-racing-broadcast/issues/620)) ([b0c2987](https://github.com/jegr78/gt-racing-broadcast/commit/b0c298762ecb42aa677f6c5df607f91309dc8f1c))
+* **relay:** classify an ended YouTube broadcast by its live status ([#623](https://github.com/jegr78/gt-racing-broadcast/issues/623)) ([350f887](https://github.com/jegr78/gt-racing-broadcast/commit/350f887ffcafab1d2ff04c17a523675104e41019))
+* **relay:** default a local feed's game audio to the capture card's own device ([#603](https://github.com/jegr78/gt-racing-broadcast/issues/603)) ([fe264e5](https://github.com/jegr78/gt-racing-broadcast/commit/fe264e50fb2b73fdda0fe080f8d401b46efa5b08))
+* **relay:** derive streamlink's early stop from the fan-out stall watchdog ([#636](https://github.com/jegr78/gt-racing-broadcast/issues/636)) ([ba5d9ce](https://github.com/jegr78/gt-racing-broadcast/commit/ba5d9ced1e5405572ab6473799ff6fb744ca4552))
+* **relay:** make NVENC local capture keyframes IDR so mid-stream consumers decode ([#667](https://github.com/jegr78/gt-racing-broadcast/issues/667)) ([d235907](https://github.com/jegr78/gt-racing-broadcast/commit/d235907e786e3052e637ab897d17d03e5415f06a))
+* **relay:** measure the OBS rejoin's prefetch wait per serve instead of guessing it ([#630](https://github.com/jegr78/gt-racing-broadcast/issues/630)) ([ec73004](https://github.com/jegr78/gt-racing-broadcast/commit/ec73004689ecc7efb9ed719846b6e1204fc23a3f))
+* **relay:** mix the commentary mic into the local capture so voice and picture stay in sync ([#672](https://github.com/jegr78/gt-racing-broadcast/issues/672)) ([2825e3d](https://github.com/jegr78/gt-racing-broadcast/commit/2825e3d25fd854f0273ffbc395a328c4d0a90c28))
+* **relay:** name RESET, not ROBUST, as the backlog's next step, and add the behind-live runbook ([#627](https://github.com/jegr78/gt-racing-broadcast/issues/627)) ([76dcb3e](https://github.com/jegr78/gt-racing-broadcast/commit/76dcb3e280a7fb5d475dd8d2798017a18675d2ca))
+* **relay:** re-find the commentary mic by name when its device id changes ([#669](https://github.com/jegr78/gt-racing-broadcast/issues/669)) ([52ca3aa](https://github.com/jegr78/gt-racing-broadcast/commit/52ca3aaa0075df36b194b1f3e40f22ed1e7ec5df))
+* **relay:** rejoin OBS after a fan-out restart, once the HLS prefetch has landed ([#629](https://github.com/jegr78/gt-racing-broadcast/issues/629)) ([824c809](https://github.com/jegr78/gt-racing-broadcast/commit/824c8096ace670b41881881e0e5ff9aface3321c))
+* **relay:** send the fMP4 init segment to every mid-stream feed consumer ([#607](https://github.com/jegr78/gt-racing-broadcast/issues/607)) ([3146724](https://github.com/jegr78/gt-racing-broadcast/commit/314672471a27bdaa361fc96e892d24ceb3df268d))
+* **relay:** stop repeating OBS rebuilds that do not help ([#609](https://github.com/jegr78/gt-racing-broadcast/issues/609)) ([86ff302](https://github.com/jegr78/gt-racing-broadcast/commit/86ff3020c7633a3e5d4c903eca795a2a995e1c82))
+* **relay:** warn when the YouTube cookie jar holds no login ([#625](https://github.com/jegr78/gt-racing-broadcast/issues/625)) ([d78abb0](https://github.com/jegr78/gt-racing-broadcast/commit/d78abb0f5cc9c1f05b9354c50dfaeef158d3d679))
+* **report:** windowed render metric and a backlog-led finding ([#611](https://github.com/jegr78/gt-racing-broadcast/issues/611)) ([4694210](https://github.com/jegr78/gt-racing-broadcast/commit/4694210ca8a4a4154754eb7ef87c05ee8046c99c))
+* restore the CLI and Control Center cleanup [#646](https://github.com/jegr78/gt-racing-broadcast/issues/646) reverted ([#654](https://github.com/jegr78/gt-racing-broadcast/issues/654)) ([ceff820](https://github.com/jegr78/gt-racing-broadcast/commit/ceff820a6b4b570699603222ef7272b825e3c162))
+* **setup:** share the capture card source for the tyres/fuel crop ([#600](https://github.com/jegr78/gt-racing-broadcast/issues/600)) ([4a98921](https://github.com/jegr78/gt-racing-broadcast/commit/4a98921a2e6fc68c6f530c52c958a26839c8c0f8))
+* **update:** stage update, profile import and restore under the install ACL ([#663](https://github.com/jegr78/gt-racing-broadcast/issues/663)) ([cfa520e](https://github.com/jegr78/gt-racing-broadcast/commit/cfa520ed08c8b80ef19490f63d7fe60bdf042f76))
+
 ## [1.10.0](https://github.com/jegr78/gt-racing-broadcast/compare/v1.9.0...v1.10.0) (2026-08-28)
 
 
