@@ -358,12 +358,19 @@ session next to the capture and broadcast encodes.
 
 ### The commentary microphone
 
-**On Windows the mic is part of the capture.** The picture of a local stint reaches OBS
-a few seconds late, through the relay. A mic going straight into OBS would put the
-producer's voice those seconds *ahead* of the picture it describes. So on Windows, with
-`RACECAST_CAPTURE` and `RACECAST_MIC_NAME` set, the relay's `ffmpeg` records the mic
-together with the card and mixes it into the local feed's audio: voice, game sound and
-picture travel one path and stay in sync (measured within a few milliseconds).
+**The mic is part of the capture.** The picture of a local stint reaches OBS a couple of
+seconds late, through the relay. A mic going straight into OBS would put the producer's
+voice those seconds *ahead* of the picture it describes. So with `RACECAST_CAPTURE` and a
+mic set, the relay's `ffmpeg` records the mic together with the card and mixes it into the
+local feed's audio: voice, game sound and picture travel one path and stay in sync
+(measured within a few milliseconds on Windows).
+
+The inputs must share one clock for that. Before the first local stint of a relay run the
+relay opens card and mic for about a second and checks which clock their timestamps are
+on (on Windows the system clock since boot; Linux and PulseAudio stamp wall-clock time).
+If they do not share one, the stint runs **without** the mic and says so, rather than
+with a misaligned voice. That first start takes about 3 seconds longer; the result is kept
+for the run.
 
 - The mic is audible exactly when the local feed is audible: on air in `Stint`, and in
   `Splitscreen` while the local stint is the audible side. Nothing switches it
@@ -372,16 +379,16 @@ picture travel one path and stay in sync (measured within a few milliseconds).
 - The OBS fader and mute of the local feed move game sound and voice together. The mic's
   level relative to the game is `RACECAST_MIC_GAIN_DB` in `.env` (dB, default `0`, range
   -20 to +20), read at the next start of the local stint.
-- `RACECAST_MIC_NAME` is the device name `racecast device-scan --mic` writes; it is also
-  the name `ffmpeg` opens.
+- The mic `ffmpeg` opens: on Windows and macOS `RACECAST_MIC_NAME`, the device name
+  `racecast device-scan --mic` writes; on Linux `RACECAST_MIC`, the PulseAudio source.
+- On Linux the card's picture and its game sound are separate inputs too; the shared
+  clock keeps those aligned as well.
 - A missing mic never costs the picture: if the device is not found, or a start with it
   fails, the stint runs without the mic and says so in `feed_A.log`/`feed_B.log` and on
   the Director Panel's feed line.
 
-**On macOS and Linux** (not yet measured there) the mic stays a separate OBS input, as
-described below, with the voice ahead of the picture by the relay's delay.
-
-The producer's microphone is then **not** part of the capture. It is the OBS input
+**Without a mic for the capture** (no mic configured, or a solo profile) the
+microphone is **not** part of the capture. It is the OBS input
 `Commentary Mic Device` in the `Stint` and `Splitscreen` scenes, set from `RACECAST_MIC`
 when you run `racecast setup` and re-import the collection in OBS. It ships muted.
 

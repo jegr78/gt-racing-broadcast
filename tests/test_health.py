@@ -1336,9 +1336,13 @@ def t_a_mixing_relay_keeps_the_obs_mic_muted():
 def t_mixes_mic_needs_windows_a_card_and_a_mic_name():
     env = {"RACECAST_CAPTURE": "card", "RACECAST_MIC_NAME": "Mikrofon (K66)"}
     assert m.mixes_mic_env(env, "win32", solo=False)
-    assert not m.mixes_mic_env(env, "linux", solo=False)
+    assert m.mixes_mic_env(env, "darwin", solo=False)
+    assert not m.mixes_mic_env(env, "linux", solo=False)       # Linux opens RACECAST_MIC
+    assert m.mixes_mic_env({"RACECAST_CAPTURE": "card", "RACECAST_MIC": "alsa_input.mic"},
+                           "linux", solo=False)                # (#675: every platform)
     assert not m.mixes_mic_env(env, "win32", solo=True)
     assert not m.mixes_mic_env({"RACECAST_CAPTURE": "card"}, "win32", solo=False)
+    assert not m.mixes_mic_env(env, "sunos5", solo=False)
 
 
 

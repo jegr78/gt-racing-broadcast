@@ -139,10 +139,11 @@ RACECAST_PROFILE=
   with `RACECAST_MIC` by `racecast device-scan --mic` and the Control Center. When the
   operating system gives the same microphone a new id (common for USB mics without a
   serial number on Windows), the relay uses the name to find it again
-  ([details](Relay-Mode#the-commentary-microphone)). On Windows it is also the device the
-  relay mixes into a local stint's capture, so voice and picture stay in sync.
-- **`RACECAST_MIC_GAIN_DB`** *(optional, Windows)*: the mic's level in that mix relative
-  to the game sound, in dB (default `0`, range -20 to +20).
+  ([details](Relay-Mode#the-commentary-microphone)). On Windows and macOS it is also the
+  device the relay mixes into a local stint's capture (Linux uses the PulseAudio source
+  in `RACECAST_MIC`), so voice and picture stay in sync.
+- **`RACECAST_MIC_GAIN_DB`** *(optional)*: the mic's level in that mix relative to the
+  game sound, in dB (default `0`, range -20 to +20).
 - **`RACECAST_UI_PASSWORD`** *(reserved)*: for the future Control-Center-over-Tailscale
   feature; not read by any current version, leave commented out.
 
