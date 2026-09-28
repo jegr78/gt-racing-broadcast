@@ -169,8 +169,8 @@ freeport 8088`).
   `runtime/<profile>/GT_Racing_Endurance.import.json` (absolute paths: do not move it after
   import). After editing scenes in OBS, re-export and fold back with
   `tools/tokenize-obs.py exported.json src/obs/GT_Racing_Endurance.json`. OBS browser
-  sources cache aggressively: `relay start`/`event start` refresh them through a hash
-  gate, `racecast obs refresh` forces it. Anything that must survive a reload lives
+  sources cache aggressively: `relay start`/`event start` always refresh them,
+  `racecast obs refresh` does it by hand. Anything that must survive a reload lives
   server-side, never in page JS.
 - **Broadcast graphics, clips and brand overrides are pure-runtime**, never committed:
   downloaded from the Sheet into `runtime/<profile>/`. `src/assets/` holds only the HUD

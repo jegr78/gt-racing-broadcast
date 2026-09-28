@@ -41,7 +41,7 @@
   racecast update [--check] [--yes] [--tag TAG]   # self-update the binary (--tag installs an exact release)
   racecast --version
 """
-import glob, hashlib, io, json, os, re, shutil, sys, tempfile, time, webbrowser, zipfile
+import glob, io, json, os, re, shutil, sys, tempfile, time, webbrowser, zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 # Adapters (added in later tasks) import sibling modules from scripts/ at module
@@ -884,8 +884,6 @@ RELAY_PORT = 8088
 STANDBY_SCENE = "Standby"   # canonical scene name in src/obs/GT_Racing_Endurance.json
 
 # The relay-served pages OBS renders as browser sources (panel is tablet-only).
-# The override.css is hashed too, so a per-profile CSS edit advances the
-# staleness gate and triggers an OBS browser-source refresh.
 OBS_PAGE_PATHS = ("/hud", "/hud/override.css",
                   "/splitscreen", "/splitscreen/override.css",
                   "/intermission", "/intermission/override.css")
@@ -895,47 +893,15 @@ def _fetch_relay_page(path):
     return http_util.get_bytes(f"http://127.0.0.1:{RELAY_PORT}{path}", timeout=3)
 
 
-def served_pages_hash(fetch=None, paths=OBS_PAGE_PATHS):
-    """SHA-256 over the page bytes the relay actually serves to OBS. Hashing
-    what OBS would load (not the files on disk) means a still-running OLD
-    relay can never advance the staleness gate past pages OBS has not seen.
-    None when any page cannot be fetched (relay down, --no-hud)."""
+def relay_serves_pages(fetch=None, paths=OBS_PAGE_PATHS):
+    """True when the relay answers every OBS page (False: relay down, --no-hud)."""
     fetch = fetch or _fetch_relay_page
-    h = hashlib.sha256()
     for path in paths:
         try:
-            h.update(fetch(path))
+            fetch(path)
         except Exception:
-            return None
-    return h.hexdigest()
-
-
-def refresh_decision(served, stored, force=False):
-    """Should the OBS page-refresh hook act? Pure for tests: 'skip-no-pages'
-    (relay down / pages disabled), 'skip-unchanged' (no on-air flicker), or
-    'refresh'."""
-    if served is None:
-        return "skip-no-pages"
-    if not force and served == stored:
-        return "skip-unchanged"
-    return "refresh"
-
-
-def read_pages_hash(path):
-    """Hash of the pages OBS last confirmed loading, or None (never refreshed)."""
-    try:
-        with open(path, encoding="utf-8") as fh:
-            return fh.read().strip() or None
-    except OSError:
-        return None
-
-
-def write_pages_hash(path, value):
-    parent = os.path.dirname(path)
-    if parent:                       # a bare filename needs no directory
-        os.makedirs(parent, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as fh:
-        fh.write(value + "\n")
+            return False
+    return True
 
 
 def wait_for(probe, wait, clock=time.monotonic, sleep=time.sleep):
@@ -2139,7 +2105,7 @@ def backup_cmd(rest):
     except ValueError as e:
         sys.exit(f"racecast: restore failed. {e} (live look unchanged)")
     print(f"Restored look '{args[0]}'.")
-    _refresh_obs_pages(force=True)   # best-effort: reload the overlay browser sources
+    _refresh_obs_pages()   # best-effort: reload the overlay browser sources
     print("Note: OBS graphics/media sources reload on the next scene activation "
           "(or right-click → Refresh).")
     return None
@@ -2465,10 +2431,6 @@ def relay_start(rest):
               f"re-run 'racecast relay start' to reconcile.")
     return None
 
-def _obs_pages_hash_path():
-    return os.path.join(_runtime_dir(), "obs-pages.hash")
-
-
 def _sync_pov_transform(set_transform=None):
     """Best-effort live sibling of the setup-time POV/webcam bake: push every
     mapped overlay slot's box position/size onto its OBS scene item (see
@@ -2515,32 +2477,25 @@ def _sync_pov_transform(set_transform=None):
         return
 
 
-def _refresh_obs_pages(force=False, wait=0):
-    """Refresh the relay-served OBS browser sources (HUD, which includes the race timer) when
-    the pages changed since the last successful refresh. Replaces the manual
-    right-click → 'Refresh cache of current page' (OBS's CEF caches the page
-    JS until then; a producer updating the package must never go on air with
-    a stale page). Best effort like _release_obs_feeds: one notice, never an
-    exception. wait: seconds to allow a just-spawned relay to open its control
-    port: never refresh against a closed port (the source would load a CEF
-    error page that does not self-recover)."""
+def _refresh_obs_pages(wait=0):
+    """Reload the relay-served OBS browser sources, the scriptable right-click →
+    'Refresh cache of current page'. Always reloads: OBS's CEF keeps stale page JS,
+    and a source that loaded while the relay was down keeps an error page that never
+    retries. Best effort like _release_obs_feeds: one notice, never an exception.
+    wait: seconds to allow a just-spawned relay to open its control port, because a
+    refresh against a closed port would itself load that error page."""
     if not wait_for(_relay_http_ok, wait):
         print(f"obs: page refresh skipped. Relay not responding on port {RELAY_PORT}.")
         return
-    served = served_pages_hash()
-    decision = refresh_decision(served, read_pages_hash(_obs_pages_hash_path()), force)
-    if decision == "skip-no-pages":
+    if not relay_serves_pages():
         print("obs: page refresh skipped. Could not read /hud from the relay.")
         return
-    if decision == "skip-unchanged":
-        return                              # unchanged pages -> no on-air flicker
     try:
         import obs_ws
         names, note = obs_ws.refresh_browser_inputs(needle=f"127.0.0.1:{RELAY_PORT}")
         if note:
             print(f"obs: page refresh skipped. {note}")
-            return                          # hash kept -> retried on the next start
-        write_pages_hash(_obs_pages_hash_path(), served)   # only confirmed refreshes advance the gate
+            return
     except Exception as exc:                # a start must never fail on this
         print(f"obs: page refresh skipped ({exc}).")
         return
@@ -2611,14 +2566,14 @@ def app_quit_cmd(rest):
 
 
 def obs_refresh_cmd(_rest):
-    """Force-refresh every relay-served browser source. The scriptable
-    right-click → Refresh (no staleness gate)."""
+    """Refresh every relay-served browser source. The scriptable
+    right-click → Refresh."""
     # Upfront probe for a real exit code + directive message; _refresh_obs_pages
     # re-probes internally (best-effort, exit 0), an accepted localhost double GET.
     if not _relay_http_ok():
         sys.exit(f"obs: relay not responding on port {RELAY_PORT}. Start it first "
                  "(refreshing against a dead relay loads an error page in OBS).")
-    _refresh_obs_pages(force=True)
+    _refresh_obs_pages()
 
 
 def obs_collection_cmd(rest):
@@ -4104,15 +4059,14 @@ def event_start(rest, _autojoin=True, _new_session=True):
             msg = exc.code if isinstance(exc.code, str) else "failed"
             print("funnel: skipped. " + msg.splitlines()[0])
     # OBS may not have been running when relay_start's refresh hook fired, since
-    # event start launches OBS after the relay. Forced rather than hash-gated: a
-    # re-run or takeover with unchanged page bytes must still clear OBS's cached
-    # browser sources. This also guarantees _sync_pov_transform runs.
+    # event start launches OBS after the relay. This also guarantees
+    # _sync_pov_transform runs.
     # OBS accepts the WebSocket several seconds before it can answer a request,
     # replying 207 "not ready" meanwhile, and the three steps below skip silently
     # inside that window. (#572)
     _wait_for_obs_ready()
     _check_scene_collection()
-    _refresh_obs_pages(force=True)
+    _refresh_obs_pages()
     _switch_to_standby()          # park OBS on Standby, ready to Start Streaming
     print()
     for line in ev.director_urls(_tailscale_ip(), _companion_tablet_port(),
@@ -6112,7 +6066,7 @@ def backup_restore_data(slug):
         zip_path = os.path.join(src["backups"], f"{ba.sanitize_label(slug)}.zip")
         ba.restore_backup(zip_path, src)
         try:
-            _refresh_obs_pages(force=True)
+            _refresh_obs_pages()
         except Exception:
             pass   # OBS refresh is best-effort; the restore already succeeded
         return {"ok": True}

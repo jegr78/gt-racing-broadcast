@@ -17,10 +17,10 @@ keeps the rules. The per-league overlay override and the visual builder are in
   a two-feed split. **OBS browser sources cache JS aggressively:** after
   `hud.html`/`splitscreen.html` (or a per-profile overlay CSS) change, OBS keeps the old
   page until refreshed. `racecast relay start` and `racecast event start` do that
-  automatically: a hash gate over the *served* page bytes (`runtime/obs-pages.hash`,
-  covering `OBS_PAGE_PATHS` = `/hud`, `/hud/override.css`, `/splitscreen`,
-  `/splitscreen/override.css`) triggers obs-websocket `refreshnocache`
-  on every browser source pointing at the relay; `racecast obs refresh` forces it. The
+  automatically: once the relay answers every page in `OBS_PAGE_PATHS`, obs-websocket
+  `refreshnocache` reloads every browser source pointing at the relay, unconditionally,
+  because a source that loaded while the relay was down keeps CEF's error page;
+  `racecast obs refresh` does the same by hand. The
   manual right-click → Refresh remains the fallback when obs-websocket is unreachable.
   Anything that must survive a reload therefore lives server-side (`runtime/timer.json`,
   the Sheet), never in page JS. When you edit scenes inside OBS, re-export and fold it

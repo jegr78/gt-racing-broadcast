@@ -953,6 +953,19 @@ def t_relay_start_retries_when_first_spawn_not_up():
         restore()
 
 
+def t_relay_start_refreshes_the_obs_pages():
+    import io, contextlib
+    restore, _calls = _relay_spawn_stubs([True])
+    refreshes = []
+    m._refresh_obs_pages = lambda *a, **k: refreshes.append(k)
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            m.relay_start([])
+        assert refreshes == [{"wait": 0}], f"a relay start must refresh OBS once, got {refreshes}"
+    finally:
+        restore()
+
+
 def t_relay_start_reports_failure_when_relay_never_comes_up():
     # If the relay never binds the control port, relay_start must report an HONEST
     # failure, never "relay started" for a dead child, which would make event-start
@@ -1074,51 +1087,47 @@ def t_env_base_per_mode():
     assert m._env_base(False, "", "/pkg") == "/pkg"
 
 
-def t_refresh_decision():
-    assert m.refresh_decision(None, None) == "skip-no-pages"
-    assert m.refresh_decision(None, "abc") == "skip-no-pages"
-    assert m.refresh_decision("abc", "abc") == "skip-unchanged"
-    assert m.refresh_decision("abc", "old") == "refresh"
-    assert m.refresh_decision("abc", None) == "refresh"          # first run
-    assert m.refresh_decision("abc", "abc", force=True) == "refresh"
+def t_relay_serves_pages_true_when_every_page_answers():
+    fetched = []
+    served = m.relay_serves_pages(fetch=lambda p: fetched.append(p) or b"x")
+    assert served is True
+    assert tuple(fetched) == m.OBS_PAGE_PATHS, "every OBS page must be probed, in order"
 
 
-def t_served_pages_hash_concatenates_in_order():
-    import hashlib
-    pages = {p: p.encode() for p in m.OBS_PAGE_PATHS}
-    expected = hashlib.sha256(b"".join(pages[p] for p in m.OBS_PAGE_PATHS)).hexdigest()
-    assert m.served_pages_hash(fetch=lambda p: pages[p]) == expected
+def t_relay_serves_pages_false_when_any_fetch_fails():
+    for broken in ("/hud", "/hud/override.css", "/intermission/override.css"):
+        def fetch(path, broken=broken):
+            if path == broken:
+                raise OSError("connection refused")
+            return b"x"
+        assert m.relay_serves_pages(fetch=fetch) is False, f"{broken} down must report False"
 
 
-def t_served_pages_hash_none_when_any_fetch_fails():
-    def fetch(path):
-        if path == "/hud":
-            raise OSError("connection refused")
-        return b"HUD"
-    assert m.served_pages_hash(fetch=fetch) is None
-
-
-def t_served_pages_hash_none_when_override_css_fetch_fails():
-    def fetch(path):
-        if path == "/hud/override.css":
-            raise OSError("connection refused")
-        return b"x"
-    assert m.served_pages_hash(fetch=fetch) is None
-
-
-def t_served_pages_hash_none_when_first_fetch_fails():
-    def fetch(path):
-        raise OSError("connection refused")
-    assert m.served_pages_hash(fetch=fetch) is None
-
-
-def t_pages_hash_roundtrip_and_missing():
-    import tempfile
-    with tempfile.TemporaryDirectory() as tmp:
-        path = os.path.join(tmp, "state", "obs-pages.hash")
-        assert m.read_pages_hash(path) is None                   # missing file
-        m.write_pages_hash(path, "abc123")                       # creates the dir
-        assert m.read_pages_hash(path) == "abc123"
+def t_refresh_obs_pages_reloads_even_when_pages_are_unchanged():
+    # A source that loaded while the relay was down keeps CEF's error page; identical
+    # page bytes must not skip the reload (#681).
+    import contextlib
+    reloads = []
+    fake_ws = type(sys)("obs_ws")
+    fake_ws.refresh_browser_inputs = lambda needle: (reloads.append(needle) or ["HUD Overlay"], "")
+    fake_ws.set_feed_close_when_inactive = lambda names, on: ""
+    saved = (m._relay_http_ok, m.relay_serves_pages, m._sync_pov_transform,
+             sys.modules.get("obs_ws"))
+    m._relay_http_ok = lambda: True
+    m.relay_serves_pages = lambda: True
+    m._sync_pov_transform = lambda: None
+    sys.modules["obs_ws"] = fake_ws
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            m._refresh_obs_pages()
+            m._refresh_obs_pages()
+    finally:
+        m._relay_http_ok, m.relay_serves_pages, m._sync_pov_transform = saved[:3]
+        if saved[3] is None:
+            sys.modules.pop("obs_ws", None)
+        else:
+            sys.modules["obs_ws"] = saved[3]
+    assert len(reloads) == 2, f"both starts must reload OBS, got {len(reloads)}"
 
 
 def t_wait_for_polls_until_deadline():
@@ -2060,7 +2069,7 @@ def t_obs_page_paths_include_overrides():
 
 
 def t_obs_page_paths_relay_mirror_in_sync():
-    # OBS_PAGE_PATHS lives in racecast.py (the obs-refresh hash gate reads it); the
+    # OBS_PAGE_PATHS lives in racecast.py (the obs-refresh relay-up probe reads it); the
     # relay keeps a mirror constant only for test discoverability. Pin the two equal
     # so a future overlay page added to one can never silently drift from the other.
     spec2 = importlib.util.spec_from_file_location(
