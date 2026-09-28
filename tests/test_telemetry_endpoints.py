@@ -154,6 +154,22 @@ def t_status_reports_telemetry_visibility():
         srv.shutdown()
 
 
+def t_telemetry_toggle_is_atomic_under_concurrency():
+    # The panel key and the Companion button can fire at once: an even number of
+    # toggles from many threads must land back on the starting state.
+    import threading
+    store = m.gt7_telemetry.TelemetryStore(None)
+    def worker():
+        for _ in range(250):
+            store.toggle()
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert store.visible() is True
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

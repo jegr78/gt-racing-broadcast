@@ -479,6 +479,12 @@ flag with `python3 tools/fetch-flags.py` (fetches only what is missing). Flags:
 `--no-hud` (disable), `--overlay-tab` / `--config-tab` (tab names), `--hud-poll`
 (refresh seconds, default 5). See [OBS Setup](OBS-Setup) for the source itself.
 
+**Telemetry block (solo POV).** `/telemetry/show`, `/telemetry/hide` and
+`/telemetry/toggle` show or hide the HUD's GT7 telemetry block (the webcam frame
+stays). The relay stores the choice in `runtime/<profile>/telemetry-view.json`, so it
+survives a relay restart; `/telemetry/data` and `/status` (`telemetry.visible`) report
+it. Outside a solo POV broadcast these routes answer 404, like `/telemetry/data`.
+
 ---
 
 ## Driver-POV PiP (optional)
@@ -495,12 +501,6 @@ once ready). **POV Toggle** (`/pov/toggle`) is a **relay action**: it flips the 
 `pov_shown` state, shows/hides the `Feed POV` PiP in OBS (best-effort), and the HUD POV
 box (frame + name) follows it. The PiP lives only in the Stint scene, so switching to
 Splitscreen/Interview/Standby auto-hides and auto-silences it; audio is muted by default.
-
-**Telemetry block (solo POV).** `/telemetry/show`, `/telemetry/hide` and
-`/telemetry/toggle` show or hide the HUD's GT7 telemetry block (the webcam frame
-stays). The relay stores the choice in `runtime/<profile>/telemetry-view.json`, so it
-survives a relay restart; `/telemetry/data` and `/status` (`telemetry.visible`) report
-it. Outside a solo POV broadcast these routes answer 404, like `/telemetry/data`.
 
 **Lead time:** the PiP is not instant: plan roughly **5 minutes** from "driver starts
 streaming" to "PiP on air" (resolve ~10–30 s, plus the 15 s retry loop while the driver

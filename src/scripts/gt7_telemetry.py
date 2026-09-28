@@ -525,9 +525,12 @@ class TelemetryStore:
             return {"visible": self._visible}
 
     def toggle(self):
+        """Flip and persist in one locked step, so two simultaneous toggles (panel
+        key and Companion button) cannot both read the old state and lose one."""
         with self._lock:
-            on = not self._visible
-        return self.set_visible(on)
+            self._visible = not self._visible
+            self._save_visible()
+            return {"visible": self._visible}
 
     def _load_visible(self):
         """Shown unless `view_path` holds a valid {"visible": false}."""
