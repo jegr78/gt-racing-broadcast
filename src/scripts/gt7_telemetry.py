@@ -205,7 +205,12 @@ class TelemetryEngine:
     def _reset_session(self, now, pkt):
         """Drop everything derived from the previous session (possibly a different
         track/car) and re-open a fresh lap at the boundary."""
-        LOG.info("session change at lap %s: reference cleared", pkt.lap)
+        acc = self._acc
+        if acc is not None:                # the lap in progress never finishes
+            LOG.info("GT7 lap %s %s: not counted (session change)",
+                     self._lap_num, _fmt_time(acc.elapsed))
+        LOG.info("GT7 session change (new lap counter %s): %s", pkt.lap,
+                 "reference cleared" if self._ref is not None else "no reference yet")
         self._ref = None
         self._lap_time_sum = 0.0
         self._lap_time_n = 0
@@ -268,7 +273,7 @@ class TelemetryEngine:
             why = "partial lap (relay connected mid-lap)"
         elif len(acc.samples) < 2 or acc.elapsed < MIN_LAP_S or acc.distance < MIN_LAP_DIST:
             why = "too short"
-        head = f"lap {self._lap_num} {_fmt_time(acc.elapsed)}"
+        head = f"GT7 lap {self._lap_num} {_fmt_time(acc.elapsed)}"
         if why is not None:
             LOG.info("%s: not counted (%s)", head, why)
             return
