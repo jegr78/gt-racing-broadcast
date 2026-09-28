@@ -1475,6 +1475,45 @@ def t_set_feed_close_when_inactive_revert_to_false():
         assert d.get("overlay") is True       # merge, not replace
 
 
+class _MissingInputSession(_FakeSession):
+    """A collection without some inputs: SetInputSettings fails the way OBS does."""
+    def __init__(self, missing, error=None):
+        super().__init__()
+        self.missing, self.error = set(missing), error
+
+    def request(self, request_type, request_data=None):
+        name = (request_data or {}).get("inputName")
+        if request_type == "SetInputSettings" and name in self.missing:
+            raise ValueError(self.error or (
+                "SetInputSettings failed: {'code': 600, 'comment': 'No source was found "
+                f"by the name of `{name}` within the canvas `Main`.', 'result': False}}"))
+        return super().request(request_type, request_data)
+
+
+def t_set_feed_close_when_inactive_skips_inputs_the_collection_lacks():
+    # A solo collection has no Feed A/B; that is not an error (#678).
+    sess = _MissingInputSession({"Feed A"})
+    orig, m._connect = m._connect, lambda *a, **k: (sess, "")
+    try:
+        note = m.set_feed_close_when_inactive(["Feed A", "Feed B"], True)
+    finally:
+        m._connect = orig
+    assert note == "", f"a missing feed input must be skipped silently, got {note!r}"
+    set_names = [rd["inputName"] for rt, rd in sess.sent if rt == "SetInputSettings"]
+    assert set_names == ["Feed B"], f"the inputs that exist must still be set, got {set_names}"
+
+
+def t_set_feed_close_when_inactive_reports_any_other_failure():
+    err = "SetInputSettings failed: {'code': 207, 'comment': 'OBS is not ready to perform the request.'}"
+    sess = _MissingInputSession({"Feed A"}, error=err)
+    orig, m._connect = m._connect, lambda *a, **k: (sess, "")
+    try:
+        note = m.set_feed_close_when_inactive(["Feed A", "Feed B"], True)
+    finally:
+        m._connect = orig
+    assert "207" in note, f"a failure other than a missing input must be reported, got {note!r}"
+
+
 def t_set_feed_close_when_inactive_unreachable_is_note_not_crash():
     orig, m._connect = m._connect, lambda *a, **k: (None, "OBS not running")
     try:

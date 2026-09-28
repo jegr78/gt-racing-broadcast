@@ -1509,19 +1509,22 @@ def set_feed_close_when_inactive(inputs, value=True, host="127.0.0.1", port=None
     """Set close_when_inactive on each named feed media input, best effort. When
     fan-out is enabled OBS disconnects off-air sources, so no stale backlog forms
     and the stale-on-activation glitch disappears. `inputs` is a list of OBS input
-    names. Returns "" on success or a short note on any failure; never raises."""
+    names; one the collection lacks (a solo collection has no Feed A/B) is skipped.
+    Returns "" on success or a short note on any other failure; never raises."""
     session, note = _connect(host, port, password, timeout)
     if session is None:
         return note
     try:
         for name in inputs:
-            session.request("SetInputSettings",
-                            {"inputName": name,
-                             "inputSettings": {"close_when_inactive": bool(value)},
-                             "overlay": True})
+            try:
+                session.request("SetInputSettings",
+                                {"inputName": name,
+                                 "inputSettings": {"close_when_inactive": bool(value)},
+                                 "overlay": True})
+            except Exception as exc:                 # noqa: BLE001  best-effort contract
+                if not is_missing_item(str(exc)):
+                    return str(exc) or exc.__class__.__name__
         return ""
-    except Exception as exc:                         # noqa: BLE001  best-effort contract
-        return str(exc) or exc.__class__.__name__
     finally:
         session.close()
 
