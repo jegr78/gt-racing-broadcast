@@ -115,17 +115,30 @@ def t_usage_for_topic_shows_only_that_command():
     assert m.usage_for("health") == m.USAGE, "a command without usage lines gets the full text"
 
 
+def _no_bootstrap():
+    """Stub main()'s process startup: the real one loads the machine's active
+    profile into os.environ (leaking RACECAST_KIND & co. into every later test in
+    this process) and seeds the app home. Returns a restore callable."""
+    orig = m._bootstrap
+    m._bootstrap = list                    # argv through unchanged (a copy)
+    return lambda: setattr(m, "_bootstrap", orig)
+
+
 def t_main_prints_topic_help_without_dispatching():
     calls = []
     orig = dict(m.DISPATCH)
     m.DISPATCH.update({k: (lambda *a, **k2: calls.append(a)) for k in orig})
     buf, old = io.StringIO(), sys.stdout
+    env_before = dict(os.environ)
+    unboot = _no_bootstrap()
     try:
         sys.stdout = buf
         m.main(["event", "start", "--help"])
     finally:
         sys.stdout = old
+        unboot()
         m.DISPATCH.clear(); m.DISPATCH.update(orig)
+    assert dict(os.environ) == env_before, "main() in a test must not change the env"
     assert calls == [], "a help request must not run the command"
     out = buf.getvalue()
     assert "racecast event start --stint N" in out, out
@@ -2768,12 +2781,14 @@ def t_main_dispatches_discord_join_leave_status():
     orig = m.discord_cmd
     captured = {}
     m.discord_cmd = lambda rest: captured.setdefault("rest", rest)
+    unboot = _no_bootstrap()
     try:
         for verb in ("join", "leave", "status"):
             captured.clear()
             m.main(["discord", verb])
             assert captured["rest"] == [verb]
     finally:
+        unboot()
         m.discord_cmd = orig
 
 

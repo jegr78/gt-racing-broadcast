@@ -11,20 +11,12 @@ spec = importlib.util.spec_from_file_location(
     "irofeeds", os.path.join(ROOT, "src", "relay", "racecast-feeds.py"))
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 
-class _NoObs:
-    """Default obs_ws stand-in: every call reports "no OBS", nothing connects.
-    UPPERCASE names (scene-name constants) fall back to the caller's default."""
-    def __getattr__(self, name):
-        if name.isupper() or name.startswith("_"):
-            raise AttributeError(name)
-        return lambda *a, **k: (False, "no OBS in tests")
-
-
 # No test in this file may drive a real OBS. A producer machine runs one on 4455:
-# a director POST to /console/obs/scene would cut its program to "Stint", and the
-# live round-trips made these checks flaky under load. A fake (not None) keeps the
-# relay's OBS routes up, so a test can still swap in its own recording fake.
-m._obs_ws = _NoObs()
+# a director POST to /console/obs/scene would cut its program to "Stint". NoObs
+# answers every OBS call as unreachable and any real connection attempt fails
+# the test; a test can still swap in its own recording fake.
+import _obs_guard  # noqa: E402
+_obs_guard.install(m)
 
 # Manual feed arm defaults on, so a bare Relay starts its feeds paused. These
 # checks exercise the auto-pull path, so pin the opt-out. (#492)
@@ -1183,9 +1175,24 @@ def t_obs_split_get_route_for_companion():
 
 
 def t_tests_never_reach_a_real_obs():
-    # Every OBS route here must run against None or a fake, never the obs_ws
-    # module that would connect to the machine's OBS.
-    assert m._obs_ws is None or getattr(m._obs_ws, "__file__", None) is None, m._obs_ws
+    # The relay routes a call through its persistent OBS connections only when
+    # `_obs_ws` exposes route_kind; NoObs must not, and the real connect functions
+    # must be tripped, so no test here can open a session to the machine's OBS.
+    assert getattr(m._obs_ws, "route_kind", None) is None
+    assert _obs_guard.is_tripped()
+    assert m._OBS_WS_MODULE is _obs_guard._real          # one obs_ws module object
+    # and a relay built here really takes the no-OBS path end to end
+    srv = _serve(); port = srv.server_address[1]
+    try:
+        assert _get(port, "/console/status", _tok("bob"))[0] == 200
+    finally:
+        srv.shutdown()
+
+
+def t_zz_no_test_reached_a_real_obs():
+    # Sorted last: after every other test in this file has run, not one of them
+    # may have attempted a real OBS connection (even one a helper swallowed).
+    assert _obs_guard.CALLS == [], _obs_guard.CALLS[:3]
 
 
 if __name__ == "__main__":

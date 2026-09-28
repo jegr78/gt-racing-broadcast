@@ -15,6 +15,11 @@ spec = importlib.util.spec_from_file_location(
     "irofeeds", os.path.join(ROOT, "src", "relay", "racecast-feeds.py"))
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 
+# Never reach the machine's OBS: tests/_obs_guard.py answers every OBS call as
+# unreachable and fails any real connection attempt.
+import _obs_guard  # noqa: E402
+_obs_guard.install(m)
+
 
 def t_telemetry_data_shape():
     store = m.gt7_telemetry.TelemetryStore(None, units="metric")
@@ -168,6 +173,11 @@ def t_telemetry_toggle_is_atomic_under_concurrency():
     for t in threads:
         t.join()
     assert store.visible() is True
+
+
+def t_zz_no_test_reached_a_real_obs():
+    # Sorted last: no test in this file may have attempted a real OBS connection.
+    assert _obs_guard.CALLS == [], _obs_guard.CALLS[:3]
 
 
 if __name__ == "__main__":

@@ -24,6 +24,11 @@ def _load(name, rel):
 ca = _load("console_auth", ("src", "scripts", "console_auth.py"))
 m = _load("irofeeds", ("src", "relay", "racecast-feeds.py"))
 
+# Never reach the machine's OBS: tests/_obs_guard.py answers every OBS call as
+# unreachable and fails any real connection attempt.
+import _obs_guard  # noqa: E402
+_obs_guard.install(m)
+
 SECRET = "sek"
 
 
@@ -226,6 +231,11 @@ def t_cockpit_data_exposes_event_title():
         assert json.loads(body)["event_title"] == "Round 4"
     finally:
         close()
+
+
+def t_zz_no_test_reached_a_real_obs():
+    # Sorted last: no test in this file may have attempted a real OBS connection.
+    assert _obs_guard.CALLS == [], _obs_guard.CALLS[:3]
 
 
 if __name__ == "__main__":
