@@ -9659,6 +9659,11 @@ _CONSOLE_PAGE_GETS = frozenset({(), ("cockpit",), ("panel",),
                                 ("health-monitor",), ("race-control",), ("buttons",)})
 
 
+# The largest request body the control server reads (a parsed POST, or one drained
+# after the /console gate answered it).
+MAX_POST_BODY = 65536
+
+
 def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_dir=None,
                  timer_store=None, setup_ctl=None, overlay_dir=None,
                  chat_store=None, cue_store=None, preview_path=None, graphics_dir=None,
@@ -9892,6 +9897,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             url = base.rstrip("/") + console_proxy.upstream_path(clean_path)
             length = int(self.headers.get("Content-Length") or 0)
             data = self.rfile.read(length) if length else None
+            self._body_consumed = True        # do_POST must not drain it a second time
             hdrs = console_proxy.forward_request_headers(
                 self.headers, host="%s:%d" % (host, cport))
             req = urllib.request.Request(url, data=data, method=method, headers=hdrs)
@@ -11037,15 +11043,37 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     return None          # client also gone before the error could be sent
         def _ok(self, r):
             self._send(r) if r else self._send({"error":"feed? (A/B)"}, 404)
+        def _drain_body(self):
+            """Read and drop a request body the handler answered without using. The
+            socket then closes with nothing unread: on Windows unread bytes turn the
+            close into a reset, and the client saw 'connection aborted' instead of
+            the response. Bounded by the same limit as a parsed body. A body the
+            response already read (the Companion proxy) is left alone: reading it
+            again would block on bytes that never come."""
+            if getattr(self, "_body_consumed", False):
+                return
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                return
+            if 0 < length <= MAX_POST_BODY:
+                self.rfile.read(length)
+
         def do_POST(self):
             p = [x for x in urlparse(self.path).path.split("/") if x]
+            self._body_consumed = False
             try:
                 if p and p[0] == "console":
                     p = self._console_gate(p, "POST")
                     if p is None:
-                        return None     # gate already sent its response (401/403/404)
+                        # The gate sent a response: a rejection (401/403/404/429) or a
+                        # route it served itself. Leave nothing unread on the socket.
+                        self._drain_body()
+                        return None
                 length = int(self.headers.get("Content-Length") or 0)
-                if length > 65536:
+                if length > MAX_POST_BODY:
+                    # Deliberately NOT drained: reading an oversized body would defeat
+                    # the cap. On Windows the client may see a reset instead of 413.
                     return self._send({"error": "body too large"}, 413)
                 try:
                     body = json.loads(self.rfile.read(length) or b"{}")
