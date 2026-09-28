@@ -1010,6 +1010,17 @@ def t_overlay_slot_obs_sources_has_tyres_capture():
         "export_scene": "Program"}
 
 
+def t_box_from_css_ignores_prefixed_size_props():
+    # border-width, max-width, min-height, line-height end in a box prop name but are
+    # not the box. The builder writes `border-width: 3px` for a framed webcam, which
+    # the OBS box sync read as width 3 and shrank the live webcam to 3 px.
+    css = ("#webcam { left: 14px; top: 695px; width: 336px; height: 189px; "
+           "border-width: 3px; max-width: 900px; min-height: 5px; line-height: 2px; "
+           "border-top-width: 4px; }")
+    assert ob.box_from_css(css, "webcam") == {"left": 14, "top": 695,
+                                               "width": 336, "height": 189}
+
+
 def t_box_from_css_webcam_slot():
     css = "#webcam{left:14px;top:695px;width:336px;height:189px}"
     assert ob.box_from_css(css, "webcam") == {"left": 14, "top": 695,
