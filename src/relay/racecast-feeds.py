@@ -11037,13 +11037,26 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     return None          # client also gone before the error could be sent
         def _ok(self, r):
             self._send(r) if r else self._send({"error":"feed? (A/B)"}, 404)
+        def _drain_body(self):
+            """Read and drop a request body the handler answered without using. The
+            socket then closes with nothing unread: on Windows unread bytes turn the
+            close into a reset, and the client saw 'connection aborted' instead of
+            the response. Bounded by the same 64 KiB limit as a parsed body."""
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                return
+            if 0 < length <= 65536:
+                self.rfile.read(length)
+
         def do_POST(self):
             p = [x for x in urlparse(self.path).path.split("/") if x]
             try:
                 if p and p[0] == "console":
                     p = self._console_gate(p, "POST")
                     if p is None:
-                        return None     # gate already sent its response (401/403/404)
+                        self._drain_body()   # gate already answered (401/403/404)
+                        return None
                 length = int(self.headers.get("Content-Length") or 0)
                 if length > 65536:
                     return self._send({"error": "body too large"}, 413)

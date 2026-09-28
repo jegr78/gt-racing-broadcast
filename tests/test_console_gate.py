@@ -1167,6 +1167,27 @@ def t_obs_split_get_route_for_companion():
     _assert_split_b_on_air(*_split_with_b_on_air(lambda port: _get(port, "/obs/split")))
 
 
+def t_rejected_post_is_answered_not_reset():
+    # A /console POST the gate rejects (401/403) must still reach the client.
+    # Answering without reading the body leaves unread bytes on the socket, and on
+    # Windows closing it then sends a reset: the client saw "connection aborted"
+    # (WinError 10053) instead of the 403, intermittently and more under load.
+    import http.client
+    srv = _serve(); port = srv.server_address[1]
+    body = json.dumps({"scene": "Stint", "pad": "x" * 60000}).encode()
+    try:
+        for token, want in ((None, 401), (_tok("alice"), 403)) * 10:
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            path = "/console/obs/scene" + ("?t=" + token if token else "")
+            conn.request("POST", path, body=body,
+                         headers={"Content-Type": "application/json"})
+            resp = conn.getresponse()
+            assert resp.status == want, (resp.status, want)
+            resp.read(); conn.close()
+    finally:
+        srv.shutdown()
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
