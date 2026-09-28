@@ -42,8 +42,8 @@ Loaded when working under `src/ui/`.
   `/overlay/fonts/<file>` (each read per request from the `--overlay-dir`; empty body
   when the file is absent). The CLI passes `--overlay-dir profiles/<active>/overlay`
   whenever that dir exists (`_overlay_relay_args` in `src/racecast.py`). The two
-  override.css are part of `OBS_PAGE_PATHS`, so editing them advances the refresh hash
-  and OBS reloads automatically. Editable in the Control Center, a **visual overlay
+  override.css are part of `OBS_PAGE_PATHS`, so every `relay start`/`event start`
+  reloads them in OBS. Editable in the Control Center, a **visual overlay
   builder** (issue #114): the slots' `data-edit` markers in `hud.html`
   are the single slot source, a pure compiler (`src/scripts/overlay_build.py`,
   `compile_overlay_css`) turns a `layout-<page>.json` the builder owns into the

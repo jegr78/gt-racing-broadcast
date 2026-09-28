@@ -322,6 +322,22 @@ def t_ob_hud_has_top_speed_slot():
     assert "tele-top" in ids
 
 
+def t_hud_trace_renders_per_frame_on_a_fixed_window():
+    # The throttle/brake trace must not redraw only when a poll lands (10 fps
+    # steps) nor stretch its x axis to the batch's own time span (the whole trace
+    # breathes horizontally with sample jitter): it draws per animation frame on a
+    # fixed window that scrolls with an estimated relay clock.
+    with open(os.path.join(ROOT, "src", "obs", "hud.html"), encoding="utf-8") as f:
+        html = f.read()
+    tele = html[html.index("async function pollTrace"):html.index("// Stream-chat box")]
+    poll = tele[:tele.index("function drawTrace")]
+    assert "clearRect" not in poll, "the poll must only buffer samples, not draw"
+    assert "requestAnimationFrame(drawTrace)" in tele
+    draw = tele[tele.index("function drawTrace"):]
+    assert "/ TRACE_WINDOW_S" in draw, "x must map onto the fixed window"
+    assert "TRACE_GAP_S" in draw, "a data gap must not be bridged by a line"
+
+
 def t_ob_hud_has_clock_slot():
     with open(os.path.join(ROOT, "src", "obs", "hud.html"), encoding="utf-8") as f:
         slots = ob.extract_slots(f.read())
@@ -870,6 +886,15 @@ def t_example_overlay_matches_demo_standard():
     assert os.path.isfile(os.path.join(ex, "layout-hud.json")), "example overlay has no layout-hud.json"
     assert _read(ex, "layout-hud.json") == _read(de, "layout-hud.json"), \
         "example layout-hud.json != demo standard"
+
+
+def t_slot_boxes_layers_the_override_over_the_hud_base():
+    base = "#pov { left: 1516px; top: 600px; width: 384px; height: 216px; }" \
+           "#webcam { left: 14px; top: 695px; width: 336px; height: 189px; }"
+    boxes = ob.slot_boxes(base, "#pov { left: 10px; }")
+    assert boxes["pov"] == {"left": 10, "top": 600, "width": 384, "height": 216}, boxes
+    assert boxes["webcam"] == {"left": 14, "top": 695, "width": 336, "height": 189}, boxes
+    assert "tyres-capture" not in boxes, "a slot without a base rule has nothing to anchor"
 
 
 def t_pov_box_from_css_full_rule():
