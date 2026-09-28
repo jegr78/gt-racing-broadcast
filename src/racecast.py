@@ -976,12 +976,9 @@ def usage_for(topic):
     or the full USAGE when there is no topic or the command has no lines of its own."""
     if not topic:
         return USAGE
-    prefixes = [f"racecast {topic} ", f"racecast {topic}\t"]
-    if topic in SERVICES:
-        prefixes.append("racecast <svc> ")
+    heads = [f"racecast {topic}"] + (["racecast <svc>"] if topic in SERVICES else [])
     lines = [ln for ln in USAGE.splitlines()
-             if any(ln.strip().startswith(p) or ln.strip() == f"racecast {topic}"
-                    for p in prefixes)]
+             if any(ln.strip() == h or ln.strip().startswith(h + " ") for h in heads)]
     if not lines:
         return USAGE
     return "\n".join(lines) + "\n\nFull reference: racecast --help"
