@@ -459,12 +459,17 @@ def format_snapshot(snap, units, thresholds):
 
 
 class TelemetryStore:
-    """Thread-safe wrapper around TelemetryEngine. Persists ONLY the reference lap
-    to `path` (survives an OBS Browser Source reload; resets on relay restart).
+    """Thread-safe wrapper around TelemetryEngine. Persists the reference lap to
+    `path` (survives an OBS Browser Source reload; resets on relay restart) and the
+    producer's show/hide choice for the HUD block to `view_path`, which a relay
+    restart keeps: hidden for the lobby or a replay stays hidden.
     """
 
-    def __init__(self, path=None, units="metric", thresholds=(70, 85, 95), reset=False):
+    def __init__(self, path=None, units="metric", thresholds=(70, 85, 95), reset=False,
+                 view_path=None):
         self._eng = TelemetryEngine()
+        self._view_path = view_path
+        self._visible = self._load_visible()
         self._lock = threading.Lock()
         self._source = None            # latched console IP (discovery/UX), or None
         self._path = path
@@ -505,7 +510,46 @@ class TelemetryStore:
             source = self._source
         out = format_snapshot(snap, self._units, self._thresholds)
         out["source"] = source
+        out["visible"] = self.visible()
         return out
+
+    def visible(self):
+        with self._lock:
+            return self._visible
+
+    def set_visible(self, on):
+        """Show or hide the HUD telemetry block; persisted to `view_path`."""
+        with self._lock:
+            self._visible = bool(on)
+            self._save_visible()
+            return {"visible": self._visible}
+
+    def toggle(self):
+        with self._lock:
+            on = not self._visible
+        return self.set_visible(on)
+
+    def _load_visible(self):
+        """Shown unless `view_path` holds a valid {"visible": false}."""
+        if not self._view_path:
+            return True
+        try:
+            with open(self._view_path, encoding="utf-8") as fh:
+                v = json.load(fh).get("visible")
+            return v if isinstance(v, bool) else True
+        except (OSError, ValueError, AttributeError):
+            return True
+
+    def _save_visible(self):
+        if not self._view_path:
+            return
+        try:
+            tmp = self._view_path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump({"visible": self._visible}, fh)
+            os.replace(tmp, self._view_path)
+        except OSError:
+            pass                               # best-effort, never crash the relay
 
     def trace(self, limit=150):
         with self._lock:

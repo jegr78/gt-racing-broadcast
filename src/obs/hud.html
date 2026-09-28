@@ -160,6 +160,10 @@
 
   /* Telemetry panel background. It is the first child of #tele, so these
      z-indexes are what keep the values on top of it. */
+  /* Producer show/hide (/telemetry/hide, e.g. in the lobby or a replay): every
+     telemetry element goes, the webcam frame in the same container stays. */
+  #tele.tele-off > :not(#webcam){display:none !important}
+
   #tele-panel{position:absolute;left:1500px;top:702px;width:398px;height:362px;
     background:rgba(9,12,17,.7);border:1px solid rgba(120,132,146,.42);border-radius:14px;z-index:0}
   #tele-tyres,#tele-trace,#tele-delta,#tele-pred,#tele-fuel,#tele-top,#tele-clock,
@@ -445,6 +449,7 @@
         if (!r.ok) return;
         const d = await r.json();
         alive = true; tele.style.display = "";
+        tele.classList.toggle("tele-off", d.visible === false);
         const wheels = ["fl", "fr", "rl", "rr"];
         d.tyres.forEach((t, i) => {
           const el = tele.querySelector('[data-w="' + wheels[i] + '"]');

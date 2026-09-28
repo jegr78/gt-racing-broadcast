@@ -28,7 +28,7 @@ def t_telemetry_trace_shape():
     assert store.trace(10) == []          # empty before any packet
 
 
-def _serve(telemetry_store):
+def _serve(telemetry_store, relay=None):
     """Stand up make_handler over a real ThreadingHTTPServer on an ephemeral port,
     mirroring tests/test_cockpit.py's harness. Returns (server, get); caller must
     srv.shutdown() in a finally block."""
@@ -39,7 +39,7 @@ def _serve(telemetry_store):
     class _Relay:
         pass
 
-    handler = m.make_handler(_Relay(), telemetry_store=telemetry_store)
+    handler = m.make_handler(relay or _Relay(), telemetry_store=telemetry_store)
     srv = m.ThreadingHTTPServer(("127.0.0.1", 0), handler)
     _t.Thread(target=srv.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{srv.server_address[1]}"
@@ -80,6 +80,76 @@ def t_route_data_and_trace_200_with_store():
         s2, _, b2 = get("/telemetry/trace")
         assert s2 == 200, s2
         assert "samples" in json.loads(b2)
+    finally:
+        srv.shutdown()
+
+
+def t_telemetry_visibility_defaults_on_and_persists():
+    # The producer hides the block for the lobby or a replay; that choice lives in
+    # its own file so it survives a relay restart (the reference-lap file does not).
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        view = os.path.join(d, "telemetry-view.json")
+        store = m.gt7_telemetry.TelemetryStore(None, view_path=view)
+        assert store.visible() is True and store.data()["visible"] is True
+        assert store.set_visible(False) == {"visible": False}
+        again = m.gt7_telemetry.TelemetryStore(None, view_path=view, reset=True)
+        assert again.visible() is False, "hidden must survive a relay restart"
+        assert again.toggle() == {"visible": True}
+        assert m.gt7_telemetry.TelemetryStore(None, view_path=view).visible() is True
+
+
+def t_telemetry_visibility_bad_file_means_visible():
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        view = os.path.join(d, "telemetry-view.json")
+        with open(view, "w", encoding="utf-8") as fh:
+            fh.write("not json")
+        assert m.gt7_telemetry.TelemetryStore(None, view_path=view).visible() is True
+
+
+def t_route_visibility_show_hide_toggle():
+    import json, tempfile
+    with tempfile.TemporaryDirectory() as d:
+        store = m.gt7_telemetry.TelemetryStore(
+            None, view_path=os.path.join(d, "telemetry-view.json"))
+        srv, get = _serve(store)
+        try:
+            assert json.loads(get("/telemetry/hide")[2]) == {"visible": False}
+            assert json.loads(get("/telemetry/data")[2])["visible"] is False
+            assert json.loads(get("/telemetry/toggle")[2]) == {"visible": True}
+            assert json.loads(get("/telemetry/hide")[2]) == {"visible": False}
+            assert json.loads(get("/telemetry/show")[2]) == {"visible": True}
+        finally:
+            srv.shutdown()
+
+
+def t_route_visibility_404_without_store():
+    srv, get = _serve(None)
+    try:
+        for verb in ("show", "hide", "toggle"):
+            assert get("/telemetry/" + verb)[0] == 404, verb
+    finally:
+        srv.shutdown()
+
+
+def t_status_reports_telemetry_visibility():
+    # The Director Panel lights its TELEMETRY toggle from /status.
+    import json
+
+    class _StatusRelay:
+        def status(self):
+            return {}
+
+    store = m.gt7_telemetry.TelemetryStore(None)
+    srv, get = _serve(store, relay=_StatusRelay())
+    try:
+        assert json.loads(get("/status")[2])["telemetry"] == {"visible": True}
+    finally:
+        srv.shutdown()
+    srv, get = _serve(None, relay=_StatusRelay())
+    try:
+        assert "telemetry" not in json.loads(get("/status")[2])
     finally:
         srv.shutdown()
 

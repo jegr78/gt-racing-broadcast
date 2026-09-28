@@ -496,6 +496,12 @@ once ready). **POV Toggle** (`/pov/toggle`) is a **relay action**: it flips the 
 box (frame + name) follows it. The PiP lives only in the Stint scene, so switching to
 Splitscreen/Interview/Standby auto-hides and auto-silences it; audio is muted by default.
 
+**Telemetry block (solo POV).** `/telemetry/show`, `/telemetry/hide` and
+`/telemetry/toggle` show or hide the HUD's GT7 telemetry block (the webcam frame
+stays). The relay stores the choice in `runtime/<profile>/telemetry-view.json`, so it
+survives a relay restart; `/telemetry/data` and `/status` (`telemetry.visible`) report
+it. Outside a solo POV broadcast these routes answer 404, like `/telemetry/data`.
+
 **Lead time:** the PiP is not instant: plan roughly **5 minutes** from "driver starts
 streaming" to "PiP on air" (resolve ~10–30 s, plus the 15 s retry loop while the driver
 isn't live yet, plus OBS connecting on first show). The operator walkthrough: including

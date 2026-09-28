@@ -944,6 +944,9 @@ const CONFIG_SOLO = {
   vis: [
     {label:"WEBCAM", scene:"Program", source:"Solo Webcam"},
     {label:"POV",    scene:"Program", source:"Feed POV", relay:"pov"},
+    // The HUD telemetry block (solo POV): relay state, no OBS item; hidden when the
+    // relay serves no telemetry (see the /status handler).
+    {label:"TELEMETRY", scene:"HUD", relay:"telemetry"},
   ],
   graphics: [
     {label:"HUD",           scene:"Program",   source:"Stint HUD"},
@@ -1052,6 +1055,7 @@ function mkKey(label, tag, onClick){
 }
 const macroKeys = [], sceneKeys = {}, toggleKeys = [];
 let povVisBtn = null;                 // the relay-driven POV visibility button (#130)
+let teleVisBtn = null;                // the relay-driven HUD telemetry show/hide button
 
 /* RED FLAG toggles the Standby Cover through the relay's /obs/source endpoint,
    using the last-known state from /obs/state. Built once and re-appended to #pgmBus
@@ -1087,6 +1091,7 @@ function buildControls(cfg){
   toggleKeys.length = 0;
   Object.keys(sceneKeys).forEach(k=>delete sceneKeys[k]);
   povVisBtn = null;
+  teleVisBtn = null;
 
   cfg.macros.forEach(m=>{
     const b = mkKey(m.label, "program", ()=>runMacro(m));
@@ -1103,9 +1108,10 @@ function buildControls(cfg){
   });
   cfg.vis.forEach(item=>{
     const b = mkKey(item.label, item.scene,
-                    ()=> item.relay ? relayCall("pov/toggle") : toggleSource(item, b));
+                    ()=> item.relay ? relayCall(item.relay + "/toggle") : toggleSource(item, b));
     b._item = item; toggleKeys.push(b); $("#scnVisBus").appendChild(b);
     if (item.relay === "pov") povVisBtn = b;
+    if (item.relay === "telemetry") teleVisBtn = b;
   });
 
   cfg.graphics.forEach(item=>{
@@ -1791,6 +1797,10 @@ async function relayPoll(){
       $("#stPov").innerHTML = "POV <b>" + (txt || "—") + "</b>";
     } else { $("#stPov").className = "st"; $("#stPov").innerHTML = "POV <b>—</b>"; }
     if (povVisBtn) povVisBtn.classList.toggle("on", !!(d.pov && d.pov.shown));
+    if (teleVisBtn){                      // /status carries telemetry only for solo POV
+      teleVisBtn.hidden = !d.telemetry;
+      teleVisBtn.classList.toggle("on", !!(d.telemetry && d.telemetry.visible));
+    }
     if (!solo){
       const lines = [healthLine("A", d.feeds.A), healthLine("B", d.feeds.B)];
       if (d.pov && d.pov.state !== "stopped") lines.push(healthLine("POV", d.pov));

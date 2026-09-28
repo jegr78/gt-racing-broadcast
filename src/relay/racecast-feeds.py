@@ -10459,6 +10459,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             if timer_store:
                 base["timer"] = timer_store.summary()
             base["event_title"] = event_store.get() if event_store else ""
+            if telemetry_store is not None:          # solo POV only; lights the panel toggle
+                base["telemetry"] = {"visible": telemetry_store.visible()}
             return base
         def _console_status_payload(self, roles):
             """Status for the Funnel-exposed /console mount. Feed stream URLs are
@@ -10629,6 +10631,14 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     if telemetry_store is None:
                         return self._send({"error": "telemetry disabled"}, 404)
                     return self._send({"samples": telemetry_store.trace(150)})
+                # Show/hide the HUD telemetry block (lobby, replay); persisted, so it
+                # survives a relay restart. Director Panel + Companion.
+                if len(p) == 2 and p[0] == "telemetry" and p[1] in ("show", "hide", "toggle"):
+                    if telemetry_store is None:
+                        return self._send({"error": "telemetry disabled"}, 404)
+                    if p[1] == "toggle":
+                        return self._send(telemetry_store.toggle())
+                    return self._send(telemetry_store.set_visible(p[1] == "show"))
                 if len(p) == 3 and p[:2] == ["overlay", "fonts"]:
                     return self._send_font(overlay_dir, p[2])
                 if p[:1] == ["timer"]:
@@ -12095,7 +12105,8 @@ def main():
                  float(os.environ.get("RACECAST_TELEMETRY_TYRE_HOT_HI", 95)))
         telemetry_store = gt7_telemetry.TelemetryStore(
             os.path.join(runtime, "telemetry.json"), units=_tunits, thresholds=_tthr,
-            reset=True)          # fresh reference each relay start (spec §D), no stale cross-track lap
+            reset=True,          # fresh reference each relay start (spec §D), no stale cross-track lap
+            view_path=os.path.join(runtime, "telemetry-view.json"))   # show/hide survives restarts
         threading.Thread(target=_telemetry_loop,
                          args=(telemetry_store, args.gt7_ps_ip, stop_evt), daemon=True).start()
         LOG.info("GT7 telemetry listener started (bind 0.0.0.0:33740, ps_ip=%s)",
