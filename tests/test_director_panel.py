@@ -265,7 +265,6 @@ def t_stint_macros_resolve_on_the_relay_like_companion():
     # and take visibility, audio and the producer's commentary mic from the relay's
     # /obs/stint, which knows whether a stint is local. No static feed names and no
     # client-side mic decision may remain in the macro.
-    import re
     h = _html()
     for label, feed in (("STINT A", "A"), ("STINT B", "B")):
         m = re.search(r'\{label:"' + label + r'",[^}]*\}', h)
