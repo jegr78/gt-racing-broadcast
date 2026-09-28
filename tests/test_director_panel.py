@@ -355,7 +355,8 @@ def _assert_config_matches(cfg, filename):
         assert name in scenes, f"{filename}: scene key {name!r} has no scene"
     # Every OBS toggle and red-flag target; relay-driven items name no OBS item.
     pairs = re.findall(r'\{[^{}]*?scene:"([^"]+)",\s*source:"([^"]+)"[^{}]*\}', cfg)
-    assert pairs, "config has no scene/source targets"
+    assert len(pairs) == cfg.count('source:"'), \
+        "an OBS target is not written as {..., scene:..., source:...} and escapes this check"
     for scene, source in pairs:
         assert scene in scenes, f"{filename}: {source!r} targets missing scene {scene!r}"
         assert source in scenes[scene], \

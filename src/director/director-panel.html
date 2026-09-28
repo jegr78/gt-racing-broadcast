@@ -1093,9 +1093,9 @@ redFlagBtn.classList.add("redflag");
 redFlagBtn._item = redFlagItem;
 
 /* Builds the Scn/Vis (#scnBus), Gfx (#gfxBus, pre-race, grid) and Audio (#audio)
-   busses plus the Program-bus (#pgmBus) macros from cfg. Each target bus is cleared first and the
-   module-level arrays it populates are reset, so a rebuild never duplicates
-   buttons. Called once at load with CONFIG, and once more with CONFIG_SOLO the
+   busses plus the Program-bus (#pgmBus) macros from cfg. Each target bus is cleared
+   first and the module-level arrays it populates are reset, so a rebuild never
+   duplicates buttons. Called once at load with CONFIG, and once more with CONFIG_SOLO the
    first time /status reports a solo relay (see applySolo()'s builtSolo latch). */
 let activeConfig = CONFIG;   // the cfg buildControls last ran with. obsStatePoll
                              // reads this, not CONFIG, so a solo build stays in sync.
