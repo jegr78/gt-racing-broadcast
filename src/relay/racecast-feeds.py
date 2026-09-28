@@ -12032,7 +12032,8 @@ def main():
             return False, "obs unavailable"
         return _obs_ws.set_scene_item_enabled(scene, source, enabled)
     flag_graphic_store = flag_graphic.FlagGraphicStore(
-        os.path.join(runtime, "flag-graphic.json"), apply_fn=_flag_graphic_apply)
+        os.path.join(runtime, "flag-graphic.json"), apply_fn=_flag_graphic_apply,
+        scenes=flag_graphic.flag_graphic_scenes(args.solo))
     flag_graphic_store.reassert()   # re-push the saved flag to OBS (best-effort)
     _health_store_obj = HealthStore(
         os.path.join(runtime, "health-history.db"),
