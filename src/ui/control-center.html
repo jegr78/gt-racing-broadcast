@@ -3196,6 +3196,7 @@ async function loadOverlay() {
   ovState.body = slotsR.body || '';
   ovState.layout = layoutR.layout || {version: 1, page: overlayPage, slots: {}, fonts: [], customCss: ''};
   if (!ovState.layout.slots) ovState.layout.slots = {};
+  ovDropZeroSizes(ovState.layout.slots);
   ovState.fonts = (fontsR && fontsR.ok && fontsR.fonts) || [];
   ovState.library = (fontsR && fontsR.ok && fontsR.library) || [];
   ovInjectDocFonts(ovState.fonts.concat(ovState.library));
@@ -3952,13 +3953,26 @@ function ovRgbToHex(v) {
   if (m[4] !== undefined && parseFloat(m[4]) === 0) return '';   // transparent -> unset
   return '#' + [1, 2, 3].map(i => (+m[i]).toString(16).padStart(2, '0')).join('');
 }
+// Drop stored width/height <= 0: the old builder pinned 0 for slots it measured
+// while hidden, and a 0px slot is never a real choice (hiding is "visible").
+function ovDropZeroSizes(slots) {
+  Object.keys(slots).forEach(id => {
+    ['width', 'height'].forEach(p => {
+      if (typeof slots[id][p] === 'number' && slots[id][p] <= 0) delete slots[id][p];
+    });
+  });
+}
 function ovBaseValues(id) {
   const el = ovState.shadow && ovState.shadow.getElementById(id);
   if (!el) return {};
   const cs = getComputedStyle(el);
-  const px = n => Math.round(parseFloat(n) || 0);
+  // A slot inside a display:none ancestor (the #tele block before telemetry
+  // arrives) resolves its size to "auto", not px: leave it unset rather than
+  // pinning 0, which the save-all would write out and so erase the slot.
+  const px = n => { const f = parseFloat(n); return isNaN(f) ? undefined : Math.round(f); };
+  const size = n => { const f = px(n); return f > 0 ? f : undefined; };
   const v = {
-    left: px(cs.left), top: px(cs.top), width: px(cs.width), height: px(cs.height),
+    left: px(cs.left), top: px(cs.top), width: size(cs.width), height: size(cs.height),
     fontSize: px(cs.fontSize),
     color: ovRgbToHex(cs.color), background: ovRgbToHex(cs.backgroundColor),
   };

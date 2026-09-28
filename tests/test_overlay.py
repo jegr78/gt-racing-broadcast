@@ -375,6 +375,35 @@ def t_ob_compile_px_and_text_props():
     assert "font-size: 44px" in css and "color: #fff" in css
 
 
+def t_ob_compile_drops_zero_box_size():
+    # A 0px box is invisible under .el's overflow:hidden and never a deliberate
+    # choice (hiding is the "visible" prop). The builder once pinned width/height 0
+    # for slots it measured inside the hidden #tele block; compiling such a layout
+    # must leave the size to the base page instead of erasing the slot.
+    css = ob.compile_overlay_css(
+        {"version": 1, "page": "hud",
+         "slots": {"stint": {"left": 800, "top": 30, "width": 0, "height": -4}}},
+        SLOTS)
+    assert "left: 800px" in css
+    assert "width" not in css and "height" not in css
+    css = ob.compile_overlay_css(
+        {"slots": {"stint": {"width": 120, "height": 40}}}, SLOTS)
+    assert "width: 120px" in css and "height: 40px" in css
+
+
+def t_cc_builder_never_pins_unresolved_sizes():
+    # getComputedStyle reports "auto" for an element inside a display:none
+    # ancestor (the #tele block before telemetry arrives). The builder must not
+    # turn that into 0 when it reads base values, and must drop a stored 0 size
+    # on load so a profile saved by the old builder heals on its next save.
+    with open(os.path.join(ROOT, "src", "ui", "control-center.html"), encoding="utf-8") as f:
+        cc = f.read()
+    base = cc[cc.index("function ovBaseValues"):]
+    base = base[:base.index("\n}\n")]
+    assert "parseFloat(n) || 0" not in base
+    assert "ovDropZeroSizes(" in cc[cc.index("ovState.layout = layoutR.layout"):]
+
+
 def t_ob_compile_align_maps_to_flex():
     css = ob.compile_overlay_css(
         {"slots": {"stint": {"align": "center"}}}, SLOTS)
