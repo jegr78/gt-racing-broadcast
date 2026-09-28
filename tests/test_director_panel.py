@@ -317,6 +317,20 @@ def t_solo_telemetry_toggle():
     assert "teleVisBtn.hidden = !d.telemetry" in html
 
 
+def t_solo_collapses_the_feeds_column():
+    h = _html()
+    assert '<div class="cols" id="ctlCols">' in h, "the Feeds|Scn-Vis block carries its own id"
+    assert '<div class="colstack" id="feedsCol">' in h, "the Feeds column carries its own id"
+    _order(h, 'id="feedsCol"', 'id="feedsSec"', '<div class="cap">Scn·Vis</div>')
+    hide = h[h.index("Kind-conditional cut (#307)"):]
+    hide = hide[:hide.index("{ display: none !important; }")]
+    assert "body.solo #feedsCol" in hide, "solo hides the whole Feeds column, not only its card"
+    assert "body.solo #ctlCols{grid-template-columns:1fr}" in h, \
+        "solo gives Scn-Vis and Timer the full width"
+    assert "body.solo .cols{" not in h and "body.solo .cols {" not in h, \
+        "the Graphics|Audio block keeps its two columns in solo"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

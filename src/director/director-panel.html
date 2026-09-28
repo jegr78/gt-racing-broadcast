@@ -500,6 +500,7 @@
   /* Kind-conditional cut (#307): in solo, hide the A/B feed, schedule and
      submission surfaces and reveal the POV editor, which lives inside #urlsBox, as
      its own card. Endurance sets no `.solo` class and is unaffected. */
+  body.solo #feedsCol,
   body.solo #feedsSec,
   body.solo #stA,
   body.solo #stB,
@@ -511,6 +512,8 @@
   body.solo #qualSched,
   body.solo #modeSwitch,
   body.solo #subsBox { display: none !important; }
+  /* Feeds is the only left column of this block, so Scn·Vis and Timer take its full width. */
+  body.solo #ctlCols{grid-template-columns:1fr}
 </style>
 </head>
 <body>
@@ -615,8 +618,8 @@
     </div>
   </section>
 
-  <div class="cols">
-    <div class="colstack">
+  <div class="cols" id="ctlCols">
+    <div class="colstack" id="feedsCol">
   <section class="bus" id="feedsSec"><div class="cap">Feeds</div>
     <div class="body">
       <div class="keys" id="feedsBus"></div>
