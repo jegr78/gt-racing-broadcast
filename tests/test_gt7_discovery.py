@@ -72,6 +72,28 @@ def t_two_consoles_sorted():
     assert out["consoles"] == ["192.168.1.42", "192.168.1.50"], out
 
 
+def t_default_decrypt_latches_a_real_packet_in_the_frozen_layout():
+    # The binary freezes gt7_discovery into its archive, so no gt7_crypto.py sits
+    # next to its __file__; gt7_crypto is only importable as a module there.
+    import shutil, sys, tempfile
+    real = bytes.fromhex(_load("gt7_fixture_t", ("tests", "test_gt7_fixture.py")).PKT_THROTTLE_HEX)
+    scripts = os.path.join(ROOT, "src", "scripts")
+    with tempfile.TemporaryDirectory() as tmp:
+        shutil.copy(os.path.join(scripts, "gt7_discovery.py"), tmp)
+        spec = importlib.util.spec_from_file_location(
+            "gt7_discovery_frozen", os.path.join(tmp, "gt7_discovery.py"))
+        frozen = importlib.util.module_from_spec(spec); spec.loader.exec_module(frozen)
+        sys.path.insert(0, scripts)
+        try:
+            out = frozen.discover_consoles(
+                timeout=2.0, sock_factory=lambda: _FakeSock([(real, ("192.168.1.42", 33739))]),
+                now=_now_seq([0, 0, 0, 100]))
+        finally:
+            sys.path.remove(scripts)
+    assert out["consoles"] == ["192.168.1.42"], \
+        f"the default decrypt must accept a real GT7 packet in the frozen layout: {out}"
+
+
 def t_no_reply_returns_hint():
     out = disc.discover_consoles(
         timeout=2.0, sock_factory=lambda: _FakeSock([]), decrypt=_ok_decrypt,
