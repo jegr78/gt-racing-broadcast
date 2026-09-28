@@ -3078,6 +3078,32 @@ def t_function_local_peer_imports_are_frozen():
                          f"not --hidden-import in tools/build-binary.py: {missing}")
 
 
+def t_frozen_modules_do_not_load_siblings_by_file_path():
+    """A --hidden-import module is frozen into the binary's archive, where its
+    __file__ has no sibling .py next to it, so loading a peer by a __file__-relative
+    path fails there and only there (gt7-discover rejected every console, #680)."""
+    import ast, re
+    with open(os.path.join(ROOT, "tools", "build-binary.py"), encoding="utf-8") as fh:
+        hidden = set(re.findall(r'"--hidden-import", "([a-z0-9_]+)"', fh.read()))
+    # Reached only from the script's main(), which the binary runs by path.
+    script_only = {("install_apps", "_common"), ("install_tools", "_common")}
+    offenders = []
+    for mod in sorted(hidden):
+        path = os.path.join(ROOT, "src", "scripts", mod + ".py")
+        if not os.path.exists(path):
+            continue
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+        for fn in ast.walk(ast.parse(text)):
+            if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                body = ast.get_source_segment(text, fn) or ""
+                if ("spec_from_file_location" in body and "__file__" in body
+                        and (mod, fn.name) not in script_only):
+                    offenders.append(f"{mod}.{fn.name}")
+    assert not offenders, ("frozen modules load a sibling by __file__ path; import it "
+                           f"as a module instead: {offenders}")
+
+
 def t_path_loaded_module_imports_are_frozen():
     """src/ui/*.py is loaded by PATH, not imported as a package, so PyInstaller's
     scan never walks it, so a peer module imported there is invisible to the build
