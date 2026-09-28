@@ -1172,21 +1172,54 @@ def t_rejected_post_is_answered_not_reset():
     # Answering without reading the body leaves unread bytes on the socket, and on
     # Windows closing it then sends a reset: the client saw "connection aborted"
     # (WinError 10053) instead of the 403, intermittently and more under load.
+    # The race is narrow on Linux/macOS, so this guards the regression chiefly on
+    # the Windows CI job.
     import http.client
     srv = _serve(); port = srv.server_address[1]
     body = json.dumps({"scene": "Stint", "pad": "x" * 60000}).encode()
     try:
         for token, want in ((None, 401), (_tok("alice"), 403)) * 10:
             conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
-            path = "/console/obs/scene" + ("?t=" + token if token else "")
-            conn.request("POST", path, body=body,
-                         headers={"Content-Type": "application/json"})
-            resp = conn.getresponse()
-            assert resp.status == want, (resp.status, want)
-            resp.read(); conn.close()
+            try:
+                path = "/console/obs/scene" + ("?t=" + token if token else "")
+                conn.request("POST", path, body=body,
+                             headers={"Content-Type": "application/json"})
+                resp = conn.getresponse()
+                assert resp.status == want, (resp.status, want)
+                resp.read()
+            finally:
+                conn.close()
     finally:
         srv.shutdown()
 
+
+def t_proxied_post_body_is_not_read_twice():
+    # The gate also returns after serving a route itself: the Companion proxy under
+    # /console/buttons reads the body to forward it. Draining it again would block
+    # on bytes that never come and leave the connection open.
+    import socket
+    srv = _serve(companion_url="http://127.0.0.1:1"); port = srv.server_address[1]
+    body = b'{"x": 1}'
+    req = ("POST /console/buttons/api/x?t=%s HTTP/1.0\r\nHost: 127.0.0.1\r\n"
+           "Content-Type: application/json\r\nContent-Length: %d\r\n\r\n"
+           % (_tok("bob"), len(body))).encode() + body
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=5) as sock:
+            sock.sendall(req)
+            sock.settimeout(3)
+            data = b""
+            while True:
+                try:
+                    chunk = sock.recv(4096)
+                except socket.timeout:
+                    raise AssertionError(
+                        "server kept the connection open: " + repr(data[:80])) from None
+                if not chunk:
+                    break                     # EOF: the handler finished and closed
+                data += chunk
+        assert data.startswith(b"HTTP/1."), data[:80]
+    finally:
+        srv.shutdown()
 
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
