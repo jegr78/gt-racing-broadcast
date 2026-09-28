@@ -50,7 +50,7 @@ that's the operator's reference for actually using the board.
 
 This page covers only how the board is wired up. The relay buttons (`Feeds Next`,
 `Feeds Reload`, `Feed A Reload`, `Feed B Reload`, `POV Reload`, `POV Stop`,
-`POV Toggle` → `/pov/toggle`, and the `FEED A/B ROBUST/AUTO` quality switches → `/feed/<A|B>/quality/<tier>`)
+`POV Toggle` → `/pov/toggle`, `Telemetry Toggle` → `/telemetry/toggle` (solo POV only; elsewhere the relay answers 404 and the press does nothing), and the `FEED A/B ROBUST/AUTO` quality switches → `/feed/<A|B>/quality/<tier>`)
 use the **Generic HTTP Requests**
 connection: see [Relay Mode §4](Relay-Mode#4-control-it-companion--relay). Everything else
 uses the OBS connection. Four combos sit on both: `RED FLAG` (Standby-Cover visibility

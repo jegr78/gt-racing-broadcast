@@ -54,7 +54,8 @@ def t_director_panel_setup_timer_pov_submissions():
                  ["setup", "set", "stint", "Alice"],
                  ["timer", "start"], ["timer", "stop"], ["timer", "set", "1:00:00"],
                  ["schedule", "set"], ["qualifying", "set"], ["event", "title"],
-                 ["submissions"], ["submissions", "approve"], ["submissions", "reject"]):
+                 ["submissions"], ["submissions", "approve"], ["submissions", "reject"],
+                 ["telemetry", "show"], ["telemetry", "hide"], ["telemetry", "toggle"]):
         assert _cap(segs) == ("director", False), segs
 
 

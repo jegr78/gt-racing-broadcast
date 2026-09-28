@@ -1249,6 +1249,16 @@ def t_cc_drag_starts_from_the_builder_position():
     assert "ovWithoutCustom(" in _cc_fn(src, "ovBuilderBox")
 
 
+def t_hud_hides_telemetry_but_keeps_the_webcam_frame():
+    # The producer's show/hide (lobby, replay) hides every telemetry element but
+    # never the webcam frame, which sits in the same #tele container.
+    with open(os.path.join(ROOT, "src", "obs", "hud.html"), encoding="utf-8") as f:
+        html = f.read()
+    assert '#tele.tele-off > :not(#webcam)' in html
+    poll = html[html.index("async function pollData"):html.index("async function pollTrace")]
+    assert 'classList.toggle("tele-off", d.visible === false)' in poll
+
+
 if __name__ == "__main__":
     for n, fn in sorted(globals().items()):
         if n.startswith("t_") and callable(fn):

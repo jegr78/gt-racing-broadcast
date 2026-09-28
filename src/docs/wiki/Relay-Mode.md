@@ -479,6 +479,12 @@ flag with `python3 tools/fetch-flags.py` (fetches only what is missing). Flags:
 `--no-hud` (disable), `--overlay-tab` / `--config-tab` (tab names), `--hud-poll`
 (refresh seconds, default 5). See [OBS Setup](OBS-Setup) for the source itself.
 
+**Telemetry block (solo POV).** `/telemetry/show`, `/telemetry/hide` and
+`/telemetry/toggle` show or hide the HUD's GT7 telemetry block (the webcam frame
+stays). The relay stores the choice in `runtime/<profile>/telemetry-view.json`, so it
+survives a relay restart; `/telemetry/data` and `/status` (`telemetry.visible`) report
+it. Outside a solo POV broadcast these routes answer 404, like `/telemetry/data`.
+
 ---
 
 ## Driver-POV PiP (optional)

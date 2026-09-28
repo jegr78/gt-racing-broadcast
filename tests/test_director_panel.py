@@ -305,6 +305,18 @@ def t_feed_reset_is_labelled_as_the_backlog_resolution():
     assert '"discards " + k.discards + " s backlog"' in h, "the cost is spelled out on the button"
 
 
+def t_solo_telemetry_toggle():
+    # Solo POV: a TELEMETRY key on the SCN-VIS bus toggles the HUD telemetry block
+    # through the relay (no OBS item behind it) and lights from /status.
+    html = _html()
+    solo = html[html.index("const CONFIG_SOLO"):]
+    solo = solo[:solo.index("graphics:")]
+    assert 'label:"TELEMETRY"' in solo and 'relay:"telemetry"' in solo
+    assert 'relayCall(item.relay + "/toggle")' in html
+    assert "teleVisBtn.classList.toggle(\"on\", !!(d.telemetry && d.telemetry.visible))" in html
+    assert "teleVisBtn.hidden = !d.telemetry" in html
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
