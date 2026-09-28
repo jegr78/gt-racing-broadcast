@@ -278,6 +278,7 @@
             border:1px solid rgba(239,68,68,.35); border-radius:8px;
             padding:8px 12px; margin:0 0 12px; font:12px var(--mono); }
   .envhint { color:var(--dim); font:12px/1.6 var(--mono); margin:14px 2px 0; }
+  .envhint.ov-override { color:var(--warn); margin:0 0 10px; }
   .addrow { padding:12px 8px 4px; display:flex; gap:8px; align-items:center; }
   .addrow button { white-space:nowrap; }
   /* Overlay-CSS editor */
@@ -810,8 +811,11 @@
             </div>
             <div class="envpath" id="overlay-path"></div>
             <textarea id="overlayCss" class="css-editor" rows="8" spellcheck="false"
-              aria-label="Advanced overlay CSS"
+              aria-label="Advanced overlay CSS" oninput="ovCustomCssChanged()"
               placeholder="Raw CSS appended verbatim AFTER the generated rules. The pro escape hatch. Existing hand-written CSS is imported here on first use."></textarea>
+            <p class="envhint">The canvas previews this CSS on top of the slot values, as on air.
+              Rules on <code>html</code>, <code>body</code> or <code>:root</code>, relative
+              <code>url()</code>s and <code>@import</code> can look different on air: check them with Preview.</p>
           </details>
           <p class="envhint ovhint">The builder writes the generated <b>profiles/&lt;active&gt;/overlay/&lt;page&gt;.css</b>
             plus a <b>layout-&lt;page&gt;.json</b> it owns. <b>Save</b> writes both; <b>Apply in OBS</b> reloads the
@@ -3303,8 +3307,15 @@ function ovBuildCanvas() {
   if (!host.shadowRoot) host.attachShadow({mode: 'open'});
   const sh = host.shadowRoot;
   ovState.shadow = sh;
-  sh.innerHTML = '<style>' + ovState.baseCss + '\n' + OV_SHADOW_CSS + '\n' +
-    ovFontFaceCss() + '</style>' + ovState.body;
+  // Cascade like the live overlay: base page CSS, then the slot values as #id
+  // rules (ovSlotStyle), then customCss, which the relay appends last to
+  // override.css. Slot values are rules, not inline styles, or they would beat
+  // customCss here while losing to it on air. The builder chrome goes last.
+  sh.innerHTML = '<style>' + ovState.baseCss + '\n' + ovFontFaceCss() + '</style>' +
+    '<style id="ov-slot-css"></style><style id="ov-custom-css"></style>' +
+    '<style>' + OV_SHADOW_CSS + '</style>' + ovState.body;
+  ovState.slotRules = {};
+  sh.getElementById('ov-custom-css').textContent = $('overlayCss').value;
   // Reference grid: inserted right after <style> (before the slots) + pointer-events
   // none, so it paints UNDER the slots and over the Overlay.png backdrop.
   ovState.gridEl = document.createElement('div');
@@ -3325,12 +3336,18 @@ function ovBuildCanvas() {
   sh.appendChild(sel);
   ovState.selBox = sel;
   ovUngate(sh);
-  ovState.slots.forEach(s => {
-    const el = sh.getElementById(s.id);
-    if (!el) return;
-    el.addEventListener('pointerdown', ovStartDrag);
-    ovStyleSlot(s.id);
-  });
+  ovState.slotBatch = true;                  // one sheet write for the whole build
+  try {
+    ovState.slots.forEach(s => {
+      const el = sh.getElementById(s.id);
+      if (!el) return;
+      el.addEventListener('pointerdown', ovStartDrag);
+      ovStyleSlot(s.id);
+    });
+  } finally {
+    ovState.slotBatch = false;               // a throwing slot must not freeze the sheet
+    ovFlushSlotCss();
+  }
   // A pointerdown on empty canvas (not on a slot or resize handle) deselects.
   // Slot/handle presses bubble here too but return early, so selecting/dragging a
   // slot is unaffected. The selection box is pointer-events:none, so clicking a
@@ -3563,44 +3580,66 @@ function ovApplyTransform(el) {
   if (isFinite(r) && r >= -360 && r <= 360) parts.push('rotate(' + r + 'deg)');
   const k = parseFloat(ov.shear);
   if (isFinite(k) && k >= -89 && k <= 89) parts.push('skewX(' + k + 'deg)');
-  el.style.transform = parts.join(' ');
+  ovSlotStyle(el.id).transform = parts.join(' ');
+  ovFlushSlotCss();
+}
+
+// The declarations of the slot's own `#id {}` rule, the canvas counterpart of the
+// rule compile_overlay_css emits for it. Kept on a detached element's style and
+// written into the slot sheet as TEXT by ovFlushSlotCss: rules added through
+// insertRule would be lost whenever the pop-out moves the canvas in the DOM,
+// since a moved <style> is re-parsed from its text. ovBuildCanvas resets the map.
+function ovSlotStyle(id) {
+  let decl = ovState.slotRules[id];
+  if (!decl) decl = ovState.slotRules[id] = document.createElement('div').style;
+  return decl;
+}
+
+function ovFlushSlotCss() {
+  if (ovState.slotBatch) return;
+  const st = ovState.shadow && ovState.shadow.getElementById('ov-slot-css');
+  if (!st) return;
+  st.textContent = Object.keys(ovState.slotRules).map(id =>
+    '#' + CSS.escape(id) + ' { ' + ovState.slotRules[id].cssText + ' }').join('\n');
 }
 
 function ovApplyProp(el, prop, value) {
   if (!el) return;
-  const name = OV_CSSNAME[prop];
-  const nameEl = el.querySelector ? el.querySelector('.name') : null;
-  // textShadow is a compound prop and not in OV_CSSNAME, so set and clear it before
-  // the generic unset path, which would no-op on removeProperty(undefined) and leave
-  // a stale shadow on the canvas.
-  if (prop === 'textShadow') {
-    el.style.textShadow = (value && value.color)
-      ? ((value.x || 0) + 'px ' + (value.y || 0) + 'px ' + (value.blur || 0) + 'px ' + value.color)
-      : '';
-    return;
-  }
-  if (prop === 'visible') {
-    el.classList.toggle('ov-hidden', value === false);   // canvas: dim, don't remove
-    return;
-  }
-  if (prop === 'slant') { el.style.clipPath = ovSlantClip(value); return; }
-  if (prop === 'rotation' || prop === 'shear') { ovApplyTransform(el); return; }
-  if (value === undefined || value === null || value === '') {
-    el.style.removeProperty(name);
-    if (prop === 'teamNameMax' && nameEl) nameEl.style.removeProperty('font-size');
-    return;
-  }
-  if (OV_PX.has(prop)) {
-    el.style.setProperty(name, value + 'px');
-    if (prop === 'teamNameMax' && nameEl) nameEl.style.fontSize = value + 'px';
-  } else if (prop === 'fontFamily') {
-    el.style.fontFamily = '"' + value + '"';
-  } else if (prop === 'align') {
-    el.style.justifyContent = OV_ALIGN[value] || '';
-  } else if (prop === 'valign') {
-    el.style.alignItems = OV_VALIGN[value] || '';
-  } else {
-    el.style.setProperty(name, value);
+  try {
+    const st = ovSlotStyle(el.id);
+    const name = OV_CSSNAME[prop];
+    // textShadow is a compound prop and not in OV_CSSNAME, so set and clear it before
+    // the generic unset path, which would no-op on removeProperty(undefined) and leave
+    // a stale shadow on the canvas.
+    if (prop === 'textShadow') {
+      st.textShadow = (value && value.color)
+        ? ((value.x || 0) + 'px ' + (value.y || 0) + 'px ' + (value.blur || 0) + 'px ' + value.color)
+        : '';
+      return;
+    }
+    if (prop === 'visible') {
+      el.classList.toggle('ov-hidden', value === false);   // canvas: dim, don't remove
+      return;
+    }
+    if (prop === 'slant') { st.clipPath = ovSlantClip(value); return; }
+    if (prop === 'rotation' || prop === 'shear') { ovApplyTransform(el); return; }
+    if (value === undefined || value === null || value === '') {
+      st.removeProperty(name);
+      return;
+    }
+    if (OV_PX.has(prop)) {
+      st.setProperty(name, value + 'px');
+    } else if (prop === 'fontFamily') {
+      st.fontFamily = '"' + value + '"';
+    } else if (prop === 'align') {
+      st.justifyContent = OV_ALIGN[value] || '';
+    } else if (prop === 'valign') {
+      st.alignItems = OV_VALIGN[value] || '';
+    } else {
+      st.setProperty(name, value);
+    }
+  } finally {
+    ovFlushSlotCss();
   }
 }
 
@@ -3796,11 +3835,31 @@ function ovSelect(id) {
 // placeholder, so a slot selection is not sticky.
 function ovDeselect() { ovSelect(null); }
 
+// Run `fn` with customCss switched off, for reading what the builder itself sets.
+function ovWithoutCustom(fn) {
+  const custom = ovState.shadow && ovState.shadow.getElementById('ov-custom-css');
+  if (custom) custom.disabled = true;
+  try { return fn(); } finally { if (custom) custom.disabled = false; }
+}
+
+// A slot's box as the builder lays it out (base CSS + slot values, no customCss).
+function ovBuilderBox(el) {
+  return ovWithoutCustom(() => ({left: el.offsetLeft, top: el.offsetTop,
+                                 width: el.offsetWidth, height: el.offsetHeight}));
+}
+
+function ovSlotJson(id) {
+  return JSON.stringify((ovState.layout.slots && ovState.layout.slots[id]) || {});
+}
+
 function ovStartDrag(e) {
   e.preventDefault();
   const el = e.currentTarget, id = el.id;
   ovSelect(id);
-  const sx = e.clientX, sy = e.clientY, sl = el.offsetLeft, st = el.offsetTop;
+  // Start from the builder's own position, not a customCss one: dragging a slot
+  // that customCss moves must not copy the custom value into the slot.
+  const box = ovBuilderBox(el), before = ovSlotJson(id);
+  const sx = e.clientX, sy = e.clientY, sl = box.left, st = box.top;
   function move(ev) {
     ovSetProp(id, 'left', ovSnap(sl + Math.round((ev.clientX - sx) / ovState.scale)));
     ovSetProp(id, 'top', ovSnap(st + Math.round((ev.clientY - sy) / ovState.scale)));
@@ -3808,8 +3867,7 @@ function ovStartDrag(e) {
   function up() {
     window.removeEventListener('pointermove', move);
     window.removeEventListener('pointerup', up);
-    const e2 = ovState.shadow.getElementById(id);
-    if (e2 && (e2.offsetLeft !== sl || e2.offsetTop !== st)) ovCommit();
+    if (ovSlotJson(id) !== before) ovCommit();
   }
   window.addEventListener('pointermove', move);
   window.addEventListener('pointerup', up);
@@ -3821,7 +3879,8 @@ function ovStartResize(e) {
   const dir = e.currentTarget.dataset.dir, id = ovState.sel;
   if (!id) return;
   const el = ovState.shadow.getElementById(id);
-  const sx = e.clientX, sy = e.clientY, sw = el.offsetWidth, sh = el.offsetHeight;
+  const box = ovBuilderBox(el), before = ovSlotJson(id);
+  const sx = e.clientX, sy = e.clientY, sw = box.width, sh = box.height;
   function move(ev) {
     const dx = Math.round((ev.clientX - sx) / ovState.scale);
     const dy = Math.round((ev.clientY - sy) / ovState.scale);
@@ -3831,7 +3890,7 @@ function ovStartResize(e) {
   function up() {
     window.removeEventListener('pointermove', move);
     window.removeEventListener('pointerup', up);
-    if (el.offsetWidth !== sw || el.offsetHeight !== sh) ovCommit();
+    if (ovSlotJson(id) !== before) ovCommit();
   }
   window.addEventListener('pointermove', move);
   window.addEventListener('pointerup', up);
@@ -4031,26 +4090,81 @@ function ovDropZeroSizes(slots) {
 function ovBaseValues(id) {
   const el = ovState.shadow && ovState.shadow.getElementById(id);
   if (!el) return {};
-  const cs = getComputedStyle(el);
-  // A slot inside a display:none ancestor (the #tele block before telemetry
-  // arrives) resolves its size to "auto", not px: leave it unset rather than
-  // pinning 0, which the save-all would write out and so erase the slot.
-  const px = n => { const f = parseFloat(n); return isNaN(f) ? undefined : Math.round(f); };
-  const size = n => { const f = px(n); return f > 0 ? f : undefined; };
-  const v = {
-    left: px(cs.left), top: px(cs.top), width: size(cs.width), height: size(cs.height),
-    fontSize: px(cs.fontSize),
-    color: ovRgbToHex(cs.color), background: ovRgbToHex(cs.backgroundColor),
+  // Base values are the page CSS plus the slot's own values. customCss is off
+  // while reading, or the save-all would copy its rules into the slot map.
+  return ovWithoutCustom(() => {
+    const cs = getComputedStyle(el);
+    // A slot inside a display:none ancestor (the #tele block before telemetry
+    // arrives) resolves its size to "auto", not px: leave it unset rather than
+    // pinning 0, which the save-all would write out and so erase the slot.
+    const px = n => { const f = parseFloat(n); return isNaN(f) ? undefined : Math.round(f); };
+    const size = n => { const f = px(n); return f > 0 ? f : undefined; };
+    const v = {
+      left: px(cs.left), top: px(cs.top), width: size(cs.width), height: size(cs.height),
+      fontSize: px(cs.fontSize),
+      color: ovRgbToHex(cs.color), background: ovRgbToHex(cs.backgroundColor),
+    };
+    // Border + background are OPTIONS (e.g. the POV box): only surface a border
+    // when the base actually draws one, so an untouched box stays clean (no border
+    // pinned on save). The transparent-background case is already dropped above.
+    if (cs.borderStyle !== 'none' && px(cs.borderWidth) > 0) {
+      v.borderStyle = cs.borderStyle;
+      v.borderWidth = px(cs.borderWidth);
+      v.borderColor = ovRgbToHex(cs.borderColor);
+    }
+    return v;
+  });
+}
+
+// The computed properties that show each builder prop's effect, compared with
+// and without customCss to find what customCss overrides on air.
+const OV_COMPUTED = {left: ['left'], top: ['top'], width: ['width'], height: ['height'],
+  padding: ['padding-top', 'padding-right', 'padding-bottom', 'padding-left'],
+  background: ['background-color', 'background-image'],
+  borderWidth: ['border-top-width'], borderStyle: ['border-top-style'],
+  borderColor: ['border-top-color'], borderRadius: ['border-top-left-radius'],
+  fontSize: ['font-size'], lineHeight: ['line-height'], letterSpacing: ['letter-spacing'],
+  fontFamily: ['font-family'], fontWeight: ['font-weight'], fontStyle: ['font-style'],
+  color: ['color'], align: ['justify-content'], valign: ['align-items'],
+  textTransform: ['text-transform'], opacity: ['opacity'], textShadow: ['text-shadow'],
+  rotation: ['transform'], shear: ['transform'], slant: ['clip-path'], visible: ['display']};
+
+// The CSS name the hint shows for a builder prop.
+function ovOverrideName(p) {
+  return {rotation: 'transform', shear: 'transform', slant: 'clip-path',
+          textShadow: 'text-shadow', visible: 'display'}[p] || OV_CSSNAME[p] || p;
+}
+
+// The slot props whose on-air value customCss changes: the slot's computed style
+// with customCss on vs off. That settles specificity, !important, shorthands and
+// @media in one go; a customCss rule that loses to the slot rule is not reported.
+function ovCustomOverrides(id, props) {
+  const el = ovState.shadow && ovState.shadow.getElementById(id);
+  if (!el) return [];
+  const read = () => {
+    const cs = getComputedStyle(el), out = {};
+    props.forEach(p => {
+      if (OV_COMPUTED[p]) out[p] = OV_COMPUTED[p].map(n => cs.getPropertyValue(n)).join('|');
+    });
+    return out;
   };
-  // Border + background are OPTIONS (e.g. the POV box): only surface a border
-  // when the base actually draws one, so an untouched box stays clean (no border
-  // pinned on save). The transparent-background case is already dropped above.
-  if (cs.borderStyle !== 'none' && px(cs.borderWidth) > 0) {
-    v.borderStyle = cs.borderStyle;
-    v.borderWidth = px(cs.borderWidth);
-    v.borderColor = ovRgbToHex(cs.borderColor);
-  }
-  return v;
+  const on = read(), off = ovWithoutCustom(read);
+  return props.filter(p => p in on && on[p] !== off[p]);
+}
+
+// The canvas takes each keystroke; the costlier refresh (team-name auto-fit, the
+// property panel and its override hint) waits for a short typing pause.
+function ovCustomCssChanged() {
+  const custom = ovState.shadow && ovState.shadow.getElementById('ov-custom-css');
+  if (!custom) return;
+  custom.textContent = $('overlayCss').value;
+  ovPositionSel();
+  clearTimeout(ovState.customCssTimer);
+  ovState.customCssTimer = setTimeout(() => {
+    ovFillSample();
+    ovPositionSel();
+    if (ovState.sel) ovRenderPanel();
+  }, 150);
 }
 
 function ovRenderPanel() {
@@ -4072,6 +4186,15 @@ function ovRenderPanel() {
   const props = meta.props || [];
   const has = p => props.includes(p);
   const h = document.createElement('h4'); h.textContent = meta.label; panel.appendChild(h);
+  const over = ovCustomOverrides(id, props);
+  if (over.length) {
+    const p = document.createElement('p');
+    p.className = 'envhint ov-override';
+    const names = Array.from(new Set(over.map(ovOverrideName)));
+    p.textContent = 'Advanced CSS overrides ' + names.join(', ') + ' on air. ' +
+      'Changing these here has no effect until you remove them there.';
+    panel.appendChild(p);
+  }
   if (has('visible')) {
     const wrap = document.createElement('div'); wrap.className = 'ovinline';
     const cb = document.createElement('input'); cb.type = 'checkbox';
@@ -4186,10 +4309,10 @@ function ovRenderPanel() {
 
 function ovResetSlot(id) {
   if (ovState.layout.slots) delete ovState.layout.slots[id];
-  ovStyleSlot(id);             // re-apply (now empty) -> reverts inline styles
-  // removeProperty leaves no inline override; rebuild to be certain base shows
-  const el = ovState.shadow.getElementById(id);
-  if (el) { el.removeAttribute('style'); el.style.cursor = 'move'; ovStyleSlot(id); }
+  // Empty the slot's #id rule so the base look shows, then re-apply (now empty).
+  if (ovState.shadow.getElementById(id)) ovSlotStyle(id).cssText = '';
+  ovState.slotBatch = true;
+  try { ovStyleSlot(id); } finally { ovState.slotBatch = false; ovFlushSlotCss(); }
   ovPositionSel();
   ovRenderPanel();
   ovCommit();
