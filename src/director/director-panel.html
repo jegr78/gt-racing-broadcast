@@ -963,6 +963,22 @@ const CONFIG_SOLO = {
     {label:"STBY COVER",    scene:"Program",   source:"Standby Cover"},
     {label:"POST-RACE",     scene:"Interview", source:"Post Race Interviews"},
   ],
+  graphicsPreRace: [
+    {label:"WEEKEND",    scene:"Program", source:"Weekend Info"},
+    {label:"RACE INFO",  scene:"Program", source:"Race Info"},
+    {label:"NEXT EVENT", scene:"Program", source:"Next Event"},
+  ],
+  graphicsGrid: [
+    {label:"STARTING GRID", scene:"Program", source:"Starting Grid", top:true},
+    {label:"GRID R1", scene:"Program", source:"Grid Row 1"},
+    {label:"GRID R2", scene:"Program", source:"Grid Row 2"},
+    {label:"GRID R3", scene:"Program", source:"Grid Row 3"},
+    {label:"GRID R4", scene:"Program", source:"Grid Row 4"},
+    {label:"GRID R5", scene:"Program", source:"Grid Row 5"},
+    {label:"GRID R6", scene:"Program", source:"Grid Row 6"},
+    {label:"GRID R7", scene:"Program", source:"Grid Row 7"},
+    {label:"GRID R8", scene:"Program", source:"Grid Row 8"},
+  ],
   audio: [
     {label:"Game",         input:"Solo Capture Device"},
     {label:"Webcam",       input:"Solo Webcam Device"},
@@ -1076,10 +1092,10 @@ const redFlagBtn = mkKey("RED FLAG", "alarm", async ()=>{
 redFlagBtn.classList.add("redflag");
 redFlagBtn._item = redFlagItem;
 
-/* Builds the Scn/Vis (#scnBus), Gfx (#gfxBus) and Audio (#audio) busses plus the
-   Program-bus (#pgmBus) macros from cfg. Each target bus is cleared first and the
-   module-level arrays it populates are reset, so a rebuild never duplicates
-   buttons. Called once at load with CONFIG, and once more with CONFIG_SOLO the
+/* Builds the Scn/Vis (#scnBus), Gfx (#gfxBus, pre-race, grid) and Audio (#audio)
+   busses plus the Program-bus (#pgmBus) macros from cfg. Each target bus is cleared
+   first and the module-level arrays it populates are reset, so a rebuild never
+   duplicates buttons. Called once at load with CONFIG, and once more with CONFIG_SOLO the
    first time /status reports a solo relay (see applySolo()'s builtSolo latch). */
 let activeConfig = CONFIG;   // the cfg buildControls last ran with. obsStatePoll
                              // reads this, not CONFIG, so a solo build stays in sync.
@@ -1089,6 +1105,9 @@ function buildControls(cfg){
   $("#scnBus").replaceChildren();
   $("#scnVisBus").replaceChildren();
   $("#gfxBus").replaceChildren();
+  $("#gfxPreRaceBus").replaceChildren();
+  $("#gfxGridTopBus").replaceChildren();
+  $("#gfxGridBus").replaceChildren();
   $("#audio").replaceChildren();
   macroKeys.length = 0;
   toggleKeys.length = 0;
@@ -1120,6 +1139,16 @@ function buildControls(cfg){
   cfg.graphics.forEach(item=>{
     const b = mkKey(item.label, item.scene, ()=>toggleSource(item, b));
     b._item = item; toggleKeys.push(b); $("#gfxBus").appendChild(b);
+  });
+
+  cfg.graphicsPreRace.forEach(item=>{
+    const b = mkKey(item.label, item.scene, ()=>toggleSource(item, b));
+    b._item = item; toggleKeys.push(b); $("#gfxPreRaceBus").appendChild(b);
+  });
+  cfg.graphicsGrid.forEach(item=>{
+    const b = mkKey(item.label, item.scene, ()=>toggleSource(item, b));
+    b._item = item; toggleKeys.push(b);
+    $(item.top ? "#gfxGridTopBus" : "#gfxGridBus").appendChild(b);
   });
 
   cfg.audio.forEach(a=>{
@@ -1236,17 +1265,6 @@ function buildPovActions(){
   });
   bus.hidden = false;
 }
-
-CONFIG.graphicsPreRace.forEach(item=>{
-  const b = mkKey(item.label, item.scene, ()=>toggleSource(item, b));
-  b._item = item; toggleKeys.push(b); $("#gfxPreRaceBus").appendChild(b);
-});
-
-CONFIG.graphicsGrid.forEach(item=>{
-  const b = mkKey(item.label, item.scene, ()=>toggleSource(item, b));
-  b._item = item; toggleKeys.push(b);
-  $(item.top ? "#gfxGridTopBus" : "#gfxGridBus").appendChild(b);
-});
 
 /* Flag-status graphic bus (#flag-graphic): an exactly-one-active OBS overlay
    toggle, parallel to the flag-text chip on #condRow. It drives /obs/flag/* and

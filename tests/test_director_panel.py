@@ -9,7 +9,9 @@ The panel is one compact scrolling view: a full-width program deck, a full-width
 HUD, two 2-column control blocks, and the full-width Schedule, Submissions and
 Substitution at the bottom. These tests guard that structure and that no control
 was dropped in the reflow."""
+import json
 import os
+import re
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -329,6 +331,59 @@ def t_solo_collapses_the_feeds_column():
         "solo gives Scn-Vis and Timer the full width"
     assert "body.solo .cols{" not in h and "body.solo .cols {" not in h, \
         "the Graphics|Audio block keeps its two columns in solo"
+
+
+def _config_block(html, name):
+    """The source text of `const <name> = {...};`, up to the closing `};`."""
+    start = html.index("const " + name + " = {")
+    return html[start: html.index("\n};", start)]
+
+
+def _collection_scenes(filename):
+    """{scene name: set of its item names} of an OBS collection under src/obs/."""
+    with open(os.path.join(ROOT, "src", "obs", filename), encoding="utf-8") as fh:
+        d = json.load(fh)
+    return {s["name"]: {i["name"] for i in s["settings"].get("items", [])}
+            for s in d["sources"] if s.get("id") == "scene"}
+
+
+def _assert_config_matches(cfg, filename):
+    scenes = _collection_scenes(filename)
+    listed = re.search(r"\n  scenes: \[([^\]]*)\]", cfg)
+    assert listed, "config has no scenes list"
+    for name in re.findall(r'"([^"]+)"', listed.group(1)):
+        assert name in scenes, f"{filename}: scene key {name!r} has no scene"
+    # Every OBS toggle and red-flag target; relay-driven items name no OBS item.
+    pairs = re.findall(r'\{[^{}]*?scene:"([^"]+)",\s*source:"([^"]+)"[^{}]*\}', cfg)
+    assert len(pairs) == cfg.count('source:"'), \
+        "an OBS target is not written as {..., scene:..., source:...} and escapes this check"
+    for scene, source in pairs:
+        assert scene in scenes, f"{filename}: {source!r} targets missing scene {scene!r}"
+        assert source in scenes[scene], \
+            f"{filename}: scene {scene!r} has no item {source!r}"
+
+
+def t_solo_config_targets_exist_in_both_solo_collections():
+    solo = _config_block(_html(), "CONFIG_SOLO")
+    for label in ("WEEKEND", "STARTING GRID", "GRID R8"):
+        assert f'label:"{label}"' in solo, f"solo config lacks the {label} key"
+    for filename in ("GT_Racing_Solo_POV.json", "GT_Racing_Solo_Commentary.json"):
+        _assert_config_matches(solo, filename)
+
+
+def t_endurance_config_targets_exist_in_endurance_collection():
+    _assert_config_matches(_config_block(_html(), "CONFIG"), "GT_Racing_Endurance.json")
+
+
+def t_prerace_and_grid_busses_rebuild_with_the_config():
+    h = _html()
+    body = _func_body(h, "buildControls")
+    for bus in ("gfxPreRaceBus", "gfxGridTopBus", "gfxGridBus"):
+        assert f'$("#{bus}").replaceChildren()' in body, f"{bus} is not cleared on rebuild"
+    assert "cfg.graphicsPreRace.forEach" in body, "pre-race keys not built from cfg"
+    assert "cfg.graphicsGrid.forEach" in body, "grid keys not built from cfg"
+    assert "CONFIG.graphicsPreRace" not in h and "CONFIG.graphicsGrid" not in h, \
+        "pre-race/grid keys still built once from the endurance CONFIG"
 
 
 if __name__ == "__main__":
