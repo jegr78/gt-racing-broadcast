@@ -398,10 +398,14 @@ def t_cc_builder_never_pins_unresolved_sizes():
     # on load so a profile saved by the old builder heals on its next save.
     with open(os.path.join(ROOT, "src", "ui", "control-center.html"), encoding="utf-8") as f:
         cc = f.read()
-    base = cc[cc.index("function ovBaseValues"):]
-    base = base[:base.index("\n}\n")]
-    assert "parseFloat(n) || 0" not in base
-    assert "ovDropZeroSizes(" in cc[cc.index("ovState.layout = layoutR.layout"):]
+    def fn(name):
+        body = cc[cc.index("function " + name):]
+        return body[:body.index("\n}\n")]
+    # Source smoke checks; t_ob_compile_drops_zero_box_size is the behavioural guard.
+    assert "parseFloat(n) || 0" not in fn("ovBaseValues")
+    assert "ovDropZeroSizes(ovState.layout.slots)" in fn("loadOverlay")
+    # A width/height <= 0 typed into the panel is unset, as the compiler drops it.
+    assert "value <= 0" in fn("ovSetProp")
 
 
 def t_ob_compile_align_maps_to_flex():

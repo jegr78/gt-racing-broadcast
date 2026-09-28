@@ -3556,6 +3556,8 @@ function ovStyleSlot(id) {
 function ovSetProp(id, prop, value) {
   if (!ovState.layout.slots) ovState.layout.slots = {};
   const slot = ovState.layout.slots[id] || (ovState.layout.slots[id] = {});
+  // A width/height <= 0 is unset: the compiler drops it, so the canvas must too.
+  if ((prop === 'width' || prop === 'height') && typeof value === 'number' && value <= 0) value = '';
   if (value === '' || value === undefined || value === null) delete slot[prop];
   else slot[prop] = value;
   ovApplyProp(ovState.shadow.getElementById(id), prop, slot[prop]);
@@ -3957,8 +3959,10 @@ function ovRgbToHex(v) {
 // while hidden, and a 0px slot is never a real choice (hiding is "visible").
 function ovDropZeroSizes(slots) {
   Object.keys(slots).forEach(id => {
+    const s = slots[id];
+    if (!s || typeof s !== 'object') return;    // a hand-edited layout; skip, don't throw
     ['width', 'height'].forEach(p => {
-      if (typeof slots[id][p] === 'number' && slots[id][p] <= 0) delete slots[id][p];
+      if (typeof s[p] === 'number' && s[p] <= 0) delete s[p];
     });
   });
 }
