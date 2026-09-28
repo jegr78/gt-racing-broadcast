@@ -322,6 +322,21 @@ def t_ob_hud_has_top_speed_slot():
     assert "tele-top" in ids
 
 
+def t_hud_trace_renders_per_frame_on_a_fixed_window():
+    # The throttle/brake trace must not redraw only when a poll lands (10 fps
+    # steps) nor stretch its x axis to the batch's own time span (the whole trace
+    # breathes horizontally with sample jitter): it draws per animation frame on a
+    # fixed window that scrolls with an estimated relay clock.
+    with open(os.path.join(ROOT, "src", "obs", "hud.html"), encoding="utf-8") as f:
+        html = f.read()
+    tele = html[html.index("async function pollTrace"):html.index("// Stream-chat box")]
+    poll = tele[:tele.index("function drawTrace")]
+    assert "clearRect" not in poll, "the poll must only buffer samples, not draw"
+    assert "requestAnimationFrame(drawTrace)" in tele
+    assert "TRACE_WINDOW_S" in tele
+    assert "samples[samples.length - 1].t - t0" not in tele
+
+
 def t_ob_hud_has_clock_slot():
     with open(os.path.join(ROOT, "src", "obs", "hud.html"), encoding="utf-8") as f:
         slots = ob.extract_slots(f.read())
