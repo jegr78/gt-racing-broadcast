@@ -684,7 +684,7 @@ def t_sync_pov_transform_calls_setter_with_merged_box():
     tf = pov["transform"]
     assert tf["positionX"] == 1516 and tf["positionY"] == 600   # from the override
     assert tf["boundsWidth"] == 384 and tf["boundsHeight"] == 216  # from the base
-    assert tf["boundsType"] == 2 and tf["alignment"] == 5
+    assert tf["boundsType"] == "OBS_BOUNDS_SCALE_INNER" and tf["alignment"] == 5
 
     webcam = by_source["Solo Webcam"]
     assert webcam["scene"] == "Program"
@@ -699,6 +699,35 @@ def t_sync_pov_transform_calls_setter_with_merged_box():
     # no override for #tyres-capture -> the hud.html base box.
     assert ttf["positionX"] == 7 and ttf["positionY"] == 926
     assert ttf["boundsWidth"] == 245 and ttf["boundsHeight"] == 84
+
+
+def _sync_output(result):
+    import contextlib, io, tempfile
+    buf = io.StringIO()
+    with tempfile.TemporaryDirectory() as d:
+        orig = m._active_overlay_dir
+        m._active_overlay_dir = lambda: d
+        try:
+            with contextlib.redirect_stdout(buf):
+                m._sync_pov_transform(set_transform=lambda scene, source, tf: result(source))
+        finally:
+            m._active_overlay_dir = orig
+    return buf.getvalue()
+
+
+def t_sync_pov_transform_reports_a_rejected_transform():
+    rejected = ("SetSceneItemTransform failed: {'code': 401, 'comment': 'The field "
+                "value of `boundsType` must be a string.'}")
+    out = _sync_output(lambda source: (False, rejected))
+    assert "obs: webcam box sync failed" in out and "401" in out, \
+        f"a transform OBS rejected must be reported, got {out!r}"
+
+
+def t_sync_pov_transform_is_silent_for_a_slot_the_collection_lacks():
+    missing = ("GetSceneItemId failed: {'code': 600, 'comment': 'No scene exists by "
+               "that name or UUID.', 'result': False}")
+    out = _sync_output(lambda source: (False, missing))
+    assert out == "", f"a slot the collection does not have must stay silent, got {out!r}"
 
 
 def t_run_module_exit_codes():
