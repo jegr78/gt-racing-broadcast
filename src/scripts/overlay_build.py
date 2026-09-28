@@ -336,6 +336,17 @@ OVERLAY_SLOT_OBS_SOURCES = {
                        "export_scene": "Program"},
 }
 
+def slot_boxes(base_css, override_css=""):
+    """{slot_id: box} for every mapped OBS slot, the override's props layered over
+    the hud.html base. A slot without a base rule is left out: nothing to anchor."""
+    boxes = {}
+    for slot_id in OVERLAY_SLOT_OBS_SOURCES:
+        base = box_from_css(base_css, slot_id)
+        if base:
+            boxes[slot_id] = {**base, **box_from_css(override_css, slot_id)}
+    return boxes
+
+
 # The px props we map onto an OBS scene-item transform.
 _POV_PX_RE = re.compile(r"\b(left|top|width|height)\s*:\s*(-?\d+(?:\.\d+)?)px")
 
@@ -446,6 +457,8 @@ def _declaration(prop, value):
     if prop in _PX_PROPS:
         if not isinstance(value, (int, float)):
             return None                         # px props take numbers only
+        if prop in ("width", "height") and value <= 0:
+            return None                         # a 0px box only erases the slot
         num = int(value) if float(value).is_integer() else value
         return f"{_PX_PROPS[prop]}: {num}px"
     if prop in _TEXT_PROPS:
