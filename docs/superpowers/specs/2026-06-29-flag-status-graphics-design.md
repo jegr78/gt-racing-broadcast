@@ -22,7 +22,8 @@ the Sheet like every other broadcast graphic, toggled live on air. Required flag
 Add flag graphics as a **separate, parallel control** to the existing flag text —
 not a replacement, not coupled to it. A league chooses to use the text chip *or* the
 graphics (or, in principle, both). The new control is built into OBS as fixed image
-sources in the **Stint** and **Splitscreen** scenes, maintained via the Sheet
+sources in the **Stint** and **Splitscreen** scenes (the solo collections carry them in
+**Program**, and the relay targets that scene when it runs with `--solo`), maintained via the Sheet
 **Assets** tab, and toggled from the **Director Panel** and **Companion / Web
 Buttons** (and over **Tailscale Funnel** via `/console/panel`, which stays
 first-class). A missing Sheet asset falls back to the transparent placeholder PNG, so
