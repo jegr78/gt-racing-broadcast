@@ -452,6 +452,8 @@ def _declaration(prop, value):
     if prop in _PX_PROPS:
         if not isinstance(value, (int, float)):
             return None                         # px props take numbers only
+        if prop in ("width", "height") and value <= 0:
+            return None                         # a 0px box only erases the slot
         num = int(value) if float(value).is_integer() else value
         return f"{_PX_PROPS[prop]}: {num}px"
     if prop in _TEXT_PROPS:
