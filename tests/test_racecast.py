@@ -2173,9 +2173,20 @@ def _with_env(**kv):
     return lambda: (os.environ.clear(), os.environ.update(saved))
 
 
+def _tripwire_event_start():
+    """Make event_start raise instead of bringing the real stack up (relay, OBS,
+    Companion, Standby switch) should a takeover test's abort path ever not fire.
+    Returns a restore callable."""
+    orig = m.event_start
+    m.event_start = lambda a, **kw: (_ for _ in ()).throw(
+        AssertionError("event_start must not run in this test"))
+    return lambda: setattr(m, "event_start", orig)
+
+
 def t_event_takeover_blocks_league_mismatch():
     orig = m._relay_fetch_json
     restore = _with_env(RACECAST_SHEET_ID="SHEET_B")
+    untrip = _tripwire_event_start()
     m._relay_fetch_json = lambda url, timeout=3: {
         "league": {"sheet_id": "SHEET_A"}, "live": {"feed": "A", "stint": 3, "mode": "race"}}
     try:
@@ -2186,12 +2197,14 @@ def t_event_takeover_blocks_league_mismatch():
             assert "league mismatch" in str(e.code)
     finally:
         m._relay_fetch_json = orig
+        untrip()
         restore()
 
 
 def t_event_takeover_unreachable_without_stint_errors():
     orig = m._relay_fetch_json
     restore = _with_env(RACECAST_SHEET_ID=None, RACECAST_SHEET_PUSH_URL="x")
+    untrip = _tripwire_event_start()
     def _boom(url, timeout=3):
         raise OSError("refused")
     m._relay_fetch_json = _boom
@@ -2203,6 +2216,7 @@ def t_event_takeover_unreachable_without_stint_errors():
             assert "--stint" in str(e.code)
     finally:
         m._relay_fetch_json = orig
+        untrip()
         restore()
 
 
@@ -2287,7 +2301,14 @@ def t_funnel_takeover_base_builds_console_url():
 
 def t_event_takeover_funnel_requires_secret():
     # --funnel with no CONSOLE_SECRET in the active profile -> clear abort.
+    # The secret lookup applies the checkout's active profile over the env, so a
+    # machine with a real league (and its CONSOLE_SECRET) active would skip the
+    # abort and run the whole event bring-up (relay, OBS, Companion, Standby
+    # switch) for real. Neutralise the injection, and trip-wire event_start.
     restore = _with_env(RACECAST_CONSOLE_SECRET="", RACECAST_SHEET_ID="L1")
+    orig_apply, m._apply_active_profile_env = m._apply_active_profile_env, lambda: None
+    orig_es, m.event_start = m.event_start, lambda a, **kw: (_ for _ in ()).throw(
+        AssertionError("event_start must not run without a secret"))
     try:
         try:
             m.event_takeover(["producer-a.example.ts.net", "--funnel", "--stint", "3"])
@@ -2296,6 +2317,7 @@ def t_event_takeover_funnel_requires_secret():
             msg = str(e.code).lower() if e.code else ""
             assert "secret" in msg or "console_secret" in msg
     finally:
+        m._apply_active_profile_env, m.event_start = orig_apply, orig_es
         restore()
 
 
@@ -2309,6 +2331,8 @@ def t_event_takeover_funnel_auth_rejected_aborts():
     orig_get, m._takeover_get = m._takeover_get, fake_get
     orig_es, m.event_start = m.event_start, lambda a, **kw: (_ for _ in ()).throw(
         AssertionError("event_start must not run on auth-reject"))
+    # Keep the checkout's active profile out: it would replace our fake secret.
+    orig_apply, m._apply_active_profile_env = m._apply_active_profile_env, lambda: None
     try:
         try:
             m.event_takeover(["producer-a.example.ts.net", "--funnel", "--stint", "3"])
@@ -2318,6 +2342,7 @@ def t_event_takeover_funnel_auth_rejected_aborts():
             assert "secret" in msg or "rejected" in msg
     finally:
         m._takeover_get, m.event_start = orig_get, orig_es
+        m._apply_active_profile_env = orig_apply
         restore()
 
 
@@ -2331,6 +2356,8 @@ def t_event_takeover_funnel_401_blames_old_relay_not_secret():
     orig_get, m._takeover_get = m._takeover_get, fake_get
     orig_es, m.event_start = m.event_start, lambda a, **kw: (_ for _ in ()).throw(
         AssertionError("event_start must not run on auth-reject"))
+    # Keep the checkout's active profile out: it would replace our fake secret.
+    orig_apply, m._apply_active_profile_env = m._apply_active_profile_env, lambda: None
     try:
         try:
             m.event_takeover(["producer-a.example.ts.net", "--funnel", "--stint", "3"])
@@ -2342,6 +2369,7 @@ def t_event_takeover_funnel_401_blames_old_relay_not_secret():
             assert "console_secret" not in msg, msg   # must NOT misattribute to the secret
     finally:
         m._takeover_get, m.event_start = orig_get, orig_es
+        m._apply_active_profile_env = orig_apply
         restore()
 
 
