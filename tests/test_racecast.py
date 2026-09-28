@@ -1739,6 +1739,30 @@ def t_overlay_slots_data_from_real_hud():
     assert "#stint" in r["css"] and r["sample"]["stint"]
 
 
+def t_overlay_slots_data_flags_telemetry_for_solo_pov_only():
+    # The builder canvas lifts the HUD's runtime gating; the telemetry block must
+    # only appear for a profile whose relay serves telemetry (solo + pov), never
+    # in endurance or solo commentary, where the live HUD never shows it.
+    import tempfile
+    for env, want in (("KIND=solo\nTEMPLATE=pov\n", True),
+                      ("KIND=solo\nTEMPLATE=commentary\n", False),
+                      ("", False)):
+        with tempfile.TemporaryDirectory() as td:
+            os.makedirs(os.path.join(td, "profiles", "lg"))
+            open(os.path.join(td, ".env.example"), "w").close()
+            with open(os.path.join(td, "profiles", "lg", "profile.env"), "w") as fh:
+                fh.write("NAME=League\n" + env)
+            os.makedirs(os.path.join(td, "runtime"))
+            orig_b, orig_r = m._env_base, m._runtime_base_dir
+            m._env_base = lambda *a, **k: td
+            m._runtime_base_dir = lambda: os.path.join(td, "runtime")
+            try:
+                r = m.overlay_slots_data("hud")
+            finally:
+                m._env_base, m._runtime_base_dir = orig_b, orig_r
+        assert r["ok"] and r["telemetry"] is want, (env, r.get("telemetry"))
+
+
 def t_overlay_slots_data_includes_flag_presets():
     r = m.overlay_slots_data("hud")
     assert r["ok"], r

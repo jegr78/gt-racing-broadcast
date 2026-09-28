@@ -5655,10 +5655,23 @@ def _css_has_rules(text):
     return bool(re.sub(r"/\*.*?\*/", "", text or "", flags=re.S).strip())
 
 
+def _profile_has_telemetry():
+    """Whether the active profile's relay serves GT7 telemetry: a solo POV
+    profile (the relay's telemetry_active gate, minus the machine opt-out).
+    Best effort: False when no profile resolves."""
+    try:
+        root = _env_base(IS_FROZEN, _real_executable(), HERE)
+        rc = pcfg.resolve_config(root, runtime_root=_runtime_base_dir())
+        return rc.kind == "solo" and rc.template.strip().lower() == "pov"
+    except Exception:  # noqa: BLE001  best effort
+        return False
+
+
 def overlay_slots_data(page):
     """The base page's editable slots + base <style> + slot markup + sample data,
-    so the Control Center renders a same-origin WYSIWYG canvas.
-    {ok, page, slots, css, body, sample, flagPresets} or {ok:false, error}."""
+    so the Control Center renders a same-origin WYSIWYG canvas. `telemetry` says
+    whether the canvas should show the telemetry block the live HUD self-gates.
+    {ok, page, slots, css, body, sample, flagPresets, telemetry} or {ok:false, error}."""
     try:
         if page != "hud":
             return {"ok": False, "error": "invalid page"}
@@ -5668,7 +5681,8 @@ def overlay_slots_data(page):
         return {"ok": True, "page": page, "slots": ob.extract_slots(html),
                 "css": ob.base_style(html), "body": ob.base_body(html),
                 "sample": ob.SAMPLE.get(page, {}),
-                "flagPresets": [dict(p) for p in ob.FLAG_PRESETS]}
+                "flagPresets": [dict(p) for p in ob.FLAG_PRESETS],
+                "telemetry": _profile_has_telemetry()}
     except Exception as exc:
         return {"ok": False, "error": f"could not read overlay slots: {exc}"}
 
