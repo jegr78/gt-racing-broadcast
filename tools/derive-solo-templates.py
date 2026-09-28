@@ -56,6 +56,12 @@ TYRES_CROP = {"crop_left": 258, "crop_top": 950, "crop_right": 1336, "crop_botto
 # Intro/Outro clips are excluded because they carry their own audio.
 MIC_TARGET_SCENES = ("Program", "Interview", "Standby", "Intermission", "Discord")
 
+# POV Intermission: the driver's webcam at 60% of the frame width (16:9), bottom edge
+# flush with the intermission chat panel (src/obs/intermission.html: bottom 96 px ->
+# y 984) and a left margin mirroring the chat's 64 px right margin.
+INTERMISSION_WEBCAM_POS = (64, 336)
+INTERMISSION_WEBCAM_BOUNDS = (1152, 648)
+
 # scene_order after derivation (drops Stint/Splitscreen, adds the device scenes).
 SCENE_ORDER = ["Program", "Standby", "Intro", "Outro", "Interview", "Discord",
                "Intermission", "Solo Capture", "Solo Webcam", "Commentary Mic"]
@@ -143,10 +149,12 @@ def _program_item(template_item, name, src_uuid, pos, bounds, item_id):
     return it
 
 
-def derive(with_tyres=False):
+def derive(with_tyres=False, intermission_webcam=False):
     """Build the solo collection. `with_tyres=True`, Commentary only, adds the
     'Solo Tyres/Fuel Capture' source cropped to GT7's bottom-left tyre/fuel widget.
-    POV omits it, because the driver's own feed already shows it."""
+    POV omits it, because the driver's own feed already shows it.
+    `intermission_webcam=True`, POV only, puts the driver's webcam into the
+    Intermission scene beside the chat (INTERMISSION_WEBCAM_POS/_BOUNDS)."""
     with open(os.path.join(OBS, "GT_Racing_Endurance.json"), encoding="utf-8") as fh:
         col = json.load(fh)
 
@@ -244,6 +252,18 @@ def derive(with_tyres=False):
     other_targets = [n for n in MIC_TARGET_SCENES if n != "Program"]
     mic_targets = {name: _add_mic_reference(by[name], discord_ref_item, U["mic_scene"])
                    for name in other_targets}
+    if intermission_webcam:
+        inter = mic_targets["Intermission"]
+        cam_id = int(inter["settings"].get("id_counter", 0)) + 1
+        inter_cam = _program_item(pov_item, "Solo Webcam", U["cam_scene"],
+                                  INTERMISSION_WEBCAM_POS, INTERMISSION_WEBCAM_BOUNDS,
+                                  item_id=cam_id)
+        inter_items = inter["settings"]["items"]
+        # Above the background, below the chat panel, so the chat stays on top.
+        at = next(i for i, it in enumerate(inter_items)
+                  if it.get("name") == "Intermission Chat")
+        inter_items.insert(at, inter_cam)
+        inter["settings"]["id_counter"] = cam_id
 
     # Remove the endurance-only scenes and sources, substitute the mic-wired scenes,
     # then append the solo additions.
@@ -291,10 +311,15 @@ def derive(with_tyres=False):
     return col
 
 
+def derive_all():
+    """{output file: collection}. Commentary gets the tyres/fuel second-capture; POV
+    omits it and instead shows the driver's webcam in the Intermission scene."""
+    return {"GT_Racing_Solo_Commentary.json": derive(with_tyres=True),
+            "GT_Racing_Solo_POV.json": derive(with_tyres=False, intermission_webcam=True)}
+
+
 def main():
-    # Commentary gets the tyres/fuel second-capture; POV omits it.
-    per_file = {"GT_Racing_Solo_Commentary.json": derive(with_tyres=True),
-                "GT_Racing_Solo_POV.json": derive(with_tyres=False)}
+    per_file = derive_all()
     for fn in OUTPUTS:
         path = os.path.join(OBS, fn)
         with open(path, "w", encoding="utf-8") as fh:

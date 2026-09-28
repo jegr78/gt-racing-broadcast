@@ -271,14 +271,14 @@ def t_solo_templates_regeneration_is_deterministic():
 def t_committed_solo_json_matches_derive_output():
     """The committed solo collections MUST equal a fresh derive(): they are generated,
     and a hand-edit would be dropped by the next `derive-solo-templates.py` run.
-    Commentary carries the tyres/fuel crop, POV does not."""
+    Commentary carries the tyres/fuel crop; POV the Intermission webcam."""
     import importlib.util
     spec = importlib.util.spec_from_file_location(
         "derive_solo_templates", os.path.join(ROOT, "tools", "derive-solo-templates.py"))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    expected = {"GT_Racing_Solo_Commentary.json": mod.derive(with_tyres=True),
-                "GT_Racing_Solo_POV.json": mod.derive(with_tyres=False)}
+    expected = mod.derive_all()
+    assert set(expected) == {"GT_Racing_Solo_Commentary.json", "GT_Racing_Solo_POV.json"}
     for fn, want in expected.items():
         with open(os.path.join(ROOT, "src", "obs", fn), encoding="utf-8") as fh:
             got = json.load(fh)
@@ -367,6 +367,37 @@ def t_solo_program_scene_item_ids_unique():
             if it.get("name") in solo_names:
                 assert all_ids.count(it["id"]) == 1, \
                     f"{fn}: solo item {it['name']} id {it['id']} collides ({all_ids})"
+
+
+def _intermission_items(fn):
+    coll = _load_solo(fn)
+    scene = next(s for s in coll["sources"] if s.get("name") == "Intermission")
+    return coll, scene["settings"]["items"]
+
+
+def t_pov_intermission_shows_the_webcam_beside_the_chat():
+    # POV: the driver's webcam fills the left of the Intermission scene, 60% of the
+    # frame wide (16:9), bottom edge flush with the intermission chat panel
+    # (intermission.html: bottom 96 px -> y 984), left margin mirroring the chat's
+    # 64 px right margin. It sits above the background and below the chat.
+    coll, items = _intermission_items("GT_Racing_Solo_POV.json")
+    names = [it["name"] for it in items]
+    assert "Solo Webcam" in names, names
+    cam = items[names.index("Solo Webcam")]
+    assert names.index("Intermission Background") < names.index("Solo Webcam") \
+        < names.index("Intermission Chat"), names
+    cam_scene = next(s for s in coll["sources"] if s.get("name") == "Solo Webcam")
+    assert cam["source_uuid"] == cam_scene["uuid"]
+    assert cam["visible"] is True and cam["bounds_type"] == 2
+    assert cam["pos"] == {"x": 64.0, "y": 336.0}
+    assert cam["bounds"] == {"x": 1152.0, "y": 648.0}
+    ids = [it["id"] for it in items]
+    assert ids.count(cam["id"]) == 1, ids
+
+
+def t_commentary_intermission_has_no_webcam():
+    _, items = _intermission_items("GT_Racing_Solo_Commentary.json")
+    assert "Solo Webcam" not in [it["name"] for it in items]
 
 
 def t_seed_committed_graphics_rejects_traversal():

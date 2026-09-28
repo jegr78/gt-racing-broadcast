@@ -58,7 +58,10 @@ collection.
   must be running for it to render). The director cuts to this scene with the Companion
   **INTERMISSION** button or the panel's **INTERMISSION** macro; when to use it is up to
   the team. The per-league overlay file `profiles/<name>/overlay/intermission.css` overrides
-  the chat panel's appearance (see [HUD overlays](HUD-Overlays)).
+  the chat panel's appearance (see [HUD overlays](HUD-Overlays)). In the **solo POV**
+  collection the scene also shows the driver's webcam (the **Solo Webcam** scene) to the
+  left of the chat panel: 1152×648 (60% of the frame width), its bottom edge flush with
+  the panel's. It sits above the background and below the chat.
 
 > **Broadcast graphics are local files.** The still-graphics image sources. Overlay,
 > Standings, Schedule, Race Results, Quali Results, Standby, Standby Cover, the three
