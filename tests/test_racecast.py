@@ -598,6 +598,18 @@ def t_relay_daemon_argv():
 
 
 def t_oneshot_extra():
+    # setup's default import name follows RACECAST_KIND, which another test in this
+    # process (or a solo profile active on the machine) may have left set; these
+    # expectations are for the endurance default.
+    saved = os.environ.pop("RACECAST_KIND", None)
+    try:
+        _oneshot_extra_cases()
+    finally:
+        if saved is not None:
+            os.environ["RACECAST_KIND"] = saved
+
+
+def _oneshot_extra_cases():
     # Signature: (command, rest, runtime_dir, base_dir). --out is always injected,
     # profile-scoped, not only when frozen.
     R = os.path.join("x", "runtime", "demo")   # profile runtime

@@ -11,6 +11,21 @@ spec = importlib.util.spec_from_file_location(
     "irofeeds", os.path.join(ROOT, "src", "relay", "racecast-feeds.py"))
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 
+class _NoObs:
+    """Default obs_ws stand-in: every call reports "no OBS", nothing connects.
+    UPPERCASE names (scene-name constants) fall back to the caller's default."""
+    def __getattr__(self, name):
+        if name.isupper() or name.startswith("_"):
+            raise AttributeError(name)
+        return lambda *a, **k: (False, "no OBS in tests")
+
+
+# No test in this file may drive a real OBS. A producer machine runs one on 4455:
+# a director POST to /console/obs/scene would cut its program to "Stint", and the
+# live round-trips made these checks flaky under load. A fake (not None) keeps the
+# relay's OBS routes up, so a test can still swap in its own recording fake.
+m._obs_ws = _NoObs()
+
 # Manual feed arm defaults on, so a bare Relay starts its feeds paused. These
 # checks exercise the auto-pull path, so pin the opt-out. (#492)
 os.environ.setdefault("RACECAST_MANUAL_FEED_ARM", "0")
@@ -1165,6 +1180,12 @@ def t_console_obs_split_forbidden_for_commentator():
 def t_obs_split_get_route_for_companion():
     # The Companion SPLIT button hits the tailnet-root GET route with no token. (#591)
     _assert_split_b_on_air(*_split_with_b_on_air(lambda port: _get(port, "/obs/split")))
+
+
+def t_tests_never_reach_a_real_obs():
+    # Every OBS route here must run against None or a fake, never the obs_ws
+    # module that would connect to the machine's OBS.
+    assert m._obs_ws is None or getattr(m._obs_ws, "__file__", None) is None, m._obs_ws
 
 
 if __name__ == "__main__":
