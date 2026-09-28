@@ -1059,6 +1059,56 @@ def t_hud_page_publishes_team_colors_and_mode():
         "the bar carries no background in base; a profile decides"
 
 
+def _cc_src():
+    with open(os.path.join(ROOT, "src", "ui", "control-center.html"), encoding="utf-8") as f:
+        return f.read()
+
+
+def _cc_fn(src, name):
+    body = src[src.index("function " + name):]
+    return body[:body.index("\n}\n")]
+
+
+def t_cc_canvas_cascades_like_the_live_overlay():
+    # Live, override.css is the slot rules followed by customCss (last wins). The
+    # canvas must cascade the same way: base CSS, then the slot values as #id
+    # rules in a stylesheet (not inline styles, which would beat customCss), then
+    # customCss, then the builder's own chrome.
+    build = _cc_fn(_cc_src(), "ovBuildCanvas")
+    i_slot, i_custom = build.index("ov-slot-css"), build.index("ov-custom-css")
+    i_chrome = build.index("OV_SHADOW_CSS")
+    assert i_slot < i_custom < i_chrome, (i_slot, i_custom, i_chrome)
+    apply = _cc_fn(_cc_src(), "ovApplyProp")
+    assert "el.style" not in apply, "slot values must not be inline styles"
+    assert "ovSlotStyle(" in apply and "ovFlushSlotCss()" in apply
+    # The pop-out moves the canvas in the DOM, which re-parses every <style> from
+    # its text: CSSOM-inserted rules would silently vanish, so the slot sheet is
+    # written as text.
+    assert "insertRule" not in _cc_fn(_cc_src(), "ovSlotStyle")
+    assert "textContent" in _cc_fn(_cc_src(), "ovFlushSlotCss")
+
+
+def t_cc_custom_css_edits_update_the_canvas():
+    src = _cc_src()
+    assert "ovCustomCssChanged" in src
+    assert 'id="overlayCss"' in src and "ovCustomCssChanged()" in src
+
+
+def t_cc_base_values_ignore_custom_css():
+    # Save-all pins each slot's base values; reading them with customCss applied
+    # would copy custom rules into the slot map.
+    base = _cc_fn(_cc_src(), "ovBaseValues")
+    assert "disabled = true" in base and "disabled = false" in base
+
+
+def t_cc_panel_flags_custom_css_overrides():
+    src = _cc_src()
+    assert "ovCustomOverrides(" in _cc_fn(src, "ovRenderPanel")
+    own = _cc_fn(src, "ovCssPropOwner")
+    for css in ("padding-", "border-", "background", "transform", "clip-path"):
+        assert css in own, css
+
+
 if __name__ == "__main__":
     for n, fn in sorted(globals().items()):
         if n.startswith("t_") and callable(fn):
