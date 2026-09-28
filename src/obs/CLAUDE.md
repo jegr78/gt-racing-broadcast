@@ -36,15 +36,19 @@ keeps the rules. The per-league overlay override and the visual builder are in
   `RACECAST_INTRO_URL`/`RACECAST_OUTRO_URL`/`RACECAST_TRAILER_URL` env overrides) into
   `runtime/<profile>/media/`; the `Intro`/`Outro`/`Trailer` OBS scenes play them looping
   with audio.
-  The localized export also **syncs the per-league POV-box position**: `setup-assets.py`
-  reads the active profile's `overlay/hud.css` (`--overlay-css`, passed by the CLI) and
-  applies its `#pov` box (`left/top/width/height`) onto the OBS **"Feed POV"** scene item
-  (`pos`/`bounds`, the 1:1 overlay-frame↔PiP mapping). The same box is pushed **live** to
-  a running OBS by the `racecast obs refresh` / `relay start` / `event start` hook
-  (`_sync_pov_transform` → `obs_ws.set_scene_item_transform`), so a builder edit aligns the
-  PiP immediately without a re-import. POV-only (`overlay_build.OVERLAY_SLOT_OBS_SOURCES`);
-  best-effort, a missing overlay/OBS leaves today's behavior. Pure parser:
-  `overlay_build.pov_box_from_css`. Spec: `docs/superpowers/specs/2026-06-26-pov-box-obs-sync-design.md`.
+  The localized export also **syncs the overlay boxes**: for every slot in
+  `overlay_build.OVERLAY_SLOT_OBS_SOURCES` (`#pov` → "Feed POV", `#webcam` → "Solo Webcam",
+  `#tyres-capture` → "Solo Tyres/Fuel Capture"), `setup-assets.py` layers the active
+  profile's `overlay/hud.css` (`--overlay-css`) over the `hud.html` base box
+  (`overlay_build.slot_boxes`) and writes it onto the scene item's `pos`/`bounds`, the 1:1
+  overlay-frame↔PiP mapping. Only items the collection actually has are touched and
+  reported. The same boxes are pushed **live** by the `racecast obs refresh` /
+  `relay start` / `event start` hook (`_sync_pov_transform` →
+  `obs_ws.set_scene_item_transform`), so a builder edit aligns the PiP without a
+  re-import. obs-websocket v5 takes `boundsType` as the enum name
+  (`OBS_BOUNDS_SCALE_INNER`), not the number the collection JSON stores; a number is
+  rejected with code 401. A transform OBS rejects is printed, a slot the collection
+  lacks stays silent. Spec: `docs/superpowers/specs/2026-06-26-pov-box-obs-sync-design.md`.
 - **Broadcast graphics are pure-runtime** (same model as the Intro/Outro/Trailer clips): the
   still-graphics (Overlay, Standings, Schedule, Race/Quali Results, the three weather
   overlays, Standby, …) are **never committed**. `python3 src/relay/get-graphics.py`
