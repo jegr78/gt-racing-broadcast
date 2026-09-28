@@ -101,6 +101,11 @@ SAMPLE = {
         "tele-avg": "1:36.205",
         "tele-dist-lbl": "DISTANCE",
         "tele-dist": "1234.5 km",
+        # The stream chat is a message list; one "user: text" line per message.
+        "chat": ("SpeedFan: What a start!\n"
+                 "PitWall: Box this lap for fresh softs\n"
+                 "Marco_R: That overtake into turn 1 was clean\n"
+                 "lena.gt: Tyre temps look good, pace holding up nicely"),
         "round-flag": {"flag": "belgium"},
         "team1-logo": {"brand": "bmw"},
         "team2-logo": {"brand": "porsche"},

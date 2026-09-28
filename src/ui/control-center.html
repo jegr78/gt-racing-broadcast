@@ -290,8 +290,10 @@
   .ovprev { margin:.4em 0; border:1px solid #2A3550; border-radius:6px; padding:.2em .5em; }
   .ovprev > summary { cursor:pointer; font-weight:600; }
   .ovprev-row { display:flex; align-items:center; gap:.4em; margin:.25em 0; font-size:.85em; }
-  .ovprev-row input[type="text"], .ovprev-row select { flex:1; min-width:0; background:#232C42;
+  .ovprev-row input[type="text"], .ovprev-row select, .ovprev-row textarea { flex:1; min-width:0; background:#232C42;
     color:var(--txt); border:1px solid #2A3550; border-radius:4px; padding:.15em .3em; }
+  .ovprev-row textarea { font:13px var(--mono); resize:vertical; }
+  .ovprev-row textarea:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
   textarea.css-editor { width:100%; box-sizing:border-box; resize:vertical;
                    background:#232C42; color:var(--txt);
                    border:1px solid var(--line); border-radius:8px;
@@ -3194,6 +3196,7 @@ async function loadOverlay() {
   ovPreviewInit();
   ovState.baseCss = slotsR.css || '';
   ovState.body = slotsR.body || '';
+  ovState.telemetry = !!slotsR.telemetry;
   ovState.layout = layoutR.layout || {version: 1, page: overlayPage, slots: {}, fonts: [], customCss: ''};
   if (!ovState.layout.slots) ovState.layout.slots = {};
   ovDropZeroSizes(ovState.layout.slots);
@@ -3321,6 +3324,7 @@ function ovBuildCanvas() {
   });
   sh.appendChild(sel);
   ovState.selBox = sel;
+  ovUngate(sh);
   ovState.slots.forEach(s => {
     const el = sh.getElementById(s.id);
     if (!el) return;
@@ -3344,12 +3348,57 @@ function ovBuildCanvas() {
   ovPositionSel();
 }
 
+// hud.html hides #tele, #chat and some telemetry values inline until live data
+// arrives; its page JS shows them. The canvas has no page JS, so lift that inline
+// display:none from every slot, and every container holding one, or those slots
+// could be selected but never seen. The telemetry block stays hidden unless the
+// active profile's relay serves telemetry (solo POV): the live HUD never shows it
+// anywhere else. The builder's own hiding (visible: false) is unaffected: it only
+// dims a slot through the .ov-hidden class and never sets an inline display.
+function ovUngate(root) {
+  const tele = root.getElementById('tele');
+  root.querySelectorAll('[style]').forEach(el => {
+    if (el.style.display !== 'none') return;
+    if (tele && !ovState.telemetry && (el === tele || tele.contains(el))) return;
+    if (el.matches('[data-edit]') || el.querySelector('[data-edit]')) el.style.display = '';
+  });
+}
+
+// Whether a slot sits in the telemetry block (#tele), which only a solo POV
+// profile's HUD ever shows.
+function ovInTele(id) {
+  const tele = ovState.shadow && ovState.shadow.getElementById('tele');
+  const el = ovState.shadow && ovState.shadow.getElementById(id);
+  return !!(tele && el && tele.contains(el));
+}
+
+// Mirror of hud.html's chat rows: one .msg per "user: text" line, the name in .u.
+// A line without "name: " is shown as plain text.
+function ovFillChat(el, text) {
+  const log = el.querySelector('#chat-log');
+  if (!log) return;
+  log.textContent = '';
+  String(text || '').split('\n').filter(ln => ln.trim()).forEach(ln => {
+    const i = ln.indexOf(': ');
+    const row = document.createElement('div'); row.className = 'msg';
+    if (i >= 0) {
+      const u = document.createElement('span'); u.className = 'u';
+      u.textContent = ln.slice(0, i) + ':';
+      row.appendChild(u);
+    }
+    const t = document.createElement('span');
+    t.textContent = (i < 0 ? ln : ' ' + ln.slice(i + 2));
+    row.appendChild(t); log.appendChild(row);
+  });
+}
+
 function ovFillSample() {
   const pv = ovState.preview || ovPreviewDefaults();
   const vals = pv.values || {};
   ovState.slots.forEach(s => {
     const el = ovState.shadow.getElementById(s.id);
     if (!el) return;
+    if (s.id === 'chat') { ovFillChat(el, vals.chat); return; }
     const img = el.querySelector('img');
     // Flag status: colour from the picked state (data-state), text from its label.
     if (s.id === 'flag-status') {
@@ -3463,8 +3512,10 @@ function ovRenderPreviewPanel() {
   // flag-status (driven by the picker above). The clock IS editable here: on air
   // it is the live race timer, but the offline builder canvas only ever shows a
   // static sample string, so letting the operator set it helps them fit the slot.
+  // Telemetry slots are left out where the canvas keeps #tele hidden.
   ovState.slots.filter(s => s.props.indexOf('fontSize') !== -1
-      && s.id !== 'flag-status').forEach(s => {
+      && s.id !== 'flag-status'
+      && (ovState.telemetry || !ovInTele(s.id))).forEach(s => {
     const row = document.createElement('label'); row.className = 'ovprev-row';
     row.appendChild(document.createTextNode(s.label));
     const inp = document.createElement('input'); inp.type = 'text';
@@ -3473,6 +3524,17 @@ function ovRenderPreviewPanel() {
     inp.oninput = () => ovPreviewText(s.id, inp.value);
     row.appendChild(inp); ff.appendChild(row);
   });
+  // The stream chat is a message list, not a text slot: one "user: text" per line.
+  const chat = ovState.slots.find(s => s.id === 'chat');
+  if (chat) {
+    const row = document.createElement('label'); row.className = 'ovprev-row';
+    row.appendChild(document.createTextNode(chat.label));
+    const ta = document.createElement('textarea'); ta.rows = 4;
+    ta.placeholder = 'user: message, one per line';
+    ta.value = (typeof pv.values.chat === 'string') ? pv.values.chat : '';
+    ta.oninput = () => ovPreviewText('chat', ta.value);
+    row.appendChild(ta); ff.appendChild(row);
+  }
 }
 
 function ovPreviewText(id, value) { ovState.preview.values[id] = value; ovPreviewSave(); ovFillSample(); }
