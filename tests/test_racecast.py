@@ -84,7 +84,7 @@ def t_help_flag_after_any_command_never_dispatches():
             try:
                 r = m.route(argv)
             except ValueError as e:
-                raise AssertionError(f"{argv} was parsed as a command, not help: {e}")
+                raise AssertionError(f"{argv} was parsed as a command, not help: {e}") from e
             assert r == {"kind": "help", "topic": cmd}, (argv, r)
 
 
