@@ -11,8 +11,6 @@ deliberately import-free, so the port constants below (GT7_RECV_PORT / GT7_SEND_
 are DUPLICATED there (racecast-feeds.py also carries GT7_HEARTBEAT_S for its own loop).
 Keep the shared copies in sync.
 """
-import importlib.util
-import os
 import socket
 import time
 
@@ -25,13 +23,10 @@ NO_CONSOLE_NOTE = ("No PlayStation answered. Make sure GT7 is in an active sessi
 
 
 def _default_decrypt(data):
-    """Lazily load gt7_crypto.decrypt_packet (sibling module, importlib to stay
-    runnable both from src/ and the frozen bundle)."""
-    here = os.path.dirname(os.path.abspath(__file__))
-    spec = importlib.util.spec_from_file_location(
-        "gt7_crypto", os.path.join(here, "gt7_crypto.py"))
-    mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
-    return mod.decrypt_packet(data)
+    """gt7_crypto.decrypt_packet, imported as a module: the binary freezes this file
+    into its archive, where no gt7_crypto.py sits next to __file__."""
+    import gt7_crypto
+    return gt7_crypto.decrypt_packet(data)
 
 
 def _default_sock_factory():

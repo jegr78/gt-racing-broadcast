@@ -855,6 +855,15 @@ def t_example_overlay_matches_demo_standard():
         "example layout-hud.json != demo standard"
 
 
+def t_slot_boxes_layers_the_override_over_the_hud_base():
+    base = "#pov { left: 1516px; top: 600px; width: 384px; height: 216px; }" \
+           "#webcam { left: 14px; top: 695px; width: 336px; height: 189px; }"
+    boxes = ob.slot_boxes(base, "#pov { left: 10px; }")
+    assert boxes["pov"] == {"left": 10, "top": 600, "width": 384, "height": 216}, boxes
+    assert boxes["webcam"] == {"left": 14, "top": 695, "width": 336, "height": 189}, boxes
+    assert "tyres-capture" not in boxes, "a slot without a base rule has nothing to anchor"
+
+
 def t_pov_box_from_css_full_rule():
     css = "#pov { left: 1516px; top: 600px; width: 384px; height: 216px; }"
     assert ob.pov_box_from_css(css) == {"left": 1516, "top": 600,

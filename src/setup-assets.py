@@ -285,6 +285,56 @@ def apply_collection_name(collection, name):
     return collection
 
 
+def read_hud_html(base):
+    """The base HUD page next to this script: obs/hud.html in the repo and the
+    binary, hud.html at the root of the built package. '' when neither exists."""
+    for path in (os.path.join(base, "obs", "hud.html"), os.path.join(base, "hud.html")):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                return fh.read()
+        except OSError:
+            continue
+    return ""
+
+
+def bake_overlay_boxes(collection, base_html, override_css=""):
+    """Apply every mapped overlay slot's box (the profile override layered over the
+    hud.html base) onto its OBS scene item. Returns [(slot_id, source, scene, box)]
+    for the slots it applied."""
+    applied = []
+    base_css = overlay_build.base_style(base_html or "")
+    if base_css:
+        boxes = overlay_build.slot_boxes(base_css, override_css)
+    else:                                   # no base page found: the override alone
+        boxes = {s: b for s in overlay_build.OVERLAY_SLOT_OBS_SOURCES
+                 if (b := overlay_build.box_from_css(override_css, s))}
+    for slot_id, box in boxes.items():
+        tgt = overlay_build.OVERLAY_SLOT_OBS_SOURCES[slot_id]
+        scene = tgt.get("export_scene")
+        if _has_box_item(collection, tgt["source"], scene):
+            apply_box_transform(collection, tgt["source"], box, scene=scene)
+            applied.append((slot_id, tgt["source"], scene, box))
+    return applied
+
+
+def _has_box_item(collection, source_name, scene=None):
+    """True when apply_box_transform would find an item to move."""
+    def found(node):
+        if isinstance(node, dict):
+            if (node.get("name") == source_name and isinstance(node.get("pos"), dict)
+                    and isinstance(node.get("bounds"), dict)):
+                return True
+            return any(found(v) for v in node.values())
+        if isinstance(node, list):
+            return any(found(v) for v in node)
+        return False
+    if scene is None:
+        return found(collection)
+    return any(found(src.get("settings", {}).get("items"))
+               for src in collection.get("sources", [])
+               if isinstance(src, dict) and src.get("id") == "scene" and src.get("name") == scene)
+
+
 def apply_box_transform(collection, source_name, overrides, scene=None):
     """Set pos/bounds of scene items named `source_name` from `overrides` (a
     box_from_css dict: any subset of left/top/width/height). Unset keys keep the
@@ -479,20 +529,17 @@ def main():
     swapped = localize_discord_audio(localized, sys.platform, web=web, browser=browser)
     device_unset = localize_device_sources(localized, sys.platform, os.environ)
     apply_collection_name(localized, a.collection)
+    css_text = ""
     if a.overlay_css and os.path.isfile(a.overlay_css):
-        css_text = ""
         try:
             with open(a.overlay_css, encoding="utf-8") as fh:
                 css_text = fh.read()
         except OSError as e:
             print(f"  NOTE: could not read overlay CSS {a.overlay_css}: {e}")
-        for slot_id, tgt in overlay_build.OVERLAY_SLOT_OBS_SOURCES.items():
-            box = overlay_build.box_from_css(css_text, slot_id)   # css_text read once
-            apply_box_transform(localized, tgt["source"], box,
-                                scene=tgt.get("export_scene"))
-            if box:
-                where = f" (scene '{tgt['export_scene']}')" if tgt.get("export_scene") else ""
-                print(f"  {slot_id} box synced to OBS '{tgt['source']}'{where}: {box}")
+    for slot_id, source, scene, box in bake_overlay_boxes(localized, read_hud_html(base),
+                                                          css_text):
+        where = f" (scene '{scene}')" if scene else ""
+        print(f"  {slot_id} box synced to OBS '{source}'{where}: {box}")
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     with open(a.out, "w", encoding="utf-8") as fh:
         json.dump(localized, fh, ensure_ascii=False, indent=4)

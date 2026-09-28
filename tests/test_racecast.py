@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Stdlib checks for the racecast dispatcher routing. Run: python3 tests/test_racecast.py"""
-import importlib.util, io, os, sys, tempfile, time
+import contextlib, importlib.util, io, os, sys, tempfile, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -64,6 +64,72 @@ def t_oneshot_with_args():
 
 def t_help_when_empty():
     assert m.route([])["kind"] == "help"
+
+
+def _routed_commands():
+    """Every command literal route() dispatches on, read from its source, so a new
+    subcommand is covered by the help guard without editing this test."""
+    import inspect, re
+    src = inspect.getsource(m.route)
+    cmds = set(re.findall(r'cmd == "([a-z0-9-]+)"', src))
+    return cmds | set(m.SERVICES)
+
+
+def t_help_flag_after_any_command_never_dispatches():
+    cmds = _routed_commands() - set(m.ONESHOTS)
+    assert {"event", "profile", "relay", "obs", "funnel"} <= cmds, cmds
+    for cmd in sorted(cmds):
+        for argv in ([cmd, "--help"], [cmd, "-h"], [cmd, "start", "--help"],
+                     [cmd, "new", "x", "-h"]):
+            try:
+                r = m.route(argv)
+            except ValueError as e:
+                raise AssertionError(f"{argv} was parsed as a command, not help: {e}") from e
+            assert r == {"kind": "help", "topic": cmd}, (argv, r)
+
+
+def t_help_flag_on_event_start_and_profile_new_is_help():
+    assert m.route(["event", "start", "--help"]) == {"kind": "help", "topic": "event"}
+    assert m.route(["profile", "new", "--help"]) == {"kind": "help", "topic": "profile"}
+    assert m.route(["relay", "run", "--help"]) == {"kind": "help", "topic": "relay"}
+
+
+def t_help_flag_passes_through_to_argparse_oneshots():
+    for cmd in m.ONESHOTS:
+        r = m.route([cmd, "--help"])
+        assert r == {"kind": "oneshot", "command": cmd, "rest": ["--help"]}, (cmd, r)
+
+
+def t_help_word_takes_an_optional_topic():
+    assert m.route(["help"]) == {"kind": "help"}
+    assert m.route(["help", "event"]) == {"kind": "help", "topic": "event"}
+
+
+def t_usage_for_topic_shows_only_that_command():
+    text = m.usage_for("event")
+    assert "racecast event start --stint N" in text, text
+    assert "racecast obs refresh" not in text, "event help must not list other groups"
+    assert "racecast --help" in text, "topic help must point at the full reference"
+    assert "racecast <svc> logs" in m.usage_for("relay"), "services share the <svc> lines"
+    assert m.usage_for(None) == m.USAGE
+    assert m.usage_for("health") == m.USAGE, "a command without usage lines gets the full text"
+
+
+def t_main_prints_topic_help_without_dispatching():
+    calls = []
+    orig = dict(m.DISPATCH)
+    m.DISPATCH.update({k: (lambda *a, **k2: calls.append(a)) for k in orig})
+    buf, old = io.StringIO(), sys.stdout
+    try:
+        sys.stdout = buf
+        m.main(["event", "start", "--help"])
+    finally:
+        sys.stdout = old
+        m.DISPATCH.clear(); m.DISPATCH.update(orig)
+    assert calls == [], "a help request must not run the command"
+    out = buf.getvalue()
+    assert "racecast event start --stint N" in out, out
+    assert "racecast obs refresh" not in out, "main must print the topic help, not the full usage"
 
 
 def t_run_only_valid_for_relay():
@@ -618,7 +684,7 @@ def t_sync_pov_transform_calls_setter_with_merged_box():
     tf = pov["transform"]
     assert tf["positionX"] == 1516 and tf["positionY"] == 600   # from the override
     assert tf["boundsWidth"] == 384 and tf["boundsHeight"] == 216  # from the base
-    assert tf["boundsType"] == 2 and tf["alignment"] == 5
+    assert tf["boundsType"] == "OBS_BOUNDS_SCALE_INNER" and tf["alignment"] == 5
 
     webcam = by_source["Solo Webcam"]
     assert webcam["scene"] == "Program"
@@ -633,6 +699,35 @@ def t_sync_pov_transform_calls_setter_with_merged_box():
     # no override for #tyres-capture -> the hud.html base box.
     assert ttf["positionX"] == 7 and ttf["positionY"] == 926
     assert ttf["boundsWidth"] == 245 and ttf["boundsHeight"] == 84
+
+
+def _sync_output(result):
+    import contextlib, io, tempfile
+    buf = io.StringIO()
+    with tempfile.TemporaryDirectory() as d:
+        orig = m._active_overlay_dir
+        m._active_overlay_dir = lambda: d
+        try:
+            with contextlib.redirect_stdout(buf):
+                m._sync_pov_transform(set_transform=lambda scene, source, tf: result(source))
+        finally:
+            m._active_overlay_dir = orig
+    return buf.getvalue()
+
+
+def t_sync_pov_transform_reports_a_rejected_transform():
+    rejected = ("SetSceneItemTransform failed: {'code': 401, 'comment': 'The field "
+                "value of `boundsType` must be a string.'}")
+    out = _sync_output(lambda source: (False, rejected))
+    assert "obs: webcam box sync failed" in out and "401" in out, \
+        f"a transform OBS rejected must be reported, got {out!r}"
+
+
+def t_sync_pov_transform_is_silent_for_a_slot_the_collection_lacks():
+    missing = ("GetSceneItemId failed: {'code': 600, 'comment': 'No scene exists by "
+               "that name or UUID.', 'result': False}")
+    out = _sync_output(lambda source: (False, missing))
+    assert out == "", f"a slot the collection does not have must stay silent, got {out!r}"
 
 
 def t_run_module_exit_codes():
@@ -887,6 +982,19 @@ def t_relay_start_retries_when_first_spawn_not_up():
         restore()
 
 
+def t_relay_start_refreshes_the_obs_pages():
+    import io, contextlib
+    restore, _calls = _relay_spawn_stubs([True])
+    refreshes = []
+    m._refresh_obs_pages = lambda *a, **k: refreshes.append(k)
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            m.relay_start([])
+        assert refreshes == [{"wait": 0}], f"a relay start must refresh OBS once, got {refreshes}"
+    finally:
+        restore()
+
+
 def t_relay_start_reports_failure_when_relay_never_comes_up():
     # If the relay never binds the control port, relay_start must report an HONEST
     # failure, never "relay started" for a dead child, which would make event-start
@@ -1008,51 +1116,47 @@ def t_env_base_per_mode():
     assert m._env_base(False, "", "/pkg") == "/pkg"
 
 
-def t_refresh_decision():
-    assert m.refresh_decision(None, None) == "skip-no-pages"
-    assert m.refresh_decision(None, "abc") == "skip-no-pages"
-    assert m.refresh_decision("abc", "abc") == "skip-unchanged"
-    assert m.refresh_decision("abc", "old") == "refresh"
-    assert m.refresh_decision("abc", None) == "refresh"          # first run
-    assert m.refresh_decision("abc", "abc", force=True) == "refresh"
+def t_relay_serves_pages_true_when_every_page_answers():
+    fetched = []
+    served = m.relay_serves_pages(fetch=lambda p: fetched.append(p) or b"x")
+    assert served is True
+    assert tuple(fetched) == m.OBS_PAGE_PATHS, "every OBS page must be probed, in order"
 
 
-def t_served_pages_hash_concatenates_in_order():
-    import hashlib
-    pages = {p: p.encode() for p in m.OBS_PAGE_PATHS}
-    expected = hashlib.sha256(b"".join(pages[p] for p in m.OBS_PAGE_PATHS)).hexdigest()
-    assert m.served_pages_hash(fetch=lambda p: pages[p]) == expected
+def t_relay_serves_pages_false_when_any_fetch_fails():
+    for broken in ("/hud", "/hud/override.css", "/intermission/override.css"):
+        def fetch(path, broken=broken):
+            if path == broken:
+                raise OSError("connection refused")
+            return b"x"
+        assert m.relay_serves_pages(fetch=fetch) is False, f"{broken} down must report False"
 
 
-def t_served_pages_hash_none_when_any_fetch_fails():
-    def fetch(path):
-        if path == "/hud":
-            raise OSError("connection refused")
-        return b"HUD"
-    assert m.served_pages_hash(fetch=fetch) is None
-
-
-def t_served_pages_hash_none_when_override_css_fetch_fails():
-    def fetch(path):
-        if path == "/hud/override.css":
-            raise OSError("connection refused")
-        return b"x"
-    assert m.served_pages_hash(fetch=fetch) is None
-
-
-def t_served_pages_hash_none_when_first_fetch_fails():
-    def fetch(path):
-        raise OSError("connection refused")
-    assert m.served_pages_hash(fetch=fetch) is None
-
-
-def t_pages_hash_roundtrip_and_missing():
-    import tempfile
-    with tempfile.TemporaryDirectory() as tmp:
-        path = os.path.join(tmp, "state", "obs-pages.hash")
-        assert m.read_pages_hash(path) is None                   # missing file
-        m.write_pages_hash(path, "abc123")                       # creates the dir
-        assert m.read_pages_hash(path) == "abc123"
+def t_refresh_obs_pages_reloads_even_when_pages_are_unchanged():
+    # A source that loaded while the relay was down keeps CEF's error page; identical
+    # page bytes must not skip the reload (#681).
+    import contextlib
+    reloads = []
+    fake_ws = type(sys)("obs_ws")
+    fake_ws.refresh_browser_inputs = lambda needle: (reloads.append(needle) or ["HUD Overlay"], "")
+    fake_ws.set_feed_close_when_inactive = lambda names, on: ""
+    saved = (m._relay_http_ok, m.relay_serves_pages, m._sync_pov_transform,
+             sys.modules.get("obs_ws"))
+    m._relay_http_ok = lambda: True
+    m.relay_serves_pages = lambda: True
+    m._sync_pov_transform = lambda: None
+    sys.modules["obs_ws"] = fake_ws
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            m._refresh_obs_pages()
+            m._refresh_obs_pages()
+    finally:
+        m._relay_http_ok, m.relay_serves_pages, m._sync_pov_transform = saved[:3]
+        if saved[3] is None:
+            sys.modules.pop("obs_ws", None)
+        else:
+            sys.modules["obs_ws"] = saved[3]
+    assert len(reloads) == 2, f"both starts must reload OBS, got {len(reloads)}"
 
 
 def t_wait_for_polls_until_deadline():
@@ -1994,7 +2098,7 @@ def t_obs_page_paths_include_overrides():
 
 
 def t_obs_page_paths_relay_mirror_in_sync():
-    # OBS_PAGE_PATHS lives in racecast.py (the obs-refresh hash gate reads it); the
+    # OBS_PAGE_PATHS lives in racecast.py (the obs-refresh relay-up probe reads it); the
     # relay keeps a mirror constant only for test discoverability. Pin the two equal
     # so a future overlay page added to one can never silently drift from the other.
     spec2 = importlib.util.spec_from_file_location(
@@ -2173,55 +2277,99 @@ def _with_env(**kv):
     return lambda: (os.environ.clear(), os.environ.update(saved))
 
 
-def t_event_takeover_blocks_league_mismatch():
-    orig = m._relay_fetch_json
-    restore = _with_env(RACECAST_SHEET_ID="SHEET_B")
-    m._relay_fetch_json = lambda url, timeout=3: {
-        "league": {"sheet_id": "SHEET_A"}, "live": {"feed": "A", "stint": 3, "mode": "race"}}
-    try:
+def _refuse_network(*a, **k):
+    raise OSError("no network in tests")
+
+
+def _event_start_tripwire(a, **kw):
+    raise AssertionError("event_start must not run in this test")
+
+
+@contextlib.contextmanager
+def _takeover_sandbox(**overrides):
+    """Run event_takeover hermetically: every runtime file it writes (chat, console
+    versions, cues, health DB, event title) goes to a temp dir, every network and
+    relay call is refused or a no-op, the checkout's active profile is not applied
+    over the test's env, and event_start trips unless a test replaces it. Without
+    this, a checkout with a real league active loses its chat, console versions
+    and event title to the test, and an abort path that failed to fire would bring
+    the real event stack up. Pass a test's fakes as keyword overrides. Yields the
+    temp dir."""
+    with tempfile.TemporaryDirectory() as d:
+        patches = {
+            "_apply_active_profile_env": lambda: None,
+            "_chat_path": lambda: os.path.join(d, "chat.json"),
+            "_console_versions_path": lambda: os.path.join(d, "console-versions.json"),
+            "_cues_path": lambda: os.path.join(d, "cues.json"),
+            "_health_db_path": lambda: os.path.join(d, "health.db"),
+            "_event_title_path": lambda: os.path.join(d, "event.json"),
+            "_chat_reload_if_running": lambda: None,
+            "_cues_reload_if_running": lambda: None,
+            "chat_cmd": lambda rest: None,
+            "console_cmd": lambda rest: None,
+            "_relay_fetch_json": _refuse_network,
+            "_takeover_get": _refuse_network,
+            "_takeover_get_text": _refuse_network,
+            "_announce_takeover": lambda status, plan, a_title: None,
+            "event_start": _event_start_tripwire,
+        }
+        patches.update(overrides)
+        saved = {name: getattr(m, name) for name in patches}
+        saved_open = m.http_util.open_url
         try:
-            m.event_takeover(["100.64.1.2"])
-            raise AssertionError("expected SystemExit")
-        except SystemExit as e:
-            assert "league mismatch" in str(e.code)
+            for name, fake in patches.items():
+                setattr(m, name, fake)
+            m.http_util.open_url = _refuse_network
+            yield d
+        finally:
+            for name, orig in saved.items():
+                setattr(m, name, orig)
+            m.http_util.open_url = saved_open
+
+
+def t_event_takeover_blocks_league_mismatch():
+    restore = _with_env(RACECAST_SHEET_ID="SHEET_B")
+    try:
+        with _takeover_sandbox(_relay_fetch_json=lambda url, timeout=3: {
+                "league": {"sheet_id": "SHEET_A"},
+                "live": {"feed": "A", "stint": 3, "mode": "race"}}):
+            try:
+                m.event_takeover(["100.64.1.2"])
+                raise AssertionError("expected SystemExit")
+            except SystemExit as e:
+                assert "league mismatch" in str(e.code)
     finally:
-        m._relay_fetch_json = orig
         restore()
 
 
 def t_event_takeover_unreachable_without_stint_errors():
-    orig = m._relay_fetch_json
     restore = _with_env(RACECAST_SHEET_ID=None, RACECAST_SHEET_PUSH_URL="x")
-    def _boom(url, timeout=3):
-        raise OSError("refused")
-    m._relay_fetch_json = _boom
     try:
-        try:
-            m.event_takeover(["100.64.1.2"])
-            raise AssertionError("expected SystemExit")
-        except SystemExit as e:
-            assert "--stint" in str(e.code)
+        with _takeover_sandbox():                  # /status refused -> unreachable
+            try:
+                m.event_takeover(["100.64.1.2"])
+                raise AssertionError("expected SystemExit")
+            except SystemExit as e:
+                assert "--stint" in str(e.code)
     finally:
-        m._relay_fetch_json = orig
         restore()
 
 
 def t_event_takeover_success_calls_event_start():
-    orig_fetch, orig_es, orig_chat = m._relay_fetch_json, m.event_start, m.chat_cmd
     restore = _with_env(RACECAST_SHEET_ID="S", RACECAST_SHEET_PUSH_URL="https://push")
-    m._relay_fetch_json = lambda url, timeout=3: {
-        "league": {"sheet_id": "S"}, "live": {"feed": "B", "stint": 7, "mode": "race"}}
-    m.chat_cmd = lambda rest: None
     captured = {}
-    m.event_start = lambda a, **kw: captured.update(args=a, kw=kw)
     try:
-        m.event_takeover(["100.64.1.2"])
-        assert captured["args"] == ["--stint", "7"]
-        # a takeover must NOT reset the report session window (continuity on B)
-        assert captured["kw"].get("_new_session") is False, captured["kw"]
+        with _takeover_sandbox(
+                _relay_fetch_json=lambda url, timeout=3: {
+                    "league": {"sheet_id": "S"},
+                    "live": {"feed": "B", "stint": 7, "mode": "race"}},
+                event_start=lambda a, **kw: captured.update(args=a, kw=kw)):
+            m.event_takeover(["100.64.1.2"])
     finally:
-        m._relay_fetch_json, m.event_start, m.chat_cmd = orig_fetch, orig_es, orig_chat
         restore()
+    assert captured["args"] == ["--stint", "7"]
+    # a takeover must NOT reset the report session window (continuity on B)
+    assert captured["kw"].get("_new_session") is False, captured["kw"]
 
 
 def t_is_continuation_start():
@@ -2236,44 +2384,37 @@ def t_is_continuation_start():
 
 
 def t_event_takeover_qualifying_and_override_forwarded():
-    orig_fetch, orig_es, orig_chat = m._relay_fetch_json, m.event_start, m.chat_cmd
     restore = _with_env(RACECAST_SHEET_ID="S", RACECAST_SHEET_PUSH_URL="https://push")
-    m._relay_fetch_json = lambda url, timeout=3: {
-        "league": {"sheet_id": "S"}, "live": {"feed": "A", "stint": 2, "mode": "race"}}
-    m.chat_cmd = lambda rest: None
     captured = {}
-    m.event_start = lambda a, **kw: captured.__setitem__("args", a)
     try:
-        m.event_takeover(["100.64.1.2", "--stint", "9", "--qualifying"])
-        assert captured["args"] == ["--stint", "9", "--qualifying"]   # override wins, mode forced
+        with _takeover_sandbox(
+                _relay_fetch_json=lambda url, timeout=3: {
+                    "league": {"sheet_id": "S"},
+                    "live": {"feed": "A", "stint": 2, "mode": "race"}},
+                event_start=lambda a, **kw: captured.__setitem__("args", a)):
+            m.event_takeover(["100.64.1.2", "--stint", "9", "--qualifying"])
     finally:
-        m._relay_fetch_json, m.event_start, m.chat_cmd = orig_fetch, orig_es, orig_chat
         restore()
+    assert captured["args"] == ["--stint", "9", "--qualifying"]   # override wins, mode forced
 
 
 def t_event_takeover_pulls_event_title():
     # Takeover adopts producer A's on-air event title (#207), persisting it to
     # event.json BEFORE bring-up so the new relay loads it (mirrors the chat pull).
-    import json as _json, tempfile
-    orig_fetch, orig_es, orig_chat = m._relay_fetch_json, m.event_start, m.chat_cmd
-    orig_path = m._event_title_path
+    import json as _json
     restore = _with_env(RACECAST_SHEET_ID="S", RACECAST_SHEET_PUSH_URL="https://push")
-    m._relay_fetch_json = lambda url, timeout=3: {
-        "league": {"sheet_id": "S"}, "live": {"feed": "A", "stint": 3, "mode": "race"},
-        "event_title": "GTEC - Round 4 - Nürburgring"}
-    m.chat_cmd = lambda rest: None
-    m.event_start = lambda a, **kw: None
-    with tempfile.TemporaryDirectory() as d:
-        path = os.path.join(d, "event.json")
-        m._event_title_path = lambda: path
-        try:
+    try:
+        with _takeover_sandbox(
+                _relay_fetch_json=lambda url, timeout=3: {
+                    "league": {"sheet_id": "S"},
+                    "live": {"feed": "A", "stint": 3, "mode": "race"},
+                    "event_title": "GTEC - Round 4 - Nürburgring"},
+                event_start=lambda a, **kw: None) as d:
             m.event_takeover(["100.64.1.2"])
-            with open(path, encoding="utf-8") as fh:
+            with open(os.path.join(d, "event.json"), encoding="utf-8") as fh:
                 assert _json.load(fh) == {"title": "GTEC - Round 4 - Nürburgring"}
-        finally:
-            (m._relay_fetch_json, m.event_start, m.chat_cmd,
-             m._event_title_path) = orig_fetch, orig_es, orig_chat, orig_path
-            restore()
+    finally:
+        restore()
 
 
 def t_funnel_takeover_base_builds_console_url():
@@ -2286,62 +2427,60 @@ def t_funnel_takeover_base_builds_console_url():
 
 
 def t_event_takeover_funnel_requires_secret():
-    # --funnel with no CONSOLE_SECRET in the active profile -> clear abort.
+    # --funnel with no CONSOLE_SECRET in the active profile -> clear abort. The
+    # sandbox keeps the checkout's active profile (and its real secret) out, which
+    # would otherwise skip the abort and run the real bring-up.
     restore = _with_env(RACECAST_CONSOLE_SECRET="", RACECAST_SHEET_ID="L1")
     try:
-        try:
-            m.event_takeover(["producer-a.example.ts.net", "--funnel", "--stint", "3"])
-            raise AssertionError("expected SystemExit")
-        except SystemExit as e:
-            msg = str(e.code).lower() if e.code else ""
-            assert "secret" in msg or "console_secret" in msg
+        with _takeover_sandbox():
+            try:
+                m.event_takeover(["producer-a.example.ts.net", "--funnel", "--stint", "3"])
+                raise AssertionError("expected SystemExit")
+            except SystemExit as e:
+                msg = str(e.code).lower() if e.code else ""
+                assert "secret" in msg or "console_secret" in msg
     finally:
         restore()
+
+
+def _takeover_http_error(code, reason):
+    import urllib.error
+    def fake_get(url, secret=None, timeout=5):
+        raise urllib.error.HTTPError(url, code, reason, {}, None)
+    return fake_get
 
 
 def t_event_takeover_funnel_auth_rejected_aborts():
     # A 403/401 from the funnel endpoint means a bad or missing secret, so abort
     # rather than silently falling back the way a network failure does.
-    import urllib.error
-    def fake_get(url, secret=None, timeout=5):
-        raise urllib.error.HTTPError(url, 403, "forbidden", {}, None)
     restore = _with_env(RACECAST_CONSOLE_SECRET="S", RACECAST_SHEET_ID="L1")
-    orig_get, m._takeover_get = m._takeover_get, fake_get
-    orig_es, m.event_start = m.event_start, lambda a, **kw: (_ for _ in ()).throw(
-        AssertionError("event_start must not run on auth-reject"))
     try:
-        try:
-            m.event_takeover(["producer-a.example.ts.net", "--funnel", "--stint", "3"])
-            raise AssertionError("expected SystemExit")
-        except SystemExit as e:
-            msg = str(e.code).lower() if e.code else ""
-            assert "secret" in msg or "rejected" in msg
+        with _takeover_sandbox(_takeover_get=_takeover_http_error(403, "forbidden")):
+            try:
+                m.event_takeover(["producer-a.example.ts.net", "--funnel", "--stint", "3"])
+                raise AssertionError("expected SystemExit")
+            except SystemExit as e:
+                msg = str(e.code).lower() if e.code else ""
+                assert "secret" in msg or "rejected" in msg
     finally:
-        m._takeover_get, m.event_start = orig_get, orig_es
         restore()
 
 
 def t_event_takeover_funnel_401_blames_old_relay_not_secret():
     # A 401 (not 403) means A is an OLDER relay that still requires a console
     # token, so the abort message must NOT blame the secret.
-    import urllib.error
-    def fake_get(url, secret=None, timeout=5):
-        raise urllib.error.HTTPError(url, 401, "unauthorized", {}, None)
     restore = _with_env(RACECAST_CONSOLE_SECRET="S", RACECAST_SHEET_ID="L1")
-    orig_get, m._takeover_get = m._takeover_get, fake_get
-    orig_es, m.event_start = m.event_start, lambda a, **kw: (_ for _ in ()).throw(
-        AssertionError("event_start must not run on auth-reject"))
     try:
-        try:
-            m.event_takeover(["producer-a.example.ts.net", "--funnel", "--stint", "3"])
-            raise AssertionError("expected SystemExit")
-        except SystemExit as e:
-            msg = str(e.code).lower() if e.code else ""
-            assert "401" in msg, msg
-            assert "older" in msg or "update" in msg, msg
-            assert "console_secret" not in msg, msg   # must NOT misattribute to the secret
+        with _takeover_sandbox(_takeover_get=_takeover_http_error(401, "unauthorized")):
+            try:
+                m.event_takeover(["producer-a.example.ts.net", "--funnel", "--stint", "3"])
+                raise AssertionError("expected SystemExit")
+            except SystemExit as e:
+                msg = str(e.code).lower() if e.code else ""
+                assert "401" in msg, msg
+                assert "older" in msg or "update" in msg, msg
+                assert "console_secret" not in msg, msg   # must NOT misattribute to the secret
     finally:
-        m._takeover_get, m.event_start = orig_get, orig_es
         restore()
 
 
@@ -2360,24 +2499,38 @@ def t_event_takeover_funnel_success_calls_event_start():
         return {}
     restore = _with_env(RACECAST_CONSOLE_SECRET="S", RACECAST_SHEET_ID="L1",
                         RACECAST_SHEET_PUSH_URL="https://push")
-    orig_get, m._takeover_get = m._takeover_get, fake_get
-    # The funnel path resolves the active profile (for the CONSOLE_SECRET), which
-    # would otherwise inject the shipped `demo` league's SHEET_ID over our env and
-    # trip the league guard. Neutralise that injection so we test the takeover path,
-    # not profile resolution (the real _active_console_secret is covered elsewhere).
-    orig_apply, m._apply_active_profile_env = m._apply_active_profile_env, lambda: None
     es = {}
-    orig_es, m.event_start = m.event_start, lambda a, **kw: es.update(args=a)
     try:
-        m.event_takeover(["producer-a.example.ts.net", "--funnel"])
+        with _takeover_sandbox(_takeover_get=fake_get,
+                               event_start=lambda a, **kw: es.update(args=a)):
+            m.event_takeover(["producer-a.example.ts.net", "--funnel"])
     finally:
-        m._takeover_get, m.event_start = orig_get, orig_es
-        m._apply_active_profile_env = orig_apply
         restore()
     assert es.get("args") == ["--stint", "3"], es           # derived from A's live.stint
     assert all(u.startswith("https://producer-a.example.ts.net/console/takeover")
                for u in seen["urls"])
     assert seen["secret"] == "S"                            # step-up header sent
+
+
+def t_takeover_sandbox_keeps_runtime_files_out_of_the_checkout():
+    # Every file event_takeover writes must land in the sandbox's temp dir.
+    restore = _with_env(RACECAST_CONSOLE_SECRET="S", RACECAST_SHEET_ID="L1",
+                        RACECAST_SHEET_PUSH_URL="https://push")
+    def fake_get(url, secret=None, timeout=5):
+        if url.endswith("/status"):
+            return {"live": {"feed": "A", "stint": 3, "mode": "race"},
+                    "league": {"sheet_id": "L1"}, "event_title": "T", "timer": None}
+        return {"messages": []} if url.endswith("/chat") else {"versions": {}}
+    try:
+        with _takeover_sandbox(_takeover_get=fake_get,
+                               event_start=lambda a, **kw: None) as d:
+            for name in ("_chat_path", "_console_versions_path", "_cues_path",
+                         "_health_db_path", "_event_title_path"):
+                assert getattr(m, name)().startswith(d), name
+            m.event_takeover(["producer-a.example.ts.net", "--funnel"])
+            assert os.path.exists(os.path.join(d, "event.json"))
+    finally:
+        restore()
 
 
 def t_chat_routing():
@@ -3001,6 +3154,32 @@ def t_function_local_peer_imports_are_frozen():
     missing = sorted(m for m in local_imports if f'"{m}"' not in build_src)
     assert not missing, ("peer modules imported function-locally in racecast.py but "
                          f"not --hidden-import in tools/build-binary.py: {missing}")
+
+
+def t_frozen_modules_do_not_load_siblings_by_file_path():
+    """A --hidden-import module is frozen into the binary's archive, where its
+    __file__ has no sibling .py next to it, so loading a peer by a __file__-relative
+    path fails there and only there (gt7-discover rejected every console, #680)."""
+    import ast, re
+    with open(os.path.join(ROOT, "tools", "build-binary.py"), encoding="utf-8") as fh:
+        hidden = set(re.findall(r'"--hidden-import", "([a-z0-9_]+)"', fh.read()))
+    # Reached only from the script's main(), which the binary runs by path.
+    script_only = {("install_apps", "_common"), ("install_tools", "_common")}
+    offenders = []
+    for mod in sorted(hidden):
+        path = os.path.join(ROOT, "src", "scripts", mod + ".py")
+        if not os.path.exists(path):
+            continue
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+        for fn in ast.walk(ast.parse(text)):
+            if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                body = ast.get_source_segment(text, fn) or ""
+                if ("spec_from_file_location" in body and "__file__" in body
+                        and (mod, fn.name) not in script_only):
+                    offenders.append(f"{mod}.{fn.name}")
+    assert not offenders, ("frozen modules load a sibling by __file__ path; import it "
+                           f"as a module instead: {offenders}")
 
 
 def t_path_loaded_module_imports_are_frozen():
