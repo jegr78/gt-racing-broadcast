@@ -81,7 +81,10 @@ def t_help_flag_after_any_command_never_dispatches():
     for cmd in sorted(cmds):
         for argv in ([cmd, "--help"], [cmd, "-h"], [cmd, "start", "--help"],
                      [cmd, "new", "x", "-h"]):
-            r = m.route(argv)
+            try:
+                r = m.route(argv)
+            except ValueError as e:
+                raise AssertionError(f"{argv} was parsed as a command, not help: {e}")
             assert r == {"kind": "help", "topic": cmd}, (argv, r)
 
 
@@ -124,7 +127,9 @@ def t_main_prints_topic_help_without_dispatching():
         sys.stdout = old
         m.DISPATCH.clear(); m.DISPATCH.update(orig)
     assert calls == [], "a help request must not run the command"
-    assert "racecast event start --stint N" in buf.getvalue(), buf.getvalue()
+    out = buf.getvalue()
+    assert "racecast event start --stint N" in out, out
+    assert "racecast obs refresh" not in out, "main must print the topic help, not the full usage"
 
 
 def t_run_only_valid_for_relay():
