@@ -333,8 +333,9 @@ def t_hud_trace_renders_per_frame_on_a_fixed_window():
     poll = tele[:tele.index("function drawTrace")]
     assert "clearRect" not in poll, "the poll must only buffer samples, not draw"
     assert "requestAnimationFrame(drawTrace)" in tele
-    assert "TRACE_WINDOW_S" in tele
-    assert "samples[samples.length - 1].t - t0" not in tele
+    draw = tele[tele.index("function drawTrace"):]
+    assert "/ TRACE_WINDOW_S" in draw, "x must map onto the fixed window"
+    assert "TRACE_GAP_S" in draw, "a data gap must not be bridged by a line"
 
 
 def t_ob_hud_has_clock_slot():
