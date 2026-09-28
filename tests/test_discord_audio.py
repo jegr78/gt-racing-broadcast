@@ -223,6 +223,18 @@ def t_apply_box_transform_webcam_empty_is_noop():
     assert _webcam_item(coll)["pos"] == {"x": 14.0, "y": 695.0}
 
 
+def t_bake_overlay_boxes_uses_the_hud_base_without_an_override():
+    # A profile CSS that restyles #webcam without repeating its geometry must still
+    # get the hud.html frame, not the template's position (#677).
+    coll = _coll_with_webcam(pos=(24.0, 776.0), bounds=(384.0, 280.0))
+    with open(os.path.join(ROOT, "src", "obs", "hud.html"), encoding="utf-8") as fh:
+        base_html = fh.read()
+    sa.bake_overlay_boxes(coll, base_html, "#webcam { border-color: #63a6b2; }")
+    it = _webcam_item(coll)
+    assert (it["pos"], it["bounds"]) == ({"x": 14, "y": 695}, {"x": 336, "y": 189}), \
+        f"the webcam must land in the hud.html frame, got {it}"
+
+
 def t_apply_box_transform_webcam_scene_scoped_program_only():
     # The webcam bake must reposition the 'Solo Webcam' item ONLY where it is
     # embedded in 'Program', never a same-named item in the standalone fullscreen

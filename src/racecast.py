@@ -2461,17 +2461,15 @@ def _sync_pov_transform(set_transform=None):
         import obs_ws
         if set_transform is None:
             set_transform = obs_ws.set_scene_item_transform
-        for slot_id, tgt in overlay_build.OVERLAY_SLOT_OBS_SOURCES.items():
-            base = overlay_build.box_from_css(base_style, slot_id)
-            if not base:                # base page lost this slot's rule -> nothing to anchor
-                continue
-            overrides = overlay_build.box_from_css(override_css, slot_id)
-            box = {**base, **overrides}
+        for slot_id, box in overlay_build.slot_boxes(base_style, override_css).items():
+            tgt = overlay_build.OVERLAY_SLOT_OBS_SOURCES[slot_id]
             transform = obs_ws.pov_scene_item_transform(box)
             ok, note = set_transform(tgt["scene"], tgt["source"], transform)
             if ok:
                 print(f"obs: {slot_id} box synced to '{tgt['source']}' "
                       f"({box['left']},{box['top']} {box['width']}x{box['height']}).")
+            elif not obs_ws.is_missing_item(note):
+                print(f"obs: {slot_id} box sync failed for '{tgt['source']}'. {note}")
     except Exception as exc:  # noqa: BLE001  best-effort contract
         print(f"obs: box sync skipped ({exc}).")
         return

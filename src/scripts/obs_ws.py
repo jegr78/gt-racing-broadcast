@@ -158,11 +158,12 @@ def split_state_intents(live, do_cut, slots=None, scene=SPLIT_SCENE, extra_mute=
 
 def pov_scene_item_transform(box):
     """Map a full POV box {left,top,width,height} to an obs-websocket
-    sceneItemTransform. The Feed POV item is top-left anchored (alignment 5) with
-    SCALE_INNER bounds (boundsType 2). Every field is sent explicitly so the result
-    is idempotent whatever the item's current bounds settings are."""
+    sceneItemTransform. The item is top-left anchored (alignment 5) with SCALE_INNER
+    bounds; obs-websocket v5 takes boundsType as the enum name, not the number the
+    collection JSON stores. Every field is sent explicitly so the result is
+    idempotent whatever the item's current bounds settings are."""
     return {"positionX": box["left"], "positionY": box["top"],
-            "boundsType": 2, "boundsAlignment": 0, "alignment": 5,
+            "boundsType": "OBS_BOUNDS_SCALE_INNER", "boundsAlignment": 0, "alignment": 5,
             "boundsWidth": box["width"], "boundsHeight": box["height"]}
 
 
@@ -1581,6 +1582,14 @@ def set_scene_item_transform(scene, source, transform, host="127.0.0.1", port=No
 
 
 OBS_NOT_READY_CODE = 207
+OBS_RESOURCE_NOT_FOUND_CODE = 600
+
+
+def is_missing_item(note):
+    """True when a set_scene_item_transform note means the scene or source does not
+    exist, as opposed to OBS rejecting the request itself."""
+    text = str(note or "")
+    return "not found" in text or f"'code': {OBS_RESOURCE_NOT_FOUND_CODE}" in text
 
 
 def is_not_ready(note):

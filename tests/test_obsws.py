@@ -1385,8 +1385,24 @@ def t_pov_scene_item_transform_maps_box():
     assert m.pov_scene_item_transform(
         {"left": 1516, "top": 600, "width": 384, "height": 216}) == {
             "positionX": 1516, "positionY": 600,
-            "boundsType": 2, "boundsAlignment": 0, "alignment": 5,
+            "boundsType": "OBS_BOUNDS_SCALE_INNER", "boundsAlignment": 0, "alignment": 5,
             "boundsWidth": 384, "boundsHeight": 216}
+
+
+def t_pov_scene_item_transform_sends_bounds_type_as_enum_name():
+    # obs-websocket v5 rejects a numeric boundsType with code 401 (#677).
+    tf = m.pov_scene_item_transform({"left": 0, "top": 0, "width": 1, "height": 1})
+    assert tf["boundsType"] == "OBS_BOUNDS_SCALE_INNER", \
+        f"boundsType must be the protocol's enum name, got {tf['boundsType']!r}"
+
+
+def t_is_missing_item_tells_a_missing_slot_from_a_rejected_request():
+    assert m.is_missing_item("scene item 'Solo Webcam' not found in scene 'Program'")
+    assert m.is_missing_item("GetSceneItemId failed: {'code': 600, 'comment': 'No scene "
+                             "exists by that name or UUID.', 'result': False}")
+    assert not m.is_missing_item("SetSceneItemTransform failed: {'code': 401, 'comment': "
+                                 "'The field value of `boundsType` must be a string.'}")
+    assert not m.is_missing_item("OBS WebSocket not reachable on 127.0.0.1:4455")
 
 
 def t_set_scene_item_transform_sends_request():
