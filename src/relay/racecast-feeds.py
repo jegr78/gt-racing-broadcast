@@ -11442,7 +11442,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     if is_last:
                         self._send({"ok": True, "index": res, "final": True})
                         relay._spawn_event_stop()
-                        return
+                        return None
                     return self._send({"ok": True, "index": res})
                 if not setup_ctl:
                     return self._send({"error": "setup control disabled"}, 404)
