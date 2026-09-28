@@ -1744,23 +1744,29 @@ def t_overlay_slots_data_flags_telemetry_for_solo_pov_only():
     # only appear for a profile whose relay serves telemetry (solo + pov), never
     # in endurance or solo commentary, where the live HUD never shows it.
     import tempfile
-    for env, want in (("KIND=solo\nTEMPLATE=pov\n", True),
-                      ("KIND=solo\nTEMPLATE=commentary\n", False),
-                      ("", False)):
-        with tempfile.TemporaryDirectory() as td:
-            os.makedirs(os.path.join(td, "profiles", "lg"))
-            open(os.path.join(td, ".env.example"), "w").close()
-            with open(os.path.join(td, "profiles", "lg", "profile.env"), "w") as fh:
-                fh.write("NAME=League\n" + env)
-            os.makedirs(os.path.join(td, "runtime"))
-            orig_b, orig_r = m._env_base, m._runtime_base_dir
-            m._env_base = lambda *a, **k: td
-            m._runtime_base_dir = lambda: os.path.join(td, "runtime")
-            try:
-                r = m.overlay_slots_data("hud")
-            finally:
-                m._env_base, m._runtime_base_dir = orig_b, orig_r
-        assert r["ok"] and r["telemetry"] is want, (env, r.get("telemetry"))
+    # A shell-exported RACECAST_PROFILE would win over the temp root's only profile.
+    saved_profile = os.environ.pop("RACECAST_PROFILE", None)
+    try:
+        for env, want in (("KIND=solo\nTEMPLATE=pov\n", True),
+                          ("KIND=solo\nTEMPLATE=commentary\n", False),
+                          ("", False)):
+            with tempfile.TemporaryDirectory() as td:
+                os.makedirs(os.path.join(td, "profiles", "lg"))
+                open(os.path.join(td, ".env.example"), "w").close()
+                with open(os.path.join(td, "profiles", "lg", "profile.env"), "w") as fh:
+                    fh.write("NAME=League\n" + env)
+                os.makedirs(os.path.join(td, "runtime"))
+                orig_b, orig_r = m._env_base, m._runtime_base_dir
+                m._env_base = lambda *a, **k: td
+                m._runtime_base_dir = lambda: os.path.join(td, "runtime")
+                try:
+                    r = m.overlay_slots_data("hud")
+                finally:
+                    m._env_base, m._runtime_base_dir = orig_b, orig_r
+            assert r["ok"] and r["telemetry"] is want, (env, r.get("telemetry"))
+    finally:
+        if saved_profile is not None:
+            os.environ["RACECAST_PROFILE"] = saved_profile
 
 
 def t_overlay_slots_data_includes_flag_presets():

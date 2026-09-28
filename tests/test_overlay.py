@@ -662,9 +662,14 @@ def t_ob_sample_previews_stream_chat():
     assert len(lines) >= 3 and all(": " in ln for ln in lines)
 
 
-def _cc():
-    with open(os.path.join(ROOT, "src", "ui", "control-center.html"), encoding="utf-8") as f:
+def _read(*parts):
+    """A repo file's text. Some tests below keep a local helper of the same name."""
+    with open(os.path.join(*parts), encoding="utf-8") as f:
         return f.read()
+
+
+def _cc():
+    return _read(ROOT, "src", "ui", "control-center.html")
 
 
 def _fn(src, name):
@@ -676,9 +681,7 @@ def t_cc_canvas_shows_runtime_gated_slots():
     # hud.html hides #tele, #chat and several telemetry values inline until live
     # data arrives. The builder canvas renders that markup offline, so it must
     # lift the inline display:none, or those slots can be selected but never seen.
-    build = _fn(_cc(), "ovBuildCanvas")
-    assert "ovUngate(" in build
-    assert build.index("ovUngate(") < build.index("ovStyleSlot(")
+    assert "ovUngate(" in _fn(_cc(), "ovBuildCanvas")
     ungate = _fn(_cc(), "ovUngate")
     assert "[data-edit]" in ungate
     # ...but #tele only for a profile whose relay serves telemetry (solo POV).
@@ -694,6 +697,15 @@ def t_cc_canvas_previews_chat_like_the_hud():
     assert "chat-log" in fill and "'msg'" in fill and "'u'" in fill
     panel = _fn(_cc(), "ovRenderPreviewPanel")
     assert "textarea" in panel and "'chat'" in panel
+    # a line without "name: " renders as plain text, not an empty name
+    assert "i < 0" in fill
+
+
+def t_cc_preview_panel_hides_telemetry_fields_without_telemetry():
+    # Endurance and solo-commentary canvases keep #tele hidden, so the preview
+    # panel must not offer fields for slots that can never show there.
+    panel = _fn(_cc(), "ovRenderPreviewPanel")
+    assert "ovInTele(" in panel and "ovState.telemetry" in panel
 
 
 def t_splitscreen_labels_source_in_collection_splitscreen_scene_only():

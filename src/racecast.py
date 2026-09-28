@@ -5657,7 +5657,9 @@ def _css_has_rules(text):
 
 def _profile_has_telemetry():
     """Whether the active profile's relay serves GT7 telemetry: a solo POV
-    profile (the relay's telemetry_active gate, minus the machine opt-out).
+    profile (the relay's telemetry_active gate, minus the machine opt-out). The
+    opt-out is left out on purpose: the overlay layout belongs to the profile and
+    travels with `profile export`, so another machine may air the telemetry block.
     Best effort: False when no profile resolves."""
     try:
         root = _env_base(IS_FROZEN, _real_executable(), HERE)

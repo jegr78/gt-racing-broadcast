@@ -3352,8 +3352,8 @@ function ovBuildCanvas() {
 // display:none from every slot, and every container holding one, or those slots
 // could be selected but never seen. The telemetry block stays hidden unless the
 // active profile's relay serves telemetry (solo POV): the live HUD never shows it
-// anywhere else. The builder's own hiding (visible: false) is applied afterwards
-// by ovStyleSlot.
+// anywhere else. The builder's own hiding (visible: false) is unaffected: it only
+// dims a slot through the .ov-hidden class and never sets an inline display.
 function ovUngate(root) {
   const tele = root.getElementById('tele');
   root.querySelectorAll('[style]').forEach(el => {
@@ -3363,7 +3363,16 @@ function ovUngate(root) {
   });
 }
 
+// Whether a slot sits in the telemetry block (#tele), which only a solo POV
+// profile's HUD ever shows.
+function ovInTele(id) {
+  const tele = ovState.shadow && ovState.shadow.getElementById('tele');
+  const el = ovState.shadow && ovState.shadow.getElementById(id);
+  return !!(tele && el && tele.contains(el));
+}
+
 // Mirror of hud.html's chat rows: one .msg per "user: text" line, the name in .u.
+// A line without "name: " is shown as plain text.
 function ovFillChat(el, text) {
   const log = el.querySelector('#chat-log');
   if (!log) return;
@@ -3371,11 +3380,14 @@ function ovFillChat(el, text) {
   String(text || '').split('\n').filter(ln => ln.trim()).forEach(ln => {
     const i = ln.indexOf(': ');
     const row = document.createElement('div'); row.className = 'msg';
-    const u = document.createElement('span'); u.className = 'u';
-    u.textContent = (i < 0 ? '' : ln.slice(0, i)) + ':';
+    if (i >= 0) {
+      const u = document.createElement('span'); u.className = 'u';
+      u.textContent = ln.slice(0, i) + ':';
+      row.appendChild(u);
+    }
     const t = document.createElement('span');
-    t.textContent = ' ' + (i < 0 ? ln : ln.slice(i + 2));
-    row.appendChild(u); row.appendChild(t); log.appendChild(row);
+    t.textContent = (i < 0 ? ln : ' ' + ln.slice(i + 2));
+    row.appendChild(t); log.appendChild(row);
   });
 }
 
@@ -3499,8 +3511,10 @@ function ovRenderPreviewPanel() {
   // flag-status (driven by the picker above). The clock IS editable here: on air
   // it is the live race timer, but the offline builder canvas only ever shows a
   // static sample string, so letting the operator set it helps them fit the slot.
+  // Telemetry slots are left out where the canvas keeps #tele hidden.
   ovState.slots.filter(s => s.props.indexOf('fontSize') !== -1
-      && s.id !== 'flag-status').forEach(s => {
+      && s.id !== 'flag-status'
+      && (ovState.telemetry || !ovInTele(s.id))).forEach(s => {
     const row = document.createElement('label'); row.className = 'ovprev-row';
     row.appendChild(document.createTextNode(s.label));
     const inp = document.createElement('input'); inp.type = 'text';
