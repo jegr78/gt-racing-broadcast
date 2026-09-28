@@ -347,8 +347,10 @@ def slot_boxes(base_css, override_css=""):
     return boxes
 
 
-# The px props we map onto an OBS scene-item transform.
-_POV_PX_RE = re.compile(r"\b(left|top|width|height)\s*:\s*(-?\d+(?:\.\d+)?)px")
+# The px props we map onto an OBS scene-item transform. The lookbehind bars a
+# hyphenated prefix: `\b` alone matched `border-width: 3px` as the width and shrank
+# a framed webcam's OBS box to 3 px.
+_POV_PX_RE = re.compile(r"(?<![\w-])(left|top|width|height)\s*:\s*(-?\d+(?:\.\d+)?)px")
 
 # Compiled per-slot `#<slot_id>{...}` rule regexes, built on first use and cached.
 # The slot set is small and fixed, so this never grows unbounded.
