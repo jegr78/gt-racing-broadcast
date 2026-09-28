@@ -1079,7 +1079,7 @@ def t_cc_canvas_cascades_like_the_live_overlay():
     i_chrome = build.index("OV_SHADOW_CSS")
     assert i_slot < i_custom < i_chrome, (i_slot, i_custom, i_chrome)
     apply = _cc_fn(_cc_src(), "ovApplyProp")
-    assert "el.style" not in apply, "slot values must not be inline styles"
+    assert not re.search(r"\bel\.style\b", apply), "slot values must not be inline styles"
     assert "ovSlotStyle(" in apply and "ovFlushSlotCss()" in apply
     # The pop-out moves the canvas in the DOM, which re-parses every <style> from
     # its text: CSSOM-inserted rules would silently vanish, so the slot sheet is
@@ -1090,23 +1090,38 @@ def t_cc_canvas_cascades_like_the_live_overlay():
 
 def t_cc_custom_css_edits_update_the_canvas():
     src = _cc_src()
-    assert "ovCustomCssChanged" in src
-    assert 'id="overlayCss"' in src and "ovCustomCssChanged()" in src
+    ta = src[src.index('<textarea id="overlayCss"'):]
+    assert 'oninput="ovCustomCssChanged()"' in ta[:ta.index("</textarea>")]
 
 
 def t_cc_base_values_ignore_custom_css():
     # Save-all pins each slot's base values; reading them with customCss applied
     # would copy custom rules into the slot map.
-    base = _cc_fn(_cc_src(), "ovBaseValues")
-    assert "disabled = true" in base and "disabled = false" in base
+    assert "ovWithoutCustom(" in _cc_fn(_cc_src(), "ovBaseValues")
+    off = _cc_fn(_cc_src(), "ovWithoutCustom")
+    assert "disabled = true" in off and "disabled = false" in off and "finally" in off
 
 
 def t_cc_panel_flags_custom_css_overrides():
+    # The hint compares the slot's computed style with and without customCss, so a
+    # customCss rule that loses to the slot's #id rule is not reported and one in
+    # @media is.
     src = _cc_src()
     assert "ovCustomOverrides(" in _cc_fn(src, "ovRenderPanel")
-    own = _cc_fn(src, "ovCssPropOwner")
-    for css in ("padding-", "border-", "background", "transform", "clip-path"):
-        assert css in own, css
+    over = _cc_fn(src, "ovCustomOverrides")
+    assert "getComputedStyle" in over and "ovWithoutCustom(" in over
+    assert "selectorText" not in over
+
+
+def t_cc_drag_starts_from_the_builder_position():
+    # Dragging or resizing a slot that customCss moves must start from the
+    # builder's own geometry, or the custom value lands in the slot map.
+    src = _cc_src()
+    for fn in ("ovStartDrag", "ovStartResize"):
+        body = _cc_fn(src, fn)
+        assert "ovBuilderBox(" in body and "ovSlotJson(" in body, fn
+        assert "el.offsetLeft" not in body and "el.offsetWidth" not in body, fn
+    assert "ovWithoutCustom(" in _cc_fn(src, "ovBuilderBox")
 
 
 if __name__ == "__main__":
