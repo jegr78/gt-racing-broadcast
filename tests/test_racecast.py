@@ -1089,7 +1089,8 @@ def t_env_base_per_mode():
 
 def t_relay_serves_pages_true_when_every_page_answers():
     fetched = []
-    assert m.relay_serves_pages(fetch=lambda p: fetched.append(p) or b"x") is True
+    served = m.relay_serves_pages(fetch=lambda p: fetched.append(p) or b"x")
+    assert served is True
     assert tuple(fetched) == m.OBS_PAGE_PATHS, "every OBS page must be probed, in order"
 
 
