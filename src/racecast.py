@@ -968,16 +968,39 @@ APP_VERBS = ("launch", "quit")          # GUI app control for the Control Center
 APP_CONTROLLED = ("obs", "discord", "tailscale")   # GUI apps racecast can launch + quit
 
 USAGE = __doc__
+HELP_FLAGS = ("-h", "--help")
+
+
+def usage_for(topic):
+    """The USAGE lines for one command (services also get the shared `<svc>` lines),
+    or the full USAGE when there is no topic or the command has no lines of its own."""
+    if not topic:
+        return USAGE
+    prefixes = [f"racecast {topic} ", f"racecast {topic}\t"]
+    if topic in SERVICES:
+        prefixes.append("racecast <svc> ")
+    lines = [ln for ln in USAGE.splitlines()
+             if any(ln.strip().startswith(p) or ln.strip() == f"racecast {topic}"
+                    for p in prefixes)]
+    if not lines:
+        return USAGE
+    return "\n".join(lines) + "\n\nFull reference: racecast --help"
 
 
 def route(argv):
     """Resolve argv into an action dict WITHOUT executing. Raises ValueError on bad
     usage. This is the unit-test seam; main() executes the result."""
-    if not argv or argv[0] in ("-h", "--help", "help"):
+    if not argv or argv[0] in ("-h", "--help"):
         return {"kind": "help"}
+    if argv[0] == "help":
+        return {"kind": "help", "topic": argv[1]} if len(argv) > 1 else {"kind": "help"}
     if argv[0] in ("--version", "-V"):
         return {"kind": "version"}
     cmd, rest = argv[0], argv[1:]
+    # A help flag must never run the command. Oneshots are the exception: they
+    # forward their args to a script whose own argparse prints the fuller help.
+    if cmd not in ONESHOTS and any(a in HELP_FLAGS for a in rest):
+        return {"kind": "help", "topic": cmd}
     if cmd == "status" and not rest:
         return {"kind": "aggregate"}
     if cmd in SERVICES:
@@ -7823,7 +7846,7 @@ def main(argv=None):
     except ValueError as e:
         sys.exit(f"racecast: {e}")
     if action["kind"] == "help":
-        print(USAGE)
+        print(usage_for(action.get("topic")))
         return None
     if action["kind"] == "version":
         print(f"racecast {version()}")
