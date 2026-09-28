@@ -711,6 +711,95 @@ def t_format_surfaces_session_distance():
     assert abs(imp["session_distance"] - 1.6) < 0.1 and imp["units"]["distance"] == "mi"
 
 
+class _LapLog:
+    """Capture the engine's per-lap verdict lines on racecast.relay.telemetry."""
+    def __enter__(self):
+        import logging
+        self.lines = []
+        cap = self
+        class H(logging.Handler):
+            def emit(self, rec): cap.lines.append(rec.getMessage())
+        self.h = H(level=logging.INFO)
+        self.log = logging.getLogger("racecast.relay.telemetry")
+        self.prev = self.log.level
+        self.log.setLevel(logging.INFO); self.log.addHandler(self.h)
+        return self
+
+    def __exit__(self, *exc):
+        self.log.removeHandler(self.h); self.log.setLevel(self.prev)
+
+
+def t_laplog_reference_then_counted():
+    with _LapLog() as cap:
+        eng = tm.TelemetryEngine()
+        eng.update(tm.parse_packet(_packet(lap=0)), 99.0)
+        t = _feed_lap(eng, 100.0, 1, duration=10.0, speed=50.0)
+        _feed_lap(eng, t, 2, duration=11.0, speed=50.0)
+    assert any("lap 0" in s and "partial" in s for s in cap.lines), cap.lines
+    assert any("lap 1" in s and "new reference" in s for s in cap.lines), cap.lines
+    assert any("lap 2" in s and "counted" in s and "reference" not in s
+               for s in cap.lines), cap.lines
+
+
+def t_laplog_names_why_a_lap_is_rejected():
+    with _LapLog() as cap:                                 # standstill pit lap
+        eng = tm.TelemetryEngine()
+        eng.update(tm.parse_packet(_packet(lap=0)), 99.0)
+        t = 100.0
+        for _ in range(80):
+            eng.update(tm.parse_packet(_packet(speed_mps=50.0, lap=1)), t); t += 0.1
+        for _ in range(30):
+            eng.update(tm.parse_packet(_packet(speed_mps=0.0, lap=1)), t); t += 0.1
+        eng.update(tm.parse_packet(_packet(speed_mps=50.0, lap=2)), t)
+    assert any("lap 1" in s and "standstill" in s for s in cap.lines), cap.lines
+
+    with _LapLog() as cap:                                 # refuel pit lap
+        eng = tm.TelemetryEngine()
+        eng.update(tm.parse_packet(_packet(lap=0, fuel_level=20.0)), 99.0)
+        t = 100.0
+        for i in range(100):
+            fuel = 20.0 + (10.0 if i > 50 else 0.0)
+            eng.update(tm.parse_packet(_packet(speed_mps=50.0, lap=1, fuel_level=fuel)), t)
+            t += 0.1
+        eng.update(tm.parse_packet(_packet(speed_mps=50.0, lap=2, fuel_level=30.0)), t)
+    assert any("lap 1" in s and "refuel" in s for s in cap.lines), cap.lines
+
+    with _LapLog() as cap:                                 # pause mid-lap
+        eng = tm.TelemetryEngine()
+        eng.update(tm.parse_packet(_packet(lap=0)), 99.0)
+        t = 100.0
+        for _ in range(50):
+            eng.update(tm.parse_packet(_packet(speed_mps=50.0, lap=1)), t); t += 0.1
+        eng.update(tm.parse_packet(_packet(speed_mps=0.0, lap=1, flags=tm.FLAG_PAUSED)), t)
+        t += 0.1
+        for _ in range(50):
+            eng.update(tm.parse_packet(_packet(speed_mps=50.0, lap=1)), t); t += 0.1
+        eng.update(tm.parse_packet(_packet(speed_mps=50.0, lap=2)), t)
+    assert any("lap 1" in s and "paused" in s for s in cap.lines), cap.lines
+
+    with _LapLog() as cap:                                 # >2 s data gap
+        eng = tm.TelemetryEngine()
+        eng.update(tm.parse_packet(_packet(lap=0)), 99.0)
+        t = 100.0
+        for _ in range(50):
+            eng.update(tm.parse_packet(_packet(speed_mps=50.0, lap=1)), t); t += 0.1
+        t += 5.0
+        for _ in range(50):
+            eng.update(tm.parse_packet(_packet(speed_mps=50.0, lap=1)), t); t += 0.1
+        eng.update(tm.parse_packet(_packet(speed_mps=50.0, lap=2)), t)
+    assert any("lap 1" in s and "gap" in s for s in cap.lines), cap.lines
+
+
+def t_laplog_session_change_clears_reference():
+    with _LapLog() as cap:
+        eng = tm.TelemetryEngine()
+        eng.update(tm.parse_packet(_packet(lap=0)), 99.0)
+        _feed_lap(eng, 100.0, 1, duration=10.0, speed=50.0)
+        eng.update(tm.parse_packet(_packet(lap=0, speed_mps=0.0)), 130.0)
+    assert any("session change" in s and "reference cleared" in s
+               for s in cap.lines), cap.lines
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

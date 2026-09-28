@@ -7,10 +7,15 @@ without a console. Offsets follow the community packet-'A' layout;
 tools/gt7-telemetry-probe.py checks them against a live console. See the design spec.
 """
 import json
+import logging
 import os
 import struct
 import threading
 from collections import deque, namedtuple
+
+# The relay's telemetry logger: one line per finished lap says whether it became
+# the reference, counted, or why it was rejected (why the delta is not up yet).
+LOG = logging.getLogger("racecast.relay.telemetry")
 
 # Packet 'A' field offsets (little-endian).
 OFF_MAGIC = 0x00
@@ -107,7 +112,8 @@ class _LapAccumulator:
     the relay connects), True for accumulators opened at a real lap-change edge.
     Only the latter may become a completed/reference lap (see _finalise_lap)."""
     __slots__ = ("t0", "elapsed", "distance", "samples", "clean", "last_t",
-                 "fuel_start", "fuel_end", "started_at_boundary", "pit", "stopped_s")
+                 "fuel_start", "fuel_end", "started_at_boundary", "pit", "stopped_s",
+                 "why")
 
     def __init__(self, now, started_at_boundary=False):
         self.t0 = now
@@ -121,6 +127,15 @@ class _LapAccumulator:
         self.started_at_boundary = started_at_boundary
         self.pit = False
         self.stopped_s = 0.0
+        self.why = None               # first reason the lap went unclean or pit, for the log
+
+    def _reject(self, why, pit=False):
+        if pit:
+            self.pit = True
+        else:
+            self.clean = False
+        if self.why is None:
+            self.why = why
 
     def add(self, pkt, now):
         dt = now - self.last_t
@@ -128,27 +143,27 @@ class _LapAccumulator:
         if dt <= 0:
             return
         if dt > 2.0:                  # a long gap (stall/menu) makes the lap time unreliable
-            self.clean = False
+            self._reject("data gap over 2 s")
             return
         if pkt.paused or pkt.loading or not pkt.on_track:
-            self.clean = False
+            self._reject("paused, loading or off track")
             return
         self.elapsed += dt
         self.distance += max(0.0, pkt.speed_mps) * dt
         if pkt.speed_mps < STOPPED_SPEED_MPS:             # standstill in the pit box
             self.stopped_s += dt
             if self.stopped_s >= PIT_STOP_MIN_S:
-                self.pit = True
+                self._reject("pit lap: standstill", pit=True)
         if self.distance >= self.samples[-1][0] + SAMPLE_MIN_DIST:
             if len(self.samples) >= MAX_SAMPLES:
-                self.clean = False        # bogus/flooded lap: cap memory, drop the lap
+                self._reject("sample flood")  # bogus/flooded lap: cap memory, drop the lap
                 return
             self.samples.append((self.distance, self.elapsed))
         if self.fuel_start is None:
             self.fuel_start = pkt.fuel_level
         self.fuel_end = pkt.fuel_level
         if self.fuel_end > self.fuel_start + FUEL_RISE_L:  # refuel = pit lap
-            self.pit = True
+            self._reject("pit lap: refuel", pit=True)
 
 
 class TelemetryEngine:
@@ -190,6 +205,7 @@ class TelemetryEngine:
     def _reset_session(self, now, pkt):
         """Drop everything derived from the previous session (possibly a different
         track/car) and re-open a fresh lap at the boundary."""
+        LOG.info("session change at lap %s: reference cleared", pkt.lap)
         self._ref = None
         self._lap_time_sum = 0.0
         self._lap_time_n = 0
@@ -240,17 +256,27 @@ class TelemetryEngine:
 
     def _finalise_lap(self):
         acc = self._acc
-        if acc is None or not acc.clean or len(acc.samples) < 2:
+        if acc is None:
             return
-        if acc.pit:                       # in/out lap (standstill or refuel): never a
-            return                        # reference, and out of the time/fuel averages
+        why = None
+        if not acc.clean or acc.pit:      # unclean, or an in/out lap (standstill or
+            why = acc.why                 # refuel): never a reference, nor averaged
         # Only a lap that opened at a real lap-change edge and ran a plausible
         # minimum length counts. That rejects the mid-lap-connect partial and the
         # menu/out-lap blips, which would poison the reference and the averages.
-        if not acc.started_at_boundary or acc.elapsed < MIN_LAP_S or acc.distance < MIN_LAP_DIST:
+        elif not acc.started_at_boundary:
+            why = "partial lap (relay connected mid-lap)"
+        elif len(acc.samples) < 2 or acc.elapsed < MIN_LAP_S or acc.distance < MIN_LAP_DIST:
+            why = "too short"
+        head = f"lap {self._lap_num} {_fmt_time(acc.elapsed)}"
+        if why is not None:
+            LOG.info("%s: not counted (%s)", head, why)
             return
         if self._ref is None or acc.elapsed < self._ref["time"]:
             self._ref = {"time": acc.elapsed, "samples": acc.samples}
+            LOG.info("%s: new reference, delta vs this lap from now on", head)
+        else:
+            LOG.info("%s: counted", head)
         self._lap_time_sum += acc.elapsed
         self._lap_time_n += 1
         if acc.fuel_start is not None and acc.fuel_end is not None:
