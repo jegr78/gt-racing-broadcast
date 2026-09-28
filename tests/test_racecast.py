@@ -66,6 +66,72 @@ def t_help_when_empty():
     assert m.route([])["kind"] == "help"
 
 
+def _routed_commands():
+    """Every command literal route() dispatches on, read from its source, so a new
+    subcommand is covered by the help guard without editing this test."""
+    import inspect, re
+    src = inspect.getsource(m.route)
+    cmds = set(re.findall(r'cmd == "([a-z0-9-]+)"', src))
+    return cmds | set(m.SERVICES)
+
+
+def t_help_flag_after_any_command_never_dispatches():
+    cmds = _routed_commands() - set(m.ONESHOTS)
+    assert {"event", "profile", "relay", "obs", "funnel"} <= cmds, cmds
+    for cmd in sorted(cmds):
+        for argv in ([cmd, "--help"], [cmd, "-h"], [cmd, "start", "--help"],
+                     [cmd, "new", "x", "-h"]):
+            try:
+                r = m.route(argv)
+            except ValueError as e:
+                raise AssertionError(f"{argv} was parsed as a command, not help: {e}") from e
+            assert r == {"kind": "help", "topic": cmd}, (argv, r)
+
+
+def t_help_flag_on_event_start_and_profile_new_is_help():
+    assert m.route(["event", "start", "--help"]) == {"kind": "help", "topic": "event"}
+    assert m.route(["profile", "new", "--help"]) == {"kind": "help", "topic": "profile"}
+    assert m.route(["relay", "run", "--help"]) == {"kind": "help", "topic": "relay"}
+
+
+def t_help_flag_passes_through_to_argparse_oneshots():
+    for cmd in m.ONESHOTS:
+        r = m.route([cmd, "--help"])
+        assert r == {"kind": "oneshot", "command": cmd, "rest": ["--help"]}, (cmd, r)
+
+
+def t_help_word_takes_an_optional_topic():
+    assert m.route(["help"]) == {"kind": "help"}
+    assert m.route(["help", "event"]) == {"kind": "help", "topic": "event"}
+
+
+def t_usage_for_topic_shows_only_that_command():
+    text = m.usage_for("event")
+    assert "racecast event start --stint N" in text, text
+    assert "racecast obs refresh" not in text, "event help must not list other groups"
+    assert "racecast --help" in text, "topic help must point at the full reference"
+    assert "racecast <svc> logs" in m.usage_for("relay"), "services share the <svc> lines"
+    assert m.usage_for(None) == m.USAGE
+    assert m.usage_for("health") == m.USAGE, "a command without usage lines gets the full text"
+
+
+def t_main_prints_topic_help_without_dispatching():
+    calls = []
+    orig = dict(m.DISPATCH)
+    m.DISPATCH.update({k: (lambda *a, **k2: calls.append(a)) for k in orig})
+    buf, old = io.StringIO(), sys.stdout
+    try:
+        sys.stdout = buf
+        m.main(["event", "start", "--help"])
+    finally:
+        sys.stdout = old
+        m.DISPATCH.clear(); m.DISPATCH.update(orig)
+    assert calls == [], "a help request must not run the command"
+    out = buf.getvalue()
+    assert "racecast event start --stint N" in out, out
+    assert "racecast obs refresh" not in out, "main must print the topic help, not the full usage"
+
+
 def t_run_only_valid_for_relay():
     _raises(lambda: m.route(["companion", "run"]))
 
