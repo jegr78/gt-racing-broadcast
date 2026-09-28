@@ -15,6 +15,8 @@ Device" as a bottom-left PiP, each wrapped in its own scene on the Discord "scen
 one source" model. The device leaf sources carry the tokens __RACECAST_CAPTURE__ and
 __RACECAST_WEBCAM__; the committed form is the macOS av_capture_input source, and
 setup-assets.py localizes the source type and device settings per OS at import time.
+Commentary adds the "Solo Tyres/Fuel Capture" crop; POV instead embeds the "Solo Webcam"
+scene a second time, in the Intermission scene beside the broadcast-chat panel.
 """
 import copy
 import json
@@ -146,6 +148,11 @@ def _program_item(template_item, name, src_uuid, pos, bounds, item_id):
     it["pos"] = {"x": float(pos[0]), "y": float(pos[1])}
     it["bounds"] = {"x": float(bounds[0]), "y": float(bounds[1])}
     it["id"] = item_id
+    # The template's transitions carry its own name ("Feed POV Show Transition").
+    for verb in ("show", "hide"):
+        tr = it.get(f"{verb}_transition")
+        if isinstance(tr, dict) and "name" in tr:
+            tr["name"] = f"{name} {verb.capitalize()} Transition"
     return it
 
 

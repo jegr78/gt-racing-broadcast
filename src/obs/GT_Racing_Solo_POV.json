@@ -1670,14 +1670,14 @@
                         "show_transition": {
                             "id": "fade_transition",
                             "versioned_id": "fade_transition",
-                            "name": "Feed POV Show Transition",
+                            "name": "Solo Webcam Show Transition",
                             "transition": {},
                             "duration": 300
                         },
                         "hide_transition": {
                             "id": "fade_transition",
                             "versioned_id": "fade_transition",
-                            "name": "Feed POV Hide Transition",
+                            "name": "Solo Webcam Hide Transition",
                             "transition": {},
                             "duration": 300
                         },
@@ -2532,14 +2532,14 @@
                         "show_transition": {
                             "id": "fade_transition",
                             "versioned_id": "fade_transition",
-                            "name": "Feed POV Show Transition",
+                            "name": "Solo Capture Show Transition",
                             "transition": {},
                             "duration": 300
                         },
                         "hide_transition": {
                             "id": "fade_transition",
                             "versioned_id": "fade_transition",
-                            "name": "Feed POV Hide Transition",
+                            "name": "Solo Capture Hide Transition",
                             "transition": {},
                             "duration": 300
                         },
@@ -2665,14 +2665,14 @@
                         "show_transition": {
                             "id": "fade_transition",
                             "versioned_id": "fade_transition",
-                            "name": "Feed POV Show Transition",
+                            "name": "Solo Webcam Show Transition",
                             "transition": {},
                             "duration": 300
                         },
                         "hide_transition": {
                             "id": "fade_transition",
                             "versioned_id": "fade_transition",
-                            "name": "Feed POV Hide Transition",
+                            "name": "Solo Webcam Hide Transition",
                             "transition": {},
                             "duration": 300
                         },

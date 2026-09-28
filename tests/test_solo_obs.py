@@ -389,8 +389,16 @@ def t_pov_intermission_shows_the_webcam_beside_the_chat():
     cam_scene = next(s for s in coll["sources"] if s.get("name") == "Solo Webcam")
     assert cam["source_uuid"] == cam_scene["uuid"]
     assert cam["visible"] is True and cam["bounds_type"] == 2
-    assert cam["pos"] == {"x": 64.0, "y": 336.0}
-    assert cam["bounds"] == {"x": 1152.0, "y": 648.0}
+    assert cam["bounds"] == {"x": 1152.0, "y": 648.0}          # 60% of 1920, 16:9
+    # Measured against the chat panel's own geometry, so moving the panel in
+    # intermission.html without moving the webcam fails here.
+    import re
+    with open(os.path.join(ROOT, "src", "obs", "intermission.html"), encoding="utf-8") as fh:
+        page = fh.read()
+    var = lambda n: float(re.search(r"--ichat-%s:\s*(\d+)px" % n, page).group(1))
+    assert cam["pos"]["y"] + cam["bounds"]["y"] == 1080 - var("bottom")   # bottom edges flush
+    assert cam["pos"]["x"] == var("right")                                # mirrored margin
+    assert cam["pos"]["x"] + cam["bounds"]["x"] < 1920 - var("right") - var("w")  # no overlap
     ids = [it["id"] for it in items]
     assert ids.count(cam["id"]) == 1, ids
 
