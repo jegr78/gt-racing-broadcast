@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Stdlib checks for the racecast dispatcher routing. Run: python3 tests/test_racecast.py"""
-import importlib.util, io, os, sys, tempfile, time
+import contextlib, importlib.util, io, os, sys, tempfile, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -2277,55 +2277,99 @@ def _with_env(**kv):
     return lambda: (os.environ.clear(), os.environ.update(saved))
 
 
-def t_event_takeover_blocks_league_mismatch():
-    orig = m._relay_fetch_json
-    restore = _with_env(RACECAST_SHEET_ID="SHEET_B")
-    m._relay_fetch_json = lambda url, timeout=3: {
-        "league": {"sheet_id": "SHEET_A"}, "live": {"feed": "A", "stint": 3, "mode": "race"}}
-    try:
+def _refuse_network(*a, **k):
+    raise OSError("no network in tests")
+
+
+def _event_start_tripwire(a, **kw):
+    raise AssertionError("event_start must not run in this test")
+
+
+@contextlib.contextmanager
+def _takeover_sandbox(**overrides):
+    """Run event_takeover hermetically: every runtime file it writes (chat, console
+    versions, cues, health DB, event title) goes to a temp dir, every network and
+    relay call is refused or a no-op, the checkout's active profile is not applied
+    over the test's env, and event_start trips unless a test replaces it. Without
+    this, a checkout with a real league active loses its chat, console versions
+    and event title to the test, and an abort path that failed to fire would bring
+    the real event stack up. Pass a test's fakes as keyword overrides. Yields the
+    temp dir."""
+    with tempfile.TemporaryDirectory() as d:
+        patches = {
+            "_apply_active_profile_env": lambda: None,
+            "_chat_path": lambda: os.path.join(d, "chat.json"),
+            "_console_versions_path": lambda: os.path.join(d, "console-versions.json"),
+            "_cues_path": lambda: os.path.join(d, "cues.json"),
+            "_health_db_path": lambda: os.path.join(d, "health.db"),
+            "_event_title_path": lambda: os.path.join(d, "event.json"),
+            "_chat_reload_if_running": lambda: None,
+            "_cues_reload_if_running": lambda: None,
+            "chat_cmd": lambda rest: None,
+            "console_cmd": lambda rest: None,
+            "_relay_fetch_json": _refuse_network,
+            "_takeover_get": _refuse_network,
+            "_takeover_get_text": _refuse_network,
+            "_announce_takeover": lambda status, plan, a_title: None,
+            "event_start": _event_start_tripwire,
+        }
+        patches.update(overrides)
+        saved = {name: getattr(m, name) for name in patches}
+        saved_open = m.http_util.open_url
         try:
-            m.event_takeover(["100.64.1.2"])
-            raise AssertionError("expected SystemExit")
-        except SystemExit as e:
-            assert "league mismatch" in str(e.code)
+            for name, fake in patches.items():
+                setattr(m, name, fake)
+            m.http_util.open_url = _refuse_network
+            yield d
+        finally:
+            for name, orig in saved.items():
+                setattr(m, name, orig)
+            m.http_util.open_url = saved_open
+
+
+def t_event_takeover_blocks_league_mismatch():
+    restore = _with_env(RACECAST_SHEET_ID="SHEET_B")
+    try:
+        with _takeover_sandbox(_relay_fetch_json=lambda url, timeout=3: {
+                "league": {"sheet_id": "SHEET_A"},
+                "live": {"feed": "A", "stint": 3, "mode": "race"}}):
+            try:
+                m.event_takeover(["100.64.1.2"])
+                raise AssertionError("expected SystemExit")
+            except SystemExit as e:
+                assert "league mismatch" in str(e.code)
     finally:
-        m._relay_fetch_json = orig
         restore()
 
 
 def t_event_takeover_unreachable_without_stint_errors():
-    orig = m._relay_fetch_json
     restore = _with_env(RACECAST_SHEET_ID=None, RACECAST_SHEET_PUSH_URL="x")
-    def _boom(url, timeout=3):
-        raise OSError("refused")
-    m._relay_fetch_json = _boom
     try:
-        try:
-            m.event_takeover(["100.64.1.2"])
-            raise AssertionError("expected SystemExit")
-        except SystemExit as e:
-            assert "--stint" in str(e.code)
+        with _takeover_sandbox():                  # /status refused -> unreachable
+            try:
+                m.event_takeover(["100.64.1.2"])
+                raise AssertionError("expected SystemExit")
+            except SystemExit as e:
+                assert "--stint" in str(e.code)
     finally:
-        m._relay_fetch_json = orig
         restore()
 
 
 def t_event_takeover_success_calls_event_start():
-    orig_fetch, orig_es, orig_chat = m._relay_fetch_json, m.event_start, m.chat_cmd
     restore = _with_env(RACECAST_SHEET_ID="S", RACECAST_SHEET_PUSH_URL="https://push")
-    m._relay_fetch_json = lambda url, timeout=3: {
-        "league": {"sheet_id": "S"}, "live": {"feed": "B", "stint": 7, "mode": "race"}}
-    m.chat_cmd = lambda rest: None
     captured = {}
-    m.event_start = lambda a, **kw: captured.update(args=a, kw=kw)
     try:
-        m.event_takeover(["100.64.1.2"])
-        assert captured["args"] == ["--stint", "7"]
-        # a takeover must NOT reset the report session window (continuity on B)
-        assert captured["kw"].get("_new_session") is False, captured["kw"]
+        with _takeover_sandbox(
+                _relay_fetch_json=lambda url, timeout=3: {
+                    "league": {"sheet_id": "S"},
+                    "live": {"feed": "B", "stint": 7, "mode": "race"}},
+                event_start=lambda a, **kw: captured.update(args=a, kw=kw)):
+            m.event_takeover(["100.64.1.2"])
     finally:
-        m._relay_fetch_json, m.event_start, m.chat_cmd = orig_fetch, orig_es, orig_chat
         restore()
+    assert captured["args"] == ["--stint", "7"]
+    # a takeover must NOT reset the report session window (continuity on B)
+    assert captured["kw"].get("_new_session") is False, captured["kw"]
 
 
 def t_is_continuation_start():
@@ -2340,44 +2384,37 @@ def t_is_continuation_start():
 
 
 def t_event_takeover_qualifying_and_override_forwarded():
-    orig_fetch, orig_es, orig_chat = m._relay_fetch_json, m.event_start, m.chat_cmd
     restore = _with_env(RACECAST_SHEET_ID="S", RACECAST_SHEET_PUSH_URL="https://push")
-    m._relay_fetch_json = lambda url, timeout=3: {
-        "league": {"sheet_id": "S"}, "live": {"feed": "A", "stint": 2, "mode": "race"}}
-    m.chat_cmd = lambda rest: None
     captured = {}
-    m.event_start = lambda a, **kw: captured.__setitem__("args", a)
     try:
-        m.event_takeover(["100.64.1.2", "--stint", "9", "--qualifying"])
-        assert captured["args"] == ["--stint", "9", "--qualifying"]   # override wins, mode forced
+        with _takeover_sandbox(
+                _relay_fetch_json=lambda url, timeout=3: {
+                    "league": {"sheet_id": "S"},
+                    "live": {"feed": "A", "stint": 2, "mode": "race"}},
+                event_start=lambda a, **kw: captured.__setitem__("args", a)):
+            m.event_takeover(["100.64.1.2", "--stint", "9", "--qualifying"])
     finally:
-        m._relay_fetch_json, m.event_start, m.chat_cmd = orig_fetch, orig_es, orig_chat
         restore()
+    assert captured["args"] == ["--stint", "9", "--qualifying"]   # override wins, mode forced
 
 
 def t_event_takeover_pulls_event_title():
     # Takeover adopts producer A's on-air event title (#207), persisting it to
     # event.json BEFORE bring-up so the new relay loads it (mirrors the chat pull).
-    import json as _json, tempfile
-    orig_fetch, orig_es, orig_chat = m._relay_fetch_json, m.event_start, m.chat_cmd
-    orig_path = m._event_title_path
+    import json as _json
     restore = _with_env(RACECAST_SHEET_ID="S", RACECAST_SHEET_PUSH_URL="https://push")
-    m._relay_fetch_json = lambda url, timeout=3: {
-        "league": {"sheet_id": "S"}, "live": {"feed": "A", "stint": 3, "mode": "race"},
-        "event_title": "GTEC - Round 4 - Nürburgring"}
-    m.chat_cmd = lambda rest: None
-    m.event_start = lambda a, **kw: None
-    with tempfile.TemporaryDirectory() as d:
-        path = os.path.join(d, "event.json")
-        m._event_title_path = lambda: path
-        try:
+    try:
+        with _takeover_sandbox(
+                _relay_fetch_json=lambda url, timeout=3: {
+                    "league": {"sheet_id": "S"},
+                    "live": {"feed": "A", "stint": 3, "mode": "race"},
+                    "event_title": "GTEC - Round 4 - Nürburgring"},
+                event_start=lambda a, **kw: None) as d:
             m.event_takeover(["100.64.1.2"])
-            with open(path, encoding="utf-8") as fh:
+            with open(os.path.join(d, "event.json"), encoding="utf-8") as fh:
                 assert _json.load(fh) == {"title": "GTEC - Round 4 - Nürburgring"}
-        finally:
-            (m._relay_fetch_json, m.event_start, m.chat_cmd,
-             m._event_title_path) = orig_fetch, orig_es, orig_chat, orig_path
-            restore()
+    finally:
+        restore()
 
 
 def t_funnel_takeover_base_builds_console_url():
@@ -2390,62 +2427,60 @@ def t_funnel_takeover_base_builds_console_url():
 
 
 def t_event_takeover_funnel_requires_secret():
-    # --funnel with no CONSOLE_SECRET in the active profile -> clear abort.
+    # --funnel with no CONSOLE_SECRET in the active profile -> clear abort. The
+    # sandbox keeps the checkout's active profile (and its real secret) out, which
+    # would otherwise skip the abort and run the real bring-up.
     restore = _with_env(RACECAST_CONSOLE_SECRET="", RACECAST_SHEET_ID="L1")
     try:
-        try:
-            m.event_takeover(["producer-a.example.ts.net", "--funnel", "--stint", "3"])
-            raise AssertionError("expected SystemExit")
-        except SystemExit as e:
-            msg = str(e.code).lower() if e.code else ""
-            assert "secret" in msg or "console_secret" in msg
+        with _takeover_sandbox():
+            try:
+                m.event_takeover(["producer-a.example.ts.net", "--funnel", "--stint", "3"])
+                raise AssertionError("expected SystemExit")
+            except SystemExit as e:
+                msg = str(e.code).lower() if e.code else ""
+                assert "secret" in msg or "console_secret" in msg
     finally:
         restore()
+
+
+def _takeover_http_error(code, reason):
+    import urllib.error
+    def fake_get(url, secret=None, timeout=5):
+        raise urllib.error.HTTPError(url, code, reason, {}, None)
+    return fake_get
 
 
 def t_event_takeover_funnel_auth_rejected_aborts():
     # A 403/401 from the funnel endpoint means a bad or missing secret, so abort
     # rather than silently falling back the way a network failure does.
-    import urllib.error
-    def fake_get(url, secret=None, timeout=5):
-        raise urllib.error.HTTPError(url, 403, "forbidden", {}, None)
     restore = _with_env(RACECAST_CONSOLE_SECRET="S", RACECAST_SHEET_ID="L1")
-    orig_get, m._takeover_get = m._takeover_get, fake_get
-    orig_es, m.event_start = m.event_start, lambda a, **kw: (_ for _ in ()).throw(
-        AssertionError("event_start must not run on auth-reject"))
     try:
-        try:
-            m.event_takeover(["producer-a.example.ts.net", "--funnel", "--stint", "3"])
-            raise AssertionError("expected SystemExit")
-        except SystemExit as e:
-            msg = str(e.code).lower() if e.code else ""
-            assert "secret" in msg or "rejected" in msg
+        with _takeover_sandbox(_takeover_get=_takeover_http_error(403, "forbidden")):
+            try:
+                m.event_takeover(["producer-a.example.ts.net", "--funnel", "--stint", "3"])
+                raise AssertionError("expected SystemExit")
+            except SystemExit as e:
+                msg = str(e.code).lower() if e.code else ""
+                assert "secret" in msg or "rejected" in msg
     finally:
-        m._takeover_get, m.event_start = orig_get, orig_es
         restore()
 
 
 def t_event_takeover_funnel_401_blames_old_relay_not_secret():
     # A 401 (not 403) means A is an OLDER relay that still requires a console
     # token, so the abort message must NOT blame the secret.
-    import urllib.error
-    def fake_get(url, secret=None, timeout=5):
-        raise urllib.error.HTTPError(url, 401, "unauthorized", {}, None)
     restore = _with_env(RACECAST_CONSOLE_SECRET="S", RACECAST_SHEET_ID="L1")
-    orig_get, m._takeover_get = m._takeover_get, fake_get
-    orig_es, m.event_start = m.event_start, lambda a, **kw: (_ for _ in ()).throw(
-        AssertionError("event_start must not run on auth-reject"))
     try:
-        try:
-            m.event_takeover(["producer-a.example.ts.net", "--funnel", "--stint", "3"])
-            raise AssertionError("expected SystemExit")
-        except SystemExit as e:
-            msg = str(e.code).lower() if e.code else ""
-            assert "401" in msg, msg
-            assert "older" in msg or "update" in msg, msg
-            assert "console_secret" not in msg, msg   # must NOT misattribute to the secret
+        with _takeover_sandbox(_takeover_get=_takeover_http_error(401, "unauthorized")):
+            try:
+                m.event_takeover(["producer-a.example.ts.net", "--funnel", "--stint", "3"])
+                raise AssertionError("expected SystemExit")
+            except SystemExit as e:
+                msg = str(e.code).lower() if e.code else ""
+                assert "401" in msg, msg
+                assert "older" in msg or "update" in msg, msg
+                assert "console_secret" not in msg, msg   # must NOT misattribute to the secret
     finally:
-        m._takeover_get, m.event_start = orig_get, orig_es
         restore()
 
 
@@ -2464,24 +2499,38 @@ def t_event_takeover_funnel_success_calls_event_start():
         return {}
     restore = _with_env(RACECAST_CONSOLE_SECRET="S", RACECAST_SHEET_ID="L1",
                         RACECAST_SHEET_PUSH_URL="https://push")
-    orig_get, m._takeover_get = m._takeover_get, fake_get
-    # The funnel path resolves the active profile (for the CONSOLE_SECRET), which
-    # would otherwise inject the shipped `demo` league's SHEET_ID over our env and
-    # trip the league guard. Neutralise that injection so we test the takeover path,
-    # not profile resolution (the real _active_console_secret is covered elsewhere).
-    orig_apply, m._apply_active_profile_env = m._apply_active_profile_env, lambda: None
     es = {}
-    orig_es, m.event_start = m.event_start, lambda a, **kw: es.update(args=a)
     try:
-        m.event_takeover(["producer-a.example.ts.net", "--funnel"])
+        with _takeover_sandbox(_takeover_get=fake_get,
+                               event_start=lambda a, **kw: es.update(args=a)):
+            m.event_takeover(["producer-a.example.ts.net", "--funnel"])
     finally:
-        m._takeover_get, m.event_start = orig_get, orig_es
-        m._apply_active_profile_env = orig_apply
         restore()
     assert es.get("args") == ["--stint", "3"], es           # derived from A's live.stint
     assert all(u.startswith("https://producer-a.example.ts.net/console/takeover")
                for u in seen["urls"])
     assert seen["secret"] == "S"                            # step-up header sent
+
+
+def t_takeover_sandbox_keeps_runtime_files_out_of_the_checkout():
+    # Every file event_takeover writes must land in the sandbox's temp dir.
+    restore = _with_env(RACECAST_CONSOLE_SECRET="S", RACECAST_SHEET_ID="L1",
+                        RACECAST_SHEET_PUSH_URL="https://push")
+    def fake_get(url, secret=None, timeout=5):
+        if url.endswith("/status"):
+            return {"live": {"feed": "A", "stint": 3, "mode": "race"},
+                    "league": {"sheet_id": "L1"}, "event_title": "T", "timer": None}
+        return {"messages": []} if url.endswith("/chat") else {"versions": {}}
+    try:
+        with _takeover_sandbox(_takeover_get=fake_get,
+                               event_start=lambda a, **kw: None) as d:
+            for name in ("_chat_path", "_console_versions_path", "_cues_path",
+                         "_health_db_path", "_event_title_path"):
+                assert getattr(m, name)().startswith(d), name
+            m.event_takeover(["producer-a.example.ts.net", "--funnel"])
+            assert os.path.exists(os.path.join(d, "event.json"))
+    finally:
+        restore()
 
 
 def t_chat_routing():
