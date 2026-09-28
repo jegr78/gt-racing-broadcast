@@ -1646,7 +1646,7 @@ def resolve_uplot_asset(uplot_dir, name):
 # without a relay restart); fonts reuse the resolve_asset security pattern.
 OVERLAY_PAGES = ("hud", "splitscreen", "intermission")
 # Paths the relay serves as OBS browser sources (mirrored in src/racecast.py for
-# the served-pages hash gate that drives the OBS auto-refresh; keep in sync).
+# the relay-up probe before the OBS auto-refresh; keep in sync).
 OBS_PAGE_PATHS = ("/hud", "/hud/override.css",
                   "/splitscreen", "/splitscreen/override.css",
                   "/intermission", "/intermission/override.css")
@@ -11282,9 +11282,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     return self._send({"ok": True, **state})
                 if p == ["obs", "refresh"]:
                     # Reload the relay-served OBS browser sources (HUD / overlay /
-                    # timer); the programmatic right-click -> Refresh. Unconditional
-                    # force (no hash gate; the CLI owns obs-pages.hash): the director
-                    # presses this precisely to clear stale caches. Best-effort like
+                    # timer); the programmatic right-click -> Refresh. Unconditional:
+                    # the director presses this precisely to clear stale caches. Best-effort like
                     # the other /obs/* branches. Auto director-gated by console_policy
                     # (p[0] == "obs"); reachable over Funnel only under /console.
                     if _obs_ws is None:

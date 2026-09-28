@@ -437,7 +437,11 @@
     async function pollData() {
       try {
         const r = await fetch("/telemetry/data", { cache: "no-store" });
-        if (r.status === 404) { tele.style.display = "none"; alive = false; return; }
+        if (r.status === 404) {
+          tele.style.display = "none"; alive = false;
+          trace = []; traceOffset = null;      // never redraw a stale trace on return
+          return;
+        }
         if (!r.ok) return;
         const d = await r.json();
         alive = true; tele.style.display = "";
@@ -495,31 +499,73 @@
         }
       } catch (e) { /* transient; keep polling */ }
     }
+    // The poll only buffers samples; drawTrace renders every animation frame on a
+    // fixed window scrolling with an estimated relay clock, so the trace moves at
+    // the OBS frame rate instead of stepping at the 10 Hz poll rate.
+    const TRACE_WINDOW_S = 5;       // visible history, seconds
+    const TRACE_DELAY_S = 0.2;      // lag behind the relay: > poll interval + jitter
+    const TRACE_GAP_S = 0.25;       // a longer gap between samples is not joined up
+    let trace = [], traceOffset = null;   // relay time - performance.now()/1000
     async function pollTrace() {
       if (!alive) return;
       try {
         const r = await fetch("/telemetry/trace", { cache: "no-store" });
         if (!r.ok) return;
         const { samples } = await r.json();
-        const w = ctx.canvas.width, h = ctx.canvas.height;
-        ctx.clearRect(0, 0, w, h);
         if (!samples.length) return;
-        const t0 = samples[0].t, span = (samples[samples.length - 1].t - t0) || 1;
-        const draw = (key, color) => {
-          ctx.beginPath(); ctx.strokeStyle = color; ctx.lineWidth = 2;
-          samples.forEach((s, i) => {
-            const x = ((s.t - t0) / span) * w;
-            const y = h - s[key] * h;
-            i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
-          });
-          ctx.stroke();
-        };
-        draw("throttle", "#37d67a"); draw("brake", "#ff4d4f");
+        // A relay clock that stepped back (a time correction, then a relay restart)
+        // sends only samples older than the buffer: start over rather than drop them.
+        if (trace.length && samples[samples.length - 1].t < trace[trace.length - 1].t - 1) {
+          trace = []; traceOffset = null;
+        }
+        const lastT = trace.length ? trace[trace.length - 1].t : -Infinity;
+        let added = false;
+        for (const s of samples) if (s.t > lastT) { trace.push(s); added = true; }
+        // No new sample (a stall, or a late overlapping response): leave the offset,
+        // or it drifts and the trace races to catch up once samples resume.
+        if (!added) return;
+        const newest = trace[trace.length - 1].t;
+        const off = newest - performance.now() / 1000;
+        // Smooth the fetch-latency jitter; re-anchor on a forward relay clock jump.
+        traceOffset = traceOffset === null || Math.abs(off - traceOffset) > 1
+          ? off : traceOffset + (off - traceOffset) * 0.1;
+        const cut = newest - TRACE_WINDOW_S - TRACE_DELAY_S - 1;
+        let i = 0;
+        while (i < trace.length && trace[i].t < cut) i++;
+        if (i) trace = trace.slice(i);
       } catch (e) { /* transient */ }
+    }
+    function drawTrace() {
+      requestAnimationFrame(drawTrace);
+      const w = ctx.canvas.width, h = ctx.canvas.height;
+      ctx.clearRect(0, 0, w, h);
+      if (!alive || !trace.length || traceOffset === null) return;
+      // Freeze at the newest sample when data stops, rather than scroll it away.
+      const tEnd = Math.min(performance.now() / 1000 + traceOffset - TRACE_DELAY_S,
+                            trace[trace.length - 1].t);
+      const t0 = tEnd - TRACE_WINDOW_S;
+      const draw = (key, color) => {
+        ctx.beginPath(); ctx.strokeStyle = color; ctx.lineWidth = 2;
+        let started = false;
+        for (let i = 0; i < trace.length; i++) {
+          const s = trace[i], next = trace[i + 1];
+          if (next && next.t < t0) continue;   // keep one point left of the edge
+          const x = ((s.t - t0) / TRACE_WINDOW_S) * w;
+          const y = h - s[key] * h;
+          // Never bridge a data gap (stall, relay restart) with an invented line.
+          const gap = i > 0 && s.t - trace[i - 1].t > TRACE_GAP_S;
+          started && !gap ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+          started = true;
+          if (s.t > tEnd) break;               // one point past the right edge
+        }
+        ctx.stroke();
+      };
+      draw("throttle", "#37d67a"); draw("brake", "#ff4d4f");
     }
     setInterval(pollData, 100);
     setInterval(pollTrace, 100);
     pollData();
+    requestAnimationFrame(drawTrace);
   })();
 
   // Stream-chat box (#300): renders the read-only broadcast chat (#294). Self-gates

@@ -322,6 +322,22 @@ def t_ob_hud_has_top_speed_slot():
     assert "tele-top" in ids
 
 
+def t_hud_trace_renders_per_frame_on_a_fixed_window():
+    # The throttle/brake trace must not redraw only when a poll lands (10 fps
+    # steps) nor stretch its x axis to the batch's own time span (the whole trace
+    # breathes horizontally with sample jitter): it draws per animation frame on a
+    # fixed window that scrolls with an estimated relay clock.
+    with open(os.path.join(ROOT, "src", "obs", "hud.html"), encoding="utf-8") as f:
+        html = f.read()
+    tele = html[html.index("async function pollTrace"):html.index("// Stream-chat box")]
+    poll = tele[:tele.index("function drawTrace")]
+    assert "clearRect" not in poll, "the poll must only buffer samples, not draw"
+    assert "requestAnimationFrame(drawTrace)" in tele
+    draw = tele[tele.index("function drawTrace"):]
+    assert "/ TRACE_WINDOW_S" in draw, "x must map onto the fixed window"
+    assert "TRACE_GAP_S" in draw, "a data gap must not be bridged by a line"
+
+
 def t_ob_hud_has_clock_slot():
     with open(os.path.join(ROOT, "src", "obs", "hud.html"), encoding="utf-8") as f:
         slots = ob.extract_slots(f.read())
@@ -373,6 +389,39 @@ def t_ob_compile_px_and_text_props():
     assert "#stint {" in css
     assert "left: 800px" in css and "top: 30px" in css
     assert "font-size: 44px" in css and "color: #fff" in css
+
+
+def t_ob_compile_drops_zero_box_size():
+    # A 0px box is invisible under .el's overflow:hidden and never a deliberate
+    # choice (hiding is the "visible" prop). The builder once pinned width/height 0
+    # for slots it measured inside the hidden #tele block; compiling such a layout
+    # must leave the size to the base page instead of erasing the slot.
+    css = ob.compile_overlay_css(
+        {"version": 1, "page": "hud",
+         "slots": {"stint": {"left": 800, "top": 30, "width": 0, "height": -4}}},
+        SLOTS)
+    assert "left: 800px" in css
+    assert "width" not in css and "height" not in css
+    css = ob.compile_overlay_css(
+        {"slots": {"stint": {"width": 120, "height": 40}}}, SLOTS)
+    assert "width: 120px" in css and "height: 40px" in css
+
+
+def t_cc_builder_never_pins_unresolved_sizes():
+    # getComputedStyle reports "auto" for an element inside a display:none
+    # ancestor (the #tele block before telemetry arrives). The builder must not
+    # turn that into 0 when it reads base values, and must drop a stored 0 size
+    # on load so a profile saved by the old builder heals on its next save.
+    with open(os.path.join(ROOT, "src", "ui", "control-center.html"), encoding="utf-8") as f:
+        cc = f.read()
+    def fn(name):
+        body = cc[cc.index("function " + name):]
+        return body[:body.index("\n}\n")]
+    # Source smoke checks; t_ob_compile_drops_zero_box_size is the behavioural guard.
+    assert "parseFloat(n) || 0" not in fn("ovBaseValues")
+    assert "ovDropZeroSizes(ovState.layout.slots)" in fn("loadOverlay")
+    # A width/height <= 0 typed into the panel is unset, as the compiler drops it.
+    assert "value <= 0" in fn("ovSetProp")
 
 
 def t_ob_compile_align_maps_to_flex():
@@ -652,6 +701,62 @@ def t_ob_sample_has_flag_and_brand_images():
         assert isinstance(h.get(tid), str) and h[tid], tid
 
 
+def t_ob_sample_previews_stream_chat():
+    # The stream chat is a message list, not a text slot: SAMPLE carries it as
+    # one "user: text" line per message so the canvas has something to wrap and
+    # clip, and the preview panel something to edit.
+    chat = ob.SAMPLE["hud"].get("chat")
+    assert isinstance(chat, str)
+    lines = [ln for ln in chat.split("\n") if ln.strip()]
+    assert len(lines) >= 3 and all(": " in ln for ln in lines)
+
+
+def _read(*parts):
+    """A repo file's text. Some tests below keep a local helper of the same name."""
+    with open(os.path.join(*parts), encoding="utf-8") as f:
+        return f.read()
+
+
+def _cc():
+    return _read(ROOT, "src", "ui", "control-center.html")
+
+
+def _fn(src, name):
+    body = src[src.index("function " + name):]
+    return body[:body.index("\n}\n")]
+
+
+def t_cc_canvas_shows_runtime_gated_slots():
+    # hud.html hides #tele, #chat and several telemetry values inline until live
+    # data arrives. The builder canvas renders that markup offline, so it must
+    # lift the inline display:none, or those slots can be selected but never seen.
+    assert "ovUngate(" in _fn(_cc(), "ovBuildCanvas")
+    ungate = _fn(_cc(), "ovUngate")
+    assert "[data-edit]" in ungate
+    # ...but #tele only for a profile whose relay serves telemetry (solo POV).
+    assert "ovState.telemetry" in ungate
+
+
+def t_cc_canvas_previews_chat_like_the_hud():
+    # The canvas renders the sample chat with the live page's row markup, so the
+    # overlay CSS for #chat-log .msg / .u previews exactly; the preview panel
+    # edits it as a multi-line field.
+    assert "ovFillChat(" in _fn(_cc(), "ovFillSample")
+    fill = _fn(_cc(), "ovFillChat")
+    assert "chat-log" in fill and "'msg'" in fill and "'u'" in fill
+    panel = _fn(_cc(), "ovRenderPreviewPanel")
+    assert "textarea" in panel and "'chat'" in panel
+    # a line without "name: " renders as plain text, not an empty name
+    assert "i < 0" in fill
+
+
+def t_cc_preview_panel_hides_telemetry_fields_without_telemetry():
+    # Endurance and solo-commentary canvases keep #tele hidden, so the preview
+    # panel must not offer fields for slots that can never show there.
+    panel = _fn(_cc(), "ovRenderPreviewPanel")
+    assert "ovInTele(" in panel and "ovState.telemetry" in panel
+
+
 def t_splitscreen_labels_source_in_collection_splitscreen_scene_only():
     import os, json
     with open(os.path.join(ROOT, "src", "obs", "GT_Racing_Endurance.json"),
@@ -837,6 +942,15 @@ def t_example_overlay_matches_demo_standard():
     assert os.path.isfile(os.path.join(ex, "layout-hud.json")), "example overlay has no layout-hud.json"
     assert _read(ex, "layout-hud.json") == _read(de, "layout-hud.json"), \
         "example layout-hud.json != demo standard"
+
+
+def t_slot_boxes_layers_the_override_over_the_hud_base():
+    base = "#pov { left: 1516px; top: 600px; width: 384px; height: 216px; }" \
+           "#webcam { left: 14px; top: 695px; width: 336px; height: 189px; }"
+    boxes = ob.slot_boxes(base, "#pov { left: 10px; }")
+    assert boxes["pov"] == {"left": 10, "top": 600, "width": 384, "height": 216}, boxes
+    assert boxes["webcam"] == {"left": 14, "top": 695, "width": 336, "height": 189}, boxes
+    assert "tyres-capture" not in boxes, "a slot without a base rule has nothing to anchor"
 
 
 def t_pov_box_from_css_full_rule():

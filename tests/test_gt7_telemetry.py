@@ -711,6 +711,126 @@ def t_format_surfaces_session_distance():
     assert abs(imp["session_distance"] - 1.6) < 0.1 and imp["units"]["distance"] == "mi"
 
 
+class _LapLog:
+    """Capture the engine's per-lap verdict lines on racecast.relay.telemetry."""
+    def __enter__(self):
+        import logging
+        self.lines = []
+        cap = self
+        class H(logging.Handler):
+            def emit(self, rec): cap.lines.append(rec.getMessage())
+        self.h = H(level=logging.INFO)
+        self.log = logging.getLogger("racecast.relay.telemetry")
+        self.prev = self.log.level
+        self.log.setLevel(logging.INFO); self.log.addHandler(self.h)
+        return self
+
+    def __exit__(self, *exc):
+        self.log.removeHandler(self.h); self.log.setLevel(self.prev)
+
+
+def _verdict(lines, lap):
+    """The one verdict line logged for `lap` ("GT7 lap N <time>: ..."), as the text
+    after the colon. Fails unless exactly one such line exists."""
+    hits = [s.split(": ", 1)[1] for s in lines if s.startswith(f"GT7 lap {lap} ")]
+    assert len(hits) == 1, (lap, lines)
+    return hits[0]
+
+
+def _drive(eng, t, lap, secs, speed=50.0, **kw):
+    for _ in range(int(secs / 0.1)):
+        eng.update(tm.parse_packet(_packet(speed_mps=speed, lap=lap, **kw)), t)
+        t += 0.1
+    return t
+
+
+def t_laplog_reference_then_counted():
+    with _LapLog() as cap:
+        eng = tm.TelemetryEngine()
+        eng.update(tm.parse_packet(_packet(lap=0)), 99.0)
+        t = _feed_lap(eng, 100.0, 1, duration=10.0, speed=50.0)
+        _feed_lap(eng, t, 2, duration=11.0, speed=50.0)
+    assert _verdict(cap.lines, 0) == "not counted (partial lap (relay connected mid-lap))"
+    assert _verdict(cap.lines, 1) == "new reference, delta vs this lap from now on"
+    assert _verdict(cap.lines, 2) == "counted"
+
+
+def t_laplog_names_why_a_lap_is_rejected():
+    with _LapLog() as cap:                                 # standstill pit lap
+        eng = tm.TelemetryEngine()
+        eng.update(tm.parse_packet(_packet(lap=0)), 99.0)
+        t = _drive(eng, 100.0, 1, 8.0)
+        t = _drive(eng, t, 1, 3.0, speed=0.0)
+        eng.update(tm.parse_packet(_packet(speed_mps=50.0, lap=2)), t)
+    assert _verdict(cap.lines, 1) == "not counted (pit lap: standstill)"
+
+    with _LapLog() as cap:                                 # refuel pit lap
+        eng = tm.TelemetryEngine()
+        eng.update(tm.parse_packet(_packet(lap=0, fuel_level=20.0)), 99.0)
+        t = _drive(eng, 100.0, 1, 5.0, fuel_level=20.0)
+        t = _drive(eng, t, 1, 5.0, fuel_level=30.0)
+        eng.update(tm.parse_packet(_packet(speed_mps=50.0, lap=2, fuel_level=30.0)), t)
+    assert _verdict(cap.lines, 1) == "not counted (pit lap: refuel)"
+
+    with _LapLog() as cap:                                 # pause mid-lap
+        eng = tm.TelemetryEngine()
+        eng.update(tm.parse_packet(_packet(lap=0)), 99.0)
+        t = _drive(eng, 100.0, 1, 5.0)
+        eng.update(tm.parse_packet(_packet(speed_mps=0.0, lap=1, flags=tm.FLAG_PAUSED)), t)
+        t = _drive(eng, t + 0.1, 1, 5.0)
+        eng.update(tm.parse_packet(_packet(speed_mps=50.0, lap=2)), t)
+    assert _verdict(cap.lines, 1) == "not counted (paused, loading or off track)"
+
+    with _LapLog() as cap:                                 # >2 s data gap
+        eng = tm.TelemetryEngine()
+        eng.update(tm.parse_packet(_packet(lap=0)), 99.0)
+        t = _drive(eng, 100.0, 1, 5.0)
+        t = _drive(eng, t + 5.0, 1, 5.0)
+        eng.update(tm.parse_packet(_packet(speed_mps=50.0, lap=2)), t)
+    assert _verdict(cap.lines, 1) == "not counted (data gap over 2 s)"
+
+    with _LapLog() as cap:                                 # boundary lap under MIN_LAP_S
+        eng = tm.TelemetryEngine()
+        eng.update(tm.parse_packet(_packet(lap=0)), 99.0)
+        t = _drive(eng, 100.0, 1, tm.MIN_LAP_S - 2.0)
+        eng.update(tm.parse_packet(_packet(speed_mps=50.0, lap=2)), t)
+    assert _verdict(cap.lines, 1) == "not counted (too short)"
+
+
+def t_laplog_reports_the_first_reason():
+    # A lap that stood in the pit box and was then paused names the standstill,
+    # which happened first, not the pause.
+    with _LapLog() as cap:
+        eng = tm.TelemetryEngine()
+        eng.update(tm.parse_packet(_packet(lap=0)), 99.0)
+        t = _drive(eng, 100.0, 1, 3.0)
+        t = _drive(eng, t, 1, tm.PIT_STOP_MIN_S + 1.0, speed=0.0)
+        eng.update(tm.parse_packet(_packet(speed_mps=0.0, lap=1, flags=tm.FLAG_PAUSED)), t)
+        t = _drive(eng, t + 0.1, 1, 5.0)
+        eng.update(tm.parse_packet(_packet(speed_mps=50.0, lap=2)), t)
+    assert _verdict(cap.lines, 1) == "not counted (pit lap: standstill)"
+
+
+def t_laplog_session_change_clears_reference():
+    with _LapLog() as cap:
+        eng = tm.TelemetryEngine()
+        eng.update(tm.parse_packet(_packet(lap=0)), 99.0)
+        t = _feed_lap(eng, 100.0, 1, duration=10.0, speed=50.0)   # lap 1 -> reference
+        t = _drive(eng, t, 2, 3.0)                                # lap 2 in progress
+        eng.update(tm.parse_packet(_packet(lap=0, speed_mps=0.0)), t)
+    # the unfinished lap gets its own verdict, so no lap is missing from the log
+    assert _verdict(cap.lines, 2) == "not counted (session change)"
+    assert "GT7 session change (new lap counter 0): reference cleared" in cap.lines, cap.lines
+
+
+def t_laplog_session_change_without_reference():
+    with _LapLog() as cap:
+        eng = tm.TelemetryEngine()
+        eng.update(tm.parse_packet(_packet(lap=3)), 99.0)         # mid-lap connect
+        eng.update(tm.parse_packet(_packet(lap=1, speed_mps=0.0)), 100.0)
+    assert "GT7 session change (new lap counter 1): no reference yet" in cap.lines, cap.lines
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
