@@ -70,8 +70,9 @@ nothing breaks.
   `settings.file = "__RACECAST_GRAPHICS__/<label>.png"`, `unload:false`,
   `linear_alpha:true`, stable unique `uuid`. Pattern copied from `Standings`.
 - **Scene items**: 5 new items in the **Stint** scene and 5 in the **Splitscreen**
-  scene, each referencing the matching source `uuid`. Geometry mirrors the existing
-  full-screen overlays (`Standings`): `align:5`, `bounds_type:2` (SCALE_INNER),
+  scene. The solo collections carry the five in **Program**, and the relay targets
+  that scene when it runs with `--solo`. Each item references the matching source
+  `uuid`. Geometry mirrors the existing full-screen overlays (`Standings`): `align:5`, `bounds_type:2` (SCALE_INNER),
   `bounds: 1920×1080`, `pos:{0,0}`, `visible:false`, `locked:true`, fade
   show/hide transitions (duration 300). Scene-item integer `id`s must be unique within
   each scene — pick unused values.

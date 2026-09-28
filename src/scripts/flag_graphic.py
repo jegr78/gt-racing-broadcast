@@ -6,15 +6,17 @@ the relay wires obs_ws in as the store's apply_fn.
 Canonical keys are the slugified flag conditions; the OBS source name equals the
 Sheet Assets label equals the PNG basename (e.g. key 'safety-car' -> 'Flag Safety
 Car' -> 'Flag Safety Car.png'). Flags are mutually exclusive: at most one graphic
-is visible, in BOTH the Stint and Splitscreen scenes, or none."""
+is visible, in every flag scene of the collection (Stint and Splitscreen in
+endurance, Program in solo), or none."""
 
 import json
 import os
 import threading
 
-# Scenes that carry the flag-graphic scene items (both get all five, kept in
-# sync so a scene switch preserves the shown flag). Mirrors the OBS collection.
+# Scenes that carry the flag-graphic scene items (each gets all five, kept in
+# sync so a scene switch preserves the shown flag). Mirrors the OBS collections.
 FLAG_GRAPHIC_SCENES = ("Stint", "Splitscreen")
+FLAG_GRAPHIC_SCENES_SOLO = ("Program",)
 
 # Canonical key -> OBS source name (== Sheet Assets label == PNG basename).
 FLAG_GRAPHIC_SOURCES = {
@@ -27,6 +29,11 @@ FLAG_GRAPHIC_SOURCES = {
 
 # Input aliases accepted by normalize_flag_value (parity with the HUD flag chip).
 FLAG_GRAPHIC_ALIASES = {"sc": "safety-car", "vsc": "virtual-safety-car"}
+
+
+def flag_graphic_scenes(solo):
+    """The flag scenes of the endurance or the solo collection."""
+    return FLAG_GRAPHIC_SCENES_SOLO if solo else FLAG_GRAPHIC_SCENES
 
 
 def normalize_flag_value(raw):
@@ -43,13 +50,13 @@ def normalize_flag_value(raw):
     return slug if slug in FLAG_GRAPHIC_SOURCES else None
 
 
-def flag_graphic_intents(active):
-    """[(scene, source, enabled), …] for every flag source in every flag scene;
+def flag_graphic_intents(active, scenes=FLAG_GRAPHIC_SCENES):
+    """[(scene, source, enabled), …] for every flag source in every scene of *scenes*;
     enabled is True only for *active*'s source. active '' / None / unknown -> all
     hidden. Deterministic order (scenes outer, sources inner)."""
     shown = FLAG_GRAPHIC_SOURCES.get(active)
     out = []
-    for scene in FLAG_GRAPHIC_SCENES:
+    for scene in scenes:
         for source in FLAG_GRAPHIC_SOURCES.values():
             out.append((scene, source, source == shown))
     return out
@@ -64,12 +71,13 @@ class FlagGraphicStore:
     applied to OBS through an injected apply_fn (the relay passes
     obs_ws.set_scene_item_enabled). There is NO sheet sync, because this is OBS
     source visibility rather than a HUD value. Selecting a flag shows its source
-    and hides the other four in both scenes; clear hides all. Best-effort
+    and hides the other four in every scene of *scenes*; clear hides all. Best-effort
     throughout: an OBS failure degrades to a note and the state is still stored."""
 
-    def __init__(self, path, apply_fn=None):
+    def __init__(self, path, apply_fn=None, scenes=FLAG_GRAPHIC_SCENES):
         self.path = path
         self.apply_fn = apply_fn or _noop_apply
+        self.scenes = tuple(scenes)
         self.lock = threading.Lock()
         self.active = ""                         # canonical key or ""
         try:
@@ -121,5 +129,5 @@ class FlagGraphicStore:
             self._apply_locked()
 
     def _apply_locked(self):
-        for scene, source, enabled in flag_graphic_intents(self.active):
+        for scene, source, enabled in flag_graphic_intents(self.active, self.scenes):
             self.apply_fn(scene, source, enabled)   # (ok, note) ignored, best-effort

@@ -24,6 +24,29 @@ def t_sources_are_the_five_flags():
     assert fg.FLAG_GRAPHIC_SOURCES["green"] == "Flag Green"
     assert fg.FLAG_GRAPHIC_SOURCES["virtual-safety-car"] == "Flag Virtual Safety Car"
     assert fg.FLAG_GRAPHIC_SCENES == ("Stint", "Splitscreen")
+    assert fg.FLAG_GRAPHIC_SCENES_SOLO == ("Program",)
+
+
+def t_scenes_for_mode():
+    assert fg.flag_graphic_scenes(solo=False) == ("Stint", "Splitscreen")
+    assert fg.flag_graphic_scenes(solo=True) == ("Program",)
+
+
+def _scenes_with_all_flags(collection):
+    with open(os.path.join(ROOT, "src", "obs", collection), encoding="utf-8") as fh:
+        data = json.load(fh)
+    flags = set(fg.FLAG_GRAPHIC_SOURCES.values())
+    return {s["name"] for s in data["sources"] if s.get("id") == "scene"
+            and flags <= {i["name"] for i in s["settings"].get("items", [])}}
+
+
+def t_mode_scenes_carry_all_flag_items_in_the_shipped_collections():
+    for collection, solo in (("GT_Racing_Endurance.json", False),
+                             ("GT_Racing_Solo_POV.json", True),
+                             ("GT_Racing_Solo_Commentary.json", True)):
+        have = _scenes_with_all_flags(collection)
+        want = set(fg.flag_graphic_scenes(solo))
+        assert want <= have, f"{collection}: flag scenes {sorted(want)} not all in {sorted(have)}"
 
 
 def t_normalize_canonical_aliases_and_clear():
@@ -44,6 +67,22 @@ def t_intents_show_one_hide_rest_in_both_scenes():
     assert on == [("Stint", "Flag Yellow"), ("Splitscreen", "Flag Yellow")]
     # everything else hidden
     assert all(not en for (sc, src, en) in intents if src != "Flag Yellow")
+
+
+def t_intents_follow_the_given_scenes():
+    intents = fg.flag_graphic_intents("red", scenes=fg.FLAG_GRAPHIC_SCENES_SOLO)
+    assert {sc for (sc, _src, _en) in intents} == {"Program"}, intents
+    assert [(sc, src) for (sc, src, en) in intents if en] == [("Program", "Flag Red")], intents
+
+
+def t_solo_store_applies_only_to_program():
+    with tempfile.TemporaryDirectory() as d:
+        obs = _FakeObs()
+        st = fg.FlagGraphicStore(os.path.join(d, "flag-graphic.json"), apply_fn=obs.apply,
+                                 scenes=fg.flag_graphic_scenes(solo=True))
+        st.set("green")
+        assert {sc for (sc, _src, _en) in obs.calls} == {"Program"}, obs.calls
+        assert ("Program", "Flag Green", True) in obs.calls, obs.calls
 
 
 def t_intents_clear_hides_all():
