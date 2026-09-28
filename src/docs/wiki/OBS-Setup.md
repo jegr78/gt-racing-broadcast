@@ -77,8 +77,8 @@ collection.
 > weather graphics are **hidden full-screen overlays in the Stint scene**, each switchable
 > by its own Companion toggle (`Weather Race (1) Toggle` / `Weather Race (2) Toggle` / `Weather Quali Toggle`: see
 > [Director guide](Director)), exactly like the Standings/Results toggles. The five flag-status
-> graphics are **hidden full-screen overlays in the Stint and Splitscreen scenes** (in a solo
-> collection: the **Program** scene), toggled
+> graphics are **hidden full-screen overlays in the Stint and Splitscreen scenes**, in a solo
+> collection in the **Program** scene. They are toggled
 > mutually exclusively from the panel's **Flag Gfx** row or the Companion **FLAGS** page's
 > graphic row: they are the *graphic* parallel to the flag-text chip and are fully optional.
 
