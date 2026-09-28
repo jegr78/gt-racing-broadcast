@@ -310,9 +310,29 @@ def bake_overlay_boxes(collection, base_html, override_css=""):
                  if (b := overlay_build.box_from_css(override_css, s))}
     for slot_id, box in boxes.items():
         tgt = overlay_build.OVERLAY_SLOT_OBS_SOURCES[slot_id]
-        apply_box_transform(collection, tgt["source"], box, scene=tgt.get("export_scene"))
-        applied.append((slot_id, tgt["source"], tgt.get("export_scene"), box))
+        scene = tgt.get("export_scene")
+        if _has_box_item(collection, tgt["source"], scene):
+            apply_box_transform(collection, tgt["source"], box, scene=scene)
+            applied.append((slot_id, tgt["source"], scene, box))
     return applied
+
+
+def _has_box_item(collection, source_name, scene=None):
+    """True when apply_box_transform would find an item to move."""
+    def found(node):
+        if isinstance(node, dict):
+            if (node.get("name") == source_name and isinstance(node.get("pos"), dict)
+                    and isinstance(node.get("bounds"), dict)):
+                return True
+            return any(found(v) for v in node.values())
+        if isinstance(node, list):
+            return any(found(v) for v in node)
+        return False
+    if scene is None:
+        return found(collection)
+    return any(found(src.get("settings", {}).get("items"))
+               for src in collection.get("sources", [])
+               if isinstance(src, dict) and src.get("id") == "scene" and src.get("name") == scene)
 
 
 def apply_box_transform(collection, source_name, overrides, scene=None):

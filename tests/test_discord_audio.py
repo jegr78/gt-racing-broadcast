@@ -229,7 +229,9 @@ def t_bake_overlay_boxes_uses_the_hud_base_without_an_override():
     coll = _coll_with_webcam(pos=(24.0, 776.0), bounds=(384.0, 280.0))
     with open(os.path.join(ROOT, "src", "obs", "hud.html"), encoding="utf-8") as fh:
         base_html = fh.read()
-    sa.bake_overlay_boxes(coll, base_html, "#webcam { border-color: #63a6b2; }")
+    applied = sa.bake_overlay_boxes(coll, base_html, "#webcam { border-color: #63a6b2; }")
+    assert [a[0] for a in applied] == ["webcam"], \
+        f"only slots whose item exists may be reported as synced, got {applied}"
     it = _webcam_item(coll)
     assert (it["pos"], it["bounds"]) == ({"x": 14, "y": 695}, {"x": 336, "y": 189}), \
         f"the webcam must land in the hud.html frame, got {it}"
