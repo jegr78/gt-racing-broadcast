@@ -77,6 +77,24 @@ def t_decrypt_typed_ignores_length_hint():
     assert gt7.decrypt_typed(ct)[0] == "A"
 
 
+def t_decrypt_typed_tries_the_length_matched_type_first():
+    """A '~' packet (344 bytes) is checked against the '~' key first, so the relay's
+    60 Hz stream pays one magic check per packet, not three. (#711 review)"""
+    ct = _encrypted(0x2468ACE0, _typed_plain(0x158, 1.0), 0x55FABB4F)
+    real, calls = gt7.salsa20_xor, []
+
+    def counting(key, nonce, data):
+        calls.append(len(data))
+        return real(key, nonce, data)
+
+    gt7.salsa20_xor = counting
+    try:
+        assert gt7.decrypt_typed(ct)[0] == "~"
+    finally:
+        gt7.salsa20_xor = real
+    assert calls == [4, 0x158], calls        # one magic check, then the full packet
+
+
 def t_decrypt_typed_rejects_garbage():
     assert gt7.decrypt_typed(bytes(0x158)) == (None, None)
     assert gt7.decrypt_typed(b"short") == (None, None)

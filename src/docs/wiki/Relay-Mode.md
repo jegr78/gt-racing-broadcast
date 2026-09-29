@@ -490,8 +490,8 @@ which adds the steering angle, the driver's pedal input and the car's accelerati
 to the base values. GT7 only changes the format of a stream that has stopped. So if
 the console still streams the base format when the relay starts, e.g. from a relay
 that ran before, the relay goes quiet once until that stream ends and then requests
-the extended one. The base values keep coming until the old stream ends (about 15
-seconds), then the HUD telemetry freezes for 2 to 3 seconds. This happens at most once
+the extended one. The base values keep coming until the old stream ends (up to about
+15 seconds), then the HUD telemetry freezes for 2 to 3 seconds. This happens at most once
 per relay start. If GT7 keeps sending the base format after that, the relay keeps
 using it and only the extended values are missing.
 

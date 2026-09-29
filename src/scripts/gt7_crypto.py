@@ -14,6 +14,8 @@ KEY = b"Simulator Interface Packet GT7 ver 0.0"[:32]
 # '~' = 344 bytes (+ driver pedal input). Each type is a superset of the previous one.
 IV_XOR_A = 0xDEADBEAF
 IV_XOR = {"A": IV_XOR_A, "B": 0xDEADBEEF, "~": 0x55FABB4F}
+# Each type's packet length: only a hint for which key to try first, never proof.
+PACKET_LEN = {"A": 0x128, "B": 0x13C, "~": 0x158}
 # Decrypted magic (little-endian uint32 at offset 0), the "0S7G" bytes.
 MAGIC = 0x47375330
 
@@ -79,13 +81,15 @@ MIN_PACKET_LEN = 0x94
 def decrypt_typed(data):
     """Decrypt a received GT7 packet of any type. Returns (type, plaintext), with type
     one of IV_XOR's keys, or (None, None) if the packet is too short or no type's key
-    yields the magic (foreign/corrupt datagram). Each candidate is tested on the first
-    keystream block only, so trying three types costs little over one."""
+    yields the magic (foreign/corrupt datagram). The type whose length matches is
+    tried first and each candidate is tested on the first keystream block only, so a
+    well-formed packet costs one magic check (the pure-Python cipher runs at 60 Hz)."""
     if len(data) < MIN_PACKET_LEN:
         return None, None
     iv1 = struct.unpack_from("<I", data, 0x40)[0]
-    for kind, iv_xor in IV_XOR.items():
-        nonce = struct.pack("<II", iv1 ^ iv_xor, iv1)
+    order = sorted(IV_XOR, key=lambda kind: PACKET_LEN[kind] != len(data))   # stable
+    for kind in order:
+        nonce = struct.pack("<II", iv1 ^ IV_XOR[kind], iv1)
         if struct.unpack_from("<I", salsa20_xor(KEY, nonce, data[:4]), 0)[0] == MAGIC:
             return kind, salsa20_xor(KEY, nonce, data)
     return None, None
