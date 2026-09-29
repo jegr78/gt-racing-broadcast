@@ -370,6 +370,14 @@ def t_solo_config_targets_exist_in_both_solo_collections():
         _assert_config_matches(solo, filename)
 
 
+def t_solo_scene_keys_cover_trailer_webcam_and_capture():
+    solo = _config_block(_html(), "CONFIG_SOLO")
+    listed = re.search(r"\n  scenes: \[([^\]]*)\]", solo).group(1)
+    assert re.findall(r'"([^"]+)"', listed) == [
+        "Program", "Interview", "Standby", "Intermission", "Intro", "Outro", "Trailer",
+        "Discord", "Solo Webcam", "Solo Capture"], listed
+
+
 def t_endurance_config_targets_exist_in_endurance_collection():
     _assert_config_matches(_config_block(_html(), "CONFIG"), "GT_Racing_Endurance.json")
 

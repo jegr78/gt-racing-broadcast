@@ -65,7 +65,7 @@ INTERMISSION_WEBCAM_POS = (64, 336)
 INTERMISSION_WEBCAM_BOUNDS = (1152, 648)
 
 # scene_order after derivation (drops Stint/Splitscreen, adds the device scenes).
-SCENE_ORDER = ["Program", "Standby", "Intro", "Outro", "Interview", "Discord",
+SCENE_ORDER = ["Program", "Standby", "Intro", "Outro", "Trailer", "Interview", "Discord",
                "Intermission", "Solo Capture", "Solo Webcam", "Commentary Mic"]
 
 START_SCENE = "Standby"

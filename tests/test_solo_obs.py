@@ -156,6 +156,15 @@ def t_solo_templates_scene_and_source_references_resolve():
         assert d["current_program_scene"] in scene_names, fn
 
 
+def t_solo_scene_order_lists_every_scene_with_trailer_after_outro():
+    for fn in SOLO_FILES:
+        d = _load_solo(fn)
+        scene_names = {s.get("name") for s in d["sources"] if s.get("id") == "scene"}
+        order = [e["name"] for e in d["scene_order"]]
+        assert set(order) == scene_names, (fn, sorted(scene_names - set(order)))
+        assert order.index("Trailer") == order.index("Outro") + 1, (fn, order)
+
+
 def t_localize_preserves_solo_scenes():
     """setup-assets.localize_device_sources must localize the device LEAF sources
     (id/settings -> per-OS device) while leaving the wrapping SCENES intact. Scene

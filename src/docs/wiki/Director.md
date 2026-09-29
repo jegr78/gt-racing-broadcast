@@ -66,9 +66,10 @@ the A/B feed pills and preview tiles, the stint schedule and the qualifying
 editor are hidden, and the POV editor stands on its own card with its own POV
 RELOAD / POV STOP. The OBS control busses retarget to the solo scene collection,
 SCN·VIS switches `PROGRAM` / `INTERVIEW` / `STANDBY` / `INTERMISSION` / `INTRO` /
-`OUTRO` / `DISCORD` and toggles the `WEBCAM` and `POV` picture-in-picture (the
-`WEBCAM` toggle acts on the webcam in the **Program** scene only; the one in the solo
-POV **Intermission** scene is not affected). The Gfx, Pre-race and Grid keys toggle
+`OUTRO` / `TRAILER` / `DISCORD` / `SOLO WEBCAM` / `SOLO CAPTURE` (the last two cut to
+the webcam or the capture card full-screen) and toggles the `WEBCAM` and `POV`
+picture-in-picture (the `WEBCAM` toggle acts on the webcam in the **Program** scene
+only; the one in the solo POV **Intermission** scene is not affected). The Gfx, Pre-race and Grid keys toggle
 their graphics in the **Program** scene, and the
 AUDIO bus exposes the solo mixer: **Game**, **Webcam**, **Mic** (the commentator's
 microphone on the producer machine), **POV**, **Discord** and **Intermission**.
