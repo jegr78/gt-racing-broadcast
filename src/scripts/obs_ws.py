@@ -43,6 +43,16 @@ INTERMISSION_SCENE = "Intermission"          # the safe holding scene and auto-f
 POV_SOURCE = "Feed POV"                      # the Stint-scene driver-POV PiP scene item
 FEED_SOURCES = {"A": "Feed A", "B": "Feed B"}   # scene-item name == audio input name
 SPLIT_SCENE = "Splitscreen"                  # the handover layout: outgoing + incoming stint
+SOLO_PROGRAM_SCENE = "Program"               # the solo collections' single program scene
+# Full-screen graphics a board may toggle through the relay (#706): in Stint for
+# endurance, in Program for solo.
+GRAPHIC_SOURCES = (
+    "Standings", "Schedule", "Race Results", "Quali Results",
+    "Race Weather 1", "Race Weather 2", "Quali Weather", "Standby Cover",
+    "Weekend Info", "Race Info", "Next Event", "Starting Grid",
+    "Grid Row 1", "Grid Row 2", "Grid Row 3", "Grid Row 4",
+    "Grid Row 5", "Grid Row 6", "Grid Row 7", "Grid Row 8",
+)
 SPLIT_DISCORD_INPUT = "Discord Audio Capture"   # the interview bus, muted during a SPLIT (#534)
 # The producer's own commentary microphone for a local stint (#593). Always the
 # LEAF input, never a scene, because a scene wrapper cannot be muted.
@@ -1527,6 +1537,11 @@ def set_feed_close_when_inactive(inputs, value=True, host="127.0.0.1", port=None
         return ""
     finally:
         session.close()
+
+
+def graphic_scene(solo):
+    """The scene that holds GRAPHIC_SOURCES in the endurance or the solo collection."""
+    return SOLO_PROGRAM_SCENE if solo else STINT_SCENE
 
 
 def set_scene_item_enabled(scene, source, enabled, host="127.0.0.1", port=None,

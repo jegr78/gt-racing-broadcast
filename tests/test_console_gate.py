@@ -1174,6 +1174,50 @@ def t_obs_split_get_route_for_companion():
     _assert_split_b_on_air(*_split_with_b_on_air(lambda port: _get(port, "/obs/split")))
 
 
+class _GraphicFakeObs(_SplitFakeObs):
+    def read_obs_state(self, sources, inputs):
+        return {"sources": [{"scene": sc, "source": src, "enabled": True}
+                            for sc, src in sources]}, ""
+
+
+def _graphic_call(fire):
+    srv = _serve(); port = srv.server_address[1]
+    fake = _GraphicFakeObs()
+    orig_obs, m._obs_ws = m._obs_ws, fake
+    try:
+        code, body = fire(port)
+        return code, body, fake.calls
+    finally:
+        m._obs_ws = orig_obs
+        srv.shutdown()
+
+
+def t_obs_graphic_get_route_for_companion():
+    # Companion's graphic buttons name only the source; an endurance relay picks
+    # Stint and a toggle inverts what OBS reports. (#706)
+    code, body, calls = _graphic_call(
+        lambda port: _get(port, "/obs/graphic/toggle/Weekend%20Info"))
+    assert code == 200, (code, body)
+    assert json.loads(body) == {"ok": True, "scene": "Stint", "source": "Weekend Info",
+                                "enabled": False}, body
+    assert calls == [("item", "Stint", "Weekend Info", False)], calls
+
+
+def t_obs_graphic_rejects_a_source_outside_the_graphics():
+    code, body, calls = _graphic_call(lambda port: _get(port, "/obs/graphic/show/Feed%20A"))
+    assert code == 400 and "unknown graphic" in json.loads(body)["error"], (code, body)
+    assert calls == [], calls
+
+
+def t_console_obs_graphic_is_director_gated():
+    code, _body, calls = _graphic_call(
+        lambda port: _get(port, "/console/obs/graphic/show/Standings", _tok("alice")))
+    assert code == 403 and calls == [], (code, calls)
+    code, body, calls = _graphic_call(
+        lambda port: _get(port, "/console/obs/graphic/show/Standings", _tok("bob")))
+    assert code == 200 and calls == [("item", "Stint", "Standings", True)], (code, body, calls)
+
+
 def t_tests_never_reach_a_real_obs():
     # The relay routes a call through its persistent OBS connections only when
     # `_obs_ws` exposes route_kind; NoObs must not, and the real connect functions
