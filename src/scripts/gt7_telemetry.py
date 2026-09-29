@@ -9,6 +9,7 @@ tests/test_gt7_fixture.py pins them with real packets. See the design spec.
 """
 import json
 import logging
+import math
 import os
 import struct
 import threading
@@ -474,6 +475,7 @@ class TelemetryEngine:
             "top_speed_mps": self._top_speed,
             "time_of_day_ms": pkt.day_ms if pkt else None,
             "car_id": pkt.car_id if pkt else None,
+            "steer_rad": pkt.steer_rad if pkt else None,
         }
 
     def trace_batch(self, limit=150):
@@ -506,6 +508,12 @@ def _band(temp_c, thresholds):
     if temp_c <= crit:            # critical is strictly ABOVE the threshold (spec: >crit)
         return "hot"
     return "critical"
+
+
+def _steer_deg(rad):
+    if rad is None or not math.isfinite(rad):
+        return None
+    return round(math.degrees(rad), 1)
 
 
 def format_snapshot(snap, units, thresholds):
@@ -542,6 +550,10 @@ def format_snapshot(snap, units, thresholds):
             "time_remaining": _fmt_time(fuel["time_remaining_s"]),
         },
         "delta_dir": snap.get("delta_dir"),
+        # Steering wheel angle for the HUD wheel (#712), positive = left; None on a
+        # base 'A' stream, which carries no steering, and for a non-finite float,
+        # which json.dumps would emit as a bare NaN the HUD cannot parse.
+        "steer_deg": _steer_deg(snap.get("steer_rad")),
         "units": {
             "speed": "mph" if imperial else "km/h",
             "temp": "°F" if imperial else "°C",

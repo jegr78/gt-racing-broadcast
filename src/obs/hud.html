@@ -140,6 +140,11 @@
     display:block;line-height:30px;   /* block, not the .el flex: ellipsis needs a block box */
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
     text-shadow:0 1px 4px rgba(0,0,0,.85)}
+  /* Steering wheel (#712): the icon turns with the GT7 steering angle. The SVG
+     rotates, not the box, so the builder frame stays upright. */
+  #tele-steer{left:1404px;top:966px;width:80px;height:80px;color:#eef2f6;
+    filter:drop-shadow(0 2px 4px rgba(0,0,0,.8))}
+  #tele-steer svg{width:100%;height:100%;transition:transform .1s linear}
   /* Time of day (on-track clock): top-left, in the gap between GT7's lap-count
      header and its standings tower, left-aligned to the driver-name column. */
   #tele-clock{left:80px;top:120px;font-size:26px;padding:2px 11px;border-radius:3px;
@@ -173,7 +178,7 @@
     background:rgba(9,12,17,.7);border:1px solid rgba(120,132,146,.42);border-radius:14px;z-index:0}
   #tele-tyres,#tele-trace,#tele-delta,#tele-pred,#tele-fuel,#tele-top,#tele-clock,
   #tele-pred-lbl,#tele-fuel-lbl,#tele-top-lbl,#tele-avg-lbl,#tele-dist-lbl,#tele-avg,#tele-dist,
-  #tele-car{z-index:1}
+  #tele-car,#tele-steer{z-index:1}
 
   /* Webcam frame, bottom-left, 16:9. The interior stays transparent so the OBS
      webcam source shows through. */
@@ -316,6 +321,7 @@
     <div id="tele-dist-lbl" class="el" data-edit="Distance label" data-edit-kind="text">DISTANCE</div>
     <div id="tele-dist" class="el white" data-edit="Distance" data-edit-kind="text">--</div>
     <div id="tele-car" class="el white" data-edit="Car" data-edit-kind="text" style="display:none">--</div>
+    <div id="tele-steer" class="el" data-edit="Steering wheel" data-edit-kind="box" style="display:none"><svg viewBox="0 0 100 100" aria-hidden="true"><circle cx="50" cy="50" r="41" fill="none" stroke="currentColor" stroke-width="9"/><path d="M9 50 H38 M62 50 H91 M50 62 V91" stroke="currentColor" stroke-width="9" fill="none"/><circle cx="50" cy="50" r="13" fill="currentColor"/><rect x="45" y="3" width="10" height="13" rx="2" fill="#e0b24a"/></svg></div>
   </div>
   <!-- Tyres/fuel capture: a top-level builder box slot driving the OBS "Solo
        Tyres/Fuel Capture" transform, like the webcam slot. Kept outside the
@@ -509,6 +515,14 @@
           car.textContent = [d.car.maker, d.car.name].filter(Boolean).join(" ");
         } else {
           car.style.display = "none";
+        }
+        const steerBox = document.getElementById("tele-steer");
+        const steer = steerBox.querySelector("svg");
+        if (d.steer_deg !== null && d.steer_deg !== undefined) {
+          steerBox.style.display = "";
+          steer.style.transform = "rotate(" + (-d.steer_deg) + "deg)";
+        } else {
+          steerBox.style.display = "none";
         }
         const clock = document.getElementById("tele-clock");
         if (d.time_of_day) {

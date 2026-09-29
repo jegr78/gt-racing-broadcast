@@ -251,7 +251,7 @@ def t_ob_extract_slots_from_real_hud():
                    "tele-clock",
                    "tele-avg-lbl", "tele-avg",
                    "tele-dist-lbl", "tele-dist",
-                   "tele-car",
+                   "tele-car", "tele-steer",
                    # "tyres-capture" is a TOP-LEVEL slot (outside #tele) so it stays
                    # builder-editable in a Commentary profile that has no telemetry;
                    # it drives the "Solo Tyres/Fuel Capture" OBS device transform
@@ -1270,6 +1270,19 @@ def t_hud_names_the_car_from_telemetry():
     assert "const car = document.getElementById(\"tele-car\");" in poll
     assert "car.textContent = [d.car.maker, d.car.name].filter(Boolean).join(\" \");" in poll
     assert 'car.style.display = "none";' in poll
+
+
+
+def t_hud_steering_wheel_follows_the_angle():
+    """#tele-steer rotates with steer_deg. GT7 counts left as positive, CSS rotates
+    clockwise for positive, hence the minus. Hidden without an angle. (#712)"""
+    with open(os.path.join(ROOT, "src", "obs", "hud.html"), encoding="utf-8") as f:
+        html = f.read()
+    assert ('id="tele-steer" class="el" data-edit="Steering wheel" data-edit-kind="box"'
+            ' style="display:none"') in html
+    poll = html[html.index("async function pollData"):html.index("async function pollTrace")]
+    assert 'steer.style.transform = "rotate(" + (-d.steer_deg) + "deg)";' in poll
+    assert "if (d.steer_deg !== null && d.steer_deg !== undefined) {" in poll
 
 
 if __name__ == "__main__":
