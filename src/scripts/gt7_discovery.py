@@ -8,15 +8,15 @@ happens to sit on that port.
 Pure-ish + best-effort: socket / clock / decrypt are injectable seams (unit-tested with
 a fake socket) and the function NEVER raises. The relay (racecast-feeds.py) is
 deliberately import-free, so the port constants below (GT7_RECV_PORT / GT7_SEND_PORT)
-are DUPLICATED there (racecast-feeds.py also carries GT7_HEARTBEAT_S for its own loop).
-Keep the shared copies in sync.
+are DUPLICATED there, and GT7_HEARTBEAT mirrors gt7_telemetry.HEARTBEAT (the relay's
+heartbeat policy). Keep the shared copies in sync.
 """
 import socket
 import time
 
 GT7_RECV_PORT = 33740          # local port we bind + the console replies to
 GT7_SEND_PORT = 33739          # console's heartbeat port
-GT7_HEARTBEAT = b"A"
+GT7_HEARTBEAT = b"~"            # the extended packet format, as the relay requests (#711)
 BROADCAST_ADDR = "255.255.255.255"
 NO_CONSOLE_NOTE = ("No PlayStation answered. Make sure GT7 is in an active session "
                    "(menus emit no telemetry) and the console is on this LAN.")

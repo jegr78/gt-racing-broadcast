@@ -11,6 +11,10 @@ The console IP is auto-discovered by default with a limited broadcast heartbeat,
 latching the first responder, so no IP is needed on a flat home LAN. --capture writes
 each RAW encrypted packet as one hex line, so a real packet can be baked into a CI
 fixture that validates the field offsets against reality, not just the wiring.
+
+It requests the extended '~' format like the relay. A console already streaming 'A'
+(e.g. to a running relay from before #711) keeps that format until its stream lapses:
+stop the other listener and wait ~10 s first.
 """
 import argparse
 import contextlib
@@ -55,21 +59,22 @@ def main():
         while True:
             now = time.monotonic()
             if now - last >= 10:
-                sock.sendto(b"A", (dest or "255.255.255.255", 33739)); last = now
+                sock.sendto(tm.HEARTBEAT, (dest or "255.255.255.255", 33739)); last = now
             try:
                 data, addr = sock.recvfrom(4096)
             except socket.timeout:
                 print("… no packet (is GT7 in a session? heartbeat sent)"); continue
             if dest is None:
                 dest = addr[0]; print("console discovered:", dest)
-            plain = crypto.decrypt_packet(data)
+            kind, plain = crypto.decrypt_typed(data)
             if plain is None:
                 print("undecryptable/foreign packet"); continue
             p = tm.parse_packet(plain)
+            steer = "-" if p.steer_rad is None else f"{p.steer_rad:+.2f} rad"
             print(f"lap {p.lap} spd {p.speed_mps*3.6:5.1f} km/h "
                   f"tyres {tuple(round(t) for t in p.tyre_temp)} "
                   f"thr {p.throttle} brk {p.brake} fuel {p.fuel_level:.1f} "
-                  f"on_track={p.on_track} paused={p.paused}")
+                  f"on_track={p.on_track} paused={p.paused} type {kind} steer {steer}")
             if cap is not None:
                 cap.write(data.hex() + "\n"); cap.flush()
                 print(f"  captured {seen + 1}" + (f"/{args.count}" if args.count else ""))

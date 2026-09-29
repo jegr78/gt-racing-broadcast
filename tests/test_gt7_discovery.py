@@ -61,6 +61,16 @@ def t_latches_only_decryptable_and_dedupes():
     assert fake.closed is True
 
 
+def t_heartbeat_requests_the_extended_format():
+    """Discovery starts the console's stream, so it must ask for the same '~' format
+    as the relay: an 'A' stream it leaves behind would cost the relay a lapse pause
+    on its next start. (#711)"""
+    fake = _FakeSock([(b"OK1", ("192.168.1.42", 33740))])
+    disc.discover_consoles(timeout=2.0, sock_factory=lambda: fake, decrypt=_ok_decrypt,
+                           now=_now_seq([0, 0, 0, 100]))
+    assert fake.sent[0][0] == b"~"
+
+
 def t_two_consoles_sorted():
     packets = [
         (b"OK3", ("192.168.1.50", 33740)),

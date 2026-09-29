@@ -11538,15 +11538,15 @@ def quali_poller(hud_source, interval, stop_evt):
 # ---------- GT7 UDP telemetry listener (solo/POV only, #324) ----------------
 GT7_RECV_PORT = 33740
 GT7_SEND_PORT = 33739
-GT7_HEARTBEAT_S = 10.0
 
 
-def _telemetry_loop(store, ps_ip, stop_evt):
-    """Bind 33740, send a heartbeat every ~10 s, decrypt+parse+feed each packet.
-    Best-effort: any error logs and the loop keeps running; no console -> idle."""
+def _telemetry_loop(store, ps_ip, stop_evt, clock=time.monotonic):
+    """Bind 33740, heartbeat per gt7_telemetry.HeartbeatPolicy (the extended '~'
+    format, #711), decrypt+parse+feed each packet. Best-effort: any error logs and
+    the loop keeps running; no console -> idle."""
     tlog = logging.getLogger("racecast.relay.telemetry")
     sock = None
-    last_hb = 0.0
+    heartbeat = gt7_telemetry.HeartbeatPolicy()
     dest = ps_ip
     while not stop_evt.is_set():
         try:
@@ -11556,14 +11556,13 @@ def _telemetry_loop(store, ps_ip, stop_evt):
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
                 sock.bind(("0.0.0.0", GT7_RECV_PORT))
                 sock.settimeout(1.0)
-            now = time.monotonic()
-            if now - last_hb >= GT7_HEARTBEAT_S:
+            beat = heartbeat.due(clock())
+            if beat is not None:
                 target = dest or "255.255.255.255"
                 try:
-                    sock.sendto(b"A", (target, GT7_SEND_PORT))
+                    sock.sendto(beat, (target, GT7_SEND_PORT))
                 except OSError as e:
                     tlog.warning("heartbeat send failed: %s", e)
-                last_hb = now
             try:
                 data, addr = sock.recvfrom(4096)
             except socket.timeout:
@@ -11576,9 +11575,10 @@ def _telemetry_loop(store, ps_ip, stop_evt):
                 continue                      # ignore packets from any other host once the
                                              # console is latched/pinned, a rogue LAN host can
                                              # forge valid telemetry (the key is fixed+public)
-            plain = gt7_crypto.decrypt_packet(data)
+            kind, plain = gt7_crypto.decrypt_typed(data)
             if plain is None:
                 continue
+            heartbeat.on_packet(kind, clock())
             store.update(gt7_telemetry.parse_packet(plain), time.time())
         except OSError as e:
             tlog.warning("telemetry socket error: %s. Reopening", e)

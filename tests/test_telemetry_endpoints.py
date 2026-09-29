@@ -175,6 +175,62 @@ def t_telemetry_toggle_is_atomic_under_concurrency():
     assert store.visible() is True
 
 
+def t_telemetry_loop_requests_extended_format_and_switches_once():
+    """The relay loop sends the '~' heartbeat. Fed a base 'A' stream it goes silent
+    until the stream lapses, then requests '~' again, exactly one pause. (#711)"""
+    import socket as _socket
+    import threading as _t
+    from test_gt7_fixture import PKT_THROTTLE_HEX
+    ps_ip = "100.64.0.7"                      # test constant, never a real console
+    clock = [0.0]
+    stop = _t.Event()
+    packets = [bytes.fromhex(PKT_THROTTLE_HEX)] * 40      # 4 s of 'A' at the fake rate
+
+    class FakeSock:
+        sent = []
+
+        def __init__(self, *a, **kw):
+            pass
+
+        def setsockopt(self, *a):
+            pass
+
+        def bind(self, addr):
+            pass
+
+        def settimeout(self, s):
+            pass
+
+        def close(self):
+            pass
+
+        def sendto(self, data, addr):
+            FakeSock.sent.append((round(clock[0], 1), data, addr))
+
+        def recvfrom(self, n):
+            if clock[0] >= 12.0:
+                stop.set()
+            if packets:
+                clock[0] += 0.1
+                return packets.pop(), (ps_ip, 33740)
+            clock[0] += 1.0                   # a recv timeout: the stream is quiet
+            raise _socket.timeout()
+
+    store = m.gt7_telemetry.TelemetryStore(None)
+    real = m.socket.socket
+    m.socket.socket = FakeSock
+    try:
+        m._telemetry_loop(store, ps_ip, stop, clock=lambda: clock[0])
+    finally:
+        m.socket.socket = real
+    beats = [(t, d) for t, d, addr in FakeSock.sent]
+    assert all(addr == (ps_ip, m.GT7_SEND_PORT) for _t0, _d, addr in FakeSock.sent)
+    assert [d for _t0, d in beats] == [b"~", b"~"], beats
+    assert beats[0][0] == 0.0
+    assert beats[1][0] >= 4.0 + m.gt7_telemetry.HEARTBEAT_LAPSE_GAP_S   # after the lapse
+    assert store.trace(10)                    # the 'A' packets still fed the HUD
+
+
 def t_zz_no_test_reached_a_real_obs():
     # Sorted last: no test in this file may have attempted a real OBS connection.
     assert _obs_guard.CALLS == [], _obs_guard.CALLS[:3]

@@ -485,6 +485,16 @@ stays). The relay stores the choice in `runtime/<profile>/telemetry-view.json`, 
 survives a relay restart; `/telemetry/data` and `/status` (`telemetry.visible`) report
 it. Outside a solo POV broadcast these routes answer 404, like `/telemetry/data`.
 
+**Telemetry packet format.** The relay asks GT7 for its extended telemetry packet,
+which adds the steering angle, the driver's pedal input and the car's accelerations
+to the base values. GT7 only changes the format of a stream that has stopped. So if
+the console still streams the base format when the relay starts, e.g. from a relay
+that ran before, the relay goes quiet once until that stream ends and then requests
+the extended one. The base values keep coming until the old stream ends (up to about
+15 seconds), then the HUD telemetry freezes for 2 to 3 seconds. This happens at most once
+per relay start. If GT7 keeps sending the base format after that, the relay keeps
+using it and only the extended values are missing.
+
 ---
 
 ## Driver-POV PiP (optional)
