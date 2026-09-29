@@ -724,6 +724,24 @@ def t_format_snapshot_time_of_day_none_before_packet():
     assert out["time_of_day"] is None
 
 
+def t_format_snapshot_steering_degrees():
+    """/telemetry/data carries the steering angle in degrees, positive = left, for
+    the HUD wheel (#712)."""
+    eng = tm.TelemetryEngine()
+    eng.update(tm.parse_packet(_ext_packet(steer_rad=0.5236, lap=1)), 100.0)
+    assert tm.format_snapshot(eng.snapshot(), "metric", (70, 85, 95))["steer_deg"] == 30.0
+    eng.update(tm.parse_packet(_ext_packet(steer_rad=-1.5708, lap=1)), 100.1)
+    assert tm.format_snapshot(eng.snapshot(), "metric", (70, 85, 95))["steer_deg"] == -90.0
+
+
+def t_format_snapshot_steering_none_on_base_packets():
+    """A base 'A' stream has no steering: the HUD hides the wheel."""
+    eng = tm.TelemetryEngine()
+    assert tm.format_snapshot(eng.snapshot(), "metric", (70, 85, 95))["steer_deg"] is None
+    eng.update(tm.parse_packet(_packet(lap=1)), 100.0)
+    assert tm.format_snapshot(eng.snapshot(), "metric", (70, 85, 95))["steer_deg"] is None
+
+
 def t_format_surfaces_fuel_per_lap_and_delta_dir():
     snap = {"speed_mps": 0.0, "tyre_temp": (70.0, 70.0, 70.0, 70.0),
             "tyre_temp_avg": (70.0, 70.0, 70.0, 70.0), "top_speed_mps": 0.0,

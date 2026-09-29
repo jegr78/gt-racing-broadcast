@@ -493,6 +493,12 @@ and the Director Panel's status strip shows it too. `/telemetry/data` and `/stat
 (`telemetry.car`) report `{id, maker, name, group}`. A car added by a GT7 update after
 the tables were refreshed shows as `Car #<id>` until the next release updates them.
 
+**Steering wheel (solo POV).** A wheel icon left of the telemetry panel turns with
+the driver's steering, from the extended telemetry packet (see below). It is the
+`Steering wheel` element in the overlay builder, hides with the rest of the telemetry
+block, and stays hidden while GT7 sends only the base packet. `/telemetry/data`
+reports the angle as `steer_deg` (degrees, positive = left).
+
 **Telemetry packet format.** The relay asks GT7 for its extended telemetry packet,
 which adds the steering angle, the driver's pedal input and the car's accelerations
 to the base values. GT7 only changes the format of a stream that has stopped. So if
