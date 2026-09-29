@@ -318,6 +318,19 @@ def t_solo_telemetry_toggle():
     assert "teleVisBtn.hidden = !d.telemetry" in html
 
 
+def t_solo_status_strip_names_the_car():
+    """The status strip shows the GT7 car from /status (telemetry.car), as text so a
+    car name can never inject markup, and hides the pill without one. (#713)"""
+    html = _html()
+    assert '<span class="st" id="stCar" hidden>CAR <b></b></span>' in html
+    poll = html[html.index("async function relayPoll"):]
+    poll = poll[:poll.index("}catch(e){")]
+    assert "const car = d.telemetry && d.telemetry.car;" in poll
+    assert '$("#stCar").hidden = !car;' in poll
+    assert '$("#stCar b").textContent = carLabel(car);' in poll
+    assert "function carLabel(car)" in html
+
+
 def t_solo_collapses_the_feeds_column():
     h = _html()
     assert '<div class="cols" id="ctlCols">' in h, "the Feeds|Scn-Vis block carries its own id"

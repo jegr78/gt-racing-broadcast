@@ -149,7 +149,7 @@ def t_status_reports_telemetry_visibility():
     store = m.gt7_telemetry.TelemetryStore(None)
     srv, get = _serve(store, relay=_StatusRelay())
     try:
-        assert json.loads(get("/status")[2])["telemetry"] == {"visible": True}
+        assert json.loads(get("/status")[2])["telemetry"] == {"visible": True, "car": None}
     finally:
         srv.shutdown()
     srv, get = _serve(None, relay=_StatusRelay())
@@ -173,6 +173,28 @@ def t_telemetry_toggle_is_atomic_under_concurrency():
     for t in threads:
         t.join()
     assert store.visible() is True
+
+
+def t_status_and_data_name_the_car():
+    """The Director Panel shows the current car from /status and the HUD from
+    /telemetry/data, both resolved through the shipped car tables. (#713)"""
+    import json
+    from test_gt7_fixture import EXT_TCS_HEX
+
+    class _StatusRelay:
+        def status(self):
+            return {}
+
+    store = m.gt7_telemetry.TelemetryStore(None, cars=m.gt7_cars.CarDB())
+    plain = m.gt7_crypto.decrypt_packet(bytes.fromhex(EXT_TCS_HEX))
+    store.update(m.gt7_telemetry.parse_packet(plain), 1.0)
+    srv, get = _serve(store, relay=_StatusRelay())
+    try:
+        car = json.loads(get("/status")[2])["telemetry"]["car"]
+        assert (car["id"], car["maker"], car["group"]) == (365, "Alfa Romeo", "Gr.4"), car
+        assert json.loads(get("/telemetry/data")[2])["car"] == car
+    finally:
+        srv.shutdown()
 
 
 def t_telemetry_loop_requests_extended_format_and_switches_once():

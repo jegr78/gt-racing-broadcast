@@ -130,6 +130,10 @@ you:
 python3 tools/e2e.py --real-league NAME   # local-only: drive the copied real-league dev build (refuses under CI)
 python3 tools/e2e.py --playwright [--headed] [--shots DIR]  # optional rendered checks / visible browser / MCP-free screenshot tour
 
+# Refresh the vendored GT7 car tables (src/assets/gt7/, ddm999/gt7info, MIT-0) that name
+# the telemetry car id (#713). Run before a release when GT7 added cars.
+python3 tools/fetch-gt7-cars.py         # --dry-run lists added/removed car ids
+
 # Fetch any missing HUD country flags from the sheet's Configuration tab
 python3 tools/fetch-flags.py            # adds missing -> src/assets/flags/ (keeps old)
 

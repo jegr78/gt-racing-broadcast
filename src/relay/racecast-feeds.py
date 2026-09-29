@@ -160,6 +160,7 @@ import cookie_jar  # the shared "jar holds a YouTube login" rule, same as prefli
 import placeholders  # transparent-graphic placeholder path -> hide pure-placeholder assets from the browser
 import gt7_crypto      # GT7 UDP telemetry: Salsa20 decrypt (solo/POV only, #324)
 import gt7_telemetry   # GT7 UDP telemetry: packet parser + TelemetryStore (solo/POV only, #324)
+import gt7_cars        # GT7 car id -> car name, from the vendored src/assets/gt7 tables (#713)
 from services import external_tool_env  # de-PyInstaller the env for spawned external tools
 
 # Module-level relay logger. main() attaches the file/console handlers via
@@ -10494,7 +10495,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 base["timer"] = timer_store.summary()
             base["event_title"] = event_store.get() if event_store else ""
             if telemetry_store is not None:          # solo POV only; lights the panel toggle
-                base["telemetry"] = {"visible": telemetry_store.visible()}
+                base["telemetry"] = {"visible": telemetry_store.visible(),
+                                 "car": telemetry_store.car()}     # panel status strip (#713)
             return base
         def _console_status_payload(self, roles):
             """Status for the Funnel-exposed /console mount. Feed stream URLs are
@@ -12166,7 +12168,8 @@ def main():
         telemetry_store = gt7_telemetry.TelemetryStore(
             os.path.join(runtime, "telemetry.json"), units=_tunits, thresholds=_tthr,
             reset=True,          # fresh reference each relay start (spec §D), no stale cross-track lap
-            view_path=os.path.join(runtime, "telemetry-view.json"))   # show/hide survives restarts
+            view_path=os.path.join(runtime, "telemetry-view.json"),   # show/hide survives restarts
+            cars=gt7_cars.CarDB(os.path.join(assets_dir, "gt7")))     # car names (#713)
         threading.Thread(target=_telemetry_loop,
                          args=(telemetry_store, args.gt7_ps_ip, stop_evt), daemon=True).start()
         LOG.info("GT7 telemetry listener started (bind 0.0.0.0:33740, ps_ip=%s)",

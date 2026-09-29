@@ -101,6 +101,7 @@ SAMPLE = {
         "tele-avg": "1:36.205",
         "tele-dist-lbl": "DISTANCE",
         "tele-dist": "1234.5 km",
+        "tele-car": "Alfa Romeo 155 2.5 V6 TI '93",
         # The stream chat is a message list; one "user: text" line per message.
         "chat": ("SpeedFan: What a start!\n"
                  "PitWall: Box this lap for fresh softs\n"
