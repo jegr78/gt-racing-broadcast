@@ -2227,19 +2227,14 @@
       "feedbacks": [
        {
         "id": "1LDAjMn90R1b6fOtM5B3N",
-        "definitionId": "scene_item_active",
-        "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+        "definitionId": "logic_operator",
+        "connectionId": "internal",
         "options": {
-         "scene": {
-          "value": "Stint",
-          "isExpression": false
-         },
-         "source": {
-          "value": "Feed POV",
-          "isExpression": false
+         "operation": {
+          "isExpression": false,
+          "value": "or"
          }
         },
-        "upgradeIndex": 8,
         "type": "feedback",
         "style": {
          "color": 16777215,
@@ -2248,6 +2243,60 @@
         "isInverted": {
          "value": false,
          "isExpression": false
+        },
+        "children": {
+         "default": [
+          {
+           "id": "ct0rbyaywrSMCfhbYul5v",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Stint",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Feed POV",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 39168
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          },
+          {
+           "id": "df_WUrV2CPfqBKv6zU4PM",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Program",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Feed POV",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 39168
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          }
+         ]
         }
        }
       ],

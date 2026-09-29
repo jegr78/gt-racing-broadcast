@@ -2130,6 +2130,18 @@ def t_companion_red_flag_shows_and_hides_the_cover_through_the_relay():
         {"Stint", "Program"}, fb
 
 
+def t_companion_pov_toggle_lights_in_both_scenes():
+    # The relay toggles the POV in either collection, so the button lights from the
+    # Stint scene and from the solo Program scene. (#706)
+    [btn] = [b for label, b in _companion_buttons() if label == "POV Toggle"]
+    [fb] = btn["feedbacks"]
+    assert fb["definitionId"] == "logic_operator" and \
+        fb["options"]["operation"]["value"] == "or", fb
+    assert {(c["options"]["scene"]["value"], c["options"]["source"]["value"])
+            for c in fb["children"]["default"]} == \
+        {("Stint", "Feed POV"), ("Program", "Feed POV")}, fb
+
+
 class _AliveFakeSock:
     """Minimal socket stand-in for the _Session.alive checks. Distinct from
     _FakeSock above, which tracks the close() handshake calls. (#537)"""
