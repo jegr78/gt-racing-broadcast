@@ -12,6 +12,7 @@ import struct
 import sys
 import tempfile
 import threading
+from urllib.parse import unquote
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -1978,6 +1979,167 @@ def t_companion_stint_buttons_end_on_the_relay_like_the_panel():
                           if a.get("definitionId") in ("toggle_scene_item", "set_source_mute"))
         assert urls[0][0] > last_direct, (label, "the relay call must come last")
         assert other in {t[-1] for _, t in got}, label
+
+
+# Graphic toggles resolved on the relay (#706): Companion names only the source,
+# the relay picks the scene of the loaded collection.
+class _GraphicObs(_SplitObs):
+    def __init__(self, enabled=None, fail=()):
+        super().__init__(fail)
+        self.enabled = enabled
+
+    def read_obs_state(self, sources, inputs):
+        self.calls.append(("read", tuple(sources)))
+        if self.enabled == "down":
+            return None, "obs unreachable"
+        return {"scene": "", "audio": [],
+                "sources": [{"scene": sc, "source": src, "enabled": self.enabled}
+                            for sc, src in sources]}, ""
+
+
+class _SoloRelay:
+    def __init__(self, solo):
+        self.solo = solo
+
+
+def t_graphic_scene_follows_the_collection_kind():
+    assert m.graphic_scene(False) == "Stint"
+    assert m.graphic_scene(True) == "Program"
+
+
+def t_graphic_sources_exist_in_every_collection():
+    def items(filename, scene):
+        with open(os.path.join(ROOT, "src", "obs", filename), encoding="utf-8") as fh:
+            d = json.load(fh)
+        [sc] = [s for s in d["sources"] if s.get("id") == "scene" and s["name"] == scene]
+        return {i["name"] for i in sc["settings"]["items"]}
+    assert len(m.GRAPHIC_SOURCES) == 20, m.GRAPHIC_SOURCES
+    for filename, solo in (("GT_Racing_Endurance.json", False),
+                           ("GT_Racing_Solo_POV.json", True),
+                           ("GT_Racing_Solo_Commentary.json", True)):
+        missing = set(m.GRAPHIC_SOURCES) - items(filename, m.graphic_scene(solo))
+        assert not missing, (filename, sorted(missing))
+
+
+def t_apply_graphic_shows_and_hides_in_the_collection_scene():
+    obs = _GraphicObs()
+    payload, status = irofeeds.apply_graphic(_SoloRelay(False), obs, "show", "Weekend Info")
+    assert status == 200 and payload == {"ok": True, "scene": "Stint",
+                                         "source": "Weekend Info", "enabled": True}, payload
+    payload, status = irofeeds.apply_graphic(_SoloRelay(True), obs, "hide", "Grid Row 8")
+    assert status == 200 and payload["scene"] == "Program" and payload["enabled"] is False, payload
+    assert obs.calls == [("item", "Stint", "Weekend Info", True),
+                         ("item", "Program", "Grid Row 8", False)], obs.calls
+
+
+def t_apply_graphic_toggle_inverts_the_read_state():
+    obs = _GraphicObs(enabled=True)
+    payload, status = irofeeds.apply_graphic(_SoloRelay(True), obs, "toggle", "Standings")
+    assert status == 200 and payload["enabled"] is False, payload
+    assert obs.calls == [("read", (("Program", "Standings"),)),
+                         ("item", "Program", "Standings", False)], obs.calls
+    obs = _GraphicObs(enabled=False)
+    payload, _ = irofeeds.apply_graphic(_SoloRelay(False), obs, "toggle", "Standings")
+    assert payload["enabled"] is True and obs.calls[-1] == ("item", "Stint", "Standings", True)
+
+
+def t_apply_graphic_toggle_refuses_without_a_known_state():
+    for enabled, note in ((None, "no scene item"), ("down", "obs unreachable")):
+        obs = _GraphicObs(enabled=enabled)
+        payload, status = irofeeds.apply_graphic(_SoloRelay(False), obs, "toggle", "Schedule")
+        assert status == 503 and payload["ok"] is False and note in payload["error"], payload
+        assert [c for c in obs.calls if c[0] == "item"] == [], obs.calls
+
+
+def t_apply_graphic_rejects_bad_input_and_reports_obs_failures():
+    obs = _GraphicObs()
+    payload, status = irofeeds.apply_graphic(_SoloRelay(False), obs, "show", "Feed A")
+    assert status == 400 and "unknown graphic" in payload["error"], payload
+    payload, status = irofeeds.apply_graphic(_SoloRelay(False), obs, "flip", "Standings")
+    assert status == 400 and "show, hide or toggle" in payload["error"], payload
+    assert obs.calls == []
+    assert irofeeds.apply_graphic(_SoloRelay(False), None, "show", "Standings") == \
+        ({"ok": False, "error": "obs unavailable"}, 503)
+    obs = _GraphicObs(fail={"Race Info"})
+    payload, status = irofeeds.apply_graphic(_SoloRelay(False), obs, "show", "Race Info")
+    assert status == 503 and payload["ok"] is False and "Race Info missing" in payload["note"], payload
+
+
+def _companion_buttons():
+    """[(label, button)] of every Companion button."""
+    path = os.path.join(ROOT, "src", "companion", "racecast-buttons.companionconfig")
+    with open(path, encoding="utf-8") as f:
+        cfg = json.load(f)
+    return [((btn.get("style") or {}).get("text", ""), btn)
+            for page in cfg["pages"].values()
+            for row in (page.get("controls") or {}).values()
+            for btn in (row or {}).values()]
+
+
+def _actions(btn):
+    return [a for step in (btn.get("steps") or {}).values()
+            for acts in (step.get("action_sets") or {}).values() for a in (acts or [])]
+
+
+def t_companion_graphics_never_name_a_scene():
+    # A graphic scene item lives in Stint for endurance and in Program for solo, so
+    # a button that names the scene is dead in one of them. (#706)
+    for label, btn in _companion_buttons():
+        for a in _actions(btn):
+            o = a.get("options") or {}
+            if a.get("definitionId") == "toggle_scene_item":
+                assert o["source"]["value"] not in m.GRAPHIC_SOURCES, \
+                    f"{label!r} switches {o['source']['value']!r} in a fixed scene"
+
+
+def t_companion_graphic_toggles_call_the_relay_and_light_in_both_scenes():
+    by_source = {}
+    for _label, btn in _companion_buttons():
+        urls = [a["options"]["url"]["value"] for a in _actions(btn)
+                if a.get("definitionId") == "get"]
+        toggles = [u for u in urls if u.startswith("http://127.0.0.1:8088/obs/graphic/toggle/")]
+        if toggles:
+            [url] = toggles
+            by_source[unquote(url.rsplit("/", 1)[1])] = btn
+    assert set(by_source) == set(m.GRAPHIC_SOURCES), sorted(set(m.GRAPHIC_SOURCES) ^ set(by_source))
+    for source, btn in by_source.items():
+        [fb] = btn["feedbacks"]
+        assert fb["definitionId"] == "logic_operator", (source, fb["definitionId"])
+        assert fb["options"]["operation"]["value"] == "or", source
+        lit = {(c["definitionId"], c["options"]["scene"]["value"], c["options"]["source"]["value"])
+               for c in fb["children"]["default"]}
+        assert lit == {("scene_item_active", "Stint", source),
+                       ("scene_item_active", "Program", source)}, (source, lit)
+
+
+def t_companion_red_flag_shows_and_hides_the_cover_through_the_relay():
+    [btn] = [b for label, b in _companion_buttons() if label == "RED\nFLAG"
+             and any("racecontrol" in (a["options"].get("url") or {}).get("value", "")
+                     for a in _actions(b) if a.get("definitionId") == "get")]
+    steps = [[a["options"]["url"]["value"] for a in s["action_sets"]["down"]]
+             for _, s in sorted(btn["steps"].items())]
+    assert steps == [
+        ["http://127.0.0.1:8088/obs/graphic/show/Standby%20Cover",
+         "http://127.0.0.1:8088/setup/set/racecontrol/Red%20Flag%20-%20Race%20Suspended"],
+        ["http://127.0.0.1:8088/obs/graphic/hide/Standby%20Cover",
+         "http://127.0.0.1:8088/setup/clear/racecontrol"],
+    ], steps
+    [fb] = btn["feedbacks"]
+    assert fb["options"]["operation"]["value"] == "or", fb
+    assert {c["options"]["scene"]["value"] for c in fb["children"]["default"]} == \
+        {"Stint", "Program"}, fb
+
+
+def t_companion_pov_toggle_lights_in_both_scenes():
+    # The relay toggles the POV in either collection, so the button lights from the
+    # Stint scene and from the solo Program scene. (#706)
+    [btn] = [b for label, b in _companion_buttons() if label == "POV Toggle"]
+    [fb] = btn["feedbacks"]
+    assert fb["definitionId"] == "logic_operator" and \
+        fb["options"]["operation"]["value"] == "or", fb
+    assert {(c["options"]["scene"]["value"], c["options"]["source"]["value"])
+            for c in fb["children"]["default"]} == \
+        {("Stint", "Feed POV"), ("Program", "Feed POV")}, fb
 
 
 class _AliveFakeSock:

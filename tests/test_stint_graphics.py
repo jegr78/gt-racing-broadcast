@@ -7,6 +7,7 @@ OBS collection, the Director Panel and Companion. A name drift between them fail
 silently in production, so it is pinned here."""
 import json
 import os
+from urllib.parse import unquote
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -71,14 +72,13 @@ def t_companion_toggles_new_graphics():
     with open(COMPANION, encoding="utf-8") as fh:
         cfg = json.load(fh)
     toggled = set()
+    prefix = "http://127.0.0.1:8088/obs/graphic/toggle/"
     def walk(o):
         if isinstance(o, dict):
-            if o.get("definitionId") == "toggle_scene_item":
-                opt = o.get("options", {})
-                scene = (opt.get("scene") or {}).get("value")
-                source = (opt.get("source") or {}).get("value")
-                if scene == "Stint" and source:
-                    toggled.add(source)
+            if o.get("definitionId") == "get":
+                url = ((o.get("options") or {}).get("url") or {}).get("value") or ""
+                if url.startswith(prefix):
+                    toggled.add(unquote(url[len(prefix):]))
             for v in o.values():
                 walk(v)
         elif isinstance(o, list):
@@ -86,7 +86,7 @@ def t_companion_toggles_new_graphics():
                 walk(v)
     walk(cfg)
     for label in NEW_GRAPHICS:
-        assert label in toggled, f"companion missing toggle for: {label}"
+        assert label in toggled, f"companion missing relay toggle for: {label}"
     # Page 1 is 8x4, so a 5th row would be unreachable; the info and grid graphics
     # live on the dedicated graphics page instead.
     assert cfg["pages"]["1"]["gridSize"]["maxRow"] <= 3

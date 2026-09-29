@@ -4563,6 +4563,34 @@ def apply_split_audio(relay, obs_ws):
     return payload, status
 
 
+def apply_graphic(relay, obs_ws, verb, source):
+    """GET /obs/graphic/<show|hide|toggle>/<source> (Companion, #706): switch one
+    full-screen graphic in the scene the loaded collection keeps it in, Stint for
+    endurance and Program for solo, so one board serves both. `toggle` reads the
+    item's state first and refuses when OBS cannot report it. Best effort, never
+    raises: bad verb or source -> 400, OBS unavailable or failing -> 503."""
+    if obs_ws is None:
+        return {"ok": False, "error": "obs unavailable"}, 503
+    if verb not in ("show", "hide", "toggle"):
+        return {"ok": False, "error": "verb must be show, hide or toggle"}, 400
+    if source not in _OBS_WS_MODULE.GRAPHIC_SOURCES:
+        return {"ok": False, "error": f"unknown graphic: {source!r}"}, 400
+    scene = _OBS_WS_MODULE.graphic_scene(getattr(relay, "solo", False))
+    if verb == "toggle":
+        state, note = obs_ws.read_obs_state([(scene, source)], [])
+        if state is None:
+            return {"ok": False, "error": note or "obs unreachable"}, 503
+        enabled = (state.get("sources") or [{}])[0].get("enabled")
+        if enabled is None:
+            return {"ok": False, "error": f"no scene item {source!r} in {scene!r}"}, 503
+        verb = "hide" if enabled else "show"
+    ok, note = obs_ws.set_scene_item_enabled(scene, source, verb == "show")
+    payload = {"ok": bool(ok), "scene": scene, "source": source, "enabled": verb == "show"}
+    if note:
+        payload["note"] = str(note)
+    return payload, (200 if ok else 503)
+
+
 def split_mjpeg_frames(buf):
     """Pure: pull every COMPLETE JPEG (SOI..EOI) out of an MJPEG byte buffer.
     Returns (frames, remainder); remainder is the trailing incomplete bytes to
@@ -10703,6 +10731,9 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     return self._send(payload, status)
                 if len(p) == 3 and p[:2] == ["obs", "stint"]:
                     payload, status = apply_stint_state(relay, relay._obs, p[2])
+                    return self._send(payload, status)
+                if len(p) == 4 and p[:2] == ["obs", "graphic"]:
+                    payload, status = apply_graphic(relay, relay._obs, p[2], unquote(p[3]))
                     return self._send(payload, status)
                 if p[:1] == ["chat"]:
                     if not chat_store:

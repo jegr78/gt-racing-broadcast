@@ -1759,19 +1759,14 @@
       "feedbacks": [
        {
         "id": "oRoJHDK377xcQdJ7pneE1",
-        "definitionId": "scene_item_active",
-        "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+        "definitionId": "logic_operator",
+        "connectionId": "internal",
         "options": {
-         "scene": {
-          "value": "Stint",
-          "isExpression": false
-         },
-         "source": {
-          "value": "Standby Cover",
-          "isExpression": false
+         "operation": {
+          "isExpression": false,
+          "value": "or"
          }
         },
-        "upgradeIndex": 8,
         "type": "feedback",
         "style": {
          "color": 16777215,
@@ -1780,6 +1775,60 @@
         "isInverted": {
          "value": false,
          "isExpression": false
+        },
+        "children": {
+         "default": [
+          {
+           "id": "mowdR-v8WkHt4K7bEwzlN",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Stint",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Standby Cover",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 12582912
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          },
+          {
+           "id": "qSKgL5GqNEJ7B6Hoqbx1M",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Program",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Standby Cover",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 12582912
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          }
+         ]
         }
        }
       ],
@@ -1789,27 +1838,29 @@
          "down": [
           {
            "id": "GbyN9wieGkymSnMelHrh4",
-           "definitionId": "toggle_scene_item",
-           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "definitionId": "get",
+           "connectionId": "BB0jmLMxj_0YwbhwslOiw",
            "options": {
-            "scene": {
-             "value": "Stint",
+            "url": {
+             "value": "http://127.0.0.1:8088/obs/graphic/show/Standby%20Cover",
              "isExpression": false
             },
-            "all": {
-             "value": false,
+            "header": {
+             "isExpression": false,
+             "value": ""
+            },
+            "jsonResultDataVariable": {
              "isExpression": false
             },
-            "source": {
-             "value": "Standby Cover",
-             "isExpression": false
+            "result_stringify": {
+             "isExpression": false,
+             "value": true
             },
-            "visible": {
-             "value": "true",
+            "statusCodeVariable": {
              "isExpression": false
             }
            },
-           "upgradeIndex": 8,
+           "upgradeIndex": 1,
            "type": "action"
           },
           {
@@ -1851,27 +1902,29 @@
          "down": [
           {
            "id": "-QRIZRj9lJtKPx0Bm0US-",
-           "definitionId": "toggle_scene_item",
-           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "definitionId": "get",
+           "connectionId": "BB0jmLMxj_0YwbhwslOiw",
            "options": {
-            "scene": {
-             "value": "Stint",
+            "url": {
+             "value": "http://127.0.0.1:8088/obs/graphic/hide/Standby%20Cover",
              "isExpression": false
             },
-            "all": {
-             "value": false,
+            "header": {
+             "isExpression": false,
+             "value": ""
+            },
+            "jsonResultDataVariable": {
              "isExpression": false
             },
-            "source": {
-             "value": "Standby Cover",
-             "isExpression": false
+            "result_stringify": {
+             "isExpression": false,
+             "value": true
             },
-            "visible": {
-             "value": "false",
+            "statusCodeVariable": {
              "isExpression": false
             }
            },
-           "upgradeIndex": 8,
+           "upgradeIndex": 1,
            "type": "action"
           },
           {
@@ -2174,19 +2227,14 @@
       "feedbacks": [
        {
         "id": "1LDAjMn90R1b6fOtM5B3N",
-        "definitionId": "scene_item_active",
-        "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+        "definitionId": "logic_operator",
+        "connectionId": "internal",
         "options": {
-         "scene": {
-          "value": "Stint",
-          "isExpression": false
-         },
-         "source": {
-          "value": "Feed POV",
-          "isExpression": false
+         "operation": {
+          "isExpression": false,
+          "value": "or"
          }
         },
-        "upgradeIndex": 8,
         "type": "feedback",
         "style": {
          "color": 16777215,
@@ -2195,6 +2243,60 @@
         "isInverted": {
          "value": false,
          "isExpression": false
+        },
+        "children": {
+         "default": [
+          {
+           "id": "ct0rbyaywrSMCfhbYul5v",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Stint",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Feed POV",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 39168
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          },
+          {
+           "id": "df_WUrV2CPfqBKv6zU4PM",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Program",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Feed POV",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 39168
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          }
+         ]
         }
        }
       ],
@@ -4840,19 +4942,14 @@
       "feedbacks": [
        {
         "id": "gfxWeekendInfoFb",
-        "definitionId": "scene_item_active",
-        "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+        "definitionId": "logic_operator",
+        "connectionId": "internal",
         "options": {
-         "scene": {
-          "value": "Stint",
-          "isExpression": false
-         },
-         "source": {
-          "value": "Weekend Info",
-          "isExpression": false
+         "operation": {
+          "isExpression": false,
+          "value": "or"
          }
         },
-        "upgradeIndex": 8,
         "type": "feedback",
         "style": {
          "color": 16777215,
@@ -4861,6 +4958,60 @@
         "isInverted": {
          "value": false,
          "isExpression": false
+        },
+        "children": {
+         "default": [
+          {
+           "id": "U3ZPrkA-n_na3BrJ10QvR",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Stint",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Weekend Info",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 13421568
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          },
+          {
+           "id": "NsZClHogvO52jKQ_ls9DY",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Program",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Weekend Info",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 13421568
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          }
+         ]
         }
        }
       ],
@@ -4870,27 +5021,29 @@
          "down": [
           {
            "id": "gfxWeekendInfoAct",
-           "definitionId": "toggle_scene_item",
-           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "definitionId": "get",
+           "connectionId": "BB0jmLMxj_0YwbhwslOiw",
            "options": {
-            "scene": {
-             "value": "Stint",
+            "url": {
+             "value": "http://127.0.0.1:8088/obs/graphic/toggle/Weekend%20Info",
              "isExpression": false
             },
-            "all": {
-             "value": false,
+            "header": {
+             "isExpression": false,
+             "value": ""
+            },
+            "jsonResultDataVariable": {
              "isExpression": false
             },
-            "source": {
-             "value": "Weekend Info",
-             "isExpression": false
+            "result_stringify": {
+             "isExpression": false,
+             "value": true
             },
-            "visible": {
-             "value": "toggle",
+            "statusCodeVariable": {
              "isExpression": false
             }
            },
-           "upgradeIndex": 8,
+           "upgradeIndex": 1,
            "type": "action"
           }
          ],
@@ -4924,19 +5077,14 @@
       "feedbacks": [
        {
         "id": "gfxRaceInfoFb",
-        "definitionId": "scene_item_active",
-        "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+        "definitionId": "logic_operator",
+        "connectionId": "internal",
         "options": {
-         "scene": {
-          "value": "Stint",
-          "isExpression": false
-         },
-         "source": {
-          "value": "Race Info",
-          "isExpression": false
+         "operation": {
+          "isExpression": false,
+          "value": "or"
          }
         },
-        "upgradeIndex": 8,
         "type": "feedback",
         "style": {
          "color": 16777215,
@@ -4945,6 +5093,60 @@
         "isInverted": {
          "value": false,
          "isExpression": false
+        },
+        "children": {
+         "default": [
+          {
+           "id": "oZqhL9cWX453VJb57-X1j",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Stint",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Race Info",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 13421568
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          },
+          {
+           "id": "UGbh8bswlL1Fd61FM7Plw",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Program",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Race Info",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 13421568
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          }
+         ]
         }
        }
       ],
@@ -4954,27 +5156,29 @@
          "down": [
           {
            "id": "gfxRaceInfoAct",
-           "definitionId": "toggle_scene_item",
-           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "definitionId": "get",
+           "connectionId": "BB0jmLMxj_0YwbhwslOiw",
            "options": {
-            "scene": {
-             "value": "Stint",
+            "url": {
+             "value": "http://127.0.0.1:8088/obs/graphic/toggle/Race%20Info",
              "isExpression": false
             },
-            "all": {
-             "value": false,
+            "header": {
+             "isExpression": false,
+             "value": ""
+            },
+            "jsonResultDataVariable": {
              "isExpression": false
             },
-            "source": {
-             "value": "Race Info",
-             "isExpression": false
+            "result_stringify": {
+             "isExpression": false,
+             "value": true
             },
-            "visible": {
-             "value": "toggle",
+            "statusCodeVariable": {
              "isExpression": false
             }
            },
-           "upgradeIndex": 8,
+           "upgradeIndex": 1,
            "type": "action"
           }
          ],
@@ -5008,19 +5212,14 @@
       "feedbacks": [
        {
         "id": "gfxNextEventFb",
-        "definitionId": "scene_item_active",
-        "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+        "definitionId": "logic_operator",
+        "connectionId": "internal",
         "options": {
-         "scene": {
-          "value": "Stint",
-          "isExpression": false
-         },
-         "source": {
-          "value": "Next Event",
-          "isExpression": false
+         "operation": {
+          "isExpression": false,
+          "value": "or"
          }
         },
-        "upgradeIndex": 8,
         "type": "feedback",
         "style": {
          "color": 16777215,
@@ -5029,6 +5228,60 @@
         "isInverted": {
          "value": false,
          "isExpression": false
+        },
+        "children": {
+         "default": [
+          {
+           "id": "DLwl820vgPG0E3o0_FHIl",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Stint",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Next Event",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 13421568
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          },
+          {
+           "id": "zLB7JNgaXq5xXtU0i9CWM",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Program",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Next Event",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 13421568
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          }
+         ]
         }
        }
       ],
@@ -5038,27 +5291,29 @@
          "down": [
           {
            "id": "gfxNextEventAct",
-           "definitionId": "toggle_scene_item",
-           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "definitionId": "get",
+           "connectionId": "BB0jmLMxj_0YwbhwslOiw",
            "options": {
-            "scene": {
-             "value": "Stint",
+            "url": {
+             "value": "http://127.0.0.1:8088/obs/graphic/toggle/Next%20Event",
              "isExpression": false
             },
-            "all": {
-             "value": false,
+            "header": {
+             "isExpression": false,
+             "value": ""
+            },
+            "jsonResultDataVariable": {
              "isExpression": false
             },
-            "source": {
-             "value": "Next Event",
-             "isExpression": false
+            "result_stringify": {
+             "isExpression": false,
+             "value": true
             },
-            "visible": {
-             "value": "toggle",
+            "statusCodeVariable": {
              "isExpression": false
             }
            },
-           "upgradeIndex": 8,
+           "upgradeIndex": 1,
            "type": "action"
           }
          ],
@@ -5092,19 +5347,14 @@
       "feedbacks": [
        {
         "id": "gfxStartingGridFb",
-        "definitionId": "scene_item_active",
-        "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+        "definitionId": "logic_operator",
+        "connectionId": "internal",
         "options": {
-         "scene": {
-          "value": "Stint",
-          "isExpression": false
-         },
-         "source": {
-          "value": "Starting Grid",
-          "isExpression": false
+         "operation": {
+          "isExpression": false,
+          "value": "or"
          }
         },
-        "upgradeIndex": 8,
         "type": "feedback",
         "style": {
          "color": 16777215,
@@ -5113,6 +5363,60 @@
         "isInverted": {
          "value": false,
          "isExpression": false
+        },
+        "children": {
+         "default": [
+          {
+           "id": "cEj7BcB-iTo72pQ4s0L9x",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Stint",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Starting Grid",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 13421568
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          },
+          {
+           "id": "KRcEREIej-bIVn1KG8epA",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Program",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Starting Grid",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 13421568
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          }
+         ]
         }
        }
       ],
@@ -5122,27 +5426,29 @@
          "down": [
           {
            "id": "gfxStartingGridAct",
-           "definitionId": "toggle_scene_item",
-           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "definitionId": "get",
+           "connectionId": "BB0jmLMxj_0YwbhwslOiw",
            "options": {
-            "scene": {
-             "value": "Stint",
+            "url": {
+             "value": "http://127.0.0.1:8088/obs/graphic/toggle/Starting%20Grid",
              "isExpression": false
             },
-            "all": {
-             "value": false,
+            "header": {
+             "isExpression": false,
+             "value": ""
+            },
+            "jsonResultDataVariable": {
              "isExpression": false
             },
-            "source": {
-             "value": "Starting Grid",
-             "isExpression": false
+            "result_stringify": {
+             "isExpression": false,
+             "value": true
             },
-            "visible": {
-             "value": "toggle",
+            "statusCodeVariable": {
              "isExpression": false
             }
            },
-           "upgradeIndex": 8,
+           "upgradeIndex": 1,
            "type": "action"
           }
          ],
@@ -5178,19 +5484,14 @@
       "feedbacks": [
        {
         "id": "19vbhTYAxAsYVnAwT75aF",
-        "definitionId": "scene_item_active",
-        "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+        "definitionId": "logic_operator",
+        "connectionId": "internal",
         "options": {
-         "scene": {
-          "value": "Stint",
-          "isExpression": false
-         },
-         "source": {
-          "value": "Standings",
-          "isExpression": false
+         "operation": {
+          "isExpression": false,
+          "value": "or"
          }
         },
-        "upgradeIndex": 8,
         "type": "feedback",
         "style": {
          "color": 16777215,
@@ -5199,6 +5500,60 @@
         "isInverted": {
          "value": false,
          "isExpression": false
+        },
+        "children": {
+         "default": [
+          {
+           "id": "1V8LgOwqPv5RxFMGC_w-v",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Stint",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Standings",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 13421568
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          },
+          {
+           "id": "7Tpqg5s2xHpNfGnygBw9I",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Program",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Standings",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 13421568
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          }
+         ]
         }
        }
       ],
@@ -5208,27 +5563,29 @@
          "down": [
           {
            "id": "kDc7StA_6Zi8B4poMIU48",
-           "definitionId": "toggle_scene_item",
-           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "definitionId": "get",
+           "connectionId": "BB0jmLMxj_0YwbhwslOiw",
            "options": {
-            "scene": {
-             "value": "Stint",
+            "url": {
+             "value": "http://127.0.0.1:8088/obs/graphic/toggle/Standings",
              "isExpression": false
             },
-            "all": {
-             "value": false,
+            "header": {
+             "isExpression": false,
+             "value": ""
+            },
+            "jsonResultDataVariable": {
              "isExpression": false
             },
-            "source": {
-             "value": "Standings",
-             "isExpression": false
+            "result_stringify": {
+             "isExpression": false,
+             "value": true
             },
-            "visible": {
-             "value": "toggle",
+            "statusCodeVariable": {
              "isExpression": false
             }
            },
-           "upgradeIndex": 8,
+           "upgradeIndex": 1,
            "type": "action"
           }
          ],
@@ -5262,19 +5619,14 @@
       "feedbacks": [
        {
         "id": "8dffPyZ8W3jePJo72-VXA",
-        "definitionId": "scene_item_active",
-        "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+        "definitionId": "logic_operator",
+        "connectionId": "internal",
         "options": {
-         "scene": {
-          "value": "Stint",
-          "isExpression": false
-         },
-         "source": {
-          "value": "Schedule",
-          "isExpression": false
+         "operation": {
+          "isExpression": false,
+          "value": "or"
          }
         },
-        "upgradeIndex": 8,
         "type": "feedback",
         "style": {
          "color": 16777215,
@@ -5283,6 +5635,60 @@
         "isInverted": {
          "value": false,
          "isExpression": false
+        },
+        "children": {
+         "default": [
+          {
+           "id": "l08B3gq4zK-Fa7QfvEjCa",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Stint",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Schedule",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 13421568
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          },
+          {
+           "id": "s-9DC5Aj8zcXsME1oPxB1",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Program",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Schedule",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 13421568
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          }
+         ]
         }
        }
       ],
@@ -5292,27 +5698,29 @@
          "down": [
           {
            "id": "1Px8Qb3kksQi9qawePCoZ",
-           "definitionId": "toggle_scene_item",
-           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "definitionId": "get",
+           "connectionId": "BB0jmLMxj_0YwbhwslOiw",
            "options": {
-            "scene": {
-             "value": "Stint",
+            "url": {
+             "value": "http://127.0.0.1:8088/obs/graphic/toggle/Schedule",
              "isExpression": false
             },
-            "all": {
-             "value": false,
+            "header": {
+             "isExpression": false,
+             "value": ""
+            },
+            "jsonResultDataVariable": {
              "isExpression": false
             },
-            "source": {
-             "value": "Schedule",
-             "isExpression": false
+            "result_stringify": {
+             "isExpression": false,
+             "value": true
             },
-            "visible": {
-             "value": "toggle",
+            "statusCodeVariable": {
              "isExpression": false
             }
            },
-           "upgradeIndex": 8,
+           "upgradeIndex": 1,
            "type": "action"
           }
          ],
@@ -5346,19 +5754,14 @@
       "feedbacks": [
        {
         "id": "5_KaZZ_xJw1PS5k3LTjEA",
-        "definitionId": "scene_item_active",
-        "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+        "definitionId": "logic_operator",
+        "connectionId": "internal",
         "options": {
-         "scene": {
-          "value": "Stint",
-          "isExpression": false
-         },
-         "source": {
-          "value": "Race Results",
-          "isExpression": false
+         "operation": {
+          "isExpression": false,
+          "value": "or"
          }
         },
-        "upgradeIndex": 8,
         "type": "feedback",
         "style": {
          "color": 16777215,
@@ -5367,6 +5770,60 @@
         "isInverted": {
          "value": false,
          "isExpression": false
+        },
+        "children": {
+         "default": [
+          {
+           "id": "6514Sgm4gx2svTv-xUi6k",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Stint",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Race Results",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 13421568
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          },
+          {
+           "id": "8s9PxYp_6GEIW_VqraEwc",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Program",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Race Results",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 13421568
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          }
+         ]
         }
        }
       ],
@@ -5376,27 +5833,29 @@
          "down": [
           {
            "id": "iOCQ9MdBMjfK-rLRZttzV",
-           "definitionId": "toggle_scene_item",
-           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "definitionId": "get",
+           "connectionId": "BB0jmLMxj_0YwbhwslOiw",
            "options": {
-            "scene": {
-             "value": "Stint",
+            "url": {
+             "value": "http://127.0.0.1:8088/obs/graphic/toggle/Race%20Results",
              "isExpression": false
             },
-            "all": {
-             "value": false,
+            "header": {
+             "isExpression": false,
+             "value": ""
+            },
+            "jsonResultDataVariable": {
              "isExpression": false
             },
-            "source": {
-             "value": "Race Results",
-             "isExpression": false
+            "result_stringify": {
+             "isExpression": false,
+             "value": true
             },
-            "visible": {
-             "value": "toggle",
+            "statusCodeVariable": {
              "isExpression": false
             }
            },
-           "upgradeIndex": 8,
+           "upgradeIndex": 1,
            "type": "action"
           }
          ],
@@ -5430,19 +5889,14 @@
       "feedbacks": [
        {
         "id": "kPhREaZxLlUom4oFEznPi",
-        "definitionId": "scene_item_active",
-        "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+        "definitionId": "logic_operator",
+        "connectionId": "internal",
         "options": {
-         "scene": {
-          "value": "Stint",
-          "isExpression": false
-         },
-         "source": {
-          "value": "Quali Results",
-          "isExpression": false
+         "operation": {
+          "isExpression": false,
+          "value": "or"
          }
         },
-        "upgradeIndex": 8,
         "type": "feedback",
         "style": {
          "color": 16777215,
@@ -5451,6 +5905,60 @@
         "isInverted": {
          "value": false,
          "isExpression": false
+        },
+        "children": {
+         "default": [
+          {
+           "id": "39AJtpzw-SSohoIMI46-w",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Stint",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Quali Results",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 13421568
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          },
+          {
+           "id": "k2I0etcNc6p6-L4zR3abS",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Program",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Quali Results",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 13421568
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          }
+         ]
         }
        }
       ],
@@ -5460,27 +5968,29 @@
          "down": [
           {
            "id": "VcV5oTiimCncuUU0GQUvf",
-           "definitionId": "toggle_scene_item",
-           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "definitionId": "get",
+           "connectionId": "BB0jmLMxj_0YwbhwslOiw",
            "options": {
-            "scene": {
-             "value": "Stint",
+            "url": {
+             "value": "http://127.0.0.1:8088/obs/graphic/toggle/Quali%20Results",
              "isExpression": false
             },
-            "all": {
-             "value": false,
+            "header": {
+             "isExpression": false,
+             "value": ""
+            },
+            "jsonResultDataVariable": {
              "isExpression": false
             },
-            "source": {
-             "value": "Quali Results",
-             "isExpression": false
+            "result_stringify": {
+             "isExpression": false,
+             "value": true
             },
-            "visible": {
-             "value": "toggle",
+            "statusCodeVariable": {
              "isExpression": false
             }
            },
-           "upgradeIndex": 8,
+           "upgradeIndex": 1,
            "type": "action"
           }
          ],
@@ -5514,19 +6024,14 @@
       "feedbacks": [
        {
         "id": "YUMqrxq7rOTxOH_d6UkOy",
-        "definitionId": "scene_item_active",
-        "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+        "definitionId": "logic_operator",
+        "connectionId": "internal",
         "options": {
-         "scene": {
-          "value": "Stint",
-          "isExpression": false
-         },
-         "source": {
-          "value": "Standby Cover",
-          "isExpression": false
+         "operation": {
+          "isExpression": false,
+          "value": "or"
          }
         },
-        "upgradeIndex": 8,
         "type": "feedback",
         "style": {
          "color": 16777215,
@@ -5535,6 +6040,60 @@
         "isInverted": {
          "value": false,
          "isExpression": false
+        },
+        "children": {
+         "default": [
+          {
+           "id": "Wkaq3xi5rlieR0lwAY4jh",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Stint",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Standby Cover",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 13421568
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          },
+          {
+           "id": "us7_ktoowgRRLqN2TSGy3",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Program",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Standby Cover",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 13421568
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          }
+         ]
         }
        }
       ],
@@ -5544,27 +6103,29 @@
          "down": [
           {
            "id": "mIJkFXQwcfJJKdKnGit5N",
-           "definitionId": "toggle_scene_item",
-           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "definitionId": "get",
+           "connectionId": "BB0jmLMxj_0YwbhwslOiw",
            "options": {
-            "scene": {
-             "value": "Stint",
+            "url": {
+             "value": "http://127.0.0.1:8088/obs/graphic/toggle/Standby%20Cover",
              "isExpression": false
             },
-            "all": {
-             "value": false,
+            "header": {
+             "isExpression": false,
+             "value": ""
+            },
+            "jsonResultDataVariable": {
              "isExpression": false
             },
-            "source": {
-             "value": "Standby Cover",
-             "isExpression": false
+            "result_stringify": {
+             "isExpression": false,
+             "value": true
             },
-            "visible": {
-             "value": "toggle",
+            "statusCodeVariable": {
              "isExpression": false
             }
            },
-           "upgradeIndex": 8,
+           "upgradeIndex": 1,
            "type": "action"
           }
          ],
@@ -5598,19 +6159,14 @@
       "feedbacks": [
        {
         "id": "6I7tM3-7-rJhdUYWNRnA9",
-        "definitionId": "scene_item_active",
-        "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+        "definitionId": "logic_operator",
+        "connectionId": "internal",
         "options": {
-         "scene": {
-          "value": "Stint",
-          "isExpression": false
-         },
-         "source": {
-          "value": "Race Weather 1",
-          "isExpression": false
+         "operation": {
+          "isExpression": false,
+          "value": "or"
          }
         },
-        "upgradeIndex": 8,
         "type": "feedback",
         "style": {
          "color": 16777215,
@@ -5619,6 +6175,60 @@
         "isInverted": {
          "value": false,
          "isExpression": false
+        },
+        "children": {
+         "default": [
+          {
+           "id": "O4t2w_FXYSHREfqYdDrRa",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Stint",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Race Weather 1",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 13421568
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          },
+          {
+           "id": "ReN3YrH-8uwtsYw6H-E5q",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Program",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Race Weather 1",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 13421568
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          }
+         ]
         }
        }
       ],
@@ -5628,27 +6238,29 @@
          "down": [
           {
            "id": "eiIN2rqUvR8OytXm6PY2f",
-           "definitionId": "toggle_scene_item",
-           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "definitionId": "get",
+           "connectionId": "BB0jmLMxj_0YwbhwslOiw",
            "options": {
-            "scene": {
-             "value": "Stint",
+            "url": {
+             "value": "http://127.0.0.1:8088/obs/graphic/toggle/Race%20Weather%201",
              "isExpression": false
             },
-            "all": {
-             "value": false,
+            "header": {
+             "isExpression": false,
+             "value": ""
+            },
+            "jsonResultDataVariable": {
              "isExpression": false
             },
-            "source": {
-             "value": "Race Weather 1",
-             "isExpression": false
+            "result_stringify": {
+             "isExpression": false,
+             "value": true
             },
-            "visible": {
-             "value": "toggle",
+            "statusCodeVariable": {
              "isExpression": false
             }
            },
-           "upgradeIndex": 8,
+           "upgradeIndex": 1,
            "type": "action"
           }
          ],
@@ -5682,19 +6294,14 @@
       "feedbacks": [
        {
         "id": "5TtODfM6nNcNZXtVBM3my",
-        "definitionId": "scene_item_active",
-        "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+        "definitionId": "logic_operator",
+        "connectionId": "internal",
         "options": {
-         "scene": {
-          "value": "Stint",
-          "isExpression": false
-         },
-         "source": {
-          "value": "Race Weather 2",
-          "isExpression": false
+         "operation": {
+          "isExpression": false,
+          "value": "or"
          }
         },
-        "upgradeIndex": 8,
         "type": "feedback",
         "style": {
          "color": 16777215,
@@ -5703,6 +6310,60 @@
         "isInverted": {
          "value": false,
          "isExpression": false
+        },
+        "children": {
+         "default": [
+          {
+           "id": "wnLP-KLVDwkrkKQAYLYbj",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Stint",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Race Weather 2",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 13421568
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          },
+          {
+           "id": "xh2MCX1E4UhOvohXhnBsS",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Program",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Race Weather 2",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 13421568
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          }
+         ]
         }
        }
       ],
@@ -5712,27 +6373,29 @@
          "down": [
           {
            "id": "zqqRJ2L-sP2XyjqLvbcdI",
-           "definitionId": "toggle_scene_item",
-           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "definitionId": "get",
+           "connectionId": "BB0jmLMxj_0YwbhwslOiw",
            "options": {
-            "scene": {
-             "value": "Stint",
+            "url": {
+             "value": "http://127.0.0.1:8088/obs/graphic/toggle/Race%20Weather%202",
              "isExpression": false
             },
-            "all": {
-             "value": false,
+            "header": {
+             "isExpression": false,
+             "value": ""
+            },
+            "jsonResultDataVariable": {
              "isExpression": false
             },
-            "source": {
-             "value": "Race Weather 2",
-             "isExpression": false
+            "result_stringify": {
+             "isExpression": false,
+             "value": true
             },
-            "visible": {
-             "value": "toggle",
+            "statusCodeVariable": {
              "isExpression": false
             }
            },
-           "upgradeIndex": 8,
+           "upgradeIndex": 1,
            "type": "action"
           }
          ],
@@ -5766,19 +6429,14 @@
       "feedbacks": [
        {
         "id": "9_yKD1NekXKPTB1BxyYsm",
-        "definitionId": "scene_item_active",
-        "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+        "definitionId": "logic_operator",
+        "connectionId": "internal",
         "options": {
-         "scene": {
-          "value": "Stint",
-          "isExpression": false
-         },
-         "source": {
-          "value": "Quali Weather",
-          "isExpression": false
+         "operation": {
+          "isExpression": false,
+          "value": "or"
          }
         },
-        "upgradeIndex": 8,
         "type": "feedback",
         "style": {
          "color": 16777215,
@@ -5787,6 +6445,60 @@
         "isInverted": {
          "value": false,
          "isExpression": false
+        },
+        "children": {
+         "default": [
+          {
+           "id": "9J5tkN45AMipJ8mQ1DbSr",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Stint",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Quali Weather",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 13421568
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          },
+          {
+           "id": "wkE_SNnqqFKzin1gjdE7R",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Program",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Quali Weather",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 13421568
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          }
+         ]
         }
        }
       ],
@@ -5796,27 +6508,29 @@
          "down": [
           {
            "id": "oHomA_cbkDuYhHw1yBSQU",
-           "definitionId": "toggle_scene_item",
-           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "definitionId": "get",
+           "connectionId": "BB0jmLMxj_0YwbhwslOiw",
            "options": {
-            "scene": {
-             "value": "Stint",
+            "url": {
+             "value": "http://127.0.0.1:8088/obs/graphic/toggle/Quali%20Weather",
              "isExpression": false
             },
-            "all": {
-             "value": false,
+            "header": {
+             "isExpression": false,
+             "value": ""
+            },
+            "jsonResultDataVariable": {
              "isExpression": false
             },
-            "source": {
-             "value": "Quali Weather",
-             "isExpression": false
+            "result_stringify": {
+             "isExpression": false,
+             "value": true
             },
-            "visible": {
-             "value": "toggle",
+            "statusCodeVariable": {
              "isExpression": false
             }
            },
-           "upgradeIndex": 8,
+           "upgradeIndex": 1,
            "type": "action"
           }
          ],
@@ -5852,19 +6566,14 @@
       "feedbacks": [
        {
         "id": "gfxGridRow1Fb",
-        "definitionId": "scene_item_active",
-        "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+        "definitionId": "logic_operator",
+        "connectionId": "internal",
         "options": {
-         "scene": {
-          "value": "Stint",
-          "isExpression": false
-         },
-         "source": {
-          "value": "Grid Row 1",
-          "isExpression": false
+         "operation": {
+          "isExpression": false,
+          "value": "or"
          }
         },
-        "upgradeIndex": 8,
         "type": "feedback",
         "style": {
          "color": 16777215,
@@ -5873,6 +6582,60 @@
         "isInverted": {
          "value": false,
          "isExpression": false
+        },
+        "children": {
+         "default": [
+          {
+           "id": "Og-rjtlSZVCvDdGryWMIm",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Stint",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Grid Row 1",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 13421568
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          },
+          {
+           "id": "iCG7Jgx7rnotfPw7r0D1q",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Program",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Grid Row 1",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 13421568
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          }
+         ]
         }
        }
       ],
@@ -5882,27 +6645,29 @@
          "down": [
           {
            "id": "gfxGridRow1Act",
-           "definitionId": "toggle_scene_item",
-           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "definitionId": "get",
+           "connectionId": "BB0jmLMxj_0YwbhwslOiw",
            "options": {
-            "scene": {
-             "value": "Stint",
+            "url": {
+             "value": "http://127.0.0.1:8088/obs/graphic/toggle/Grid%20Row%201",
              "isExpression": false
             },
-            "all": {
-             "value": false,
+            "header": {
+             "isExpression": false,
+             "value": ""
+            },
+            "jsonResultDataVariable": {
              "isExpression": false
             },
-            "source": {
-             "value": "Grid Row 1",
-             "isExpression": false
+            "result_stringify": {
+             "isExpression": false,
+             "value": true
             },
-            "visible": {
-             "value": "toggle",
+            "statusCodeVariable": {
              "isExpression": false
             }
            },
-           "upgradeIndex": 8,
+           "upgradeIndex": 1,
            "type": "action"
           }
          ],
@@ -5936,19 +6701,14 @@
       "feedbacks": [
        {
         "id": "gfxGridRow2Fb",
-        "definitionId": "scene_item_active",
-        "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+        "definitionId": "logic_operator",
+        "connectionId": "internal",
         "options": {
-         "scene": {
-          "value": "Stint",
-          "isExpression": false
-         },
-         "source": {
-          "value": "Grid Row 2",
-          "isExpression": false
+         "operation": {
+          "isExpression": false,
+          "value": "or"
          }
         },
-        "upgradeIndex": 8,
         "type": "feedback",
         "style": {
          "color": 16777215,
@@ -5957,6 +6717,60 @@
         "isInverted": {
          "value": false,
          "isExpression": false
+        },
+        "children": {
+         "default": [
+          {
+           "id": "SEEWiSR5KuQ73jBX97P6a",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Stint",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Grid Row 2",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 13421568
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          },
+          {
+           "id": "wCOXc6WaFxYmHjG4tAQAl",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Program",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Grid Row 2",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 13421568
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          }
+         ]
         }
        }
       ],
@@ -5966,27 +6780,29 @@
          "down": [
           {
            "id": "gfxGridRow2Act",
-           "definitionId": "toggle_scene_item",
-           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "definitionId": "get",
+           "connectionId": "BB0jmLMxj_0YwbhwslOiw",
            "options": {
-            "scene": {
-             "value": "Stint",
+            "url": {
+             "value": "http://127.0.0.1:8088/obs/graphic/toggle/Grid%20Row%202",
              "isExpression": false
             },
-            "all": {
-             "value": false,
+            "header": {
+             "isExpression": false,
+             "value": ""
+            },
+            "jsonResultDataVariable": {
              "isExpression": false
             },
-            "source": {
-             "value": "Grid Row 2",
-             "isExpression": false
+            "result_stringify": {
+             "isExpression": false,
+             "value": true
             },
-            "visible": {
-             "value": "toggle",
+            "statusCodeVariable": {
              "isExpression": false
             }
            },
-           "upgradeIndex": 8,
+           "upgradeIndex": 1,
            "type": "action"
           }
          ],
@@ -6020,19 +6836,14 @@
       "feedbacks": [
        {
         "id": "gfxGridRow3Fb",
-        "definitionId": "scene_item_active",
-        "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+        "definitionId": "logic_operator",
+        "connectionId": "internal",
         "options": {
-         "scene": {
-          "value": "Stint",
-          "isExpression": false
-         },
-         "source": {
-          "value": "Grid Row 3",
-          "isExpression": false
+         "operation": {
+          "isExpression": false,
+          "value": "or"
          }
         },
-        "upgradeIndex": 8,
         "type": "feedback",
         "style": {
          "color": 16777215,
@@ -6041,6 +6852,60 @@
         "isInverted": {
          "value": false,
          "isExpression": false
+        },
+        "children": {
+         "default": [
+          {
+           "id": "NLCKC6RNeJ3huibKAXJ1q",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Stint",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Grid Row 3",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 13421568
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          },
+          {
+           "id": "GV_UqGLz_v9CvehThFE3O",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Program",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Grid Row 3",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 13421568
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          }
+         ]
         }
        }
       ],
@@ -6050,27 +6915,29 @@
          "down": [
           {
            "id": "gfxGridRow3Act",
-           "definitionId": "toggle_scene_item",
-           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "definitionId": "get",
+           "connectionId": "BB0jmLMxj_0YwbhwslOiw",
            "options": {
-            "scene": {
-             "value": "Stint",
+            "url": {
+             "value": "http://127.0.0.1:8088/obs/graphic/toggle/Grid%20Row%203",
              "isExpression": false
             },
-            "all": {
-             "value": false,
+            "header": {
+             "isExpression": false,
+             "value": ""
+            },
+            "jsonResultDataVariable": {
              "isExpression": false
             },
-            "source": {
-             "value": "Grid Row 3",
-             "isExpression": false
+            "result_stringify": {
+             "isExpression": false,
+             "value": true
             },
-            "visible": {
-             "value": "toggle",
+            "statusCodeVariable": {
              "isExpression": false
             }
            },
-           "upgradeIndex": 8,
+           "upgradeIndex": 1,
            "type": "action"
           }
          ],
@@ -6104,19 +6971,14 @@
       "feedbacks": [
        {
         "id": "gfxGridRow4Fb",
-        "definitionId": "scene_item_active",
-        "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+        "definitionId": "logic_operator",
+        "connectionId": "internal",
         "options": {
-         "scene": {
-          "value": "Stint",
-          "isExpression": false
-         },
-         "source": {
-          "value": "Grid Row 4",
-          "isExpression": false
+         "operation": {
+          "isExpression": false,
+          "value": "or"
          }
         },
-        "upgradeIndex": 8,
         "type": "feedback",
         "style": {
          "color": 16777215,
@@ -6125,6 +6987,60 @@
         "isInverted": {
          "value": false,
          "isExpression": false
+        },
+        "children": {
+         "default": [
+          {
+           "id": "p3aRaoyQ8BHj8rHNAEzdS",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Stint",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Grid Row 4",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 13421568
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          },
+          {
+           "id": "JIs0vbVds-lxAMLsdTPnt",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Program",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Grid Row 4",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 13421568
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          }
+         ]
         }
        }
       ],
@@ -6134,27 +7050,29 @@
          "down": [
           {
            "id": "gfxGridRow4Act",
-           "definitionId": "toggle_scene_item",
-           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "definitionId": "get",
+           "connectionId": "BB0jmLMxj_0YwbhwslOiw",
            "options": {
-            "scene": {
-             "value": "Stint",
+            "url": {
+             "value": "http://127.0.0.1:8088/obs/graphic/toggle/Grid%20Row%204",
              "isExpression": false
             },
-            "all": {
-             "value": false,
+            "header": {
+             "isExpression": false,
+             "value": ""
+            },
+            "jsonResultDataVariable": {
              "isExpression": false
             },
-            "source": {
-             "value": "Grid Row 4",
-             "isExpression": false
+            "result_stringify": {
+             "isExpression": false,
+             "value": true
             },
-            "visible": {
-             "value": "toggle",
+            "statusCodeVariable": {
              "isExpression": false
             }
            },
-           "upgradeIndex": 8,
+           "upgradeIndex": 1,
            "type": "action"
           }
          ],
@@ -6188,19 +7106,14 @@
       "feedbacks": [
        {
         "id": "gfxGridRow5Fb",
-        "definitionId": "scene_item_active",
-        "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+        "definitionId": "logic_operator",
+        "connectionId": "internal",
         "options": {
-         "scene": {
-          "value": "Stint",
-          "isExpression": false
-         },
-         "source": {
-          "value": "Grid Row 5",
-          "isExpression": false
+         "operation": {
+          "isExpression": false,
+          "value": "or"
          }
         },
-        "upgradeIndex": 8,
         "type": "feedback",
         "style": {
          "color": 16777215,
@@ -6209,6 +7122,60 @@
         "isInverted": {
          "value": false,
          "isExpression": false
+        },
+        "children": {
+         "default": [
+          {
+           "id": "MiojQAXK7HJWPEDn5VOrn",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Stint",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Grid Row 5",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 13421568
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          },
+          {
+           "id": "wF_bgK7Fe9GFHUTXho2O7",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Program",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Grid Row 5",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 13421568
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          }
+         ]
         }
        }
       ],
@@ -6218,27 +7185,29 @@
          "down": [
           {
            "id": "gfxGridRow5Act",
-           "definitionId": "toggle_scene_item",
-           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "definitionId": "get",
+           "connectionId": "BB0jmLMxj_0YwbhwslOiw",
            "options": {
-            "scene": {
-             "value": "Stint",
+            "url": {
+             "value": "http://127.0.0.1:8088/obs/graphic/toggle/Grid%20Row%205",
              "isExpression": false
             },
-            "all": {
-             "value": false,
+            "header": {
+             "isExpression": false,
+             "value": ""
+            },
+            "jsonResultDataVariable": {
              "isExpression": false
             },
-            "source": {
-             "value": "Grid Row 5",
-             "isExpression": false
+            "result_stringify": {
+             "isExpression": false,
+             "value": true
             },
-            "visible": {
-             "value": "toggle",
+            "statusCodeVariable": {
              "isExpression": false
             }
            },
-           "upgradeIndex": 8,
+           "upgradeIndex": 1,
            "type": "action"
           }
          ],
@@ -6272,19 +7241,14 @@
       "feedbacks": [
        {
         "id": "gfxGridRow6Fb",
-        "definitionId": "scene_item_active",
-        "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+        "definitionId": "logic_operator",
+        "connectionId": "internal",
         "options": {
-         "scene": {
-          "value": "Stint",
-          "isExpression": false
-         },
-         "source": {
-          "value": "Grid Row 6",
-          "isExpression": false
+         "operation": {
+          "isExpression": false,
+          "value": "or"
          }
         },
-        "upgradeIndex": 8,
         "type": "feedback",
         "style": {
          "color": 16777215,
@@ -6293,6 +7257,60 @@
         "isInverted": {
          "value": false,
          "isExpression": false
+        },
+        "children": {
+         "default": [
+          {
+           "id": "p48OIBAic7fAbQj-kJVLA",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Stint",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Grid Row 6",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 13421568
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          },
+          {
+           "id": "6C3xrzG43doCPjMUjgWcu",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Program",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Grid Row 6",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 13421568
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          }
+         ]
         }
        }
       ],
@@ -6302,27 +7320,29 @@
          "down": [
           {
            "id": "gfxGridRow6Act",
-           "definitionId": "toggle_scene_item",
-           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "definitionId": "get",
+           "connectionId": "BB0jmLMxj_0YwbhwslOiw",
            "options": {
-            "scene": {
-             "value": "Stint",
+            "url": {
+             "value": "http://127.0.0.1:8088/obs/graphic/toggle/Grid%20Row%206",
              "isExpression": false
             },
-            "all": {
-             "value": false,
+            "header": {
+             "isExpression": false,
+             "value": ""
+            },
+            "jsonResultDataVariable": {
              "isExpression": false
             },
-            "source": {
-             "value": "Grid Row 6",
-             "isExpression": false
+            "result_stringify": {
+             "isExpression": false,
+             "value": true
             },
-            "visible": {
-             "value": "toggle",
+            "statusCodeVariable": {
              "isExpression": false
             }
            },
-           "upgradeIndex": 8,
+           "upgradeIndex": 1,
            "type": "action"
           }
          ],
@@ -6356,19 +7376,14 @@
       "feedbacks": [
        {
         "id": "gfxGridRow7Fb",
-        "definitionId": "scene_item_active",
-        "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+        "definitionId": "logic_operator",
+        "connectionId": "internal",
         "options": {
-         "scene": {
-          "value": "Stint",
-          "isExpression": false
-         },
-         "source": {
-          "value": "Grid Row 7",
-          "isExpression": false
+         "operation": {
+          "isExpression": false,
+          "value": "or"
          }
         },
-        "upgradeIndex": 8,
         "type": "feedback",
         "style": {
          "color": 16777215,
@@ -6377,6 +7392,60 @@
         "isInverted": {
          "value": false,
          "isExpression": false
+        },
+        "children": {
+         "default": [
+          {
+           "id": "AqRyWs5UQd64z2JWU1OTk",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Stint",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Grid Row 7",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 13421568
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          },
+          {
+           "id": "qkKfkzBRFVnkysANC_0JQ",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Program",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Grid Row 7",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 13421568
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          }
+         ]
         }
        }
       ],
@@ -6386,27 +7455,29 @@
          "down": [
           {
            "id": "gfxGridRow7Act",
-           "definitionId": "toggle_scene_item",
-           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "definitionId": "get",
+           "connectionId": "BB0jmLMxj_0YwbhwslOiw",
            "options": {
-            "scene": {
-             "value": "Stint",
+            "url": {
+             "value": "http://127.0.0.1:8088/obs/graphic/toggle/Grid%20Row%207",
              "isExpression": false
             },
-            "all": {
-             "value": false,
+            "header": {
+             "isExpression": false,
+             "value": ""
+            },
+            "jsonResultDataVariable": {
              "isExpression": false
             },
-            "source": {
-             "value": "Grid Row 7",
-             "isExpression": false
+            "result_stringify": {
+             "isExpression": false,
+             "value": true
             },
-            "visible": {
-             "value": "toggle",
+            "statusCodeVariable": {
              "isExpression": false
             }
            },
-           "upgradeIndex": 8,
+           "upgradeIndex": 1,
            "type": "action"
           }
          ],
@@ -6440,19 +7511,14 @@
       "feedbacks": [
        {
         "id": "gfxGridRow8Fb",
-        "definitionId": "scene_item_active",
-        "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+        "definitionId": "logic_operator",
+        "connectionId": "internal",
         "options": {
-         "scene": {
-          "value": "Stint",
-          "isExpression": false
-         },
-         "source": {
-          "value": "Grid Row 8",
-          "isExpression": false
+         "operation": {
+          "isExpression": false,
+          "value": "or"
          }
         },
-        "upgradeIndex": 8,
         "type": "feedback",
         "style": {
          "color": 16777215,
@@ -6461,6 +7527,60 @@
         "isInverted": {
          "value": false,
          "isExpression": false
+        },
+        "children": {
+         "default": [
+          {
+           "id": "mZpumO2BOmGIw0nF8d-F6",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Stint",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Grid Row 8",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 13421568
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          },
+          {
+           "id": "1Tq0X8iR4CKUFqCyTY6xs",
+           "definitionId": "scene_item_active",
+           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "options": {
+            "scene": {
+             "value": "Program",
+             "isExpression": false
+            },
+            "source": {
+             "value": "Grid Row 8",
+             "isExpression": false
+            }
+           },
+           "upgradeIndex": 8,
+           "type": "feedback",
+           "style": {
+            "color": 16777215,
+            "bgcolor": 13421568
+           },
+           "isInverted": {
+            "value": false,
+            "isExpression": false
+           }
+          }
+         ]
         }
        }
       ],
@@ -6470,27 +7590,29 @@
          "down": [
           {
            "id": "gfxGridRow8Act",
-           "definitionId": "toggle_scene_item",
-           "connectionId": "dv_e1zuVb_6XgPv0eRibl",
+           "definitionId": "get",
+           "connectionId": "BB0jmLMxj_0YwbhwslOiw",
            "options": {
-            "scene": {
-             "value": "Stint",
+            "url": {
+             "value": "http://127.0.0.1:8088/obs/graphic/toggle/Grid%20Row%208",
              "isExpression": false
             },
-            "all": {
-             "value": false,
+            "header": {
+             "isExpression": false,
+             "value": ""
+            },
+            "jsonResultDataVariable": {
              "isExpression": false
             },
-            "source": {
-             "value": "Grid Row 8",
-             "isExpression": false
+            "result_stringify": {
+             "isExpression": false,
+             "value": true
             },
-            "visible": {
-             "value": "toggle",
+            "statusCodeVariable": {
              "isExpression": false
             }
            },
-           "upgradeIndex": 8,
+           "upgradeIndex": 1,
            "type": "action"
           }
          ],
