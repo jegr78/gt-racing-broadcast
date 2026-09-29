@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Real-packet CI fixtures: genuine GT7 "A" packets captured from a PS5 session with
+"""Real-packet CI fixtures: genuine GT7 "A" and extended "~" packets captured from a PS5 session with
 `tools/gt7-telemetry-probe.py --capture`. Decrypting and parsing them validates the
 field offsets against reality rather than just the internal wiring, across three
 states: full throttle with no lap yet, hard braking, and a completed lap. A GT7
@@ -61,6 +61,63 @@ PKT_LAP_HEX = (
 )
 
 
+# Extended '~' packets (344 bytes), captured 2026-09-29 on the Nurburgring GP in a
+# Gr.4 car with the relay requesting the extended format (#711): a hard left turn, a
+# hard right turn, the traction control cutting a floored throttle, and threshold
+# braking. They pin the extended offsets (steering, driver inputs, accelerations).
+EXT_LEFT_HEX = (
+    "ad9e34d2d4cd1a52a246770bfa3ec66a34045ba7603d5c41b57e0477ab6ff361b68a125b11"
+    "11769b9358d38d43eed18b112586da4db22ec7331a1c63cc90a4760f710d8388797f33e1b4"
+    "cdac60a9fe838f413eae70c5f4d69d9ff4c0722a7f4fc0052044fb5a82faa93bb94170d346"
+    "1b895c2a13f7a701c3d76611ff1f14c926077b875922d832bc12222943cb35953ed410c70b"
+    "c5066a7c031119d6763f3f59857f9adfce1b7ffa139abfd69ebbe6267e7a382b3b8f581122"
+    "b00d9f03a07fd93c55fcbe31290ff91fb58b29c392226c982bec8f4ea42ca33bfc60414e37"
+    "bd26615239c0d6d2a11e1e6d71d1d27ceb9a99578a4e25bc1e20dccd20912beebbc4d4b097"
+    "91094c7e93b8c87666d2cc419ecb2298db1f24fe1b8e9889e8669157ea48902ffc202cf709"
+    "8d35e41d25aaa8c62d677ad09b83006f8345709a4a7d8a7bbed5a943a8f8d8cc121bc36e12"
+    "80ecaf7b2c434abe77c46c"
+)
+
+EXT_RIGHT_HEX = (
+    "4c3a91f77c064a27b852c2020f19addcc5b93b4c8e8b3a1263da80365ab1cbc32fb805b1bd"
+    "5dc7c6fd5cf1c0dc569d1b862800b393ea8a235150110cfb1e113814534da00115ae6163ef"
+    "0cc432b1fb5e6136f1ee109cf8b4aaebeaf63a3370b0ba99691e74d5ca7db94adc7218e402"
+    "457ced05338429c1492d735a6be4570ebfc3edfb1e9394fec1f1c19471b53d3f18a14e907e"
+    "aac63eae374b8296088a55ded3486ba1c0fcef0af83d3394dc9422606b138d7cc60a96784c"
+    "d4c5d2ed742ea868628cf659693a7d95c6d1299c71a2dd0dbda4729f8dfc091a42119e26bc"
+    "f3d266ab7e4f32f9645cf1cec38a98acf39faf56c2abb6e482be0a3226e8cac50b9b7d9ed4"
+    "a493e2c658879d30bb4f65fcfedec8dcb9561426ca27b7655bbff5731bf2581bfce436b18c"
+    "f81c8668f2b1301bcd70022afab4ccd25a03b36dde0c15e835ba1c10cedf80652397e6d77f"
+    "a4c6a9aab39a42a50ba3c3"
+)
+
+EXT_TCS_HEX = (
+    "96f391b5bb338adf717d22db97fcdcaf45ec9498c196ae0aa736e9be2555999a5a0757be81"
+    "4beafb26f48fa6fca4b114fbe7e2f4f7f93fd19cca3223201360dc621f821ddf319a6a10f9"
+    "dd52f5a3becbbd2e2edb4697a80e6cd8a7a7a96ab211d37356be7f6064ce8ef1f3d8ebbe05"
+    "b47af9aa72fd2e05b9230d41b63744309ea73c891b7a48a612e7e2f45e5a04c35d425ef5f4"
+    "9de655d80506312d25510d1043196bd2c0e19b41a0e137788ec8da47b98f671b4f4d8eddf3"
+    "45fc1e368e0e38ecc2a76093485a6104e97526fb9290ab9ddb9e8d82e1124aae70f77349f9"
+    "bf70c206fef3902cc371dc01fe84a0e514d44af7f860f937f798e7b27dc4b23e81fd4cfcb9"
+    "472173944a01729ed11f68acc6c05fbf765b7951416004d12b13b456d1bb20354c922721d4"
+    "142b69f014ea64338a0845c547313141a428ef63c5b6272d06e03d10f5637c4ee4ce7fb517"
+    "ac89013c93acf80cf50048"
+)
+
+EXT_BRAKE_HEX = (
+    "8fd153a52a66a77ea71bc06f00689bab5911d94f936a2e424a5049951b1dc5d4722f5742a4"
+    "5de40a7d7fdcf765d50c95a57b67a535339e196c1a916288f06e8eb6a9a4976ba6b80b2e28"
+    "c4ff50a2680d61a92af646ce221a689d7175e6f39d9f4b436f26db246ec2b82f71743194c2"
+    "72156cb7c5c132188777838fe96f2276e743aeb0efb8d439f81f53e7f90d9a28b3361627b5"
+    "d605c49fb33560d09378514b5cb36c83572d3f5d5f4ba6f7030c4e85023d8971411810db30"
+    "53e289f304966af94d2511785ab90070f5b93029b56ed982dab92fced418cb4c41da6b3b4f"
+    "94076614e3b8802dfbe51924838128613be4c7ffee7828be7355032a5d4db596f69430c4fc"
+    "b4e6c01b87fcc1b77bc6a3c8347cf1f53d6840abd643e6dc19f019250b04cc6190d17d5e64"
+    "174368cbb6cf4720c2ce62b2a0adebede4b43abe60b9741cc6eaf970fc81ef6d022d54d50b"
+    "2da0e8749e1835ab191310"
+)
+
+
 def _parse(h):
     data = bytes.fromhex(h)
     assert len(data) == 296
@@ -90,6 +147,44 @@ def t_real_completed_lap():
     assert p.best_ms == 109724 and p.best_ms > 0       # real lap time in ms
     assert p.last_ms > 0
     assert p.lap == 2
+
+
+def _parse_ext(h):
+    data = bytes.fromhex(h)
+    assert len(data) == 344
+    kind, plain = gc.decrypt_typed(data)
+    assert kind == "~"                   # the console streamed the extended format
+    return tm.parse_packet(plain)
+
+
+def t_real_extended_steering_sign():
+    """Positive steering is a LEFT turn: the car turning left swings the lateral
+    acceleration (sway) negative, turning right swings it positive."""
+    left, right = _parse_ext(EXT_LEFT_HEX), _parse_ext(EXT_RIGHT_HEX)
+    assert left.steer_rad > 1.0 and right.steer_rad < -1.0
+    assert left.sway < 0 < right.sway
+
+
+def t_real_extended_driver_input_vs_applied():
+    """0x13C/0x13D carry the driver's pedal input, 0x91/0x92 what the car applies:
+    traction control cuts a floored throttle, brake assist tops up the brake."""
+    tcs = _parse_ext(EXT_TCS_HEX)
+    assert tcs.throttle_input == 255 and tcs.throttle < 100
+    brk = _parse_ext(EXT_BRAKE_HEX)
+    assert brk.brake_input > 200 and brk.brake == 255
+    assert brk.surge < -10                  # hard deceleration
+
+
+def t_real_extended_keeps_base_fields():
+    p = _parse_ext(EXT_BRAKE_HEX)
+    assert p.lap == 1 and p.on_track is True
+    assert 40.0 < p.speed_mps < 60.0        # ~185 km/h
+    assert all(0.0 < t < 200.0 for t in p.tyre_temp)
+
+
+def t_real_base_packet_has_no_extended_fields():
+    p = _parse(PKT_THROTTLE_HEX)
+    assert p.steer_rad is None and p.throttle_input is None and p.sway is None
 
 
 if __name__ == "__main__":

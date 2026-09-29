@@ -3,8 +3,9 @@
 
 No sockets: the relay owns the UDP thread and feeds decrypted packets here. All
 functions are deterministic (timestamps are injected) so the engine is unit-tested
-without a console. Offsets follow the community packet-'A' layout;
-tools/gt7-telemetry-probe.py checks them against a live console. See the design spec.
+without a console. Offsets follow the community packet layout ('A' base, 'B'/'~'
+extended, #711); tools/gt7-telemetry-probe.py checks them against a live console and
+tests/test_gt7_fixture.py pins them with real packets. See the design spec.
 """
 import json
 import logging
@@ -33,6 +34,14 @@ OFF_DAY_PROGRESSION = 0x80  # time of day on track, ms since midnight (int32)
 OFF_FLAGS = 0x8E        # simulator flags (uint16 bitfield)
 OFF_THROTTLE = 0x91     # 0-255 (uint8)
 OFF_BRAKE = 0x92        # 0-255 (uint8)
+# Extended fields, only in the longer packet types (#711). Packet 'B' adds the
+# steering and motion floats, '~' adds the driver's pedal input on top.
+OFF_STEER = 0x128       # steering wheel angle, radians, positive = left (float)
+OFF_SWAY = 0x130        # lateral acceleration (float)
+OFF_HEAVE = 0x134       # vertical acceleration (float)
+OFF_SURGE = 0x138       # longitudinal acceleration, negative = braking (float)
+OFF_THROTTLE_INPUT = 0x13C  # driver throttle input before assists, 0-255 (uint8)
+OFF_BRAKE_INPUT = 0x13D     # driver brake input before assists, 0-255 (uint8)
 
 # Simulator flag bits, the subset we use.
 FLAG_ON_TRACK = 1 << 0
@@ -76,11 +85,21 @@ GT7Packet = namedtuple("GT7Packet", [
     "speed_mps", "fuel_level", "fuel_capacity", "tyre_temp",
     "throttle", "brake", "lap", "best_ms", "last_ms", "day_ms",
     "flags", "on_track", "paused", "loading",
-])
+    "steer_rad", "sway", "heave", "surge", "throttle_input", "brake_input",
+], defaults=(None,) * 6)   # the extended fields are None on a base 'A' packet
+
+
+def _opt_float(plain, off):
+    return struct.unpack_from("<f", plain, off)[0] if len(plain) >= off + 4 else None
+
+
+def _opt_byte(plain, off):
+    return plain[off] if len(plain) > off else None
 
 
 def parse_packet(plain):
-    """Parse a decrypted packet-'A' buffer into a GT7Packet."""
+    """Parse a decrypted packet buffer of any type into a GT7Packet. Fields the
+    packet type does not carry are None."""
     flags = struct.unpack_from("<H", plain, OFF_FLAGS)[0]
     return GT7Packet(
         speed_mps=struct.unpack_from("<f", plain, OFF_SPEED)[0],
@@ -102,7 +121,73 @@ def parse_packet(plain):
         on_track=bool(flags & FLAG_ON_TRACK),
         paused=bool(flags & FLAG_PAUSED),
         loading=bool(flags & FLAG_LOADING),
+        steer_rad=_opt_float(plain, OFF_STEER),
+        sway=_opt_float(plain, OFF_SWAY),
+        heave=_opt_float(plain, OFF_HEAVE),
+        surge=_opt_float(plain, OFF_SURGE),
+        throttle_input=_opt_byte(plain, OFF_THROTTLE_INPUT),
+        brake_input=_opt_byte(plain, OFF_BRAKE_INPUT),
     )
+
+
+# ---- heartbeat policy: which byte to send, and when (#711) ----
+# The console streams while it gets a heartbeat at least every ~16 s, in the format
+# the heartbeat byte asked for. A running stream keeps its format though: a '~'
+# heartbeat into a live 'A' stream (left over from another tool, or a relay that ran
+# before #711) just keeps 'A' alive. The stream only restarts in a new format after it
+# lapsed, ~8 s after the last heartbeat (verified live on a PS5).
+HEARTBEAT = b"~"
+HEARTBEAT_INTERVAL_S = 10.0
+HEARTBEAT_LAPSE_GAP_S = 2.0    # packets stopped this long = the stream has lapsed
+HEARTBEAT_LAPSE_MAX_S = 30.0   # stop waiting if the stream never lapses
+
+
+class HeartbeatPolicy:
+    """Decides when to send the heartbeat. Pure: the relay feeds it packet types and
+    the clock, and sends whatever due() returns.
+
+    States: "request" sends HEARTBEAT every interval. The first packet of another
+    type moves to "lapse": heartbeats stop until the stream has been quiet for
+    HEARTBEAT_LAPSE_GAP_S, then "~" is requested at once. The switch is tried ONCE:
+    if the console still answers in another format, the policy stays in "request"
+    and keeps that stream alive rather than cutting telemetry again."""
+
+    def __init__(self, want=HEARTBEAT):
+        self.want = want
+        self.state = "request"
+        self._want_kind = want.decode("ascii")
+        self._last_sent = None
+        self._last_rx = None
+        self._lapse_since = None
+        self._tried = False
+
+    def on_packet(self, kind, now):
+        self._last_rx = now
+        if kind == self._want_kind or self._tried or self.state != "request":
+            return
+        self._tried = True
+        self.state = "lapse"
+        self._lapse_since = now
+        LOG.info("console streams packet type %r, pausing the heartbeat once to "
+                 "switch it to %r", kind, self._want_kind)
+
+    def due(self, now):
+        """The heartbeat bytes to send now, or None."""
+        if self.state == "lapse":
+            if now - self._last_rx >= HEARTBEAT_LAPSE_GAP_S:
+                LOG.info("telemetry stream lapsed, requesting packet type %r",
+                         self._want_kind)
+            elif now - self._lapse_since >= HEARTBEAT_LAPSE_MAX_S:
+                LOG.warning("telemetry stream did not lapse within %.0f s, keeping "
+                            "its packet type", HEARTBEAT_LAPSE_MAX_S)
+            else:
+                return None
+            self.state = "request"
+            self._last_sent = None
+        if self._last_sent is None or now - self._last_sent >= HEARTBEAT_INTERVAL_S:
+            self._last_sent = now
+            return self.want
+        return None
 
 
 class _LapAccumulator:

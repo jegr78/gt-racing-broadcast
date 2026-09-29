@@ -141,6 +141,8 @@ python3 tools/broadcast-chat-probe.py https://www.twitch.tv/SomeChannel     # or
 
 # Probe GT7 UDP telemetry (#324) against a LIVE PS4/PS5: standalone, no relay/Sheet.
 python3 tools/gt7-telemetry-probe.py --ps-ip 192.168.1.42   # heartbeat + decrypt + field dump
+# Stop the relay first: only one listener can own UDP 33740. It requests the extended
+# "~" format; a console still streaming "A" switches only after ~10 s of silence.
 
 # Publish the GitHub wiki from src/docs/wiki/ (maintainer; --dry-run to preview)
 python3 tools/sync-wiki.py

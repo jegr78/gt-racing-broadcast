@@ -54,6 +54,98 @@ def t_parse_flags():
     assert p.on_track is False and p.paused is True and p.loading is True
 
 
+def _ext_packet(**kw):
+    """An extended '~' buffer (0x158 bytes): the base fields plus the extras."""
+    b = bytearray(_packet(**kw)) + bytearray(0x158 - 0x128)
+    struct.pack_into("<f", b, tm.OFF_STEER, kw.get("steer_rad", 0.0))
+    struct.pack_into("<f", b, tm.OFF_SWAY, kw.get("sway", 0.0))
+    struct.pack_into("<f", b, tm.OFF_HEAVE, kw.get("heave", 0.0))
+    struct.pack_into("<f", b, tm.OFF_SURGE, kw.get("surge", 0.0))
+    b[tm.OFF_THROTTLE_INPUT] = kw.get("throttle_input", 0)
+    b[tm.OFF_BRAKE_INPUT] = kw.get("brake_input", 0)
+    return bytes(b)
+
+
+def t_parse_extended_fields():
+    p = tm.parse_packet(_ext_packet(steer_rad=0.75, sway=-3.5, heave=0.25, surge=-12.0,
+                                    throttle_input=200, brake_input=17, throttle=90))
+    assert abs(p.steer_rad - 0.75) < 1e-6
+    assert abs(p.sway + 3.5) < 1e-6 and abs(p.heave - 0.25) < 1e-6 and abs(p.surge + 12.0) < 1e-6
+    assert p.throttle_input == 200 and p.brake_input == 17 and p.throttle == 90
+
+
+def t_parse_base_packet_leaves_extended_fields_none():
+    p = tm.parse_packet(_packet(speed_mps=10.0))
+    assert (p.steer_rad, p.sway, p.heave, p.surge, p.throttle_input, p.brake_input) == (None,) * 6
+
+
+def t_parse_type_b_packet_has_motion_but_no_driver_input():
+    """Packet 'B' (0x13C bytes) ends before the driver-input bytes at 0x13C."""
+    p = tm.parse_packet(_ext_packet(steer_rad=-0.5, surge=2.0, throttle_input=99)[:0x13C])
+    assert abs(p.steer_rad + 0.5) < 1e-6 and abs(p.surge - 2.0) < 1e-6
+    assert p.throttle_input is None and p.brake_input is None
+
+
+# ---- heartbeat: request the extended format, force one switch (#711) ----
+
+def t_heartbeat_requests_extended_format_every_interval():
+    hb = tm.HeartbeatPolicy()
+    assert hb.due(0.0) == b"~"
+    assert hb.due(5.0) is None
+    assert hb.due(10.0) == b"~"
+
+
+def t_heartbeat_extended_stream_never_pauses():
+    hb = tm.HeartbeatPolicy()
+    hb.due(0.0)
+    for i in range(1, 250):
+        hb.on_packet("~", i * 0.1)
+    assert hb.due(25.0) == b"~" and hb.state == "request"
+
+
+def t_heartbeat_pauses_once_to_switch_a_base_stream():
+    """GT7 keeps a running stream in its format while heartbeats continue, so a base
+    'A' stream only switches after it lapses (~8 s after the last heartbeat). The
+    policy goes silent until the stream stops, then requests '~' at once."""
+    hb = tm.HeartbeatPolicy()
+    hb.due(0.0)
+    t = 0.0
+    while t < 18.0:                               # 'A' keeps flowing past two intervals
+        t += 0.1
+        hb.on_packet("A", t)
+        assert hb.due(t) is None                  # silent: no heartbeat keeps it alive
+    assert hb.state == "lapse"
+    assert hb.due(t + 1.0) is None                # a short gap is not a lapse yet
+    assert hb.due(t + tm.HEARTBEAT_LAPSE_GAP_S) == b"~"   # stream stopped: ask for '~'
+    assert hb.state == "request"
+
+
+def t_heartbeat_switch_is_attempted_only_once():
+    hb = tm.HeartbeatPolicy()
+    hb.due(0.0)
+    hb.on_packet("A", 0.1)
+    hb.due(0.1 + tm.HEARTBEAT_LAPSE_GAP_S)       # lapse over, '~' requested
+    t = 3.0
+    while t < 30.0:                               # console still answers with 'A'
+        hb.on_packet("A", t)
+        t += 0.1
+    assert hb.state == "request"                  # no second pause: stay on 'A'
+    assert hb.due(t) == b"~"                      # heartbeats keep the stream alive
+
+
+def t_heartbeat_gives_up_waiting_when_the_stream_never_lapses():
+    """If the base stream keeps flowing without our heartbeat (something else on this
+    host keeps it alive), the pause is bounded and heartbeats resume."""
+    hb = tm.HeartbeatPolicy()
+    hb.due(0.0)
+    t = 0.0
+    while t < tm.HEARTBEAT_LAPSE_MAX_S:
+        t += 0.1
+        hb.on_packet("A", t)
+        hb.due(t)
+    assert hb.due(t + 0.1) == b"~" and hb.state == "request"
+
+
 def _feed_lap(eng, t0, lap, *, duration=10.0, dt=0.1, speed=50.0,
               flags=None, fuel_start=None):
     """Drive one synthetic lap of constant speed; returns the end timestamp.
