@@ -485,6 +485,14 @@ stays). The relay stores the choice in `runtime/<profile>/telemetry-view.json`, 
 survives a relay restart; `/telemetry/data` and `/status` (`telemetry.visible`) report
 it. Outside a solo POV broadcast these routes answer 404, like `/telemetry/data`.
 
+**Car name (solo POV).** Every GT7 telemetry packet carries a car id. The relay
+resolves it to maker, model and class through the car tables it ships with, from the
+community database [ddm999/gt7info](https://github.com/ddm999/gt7info). The HUD shows
+maker and model above the telemetry panel (the `Car` element in the overlay builder),
+and the Director Panel's status strip shows it too. `/telemetry/data` and `/status`
+(`telemetry.car`) report `{id, maker, name, group}`. A car added by a GT7 update after
+the tables were refreshed shows as `Car #<id>` until the next release updates them.
+
 **Telemetry packet format.** The relay asks GT7 for its extended telemetry packet,
 which adds the steering angle, the driver's pedal input and the car's accelerations
 to the base values. GT7 only changes the format of a stream that has stopped. So if

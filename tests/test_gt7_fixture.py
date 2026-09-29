@@ -182,6 +182,12 @@ def t_real_extended_keeps_base_fields():
     assert all(0.0 < t < 200.0 for t in p.tyre_temp)
 
 
+def t_real_extended_car_id():
+    """Every packet of the session names the car: 365, the Alfa Romeo 155 (#713)."""
+    for h in (EXT_LEFT_HEX, EXT_RIGHT_HEX, EXT_TCS_HEX, EXT_BRAKE_HEX):
+        assert _parse_ext(h).car_id == 365
+
+
 def t_real_base_packet_has_no_extended_fields():
     p = _parse(PKT_THROTTLE_HEX)
     assert p.steer_rad is None and p.throttle_input is None and p.sway is None

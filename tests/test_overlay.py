@@ -251,6 +251,7 @@ def t_ob_extract_slots_from_real_hud():
                    "tele-clock",
                    "tele-avg-lbl", "tele-avg",
                    "tele-dist-lbl", "tele-dist",
+                   "tele-car",
                    # "tyres-capture" is a TOP-LEVEL slot (outside #tele) so it stays
                    # builder-editable in a Commentary profile that has no telemetry;
                    # it drives the "Solo Tyres/Fuel Capture" OBS device transform
@@ -1257,6 +1258,18 @@ def t_hud_hides_telemetry_but_keeps_the_webcam_frame():
     assert '#tele.tele-off > :not(#webcam)' in html
     poll = html[html.index("async function pollData"):html.index("async function pollTrace")]
     assert 'classList.toggle("tele-off", d.visible === false)' in poll
+
+
+
+def t_hud_names_the_car_from_telemetry():
+    """#tele-car shows maker + model from /telemetry/data and hides without a car. (#713)"""
+    with open(os.path.join(ROOT, "src", "obs", "hud.html"), encoding="utf-8") as f:
+        html = f.read()
+    assert 'id="tele-car" class="el white" data-edit="Car" data-edit-kind="text" style="display:none"' in html
+    poll = html[html.index("async function pollData"):html.index("async function pollTrace")]
+    assert "const car = document.getElementById(\"tele-car\");" in poll
+    assert "car.textContent = [d.car.maker, d.car.name].filter(Boolean).join(\" \");" in poll
+    assert 'car.style.display = "none";' in poll
 
 
 if __name__ == "__main__":

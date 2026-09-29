@@ -34,6 +34,7 @@ OFF_DAY_PROGRESSION = 0x80  # time of day on track, ms since midnight (int32)
 OFF_FLAGS = 0x8E        # simulator flags (uint16 bitfield)
 OFF_THROTTLE = 0x91     # 0-255 (uint8)
 OFF_BRAKE = 0x92        # 0-255 (uint8)
+OFF_CAR_ID = 0x124      # car id, named by gt7_cars (int32; base packet, #713)
 # Extended fields, only in the longer packet types (#711). Packet 'B' adds the
 # steering and motion floats, '~' adds the driver's pedal input on top.
 OFF_STEER = 0x128       # steering wheel angle, radians, positive = left (float)
@@ -85,12 +86,17 @@ GT7Packet = namedtuple("GT7Packet", [
     "speed_mps", "fuel_level", "fuel_capacity", "tyre_temp",
     "throttle", "brake", "lap", "best_ms", "last_ms", "day_ms",
     "flags", "on_track", "paused", "loading",
+    "car_id",
     "steer_rad", "sway", "heave", "surge", "throttle_input", "brake_input",
-], defaults=(None,) * 6)   # the extended fields are None on a base 'A' packet
+], defaults=(None,) * 7)   # None when the packet is too short to carry the field
 
 
 def _opt_float(plain, off):
     return struct.unpack_from("<f", plain, off)[0] if len(plain) >= off + 4 else None
+
+
+def _opt_int(plain, off):
+    return struct.unpack_from("<i", plain, off)[0] if len(plain) >= off + 4 else None
 
 
 def _opt_byte(plain, off):
@@ -121,6 +127,7 @@ def parse_packet(plain):
         on_track=bool(flags & FLAG_ON_TRACK),
         paused=bool(flags & FLAG_PAUSED),
         loading=bool(flags & FLAG_LOADING),
+        car_id=_opt_int(plain, OFF_CAR_ID),
         steer_rad=_opt_float(plain, OFF_STEER),
         sway=_opt_float(plain, OFF_SWAY),
         heave=_opt_float(plain, OFF_HEAVE),
@@ -466,6 +473,7 @@ class TelemetryEngine:
             "tyre_temp_avg": self._tyre_avg(),
             "top_speed_mps": self._top_speed,
             "time_of_day_ms": pkt.day_ms if pkt else None,
+            "car_id": pkt.car_id if pkt else None,
         }
 
     def trace_batch(self, limit=150):
@@ -551,8 +559,9 @@ class TelemetryStore:
     """
 
     def __init__(self, path=None, units="metric", thresholds=(70, 85, 95), reset=False,
-                 view_path=None):
+                 view_path=None, cars=None):
         self._eng = TelemetryEngine()
+        self._cars = cars              # gt7_cars.CarDB (or None: no car names)
         self._view_path = view_path
         self._visible = self._load_visible()
         self._lock = threading.Lock()
@@ -596,7 +605,17 @@ class TelemetryStore:
         out = format_snapshot(snap, self._units, self._thresholds)
         out["source"] = source
         out["visible"] = self.visible()
+        out["car"] = self._lookup_car(snap["car_id"])
         return out
+
+    def _lookup_car(self, car_id):
+        return self._cars.lookup(car_id) if self._cars is not None else None
+
+    def car(self):
+        """The current car ({id, maker, name, group}) or None, for /status."""
+        with self._lock:
+            pkt = self._eng._last
+        return self._lookup_car(pkt.car_id if pkt else None)
 
     def visible(self):
         with self._lock:

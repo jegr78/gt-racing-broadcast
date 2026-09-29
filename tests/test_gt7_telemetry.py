@@ -34,6 +34,7 @@ def _packet(**kw):
     struct.pack_into("<H", b, tm.OFF_FLAGS, kw.get("flags", tm.FLAG_ON_TRACK))
     b[tm.OFF_THROTTLE] = kw.get("throttle", 0)
     b[tm.OFF_BRAKE] = kw.get("brake", 0)
+    struct.pack_into("<i", b, tm.OFF_CAR_ID, kw.get("car_id", 0))
     return bytes(b)
 
 
@@ -64,6 +65,37 @@ def _ext_packet(**kw):
     b[tm.OFF_THROTTLE_INPUT] = kw.get("throttle_input", 0)
     b[tm.OFF_BRAKE_INPUT] = kw.get("brake_input", 0)
     return bytes(b)
+
+
+def t_parse_car_id():
+    """The car id sits in the base packet too, so it needs no extended format."""
+    assert tm.parse_packet(_packet(car_id=3424)).car_id == 3424
+
+
+class _Cars:
+    def lookup(self, car_id):
+        return None if not car_id else {"id": car_id, "maker": "M", "name": "N", "group": None}
+
+
+def t_store_data_names_the_car():
+    store = tm.TelemetryStore(None, cars=_Cars())
+    assert store.data()["car"] is None and store.car() is None       # no packet yet
+    store.update(tm.parse_packet(_packet(car_id=365)), 1.0)
+    assert store.data()["car"] == {"id": 365, "maker": "M", "name": "N", "group": None}
+    assert store.car()["id"] == 365
+
+
+def t_store_follows_a_car_change():
+    store = tm.TelemetryStore(None, cars=_Cars())
+    store.update(tm.parse_packet(_packet(car_id=3424)), 1.0)
+    store.update(tm.parse_packet(_packet(car_id=365, lap=0)), 2.0)
+    assert store.car()["id"] == 365
+
+
+def t_store_without_car_table_has_no_car():
+    store = tm.TelemetryStore(None)
+    store.update(tm.parse_packet(_packet(car_id=365)), 1.0)
+    assert store.data()["car"] is None
 
 
 def t_parse_extended_fields():
