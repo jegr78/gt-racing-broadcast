@@ -12,6 +12,7 @@ import struct
 import sys
 import tempfile
 import threading
+from urllib.parse import unquote
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -2062,6 +2063,71 @@ def t_apply_graphic_rejects_bad_input_and_reports_obs_failures():
     obs = _GraphicObs(fail={"Race Info"})
     payload, status = irofeeds.apply_graphic(_SoloRelay(False), obs, "show", "Race Info")
     assert status == 503 and payload["ok"] is False and "Race Info missing" in payload["note"], payload
+
+
+def _companion_buttons():
+    """[(label, button)] of every Companion button."""
+    path = os.path.join(ROOT, "src", "companion", "racecast-buttons.companionconfig")
+    with open(path, encoding="utf-8") as f:
+        cfg = json.load(f)
+    return [((btn.get("style") or {}).get("text", ""), btn)
+            for page in cfg["pages"].values()
+            for row in (page.get("controls") or {}).values()
+            for btn in (row or {}).values()]
+
+
+def _actions(btn):
+    return [a for step in (btn.get("steps") or {}).values()
+            for acts in (step.get("action_sets") or {}).values() for a in (acts or [])]
+
+
+def t_companion_graphics_never_name_a_scene():
+    # A graphic scene item lives in Stint for endurance and in Program for solo, so
+    # a button that names the scene is dead in one of them. (#706)
+    for label, btn in _companion_buttons():
+        for a in _actions(btn):
+            o = a.get("options") or {}
+            if a.get("definitionId") == "toggle_scene_item":
+                assert o["source"]["value"] not in m.GRAPHIC_SOURCES, \
+                    f"{label!r} switches {o['source']['value']!r} in a fixed scene"
+
+
+def t_companion_graphic_toggles_call_the_relay_and_light_in_both_scenes():
+    by_source = {}
+    for _label, btn in _companion_buttons():
+        urls = [a["options"]["url"]["value"] for a in _actions(btn)
+                if a.get("definitionId") == "get"]
+        toggles = [u for u in urls if u.startswith("http://127.0.0.1:8088/obs/graphic/toggle/")]
+        if toggles:
+            [url] = toggles
+            by_source[unquote(url.rsplit("/", 1)[1])] = btn
+    assert set(by_source) == set(m.GRAPHIC_SOURCES), sorted(set(m.GRAPHIC_SOURCES) ^ set(by_source))
+    for source, btn in by_source.items():
+        [fb] = btn["feedbacks"]
+        assert fb["definitionId"] == "logic_operator", (source, fb["definitionId"])
+        assert fb["options"]["operation"]["value"] == "or", source
+        lit = {(c["definitionId"], c["options"]["scene"]["value"], c["options"]["source"]["value"])
+               for c in fb["children"]["default"]}
+        assert lit == {("scene_item_active", "Stint", source),
+                       ("scene_item_active", "Program", source)}, (source, lit)
+
+
+def t_companion_red_flag_shows_and_hides_the_cover_through_the_relay():
+    [btn] = [b for label, b in _companion_buttons() if label == "RED\nFLAG"
+             and any("racecontrol" in (a["options"].get("url") or {}).get("value", "")
+                     for a in _actions(b) if a.get("definitionId") == "get")]
+    steps = [[a["options"]["url"]["value"] for a in s["action_sets"]["down"]]
+             for _, s in sorted(btn["steps"].items())]
+    assert steps == [
+        ["http://127.0.0.1:8088/obs/graphic/show/Standby%20Cover",
+         "http://127.0.0.1:8088/setup/set/racecontrol/Red%20Flag%20-%20Race%20Suspended"],
+        ["http://127.0.0.1:8088/obs/graphic/hide/Standby%20Cover",
+         "http://127.0.0.1:8088/setup/clear/racecontrol"],
+    ], steps
+    [fb] = btn["feedbacks"]
+    assert fb["options"]["operation"]["value"] == "or", fb
+    assert {c["options"]["scene"]["value"] for c in fb["children"]["default"]} == \
+        {"Stint", "Program"}, fb
 
 
 class _AliveFakeSock:
