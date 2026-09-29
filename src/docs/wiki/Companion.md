@@ -53,8 +53,10 @@ This page covers only how the board is wired up. The relay buttons (`Feeds Next`
 `POV Toggle` → `/pov/toggle`, `Telemetry Toggle` → `/telemetry/toggle` (solo POV only; elsewhere the relay answers 404 and the press does nothing), and the `FEED A/B ROBUST/AUTO` quality switches → `/feed/<A|B>/quality/<tier>`)
 use the **Generic HTTP Requests**
 connection: see [Relay Mode §4](Relay-Mode#4-control-it-companion--relay). Everything else
-uses the OBS connection. Four combos sit on both: `RED FLAG` (Standby-Cover visibility
-through OBS, Race Control write through the relay), `SPLIT` (cuts to Splitscreen through
+uses the OBS connection, except the full-screen graphic toggles on the FLAGS & GRAPHICS page
+and `RED FLAG`: they call the relay's `/obs/graphic/<show|hide|toggle>/<source>`, which picks
+the Stint scene, or Program in solo, and they light from either scene. `RED FLAG` also writes
+Race Control through the relay. Three combos sit on both connections: `SPLIT` (cuts to Splitscreen through
 OBS, then asks the relay's `/obs/split` to show both feeds and set the audio for the
 on-air feed, and sets Race Control to *Driver Swaps*) and `STINT A` / `STINT B` (switch
 the feeds and their audio in OBS, then ask the relay's `/obs/stint/<A|B>` to do the same
@@ -63,6 +65,11 @@ also clears Race Control when it cuts back to the Stint scene, so a swap done pu
 `SPLIT` → `Feeds Next` needs no `STINT A/B` press to wipe the banner. The Race Control
 writes go to `/setup/set/racecontrol/…` / `/setup/clear/racecontrol` and need the
 [sheet-write webhook](Sheet-Webhook).
+
+One board serves endurance and solo profiles. A solo collection has no feed pair and no
+Stint or Splitscreen scene, so `STINT A` / `STINT B`, `SPLIT`, `Stint Scene`, `Split Scene`
+and `Feed A/B Toggle` have nothing to act on there; the graphic toggles and `RED FLAG` work
+in both.
 
 ## Remote access
 
