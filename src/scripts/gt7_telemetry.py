@@ -510,6 +510,12 @@ def _band(temp_c, thresholds):
     return "critical"
 
 
+def _steer_deg(rad):
+    if rad is None or not math.isfinite(rad):
+        return None
+    return round(math.degrees(rad), 1)
+
+
 def format_snapshot(snap, units, thresholds):
     imperial = units == "imperial"
     spd = snap["speed_mps"] * (2.2369363 if imperial else 3.6)
@@ -545,9 +551,9 @@ def format_snapshot(snap, units, thresholds):
         },
         "delta_dir": snap.get("delta_dir"),
         # Steering wheel angle for the HUD wheel (#712), positive = left; None on a
-        # base 'A' stream, which carries no steering.
-        "steer_deg": (None if snap.get("steer_rad") is None
-                      else round(math.degrees(snap["steer_rad"]), 1)),
+        # base 'A' stream, which carries no steering, and for a non-finite float,
+        # which json.dumps would emit as a bare NaN the HUD cannot parse.
+        "steer_deg": _steer_deg(snap.get("steer_rad")),
         "units": {
             "speed": "mph" if imperial else "km/h",
             "temp": "°F" if imperial else "°C",

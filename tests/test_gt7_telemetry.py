@@ -742,6 +742,15 @@ def t_format_snapshot_steering_none_on_base_packets():
     assert tm.format_snapshot(eng.snapshot(), "metric", (70, 85, 95))["steer_deg"] is None
 
 
+def t_format_snapshot_steering_non_finite_is_none():
+    """A NaN/inf steering float must not reach the JSON: json.dumps would emit a bare
+    NaN that the HUD's JSON.parse rejects, freezing the whole block. (#716 review)"""
+    eng = tm.TelemetryEngine()
+    for bad in (float("nan"), float("inf"), float("-inf")):
+        eng.update(tm.parse_packet(_ext_packet(steer_rad=bad, lap=1)), 100.0)
+        assert tm.format_snapshot(eng.snapshot(), "metric", (70, 85, 95))["steer_deg"] is None
+
+
 def t_format_surfaces_fuel_per_lap_and_delta_dir():
     snap = {"speed_mps": 0.0, "tyre_temp": (70.0, 70.0, 70.0, 70.0),
             "tyre_temp_avg": (70.0, 70.0, 70.0, 70.0), "top_speed_mps": 0.0,
