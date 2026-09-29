@@ -10496,7 +10496,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             base["event_title"] = event_store.get() if event_store else ""
             if telemetry_store is not None:          # solo POV only; lights the panel toggle
                 base["telemetry"] = {"visible": telemetry_store.visible(),
-                                 "car": telemetry_store.car()}     # panel status strip (#713)
+                                     "car": telemetry_store.car()}  # panel status strip (#713)
             return base
         def _console_status_payload(self, roles):
             """Status for the Funnel-exposed /console mount. Feed stream URLs are
