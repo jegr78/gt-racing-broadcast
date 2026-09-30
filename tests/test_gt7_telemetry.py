@@ -751,6 +751,63 @@ def t_format_snapshot_steering_non_finite_is_none():
         assert tm.format_snapshot(eng.snapshot(), "metric", (70, 85, 95))["steer_deg"] is None
 
 
+_BAD = (float("nan"), float("inf"), float("-inf"))
+
+
+def t_engine_non_finite_floats_keep_the_last_good_value():
+    """A NaN/inf float in any packet field is replaced by the last good reading, so
+    the accumulated distance, fuel and tyre averages stay finite. (#717)"""
+    for bad in _BAD:
+        eng = tm.TelemetryEngine()
+        eng.update(tm.parse_packet(_ext_packet(speed_mps=50.0, fuel_level=40.0, lap=1,
+                                               tyre_temp=(80.0, 81.0, 82.0, 83.0),
+                                               steer_rad=0.5, sway=1.0)), 100.0)
+        eng.update(tm.parse_packet(_ext_packet(speed_mps=bad, fuel_level=bad, lap=1,
+                                               fuel_capacity=bad,
+                                               tyre_temp=(bad, bad, bad, bad),
+                                               steer_rad=bad, sway=bad, heave=bad,
+                                               surge=bad)), 101.0)
+        last = eng._last
+        assert (last.speed_mps, last.fuel_level, last.fuel_capacity) == (50.0, 40.0, 60.0), last
+        assert last.tyre_temp == (80.0, 81.0, 82.0, 83.0), last.tyre_temp
+        assert (last.steer_rad, last.sway, last.heave, last.surge) == (
+            _f32(0.5), 1.0, 0.0, 0.0), last
+        snap = eng.snapshot()
+        assert snap["session_dist_m"] == 50.0, snap["session_dist_m"]
+        assert snap["top_speed_mps"] == 50.0, snap["top_speed_mps"]
+
+
+def t_engine_non_finite_first_packet_falls_back_to_defaults():
+    """Without an earlier reading a base float becomes 0.0 and an extended one None."""
+    eng = tm.TelemetryEngine()
+    nan = float("nan")
+    eng.update(tm.parse_packet(_ext_packet(speed_mps=nan, fuel_level=nan, lap=1,
+                                           tyre_temp=(nan, 70.0, nan, 70.0),
+                                           steer_rad=nan)), 100.0)
+    last = eng._last
+    assert (last.speed_mps, last.fuel_level) == (0.0, 0.0), last
+    assert last.tyre_temp == (0.0, 70.0, 0.0, 70.0), last.tyre_temp
+    assert last.steer_rad is None, last.steer_rad
+
+
+def t_store_data_is_strict_json_after_non_finite_packets():
+    """/telemetry/data must neither raise (round(nan)) nor emit NaN/Infinity, or the
+    HUD's r.json() fails and the whole telemetry block freezes. (#717)"""
+    import json
+    store = tm.TelemetryStore()
+    t = 100.0
+    store.update(tm.parse_packet(_ext_packet(speed_mps=50.0, lap=1)), t)
+    for bad in _BAD:
+        t += 0.1
+        store.update(tm.parse_packet(_ext_packet(
+            speed_mps=bad, fuel_level=bad, fuel_capacity=bad, lap=1,
+            tyre_temp=(bad, bad, bad, bad), steer_rad=bad)), t)
+        json.dumps(store.data(), allow_nan=False)
+
+
+def _f32(x):
+    return struct.unpack("<f", struct.pack("<f", x))[0]
+
 def t_format_surfaces_fuel_per_lap_and_delta_dir():
     snap = {"speed_mps": 0.0, "tyre_temp": (70.0, 70.0, 70.0, 70.0),
             "tyre_temp_avg": (70.0, 70.0, 70.0, 70.0), "top_speed_mps": 0.0,
