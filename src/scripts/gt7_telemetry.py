@@ -198,6 +198,30 @@ class HeartbeatPolicy:
         return None
 
 
+def _finite(value, fallback):
+    return value if value is None or math.isfinite(value) else fallback
+
+
+def _sanitize(pkt, last):
+    """`pkt` with every NaN/inf float replaced by `last`'s reading, else 0.0 for a
+    base field and None for an extended one. The engine accumulates these floats,
+    and round() in format_snapshot raises on a non-finite value."""
+    def keep(name, default):
+        prev = getattr(last, name) if last is not None else default
+        return _finite(getattr(pkt, name), prev)
+    prev_tyres = last.tyre_temp if last is not None else (0.0, 0.0, 0.0, 0.0)
+    return pkt._replace(
+        speed_mps=keep("speed_mps", 0.0),
+        fuel_level=keep("fuel_level", 0.0),
+        fuel_capacity=keep("fuel_capacity", 0.0),
+        tyre_temp=tuple(_finite(pkt.tyre_temp[i], prev_tyres[i]) for i in range(4)),
+        steer_rad=keep("steer_rad", None),
+        sway=keep("sway", None),
+        heave=keep("heave", None),
+        surge=keep("surge", None),
+    )
+
+
 class _LapAccumulator:
     """Accumulates time + distance samples within one lap.
 
@@ -316,6 +340,7 @@ class TelemetryEngine:
         self._acc = _LapAccumulator(now, started_at_boundary=True)
 
     def update(self, pkt, now):
+        pkt = _sanitize(pkt, self._last)
         if self._lap_num is None:         # first packet: open a lap MID-lap (not a boundary)
             self._lap_num = pkt.lap
             self._acc = _LapAccumulator(now)                       # started_at_boundary=False
