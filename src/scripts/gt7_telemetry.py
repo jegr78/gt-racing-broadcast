@@ -214,7 +214,7 @@ def _sanitize(pkt, last):
         speed_mps=keep("speed_mps", 0.0),
         fuel_level=keep("fuel_level", 0.0),
         fuel_capacity=keep("fuel_capacity", 0.0),
-        tyre_temp=tuple(_finite(t, p) for t, p in zip(pkt.tyre_temp, prev_tyres)),
+        tyre_temp=tuple(_finite(pkt.tyre_temp[i], prev_tyres[i]) for i in range(4)),
         steer_rad=keep("steer_rad", None),
         sway=keep("sway", None),
         heave=keep("heave", None),
