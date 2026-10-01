@@ -1,5 +1,39 @@
 # Changelog
 
+## [1.12.0](https://github.com/jegr78/gt-racing-broadcast/compare/v1.11.0...v1.12.0) (2026-10-01)
+
+
+### Features
+
+* **hud:** rotating steering wheel from GT7 telemetry ([#716](https://github.com/jegr78/gt-racing-broadcast/issues/716)) ([891e587](https://github.com/jegr78/gt-racing-broadcast/commit/891e58701d70d9f33d325299e61d558c93631738))
+* **obs:** show the driver's webcam in the solo POV Intermission scene ([#693](https://github.com/jegr78/gt-racing-broadcast/issues/693)) ([c0b40cb](https://github.com/jegr78/gt-racing-broadcast/commit/c0b40cb00aadf5e0fa1cc0c3d47fa3e99d3f20e5))
+* **relay:** log why each GT7 lap did or did not become the delta reference ([#687](https://github.com/jegr78/gt-racing-broadcast/issues/687)) ([22fa79b](https://github.com/jegr78/gt-racing-broadcast/commit/22fa79b3bdd78e2d49d0a80baf1499b3480c0cb1))
+* **relay:** show or hide the HUD telemetry block from the panel and Companion ([#696](https://github.com/jegr78/gt-racing-broadcast/issues/696)) ([d66c947](https://github.com/jegr78/gt-racing-broadcast/commit/d66c947e6cddb7396b9c620c67ec3dadd691f085))
+* **telemetry:** name the GT7 car in the HUD and the Director Panel ([#715](https://github.com/jegr78/gt-racing-broadcast/issues/715)) ([20e229a](https://github.com/jegr78/gt-racing-broadcast/commit/20e229af1b8db0fd6e9c1d710d04f46c0100fcbb))
+* **telemetry:** request the extended GT7 packet format ([#714](https://github.com/jegr78/gt-racing-broadcast/issues/714)) ([5f1d78b](https://github.com/jegr78/gt-racing-broadcast/commit/5f1d78b56fa993d1d5e2990ae11e6c14d5d9ec2a))
+* **ui:** cascade the overlay builder canvas like the live overlay ([#692](https://github.com/jegr78/gt-racing-broadcast/issues/692)) ([e05fd14](https://github.com/jegr78/gt-racing-broadcast/commit/e05fd14c7dc09c17c0ca66a72322f053b68016b9))
+* **ui:** show the stream chat and telemetry block in the overlay builder ([#689](https://github.com/jegr78/gt-racing-broadcast/issues/689)) ([908d6ac](https://github.com/jegr78/gt-racing-broadcast/commit/908d6ac6f49369f3a6648a587c5ac78633efa1a3))
+
+
+### Bug Fixes
+
+* **cli:** treat --help after a subcommand as a help request ([#682](https://github.com/jegr78/gt-racing-broadcast/issues/682)) ([6df052e](https://github.com/jegr78/gt-racing-broadcast/commit/6df052e80474979bd87f11746be47287dae72d1e))
+* **companion:** switch the graphics in the solo Program scene through the relay ([#706](https://github.com/jegr78/gt-racing-broadcast/issues/706)) ([#709](https://github.com/jegr78/gt-racing-broadcast/issues/709)) ([c3218d2](https://github.com/jegr78/gt-racing-broadcast/commit/c3218d2c495f485a7403ff20c5e30fa645ea30d0))
+* **director:** collapse the empty Feeds column in the solo panel ([#700](https://github.com/jegr78/gt-racing-broadcast/issues/700)) ([#705](https://github.com/jegr78/gt-racing-broadcast/issues/705)) ([873cd85](https://github.com/jegr78/gt-racing-broadcast/commit/873cd85d09f9aea827f5635883848ebbedbbf301))
+* **director:** target the solo Program scene with the pre-race and grid keys ([#701](https://github.com/jegr78/gt-racing-broadcast/issues/701)) ([#707](https://github.com/jegr78/gt-racing-broadcast/issues/707)) ([adba3df](https://github.com/jegr78/gt-racing-broadcast/commit/adba3dfbea1d9e8c68ad680810aa4251691519a0))
+* **gt7:** decrypt discovery replies in the frozen binary ([#688](https://github.com/jegr78/gt-racing-broadcast/issues/688)) ([2c5fb1a](https://github.com/jegr78/gt-racing-broadcast/commit/2c5fb1a2c2a7823b54dd8c4260f1027e58753695)), closes [#680](https://github.com/jegr78/gt-racing-broadcast/issues/680)
+* **hud:** draw the throttle/brake trace smoothly on a fixed time window ([#684](https://github.com/jegr78/gt-racing-broadcast/issues/684)) ([c065a3e](https://github.com/jegr78/gt-racing-broadcast/commit/c065a3ee0d7abc49daa732a8a90877ab7a522e87))
+* **obs:** always reload the OBS pages on relay start ([#683](https://github.com/jegr78/gt-racing-broadcast/issues/683)) ([4aaa47c](https://github.com/jegr78/gt-racing-broadcast/commit/4aaa47cefb73d466c1cd0d5c66508c884c6c6adc))
+* **obs:** send boundsType as the enum name so the box sync lands ([#691](https://github.com/jegr78/gt-racing-broadcast/issues/691)) ([04db97a](https://github.com/jegr78/gt-racing-broadcast/commit/04db97a7072b6e56d8a14b6f43bb156533b8d69f))
+* **obs:** skip feed inputs a collection lacks when setting close_when_inactive ([#694](https://github.com/jegr78/gt-racing-broadcast/issues/694)) ([a97670a](https://github.com/jegr78/gt-racing-broadcast/commit/a97670a64d0f2cf49288bc2482a09d0b5587e98d)), closes [#678](https://github.com/jegr78/gt-racing-broadcast/issues/678)
+* **obs:** stop the overlay box sync reading border-width as the width ([#695](https://github.com/jegr78/gt-racing-broadcast/issues/695)) ([52dcd60](https://github.com/jegr78/gt-racing-broadcast/commit/52dcd60ea3da0bd415b3fa8624682490075f3721))
+* **obs:** switch flag graphics in the solo Program scene ([#704](https://github.com/jegr78/gt-racing-broadcast/issues/704)) ([b05f6f3](https://github.com/jegr78/gt-racing-broadcast/commit/b05f6f3441b702578c0b0e9ff518cfeef1758237))
+* **relay:** make do_POST's last-part return explicit (CodeQL py/mixed-returns) ([#699](https://github.com/jegr78/gt-racing-broadcast/issues/699)) ([1f9e3d1](https://github.com/jegr78/gt-racing-broadcast/commit/1f9e3d1b32bf38b5c8cd08356800447326f38c49))
+* **relay:** read a rejected /console POST's body before closing ([#698](https://github.com/jegr78/gt-racing-broadcast/issues/698)) ([4d3b470](https://github.com/jegr78/gt-racing-broadcast/commit/4d3b470dc13a47b4f89fb626aa57a56cbbf7409c))
+* **solo:** add Trailer, Solo Webcam and Solo Capture to the panel scenes ([#703](https://github.com/jegr78/gt-racing-broadcast/issues/703)) ([#710](https://github.com/jegr78/gt-racing-broadcast/issues/710)) ([090162e](https://github.com/jegr78/gt-racing-broadcast/commit/090162e0d1871e5ea6fb0bb17236be40cb9f09c0))
+* **telemetry:** keep non-finite GT7 packet floats out of the HUD data ([#717](https://github.com/jegr78/gt-racing-broadcast/issues/717)) ([#718](https://github.com/jegr78/gt-racing-broadcast/issues/718)) ([b882454](https://github.com/jegr78/gt-racing-broadcast/commit/b882454c95435e70ef117f8efbdc22c396b056a1))
+* **ui:** stop the overlay builder erasing hidden telemetry slots on save ([#685](https://github.com/jegr78/gt-racing-broadcast/issues/685)) ([ec79202](https://github.com/jegr78/gt-racing-broadcast/commit/ec79202583f91acccf11ccae04660e617fa9e119))
+
 ## [1.11.0](https://github.com/jegr78/gt-racing-broadcast/compare/v1.10.0...v1.11.0) (2026-09-25)
 
 
