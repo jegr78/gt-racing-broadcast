@@ -9030,14 +9030,15 @@ class Relay:
         path otherwise stays live and doubles the voice on air. One WARNING and one
         health event per remute; a mute OBS keeps refusing is retried every probe but
         warned once. Runs on the OBS probe thread; never raises."""
-        if _obs_ws is None or not (self.manages_mic() and self.mixes_mic()):
+        manages, mixes = self.manages_mic(), self.mixes_mic()
+        if _obs_ws is None or not (manages and mixes):
             return
         mic = _obs_ws.COMMENTARY_MIC_INPUT
         try:
             muted, _note = self._obs.get_input_mute(mic)
         except Exception:                                # noqa: BLE001  best-effort
             return
-        if not mixed_mic_needs_remute(True, True, muted):
+        if not mixed_mic_needs_remute(manages, mixes, muted):
             if muted:
                 self._mic_remute_failing = False
             return
