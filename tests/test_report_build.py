@@ -670,6 +670,21 @@ def t_a_multi_part_event_counts_each_repair_once():
     assert rep["on_air"]["av_repairs"] == 4, rep["on_air"]
 
 
+def t_the_report_counts_the_relays_mic_remutes():
+    # #721: each remute is a stretch where the producer's voice went out twice. The
+    # report names how often it happened, so a producer who unmuted the OBS mic by hand
+    # learns it afterwards even if nobody in chat said so.
+    samples = [_sample(0.0, live_stint=1), _sample(30.0, live_stint=1)]
+    events = [{"ts": 5.0, "type": "mic_remuted", "metadata": {"input": "Commentary Mic Device"}},
+              {"ts": 20.0, "type": "mic_remuted", "metadata": {"input": "Commentary Mic Device"}}]
+    rep = rb.build_report(samples, events, {1: "Alice"}, "E", (0.0, 30.0), now=100.0)
+    assert rep["mic_remutes"] == 2, rep.get("mic_remutes")
+    html = rb.render_html(rep)
+    assert "muted the OBS commentary mic 2 time(s)" in html, html
+    quiet = rb.build_report(samples, [], {1: "Alice"}, "E", (0.0, 30.0), now=100.0)
+    assert quiet["mic_remutes"] == 0 and "commentary mic" not in rb.render_html(quiet)
+
+
 def t_a_repair_between_two_parts_is_still_part_of_the_event():
     # One series across every window, not a sum per window. Per window, each part's
     # first sample is its own baseline, so a rise in the off-air gap between two parts

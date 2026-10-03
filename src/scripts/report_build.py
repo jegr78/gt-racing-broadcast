@@ -479,6 +479,8 @@ def build_report(samples, events, name_for_stint, event_title, window, now,
         "substitutions": substitutions,
         "recoveries": recoveries,
         "obs_consumer": obs_consumer,
+        # #721: the relay found the OBS mic live while the mic was in the local feed.
+        "mic_remutes": sum(1 for e in events if e.get("type") == "mic_remuted"),
         "overlap_approximate": bool(handovers),
         "broadcast_timeline": broadcast_timeline(events),
         "health_bands": health_bands,
@@ -641,6 +643,11 @@ def render_html(report):
                      f"{oa['av_repairs']} time(s) during this event{_esc(tail)}. Each "
                      f"one is a brief audible gap; picture and sound are back in sync "
                      f"afterwards.</p>")
+    if report.get("mic_remutes", 0) > 0:
+        parts.append(f"<p class='caveat'>The relay muted the OBS commentary mic "
+                     f"{report['mic_remutes']} time(s): it was live while the mic is mixed "
+                     f"into the local feed, so the producer's voice went out twice until "
+                     f"then.</p>")
     if oa.get("desync_seconds", 0) > 0:
         parts.append(f"<p class='caveat'>&#9888; A ping-pong desync was active for "
                      f"{_esc(_fmt_dur(oa['desync_seconds']))} of this event, so "

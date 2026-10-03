@@ -4093,6 +4093,13 @@ def mixes_mic_env(environ, platform, solo):
             and bool(mic_device_for(environ, platform)))
 
 
+def mixed_mic_needs_remute(manages, mixes, muted):
+    """True when the OBS commentary mic input is live although the relay mixes the mic
+    into the local feed (#721): the voice then goes out twice, the OBS copy ~3 s early.
+    `muted` None (OBS could not answer) is no reason to act. Pure."""
+    return bool(manages and mixes and muted is False)
+
+
 def _join_notes(a, b):
     return f"{a}; {b}" if a else b
 
@@ -7853,6 +7860,7 @@ class Relay:
         self.obs_stats = {}               # last redacted OBS GetStats/GetStreamStatus
         self.mic_device = None            # #668: last commentary-mic device check
         self._mic_check_ts = None
+        self._mic_remute_failing = False  # #721: a refused remute is warned once
         self._obs_last_bytes = None       # for stream_kbps derivation
         self._obs_last_bytes_ts = None
         self.conn_state = {"funnel_ok": None, "tailscale_up": None,
@@ -9016,6 +9024,39 @@ class Relay:
         if res.get("state") is not None:                 # keep the last real answer
             self.mic_device = res
 
+    def _maybe_remute_mixed_mic(self, now):
+        """#721: while the mic travels inside the local feed, keep the OBS mic input
+        muted on every probe, not only at a handover: an unmute by hand or by any other
+        path otherwise stays live and doubles the voice on air. One WARNING and one
+        health event per remute; a mute OBS keeps refusing is retried every probe but
+        warned once. Runs on the OBS probe thread; never raises."""
+        if _obs_ws is None or not (self.manages_mic() and self.mixes_mic()):
+            return
+        mic = _obs_ws.COMMENTARY_MIC_INPUT
+        try:
+            muted, _note = self._obs.get_input_mute(mic)
+        except Exception:                                # noqa: BLE001  best-effort
+            return
+        if not mixed_mic_needs_remute(True, True, muted):
+            if muted:
+                self._mic_remute_failing = False
+            return
+        try:
+            ok, note = self._obs.set_input_mute(mic, True)
+        except Exception as exc:                         # noqa: BLE001  best-effort
+            ok, note = False, str(exc) or exc.__class__.__name__
+        if ok:
+            self._mic_remute_failing = False
+            LOG.warning("OBS: %s was live while the commentary mic is mixed into the local "
+                        "feed (voice doubled on air); muted it", mic)
+            self._record_event(now, "mic_remuted",
+                               f"{mic} muted: it was live while the mic is in the local feed",
+                               {"input": mic})
+        elif not self._mic_remute_failing:
+            self._mic_remute_failing = True
+            LOG.warning("OBS: %s is live while the commentary mic is mixed into the local "
+                        "feed (voice doubled on air), and muting it failed: %s", mic, note)
+
     def obs_audio_plan(self):
         """(audio, extra_mute) for the OBS intent planners (#593): which feed carries
         the local capture right now, and whether this machine manages the commentary
@@ -9109,6 +9150,7 @@ class Relay:
                 self._on_stream_transition(transition, now, kbps=kbps)
             if reachable:
                 self._maybe_check_mic(now)
+                self._maybe_remute_mixed_mic(now)
         except Exception:                                # noqa: BLE001  best-effort
             with self._obs_lock:
                 self._obs_probe_running = False

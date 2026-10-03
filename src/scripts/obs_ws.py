@@ -575,7 +575,8 @@ _SHOT_FNS = frozenset({"get_program_screenshot", "get_source_screenshot"})
 _ROUTED_FNS = _SHOT_FNS | frozenset({
     "read_obs_state", "get_health_stats", "get_current_program_scene",
     "set_current_program_scene", "switch_to_scene_if_idle", "set_scene_item_enabled",
-    "set_scene_item_transform", "set_input_volume", "set_input_mute", "set_stream",
+    "set_scene_item_transform", "set_input_volume", "set_input_mute", "get_input_mute",
+    "set_stream",
     "set_stream_service", "reflect_feed_state", "refresh_browser_inputs",
     "release_feed_inputs", "feed_media_cursors", "get_scene_collection",
     "set_scene_collection", "ensure_mic_device",
@@ -1350,6 +1351,26 @@ def set_input_mute(input_name, muted, host="127.0.0.1", port=None,
         return True, ""
     except Exception as exc:                          # noqa: BLE001  best-effort contract
         return False, str(exc) or exc.__class__.__name__
+    finally:
+        if own:
+            session.close()
+
+
+def get_input_mute(input_name, host="127.0.0.1", port=None,
+                   password=None, timeout=2.0, session=None):
+    """An OBS audio input's mute state, best effort. Returns (muted, note): True/False,
+    or None with a note when OBS is unreachable or has no such input."""
+    note = ""
+    own = session is None
+    if own:
+        session, note = _connect(host, port, password, timeout)
+    if session is None:
+        return None, note
+    try:
+        muted = session.request("GetInputMute", {"inputName": input_name}).get("inputMuted")
+        return (bool(muted) if muted is not None else None), ""
+    except Exception as exc:                          # noqa: BLE001  best-effort contract
+        return None, str(exc) or exc.__class__.__name__
     finally:
         if own:
             session.close()
