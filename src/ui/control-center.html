@@ -1036,18 +1036,20 @@
             </select></div>
           <p class="envhint" id="dev-hint">Loading devices…</p>
           <p class="envhint endurance-only">The capture card is what a <b>local:</b> stint puts on air;
-            the relay mixes the mic into that feed, so leave OBS's own mic input muted.</p>
+            the relay mixes the mic into that feed, so leave OBS's own mic input muted. On macOS the relay
+            needs the capture card's <b>name</b>, not the id picked here: enter it as RACECAST_CAPTURE in the
+            .env editor below.</p>
           <p class="envhint solo-only">Tyres/Fuel: leave it on "same as capture card" when one card carries
             the game; the crop then reuses the capture card. Pick a device only for a second card (or pick
             the capture card to go back to one).</p>
           <div class="solo-only">
-          <div class="row" style="margin-top:12px"><span class="name">PlayStation IP (GT7)</span>
-            <input id="ps-ip" type="text" style="flex:1" placeholder="e.g. 192.168.1.42"
-                   aria-label="PlayStation IP">
-            <button id="ps-discover" onclick="discoverPs()">Discover PlayStation</button>
-            <button id="ps-save" onclick="savePsIp()">Save</button></div>
-          <select id="ps-list" style="width:100%;margin-top:6px" aria-label="Found consoles" hidden></select>
-          <p class="envhint" id="ps-hint">Set the console IP by hand, or click Discover (GT7 must be in an active session).</p>
+            <div class="row" style="margin-top:12px"><span class="name">PlayStation IP (GT7)</span>
+              <input id="ps-ip" type="text" style="flex:1" placeholder="e.g. 192.168.1.42"
+                     aria-label="PlayStation IP">
+              <button id="ps-discover" onclick="discoverPs()">Discover PlayStation</button>
+              <button id="ps-save" onclick="savePsIp()">Save</button></div>
+            <select id="ps-list" style="width:100%;margin-top:6px" aria-label="Found consoles" hidden></select>
+            <p class="envhint" id="ps-hint">Set the console IP by hand, or click Discover (GT7 must be in an active session).</p>
           </div>
         </section>
         <div class="enverr" id="env-err" hidden></div>
@@ -2574,7 +2576,7 @@ async function loadDevices() {
   $('dev-hint').textContent = ok
     ? 'Pick the devices, then Save. Shared machine-wide (not per-league).'
     : ((d && d.note) || 'Start OBS with obs-websocket enabled to list devices, or set '
-       + 'RACECAST_CAPTURE/RACECAST_WEBCAM/RACECAST_MIC/RACECAST_TYRES_CAPTURE in the .env editor below.');
+       + 'RACECAST_CAPTURE/RACECAST_MIC (solo also RACECAST_WEBCAM/RACECAST_TYRES_CAPTURE) in the .env editor below.');
 }
 
 async function saveDevices() {
