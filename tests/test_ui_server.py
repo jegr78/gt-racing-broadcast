@@ -1956,10 +1956,10 @@ def t_device_pickers_shown_for_endurance_profiles():
         "solo-only rows must be hidden outside a solo profile"
     assert "body.solo .endurance-only" in hiding, \
         "endurance-only notes must be hidden in a solo profile"
-    assert "solo-only" not in _row_classes(page, "Capture")
-    assert "solo-only" not in _row_classes(page, "Mic")
-    assert "solo-only" in _row_classes(page, "Webcam")
-    assert "solo-only" in _row_classes(page, "Tyres/Fuel")
+    assert "solo-only" not in _row_classes(page, "Capture"), "the capture picker must show for endurance"
+    assert "solo-only" not in _row_classes(page, "Mic"), "the mic picker must show for endurance"
+    assert "solo-only" in _row_classes(page, "Webcam"), "the webcam picker is solo-only"
+    assert "solo-only" in _row_classes(page, "Tyres/Fuel"), "the tyres/fuel picker is solo-only"
     ps = re.search(r'<div class="solo-only"[^>]*>(.*?)</div>\s*</section>', page, re.S)
     assert ps and 'id="ps-ip"' in ps.group(1) and 'id="ps-hint"' in ps.group(1), \
         "the PlayStation IP block must sit in a solo-only wrapper"
