@@ -1369,7 +1369,8 @@ def t_only_a_live_mic_on_a_mixing_machine_needs_a_remute():
     # #721: the OBS mic input must never be live while the mic is mixed into the feed.
     assert m.mixed_mic_needs_remute(manages=True, mixes=True, muted=False) is True
     assert m.mixed_mic_needs_remute(manages=True, mixes=True, muted=True) is False
-    assert m.mixed_mic_needs_remute(manages=True, mixes=True, muted=None) is False, \n        "an unknown mute state (OBS did not answer) is no reason to act"
+    assert m.mixed_mic_needs_remute(manages=True, mixes=True, muted=None) is False, (
+        "an unknown mute state (OBS did not answer) is no reason to act")
     assert m.mixed_mic_needs_remute(manages=True, mixes=False, muted=False) is False  # #593
     assert m.mixed_mic_needs_remute(manages=False, mixes=True, muted=False) is False  # solo
 
@@ -1437,14 +1438,16 @@ def t_a_failing_remute_is_retried_but_warned_once():
     assert second == [], "a mute OBS keeps refusing is warned once, not every 5 s"
     assert events == [], "no remute happened, so no event"
     _remute(stub, 11.0)                                  # still live: retried, still quiet
-    assert _remute(stub, 16.0) == [] and stub._mic_remute_failing is False, \n        "once the input reads muted again, a later refusal must warn again"
+    assert _remute(stub, 16.0) == [] and stub._mic_remute_failing is False, (
+        "once the input reads muted again, a later refusal must warn again")
 
 
 def t_without_mixing_the_relay_leaves_the_obs_mic_alone():
     obs = _MicObs([False])
     stub, events = _mic_stub(obs, mixes=False)           # #593: the relay opens it on air
     assert _remute(stub, 1.0) == []
-    assert obs.reads == 0 and obs.sets == [] and events == [], \n        "without mixing (#593) the relay opens the OBS mic itself; never fight that"
+    assert obs.reads == 0 and obs.sets == [] and events == [], (
+        "without mixing (#593) the relay opens the OBS mic itself; never fight that")
 
 
 def t_mixes_mic_needs_windows_a_card_and_a_mic_name():
