@@ -2228,6 +2228,33 @@ def t_set_input_mute_uses_passed_session_no_connect_no_close():
     assert fs.requests and fs.requests[0][0] == "SetInputMute"
 
 
+def t_get_input_mute_reads_the_state_on_a_passed_session():
+    # #721: the relay polls the commentary mic's mute state on its persistent session.
+    fs = _ReuseFakeSession({"GetInputMute": {"inputMuted": False}})
+    orig, m._connect = m._connect, lambda *a, **k: (_ for _ in ()).throw(AssertionError("connect"))
+    try:
+        muted, note = m.get_input_mute("Commentary Mic Device", session=fs)
+    finally:
+        m._connect = orig
+    assert muted is False and note == "", (muted, note)
+    assert fs.requests == [("GetInputMute", {"inputName": "Commentary Mic Device"})]
+    assert fs.closed is False, "must NOT close a session it did not open"
+    assert m.route_kind("get_input_mute") == "ctrl", "the relay calls it on its persistent session"
+
+
+def t_get_input_mute_is_none_when_obs_cannot_answer():
+    class Broken(_ReuseFakeSession):
+        def request(self, rt, rd):
+            raise RuntimeError("No source was found by the name of `Commentary Mic Device`.")
+    muted, note = m.get_input_mute("Commentary Mic Device", session=Broken({}))
+    assert muted is None and "No source was found" in note, (muted, note)
+    orig, m._connect = m._connect, lambda *a, **k: (None, "OBS not reachable")
+    try:
+        assert m.get_input_mute("Commentary Mic Device") == (None, "OBS not reachable")
+    finally:
+        m._connect = orig
+
+
 def t_get_program_screenshot_uses_passed_session_no_connect_no_close():
     raw = b"JPEGDATA"
     data_uri = "data:image/jpg;base64," + base64.b64encode(raw).decode()

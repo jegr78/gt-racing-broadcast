@@ -60,7 +60,7 @@ and mutes it on every other handover/SPLIT (`obs_ws.feed_audio_plan`, snapshotte
 solo, where the mic ships hot). A hand-picked STINT A/B uses the same plan through
 `GET /obs/stint/<A|B>` / `POST /obs/stint` (`apply_stint_state`), the panel macro calls
 only that, Companion calls it after its direct OBS actions (the break-glass path when the
-relay cannot reach OBS; they never touch the mic), and the smoke test does the same. A failed switch (collection imported before #593) is a relay-log WARNING. Only the director/sheet can set
+relay cannot reach OBS; they never touch the mic), and the smoke test does the same. A failed switch (collection imported before #593) is a relay-log WARNING. Since #670 a machine whose `ffmpeg` can open the mic (`mixes_mic`) mixes it into the local feed instead, and then the OBS input is only ever muted: `_maybe_remute_mixed_mic` (#721) reads it on every OBS probe and mutes it again if anything unmuted it, because a live OBS copy doubles the voice ~3 s early (WARNING + a `mic_remuted` health event, counted in the post-event report; a refused mute is retried every probe but warned once). Only the director/sheet can set
 it (`is_feed_source`); the commentator submit and POV paths stay on `is_channel`. (`curl`-ing a feed port returns nothing, it serves a single
 consumer; that is not a failure.)
 

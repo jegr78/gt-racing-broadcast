@@ -375,7 +375,9 @@ for the run.
 - The mic is audible exactly when the local feed is audible: on air in `Stint`, and in
   `Splitscreen` while the local stint is the audible side. Nothing switches it
   separately, and the OBS input `Commentary Mic Device` stays muted on this machine
-  (unmuting it would double the voice, early).
+  (unmuting it would double the voice, early). The relay enforces that: it checks the
+  input every few seconds and mutes it again if anything unmuted it, with a WARNING in
+  the relay log and a line in the post-event report.
 - The OBS fader and mute of the local feed move game sound and voice together. The mic's
   level relative to the game is `RACECAST_MIC_GAIN_DB` in `.env` (dB, default `0`, range
   -20 to +20), read at the next start of the local stint.

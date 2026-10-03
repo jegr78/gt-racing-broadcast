@@ -513,6 +513,38 @@ def t_run_obs_probe_records_live_result_and_clears_inflight():
         m._obs_ws = orig
 
 
+def t_every_reachable_obs_probe_keeps_a_mixed_mic_muted():
+    # #721 wiring: the probe (every OBS_PROBE_INTERVAL_S) is what re-mutes the OBS mic.
+    class MicFakeObs(_FakeObs):
+        COMMENTARY_MIC_INPUT = "Commentary Mic Device"
+
+        def __init__(self, reachable):
+            super().__init__(reachable, "")
+            self.sets = []
+
+        def get_input_mute(self, name):
+            return False, ""
+
+        def set_input_mute(self, name, muted):
+            self.sets.append((name, muted))
+            return True, ""
+    orig = m._obs_ws
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            r = _mk_relay(td, ["local:", "https://youtu.be/b"])
+            r.manages_mic, r.mixes_mic = (lambda: True), (lambda: True)
+            m._obs_ws = MicFakeObs(False)
+            r._obs_probe_running = True
+            r._run_obs_probe()
+            assert m._obs_ws.sets == [], "an unreachable OBS is not asked to mute"
+            m._obs_ws = MicFakeObs(True)
+            r._obs_probe_running = True
+            r._run_obs_probe()
+            assert m._obs_ws.sets == [("Commentary Mic Device", True)], m._obs_ws.sets
+    finally:
+        m._obs_ws = orig
+
+
 def t_run_obs_probe_latches_stream_expected():
     orig = m._obs_ws
     try:
@@ -1331,6 +1363,91 @@ def t_a_mixing_relay_keeps_the_obs_mic_muted():
         assert mic in audio["A"] and mic in extra
     finally:
         m._OBS_WS_MODULE = saved
+
+
+def t_only_a_live_mic_on_a_mixing_machine_needs_a_remute():
+    # #721: the OBS mic input must never be live while the mic is mixed into the feed.
+    assert m.mixed_mic_needs_remute(manages=True, mixes=True, muted=False) is True
+    assert m.mixed_mic_needs_remute(manages=True, mixes=True, muted=True) is False
+    assert m.mixed_mic_needs_remute(manages=True, mixes=True, muted=None) is False, (
+        "an unknown mute state (OBS did not answer) is no reason to act")
+    assert m.mixed_mic_needs_remute(manages=True, mixes=False, muted=False) is False  # #593
+    assert m.mixed_mic_needs_remute(manages=False, mixes=True, muted=False) is False  # solo
+
+
+class _MicObs:
+    """A fake relay OBS facade: answers GetInputMute from `states`, records SetInputMute."""
+    def __init__(self, states, set_ok=True):
+        self.states, self.set_ok, self.reads, self.sets = list(states), set_ok, 0, []
+
+    def get_input_mute(self, name):
+        self.reads += 1
+        return self.states.pop(0), ""
+
+    def set_input_mute(self, name, muted):
+        self.sets.append((name, muted))
+        return (True, "") if self.set_ok else (False, "OBS refused")
+
+
+def _mic_stub(obs, mixes=True):
+    import types
+    events = []
+    stub = types.SimpleNamespace(_obs=obs, _mic_remute_failing=False,
+                                 manages_mic=lambda: True, mixes_mic=lambda: mixes,
+                                 _record_event=lambda now, t, label, md: events.append(t))
+    return stub, events
+
+
+def _remute(stub, now):
+    import types
+    saved = m._obs_ws
+    m._obs_ws = types.SimpleNamespace(COMMENTARY_MIC_INPUT="Commentary Mic Device")
+    lines = []
+
+    class H(logging.Handler):
+        def emit(self, rec):
+            lines.append((rec.levelno, rec.getMessage()))
+    h = H()
+    m.LOG.addHandler(h)
+    try:
+        m.Relay._maybe_remute_mixed_mic(stub, now)
+    finally:
+        m.LOG.removeHandler(h)
+        m._obs_ws = saved
+    return lines
+
+
+def t_a_mixing_relay_remutes_a_live_obs_mic_and_says_so_once():
+    obs = _MicObs([False, True])
+    stub, events = _mic_stub(obs)
+    lines = _remute(stub, 100.0)
+    assert obs.sets == [("Commentary Mic Device", True)], obs.sets
+    assert events == ["mic_remuted"], events
+    assert len(lines) == 1 and lines[0][0] == logging.WARNING, lines
+    assert "doubled" in lines[0][1] and "Commentary Mic Device" in lines[0][1], lines
+    assert _remute(stub, 105.0) == [] and obs.sets == [("Commentary Mic Device", True)]
+    assert events == ["mic_remuted"]                     # nothing to do while it stays muted
+
+
+def t_a_failing_remute_is_retried_but_warned_once():
+    obs = _MicObs([False, False, False, True], set_ok=False)
+    stub, events = _mic_stub(obs)
+    first, second = _remute(stub, 1.0), _remute(stub, 6.0)
+    assert len(obs.sets) == 2, "every probe retries the mute"
+    assert len(first) == 1 and "OBS refused" in first[0][1], first
+    assert second == [], "a mute OBS keeps refusing is warned once, not every 5 s"
+    assert events == [], "no remute happened, so no event"
+    _remute(stub, 11.0)                                  # still live: retried, still quiet
+    assert _remute(stub, 16.0) == [] and stub._mic_remute_failing is False, (
+        "once the input reads muted again, a later refusal must warn again")
+
+
+def t_without_mixing_the_relay_leaves_the_obs_mic_alone():
+    obs = _MicObs([False])
+    stub, events = _mic_stub(obs, mixes=False)           # #593: the relay opens it on air
+    assert _remute(stub, 1.0) == []
+    assert obs.reads == 0 and obs.sets == [] and events == [], (
+        "without mixing (#593) the relay opens the OBS mic itself; never fight that")
 
 
 def t_mixes_mic_needs_windows_a_card_and_a_mic_name():
