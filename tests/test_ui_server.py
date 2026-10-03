@@ -1924,6 +1924,48 @@ def t_panel_link_has_no_obs_credential_fragment():
     assert "/panel" in page                    # but the plain panel link still exists
 
 
+def _cc_page():
+    with open(os.path.join(ROOT, "src", "ui", "control-center.html"),
+              encoding="utf-8") as fh:                # cp1252 on Windows would choke
+        return fh.read()
+
+
+def _row_classes(page, label):
+    """The class attribute of the General-Settings row whose name cell is `label`."""
+    m = re.search(r'<div class="([^"]*)"[^>]*>\s*<span class="name">' + re.escape(label) + "<",
+                  page)
+    assert m, f"no settings row named {label!r}"
+    return m.group(1).split()
+
+
+def t_device_pickers_shown_for_endurance_profiles():
+    # #720: an endurance league puts its own capture card on air (`local:`, #592) and
+    # mixes the commentary mic into that feed (#670), so the capture and mic pickers
+    # must not be solo-only. Webcam, tyres/fuel and the GT7 PlayStation stay solo:
+    # only the solo collections carry those inputs, and telemetry runs in solo POV only.
+    page = _cc_page()
+    style = page[page.index("<style>") + len("<style>"):page.index("</style>")]
+    style = re.sub(r"/\*.*?\*/", "", style, flags=re.S)
+    hiding = set()
+    for sel, body in re.findall(r"([^{}]+)\{([^{}]*)\}", style):
+        if re.search(r"display\s*:\s*none", body):
+            hiding.update(" ".join(s.split()) for s in sel.split(","))
+    assert not [s for s in hiding if "#dev-section" in s or "#dev-head" in s], \
+        f"the device section is hidden: {sorted(hiding)}"
+    assert "body:not(.solo) .solo-only" in hiding, \
+        "solo-only rows must be hidden outside a solo profile"
+    assert "body.solo .endurance-only" in hiding, \
+        "endurance-only notes must be hidden in a solo profile"
+    assert "solo-only" not in _row_classes(page, "Capture")
+    assert "solo-only" not in _row_classes(page, "Mic")
+    assert "solo-only" in _row_classes(page, "Webcam")
+    assert "solo-only" in _row_classes(page, "Tyres/Fuel")
+    ps = re.search(r'<div class="solo-only"[^>]*>(.*?)</div>\s*</section>', page, re.S)
+    assert ps and 'id="ps-ip"' in ps.group(1) and 'id="ps-hint"' in ps.group(1), \
+        "the PlayStation IP block must sit in a solo-only wrapper"
+    assert ">Solo devices<" not in page, "the heading must not call the section solo-only"
+
+
 def t_api_resources_route():
     ctx = _ctx()
     ctx["resources"] = lambda: {"available": True, "cpu_pct": 42.0, "cpu_level": "green",

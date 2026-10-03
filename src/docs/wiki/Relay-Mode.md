@@ -400,8 +400,8 @@ follow the same rule (the relay's `/obs/stint/<A|B>`): the mic opens only when t
 feed is the local one. The one gap is the break-glass case where the relay cannot reach
 OBS: the Companion STINT buttons still switch the feeds directly, but leave the mic as it
 was (see [Director → At a driver change](Director#at-a-driver-change) and
-[Companion](Companion)). The Control Center's device picker covers solo profiles only; on
-an endurance machine use `.env` or `racecast device-scan --mic`.
+[Companion](Companion)). Pick the mic in the Control Center (**General Settings →
+Devices**), with `racecast device-scan --mic`, or in `.env`.
 
 A collection imported before this feature has no mic input. The relay then logs a
 WARNING (run `racecast setup` and re-import) and the local stint goes out without the
