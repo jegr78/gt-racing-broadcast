@@ -128,6 +128,9 @@ racecast.py:4217):
   assume A/B).
 - Make the **Solo devices** picker (added in #304, currently always in General
   Settings) **solo-only** — shown for a solo profile, hidden for endurance.
+  *Superseded by #720:* the section is now **Devices** and shows for every kind. The
+  capture card and mic rows serve an endurance `local:` stint (#592, #670); only the
+  webcam, tyres/fuel and GT7 PlayStation rows stay solo-only (`.solo-only`).
 - Gating reads the active profile's `kind` from `/api/profiles`; a `body.solo`
   class (or equivalent per-nav `data-kind` gate) drives the CSS, matching the
   existing `showView`/nav pattern. Switching the active profile re-reads

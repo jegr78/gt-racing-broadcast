@@ -457,9 +457,9 @@
   body.solo [data-nav="streams"],
   body.solo [data-view="streams"],
   body.solo #home-feeds-row { display: none !important; }
-  #dev-head, #dev-section { display: none; }  /* solo-only; hidden for endurance */
-  body.solo #dev-head { display: flex; }
-  body.solo #dev-section { display: block; }
+  /* Devices (#720): capture card and mic serve both kinds (an endurance `local:` stint,
+     #592/#670); webcam, tyres/fuel and the GT7 PlayStation exist in solo only. */
+  body:not(.solo) .solo-only, body.solo .endurance-only { display: none; }
 </style>
 </head>
 <body>
@@ -1010,7 +1010,7 @@
             <b>runtime/fonts/</b>. When a league's design uses a font, it is copied into that league's
             <b>overlay/fonts/</b> on save, so the overlay works offline and <b>profile export</b> stays self-contained.</p>
         </section>
-        <div class="viewhead" id="dev-head"><h3>Solo devices</h3><span class="sub">webcam, capture-card, commentary mic &amp; tyres/fuel capture selection for solo mode</span>
+        <div class="viewhead" id="dev-head"><h3>Devices</h3><span class="sub">capture card &amp; commentary mic<span class="solo-only">, webcam, tyres/fuel capture &amp; GT7 PlayStation</span></span>
           <span class="spacer"></span>
           <button onclick="loadDevices()">
             <svg viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Reload</button>
@@ -1018,7 +1018,7 @@
             <svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>Save</button></div>
         <section id="dev-section">
           <div class="enverr" id="dev-err" hidden></div>
-          <div class="row"><span class="name">Webcam</span>
+          <div class="row solo-only"><span class="name">Webcam</span>
             <select id="dev-webcam" style="flex:1" aria-label="Webcam device" disabled>
               <option value="">—</option>
             </select></div>
@@ -1030,18 +1030,27 @@
             <select id="dev-mic" style="flex:1" aria-label="Commentary mic device" disabled>
               <option value="">—</option>
             </select></div>
-          <div class="row"><span class="name">Tyres/Fuel</span>
+          <div class="row solo-only"><span class="name">Tyres/Fuel</span>
             <select id="dev-tyres" style="flex:1" aria-label="Tyres/fuel capture device" disabled>
               <option value="">— same as capture card</option>
             </select></div>
           <p class="envhint" id="dev-hint">Loading devices…</p>
-          <div class="row" style="margin-top:12px"><span class="name">PlayStation IP (GT7)</span>
-            <input id="ps-ip" type="text" style="flex:1" placeholder="e.g. 192.168.1.42"
-                   aria-label="PlayStation IP">
-            <button id="ps-discover" onclick="discoverPs()">Discover PlayStation</button>
-            <button id="ps-save" onclick="savePsIp()">Save</button></div>
-          <select id="ps-list" style="width:100%;margin-top:6px" aria-label="Found consoles" hidden></select>
-          <p class="envhint" id="ps-hint">Set the console IP by hand, or click Discover (GT7 must be in an active session).</p>
+          <p class="envhint endurance-only">The capture card is what a <b>local:</b> stint puts on air;
+            the relay mixes the mic into that feed, so leave OBS's own mic input muted. On macOS the relay
+            needs the capture card's <b>name</b>, not the id picked here: enter it as RACECAST_CAPTURE in the
+            .env editor below.</p>
+          <p class="envhint solo-only">Tyres/Fuel: leave it on "same as capture card" when one card carries
+            the game; the crop then reuses the capture card. Pick a device only for a second card (or pick
+            the capture card to go back to one).</p>
+          <div class="solo-only">
+            <div class="row" style="margin-top:12px"><span class="name">PlayStation IP (GT7)</span>
+              <input id="ps-ip" type="text" style="flex:1" placeholder="e.g. 192.168.1.42"
+                     aria-label="PlayStation IP">
+              <button id="ps-discover" onclick="discoverPs()">Discover PlayStation</button>
+              <button id="ps-save" onclick="savePsIp()">Save</button></div>
+            <select id="ps-list" style="width:100%;margin-top:6px" aria-label="Found consoles" hidden></select>
+            <p class="envhint" id="ps-hint">Set the console IP by hand, or click Discover (GT7 must be in an active session).</p>
+          </div>
         </section>
         <div class="enverr" id="env-err" hidden></div>
         <div class="envpath" id="env-path"></div>
@@ -2525,7 +2534,8 @@ async function loadSettings(force) {
   d.entries.forEach(e => c.appendChild(settingsRow(e.key, e.value)));
 }
 
-// Solo devices (General Settings): webcam + capture-card + mic pickers
+// Devices (General Settings): webcam + capture-card + mic pickers (#720: capture + mic
+// for every kind, webcam + tyres/fuel solo only)
 // Webcam/Capture share the same OBS video-device list (the "Solo Capture Device"
 // input enumerates whatever this platform's video-capture API sees); Mic has its
 // own audio-device list (#307, the "Commentary Mic Device" input). A blank
@@ -2564,11 +2574,9 @@ async function loadDevices() {
   wSel.disabled = cSel.disabled = tSel.disabled = !ok;
   mSel.disabled = !micOk;
   $('dev-hint').textContent = ok
-    ? 'Pick the webcam, capture-card, mic and/or tyres/fuel device, then Save. Shared machine-wide (not per-league). '
-       + 'Tyres/Fuel: leave it on "same as capture card" when one card carries the game; the crop then reuses '
-       + 'the capture card. Pick a device only for a second card (or pick the capture card to go back to one).'
+    ? 'Pick the devices, then Save. Shared machine-wide (not per-league).'
     : ((d && d.note) || 'Start OBS with obs-websocket enabled to list devices, or set '
-       + 'RACECAST_CAPTURE/RACECAST_WEBCAM/RACECAST_MIC/RACECAST_TYRES_CAPTURE in the .env editor below.');
+       + 'RACECAST_CAPTURE/RACECAST_MIC (solo also RACECAST_WEBCAM/RACECAST_TYRES_CAPTURE) in the .env editor below.');
 }
 
 async function saveDevices() {

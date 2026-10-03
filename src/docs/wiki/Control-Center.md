@@ -179,8 +179,14 @@ Machine-wide (not league) configuration:
   the eye to reveal one. Comments in the file are preserved. Changes apply the next time
   you (re)start the affected service.
 - **YouTube cookies**: freshness status, re-exported with **Refresh** (pick the browser).
+- **Devices**: **Reload** lists the video and audio devices OBS sees; pick the **capture
+  card** (what a [local capture stint](Relay-Mode#local-capture-stint) puts on air) and the
+  **commentary mic**, then **Save** (writes `RACECAST_CAPTURE`, `RACECAST_MIC` and
+  `RACECAST_MIC_NAME`). A solo profile adds the webcam, the tyres/fuel capture and the GT7
+  PlayStation IP.
 
-> **CLI alternative:** edit `.env` in any text editor; `racecast cookies <browser>`.
+> **CLI alternative:** edit `.env` in any text editor; `racecast cookies <browser>`;
+> `racecast device-scan`.
 
 ### Crew Console
 
