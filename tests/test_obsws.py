@@ -2239,7 +2239,7 @@ def t_get_input_mute_reads_the_state_on_a_passed_session():
     assert muted is False and note == "", (muted, note)
     assert fs.requests == [("GetInputMute", {"inputName": "Commentary Mic Device"})]
     assert fs.closed is False, "must NOT close a session it did not open"
-    assert m.route_kind("get_input_mute") == "ctrl"
+    assert m.route_kind("get_input_mute") == "ctrl", "the relay calls it on its persistent session"
 
 
 def t_get_input_mute_is_none_when_obs_cannot_answer():
