@@ -280,6 +280,32 @@ def t_next_reflects_only_when_incoming_serving():
     assert calls == [("A", True)]
 
 
+def t_next_auto_passes_the_transition_to_the_cut():
+    # NEXT honours the panel's armed transition (#730); Companion's bare /next keeps
+    # the hard cut, so the old two-argument call stays when none is given.
+    r = _relay(["s1", "s2", "s3", "s4"])
+    calls = []
+    r._reflect = lambda live, cut, **kw: calls.append((live, cut, kw))
+    r.feeds["B"].phase = "serving"
+    out = r.next_auto(transition="fade", duration_ms=700)
+    assert out["obs_cut"] is True
+    assert calls == [("B", True, {"transition": "fade", "duration_ms": 700})], calls
+    calls.clear()
+    r.feeds["A"].phase = "serving"
+    r.next_auto()
+    assert calls == [("A", True, {})], calls
+
+
+def t_next_transition_query_is_validated():
+    q = m.next_transition_query
+    assert q("/next?transition=fade&duration=700") == ("fade", 700)
+    assert q("/next?transition=cut") == ("cut", None)
+    assert q("/next") == (None, None), "Companion's bare /next stays a hard cut"
+    assert q("/next?transition=wipe&duration=700") == (None, None), "unknown transition"
+    assert q("/next?transition=fade&duration=99999") == ("fade", 10000), "clamped like /obs/scene"
+    assert q("/next?transition=fade&duration=x") == ("fade", None)
+
+
 def t_next_auto_stops_freed_feed_on_cut():
     r = _relay(["s1", "s2", "s3", "s4"])
     r.manual_feed_arm = True
@@ -2968,7 +2994,7 @@ def t_reflect_warns_when_the_mic_cannot_be_opened():
             records.append(rec)
 
     class FakeObs:
-        def reflect_feed_state(self, live, cut, audio=None, extra_mute=()):
+        def reflect_feed_state(self, live, cut, audio=None, extra_mute=(), **kw):
             return [], f"unmute {MIC}: request SetInputMute failed: not found"
 
     class _Now:                             # run _reflect's thread inline
@@ -3007,7 +3033,7 @@ def t_reflect_snapshots_the_mic_before_the_freed_feed_advances():
     seen, deferred = [], []
 
     class FakeObs:
-        def reflect_feed_state(self, live, cut, audio=None, extra_mute=()):
+        def reflect_feed_state(self, live, cut, audio=None, extra_mute=(), **kw):
             seen.append((live, cut, audio, list(extra_mute)))
             return [], ""
 

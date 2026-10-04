@@ -4524,6 +4524,24 @@ def _apply_obs_intents(obs_ws, scene, intents):
     return payload, (200 if ok_all else 503)
 
 
+NEXT_TRANSITIONS = ("cut", "fade", "stinger")
+
+
+def next_transition_query(path):
+    """(transition, duration_ms) from a `/next?transition=..&duration=..` request.
+    Unknown transitions give (None, None), the hard cut a bare /next has always made;
+    the duration is clamped like /obs/scene's."""
+    qs = parse_qs(urlparse(path).query)
+    transition = (qs.get("transition") or [""])[0].strip().lower()
+    if transition not in NEXT_TRANSITIONS:
+        return None, None
+    try:
+        duration = max(0, min(10000, int((qs.get("duration") or [""])[0])))
+    except ValueError:
+        duration = None
+    return transition, duration
+
+
 # --- Relay-driven STINT A/B override (#593 follow-up) ---------------------------
 def apply_stint_state(relay, obs_ws, feed):
     """GET /obs/stint/<A|B> (Companion) and POST /obs/stint {"feed"} (Director
@@ -9089,7 +9107,7 @@ class Relay:
             local = set()                    # unknown -> the mic stays closed
         return _OBS_WS_MODULE.feed_audio_plan(local, mic=mic)
 
-    def _reflect(self, live, cut):
+    def _reflect(self, live, cut, transition=None, duration_ms=None):
         """Push the on-air feed (A/B) into OBS off-thread; never blocks the HTTP
         response, never raises. Records the note for /status."""
         if _obs_ws is None:
@@ -9099,7 +9117,8 @@ class Relay:
 
         def run():
             _applied, note = self._obs.reflect_feed_state(
-                live, cut, audio=audio, extra_mute=extra_mute)
+                live, cut, audio=audio, extra_mute=extra_mute,
+                transition=transition, duration_ms=duration_ms)
             self.obs_note = note or None
             _warn_if_mic_failed(note)
         threading.Thread(target=run, daemon=True).start()
@@ -9251,7 +9270,11 @@ class Relay:
         self.conn_state = {"funnel_ok": funnel_ok, "tailscale_up": ts_up,
                            "companion_ok": comp}
 
-    def next_auto(self):
+    def next_auto(self, transition=None, duration_ms=None):
+        """The handover. `transition`/`duration_ms` pick the OBS transition of the cut
+        (the panel's armed one); without them the cut is hard, as Companion expects."""
+        tx = ({"transition": transition, "duration_ms": duration_ms}
+              if transition else {})
         if self.solo:
             return {"error": "not available in solo mode", "solo": True}
         self.source.refresh(timeout=6)               # fresh sheet data at handover (bounded wait)
@@ -9278,7 +9301,7 @@ class Relay:
             result = self.advance(target, +2)
             cut = self.feeds[new_live].phase == "serving"
             if cut:
-                self._reflect(new_live, cut=True)
+                self._reflect(new_live, True, **tx)
             self.on_air_row = self.feeds[new_live].idx
             # `result` (from advance()) already carries status() plus "changed"/"feed";
             # spread it first and place continuation/obs_cut last, matching the
@@ -9294,7 +9317,7 @@ class Relay:
         self.feeds[new_live].set_index(next_slot_first_row(slots, cur))
         cut = self.feeds[new_live].phase == "serving"
         if cut:
-            self._reflect(new_live, cut=True)         # only flip onto a feed that is actually live
+            self._reflect(new_live, True, **tx)       # only flip onto a feed that is actually live
         # #489/#505: on a real handover cut, stop the outgoing pull so only ONE feed
         # ever pulls googlevideo between handovers (the durable single-puller fix). Gated
         # on cut (never stop a feed we did not cut away from -> never blacks the program)
@@ -11069,7 +11092,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                             part_store.reset()
                     return self._send(res)
                 if p == ["next"]:
-                    result = relay.next_auto()
+                    transition, duration = next_transition_query(self.path)
+                    result = relay.next_auto(transition=transition, duration_ms=duration)
                     # One-button handover: next_auto cuts OBS back to the Stint
                     # scene itself, so no STINT macro press follows to clear Race
                     # Control. Mirror that macro's rc:"" here when a real cut

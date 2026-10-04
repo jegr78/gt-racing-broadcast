@@ -1587,6 +1587,28 @@ def t_set_scene_stinger_absent_degrades_to_cut_with_note():
     assert ("SetCurrentProgramScene", {"sceneName": "Stint"}) in sess.sent
 
 
+def t_reflect_feed_state_cuts_with_the_given_transition():
+    # NEXT honours the panel's armed transition (#730): the handover cut is a FADE.
+    sess = _FakeSession(responses={"GetSceneItemId": {"sceneItemId": 3},
+                                   "GetSceneTransitionList": {"transitions": [
+                                       {"transitionName": "Fade", "transitionKind": "fade_transition"}]}})
+    applied, note = m.reflect_feed_state("B", True, transition="fade", duration_ms=700,
+                                         session=sess)
+    types = [t for t, _ in sess.sent]
+    assert ("SetCurrentSceneTransition", {"transitionName": "Fade"}) in sess.sent, sess.sent
+    assert ("SetCurrentSceneTransitionDuration", {"transitionDuration": 700}) in sess.sent
+    assert types.index("SetCurrentSceneTransition") < types.index("SetCurrentProgramScene")
+    assert ("cut", "Stint") in applied and note == "", (applied, note)
+
+
+def t_reflect_feed_state_without_transition_keeps_the_hard_cut():
+    sess = _FakeSession(responses={"GetSceneItemId": {"sceneItemId": 3}})
+    m.reflect_feed_state("B", True, session=sess)
+    types = [t for t, _ in sess.sent]
+    assert "GetSceneTransitionList" not in types and "SetCurrentSceneTransition" not in types, types
+    assert ("SetCurrentProgramScene", {"sceneName": "Stint"}) in sess.sent
+
+
 def t_set_scene_no_transition_is_plain_switch():
     sess = _FakeSession()
     orig, m._connect = m._connect, lambda *a, **k: (sess, "")
