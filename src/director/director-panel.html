@@ -3360,7 +3360,7 @@ function soloLayout(template){
   document.querySelectorAll('.pvtile[data-feed="A"], .pvtile[data-feed="B"]').forEach(t => {
     pvStopFeed(t); t.remove();
   });
-  for (const [src, label] of (SOLO_TILES[template] || SOLO_TILES.pov).slice().reverse()){
+  for (const [src, label] of (SOLO_TILES[template] || SOLO_TILES.pov)){
     const tile = pov.cloneNode(true);
     tile.dataset.feed = label; tile.dataset.src = src;
     tile.classList.remove("onair", "paused");
