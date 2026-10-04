@@ -69,6 +69,58 @@ def t_solo_heartbeat_paths_never_crash():
     r._maybe_auto_failover(now)              # must not KeyError on feeds[None]
 
 
+def _get_json(srv, path, body=None):
+    import json, urllib.error, urllib.request
+    url = "http://127.0.0.1:%d%s" % (srv.server_address[1], path)
+    data = None if body is None else json.dumps(body).encode()
+    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            return resp.status, json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        return e.code, json.loads(e.read())
+
+
+def _solo_server(**kw):
+    import threading
+    srv = m.ThreadingHTTPServer(("127.0.0.1", 0), m.make_handler(_solo_relay(), **kw))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv
+
+
+def t_solo_schedule_rows_are_empty():
+    assert _solo_relay().schedule_rows() == [], "solo has no schedule source, so no rows"
+
+
+def t_solo_schedule_data_is_an_empty_schedule_not_a_500():
+    srv = _solo_server()
+    try:
+        status, body = _get_json(srv, "/schedule/data")
+    finally:
+        srv.shutdown()
+    assert status == 200, (status, body)
+    assert body["rows"] == [] and body["source"] is None, body
+
+
+def t_solo_cue_send_reaches_the_store_not_a_500():
+    store = m.CueStore(os.path.join(tempfile.mkdtemp(), "cues.json"))
+    srv = _solo_server(cue_store=store)
+    try:
+        status, body = _get_json(srv, "/cues/send",
+                                 {"target": "all", "level": "info", "text": "wrap up"})
+    finally:
+        srv.shutdown()
+    assert status == 200, (status, body)
+    assert "error" not in body, body
+
+
+def t_handlers_read_the_schedule_through_the_solo_safe_accessor():
+    with open(os.path.join(ROOT, "src", "relay", "racecast-feeds.py"), encoding="utf-8") as fh:
+        src = fh.read()
+    assert "relay.source.get_rows()" not in src, \
+        "relay.source is None in solo; handlers must call relay.schedule_rows()"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
