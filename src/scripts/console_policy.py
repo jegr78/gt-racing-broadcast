@@ -139,6 +139,8 @@ def min_capability(segments, method="GET"):
         return Requirement(ANY, False)
     if p in ([], ["status"], ["console"], ["data"], ["program"]):
         return Requirement(ANY, False)
+    if len(p) == 3 and p[:2] == ["preview", "source"]:   # solo inputs, maybe off program
+        return Requirement(DIRECTOR, False)
     if p and p[0] in ("hud", "preview", "splitscreen"):
         return Requirement(ANY, False)
     if len(p) == 3 and p[:2] == ["overlay", "fonts"]:

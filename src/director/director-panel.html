@@ -54,33 +54,32 @@
     color:var(--ink); font-family:var(--mono); padding:18px; min-height:100vh;
     -webkit-font-smoothing:antialiased;
   }
-  .wrap{max-width:1240px;margin:0 auto}
 
   /* Header: brand, status strip, LEDs */
   header{
-    position:sticky;top:0;z-index:50;
-    display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+    display:flex;align-items:center;gap:12px;flex-wrap:nowrap;min-width:0;
     border:1px solid var(--edge);background:linear-gradient(180deg,#171c22f2,#13171cf2);
-    backdrop-filter:blur(6px);
-    border-radius:14px;padding:11px 16px;margin-bottom:12px;
+    border-radius:14px;padding:9px 14px;
     box-shadow:0 12px 40px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.03);
   }
   a.back{display:inline-flex;align-items:center;gap:6px;text-decoration:none;color:#e7edf3;
     background:#0c0f13;border:1px solid var(--edge);border-radius:8px;padding:7px 11px;
     font:inherit;font-size:13px;font-weight:600;letter-spacing:.04em;text-transform:none}
   a.back:hover{border-color:var(--live)}
-  .appmeta{display:flex;align-items:center;gap:8px;margin-left:auto}
+  .appmeta{display:flex;align-items:center;gap:8px;margin-left:auto;flex:0 0 auto;white-space:nowrap}
   .appmeta a{display:inline-flex;align-items:center;gap:5px;text-decoration:none;color:#e7edf3;
     background:#0c0f13;border:1px solid var(--edge);border-radius:8px;padding:7px 11px;
     font:inherit;font-size:12px;font-weight:600;letter-spacing:.04em}
   .appmeta a:hover{border-color:var(--live)}
   .appmeta .ver{color:var(--amber);font-variant-numeric:tabular-nums}
-  .brand{font-family:var(--head);font-weight:700;letter-spacing:.16em;font-size:24px;text-transform:uppercase}
+  .brand{font-family:var(--head);font-weight:700;letter-spacing:.16em;font-size:24px;text-transform:uppercase;white-space:nowrap;flex:0 0 auto}
   .brand small{color:var(--amber);display:flex;align-items:center;gap:6px;font-size:10px;letter-spacing:.32em;margin-top:-2px}
   .brand-edit{background:none;border:0;color:var(--amber);opacity:.5;cursor:pointer;font-size:11px;padding:0 2px;line-height:1}
   .brand-edit:hover{opacity:1}
-  #brandSubInput{font:inherit;letter-spacing:.16em;text-transform:none;color:#e7edf3;background:#0c0f13;border:1px solid var(--edge);border-radius:5px;padding:2px 6px;min-width:340px;max-width:60vw}
-  .strip{display:flex;gap:8px;flex-wrap:wrap;align-items:center;flex:1;justify-content:center}
+  #brandSubInput{font:inherit;letter-spacing:.16em;text-transform:none;color:#e7edf3;background:#0c0f13;border:1px solid var(--edge);border-radius:5px;padding:2px 6px;min-width:220px;max-width:40vw}
+  /* One row at every desktop width: the strip clips rather than wrapping into a second row. */
+  .strip{display:flex;gap:8px;flex-wrap:nowrap;align-items:center;flex:1 1 auto;min-width:0;
+    overflow:hidden;justify-content:safe center}
   .st{display:inline-flex;align-items:center;gap:6px;background:#0c0f13;border:1px solid var(--edge);
     border-radius:8px;padding:6px 10px;font-size:11px;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;white-space:nowrap}
   .st b{color:var(--ink);font-weight:600}
@@ -130,24 +129,10 @@
   .grp{display:flex;flex-direction:column;gap:5px}
   .glbl{font-size:8px;letter-spacing:.22em;text-transform:uppercase;color:var(--muted)}
 
-  /* Layout: deck plus two-column control blocks */
-  /* deck groups the program preview + PGM bus at the top, full width */
-  .deck{border:1px solid var(--edge);background:linear-gradient(180deg,var(--panel-2),var(--panel));
-    border-radius:12px;padding:10px 12px;margin-bottom:12px;
-    box-shadow:0 10px 28px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.03)}
-  .deck>.bus{border:0;background:none;box-shadow:none;padding:0;margin:0;border-radius:0}
-  .deck>.bus + .bus{border-top:1px solid #222a33;padding-top:9px;margin-top:9px}
-  /* independent flowing stacks so unequal columns don't leave row gaps */
-  .cols{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start}
-  .colstack{display:flex;flex-direction:column;min-width:0}
-  /* Cues: full-width 2/1 body */
+  /* Cues: 2/1 body */
   .cues2{display:grid;grid-template-columns:2fr 1fr;gap:14px;align-items:start}
   .cuescol{display:flex;flex-direction:column;gap:8px;min-width:0}
-  @media(max-width:820px){ .cols,.cues2{grid-template-columns:1fr} }
-  .txarmed{align-self:center;flex:0 0 auto;cursor:pointer;font-family:var(--mono);
-    font-size:11px;letter-spacing:.08em;color:var(--ink);background:#0c0f13;
-    border:1px solid var(--edge);border-radius:8px;padding:7px 10px;white-space:nowrap}
-  .txarmed:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+  @media(max-width:820px){ .cues2{grid-template-columns:1fr} }
 
   /* Keys */
   button.k{
@@ -195,10 +180,10 @@
   /* Audio rows */
   /* dB rows: a fixed 5-column grid (name, slider, dB, reset, mute) so nothing
      overflows the half-width Audio card. */
-  .arow{display:grid;grid-template-columns:60px minmax(0,1fr) 58px auto auto;align-items:center;gap:8px;
+  .arow{display:grid;grid-template-columns:110px minmax(0,1fr) 58px auto auto;align-items:center;gap:8px;
     padding:6px 0;border-top:1px dashed var(--edge)}
   .arow:first-child{border-top:0}
-  .arow .nm{font-size:11px;color:var(--ink)}
+  .arow .nm{font-size:11px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .arow input[type=range]{width:100%;min-width:0;accent-color:var(--live)}
   .arow .db{font-size:10px;color:var(--muted);text-align:right;font-variant-numeric:tabular-nums}
   .rst,.mute{padding:4px 7px;font-size:9px;letter-spacing:.06em;text-transform:uppercase;
@@ -276,7 +261,7 @@
     border:1px solid var(--edge);background:#0c0f13;border-radius:10px;padding:10px;white-space:pre-wrap}
 
   /* State banners (persistent) and toasts (one-off) */
-  #banners{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
+  #banners{display:flex;flex-direction:column;gap:8px}
   #banners:empty{display:none}
   .banner{border-radius:10px;padding:10px 14px;font-size:13px;font-weight:600;
     letter-spacing:.04em;display:flex;gap:10px;align-items:center}
@@ -317,7 +302,6 @@
     body{padding:10px}
     .bus{flex-direction:column;gap:8px}
     .bus .cap{padding-top:0;flex:0 0 auto}
-    .pgm{top:4px}
     button.k{flex:1 1 30%;min-width:84px}
     .strip{justify-content:flex-start}
     .arow .nm{flex:0 0 64px}
@@ -362,8 +346,6 @@
   #cueBackList li .who{color:#7fb2ff;font-weight:700}
   #cueBackList li .ts{color:var(--muted);font-size:10px;margin-right:6px;font-variant-numeric:tabular-nums}
 
-  /* Two-pane layout: scrolling controls, persistent chat */
-  .panes{display:block}
   details.chat{display:block}
 
   /* Chat */
@@ -419,36 +401,6 @@
   .chatsend .save:disabled{opacity:.5;cursor:not-allowed;filter:grayscale(.3)}
   .unread{background:#c33;color:#fff;border-radius:9px;padding:0 6px;font-size:11px;margin-left:6px}
 
-  /* Desktop: the chat becomes a persistent right column. The <details> body is
-     forced open and its summary turned into a static caption, while the controls
-     scroll on the left. Narrow screens keep the single-column flow with the chat as
-     a native collapsible <details>. */
-  @media(min-width:900px){
-    .panes{display:grid;grid-template-columns:minmax(0,1fr) clamp(280px,26vw,360px);
-           gap:14px;align-items:start}
-    .mainpane{min-width:0}
-    /* Right rail: a sticky column stacking the crew chat over the read-only
-       broadcast chat, both always visible (#294). Each log is a fixed-height scroll
-       region and must not grow with its messages, or the crew box pushes down into
-       the broadcast box. A <details> does not propagate a definite height to its
-       descendants through flex-grow or flex-shrink in Chromium, where a flex:1 fill
-       chain collapses the log to nothing, so each height is pinned rather than
-       flexed and the boxes are flex:0 0 auto. Together the two boxes and the chrome
-       fit the rail at any realistic director window, so the rail's own
-       overflow-y:auto scrollbar stays a fallback for a very small window. */
-    .rail{position:sticky;top:18px;align-self:start;display:flex;flex-direction:column;
-           gap:14px;max-height:calc(100vh - 36px);overflow-y:auto}
-    details.chat#chatBox,details.chat#bchatBox{margin-bottom:0;min-height:0;flex:0 0 auto;
-           display:flex;flex-direction:column}
-    details.chat#chatBox>summary,details.chat#bchatBox>summary{cursor:default;
-           pointer-events:none;margin-bottom:8px}
-    details.chat#chatBox>summary::after,details.chat#bchatBox>summary::after{display:none}
-    details.chat#chatBox>.body,details.chat#bchatBox>.body{display:flex !important;
-           flex-direction:column;min-height:0}
-    details.chat#chatBox .chatlog,details.chat#bchatBox .chatlog{height:clamp(140px, calc(50vh - 180px), 440px);
-           overflow-y:auto;min-height:0;margin-top:0}
-    details.chat#chatBox .hint,details.chat#bchatBox .hint{margin-top:6px}
-  }
   /* Live Preview stacks as a full-width column: the label, SHOW/HIDE and stream
      button take their own top row and the program/feeds body renders beneath. The
      default .bus side-by-side caps the width and let its buttons overflow the body. */
@@ -468,6 +420,7 @@
   .pvph svg{width:22px;height:22px;opacity:.6}
   .pvph.err{color:#c98a8a}
   .pvlabel{font-size:10px;opacity:.85;margin-top:3px;display:flex;justify-content:space-between;align-items:center;gap:6px}
+  .pvlabel>span{white-space:nowrap}
   /* compact per-tile PAUSE toggle */
   button.k.pvtoggle{min-width:0;min-height:0;padding:3px 9px;font-size:10px;box-shadow:none}
   .pvtile.onair .pvframe{outline:2px solid var(--live);outline-offset:-1px}
@@ -503,7 +456,6 @@
   /* Kind-conditional cut (#307): in solo, hide the A/B feed, schedule and
      submission surfaces and reveal the POV editor, which lives inside #urlsBox, as
      its own card. Endurance sets no `.solo` class and is unaffected. */
-  body.solo #feedsCol,
   body.solo #feedsSec,
   body.solo #stA,
   body.solo #stB,
@@ -514,13 +466,162 @@
   body.solo #raceSched,
   body.solo #qualSched,
   body.solo #modeSwitch,
-  body.solo #subsBox { display: none !important; }
-  /* Feeds is the only left column of this block, so Scn·Vis and Timer take its full width. */
-  body.solo #ctlCols{grid-template-columns:1fr}
+  body.solo #subsBox,
+  body.solo #handoverCtl,
+  body.solo #emergencySec,
+  body.solo #nextStep,
+  body.solo .navbtn[data-area="handover"],
+  body.solo .area[data-area="handover"] { display: none !important; }
+
+  /* Frame (#728): header, banners, then nav | live | workspace | chats. Each column
+     scrolls on its own, so the live controls and both chats never scroll away. */
+  html,body{height:100%}
+  body{padding:0}
+  .app{display:grid;grid-template-rows:auto auto minmax(0,1fr);height:100vh;padding:12px;gap:10px}
+  .frame{display:grid;grid-template-columns:220px 360px minmax(0,1fr) 380px;gap:12px;min-height:0;
+    grid-row:3}   /* the 1fr row, also while the empty #banners is display:none */
+  .frame>*{min-height:0;min-width:0;overflow-y:auto}
+
+  /* Navigation by topic; the order implies no procedure. */
+  #areaNav{display:flex;flex-direction:column;gap:6px;padding:10px 8px;border:1px solid var(--edge);
+    border-radius:12px;background:linear-gradient(180deg,var(--panel-2),var(--panel))}
+  .navcollapse{align-self:flex-end;min-width:32px;min-height:32px;border-radius:8px;border:1px solid var(--edge);
+    background:#0c0f13;color:var(--muted);font:600 14px var(--mono);cursor:pointer}
+  .navcollapse:hover{color:var(--ink);border-color:var(--blue)}
+  .navcollapse[hidden]{display:none}
+  .navgrp{display:flex;flex-direction:column;gap:4px}
+  .navgrp+.navgrp{border-top:1px solid #222a33;padding-top:8px;margin-top:4px}
+  .navhead{font-size:9px;letter-spacing:.22em;text-transform:uppercase;color:var(--muted);padding:2px 8px}
+  .navbtn{display:flex;align-items:center;gap:10px;min-height:52px;padding:6px 10px;border-radius:9px;
+    border:1px solid transparent;background:none;color:var(--ink);font:600 13px var(--mono);
+    text-align:left;cursor:pointer}
+  .navbtn:hover{border-color:var(--edge)}
+  .navbtn.active{border-color:var(--blue);background:#16212e}
+  .navbtn:focus-visible,.navcollapse:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
+  .ndot{width:10px;height:10px;border-radius:50%;flex:0 0 auto;background:#3a434d}
+  .ndot.ok{background:var(--live)}
+  .ndot.warn{background:var(--amber)}
+  .ndot.live{background:var(--air)}
+  .nlbl{display:flex;flex-direction:column;gap:2px;min-width:0}
+  .nwhy{font-size:11px;font-weight:500;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .nwhy:empty{display:none}
+  body.nav-collapsed .frame{grid-template-columns:72px 360px minmax(0,1fr) 380px}
+  body.nav-collapsed .nlbl,body.nav-collapsed .navhead{display:none}
+  body.nav-collapsed .navbtn{flex-direction:column;justify-content:center;gap:4px;padding:6px 0}
+  body.nav-collapsed .navbtn::after{content:attr(data-short);font:700 13px var(--mono)}
+  body.nav-collapsed .navcollapse{align-self:center}
+
+  /* Live column: what acts on air within seconds. */
+  #liveCol{display:flex;flex-direction:column;gap:10px}
+  #liveCol>.bus{margin-bottom:0}
+  #liveCol .preview .pvbody{grid-template-columns:repeat(3,minmax(0,1fr))}
+  #liveCol .pvprog{grid-column:1 / -1}
+  .liveair{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#ff8080;
+    border:1px solid var(--air);border-radius:10px;padding:8px 12px;background:#1a0f0f}
+  .liveair b{display:block;color:var(--ink);font:700 19px var(--head);letter-spacing:.04em;text-transform:none}
+  #liveCol .pgm .keys,#overlaySec .keys{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
+  #liveCol .pgm button.k,#overlaySec button.k{min-width:0}
+  #liveCol #txBar .keys{flex-wrap:nowrap}
+  #liveCol #txBar button.k{min-width:0;flex:1 1 0}
+  #handoverCtl{display:flex;flex-direction:column;gap:8px}
+  #armBtn{width:100%;border-color:var(--blue);color:#9fd0ff}
+  #armBtn.starting{border-color:var(--amber);color:#ffd361;background:#2a2110}
+  #armBtn.ready{border-color:var(--live);color:#baf5d0;background:#10261a}
+  #armBtn[hidden]{display:none}
+  #nextBtn{width:100%;min-height:84px;display:flex;flex-direction:column;align-items:center;
+    justify-content:center;gap:4px;border-color:#2a333d;background:#14181d;box-shadow:none;color:#6c7884}
+  #nextBtn .nmain{font:700 28px var(--head);letter-spacing:.08em}
+  #nextBtn .nsub{font-size:11px;letter-spacing:.04em}
+  #nextBtn.ready{border-color:var(--live);background:linear-gradient(180deg,#17351f,#0f2717);
+    box-shadow:0 0 0 1px var(--live),0 0 18px var(--live-glow);color:#baf5d0}
+
+  /* Workspace: one area at a time; the cards inside never move between areas. */
+  #workspace{display:flex;flex-direction:column;gap:10px}
+  .area{display:none}
+  .area.active{display:block}
+  .nextstep{display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid var(--live);
+    border-radius:12px;background:#0f1d15;font-size:13px;flex:0 0 auto}
+  .nextstep[hidden]{display:none}
+  .nslbl{font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:#8fe6b0;white-space:nowrap}
+  .hocards{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .hocard{border:1px solid var(--edge);border-radius:10px;padding:10px 12px;background:#10151b;min-width:0}
+  .hocard.air{border-color:var(--air);background:#1a0f0f}
+  .hocard.ready{border-color:var(--live);background:#0f1d15}
+  .hocard .hk{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+  .hocard.air .hk{color:#ff8080}
+  .hocard.ready .hk{color:#8fe6b0}
+  .hocard .hv{font:700 22px var(--head);letter-spacing:.03em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .hocard .hs{font-size:12px;color:var(--muted)}
+  #hoUpcoming{margin-top:8px}
+  #hoUpcoming .hrow{display:grid;grid-template-columns:90px minmax(0,1fr) minmax(0,1.4fr) 110px;gap:10px;
+    align-items:center;min-height:40px;border-top:1px solid #1e252d;font-size:12px}
+  #hoUpcoming .hrow .hst{color:var(--muted);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #hoUpcoming .hrow .hst.ok{color:#8fe6b0}
+  #hoUpcoming .hrow .hst.pend{color:#9fd0ff}
+  #hoUpcoming .hrow .hst.warn{color:#ffd361}
+  #hoUpcoming .hrow button{min-height:34px;border-radius:8px;border:1px solid var(--live);background:#141a21;
+    color:#9fe9bd;font:600 11px var(--mono);cursor:pointer}
+  #log{flex:0 0 auto}
+
+  /* Chat rail: crew chat above broadcast chat, the split draggable and remembered. */
+  .rail{display:grid;grid-template-rows:minmax(140px,var(--crew,58fr)) 12px minmax(140px,var(--bcast,42fr));
+    overflow:hidden}
+  .rail>.chat{display:flex;flex-direction:column;min-height:0;margin:0}
+  .rail>.chat>.body{display:flex;flex-direction:column;flex:1;min-height:0}
+  .rail .chatlog{flex:1;min-height:0;max-height:none;overflow-y:auto;margin:6px 0}
+  .rail .hint{margin-top:4px}
+  .bus.chat .cap .robadge{margin-right:auto}
+  .railsplit{cursor:row-resize;display:flex;align-items:center;justify-content:center;touch-action:none}
+  .railsplit::after{content:"";width:44px;height:3px;border-radius:2px;background:#3a4552}
+  .railsplit:focus-visible{outline:2px solid var(--blue)}
+  .kbdbtn{flex:0 0 auto;padding:7px 11px;border-radius:8px;border:1px solid var(--edge);background:#0c0f13;
+    color:var(--muted);font:600 12px var(--mono);cursor:pointer;white-space:nowrap}
+  .kbdbtn.on{color:#ffd361;border-color:var(--amber)}
+  body.keys-on #pgmBus button.k[data-kbd]::after,body.keys-on #nextBtn::after{content:attr(data-kbd);
+    position:absolute;top:4px;right:6px;font:700 10px var(--mono);color:#ffd361}
+  #pgmBus button.k,#nextBtn{position:relative}
+  button.k.kbdarmed{outline:2px solid var(--amber);outline-offset:2px}
+  .drawerbtn{display:none;align-items:center;gap:6px;padding:7px 11px;border-radius:8px;
+    border:1px solid var(--edge);background:#0c0f13;color:#e7edf3;font:600 12px var(--mono);cursor:pointer}
+
+  /* < 1280: the chats become a drawer opened from the header. */
+  @media(max-width:1279px){
+    .frame,body.nav-collapsed .frame{grid-template-columns:72px 340px minmax(0,1fr)}
+    .drawerbtn{display:inline-flex}
+    .rail{position:fixed;top:0;right:0;bottom:0;width:min(400px,92vw);z-index:60;padding:12px;
+      background:var(--bg);border-left:1px solid var(--edge);transform:translateX(100%);
+      transition:transform .2s ease;overflow:hidden}
+    body.chats-open .rail{transform:none}
+  }
+  /* < 900: one column, live first. */
+  @media(max-width:899px){
+    html,body{height:auto}
+    .app{height:auto;display:block}
+    .app>*+*{margin-top:10px}
+    header{flex-wrap:wrap}
+    .strip{flex-wrap:wrap;overflow:visible;justify-content:flex-start}
+    #brandSubInput{min-width:0;max-width:100%}
+    .frame,body.nav-collapsed .frame{display:flex;flex-direction:column}
+    .frame>*{overflow:visible}
+    #liveCol{order:1}
+    #areaNav{order:2;flex-direction:row;flex-wrap:wrap}
+    #areaNav .navgrp{flex-direction:row;flex-wrap:wrap}
+    .navcollapse,.navhead{display:none}
+    .navbtn{min-height:44px}
+    #workspace{order:3}
+    .rail{order:4;position:static;transform:none;width:auto;padding:0;border:0;display:flex;
+      flex-direction:column;gap:10px}
+    .rail .chatlog{height:240px;flex:0 0 auto}
+    .railsplit{display:none}
+    .drawerbtn{display:none}
+    .hocards{grid-template-columns:1fr}
+    #hoUpcoming .hrow{grid-template-columns:70px minmax(0,1fr) 110px}
+    #hoUpcoming .hrow button{grid-column:1 / -1}
+  }
 </style>
 </head>
 <body>
-<div class="wrap">
+<div class="app">
 
   <header>
     <a class="back" id="backConsole" href="#" hidden aria-label="Back to Console">
@@ -541,6 +642,10 @@
     </div>
     <div class="led"><span class="dot" id="ledObs"></span>OBS</div>
     <div class="led"><span class="dot" id="ledRelay"></span>Relay</div>
+    <button type="button" id="kbdBtn" class="kbdbtn" aria-pressed="false"
+            title="Keyboard shortcuts: N for NEXT, 1 to 9 for the scene macros, each pressed twice">KEYS OFF</button>
+    <button type="button" id="chatDrawerBtn" class="drawerbtn" aria-expanded="false"
+            aria-controls="chatRail">Chats <span class="unread" id="drawerUnread" hidden>0</span></button>
     <div class="appmeta">
       <a class="ver" href="https://github.com/jegr78/gt-racing-broadcast/releases"
          target="_blank" rel="noopener" title="Running racecast version. View releases">__RC_VERSION__ ↗</a>
@@ -560,305 +665,329 @@
 
   <div id="banners"></div>
 
-
-  <div class="panes">
-  <div class="mainpane">
-
-  <div class="deck">
-
-  <section class="bus preview" id="previewSec">
-    <div class="cap">Live Preview
-      <button class="k" id="pvToggle">SHOW</button>
-      <button class="k stream" id="obsStreamBtn" hidden>OFFLINE</button>
-      <div id="partControl" class="partctl" hidden>
-        <span id="partStatus" class="partstatus">Part —</span>
-        <button class="k stream" id="partActionBtn" hidden>Start Part 1</button>
-      </div></div>
-    <div class="pvbody" id="pvBody" hidden>
-      <div class="pvprog">
-        <div class="pvframe" id="pvProgramFrame">
-          <img id="pvProgram" alt="Program output">
-          <div class="pvph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="19" height="12" rx="2"></rect><path d="M10 8.5l4.5 2.5-4.5 2.5z" fill="currentColor" stroke="none"></path><path d="M8.5 20h7"></path><path d="M12 16.5V20"></path></svg><span class="pvphtxt">Program loading …</span></div>
+  <div class="frame">
+    <nav id="areaNav" aria-label="Panel areas">
+      <button type="button" id="navCollapse" class="navcollapse" aria-expanded="true"
+              title="Collapse or expand the navigation">«</button>
+      <div class="navgrp"><span class="navhead">On air</span>
+        <button type="button" class="navbtn" data-area="handover" data-short="H"><span class="ndot"></span><span class="nlbl">Handover<small class="nwhy"></small></span></button>
+        <button type="button" class="navbtn" data-area="graphics" data-short="G"><span class="ndot"></span><span class="nlbl">Graphics<small class="nwhy"></small></span></button>
+        <button type="button" class="navbtn" data-area="hud" data-short="U"><span class="ndot"></span><span class="nlbl">HUD<small class="nwhy"></small></span></button>
+        <button type="button" class="navbtn" data-area="cues" data-short="C"><span class="ndot"></span><span class="nlbl">Cues<small class="nwhy"></small></span></button>
+        <button type="button" class="navbtn" data-area="audio" data-short="A"><span class="ndot"></span><span class="nlbl">Audio<small class="nwhy"></small></span></button>
+      </div>
+      <div class="navgrp"><span class="navhead">Operations</span>
+        <button type="button" class="navbtn" data-area="broadcast" data-short="B"><span class="ndot"></span><span class="nlbl">Broadcast<small class="nwhy"></small></span></button>
+        <button type="button" class="navbtn" data-area="schedule" data-short="S"><span class="ndot"></span><span class="nlbl">Schedule<small class="nwhy"></small></span></button>
+        <button type="button" class="navbtn" data-area="setup" data-short="T"><span class="ndot"></span><span class="nlbl">Setup<small class="nwhy"></small></span></button>
+        <button type="button" class="navbtn" data-area="fault" data-short="!"><span class="ndot"></span><span class="nlbl">Troubleshoot<small class="nwhy"></small></span></button>
+      </div>
+    </nav>
+    <section id="liveCol" aria-label="Live">
+      <section class="bus preview" id="previewSec">
+        <div class="cap">Program
+          <button class="k" id="pvToggle">SHOW</button></div>
+        <div class="pvbody" id="pvBody" hidden>
+          <div class="pvprog">
+            <div class="pvframe" id="pvProgramFrame">
+              <img id="pvProgram" alt="Program output">
+              <div class="pvph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="19" height="12" rx="2"></rect><path d="M10 8.5l4.5 2.5-4.5 2.5z" fill="currentColor" stroke="none"></path><path d="M8.5 20h7"></path><path d="M12 16.5V20"></path></svg><span class="pvphtxt">Program loading …</span></div>
+            </div>
+            <div class="pvlabel" id="pvProgramLabel"><span>PROGRAM</span></div>
+          </div>
+          <div class="pvfeeds">
+            <div class="pvtile" data-feed="A">
+              <div class="pvframe"><img alt="Feed A">
+                <div class="pvph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="19" height="12" rx="2"></rect><path d="M10 8.5l4.5 2.5-4.5 2.5z" fill="currentColor" stroke="none"></path><path d="M8.5 20h7"></path><path d="M12 16.5V20"></path></svg><span class="pvphtxt">Load still</span></div></div>
+              <div class="pvbar"><span class="pvbarfill"></span></div>
+              <div class="pvlabel"><span>FEED A</span><button class="k pvtoggle" data-feed="A">PAUSE</button></div></div>
+            <div class="pvtile" data-feed="B">
+              <div class="pvframe"><img alt="Feed B">
+                <div class="pvph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="19" height="12" rx="2"></rect><path d="M10 8.5l4.5 2.5-4.5 2.5z" fill="currentColor" stroke="none"></path><path d="M8.5 20h7"></path><path d="M12 16.5V20"></path></svg><span class="pvphtxt">Load still</span></div></div>
+              <div class="pvbar"><span class="pvbarfill"></span></div>
+              <div class="pvlabel"><span>FEED B</span><button class="k pvtoggle" data-feed="B">PAUSE</button></div></div>
+            <div class="pvtile" data-feed="POV">
+              <div class="pvframe"><img alt="POV">
+                <div class="pvph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="19" height="12" rx="2"></rect><path d="M10 8.5l4.5 2.5-4.5 2.5z" fill="currentColor" stroke="none"></path><path d="M8.5 20h7"></path><path d="M12 16.5V20"></path></svg><span class="pvphtxt">Load still</span></div></div>
+              <div class="pvbar"><span class="pvbarfill"></span></div>
+              <div class="pvlabel"><span>POV</span><button class="k pvtoggle" data-feed="POV">PAUSE</button></div></div>
+          </div>
+          <div id="pgmAudioBar" style="display:none; align-items:center; gap:8px; margin-top:2px;">
+            <button class="k" id="pgmAudioBtn" type="button" aria-pressed="false" title="Listen to on-air audio">🔇 Audio</button>
+            <input id="pgmAudioVol" type="range" min="0" max="1" step="0.05" value="0.8"
+                   aria-label="Program audio volume" style="width:110px;">
+            <audio id="pgmAudio" preload="none" style="display:none;"></audio>
+          </div>
         </div>
-        <div class="pvlabel" id="pvProgramLabel"><span>PROGRAM</span></div>
+      </section>
+      <div class="liveair" id="liveOnAir">ON AIR <b>—</b></div>
+      <section class="bus" id="handoverCtl" aria-label="Handover">
+        <button type="button" class="k armkey" id="armBtn" hidden>ARM</button>
+        <button type="button" class="k next" id="nextBtn" data-kbd="N"><span class="nmain">NEXT</span><span class="nsub" id="nextSub">—</span></button>
+      </section>
+      <section class="bus pgm"><div class="cap">Scenes</div><div class="keys" id="pgmBus"></div></section>
+      <section class="bus" id="overlaySec"><div class="cap">Overlays</div><div class="keys" id="scnVisBus"></div></section>
+      <section class="bus" id="txBar" title="Transition applied to the next scene switch">
+        <div class="cap">Transition</div>
+        <div class="keys">
+          <button class="k tx" data-tx="cut">CUT</button>
+          <button class="k tx" data-tx="fade">FADE</button>
+          <button class="k tx" data-tx="stinger">STINGER</button>
+          <label class="txdur">dur <input id="txDur" type="number" min="0" max="10000"
+                 step="50" value="300"> ms</label>
+        </div>
+      </section>
+    </section>
+    <main id="workspace">
+      <div class="nextstep" id="nextStep" hidden><span class="nslbl">Next step</span><span id="nextStepText"></span></div>
+      <div class="area" data-area="handover">
+        <section class="bus" id="handoverSec"><div class="cap">Handover</div>
+          <div class="hocards"><div class="hocard air" id="hoOnAir"></div><div class="hocard" id="hoNext"></div></div>
+          <div id="hoUpcoming"></div>
+        </section>
       </div>
-      <div class="pvfeeds">
-        <div class="pvtile" data-feed="A">
-          <div class="pvframe"><img alt="Feed A">
-            <div class="pvph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="19" height="12" rx="2"></rect><path d="M10 8.5l4.5 2.5-4.5 2.5z" fill="currentColor" stroke="none"></path><path d="M8.5 20h7"></path><path d="M12 16.5V20"></path></svg><span class="pvphtxt">Load still</span></div></div>
-          <div class="pvbar"><span class="pvbarfill"></span></div>
-          <div class="pvlabel"><span>FEED A</span><button class="k pvtoggle" data-feed="A">PAUSE</button></div></div>
-        <div class="pvtile" data-feed="B">
-          <div class="pvframe"><img alt="Feed B">
-            <div class="pvph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="19" height="12" rx="2"></rect><path d="M10 8.5l4.5 2.5-4.5 2.5z" fill="currentColor" stroke="none"></path><path d="M8.5 20h7"></path><path d="M12 16.5V20"></path></svg><span class="pvphtxt">Load still</span></div></div>
-          <div class="pvbar"><span class="pvbarfill"></span></div>
-          <div class="pvlabel"><span>FEED B</span><button class="k pvtoggle" data-feed="B">PAUSE</button></div></div>
-        <div class="pvtile" data-feed="POV">
-          <div class="pvframe"><img alt="POV">
-            <div class="pvph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="19" height="12" rx="2"></rect><path d="M10 8.5l4.5 2.5-4.5 2.5z" fill="currentColor" stroke="none"></path><path d="M8.5 20h7"></path><path d="M12 16.5V20"></path></svg><span class="pvphtxt">Load still</span></div></div>
-          <div class="pvbar"><span class="pvbarfill"></span></div>
-          <div class="pvlabel"><span>POV</span><button class="k pvtoggle" data-feed="POV">PAUSE</button></div></div>
+      <div class="area" data-area="graphics">
+        <section class="bus"><div class="cap">Graphics</div>
+          <div class="grp"><span class="glbl">Standard</span><div class="keys" id="gfxBus"></div></div>
+          <div class="grp"><span class="glbl">Pre-race</span><div class="keys" id="gfxPreRaceBus"></div></div>
+          <div class="grp"><span class="glbl">Grid</span>
+            <div class="keys" id="gfxGridTopBus"></div>
+            <div class="keys" id="gfxGridBus"></div>
+          </div>
+          <div class="grp"><span class="glbl">Flag graphic, one active</span><div class="keys" id="flagGfxBus"></div></div>
+        </section>
       </div>
-      <div id="pgmAudioBar" style="display:none; align-items:center; gap:8px; margin-top:2px;">
-        <button class="k" id="pgmAudioBtn" type="button" aria-pressed="false" title="Listen to on-air audio">🔇 Audio</button>
-        <input id="pgmAudioVol" type="range" min="0" max="1" step="0.05" value="0.8"
-               aria-label="Program audio volume" style="width:110px;">
-        <audio id="pgmAudio" preload="none" style="display:none;"></audio>
+      <div class="area" data-area="hud">
+        <section class="bus" id="hudBus"><div class="cap">HUD</div>
+          <div class="body">
+            <div class="setrow" id="setupRow"></div>
+            <div class="setrow" id="teamRow"></div>
+            <div class="setrow" id="condRow"></div>
+            <div class="hint" id="setupInfo">HUD: connecting to relay…</div>
+          </div>
+        </section>
+        <section class="bus"><div class="cap">Timer</div>
+          <div class="body">
+            <div class="keys" id="timerBus"></div>
+            <div class="hint" id="timerInfo">Timer: connecting to relay…</div>
+          </div>
+        </section>
       </div>
-    </div>
-  </section>
+      <div class="area" data-area="cues">
+        <section class="bus" id="cuesBus"><div class="cap">Cues</div>
+          <div class="cues2">
+            <div class="cuescol">
+              <div class="cue-compose">
+                <select id="cueTarget" aria-label="Cue target">
+                  <option value="all">All</option>
+                  <option value="on-air">On air</option>
+                </select>
+                <select id="cueLevel" aria-label="Cue level">
+                  <option value="info">Info</option>
+                  <option value="critical">Critical</option>
+                </select>
+                <input id="cueText" type="text" maxlength="200" placeholder="Cue text…">
+                <button id="cueSend" type="button">SEND CUE</button>
+              </div>
+              <div id="cuePresets"></div>
+            </div>
+            <div class="cuescol">
+              <ul id="cueRecent"></ul>
+              <div class="cueback" id="cueBackWrap" hidden>
+                <div class="cueback-cap">From commentators</div>
+                <ul id="cueBackList"></ul>
+              </div>
+            </div>
+          </div>
+          <div class="hint" id="cueHint">Send a text cue to a commentator or all commentators. Critical cues require acknowledgement in the cockpit. Commentator replies appear under “From commentators”.</div>
+        </section>
+      </div>
+      <div class="area" data-area="audio">
+        <section class="bus"><div class="cap">Audio</div><div class="body" id="audio"></div></section>
+      </div>
+      <div class="area" data-area="broadcast">
+        <section class="bus" id="streamSec"><div class="cap">Stream</div>
+          <div class="keys">
+            <button class="k stream" id="obsStreamBtn" hidden>OFFLINE</button>
+            <div id="partControl" class="partctl" hidden>
+              <span id="partStatus" class="partstatus">Part —</span>
+              <button class="k stream" id="partActionBtn" hidden>Start Part 1</button>
+            </div>
+          </div>
+        </section>
+        <section class="bus" id="subSec" style="display:none">
+          <div class="cap">Substitution</div>
+          <div class="body">
+            <div class="hint" id="subInfo"></div>
+            <div class="setrow">
+              <div class="fld">
+                <label>Reason</label>
+                <input id="subReason" type="text" maxlength="200" placeholder="reason (optional)">
+              </div>
+              <button class="pill go" id="subSave">SAVE</button>
+            </div>
+          </div>
+        </section>
+      </div>
+      <div class="area" data-area="schedule">
+        <details class="bus urls" id="urlsBox" open>
+          <summary>Schedule <span class="modechip" id="modeChip">RACE</span><button class="modeswitch" id="modeSwitch" hidden>switch → QUALIFYING</button></summary>
+          <div class="body">
 
-  <section class="bus pgm"><div class="cap">PGM</div><div class="keys" id="pgmBus"></div><button
-    class="txarmed" id="txArmed" type="button"
-    title="Armed transition. Change it in the Utilities section">TX: FADE</button></section>
+            <!-- Race schedule (shown in race mode) -->
+            <div id="raceSched">
+              <table><tbody id="schedBody"></tbody></table>
+              <button class="add" id="schedAdd">+ ADD ROW</button>
+              <div class="hint">YouTube or Twitch. Enter a full watch URL
+                (<code>youtube.com/watch?v=…</code> or <code>twitch.tv/&lt;channel&gt;</code>),
+                or <code>local:</code> for this machine's capture card.
+                Saves write the Google Sheet only. A feed picks the new URL up
+                on RELOAD A/B / NEXT (rows marked <b>A</b>/<b>B</b> are live now). Each row's
+                <b>Streamer</b> and <b>Stint</b> label (Configuration vocab) become the HUD's
+                STREAMER/STINT when that row goes on air. <b>CLEAR URL</b> removes only the
+                stream link and keeps the Streamer + Stint slot. Streamer/Stint/URL can still
+                be edited in the Sheet directly.</div>
+            </div>
+
+            <!-- Qualifying schedule (shown in qualifying mode) -->
+            <div id="qualSched" hidden>
+              <table><tbody>
+                <tr id="qualRow">
+                  <td class="rn">Q<span class="livebadge" id="qualLive"></span></td>
+                  <td style="width:22%"><select class="nm" id="qualNm" title="Streamer (Configuration vocab)"></select></td>
+                  <td style="width:18%"><select class="st" id="qualSt" title="Stint label (Configuration vocab)"></select></td>
+                  <td><input class="u" id="qualUrl" placeholder="youtube.com/watch?v=… · twitch.tv/<channel> · UC…"></td>
+                  <td class="act"><button class="save" id="qualSave">SAVE</button><button class="clear" id="qualClear">CLEAR</button></td>
+                </tr>
+              </tbody></table>
+              <div class="hint" id="qualInfo">Qualifying: one stream, served on <b>Feed A</b>.
+                Edits write the <b>Qualifying</b> tab in the Sheet. The feed picks it up on
+                RELOAD A / NEXT (or on the mode switch). On switch the HUD STREAMER/STINT follow
+                this row.</div>
+            </div>
+
+            <!-- POV, shown in both modes: it is a separate, mode-independent feed -->
+            <table><tbody>
+              <tr><td class="rn">POV</td>
+                  <td><input id="povName" maxlength="20" placeholder="name (max 20)"></td>
+                  <td><input id="povUrl" placeholder="youtube.com/watch?v=… · twitch.tv/<channel> · UC…"></td>
+                  <td class="act"><button class="save" id="povSave">SAVE</button></td></tr>
+            </tbody></table>
+            <div class="hint">POV. A full watch URL (<code>youtube.com/watch?v=…</code> or
+              <code>twitch.tv/&lt;channel&gt;</code>). The POV URL applies on <b>POV RELOAD</b>.
+              Available in both race and qualifying.</div>
+            <!-- Solo-only: POV RELOAD/STOP, kept reachable here because #feedsSec, where
+                 these actions normally live, is hidden in solo. Built only under solo, see
+                 buildPovActions(); empty and hidden in endurance. -->
+            <div class="keys" id="povActionsBus" hidden></div>
+          </div>
+        </details>
+        <details class="bus urls" id="subsBox" open>
+          <summary>Pending stream submissions <span class="unread" id="subsCount" hidden>0</span></summary>
+          <div class="body">
+            <table><tbody id="subsBody"></tbody></table>
+            <div class="hint" id="subsEmpty">No pending submissions. Commentators can submit
+              their own stream link from the cockpit; approvals here write the Schedule
+              (Sheet). The feed picks it up on RELOAD A/B / NEXT. Nothing a commentator
+              submits goes on air without an approval.</div>
+          </div>
+        </details>
+      </div>
+      <div class="area" data-area="setup">
+        <details class="bus chat" id="gfxBrowseBox" open>
+          <summary>Graphics library<button id="gfxRefresh" class="bcompose" title="Reload the graphics list">⟳ Refresh</button></summary>
+          <div class="body">
+            <div id="gfxList" class="chatlog"><div class="bempty">Loading…</div></div>
+            <div class="hint">Read-only: the broadcast still-graphics (Sheet Assets tab).
+              Click one to open it in a new tab. OBS-only assets are hidden.</div>
+          </div>
+        </details>
+      </div>
+      <div class="area" data-area="fault">
+        <section class="bus" id="feedsSec"><div class="cap">Feeds</div>
+          <div class="body">
+            <div class="keys" id="feedsBus"></div>
+            <div class="hint" id="feedHealth"></div>
+            <!-- per-feed quality profile (#493): FULL(<=1080p) / ROBUST(720p) / EMERGENCY(<=480p) / AUTO -->
+            <!-- Per feed: ARM/STOP pull (#492, manual-arm only), quality profile (#493)
+                 and Preview. ARM/STOP are `armbtn`; the tier handler excludes them. -->
+            <div id="feedQuality">
+              <div class="qrow" data-qfeed="A">
+                <span class="qlabel">Feed A</span>
+                <span class="qres" data-qres="A"></span>
+                <button class="qbtn armbtn" data-feed="A" data-on="1"
+                        title="Arm this feed's pull (before a handover)">ARM</button>
+                <button class="qbtn armbtn" data-feed="A" data-on="0"
+                        title="Stop this feed's pull (frees bandwidth)">STOP</button>
+                <button class="qbtn" data-feed="A" data-tier="auto">AUTO</button>
+                <button class="qbtn" data-feed="A" data-tier="full">FULL</button>
+                <button class="qbtn" data-feed="A" data-tier="robust">ROBUST</button>
+                <button class="qbtn" data-feed="A" data-tier="emergency">EMERG</button>
+                <button class="qbtn qprev" data-feed="A" type="button" disabled
+                        title="Open Feed A's current stream in a new tab">▶ Preview</button>
+              </div>
+              <div class="qrow" data-qfeed="B">
+                <span class="qlabel">Feed B</span>
+                <span class="qres" data-qres="B"></span>
+                <button class="qbtn armbtn" data-feed="B" data-on="1"
+                        title="Arm this feed's pull (before a handover)">ARM</button>
+                <button class="qbtn armbtn" data-feed="B" data-on="0"
+                        title="Stop this feed's pull (frees bandwidth)">STOP</button>
+                <button class="qbtn" data-feed="B" data-tier="auto">AUTO</button>
+                <button class="qbtn" data-feed="B" data-tier="full">FULL</button>
+                <button class="qbtn" data-feed="B" data-tier="robust">ROBUST</button>
+                <button class="qbtn" data-feed="B" data-tier="emergency">EMERG</button>
+                <button class="qbtn qprev" data-feed="B" type="button" disabled
+                        title="Open Feed B's current stream in a new tab">▶ Preview</button>
+              </div>
+            </div>
+          </div>
+        </section>
+        <section class="bus" id="emergencySec"><div class="cap">Emergency feed switch</div>
+          <div class="keys" id="emergencyBus"></div>
+          <div class="hint">Only when NEXT cannot hand over. Shows one feed in the Stint scene with its audio and makes it the relay's on-air feed; the other feed moves to the next stint. STOP per feed sits in the Feeds card above.</div>
+        </section>
+        <section class="bus" id="scnVisSec"><div class="cap">Raw scenes</div>
+            <div class="grp"><span class="glbl">Switch scene</span><div class="keys" id="scnBus"></div></div>
+            <div class="hint">Raw scene switch: audio stays as it is. The scene macros in the live column set the audio too.</div>
+          </section>
+        <section class="bus" id="obsToolsSec"><div class="cap">OBS</div>
+          <div class="keys"><button class="k" id="obsRefreshBtn">↻ REFRESH</button></div>
+          <div class="hint">Reloads the relay-served OBS browser sources.</div>
+        </section>
+      </div>
+      <div id="log">Ready. All controls work relay-only. No OBS connection needed.</div>
+    </main>
+    <aside class="rail" id="chatRail" aria-label="Chats">
+      <section class="bus chat" id="chatBox">
+          <div class="cap">Crew chat <span class="unread" id="chatUnread" hidden>0</span></div>
+          <div class="body">
+            <div class="chatname">
+              <label>You:</label>
+              <input id="chatName" maxlength="40" placeholder="your name">
+            </div>
+            <div id="chatLog" class="chatlog"></div>
+            <div class="chatsend">
+              <input id="chatInput" maxlength="500" placeholder="message the active crew…">
+              <button class="save" id="chatSendBtn">SEND</button>
+            </div>
+            <div class="hint">Seen by everyone on this relay's tailnet. The producer can clear
+              the history from the Control Center or <code>racecast chat clear</code>.</div>
+          </div>
+        </section>
+      <div class="railsplit" id="railSplit" role="separator" aria-orientation="horizontal"
+           aria-label="Drag to resize the chats" tabindex="0"></div>
+      <section class="bus chat" id="bchatBox">
+          <div class="cap">Broadcast chat <span class="robadge">read-only</span><button id="bchatCompose" class="bcompose" hidden></button><button id="bchatRefresh" class="bcompose" title="Reconnect the chat reader and refresh">⟳ Refresh</button></div>
+          <div class="body">
+            <div id="bchatLog" class="chatlog"><div class="bempty">Waiting for the broadcast stream…</div></div>
+            <div class="hint">Read-only mirror of the event's public YouTube/Twitch broadcast
+              chat (the <code>Channel</code> tab). During a producer handover both live streams
+              are merged here.</div>
+          </div>
+        </section>
+    </aside>
   </div>
-
-  <section class="bus" id="hudBus"><div class="cap">HUD</div>
-    <div class="body">
-      <div class="setrow" id="setupRow"></div>
-      <div class="setrow" id="teamRow"></div>
-      <div class="setrow" id="condRow"></div>
-      <div class="hint" id="setupInfo">HUD: connecting to relay…</div>
-    </div>
-  </section>
-
-  <div class="cols" id="ctlCols">
-    <div class="colstack" id="feedsCol">
-  <section class="bus" id="feedsSec"><div class="cap">Feeds</div>
-    <div class="body">
-      <div class="keys" id="feedsBus"></div>
-      <div class="hint" id="feedHealth"></div>
-      <!-- per-feed quality profile (#493): FULL(<=1080p) / ROBUST(720p) / EMERGENCY(<=480p) / AUTO -->
-      <!-- Per feed: ARM/STOP pull (#492, manual-arm only), quality profile (#493)
-           and Preview. ARM/STOP are `armbtn`; the tier handler excludes them. -->
-      <div id="feedQuality">
-        <div class="qrow" data-qfeed="A">
-          <span class="qlabel">Feed A</span>
-          <span class="qres" data-qres="A"></span>
-          <button class="qbtn armbtn" data-feed="A" data-on="1"
-                  title="Arm this feed's pull (before a handover)">ARM</button>
-          <button class="qbtn armbtn" data-feed="A" data-on="0"
-                  title="Stop this feed's pull (frees bandwidth)">STOP</button>
-          <button class="qbtn" data-feed="A" data-tier="auto">AUTO</button>
-          <button class="qbtn" data-feed="A" data-tier="full">FULL</button>
-          <button class="qbtn" data-feed="A" data-tier="robust">ROBUST</button>
-          <button class="qbtn" data-feed="A" data-tier="emergency">EMERG</button>
-          <button class="qbtn qprev" data-feed="A" type="button" disabled
-                  title="Open Feed A's current stream in a new tab">▶ Preview</button>
-        </div>
-        <div class="qrow" data-qfeed="B">
-          <span class="qlabel">Feed B</span>
-          <span class="qres" data-qres="B"></span>
-          <button class="qbtn armbtn" data-feed="B" data-on="1"
-                  title="Arm this feed's pull (before a handover)">ARM</button>
-          <button class="qbtn armbtn" data-feed="B" data-on="0"
-                  title="Stop this feed's pull (frees bandwidth)">STOP</button>
-          <button class="qbtn" data-feed="B" data-tier="auto">AUTO</button>
-          <button class="qbtn" data-feed="B" data-tier="full">FULL</button>
-          <button class="qbtn" data-feed="B" data-tier="robust">ROBUST</button>
-          <button class="qbtn" data-feed="B" data-tier="emergency">EMERG</button>
-          <button class="qbtn qprev" data-feed="B" type="button" disabled
-                  title="Open Feed B's current stream in a new tab">▶ Preview</button>
-        </div>
-      </div>
-    </div>
-  </section>
-    </div>
-    <div class="colstack">
-  <section class="bus"><div class="cap">Scn·Vis</div>
-    <div class="grp"><span class="glbl">Switch scene</span><div class="keys" id="scnBus"></div></div>
-    <div class="grp"><span class="glbl">Source visibility</span><div class="keys" id="scnVisBus"></div></div>
-  </section>
-  <section class="bus"><div class="cap">Timer</div>
-    <div class="body">
-      <div class="keys" id="timerBus"></div>
-      <div class="hint" id="timerInfo">Timer: connecting to relay…</div>
-    </div>
-  </section>
-    </div>
-  </div>
-
-  <div id="log">Ready. All controls work relay-only. No OBS connection needed.</div>
-
-  <section class="bus" id="cuesBus"><div class="cap">Cues</div>
-    <div class="cues2">
-      <div class="cuescol">
-        <div class="cue-compose">
-          <select id="cueTarget" aria-label="Cue target">
-            <option value="all">All</option>
-            <option value="on-air">On air</option>
-          </select>
-          <select id="cueLevel" aria-label="Cue level">
-            <option value="info">Info</option>
-            <option value="critical">Critical</option>
-          </select>
-          <input id="cueText" type="text" maxlength="200" placeholder="Cue text…">
-          <button id="cueSend" type="button">SEND CUE</button>
-        </div>
-        <div id="cuePresets"></div>
-      </div>
-      <div class="cuescol">
-        <ul id="cueRecent"></ul>
-        <div class="cueback" id="cueBackWrap" hidden>
-          <div class="cueback-cap">From commentators</div>
-          <ul id="cueBackList"></ul>
-        </div>
-      </div>
-    </div>
-    <div class="hint" id="cueHint">Send a text cue to a commentator or all commentators. Critical cues require acknowledgement in the cockpit. Commentator replies appear under “From commentators”.</div>
-  </section>
-
-  <div class="cols">
-    <div class="colstack">
-  <section class="bus"><div class="cap">Graphics</div>
-    <div class="grp"><span class="glbl">Standard</span><div class="keys" id="gfxBus"></div></div>
-    <div class="grp"><span class="glbl">Pre-race</span><div class="keys" id="gfxPreRaceBus"></div></div>
-    <div class="grp"><span class="glbl">Grid</span>
-      <div class="keys" id="gfxGridTopBus"></div>
-      <div class="keys" id="gfxGridBus"></div>
-    </div>
-    <div class="grp"><span class="glbl">Flag graphic, one active</span><div class="keys" id="flagGfxBus"></div></div>
-  </section>
-    </div>
-    <div class="colstack">
-  <section class="bus"><div class="cap">Audio</div><div class="body" id="audio"></div></section>
-  <section class="bus" id="txBar" title="Transition applied to the next scene switch">
-    <div class="cap">Utilities</div>
-    <div class="grp"><span class="glbl">Armed transition</span>
-    <div class="keys">
-      <button class="k tx" data-tx="cut">CUT</button>
-      <button class="k tx" data-tx="fade">FADE</button>
-      <button class="k tx" data-tx="stinger">STINGER</button>
-      <label class="txdur">dur <input id="txDur" type="number" min="0" max="10000"
-             step="50" value="300"> ms</label>
-    </div>
-    </div>
-    <div class="grp"><span class="glbl">OBS pages</span>
-      <div class="keys"><button class="k" id="obsRefreshBtn">↻ REFRESH</button></div>
-    </div>
-  </section>
-    </div>
-  </div>
-
-  <details class="bus urls" id="urlsBox">
-    <summary>Schedule <span class="modechip" id="modeChip">RACE</span><button class="modeswitch" id="modeSwitch" hidden>switch → QUALIFYING</button></summary>
-    <div class="body">
-
-      <!-- Race schedule (shown in race mode) -->
-      <div id="raceSched">
-        <table><tbody id="schedBody"></tbody></table>
-        <button class="add" id="schedAdd">+ ADD ROW</button>
-        <div class="hint">YouTube or Twitch. Enter a full watch URL
-          (<code>youtube.com/watch?v=…</code> or <code>twitch.tv/&lt;channel&gt;</code>),
-          or <code>local:</code> for this machine's capture card.
-          Saves write the Google Sheet only. A feed picks the new URL up
-          on RELOAD A/B / NEXT (rows marked <b>A</b>/<b>B</b> are live now). Each row's
-          <b>Streamer</b> and <b>Stint</b> label (Configuration vocab) become the HUD's
-          STREAMER/STINT when that row goes on air. <b>CLEAR URL</b> removes only the
-          stream link and keeps the Streamer + Stint slot. Streamer/Stint/URL can still
-          be edited in the Sheet directly.</div>
-      </div>
-
-      <!-- Qualifying schedule (shown in qualifying mode) -->
-      <div id="qualSched" hidden>
-        <table><tbody>
-          <tr id="qualRow">
-            <td class="rn">Q<span class="livebadge" id="qualLive"></span></td>
-            <td style="width:22%"><select class="nm" id="qualNm" title="Streamer (Configuration vocab)"></select></td>
-            <td style="width:18%"><select class="st" id="qualSt" title="Stint label (Configuration vocab)"></select></td>
-            <td><input class="u" id="qualUrl" placeholder="youtube.com/watch?v=… · twitch.tv/<channel> · UC…"></td>
-            <td class="act"><button class="save" id="qualSave">SAVE</button><button class="clear" id="qualClear">CLEAR</button></td>
-          </tr>
-        </tbody></table>
-        <div class="hint" id="qualInfo">Qualifying: one stream, served on <b>Feed A</b>.
-          Edits write the <b>Qualifying</b> tab in the Sheet. The feed picks it up on
-          RELOAD A / NEXT (or on the mode switch). On switch the HUD STREAMER/STINT follow
-          this row.</div>
-      </div>
-
-      <!-- POV, shown in both modes: it is a separate, mode-independent feed -->
-      <table><tbody>
-        <tr><td class="rn">POV</td>
-            <td><input id="povName" maxlength="20" placeholder="name (max 20)"></td>
-            <td><input id="povUrl" placeholder="youtube.com/watch?v=… · twitch.tv/<channel> · UC…"></td>
-            <td class="act"><button class="save" id="povSave">SAVE</button></td></tr>
-      </tbody></table>
-      <div class="hint">POV. A full watch URL (<code>youtube.com/watch?v=…</code> or
-        <code>twitch.tv/&lt;channel&gt;</code>). The POV URL applies on <b>POV RELOAD</b>.
-        Available in both race and qualifying.</div>
-      <!-- Solo-only: POV RELOAD/STOP, kept reachable here because #feedsSec, where
-           these actions normally live, is hidden in solo. Built only under solo, see
-           buildPovActions(); empty and hidden in endurance. -->
-      <div class="keys" id="povActionsBus" hidden></div>
-    </div>
-  </details>
-
-  <details class="bus urls" id="subsBox">
-    <summary>Pending stream submissions <span class="unread" id="subsCount" hidden>0</span></summary>
-    <div class="body">
-      <table><tbody id="subsBody"></tbody></table>
-      <div class="hint" id="subsEmpty">No pending submissions. Commentators can submit
-        their own stream link from the cockpit; approvals here write the Schedule
-        (Sheet). The feed picks it up on RELOAD A/B / NEXT. Nothing a commentator
-        submits goes on air without an approval.</div>
-    </div>
-  </details>
-
-  <section class="bus" id="subSec" style="display:none">
-    <div class="cap">Substitution</div>
-    <div class="body">
-      <div class="hint" id="subInfo"></div>
-      <div class="setrow">
-        <div class="fld">
-          <label>Reason</label>
-          <input id="subReason" type="text" maxlength="200" placeholder="reason (optional)">
-        </div>
-        <button class="pill go" id="subSave">SAVE</button>
-      </div>
-    </div>
-  </section>
-
-  </div><!-- /.mainpane -->
-
-  <div class="rail">
-  <details class="bus chat" id="chatBox" open>
-    <summary>Chat <span class="unread" id="chatUnread" hidden>0</span></summary>
-    <div class="body">
-      <div class="chatname">
-        <label>You:</label>
-        <input id="chatName" maxlength="40" placeholder="your name">
-      </div>
-      <div id="chatLog" class="chatlog"></div>
-      <div class="chatsend">
-        <input id="chatInput" maxlength="500" placeholder="message the active crew…">
-        <button class="save" id="chatSendBtn">SEND</button>
-      </div>
-      <div class="hint">Seen by everyone on this relay's tailnet. The producer can clear
-        the history from the Control Center or <code>racecast chat clear</code>.</div>
-    </div>
-  </details>
-
-  <details class="bus chat" id="bchatBox" open>
-    <summary>Broadcast chat <span class="robadge">read-only</span><button id="bchatCompose" class="bcompose" hidden></button><button id="bchatRefresh" class="bcompose" title="Reconnect the chat reader and refresh">⟳ Refresh</button></summary>
-    <div class="body">
-      <div id="bchatLog" class="chatlog"><div class="bempty">Waiting for the broadcast stream…</div></div>
-      <div class="hint">Read-only mirror of the event's public YouTube/Twitch broadcast
-        chat (the <code>Channel</code> tab). During a producer handover both live streams
-        are merged here.</div>
-    </div>
-  </details>
-
-  <details class="bus chat" id="gfxBrowseBox" open>
-    <summary>Graphics<button id="gfxRefresh" class="bcompose" title="Reload the graphics list">⟳ Refresh</button></summary>
-    <div class="body">
-      <div id="gfxList" class="chatlog"><div class="bempty">Loading…</div></div>
-      <div class="hint">Read-only: the broadcast still-graphics (Sheet Assets tab).
-        Click one to open it in a new tab. OBS-only assets are hidden.</div>
-    </div>
-  </details>
-  </div><!-- /.rail -->
-
-  </div><!-- /.panes -->
 <div id="toasts"></div>
 </div>
 
@@ -877,10 +1006,9 @@ const CONFIG = {
     // rc: the Race Control value written via the relay after the OBS steps, ""
     // clearing it. Unconditional, mirroring the Companion combos: SPLIT stamps
     // "Driver Swaps" and cutting back to a stint clears whatever is shown.
-    // STINT A/B resolve on the relay like SPLIT and like the Companion buttons:
+    // STINT resolves on the relay like SPLIT: the on-air feed (NEXT picks it), its
     // visibility, audio and the producer's commentary mic of a local stint.
-    {label:"STINT A", scene:"Stint", show:[], hide:[], relayStint:"A", rc:""},
-    {label:"STINT B", scene:"Stint", show:[], hide:[], relayStint:"B", rc:""},
+    {label:"STINT", scene:"Stint", show:[], hide:[], relayStint:"live", rc:""},
     {label:"SPLIT", scene:"Splitscreen", show:[], hide:[],
      relaySplit:true, rc:"Driver Swaps"},   // the relay resolves visibility and audio from the on-air slot (#591)
     {label:"INTERVIEW", scene:"Interview", show:[], hide:[],
@@ -898,9 +1026,12 @@ const CONFIG = {
                             // this scene, so muting them forces a manual reset later.
   ],
   scenes: ["Stint","Splitscreen","Interview","Standby"],
+  // Troubleshoot only: cut the Stint scene to one feed by hand (confirmed).
+  emergency: [
+    {label:"FEED A ON AIR", scene:"Stint", show:[], hide:[], relayStint:"A", take:true, rc:""},
+    {label:"FEED B ON AIR", scene:"Stint", show:[], hide:[], relayStint:"B", take:true, rc:""},
+  ],
   vis: [
-    {label:"FEED A", scene:"Stint", source:"Feed A"},
-    {label:"FEED B", scene:"Stint", source:"Feed B"},
     {label:"POV",    scene:"Stint", source:"Feed POV", relay:"pov"},
   ],
   graphics: [
@@ -913,7 +1044,6 @@ const CONFIG = {
     {label:"RACE WX 1",     scene:"Stint",       source:"Race Weather 1"},
     {label:"RACE WX 2",     scene:"Stint",       source:"Race Weather 2"},
     {label:"QUALI WX",      scene:"Stint",       source:"Quali Weather"},
-    {label:"STBY COVER",    scene:"Stint",       source:"Standby Cover"},
     {label:"POST-RACE",     scene:"Interview",   source:"Post Race Interviews"},
   ],
   graphicsPreRace: [
@@ -942,11 +1072,26 @@ const CONFIG = {
 };
 
 /* CONFIG_SOLO is the solo OBS control set, derived from the `GT Racing Solo`
-   collection (#303). No A/B feeds and no macros, because solo has no feed-swap
-   workflow. It is built onto the busses in place of CONFIG the first time /status
-   reports solo (see applySolo()'s builtSolo latch); endurance is unaffected. */
+   collections (#303). No A/B feeds. It is built onto the busses in place of CONFIG
+   the first time /status reports solo (see applySolo()'s builtSolo latch). */
+const SOLO_GAME = "Solo Capture Device", SOLO_MIC = "Commentary Mic Device",
+      SOLO_DISCORD = "Discord Audio Capture";
+const soloMacro = (label, scene, unmute, mute) => ({label, scene, show:[], hide:[], unmute, mute});
 const CONFIG_SOLO = {
-  macros: [],
+  // The solo audio table of the #723 spec: every macro sets Game, Mic and Discord.
+  macros: [
+    soloMacro("PROGRAM",      "Program",      [SOLO_GAME, SOLO_MIC], [SOLO_DISCORD]),
+    soloMacro("INTERVIEW",    "Interview",    [SOLO_MIC, SOLO_DISCORD], [SOLO_GAME]),
+    soloMacro("STANDBY",      "Standby",      [SOLO_MIC], [SOLO_GAME, SOLO_DISCORD]),
+    soloMacro("INTERMISSION", "Intermission", [SOLO_MIC], [SOLO_GAME, SOLO_DISCORD]),
+    soloMacro("INTRO",        "Intro",        [], [SOLO_GAME, SOLO_MIC, SOLO_DISCORD]),
+    soloMacro("OUTRO",        "Outro",        [], [SOLO_GAME, SOLO_MIC, SOLO_DISCORD]),
+    soloMacro("TRAILER",      "Trailer",      [], [SOLO_GAME, SOLO_MIC, SOLO_DISCORD]),
+    soloMacro("DISCORD",      "Discord",      [SOLO_MIC, SOLO_DISCORD], [SOLO_GAME]),
+    soloMacro("WEBCAM",       "Solo Webcam",  [SOLO_GAME, SOLO_MIC], [SOLO_DISCORD]),
+    soloMacro("CAPTURE",      "Solo Capture", [SOLO_GAME, SOLO_MIC], [SOLO_DISCORD]),
+  ],
+  emergency: [],
   scenes: ["Program","Interview","Standby","Intermission","Intro","Outro","Trailer",
            "Discord","Solo Webcam","Solo Capture"],
   vis: [
@@ -965,7 +1110,6 @@ const CONFIG_SOLO = {
     {label:"RACE WX 1",     scene:"Program",   source:"Race Weather 1"},
     {label:"RACE WX 2",     scene:"Program",   source:"Race Weather 2"},
     {label:"QUALI WX",      scene:"Program",   source:"Quali Weather"},
-    {label:"STBY COVER",    scene:"Program",   source:"Standby Cover"},
     {label:"POST-RACE",     scene:"Interview", source:"Post Race Interviews"},
   ],
   graphicsPreRace: [
@@ -1120,13 +1264,25 @@ function buildControls(cfg){
   povVisBtn = null;
   teleVisBtn = null;
 
-  cfg.macros.forEach(m=>{
+  cfg.macros.forEach((m, i)=>{
     const b = mkKey(m.label, "program", ()=>runMacro(m));
+    if (i < 9) b.dataset.kbd = String(i + 1);         // keyboard shortcut label (#731)
     b._m = m; macroKeys.push(b); $("#pgmBus").appendChild(b);
   });
   if (cfg.redFlag){ redFlagItem.scene = cfg.redFlag.scene; redFlagItem.source = cfg.redFlag.source; }
   toggleKeys.push(redFlagBtn);
   $("#pgmBus").appendChild(redFlagBtn);
+
+  $("#emergencyBus").replaceChildren();
+  cfg.emergency.forEach(m=>{
+    const b = mkKey(m.label, "emergency", ()=>{
+      if (!confirm(`${m.label}: cut the Stint scene to Feed ${m.relayStint} by hand? ` +
+                   "The relay makes it the on-air feed and moves the other feed to the next stint."))
+        return;
+      runMacro(m);
+    });
+    b._m = m; macroKeys.push(b); $("#emergencyBus").appendChild(b);
+  });
 
   cfg.scenes.forEach(name=>{
     const b = mkKey(name.toUpperCase(), "scene",
@@ -1183,22 +1339,19 @@ function buildControls(cfg){
 }
 buildControls(CONFIG);
 
-FEED_ACTIONS.forEach(([label, path, tag])=>{
+FEED_ACTIONS.filter(([label])=>label !== "NEXT").forEach(([label, path, tag])=>{
   const b = mkKey(label, tag, ()=>{
     // RELOAD tears the running pull, so an on-air feed goes briefly dead.
     if (label.startsWith("RELOAD") &&
         !confirm(label + ": reconnect the feed — brief interruption if it is on air. Continue?"))
       return;
-    if (label === "NEXT"){            // double-press guard: two presses = two handovers
-      b.disabled = true;
-      setTimeout(()=>{ b.disabled = false; }, 3000);
-    }
     relayCall(path);
   }, false);
-  if (label === "NEXT") b.classList.add("next");
   $("#feedsBus").appendChild(b);
 });
-$("#feedsBus").appendChild(mkKey("FEEDS → STINT…", "correction", ()=>{
+// /set/stint needs producer rights with the step-up header, which this page never
+// sends, so over /console the key could only fail.
+if (!window.RC_API_BASE) $("#feedsBus").appendChild(mkKey("FEEDS → STINT…", "correction", ()=>{
   const v = prompt("Which stint is ON AIR right now? (e.g. 3)");
   if (v === null) return;
   if (!/^\d+$/.test(v.trim())) { log("Stint must be a number.", "err"); return; }
@@ -1329,8 +1482,6 @@ function renderTxBar(){
     b.classList.toggle('on', b.dataset.tx === activeTransition));
   const dur = $("#txDur");
   if (dur) dur.disabled = (activeTransition === "cut");
-  const chip = document.getElementById("txArmed");
-  if (chip) chip.textContent = "TX: " + activeTransition.toUpperCase();
 }
 document.querySelectorAll('#txBar .tx').forEach(b =>
   b.addEventListener('click', () => { activeTransition = b.dataset.tx; renderTxBar(); }));
@@ -1338,11 +1489,6 @@ document.querySelectorAll('#txBar .tx').forEach(b =>
     const v = parseInt(d.value, 10);
     activeDuration = isNaN(v) ? 300 : Math.max(0, Math.min(10000, v)); d.value = activeDuration; }); }
 renderTxBar();
-{ const chip = document.getElementById("txArmed");
-  if (chip) chip.addEventListener("click", () => {
-    const u = document.getElementById("txBar");
-    if (u) u.scrollIntoView({ behavior: "smooth", block: "center" });
-  }); }
 
 async function obsScene(scene){
   const d = await obsPost("scene", {scene, transition: activeTransition,
@@ -1474,7 +1620,9 @@ function renderStreamBtn(s){
 /* The sources that must be visible for a macro to count as on air. A relay-driven
    STINT has no static `show`; the feed it picks is the one that must be visible. */
 function macroAirSources(m){
-  return m.relayStint ? [[m.scene, "Feed " + m.relayStint]] : m.show;
+  if (!m.relayStint) return m.show;
+  const feed = m.relayStint === "live" ? liveFeed : m.relayStint;
+  return feed ? [[m.scene, "Feed " + feed]] : [];
 }
 
 /* A relay-resolved step (SPLIT, STINT). The relay applies several OBS changes and
@@ -1499,7 +1647,8 @@ async function runMacro(m){
     ...(m.relaySplit                                  // the server resolves the on-air slot (#591)
         ? [relayStep("split (on-air)", "split", {})]
         : m.relayStint                                // server resolves feeds + commentary mic, like Companion
-        ? [relayStep("stint " + m.relayStint, "stint", {feed: m.relayStint})]
+        ? [relayStep("stint " + m.relayStint, "stint",
+                     m.take ? {feed: m.relayStint, take: true} : {feed: m.relayStint})]
         : [...(m.unmute||[]).map(i=>[`unmute ${i}`, ()=>obsMute(i,false)]),
            ...(m.mute||[]).map(i=>[`mute ${i}`,     ()=>obsMute(i,true)])]),
   ];
@@ -1793,7 +1942,7 @@ async function relayPoll(){
     const d = await r.json();
     relayLed(true); clearBanner("relay");
     const solo = d.solo === true;         // feed-less solo relay (#302)
-    applySolo(solo);
+    applySolo(solo, d.template);
     renderEventTitle(d.event_title);          // header subtitle + tab title (#207)
     // On-air feed = the lower stint index (mirrors the relay's live_feed()).
     pvMarkOnAir(!solo && d.feeds && d.feeds.A
@@ -1919,8 +2068,10 @@ async function relayPoll(){
         "OBS NOT REACHABLE — NEXT can't auto-cut · use the manual FEED/scene buttons" +
         (solo ? "" : "; Feed " + (d.feeds.A.state === "serving" ? "A" : "B") + " state shown above"));
     else clearBanner("obs");
+    renderLive(d);
   }catch(e){
     relayLed(false);
+    renderLive(null);
     setBanner("relay", "red", "RELAY UNREACHABLE — feed & timer buttons will not work");
     // The cookies banner persists on purpose: it is the last-known state and cannot
     // improve while the relay is down.
@@ -2033,15 +2184,16 @@ function chatRender(messages){
     const body = document.createElement("span"); body.textContent = msg.text;
     line.append(t, who, body); el.appendChild(line);          // textContent => no HTML injection
   }
-  const open = $("#chatBox").open && document.hasFocus();
+  const open = chatVisible() && document.hasFocus();
   if (open && stick){ el.scrollTop = el.scrollHeight; chatMarkSeen(); }
   else chatUpdateBadge();
 }
 function chatUpdateBadge(){
   const count = chatMessages.filter(m => m.ts > chatSeenTs).length;
-  const badge = $("#chatUnread");
-  badge.hidden = count === 0;
-  if (count) badge.textContent = String(count);
+  for (const badge of [$("#chatUnread"), $("#drawerUnread")]){
+    badge.hidden = count === 0;
+    if (count) badge.textContent = String(count);
+  }
 }
 function chatMarkSeen(){
   chatSeenTs = chatMessages.length ? chatMessages[chatMessages.length - 1].ts : chatSeenTs;
@@ -2071,8 +2223,7 @@ async function chatPoll(){
 }
 $("#chatSendBtn").addEventListener("click", chatSend);
 $("#chatInput").addEventListener("keydown", e=>{ if (e.key === "Enter") chatSend(); });
-$("#chatBox").addEventListener("toggle", ()=>{ if ($("#chatBox").open) chatMarkSeen(); });
-$("#chatLog").addEventListener("scroll", ()=>{ if ($("#chatBox").open && chatAtBottom()) chatMarkSeen(); });
+$("#chatLog").addEventListener("scroll", ()=>{ if (chatVisible() && chatAtBottom()) chatMarkSeen(); });
 
 /* Broadcast chat (#294): read-only mirror of the public stream chat */
 let bchatTimer = null;
@@ -2510,7 +2661,7 @@ function applyMode(qualifying){
 // Kind-conditional cut (#307): a feed-less solo relay reports {solo:true}. Hide the
 // A/B feed, schedule and submission affordances and reveal the POV editor as its own
 // card. Endurance reports solo=false and no class is set.
-function applySolo(isSolo){
+function applySolo(isSolo, template){
   document.body.classList.toggle("solo", !!isSolo);
   const box = $("#urlsBox");
   if (box && isSolo) box.open = true;   // POV lives in the schedule <details>;
@@ -2522,6 +2673,7 @@ function applySolo(isSolo){
     window.__builtSolo = true;
     buildControls(CONFIG_SOLO);
     buildPovActions();
+    soloLayout(template);
   }
 }
 function qualRowBusy(){
@@ -2637,6 +2789,7 @@ async function subsPoll(){
     const r = await fetch("/submissions", {cache:"no-store"});
     const d = await r.json();
     const pend = d.pending || [];
+    lastPending = pend;
     const badge = $("#subsCount");
     badge.textContent = pend.length; badge.hidden = pend.length === 0;
     $("#subsEmpty").style.display = pend.length ? "none" : "";
@@ -2884,7 +3037,8 @@ function pvPollFeed(tile){
                          ph.classList.remove("err"); };
   probe.onerror = () => { frame.classList.remove("loaded");
                           ph.classList.add("err"); txt.textContent = "Unavailable"; };
-  probe.src = RC_API("/preview/feed/" + feed) + "?ts=" + Date.now();
+  probe.src = RC_API(tile.dataset.src ? "/preview/source/" + tile.dataset.src
+                                       : "/preview/feed/" + feed) + "?ts=" + Date.now();
 }
 function pvStartFeed(tile){
   const feed = tile.dataset.feed;
@@ -2908,13 +3062,14 @@ function pvPollLevels(){
     });
   }).catch(() => {});
 }
-document.querySelectorAll(".pvtile .pvtoggle").forEach(btn => {
+function wireTileToggle(tile){
+  const btn = tile.querySelector(".pvtoggle");
   btn.onclick = () => {
-    const tile = btn.closest(".pvtile");
     if(pvFeedTimers[tile.dataset.feed]){ pvStopFeed(tile); btn.textContent = "PLAY"; }
     else { pvStartFeed(tile); btn.textContent = "PAUSE"; }
   };
-});
+}
+document.querySelectorAll(".pvtile").forEach(wireTileToggle);
 function pvMarkOnAir(feed){
   document.querySelectorAll(".pvtile").forEach(
     t => t.classList.toggle("onair", t.dataset.feed === feed));
@@ -2969,6 +3124,318 @@ function updateSetupBadge(){
   else if(subActive){ badge.textContent = "•"; badge.hidden = false; }
   else { badge.hidden = true; }
 }
+
+/* Frame (#728): the topic areas, the live column and the handover. Every card
+   stays in the DOM; an area only toggles visibility, so the pollers keep writing by
+   id whatever area is showing. `var` because applySolo and relayPoll can run
+   before this block during boot. */
+var lastPending = [];       // /submissions pending list, kept by subsPoll
+var schedRows = [];         // /schedule/data rows, for the Handover area
+var liveFeed = null;        // the relay's on-air feed, for the STINT macro's air light
+var AREA_KEY = "rc_area", NAV_KEY = "rc_nav_collapsed", SPLIT_KEY = "rc_chat_split";
+var NAV_AUTO = matchMedia("(min-width:900px) and (max-width:1599px)");
+var DRAWER_MQ = matchMedia("(max-width:1279px)");
+var PHONE_MQ = matchMedia("(max-width:899px)");
+function store(k, v){ try{ localStorage.setItem(k, v); }catch(e){ /* private mode */ } }
+function recall(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
+
+var AREAS = ["handover", "graphics", "hud", "cues", "audio", "broadcast", "schedule", "setup", "fault"];
+function areaAvailable(name){
+  if (!AREAS.includes(name)) return false;   // a stale stored value never reaches the selector
+  const b = document.querySelector(`.navbtn[data-area="${name}"]`);
+  return !!b && getComputedStyle(b).display !== "none";
+}
+function showArea(name){
+  if (!areaAvailable(name)) name = document.body.classList.contains("solo") ? "graphics" : "handover";
+  document.querySelectorAll(".navbtn").forEach(b => {
+    const on = b.dataset.area === name;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-current", on ? "page" : "false");
+  });
+  document.querySelectorAll(".area").forEach(a => a.classList.toggle("active", a.dataset.area === name));
+  store(AREA_KEY, name);
+  if (name === "schedule"){ schedPoll(); qualPoll(); subsPoll(); }
+}
+document.querySelectorAll(".navbtn").forEach(b => b.addEventListener("click", () => showArea(b.dataset.area)));
+
+function applyNavCollapse(){
+  const collapsed = NAV_AUTO.matches || recall(NAV_KEY) === "1";
+  document.body.classList.toggle("nav-collapsed", collapsed);
+  const t = $("#navCollapse");
+  t.textContent = collapsed ? "»" : "«";
+  t.setAttribute("aria-expanded", String(!collapsed));
+  t.hidden = NAV_AUTO.matches;           // a narrow window always collapses the nav
+}
+$("#navCollapse").addEventListener("click", () => {
+  store(NAV_KEY, recall(NAV_KEY) === "1" ? "0" : "1");
+  applyNavCollapse();
+});
+NAV_AUTO.addEventListener("change", applyNavCollapse);
+
+function chatVisible(){
+  return !DRAWER_MQ.matches || PHONE_MQ.matches || document.body.classList.contains("chats-open");
+}
+function setDrawer(open){
+  document.body.classList.toggle("chats-open", open);
+  $("#chatDrawerBtn").setAttribute("aria-expanded", String(open));
+  if (open && chatAtBottom()) chatMarkSeen();
+}
+$("#chatDrawerBtn").addEventListener("click", () => setDrawer(!document.body.classList.contains("chats-open")));
+// The open drawer covers the header button, so a click beside it or Escape closes it.
+document.addEventListener("click", e => {
+  if (document.body.classList.contains("chats-open") && !e.target.closest("#chatRail, #chatDrawerBtn"))
+    setDrawer(false);
+});
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && document.body.classList.contains("chats-open")) setDrawer(false);
+});
+
+// Keyboard shortcuts (#731): off until switched on in the header, per browser. N is
+// NEXT, 1 to 9 the scene macros. A first press only arms the key; the same key again
+// within KEY_CONFIRM_MS acts, so no single key press ever reaches the program.
+var KEYS_KEY = "rc_keys", KEY_CONFIRM_MS = 1500, kbdArmed = null;
+function keysOn(){ return recall(KEYS_KEY) === "1"; }
+function renderKeysBtn(){
+  const on = keysOn(), b = $("#kbdBtn");
+  document.body.classList.toggle("keys-on", on);
+  b.classList.toggle("on", on);
+  b.setAttribute("aria-pressed", String(on));
+  b.textContent = !on ? "KEYS OFF" : kbdArmed ? `PRESS ${kbdArmed.key.toUpperCase()} AGAIN` : "KEYS ON";
+}
+function kbdTarget(key){
+  if (key === "n") return $("#nextBtn").hidden ? null : $("#nextBtn");
+  if (/^[1-9]$/.test(key)) return [...$("#pgmBus").children].filter(b => b._m)[Number(key) - 1] || null;
+  return null;
+}
+function kbdArm(key, btn, at){
+  kbdArmed = {key, btn, at};
+  btn.classList.add("kbdarmed");
+  setTimeout(() => { if (kbdArmed && kbdArmed.at === at) kbdDisarm(); }, KEY_CONFIRM_MS);
+  renderKeysBtn();
+}
+function kbdDisarm(){
+  if (kbdArmed) kbdArmed.btn.classList.remove("kbdarmed");
+  kbdArmed = null;
+  renderKeysBtn();
+}
+$("#kbdBtn").addEventListener("click", () => {
+  store(KEYS_KEY, keysOn() ? "0" : "1");
+  kbdDisarm();
+});
+document.addEventListener("keydown", e => {
+  if (!keysOn() || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.target.closest && e.target.closest("input, textarea, select, [contenteditable]")) return;
+  const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  const btn = kbdTarget(key);
+  if (!btn){ if (kbdArmed) kbdDisarm(); return; }
+  e.preventDefault();
+  const now = Date.now();
+  if (kbdArmed && kbdArmed.key === key && now - kbdArmed.at <= KEY_CONFIRM_MS){
+    kbdDisarm();
+    btn.click();
+    return;
+  }
+  kbdDisarm();
+  kbdArm(key, btn, now);
+});
+renderKeysBtn();
+
+// The divider between the two chats: drag it or use the arrow keys.
+function applySplit(r){
+  r = Math.min(0.8, Math.max(0.2, r));
+  const rail = $("#chatRail");
+  rail.style.setProperty("--crew", (r * 100).toFixed(1) + "fr");
+  rail.style.setProperty("--bcast", ((1 - r) * 100).toFixed(1) + "fr");
+  return r;
+}
+var chatSplit = applySplit(parseFloat(recall(SPLIT_KEY)) || 0.58);
+{ const sp = $("#railSplit");
+  sp.addEventListener("pointerdown", e => {
+    sp.setPointerCapture(e.pointerId);
+    const box = $("#chatRail").getBoundingClientRect();
+    const move = ev => { chatSplit = applySplit((ev.clientY - box.top) / box.height); };
+    sp.addEventListener("pointermove", move);
+    sp.addEventListener("pointerup", () => {
+      sp.removeEventListener("pointermove", move);
+      store(SPLIT_KEY, String(chatSplit));
+    }, {once: true});
+  });
+  sp.addEventListener("keydown", e => {
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+    e.preventDefault();
+    chatSplit = applySplit(chatSplit + (e.key === "ArrowUp" ? -0.05 : 0.05));
+    store(SPLIT_KEY, String(chatSplit));
+  });
+}
+
+// ARM targets the off-air feed and NEXT hands over to it; the producer never picks
+// A or B. NEXT stays clickable while dimmed: the relay ignores it until the feed serves.
+$("#armBtn").addEventListener("click", () => {
+  const b = $("#armBtn");
+  if (b.dataset.feed) feedArm(b.dataset.feed, b.dataset.on === "1");
+});
+$("#nextBtn").addEventListener("click", () => {
+  const b = $("#nextBtn");
+  b.disabled = true;                    // double-press guard: two presses = two handovers
+  setTimeout(() => { b.disabled = false; }, 3000);
+  // The handover cut uses the transition armed in the live column (#730).
+  relayCall(`next?transition=${activeTransition}&duration=${activeTransition === "cut" ? 0 : activeDuration}`);
+});
+
+function setNav(area, level, why){
+  const b = document.querySelector(`.navbtn[data-area="${area}"]`);
+  if (!b) return;
+  b.querySelector(".ndot").className = "ndot" + (level ? " " + level : "");
+  b.querySelector(".nwhy").textContent = why || "";
+}
+function faultReasons(d){
+  const out = [];
+  if (d.obs && d.obs.reachable === false) out.push("OBS unreachable");
+  if (!d.solo && d.feeds && d.feeds.A){
+    for (const k of ["A", "B"]){
+      const f = d.feeds[k];
+      if (f.down) out.push(`Feed ${k} down`);
+      else if (f.profile === "robust" && !f.pinned) out.push(`Feed ${k} on ROBUST`);
+    }
+    if (d.desync && d.desync.active) out.push("feed desync");
+    if (d.auto_cover_active) out.push("cover auto-raised");
+    if (d.rebuild_guard && d.rebuild_guard.stood_down) out.push("auto-rebuild paused");
+  }
+  if (d.pov && d.pov.down) out.push("POV down");
+  return out;
+}
+function renderNavCommon(d){
+  const faults = d ? faultReasons(d) : ["relay unreachable"];
+  setNav("fault", faults.length ? "warn" : "ok", faults[0] || "no issues");
+  const onAir = $("#obsStreamBtn").classList.contains("live") || $("#partStatus").classList.contains("live");
+  setNav("broadcast", onAir ? "live" : "", onAir ? "stream live" : "stream offline");
+  setNav("schedule", "", lastPending.length ? `${lastPending.length} submitted` : "");
+}
+function hoCard(el, cls, key, value, sub){
+  el.className = "hocard" + (cls ? " " + cls : "");
+  el.replaceChildren();
+  for (const [c, t] of [["hk", key], ["hv", value], ["hs", sub]]){
+    const x = document.createElement("div"); x.className = c; x.textContent = t; el.appendChild(x);
+  }
+}
+function stintName(i){ const r = schedRows[i]; return r && r.name ? " · " + r.name : ""; }
+function renderHandover(lf, live, of, off){
+  const serving = of.state === "serving";
+  hoCard($("#hoOnAir"), "air", "On air", `Stint ${lf.stint}${stintName(lf.index)}`, "Feed " + live);
+  hoCard($("#hoNext"), serving ? "ready" : "",
+         serving ? "Up next · ready" : of.armed ? "Up next · starting" : "Up next · not armed",
+         `Stint ${of.stint}${stintName(of.index)}`, `Feed ${off} · ${of.state || "idle"}`);
+  const box = $("#hoUpcoming");
+  box.replaceChildren();
+  for (let i = lf.index + 1; i <= lf.index + 3 && i < schedRows.length; i++){
+    const r = schedRows[i];
+    const subs = lastPending.filter(e => e.mode !== "qualifying" && e.target_line === r.sheetRow);
+    // One click approves only an unambiguous submission, and the row shows its link.
+    const pend = subs.length === 1 ? subs[0] : null;
+    const row = document.createElement("div"); row.className = "hrow";
+    const label = document.createElement("span"); label.textContent = r.stint || ("Row " + r.row);
+    const who = document.createElement("span"); who.textContent = r.name || "—";
+    const st = document.createElement("span");
+    st.className = "hst " + (subs.length ? "pend" : r.url ? "ok" : i === of.index ? "warn" : "");
+    st.textContent = pend ? pend.proposed_url : subs.length ? `${subs.length} submitted · see Schedule`
+                   : r.url ? "link ready" : "no link yet";
+    if (pend) st.title = pend.proposed_url;
+    row.append(label, who, st);
+    if (pend){
+      const b = document.createElement("button"); b.type = "button"; b.textContent = "APPROVE";
+      b.addEventListener("click", () => subAct(pend.id, "approve"));
+      row.appendChild(b);
+    }
+    box.appendChild(row);
+  }
+  if (!box.children.length){
+    const e = document.createElement("div"); e.className = "hint";
+    e.textContent = "No further stints in the schedule.";
+    box.appendChild(e);
+  }
+}
+// Called from every /status poll (null while the relay is unreachable).
+function renderLive(d){
+  renderNavCommon(d);
+  if (!d){ $("#liveOnAir b").textContent = "relay unreachable"; return; }
+  if (d.solo === true){ $("#liveOnAir b").textContent = programScene || "—"; return; }
+  if (!d.feeds || !d.feeds.A) return;
+  const live = d.feeds.A.index <= d.feeds.B.index ? "A" : "B";   // the relay's live_feed()
+  liveFeed = live;
+  const off = live === "A" ? "B" : "A";
+  const lf = d.feeds[live], of = d.feeds[off];
+  const qual = d.mode === "qualifying";
+  const end = typeof d.schedule_len === "number" && of.index >= d.schedule_len;
+  const serving = of.state === "serving", armed = !!of.armed, manual = !!d.manual_feed_arm;
+  $("#liveOnAir b").textContent = (qual ? "Qualifying" : "Stint " + lf.stint) + " · Feed " + live
+                                  + stintName(lf.index);
+  const arm = $("#armBtn");
+  arm.hidden = !manual || qual || end;
+  arm.dataset.feed = off;
+  arm.dataset.on = armed || serving ? "0" : "1";
+  arm.classList.toggle("ready", serving);
+  arm.classList.toggle("starting", armed && !serving);
+  arm.textContent = serving ? `FEED ${off} SERVING · STOP`
+                  : armed ? `STARTING FEED ${off} … STOP`
+                  : `ARM → STINT ${of.stint} (FEED ${off})`;
+  $("#nextBtn").hidden = qual;
+  $("#nextBtn").classList.toggle("ready", serving && !end);
+  $("#nextSub").textContent = end ? "end of the schedule"
+                            : serving ? `→ stint ${of.stint}`
+                            : manual && !armed ? `arm stint ${of.stint} first` : "waiting for the feed";
+  // The handover steps of Director.md ("At a driver change"), nothing beyond them.
+  // The relay's handover_next (#730) says whether the next stint has a link yet.
+  const ho = d.handover_next;
+  const noLink = !qual && !end && ho && !ho.link;
+  const step = qual ? "" : end ? "No further stint in the schedule."
+             : serving ? `Feed ${off} is serving stint ${of.stint}. SPLIT covers the swap, then NEXT.`
+             : noLink && ho.pending ? `Stint ${ho.stint}: a link was submitted. Approve it in Handover or Schedule.`
+             : noLink ? `Stint ${ho.stint} has no link yet. Enter it under Schedule.`
+             : armed || !manual ? `Feed ${off} is starting stint ${of.stint} (10 to 30 s). NEXT turns green when it is serving.`
+             : `Stint ${of.stint}${stintName(of.index)}: ARM a few minutes before the swap.`;
+  $("#nextStep").hidden = !step;
+  $("#nextStepText").textContent = step;
+  setNav("handover", serving ? "ok" : "", end ? "end of schedule"
+         : serving ? `stint ${of.stint} ready` : armed ? `stint ${of.stint} starting` : `arm stint ${of.stint}`);
+  // Only the next stint warns; stints further out stay neutral.
+  if (noLink)
+    setNav("schedule", "warn", ho.pending ? `stint ${ho.stint}: link submitted` : `stint ${ho.stint}: no link`);
+  renderHandover(lf, live, of, off);
+}
+async function handoverPoll(){
+  if (document.body.classList.contains("solo")) return;
+  try{
+    const r = await fetch("/schedule/data", {cache:"no-store"});
+    const d = await r.json();
+    if (Array.isArray(d.rows)) schedRows = d.rows;
+  }catch(e){ /* relay unreachable: keep the last rows */ }
+}
+// Solo: no handover, so Graphics is the default area, and the live column previews
+// the solo inputs instead of the A/B feeds (tyres only in a commentary collection).
+const SOLO_TILES = {pov: [["capture", "CAPTURE"], ["webcam", "WEBCAM"]],
+                    commentary: [["capture", "CAPTURE"], ["webcam", "WEBCAM"], ["tyres", "TYRES"]]};
+function soloLayout(template){
+  showArea(recall(AREA_KEY) || "graphics");
+  const pov = document.querySelector('.pvtile[data-feed="POV"]');
+  document.querySelectorAll('.pvtile[data-feed="A"], .pvtile[data-feed="B"]').forEach(t => {
+    pvStopFeed(t); t.remove();
+  });
+  for (const [src, label] of (SOLO_TILES[template] || SOLO_TILES.pov)){
+    const tile = pov.cloneNode(true);
+    tile.dataset.feed = label; tile.dataset.src = src;
+    tile.classList.remove("onair", "paused");
+    tile.querySelector("img").alt = label;
+    tile.querySelector(".pvframe").classList.remove("loaded");
+    tile.querySelector(".pvlabel span").textContent = label;
+    tile.querySelector(".pvtoggle").dataset.feed = label;
+    wireTileToggle(tile);
+    pov.before(tile);
+    if (!$("#pvBody").hidden) pvStartFeed(tile);
+  }
+}
+applyNavCollapse();
+showArea(recall(AREA_KEY) || "handover");
+handoverPoll(); setInterval(handoverPoll, 2000);
 
 /* Boot */
 renderAir({});

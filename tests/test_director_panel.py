@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
-"""Stdlib structural checks for the Director Panel single-content layout.
+"""Stdlib structural checks for the Director Panel frame.
 Run: python3 tests/test_director_panel.py
 
 There is no JS runtime here: these assert markup and presence-of-code anchors over
 the served HTML string. Runtime behavior is verified in the render pass.
 
-The panel is one compact scrolling view: a full-width program deck, a full-width
-HUD, two 2-column control blocks, and the full-width Schedule, Submissions and
-Substitution at the bottom. These tests guard that structure and that no control
-was dropped in the reflow."""
+The panel is a fixed frame (#728): topic navigation, the live column, one workspace
+area at a time and the chat rail. These tests guard that structure and that no
+control of the old page was dropped."""
 import json
 import os
 import re
@@ -44,38 +43,7 @@ def t_tabs_removed():
     assert 'id="setupBadge"' not in h, "the SETUP tab badge is gone with the tabs"
 
 
-def t_single_content_layout_classes():
-    # The layout primitives are present: deck plus two-column control blocks.
-    h = _html()
-    assert 'class="deck"' in h, "program deck wrapper"
-    assert h.count('class="cols"') == 2, "two 2-column control blocks"
-    assert 'class="cues2"' in h, "Cues uses the full-width 2/1 body"
-    assert 'class="grp"' in h, "Graphics/Utilities use grouped sub-rows"
 
-
-def t_top_to_bottom_order():
-    # deck(preview -> PGM) -> HUD -> [Feeds | Scn.Vis -> Timer] -> Log -> Cues ->
-    # [Graphics(gfx/pre/grid/flag) | Audio -> Utilities(txBar)] -> Schedule ->
-    # Submissions -> Substitution. One straight DOM order, no tab wrappers.
-    h = _html()
-    _order(h,
-           'class="deck"',
-           'id="previewSec"', 'id="pgmBus"', 'id="txArmed"',
-           'id="hudBus"', 'id="setupRow"', 'id="teamRow"', 'id="condRow"',
-           'id="feedsBus"', 'id="scnBus"', 'id="timerBus"',
-           'id="log"',
-           'id="cuesBus"',
-           'id="gfxBus"', 'id="gfxPreRaceBus"', 'id="gfxGridTopBus"',
-           'id="gfxGridBus"', 'id="flagGfxBus"',
-           'id="audio"', 'id="txBar"', 'id="obsRefreshBtn"',
-           'id="urlsBox"', 'id="subsBox"', 'id="subSec"')
-
-
-def t_log_sits_between_feeds_and_cues():
-    # The action log sits below the Feeds/Timer row and above Cues, near Feeds.
-    h = _html()
-    _order(h, 'id="timerBus"', 'id="log"', 'id="cuesBus"')
-    assert 'id="log"' in h
 
 
 def t_no_control_dropped():
@@ -95,22 +63,11 @@ def t_no_control_dropped():
     assert h.count('data-tier="robust"') >= 2 and h.count('data-tier="emergency"') >= 2
 
 
-def t_header_is_sticky():
-    # The page header is the sticky element, not the PGM bus.
-    h = _html()
-    hdr = h.find("header{")
-    assert hdr != -1
-    seg = h[hdr:hdr + 200]
-    assert "position:sticky" in seg and "top:0" in seg
-    assert ".pgm{position:sticky" not in h
-
 
 def t_cues_two_column_body():
     # Cues compose and presets sit left, recent and cueback right, inside .cues2.
     h = _html()
-    cues = h.find('id="cuesBus"')
-    nxt = h.find('class="cols"', cues)          # the following control block
-    seg = h[cues:nxt]
+    seg = _area(h, "cues")
     assert 'class="cues2"' in seg
     assert seg.count('class="cuescol"') == 2
     _order(seg, 'id="cueTarget"', 'id="cuePresets"', 'id="cueRecent"')
@@ -127,26 +84,6 @@ def t_graphics_grouped_into_one_card():
         assert f'id="{cid}"' in seg, f"#{cid} must live inside the merged Graphics card"
 
 
-def t_utilities_merges_transition_and_obs():
-    # Transition (#txBar, id kept for CSS and JS) and OBS refresh live in one card.
-    h = _html()
-    tx = h.find('id="txBar"')
-    end = h.find('</section>', tx)
-    seg = h[tx:end]
-    assert 'id="obsRefreshBtn"' in seg, "OBS refresh folded into the Utilities card"
-    assert 'data-tx="cut"' in seg and 'id="txDur"' in seg
-
-
-def t_tx_chip_present_and_wired():
-    h = _html()
-    # chip lives in the deck's PGM section, before Cues
-    assert 'id="txArmed"' in h
-    pgm = h.find('class="bus pgm"')
-    assert pgm != -1 and h.find('id="txArmed"') > pgm
-    assert h.find('id="txArmed"') < h.find('id="cuesBus"'), "chip must be in the PGM/deck area"
-    assert 'chip.textContent = "TX: " + activeTransition.toUpperCase()' in h
-    # clicking the chip scrolls to the Utilities/Transition card
-    assert 'getElementById("txBar")' in h and "scrollIntoView" in h
 
 
 def t_setup_badge_is_safe_noop():
@@ -260,36 +197,134 @@ def t_program_preview_self_reschedules_no_wedge():
         "pvStop must clearTimeout the program-preview poll handle (no leaked poll after HIDE)"
 
 
-def t_stint_macros_resolve_on_the_relay_like_companion():
-    # One behaviour for the panel and Companion: STINT A/B cut to Stint themselves
-    # and take visibility, audio and the producer's commentary mic from the relay's
-    # /obs/stint, which knows whether a stint is local. No static feed names and no
-    # client-side mic decision may remain in the macro.
+def t_stint_macro_resolves_the_on_air_feed_on_the_relay():
+    # One STINT macro (#729): the relay's /obs/stint picks the on-air feed and sets
+    # its visibility, audio and the producer's commentary mic. NEXT decides the feed.
     h = _html()
-    for label, feed in (("STINT A", "A"), ("STINT B", "B")):
-        m = re.search(r'\{label:"' + label + r'",[^}]*\}', h)
-        assert m, label
-        macro = m.group(0)
-        assert 'scene:"Stint"' in macro and 'relayStint:"' + feed + '"' in macro, macro
-        assert '"Feed A"' not in macro and '"Feed B"' not in macro, macro
-    # The PGM bus still tells STINT A from STINT B: with no static `show`, the air
-    # light and the state read-back take the picked feed from macroAirSources().
-    assert 'function macroAirSources(m){' in h
-    assert '[[m.scene, "Feed " + m.relayStint]]' in h           # one source of truth
-    # A relay-resolved step such as SPLIT or STINT answers with a note when an input
-    # is missing, for instance the commentary mic of an older collection, and that
+    endurance = _config_block(h, "CONFIG")
+    assert 'label:"STINT A"' not in endurance and 'label:"STINT B"' not in endurance
+    m = re.search(r'\{label:"STINT",[^}]*\}', endurance)
+    assert m and 'scene:"Stint"' in m.group(0) and 'relayStint:"live"' in m.group(0), m
+    assert '"Feed A"' not in m.group(0) and '"Feed B"' not in m.group(0), m.group(0)
+    # The air light follows the relay's on-air feed.
+    src = _func_src(h, "macroAirSources")
+    assert 'const feed = m.relayStint === "live" ? liveFeed : m.relayStint;' in src
+    assert "liveFeed = live;" in _func_src(h, "renderLive")
+    # A relay-resolved step answers with a note when an input is missing, and that
     # note is logged rather than shown only as a red OBS LED.
     assert "function relayStep(what, path, body){" in h
-    assert 'relayStep("stint " + m.relayStint, "stint", {feed: m.relayStint})' in h
+    assert 'relayStep("stint " + m.relayStint, "stint",' in h
     assert 'relayStep("split (on-air)", "split", {})' in h
     assert "const why = d && (d.note || (!d.ok && d.error));" in h   # a bare error too
     assert 'if (why) log(`${what}: ${why}`, d.ok ? "warn" : "err");' in h
     assert "for (const [sc, src] of macroAirSources(m))" in h
     assert "if (air && req.length){" in h
-    for gone in ("stintMicIntent", "feedPlatforms", "micFor", "COMMENTARY_MIC"):
-        assert gone not in h, gone
 
 
+def t_emergency_feed_switch_lives_in_troubleshoot_with_a_confirm():
+    h = _html()
+    endurance = _config_block(h, "CONFIG")
+    for feed in ("A", "B"):
+        m = re.search(r'\{label:"FEED ' + feed + r' ON AIR",[^}]*\}', endurance)
+        assert m and 'relayStint:"' + feed + '"' in m.group(0), feed
+    assert 'id="emergencyBus"' in _area(h, "fault")
+    keys = _block(_func_body(h, "buildControls"), "cfg.emergency.forEach", '$("#emergencyBus").appendChild(b);')
+    assert "if (!confirm(" in keys and "return;" in keys, "the manual switch must be confirmed"
+    assert "emergency: []," in _config_block(h, "CONFIG_SOLO")
+
+
+def t_emergency_switch_moves_the_relay_too():
+    h = _html()
+    endurance = _config_block(h, "CONFIG")
+    for feed in ("A", "B"):
+        m = re.search(r'\{label:"FEED ' + feed + r' ON AIR",[^}]*\}', endurance)
+        assert "take:true" in m.group(0), m.group(0)
+    assert "m.take ? {feed: m.relayStint, take: true} : {feed: m.relayStint}" in _func_src(h, "runMacro")
+    m = re.search(r'\{label:"STINT",[^}]*\}', endurance)
+    assert "take" not in m.group(0), "the STINT macro never moves the relay"
+
+
+def t_next_step_and_schedule_dot_read_handover_next():
+    src = _func_src(_html(), "renderLive")
+    assert "const ho = d.handover_next;" in src
+    assert "const noLink = !qual && !end && ho && !ho.link;" in src
+    assert "if (noLink)\n    setNav(\"schedule\", \"warn\"" in src, "only the next stint warns"
+    assert "schedRows[of.index].url" not in src, "no client-side guess about the next link"
+
+
+def t_solo_preview_tiles_follow_the_template():
+    h = _html()
+    assert 'const SOLO_TILES = {pov: [["capture", "CAPTURE"], ["webcam", "WEBCAM"]],' in h
+    assert 'commentary: [["capture", "CAPTURE"], ["webcam", "WEBCAM"], ["tyres", "TYRES"]]};' in h
+    src = _func_src(h, "soloLayout")
+    assert "pvStopFeed(t); t.remove();" in src, "solo stops polling the A/B tiles it hides"
+    assert "applySolo(solo, d.template);" in h and "soloLayout(template);" in _func_src(h, "applySolo")
+    assert 'tile.dataset.src ? "/preview/source/" + tile.dataset.src' in _func_src(h, "pvPollFeed")
+
+
+def t_removed_duplicate_keys():
+    h = _html()
+    for name in ("CONFIG", "CONFIG_SOLO"):
+        cfg = _config_block(h, name)
+        assert "STBY COVER" not in cfg, f"{name}: RED FLAG toggles the Standby Cover"
+    vis = _config_block(h, "CONFIG")
+    assert 'label:"FEED A"' not in vis and 'label:"FEED B"' not in vis, "the emergency switch replaces them"
+
+
+def _macro_scenes(cfg):
+    return set(re.findall(r'label:"[^"]+", scene:"([^"]+)"', cfg)) | \
+        set(re.findall(r'soloMacro\("[^"]+",\s*"([^"]+)"', cfg))
+
+
+def t_every_scene_has_a_macro():
+    h = _html()
+    for name in ("CONFIG", "CONFIG_SOLO"):
+        cfg = _config_block(h, name)
+        raw = re.findall(r'"([^"]+)"', re.search(r"\n  scenes: \[([^\]]*)\]", cfg).group(1))
+        missing = set(raw) - _macro_scenes(cfg)
+        assert not missing, f"{name}: scenes reachable only as a raw key: {missing}"
+
+
+SOLO_AUDIO_TABLE = {   # macro: (unmuted, muted) of Game, Mic and Discord, from the spec
+    "PROGRAM": ({"SOLO_GAME", "SOLO_MIC"}, {"SOLO_DISCORD"}),
+    "INTERVIEW": ({"SOLO_MIC", "SOLO_DISCORD"}, {"SOLO_GAME"}),
+    "STANDBY": ({"SOLO_MIC"}, {"SOLO_GAME", "SOLO_DISCORD"}),
+    "INTERMISSION": ({"SOLO_MIC"}, {"SOLO_GAME", "SOLO_DISCORD"}),
+    "INTRO": (set(), {"SOLO_GAME", "SOLO_MIC", "SOLO_DISCORD"}),
+    "OUTRO": (set(), {"SOLO_GAME", "SOLO_MIC", "SOLO_DISCORD"}),
+    "TRAILER": (set(), {"SOLO_GAME", "SOLO_MIC", "SOLO_DISCORD"}),
+    "DISCORD": ({"SOLO_MIC", "SOLO_DISCORD"}, {"SOLO_GAME"}),
+    "WEBCAM": ({"SOLO_GAME", "SOLO_MIC"}, {"SOLO_DISCORD"}),
+    "CAPTURE": ({"SOLO_GAME", "SOLO_MIC"}, {"SOLO_DISCORD"}),
+}
+
+
+def t_solo_macros_follow_the_spec_audio_table():
+    solo = _config_block(_html(), "CONFIG_SOLO")
+    rows = re.findall(r'soloMacro\("([^"]+)",\s*"[^"]+",\s*\[([^\]]*)\],\s*\[([^\]]*)\]\)', solo)
+    got = {label: ({x.strip() for x in on.split(",") if x.strip()},
+                   {x.strip() for x in off.split(",") if x.strip()}) for label, on, off in rows}
+    assert got == SOLO_AUDIO_TABLE, got
+
+
+def t_solo_audio_inputs_exist_in_both_solo_collections():
+    h = _html()
+    names = dict(re.findall(r'(SOLO_GAME|SOLO_MIC|SOLO_DISCORD) = "([^"]+)"', h))
+    assert set(names) == {"SOLO_GAME", "SOLO_MIC", "SOLO_DISCORD"}, names
+    for filename in ("GT_Racing_Solo_POV.json", "GT_Racing_Solo_Commentary.json"):
+        with open(os.path.join(ROOT, "src", "obs", filename), encoding="utf-8") as fh:
+            sources = {s["name"] for s in json.load(fh)["sources"]}
+        for const, name in names.items():
+            assert name in sources, f"{filename}: no input {name!r} for {const}"
+
+
+def t_endurance_macro_inputs_exist():
+    cfg = _config_block(_html(), "CONFIG")
+    with open(os.path.join(ROOT, "src", "obs", "GT_Racing_Endurance.json"), encoding="utf-8") as fh:
+        sources = {s["name"] for s in json.load(fh)["sources"]}
+    for group in re.findall(r"(?:un)?mute:\[([^\]]*)\]", cfg):
+        for name in re.findall(r'"([^"]+)"', group):
+            assert name in sources, f"macro input {name!r} is not in the endurance collection"
 def t_feed_reset_is_labelled_as_the_backlog_resolution():
     # The one RESET button per feed doubles as the deliberate backlog fix. It jumps
     # OBS back to live, so it says so and shows the cost from /status on each poll,
@@ -330,19 +365,6 @@ def t_solo_status_strip_names_the_car():
     assert '$("#stCar b").textContent = carLabel(car);' in poll
     assert "function carLabel(car)" in html
 
-
-def t_solo_collapses_the_feeds_column():
-    h = _html()
-    assert '<div class="cols" id="ctlCols">' in h, "the Feeds|Scn-Vis block carries its own id"
-    assert '<div class="colstack" id="feedsCol">' in h, "the Feeds column carries its own id"
-    _order(h, 'id="feedsCol"', 'id="feedsSec"', '<div class="cap">Scn·Vis</div>')
-    hide = h[h.index("Kind-conditional cut (#307)"):]
-    hide = hide[:hide.index("{ display: none !important; }")]
-    assert "body.solo #feedsCol" in hide, "solo hides the whole Feeds column, not only its card"
-    assert "body.solo #ctlCols{grid-template-columns:1fr}" in h, \
-        "solo gives Scn-Vis and Timer the full width"
-    assert "body.solo .cols{" not in h and "body.solo .cols {" not in h, \
-        "the Graphics|Audio block keeps its two columns in solo"
 
 
 def _config_block(html, name):
@@ -404,6 +426,233 @@ def t_prerace_and_grid_busses_rebuild_with_the_config():
     assert "cfg.graphicsGrid.forEach" in body, "grid keys not built from cfg"
     assert "CONFIG.graphicsPreRace" not in h and "CONFIG.graphicsGrid" not in h, \
         "pre-race/grid keys still built once from the endurance CONFIG"
+
+
+AREAS = ("handover", "graphics", "hud", "cues", "audio",
+         "broadcast", "schedule", "setup", "fault")
+
+# Every id of the page before the frame (#728). Only the three layout wrappers the
+# frame replaced may go; a missing id here is a control the reshuffle dropped.
+OLD_IDS = (
+    "audio", "backConsole", "banners", "bchatBox", "bchatCompose", "bchatLog",
+    "bchatRefresh", "brandSub", "brandSubEdit", "brandSubInput", "brandSubText", "chatBox",
+    "chatInput", "chatLog", "chatName", "chatSendBtn", "chatUnread", "condRow",
+    "cueBackList", "cueBackWrap", "cueHint", "cueLevel", "cuePresets", "cueRecent",
+    "cueSend", "cueTarget", "cueText", "cuesBus", "feedHealth", "feedQuality", "feedsBus",
+    "feedsSec", "flagGfxBus", "gfxBrowseBox", "gfxBus", "gfxGridBus", "gfxGridTopBus",
+    "gfxList", "gfxPreRaceBus", "gfxRefresh", "hudBus", "ledObs", "ledRelay", "log",
+    "modeChip", "modeSwitch", "notesBody", "notesBtn", "notesModal", "obsRefreshBtn",
+    "obsStreamBtn", "partActionBtn", "partControl", "partModal", "partModalBody",
+    "partModalConfirm", "partModalInput", "partModalPhrase", "partModalTitle", "partStatus",
+    "pgmAudio", "pgmAudioBar", "pgmAudioBtn", "pgmAudioVol", "pgmBus", "povActionsBus",
+    "povName", "povSave", "povUrl", "previewSec", "pvBody", "pvProgram", "pvProgramFrame",
+    "pvProgramLabel", "pvToggle", "qualClear", "qualInfo", "qualLive", "qualNm", "qualRow",
+    "qualSave", "qualSched", "qualSt", "qualUrl", "raceSched", "rebuildRearm", "schedAdd",
+    "schedBody", "scnBus", "scnVisBus", "setupInfo", "setupRow", "stA", "stAir", "stB",
+    "stBehind", "stCar", "stHealth", "stPov", "stTimer", "subInfo", "subReason", "subSave",
+    "subSec", "subsBody", "subsBox", "subsCount", "subsEmpty", "teamRow", "timerBus",
+    "timerInfo", "toasts", "top3Apply", "top3BatchTgl", "txBar", "txDur", "urlsBox")
+
+
+def _block(html, start, end_marker):
+    i = html.index(start)
+    return html[i:html.index(end_marker, i)]
+
+
+def _area(html, name):
+    """The markup of one workspace area, up to the next area or the action log."""
+    i = html.index(f'<div class="area" data-area="{name}">')
+    ends = [j for j in (html.find('<div class="area"', i + 1), html.find('<div id="log">', i))
+            if j != -1]
+    return html[i:min(ends)]
+
+
+def _func_src(html, name):
+    """One top-level function: up to its closing brace or the next declaration."""
+    i = html.index(f"function {name}(")
+    ends = [j for j in (html.find(m, i + 1) for m in ("\n}\n", "\nfunction ", "\nasync function "))
+            if j != -1]
+    return html[i:min(ends)]
+
+
+def t_old_controls_survive_the_frame():
+    h = _html()
+    missing = [i for i in OLD_IDS if f'id="{i}"' not in h]
+    assert not missing, f"controls dropped by the frame: {missing}"
+    for gone in ("ctlCols", "feedsCol", "txArmed"):
+        assert f'id="{gone}"' not in h, f"#{gone} belongs to the old layout"
+
+
+def t_frame_columns_in_order():
+    _order(_html(), '<div class="frame">', '<nav id="areaNav"', '<section id="liveCol"',
+           '<main id="workspace">', '<aside class="rail" id="chatRail"')
+
+
+def t_nav_and_areas_match_the_spec_topics():
+    h = _html()
+    nav = re.findall(r'class="navbtn" data-area="([a-z]+)"', h)
+    assert tuple(nav) == AREAS, nav
+    areas = re.findall(r'<div class="area" data-area="([a-z]+)">', h)
+    assert tuple(areas) == AREAS, areas
+    assert '<span class="navhead">On air</span>' in h and '<span class="navhead">Operations</span>' in h
+
+
+def t_cards_sit_in_their_area():
+    h = _html()
+    homes = {
+        "handover": ("handoverSec", "hoOnAir", "hoNext", "hoUpcoming"),
+        "graphics": ("gfxBus", "gfxPreRaceBus", "gfxGridTopBus", "gfxGridBus", "flagGfxBus"),
+        "hud": ("hudBus", "setupRow", "teamRow", "condRow", "timerBus"),
+        "cues": ("cuesBus", "cueText", "cueRecent"),
+        "audio": ("audio",),
+        "broadcast": ("streamSec", "obsStreamBtn", "partControl", "subSec"),
+        "schedule": ("urlsBox", "subsBox"),
+        "setup": ("gfxBrowseBox",),
+        "fault": ("feedsSec", "feedsBus", "feedQuality", "emergencySec", "emergencyBus", "scnVisSec", "obsToolsSec", "obsRefreshBtn"),
+    }
+    for area, ids in homes.items():
+        seg = _area(h, area)
+        for cid in ids:
+            assert f'id="{cid}"' in seg, f"#{cid} is not in the {area} area"
+
+
+def t_live_column_holds_what_acts_on_air():
+    h = _html()
+    live = _block(h, '<section id="liveCol"', '<main id="workspace">')
+    _order(live, 'id="previewSec"', 'id="liveOnAir"', 'id="armBtn"', 'id="nextBtn"',
+           'id="pgmBus"', 'id="overlaySec"', 'id="scnVisBus"', 'id="txBar"')
+    for cid in ("obsRefreshBtn", "obsStreamBtn", "partControl"):
+        assert f'id="{cid}"' not in live, f"#{cid} is not a live control"
+    assert 'data-tx="cut"' in live and 'id="txDur"' in live
+    assert '<div class="liveair" id="liveOnAir">' in live and "  .onair{" not in h, \
+        "the on-air card must not reuse .onair, which styles the on-air preview tile"
+
+
+def t_chat_rail_holds_both_chats_as_sections():
+    h = _html()
+    rail = _block(h, '<aside class="rail" id="chatRail"', "</aside>")
+    _order(rail, 'id="chatBox"', 'id="railSplit"', 'id="bchatBox"')
+    assert "<details" not in rail, "a <details> passes no height to its children"
+    assert '$("#chatBox").open' not in h, "chat visibility goes through chatVisible()"
+    assert h.count("chatVisible()") >= 2
+    assert '<button type="button" id="chatDrawerBtn"' in h and 'id="drawerUnread"' in h
+    assert '$("#drawerUnread")' in _func_src(h, "chatUpdateBadge"), "the drawer button shows unread too"
+    assert 'e.key === "Escape" && document.body.classList.contains("chats-open")) setDrawer(false);' in h, \
+        "the open drawer covers its own button, so Escape must close it"
+    assert '!e.target.closest("#chatRail, #chatDrawerBtn")' in h, "a click beside the drawer closes it"
+
+
+def t_rail_split_is_draggable_and_remembered():
+    h = _html()
+    assert "grid-template-rows:minmax(140px,var(--crew,58fr)) 12px minmax(140px,var(--bcast,42fr))" in h
+    assert 'role="separator"' in h and 'tabindex="0"' in _block(h, 'id="railSplit"', "</div>")
+    src = _func_src(h, "applySplit")
+    assert "Math.min(0.8, Math.max(0.2, r))" in src, "the split is clamped"
+    assert 'SPLIT_KEY = "rc_chat_split"' in h
+
+
+def t_area_and_nav_state_are_remembered_per_browser():
+    h = _html()
+    assert 'AREA_KEY = "rc_area"' in h and 'NAV_KEY = "rc_nav_collapsed"' in h
+    store, recall = _func_src(h, "store"), _func_src(h, "recall")
+    assert "try{" in store and "try{" in recall, "storage access must survive private mode"
+    assert "store(AREA_KEY, name)" in _func_src(h, "showArea")
+
+
+def t_area_falls_back_when_hidden():
+    h = _html()
+    assert "if (!AREAS.includes(name)) return false;" in _func_src(h, "areaAvailable"), \
+        "a stored area name must be checked before it reaches a selector"
+    src = _func_src(h, "showArea")
+    assert 'if (!areaAvailable(name)) name = document.body.classList.contains("solo") ? "graphics" : "handover";' in src
+
+
+def t_next_moved_into_the_live_column():
+    h = _html()
+    assert 'FEED_ACTIONS.filter(([label]) => label !== "NEXT")' in h or \
+           'FEED_ACTIONS.filter(([label])=>label !== "NEXT")' in h, "NEXT left the feeds bus"
+    handler = _block(h, '$("#nextBtn").addEventListener("click"', "});")
+    assert 'relayCall(`next?transition=${activeTransition}&duration=' in handler, \
+        "the handover cut uses the transition armed in the live column"
+    assert "setTimeout(() => { b.disabled = false; }, 3000)" in handler, "double-press guard"
+
+
+def t_arm_targets_the_off_air_feed_only_in_manual_mode():
+    src = _func_src(_html(), "renderLive")
+    assert 'd.feeds.A.index <= d.feeds.B.index ? "A" : "B"' in src, "live feed = lower index"
+    assert "arm.hidden = !manual || qual || end;" in src
+    assert "arm.dataset.feed = off;" in src
+    assert '$("#nextBtn").classList.toggle("ready", serving && !end);' in src
+
+
+def t_handover_matches_a_submission_by_sheet_row():
+    src = _func_src(_html(), "renderHandover")
+    assert 'e.target_line === r.sheetRow' in src, "stint labels can repeat; the sheet row cannot"
+    assert "const pend = subs.length === 1 ? subs[0] : null;" in src, \
+        "two submissions for one row must not be approvable with one click"
+    assert "st.textContent = pend ? pend.proposed_url" in src, "the director sees the link before approving"
+
+
+def t_handover_renders_text_only():
+    h = _html()
+    for fn in ("renderHandover", "hoCard", "renderLive", "setNav"):
+        assert "innerHTML" not in _func_src(h, fn), f"{fn} must not build markup from relay data"
+
+
+def t_live_column_follows_every_status_poll():
+    poll = _func_src(_html(), "relayPoll")
+    assert "renderLive(d);" in poll and "renderLive(null);" in poll
+
+
+def t_solo_hides_handover_and_the_feed_switch():
+    h = _html()
+    hide = h[h.index("Kind-conditional cut (#307)"):]
+    hide = hide[:hide.index("{ display: none !important; }")]
+    for sel in ("body.solo #handoverCtl", "body.solo #nextStep", "body.solo #feedsSec"):
+        assert sel in hide, f"solo must hide {sel}"
+    assert "body.solo #emergencySec" in hide, "solo has no feed pair to switch"
+    assert "scnVisSec" not in _func_src(h, "soloLayout"), "solo scenes are macros, raw keys stay in Troubleshoot"
+    assert "soloLayout(template);" in _func_src(h, "applySolo")
+
+
+def t_frame_fills_the_window_without_banners():
+    h = _html()
+    assert "#banners:empty{display:none}" in h
+    assert "grid-row:3}" in _block(h, "  .frame{display:grid", "\n  .frame>"), \
+        "with no banner the frame would fall into the auto row and leave the 1fr row empty"
+
+
+def t_keyboard_shortcuts_are_off_by_default_and_shown_in_the_header():
+    h = _html()
+    assert '<button type="button" id="kbdBtn" class="kbdbtn" aria-pressed="false"' in h
+    assert 'KEYS_KEY = "rc_keys"' in h
+    assert _func_src(h, "keysOn").count('recall(KEYS_KEY) === "1"') == 1, "on only after an explicit opt-in"
+
+
+def t_keyboard_shortcuts_cover_next_and_the_scene_macros_only():
+    src = _func_src(_html(), "kbdTarget")
+    assert 'if (key === "n")' in src
+    assert "/^[1-9]$/.test(key)" in src
+    assert 'filter(b => b._m)' in src, "RED FLAG and other toggles get no key"
+
+
+def t_keyboard_shortcut_needs_a_confirming_second_press():
+    h = _html()
+    src = _block(h, 'document.addEventListener("keydown", e => {\n  if (!keysOn()', "\n});")
+    assert "if (!keysOn() || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;" in src
+    assert 'closest("input, textarea, select, [contenteditable]")' in src, "never while typing"
+    assert "kbdArmed.key === key && now - kbdArmed.at <= KEY_CONFIRM_MS" in src
+    # The first press only arms; the click happens solely on the confirmed branch.
+    assert src.count("btn.click()") == 1
+    confirmed = src[src.index("kbdArmed.key === key"):src.index("btn.click()")]
+    assert "kbdArm(" not in confirmed
+
+
+def t_breakpoints():
+    h = _html()
+    assert 'matchMedia("(min-width:900px) and (max-width:1599px)")' in h, "nav collapses below 1600"
+    assert "@media(max-width:1279px)" in h, "chats become a drawer below 1280"
+    assert "@media(max-width:899px)" in h, "one column below 900"
 
 
 if __name__ == "__main__":

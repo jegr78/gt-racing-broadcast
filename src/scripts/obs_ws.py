@@ -1252,6 +1252,26 @@ def resolve_transition(choice, transitions):
     return (None, "")
 
 
+def select_transition(session, transition, duration_ms=None):
+    """Make `transition` (cut, fade or stinger, resolved by kind) and its duration the
+    current OBS transition on `session`. A missing stinger degrades to a cut; the
+    returned note says so. No transition leaves OBS as it is. May raise."""
+    if not transition:
+        return ""
+    out_note = ""
+    tlist = session.request("GetSceneTransitionList", {}).get("transitions", [])
+    name, resolve_note = resolve_transition(transition, tlist)
+    if name is None and transition == "stinger":
+        name, _ = resolve_transition("cut", tlist)     # degrade to a cut
+        out_note = resolve_note
+    if name:
+        session.request("SetCurrentSceneTransition", {"transitionName": name})
+        if transition != "cut" and duration_ms is not None:
+            session.request("SetCurrentSceneTransitionDuration",
+                            {"transitionDuration": int(duration_ms)})
+    return out_note
+
+
 def set_current_program_scene(scene, host="127.0.0.1", port=None,
                               password=None, timeout=2.0,
                               transition=None, duration_ms=None, session=None):
@@ -1266,19 +1286,8 @@ def set_current_program_scene(scene, host="127.0.0.1", port=None,
         session, note = _connect(host, port, password, timeout)
     if session is None:
         return False, note
-    out_note = ""
     try:
-        if transition:
-            tlist = session.request("GetSceneTransitionList", {}).get("transitions", [])
-            name, resolve_note = resolve_transition(transition, tlist)
-            if name is None and transition == "stinger":
-                name, _ = resolve_transition("cut", tlist)     # degrade to a cut
-                out_note = resolve_note
-            if name:
-                session.request("SetCurrentSceneTransition", {"transitionName": name})
-                if transition != "cut" and duration_ms is not None:
-                    session.request("SetCurrentSceneTransitionDuration",
-                                    {"transitionDuration": int(duration_ms)})
+        out_note = select_transition(session, transition, duration_ms)
         session.request("SetCurrentProgramScene", {"sceneName": scene})
         return True, out_note
     except Exception as exc:                          # noqa: BLE001  best-effort contract
@@ -1489,7 +1498,8 @@ def read_obs_state(sources, inputs, host="127.0.0.1", port=None,
 
 def reflect_feed_state(live, do_cut, scene=STINT_SCENE, sources=None,
                        host="127.0.0.1", port=None, password=None, timeout=2.0,
-                       session=None, audio=None, extra_mute=()):
+                       session=None, audio=None, extra_mute=(),
+                       transition=None, duration_ms=None):
     """Reflect which feed, A or B, is on air into OBS: show and hide the Stint-scene
     sources, mute and unmute the feed audio inputs plus the commentary mic of a local
     stint (see feed_audio_plan), and cut the program to Stint when do_cut is set.
@@ -1497,7 +1507,8 @@ def reflect_feed_state(live, do_cut, scene=STINT_SCENE, sources=None,
     because a handover must go through even if OBS is closed. A failed mute is noted
     and skipped, so an input the collection lacks never stops the cut, while a failed
     show or hide still aborts. On any failure the relay falls back to the manual
-    panel and Companion controls."""
+    panel and Companion controls. `transition`/`duration_ms` pick the OBS transition
+    for the cut (see select_transition); without them the cut is hard."""
     intents = feed_state_intents(live, do_cut, scene=scene, sources=sources,
                                  audio=audio, extra_mute=extra_mute)
     note = ""
@@ -1525,6 +1536,9 @@ def reflect_feed_state(live, do_cut, scene=STINT_SCENE, sources=None,
                     notes.append(f"{verb} {target}: {str(exc) or exc.__class__.__name__}")
                     continue
             elif verb == "cut":
+                tnote = select_transition(session, transition, duration_ms)
+                if tnote:
+                    notes.append(tnote)
                 session.request("SetCurrentProgramScene", {"sceneName": target})
             applied.append((verb, target))
         return applied, "; ".join(notes)
