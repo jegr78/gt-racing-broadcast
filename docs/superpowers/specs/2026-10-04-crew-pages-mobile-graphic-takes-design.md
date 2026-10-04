@@ -69,24 +69,21 @@ relay start. Switching the mode drops open requests.
 
 ## Graphic definitions
 
-The relay owns one definition per collection (endurance, solo):
-
-```
-label, OBS source, scenes, group (editorial | flag), roles
-```
-
-`GET /obs/graphics` returns it for the caller's role together with the live state:
-program scene, and per entry whether it is visible and who set it. The panel builds
-its graphic buses from this list and drops `CONFIG.graphics` and friends; the
-cockpit and the Race Control desk build their graphic card from it. A Sheet asset
-without an entry stays view-only.
+`src/scripts/graphic_takes.py` holds one definition per collection (endurance,
+solo): OBS source (also the Sheet label), scenes, group (editorial or flag), roles.
+The editorial list derives from `obs_ws.GRAPHIC_SOURCES` (the Companion graphic
+route, #706) minus the director-only sources, and the flags come from
+`flag_graphic.FLAG_GRAPHIC_SOURCES`, so no third list exists. A Sheet asset without
+an entry stays view-only.
 
 Rights:
 
-- Editorial graphics (standings, schedule, results, weather, pre-race, grid,
-  standby cover, post-race): commentator and Race Control.
+- Editorial graphics (standings, schedule, results, weather, weekend and race info,
+  next event, starting grid, post-race interviews): commentator and Race Control.
 - Flag graphics: Race Control only, through the existing flag store, so one flag
   stays active and the persisted value survives a relay restart.
+- Director only: Standby Cover (the panel's RED FLAG) and the grid rows (the
+  director's grid sequence). The HUD groups are not graphics.
 
 ## Take rules
 
@@ -102,12 +99,19 @@ Rights:
 - Rate limit: one take per person per 2 s. No step-up secret. The allowlist, the
   role check and the director's live override bound what a leaked token can do.
 
-Endpoints, all under the `/console` mount, gated by `console_policy`:
+Endpoints. The crew routes live under `/cockpit/`, where the relay already resolves
+the caller from the token at the tailnet root and under `/console`, because every
+`/obs/*` route is director-only in `console_policy`:
 
-- `POST /obs/graphics/take` `{label, on}`: direct mode, or a Race Control flag.
-- `POST /obs/graphics/request` `{label}`: request mode.
-- `POST /obs/graphics/request/<id>` `{action: take|decline}`: director only.
-- `POST /obs/graphics/mode` `{role, mode}`: director only, the live override.
+- `GET /cockpit/graphic-takes`: mode, program scene and every graphic with its
+  state, who set it and whether the caller may take it.
+- `POST /cockpit/graphic-takes` `{source, on}`: a take or hide, in direct mode or
+  for a Race Control flag.
+- `GET /obs/graphics`: the same list without per-caller rights, for the panel (also
+  token-less on the tailnet `/panel`).
+- Increment 4 adds `POST /cockpit/graphic-takes/request` `{source}` and the
+  director-only `POST /obs/graphics/request/<id>` `{action}` and
+  `POST /obs/graphics/mode` `{role, mode}`.
 
 ## Requests (director side)
 
@@ -145,7 +149,7 @@ with its feed letter.
 
 ## Increments
 
-1. **Relay (#744):** graphic definitions per collection, `GET /obs/graphics` with state,
+1. **Relay (#744):** graphic definitions per collection, `GET /cockpit/graphic-takes` and `GET /obs/graphics` with state,
    take endpoint with the take rules, `GRAPHICS_TAKE` (`off`, `direct`), crew-chat
    lines, rate limit. Tests for the rules and the gates.
 2. **Shared frame (#745):** `crew.js`/`crew.css`, live strip, bottom tabs, touch targets,
