@@ -228,8 +228,8 @@ def t_emergency_feed_switch_lives_in_troubleshoot_with_a_confirm():
         m = re.search(r'\{label:"FEED ' + feed + r' ON AIR",[^}]*\}', endurance)
         assert m and 'relayStint:"' + feed + '"' in m.group(0), feed
     assert 'id="emergencyBus"' in _area(h, "fault")
-    body = _func_body(h, "buildControls")
-    assert "cfg.emergency.forEach" in body and "if (!confirm(" in body, "the manual switch must be confirmed"
+    keys = _block(_func_body(h, "buildControls"), "cfg.emergency.forEach", '$("#emergencyBus").appendChild(b);')
+    assert "if (!confirm(" in keys and "return;" in keys, "the manual switch must be confirmed"
     assert "emergency: []," in _config_block(h, "CONFIG_SOLO")
 
 
