@@ -585,6 +585,13 @@ def t_solo_hides_handover_and_the_feed_switch():
     assert "soloLayout();" in _func_src(h, "applySolo")
 
 
+def t_frame_fills_the_window_without_banners():
+    h = _html()
+    assert "#banners:empty{display:none}" in h
+    assert "grid-row:3}" in _block(h, "  .frame{display:grid", "\n  .frame>"), \
+        "with no banner the frame would fall into the auto row and leave the 1fr row empty"
+
+
 def t_breakpoints():
     h = _html()
     assert 'matchMedia("(min-width:900px) and (max-width:1599px)")' in h, "nav collapses below 1600"

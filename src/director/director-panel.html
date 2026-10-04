@@ -478,7 +478,8 @@
   html,body{height:100%}
   body{padding:0}
   .app{display:grid;grid-template-rows:auto auto minmax(0,1fr);height:100vh;padding:12px;gap:10px}
-  .frame{display:grid;grid-template-columns:220px 360px minmax(0,1fr) 380px;gap:12px;min-height:0}
+  .frame{display:grid;grid-template-columns:220px 360px minmax(0,1fr) 380px;gap:12px;min-height:0;
+    grid-row:3}   /* the 1fr row, also while the empty #banners is display:none */
   .frame>*{min-height:0;min-width:0;overflow-y:auto}
 
   /* Navigation by topic; the order implies no procedure. */
