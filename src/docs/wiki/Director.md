@@ -72,8 +72,9 @@ Where each bus lives:
 | **URLs** (Schedule area) | the editor for the schedule and POV URLs, next to the commentators' link submissions |
 
 The **Handover** area shows the on-air stint, the next stint with its feed state (not
-armed, starting, ready) and the three stints after it: `link ready`, `submitted` with an
-**APPROVE** key for a pending link submission, or `no link yet`. **Setup** holds the
+armed, starting, ready) and the three stints after it: `link ready`, `no link yet`, or a
+commentator's pending link submission. One submission shows its link with an **APPROVE**
+key; two or more for the same stint point to the Schedule area, where each link is listed. **Setup** holds the
 graphics library, **Broadcast** the stream key and the substitution card, and
 **Troubleshoot** the raw feed controls, SCN·VIS and the OBS page refresh.
 

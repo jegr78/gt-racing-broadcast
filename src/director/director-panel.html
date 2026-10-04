@@ -551,9 +551,9 @@
   .hocard .hv{font:700 22px var(--head);letter-spacing:.03em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .hocard .hs{font-size:12px;color:var(--muted)}
   #hoUpcoming{margin-top:8px}
-  #hoUpcoming .hrow{display:grid;grid-template-columns:90px minmax(0,1fr) 140px 110px;gap:10px;
+  #hoUpcoming .hrow{display:grid;grid-template-columns:90px minmax(0,1fr) minmax(0,1.4fr) 110px;gap:10px;
     align-items:center;min-height:40px;border-top:1px solid #1e252d;font-size:12px}
-  #hoUpcoming .hrow .hst{color:var(--muted)}
+  #hoUpcoming .hrow .hst{color:var(--muted);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   #hoUpcoming .hrow .hst.ok{color:#8fe6b0}
   #hoUpcoming .hrow .hst.pend{color:#9fd0ff}
   #hoUpcoming .hrow .hst.warn{color:#ffd361}
@@ -3091,7 +3091,9 @@ var PHONE_MQ = matchMedia("(max-width:899px)");
 function store(k, v){ try{ localStorage.setItem(k, v); }catch(e){ /* private mode */ } }
 function recall(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
 
+var AREAS = ["handover", "graphics", "hud", "cues", "audio", "broadcast", "schedule", "setup", "fault"];
 function areaAvailable(name){
+  if (!AREAS.includes(name)) return false;   // a stale stored value never reaches the selector
   const b = document.querySelector(`.navbtn[data-area="${name}"]`);
   return !!b && getComputedStyle(b).display !== "none";
 }
@@ -3228,13 +3230,17 @@ function renderHandover(lf, live, of, off){
   box.replaceChildren();
   for (let i = lf.index + 1; i <= lf.index + 3 && i < schedRows.length; i++){
     const r = schedRows[i];
-    const pend = lastPending.find(e => e.mode !== "qualifying" && e.target_stint && e.target_stint === r.stint);
+    const subs = lastPending.filter(e => e.mode !== "qualifying" && e.target_line === r.sheetRow);
+    // One click approves only an unambiguous submission, and the row shows its link.
+    const pend = subs.length === 1 ? subs[0] : null;
     const row = document.createElement("div"); row.className = "hrow";
     const label = document.createElement("span"); label.textContent = r.stint || ("Row " + r.row);
     const who = document.createElement("span"); who.textContent = r.name || "—";
     const st = document.createElement("span");
-    st.className = "hst " + (pend ? "pend" : r.url ? "ok" : i === of.index ? "warn" : "");
-    st.textContent = pend ? "submitted" : r.url ? "link ready" : "no link yet";
+    st.className = "hst " + (subs.length ? "pend" : r.url ? "ok" : i === of.index ? "warn" : "");
+    st.textContent = pend ? pend.proposed_url : subs.length ? `${subs.length} submitted · see Schedule`
+                   : r.url ? "link ready" : "no link yet";
+    if (pend) st.title = pend.proposed_url;
     row.append(label, who, st);
     if (pend){
       const b = document.createElement("button"); b.type = "button"; b.textContent = "APPROVE";

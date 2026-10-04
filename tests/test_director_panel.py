@@ -462,7 +462,10 @@ def t_area_and_nav_state_are_remembered_per_browser():
 
 
 def t_area_falls_back_when_hidden():
-    src = _func_src(_html(), "showArea")
+    h = _html()
+    assert "if (!AREAS.includes(name)) return false;" in _func_src(h, "areaAvailable"), \
+        "a stored area name must be checked before it reaches a selector"
+    src = _func_src(h, "showArea")
     assert 'if (!areaAvailable(name)) name = document.body.classList.contains("solo") ? "graphics" : "handover";' in src
 
 
@@ -481,6 +484,14 @@ def t_arm_targets_the_off_air_feed_only_in_manual_mode():
     assert "arm.hidden = !manual || qual || end;" in src
     assert "arm.dataset.feed = off;" in src
     assert '$("#nextBtn").classList.toggle("ready", serving && !end);' in src
+
+
+def t_handover_matches_a_submission_by_sheet_row():
+    src = _func_src(_html(), "renderHandover")
+    assert 'e.target_line === r.sheetRow' in src, "stint labels can repeat; the sheet row cannot"
+    assert "const pend = subs.length === 1 ? subs[0] : null;" in src, \
+        "two submissions for one row must not be approvable with one click"
+    assert "st.textContent = pend ? pend.proposed_url" in src, "the director sees the link before approving"
 
 
 def t_handover_renders_text_only():
