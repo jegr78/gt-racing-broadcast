@@ -696,6 +696,11 @@ def t_status_pills_shorten_instead_of_clipping():
     assert re.search(r"\.strip:not\(\.compact\) \.sts\{display:none\}", html), "full mode hides the short text"
     assert re.search(r'stopped:\["STOPPED",\s*"",\s*"STOP"\]', html), "each feed state needs a short form"
     assert "new ResizeObserver(fitStrip)" in html, "the strip re-fits when the header width changes"
+    fit = html[html.index("function fitStrip("):]
+    fit = fit[:fit.index("\n}\n")]
+    assert fit.index('add("compact")') < fit.index('add("tight")') < fit.index('add("stripwrap")'), \
+        "the strip steps down short forms, then tighter pills, then its own row"
+    assert re.search(r"header\.stripwrap \.strip\{[^}]*flex:1 0 100%", html), "the last step gives the strip a full row"
     for pill in ('"#stPov"', "statePill("):
         assert pill in html
 

@@ -1871,9 +1871,8 @@ function renderAir(visState){
 
 
 /* Relay status strip, which works without OBS */
-/* state -> [pill suffix, pill css class]. Durations and staleness come from the
-   relay (state_age_s, cookies_health); this file only renders. */
-// [pill text, pill class, short text for a header too narrow for the full pills]
+/* state -> [pill suffix, pill css class, short suffix for a narrow header]. Durations
+   and staleness come from the relay (state_age_s, cookies_health); this file only renders. */
 const FEED_STATE = {serving:["LIVE","ok","LIVE"], connecting:["CONN","warn","CONN"],
                     idle:["IDLE","","IDLE"], stopped:["STOPPED","","STOP"]};
 function fmtDur(s){
