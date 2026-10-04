@@ -95,6 +95,14 @@ def t_parse_if_table2_empty_or_short():
         "a header claiming more rows than the buffer holds is unreadable"
 
 
+def t_windows_reader_returns_live_counters():
+    if not r.IS_WIN:
+        return
+    got = r._read_net()
+    assert got and got[0] == "counter", got
+    assert got[1] > 0, f"no hardware NIC survived the row selection on this host: {got}"
+
+
 def t_no_typeperf_under_src():
     hits = []
     for base, _dirs, files in os.walk(os.path.join(ROOT, "src")):
