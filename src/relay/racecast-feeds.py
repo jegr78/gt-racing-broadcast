@@ -737,6 +737,7 @@ class ProgramShotCache:
 # One shared cache instance; the program image is identical for every console view,
 # so the Director Panel and the Cockpit/Race-Control monitors all read through it.
 _program_shot_cache = ProgramShotCache()
+_source_shot_caches = {}          # solo preview tiles, one cache per allowlisted key
 
 
 def feed_stalled(last_byte_ts, now, stall_s=FANOUT_STALL_S):
@@ -4892,6 +4893,19 @@ class _PreviewRingTap:
 
 
 PREVIEW_FEEDS = ("A", "B", "POV")        # tiles the Director Panel can request
+# Solo tiles (#730): OBS inputs the panel may preview, per solo template.
+SOLO_PREVIEW_SOURCES = {"capture": "Solo Capture Device", "webcam": "Solo Webcam Device",
+                        "tyres": "Solo Tyres Capture Device"}
+SOLO_PREVIEW_TEMPLATES = {"tyres": ("commentary",)}
+
+
+def solo_preview_source(key, template):
+    """The OBS input behind a solo preview tile, or None when `key` is not on the
+    allowlist or the template's collection has no such input. Pure."""
+    name = SOLO_PREVIEW_SOURCES.get(key)
+    if name is None or template not in SOLO_PREVIEW_TEMPLATES.get(key, SOLO_TEMPLATES):
+        return None
+    return name
 
 
 def preview_source(target, live, pov_active, feed_keys, fanout=False):
@@ -10774,6 +10788,20 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     if preview_manager is None:
                         return self._send({"error": "preview disabled"}, 404)
                     data, note = preview_manager.still(target)
+                    if data is None:
+                        return self._send({"error": "preview unavailable",
+                                           "note": note}, 503)
+                    return self._send_jpeg(data)
+                if len(p) == 3 and p[:2] == ["preview", "source"]:
+                    name = (solo_preview_source(p[2], solo_template(os.environ))
+                            if relay.solo else None)
+                    if name is None:
+                        return self._send({"error": "unknown source", "source": p[2]}, 404)
+                    if _obs_ws is None:
+                        return self._send({"error": "obs unavailable"}, 503)
+                    cache = _source_shot_caches.setdefault(p[2], ProgramShotCache())
+                    data, note = cache.fetch(
+                        lambda: relay._obs.get_source_screenshot(name, width=320))
                     if data is None:
                         return self._send({"error": "preview unavailable",
                                            "note": note}, 503)
