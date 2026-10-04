@@ -670,6 +670,51 @@ def t_breakpoints():
     assert "@media(max-width:899px)" in h, "one column below 900"
 
 
+def t_obs_poll_survives_an_input_missing_from_obs():
+    html = _html()
+    poll = html[html.index("async function obsStatePoll"):]
+    poll = poll[:poll.index("renderAir(visState)")]
+    assert re.search(r'if \(!a \|\| typeof a\.volumeDb !== "number"\) continue;', poll), \
+        "an input OBS lacks (volumeDb null) must be skipped, not throw and paint the OBS LED red"
+
+
+def t_collapsed_nav_buttons_carry_their_name_as_tooltip():
+    html = _html()
+    assert re.search(r'\.navbtn"\)\.forEach\(b\s*=>\s*navTitle\(b\)\)', html), \
+        "every nav button needs its title set on load"
+    fn = html[html.index("function setNav("):]
+    fn = fn[:fn.index("\n}\n")]
+    assert "navTitle(b)" in fn, "a status reason must reach the tooltip too"
+    nt = html[html.index("function navTitle("):]
+    nt = nt[:nt.index("\n}\n")]
+    assert "aria-label" in nt and "b.title" in nt, "the tooltip doubles as the accessible name"
+
+
+def t_status_pills_shorten_instead_of_clipping():
+    html = _html()
+    assert re.search(r"\.strip\.compact \.stl\{display:none\}", html), "compact mode hides the long text"
+    assert re.search(r"\.strip:not\(\.compact\) \.sts\{display:none\}", html), "full mode hides the short text"
+    assert re.search(r'stopped:\["STOPPED",\s*"",\s*"STOP"\]', html), "each feed state needs a short form"
+    assert "new ResizeObserver(fitStrip)" in html, "the strip re-fits when the header width changes"
+    fit = html[html.index("function fitStrip("):]
+    fit = fit[:fit.index("\n}\n")]
+    assert fit.index('add("compact")') < fit.index('add("tight")') < fit.index('add("stripwrap")'), \
+        "the strip steps down short forms, then tighter pills, then its own row"
+    assert re.search(r"header\.stripwrap \.strip\{[^}]*flex:1 0 100%", html), "the last step gives the strip a full row"
+    for pill in ('"#stPov"', "statePill("):
+        assert pill in html
+
+
+def t_crew_take_modes_explain_themselves():
+    html = _html()
+    assert "Crew graphic takes" in html, "the take-mode group needs a heading that says what it controls"
+    modes = html[html.index("const TAKE_MODES"):]
+    modes = modes[:modes.index("];")]
+    assert modes.count("[") == 4 and modes.count('"') >= 18, \
+        "each mode needs a key label, a short meaning and a tooltip"
+    assert "b.title = help" in html, "the long meaning goes into the key tooltip"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
