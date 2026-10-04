@@ -478,7 +478,7 @@ def t_rendered_checks_skip_without_browser():
         assert len(rendered) == len(driver.RENDERED_CHECKS), rendered
         assert all(r.status == "skip" for r in rendered), rendered
         names = {r.name for r in rendered}
-        assert names == {"render_tally_pill", "render_funnel_pill",
+        assert names == {"render_tally_pill", "render_funnel_pill", "render_cockpit_phone",
                          "render_panel_shortcut_confirm"}, names
     finally:
         driver._playwright_available = saved

@@ -27,7 +27,7 @@
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
   body { margin: 0; font: 15px/1.4 system-ui, sans-serif; background: #0b0d10; color: #e8eaed; }
-  header { display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: #14171c; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 10px 14px; background: #14171c; }
   header h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .02em; }
   a.back { display: inline-flex; align-items: center; gap: 6px; text-decoration: none;
            color: #e8eaed; background: #1b1f25; border: 1px solid #232830; border-radius: 8px;
@@ -107,7 +107,7 @@
     /* Stacked: the chat returns to normal flow with a bounded scroll height, and
        flex:1 1 0 is reset because in a column it would zero the items' heights. */
     .leftcol, .leftrow2 { flex-direction: column; }
-    .leftcol > .progwrap { flex: 0 0 auto; }
+    .leftcol > .progwrap, .leftrow2 > .card { flex: 0 0 auto; }
     #bchatCard { flex: 0 0 auto; position: static; overflow: visible; }
     #bchat { position: static; }
     #bchatlog { max-height: 50vh; }
