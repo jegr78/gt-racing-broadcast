@@ -5936,6 +5936,12 @@ def cockpit_own_stints(rows, me_key):
     return out
 
 
+def schedule_rows(relay):
+    """The relay's active schedule rows; [] in solo, which has no schedule source."""
+    src = relay.source
+    return src.get_rows() if src else []
+
+
 def own_submission_target(rows, me_key, stint=None, row=None):
     """Resolve the schedule row a commentator (*me_key*) may write via a cockpit
     submission. Returns (True, {target_line, target_stint, streamer_name,
@@ -10358,7 +10364,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                     cookie_token=self._cockpit_token(), cookie_path="/console")
                     return None
                 if sub == ["race-control", "data"] and method == "GET":
-                    rows = relay.source.get_rows()
+                    rows = schedule_rows(relay)
                     live = relay.live_row_map()
                     live_idx = relay.on_air_row_idx()
                     return self._send({
@@ -10859,7 +10865,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         me = self._console_auth()
                         if me is None:
                             return None
-                        rows = relay.source.get_rows()
+                        rows = schedule_rows(relay)
                         live_idx = relay.on_air_row_idx()
                         tally = cockpit_tally(rows, live_idx, me)
                         # The commentator's OWN pending submissions (stint + id
@@ -10991,7 +10997,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     pend = submission_store.list() if submission_store else []
                     return self._send({"pending": pend})
                 if p == ["schedule", "data"]:
-                    rows = relay.source.get_rows()
+                    rows = schedule_rows(relay)
                     # Deliberately the PHYSICAL pull row, NOT live_row_map()/
                     # on_air_row_idx(): the Director Panel schedule EDITOR's "live"
                     # marker must warn which row a feed is actually pulling (so a
@@ -11004,7 +11010,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                                  "url": u, "name": n, "stint": st,
                                                  "live": live.get(i)}
                                                 for i, (u, n, st, line) in enumerate(rows)],
-                                       "source": relay.source.health()})
+                                       "source": relay.source.health() if relay.source else None})
                 if p == ["substitution", "latest"]:
                     # Director-panel read side for the ad-hoc stream-substitution
                     # section. Root path; mirrored at /console/substitution/latest
@@ -11176,7 +11182,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         if not _cockpit_chat_rl.allow(me):
                             return self._send({"error": "rate limited"}, 429)
                         # Identity is the token's streamer, never client-declared.
-                        name = cockpit_display_name(relay.source.get_rows(), me)
+                        name = cockpit_display_name(schedule_rows(relay), me)
                         return self._send(chat_store.add(user=name,
                                                          text=body.get("text")))
                     if p == ["cockpit", "submit"]:
@@ -11196,7 +11202,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         if not is_channel(url):
                             return self._send(
                                 {"error": "url must be a watch URL or UC… channel ID"}, 400)
-                        rows = relay.source.get_rows()
+                        rows = schedule_rows(relay)
                         ok, res = own_submission_target(
                             rows, me, stint=body.get("stint"), row=body.get("row"))
                         if not ok:
@@ -11239,7 +11245,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                             return self._send({"error": "cues disabled"}, 404)
                         if not _cockpit_cueback_rl.allow(me):
                             return self._send({"error": "rate limited"}, 429)
-                        name = cockpit_display_name(relay.source.get_rows(), me)
+                        name = cockpit_display_name(schedule_rows(relay), me)
                         return self._send(cue_store.add(
                             target=cue_admin.CUE_BACK_TARGET, level="info",
                             text=body.get("text"), from_name=name,
@@ -11255,7 +11261,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 if p == ["cues", "send"]:
                     if not cue_store:
                         return self._send({"error": "cues disabled"}, 404)
-                    rows = relay.source.get_rows()
+                    rows = schedule_rows(relay)
                     live_idx = relay.on_air_row_idx()
                     cur = live_schedule_row(rows, live_idx)
                     on_air_key = asset_key(cur["streamer"]) if cur else None
@@ -11274,7 +11280,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     # toast. Target resolves like a director cue (on-air/all/name).
                     if not cue_store:
                         return self._send({"error": "cues disabled"}, 404)
-                    rows = relay.source.get_rows()
+                    rows = schedule_rows(relay)
                     live_idx = relay.on_air_row_idx()
                     cur = live_schedule_row(rows, live_idx)
                     on_air_key = asset_key(cur["streamer"]) if cur else None
