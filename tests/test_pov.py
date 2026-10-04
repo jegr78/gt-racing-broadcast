@@ -321,6 +321,13 @@ def t_take_on_air_moves_the_relay_to_the_picked_feed():
     assert r.A.idx == 2
 
 
+def t_solo_template_is_normalized():
+    assert m.solo_template({"RACECAST_TEMPLATE": " POV "}) == "pov"
+    assert m.solo_template({"RACECAST_TEMPLATE": "commentary"}) == "commentary"
+    assert m.solo_template({"RACECAST_TEMPLATE": "other"}) == ""
+    assert m.solo_template({}) == ""
+
+
 def t_take_on_air_is_refused_in_solo():
     r = _relay(["s1", "s2"])
     r.solo = True

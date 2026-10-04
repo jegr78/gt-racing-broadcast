@@ -149,6 +149,20 @@ def t_pov_toggle_targets_stint_in_endurance():
     assert _reflected_pov_scene(False) == [("Stint", "Feed POV", True)]
 
 
+def t_solo_status_carries_the_template():
+    # The panel tells solo POV from solo commentary (#730), e.g. for the tyres tile.
+    r = _solo_relay()
+    old = os.environ.get("RACECAST_TEMPLATE")
+    os.environ["RACECAST_TEMPLATE"] = "commentary"
+    try:
+        assert r.status()["template"] == "commentary", r.status()
+    finally:
+        if old is None:
+            os.environ.pop("RACECAST_TEMPLATE", None)
+        else:
+            os.environ["RACECAST_TEMPLATE"] = old
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

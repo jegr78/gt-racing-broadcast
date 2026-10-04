@@ -623,6 +623,16 @@ def telemetry_enabled(environ):
     return str(environ.get("RACECAST_GT7_TELEMETRY", "")).strip().lower() not in _TELEMETRY_FALSEY
 
 
+SOLO_TEMPLATES = ("pov", "commentary")
+
+
+def solo_template(environ):
+    """The solo starter template the CLI injects (RACECAST_TEMPLATE): "pov",
+    "commentary", or "" when unknown."""
+    t = str(environ.get("RACECAST_TEMPLATE", "")).strip().lower()
+    return t if t in SOLO_TEMPLATES else ""
+
+
 def telemetry_active(solo, environ):
     """GT7 telemetry (the UDP listener + the /telemetry/* endpoints + the HUD
     telemetry block) is POV-only. It runs only in a solo POV broadcast: the driver
@@ -633,7 +643,7 @@ def telemetry_active(solo, environ):
     explicitly disabled. Pure so it is unit-testable."""
     return (bool(solo)
             and telemetry_enabled(environ)
-            and str(environ.get("RACECAST_TEMPLATE", "")).strip().lower() == "pov")
+            and solo_template(environ) == "pov")
 
 
 def should_failover(enabled, on_air_down, program_scene,
@@ -8863,6 +8873,7 @@ class Relay:
         """Status payload for solo mode: no A/B schedule/feeds. POV + OBS + health +
         league identity (the console/panel read these); mirrors the tail of status()."""
         out = {"mode": "solo", "solo": True, "feeds": {},
+               "template": solo_template(os.environ),
                "cookies": bool(self.cookies),
                "cookies_health": cookie_health(self.cookies, now=now)}
         if self.pov:
