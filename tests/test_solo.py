@@ -89,7 +89,7 @@ def _solo_server(**kw):
 
 
 def t_solo_schedule_rows_are_empty():
-    assert _solo_relay().schedule_rows() == [], "solo has no schedule source, so no rows"
+    assert m.schedule_rows(_solo_relay()) == [], "solo has no schedule source, so no rows"
 
 
 def t_solo_schedule_data_is_an_empty_schedule_not_a_500():
@@ -118,7 +118,7 @@ def t_handlers_read_the_schedule_through_the_solo_safe_accessor():
     with open(os.path.join(ROOT, "src", "relay", "racecast-feeds.py"), encoding="utf-8") as fh:
         src = fh.read()
     assert "relay.source.get_rows()" not in src, \
-        "relay.source is None in solo; handlers must call relay.schedule_rows()"
+        "relay.source is None in solo; handlers must call schedule_rows(relay)"
 
 
 if __name__ == "__main__":
