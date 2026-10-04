@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
-"""Stdlib structural checks for the Director Panel single-content layout.
+"""Stdlib structural checks for the Director Panel frame.
 Run: python3 tests/test_director_panel.py
 
 There is no JS runtime here: these assert markup and presence-of-code anchors over
 the served HTML string. Runtime behavior is verified in the render pass.
 
-The panel is one compact scrolling view: a full-width program deck, a full-width
-HUD, two 2-column control blocks, and the full-width Schedule, Submissions and
-Substitution at the bottom. These tests guard that structure and that no control
-was dropped in the reflow."""
+The panel is a fixed frame (#728): topic navigation, the live column, one workspace
+area at a time and the chat rail. These tests guard that structure and that no
+control of the old page was dropped."""
 import json
 import os
 import re
@@ -44,38 +43,7 @@ def t_tabs_removed():
     assert 'id="setupBadge"' not in h, "the SETUP tab badge is gone with the tabs"
 
 
-def t_single_content_layout_classes():
-    # The layout primitives are present: deck plus two-column control blocks.
-    h = _html()
-    assert 'class="deck"' in h, "program deck wrapper"
-    assert h.count('class="cols"') == 2, "two 2-column control blocks"
-    assert 'class="cues2"' in h, "Cues uses the full-width 2/1 body"
-    assert 'class="grp"' in h, "Graphics/Utilities use grouped sub-rows"
 
-
-def t_top_to_bottom_order():
-    # deck(preview -> PGM) -> HUD -> [Feeds | Scn.Vis -> Timer] -> Log -> Cues ->
-    # [Graphics(gfx/pre/grid/flag) | Audio -> Utilities(txBar)] -> Schedule ->
-    # Submissions -> Substitution. One straight DOM order, no tab wrappers.
-    h = _html()
-    _order(h,
-           'class="deck"',
-           'id="previewSec"', 'id="pgmBus"', 'id="txArmed"',
-           'id="hudBus"', 'id="setupRow"', 'id="teamRow"', 'id="condRow"',
-           'id="feedsBus"', 'id="scnBus"', 'id="timerBus"',
-           'id="log"',
-           'id="cuesBus"',
-           'id="gfxBus"', 'id="gfxPreRaceBus"', 'id="gfxGridTopBus"',
-           'id="gfxGridBus"', 'id="flagGfxBus"',
-           'id="audio"', 'id="txBar"', 'id="obsRefreshBtn"',
-           'id="urlsBox"', 'id="subsBox"', 'id="subSec"')
-
-
-def t_log_sits_between_feeds_and_cues():
-    # The action log sits below the Feeds/Timer row and above Cues, near Feeds.
-    h = _html()
-    _order(h, 'id="timerBus"', 'id="log"', 'id="cuesBus"')
-    assert 'id="log"' in h
 
 
 def t_no_control_dropped():
@@ -95,22 +63,11 @@ def t_no_control_dropped():
     assert h.count('data-tier="robust"') >= 2 and h.count('data-tier="emergency"') >= 2
 
 
-def t_header_is_sticky():
-    # The page header is the sticky element, not the PGM bus.
-    h = _html()
-    hdr = h.find("header{")
-    assert hdr != -1
-    seg = h[hdr:hdr + 200]
-    assert "position:sticky" in seg and "top:0" in seg
-    assert ".pgm{position:sticky" not in h
-
 
 def t_cues_two_column_body():
     # Cues compose and presets sit left, recent and cueback right, inside .cues2.
     h = _html()
-    cues = h.find('id="cuesBus"')
-    nxt = h.find('class="cols"', cues)          # the following control block
-    seg = h[cues:nxt]
+    seg = _area(h, "cues")
     assert 'class="cues2"' in seg
     assert seg.count('class="cuescol"') == 2
     _order(seg, 'id="cueTarget"', 'id="cuePresets"', 'id="cueRecent"')
@@ -127,26 +84,6 @@ def t_graphics_grouped_into_one_card():
         assert f'id="{cid}"' in seg, f"#{cid} must live inside the merged Graphics card"
 
 
-def t_utilities_merges_transition_and_obs():
-    # Transition (#txBar, id kept for CSS and JS) and OBS refresh live in one card.
-    h = _html()
-    tx = h.find('id="txBar"')
-    end = h.find('</section>', tx)
-    seg = h[tx:end]
-    assert 'id="obsRefreshBtn"' in seg, "OBS refresh folded into the Utilities card"
-    assert 'data-tx="cut"' in seg and 'id="txDur"' in seg
-
-
-def t_tx_chip_present_and_wired():
-    h = _html()
-    # chip lives in the deck's PGM section, before Cues
-    assert 'id="txArmed"' in h
-    pgm = h.find('class="bus pgm"')
-    assert pgm != -1 and h.find('id="txArmed"') > pgm
-    assert h.find('id="txArmed"') < h.find('id="cuesBus"'), "chip must be in the PGM/deck area"
-    assert 'chip.textContent = "TX: " + activeTransition.toUpperCase()' in h
-    # clicking the chip scrolls to the Utilities/Transition card
-    assert 'getElementById("txBar")' in h and "scrollIntoView" in h
 
 
 def t_setup_badge_is_safe_noop():
@@ -331,19 +268,6 @@ def t_solo_status_strip_names_the_car():
     assert "function carLabel(car)" in html
 
 
-def t_solo_collapses_the_feeds_column():
-    h = _html()
-    assert '<div class="cols" id="ctlCols">' in h, "the Feeds|Scn-Vis block carries its own id"
-    assert '<div class="colstack" id="feedsCol">' in h, "the Feeds column carries its own id"
-    _order(h, 'id="feedsCol"', 'id="feedsSec"', '<div class="cap">Scn·Vis</div>')
-    hide = h[h.index("Kind-conditional cut (#307)"):]
-    hide = hide[:hide.index("{ display: none !important; }")]
-    assert "body.solo #feedsCol" in hide, "solo hides the whole Feeds column, not only its card"
-    assert "body.solo #ctlCols{grid-template-columns:1fr}" in h, \
-        "solo gives Scn-Vis and Timer the full width"
-    assert "body.solo .cols{" not in h and "body.solo .cols {" not in h, \
-        "the Graphics|Audio block keeps its two columns in solo"
-
 
 def _config_block(html, name):
     """The source text of `const <name> = {...};`, up to the closing `};`."""
@@ -404,6 +328,182 @@ def t_prerace_and_grid_busses_rebuild_with_the_config():
     assert "cfg.graphicsGrid.forEach" in body, "grid keys not built from cfg"
     assert "CONFIG.graphicsPreRace" not in h and "CONFIG.graphicsGrid" not in h, \
         "pre-race/grid keys still built once from the endurance CONFIG"
+
+
+AREAS = ("handover", "graphics", "hud", "cues", "audio",
+         "broadcast", "schedule", "setup", "fault")
+
+# Every id of the page before the frame (#728). Only the three layout wrappers the
+# frame replaced may go; a missing id here is a control the reshuffle dropped.
+OLD_IDS = (
+    "audio", "backConsole", "banners", "bchatBox", "bchatCompose", "bchatLog",
+    "bchatRefresh", "brandSub", "brandSubEdit", "brandSubInput", "brandSubText", "chatBox",
+    "chatInput", "chatLog", "chatName", "chatSendBtn", "chatUnread", "condRow",
+    "cueBackList", "cueBackWrap", "cueHint", "cueLevel", "cuePresets", "cueRecent",
+    "cueSend", "cueTarget", "cueText", "cuesBus", "feedHealth", "feedQuality", "feedsBus",
+    "feedsSec", "flagGfxBus", "gfxBrowseBox", "gfxBus", "gfxGridBus", "gfxGridTopBus",
+    "gfxList", "gfxPreRaceBus", "gfxRefresh", "hudBus", "ledObs", "ledRelay", "log",
+    "modeChip", "modeSwitch", "notesBody", "notesBtn", "notesModal", "obsRefreshBtn",
+    "obsStreamBtn", "partActionBtn", "partControl", "partModal", "partModalBody",
+    "partModalConfirm", "partModalInput", "partModalPhrase", "partModalTitle", "partStatus",
+    "pgmAudio", "pgmAudioBar", "pgmAudioBtn", "pgmAudioVol", "pgmBus", "povActionsBus",
+    "povName", "povSave", "povUrl", "previewSec", "pvBody", "pvProgram", "pvProgramFrame",
+    "pvProgramLabel", "pvToggle", "qualClear", "qualInfo", "qualLive", "qualNm", "qualRow",
+    "qualSave", "qualSched", "qualSt", "qualUrl", "raceSched", "rebuildRearm", "schedAdd",
+    "schedBody", "scnBus", "scnVisBus", "setupInfo", "setupRow", "stA", "stAir", "stB",
+    "stBehind", "stCar", "stHealth", "stPov", "stTimer", "subInfo", "subReason", "subSave",
+    "subSec", "subsBody", "subsBox", "subsCount", "subsEmpty", "teamRow", "timerBus",
+    "timerInfo", "toasts", "top3Apply", "top3BatchTgl", "txBar", "txDur", "urlsBox")
+
+
+def _block(html, start, end_marker):
+    i = html.index(start)
+    return html[i:html.index(end_marker, i)]
+
+
+def _area(html, name):
+    """The markup of one workspace area, up to the next area or the action log."""
+    i = html.index(f'<div class="area" data-area="{name}">')
+    ends = [j for j in (html.find('<div class="area"', i + 1), html.find('<div id="log">', i))
+            if j != -1]
+    return html[i:min(ends)]
+
+
+def _func_src(html, name):
+    """One top-level function: up to its closing brace or the next declaration."""
+    i = html.index(f"function {name}(")
+    ends = [j for j in (html.find(m, i + 1) for m in ("\n}\n", "\nfunction ", "\nasync function "))
+            if j != -1]
+    return html[i:min(ends)]
+
+
+def t_old_controls_survive_the_frame():
+    h = _html()
+    missing = [i for i in OLD_IDS if f'id="{i}"' not in h]
+    assert not missing, f"controls dropped by the frame: {missing}"
+    for gone in ("ctlCols", "feedsCol", "txArmed"):
+        assert f'id="{gone}"' not in h, f"#{gone} belongs to the old layout"
+
+
+def t_frame_columns_in_order():
+    _order(_html(), '<div class="frame">', '<nav id="areaNav"', '<section id="liveCol"',
+           '<main id="workspace">', '<aside class="rail" id="chatRail"')
+
+
+def t_nav_and_areas_match_the_spec_topics():
+    h = _html()
+    nav = re.findall(r'class="navbtn" data-area="([a-z]+)"', h)
+    assert tuple(nav) == AREAS, nav
+    areas = re.findall(r'<div class="area" data-area="([a-z]+)">', h)
+    assert tuple(areas) == AREAS, areas
+    assert '<span class="navhead">On air</span>' in h and '<span class="navhead">Operations</span>' in h
+
+
+def t_cards_sit_in_their_area():
+    h = _html()
+    homes = {
+        "handover": ("handoverSec", "hoOnAir", "hoNext", "hoUpcoming"),
+        "graphics": ("gfxBus", "gfxPreRaceBus", "gfxGridTopBus", "gfxGridBus", "flagGfxBus"),
+        "hud": ("hudBus", "setupRow", "teamRow", "condRow", "timerBus"),
+        "cues": ("cuesBus", "cueText", "cueRecent"),
+        "audio": ("audio",),
+        "broadcast": ("streamSec", "obsStreamBtn", "partControl", "subSec"),
+        "schedule": ("urlsBox", "subsBox"),
+        "setup": ("gfxBrowseBox",),
+        "fault": ("feedsSec", "feedsBus", "feedQuality", "scnVisSec", "obsToolsSec", "obsRefreshBtn"),
+    }
+    for area, ids in homes.items():
+        seg = _area(h, area)
+        for cid in ids:
+            assert f'id="{cid}"' in seg, f"#{cid} is not in the {area} area"
+
+
+def t_live_column_holds_what_acts_on_air():
+    h = _html()
+    live = _block(h, '<section id="liveCol"', '<main id="workspace">')
+    _order(live, 'id="previewSec"', 'id="liveOnAir"', 'id="pgmBus"', 'id="liveSceneSlot"',
+           'id="txBar"', 'id="armBtn"', 'id="nextBtn"')
+    for cid in ("obsRefreshBtn", "obsStreamBtn", "partControl"):
+        assert f'id="{cid}"' not in live, f"#{cid} is not a live control"
+    assert 'data-tx="cut"' in live and 'id="txDur"' in live
+
+
+def t_chat_rail_holds_both_chats_as_sections():
+    h = _html()
+    rail = _block(h, '<aside class="rail" id="chatRail"', "</aside>")
+    _order(rail, 'id="chatBox"', 'id="railSplit"', 'id="bchatBox"')
+    assert "<details" not in rail, "a <details> passes no height to its children"
+    assert '$("#chatBox").open' not in h, "chat visibility goes through chatVisible()"
+    assert h.count("chatVisible()") >= 2
+    assert '<button type="button" id="chatDrawerBtn"' in h and 'id="drawerUnread"' in h
+    assert '$("#drawerUnread")' in _func_src(h, "chatUpdateBadge"), "the drawer button shows unread too"
+
+
+def t_rail_split_is_draggable_and_remembered():
+    h = _html()
+    assert "grid-template-rows:minmax(140px,var(--crew,58fr)) 12px minmax(140px,var(--bcast,42fr))" in h
+    assert 'role="separator"' in h and 'tabindex="0"' in _block(h, 'id="railSplit"', "</div>")
+    src = _func_src(h, "applySplit")
+    assert "Math.min(0.8, Math.max(0.2, r))" in src, "the split is clamped"
+    assert 'SPLIT_KEY = "rc_chat_split"' in h
+
+
+def t_area_and_nav_state_are_remembered_per_browser():
+    h = _html()
+    assert 'AREA_KEY = "rc_area"' in h and 'NAV_KEY = "rc_nav_collapsed"' in h
+    store, recall = _func_src(h, "store"), _func_src(h, "recall")
+    assert "try{" in store and "try{" in recall, "storage access must survive private mode"
+    assert "store(AREA_KEY, name)" in _func_src(h, "showArea")
+
+
+def t_area_falls_back_when_hidden():
+    src = _func_src(_html(), "showArea")
+    assert 'if (!areaAvailable(name)) name = document.body.classList.contains("solo") ? "graphics" : "handover";' in src
+
+
+def t_next_moved_into_the_live_column():
+    h = _html()
+    assert 'FEED_ACTIONS.filter(([label]) => label !== "NEXT")' in h or \
+           'FEED_ACTIONS.filter(([label])=>label !== "NEXT")' in h, "NEXT left the feeds bus"
+    handler = _block(h, '$("#nextBtn").addEventListener("click"', "});")
+    assert 'relayCall("next")' in handler
+    assert "setTimeout(() => { b.disabled = false; }, 3000)" in handler, "double-press guard"
+
+
+def t_arm_targets_the_off_air_feed_only_in_manual_mode():
+    src = _func_src(_html(), "renderLive")
+    assert 'd.feeds.A.index <= d.feeds.B.index ? "A" : "B"' in src, "live feed = lower index"
+    assert "arm.hidden = !manual || qual || end;" in src
+    assert "arm.dataset.feed = off;" in src
+    assert '$("#nextBtn").classList.toggle("ready", serving && !end);' in src
+
+
+def t_handover_renders_text_only():
+    h = _html()
+    for fn in ("renderHandover", "hoCard", "renderLive", "setNav"):
+        assert "innerHTML" not in _func_src(h, fn), f"{fn} must not build markup from relay data"
+
+
+def t_live_column_follows_every_status_poll():
+    poll = _func_src(_html(), "relayPoll")
+    assert "renderLive(d);" in poll and "renderLive(null);" in poll
+
+
+def t_solo_hides_handover_and_lifts_the_scene_keys():
+    h = _html()
+    hide = h[h.index("Kind-conditional cut (#307)"):]
+    hide = hide[:hide.index("{ display: none !important; }")]
+    for sel in ("body.solo #handoverCtl", "body.solo #nextStep", "body.solo #feedsSec"):
+        assert sel in hide, f"solo must hide {sel}"
+    assert '$("#liveSceneSlot").appendChild($("#scnVisSec"));' in _func_src(h, "soloLayout")
+    assert "soloLayout();" in _func_src(h, "applySolo")
+
+
+def t_breakpoints():
+    h = _html()
+    assert 'matchMedia("(min-width:900px) and (max-width:1599px)")' in h, "nav collapses below 1600"
+    assert "@media(max-width:1279px)" in h, "chats become a drawer below 1280"
+    assert "@media(max-width:899px)" in h, "one column below 900"
 
 
 if __name__ == "__main__":

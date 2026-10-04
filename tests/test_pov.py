@@ -843,22 +843,17 @@ def t_director_panel_has_stream_button():
 
 
 def t_director_panel_chat_rail_fixed_height():
-    # The desktop right-rail stacks the crew chat over the read-only broadcast chat.
-    # Both logs need a fixed height so the crew box cannot grow with messages and push
-    # into the broadcast box, and neither box may flex-shrink or the crew box spills
-    # over the broadcast one. Two 38vh logs plus chrome overflow the rail and produce a
-    # second scrollbar.
+    # The rail splits its own fixed height between the two chats, so a busy crew chat
+    # scrolls inside its row and can never push the broadcast chat off screen.
     path = os.path.join(ROOT, "src", "director", "director-panel.html")
     with open(path, encoding="utf-8") as fh:
         html = fh.read()
-    assert "38vh" not in html, \
-        "the unbounded grow-to-38vh cap is gone (it was the only 38vh in the file)"
-    # Logs get a stable, viewport-aware fixed height (clamped), not max-height growth.
-    assert "details.chat#chatBox .chatlog,details.chat#bchatBox .chatlog{height:clamp(" in html
-    # Boxes do not shrink below their content (flex:0 0 auto, not 0 1 auto).
-    assert "details.chat#chatBox,details.chat#bchatBox{margin-bottom:0;min-height:0;flex:0 0 auto;" in html
-    assert "flex:0 1 auto" not in html
-
+    assert "38vh" not in html, "the unbounded grow-to-38vh cap is gone"
+    assert ".rail{display:grid;grid-template-rows:minmax(140px,var(--crew,58fr)) 12px " \
+           "minmax(140px,var(--bcast,42fr));\n    overflow:hidden}" in html, "the rail owns the height split"
+    assert ".rail .chatlog{flex:1;min-height:0;max-height:none;overflow-y:auto;" in html, \
+        "each log scrolls inside its row instead of growing"
+    assert ".frame>*{min-height:0;min-width:0;overflow-y:auto}" in html, "the frame columns never grow the page"
 
 def t_obs_stream_503_when_obs_down():
     r = m.Relay(_FakeSource(_URLS8), [53001, 53002], LOGDIR)
