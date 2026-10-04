@@ -453,6 +453,17 @@ def _import_e2e():
     return importlib.import_module("e2e")
 
 
+def t_real_league_rendered_checks_never_send_next():
+    # The shortcut check presses NEXT; against a real league that can reach the
+    # producer's OBS, so the real-league run leaves it out (#731).
+    driver = _import_e2e()
+    names = {fn.__name__ for fn in driver.REAL_LEAGUE_RENDERED_CHECKS}
+    assert "render_panel_shortcut_confirm" not in names, names
+    with open(driver.__file__, encoding="utf-8") as fh:
+        src = fh.read()
+    assert "checks=REAL_LEAGUE_RENDERED_CHECKS)" in src, "the real-league run must pass its own list"
+
+
 def t_rendered_checks_skip_without_browser():
     # A gate check, not a browser check: when Playwright is unavailable the gated
     # dispatch yields one SKIP result per rendered check and never launches a browser.
@@ -467,7 +478,8 @@ def t_rendered_checks_skip_without_browser():
         assert len(rendered) == len(driver.RENDERED_CHECKS), rendered
         assert all(r.status == "skip" for r in rendered), rendered
         names = {r.name for r in rendered}
-        assert names == {"render_tally_pill", "render_funnel_pill"}, names
+        assert names == {"render_tally_pill", "render_funnel_pill",
+                         "render_panel_shortcut_confirm"}, names
     finally:
         driver._playwright_available = saved
 

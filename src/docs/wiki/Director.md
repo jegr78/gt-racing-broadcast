@@ -234,6 +234,19 @@ One-off action failures (a button press that didn't take) show as short
 toasts in the top-right corner and are also logged in the log box below the
 workspace area.
 
+### Keyboard shortcuts
+
+The panel has shortcuts for **NEXT** (`N`) and the scene macros on the PGM bus (`1` to
+`9`, in the order of the keys). They are **off** until you press **KEYS OFF** in the
+header; the button then reads **KEYS ON**, and each key shows its number. The setting
+is kept per browser.
+
+Every shortcut needs two presses of the same key within 1.5 seconds. The first press
+only outlines the key and the header reads, for example, **PRESS N AGAIN**. The second
+press acts. Any other key, or waiting, cancels it. No shortcut acts while you type in a
+text field, and keys combined with Ctrl, Alt or Cmd are ignored. RED FLAG and the
+graphics have no shortcut, and in solo the tenth macro (`CAPTURE`) has none.
+
 ### Guarded buttons
 
 - `RELOAD A` / `RELOAD B` / `RELOAD ALL` ask for confirmation, a reload
