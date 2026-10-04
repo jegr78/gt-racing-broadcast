@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Live-server integration checks for the /console auth gate (#216 phase 3a).
 Run: python3 tests/test_console_gate.py"""
-import importlib.util, os, tempfile, threading, json
+import importlib.util, os, tempfile, threading, json, types
 import urllib.request, urllib.error
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -1323,7 +1323,7 @@ def _take_call(fire, mode="direct", scene="Stint", visible=(), solo=False):
     orig_obs, m._obs_ws = m._obs_ws, fake
     try:
         res = fire(port)
-        return res, fake.calls, store, flags
+        return types.SimpleNamespace(res=res, calls=fake.calls, store=store, flags=flags)
     finally:
         m._obs_ws = orig_obs
         srv.shutdown()
@@ -1335,14 +1335,17 @@ def _take(port, who, source, on=True):
 
 
 def t_graphic_takes_off_by_default():
-    (code, body), calls, _s, _f = _take_call(lambda p: _take(p, "alice", "Standings"),
-                                              mode="off")
+    t = _take_call(lambda p: _take(p, "alice", "Standings"),
+                   mode="off")
+    code, body = t.res
+    calls = t.calls
     assert code == 403 and calls == [], (code, body, calls)
 
 
 def t_graphic_takes_view_lists_rights_per_role():
-    (code, body), _c, _s, _f = _take_call(
+    t = _take_call(
         lambda p: _get(p, "/console/cockpit/graphic-takes", _tok("alice")))
+    code, body = t.res
     assert code == 200, (code, body)
     data = json.loads(body)
     assert data["mode"] == "direct" and data["program_scene"] == "Stint", data
@@ -1352,7 +1355,9 @@ def t_graphic_takes_view_lists_rights_per_role():
 
 
 def t_commentator_takes_a_graphic():
-    (code, body), calls, _s, _f = _take_call(lambda p: _take(p, "alice", "Standings"))
+    t = _take_call(lambda p: _take(p, "alice", "Standings"))
+    code, body = t.res
+    calls = t.calls
     assert code == 200, (code, body)
     assert calls == [("item", "Stint", "Standings", True)], calls
 
@@ -1361,24 +1366,32 @@ def t_take_posts_a_crew_chat_line():
     def fire(p):
         _take(p, "alice", "Standings")
         return _get(p, "/console/cockpit/chat/data", _tok("alice"))
-    (code, body), _c, _s, _f = _take_call(fire)
+    t = _take_call(fire)
+    code, body = t.res
     texts = [msg["text"] for msg in json.loads(body)["messages"]]
     assert "Alice put Standings on air" in texts, texts
 
 
 def t_take_is_refused_while_its_scene_is_off_air():
-    (code, body), calls, _s, _f = _take_call(lambda p: _take(p, "alice", "Standings"),
-                                              scene="Splitscreen")
+    t = _take_call(lambda p: _take(p, "alice", "Standings"),
+                   scene="Splitscreen")
+    code, body = t.res
+    calls = t.calls
     assert code == 409 and calls == [], (code, body, calls)
 
 
 def t_commentator_cannot_set_a_flag():
-    (code, body), _c, store, _f = _take_call(lambda p: _take(p, "alice", "Flag Yellow"))
+    t = _take_call(lambda p: _take(p, "alice", "Flag Yellow"))
+    code, body = t.res
+    store = t.store
     assert code == 403 and store.get() == "", (code, body)
 
 
 def t_race_control_sets_a_flag_through_the_flag_store():
-    (code, body), _c, store, flags = _take_call(lambda p: _take(p, "dave", "Flag Yellow"))
+    t = _take_call(lambda p: _take(p, "dave", "Flag Yellow"))
+    code, body = t.res
+    store = t.store
+    flags = t.flags
     assert code == 200, (code, body)
     assert store.get() == "yellow", store.get()
     assert ("Stint", "Flag Yellow", True) in flags, flags
@@ -1388,23 +1401,28 @@ def t_graphic_takes_are_rate_limited():
     def fire(p):
         _take(p, "alice", "Standings")
         return _take(p, "alice", "Schedule")
-    (code, body), _c, _s, _f = _take_call(fire)
+    t = _take_call(fire)
+    code, body = t.res
     assert code == 429, (code, body)
 
 
 def t_unknown_graphic_is_not_takeable():
-    (code, body), calls, _s, _f = _take_call(lambda p: _take(p, "alice", "Standby Cover"))
+    t = _take_call(lambda p: _take(p, "alice", "Standby Cover"))
+    code, body = t.res
+    calls = t.calls
     assert code == 404 and calls == [], (code, body, calls)
 
 
 def t_obs_graphics_lists_every_graphic_for_the_director():
-    (code, body), _c, _s, _f = _take_call(
+    t = _take_call(
         lambda p: _get(p, "/console/obs/graphics", _tok("bob")))
+    code, body = t.res
     assert code == 200, (code, body)
     sources = {g["source"] for g in json.loads(body)["graphics"]}
     assert {"Standings", "Flag Red", "Post Race Interviews"} <= sources, sources
-    (code, _b), _c, _s, _f = _take_call(
+    t = _take_call(
         lambda p: _get(p, "/console/obs/graphics", _tok("alice")))
+    code = t.res[0]
     assert code == 403, code
 
 
@@ -1416,7 +1434,9 @@ def _chat_texts(port):
 def t_hide_takes_a_visible_graphic_off_air():
     def fire(p):
         return _take(p, "alice", "Standings", on=False), _chat_texts(p)
-    ((code, body), texts), calls, _s, _f = _take_call(fire, visible={"Standings"})
+    t = _take_call(fire, visible={"Standings"})
+    (code, body), texts = t.res
+    calls = t.calls
     assert code == 200, (code, body)
     assert calls == [("item", "Stint", "Standings", False)], calls
     assert "Alice took Standings off air" in texts, texts
@@ -1426,14 +1446,18 @@ def t_hiding_a_hidden_graphic_posts_nothing():
     def fire(p):
         before = _chat_texts(p)
         return _take(p, "alice", "Standings", on=False), before, _chat_texts(p)
-    ((code, body), before, after), calls, _s, _f = _take_call(fire)
+    t = _take_call(fire)
+    (code, body), before, after = t.res
+    calls = t.calls
     assert code == 200 and json.loads(body)["changed"] is False, (code, body)
     assert calls == [] and after == before, (calls, after[len(before):])
 
 
 def t_solo_takes_land_in_program():
-    (code, body), calls, _s, _f = _take_call(lambda p: _take(p, "alice", "Standings"),
-                                              scene="Program", solo=True)
+    t = _take_call(lambda p: _take(p, "alice", "Standings"),
+                   scene="Program", solo=True)
+    code, body = t.res
+    calls = t.calls
     assert code == 200, (code, body)
     assert calls == [("item", "Program", "Standings", True)], calls
 
