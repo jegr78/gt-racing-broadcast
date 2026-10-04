@@ -170,13 +170,12 @@ def t_hud_groups_present_with_members():
 def t_director_panel_targets_existing_hud_groups():
     # The Director Panel toggles the HUD group by name per scene; those names
     # must match the groups in the collection or the toggle silently no-ops.
-    with open(os.path.join(ROOT, "src", "director", "director-panel.html"),
-              encoding="utf-8") as fh:
-        panel = fh.read()
-    assert 'scene:"Stint",       source:"Stint HUD"' in panel \
-        or 'source:"Stint HUD"' in panel, "panel does not target 'Stint HUD'"
-    assert 'source:"Split HUD"' in panel, "panel does not target 'Split HUD'"
-    assert 'source:"HUD"' not in panel, "panel still targets the removed 'HUD' group"
+    import sys  # noqa: PLC0415  the catalog module lives in src/scripts
+    sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))
+    import graphic_takes  # noqa: PLC0415
+    huds = {(i["scene"], i["source"]) for i in graphic_takes.panel_catalog(False)["graphics"]
+            if i["label"] == "HUD"}
+    assert huds == {("Stint", "Stint HUD"), ("Splitscreen", "Split HUD")}, huds
 
 
 def t_all_scene_and_group_items_locked():

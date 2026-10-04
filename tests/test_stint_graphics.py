@@ -7,12 +7,15 @@ OBS collection, the Director Panel and Companion. A name drift between them fail
 silently in production, so it is pinned here."""
 import json
 import os
+import sys
 from urllib.parse import unquote
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 OBS = os.path.join(ROOT, "src", "obs", "GT_Racing_Endurance.json")
 PANEL = os.path.join(ROOT, "src", "director", "director-panel.html")
+sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))
+import graphic_takes  # noqa: E402  the panel's graphic buses live here (#747)
 COMPANION = os.path.join(ROOT, "src", "companion",
                          "racecast-buttons.companionconfig")
 
@@ -60,12 +63,12 @@ def t_obs_stint_scene_items_present():
 def t_panel_lists_new_graphics():
     with open(PANEL, encoding="utf-8") as fh:
         html = fh.read()
-    assert "graphicsPreRace" in html, "missing CONFIG.graphicsPreRace"
-    assert "graphicsGrid" in html, "missing CONFIG.graphicsGrid"
     assert 'id="gfxPreRaceBus"' in html
     assert 'id="gfxGridBus"' in html
+    cat = graphic_takes.panel_catalog(False)
+    sources = {i["source"] for bus in ("graphicsPreRace", "graphicsGrid") for i in cat[bus]}
     for label in NEW_GRAPHICS:
-        assert f'source:"{label}"' in html, f"panel missing source: {label}"
+        assert label in sources, f"panel catalog missing source: {label}"
 
 
 def t_companion_toggles_new_graphics():
