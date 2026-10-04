@@ -1364,6 +1364,12 @@ def t_profile_env_vars_includes_obs_collection():
     assert out["RACECAST_OBS_COLLECTION"] == "Demo Broadcast"
 
 
+def t_profile_env_vars_includes_graphics_take():
+    rc = m.pcfg.ResolvedConfig(profile="demo", name="Demo", sheet_id="abc",
+                               graphics_take="direct")
+    assert m._profile_env_vars(rc)["RACECAST_GRAPHICS_TAKE"] == "direct"
+
+
 def t_profile_env_vars_includes_event_title():
     rc = m.pcfg.ResolvedConfig(profile="demo", name="Demo", sheet_id="abc",
                                event_title="GTEC - Round 4")
@@ -4439,7 +4445,7 @@ def t_profile_env_vars_includes_kind():
         trailer_url = ""
         discord_webhook_url = ""; obs_collection = ""; console_secret = ""
         discord_client_id = ""; discord_client_secret = ""; discord_voice_url = ""
-        event_title = ""; name = "Solo League"; logo_path = ""; kind = "solo"
+        event_title = ""; graphics_take = ""; name = "Solo League"; logo_path = ""; kind = "solo"
         template = ""
     env = m._profile_env_vars(_RC())
     assert env["RACECAST_KIND"] == "solo"

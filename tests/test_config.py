@@ -360,6 +360,22 @@ def t_resolve_config_discord_voice_url_blank_when_absent():
         assert rc.discord_voice_url == ""
 
 
+def t_resolve_config_graphics_take():
+    with tempfile.TemporaryDirectory() as td:
+        root = _mkroot(td)
+        _mkprofile(root, "demo", "NAME=Demo\nSHEET_ID=abc\nGRAPHICS_TAKE=direct\n")
+        rc = m.resolve_config(root, override="demo", environ={})
+        assert rc.graphics_take == "direct"
+
+
+def t_resolve_config_graphics_take_blank_when_absent():
+    with tempfile.TemporaryDirectory() as td:
+        root = _mkroot(td)
+        _mkprofile(root, "demo", "NAME=Demo\nSHEET_ID=abc\n")
+        rc = m.resolve_config(root, environ={})
+        assert rc.graphics_take == "", "a missing key must stay blank so the relay reads off"
+
+
 def t_resolve_config_obs_collection_explicit_wins_over_prefix():
     with tempfile.TemporaryDirectory() as td:
         root = _mkroot(td)
