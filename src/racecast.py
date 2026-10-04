@@ -5662,7 +5662,7 @@ def _profile_has_telemetry():
     travels with `profile export`, so another machine may air the telemetry block.
     Best effort: False when no profile resolves."""
     rc = _active_config()
-    return rc is not None and rc.kind == "solo" and rc.template.strip().lower() == "pov"
+    return rc is not None and solo_template(rc) == "pov"
 
 
 def overlay_slots_data(page):
