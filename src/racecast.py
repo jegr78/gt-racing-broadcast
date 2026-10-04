@@ -4720,10 +4720,18 @@ def profile_logo():
         return None
 
 
+def solo_template(rc):
+    """The OBS template a profile builds: "pov" or "commentary" for solo (a blank or
+    unknown TEMPLATE builds commentary, as setup-assets does), "" for endurance."""
+    if rc.kind != "solo":
+        return ""
+    return "pov" if rc.template.strip().lower() == "pov" else "commentary"
+
+
 def profiles_data():
     """Control Center profile switcher data: the effective active profile plus
     every available profile with its display NAME and whether SHEET_ID is set.
-    {ok, active, logo, profiles:[{name, display, sheet_set, kind}]} or
+    {ok, active, logo, profiles:[{name, display, sheet_set, kind, template}]} or
     {ok:false, error}. Never raises."""
     try:
         root = _env_base(IS_FROZEN, _real_executable(), HERE)
@@ -4736,12 +4744,12 @@ def profiles_data():
                 rc = pcfg.resolve_config(root, override=n, runtime_root=runtime_root)
                 out.append({"name": n, "display": rc.name,
                             "sheet_set": bool(rc.sheet_id),
-                            "kind": rc.kind})
+                            "kind": rc.kind, "template": solo_template(rc)})
                 if n == active:
                     logo = bool(servable_logo_path(rc.logo_path))
             except pcfg.ProfileError:
                 out.append({"name": n, "display": n, "sheet_set": False,
-                            "kind": pcfg.DEFAULT_KIND})
+                            "kind": pcfg.DEFAULT_KIND, "template": ""})
         return {"ok": True, "active": active, "logo": logo, "profiles": out}
     except Exception as exc:
         return {"ok": False, "error": f"could not read profiles: {exc}"}
@@ -5654,7 +5662,7 @@ def _profile_has_telemetry():
     travels with `profile export`, so another machine may air the telemetry block.
     Best effort: False when no profile resolves."""
     rc = _active_config()
-    return rc is not None and rc.kind == "solo" and rc.template.strip().lower() == "pov"
+    return rc is not None and solo_template(rc) == "pov"
 
 
 def overlay_slots_data(page):

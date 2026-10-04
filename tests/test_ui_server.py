@@ -1960,10 +1960,25 @@ def t_device_pickers_shown_for_endurance_profiles():
     assert "solo-only" not in _row_classes(page, "Mic"), "the mic picker must show for endurance"
     assert "solo-only" in _row_classes(page, "Webcam"), "the webcam picker is solo-only"
     assert "solo-only" in _row_classes(page, "Tyres/Fuel"), "the tyres/fuel picker is solo-only"
-    ps = re.search(r'<div class="solo-only"[^>]*>(.*?)</div>\s*</section>', page, re.S)
+    ps = re.search(r'<div class="solo-only[^"]*"[^>]*>(.*?)</div>\s*</section>', page, re.S)
     assert ps and 'id="ps-ip"' in ps.group(1) and 'id="ps-hint"' in ps.group(1), \
         "the PlayStation IP block must sit in a solo-only wrapper"
     assert ">Solo devices<" not in page, "the heading must not call the section solo-only"
+
+
+def t_solo_device_rows_follow_the_template():
+    page = _cc_page()
+    style = re.sub(r"/\*.*?\*/", "", page[page.index("<style>"):page.index("</style>")], flags=re.S)
+    assert re.search(r"body:not\(\.tpl-pov\)\s+\.pov-only[^{]*\{[^}]*display\s*:\s*none", style), \
+        "pov-only rows must be hidden outside a solo POV profile"
+    assert re.search(r"body:not\(\.tpl-commentary\)\s+\.commentary-only[^{]*\{[^}]*display\s*:\s*none",
+                     style), "commentary-only rows must be hidden outside a solo commentary profile"
+    assert "commentary-only" in _row_classes(page, "Tyres/Fuel"), \
+        "only the commentary collection has the tyres/fuel capture"
+    ps = re.search(r'<div class="([^"]*)"[^>]*>\s*<div class="row"[^>]*><span class="name">PlayStation IP', page)
+    assert ps and "pov-only" in ps.group(1).split(), "GT7 telemetry runs in solo POV only"
+    assert "classList.toggle('tpl-pov'" in page and "classList.toggle('tpl-commentary'" in page, \
+        "applyKindGating must set the template class"
 
 
 def t_api_resources_route():
