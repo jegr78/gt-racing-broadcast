@@ -67,8 +67,9 @@
                                 #1E293B 0%, var(--bg) 70%); }
   main { flex:1; overflow:auto; padding:22px 26px; }
   .view { max-width:1040px; margin:0 auto; }
-  .viewhead { display:flex; align-items:center; gap:12px; margin:0 0 14px;
+  .viewhead { display:flex; flex-wrap:wrap; align-items:center; gap:12px; margin:0 0 14px;
               min-height:34px; }
+  .viewhead button { white-space:nowrap; flex-shrink:0; }
   .viewhead h2 { font-size:16px; font-weight:600; letter-spacing:.01em;
                  margin:0; color:var(--txt); text-transform:none; }
   .viewhead h3 { font-size:13px; font-weight:600; margin:0; color:var(--txt); }
@@ -3462,6 +3463,12 @@ function ovFillSample() {
       el.classList.remove('empty');
     }
   });
+  // A webfont that loads after this pass widens the names again; the live HUD refits on
+  // every poll, the canvas once more here.
+  document.fonts.ready.then(() => ovState.slots.forEach(s => {
+    const el = /^team\d-name$/.test(s.id) && ovState.shadow.getElementById(s.id);
+    if (el) ovFitName(el);
+  }));
 }
 
 // Mirror of hud.html::fitName: shrink a team name from --team-name-max toward

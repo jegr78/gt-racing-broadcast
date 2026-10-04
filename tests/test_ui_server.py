@@ -2044,6 +2044,11 @@ def t_every_button_icon_is_styled():
     assert re.search(r"(?:^|[{},])\s*button svg\s*[,{]", style, re.M), \
         "buttons outside .row need a base icon rule"
     assert "cap.title = cap.textContent" in html, "an ellipsized asset name needs its full text as a tooltip"
+    assert re.search(r"\.viewhead button\s*\{[^}]*white-space:\s*nowrap", style), \
+        "a crowded header must wrap its buttons to a new line, not squeeze their labels"
+    assert re.search(r"\.viewhead\s*\{[^}]*flex-wrap:\s*wrap", style), "the header row must be allowed to wrap"
+    fill = html[html.index("function ovFillSample()"):html.index("function ovFitName(")]
+    assert "document.fonts.ready" in fill, "team names must be fitted again once the webfont has loaded"
 
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
