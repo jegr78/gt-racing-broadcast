@@ -172,7 +172,50 @@ def render_funnel_pill(ctx, headed=False, slowmo=0):
     return _render_pill(ctx, "render_funnel_pill", "#who", "funnel-state pill", headed, slowmo)
 
 
-RENDERED_CHECKS = [render_tally_pill, render_funnel_pill]
+def render_panel_shortcut_confirm(ctx, headed=False, slowmo=0):
+    """Director Panel keyboard shortcuts (#731): with the keys switched on, one N
+    press sends no /next, a confirmed second press sends exactly one, and N typed
+    into a text field sends none."""
+    from playwright.sync_api import sync_playwright  # noqa: PLC0415  optional, lazy
+    name = "render_panel_shortcut_confirm"
+    nexts = []
+    try:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=not headed, slow_mo=slowmo)
+            try:
+                page = browser.new_page()
+                page.on("request", lambda r: nexts.append(r.url)
+                        if "/next" in r.url.split("?")[0] else None)
+                page.goto(ctx.relay_url + "/panel", wait_until="domcontentloaded")
+                page.wait_for_selector("#nextBtn", state="visible", timeout=10000)
+                page.click("#kbdBtn")
+                page.keyboard.press("n")
+                page.wait_for_timeout(2000)                  # past the confirm window
+                if nexts:
+                    return E.CheckResult(name, "fail", f"a single N press sent {nexts}")
+                page.focus("#chatInput")                     # always visible in the rail
+                if page.evaluate("document.activeElement.id") != "chatInput":
+                    return E.CheckResult(name, "fail", "could not focus the chat input")
+                page.keyboard.press("n")
+                page.keyboard.press("n")
+                page.wait_for_timeout(500)
+                if nexts:
+                    return E.CheckResult(name, "fail", f"N typed into a text field sent {nexts}")
+                page.evaluate("document.activeElement.blur()")
+                page.keyboard.press("n")
+                page.wait_for_timeout(200)
+                page.keyboard.press("n")
+                page.wait_for_timeout(1500)
+                if len(nexts) != 1:
+                    return E.CheckResult(name, "fail", f"a confirmed N sent {len(nexts)} /next calls")
+            finally:
+                browser.close()
+    except Exception as exc:  # noqa: BLE001  a render failure is a check failure
+        return E.CheckResult(name, "fail", f"{type(exc).__name__}: {exc}")
+    return E.CheckResult(name, "pass", "")
+
+
+RENDERED_CHECKS = [render_tally_pill, render_funnel_pill, render_panel_shortcut_confirm]
 
 
 def run_rendered_checks(ctx, headed=False, slowmo=0):
