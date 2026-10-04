@@ -45,16 +45,6 @@
   .wrap { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; padding: 12px; }
   .schedgfx { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
   @media (max-width: 640px) { .schedgfx { grid-template-columns: 1fr; } }
-  #gfxHead { display: flex; align-items: center; justify-content: space-between; }
-  #gfxRefresh { background: none; border: 0; color: #8ab4f8; cursor: pointer;
-                font: inherit; font-size: 12px; padding: 0; }
-  #gfxList { display: flex; flex-direction: column; gap: 4px;
-             max-height: 260px; overflow-y: auto; }
-  #gfxList a { display: block; text-decoration: none; color: #e8eaed;
-               background: #1b1f25; border: 1px solid #2a3038; border-radius: 6px;
-               padding: 7px 10px; font-size: 14px; }
-  #gfxList a:hover { border-color: #3b82f6; }
-  #gfxList .empty { font-size: 13px; opacity: .6; padding: 2px 0; }
   /* Grid items default to min-width:auto, so one unbreakable chat token would blow
      the 1fr column past its track and squeeze the 2fr preview column. min-width:0
      lets the columns honour their fr ratio. */
@@ -227,6 +217,10 @@
         </div>
         <div id="rcMsg" class="rcmsg" role="status"></div>
       </div>
+    </div>
+    <div class="card" id="flagCard" data-tab="act" style="margin-top:12px;" hidden>
+      <h2>Flag graphic</h2>
+      <div id="flagList" class="flaglist"></div>
     </div>
     <div class="card desk-only" style="margin-top:12px;"><h2>Race timer</h2><div id="timer"><div class="t">—</div></div></div>
     <div class="card" data-tab="chat" style="margin-top:12px;">
@@ -602,32 +596,6 @@ async function refreshBroadcastChat() {
 }
 { const br = $('bchatRefresh'); if (br) br.addEventListener('click', refreshBroadcastChat); }
 
-async function loadGraphics() {
-  const box = $('gfxList');
-  try {
-    const d = await j('/graphics');
-    const list = d.graphics || [];
-    box.textContent = '';
-    if (!list.length) {
-      const e = document.createElement('div');
-      e.className = 'empty'; e.textContent = 'No graphics available.';
-      box.appendChild(e); return;
-    }
-    list.forEach(g => {
-      const a = document.createElement('a');
-      a.href = RC_API('/graphics/' + encodeURIComponent(g.file));
-      a.target = '_blank'; a.rel = 'noopener';
-      a.textContent = g.name;                 // XSS-safe (Sheet label)
-      box.appendChild(a);
-    });
-  } catch (e) {
-    box.textContent = '';
-    const er = document.createElement('div');
-    er.className = 'empty'; er.textContent = 'Could not load graphics.';
-    box.appendChild(er);
-  }
-}
-$('gfxRefresh').addEventListener('click', loadGraphics);
 
   function openNotes() { document.getElementById('notesModal').showModal(); }
   function closeNotes() { document.getElementById('notesModal').close(); }
@@ -660,7 +628,7 @@ $('gfxRefresh').addEventListener('click', loadGraphics);
     setTimeout(pollNotes, 30000);
   }
   pollNotes();
-pollSchedule(); pollProgram(); pollTimer(); pollChat(); pollBroadcastChat(); loadRcPresets(); loadGraphics();
+pollSchedule(); pollProgram(); pollTimer(); pollChat(); pollBroadcastChat(); loadRcPresets();
 pgmAudioInit("/cockpit/program-audio");
 </script>
 <dialog id="notesModal" class="notesmodal">

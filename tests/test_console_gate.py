@@ -1471,6 +1471,8 @@ def t_crew_pages_carry_the_shared_frame():
             assert code == 200, (path, code)
             assert "__CREW_FRAME__" not in body, f"{path} still has the placeholder"
             assert 'id="crewTabs"' in body and "function crewSelectTab" in body, path
+            assert "/cockpit/graphic-takes" in body, f"{path} lacks the graphic card"
+            assert "function loadGraphics" not in body, f"{path} keeps its own graphics list"
     finally:
         srv.shutdown()
 

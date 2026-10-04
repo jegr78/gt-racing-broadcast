@@ -52,9 +52,9 @@ endpoints.
 ### Race Control (read-only monitoring desk)
 
 **Race Control** is a monitoring desk: a live **program preview**, the **streamer / stint
-schedule**, the **race timer**, and **crew chat**. *Read-only* means it triggers **no
-broadcast actions**, no scenes, graphics or feeds; the **director keeps full control of
-the Panel**. The **crew chat is two-way**, though, and is the desk's working channel: the
+schedule**, the **race timer**, and **crew chat**. It switches **no scenes or feeds**; the
+**director keeps full control of the Panel**. When the league allows graphic takes, the
+desk can put graphics and flag graphics on air (see [Graphics](#graphics) below). The **crew chat is two-way**, though, and is the desk's working channel: the
 operator is expected to **post race-control information** for the crew (e.g. a
 drive-through / DSQ for a team, a car's rejoin time, a team that can't field a driver for
 the next stint, a team retiring from the race) and to **direct the commentators** through
@@ -78,10 +78,31 @@ the top while you scroll. A tab bar at the bottom shows one part of the page at 
 | Page | Tabs |
 |---|---|
 | Commentator Cockpit | **Talk** (message the director, crew chat, Race Control notes), **Program** (picture, audio, broadcast chat), **Graphics**, **Plan** (stint plan, stream-link submission) |
-| Race Control | **Act** (note to commentator), **Graphics**, **Chat** (crew and broadcast), **Program**, **Schedule** |
+| Race Control | **Act** (note to commentator, flag graphic), **Graphics**, **Chat** (crew and broadcast), **Program**, **Schedule** |
 
 The page remembers the last tab. On a wider screen both pages keep their multi-column
 layout.
+
+### Graphics
+
+Both pages show the league's broadcast stills as tiles. Tap a tile to see the graphic
+large in the page. A tile with a red frame and **ON AIR** is in the broadcast right now.
+
+The league decides whether the crew may put graphics on air, with `GRAPHICS_TAKE` in its
+`profile.env` (see [Configuration](Configuration)). It is off unless the league sets it.
+With `GRAPHICS_TAKE=direct`:
+
+- Commentators and Race Control get **Put on air** / **Take off air** on each graphic the
+  broadcast can show. Graphics that exist only in the Sheet stay view-only.
+- Only one graphic from the crew is on air at a time: a new one replaces the previous crew
+  graphic. Graphics the director put on air are never touched.
+- A graphic can only go on air while its scene is on air, so a Stint graphic is locked
+  during the Splitscreen and the tile says why.
+- Race Control alone sets the **flag graphic** (Green, Yellow, Red, Safety Car, Virtual
+  Safety Car) in the **Act** tab. One flag is shown at a time.
+- Every take posts a line in the crew chat, for example "RC 2 put Flag Yellow on air".
+
+The director keeps every control in the Panel and can take any graphic off air.
 
 > **Naming note:** the role shares its label with the director-only HUD **Race Control**
 > banner (the Setup-tab `Race Control` field shown on the lower third). They are

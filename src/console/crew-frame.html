@@ -66,3 +66,205 @@
     }
   })();
 </script>
+<style>
+  /* Graphic card: thumbnails, an in-page preview and, where the league allows it,
+     a take button per graphic (GRAPHICS_TAKE). */
+  #gfxHead { display: flex; align-items: center; justify-content: space-between; }
+  #gfxRefresh { background: none; border: 0; color: #8ab4f8; cursor: pointer;
+                font: inherit; font-size: 12px; padding: 0 4px; }
+  #gfxList { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+             gap: 8px; padding: 10px 12px; }
+  #gfxList .empty { grid-column: 1 / -1; font-size: 13px; opacity: .6; }
+  .gtile { display: flex; flex-direction: column; background: #1b1f25;
+           border: 2px solid #2a3038; border-radius: 8px; overflow: hidden; }
+  .gtile.onair { border-color: #e5484d; }
+  .gthumb { position: relative; display: block; width: 100%; padding: 0; border: 0;
+            background: #000; cursor: zoom-in; }
+  .gthumb img { display: block; width: 100%; aspect-ratio: 16/9; object-fit: contain; }
+  .gbadge { position: absolute; top: 6px; left: 6px; background: #c1121f; color: #fff;
+            font-size: 10px; font-weight: 800; letter-spacing: .06em; padding: 2px 6px;
+            border-radius: 999px; }
+  .gname { font-size: 12px; padding: 5px 6px 0; overflow-wrap: anywhere; }
+  .gby { font-size: 11px; opacity: .6; padding: 0 6px; }
+  .gtake { margin: 5px 6px 6px; padding: 5px 6px; border: 0; border-radius: 6px;
+           background: #1d4ed8; color: #fff; font: inherit; font-size: 12px;
+           font-weight: 700; cursor: pointer; }
+  .gtake.off { background: #3a4250; }
+  .gtake:disabled { opacity: .45; cursor: default; }
+  .gwhy { font-size: 11px; opacity: .6; padding: 0 6px 6px; margin-top: -2px; }
+  #gfxMsg { font-size: 12px; padding: 0 12px 10px; min-height: 0; color: #ff6b6b; }
+  #gfxMsg:empty { display: none; }
+  .flaglist { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+              gap: 8px; padding: 10px 12px; }
+  .flaglist button { min-height: 44px; border-radius: 8px; border: 2px solid transparent;
+                     font: inherit; font-weight: 800; cursor: pointer; color: #111; }
+  .flaglist button[aria-pressed="true"] { border-color: #fff; box-shadow: 0 0 0 3px #e5484d; }
+  .flaglist .fon { display: block; font-size: 10px; letter-spacing: .08em; }
+  .flaglist button:disabled { opacity: .45; cursor: default; }
+  .gpreview { max-width: 960px; width: 94vw; border: 0; border-radius: 10px; padding: 0;
+              background: #14171c; color: #e8eaed; }
+  .gpreview::backdrop { background: rgba(0,0,0,.7); }
+  .gpreview img { display: block; width: 100%; aspect-ratio: 16/9; object-fit: contain;
+                  background: #000; }
+  .gpreview .gpbar { display: flex; align-items: center; gap: 8px; padding: 10px 12px; }
+  .gpreview .gpbar .gname { flex: 1; padding: 0; font-weight: 600; }
+  .gpreview .gpbar button { min-height: 44px; padding: 0 14px; border-radius: 6px; border: 0;
+                            font: inherit; font-weight: 700; cursor: pointer;
+                            background: #1f2630; color: #e8eaed; }
+  .gpreview .gpbar .gtake { margin: 0; background: #1d4ed8; color: #fff; }
+  .gpreview .gpbar .gtake.off { background: #3a4250; }
+  @media (max-width: 820px) {
+    #gfxList { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .gtake { min-height: 44px; font-size: 13px; }
+    .gname { font-size: 13px; }
+  }
+</style>
+<script>
+  (function () {
+    var box = document.getElementById('gfxList');
+    if (!box) return;
+    var FLAG_COLORS = { 'Flag Green': '#2bd66a', 'Flag Yellow': '#ffd60a', 'Flag Red': '#ff4d5e',
+                        'Flag Safety Car': '#ffb300', 'Flag Virtual Safety Car': '#ffcf66' };
+    var list = [], view = null, viewSig = '', busy = false;
+    var msg = document.createElement('div');
+    msg.id = 'gfxMsg'; msg.setAttribute('role', 'status');
+    box.insertAdjacentElement('afterend', msg);
+    var dlg = document.createElement('dialog');
+    dlg.className = 'gpreview';
+    document.body.appendChild(dlg);
+    dlg.addEventListener('click', function (e) { if (e.target === dlg) dlg.close(); });
+
+    function api(p) { return window.RC_API ? window.RC_API(p) : p; }
+    function imgUrl(file) { return api('/graphics/' + encodeURIComponent(file)); }
+    // Graphics are served no-store, so a rebuilt tile reuses its image element
+    // instead of downloading the still again.
+    var imgs = {};
+    function imgFor(file, kind) {
+      var key = kind + ':' + file;
+      if (!imgs[key]) {
+        var img = el('img'); img.alt = ''; img.src = imgUrl(file);
+        if (kind === 'thumb') img.loading = 'lazy';
+        imgs[key] = img;
+      }
+      return imgs[key];
+    }
+    function el(tag, cls, text) {
+      var e = document.createElement(tag);
+      if (cls) e.className = cls;
+      if (text != null) e.textContent = text;
+      return e;
+    }
+    function takeOf(name) {
+      return view ? (view.graphics || []).filter(function (g) { return g.source === name; })[0] : null;
+    }
+    // A take needs the graphic's scene on air; hiding it does not.
+    function blockedReason(t) {
+      if (t.visible || !view || !view.program_scene) return '';
+      return t.scenes.indexOf(view.program_scene) >= 0 ? '' : t.scenes.join(' / ') + ' is not on air';
+    }
+    function takeButton(t) {
+      var b = el('button', 'gtake' + (t.visible ? ' off' : ''), t.visible ? 'Take off air' : 'Put on air');
+      b.type = 'button';
+      var why = blockedReason(t);
+      b.disabled = busy || !!why;
+      if (why) b.title = why;
+      b.addEventListener('click', function (e) { e.stopPropagation(); take(t.source, !t.visible); });
+      return b;
+    }
+    function openPreview(g) {
+      var t = takeOf(g.name);
+      dlg.textContent = '';
+      var img = imgFor(g.file, 'big');
+      var bar = el('div', 'gpbar');
+      bar.appendChild(el('div', 'gname', g.name));
+      if (t && t.can_take) bar.appendChild(takeButton(t));
+      var close = el('button', '', 'Close'); close.type = 'button';
+      close.addEventListener('click', function () { dlg.close(); });
+      bar.appendChild(close);
+      dlg.append(img, bar);
+      if (!dlg.open) dlg.showModal();
+    }
+    function render() {
+      box.textContent = '';
+      if (!list.length) { box.appendChild(el('div', 'empty', 'No graphics available.')); }
+      list.forEach(function (g) {
+        var t = takeOf(g.name);
+        var tile = el('div', 'gtile' + (t && t.visible ? ' onair' : ''));
+        var thumb = el('button', 'gthumb'); thumb.type = 'button';
+        thumb.setAttribute('aria-label', 'Preview ' + g.name);
+        thumb.appendChild(imgFor(g.file, 'thumb'));
+        if (t && t.visible) thumb.appendChild(el('span', 'gbadge', 'ON AIR'));
+        thumb.addEventListener('click', function () { openPreview(g); });
+        tile.append(thumb, el('div', 'gname', g.name));
+        if (t && t.visible && t.by) tile.appendChild(el('div', 'gby', 'by ' + t.by));
+        if (t && t.can_take) {
+          tile.appendChild(takeButton(t));
+          var why = blockedReason(t);
+          if (why) tile.appendChild(el('div', 'gwhy', why));
+        }
+        box.appendChild(tile);
+      });
+      renderFlags();
+      if (dlg.open) {
+        var name = dlg.querySelector('.gname');
+        var g = name && list.filter(function (x) { return x.name === name.textContent; })[0];
+        if (g) openPreview(g);
+      }
+    }
+    function renderFlags() {
+      var card = document.getElementById('flagCard'), fl = document.getElementById('flagList');
+      if (!card || !fl) return;
+      var flags = view ? (view.graphics || []).filter(function (g) { return g.group === 'flag' && g.can_take; }) : [];
+      card.hidden = !flags.length;
+      fl.textContent = '';
+      flags.forEach(function (t) {
+        var b = el('button', '', t.source.replace(/^Flag /, ''));
+        b.type = 'button';
+        if (t.visible) b.appendChild(el('span', 'fon', 'ON AIR'));
+        b.style.background = FLAG_COLORS[t.source] || '#cdd3da';
+        b.setAttribute('aria-pressed', t.visible ? 'true' : 'false');
+        var why = blockedReason(t);
+        b.disabled = busy || !!why;
+        b.title = why || (t.visible ? 'Take ' + t.source + ' off air' : 'Put ' + t.source + ' on air');
+        b.addEventListener('click', function () { take(t.source, !t.visible); });
+        fl.appendChild(b);
+      });
+    }
+    // The first requests of a page load sometimes meet a reset connection; one
+    // quick retry saves a poll interval of empty card.
+    function retryOnce(fn, retried) { if (!retried) setTimeout(function () { fn(true); }, 1000); }
+    function loadList(retried) {
+      return fetch('/graphics', { cache: 'no-store' })
+        .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+        .then(function (d) { list = d.graphics || []; imgs = {}; render(); })
+        .catch(function () {
+          box.textContent = ''; box.appendChild(el('div', 'empty', 'Could not load graphics.'));
+          retryOnce(loadList, retried);
+        });
+    }
+    function loadView(retried) {
+      return fetch('/cockpit/graphic-takes', { cache: 'no-store' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          var sig = JSON.stringify(d);
+          if (sig === viewSig) return;     // unchanged: keep the tiles and their images
+          viewSig = sig; view = d; render();
+        })
+        .catch(function () { retryOnce(loadView, retried); });
+    }
+    function take(source, on) {
+      busy = true; msg.textContent = ''; render();
+      fetch('/cockpit/graphic-takes', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ source: source, on: on }) })
+        .then(function (r) { return r.json().catch(function () { return {}; }).then(function (d) {
+          if (!r.ok || !d.ok) msg.textContent = d.error || ('Failed (' + r.status + ')');
+        }); })
+        .catch(function () { msg.textContent = 'Network error.'; })
+        .then(function () { busy = false; return loadView(); });
+    }
+    var refresh = document.getElementById('gfxRefresh');
+    if (refresh) refresh.addEventListener('click', function () { loadList(true); loadView(true); });
+    loadList(); loadView();
+    setInterval(function () { if (!busy && !document.hidden) loadView(true); }, 3000);
+  })();
+</script>
