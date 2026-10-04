@@ -84,6 +84,13 @@
     border-radius:8px;padding:6px 10px;font-size:11px;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;white-space:nowrap}
   .st b{color:var(--ink);font-weight:600}
   .st[hidden]{display:none}
+  .strip.compact .stl{display:none}
+  .strip:not(.compact) .sts{display:none}
+  .strip.tight{gap:5px}
+  .strip.tight .st{padding:5px 7px;letter-spacing:.03em}
+  header:has(.strip.tight) .brand{font-size:20px;letter-spacing:.1em}
+  header.stripwrap{flex-wrap:wrap}
+  header.stripwrap .strip{order:9;flex:1 0 100%;justify-content:flex-start}
   .st.air{border-color:var(--air);color:#ff8080;box-shadow:0 0 12px var(--air-glow)}
   .st.air b{color:#ffb3b3}
   .st.ok{border-color:var(--live);color:#8fe6b0}
@@ -768,7 +775,7 @@
             <div class="keys" id="gfxGridBus"></div>
           </div>
           <div class="grp"><span class="glbl">Flag graphic, one active</span><div class="keys" id="flagGfxBus"></div></div>
-          <div class="grp"><span class="glbl">Crew takes <span id="takeLeague"></span></span>
+          <div class="grp"><span class="glbl">Crew graphic takes <span id="takeLeague"></span></span>
             <div class="takemode" data-role="commentator"><span>Commentator</span><div class="keys"></div></div>
             <div class="takemode" data-role="race_control"><span>Race Control</span><div class="keys"></div></div>
           </div>
@@ -1317,12 +1324,16 @@ loadGraphicCatalog();
 
 /* Crew graphic takes: the live mode per role and the requests waiting for the
    director. A mode change on the relay drops the open requests. */
-const TAKE_MODES = [["off", "OFF"], ["request", "REQUEST"], ["direct", "DIRECT"]];
+const TAKE_MODES = [
+  ["off", "OFF", "no takes", "The crew cannot put graphics on air."],
+  ["request", "REQUEST", "asks you", "The crew asks for a graphic. It waits under Graphic requests until you take or decline it."],
+  ["direct", "DIRECT", "crew takes", "The crew puts graphics on air itself."],
+];
 let takeModes = {};
 document.querySelectorAll(".takemode").forEach(row=>{
-  TAKE_MODES.forEach(([mode, label])=>{
-    const b = mkKey(label, "crew", ()=>setTakeMode(row.dataset.role, mode));
-    b.dataset.mode = mode; row.querySelector(".keys").appendChild(b);
+  TAKE_MODES.forEach(([mode, label, sub, help])=>{
+    const b = mkKey(label, sub, ()=>setTakeMode(row.dataset.role, mode));
+    b.dataset.mode = mode; b.title = help; row.querySelector(".keys").appendChild(b);
   });
 });
 function renderTakeModes(){
@@ -1829,7 +1840,7 @@ async function obsStatePoll(){
     for (const row of document.querySelectorAll(".arow")){
       const input = row.querySelector("input[type=range]").dataset.input;
       const a = obsState.audio.find(x=>x.input===input);
-      if (!a) continue;
+      if (!a || typeof a.volumeDb !== "number") continue;   // input not in this OBS collection
       const mbtn = row.querySelector(".mute");
       mbtn.classList.toggle("muted", !!a.muted);
       mbtn.textContent = a.muted ? "Muted" : "Mute";
@@ -1862,8 +1873,9 @@ function renderAir(visState){
 /* Relay status strip, which works without OBS */
 /* state -> [pill suffix, pill css class]. Durations and staleness come from the
    relay (state_age_s, cookies_health); this file only renders. */
-const FEED_STATE = {serving:["LIVE","ok"], connecting:["CONN","warn"],
-                    idle:["IDLE",""], stopped:["STOPPED",""]};
+// [pill text, pill class, short text for a header too narrow for the full pills]
+const FEED_STATE = {serving:["LIVE","ok","LIVE"], connecting:["CONN","warn","CONN"],
+                    idle:["IDLE","","IDLE"], stopped:["STOPPED","","STOP"]};
 function fmtDur(s){
   s = Math.max(0, Math.floor(s));
   const h = Math.floor(s/3600), mi = Math.floor(s%3600/60), sec = s%60;
@@ -1919,11 +1931,30 @@ function healthLine(name, f){
   return "";
 }
 function statePill(el, label, stint, n, state, down){
-  let [txt, cls] = FEED_STATE[state] || ["", ""];
-  if (down){ txt = "DOWN"; cls = "air"; }     // lost live serve -> red pill
+  let [txt, cls, short] = FEED_STATE[state] || ["", "", ""];
+  if (down){ txt = short = "DOWN"; cls = "air"; }     // lost live serve -> red pill
   el.className = "st" + (cls ? " " + cls : "");
-  el.innerHTML = label + " <b>" + stint + "</b>" + (n ? "/" + n : "") + (txt ? " · " + txt : "");
+  el.innerHTML = label + " <b>" + stint + "</b>"
+    + '<span class="stl">' + (n ? "/" + n : "") + (txt ? " · " + txt : "") + "</span>"
+    + (short ? '<span class="sts">' + short + "</span>" : "");
 }
+// Full pills when they fit, then short forms, then tighter pills, and last a row of
+// their own, so no pill is ever cut.
+function fitStrip(){
+  const s = $(".strip"), h = s.parentElement;
+  const over = () => s.scrollWidth > s.clientWidth;
+  h.classList.remove("stripwrap");
+  s.classList.remove("compact", "tight");
+  if (over()) s.classList.add("compact");
+  if (over()) s.classList.add("tight");
+  if (over()){
+    s.classList.remove("compact", "tight");
+    h.classList.add("stripwrap");
+    if (over()) s.classList.add("compact");
+  }
+}
+new ResizeObserver(fitStrip).observe($(".strip").parentElement);
+new MutationObserver(fitStrip).observe($(".strip"), {childList:true, subtree:true, characterData:true});
 /* Event title (#207): header display and inline editor */
 const BRAND_SUB_STATIC = "GT RACING BROADCAST";
 let eventTitle = "", editingTitle = false;
@@ -2025,10 +2056,11 @@ async function relayPoll(){
     }
     if (d.pov){
       const ps = d.pov.state || "";                       // guard: version-skewed relay
-      let [txt, cls] = FEED_STATE[ps] || [ps.toUpperCase(), ""];
-      if (d.pov.down){ txt = "DOWN"; cls = "air"; }
+      let [txt, cls, short] = FEED_STATE[ps] || [ps.toUpperCase(), "", ps.toUpperCase()];
+      if (d.pov.down){ txt = short = "DOWN"; cls = "air"; }
       $("#stPov").className = "st" + (cls ? " " + cls : "");
-      $("#stPov").innerHTML = "POV <b>" + (txt || "—") + "</b>";
+      $("#stPov").innerHTML = 'POV <b><span class="stl">' + escapeHtml(txt || "—")
+        + '</span><span class="sts">' + escapeHtml(short || "—") + "</span></b>";
     } else { $("#stPov").className = "st"; $("#stPov").innerHTML = "POV <b>—</b>"; }
     if (povVisBtn) povVisBtn.classList.toggle("on", !!(d.pov && d.pov.shown));
     if (teleVisBtn){                      // /status carries telemetry only for solo POV
@@ -3210,6 +3242,7 @@ function showArea(name){
   if (name === "schedule"){ schedPoll(); qualPoll(); subsPoll(); }
 }
 document.querySelectorAll(".navbtn").forEach(b => b.addEventListener("click", () => showArea(b.dataset.area)));
+document.querySelectorAll(".navbtn").forEach(b => navTitle(b));
 
 function applyNavCollapse(){
   const collapsed = NAV_AUTO.matches || recall(NAV_KEY) === "1";
@@ -3335,11 +3368,18 @@ $("#nextBtn").addEventListener("click", () => {
   relayCall(`next?transition=${activeTransition}&duration=${activeTransition === "cut" ? 0 : activeDuration}`);
 });
 
+function navTitle(b){
+  const name = b.querySelector(".nlbl").firstChild.textContent.trim();
+  const why = b.querySelector(".nwhy").textContent;
+  b.title = why ? name + " · " + why : name;
+  b.setAttribute("aria-label", b.title);
+}
 function setNav(area, level, why){
   const b = document.querySelector(`.navbtn[data-area="${area}"]`);
   if (!b) return;
   b.querySelector(".ndot").className = "ndot" + (level ? " " + level : "");
   b.querySelector(".nwhy").textContent = why || "";
+  navTitle(b);
 }
 function faultReasons(d){
   const out = [];

@@ -71,7 +71,7 @@ Where each bus lives:
 | **TRANS** (live column) | transition selector for the next scene switch. **Cut**, **Fade** (default), or **Stinger** |
 | **GFX** (Graphics area) | graphics toggles (HUD, standings, schedule, results, weather, covers) |
 | **FLAG GFX** | mutually exclusive flag-status graphic overlays, exactly one active at a time (or none); distinct from the flag-text chip in the HUD |
-| **CREW TAKES** (Graphics area) | the live take mode per crew role, **Commentator** and **Race Control**: `OFF`, `REQUEST` or `DIRECT`. It starts from the league's `GRAPHICS_TAKE` and returns to it when the relay restarts. Changing a mode drops the open requests |
+| **CREW GRAPHIC TAKES** (bottom of the Graphics area) | the live take mode per crew role, **Commentator** and **Race Control**: `OFF` (no takes), `REQUEST` (the crew asks, you take or decline) or `DIRECT` (the crew takes graphics itself). Each key explains its mode on hover. It starts from the league's `GRAPHICS_TAKE` and returns to it when the relay restarts. Changing a mode drops the open requests |
 | **TIMER** (HUD area) | the race timer ([Race Timer](Race-Timer)) |
 | **AUDIO** (Audio area) | per-source dB sliders, 0 dB reset and mutes; includes an **Intermission Music** fader for the music track in the Intermission scene |
 | **URLs** (Schedule area) | the editor for the schedule and POV URLs, next to the commentators' link submissions |
