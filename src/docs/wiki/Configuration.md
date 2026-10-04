@@ -45,6 +45,8 @@ OBS_COLLECTION=
 DISCORD_CLIENT_ID=
 DISCORD_CLIENT_SECRET=
 DISCORD_WEBHOOK_URL=
+# optional: crew graphic takes (off | direct)
+GRAPHICS_TAKE=
 ```
 
 - **`NAME`**: display name shown in the CLI / Control Center / docs (not the HUD).
@@ -87,6 +89,10 @@ DISCORD_WEBHOOK_URL=
   When set, the relay posts commentator stream-link submissions and health alerts to that
   channel; when absent those notifications are simply no-ops. Setup:
   [Console & cockpit setup](Console-Setup).
+- **`GRAPHICS_TAKE`** *(optional)*: may commentators and Race Control put broadcast
+  graphics on air from their pages? `off` (default, view only) or `direct`. Flag graphics
+  are Race Control only, and the director keeps full control either way. See
+  [Console → Graphics](Console#graphics).
 
 **Which profile is active** (resolution order): a global `--profile <name>` flag wins;
 then the machine `RACECAST_PROFILE` (or `.env`) value; then the `runtime/active-profile`

@@ -1527,6 +1527,7 @@ def resolve_brand_override(brands_dir, key):
 # cannot share code; the relay's downloaders are deliberately dependency-light, so keep
 # the literal "manifest.json" in sync.
 GRAPHICS_MANIFEST_NAME = "manifest.json"
+TAKES_STATE_TTL_S = 2.0   # shared OBS read behind the crew graphic-take view
 
 
 def _internal_graphic_labels(graphics_dir):
@@ -4635,16 +4636,18 @@ def apply_graphic(relay, obs_ws, verb, source):
     return payload, (200 if ok else 503)
 
 
-def graphic_takes_view(relay, obs_ws, mode, roles, crew_takes, flag_store):
+def graphic_takes_view(relay, obs_ws, mode, roles, crew_takes, flag_store, read_state=None):
     """The takeable graphics with their live state. *roles* None is the director's
-    full list; a role set adds "can_take" per graphic for that caller."""
+    full list; a role set adds "can_take" per graphic for that caller. *read_state*
+    (items) -> (state, note) replaces the direct OBS read, e.g. with a shared cache."""
     defs = graphic_takes.definitions(getattr(relay, "solo", False))
     items = [(sc, d["source"]) for d in defs if d["flag"] is None for sc in d["scenes"]]
     scene, note, visible = None, "", {}
     if obs_ws is None:
         note = "obs unavailable"
     else:
-        state, note = obs_ws.read_obs_state(items, [])
+        state, note = (read_state(items) if read_state
+                       else obs_ws.read_obs_state(items, []))
         if state is not None:
             scene = state.get("scene")
             for item in state.get("sources") or []:
@@ -9963,6 +9966,20 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
     _console_authfail_rl = console_auth.RateLimiter(limit=20, window_s=60)
     _graphic_take_rl = console_auth.RateLimiter(limit=1, window_s=2)
     _crew_takes = graphic_takes.CrewTakes()
+    # Every open crew page polls the take view; one OBS read serves them all for a
+    # short window, and a take drops it so the next poll shows the change.
+    _takes_state = {"at": 0.0, "value": None}
+    _takes_state_lock = threading.Lock()
+
+    def _takes_read_state(items):
+        with _takes_state_lock:
+            now = time.monotonic()
+            cached = _takes_state["value"]
+            if cached is not None and now - _takes_state["at"] < TAKES_STATE_TTL_S:
+                return cached
+            value = relay._obs.read_obs_state(items, [])
+            _takes_state.update(at=now, value=value if value[0] is not None else None)
+            return value
     graphics_take = graphic_takes.normalize_mode(graphics_take)
     # Shared tab bar and live strip of the cockpit and the Race Control desk.
     crew_frame_path = (os.path.join(os.path.dirname(console_page_path), "crew-frame.html")
@@ -10982,7 +10999,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     # The panel's graphic list; director-gated under /console.
                     return self._send(graphic_takes_view(
                         relay, relay._obs if _obs_ws is not None else None,
-                        graphics_take, None, _crew_takes, flag_graphic_store))
+                        graphics_take, None, _crew_takes, flag_graphic_store,
+                        _takes_read_state))
                 if p[:2] == ["obs", "flag"]:
                     # Flag-status GRAPHIC toggle (parallel to the flag-text chip).
                     # GET so Companion's Generic-HTTP module hits it directly; the
@@ -11167,7 +11185,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         return self._send(graphic_takes_view(
                             relay, relay._obs if _obs_ws is not None else None,
                             graphics_take, self._console_roles(me), _crew_takes,
-                            flag_graphic_store))
+                            flag_graphic_store, _takes_read_state))
                     if p == ["cockpit", "rc-notes"]:
                         # RC -> commentator notes (#376): identity-scoped rolling
                         # window for the cockpit's "Race Control" card.
@@ -11477,6 +11495,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                             graphics_take, self._console_roles(me), name,
                             str(body.get("source") or ""), body.get("on") is not False,
                             _crew_takes, flag_graphic_store, chat_store)
+                        _takes_state["value"] = None
                         return self._send(payload, status)
                     if p == ["cockpit", "cue-back"]:
                         # Commentator -> director cue-back (#377). Identity-scoped

@@ -1426,6 +1426,32 @@ def t_obs_graphics_lists_every_graphic_for_the_director():
     assert code == 403, code
 
 
+class _CountingTakeObs(_TakeFakeObs):
+    def __init__(self):
+        super().__init__()
+        self.reads = 0
+
+    def read_obs_state(self, sources, inputs):
+        self.reads += 1
+        return super().read_obs_state(sources, inputs)
+
+
+def t_graphic_takes_view_shares_one_obs_read_between_polls():
+    srv = _serve(graphics_take="direct"); port = srv.server_address[1]
+    fake = _CountingTakeObs()
+    orig_obs, m._obs_ws = m._obs_ws, fake
+    try:
+        for who in ("alice", "dave", "alice"):
+            assert _get(port, "/console/cockpit/graphic-takes", _tok(who))[0] == 200
+        assert fake.reads == 1, f"three polls within the window read OBS {fake.reads} times"
+        _take(port, "alice", "Standings")
+        reads = fake.reads
+        _get(port, "/console/cockpit/graphic-takes", _tok("alice"))
+        assert fake.reads == reads + 1, "a take must drop the cached state"
+    finally:
+        m._obs_ws = orig_obs
+        srv.shutdown()
+
 def _chat_texts(port):
     code, body = _get(port, "/console/cockpit/chat/data", _tok("alice"))
     return [msg["text"] for msg in json.loads(body)["messages"]]
@@ -1471,6 +1497,8 @@ def t_crew_pages_carry_the_shared_frame():
             assert code == 200, (path, code)
             assert "__CREW_FRAME__" not in body, f"{path} still has the placeholder"
             assert 'id="crewTabs"' in body and "function crewSelectTab" in body, path
+            assert "/cockpit/graphic-takes" in body, f"{path} lacks the graphic card"
+            assert "function loadGraphics" not in body, f"{path} keeps its own graphics list"
     finally:
         srv.shutdown()
 

@@ -267,10 +267,40 @@ def render_panel_shortcut_confirm(ctx, headed=False, slowmo=0):
     return E.CheckResult(name, "pass", "")
 
 
+def render_cockpit_graphics(ctx, headed=False, slowmo=0):
+    """The cockpit's graphic card shows tiles, a tap previews in the page instead of a
+    new tab, and with GRAPHICS_TAKE unset there is no take button."""
+    from playwright.sync_api import sync_playwright  # noqa: PLC0415  optional, lazy
+    name = "render_cockpit_graphics"
+    url = ctx.relay_url + "/cockpit?t=" + ctx.token
+    try:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=not headed, slow_mo=slowmo)
+            try:
+                context = browser.new_context(viewport={"width": 1280, "height": 900})
+                page = context.new_page()
+                page.goto(url, wait_until="domcontentloaded")
+                page.wait_for_selector("#gfxList .gtile", state="visible", timeout=10000)
+                buttons = page.locator("#gfxList .gtake").count()
+                page.click("#gfxList .gthumb")
+                page.wait_for_selector("dialog.gpreview[open] img", timeout=5000)
+                pages = len(context.pages)
+            finally:
+                browser.close()
+    except Exception as exc:  # noqa: BLE001  a render failure is a check failure
+        return E.CheckResult(name, "fail", f"{type(exc).__name__}: {exc}")
+    if buttons:
+        return E.CheckResult(name, "fail", f"{buttons} take buttons with GRAPHICS_TAKE off")
+    if pages != 1:
+        return E.CheckResult(name, "fail", f"the preview opened {pages - 1} extra tab(s)")
+    return E.CheckResult(name, "pass", "")
+
+
 RENDERED_CHECKS = [render_tally_pill, render_funnel_pill, render_cockpit_phone,
-                   render_panel_shortcut_confirm]
+                   render_cockpit_graphics, render_panel_shortcut_confirm]
 # A real league's relay can reach the producer's OBS, so no check that sends /next.
-REAL_LEAGUE_RENDERED_CHECKS = [render_tally_pill, render_funnel_pill, render_cockpit_phone]
+REAL_LEAGUE_RENDERED_CHECKS = [render_tally_pill, render_funnel_pill, render_cockpit_phone,
+                               render_cockpit_graphics]
 
 
 def run_rendered_checks(ctx, headed=False, slowmo=0, checks=None):
@@ -392,6 +422,10 @@ def run_synthetic(args):
         # of the real runtime tree.
         relay_runtime = os.path.join(tmp, "runtime")
         os.makedirs(relay_runtime, exist_ok=True)
+        # One still for the crew graphic card; any real PNG will do.
+        os.makedirs(os.path.join(relay_runtime, "graphics"), exist_ok=True)
+        shutil.copy(os.path.join(ROOT, "src", "assets", "brands", "audi.png"),
+                    os.path.join(relay_runtime, "graphics", "Standings.png"))
 
         # Stub the external stream tools so the relay's startup tool-check passes
         # on a clean machine or CI runner.
