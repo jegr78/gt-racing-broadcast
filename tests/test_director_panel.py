@@ -345,8 +345,8 @@ def t_solo_telemetry_toggle():
     # Solo POV: a TELEMETRY key on the SCN-VIS bus toggles the HUD telemetry block
     # through the relay (no OBS item behind it) and lights from /status.
     html = _html()
-    solo = html[html.index("const CONFIG_SOLO"):]
-    solo = solo[:solo.index("graphics:")]
+    solo = _config_block(html, "CONFIG_SOLO")
+    solo = solo[solo.index("vis:"):solo.index("audio:")]
     assert 'label:"TELEMETRY"' in solo and 'relay:"telemetry"' in solo
     assert 'relayCall(item.relay + "/toggle")' in html
     assert "teleVisBtn.classList.toggle(\"on\", !!(d.telemetry && d.telemetry.visible))" in html
@@ -399,8 +399,6 @@ def _assert_config_matches(cfg, filename):
 
 def t_solo_config_targets_exist_in_both_solo_collections():
     solo = _config_block(_html(), "CONFIG_SOLO")
-    for label in ("WEEKEND", "STARTING GRID", "GRID R8"):
-        assert f'label:"{label}"' in solo, f"solo config lacks the {label} key"
     for filename in ("GT_Racing_Solo_POV.json", "GT_Racing_Solo_Commentary.json"):
         _assert_config_matches(solo, filename)
 
@@ -417,15 +415,18 @@ def t_endurance_config_targets_exist_in_endurance_collection():
     _assert_config_matches(_config_block(_html(), "CONFIG"), "GT_Racing_Endurance.json")
 
 
-def t_prerace_and_grid_busses_rebuild_with_the_config():
+def t_graphic_buses_come_from_the_relay_catalog():
     h = _html()
-    body = _func_body(h, "buildControls")
-    for bus in ("gfxPreRaceBus", "gfxGridTopBus", "gfxGridBus"):
-        assert f'$("#{bus}").replaceChildren()' in body, f"{bus} is not cleared on rebuild"
-    assert "cfg.graphicsPreRace.forEach" in body, "pre-race keys not built from cfg"
-    assert "cfg.graphicsGrid.forEach" in body, "grid keys not built from cfg"
-    assert "CONFIG.graphicsPreRace" not in h and "CONFIG.graphicsGrid" not in h, \
-        "pre-race/grid keys still built once from the endurance CONFIG"
+    assert "buildGraphicBuses();" in _func_body(h, "buildControls"), \
+        "a rebuild of the other buses must rebuild the graphic keys too"
+    body = _func_body(h, "buildGraphicBuses")
+    for bus in ("gfxBus", "gfxPreRaceBus", "gfxGridTopBus", "gfxGridBus"):
+        assert f'"#{bus}"' in body, f"{bus} is not built from the catalog"
+    for name in ("CONFIG", "CONFIG_SOLO"):
+        cfg = _config_block(h, name)
+        for key in ("graphics:", "graphicsPreRace:", "graphicsGrid:"):
+            assert key not in cfg, f"{name} still lists {key} next to the relay catalog"
+    assert 'fetch("/obs/graphics"' in _func_body(h, "loadGraphicCatalog")
 
 
 AREAS = ("handover", "graphics", "hud", "cues", "audio",

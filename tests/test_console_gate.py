@@ -1503,6 +1503,16 @@ def t_crew_pages_carry_the_shared_frame():
         srv.shutdown()
 
 
+
+def t_obs_graphics_carries_the_panel_catalog():
+    # The tailnet /panel has no token; the root route serves the catalog to it.
+    t = _take_call(lambda p: _get(p, "/obs/graphics"))
+    code, body = t.res
+    assert code == 200, (code, body)
+    panel = json.loads(body)["panel"]
+    assert panel["graphicsGrid"][0]["label"] == "STARTING GRID", panel["graphicsGrid"][0]
+    assert panel["graphics"][0] == {"label": "HUD", "scene": "Stint", "source": "Stint HUD"}
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
