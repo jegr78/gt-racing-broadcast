@@ -44,7 +44,9 @@ The page is a fixed frame of four columns, so nothing you need on air scrolls aw
 - **Live column**: the program preview with the feed tiles, what is on air, the PGM
   scene keys, the transition, and the handover keys **ARM** and **NEXT**.
 - **Workspace** (middle): the area you picked. Above it a "next step" line names the
-  next handover step from the relay's state. The action log sits below the area.
+  next handover step from the relay's state: a missing or submitted link for the next
+  stint first, then ARM, then the cut. Only the next stint's missing link turns the
+  Schedule dot amber. The action log sits below the area.
 - **Chat rail** (right): crew chat above the broadcast chat, always visible. Drag the
   divider between them (or focus it and use the arrow keys) to share the height; the
   panel remembers the split.
@@ -108,8 +110,10 @@ Solo (Game is the capture card, Mic the commentary microphone):
 
 The **emergency feed switch** in Troubleshoot (`FEED A ON AIR`, `FEED B ON AIR`) shows
 one feed in the Stint scene with its audio after a confirmation. It is for the case where
-NEXT cannot hand over. It changes OBS only: the relay keeps its own on-air feed, so the
-HUD, `/status` and the next NEXT still follow the relay.
+NEXT cannot hand over. The relay then takes that feed as on air: its stint becomes the
+on-air stint, the HUD follows it, and the other feed moves to the next stint (stopped,
+like after a NEXT). The next NEXT hands over from there. Switching to a feed that is
+already on air changes nothing on the relay.
 
 All controls: scenes, sources, audio, feeds, timer, HUD, and URLs, work
 relay-only. The relay calls the producer's local OBS on your behalf; no OBS
@@ -123,8 +127,9 @@ For a **solo** profile (a single-race commentary or driver-POV broadcast: local
 capture + webcam, no A/B feeds) the panel adapts automatically: the Handover area,
 ARM and NEXT are hidden, Graphics is the default area, the PGM bus carries the solo
 macros (see [Scene macros](#scene-macros)), and the FEEDS bus, the emergency feed switch,
-the A/B feed pills and preview tiles, the stint schedule and the qualifying
-editor are hidden, and the POV editor stands on its own card with its own POV
+the A/B feed pills, the stint schedule and the qualifying editor are hidden. The live
+column previews `CAPTURE` and `WEBCAM` (a commentary profile also `TYRES`) next to
+`POV` instead of the A/B tiles, and the POV editor stands on its own card with its own POV
 RELOAD / POV STOP. The OBS control busses retarget to the solo scene collection.
 The Overlays card in the live column toggles the `WEBCAM` and `POV`
 picture-in-picture (the `WEBCAM` toggle acts on the webcam in the **Program** scene
@@ -576,7 +581,8 @@ Per swap:
    sets **Race Control → Driver Swaps** for you).
 4. **Press NEXT once.** The relay hands over to the armed feed, shows the new
    commentator in the **Stint** scene, switches the audio, cuts the program to
-   **Stint**, sets the HUD **Stint** / **Streamer** from the on-air Schedule row,
+   **Stint** (from the panel with the transition armed in the live column; the
+   Companion's **Feeds Next** cuts hard), sets the HUD **Stint** / **Streamer** from the on-air Schedule row,
    clears Race Control: and **stops the outgoing feed's pull**. You do not pick Feed
    A or Feed B; correct the HUD from the panel's **HUD** bus if needed.
 

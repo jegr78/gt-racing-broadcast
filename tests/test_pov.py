@@ -280,6 +280,105 @@ def t_next_reflects_only_when_incoming_serving():
     assert calls == [("A", True)]
 
 
+def t_next_auto_passes_the_transition_to_the_cut():
+    # NEXT honours the panel's armed transition (#730); Companion's bare /next keeps
+    # the hard cut, so the old two-argument call stays when none is given.
+    r = _relay(["s1", "s2", "s3", "s4"])
+    calls = []
+    r._reflect = lambda live, cut, **kw: calls.append((live, cut, kw))
+    r.feeds["B"].phase = "serving"
+    out = r.next_auto(transition="fade", duration_ms=700)
+    assert out["obs_cut"] is True
+    assert calls == [("B", True, {"transition": "fade", "duration_ms": 700})], calls
+    calls.clear()
+    r.feeds["A"].phase = "serving"
+    r.next_auto()
+    assert calls == [("A", True, {})], calls
+
+
+def t_next_transition_query_is_validated():
+    q = m.next_transition_query
+    assert q("/next?transition=fade&duration=700") == ("fade", 700)
+    assert q("/next?transition=cut") == ("cut", None)
+    assert q("/next") == (None, None), "Companion's bare /next stays a hard cut"
+    assert q("/next?transition=wipe&duration=700") == (None, None), "unknown transition"
+    assert q("/next?transition=fade&duration=99999") == ("fade", 10000), "clamped like /obs/scene"
+    assert q("/next?transition=fade&duration=x") == ("fade", None)
+
+
+def t_take_on_air_moves_the_relay_to_the_picked_feed():
+    # The panel's emergency feed switch (#730): the picture shows Feed B's stint, so
+    # the relay must say so too, and the next NEXT must target the other feed.
+    r = _relay(["s1", "s2", "s3", "s4"])
+    r.manual_feed_arm = True
+    r.A.paused = False; r.B.paused = False
+    assert r.live_feed() == "A" and r.B.idx == 1
+    assert r.take_on_air("B") is True
+    assert r.live_feed() == "B" and r.on_air_row_idx() == 1, r.status()["live"]
+    assert r.A.idx == 2, "the other feed waits on the next slot"
+    assert r.A.paused is True, "only one feed pulls, as after NEXT"
+    assert r.take_on_air("B") is False, "already on air: nothing moves"
+    assert r.A.idx == 2
+
+
+def t_solo_template_is_normalized():
+    assert m.solo_template({"RACECAST_TEMPLATE": " POV "}) == "pov"
+    assert m.solo_template({"RACECAST_TEMPLATE": "commentary"}) == "commentary"
+    assert m.solo_template({"RACECAST_TEMPLATE": "other"}) == ""
+    assert m.solo_template({}) == ""
+
+
+_HO_ROWS = [("u1", "Ann", "Stint 1", 2), ("", "Ben", "Stint 2", 3),
+            ("u3", "Cat", "Stint 3", 4)]
+_HO_FEEDS = {"A": {"index": 0}, "B": {"index": 1}}
+
+
+def t_handover_next_names_the_off_air_feed_and_its_link():
+    # The panel's "next step" and Schedule dot read this instead of guessing (#730).
+    got = m.handover_next(_HO_FEEDS, _HO_ROWS, [])
+    assert got == {"feed": "B", "stint": 2, "label": "Stint 2", "streamer": "Ben",
+                   "link": False, "pending": False}, got
+    got = m.handover_next({"A": {"index": 2}, "B": {"index": 1}}, _HO_ROWS, [])
+    assert got["feed"] == "A" and got["link"] is True, got
+
+
+def t_handover_next_sees_a_pending_submission_for_that_row_only():
+    pend = [{"target_line": 3, "mode": "race"}]
+    assert m.handover_next(_HO_FEEDS, _HO_ROWS, pend)["pending"] is True
+    assert m.handover_next(_HO_FEEDS, _HO_ROWS, [{"target_line": 4}])["pending"] is False
+    qual = [{"target_line": 3, "mode": "qualifying"}]
+    assert m.handover_next(_HO_FEEDS, _HO_ROWS, qual)["pending"] is False
+
+
+def t_handover_next_is_none_past_the_schedule():
+    assert m.handover_next({"A": {"index": 2}, "B": {"index": 3}}, _HO_ROWS, []) is None
+    assert m.handover_next({}, _HO_ROWS, []) is None
+
+
+def t_handover_next_stays_with_director_and_producer_over_the_console():
+    full = {"feeds": {}, "handover_next": {"feed": "B", "pending": True}}
+    assert "handover_next" in m.redact_console_status(full, ["director"])
+    assert "handover_next" not in m.redact_console_status(full, ["commentator"])
+
+
+def t_status_route_carries_handover_next():
+    r = m.Relay(_FakeSource(_URLS8), [53001, 53002], LOGDIR)
+    srv = _serve(r)
+    try:
+        port = srv.server_address[1]
+        got = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/status", timeout=5).read())
+        ho = got["handover_next"]
+        assert ho["feed"] == "B" and ho["stint"] == 2 and ho["pending"] is False, ho
+    finally:
+        srv.shutdown()
+
+
+def t_take_on_air_is_refused_in_solo():
+    r = _relay(["s1", "s2"])
+    r.solo = True
+    assert r.take_on_air("A") is False
+
+
 def t_next_auto_stops_freed_feed_on_cut():
     r = _relay(["s1", "s2", "s3", "s4"])
     r.manual_feed_arm = True
@@ -782,6 +881,12 @@ def t_obs_stint_routes_get_and_post():
             headers={"Content-Type": "application/json"}, method="POST")
         got = json.loads(urllib.request.urlopen(req, timeout=5).read())
         assert got["ok"] is True and got["feed"] == r.live_feed() == "A", got
+        # The emergency switch sends take: the relay follows the picture (#730).
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/obs/stint", data=b'{"feed": "B", "take": true}',
+            headers={"Content-Type": "application/json"}, method="POST")
+        got = json.loads(urllib.request.urlopen(req, timeout=5).read())
+        assert got["relay_on_air"] is True and r.live_feed() == "B", got
         try:
             urllib.request.urlopen(f"http://127.0.0.1:{port}/obs/stint/X", timeout=5)
             raise AssertionError("expected HTTP 400")
@@ -2968,7 +3073,7 @@ def t_reflect_warns_when_the_mic_cannot_be_opened():
             records.append(rec)
 
     class FakeObs:
-        def reflect_feed_state(self, live, cut, audio=None, extra_mute=()):
+        def reflect_feed_state(self, live, cut, audio=None, extra_mute=(), **kw):
             return [], f"unmute {MIC}: request SetInputMute failed: not found"
 
     class _Now:                             # run _reflect's thread inline
@@ -3007,7 +3112,7 @@ def t_reflect_snapshots_the_mic_before_the_freed_feed_advances():
     seen, deferred = [], []
 
     class FakeObs:
-        def reflect_feed_state(self, live, cut, audio=None, extra_mute=()):
+        def reflect_feed_state(self, live, cut, audio=None, extra_mute=(), **kw):
             seen.append((live, cut, audio, list(extra_mute)))
             return [], ""
 

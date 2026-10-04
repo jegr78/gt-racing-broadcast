@@ -623,6 +623,16 @@ def telemetry_enabled(environ):
     return str(environ.get("RACECAST_GT7_TELEMETRY", "")).strip().lower() not in _TELEMETRY_FALSEY
 
 
+SOLO_TEMPLATES = ("pov", "commentary")
+
+
+def solo_template(environ):
+    """The solo starter template the CLI injects (RACECAST_TEMPLATE): "pov",
+    "commentary", or "" when unknown."""
+    t = str(environ.get("RACECAST_TEMPLATE", "")).strip().lower()
+    return t if t in SOLO_TEMPLATES else ""
+
+
 def telemetry_active(solo, environ):
     """GT7 telemetry (the UDP listener + the /telemetry/* endpoints + the HUD
     telemetry block) is POV-only. It runs only in a solo POV broadcast: the driver
@@ -633,7 +643,7 @@ def telemetry_active(solo, environ):
     explicitly disabled. Pure so it is unit-testable."""
     return (bool(solo)
             and telemetry_enabled(environ)
-            and str(environ.get("RACECAST_TEMPLATE", "")).strip().lower() == "pov")
+            and solo_template(environ) == "pov")
 
 
 def should_failover(enabled, on_air_down, program_scene,
@@ -727,6 +737,7 @@ class ProgramShotCache:
 # One shared cache instance; the program image is identical for every console view,
 # so the Director Panel and the Cockpit/Race-Control monitors all read through it.
 _program_shot_cache = ProgramShotCache()
+_source_shot_caches = {}          # solo preview tiles, one cache per allowlisted key
 
 
 def feed_stalled(last_byte_ts, now, stall_s=FANOUT_STALL_S):
@@ -4524,17 +4535,37 @@ def _apply_obs_intents(obs_ws, scene, intents):
     return payload, (200 if ok_all else 503)
 
 
+NEXT_TRANSITIONS = ("cut", "fade", "stinger")
+
+
+def next_transition_query(path):
+    """(transition, duration_ms) from a `/next?transition=..&duration=..` request.
+    Unknown transitions give (None, None), the hard cut a bare /next has always made;
+    the duration is clamped like /obs/scene's."""
+    qs = parse_qs(urlparse(path).query)
+    transition = (qs.get("transition") or [""])[0].strip().lower()
+    if transition not in NEXT_TRANSITIONS:
+        return None, None
+    try:
+        duration = max(0, min(10000, int((qs.get("duration") or [""])[0])))
+    except ValueError:
+        duration = None
+    return transition, duration
+
+
 # --- Relay-driven STINT A/B override (#593 follow-up) ---------------------------
-def apply_stint_state(relay, obs_ws, feed):
+def apply_stint_state(relay, obs_ws, feed, take=False):
     """GET /obs/stint/<A|B> (Companion) and POST /obs/stint {"feed"} (Director
     Panel): make the Stint scene show `feed`, the director's pick or "live" for the
     relay's on-air feed, with its audio live and the rest muted, the Discord
     bus included. The audio comes from the same plan as a handover
     (relay.obs_audio_plan), so the producer's commentary mic opens only when the
-    pick is the local stint and closes when the other feed is. The relay's on-air
-    state is not touched, and the scene cut stays with the caller, so a STINT press
-    still cuts when the relay is down. Best effort, never raises: bad feed -> 400,
-    no feed pair (solo) -> 409, OBS unavailable -> 503."""
+    pick is the local stint and closes when the other feed is. Without `take` the
+    relay's on-air state is not touched; the scene cut stays with the caller, so a STINT press
+    still cuts when the relay is down. `take` (the panel's emergency switch, #730)
+    also makes the pick the relay's on-air feed once OBS took the change. Best
+    effort, never raises: bad feed -> 400, no feed pair (solo) -> 409, OBS
+    unavailable -> 503."""
     if obs_ws is None:
         return {"error": "obs unavailable"}, 503
     if getattr(relay, "solo", False):
@@ -4551,6 +4582,8 @@ def apply_stint_state(relay, obs_ws, feed):
         extra_mute=list(extra_mute) + [_OBS_WS_MODULE.SPLIT_DISCORD_INPUT])
     payload, status = _apply_obs_intents(obs_ws, _OBS_WS_MODULE.STINT_SCENE, intents)
     payload["feed"] = feed
+    if take and status == 200:
+        payload["relay_on_air"] = bool(relay.take_on_air(feed))
     return payload, status
 
 
@@ -4860,6 +4893,19 @@ class _PreviewRingTap:
 
 
 PREVIEW_FEEDS = ("A", "B", "POV")        # tiles the Director Panel can request
+# Solo tiles (#730): OBS inputs the panel may preview, per solo template.
+SOLO_PREVIEW_SOURCES = {"capture": "Solo Capture Device", "webcam": "Solo Webcam Device",
+                        "tyres": "Solo Tyres Capture Device"}
+SOLO_PREVIEW_TEMPLATES = {"tyres": ("commentary",)}
+
+
+def solo_preview_source(key, template):
+    """The OBS input behind a solo preview tile, or None when `key` is not on the
+    allowlist or the template's collection has no such input. Pure."""
+    name = SOLO_PREVIEW_SOURCES.get(key)
+    if name is None or template not in SOLO_PREVIEW_TEMPLATES.get(key, SOLO_TEMPLATES):
+        return None
+    return name
 
 
 def preview_source(target, live, pov_active, feed_keys, fanout=False):
@@ -5851,6 +5897,24 @@ def cockpit_schedule(rows, live_idx, me_key):
             for i, (_u, n, st, _l) in enumerate(rows)]
 
 
+def handover_next(feeds, rows, pending):
+    """The next handover for the Director Panel (#730): the off-air feed (the higher
+    index), its stint, whether its schedule row has a link and whether a commentator
+    submission for that row is pending. `feeds` is /status's feeds block, `rows` the
+    schedule as (url, streamer, stint, sheet line). None past the schedule. Pure."""
+    if not (feeds.get("A") and feeds.get("B")):
+        return None
+    off = "B" if feeds["A"]["index"] <= feeds["B"]["index"] else "A"
+    idx = feeds[off]["index"]
+    if not 0 <= idx < len(rows):
+        return None
+    url, streamer, stint, line = rows[idx]
+    return {"feed": off, "stint": idx + 1, "label": stint, "streamer": streamer,
+            "link": bool((url or "").strip()),
+            "pending": any(e.get("target_line") == line and e.get("mode") != "qualifying"
+                           for e in pending)}
+
+
 def redact_console_status(full, roles):
     """Redact the full /status for the Funnel-exposed /console mount, by role (#493).
     Feed stream URLs (feeds[*].channel), the POV stream URL, and the Sheet id are
@@ -5873,6 +5937,7 @@ def redact_console_status(full, roles):
         mic = full.get("mic")
         if isinstance(mic, dict):                     # #669: device name + OS ids stay home
             out["mic"] = {"state": mic.get("state")}
+        out.pop("handover_next", None)                # who submitted what is director business
     return out
 
 
@@ -8841,6 +8906,7 @@ class Relay:
         """Status payload for solo mode: no A/B schedule/feeds. POV + OBS + health +
         league identity (the console/panel read these); mirrors the tail of status()."""
         out = {"mode": "solo", "solo": True, "feeds": {},
+               "template": solo_template(os.environ),
                "cookies": bool(self.cookies),
                "cookies_health": cookie_health(self.cookies, now=now)}
         if self.pov:
@@ -9089,7 +9155,7 @@ class Relay:
             local = set()                    # unknown -> the mic stays closed
         return _OBS_WS_MODULE.feed_audio_plan(local, mic=mic)
 
-    def _reflect(self, live, cut):
+    def _reflect(self, live, cut, transition=None, duration_ms=None):
         """Push the on-air feed (A/B) into OBS off-thread; never blocks the HTTP
         response, never raises. Records the note for /status."""
         if _obs_ws is None:
@@ -9099,7 +9165,8 @@ class Relay:
 
         def run():
             _applied, note = self._obs.reflect_feed_state(
-                live, cut, audio=audio, extra_mute=extra_mute)
+                live, cut, audio=audio, extra_mute=extra_mute,
+                transition=transition, duration_ms=duration_ms)
             self.obs_note = note or None
             _warn_if_mic_failed(note)
         threading.Thread(target=run, daemon=True).start()
@@ -9251,7 +9318,11 @@ class Relay:
         self.conn_state = {"funnel_ok": funnel_ok, "tailscale_up": ts_up,
                            "companion_ok": comp}
 
-    def next_auto(self):
+    def next_auto(self, transition=None, duration_ms=None):
+        """The handover. `transition`/`duration_ms` pick the OBS transition of the cut
+        (the panel's armed one); without them the cut is hard, as Companion expects."""
+        tx = ({"transition": transition, "duration_ms": duration_ms}
+              if transition else {})
         if self.solo:
             return {"error": "not available in solo mode", "solo": True}
         self.source.refresh(timeout=6)               # fresh sheet data at handover (bounded wait)
@@ -9278,7 +9349,7 @@ class Relay:
             result = self.advance(target, +2)
             cut = self.feeds[new_live].phase == "serving"
             if cut:
-                self._reflect(new_live, cut=True)
+                self._reflect(new_live, True, **tx)
             self.on_air_row = self.feeds[new_live].idx
             # `result` (from advance()) already carries status() plus "changed"/"feed";
             # spread it first and place continuation/obs_cut last, matching the
@@ -9294,7 +9365,7 @@ class Relay:
         self.feeds[new_live].set_index(next_slot_first_row(slots, cur))
         cut = self.feeds[new_live].phase == "serving"
         if cut:
-            self._reflect(new_live, cut=True)         # only flip onto a feed that is actually live
+            self._reflect(new_live, True, **tx)       # only flip onto a feed that is actually live
         # #489/#505: on a real handover cut, stop the outgoing pull so only ONE feed
         # ever pulls googlevideo between handovers (the durable single-puller fix). Gated
         # on cut (never stop a feed we did not cut away from -> never blacks the program)
@@ -9317,6 +9388,27 @@ class Relay:
         # branch above for why (uniform across all three next_auto branches).
         return {**self.status(), "changed": True, "feed": new_live,
                 "continuation": False, "obs_cut": cut}
+
+    def take_on_air(self, which):
+        """The panel's emergency feed switch (#730): `which` is on air by hand, so the
+        relay follows the picture. Its row becomes the on-air stint and the other feed
+        moves to the next slot (stopped under manual arm), as after a NEXT. Returns
+        whether anything moved; never cuts OBS (the caller already did)."""
+        which = str(which or "").upper()
+        if self.solo or which not in self.feeds or self.live_feed() == which:
+            return False
+        rows = self.source.get_rows()
+        slots = pull_slots(rows)
+        taken = self.feeds[which]
+        other = self.feeds["B" if which == "A" else "A"]
+        if self.manual_feed_arm:
+            other.paused = True          # before set_index wakes its loop, as in next_auto
+        other.set_index(next_slot_first_row(slots, taken.idx))
+        if self.manual_feed_arm:
+            other.reload()
+        self.on_air_row = taken.idx
+        LOG.info("emergency switch -> feed %s on air (stint %d)", which, taken.idx + 1)
+        return True
 
     def advance(self, which, delta):
         f = self.feeds.get(which.upper())
@@ -10549,6 +10641,11 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             if timer_store:
                 base["timer"] = timer_store.summary()
             base["event_title"] = event_store.get() if event_store else ""
+            feeds = base.get("feeds") or {}
+            if feeds.get("A") and feeds.get("B") and base.get("mode") != "qualifying":
+                base["handover_next"] = handover_next(
+                    feeds, schedule_rows(relay),
+                    submission_store.list() if submission_store else [])
             if telemetry_store is not None:          # solo POV only; lights the panel toggle
                 base["telemetry"] = {"visible": telemetry_store.visible(),
                                      "car": telemetry_store.car()}  # panel status strip (#713)
@@ -10692,6 +10789,20 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     if preview_manager is None:
                         return self._send({"error": "preview disabled"}, 404)
                     data, note = preview_manager.still(target)
+                    if data is None:
+                        return self._send({"error": "preview unavailable",
+                                           "note": note}, 503)
+                    return self._send_jpeg(data)
+                if len(p) == 3 and p[:2] == ["preview", "source"]:
+                    name = (solo_preview_source(p[2], solo_template(os.environ))
+                            if relay.solo else None)
+                    if name is None:
+                        return self._send({"error": "unknown source", "source": p[2]}, 404)
+                    if _obs_ws is None:
+                        return self._send({"error": "obs unavailable"}, 503)
+                    cache = _source_shot_caches.setdefault(p[2], ProgramShotCache())
+                    data, note = cache.fetch(
+                        lambda: relay._obs.get_source_screenshot(name, width=320))
                     if data is None:
                         return self._send({"error": "preview unavailable",
                                            "note": note}, 503)
@@ -11069,7 +11180,9 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                             part_store.reset()
                     return self._send(res)
                 if p == ["next"]:
-                    result = relay.next_auto()
+                    transition, duration = next_transition_query(self.path)
+                    result = relay.next_auto(**({"transition": transition, "duration_ms": duration}
+                                                if transition else {}))
                     # One-button handover: next_auto cuts OBS back to the Stint
                     # scene itself, so no STINT macro press follows to clear Race
                     # Control. Mirror that macro's rc:"" here when a real cut
@@ -11385,7 +11498,11 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     payload, status = apply_split_state(relay, relay._obs)
                     return self._send(payload, status)
                 if p == ["obs", "stint"]:
-                    payload, status = apply_stint_state(relay, relay._obs, body.get("feed"))
+                    payload, status = apply_stint_state(relay, relay._obs, body.get("feed"),
+                                                        take=body.get("take") is True)
+                    # The relay now follows the picture, so the HUD follows the relay.
+                    if payload.get("relay_on_air") and setup_ctl:
+                        _push_live_schedule(relay, setup_ctl)
                     return self._send(payload, status)
                 if p == ["obs", "stream"]:
                     if _obs_ws is None:
