@@ -857,6 +857,18 @@ def make_handler(ctx):
                                        "error": f"could not fetch Google font: {exc}"},
                                       code=500)
                 return self._json(result, code=200 if result.get("ok") else 400)
+            if path == "/api/fonts/restore":
+                body = self._body_json()
+                if body is None:
+                    return self._json({"ok": False, "error": "malformed JSON body"},
+                                      code=400)
+                try:
+                    result = ctx["fonts_restore"](body.get("force") is True)
+                except Exception as exc:
+                    return self._json({"ok": False,
+                                       "error": f"could not restore fonts: {exc}"},
+                                      code=500)
+                return self._json(result, code=200 if result.get("ok") else 400)
             if path == "/api/fonts/delete":
                 body = self._body_json()
                 if body is None:

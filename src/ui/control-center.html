@@ -70,6 +70,7 @@
   .viewhead { display:flex; flex-wrap:wrap; align-items:center; gap:12px; margin:0 0 14px;
               min-height:34px; }
   .viewhead button { white-space:nowrap; flex-shrink:0; }
+  .viewhead .vhbtns { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; margin-left:auto; }
   #takeover-host, #takeover-funnel-host { max-width:170px; }
   .cplinks { display:grid; grid-template-columns:repeat(4, max-content); gap:6px 8px; align-items:center; }
   .cplinks .cprow { display:contents; }   /* one shared column per field across rows */   /* option text sizes the select */
@@ -997,9 +998,11 @@
               <svg viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Refresh Twitch login</button></div>
         </section>
         <div class="viewhead"><h3>Overlay fonts</h3><span class="sub">machine-wide font library for the Overlay Builder. Shared across all leagues</span>
-          <span class="spacer"></span>
+          <span class="vhbtns">
+          <button id="font-restore" onclick="restoreBundledFonts()" title="Overwrite the fonts that ship with this install, in the library and in every league profile">
+            <svg viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Restore bundled fonts</button>
           <button onclick="window.open('https://fonts.google.com/', '_blank', 'noopener')" title="Browse the Google Fonts catalog in a new tab, then add a family by name below">
-            <svg viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>Browse Google Fonts ↗</button></div>
+            <svg viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>Browse Google Fonts ↗</button></span></div>
         <section>
           <div class="enverr" id="font-err" hidden></div>
           <div class="row">
@@ -2736,6 +2739,29 @@ async function downloadCustomFont() {
     return;
   }
   $('font-custom').value = '';
+  loadFontLibrary();
+}
+
+async function restoreBundledFonts() {
+  if (!(await confirmModal('Overwrite the fonts that ship with this install, in the font library ' +
+      'and in every league profile? Fonts you added under another name stay untouched.',
+      {okLabel: 'Restore'}))) return;
+  $('font-err').hidden = true;
+  const b = $('font-restore'); b.disabled = true;
+  let d;
+  try {
+    d = await (await fetch('/api/fonts/restore', {method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({force: true})})).json();
+  } catch (e) { showFontErr('Control Center not reachable.'); }
+  b.disabled = false;
+  if (!d) return;
+  if (!d.ok) { showFontErr(d.error || 'restore failed'); return; }
+  const leagues = Object.keys(d.profiles || {});
+  await alertModal('Restored ' + d.library.length + ' bundled font file(s) in the library' +
+      (leagues.length ? ' and replaced copies in: ' + leagues.join(', ') : '') +
+      '. Reload the OBS browser sources (racecast obs refresh) to show them on air.',
+      {title: 'Fonts restored'});
   loadFontLibrary();
 }
 

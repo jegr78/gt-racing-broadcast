@@ -23,8 +23,10 @@ Loaded when working under `src/ui/`.
   leagues). A curated baseline set (`overlay_build.GOOGLE_FONTS`) is downloaded at build
   time into `fonts.zip`, bundled INTO each binary, and extracted into `runtime/fonts/` on
   first start by `ensure_bundled_fonts()` (stamp-gated, only-if-absent, zip-slip-safe, so
-  every install has fonts without a manual download, and `racecast update` refreshes the
-  set). Operators add further families by name via the Settings typeahead (routes
+  every install has fonts without a manual download, and `racecast update` adds new
+  bundled fonts). `racecast fonts restore --force` (Settings: **Restore bundled fonts**,
+  route `/api/fonts/restore`) overwrites same-named bundled fonts in the library and in
+  every profile's `overlay/fonts/`. Operators add further families by name via the Settings typeahead (routes
   `/api/fonts`, `/api/fonts/{catalog,download,delete}`); `tools/fetch-fonts.py` is the
   maintainer tool that builds the zip. A font a league's design uses is copied into that
   profile's `overlay/fonts/` on save (`_materialize_overlay_fonts`), so `profile export`

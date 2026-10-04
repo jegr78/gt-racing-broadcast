@@ -8,7 +8,7 @@ tests/test_fonts.py.
 The zip carries a manifest.json {version, fonts:[names], stamp} where stamp is a
 sha256 of the sorted font filenames. Extraction is stamp-gated (a marker file
 records the last applied stamp, so an unchanged set is a cheap no-op every start),
-per-file only-if-absent (never overwrites an operator's own font), and zip-slip
+per-file only-if-absent unless the caller forces an overwrite, and zip-slip
 safe (every entry is whitelist- and containment-checked, never a blind extractall).
 """
 import hashlib, json, os, zipfile
@@ -70,40 +70,73 @@ def read_marker(dest):
         return None
 
 
-def extract_bundled(zip_path, dest):
-    """Seed dest (runtime/fonts/) from zip_path's bundled font set.
-
-    Stamp-gated: if the marker already records the zip's stamp, returns
-    {"skipped": True, "extracted": []} without touching the filesystem. Otherwise
-    extracts each font entry that passes font_name_ok + realpath containment and is
-    not already present (never overwrites), then writes the marker. Returns
-    {"skipped": False, "extracted": [names]}."""
+def _bundled_entries(zip_path, dest):
+    """(zipfile, [(name, target path)]) for every safe manifest entry, or None when
+    zip_path carries no manifest. Entries failing font_name_ok or realpath
+    containment in dest are dropped."""
     manifest = read_manifest(zip_path)
     if not manifest:
+        return None
+    base = os.path.realpath(dest)
+    entries = []
+    for name in manifest.get("fonts", []):
+        if not font_name_ok(name):
+            continue                          # zip-slip / junk entry -> skip
+        target = os.path.realpath(os.path.join(base, name))
+        if target.startswith(base + os.sep):
+            entries.append((name, target))
+    return manifest, entries
+
+
+def _write_entry(zf, name, target):
+    """Write one zip entry atomically to target. False when the zip lacks it."""
+    try:
+        data = zf.read(name)
+    except KeyError:
+        return False                          # listed but missing in the zip
+    with open(target + ".tmp", "wb") as fh:
+        fh.write(data)
+    os.replace(target + ".tmp", target)
+    return True
+
+
+def extract_bundled(zip_path, dest, overwrite=False, gated=True):
+    """Seed dest (runtime/fonts/) from zip_path's bundled font set.
+
+    Gated by default: if the marker already records the zip's stamp, returns
+    {"skipped": True, "extracted": []} without touching the filesystem. Otherwise
+    extracts each safe entry that is not already present, then writes the marker.
+    overwrite=True also replaces same-named files and implies gated=False. Returns
+    {"skipped": False, "extracted": [names]}."""
+    found = _bundled_entries(zip_path, dest)
+    if not found:
         return {"skipped": True, "extracted": []}
+    manifest, entries = found
     stamp = manifest.get("stamp")
-    if stamp and read_marker(dest) == stamp:
+    if gated and not overwrite and stamp and read_marker(dest) == stamp:
         return {"skipped": True, "extracted": []}
     os.makedirs(dest, exist_ok=True)
-    base = os.path.realpath(dest)
     extracted = []
     with zipfile.ZipFile(zip_path) as zf:
-        for name in manifest.get("fonts", []):
-            if not font_name_ok(name):
-                continue                          # zip-slip / junk entry -> skip
-            target = os.path.realpath(os.path.join(base, name))
-            if not target.startswith(base + os.sep):
-                continue                          # escaped dest -> skip
-            if os.path.exists(target):
-                continue                          # never overwrite operator's own
-            try:
-                data = zf.read(name)
-            except KeyError:
-                continue                          # listed but missing in the zip
-            with open(target + ".tmp", "wb") as fh:
-                fh.write(data)
-            os.replace(target + ".tmp", target)
-            extracted.append(name)
+        for name, target in entries:
+            if os.path.exists(target) and not overwrite:
+                continue                      # operator's own font
+            if _write_entry(zf, name, target):
+                extracted.append(name)
     with open(os.path.join(dest, MARKER_NAME), "w", encoding="utf-8") as fh:
         json.dump({"stamp": stamp}, fh)
     return {"skipped": False, "extracted": extracted}
+
+
+def replace_bundled_copies(zip_path, dest):
+    """Overwrite the files in dest (a profile's overlay/fonts/) that share a name
+    with a bundled font. Never adds a font dest lacks. Returns the replaced names."""
+    found = _bundled_entries(zip_path, dest) if os.path.isdir(dest) else None
+    if not found:
+        return []
+    replaced = []
+    with zipfile.ZipFile(zip_path) as zf:
+        for name, target in found[1]:
+            if os.path.isfile(target) and _write_entry(zf, name, target):
+                replaced.append(name)
+    return replaced

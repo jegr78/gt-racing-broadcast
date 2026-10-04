@@ -195,6 +195,7 @@ def _ctx(jobs=None, init_plan=None, init_step=None, profile_logo=None,
             "machine_font_download": lambda name: {"ok": bool(name),
                                                    "name": (name or "") + ".woff2"},
             "machine_font_delete": lambda name: {"ok": True, "removed": name},
+            "fonts_restore": lambda force: {"ok": True, "library": [], "profiles": {}},
             "overlay_font_upload": lambda name, data: {"ok": bool(name),
                                                        "name": name,
                                                        "_len": len(data)},
@@ -1578,6 +1579,21 @@ def t_font_delete_route_passes_name():
         code, body = _post_json(port, "/api/fonts/delete", {"name": "Oswald.woff2"})
         assert code == 200 and json.loads(body)["ok"] is True
         assert seen == ["Oswald.woff2"]
+    finally:
+        httpd.shutdown()
+
+
+def t_fonts_restore_route_passes_only_a_literal_true_force():
+    ctx = _ctx()
+    seen = []
+    ctx["fonts_restore"] = lambda force: seen.append(force) or {
+        "ok": True, "library": ["Oswald.woff2"], "profiles": {"demo": ["Oswald.woff2"]}}
+    httpd, port = _serve(ctx)
+    try:
+        code, body = _post_json(port, "/api/fonts/restore", {"force": True})
+        assert code == 200 and json.loads(body)["profiles"] == {"demo": ["Oswald.woff2"]}
+        _post_json(port, "/api/fonts/restore", {"force": "yes"})
+        assert seen == [True, False], seen
     finally:
         httpd.shutdown()
 
