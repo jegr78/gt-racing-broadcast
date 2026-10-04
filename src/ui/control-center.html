@@ -70,7 +70,9 @@
   .viewhead { display:flex; flex-wrap:wrap; align-items:center; gap:12px; margin:0 0 14px;
               min-height:34px; }
   .viewhead button { white-space:nowrap; flex-shrink:0; }
-  #takeover-host, #takeover-funnel-host { max-width:170px; }   /* option text sizes the select */
+  #takeover-host, #takeover-funnel-host { max-width:170px; }
+  .cplinks { display:grid; grid-template-columns:repeat(4, max-content); gap:6px 8px; align-items:center; }
+  .cplinks .cprow { display:contents; }   /* one shared column per field across rows */   /* option text sizes the select */
   .viewhead h2 { font-size:16px; font-weight:600; letter-spacing:.01em;
                  margin:0; color:var(--txt); text-transform:none; }
   .viewhead h3 { font-size:13px; font-weight:600; margin:0; color:var(--txt); }
@@ -2801,6 +2803,7 @@ async function loadConsole() {
   $('cp-link-hint').hidden = hasUrl;
   const c = $('cp-links');
   c.textContent = '';
+  c.classList.remove('cplinks');
   if (!d.has_secret) {
     c.textContent = 'Start the relay to generate a league secret and crew links.';
     return;
@@ -2809,6 +2812,7 @@ async function loadConsole() {
     c.textContent = 'No streamers in the schedule yet (start the relay).';
     return;
   }
+  c.classList.add('cplinks');
   d.links.forEach(l => {
     const row = document.createElement('div');
     row.className = 'cprow';

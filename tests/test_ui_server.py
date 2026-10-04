@@ -2050,6 +2050,7 @@ def t_every_button_icon_is_styled():
     fill = html[html.index("function ovFillSample()"):html.index("function ovFitName(")]
     assert "document.fonts.ready" in fill, "team names must be fitted again once the webfont has loaded"
     assert "ResizeObserver" in fill, "a name filled while the canvas is hidden must be fitted once it is laid out"
+    assert ".cplinks .cprow { display:contents; }" in style, "crew link rows must share their columns"
 
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
