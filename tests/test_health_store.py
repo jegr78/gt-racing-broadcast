@@ -677,6 +677,53 @@ def t_migrate_adds_backlog_columns_v9_lossless_and_charted():
         conn2.close()
 
 
+def t_migrate_adds_net_down_floor_v12_lossless():
+    import sqlite3
+    d = tempfile.mkdtemp()
+    path = os.path.join(d, "h.db")
+    c = sqlite3.connect(path)
+    try:
+        c.executescript("CREATE TABLE samples (ts REAL NOT NULL, kind TEXT NOT NULL, "
+                        "sys_net_down_kbps REAL);")
+        c.execute("PRAGMA user_version=11")
+        c.execute("INSERT INTO samples (ts, kind, sys_net_down_kbps) VALUES (?,?,?)",
+                  (1000.0, "tick", 8000.0))
+        c.commit()
+    finally:
+        c.close()
+    conn = hs.open_db(path)
+    try:
+        hs.migrate(conn)
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == hs.SCHEMA_VERSION == 12
+        row = conn.execute("SELECT sys_net_down_kbps, sys_net_down_min_kbps FROM samples").fetchone()
+        assert tuple(row) == (8000.0, None), "the old row survives with a NULL floor"
+    finally:
+        conn.close()
+    assert "sys_net_down_min_kbps" in hs.COLUMNS and "sys_net_down_min_kbps" in hs.NUMERIC_FIELDS
+    fresh = hs.open_db(os.path.join(d, "fresh.db"))
+    try:
+        hs.migrate(fresh)
+        hs.record(fresh, {"ts": 1001.0, "sys_net_down_min_kbps": 120.5}, "tick")
+        got = fresh.execute("SELECT sys_net_down_min_kbps FROM samples").fetchone()[0]
+        assert got == 120.5, got
+    finally:
+        fresh.close()
+
+
+def t_relay_health_snapshot_takes_the_net_down_floor():
+    relay = _make_relay(m)
+    taken = []
+
+    class _Floor:
+        def take(self):
+            taken.append(1)
+            return 2500.0
+    relay._net_floor = _Floor()
+    snap = relay._health_snapshot(now=123.0)
+    assert snap["sys_net_down_min_kbps"] == 2.5, snap["sys_net_down_min_kbps"]
+    assert taken == [1], "each heartbeat sample takes (and so resets) the floor once"
+
+
 def t_migrate_adds_av_columns_v11_lossless():
     # An event's A/V sync disturbances belong in the history, so the post-event report
     # can say how often the chain was disturbed and how often nothing explained it.
@@ -697,7 +744,7 @@ def t_migrate_adds_av_columns_v11_lossless():
     conn = hs.open_db(path)
     try:
         hs.migrate(conn)
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == hs.SCHEMA_VERSION == 11
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == hs.SCHEMA_VERSION
         cols = {r[1] for r in conn.execute("PRAGMA table_info(samples)").fetchall()}
         assert {"av_repairs_total", "av_unexplained_total"} <= cols, cols
         row = conn.execute("SELECT obs_fps, av_repairs_total, av_unexplained_total "

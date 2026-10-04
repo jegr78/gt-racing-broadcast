@@ -7967,6 +7967,7 @@ class Relay:
         self.timer_store = None  # assigned by bootstrap; sampled best-effort for timer_push
         self._last_prune = 0  # epoch of last health-history prune (daily, in heartbeat)
         self._resource_sampler = resources.ResourceSampler()
+        self._net_floor = resources.NetDownFloor()   # #722: started with the heartbeat
 
     def active_source(self):
         """The schedule the A/B feeds currently serve: qualifying when in
@@ -7999,6 +8000,7 @@ class Relay:
         if self.pov:
             threading.Thread(target=self.pov.run, daemon=True).start()
         threading.Thread(target=self._heartbeat_loop, daemon=True).start()
+        self._net_floor.start()
         threading.Thread(target=self._auto_cover_loop, daemon=True).start()
         self._start_av_watcher()
         if self.fanout:                   # #488 freeze detector only applies to the fan-out demuxer
@@ -8177,9 +8179,11 @@ class Relay:
             return getattr(f, "quality", None)
 
         try:
-            sys_res = resources.to_health_fields(self._resource_sampler.sample(now))
+            sys_snap = self._resource_sampler.sample(now)
         except Exception:  # noqa: BLE001 - best-effort; never break the heartbeat
-            sys_res = resources.to_health_fields({})   # all-None, keys still present
+            sys_snap = {}   # all-None, keys still present
+        sys_res = resources.to_health_fields({**sys_snap,
+                                              "net_down_min_bps": self._net_floor.take()})
 
         return {"ts": now,
                 "health_level": self.health_level, "health_reasons": self.health_reasons,

@@ -448,6 +448,61 @@ class ResourceMonitor:
         self._stop.set()
 
 
+class NetDownFloor:
+    """Samples the host's download rate every `interval` seconds on its own thread and
+    keeps the smallest rate seen since the last take(). A 30 s mean hides a 5 s dip;
+    the floor shows it. Inject `reader` and `clock` to drive tick() in tests."""
+
+    def __init__(self, interval=2.0, reader=None, clock=time.monotonic):
+        self.interval = interval
+        self.reader = reader or _read_net
+        self.clock = clock
+        self._prev = None          # (rx, t) of the last good reading
+        self._floor = None
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._thread = None
+
+    def tick(self):
+        try:
+            reading = self.reader()
+        except Exception:  # noqa: BLE001 - never raise
+            reading = None
+        now = self.clock()
+        if not reading or reading[0] != "counter":
+            self._prev = None
+            return
+        prev, self._prev = self._prev, (reading[1], now)
+        if prev is None:
+            return
+        down = rate_from_delta(prev[0], reading[1], now - prev[1])
+        if down is None:
+            return
+        with self._lock:
+            if self._floor is None or down < self._floor:
+                self._floor = down
+
+    def take(self):
+        """The smallest download rate (bytes/s) since the last call, or None."""
+        with self._lock:
+            floor, self._floor = self._floor, None
+        return floor
+
+    def _run(self):
+        while not self._stop.is_set():
+            self.tick()
+            self._stop.wait(self.interval)
+
+    def start(self):
+        if self._thread is not None:
+            return
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._stop.set()
+
+
 def to_health_fields(snap):
     """Map a ResourceSampler snapshot to the health_store sys_* columns, in percent,
     kbps and MB. None-safe."""
@@ -460,4 +515,5 @@ def to_health_fields(snap):
             "sys_mem_pct": snap.get("mem_pct"),
             "sys_net_up_kbps": kbps(snap.get("net_up_bps")),
             "sys_net_down_kbps": kbps(snap.get("net_down_bps")),
+            "sys_net_down_min_kbps": kbps(snap.get("net_down_min_bps")),
             "sys_disk_free_mb": mb(snap.get("disk_free"))}

@@ -194,11 +194,51 @@ def t_to_health_fields():
     f = r.to_health_fields(snap)
     assert f == {"sys_cpu_pct": 42.0, "sys_mem_pct": 55.0,
                  "sys_net_up_kbps": 2.0, "sys_net_down_kbps": 1.0,
-                 "sys_disk_free_mb": 100.0}, f
+                 "sys_net_down_min_kbps": None, "sys_disk_free_mb": 100.0}, f
     # None-safe
     empty = r.to_health_fields({"cpu_pct": None, "mem_pct": None, "net_up_bps": None,
                                 "net_down_bps": None, "disk_free": None})
     assert set(empty.values()) == {None}
+
+
+def _floor(readings, times):
+    """A NetDownFloor driven by scripted net readings and clock values."""
+    it, clock = iter(readings), iter(times)
+    return r.NetDownFloor(reader=lambda: next(it), clock=lambda: next(clock))
+
+
+def t_net_down_floor_keeps_the_smallest_rate_until_taken():
+    f = _floor([("counter", 0, 0), ("counter", 4000, 0), ("counter", 5000, 0),
+                ("counter", 9000, 0), ("counter", 15000, 0)],
+               [0.0, 2.0, 4.0, 6.0, 8.0])
+    for _ in range(4):
+        f.tick()
+    assert f.take() == 500.0, "rates 2000, 500, 2000 bytes/s: the floor is the dip"
+    assert f.take() is None, "take() resets the floor"
+    f.tick()
+    assert f.take() == 3000.0, "the previous counter survives take(), so the next tick has a rate"
+
+
+def t_net_down_floor_restarts_after_a_failed_read():
+    f = _floor([("counter", 0, 0), None, ("counter", 1000, 0), ("counter", 9000, 0)],
+               [0.0, 2.0, 4.0, 6.0])
+    for _ in range(4):
+        f.tick()
+    assert f.take() == 4000.0, "a failed read drops the baseline instead of spanning the gap"
+
+
+def t_net_down_floor_ignores_a_counter_reset():
+    f = _floor([("counter", 9000, 0), ("counter", 100, 0), ("counter", 2100, 0)],
+               [0.0, 2.0, 4.0])
+    for _ in range(3):
+        f.tick()
+    assert f.take() == 1000.0, "a counter that went backwards yields no rate, not a zero floor"
+
+
+def t_to_health_fields_carries_the_down_floor():
+    f = r.to_health_fields({"net_down_bps": 8000.0, "net_down_min_bps": 1500.0})
+    assert f["sys_net_down_min_kbps"] == 1.5, f
+    assert r.to_health_fields({})["sys_net_down_min_kbps"] is None
 
 
 def t_monitor_latest_none_then_sampled():
