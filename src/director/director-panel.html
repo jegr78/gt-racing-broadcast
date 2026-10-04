@@ -936,7 +936,7 @@
         </section>
         <section class="bus" id="emergencySec"><div class="cap">Emergency feed switch</div>
           <div class="keys" id="emergencyBus"></div>
-          <div class="hint">Only when NEXT cannot hand over. Shows one feed in the Stint scene with its audio; the relay keeps its own on-air feed. STOP per feed sits in the Feeds card above.</div>
+          <div class="hint">Only when NEXT cannot hand over. Shows one feed in the Stint scene with its audio and makes it the relay's on-air feed; the other feed moves to the next stint. STOP per feed sits in the Feeds card above.</div>
         </section>
         <section class="bus" id="scnVisSec"><div class="cap">Raw scenes</div>
             <div class="grp"><span class="glbl">Switch scene</span><div class="keys" id="scnBus"></div></div>
@@ -1019,8 +1019,8 @@ const CONFIG = {
   scenes: ["Stint","Splitscreen","Interview","Standby"],
   // Troubleshoot only: cut the Stint scene to one feed by hand (confirmed).
   emergency: [
-    {label:"FEED A ON AIR", scene:"Stint", show:[], hide:[], relayStint:"A", rc:""},
-    {label:"FEED B ON AIR", scene:"Stint", show:[], hide:[], relayStint:"B", rc:""},
+    {label:"FEED A ON AIR", scene:"Stint", show:[], hide:[], relayStint:"A", take:true, rc:""},
+    {label:"FEED B ON AIR", scene:"Stint", show:[], hide:[], relayStint:"B", take:true, rc:""},
   ],
   vis: [
     {label:"POV",    scene:"Stint", source:"Feed POV", relay:"pov"},
@@ -1267,7 +1267,7 @@ function buildControls(cfg){
   cfg.emergency.forEach(m=>{
     const b = mkKey(m.label, "emergency", ()=>{
       if (!confirm(`${m.label}: cut the Stint scene to Feed ${m.relayStint} by hand? ` +
-                   "The relay keeps its own on-air feed, so NEXT and the HUD do not follow."))
+                   "The relay makes it the on-air feed and moves the other feed to the next stint."))
         return;
       runMacro(m);
     });
@@ -1637,7 +1637,8 @@ async function runMacro(m){
     ...(m.relaySplit                                  // the server resolves the on-air slot (#591)
         ? [relayStep("split (on-air)", "split", {})]
         : m.relayStint                                // server resolves feeds + commentary mic, like Companion
-        ? [relayStep("stint " + m.relayStint, "stint", {feed: m.relayStint})]
+        ? [relayStep("stint " + m.relayStint, "stint",
+                     m.take ? {feed: m.relayStint, take: true} : {feed: m.relayStint})]
         : [...(m.unmute||[]).map(i=>[`unmute ${i}`, ()=>obsMute(i,false)]),
            ...(m.mute||[]).map(i=>[`mute ${i}`,     ()=>obsMute(i,true)])]),
   ];
@@ -1931,7 +1932,7 @@ async function relayPoll(){
     const d = await r.json();
     relayLed(true); clearBanner("relay");
     const solo = d.solo === true;         // feed-less solo relay (#302)
-    applySolo(solo);
+    applySolo(solo, d.template);
     renderEventTitle(d.event_title);          // header subtitle + tab title (#207)
     // On-air feed = the lower stint index (mirrors the relay's live_feed()).
     pvMarkOnAir(!solo && d.feeds && d.feeds.A
@@ -2650,7 +2651,7 @@ function applyMode(qualifying){
 // Kind-conditional cut (#307): a feed-less solo relay reports {solo:true}. Hide the
 // A/B feed, schedule and submission affordances and reveal the POV editor as its own
 // card. Endurance reports solo=false and no class is set.
-function applySolo(isSolo){
+function applySolo(isSolo, template){
   document.body.classList.toggle("solo", !!isSolo);
   const box = $("#urlsBox");
   if (box && isSolo) box.open = true;   // POV lives in the schedule <details>;
@@ -2662,7 +2663,7 @@ function applySolo(isSolo){
     window.__builtSolo = true;
     buildControls(CONFIG_SOLO);
     buildPovActions();
-    soloLayout();
+    soloLayout(template);
   }
 }
 function qualRowBusy(){
@@ -3026,7 +3027,8 @@ function pvPollFeed(tile){
                          ph.classList.remove("err"); };
   probe.onerror = () => { frame.classList.remove("loaded");
                           ph.classList.add("err"); txt.textContent = "Unavailable"; };
-  probe.src = RC_API("/preview/feed/" + feed) + "?ts=" + Date.now();
+  probe.src = RC_API(tile.dataset.src ? "/preview/source/" + tile.dataset.src
+                                       : "/preview/feed/" + feed) + "?ts=" + Date.now();
 }
 function pvStartFeed(tile){
   const feed = tile.dataset.feed;
@@ -3050,13 +3052,14 @@ function pvPollLevels(){
     });
   }).catch(() => {});
 }
-document.querySelectorAll(".pvtile .pvtoggle").forEach(btn => {
+function wireTileToggle(tile){
+  const btn = tile.querySelector(".pvtoggle");
   btn.onclick = () => {
-    const tile = btn.closest(".pvtile");
     if(pvFeedTimers[tile.dataset.feed]){ pvStopFeed(tile); btn.textContent = "PLAY"; }
     else { pvStartFeed(tile); btn.textContent = "PAUSE"; }
   };
-});
+}
+document.querySelectorAll(".pvtile").forEach(wireTileToggle);
 function pvMarkOnAir(feed){
   document.querySelectorAll(".pvtile").forEach(
     t => t.classList.toggle("onair", t.dataset.feed === feed));
@@ -3215,7 +3218,8 @@ $("#nextBtn").addEventListener("click", () => {
   const b = $("#nextBtn");
   b.disabled = true;                    // double-press guard: two presses = two handovers
   setTimeout(() => { b.disabled = false; }, 3000);
-  relayCall("next");
+  // The handover cut uses the transition armed in the live column (#730).
+  relayCall(`next?transition=${activeTransition}&duration=${activeTransition === "cut" ? 0 : activeDuration}`);
 });
 
 function setNav(area, level, why){
@@ -3320,16 +3324,22 @@ function renderLive(d){
                             : serving ? `→ stint ${of.stint}`
                             : manual && !armed ? `arm stint ${of.stint} first` : "waiting for the feed";
   // The handover steps of Director.md ("At a driver change"), nothing beyond them.
+  // The relay's handover_next (#730) says whether the next stint has a link yet.
+  const ho = d.handover_next;
+  const noLink = !qual && !end && ho && !ho.link;
   const step = qual ? "" : end ? "No further stint in the schedule."
              : serving ? `Feed ${off} is serving stint ${of.stint}. SPLIT covers the swap, then NEXT.`
+             : noLink && ho.pending ? `Stint ${ho.stint}: a link was submitted. Approve it in Handover or Schedule.`
+             : noLink ? `Stint ${ho.stint} has no link yet. Enter it under Schedule.`
              : armed || !manual ? `Feed ${off} is starting stint ${of.stint} (10 to 30 s). NEXT turns green when it is serving.`
              : `Stint ${of.stint}${stintName(of.index)}: ARM a few minutes before the swap.`;
   $("#nextStep").hidden = !step;
   $("#nextStepText").textContent = step;
   setNav("handover", serving ? "ok" : "", end ? "end of schedule"
          : serving ? `stint ${of.stint} ready` : armed ? `stint ${of.stint} starting` : `arm stint ${of.stint}`);
-  if (!end && schedRows[of.index] && !schedRows[of.index].url)
-    setNav("schedule", "warn", `stint ${of.stint}: no link`);
+  // Only the next stint warns; stints further out stay neutral.
+  if (noLink)
+    setNav("schedule", "warn", ho.pending ? `stint ${ho.stint}: link submitted` : `stint ${ho.stint}: no link`);
   renderHandover(lf, live, of, off);
 }
 async function handoverPoll(){
@@ -3340,9 +3350,28 @@ async function handoverPoll(){
     if (Array.isArray(d.rows)) schedRows = d.rows;
   }catch(e){ /* relay unreachable: keep the last rows */ }
 }
-// Solo: no handover, so Graphics is the default area.
-function soloLayout(){
+// Solo: no handover, so Graphics is the default area, and the live column previews
+// the solo inputs instead of the A/B feeds (tyres only in a commentary collection).
+const SOLO_TILES = {pov: [["capture", "CAPTURE"], ["webcam", "WEBCAM"]],
+                    commentary: [["capture", "CAPTURE"], ["webcam", "WEBCAM"], ["tyres", "TYRES"]]};
+function soloLayout(template){
   showArea(recall(AREA_KEY) || "graphics");
+  const pov = document.querySelector('.pvtile[data-feed="POV"]');
+  document.querySelectorAll('.pvtile[data-feed="A"], .pvtile[data-feed="B"]').forEach(t => {
+    pvStopFeed(t); t.remove();
+  });
+  for (const [src, label] of (SOLO_TILES[template] || SOLO_TILES.pov).slice().reverse()){
+    const tile = pov.cloneNode(true);
+    tile.dataset.feed = label; tile.dataset.src = src;
+    tile.classList.remove("onair", "paused");
+    tile.querySelector("img").alt = label;
+    tile.querySelector(".pvframe").classList.remove("loaded");
+    tile.querySelector(".pvlabel span").textContent = label;
+    tile.querySelector(".pvtoggle").dataset.feed = label;
+    wireTileToggle(tile);
+    pov.before(tile);
+    if (!$("#pvBody").hidden) pvStartFeed(tile);
+  }
 }
 applyNavCollapse();
 showArea(recall(AREA_KEY) || "handover");

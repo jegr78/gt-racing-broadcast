@@ -213,7 +213,7 @@ def t_stint_macro_resolves_the_on_air_feed_on_the_relay():
     # A relay-resolved step answers with a note when an input is missing, and that
     # note is logged rather than shown only as a red OBS LED.
     assert "function relayStep(what, path, body){" in h
-    assert 'relayStep("stint " + m.relayStint, "stint", {feed: m.relayStint})' in h
+    assert 'relayStep("stint " + m.relayStint, "stint",' in h
     assert 'relayStep("split (on-air)", "split", {})' in h
     assert "const why = d && (d.note || (!d.ok && d.error));" in h   # a bare error too
     assert 'if (why) log(`${what}: ${why}`, d.ok ? "warn" : "err");' in h
@@ -231,6 +231,35 @@ def t_emergency_feed_switch_lives_in_troubleshoot_with_a_confirm():
     keys = _block(_func_body(h, "buildControls"), "cfg.emergency.forEach", '$("#emergencyBus").appendChild(b);')
     assert "if (!confirm(" in keys and "return;" in keys, "the manual switch must be confirmed"
     assert "emergency: []," in _config_block(h, "CONFIG_SOLO")
+
+
+def t_emergency_switch_moves_the_relay_too():
+    h = _html()
+    endurance = _config_block(h, "CONFIG")
+    for feed in ("A", "B"):
+        m = re.search(r'\{label:"FEED ' + feed + r' ON AIR",[^}]*\}', endurance)
+        assert "take:true" in m.group(0), m.group(0)
+    assert "m.take ? {feed: m.relayStint, take: true} : {feed: m.relayStint}" in _func_src(h, "runMacro")
+    m = re.search(r'\{label:"STINT",[^}]*\}', endurance)
+    assert "take" not in m.group(0), "the STINT macro never moves the relay"
+
+
+def t_next_step_and_schedule_dot_read_handover_next():
+    src = _func_src(_html(), "renderLive")
+    assert "const ho = d.handover_next;" in src
+    assert "const noLink = !qual && !end && ho && !ho.link;" in src
+    assert "if (noLink)\n    setNav(\"schedule\", \"warn\"" in src, "only the next stint warns"
+    assert "schedRows[of.index].url" not in src, "no client-side guess about the next link"
+
+
+def t_solo_preview_tiles_follow_the_template():
+    h = _html()
+    assert 'const SOLO_TILES = {pov: [["capture", "CAPTURE"], ["webcam", "WEBCAM"]],' in h
+    assert 'commentary: [["capture", "CAPTURE"], ["webcam", "WEBCAM"], ["tyres", "TYRES"]]};' in h
+    src = _func_src(h, "soloLayout")
+    assert "pvStopFeed(t); t.remove();" in src, "solo stops polling the A/B tiles it hides"
+    assert "applySolo(solo, d.template);" in h and "soloLayout(template);" in _func_src(h, "applySolo")
+    assert 'tile.dataset.src ? "/preview/source/" + tile.dataset.src' in _func_src(h, "pvPollFeed")
 
 
 def t_removed_duplicate_keys():
@@ -543,7 +572,8 @@ def t_next_moved_into_the_live_column():
     assert 'FEED_ACTIONS.filter(([label]) => label !== "NEXT")' in h or \
            'FEED_ACTIONS.filter(([label])=>label !== "NEXT")' in h, "NEXT left the feeds bus"
     handler = _block(h, '$("#nextBtn").addEventListener("click"', "});")
-    assert 'relayCall("next")' in handler
+    assert 'relayCall(`next?transition=${activeTransition}&duration=' in handler, \
+        "the handover cut uses the transition armed in the live column"
     assert "setTimeout(() => { b.disabled = false; }, 3000)" in handler, "double-press guard"
 
 
@@ -582,7 +612,7 @@ def t_solo_hides_handover_and_the_feed_switch():
         assert sel in hide, f"solo must hide {sel}"
     assert "body.solo #emergencySec" in hide, "solo has no feed pair to switch"
     assert "scnVisSec" not in _func_src(h, "soloLayout"), "solo scenes are macros, raw keys stay in Troubleshoot"
-    assert "soloLayout();" in _func_src(h, "applySolo")
+    assert "soloLayout(template);" in _func_src(h, "applySolo")
 
 
 def t_frame_fills_the_window_without_banners():
