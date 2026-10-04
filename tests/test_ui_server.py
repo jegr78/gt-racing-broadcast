@@ -2035,6 +2035,16 @@ def t_api_ps_save_rejects_bad_ip():
         httpd.shutdown()
 
 
+
+def t_every_button_icon_is_styled():
+    # An unstyled inline SVG renders as a black filled shape that fills the button.
+    with open(os.path.join(ROOT, "src", "ui", "control-center.html"), encoding="utf-8") as fh:
+        html = fh.read()
+    style = html[html.index("<style"):html.index("</style>")]
+    assert re.search(r"(?:^|[{},])\s*button svg\s*[,{]", style, re.M), \
+        "buttons outside .row need a base icon rule"
+    assert "cap.title = cap.textContent" in html, "an ellipsized asset name needs its full text as a tooltip"
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

@@ -120,7 +120,7 @@
            border-radius:8px; padding:6px 13px; cursor:pointer; font-size:13px;
            font-weight:500; transition:border-color .2s, background .2s,
            transform .1s; }
-  button.action svg, .row button svg, .console-head button svg {
+  button svg {
            width:13px; height:13px; stroke:currentColor; fill:none;
            stroke-width:2.2; stroke-linecap:round; stroke-linejoin:round;
            opacity:.85; }
@@ -2334,6 +2334,7 @@ function renderGallery(containerId, kind, items, isVideo) {
     const cap = document.createElement('div');
     cap.className = 'cap';
     cap.textContent = name.replace(/\.[^.]+$/, '');
+    cap.title = cap.textContent;   // the caption ellipsizes long names
     t.appendChild(cap);
     c.appendChild(t);
   });
