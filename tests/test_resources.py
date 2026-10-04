@@ -57,10 +57,54 @@ def t_parse_vm_stat():
     assert r.parse_vm_stat(text) == 350 * 4096, r.parse_vm_stat(text)
 
 
-def t_parse_typeperf_net():
-    text = ('"(PDH-CSV 4.0)","\\\\PC\\Network Interface(x)\\Bytes Received/sec","\\\\PC\\Network Interface(x)\\Bytes Sent/sec"\n'
-            '"07/01/2026 10:00:00.000","1000.0","2000.0"\n')
-    assert r.parse_typeperf_net(text) == (2000.0, 1000.0)   # (up=Sent, down=Received)
+def _if_table(rows):
+    """A MIB_IF_TABLE2 buffer as GetIfTable2 lays it out: (if_type, flags, rx, tx) rows."""
+    import ctypes
+    table = (r.MIB_IF_ROW2 * len(rows))()
+    for row, (if_type, flags, rx, tx) in zip(table, rows, strict=True):
+        row.Type, row.InterfaceAndOperStatusFlags = if_type, flags
+        row.InOctets, row.OutOctets = rx, tx
+    head = ctypes.c_uint32(len(rows))
+    return bytes(head) + bytes(4) + bytes(table)
+
+
+def t_mib_if_row2_layout_matches_windows():
+    import ctypes
+    assert ctypes.sizeof(r.MIB_IF_ROW2) == 1352, ctypes.sizeof(r.MIB_IF_ROW2)
+    assert r.MIB_IF_ROW2.InOctets.offset == 1208, "InOctets must sit at the netioapi.h offset"
+    assert r.MIB_IF_ROW2.OutOctets.offset == 1280, "OutOctets must sit at the netioapi.h offset"
+    assert r.MIB_IF_ROW2.InterfaceAndOperStatusFlags.offset == 1152
+    assert r.MIB_IF_ROW2.Type.offset == 1128
+
+
+def t_parse_if_table2_counts_hardware_rows_once():
+    hw, flt = r.IF_FLAG_HARDWARE, r.IF_FLAG_FILTER
+    rows = [(6, hw, 1000, 2000),          # Ethernet NIC
+            (6, hw | flt, 1000, 2000),    # WFP/QoS filter stacked on that NIC
+            (53, 0, 300, 400),            # tunnel adapter (Tailscale, VPN)
+            (24, 0, 50, 50),              # software loopback
+            (71, hw, 10, 20)]             # Wi-Fi NIC
+    assert r.parse_if_table2(_if_table(rows)) == (1010, 2020), \
+        "only hardware rows count; filter, tunnel and loopback rows mirror or skip the line"
+
+
+def t_parse_if_table2_empty_or_short():
+    assert r.parse_if_table2(_if_table([])) == (0, 0)
+    assert r.parse_if_table2(b"") is None, "a buffer without a header is unreadable"
+    assert r.parse_if_table2(_if_table([(6, 1, 1, 1)])[:100]) is None, \
+        "a header claiming more rows than the buffer holds is unreadable"
+
+
+def t_no_typeperf_under_src():
+    hits = []
+    for base, _dirs, files in os.walk(os.path.join(ROOT, "src")):
+        for f in files:
+            if f.endswith(".py"):
+                path = os.path.join(base, f)
+                with open(path, encoding="utf-8") as fh:
+                    if "typeperf" in fh.read():
+                        hits.append(os.path.relpath(path, ROOT))
+    assert not hits, f"typeperf counter paths are localized and fail on German Windows: {hits}"
 
 
 def t_cpu_pct_from_delta():
@@ -119,15 +163,13 @@ def t_sampler_counter_deltas():
     assert second["net_down_bps"] == 1000.0 and second["net_up_bps"] == 2000.0, second
 
 
-def t_sampler_percent_and_rate_passthrough():
+def t_sampler_percent_passthrough():
     readers = _fake_readers([
-        {"cpu": ("percent", 42.0, None), "net": ("rate", 500.0, 700.0),
+        {"cpu": ("percent", 42.0, None), "net": None,
          "mem": (4 * 1024**3, 8 * 1024**3), "disk": 50 * 1024**3},
     ])
-    s = r.ResourceSampler(readers=readers)
-    snap = s.sample(now=1.0)
+    snap = r.ResourceSampler(readers=readers).sample(now=1.0)
     assert snap["cpu_pct"] == 42.0
-    assert snap["net_up_bps"] == 500.0 and snap["net_down_bps"] == 700.0   # (up,down)
 
 
 def t_sampler_none_on_reader_failure():

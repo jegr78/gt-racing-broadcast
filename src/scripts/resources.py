@@ -7,6 +7,7 @@ The pure parsers and delta math are unit-tested with fixture strings.
 snapshot. Per-OS reads mirror preflight.py: Linux /proc, Windows ctypes, macOS
 subprocess. Nothing raises; an unreadable metric is None.
 """
+import ctypes
 import re
 import shutil
 import subprocess
@@ -111,33 +112,78 @@ def parse_vm_stat(text):
     return (active + wired + comp) * page
 
 
-def parse_typeperf_net(text):
-    """Windows `typeperf` CSV -> (up_bps, down_bps) from the last data row, or None."""
-    import csv
-    import io
-    hdr = None
-    data = None
-    for row in csv.reader(io.StringIO(text)):
-        if not row:
-            continue
-        if any("Bytes" in c for c in row):
-            hdr = row
-        elif hdr and len(row) == len(hdr):
-            data = row
-    if not hdr or not data:
+class MIB_IF_ROW2(ctypes.Structure):
+    """netioapi.h MIB_IF_ROW2 in fixed-width types, so the layout (1352 bytes) is the
+    same on every OS and testable off Windows. WCHAR arrays are uint16."""
+    _fields_ = [("InterfaceLuid", ctypes.c_uint64),
+                ("InterfaceIndex", ctypes.c_uint32),
+                ("InterfaceGuid", ctypes.c_uint8 * 16),
+                ("Alias", ctypes.c_uint16 * 257),
+                ("Description", ctypes.c_uint16 * 257),
+                ("PhysicalAddressLength", ctypes.c_uint32),
+                ("PhysicalAddress", ctypes.c_uint8 * 32),
+                ("PermanentPhysicalAddress", ctypes.c_uint8 * 32),
+                ("Mtu", ctypes.c_uint32),
+                ("Type", ctypes.c_uint32),
+                ("TunnelType", ctypes.c_uint32),
+                ("MediaType", ctypes.c_uint32),
+                ("PhysicalMediumType", ctypes.c_uint32),
+                ("AccessType", ctypes.c_uint32),
+                ("DirectionType", ctypes.c_uint32),
+                ("InterfaceAndOperStatusFlags", ctypes.c_uint8),
+                ("OperStatus", ctypes.c_uint32),
+                ("AdminStatus", ctypes.c_uint32),
+                ("MediaConnectState", ctypes.c_uint32),
+                ("NetworkGuid", ctypes.c_uint8 * 16),
+                ("ConnectionType", ctypes.c_uint32),
+                ("TransmitLinkSpeed", ctypes.c_uint64),
+                ("ReceiveLinkSpeed", ctypes.c_uint64),
+                ("InOctets", ctypes.c_uint64),
+                ("InUcastPkts", ctypes.c_uint64),
+                ("InNUcastPkts", ctypes.c_uint64),
+                ("InDiscards", ctypes.c_uint64),
+                ("InErrors", ctypes.c_uint64),
+                ("InUnknownProtos", ctypes.c_uint64),
+                ("InUcastOctets", ctypes.c_uint64),
+                ("InMulticastOctets", ctypes.c_uint64),
+                ("InBroadcastOctets", ctypes.c_uint64),
+                ("OutOctets", ctypes.c_uint64),
+                ("OutUcastPkts", ctypes.c_uint64),
+                ("OutNUcastPkts", ctypes.c_uint64),
+                ("OutDiscards", ctypes.c_uint64),
+                ("OutErrors", ctypes.c_uint64),
+                ("OutUcastOctets", ctypes.c_uint64),
+                ("OutMulticastOctets", ctypes.c_uint64),
+                ("OutBroadcastOctets", ctypes.c_uint64),
+                ("OutQLen", ctypes.c_uint64)]
+
+
+IF_FLAG_HARDWARE = 0x01   # InterfaceAndOperStatusFlags.HardwareInterface
+IF_FLAG_FILTER = 0x02     # InterfaceAndOperStatusFlags.FilterInterface
+_IF_TABLE2_ROWS_AT = 8    # ULONG NumEntries, padded to the rows' 8-byte alignment
+
+
+def parse_if_table2(buf):
+    """A GetIfTable2 MIB_IF_TABLE2 buffer -> (rx_bytes, tx_bytes) over the hardware
+    NICs, or None if the buffer is truncated.
+
+    Filter drivers stacked on a NIC (WFP, QoS) repeat its counters, and tunnel
+    adapters (Tailscale, VPN) carry traffic the NIC already counts, so only
+    hardware rows that are not filters count. No localized counter names are
+    involved, unlike perf-counter paths."""
+    if len(buf) < _IF_TABLE2_ROWS_AT:
         return None
-    up = down = 0.0
-    got = False
-    for i, col in enumerate(hdr):
-        try:
-            val = float(data[i])
-        except (ValueError, IndexError):
-            continue
-        if "Received" in col:
-            down += val; got = True
-        elif "Sent" in col:
-            up += val; got = True
-    return (up, down) if got else None
+    n = int.from_bytes(buf[:4], "little")
+    if len(buf) < _IF_TABLE2_ROWS_AT + n * ctypes.sizeof(MIB_IF_ROW2):
+        return None
+    rows = (MIB_IF_ROW2 * n).from_buffer_copy(buf, _IF_TABLE2_ROWS_AT)
+    rx = tx = 0
+    for row in rows:
+        flags = row.InterfaceAndOperStatusFlags
+        if flags & IF_FLAG_HARDWARE and not flags & IF_FLAG_FILTER:
+            rx += row.InOctets
+            tx += row.OutOctets
+    return (rx, tx)
 
 
 def cpu_pct_from_delta(prev, cur):
@@ -214,8 +260,22 @@ def _read_cpu():
     return None
 
 
+def _read_if_table2():
+    """Windows: cumulative (rx, tx) bytes over the hardware NICs via iphlpapi, or None."""
+    iphlpapi = ctypes.windll.iphlpapi
+    table = ctypes.c_void_p()
+    if iphlpapi.GetIfTable2(ctypes.byref(table)) != 0:
+        return None
+    try:
+        n = ctypes.c_uint32.from_address(table.value).value
+        size = _IF_TABLE2_ROWS_AT + n * ctypes.sizeof(MIB_IF_ROW2)
+        return parse_if_table2(ctypes.string_at(table.value, size))
+    finally:
+        iphlpapi.FreeMibTable(table)
+
+
 def _read_net():
-    """-> ('counter', rx, tx) | ('rate', up_bps, down_bps) | None."""
+    """-> ('counter', rx, tx) | None."""
     try:
         if IS_LINUX:
             with open("/proc/net/dev") as fh:
@@ -227,12 +287,8 @@ def _read_net():
             rx, tx = parse_netstat_ib(out)
             return ("counter", rx, tx)
         if IS_WIN:
-            out = subprocess.run(
-                ["typeperf", r"\Network Interface(*)\Bytes Received/sec",
-                 r"\Network Interface(*)\Bytes Sent/sec", "-sc", "1"],
-                capture_output=True, text=True, errors="replace", timeout=10, **no_window_kwargs()).stdout
-            got = parse_typeperf_net(out)
-            return ("rate", got[0], got[1]) if got else None
+            got = _read_if_table2()
+            return ("counter", got[0], got[1]) if got else None
     except (OSError, ValueError, subprocess.SubprocessError):
         return None
     return None
@@ -316,8 +372,6 @@ class ResourceSampler:
     def _net(self, reading, now):
         if not reading:
             return (None, None)
-        if reading[0] == "rate":
-            return (reading[1], reading[2])           # (up_bps, down_bps)
         if reading[0] == "counter":
             cur = (reading[1], reading[2])            # (rx, tx)
             dt = (now - self._prev_ts) if self._prev_ts is not None else 0
