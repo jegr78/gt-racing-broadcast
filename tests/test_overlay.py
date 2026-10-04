@@ -605,6 +605,21 @@ def t_ob_parse_google_font_cuts_latin_only():
     assert ("normal", "400") in cuts and len(cuts) == 2     # the cyrillic block dropped
 
 
+def t_ob_google_font_woff2_url_prefers_latin():
+    css = """
+/* cyrillic */
+@font-face { font-family:'X'; src: url(https://fonts.gstatic.com/s/x/cyr.woff2) format('woff2');
+  unicode-range: U+0301, U+0400-045F; }
+/* latin */
+@font-face { font-family:'X'; src: url(https://fonts.gstatic.com/s/x/lat.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131; }
+"""
+    assert ob.google_font_woff2_url(css).endswith("lat.woff2"), "a fallback must not take the cyrillic face"
+    single = "@font-face { src: url(https://fonts.gstatic.com/s/x/only.woff2) format('woff2'); }"
+    assert ob.google_font_woff2_url(single).endswith("only.woff2"), "a response without subsets has one face"
+    assert ob.google_font_woff2_url("@font-face { src: url(https://evil.example/x.woff2); }") is None
+
+
 def t_ob_is_google_font_name():
     # valid families (incl. ones outside the curated catalog) pass
     for ok in ("Oswald", "Exo 2", "Roboto Condensed", "Big Shoulders Display", "A1"):
@@ -1291,6 +1306,15 @@ def t_hud_steering_wheel_follows_the_angle():
     assert 'steer.style.transform = "rotate(" + (-d.steer_deg) + "deg)";' in poll
     assert "if (d.steer_deg !== null && d.steer_deg !== undefined) {" in poll
 
+
+
+def t_base_chat_clears_the_race_control_bar():
+    with open(os.path.join(ROOT, "src", "obs", "hud.html"), encoding="utf-8") as fh:
+        css = ob.base_style(fh.read())
+    chat, rc = ob.box_from_css(css, "chat"), ob.box_from_css(css, "race-control")
+    overlap_x = min(chat["left"] + chat["width"], rc["left"] + rc["width"]) - max(chat["left"], rc["left"])
+    overlap_y = min(chat["top"] + chat["height"], rc["top"] + rc["height"]) - max(chat["top"], rc["top"])
+    assert overlap_x <= 0 or overlap_y <= 0, f"stream chat {chat} covers the race-control bar {rc}"
 
 if __name__ == "__main__":
     for n, fn in sorted(globals().items()):

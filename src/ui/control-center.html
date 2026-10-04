@@ -67,8 +67,12 @@
                                 #1E293B 0%, var(--bg) 70%); }
   main { flex:1; overflow:auto; padding:22px 26px; }
   .view { max-width:1040px; margin:0 auto; }
-  .viewhead { display:flex; align-items:center; gap:12px; margin:0 0 14px;
+  .viewhead { display:flex; flex-wrap:wrap; align-items:center; gap:12px; margin:0 0 14px;
               min-height:34px; }
+  .viewhead button { white-space:nowrap; flex-shrink:0; }
+  #takeover-host, #takeover-funnel-host { max-width:170px; }
+  .cplinks { display:grid; grid-template-columns:repeat(4, max-content); gap:6px 8px; align-items:center; }
+  .cplinks .cprow { display:contents; }   /* one shared column per field across rows */   /* option text sizes the select */
   .viewhead h2 { font-size:16px; font-weight:600; letter-spacing:.01em;
                  margin:0; color:var(--txt); text-transform:none; }
   .viewhead h3 { font-size:13px; font-weight:600; margin:0; color:var(--txt); }
@@ -120,7 +124,7 @@
            border-radius:8px; padding:6px 13px; cursor:pointer; font-size:13px;
            font-weight:500; transition:border-color .2s, background .2s,
            transform .1s; }
-  button.action svg, .row button svg, .console-head button svg {
+  button svg {
            width:13px; height:13px; stroke:currentColor; fill:none;
            stroke-width:2.2; stroke-linecap:round; stroke-linejoin:round;
            opacity:.85; }
@@ -2334,6 +2338,7 @@ function renderGallery(containerId, kind, items, isVideo) {
     const cap = document.createElement('div');
     cap.className = 'cap';
     cap.textContent = name.replace(/\.[^.]+$/, '');
+    cap.title = cap.textContent;   // the caption ellipsizes long names
     t.appendChild(cap);
     c.appendChild(t);
   });
@@ -2798,6 +2803,7 @@ async function loadConsole() {
   $('cp-link-hint').hidden = hasUrl;
   const c = $('cp-links');
   c.textContent = '';
+  c.classList.remove('cplinks');
   if (!d.has_secret) {
     c.textContent = 'Start the relay to generate a league secret and crew links.';
     return;
@@ -2806,6 +2812,7 @@ async function loadConsole() {
     c.textContent = 'No streamers in the schedule yet (start the relay).';
     return;
   }
+  c.classList.add('cplinks');
   d.links.forEach(l => {
     const row = document.createElement('div');
     row.className = 'cprow';
@@ -3456,11 +3463,24 @@ function ovFillSample() {
     } else if (typeof v === 'string' && !img) {    // text slot
       el.textContent = v;
       el.classList.toggle('empty', !v);
-      if (/^team\d-name$/.test(s.id)) ovFitName(el);   // mirror hud.html auto-fit
+      if (/^team\d-name$/.test(s.id)) {              // mirror hud.html auto-fit
+        ovFitName(el);
+        // Filled while the canvas is hidden, the name measures 0 wide; fit once laid out.
+        if (!el._fitObserver) {
+          el._fitObserver = new ResizeObserver(() => ovFitName(el));
+          el._fitObserver.observe(el);
+        }
+      }
     } else {
       el.classList.remove('empty');
     }
   });
+  // A webfont that loads after this pass widens the names again; the live HUD refits on
+  // every poll, the canvas once more here.
+  document.fonts.ready.then(() => ovState.slots.forEach(s => {
+    const el = /^team\d-name$/.test(s.id) && ovState.shadow.getElementById(s.id);
+    if (el) ovFitName(el);
+  }));
 }
 
 // Mirror of hud.html::fitName: shrink a team name from --team-name-max toward

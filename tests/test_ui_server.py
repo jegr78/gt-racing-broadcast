@@ -2035,6 +2035,23 @@ def t_api_ps_save_rejects_bad_ip():
         httpd.shutdown()
 
 
+
+def t_every_button_icon_is_styled():
+    # An unstyled inline SVG renders as a black filled shape that fills the button.
+    with open(os.path.join(ROOT, "src", "ui", "control-center.html"), encoding="utf-8") as fh:
+        html = fh.read()
+    style = html[html.index("<style"):html.index("</style>")]
+    assert re.search(r"(?:^|[{},])\s*button svg\s*[,{]", style, re.M), \
+        "buttons outside .row need a base icon rule"
+    assert "cap.title = cap.textContent" in html, "an ellipsized asset name needs its full text as a tooltip"
+    assert re.search(r"\.viewhead button\s*\{[^}]*white-space:\s*nowrap", style), \
+        "a crowded header must wrap its buttons to a new line, not squeeze their labels"
+    assert re.search(r"\.viewhead\s*\{[^}]*flex-wrap:\s*wrap", style), "the header row must be allowed to wrap"
+    fill = html[html.index("function ovFillSample()"):html.index("function ovFitName(")]
+    assert "document.fonts.ready" in fill, "team names must be fitted again once the webfont has loaded"
+    assert "ResizeObserver" in fill, "a name filled while the canvas is hidden must be fitted once it is laid out"
+    assert ".cplinks .cprow { display:contents; }" in style, "crew link rows must share their columns"
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
