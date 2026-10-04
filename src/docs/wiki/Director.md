@@ -57,7 +57,7 @@ on a wide screen. Below 1280 px the chats move into a drawer opened by the **Cha
 button in the header, which also counts unread crew messages. Below 900 px (a phone)
 the page becomes one column: live column, navigation, area, chats.
 
-![The director panel: navigation on the left, the live column with program preview, scene keys, transition, ARM and NEXT, the Handover area in the middle, and the crew and broadcast chats on the right](images/director-panel.png)
+![The director panel: navigation on the left, the live column with program preview, a crew graphic request, ARM, NEXT and scene keys, the Handover area in the middle, and the crew and broadcast chats on the right](images/director-panel.png)
 
 Where each bus lives:
 
