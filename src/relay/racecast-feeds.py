@@ -8181,7 +8181,7 @@ class Relay:
         try:
             sys_snap = self._resource_sampler.sample(now)
         except Exception:  # noqa: BLE001 - best-effort; never break the heartbeat
-            sys_snap = {}   # all-None, keys still present
+            sys_snap = {}   # to_health_fields still emits every key, as None
         sys_res = resources.to_health_fields({**sys_snap,
                                               "net_down_min_bps": self._net_floor.take()})
 

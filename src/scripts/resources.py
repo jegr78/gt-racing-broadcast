@@ -264,7 +264,7 @@ def _read_if_table2():
     """Windows: cumulative (rx, tx) bytes over the hardware NICs via iphlpapi, or None."""
     iphlpapi = ctypes.windll.iphlpapi
     table = ctypes.c_void_p()
-    if iphlpapi.GetIfTable2(ctypes.byref(table)) != 0:
+    if iphlpapi.GetIfTable2(ctypes.byref(table)) != 0 or not table.value:
         return None
     try:
         n = ctypes.c_uint32.from_address(table.value).value
@@ -498,9 +498,6 @@ class NetDownFloor:
             return
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
-
-    def stop(self):
-        self._stop.set()
 
 
 def to_health_fields(snap):
