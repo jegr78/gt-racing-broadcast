@@ -122,7 +122,7 @@ memory:
 
 | Bus | What it does |
 |---|---|
-| **PGM** | one-press program switches (scene + feed visibility + mutes), identical to the Companion macros. STINT A/B, SPLIT, INTERVIEW, STANDBY, INTRO, OUTRO, RED FLAG. SPLIT also sets Race Control to *Driver Swaps*, STINT A/B clear it, and RED FLAG toggles the Standby Cover together with the *Red Flag* message ([Director guide](Director#the-companion-web-buttons-board)); these Race Control writes need the sheet-write webhook |
+| **PGM** | one-press program switches (scene + feed visibility + mutes), one per scene ([Scene macros](Director#scene-macros)). STINT (the on-air feed), SPLIT, INTERVIEW, STANDBY, INTRO, OUTRO, TRAILER, INTERMISSION, RED FLAG. SPLIT also sets Race Control to *Driver Swaps*, STINT clears it, and RED FLAG toggles the Standby Cover together with the *Red Flag* message ([Director guide](Director#the-companion-web-buttons-board)); these Race Control writes need the sheet-write webhook |
 | **ARM / NEXT** (live column) | ARM pulls the off-air feed; NEXT is the driver change: cuts back to Stint and clears Race Control with the cut |
 | **FEEDS** (Troubleshoot) | relay control: per-feed ARM/STOP, feed reloads, POV reload/stop, FEEDS → STINT… |
 | **HUD** | the Stint HUD label, Streamer, Session and Race Control dropdowns: changes show on the HUD immediately and are written back to the Setup tab ([Director guide](Director)) |
