@@ -122,10 +122,14 @@ The requester sees its state: waiting, on air, declined, expired.
 
 ## Page frame (cockpit and desk)
 
-One shared frame, served once by the relay as `/console/static/crew.js` and
-`crew.css` and used by both pages:
+One shared frame, `src/console/crew-frame.html` (style and script). The relay
+inlines it into both pages in place of `<!--__CREW_FRAME__-->` when it serves
+them, the same per-request substitution as `__RC_API_BASE__`. That keeps one copy
+in source without a new route or policy entry. The tab rules apply only once the
+script has run, so a page whose script failed still shows every card.
 
-- **Live strip**, always visible, sticky: tally, race timer, critical cue.
+- **Live strip** on phones, sticky: tally, race timer, critical cue. On a desktop
+  the large on-air banner would take a fixed 150 px, so it scrolls there.
 - **Desktop (above 820 px):** today's multi-column grid.
 - **Phone and portrait tablet (820 px and below):** a bottom tab bar instead of one
   long page. Tabs per role:
@@ -152,7 +156,7 @@ with its feed letter.
 1. **Relay (#744):** graphic definitions per collection, `GET /cockpit/graphic-takes` and `GET /obs/graphics` with state,
    take endpoint with the take rules, `GRAPHICS_TAKE` (`off`, `direct`), crew-chat
    lines, rate limit. Tests for the rules and the gates.
-2. **Shared frame (#745):** `crew.js`/`crew.css`, live strip, bottom tabs, touch targets,
+2. **Shared frame (#745):** `crew-frame.html`, live strip, bottom tabs, touch targets,
    for cockpit and desk; the Race Control schedule fix. Wiki screenshots
    `console-cockpit.png` and `console-race-control.png`.
 3. **Graphic card (#746)** with thumbnails, preview and take, on both pages.
