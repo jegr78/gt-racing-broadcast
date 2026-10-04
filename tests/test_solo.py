@@ -155,7 +155,7 @@ def t_solo_status_carries_the_template():
     old = os.environ.get("RACECAST_TEMPLATE")
     os.environ["RACECAST_TEMPLATE"] = "commentary"
     try:
-        assert r.status()["template"] == "commentary", r.status()
+        assert r.status().get("template") == "commentary", r.status()
     finally:
         if old is None:
             os.environ.pop("RACECAST_TEMPLATE", None)
