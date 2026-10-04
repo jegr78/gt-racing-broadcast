@@ -1561,7 +1561,8 @@ def set_feed_close_when_inactive(inputs, value=True, host="127.0.0.1", port=None
 
 
 def graphic_scene(solo):
-    """The scene that holds GRAPHIC_SOURCES in the endurance or the solo collection."""
+    """The scene that holds GRAPHIC_SOURCES and Feed POV in the endurance or the
+    solo collection."""
     return SOLO_PROGRAM_SCENE if solo else STINT_SCENE
 
 

@@ -325,17 +325,24 @@ def base_body(html):
 # telemetry panel are pure overlay with no OBS source behind them.
 #
 # `scene` is where the LIVE sync (SetSceneItemTransform via GetSceneItemId) targets
-# the item. The optional `export_scene` scopes the setup-time bake's tree-walk to a
+# the item; `solo_scene` replaces it for a solo collection. The optional `export_scene` scopes the setup-time bake's tree-walk to a
 # single scene: the 'Solo Webcam' item is repositioned ONLY where it is embedded in
 # 'Program', never in the standalone fullscreen 'Solo Webcam' scene or its device.
 # POV omits it and bakes the whole tree, because 'Feed POV' may live in different
 # scenes across collections and every instance should track the box.
 OVERLAY_SLOT_OBS_SOURCES = {
-    "pov":    {"scene": "Stint",   "source": "Feed POV"},
+    "pov":    {"scene": "Stint",   "source": "Feed POV", "solo_scene": "Program"},
     "webcam": {"scene": "Program", "source": "Solo Webcam", "export_scene": "Program"},
     "tyres-capture": {"scene": "Program", "source": "Solo Tyres/Fuel Capture",
                        "export_scene": "Program"},
 }
+
+def slot_scene(slot_id, solo):
+    """The scene the live sync targets for *slot_id*; `solo_scene` overrides it in a
+    solo collection."""
+    tgt = OVERLAY_SLOT_OBS_SOURCES[slot_id]
+    return tgt.get("solo_scene", tgt["scene"]) if solo else tgt["scene"]
+
 
 def slot_boxes(base_css, override_css=""):
     """{slot_id: box} for every mapped OBS slot, the override's props layered over

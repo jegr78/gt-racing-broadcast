@@ -121,6 +121,34 @@ def t_handlers_read_the_schedule_through_the_solo_safe_accessor():
         "relay.source is None in solo; handlers must call schedule_rows(relay)"
 
 
+def _reflected_pov_scene(solo):
+    import time as _t
+    r = _solo_relay() if solo else m.Relay(None, [], LOGDIR, solo=True)
+    r.solo = solo
+    seen = []
+
+    class _Obs:
+        def set_scene_item_enabled(self, scene, source, enabled):
+            seen.append((scene, source, enabled))
+            return True, ""
+    r._obs = _Obs()
+    r._reflect_pov(True)
+    for _ in range(100):
+        if seen:
+            break
+        _t.sleep(0.01)
+    return seen
+
+
+def t_pov_toggle_targets_program_in_solo():
+    assert _reflected_pov_scene(True) == [("Program", "Feed POV", True)], \
+        "Feed POV lives in the Program scene of the solo collections"
+
+
+def t_pov_toggle_targets_stint_in_endurance():
+    assert _reflected_pov_scene(False) == [("Stint", "Feed POV", True)]
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

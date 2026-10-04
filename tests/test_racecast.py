@@ -697,7 +697,7 @@ def t_sync_pov_transform_calls_setter_with_merged_box():
         orig = m._active_overlay_dir
         m._active_overlay_dir = lambda: d
         try:
-            m._sync_pov_transform(set_transform=fake_set)
+            m._sync_pov_transform(set_transform=fake_set, solo=False)
         finally:
             m._active_overlay_dir = orig
 
@@ -726,6 +726,21 @@ def t_sync_pov_transform_calls_setter_with_merged_box():
     assert ttf["boundsWidth"] == 245 and ttf["boundsHeight"] == 84
 
 
+def t_sync_pov_transform_targets_program_in_solo():
+    import tempfile
+    calls = []
+    with tempfile.TemporaryDirectory() as d:
+        orig = m._active_overlay_dir
+        m._active_overlay_dir = lambda: d
+        try:
+            m._sync_pov_transform(set_transform=lambda scene, source, tf:
+                                  (calls.append((scene, source)), (True, ""))[1], solo=True)
+        finally:
+            m._active_overlay_dir = orig
+    assert ("Program", "Feed POV") in calls, \
+        f"the solo collections hold Feed POV in Program, not Stint: {calls}"
+
+
 def _sync_output(result):
     import contextlib, io, tempfile
     buf = io.StringIO()
@@ -734,7 +749,8 @@ def _sync_output(result):
         m._active_overlay_dir = lambda: d
         try:
             with contextlib.redirect_stdout(buf):
-                m._sync_pov_transform(set_transform=lambda scene, source, tf: result(source))
+                m._sync_pov_transform(set_transform=lambda scene, source, tf: result(source),
+                                      solo=False)
         finally:
             m._active_overlay_dir = orig
     return buf.getvalue()

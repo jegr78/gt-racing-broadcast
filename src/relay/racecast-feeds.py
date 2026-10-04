@@ -8978,7 +8978,7 @@ class Relay:
 
         def run():
             _ok, note = self._obs.set_scene_item_enabled(
-                _obs_ws.STINT_SCENE, _obs_ws.POV_SOURCE, shown)
+                _obs_ws.graphic_scene(self.solo), _obs_ws.POV_SOURCE, shown)
             self.obs_note = note or None
         threading.Thread(target=run, daemon=True).start()
 
