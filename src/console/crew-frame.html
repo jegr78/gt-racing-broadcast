@@ -81,6 +81,9 @@
   .gthumb { position: relative; display: block; width: 100%; padding: 0; border: 0;
             background: #000; cursor: zoom-in; }
   .gthumb img { display: block; width: 100%; aspect-ratio: 16/9; object-fit: contain; }
+  .gnoprev { display: flex; align-items: center; justify-content: center; aspect-ratio: 16/9;
+             font-size: 11px; color: #8a929c; }
+  .gthumb:disabled { cursor: default; }
   .gbadge { position: absolute; top: 6px; left: 6px; background: #c1121f; color: #fff;
             font-size: 10px; font-weight: 800; letter-spacing: .06em; padding: 2px 6px;
             border-radius: 999px; }
@@ -184,17 +187,32 @@
       dlg.append(img, bar);
       if (!dlg.open) dlg.showModal();
     }
+    // A takeable graphic the Sheet list hides (internal or still a placeholder)
+    // still gets a tile, without a preview, so the crew can put it on air.
+    function tiles() {
+      var names = list.map(function (g) { return g.name; });
+      var extra = view ? (view.graphics || []).filter(function (t) {
+        return t.group === 'editorial' && t.can_take && names.indexOf(t.source) < 0;
+      }).map(function (t) { return { name: t.source, file: null }; }) : [];
+      return list.concat(extra);
+    }
     function render() {
       box.textContent = '';
-      if (!list.length) { box.appendChild(el('div', 'empty', 'No graphics available.')); }
-      list.forEach(function (g) {
+      var all = tiles();
+      if (!all.length) { box.appendChild(el('div', 'empty', 'No graphics available.')); }
+      all.forEach(function (g) {
         var t = takeOf(g.name);
         var tile = el('div', 'gtile' + (t && t.visible ? ' onair' : ''));
         var thumb = el('button', 'gthumb'); thumb.type = 'button';
-        thumb.setAttribute('aria-label', 'Preview ' + g.name);
-        thumb.appendChild(imgFor(g.file, 'thumb'));
+        if (g.file) {
+          thumb.setAttribute('aria-label', 'Preview ' + g.name);
+          thumb.appendChild(imgFor(g.file, 'thumb'));
+          thumb.addEventListener('click', function () { openPreview(g); });
+        } else {
+          thumb.disabled = true;
+          thumb.appendChild(el('span', 'gnoprev', 'No preview'));
+        }
         if (t && t.visible) thumb.appendChild(el('span', 'gbadge', 'ON AIR'));
-        thumb.addEventListener('click', function () { openPreview(g); });
         tile.append(thumb, el('div', 'gname', g.name));
         if (t && t.visible && t.by) tile.appendChild(el('div', 'gby', 'by ' + t.by));
         if (t && t.can_take) {
