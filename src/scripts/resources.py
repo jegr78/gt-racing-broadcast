@@ -240,7 +240,6 @@ def _read_cpu():
                 got = parse_proc_stat_cpu(fh.read())
             return ("counter", got[0], got[1]) if got else None
         if IS_WIN:
-            import ctypes
             idle, kern, user = (ctypes.c_ulonglong(), ctypes.c_ulonglong(),
                                 ctypes.c_ulonglong())
             if not ctypes.windll.kernel32.GetSystemTimes(ctypes.byref(idle),
@@ -308,8 +307,6 @@ def _read_mem():
             used = (total - avail) if (total is not None and avail is not None) else None
             return (used, total)
         if IS_WIN:
-            import ctypes
-
             class _MS(ctypes.Structure):
                 _fields_ = [("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
                             ("ullTotalPhys", ctypes.c_ulonglong),
