@@ -149,6 +149,64 @@ def t_pov_toggle_targets_stint_in_endurance():
     assert _reflected_pov_scene(False) == [("Stint", "Feed POV", True)]
 
 
+def t_solo_status_carries_the_template():
+    # The panel tells solo POV from solo commentary (#730), e.g. for the tyres tile.
+    r = _solo_relay()
+    old = os.environ.get("RACECAST_TEMPLATE")
+    os.environ["RACECAST_TEMPLATE"] = "commentary"
+    try:
+        assert r.status().get("template") == "commentary", r.status()
+    finally:
+        if old is None:
+            os.environ.pop("RACECAST_TEMPLATE", None)
+        else:
+            os.environ["RACECAST_TEMPLATE"] = old
+
+
+
+def t_solo_preview_source_allowlist_per_template():
+    q = m.solo_preview_source
+    assert q("capture", "pov") == "Solo Capture Device"
+    assert q("webcam", "commentary") == "Solo Webcam Device"
+    assert q("tyres", "commentary") == "Solo Tyres Capture Device"
+    assert q("tyres", "pov") is None, "the POV collection has no tyres capture"
+    assert q("Discord Audio Capture", "pov") is None, "only the allowlist reaches OBS"
+
+
+def t_solo_preview_source_route_screenshots_the_input():
+    import urllib.error, urllib.request
+
+    class FakeObs:
+        def __init__(self): self.asked = []
+        def get_source_screenshot(self, name, width=640, **kw):
+            self.asked.append(name); return b"\xff\xd8jpeg", ""
+
+    fake = FakeObs()
+    old_obs, old_tpl = m._obs_ws, os.environ.get("RACECAST_TEMPLATE")
+    m._obs_ws = fake
+    os.environ["RACECAST_TEMPLATE"] = "pov"
+    srv = _solo_server()
+    try:
+        port = srv.server_address[1]
+        r = urllib.request.urlopen(f"http://127.0.0.1:{port}/preview/source/webcam", timeout=5)
+        assert r.headers["Content-Type"] == "image/jpeg" and r.read() == b"\xff\xd8jpeg"
+        assert fake.asked == ["Solo Webcam Device"], fake.asked
+        for bad in ("tyres", "nope"):
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{port}/preview/source/{bad}", timeout=5)
+                raise AssertionError(f"expected 404 for {bad}")
+            except urllib.error.HTTPError as e:
+                assert e.code == 404, (bad, e.code)
+        assert fake.asked == ["Solo Webcam Device"], "a refused key never reaches OBS"
+    finally:
+        srv.shutdown()
+        m._obs_ws = old_obs
+        if old_tpl is None:
+            os.environ.pop("RACECAST_TEMPLATE", None)
+        else:
+            os.environ["RACECAST_TEMPLATE"] = old_tpl
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

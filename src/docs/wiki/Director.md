@@ -34,23 +34,86 @@ practical differences:
 - **Fallback: direct on the tailnet.** If you joined the producer's tailnet, open
   `http://<producer-tailscale-ip>:8088/panel` directly.
 
-The page is organized as horizontal busses; the Stream Deck pages and the panel share
-one muscle memory:
+The page is a fixed frame of four columns, so nothing you need on air scrolls away:
 
-![The director panel, the whole show on one page: the PGM, FEEDS, HUD, SCN·VIS, GFX, TIMER, AUDIO and CUES busses, a status strip, and the collapsible Schedule and Chat sections](images/director-panel.png)
+- **Navigation** (left): the topic areas. **On air**: Handover, Graphics, HUD, Cues,
+  Audio. **Operations**: Broadcast, Schedule, Setup, Troubleshoot. Each entry carries a
+  status dot and a one-line reason, e.g. `stint 4 ready`, `Feed B down`, `stream live`.
+  The order is not a procedure; open whichever area you need. The panel remembers the
+  last area per browser.
+- **Live column**: the program preview with the feed tiles, what is on air, the PGM
+  scene keys, the transition, and the handover keys **ARM** and **NEXT**.
+- **Workspace** (middle): the area you picked. Above it a "next step" line names the
+  next handover step from the relay's state: a missing or submitted link for the next
+  stint first, then ARM, then the cut. Only the next stint's missing link turns the
+  Schedule dot amber. The action log sits below the area.
+- **Chat rail** (right): crew chat above the broadcast chat, always visible. Drag the
+  divider between them (or focus it and use the arrow keys) to share the height; the
+  panel remembers the split.
+
+Below 1600 px width the navigation collapses to letters; the `«`/`»` key does the same
+on a wide screen. Below 1280 px the chats move into a drawer opened by the **Chats**
+button in the header, which also counts unread crew messages. Below 900 px (a phone)
+the page becomes one column: live column, navigation, area, chats.
+
+![The director panel: navigation on the left, the live column with program preview, scene keys, transition, ARM and NEXT, the Handover area in the middle, and the crew and broadcast chats on the right](images/director-panel.png)
+
+Where each bus lives:
 
 | Bus | What's on it |
 |---|---|
-| **PGM** | one-press program looks: `STINT A/B`, `SPLIT`, `INTERVIEW`, `STANDBY`, `INTRO`, `OUTRO`, `TRAILER`, `INTERMISSION`, `RED FLAG` (same behavior as the Companion combos below) |
-| **FEEDS** | `NEXT` (the handover), **`ARM A/B` / `STOP A/B`** (arm a feed's pull before a swap / stop it), per-feed reloads, `RESET A/B → LIVE` (reconnect OBS to one feed, see [Dropping a backlog](#dropping-a-backlog)), POV reload/stop, `FEEDS → STINT…` |
-| **HUD** | the Stint label, Streamer, Session and Race Control dropdowns, they update the HUD live and write back to the Setup tab |
-| **SCN·VIS** | raw scene switches and feed visibility toggles |
-| **TRANS** | transition selector for the next scene switch. **Cut**, **Fade** (default), or **Stinger** |
-| **GFX** | graphics toggles (HUD, standings, schedule, results, weather, covers) |
+| **PGM** (live column) | one-press program looks: `STINT`, `SPLIT`, `INTERVIEW`, `STANDBY`, `INTRO`, `OUTRO`, `TRAILER`, `INTERMISSION`, `RED FLAG` (same behavior as the Companion combos below) |
+| **FEEDS** (Troubleshoot) | **`ARM A/B` / `STOP A/B`** per feed, per-feed reloads, `RESET A/B → LIVE` (reconnect OBS to one feed, see [Dropping a backlog](#dropping-a-backlog)), POV reload/stop, `FEEDS → STINT…` |
+| **HUD** (HUD area) | the Stint label, Streamer, Session and Race Control dropdowns, they update the HUD live and write back to the Setup tab |
+| **Overlays** (live column) | picture-in-picture toggles: `POV`; in solo also `WEBCAM` and, for a POV profile, `TELEMETRY` |
+| **Raw scenes** (Troubleshoot) | scene switches without audio (the audio stays as it is) |
+| **TRANS** (live column) | transition selector for the next scene switch. **Cut**, **Fade** (default), or **Stinger** |
+| **GFX** (Graphics area) | graphics toggles (HUD, standings, schedule, results, weather, covers) |
 | **FLAG GFX** | mutually exclusive flag-status graphic overlays, exactly one active at a time (or none); distinct from the flag-text chip in the HUD |
-| **TIMER** | the race timer ([Race Timer](Race-Timer)) |
-| **AUDIO** | per-source dB sliders, 0 dB reset and mutes; includes an **Intermission Music** fader for the music track in the Intermission scene |
-| **URLs** | collapsible editor for the schedule and POV URLs |
+| **TIMER** (HUD area) | the race timer ([Race Timer](Race-Timer)) |
+| **AUDIO** (Audio area) | per-source dB sliders, 0 dB reset and mutes; includes an **Intermission Music** fader for the music track in the Intermission scene |
+| **URLs** (Schedule area) | the editor for the schedule and POV URLs, next to the commentators' link submissions |
+
+The **Handover** area shows the on-air stint, the next stint with its feed state (not
+armed, starting, ready) and the three stints after it: `link ready`, `no link yet`, or a
+commentator's pending link submission. One submission shows its link with an **APPROVE**
+key; two or more for the same stint point to the Schedule area, where each link is listed. **Setup** holds the
+graphics library, **Broadcast** the stream key and the substitution card, and
+**Troubleshoot** the raw feed controls, the emergency feed switch, the raw scenes and the OBS
+page refresh.
+
+### Scene macros
+
+Every scene has a macro on the PGM bus that sets the scene and its audio in one press.
+The raw scene keys in Troubleshoot switch only the scene.
+
+Endurance:
+
+| Macro | Scene | Audio |
+|---|---|---|
+| `STINT` | Stint | the on-air feed (and the producer's mic on a local stint) on, the other feed and Discord off. The relay picks the on-air feed; NEXT decides which one that is. Clears Race Control |
+| `SPLIT` | Splitscreen | both feeds visible, the on-air feed audible, the other feed and Discord off. Sets Race Control to *Driver Swaps* |
+| `INTERVIEW` | Interview | Discord on, Feed A and B off |
+| `STANDBY`, `INTRO`, `OUTRO`, `TRAILER` | same name | Feed A, Feed B and Discord off |
+| `INTERMISSION` | Intermission | unchanged (the feeds are not in this scene) |
+
+Solo (Game is the capture card, Mic the commentary microphone):
+
+| Macro | Scene | Game | Mic | Discord |
+|---|---|---|---|---|
+| `PROGRAM` | Program | on | on | off |
+| `INTERVIEW` | Interview | off | on | on |
+| `STANDBY`, `INTERMISSION` | same name | off | on | off |
+| `INTRO`, `OUTRO`, `TRAILER` | same name | off | off | off |
+| `DISCORD` | Discord | off | on | on |
+| `WEBCAM`, `CAPTURE` | Solo Webcam, Solo Capture (full frame) | on | on | off |
+
+The **emergency feed switch** in Troubleshoot (`FEED A ON AIR`, `FEED B ON AIR`) shows
+one feed in the Stint scene with its audio after a confirmation. It is for the case where
+NEXT cannot hand over. The relay then takes that feed as on air: its stint becomes the
+on-air stint, the HUD follows it, and the other feed moves to the next stint (stopped,
+like after a NEXT). The next NEXT hands over from there. Switching to a feed that is
+already on air changes nothing on the relay.
 
 All controls: scenes, sources, audio, feeds, timer, HUD, and URLs, work
 relay-only. The relay calls the producer's local OBS on your behalf; no OBS
@@ -61,19 +124,20 @@ are display-only.
 ### Solo mode
 
 For a **solo** profile (a single-race commentary or driver-POV broadcast: local
-capture + webcam, no A/B feeds) the panel adapts automatically: the FEEDS bus,
-the A/B feed pills and preview tiles, the stint schedule and the qualifying
-editor are hidden, and the POV editor stands on its own card with its own POV
-RELOAD / POV STOP. The OBS control busses retarget to the solo scene collection,
-SCN·VIS switches `PROGRAM` / `INTERVIEW` / `STANDBY` / `INTERMISSION` / `INTRO` /
-`OUTRO` / `TRAILER` / `DISCORD` / `SOLO WEBCAM` / `SOLO CAPTURE` (the last two cut to
-the webcam or the capture card full-screen) and toggles the `WEBCAM` and `POV`
+capture + webcam, no A/B feeds) the panel adapts automatically: the Handover area,
+ARM and NEXT are hidden, Graphics is the default area, the PGM bus carries the solo
+macros (see [Scene macros](#scene-macros)), and the FEEDS bus, the emergency feed switch,
+the A/B feed pills, the stint schedule and the qualifying editor are hidden. The live
+column previews `CAPTURE` and `WEBCAM` (a commentary profile also `TYRES`) next to
+`POV` instead of the A/B tiles, and the POV editor stands on its own card with its own POV
+RELOAD / POV STOP. The OBS control busses retarget to the solo scene collection.
+The Overlays card in the live column toggles the `WEBCAM` and `POV`
 picture-in-picture (the `WEBCAM` toggle acts on the webcam in the **Program** scene
 only; the one in the solo POV **Intermission** scene is not affected). The Gfx, Pre-race and Grid keys toggle
 their graphics in the **Program** scene, and the
 AUDIO bus exposes the solo mixer: **Game**, **Webcam**, **Mic** (the commentator's
 microphone on the producer machine), **POV**, **Discord** and **Intermission**.
-In a solo **POV** profile SCN·VIS also carries `TELEMETRY`: it shows or hides the
+In a solo **POV** profile Overlays also carries `TELEMETRY`: it shows or hides the
 HUD's whole GT7 telemetry block (panel, tyres, trace, values, delta, time of day),
 for example while waiting in the lobby or watching a replay. The webcam frame stays.
 The relay keeps the choice across restarts; the key lights while the block is shown.
@@ -91,7 +155,7 @@ appears once the console sends telemetry and follows a car change.
 
 ### Going live: Start/Stop the stream
 
-The **Live Preview** header carries a broadcast button. It shows **OFFLINE** when
+The **Broadcast** area carries the broadcast button. It shows **OFFLINE** when
 OBS is not streaming and turns into **● LIVE HH:MM:SS** (with the running
 broadcast time) once on air; while OBS is reconnecting it reads **RECONNECTING…**.
 Starting the stream is one click; **stopping asks for confirmation** (ending a live
@@ -105,8 +169,8 @@ panel cannot reach OBS the button shows **STREAM ?**.
 
 The strip at the top shows what is on air, the race timer, and one pill per
 feed with its stint and state: `A S3 · LIVE` (green: serving), `B S4 · CONN`
-(amber: still connecting), `IDLE`, or `STOPPED`. The FEEDS bus adds a health
-line per feed, e.g. `A · serving stint 3 (since 1:32:08)`. When a feed has
+(amber: still connecting), `IDLE`, or `STOPPED`. The FEEDS bus (Troubleshoot) adds a
+health line per feed, e.g. `A · serving stint 3 (since 1:32:08)`. When a feed has
 been connecting for more than ~30 seconds the line turns amber and warns
 `stream may not be live yet`: usually the streamer simply hasn't started;
 the exact error from the producer's machine is appended when there is one.
@@ -167,8 +231,8 @@ while the condition holds and disappear on their own when it is resolved:
 | **COOKIES N H OLD** (amber) | the producer's YouTube cookies are stale, the **next handover may fail** | tell the producer: `racecast cookies firefox` on the producer machine |
 
 One-off action failures (a button press that didn't take) show as short
-toasts in the top-right corner and are also logged in the log box at the
-bottom.
+toasts in the top-right corner and are also logged in the log box below the
+workspace area.
 
 ### Guarded buttons
 
@@ -197,8 +261,8 @@ takes until you change it (a page reload resets it to the default, Fade).
 | **Stinger** | Plays the Stinger transition configured in OBS; falls back to a cut if no Stinger is configured, with a note in the log |
 
 The transition applies to **scene switches** only: buttons on the **PGM** and
-**SCN·VIS** busses and the scene-switch step inside macros. It does **not**
-apply to **source toggles** (show/hide on the GFX, FLAG GFX, or SCN·VIS rows),
+**Raw scenes** busses and the scene-switch step inside macros. It does **not**
+apply to **source toggles** (show/hide on the GFX, FLAG GFX, or Overlays rows),
 an OBS-WebSocket limitation.
 
 **Cut and Fade always work.** Stinger requires the producer to have a Stinger
@@ -224,8 +288,7 @@ either way: they never need the webhook.) See [Sheet-Webhook](Sheet-Webhook).
 
 ## Director panel: Schedule section
 
-Below the main rows the panel has one collapsible, **mode-aware Schedule**
-section. Its header carries a mode chip (**RACE** / **QUALIFYING**) and a single
+The **Schedule** area holds one **mode-aware Schedule** section. Its header carries a mode chip (**RACE** / **QUALIFYING**) and a single
 switch button (**switch → QUALIFYING** / **switch → RACE**): see
 [Qualifying](#director-panel-qualifying). The body follows the mode: in **race**
 mode it shows the Schedule tab entries (one per stint: **Streamer** + **Stint**
@@ -417,8 +480,8 @@ How the board is imported and built: [Companion](Companion).
 ## Through the broadcast (scene + HUD cues)
 
 The steps below name the Companion buttons; the panel has the same controls,
-the combos sit on the **PGM** bus and **Feeds Next** is **NEXT** in the FEEDS
-bus.
+the combos sit on the **PGM** bus and **Feeds Next** is **NEXT** in the live
+column.
 
 As director you drive two things: the **scenes** (Companion or panel) and
 three **HUD fields**: **Stint**, **Session**, and **Race Control**, from the
@@ -437,7 +500,7 @@ or clear it to show nothing. The whole run, in order:
 
 **Formation lap**, the race always begins with a manual formation lap.
 - HUD: **Race Control → Formation Lap**. Set it **after** the cut: the combos write
-  Race Control too (**SPLIT** stamps *Driver Swaps*, **STINT A/B** and the **Feeds Next**
+  Race Control too (**SPLIT** stamps *Driver Swaps*, **STINT** and the **Feeds Next**
   handover clear it), so a combo or handover afterwards would wipe the *Formation Lap*
   message.
 - As the formation lap starts: **Stint → Stint 1**, **Session → Race**.
@@ -504,19 +567,22 @@ below).
 
 Per swap:
 
-1. **Enter the next link early**: ~20–30 min ahead, from the panel's **URLs**
-   section (or the sheet's Schedule tab as a fallback). It just sits there; nothing
+1. **Enter the next link early**: ~20–30 min ahead, from the panel's **Schedule**
+   area (or the sheet's Schedule tab as a fallback). It just sits there; nothing
    pulls yet.
-2. **Arm the incoming (off-air) feed** a few minutes before the swap: press **ARM A**
-   or **ARM B** (FEEDS bus). The relay resolves and pulls it, a cold start of
-   ~10–30 s, like POV Reload. Wait until the FEEDS health line shows that feed
-   **serving**: that is your "ready to cut" signal. (Arming onto a stream the other
+2. **Arm the incoming (off-air) feed** a few minutes before the swap: press **ARM**
+   in the panel's live column (it reads `ARM → STINT 4 (FEED B)` and always targets
+   the off-air feed), or **ARM A** / **ARM B** on the Companion deck. The relay
+   resolves and pulls it, a cold start of ~10–30 s, like POV Reload. The key turns
+   amber while the feed starts and green once it is **serving**, and **NEXT** turns
+   green with it: that is your "ready to cut" signal. (Arming onto a stream the other
    feed already pulls is refused, so a same-URL back-to-back can never double-pull.)
 3. **Cut to Splitscreen** with the **SPLIT** combo (covers the handover window; also
    sets **Race Control → Driver Swaps** for you).
 4. **Press NEXT once.** The relay hands over to the armed feed, shows the new
    commentator in the **Stint** scene, switches the audio, cuts the program to
-   **Stint**, sets the HUD **Stint** / **Streamer** from the on-air Schedule row,
+   **Stint** (from the panel with the transition armed in the live column; the
+   Companion's **Feeds Next** cuts hard), sets the HUD **Stint** / **Streamer** from the on-air Schedule row,
    clears Race Control: and **stops the outgoing feed's pull**. You do not pick Feed
    A or Feed B; correct the HUD from the panel's **HUD** bus if needed.
 
@@ -534,11 +600,13 @@ The current program stays on air; arm the feed and press **NEXT** again.
 > auto-pull: but it is **not** the recommended path; the standard everywhere is to arm.)
 
 The relay also handles the audio (it mutes the off-air feed, unmutes the on-air one).
-**STINT A / STINT B**, **MUTE A / MUTE B** and **Feed A/B Toggle** are a
+The Companion's **STINT A / STINT B**, **MUTE A / MUTE B** and **Feed A/B Toggle** are a
 **break-glass fallback**: if the panel shows **OBS NOT REACHABLE** (the relay
 cannot reach OBS on the producer machine), NEXT can't auto-cut, then use
 **STINT A / STINT B** (and, if needed, the manual FEED/MUTE buttons) to cut by
-hand; `/status` shows which feed is live. The Companion STINT buttons switch the feeds and
+hand; `/status` shows which feed is live. The panel cannot help here, because all its
+OBS control goes through the relay; its emergency feed switch in Troubleshoot is for the
+case where OBS is reachable but NEXT cannot hand over. The Companion STINT buttons switch the feeds and
 their audio directly in OBS before they ask the relay, so they still work here; only the
 producer's commentary mic of a local stint is left as it was, because only the relay
 switches it.

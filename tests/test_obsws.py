@@ -1587,6 +1587,28 @@ def t_set_scene_stinger_absent_degrades_to_cut_with_note():
     assert ("SetCurrentProgramScene", {"sceneName": "Stint"}) in sess.sent
 
 
+def t_reflect_feed_state_cuts_with_the_given_transition():
+    # NEXT honours the panel's armed transition (#730): the handover cut is a FADE.
+    sess = _FakeSession(responses={"GetSceneItemId": {"sceneItemId": 3},
+                                   "GetSceneTransitionList": {"transitions": [
+                                       {"transitionName": "Fade", "transitionKind": "fade_transition"}]}})
+    applied, note = m.reflect_feed_state("B", True, transition="fade", duration_ms=700,
+                                         session=sess)
+    types = [t for t, _ in sess.sent]
+    assert ("SetCurrentSceneTransition", {"transitionName": "Fade"}) in sess.sent, sess.sent
+    assert ("SetCurrentSceneTransitionDuration", {"transitionDuration": 700}) in sess.sent
+    assert types.index("SetCurrentSceneTransition") < types.index("SetCurrentProgramScene")
+    assert ("cut", "Stint") in applied and note == "", (applied, note)
+
+
+def t_reflect_feed_state_without_transition_keeps_the_hard_cut():
+    sess = _FakeSession(responses={"GetSceneItemId": {"sceneItemId": 3}})
+    m.reflect_feed_state("B", True, session=sess)
+    types = [t for t, _ in sess.sent]
+    assert "GetSceneTransitionList" not in types and "SetCurrentSceneTransition" not in types, types
+    assert ("SetCurrentProgramScene", {"sceneName": "Stint"}) in sess.sent
+
+
 def t_set_scene_no_transition_is_plain_switch():
     sess = _FakeSession()
     orig, m._connect = m._connect, lambda *a, **k: (sess, "")
@@ -1846,6 +1868,46 @@ def t_apply_stint_state_closes_the_mic_when_the_other_feed_is_local():
     obs = _SplitObs()
     irofeeds.apply_stint_state(_StintRelay(local={"A"}), obs, "B")
     assert ("mute", MIC, True) in obs.calls and ("mute", MIC, False) not in obs.calls
+
+
+def t_apply_stint_state_live_takes_the_relays_on_air_feed():
+    # The panel's single STINT macro (#729) names no feed: NEXT decides which one is
+    # on air, and the relay is the one that knows.
+    relay = _StintRelay()
+    relay.live = "B"
+    obs = _SplitObs()
+    payload, status = irofeeds.apply_stint_state(relay, obs, "live")
+    assert status == 200 and payload["feed"] == "B", payload
+    assert obs.calls[0] == ("item", "Stint", "Feed B", True), obs.calls
+
+
+class _TakeRelay(_StintRelay):
+    def __init__(self):
+        super().__init__()
+        self.taken = []
+
+    def take_on_air(self, which):
+        self.taken.append(which)
+        return True
+
+
+def t_apply_stint_state_take_moves_the_relay_only_when_asked():
+    # The panel's emergency switch sends take=True (#730); Companion's STINT A/B do
+    # not, so a break-glass press never re-indexes the feeds.
+    relay = _TakeRelay()
+    payload, status = irofeeds.apply_stint_state(relay, _SplitObs(), "B", take=True)
+    assert status == 200 and relay.taken == ["B"] and payload["relay_on_air"] is True, payload
+    relay.taken.clear()
+    payload, _ = irofeeds.apply_stint_state(relay, _SplitObs(), "B")
+    assert relay.taken == [] and "relay_on_air" not in payload, payload
+
+
+def t_apply_stint_state_take_never_moves_the_relay_when_obs_failed():
+    relay = _TakeRelay()
+    payload, status = irofeeds.apply_stint_state(relay, None, "B", take=True)
+    assert status == 503 and relay.taken == [], payload
+    payload, status = irofeeds.apply_stint_state(relay, _SplitObs(fail={"Feed B"}), "B", take=True)
+    assert status == 503 and relay.taken == [], payload
 
 
 def t_apply_stint_state_rejects_a_bad_feed_and_solo():

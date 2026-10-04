@@ -114,15 +114,20 @@ director URLs ready to forward; first-time directors:
 
 ![Director panel](images/director-panel.png)
 
-The page is organized as horizontal busses that mirror the Companion pages,
-so the Stream Deck and the panel share one muscle memory:
+The page is a fixed frame: topic navigation on the left, a live column with the
+program preview, the PGM keys, the transition and **ARM**/**NEXT**, the picked area in
+the middle and both chats on the right ([layout](Director#the-director-panel)). Its
+busses mirror the Companion pages, so the Stream Deck and the panel share one muscle
+memory:
 
 | Bus | What it does |
 |---|---|
-| **PGM** | one-press program switches (scene + feed visibility + mutes), identical to the Companion macros. STINT A/B, SPLIT, INTERVIEW, STANDBY, INTRO, OUTRO, RED FLAG. SPLIT also sets Race Control to *Driver Swaps*, STINT A/B clear it, and RED FLAG toggles the Standby Cover together with the *Red Flag* message ([Director guide](Director#the-companion-web-buttons-board)); these Race Control writes need the sheet-write webhook |
-| **FEEDS** | relay control: NEXT (driver change: cuts back to Stint and clears Race Control with the cut), feed reloads, POV reload/stop, FEEDS → STINT… |
+| **PGM** | one-press program switches (scene + feed visibility + mutes), one per scene ([Scene macros](Director#scene-macros)). STINT (the on-air feed), SPLIT, INTERVIEW, STANDBY, INTRO, OUTRO, TRAILER, INTERMISSION, RED FLAG. SPLIT also sets Race Control to *Driver Swaps*, STINT clears it, and RED FLAG toggles the Standby Cover together with the *Red Flag* message ([Director guide](Director#the-companion-web-buttons-board)); these Race Control writes need the sheet-write webhook |
+| **ARM / NEXT** (live column) | ARM pulls the off-air feed; NEXT is the driver change: cuts back to Stint and clears Race Control with the cut |
+| **FEEDS** (Troubleshoot) | relay control: per-feed ARM/STOP, feed reloads, POV reload/stop, FEEDS → STINT… |
 | **HUD** | the Stint HUD label, Streamer, Session and Race Control dropdowns: changes show on the HUD immediately and are written back to the Setup tab ([Director guide](Director)) |
-| **SCN·VIS** | raw scene switches and feed visibility toggles |
+| **Overlays** | picture-in-picture toggles (POV; solo also webcam and telemetry) |
+| **Raw scenes** (Troubleshoot) | scene switches that leave the audio as it is |
 | **GFX** | graphics toggles (HUD, Standings, Schedule, results, weather, covers) |
 | **TIMER** | the race timer (see [Race Timer](Race-Timer)) |
 | **AUDIO** | per-input dB sliders, 0 dB reset and mutes |
@@ -185,7 +190,7 @@ flowchart LR
 ```
 
 At each change the director: **arms the incoming feed** a few minutes ahead (its
-scheduled link only starts pulling once armed. **ARM A/B** on the panel; wait for
+scheduled link only starts pulling once armed. **ARM** in the panel's live column; wait for
 *serving*), cuts to **Splitscreen** (the combo sets **Race Control** to *Driver Swaps*
 with it), then, with the incoming feed warm, presses **Feeds Next**. The relay hands
 the feed over, cuts the program back to **Stint** on the incoming feed for you (no

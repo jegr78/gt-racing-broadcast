@@ -172,6 +172,13 @@ def t_program_audio_endpoints_are_any():
     assert cp.min_capability(["preview", "program-audio"]) == cp.Requirement(cp.ANY, False)
 
 
+def t_solo_input_previews_are_director_only():
+    # A solo webcam or capture can be off program, so only the panel may see it (#730).
+    for key in ("capture", "webcam", "tyres"):
+        assert cp.min_capability(["preview", "source", key]) == cp.Requirement(cp.DIRECTOR, False), key
+    assert cp.min_capability(["preview", "feed", "A"]) == cp.Requirement(cp.ANY, False)
+
+
 def t_root_graphics_browser_is_any_authenticated():
     # The tailnet-open /graphics list and file endpoints are also reachable via
     # /console/graphics for any authenticated subject, so the console pages' graphics
