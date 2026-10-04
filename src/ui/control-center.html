@@ -3458,7 +3458,14 @@ function ovFillSample() {
     } else if (typeof v === 'string' && !img) {    // text slot
       el.textContent = v;
       el.classList.toggle('empty', !v);
-      if (/^team\d-name$/.test(s.id)) ovFitName(el);   // mirror hud.html auto-fit
+      if (/^team\d-name$/.test(s.id)) {              // mirror hud.html auto-fit
+        ovFitName(el);
+        // Filled while the canvas is hidden, the name measures 0 wide; fit once laid out.
+        if (!el._fitObserver) {
+          el._fitObserver = new ResizeObserver(() => ovFitName(el));
+          el._fitObserver.observe(el);
+        }
+      }
     } else {
       el.classList.remove('empty');
     }

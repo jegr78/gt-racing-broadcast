@@ -2049,6 +2049,7 @@ def t_every_button_icon_is_styled():
     assert re.search(r"\.viewhead\s*\{[^}]*flex-wrap:\s*wrap", style), "the header row must be allowed to wrap"
     fill = html[html.index("function ovFillSample()"):html.index("function ovFitName(")]
     assert "document.fonts.ready" in fill, "team names must be fitted again once the webfont has loaded"
+    assert "ResizeObserver" in fill, "a name filled while the canvas is hidden must be fitted once it is laid out"
 
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
