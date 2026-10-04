@@ -1437,6 +1437,7 @@ def t_solo_takes_land_in_program():
     assert code == 200, (code, body)
     assert calls == [("item", "Program", "Standings", True)], calls
 
+
 def t_crew_pages_carry_the_shared_frame():
     srv = _serve(); port = srv.server_address[1]
     try:
