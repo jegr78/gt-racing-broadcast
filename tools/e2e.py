@@ -172,6 +172,32 @@ def render_funnel_pill(ctx, headed=False, slowmo=0):
     return _render_pill(ctx, "render_funnel_pill", "#who", "funnel-state pill", headed, slowmo)
 
 
+def render_cockpit_phone(ctx, headed=False, slowmo=0):
+    """At phone width the cockpit fits the viewport and the crew chat keeps its height."""
+    from playwright.sync_api import sync_playwright  # noqa: PLC0415  optional, lazy
+    name = "render_cockpit_phone"
+    url = ctx.relay_url + "/cockpit?t=" + ctx.token
+    try:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=not headed, slow_mo=slowmo)
+            try:
+                page = browser.new_page(viewport={"width": 390, "height": 844})
+                page.goto(url, wait_until="domcontentloaded")
+                page.wait_for_selector("#tally", state="visible", timeout=10000)
+                scroll_w = page.evaluate("document.documentElement.scrollWidth")
+                chat_h = page.evaluate(
+                    "document.getElementById('chat').closest('.card').getBoundingClientRect().height")
+            finally:
+                browser.close()
+    except Exception as exc:  # noqa: BLE001  a render failure is a check failure
+        return E.CheckResult(name, "fail", f"{type(exc).__name__}: {exc}")
+    if scroll_w > 390:
+        return E.CheckResult(name, "fail", f"page is {scroll_w} px wide in a 390 px viewport")
+    if chat_h < 100:
+        return E.CheckResult(name, "fail", f"crew chat card is {chat_h:.0f} px high")
+    return E.CheckResult(name, "pass", "")
+
+
 def render_panel_shortcut_confirm(ctx, headed=False, slowmo=0):
     """Director Panel keyboard shortcuts (#731): with the keys switched on, one N
     press sends no /next, a confirmed second press sends exactly one, and N typed
@@ -215,9 +241,10 @@ def render_panel_shortcut_confirm(ctx, headed=False, slowmo=0):
     return E.CheckResult(name, "pass", "")
 
 
-RENDERED_CHECKS = [render_tally_pill, render_funnel_pill, render_panel_shortcut_confirm]
+RENDERED_CHECKS = [render_tally_pill, render_funnel_pill, render_cockpit_phone,
+                   render_panel_shortcut_confirm]
 # A real league's relay can reach the producer's OBS, so no check that sends /next.
-REAL_LEAGUE_RENDERED_CHECKS = [render_tally_pill, render_funnel_pill]
+REAL_LEAGUE_RENDERED_CHECKS = [render_tally_pill, render_funnel_pill, render_cockpit_phone]
 
 
 def run_rendered_checks(ctx, headed=False, slowmo=0, checks=None):
