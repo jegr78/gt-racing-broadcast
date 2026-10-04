@@ -389,12 +389,20 @@ for the run.
   fails, the stint runs without the mic and says so in `feed_A.log`/`feed_B.log` and on
   the Director Panel's feed line.
 
-**Without a mic for the capture** (no mic configured, or a solo profile) the
+**Without a mic for the capture** (an endurance profile with no mic configured) the
 microphone is **not** part of the capture. It is the OBS input
 `Commentary Mic Device` in the `Stint` and `Splitscreen` scenes, set from `RACECAST_MIC`
 when you run `racecast setup` and re-import the collection in OBS. It ships muted.
 
-On such a machine with `RACECAST_CAPTURE` set, the relay opens the mic while the local stint
+**In a solo profile** the mic is never part of the capture either, and the relay does not
+manage it. It is the nested scene `Commentary Mic` (input `Commentary Mic Device`, set from
+`RACECAST_MIC` by `racecast setup`) inside `Program`, `Interview`, `Standby`,
+`Intermission` and `Discord`; the `Intro` and `Outro` clips carry their own audio and do
+not include it. It ships **unmuted**, because it is the main audio of a solo broadcast.
+You set its level and mute it with the Director Panel's **Mic** fader or in OBS; the relay
+never mutes it on its own.
+
+On an endurance machine with `RACECAST_CAPTURE` set, the relay opens the mic while the local stint
 is on air and mutes it on every handover to a remote stint. `SPLIT` follows the on-air
 feed: the mic stays open while the local stint is the audible one and is muted when the
 remote feed is. `STINT A` / `STINT B`
