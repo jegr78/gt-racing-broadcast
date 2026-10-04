@@ -131,6 +131,52 @@ def t_fetch_family_single_cut_fallback():
     assert files == {"Oswald.woff2": b"DATA"}
 
 
+def t_extract_overwrite_replaces_existing_and_ignores_stamp():
+    with tempfile.TemporaryDirectory() as tmp:
+        zp = os.path.join(tmp, "fonts.zip")
+        fb.build_zip(zp, {"Oswald.woff2": b"NEW"})
+        dest = os.path.join(tmp, "fonts")
+        fb.extract_bundled(zp, dest)
+        with open(os.path.join(dest, "Oswald.woff2"), "wb") as fh:
+            fh.write(b"STALE")
+        with open(os.path.join(dest, "Mine.woff2"), "wb") as fh:
+            fh.write(b"MINE")
+        res = fb.extract_bundled(zp, dest, overwrite=True)
+        assert res["skipped"] is False and res["extracted"] == ["Oswald.woff2"], res
+        with open(os.path.join(dest, "Oswald.woff2"), "rb") as fh:
+            assert fh.read() == b"NEW", "overwrite must replace a same-named file"
+        with open(os.path.join(dest, "Mine.woff2"), "rb") as fh:
+            assert fh.read() == b"MINE", "a font outside the bundle must stay"
+
+
+def t_extract_ungated_readds_a_deleted_font():
+    with tempfile.TemporaryDirectory() as tmp:
+        zp = os.path.join(tmp, "fonts.zip")
+        fb.build_zip(zp, {"Oswald.woff2": b"AAA", "Teko.woff2": b"BBB"})
+        dest = os.path.join(tmp, "fonts")
+        fb.extract_bundled(zp, dest)
+        os.remove(os.path.join(dest, "Teko.woff2"))
+        assert fb.extract_bundled(zp, dest)["skipped"] is True
+        res = fb.extract_bundled(zp, dest, gated=False)
+        assert res["extracted"] == ["Teko.woff2"], res
+
+
+def t_replace_bundled_copies_touches_only_present_names():
+    with tempfile.TemporaryDirectory() as tmp:
+        zp = os.path.join(tmp, "fonts.zip")
+        fb.build_zip(zp, {"Oswald.woff2": b"NEW", "Teko.woff2": b"BBB"})
+        dest = os.path.join(tmp, "overlay", "fonts"); os.makedirs(dest)
+        for n, data in (("Oswald.woff2", b"STALE"), ("League.ttf", b"OWN")):
+            with open(os.path.join(dest, n), "wb") as fh:
+                fh.write(data)
+        replaced = fb.replace_bundled_copies(zp, dest)
+        assert replaced == ["Oswald.woff2"], replaced
+        assert sorted(os.listdir(dest)) == ["League.ttf", "Oswald.woff2"], \
+            "a profile copy must never gain fonts it did not have"
+        with open(os.path.join(dest, "Oswald.woff2"), "rb") as fh:
+            assert fh.read() == b"NEW"
+
+
 if __name__ == "__main__":
     for n, fn in sorted(globals().items()):
         if n.startswith("t_") and callable(fn):

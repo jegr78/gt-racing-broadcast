@@ -30,6 +30,7 @@
   racecast report send [FILE]                # send the newest (or given) report to the league Discord as an attachment
   racecast backup    {create|list|restore|delete} <label>   # named look snapshots (overlay+graphics+media)
   racecast ui [--no-browser]                 # local Control Center web app (port 8089 / RACECAST_UI_PORT)
+  racecast fonts restore [--force]           # re-add missing bundled overlay fonts; --force overwrites them in the library and every profile
   racecast freeport [PORT...] [--force]       # free a stuck feed port (default 53001-53003); kills orphaned holders, refuses a running relay/streams
   racecast device-scan [--webcam VAL] [--capture VAL] [--mic VAL]  # enumerate OBS video-capture devices + microphones and save the pick(s) to .env (interactive when no flags given)
   racecast gt7-discover [--save] [--print] [--timeout N] [--pick I]  # find the PS4/PS5 running GT7 and save its IP
@@ -1002,6 +1003,10 @@ def route(argv):
         return {"kind": "ui", "rest": rest}
     if cmd == "freeport":
         return {"kind": "freeport", "rest": rest}
+    if cmd == "fonts":
+        if rest[:1] != ["restore"]:
+            raise ValueError("usage: racecast fonts restore [--force]")
+        return {"kind": "fonts", "rest": rest}
     if cmd == "device-scan":
         return {"kind": "device-scan", "rest": rest}
     if cmd == "gt7-discover":
@@ -4379,6 +4384,24 @@ def freeport_cmd(rest):
     raise SystemExit(1 if refused else 0)
 
 
+def fonts_cmd(rest):
+    """`racecast fonts restore [--force]`: re-seed the bundled overlay fonts."""
+    extra = [a for a in rest[1:] if a not in ("--force", "-f")]
+    if extra:
+        sys.exit(f"racecast: unknown option: {extra[0]}")
+    force = any(a in ("--force", "-f") for a in rest[1:])
+    d = restore_bundled_fonts_data(force=force)
+    if not d["ok"]:
+        sys.exit(f"racecast: {d['error']}")
+    print(f"font library: {len(d['library'])} bundled font(s) "
+          f"{'restored' if force else 'added'}.")
+    for name, files in sorted(d["profiles"].items()):
+        print(f"profile {name}: replaced {', '.join(files)}")
+    if force and (d["library"] or d["profiles"]):
+        print("Reload the OBS browser sources to show them: racecast obs refresh")
+    return None
+
+
 DISPATCH = {
     ("relay", "start"): relay_start, ("relay", "stop"): relay_stop,
     ("relay", "restart"): relay_restart, ("relay", "status"): relay_status,
@@ -6043,6 +6066,30 @@ def machine_font_delete_data(name):
         return {"ok": False, "error": f"could not delete font: {exc}"}
 
 
+def restore_bundled_fonts_data(force=False):
+    """Re-seed the machine font library from the bundled fonts.zip, re-adding any
+    missing bundled font. force=True also overwrites same-named library files and
+    the same-named copies in every profile's overlay/fonts/. Fonts outside the
+    bundle are never touched. {ok, library:[names], profiles:{name:[names]}}."""
+    zip_path = _bundled_fonts_zip()
+    if not zip_path:
+        return {"ok": False, "error": "this install has no bundled fonts.zip"}
+    try:
+        res = fb.extract_bundled(zip_path, _machine_fonts_dir(), overwrite=force,
+                                 gated=False)
+        profiles = {}
+        if force:
+            root = _env_base(IS_FROZEN, _real_executable(), HERE)
+            for name in pcfg.list_profiles(root):
+                fdir = os.path.join(pcfg.profiles_dir(root), name, "overlay", "fonts")
+                replaced = fb.replace_bundled_copies(zip_path, fdir)
+                if replaced:
+                    profiles[name] = replaced
+        return {"ok": True, "library": res["extracted"], "profiles": profiles}
+    except Exception as exc:
+        return {"ok": False, "error": f"could not restore bundled fonts: {exc}"}
+
+
 # Keyless full Google-fonts family list (the metadata endpoint the fonts.google.com
 # site itself uses, so no API key and no secret to manage). Powers the Settings
 # free-text typeahead; cached by the caller and falling back to the curated list.
@@ -6939,6 +6986,7 @@ def run_ui(rest, fail=sys.exit, open_browser=True):
         "font_catalog": font_catalog_cached,
         "machine_font_download": machine_font_download_data,
         "machine_font_delete": machine_font_delete_data,
+        "fonts_restore": restore_bundled_fonts_data,
         "backup_list": backup_list_data,
         "backup_create": backup_create_data,
         "backup_restore": backup_restore_data,
@@ -7853,6 +7901,8 @@ def main(argv=None):
         return ui_cmd(action["rest"])
     if action["kind"] == "freeport":
         return freeport_cmd(action["rest"])
+    if action["kind"] == "fonts":
+        return fonts_cmd(action["rest"])
     if action["kind"] == "device-scan":
         return device_scan_cmd(action["rest"])
     if action["kind"] == "gt7-discover":

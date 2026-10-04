@@ -2090,6 +2090,65 @@ def t_overlay_save_copies_font_cut_siblings_into_profile():
         assert 'font-family: "NunitoSans"' in w["css"] and "font-style: italic" in w["css"]
 
 
+def t_restore_bundled_fonts_force_overwrites_library_and_profiles():
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        orig = _mk_active_profile(td)
+        other = os.path.join(td, "profiles", "league2")
+        os.makedirs(os.path.join(other, "overlay", "fonts"))
+        open(os.path.join(other, "profile.env"), "w").close()
+        zp = os.path.join(td, "fonts.zip")
+        m.fb.build_zip(zp, {"Oswald.woff2": b"NEW", "Teko.woff2": b"TEKO"})
+        lib = os.path.join(td, "runtime", "fonts")
+        os.makedirs(lib)
+        stale = [os.path.join(lib, "Oswald.woff2"),
+                 os.path.join(td, "profiles", "demo", "overlay", "fonts", "Oswald.woff2"),
+                 os.path.join(other, "overlay", "fonts", "Oswald.woff2")]
+        for path in stale:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "wb") as fh:
+                fh.write(b"STALE")
+        orig_zip = m._bundled_fonts_zip
+        m._bundled_fonts_zip = lambda: zp
+        try:
+            soft = m.restore_bundled_fonts_data(force=False)
+            with open(stale[0], "rb") as fh:
+                soft_bytes = fh.read()
+            hard = m.restore_bundled_fonts_data(force=True)
+        finally:
+            m._env_base, m._runtime_base_dir = orig
+            m._bundled_fonts_zip = orig_zip
+        assert soft["ok"] and soft["library"] == ["Teko.woff2"], soft
+        assert soft_bytes == b"STALE", "without force an existing font must stay"
+        assert hard["ok"] and sorted(hard["library"]) == ["Oswald.woff2", "Teko.woff2"], hard
+        assert hard["profiles"] == {"demo": ["Oswald.woff2"], "league2": ["Oswald.woff2"]}, hard
+        for path in stale:
+            with open(path, "rb") as fh:
+                assert fh.read() == b"NEW", f"{path} not restored"
+        assert not os.path.exists(os.path.join(other, "overlay", "fonts", "Teko.woff2")), \
+            "a profile must not gain fonts it never used"
+
+
+def t_restore_bundled_fonts_without_zip_fails():
+    orig_zip = m._bundled_fonts_zip
+    m._bundled_fonts_zip = lambda: None
+    try:
+        d = m.restore_bundled_fonts_data(force=True)
+    finally:
+        m._bundled_fonts_zip = orig_zip
+    assert d["ok"] is False and "fonts.zip" in d["error"], d
+
+
+def t_route_fonts_restore():
+    assert m.route(["fonts", "restore", "--force"]) == \
+        {"kind": "fonts", "rest": ["restore", "--force"]}
+    try:
+        m.route(["fonts"])
+        raise AssertionError("bare `fonts` must be a usage error")
+    except ValueError as exc:
+        assert "racecast fonts restore" in str(exc), exc
+
+
 def t_machine_font_download_rejects_unsafe_name():
     # SSRF gate: a name with path/host tricks is rejected before any fetch.
     hit = {"n": 0}

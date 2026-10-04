@@ -123,6 +123,14 @@ re-download. When a league's design uses a font, it is copied into that league's
 `overlay/fonts/` on save, so the overlay works offline and **profile export** stays
 self-contained.
 
+An update never replaces a font file that is already on disk, so it does not repair a
+bundled font that an older version shipped broken (for example, missing Latin letters
+and falling back to a serif). **Restore bundled fonts** in **General Settings → Overlay
+fonts**, or `racecast fonts restore --force`, overwrites the bundled fonts in the
+library and the same-named copies in every league's `overlay/fonts/`. Fonts you added
+under a name the bundle does not use stay untouched. Afterwards run `racecast obs
+refresh` so OBS reloads them.
+
 How it round-trips: the builder owns a `layout-<page>.json` model and **compiles** it into
 the same `profiles/<name>/overlay/<page>.css` the relay serves, so everything below about
 the cascade still holds. A profile's existing **hand-written** `<page>.css` is imported
