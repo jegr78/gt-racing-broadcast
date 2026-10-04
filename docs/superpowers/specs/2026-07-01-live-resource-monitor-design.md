@@ -64,7 +64,8 @@ the injectable-seam testability of `speedtest.py` (`runner`/`which`).
     `GetSystemTimes` idle/kernel/user — no subprocess, no console flash; **macOS** the
     `top -l2` subprocess, which self-contains its own two-sample delta). Net: cumulative-byte
     delta between calls (**Linux** `/proc/net/dev`; **macOS** `netstat -ib`; **Windows**
-    `typeperf`/iphlpapi). RAM: `preflight.read_ram_bytes()` for total + per-OS used
+    iphlpapi `GetIfTable2`, hardware NICs only, filter drivers excluded; perf-counter paths
+    are localized and fail on German Windows, #722). RAM: `preflight.read_ram_bytes()` for total + per-OS used
     (`/proc/meminfo` MemAvailable on Linux; ctypes `ullAvailPhys` on Windows;
     `vm_stat`/`sysctl` on macOS). Disk: `shutil.disk_usage(path).free`.
   - **First call** (no previous counters) → `cpu_pct`/`net_*` are `None`; RAM/disk are
@@ -101,6 +102,10 @@ the injectable-seam testability of `speedtest.py` (`runner`/`which`).
 - The **relay heartbeat** (`_health_snapshot` in `src/relay/racecast-feeds.py`, every 30 s)
   owns a relay-side `ResourceSampler`; each tick merges its snapshot (converted to the column
   units — % and kbps and MB) into the sample row.
+- **v12 (#722):** `sys_net_down_min_kbps`, the smallest download rate within the heartbeat
+  interval. A relay-side `NetDownFloor` samples the net counter every 2 s on its own thread;
+  the heartbeat takes and resets it, the same contract as the feeds' interval max gap. The
+  30 s mean hides a short dip; the floor shows it next to `feed_*_max_gap_s` in one row.
 - The generic `numeric_series` → uPlot pipeline charts the new fields automatically; the
   `health-monitor.html` `NUMERIC_FIELDS` array gains a **"System (machine)"** group. Numbers
   only → redaction-safe, so it flows over Funnel and the takeover health-pull unchanged.
