@@ -325,7 +325,7 @@ def t_console_race_control_data_redacted_and_gated():
         serialised = json.dumps(blob)
         assert "url" not in serialised and "http" not in serialised.lower(), serialised
         # The schedule row carries stint + streamer + the live marker only.
-        assert blob["schedule"] and set(blob["schedule"][0]) == {"stint", "streamer", "live"}, blob
+        assert blob["schedule"] and set(blob["schedule"][0]) == {"stint", "streamer", "live", "on_air"}, blob
     finally:
         srv.shutdown()
 
@@ -1436,6 +1436,18 @@ def t_solo_takes_land_in_program():
                                               scene="Program", solo=True)
     assert code == 200, (code, body)
     assert calls == [("item", "Program", "Standings", True)], calls
+
+def t_crew_pages_carry_the_shared_frame():
+    srv = _serve(); port = srv.server_address[1]
+    try:
+        for path, who in (("/console/cockpit", "alice"), ("/console/race-control", "dave"),
+                          ("/cockpit", "alice")):
+            code, body = _get(port, path, _tok(who))
+            assert code == 200, (path, code)
+            assert "__CREW_FRAME__" not in body, f"{path} still has the placeholder"
+            assert 'id="crewTabs"' in body and "function crewSelectTab" in body, path
+    finally:
+        srv.shutdown()
 
 
 if __name__ == "__main__":

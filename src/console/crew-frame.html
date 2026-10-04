@@ -1,0 +1,66 @@
+<style>
+  /* Shared by the Commentator Cockpit and the Race Control desk. A page marks each
+     card with data-tab="<id> [<id> ...]" and declares its tabs on #crewTabs. At
+     820 px and below the page shows one tab at a time and keeps the live strip on
+     screen; above it the page's own grid is untouched. */
+  .crewtabs, .livetimer { display: none; }
+  @media (max-width: 820px) {
+    body { padding-bottom: calc(60px + env(safe-area-inset-bottom)); }
+    .livestrip { position: sticky; top: 0; z-index: 40; background: #0b0d10;
+                 padding-bottom: 1px; }
+    .livestrip .tally { margin: 8px 12px 0; padding: 10px 12px; font-size: 18px; }
+    .livestrip .tally .sub { font-size: 12px; margin-top: 2px; }
+    .livestrip .cue-critical { font-size: 17px; gap: 8px 12px; padding: 8px 12px; }
+    .livestrip button { min-height: 44px; }
+    .livetimer { display: block; text-align: center; font-weight: 700; font-size: 15px;
+                 font-variant-numeric: tabular-nums; padding: 4px 0 6px; color: #cdd3da; }
+    .livetimer:empty { display: none; }
+    .crewtabs { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
+                background: #14171c; border-top: 1px solid #232830;
+                padding-bottom: env(safe-area-inset-bottom); }
+    .crewtabs button { flex: 1; min-height: 56px; background: none; border: 0;
+                       color: #9aa0a6; font: inherit; font-size: 13px; font-weight: 600;
+                       cursor: pointer; }
+    .crewtabs button[aria-selected="true"] { color: #fff; box-shadow: inset 0 3px 0 #3b82f6; }
+    [data-tab]:not(.tab-on), .desk-only { display: none !important; }
+    .wrap .card { margin-top: 0 !important; }
+    header a, header button, .wrap button, .wrap select,
+    .wrap input:not([type="range"]) { min-height: 44px; }
+    .wrap input[type="range"] { height: 44px; }
+  }
+</style>
+<script>
+  (function () {
+    var nav = document.getElementById('crewTabs');
+    if (!nav) return;
+    var tabs = JSON.parse(nav.getAttribute('data-tabs') || '[]');
+    var key = 'crewTab:' + location.pathname;
+    window.crewSelectTab = function crewSelectTab(id) {
+      document.querySelectorAll('[data-tab]').forEach(function (el) {
+        el.classList.toggle('tab-on', el.getAttribute('data-tab').split(' ').indexOf(id) >= 0);
+      });
+      nav.querySelectorAll('button').forEach(function (b) {
+        b.setAttribute('aria-selected', b.getAttribute('data-id') === id ? 'true' : 'false');
+      });
+      try { localStorage.setItem(key, id); } catch (e) { /* private mode */ }
+    };
+    tabs.forEach(function (t) {
+      var b = document.createElement('button');
+      b.type = 'button'; b.setAttribute('role', 'tab');
+      b.setAttribute('data-id', t[0]); b.textContent = t[1];
+      b.addEventListener('click', function () { window.crewSelectTab(t[0]); window.scrollTo(0, 0); });
+      nav.appendChild(b);
+    });
+    var saved = null;
+    try { saved = localStorage.getItem(key); } catch (e) { /* private mode */ }
+    var ids = tabs.map(function (t) { return t[0]; });
+    window.crewSelectTab(ids.indexOf(saved) >= 0 ? saved : ids[0]);
+    // Mirror the race timer into the live strip, since its card is desktop-only.
+    var src = document.getElementById('timer'), dst = document.getElementById('liveTimer');
+    if (src && dst) {
+      var copy = function () { dst.textContent = src.textContent.trim().replace(/^—$/, ''); };
+      new MutationObserver(copy).observe(src, { childList: true, subtree: true, characterData: true });
+      copy();
+    }
+  })();
+</script>
