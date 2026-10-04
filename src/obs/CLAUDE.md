@@ -45,7 +45,9 @@ keeps the rules. The per-league overlay override and the visual builder are in
   reported. The same boxes are pushed **live** by the `racecast obs refresh` /
   `relay start` / `event start` hook (`_sync_pov_transform` →
   `obs_ws.set_scene_item_transform`), so a builder edit aligns the PiP without a
-  re-import. obs-websocket v5 takes `boundsType` as the enum name
+  re-import. The live push targets each slot's scene per kind (`overlay_build.slot_scene`):
+  "Feed POV" sits in Stint for endurance and in Program for solo, which is also where the
+  relay's POV toggle shows it (`obs_ws.graphic_scene`). obs-websocket v5 takes `boundsType` as the enum name
   (`OBS_BOUNDS_SCALE_INNER`), not the number the collection JSON stores; a number is
   rejected with code 401. A transform OBS rejects is printed, a slot the collection
   lacks stays silent. Spec: `docs/superpowers/specs/2026-06-26-pov-box-obs-sync-design.md`.

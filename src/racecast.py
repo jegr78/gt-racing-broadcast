@@ -2431,18 +2431,22 @@ def relay_start(rest):
               f"re-run 'racecast relay start' to reconcile.")
     return None
 
-def _sync_pov_transform(set_transform=None):
+def _sync_pov_transform(set_transform=None, solo=None):
     """Best-effort live sibling of the setup-time POV/webcam bake: push every
     mapped overlay slot's box position/size onto its OBS scene item (see
-    overlay_build.OVERLAY_SLOT_OBS_SOURCES, 'pov' -> Stint/'Feed POV', 'webcam'
+    overlay_build.OVERLAY_SLOT_OBS_SOURCES, 'pov' -> Stint/'Feed POV' (Program in
+    solo), 'webcam'
     -> Program/'Solo Webcam'). Reads the hud.html base and the profile override
     CSS ONCE, then loops the slots, merging override over base per slot (so an
     override of only some props keeps the rest at the base) and calling
     SetSceneItemTransform. Silent per-slot on any miss. OBS unreachable, no
     overlay, no base rule for that slot, missing scene/source (e.g. no 'Solo
     Webcam' in an endurance collection). `set_transform` is a test seam
-    (defaults to obs_ws.set_scene_item_transform)."""
+    (defaults to obs_ws.set_scene_item_transform); `solo` defaults to the active
+    profile's kind and picks each slot's scene (overlay_build.slot_scene)."""
     import overlay_build
+    if solo is None:
+        solo = _profile_is_solo()
     try:
         with open(os.path.join(HERE, "obs", "hud.html"), encoding="utf-8") as fh:
             base_style = overlay_build.base_style(fh.read())
@@ -2464,7 +2468,8 @@ def _sync_pov_transform(set_transform=None):
         for slot_id, box in overlay_build.slot_boxes(base_style, override_css).items():
             tgt = overlay_build.OVERLAY_SLOT_OBS_SOURCES[slot_id]
             transform = obs_ws.pov_scene_item_transform(box)
-            ok, note = set_transform(tgt["scene"], tgt["source"], transform)
+            ok, note = set_transform(overlay_build.slot_scene(slot_id, solo),
+                                     tgt["source"], transform)
             if ok:
                 print(f"obs: {slot_id} box synced to '{tgt['source']}' "
                       f"({box['left']},{box['top']} {box['width']}x{box['height']}).")
@@ -5627,18 +5632,29 @@ def _css_has_rules(text):
     return bool(re.sub(r"/\*.*?\*/", "", text or "", flags=re.S).strip())
 
 
+def _active_config():
+    """The active profile's resolved config, or None when no profile resolves."""
+    try:
+        root = _env_base(IS_FROZEN, _real_executable(), HERE)
+        return pcfg.resolve_config(root, runtime_root=_runtime_base_dir())
+    except Exception:  # noqa: BLE001  best effort
+        return None
+
+
+def _profile_is_solo():
+    """Whether the active profile is a solo profile. False when no profile resolves."""
+    rc = _active_config()
+    return rc is not None and rc.kind == "solo"
+
+
 def _profile_has_telemetry():
     """Whether the active profile's relay serves GT7 telemetry: a solo POV
     profile (the relay's telemetry_active gate, minus the machine opt-out). The
     opt-out is left out on purpose: the overlay layout belongs to the profile and
     travels with `profile export`, so another machine may air the telemetry block.
     Best effort: False when no profile resolves."""
-    try:
-        root = _env_base(IS_FROZEN, _real_executable(), HERE)
-        rc = pcfg.resolve_config(root, runtime_root=_runtime_base_dir())
-        return rc.kind == "solo" and rc.template.strip().lower() == "pov"
-    except Exception:  # noqa: BLE001  best effort
-        return False
+    rc = _active_config()
+    return rc is not None and rc.kind == "solo" and rc.template.strip().lower() == "pov"
 
 
 def overlay_slots_data(page):

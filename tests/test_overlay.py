@@ -991,9 +991,16 @@ def t_pov_box_from_css_float_value():
     assert ob.pov_box_from_css("#pov { left: 1516.5px; }") == {"left": 1516.5}
 
 
+def t_slot_scene_per_kind():
+    assert ob.slot_scene("pov", solo=False) == "Stint"
+    assert ob.slot_scene("pov", solo=True) == "Program", "solo collections hold Feed POV in Program"
+    assert ob.slot_scene("webcam", solo=True) == "Program"
+    assert ob.slot_scene("webcam", solo=False) == "Program"
+
+
 def t_overlay_slot_obs_sources_constant():
     assert ob.OVERLAY_SLOT_OBS_SOURCES == {
-        "pov":    {"scene": "Stint",   "source": "Feed POV"},
+        "pov":    {"scene": "Stint",   "source": "Feed POV", "solo_scene": "Program"},
         "webcam": {"scene": "Program", "source": "Solo Webcam",
                    "export_scene": "Program"},
         "tyres-capture": {"scene": "Program", "source": "Solo Tyres/Fuel Capture",
