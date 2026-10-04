@@ -128,6 +128,7 @@ import event_notes   # noqa: E402  (pure Event Notes tab parser)
 import resources  # noqa: E402, F401 - machine resource sampler (health history)
 import cue_admin   # director text-cue channel (#243)
 import flag_graphic   # flag-status graphics: value->source + persisted store (#flag-graphic)
+import graphic_takes   # crew graphic takes: allowlist + take rules (#744)
 import health_store  # health-history SQLite store (task 7; src/scripts on sys.path)
 _HEALTH_CONST = health_store  # stable module alias: make_handler's `health_store`
 # PARAMETER shadows the module name inside its closure, so the constants
@@ -4632,6 +4633,92 @@ def apply_graphic(relay, obs_ws, verb, source):
     if note:
         payload["note"] = str(note)
     return payload, (200 if ok else 503)
+
+
+def graphic_takes_view(relay, obs_ws, mode, roles, crew_takes, flag_store):
+    """The takeable graphics with their live state. *roles* None is the director's
+    full list; a role set adds "can_take" per graphic for that caller."""
+    defs = graphic_takes.definitions(getattr(relay, "solo", False))
+    items = [(sc, d["source"]) for d in defs if d["flag"] is None for sc in d["scenes"]]
+    scene, note, visible = None, "", {}
+    if obs_ws is None:
+        note = "obs unavailable"
+    else:
+        state, note = obs_ws.read_obs_state(items, [])
+        if state is not None:
+            scene = state.get("scene")
+            for item in state.get("sources") or []:
+                if item.get("enabled") is not None:
+                    visible[item["source"]] = (visible.get(item["source"], False)
+                                               or bool(item["enabled"]))
+    active_flag = flag_store.get() if flag_store else None
+    _current, by = crew_takes.snapshot()
+    out = []
+    for d in defs:
+        if d["flag"]:
+            shown = None if active_flag is None else d["flag"] == active_flag
+        else:
+            shown = visible.get(d["source"])
+        item = {"source": d["source"], "group": d["group"], "scenes": d["scenes"],
+                "visible": shown, "by": by.get(d["source"])}
+        if roles is not None:
+            item["can_take"] = (graphic_takes.may_take(d, roles, mode)
+                                and (d["flag"] is None or flag_store is not None))
+        out.append(item)
+    payload = {"mode": mode, "program_scene": scene, "graphics": out}
+    if note:
+        payload["note"] = str(note)
+    return payload
+
+
+def apply_graphic_take(relay, obs_ws, mode, roles, name, source, on, crew_takes,
+                       flag_store, chat_store):
+    """POST /cockpit/graphic-takes: a commentator or Race Control puts a graphic on
+    air or takes it off. Returns (payload, status). A request that changes nothing
+    posts no chat line. Best effort, never raises."""
+    defs = graphic_takes.definitions(getattr(relay, "solo", False))
+    entry = graphic_takes.find(defs, source)
+    if entry is None or (entry["flag"] and not flag_store):
+        return {"ok": False, "error": f"not a takeable graphic: {source!r}"}, 404
+    if not graphic_takes.may_take(entry, roles, mode):
+        return {"ok": False, "error": "graphic takes are not allowed for you"}, 403
+    if obs_ws is None:
+        return {"ok": False, "error": "obs unavailable"}, 503
+    items = []
+    if entry["flag"] is None:
+        prev = graphic_takes.find(defs, crew_takes.snapshot()[0])
+        for d in [entry] + ([prev] if prev is not None else []):
+            items += [(sc, d["source"]) for sc in d["scenes"]]
+    state, note = obs_ws.read_obs_state(items, [])
+    if state is None:
+        return {"ok": False, "error": note or "obs unreachable"}, 503
+    if on and not graphic_takes.scene_ok(entry, state.get("scene")):
+        return {"ok": False, "error": f"{' / '.join(entry['scenes'])} is not on air",
+                "program_scene": state.get("scene")}, 409
+    failed = []
+    if entry["flag"]:
+        active = flag_store.get()
+        changed = (active != entry["flag"]) if on else (active == entry["flag"])
+        if changed and on:
+            flag_store.set(entry["flag"])
+        elif changed:
+            flag_store.clear()
+    else:
+        visible = {}
+        for item in state.get("sources") or []:
+            visible[item["source"]] = visible.get(item["source"], False) or bool(item.get("enabled"))
+        intents, failed = crew_takes.apply(entry, on, name, defs, visible,
+                                           obs_ws.set_scene_item_enabled)
+        changed = bool(intents) and not failed
+    if changed:
+        line = graphic_takes.chat_line(name, source, on)
+        LOG.info("graphic take: %s", line)
+        if chat_store:
+            chat_store.add(user="racecast", text=line)
+    payload = {"ok": not failed, "source": source, "on": bool(on), "changed": changed}
+    if failed:
+        payload["error"] = "; ".join(failed)
+    return payload, (503 if failed else 200)
 
 
 def split_mjpeg_frames(buf):
@@ -9854,7 +9941,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                  health_store=None, health_monitor_page_path=None, uplot_dir=None,
                  broadcast_chat_store=None, broadcast_chat_supervisor=None,
                  preview_manager=None, program_audio_service=None, brands_dir=None,
-                 flag_graphic_store=None, app_version="dev",
+                 flag_graphic_store=None, graphics_take="off", app_version="dev",
                  channel_source=None, producer_source=None, part_store=None,
                  channel_csv_url=None, push_url=None, telemetry_store=None):
     # Shared across all H instances (one limiter per relay). The CHAT limiter is
@@ -9873,6 +9960,9 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
     if health_store is not None:
         relay.health_store = health_store
     _console_authfail_rl = console_auth.RateLimiter(limit=20, window_s=60)
+    _graphic_take_rl = console_auth.RateLimiter(limit=1, window_s=2)
+    _crew_takes = graphic_takes.CrewTakes()
+    graphics_take = graphic_takes.normalize_mode(graphics_take)
     _cockpit_chat_rl = console_auth.RateLimiter(limit=10, window_s=60)
     # Submit is a PUBLIC write path (funnelled). Keyed on the authed identity
     # (not the shared proxy IP, like chat) so one commentator can't exhaust the
@@ -10877,6 +10967,11 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     if len(p) == 3 and p[1] == "clear":
                         return self._send(setup_ctl.set_field(p[2].lower(), ""))
                     return self._send({"error": "unknown", "path": self.path}, 404)
+                if p == ["obs", "graphics"]:
+                    # The panel's graphic list; director-gated under /console.
+                    return self._send(graphic_takes_view(
+                        relay, relay._obs if _obs_ws is not None else None,
+                        graphics_take, None, _crew_takes, flag_graphic_store))
                 if p[:2] == ["obs", "flag"]:
                     # Flag-status GRAPHIC toggle (parallel to the flag-text chip).
                     # GET so Companion's Generic-HTTP module hits it directly; the
@@ -11054,6 +11149,14 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                             return self._send({"error": "cues disabled"}, 404)
                         return self._send({"cues": cue_admin.active_cues_for(
                             cue_store.list(), me, time.time())})
+                    if p == ["cockpit", "graphic-takes"]:
+                        me = self._console_auth()
+                        if me is None:
+                            return None
+                        return self._send(graphic_takes_view(
+                            relay, relay._obs if _obs_ws is not None else None,
+                            graphics_take, self._console_roles(me), _crew_takes,
+                            flag_graphic_store))
                     if p == ["cockpit", "rc-notes"]:
                         # RC -> commentator notes (#376): identity-scoped rolling
                         # window for the cockpit's "Race Control" card.
@@ -11348,6 +11451,22 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         except (TypeError, ValueError):
                             return self._send({"error": "id must be an integer"}, 400)
                         return self._send(cue_store.ack(cid, me))
+                    if p == ["cockpit", "graphic-takes"]:
+                        me = self._console_auth()
+                        if me is None:
+                            return None
+                        if not _graphic_take_rl.allow(me):
+                            return self._send({"error": "rate limited"}, 429)
+                        name = cockpit_display_name(schedule_rows(relay), me)
+                        if name == me and crew_source:
+                            name = next((row[0] for row in crew_source.get()
+                                         if console_auth.streamer_key(row[0]) == me), me)
+                        payload, status = apply_graphic_take(
+                            relay, relay._obs if _obs_ws is not None else None,
+                            graphics_take, self._console_roles(me), name,
+                            str(body.get("source") or ""), body.get("on") is not False,
+                            _crew_takes, flag_graphic_store, chat_store)
+                        return self._send(payload, status)
                     if p == ["cockpit", "cue-back"]:
                         # Commentator -> director cue-back (#377). Identity-scoped
                         # (the sender name is the token's streamer, never client-
@@ -12404,6 +12523,7 @@ def main():
                            program_audio_service=program_audio_service,
                            app_version=VERSION_LABEL,
                            flag_graphic_store=flag_graphic_store,
+                           graphics_take=os.environ.get("RACECAST_GRAPHICS_TAKE", ""),
                            channel_source=channel_source,
                            producer_source=producer_source,
                            part_store=part_store,

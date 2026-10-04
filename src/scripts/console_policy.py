@@ -163,6 +163,9 @@ def min_capability(segments, method="GET"):
     # the filename server-side, not here.
     if p == ["cockpit", "graphics"]:
         return Requirement(ANY, False)
+    # Crew graphic takes: the handler checks role and GRAPHICS_TAKE per graphic.
+    if p == ["cockpit", "graphic-takes"]:
+        return Requirement(ANY, False)
     if len(p) == 3 and p[:2] == ["cockpit", "graphics"]:
         return Requirement(ANY, False)
 

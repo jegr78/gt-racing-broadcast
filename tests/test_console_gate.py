@@ -48,10 +48,12 @@ class _Crew:
     def race_control_keys(self): return self._rc
 
 
-def _serve(companion_url=None, logo_path=None, sheet_id=None, graphics_dir=None):
+def _serve(companion_url=None, logo_path=None, sheet_id=None, graphics_dir=None,
+           graphics_take="off", flag_graphic_store=None, solo=False):
     rows = [("https://youtu.be/a", "Alice", "1", 2)]           # alice -> commentator
     src = _FakeSource(_URLS8, rows)
     relay = m.Relay(src, [53001, 53002], LOGDIR, sheet_id=sheet_id)
+    relay.solo = solo
     # bob=director, carol=producer; dave=race_control desk (no other role)
     crew = _Crew([("Bob", True, False), ("Carol", False, True)], rc={"dave"})
     SRC = os.path.join(ROOT, "src")
@@ -69,7 +71,9 @@ def _serve(companion_url=None, logo_path=None, sheet_id=None, graphics_dir=None)
         uplot_dir=os.path.join(SRC, "assets", "vendor", "uplot"),
         companion_url=companion_url,
         logo_path=logo_path,
-        graphics_dir=graphics_dir)
+        graphics_dir=graphics_dir,
+        graphics_take=graphics_take,
+        flag_graphic_store=flag_graphic_store)
     srv = m.ThreadingHTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return srv
@@ -1292,6 +1296,146 @@ def t_proxied_post_body_is_not_read_twice():
         assert data.startswith(b"HTTP/1."), data[:80]
     finally:
         srv.shutdown()
+
+
+class _TakeFakeObs(_SplitFakeObs):
+    """OBS with a fixed program scene; every scene item reports hidden."""
+
+    def __init__(self, scene="Stint", visible=()):
+        super().__init__()
+        self.scene = scene
+        self.visible = set(visible)
+
+    def read_obs_state(self, sources, inputs):
+        return {"scene": self.scene, "sources": [
+            {"scene": sc, "source": src, "enabled": src in self.visible}
+            for sc, src in sources]}, ""
+
+
+def _take_call(fire, mode="direct", scene="Stint", visible=(), solo=False):
+    flags = []
+    store = m.flag_graphic.FlagGraphicStore(
+        os.path.join(tempfile.mkdtemp(), "flag.json"),
+        apply_fn=lambda sc, src, on: flags.append((sc, src, on)) or (True, ""))
+    srv = _serve(graphics_take=mode, flag_graphic_store=store, solo=solo)
+    port = srv.server_address[1]
+    fake = _TakeFakeObs(scene, visible)
+    orig_obs, m._obs_ws = m._obs_ws, fake
+    try:
+        res = fire(port)
+        return res, fake.calls, store, flags
+    finally:
+        m._obs_ws = orig_obs
+        srv.shutdown()
+
+
+def _take(port, who, source, on=True):
+    return _post(port, "/console/cockpit/graphic-takes", _tok(who),
+                 body={"source": source, "on": on})
+
+
+def t_graphic_takes_off_by_default():
+    (code, body), calls, _s, _f = _take_call(lambda p: _take(p, "alice", "Standings"),
+                                              mode="off")
+    assert code == 403 and calls == [], (code, body, calls)
+
+
+def t_graphic_takes_view_lists_rights_per_role():
+    (code, body), _c, _s, _f = _take_call(
+        lambda p: _get(p, "/console/cockpit/graphic-takes", _tok("alice")))
+    assert code == 200, (code, body)
+    data = json.loads(body)
+    assert data["mode"] == "direct" and data["program_scene"] == "Stint", data
+    rights = {g["source"]: g["can_take"] for g in data["graphics"]}
+    assert rights["Standings"] is True and rights["Flag Yellow"] is False, rights
+    assert "Standby Cover" not in rights, "the RED FLAG cover stays director-only"
+
+
+def t_commentator_takes_a_graphic():
+    (code, body), calls, _s, _f = _take_call(lambda p: _take(p, "alice", "Standings"))
+    assert code == 200, (code, body)
+    assert calls == [("item", "Stint", "Standings", True)], calls
+
+
+def t_take_posts_a_crew_chat_line():
+    def fire(p):
+        _take(p, "alice", "Standings")
+        return _get(p, "/console/cockpit/chat/data", _tok("alice"))
+    (code, body), _c, _s, _f = _take_call(fire)
+    texts = [msg["text"] for msg in json.loads(body)["messages"]]
+    assert "Alice put Standings on air" in texts, texts
+
+
+def t_take_is_refused_while_its_scene_is_off_air():
+    (code, body), calls, _s, _f = _take_call(lambda p: _take(p, "alice", "Standings"),
+                                              scene="Splitscreen")
+    assert code == 409 and calls == [], (code, body, calls)
+
+
+def t_commentator_cannot_set_a_flag():
+    (code, body), _c, store, _f = _take_call(lambda p: _take(p, "alice", "Flag Yellow"))
+    assert code == 403 and store.get() == "", (code, body)
+
+
+def t_race_control_sets_a_flag_through_the_flag_store():
+    (code, body), _c, store, flags = _take_call(lambda p: _take(p, "dave", "Flag Yellow"))
+    assert code == 200, (code, body)
+    assert store.get() == "yellow", store.get()
+    assert ("Stint", "Flag Yellow", True) in flags, flags
+
+
+def t_graphic_takes_are_rate_limited():
+    def fire(p):
+        _take(p, "alice", "Standings")
+        return _take(p, "alice", "Schedule")
+    (code, body), _c, _s, _f = _take_call(fire)
+    assert code == 429, (code, body)
+
+
+def t_unknown_graphic_is_not_takeable():
+    (code, body), calls, _s, _f = _take_call(lambda p: _take(p, "alice", "Standby Cover"))
+    assert code == 404 and calls == [], (code, body, calls)
+
+
+def t_obs_graphics_lists_every_graphic_for_the_director():
+    (code, body), _c, _s, _f = _take_call(
+        lambda p: _get(p, "/console/obs/graphics", _tok("bob")))
+    assert code == 200, (code, body)
+    sources = {g["source"] for g in json.loads(body)["graphics"]}
+    assert {"Standings", "Flag Red", "Post Race Interviews"} <= sources, sources
+    (code, _b), _c, _s, _f = _take_call(
+        lambda p: _get(p, "/console/obs/graphics", _tok("alice")))
+    assert code == 403, code
+
+
+def _chat_texts(port):
+    code, body = _get(port, "/console/cockpit/chat/data", _tok("alice"))
+    return [msg["text"] for msg in json.loads(body)["messages"]]
+
+
+def t_hide_takes_a_visible_graphic_off_air():
+    def fire(p):
+        return _take(p, "alice", "Standings", on=False), _chat_texts(p)
+    ((code, body), texts), calls, _s, _f = _take_call(fire, visible={"Standings"})
+    assert code == 200, (code, body)
+    assert calls == [("item", "Stint", "Standings", False)], calls
+    assert "Alice took Standings off air" in texts, texts
+
+
+def t_hiding_a_hidden_graphic_posts_nothing():
+    def fire(p):
+        before = _chat_texts(p)
+        return _take(p, "alice", "Standings", on=False), before, _chat_texts(p)
+    ((code, body), before, after), calls, _s, _f = _take_call(fire)
+    assert code == 200 and json.loads(body)["changed"] is False, (code, body)
+    assert calls == [] and after == before, (calls, after[len(before):])
+
+
+def t_solo_takes_land_in_program():
+    (code, body), calls, _s, _f = _take_call(lambda p: _take(p, "alice", "Standings"),
+                                              scene="Program", solo=True)
+    assert code == 200, (code, body)
+    assert calls == [("item", "Program", "Standings", True)], calls
 
 
 if __name__ == "__main__":

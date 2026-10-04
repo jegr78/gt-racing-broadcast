@@ -225,6 +225,7 @@ def _profile_env_vars(rc):
              ("RACECAST_DISCORD_CLIENT_SECRET", rc.discord_client_secret),
              ("RACECAST_DISCORD_VOICE_URL", rc.discord_voice_url),
              ("RACECAST_EVENT_TITLE", rc.event_title),
+             ("RACECAST_GRAPHICS_TAKE", rc.graphics_take),
              ("RACECAST_PROFILE_NAME", rc.name),
              ("RACECAST_LOGO", rc.logo_path),
              ("RACECAST_KIND", rc.kind),   # endurance|solo; relay's --solo default
