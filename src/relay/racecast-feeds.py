@@ -5883,6 +5883,24 @@ def cockpit_schedule(rows, live_idx, me_key):
             for i, (_u, n, st, _l) in enumerate(rows)]
 
 
+def handover_next(feeds, rows, pending):
+    """The next handover for the Director Panel (#730): the off-air feed (the higher
+    index), its stint, whether its schedule row has a link and whether a commentator
+    submission for that row is pending. `feeds` is /status's feeds block, `rows` the
+    schedule as (url, streamer, stint, sheet line). None past the schedule. Pure."""
+    if not (feeds.get("A") and feeds.get("B")):
+        return None
+    off = "B" if feeds["A"]["index"] <= feeds["B"]["index"] else "A"
+    idx = feeds[off]["index"]
+    if not 0 <= idx < len(rows):
+        return None
+    url, streamer, stint, line = rows[idx]
+    return {"feed": off, "stint": idx + 1, "label": stint, "streamer": streamer,
+            "link": bool((url or "").strip()),
+            "pending": any(e.get("target_line") == line and e.get("mode") != "qualifying"
+                           for e in pending)}
+
+
 def redact_console_status(full, roles):
     """Redact the full /status for the Funnel-exposed /console mount, by role (#493).
     Feed stream URLs (feeds[*].channel), the POV stream URL, and the Sheet id are
@@ -5905,6 +5923,7 @@ def redact_console_status(full, roles):
         mic = full.get("mic")
         if isinstance(mic, dict):                     # #669: device name + OS ids stay home
             out["mic"] = {"state": mic.get("state")}
+        out.pop("handover_next", None)                # who submitted what is director business
     return out
 
 
@@ -10608,6 +10627,10 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             if timer_store:
                 base["timer"] = timer_store.summary()
             base["event_title"] = event_store.get() if event_store else ""
+            if not relay.solo and relay.mode != "qualifying":
+                base["handover_next"] = handover_next(
+                    base.get("feeds") or {}, schedule_rows(relay),
+                    submission_store.list() if submission_store else [])
             if telemetry_store is not None:          # solo POV only; lights the panel toggle
                 base["telemetry"] = {"visible": telemetry_store.visible(),
                                      "car": telemetry_store.car()}  # panel status strip (#713)
