@@ -112,12 +112,21 @@ Line charts plot scalar metrics over time, grouped by subsystem:
 | **CPU %** | Producer machine CPU utilisation |
 | **Memory %** | Producer machine RAM utilisation |
 | **Net up (kbps)** | Upload throughput in kilobits per second |
-| **Net down (kbps)** | Download throughput in kilobits per second |
+| **Net down (kbps)** | Download throughput in kilobits per second, averaged over the ~30 s interval |
+| **Net down min (kbps)** | The lowest download rate within the interval, measured every ~2 s |
 | **Disk free (MB)** | Free disk space on the machine's primary drive |
 
 These metrics are sampled every ~30 s in the relay heartbeat alongside the
 [OBS Resources](#obs-resources) series. History recorded before this feature was
 added will show no data points for this group, that is expected.
+
+The average hides a short dip; **Net down min** shows it. Read it together with the
+**Feed stalls** charts of the same moment: a feed's max gap growing while the
+download drops points at the line, not at the commentator's stream. Only the
+producer PC's own traffic is measured. Another device on the same line (a
+console running a network check, say) is invisible here and shows only
+indirectly, as this PC's download falling. On Windows the network numbers count
+the physical network adapters, so VPN and Tailscale traffic is not counted twice.
 
 #### Output backlog
 
