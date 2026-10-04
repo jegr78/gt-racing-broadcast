@@ -4543,16 +4543,18 @@ def next_transition_query(path):
 
 
 # --- Relay-driven STINT A/B override (#593 follow-up) ---------------------------
-def apply_stint_state(relay, obs_ws, feed):
+def apply_stint_state(relay, obs_ws, feed, take=False):
     """GET /obs/stint/<A|B> (Companion) and POST /obs/stint {"feed"} (Director
     Panel): make the Stint scene show `feed`, the director's pick or "live" for the
     relay's on-air feed, with its audio live and the rest muted, the Discord
     bus included. The audio comes from the same plan as a handover
     (relay.obs_audio_plan), so the producer's commentary mic opens only when the
-    pick is the local stint and closes when the other feed is. The relay's on-air
-    state is not touched, and the scene cut stays with the caller, so a STINT press
-    still cuts when the relay is down. Best effort, never raises: bad feed -> 400,
-    no feed pair (solo) -> 409, OBS unavailable -> 503."""
+    pick is the local stint and closes when the other feed is. Without `take` the
+    relay's on-air state is not touched; the scene cut stays with the caller, so a STINT press
+    still cuts when the relay is down. `take` (the panel's emergency switch, #730)
+    also makes the pick the relay's on-air feed once OBS took the change. Best
+    effort, never raises: bad feed -> 400, no feed pair (solo) -> 409, OBS
+    unavailable -> 503."""
     if obs_ws is None:
         return {"error": "obs unavailable"}, 503
     if getattr(relay, "solo", False):
@@ -4569,6 +4571,8 @@ def apply_stint_state(relay, obs_ws, feed):
         extra_mute=list(extra_mute) + [_OBS_WS_MODULE.SPLIT_DISCORD_INPUT])
     payload, status = _apply_obs_intents(obs_ws, _OBS_WS_MODULE.STINT_SCENE, intents)
     payload["feed"] = feed
+    if take and status == 200:
+        payload["relay_on_air"] = bool(relay.take_on_air(feed))
     return payload, status
 
 
@@ -9341,6 +9345,27 @@ class Relay:
         return {**self.status(), "changed": True, "feed": new_live,
                 "continuation": False, "obs_cut": cut}
 
+    def take_on_air(self, which):
+        """The panel's emergency feed switch (#730): `which` is on air by hand, so the
+        relay follows the picture. Its row becomes the on-air stint and the other feed
+        moves to the next slot (stopped under manual arm), as after a NEXT. Returns
+        whether anything moved; never cuts OBS (the caller already did)."""
+        which = str(which or "").upper()
+        if self.solo or which not in self.feeds or self.live_feed() == which:
+            return False
+        rows = self.source.get_rows()
+        slots = pull_slots(rows)
+        taken = self.feeds[which]
+        other = self.feeds["B" if which == "A" else "A"]
+        if self.manual_feed_arm:
+            other.paused = True          # before set_index wakes its loop, as in next_auto
+        other.set_index(next_slot_first_row(slots, taken.idx))
+        if self.manual_feed_arm:
+            other.reload()
+        self.on_air_row = taken.idx
+        LOG.info("emergency switch -> feed %s on air (stint %d)", which, taken.idx + 1)
+        return True
+
     def advance(self, which, delta):
         f = self.feeds.get(which.upper())
         if not f:
@@ -11409,7 +11434,11 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     payload, status = apply_split_state(relay, relay._obs)
                     return self._send(payload, status)
                 if p == ["obs", "stint"]:
-                    payload, status = apply_stint_state(relay, relay._obs, body.get("feed"))
+                    payload, status = apply_stint_state(relay, relay._obs, body.get("feed"),
+                                                        take=body.get("take") is True)
+                    # The relay now follows the picture, so the HUD follows the relay.
+                    if payload.get("relay_on_air") and setup_ctl:
+                        _push_live_schedule(relay, setup_ctl)
                     return self._send(payload, status)
                 if p == ["obs", "stream"]:
                     if _obs_ws is None:

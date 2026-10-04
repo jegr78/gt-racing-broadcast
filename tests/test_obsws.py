@@ -1881,6 +1881,35 @@ def t_apply_stint_state_live_takes_the_relays_on_air_feed():
     assert obs.calls[0] == ("item", "Stint", "Feed B", True), obs.calls
 
 
+class _TakeRelay(_StintRelay):
+    def __init__(self):
+        super().__init__()
+        self.taken = []
+
+    def take_on_air(self, which):
+        self.taken.append(which)
+        return True
+
+
+def t_apply_stint_state_take_moves_the_relay_only_when_asked():
+    # The panel's emergency switch sends take=True (#730); Companion's STINT A/B do
+    # not, so a break-glass press never re-indexes the feeds.
+    relay = _TakeRelay()
+    payload, status = irofeeds.apply_stint_state(relay, _SplitObs(), "B", take=True)
+    assert status == 200 and relay.taken == ["B"] and payload["relay_on_air"] is True, payload
+    relay.taken.clear()
+    payload, _ = irofeeds.apply_stint_state(relay, _SplitObs(), "B")
+    assert relay.taken == [] and "relay_on_air" not in payload, payload
+
+
+def t_apply_stint_state_take_never_moves_the_relay_when_obs_failed():
+    relay = _TakeRelay()
+    payload, status = irofeeds.apply_stint_state(relay, None, "B", take=True)
+    assert status == 503 and relay.taken == [], payload
+    payload, status = irofeeds.apply_stint_state(relay, _SplitObs(fail={"Feed B"}), "B", take=True)
+    assert status == 503 and relay.taken == [], payload
+
+
 def t_apply_stint_state_rejects_a_bad_feed_and_solo():
     obs = _SplitObs()
     payload, status = irofeeds.apply_stint_state(_StintRelay(), obs, "C")

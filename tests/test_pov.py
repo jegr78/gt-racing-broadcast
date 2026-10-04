@@ -306,6 +306,27 @@ def t_next_transition_query_is_validated():
     assert q("/next?transition=fade&duration=x") == ("fade", None)
 
 
+def t_take_on_air_moves_the_relay_to_the_picked_feed():
+    # The panel's emergency feed switch (#730): the picture shows Feed B's stint, so
+    # the relay must say so too, and the next NEXT must target the other feed.
+    r = _relay(["s1", "s2", "s3", "s4"])
+    r.manual_feed_arm = True
+    r.A.paused = False; r.B.paused = False
+    assert r.live_feed() == "A" and r.B.idx == 1
+    assert r.take_on_air("B") is True
+    assert r.live_feed() == "B" and r.on_air_row_idx() == 1, r.status()["live"]
+    assert r.A.idx == 2, "the other feed waits on the next slot"
+    assert r.A.paused is True, "only one feed pulls, as after NEXT"
+    assert r.take_on_air("B") is False, "already on air: nothing moves"
+    assert r.A.idx == 2
+
+
+def t_take_on_air_is_refused_in_solo():
+    r = _relay(["s1", "s2"])
+    r.solo = True
+    assert r.take_on_air("A") is False
+
+
 def t_next_auto_stops_freed_feed_on_cut():
     r = _relay(["s1", "s2", "s3", "s4"])
     r.manual_feed_arm = True
@@ -808,6 +829,12 @@ def t_obs_stint_routes_get_and_post():
             headers={"Content-Type": "application/json"}, method="POST")
         got = json.loads(urllib.request.urlopen(req, timeout=5).read())
         assert got["ok"] is True and got["feed"] == r.live_feed() == "A", got
+        # The emergency switch sends take: the relay follows the picture (#730).
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/obs/stint", data=b'{"feed": "B", "take": true}',
+            headers={"Content-Type": "application/json"}, method="POST")
+        got = json.loads(urllib.request.urlopen(req, timeout=5).read())
+        assert got["relay_on_air"] is True and r.live_feed() == "B", got
         try:
             urllib.request.urlopen(f"http://127.0.0.1:{port}/obs/stint/X", timeout=5)
             raise AssertionError("expected HTTP 400")
