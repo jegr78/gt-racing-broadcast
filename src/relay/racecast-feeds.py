@@ -11711,14 +11711,14 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                       else {"ok": True})
                 if p == ["obs", "graphics", "mode"]:
                     # The director's live override of a crew role's take mode.
-                    role, mode = body.get("role"), body.get("mode")
                     before = _take_modes.snapshot()
-                    if not _take_modes.set(role, mode):
+                    changed = _take_modes.set(body.get("role"), body.get("mode"))
+                    if changed is None:
                         return self._send({"ok": False,
                                            "error": "role or mode unknown"}, 400)
                     if _take_modes.snapshot() != before:
                         _graphic_requests.drop_pending()
-                    LOG.info("graphic take: %s mode set to %s", role, mode)
+                    LOG.info("graphic take: %s mode set to %s", *changed)
                     return self._send({"ok": True, "modes": _take_modes.snapshot()})
                 if len(p) == 4 and p[:3] == ["obs", "graphics", "request"]:
                     try:
