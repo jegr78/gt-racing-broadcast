@@ -6,6 +6,7 @@ applies the returned intents and routes flags through FlagGraphicStore.
 Spec: docs/superpowers/specs/2026-10-04-crew-pages-mobile-graphic-takes-design.md
 """
 
+import itertools
 import threading
 
 import flag_graphic   # siblings in src/scripts (sys.path injected by the relay/tests)
@@ -14,8 +15,10 @@ import obs_ws
 COMMENTATOR = "commentator"
 RACE_CONTROL = "race_control"
 
-# "request" joins once the Director Panel can show requests (#747).
-MODES = ("off", "direct")
+ROLES = (COMMENTATOR, RACE_CONTROL)
+MODES = ("off", "request", "direct")
+_RANK = {mode: n for n, mode in enumerate(MODES)}
+REQUEST_TTL_S = 60.0
 
 # OBS source names, which are also the Sheet asset labels. Standby Cover is the
 # panel's RED FLAG and the grid rows belong to the director's grid sequence.
@@ -86,8 +89,31 @@ def find(defs, source):
     return next((d for d in defs if d["source"] == source), None)
 
 
-def may_take(entry, roles, mode):
-    return normalize_mode(mode) != "off" and bool(set(entry["roles"]) & set(roles))
+def entry_mode(entry, roles, modes):
+    """The caller's mode for one graphic: the most permissive over the caller's
+    roles that may take it. *modes* maps a role to its mode. Race Control flags
+    go on air directly in request mode too."""
+    best = "off"
+    for role in set(entry["roles"]) & set(roles):
+        mode = normalize_mode(modes.get(role))
+        if _RANK[mode] > _RANK[best]:
+            best = mode
+    return "direct" if entry["flag"] and best == "request" else best
+
+
+def may_take(entry, roles, modes):
+    return entry_mode(entry, roles, modes) == "direct"
+
+
+def may_request(entry, roles, modes):
+    return entry["flag"] is None and entry_mode(entry, roles, modes) == "request"
+
+
+def may_hide(entry, roles, modes, crew_current):
+    """Take rights hide any graphic; in request mode the crew still hides the one
+    graphic the crew put on air."""
+    return may_take(entry, roles, modes) or (
+        may_request(entry, roles, modes) and crew_current == entry["source"])
 
 
 def scene_ok(entry, program_scene):
@@ -147,6 +173,113 @@ class CrewTakes:
         with self.lock:
             return self.current, dict(self.by)
 
+    def forget(self, source):
+        """The director toggled *source*: it is no longer a crew graphic."""
+        with self.lock:
+            if self.current == source:
+                self.current = None
+            self.by.pop(source, None)
+
 
 def chat_line(name, source, on):
     return f"{name} put {source} on air" if on else f"{name} took {source} off air"
+
+
+def request_line(name, source):
+    return f"{name} asked for {source}"
+
+
+def decline_line(source):
+    return f"Director declined {source}"
+
+
+class TakeModes:
+    """The take mode per crew role: the league value plus the director's live
+    override. In memory, so a relay start returns to the league value."""
+
+    def __init__(self, league):
+        self.league = normalize_mode(league)
+        self.lock = threading.Lock()
+        self.override = {}
+
+    def set(self, role, mode):
+        if role not in ROLES or mode not in MODES:
+            return False
+        with self.lock:
+            self.override[role] = mode
+        return True
+
+    def snapshot(self):
+        with self.lock:
+            return {role: self.override.get(role, self.league) for role in ROLES}
+
+
+class Requests:
+    """Crew requests for the director. Requests for one graphic merge into one
+    entry that keeps its first deadline. An answered or expired request stays
+    readable for REQUEST_TTL_S so the requester sees the outcome."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.items = []
+        self._ids = itertools.count(1)
+
+    @staticmethod
+    def _copy(item):
+        return dict(item, keys=list(item["keys"]), by=list(item["by"]))
+
+    def _prune(self, now):
+        for item in self.items:
+            if item["state"] == "pending" and now - item["at"] > REQUEST_TTL_S:
+                item.update(state="expired", done_at=item["at"] + REQUEST_TTL_S)
+        self.items = [i for i in self.items
+                      if i["state"] == "pending" or now - i["done_at"] <= REQUEST_TTL_S]
+
+    def add(self, source, key, name, now):
+        """(request, merged) for a crew member asking for *source*."""
+        with self.lock:
+            self._prune(now)
+            for item in self.items:
+                if item["state"] == "pending" and item["source"] == source:
+                    if key not in item["keys"]:
+                        item["keys"].append(key)
+                        item["by"].append(name)
+                    return self._copy(item), True
+            item = {"id": next(self._ids), "source": source, "keys": [key],
+                    "by": [name], "at": now, "state": "pending", "done_at": None}
+            self.items.append(item)
+            return self._copy(item), False
+
+    def pending(self, now):
+        with self.lock:
+            self._prune(now)
+            return [self._copy(i) for i in self.items if i["state"] == "pending"]
+
+    def get(self, rid, now):
+        with self.lock:
+            self._prune(now)
+            item = next((i for i in self.items
+                         if i["id"] == rid and i["state"] == "pending"), None)
+            return self._copy(item) if item else None
+
+    def resolve(self, rid, state, now):
+        """Mark a pending request taken or declined; None when it is not pending.
+        A take may also close a request that expired while OBS applied it."""
+        with self.lock:
+            self._prune(now)
+            for item in self.items:
+                if item["id"] == rid and (item["state"] == "pending" or
+                                          (state == "taken" and item["state"] == "expired")):
+                    item.update(state=state, done_at=now)
+                    return self._copy(item)
+            return None
+
+    def states_for(self, key, now):
+        """{source: state} of the requests *key* took part in, newest wins."""
+        with self.lock:
+            self._prune(now)
+            return {i["source"]: i["state"] for i in self.items if key in i["keys"]}
+
+    def drop_pending(self):
+        with self.lock:
+            self.items = [i for i in self.items if i["state"] != "pending"]

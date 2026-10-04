@@ -61,11 +61,12 @@ changes that on purpose.
 | `direct` | Commentator and Race Control put graphics on air themselves. |
 
 A missing key means `off`, so updating racecast never widens anyone's rights.
-`request` becomes selectable only once the panel can show requests (increment 4).
+`request` became selectable with the panel's request queue (increment 4). In request
+mode the crew still hides a graphic the crew put on air, directly.
 
 The director can override the mode live, per role (commentator, Race Control),
 from the panel. The override lives in the relay and resets to the league value on
-relay start. Switching the mode drops open requests.
+relay start. Switching any mode drops all open requests.
 
 ## Graphic definitions
 

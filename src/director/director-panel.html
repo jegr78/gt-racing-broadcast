@@ -525,6 +525,15 @@
   #liveCol #txBar .keys{flex-wrap:nowrap}
   #liveCol #txBar button.k{min-width:0;flex:1 1 0}
   #handoverCtl{display:flex;flex-direction:column;gap:8px}
+  #gfxReqSec{border-color:var(--amber)}
+  #gfxReqList{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+  #gfxReqList li{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:6px;align-items:center}
+  #gfxReqList .rq{font-size:12px;color:var(--ink);overflow-wrap:anywhere}
+  #gfxReqList .rq small{display:block;font-size:11px;color:var(--muted)}
+  #gfxReqList .rq .left{white-space:nowrap}
+  #gfxReqList button.k{min-width:0}
+  .takemode{display:flex;align-items:center;gap:8px}
+  .takemode>span{font-size:11px;color:var(--muted);min-width:92px}
   #armBtn{width:100%;border-color:var(--blue);color:#9fd0ff}
   #armBtn.starting{border-color:var(--amber);color:#ffd361;background:#2a2110}
   #armBtn.ready{border-color:var(--live);color:#baf5d0;background:#10261a}
@@ -722,6 +731,8 @@
         </div>
       </section>
       <div class="liveair" id="liveOnAir">ON AIR <b>—</b></div>
+      <section class="bus" id="gfxReqSec" hidden><div class="cap">Graphic requests</div>
+        <ul id="gfxReqList"></ul></section>
       <section class="bus" id="handoverCtl" aria-label="Handover">
         <button type="button" class="k armkey" id="armBtn" hidden>ARM</button>
         <button type="button" class="k next" id="nextBtn" data-kbd="N"><span class="nmain">NEXT</span><span class="nsub" id="nextSub">—</span></button>
@@ -756,6 +767,10 @@
             <div class="keys" id="gfxGridBus"></div>
           </div>
           <div class="grp"><span class="glbl">Flag graphic, one active</span><div class="keys" id="flagGfxBus"></div></div>
+          <div class="grp"><span class="glbl">Crew takes <span id="takeLeague"></span></span>
+            <div class="takemode" data-role="commentator"><span>Commentator</span><div class="keys"></div></div>
+            <div class="takemode" data-role="race_control"><span>Race Control</span><div class="keys"></div></div>
+          </div>
         </section>
       </div>
       <div class="area" data-area="hud">
@@ -1298,6 +1313,83 @@ async function loadGraphicCatalog(){
   }catch(e){ setTimeout(loadGraphicCatalog, 3000); }
 }
 loadGraphicCatalog();
+
+/* Crew graphic takes: the live mode per role and the requests waiting for the
+   director. A mode change on the relay drops the open requests. */
+const TAKE_MODES = [["off", "OFF"], ["request", "REQUEST"], ["direct", "DIRECT"]];
+let takeModes = {};
+document.querySelectorAll(".takemode").forEach(row=>{
+  TAKE_MODES.forEach(([mode, label])=>{
+    const b = mkKey(label, "crew", ()=>setTakeMode(row.dataset.role, mode));
+    b.dataset.mode = mode; row.querySelector(".keys").appendChild(b);
+  });
+});
+function renderTakeModes(){
+  document.querySelectorAll(".takemode").forEach(row=>{
+    row.querySelectorAll("button").forEach(b=>
+      b.classList.toggle("on", takeModes[row.dataset.role] === b.dataset.mode));
+  });
+}
+async function graphicsPost(path, body){
+  const r = await fetch(path, {method:"POST", cache:"no-store",
+    headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)});
+  const d = await r.json().catch(()=>({}));
+  if (!r.ok || !d.ok) throw new Error(d.error || r.status);
+  return d;
+}
+async function setTakeMode(role, mode){
+  try{
+    takeModes = (await graphicsPost("/obs/graphics/mode", {role, mode})).modes;
+    renderTakeModes();
+    log(`Crew takes for ${role}: ${mode}`);
+    graphicRequestPoll();
+  }catch(e){ log(`Crew take mode failed: ${e.message||e}`, "err"); toast(`Crew take mode failed: ${e.message||e}`); }
+}
+async function answerRequest(id, action, source){
+  try{
+    await graphicsPost(`/obs/graphics/request/${id}`, {action});
+    log(`${source} request: ${action === "take" ? "on air" : "declined"}`);
+    obsStatePoll();
+  }catch(e){ log(`${source} request failed: ${e.message||e}`, "err"); toast(`${source}: ${e.message||e}`); }
+  graphicRequestPoll();
+}
+function renderRequests(list){
+  const ul = $("#gfxReqList");
+  ul.replaceChildren();
+  $("#gfxReqSec").hidden = !list.length;
+  list.forEach(r=>{
+    const li = document.createElement("li");
+    const txt = document.createElement("div"); txt.className = "rq";
+    txt.textContent = r.source;
+    const by = document.createElement("small");
+    by.textContent = `requested by ${r.by.join(", ")} · `;
+    const left = document.createElement("span"); left.className = "left";
+    left.textContent = `${r.left_s} s left`;
+    by.appendChild(left);
+    txt.appendChild(by);
+    const key = (label, action)=>{
+      const b = document.createElement("button"); b.className = "k"; b.type = "button";
+      b.textContent = label;
+      b.addEventListener("click", ()=>answerRequest(r.id, action, r.source));
+      return b;
+    };
+    li.append(txt, key("TAKE", "take"), key("DECLINE", "decline"));
+    ul.appendChild(li);
+  });
+}
+async function graphicRequestPoll(){
+  try{
+    const r = await fetch("/obs/graphics/requests", {cache:"no-store"});
+    if (!r.ok) return;
+    const d = await r.json();
+    takeModes = d.modes || {};
+    $("#takeLeague").textContent = d.league_mode ? `· league: ${d.league_mode}` : "";
+    renderTakeModes();
+    renderRequests(d.requests || []);
+  }catch(e){ /* the relay poll already reports an unreachable relay */ }
+}
+graphicRequestPoll();
+setInterval(()=>{ if (!document.hidden) graphicRequestPoll(); }, 2000);
 
 FEED_ACTIONS.filter(([label])=>label !== "NEXT").forEach(([label, path, tag])=>{
   const b = mkKey(label, tag, ()=>{

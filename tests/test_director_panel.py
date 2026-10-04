@@ -430,6 +430,17 @@ def t_graphic_buses_come_from_the_relay_catalog():
     assert 'fetch("/obs/graphics"' in _func_body(h, "loadGraphicCatalog")
 
 
+def t_graphic_requests_sit_in_the_live_column():
+    h = _html()
+    live = h[h.index('<section id="liveCol"'):h.index('<main id="workspace"')]
+    assert 'id="gfxReqList"' in live, "requests must stay visible while another topic is open"
+    body = _func_body(h, "renderRequests")
+    assert "innerHTML" not in body and "textContent" in body, \
+        "requester names come from the Sheet and must not reach innerHTML"
+    for role in ("commentator", "race_control"):
+        assert f'class="takemode" data-role="{role}"' in h, f"no take mode keys for {role}"
+
+
 AREAS = ("handover", "graphics", "hud", "cues", "audio",
          "broadcast", "schedule", "setup", "fault")
 

@@ -90,8 +90,10 @@ GRAPHICS_TAKE=
   channel; when absent those notifications are simply no-ops. Setup:
   [Console & cockpit setup](Console-Setup).
 - **`GRAPHICS_TAKE`** *(optional)*: may commentators and Race Control put broadcast
-  graphics on air from their pages? `off` (default, view only) or `direct`. Flag graphics
-  are Race Control only, and the director keeps full control either way. See
+  graphics on air from their pages? `off` (default, view only), `request` (they ask, the
+  director takes or declines) or `direct`. Flag graphics are Race Control only and go on
+  air directly in `request` mode too. The director keeps full control either way and can
+  change the mode per role live from the panel until the relay restarts. See
   [Console → Graphics](Console#graphics).
 
 **Which profile is active** (resolution order): a global `--profile <name>` flag wins;
