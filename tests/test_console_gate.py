@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Live-server integration checks for the /console auth gate (#216 phase 3a).
 Run: python3 tests/test_console_gate.py"""
-import importlib.util, os, tempfile, threading, json, types
+import importlib.util, os, tempfile, threading, json, time, types
 import urllib.request, urllib.error
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -1502,6 +1502,166 @@ def t_crew_pages_carry_the_shared_frame():
     finally:
         srv.shutdown()
 
+
+
+def _ask(port, who, source):
+    return _post(port, "/console/cockpit/graphic-takes/request", _tok(who),
+                 body={"source": source})
+
+
+def _queue(port):
+    code, body = _get(port, "/obs/graphics/requests")
+    assert code == 200, (code, body)
+    return json.loads(body)
+
+
+def _answer(port, rid, action):
+    return _post(port, f"/obs/graphics/request/{rid}", body={"action": action})
+
+
+def _own_requests(port, who):
+    code, body = _get(port, "/console/cockpit/graphic-takes", _tok(who))
+    return {g["source"]: g.get("request") for g in json.loads(body)["graphics"]}
+
+
+def t_request_mode_queues_a_request_for_the_director():
+    def fire(p):
+        return _ask(p, "alice", "Standings"), _queue(p), _chat_texts(p)
+    t = _take_call(fire, mode="request")
+    (code, body), queue, texts = t.res
+    assert code == 200 and t.calls == [], (code, body, t.calls)
+    assert [(r["source"], r["by"]) for r in queue["requests"]] == [("Standings", ["Alice"])], queue
+    assert "Alice asked for Standings" in texts, texts
+
+
+def t_request_mode_shows_request_rights_to_the_crew():
+    t = _take_call(lambda p: _get(p, "/console/cockpit/graphic-takes", _tok("alice")),
+                   mode="request")
+    data = json.loads(t.res[1])
+    standings = next(g for g in data["graphics"] if g["source"] == "Standings")
+    assert data["mode"] == "request", data["mode"]
+    assert standings["can_take"] is False and standings["can_request"] is True, standings
+
+
+def t_request_is_refused_outside_request_mode():
+    for mode in ("direct", "off"):
+        t = _take_call(lambda p: _ask(p, "alice", "Standings"), mode=mode)
+        assert t.res[0] == 403, (mode, t.res)
+
+
+def t_flags_are_never_requested():
+    t = _take_call(lambda p: _ask(p, "dave", "Flag Yellow"), mode="request")
+    assert t.res[0] == 403, t.res
+
+
+def t_race_control_sets_a_flag_directly_in_request_mode():
+    t = _take_call(lambda p: _take(p, "dave", "Flag Yellow"), mode="request")
+    assert t.res[0] == 200 and t.store.get() == "yellow", (t.res, t.store.get())
+
+
+def t_a_request_may_be_sent_while_its_scene_is_off_air():
+    t = _take_call(lambda p: _ask(p, "alice", "Standings"), mode="request",
+                   scene="Splitscreen")
+    assert t.res[0] == 200, t.res
+
+
+def t_director_takes_a_request_in_the_requesters_name():
+    def fire(p):
+        rid = json.loads(_ask(p, "alice", "Standings")[1])["id"]
+        return _answer(p, rid, "take"), _queue(p), _chat_texts(p), _own_requests(p, "alice")
+    t = _take_call(fire, mode="request")
+    (code, body), queue, texts, own = t.res
+    assert code == 200, (code, body)
+    assert t.calls == [("item", "Stint", "Standings", True)], t.calls
+    assert queue["requests"] == [], queue
+    assert "Alice put Standings on air" in texts, texts
+    assert own["Standings"] == "taken", own
+
+
+def t_a_request_taken_off_air_stays_queued():
+    def fire(p):
+        rid = json.loads(_ask(p, "alice", "Standings")[1])["id"]
+        return _answer(p, rid, "take"), _queue(p)
+    t = _take_call(fire, mode="request", scene="Splitscreen")
+    (code, body), queue = t.res
+    assert code == 409 and t.calls == [], (code, body, t.calls)
+    assert [r["source"] for r in queue["requests"]] == ["Standings"], \
+        "the director retries after the scene switch"
+
+
+def t_director_declines_a_request():
+    def fire(p):
+        rid = json.loads(_ask(p, "alice", "Standings")[1])["id"]
+        return _answer(p, rid, "decline"), _chat_texts(p), _own_requests(p, "alice")
+    t = _take_call(fire, mode="request")
+    (code, body), texts, own = t.res
+    assert code == 200 and t.calls == [], (code, body, t.calls)
+    assert "Director declined Standings" in texts, texts
+    assert own["Standings"] == "declined", own
+
+
+def t_an_answered_request_cannot_be_answered_again():
+    def fire(p):
+        rid = json.loads(_ask(p, "alice", "Standings")[1])["id"]
+        _answer(p, rid, "decline")
+        return _answer(p, rid, "take")
+    t = _take_call(fire, mode="request")
+    assert t.res[0] == 404 and t.calls == [], (t.res, t.calls)
+
+
+def t_crew_hides_its_own_take_in_request_mode():
+    def fire(p):
+        rid = json.loads(_ask(p, "alice", "Standings")[1])["id"]
+        _answer(p, rid, "take")
+        m._obs_ws.visible.add("Standings")
+        time.sleep(2.1)   # one take per person per 2 s
+        return _take(p, "alice", "Standings", on=False)
+    t = _take_call(fire, mode="request")
+    assert t.res[0] == 200, t.res
+    assert t.calls[-1] == ("item", "Stint", "Standings", False), t.calls
+
+
+def t_crew_cannot_hide_a_director_graphic_in_request_mode():
+    t = _take_call(lambda p: _take(p, "alice", "Standings", on=False), mode="request",
+                   visible={"Standings"})
+    assert t.res[0] == 403 and t.calls == [], (t.res, t.calls)
+
+
+def t_director_overrides_the_mode_per_role():
+    def fire(p):
+        _ask(p, "alice", "Standings")
+        res = _post(p, "/obs/graphics/mode", body={"role": "commentator", "mode": "direct"})
+        alice = _get(p, "/console/cockpit/graphic-takes", _tok("alice"))[1]
+        return res, _queue(p), json.loads(alice), _take(p, "dave", "Standings")
+    t = _take_call(fire, mode="request")
+    (code, body), queue, alice, dave = t.res
+    assert code == 200, (code, body)
+    assert queue["modes"] == {"commentator": "direct", "race_control": "request"}, queue
+    assert queue["league_mode"] == "request", queue
+    assert queue["requests"] == [], "a mode switch drops the open requests"
+    assert alice["mode"] == "direct", alice["mode"]
+    assert next(g for g in alice["graphics"] if g["source"] == "Schedule")["can_take"] is True
+    assert dave[0] == 403, "race control is still in request mode"
+
+
+def t_mode_override_rejects_unknown_values():
+    def fire(p):
+        return (_post(p, "/obs/graphics/mode", body={"role": "director", "mode": "direct"}),
+                _post(p, "/obs/graphics/mode", body={"role": "commentator", "mode": "x"}))
+    t = _take_call(fire, mode="off")
+    assert [r[0] for r in t.res] == [400, 400], t.res
+
+
+def t_request_routes_are_director_only_under_console():
+    def fire(p):
+        return [(_get(p, "/console/obs/graphics/requests", _tok(who))[0],
+                 _post(p, "/console/obs/graphics/mode", _tok(who),
+                       body={"role": "commentator", "mode": "direct"})[0],
+                 _post(p, "/console/obs/graphics/request/1", _tok(who),
+                       body={"action": "take"})[0])
+                for who in ("alice", "dave")]
+    t = _take_call(fire, mode="request")
+    assert t.res == [(403, 403, 403), (403, 403, 403)], t.res
 
 
 def t_obs_graphics_carries_the_panel_catalog():

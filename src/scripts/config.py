@@ -182,7 +182,7 @@ class ResolvedConfig:
     discord_client_secret: str = ""  # never leaves the producer machine
     discord_voice_url: str = ""      # league voice channel (fallback; Sheet override wins)
     event_title: str = ""        # optional free-text event title (Panel/Cockpit/Discord, #207)
-    graphics_take: str = ""      # crew graphic takes: off (blank) | direct
+    graphics_take: str = ""      # crew graphic takes: off (blank) | request | direct
     logo_path: str = ""          # absolute path, or "" if unset/missing
     profile_dir: str = ""
     runtime_dir: str = ""

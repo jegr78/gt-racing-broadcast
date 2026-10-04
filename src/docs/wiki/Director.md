@@ -42,7 +42,8 @@ The page is a fixed frame of four columns, so nothing you need on air scrolls aw
   The order is not a procedure; open whichever area you need. The panel remembers the
   last area per browser.
 - **Live column**: the program preview with the feed tiles, what is on air, the PGM
-  scene keys, the transition, and the handover keys **ARM** and **NEXT**.
+  scene keys, the transition, and the handover keys **ARM** and **NEXT**. Graphic
+  requests from the crew appear here too, under what is on air (see below).
 - **Workspace** (middle): the area you picked. Above it a "next step" line names the
   next handover step from the relay's state: a missing or submitted link for the next
   stint first, then ARM, then the cut. Only the next stint's missing link turns the
@@ -70,6 +71,7 @@ Where each bus lives:
 | **TRANS** (live column) | transition selector for the next scene switch. **Cut**, **Fade** (default), or **Stinger** |
 | **GFX** (Graphics area) | graphics toggles (HUD, standings, schedule, results, weather, covers) |
 | **FLAG GFX** | mutually exclusive flag-status graphic overlays, exactly one active at a time (or none); distinct from the flag-text chip in the HUD |
+| **CREW TAKES** (Graphics area) | the live take mode per crew role, **Commentator** and **Race Control**: `OFF`, `REQUEST` or `DIRECT`. It starts from the league's `GRAPHICS_TAKE` and returns to it when the relay restarts. Changing a mode drops the open requests |
 | **TIMER** (HUD area) | the race timer ([Race Timer](Race-Timer)) |
 | **AUDIO** (Audio area) | per-source dB sliders, 0 dB reset and mutes; includes an **Intermission Music** fader for the music track in the Intermission scene |
 | **URLs** (Schedule area) | the editor for the schedule and POV URLs, next to the commentators' link submissions |
@@ -81,6 +83,19 @@ key; two or more for the same stint point to the Schedule area, where each link 
 graphics library, **Broadcast** the stream key and the substitution card, and
 **Troubleshoot** the raw feed controls, the emergency feed switch, the raw scenes and the OBS
 page refresh.
+
+### Graphic requests
+
+In `REQUEST` mode commentators and Race Control ask for a graphic instead of putting it on
+air themselves. Each request shows in the live column as "Standings, requested by
+Comms 1" with **TAKE** and **DECLINE**. Two people asking for the same graphic share one
+entry. A request expires after 60 s.
+
+**TAKE** follows the crew rules: the graphic replaces the previous crew graphic and goes
+on air in the requester's name. While its scene is not on air the relay refuses the take
+and the request stays, so you can switch the scene and press **TAKE** again. **DECLINE**
+posts a line in the crew chat. Race Control flag graphics never queue: Race Control sets
+them directly in `REQUEST` mode too.
 
 ### Scene macros
 

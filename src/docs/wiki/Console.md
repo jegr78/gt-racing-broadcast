@@ -90,7 +90,8 @@ large in the page. A tile with a red frame and **ON AIR** is in the broadcast ri
 
 The league decides whether the crew may put graphics on air, with `GRAPHICS_TAKE` in its
 `profile.env` (see [Configuration](Configuration)). It is off unless the league sets it.
-With `GRAPHICS_TAKE=direct`:
+The director can change the mode per role during the event; it returns to the league
+value when the relay restarts. With `GRAPHICS_TAKE=direct`:
 
 - Commentators and Race Control get **Put on air** / **Take off air** on each graphic the
   broadcast can show. Graphics that exist only in the Sheet stay view-only.
@@ -101,6 +102,16 @@ With `GRAPHICS_TAKE=direct`:
 - Race Control alone sets the **flag graphic** (Green, Yellow, Red, Safety Car, Virtual
   Safety Car) in the **Act** tab. One flag is shown at a time.
 - Every take posts a line in the crew chat, for example "RC 2 put Flag Yellow on air".
+
+With `GRAPHICS_TAKE=request`:
+
+- Each graphic gets **Request** instead of **Put on air**. The request goes to the
+  director, who takes or declines it. A request may be sent while its scene is off air.
+- The tile shows **REQUESTED** while the director decides, and afterwards "Declined by the
+  director" or "Request expired" (after 60 s without an answer).
+- A graphic the crew put on air, or the director took from a crew request, can be taken
+  off air by the crew directly. Graphics the director put on air stay with the director.
+- Race Control still sets the flag graphics directly.
 
 The director keeps every control in the Panel and can take any graphic off air.
 
