@@ -4527,8 +4527,8 @@ def _apply_obs_intents(obs_ws, scene, intents):
 # --- Relay-driven STINT A/B override (#593 follow-up) ---------------------------
 def apply_stint_state(relay, obs_ws, feed):
     """GET /obs/stint/<A|B> (Companion) and POST /obs/stint {"feed"} (Director
-    Panel): make the Stint scene show `feed`, the director's pick, not necessarily
-    the relay's on-air feed, with its audio live and the rest muted, the Discord
+    Panel): make the Stint scene show `feed`, the director's pick or "live" for the
+    relay's on-air feed, with its audio live and the rest muted, the Discord
     bus included. The audio comes from the same plan as a handover
     (relay.obs_audio_plan), so the producer's commentary mic opens only when the
     pick is the local stint and closes when the other feed is. The relay's on-air
@@ -4537,11 +4537,13 @@ def apply_stint_state(relay, obs_ws, feed):
     no feed pair (solo) -> 409, OBS unavailable -> 503."""
     if obs_ws is None:
         return {"error": "obs unavailable"}, 503
-    feed = str(feed or "").strip().upper()
-    if feed not in ("A", "B"):
-        return {"ok": False, "error": "feed must be A or B"}, 400
     if getattr(relay, "solo", False):
         return {"ok": False, "error": "no feed pair"}, 409
+    feed = str(feed or "").strip().upper()
+    if feed == "LIVE":
+        feed = relay.live_feed() or ""
+    if feed not in ("A", "B"):
+        return {"ok": False, "error": "feed must be A, B or live"}, 400
     plan = getattr(relay, "obs_audio_plan", None)
     audio, extra_mute = plan() if plan else (None, [])
     intents = _OBS_WS_MODULE.feed_state_intents(

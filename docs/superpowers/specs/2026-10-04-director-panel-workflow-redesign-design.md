@@ -176,7 +176,7 @@ correct it if a league runs solo differently.
 | STANDBY, INTERMISSION | off | on | off |
 | INTRO, OUTRO, TRAILER | off | off | off |
 | WEBCAM, CAPTURE (full frame) | as PROGRAM | as PROGRAM | off |
-| DISCORD | off | on | on (proposed; not part of the agreed table) |
+| DISCORD | off | on | on (added with #729 so no solo scene is reachable only as a raw key) |
 
 ### Removed duplicates
 

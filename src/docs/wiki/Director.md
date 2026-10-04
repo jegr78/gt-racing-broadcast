@@ -60,10 +60,11 @@ Where each bus lives:
 
 | Bus | What's on it |
 |---|---|
-| **PGM** (live column) | one-press program looks: `STINT A/B`, `SPLIT`, `INTERVIEW`, `STANDBY`, `INTRO`, `OUTRO`, `TRAILER`, `INTERMISSION`, `RED FLAG` (same behavior as the Companion combos below) |
+| **PGM** (live column) | one-press program looks: `STINT`, `SPLIT`, `INTERVIEW`, `STANDBY`, `INTRO`, `OUTRO`, `TRAILER`, `INTERMISSION`, `RED FLAG` (same behavior as the Companion combos below) |
 | **FEEDS** (Troubleshoot) | **`ARM A/B` / `STOP A/B`** per feed, per-feed reloads, `RESET A/B → LIVE` (reconnect OBS to one feed, see [Dropping a backlog](#dropping-a-backlog)), POV reload/stop, `FEEDS → STINT…` |
 | **HUD** (HUD area) | the Stint label, Streamer, Session and Race Control dropdowns, they update the HUD live and write back to the Setup tab |
-| **SCN·VIS** (Troubleshoot) | raw scene switches and feed visibility toggles |
+| **Overlays** (live column) | picture-in-picture toggles: `POV`; in solo also `WEBCAM` and, for a POV profile, `TELEMETRY` |
+| **Raw scenes** (Troubleshoot) | scene switches without audio (the audio stays as it is) |
 | **TRANS** (live column) | transition selector for the next scene switch. **Cut**, **Fade** (default), or **Stinger** |
 | **GFX** (Graphics area) | graphics toggles (HUD, standings, schedule, results, weather, covers) |
 | **FLAG GFX** | mutually exclusive flag-status graphic overlays, exactly one active at a time (or none); distinct from the flag-text chip in the HUD |
@@ -76,7 +77,39 @@ armed, starting, ready) and the three stints after it: `link ready`, `no link ye
 commentator's pending link submission. One submission shows its link with an **APPROVE**
 key; two or more for the same stint point to the Schedule area, where each link is listed. **Setup** holds the
 graphics library, **Broadcast** the stream key and the substitution card, and
-**Troubleshoot** the raw feed controls, SCN·VIS and the OBS page refresh.
+**Troubleshoot** the raw feed controls, the emergency feed switch, the raw scenes and the OBS
+page refresh.
+
+### Scene macros
+
+Every scene has a macro on the PGM bus that sets the scene and its audio in one press.
+The raw scene keys in Troubleshoot switch only the scene.
+
+Endurance:
+
+| Macro | Scene | Audio |
+|---|---|---|
+| `STINT` | Stint | the on-air feed (and the producer's mic on a local stint) on, the other feed and Discord off. The relay picks the on-air feed; NEXT decides which one that is. Clears Race Control |
+| `SPLIT` | Splitscreen | both feeds visible, the on-air feed audible, the other feed and Discord off. Sets Race Control to *Driver Swaps* |
+| `INTERVIEW` | Interview | Discord on, Feed A and B off |
+| `STANDBY`, `INTRO`, `OUTRO`, `TRAILER` | same name | Feed A, Feed B and Discord off |
+| `INTERMISSION` | Intermission | unchanged (the feeds are not in this scene) |
+
+Solo (Game is the capture card, Mic the commentary microphone):
+
+| Macro | Scene | Game | Mic | Discord |
+|---|---|---|---|---|
+| `PROGRAM` | Program | on | on | off |
+| `INTERVIEW` | Interview | off | on | on |
+| `STANDBY`, `INTERMISSION` | same name | off | on | off |
+| `INTRO`, `OUTRO`, `TRAILER` | same name | off | off | off |
+| `DISCORD` | Discord | off | on | on |
+| `WEBCAM`, `CAPTURE` | Solo Webcam, Solo Capture (full frame) | on | on | off |
+
+The **emergency feed switch** in Troubleshoot (`FEED A ON AIR`, `FEED B ON AIR`) shows
+one feed in the Stint scene with its audio after a confirmation. It is for the case where
+NEXT cannot hand over. It changes OBS only: the relay keeps its own on-air feed, so the
+HUD, `/status` and the next NEXT still follow the relay.
 
 All controls: scenes, sources, audio, feeds, timer, HUD, and URLs, work
 relay-only. The relay calls the producer's local OBS on your behalf; no OBS
@@ -88,20 +121,18 @@ are display-only.
 
 For a **solo** profile (a single-race commentary or driver-POV broadcast: local
 capture + webcam, no A/B feeds) the panel adapts automatically: the Handover area,
-ARM and NEXT are hidden, Graphics is the default area, SCN·VIS moves into the live
-column under the PGM keys, and the FEEDS bus,
+ARM and NEXT are hidden, Graphics is the default area, the PGM bus carries the solo
+macros (see [Scene macros](#scene-macros)), and the FEEDS bus, the emergency feed switch,
 the A/B feed pills and preview tiles, the stint schedule and the qualifying
 editor are hidden, and the POV editor stands on its own card with its own POV
-RELOAD / POV STOP. The OBS control busses retarget to the solo scene collection,
-SCN·VIS switches `PROGRAM` / `INTERVIEW` / `STANDBY` / `INTERMISSION` / `INTRO` /
-`OUTRO` / `TRAILER` / `DISCORD` / `SOLO WEBCAM` / `SOLO CAPTURE` (the last two cut to
-the webcam or the capture card full-screen) and toggles the `WEBCAM` and `POV`
+RELOAD / POV STOP. The OBS control busses retarget to the solo scene collection.
+The Overlays card in the live column toggles the `WEBCAM` and `POV`
 picture-in-picture (the `WEBCAM` toggle acts on the webcam in the **Program** scene
 only; the one in the solo POV **Intermission** scene is not affected). The Gfx, Pre-race and Grid keys toggle
 their graphics in the **Program** scene, and the
 AUDIO bus exposes the solo mixer: **Game**, **Webcam**, **Mic** (the commentator's
 microphone on the producer machine), **POV**, **Discord** and **Intermission**.
-In a solo **POV** profile SCN·VIS also carries `TELEMETRY`: it shows or hides the
+In a solo **POV** profile Overlays also carries `TELEMETRY`: it shows or hides the
 HUD's whole GT7 telemetry block (panel, tyres, trace, values, delta, time of day),
 for example while waiting in the lobby or watching a replay. The webcam frame stays.
 The relay keeps the choice across restarts; the key lights while the block is shown.
@@ -225,8 +256,8 @@ takes until you change it (a page reload resets it to the default, Fade).
 | **Stinger** | Plays the Stinger transition configured in OBS; falls back to a cut if no Stinger is configured, with a note in the log |
 
 The transition applies to **scene switches** only: buttons on the **PGM** and
-**SCN·VIS** busses and the scene-switch step inside macros. It does **not**
-apply to **source toggles** (show/hide on the GFX, FLAG GFX, or SCN·VIS rows),
+**Raw scenes** busses and the scene-switch step inside macros. It does **not**
+apply to **source toggles** (show/hide on the GFX, FLAG GFX, or Overlays rows),
 an OBS-WebSocket limitation.
 
 **Cut and Fade always work.** Stinger requires the producer to have a Stinger
@@ -464,7 +495,7 @@ or clear it to show nothing. The whole run, in order:
 
 **Formation lap**, the race always begins with a manual formation lap.
 - HUD: **Race Control → Formation Lap**. Set it **after** the cut: the combos write
-  Race Control too (**SPLIT** stamps *Driver Swaps*, **STINT A/B** and the **Feeds Next**
+  Race Control too (**SPLIT** stamps *Driver Swaps*, **STINT** and the **Feeds Next**
   handover clear it), so a combo or handover afterwards would wipe the *Formation Lap*
   message.
 - As the formation lap starts: **Stint → Stint 1**, **Session → Race**.
@@ -563,11 +594,13 @@ The current program stays on air; arm the feed and press **NEXT** again.
 > auto-pull: but it is **not** the recommended path; the standard everywhere is to arm.)
 
 The relay also handles the audio (it mutes the off-air feed, unmutes the on-air one).
-**STINT A / STINT B**, **MUTE A / MUTE B** and **Feed A/B Toggle** are a
+The Companion's **STINT A / STINT B**, **MUTE A / MUTE B** and **Feed A/B Toggle** are a
 **break-glass fallback**: if the panel shows **OBS NOT REACHABLE** (the relay
 cannot reach OBS on the producer machine), NEXT can't auto-cut, then use
 **STINT A / STINT B** (and, if needed, the manual FEED/MUTE buttons) to cut by
-hand; `/status` shows which feed is live. The Companion STINT buttons switch the feeds and
+hand; `/status` shows which feed is live. The panel cannot help here, because all its
+OBS control goes through the relay; its emergency feed switch in Troubleshoot is for the
+case where OBS is reachable but NEXT cannot hand over. The Companion STINT buttons switch the feeds and
 their audio directly in OBS before they ask the relay, so they still work here; only the
 producer's commentary mic of a local stint is left as it was, because only the relay
 switches it.

@@ -1848,6 +1848,17 @@ def t_apply_stint_state_closes_the_mic_when_the_other_feed_is_local():
     assert ("mute", MIC, True) in obs.calls and ("mute", MIC, False) not in obs.calls
 
 
+def t_apply_stint_state_live_takes_the_relays_on_air_feed():
+    # The panel's single STINT macro (#729) names no feed: NEXT decides which one is
+    # on air, and the relay is the one that knows.
+    relay = _StintRelay()
+    relay.live = "B"
+    obs = _SplitObs()
+    payload, status = irofeeds.apply_stint_state(relay, obs, "live")
+    assert status == 200 and payload["feed"] == "B", payload
+    assert obs.calls[0] == ("item", "Stint", "Feed B", True), obs.calls
+
+
 def t_apply_stint_state_rejects_a_bad_feed_and_solo():
     obs = _SplitObs()
     payload, status = irofeeds.apply_stint_state(_StintRelay(), obs, "C")

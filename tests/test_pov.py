@@ -776,6 +776,12 @@ def t_obs_stint_routes_get_and_post():
         got = json.loads(urllib.request.urlopen(req, timeout=5).read())
         assert got["ok"] is True and got["feed"] == "A", got
         assert ("Stint", "Feed A", True) in fo.calls and ("Feed A", False) in fo.calls
+        # The panel's STINT macro sends "live": the relay's on-air feed (A at start).
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/obs/stint", data=b'{"feed": "live"}',
+            headers={"Content-Type": "application/json"}, method="POST")
+        got = json.loads(urllib.request.urlopen(req, timeout=5).read())
+        assert got["ok"] is True and got["feed"] == r.live_feed() == "A", got
         try:
             urllib.request.urlopen(f"http://127.0.0.1:{port}/obs/stint/X", timeout=5)
             raise AssertionError("expected HTTP 400")
@@ -786,8 +792,8 @@ def t_obs_stint_routes_get_and_post():
         # reaches OBS: 400 with the reason, and no call was made.
         fo.calls.clear()
         for raw, reason in ((b'["A"]', "body must be a JSON object"),
-                            (b'{"feed": 5}', "feed must be A or B"),
-                            (b'{"feed": null}', "feed must be A or B")):
+                            (b'{"feed": 5}', "feed must be A, B or live"),
+                            (b'{"feed": null}', "feed must be A, B or live")):
             req = urllib.request.Request(
                 f"http://127.0.0.1:{port}/obs/stint", data=raw,
                 headers={"Content-Type": "application/json"}, method="POST")
