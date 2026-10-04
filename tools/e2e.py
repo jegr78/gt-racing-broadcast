@@ -216,9 +216,11 @@ def render_panel_shortcut_confirm(ctx, headed=False, slowmo=0):
 
 
 RENDERED_CHECKS = [render_tally_pill, render_funnel_pill, render_panel_shortcut_confirm]
+# A real league's relay can reach the producer's OBS, so no check that sends /next.
+REAL_LEAGUE_RENDERED_CHECKS = [render_tally_pill, render_funnel_pill]
 
 
-def run_rendered_checks(ctx, headed=False, slowmo=0):
+def run_rendered_checks(ctx, headed=False, slowmo=0, checks=None):
     """Run the gated Playwright rendered checks for *ctx*. Returns a list of
     CheckResults to append after the API results. Without Playwright or a browser
     every rendered check is reported as a skip, so a browserless run never fails
@@ -226,7 +228,7 @@ def run_rendered_checks(ctx, headed=False, slowmo=0):
     *slowmo* drive a visible, watchable browser, local only."""
     available = _playwright_available()
     results = []
-    for fn in RENDERED_CHECKS:
+    for fn in RENDERED_CHECKS if checks is None else checks:
         skipped = E.classify_capability(available, fn.__name__)
         if skipped is not None:
             results.append(skipped)
@@ -550,7 +552,8 @@ def run_real_league(args):
         results, code = E.run_checks(E.REAL_LEAGUE_CHECKS, ctx)
         if args.playwright:
             # Gated: skips without a browser. --headed gives a visible window.
-            rendered = run_rendered_checks(ctx, headed=args.headed, slowmo=args.slowmo)
+            rendered = run_rendered_checks(ctx, headed=args.headed, slowmo=args.slowmo,
+                                           checks=REAL_LEAGUE_RENDERED_CHECKS)
             results = results + rendered
             if any(r.status == "fail" for r in rendered):
                 code = 1

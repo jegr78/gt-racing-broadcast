@@ -68,7 +68,8 @@ guaranteed `finally` teardown, no leaked relays/UI even on failure). Two modes:
 The checks regression-guard the four #191 cockpit bugs (env-clobber via the real
 `racecast._set_env_key`, timer `—`, double-"stint" tally, flat `/cockpit/data` shape)
 and the #193 own-row submission. Optional **rendered checks** (`--playwright`: the
-cockpit pills and the Director Panel's confirmed keyboard shortcut, #731) use the
+cockpit pills and the Director Panel's confirmed keyboard shortcut, #731; the shortcut
+check presses NEXT, so `--real-league` leaves it out) use the
 Playwright **Python library** (not the MCP) and SKIP when unavailable (CI omits the
 flag). Visual helpers, all local-only: `--headed`/`--slowmo` (visible browser),
 `--keep` (leave the services up + print the live URLs incl. the cockpit token), and
