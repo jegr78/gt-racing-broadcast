@@ -63,7 +63,8 @@ Where each bus lives:
 | **PGM** (live column) | one-press program looks: `STINT`, `SPLIT`, `INTERVIEW`, `STANDBY`, `INTRO`, `OUTRO`, `TRAILER`, `INTERMISSION`, `RED FLAG` (same behavior as the Companion combos below) |
 | **FEEDS** (Troubleshoot) | **`ARM A/B` / `STOP A/B`** per feed, per-feed reloads, `RESET A/B → LIVE` (reconnect OBS to one feed, see [Dropping a backlog](#dropping-a-backlog)), POV reload/stop, `FEEDS → STINT…` |
 | **HUD** (HUD area) | the Stint label, Streamer, Session and Race Control dropdowns, they update the HUD live and write back to the Setup tab |
-| **SCN·VIS** (Troubleshoot) | raw scene switches (scene only, the audio stays as it is) and the POV visibility toggle |
+| **Overlays** (live column) | picture-in-picture toggles: `POV`; in solo also `WEBCAM` and, for a POV profile, `TELEMETRY` |
+| **Raw scenes** (Troubleshoot) | scene switches without audio (the audio stays as it is) |
 | **TRANS** (live column) | transition selector for the next scene switch. **Cut**, **Fade** (default), or **Stinger** |
 | **GFX** (Graphics area) | graphics toggles (HUD, standings, schedule, results, weather, covers) |
 | **FLAG GFX** | mutually exclusive flag-status graphic overlays, exactly one active at a time (or none); distinct from the flag-text chip in the HUD |
@@ -76,7 +77,7 @@ armed, starting, ready) and the three stints after it: `link ready`, `no link ye
 commentator's pending link submission. One submission shows its link with an **APPROVE**
 key; two or more for the same stint point to the Schedule area, where each link is listed. **Setup** holds the
 graphics library, **Broadcast** the stream key and the substitution card, and
-**Troubleshoot** the raw feed controls, the emergency feed switch, SCN·VIS and the OBS
+**Troubleshoot** the raw feed controls, the emergency feed switch, the raw scenes and the OBS
 page refresh.
 
 ### Scene macros
@@ -125,13 +126,13 @@ macros (see [Scene macros](#scene-macros)), and the FEEDS bus, the emergency fee
 the A/B feed pills and preview tiles, the stint schedule and the qualifying
 editor are hidden, and the POV editor stands on its own card with its own POV
 RELOAD / POV STOP. The OBS control busses retarget to the solo scene collection.
-SCN·VIS in Troubleshoot keeps the raw scene keys and toggles the `WEBCAM` and `POV`
+The Overlays card in the live column toggles the `WEBCAM` and `POV`
 picture-in-picture (the `WEBCAM` toggle acts on the webcam in the **Program** scene
 only; the one in the solo POV **Intermission** scene is not affected). The Gfx, Pre-race and Grid keys toggle
 their graphics in the **Program** scene, and the
 AUDIO bus exposes the solo mixer: **Game**, **Webcam**, **Mic** (the commentator's
 microphone on the producer machine), **POV**, **Discord** and **Intermission**.
-In a solo **POV** profile SCN·VIS also carries `TELEMETRY`: it shows or hides the
+In a solo **POV** profile Overlays also carries `TELEMETRY`: it shows or hides the
 HUD's whole GT7 telemetry block (panel, tyres, trace, values, delta, time of day),
 for example while waiting in the lobby or watching a replay. The webcam frame stays.
 The relay keeps the choice across restarts; the key lights while the block is shown.
@@ -255,8 +256,8 @@ takes until you change it (a page reload resets it to the default, Fade).
 | **Stinger** | Plays the Stinger transition configured in OBS; falls back to a cut if no Stinger is configured, with a note in the log |
 
 The transition applies to **scene switches** only: buttons on the **PGM** and
-**SCN·VIS** busses and the scene-switch step inside macros. It does **not**
-apply to **source toggles** (show/hide on the GFX, FLAG GFX, or SCN·VIS rows),
+**Raw scenes** busses and the scene-switch step inside macros. It does **not**
+apply to **source toggles** (show/hide on the GFX, FLAG GFX, or Overlays rows),
 an OBS-WebSocket limitation.
 
 **Cut and Fade always work.** Stinger requires the producer to have a Stinger

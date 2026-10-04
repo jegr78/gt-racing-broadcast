@@ -491,7 +491,7 @@ def t_live_column_holds_what_acts_on_air():
     h = _html()
     live = _block(h, '<section id="liveCol"', '<main id="workspace">')
     _order(live, 'id="previewSec"', 'id="liveOnAir"', 'id="armBtn"', 'id="nextBtn"',
-           'id="pgmBus"', 'id="txBar"')
+           'id="pgmBus"', 'id="overlaySec"', 'id="scnVisBus"', 'id="txBar"')
     for cid in ("obsRefreshBtn", "obsStreamBtn", "partControl"):
         assert f'id="{cid}"' not in live, f"#{cid} is not a live control"
     assert 'data-tx="cut"' in live and 'id="txDur"' in live

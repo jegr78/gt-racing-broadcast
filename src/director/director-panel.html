@@ -519,8 +519,8 @@
   .liveair{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#ff8080;
     border:1px solid var(--air);border-radius:10px;padding:8px 12px;background:#1a0f0f}
   .liveair b{display:block;color:var(--ink);font:700 19px var(--head);letter-spacing:.04em;text-transform:none}
-  #liveCol .pgm .keys{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
-  #liveCol .pgm button.k{min-width:0}
+  #liveCol .pgm .keys,#overlaySec .keys{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
+  #liveCol .pgm button.k,#overlaySec button.k{min-width:0}
   #liveCol #txBar .keys{flex-wrap:nowrap}
   #liveCol #txBar button.k{min-width:0;flex:1 1 0}
   #handoverCtl{display:flex;flex-direction:column;gap:8px}
@@ -717,6 +717,7 @@
         <button type="button" class="k next" id="nextBtn"><span class="nmain">NEXT</span><span class="nsub" id="nextSub">—</span></button>
       </section>
       <section class="bus pgm"><div class="cap">Scenes</div><div class="keys" id="pgmBus"></div></section>
+      <section class="bus" id="overlaySec"><div class="cap">Overlays</div><div class="keys" id="scnVisBus"></div></section>
       <section class="bus" id="txBar" title="Transition applied to the next scene switch">
         <div class="cap">Transition</div>
         <div class="keys">
@@ -937,9 +938,8 @@
           <div class="keys" id="emergencyBus"></div>
           <div class="hint">Only when NEXT cannot hand over. Shows one feed in the Stint scene with its audio; the relay keeps its own on-air feed. STOP per feed sits in the Feeds card above.</div>
         </section>
-        <section class="bus" id="scnVisSec"><div class="cap">Scn·Vis</div>
+        <section class="bus" id="scnVisSec"><div class="cap">Raw scenes</div>
             <div class="grp"><span class="glbl">Switch scene</span><div class="keys" id="scnBus"></div></div>
-            <div class="grp"><span class="glbl">Source visibility</span><div class="keys" id="scnVisBus"></div></div>
             <div class="hint">Raw scene switch: audio stays as it is. The scene macros in the live column set the audio too.</div>
           </section>
         <section class="bus" id="obsToolsSec"><div class="cap">OBS</div>

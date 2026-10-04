@@ -126,7 +126,8 @@ memory:
 | **ARM / NEXT** (live column) | ARM pulls the off-air feed; NEXT is the driver change: cuts back to Stint and clears Race Control with the cut |
 | **FEEDS** (Troubleshoot) | relay control: per-feed ARM/STOP, feed reloads, POV reload/stop, FEEDS → STINT… |
 | **HUD** | the Stint HUD label, Streamer, Session and Race Control dropdowns: changes show on the HUD immediately and are written back to the Setup tab ([Director guide](Director)) |
-| **SCN·VIS** | raw scene switches and feed visibility toggles |
+| **Overlays** | picture-in-picture toggles (POV; solo also webcam and telemetry) |
+| **Raw scenes** (Troubleshoot) | scene switches that leave the audio as it is |
 | **GFX** | graphics toggles (HUD, Standings, Schedule, results, weather, covers) |
 | **TIMER** | the race timer (see [Race Timer](Race-Timer)) |
 | **AUDIO** | per-input dB sliders, 0 dB reset and mutes |
