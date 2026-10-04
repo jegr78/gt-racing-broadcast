@@ -66,20 +66,20 @@
     background:#0c0f13;border:1px solid var(--edge);border-radius:8px;padding:7px 11px;
     font:inherit;font-size:13px;font-weight:600;letter-spacing:.04em;text-transform:none}
   a.back:hover{border-color:var(--live)}
-  .appmeta{display:flex;align-items:center;gap:8px;margin-left:auto}
+  .appmeta{display:flex;align-items:center;gap:8px;margin-left:auto;flex:0 0 auto;white-space:nowrap}
   .appmeta a{display:inline-flex;align-items:center;gap:5px;text-decoration:none;color:#e7edf3;
     background:#0c0f13;border:1px solid var(--edge);border-radius:8px;padding:7px 11px;
     font:inherit;font-size:12px;font-weight:600;letter-spacing:.04em}
   .appmeta a:hover{border-color:var(--live)}
   .appmeta .ver{color:var(--amber);font-variant-numeric:tabular-nums}
-  .brand{font-family:var(--head);font-weight:700;letter-spacing:.16em;font-size:24px;text-transform:uppercase}
+  .brand{font-family:var(--head);font-weight:700;letter-spacing:.16em;font-size:24px;text-transform:uppercase;white-space:nowrap;flex:0 0 auto}
   .brand small{color:var(--amber);display:flex;align-items:center;gap:6px;font-size:10px;letter-spacing:.32em;margin-top:-2px}
   .brand-edit{background:none;border:0;color:var(--amber);opacity:.5;cursor:pointer;font-size:11px;padding:0 2px;line-height:1}
   .brand-edit:hover{opacity:1}
   #brandSubInput{font:inherit;letter-spacing:.16em;text-transform:none;color:#e7edf3;background:#0c0f13;border:1px solid var(--edge);border-radius:5px;padding:2px 6px;min-width:220px;max-width:40vw}
   /* One row at every desktop width: the strip clips rather than wrapping into a second row. */
   .strip{display:flex;gap:8px;flex-wrap:nowrap;align-items:center;flex:1 1 auto;min-width:0;
-    overflow:hidden;justify-content:center}
+    overflow:hidden;justify-content:safe center}
   .st{display:inline-flex;align-items:center;gap:6px;background:#0c0f13;border:1px solid var(--edge);
     border-radius:8px;padding:6px 10px;font-size:11px;letter-spacing:.08em;color:var(--muted);text-transform:uppercase;white-space:nowrap}
   .st b{color:var(--ink);font-weight:600}
@@ -420,6 +420,7 @@
   .pvph svg{width:22px;height:22px;opacity:.6}
   .pvph.err{color:#c98a8a}
   .pvlabel{font-size:10px;opacity:.85;margin-top:3px;display:flex;justify-content:space-between;align-items:center;gap:6px}
+  .pvlabel>span{white-space:nowrap}
   /* compact per-tile PAUSE toggle */
   button.k.pvtoggle{min-width:0;min-height:0;padding:3px 9px;font-size:10px;box-shadow:none}
   .pvtile.onair .pvframe{outline:2px solid var(--live);outline-offset:-1px}
@@ -513,9 +514,9 @@
   #liveCol>.bus{margin-bottom:0}
   #liveCol .preview .pvbody{grid-template-columns:repeat(3,minmax(0,1fr))}
   #liveCol .pvprog{grid-column:1 / -1}
-  .onair{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#ff8080;
+  .liveair{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#ff8080;
     border:1px solid var(--air);border-radius:10px;padding:8px 12px;background:#1a0f0f}
-  .onair b{display:block;color:var(--ink);font:700 19px var(--head);letter-spacing:.04em;text-transform:none}
+  .liveair b{display:block;color:var(--ink);font:700 19px var(--head);letter-spacing:.04em;text-transform:none}
   #liveCol .pgm .keys,#liveCol #scnVisSec .keys{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
   #liveCol .pgm button.k,#liveCol #scnVisSec button.k{min-width:0}
   #liveCol #txBar .keys{flex-wrap:nowrap}
@@ -708,7 +709,11 @@
           </div>
         </div>
       </section>
-      <div class="onair" id="liveOnAir">ON AIR <b>—</b></div>
+      <div class="liveair" id="liveOnAir">ON AIR <b>—</b></div>
+      <section class="bus" id="handoverCtl" aria-label="Handover">
+        <button type="button" class="k armkey" id="armBtn" hidden>ARM</button>
+        <button type="button" class="k next" id="nextBtn"><span class="nmain">NEXT</span><span class="nsub" id="nextSub">—</span></button>
+      </section>
       <section class="bus pgm"><div class="cap">Scenes</div><div class="keys" id="pgmBus"></div></section>
       <div id="liveSceneSlot"></div>
       <section class="bus" id="txBar" title="Transition applied to the next scene switch">
@@ -720,10 +725,6 @@
           <label class="txdur">dur <input id="txDur" type="number" min="0" max="10000"
                  step="50" value="300"> ms</label>
         </div>
-      </section>
-      <section class="bus" id="handoverCtl" aria-label="Handover">
-        <button type="button" class="k armkey" id="armBtn" hidden>ARM</button>
-        <button type="button" class="k next" id="nextBtn"><span class="nmain">NEXT</span><span class="nsub" id="nextSub">—</span></button>
       </section>
     </section>
     <main id="workspace">
@@ -3124,11 +3125,19 @@ NAV_AUTO.addEventListener("change", applyNavCollapse);
 function chatVisible(){
   return !DRAWER_MQ.matches || PHONE_MQ.matches || document.body.classList.contains("chats-open");
 }
-$("#chatDrawerBtn").addEventListener("click", () => {
-  const open = !document.body.classList.contains("chats-open");
+function setDrawer(open){
   document.body.classList.toggle("chats-open", open);
   $("#chatDrawerBtn").setAttribute("aria-expanded", String(open));
   if (open && chatAtBottom()) chatMarkSeen();
+}
+$("#chatDrawerBtn").addEventListener("click", () => setDrawer(!document.body.classList.contains("chats-open")));
+// The open drawer covers the header button, so a click beside it or Escape closes it.
+document.addEventListener("click", e => {
+  if (document.body.classList.contains("chats-open") && !e.target.closest("#chatRail, #chatDrawerBtn"))
+    setDrawer(false);
+});
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && document.body.classList.contains("chats-open")) setDrawer(false);
 });
 
 // The divider between the two chats: drag it or use the arrow keys.

@@ -421,11 +421,13 @@ def t_cards_sit_in_their_area():
 def t_live_column_holds_what_acts_on_air():
     h = _html()
     live = _block(h, '<section id="liveCol"', '<main id="workspace">')
-    _order(live, 'id="previewSec"', 'id="liveOnAir"', 'id="pgmBus"', 'id="liveSceneSlot"',
-           'id="txBar"', 'id="armBtn"', 'id="nextBtn"')
+    _order(live, 'id="previewSec"', 'id="liveOnAir"', 'id="armBtn"', 'id="nextBtn"',
+           'id="pgmBus"', 'id="liveSceneSlot"', 'id="txBar"')
     for cid in ("obsRefreshBtn", "obsStreamBtn", "partControl"):
         assert f'id="{cid}"' not in live, f"#{cid} is not a live control"
     assert 'data-tx="cut"' in live and 'id="txDur"' in live
+    assert '<div class="liveair" id="liveOnAir">' in live and "  .onair{" not in h, \
+        "the on-air card must not reuse .onair, which styles the on-air preview tile"
 
 
 def t_chat_rail_holds_both_chats_as_sections():
@@ -437,6 +439,9 @@ def t_chat_rail_holds_both_chats_as_sections():
     assert h.count("chatVisible()") >= 2
     assert '<button type="button" id="chatDrawerBtn"' in h and 'id="drawerUnread"' in h
     assert '$("#drawerUnread")' in _func_src(h, "chatUpdateBadge"), "the drawer button shows unread too"
+    assert 'e.key === "Escape" && document.body.classList.contains("chats-open")) setDrawer(false);' in h, \
+        "the open drawer covers its own button, so Escape must close it"
+    assert '!e.target.closest("#chatRail, #chatDrawerBtn")' in h, "a click beside the drawer closes it"
 
 
 def t_rail_split_is_draggable_and_remembered():
