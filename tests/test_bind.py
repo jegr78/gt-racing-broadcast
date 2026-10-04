@@ -211,7 +211,7 @@ def t_no_http_server_in_src_keeps_the_stdlib_backlog():
             path = os.path.join(dirpath, fn)
             with open(path, encoding="utf-8") as fh:
                 text = fh.read()
-            for mo in re.finditer(r"\b(?:Threading)?(?:HTTP|TCP)Server\(\(", text):
+            for mo in re.finditer(r"\b(?:Threading)?(?:HTTP|TCP)Server\(", text):
                 bare.append(f"{os.path.relpath(path, ROOT)}:{text.count(chr(10), 0, mo.start()) + 1}")
     assert bare == [], f"construct a subclass with request_queue_size set, not the stdlib default of 5: {bare}"
 
