@@ -219,6 +219,24 @@ def parse_google_font_cuts(css):
     return out
 
 
+_GSTATIC_WOFF2_RE = re.compile(r"url\((https://fonts\.gstatic\.com/[^)]+\.woff2)\)")
+
+
+def google_font_woff2_url(css):
+    """The gstatic woff2 URL of a css2 response's latin block (U+0000-00FF). A
+    response without subset blocks has one face, which is taken. None if no
+    gstatic woff2 is present."""
+    blocks = re.split(r"@font-face", css or "")[1:]
+    for block in blocks:
+        m = _GSTATIC_WOFF2_RE.search(block)
+        if m and "U+0000-00FF" in block:
+            return m.group(1)
+    if not any("unicode-range" in b for b in blocks):
+        m = _GSTATIC_WOFF2_RE.search(css or "")
+        return m.group(1) if m else None
+    return None
+
+
 # Recognized cut suffixes on a self-hosted font file, longest first so
 # "-BoldItalic" wins over "-Italic". Each maps to (font-style, font-weight).
 _FONT_CUT_SUFFIXES = (

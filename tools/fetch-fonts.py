@@ -20,7 +20,7 @@ Usage:
   python3 tools/fetch-fonts.py --out PATH       # write elsewhere
   python3 tools/fetch-fonts.py --version vX.Y.Z # stamp the manifest version
 """
-import argparse, os, re, sys
+import argparse, os, sys
 from urllib.request import Request, urlopen
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -67,9 +67,9 @@ def fetch_family(name, css_fetch=None, bin_fetch=None):
             css = css_fetch(url)
         except Exception:                          # a 400 for a missing weight, etc.
             continue
-        m = re.search(r"url\((https://fonts\.gstatic\.com/[^)]+\.woff2)\)", css or "")
-        if m:
-            data = bin_fetch(m.group(1))
+        url = ob.google_font_woff2_url(css)
+        if url:
+            data = bin_fetch(url)
             if data:
                 return {ob.google_font_filename(name): data}
     return {}

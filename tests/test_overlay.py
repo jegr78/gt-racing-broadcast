@@ -605,6 +605,21 @@ def t_ob_parse_google_font_cuts_latin_only():
     assert ("normal", "400") in cuts and len(cuts) == 2     # the cyrillic block dropped
 
 
+def t_ob_google_font_woff2_url_prefers_latin():
+    css = """
+/* cyrillic */
+@font-face { font-family:'X'; src: url(https://fonts.gstatic.com/s/x/cyr.woff2) format('woff2');
+  unicode-range: U+0301, U+0400-045F; }
+/* latin */
+@font-face { font-family:'X'; src: url(https://fonts.gstatic.com/s/x/lat.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131; }
+"""
+    assert ob.google_font_woff2_url(css).endswith("lat.woff2"), "a fallback must not take the cyrillic face"
+    single = "@font-face { src: url(https://fonts.gstatic.com/s/x/only.woff2) format('woff2'); }"
+    assert ob.google_font_woff2_url(single).endswith("only.woff2"), "a response without subsets has one face"
+    assert ob.google_font_woff2_url("@font-face { src: url(https://evil.example/x.woff2); }") is None
+
+
 def t_ob_is_google_font_name():
     # valid families (incl. ones outside the curated catalog) pass
     for ok in ("Oswald", "Exo 2", "Roboto Condensed", "Big Shoulders Display", "A1"):

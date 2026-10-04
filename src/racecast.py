@@ -6002,12 +6002,12 @@ def machine_font_download_data(name, css_fetch=None, bin_fetch=None):
             except Exception:                     # a 400 for a missing weight, etc.
                 continue
             # The woff2 must live on the fixed Google CDN host (defense in depth).
-            m = re.search(r"url\((https://fonts\.gstatic\.com/[^)]+\.woff2)\)", css or "")
+            m = ob.google_font_woff2_url(css)
             if m:
                 break
         if not m:
             return {"ok": False, "error": "no woff2 in Google CSS (unknown font?)"}
-        data = bin_fetch(m.group(1))
+        data = bin_fetch(m)
         if not data:
             return {"ok": False, "error": "empty font download"}
         ok, res = _write_font(fdir, ob.google_font_filename(name), data)
