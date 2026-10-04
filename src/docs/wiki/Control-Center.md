@@ -182,8 +182,8 @@ Machine-wide (not league) configuration:
 - **Devices**: **Reload** lists the video and audio devices OBS sees; pick the **capture
   card** (what a [local capture stint](Relay-Mode#local-capture-stint) puts on air) and the
   **commentary mic**, then **Save** (writes `RACECAST_CAPTURE`, `RACECAST_MIC` and
-  `RACECAST_MIC_NAME`). A solo profile adds the webcam, the tyres/fuel capture and the GT7
-  PlayStation IP.
+  `RACECAST_MIC_NAME`). A solo profile adds the webcam; a solo commentary profile also
+  the tyres/fuel capture, a solo POV profile the GT7 PlayStation IP.
 
 > **CLI alternative:** edit `.env` in any text editor; `racecast cookies <browser>`;
 > `racecast device-scan`.

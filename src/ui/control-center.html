@@ -460,6 +460,9 @@
   /* Devices (#720): capture card and mic serve both kinds (an endurance `local:` stint,
      #592/#670); webcam, tyres/fuel and the GT7 PlayStation exist in solo only. */
   body:not(.solo) .solo-only, body.solo .endurance-only { display: none; }
+  /* Within solo, the tyres/fuel crop exists only in the commentary collection and GT7
+     telemetry only in the POV one. */
+  body:not(.tpl-commentary) .commentary-only, body:not(.tpl-pov) .pov-only { display: none; }
 </style>
 </head>
 <body>
@@ -1010,7 +1013,7 @@
             <b>runtime/fonts/</b>. When a league's design uses a font, it is copied into that league's
             <b>overlay/fonts/</b> on save, so the overlay works offline and <b>profile export</b> stays self-contained.</p>
         </section>
-        <div class="viewhead" id="dev-head"><h3>Devices</h3><span class="sub">capture card &amp; commentary mic<span class="solo-only">, webcam, tyres/fuel capture &amp; GT7 PlayStation</span></span>
+        <div class="viewhead" id="dev-head"><h3>Devices</h3><span class="sub">capture card &amp; commentary mic<span class="solo-only">, webcam</span><span class="commentary-only"> &amp; tyres/fuel capture</span><span class="pov-only"> &amp; GT7 PlayStation</span></span>
           <span class="spacer"></span>
           <button onclick="loadDevices()">
             <svg viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Reload</button>
@@ -1030,7 +1033,7 @@
             <select id="dev-mic" style="flex:1" aria-label="Commentary mic device" disabled>
               <option value="">—</option>
             </select></div>
-          <div class="row solo-only"><span class="name">Tyres/Fuel</span>
+          <div class="row solo-only commentary-only"><span class="name">Tyres/Fuel</span>
             <select id="dev-tyres" style="flex:1" aria-label="Tyres/fuel capture device" disabled>
               <option value="">— same as capture card</option>
             </select></div>
@@ -1039,10 +1042,10 @@
             the relay mixes the mic into that feed and keeps OBS's own mic input muted. On macOS the relay
             needs the capture card's <b>name</b>, not the id picked here: enter it as RACECAST_CAPTURE in the
             .env editor below.</p>
-          <p class="envhint solo-only">Tyres/Fuel: leave it on "same as capture card" when one card carries
+          <p class="envhint solo-only commentary-only">Tyres/Fuel: leave it on "same as capture card" when one card carries
             the game; the crop then reuses the capture card. Pick a device only for a second card (or pick
             the capture card to go back to one).</p>
-          <div class="solo-only">
+          <div class="solo-only pov-only">
             <div class="row" style="margin-top:12px"><span class="name">PlayStation IP (GT7)</span>
               <input id="ps-ip" type="text" style="flex:1" placeholder="e.g. 192.168.1.42"
                      aria-label="PlayStation IP">
@@ -2953,12 +2956,15 @@ async function loadProfiles(force) {
 function applyKindGating(data) {
   // Reflect the ACTIVE profile's kind onto <body> so kind-specific CSS can
   // hide feed surfaces / reveal solo controls. Endurance = no class.
-  let kind = 'endurance';
+  let kind = 'endurance', template = '';
   if (data && data.ok && Array.isArray(data.profiles)) {
     const a = data.profiles.find(p => p.name === data.active);
     if (a && a.kind) kind = a.kind;
+    if (a && a.template) template = a.template;
   }
   document.body.classList.toggle('solo', kind === 'solo');
+  document.body.classList.toggle('tpl-pov', kind === 'solo' && template === 'pov');
+  document.body.classList.toggle('tpl-commentary', kind === 'solo' && template !== 'pov');
 }
 
 async function useProfile(name) {

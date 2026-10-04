@@ -1496,6 +1496,31 @@ def t_profiles_data_reports_kind():
         assert by["solo1"]["kind"] == "solo", by["solo1"]
 
 
+def t_profiles_data_reports_template():
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        prof = os.path.join(td, "profiles")
+        envs = {"demo": "NAME=Demo\n", "pov1": "NAME=P\nKIND=solo\nTEMPLATE=pov\n",
+                "com1": "NAME=C\nKIND=solo\nTEMPLATE=commentary\n",
+                "bare": "NAME=B\nKIND=solo\n"}
+        for name, body in envs.items():
+            os.makedirs(os.path.join(prof, name))
+            with open(os.path.join(prof, name, "profile.env"), "w") as fh:
+                fh.write(body)
+        open(os.path.join(td, ".env.example"), "w").close()
+        os.makedirs(os.path.join(td, "runtime"))
+        orig_b, orig_r = m._env_base, m._runtime_base_dir
+        m._env_base = lambda *a, **k: td
+        m._runtime_base_dir = lambda: os.path.join(td, "runtime")
+        try:
+            d = m.profiles_data()
+        finally:
+            m._env_base, m._runtime_base_dir = orig_b, orig_r
+        got = {p["name"]: p["template"] for p in d["profiles"]}
+    assert got == {"demo": "", "pov1": "pov", "com1": "commentary", "bare": "commentary"}, \
+        f"solo without a template builds the commentary collection, endurance has none: {got}"
+
+
 def t_profile_use_data_switches_pointer():
     import tempfile
     with tempfile.TemporaryDirectory() as td:
