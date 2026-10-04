@@ -173,7 +173,8 @@ def render_funnel_pill(ctx, headed=False, slowmo=0):
 
 
 def render_cockpit_phone(ctx, headed=False, slowmo=0):
-    """At phone width the cockpit fits the viewport and the crew chat keeps its height."""
+    """At phone width the cockpit fits the viewport on every tab, every tab shows a card
+    and the crew chat keeps its height."""
     from playwright.sync_api import sync_playwright  # noqa: PLC0415  optional, lazy
     name = "render_cockpit_phone"
     url = ctx.relay_url + "/cockpit?t=" + ctx.token
@@ -187,6 +188,15 @@ def render_cockpit_phone(ctx, headed=False, slowmo=0):
                 scroll_w = page.evaluate("document.documentElement.scrollWidth")
                 chat_h = page.evaluate(
                     "document.getElementById('chat').closest('.card').getBoundingClientRect().height")
+                empty_tabs = []
+                for tab in page.evaluate(
+                        "[...document.querySelectorAll('#crewTabs button')].map(b => b.dataset.id)"):
+                    page.click(f"#crewTabs button[data-id='{tab}']")
+                    shown = page.evaluate("[...document.querySelectorAll('[data-tab]')]"
+                                          ".filter(e => e.offsetParent !== null).length")
+                    if not shown:
+                        empty_tabs.append(tab)
+                    scroll_w = max(scroll_w, page.evaluate("document.documentElement.scrollWidth"))
             finally:
                 browser.close()
     except Exception as exc:  # noqa: BLE001  a render failure is a check failure
@@ -195,6 +205,8 @@ def render_cockpit_phone(ctx, headed=False, slowmo=0):
         return E.CheckResult(name, "fail", f"page is {scroll_w} px wide in a 390 px viewport")
     if chat_h < 100:
         return E.CheckResult(name, "fail", f"crew chat card is {chat_h:.0f} px high")
+    if empty_tabs:
+        return E.CheckResult(name, "fail", f"tabs show no card: {empty_tabs}")
     return E.CheckResult(name, "pass", "")
 
 
