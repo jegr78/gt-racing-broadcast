@@ -49,10 +49,11 @@ class _Crew:
 
 
 def _serve(companion_url=None, logo_path=None, sheet_id=None, graphics_dir=None,
-           graphics_take="off", flag_graphic_store=None):
+           graphics_take="off", flag_graphic_store=None, solo=False):
     rows = [("https://youtu.be/a", "Alice", "1", 2)]           # alice -> commentator
     src = _FakeSource(_URLS8, rows)
     relay = m.Relay(src, [53001, 53002], LOGDIR, sheet_id=sheet_id)
+    relay.solo = solo
     # bob=director, carol=producer; dave=race_control desk (no other role)
     crew = _Crew([("Bob", True, False), ("Carol", False, True)], rc={"dave"})
     SRC = os.path.join(ROOT, "src")
@@ -1300,23 +1301,25 @@ def t_proxied_post_body_is_not_read_twice():
 class _TakeFakeObs(_SplitFakeObs):
     """OBS with a fixed program scene; every scene item reports hidden."""
 
-    def __init__(self, scene="Stint"):
+    def __init__(self, scene="Stint", visible=()):
         super().__init__()
         self.scene = scene
+        self.visible = set(visible)
 
     def read_obs_state(self, sources, inputs):
         return {"scene": self.scene, "sources": [
-            {"scene": sc, "source": src, "enabled": False} for sc, src in sources]}, ""
+            {"scene": sc, "source": src, "enabled": src in self.visible}
+            for sc, src in sources]}, ""
 
 
-def _take_call(fire, mode="direct", scene="Stint"):
+def _take_call(fire, mode="direct", scene="Stint", visible=(), solo=False):
     flags = []
     store = m.flag_graphic.FlagGraphicStore(
         os.path.join(tempfile.mkdtemp(), "flag.json"),
         apply_fn=lambda sc, src, on: flags.append((sc, src, on)) or (True, ""))
-    srv = _serve(graphics_take=mode, flag_graphic_store=store)
+    srv = _serve(graphics_take=mode, flag_graphic_store=store, solo=solo)
     port = srv.server_address[1]
-    fake = _TakeFakeObs(scene)
+    fake = _TakeFakeObs(scene, visible)
     orig_obs, m._obs_ws = m._obs_ws, fake
     try:
         res = fire(port)
@@ -1403,6 +1406,36 @@ def t_obs_graphics_lists_every_graphic_for_the_director():
     (code, _b), _c, _s, _f = _take_call(
         lambda p: _get(p, "/console/obs/graphics", _tok("alice")))
     assert code == 403, code
+
+
+def _chat_texts(port):
+    code, body = _get(port, "/console/cockpit/chat/data", _tok("alice"))
+    return [msg["text"] for msg in json.loads(body)["messages"]]
+
+
+def t_hide_takes_a_visible_graphic_off_air():
+    def fire(p):
+        return _take(p, "alice", "Standings", on=False), _chat_texts(p)
+    ((code, body), texts), calls, _s, _f = _take_call(fire, visible={"Standings"})
+    assert code == 200, (code, body)
+    assert calls == [("item", "Stint", "Standings", False)], calls
+    assert "Alice took Standings off air" in texts, texts
+
+
+def t_hiding_a_hidden_graphic_posts_nothing():
+    def fire(p):
+        before = _chat_texts(p)
+        return _take(p, "alice", "Standings", on=False), before, _chat_texts(p)
+    ((code, body), before, after), calls, _s, _f = _take_call(fire)
+    assert code == 200 and json.loads(body)["changed"] is False, (code, body)
+    assert calls == [] and after == before, (calls, after[len(before):])
+
+
+def t_solo_takes_land_in_program():
+    (code, body), calls, _s, _f = _take_call(lambda p: _take(p, "alice", "Standings"),
+                                              scene="Program", solo=True)
+    assert code == 200, (code, body)
+    assert calls == [("item", "Program", "Standings", True)], calls
 
 
 if __name__ == "__main__":

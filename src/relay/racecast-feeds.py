@@ -4674,43 +4674,52 @@ def graphic_takes_view(relay, obs_ws, mode, roles, crew_takes, flag_store):
 def apply_graphic_take(relay, obs_ws, mode, roles, name, source, on, crew_takes,
                        flag_store, chat_store):
     """POST /cockpit/graphic-takes: a commentator or Race Control puts a graphic on
-    air or takes it off. Returns (payload, status). Best effort, never raises."""
+    air or takes it off. Returns (payload, status). A request that changes nothing
+    posts no chat line. Best effort, never raises."""
     defs = graphic_takes.definitions(getattr(relay, "solo", False))
     entry = graphic_takes.find(defs, source)
     if entry is None or (entry["flag"] and not flag_store):
         return {"ok": False, "error": f"not a takeable graphic: {source!r}"}, 404
     if not graphic_takes.may_take(entry, roles, mode):
         return {"ok": False, "error": "graphic takes are not allowed for you"}, 403
-    if on:
-        if obs_ws is None:
-            return {"ok": False, "error": "obs unavailable"}, 503
-        state, note = obs_ws.read_obs_state([], [])
-        if state is None:
-            return {"ok": False, "error": note or "obs unreachable"}, 503
-        if not graphic_takes.scene_ok(entry, state.get("scene")):
-            return {"ok": False, "error": f"{' / '.join(entry['scenes'])} is not on air",
-                    "program_scene": state.get("scene")}, 409
+    if obs_ws is None:
+        return {"ok": False, "error": "obs unavailable"}, 503
+    items = []
+    if entry["flag"] is None:
+        prev = graphic_takes.find(defs, crew_takes.snapshot()[0])
+        for d in [entry] + ([prev] if prev is not None else []):
+            items += [(sc, d["source"]) for sc in d["scenes"]]
+    state, note = obs_ws.read_obs_state(items, [])
+    if state is None:
+        return {"ok": False, "error": note or "obs unreachable"}, 503
+    if on and not graphic_takes.scene_ok(entry, state.get("scene")):
+        return {"ok": False, "error": f"{' / '.join(entry['scenes'])} is not on air",
+                "program_scene": state.get("scene")}, 409
     failed = []
     if entry["flag"]:
-        if on:
+        active = flag_store.get()
+        changed = (active != entry["flag"]) if on else (active == entry["flag"])
+        if changed and on:
             flag_store.set(entry["flag"])
-        elif flag_store.get() == entry["flag"]:
+        elif changed:
             flag_store.clear()
     else:
-        if obs_ws is None:
-            return {"ok": False, "error": "obs unavailable"}, 503
-        for scene, src, enabled in crew_takes.apply(entry, on, name, defs):
-            ok, note = obs_ws.set_scene_item_enabled(scene, src, enabled)
-            if not ok:
-                failed.append(f"{src} in {scene}: {note}")
-    line = graphic_takes.chat_line(name, source, on)
-    LOG.info("graphic take: %s", line)
-    if chat_store:
-        chat_store.add(user="racecast", text=line)
-    payload = {"ok": not failed, "source": source, "on": bool(on)}
+        visible = {}
+        for item in state.get("sources") or []:
+            visible[item["source"]] = visible.get(item["source"], False) or bool(item.get("enabled"))
+        intents, failed = crew_takes.apply(entry, on, name, defs, visible,
+                                           obs_ws.set_scene_item_enabled)
+        changed = bool(intents) and not failed
+    if changed:
+        line = graphic_takes.chat_line(name, source, on)
+        LOG.info("graphic take: %s", line)
+        if chat_store:
+            chat_store.add(user="racecast", text=line)
+    payload = {"ok": not failed, "source": source, "on": bool(on), "changed": changed}
     if failed:
         payload["error"] = "; ".join(failed)
     return payload, (503 if failed else 200)
+
 
 def split_mjpeg_frames(buf):
     """Pure: pull every COMPLETE JPEG (SOI..EOI) out of an MJPEG byte buffer.

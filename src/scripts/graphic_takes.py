@@ -61,18 +61,21 @@ def scene_ok(entry, program_scene):
     return program_scene in entry["scenes"]
 
 
-def take_intents(entry, on, crew_current, defs):
+def take_intents(entry, on, crew_current, defs, visible):
     """(intents, new_crew_current) for an editorial take or hide. Intents are
-    (scene, source, enabled). Crew takes keep one editorial graphic: a new take
-    hides the previous crew take, never a graphic the director set."""
+    (scene, source, enabled); *visible* maps a source to what OBS reports. Crew
+    takes keep one editorial graphic: a new take hides the previous crew take
+    while it is still on air, never a graphic the director set."""
     intents = []
     if on:
         prev = find(defs, crew_current) if crew_current != entry["source"] else None
-        if prev is not None:
+        if prev is not None and visible.get(prev["source"]):
             intents += [(sc, prev["source"], False) for sc in prev["scenes"]]
-        intents += [(sc, entry["source"], True) for sc in entry["scenes"]]
+        if not visible.get(entry["source"]):
+            intents += [(sc, entry["source"], True) for sc in entry["scenes"]]
         return intents, entry["source"]
-    intents += [(sc, entry["source"], False) for sc in entry["scenes"]]
+    if visible.get(entry["source"]):
+        intents += [(sc, entry["source"], False) for sc in entry["scenes"]]
     return intents, (None if crew_current == entry["source"] else crew_current)
 
 
@@ -85,17 +88,26 @@ class CrewTakes:
         self.current = None
         self.by = {}
 
-    def apply(self, entry, on, name, defs):
-        """Record a take or hide and return the OBS intents for it."""
+    def apply(self, entry, on, name, defs, visible, apply_fn):
+        """Apply a take or hide through apply_fn(scene, source, enabled) -> (ok,
+        note). Returns (intents, failures); the state changes only when every
+        intent succeeded."""
         with self.lock:
             prev = self.current
-            intents, self.current = take_intents(entry, on, prev, defs)
-            if on:
-                self.by.pop(prev, None)
-                self.by[entry["source"]] = name
-            else:
-                self.by.pop(entry["source"], None)
-            return intents
+            intents, new = take_intents(entry, on, prev, defs, visible)
+            failed = []
+            for scene, source, enabled in intents:
+                ok, note = apply_fn(scene, source, enabled)
+                if not ok:
+                    failed.append(f"{source} in {scene}: {note}")
+            if not failed:
+                self.current = new
+                if on:
+                    self.by.pop(prev, None)
+                    self.by[entry["source"]] = name
+                else:
+                    self.by.pop(entry["source"], None)
+            return intents, failed
 
     def snapshot(self):
         with self.lock:

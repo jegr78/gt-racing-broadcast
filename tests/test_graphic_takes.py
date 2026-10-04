@@ -85,42 +85,75 @@ def t_scene_gate():
 
 def t_take_replaces_the_previous_crew_take():
     defs = gt.definitions(solo=False)
-    intents, current = gt.take_intents(_entry(defs, "Standings"), True, "Schedule", defs)
+    intents, current = gt.take_intents(_entry(defs, "Standings"), True, "Schedule", defs,
+                                       {"Schedule": True})
     assert ("Stint", "Schedule", False) in intents, "the previous crew take must go"
     assert ("Stint", "Standings", True) in intents
     assert current == "Standings"
 
 
+def t_a_crew_take_the_director_already_hid_is_left_alone():
+    # Hidden since by the director: if he shows it again it is his, not the crew's.
+    defs = gt.definitions(solo=False)
+    intents, _ = gt.take_intents(_entry(defs, "Standings"), True, "Schedule", defs,
+                                 {"Schedule": False})
+    assert intents == [("Stint", "Standings", True)], intents
+
+
 def t_take_without_a_previous_crew_take_hides_nothing():
     defs = gt.definitions(solo=False)
-    intents, current = gt.take_intents(_entry(defs, "Standings"), True, None, defs)
+    intents, current = gt.take_intents(_entry(defs, "Standings"), True, None, defs, {})
     assert intents == [("Stint", "Standings", True)], intents
     assert current == "Standings"
 
 
-def t_retaking_the_same_graphic_does_not_hide_it():
+def t_retaking_a_visible_graphic_changes_nothing():
     defs = gt.definitions(solo=False)
-    intents, _ = gt.take_intents(_entry(defs, "Standings"), True, "Standings", defs)
-    assert intents == [("Stint", "Standings", True)], intents
+    intents, _ = gt.take_intents(_entry(defs, "Standings"), True, "Standings", defs,
+                                 {"Standings": True})
+    assert intents == [], intents
 
 
 def t_hide_clears_the_crew_take_only_for_that_graphic():
     defs = gt.definitions(solo=False)
-    intents, current = gt.take_intents(_entry(defs, "Standings"), False, "Standings", defs)
+    intents, current = gt.take_intents(_entry(defs, "Standings"), False, "Standings", defs,
+                                       {"Standings": True})
     assert intents == [("Stint", "Standings", False)] and current is None
-    intents, current = gt.take_intents(_entry(defs, "Schedule"), False, "Standings", defs)
+    intents, current = gt.take_intents(_entry(defs, "Schedule"), False, "Standings", defs,
+                                       {"Schedule": True})
     assert intents == [("Stint", "Schedule", False)] and current == "Standings"
+
+
+def t_hiding_a_hidden_graphic_changes_nothing():
+    defs = gt.definitions(solo=False)
+    intents, _ = gt.take_intents(_entry(defs, "Standings"), False, None, defs,
+                                 {"Standings": False})
+    assert intents == [], intents
+
+
+def _ok(scene, source, enabled):
+    return True, ""
 
 
 def t_crew_takes_track_who_set_what():
     defs = gt.definitions(solo=False)
     st = gt.CrewTakes()
-    st.apply(_entry(defs, "Schedule"), True, "Comms 1", defs)
-    intents = st.apply(_entry(defs, "Standings"), True, "RC 2", defs)
-    assert ("Stint", "Schedule", False) in intents
+    st.apply(_entry(defs, "Schedule"), True, "Comms 1", defs, {}, _ok)
+    intents, failed = st.apply(_entry(defs, "Standings"), True, "RC 2", defs,
+                               {"Schedule": True}, _ok)
+    assert ("Stint", "Schedule", False) in intents and failed == []
     assert st.snapshot() == ("Standings", {"Standings": "RC 2"}), st.snapshot()
-    st.apply(_entry(defs, "Standings"), False, "Comms 1", defs)
+    st.apply(_entry(defs, "Standings"), False, "Comms 1", defs, {"Standings": True}, _ok)
     assert st.snapshot() == (None, {}), st.snapshot()
+
+
+def t_crew_takes_keep_their_state_when_obs_fails():
+    defs = gt.definitions(solo=False)
+    st = gt.CrewTakes()
+    _intents, failed = st.apply(_entry(defs, "Standings"), True, "Comms 1", defs, {},
+                                lambda sc, src, on: (False, "boom"))
+    assert failed == ["Standings in Stint: boom"], failed
+    assert st.snapshot() == (None, {}), "a failed take must not count as on air"
 
 
 def t_chat_line_names_the_person_and_the_graphic():
