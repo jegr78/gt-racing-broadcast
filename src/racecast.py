@@ -6006,7 +6006,7 @@ def machine_font_download_data(name, css_fetch=None, bin_fetch=None):
             if m:
                 break
         if not m:
-            return {"ok": False, "error": "no woff2 in Google CSS (unknown font?)"}
+            return {"ok": False, "error": "no latin woff2 face in Google CSS (unknown font or subset?)"}
         data = bin_fetch(m)
         if not data:
             return {"ok": False, "error": "empty font download"}
