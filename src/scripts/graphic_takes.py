@@ -173,6 +173,13 @@ class CrewTakes:
         with self.lock:
             return self.current, dict(self.by)
 
+    def forget(self, source):
+        """The director toggled *source*: it is no longer a crew graphic."""
+        with self.lock:
+            if self.current == source:
+                self.current = None
+            self.by.pop(source, None)
+
 
 def chat_line(name, source, on):
     return f"{name} put {source} on air" if on else f"{name} took {source} off air"
@@ -256,11 +263,13 @@ class Requests:
             return self._copy(item) if item else None
 
     def resolve(self, rid, state, now):
-        """Mark a pending request taken or declined; None when it is not pending."""
+        """Mark a pending request taken or declined; None when it is not pending.
+        A take may also close a request that expired while OBS applied it."""
         with self.lock:
             self._prune(now)
             for item in self.items:
-                if item["id"] == rid and item["state"] == "pending":
+                if item["id"] == rid and (item["state"] == "pending" or
+                                          (state == "taken" and item["state"] == "expired")):
                     item.update(state=state, done_at=now)
                     return self._copy(item)
             return None

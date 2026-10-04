@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Live-server integration checks for the /console auth gate (#216 phase 3a).
 Run: python3 tests/test_console_gate.py"""
-import importlib.util, os, tempfile, threading, json, time, types
+import importlib.util, os, tempfile, threading, json, types
 import urllib.request, urllib.error
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -1614,8 +1614,7 @@ def t_crew_hides_its_own_take_in_request_mode():
         rid = json.loads(_ask(p, "alice", "Standings")[1])["id"]
         _answer(p, rid, "take")
         m._obs_ws.visible.add("Standings")
-        time.sleep(2.1)   # one take per person per 2 s
-        return _take(p, "alice", "Standings", on=False)
+        return _take(p, "dave", "Standings", on=False)
     t = _take_call(fire, mode="request")
     assert t.res[0] == 200, t.res
     assert t.calls[-1] == ("item", "Stint", "Standings", False), t.calls
@@ -1650,6 +1649,26 @@ def t_mode_override_rejects_unknown_values():
                 _post(p, "/obs/graphics/mode", body={"role": "commentator", "mode": "x"}))
     t = _take_call(fire, mode="off")
     assert [r[0] for r in t.res] == [400, 400], t.res
+
+
+def t_a_director_toggle_ends_the_crews_hide_right():
+    def fire(p):
+        rid = json.loads(_ask(p, "alice", "Standings")[1])["id"]
+        _answer(p, rid, "take")
+        _post(p, "/obs/source", body={"scene": "Stint", "source": "Standings", "on": True})
+        m._obs_ws.visible.add("Standings")
+        return _take(p, "dave", "Standings", on=False)
+    t = _take_call(fire, mode="request")
+    assert t.res[0] == 403, t.res
+
+
+def t_request_queue_reports_the_time_left():
+    def fire(p):
+        _ask(p, "alice", "Standings")
+        return _queue(p)
+    t = _take_call(fire, mode="request")
+    left = t.res["requests"][0]["left_s"]
+    assert 55 <= left <= 60, left
 
 
 def t_request_routes_are_director_only_under_console():

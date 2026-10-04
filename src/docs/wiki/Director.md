@@ -88,7 +88,7 @@ page refresh.
 
 In `REQUEST` mode commentators and Race Control ask for a graphic instead of putting it on
 air themselves. Each request shows in the live column as "Standings, requested by
-Comms 1" with **TAKE** and **DECLINE**. Two people asking for the same graphic share one
+Comms 1", with the seconds left and **TAKE** and **DECLINE**. Two people asking for the same graphic share one
 entry. A request expires after 60 s.
 
 **TAKE** follows the crew rules: the graphic replaces the previous crew graphic and goes

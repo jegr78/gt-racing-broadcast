@@ -327,6 +327,26 @@ def t_resolving_a_request_reports_back_to_every_requester():
     assert q.resolve(req["id"], "taken", now=104) is None, "a request resolves once"
 
 
+def t_a_take_that_outlives_the_deadline_still_counts():
+    q = gt.Requests()
+    req, _ = q.add("Standings", "alice", "Alice", now=100)
+    assert q.get(req["id"], now=159) is not None
+    q.pending(now=161)                     # another poll expires it during the take
+    assert q.resolve(req["id"], "taken", now=161) is not None
+    assert q.states_for("alice", now=162) == {"Standings": "taken"}
+    assert q.resolve(req["id"], "declined", now=162) is None
+
+
+def t_crew_takes_forget_a_graphic_the_director_toggles():
+    defs = gt.definitions(solo=False)
+    st = gt.CrewTakes()
+    st.apply(_entry(defs, "Standings"), True, "Comms 1", defs, {}, _ok)
+    st.forget("Schedule")
+    assert st.snapshot() == ("Standings", {"Standings": "Comms 1"})
+    st.forget("Standings")
+    assert st.snapshot() == (None, {}), "the director's toggle makes it the director's graphic"
+
+
 def t_dropping_requests_clears_the_queue():
     q = gt.Requests()
     q.add("Standings", "alice", "Alice", now=100)

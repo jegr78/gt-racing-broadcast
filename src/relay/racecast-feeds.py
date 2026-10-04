@@ -11072,10 +11072,13 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         _takes_read_state))
                 if p == ["obs", "graphics", "requests"]:
                     # The panel's request queue and modes, without an OBS read.
+                    now = time.time()
                     return self._send({
                         "modes": _take_modes.snapshot(), "league_mode": _take_modes.league,
-                        "requests": [{k: r[k] for k in ("id", "source", "by", "at")}
-                                     for r in _graphic_requests.pending(time.time())]})
+                        "requests": [{"id": r["id"], "source": r["source"], "by": r["by"],
+                                      "left_s": max(0, round(graphic_takes.REQUEST_TTL_S
+                                                             - (now - r["at"])))}
+                                     for r in _graphic_requests.pending(now)]})
                 if p[:2] == ["obs", "flag"]:
                     # Flag-status GRAPHIC toggle (parallel to the flag-text chip).
                     # GET so Companion's Generic-HTTP module hits it directly; the
@@ -11100,6 +11103,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     payload, status = apply_stint_state(relay, relay._obs, p[2])
                     return self._send(payload, status)
                 if len(p) == 4 and p[:2] == ["obs", "graphic"]:
+                    _crew_takes.forget(unquote(p[3]))
                     payload, status = apply_graphic(relay, relay._obs, p[2], unquote(p[3]))
                     return self._send(payload, status)
                 if p[:1] == ["chat"]:
@@ -11730,6 +11734,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 if p == ["obs", "source"]:
                     if _obs_ws is None:
                         return self._send({"error": "obs unavailable"}, 503)
+                    _crew_takes.forget(body.get("source"))
                     ok, note = relay._obs.set_scene_item_enabled(
                         body.get("scene"), body.get("source"), bool(body.get("on")))
                     return self._send({"ok": True} if ok
