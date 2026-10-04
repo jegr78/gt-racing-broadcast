@@ -455,8 +455,8 @@ def t_race_control_map_follows_displayed_stint_on_continuation():
     assert r.on_air_row_idx() == 2
     live = r.live_row_map()
     # the RC/stint-plan highlight is on the DISPLAYED stint (row2), not the pull row (1)
-    sched = m.race_control_schedule(rows, live)
-    assert sched[2]["live"] == "B"      # stint 3 marked live
+    sched = m.race_control_schedule(rows, live, r.on_air_row_idx())
+    assert sched[2]["live"] == "B" and sched[2]["on_air"]   # stint 3 marked live
     assert sched[1]["live"] is None     # stint 2 no longer highlighted
 
 
