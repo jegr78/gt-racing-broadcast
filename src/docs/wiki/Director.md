@@ -531,8 +531,8 @@ below).
 
 Per swap:
 
-1. **Enter the next link early**: ~20–30 min ahead, from the panel's **URLs**
-   section (or the sheet's Schedule tab as a fallback). It just sits there; nothing
+1. **Enter the next link early**: ~20–30 min ahead, from the panel's **Schedule**
+   area (or the sheet's Schedule tab as a fallback). It just sits there; nothing
    pulls yet.
 2. **Arm the incoming (off-air) feed** a few minutes before the swap: press **ARM**
    in the panel's live column (it reads `ARM → STINT 4 (FEED B)` and always targets

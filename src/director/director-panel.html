@@ -180,10 +180,10 @@
   /* Audio rows */
   /* dB rows: a fixed 5-column grid (name, slider, dB, reset, mute) so nothing
      overflows the half-width Audio card. */
-  .arow{display:grid;grid-template-columns:60px minmax(0,1fr) 58px auto auto;align-items:center;gap:8px;
+  .arow{display:grid;grid-template-columns:110px minmax(0,1fr) 58px auto auto;align-items:center;gap:8px;
     padding:6px 0;border-top:1px dashed var(--edge)}
   .arow:first-child{border-top:0}
-  .arow .nm{font-size:11px;color:var(--ink)}
+  .arow .nm{font-size:11px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .arow input[type=range]{width:100%;min-width:0;accent-color:var(--live)}
   .arow .db{font-size:10px;color:var(--muted);text-align:right;font-variant-numeric:tabular-nums}
   .rst,.mute{padding:4px 7px;font-size:9px;letter-spacing:.06em;text-transform:uppercase;
@@ -884,7 +884,7 @@
       </div>
       <div class="area" data-area="setup">
         <details class="bus chat" id="gfxBrowseBox" open>
-          <summary>Graphics<button id="gfxRefresh" class="bcompose" title="Reload the graphics list">⟳ Refresh</button></summary>
+          <summary>Graphics library<button id="gfxRefresh" class="bcompose" title="Reload the graphics list">⟳ Refresh</button></summary>
           <div class="body">
             <div id="gfxList" class="chatlog"><div class="bempty">Loading…</div></div>
             <div class="hint">Read-only: the broadcast still-graphics (Sheet Assets tab).
