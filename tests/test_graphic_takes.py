@@ -175,6 +175,56 @@ def t_policy_keeps_obs_graphics_director_only():
     assert cp.decide(RC, ["obs", "graphics"], "GET") == cp.FORBIDDEN
 
 
+
+def _collection_items(filename):
+    import json
+    with open(os.path.join(ROOT, "src", "obs", filename), encoding="utf-8") as fh:
+        d = json.load(fh)
+    return {sc["name"]: {i["name"] for i in sc["settings"].get("items", [])}
+            for sc in d["sources"] if sc.get("id") == "scene"}
+
+
+def t_panel_catalog_targets_exist_in_their_collections():
+    for solo, files in ((False, ["GT_Racing_Endurance.json"]),
+                        (True, ["GT_Racing_Solo_POV.json", "GT_Racing_Solo_Commentary.json"])):
+        cat = gt.panel_catalog(solo)
+        for filename in files:
+            scenes = _collection_items(filename)
+            for bus in ("graphics", "graphicsPreRace", "graphicsGrid"):
+                for item in cat[bus]:
+                    assert item["source"] in scenes.get(item["scene"], set()), \
+                        f"{filename}: {item['scene']!r} has no {item['source']!r}"
+
+
+def t_panel_catalog_keeps_the_panel_layout():
+    cat = gt.panel_catalog(False)
+    assert [i["label"] for i in cat["graphics"]] == [
+        "HUD", "HUD", "STANDINGS", "SCHEDULE", "RACE RESULTS", "QUALI RESULTS",
+        "RACE WX 1", "RACE WX 2", "QUALI WX", "POST-RACE"], cat["graphics"]
+    assert cat["graphics"][1] == {"label": "HUD", "scene": "Splitscreen", "source": "Split HUD"}
+    assert [i["label"] for i in cat["graphicsPreRace"]] == ["WEEKEND", "RACE INFO", "NEXT EVENT"]
+    grid = cat["graphicsGrid"]
+    assert grid[0] == {"label": "STARTING GRID", "scene": "Stint", "source": "Starting Grid",
+                       "top": True}, grid[0]
+    assert [i["label"] for i in grid[1:]] == [f"GRID R{n}" for n in range(1, 9)]
+    solo = gt.panel_catalog(True)
+    assert [i["source"] for i in solo["graphics"]][:1] == ["Stint HUD"]
+    assert "Split HUD" not in [i["source"] for i in solo["graphics"]], "solo has no Splitscreen"
+    assert {i["scene"] for i in solo["graphicsGrid"]} == {"Program"}
+
+
+def t_panel_catalog_covers_every_companion_graphic():
+    # The Companion route (#706) and the panel must offer the same full-screen stills.
+    sources = {i["source"] for bus in gt.panel_catalog(False).values() for i in bus}
+    missing = set(gt.obs_ws.GRAPHIC_SOURCES) - sources - {"Standby Cover"}
+    assert not missing, f"panel lacks {sorted(missing)}"
+
+
+def t_crew_definitions_are_a_subset_of_the_panel_catalog():
+    sources = {i["source"] for bus in gt.panel_catalog(False).values() for i in bus}
+    crew = {d["source"] for d in gt.definitions(False) if d["group"] == "editorial"}
+    assert crew <= sources, sorted(crew - sources)
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

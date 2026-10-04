@@ -24,6 +24,40 @@ EDITORIAL_PROGRAM = tuple(s for s in obs_ws.GRAPHIC_SOURCES if s not in DIRECTOR
 EDITORIAL_INTERVIEW = ("Post Race Interviews",)
 
 
+# The Director Panel's graphic buses, in its button order and with its short labels.
+PANEL_STANDARD = ("Standings", "Schedule", "Race Results", "Quali Results",
+                  "Race Weather 1", "Race Weather 2", "Quali Weather")
+PANEL_PRE_RACE = ("Weekend Info", "Race Info", "Next Event")
+PANEL_LABELS = {
+    "Stint HUD": "HUD", "Split HUD": "HUD", "Standings": "STANDINGS",
+    "Schedule": "SCHEDULE", "Race Results": "RACE RESULTS",
+    "Quali Results": "QUALI RESULTS", "Race Weather 1": "RACE WX 1",
+    "Race Weather 2": "RACE WX 2", "Quali Weather": "QUALI WX",
+    "Post Race Interviews": "POST-RACE", "Weekend Info": "WEEKEND",
+    "Race Info": "RACE INFO", "Next Event": "NEXT EVENT", "Starting Grid": "STARTING GRID",
+}
+
+
+def panel_catalog(solo):
+    """The Director Panel's graphic buses for the endurance or the solo collection:
+    {"graphics", "graphicsPreRace", "graphicsGrid"}, each a list of
+    {"label", "scene", "source"} (the grid's lead key also has "top")."""
+    program = obs_ws.graphic_scene(solo)
+
+    def key(source, scene):
+        return {"label": PANEL_LABELS.get(source, source.upper()), "scene": scene,
+                "source": source}
+    hud = [key("Stint HUD", program)] + ([] if solo else [key("Split HUD", "Splitscreen")])
+    grid = [dict(key("Starting Grid", program), top=True)]
+    grid += [dict(key(f"Grid Row {n}", program), label=f"GRID R{n}") for n in range(1, 9)]
+    return {
+        "graphics": hud + [key(s, program) for s in PANEL_STANDARD]
+                    + [key("Post Race Interviews", "Interview")],
+        "graphicsPreRace": [key(s, program) for s in PANEL_PRE_RACE],
+        "graphicsGrid": grid,
+    }
+
+
 def normalize_mode(raw):
     """The GRAPHICS_TAKE value, or "off" for a missing or unknown one."""
     mode = (raw or "").strip().lower()

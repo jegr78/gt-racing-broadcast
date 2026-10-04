@@ -4638,8 +4638,9 @@ def apply_graphic(relay, obs_ws, verb, source):
 
 def graphic_takes_view(relay, obs_ws, mode, roles, crew_takes, flag_store, read_state=None):
     """The takeable graphics with their live state. *roles* None is the director's
-    full list; a role set adds "can_take" per graphic for that caller. *read_state*
-    (items) -> (state, note) replaces the direct OBS read, e.g. with a shared cache."""
+    view, which also carries the panel's graphic buses; a role set adds "can_take"
+    per graphic for that caller. *read_state* (items) -> (state, note) replaces the
+    direct OBS read, e.g. with a shared cache."""
     defs = graphic_takes.definitions(getattr(relay, "solo", False))
     items = [(sc, d["source"]) for d in defs if d["flag"] is None for sc in d["scenes"]]
     scene, note, visible = None, "", {}
@@ -4669,6 +4670,8 @@ def graphic_takes_view(relay, obs_ws, mode, roles, crew_takes, flag_store, read_
                                 and (d["flag"] is None or flag_store is not None))
         out.append(item)
     payload = {"mode": mode, "program_scene": scene, "graphics": out}
+    if roles is None:
+        payload["panel"] = graphic_takes.panel_catalog(getattr(relay, "solo", False))
     if note:
         payload["note"] = str(note)
     return payload

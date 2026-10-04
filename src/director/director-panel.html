@@ -372,6 +372,7 @@
                              border-radius: 6px; padding: 6px 9px; font-size: 13px; }
   #gfxBrowseBox #gfxList a:hover { border-color: #3b82f6; }
   #gfxBrowseBox #gfxList .bempty { color: var(--muted); font-size: 11px; }
+  #gfxBus .bempty { color: var(--muted); font-size: 11px; }
   .robadge{font-size:10px;font-weight:500;color:var(--muted);border:1px solid #2a2f3a;
            border-radius:6px;padding:0 5px;margin-left:6px}
   .bcompose { float: right; font: inherit; font-size: 11px; line-height: 1.4;
@@ -998,9 +999,9 @@
    - macros:   PGM bus, the Companion page-1 row-0 semantics
    - scenes:   raw scene switches
    - vis:      feed visibility toggles (scene items)
-   - graphics: overlay toggles. "Stint HUD" and "Split HUD" are the per-scene OBS
-               groups holding Overlay and HUD Overlay, so toggling one hides all.
-   - audio:    OBS audio inputs for the dB rows */
+   - audio:    OBS audio inputs for the dB rows
+   The graphic buses are not here: they come from the relay's panel catalog
+   (GET /obs/graphics), shared with the crew graphic takes. */
 const CONFIG = {
   macros: [
     // rc: the Race Control value written via the relay after the OBS steps, ""
@@ -1033,34 +1034,6 @@ const CONFIG = {
   ],
   vis: [
     {label:"POV",    scene:"Stint", source:"Feed POV", relay:"pov"},
-  ],
-  graphics: [
-    {label:"HUD",           scene:"Stint",       source:"Stint HUD"},
-    {label:"HUD",           scene:"Splitscreen", source:"Split HUD"},
-    {label:"STANDINGS",     scene:"Stint",       source:"Standings"},
-    {label:"SCHEDULE",      scene:"Stint",       source:"Schedule"},
-    {label:"RACE RESULTS",  scene:"Stint",       source:"Race Results"},
-    {label:"QUALI RESULTS", scene:"Stint",       source:"Quali Results"},
-    {label:"RACE WX 1",     scene:"Stint",       source:"Race Weather 1"},
-    {label:"RACE WX 2",     scene:"Stint",       source:"Race Weather 2"},
-    {label:"QUALI WX",      scene:"Stint",       source:"Quali Weather"},
-    {label:"POST-RACE",     scene:"Interview",   source:"Post Race Interviews"},
-  ],
-  graphicsPreRace: [
-    {label:"WEEKEND",    scene:"Stint", source:"Weekend Info"},
-    {label:"RACE INFO",  scene:"Stint", source:"Race Info"},
-    {label:"NEXT EVENT", scene:"Stint", source:"Next Event"},
-  ],
-  graphicsGrid: [
-    {label:"STARTING GRID", scene:"Stint", source:"Starting Grid", top:true},
-    {label:"GRID R1", scene:"Stint", source:"Grid Row 1"},
-    {label:"GRID R2", scene:"Stint", source:"Grid Row 2"},
-    {label:"GRID R3", scene:"Stint", source:"Grid Row 3"},
-    {label:"GRID R4", scene:"Stint", source:"Grid Row 4"},
-    {label:"GRID R5", scene:"Stint", source:"Grid Row 5"},
-    {label:"GRID R6", scene:"Stint", source:"Grid Row 6"},
-    {label:"GRID R7", scene:"Stint", source:"Grid Row 7"},
-    {label:"GRID R8", scene:"Stint", source:"Grid Row 8"},
   ],
   audio: [
     {label:"Feed A",  input:"Feed A"},
@@ -1100,33 +1073,6 @@ const CONFIG_SOLO = {
     // The HUD telemetry block (solo POV): relay state, no OBS item; hidden when the
     // relay serves no telemetry (see the /status handler).
     {label:"TELEMETRY", scene:"HUD", relay:"telemetry"},
-  ],
-  graphics: [
-    {label:"HUD",           scene:"Program",   source:"Stint HUD"},
-    {label:"STANDINGS",     scene:"Program",   source:"Standings"},
-    {label:"SCHEDULE",      scene:"Program",   source:"Schedule"},
-    {label:"RACE RESULTS",  scene:"Program",   source:"Race Results"},
-    {label:"QUALI RESULTS", scene:"Program",   source:"Quali Results"},
-    {label:"RACE WX 1",     scene:"Program",   source:"Race Weather 1"},
-    {label:"RACE WX 2",     scene:"Program",   source:"Race Weather 2"},
-    {label:"QUALI WX",      scene:"Program",   source:"Quali Weather"},
-    {label:"POST-RACE",     scene:"Interview", source:"Post Race Interviews"},
-  ],
-  graphicsPreRace: [
-    {label:"WEEKEND",    scene:"Program", source:"Weekend Info"},
-    {label:"RACE INFO",  scene:"Program", source:"Race Info"},
-    {label:"NEXT EVENT", scene:"Program", source:"Next Event"},
-  ],
-  graphicsGrid: [
-    {label:"STARTING GRID", scene:"Program", source:"Starting Grid", top:true},
-    {label:"GRID R1", scene:"Program", source:"Grid Row 1"},
-    {label:"GRID R2", scene:"Program", source:"Grid Row 2"},
-    {label:"GRID R3", scene:"Program", source:"Grid Row 3"},
-    {label:"GRID R4", scene:"Program", source:"Grid Row 4"},
-    {label:"GRID R5", scene:"Program", source:"Grid Row 5"},
-    {label:"GRID R6", scene:"Program", source:"Grid Row 6"},
-    {label:"GRID R7", scene:"Program", source:"Grid Row 7"},
-    {label:"GRID R8", scene:"Program", source:"Grid Row 8"},
   ],
   audio: [
     {label:"Game",         input:"Solo Capture Device"},
@@ -1246,6 +1192,7 @@ redFlagBtn._item = redFlagItem;
    first and the module-level arrays it populates are reset, so a rebuild never
    duplicates buttons. Called once at load with CONFIG, and once more with CONFIG_SOLO the
    first time /status reports a solo relay (see applySolo()'s builtSolo latch). */
+let graphicCatalog = null;   // the relay's panel catalog, see loadGraphicCatalog()
 let activeConfig = CONFIG;   // the cfg buildControls last ran with. obsStatePoll
                              // reads this, not CONFIG, so a solo build stays in sync.
 function buildControls(cfg){
@@ -1253,10 +1200,6 @@ function buildControls(cfg){
   $("#pgmBus").replaceChildren();
   $("#scnBus").replaceChildren();
   $("#scnVisBus").replaceChildren();
-  $("#gfxBus").replaceChildren();
-  $("#gfxPreRaceBus").replaceChildren();
-  $("#gfxGridTopBus").replaceChildren();
-  $("#gfxGridBus").replaceChildren();
   $("#audio").replaceChildren();
   macroKeys.length = 0;
   toggleKeys.length = 0;
@@ -1297,20 +1240,7 @@ function buildControls(cfg){
     if (item.relay === "telemetry") teleVisBtn = b;
   });
 
-  cfg.graphics.forEach(item=>{
-    const b = mkKey(item.label, item.scene, ()=>toggleSource(item, b));
-    b._item = item; toggleKeys.push(b); $("#gfxBus").appendChild(b);
-  });
-
-  cfg.graphicsPreRace.forEach(item=>{
-    const b = mkKey(item.label, item.scene, ()=>toggleSource(item, b));
-    b._item = item; toggleKeys.push(b); $("#gfxPreRaceBus").appendChild(b);
-  });
-  cfg.graphicsGrid.forEach(item=>{
-    const b = mkKey(item.label, item.scene, ()=>toggleSource(item, b));
-    b._item = item; toggleKeys.push(b);
-    $(item.top ? "#gfxGridTopBus" : "#gfxGridBus").appendChild(b);
-  });
+  buildGraphicBuses();
 
   cfg.audio.forEach(a=>{
     const row = document.createElement("div"); row.className = "arow";
@@ -1338,6 +1268,36 @@ function buildControls(cfg){
   });
 }
 buildControls(CONFIG);
+
+/* Graphic buses (Standard, Pre-race, Grid) from the relay's panel catalog, which
+   already matches the loaded collection, endurance or solo. A rebuild of the other
+   buses calls this again, so the keys survive a solo switch. */
+function buildGraphicBuses(){
+  ["#gfxBus", "#gfxPreRaceBus", "#gfxGridTopBus", "#gfxGridBus"].forEach(id=>$(id).replaceChildren());
+  for (let i = toggleKeys.length - 1; i >= 0; i--) if (toggleKeys[i]._gfx) toggleKeys.splice(i, 1);
+  if (!graphicCatalog){
+    const e = document.createElement("div"); e.className = "bempty";
+    e.textContent = "Waiting for the relay…"; $("#gfxBus").appendChild(e); return;
+  }
+  const add = (item, bus)=>{
+    const b = mkKey(item.label, item.scene, ()=>toggleSource(item, b));
+    b._item = item; b._gfx = true; toggleKeys.push(b); $(bus).appendChild(b);
+  };
+  graphicCatalog.graphics.forEach(item=>add(item, "#gfxBus"));
+  graphicCatalog.graphicsPreRace.forEach(item=>add(item, "#gfxPreRaceBus"));
+  graphicCatalog.graphicsGrid.forEach(item=>add(item, item.top ? "#gfxGridTopBus" : "#gfxGridBus"));
+}
+async function loadGraphicCatalog(){
+  try{
+    const r = await fetch("/obs/graphics", {cache: "no-store"});
+    const d = await r.json();
+    if (!r.ok || !d.panel) throw new Error(r.status);
+    graphicCatalog = d.panel;
+    buildGraphicBuses();
+    obsStatePoll();
+  }catch(e){ setTimeout(loadGraphicCatalog, 3000); }
+}
+loadGraphicCatalog();
 
 FEED_ACTIONS.filter(([label])=>label !== "NEXT").forEach(([label, path, tag])=>{
   const b = mkKey(label, tag, ()=>{
