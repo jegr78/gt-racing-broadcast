@@ -1292,6 +1292,15 @@ def t_hud_steering_wheel_follows_the_angle():
     assert "if (d.steer_deg !== null && d.steer_deg !== undefined) {" in poll
 
 
+
+def t_base_chat_clears_the_race_control_bar():
+    with open(os.path.join(ROOT, "src", "obs", "hud.html"), encoding="utf-8") as fh:
+        css = ob.base_style(fh.read())
+    chat, rc = ob.box_from_css(css, "chat"), ob.box_from_css(css, "race-control")
+    overlap_x = min(chat["left"] + chat["width"], rc["left"] + rc["width"]) - max(chat["left"], rc["left"])
+    overlap_y = min(chat["top"] + chat["height"], rc["top"] + rc["height"]) - max(chat["top"], rc["top"])
+    assert overlap_x <= 0 or overlap_y <= 0, f"stream chat {chat} covers the race-control bar {rc}"
+
 if __name__ == "__main__":
     for n, fn in sorted(globals().items()):
         if n.startswith("t_") and callable(fn):
