@@ -10641,9 +10641,10 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             if timer_store:
                 base["timer"] = timer_store.summary()
             base["event_title"] = event_store.get() if event_store else ""
-            if not relay.solo and relay.mode != "qualifying":
+            feeds = base.get("feeds") or {}
+            if feeds.get("A") and feeds.get("B") and base.get("mode") != "qualifying":
                 base["handover_next"] = handover_next(
-                    base.get("feeds") or {}, schedule_rows(relay),
+                    feeds, schedule_rows(relay),
                     submission_store.list() if submission_store else [])
             if telemetry_store is not None:          # solo POV only; lights the panel toggle
                 base["telemetry"] = {"visible": telemetry_store.visible(),
@@ -11180,7 +11181,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     return self._send(res)
                 if p == ["next"]:
                     transition, duration = next_transition_query(self.path)
-                    result = relay.next_auto(transition=transition, duration_ms=duration)
+                    result = relay.next_auto(**({"transition": transition, "duration_ms": duration}
+                                                if transition else {}))
                     # One-button handover: next_auto cuts OBS back to the Stint
                     # scene itself, so no STINT macro press follows to clear Race
                     # Control. Mirror that macro's rc:"" here when a real cut
