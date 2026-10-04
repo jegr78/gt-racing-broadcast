@@ -439,6 +439,8 @@ def t_graphic_requests_sit_in_the_live_column():
         "requester names come from the Sheet and must not reach innerHTML"
     for role in ("commentator", "race_control"):
         assert f'class="takemode" data-role="{role}"' in h, f"no take mode keys for {role}"
+    assert "#gfxReqSec[hidden]{display:none}" in h, \
+        ".bus sets display:flex, which beats the UA [hidden] rule on an empty queue"
 
 
 AREAS = ("handover", "graphics", "hud", "cues", "audio",
