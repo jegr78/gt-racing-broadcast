@@ -197,24 +197,20 @@ def t_program_preview_self_reschedules_no_wedge():
         "pvStop must clearTimeout the program-preview poll handle (no leaked poll after HIDE)"
 
 
-def t_stint_macros_resolve_on_the_relay_like_companion():
-    # One behaviour for the panel and Companion: STINT A/B cut to Stint themselves
-    # and take visibility, audio and the producer's commentary mic from the relay's
-    # /obs/stint, which knows whether a stint is local. No static feed names and no
-    # client-side mic decision may remain in the macro.
+def t_stint_macro_resolves_the_on_air_feed_on_the_relay():
+    # One STINT macro (#729): the relay's /obs/stint picks the on-air feed and sets
+    # its visibility, audio and the producer's commentary mic. NEXT decides the feed.
     h = _html()
-    for label, feed in (("STINT A", "A"), ("STINT B", "B")):
-        m = re.search(r'\{label:"' + label + r'",[^}]*\}', h)
-        assert m, label
-        macro = m.group(0)
-        assert 'scene:"Stint"' in macro and 'relayStint:"' + feed + '"' in macro, macro
-        assert '"Feed A"' not in macro and '"Feed B"' not in macro, macro
-    # The PGM bus still tells STINT A from STINT B: with no static `show`, the air
-    # light and the state read-back take the picked feed from macroAirSources().
-    assert 'function macroAirSources(m){' in h
-    assert '[[m.scene, "Feed " + m.relayStint]]' in h           # one source of truth
-    # A relay-resolved step such as SPLIT or STINT answers with a note when an input
-    # is missing, for instance the commentary mic of an older collection, and that
+    endurance = _config_block(h, "CONFIG")
+    assert 'label:"STINT A"' not in endurance and 'label:"STINT B"' not in endurance
+    m = re.search(r'\{label:"STINT",[^}]*\}', endurance)
+    assert m and 'scene:"Stint"' in m.group(0) and 'relayStint:"live"' in m.group(0), m
+    assert '"Feed A"' not in m.group(0) and '"Feed B"' not in m.group(0), m.group(0)
+    # The air light follows the relay's on-air feed.
+    src = _func_src(h, "macroAirSources")
+    assert 'const feed = m.relayStint === "live" ? liveFeed : m.relayStint;' in src
+    assert "liveFeed = live;" in _func_src(h, "renderLive")
+    # A relay-resolved step answers with a note when an input is missing, and that
     # note is logged rather than shown only as a red OBS LED.
     assert "function relayStep(what, path, body){" in h
     assert 'relayStep("stint " + m.relayStint, "stint", {feed: m.relayStint})' in h
@@ -223,10 +219,83 @@ def t_stint_macros_resolve_on_the_relay_like_companion():
     assert 'if (why) log(`${what}: ${why}`, d.ok ? "warn" : "err");' in h
     assert "for (const [sc, src] of macroAirSources(m))" in h
     assert "if (air && req.length){" in h
-    for gone in ("stintMicIntent", "feedPlatforms", "micFor", "COMMENTARY_MIC"):
-        assert gone not in h, gone
 
 
+def t_emergency_feed_switch_lives_in_troubleshoot_with_a_confirm():
+    h = _html()
+    endurance = _config_block(h, "CONFIG")
+    for feed in ("A", "B"):
+        m = re.search(r'\{label:"FEED ' + feed + r' ON AIR",[^}]*\}', endurance)
+        assert m and 'relayStint:"' + feed + '"' in m.group(0), feed
+    assert 'id="emergencyBus"' in _area(h, "fault")
+    body = _func_body(h, "buildControls")
+    assert "cfg.emergency.forEach" in body and "if (!confirm(" in body, "the manual switch must be confirmed"
+    assert "emergency: []," in _config_block(h, "CONFIG_SOLO")
+
+
+def t_removed_duplicate_keys():
+    h = _html()
+    for name in ("CONFIG", "CONFIG_SOLO"):
+        cfg = _config_block(h, name)
+        assert "STBY COVER" not in cfg, f"{name}: RED FLAG toggles the Standby Cover"
+    vis = _config_block(h, "CONFIG")
+    assert 'label:"FEED A"' not in vis and 'label:"FEED B"' not in vis, "the emergency switch replaces them"
+
+
+def _macro_scenes(cfg):
+    return set(re.findall(r'label:"[^"]+", scene:"([^"]+)"', cfg)) | \
+        set(re.findall(r'soloMacro\("[^"]+",\s*"([^"]+)"', cfg))
+
+
+def t_every_scene_has_a_macro():
+    h = _html()
+    for name in ("CONFIG", "CONFIG_SOLO"):
+        cfg = _config_block(h, name)
+        raw = re.findall(r'"([^"]+)"', re.search(r"\n  scenes: \[([^\]]*)\]", cfg).group(1))
+        missing = set(raw) - _macro_scenes(cfg)
+        assert not missing, f"{name}: scenes reachable only as a raw key: {missing}"
+
+
+SOLO_AUDIO_TABLE = {   # macro: (unmuted, muted) of Game, Mic and Discord, from the spec
+    "PROGRAM": ({"SOLO_GAME", "SOLO_MIC"}, {"SOLO_DISCORD"}),
+    "INTERVIEW": ({"SOLO_MIC", "SOLO_DISCORD"}, {"SOLO_GAME"}),
+    "STANDBY": ({"SOLO_MIC"}, {"SOLO_GAME", "SOLO_DISCORD"}),
+    "INTERMISSION": ({"SOLO_MIC"}, {"SOLO_GAME", "SOLO_DISCORD"}),
+    "INTRO": (set(), {"SOLO_GAME", "SOLO_MIC", "SOLO_DISCORD"}),
+    "OUTRO": (set(), {"SOLO_GAME", "SOLO_MIC", "SOLO_DISCORD"}),
+    "TRAILER": (set(), {"SOLO_GAME", "SOLO_MIC", "SOLO_DISCORD"}),
+    "DISCORD": ({"SOLO_MIC", "SOLO_DISCORD"}, {"SOLO_GAME"}),
+    "WEBCAM": ({"SOLO_GAME", "SOLO_MIC"}, {"SOLO_DISCORD"}),
+    "CAPTURE": ({"SOLO_GAME", "SOLO_MIC"}, {"SOLO_DISCORD"}),
+}
+
+
+def t_solo_macros_follow_the_spec_audio_table():
+    solo = _config_block(_html(), "CONFIG_SOLO")
+    rows = re.findall(r'soloMacro\("([^"]+)",\s*"[^"]+",\s*\[([^\]]*)\],\s*\[([^\]]*)\]\)', solo)
+    got = {label: ({x.strip() for x in on.split(",") if x.strip()},
+                   {x.strip() for x in off.split(",") if x.strip()}) for label, on, off in rows}
+    assert got == SOLO_AUDIO_TABLE, got
+
+
+def t_solo_audio_inputs_exist_in_both_solo_collections():
+    h = _html()
+    names = dict(re.findall(r'(SOLO_GAME|SOLO_MIC|SOLO_DISCORD) = "([^"]+)"', h))
+    assert set(names) == {"SOLO_GAME", "SOLO_MIC", "SOLO_DISCORD"}, names
+    for filename in ("GT_Racing_Solo_POV.json", "GT_Racing_Solo_Commentary.json"):
+        with open(os.path.join(ROOT, "src", "obs", filename), encoding="utf-8") as fh:
+            sources = {s["name"] for s in json.load(fh)["sources"]}
+        for const, name in names.items():
+            assert name in sources, f"{filename}: no input {name!r} for {const}"
+
+
+def t_endurance_macro_inputs_exist():
+    cfg = _config_block(_html(), "CONFIG")
+    with open(os.path.join(ROOT, "src", "obs", "GT_Racing_Endurance.json"), encoding="utf-8") as fh:
+        sources = {s["name"] for s in json.load(fh)["sources"]}
+    for group in re.findall(r"(?:un)?mute:\[([^\]]*)\]", cfg):
+        for name in re.findall(r'"([^"]+)"', group):
+            assert name in sources, f"macro input {name!r} is not in the endurance collection"
 def t_feed_reset_is_labelled_as_the_backlog_resolution():
     # The one RESET button per feed doubles as the deliberate backlog fix. It jumps
     # OBS back to live, so it says so and shows the cost from /status on each poll,
@@ -410,7 +479,7 @@ def t_cards_sit_in_their_area():
         "broadcast": ("streamSec", "obsStreamBtn", "partControl", "subSec"),
         "schedule": ("urlsBox", "subsBox"),
         "setup": ("gfxBrowseBox",),
-        "fault": ("feedsSec", "feedsBus", "feedQuality", "scnVisSec", "obsToolsSec", "obsRefreshBtn"),
+        "fault": ("feedsSec", "feedsBus", "feedQuality", "emergencySec", "emergencyBus", "scnVisSec", "obsToolsSec", "obsRefreshBtn"),
     }
     for area, ids in homes.items():
         seg = _area(h, area)
@@ -422,7 +491,7 @@ def t_live_column_holds_what_acts_on_air():
     h = _html()
     live = _block(h, '<section id="liveCol"', '<main id="workspace">')
     _order(live, 'id="previewSec"', 'id="liveOnAir"', 'id="armBtn"', 'id="nextBtn"',
-           'id="pgmBus"', 'id="liveSceneSlot"', 'id="txBar"')
+           'id="pgmBus"', 'id="txBar"')
     for cid in ("obsRefreshBtn", "obsStreamBtn", "partControl"):
         assert f'id="{cid}"' not in live, f"#{cid} is not a live control"
     assert 'data-tx="cut"' in live and 'id="txDur"' in live
@@ -505,13 +574,14 @@ def t_live_column_follows_every_status_poll():
     assert "renderLive(d);" in poll and "renderLive(null);" in poll
 
 
-def t_solo_hides_handover_and_lifts_the_scene_keys():
+def t_solo_hides_handover_and_the_feed_switch():
     h = _html()
     hide = h[h.index("Kind-conditional cut (#307)"):]
     hide = hide[:hide.index("{ display: none !important; }")]
     for sel in ("body.solo #handoverCtl", "body.solo #nextStep", "body.solo #feedsSec"):
         assert sel in hide, f"solo must hide {sel}"
-    assert '$("#liveSceneSlot").appendChild($("#scnVisSec"));' in _func_src(h, "soloLayout")
+    assert "body.solo #emergencySec" in hide, "solo has no feed pair to switch"
+    assert "scnVisSec" not in _func_src(h, "soloLayout"), "solo scenes are macros, raw keys stay in Troubleshoot"
     assert "soloLayout();" in _func_src(h, "applySolo")
 
 

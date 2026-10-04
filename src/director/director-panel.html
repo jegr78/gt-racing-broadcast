@@ -468,6 +468,7 @@
   body.solo #modeSwitch,
   body.solo #subsBox,
   body.solo #handoverCtl,
+  body.solo #emergencySec,
   body.solo #nextStep,
   body.solo .navbtn[data-area="handover"],
   body.solo .area[data-area="handover"] { display: none !important; }
@@ -517,8 +518,8 @@
   .liveair{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#ff8080;
     border:1px solid var(--air);border-radius:10px;padding:8px 12px;background:#1a0f0f}
   .liveair b{display:block;color:var(--ink);font:700 19px var(--head);letter-spacing:.04em;text-transform:none}
-  #liveCol .pgm .keys,#liveCol #scnVisSec .keys{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
-  #liveCol .pgm button.k,#liveCol #scnVisSec button.k{min-width:0}
+  #liveCol .pgm .keys{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
+  #liveCol .pgm button.k{min-width:0}
   #liveCol #txBar .keys{flex-wrap:nowrap}
   #liveCol #txBar button.k{min-width:0;flex:1 1 0}
   #handoverCtl{display:flex;flex-direction:column;gap:8px}
@@ -715,7 +716,6 @@
         <button type="button" class="k next" id="nextBtn"><span class="nmain">NEXT</span><span class="nsub" id="nextSub">—</span></button>
       </section>
       <section class="bus pgm"><div class="cap">Scenes</div><div class="keys" id="pgmBus"></div></section>
-      <div id="liveSceneSlot"></div>
       <section class="bus" id="txBar" title="Transition applied to the next scene switch">
         <div class="cap">Transition</div>
         <div class="keys">
@@ -932,9 +932,14 @@
             </div>
           </div>
         </section>
+        <section class="bus" id="emergencySec"><div class="cap">Emergency feed switch</div>
+          <div class="keys" id="emergencyBus"></div>
+          <div class="hint">Only when NEXT cannot hand over. Shows one feed in the Stint scene with its audio; the relay keeps its own on-air feed. STOP per feed sits in the Feeds card above.</div>
+        </section>
         <section class="bus" id="scnVisSec"><div class="cap">Scn·Vis</div>
             <div class="grp"><span class="glbl">Switch scene</span><div class="keys" id="scnBus"></div></div>
             <div class="grp"><span class="glbl">Source visibility</span><div class="keys" id="scnVisBus"></div></div>
+            <div class="hint">Raw scene switch: audio stays as it is. The scene macros in the live column set the audio too.</div>
           </section>
         <section class="bus" id="obsToolsSec"><div class="cap">OBS</div>
           <div class="keys"><button class="k" id="obsRefreshBtn">↻ REFRESH</button></div>
@@ -991,10 +996,9 @@ const CONFIG = {
     // rc: the Race Control value written via the relay after the OBS steps, ""
     // clearing it. Unconditional, mirroring the Companion combos: SPLIT stamps
     // "Driver Swaps" and cutting back to a stint clears whatever is shown.
-    // STINT A/B resolve on the relay like SPLIT and like the Companion buttons:
+    // STINT resolves on the relay like SPLIT: the on-air feed (NEXT picks it), its
     // visibility, audio and the producer's commentary mic of a local stint.
-    {label:"STINT A", scene:"Stint", show:[], hide:[], relayStint:"A", rc:""},
-    {label:"STINT B", scene:"Stint", show:[], hide:[], relayStint:"B", rc:""},
+    {label:"STINT", scene:"Stint", show:[], hide:[], relayStint:"live", rc:""},
     {label:"SPLIT", scene:"Splitscreen", show:[], hide:[],
      relaySplit:true, rc:"Driver Swaps"},   // the relay resolves visibility and audio from the on-air slot (#591)
     {label:"INTERVIEW", scene:"Interview", show:[], hide:[],
@@ -1012,9 +1016,12 @@ const CONFIG = {
                             // this scene, so muting them forces a manual reset later.
   ],
   scenes: ["Stint","Splitscreen","Interview","Standby"],
+  // Troubleshoot only: cut the Stint scene to one feed by hand (confirmed).
+  emergency: [
+    {label:"FEED A ON AIR", scene:"Stint", show:[], hide:[], relayStint:"A", rc:""},
+    {label:"FEED B ON AIR", scene:"Stint", show:[], hide:[], relayStint:"B", rc:""},
+  ],
   vis: [
-    {label:"FEED A", scene:"Stint", source:"Feed A"},
-    {label:"FEED B", scene:"Stint", source:"Feed B"},
     {label:"POV",    scene:"Stint", source:"Feed POV", relay:"pov"},
   ],
   graphics: [
@@ -1027,7 +1034,6 @@ const CONFIG = {
     {label:"RACE WX 1",     scene:"Stint",       source:"Race Weather 1"},
     {label:"RACE WX 2",     scene:"Stint",       source:"Race Weather 2"},
     {label:"QUALI WX",      scene:"Stint",       source:"Quali Weather"},
-    {label:"STBY COVER",    scene:"Stint",       source:"Standby Cover"},
     {label:"POST-RACE",     scene:"Interview",   source:"Post Race Interviews"},
   ],
   graphicsPreRace: [
@@ -1056,11 +1062,26 @@ const CONFIG = {
 };
 
 /* CONFIG_SOLO is the solo OBS control set, derived from the `GT Racing Solo`
-   collection (#303). No A/B feeds and no macros, because solo has no feed-swap
-   workflow. It is built onto the busses in place of CONFIG the first time /status
-   reports solo (see applySolo()'s builtSolo latch); endurance is unaffected. */
+   collections (#303). No A/B feeds. It is built onto the busses in place of CONFIG
+   the first time /status reports solo (see applySolo()'s builtSolo latch). */
+const SOLO_GAME = "Solo Capture Device", SOLO_MIC = "Commentary Mic Device",
+      SOLO_DISCORD = "Discord Audio Capture";
+const soloMacro = (label, scene, unmute, mute) => ({label, scene, show:[], hide:[], unmute, mute});
 const CONFIG_SOLO = {
-  macros: [],
+  // The solo audio table of the #723 spec: every macro sets Game, Mic and Discord.
+  macros: [
+    soloMacro("PROGRAM",      "Program",      [SOLO_GAME, SOLO_MIC], [SOLO_DISCORD]),
+    soloMacro("INTERVIEW",    "Interview",    [SOLO_MIC, SOLO_DISCORD], [SOLO_GAME]),
+    soloMacro("STANDBY",      "Standby",      [SOLO_MIC], [SOLO_GAME, SOLO_DISCORD]),
+    soloMacro("INTERMISSION", "Intermission", [SOLO_MIC], [SOLO_GAME, SOLO_DISCORD]),
+    soloMacro("INTRO",        "Intro",        [], [SOLO_GAME, SOLO_MIC, SOLO_DISCORD]),
+    soloMacro("OUTRO",        "Outro",        [], [SOLO_GAME, SOLO_MIC, SOLO_DISCORD]),
+    soloMacro("TRAILER",      "Trailer",      [], [SOLO_GAME, SOLO_MIC, SOLO_DISCORD]),
+    soloMacro("DISCORD",      "Discord",      [SOLO_MIC, SOLO_DISCORD], [SOLO_GAME]),
+    soloMacro("WEBCAM",       "Solo Webcam",  [SOLO_GAME, SOLO_MIC], [SOLO_DISCORD]),
+    soloMacro("CAPTURE",      "Solo Capture", [SOLO_GAME, SOLO_MIC], [SOLO_DISCORD]),
+  ],
+  emergency: [],
   scenes: ["Program","Interview","Standby","Intermission","Intro","Outro","Trailer",
            "Discord","Solo Webcam","Solo Capture"],
   vis: [
@@ -1079,7 +1100,6 @@ const CONFIG_SOLO = {
     {label:"RACE WX 1",     scene:"Program",   source:"Race Weather 1"},
     {label:"RACE WX 2",     scene:"Program",   source:"Race Weather 2"},
     {label:"QUALI WX",      scene:"Program",   source:"Quali Weather"},
-    {label:"STBY COVER",    scene:"Program",   source:"Standby Cover"},
     {label:"POST-RACE",     scene:"Interview", source:"Post Race Interviews"},
   ],
   graphicsPreRace: [
@@ -1241,6 +1261,17 @@ function buildControls(cfg){
   if (cfg.redFlag){ redFlagItem.scene = cfg.redFlag.scene; redFlagItem.source = cfg.redFlag.source; }
   toggleKeys.push(redFlagBtn);
   $("#pgmBus").appendChild(redFlagBtn);
+
+  $("#emergencyBus").replaceChildren();
+  cfg.emergency.forEach(m=>{
+    const b = mkKey(m.label, "emergency", ()=>{
+      if (!confirm(`${m.label}: cut the Stint scene to Feed ${m.relayStint} by hand? ` +
+                   "The relay keeps its own on-air feed, so NEXT and the HUD do not follow."))
+        return;
+      runMacro(m);
+    });
+    b._m = m; macroKeys.push(b); $("#emergencyBus").appendChild(b);
+  });
 
   cfg.scenes.forEach(name=>{
     const b = mkKey(name.toUpperCase(), "scene",
@@ -1578,7 +1609,9 @@ function renderStreamBtn(s){
 /* The sources that must be visible for a macro to count as on air. A relay-driven
    STINT has no static `show`; the feed it picks is the one that must be visible. */
 function macroAirSources(m){
-  return m.relayStint ? [[m.scene, "Feed " + m.relayStint]] : m.show;
+  if (!m.relayStint) return m.show;
+  const feed = m.relayStint === "live" ? liveFeed : m.relayStint;
+  return feed ? [[m.scene, "Feed " + feed]] : [];
 }
 
 /* A relay-resolved step (SPLIT, STINT). The relay applies several OBS changes and
@@ -3084,6 +3117,7 @@ function updateSetupBadge(){
    before this block during boot. */
 var lastPending = [];       // /submissions pending list, kept by subsPoll
 var schedRows = [];         // /schedule/data rows, for the Handover area
+var liveFeed = null;        // the relay's on-air feed, for the STINT macro's air light
 var AREA_KEY = "rc_area", NAV_KEY = "rc_nav_collapsed", SPLIT_KEY = "rc_chat_split";
 var NAV_AUTO = matchMedia("(min-width:900px) and (max-width:1599px)");
 var DRAWER_MQ = matchMedia("(max-width:1279px)");
@@ -3262,6 +3296,7 @@ function renderLive(d){
   if (d.solo === true){ $("#liveOnAir b").textContent = programScene || "—"; return; }
   if (!d.feeds || !d.feeds.A) return;
   const live = d.feeds.A.index <= d.feeds.B.index ? "A" : "B";   // the relay's live_feed()
+  liveFeed = live;
   const off = live === "A" ? "B" : "A";
   const lf = d.feeds[live], of = d.feeds[off];
   const qual = d.mode === "qualifying";
@@ -3304,10 +3339,8 @@ async function handoverPoll(){
     if (Array.isArray(d.rows)) schedRows = d.rows;
   }catch(e){ /* relay unreachable: keep the last rows */ }
 }
-// Solo: no handover, Graphics is the default area, and until #729 turns scenes into
-// macros the scene keys are solo's only scene control, so they join the live column.
+// Solo: no handover, so Graphics is the default area.
 function soloLayout(){
-  $("#liveSceneSlot").appendChild($("#scnVisSec"));
   showArea(recall(AREA_KEY) || "graphics");
 }
 applyNavCollapse();
