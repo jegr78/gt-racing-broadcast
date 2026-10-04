@@ -71,7 +71,7 @@ def read_marker(dest):
 
 
 def _bundled_entries(zip_path, dest):
-    """(zipfile, [(name, target path)]) for every safe manifest entry, or None when
+    """(manifest, [(name, target path)]) for every safe manifest entry, or None when
     zip_path carries no manifest. Entries failing font_name_ok or realpath
     containment in dest are dropped."""
     manifest = read_manifest(zip_path)

@@ -2052,6 +2052,16 @@ def t_api_ps_save_rejects_bad_ip():
 
 
 
+def t_restore_fonts_button_confirms_before_forcing():
+    with open(os.path.join(ROOT, "src", "ui", "control-center.html"), encoding="utf-8") as fh:
+        html = fh.read()
+    assert 'id="font-restore" onclick="restoreBundledFonts()"' in html, "the Settings button must call restoreBundledFonts"
+    fn = html[html.index("async function restoreBundledFonts()"):]
+    fn = fn[:fn.index("\n}\n")]
+    assert fn.index("confirmModal(") < fn.index("fetch('/api/fonts/restore'"), "the overwrite must be confirmed first"
+    assert "JSON.stringify({force: true})" in fn, "the button must request the forced restore"
+
+
 def t_every_button_icon_is_styled():
     # An unstyled inline SVG renders as a black filled shape that fills the button.
     with open(os.path.join(ROOT, "src", "ui", "control-center.html"), encoding="utf-8") as fh:

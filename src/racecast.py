@@ -4389,7 +4389,7 @@ def fonts_cmd(rest):
     extra = [a for a in rest[1:] if a not in ("--force", "-f")]
     if extra:
         sys.exit(f"racecast: unknown option: {extra[0]}")
-    force = len(rest) > 1          # every remaining arg is --force/-f
+    force = any(a in ("--force", "-f") for a in rest[1:])
     d = restore_bundled_fonts_data(force=force)
     if not d["ok"]:
         sys.exit(f"racecast: {d['error']}")
