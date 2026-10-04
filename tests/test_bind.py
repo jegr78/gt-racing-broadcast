@@ -165,6 +165,57 @@ def t_main_probes_control_port_before_refresh_and_logs_league():
     assert '(args.league_name or "?")' in src                    # start line uses the injected name
 
 
+def t_control_server_queues_a_browser_burst():
+    # A panel tab opens a dozen parallel requests; the stdlib backlog of 5 reset
+    # the overflow on macOS (Failed to fetch, #764).
+    import socket, threading
+    from http.server import BaseHTTPRequestHandler
+
+    class Ok(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200); self.send_header("Content-Length", "2"); self.end_headers()
+            self.wfile.write(b"ok")
+        def log_message(self, *a):
+            pass
+
+    assert m.QuietThreadingHTTPServer.request_queue_size >= 128, \
+        "the control server needs a listen backlog for a browser's parallel polls"
+    srv = m.QuietThreadingHTTPServer(("127.0.0.1", 0), Ok)
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    errors = []
+    def one():
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=10) as c:
+                c.sendall(b"GET / HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+                if not c.recv(64).startswith(b"HTTP/1.0 200"):
+                    errors.append("bad reply")
+        except OSError as exc:
+            errors.append(type(exc).__name__)
+    try:
+        threads = [threading.Thread(target=one) for _ in range(40)]
+        for t in threads: t.start()
+        for t in threads: t.join()
+    finally:
+        srv.shutdown(); srv.server_close()
+    assert errors == [], f"40 parallel connections must all be served, got {errors}"
+
+
+def t_no_http_server_in_src_keeps_the_stdlib_backlog():
+    import re
+    bare = []
+    for dirpath, _, files in os.walk(os.path.join(ROOT, "src")):
+        for fn in files:
+            if not fn.endswith(".py"):
+                continue
+            path = os.path.join(dirpath, fn)
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+            for mo in re.finditer(r"\b(?:Threading)?(?:HTTP|TCP)Server\(\(", text):
+                bare.append(f"{os.path.relpath(path, ROOT)}:{text.count(chr(10), 0, mo.start()) + 1}")
+    assert bare == [], f"construct a subclass with request_queue_size set, not the stdlib default of 5: {bare}"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

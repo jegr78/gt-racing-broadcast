@@ -1598,6 +1598,15 @@ def t_fonts_restore_route_passes_only_a_literal_true_force():
         httpd.shutdown()
 
 
+def t_ui_server_queues_a_browser_burst():
+    httpd, _ = _serve(_ctx())
+    try:
+        assert httpd.request_queue_size >= 128, \
+            "the Control Center fires parallel fetches; the stdlib backlog of 5 resets them"
+    finally:
+        httpd.shutdown()
+
+
 def t_overlay_fonts_list_includes_library():
     httpd, port = _serve(_ctx())
     try:

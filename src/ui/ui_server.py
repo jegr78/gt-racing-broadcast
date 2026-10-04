@@ -1102,11 +1102,16 @@ def make_handler(ctx):
     return Handler
 
 
+class UiHTTPServer(ThreadingHTTPServer):
+    """The stdlib listen backlog of 5 resets a browser's parallel requests."""
+    request_queue_size = 128
+
+
 def serve(ctx, host, port):
     """Build the server (caller runs serve_forever) and install ctx['shutdown'].
     Raises OSError when the port is taken; callers turn that into the
     RACECAST_UI_PORT hint."""
-    httpd = ThreadingHTTPServer((host, port), make_handler(ctx))
+    httpd = UiHTTPServer((host, port), make_handler(ctx))
     httpd.daemon_threads = True                  # SSE threads die with the process
     ctx["shutdown"] = httpd.shutdown
     return httpd

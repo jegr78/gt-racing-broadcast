@@ -9980,7 +9980,9 @@ class QuietThreadingHTTPServer(ThreadingHTTPServer):
     response. The stdlib's handle_error() dumps a full traceback for the
     ConnectionAbortedError that wfile.flush() raises after the client is gone
     (issue #25: the HUD/timer browser sources poll and close constantly), which
-    floods the relay console with noise that looks like a crash."""
+    floods the relay console with noise that looks like a crash. The listen backlog
+    is raised from the stdlib's 5, which reset a panel tab's parallel polls (#764)."""
+    request_queue_size = 128
     def handle_error(self, request, client_address):
         if _benign_client_disconnect(sys.exc_info()[1]):
             return                       # client went away, nothing to report
