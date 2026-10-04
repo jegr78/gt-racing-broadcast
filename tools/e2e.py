@@ -198,42 +198,56 @@ def render_cockpit_phone(ctx, headed=False, slowmo=0):
     return E.CheckResult(name, "pass", "")
 
 
+class _NextRecorder:
+    """Collects the /next requests a page sends; the browser fills it from a callback."""
+
+    def __init__(self):
+        self.urls = []
+
+    def on_request(self, request):
+        if "/next" in request.url.split("?")[0]:
+            self.urls.append(request.url)
+
+    def sent(self):
+        return list(self.urls)
+
+
 def render_panel_shortcut_confirm(ctx, headed=False, slowmo=0):
     """Director Panel keyboard shortcuts (#731): with the keys switched on, one N
     press sends no /next, a confirmed second press sends exactly one, and N typed
     into a text field sends none."""
     from playwright.sync_api import sync_playwright  # noqa: PLC0415  optional, lazy
     name = "render_panel_shortcut_confirm"
-    nexts = []
+    nexts = _NextRecorder()
     try:
         with sync_playwright() as pw:
             browser = pw.chromium.launch(headless=not headed, slow_mo=slowmo)
             try:
                 page = browser.new_page()
-                page.on("request", lambda r: nexts.append(r.url)
-                        if "/next" in r.url.split("?")[0] else None)
+                page.on("request", nexts.on_request)
                 page.goto(ctx.relay_url + "/panel", wait_until="domcontentloaded")
                 page.wait_for_selector("#nextBtn", state="visible", timeout=10000)
                 page.click("#kbdBtn")
                 page.keyboard.press("n")
                 page.wait_for_timeout(2000)                  # past the confirm window
-                if nexts:
-                    return E.CheckResult(name, "fail", f"a single N press sent {nexts}")
+                if nexts.sent():
+                    return E.CheckResult(name, "fail", f"a single N press sent {nexts.sent()}")
                 page.focus("#chatInput")                     # always visible in the rail
                 if page.evaluate("document.activeElement.id") != "chatInput":
                     return E.CheckResult(name, "fail", "could not focus the chat input")
                 page.keyboard.press("n")
                 page.keyboard.press("n")
                 page.wait_for_timeout(500)
-                if nexts:
-                    return E.CheckResult(name, "fail", f"N typed into a text field sent {nexts}")
+                if nexts.sent():
+                    return E.CheckResult(name, "fail", f"N typed into a text field sent {nexts.sent()}")
                 page.evaluate("document.activeElement.blur()")
                 page.keyboard.press("n")
                 page.wait_for_timeout(200)
                 page.keyboard.press("n")
                 page.wait_for_timeout(1500)
-                if len(nexts) != 1:
-                    return E.CheckResult(name, "fail", f"a confirmed N sent {len(nexts)} /next calls")
+                if len(nexts.sent()) != 1:
+                    return E.CheckResult(name, "fail",
+                                         f"a confirmed N sent {len(nexts.sent())} /next calls")
             finally:
                 browser.close()
     except Exception as exc:  # noqa: BLE001  a render failure is a check failure
