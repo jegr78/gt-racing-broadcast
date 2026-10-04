@@ -71,7 +71,16 @@ Control is an **unauthenticated** `ThreadingHTTPServer` on port `8088` exposing 
 endpoints (`/next`, `/reload`, `/set/A/<n>`, `/pov/reload`, `/timer/*`, `/status`,
 `/panel`, plus the served pages `/hud`, `/splitscreen` and the per-league overlay assets
 `/hud/override.css`, `/splitscreen/override.css`, `/overlay/fonts/<file>`, …)
-driven by Companion's Generic-HTTP module. `--bind` defaults to **`auto`** (plug &
+driven by Companion's Generic-HTTP module. `/next?transition=<cut|fade|stinger>&duration=<ms>`
+(the panel, #730) cuts with that transition via `obs_ws.select_transition`; a bare
+`/next` (Companion) keeps the hard cut. For the panel `/status` adds `handover_next`
+(off-air feed, its stint, `link`, `pending` submission; dropped for non-director console
+roles) and, in solo, `template`. `POST /obs/stint {"feed":X,"take":true}` (the panel's
+emergency switch) also makes X the relay's on-air feed once OBS took the change
+(`Relay.take_on_air`: X's row goes on air, the other feed moves to the next slot and
+stops under manual arm); Companion's GET form never takes. `/preview/source/<key>`
+serves solo tiles from an allowlist (`SOLO_PREVIEW_SOURCES`: capture, webcam, tyres for
+commentary only) through `get_source_screenshot`. `--bind` defaults to **`auto`** (plug &
 play): it binds `127.0.0.1` (OBS always reaches the HUD/feeds on the fixed loopback
 address: the OBS collection never needs editing) **and** this machine's Tailscale IP
 (auto-detected via `detect_tailscale_ip()`, the `100.64.0.0/10` CGNAT range) when
