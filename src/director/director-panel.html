@@ -520,7 +520,7 @@
 </style>
 </head>
 <body>
-<div class="wrap">
+<div class="app">
 
   <header>
     <a class="back" id="backConsole" href="#" hidden aria-label="Back to Console">
@@ -541,6 +541,8 @@
     </div>
     <div class="led"><span class="dot" id="ledObs"></span>OBS</div>
     <div class="led"><span class="dot" id="ledRelay"></span>Relay</div>
+    <button type="button" id="chatDrawerBtn" class="drawerbtn" aria-expanded="false"
+            aria-controls="chatRail">Chats <span class="unread" id="drawerUnread" hidden>0</span></button>
     <div class="appmeta">
       <a class="ver" href="https://github.com/jegr78/gt-racing-broadcast/releases"
          target="_blank" rel="noopener" title="Running racecast version. View releases">__RC_VERSION__ ↗</a>
@@ -560,305 +562,325 @@
 
   <div id="banners"></div>
 
-
-  <div class="panes">
-  <div class="mainpane">
-
-  <div class="deck">
-
-  <section class="bus preview" id="previewSec">
-    <div class="cap">Live Preview
-      <button class="k" id="pvToggle">SHOW</button>
-      <button class="k stream" id="obsStreamBtn" hidden>OFFLINE</button>
-      <div id="partControl" class="partctl" hidden>
-        <span id="partStatus" class="partstatus">Part —</span>
-        <button class="k stream" id="partActionBtn" hidden>Start Part 1</button>
-      </div></div>
-    <div class="pvbody" id="pvBody" hidden>
-      <div class="pvprog">
-        <div class="pvframe" id="pvProgramFrame">
-          <img id="pvProgram" alt="Program output">
-          <div class="pvph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="19" height="12" rx="2"></rect><path d="M10 8.5l4.5 2.5-4.5 2.5z" fill="currentColor" stroke="none"></path><path d="M8.5 20h7"></path><path d="M12 16.5V20"></path></svg><span class="pvphtxt">Program loading …</span></div>
+  <div class="frame">
+    <nav id="areaNav" aria-label="Panel areas">
+      <button type="button" id="navCollapse" class="navcollapse" aria-expanded="true"
+              title="Collapse or expand the navigation">«</button>
+      <div class="navgrp"><span class="navhead">On air</span>
+        <button type="button" class="navbtn" data-area="handover" data-short="H"><span class="ndot"></span><span class="nlbl">Handover<small class="nwhy"></small></span></button>
+        <button type="button" class="navbtn" data-area="graphics" data-short="G"><span class="ndot"></span><span class="nlbl">Graphics<small class="nwhy"></small></span></button>
+        <button type="button" class="navbtn" data-area="hud" data-short="U"><span class="ndot"></span><span class="nlbl">HUD<small class="nwhy"></small></span></button>
+        <button type="button" class="navbtn" data-area="cues" data-short="C"><span class="ndot"></span><span class="nlbl">Cues<small class="nwhy"></small></span></button>
+        <button type="button" class="navbtn" data-area="audio" data-short="A"><span class="ndot"></span><span class="nlbl">Audio<small class="nwhy"></small></span></button>
+      </div>
+      <div class="navgrp"><span class="navhead">Operations</span>
+        <button type="button" class="navbtn" data-area="broadcast" data-short="B"><span class="ndot"></span><span class="nlbl">Broadcast<small class="nwhy"></small></span></button>
+        <button type="button" class="navbtn" data-area="schedule" data-short="S"><span class="ndot"></span><span class="nlbl">Schedule<small class="nwhy"></small></span></button>
+        <button type="button" class="navbtn" data-area="setup" data-short="T"><span class="ndot"></span><span class="nlbl">Setup<small class="nwhy"></small></span></button>
+        <button type="button" class="navbtn" data-area="fault" data-short="!"><span class="ndot"></span><span class="nlbl">Troubleshoot<small class="nwhy"></small></span></button>
+      </div>
+    </nav>
+    <section id="liveCol" aria-label="Live">
+      <section class="bus preview" id="previewSec">
+        <div class="cap">Program
+          <button class="k" id="pvToggle">SHOW</button></div>
+        <div class="pvbody" id="pvBody" hidden>
+          <div class="pvprog">
+            <div class="pvframe" id="pvProgramFrame">
+              <img id="pvProgram" alt="Program output">
+              <div class="pvph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="19" height="12" rx="2"></rect><path d="M10 8.5l4.5 2.5-4.5 2.5z" fill="currentColor" stroke="none"></path><path d="M8.5 20h7"></path><path d="M12 16.5V20"></path></svg><span class="pvphtxt">Program loading …</span></div>
+            </div>
+            <div class="pvlabel" id="pvProgramLabel"><span>PROGRAM</span></div>
+          </div>
+          <div class="pvfeeds">
+            <div class="pvtile" data-feed="A">
+              <div class="pvframe"><img alt="Feed A">
+                <div class="pvph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="19" height="12" rx="2"></rect><path d="M10 8.5l4.5 2.5-4.5 2.5z" fill="currentColor" stroke="none"></path><path d="M8.5 20h7"></path><path d="M12 16.5V20"></path></svg><span class="pvphtxt">Load still</span></div></div>
+              <div class="pvbar"><span class="pvbarfill"></span></div>
+              <div class="pvlabel"><span>FEED A</span><button class="k pvtoggle" data-feed="A">PAUSE</button></div></div>
+            <div class="pvtile" data-feed="B">
+              <div class="pvframe"><img alt="Feed B">
+                <div class="pvph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="19" height="12" rx="2"></rect><path d="M10 8.5l4.5 2.5-4.5 2.5z" fill="currentColor" stroke="none"></path><path d="M8.5 20h7"></path><path d="M12 16.5V20"></path></svg><span class="pvphtxt">Load still</span></div></div>
+              <div class="pvbar"><span class="pvbarfill"></span></div>
+              <div class="pvlabel"><span>FEED B</span><button class="k pvtoggle" data-feed="B">PAUSE</button></div></div>
+            <div class="pvtile" data-feed="POV">
+              <div class="pvframe"><img alt="POV">
+                <div class="pvph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="19" height="12" rx="2"></rect><path d="M10 8.5l4.5 2.5-4.5 2.5z" fill="currentColor" stroke="none"></path><path d="M8.5 20h7"></path><path d="M12 16.5V20"></path></svg><span class="pvphtxt">Load still</span></div></div>
+              <div class="pvbar"><span class="pvbarfill"></span></div>
+              <div class="pvlabel"><span>POV</span><button class="k pvtoggle" data-feed="POV">PAUSE</button></div></div>
+          </div>
+          <div id="pgmAudioBar" style="display:none; align-items:center; gap:8px; margin-top:2px;">
+            <button class="k" id="pgmAudioBtn" type="button" aria-pressed="false" title="Listen to on-air audio">🔇 Audio</button>
+            <input id="pgmAudioVol" type="range" min="0" max="1" step="0.05" value="0.8"
+                   aria-label="Program audio volume" style="width:110px;">
+            <audio id="pgmAudio" preload="none" style="display:none;"></audio>
+          </div>
         </div>
-        <div class="pvlabel" id="pvProgramLabel"><span>PROGRAM</span></div>
+      </section>
+      <div class="onair" id="liveOnAir">ON AIR <b>—</b></div>
+      <section class="bus pgm"><div class="cap">Scenes</div><div class="keys" id="pgmBus"></div></section>
+      <div id="liveSceneSlot"></div>
+      <section class="bus" id="txBar" title="Transition applied to the next scene switch">
+        <div class="cap">Transition</div>
+        <div class="keys">
+          <button class="k tx" data-tx="cut">CUT</button>
+          <button class="k tx" data-tx="fade">FADE</button>
+          <button class="k tx" data-tx="stinger">STINGER</button>
+          <label class="txdur">dur <input id="txDur" type="number" min="0" max="10000"
+                 step="50" value="300"> ms</label>
+        </div>
+      </section>
+      <section class="bus" id="handoverCtl" aria-label="Handover">
+        <button type="button" class="k armkey" id="armBtn" hidden>ARM</button>
+        <button type="button" class="k next" id="nextBtn"><span class="nmain">NEXT</span><span class="nsub" id="nextSub">—</span></button>
+      </section>
+    </section>
+    <main id="workspace">
+      <div class="nextstep" id="nextStep" hidden><span class="nslbl">Next step</span><span id="nextStepText"></span></div>
+      <div class="area" data-area="handover">
+        <section class="bus" id="handoverSec"><div class="cap">Handover</div>
+          <div class="hocards"><div class="hocard air" id="hoOnAir"></div><div class="hocard" id="hoNext"></div></div>
+          <div id="hoUpcoming"></div>
+        </section>
       </div>
-      <div class="pvfeeds">
-        <div class="pvtile" data-feed="A">
-          <div class="pvframe"><img alt="Feed A">
-            <div class="pvph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="19" height="12" rx="2"></rect><path d="M10 8.5l4.5 2.5-4.5 2.5z" fill="currentColor" stroke="none"></path><path d="M8.5 20h7"></path><path d="M12 16.5V20"></path></svg><span class="pvphtxt">Load still</span></div></div>
-          <div class="pvbar"><span class="pvbarfill"></span></div>
-          <div class="pvlabel"><span>FEED A</span><button class="k pvtoggle" data-feed="A">PAUSE</button></div></div>
-        <div class="pvtile" data-feed="B">
-          <div class="pvframe"><img alt="Feed B">
-            <div class="pvph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="19" height="12" rx="2"></rect><path d="M10 8.5l4.5 2.5-4.5 2.5z" fill="currentColor" stroke="none"></path><path d="M8.5 20h7"></path><path d="M12 16.5V20"></path></svg><span class="pvphtxt">Load still</span></div></div>
-          <div class="pvbar"><span class="pvbarfill"></span></div>
-          <div class="pvlabel"><span>FEED B</span><button class="k pvtoggle" data-feed="B">PAUSE</button></div></div>
-        <div class="pvtile" data-feed="POV">
-          <div class="pvframe"><img alt="POV">
-            <div class="pvph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="19" height="12" rx="2"></rect><path d="M10 8.5l4.5 2.5-4.5 2.5z" fill="currentColor" stroke="none"></path><path d="M8.5 20h7"></path><path d="M12 16.5V20"></path></svg><span class="pvphtxt">Load still</span></div></div>
-          <div class="pvbar"><span class="pvbarfill"></span></div>
-          <div class="pvlabel"><span>POV</span><button class="k pvtoggle" data-feed="POV">PAUSE</button></div></div>
+      <div class="area" data-area="graphics">
+        <section class="bus"><div class="cap">Graphics</div>
+          <div class="grp"><span class="glbl">Standard</span><div class="keys" id="gfxBus"></div></div>
+          <div class="grp"><span class="glbl">Pre-race</span><div class="keys" id="gfxPreRaceBus"></div></div>
+          <div class="grp"><span class="glbl">Grid</span>
+            <div class="keys" id="gfxGridTopBus"></div>
+            <div class="keys" id="gfxGridBus"></div>
+          </div>
+          <div class="grp"><span class="glbl">Flag graphic, one active</span><div class="keys" id="flagGfxBus"></div></div>
+        </section>
       </div>
-      <div id="pgmAudioBar" style="display:none; align-items:center; gap:8px; margin-top:2px;">
-        <button class="k" id="pgmAudioBtn" type="button" aria-pressed="false" title="Listen to on-air audio">🔇 Audio</button>
-        <input id="pgmAudioVol" type="range" min="0" max="1" step="0.05" value="0.8"
-               aria-label="Program audio volume" style="width:110px;">
-        <audio id="pgmAudio" preload="none" style="display:none;"></audio>
+      <div class="area" data-area="hud">
+        <section class="bus" id="hudBus"><div class="cap">HUD</div>
+          <div class="body">
+            <div class="setrow" id="setupRow"></div>
+            <div class="setrow" id="teamRow"></div>
+            <div class="setrow" id="condRow"></div>
+            <div class="hint" id="setupInfo">HUD: connecting to relay…</div>
+          </div>
+        </section>
+        <section class="bus"><div class="cap">Timer</div>
+          <div class="body">
+            <div class="keys" id="timerBus"></div>
+            <div class="hint" id="timerInfo">Timer: connecting to relay…</div>
+          </div>
+        </section>
       </div>
-    </div>
-  </section>
+      <div class="area" data-area="cues">
+        <section class="bus" id="cuesBus"><div class="cap">Cues</div>
+          <div class="cues2">
+            <div class="cuescol">
+              <div class="cue-compose">
+                <select id="cueTarget" aria-label="Cue target">
+                  <option value="all">All</option>
+                  <option value="on-air">On air</option>
+                </select>
+                <select id="cueLevel" aria-label="Cue level">
+                  <option value="info">Info</option>
+                  <option value="critical">Critical</option>
+                </select>
+                <input id="cueText" type="text" maxlength="200" placeholder="Cue text…">
+                <button id="cueSend" type="button">SEND CUE</button>
+              </div>
+              <div id="cuePresets"></div>
+            </div>
+            <div class="cuescol">
+              <ul id="cueRecent"></ul>
+              <div class="cueback" id="cueBackWrap" hidden>
+                <div class="cueback-cap">From commentators</div>
+                <ul id="cueBackList"></ul>
+              </div>
+            </div>
+          </div>
+          <div class="hint" id="cueHint">Send a text cue to a commentator or all commentators. Critical cues require acknowledgement in the cockpit. Commentator replies appear under “From commentators”.</div>
+        </section>
+      </div>
+      <div class="area" data-area="audio">
+        <section class="bus"><div class="cap">Audio</div><div class="body" id="audio"></div></section>
+      </div>
+      <div class="area" data-area="broadcast">
+        <section class="bus" id="streamSec"><div class="cap">Stream</div>
+          <div class="keys">
+            <button class="k stream" id="obsStreamBtn" hidden>OFFLINE</button>
+            <div id="partControl" class="partctl" hidden>
+              <span id="partStatus" class="partstatus">Part —</span>
+              <button class="k stream" id="partActionBtn" hidden>Start Part 1</button>
+            </div>
+          </div>
+        </section>
+        <section class="bus" id="subSec" style="display:none">
+          <div class="cap">Substitution</div>
+          <div class="body">
+            <div class="hint" id="subInfo"></div>
+            <div class="setrow">
+              <div class="fld">
+                <label>Reason</label>
+                <input id="subReason" type="text" maxlength="200" placeholder="reason (optional)">
+              </div>
+              <button class="pill go" id="subSave">SAVE</button>
+            </div>
+          </div>
+        </section>
+      </div>
+      <div class="area" data-area="schedule">
+        <details class="bus urls" id="urlsBox">
+          <summary>Schedule <span class="modechip" id="modeChip">RACE</span><button class="modeswitch" id="modeSwitch" hidden>switch → QUALIFYING</button></summary>
+          <div class="body">
 
-  <section class="bus pgm"><div class="cap">PGM</div><div class="keys" id="pgmBus"></div><button
-    class="txarmed" id="txArmed" type="button"
-    title="Armed transition. Change it in the Utilities section">TX: FADE</button></section>
+            <!-- Race schedule (shown in race mode) -->
+            <div id="raceSched">
+              <table><tbody id="schedBody"></tbody></table>
+              <button class="add" id="schedAdd">+ ADD ROW</button>
+              <div class="hint">YouTube or Twitch. Enter a full watch URL
+                (<code>youtube.com/watch?v=…</code> or <code>twitch.tv/&lt;channel&gt;</code>),
+                or <code>local:</code> for this machine's capture card.
+                Saves write the Google Sheet only. A feed picks the new URL up
+                on RELOAD A/B / NEXT (rows marked <b>A</b>/<b>B</b> are live now). Each row's
+                <b>Streamer</b> and <b>Stint</b> label (Configuration vocab) become the HUD's
+                STREAMER/STINT when that row goes on air. <b>CLEAR URL</b> removes only the
+                stream link and keeps the Streamer + Stint slot. Streamer/Stint/URL can still
+                be edited in the Sheet directly.</div>
+            </div>
+
+            <!-- Qualifying schedule (shown in qualifying mode) -->
+            <div id="qualSched" hidden>
+              <table><tbody>
+                <tr id="qualRow">
+                  <td class="rn">Q<span class="livebadge" id="qualLive"></span></td>
+                  <td style="width:22%"><select class="nm" id="qualNm" title="Streamer (Configuration vocab)"></select></td>
+                  <td style="width:18%"><select class="st" id="qualSt" title="Stint label (Configuration vocab)"></select></td>
+                  <td><input class="u" id="qualUrl" placeholder="youtube.com/watch?v=… · twitch.tv/<channel> · UC…"></td>
+                  <td class="act"><button class="save" id="qualSave">SAVE</button><button class="clear" id="qualClear">CLEAR</button></td>
+                </tr>
+              </tbody></table>
+              <div class="hint" id="qualInfo">Qualifying: one stream, served on <b>Feed A</b>.
+                Edits write the <b>Qualifying</b> tab in the Sheet. The feed picks it up on
+                RELOAD A / NEXT (or on the mode switch). On switch the HUD STREAMER/STINT follow
+                this row.</div>
+            </div>
+
+            <!-- POV, shown in both modes: it is a separate, mode-independent feed -->
+            <table><tbody>
+              <tr><td class="rn">POV</td>
+                  <td><input id="povName" maxlength="20" placeholder="name (max 20)"></td>
+                  <td><input id="povUrl" placeholder="youtube.com/watch?v=… · twitch.tv/<channel> · UC…"></td>
+                  <td class="act"><button class="save" id="povSave">SAVE</button></td></tr>
+            </tbody></table>
+            <div class="hint">POV. A full watch URL (<code>youtube.com/watch?v=…</code> or
+              <code>twitch.tv/&lt;channel&gt;</code>). The POV URL applies on <b>POV RELOAD</b>.
+              Available in both race and qualifying.</div>
+            <!-- Solo-only: POV RELOAD/STOP, kept reachable here because #feedsSec, where
+                 these actions normally live, is hidden in solo. Built only under solo, see
+                 buildPovActions(); empty and hidden in endurance. -->
+            <div class="keys" id="povActionsBus" hidden></div>
+          </div>
+        </details>
+        <details class="bus urls" id="subsBox">
+          <summary>Pending stream submissions <span class="unread" id="subsCount" hidden>0</span></summary>
+          <div class="body">
+            <table><tbody id="subsBody"></tbody></table>
+            <div class="hint" id="subsEmpty">No pending submissions. Commentators can submit
+              their own stream link from the cockpit; approvals here write the Schedule
+              (Sheet). The feed picks it up on RELOAD A/B / NEXT. Nothing a commentator
+              submits goes on air without an approval.</div>
+          </div>
+        </details>
+      </div>
+      <div class="area" data-area="setup">
+        <details class="bus chat" id="gfxBrowseBox" open>
+          <summary>Graphics<button id="gfxRefresh" class="bcompose" title="Reload the graphics list">⟳ Refresh</button></summary>
+          <div class="body">
+            <div id="gfxList" class="chatlog"><div class="bempty">Loading…</div></div>
+            <div class="hint">Read-only: the broadcast still-graphics (Sheet Assets tab).
+              Click one to open it in a new tab. OBS-only assets are hidden.</div>
+          </div>
+        </details>
+      </div>
+      <div class="area" data-area="fault">
+        <section class="bus" id="feedsSec"><div class="cap">Feeds</div>
+          <div class="body">
+            <div class="keys" id="feedsBus"></div>
+            <div class="hint" id="feedHealth"></div>
+            <!-- per-feed quality profile (#493): FULL(<=1080p) / ROBUST(720p) / EMERGENCY(<=480p) / AUTO -->
+            <!-- Per feed: ARM/STOP pull (#492, manual-arm only), quality profile (#493)
+                 and Preview. ARM/STOP are `armbtn`; the tier handler excludes them. -->
+            <div id="feedQuality">
+              <div class="qrow" data-qfeed="A">
+                <span class="qlabel">Feed A</span>
+                <span class="qres" data-qres="A"></span>
+                <button class="qbtn armbtn" data-feed="A" data-on="1"
+                        title="Arm this feed's pull (before a handover)">ARM</button>
+                <button class="qbtn armbtn" data-feed="A" data-on="0"
+                        title="Stop this feed's pull (frees bandwidth)">STOP</button>
+                <button class="qbtn" data-feed="A" data-tier="auto">AUTO</button>
+                <button class="qbtn" data-feed="A" data-tier="full">FULL</button>
+                <button class="qbtn" data-feed="A" data-tier="robust">ROBUST</button>
+                <button class="qbtn" data-feed="A" data-tier="emergency">EMERG</button>
+                <button class="qbtn qprev" data-feed="A" type="button" disabled
+                        title="Open Feed A's current stream in a new tab">▶ Preview</button>
+              </div>
+              <div class="qrow" data-qfeed="B">
+                <span class="qlabel">Feed B</span>
+                <span class="qres" data-qres="B"></span>
+                <button class="qbtn armbtn" data-feed="B" data-on="1"
+                        title="Arm this feed's pull (before a handover)">ARM</button>
+                <button class="qbtn armbtn" data-feed="B" data-on="0"
+                        title="Stop this feed's pull (frees bandwidth)">STOP</button>
+                <button class="qbtn" data-feed="B" data-tier="auto">AUTO</button>
+                <button class="qbtn" data-feed="B" data-tier="full">FULL</button>
+                <button class="qbtn" data-feed="B" data-tier="robust">ROBUST</button>
+                <button class="qbtn" data-feed="B" data-tier="emergency">EMERG</button>
+                <button class="qbtn qprev" data-feed="B" type="button" disabled
+                        title="Open Feed B's current stream in a new tab">▶ Preview</button>
+              </div>
+            </div>
+          </div>
+        </section>
+        <section class="bus" id="scnVisSec"><div class="cap">Scn·Vis</div>
+            <div class="grp"><span class="glbl">Switch scene</span><div class="keys" id="scnBus"></div></div>
+            <div class="grp"><span class="glbl">Source visibility</span><div class="keys" id="scnVisBus"></div></div>
+          </section>
+        <section class="bus" id="obsToolsSec"><div class="cap">OBS</div>
+          <div class="keys"><button class="k" id="obsRefreshBtn">↻ REFRESH</button></div>
+          <div class="hint">Reloads the relay-served OBS browser sources.</div>
+        </section>
+      </div>
+      <div id="log">Ready. All controls work relay-only. No OBS connection needed.</div>
+    </main>
+    <aside class="rail" id="chatRail" aria-label="Chats">
+      <section class="bus chat" id="chatBox">
+          <div class="cap">Crew chat <span class="unread" id="chatUnread" hidden>0</span></div>
+          <div class="body">
+            <div class="chatname">
+              <label>You:</label>
+              <input id="chatName" maxlength="40" placeholder="your name">
+            </div>
+            <div id="chatLog" class="chatlog"></div>
+            <div class="chatsend">
+              <input id="chatInput" maxlength="500" placeholder="message the active crew…">
+              <button class="save" id="chatSendBtn">SEND</button>
+            </div>
+            <div class="hint">Seen by everyone on this relay's tailnet. The producer can clear
+              the history from the Control Center or <code>racecast chat clear</code>.</div>
+          </div>
+        </section>
+      <div class="railsplit" id="railSplit" role="separator" aria-orientation="horizontal"
+           aria-label="Drag to resize the chats" tabindex="0"></div>
+      <section class="bus chat" id="bchatBox">
+          <div class="cap">Broadcast chat <span class="robadge">read-only</span><button id="bchatCompose" class="bcompose" hidden></button><button id="bchatRefresh" class="bcompose" title="Reconnect the chat reader and refresh">⟳ Refresh</button></div>
+          <div class="body">
+            <div id="bchatLog" class="chatlog"><div class="bempty">Waiting for the broadcast stream…</div></div>
+            <div class="hint">Read-only mirror of the event's public YouTube/Twitch broadcast
+              chat (the <code>Channel</code> tab). During a producer handover both live streams
+              are merged here.</div>
+          </div>
+        </section>
+    </aside>
   </div>
-
-  <section class="bus" id="hudBus"><div class="cap">HUD</div>
-    <div class="body">
-      <div class="setrow" id="setupRow"></div>
-      <div class="setrow" id="teamRow"></div>
-      <div class="setrow" id="condRow"></div>
-      <div class="hint" id="setupInfo">HUD: connecting to relay…</div>
-    </div>
-  </section>
-
-  <div class="cols" id="ctlCols">
-    <div class="colstack" id="feedsCol">
-  <section class="bus" id="feedsSec"><div class="cap">Feeds</div>
-    <div class="body">
-      <div class="keys" id="feedsBus"></div>
-      <div class="hint" id="feedHealth"></div>
-      <!-- per-feed quality profile (#493): FULL(<=1080p) / ROBUST(720p) / EMERGENCY(<=480p) / AUTO -->
-      <!-- Per feed: ARM/STOP pull (#492, manual-arm only), quality profile (#493)
-           and Preview. ARM/STOP are `armbtn`; the tier handler excludes them. -->
-      <div id="feedQuality">
-        <div class="qrow" data-qfeed="A">
-          <span class="qlabel">Feed A</span>
-          <span class="qres" data-qres="A"></span>
-          <button class="qbtn armbtn" data-feed="A" data-on="1"
-                  title="Arm this feed's pull (before a handover)">ARM</button>
-          <button class="qbtn armbtn" data-feed="A" data-on="0"
-                  title="Stop this feed's pull (frees bandwidth)">STOP</button>
-          <button class="qbtn" data-feed="A" data-tier="auto">AUTO</button>
-          <button class="qbtn" data-feed="A" data-tier="full">FULL</button>
-          <button class="qbtn" data-feed="A" data-tier="robust">ROBUST</button>
-          <button class="qbtn" data-feed="A" data-tier="emergency">EMERG</button>
-          <button class="qbtn qprev" data-feed="A" type="button" disabled
-                  title="Open Feed A's current stream in a new tab">▶ Preview</button>
-        </div>
-        <div class="qrow" data-qfeed="B">
-          <span class="qlabel">Feed B</span>
-          <span class="qres" data-qres="B"></span>
-          <button class="qbtn armbtn" data-feed="B" data-on="1"
-                  title="Arm this feed's pull (before a handover)">ARM</button>
-          <button class="qbtn armbtn" data-feed="B" data-on="0"
-                  title="Stop this feed's pull (frees bandwidth)">STOP</button>
-          <button class="qbtn" data-feed="B" data-tier="auto">AUTO</button>
-          <button class="qbtn" data-feed="B" data-tier="full">FULL</button>
-          <button class="qbtn" data-feed="B" data-tier="robust">ROBUST</button>
-          <button class="qbtn" data-feed="B" data-tier="emergency">EMERG</button>
-          <button class="qbtn qprev" data-feed="B" type="button" disabled
-                  title="Open Feed B's current stream in a new tab">▶ Preview</button>
-        </div>
-      </div>
-    </div>
-  </section>
-    </div>
-    <div class="colstack">
-  <section class="bus"><div class="cap">Scn·Vis</div>
-    <div class="grp"><span class="glbl">Switch scene</span><div class="keys" id="scnBus"></div></div>
-    <div class="grp"><span class="glbl">Source visibility</span><div class="keys" id="scnVisBus"></div></div>
-  </section>
-  <section class="bus"><div class="cap">Timer</div>
-    <div class="body">
-      <div class="keys" id="timerBus"></div>
-      <div class="hint" id="timerInfo">Timer: connecting to relay…</div>
-    </div>
-  </section>
-    </div>
-  </div>
-
-  <div id="log">Ready. All controls work relay-only. No OBS connection needed.</div>
-
-  <section class="bus" id="cuesBus"><div class="cap">Cues</div>
-    <div class="cues2">
-      <div class="cuescol">
-        <div class="cue-compose">
-          <select id="cueTarget" aria-label="Cue target">
-            <option value="all">All</option>
-            <option value="on-air">On air</option>
-          </select>
-          <select id="cueLevel" aria-label="Cue level">
-            <option value="info">Info</option>
-            <option value="critical">Critical</option>
-          </select>
-          <input id="cueText" type="text" maxlength="200" placeholder="Cue text…">
-          <button id="cueSend" type="button">SEND CUE</button>
-        </div>
-        <div id="cuePresets"></div>
-      </div>
-      <div class="cuescol">
-        <ul id="cueRecent"></ul>
-        <div class="cueback" id="cueBackWrap" hidden>
-          <div class="cueback-cap">From commentators</div>
-          <ul id="cueBackList"></ul>
-        </div>
-      </div>
-    </div>
-    <div class="hint" id="cueHint">Send a text cue to a commentator or all commentators. Critical cues require acknowledgement in the cockpit. Commentator replies appear under “From commentators”.</div>
-  </section>
-
-  <div class="cols">
-    <div class="colstack">
-  <section class="bus"><div class="cap">Graphics</div>
-    <div class="grp"><span class="glbl">Standard</span><div class="keys" id="gfxBus"></div></div>
-    <div class="grp"><span class="glbl">Pre-race</span><div class="keys" id="gfxPreRaceBus"></div></div>
-    <div class="grp"><span class="glbl">Grid</span>
-      <div class="keys" id="gfxGridTopBus"></div>
-      <div class="keys" id="gfxGridBus"></div>
-    </div>
-    <div class="grp"><span class="glbl">Flag graphic, one active</span><div class="keys" id="flagGfxBus"></div></div>
-  </section>
-    </div>
-    <div class="colstack">
-  <section class="bus"><div class="cap">Audio</div><div class="body" id="audio"></div></section>
-  <section class="bus" id="txBar" title="Transition applied to the next scene switch">
-    <div class="cap">Utilities</div>
-    <div class="grp"><span class="glbl">Armed transition</span>
-    <div class="keys">
-      <button class="k tx" data-tx="cut">CUT</button>
-      <button class="k tx" data-tx="fade">FADE</button>
-      <button class="k tx" data-tx="stinger">STINGER</button>
-      <label class="txdur">dur <input id="txDur" type="number" min="0" max="10000"
-             step="50" value="300"> ms</label>
-    </div>
-    </div>
-    <div class="grp"><span class="glbl">OBS pages</span>
-      <div class="keys"><button class="k" id="obsRefreshBtn">↻ REFRESH</button></div>
-    </div>
-  </section>
-    </div>
-  </div>
-
-  <details class="bus urls" id="urlsBox">
-    <summary>Schedule <span class="modechip" id="modeChip">RACE</span><button class="modeswitch" id="modeSwitch" hidden>switch → QUALIFYING</button></summary>
-    <div class="body">
-
-      <!-- Race schedule (shown in race mode) -->
-      <div id="raceSched">
-        <table><tbody id="schedBody"></tbody></table>
-        <button class="add" id="schedAdd">+ ADD ROW</button>
-        <div class="hint">YouTube or Twitch. Enter a full watch URL
-          (<code>youtube.com/watch?v=…</code> or <code>twitch.tv/&lt;channel&gt;</code>),
-          or <code>local:</code> for this machine's capture card.
-          Saves write the Google Sheet only. A feed picks the new URL up
-          on RELOAD A/B / NEXT (rows marked <b>A</b>/<b>B</b> are live now). Each row's
-          <b>Streamer</b> and <b>Stint</b> label (Configuration vocab) become the HUD's
-          STREAMER/STINT when that row goes on air. <b>CLEAR URL</b> removes only the
-          stream link and keeps the Streamer + Stint slot. Streamer/Stint/URL can still
-          be edited in the Sheet directly.</div>
-      </div>
-
-      <!-- Qualifying schedule (shown in qualifying mode) -->
-      <div id="qualSched" hidden>
-        <table><tbody>
-          <tr id="qualRow">
-            <td class="rn">Q<span class="livebadge" id="qualLive"></span></td>
-            <td style="width:22%"><select class="nm" id="qualNm" title="Streamer (Configuration vocab)"></select></td>
-            <td style="width:18%"><select class="st" id="qualSt" title="Stint label (Configuration vocab)"></select></td>
-            <td><input class="u" id="qualUrl" placeholder="youtube.com/watch?v=… · twitch.tv/<channel> · UC…"></td>
-            <td class="act"><button class="save" id="qualSave">SAVE</button><button class="clear" id="qualClear">CLEAR</button></td>
-          </tr>
-        </tbody></table>
-        <div class="hint" id="qualInfo">Qualifying: one stream, served on <b>Feed A</b>.
-          Edits write the <b>Qualifying</b> tab in the Sheet. The feed picks it up on
-          RELOAD A / NEXT (or on the mode switch). On switch the HUD STREAMER/STINT follow
-          this row.</div>
-      </div>
-
-      <!-- POV, shown in both modes: it is a separate, mode-independent feed -->
-      <table><tbody>
-        <tr><td class="rn">POV</td>
-            <td><input id="povName" maxlength="20" placeholder="name (max 20)"></td>
-            <td><input id="povUrl" placeholder="youtube.com/watch?v=… · twitch.tv/<channel> · UC…"></td>
-            <td class="act"><button class="save" id="povSave">SAVE</button></td></tr>
-      </tbody></table>
-      <div class="hint">POV. A full watch URL (<code>youtube.com/watch?v=…</code> or
-        <code>twitch.tv/&lt;channel&gt;</code>). The POV URL applies on <b>POV RELOAD</b>.
-        Available in both race and qualifying.</div>
-      <!-- Solo-only: POV RELOAD/STOP, kept reachable here because #feedsSec, where
-           these actions normally live, is hidden in solo. Built only under solo, see
-           buildPovActions(); empty and hidden in endurance. -->
-      <div class="keys" id="povActionsBus" hidden></div>
-    </div>
-  </details>
-
-  <details class="bus urls" id="subsBox">
-    <summary>Pending stream submissions <span class="unread" id="subsCount" hidden>0</span></summary>
-    <div class="body">
-      <table><tbody id="subsBody"></tbody></table>
-      <div class="hint" id="subsEmpty">No pending submissions. Commentators can submit
-        their own stream link from the cockpit; approvals here write the Schedule
-        (Sheet). The feed picks it up on RELOAD A/B / NEXT. Nothing a commentator
-        submits goes on air without an approval.</div>
-    </div>
-  </details>
-
-  <section class="bus" id="subSec" style="display:none">
-    <div class="cap">Substitution</div>
-    <div class="body">
-      <div class="hint" id="subInfo"></div>
-      <div class="setrow">
-        <div class="fld">
-          <label>Reason</label>
-          <input id="subReason" type="text" maxlength="200" placeholder="reason (optional)">
-        </div>
-        <button class="pill go" id="subSave">SAVE</button>
-      </div>
-    </div>
-  </section>
-
-  </div><!-- /.mainpane -->
-
-  <div class="rail">
-  <details class="bus chat" id="chatBox" open>
-    <summary>Chat <span class="unread" id="chatUnread" hidden>0</span></summary>
-    <div class="body">
-      <div class="chatname">
-        <label>You:</label>
-        <input id="chatName" maxlength="40" placeholder="your name">
-      </div>
-      <div id="chatLog" class="chatlog"></div>
-      <div class="chatsend">
-        <input id="chatInput" maxlength="500" placeholder="message the active crew…">
-        <button class="save" id="chatSendBtn">SEND</button>
-      </div>
-      <div class="hint">Seen by everyone on this relay's tailnet. The producer can clear
-        the history from the Control Center or <code>racecast chat clear</code>.</div>
-    </div>
-  </details>
-
-  <details class="bus chat" id="bchatBox" open>
-    <summary>Broadcast chat <span class="robadge">read-only</span><button id="bchatCompose" class="bcompose" hidden></button><button id="bchatRefresh" class="bcompose" title="Reconnect the chat reader and refresh">⟳ Refresh</button></summary>
-    <div class="body">
-      <div id="bchatLog" class="chatlog"><div class="bempty">Waiting for the broadcast stream…</div></div>
-      <div class="hint">Read-only mirror of the event's public YouTube/Twitch broadcast
-        chat (the <code>Channel</code> tab). During a producer handover both live streams
-        are merged here.</div>
-    </div>
-  </details>
-
-  <details class="bus chat" id="gfxBrowseBox" open>
-    <summary>Graphics<button id="gfxRefresh" class="bcompose" title="Reload the graphics list">⟳ Refresh</button></summary>
-    <div class="body">
-      <div id="gfxList" class="chatlog"><div class="bempty">Loading…</div></div>
-      <div class="hint">Read-only: the broadcast still-graphics (Sheet Assets tab).
-        Click one to open it in a new tab. OBS-only assets are hidden.</div>
-    </div>
-  </details>
-  </div><!-- /.rail -->
-
-  </div><!-- /.panes -->
 <div id="toasts"></div>
 </div>
 
