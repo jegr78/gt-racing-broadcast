@@ -203,11 +203,13 @@ class TakeModes:
         self.override = {}
 
     def set(self, role, mode):
+        """(role, mode) as the module's own constants, or None for an unknown one."""
         if role not in ROLES or mode not in MODES:
-            return False
+            return None
+        role, mode = ROLES[ROLES.index(role)], MODES[MODES.index(mode)]
         with self.lock:
             self.override[role] = mode
-        return True
+        return role, mode
 
     def snapshot(self):
         with self.lock:

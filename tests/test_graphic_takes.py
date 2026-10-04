@@ -278,10 +278,10 @@ def t_crew_hides_its_own_take_in_request_mode():
 def t_take_modes_start_from_the_league_value():
     modes = gt.TakeModes("request")
     assert modes.snapshot() == {"commentator": "request", "race_control": "request"}
-    assert modes.set("commentator", "direct")
+    assert modes.set("commentator", "direct") == ("commentator", "direct")
     assert modes.snapshot() == {"commentator": "direct", "race_control": "request"}
-    assert not modes.set("director", "direct"), "only crew roles have a mode"
-    assert not modes.set("race_control", "sometimes"), "an unknown mode is refused"
+    assert modes.set("director", "direct") is None, "only crew roles have a mode"
+    assert modes.set("race_control", "sometimes") is None, "an unknown mode is refused"
     assert gt.TakeModes("request").snapshot()["commentator"] == "request", \
         "a new relay starts from the league value again"
     assert gt.TakeModes(None).snapshot() == {"commentator": "off", "race_control": "off"}
