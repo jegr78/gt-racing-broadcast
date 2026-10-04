@@ -207,12 +207,13 @@ def t_display_name_maps_key_to_name():
 def t_race_control_schedule_redacts_url():
     # The Race Control desk (#244) sees stint + streamer + a live-feed marker, but
     # NEVER a stream URL, the same redaction boundary as /console/takeover/status.
-    sched = m.race_control_schedule(_rows(), {0: "A", 1: "B"})
+    sched = m.race_control_schedule(_rows(), {0: "A", 1: "B"}, 1)
     assert sched == [
-        {"stint": "S1", "streamer": "Alpha Racing", "live": "A"},
-        {"stint": "S2", "streamer": "Beta", "live": "B"},
-        {"stint": "S3", "streamer": "Alpha Racing", "live": None},
-        {"stint": "S4", "streamer": "Gamma", "live": None}], sched
+        {"stint": "S1", "streamer": "Alpha Racing", "live": "A", "on_air": False},
+        {"stint": "S2", "streamer": "Beta", "live": "B", "on_air": True},
+        {"stint": "S3", "streamer": "Alpha Racing", "live": None, "on_air": False},
+        {"stint": "S4", "streamer": "Gamma", "live": None, "on_air": False}], \
+        "only the feed on air is on air; the other loaded stint is not"
     # No row carries a URL key, and no value leaks the source URL.
     for row in sched:
         assert "url" not in row, row
@@ -220,7 +221,7 @@ def t_race_control_schedule_redacts_url():
 
 
 def t_race_control_schedule_empty():
-    assert m.race_control_schedule([], {}) == []
+    assert m.race_control_schedule([], {}, None) == []
 
 
 def t_cockpit_schedule_flags_on_air_and_mine():

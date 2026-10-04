@@ -76,6 +76,7 @@ def main():
     cp("console/console.html", "console.html")        # /console launcher (#216)
     cp("console/buttons.html", "buttons.html")         # /console/buttons wrapper (#236)
     cp("console/health-monitor.html", "health-monitor.html")  # /health-monitor dashboard
+    cp("console/crew-frame.html", "crew-frame.html")   # cockpit/race-control tab bar (#745)
     cp("setup-assets.py", "setup-assets.py")
     cp("racecast.py", "racecast.py")
     cp("racecast_ui.py", "racecast_ui.py")   # windowed Control Center launcher (racecast-ui)
@@ -208,6 +209,7 @@ def main():
         "console launcher shipped": os.path.isfile(os.path.join(PKG, "console.html")),
         "console buttons page shipped": os.path.isfile(os.path.join(PKG, "buttons.html")),
         "health monitor page shipped": os.path.isfile(os.path.join(PKG, "health-monitor.html")),
+        "crew frame shipped": os.path.isfile(os.path.join(PKG, "crew-frame.html")),
         "uplot vendored": os.path.isfile(os.path.join(PKG, "assets", "vendor", "uplot", "uPlot.iife.min.js")),
         "preview backdrop shipped": os.path.isfile(os.path.join(PKG, "assets", "preview-bg.jpg")),
         ".env.example shipped": os.path.isfile(os.path.join(PKG, ".env.example")),

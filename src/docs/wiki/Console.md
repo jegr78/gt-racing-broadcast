@@ -66,6 +66,23 @@ desk is safe over the public Funnel.
 
 ![Race Control desk: program preview, redacted streamer/stint schedule with an on-air marker, race timer and crew chat](images/console-race-control.png)
 
+The schedule marks the stint on air with **ON AIR** and the stint already loaded on the
+other feed with **NEXT**, each with its feed letter.
+
+### On a phone
+
+The Commentator Cockpit and the Race Control desk use the same layout on a narrow screen
+(820 px and below). The on-air banner, the race timer and a critical director cue stay at
+the top while you scroll. A tab bar at the bottom shows one part of the page at a time:
+
+| Page | Tabs |
+|---|---|
+| Commentator Cockpit | **Talk** (message the director, crew chat, Race Control notes), **Program** (picture, audio, broadcast chat), **Graphics**, **Plan** (stint plan, stream-link submission) |
+| Race Control | **Act** (note to commentator), **Graphics**, **Chat** (crew and broadcast), **Program**, **Schedule** |
+
+The page remembers the last tab. On a wider screen both pages keep their multi-column
+layout.
+
 > **Naming note:** the role shares its label with the director-only HUD **Race Control**
 > banner (the Setup-tab `Race Control` field shown on the lower third). They are
 > unrelated: the role is `race_control` (Crew tab), the banner is `racecontrol` (Setup

@@ -5960,14 +5960,15 @@ def cockpit_tally(rows, live_idx, me_key):
     return {"on_air": on_air, "up_next": up_next, "scheduled": scheduled}
 
 
-def race_control_schedule(rows, live_map):
+def race_control_schedule(rows, live_map, live_idx):
     """Redacted schedule for the Race Control monitoring desk (#244): stint +
     streamer + live-feed marker per row, with NO stream URL. The redaction is the
     same boundary as /console/takeover/status. Feed URLs never leave the tailnet,
     and this desk is reachable over the public Funnel. Pure for unit testing.
     *rows* are ScheduleSource 4-tuples (url, streamer, stint, line); *live_map*
-    maps a 0-based row index -> the feed key (A/B) currently serving it."""
-    return [{"stint": st, "streamer": n, "live": live_map.get(i)}
+    maps a 0-based row index -> the feed key (A/B) currently serving it, and
+    *live_idx* is the row on air, since both feeds serve a row at once."""
+    return [{"stint": st, "streamer": n, "live": live_map.get(i), "on_air": i == live_idx}
             for i, (_u, n, st, _l) in enumerate(rows)]
 
 
@@ -9963,6 +9964,9 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
     _graphic_take_rl = console_auth.RateLimiter(limit=1, window_s=2)
     _crew_takes = graphic_takes.CrewTakes()
     graphics_take = graphic_takes.normalize_mode(graphics_take)
+    # Shared tab bar and live strip of the cockpit and the Race Control desk.
+    crew_frame_path = (os.path.join(os.path.dirname(console_page_path), "crew-frame.html")
+                       if console_page_path else None)
     _cockpit_chat_rl = console_auth.RateLimiter(limit=10, window_s=60)
     # Submit is a PUBLIC write path (funnelled). Keyed on the authed identity
     # (not the shared proxy IP, like chat) so one commentator can't exhaust the
@@ -10017,6 +10021,13 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             oauth_flag = b"1" if (discord_client_id and discord_client_secret) else b""
             body = body.replace(b"__RC_OAUTH__", oauth_flag)
             body = body.replace(b"__RC_VERSION__", (app_version or "dev").encode())
+            if b"<!--__CREW_FRAME__-->" in body:
+                try:
+                    with open(crew_frame_path, "rb") as fh:
+                        frame = fh.read()
+                except (OSError, TypeError):
+                    frame = b""
+                body = body.replace(b"<!--__CREW_FRAME__-->", frame)
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -10552,7 +10563,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     live = relay.live_row_map()
                     live_idx = relay.on_air_row_idx()
                     return self._send({
-                        "schedule": race_control_schedule(rows, live),
+                        "schedule": race_control_schedule(rows, live, live_idx),
                         "event_title": event_store.get() if event_store else "",
                         "mode": relay.mode,
                         "on_air": live_schedule_row(rows, live_idx)})

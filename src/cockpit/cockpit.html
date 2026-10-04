@@ -111,6 +111,9 @@
     #bchatCard { flex: 0 0 auto; position: static; overflow: visible; }
     #bchat { position: static; }
     #bchatlog { max-height: 50vh; }
+    /* One tab at a time: the cards become grid items so a tab orders its own. */
+    .leftstack, .leftcol, .leftrow2, .wrap > div { display: contents; }
+    #cbCard { order: 1; } #chatCard { order: 2; } #rcCard { order: 3; }
   }
   #bchatlog .msg { margin-bottom: 6px; overflow-wrap: anywhere; }
   #bchatlog .u { font-weight: 600; color: #f0a868; }   /* amber, distinct from crew blue */
@@ -270,15 +273,17 @@
   })();
 </script>
 
-<div id="cueCritical" class="cue-critical" hidden></div>
+<div class="livestrip">
+  <div id="cueCritical" class="cue-critical" hidden></div>
+  <div id="tally" class="tally idle">…</div>
+  <div id="liveTimer" class="livetimer"></div>
+</div>
 <div id="cueToasts" class="cue-toasts"></div>
-
-<div id="tally" class="tally idle">…</div>
 
 <div class="wrap">
   <div class="leftstack">
     <div class="leftcol">
-      <div class="card progwrap">
+      <div class="card progwrap" data-tab="program">
         <span class="badge">PROGRAM</span>
         <img id="program" alt="program monitor">
         <div id="progBehind" class="prog-behind" role="status" hidden></div>
@@ -289,7 +294,7 @@
           <audio id="pgmAudio" preload="none" style="display:none;"></audio>
         </div>
       </div>
-      <div class="card" id="bchatCard">
+      <div class="card" id="bchatCard" data-tab="program">
         <div id="bchat">
           <h2>Broadcast chat <span class="ro">read-only</span><button id="bchatCompose" class="bcompose" hidden></button><button id="bchatRefresh" class="bcompose" title="Reconnect the chat reader and refresh">⟳ Refresh</button></h2>
           <div id="bchatlog"><div class="empty">Waiting for the broadcast stream…</div></div>
@@ -297,7 +302,7 @@
       </div>
     </div>
     <div class="leftrow2">
-      <div class="card" id="submitCard" hidden>
+      <div class="card" id="submitCard" data-tab="plan" hidden>
         <h2>Submit your stream link</h2>
         <div class="submit">
           <label>Your stint
@@ -311,7 +316,7 @@
             air. Nothing you submit goes live automatically. YouTube or Twitch only.</div>
         </div>
       </div>
-      <div class="card">
+      <div class="card" id="chatCard" data-tab="talk">
         <h2>Crew chat</h2>
         <div id="chat">
           <div id="chatlog"></div>
@@ -324,8 +329,8 @@
     </div>
   </div>
   <div>
-    <div class="card"><h2>Race timer</h2><div id="timer"><div class="t">—</div></div></div>
-    <div class="card" id="cbCard" style="margin-top:12px;">
+    <div class="card desk-only"><h2>Race timer</h2><div id="timer"><div class="t">—</div></div></div>
+    <div class="card" id="cbCard" data-tab="talk" style="margin-top:12px;">
       <h2>Message director</h2>
       <div class="cbsend">
         <div class="cbpresets" id="cbPresets"></div>
@@ -336,13 +341,13 @@
         <div id="cbMsg" class="cbmsg" role="status"></div>
       </div>
     </div>
-    <div class="card" id="rcCard" style="margin-top:12px;" hidden>
+    <div class="card" id="rcCard" data-tab="talk" style="margin-top:12px;" hidden>
       <h2>Race Control <span class="ro">info</span></h2>
       <div id="rcNotes"><div class="empty">No notes.</div></div>
     </div>
-    <div class="card" style="margin-top:12px;"><h2>Stint plan</h2>
+    <div class="card" data-tab="plan" style="margin-top:12px;"><h2>Stint plan</h2>
       <div id="stintPlan"><div class="empty">Loading…</div></div></div>
-    <div class="card" style="margin-top:12px;">
+    <div class="card" data-tab="graphics" style="margin-top:12px;">
       <h2 id="gfxHead">Graphics
         <button id="gfxRefresh" type="button" title="Reload the graphics list">Refresh</button>
       </h2>
@@ -962,5 +967,8 @@ pollBroadcastChat();
   <div id="notesBody" class="notesbody"></div>
   <div class="notesactions"><button type="button" onclick="closeNotes()" autofocus>Close</button></div>
 </dialog>
+<nav id="crewTabs" class="crewtabs" role="tablist" aria-label="Sections"
+     data-tabs='[["talk","Talk"],["program","Program"],["graphics","Graphics"],["plan","Plan"]]'></nav>
+<!--__CREW_FRAME__-->
 </body>
 </html>
