@@ -14,4 +14,5 @@
 #team3-num { left: 1274px; top: 1014px; width: 54px; height: 48px; padding: 4px; font-size: 20px; border-radius: 3px; color: #ffffff; background: #12161c; justify-content: center; }
 #team3-name { left: 1340px; top: 1010px; width: 250px; height: 56px; font-size: 30px; --team-name-max: 30px; --team-name-min: 16px; color: #eef0f2; justify-content: flex-start; }
 #race-control { left: 264px; top: 864px; width: 1330px; height: 55px; padding: 14px; font-size: 34px; border-radius: 8px; color: #eef0f2; background: #243039; justify-content: flex-start; }
+#chat { left: 6px; top: 628px; width: 290px; height: 220px; }
 #clock { left: 986px; top: 34px; width: 236px; height: 56px; font-size: 46px; color: #eef0f2; justify-content: center; }

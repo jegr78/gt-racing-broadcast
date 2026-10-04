@@ -160,6 +160,12 @@
       "color": "#eef0f2",
       "teamNameMax": 30,
       "teamNameMin": 16
+    },
+    "chat": {
+      "left": 6,
+      "top": 628,
+      "width": 290,
+      "height": 220
     }
   },
   "fonts": [],
