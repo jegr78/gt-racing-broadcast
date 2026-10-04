@@ -5632,14 +5632,19 @@ def _css_has_rules(text):
     return bool(re.sub(r"/\*.*?\*/", "", text or "", flags=re.S).strip())
 
 
-def _profile_is_solo():
-    """Whether the active profile is a solo profile. Best effort: False when no
-    profile resolves."""
+def _active_config():
+    """The active profile's resolved config, or None when no profile resolves."""
     try:
         root = _env_base(IS_FROZEN, _real_executable(), HERE)
-        return pcfg.resolve_config(root, runtime_root=_runtime_base_dir()).kind == "solo"
+        return pcfg.resolve_config(root, runtime_root=_runtime_base_dir())
     except Exception:  # noqa: BLE001  best effort
-        return False
+        return None
+
+
+def _profile_is_solo():
+    """Whether the active profile is a solo profile. False when no profile resolves."""
+    rc = _active_config()
+    return rc is not None and rc.kind == "solo"
 
 
 def _profile_has_telemetry():
@@ -5648,12 +5653,8 @@ def _profile_has_telemetry():
     opt-out is left out on purpose: the overlay layout belongs to the profile and
     travels with `profile export`, so another machine may air the telemetry block.
     Best effort: False when no profile resolves."""
-    try:
-        root = _env_base(IS_FROZEN, _real_executable(), HERE)
-        rc = pcfg.resolve_config(root, runtime_root=_runtime_base_dir())
-        return rc.kind == "solo" and rc.template.strip().lower() == "pov"
-    except Exception:  # noqa: BLE001  best effort
-        return False
+    rc = _active_config()
+    return rc is not None and rc.kind == "solo" and rc.template.strip().lower() == "pov"
 
 
 def overlay_slots_data(page):
