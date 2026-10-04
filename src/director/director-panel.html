@@ -372,6 +372,7 @@
                              border-radius: 6px; padding: 6px 9px; font-size: 13px; }
   #gfxBrowseBox #gfxList a:hover { border-color: #3b82f6; }
   #gfxBrowseBox #gfxList .bempty { color: var(--muted); font-size: 11px; }
+  #gfxBus .bempty { color: var(--muted); font-size: 11px; }
   .robadge{font-size:10px;font-weight:500;color:var(--muted);border:1px solid #2a2f3a;
            border-radius:6px;padding:0 5px;margin-left:6px}
   .bcompose { float: right; font: inherit; font-size: 11px; line-height: 1.4;
@@ -998,9 +999,9 @@
    - macros:   PGM bus, the Companion page-1 row-0 semantics
    - scenes:   raw scene switches
    - vis:      feed visibility toggles (scene items)
-   The graphic buses come from the relay (GET /obs/graphics, panel catalog), which
-   keeps them in one place with the crew graphic takes and the Companion route.
-   - audio:    OBS audio inputs for the dB rows */
+   - audio:    OBS audio inputs for the dB rows
+   The graphic buses are not here: they come from the relay's panel catalog
+   (GET /obs/graphics), shared with the crew graphic takes. */
 const CONFIG = {
   macros: [
     // rc: the Race Control value written via the relay after the OBS steps, ""
@@ -1274,7 +1275,10 @@ buildControls(CONFIG);
 function buildGraphicBuses(){
   ["#gfxBus", "#gfxPreRaceBus", "#gfxGridTopBus", "#gfxGridBus"].forEach(id=>$(id).replaceChildren());
   for (let i = toggleKeys.length - 1; i >= 0; i--) if (toggleKeys[i]._gfx) toggleKeys.splice(i, 1);
-  if (!graphicCatalog) return;
+  if (!graphicCatalog){
+    const e = document.createElement("div"); e.className = "bempty";
+    e.textContent = "Waiting for the relay…"; $("#gfxBus").appendChild(e); return;
+  }
   const add = (item, bus)=>{
     const b = mkKey(item.label, item.scene, ()=>toggleSource(item, b));
     b._item = item; b._gfx = true; toggleKeys.push(b); $(bus).appendChild(b);

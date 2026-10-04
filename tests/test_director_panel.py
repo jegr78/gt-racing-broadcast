@@ -422,6 +422,7 @@ def t_graphic_buses_come_from_the_relay_catalog():
     body = _func_body(h, "buildGraphicBuses")
     for bus in ("gfxBus", "gfxPreRaceBus", "gfxGridTopBus", "gfxGridBus"):
         assert f'"#{bus}"' in body, f"{bus} is not built from the catalog"
+    assert "Waiting for the relay" in body, "an unloaded catalog must say why the buses are empty"
     for name in ("CONFIG", "CONFIG_SOLO"):
         cfg = _config_block(h, name)
         for key in ("graphics:", "graphicsPreRace:", "graphicsGrid:"):
