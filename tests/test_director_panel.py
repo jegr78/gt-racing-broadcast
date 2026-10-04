@@ -622,6 +622,32 @@ def t_frame_fills_the_window_without_banners():
         "with no banner the frame would fall into the auto row and leave the 1fr row empty"
 
 
+def t_keyboard_shortcuts_are_off_by_default_and_shown_in_the_header():
+    h = _html()
+    assert '<button type="button" id="kbdBtn" class="kbdbtn" aria-pressed="false"' in h
+    assert 'KEYS_KEY = "rc_keys"' in h
+    assert _func_src(h, "keysOn").count('recall(KEYS_KEY) === "1"') == 1, "on only after an explicit opt-in"
+
+
+def t_keyboard_shortcuts_cover_next_and_the_scene_macros_only():
+    src = _func_src(_html(), "kbdTarget")
+    assert 'if (key === "n")' in src
+    assert "/^[1-9]$/.test(key)" in src
+    assert 'filter(b => b._m)' in src, "RED FLAG and other toggles get no key"
+
+
+def t_keyboard_shortcut_needs_a_confirming_second_press():
+    h = _html()
+    src = _block(h, 'document.addEventListener("keydown", e => {\n  if (!keysOn()', "\n});")
+    assert "if (!keysOn() || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;" in src
+    assert 'closest("input, textarea, select, [contenteditable]")' in src, "never while typing"
+    assert "kbdArmed.key === key && now - kbdArmed.at <= KEY_CONFIRM_MS" in src
+    # The first press only arms; the click happens solely on the confirmed branch.
+    assert src.count("btn.click()") == 1
+    confirmed = src[src.index("kbdArmed.key === key"):src.index("btn.click()")]
+    assert "kbdArm(" not in confirmed
+
+
 def t_breakpoints():
     h = _html()
     assert 'matchMedia("(min-width:900px) and (max-width:1599px)")' in h, "nav collapses below 1600"

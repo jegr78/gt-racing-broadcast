@@ -574,6 +574,13 @@
   .railsplit{cursor:row-resize;display:flex;align-items:center;justify-content:center;touch-action:none}
   .railsplit::after{content:"";width:44px;height:3px;border-radius:2px;background:#3a4552}
   .railsplit:focus-visible{outline:2px solid var(--blue)}
+  .kbdbtn{flex:0 0 auto;padding:7px 11px;border-radius:8px;border:1px solid var(--edge);background:#0c0f13;
+    color:var(--muted);font:600 12px var(--mono);cursor:pointer;white-space:nowrap}
+  .kbdbtn.on{color:#ffd361;border-color:var(--amber)}
+  body.keys-on #pgmBus button.k[data-kbd]::after,body.keys-on #nextBtn::after{content:attr(data-kbd);
+    position:absolute;top:4px;right:6px;font:700 10px var(--mono);color:#ffd361}
+  #pgmBus button.k,#nextBtn{position:relative}
+  button.k.kbdarmed{outline:2px solid var(--amber);outline-offset:2px}
   .drawerbtn{display:none;align-items:center;gap:6px;padding:7px 11px;border-radius:8px;
     border:1px solid var(--edge);background:#0c0f13;color:#e7edf3;font:600 12px var(--mono);cursor:pointer}
 
@@ -635,6 +642,8 @@
     </div>
     <div class="led"><span class="dot" id="ledObs"></span>OBS</div>
     <div class="led"><span class="dot" id="ledRelay"></span>Relay</div>
+    <button type="button" id="kbdBtn" class="kbdbtn" aria-pressed="false"
+            title="Keyboard shortcuts: N for NEXT, 1 to 9 for the scene macros, each pressed twice">KEYS OFF</button>
     <button type="button" id="chatDrawerBtn" class="drawerbtn" aria-expanded="false"
             aria-controls="chatRail">Chats <span class="unread" id="drawerUnread" hidden>0</span></button>
     <div class="appmeta">
@@ -714,7 +723,7 @@
       <div class="liveair" id="liveOnAir">ON AIR <b>—</b></div>
       <section class="bus" id="handoverCtl" aria-label="Handover">
         <button type="button" class="k armkey" id="armBtn" hidden>ARM</button>
-        <button type="button" class="k next" id="nextBtn"><span class="nmain">NEXT</span><span class="nsub" id="nextSub">—</span></button>
+        <button type="button" class="k next" id="nextBtn" data-kbd="N"><span class="nmain">NEXT</span><span class="nsub" id="nextSub">—</span></button>
       </section>
       <section class="bus pgm"><div class="cap">Scenes</div><div class="keys" id="pgmBus"></div></section>
       <section class="bus" id="overlaySec"><div class="cap">Overlays</div><div class="keys" id="scnVisBus"></div></section>
@@ -1255,8 +1264,9 @@ function buildControls(cfg){
   povVisBtn = null;
   teleVisBtn = null;
 
-  cfg.macros.forEach(m=>{
+  cfg.macros.forEach((m, i)=>{
     const b = mkKey(m.label, "program", ()=>runMacro(m));
+    if (i < 9) b.dataset.kbd = String(i + 1);         // keyboard shortcut label (#731)
     b._m = m; macroKeys.push(b); $("#pgmBus").appendChild(b);
   });
   if (cfg.redFlag){ redFlagItem.scene = cfg.redFlag.scene; redFlagItem.source = cfg.redFlag.source; }
@@ -3179,6 +3189,56 @@ document.addEventListener("click", e => {
 document.addEventListener("keydown", e => {
   if (e.key === "Escape" && document.body.classList.contains("chats-open")) setDrawer(false);
 });
+
+// Keyboard shortcuts (#731): off until switched on in the header, per browser. N is
+// NEXT, 1 to 9 the scene macros. A first press only arms the key; the same key again
+// within KEY_CONFIRM_MS acts, so no single key press ever reaches the program.
+var KEYS_KEY = "rc_keys", KEY_CONFIRM_MS = 1500, kbdArmed = null;
+function keysOn(){ return recall(KEYS_KEY) === "1"; }
+function renderKeysBtn(){
+  const on = keysOn(), b = $("#kbdBtn");
+  document.body.classList.toggle("keys-on", on);
+  b.classList.toggle("on", on);
+  b.setAttribute("aria-pressed", String(on));
+  b.textContent = !on ? "KEYS OFF" : kbdArmed ? `PRESS ${kbdArmed.key.toUpperCase()} AGAIN` : "KEYS ON";
+}
+function kbdTarget(key){
+  if (key === "n") return $("#nextBtn").hidden ? null : $("#nextBtn");
+  if (/^[1-9]$/.test(key)) return [...$("#pgmBus").children].filter(b => b._m)[Number(key) - 1] || null;
+  return null;
+}
+function kbdArm(key, btn, at){
+  kbdArmed = {key, btn, at};
+  btn.classList.add("kbdarmed");
+  setTimeout(() => { if (kbdArmed && kbdArmed.at === at) kbdDisarm(); }, KEY_CONFIRM_MS);
+  renderKeysBtn();
+}
+function kbdDisarm(){
+  if (kbdArmed) kbdArmed.btn.classList.remove("kbdarmed");
+  kbdArmed = null;
+  renderKeysBtn();
+}
+$("#kbdBtn").addEventListener("click", () => {
+  store(KEYS_KEY, keysOn() ? "0" : "1");
+  kbdDisarm();
+});
+document.addEventListener("keydown", e => {
+  if (!keysOn() || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.target.closest && e.target.closest("input, textarea, select, [contenteditable]")) return;
+  const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  const btn = kbdTarget(key);
+  if (!btn){ if (kbdArmed) kbdDisarm(); return; }
+  e.preventDefault();
+  const now = Date.now();
+  if (kbdArmed && kbdArmed.key === key && now - kbdArmed.at <= KEY_CONFIRM_MS){
+    kbdDisarm();
+    btn.click();
+    return;
+  }
+  kbdDisarm();
+  kbdArm(key, btn, now);
+});
+renderKeysBtn();
 
 // The divider between the two chats: drag it or use the arrow keys.
 function applySplit(r){
