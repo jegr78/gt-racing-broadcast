@@ -835,7 +835,7 @@ def t_schedule_set_injects_on_success():
     src.items = ["s1"]; src.rows = [("s1", "Ann", "", 1)]
     ctl = m.SetupControl(push_url="https://example.test/push", hud_source=None,
                          schedule_source=src)
-    ctl._push = lambda payload, expected: (True, "")     # stub the webhook
+    ctl._push = lambda payload, expected, **_kw: (True, "")     # stub the webhook
     out = ctl.schedule_set(2, "https://www.youtube.com/watch?v=abc", "Ben")
     assert out.get("ok") is True
     assert src.get() == ["s1", "https://www.youtube.com/watch?v=abc"]   # available immediately
@@ -847,7 +847,7 @@ def t_schedule_set_no_inject_on_push_failure():
     src.items = ["s1"]; src.rows = [("s1", "Ann", "", 1)]
     ctl = m.SetupControl(push_url="https://example.test/push", hud_source=None,
                          schedule_source=src)
-    ctl._push = lambda payload, expected: (False, "boom")
+    ctl._push = lambda payload, expected, **_kw: (False, "boom")
     out = ctl.schedule_set(2, "https://www.youtube.com/watch?v=abc", "Ben")
     assert "error" in out
     assert src.get() == ["s1"]                            # nothing injected on failure
@@ -1430,12 +1430,187 @@ def t_push_retry_budget_cap_stops_early():
         calls.append(1)
         raise OSError("slow")
     # now() jumps past the budget after the first attempt, so there is no second.
-    ticks = iter([0.0, 999.0, 999.0, 999.0])
+    ticks = [0.0, 0.0]
     ok, err, _ = m.push_webhook_retrying(
         "http://push", {"a": 1}, None, attempts=3,
-        post=fake_post, sleep=lambda d: None, rand=lambda: 0.0, now=lambda: next(ticks))
+        post=fake_post, sleep=lambda d: None, rand=lambda: 0.0,
+        now=lambda: ticks.pop(0) if ticks else 999.0)
     assert ok is False
     assert len(calls) == 1                            # budget cap stopped further attempts
+
+
+# #767: the push rides out normal Apps Script latency and logs every outcome.
+
+class _FakeClock:
+    """A monotonic clock that fake posts and sleeps advance."""
+    def __init__(self):
+        self.t = 0.0
+    def now(self):
+        return self.t
+    def sleep(self, d):
+        self.t += d
+
+
+def t_push_retry_waits_long_enough_for_a_slow_apps_script():
+    # Measured on a production webhook: typical 1.5-4 s, outliers 9.7 s and 18.9 s.
+    # A 9.7 s answer must succeed on the first attempt.
+    clock, calls = _FakeClock(), []
+    def fake_post(url, payload, timeout=10):
+        calls.append(timeout)
+        if timeout < 9.7:
+            clock.t += timeout
+            raise TimeoutError("The read operation timed out")
+        clock.t += 9.7
+        return b'{"ok": true, "action": "setup"}'
+    ok, err, _ = m.push_webhook_retrying(
+        "http://push", {"action": "setup"}, "setup",
+        post=fake_post, sleep=clock.sleep, rand=lambda: 0.0, now=clock.now)
+    assert ok is True and len(calls) == 1, (ok, err, calls)
+
+
+def t_push_retry_fits_three_full_timeouts_in_the_budget():
+    # Every attempt hangs for its full timeout: the budget still allows all three,
+    # so one slow phase of the script is ridden out instead of reported.
+    clock, calls = _FakeClock(), []
+    def fake_post(url, payload, timeout=10):
+        calls.append(clock.t)
+        clock.t += timeout
+        raise TimeoutError("The read operation timed out")
+    ok, _err, _ = m.push_webhook_retrying(
+        "http://push", {"action": "setup"}, "setup",
+        post=fake_post, sleep=clock.sleep, rand=lambda: 1.0, now=clock.now)
+    assert ok is False
+    assert len(calls) == m.WEBHOOK_RETRY_ATTEMPTS == 3, calls
+    assert clock.t <= m.WEBHOOK_RETRY_BUDGET_S + m.WEBHOOK_RETRY_TIMEOUT_S, clock.t
+
+
+def t_hud_override_outlives_the_longest_push():
+    # The optimistic HUD echo must not expire while the push is still retrying,
+    # or the HUD flips back to the old sheet value and then forward again.
+    assert m.OVERRIDE_TTL > m.WEBHOOK_RETRY_BUDGET_S + m.WEBHOOK_RETRY_TIMEOUT_S, \
+        (m.OVERRIDE_TTL, m.WEBHOOK_RETRY_BUDGET_S, m.WEBHOOK_RETRY_TIMEOUT_S)
+
+
+def _capture_relay_log():
+    import logging
+    records = []
+    class _H(logging.Handler):
+        def emit(self, record):
+            records.append(record)
+    h = _H(level=logging.DEBUG)
+    m.LOG.addHandler(h)
+    old_level = m.LOG.level
+    m.LOG.setLevel(logging.DEBUG)
+    def stop():
+        m.LOG.removeHandler(h)
+        m.LOG.setLevel(old_level)
+    return records, stop
+
+
+SECRET_URL = "https://script.google.com/macros/s/AKfyc-test/exec?key=s3cr3t-key"
+
+
+def t_push_logs_each_failed_attempt_and_the_final_failure_without_the_url():
+    import logging
+    records, stop = _capture_relay_log()
+    try:
+        clock = _FakeClock()
+        def fake_post(url, payload, timeout=10):
+            clock.t += timeout
+            raise OSError(f"failed to reach {url}")
+        ok, err, _ = m.push_webhook_retrying(
+            SECRET_URL, {"action": "teams", "slot": 1, "name": "X"}, "teams",
+            post=fake_post, sleep=clock.sleep, rand=lambda: 0.0, now=clock.now)
+    finally:
+        stop()
+    assert ok is False
+    msgs = [r.getMessage() for r in records]
+    warns = [r.getMessage() for r in records if r.levelno == logging.WARNING]
+    assert len(warns) == 4, msgs                     # 3 attempts + the final failure
+    assert "teams" in warns[0] and "1/3" in warns[0], warns[0]
+    assert "failed after 3 attempt" in warns[-1], warns[-1]
+    for text in msgs + [err]:
+        assert "s3cr3t-key" not in text and "AKfyc-test" not in text, text
+
+
+def t_push_logs_a_retried_or_slow_success_but_not_a_fast_one():
+    import logging
+    for answer_s, fail_first, expect_info in ((1.0, False, False), (7.0, False, True),
+                                              (1.0, True, True)):
+        records, stop = _capture_relay_log()
+        try:
+            clock, n = _FakeClock(), []
+            def fake_post(url, payload, timeout=10, answer_s=answer_s,
+                          fail_first=fail_first, clock=clock, n=n):
+                n.append(1)
+                clock.t += answer_s
+                if fail_first and len(n) == 1:
+                    raise TimeoutError("The read operation timed out")
+                return b'{"ok": true, "action": "setup"}'
+            ok, _e, _ = m.push_webhook_retrying(
+                SECRET_URL, {"action": "setup"}, "setup",
+                post=fake_post, sleep=clock.sleep, rand=lambda: 0.0, now=clock.now)
+        finally:
+            stop()
+        assert ok is True
+        infos = [r.getMessage() for r in records if r.levelno == logging.INFO]
+        assert bool(infos) == expect_info, (answer_s, fail_first, infos)
+        if infos:
+            assert "setup" in infos[0] and "ok after" in infos[0], infos[0]
+
+
+def t_timer_push_is_logged_as_timer():
+    import logging
+    records, stop = _capture_relay_log()
+    try:
+        def fake_post(url, payload, timeout=10):
+            raise OSError("down")
+        m.push_webhook_retrying("http://push", {"end": "", "duration": "1:00:00"}, None,
+                                attempts=1, post=fake_post, sleep=lambda d: None,
+                                rand=lambda: 0.0, now=lambda: 0.0)
+    finally:
+        stop()
+    warns = [r.getMessage() for r in records if r.levelno == logging.WARNING]
+    assert warns and "timer" in warns[-1], warns
+
+
+def _record_push_kwargs(ctl):
+    seen = []
+    orig = m.push_webhook_retrying
+    def spy(url, payload, expected_action=None, **kw):
+        seen.append((payload.get("action"), payload.get("delete", False), kw))
+        return True, None, b'{"ok": true}'
+    m.push_webhook_retrying = spy
+    return seen, lambda: setattr(m, "push_webhook_retrying", orig)
+
+
+def t_synchronous_sheet_writes_use_the_short_budget():
+    # Schedule/POV/crew writes run inside the panel's HTTP request: they must not
+    # hang for the background budget.
+    ctl = m.SetupControl("http://push", _hs_stub())
+    seen, restore = _record_push_kwargs(ctl)
+    try:
+        ctl.schedule_set(1, url="")
+        ctl.pov_set("")
+        ctl.crew_set(2, name="Someone")
+    finally:
+        restore()
+    assert [a for a, _d, _k in seen] == ["schedule", "pov", "crew"], seen
+    for action, _d, kw in seen:
+        assert kw.get("budget_s") == m.WEBHOOK_SYNC_BUDGET_S, (action, kw)
+    assert m.WEBHOOK_SYNC_BUDGET_S <= m.WEBHOOK_RETRY_TIMEOUT_S
+
+
+def t_crew_delete_is_never_retried():
+    # A timed-out delete may still have landed: a retry would delete the NEXT row.
+    ctl = m.SetupControl("http://push", _hs_stub())
+    seen, restore = _record_push_kwargs(ctl)
+    try:
+        ctl.crew_delete(3)
+    finally:
+        restore()
+    assert seen and seen[0][1] is True, seen
+    assert seen[0][2].get("attempts") == 1, seen
 
 
 # setup-assets media fill: the template-driven scan.

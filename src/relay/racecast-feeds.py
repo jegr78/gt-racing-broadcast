@@ -2404,14 +2404,35 @@ def check_webhook_response(body, expected_action=None):
 
 WEBHOOK_RETRY_ATTEMPTS = 3
 WEBHOOK_RETRY_BASE_S = 0.5
-WEBHOOK_RETRY_BUDGET_S = 10.0
-WEBHOOK_RETRY_TIMEOUT_S = 5   # per-attempt; lower than the direct 10 s so a hung try fails fast
+# Apps Script usually answers in 1.5-4 s, with outliers of 9.7 s and 18.9 s measured
+# on a production webhook (#767). A 15 s attempt rides out such a slow phase, and the
+# budget still fits all three attempts (worst case ~48 s, below OVERRIDE_TTL).
+WEBHOOK_RETRY_BUDGET_S = 40.0
+WEBHOOK_RETRY_TIMEOUT_S = 15
+# Schedule/POV/crew writes run inside the panel's HTTP request: one full attempt,
+# a second only after a fast failure.
+WEBHOOK_SYNC_BUDGET_S = 15.0
+# A success slower than this is logged, so the relay log shows a slowing script
+# before it starts to time out.
+WEBHOOK_SLOW_S = 5.0
 
 
 def webhook_error_permanent(err):
     """True iff *err* is the permanent 'script outdated' config error (never retry).
     Any other non-ok error (a transient 'did not confirm') is retryable. Pure."""
     return err == WEBHOOK_OUTDATED_ERROR
+
+
+def _mask_webhook(text, url):
+    """`text` with the webhook URL and its ?key= secret masked, for logs and the
+    panel's last_error."""
+    if not text or not url:
+        return text
+    secret = parse_qs(urlparse(url).query).get("key", [""])[0]
+    for part in (url, url.split("?", 1)[0], secret):
+        if part:
+            text = text.replace(part, "<webhook>")
+    return text
 
 
 def push_webhook_retrying(url, payload, expected_action=None, *,
@@ -2427,35 +2448,48 @@ def push_webhook_retrying(url, payload, expected_action=None, *,
     permanent 'script outdated' error is returned immediately. `post`/`sleep`/`rand`/
     `now` resolve at CALL time (default the module globals) so the existing
     m.post_webhook monkeypatch seam keeps working; injectable for deterministic
-    tests."""
+    tests. Every failed attempt and the final failure are logged as WARNING, a
+    success that needed a retry or took WEBHOOK_SLOW_S as INFO (#767); the URL and
+    its key never reach the log or *err*."""
     post = post or post_webhook
     sleep = sleep or time.sleep
     rand = rand or random.random
     now = now or time.monotonic
+    # The timer push is the only one without an action.
+    label = (payload.get("action") if isinstance(payload, dict) else None) or "timer"
     start = now()
     err = "not attempted"
     body = None
+    tried = 0
     for i in range(max(1, attempts)):
         if i > 0 and (now() - start) >= budget_s:
             break
+        tried = i + 1
+        t0 = now()
         try:
             body = post(url, payload, timeout=timeout)
         except Exception as e:            # noqa: BLE001  network/timeout is retryable
-            err = f"{type(e).__name__}: {e}"
+            err = _mask_webhook(f"{type(e).__name__}: {e}", url)
             body = None
         else:
             ok, cerr = check_webhook_response(body, expected_action)
             if ok:
+                took = now() - start
+                if i > 0 or took >= WEBHOOK_SLOW_S:
+                    LOG.info("sheet push %s ok after %d attempt(s), %.1f s",
+                             label, tried, took)
                 return True, None, body
             err = cerr
-            if webhook_error_permanent(cerr):
-                return False, err, body      # permanent config error -> no retry
-        if i + 1 >= attempts:
-            break
+        LOG.warning("sheet push %s: attempt %d/%d failed after %.1f s: %s",
+                    label, tried, attempts, now() - t0, err)
+        if webhook_error_permanent(err) or i + 1 >= attempts:
+            break                            # permanent config error -> no retry
         delay = base_delay * (2 ** i) + rand() * base_delay
         if (now() - start) + delay >= budget_s:
             break
         sleep(delay)
+    LOG.warning("sheet push %s failed after %d attempt(s), %.1f s: %s",
+                label, tried, now() - start, err)
     return False, err, body
 
 
@@ -6685,7 +6719,10 @@ class CrewSource:
                 self.rows = rows
 
 
-OVERRIDE_TTL = 30  # s: unconfirmed panel write -> HUD falls back to sheet truth
+# s: unconfirmed panel write -> HUD falls back to sheet truth. Longer than the
+# slowest push (WEBHOOK_RETRY_BUDGET_S + one attempt), so the echo never expires
+# while the push is still retrying.
+OVERRIDE_TTL = 60
 
 
 # The team-entry key set, spelled once. EMPTY and the override padding build
@@ -6968,8 +7005,9 @@ class SetupControl:
         self.last_error = None
 
     # -- shared blocking push -> (ok, error); diagnostics like TimerStore ----
-    def _push(self, payload, expected_action):
-        ok, err, _body = push_webhook_retrying(self.push_url, payload, expected_action)
+    def _push(self, payload, expected_action, **retry):
+        ok, err, _body = push_webhook_retrying(self.push_url, payload, expected_action,
+                                               **retry)
         # diagnostics: single ref assignments, no lock needed
         self.push_status = "ok" if ok else "failed"
         self.last_error = None if ok else err
@@ -7124,7 +7162,7 @@ class SetupControl:
                    "director": bool(director), "producer": bool(producer),
                    "commentator": bool(commentator),
                    "race_control": bool(race_control), "discord": discord}
-        ok, err = self._push(payload, "crew")
+        ok, err = self._push(payload, "crew", budget_s=WEBHOOK_SYNC_BUDGET_S)
         if ok and self.crew_source is not None:
             self.crew_source.inject_row(rownum, name=name, director=bool(director),
                                         producer=bool(producer),
@@ -7140,7 +7178,10 @@ class SetupControl:
         rownum = self._crew_rownum(row)
         if isinstance(rownum, dict):
             return rownum
-        ok, err = self._push({"action": "crew", "row": rownum, "delete": True}, "crew")
+        # One attempt only: a timed-out delete may still have landed, and a retry
+        # would then delete the NEXT row (#767).
+        ok, err = self._push({"action": "crew", "row": rownum, "delete": True}, "crew",
+                             attempts=1, budget_s=WEBHOOK_SYNC_BUDGET_S)
         if ok and self.crew_source is not None:
             self.crew_source.delete_row(rownum)
         return {"ok": True, "row": rownum} if ok else {"error": err}
@@ -7203,7 +7244,7 @@ class SetupControl:
             if err:
                 return err
             payload["stint"] = stint
-        ok, err = self._push(payload, "schedule")
+        ok, err = self._push(payload, "schedule", budget_s=WEBHOOK_SYNC_BUDGET_S)
         if ok and inject_source is not None:
             # Reflect the write locally now. INCLUDING a URL clear (url=""), so
             # /schedule/data + /cockpit/data don't show the stale link for a poll
@@ -7233,7 +7274,7 @@ class SetupControl:
         payload = {"action": "pov", "url": url}
         if name is not None:        # omitted -> leave the Sheet cell; "" -> explicit clear
             payload["name"] = (name or "")[:20]
-        ok, err = self._push(payload, "pov")
+        ok, err = self._push(payload, "pov", budget_s=WEBHOOK_SYNC_BUDGET_S)
         if ok and self.pov_source is not None:
             self.pov_source.refresh()    # name (and stored url) live immediately
         return {"ok": True} if ok else {"error": err}

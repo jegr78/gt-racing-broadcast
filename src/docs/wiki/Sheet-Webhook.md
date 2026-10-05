@@ -436,6 +436,12 @@ instead creates a NEW URL and every `profile.env` must be updated.)
 The relay detects an outdated (v1, timer-only) script: panel writes then
 report *"webhook script outdated: redeploy"* instead of failing silently.
 
+Apps Script usually answers in a few seconds but has slow phases of 10-20 s. The relay
+therefore gives each write 15 s and retries it up to three times. Every failed attempt is a
+`sheet push … failed` WARNING in the relay log (`racecast relay logs`), and a write that
+needed a retry or took 5 s or longer is logged as INFO, so a slowing script shows up before
+the panel turns red. The webhook URL and its key never appear in the log.
+
 The current script is **v7** (v3 added the Schedule `Stint` column; v4 lets the
 `schedule` action target the **Qualifying** tab via `"tab":"Qualifying"`; v5 added
 `teams`; v6 added the `crew` action and the `Crew` tab; v7 makes `crew` header-aware
