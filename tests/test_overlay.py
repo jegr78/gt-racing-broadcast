@@ -1336,6 +1336,13 @@ def t_slot_visibility_reads_selector_lists_and_the_cascade():
     assert vis == {"webcam": False, "tyres-capture": True}, vis
 
 
+def t_slot_visibility_reads_a_rule_after_a_comment():
+    # The builder and hand-written CSS put comments right before a rule; the rule
+    # must still count.
+    css = "/* no webcam at this league */\n#webcam { display: none; }"
+    assert ob.slot_visibility(css)["webcam"] is False
+
+
 def t_slot_visibility_important_beats_a_later_plain_rule():
     css = "#webcam { display: none !important; }\n#webcam { display: block; }"
     assert ob.slot_visibility(css)["webcam"] is False
