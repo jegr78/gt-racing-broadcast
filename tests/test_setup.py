@@ -1559,6 +1559,17 @@ def t_push_logs_a_retried_or_slow_success_but_not_a_fast_one():
             assert "setup" in infos[0] and "ok after" in infos[0], infos[0]
 
 
+def t_push_masks_the_url_in_an_unconfirmed_body():
+    # Apps Script error pages can echo the script URL into the 120-char snippet.
+    def fake_post(url, payload, timeout=10):
+        return ("<html>error at " + url + "</html>").encode()
+    ok, err, _ = m.push_webhook_retrying(
+        SECRET_URL, {"action": "setup"}, "setup", attempts=1,
+        post=fake_post, sleep=lambda d: None, rand=lambda: 0.0, now=lambda: 0.0)
+    assert ok is False and "did not confirm" in err, err
+    assert "s3cr3t-key" not in err and "AKfyc-test" not in err, err
+
+
 def t_timer_push_is_logged_as_timer():
     import logging
     records, stop = _capture_relay_log()
@@ -1574,7 +1585,7 @@ def t_timer_push_is_logged_as_timer():
     assert warns and "timer" in warns[-1], warns
 
 
-def _record_push_kwargs(ctl):
+def _record_push_kwargs():
     seen = []
     orig = m.push_webhook_retrying
     def spy(url, payload, expected_action=None, **kw):
@@ -1588,7 +1599,7 @@ def t_synchronous_sheet_writes_use_the_short_budget():
     # Schedule/POV/crew writes run inside the panel's HTTP request: they must not
     # hang for the background budget.
     ctl = m.SetupControl("http://push", _hs_stub())
-    seen, restore = _record_push_kwargs(ctl)
+    seen, restore = _record_push_kwargs()
     try:
         ctl.schedule_set(1, url="")
         ctl.pov_set("")
@@ -1604,7 +1615,7 @@ def t_synchronous_sheet_writes_use_the_short_budget():
 def t_crew_delete_is_never_retried():
     # A timed-out delete may still have landed: a retry would delete the NEXT row.
     ctl = m.SetupControl("http://push", _hs_stub())
-    seen, restore = _record_push_kwargs(ctl)
+    seen, restore = _record_push_kwargs()
     try:
         ctl.crew_delete(3)
     finally:

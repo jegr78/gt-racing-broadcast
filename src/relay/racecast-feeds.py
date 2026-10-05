@@ -2479,7 +2479,7 @@ def push_webhook_retrying(url, payload, expected_action=None, *,
                     LOG.info("sheet push %s ok after %d attempt(s), %.1f s",
                              label, tried, took)
                 return True, None, body
-            err = cerr
+            err = _mask_webhook(cerr, url)    # the body snippet may echo the URL
         LOG.warning("sheet push %s: attempt %d/%d failed after %.1f s: %s",
                     label, tried, attempts, now() - t0, err)
         if webhook_error_permanent(err) or i + 1 >= attempts:
