@@ -64,6 +64,15 @@ exposes these ids:
 The POV box (frame + name) is shown only while the POV PiP is toggled on (driven by the
 relay's `pov_shown`, via `/hud/data` `povActive`).
 
+In a solo profile, `#webcam` (the webcam frame) and `#tyres-capture` (the tyres/fuel
+crop box) also drive OBS sources: their box sets the position and size of **Solo Webcam**
+and **Solo Tyres/Fuel Capture** in the Program scene, and hiding the slot
+(`display: none`, or hiding it in the builder) hides that OBS source too. A slot that is
+not hidden is shown. OBS follows the profile on `racecast setup` and on every relay
+start, so the choice travels with `profile export`. Hiding or showing either source by
+hand in OBS lasts only until the next relay start. `#pov` only places Feed POV; showing
+and hiding it stays with the director's POV toggle.
+
 ## Team colours and qualifying lap
 
 Three more overrides, all optional and driven by Sheet data rather than columns in the

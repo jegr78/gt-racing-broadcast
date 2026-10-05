@@ -51,6 +51,13 @@ keeps the rules. The per-league overlay override and the visual builder are in
   (`OBS_BOUNDS_SCALE_INNER`), not the number the collection JSON stores; a number is
   rejected with code 401. A transform OBS rejects is printed, a slot the collection
   lacks stays silent. Spec: `docs/superpowers/specs/2026-06-26-pov-box-obs-sync-design.md`.
+  **Visibility follows the profile too** (#766) for `overlay_build.VISIBILITY_SLOTS`
+  (`#webcam`, `#tyres-capture`): `display: none` on the plain slot selector in the
+  profile's `hud.css` hides the item, anything else shows it, baked into the import's
+  `visible` flag (`bake_overlay_visibility`) and pushed live by the same hook
+  (`obs_ws.set_scene_item_enabled`). Only a selector-list item exactly `#webcam` counts,
+  never `:not(#webcam)` or `#webcam .x`. Feed POV is excluded on purpose: the
+  director's live POV toggle owns its visibility.
 - **Broadcast graphics are pure-runtime** (same model as the Intro/Outro/Trailer clips): the
   still-graphics (Overlay, Standings, Schedule, Race/Quali Results, the three weather
   overlays, Standby, …) are **never committed**. `python3 src/relay/get-graphics.py`

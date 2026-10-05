@@ -362,6 +362,40 @@ def slot_scene(slot_id, solo):
     return tgt.get("solo_scene", tgt["scene"]) if solo else tgt["scene"]
 
 
+# Slots whose OBS item visibility the profile CSS owns (#766): `display: none` on the
+# slot hides the item, any other state shows it. Feed POV is deliberately absent: the
+# director's live POV toggle (/pov/toggle, paused at relay start) owns its visibility.
+VISIBILITY_SLOTS = ("webcam", "tyres-capture")
+
+_CSS_COMMENT_RE = re.compile(r"/\*.*?\*/", re.S)
+_CSS_RULE_RE = re.compile(r"([^{}]+)\{([^{}]*)\}")
+_DISPLAY_RE = re.compile(r"(?<![\w-])display\s*:\s*([^;!}]+?)\s*(!\s*important)?\s*(?:;|$)", re.I)
+
+
+def slot_hidden(css_text, slot_id):
+    """True when the effective `display` of the plain `#<slot_id>` selector is
+    `none`. Only rules whose selector list holds `#<slot_id>` as a whole item
+    count, so `:not(#webcam)` or `#webcam .inner` never hide the slot. Later rules
+    win, and an `!important` one beats a later plain one, like the CSS cascade."""
+    if not isinstance(css_text, str):
+        return False
+    target = "#" + slot_id
+    value, important = None, False
+    for selectors, body in _CSS_RULE_RE.findall(_CSS_COMMENT_RE.sub("", css_text)):
+        if target not in (s.strip() for s in selectors.split(",")):
+            continue
+        for val, imp in _DISPLAY_RE.findall(body):
+            if imp or not important:
+                value, important = val.strip().lower(), bool(imp)
+    return value == "none"
+
+
+def slot_visibility(override_css):
+    """{slot_id: visible} for every VISIBILITY_SLOTS entry, from the profile's
+    override CSS alone: the profile decides, a slot it never hides is shown."""
+    return {s: not slot_hidden(override_css, s) for s in VISIBILITY_SLOTS}
+
+
 def slot_boxes(base_css, override_css=""):
     """{slot_id: box} for every mapped OBS slot, the override's props layered over
     the hud.html base. A slot without a base rule is left out: nothing to anchor."""

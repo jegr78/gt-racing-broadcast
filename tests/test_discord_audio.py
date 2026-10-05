@@ -237,6 +237,29 @@ def t_bake_overlay_boxes_uses_the_hud_base_without_an_override():
         f"the webcam must land in the hud.html frame, got {it}"
 
 
+def t_bake_overlay_visibility_hides_and_shows_program_items():
+    # #766: the import JSON follows the profile CSS in both directions, and only
+    # inside 'Program' (the standalone 'Solo Webcam' scene keeps its item).
+    coll = {"sources": [
+        {"name": "Solo Webcam", "id": "scene", "settings": {"items": [
+            {"name": "Solo Webcam", "visible": True}]}},
+        {"name": "Program", "id": "scene", "settings": {"items": [
+            {"name": "Solo Webcam", "visible": True},
+            {"name": "Solo Tyres/Fuel Capture", "visible": False}]}},
+    ]}
+    applied = sa.bake_overlay_visibility(coll, "#webcam { display: none; }")
+    prog = {i["name"]: i["visible"] for i in coll["sources"][1]["settings"]["items"]}
+    assert prog == {"Solo Webcam": False, "Solo Tyres/Fuel Capture": True}, prog
+    assert coll["sources"][0]["settings"]["items"][0]["visible"] is True,         "the standalone Solo Webcam scene must stay untouched"
+    assert sorted((a[0], a[3]) for a in applied) == [("tyres-capture", True),
+                                                     ("webcam", False)], applied
+
+
+def t_bake_overlay_visibility_skips_a_missing_item():
+    coll = {"sources": [{"name": "Program", "id": "scene", "settings": {"items": []}}]}
+    assert sa.bake_overlay_visibility(coll, "#webcam { display: none; }") == []
+
+
 def t_apply_box_transform_webcam_scene_scoped_program_only():
     # The webcam bake must reposition the 'Solo Webcam' item ONLY where it is
     # embedded in 'Program', never a same-named item in the standalone fullscreen

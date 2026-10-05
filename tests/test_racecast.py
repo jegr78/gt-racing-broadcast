@@ -697,7 +697,8 @@ def t_sync_pov_transform_calls_setter_with_merged_box():
         orig = m._active_overlay_dir
         m._active_overlay_dir = lambda: d
         try:
-            m._sync_pov_transform(set_transform=fake_set, solo=False)
+            m._sync_pov_transform(set_transform=fake_set, solo=False,
+                                  set_enabled=lambda *a: (True, ""))
         finally:
             m._active_overlay_dir = orig
 
@@ -726,6 +727,26 @@ def t_sync_pov_transform_calls_setter_with_merged_box():
     assert ttf["boundsWidth"] == 245 and ttf["boundsHeight"] == 84
 
 
+def t_sync_pov_transform_shows_and_hides_items_from_the_profile_css():
+    # #766: on relay start OBS follows the profile CSS in both directions; Feed
+    # POV is left to the director's live toggle.
+    import tempfile
+    enabled = []
+    with tempfile.TemporaryDirectory() as d:
+        with open(os.path.join(d, "hud.css"), "w") as fh:
+            fh.write("#webcam { display: none; }\n#pov { display: none; }")
+        orig = m._active_overlay_dir
+        m._active_overlay_dir = lambda: d
+        try:
+            m._sync_pov_transform(set_transform=lambda *a: (True, ""), solo=True,
+                                  set_enabled=lambda scene, source, on:
+                                  (enabled.append((scene, source, on)), (True, ""))[1])
+        finally:
+            m._active_overlay_dir = orig
+    assert sorted(enabled) == [("Program", "Solo Tyres/Fuel Capture", True),
+                               ("Program", "Solo Webcam", False)], enabled
+
+
 def t_sync_pov_transform_targets_program_in_solo():
     import tempfile
     calls = []
@@ -734,7 +755,8 @@ def t_sync_pov_transform_targets_program_in_solo():
         m._active_overlay_dir = lambda: d
         try:
             m._sync_pov_transform(set_transform=lambda scene, source, tf:
-                                  (calls.append((scene, source)), (True, ""))[1], solo=True)
+                                  (calls.append((scene, source)), (True, ""))[1], solo=True,
+                                  set_enabled=lambda *a: (True, ""))
         finally:
             m._active_overlay_dir = orig
     assert ("Program", "Feed POV") in calls, \
@@ -750,7 +772,8 @@ def _sync_output(result):
         try:
             with contextlib.redirect_stdout(buf):
                 m._sync_pov_transform(set_transform=lambda scene, source, tf: result(source),
-                                      solo=False)
+                                      solo=False,
+                                      set_enabled=lambda scene, source, on: result(source))
         finally:
             m._active_overlay_dir = orig
     return buf.getvalue()
@@ -762,6 +785,24 @@ def t_sync_pov_transform_reports_a_rejected_transform():
     out = _sync_output(lambda source: (False, rejected))
     assert "obs: webcam box sync failed" in out and "401" in out, \
         f"a transform OBS rejected must be reported, got {out!r}"
+
+
+def t_sync_pov_transform_reports_a_refused_show_or_hide():
+    import contextlib, io, tempfile
+    buf = io.StringIO()
+    with tempfile.TemporaryDirectory() as d:
+        with open(os.path.join(d, "hud.css"), "w") as fh:
+            fh.write("#webcam { display: none; }")
+        orig = m._active_overlay_dir
+        m._active_overlay_dir = lambda: d
+        try:
+            with contextlib.redirect_stdout(buf):
+                m._sync_pov_transform(set_transform=lambda *a: (True, ""), solo=True,
+                                      set_enabled=lambda *a: (False, "connection refused"))
+        finally:
+            m._active_overlay_dir = orig
+    out = buf.getvalue()
+    assert "could not hide 'Solo Webcam'" in out and "connection refused" in out, out
 
 
 def t_sync_pov_transform_is_silent_for_a_slot_the_collection_lacks():

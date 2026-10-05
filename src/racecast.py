@@ -2484,7 +2484,7 @@ def relay_start(rest):
               f"re-run 'racecast relay start' to reconcile.")
     return None
 
-def _sync_pov_transform(set_transform=None, solo=None):
+def _sync_pov_transform(set_transform=None, solo=None, set_enabled=None):
     """Best-effort live sibling of the setup-time POV/webcam bake: push every
     mapped overlay slot's box position/size onto its OBS scene item (see
     overlay_build.OVERLAY_SLOT_OBS_SOURCES, 'pov' -> Stint/'Feed POV' (Program in
@@ -2496,7 +2496,9 @@ def _sync_pov_transform(set_transform=None, solo=None):
     overlay, no base rule for that slot, missing scene/source (e.g. no 'Solo
     Webcam' in an endurance collection). `set_transform` is a test seam
     (defaults to obs_ws.set_scene_item_transform); `solo` defaults to the active
-    profile's kind and picks each slot's scene (overlay_build.slot_scene)."""
+    profile's kind and picks each slot's scene (overlay_build.slot_scene). It also
+    shows or hides each VISIBILITY_SLOTS item as the profile CSS says (#766);
+    `set_enabled` is that seam (defaults to obs_ws.set_scene_item_enabled)."""
     import overlay_build
     if solo is None:
         solo = _profile_is_solo()
@@ -2528,6 +2530,16 @@ def _sync_pov_transform(set_transform=None, solo=None):
                       f"({box['left']},{box['top']} {box['width']}x{box['height']}).")
             elif not obs_ws.is_missing_item(note):
                 print(f"obs: {slot_id} box sync failed for '{tgt['source']}'. {note}")
+        if set_enabled is None:
+            set_enabled = obs_ws.set_scene_item_enabled
+        for slot_id, visible in overlay_build.slot_visibility(override_css).items():
+            source = overlay_build.OVERLAY_SLOT_OBS_SOURCES[slot_id]["source"]
+            ok, note = set_enabled(overlay_build.slot_scene(slot_id, solo), source, visible)
+            if ok:
+                print(f"obs: '{source}' {'shown' if visible else 'hidden'} "
+                      "as the profile CSS says.")
+            elif not obs_ws.is_missing_item(note):
+                print(f"obs: could not {'show' if visible else 'hide'} '{source}'. {note}")
     except Exception as exc:  # noqa: BLE001  best-effort contract
         print(f"obs: box sync skipped ({exc}).")
         return
