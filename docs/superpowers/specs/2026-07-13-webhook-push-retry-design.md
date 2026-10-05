@@ -66,6 +66,11 @@ Constants (module-level, easily tuned):
 `WEBHOOK_RETRY_TIMEOUT_S = 5` (per-attempt; lower than the direct 10 s so a hung attempt
 fails fast and the next one runs inside the budget).
 
+> **Revised by #767:** 5 s per attempt was tighter than Apps Script's real latency, and the
+> 10 s budget allowed only two attempts. Now `WEBHOOK_RETRY_TIMEOUT_S = 15` and
+> `WEBHOOK_RETRY_BUDGET_S = 40.0` (three attempts, worst case ~48 s); see "Revision (#767)"
+> below.
+
 ### 2. Permanent-vs-transient — a pure predicate
 
 Extract the outdated-script message to a module constant and add:
@@ -117,6 +122,28 @@ the retry succeeds on attempt 2 (~5.5 s). Constants are tunable.
 Decoupling / de-prioritising the push from the feed-resolve load window (a dedicated egress
 queue so the webhook POST never competes with the streamlink/yt-dlp burst). A separate
 follow-up; this change is retry + bounded backoff + a lower per-attempt timeout only.
+
+## Revision (#767): fit the timeouts to Apps Script and log every push
+
+Measured on 2026-10-05 against a production webhook (no-op `setup` writes): typical
+1.5-4 s, outliers of 9.7 s and 18.9 s, independent of parallel sheet reads; 2 of 6 pushes
+through an idle relay ended in the 5 s timeout. With 5 s per attempt and a 10 s budget only
+two attempts fit, so a ~10 s slow phase of the script always raised SHEET SYNC FAILED.
+
+- `WEBHOOK_RETRY_TIMEOUT_S = 15`, `WEBHOOK_RETRY_BUDGET_S = 40.0`: three attempts fit (worst
+  case ~48 s). Background pushes (setup fields, teams, timer) use this.
+- `WEBHOOK_SYNC_BUDGET_S = 15.0` for the writes that run inside the panel's HTTP request
+  (schedule, POV, crew): one full attempt, a second only after a fast failure. This replaces
+  the latency trade-off in section 4.
+- `crew` deletes are never retried (`attempts=1`): a timed-out attempt can still land, and a
+  retried delete would then remove the next row. Every other action writes values and is
+  safe to repeat.
+- `OVERRIDE_TTL` goes from 30 to 60 s, so the HUD's optimistic echo outlives the slowest
+  background push instead of flipping back to the old sheet value mid-retry.
+- Logging: each failed attempt and the final failure are a WARNING in the relay log
+  (`sheet push <action>: attempt n/N failed after X s: <error>`), a success that needed a
+  retry or took `WEBHOOK_SLOW_S` (5 s) or longer is an INFO. The webhook URL and its
+  `key` are masked in the log and in the panel's `last_error`.
 
 ## Acceptance criteria (from #490)
 
