@@ -3521,6 +3521,126 @@ def t_ensure_active_console_secret_skips_example_and_missing():
     _with_cockpit_secret_env_cleared(body)
 
 
+def _league_rc(**kw):
+    """A ResolvedConfig for the profile-env switch tests (#768)."""
+    base = dict(profile="demo", name="Demo", sheet_id="abc")
+    base.update(kw)
+    return m.pcfg.ResolvedConfig(**base)
+
+
+def t_apply_profile_env_clears_values_the_new_profile_leaves_empty():
+    # #768: switching to a profile with an empty CONSOLE_SECRET / webhook must not
+    # keep the previous league's values; a relay started next would verify console
+    # tokens with, and post to, the wrong league.
+    env = {}
+    m._apply_profile_env(_league_rc(console_secret="secret-a",
+                                    discord_webhook_url="https://discord.com/api/webhooks/1/a"),
+                         environ=env)
+    assert env["RACECAST_CONSOLE_SECRET"] == "secret-a", env
+    m._apply_profile_env(_league_rc(profile="b", name="B", sheet_id="def"), environ=env)
+    assert "RACECAST_CONSOLE_SECRET" not in env, env
+    assert "RACECAST_DISCORD_WEBHOOK_URL" not in env, env
+    assert env["RACECAST_SHEET_ID"] == "def", env
+
+
+def t_apply_profile_env_clears_values_a_child_process_inherited():
+    # The Control Center starts the relay as a `racecast relay start` child that
+    # inherits a COPY of its environment: the child must still recognise the
+    # previous profile's values as profile-owned and drop them.
+    parent = {}
+    m._apply_profile_env(_league_rc(console_secret="secret-a"), environ=parent)
+    child = dict(parent)
+    m._apply_profile_env(_league_rc(profile="b", name="B"), environ=child)
+    assert "RACECAST_CONSOLE_SECRET" not in child, child
+
+
+def t_apply_profile_env_keeps_machine_and_shell_values():
+    # A league key the machine .env or the shell set, and no profile ever
+    # injected, survives a profile that leaves it empty.
+    env = {"RACECAST_SHEET_PUSH_URL": "https://script.google.com/macros/s/x/exec"}
+    m._apply_profile_env(_league_rc(), environ=env)
+    assert env.get("RACECAST_SHEET_PUSH_URL") == "https://script.google.com/macros/s/x/exec", env
+
+
+def t_apply_profile_env_restores_the_machine_value_a_profile_overrode():
+    env = {}
+    machine = {"RACECAST_SHEET_PUSH_URL": "https://machine/exec"}
+    m._apply_profile_env(_league_rc(sheet_push_url="https://league-a/exec",
+                                    machine_env=machine), environ=env)
+    assert env["RACECAST_SHEET_PUSH_URL"] == "https://league-a/exec", env
+    m._apply_profile_env(_league_rc(profile="b", name="B", machine_env=machine),
+                         environ=env)
+    assert env.get("RACECAST_SHEET_PUSH_URL") == "https://machine/exec", env
+
+
+def t_ensure_active_console_secret_provisions_after_a_profile_switch():
+    # #768 end to end: profile A's secret is in the environment, the active profile
+    # B has none. Applying B and ensuring the secret must provision B's own secret,
+    # not hand back A's.
+    import tempfile
+    def body():
+        with tempfile.TemporaryDirectory() as dd:
+            ppath = os.path.join(dd, "profile.env")
+            with open(ppath, "w", encoding="utf-8") as fh:
+                fh.write("NAME=B\n")
+            m._apply_profile_env(_league_rc(console_secret="secret-a"))
+            m._apply_profile_env(_league_rc(profile="b", name="B"))
+            m._active_profile_env_strict = lambda: ("b", ppath)
+            got = m._ensure_active_console_secret()
+            assert got and got != "secret-a" and len(got) == 64, got
+            with open(ppath, encoding="utf-8") as fh:
+                assert m.parse_env_text(fh.read())["CONSOLE_SECRET"] == got
+            # the provisioned secret belongs to B: a switch to a third profile
+            # without a secret drops it again
+            m._apply_profile_env(_league_rc(profile="c", name="C"))
+            assert "RACECAST_CONSOLE_SECRET" not in os.environ, \
+                "the provisioned secret leaked into the next profile"
+    keys = (*m.PROFILE_ENV_KEYS, m.PROFILE_ENV_MARKER)
+    saved = {k: os.environ.pop(k, None) for k in keys}
+    try:
+        _with_cockpit_secret_env_cleared(body)
+    finally:
+        for k, v in saved.items():
+            os.environ.pop(k, None)
+            if v is not None:
+                os.environ[k] = v
+
+
+def t_apply_active_profile_env_switch_drops_the_previous_league_values():
+    # The production path: two real profile dirs, switch the active one.
+    import tempfile
+    keys = (*m.PROFILE_ENV_KEYS, m.PROFILE_ENV_MARKER)
+    saved = {k: os.environ.pop(k, None) for k in keys}
+    saved_fns = (m._active_profile_name, m._env_base, m._runtime_base_dir)
+    try:
+        with tempfile.TemporaryDirectory() as root:
+            for name, body in (("a", "NAME=A\nSHEET_ID=sa\nCONSOLE_SECRET=secret-a\n"
+                                     "DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/1/a\n"),
+                               ("b", "NAME=B\nSHEET_ID=sb\n")):
+                os.makedirs(os.path.join(root, "profiles", name))
+                with open(os.path.join(root, "profiles", name, "profile.env"), "w",
+                          encoding="utf-8") as fh:
+                    fh.write(body)
+            m._env_base = lambda *_a: root
+            m._runtime_base_dir = lambda: os.path.join(root, "runtime")
+            m._active_profile_name = lambda: "a"
+            assert m._apply_active_profile_env() == "a"
+            assert os.environ.get("RACECAST_CONSOLE_SECRET") == "secret-a"
+            m._active_profile_name = lambda: "b"
+            assert m._apply_active_profile_env() == "b"
+            assert os.environ.get("RACECAST_SHEET_ID") == "sb"
+            assert os.environ.get("RACECAST_CONSOLE_SECRET") is None, \
+                "profile a's console secret survived the switch to b"
+            assert os.environ.get("RACECAST_DISCORD_WEBHOOK_URL") is None, \
+                "profile a's Discord webhook survived the switch to b"
+    finally:
+        m._active_profile_name, m._env_base, m._runtime_base_dir = saved_fns
+        for k, v in saved.items():
+            os.environ.pop(k, None)
+            if v is not None:
+                os.environ[k] = v
+
+
 def t_ensure_active_console_secret_respects_existing_env():
     """RACECAST_CONSOLE_SECRET in env is returned immediately without resolving a profile."""
     def body():

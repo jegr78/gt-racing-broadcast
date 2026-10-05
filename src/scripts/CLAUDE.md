@@ -69,7 +69,12 @@ active league's values into child processes as **prefixed** env vars
 (`RACECAST_SHEET_ID`, `RACECAST_SHEET_PUSH_URL`, `RACECAST_INTRO_URL`,
 `RACECAST_OUTRO_URL`, `RACECAST_TRAILER_URL`, `RACECAST_OBS_COLLECTION`: see `_profile_env_vars` /
 `_apply_active_profile_env` in `src/racecast.py`), so the relay and the asset
-downloaders read a flat environment and stay profile-agnostic. `racecast profile
+downloaders read a flat environment and stay profile-agnostic. The injection is a
+**replace, not a merge** (`_apply_profile_env`, #768): a key the new profile leaves empty
+is dropped (or reset to the machine `.env` value) when an earlier profile injected it.
+`RACECAST_PROFILE_ENV_KEYS` lists the injected keys and travels with the environment, so
+a `racecast relay start` child of a long-running Control Center does not inherit the
+previous league's `CONSOLE_SECRET`, Discord webhook or sheet webhook. `racecast profile
 list|show|use|new|export|import [--from/--no-assets/--out/--force]` manages profiles;
 global `--profile NAME` runs one command against a non-active profile. `racecast
 profile export NAME` packages the entire `profiles/<name>/` tree (including
