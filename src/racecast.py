@@ -210,11 +210,9 @@ def _ui_app_log_dir():
 def _ui_app_log_path():
     return os.path.join(_ui_app_log_dir(), "app.log")
 
-def _profile_env_vars(rc):
-    """The league values from a ResolvedConfig to push into the child env, as a
-    dict of the non-empty ones. These are exactly what the relay / one-shots /
-    probes read (RACECAST_SHEET_ID etc.)."""
-    pairs = (("RACECAST_SHEET_ID", rc.sheet_id),
+def _profile_env_pairs(rc):
+    """Every league env key with the ResolvedConfig's value ("" when unset)."""
+    return (("RACECAST_SHEET_ID", rc.sheet_id),
              ("RACECAST_SHEET_PUSH_URL", rc.sheet_push_url),
              ("RACECAST_INTRO_URL", rc.intro_url),
              ("RACECAST_OUTRO_URL", rc.outro_url),
@@ -231,7 +229,51 @@ def _profile_env_vars(rc):
              ("RACECAST_LOGO", rc.logo_path),
              ("RACECAST_KIND", rc.kind),   # endurance|solo; relay's --solo default
              ("RACECAST_TEMPLATE", rc.template))  # solo starter template (commentary|pov)
-    return {k: v for k, v in pairs if v}
+
+
+def _profile_env_vars(rc):
+    """The league values from a ResolvedConfig to push into the child env, as a
+    dict of the non-empty ones. These are exactly what the relay / one-shots /
+    probes read (RACECAST_SHEET_ID etc.)."""
+    return {k: v for k, v in _profile_env_pairs(rc) if v}
+
+
+# The league env keys, and the env var that lists which of them the profile layer
+# injected. The list travels with the environment, so a `racecast relay start`
+# child of the Control Center still knows an inherited value came from a profile
+# (#768).
+PROFILE_ENV_KEYS = tuple(k for k, _ in _profile_env_pairs(
+    pcfg.ResolvedConfig(profile="", name="", sheet_id="")))
+PROFILE_ENV_MARKER = "RACECAST_PROFILE_ENV_KEYS"
+
+
+def _profile_owned_keys(environ):
+    return {k for k in environ.get(PROFILE_ENV_MARKER, "").split(",") if k}
+
+
+def _mark_profile_owned(key, environ=None):
+    """Record `key` as injected by the profile layer."""
+    environ = os.environ if environ is None else environ
+    environ[PROFILE_ENV_MARKER] = ",".join(sorted(_profile_owned_keys(environ) | {key}))
+
+
+def _apply_profile_env(rc, environ=None):
+    """Make the league keys in `environ` reflect exactly this profile (#768). A key
+    the profile sets is injected. A key it leaves empty is dropped when an earlier
+    profile injected it, or reset to the machine .env value when there is one, so a
+    long-running Control Center never hands the previous league's console secret,
+    Discord webhook or sheet webhook to the next relay. A value the machine .env or
+    the shell set, and no profile injected, stays."""
+    environ = os.environ if environ is None else environ
+    values = _profile_env_vars(rc)
+    machine = rc.machine_env or {}
+    for key in _profile_owned_keys(environ) - set(values):
+        if machine.get(key):
+            environ[key] = machine[key]
+        else:
+            environ.pop(key, None)
+    environ.update(values)
+    environ[PROFILE_ENV_MARKER] = ",".join(sorted(values))
 
 def _apply_active_profile_env():
     """Resolve the active profile and inject its league values into os.environ so
@@ -246,7 +288,7 @@ def _apply_active_profile_env():
                                  runtime_root=_runtime_base_dir())
     except pcfg.ProfileError:
         return None
-    os.environ.update(_profile_env_vars(rc))
+    _apply_profile_env(rc)
     return name
 
 def _env_base(frozen, executable, here):
@@ -2010,11 +2052,13 @@ def _ensure_active_console_secret():
             existing = parsed.get("CONSOLE_SECRET", "")
         if existing:                       # already provisioned (or exported) -> reuse
             os.environ["RACECAST_CONSOLE_SECRET"] = existing
+            _mark_profile_owned("RACECAST_CONSOLE_SECRET")
             return existing
         fresh = secrets.token_hex(32)      # first use on this league -> generate + persist
         if not _set_env_key(ppath, "CONSOLE_SECRET", fresh).get("ok"):
             return None
         os.environ["RACECAST_CONSOLE_SECRET"] = fresh
+        _mark_profile_owned("RACECAST_CONSOLE_SECRET")   # belongs to this league (#768)
         return fresh
     except Exception:
         return None
