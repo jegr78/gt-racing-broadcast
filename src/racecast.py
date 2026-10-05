@@ -248,6 +248,7 @@ PROFILE_ENV_MARKER = "RACECAST_PROFILE_ENV_KEYS"
 
 
 def _profile_owned_keys(environ):
+    """The league keys an earlier profile apply injected into `environ`."""
     return {k for k in environ.get(PROFILE_ENV_MARKER, "").split(",") if k}
 
 
@@ -276,9 +277,11 @@ def _apply_profile_env(rc, environ=None):
     environ[PROFILE_ENV_MARKER] = ",".join(sorted(values))
 
 def _apply_active_profile_env():
-    """Resolve the active profile and inject its league values into os.environ so
-    every downstream consumer (relay daemon, one-shots, event probes) inherits
-    them. Tolerant: no profile -> no-op. Returns the profile name or None."""
+    """Resolve the active profile and make os.environ carry exactly its league
+    values (_apply_profile_env: a value the previous profile injected and this one
+    leaves empty is dropped), so every downstream consumer (relay daemon, one-shots,
+    event probes) inherits them. Tolerant: no profile -> no-op. Returns the profile
+    name or None."""
     name = _active_profile_name()
     if not name:
         return None
