@@ -2424,7 +2424,7 @@ def webhook_error_permanent(err):
 
 
 def _mask_webhook(text, url):
-    """`text` with the webhook URL and its ?key= secret masked, for logs and the
+    """`text` with the webhook URL and its key secret masked, for logs and the
     panel's last_error."""
     if not text or not url:
         return text
