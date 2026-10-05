@@ -1570,6 +1570,13 @@ def t_push_masks_the_url_in_an_unconfirmed_body():
     assert "s3cr3t-key" not in err and "AKfyc-test" not in err, err
 
 
+def t_mask_webhook_hides_an_encoded_key():
+    url = "https://script.google.com/macros/s/X/exec?key=a+b%2Bc&v=1"
+    for text in ("bad key=a+b%2Bc", "bad key a b+c"):
+        masked = m._mask_webhook(text, url)
+        assert "a+b%2Bc" not in masked and "a b+c" not in masked, masked
+
+
 def t_timer_push_is_logged_as_timer():
     import logging
     records, stop = _capture_relay_log()

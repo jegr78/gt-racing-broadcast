@@ -2428,8 +2428,10 @@ def _mask_webhook(text, url):
     panel's last_error."""
     if not text or not url:
         return text
-    secret = parse_qs(urlparse(url).query).get("key", [""])[0]
-    for part in (url, url.split("?", 1)[0], secret):
+    query = urlparse(url).query
+    secret = parse_qs(query).get("key", [""])[0]
+    raw = next((p[4:] for p in query.split("&") if p.startswith("key=")), "")
+    for part in (url, url.split("?", 1)[0], raw, secret):
         if part:
             text = text.replace(part, "<webhook>")
     return text
