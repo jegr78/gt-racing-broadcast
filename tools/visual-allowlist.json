@@ -1,7 +1,4 @@
 [
-  {"surface": "cc-help", "rule": "contrast",
-   "selector": "#(wiki-open|decks-open|decks-local-open|g-setup|g-director|g-event)|#local-docs > div\\.row(:nth-of-type\\(\\d+\\))? > a\\.linkbtn",
-   "reason": "known defect, #773"},
   {"surface": "cc-.*", "rule": "contrast", "selector": "#ver", "detail": "^3\\.57:1 ",
    "reason": "known defect, #774"},
   {"surface": "cc-.*", "rule": "contrast", "selector": "#jobtitle", "detail": "^3\\.57:1 ",
