@@ -11,6 +11,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))
 import e2e_checks as E
+import e2e_visual as V
 import console_auth
 
 
@@ -126,6 +127,11 @@ SCHEDULE_ROWS = [
 
 # Rita is crew only, so her token carries race_control and nothing else.
 CREW_ROWS = [("Rita", "", "", "", "x")]
+
+PROBE_JS = os.path.join(ROOT, "tools", "visual-probe.js")
+ALLOWLIST = os.path.join(ROOT, "tools", "visual-allowlist.json")
+PLAYWRIGHT_HINT = ("pip install playwright==1.63.0 && python -m playwright install chromium "
+                   "(see tools/CLAUDE.md)")
 
 
 # The rendered checks load the cockpit page in a real browser and assert its state
@@ -401,6 +407,64 @@ def _capture_shots(ctx, outdir, headed=False, slowmo=0):
     return written
 
 
+def _visual_one(browser, surface, viewport, urls, outdir, probe, allow, used):
+    """Render one surface in one viewport, screenshot it and judge it. Returns a SurfaceResult."""
+    w, h = V.VIEWPORTS[viewport]
+    shot = f"{surface.name}-{viewport}.png"
+    errors = []
+
+    def on_console(msg):
+        if msg.type == "error":
+            errors.append(f"console.error: {msg.text}")
+
+    page = browser.new_page(viewport={"width": w, "height": h})
+    page.on("pageerror", lambda exc: errors.append(f"pageerror: {exc}"))
+    page.on("console", on_console)
+    try:
+        page.goto(V.surface_url(surface, urls), wait_until="domcontentloaded")
+        if surface.prep:
+            page.evaluate(surface.prep)
+        page.wait_for_function(surface.ready, timeout=surface.timeout_ms)
+        page.wait_for_timeout(V.SETTLE_MS)
+        page.screenshot(path=os.path.join(outdir, shot), full_page=True)
+        facts = page.evaluate(probe)
+    except Exception as exc:  # noqa: BLE001  a surface that does not render is a failure
+        return V.SurfaceResult(surface.name, viewport, None, [], 0, f"{type(exc).__name__}: {exc}")
+    finally:
+        page.close()
+    findings = V.evaluate(facts, errors)
+    kept, hit = V.apply_allowlist(findings, allow, surface.name, viewport)
+    used.update(hit)
+    return V.SurfaceResult(surface.name, viewport, shot, kept, len(findings) - len(kept), None)
+
+
+def run_visual(urls, outdir, headed=False, slowmo=0):
+    """Render every surface of the visual acceptance run, write DIR/report.html and the
+    screenshots, print a summary. Returns 0 when clean, 1 on a finding or a broken surface."""
+    from playwright.sync_api import sync_playwright  # noqa: PLC0415  optional, lazy
+    with open(PROBE_JS, encoding="utf-8") as fh:
+        probe = fh.read()
+    allow = V.load_allowlist(ALLOWLIST)
+    os.makedirs(outdir, exist_ok=True)
+    results, used = [], set()
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=not headed, slow_mo=slowmo)
+        try:
+            for surface in V.SURFACES:
+                for viewport in surface.viewports:
+                    results.append(_visual_one(browser, surface, viewport, urls, outdir,
+                                               probe, allow, used))
+        finally:
+            browser.close()
+    unused = [e for n, e in enumerate(allow) if n not in used]
+    report = os.path.join(outdir, "report.html")
+    with open(report, "w", encoding="utf-8") as fh:
+        fh.write(V.render_report(results, unused))
+    print("visual acceptance:\n" + V.summarize(results, unused))
+    print(f"--visual: report at {report}")
+    return V.result_code(results)
+
+
 def _print_live_urls(relay_url, ui_url, token):
     """With --keep the spawned relay and Control Center are left running: they
     started in their own session, so they outlive this process. Print the live
@@ -568,6 +632,12 @@ def run_synthetic(args):
             if any(r.status == "fail" for r in rendered):
                 code = 1
         print(E.summarize(results))
+        if args.visual:
+            if not _playwright_available():
+                print(f"--visual: Playwright + Chromium required: {PLAYWRIGHT_HINT}")
+                return 2
+            urls = {"ui": ui_url, "relay": relay_url, "token": token, "rc_token": rc_token}
+            code = max(code, run_visual(urls, args.report, headed=args.headed, slowmo=args.slowmo))
         if args.shots:
             _capture_shots(ctx, args.shots, headed=args.headed, slowmo=args.slowmo)
         if args.keep:
@@ -714,6 +784,14 @@ def main(argv=None):
                     help="write a screenshot of each surface (cockpit/panel/hud/Control "
                          "Center) to DIR via Playwright, a reproducible MCP-free visual "
                          "tour (local only; the Control Center shot shows your Tailscale IP)")
+    ap.add_argument("--visual", action="store_true",
+                    help="visual acceptance run: render Control Center, Director Panel, cockpit "
+                         "and Race Control, apply the layout rules, fail on a finding "
+                         "(synthetic mode only, needs Playwright)")
+    ap.add_argument("--report", metavar="DIR",
+                    default=os.path.join(ROOT, "runtime", "visual-report"),
+                    help="where --visual writes report.html and the screenshots "
+                         "(default runtime/visual-report)")
     ap.add_argument("--timeout", type=float, default=30.0,
                     help="per-service readiness timeout (s)")
     ap.add_argument("--keep", action="store_true",
@@ -726,6 +804,8 @@ def main(argv=None):
     if args.real_league:
         if args.binary is not None:
             ap.error("--binary is synthetic-only; not supported with --real-league")
+        if args.visual:
+            ap.error("--visual is synthetic-only; not supported with --real-league")
         return run_real_league(args)
     return run_synthetic(args)
 
