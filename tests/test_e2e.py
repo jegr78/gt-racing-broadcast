@@ -697,6 +697,41 @@ def t_check_program_audio_stream_fails_when_unavailable():
         srv.shutdown()
 
 
+def t_build_crew_csv_header_and_rows():
+    text = e.build_crew_csv([("Rita", "", "", "", "x")])
+    lines = text.strip().splitlines()
+    assert lines[0] == "Name,Director,Producer,Commentator,Race Control", lines[0]
+    assert lines[1] == "Rita,,,,x", lines[1]
+
+
+def t_race_control_check_skips_without_token():
+    ctx = e.Ctx(relay_url="http://127.0.0.1:9", disabled_relay_url=None, ui_url=None,
+                token="t", streamer_key="alice", expect={})
+    r = e.check_race_control_page(ctx)
+    assert r.status == "skip", r
+
+
+def t_program_monitor_fails_on_503():
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class H(BaseHTTPRequestHandler):
+        def log_message(self, *a): pass
+        def do_GET(self):
+            self.send_response(503); self.end_headers()
+
+    srv = ThreadingHTTPServer(("127.0.0.1", e.free_port()), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        ctx = e.Ctx(relay_url=f"http://127.0.0.1:{srv.server_address[1]}",
+                    disabled_relay_url=None, ui_url=None, token="t",
+                    streamer_key="alice", expect={})
+        r = e.check_program_monitor(ctx)
+        assert r.status == "fail", r
+    finally:
+        srv.shutdown()
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

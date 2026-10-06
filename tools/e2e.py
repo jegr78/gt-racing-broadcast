@@ -4,28 +4,34 @@ src/ and assert the live HTTP surface. Synthetic mode is the default and runs in
 CI with no real Sheet, cookies, OBS or Tailscale; --real-league NAME is local-only.
 
 Maintainer tool, not shipped. Stdlib only."""
-import argparse, contextlib, os, shutil, signal, subprocess, sys, tempfile, threading, time
+import argparse, contextlib, os, shutil, signal, socket, subprocess, sys, tempfile, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))
 import e2e_checks as E
+import e2e_visual as V
 import console_auth
 
 
-def _csv_server(csv_text):
-    body = csv_text.encode()
+def _csv_server(files):
+    """Serve each {path: csv_text} entry over loopback HTTP; returns (server, base_url)."""
+    bodies = {p: t.encode() for p, t in files.items()}
 
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a): pass
         def do_GET(self):
+            body = bodies.get(self.path.split("?", 1)[0])
+            if body is None:
+                self.send_response(404); self.end_headers()
+                return
             self.send_response(200)
             self.send_header("Content-Type", "text/csv"); self.end_headers()
             self.wfile.write(body)
     srv = ThreadingHTTPServer(("127.0.0.1", E.free_port()), H)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
-    return srv, f"http://127.0.0.1:{srv.server_address[1]}/schedule.csv"
+    return srv, f"http://127.0.0.1:{srv.server_address[1]}"
 
 
 def _spawn(argv, env, log, cwd=ROOT):
@@ -104,10 +110,28 @@ def _wait_ready(url, timeout, proc=None, log=None):
     raise RuntimeError(f"service not ready at {url} within {timeout}s\n--- child log ---\n{detail}")
 
 
+def _wait_port(port, timeout):
+    """Block until 127.0.0.1:*port* accepts a TCP connection or *timeout* seconds pass."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        with contextlib.suppress(OSError), socket.create_connection(("127.0.0.1", port), 0.5):
+            return
+        time.sleep(0.1)
+    raise RuntimeError(f"port {port} not ready after {timeout}s")
+
+
 SCHEDULE_ROWS = [
     ("https://www.youtube.com/watch?v=aaaaaaaaaaa", "Alice", "Stint 1"),
     ("https://www.twitch.tv/bobcaster", "Bob", "Stint 2"),
 ]
+
+# Rita is crew only, so her token carries race_control and nothing else.
+CREW_ROWS = [("Rita", "", "", "", "x")]
+
+PROBE_JS = os.path.join(ROOT, "tools", "visual-probe.js")
+ALLOWLIST = os.path.join(ROOT, "tools", "visual-allowlist.json")
+PLAYWRIGHT_HINT = ("pip install playwright==1.63.0 && python -m playwright install chromium "
+                   "(see tools/CLAUDE.md)")
 
 
 # The rendered checks load the cockpit page in a real browser and assert its state
@@ -383,6 +407,69 @@ def _capture_shots(ctx, outdir, headed=False, slowmo=0):
     return written
 
 
+def _visual_one(browser, surface, viewport, urls, outdir, probe, allow, used):
+    """Render one surface in one viewport, screenshot it and judge it. Returns a SurfaceResult."""
+    w, h = V.VIEWPORTS[viewport]
+    shot = f"{surface.name}-{viewport}.png"
+    errors = []
+
+    def on_console(msg):
+        if msg.type == "error":
+            # A failed resource load names no URL in its text, only in its location.
+            url = (msg.location or {}).get("url")
+            errors.append(f"console.error: {msg.text}" + (f" ({url})" if url else ""))
+
+    page = browser.new_page(viewport={"width": w, "height": h})
+    page.on("pageerror", lambda exc: errors.append(f"pageerror: {exc}"))
+    page.on("console", on_console)
+    try:
+        page.goto(V.surface_url(surface, urls), wait_until="domcontentloaded")
+        if surface.prep:
+            page.evaluate(surface.prep)
+        page.wait_for_function(surface.ready, timeout=surface.timeout_ms)
+        page.wait_for_timeout(V.SETTLE_MS)
+        page.screenshot(path=os.path.join(outdir, shot), full_page=True)
+        facts = page.evaluate(probe)
+    except Exception as exc:  # noqa: BLE001  a surface that does not render is a failure
+        return V.SurfaceResult(surface.name, viewport, None, [], 0, f"{type(exc).__name__}: {exc}")
+    finally:
+        page.close()
+    try:
+        findings = V.evaluate(facts, errors)
+        kept, hit = V.apply_allowlist(findings, allow, surface.name, viewport)
+    except Exception as exc:  # noqa: BLE001  facts the rules cannot read fail only this surface
+        return V.SurfaceResult(surface.name, viewport, shot, [], 0, f"{type(exc).__name__}: {exc}")
+    used.update(hit)
+    return V.SurfaceResult(surface.name, viewport, shot, kept, len(findings) - len(kept), None)
+
+
+def run_visual(urls, outdir, headed=False, slowmo=0):
+    """Render every surface of the visual acceptance run, write DIR/report.html and the
+    screenshots, print a summary. Returns 0 when clean, 1 on a finding or a broken surface."""
+    from playwright.sync_api import sync_playwright  # noqa: PLC0415  optional, lazy
+    with open(PROBE_JS, encoding="utf-8") as fh:
+        probe = fh.read()
+    allow = V.load_allowlist(ALLOWLIST)
+    os.makedirs(outdir, exist_ok=True)
+    results, used = [], set()
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=not headed, slow_mo=slowmo)
+        try:
+            for surface in V.SURFACES:
+                for viewport in surface.viewports:
+                    results.append(_visual_one(browser, surface, viewport, urls, outdir,
+                                               probe, allow, used))
+        finally:
+            browser.close()
+    unused = [e for n, e in enumerate(allow) if n not in used]
+    report = os.path.join(outdir, "report.html")
+    with open(report, "w", encoding="utf-8") as fh:
+        fh.write(V.render_report(results, unused))
+    print("visual acceptance:\n" + V.summarize(results, unused))
+    print(f"--visual: report at {report}")
+    return V.result_code(results)
+
+
 def _print_live_urls(relay_url, ui_url, token):
     """With --keep the spawned relay and Control Center are left running: they
     started in their own session, so they outlive this process. Print the live
@@ -408,6 +495,7 @@ def run_synthetic(args):
         secret = "e2e-secret-0123456789abcdef"
         key = console_auth.streamer_key("Alice")
         token = console_auth.mint_token(secret, key, version=1)
+        rc_token = console_auth.mint_token(secret, console_auth.streamer_key("Rita"), version=1)
 
         # The CLI always injects --cookies <runtime>/yt-cookies.txt and the relay
         # hard-exits if that path is missing. Synthetic runs have no real YouTube
@@ -431,6 +519,14 @@ def run_synthetic(args):
         # on a clean machine or CI runner.
         stub_bin = _stub_tools_bin(tmp)
 
+        # A stand-in OBS, so the program monitors render a picture instead of their offline state.
+        obs_port = E.free_port()
+        procs.append(_spawn([sys.executable, os.path.join(ROOT, "tools", "obs-sim.py"),
+                             "--image", os.path.join(relay_runtime, "graphics", "Standings.png"),
+                             "--port", str(obs_port)],
+                            dict(os.environ), os.path.join(tmp, "obs-sim.log")))
+        _wait_port(obs_port, args.timeout)
+
         # Launcher: the frozen binary, or `python src/racecast.py`. Binary mode
         # guards the bugs the src/ dev build hides, a file or import missing from
         # the PyInstaller bundle and frozen path resolution. The subcommand surface
@@ -444,9 +540,12 @@ def run_synthetic(args):
                 None, sys.executable, os.path.join(ROOT, "src", "racecast.py"))
             run_cwd = ROOT
 
-        # 2. schedule CSV server
-        csv_srv, csv_url = _csv_server(E.build_schedule_csv(SCHEDULE_ROWS))
+        # 2. schedule + crew CSV server
+        csv_srv, csv_base = _csv_server({
+            "/schedule.csv": E.build_schedule_csv(SCHEDULE_ROWS),
+            "/crew.csv": E.build_crew_csv(CREW_ROWS)})
         servers.append(csv_srv)
+        csv_url, crew_url = csv_base + "/schedule.csv", csv_base + "/crew.csv"
 
         # 3. cockpit relay: a secret in the env makes /cockpit/* served and token-gated
         relay_port = E.free_port()
@@ -457,11 +556,13 @@ def run_synthetic(args):
         # feed ports; step 6's relay overrides this on its own free ports. It also
         # neutralizes a RACECAST_FEED_FANOUT leaked from the operator's shell.
         env.update(RACECAST_CONSOLE_SECRET=secret, RACECAST_PROFILE="e2e",
-                   RACECAST_FEED_FANOUT="0")
+                   RACECAST_FEED_FANOUT="0", RACECAST_OBS_WS_HOST="127.0.0.1",
+                   RACECAST_OBS_WS_PORT=str(obs_port), RACECAST_OBS_WS_PASSWORD="")
         env["PATH"] = stub_bin + os.pathsep + env.get("PATH", "")
         relay_log = os.path.join(tmp, "relay.log")
         relay = _spawn(launcher + ["relay", "run", "--bind", "127.0.0.1",
                         "--http-port", str(relay_port), "--sheet-csv-url", csv_url,
+                        "--crew-csv-url", crew_url,
                         "--cookies", dummy_cookies, "--runtime-dir", relay_runtime],
                        env, relay_log, cwd=run_cwd)
         procs.append(relay)
@@ -524,7 +625,8 @@ def run_synthetic(args):
                     token=token, streamer_key=key, own_stint="Stint 1",
                     expect={"schedule_len": 2, "live_stint": 1},
                     fanout_feed_port=fanout_feed_a,
-                    fanout_relay_url=f"http://127.0.0.1:{fanout_http}")
+                    fanout_relay_url=f"http://127.0.0.1:{fanout_http}",
+                    rc_token=rc_token)
         results, code = E.run_checks(E.SYNTHETIC_CHECKS, ctx)
         if args.playwright:
             # Append the rendered-check results after the API results. A
@@ -535,6 +637,9 @@ def run_synthetic(args):
             if any(r.status == "fail" for r in rendered):
                 code = 1
         print(E.summarize(results))
+        if args.visual:
+            urls = {"ui": ui_url, "relay": relay_url, "token": token, "rc_token": rc_token}
+            code = max(code, run_visual(urls, args.report, headed=args.headed, slowmo=args.slowmo))
         if args.shots:
             _capture_shots(ctx, args.shots, headed=args.headed, slowmo=args.slowmo)
         if args.keep:
@@ -681,6 +786,14 @@ def main(argv=None):
                     help="write a screenshot of each surface (cockpit/panel/hud/Control "
                          "Center) to DIR via Playwright, a reproducible MCP-free visual "
                          "tour (local only; the Control Center shot shows your Tailscale IP)")
+    ap.add_argument("--visual", action="store_true",
+                    help="visual acceptance run: render Control Center, Director Panel, cockpit "
+                         "and Race Control, apply the layout rules, fail on a finding "
+                         "(synthetic mode only, needs Playwright)")
+    ap.add_argument("--report", metavar="DIR",
+                    default=os.path.join(ROOT, "runtime", "visual-report"),
+                    help="where --visual writes report.html and the screenshots "
+                         "(default runtime/visual-report)")
     ap.add_argument("--timeout", type=float, default=30.0,
                     help="per-service readiness timeout (s)")
     ap.add_argument("--keep", action="store_true",
@@ -693,7 +806,12 @@ def main(argv=None):
     if args.real_league:
         if args.binary is not None:
             ap.error("--binary is synthetic-only; not supported with --real-league")
+        if args.visual:
+            ap.error("--visual is synthetic-only; not supported with --real-league")
         return run_real_league(args)
+    if args.visual and not _playwright_available():
+        print(f"--visual: Playwright + Chromium required: {PLAYWRIGHT_HINT}")
+        return 2
     return run_synthetic(args)
 
 

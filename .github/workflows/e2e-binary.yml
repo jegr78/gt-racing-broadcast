@@ -53,7 +53,7 @@ jobs:
           # binary-build / e2e tooling (the surfaces a frozen-only bug can hide in).
           elif [ -n "$BASE_SHA" ] && [ -n "$HEAD_SHA" ]; then
             if git diff --name-only "$BASE_SHA" "$HEAD_SHA" | grep -qE \
-                '^(src/relay/|src/cockpit/|src/ui/|src/director/|src/obs/|tools/build-binary\.py|tools/e2e\.py|tools/e2e_checks\.py|\.github/workflows/e2e-binary\.yml)'; then
+                '^(src/relay/|src/cockpit/|src/ui/|src/director/|src/obs/|tools/build-binary\.py|tools/e2e\.py|tools/e2e_checks\.py|tools/obs-sim\.py|\.github/workflows/e2e-binary\.yml)'; then
               run=true
             fi
           fi

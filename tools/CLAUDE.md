@@ -50,7 +50,7 @@ the `check_*` callables, `SYNTHETIC_CHECKS`/`REAL_LEAGUE_CHECKS`), unit-tested i
 guaranteed `finally` teardown, no leaked relays/UI even on failure). Two modes:
 - **Synthetic** (`tools/e2e.py`, the default, **CI-runnable**): an ephemeral temp profile +
   an in-process CSV schedule server via `--sheet-csv-url`; spawns an enabled relay + a
-  cockpit-disabled relay + the Control Center on free `127.0.0.1` ports; runs 10 checks.
+  cockpit-disabled relay + the Control Center on free `127.0.0.1` ports; runs `SYNTHETIC_CHECKS`.
   No real Sheet/cookies/OBS/Tailscale. Because the relay **hard-exits at startup without
   `yt-dlp`/`streamlink` on PATH** (`racecast-feeds.py`), synthetic mode writes **no-op
   stubs** for `yt-dlp`/`streamlink`/`ffmpeg`/`deno` into the temp dir and prepends them
@@ -80,6 +80,23 @@ profile/runtime/cookies in, enable cockpit on the copy, set up a Playwright venv
 tear down) is captured in the **`racecast-e2e`** skill, which builds on the
 **`racecast-local-uat`** skill's data copy-in. Spec/plan:
 `docs/superpowers/{specs,plans}/2026-06-17-e2e-regression-harness*.md`.
+
+**Visual acceptance run** (`--visual [--report DIR]`, #772): renders the 13 Control Center
+views, the Director Panel, the cockpit and the Race Control desk (the two crew pages also at
+390 px) against the synthetic run, which serves a Crew roster (`--crew-csv-url`) and runs
+`tools/obs-sim.py`. `tools/visual-probe.js` reads element facts in the page;
+`tools/e2e_visual.py` applies six rules (page overflow, clipped text, a control left at the
+browser default on a dark surface, overlapping controls, WCAG AA contrast, console errors)
+and writes `DIR/report.html` plus screenshots. Any finding fails the run (exit 1); a missing
+Playwright is exit 2, never a skip. Deliberate exceptions go in `tools/visual-allowlist.json`,
+each with a reason; a real defect is allowlisted with reason "known defect, #N" pointing at
+its own issue. `surface` and `selector` are full-match regexes; the optional `detail` is
+searched, so anchor it with `^`/`$` when it must match exactly. The Control Center check
+only sees what is visible inside its scrolling content area (its `<main>` scrolls; the
+page itself does not). The CI `visual` job
+runs it on every PR and uploads the report. Local setup:
+`python3 -m venv runtime/pw-venv && runtime/pw-venv/bin/pip install playwright==1.63.0 &&
+runtime/pw-venv/bin/python -m playwright install chromium`.
 
 ## Prove a text-only change (`tools/ast-gate.py` + `tools/html-gate.py`)
 Two maintainer gates for a pass that is supposed to touch comments and prose only.
@@ -131,6 +148,7 @@ you:
 ```bash
 python3 tools/e2e.py --real-league NAME   # local-only: drive the copied real-league dev build (refuses under CI)
 python3 tools/e2e.py --playwright [--headed] [--shots DIR]  # optional rendered checks / visible browser / MCP-free screenshot tour
+runtime/pw-venv/bin/python tools/e2e.py --visual   # visual acceptance run -> runtime/visual-report/report.html
 
 # Refresh the vendored GT7 car tables (src/assets/gt7/, ddm999/gt7info, MIT-0) that name
 # the telemetry car id (#713). Run before a release when GT7 added cars.

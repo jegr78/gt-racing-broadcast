@@ -6514,6 +6514,16 @@ class ScheduleSource:
                 "last_error": self.last_error}
 
 
+def crew_csv_url(sheet_id, crew_tab, sheet_csv_url=None, override=None):
+    """The Crew roster CSV URL, or None when a custom schedule URL leaves no tab to derive it from."""
+    if override:
+        return override
+    if sheet_csv_url:
+        return None
+    return (f"https://docs.google.com/spreadsheets/d/{sheet_id}"
+            f"/gviz/tq?tqx=out:csv&sheet={quote(crew_tab)}")
+
+
 class CrewSource:
     """Reads the Crew roster from the Google Sheet (CSV) with last-good + fallback.
 
@@ -12177,7 +12187,11 @@ def main():
                          "default 'Qualifying'). One stream, served on Feed A.")
     ap.add_argument("--crew-tab", default="Crew",
                     help="Sheet tab naming Director/Producer crew for /console roles "
-                         "(#216); disabled with a custom --sheet-csv-url.")
+                         "(#216); a custom --sheet-csv-url disables it unless "
+                         "--crew-csv-url is given.")
+    ap.add_argument("--crew-csv-url", default=None,
+                    help="Full Crew roster CSV URL (overrides the derived Crew tab, "
+                         "also with --sheet-csv-url)")
     ap.add_argument("--channel-tab", default="Channel",
                     help="Sheet tab naming the event broadcast channel(s) for the "
                          "read-only broadcast-chat reader (#294); disabled with a "
@@ -12346,14 +12360,14 @@ def main():
 
     # Crew roster (#216): Name | Director | Producer tab giving the director/
     # producer capabilities for /console. Like POV/qualifying it is derivable
-    # only from sheet-id/tab, so a custom --sheet-csv-url disables it. Missing or
-    # empty tab is non-fatal -- roles just fall back to schedule-only commentator.
+    # only from sheet-id/tab, so a custom --sheet-csv-url disables it unless
+    # --crew-csv-url names one. Missing or empty tab is non-fatal -- roles just
+    # fall back to schedule-only commentator.
     crew_source = None
-    if not args.sheet_csv_url:
-        crew_csv_url = (f"https://docs.google.com/spreadsheets/d/{args.sheet_id}"
-                        f"/gviz/tq?tqx=out:csv&sheet={quote(args.crew_tab)}")
+    crew_url = crew_csv_url(args.sheet_id, args.crew_tab, args.sheet_csv_url, args.crew_csv_url)
+    if crew_url:
         crew_cache = os.path.join(runtime, "crew.cache.txt")
-        crew_source = CrewSource(crew_csv_url, crew_cache)
+        crew_source = CrewSource(crew_url, crew_cache)
         crew_source.refresh()   # non-fatal: empty/unreachable = no director/producer rows
 
     # Broadcast-chat reader (#294): the Channel tab + an ephemeral in-memory

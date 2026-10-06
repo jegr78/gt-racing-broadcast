@@ -114,3 +114,27 @@ jobs:
           python-version: "3.12"
       - name: Run the synthetic e2e harness (relay + Control Center bring-up)
         run: python tools/e2e.py
+
+  visual:
+    # Visual acceptance run: renders Control Center, Director Panel, cockpit and
+    # Race Control in Chromium and fails on a layout-rule finding. The stdlib e2e
+    # job above stays Playwright-free.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install Playwright + Chromium
+        run: |
+          python -m pip install playwright==1.63.0
+          python -m playwright install --with-deps chromium
+      - name: Run the visual acceptance run
+        run: python tools/e2e.py --visual --report visual-report
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: visual-report
+          path: visual-report/
+          if-no-files-found: ignore

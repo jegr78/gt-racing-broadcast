@@ -322,6 +322,15 @@ def t_race_control_keys_positional_fallback_empty():
     assert src.race_control_keys() == set(), src.race_control_keys()
 
 
+def t_crew_csv_url_derivation():
+    assert m.crew_csv_url("SHEET", "Crew") == (
+        "https://docs.google.com/spreadsheets/d/SHEET/gviz/tq?tqx=out:csv&sheet=Crew")
+    assert m.crew_csv_url("SHEET", "Crew", sheet_csv_url="http://h/s.csv") is None, \
+        "a custom schedule URL leaves no tab to derive the roster from"
+    assert m.crew_csv_url("SHEET", "Crew", sheet_csv_url="http://h/s.csv",
+                          override="http://h/c.csv") == "http://h/c.csv"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

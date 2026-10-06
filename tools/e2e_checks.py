@@ -82,6 +82,19 @@ def build_schedule_csv(rows):
     return buf.getvalue()
 
 
+CREW_HEADER = ("Name", "Director", "Producer", "Commentator", "Race Control")
+
+
+def build_crew_csv(rows):
+    """A header-mode Crew-tab CSV the relay's CrewSource parses; *rows* follow CREW_HEADER."""
+    buf = _io.StringIO()
+    w = _csv.writer(buf, lineterminator="\n")
+    w.writerow(CREW_HEADER)
+    for row in rows:
+        w.writerow(row)
+    return buf.getvalue()
+
+
 def free_port():
     """An OS-assigned free TCP port on the loopback. Binds :0, reads it back and
     closes, so there is a small race window the caller closes by handing the port
@@ -125,9 +138,9 @@ def service_launcher(binary, python=None, script=None):
 Ctx = collections.namedtuple(
     "Ctx",
     "relay_url disabled_relay_url ui_url token streamer_key expect own_stint"
-    " fanout_feed_port fanout_relay_url")
-Ctx.__new__.__defaults__ = (None, None, None)  # own_stint, fanout_feed_port and
-                                                # fanout_relay_url are optional
+    " fanout_feed_port fanout_relay_url rc_token")
+Ctx.__new__.__defaults__ = (None, None, None, None)  # own_stint, fanout_feed_port,
+                                                      # fanout_relay_url, rc_token are optional
 
 
 def _get_json(url, headers=None):
@@ -340,6 +353,32 @@ def check_cc_api_cockpit(ctx):
     return CheckResult("cc_api_cockpit", "pass", "")
 
 
+def check_race_control_page(ctx):
+    """A crew member with the Race Control flag gets the desk, a plain commentator gets 403."""
+    name = "race_control_page"
+    if not ctx.rc_token:
+        return CheckResult(name, "skip", "no race-control token")
+    st, _, _ = http_request(f"{ctx.relay_url}/console/race-control?t={ctx.rc_token}")
+    if st != 200:
+        return CheckResult(name, "fail", f"race-control token: HTTP {st}")
+    st, _, _ = http_request(f"{ctx.relay_url}/console/race-control?t={ctx.token}")
+    if st != 403:
+        return CheckResult(name, "fail", f"commentator token: HTTP {st}, want 403")
+    return CheckResult(name, "pass", "")
+
+
+def check_program_monitor(ctx):
+    """The cockpit program monitor serves the still obs-sim hands the relay."""
+    name = "program_monitor"
+    st, body, hdrs = http_request(f"{ctx.relay_url}/cockpit/program?t={ctx.token}")
+    if st != 200:
+        return CheckResult(name, "fail", f"HTTP {st}")
+    ctype = hdrs.get("Content-Type") or ""
+    if not ctype.startswith("image/") or not body:
+        return CheckResult(name, "fail", f"not an image: {ctype!r}, {len(body)} bytes")
+    return CheckResult(name, "pass", "")
+
+
 def _load_set_env_key():
     """Import the real `_set_env_key` from src/racecast.py, the single-key
     profile.env writer the #191 fix lives in. racecast.py imports cleanly as a
@@ -548,6 +587,8 @@ SYNTHETIC_CHECKS = [
     check_fanout_feed_port_bound,
     check_intermission_page,
     check_program_audio_stream,
+    check_race_control_page,
+    check_program_monitor,
 ]
 
 # Real-league mode, local only: the safe subset for a copied profile. The two
