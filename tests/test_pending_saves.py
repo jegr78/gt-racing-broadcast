@@ -141,6 +141,28 @@ def t_states_lists_every_unconfirmed_row_of_a_target():
     assert s.states("schedule") == {5: ("saving", None)}
 
 
+def t_retryable_excludes_held_entries():
+    s, _c = _store()
+    s.put("schedule", 2, {"url": ""})
+    s.put("schedule", 3, {"url": ""})
+    j = s.next_job(); s.done(j[0], j[1], j[3], ok=False, err="slow")
+    j = s.next_job(); s.done(j[0], j[1], j[3], ok=False, err="outdated", hold=True)
+    assert s.retryable() == 1 and s.unsynced()[0] == 2
+
+
+def t_expire_drops_confirmed_entries_past_grace_without_a_sheet():
+    # An emptied Qualifying tab makes every fetch return nothing, so reconcile
+    # never runs; the grace must still release a confirmed entry.
+    s, c = _store()
+    s.put("qualifying", 2, {"url": "", "name": "", "stint": ""})
+    j = s.next_job(); s.done(j[0], j[1], j[3], ok=True)
+    s.put("qualifying", 3, {"url": ""})                       # still saving
+    assert s.expire("qualifying") == []
+    c.t += ps.CONFIRM_GRACE_S + 1
+    assert s.expire("qualifying") == [2]
+    assert s.state("qualifying", 3) == ("saving", None)
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

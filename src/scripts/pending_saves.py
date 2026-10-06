@@ -126,6 +126,24 @@ class PendingSaves:
                 return LOCAL, e.err
             return SAVING, None
 
+    def expire(self, target):
+        """Drop confirmed entries of *target* whose grace has passed, without a
+        sheet to compare (a fetch that returned nothing, e.g. an emptied tab)."""
+        now = self._now()
+        dropped = []
+        with self._lock:
+            for (t, row), e in list(self._entries.items()):
+                if (t == target and e.state == CONFIRMED
+                        and now - e.confirmed_at >= CONFIRM_GRACE_S):
+                    del self._entries[(t, row)]
+                    dropped.append(row)
+        return sorted(dropped)
+
+    def retryable(self):
+        """`local` entries a recovery may push again (not held by an outdated script)."""
+        with self._lock:
+            return sum(1 for e in self._entries.values() if e.state == LOCAL and not e.hold)
+
     def states(self, target):
         """row -> (sync, err) for every unconfirmed entry of *target*, including
         a save that emptied its row (the row is then gone from the source)."""

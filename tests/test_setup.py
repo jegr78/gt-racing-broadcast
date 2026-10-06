@@ -2076,6 +2076,59 @@ def t_sync_rows_reports_a_save_that_emptied_its_row():
         m.post_webhook = orig
 
 
+def t_one_save_worker_even_when_started_concurrently():
+    import threading, time as _t
+    ctl = m.SetupControl("http://push", _hs_stub())
+    started = []
+
+    class SlowStart:
+        def __init__(self):
+            self.alive = False
+        def start(self):
+            _t.sleep(0.02)               # widen the check-then-start window
+            started.append(self); self.alive = True
+        def is_alive(self):
+            return self.alive
+
+    ctl._new_worker = SlowStart
+    threads = [threading.Thread(target=ctl._ensure_worker) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(5)
+    assert len(started) == 1, len(started)
+
+
+def t_a_raising_push_leaves_the_save_local_not_pinned():
+    ctl, s, calls = _async_ctl()
+    def boom(payload, expected_action):
+        raise RuntimeError("unexpected")
+    ctl._save_push = boom
+    ctl.schedule_set(2, url="https://www.youtube.com/watch?v=new")
+    assert ctl.drain_saves() == 1                 # the job ends, nothing escapes
+    sync, err = s.sync_state(2)
+    assert sync == "local" and "RuntimeError" in err
+    ctl._save_push = lambda payload, expected_action: (True, None)
+    assert ctl.sync_save("schedule", 2) == {"ok": True}   # not stuck in flight
+    assert ctl.drain_saves() == 1 and s.sync_state(2) == (None, None)
+
+
+def t_outdated_only_saves_do_not_probe_every_tick():
+    ctl, s, calls = _async_ctl(post=lambda p: (False, m.WEBHOOK_OUTDATED_ERROR))
+    ctl.schedule_set(2, url="https://www.youtube.com/watch?v=new")
+    ctl.drain_saves()
+    def probe(url):
+        raise AssertionError("an outdated script is not fixed by a probe")
+    assert m.webhook_recovery_tick("http://push", [ctl], probe=probe) is False
+
+
+def t_pov_name_clamp_drops_a_trailing_space():
+    ctl, s, calls = _async_ctl()
+    ctl.pov_set("https://www.youtube.com/watch?v=p", "Mustermann Racing T am")
+    ctl.drain_saves()
+    assert calls[-1]["name"] == "Mustermann Racing T"   # matches the stripped sheet value
+
+
 # setup-assets media fill: the template-driven scan.
 
 def t_setup_media_fill_uses_template_scan():

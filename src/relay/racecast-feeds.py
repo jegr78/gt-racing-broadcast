@@ -6578,6 +6578,10 @@ class ScheduleSource:
             except Exception:
                 pass  # cache write is best-effort; the in-memory schedule is current
             return True
+        if self._pending is not None:
+            # Nothing came back (sheet down, or an emptied tab): no row to compare,
+            # but a confirmed save's grace still runs out.
+            self._pending.expire(self._pending_target)
         return False
 
     def load_initial(self, template=None):
@@ -7191,6 +7195,7 @@ class SetupControl(PushHealth):
         self.autostart_worker = True
         self._save_wake = threading.Event()
         self._worker = None
+        self._worker_lock = threading.Lock()   # one sheet-save thread, never two
         # Keys whose last push failed, so "kept in relay" and "now in sheet" are
         # each logged once per transition.
         self._was_local = set()
@@ -7234,14 +7239,17 @@ class SetupControl(PushHealth):
             src.apply_pending()
         self._ensure_worker()
 
+    def _new_worker(self):
+        return threading.Thread(target=self._save_worker, name="sheet-save", daemon=True)
+
     def _ensure_worker(self):
         self._save_wake.set()
         if not self.autostart_worker:
             return
-        if self._worker is None or not self._worker.is_alive():
-            self._worker = threading.Thread(target=self._save_worker,
-                                            name="sheet-save", daemon=True)
-            self._worker.start()
+        with self._worker_lock:
+            if self._worker is None or not self._worker.is_alive():
+                self._worker = self._new_worker()
+                self._worker.start()
 
     def _save_worker(self):
         while True:
@@ -7266,8 +7274,12 @@ class SetupControl(PushHealth):
             if target == "qualifying":
                 payload["tab"] = DEFAULT_QUALIFYING_TAB
             payload.update(fields)
-        with self._sync_lock:
-            ok, err = self._save_push(payload, action)
+        try:
+            with self._sync_lock:
+                ok, err = self._save_push(payload, action)
+        except Exception as exc:          # noqa: BLE001  never pin a save in flight
+            LOG.exception("sheet save %s: push raised", self._save_label(target, row))
+            ok, err = False, f"{type(exc).__name__}: {exc}"
         key = (target, row)
         if ok:
             self.push_status, self.last_error = "ok", None
@@ -7310,7 +7322,9 @@ class SetupControl(PushHealth):
         return {"ok": True}
 
     def needs_recovery(self):
-        return PushHealth.needs_recovery(self) or self.saves.unsynced()[0] > 0
+        if self._push_held_by_outdated_save():
+            return self.saves.retryable() > 0     # a probe cannot fix an outdated script
+        return PushHealth.needs_recovery(self) or self.saves.retryable() > 0
 
     def recover_push(self, probe):
         """#779 recovery plus the panel saves held in the relay: once the webhook
@@ -7319,7 +7333,7 @@ class SetupControl(PushHealth):
         cleared = False
         if not self._push_held_by_outdated_save():
             cleared = PushHealth.recover_push(self, probe)
-        if self.saves.unsynced()[0] and probe():
+        if self.saves.retryable() and probe():
             if self.saves.requeue_local():
                 self._ensure_worker()
                 cleared = True
@@ -7581,7 +7595,7 @@ class SetupControl(PushHealth):
             return {"error": "url must be a watch URL or UC… channel ID"}
         payload = {"action": "pov", "url": url}
         if name is not None:        # omitted -> leave the Sheet cell; "" -> explicit clear
-            payload["name"] = (name or "")[:20]
+            payload["name"] = (name or "")[:20].rstrip()   # the sheet value is read stripped
         fields = {"url": url}
         if "name" in payload:
             fields["name"] = payload["name"]
@@ -12025,8 +12039,10 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         # the Sheet; the URL applies on the next /reload (the relay
                         # never tears a feed mid-stint). Pass the row's own
                         # streamer + stint so the optimistic local inject keeps
-                        # them (both are Configuration vocab, from the sheet). Only
-                        # clear the pending entry once the write actually succeeds.
+                        # them (both are Configuration vocab, from the sheet). The
+                        # save is async: a valid one answers `pending` at once and
+                        # the relay keeps the link until the sheet has it, so the
+                        # submission is cleared then; a validation error keeps it.
                         # Branch on the ENTRY's recorded mode (not the relay's
                         # current mode) so a director can approve a qualifying
                         # submission into the Qualifying tab regardless of what
