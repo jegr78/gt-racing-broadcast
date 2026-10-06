@@ -4,7 +4,7 @@ src/ and assert the live HTTP surface. Synthetic mode is the default and runs in
 CI with no real Sheet, cookies, OBS or Tailscale; --real-league NAME is local-only.
 
 Maintainer tool, not shipped. Stdlib only."""
-import argparse, contextlib, os, shutil, signal, subprocess, sys, tempfile, threading, time
+import argparse, contextlib, os, shutil, signal, socket, subprocess, sys, tempfile, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -107,6 +107,16 @@ def _wait_ready(url, timeout, proc=None, log=None):
         with open(log, "rb") as fh:
             detail = fh.read()[-2000:].decode("utf-8", "replace")
     raise RuntimeError(f"service not ready at {url} within {timeout}s\n--- child log ---\n{detail}")
+
+
+def _wait_port(port, timeout):
+    """Block until 127.0.0.1:*port* accepts a TCP connection or *timeout* seconds pass."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        with contextlib.suppress(OSError), socket.create_connection(("127.0.0.1", port), 0.5):
+            return
+        time.sleep(0.1)
+    raise RuntimeError(f"port {port} not ready after {timeout}s")
 
 
 SCHEDULE_ROWS = [
@@ -440,6 +450,14 @@ def run_synthetic(args):
         # on a clean machine or CI runner.
         stub_bin = _stub_tools_bin(tmp)
 
+        # A stand-in OBS, so the program monitors render a picture instead of their offline state.
+        obs_port = E.free_port()
+        procs.append(_spawn([sys.executable, os.path.join(ROOT, "tools", "obs-sim.py"),
+                             "--image", os.path.join(relay_runtime, "graphics", "Standings.png"),
+                             "--port", str(obs_port)],
+                            dict(os.environ), os.path.join(tmp, "obs-sim.log")))
+        _wait_port(obs_port, args.timeout)
+
         # Launcher: the frozen binary, or `python src/racecast.py`. Binary mode
         # guards the bugs the src/ dev build hides, a file or import missing from
         # the PyInstaller bundle and frozen path resolution. The subcommand surface
@@ -469,7 +487,8 @@ def run_synthetic(args):
         # feed ports; step 6's relay overrides this on its own free ports. It also
         # neutralizes a RACECAST_FEED_FANOUT leaked from the operator's shell.
         env.update(RACECAST_CONSOLE_SECRET=secret, RACECAST_PROFILE="e2e",
-                   RACECAST_FEED_FANOUT="0")
+                   RACECAST_FEED_FANOUT="0", RACECAST_OBS_WS_HOST="127.0.0.1",
+                   RACECAST_OBS_WS_PORT=str(obs_port), RACECAST_OBS_WS_PASSWORD="")
         env["PATH"] = stub_bin + os.pathsep + env.get("PATH", "")
         relay_log = os.path.join(tmp, "relay.log")
         relay = _spawn(launcher + ["relay", "run", "--bind", "127.0.0.1",

@@ -367,6 +367,18 @@ def check_race_control_page(ctx):
     return CheckResult(name, "pass", "")
 
 
+def check_program_monitor(ctx):
+    """The cockpit program monitor serves the still obs-sim hands the relay."""
+    name = "program_monitor"
+    st, body, hdrs = http_request(f"{ctx.relay_url}/cockpit/program?t={ctx.token}")
+    if st != 200:
+        return CheckResult(name, "fail", f"HTTP {st}")
+    ctype = hdrs.get("Content-Type") or ""
+    if not ctype.startswith("image/") or not body:
+        return CheckResult(name, "fail", f"not an image: {ctype!r}, {len(body)} bytes")
+    return CheckResult(name, "pass", "")
+
+
 def _load_set_env_key():
     """Import the real `_set_env_key` from src/racecast.py, the single-key
     profile.env writer the #191 fix lives in. racecast.py imports cleanly as a
@@ -576,6 +588,7 @@ SYNTHETIC_CHECKS = [
     check_intermission_page,
     check_program_audio_stream,
     check_race_control_page,
+    check_program_monitor,
 ]
 
 # Real-league mode, local only: the safe subset for a copied profile. The two
