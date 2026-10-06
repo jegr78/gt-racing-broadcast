@@ -5,6 +5,7 @@ tools/visual-probe.js turns a rendered page into element facts (schema in
 docs/superpowers/plans/2026-10-06-visual-acceptance-run.md); the rules here
 turn facts into findings. Stdlib only, unit-tested by tests/test_e2e_visual.py."""
 import collections
+import html
 import json
 import re
 
@@ -191,3 +192,106 @@ def apply_allowlist(findings, entries, surface, viewport):
         if not hits:
             kept.append(f)
     return kept, used
+
+
+# Desktop matches tools/e2e.py's existing --shots capture size; phone is a current iPhone CSS viewport.
+VIEWPORTS = {"desktop": (1280, 800), "phone": (390, 844)}
+# Gives in-flight CSS transitions/fade-ins time to finish after the ready expression turns true.
+SETTLE_MS = 800
+
+Surface = collections.namedtuple("Surface", "name base path viewports prep ready timeout_ms")
+SurfaceResult = collections.namedtuple(
+    "SurfaceResult", "surface viewport shot findings suppressed error")
+
+# cockpit.html and race-control.html both seed #tally with this placeholder before data arrives.
+TALLY_READY = ("(() => { const t = document.getElementById('tally');"
+               " return !!t && t.textContent.trim() !== '…'; })()")
+CC_VIEWS = ("home", "streams", "services", "profile", "settings", "preflight", "tools",
+            "apps", "console", "logs", "report", "help", "wizard")
+CC_READY = "document.readyState === 'complete'"
+# control-center.html sets #pf-summary to "running..." while the checklist runs, then a final tally.
+PREFLIGHT_READY = ("(() => { const s = document.getElementById('pf-summary');"
+                   " return !!s && !s.textContent.startsWith('running'); })()")
+
+SURFACES = [
+    Surface("director-panel", "relay", "/panel", ("desktop",), None,
+            "!!document.querySelector('#schedBody tr')", 15000),
+    Surface("cockpit", "relay", "/cockpit?t={token}", ("desktop", "phone"), None,
+            TALLY_READY, 15000),
+    Surface("race-control", "relay", "/console/race-control?t={rc_token}",
+            ("desktop", "phone"), None, TALLY_READY, 15000),
+] + [
+    # The preflight view runs real hardware/tool/port checks and needs a much longer timeout.
+    Surface(f"cc-{view}", "ui", "/", ("desktop",), f"showView('{view}')",
+            PREFLIGHT_READY if view == "preflight" else CC_READY,
+            90000 if view == "preflight" else 15000)
+    for view in CC_VIEWS
+]
+
+
+def surface_url(surface, urls):
+    """Absolute URL of *surface*; *urls* holds the ui/relay base URLs and the two tokens."""
+    return urls[surface.base] + surface.path.format(token=urls["token"], rc_token=urls["rc_token"])
+
+
+def result_code(results):
+    """1 when any surface has a finding or failed to render, else 0."""
+    return 1 if any(r.findings or r.error for r in results) else 0
+
+
+def summarize(results, unused_entries):
+    """Plain-text pass/fail lines per surface view plus unused-allowlist warnings, for console output."""
+    lines = []
+    for r in results:
+        mark = "FAIL" if (r.findings or r.error) else "PASS"
+        tail = r.error or (f"{len(r.findings)} finding(s)" if r.findings else "")
+        lines.append(f"  [{mark}] {r.surface} {r.viewport}" + (f": {tail}" if tail else ""))
+        for f in r.findings:
+            lines.append(f"      {f.rule} {f.selector}: {f.detail}")
+    for e in unused_entries:
+        lines.append(f"  [WARN] unused allowlist entry: {e['surface']} {e['rule']} {e['selector']}")
+    bad = sum(1 for r in results if r.findings or r.error)
+    lines.append(f"  {len(results) - bad} surface views clean, {bad} with findings")
+    return "\n".join(lines)
+
+
+_REPORT_CSS = """
+:root { --bg:#f6f7f9; --ink:#14171c; --card:#fff; --line:#d8dce3; --bad:#b42318; --ok:#1a7f37; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#0f1216; --ink:#e6e9ee; --card:#171b21; --line:#2a313b; --bad:#ff7b72; --ok:#56d364; } }
+body { margin:0; padding:16px; background:var(--bg); color:var(--ink); font:14px/1.45 system-ui, sans-serif; }
+section { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px; margin:0 0 16px; }
+h2 { font-size:16px; margin:0 0 8px; } .FAIL { color:var(--bad); } .PASS { color:var(--ok); }
+img { max-width:100%; border:1px solid var(--line); } code { font-size:12px; }
+table { border-collapse:collapse; width:100%; } td { border-top:1px solid var(--line); padding:4px; vertical-align:top; }
+"""
+
+
+def render_report(results, unused_entries):
+    """A self-contained HTML report: verdict, findings and screenshot per surface view."""
+    esc = html.escape
+    parts = ["<!doctype html><html lang=en><meta charset=utf-8>"
+             "<meta name=viewport content='width=device-width, initial-scale=1'>"
+             f"<title>Visual acceptance</title><style>{_REPORT_CSS}</style><body>",
+             f"<h1>Visual acceptance</h1><pre>{esc(summarize(results, unused_entries))}</pre>"]
+    for r in results:
+        verdict = "FAIL" if (r.findings or r.error) else "PASS"
+        parts.append(f"<section><h2><span class={verdict}>{verdict}</span> "
+                     f"{esc(r.surface)} <small>{esc(r.viewport)}</small></h2>")
+        if r.error:
+            parts.append(f"<p class=FAIL>{esc(r.error)}</p>")
+        if r.findings:
+            rows = "".join(f"<tr><td>{esc(f.rule)}</td><td><code>{esc(f.selector)}</code></td>"
+                           f"<td>{esc(f.detail)}</td></tr>" for f in r.findings)
+            parts.append(f"<table>{rows}</table>")
+        if r.suppressed:
+            parts.append(f"<p>{r.suppressed} allowlisted finding(s) hidden</p>")
+        if r.shot:
+            parts.append(f'<img src="{esc(r.shot)}" alt="{esc(r.surface)} {esc(r.viewport)}" loading=lazy>')
+        parts.append("</section>")
+    if unused_entries:
+        items = "".join(f"<li><code>{esc(e['surface'])} {esc(e['rule'])} {esc(e['selector'])}</code>"
+                        f" {esc(e['reason'])}</li>" for e in unused_entries)
+        parts.append(f"<section><h2>Unused allowlist entries</h2><ul>{items}</ul></section>")
+    parts.append("</body></html>")
+    return "\n".join(parts)

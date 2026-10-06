@@ -208,6 +208,48 @@ def t_shipped_allowlist_loads():
     assert isinstance(v.load_allowlist(path), list)
 
 
+def t_surfaces_cover_all_four_uis():
+    names = {s.name for s in v.SURFACES}
+    for want in ("director-panel", "cockpit", "race-control"):
+        assert want in names, want
+    assert {f"cc-{view}" for view in v.CC_VIEWS} <= names
+    assert len(v.CC_VIEWS) == 13, v.CC_VIEWS
+    phone = {s.name for s in v.SURFACES if "phone" in s.viewports}
+    assert phone == {"cockpit", "race-control"}, phone
+    assert len({s.name for s in v.SURFACES}) == len(v.SURFACES), "surface names must be unique"
+
+
+def t_surface_url_fills_tokens():
+    urls = {"ui": "http://127.0.0.1:1", "relay": "http://127.0.0.1:2", "token": "T", "rc_token": "R"}
+    by = {s.name: s for s in v.SURFACES}
+    assert v.surface_url(by["race-control"], urls) == "http://127.0.0.1:2/console/race-control?t=R"
+    assert v.surface_url(by["cockpit"], urls) == "http://127.0.0.1:2/cockpit?t=T"
+    assert v.surface_url(by["cc-home"], urls) == "http://127.0.0.1:1/"
+
+
+def t_report_shows_findings_escaped_and_verdicts():
+    ok = v.SurfaceResult("cockpit", "phone", "cockpit-phone.png", [], 1, None)
+    bad = v.SurfaceResult("director-panel", "desktop", "director-panel-desktop.png",
+                          [v.Finding("contrast", "div > b<i>", "2.0:1 < 4.5:1")], 0, None)
+    broken = v.SurfaceResult("race-control", "desktop", None, [], 0, "TimeoutError: ready")
+    html = v.render_report([ok, bad, broken], [{"surface": "x", "rule": "overlap",
+                                                 "selector": "#gone", "reason": "old"}])
+    assert 'src="cockpit-phone.png"' in html
+    assert "div &gt; b&lt;i&gt;" in html and "b<i>" not in html, "selectors must be escaped"
+    assert html.count("FAIL") >= 2 and "PASS" in html
+    assert "TimeoutError" in html and "#gone" in html, "errors and unused allowlist entries must show"
+
+
+def t_result_code_and_summary():
+    ok = v.SurfaceResult("a", "desktop", "a.png", [], 0, None)
+    bad = v.SurfaceResult("b", "desktop", "b.png", [v.Finding("overflow", "html", "")], 0, None)
+    assert v.result_code([ok]) == 0
+    assert v.result_code([ok, bad]) == 1
+    assert v.result_code([v.SurfaceResult("c", "phone", None, [], 0, "boom")]) == 1
+    text = v.summarize([ok, bad], [])
+    assert "[PASS] a desktop" in text and "[FAIL] b desktop" in text, text
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
