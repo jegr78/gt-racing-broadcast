@@ -107,17 +107,20 @@ reach the script one at a time (the #781 property).
   harmless.
 - On success: the entry becomes `confirmed` for the pushed revision (or stays
   `saving` if a newer revision arrived meanwhile and is queued).
-- On a transient failure (timeout, network error, HTTP error, "did not confirm"
-  without an explicit script error): the entry becomes `local`. No red status.
-- On a real error: the entry becomes `local` and the push status becomes `failed`
-  (red banner). Real errors are the outdated script (`WEBHOOK_OUTDATED_ERROR`) and
-  an explicit rejection, i.e. the script answered `{"ok": false, "error": ...}`.
+- On any failure except an outdated script: the entry becomes `local`, keeps the
+  last error text, and the push status is not touched (no red). This includes an
+  explicit script error (`{"ok": false, "error": ...}`): the script's `catch`
+  reports every exception that way, Google's own "Service Spreadsheets timed out"
+  included, and a test save on 2026-10-06 got exactly such an answer after 34 s and
+  went through seconds later. So it is treated as transient.
+- On an outdated script (`WEBHOOK_OUTDATED_ERROR`): the entry becomes `local` and
+  the push status becomes `failed` (red banner). It is not retried automatically.
 
 ### Catching up
 
 `webhook_recovery_tick` (from #779) also runs while `PendingWrites` holds `local`
 entries. When the probe answers, every `local` entry goes back to `saving` and is
-re-queued. A real error is not retried automatically, it needs a fix first.
+re-queued, except one held by an outdated script, which needs a fix first.
 
 `SetupControl.recover_push` keeps its #779 behaviour for the HUD/team pushes. The
 push status turns `ok` only through successful pushes; a probe alone never clears a
@@ -133,19 +136,22 @@ lists them next to `schedule/set` and `qualifying/set`).
 The panel banner (`push === "failed"`) appears only for:
 
 - an outdated Apps Script,
-- an explicit script rejection of a save,
 - HUD field and team pushes, as today: their override expires after 60 s, so a
   failed push really loses the value (with #779 recovery).
 
-Timeouts, network errors and Google HTTP errors on a panel save only produce the
-quiet `local` state.
+Timeouts, network errors, Google HTTP errors and script error answers on a panel
+save only produce the quiet `local` state. The last error text of a `local` row is
+shown in the row's tooltip and, for the most recent one, in the HUD info line, so a
+lasting configuration problem (e.g. a missing tab) stays visible.
 
 ### API additions
 
 - `/schedule/data` rows and the qualifying data gain `"sync": "saving" | "local"`
   (absent when nothing is pending).
 - `/status` POV block gains the same `sync` field.
-- `/setup/data` gains `"unsynced": <count of local entries>`.
+- `/setup/data` gains `"unsynced": <count of local entries>` and
+  `"unsynced_error": <last error text of a local entry, or null>`.
+- Rows in the `local` state also carry `"sync_error"` (the last error text).
 
 ## Director Panel
 
@@ -154,7 +160,7 @@ Per row (Schedule, Qualifying, POV), from the `sync` field:
 | State | Display |
 |---|---|
 | `saving` | Button "SYNCING…", subtle amber; inputs stay usable |
-| `local` | Small amber badge "IN RELAY" (tooltip: not in the sheet yet, retried automatically) and a "SYNC NOW" button; never red |
+| `local` | Small amber badge "IN RELAY" (tooltip: not in the sheet yet, retried automatically, plus the last error text) and a "SYNC NOW" button; never red |
 | confirmed (sync field gone after a save) | "SAVED ✓" for 4 s, then "SAVE" |
 | validation error | Toast with the message as today; button back to "SAVE" (not "RETRY") |
 
@@ -165,7 +171,7 @@ Panel log lines:
 - Once, when it lands: `Schedule row N now in sheet`.
 
 The HUD info line shows `N changes not in the sheet yet, retried automatically`
-while `unsynced > 0`.
+while `unsynced > 0`, followed by `unsynced_error` when present.
 
 Approving a commentator submission removes it from the list at once; the schedule
 row then shows its own sync state. UI text stays English.
@@ -193,8 +199,9 @@ Stdlib tests, failing first, mostly in `tests/test_setup.py`:
 - A pending value survives `ScheduleSource.refresh()` (poller, RELOAD, NEXT paths)
   and leaves only when the sheet shows it, or after the 120 s safety limit once
   confirmed.
-- Transient failures lead to `local` without a red status; an outdated script and
-  an explicit `ok: false` rejection lead to red.
+- Timeouts, network errors and an explicit `ok: false` script error lead to
+  `local` without a red status; an outdated script leads to red and is not
+  re-queued by recovery.
 - The recovery tick re-queues `local` saves; the status turns `ok` only after the
   real push.
 - Merging two saves for one row, including one in flight; one worker writes in
