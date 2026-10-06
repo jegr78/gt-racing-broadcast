@@ -1,6 +1,6 @@
 # Async Director Panel sheet saves
 
-Date: 2026-10-06. Status: approved design, pending implementation.
+Date: 2026-10-06. Status: implemented (#783).
 Follows #778/#779 (banner recovery) and #780/#781 (serialized 30 s panel saves).
 
 ## Problem

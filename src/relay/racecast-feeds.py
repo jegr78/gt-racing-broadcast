@@ -7279,7 +7279,7 @@ class SetupControl(PushHealth):
                 ok, err = self._save_push(payload, action)
         except Exception as exc:          # noqa: BLE001  never pin a save in flight
             LOG.exception("sheet save %s: push raised", self._save_label(target, row))
-            ok, err = False, f"{type(exc).__name__}: {exc}"
+            ok, err = False, _mask_webhook(f"{type(exc).__name__}: {exc}", self.push_url)
         key = (target, row)
         if ok:
             self.push_status, self.last_error = "ok", None

@@ -1980,6 +1980,7 @@ def t_async_save_push_uses_the_long_attempt():
         ok, err = ctl._save_push({"action": "schedule", "row": 2}, "schedule")
     finally:
         restore()
+    assert ok and err is None                     # the spy confirms the push
     kw = seen[0][2]
     assert kw["timeout"] == m.WEBHOOK_ASYNC_SAVE_TIMEOUT_S == 45
     assert kw["attempts"] == m.WEBHOOK_ASYNC_SAVE_ATTEMPTS == 3
@@ -2127,6 +2128,20 @@ def t_pov_name_clamp_drops_a_trailing_space():
     ctl.pov_set("https://www.youtube.com/watch?v=p", "Mustermann Racing T am")
     ctl.drain_saves()
     assert calls[-1]["name"] == "Mustermann Racing T"   # matches the stripped sheet value
+
+
+def t_a_raising_push_never_stores_the_webhook_url():
+    ctl = m.SetupControl("https://script.example.test/macros/s/SECRET/exec?key=K123",
+                         _hs_stub(),
+                         schedule_source=_sched_with_rows([("", "JeGr", "Stint 1", 2)]))
+    ctl.autostart_worker = False
+    def boom(payload, expected_action):
+        raise ValueError("bad url https://script.example.test/macros/s/SECRET/exec?key=K123")
+    ctl._save_push = boom
+    ctl.schedule_set(2, url="https://www.youtube.com/watch?v=n")
+    ctl.drain_saves()
+    err = ctl.schedule_source.sync_state(2)[1]
+    assert "SECRET" not in err and "K123" not in err, err
 
 
 # setup-assets media fill: the template-driven scan.
