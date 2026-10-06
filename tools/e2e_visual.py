@@ -149,15 +149,25 @@ ALLOW_REQUIRED = ("surface", "rule", "selector", "reason")
 
 
 def load_allowlist(path):
-    """Read the allowlist JSON; every entry needs surface, rule, selector and a non-empty reason."""
+    """Read the allowlist JSON; every entry must be an object with surface, rule, a non-empty reason and compilable selector/detail regexes."""
     with open(path, encoding="utf-8") as fh:
         entries = json.load(fh)
     if not isinstance(entries, list):
         raise ValueError(f"{path}: top level must be a list")
     for n, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            raise ValueError(f"{path}: entry {n} is not an object")
         missing = [k for k in ALLOW_REQUIRED if not str(entry.get(k, "")).strip()]
         if missing:
             raise ValueError(f"{path}: entry {n} lacks {', '.join(missing)}")
+        for key in ("selector", "detail"):
+            pattern = entry.get(key)
+            if not pattern:
+                continue
+            try:
+                re.compile(pattern)
+            except re.error as exc:
+                raise ValueError(f"{path}: entry {n} has an invalid {key} regex: {exc}") from exc
     return entries
 
 

@@ -168,6 +168,41 @@ def t_load_allowlist_requires_a_reason():
         os.unlink(fh.name)
 
 
+def t_load_allowlist_rejects_a_non_object_entry():
+    import json, tempfile
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as fh:
+        json.dump(["#a"], fh)
+    try:
+        v.load_allowlist(fh.name)
+        raise AssertionError("a non-object entry must be rejected")
+    except ValueError:
+        pass
+    finally:
+        os.unlink(fh.name)
+
+
+def t_load_allowlist_rejects_an_invalid_regex():
+    import json, tempfile
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as fh:
+        json.dump([{"surface": "s", "rule": "contrast", "selector": "#a(", "reason": "r"}], fh)
+    try:
+        v.load_allowlist(fh.name)
+        raise AssertionError("an invalid selector regex must be rejected")
+    except ValueError:
+        pass
+    finally:
+        os.unlink(fh.name)
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as fh:
+        json.dump([{"surface": "s", "rule": "contrast", "selector": "#a", "reason": "r", "detail": "("}], fh)
+    try:
+        v.load_allowlist(fh.name)
+        raise AssertionError("an invalid detail regex must be rejected")
+    except ValueError:
+        pass
+    finally:
+        os.unlink(fh.name)
+
+
 def t_shipped_allowlist_loads():
     path = os.path.join(os.path.dirname(__file__), "..", "tools", "visual-allowlist.json")
     assert isinstance(v.load_allowlist(path), list)
