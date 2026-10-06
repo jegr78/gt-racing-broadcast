@@ -87,6 +87,92 @@ def t_console_errors_become_findings():
     assert [(f.rule, f.selector) for f in hits] == [("console", "console")], hits
 
 
+def t_clipped_text_without_ellipsis_is_flagged():
+    el = _el(sel="#name", has_text=True, overflow_x="hidden", client_w=80, scroll_w=140)
+    hits = v.rule_clipped_text(_facts([el]))
+    assert [(f.rule, f.selector) for f in hits] == [("clipped-text", "#name")], hits
+
+
+def t_ellipsis_and_scrollers_pass():
+    ell = _el(has_text=True, overflow_x="hidden", client_w=80, scroll_w=140, text_overflow="ellipsis")
+    scroller = _el(has_text=True, overflow_x="auto", client_w=80, scroll_w=140)
+    subpixel = _el(has_text=True, overflow_x="hidden", client_w=80, scroll_w=81)
+    clamp = _el(has_text=True, overflow_y="hidden", client_h=40, scroll_h=90, line_clamp=True)
+    assert v.rule_clipped_text(_facts([ell, scroller, subpixel, clamp])) == []
+
+
+def t_vertical_clip_is_flagged():
+    el = _el(sel="#note", has_text=True, overflow_y="hidden", client_h=40, scroll_h=90)
+    assert [f.rule for f in v.rule_clipped_text(_facts([el]))] == ["clipped-text"]
+
+
+def t_low_contrast_text_is_flagged():
+    el = _el(sel="#dim", text="ON AIR", color=[60, 66, 74, 1], bg_chain=[DARK])
+    hits = v.rule_contrast(_facts([el]))
+    assert [(f.rule, f.selector) for f in hits] == [("contrast", "#dim")], hits
+    assert ":1" in hits[0].detail
+
+
+def t_large_text_uses_the_3_to_1_threshold():
+    grey = [118, 118, 118, 1]          # ~4.0:1 on DARK
+    small = _el(text="x", color=grey, font_size=14.0)
+    large = _el(text="x", color=grey, font_size=24.0)
+    bold = _el(text="x", color=grey, font_size=19.0, font_weight=700)
+    assert len(v.rule_contrast(_facts([small]))) == 1
+    assert v.rule_contrast(_facts([large, bold])) == []
+
+
+def t_contrast_skips_unknowable_cases():
+    cases = [_el(text="x", color=[60, 66, 74, 1], bg_image=True),
+             _el(text="x", color=[60, 66, 74, 1], disabled=True),
+             _el(text="x", color=[60, 66, 74, 1], opacity=0.5),
+             _el(text="x", color=None),
+             _el(text="", color=[60, 66, 74, 1])]
+    assert v.rule_contrast(_facts(cases)) == []
+
+
+def t_allowlist_matches_surface_viewport_rule_selector():
+    entries = [{"surface": "cockpit", "viewport": "phone", "rule": "contrast",
+                "selector": "#dim", "reason": "placeholder dash"},
+               {"surface": "cockpit", "rule": "console", "selector": "console",
+                "detail": "favicon", "reason": "synthetic profile has no favicon"},
+               {"surface": "cockpit", "rule": "overlap", "selector": "#never", "reason": "stale"}]
+    found = [v.Finding("contrast", "#dim", "2.1:1 < 4.5:1"),
+             v.Finding("console", "console", "console.error: GET /favicon.ico 404"),
+             v.Finding("contrast", "#other", "2.1:1 < 4.5:1")]
+    kept, used = v.apply_allowlist(found, entries, "cockpit", "phone")
+    assert kept == [found[2]], kept
+    assert used == {0, 1}, used
+    kept, _ = v.apply_allowlist(found, entries, "cockpit", "desktop")
+    assert found[0] in kept, "a viewport-bound entry must not match another viewport"
+
+
+def t_allowlist_selector_is_a_full_regex():
+    entries = [{"surface": "s", "rule": "contrast", "selector": r"#row-\d+", "reason": "r"}]
+    kept, _ = v.apply_allowlist([v.Finding("contrast", "#row-12", "")], entries, "s", "desktop")
+    assert kept == []
+    kept, _ = v.apply_allowlist([v.Finding("contrast", "#row-12 > b", "")], entries, "s", "desktop")
+    assert len(kept) == 1, "the selector must match in full"
+
+
+def t_load_allowlist_requires_a_reason():
+    import json, tempfile
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as fh:
+        json.dump([{"surface": "s", "rule": "contrast", "selector": "#a", "reason": ""}], fh)
+    try:
+        v.load_allowlist(fh.name)
+        raise AssertionError("an entry without a reason must be rejected")
+    except ValueError:
+        pass
+    finally:
+        os.unlink(fh.name)
+
+
+def t_shipped_allowlist_loads():
+    path = os.path.join(os.path.dirname(__file__), "..", "tools", "visual-allowlist.json")
+    assert isinstance(v.load_allowlist(path), list)
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
