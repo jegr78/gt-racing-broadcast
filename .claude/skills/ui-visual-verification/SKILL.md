@@ -90,6 +90,12 @@ non-visual). Re-editing a file changes its hash and re-arms the gate, so record 
 your final edit. The marker lives under `runtime/` (gitignored), it is local session
 state, never committed.
 
+### Then run the automated rules
+`runtime/pw-venv/bin/python tools/e2e.py --visual` (setup in `tools/CLAUDE.md`) checks every
+surface for overflow, clipped text, browser-default controls, overlaps, contrast and console
+errors. It does not replace looking: it catches what a quick look misses, and the CI `visual`
+job runs it anyway. Your element screenshot still decides whether the change looks right.
+
 ## Cleanup
 Tear down the demo build as in [wiki-screenshots](../wiki-screenshots/SKILL.md): `relay
 stop`, `pkill -f obs-sim.py`, `rm -f runtime/demo/stub-cookies.txt` (the shared jar stays), and
