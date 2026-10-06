@@ -140,8 +140,9 @@ Setup fields (Stint label/Streamer/Session/Race Control) are async-optimistic
 (`HudSource` override now, sheet poll confirms, 60 s expiry), Schedule/POV URL
 writes are synchronous; URL changes never auto-reload a feed. Setup "Stint" =
 HUD display label, NOT the feed stint index. Every push retries within a bounded budget
-(`push_webhook_retrying`: 15 s per attempt, 40 s for background pushes, 15 s for the
-synchronous URL/crew writes, no retry for a crew delete) and logs each failed attempt as a
+(`push_webhook_retrying`: 15 s per attempt and 40 s for background pushes; the
+synchronous URL/crew writes get one 30 s attempt, sent one at a time through
+`SetupControl._sync_push` (#780); no retry for a crew delete) and logs each failed attempt as a
 `sheet push` WARNING with the URL masked (#767). A failed push stays `failed` only while the webhook is down: `run_webhook_recovery` probes it every 30 s with a read (`get_stream_key` for an unknown ref, never a write) and clears a transient failure of `SetupControl` and `TimerStore` once the script answers; an outdated script stays red, and a failure recorded during the probe wins (`PushHealth`). `SetupControl` + endpoints
 `/setup/*`, `/schedule/*`, `/pov/set` (POST). Tests: `tests/test_setup.py`.
 

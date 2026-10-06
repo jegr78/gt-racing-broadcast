@@ -1602,21 +1602,70 @@ def _record_push_kwargs():
     return seen, lambda: setattr(m, "push_webhook_retrying", orig)
 
 
-def t_synchronous_sheet_writes_use_the_short_budget():
-    # Schedule/POV/crew writes run inside the panel's HTTP request: they must not
-    # hang for the background budget.
+def t_synchronous_sheet_writes_get_one_long_attempt():
+    # Schedule/POV/crew writes run inside the panel's HTTP request. Apps Script
+    # answers a write in up to ~15 s in a slow phase (#780), so one attempt gets
+    # 30 s; a second one only follows a fast failure.
     ctl = m.SetupControl("http://push", _hs_stub())
     seen, restore = _record_push_kwargs()
     try:
         ctl.schedule_set(1, url="")
         ctl.pov_set("")
         ctl.crew_set(2, name="Someone")
+        ctl.crew_delete(3)
     finally:
         restore()
-    assert [a for a, _d, _k in seen] == ["schedule", "pov", "crew"], seen
+    assert [a for a, _d, _k in seen] == ["schedule", "pov", "crew", "crew"], seen
     for action, _d, kw in seen:
+        assert kw.get("timeout") == m.WEBHOOK_SYNC_TIMEOUT_S, (action, kw)
         assert kw.get("budget_s") == m.WEBHOOK_SYNC_BUDGET_S, (action, kw)
-    assert m.WEBHOOK_SYNC_BUDGET_S <= m.WEBHOOK_RETRY_TIMEOUT_S
+    assert m.WEBHOOK_SYNC_TIMEOUT_S >= 30
+    assert m.WEBHOOK_SYNC_BUDGET_S <= m.WEBHOOK_SYNC_TIMEOUT_S
+
+
+def t_synchronous_sheet_writes_run_one_at_a_time():
+    # Two rows saved at once used to hit the script concurrently and slow each
+    # other into a timeout (#780).
+    import threading, time as _t
+    ctl = m.SetupControl("http://push", _hs_stub())
+    state = {"active": 0, "max": 0}
+    guard = threading.Lock()
+    orig = m.push_webhook_retrying
+    def spy(url, payload, expected_action=None, **kw):
+        with guard:
+            state["active"] += 1
+            state["max"] = max(state["max"], state["active"])
+        _t.sleep(0.05)
+        with guard:
+            state["active"] -= 1
+        return True, None, b'{"ok": true}'
+    m.push_webhook_retrying = spy
+    try:
+        threads = [threading.Thread(target=ctl.schedule_set, args=(n,), kwargs={"url": ""})
+                   for n in (1, 2, 3)]
+        threads.append(threading.Thread(target=ctl.pov_set, args=("",)))
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(5)
+    finally:
+        m.push_webhook_retrying = orig
+    assert state["max"] == 1, state
+
+
+def t_background_pushes_do_not_wait_for_a_panel_write():
+    import threading
+    pushes = []
+    ctl, _hs, orig = _ctl(pushes)
+    try:
+        with ctl._sync_lock:                     # a panel write is in flight
+            t = threading.Thread(target=ctl._push_setup, args=("Streamer", "GT45"))
+            t.start()
+            t.join(5)
+            assert not t.is_alive(), "a HUD field push queued behind a panel write"
+    finally:
+        m.post_webhook = orig
+    assert pushes and pushes[-1]["action"] == "setup"
 
 
 def t_crew_delete_is_never_retried():
