@@ -12,7 +12,7 @@
    "selector": "#chatlog > div\\.msg(:nth-of-type\\(\\d+\\))? > span\\.ts(:nth-of-type\\(\\d+\\))?",
    "reason": "crew-chat timestamps are secondary metadata, set smaller and dimmer than the message (#chatlog .ts)"},
   {"surface": "director-panel", "rule": "console", "selector": "console",
-   "detail": "status of 503 \\(Service Unavailable\\) \\(http://127\\.0\\.0\\.1:\\d+/preview/feed/[A-Z]+\\?ts=\\d+\\)$",
+   "detail": "status of 503 \\(Service Unavailable\\) \\(http://127\\.0\\.0\\.1:\\d+/preview/feed/(B|POV)\\?ts=\\d+\\)$",
    "reason": "the relay answers 503 for a feed without a preview still and the tile shows Unavailable; the synthetic run never serves feed B or POV"},
   {"surface": "director-panel", "rule": "console", "selector": "console",
    "detail": "status of 404 \\(Not Found\\) \\(http://127\\.0\\.0\\.1:\\d+/preview/program-audio\\?probe=1\\)$",
