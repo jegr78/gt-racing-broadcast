@@ -90,7 +90,7 @@ browser default on a dark surface, overlapping controls, WCAG AA contrast, conso
 and writes `DIR/report.html` plus screenshots. Any finding fails the run (exit 1); a missing
 Playwright is exit 2, never a skip. Deliberate exceptions go in `tools/visual-allowlist.json`,
 each with a reason; a real defect is allowlisted with reason "known defect, #N" pointing at
-its own issue (currently #773 and #774). `surface`, `selector` and the optional `detail` are
+its own issue. `surface`, `selector` and the optional `detail` are
 all full-match regexes. The Control Center check only sees what is visible inside its
 scrolling content area (its `<main>` scrolls; the page itself does not). The CI `visual` job
 runs it on every PR and uploads the report. Local setup:

@@ -638,9 +638,6 @@ def run_synthetic(args):
                 code = 1
         print(E.summarize(results))
         if args.visual:
-            if not _playwright_available():
-                print(f"--visual: Playwright + Chromium required: {PLAYWRIGHT_HINT}")
-                return 2
             urls = {"ui": ui_url, "relay": relay_url, "token": token, "rc_token": rc_token}
             code = max(code, run_visual(urls, args.report, headed=args.headed, slowmo=args.slowmo))
         if args.shots:
@@ -812,6 +809,9 @@ def main(argv=None):
         if args.visual:
             ap.error("--visual is synthetic-only; not supported with --real-league")
         return run_real_league(args)
+    if args.visual and not _playwright_available():
+        print(f"--visual: Playwright + Chromium required: {PLAYWRIGHT_HINT}")
+        return 2
     return run_synthetic(args)
 
 

@@ -9,6 +9,7 @@ WHITE_UA = "rgb(255, 255, 255)"
 
 
 def _el(**kw):
+    """Build one visible-element fact record with dark-panel defaults, overridden by kw."""
     rec = {"i": 0, "sel": "#x", "tag": "div", "interactive": False, "text": "",
            "has_text": False, "rect": [0, 0, 100, 20], "client_w": 100, "scroll_w": 100,
            "client_h": 20, "scroll_h": 20, "overflow_x": "visible", "overflow_y": "visible",
@@ -21,6 +22,7 @@ def _el(**kw):
 
 
 def _facts(elements, w=1280, scroll_width=1280):
+    """Build a desktop-viewport facts dict wrapping *elements* for the rule functions."""
     return {"viewport": {"w": w, "h": 800}, "scroll_width": scroll_width,
             "ua": {"input": WHITE_UA, "select": WHITE_UA, "textarea": WHITE_UA,
                    "button": "rgb(239, 239, 239)"},
@@ -47,11 +49,11 @@ def t_overflow_flags_wide_page():
 
 
 def t_unstyled_input_on_dark_panel_is_flagged():
-    # The #397 case: a duration input left at the UA white on the dark Director Panel.
     el = _el(sel="#txDur", tag="input", interactive=True, ua_key="input",
              bg_raw=WHITE_UA, bg_chain=[[255, 255, 255, 1]])
     hits = v.rule_unstyled_controls(_facts([el]))
-    assert [(f.rule, f.selector) for f in hits] == [("unstyled-control", "#txDur")], hits
+    assert [(f.rule, f.selector) for f in hits] == [("unstyled-control", "#txDur")], \
+        "a duration input left at the UA white background on a dark panel must flag as unstyled"
 
 
 def t_styled_input_passes():
@@ -83,7 +85,6 @@ def t_overlap_ignores_hairline_touch():
 
 
 def t_overlap_uses_the_visible_rect_of_a_clipped_element():
-    # cc-profile: "Add entry" pokes 6 px past the bottom of the scrolling main, above the console dock.
     btn = _el(i=0, sel="#add", interactive=True, rect=[265, 727, 103, 34], vis_rect=[265, 727, 103, 28])
     head = _el(i=1, sel="#head", interactive=True, rect=[212, 756, 1068, 44], vis_rect=[212, 756, 1068, 44])
     assert v.rule_overlap(_facts([btn, head])) == [], "the clipped strip is not painted"
@@ -92,6 +93,7 @@ def t_overlap_uses_the_visible_rect_of_a_clipped_element():
 
 
 def _phone(elements, scroll_height):
+    """Build 390x844 phone facts for *elements*, with scroll_height/scroll_y set for the fixed-bar overlap rules."""
     facts = _facts(elements, w=390, scroll_width=390)
     facts["viewport"]["h"] = 844
     facts["scroll_height"] = scroll_height
@@ -100,7 +102,6 @@ def _phone(elements, scroll_height):
 
 
 def t_overlap_ignores_a_fixed_bar_the_page_scrolls_clear():
-    # cockpit phone: body padding-bottom lets the chat input scroll above the fixed tab bar.
     tab = _el(i=0, sel="#tab", interactive=True, fixed=True, rect=[0, 787, 98, 57])
     inp = _el(i=1, sel="#chatin", interactive=True, rect=[12, 787, 280, 44])
     assert v.rule_overlap(_phone([tab, inp], 986)) == [], "a 142 px scroll uncovers the input"

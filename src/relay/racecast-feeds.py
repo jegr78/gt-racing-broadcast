@@ -12187,7 +12187,8 @@ def main():
                          "default 'Qualifying'). One stream, served on Feed A.")
     ap.add_argument("--crew-tab", default="Crew",
                     help="Sheet tab naming Director/Producer crew for /console roles "
-                         "(#216); disabled with a custom --sheet-csv-url.")
+                         "(#216); a custom --sheet-csv-url disables it unless "
+                         "--crew-csv-url is given.")
     ap.add_argument("--crew-csv-url", default=None,
                     help="Full Crew roster CSV URL (overrides the derived Crew tab, "
                          "also with --sheet-csv-url)")
