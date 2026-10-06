@@ -8,7 +8,10 @@ import collections
 
 Finding = collections.namedtuple("Finding", "rule selector detail")
 
+# Relative luminance below which a surface reads as dark, roughly the mid-grey
+# rgb(124, 124, 124); a UA-white control stands out against anything darker.
 DARK_SURFACE_LUM = 0.2
+# A 1 px shared edge between neighbouring rects is layout rounding, not an overlap.
 OVERLAP_MIN_PX = 2
 
 
@@ -42,6 +45,7 @@ def contrast_ratio(a, b):
 
 
 def rule_overflow(facts):
+    """Flag a page whose scroll_width exceeds its own viewport width."""
     w, sw = facts["viewport"]["w"], facts["scroll_width"]
     if sw > w + 1:
         return [Finding("overflow", "html", f"page is {sw} px wide in a {w} px viewport")]
@@ -49,6 +53,7 @@ def rule_overflow(facts):
 
 
 def rule_unstyled_controls(facts):
+    """Flag a form control (ua_key set) whose bg_raw is still the UA default while parent_bg composites to a dark surface."""
     out = []
     for el in facts["elements"]:
         ua = facts["ua"].get(el["ua_key"]) if el["ua_key"] else None
@@ -61,6 +66,7 @@ def rule_unstyled_controls(facts):
 
 
 def _intersects(a, b):
+    """True when rects *a* and *b* ([x, y, w, h]) overlap by at least `OVERLAP_MIN_PX` on both axes."""
     ax, ay, aw, ah = a
     bx, by, bw, bh = b
     w = min(ax + aw, bx + bw) - max(ax, bx)
@@ -69,6 +75,7 @@ def _intersects(a, b):
 
 
 def rule_overlap(facts):
+    """Flag interactive element pairs whose rects overlap, excluding ancestor/descendant pairs via anc."""
     items = [el for el in facts["elements"] if el["interactive"]]
     out = []
     for n, a in enumerate(items):
@@ -81,6 +88,7 @@ def rule_overlap(facts):
 
 
 def rule_console(errors):
+    """One finding per captured console error, detail truncated to 300 characters."""
     return [Finding("console", "console", msg[:300]) for msg in errors]
 
 
