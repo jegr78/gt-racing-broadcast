@@ -2034,6 +2034,30 @@ def t_probe_alone_does_not_clear_a_red_status_held_by_a_save():
     assert ctl.push_status == "failed"
 
 
+def t_sync_fields_helper():
+    class Src:
+        def sync_state(self, row):
+            return {2: ("saving", None), 3: ("local", "TimeoutError: x")}.get(row, (None, None))
+    assert m.sync_fields(Src(), 2) == {"sync": "saving"}
+    assert m.sync_fields(Src(), 3) == {"sync": "local", "sync_error": "TimeoutError: x"}
+    assert m.sync_fields(Src(), 4) == {}
+    assert m.sync_fields(object(), 2) == {}          # stub sources without sync_state
+
+
+def t_endpoints_sync_routes():
+    ctl, s, calls = _async_ctl(post=lambda p: (False, "TimeoutError: slow"))
+    srv, get, post = _client(ctl)
+    try:
+        assert post("/schedule/set", {"row": 2, "url": "https://youtu.be/x"}).get("pending")
+        ctl.drain_saves()
+        assert post("/schedule/sync", {"row": 2}) == {"ok": True}
+        assert "error" in post("/schedule/sync", {"row": 9})
+        assert "error" in post("/qualifying/sync", {"row": 2})
+        assert "error" in post("/pov/sync", {})
+    finally:
+        srv.shutdown()
+
+
 # setup-assets media fill: the template-driven scan.
 
 def t_setup_media_fill_uses_template_scan():

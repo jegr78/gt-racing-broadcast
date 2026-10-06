@@ -59,6 +59,12 @@ def t_director_panel_setup_timer_pov_submissions():
         assert _cap(segs) == ("director", False), segs
 
 
+def t_sync_now_routes_are_director_only():
+    # SYNC NOW re-pushes a panel save that is held in the relay (spec 2026-10-06).
+    for segs in (["schedule", "sync"], ["qualifying", "sync"], ["pov", "sync"]):
+        assert _cap(segs) == ("director", False), segs
+
+
 def t_setup_data_and_timer_data_are_reads_not_director():
     # The read endpoints under setup/timer must stay "any", not escalate to director.
     assert _cap(["setup", "data"]) == ("any", False)

@@ -2588,6 +2588,18 @@ def webhook_recovery_tick(url, stores, probe=None):
     return any(cleared)
 
 
+def sync_fields(source, line):
+    """The panel's per-row save state for /schedule/data, /qualifying/data and
+    the POV status: {} when nothing is pending (or the source has no store)."""
+    state = getattr(source, "sync_state", None)
+    if state is None:
+        return {}
+    sync, err = state(line)
+    if not sync:
+        return {}
+    return {"sync": sync, "sync_error": err} if sync == "local" else {"sync": sync}
+
+
 def run_webhook_recovery(url, stores, interval=WEBHOOK_RECOVERY_INTERVAL_S,
                          sleep=None):
     """Daemon loop around webhook_recovery_tick. Never raises."""
@@ -9356,6 +9368,7 @@ class Relay:
                           "state_age_s": round(now - self.pov.phase_since, 1),
                           "down": self.pov.dropped and not self.pov.paused,
                           "source": self.pov_source.health() if self.pov_source else None,
+                          **sync_fields(self.pov_source, POV_SHEET_ROW),
                           **self._backlog_status("POV", self.pov)}
         out["obs"] = {"reachable": self.obs_reachable, "note": self.obs_note}
         # On-air feed/stint + league identity for producer takeover (#takeover):
@@ -9399,6 +9412,7 @@ class Relay:
                           "state_age_s": round(now - self.pov.phase_since, 1),
                           "down": self.pov.dropped and not self.pov.paused,
                           "source": self.pov_source.health() if self.pov_source else None,
+                          **sync_fields(self.pov_source, POV_SHEET_ROW),
                           **self._backlog_status("POV", self.pov)}
         out["obs"] = {"reachable": self.obs_reachable, "note": self.obs_note}
         out["live"] = {"feed": None, "stint": None, "mode": "solo"}
@@ -11658,7 +11672,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     live = {f.idx: k for k, f in relay.feeds.items()}
                     return self._send({"rows": [{"row": i + 1, "sheetRow": line,
                                                  "url": u, "name": n, "stint": st,
-                                                 "live": live.get(i)}
+                                                 "live": live.get(i),
+                                                 **sync_fields(relay.source, line)}
                                                 for i, (u, n, st, line) in enumerate(rows)],
                                        "source": relay.source.health() if relay.source else None})
                 if p == ["substitution", "latest"]:
@@ -11697,7 +11712,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     return self._send({"available": True, "mode": relay.mode,
                                        "rows": [{"row": i + 1, "sheetRow": line,
                                                  "url": u, "name": n, "stint": st,
-                                                 "live": live.get(i)}
+                                                 "live": live.get(i),
+                                                 **sync_fields(qs, line)}
                                                 for i, (u, n, st, line) in enumerate(qrows)],
                                        "source": qs.health()})
                 if len(p) == 2 and p[0] == "mode":
@@ -12255,6 +12271,12 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 if p == ["pov", "set"]:
                     return self._send(setup_ctl.pov_set(body.get("url"),
                                                         body.get("name")))
+                if p == ["schedule", "sync"]:
+                    return self._send(setup_ctl.sync_save("schedule", body.get("row")))
+                if p == ["qualifying", "sync"]:
+                    return self._send(setup_ctl.sync_save("qualifying", body.get("row")))
+                if p == ["pov", "sync"]:
+                    return self._send(setup_ctl.sync_save("pov"))
                 if p == ["setup", "teams"]:
                     return self._send(setup_ctl.set_teams(body.get("teams")))
                 return self._send({"error": "unknown", "path": self.path}, 404)
@@ -13029,6 +13051,9 @@ def main():
         # IMPORTANT: do NOT call shutdown() from the thread running serve_forever()
         # (deadlock). Stop the feeds and exit hard; the OS frees the sockets; the
         # streamlink subprocesses are cleanly terminated.
+        if setup_ctl is not None and len(setup_ctl.saves):
+            LOG.warning("relay stopping with %d panel save(s) not confirmed in the "
+                        "sheet; they are dropped", len(setup_ctl.saves))
         LOG.info("Stopping feeds…")
         stop_evt.set(); relay.shutdown(); os._exit(0)
     signal.signal(signal.SIGINT, shutdown)
