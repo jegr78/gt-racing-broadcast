@@ -122,6 +122,25 @@ def t_targets_are_separate():
     assert s.overlay("qualifying") == {2: {"url": "https://youtu.be/q"}}
 
 
+def t_unconfirmed_counts_saving_and_local_only():
+    s, _c = _store()
+    s.put("schedule", 2, {"url": ""})
+    s.put("schedule", 3, {"url": ""})
+    s.put("pov", 2, {"url": ""})
+    j = s.next_job(); s.done(j[0], j[1], j[3], ok=True)          # confirmed
+    j = s.next_job(); s.done(j[0], j[1], j[3], ok=False, err="x")  # local
+    assert s.unconfirmed() == 2                                     # local + saving
+
+
+def t_states_lists_every_unconfirmed_row_of_a_target():
+    s, _c = _store()
+    s.put("qualifying", 2, {"url": "", "name": "", "stint": ""})
+    j = s.next_job(); s.done(j[0], j[1], j[3], ok=False, err="slow")
+    s.put("schedule", 5, {"url": ""})
+    assert s.states("qualifying") == {2: ("local", "slow")}
+    assert s.states("schedule") == {5: ("saving", None)}
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

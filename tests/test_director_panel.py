@@ -715,6 +715,19 @@ def t_crew_take_modes_explain_themselves():
     assert "b.title = help" in html, "the long meaning goes into the key tooltip"
 
 
+def t_save_clears_a_stale_syncing_state():
+    # A save started while the row still shows SYNCING... must drop that state, or
+    # the next poll turns a rejected correction into SAVED (review of #async-saves).
+    html = _html()
+    assert html.count('btn.classList.remove("ok", "syncing")') == 3
+
+
+def t_sync_state_reads_sync_rows_and_skips_race_rows_in_qualifying():
+    html = _html()
+    assert "d.sync_rows" in html                       # rows a save emptied
+    assert 'relayMode !== "qualifying"' in html          # race-row states only in race
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

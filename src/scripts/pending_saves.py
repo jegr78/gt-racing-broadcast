@@ -126,6 +126,20 @@ class PendingSaves:
                 return LOCAL, e.err
             return SAVING, None
 
+    def states(self, target):
+        """row -> (sync, err) for every unconfirmed entry of *target*, including
+        a save that emptied its row (the row is then gone from the source)."""
+        with self._lock:
+            return {row: (LOCAL if e.state == LOCAL else SAVING,
+                          e.err if e.state == LOCAL else None)
+                    for (t, row), e in self._entries.items()
+                    if t == target and e.state != CONFIRMED}
+
+    def unconfirmed(self):
+        """Entries the sheet has not confirmed yet (saving or local)."""
+        with self._lock:
+            return sum(1 for e in self._entries.values() if e.state != CONFIRMED)
+
     def unsynced(self):
         with self._lock:
             local = [e for e in self._entries.values() if e.state == LOCAL]

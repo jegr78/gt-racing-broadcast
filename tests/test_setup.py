@@ -2058,6 +2058,24 @@ def t_endpoints_sync_routes():
         srv.shutdown()
 
 
+def t_sync_rows_reports_a_save_that_emptied_its_row():
+    # Qualifying CLEAR blanks streamer, stint and URL: the row leaves the source,
+    # but the panel must still see that the save is only in the relay.
+    pushes = []
+    ctl, qsrc, ssrc, orig = _qctl(pushes)
+    try:
+        qsrc.inject_row(2, "https://www.youtube.com/watch?v=q", "GT45", "Stint 2")
+        ctl._save_push = lambda payload, expected_action: (False, "TimeoutError: slow")
+        ctl.qualifying_set(2, url="", name="", stint="")
+        ctl.drain_saves()
+        assert qsrc.get_rows() == []
+        assert m.sync_rows(qsrc) == {"2": {"sync": "local", "sync_error": "TimeoutError: slow"}}
+        assert m.sync_rows(ssrc) == {}
+        assert m.sync_rows(object()) == {}
+    finally:
+        m.post_webhook = orig
+
+
 # setup-assets media fill: the template-driven scan.
 
 def t_setup_media_fill_uses_template_scan():

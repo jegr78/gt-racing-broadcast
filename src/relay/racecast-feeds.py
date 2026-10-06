@@ -2600,6 +2600,17 @@ def sync_fields(source, line):
     return {"sync": sync, "sync_error": err} if sync == "local" else {"sync": sync}
 
 
+def sync_rows(source):
+    """{sheetRow: sync fields} for every unconfirmed save of *source*, so the panel
+    also sees a save that emptied its row (the row is then gone from the rows)."""
+    states = getattr(source, "sync_states", None)
+    if states is None:
+        return {}
+    return {str(row): ({"sync": sync, "sync_error": err} if sync == "local"
+                       else {"sync": sync})
+            for row, (sync, err) in states().items()}
+
+
 def run_webhook_recovery(url, stores, interval=WEBHOOK_RECOVERY_INTERVAL_S,
                          sleep=None):
     """Daemon loop around webhook_recovery_tick. Never raises."""
@@ -6654,6 +6665,12 @@ class ScheduleSource:
         if self._pending is None:
             return None, None
         return self._pending.state(self._pending_target, row)
+
+    def sync_states(self):
+        """row -> (sync, err) for every unconfirmed save of this source."""
+        if self._pending is None:
+            return {}
+        return self._pending.states(self._pending_target)
 
     def health(self):
         with self.lock:
@@ -11675,6 +11692,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                                  "live": live.get(i),
                                                  **sync_fields(relay.source, line)}
                                                 for i, (u, n, st, line) in enumerate(rows)],
+                                       "sync_rows": sync_rows(relay.source),
                                        "source": relay.source.health() if relay.source else None})
                 if p == ["substitution", "latest"]:
                     # Director-panel read side for the ad-hoc stream-substitution
@@ -11715,6 +11733,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                                  "live": live.get(i),
                                                  **sync_fields(qs, line)}
                                                 for i, (u, n, st, line) in enumerate(qrows)],
+                                       "sync_rows": sync_rows(qs),
                                        "source": qs.health()})
                 if len(p) == 2 and p[0] == "mode":
                     res = relay.set_mode(p[1].lower())
@@ -13051,9 +13070,9 @@ def main():
         # IMPORTANT: do NOT call shutdown() from the thread running serve_forever()
         # (deadlock). Stop the feeds and exit hard; the OS frees the sockets; the
         # streamlink subprocesses are cleanly terminated.
-        if setup_ctl is not None and len(setup_ctl.saves):
+        if setup_ctl is not None and setup_ctl.saves.unconfirmed():
             LOG.warning("relay stopping with %d panel save(s) not confirmed in the "
-                        "sheet; they are dropped", len(setup_ctl.saves))
+                        "sheet; they are dropped", setup_ctl.saves.unconfirmed())
         LOG.info("Stopping feeds…")
         stop_evt.set(); relay.shutdown(); os._exit(0)
     signal.signal(signal.SIGINT, shutdown)

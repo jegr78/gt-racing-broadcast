@@ -348,7 +348,7 @@ background, so a slow Google Sheet never blocks the panel:
 The **HUD** line counts rows that are still **IN RELAY**. Such a value exists
 only in this relay: a producer taking over on another machine reads the sheet,
 so the counter shows whether the sheet is complete. A relay restart drops values
-that were still **IN RELAY** (the relay log names how many).
+that were still **IN RELAY**: check the counter before restarting the relay.
 
 **Handover auto-fills the HUD.** When a stint goes on air via **NEXT** (or a
 **FEEDS → STINT** takeover), the relay sets the HUD's **Streamer** and **Stint

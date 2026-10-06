@@ -2675,7 +2675,7 @@ function schedRow(i){
 }
 async function schedSave(tr, row){
   const btn = tr.querySelector(".save");
-  btn.disabled = true; btn.textContent = "…"; btn.classList.remove("ok");
+  btn.disabled = true; btn.textContent = "…"; btn.classList.remove("ok", "syncing");
   // Use the physical sheet row stamped by schedPoll; fall back to the stint number
   // only for a row the poll has not stamped yet, such as a new ADD ROW.
   const sheetRow = Number(tr.dataset.sheetRow || row);
@@ -2710,7 +2710,7 @@ $("#schedAdd").addEventListener("click", ()=>{
 });
 $("#povSave").addEventListener("click", async ()=>{
   const btn = $("#povSave");
-  btn.disabled = true; btn.textContent = "…"; btn.classList.remove("ok");
+  btn.disabled = true; btn.textContent = "…"; btn.classList.remove("ok", "syncing");
   try{
     const r = await fetch("/pov/set", {method:"POST", cache:"no-store",
       headers:{"Content-Type":"application/json"},
@@ -2743,8 +2743,11 @@ async function schedPoll(){
       // Stamp the physical sheet row so schedSave and schedAdd use it.
       tr.dataset.sheetRow = row.sheetRow;
       tr.querySelector(".livebadge").textContent = row.live || "";
-      applySync("sched:" + row.sheetRow, "Schedule row " + row.row, row.sync, row.sync_error,
-                tr.querySelector(".save"), tr.querySelector(".syncbadge"), tr.querySelector(".syncnow"));
+      // In qualifying mode /schedule/data serves the qualifying rows; their state
+      // belongs to the Qualifying row below, not to this (hidden) race table.
+      if (relayMode !== "qualifying")
+        applySync("sched:" + row.sheetRow, "Schedule row " + row.row, row.sync, row.sync_error,
+                  tr.querySelector(".save"), tr.querySelector(".syncbadge"), tr.querySelector(".syncnow"));
       const busy = rowBusy(tr);
       // Keep the dropdown options fresh always, but adopt the sheet's saved selection
       // only when the row is not being edited. cur=null leaves it alone.
@@ -2753,6 +2756,17 @@ async function schedPoll(){
       if (busy) return;
       tr.querySelector(".u").value = row.url;
     });
+    // A save that emptied its row is gone from d.rows: show its state from sync_rows.
+    if (relayMode !== "qualifying"){
+      const shown = new Set(d.rows.map(r=>String(r.sheetRow)));
+      document.querySelectorAll("#schedBody tr").forEach(tr=>{
+        const sr = String(tr.dataset.sheetRow || "");
+        if (!sr || shown.has(sr)) return;
+        const st = (d.sync_rows || {})[sr] || {};
+        applySync("sched:" + sr, "Schedule row " + tr.dataset.row, st.sync, st.sync_error,
+                  tr.querySelector(".save"), tr.querySelector(".syncbadge"), tr.querySelector(".syncnow"));
+      });
+    }
   }catch(e){}
   try{
     const r = await fetch("/status", {cache:"no-store"});
@@ -2811,7 +2825,7 @@ function qualRowBusy(){
 }
 async function qualSave(){
   const btn = $("#qualSave");
-  btn.disabled = true; btn.textContent = "…"; btn.classList.remove("ok");
+  btn.disabled = true; btn.textContent = "…"; btn.classList.remove("ok", "syncing");
   const sheetRow = Number($("#qualRow").dataset.sheetRow || 2);   // first data row under the header
   try{
     const r = await fetch("/qualifying/set", {method:"POST", cache:"no-store",
@@ -2863,7 +2877,9 @@ async function qualPoll(){
     }
     const row = (d.rows && d.rows[0]) || null;
     $("#qualLive").textContent = row && row.live ? row.live : "";
-    applySync("qual", "Qualifying row", row && row.sync, row && row.sync_error,
+    // From sync_rows, so a CLEAR that emptied the row still shows its state.
+    const qst = (d.sync_rows || {})[String($("#qualRow").dataset.sheetRow || (row && row.sheetRow) || 2)] || {};
+    applySync("qual", "Qualifying row", qst.sync, qst.sync_error,
               $("#qualSave"), $("#qualSync"), $("#qualSyncNow"));
     const busy = qualRowBusy();
     fillSchedSelect($("#qualNm"), schedOptions.streamer, busy ? null : (row ? (row.name||"") : ""));
