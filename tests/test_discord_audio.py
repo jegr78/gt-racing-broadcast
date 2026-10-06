@@ -250,7 +250,8 @@ def t_bake_overlay_visibility_hides_and_shows_program_items():
     applied = sa.bake_overlay_visibility(coll, "#webcam { display: none; }")
     prog = {i["name"]: i["visible"] for i in coll["sources"][1]["settings"]["items"]}
     assert prog == {"Solo Webcam": False, "Solo Tyres/Fuel Capture": True}, prog
-    assert coll["sources"][0]["settings"]["items"][0]["visible"] is True,         "the standalone Solo Webcam scene must stay untouched"
+    assert coll["sources"][0]["settings"]["items"][0]["visible"] is True, \
+        "the standalone Solo Webcam scene must stay untouched"
     assert sorted((a[0], a[3]) for a in applied) == [("tyres-capture", True),
                                                      ("webcam", False)], applied
 

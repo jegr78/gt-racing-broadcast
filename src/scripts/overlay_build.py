@@ -367,9 +367,29 @@ def slot_scene(slot_id, solo):
 # director's live POV toggle (/pov/toggle, paused at relay start) owns its visibility.
 VISIBILITY_SLOTS = ("webcam", "tyres-capture")
 
-_CSS_COMMENT_RE = re.compile(r"/\*.*?\*/", re.S)
-_CSS_RULE_RE = re.compile(r"([^{}]+)\{([^{}]*)\}")
-_DISPLAY_RE = re.compile(r"(?<![\w-])display\s*:\s*([^;!}]+?)\s*(!\s*important)?\s*(?:;|$)", re.I)
+_CSS_COMMENT_RE = re.compile(r"/\*.*?(?:\*/|\Z)", re.S)    # an unclosed one runs to the end
+_DISPLAY_RE = re.compile(r"(?<![\w-])display\s*:\s*([^;!}]*)(!\s*important)?", re.I)
+
+
+def _top_level_rules(css):
+    """(selectors, body) of each top-level rule, in one linear pass. Rules inside an
+    at-rule block (@media, @supports) are skipped: they apply only sometimes."""
+    rules, depth, sel_start, body_start, selectors = [], 0, 0, 0, ""
+    for i, ch in enumerate(css):
+        if ch == "{":
+            if depth == 0:
+                selectors, body_start = css[sel_start:i], i + 1
+            depth += 1
+        elif ch == "}":
+            if depth == 0:
+                sel_start = i + 1
+                continue
+            depth -= 1
+            if depth == 0:
+                if not selectors.lstrip().startswith("@"):
+                    rules.append((selectors, css[body_start:i]))
+                sel_start = i + 1
+    return rules
 
 
 def slot_hidden(css_text, slot_id):
@@ -381,7 +401,7 @@ def slot_hidden(css_text, slot_id):
         return False
     target = "#" + slot_id
     value, important = None, False
-    for selectors, body in _CSS_RULE_RE.findall(_CSS_COMMENT_RE.sub("", css_text)):
+    for selectors, body in _top_level_rules(_CSS_COMMENT_RE.sub("", css_text)):
         if target not in (s.strip() for s in selectors.split(",")):
             continue
         for val, imp in _DISPLAY_RE.findall(body):

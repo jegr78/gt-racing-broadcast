@@ -554,7 +554,7 @@ def main():
     css_text = ""
     if a.overlay_css and os.path.isfile(a.overlay_css):
         try:
-            with open(a.overlay_css, encoding="utf-8") as fh:
+            with open(a.overlay_css, encoding="utf-8", errors="replace") as fh:
                 css_text = fh.read()
         except OSError as e:
             print(f"  NOTE: could not read overlay CSS {a.overlay_css}: {e}")

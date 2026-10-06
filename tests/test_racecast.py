@@ -727,9 +727,11 @@ def t_sync_pov_transform_calls_setter_with_merged_box():
     assert ttf["boundsWidth"] == 245 and ttf["boundsHeight"] == 84
 
 
-def t_sync_pov_transform_shows_and_hides_items_from_the_profile_css():
-    # #766: on relay start OBS follows the profile CSS in both directions; Feed
-    # POV is left to the director's live toggle.
+def t_sync_pov_transform_only_hides_items_live():
+    # #766: the live sync (relay start, event start, obs refresh, backup restore)
+    # only hides what the profile CSS hides. It never shows an item, because the
+    # director's WEBCAM toggle may have hidden it on air; showing is the setup bake's
+    # job. Feed POV is left to the director's live toggle.
     import tempfile
     enabled = []
     with tempfile.TemporaryDirectory() as d:
@@ -743,8 +745,26 @@ def t_sync_pov_transform_shows_and_hides_items_from_the_profile_css():
                                   (enabled.append((scene, source, on)), (True, ""))[1])
         finally:
             m._active_overlay_dir = orig
-    assert sorted(enabled) == [("Program", "Solo Tyres/Fuel Capture", True),
-                               ("Program", "Solo Webcam", False)], enabled
+    assert enabled == [("Program", "Solo Webcam", False)], enabled
+
+
+def t_sync_pov_transform_reads_a_hud_css_that_is_not_utf8():
+    # A stray byte in an imported hud.css must not crash relay start after the
+    # relay spawned; the slot rules still apply.
+    import tempfile
+    enabled = []
+    with tempfile.TemporaryDirectory() as d:
+        with open(os.path.join(d, "hud.css"), "wb") as fh:
+            fh.write(b"/* caf\xe9 */\n#webcam { display: none; }")
+        orig = m._active_overlay_dir
+        m._active_overlay_dir = lambda: d
+        try:
+            m._sync_pov_transform(set_transform=lambda *a: (True, ""), solo=True,
+                                  set_enabled=lambda scene, source, on:
+                                  (enabled.append((source, on)), (True, ""))[1])
+        finally:
+            m._active_overlay_dir = orig
+    assert enabled == [("Solo Webcam", False)], enabled
 
 
 def t_sync_pov_transform_targets_program_in_solo():

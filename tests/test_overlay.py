@@ -1356,6 +1356,26 @@ def t_slot_visibility_ignores_other_selectors_naming_the_slot():
     assert ob.slot_visibility(css)["webcam"] is True
 
 
+def t_slot_visibility_skips_rules_inside_at_blocks():
+    # A rule under @media or @supports applies only sometimes, so it never hides the
+    # OBS source for good.
+    css = "@media (max-width: 600px) { #webcam { display: none; } }\n#tyres-capture { left: 1px; }"
+    assert ob.slot_visibility(css) == {"webcam": True, "tyres-capture": True}
+
+
+def t_slot_visibility_stays_linear_on_hostile_css():
+    # An imported profile's hud.css runs on setup, relay start and event start; a
+    # quadratic parse there stalls them for minutes.
+    import time
+    n = 300_000
+    for css in ("a" * n, "#webcam{display: " + "a " * n, "/* " * n,
+                "#webcam{" + "display: " * (n // 9), "{" * n, "}" * n):
+        start = time.monotonic()
+        ob.slot_visibility(css)
+        took = time.monotonic() - start
+        assert took < 1.0, f"{took:.1f} s for {css[:20]!r}... ({len(css)} chars)"
+
+
 def t_slot_visibility_leaves_feed_pov_to_the_live_toggle():
     # The director's /pov/toggle owns Feed POV; the CSS must never drive it.
     assert "pov" not in ob.slot_visibility("#pov { display: none; }")
