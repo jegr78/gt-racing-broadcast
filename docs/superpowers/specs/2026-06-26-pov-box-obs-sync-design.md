@@ -218,6 +218,7 @@ For `overlay_build.VISIBILITY_SLOTS` (`#webcam` -> "Solo Webcam", `#tyres-captur
 "Solo Tyres/Fuel Capture") the profile's `hud.css` now also decides whether the OBS item
 is shown: `display: none` on the plain slot selector hides it, any other state shows it.
 `setup-assets.py` bakes it into the item's `visible` flag in the export scene
-(`bake_overlay_visibility`), and the live hook (`_sync_pov_transform`) pushes it with
-`obs_ws.set_scene_item_enabled`. The producer decided that the profile is authoritative in
-both directions. Feed POV is excluded: the director's live POV toggle owns its visibility.
+(`bake_overlay_visibility`), in both directions, as the producer decided. The live hook
+(`_sync_pov_transform`) only hides, through `obs_ws.set_scene_item_enabled`: it also runs on
+`obs refresh` and backup restore, and the director's `WEBCAM` panel key may have hidden the
+webcam on air, the same reason Feed POV is excluded entirely (its live POV toggle owns it).
