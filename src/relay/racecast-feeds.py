@@ -2410,8 +2410,11 @@ WEBHOOK_RETRY_BASE_S = 0.5
 WEBHOOK_RETRY_BUDGET_S = 40.0
 WEBHOOK_RETRY_TIMEOUT_S = 15
 # Schedule/POV/crew writes run inside the panel's HTTP request: one full attempt,
-# a second only after a fast failure.
-WEBHOOK_SYNC_BUDGET_S = 15.0
+# a second only after a fast failure. A single write took up to ~15 s in a slow
+# Apps Script phase (#780) and the panel's fetch has no client timeout, so the
+# attempt gets 30 s. SetupControl sends these writes one at a time.
+WEBHOOK_SYNC_TIMEOUT_S = 30
+WEBHOOK_SYNC_BUDGET_S = 30.0
 # A success slower than this is logged, so the relay log shows a slowing script
 # before it starts to time out.
 WEBHOOK_SLOW_S = 5.0
@@ -7015,6 +7018,10 @@ class SetupControl:
         self.crew_source = crew_source
         self.push_status = "disabled" if not push_url else "never"
         self.last_error = None
+        # Panel writes (schedule/POV/crew) go to the script one at a time: two rows
+        # saved at once competed at the script and slowed each other into a
+        # timeout (#780). Background HUD/team pushes do not take this lock.
+        self._sync_lock = threading.Lock()
 
     # -- shared blocking push -> (ok, error); diagnostics like TimerStore ----
     def _push(self, payload, expected_action, **retry):
@@ -7024,6 +7031,14 @@ class SetupControl:
         self.push_status = "ok" if ok else "failed"
         self.last_error = None if ok else err
         return ok, err
+
+    def _sync_push(self, payload, expected_action, **retry):
+        """A panel write: waits for any other panel write, then gets its own full
+        WEBHOOK_SYNC_BUDGET_S (the wait is not counted against it)."""
+        retry.setdefault("timeout", WEBHOOK_SYNC_TIMEOUT_S)
+        retry.setdefault("budget_s", WEBHOOK_SYNC_BUDGET_S)
+        with self._sync_lock:
+            return self._push(payload, expected_action, **retry)
 
     # -- setup fields (async-optimistic) -------------------------------------
     def set_field(self, key, value, now=None):
@@ -7174,7 +7189,7 @@ class SetupControl:
                    "director": bool(director), "producer": bool(producer),
                    "commentator": bool(commentator),
                    "race_control": bool(race_control), "discord": discord}
-        ok, err = self._push(payload, "crew", budget_s=WEBHOOK_SYNC_BUDGET_S)
+        ok, err = self._sync_push(payload, "crew")
         if ok and self.crew_source is not None:
             self.crew_source.inject_row(rownum, name=name, director=bool(director),
                                         producer=bool(producer),
@@ -7192,8 +7207,8 @@ class SetupControl:
             return rownum
         # One attempt only: a timed-out delete may still have landed, and a retry
         # would then delete the NEXT row (#767).
-        ok, err = self._push({"action": "crew", "row": rownum, "delete": True}, "crew",
-                             attempts=1, budget_s=WEBHOOK_SYNC_BUDGET_S)
+        ok, err = self._sync_push({"action": "crew", "row": rownum, "delete": True},
+                                  "crew", attempts=1)
         if ok and self.crew_source is not None:
             self.crew_source.delete_row(rownum)
         return {"ok": True, "row": rownum} if ok else {"error": err}
@@ -7256,7 +7271,7 @@ class SetupControl:
             if err:
                 return err
             payload["stint"] = stint
-        ok, err = self._push(payload, "schedule", budget_s=WEBHOOK_SYNC_BUDGET_S)
+        ok, err = self._sync_push(payload, "schedule")
         if ok and inject_source is not None:
             # Reflect the write locally now. INCLUDING a URL clear (url=""), so
             # /schedule/data + /cockpit/data don't show the stale link for a poll
@@ -7286,7 +7301,7 @@ class SetupControl:
         payload = {"action": "pov", "url": url}
         if name is not None:        # omitted -> leave the Sheet cell; "" -> explicit clear
             payload["name"] = (name or "")[:20]
-        ok, err = self._push(payload, "pov", budget_s=WEBHOOK_SYNC_BUDGET_S)
+        ok, err = self._sync_push(payload, "pov")
         if ok and self.pov_source is not None:
             self.pov_source.refresh()    # name (and stored url) live immediately
         return {"ok": True} if ok else {"error": err}
