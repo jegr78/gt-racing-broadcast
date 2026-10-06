@@ -181,7 +181,7 @@ ALLOW_REQUIRED = ("surface", "rule", "selector", "reason")
 
 
 def load_allowlist(path):
-    """Read the allowlist JSON; every entry must be an object with surface, rule, a non-empty reason and compilable selector/detail regexes."""
+    """Read the allowlist JSON; every entry must be an object with rule, a non-empty reason, and surface, selector and optional detail as compilable regexes."""
     with open(path, encoding="utf-8") as fh:
         entries = json.load(fh)
     if not isinstance(entries, list):
@@ -192,7 +192,7 @@ def load_allowlist(path):
         missing = [k for k in ALLOW_REQUIRED if not str(entry.get(k, "")).strip()]
         if missing:
             raise ValueError(f"{path}: entry {n} lacks {', '.join(missing)}")
-        for key in ("selector", "detail"):
+        for key in ("surface", "selector", "detail"):
             pattern = entry.get(key)
             if not pattern:
                 continue
@@ -205,7 +205,7 @@ def load_allowlist(path):
 
 def _allows(entry, finding, surface, viewport):
     """True when one allowlist entry matches one finding for the given surface and viewport."""
-    if entry["surface"] != surface or entry["rule"] != finding.rule:
+    if entry["rule"] != finding.rule or not re.fullmatch(entry["surface"], surface):
         return False
     if entry.get("viewport") and entry["viewport"] != viewport:
         return False

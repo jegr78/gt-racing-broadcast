@@ -191,6 +191,15 @@ def t_allowlist_selector_is_a_full_regex():
     assert len(kept) == 1, "the selector must match in full"
 
 
+def t_allowlist_surface_is_a_full_regex():
+    entries = [{"surface": "cc-.*", "rule": "contrast", "selector": "#ver", "reason": "r"}]
+    f = v.Finding("contrast", "#ver", "3.57:1 < 4.5:1")
+    assert v.apply_allowlist([f], entries, "cc-home", "desktop")[0] == []
+    assert v.apply_allowlist([f], entries, "cockpit", "desktop")[0] == [f], "other surfaces stay judged"
+    literal = [{"surface": "cockpit", "rule": "contrast", "selector": "#ver", "reason": "r"}]
+    assert v.apply_allowlist([f], literal, "cockpit-x", "desktop")[0] == [f], "the surface must match in full"
+
+
 def t_load_allowlist_requires_a_reason():
     import json, tempfile
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as fh:
@@ -233,6 +242,15 @@ def t_load_allowlist_rejects_an_invalid_regex():
     try:
         v.load_allowlist(fh.name)
         raise AssertionError("an invalid detail regex must be rejected")
+    except ValueError:
+        pass
+    finally:
+        os.unlink(fh.name)
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as fh:
+        json.dump([{"surface": "cc-(", "rule": "contrast", "selector": "#a", "reason": "r"}], fh)
+    try:
+        v.load_allowlist(fh.name)
+        raise AssertionError("an invalid surface regex must be rejected")
     except ValueError:
         pass
     finally:
