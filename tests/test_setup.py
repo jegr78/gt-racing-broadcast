@@ -2005,6 +2005,35 @@ def t_worker_thread_pushes_in_the_background():
     assert ctl.schedule_source.sync_state(2) == (None, None)
 
 
+def t_script_error_is_quiet_and_recovers():
+    answers = [(False, "webhook did not confirm: '{\"ok\": false, \"error\": \"Exception: Service Spreadsheets timed out\"}'"),
+               (True, None)]
+    ctl, s, calls = _async_ctl(post=lambda p: answers.pop(0))
+    ctl.schedule_set(2, url="https://www.youtube.com/watch?v=new")
+    ctl.drain_saves()
+    assert ctl.push_status != "failed" and s.sync_state(2)[0] == "local"
+    assert m.webhook_recovery_tick("http://push", [ctl], probe=lambda url: True) is True
+    assert s.sync_state(2) == ("saving", None)
+    ctl.drain_saves()
+    assert s.sync_state(2) == (None, None) and ctl.data()["unsynced"] == 0
+
+
+def t_recovery_leaves_local_saves_while_the_probe_fails():
+    ctl, s, calls = _async_ctl(post=lambda p: (False, "TimeoutError: slow"))
+    ctl.schedule_set(2, url="https://www.youtube.com/watch?v=new")
+    ctl.drain_saves()
+    assert m.webhook_recovery_tick("http://push", [ctl], probe=lambda url: False) is False
+    assert s.sync_state(2)[0] == "local"
+
+
+def t_probe_alone_does_not_clear_a_red_status_held_by_a_save():
+    ctl, s, calls = _async_ctl(post=lambda p: (False, m.WEBHOOK_OUTDATED_ERROR))
+    ctl.schedule_set(2, url="https://www.youtube.com/watch?v=new")
+    ctl.drain_saves()
+    m.webhook_recovery_tick("http://push", [ctl], probe=lambda url: True)
+    assert ctl.push_status == "failed"
+
+
 # setup-assets media fill: the template-driven scan.
 
 def t_setup_media_fill_uses_template_scan():

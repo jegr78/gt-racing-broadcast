@@ -2545,6 +2545,9 @@ class PushHealth:
     def _push_error_text(self, err):
         return err
 
+    def needs_recovery(self):
+        return self.push_status == "failed"
+
     def recover_push(self, probe):
         """Clear a TRANSIENT failure once probe() says the webhook answers.
         Returns True iff it cleared. An outdated script stays failed (a config
@@ -2569,7 +2572,7 @@ def webhook_recovery_tick(url, stores, probe=None):
     failure, then let each failed store clear. No failure, no webhook call.
     Returns True iff a store cleared."""
     probe = probe or probe_webhook
-    failed = [s for s in stores if s is not None and s.push_status == "failed"]
+    failed = [s for s in stores if s is not None and s.needs_recovery()]
     if not failed:
         return False
     answer = []
@@ -7276,6 +7279,25 @@ class SetupControl(PushHealth):
             return {"error": "nothing waiting for the sheet in that row"}
         self._ensure_worker()
         return {"ok": True}
+
+    def needs_recovery(self):
+        return PushHealth.needs_recovery(self) or self.saves.unsynced()[0] > 0
+
+    def recover_push(self, probe):
+        """#779 recovery plus the panel saves held in the relay: once the webhook
+        answers, every `local` save is pushed again. The status itself only turns
+        ok through a real push, and an outdated script stays red."""
+        cleared = False
+        if not self._push_held_by_outdated_save():
+            cleared = PushHealth.recover_push(self, probe)
+        if self.saves.unsynced()[0] and probe():
+            if self.saves.requeue_local():
+                self._ensure_worker()
+                cleared = True
+        return cleared
+
+    def _push_held_by_outdated_save(self):
+        return webhook_error_permanent(getattr(self, "_push_err", None))
 
     # -- setup fields (async-optimistic) -------------------------------------
     def set_field(self, key, value, now=None):
