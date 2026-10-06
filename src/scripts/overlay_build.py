@@ -368,12 +368,12 @@ def slot_scene(slot_id, solo):
 VISIBILITY_SLOTS = ("webcam", "tyres-capture")
 
 _CSS_COMMENT_RE = re.compile(r"/\*.*?(?:\*/|\Z)", re.S)    # an unclosed one runs to the end
-_DISPLAY_RE = re.compile(r"(?<![\w-])display\s*:\s*([^;!}]*)(!\s*important)?", re.I)
+_DISPLAY_RE = re.compile(r"(?<![\w-])display\s*:\s*([^;!}]+?)\s*(!\s*important)?\s*(?:;|$)", re.I)
 
 
 def _top_level_rules(css):
-    """(selectors, body) of each top-level rule, in one linear pass. Rules inside an
-    at-rule block (@media, @supports) are skipped: they apply only sometimes."""
+    """(selectors, body) of each top-level rule, in one linear pass. A rule nested in
+    an at-rule block (@media, @supports) is never top-level: it applies only sometimes."""
     rules, depth, sel_start, body_start, selectors = [], 0, 0, 0, ""
     for i, ch in enumerate(css):
         if ch == "{":
@@ -386,8 +386,7 @@ def _top_level_rules(css):
                 continue
             depth -= 1
             if depth == 0:
-                if not selectors.lstrip().startswith("@"):
-                    rules.append((selectors, css[body_start:i]))
+                rules.append((selectors, css[body_start:i]))
                 sel_start = i + 1
     return rules
 
