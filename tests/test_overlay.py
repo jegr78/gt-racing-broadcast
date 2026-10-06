@@ -1316,6 +1316,70 @@ def t_base_chat_clears_the_race_control_bar():
     overlap_y = min(chat["top"] + chat["height"], rc["top"] + rc["height"]) - max(chat["top"], rc["top"])
     assert overlap_x <= 0 or overlap_y <= 0, f"stream chat {chat} covers the race-control bar {rc}"
 
+
+# #766: the profile CSS decides whether a mapped OBS item is shown.
+
+def t_slot_visibility_follows_display_none():
+    vis = ob.slot_visibility("#webcam { display: none; }\n#tyres-capture { left: 7px; }")
+    assert vis == {"webcam": False, "tyres-capture": True}, vis
+
+
+def t_slot_visibility_shows_a_slot_the_css_never_mentions():
+    assert ob.slot_visibility("") == {"webcam": True, "tyres-capture": True}
+    assert ob.slot_visibility(None) == {"webcam": True, "tyres-capture": True}
+
+
+def t_slot_visibility_reads_selector_lists_and_the_cascade():
+    css = ("#streamer, #webcam, [id^=\"team\"] { display: none !important; }\n"
+           "#tyres-capture { display: none; }\n#tyres-capture { display: block; }")
+    vis = ob.slot_visibility(css)
+    assert vis == {"webcam": False, "tyres-capture": True}, vis
+
+
+def t_slot_visibility_reads_a_rule_after_a_comment():
+    # The builder and hand-written CSS put comments right before a rule; the rule
+    # must still count.
+    css = "/* no webcam at this league */\n#webcam { display: none; }"
+    assert ob.slot_visibility(css)["webcam"] is False
+
+
+def t_slot_visibility_important_beats_a_later_plain_rule():
+    css = "#webcam { display: none !important; }\n#webcam { display: block; }"
+    assert ob.slot_visibility(css)["webcam"] is False
+
+
+def t_slot_visibility_ignores_other_selectors_naming_the_slot():
+    # hud.html's own `#tele.tele-off > :not(#webcam)` rule, a descendant rule and a
+    # commented-out rule must not hide the webcam.
+    css = ("#tele.tele-off > :not(#webcam){display:none !important}\n"
+           "#webcam .inner { display: none; }\n/* #webcam { display: none; } */")
+    assert ob.slot_visibility(css)["webcam"] is True
+
+
+def t_slot_visibility_skips_rules_inside_at_blocks():
+    # A rule under @media or @supports applies only sometimes, so it never hides the
+    # OBS source for good.
+    css = "@media (max-width: 600px) { #webcam { display: none; } }\n#tyres-capture { left: 1px; }"
+    assert ob.slot_visibility(css) == {"webcam": True, "tyres-capture": True}
+
+
+def t_slot_visibility_stays_linear_on_hostile_css():
+    # An imported profile's hud.css runs on setup, relay start and event start; a
+    # quadratic parse there stalls them for minutes.
+    import time
+    n = 300_000
+    for css in ("a" * n, "#webcam{display: " + "a " * n, "/* " * n,
+                "#webcam{" + "display: " * (n // 9), "{" * n, "}" * n):
+        start = time.monotonic()
+        ob.slot_visibility(css)
+        took = time.monotonic() - start
+        assert took < 1.0, f"{took:.1f} s for {css[:20]!r}... ({len(css)} chars)"
+
+
+def t_slot_visibility_leaves_feed_pov_to_the_live_toggle():
+    # The director's /pov/toggle owns Feed POV; the CSS must never drive it.
+    assert "pov" not in ob.slot_visibility("#pov { display: none; }")
+
 if __name__ == "__main__":
     for n, fn in sorted(globals().items()):
         if n.startswith("t_") and callable(fn):

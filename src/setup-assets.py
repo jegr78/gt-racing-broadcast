@@ -317,6 +317,28 @@ def bake_overlay_boxes(collection, base_html, override_css=""):
     return applied
 
 
+def bake_overlay_visibility(collection, override_css=""):
+    """Show or hide each VISIBILITY_SLOTS item in its export scene as the profile
+    CSS says (#766): `display: none` on the slot hides it, anything else shows it.
+    Returns [(slot_id, source, scene, visible)] for the items it found."""
+    applied = []
+    for slot_id, visible in overlay_build.slot_visibility(override_css).items():
+        tgt = overlay_build.OVERLAY_SLOT_OBS_SOURCES[slot_id]
+        scene = tgt.get("export_scene")
+        found = False
+        for src in collection.get("sources", []):
+            if not (isinstance(src, dict) and src.get("id") == "scene"
+                    and src.get("name") == scene):
+                continue
+            for item in src.get("settings", {}).get("items") or []:
+                if isinstance(item, dict) and item.get("name") == tgt["source"]:
+                    item["visible"] = visible
+                    found = True
+        if found:
+            applied.append((slot_id, tgt["source"], scene, visible))
+    return applied
+
+
 def _has_box_item(collection, source_name, scene=None):
     """True when apply_box_transform would find an item to move."""
     def found(node):
@@ -532,7 +554,7 @@ def main():
     css_text = ""
     if a.overlay_css and os.path.isfile(a.overlay_css):
         try:
-            with open(a.overlay_css, encoding="utf-8") as fh:
+            with open(a.overlay_css, encoding="utf-8", errors="replace") as fh:
                 css_text = fh.read()
         except OSError as e:
             print(f"  NOTE: could not read overlay CSS {a.overlay_css}: {e}")
@@ -540,6 +562,9 @@ def main():
                                                           css_text):
         where = f" (scene '{scene}')" if scene else ""
         print(f"  {slot_id} box synced to OBS '{source}'{where}: {box}")
+    for slot_id, source, scene, visible in bake_overlay_visibility(localized, css_text):
+        print(f"  {slot_id}: OBS '{source}' (scene '{scene}') "
+              f"{'shown' if visible else 'hidden'} as the profile CSS says")
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     with open(a.out, "w", encoding="utf-8") as fh:
         json.dump(localized, fh, ensure_ascii=False, indent=4)

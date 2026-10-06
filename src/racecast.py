@@ -2484,7 +2484,7 @@ def relay_start(rest):
               f"re-run 'racecast relay start' to reconcile.")
     return None
 
-def _sync_pov_transform(set_transform=None, solo=None):
+def _sync_pov_transform(set_transform=None, solo=None, set_enabled=None):
     """Best-effort live sibling of the setup-time POV/webcam bake: push every
     mapped overlay slot's box position/size onto its OBS scene item (see
     overlay_build.OVERLAY_SLOT_OBS_SOURCES, 'pov' -> Stint/'Feed POV' (Program in
@@ -2496,7 +2496,11 @@ def _sync_pov_transform(set_transform=None, solo=None):
     overlay, no base rule for that slot, missing scene/source (e.g. no 'Solo
     Webcam' in an endurance collection). `set_transform` is a test seam
     (defaults to obs_ws.set_scene_item_transform); `solo` defaults to the active
-    profile's kind and picks each slot's scene (overlay_build.slot_scene)."""
+    profile's kind and picks each slot's scene (overlay_build.slot_scene). It also
+    hides each VISIBILITY_SLOTS item the profile CSS hides (#766), but never shows
+    one: the director may have hidden the webcam on air, and this runs on obs refresh
+    and backup restore too. Showing is the setup bake's job. `set_enabled` is that
+    seam (defaults to obs_ws.set_scene_item_enabled)."""
     import overlay_build
     if solo is None:
         solo = _profile_is_solo()
@@ -2510,7 +2514,7 @@ def _sync_pov_transform(set_transform=None, solo=None):
     css = os.path.join(od, "hud.css") if od else None
     if css and os.path.isfile(css):
         try:
-            with open(css, encoding="utf-8") as fh:
+            with open(css, encoding="utf-8", errors="replace") as fh:
                 override_css = fh.read()
         except OSError:
             override_css = ""
@@ -2528,6 +2532,17 @@ def _sync_pov_transform(set_transform=None, solo=None):
                       f"({box['left']},{box['top']} {box['width']}x{box['height']}).")
             elif not obs_ws.is_missing_item(note):
                 print(f"obs: {slot_id} box sync failed for '{tgt['source']}'. {note}")
+        if set_enabled is None:
+            set_enabled = obs_ws.set_scene_item_enabled
+        for slot_id, visible in overlay_build.slot_visibility(override_css).items():
+            if visible:
+                continue
+            source = overlay_build.OVERLAY_SLOT_OBS_SOURCES[slot_id]["source"]
+            ok, note = set_enabled(overlay_build.slot_scene(slot_id, solo), source, False)
+            if ok:
+                print(f"obs: '{source}' hidden as the profile CSS says.")
+            elif not obs_ws.is_missing_item(note):
+                print(f"obs: could not hide '{source}'. {note}")
     except Exception as exc:  # noqa: BLE001  best-effort contract
         print(f"obs: box sync skipped ({exc}).")
         return
