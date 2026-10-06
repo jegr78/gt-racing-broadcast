@@ -14,18 +14,23 @@ import e2e_checks as E
 import console_auth
 
 
-def _csv_server(csv_text):
-    body = csv_text.encode()
+def _csv_server(files):
+    """Serve each {path: csv_text} entry over loopback HTTP; returns (server, base_url)."""
+    bodies = {p: t.encode() for p, t in files.items()}
 
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a): pass
         def do_GET(self):
+            body = bodies.get(self.path.split("?", 1)[0])
+            if body is None:
+                self.send_response(404); self.end_headers()
+                return
             self.send_response(200)
             self.send_header("Content-Type", "text/csv"); self.end_headers()
             self.wfile.write(body)
     srv = ThreadingHTTPServer(("127.0.0.1", E.free_port()), H)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
-    return srv, f"http://127.0.0.1:{srv.server_address[1]}/schedule.csv"
+    return srv, f"http://127.0.0.1:{srv.server_address[1]}"
 
 
 def _spawn(argv, env, log, cwd=ROOT):
@@ -108,6 +113,9 @@ SCHEDULE_ROWS = [
     ("https://www.youtube.com/watch?v=aaaaaaaaaaa", "Alice", "Stint 1"),
     ("https://www.twitch.tv/bobcaster", "Bob", "Stint 2"),
 ]
+
+# Rita is crew only, so her token carries race_control and nothing else.
+CREW_ROWS = [("Rita", "", "", "", "x")]
 
 
 # The rendered checks load the cockpit page in a real browser and assert its state
@@ -408,6 +416,7 @@ def run_synthetic(args):
         secret = "e2e-secret-0123456789abcdef"
         key = console_auth.streamer_key("Alice")
         token = console_auth.mint_token(secret, key, version=1)
+        rc_token = console_auth.mint_token(secret, console_auth.streamer_key("Rita"), version=1)
 
         # The CLI always injects --cookies <runtime>/yt-cookies.txt and the relay
         # hard-exits if that path is missing. Synthetic runs have no real YouTube
@@ -444,9 +453,12 @@ def run_synthetic(args):
                 None, sys.executable, os.path.join(ROOT, "src", "racecast.py"))
             run_cwd = ROOT
 
-        # 2. schedule CSV server
-        csv_srv, csv_url = _csv_server(E.build_schedule_csv(SCHEDULE_ROWS))
+        # 2. schedule + crew CSV server
+        csv_srv, csv_base = _csv_server({
+            "/schedule.csv": E.build_schedule_csv(SCHEDULE_ROWS),
+            "/crew.csv": E.build_crew_csv(CREW_ROWS)})
         servers.append(csv_srv)
+        csv_url, crew_url = csv_base + "/schedule.csv", csv_base + "/crew.csv"
 
         # 3. cockpit relay: a secret in the env makes /cockpit/* served and token-gated
         relay_port = E.free_port()
@@ -462,6 +474,7 @@ def run_synthetic(args):
         relay_log = os.path.join(tmp, "relay.log")
         relay = _spawn(launcher + ["relay", "run", "--bind", "127.0.0.1",
                         "--http-port", str(relay_port), "--sheet-csv-url", csv_url,
+                        "--crew-csv-url", crew_url,
                         "--cookies", dummy_cookies, "--runtime-dir", relay_runtime],
                        env, relay_log, cwd=run_cwd)
         procs.append(relay)
@@ -524,7 +537,8 @@ def run_synthetic(args):
                     token=token, streamer_key=key, own_stint="Stint 1",
                     expect={"schedule_len": 2, "live_stint": 1},
                     fanout_feed_port=fanout_feed_a,
-                    fanout_relay_url=f"http://127.0.0.1:{fanout_http}")
+                    fanout_relay_url=f"http://127.0.0.1:{fanout_http}",
+                    rc_token=rc_token)
         results, code = E.run_checks(E.SYNTHETIC_CHECKS, ctx)
         if args.playwright:
             # Append the rendered-check results after the API results. A
