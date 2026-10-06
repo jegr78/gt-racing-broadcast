@@ -137,14 +137,20 @@ The panel's **sheet controls** write back through one Apps Script webhook
 (`RACECAST_SHEET_PUSH_URL`, injected by the CLI from the active profile's
 `SHEET_PUSH_URL`, shared with the race timer, wiki: Sheet-Webhook):
 Setup fields (Stint label/Streamer/Session/Race Control) are async-optimistic
-(`HudSource` override now, sheet poll confirms, 60 s expiry), Schedule/POV URL
-writes are synchronous; URL changes never auto-reload a feed. Setup "Stint" =
+(`HudSource` override now, sheet poll confirms, 60 s expiry). Schedule/Qualifying/POV
+saves are async too (spec 2026-10-06-async-panel-sheet-saves): `pending_saves.PendingSaves`
+holds one entry per (target, row), `ScheduleSource.attach_pending` re-applies it after
+every `refresh()` (poller, RELOAD, NEXT, mode switch) until the sheet shows it (or 120 s
+after the confirm), and one `sheet-save` worker pushes in order (45 s x 3). A failed save
+stays `local` and quiet; the recovery tick re-queues it, and only an outdated script turns
+the status red. URL changes never auto-reload a feed. Setup "Stint" =
 HUD display label, NOT the feed stint index. Every push retries within a bounded budget
 (`push_webhook_retrying`: 15 s per attempt and 40 s for background pushes; the
-synchronous URL/crew writes get one 30 s attempt, sent one at a time through
-`SetupControl._sync_push` (#780); no retry for a crew delete) and logs each failed attempt as a
+synchronous Crew writes get one 30 s attempt through `SetupControl._sync_push` (#780),
+which shares its lock with the save worker; no retry for a crew delete) and logs each failed attempt as a
 `sheet push` WARNING with the URL masked (#767). A failed push stays `failed` only while the webhook is down: `run_webhook_recovery` probes it every 30 s with a read (`get_stream_key` for an unknown ref, never a write) and clears a transient failure of `SetupControl` and `TimerStore` once the script answers; an outdated script stays red, and a failure recorded during the probe wins (`PushHealth`). `SetupControl` + endpoints
-`/setup/*`, `/schedule/*`, `/pov/set` (POST). Tests: `tests/test_setup.py`.
+`/setup/*`, `/schedule/*`, `/qualifying/*`, `/pov/set`, `/pov/sync` (POST; the `*/sync`
+routes are SYNC NOW). Tests: `tests/test_setup.py`, `tests/test_pending_saves.py`.
 
 The relay also hosts a **crew chat** (`GET /chat/data`, `POST /chat/send`,
 `GET /chat/reload`): an in-memory ring buffer (400 messages) persisted to

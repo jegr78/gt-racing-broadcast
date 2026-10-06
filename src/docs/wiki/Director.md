@@ -241,7 +241,7 @@ while the condition holds and disappear on their own when it is resolved:
 | Banner | Meaning | Who acts |
 |---|---|---|
 | **RELAY UNREACHABLE** (red) | the panel cannot reach the producer's relay: buttons in FEEDS/TIMER will not work | tell the producer (`racecast status` on their side names the problem) |
-| **SHEET SYNC FAILED** (red) | a write to the shared sheet did not go through. The relay then checks the sheet webhook every 30 s and clears the banner as soon as it answers again, so a banner that stays means the webhook is still unreachable (or its script is outdated). The failed change itself is not written by that check. | re-try the change once the banner is gone; if it stays, tell the producer (the relay log names each failed `sheet push` and logs `sheet sync recovered` when it clears) |
+| **SHEET SYNC FAILED** (red) | the sheet webhook's Apps Script is outdated, or a HUD field / team write did not reach the sheet (that value falls back to the sheet after 60 s). A Schedule, Qualifying or POV save never raises it: such a save is held in the relay instead (see [Schedule section](#director-panel-schedule-section)). The relay checks the webhook every 30 s and clears the banner as soon as it answers again. | re-try the HUD change once the banner is gone; if it stays, tell the producer (the relay log names each failed `sheet push` and logs `sheet sync recovered` when it clears) |
 | **TIMER SHEET SYNC FAILED** (red) | the race timer's state is not reaching the sheet, a producer handover would not pick up the correct remaining time | tell the producer; details in [Race Timer](Race-Timer) |
 | **COOKIES N H OLD** (amber) | the producer's YouTube cookies are stale, the **next handover may fail** | tell the producer: `racecast cookies firefox` on the producer machine |
 
@@ -334,6 +334,21 @@ automatically**. A new stream URL takes effect at the next **RELOAD A/B** /
 **NEXT** for that feed (POV: **POV RELOAD**). Editing the Schedule tab in the
 sheet directly has the same effect and is the fallback when you don't have the
 panel open.
+
+**SAVE answers at once.** The relay uses the saved value immediately (RELOAD,
+NEXT and the mode switch pick it up) and writes it to the sheet in the
+background, so a slow Google Sheet never blocks the panel:
+
+| Row shows | Meaning |
+|---|---|
+| **SYNCING…** (amber button) | the relay is writing the value to the sheet |
+| **SAVED ✓** | the sheet has the value |
+| **IN RELAY** (amber badge) + **SYNC NOW** | the sheet has not got the value yet; the relay keeps using it and retries automatically whenever the webhook answers again. **SYNC NOW** retries at once; the badge's tooltip shows the last error |
+
+The **HUD** line counts rows that are still **IN RELAY**. Such a value exists
+only in this relay: a producer taking over on another machine reads the sheet,
+so the counter shows whether the sheet is complete. A relay restart drops values
+that were still **IN RELAY** (the relay log names how many).
 
 **Handover auto-fills the HUD.** When a stint goes on air via **NEXT** (or a
 **FEEDS → STINT** takeover), the relay sets the HUD's **Streamer** and **Stint
