@@ -45,6 +45,24 @@
     return parts.join(" > ");
   };
 
+  // An ancestor with non-visible overflow hides whatever lies outside its box, e.g. content scrolled out of a panel.
+  const clippedAway = (el, r) => {
+    let left = r.left, top = r.top, right = r.right, bottom = r.bottom;
+    // Body and html overflow apply to the viewport, and a fixed box escapes the clipping of its ancestors.
+    let fixed = getComputedStyle(el).position === "fixed";
+    for (let p = el.parentElement; p && p !== document.body && !fixed; p = p.parentElement) {
+      const ps = getComputedStyle(p);
+      if (ps.overflowX !== "visible" || ps.overflowY !== "visible") {
+        const pr = p.getBoundingClientRect();
+        if (ps.overflowX !== "visible") { left = Math.max(left, pr.left); right = Math.min(right, pr.right); }
+        if (ps.overflowY !== "visible") { top = Math.max(top, pr.top); bottom = Math.min(bottom, pr.bottom); }
+        if (right - left <= 0 || bottom - top <= 0) return true;
+      }
+      fixed = ps.position === "fixed";
+    }
+    return false;
+  };
+
   const ownText = el => [...el.childNodes].filter(n => n.nodeType === 3)
     .map(n => n.textContent).join("").trim().slice(0, 60);
 
@@ -54,6 +72,8 @@
   document.body.appendChild(frame);
   const fd = frame.contentDocument;
   fd.open(); fd.write("<!doctype html><input><select></select><textarea></textarea><button>x</button>"); fd.close();
+  // A page with color-scheme: dark gets dark UA controls, so the baseline must use the same scheme.
+  fd.documentElement.style.colorScheme = getComputedStyle(doc).colorScheme;
   const ua = {};
   for (const tag of ["input", "select", "textarea", "button"]) {
     ua[tag] = frame.contentWindow.getComputedStyle(fd.querySelector(tag)).backgroundColor;
@@ -68,6 +88,7 @@
     const r = el.getBoundingClientRect();
     if (r.width <= 0 || r.height <= 0) continue;
     if (!el.checkVisibility({opacityProperty: true, visibilityProperty: true})) continue;
+    if (clippedAway(el, r)) continue;
     const x = r.left + scrollX, y = r.top + scrollY;
     if (x + r.width <= 0 || y + r.height <= 0 || x >= scrollWidth) continue;
     const cs = getComputedStyle(el);

@@ -415,7 +415,9 @@ def _visual_one(browser, surface, viewport, urls, outdir, probe, allow, used):
 
     def on_console(msg):
         if msg.type == "error":
-            errors.append(f"console.error: {msg.text}")
+            # A failed resource load names no URL in its text, only in its location.
+            url = (msg.location or {}).get("url")
+            errors.append(f"console.error: {msg.text}" + (f" ({url})" if url else ""))
 
     page = browser.new_page(viewport={"width": w, "height": h})
     page.on("pageerror", lambda exc: errors.append(f"pageerror: {exc}"))
@@ -432,8 +434,11 @@ def _visual_one(browser, surface, viewport, urls, outdir, probe, allow, used):
         return V.SurfaceResult(surface.name, viewport, None, [], 0, f"{type(exc).__name__}: {exc}")
     finally:
         page.close()
-    findings = V.evaluate(facts, errors)
-    kept, hit = V.apply_allowlist(findings, allow, surface.name, viewport)
+    try:
+        findings = V.evaluate(facts, errors)
+        kept, hit = V.apply_allowlist(findings, allow, surface.name, viewport)
+    except Exception as exc:  # noqa: BLE001  facts the rules cannot read fail only this surface
+        return V.SurfaceResult(surface.name, viewport, shot, [], 0, f"{type(exc).__name__}: {exc}")
     used.update(hit)
     return V.SurfaceResult(surface.name, viewport, shot, kept, len(findings) - len(kept), None)
 
