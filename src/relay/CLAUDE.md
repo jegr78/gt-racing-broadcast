@@ -142,7 +142,7 @@ writes are synchronous; URL changes never auto-reload a feed. Setup "Stint" =
 HUD display label, NOT the feed stint index. Every push retries within a bounded budget
 (`push_webhook_retrying`: 15 s per attempt, 40 s for background pushes, 15 s for the
 synchronous URL/crew writes, no retry for a crew delete) and logs each failed attempt as a
-`sheet push` WARNING with the URL masked (#767). `SetupControl` + endpoints
+`sheet push` WARNING with the URL masked (#767). A failed push stays `failed` only while the webhook is down: `run_webhook_recovery` probes it every 30 s with a read (`get_stream_key` for an unknown ref, never a write) and clears a transient failure of `SetupControl` and `TimerStore` once the script answers; an outdated script stays red, and a failure recorded during the probe wins (`PushHealth`). `SetupControl` + endpoints
 `/setup/*`, `/schedule/*`, `/pov/set` (POST). Tests: `tests/test_setup.py`.
 
 The relay also hosts a **crew chat** (`GET /chat/data`, `POST /chat/send`,
