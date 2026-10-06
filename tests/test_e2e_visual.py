@@ -269,6 +269,7 @@ def t_surfaces_cover_all_four_uis():
         assert want in names, want
     assert {f"cc-{view}" for view in v.CC_VIEWS} <= names
     assert len(v.CC_VIEWS) == 13, v.CC_VIEWS
+    assert "cc-quit-modal" in names, "the primary buttons only live in modals, so one modal must be a surface"
     phone = {s.name for s in v.SURFACES if "phone" in s.viewports}
     assert phone == {"cockpit", "race-control"}, phone
     assert len({s.name for s in v.SURFACES}) == len(v.SURFACES), "surface names must be unique"
