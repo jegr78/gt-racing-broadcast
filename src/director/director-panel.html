@@ -211,6 +211,10 @@
     min-width:150px;outline:none}
   .fld select:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(58,160,255,.18)}
   .fld select.pending{border-color:var(--amber);box-shadow:0 0 0 3px var(--amber-glow)}
+  /* Panel saves held in the relay (spec 2026-10-06): amber, never red */
+  .syncbadge{display:none;margin-left:6px;padding:0 5px;border:1px solid var(--amber);
+             border-radius:3px;color:var(--amber);font-size:10px;letter-spacing:.06em;cursor:help}
+  .syncbadge.on{display:inline-block}
   .fld select.staged{border-color:var(--blue);box-shadow:0 0 0 3px rgba(58,160,255,.18)}
   .fld select:disabled{opacity:.45}
   /* HUD dropdown rows fill the full card width (P1/P2/P3 stretch; Apply stays auto) */
@@ -254,10 +258,12 @@
   .urls select:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(58,160,255,.18)}
   .urls select:disabled{opacity:.45}
   .urls td.act{width:130px;white-space:nowrap;text-align:right}
-  .urls .save,.urls .clear{display:inline-block;width:auto;font-family:var(--mono);font-size:9px;
+  .urls .save,.urls .clear,.urls .syncnow{display:inline-block;width:auto;font-family:var(--mono);font-size:9px;
     padding:4px 7px;margin:0 0 0 4px;border-radius:6px;border:1px solid var(--edge);background:#141a21;cursor:pointer}
   .urls .save{border-color:var(--live);color:#9fe9bd}
   .urls .save.ok{border-color:var(--live);color:var(--live)}
+  .urls .save.syncing,.urls .syncnow{border-color:var(--amber);color:var(--amber)}
+  .urls .syncnow[hidden]{display:none}
   .urls .clear{border-color:var(--air);color:#ffb0b0}
   .urls .clear:hover{border-color:var(--air);color:var(--air)}
   .urls .add{display:inline-block;width:auto;margin-top:8px;font-size:10px;padding:6px 10px;border-radius:7px;
@@ -877,11 +883,11 @@
             <div id="qualSched" hidden>
               <table><tbody>
                 <tr id="qualRow">
-                  <td class="rn">Q<span class="livebadge" id="qualLive"></span></td>
+                  <td class="rn">Q<span class="livebadge" id="qualLive"></span><span class="syncbadge" id="qualSync">IN RELAY</span></td>
                   <td style="width:22%"><select class="nm" id="qualNm" title="Streamer (Configuration vocab)"></select></td>
                   <td style="width:18%"><select class="st" id="qualSt" title="Stint label (Configuration vocab)"></select></td>
                   <td><input class="u" id="qualUrl" placeholder="youtube.com/watch?v=… · twitch.tv/<channel> · UC…"></td>
-                  <td class="act"><button class="save" id="qualSave">SAVE</button><button class="clear" id="qualClear">CLEAR</button></td>
+                  <td class="act"><button class="save" id="qualSave">SAVE</button><button class="syncnow" id="qualSyncNow" hidden>SYNC NOW</button><button class="clear" id="qualClear">CLEAR</button></td>
                 </tr>
               </tbody></table>
               <div class="hint" id="qualInfo">Qualifying: one stream, served on <b>Feed A</b>.
@@ -892,10 +898,10 @@
 
             <!-- POV, shown in both modes: it is a separate, mode-independent feed -->
             <table><tbody>
-              <tr><td class="rn">POV</td>
+              <tr><td class="rn">POV<span class="syncbadge" id="povSync">IN RELAY</span></td>
                   <td><input id="povName" maxlength="20" placeholder="name (max 20)"></td>
                   <td><input id="povUrl" placeholder="youtube.com/watch?v=… · twitch.tv/<channel> · UC…"></td>
-                  <td class="act"><button class="save" id="povSave">SAVE</button></td></tr>
+                  <td class="act"><button class="save" id="povSave">SAVE</button><button class="syncnow" id="povSyncNow" hidden>SYNC NOW</button></td></tr>
             </tbody></table>
             <div class="hint">POV. A full watch URL (<code>youtube.com/watch?v=…</code> or
               <code>twitch.tv/&lt;channel&gt;</code>). The POV URL applies on <b>POV RELOAD</b>.
@@ -2572,11 +2578,13 @@ async function setupPoll(){
   if (d.push === "failed")
     setBanner("sync", "red", "SHEET SYNC FAILED — panel HUD/URL changes are not reaching the sheet");
   else clearBanner("sync");
+  const unsynced = d.unsynced ? ` · ${d.unsynced} change${d.unsynced === 1 ? "" : "s"} not in the sheet yet, retried automatically` +
+                                (d.unsynced_error ? ` (${d.unsynced_error})` : "") : "";
   $("#setupInfo").textContent = "HUD: " +
       (d.push === "ok" ? "sheet sync OK"
      : ro ? "read-only — set RACECAST_SHEET_PUSH_URL in .env (wiki: Sheet-Webhook)"
      : d.push === "failed" ? "SHEET SYNC FAILED — " + (d.last_error || "see relay log")
-     : "sheet sync not yet attempted");
+     : "sheet sync not yet attempted") + unsynced;
 }
 
 /* URLs section: Schedule rows and POV. Sheet writes, no reloads. */
@@ -2585,6 +2593,39 @@ function rowBusy(tr){
   return tr.dataset.dirty ||
          tr.contains(document.activeElement) ||
          Date.now() - Number(tr.dataset.saved||0) < SAVE_GUARD_MS;
+}
+// Sheet state of a saved row (spec 2026-10-06): "saving" while the relay pushes it,
+// "local" while it lives only in the relay. Never red: the relay already uses it.
+const syncSeen = {};   // key -> last sync state, for one log line per transition
+function applySync(key, label, sync, err, btn, badge, syncBtn){
+  const prev = syncSeen[key];
+  syncSeen[key] = sync || "";
+  if (badge){
+    badge.classList.toggle("on", sync === "local");
+    badge.title = sync === "local"
+      ? "Not in the sheet yet, retried automatically." + (err ? " Last error: " + err : "")
+      : "";
+  }
+  if (syncBtn) syncBtn.hidden = sync !== "local";
+  if (btn && !btn.disabled){
+    if (sync === "saving"){ btn.textContent = "SYNCING…"; btn.classList.add("syncing"); btn.classList.remove("ok"); }
+    else if (btn.classList.contains("syncing")){
+      btn.classList.remove("syncing");
+      btn.textContent = sync === "local" ? "SAVE" : "SAVED ✓";
+      if (!sync){ btn.classList.add("ok");
+        setTimeout(()=>{ if (btn.textContent === "SAVED ✓"){ btn.textContent = "SAVE"; btn.classList.remove("ok"); } }, 4000); }
+    }
+  }
+  if (sync === "local" && prev !== "local") log(label + ": sheet write delayed, kept in relay");
+  if (!sync && prev === "local") log(label + " now in sheet");
+}
+async function syncNow(path, body, label){
+  try{
+    const r = await fetch(path, {method:"POST", cache:"no-store",
+      headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)});
+    const d = await r.json();
+    if (d.error) toast(label + ": " + d.error);
+  }catch(e){ toast(label + ": relay unreachable"); }
 }
 // Fill a Schedule-editor dropdown from a vocab list, preserving an open menu and a
 // just-picked value. cur=null leaves the current selection untouched.
@@ -2602,11 +2643,11 @@ function schedRow(i){
   let tr = document.querySelector(`#schedBody tr[data-row="${i}"]`);
   if (tr) return tr;
   tr = document.createElement("tr"); tr.dataset.row = i;
-  tr.innerHTML = `<td class="rn">${i}<span class="livebadge"></span></td>
+  tr.innerHTML = `<td class="rn">${i}<span class="livebadge"></span><span class="syncbadge">IN RELAY</span></td>
     <td style="width:22%"><select class="nm" title="Streamer (Configuration vocab)"></select></td>
     <td style="width:18%"><select class="st" title="Stint label (Configuration vocab)"></select></td>
     <td><input class="u" placeholder="youtube.com/watch?v=… · twitch.tv/<channel> · UC…"></td>
-    <td class="act"><button class="save">SAVE</button><button class="clear">CLEAR URL</button></td>`;
+    <td class="act"><button class="save">SAVE</button><button class="syncnow" hidden>SYNC NOW</button><button class="clear">CLEAR URL</button></td>`;
   fillSchedSelect(tr.querySelector(".nm"), schedOptions.streamer, "");
   fillSchedSelect(tr.querySelector(".st"), schedOptions.stint, "");
   tr.querySelectorAll("input,select").forEach(inp=>{
@@ -2614,6 +2655,8 @@ function schedRow(i){
     inp.addEventListener("change", ()=>tr.dataset.dirty = 1);
   });
   tr.querySelector(".save").addEventListener("click", ()=>schedSave(tr, i));
+  tr.querySelector(".syncnow").addEventListener("click", ()=>
+    syncNow("/schedule/sync", {row: Number(tr.dataset.sheetRow || i)}, "Schedule row " + i));
   tr.querySelector(".clear").addEventListener("click", ()=>{
     // Clear the URL only and keep Streamer and Stint, so the slot survives. Emptying
     // all three cells makes the relay's CSV parser drop the blank row, which collapses
@@ -2643,17 +2686,14 @@ async function schedSave(tr, row){
                             name: tr.querySelector(".nm").value.trim(),
                             stint: tr.querySelector(".st").value.trim()})});
     const d = await r.json();
-    if (d.error){ log("Schedule row " + row + ": " + d.error, "err"); toast("Schedule row " + row + ": " + d.error); btn.textContent = "RETRY"; return; }
+    if (d.error){ log("Schedule row " + row + ": " + d.error, "err"); toast("Schedule row " + row + ": " + d.error); btn.textContent = "SAVE"; return; }
     delete tr.dataset.dirty; tr.dataset.saved = Date.now();
-    btn.textContent = "SAVED ✓"; btn.classList.add("ok");
+    btn.textContent = "SYNCING…"; btn.classList.add("syncing");
     const live = tr.querySelector(".livebadge").textContent;
     log("Schedule row " + row + " saved" +
-        (live ? ` — feed ${live} picks it up on RELOAD ${live} / NEXT` : ""));
+        (live ? `: feed ${live} picks it up on RELOAD ${live} / NEXT` : ""));
   }catch(e){ log("Schedule save failed: " + e, "err"); toast("Schedule row " + row + " save failed"); btn.textContent = "RETRY"; }
-  finally{
-    btn.disabled = false;
-    setTimeout(()=>{ if (btn.textContent === "SAVED ✓"){ btn.textContent = "SAVE"; btn.classList.remove("ok"); } }, 4000);
-  }
+  finally{ btn.disabled = false; }
 }
 $("#schedAdd").addEventListener("click", ()=>{
   // Take the next physical sheet row from the max of the existing sheetRow stamps, so
@@ -2677,17 +2717,17 @@ $("#povSave").addEventListener("click", async ()=>{
       body: JSON.stringify({url: $("#povUrl").value.trim(),
                             name: $("#povName").value.trim()})});
     const d = await r.json();
-    if (d.error){ log("POV URL: " + d.error, "err"); toast("POV URL: " + d.error); btn.textContent = "RETRY"; return; }
+    if (d.error){ log("POV URL: " + d.error, "err"); toast("POV URL: " + d.error); btn.textContent = "SAVE"; return; }
     delete $("#povUrl").dataset.dirty; $("#povUrl").dataset.saved = Date.now();
     delete $("#povName").dataset.dirty; $("#povName").dataset.saved = Date.now();
-    btn.textContent = "SAVED ✓"; btn.classList.add("ok");
-    log("POV name + URL saved — name applies now, URL on POV RELOAD.");
+    btn.textContent = "SYNCING…"; btn.classList.add("syncing");
+    log("POV name + URL saved: name applies now, URL on POV RELOAD.");
   }catch(e){ log("POV save failed: " + e, "err"); toast("POV URL save failed"); btn.textContent = "RETRY"; }
-  finally{
-    btn.disabled = false;
-    setTimeout(()=>{ if (btn.textContent === "SAVED ✓"){ btn.textContent = "SAVE"; btn.classList.remove("ok"); } }, 4000);
-  }
+  finally{ btn.disabled = false; }
 });
+$("#povSyncNow").addEventListener("click", ()=>syncNow("/pov/sync", {}, "POV"));
+$("#qualSyncNow").addEventListener("click", ()=>
+  syncNow("/qualifying/sync", {row: Number($("#qualRow").dataset.sheetRow || 2)}, "Qualifying row"));
 $("#povUrl").addEventListener("input", ()=>$("#povUrl").dataset.dirty = 1);
 $("#povName").addEventListener("input", ()=>$("#povName").dataset.dirty = 1);
 
@@ -2703,6 +2743,8 @@ async function schedPoll(){
       // Stamp the physical sheet row so schedSave and schedAdd use it.
       tr.dataset.sheetRow = row.sheetRow;
       tr.querySelector(".livebadge").textContent = row.live || "";
+      applySync("sched:" + row.sheetRow, "Schedule row " + row.row, row.sync, row.sync_error,
+                tr.querySelector(".save"), tr.querySelector(".syncbadge"), tr.querySelector(".syncnow"));
       const busy = rowBusy(tr);
       // Keep the dropdown options fresh always, but adopt the sheet's saved selection
       // only when the row is not being edited. cur=null leaves it alone.
@@ -2715,6 +2757,8 @@ async function schedPoll(){
   try{
     const r = await fetch("/status", {cache:"no-store"});
     const d = await r.json();
+    if (d.pov) applySync("pov", "POV", d.pov.sync, d.pov.sync_error,
+                         $("#povSave"), $("#povSync"), $("#povSyncNow"));
     const inp = $("#povUrl");
     if (d.pov && !inp.dataset.dirty && inp !== document.activeElement &&
         Date.now() - Number(inp.dataset.saved||0) > SAVE_GUARD_MS)
@@ -2775,15 +2819,12 @@ async function qualSave(){
       body: JSON.stringify({row: sheetRow, url: $("#qualUrl").value.trim(),
                             name: $("#qualNm").value.trim(), stint: $("#qualSt").value.trim()})});
     const d = await r.json();
-    if (d.error){ log("Qualifying: " + d.error, "err"); toast("Qualifying: " + d.error); btn.textContent = "RETRY"; return; }
+    if (d.error){ log("Qualifying: " + d.error, "err"); toast("Qualifying: " + d.error); btn.textContent = "SAVE"; return; }
     delete $("#qualRow").dataset.dirty; $("#qualRow").dataset.saved = Date.now();
-    btn.textContent = "SAVED ✓"; btn.classList.add("ok");
-    log("Qualifying row saved — feed picks it up on RELOAD A / NEXT (or on QUALIFYING MODE).");
+    btn.textContent = "SYNCING…"; btn.classList.add("syncing");
+    log("Qualifying row saved: feed picks it up on RELOAD A / NEXT (or on QUALIFYING MODE).");
   }catch(e){ log("Qualifying save failed: " + e, "err"); toast("Qualifying save failed"); btn.textContent = "RETRY"; }
-  finally{
-    btn.disabled = false;
-    setTimeout(()=>{ if (btn.textContent === "SAVED ✓"){ btn.textContent = "SAVE"; btn.classList.remove("ok"); } }, 4000);
-  }
+  finally{ btn.disabled = false; }
 }
 $("#qualSave").addEventListener("click", qualSave);
 $("#qualClear").addEventListener("click", ()=>{
@@ -2822,6 +2863,8 @@ async function qualPoll(){
     }
     const row = (d.rows && d.rows[0]) || null;
     $("#qualLive").textContent = row && row.live ? row.live : "";
+    applySync("qual", "Qualifying row", row && row.sync, row && row.sync_error,
+              $("#qualSave"), $("#qualSync"), $("#qualSyncNow"));
     const busy = qualRowBusy();
     fillSchedSelect($("#qualNm"), schedOptions.streamer, busy ? null : (row ? (row.name||"") : ""));
     fillSchedSelect($("#qualSt"), schedOptions.stint, busy ? null : (row ? (row.stint||"") : ""));
