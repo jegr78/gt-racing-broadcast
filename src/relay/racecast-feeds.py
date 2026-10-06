@@ -2498,6 +2498,98 @@ def push_webhook_retrying(url, payload, expected_action=None, *,
     return False, err, body
 
 
+# Recovery of a failed sheet sync. A failed push used to stay "failed" until the
+# next successful write, so one Apps Script blip left the panel's red banner up
+# for good once nobody wrote any more. After a transient failure the relay now
+# probes the webhook with a read and clears the status when the script answers.
+WEBHOOK_RECOVERY_INTERVAL_S = 30.0
+# A ref no league uses: get_stream_key only reads the Channel tab, so the probe
+# never writes, and the unknown-ref answer never carries a key.
+WEBHOOK_PROBE_REF = "__racecast_probe__"
+
+
+def probe_webhook(url, *, post=None, timeout=WEBHOOK_RETRY_TIMEOUT_S):
+    """True iff the Apps Script answers with a JSON object. Any object counts (an
+    unknown-ref or unknown-action error is still the script running); a Google
+    HTML error page, a timeout or a network error does not. The body is dropped
+    unread beyond the JSON check."""
+    if not url:
+        return False
+    post = post or post_webhook
+    try:
+        body = post(url, {"action": "get_stream_key", "ref": WEBHOOK_PROBE_REF},
+                    timeout=timeout)
+        d = json.loads((body or b"").decode("utf-8", "replace"))
+    except Exception:                    # noqa: BLE001  unreachable = not recovered
+        return False
+    return isinstance(d, dict)
+
+
+class PushHealth:
+    """The push status a store shows the panel, plus its recovery. Mixed into
+    SetupControl and TimerStore; each keeps its own push_status/last_error."""
+
+    def _mark_push_failed(self, err):
+        self._push_fail_seq = getattr(self, "_push_fail_seq", 0) + 1
+        self._push_err = err
+        self.push_status = "failed"
+        self.last_error = self._push_error_text(err)
+
+    def _push_error_text(self, err):
+        return err
+
+    def recover_push(self, probe):
+        """Clear a TRANSIENT failure once probe() says the webhook answers.
+        Returns True iff it cleared. An outdated script stays failed (a config
+        error a probe cannot fix), and a failure recorded while the probe ran
+        wins over the probe."""
+        err = getattr(self, "_push_err", None)
+        if self.push_status != "failed" or webhook_error_permanent(err):
+            return False
+        seq = getattr(self, "_push_fail_seq", 0)
+        if not probe():
+            return False
+        if getattr(self, "_push_fail_seq", 0) != seq or self.push_status != "failed":
+            return False
+        self.push_status = "ok"
+        if self.last_error == self._push_error_text(err):
+            self.last_error = None
+        return True
+
+
+def webhook_recovery_tick(url, stores, probe=None):
+    """One recovery pass: probe the webhook once if any store shows a transient
+    failure, then let each failed store clear. No failure, no webhook call.
+    Returns True iff a store cleared."""
+    probe = probe or probe_webhook
+    failed = [s for s in stores if s is not None and s.push_status == "failed"]
+    if not failed:
+        return False
+    answer = []
+
+    def once():
+        if not answer:
+            answer.append(bool(probe(url)))
+        return answer[0]
+
+    cleared = [s.recover_push(once) for s in failed]
+    if any(cleared):
+        LOG.info("sheet sync recovered: the webhook answers again")
+    return any(cleared)
+
+
+def run_webhook_recovery(url, stores, interval=WEBHOOK_RECOVERY_INTERVAL_S,
+                         sleep=None):
+    """Daemon loop around webhook_recovery_tick. Never raises."""
+    sleep = sleep or time.sleep
+    while True:
+        sleep(interval)
+        try:
+            webhook_recovery_tick(url, stores)
+        except Exception:                # noqa: BLE001  a probe bug must not kill the relay
+            LOG.exception("sheet sync recovery tick failed")
+
+
 def apply_stream_service_for_ref(ref, channel_csv_url, push_url, set_service,
                                  fetch=None, post=None):
     """Resolve the event platform (Channel tab) + the real stream key
@@ -2665,7 +2757,7 @@ class EventTitleStore:
         return {"title": self.get()}
 
 
-class TimerStore:
+class TimerStore(PushHealth):
     """Race-timer state with three layers (spec §3): in-memory + local JSON
     file (restart-safe) + Sheet tab via CSV poll / Apps-Script webhook push
     (producer-handover-safe). Director actions apply locally first and push in
@@ -2752,8 +2844,10 @@ class TimerStore:
         if ok:
             self.push_status = "ok"  # diagnostics: single ref assignments, no lock needed
         else:
-            self.push_status = "failed"
-            self.last_error = f"push: {err}"
+            self._mark_push_failed(err)
+
+    def _push_error_text(self, err):
+        return f"push: {err}"
 
     def _spawn_push(self, payload):
         threading.Thread(target=self._push, args=(payload,), daemon=True).start()
@@ -7001,7 +7095,7 @@ SETUP_FIELDS = {
 TEAM_SLOTS = {"p1": 1, "p2": 2, "p3": 3}
 
 
-class SetupControl:
+class SetupControl(PushHealth):
     """Panel -> sheet writes (spec: panel-sheet-control). Setup fields are
     async-optimistic (override now, push in the background, the sheet poll
     confirms); Schedule/POV URL writes are synchronous (no local echo target,
@@ -7028,8 +7122,10 @@ class SetupControl:
         ok, err, _body = push_webhook_retrying(self.push_url, payload, expected_action,
                                                **retry)
         # diagnostics: single ref assignments, no lock needed
-        self.push_status = "ok" if ok else "failed"
-        self.last_error = None if ok else err
+        if ok:
+            self.push_status, self.last_error = "ok", None
+        else:
+            self._mark_push_failed(err)
         return ok, err
 
     def _sync_push(self, payload, expected_action, **retry):
@@ -7149,8 +7245,7 @@ class SetupControl:
             # A later slot's success must not mask an earlier slot's failure:
             # _push sets push_status per call, so without this the panel would
             # read "sheet sync OK" while a slot silently reverted after the TTL.
-            self.push_status = "failed"
-            self.last_error = first_err
+            self._mark_push_failed(first_err)
 
     # -- URL writes (synchronous) --------------------------------------------
     def schedule_set(self, row, url=None, name=None, stint=None):
@@ -12604,6 +12699,10 @@ def main():
                               qual_source=qual_source, pov_source=pov_source,
                               crew_source=crew_source)
                  if hud_source else None)
+    if push_url and (setup_ctl or timer_store):
+        threading.Thread(target=run_webhook_recovery,
+                         args=(push_url, [setup_ctl, timer_store]),
+                         name="webhook-recovery", daemon=True).start()
     if source is not None and len(source.get()) < 2:
         LOG.info("schedule has fewer than 2 stints. Feed B idles on the empty next "
                  "slot (black) until that stint's link is added; Feed A keeps serving stint 1.")

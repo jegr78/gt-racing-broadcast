@@ -241,7 +241,7 @@ while the condition holds and disappear on their own when it is resolved:
 | Banner | Meaning | Who acts |
 |---|---|---|
 | **RELAY UNREACHABLE** (red) | the panel cannot reach the producer's relay: buttons in FEEDS/TIMER will not work | tell the producer (`racecast status` on their side names the problem) |
-| **SHEET SYNC FAILED** (red) | a write to the shared sheet did not go through after several attempts. The banner stays until the next write succeeds, so it can outlive the problem. | re-try the change; if it fails again, tell the producer (the relay log names each failed `sheet push`) |
+| **SHEET SYNC FAILED** (red) | a write to the shared sheet did not go through. The relay then checks the sheet webhook every 30 s and clears the banner as soon as it answers again, so a banner that stays means the webhook is still unreachable (or its script is outdated). The failed change itself is not written by that check. | re-try the change once the banner is gone; if it stays, tell the producer (the relay log names each failed `sheet push` and logs `sheet sync recovered` when it clears) |
 | **TIMER SHEET SYNC FAILED** (red) | the race timer's state is not reaching the sheet, a producer handover would not pick up the correct remaining time | tell the producer; details in [Race Timer](Race-Timer) |
 | **COOKIES N H OLD** (amber) | the producer's YouTube cookies are stale, the **next handover may fail** | tell the producer: `racecast cookies firefox` on the producer machine |
 

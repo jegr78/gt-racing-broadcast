@@ -1680,6 +1680,135 @@ def t_crew_delete_is_never_retried():
     assert seen[0][2].get("attempts") == 1, seen
 
 
+# Sheet-sync recovery: a failed push clears once the webhook answers again.
+
+def t_probe_webhook_is_a_read_and_accepts_any_script_json():
+    seen = []
+    def post(url, payload, timeout=10):
+        seen.append(payload)
+        return b'{"ok": false, "action": "get_stream_key", "error": "no key"}'
+    assert m.probe_webhook("http://push", post=post) is True
+    assert seen[0]["action"] == "get_stream_key"        # never a write action
+    assert m.probe_webhook("http://push",
+                           post=lambda u, p, timeout=10: b'{"error": "unknown action: x"}')
+
+
+def t_probe_webhook_rejects_html_and_network_errors():
+    assert m.probe_webhook("http://push",
+                           post=lambda u, p, timeout=10: b"<html>404</html>") is False
+    def boom(url, payload, timeout=10):
+        raise TimeoutError("The read operation timed out")
+    assert m.probe_webhook("http://push", post=boom) is False
+    assert m.probe_webhook(None, post=boom) is False
+
+
+def _failed_ctl(err="TimeoutError: The read operation timed out"):
+    ctl = m.SetupControl("http://push", _hs_stub())
+    ctl._mark_push_failed(err)
+    return ctl
+
+
+def t_setup_recover_push_clears_a_transient_failure():
+    ctl = _failed_ctl()
+    assert ctl.data()["push"] == "failed"
+    assert ctl.recover_push(lambda: True) is True
+    d = ctl.data()
+    assert d["push"] == "ok" and d["last_error"] is None
+
+
+def t_setup_recover_push_keeps_failed_while_the_probe_fails():
+    ctl = _failed_ctl()
+    assert ctl.recover_push(lambda: False) is False
+    assert ctl.data()["push"] == "failed"
+
+
+def t_setup_recover_push_never_probes_without_a_failure():
+    ctl = m.SetupControl("http://push", _hs_stub())
+    def probe():
+        raise AssertionError("probed without a failure")
+    assert ctl.recover_push(probe) is False
+    assert ctl.data()["push"] == "never"
+
+
+def t_setup_recover_push_keeps_an_outdated_script_red():
+    ctl = _failed_ctl(m.WEBHOOK_OUTDATED_ERROR)
+    def probe():
+        raise AssertionError("an outdated script is a config error, not a blip")
+    assert ctl.recover_push(probe) is False
+    assert ctl.data()["push"] == "failed"
+
+
+def t_setup_recover_push_does_not_mask_a_failure_during_the_probe():
+    ctl = _failed_ctl()
+    def probe():
+        ctl._mark_push_failed("TimeoutError: again")   # a real write fails meanwhile
+        return True
+    assert ctl.recover_push(probe) is False
+    assert ctl.data()["push"] == "failed"
+    assert ctl.data()["last_error"] == "TimeoutError: again"
+
+
+def t_failed_push_marks_the_status_for_recovery():
+    pushes = []
+    ctl, _hs, orig = _ctl(pushes)
+    _base, m.WEBHOOK_RETRY_BASE_S = m.WEBHOOK_RETRY_BASE_S, 0.0
+    try:
+        def boom(url, payload, timeout=10):
+            raise OSError("down")
+        m.post_webhook = boom
+        r = ctl.schedule_set(2, url="")
+        assert "error" in r and ctl.push_status == "failed"
+        assert ctl.recover_push(lambda: True) is True
+        assert ctl.push_status == "ok"
+    finally:
+        m.post_webhook = orig
+        m.WEBHOOK_RETRY_BASE_S = _base
+
+
+def _timer_store():
+    import tempfile
+    d = tempfile.mkdtemp()
+    return m.TimerStore(None, "http://push", os.path.join(d, "timer.json"))
+
+
+def t_timer_recover_push_clears_a_push_failure():
+    ts = _timer_store()
+    ts._mark_push_failed("OSError: down")
+    assert ts.data()["sync"]["push"] == "failed"
+    assert ts.recover_push(lambda: True) is True
+    sync = ts.data()["sync"]
+    assert sync["push"] == "ok" and sync["last_error"] is None
+
+
+def t_timer_recover_push_keeps_a_sheet_read_error():
+    ts = _timer_store()
+    ts._mark_push_failed("OSError: down")
+    ts.last_error = "URLError: sheet read failed"     # a later CSV-read error
+    assert ts.recover_push(lambda: True) is True
+    sync = ts.data()["sync"]
+    assert sync["push"] == "ok"
+    assert sync["last_error"] == "URLError: sheet read failed"   # not ours to clear
+
+
+def t_recovery_tick_probes_once_for_all_failed_stores():
+    a, b, fine = _failed_ctl(), _timer_store(), m.SetupControl("http://push", _hs_stub())
+    b._mark_push_failed("OSError: down")
+    calls = []
+    def probe(url):
+        calls.append(url)
+        return True
+    assert m.webhook_recovery_tick("http://push", [a, b, fine, None], probe=probe) is True
+    assert calls == ["http://push"]
+    assert a.push_status == "ok" and b.push_status == "ok" and fine.push_status == "never"
+
+
+def t_recovery_tick_stays_quiet_without_a_failure():
+    fine = m.SetupControl("http://push", _hs_stub())
+    def probe(url):
+        raise AssertionError("no failure, no webhook call")
+    assert m.webhook_recovery_tick("http://push", [fine, None], probe=probe) is False
+
+
 # setup-assets media fill: the template-driven scan.
 
 def t_setup_media_fill_uses_template_scan():
