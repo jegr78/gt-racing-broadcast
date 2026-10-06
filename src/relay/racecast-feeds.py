@@ -6438,6 +6438,10 @@ class ScheduleSource:
         self.rows = []
         self.last_ok = None
         self.last_error = None
+        # Pending panel saves (spec 2026-10-06): applied after every refresh so a
+        # value not yet in the sheet is what the feeds, RELOAD and NEXT see.
+        self._pending = None
+        self._pending_target = None
 
     @staticmethod
     def _parse_rows(text, allow_local=True):
@@ -6531,6 +6535,10 @@ class ScheduleSource:
                 self.items = [u for u, _n, _s, _l in rows]
                 self.last_ok = time.time()
                 self.last_error = None
+                if self._pending is not None:
+                    self._pending.reconcile(self._pending_target,
+                                            {l: (u, n, s) for u, n, s, l in rows})
+                    self._apply_pending_locked()
             try:
                 with open(self.cache_path, "w", encoding="utf-8") as fh:
                     fh.write("\n".join(u for u, _n, _s, _l in rows) + "\n")
@@ -6588,20 +6596,42 @@ class ScheduleSource:
         row left fully empty is dropped, matching _parse_rows which skips blank
         rows (so the optimistic state can't diverge from a re-poll)."""
         with self.lock:
-            existing = next((r for r in self.rows if r[3] == physical_row), None)
-            cur_u, cur_n, cur_s = existing[:3] if existing else ("", "", "")
-            new_u = cur_u if url is None else feed_source_value(url)
-            new_n = cur_n if name is None else (name or "").strip()
-            new_s = cur_s if stint is None else (stint or "").strip()
-            if new_u and not (is_feed_source(new_u) if self.allow_local else is_channel(new_u)):
-                return False
-            rows = [r for r in self.rows if r[3] != physical_row]
-            if new_u or new_n or new_s:        # keep planned stints (url may be "")
-                rows.append((new_u, new_n, new_s, physical_row))
-            rows.sort(key=lambda r: r[3])
-            self.rows = rows
-            self.items = [u for u, _n, _s, _l in rows]
+            return self._merge_row_locked(physical_row, url, name, stint)
+
+    def _merge_row_locked(self, physical_row, url=None, name=None, stint=None):
+        existing = next((r for r in self.rows if r[3] == physical_row), None)
+        cur_u, cur_n, cur_s = existing[:3] if existing else ("", "", "")
+        new_u = cur_u if url is None else feed_source_value(url)
+        new_n = cur_n if name is None else (name or "").strip()
+        new_s = cur_s if stint is None else (stint or "").strip()
+        if new_u and not (is_feed_source(new_u) if self.allow_local else is_channel(new_u)):
+            return False
+        rows = [r for r in self.rows if r[3] != physical_row]
+        if new_u or new_n or new_s:        # keep planned stints (url may be "")
+            rows.append((new_u, new_n, new_s, physical_row))
+        rows.sort(key=lambda r: r[3])
+        self.rows = rows
+        self.items = [u for u, _n, _s, _l in rows]
         return True
+
+    def attach_pending(self, store, target):
+        self._pending, self._pending_target = store, target
+
+    def _apply_pending_locked(self):
+        if self._pending is None:
+            return
+        for row, fields in self._pending.overlay(self._pending_target).items():
+            self._merge_row_locked(row, fields.get("url"), fields.get("name"),
+                                   fields.get("stint"))
+
+    def apply_pending(self):
+        with self.lock:
+            self._apply_pending_locked()
+
+    def sync_state(self, row):
+        if self._pending is None:
+            return None, None
+        return self._pending.state(self._pending_target, row)
 
     def health(self):
         with self.lock:

@@ -208,6 +208,57 @@ def t_items_idle_on_planned_rows_without_url():
     assert s.get() == ["UCaaaaaaaaaaaaaaaaaaaaa1", ""]   # planned stint = idle slot
 
 
+# Pending panel saves pinned in the source (spec 2026-10-06-async-panel-sheet-saves).
+
+import pending_saves as _ps   # src/scripts is on sys.path once the relay module loaded
+
+
+def _pinned_source(sheet_rows, target="schedule"):
+    s = _sched_with_rows(sheet_rows)
+    store = _ps.PendingSaves()
+    s.attach_pending(store, target)
+    return s, store
+
+
+def t_pinned_value_survives_refresh():
+    s, store = _pinned_source([("https://www.youtube.com/watch?v=old", "JeGr", "Stint 1", 2)])
+    store.put("schedule", 2, {"url": "https://www.youtube.com/watch?v=new"})
+    s.apply_pending()
+    assert s.get() == ["https://www.youtube.com/watch?v=new"]
+    assert s.refresh() is True                        # sheet still shows the old link
+    assert s.get_rows() == [("https://www.youtube.com/watch?v=new", "JeGr", "Stint 1", 2)]
+    assert s.sync_state(2) == ("saving", None)
+
+
+def t_pinned_clear_survives_stale_refresh():
+    s, store = _pinned_source([("https://www.youtube.com/watch?v=old", "JeGr", "Stint 1", 2)])
+    store.put("schedule", 2, {"url": ""})
+    s.apply_pending(); s.refresh()
+    assert s.get_rows() == [("", "JeGr", "Stint 1", 2)]
+
+
+def t_pinned_new_row_survives_refresh():
+    s, store = _pinned_source([("https://www.youtube.com/watch?v=a", "JeGr", "Stint 1", 2)])
+    store.put("schedule", 3, {"url": "https://www.youtube.com/watch?v=b",
+                              "name": "GT45", "stint": "Stint 2"})
+    s.apply_pending(); s.refresh()
+    assert [r[3] for r in s.get_rows()] == [2, 3]
+
+
+def t_confirmed_value_released_once_the_sheet_shows_it():
+    s, store = _pinned_source([("https://www.youtube.com/watch?v=old", "JeGr", "", 2)])
+    store.put("schedule", 2, {"url": "https://www.youtube.com/watch?v=new"})
+    j = store.next_job(); store.done(j[0], j[1], j[3], ok=True)
+    s.fetch = lambda timeout=15: [("https://www.youtube.com/watch?v=new", "JeGr", "", 2)]
+    s.refresh()
+    assert len(store) == 0 and s.sync_state(2) == (None, None)
+
+
+def t_unattached_source_reports_no_sync_state():
+    s = _sched_with_rows([("https://www.youtube.com/watch?v=a", "JeGr", "", 2)])
+    assert s.sync_state(2) == (None, None)
+
+
 # SetupControl.
 
 OVERLAY_CSV = (",Stint,Intro,,,,,,,\n,Streamer,JeGr,,,,,,,\n"
