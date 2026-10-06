@@ -16,11 +16,13 @@
 <style>
   :root {
     --bg:#0F172A; --card:#1B2336; --card2:#151C2E; --line:#273349;
-    --txt:#F8FAFC; --dim:#94A3B8; --faint:#64748B;
+    --txt:#F8FAFC; --dim:#94A3B8; --faint:#8392A7;
     --ok:#22C55E; --warn:#F59E0B; --bad:#EF4444; --off:#475569;
     --accent:#3B82F6; --nav:212px;
     /* --accent as text misses WCAG AA on the card and button surfaces; links use this lighter blue. */
     --link:#60A5FA;
+    /* --bad and --accent as text or behind white text miss WCAG AA; these are their AA variants. */
+    --bad-text:#FCA5A5; --accent-strong:#2563EB;
     --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas,
             "Liberation Mono", monospace;
   }
@@ -405,7 +407,7 @@
   .tval { font-size:14px; font-weight:600; color:var(--txt); }
   .tile.ok .tval { color:var(--ok); }
   .tile.warn .tval { color:var(--warn); }
-  .tile.bad .tval { color:var(--bad); }
+  .tile.bad .tval { color:var(--bad-text); }
   /* Producer schedule table on the Home view */
   table.prodtable { width:100%; border-collapse:collapse; font:13px var(--mono); }
   table.prodtable th, table.prodtable td { text-align:left; padding:6px 8px;
@@ -448,8 +450,8 @@
   .updactions { display:flex; align-items:center; gap:10px; }
   /* generic confirm/alert modal body; preserves the \n breaks some messages carry */
   .cmodal-body { font-size:13px; line-height:1.55; margin:8px 0 16px; white-space:pre-line; }
-  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
-  button.primary:hover { background: color-mix(in srgb, var(--accent) 82%, #000); border-color: color-mix(in srgb, var(--accent) 82%, #000); }
+  button.primary { background:var(--accent-strong); color:#fff; border-color:var(--accent-strong); }
+  button.primary:hover { background: color-mix(in srgb, var(--accent-strong) 82%, #000); border-color: color-mix(in srgb, var(--accent-strong) 82%, #000); }
   .prevsec { margin-top: 24px; }
   .prevtoggle { display: flex; gap: 8px; align-items: center; font-size: 14px; }
   .prevrow { display: flex; align-items: center; gap: 10px; padding: 8px 0;

@@ -89,6 +89,7 @@
   frame.remove();
 
   const scrollWidth = doc.scrollWidth;
+  const modal = document.querySelector("dialog:modal");
   const index = new Map();
   const elements = [];
   for (const el of document.body.querySelectorAll("*")) {
@@ -96,6 +97,8 @@
     const r = el.getBoundingClientRect();
     if (r.width <= 0 || r.height <= 0) continue;
     if (!el.checkVisibility({opacityProperty: true, visibilityProperty: true})) continue;
+    // An open modal dialog makes everything outside it inert, so only the dialog is judged.
+    if (modal && !modal.contains(el)) continue;
     const vr = visibleRect(el, r);
     if (vr === null) continue;
     const x = r.left + scrollX, y = r.top + scrollY;

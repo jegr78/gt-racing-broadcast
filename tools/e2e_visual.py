@@ -257,6 +257,11 @@ SURFACES = [
             PREFLIGHT_READY if view == "preflight" else CC_READY,
             90000 if view == "preflight" else 15000)
     for view in CC_VIEWS
+] + [
+    # The primary buttons exist only in modals, which no view opens on its own.
+    Surface("cc-quit-modal", "ui", "/", ("desktop",),
+            "document.getElementById('quitmodal').showModal()",
+            "!!document.querySelector('#quitmodal[open]')", 15000),
 ]
 
 
