@@ -50,7 +50,7 @@ the `check_*` callables, `SYNTHETIC_CHECKS`/`REAL_LEAGUE_CHECKS`), unit-tested i
 guaranteed `finally` teardown, no leaked relays/UI even on failure). Two modes:
 - **Synthetic** (`tools/e2e.py`, the default, **CI-runnable**): an ephemeral temp profile +
   an in-process CSV schedule server via `--sheet-csv-url`; spawns an enabled relay + a
-  cockpit-disabled relay + the Control Center on free `127.0.0.1` ports; runs 10 checks.
+  cockpit-disabled relay + the Control Center on free `127.0.0.1` ports; runs `SYNTHETIC_CHECKS`.
   No real Sheet/cookies/OBS/Tailscale. Because the relay **hard-exits at startup without
   `yt-dlp`/`streamlink` on PATH** (`racecast-feeds.py`), synthetic mode writes **no-op
   stubs** for `yt-dlp`/`streamlink`/`ffmpeg`/`deno` into the temp dir and prepends them
@@ -90,9 +90,10 @@ browser default on a dark surface, overlapping controls, WCAG AA contrast, conso
 and writes `DIR/report.html` plus screenshots. Any finding fails the run (exit 1); a missing
 Playwright is exit 2, never a skip. Deliberate exceptions go in `tools/visual-allowlist.json`,
 each with a reason; a real defect is allowlisted with reason "known defect, #N" pointing at
-its own issue. `surface`, `selector` and the optional `detail` are
-all full-match regexes. The Control Center check only sees what is visible inside its
-scrolling content area (its `<main>` scrolls; the page itself does not). The CI `visual` job
+its own issue. `surface` and `selector` are full-match regexes; the optional `detail` is
+searched, so anchor it with `^`/`$` when it must match exactly. The Control Center check
+only sees what is visible inside its scrolling content area (its `<main>` scrolls; the
+page itself does not). The CI `visual` job
 runs it on every PR and uploads the report. Local setup:
 `python3 -m venv runtime/pw-venv && runtime/pw-venv/bin/pip install playwright==1.63.0 &&
 runtime/pw-venv/bin/python -m playwright install chromium`.
