@@ -208,6 +208,57 @@ def t_items_idle_on_planned_rows_without_url():
     assert s.get() == ["UCaaaaaaaaaaaaaaaaaaaaa1", ""]   # planned stint = idle slot
 
 
+# Pending panel saves pinned in the source (spec 2026-10-06-async-panel-sheet-saves).
+
+import pending_saves as _ps   # src/scripts is on sys.path once the relay module loaded
+
+
+def _pinned_source(sheet_rows, target="schedule"):
+    s = _sched_with_rows(sheet_rows)
+    store = _ps.PendingSaves()
+    s.attach_pending(store, target)
+    return s, store
+
+
+def t_pinned_value_survives_refresh():
+    s, store = _pinned_source([("https://www.youtube.com/watch?v=old", "JeGr", "Stint 1", 2)])
+    store.put("schedule", 2, {"url": "https://www.youtube.com/watch?v=new"})
+    s.apply_pending()
+    assert s.get() == ["https://www.youtube.com/watch?v=new"]
+    assert s.refresh() is True                        # sheet still shows the old link
+    assert s.get_rows() == [("https://www.youtube.com/watch?v=new", "JeGr", "Stint 1", 2)]
+    assert s.sync_state(2) == ("saving", None)
+
+
+def t_pinned_clear_survives_stale_refresh():
+    s, store = _pinned_source([("https://www.youtube.com/watch?v=old", "JeGr", "Stint 1", 2)])
+    store.put("schedule", 2, {"url": ""})
+    s.apply_pending(); s.refresh()
+    assert s.get_rows() == [("", "JeGr", "Stint 1", 2)]
+
+
+def t_pinned_new_row_survives_refresh():
+    s, store = _pinned_source([("https://www.youtube.com/watch?v=a", "JeGr", "Stint 1", 2)])
+    store.put("schedule", 3, {"url": "https://www.youtube.com/watch?v=b",
+                              "name": "GT45", "stint": "Stint 2"})
+    s.apply_pending(); s.refresh()
+    assert [r[3] for r in s.get_rows()] == [2, 3]
+
+
+def t_confirmed_value_released_once_the_sheet_shows_it():
+    s, store = _pinned_source([("https://www.youtube.com/watch?v=old", "JeGr", "", 2)])
+    store.put("schedule", 2, {"url": "https://www.youtube.com/watch?v=new"})
+    j = store.next_job(); store.done(j[0], j[1], j[3], ok=True)
+    s.fetch = lambda timeout=15: [("https://www.youtube.com/watch?v=new", "JeGr", "", 2)]
+    s.refresh()
+    assert len(store) == 0 and s.sync_state(2) == (None, None)
+
+
+def t_unattached_source_reports_no_sync_state():
+    s = _sched_with_rows([("https://www.youtube.com/watch?v=a", "JeGr", "", 2)])
+    assert s.sync_state(2) == (None, None)
+
+
 # SetupControl.
 
 OVERLAY_CSV = (",Stint,Intro,,,,,,,\n,Streamer,JeGr,,,,,,,\n"
@@ -230,6 +281,7 @@ def _hs_stub():
 def _ctl(pushes, response=b'{"ok": true, "action": "%s", "v": 2}', pov_source=None):
     hs = _hs_stub()
     ctl = m.SetupControl("http://push", hs, pov_source=pov_source)
+    ctl.autostart_worker = False       # tests run the save worker with drain_saves()
     def fake_post(url, payload, timeout=10):
         pushes.append(payload)
         return response % payload["action"].encode() if b"%s" in response else response
@@ -317,6 +369,7 @@ def t_schedule_set_validates_and_pushes():
         assert "error" in ctl.schedule_set(1, url="not a url")
         r = ctl.schedule_set(2, url="https://www.youtube.com/watch?v=x", name="JeGr")
         assert r.get("ok"), r
+        ctl.drain_saves()
         assert pushes[-1] == {"action": "schedule", "row": 2,
                               "url": "https://www.youtube.com/watch?v=x", "name": "JeGr"}
     finally:
@@ -335,6 +388,7 @@ def t_schedule_set_validates_streamer_and_stint_vocab():
         r = ctl.schedule_set(2, url="https://www.youtube.com/watch?v=x",
                              name="GT45", stint="Stint 2")
         assert r.get("ok"), r
+        ctl.drain_saves()
         assert pushes[-1] == {"action": "schedule", "row": 2,
                               "url": "https://www.youtube.com/watch?v=x",
                               "name": "GT45", "stint": "Stint 2"}
@@ -349,6 +403,7 @@ def t_schedule_set_clear_reflects_in_source():
     hs = _hs_stub()
     s = _sched_with_rows([("https://www.youtube.com/watch?v=x", "JeGr", "Stint 1", 2)])
     ctl = m.SetupControl("http://push", hs, schedule_source=s)
+    ctl.autostart_worker = False
 
     def fake_post(url, payload, timeout=10):
         pushes.append(payload)
@@ -357,6 +412,7 @@ def t_schedule_set_clear_reflects_in_source():
     try:
         r = ctl.schedule_set(2, url="", name="JeGr", stint="Stint 1")
         assert r.get("ok"), r
+        ctl.drain_saves()
         assert pushes[-1]["url"] == ""                       # cleared in the sheet
         assert s.get_rows() == [("", "JeGr", "Stint 1", 2)]  # and live in memory
     finally:
@@ -371,6 +427,7 @@ def t_schedule_set_accepts_local_but_pov_does_not():
     try:
         r = ctl.schedule_set(2, url=" Local: ")
         assert r.get("ok"), r
+        ctl.drain_saves()
         assert pushes[-1] == {"action": "schedule", "row": 2, "url": "local:"}
         assert "error" in ctl.pov_set("local:")
     finally:
@@ -383,43 +440,34 @@ def t_pov_set_pushes():
         assert "error" in ctl.pov_set("nonsense")
         r = ctl.pov_set("https://www.youtube.com/watch?v=p")
         assert r.get("ok"), r
+        ctl.drain_saves()
         assert pushes[-1] == {"action": "pov", "url": "https://www.youtube.com/watch?v=p"}
     finally:
         m.post_webhook = orig
 
 
-class _RefreshSpy:
-    """Minimal pov_source stub: records refresh() calls."""
-    def __init__(self):
-        self.refreshed = 0
-    def refresh(self, timeout=15):     # match ScheduleSource.refresh's default
-        self.refreshed += 1
-        return True
-
-
-def t_pov_set_with_name_pushes_clamped_and_refreshes():
+def t_pov_set_with_name_pushes_clamped():
     pushes = []
-    spy = _RefreshSpy()
-    ctl, hs, orig = _ctl(pushes, pov_source=spy)
+    ctl, hs, orig = _ctl(pushes)
     try:
         r = ctl.pov_set("https://www.youtube.com/watch?v=p", "A Very Long Driver Name Here")
         assert r.get("ok"), r
+        ctl.drain_saves()
         assert pushes[-1] == {"action": "pov",
                               "url": "https://www.youtube.com/watch?v=p",
                               "name": "A Very Long Driver N"}    # clamped to 20 chars
         assert len(pushes[-1]["name"]) == 20
-        assert spy.refreshed == 1                                 # name applied immediately
     finally:
         m.post_webhook = orig
 
 
 def t_pov_set_empty_name_clears():
     pushes = []
-    spy = _RefreshSpy()
-    ctl, hs, orig = _ctl(pushes, pov_source=spy)
+    ctl, hs, orig = _ctl(pushes)
     try:
         r = ctl.pov_set("https://www.youtube.com/watch?v=p", "")
         assert r.get("ok"), r
+        ctl.drain_saves()
         assert pushes[-1]["name"] == ""                           # explicit clear
     finally:
         m.post_webhook = orig
@@ -745,6 +793,7 @@ def t_endpoints_qualifying_set_post():
         r = post("/qualifying/set", {"row": 2, "url": "https://youtu.be/q",
                                      "name": "JeGr", "stint": "Stint 1"})
         assert r.get("ok"), r
+        ctl.drain_saves()
         assert pushes[-1]["tab"] == "Qualifying"
         assert pushes[-1]["stint"] == "Stint 1"
     finally:
@@ -773,10 +822,12 @@ def t_endpoints_post_writes():
         r = post("/schedule/set", {"row": 1, "url": "https://youtu.be/x",
                                    "name": "JeGr", "stint": "Stint 1"})
         assert r.get("ok"), r
+        ctl.drain_saves()
         assert pushes[-1]["action"] == "schedule"
         assert pushes[-1]["stint"] == "Stint 1"
         r = post("/pov/set", {"url": "https://youtu.be/p"})
         assert r.get("ok"), r
+        ctl.drain_saves()
         assert pushes[-1]["action"] == "pov"
         assert "error" in post("/pov/bogus", {})
     finally:
@@ -835,22 +886,26 @@ def t_schedule_set_injects_on_success():
     src.items = ["s1"]; src.rows = [("s1", "Ann", "", 1)]
     ctl = m.SetupControl(push_url="https://example.test/push", hud_source=None,
                          schedule_source=src)
-    ctl._push = lambda payload, expected, **_kw: (True, "")     # stub the webhook
+    ctl.autostart_worker = False
+    ctl._save_push = lambda payload, expected_action: (True, None)   # stub the webhook
     out = ctl.schedule_set(2, "https://www.youtube.com/watch?v=abc", "Ben")
     assert out.get("ok") is True
     assert src.get() == ["s1", "https://www.youtube.com/watch?v=abc"]   # available immediately
 
 
-def t_schedule_set_no_inject_on_push_failure():
+def t_schedule_set_keeps_value_when_push_fails():
     src = m.ScheduleSource(csv_url=None, cache_path=os.path.join(HERE, "_z.cache"),
                            local_fallback=None)
     src.items = ["s1"]; src.rows = [("s1", "Ann", "", 1)]
     ctl = m.SetupControl(push_url="https://example.test/push", hud_source=None,
                          schedule_source=src)
-    ctl._push = lambda payload, expected, **_kw: (False, "boom")
+    ctl.autostart_worker = False
+    ctl._save_push = lambda payload, expected_action: (False, "boom")
     out = ctl.schedule_set(2, "https://www.youtube.com/watch?v=abc", "Ben")
-    assert "error" in out
-    assert src.get() == ["s1"]                            # nothing injected on failure
+    ctl.drain_saves()
+    assert out.get("pending"), out
+    assert src.get() == ["s1", "https://www.youtube.com/watch?v=abc"]   # kept in relay
+    assert src.sync_state(2) == ("local", "boom")
 
 
 # Qualifying: a separate tab, its own source, Feed A. (#124)
@@ -866,6 +921,7 @@ def _qctl(pushes):
                             local_fallback=None)
     ssrc.items = []; ssrc.rows = []
     ctl = m.SetupControl("http://push", hs, schedule_source=ssrc, qual_source=qsrc)
+    ctl.autostart_worker = False       # tests run the save worker with drain_saves()
     def fake_post(url, payload, timeout=10):
         pushes.append(payload)
         return b'{"ok": true, "action": "schedule", "v": 4}'
@@ -881,6 +937,7 @@ def t_qualifying_set_targets_qualifying_tab_and_injects_qual_source():
                                name="GT45", stint="Stint 2")
         assert r.get("ok"), r
         # The webhook payload carries the Qualifying tab target and the action.
+        ctl.drain_saves()
         assert pushes[-1] == {"action": "schedule", "row": 2, "tab": "Qualifying",
                               "url": "https://www.youtube.com/watch?v=q",
                               "name": "GT45", "stint": "Stint 2"}
@@ -908,6 +965,7 @@ def t_schedule_set_has_no_tab_key():
     ctl, qsrc, ssrc, orig = _qctl(pushes)
     try:
         ctl.schedule_set(2, url="https://www.youtube.com/watch?v=x", name="JeGr")
+        ctl.drain_saves()
         assert "tab" not in pushes[-1]
     finally:
         m.post_webhook = orig
@@ -1603,19 +1661,17 @@ def _record_push_kwargs():
 
 
 def t_synchronous_sheet_writes_get_one_long_attempt():
-    # Schedule/POV/crew writes run inside the panel's HTTP request. Apps Script
+    # Crew writes run inside the panel's HTTP request. Apps Script
     # answers a write in up to ~15 s in a slow phase (#780), so one attempt gets
     # 30 s; a second one only follows a fast failure.
     ctl = m.SetupControl("http://push", _hs_stub())
     seen, restore = _record_push_kwargs()
     try:
-        ctl.schedule_set(1, url="")
-        ctl.pov_set("")
         ctl.crew_set(2, name="Someone")
         ctl.crew_delete(3)
     finally:
         restore()
-    assert [a for a, _d, _k in seen] == ["schedule", "pov", "crew", "crew"], seen
+    assert [a for a, _d, _k in seen] == ["crew", "crew"], seen
     for action, _d, kw in seen:
         assert kw.get("timeout") == m.WEBHOOK_SYNC_TIMEOUT_S, (action, kw)
         assert kw.get("budget_s") == m.WEBHOOK_SYNC_BUDGET_S, (action, kw)
@@ -1641,9 +1697,8 @@ def t_synchronous_sheet_writes_run_one_at_a_time():
         return True, None, b'{"ok": true}'
     m.push_webhook_retrying = spy
     try:
-        threads = [threading.Thread(target=ctl.schedule_set, args=(n,), kwargs={"url": ""})
-                   for n in (1, 2, 3)]
-        threads.append(threading.Thread(target=ctl.pov_set, args=("",)))
+        threads = [threading.Thread(target=ctl.crew_set, args=(n,), kwargs={"name": "Someone"})
+                   for n in (1, 2, 3, 4)]
         for t in threads:
             t.start()
         for t in threads:
@@ -1756,8 +1811,9 @@ def t_failed_push_marks_the_status_for_recovery():
         def boom(url, payload, timeout=10):
             raise OSError("down")
         m.post_webhook = boom
-        r = ctl.schedule_set(2, url="")
-        assert "error" in r and ctl.push_status == "failed"
+        ctl.set_field("streamer", "GT45", now=1000.0)
+        ctl._push_setup("Streamer", "GT45")            # a background HUD push fails
+        assert ctl.push_status == "failed"
         assert ctl.recover_push(lambda: True) is True
         assert ctl.push_status == "ok"
     finally:
@@ -1807,6 +1863,285 @@ def t_recovery_tick_stays_quiet_without_a_failure():
     def probe(url):
         raise AssertionError("no failure, no webhook call")
     assert m.webhook_recovery_tick("http://push", [fine, None], probe=probe) is False
+
+
+# Async panel saves (spec 2026-10-06-async-panel-sheet-saves).
+
+def _async_ctl(post=None, rows=None):
+    hs = _hs_stub()
+    s = _sched_with_rows(rows or [("https://www.youtube.com/watch?v=old", "JeGr", "Stint 1", 2)])
+    ctl = m.SetupControl("http://push", hs, schedule_source=s)
+    ctl.autostart_worker = False
+    calls = []
+    def fake(payload, expected_action):
+        calls.append(payload)
+        return post(payload) if post else (True, None)
+    ctl._save_push = fake
+    return ctl, s, calls
+
+
+def t_save_answers_pending_before_the_webhook():
+    ctl, s, calls = _async_ctl()
+    r = ctl.schedule_set(2, url="https://www.youtube.com/watch?v=new")
+    assert r == {"ok": True, "row": 2, "pending": True}, r
+    assert calls == []                                       # nothing pushed yet
+    assert s.get() == ["https://www.youtube.com/watch?v=new"]   # live at once
+    assert s.sync_state(2) == ("saving", None)
+    assert ctl.drain_saves() == 1
+    assert calls[-1] == {"action": "schedule", "row": 2,
+                         "url": "https://www.youtube.com/watch?v=new"}
+    assert s.sync_state(2) == (None, None)                   # confirmed
+
+
+def t_validation_errors_create_no_pending_entry():
+    ctl, s, calls = _async_ctl()
+    assert "error" in ctl.schedule_set(2, name="Nobody")
+    assert "error" in ctl.schedule_set(2, url="not a url")
+    assert "error" in ctl.pov_set("local:")
+    assert len(ctl.saves) == 0 and ctl.drain_saves() == 0
+    assert "error" in m.SetupControl(None, _hs_stub()).schedule_set(2, url="")
+
+
+def t_failed_save_stays_in_relay_quietly():
+    ctl, s, calls = _async_ctl(post=lambda p: (False, "TimeoutError: slow"))
+    ctl.schedule_set(2, url="https://www.youtube.com/watch?v=new")
+    ctl.drain_saves()
+    assert s.sync_state(2) == ("local", "TimeoutError: slow")
+    assert s.get() == ["https://www.youtube.com/watch?v=new"]   # still live
+    assert ctl.push_status != "failed"                          # no red banner
+    assert ctl.data()["unsynced"] == 1
+    assert ctl.data()["unsynced_error"] == "TimeoutError: slow"
+
+
+def t_outdated_script_turns_red_and_holds():
+    ctl, s, calls = _async_ctl(post=lambda p: (False, m.WEBHOOK_OUTDATED_ERROR))
+    ctl.schedule_set(2, url="https://www.youtube.com/watch?v=new")
+    ctl.drain_saves()
+    assert ctl.push_status == "failed"
+    assert ctl.saves.requeue_local() == 0                   # held for a fix
+
+
+def t_two_saves_for_one_row_push_the_newest():
+    ctl, s, calls = _async_ctl()
+    ctl.schedule_set(2, url="https://www.youtube.com/watch?v=a")
+    ctl.schedule_set(2, name="GT45")
+    ctl.drain_saves()
+    assert calls == [{"action": "schedule", "row": 2,
+                      "url": "https://www.youtube.com/watch?v=a", "name": "GT45"}]
+
+
+def t_qualifying_save_targets_its_tab_and_source():
+    pushes = []
+    ctl, qsrc, ssrc, orig = _qctl(pushes)
+    ctl.autostart_worker = False
+    try:
+        r = ctl.qualifying_set(2, url="https://www.youtube.com/watch?v=q",
+                               name="GT45", stint="Stint 2")
+        assert r.get("pending"), r
+        assert qsrc.get() == ["https://www.youtube.com/watch?v=q"] and ssrc.get() == []
+        ctl.drain_saves()
+        assert pushes[-1]["tab"] == "Qualifying"
+    finally:
+        m.post_webhook = orig
+
+
+def t_pov_save_pins_row_two():
+    import tempfile
+    pov = m.ScheduleSource("http://pov", os.path.join(tempfile.mkdtemp(), "p.txt"),
+                           None, allow_local=False)
+    pov.fetch = lambda timeout=15: [("https://www.youtube.com/watch?v=old", "Old", "", 2)]
+    pov.refresh()
+    ctl = m.SetupControl("http://push", _hs_stub(), pov_source=pov)
+    ctl.autostart_worker = False
+    ctl._save_push = lambda payload, expected_action: (True, None)
+    r = ctl.pov_set("https://www.youtube.com/watch?v=p", "A Very Long Driver Name Here")
+    assert r == {"ok": True, "pending": True}, r
+    assert pov.get_rows() == [("https://www.youtube.com/watch?v=p", "A Very Long Driver N", "", 2)]
+    pov.refresh()                                            # stale sheet
+    assert pov.get()[0] == "https://www.youtube.com/watch?v=p"
+
+
+def t_sync_save_requeues_a_local_row():
+    results = [(False, "TimeoutError: slow"), (True, None)]
+    ctl, s, calls = _async_ctl(post=lambda p: results.pop(0))
+    ctl.schedule_set(2, url="https://www.youtube.com/watch?v=new")
+    ctl.drain_saves()
+    assert ctl.sync_save("schedule", 2) == {"ok": True}
+    assert ctl.drain_saves() == 1
+    assert s.sync_state(2) == (None, None)
+    assert "error" in ctl.sync_save("schedule", 2)            # nothing pending any more
+    assert "error" in ctl.sync_save("bogus", 2)
+
+
+def t_async_save_push_uses_the_long_attempt():
+    seen, restore = _record_push_kwargs()
+    try:
+        ctl = m.SetupControl("http://push", _hs_stub())
+        ok, err = ctl._save_push({"action": "schedule", "row": 2}, "schedule")
+    finally:
+        restore()
+    assert ok and err is None                     # the spy confirms the push
+    kw = seen[0][2]
+    assert kw["timeout"] == m.WEBHOOK_ASYNC_SAVE_TIMEOUT_S == 45
+    assert kw["attempts"] == m.WEBHOOK_ASYNC_SAVE_ATTEMPTS == 3
+    assert kw["budget_s"] == m.WEBHOOK_ASYNC_SAVE_BUDGET_S
+
+
+def t_worker_thread_pushes_in_the_background():
+    import threading
+    gate = threading.Event()
+    ctl = m.SetupControl("http://push", _hs_stub(),
+                         schedule_source=_sched_with_rows([("", "JeGr", "Stint 1", 2)]))
+    def slow(payload, expected_action):
+        gate.wait(5)
+        return True, None
+    ctl._save_push = slow
+    r = ctl.schedule_set(2, url="https://www.youtube.com/watch?v=n")   # worker autostarts
+    assert r.get("pending")
+    gate.set()
+    for _ in range(100):
+        if ctl.schedule_source.sync_state(2) == (None, None):
+            break
+        import time as _t; _t.sleep(0.02)
+    assert ctl.schedule_source.sync_state(2) == (None, None)
+
+
+def t_script_error_is_quiet_and_recovers():
+    answers = [(False, "webhook did not confirm: '{\"ok\": false, \"error\": \"Exception: Service Spreadsheets timed out\"}'"),
+               (True, None)]
+    ctl, s, calls = _async_ctl(post=lambda p: answers.pop(0))
+    ctl.schedule_set(2, url="https://www.youtube.com/watch?v=new")
+    ctl.drain_saves()
+    assert ctl.push_status != "failed" and s.sync_state(2)[0] == "local"
+    assert m.webhook_recovery_tick("http://push", [ctl], probe=lambda url: True) is True
+    assert s.sync_state(2) == ("saving", None)
+    ctl.drain_saves()
+    assert s.sync_state(2) == (None, None) and ctl.data()["unsynced"] == 0
+
+
+def t_recovery_leaves_local_saves_while_the_probe_fails():
+    ctl, s, calls = _async_ctl(post=lambda p: (False, "TimeoutError: slow"))
+    ctl.schedule_set(2, url="https://www.youtube.com/watch?v=new")
+    ctl.drain_saves()
+    assert m.webhook_recovery_tick("http://push", [ctl], probe=lambda url: False) is False
+    assert s.sync_state(2)[0] == "local"
+
+
+def t_probe_alone_does_not_clear_a_red_status_held_by_a_save():
+    ctl, s, calls = _async_ctl(post=lambda p: (False, m.WEBHOOK_OUTDATED_ERROR))
+    ctl.schedule_set(2, url="https://www.youtube.com/watch?v=new")
+    ctl.drain_saves()
+    m.webhook_recovery_tick("http://push", [ctl], probe=lambda url: True)
+    assert ctl.push_status == "failed"
+
+
+def t_sync_fields_helper():
+    class Src:
+        def sync_state(self, row):
+            return {2: ("saving", None), 3: ("local", "TimeoutError: x")}.get(row, (None, None))
+    assert m.sync_fields(Src(), 2) == {"sync": "saving"}
+    assert m.sync_fields(Src(), 3) == {"sync": "local", "sync_error": "TimeoutError: x"}
+    assert m.sync_fields(Src(), 4) == {}
+    assert m.sync_fields(object(), 2) == {}          # stub sources without sync_state
+
+
+def t_endpoints_sync_routes():
+    ctl, s, calls = _async_ctl(post=lambda p: (False, "TimeoutError: slow"))
+    srv, get, post = _client(ctl)
+    try:
+        assert post("/schedule/set", {"row": 2, "url": "https://youtu.be/x"}).get("pending")
+        ctl.drain_saves()
+        assert post("/schedule/sync", {"row": 2}) == {"ok": True}
+        assert "error" in post("/schedule/sync", {"row": 9})
+        assert "error" in post("/qualifying/sync", {"row": 2})
+        assert "error" in post("/pov/sync", {})
+    finally:
+        srv.shutdown()
+
+
+def t_sync_rows_reports_a_save_that_emptied_its_row():
+    # Qualifying CLEAR blanks streamer, stint and URL: the row leaves the source,
+    # but the panel must still see that the save is only in the relay.
+    pushes = []
+    ctl, qsrc, ssrc, orig = _qctl(pushes)
+    try:
+        qsrc.inject_row(2, "https://www.youtube.com/watch?v=q", "GT45", "Stint 2")
+        ctl._save_push = lambda payload, expected_action: (False, "TimeoutError: slow")
+        ctl.qualifying_set(2, url="", name="", stint="")
+        ctl.drain_saves()
+        assert qsrc.get_rows() == []
+        assert m.sync_rows(qsrc) == {"2": {"sync": "local", "sync_error": "TimeoutError: slow"}}
+        assert m.sync_rows(ssrc) == {}
+        assert m.sync_rows(object()) == {}
+    finally:
+        m.post_webhook = orig
+
+
+def t_one_save_worker_even_when_started_concurrently():
+    import threading, time as _t
+    ctl = m.SetupControl("http://push", _hs_stub())
+    started = []
+
+    class SlowStart:
+        def __init__(self):
+            self.alive = False
+        def start(self):
+            _t.sleep(0.02)               # widen the check-then-start window
+            started.append(self); self.alive = True
+        def is_alive(self):
+            return self.alive
+
+    ctl._new_worker = SlowStart
+    threads = [threading.Thread(target=ctl._ensure_worker) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(5)
+    assert len(started) == 1, len(started)
+
+
+def t_a_raising_push_leaves_the_save_local_not_pinned():
+    ctl, s, calls = _async_ctl()
+    def boom(payload, expected_action):
+        raise RuntimeError("unexpected")
+    ctl._save_push = boom
+    ctl.schedule_set(2, url="https://www.youtube.com/watch?v=new")
+    assert ctl.drain_saves() == 1                 # the job ends, nothing escapes
+    sync, err = s.sync_state(2)
+    assert sync == "local" and "RuntimeError" in err
+    ctl._save_push = lambda payload, expected_action: (True, None)
+    assert ctl.sync_save("schedule", 2) == {"ok": True}   # not stuck in flight
+    assert ctl.drain_saves() == 1 and s.sync_state(2) == (None, None)
+
+
+def t_outdated_only_saves_do_not_probe_every_tick():
+    ctl, s, calls = _async_ctl(post=lambda p: (False, m.WEBHOOK_OUTDATED_ERROR))
+    ctl.schedule_set(2, url="https://www.youtube.com/watch?v=new")
+    ctl.drain_saves()
+    def probe(url):
+        raise AssertionError("an outdated script is not fixed by a probe")
+    assert m.webhook_recovery_tick("http://push", [ctl], probe=probe) is False
+
+
+def t_pov_name_clamp_drops_a_trailing_space():
+    ctl, s, calls = _async_ctl()
+    ctl.pov_set("https://www.youtube.com/watch?v=p", "Mustermann Racing T am")
+    ctl.drain_saves()
+    assert calls[-1]["name"] == "Mustermann Racing T"   # matches the stripped sheet value
+
+
+def t_a_raising_push_never_stores_the_webhook_url():
+    ctl = m.SetupControl("https://script.example.test/macros/s/SECRET/exec?key=K123",
+                         _hs_stub(),
+                         schedule_source=_sched_with_rows([("", "JeGr", "Stint 1", 2)]))
+    ctl.autostart_worker = False
+    def boom(payload, expected_action):
+        raise ValueError("bad url https://script.example.test/macros/s/SECRET/exec?key=K123")
+    ctl._save_push = boom
+    ctl.schedule_set(2, url="https://www.youtube.com/watch?v=n")
+    ctl.drain_saves()
+    err = ctl.schedule_source.sync_state(2)[1]
+    assert "SECRET" not in err and "K123" not in err, err
 
 
 # setup-assets media fill: the template-driven scan.

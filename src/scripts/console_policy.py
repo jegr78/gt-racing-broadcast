@@ -93,7 +93,8 @@ def min_capability(segments, method="GET"):
         return Requirement(DIRECTOR, False)
     if len(p) >= 2 and p[0] == "timer" and p[1] != "data":
         return Requirement(DIRECTOR, False)
-    if p == ["schedule", "set"] or p == ["qualifying", "set"]:
+    if p in (["schedule", "set"], ["qualifying", "set"],
+             ["schedule", "sync"], ["qualifying", "sync"]):
         return Requirement(DIRECTOR, False)
     if p == ["schedule", "data"] or p == ["qualifying", "data"]:
         # These carry per-stint stream URLs, so a commentator must not read them

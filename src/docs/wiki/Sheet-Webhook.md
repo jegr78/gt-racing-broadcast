@@ -438,9 +438,10 @@ report *"webhook script outdated: redeploy"* instead of failing silently.
 
 Apps Script usually answers in a few seconds but has slow phases of 10-20 s. The relay
 therefore gives each background write (HUD fields, teams, timer) 15 s and retries it up to
-three times. A save from the panel (a Schedule, POV or Crew row) gets one 30 s attempt, and
-saves sent at the same time go to the script one after another, so a slow phase shows as a
-slower confirm instead of an error. Every failed attempt is a
+three times. A Schedule, Qualifying or POV save from the panel answers at once and is
+written in the background, one save after another, with 45 s per attempt and three attempts;
+if that is not enough, the relay keeps the value and writes it again whenever the webhook
+answers. A Crew row (Control Center) keeps one 30 s attempt. Every failed attempt is a
 `sheet push … failed` WARNING in the relay log (`racecast relay logs`), and a write that
 needed a retry or took 5 s or longer is logged as INFO, so a slowing script shows up before
 the panel turns red. The webhook URL and its key never appear in the log.

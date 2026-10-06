@@ -129,6 +129,7 @@ import resources  # noqa: E402, F401 - machine resource sampler (health history)
 import cue_admin   # director text-cue channel (#243)
 import flag_graphic   # flag-status graphics: value->source + persisted store (#flag-graphic)
 import graphic_takes   # crew graphic takes: allowlist + take rules (#744)
+import pending_saves   # pending Director Panel sheet saves (src/scripts on sys.path)
 import health_store  # health-history SQLite store (task 7; src/scripts on sys.path)
 _HEALTH_CONST = health_store  # stable module alias: make_handler's `health_store`
 # PARAMETER shadows the module name inside its closure, so the constants
@@ -2415,6 +2416,12 @@ WEBHOOK_RETRY_TIMEOUT_S = 15
 # attempt gets 30 s. SetupControl sends these writes one at a time.
 WEBHOOK_SYNC_TIMEOUT_S = 30
 WEBHOOK_SYNC_BUDGET_S = 30.0
+# Async panel saves (Schedule/Qualifying/POV, spec 2026-10-06): the answer does
+# not wait for the script, so an attempt can outlast its 30-40 s slow phases.
+WEBHOOK_ASYNC_SAVE_TIMEOUT_S = 45
+WEBHOOK_ASYNC_SAVE_ATTEMPTS = 3
+WEBHOOK_ASYNC_SAVE_BUDGET_S = 150.0
+POV_SHEET_ROW = 2     # the Apps Script writes the POV tab's row 2 (writePov)
 # A success slower than this is logged, so the relay log shows a slowing script
 # before it starts to time out.
 WEBHOOK_SLOW_S = 5.0
@@ -2538,6 +2545,9 @@ class PushHealth:
     def _push_error_text(self, err):
         return err
 
+    def needs_recovery(self):
+        return self.push_status == "failed"
+
     def recover_push(self, probe):
         """Clear a TRANSIENT failure once probe() says the webhook answers.
         Returns True iff it cleared. An outdated script stays failed (a config
@@ -2562,7 +2572,7 @@ def webhook_recovery_tick(url, stores, probe=None):
     failure, then let each failed store clear. No failure, no webhook call.
     Returns True iff a store cleared."""
     probe = probe or probe_webhook
-    failed = [s for s in stores if s is not None and s.push_status == "failed"]
+    failed = [s for s in stores if s is not None and s.needs_recovery()]
     if not failed:
         return False
     answer = []
@@ -2576,6 +2586,29 @@ def webhook_recovery_tick(url, stores, probe=None):
     if any(cleared):
         LOG.info("sheet sync recovered: the webhook answers again")
     return any(cleared)
+
+
+def sync_fields(source, line):
+    """The panel's per-row save state for /schedule/data, /qualifying/data and
+    the POV status: {} when nothing is pending (or the source has no store)."""
+    state = getattr(source, "sync_state", None)
+    if state is None:
+        return {}
+    sync, err = state(line)
+    if not sync:
+        return {}
+    return {"sync": sync, "sync_error": err} if sync == "local" else {"sync": sync}
+
+
+def sync_rows(source):
+    """{sheetRow: sync fields} for every unconfirmed save of *source*, so the panel
+    also sees a save that emptied its row (the row is then gone from the rows)."""
+    states = getattr(source, "sync_states", None)
+    if states is None:
+        return {}
+    return {str(row): ({"sync": sync, "sync_error": err} if sync == "local"
+                       else {"sync": sync})
+            for row, (sync, err) in states().items()}
 
 
 def run_webhook_recovery(url, stores, interval=WEBHOOK_RECOVERY_INTERVAL_S,
@@ -6438,6 +6471,10 @@ class ScheduleSource:
         self.rows = []
         self.last_ok = None
         self.last_error = None
+        # Pending panel saves (spec 2026-10-06): applied after every refresh so a
+        # value not yet in the sheet is what the feeds, RELOAD and NEXT see.
+        self._pending = None
+        self._pending_target = None
 
     @staticmethod
     def _parse_rows(text, allow_local=True):
@@ -6531,12 +6568,20 @@ class ScheduleSource:
                 self.items = [u for u, _n, _s, _l in rows]
                 self.last_ok = time.time()
                 self.last_error = None
+                if self._pending is not None:
+                    self._pending.reconcile(self._pending_target,
+                                            {l: (u, n, s) for u, n, s, l in rows})
+                    self._apply_pending_locked()
             try:
                 with open(self.cache_path, "w", encoding="utf-8") as fh:
                     fh.write("\n".join(u for u, _n, _s, _l in rows) + "\n")
             except Exception:
                 pass  # cache write is best-effort; the in-memory schedule is current
             return True
+        if self._pending is not None:
+            # Nothing came back (sheet down, or an emptied tab): no row to compare,
+            # but a confirmed save's grace still runs out.
+            self._pending.expire(self._pending_target)
         return False
 
     def load_initial(self, template=None):
@@ -6588,20 +6633,48 @@ class ScheduleSource:
         row left fully empty is dropped, matching _parse_rows which skips blank
         rows (so the optimistic state can't diverge from a re-poll)."""
         with self.lock:
-            existing = next((r for r in self.rows if r[3] == physical_row), None)
-            cur_u, cur_n, cur_s = existing[:3] if existing else ("", "", "")
-            new_u = cur_u if url is None else feed_source_value(url)
-            new_n = cur_n if name is None else (name or "").strip()
-            new_s = cur_s if stint is None else (stint or "").strip()
-            if new_u and not (is_feed_source(new_u) if self.allow_local else is_channel(new_u)):
-                return False
-            rows = [r for r in self.rows if r[3] != physical_row]
-            if new_u or new_n or new_s:        # keep planned stints (url may be "")
-                rows.append((new_u, new_n, new_s, physical_row))
-            rows.sort(key=lambda r: r[3])
-            self.rows = rows
-            self.items = [u for u, _n, _s, _l in rows]
+            return self._merge_row_locked(physical_row, url, name, stint)
+
+    def _merge_row_locked(self, physical_row, url=None, name=None, stint=None):
+        existing = next((r for r in self.rows if r[3] == physical_row), None)
+        cur_u, cur_n, cur_s = existing[:3] if existing else ("", "", "")
+        new_u = cur_u if url is None else feed_source_value(url)
+        new_n = cur_n if name is None else (name or "").strip()
+        new_s = cur_s if stint is None else (stint or "").strip()
+        if new_u and not (is_feed_source(new_u) if self.allow_local else is_channel(new_u)):
+            return False
+        rows = [r for r in self.rows if r[3] != physical_row]
+        if new_u or new_n or new_s:        # keep planned stints (url may be "")
+            rows.append((new_u, new_n, new_s, physical_row))
+        rows.sort(key=lambda r: r[3])
+        self.rows = rows
+        self.items = [u for u, _n, _s, _l in rows]
         return True
+
+    def attach_pending(self, store, target):
+        self._pending, self._pending_target = store, target
+
+    def _apply_pending_locked(self):
+        if self._pending is None:
+            return
+        for row, fields in self._pending.overlay(self._pending_target).items():
+            self._merge_row_locked(row, fields.get("url"), fields.get("name"),
+                                   fields.get("stint"))
+
+    def apply_pending(self):
+        with self.lock:
+            self._apply_pending_locked()
+
+    def sync_state(self, row):
+        if self._pending is None:
+            return None, None
+        return self._pending.state(self._pending_target, row)
+
+    def sync_states(self):
+        """row -> (sync, err) for every unconfirmed save of this source."""
+        if self._pending is None:
+            return {}
+        return self._pending.states(self._pending_target)
 
     def health(self):
         with self.lock:
@@ -7098,9 +7171,9 @@ TEAM_SLOTS = {"p1": 1, "p2": 2, "p3": 3}
 class SetupControl(PushHealth):
     """Panel -> sheet writes (spec: panel-sheet-control). Setup fields are
     async-optimistic (override now, push in the background, the sheet poll
-    confirms); Schedule/POV URL writes are synchronous (no local echo target,
-    and answering after the webhook confirm removes the save-vs-RELOAD race).
-    The sheet stays authoritative throughout."""
+    confirms). Schedule/Qualifying/POV saves are async too: live in the relay at
+    once, pushed by one background worker (spec 2026-10-06-async-panel-sheet-saves);
+    Crew writes stay synchronous. The sheet stays authoritative throughout."""
 
     def __init__(self, push_url, hud_source, schedule_source=None, qual_source=None,
                  pov_source=None, crew_source=None):
@@ -7116,6 +7189,21 @@ class SetupControl(PushHealth):
         # saved at once competed at the script and slowed each other into a
         # timeout (#780). Background HUD/team pushes do not take this lock.
         self._sync_lock = threading.Lock()
+        # Schedule/Qualifying/POV saves answer at once and are pushed by one
+        # background worker, in order (spec 2026-10-06-async-panel-sheet-saves).
+        self.saves = pending_saves.PendingSaves()
+        self.autostart_worker = True
+        self._save_wake = threading.Event()
+        self._worker = None
+        self._worker_lock = threading.Lock()   # one sheet-save thread, never two
+        # Keys whose last push failed, so "kept in relay" and "now in sheet" are
+        # each logged once per transition.
+        self._was_local = set()
+        self._save_sources = {"schedule": schedule_source, "qualifying": qual_source,
+                              "pov": pov_source}
+        for target, src in self._save_sources.items():
+            if src is not None and hasattr(src, "attach_pending"):
+                src.attach_pending(self.saves, target)
 
     # -- shared blocking push -> (ok, error); diagnostics like TimerStore ----
     def _push(self, payload, expected_action, **retry):
@@ -7135,6 +7223,124 @@ class SetupControl(PushHealth):
         retry.setdefault("budget_s", WEBHOOK_SYNC_BUDGET_S)
         with self._sync_lock:
             return self._push(payload, expected_action, **retry)
+
+    def _save_push(self, payload, expected_action):
+        """One async-save push: the long attempt, NOT the panel lock's 30 s."""
+        ok, err, _body = push_webhook_retrying(
+            self.push_url, payload, expected_action,
+            timeout=WEBHOOK_ASYNC_SAVE_TIMEOUT_S, attempts=WEBHOOK_ASYNC_SAVE_ATTEMPTS,
+            budget_s=WEBHOOK_ASYNC_SAVE_BUDGET_S)
+        return ok, err
+
+    def _queue_save(self, target, row, fields):
+        self.saves.put(target, row, fields)
+        src = self._save_sources.get(target)
+        if src is not None and hasattr(src, "apply_pending"):
+            src.apply_pending()
+        self._ensure_worker()
+
+    def _new_worker(self):
+        return threading.Thread(target=self._save_worker, name="sheet-save", daemon=True)
+
+    def _ensure_worker(self):
+        self._save_wake.set()
+        if not self.autostart_worker:
+            return
+        with self._worker_lock:
+            if self._worker is None or not self._worker.is_alive():
+                self._worker = self._new_worker()
+                self._worker.start()
+
+    def _save_worker(self):
+        while True:
+            self._save_wake.wait()
+            self._save_wake.clear()
+            while self._run_save_job():
+                pass
+
+    @staticmethod
+    def _save_label(target, row):
+        return "POV" if target == "pov" else f"{target} row {row}"
+
+    def _run_save_job(self):
+        job = self.saves.next_job()
+        if job is None:
+            return False
+        target, row, fields, rev = job
+        if target == "pov":
+            payload, action = {"action": "pov", **fields}, "pov"
+        else:
+            payload, action = {"action": "schedule", "row": row}, "schedule"
+            if target == "qualifying":
+                payload["tab"] = DEFAULT_QUALIFYING_TAB
+            payload.update(fields)
+        try:
+            with self._sync_lock:
+                ok, err = self._save_push(payload, action)
+        except Exception as exc:          # noqa: BLE001  never pin a save in flight
+            LOG.exception("sheet save %s: push raised", self._save_label(target, row))
+            ok, err = False, _mask_webhook(f"{type(exc).__name__}: {exc}", self.push_url)
+        key = (target, row)
+        if ok:
+            self.push_status, self.last_error = "ok", None
+            state = self.saves.done(target, row, rev, ok=True)
+            if state == pending_saves.CONFIRMED and key in self._was_local:
+                self._was_local.discard(key)
+                LOG.info("sheet save %s now in sheet", self._save_label(target, row))
+        else:
+            outdated = webhook_error_permanent(err)
+            if outdated:
+                self._mark_push_failed(err)
+            state = self.saves.done(target, row, rev, ok=False, err=err, hold=outdated)
+            if state == pending_saves.LOCAL and key not in self._was_local:
+                self._was_local.add(key)
+                LOG.warning("sheet save %s kept in relay, not in the sheet yet: %s",
+                            self._save_label(target, row), err)
+        src = self._save_sources.get(target)
+        if src is not None and hasattr(src, "apply_pending"):
+            src.apply_pending()
+        return True
+
+    def drain_saves(self):
+        """Run every queued save in the calling thread (tests, and nothing else)."""
+        n = 0
+        while self._run_save_job():
+            n += 1
+        return n
+
+    def sync_save(self, target, row=POV_SHEET_ROW):
+        """SYNC NOW: push one `local` save again at once."""
+        if target not in self._save_sources:
+            return {"error": f"unknown save target: {target!r}"}
+        try:
+            row = POV_SHEET_ROW if target == "pov" else int(row)
+        except (TypeError, ValueError):
+            return {"error": "row must be a number (1-based)"}
+        if not self.saves.requeue(target, row):
+            return {"error": "nothing waiting for the sheet in that row"}
+        self._ensure_worker()
+        return {"ok": True}
+
+    def needs_recovery(self):
+        if self._push_held_by_outdated_save():
+            return self.saves.retryable() > 0     # a probe cannot fix an outdated script
+        return PushHealth.needs_recovery(self) or self.saves.retryable() > 0
+
+    def recover_push(self, probe):
+        """#779 recovery plus the panel saves held in the relay: once the webhook
+        answers, every `local` save is pushed again. The status itself only turns
+        ok through a real push, and an outdated script stays red."""
+        cleared = False
+        if not self._push_held_by_outdated_save():
+            cleared = PushHealth.recover_push(self, probe)
+        if self.saves.retryable() and probe():
+            if self.saves.requeue_local():
+                self._ensure_worker()
+                cleared = True
+        return cleared
+
+    def _push_held_by_outdated_save(self):
+        return webhook_error_permanent(getattr(self, "_push_err", None))
 
     # -- setup fields (async-optimistic) -------------------------------------
     def set_field(self, key, value, now=None):
@@ -7247,19 +7453,16 @@ class SetupControl(PushHealth):
             # read "sheet sync OK" while a slot silently reverted after the TTL.
             self._mark_push_failed(first_err)
 
-    # -- URL writes (synchronous) --------------------------------------------
+    # -- URL writes (async: live at once, pushed by the save worker) ----------
     def schedule_set(self, row, url=None, name=None, stint=None):
         """Write a race Schedule row (the default tab)."""
-        return self._schedule_write(row, url, name, stint,
-                                    tab=None, inject_source=self.schedule_source)
+        return self._schedule_write(row, url, name, stint, tab=None)
 
     def qualifying_set(self, row, url=None, name=None, stint=None):
         """Write the qualifying row. Same payload, but targeting the Qualifying
         tab (issue #124) and echoing into the qualifying source. Kept separate so
         the race schedule is never touched by a qualifying edit and vice versa."""
-        return self._schedule_write(row, url, name, stint,
-                                    tab=DEFAULT_QUALIFYING_TAB,
-                                    inject_source=self.qual_source)
+        return self._schedule_write(row, url, name, stint, tab=DEFAULT_QUALIFYING_TAB)
 
     # -- crew roster writes (Crew tab: Name | Commentator | Director | Producer | Discord) --
     def crew_set(self, row, name=None, director=None, producer=None,
@@ -7323,7 +7526,7 @@ class SetupControl(PushHealth):
         return row
 
     def _schedule_write(self, row, url=None, name=None, stint=None,
-                        tab=None, inject_source=None):
+                        tab=None):
         if not self.push_url:
             return {"error": "webhook not configured: set RACECAST_SHEET_PUSH_URL "
                              "in the active profile or .env (wiki: Sheet-Webhook)"}
@@ -7366,14 +7569,11 @@ class SetupControl(PushHealth):
             if err:
                 return err
             payload["stint"] = stint
-        ok, err = self._sync_push(payload, "schedule")
-        if ok and inject_source is not None:
-            # Reflect the write locally now. INCLUDING a URL clear (url=""), so
-            # /schedule/data + /cockpit/data don't show the stale link for a poll
-            # interval. None for a field the write didn't touch leaves it as-is.
-            inject_source.inject_row(row, payload.get("url"), payload.get("name"),
-                                     payload.get("stint"))
-        return {"ok": True, "row": row} if ok else {"error": err}
+        # Live in the relay at once, INCLUDING a URL clear (url=""), and pushed in
+        # the background; None for a field the save didn't touch leaves it as-is.
+        fields = {k: payload[k] for k in ("url", "name", "stint") if k in payload}
+        self._queue_save("qualifying" if tab else "schedule", row, fields)
+        return {"ok": True, "row": row, "pending": True}
 
     def _reject_off_vocab(self, key, value):
         """An error dict when a non-empty value is outside the Configuration
@@ -7395,11 +7595,12 @@ class SetupControl(PushHealth):
             return {"error": "url must be a watch URL or UC… channel ID"}
         payload = {"action": "pov", "url": url}
         if name is not None:        # omitted -> leave the Sheet cell; "" -> explicit clear
-            payload["name"] = (name or "")[:20]
-        ok, err = self._sync_push(payload, "pov")
-        if ok and self.pov_source is not None:
-            self.pov_source.refresh()    # name (and stored url) live immediately
-        return {"ok": True} if ok else {"error": err}
+            payload["name"] = (name or "")[:20].rstrip()   # the sheet value is read stripped
+        fields = {"url": url}
+        if "name" in payload:
+            fields["name"] = payload["name"]
+        self._queue_save("pov", POV_SHEET_ROW, fields)
+        return {"ok": True, "pending": True}
 
     # -- panel poll ------------------------------------------------------------
     def data(self):
@@ -7420,9 +7621,11 @@ class SetupControl(PushHealth):
             options[key] = list(names)
             if i in team_pending:
                 out_pending.append(key)
+        unsynced, unsynced_error = self.saves.unsynced()
         return {"fields": fields, "options": options,
                 "pending": sorted(out_pending),
-                "push": self.push_status, "last_error": self.last_error}
+                "push": self.push_status, "last_error": self.last_error,
+                "unsynced": unsynced, "unsynced_error": unsynced_error}
 
 
 _STREAM_QUALITY_RE = re.compile(r"Opening stream:\s+(\S+)")
@@ -9196,6 +9399,7 @@ class Relay:
                           "state_age_s": round(now - self.pov.phase_since, 1),
                           "down": self.pov.dropped and not self.pov.paused,
                           "source": self.pov_source.health() if self.pov_source else None,
+                          **sync_fields(self.pov_source, POV_SHEET_ROW),
                           **self._backlog_status("POV", self.pov)}
         out["obs"] = {"reachable": self.obs_reachable, "note": self.obs_note}
         # On-air feed/stint + league identity for producer takeover (#takeover):
@@ -9239,6 +9443,7 @@ class Relay:
                           "state_age_s": round(now - self.pov.phase_since, 1),
                           "down": self.pov.dropped and not self.pov.paused,
                           "source": self.pov_source.health() if self.pov_source else None,
+                          **sync_fields(self.pov_source, POV_SHEET_ROW),
                           **self._backlog_status("POV", self.pov)}
         out["obs"] = {"reachable": self.obs_reachable, "note": self.obs_note}
         out["live"] = {"feed": None, "stint": None, "mode": "solo"}
@@ -11498,8 +11703,10 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     live = {f.idx: k for k, f in relay.feeds.items()}
                     return self._send({"rows": [{"row": i + 1, "sheetRow": line,
                                                  "url": u, "name": n, "stint": st,
-                                                 "live": live.get(i)}
+                                                 "live": live.get(i),
+                                                 **sync_fields(relay.source, line)}
                                                 for i, (u, n, st, line) in enumerate(rows)],
+                                       "sync_rows": sync_rows(relay.source),
                                        "source": relay.source.health() if relay.source else None})
                 if p == ["substitution", "latest"]:
                     # Director-panel read side for the ad-hoc stream-substitution
@@ -11537,8 +11744,10 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     return self._send({"available": True, "mode": relay.mode,
                                        "rows": [{"row": i + 1, "sheetRow": line,
                                                  "url": u, "name": n, "stint": st,
-                                                 "live": live.get(i)}
+                                                 "live": live.get(i),
+                                                 **sync_fields(qs, line)}
                                                 for i, (u, n, st, line) in enumerate(qrows)],
+                                       "sync_rows": sync_rows(qs),
                                        "source": qs.health()})
                 if len(p) == 2 and p[0] == "mode":
                     res = relay.set_mode(p[1].lower())
@@ -11830,8 +12039,10 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         # the Sheet; the URL applies on the next /reload (the relay
                         # never tears a feed mid-stint). Pass the row's own
                         # streamer + stint so the optimistic local inject keeps
-                        # them (both are Configuration vocab, from the sheet). Only
-                        # clear the pending entry once the write actually succeeds.
+                        # them (both are Configuration vocab, from the sheet). The
+                        # save is async: a valid one answers `pending` at once and
+                        # the relay keeps the link until the sheet has it, so the
+                        # submission is cleared then; a validation error keeps it.
                         # Branch on the ENTRY's recorded mode (not the relay's
                         # current mode) so a director can approve a qualifying
                         # submission into the Qualifying tab regardless of what
@@ -12095,6 +12306,12 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 if p == ["pov", "set"]:
                     return self._send(setup_ctl.pov_set(body.get("url"),
                                                         body.get("name")))
+                if p == ["schedule", "sync"]:
+                    return self._send(setup_ctl.sync_save("schedule", body.get("row")))
+                if p == ["qualifying", "sync"]:
+                    return self._send(setup_ctl.sync_save("qualifying", body.get("row")))
+                if p == ["pov", "sync"]:
+                    return self._send(setup_ctl.sync_save("pov"))
                 if p == ["setup", "teams"]:
                     return self._send(setup_ctl.set_teams(body.get("teams")))
                 return self._send({"error": "unknown", "path": self.path}, 404)
@@ -12869,6 +13086,9 @@ def main():
         # IMPORTANT: do NOT call shutdown() from the thread running serve_forever()
         # (deadlock). Stop the feeds and exit hard; the OS frees the sockets; the
         # streamlink subprocesses are cleanly terminated.
+        if setup_ctl is not None and setup_ctl.saves.unconfirmed():
+            LOG.warning("relay stopping with %d panel save(s) not confirmed in the "
+                        "sheet; they are dropped", setup_ctl.saves.unconfirmed())
         LOG.info("Stopping feeds…")
         stop_evt.set(); relay.shutdown(); os._exit(0)
     signal.signal(signal.SIGINT, shutdown)
