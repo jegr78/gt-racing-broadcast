@@ -82,6 +82,42 @@ def t_overlap_ignores_hairline_touch():
     assert v.rule_overlap(_facts([a, b])) == [], "a 1 px shared edge is not an overlap"
 
 
+def t_overlap_uses_the_visible_rect_of_a_clipped_element():
+    # cc-profile: "Add entry" pokes 6 px past the bottom of the scrolling main, above the console dock.
+    btn = _el(i=0, sel="#add", interactive=True, rect=[265, 727, 103, 34], vis_rect=[265, 727, 103, 28])
+    head = _el(i=1, sel="#head", interactive=True, rect=[212, 756, 1068, 44], vis_rect=[212, 756, 1068, 44])
+    assert v.rule_overlap(_facts([btn, head])) == [], "the clipped strip is not painted"
+    del btn["vis_rect"]
+    assert len(v.rule_overlap(_facts([btn, head]))) == 1, "without vis_rect the full rect still counts"
+
+
+def _phone(elements, scroll_height):
+    facts = _facts(elements, w=390, scroll_width=390)
+    facts["viewport"]["h"] = 844
+    facts["scroll_height"] = scroll_height
+    facts["scroll_y"] = 0
+    return facts
+
+
+def t_overlap_ignores_a_fixed_bar_the_page_scrolls_clear():
+    # cockpit phone: body padding-bottom lets the chat input scroll above the fixed tab bar.
+    tab = _el(i=0, sel="#tab", interactive=True, fixed=True, rect=[0, 787, 98, 57])
+    inp = _el(i=1, sel="#chatin", interactive=True, rect=[12, 787, 280, 44])
+    assert v.rule_overlap(_phone([tab, inp], 986)) == [], "a 142 px scroll uncovers the input"
+
+
+def t_overlap_flags_content_stuck_under_a_fixed_bar():
+    tab = _el(i=0, sel="#tab", interactive=True, fixed=True, rect=[0, 787, 98, 57])
+    inp = _el(i=1, sel="#chatin", interactive=True, rect=[12, 887, 280, 44])
+    hits = v.rule_overlap(_phone([tab, inp], 931))
+    assert [(f.selector, f.detail) for f in hits] == [("#tab", "overlaps #chatin")], \
+        "without bottom padding the last input never scrolls clear of the bar"
+    head = _el(i=0, sel="#head", interactive=True, fixed=True, rect=[0, 0, 390, 60])
+    btn = _el(i=1, sel="#btn", interactive=True, rect=[10, 20, 100, 30])
+    assert len(v.rule_overlap(_phone([head, btn], 2000))) == 1, \
+        "content at the top of the document stays under a fixed header"
+
+
 def t_console_errors_become_findings():
     hits = v.rule_console(["pageerror: TypeError: x is undefined"])
     assert [(f.rule, f.selector) for f in hits] == [("console", "console")], hits

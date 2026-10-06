@@ -81,15 +81,46 @@ def _intersects(a, b):
     return w >= OVERLAP_MIN_PX and h >= OVERLAP_MIN_PX
 
 
+def _painted(el):
+    """The element's rect minus what ancestor overflow clips (vis_rect), or rect when the probe gave none."""
+    return el.get("vis_rect") or el["rect"]
+
+
+def _never_clear(fixed, flow, facts):
+    """True when no document scroll offset shows *flow* fully in the viewport and clear of the fixed element's band."""
+    vh = facts["viewport"]["h"]
+    max_s = max(0, facts.get("scroll_height", vh) - vh)
+    fy, fh = fixed[1] - facts.get("scroll_y", 0), fixed[3]
+    y, h = flow[1], flow[3]
+    lo, hi = max(0, y + h - vh), min(max_s, y)
+    if lo > hi:
+        lo, hi = 0, max_s
+    above = max(lo, y + h - fy) <= hi
+    below = lo <= min(hi, y - fy - fh)
+    return not (above or below)
+
+
+def _overlaps(a, b, facts):
+    """True when *a* and *b* overlap as the viewer sees them; a fixed box against in-flow content only when scrolling cannot separate them."""
+    ra, rb = _painted(a), _painted(b)
+    if bool(a.get("fixed")) == bool(b.get("fixed")):
+        return _intersects(ra, rb)
+    across = min(ra[0] + ra[2], rb[0] + rb[2]) - max(ra[0], rb[0])
+    if across < OVERLAP_MIN_PX:
+        return False
+    fixed, flow = (ra, rb) if a.get("fixed") else (rb, ra)
+    return _never_clear(fixed, flow, facts)
+
+
 def rule_overlap(facts):
-    """Flag interactive element pairs whose rects overlap, excluding ancestor/descendant pairs via anc."""
+    """Flag interactive element pairs that overlap, excluding ancestor/descendant pairs via anc."""
     items = [el for el in facts["elements"] if el["interactive"]]
     out = []
     for n, a in enumerate(items):
         for b in items[n + 1:]:
             if a["i"] in b["anc"] or b["i"] in a["anc"]:
                 continue
-            if _intersects(a["rect"], b["rect"]):
+            if _overlaps(a, b, facts):
                 out.append(Finding("overlap", a["sel"], f"overlaps {b['sel']}"))
     return out
 

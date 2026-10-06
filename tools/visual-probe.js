@@ -46,7 +46,8 @@
   };
 
   // An ancestor with non-visible overflow hides whatever lies outside its box, e.g. content scrolled out of a panel.
-  const clippedAway = (el, r) => {
+  // Returns the part of r left after that clipping, in viewport coordinates, or null when nothing is left.
+  const visibleRect = (el, r) => {
     let left = r.left, top = r.top, right = r.right, bottom = r.bottom;
     // Body and html overflow apply to the viewport, and a fixed box escapes the clipping of its ancestors.
     let fixed = getComputedStyle(el).position === "fixed";
@@ -56,9 +57,16 @@
         const pr = p.getBoundingClientRect();
         if (ps.overflowX !== "visible") { left = Math.max(left, pr.left); right = Math.min(right, pr.right); }
         if (ps.overflowY !== "visible") { top = Math.max(top, pr.top); bottom = Math.min(bottom, pr.bottom); }
-        if (right - left <= 0 || bottom - top <= 0) return true;
+        if (right - left <= 0 || bottom - top <= 0) return null;
       }
       fixed = ps.position === "fixed";
+    }
+    return {left, top, width: right - left, height: bottom - top};
+  };
+
+  const inFixed = el => {
+    for (let e = el; e && e.nodeType === 1; e = e.parentElement) {
+      if (getComputedStyle(e).position === "fixed") return true;
     }
     return false;
   };
@@ -88,7 +96,8 @@
     const r = el.getBoundingClientRect();
     if (r.width <= 0 || r.height <= 0) continue;
     if (!el.checkVisibility({opacityProperty: true, visibilityProperty: true})) continue;
-    if (clippedAway(el, r)) continue;
+    const vr = visibleRect(el, r);
+    if (vr === null) continue;
     const x = r.left + scrollX, y = r.top + scrollY;
     if (x + r.width <= 0 || y + r.height <= 0 || x >= scrollWidth) continue;
     const cs = getComputedStyle(el);
@@ -102,6 +111,7 @@
       i: elements.length, sel: selector(el), tag, interactive: el.matches(INTERACTIVE),
       text: ownText(el), has_text: (el.textContent || "").trim() !== "",
       rect: [x, y, r.width, r.height],
+      vis_rect: [vr.left + scrollX, vr.top + scrollY, vr.width, vr.height], fixed: inFixed(el),
       client_w: el.clientWidth, scroll_w: el.scrollWidth,
       client_h: el.clientHeight, scroll_h: el.scrollHeight,
       overflow_x: cs.overflowX, overflow_y: cs.overflowY, text_overflow: cs.textOverflow,
@@ -119,5 +129,6 @@
     }
     elements.push(rec);
   }
-  return {viewport: {w: doc.clientWidth, h: innerHeight}, scroll_width: scrollWidth, ua, elements};
+  return {viewport: {w: doc.clientWidth, h: innerHeight}, scroll_width: scrollWidth,
+          scroll_height: doc.scrollHeight, scroll_y: Math.round(scrollY), ua, elements};
 }

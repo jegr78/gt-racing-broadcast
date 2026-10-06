@@ -44,6 +44,8 @@
 facts = {
   "viewport":     {"w": int, "h": int},          # documentElement.clientWidth / innerHeight
   "scroll_width": int,                           # documentElement.scrollWidth
+  "scroll_height": int,                          # documentElement.scrollHeight
+  "scroll_y":     int,                          # window.scrollY when the probe ran
   "ua":           {"input": str, "select": str, "textarea": str, "button": str},
                                                  # UA-default computed background-color per control
   "elements": [ {                                # visible elements only, document order
@@ -54,6 +56,8 @@ facts = {
       "text": str,                               # own text nodes, trimmed, max 60 chars
       "has_text": bool,                          # textContent non-empty (descendants included)
       "rect": [x, y, w, h],                      # document coordinates, px
+      "vis_rect": [x, y, w, h],                  # rect minus what ancestor overflow clips, document coordinates
+      "fixed": bool,                             # the element or an ancestor is position: fixed
       "client_w": int, "scroll_w": int, "client_h": int, "scroll_h": int,
       "overflow_x": str, "overflow_y": str, "text_overflow": str, "line_clamp": bool,
       "color": [r, g, b, a] | None,              # None when not rgb()/rgba()
