@@ -24,7 +24,8 @@
   - `gt7_recording.list_recordings(rec_dir) -> [{name, path, size, started, duration_s, laps, partial}]`; `started` is the header's ISO 8601 string with offset.
   - `gt7_laps.index(path, track_db, cars, runtime_base) -> {"rec", "started", "start_ts", "end_ts", "track", "laps"}`; each lap has `session, lap, start_t_s, end_t_s, gt7_time_s, relay_time_s, status, reason, fuel_used_l, top_speed_kmh, car, rec, track_id, car_id, tyre_avg_c, trace`; `trace` points carry `d, t, speed_kmh, throttle, brake, steer_deg, gear, x, z` every 5 m. The track is decided per GT7 session, so each lap carries its own `track_id`; a recording can span several tracks. The recording-level `track` field is not used here.
   - `gt7_laps.sectors(trace, length_m, step_m=200)`, `gt7_laps.best_sectors(laps)`, `gt7_laps.theoretical_best(laps)`.
-  - `gt7_tracks.TrackDB.load(runtime_base, bundled_dir=None)` and `TrackDB.name(official_id) -> {id, track, layout, reverse, country, length_m} | None`; `gt7_cars.CarDB(directory)`.
+  - `gt7_tracks.TrackDB.load(runtime_base, bundled=None)` and `TrackDB.name(official_id) -> {id, track, layout, reverse, country, length_m, official_name} | None`; `gt7_cars.CarDB(directory)`.
+  - Part 3 helpers in `racecast.py`: `_telemetry_dbs() -> (TrackDB, CarDB)` and `_telemetry_index(path, dbs=None)`, which passes the learned-assignment key `"<profile>/<stem>"` and the bundled dir to `gt7_laps.index`. The report uses these two, so it names cars and tracks exactly as the Control Center does.
   - `racecast.py`: `_runtime_base_dir()`, `resource_path("assets/gt7")`, `_profile_has_telemetry()` (line 5744), `_telemetry_rec_dir()` (part 1).
 - Decisions the tests pin:
   - A lap is **counted** when `status` is `"reference"` or `"counted"`. A reference lap is a valid lap that set a new best, so it belongs in every figure.
@@ -856,18 +857,20 @@ def t_report_telemetry_skips_a_broken_recording():
              "duration_s": 600.0, "laps": 1, "partial": True}]
     pit = trt._lap(1, 5.0, status="not counted", reason="pit", relay=95.0, track_id=None)
 
-    def index(path, track_db, cars, runtime_base):
+    def index(path, track_db, cars, runtime_base, key=None, bundled=None):
         if path == "b":
             raise ValueError("corrupt recording")
         return {"rec": "a", "started": started, "start_ts": start, "end_ts": start + 600,
                 "track": None, "laps": [pit]}
 
     fakes = {
-        "gt7_recording": types.SimpleNamespace(list_recordings=lambda d: rows),
+        "gt7_recording": types.SimpleNamespace(list_recordings=lambda d: rows,
+                                               recording_stem=lambda p: p),
         "gt7_laps": types.SimpleNamespace(index=index),
         "gt7_tracks": types.SimpleNamespace(TrackDB=types.SimpleNamespace(
-            load=lambda base, bundled_dir=None: types.SimpleNamespace(name=lambda tid: None))),
+            load=lambda base, bundled=None: types.SimpleNamespace(name=lambda tid: None))),
         "gt7_cars": types.SimpleNamespace(CarDB=lambda directory=None: object()),
+        "gt7_data": types.SimpleNamespace(cars_dir=lambda base, bundled=None: "unused"),
     }
     saved = {k: sys.modules.get(k) for k in fakes}
     orig = (rc._profile_has_telemetry, rc._telemetry_rec_dir)
@@ -950,19 +953,17 @@ def _report_telemetry(frm, to):
     if not _profile_has_telemetry():
         return None
     try:
-        import gt7_cars, gt7_laps, gt7_recording, gt7_tracks
+        import gt7_recording
         import report_telemetry as rtel
         rows = _recordings_in_window(gt7_recording.list_recordings(_telemetry_rec_dir()),
                                      frm, to)
         if not rows:
             return None
-        base = _runtime_base_dir()
-        track_db = gt7_tracks.TrackDB.load(base, bundled_dir=resource_path("assets/gt7"))
-        cars = gt7_cars.CarDB(resource_path("assets/gt7"))   # see the note below
+        track_db, cars = _telemetry_dbs()
         indexes = []
         for r in rows:
             try:
-                idx = gt7_laps.index(r["path"], track_db, cars, base)
+                idx = _telemetry_index(r["path"], (track_db, cars))
             except Exception as exc:  # noqa: BLE001  one broken recording must not drop the others
                 print(f"note: telemetry recording {r['name']} skipped ({exc}).")
                 continue
@@ -974,8 +975,6 @@ def _report_telemetry(frm, to):
         print(f"note: telemetry section skipped ({exc}).")
         return None
 ```
-
-Construct `TrackDB` and `CarDB` exactly as part 3's telemetry data functions in `racecast.py` do (`grep -n "TrackDB.load\|CarDB(" src/racecast.py`). If they call `gt7_cars.CarDB()` without a directory (the part 2 path through `gt7_data.resolve`, which prefers the updated runtime tables), use that here too, so the report names the same cars as the Control Center; then drop the comment.
 
 In `_build_report_file` (line 1603), replace the `build_report` call:
 

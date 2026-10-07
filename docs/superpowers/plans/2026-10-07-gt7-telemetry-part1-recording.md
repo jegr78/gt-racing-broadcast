@@ -316,7 +316,7 @@ git commit -m "feat(telemetry): emit lap records and count sessions in the engin
   - `class RecordingWriter(rec_dir, profile, relay_version, queue_max=QUEUE_MAX, flush_s=FLUSH_S)`: `put(wall_ts, kind, plain)` (kind is `"A"`, `"B"` or `"~"`), `close(timeout=5.0)`; attributes `path` (current file path or None), `started` (wall ts or None), `bytes`, `dropped`, `error` (str or None).
   - `class Recording(path)`: `header` (dict), `packets()` generator of `(wall_ts, kind, plain)`, `dropped` (int, valid after `packets()` is exhausted).
   - `finalize_partials(rec_dir) -> list[str]` of new file names.
-  - `list_recordings(rec_dir) -> list[dict]` with keys `name`, `path`, `size`, `started`, `duration_s`, `laps`, `partial`, sorted by name.
+  - `list_recordings(rec_dir, count_laps=False) -> list[dict]` with keys `name`, `path`, `size`, `started`, `duration_s`, `laps`, `partial`, sorted by name. The default reads only each header: `duration_s` is the file's mtime minus the header's `started`, `laps` is None. `count_laps=True` reads every packet for the exact first-to-last duration and the lap count (the CLI `list` uses it; the Control Center and the report must stay fast).
   - `recording_stem(path) -> str`: file name without `.gt7rec` / `.gt7rec.part`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -461,9 +461,12 @@ def t_list_recordings_reports_duration_laps_partial():
                  (30.0, "A", _plain(lap=3))]
         w = _write(d, items)
         os.replace(w.path, w.path + ".part")
-        (row,) = rec.list_recordings(d)
+        (row,) = rec.list_recordings(d, count_laps=True)
         assert row["name"] == os.path.basename(w.path) + ".part"
         assert row["duration_s"] == 20.0 and row["laps"] == 2 and row["partial"] is True
+        (fast,) = rec.list_recordings(d)
+        assert fast["laps"] is None and fast["partial"] is True, "the default reads only the header"
+        assert fast["duration_s"] >= 0.0
         assert rec.recording_stem(row["path"]) == os.path.basename(w.path)[:-len(".gt7rec")]
 
 
@@ -700,8 +703,15 @@ def finalize_partials(rec_dir):
     return done
 
 
-def list_recordings(rec_dir):
-    """One dict per readable recording in rec_dir, sorted by name."""
+def _started_ts(header):
+    try:
+        return datetime.datetime.fromisoformat(header.get("started", "")).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
+def list_recordings(rec_dir, count_laps=False):
+    """One dict per readable recording in rec_dir, sorted by name; count_laps reads every packet."""
     try:
         names = sorted(os.listdir(rec_dir))
     except OSError:
@@ -714,6 +724,13 @@ def list_recordings(rec_dir):
         try:
             r = Recording(path)
         except RecordingError:
+            continue
+        if not count_laps:
+            start = _started_ts(r.header)
+            rows.append({"name": name, "path": path, "size": os.path.getsize(path),
+                         "started": r.header.get("started", ""),
+                         "duration_s": max(0.0, os.path.getmtime(path) - start) if start else 0.0,
+                         "laps": None, "partial": name.endswith(PART)})
             continue
         first = last = prev_lap = None
         laps = 0
@@ -1706,7 +1723,7 @@ def telemetry_list_cmd(_rest):
     """List the active profile's recordings."""
     import gt7_recording as gr
     rec_dir = _telemetry_rec_dir()
-    rows = gr.list_recordings(rec_dir)
+    rows = gr.list_recordings(rec_dir, count_laps=True)
     if not rows:
         print(f"no telemetry recordings in {rec_dir}")
         return

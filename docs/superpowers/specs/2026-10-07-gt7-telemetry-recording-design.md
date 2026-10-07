@@ -109,8 +109,11 @@ Stdlib only, no relay imports.
   `RecordingError` with a clear message.
 - `export_csv(path, out_dir, include_all=False, excel=False)` writes `samples.csv` and
   `laps.csv` (below).
-- `list_recordings(dir)` -> name, size, start, duration, lap count, `partial` flag
-  (the file still ends in `.part`).
+- `list_recordings(dir, count_laps=False)` -> name, size, start, duration, lap count,
+  `partial` flag (the file still ends in `.part`). By default it reads only the header
+  (duration = file mtime minus `started`, no lap count), so the Control Center and the
+  report stay fast; `count_laps=True` reads every packet, which `racecast telemetry list`
+  does.
 
 ## Switch and state
 
