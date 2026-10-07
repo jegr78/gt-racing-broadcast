@@ -424,8 +424,10 @@ recordings of the active profile.
   - track map of the best lap as SVG, mini-sectors coloured by the gap to the best
     sector time;
   - the lap table: time, status, reason, fuel, top speed, car, track.
-- `render_summary_text` (the Discord message) adds one line:
-  `Best lap 1:58.432 (theoretical 1:57.910), 23 laps, Suzuka Circuit`.
+- One line `Best lap 1:58.432 (theoretical 1:57.910), 23 laps, Suzuka Circuit` goes into
+  `render_summary_text` (CLI and Control Center summary) and, as a "Telemetry" field,
+  into the Discord embed built by `report_discord_fields`. With several track and car
+  combinations the line names the one with the most counted laps.
 - `build_report` takes the telemetry block as an optional argument, so its existing
   tests stay unchanged.
 
