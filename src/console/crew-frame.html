@@ -105,6 +105,10 @@
   .flaglist button { min-height: 44px; border-radius: 8px; border: 2px solid transparent;
                      font: inherit; font-weight: 800; cursor: pointer; color: #111; }
   .flaglist button[aria-pressed="true"] { border-color: #fff; box-shadow: 0 0 0 3px #e5484d; }
+  .flaglist button.chk { background: repeating-conic-gradient(#111 0 25%, #f4f4f4 0 50%) 0 0 / 16px 16px; }
+  .flaglist button.chk .flab, .flaglist button.chk .fon {
+    background: #111; color: #fff; padding: 1px 6px; border-radius: 4px; }
+  .flaglist button.chk .fon { display: table; margin: 2px auto 0; }
   .flaglist .fon { display: block; font-size: 10px; letter-spacing: .08em; }
   .flaglist button:disabled { opacity: .45; cursor: default; }
   .gpreview { max-width: 960px; width: 94vw; border: 0; border-radius: 10px; padding: 0;
@@ -263,10 +267,11 @@
       card.hidden = !flags.length;
       fl.textContent = '';
       flags.forEach(function (t) {
-        var b = el('button', '', t.source.replace(/^Flag /, ''));
+        var b = el('button', t.source === 'Flag Checkered' ? 'chk' : '');
         b.type = 'button';
+        b.appendChild(el('span', 'flab', t.source.replace(/^Flag /, '')));
         if (t.visible) b.appendChild(el('span', 'fon', 'ON AIR'));
-        b.style.background = FLAG_COLORS[t.source] || '#cdd3da';
+        if (!b.className) b.style.background = FLAG_COLORS[t.source] || '#cdd3da';
         b.setAttribute('aria-pressed', t.visible ? 'true' : 'false');
         var why = blockedReason(t);
         b.disabled = busy || !!why;

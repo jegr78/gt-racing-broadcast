@@ -512,9 +512,10 @@ stay dark and light up while their graphic is on air.
 > handovers** until you clear it. Same text control is on the panel's **FLAG** dropdown.
 >
 > The **Flag Gfx** row drives relay-mediated OBS source visibility (`/obs/flag/*`) and
-> requires the five optional `Flag …` PNGs from the Sheet **Assets** tab
-> (see [Sheet template](Sheet-Template#assets-tab)). A missing PNG is non-fatal. OBS
-> shows nothing for that state. The panel's **Flag Gfx** row is the equivalent control.
+> requires the optional `Flag …` PNGs from the Sheet **Assets** tab
+> (see [Sheet template](Sheet-Template#assets-tab)). A flag whose PNG the Sheet does not
+> link answers an error and OBS stays unchanged. The panel's **Flag Gfx** row is the
+> equivalent control; it shows only the linked flags, Checkered included.
 
 ![Companion page 3, flags & graphics: the race-condition flag and flag-graphic rows, the pre-race info and starting-grid toggles, the standings/results/weather overlays, and the per-row grid reveals](images/companion-page3-flags-graphics.png)
 

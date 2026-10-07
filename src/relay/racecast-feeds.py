@@ -1548,37 +1548,6 @@ def _internal_graphic_labels(graphics_dir):
     return {str(x).strip().lower() for x in internal}
 
 
-def _placeholder_signature():
-    """(size, bytes) of the transparent graphic placeholder, or None if it cannot be
-    read. A pure-placeholder graphic (written by get-graphics' seed/reset for an
-    un-linked or un-Sheeted asset, #387) is byte-identical to this file and renders
-    blank, so it is dropped from the browser list. Best-effort: None -> no placeholder
-    filtering (the files just stay listed, today's behaviour)."""
-    try:
-        with open(placeholders.graphic_placeholder_path(), "rb") as fh:
-            data = fh.read()
-    except OSError:
-        return None
-    return (len(data), data)
-
-
-def _is_placeholder_png(path, placeholder_sig):
-    """True iff the file at `path` is byte-identical to the graphic placeholder.
-    A cheap size pre-check avoids reading real (larger) graphics. placeholder_sig is
-    the (size, bytes) tuple from _placeholder_signature(), or None -> never a
-    placeholder (no filtering)."""
-    if not placeholder_sig:
-        return False
-    size, data = placeholder_sig
-    try:
-        if os.path.getsize(path) != size:
-            return False
-        with open(path, "rb") as fh:
-            return fh.read() == data
-    except OSError:
-        return False
-
-
 def list_graphics(graphics_dir):
     """Sorted list of the broadcast still-graphics (*.png) in graphics_dir as
     [{"name": <Sheet label>, "file": <label>.png}, ...] for the cockpit browser.
@@ -1594,14 +1563,13 @@ def list_graphics(graphics_dir):
     except OSError:
         return []
     internal = _internal_graphic_labels(graphics_dir)
-    placeholder_sig = _placeholder_signature()
     out = []
     for fn in names:
         if fn.lower().endswith(".png") and os.path.isfile(os.path.join(graphics_dir, fn)):
             name = fn[:-4]
             if name.strip().lower() in internal:
                 continue
-            if _is_placeholder_png(os.path.join(graphics_dir, fn), placeholder_sig):
+            if placeholders.is_graphic_placeholder(os.path.join(graphics_dir, fn)):
                 continue
             out.append({"name": name, "file": fn})
     out.sort(key=lambda e: e["name"].lower())
@@ -4802,6 +4770,13 @@ def apply_graphic(relay, obs_ws, verb, source):
     return payload, (200 if ok else 503)
 
 
+def _takeable_definitions(relay, flag_store):
+    """The graphic-take definitions minus the flags the Sheet Assets do not link."""
+    defs = graphic_takes.definitions(getattr(relay, "solo", False))
+    available = set(flag_store.available()) if flag_store else set()
+    return [d for d in defs if d["flag"] is None or d["flag"] in available]
+
+
 def graphic_takes_view(relay, obs_ws, modes, roles, crew_takes, flag_store, read_state=None,
                        own_requests=None):
     """The takeable graphics with their live state. *modes* maps a crew role to its
@@ -4810,7 +4785,7 @@ def graphic_takes_view(relay, obs_ws, modes, roles, crew_takes, flag_store, read
     *own_requests* ({source: state}), the state of the caller's requests.
     *read_state* (items) -> (state, note) replaces the direct OBS read, e.g. with a
     shared cache."""
-    defs = graphic_takes.definitions(getattr(relay, "solo", False))
+    defs = _takeable_definitions(relay, flag_store)
     items = [(sc, d["source"]) for d in defs if d["flag"] is None for sc in d["scenes"]]
     scene, note, visible = None, "", {}
     if obs_ws is None:
@@ -4835,10 +4810,9 @@ def graphic_takes_view(relay, obs_ws, modes, roles, crew_takes, flag_store, read
         item = {"source": d["source"], "group": d["group"], "scenes": d["scenes"],
                 "visible": shown, "by": by.get(d["source"])}
         if roles is not None:
-            usable = d["flag"] is None or flag_store is not None
-            item["can_take"] = usable and graphic_takes.may_take(d, roles, modes)
+            item["can_take"] = graphic_takes.may_take(d, roles, modes)
             item["can_request"] = graphic_takes.may_request(d, roles, modes)
-            item["can_hide"] = usable and graphic_takes.may_hide(d, roles, modes, current)
+            item["can_hide"] = graphic_takes.may_hide(d, roles, modes, current)
             item["request"] = (own_requests or {}).get(d["source"])
         out.append(item)
     if roles is None:
@@ -4858,9 +4832,9 @@ def apply_graphic_take(relay, obs_ws, modes, roles, name, source, on, crew_takes
     """POST /cockpit/graphic-takes: a commentator or Race Control puts a graphic on
     air or takes it off. Returns (payload, status). A request that changes nothing
     posts no chat line. Best effort, never raises."""
-    defs = graphic_takes.definitions(getattr(relay, "solo", False))
+    defs = _takeable_definitions(relay, flag_store)
     entry = graphic_takes.find(defs, source)
-    if entry is None or (entry["flag"] and not flag_store):
+    if entry is None:
         return {"ok": False, "error": f"not a takeable graphic: {source!r}"}, 404
     allowed = (graphic_takes.may_take(entry, roles, modes) if on else
                graphic_takes.may_hide(entry, roles, modes, crew_takes.snapshot()[0]))
@@ -12884,7 +12858,7 @@ def main():
         return _obs_ws.set_scene_item_enabled(scene, source, enabled)
     flag_graphic_store = flag_graphic.FlagGraphicStore(
         os.path.join(runtime, "flag-graphic.json"), apply_fn=_flag_graphic_apply,
-        scenes=flag_graphic.flag_graphic_scenes(args.solo))
+        scenes=flag_graphic.flag_graphic_scenes(args.solo), graphics_dir=graphics_dir)
     flag_graphic_store.reassert()   # re-push the saved flag to OBS (best-effort)
     _health_store_obj = HealthStore(
         os.path.join(runtime, "health-history.db"),

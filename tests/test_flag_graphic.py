@@ -3,6 +3,7 @@
 import importlib.util
 import json
 import os
+import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -15,12 +16,15 @@ def _load(name, rel):
     return mod
 
 
+sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))
 fg = _load("flag_graphic", ("src", "scripts", "flag_graphic.py"))
+import placeholders  # noqa: E402
 
 
-def t_sources_are_the_five_flags():
+def t_sources_are_the_catalog_flags():
     assert list(fg.FLAG_GRAPHIC_SOURCES) == [
-        "green", "yellow", "red", "safety-car", "virtual-safety-car"]
+        "green", "yellow", "red", "safety-car", "virtual-safety-car", "checkered"]
+    assert fg.FLAG_GRAPHIC_SOURCES["checkered"] == "Flag Checkered"
     assert fg.FLAG_GRAPHIC_SOURCES["green"] == "Flag Green"
     assert fg.FLAG_GRAPHIC_SOURCES["virtual-safety-car"] == "Flag Virtual Safety Car"
     assert fg.FLAG_GRAPHIC_SCENES == ("Stint", "Splitscreen")
@@ -58,11 +62,13 @@ def t_normalize_canonical_aliases_and_clear():
     assert fg.normalize_flag_value("") == ""
     assert fg.normalize_flag_value(None) == ""
     assert fg.normalize_flag_value("purple") is None
+    assert fg.normalize_flag_value("Chequered") == "checkered"
+    assert fg.normalize_flag_value("Checkered Flag") == "checkered"
 
 
 def t_intents_show_one_hide_rest_in_both_scenes():
     intents = fg.flag_graphic_intents("yellow")
-    assert len(intents) == 10                         # 5 sources x 2 scenes
+    assert len(intents) == 2 * len(fg.FLAG_GRAPHIC_SOURCES), "every flag in both scenes"
     on = [(sc, src) for (sc, src, en) in intents if en]
     assert on == [("Stint", "Flag Yellow"), ("Splitscreen", "Flag Yellow")]
     # everything else hidden
@@ -166,6 +172,47 @@ def t_obs_unreachable_is_ok_not_crash():
         res = st.set("yellow")                  # apply_fn returns (False, note)
         assert res == {"ok": True, "active": "yellow"}, res   # state still set + persisted
         assert st.get() == "yellow"
+
+
+def _graphics(d, real=(), placeholder=()):
+    """A graphics dir with real PNGs for *real* and the placeholder for *placeholder*."""
+    with open(placeholders.graphic_placeholder_path(), "rb") as fh:
+        blank = fh.read()
+    for key in real:
+        with open(os.path.join(d, fg.FLAG_GRAPHIC_SOURCES[key] + ".png"), "wb") as fh:
+            fh.write(b"\x89PNG real " + key.encode())
+    for key in placeholder:
+        with open(os.path.join(d, fg.FLAG_GRAPHIC_SOURCES[key] + ".png"), "wb") as fh:
+            fh.write(blank)
+    return d
+
+
+def t_available_flags_are_the_linked_sheet_assets():
+    with tempfile.TemporaryDirectory() as d:
+        _graphics(d, real=("checkered", "green"), placeholder=("red",))
+        with open(os.path.join(d, "manifest.json"), "w") as fh:
+            json.dump({"internal": ["Flag Green"]}, fh)
+        assert fg.available_flags(d) == ["green", "checkered"], \
+            "only linked flags count, in catalog order, internal ones included"
+
+
+def t_without_a_graphics_dir_every_flag_is_available():
+    assert fg.available_flags(None) == list(fg.FLAG_GRAPHIC_SOURCES)
+    assert fg.available_flags(os.path.join(tempfile.gettempdir(), "no-such-dir")) == []
+
+
+def t_store_refuses_a_flag_the_sheet_does_not_link():
+    with tempfile.TemporaryDirectory() as d:
+        _graphics(d, real=("yellow",), placeholder=("red",))
+        obs = _FakeObs()
+        st = fg.FlagGraphicStore(os.path.join(d, "flag-graphic.json"), apply_fn=obs.apply,
+                                 graphics_dir=d)
+        assert st.available() == ["yellow"]
+        res = st.set("red")
+        assert "error" in res and st.get() == "" and obs.calls == [], res
+        assert st.set("yellow") == {"ok": True, "active": "yellow"}
+        assert st.clear() == {"ok": True, "active": ""}, "clear always works"
+        assert st.data()["available"] == [{"key": "yellow", "source": "Flag Yellow"}]
 
 
 cp = _load("console_policy", ("src", "scripts", "console_policy.py"))

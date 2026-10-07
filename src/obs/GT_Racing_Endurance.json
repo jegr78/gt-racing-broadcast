@@ -1323,7 +1323,7 @@
             "versioned_id": "scene",
             "settings": {
                 "custom_size": false,
-                "id_counter": 30,
+                "id_counter": 32,
                 "items": [
                     {
                         "name": "Discord",
@@ -1836,6 +1836,53 @@
                         "private_settings": {}
                     },
                     {
+                        "name": "Flag Checkered",
+                        "source_uuid": "dddddd0b-0000-4000-8000-00000000000b",
+                        "visible": false,
+                        "locked": true,
+                        "rot": 0.0,
+                        "align": 5,
+                        "bounds_type": 2,
+                        "bounds_align": 0,
+                        "bounds_crop": false,
+                        "crop_left": 0,
+                        "crop_top": 0,
+                        "crop_right": 0,
+                        "crop_bottom": 0,
+                        "id": 31,
+                        "group_item_backup": false,
+                        "pos": {
+                            "x": 0.0,
+                            "y": 0.0
+                        },
+                        "scale": {
+                            "x": 1.0,
+                            "y": 1.0
+                        },
+                        "bounds": {
+                            "x": 1920.0,
+                            "y": 1080.0
+                        },
+                        "scale_filter": "disable",
+                        "blend_method": "default",
+                        "blend_type": "normal",
+                        "show_transition": {
+                            "id": "fade_transition",
+                            "versioned_id": "fade_transition",
+                            "name": "Flag Checkered Show Transition",
+                            "transition": {},
+                            "duration": 300
+                        },
+                        "hide_transition": {
+                            "id": "fade_transition",
+                            "versioned_id": "fade_transition",
+                            "name": "Flag Checkered Hide Transition",
+                            "transition": {},
+                            "duration": 300
+                        },
+                        "private_settings": {}
+                    },
+                    {
                         "name": "Commentary Mic Device",
                         "source_uuid": "aaaaaaa6-0000-4000-8000-000000000006",
                         "visible": true,
@@ -2216,13 +2263,41 @@
         },
         {
             "prev_ver": 536936450,
+            "name": "Flag Checkered",
+            "uuid": "dddddd0b-0000-4000-8000-00000000000b",
+            "id": "image_source",
+            "versioned_id": "image_source",
+            "settings": {
+                "file": "__RACECAST_GRAPHICS__/Flag Checkered.png",
+                "unload": false,
+                "linear_alpha": true
+            },
+            "mixers": 0,
+            "sync": 0,
+            "flags": 0,
+            "volume": 1.0,
+            "balance": 0.5,
+            "enabled": true,
+            "muted": false,
+            "push-to-mute": false,
+            "push-to-mute-delay": 0,
+            "push-to-talk": false,
+            "push-to-talk-delay": 0,
+            "hotkeys": {},
+            "deinterlace_mode": 0,
+            "deinterlace_field_order": 0,
+            "monitoring_type": 0,
+            "private_settings": {}
+        },
+        {
+            "prev_ver": 536936450,
             "name": "Stint",
             "uuid": "11111111-1111-4111-8111-111111111111",
             "id": "scene",
             "versioned_id": "scene",
             "settings": {
                 "custom_size": false,
-                "id_counter": 50,
+                "id_counter": 52,
                 "items": [
                     {
                         "name": "Discord",
@@ -2829,6 +2904,53 @@
                             "id": "fade_transition",
                             "versioned_id": "fade_transition",
                             "name": "Flag Virtual Safety Car Hide Transition",
+                            "transition": {},
+                            "duration": 300
+                        },
+                        "private_settings": {}
+                    },
+                    {
+                        "name": "Flag Checkered",
+                        "source_uuid": "dddddd0b-0000-4000-8000-00000000000b",
+                        "visible": false,
+                        "locked": true,
+                        "rot": 0.0,
+                        "align": 5,
+                        "bounds_type": 2,
+                        "bounds_align": 0,
+                        "bounds_crop": false,
+                        "crop_left": 0,
+                        "crop_top": 0,
+                        "crop_right": 0,
+                        "crop_bottom": 0,
+                        "id": 51,
+                        "group_item_backup": false,
+                        "pos": {
+                            "x": 0.0,
+                            "y": 0.0
+                        },
+                        "scale": {
+                            "x": 1.0,
+                            "y": 1.0
+                        },
+                        "bounds": {
+                            "x": 1920.0,
+                            "y": 1080.0
+                        },
+                        "scale_filter": "disable",
+                        "blend_method": "default",
+                        "blend_type": "normal",
+                        "show_transition": {
+                            "id": "fade_transition",
+                            "versioned_id": "fade_transition",
+                            "name": "Flag Checkered Show Transition",
+                            "transition": {},
+                            "duration": 300
+                        },
+                        "hide_transition": {
+                            "id": "fade_transition",
+                            "versioned_id": "fade_transition",
+                            "name": "Flag Checkered Hide Transition",
                             "transition": {},
                             "duration": 300
                         },

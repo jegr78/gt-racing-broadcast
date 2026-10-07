@@ -13,7 +13,9 @@ import json
 import os
 import threading
 
-# Scenes that carry the flag-graphic scene items (each gets all five, kept in
+import placeholders   # sibling in src/scripts (sys.path injected by the relay/tests)
+
+# Scenes that carry the flag-graphic scene items (each gets every flag, kept in
 # sync so a scene switch preserves the shown flag). Mirrors the OBS collections.
 FLAG_GRAPHIC_SCENES = ("Stint", "Splitscreen")
 FLAG_GRAPHIC_SCENES_SOLO = ("Program",)
@@ -25,10 +27,13 @@ FLAG_GRAPHIC_SOURCES = {
     "red": "Flag Red",
     "safety-car": "Flag Safety Car",
     "virtual-safety-car": "Flag Virtual Safety Car",
+    "checkered": "Flag Checkered",
 }
 
 # Input aliases accepted by normalize_flag_value (parity with the HUD flag chip).
-FLAG_GRAPHIC_ALIASES = {"sc": "safety-car", "vsc": "virtual-safety-car"}
+FLAG_GRAPHIC_ALIASES = {"sc": "safety-car", "vsc": "virtual-safety-car",
+                        "chequered": "checkered", "checkered-flag": "checkered",
+                        "chequered-flag": "checkered"}
 
 
 def flag_graphic_scenes(solo):
@@ -48,6 +53,20 @@ def normalize_flag_value(raw):
         return ""
     slug = FLAG_GRAPHIC_ALIASES.get(slug, slug)
     return slug if slug in FLAG_GRAPHIC_SOURCES else None
+
+
+def available_flags(graphics_dir):
+    """Catalog keys, in catalog order, whose PNG in *graphics_dir* is a real Sheet
+    asset rather than the transparent placeholder. No *graphics_dir* means every
+    flag is available."""
+    if not graphics_dir:
+        return list(FLAG_GRAPHIC_SOURCES)
+    out = []
+    for key, source in FLAG_GRAPHIC_SOURCES.items():
+        path = os.path.join(graphics_dir, source + ".png")
+        if os.path.isfile(path) and not placeholders.is_graphic_placeholder(path):
+            out.append(key)
+    return out
 
 
 def flag_graphic_intents(active, scenes=FLAG_GRAPHIC_SCENES):
@@ -71,11 +90,12 @@ class FlagGraphicStore:
     applied to OBS through an injected apply_fn (the relay passes
     obs_ws.set_scene_item_enabled). There is NO sheet sync, because this is OBS
     source visibility rather than a HUD value. Selecting a flag shows its source
-    and hides the other four in every scene of *scenes*; clear hides all. Best-effort
+    and hides the others in every scene of *scenes*; clear hides all. Best-effort
     throughout: an OBS failure degrades to a note and the state is still stored."""
 
-    def __init__(self, path, apply_fn=None, scenes=FLAG_GRAPHIC_SCENES):
+    def __init__(self, path, apply_fn=None, scenes=FLAG_GRAPHIC_SCENES, graphics_dir=None):
         self.path = path
+        self.graphics_dir = graphics_dir
         self.apply_fn = apply_fn or _noop_apply
         self.scenes = tuple(scenes)
         self.lock = threading.Lock()
@@ -106,14 +126,23 @@ class FlagGraphicStore:
         with self.lock:
             return self.active
 
+    def available(self):
+        """The flags the league links in its Sheet Assets, read fresh per call."""
+        return available_flags(self.graphics_dir)
+
     def data(self):
-        return {"active": self.get()}
+        return {"active": self.get(),
+                "available": [{"key": k, "source": FLAG_GRAPHIC_SOURCES[k]}
+                              for k in self.available()]}
 
     def set(self, raw):
         key = normalize_flag_value(raw)
         if key is None:
             return {"error": f"unknown flag graphic: {raw!r} "
                              f"(one of {', '.join(FLAG_GRAPHIC_SOURCES)})"}
+        if key and key not in self.available():
+            return {"error": f"flag graphic not in the Sheet Assets: "
+                             f"{FLAG_GRAPHIC_SOURCES[key]!r}"}
         with self.lock:
             self.active = key
             self._save_file()
