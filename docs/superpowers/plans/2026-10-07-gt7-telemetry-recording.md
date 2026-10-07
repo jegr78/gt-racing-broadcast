@@ -563,12 +563,13 @@ class RecordingWriter:
     def _open(self, first_ts):
         os.makedirs(self._dir, exist_ok=True)
         stem = time.strftime("%Y%m%d-%H%M%S", time.localtime(first_ts))
-        self.path = _free_path(self._dir, stem)
-        fh = open(self.path + PART, "wb")
+        path = _free_path(self._dir, stem)
+        fh = open(path + PART, "wb")
         head = _header(self._profile, self._relay_version, first_ts)
         fh.write(head)
         self.started = first_ts
         self.bytes = len(head)
+        self.path = path              # last: a visible path always has a start time
         return fh
 
     def _write(self, fh, data):
@@ -670,7 +671,9 @@ def finalize_partials(rec_dir):
     for name in names:
         if not name.endswith(SUFFIX + PART):
             continue
-        target = _free_path(rec_dir, name[:-len(SUFFIX + PART)])
+        target = os.path.join(rec_dir, name[:-len(PART)])
+        if os.path.exists(target):    # _free_path alone would count this .part as taken
+            target = _free_path(rec_dir, name[:-len(SUFFIX + PART)])
         try:
             os.replace(os.path.join(rec_dir, name), target)
             done.append(os.path.basename(target))
