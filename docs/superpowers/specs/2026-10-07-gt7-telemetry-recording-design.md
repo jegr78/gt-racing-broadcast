@@ -307,9 +307,11 @@ Control Center Settings view gets a "GT7 data" row with the age of the data and 
   4. Result `{"id", "track", "layout", "reverse", "score_m"}` for a single best row,
      or `{"candidates": [ids...]}` when more rows score within 3 m of the best, or
      None.
-- `learn(learned_path, official_id, points, length_m)`: writes a row in the
+- `learn(official_id, points, length_m, key=None)`: writes a row in the
   `signatures.json` shape (box from the points, `path` = points, `provenance:
-  "learned"`) into `learned-tracks.json`, atomically. Updates never touch this file.
+  "learned"`) into `learned-tracks.json`, atomically, and with `key`
+  (`"<profile>/<stem>"`) records the assignment of that recording to the layout.
+  `assignment(key)` reads it back. Updates never touch this file.
 - `project(points, official_id)` -> per point the distance along the row's `path` from
   its start (the line), for `lap_dist_m`.
 
@@ -328,11 +330,19 @@ Control Center Settings view gets a "GT7 data" row with the age of the data and 
 
 ## Export
 
+- A recording can hold several GT7 sessions on different tracks, so the track is
+  decided **per session**: the match of the session's longest closed lap, unless a
+  learned assignment for the recording exists (`assignment("<profile>/<stem>")`, set in
+  part 3), which wins for every session. The exporter replays the recording twice:
+  once to collect the laps and decide each session's track, once to write.
 - `laps.csv` appends `track` and `layout` (empty when unknown). The exporter runs the
   same `TrackDB` the relay uses.
-- `lap_dist_m` in `samples.csv`: when the recording's track is known, the exporter
-  projects each sample onto the racing line (`project`); otherwise it stays the
-  integrated distance.
+- `lap_dist_m` in `samples.csv`: when the session's track is known, the exporter
+  projects each sample onto the racing line (`project`), taking the value (`s`, `s - L`
+  or `s + L`) closest to the integrated distance so a sample just behind the line does
+  not read as a full lap; otherwise it stays the integrated distance. `TrackDB` keeps a
+  50 m grid over each racing line, so a projection looks at a few points, not the
+  whole line.
 
 ## Tests and docs
 
@@ -359,8 +369,8 @@ Control Center Settings view gets a "GT7 data" row with the age of the data and 
   `car`, `tyre_avg_c` (mean surface temperature per wheel over the lap), and `trace`:
   the lap resampled every 5 m of `lap_dist_m` with `t`, `speed_kmh`,
   `throttle`, `brake`, `steer_deg`, `gear`, `x`, `z`.
-- The recording's track: the match of its longest closed lap; a learned assignment for
-  this recording (part of the learned file, keyed by recording stem) wins.
+- Each lap's track: its session's track, decided as in the part 2 export (a learned
+  assignment keyed `<profile>/<stem>` wins).
 - `sectors(trace, length_m, step_m=200)`: sector times from the trace, boundaries every
   200 m from the line, the last sector shorter, times interpolated at the boundaries.
 - `best_sectors(laps)`: per sector the minimum over the given counted laps;
