@@ -1,4 +1,4 @@
-# GT7 Telemetry Recording Implementation Plan
+# GT7 Telemetry Part 1: Recording and CSV Export Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3 stdlib only (`struct`, `queue`, `threading`, `csv`, `json`). Tests are runnable stdlib scripts under `tests/` (no pytest), one file per area.
 
-**Spec:** `docs/superpowers/specs/2026-10-07-gt7-telemetry-recording-design.md`. Issue #785.
+**Spec:** `docs/superpowers/specs/2026-10-07-gt7-telemetry-recording-design.md`, section "Part 1". Issue #786, part 1 of epic #785. Parts 2 to 4 (#787 to #789) build on the interfaces defined here.
 
 ## Global Constraints
 
@@ -155,7 +155,7 @@ Expected: each prints `ALL PASS` (or its last `ok` line), lint clean.
 
 ```bash
 git add src/scripts/gt7_telemetry.py tests/test_gt7_telemetry.py tests/test_gt7_fixture.py
-git commit -m "feat(telemetry): parse gear, rpm and car position from GT7 packets (#785)"
+git commit -m "feat(telemetry): parse gear, rpm and car position from GT7 packets (#786)"
 ```
 
 ---
@@ -169,9 +169,10 @@ git commit -m "feat(telemetry): parse gear, rpm and car position from GT7 packet
 **Interfaces:**
 - Consumes: Task 1's `GT7Packet`.
 - Produces:
-  - `TelemetryEngine.on_lap`: `None` or a callable taking one dict, called once per lap the engine closes (finalised at a lap edge, or abandoned at a session change). Dict keys: `session` (int), `lap` (int), `start` (float, wall ts of the lap's first packet), `end` (float, wall ts of its last packet), `elapsed` (float s, the relay's lap time), `status` (`"reference" | "counted" | "not counted"`), `reason` (str, `""` unless not counted), `fuel_used` (float L or None), `top_speed_mps` (float).
+  - `TelemetryEngine.on_lap`: `None` or a callable taking one dict, called once per lap the engine closes (finalised at a lap edge, or abandoned at a session change). Dict keys: `session` (int), `lap` (int), `start` (float, wall ts of the lap's first packet), `end` (float, wall ts of its last packet), `elapsed` (float s, the relay's lap time), `status` (`"reference" | "counted" | "not counted"`), `reason` (str, `""` unless not counted), `fuel_used` (float L or None), `top_speed_mps` (float), `car_id` (int or None, from the lap's last packet).
   - `TelemetryEngine.session`: int, starts at 1, +1 at every session boundary.
   - `TelemetryEngine.lap_started_at()`: wall ts of the current lap's first packet, or None.
+  - `TelemetryEngine.lap_distance()`: metres driven in the current lap (integrated from speed), or None.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -211,9 +212,21 @@ def t_engine_session_change_emits_abandoned_lap_and_counts_session():
 
 def t_engine_without_on_lap_is_unchanged():
     eng = tm.TelemetryEngine()
-    assert eng.on_lap is None and eng.lap_started_at() is None
+    assert eng.on_lap is None and eng.lap_started_at() is None and eng.lap_distance() is None
     eng.update(tm.parse_packet(_packet(lap=1)), 1.0)
     assert eng.lap_started_at() == 1.0
+
+
+def t_engine_lap_distance_and_car_in_record():
+    eng = tm.TelemetryEngine()
+    laps = []
+    eng.on_lap = laps.append
+    eng.update(tm.parse_packet(_packet(lap=1, car_id=3424)), 1.0)
+    for i in range(1, 11):                                    # 1 s at 50 m/s
+        eng.update(tm.parse_packet(_packet(lap=1, speed_mps=50.0, car_id=3424)), 1.0 + i / 10)
+    assert abs(eng.lap_distance() - 50.0) < 1e-6, eng.lap_distance()
+    eng.update(tm.parse_packet(_packet(lap=2, car_id=3424)), 2.1)
+    assert laps[-1]["car_id"] == 3424 and eng.lap_distance() == 0.0
 ```
 
 `_feed_lap(eng, t0, lap, *, duration, dt=0.1, speed=50.0, ...)` already exists in the file: it drives `lap` for `duration` seconds, then sends one packet with `lap + 1` (the lap-change edge) and returns that packet's timestamp.
@@ -246,6 +259,10 @@ Add methods to `TelemetryEngine`:
         """Wall time of the current lap's first packet, or None before any packet."""
         return self._acc.t0 if self._acc is not None else None
 
+    def lap_distance(self):
+        """Metres driven in the current lap, integrated from speed; None before any packet."""
+        return self._acc.distance if self._acc is not None else None
+
     def _emit_lap(self, acc, status, reason):
         if self.on_lap is None:
             return
@@ -253,7 +270,8 @@ Add methods to `TelemetryEngine`:
                 if acc.fuel_start is not None and acc.fuel_end is not None else None)
         self.on_lap({"session": self.session, "lap": self._lap_num, "start": acc.t0,
                      "end": acc.last_t, "elapsed": acc.elapsed, "status": status,
-                     "reason": reason, "fuel_used": fuel, "top_speed_mps": acc.top_speed})
+                     "reason": reason, "fuel_used": fuel, "top_speed_mps": acc.top_speed,
+                     "car_id": self._last.car_id if self._last is not None else None})
 ```
 
 `_reset_session`: inside the existing `if acc is not None:` block, after the `LOG.info(...)`, add `self._emit_lap(acc, "not counted", "session change")`. After the block add `self.session += 1`.
@@ -279,7 +297,7 @@ Expected: ALL PASS, lint clean.
 
 ```bash
 git add src/scripts/gt7_telemetry.py tests/test_gt7_telemetry.py
-git commit -m "feat(telemetry): emit lap records and count sessions in the engine (#785)"
+git commit -m "feat(telemetry): emit lap records and count sessions in the engine (#786)"
 ```
 
 ---
@@ -722,7 +740,7 @@ Expected: ALL PASS, lint clean.
 
 ```bash
 git add src/scripts/gt7_recording.py tests/test_gt7_recording.py
-git commit -m "feat(telemetry): recording file format with writer, reader and listing (#785)"
+git commit -m "feat(telemetry): recording file format with writer, reader and listing (#786)"
 ```
 
 ---
@@ -735,7 +753,7 @@ git commit -m "feat(telemetry): recording file format with writer, reader and li
 
 **Interfaces:**
 - Consumes: Task 2 (`on_lap`, `session`, `lap_started_at`), Task 3 (`Recording`, `recording_stem`).
-- Produces: `export_csv(path, out_dir, include_all=False, excel=False) -> dict` with keys `dir`, `samples` (rows written), `laps`, `dropped`. Constants `SAMPLE_COLUMNS`, `LAP_COLUMNS`, `GT7_TIME_WINDOW_S = 3.0`.
+- Produces: `export_csv(path, out_dir, include_all=False, excel=False, cars=None) -> dict` with keys `dir`, `samples` (rows written), `laps`, `dropped`. `cars` is a `gt7_cars.CarDB`; None loads `gt7_cars.CarDB()` (bundled tables). Constants `SAMPLE_COLUMNS`, `LAP_COLUMNS`, `GT7_TIME_WINDOW_S = 3.0`. Part 2 appends `track` and `layout` to `LAP_COLUMNS` and adds a `tracks` parameter.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -761,6 +779,7 @@ def _tpkt(lap, speed=50.0, last_ms=-1, flags=None, throttle=255, steer=None):
     b[tm.OFF_THROTTLE] = throttle
     struct.pack_into("<f", b, tm.OFF_RPM, 7000.0)
     b[tm.OFF_GEAR] = 4
+    struct.pack_into("<i", b, tm.OFF_CAR_ID, 999999)
     if steer is not None:
         struct.pack_into("<f", b, tm.OFF_STEER, steer)
     return bytes(b)
@@ -797,12 +816,15 @@ def t_export_samples_and_laps():
         first = samples[0]
         assert first["t_s"] == "0.000" and first["throttle_pct"] == "100.0"
         assert first["gear"] == "4" and first["rpm"] == "7000" and first["steer_deg"] == ""
+        lap1 = [s for s in samples if s["lap"] == "1"]
+        assert lap1[0]["lap_dist_m"] == "0.0" and lap1[-1]["lap_dist_m"] == "495.0", lap1[-1]
         laps = _rows(os.path.join(d, "out", "laps.csv"))
         assert list(laps[0]) == list(rec.LAP_COLUMNS)
         by_lap = {r["lap"]: r for r in laps}
         assert by_lap["1"]["status"] == "reference" and by_lap["1"]["gt7_time_s"] == "10.000"
         assert by_lap["0"]["status"] == "not counted" and by_lap["0"]["gt7_time_s"] == ""
         assert by_lap["1"]["start_t_s"] == "0.100" and by_lap["2"]["start_t_s"] == "10.100", laps
+        assert by_lap["1"]["car"] == "Car #999999", "an id the tables do not know keeps its number"
 
 
 def t_export_all_keeps_paused_packets():
@@ -823,6 +845,17 @@ def t_export_excel_uses_semicolon_and_decimal_comma():
         assert row["t_s"] == "0,100" and row["throttle_pct"] == "100,0", row
 
 
+def t_export_car_name_from_tables():
+    class Cars:
+        def lookup(self, car_id):
+            return {"id": car_id, "maker": "Porsche", "name": "911 RSR", "group": "Gr.3"}
+    with tempfile.TemporaryDirectory() as d:
+        src = _session(d)
+        rec.export_csv(src, os.path.join(d, "out"), cars=Cars())
+        laps = _rows(os.path.join(d, "out", "laps.csv"))
+        assert {r["car"] for r in laps} == {"Porsche 911 RSR"}, laps
+
+
 def t_export_steering_in_degrees_positive_left():
     with tempfile.TemporaryDirectory() as d:
         w = _write(d, [(1.0, "~", _tpkt(1, steer=0.5))])
@@ -837,17 +870,17 @@ Expected: FAIL with `AttributeError: module 'gt7_recording' has no attribute 'ex
 
 - [ ] **Step 3: Implement**
 
-Add `import csv` and `import math` to the imports of `gt7_recording.py`, then append:
+Add `import csv`, `import math` and `import gt7_cars` to the imports of `gt7_recording.py`, then append:
 
 ```python
 SAMPLE_COLUMNS = (
-    "t_s", "session", "lap", "lap_t_s", "on_track", "paused", "speed_kmh",
+    "t_s", "session", "lap", "lap_t_s", "lap_dist_m", "on_track", "paused", "speed_kmh",
     "throttle_pct", "brake_pct", "throttle_input_pct", "brake_input_pct", "steer_deg",
     "gear", "rpm", "fuel_l", "tyre_fl_c", "tyre_fr_c", "tyre_rl_c", "tyre_rr_c",
     "pos_x", "pos_y", "pos_z", "car_id")
 LAP_COLUMNS = (
     "session", "lap", "start_t_s", "end_t_s", "gt7_time_s", "relay_time_s", "status",
-    "reason", "fuel_used_l", "top_speed_kmh")
+    "reason", "fuel_used_l", "top_speed_kmh", "car")
 GT7_TIME_WINDOW_S = 3.0       # GT7 updates last_ms shortly after the line
 
 
@@ -864,8 +897,16 @@ def _pct(byte):
     return None if byte is None else byte * 100.0 / 255.0
 
 
-def export_csv(path, out_dir, include_all=False, excel=False):
+def _car_name(cars, car_id):
+    car = cars.lookup(car_id) if car_id is not None else None
+    if car is None:
+        return ""
+    return f"{car['maker']} {car['name']}" if car.get("maker") else car["name"]
+
+
+def export_csv(path, out_dir, include_all=False, excel=False, cars=None):
     """Write samples.csv and laps.csv for one recording into out_dir."""
+    cars = cars if cars is not None else gt7_cars.CarDB()
     r = Recording(path)
     num = _fmt(excel)
     eng = gt7_telemetry.TelemetryEngine()
@@ -904,7 +945,7 @@ def export_csv(path, out_dir, include_all=False, excel=False):
             w.writerow([
                 num(wall_ts - t0, 3), eng.session, pkt.lap,
                 num(wall_ts - started if started is not None else None, 3),
-                int(pkt.on_track), int(pkt.paused), num(pkt.speed_mps * 3.6, 1),
+                num(eng.lap_distance(), 1), int(pkt.on_track), int(pkt.paused), num(pkt.speed_mps * 3.6, 1),
                 num(_pct(pkt.throttle), 1), num(_pct(pkt.brake), 1),
                 num(_pct(pkt.throttle_input), 1), num(_pct(pkt.brake_input), 1),
                 num(steer, 1), pkt.gear, num(pkt.rpm, 0), num(pkt.fuel_level, 2),
@@ -920,11 +961,12 @@ def export_csv(path, out_dir, include_all=False, excel=False):
                 lap["session"], lap["lap"], num(lap["start"] - t0, 3),
                 num(lap["end"] - t0, 3), num(lap["gt7_time_s"], 3),
                 num(lap["elapsed"], 3), lap["status"], lap["reason"],
-                num(lap["fuel_used"], 2), num(lap["top_speed_mps"] * 3.6, 1)])
+                num(lap["fuel_used"], 2), num(lap["top_speed_mps"] * 3.6, 1),
+                _car_name(cars, lap["car_id"])])
     return {"dir": out_dir, "samples": written, "laps": len(laps), "dropped": r.dropped}
 ```
 
-If `t_export_samples_and_laps` disagrees on `start_t_s`, check the fixture: lap 1 starts at `1000.1`, lap 2 at `1000.1 + 10.0`, so `0.100` and `10.100` are correct; adjust the implementation, not the expectation. Same for `gt7_time_s`: lap 1 closes at the first lap-2 packet, `prev_last_ms` is `-1`, and the sixth lap-2 packet carries `10000`.
+`lap_dist_m` for lap 1: the accumulator adds `speed * dt` from the second packet on, so 99 steps of 0.1 s at 50 m/s give `495.0` on the last lap-1 row. If `t_export_samples_and_laps` disagrees on `start_t_s`, check the fixture: lap 1 starts at `1000.1`, lap 2 at `1000.1 + 10.0`, so `0.100` and `10.100` are correct; adjust the implementation, not the expectation. Same for `gt7_time_s`: lap 1 closes at the first lap-2 packet, `prev_last_ms` is `-1`, and the sixth lap-2 packet carries `10000`.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -935,7 +977,7 @@ Expected: ALL PASS, lint clean.
 
 ```bash
 git add src/scripts/gt7_recording.py tests/test_gt7_recording.py
-git commit -m "feat(telemetry): export a recording to samples.csv and laps.csv (#785)"
+git commit -m "feat(telemetry): export a recording to samples.csv and laps.csv (#786)"
 ```
 
 ---
@@ -1142,7 +1184,7 @@ Expected: ALL PASS, lint clean.
 
 ```bash
 git add src/scripts/gt7_recording.py tests/test_gt7_recording.py
-git commit -m "feat(telemetry): live recording switch with persisted state (#785)"
+git commit -m "feat(telemetry): live recording switch with persisted state (#786)"
 ```
 
 ---
@@ -1344,7 +1386,7 @@ Expected: ALL PASS, lint clean. The existing `t_status_reports_telemetry_visibil
 
 ```bash
 git add src/scripts/gt7_telemetry.py src/relay/racecast-feeds.py src/scripts/console_policy.py tests/test_telemetry_endpoints.py tests/test_console.py
-git commit -m "feat(relay): record GT7 telemetry with /telemetry/record and /status (#785)"
+git commit -m "feat(relay): record GT7 telemetry with /telemetry/record and /status (#786)"
 ```
 
 ---
@@ -1472,7 +1514,7 @@ Expected: ALL PASS, lint clean.
 
 ```bash
 git add src/scripts/config.py src/racecast.py src/scripts/profile_admin.py tests/test_racecast.py tests/test_config.py tests/test_profile.py
-git commit -m "feat(profile): TELEMETRY_RECORD key, injection and event-start reset (#785)"
+git commit -m "feat(profile): TELEMETRY_RECORD key, injection and event-start reset (#786)"
 ```
 
 ---
@@ -1682,6 +1724,7 @@ def telemetry_list_cmd(_rest):
 def telemetry_export_cmd(rest):
     """Export one recording to samples.csv + laps.csv."""
     import argparse
+    import gt7_cars
     import gt7_recording as gr
     ap = argparse.ArgumentParser(prog="racecast telemetry export")
     ap.add_argument("name", help="recording name, its stem, or 'latest'")
@@ -1695,7 +1738,8 @@ def telemetry_export_cmd(rest):
     path = _resolve_recording(rec_dir, args.name)
     out_dir = args.out or os.path.join(rec_dir, gr.recording_stem(path))
     try:
-        res = gr.export_csv(path, out_dir, include_all=args.all, excel=args.excel)
+        res = gr.export_csv(path, out_dir, include_all=args.all, excel=args.excel,
+                            cars=gt7_cars.CarDB(resource_path("assets/gt7")))
     except gr.RecordingError as e:
         sys.exit(str(e))
     print(f"wrote {res['samples']} samples and {res['laps']} laps to {res['dir']}")
@@ -1725,6 +1769,7 @@ def telemetry_delete_cmd(rest):
 
 ```python
            "--hidden-import", "gt7_recording", "--hidden-import", "gt7_telemetry",
+           "--hidden-import", "gt7_cars",
 ```
 
 Check `grep -n "def t_function_local_peer_imports_are_frozen" -A30 tests/test_racecast.py`: if that guard keeps its own list of expected modules, it now fails until `build-binary.py` lists `gt7_recording`; that is the intended signal.
@@ -1738,7 +1783,7 @@ Expected: ALL PASS, lint clean, both help outputs print ASCII text and exit 0.
 
 ```bash
 git add src/racecast.py tools/build-binary.py tests/test_racecast.py
-git commit -m "feat(cli): racecast telemetry record|list|export|delete (#785)"
+git commit -m "feat(cli): racecast telemetry record|list|export|delete (#786)"
 ```
 
 ---
@@ -1831,7 +1876,7 @@ Expected: all pass.
 
 ```bash
 git add src/director/director-panel.html src/docs/wiki/images/director-panel.png src/docs/slides/assets/img/
-git commit -m "feat(panel): REC key for the GT7 telemetry recording (#785)"
+git commit -m "feat(panel): REC key for the GT7 telemetry recording (#786)"
 ```
 
 ---
@@ -1910,7 +1955,7 @@ python3 tools/run-tests.py
 
 ```bash
 git add src/relay/CLAUDE.md src/docs/wiki/Relay-Mode.md src/docs/wiki/Director.md src/docs/wiki/Configuration.md
-git commit -m "docs: GT7 telemetry recording in the relay notes and the wiki (#785)"
+git commit -m "docs: GT7 telemetry recording in the relay notes and the wiki (#786)"
 ```
 
-Then open one PR for #785 following the `ship-feature` skill (self-review with `pr-review`, green CI, squash-merge).
+Then open one PR for #786 following the `ship-feature` skill (self-review with `pr-review`, green CI, squash-merge). The PR body says `Closes #786` and `Part of #785`. The spec and all four plans ride along in this PR.
