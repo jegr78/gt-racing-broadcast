@@ -36,7 +36,12 @@ work with.
 
 Path: `runtime/<profile>/telemetry-recordings/<YYYYMMDD-HHMMSS>.gt7rec`, local time of
 the first recorded packet. While open the file is named `<...>.gt7rec.part`; a clean
-stop renames it. A leftover `.part` file is an aborted recording.
+stop renames it. On Windows `relay stop` ends the relay with `taskkill /F`, so no
+shutdown code runs there and every recording ends as a `.part` file. The writer
+therefore flushes about once per second (at most ~1 s of packets is lost), and every
+relay start that has telemetry renames leftover `.part` files in the directory to
+`.gt7rec` and logs each one. The content stays as written; the reader skips a
+truncated last record.
 
 Layout:
 
@@ -87,7 +92,8 @@ Stdlib only, no relay imports.
   `RecordingError` with a clear message.
 - `export_csv(path, out_dir, include_all=False, excel=False)` writes `samples.csv` and
   `laps.csv` (below).
-- `list_recordings(dir)` -> name, size, start, duration, lap count, `aborted` flag.
+- `list_recordings(dir)` -> name, size, start, duration, lap count, `partial` flag
+  (the file still ends in `.part`).
 
 ## Switch and state
 
@@ -126,10 +132,12 @@ New group `racecast telemetry`. Help strings stay ASCII.
 
 - `record start|stop|status`: talks to the local relay through `http_util`. Without a
   running relay it prints a clear error and exits non-zero.
-- `list`: the active profile's recordings (name, size, start, duration, laps, aborted).
+- `list`: the active profile's recordings (name, size, start, duration, laps). The
+  file the running relay is writing (from `/status`) is marked `recording`; any other
+  `.part` file is marked `unclosed`.
 - `export <name|latest> [--out DIR] [--all] [--excel]`: writes into `<name>/` next to
   the recording, or into `DIR`.
-- `delete <name>`: refuses the recording that is currently open.
+- `delete <name>`: refuses the file the running relay reports as open in `/status`.
 
 `list`, `export` and `delete` read files only and do not need a relay. `--profile`
 works as for every other command.
@@ -181,7 +189,7 @@ LibreOffice and Google Sheets. When packets were dropped, the exporter prints th
 |---|---|
 | disk full, write error | recording stops, `record.error` set, panel button yellow; live telemetry and HUD continue |
 | queue full | packet dropped, `dropped` counted, exporter reports it |
-| relay crash | `.part` file readable up to the last complete record; `list` marks it aborted, `export` works |
+| relay killed (crash, or `relay stop` on Windows) | `.part` file readable up to the last complete record, `export` works; the next relay start renames it to `.gt7rec` |
 | unknown file version | export aborts with a clear message |
 | toggle without solo POV | 404 from the relay, CLI prints why |
 
