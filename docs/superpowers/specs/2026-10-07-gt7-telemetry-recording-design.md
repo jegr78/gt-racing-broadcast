@@ -54,6 +54,11 @@ Layout:
    - `uint16` little-endian, payload length
    - the decrypted payload bytes
 
+   Kind byte `0x00` marks a meta record whose payload is UTF-8 JSON `{"dropped": n}`,
+   the total of packets dropped so far. The writer adds one at a flush when the count
+   changed and at close, so the count also survives a killed relay. Readers keep the
+   latest value and do not yield meta records as packets.
+
 About 21 KB/s with the 344-byte `~` packet, so roughly 75 MB per hour.
 
 ## Parser additions
