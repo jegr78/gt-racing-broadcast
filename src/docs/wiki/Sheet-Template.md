@@ -380,14 +380,17 @@ Flag Yellow          | <Drive link>
 Flag Red             | <Drive link>
 Flag Safety Car      | <Drive link>
 Flag Virtual Safety Car | <Drive link>
+Flag Checkered       | <Drive link>
 Intro Video          | https://www.youtube.com/watch?v=SAMPLE0INTRO
 Outro Video          | https://www.youtube.com/watch?v=SAMPLE0OUTRO
 Trailer Video        | https://www.youtube.com/watch?v=SAMPLE0TRAILER
 Intermission Music   | <Drive link or YouTube URL>
 ```
 
-The five **`Flag …`** rows are **optional**. Each is a full-screen transparent 1080p PNG
-placed as an image source in the **Stint** and **Splitscreen** OBS scenes. They are the
+The six **`Flag …`** rows are **optional**. Each is a full-screen transparent 1080p PNG
+placed as an image source in the **Stint** and **Splitscreen** OBS scenes. The Director
+Panel and the Race Control desk show a flag button only for a row that links a PNG, so
+leave out the flags your league does not use. They are the
 *graphic* alternative to the flag-status **text** chip in the HUD (`Flag` field in the
 Setup tab): the text chip and the graphic overlay are independent controls: you can use
 one, both, or neither depending on your broadcast design. Exactly one flag graphic is

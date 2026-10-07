@@ -67,6 +67,16 @@ def t_find_obs_template_prefers_template_then_json():
         assert ph.find_obs_template(tmp).endswith("GT_Racing_Endurance.template.json")
 
 
+def t_is_graphic_placeholder_matches_only_the_bundled_png():
+    with tempfile.TemporaryDirectory() as d:
+        real = os.path.join(d, "real.png")
+        with open(real, "wb") as fh:
+            fh.write(b"\x89PNG not blank")
+        assert ph.is_graphic_placeholder(PNG)
+        assert not ph.is_graphic_placeholder(real)
+        assert not ph.is_graphic_placeholder(os.path.join(d, "missing.png"))
+
+
 def t_placeholder_paths_resolve_to_bundled_files():
     assert ph.graphic_placeholder_path() == PNG
     assert ph.media_placeholder_path() == MP4

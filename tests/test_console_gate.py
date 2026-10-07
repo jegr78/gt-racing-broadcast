@@ -1312,11 +1312,13 @@ class _TakeFakeObs(_SplitFakeObs):
             for sc, src in sources]}, ""
 
 
-def _take_call(fire, mode="direct", scene="Stint", visible=(), solo=False):
+def _take_call(fire, mode="direct", scene="Stint", visible=(), solo=False,
+               graphics_dir=None):
     flags = []
     store = m.flag_graphic.FlagGraphicStore(
         os.path.join(tempfile.mkdtemp(), "flag.json"),
-        apply_fn=lambda sc, src, on: flags.append((sc, src, on)) or (True, ""))
+        apply_fn=lambda sc, src, on: flags.append((sc, src, on)) or (True, ""),
+        graphics_dir=graphics_dir)
     srv = _serve(graphics_take=mode, flag_graphic_store=store, solo=solo)
     port = srv.server_address[1]
     fake = _TakeFakeObs(scene, visible)
@@ -1395,6 +1397,42 @@ def t_race_control_sets_a_flag_through_the_flag_store():
     assert code == 200, (code, body)
     assert store.get() == "yellow", store.get()
     assert ("Stint", "Flag Yellow", True) in flags, flags
+
+
+def _flag_graphics_dir(*linked):
+    """A graphics dir where only the flags in *linked* carry a real PNG."""
+    d = tempfile.mkdtemp()
+    with open(m.placeholders.graphic_placeholder_path(), "rb") as fh:
+        blank = fh.read()
+    for key, source in m.flag_graphic.FLAG_GRAPHIC_SOURCES.items():
+        with open(os.path.join(d, source + ".png"), "wb") as fh:
+            fh.write(b"\x89PNG real" if key in linked else blank)
+    return d
+
+
+def t_flag_takes_list_only_the_flags_the_sheet_links():
+    t = _take_call(lambda p: _get(p, "/console/cockpit/graphic-takes", _tok("dave")),
+                   graphics_dir=_flag_graphics_dir("yellow", "checkered"))
+    code, body = t.res
+    assert code == 200, (code, body)
+    flags = [g["source"] for g in json.loads(body)["graphics"] if g["group"] == "flag"]
+    assert flags == ["Flag Yellow", "Flag Checkered"], flags
+
+
+def t_unlinked_flag_is_not_takeable():
+    t = _take_call(lambda p: _take(p, "dave", "Flag Red"),
+                   graphics_dir=_flag_graphics_dir("yellow"))
+    code, body = t.res
+    assert code == 404 and t.store.get() == "" and t.flags == [], (code, body)
+
+
+def t_obs_flag_data_lists_the_available_flags():
+    t = _take_call(lambda p: _get(p, "/console/obs/flag/data", _tok("bob")),
+                   graphics_dir=_flag_graphics_dir("checkered"))
+    code, body = t.res
+    assert code == 200, (code, body)
+    assert json.loads(body) == {"active": "", "available": [
+        {"key": "checkered", "source": "Flag Checkered"}]}, body
 
 
 def t_graphic_takes_are_rate_limited():

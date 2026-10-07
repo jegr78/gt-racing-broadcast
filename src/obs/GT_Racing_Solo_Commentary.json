@@ -1465,6 +1465,34 @@
         },
         {
             "prev_ver": 536936450,
+            "name": "Flag Checkered",
+            "uuid": "dddddd0b-0000-4000-8000-00000000000b",
+            "id": "image_source",
+            "versioned_id": "image_source",
+            "settings": {
+                "file": "__RACECAST_GRAPHICS__/Flag Checkered.png",
+                "unload": false,
+                "linear_alpha": true
+            },
+            "mixers": 0,
+            "sync": 0,
+            "flags": 0,
+            "volume": 1.0,
+            "balance": 0.5,
+            "enabled": true,
+            "muted": false,
+            "push-to-mute": false,
+            "push-to-mute-delay": 0,
+            "push-to-talk": false,
+            "push-to-talk-delay": 0,
+            "hotkeys": {},
+            "deinterlace_mode": 0,
+            "deinterlace_field_order": 0,
+            "monitoring_type": 0,
+            "private_settings": {}
+        },
+        {
+            "prev_ver": 536936450,
             "name": "Thumbnail",
             "uuid": "aecf782b-9f16-4c9d-ad0d-0a78a78cbcc3",
             "id": "image_source",
@@ -2563,7 +2591,7 @@
             "versioned_id": "scene",
             "settings": {
                 "custom_size": false,
-                "id_counter": 53,
+                "id_counter": 55,
                 "items": [
                     {
                         "name": "Solo Capture",
@@ -2579,7 +2607,7 @@
                         "crop_top": 0,
                         "crop_right": 0,
                         "crop_bottom": 0,
-                        "id": 50,
+                        "id": 52,
                         "group_item_backup": false,
                         "pos": {
                             "x": 0.0,
@@ -2712,7 +2740,7 @@
                         "crop_top": 0,
                         "crop_right": 0,
                         "crop_bottom": 0,
-                        "id": 51,
+                        "id": 53,
                         "group_item_backup": false,
                         "pos": {
                             "x": 24.0,
@@ -2759,7 +2787,7 @@
                         "crop_top": 950,
                         "crop_right": 1336,
                         "crop_bottom": 18,
-                        "id": 52,
+                        "id": 54,
                         "group_item_backup": false,
                         "pos": {
                             "x": 7.0,
@@ -3233,6 +3261,53 @@
                             "id": "fade_transition",
                             "versioned_id": "fade_transition",
                             "name": "Flag Virtual Safety Car Hide Transition",
+                            "transition": {},
+                            "duration": 300
+                        },
+                        "private_settings": {}
+                    },
+                    {
+                        "name": "Flag Checkered",
+                        "source_uuid": "dddddd0b-0000-4000-8000-00000000000b",
+                        "visible": false,
+                        "locked": true,
+                        "rot": 0.0,
+                        "align": 5,
+                        "bounds_type": 2,
+                        "bounds_align": 0,
+                        "bounds_crop": false,
+                        "crop_left": 0,
+                        "crop_top": 0,
+                        "crop_right": 0,
+                        "crop_bottom": 0,
+                        "id": 51,
+                        "group_item_backup": false,
+                        "pos": {
+                            "x": 0.0,
+                            "y": 0.0
+                        },
+                        "scale": {
+                            "x": 1.0,
+                            "y": 1.0
+                        },
+                        "bounds": {
+                            "x": 1920.0,
+                            "y": 1080.0
+                        },
+                        "scale_filter": "disable",
+                        "blend_method": "default",
+                        "blend_type": "normal",
+                        "show_transition": {
+                            "id": "fade_transition",
+                            "versioned_id": "fade_transition",
+                            "name": "Flag Checkered Show Transition",
+                            "transition": {},
+                            "duration": 300
+                        },
+                        "hide_transition": {
+                            "id": "fade_transition",
+                            "versioned_id": "fade_transition",
+                            "name": "Flag Checkered Hide Transition",
                             "transition": {},
                             "duration": 300
                         },
@@ -4098,7 +4173,7 @@
                         "crop_top": 0,
                         "crop_right": 0,
                         "crop_bottom": 0,
-                        "id": 53,
+                        "id": 55,
                         "group_item_backup": false,
                         "pos": {
                             "x": 0.0,

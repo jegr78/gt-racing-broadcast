@@ -36,6 +36,21 @@ def graphic_placeholder_path():
     return p if os.path.isfile(p) else None
 
 
+def is_graphic_placeholder(path):
+    """True iff the file at *path* is byte-identical to the bundled transparent PNG,
+    i.e. a graphic the Sheet does not link. False when either file is unreadable."""
+    blank = graphic_placeholder_path()
+    if not blank:
+        return False
+    try:
+        if os.path.getsize(path) != os.path.getsize(blank):
+            return False
+        with open(path, "rb") as a, open(blank, "rb") as b:
+            return a.read() == b.read()
+    except OSError:
+        return False
+
+
 def media_placeholder_path():
     """Absolute path of the bundled neutral clip, or None when absent."""
     p = os.path.join(_placeholders_dir(), MEDIA_PLACEHOLDER)

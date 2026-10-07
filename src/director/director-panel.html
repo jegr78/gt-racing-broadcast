@@ -1496,13 +1496,12 @@ function buildPovActions(){
 
 /* Flag-status graphic bus (#flag-graphic): an exactly-one-active OBS overlay
    toggle, parallel to the flag-text chip on #condRow. It drives /obs/flag/* and
-   highlights the active flag from /obs/flag/data. Unlike the Gfx bus, whose
-   toggles are independent, these five are mutually exclusive. */
-const FLAG_GFX = [
-  ["GREEN","green"], ["YELLOW","yellow"], ["RED","red"],
-  ["SAFETY CAR","safety-car"], ["VSC","virtual-safety-car"],
-];
-const flagGfxKeys = {};          // key -> button
+   builds its keys from the flags /obs/flag/data reports as linked in the Sheet
+   Assets. Unlike the Gfx bus, whose toggles are independent, these are mutually
+   exclusive. */
+const FLAG_GFX_LABELS = {"virtual-safety-car":"VSC"};
+let flagGfxKeys = {};            // key -> button
+let flagGfxSig = null;           // the rendered key list, rebuilt only on change
 async function flagGfxSet(key){  // key "" clears
   const path = key ? "obs/flag/set/" + key : "obs/flag/clear";
   try{
@@ -1515,16 +1514,25 @@ async function flagGfxSet(key){  // key "" clears
 function flagGfxRender(active){
   for (const [key, btn] of Object.entries(flagGfxKeys)) btn.classList.toggle("on", key === active);
 }
-FLAG_GFX.forEach(([label, key])=>{
-  const b = mkKey(label, "flaggfx", ()=>flagGfxSet(key));
-  flagGfxKeys[key] = b; $("#flagGfxBus").appendChild(b);
-});
-$("#flagGfxBus").appendChild(mkKey("CLEAR", "stop", ()=>flagGfxSet("")));
+function flagGfxBuild(available){
+  const sig = available.map(f => f.key).join(",");
+  if (sig === flagGfxSig) return;
+  flagGfxSig = sig; flagGfxKeys = {};
+  const bus = $("#flagGfxBus");
+  bus.textContent = "";
+  available.forEach(({key, source})=>{
+    const label = FLAG_GFX_LABELS[key] || source.replace(/^Flag /, "").toUpperCase();
+    const b = mkKey(label, "flaggfx", ()=>flagGfxSet(key));
+    flagGfxKeys[key] = b; bus.appendChild(b);
+  });
+  bus.appendChild(mkKey("CLEAR", "stop", ()=>flagGfxSet("")));
+}
+flagGfxBuild([]);
 async function flagGfxPoll(){
   try{
     const r = await fetch("/obs/flag/data", {cache:"no-store"});
     const d = await r.json();
-    if (!d.error) flagGfxRender(d.active || "");
+    if (!d.error){ flagGfxBuild(d.available || []); flagGfxRender(d.active || ""); }
   }catch(e){ /* relay unreachable: leave the last highlight in place */ }
 }
 

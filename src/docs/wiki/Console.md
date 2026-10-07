@@ -100,7 +100,8 @@ value when the relay restarts. With `GRAPHICS_TAKE=direct`:
 - A graphic can only go on air while its scene is on air, so a Stint graphic is locked
   during the Splitscreen and the tile says why.
 - Race Control alone sets the **flag graphic** (Green, Yellow, Red, Safety Car, Virtual
-  Safety Car) in the **Act** tab. One flag is shown at a time.
+  Safety Car, Checkered) in the **Act** tab. The tab offers only the flags whose
+  `Flag …` row is linked in the Sheet **Assets** tab. One flag is shown at a time.
 - Every take posts a line in the crew chat, for example "RC 2 put Flag Yellow on air".
 
 With `GRAPHICS_TAKE=request`:
