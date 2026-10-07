@@ -30,9 +30,8 @@ byte-identical to the transparent graphic placeholder. That is the same signal
 OBS-referenced graphic the Sheet does not link. The "OBS only" (internal) Assets
 column is ignored here, because flag rows are usually marked internal.
 
-- `placeholders.is_graphic_placeholder(path)` is the check for the flag store. The
-  relay's `list_graphics` keeps its own variant, which reads the reference file once
-  per listing.
+- `placeholders.is_graphic_placeholder(path)` is the one placeholder check, used by
+  the flag store and by the relay's `list_graphics`.
 - `flag_graphic.available_flags(graphics_dir)` returns the available keys in
   catalog order. An unset `graphics_dir` means every catalog flag is available
   (keeps callers without a runtime dir, and today's tests, working).

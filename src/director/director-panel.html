@@ -134,6 +134,7 @@
   .sep{flex:0 0 100%;height:1px;background:var(--edge);margin:2px 0}
   /* grouped sub-rows inside a card (Graphics, Utilities) + their tiny labels */
   .grp{display:flex;flex-direction:column;gap:5px}
+  .grp[hidden]{display:none}
   .glbl{font-size:8px;letter-spacing:.22em;text-transform:uppercase;color:var(--muted)}
 
   /* Cues: 2/1 body */
@@ -1520,6 +1521,7 @@ function flagGfxBuild(available){
   flagGfxSig = sig; flagGfxKeys = {};
   const bus = $("#flagGfxBus");
   bus.textContent = "";
+  bus.parentElement.hidden = !available.length;   // no linked flag: no flag group
   available.forEach(({key, source})=>{
     const label = FLAG_GFX_LABELS[key] || source.replace(/^Flag /, "").toUpperCase();
     const b = mkKey(label, "flaggfx", ()=>flagGfxSet(key));
