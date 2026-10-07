@@ -1,6 +1,16 @@
-# GT7 telemetry recording
+# GT7 telemetry recording, track recognition and lap analysis
 
-Issue #785. Extends the solo POV telemetry of #324, #711 and #713.
+Epic #785 with four parts, one PR and one plan each:
+
+| Part | Issue | Content |
+|---|---|---|
+| 1 | #786 | record the trace, CSV export, REC key |
+| 2 | #787 | GT7 data updates, track recognition |
+| 3 | #788 | lap index, mini-sectors, Control Center lap comparison |
+| 4 | #789 | telemetry section in the post-event report |
+
+Each part depends on the one before. Extends the solo POV telemetry of #324, #711 and
+#713.
 
 ## Problem
 
@@ -9,6 +19,8 @@ In a solo POV broadcast the relay receives every GT7 telemetry packet at about 6
 keeps the reference lap in `telemetry.json` and a 15 s, 30 Hz throttle/brake trace in
 memory for the HUD. A driver who wants to analyse a session afterwards has nothing to
 work with.
+
+# Part 1: recording and CSV export (#786)
 
 ## Decisions
 
@@ -24,9 +36,9 @@ work with.
   appear as a `session` counter in the export, not as separate files.
 - **No automatic cleanup.** Recordings stay until the producer deletes them.
   `racecast telemetry list` shows count and size.
-- Operator surfaces in scope: relay endpoints, the profile key, the CLI and a Director
+- Operator surfaces in part 1: relay endpoints, the profile key, the CLI and a Director
   Panel button. The Control Center only gets the key pre-filled in new solo POV
-  profiles. A Companion button is out of scope.
+  profiles. A Companion button is out of scope for the whole epic.
 - A live toggle **survives a relay restart**. A new broadcast (`event start` without
   recovery flags) resets it to the profile default.
 - Solo POV only: everything hangs off `telemetry_store`, which exists only when
@@ -156,21 +168,27 @@ packet.
 
 `samples.csv`, one row per packet:
 
-`t_s, session, lap, lap_t_s, on_track, paused, speed_kmh, throttle_pct, brake_pct,
-throttle_input_pct, brake_input_pct, steer_deg, gear, rpm, fuel_l, tyre_fl_c,
-tyre_fr_c, tyre_rl_c, tyre_rr_c, pos_x, pos_y, pos_z, car_id`
+`t_s, session, lap, lap_t_s, lap_dist_m, on_track, paused, speed_kmh, throttle_pct,
+brake_pct, throttle_input_pct, brake_input_pct, steer_deg, gear, rpm, fuel_l,
+tyre_fl_c, tyre_fr_c, tyre_rl_c, tyre_rr_c, pos_x, pos_y, pos_z, car_id`
 
 - `t_s` counts from the first record, `lap_t_s` from the engine's lap-change edge.
+- `lap_dist_m` is the distance driven since the lap-change edge, integrated from speed
+  (the engine's `_LapAccumulator.distance`). Part 2 replaces it with the position
+  projected onto the racing line when the track is known.
 - `session` starts at 1 and follows the engine's session counter.
 
 `laps.csv`, one row per lap the engine finalised:
 
 `session, lap, start_t_s, end_t_s, gt7_time_s, relay_time_s, status, reason,
-fuel_used_l, top_speed_kmh`
+fuel_used_l, top_speed_kmh, car`
 
 - `gt7_time_s` is the first `last_ms` that changes within the first 3 s of the
   following lap (GT7 updates it shortly after the line). Empty if none arrives.
 - `relay_time_s`, `status` and `reason` come from the engine's lap record.
+- `car` is `<maker> <name>` from the car tables for the car id of the lap's last
+  packet, or `Car #<id>` for an id the tables do not know. Part 2 appends `track` and
+  `layout`.
 
 The exporter replays the packets through the same `parse_packet` and `TelemetryEngine`
 the HUD uses, so the lap verdicts match what the broadcast showed.
@@ -182,8 +200,8 @@ LibreOffice and Google Sheets. When packets were dropped, the exporter prints th
 ## Surfaces
 
 - **Director Panel:** a `REC` button next to `TELEMETRY` in the solo `vis` list,
-  `relay: "telemetry-record"`. Hidden when `/status` has no telemetry block, red with
-  the elapsed time while recording, yellow when `record.error` is set.
+  `relay: "telemetry/record"`. Hidden when `/status` has no telemetry block, red with
+  the elapsed time while recording, amber when `record.error` is set.
   `director-panel.png` is refreshed in the same PR.
 - **Control Center:** `profile_admin` writes an empty `TELEMETRY_RECORD=` into new solo
   POV profiles. No other change, so no `cc-*.png` refresh.
@@ -192,7 +210,7 @@ LibreOffice and Google Sheets. When packets were dropped, the exporter prints th
 
 | Case | Behaviour |
 |---|---|
-| disk full, write error | recording stops, `record.error` set, panel button yellow; live telemetry and HUD continue |
+| disk full, write error | recording stops, `record.error` set, panel button amber; live telemetry and HUD continue |
 | queue full | packet dropped, `dropped` counted, exporter reports it |
 | relay killed (crash, or `relay stop` on Windows) | `.part` file readable up to the last complete record, `export` works; the next relay start renames it to `.gt7rec` |
 | unknown file version | export aborts with a clear message |
@@ -218,3 +236,192 @@ TDD, failing test first.
 - `src/relay/CLAUDE.md`: the GT7 telemetry paragraph gains the recorder.
 - Wiki `Relay-Mode.md` (telemetry section): recording, the switch and the export.
 - `src/docs/wiki/Director.md`: the `REC` button.
+
+# Part 2: GT7 data updates and track recognition (#787)
+
+## Data sources
+
+| Files | Source | Licence |
+|---|---|---|
+| `cars.csv`, `maker.csv`, `cargrp.csv` | [ddm999/gt7info](https://github.com/ddm999/gt7info) `_data/db/` | MIT-0 |
+| `index.json`, `signatures.json` | [jbhoorasingh/gt7-datalogger-track-data](https://github.com/jbhoorasingh/gt7-datalogger-track-data) | CC0 (survey data, `index.json`); `signatures.json` also builds on MIT captures of [zetetos/gt-telemetry](https://github.com/zetetos/gt-telemetry) |
+
+- `index.json` lists all 121 GT7 layouts: `official_id`, `track`, `layout`,
+  `official_name`, `country`, `turns`, `length_m`, `reverse`. It is the catalogue for
+  names and for the "set track" choice in part 3.
+- `signatures.json` has a row for 78 layouts: `official_id`, `official_name`,
+  `length_m`, `min_x/max_x/min_z/max_z`, `path` (racing line as `[x, z]` every 20 m, in
+  driving order, starting at the line), `reverse` (`null` or `{official_id,
+  official_name}` of the reverse twin, which has no row of its own), `ambiguous_with`
+  and `flags`. Coordinates are GT7 world `pos_x`/`pos_z`.
+- On the real fixture packets the four `~` packets lie 2.5 to 6.6 m from the Nürburgring
+  GP line and the three `A` packets 2 to 10 m from Suzuka; single points also fall into
+  up to 35 bounding boxes, so recognition always works on a whole lap.
+- The bundled copies live in `src/assets/gt7/` beside the car tables, with the licence
+  texts (`LICENSE-track-data` with the CC0 dedication and the MIT notice of
+  zetetos/gt-telemetry). `src/assets/gt7/README.md` names all sources.
+
+## Module `src/scripts/gt7_data.py`
+
+- `SOURCES`: per file its URL, a validator (CSV columns and minimum row count as in
+  today's `tools/fetch-gt7-cars.py`; JSON `format`/`version` and minimum row counts:
+  `configurations` >= 100, `signatures` >= 50).
+- `data_dir(runtime_base)` -> `<runtime_base>/gt7`. `resolve(name, runtime_base)`
+  returns the runtime copy when it exists and validates, else the bundled one.
+- `update(runtime_base, force=False, fetch=http_util.get_bytes, now=time.time)`:
+  downloads every file, validates, writes atomically, records SHA-256 and time in
+  `<runtime_base>/gt7/updated.json`. Without `force` it returns at once when the last
+  successful check is younger than 24 h. Any network or validation failure keeps the
+  old file and is reported per file in the result; it never raises.
+- `status(runtime_base)` -> per file: source (`runtime` or `bundled`), last update,
+  row count.
+- `tools/fetch-gt7-cars.py` becomes `tools/fetch-gt7-data.py`: it calls the same
+  download and validation and writes the bundled copies in `src/assets/gt7/`.
+
+**Automatic.** A relay start with telemetry runs `update()` in a daemon thread. After
+a successful update the relay reloads its car database and track database in place.
+
+**Manual.** `racecast gt7-data update [--force]` and `racecast gt7-data status`. The
+Control Center Settings view gets a "GT7 data" row with the age of the data and an
+**Update** button (route `POST /api/gt7-data/update`, `GET /api/gt7-data`).
+`cc-settings.png` is refreshed.
+
+`gt7_cars.CarDB()` without a directory and the new track database both read through
+`gt7_data.resolve`.
+
+## Module `src/scripts/gt7_tracks.py`
+
+- `TrackDB(index_path, signatures_path, learned_path=None)`: loads the catalogue, the
+  shipped signatures and the learned ones. Learned rows win over shipped rows with the
+  same `official_id`. `name(official_id)` -> `{id, track, layout, reverse, country,
+  length_m}` or None. `layouts()` -> the catalogue sorted by track and layout.
+- `match(points, length_m)` with `points` = `[(x, z), ...]` every ~20 m in driving
+  order:
+  1. Candidates: rows whose `length_m` is within 3 % of `length_m` and whose box,
+     widened by 50 m, contains every point.
+  2. Score: mean distance from each point to the nearest `path` point. Rows above 15 m
+     drop out.
+  3. Direction: the sequence of nearest `path` indices, unwrapped modulo the path
+     length, must mostly rise (forward) or fall (reverse). Falling selects the row's
+     `reverse` twin; a falling match on a row without a twin drops out.
+  4. Result `{"id", "track", "layout", "reverse", "score_m"}` for a single best row,
+     or `{"candidates": [ids...]}` when more rows score within 3 m of the best, or
+     None.
+- `learn(learned_path, official_id, points, length_m)`: writes a row in the
+  `signatures.json` shape (box from the points, `path` = points, `provenance:
+  "learned"`) into `learned-tracks.json`, atomically. Updates never touch this file.
+- `project(points, official_id)` -> per point the distance along the row's `path` from
+  its start (the line), for `lap_dist_m`.
+
+## Engine and relay
+
+- `_LapAccumulator` also keeps `(pos_x, pos_z)` whenever the driven distance passed
+  another 20 m; the lap record (`on_lap`) carries it as `points` plus `distance_m`.
+- `TelemetryEngine.track_db` (None by default) and `TelemetryEngine.track`: after each
+  closed lap with `distance_m` >= 80 % of the shortest candidate length, the engine
+  calls `track_db.match`. A single match sets `track` until the next session boundary;
+  candidates set `track = {"candidates": [...]}` and keep trying on later laps.
+- `TelemetryStore.data()` and `/status` `telemetry.track` carry `track` (None until
+  recognised). The Director Panel status strip shows `<track> - <layout>` next to the
+  car (`stTrack`), or `Track ?` with the candidate names as tooltip.
+  `director-panel.png` is refreshed.
+
+## Export
+
+- `laps.csv` appends `track` and `layout` (empty when unknown). The exporter runs the
+  same `TrackDB` the relay uses.
+- `lap_dist_m` in `samples.csv`: when the recording's track is known, the exporter
+  projects each sample onto the racing line (`project`); otherwise it stays the
+  integrated distance.
+
+## Tests and docs
+
+- `tests/test_gt7_data.py`: validators, atomic replace, 24 h gate, failure keeps the
+  old file, `resolve` fallback; all downloads through an injected fetch.
+- `tests/test_gt7_tracks.py`: synthetic laps built from a real signature's `path`
+  (forward, reverse, offset by 5 m, a wrong length, a different track), candidates for
+  an ambiguous pair, learned rows winning, `project`; the real `~` fixture points lie
+  near the Nürburgring GP line.
+- Relay `/status` `telemetry.track`, panel status strip (visual check), CLI
+  `gt7-data`, Control Center route and Settings row (visual check).
+- Docs: `src/relay/CLAUDE.md`, wiki `Relay-Mode.md`, `Director.md`, `Control-Center.md`,
+  `src/assets/gt7/README.md`.
+
+# Part 3: lap index, mini-sectors and lap comparison (#788)
+
+## Module `src/scripts/gt7_laps.py`
+
+- `index(path, track_db, cars)` returns the lap index of one recording and caches it in
+  `<stem>.laps.json` next to the recording. The cache records the recording's size and
+  mtime and the SHA-256 of the track data (`updated.json`) plus the learned file's
+  mtime; any change rebuilds it.
+- Per lap: the `laps.csv` fields plus `rec` (recording stem), `track_id`, `car_id`,
+  `car`, `tyre_avg_c` (mean surface temperature per wheel over the lap), and `trace`:
+  the lap resampled every 5 m of `lap_dist_m` with `t`, `speed_kmh`,
+  `throttle`, `brake`, `steer_deg`, `gear`, `x`, `z`.
+- The recording's track: the match of its longest closed lap; a learned assignment for
+  this recording (part of the learned file, keyed by recording stem) wins.
+- `sectors(trace, length_m, step_m=200)`: sector times from the trace, boundaries every
+  200 m from the line, the last sector shorter, times interpolated at the boundaries.
+- `best_sectors(laps)`: per sector the minimum over the given counted laps;
+  `theoretical_best` = their sum.
+- `delta(trace_a, trace_b)`: time of B minus time of A at each 5 m station.
+
+Comparisons pool counted laps of the same `track_id` and `car_id` across all
+recordings of the active profile.
+
+## Control Center view `Telemetry`
+
+- Shown when the active profile is solo POV. It reads files through the `racecast.py`
+  data layer and needs no running relay.
+- Left column: recordings (newest first), then the laps of the selected recording with
+  time, status, car and track. A recording with an unknown or ambiguous track offers
+  **Set track**: a choice from `TrackDB.layouts()` that calls `learn` with the
+  recording's longest counted lap and stores the assignment.
+- Lap A is the reference, by default the fastest counted lap of the same track and car
+  across all recordings; lap B is the selected lap. Both have a picker over all
+  matching laps.
+- Main area: stacked charts over distance for speed, throttle, brake, steering and
+  gear with both laps, then the delta curve of B against A; a shared cursor follows the
+  pointer. Right: the track map with both lines, mini-sectors coloured green where B
+  gains and red where B loses. Below: the mini-sector table with A, B, the best sector
+  and the theoretical best.
+- Inline SVG, no external library. The Control Center's existing colour tokens and
+  dark theme apply.
+- Routes: `GET /api/telemetry/recordings`, `GET /api/telemetry/laps?track=&car=`,
+  `GET /api/telemetry/lap?rec=&lap=&session=`, `GET /api/telemetry/tracks`,
+  `POST /api/telemetry/learn` `{rec, track_id}`.
+- New wiki screenshot `cc-telemetry.png` from a synthetic demo recording (a tool under
+  `tools/` builds it from a signature's racing line), captured from a local dev build.
+
+## Tests and docs
+
+- `tests/test_gt7_laps.py`: cache build and invalidation, resampling, sectors with a
+  short last sector, best sectors and theoretical best, delta.
+- `tests/test_ui_server.py` / `tests/test_racecast.py`: the five routes and their data
+  functions; `learn` writes the learned file and the assignment.
+- Visual check of the view; wiki `Control-Center.md` with `cc-telemetry.png`.
+
+# Part 4: telemetry in the post-event report (#789)
+
+- `racecast report` collects the active profile's recordings whose time span overlaps
+  the report window and reads their lap indexes. Without any, the section is absent;
+  endurance reports are unchanged.
+- HTML section "Telemetry":
+  - key figures: best lap, theoretical best, consistency (standard deviation of the
+    counted lap times), fuel per lap, average tyre temperature per wheel;
+  - lap-time trend as a small SVG: counted laps as dots, other laps greyed;
+  - track map of the best lap as SVG, mini-sectors coloured by the gap to the best
+    sector time;
+  - the lap table: time, status, reason, fuel, top speed, car, track.
+- `render_summary_text` (the Discord message) adds one line:
+  `Best lap 1:58.432 (theoretical 1:57.910), 23 laps, Suzuka Circuit`.
+- `build_report` takes the telemetry block as an optional argument, so its existing
+  tests stay unchanged.
+
+## Tests and docs
+
+- `tests/test_report_build.py`: figures, consistency,
+  section absent without recordings, summary line; SVG output is well-formed XML.
+- Visual check of a rendered report; the post-event report section in wiki
+  `Health-Monitor.md` describes the telemetry part.
