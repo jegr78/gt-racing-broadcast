@@ -98,9 +98,55 @@ def t_write_error_stops_and_reports():
         blocker = os.path.join(d, "file")
         with open(blocker, "w") as fh:
             fh.write("x")
-        w = _write(os.path.join(blocker, "sub"), [(1.0, "A", _plain())])   # dir under a file
+        sub = os.path.join(blocker, "sub")
+        w = _write(sub, [(1.0, "A", _plain())])   # dir under a file
         assert w.error, "an unwritable directory must surface as error, not raise"
+        assert sub not in w.error and d not in w.error, \
+            f"an OSError message must not leak the recording path: {w.error}"
+        before = w.error
         w.put(2.0, "A", _plain())               # ignored after an error
+        assert w.error == before and w._q.empty(), \
+            "a packet after an error must not change the error or be queued"
+
+
+def t_non_os_error_in_writer_stops_recording_and_reports():
+    # ord() on a multi-char kind raises TypeError, not OSError; _run must still
+    # stop the recording and report it, not die silently with error=None (#786).
+    with tempfile.TemporaryDirectory() as d:
+        w = rec.RecordingWriter(d, "Demo", "dev", flush_s=0.05)
+        w.put(1.0, "AB", _plain())
+        w.close()
+        assert w.error == "TypeError", w.error
+        assert os.path.exists(w.path + rec.PART), "a non-OSError failure must not be renamed clean"
+        assert not os.path.exists(w.path)
+
+
+def t_header_and_stem_survive_the_windows_near_epoch_localtime_bug():
+    # On Windows, datetime.fromtimestamp(ts).astimezone() (no tz) raises OSError
+    # (Errno 22) for small ts; the fix passes tz=utc explicitly. Simulate the
+    # Windows CRT behaviour here (this machine's libc tolerates small ts fine) so
+    # the regression is caught on any platform.
+    import datetime as _dt
+    _real = _dt.datetime
+
+    class StrictDatetime(_real):
+        @classmethod
+        def fromtimestamp(cls, ts, tz=None):
+            if tz is None:
+                raise OSError(22, "Invalid argument")
+            return _real.fromtimestamp(ts, tz)
+
+    orig = rec.datetime.datetime
+    rec.datetime.datetime = StrictDatetime
+    try:
+        rec._header("Demo", "dev", 1.0)          # must not raise
+        with tempfile.TemporaryDirectory() as d:
+            w = rec.RecordingWriter(d, "Demo", "dev", flush_s=0.05)
+            w.put(1.0, "A", _plain())
+            w.close()
+            assert w.error is None, w.error
+    finally:
+        rec.datetime.datetime = orig
 
 
 def t_reader_rejects_foreign_and_newer_files():
@@ -355,7 +401,7 @@ def t_control_put_does_not_recreate_writer_after_error():
 
 def t_control_put_after_close_never_recreates_writer():
     # The relay's shutdown() calls close() while the telemetry thread may still be
-    # in flight with one more packet (#786): that packet must not open a new file.
+    # in flight with one more packet (#786).
     calls = []
     class Fake:
         path, started, bytes, dropped, error = None, 1.0, 0, 0, None
@@ -369,7 +415,28 @@ def t_control_put_after_close_never_recreates_writer():
         c.put(1.0, "A", _plain())        # opens the first (fake) writer
         c.close()
         c.put(2.0, "A", _plain())        # arrives after close(): must stay a no-op
-        assert calls == [1], calls
+        assert calls == [1], "a packet arriving after close() must not open a new file"
+
+
+def t_status_elapsed_s_is_relay_clock_minus_since():
+    with tempfile.TemporaryDirectory() as d:
+        c = _control(d, default=True)
+        c.put(1000.0, "A", _plain())
+        for _ in range(50):
+            if c.status()["file"]:
+                break
+            time.sleep(0.02)
+        since = c.status()["since"]
+        assert since is not None
+        assert abs(c.status(now=since + 12.3)["elapsed_s"] - 12.3) < 1e-6
+        c.close()
+        assert c.status()["elapsed_s"] is None, "no open writer after close() -> no elapsed time"
+
+
+def t_status_elapsed_s_is_none_while_idle():
+    with tempfile.TemporaryDirectory() as d:
+        c = _control(d, default=False)
+        assert c.status()["elapsed_s"] is None
 
 
 def t_control_state_file_true_beats_default_false():

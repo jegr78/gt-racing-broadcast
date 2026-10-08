@@ -39,12 +39,24 @@ def _encode(wall_ts, kind_byte, payload):
     return _REC.pack(wall_ts, kind_byte, len(payload)) + payload
 
 
+def _local_dt(ts):
+    """ts as a local-timezone datetime, via an explicit UTC tz so the conversion never
+    calls the platform's raw localtime(): on Windows that raises OSError (Errno 22)
+    for small ts, which near-epoch test fixtures (and a just-started recording) hit."""
+    return datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc).astimezone()
+
+
 def _header(profile, relay_version, started_ts):
-    started = datetime.datetime.fromtimestamp(started_ts).astimezone().isoformat(
-        timespec="seconds")
+    started = _local_dt(started_ts).isoformat(timespec="seconds")
     return (json.dumps({"format": FORMAT, "version": VERSION, "profile": profile,
                         "started": started, "relay_version": relay_version})
             + "\n").encode("utf-8")
+
+
+def _sanitize_error(e):
+    """A /status-safe message: never the OS path from an OSError, which reaches every
+    console role (#786). strerror has no path; fall back to the exception class name."""
+    return (e.strerror or type(e).__name__) if isinstance(e, OSError) else type(e).__name__
 
 
 def _free_path(rec_dir, stem):
@@ -99,7 +111,7 @@ class RecordingWriter:
 
     def _open(self, first_ts):
         os.makedirs(self._dir, exist_ok=True)
-        stem = time.strftime("%Y%m%d-%H%M%S", time.localtime(first_ts))
+        stem = _local_dt(first_ts).strftime("%Y%m%d-%H%M%S")
         path = _free_path(self._dir, stem)
         fh = open(path + PART, "wb")  # noqa: SIM115  kept open across the writer loop
         head = _header(self._profile, self._relay_version, first_ts)
@@ -139,8 +151,8 @@ class RecordingWriter:
                     last_flush = now
                 if done:
                     break
-        except OSError as e:
-            self.error = str(e)
+        except Exception as e:  # noqa: BLE001  any writer failure must stop recording, not die silently
+            self.error = _sanitize_error(e)
             LOG.warning("telemetry recording stopped: %s", e)
         finally:
             if fh is not None:
@@ -149,7 +161,7 @@ class RecordingWriter:
                     if self.error is None:
                         os.replace(self.path + PART, self.path)
                 except OSError as e:
-                    self.error = self.error or str(e)
+                    self.error = self.error or _sanitize_error(e)
 
 
 class Recording:
@@ -407,7 +419,7 @@ class RecordControl:
                 try:
                     self._writer = self._factory()
                 except Exception as e:  # noqa: BLE001  a bad writer must never reach the UDP loop
-                    self._error = str(e) or type(e).__name__
+                    self._error = _sanitize_error(e)
                     return
             w = self._writer
             if w.error is not None:
@@ -451,13 +463,17 @@ class RecordControl:
                 "file": os.path.basename(w.path) if w is not None and w.path else None,
                 "since": w.started if w is not None else None}
 
-    def status(self):
+    def status(self, now=None):
+        """now overrides the relay wall clock for elapsed_s (tests only)."""
         with self._lock:
             out = self._brief()
             w = self._writer
             out["bytes"] = w.bytes if w is not None else 0
             out["dropped"] = w.dropped if w is not None else 0
             out["error"] = self._error or (w.error if w is not None else None)
+            since = out["since"]
+            out["elapsed_s"] = None if since is None else max(
+                0.0, (time.time() if now is None else now) - since)
             return out
 
     def close(self):

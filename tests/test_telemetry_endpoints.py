@@ -299,6 +299,7 @@ def t_status_reports_record_block():
         try:
             rec = json.loads(get("/status")[2])["telemetry"]["record"]
             assert rec["active"] is True and rec["file"] is None and rec["error"] is None, rec
+            assert rec["elapsed_s"] is None, "no open file yet -> no elapsed time"
         finally:
             srv.shutdown()
             store.recorder.close()
@@ -338,6 +339,16 @@ def t_telemetry_loop_feeds_the_recorder():
     finally:
         m.socket.socket = real
     assert got == [("~", 0x158)] * 3, got
+
+
+def t_telemetry_store_record_swallows_a_raising_recorder():
+    # A bad recorder (its put() raises) must never stop the UDP telemetry loop.
+    class BoomRecorder:
+        def put(self, wall_ts, kind, plain):
+            raise RuntimeError("disk full")
+
+    store = m.gt7_telemetry.TelemetryStore(None, recorder=BoomRecorder())
+    store.record(1.0, "A", b"x")          # must not raise
 
 
 def t_zz_no_test_reached_a_real_obs():
