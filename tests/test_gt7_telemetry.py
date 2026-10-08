@@ -35,6 +35,9 @@ def _packet(**kw):
     b[tm.OFF_THROTTLE] = kw.get("throttle", 0)
     b[tm.OFF_BRAKE] = kw.get("brake", 0)
     struct.pack_into("<i", b, tm.OFF_CAR_ID, kw.get("car_id", 0))
+    struct.pack_into("<3f", b, tm.OFF_POS, *kw.get("pos", (0.0, 0.0, 0.0)))
+    struct.pack_into("<f", b, tm.OFF_RPM, kw.get("rpm", 0.0))
+    b[tm.OFF_GEAR] = kw.get("gear_byte", 0)
     return bytes(b)
 
 
@@ -70,6 +73,22 @@ def _ext_packet(**kw):
 def t_parse_car_id():
     """The car id sits in the base packet too, so it needs no extended format."""
     assert tm.parse_packet(_packet(car_id=3424)).car_id == 3424
+
+
+def t_parse_gear_rpm_position():
+    p = tm.parse_packet(_packet(gear_byte=0x24, rpm=7350.5, pos=(1.5, -2.0, 300.25)))
+    assert p.gear == 4, "gear is the low nibble of 0x90; the high nibble is ignored"
+    assert abs(p.rpm - 7350.5) < 1e-3
+    assert (p.pos_x, p.pos_y, p.pos_z) == (1.5, -2.0, 300.25)
+
+
+def t_sanitize_keeps_last_rpm_and_position_on_nan():
+    eng = tm.TelemetryEngine()
+    eng.update(tm.parse_packet(_packet(rpm=5000.0, pos=(1.0, 2.0, 3.0))), 1.0)
+    nan = float("nan")
+    eng.update(tm.parse_packet(_packet(rpm=nan, pos=(nan, nan, nan))), 1.1)
+    assert eng._last.rpm == 5000.0, "a non-finite rpm keeps the previous reading"
+    assert (eng._last.pos_x, eng._last.pos_y, eng._last.pos_z) == (1.0, 2.0, 3.0)
 
 
 class _Cars:

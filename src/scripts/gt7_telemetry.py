@@ -21,6 +21,9 @@ LOG = logging.getLogger("racecast.relay.telemetry")
 
 # Packet 'A' field offsets (little-endian).
 OFF_MAGIC = 0x00
+OFF_POS = 0x04          # car position x/y/z, metres (float x3)
+OFF_RPM = 0x3C          # engine rpm (float)
+OFF_GEAR = 0x90         # low nibble = current gear (uint8)
 OFF_SPEED = 0x4C        # metres/second (float)
 OFF_FUEL_LEVEL = 0x44   # litres in tank (float)
 OFF_FUEL_CAP = 0x48     # tank capacity (float)
@@ -89,7 +92,8 @@ GT7Packet = namedtuple("GT7Packet", [
     "flags", "on_track", "paused", "loading",
     "car_id",
     "steer_rad", "sway", "heave", "surge", "throttle_input", "brake_input",
-], defaults=(None,) * 7)   # None when the packet is too short to carry the field
+    "gear", "rpm", "pos_x", "pos_y", "pos_z",
+], defaults=(None,) * 12)   # None when the packet is too short to carry the field
 
 
 def _opt_float(plain, off):
@@ -135,6 +139,11 @@ def parse_packet(plain):
         surge=_opt_float(plain, OFF_SURGE),
         throttle_input=_opt_byte(plain, OFF_THROTTLE_INPUT),
         brake_input=_opt_byte(plain, OFF_BRAKE_INPUT),
+        gear=plain[OFF_GEAR] & 0x0F,
+        rpm=struct.unpack_from("<f", plain, OFF_RPM)[0],
+        pos_x=struct.unpack_from("<f", plain, OFF_POS)[0],
+        pos_y=struct.unpack_from("<f", plain, OFF_POS + 4)[0],
+        pos_z=struct.unpack_from("<f", plain, OFF_POS + 8)[0],
     )
 
 
@@ -219,6 +228,10 @@ def _sanitize(pkt, last):
         sway=keep("sway", None),
         heave=keep("heave", None),
         surge=keep("surge", None),
+        rpm=keep("rpm", 0.0),
+        pos_x=keep("pos_x", 0.0),
+        pos_y=keep("pos_y", 0.0),
+        pos_z=keep("pos_z", 0.0),
     )
 
 
