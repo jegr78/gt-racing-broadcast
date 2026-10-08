@@ -389,6 +389,7 @@ class RecordControl:
 
     def _save(self):
         try:
+            os.makedirs(os.path.dirname(self._state_path) or ".", exist_ok=True)
             tmp = self._state_path + ".tmp"
             with open(tmp, "w", encoding="utf-8") as fh:
                 json.dump({"active": self._active}, fh)
@@ -397,41 +398,51 @@ class RecordControl:
             pass  # best-effort, never crash the relay
 
     def put(self, wall_ts, kind, plain):
+        bad = None
         with self._lock:
             if not self._active or self._error is not None:
                 return
             if self._writer is None:
-                self._writer = self._factory()
+                try:
+                    self._writer = self._factory()
+                except Exception as e:  # noqa: BLE001  a bad writer must never reach the UDP loop
+                    self._error = str(e) or type(e).__name__
+                    return
             w = self._writer
             if w.error is not None:
                 self._error = w.error
-                self._writer = None
-                w.close()
-                return
+                bad = self._detach_writer()
+        if bad is not None:
+            bad.close()   # outside the lock: close() can block on its writer thread
+            return
         w.put(wall_ts, kind, plain)
 
-    def _close_writer(self):
+    def _detach_writer(self):
+        """Pop the open writer so a slow close() runs outside `self._lock`."""
         w, self._writer = self._writer, None
-        if w is not None:
-            w.close()
+        return w
 
     def set_active(self, on):
         with self._lock:
             self._active = bool(on)
             self._error = None
-            if not self._active:
-                self._close_writer()
+            w = self._detach_writer() if not self._active else None
             self._save()
-            return self._brief()
+            brief = self._brief()
+        if w is not None:
+            w.close()
+        return brief
 
     def toggle(self):
         with self._lock:
             self._active = not self._active
             self._error = None
-            if not self._active:
-                self._close_writer()
+            w = self._detach_writer() if not self._active else None
             self._save()
-            return self._brief()
+            brief = self._brief()
+        if w is not None:
+            w.close()
+        return brief
 
     def _brief(self):
         w = self._writer
@@ -450,4 +461,6 @@ class RecordControl:
 
     def close(self):
         with self._lock:
-            self._close_writer()
+            w = self._detach_writer()
+        if w is not None:
+            w.close()

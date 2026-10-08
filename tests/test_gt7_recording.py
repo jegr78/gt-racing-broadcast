@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """GT7 telemetry recording: file format, writer, reader, switch and CSV export.
 Run: python3 tests/test_gt7_recording.py"""
-import importlib.util, json, os, struct, sys, tempfile, time
+import importlib.util, json, os, struct, sys, tempfile, threading, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -314,6 +314,91 @@ def t_control_write_error_reported_until_next_set():
         assert st["error"] == "disk full" and st["active"] is True, st
         c.set_active(True)
         assert c.status()["error"] is None, "a fresh start clears the error"
+
+
+def t_control_put_does_not_block_on_slow_close():
+    class Slow:
+        path, started, bytes, dropped, error = None, 1.0, 0, 0, None
+        def put(self, *a): pass
+        def close(self, timeout=5.0):
+            time.sleep(1.0)
+    with tempfile.TemporaryDirectory() as d:
+        c = _control(d, default=True, writer_factory=Slow)
+        c.put(1.0, "A", _plain())              # opens the (fake) writer
+        th = threading.Thread(target=c.set_active, args=(False,))
+        th.start()
+        time.sleep(0.05)                        # let set_active grab the lock and start closing
+        t0 = time.monotonic()
+        c.put(2.0, "A", _plain())               # must not wait for the slow close()
+        elapsed = time.monotonic() - t0
+        th.join(timeout=2.0)
+        c.close()
+        assert elapsed < 0.2, elapsed
+
+
+def t_control_put_does_not_recreate_writer_after_error():
+    calls = []
+    class Broken:
+        path, started, bytes, dropped, error = None, None, 0, 0, "disk full"
+        def put(self, *a): pass
+        def close(self, timeout=5.0): pass
+    def factory():
+        calls.append(1)
+        return Broken()
+    with tempfile.TemporaryDirectory() as d:
+        c = _control(d, default=True, writer_factory=factory)
+        c.put(1.0, "A", _plain())
+        c.put(2.0, "A", _plain())
+        c.close()
+        assert calls == [1], calls
+
+
+def t_control_state_file_true_beats_default_false():
+    with tempfile.TemporaryDirectory() as d:
+        state = os.path.join(d, "telemetry-record.json")
+        with open(state, "w", encoding="utf-8") as fh:
+            json.dump({"active": True}, fh)
+        c = rec.RecordControl(os.path.join(d, "rec"), state, False,
+                               profile="Demo", relay_version="dev")
+        assert c.status()["active"] is True, "a valid state file beats default=False too"
+        c.close()
+
+
+def t_control_set_active_true_while_on_keeps_writer():
+    with tempfile.TemporaryDirectory() as d:
+        c = _control(d, default=True)
+        c.put(time.time(), "A", _plain())
+        for _ in range(50):
+            if c.status()["file"]:
+                break
+            time.sleep(0.02)
+        before = c.status()["file"]
+        assert before
+        c.set_active(True)
+        assert c.status()["file"] == before, "set_active(True) while on must not open a new file"
+        c.close()
+
+
+def t_control_factory_exception_never_escapes_put():
+    def boom():
+        raise RuntimeError()
+    with tempfile.TemporaryDirectory() as d:
+        c = _control(d, default=True, writer_factory=boom)
+        c.put(1.0, "A", _plain())              # must not raise
+        assert c.status()["error"] == "RuntimeError", c.status()
+        c.close()
+
+
+def t_control_save_creates_missing_state_dir():
+    with tempfile.TemporaryDirectory() as d:
+        state = os.path.join(d, "nested", "sub", "telemetry-record.json")
+        c = rec.RecordControl(os.path.join(d, "rec"), state, False,
+                               profile="Demo", relay_version="dev")
+        c.toggle()
+        c.close()
+        assert os.path.exists(state), "a toggle must persist even into a missing directory"
+        with open(state, encoding="utf-8") as fh:
+            assert json.load(fh)["active"] is True
 
 
 if __name__ == "__main__":
