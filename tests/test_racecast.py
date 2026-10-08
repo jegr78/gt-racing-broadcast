@@ -267,6 +267,108 @@ def t_route_telemetry_verbs():
     _raises(lambda: m.route(["telemetry", "bogus"]))
 
 
+def t_route_gt7_data_verbs():
+    for verb in ("update", "status"):
+        assert m.route(["gt7-data", verb]) == \
+            {"kind": "service", "command": "gt7-data", "verb": verb, "rest": []}
+    _raises(lambda: m.route(["gt7-data"]))
+    _raises(lambda: m.route(["gt7-data", "bogus"]))
+
+
+@contextlib.contextmanager
+def _fake_gt7_data(fake):
+    real = m._gt7_data_module
+    m._gt7_data_module = lambda: fake
+    try:
+        yield
+    finally:
+        m._gt7_data_module = real
+
+
+def t_gt7_data_update_data_forces_and_never_raises():
+    seen = []
+
+    class Fake:
+        @staticmethod
+        def update(base, force=False):
+            seen.append(force)
+            return {"checked": True, "changed": True, "files": {"cars.csv": "updated"}}
+
+        @staticmethod
+        def status(base, bundled=None):
+            raise RuntimeError("disk")
+
+    with _fake_gt7_data(Fake):
+        assert m.gt7_data_update_data()["ok"] is True and seen == [True]
+        assert m.gt7_data_status_data() == {"ok": False, "error": "could not read GT7 data: disk"}
+
+
+def t_gt7_data_update_data_maps_errors():
+    class AllFailed:
+        @staticmethod
+        def update(base, force=False):
+            return {"checked": True, "changed": False, "files": {"cars.csv": "error: offline"}}
+
+    class Boom:
+        @staticmethod
+        def update(base, force=False):
+            raise RuntimeError("disk")
+
+    with _fake_gt7_data(AllFailed):
+        assert m.gt7_data_update_data()["ok"] is False, "every file failed -> not ok"
+    with _fake_gt7_data(Boom):
+        assert m.gt7_data_update_data() == {"ok": False,
+                                            "error": "could not update GT7 data: disk"}
+
+
+def t_gt7_data_status_cmd_names_missing_signatures():
+    class Fake:
+        @staticmethod
+        def status(base, bundled=None):
+            return {"checked": None, "files": {
+                "cars.csv": {"source": "bundled", "updated": None, "rows": 500},
+                "signatures.json": {"source": "missing", "updated": None, "rows": None}}}
+
+    out = io.StringIO()
+    with _fake_gt7_data(Fake), contextlib.redirect_stdout(out):
+        m.gt7_data_status_cmd([])
+    text = out.getvalue()
+    assert "last check: never" in text, text
+    assert "cars.csv: bundled, 500 rows" in text, text
+    assert "signatures.json: not downloaded yet" in text and "gt7-data update" in text, text
+
+
+def t_gt7_data_update_cmd_prints_files_and_fails_when_all_fail():
+    seen = []
+
+    class Fake:
+        files = {"cars.csv": "updated", "index.json": "unchanged"}
+
+        @classmethod
+        def update(cls, base, force=False):
+            seen.append(force)
+            return {"checked": True, "changed": True, "files": cls.files}
+
+    out = io.StringIO()
+    with _fake_gt7_data(Fake), contextlib.redirect_stdout(out):
+        m.gt7_data_update_cmd(["--force"])
+    assert "cars.csv: updated" in out.getvalue() and seen == [True], out.getvalue()
+    Fake.files = {"cars.csv": "error: offline"}
+    try:
+        with _fake_gt7_data(Fake), contextlib.redirect_stdout(io.StringIO()):
+            m.gt7_data_update_cmd([])
+    except SystemExit as e:
+        assert "failed" in str(e.code), e.code
+    else:
+        raise AssertionError("an update where every file failed must exit non-zero")
+    try:
+        m.gt7_data_update_cmd(["--bogus"])
+    except SystemExit as e:
+        assert "usage" in str(e.code), e.code
+    else:
+        raise AssertionError("an unknown flag must print usage")
+
+
 def _rec_dir_with_one(d):
     import importlib
     gr = importlib.import_module("gt7_recording")

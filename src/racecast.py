@@ -22,6 +22,7 @@
   racecast sheet     url | open              # print / open the active league's Google Sheet (built from its SHEET_ID)
   racecast telemetry record start|stop|status   # solo POV: record the GT7 telemetry trace (relay must run)
   racecast telemetry list | export <name|latest> [--out DIR] [--all] [--excel] | delete <name>   # recordings of the active profile -> samples.csv + laps.csv
+  racecast gt7-data  update [--force] | status   # GT7 car names + track recognition data (checked daily by the relay)
   racecast app launch|quit obs|discord|tailscale   # start / gracefully quit a GUI app (Control Center buttons)
   racecast discord   join | leave | status   # drive the desktop Discord client into/out of the league's voice channel
   racecast status                            # aggregate health of all services
@@ -982,6 +983,7 @@ TAILSCALE_VERBS = ("up", "down", "status", "logs")
 OBS_VERBS = ("refresh", "collection", "logs", "stream-target", "benchmark")
 SHEET_VERBS = ("url", "open")           # active league's Google Sheet (from SHEET_ID)
 TELEMETRY_VERBS = ("record", "list", "export", "delete")   # GT7 telemetry recordings
+GT7DATA_VERBS = ("update", "status")      # GT7 reference data
 APP_VERBS = ("launch", "quit")          # GUI app control for the Control Center
 APP_CONTROLLED = ("obs", "discord", "tailscale")   # GUI apps racecast can launch + quit
 
@@ -1049,6 +1051,11 @@ def route(argv):
         if verb not in TELEMETRY_VERBS:
             raise ValueError(f"usage: racecast telemetry {{{'|'.join(TELEMETRY_VERBS)}}}")
         return {"kind": "service", "command": "telemetry", "verb": verb, "rest": rest[1:]}
+    if cmd == "gt7-data":
+        verb = rest[0] if rest else None
+        if verb not in GT7DATA_VERBS:
+            raise ValueError(f"usage: racecast gt7-data {{{'|'.join(GT7DATA_VERBS)}}}")
+        return {"kind": "service", "command": "gt7-data", "verb": verb, "rest": rest[1:]}
     if cmd == "app":
         verb = rest[0] if rest else None
         if verb not in APP_VERBS:
@@ -3303,6 +3310,60 @@ def telemetry_delete_cmd(rest):
     print(f"deleted {name}")
 
 
+def _gt7_data_module():
+    import gt7_data
+    return gt7_data
+
+
+def _gt7_files_ok(files):
+    return any(not str(v).startswith("error") for v in files.values())
+
+
+def gt7_data_update_data():
+    """Force a GT7 data update for the Control Center; never raises."""
+    try:
+        res = _gt7_data_module().update(_runtime_base_dir(), force=True)
+    except Exception as exc:  # noqa: BLE001  the Control Center shows the message instead
+        return {"ok": False, "error": f"could not update GT7 data: {exc}"}
+    return {"ok": _gt7_files_ok(res["files"]), "changed": res["changed"], "files": res["files"]}
+
+
+def gt7_data_status_data():
+    """Source, age and row count of each GT7 data file; never raises."""
+    try:
+        st = _gt7_data_module().status(_runtime_base_dir(), resource_path("assets/gt7"))
+    except Exception as exc:  # noqa: BLE001  the Control Center shows the message instead
+        return {"ok": False, "error": f"could not read GT7 data: {exc}"}
+    return {"ok": True, "checked": st["checked"], "files": st["files"]}
+
+
+def gt7_data_update_cmd(rest):
+    """Fetch the latest GT7 car and track data now."""
+    if rest not in ([], ["--force"]):
+        sys.exit("usage: racecast gt7-data update [--force]")
+    res = gt7_data_update_data()
+    if "error" in res:
+        sys.exit(res["error"])
+    for name, state in sorted(res["files"].items()):
+        print(f"{name}: {state}")
+    if not res["ok"]:
+        sys.exit("GT7 data update failed (offline?)")
+
+
+def gt7_data_status_cmd(_rest):
+    """Show where each GT7 data file comes from and how many rows it holds."""
+    st = gt7_data_status_data()
+    if not st["ok"]:
+        sys.exit(st["error"])
+    when = time.strftime("%Y-%m-%d %H:%M", time.localtime(st["checked"])) if st["checked"] else "never"
+    print(f"last check: {when}")
+    for name, f in sorted(st["files"].items()):
+        if f["source"] == "missing":
+            print(f"{name}: not downloaded yet (run 'racecast gt7-data update')")
+            continue
+        print(f"{name}: {f['source']}, {f['rows'] if f['rows'] is not None else '?'} rows")
+
+
 def _release_obs_feeds():
     """Make OBS (via obs-websocket) drop its connections to the just-killed
     feeds. Otherwise OBS keeps the half-dead connections and the kernel pins
@@ -4694,6 +4755,7 @@ DISPATCH = {
     ("sheet", "url"): sheet_url_cmd, ("sheet", "open"): sheet_open_cmd,
     ("telemetry", "record"): telemetry_record_cmd, ("telemetry", "list"): telemetry_list_cmd,
     ("telemetry", "export"): telemetry_export_cmd, ("telemetry", "delete"): telemetry_delete_cmd,
+    ("gt7-data", "update"): gt7_data_update_cmd, ("gt7-data", "status"): gt7_data_status_cmd,
     ("app", "launch"): app_launch_cmd, ("app", "quit"): app_quit_cmd,
 }
 
@@ -7256,6 +7318,8 @@ def run_ui(rest, fail=sys.exit, open_browser=True):
         "machine_font_download": machine_font_download_data,
         "machine_font_delete": machine_font_delete_data,
         "fonts_restore": restore_bundled_fonts_data,
+        "gt7_data_status": gt7_data_status_data,
+        "gt7_data_update": gt7_data_update_data,
         "backup_list": backup_list_data,
         "backup_create": backup_create_data,
         "backup_restore": backup_restore_data,

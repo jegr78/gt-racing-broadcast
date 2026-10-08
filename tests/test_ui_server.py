@@ -196,6 +196,8 @@ def _ctx(jobs=None, init_plan=None, init_step=None, profile_logo=None,
                                                    "name": (name or "") + ".woff2"},
             "machine_font_delete": lambda name: {"ok": True, "removed": name},
             "fonts_restore": lambda force: {"ok": True, "library": [], "profiles": {}},
+            "gt7_data_status": lambda: {"ok": True, "checked": None, "files": {}},
+            "gt7_data_update": lambda: {"ok": True, "changed": False, "files": {}},
             "overlay_font_upload": lambda name, data: {"ok": bool(name),
                                                        "name": name,
                                                        "_len": len(data)},
@@ -1594,6 +1596,35 @@ def t_fonts_restore_route_passes_only_a_literal_true_force():
         assert code == 200 and json.loads(body)["profiles"] == {"demo": ["Oswald.woff2"]}
         _post_json(port, "/api/fonts/restore", {"force": "yes"})
         assert seen == [True, False], seen
+    finally:
+        httpd.shutdown()
+
+
+def t_gt7_data_routes():
+    ctx = _ctx()
+    ctx["gt7_data_update"] = lambda: {"ok": True, "changed": True,
+                                      "files": {"cars.csv": "updated"}}
+    httpd, port = _serve(ctx)
+    try:
+        code, body = _get(port, "/api/gt7-data")
+        assert code == 200 and json.loads(body)["ok"] is True, (code, body)
+        code, body = _post_json(port, "/api/gt7-data/update", {})
+        assert code == 200 and json.loads(body)["files"] == {"cars.csv": "updated"}, body
+    finally:
+        httpd.shutdown()
+
+
+def t_gt7_data_update_route_maps_failures():
+    ctx = _ctx()
+    ctx["gt7_data_update"] = lambda: {"ok": False, "changed": False,
+                                      "files": {"cars.csv": "error: offline"}}
+    httpd, port = _serve(ctx)
+    try:
+        code, body = _post_json(port, "/api/gt7-data/update", {})
+        assert code == 502 and json.loads(body)["ok"] is False, (code, body)
+        ctx["gt7_data_update"] = lambda: 1 / 0
+        code, body = _post_json(port, "/api/gt7-data/update", {})
+        assert code == 500 and json.loads(body)["ok"] is False, (code, body)
     finally:
         httpd.shutdown()
 
