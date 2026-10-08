@@ -1597,27 +1597,42 @@ def t_sync_live_telemetry_record_never_raises():
         m._active_config = orig
 
 
+def _stub_relay_signals(port_pids, pidfile_pid, http_ok, running, active):
+    """Stub every signal relay_start_plan reads; returns a restore callable."""
+    saved = (m.pt.pids_on_port, m.sv.read_pid, m.sv.pid_alive, m._relay_http_ok,
+             m._running_relay_profile, m._active_profile_name)
+    m.pt.pids_on_port = lambda port: list(port_pids) if port == m.RELAY_PORT else []
+    m.sv.read_pid = lambda path: pidfile_pid
+    m.sv.pid_alive = lambda pid: pid is not None
+    m._relay_http_ok = lambda: http_ok
+    m._running_relay_profile = lambda: running
+    m._active_profile_name = lambda: active
+
+    def restore():
+        (m.pt.pids_on_port, m.sv.read_pid, m.sv.pid_alive, m._relay_http_ok,
+         m._running_relay_profile, m._active_profile_name) = saved
+    return restore
+
+
 def t_relay_already_running_for_active_profile_requires_both():
-    orig = (m._relay_http_ok, m._running_relay_profile, m._active_profile_name)
-    try:
-        m._relay_http_ok = lambda: True
-        m._running_relay_profile = lambda: "demo"
-        m._active_profile_name = lambda: "demo"
-        assert m._relay_already_running_for_active_profile() is True
-        m._relay_http_ok = lambda: False
-        assert m._relay_already_running_for_active_profile() is False
-        m._relay_http_ok = lambda: True
-        m._running_relay_profile = lambda: "other-league"   # foreign-profile holder
-        assert m._relay_already_running_for_active_profile() is False
-    finally:
-        m._relay_http_ok, m._running_relay_profile, m._active_profile_name = orig
+    cases = [
+        ((4242,), 4242, True, "demo", "demo", True, "our healthy relay on the active profile"),
+        ((4242,), 4242, False, "demo", "demo", False, "relay not answering"),
+        ((4242,), 4242, True, "other-league", "demo", False, "foreign-profile holder"),
+        ((4242,), 4242, True, "", "", False, "an empty stamp is an unknown profile"),
+        ((4242,), 999, True, "demo", "demo", False, "stamp matches but the port holder is not ours"),
+        ((), None, True, "demo", "demo", False, "nothing holds the control port"),
+    ]
+    for port_pids, pid, http_ok, running, active, want, why in cases:
+        restore = _stub_relay_signals(port_pids, pid, http_ok, running, active)
+        try:
+            got = m._relay_already_running_for_active_profile()
+        finally:
+            restore()
+        assert got is want, f"{why}: got {got}"
 
 
 def t_event_start_pushes_live_telemetry_record_only_when_relay_already_running():
-    # Must gate on BOTH http_ok and the running profile matching the active one:
-    # a foreign-profile relay (e.g. mid `profile use --force`) must not have this
-    # profile's TELEMETRY_RECORD default pushed into ITS state file before
-    # relay_start heals it away (#786).
     import tempfile
 
     class _Reached(Exception):
@@ -1627,16 +1642,14 @@ def t_event_start_pushes_live_telemetry_record_only_when_relay_already_running()
         ev = m._event_modules()[0]
         calls = []
         saved = (m._event_gate_results, m._tailscale_connect, ev.app_running,
-                 m._runtime_dir, m._relay_http_ok, m._running_relay_profile,
-                 m._active_profile_name, m._sync_live_telemetry_record, m.relay_start)
+                 m._runtime_dir, m._sync_live_telemetry_record, m.relay_start)
+        restore = _stub_relay_signals((4242,) if http_ok else (), 4242 if http_ok else None,
+                                      http_ok, running_profile, active_profile)
         with tempfile.TemporaryDirectory() as tmp:
             m._event_gate_results = lambda e, p: []
             m._tailscale_connect = lambda e: "ok"
             ev.app_running = lambda app, platform=None: True
             m._runtime_dir = lambda: tmp
-            m._relay_http_ok = lambda: http_ok
-            m._running_relay_profile = lambda: running_profile
-            m._active_profile_name = lambda: active_profile
             m._sync_live_telemetry_record = lambda: calls.append("sync")
 
             def _boom(_rest):
@@ -1648,15 +1661,14 @@ def t_event_start_pushes_live_telemetry_record_only_when_relay_already_running()
             except _Reached:
                 return calls
             finally:
+                restore()
                 (m._event_gate_results, m._tailscale_connect, ev.app_running,
-                 m._runtime_dir, m._relay_http_ok, m._running_relay_profile,
-                 m._active_profile_name, m._sync_live_telemetry_record,
-                 m.relay_start) = saved
+                 m._runtime_dir, m._sync_live_telemetry_record, m.relay_start) = saved
 
     assert _drive(True, "demo", "demo") == ["sync"], "same relay, same profile: push it"
     assert _drive(False, "", "demo") == [], "no relay yet: relay_start seeds state from scratch"
     assert _drive(True, "other-league", "demo") == [], \
-        "a foreign-profile relay must not get this profile's state pushed into it"
+        "a foreign-profile relay (e.g. mid `profile use --force`) must not get this profile's state pushed into it"
 
 
 def t_profile_env_vars_includes_event_title():

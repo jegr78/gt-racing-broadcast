@@ -1480,11 +1480,8 @@ def _sync_live_telemetry_record():
 
 
 def _relay_already_running_for_active_profile():
-    """True exactly when relay_start would no-op with action "running": a healthy
-    relay already up and serving the active profile. A foreign-profile holder
-    (e.g. mid `profile use --force`) must not have this profile's state pushed
-    into it before relay_start heals it away."""
-    return _relay_http_ok() and _running_relay_profile() == (_active_profile_name() or "")
+    """True exactly when relay_start would no-op with action "running"."""
+    return relay_start_plan(**_relay_start_signals())[0] == "running"
 
 
 def _is_continuation_start(rest):
@@ -2441,6 +2438,23 @@ def relay_start_plan(*, port_pids, feed_pids, pidfile_pid, pidfile_alive,
     return ("heal", kill, reason)
 
 
+def _relay_start_signals():
+    """The keyword arguments relay_start_plan decides on, gathered from this machine.
+
+    The PID file is the un-scoped singleton (_relay_pid_path), so it finds the one
+    tracked relay even across a profile switch; pids_on_port finds EVERY listener
+    (incl. an untracked orphan / a Windows dual-bind split-brain) the PID file
+    cannot see."""
+    port_pids = pt.pids_on_port(RELAY_PORT)
+    pid = sv.read_pid(_relay_pid_path())
+    return {"port_pids": port_pids,
+            "feed_pids": sorted({p for fp in pt.FEED_PORTS for p in pt.pids_on_port(fp)}),
+            "pidfile_pid": pid, "pidfile_alive": sv.pid_alive(pid),
+            "running_profile": _running_relay_profile(),
+            "active_profile": _active_profile_name() or "",
+            "http_ok": _relay_http_ok() if port_pids else False}
+
+
 RELAY_START_VERIFY_S = 15   # seconds to confirm the freshly spawned relay bound its control port
 
 
@@ -2467,19 +2481,9 @@ def _spawn_relay_verified(argv, attempts=2, verify_s=RELAY_START_VERIFY_S):
 
 def relay_start(rest):
     stint = _stint_args(rest)   # validate early: fail fast BEFORE spawning the daemon
-    # Gather the signals for the pure plan. The PID file is the un-scoped singleton
-    # (_relay_pid_path), so it finds the one tracked relay even across a profile
-    # switch; pids_on_port finds EVERY listener (incl. an untracked orphan / a
-    # Windows dual-bind split-brain) the PID file cannot see.
-    port_pids = pt.pids_on_port(RELAY_PORT)
-    feed_pids = sorted({p for fp in pt.FEED_PORTS for p in pt.pids_on_port(fp)})
-    pid = sv.read_pid(_relay_pid_path())
-    action, kill_pids, reason = relay_start_plan(
-        port_pids=port_pids, feed_pids=feed_pids,
-        pidfile_pid=pid, pidfile_alive=sv.pid_alive(pid),
-        running_profile=_running_relay_profile(),
-        active_profile=_active_profile_name() or "",
-        http_ok=_relay_http_ok() if port_pids else False)
+    signals = _relay_start_signals()
+    pid = signals["pidfile_pid"]
+    action, kill_pids, reason = relay_start_plan(**signals)
     if action == "running":
         print(f"relay already running (pid {pid}).")
         if stint:
