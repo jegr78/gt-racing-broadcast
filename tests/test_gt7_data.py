@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """GT7 reference data: validation, runtime-over-bundled resolution, the update gate.
 Run: python3 tests/test_gt7_data.py"""
-import importlib.util, json, os, sys, tempfile
+import importlib.util, json, os, shutil, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -154,6 +154,21 @@ def t_data_version_changes_with_learned_file():
         with open(gd.learned_path(base), "w", encoding="utf-8") as fh:
             fh.write("{}")
         assert gd.data_version(base, b) != v1 and len(v1) == 16
+
+
+def t_data_version_ignores_where_the_bundled_files_live():
+    with tempfile.TemporaryDirectory() as d:
+        b1 = _bundled(d)
+        b2 = os.path.join(d, "unpacked")
+        shutil.copytree(b1, b2)
+        os.utime(os.path.join(b2, "index.json"), ns=(1_000_000_000, 1_000_000_000))
+        base = os.path.join(d, "runtime")
+        assert gd.data_version(base, b1) == gd.data_version(base, b2), \
+            "a onefile binary unpacks the same bundled files to a new dir per launch"
+        with open(os.path.join(b2, "index.json"), "ab") as fh:
+            fh.write(b" ")
+        assert gd.data_version(base, b1) != gd.data_version(base, b2), \
+            "a different bundled file still changes the version"
 
 
 def t_update_tolerates_a_corrupt_stamp_file():

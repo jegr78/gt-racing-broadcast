@@ -212,23 +212,40 @@ def status(runtime_base, bundled=None):
     return {"checked": stamp.get("checked"), "files": out}
 
 
+def _stat_entry(path):
+    try:
+        st = os.stat(path)
+        return f"{path}|{st.st_mtime_ns}|{st.st_size};"
+    except OSError:
+        return f"{path}|-;"
+
+
 def _stat_hash(paths):
     h = hashlib.sha1()
     for p in paths:
-        try:
-            st = os.stat(p)
-            h.update(f"{p}|{st.st_mtime_ns}|{st.st_size};".encode("utf-8"))
-        except OSError:
-            h.update(f"{p}|-;".encode("utf-8"))
+        h.update(_stat_entry(p).encode("utf-8"))
     return h.hexdigest()[:16]
 
 
 def data_version(runtime_base, bundled=None):
-    """Changes whenever the track data or the learned tracks change (lap-index caches key on it)."""
-    paths = [resolve(n, runtime_base, bundled) for n in ("index.json", "signatures.json")]
+    """Changes whenever the track data or the learned tracks change (lap-index caches key on it).
+    A bundled file counts by name and size only: a onefile binary unpacks it to a new
+    temp dir on every launch."""
+    h = hashlib.sha1()
+    runtime = data_dir(runtime_base) if runtime_base else None
+    for name in ("index.json", "signatures.json"):
+        path = resolve(name, runtime_base, bundled)
+        if runtime and path == os.path.join(runtime, name):
+            h.update(_stat_entry(path).encode("utf-8"))
+            continue
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            size = "-"
+        h.update(f"bundled/{name}|{size};".encode("utf-8"))
     if runtime_base:
-        paths.append(learned_path(runtime_base))
-    return _stat_hash(paths)
+        h.update(_stat_entry(learned_path(runtime_base)).encode("utf-8"))
+    return h.hexdigest()[:16]
 
 
 def fingerprint(runtime_base, bundled=None):
