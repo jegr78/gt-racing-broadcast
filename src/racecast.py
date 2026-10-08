@@ -3253,7 +3253,9 @@ def telemetry_export_cmd(rest):
     """Export one recording to samples.csv + laps.csv."""
     import argparse
     import gt7_cars
+    import gt7_data
     import gt7_recording as gr
+    import gt7_tracks
     ap = argparse.ArgumentParser(prog="racecast telemetry export")
     ap.add_argument("name", help="recording name, its stem, or 'latest'")
     ap.add_argument("--out", help="output directory (default: <recording>/ next to it)")
@@ -3265,9 +3267,13 @@ def telemetry_export_cmd(rest):
     rec_dir = _telemetry_rec_dir()
     path = _resolve_recording(rec_dir, args.name)
     out_dir = args.out or os.path.join(rec_dir, gr.recording_stem(path))
+    base = _runtime_base_dir()
+    bundled = resource_path("assets/gt7")
+    key = f"{_active_profile_name()}/{gr.recording_stem(path)}"
     try:
         res = gr.export_csv(path, out_dir, include_all=args.all, excel=args.excel,
-                            cars=gt7_cars.CarDB(resource_path("assets/gt7")))
+                            cars=gt7_cars.CarDB(gt7_data.cars_dir(base, bundled)),
+                            tracks=gt7_tracks.TrackDB.load(base, bundled), key=key)
     except gr.RecordingError as e:
         sys.exit(str(e))
     print(f"wrote {res['samples']} samples and {res['laps']} laps to {res['dir']}")

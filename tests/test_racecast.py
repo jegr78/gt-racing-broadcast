@@ -433,6 +433,8 @@ def t_telemetry_export_writes_next_to_recording():
         out = os.path.join(d, name[:-len(".gt7rec")])
         assert os.path.exists(os.path.join(out, "samples.csv"))
         assert os.path.exists(os.path.join(out, "laps.csv"))
+        with open(os.path.join(out, "laps.csv"), encoding="utf-8") as fh:
+            assert fh.readline().rstrip().endswith(",track,layout")
 
 
 def t_telemetry_record_without_relay_exits_nonzero():

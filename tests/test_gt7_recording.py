@@ -568,6 +568,89 @@ def t_control_save_creates_missing_state_dir():
             assert json.load(fh)["active"] is True
 
 
+class _Tracks:
+    """Recognises any lap longer than 300 m as layout 'aaa001', a 600 m straight line."""
+    def __init__(self, assigned=None):
+        self.assigned = assigned
+
+    def match(self, points, length_m):
+        return ({"id": "aaa001", "track": "Oval", "layout": "Full", "reverse": False,
+                 "score_m": 1.0} if length_m > 300 else None)
+
+    def name(self, oid):
+        return {"id": oid, "track": "Assigned", "layout": "X", "reverse": False}
+
+    def assignment(self, key):
+        return self.assigned
+
+    def line_length(self, oid):
+        return 600.0
+
+    def project(self, points, oid):
+        return [x % 600.0 for x, _z in points]
+
+
+def _xy_session(d):
+    """Lap 1 of 10 s at 50 m/s along +x from x=590 (just behind the line), lap 2 starts."""
+    items, t, x = [(1000.0, "A", _tpkt(0))], 1000.1, 590.0
+    for _ in range(100):
+        b = bytearray(_tpkt(1))
+        struct.pack_into("<3f", b, tm.OFF_POS, x, 0.0, 0.0)
+        items.append((t, "A", bytes(b)))
+        t += 0.1
+        x += 5.0
+    items.append((t, "A", _tpkt(2)))
+    return _write(d, items).path
+
+
+def t_session_tracks_and_columns():
+    with tempfile.TemporaryDirectory() as d:
+        src = _xy_session(d)
+        _h, laps, _dropped = rec.replay_laps(src)
+        assert rec.session_tracks(laps, _Tracks()) == {1: {"id": "aaa001", "track": "Oval",
+                                                         "layout": "Full", "reverse": False}}
+        assert rec.session_tracks(laps, _Tracks(assigned="zzz"), key="p/s")[1]["track"] == \
+            "Assigned", "a learned assignment wins"
+        assert rec.session_tracks(laps, None) == {}
+        rec.export_csv(src, os.path.join(d, "out"), tracks=_Tracks())
+        lap1 = [r for r in _rows(os.path.join(d, "out", "laps.csv")) if r["lap"] == "1"][0]
+        assert (lap1["track"], lap1["layout"]) == ("Oval", "Full")
+
+
+def t_projected_distance_stays_continuous_across_the_line():
+    with tempfile.TemporaryDirectory() as d:
+        src = _xy_session(d)
+        rec.export_csv(src, os.path.join(d, "out"), tracks=_Tracks())
+        lap1 = [r for r in _rows(os.path.join(d, "out", "samples.csv")) if r["lap"] == "1"]
+        first = float(lap1[0]["lap_dist_m"])
+        assert first == -10.0, "590 m on a 600 m line right after the edge reads as -10 m"
+        assert float(lap1[-1]["lap_dist_m"]) == 485.0
+
+
+class _NanAwareTracks(_Tracks):
+    """project() mirrors gt7_tracks.TrackDB.project: None for a non-finite point."""
+    def project(self, points, oid):
+        import math
+        return [None if not math.isfinite(x) else x % 600.0 for x, _z in points]
+
+
+def t_lap_dist_survives_a_non_finite_projected_position():
+    with tempfile.TemporaryDirectory() as d:
+        items, t, x = [(1000.0, "A", _tpkt(0))], 1000.1, 590.0
+        for i in range(100):
+            b = bytearray(_tpkt(1))
+            px = float("nan") if i == 50 else x
+            struct.pack_into("<3f", b, tm.OFF_POS, px, 0.0, 0.0)
+            items.append((t, "A", bytes(b)))
+            t += 0.1
+            x += 5.0
+        items.append((t, "A", _tpkt(2)))
+        src = _write(d, items).path
+        rec.export_csv(src, os.path.join(d, "out"), tracks=_NanAwareTracks())  # must not raise
+        lap1 = [r for r in _rows(os.path.join(d, "out", "samples.csv")) if r["lap"] == "1"]
+        assert lap1[50]["lap_dist_m"] != "", "a non-finite projection falls back to the integrated distance"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
