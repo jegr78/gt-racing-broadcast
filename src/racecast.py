@@ -3175,6 +3175,14 @@ def _relay_record_status():
     return ((st or {}).get("telemetry") or {}).get("record")
 
 
+def _foreign_relay_profile():
+    """The profile a reachable relay runs under when it is not the active one, else ""."""
+    running = _running_relay_profile()
+    if running and running != (_active_profile_name() or "") and _relay_http_ok():
+        return running
+    return ""
+
+
 def _recording_sort_key(row):
     """(started_ts, mtime): the header's started time, which two recordings begun in
     the same second share (second resolution), so an mtime tie-break picks the one
@@ -3208,6 +3216,10 @@ def telemetry_record_cmd(rest):
     verb = rest[0] if rest else None
     if verb not in ("start", "stop", "status"):
         sys.exit("usage: racecast telemetry record start|stop|status")
+    foreign = _foreign_relay_profile()
+    if foreign:
+        sys.exit(f"telemetry recording refused: the relay runs profile {foreign!r}, "
+                 f"not the active profile {_active_profile_name() or ''!r}")
     out = _relay_record_status() if verb == "status" else _relay_record_call(verb)
     if out is None:
         sys.exit("telemetry recording unavailable: the relay is not running, or the "
@@ -3223,10 +3235,14 @@ def telemetry_list_cmd(_rest):
     import gt7_recording as gr
     rec_dir = _telemetry_rec_dir()
     rows = gr.list_recordings(rec_dir, count_laps=True)
+    foreign = _foreign_relay_profile()
+    note = f"note: the relay runs profile {foreign!r}, its recordings are not listed here"
     if not rows:
         print(f"no telemetry recordings in {rec_dir}")
+        if foreign:
+            print(note)
         return
-    open_file = (_relay_record_status() or {}).get("file")
+    open_file = None if foreign else (_relay_record_status() or {}).get("file")
     total = 0
     for row in rows:
         total += row["size"]
@@ -3235,6 +3251,8 @@ def telemetry_list_cmd(_rest):
         print(f"{gr.recording_stem(row['path'])}  {row['size'] / 1e6:7.1f} MB  "
               f"{row['duration_s'] / 60:6.1f} min  {row['laps']:4d} laps  {mark}".rstrip())
     print(f"{len(rows)} recording(s), {total / 1e6:.1f} MB in {rec_dir}")
+    if foreign:
+        print(note)
 
 
 def telemetry_export_cmd(rest):
@@ -3270,15 +3288,19 @@ def telemetry_delete_cmd(rest):
         sys.exit("usage: racecast telemetry delete <name>")
     rec_dir = _telemetry_rec_dir()
     path = _resolve_recording(rec_dir, rest[0])
-    open_file = (_relay_record_status() or {}).get("file")
-    if open_file and os.path.basename(path).startswith(open_file):
-        sys.exit(f"{os.path.basename(path)} is currently recording; stop it first "
+    name = os.path.basename(path)
+    open_file = None if _foreign_relay_profile() else (_relay_record_status() or {}).get("file")
+    if open_file and name.startswith(open_file):
+        sys.exit(f"{name} is currently recording; stop it first "
                  "('racecast telemetry record stop')")
-    os.remove(path)
     export_dir = os.path.join(rec_dir, gr.recording_stem(path))
-    if os.path.isdir(export_dir):
-        shutil.rmtree(export_dir)
-    print(f"deleted {os.path.basename(path)}")
+    try:
+        os.remove(path)
+        if os.path.isdir(export_dir):
+            shutil.rmtree(export_dir)
+    except OSError as e:
+        sys.exit(f"could not delete {name}: {e.strerror}")
+    print(f"deleted {name}")
 
 
 def _release_obs_feeds():

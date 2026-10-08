@@ -316,13 +316,30 @@ def t_resolve_recording_latest_picks_by_started_time_not_name_sort():
         assert m._resolve_recording(d, "latest") == w2.path
 
 
+def _stub_telemetry_cli(d, status, running="", active="demo", http_ok=True):
+    """Point the telemetry commands at rec dir d and a fake relay; returns a restore callable."""
+    saved = (m._telemetry_rec_dir, m._relay_record_status, m._relay_record_call,
+             m._running_relay_profile, m._active_profile_name, m._relay_http_ok)
+    calls = []
+    m._telemetry_rec_dir = lambda: d
+    m._relay_record_status = lambda: status
+    m._relay_record_call = lambda verb: calls.append(verb) or status
+    m._running_relay_profile = lambda: running
+    m._active_profile_name = lambda: active
+    m._relay_http_ok = lambda: http_ok
+
+    def restore():
+        (m._telemetry_rec_dir, m._relay_record_status, m._relay_record_call,
+         m._running_relay_profile, m._active_profile_name, m._relay_http_ok) = saved
+    restore.calls = calls
+    return restore
+
+
 def t_telemetry_delete_refuses_the_open_file():
     import tempfile
     with tempfile.TemporaryDirectory() as d:
         name = _rec_dir_with_one(d)
-        real_dir, real_status = m._telemetry_rec_dir, m._relay_record_status
-        m._telemetry_rec_dir = lambda: d
-        m._relay_record_status = lambda: {"active": True, "file": name}
+        restore = _stub_telemetry_cli(d, {"active": True, "file": name}, running="demo")
         try:
             try:
                 m.telemetry_delete_cmd([name]); raise AssertionError("open file deleted")
@@ -332,7 +349,79 @@ def t_telemetry_delete_refuses_the_open_file():
             m.telemetry_delete_cmd([name])
             assert not os.path.exists(os.path.join(d, name))
         finally:
-            m._telemetry_rec_dir, m._relay_record_status = real_dir, real_status
+            restore()
+
+
+def t_telemetry_delete_reports_os_errors():
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        name = _rec_dir_with_one(d)
+        os.makedirs(os.path.join(d, name[:-len(".gt7rec")]))      # an export folder
+        restore = _stub_telemetry_cli(d, None)
+        real_remove, real_rmtree = m.os.remove, m.shutil.rmtree
+
+        def locked(*_a, **_k):
+            raise PermissionError(13, "Permission denied", os.path.join(d, name))
+        try:
+            for target in ("remove", "rmtree"):
+                if target == "remove":
+                    m.os.remove = locked
+                else:
+                    m.os.remove, m.shutil.rmtree = real_remove, locked
+                try:
+                    m.telemetry_delete_cmd([name]); raise AssertionError(f"{target} error swallowed")
+                except SystemExit as e:
+                    assert str(e) == f"could not delete {name}: Permission denied", \
+                        f"a failed {target} must exit with a short message, not a traceback: {e}"
+        finally:
+            m.os.remove, m.shutil.rmtree = real_remove, real_rmtree
+            restore()
+
+
+def t_telemetry_record_refuses_a_relay_on_another_profile():
+    restore = _stub_telemetry_cli("unused", {"active": True, "file": None},
+                                  running="other-league", active="demo")
+    try:
+        for verb in ("start", "stop", "status"):
+            try:
+                m.telemetry_record_cmd([verb]); raise AssertionError(f"{verb} accepted")
+            except SystemExit as e:
+                assert "other-league" in str(e), f"the refusal must name the running profile: {e}"
+        assert restore.calls == [], f"no request may reach the foreign relay: {restore.calls}"
+    finally:
+        restore()
+
+
+def t_telemetry_list_ignores_the_open_file_of_a_relay_on_another_profile():
+    import io, tempfile, contextlib
+    with tempfile.TemporaryDirectory() as d:
+        name = _rec_dir_with_one(d)
+        restore = _stub_telemetry_cli(d, {"active": True, "file": name},
+                                      running="other-league", active="demo")
+        out = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out):
+                m.telemetry_list_cmd([])
+        finally:
+            restore()
+        text = out.getvalue()
+        assert "recording" not in text.split("\n")[0], \
+            f"another profile's open file must not mark this profile's recording: {text}"
+        assert "other-league" in text, f"list must say the relay runs another profile: {text}"
+
+
+def t_telemetry_delete_ignores_the_open_file_of_a_relay_on_another_profile():
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        name = _rec_dir_with_one(d)
+        restore = _stub_telemetry_cli(d, {"active": True, "file": name},
+                                      running="other-league", active="demo")
+        try:
+            m.telemetry_delete_cmd([name])
+        finally:
+            restore()
+        assert not os.path.exists(os.path.join(d, name)), \
+            "a relay on another profile does not hold this profile's file open"
 
 
 def t_telemetry_export_writes_next_to_recording():
