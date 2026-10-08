@@ -151,9 +151,10 @@ python3 tools/e2e.py --playwright [--headed] [--shots DIR]  # optional rendered 
 runtime/pw-venv/bin/python tools/e2e.py --visual   # visual acceptance run -> runtime/visual-report/report.html
 
 # Refresh the bundled GT7 reference data (src/assets/gt7/: car tables from
-# ddm999/gt7info, MIT-0; track catalogue + signatures from
+# ddm999/gt7info, MIT-0; track catalogue index.json from
 # jbhoorasingh/gt7-datalogger-track-data, CC0) that name the telemetry car id (#713)
-# and track (#787). Run before a release when GT7 added cars or tracks.
+# and track (#787). Run before a release when GT7 added cars or tracks. The track
+# signatures never ship; each install downloads them (gt7_data.RUNTIME_ONLY).
 python3 tools/fetch-gt7-data.py         # --dry-run lists added/removed cars and layouts
 
 # Fetch any missing HUD country flags from the sheet's Configuration tab

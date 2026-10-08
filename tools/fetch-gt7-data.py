@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Refresh the bundled GT7 reference data (src/assets/gt7/) from its two sources.
 
-Car tables from ddm999/gt7info (MIT-0); the track catalogue (index.json, CC0) and
-track signatures (signatures.json) from jbhoorasingh/gt7-datalogger-track-data.
-Every file is validated by src/scripts/gt7_data.py before it replaces the local
-copy. Installs refresh the same files at runtime (racecast gt7-data update); this
-tool keeps the copy that ships current.
+Car tables from ddm999/gt7info (MIT-0); the track catalogue (index.json, CC0) from
+jbhoorasingh/gt7-datalogger-track-data. Every file is validated by
+src/scripts/gt7_data.py before it replaces the local copy. The track signatures
+(gt7_data.RUNTIME_ONLY) never ship: installs download them at runtime
+(racecast gt7-data update), as they do newer copies of the bundled files.
 
 Usage:
   python3 tools/fetch-gt7-data.py              # refresh the bundled files
@@ -21,6 +21,7 @@ import gt7_data  # noqa: E402
 import http_util  # noqa: E402
 
 GT7_DIR = os.path.join(ROOT, "src", "assets", "gt7")
+BUNDLED = [n for n in gt7_data.SOURCES if n not in gt7_data.RUNTIME_ONLY]
 
 
 def _ids(name, data):
@@ -28,8 +29,6 @@ def _ids(name, data):
         return {r["ID"]: r["ShortName"] for r in csv.DictReader(io.StringIO(data.decode()))}
     if name == "index.json":
         return {c["official_id"]: c["official_name"] for c in json.loads(data)["configurations"]}
-    if name == "signatures.json":
-        return {r["official_id"]: r["official_name"] for r in json.loads(data)["signatures"]}
     return {}
 
 
@@ -37,8 +36,10 @@ def main():
     ap = argparse.ArgumentParser(description="Refresh the bundled GT7 reference data.")
     ap.add_argument("--dry-run", action="store_true", help="show the changes, write nothing")
     args = ap.parse_args()
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # track names are not ASCII
     fetched = {}
-    for name, url in gt7_data.SOURCES.items():
+    for name in BUNDLED:
+        url = gt7_data.SOURCES[name]
         data = http_util.get_bytes(url, timeout=30)
         rows = gt7_data.validate(name, data)
         fetched[name] = data

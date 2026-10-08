@@ -76,9 +76,10 @@ def t_default_dir_is_the_shipped_tables():
 def t_fetch_tool_uses_the_shared_validator():
     tool = _load("fetch_gt7_data", ("tools", "fetch-gt7-data.py"))
     assert tool.gt7_data.SOURCES["cars.csv"].endswith("/cars.csv")
-    for name in tool.gt7_data.SOURCES:
+    for name in tool.BUNDLED:
         with open(os.path.join(SHIPPED, name), "rb") as f:
             assert tool.gt7_data.validate(name, f.read()) > 0, f"bundled {name} must validate"
+    assert "signatures.json" not in tool.BUNDLED, "signatures.json is downloaded at runtime only"
 
 
 if __name__ == "__main__":

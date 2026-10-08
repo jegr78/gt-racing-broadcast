@@ -3,6 +3,7 @@
 
 The bundled copy in src/assets/gt7/ ships with racecast. update() fetches newer
 copies into <runtime>/gt7/, and resolve() prefers a runtime copy once it validates.
+RUNTIME_ONLY files never ship and exist only after a successful update().
 """
 import csv
 import hashlib
@@ -27,6 +28,7 @@ MIN_SIGNATURES = 50
 UPDATE_EVERY_S = 24 * 3600
 STAMP = "updated.json"
 LEARNED = "learned-tracks.json"
+RUNTIME_ONLY = ("signatures.json",)  # upstream licenses only index.json for redistribution
 
 
 def _validate_csv(name, data):
@@ -152,7 +154,9 @@ def update(runtime_base, force=False, fetch=None, now=None):
     d = data_dir(runtime_base)
     stamp = _read_stamp(d)
     checked_before = stamp.get("checked")
-    if not force and checked_before is not None and now - float(checked_before) < UPDATE_EVERY_S:
+    complete = all(os.path.exists(os.path.join(d, n)) for n in RUNTIME_ONLY)
+    if (not force and complete and checked_before is not None
+            and now - float(checked_before) < UPDATE_EVERY_S):
         return {"checked": False, "changed": False, "files": {}}
     shas = dict(stamp.get("sha256") or {})
     times = dict(stamp.get("updated") or {})
@@ -193,7 +197,8 @@ def status(runtime_base, bundled=None):
                 rows = validate(name, fh.read())
         except (OSError, ValueError):
             rows = None
-        out[name] = {"source": "runtime" if runtime else "bundled",
+        source = "runtime" if runtime else "bundled" if os.path.exists(path) else "missing"
+        out[name] = {"source": source,
                      "updated": (stamp.get("updated") or {}).get(name) if runtime else None,
                      "rows": rows}
     return {"checked": stamp.get("checked"), "files": out}

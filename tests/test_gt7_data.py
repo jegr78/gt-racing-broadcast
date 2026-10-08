@@ -169,11 +169,32 @@ def t_update_tolerates_a_corrupt_stamp_file():
 def t_bundled_files_validate_and_carry_licence():
     b = gd.bundled_dir()
     for name in gd.SOURCES:
+        if name in gd.RUNTIME_ONLY:
+            assert not os.path.exists(os.path.join(b, name)), f"{name} must not ship"
+            continue
         with open(os.path.join(b, name), "rb") as fh:
             assert gd.validate(name, fh.read()) > 0, name
     with open(os.path.join(b, "LICENSE-track-data"), encoding="utf-8") as fh:
-        text = fh.read()
-    assert "CC0" in text and "MIT License" in text and "zetetos" in text
+        assert "CC0" in fh.read(), "the shipped track catalogue carries its CC0 dedication"
+
+
+def t_update_rechecks_within_24h_while_a_runtime_only_file_is_missing():
+    with tempfile.TemporaryDirectory() as d:
+        base = os.path.join(d, "runtime")
+        no_sigs = {k: v for k, v in GOOD.items() if k != "signatures.json"}
+        gd.update(base, fetch=_fetch(no_sigs), now=1000.0)
+        res = gd.update(base, fetch=_fetch(GOOD), now=1060.0)
+        assert res["files"].get("signatures.json") == "updated", res
+
+
+def t_status_reports_a_missing_runtime_only_file():
+    with tempfile.TemporaryDirectory() as d:
+        b = _bundled(d)
+        os.remove(os.path.join(b, "signatures.json"))
+        st = gd.status(os.path.join(d, "runtime"), b)
+        sig = st["files"]["signatures.json"]
+        assert sig["source"] == "missing" and sig["rows"] is None, sig
+        assert st["files"]["cars.csv"]["source"] == "bundled", st
 
 
 if __name__ == "__main__":
