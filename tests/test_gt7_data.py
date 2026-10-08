@@ -104,6 +104,30 @@ def t_update_writes_validated_files_and_gates_24h():
         assert st["files"]["cars.csv"]["rows"] == 400
 
 
+def t_update_accepts_a_str_fetch_result_without_raising():
+    with tempfile.TemporaryDirectory() as d:
+        base = os.path.join(d, "runtime")
+        as_str = dict(GOOD, **{"index.json": _index().decode("utf-8")})
+        res = gd.update(base, fetch=_fetch(as_str), now=1000.0)
+        assert res["files"]["index.json"] == "updated", res
+        with open(os.path.join(gd.data_dir(base), "index.json"), "rb") as fh:
+            assert fh.read() == _index(), "a str fetch result is encoded to utf-8 before writing"
+
+
+def t_cars_dir_falls_back_to_bundled_when_one_runtime_table_is_broken():
+    with tempfile.TemporaryDirectory() as d:
+        b = _bundled(d)
+        base = os.path.join(d, "runtime")
+        os.makedirs(gd.data_dir(base))
+        with open(os.path.join(gd.data_dir(base), "cars.csv"), "wb") as fh:
+            fh.write(GOOD["cars.csv"])
+        with open(os.path.join(gd.data_dir(base), "maker.csv"), "wb") as fh:
+            fh.write(GOOD["maker.csv"])
+        with open(os.path.join(gd.data_dir(base), "cargrp.csv"), "wb") as fh:
+            fh.write(b"<html>broken</html>")
+        assert gd.cars_dir(base, b) == b, "one broken car table falls the whole set back to bundled"
+
+
 def t_update_failure_keeps_old_file_and_retries():
     with tempfile.TemporaryDirectory() as d:
         base = os.path.join(d, "runtime")

@@ -161,20 +161,17 @@ def update(runtime_base, force=False, fetch=None, now=None):
         try:
             data = fetch(url)
             validate(name, data)
-        except Exception as e:  # noqa: BLE001  offline or a bad download keeps the old file
-            files[name] = f"error: {e}"
-            continue
-        sha = hashlib.sha256(data).hexdigest()
-        if shas.get(name) == sha and os.path.exists(os.path.join(d, name)):
-            files[name] = "unchanged"
-            continue
-        try:
+            if isinstance(data, str):
+                data = data.encode("utf-8")
+            sha = hashlib.sha256(data).hexdigest()
+            if shas.get(name) == sha and os.path.exists(os.path.join(d, name)):
+                files[name] = "unchanged"
+                continue
             _write(d, name, data)
-        except OSError as e:
-            files[name] = f"error: {e}"
-            continue
-        shas[name], times[name] = sha, now
-        files[name] = "updated"
+            shas[name], times[name] = sha, now
+            files[name] = "updated"
+        except Exception as e:  # noqa: BLE001  offline, a bad download or an unexpected
+            files[name] = f"error: {e}"  # fetch/validate/write failure keeps the old file
     fetched = any(not v.startswith("error") for v in files.values())
     if fetched:
         try:
