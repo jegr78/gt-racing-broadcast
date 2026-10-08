@@ -220,11 +220,10 @@ class TrackDB:
             if forward:
                 oid = row["id"]
             elif row["reverse"]:
-                oid, forward = row["reverse"], False
+                oid = row["reverse"]
+                via_reverse.add(oid)
             else:
                 continue
-            if not forward:
-                via_reverse.add(oid)
             if oid not in scored or score < scored[oid]:
                 scored[oid] = score
         if not scored:
