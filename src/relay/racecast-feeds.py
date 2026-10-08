@@ -11187,6 +11187,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                                      "car": telemetry_store.car()}  # panel status strip (#713)
                 if telemetry_store.recorder is not None:
                     base["telemetry"]["record"] = telemetry_store.recorder.status()
+                if telemetry_store.has_tracks():
+                    base["telemetry"]["track"] = telemetry_store.track()
             return base
         def _console_status_payload(self, roles):
             """Status for the Funnel-exposed /console mount. Feed stream URLs are

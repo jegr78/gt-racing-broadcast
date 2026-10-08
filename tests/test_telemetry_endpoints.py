@@ -351,6 +351,37 @@ def t_telemetry_store_record_swallows_a_raising_recorder():
     store.record(1.0, "A", b"x")          # must not raise
 
 
+def t_status_reports_track_only_with_track_db():
+    import json
+
+    class _StatusRelay:
+        def status(self):
+            return {}
+
+    class _Tracks:
+        def match(self, points, length_m):
+            return None
+
+    store = m.gt7_telemetry.TelemetryStore(None, tracks=_Tracks())
+    srv, get = _serve(store, relay=_StatusRelay())
+    try:
+        tel = json.loads(get("/status")[2])["telemetry"]
+        assert "track" in tel and tel["track"] is None, tel
+        assert json.loads(get("/telemetry/data")[2])["track"] is None
+    finally:
+        srv.shutdown()
+
+
+def t_store_reload_data_swaps_cars_and_tracks():
+    class _Cars:
+        def lookup(self, car_id):
+            return {"id": car_id, "maker": "New", "name": "Car", "group": None}
+    store = m.gt7_telemetry.TelemetryStore(None)
+    assert not store.has_tracks()
+    store.reload_data(_Cars(), object())
+    assert store.has_tracks() and store._lookup_car(5)["maker"] == "New"
+
+
 def t_zz_no_test_reached_a_real_obs():
     # Sorted last: no test in this file may have attempted a real OBS connection.
     assert _obs_guard.CALLS == [], _obs_guard.CALLS[:3]

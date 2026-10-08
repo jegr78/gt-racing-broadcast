@@ -1121,6 +1121,72 @@ def t_engine_on_lap_failure_does_not_raise():
     assert eng.session == 1
 
 
+class _FakeTracks:
+    def __init__(self, result):
+        self.result, self.calls = result, []
+
+    def match(self, points, length_m):
+        self.calls.append((len(points), round(length_m)))
+        return self.result
+
+
+def _drive_xy(eng, t, lap, secs, speed=50.0):
+    """Drive `secs` along +x at `speed`, positions following the distance."""
+    x = 0.0
+    for _ in range(int(secs / 0.1)):
+        eng.update(tm.parse_packet(_packet(speed_mps=speed, lap=lap, pos=(x, 0.0, 0.0))), t)
+        t += 0.1
+        x += speed * 0.1
+    return t
+
+
+def t_lap_record_carries_points_every_20m():
+    eng = tm.TelemetryEngine()
+    laps = []
+    eng.on_lap = laps.append
+    eng.update(tm.parse_packet(_packet(lap=1)), 0.0)
+    t = _drive_xy(eng, 0.1, 2, 10.0)                       # 500 m
+    eng.update(tm.parse_packet(_packet(lap=3)), t)
+    pts = laps[-1]["points"]
+    assert 24 <= len(pts) <= 26, len(pts)
+    assert all(15.0 <= b[0] - a[0] <= 25.0 for a, b in zip(pts, pts[1:], strict=False)), pts[:4]
+    assert abs(laps[-1]["distance_m"] - 495.0) < 1e-6
+
+
+def t_engine_sets_track_after_a_matching_lap_and_resets_on_session_change():
+    eng = tm.TelemetryEngine()
+    found = {"id": "2066d9", "track": "Nürburgring", "layout": "Grand Prix",
+             "reverse": False, "score_m": 4.2}
+    eng.track_db = _FakeTracks(found)
+    eng.update(tm.parse_packet(_packet(lap=1)), 0.0)
+    t = _drive_xy(eng, 0.1, 2, 10.0)
+    eng.update(tm.parse_packet(_packet(lap=3)), t)
+    assert eng.track == found
+    n = len(eng.track_db.calls)
+    t = _drive_xy(eng, t + 0.1, 3, 10.0)
+    eng.update(tm.parse_packet(_packet(lap=4)), t)
+    assert len(eng.track_db.calls) == n, "a recognised track is not matched again"
+    eng.update(tm.parse_packet(_packet(lap=0)), t + 0.1)
+    assert eng.track is None
+
+
+def t_engine_keeps_trying_while_ambiguous_and_survives_matcher_errors():
+    eng = tm.TelemetryEngine()
+    eng.track_db = _FakeTracks({"candidates": ["a", "b"]})
+    eng.update(tm.parse_packet(_packet(lap=1)), 0.0)
+    t = _drive_xy(eng, 0.1, 2, 10.0)
+    eng.update(tm.parse_packet(_packet(lap=3)), t)
+    assert eng.track == {"candidates": ["a", "b"]}
+
+    class Boom:
+        def match(self, *a):
+            raise RuntimeError("bad data")
+    eng.track_db = Boom()
+    t = _drive_xy(eng, t + 0.1, 3, 10.0)
+    eng.update(tm.parse_packet(_packet(lap=4)), t)        # must not raise
+    assert eng.track == {"candidates": ["a", "b"]}
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
