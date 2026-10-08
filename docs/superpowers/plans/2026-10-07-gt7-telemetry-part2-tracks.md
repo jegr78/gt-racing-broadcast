@@ -22,6 +22,7 @@
   - `GT7INFO_URL = "https://raw.githubusercontent.com/ddm999/gt7info/web-new/_data/db/"` for `cars.csv`, `maker.csv`, `cargrp.csv` (MIT-0).
   - `TRACKDATA_URL = "https://raw.githubusercontent.com/jbhoorasingh/gt7-datalogger-track-data/main/"` for `index.json` (`format` `gt7-datalogger-track-index`, version 1, key `configurations`) and `signatures.json` (`format` `gt7-datalogger-track-signatures`, version 1, key `signatures`).
 - Match constants, verbatim: length tolerance 3 %, box margin 50 m, max mean distance 15 m, ambiguity window 3 m, position step 20 m, grid cell 50 m, at least 10 points.
+- `signatures.json` never ships (`gt7_data.RUNTIME_ONLY`): its upstream CC0 dedication names only `index.json`. Each install downloads it into `<runtime>/gt7/`; without it `TrackDB` still loads the catalogue and learned rows and recognises only learned tracks. No test may depend on the real file.
 - Learned file `<runtime>/gt7/learned-tracks.json`: `{"format": "racecast-gt7-learned", "version": 1, "signatures": [...], "assignments": {"<profile>/<stem>": "<official_id>"}}`. Updates never write it.
 - Commit messages end with `Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>`. Run `python3 tools/lint.py` after every Python change.
 
@@ -31,7 +32,7 @@
 |---|---|---|
 | `src/scripts/gt7_data.py` | create | sources, validators, `resolve`, `cars_dir`, `update`, `status`, `data_version`, `learned_path` |
 | `src/scripts/gt7_tracks.py` | create | `TrackDB`: catalogue, signatures, learned rows, `match`, `project`, `learn`, `assignment` |
-| `src/assets/gt7/index.json`, `signatures.json`, `LICENSE-track-data`, `README.md` | create/modify | bundled track data and its licence |
+| `src/assets/gt7/index.json`, `LICENSE-track-data`, `README.md` | create/modify | bundled track catalogue and its licence (`signatures.json` is runtime-only) |
 | `tools/fetch-gt7-cars.py` -> `tools/fetch-gt7-data.py` | rename/rewrite | refresh the bundled copies through `gt7_data` |
 | `src/scripts/gt7_telemetry.py` | modify | lap points, `distance_m`, live track detection, store `track()` and `reload_data` |
 | `src/scripts/gt7_recording.py` | modify | `replay_laps`, `session_tracks`, `track`/`layout` columns, projected `lap_dist_m` |
@@ -450,7 +451,7 @@ git commit -m "feat(gt7): reference data with validated runtime updates (#787)"
 
 **Interfaces:**
 - Consumes: Task 1 `SOURCES`, `validate`, `CAR_TABLES`.
-- Produces: bundled `index.json` + `signatures.json` that pass `validate`; `tools/fetch-gt7-data.py [--dry-run]`.
+- Produces: bundled `index.json` that passes `validate`; `tools/fetch-gt7-data.py [--dry-run]`. (Done: commits 6d3e003 and 5e2bc34; the second removed the vendored `signatures.json`, added `gt7_data.RUNTIME_ONLY`, a 24 h gate that re-checks while a runtime-only file is missing, and `status()` source `"missing"`.)
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -756,16 +757,12 @@ def t_name_and_layouts():
         assert [c["id"] for c in db.layouts()] == ["aaa001", "aaa002", "ccc001", "bbb001"]
 
 
-def t_real_fixture_points_lie_on_nurburgring_gp():
-    """The captured '~' packets (#711) were driven on the Nürburgring GP."""
-    sys.path.insert(0, HERE)
-    from test_gt7_fixture import EXT_LEFT_HEX, EXT_RIGHT_HEX, EXT_TCS_HEX, EXT_BRAKE_HEX, gc, tm
-    db = gt.TrackDB.load(None)
-    gp = [c["id"] for c in db.layouts() if c["official_name"] == "Nürburgring GP"]
-    assert gp, "bundled index lists the Nürburgring GP"
-    for hexpkt in (EXT_LEFT_HEX, EXT_RIGHT_HEX, EXT_TCS_HEX, EXT_BRAKE_HEX):
-        p = tm.parse_packet(gc.decrypt_packet(bytes.fromhex(hexpkt)))
-        assert db.distance_m(gp[0], p.pos_x, p.pos_z) < 10.0
+def t_missing_signatures_file_still_loads_the_catalogue():
+    with tempfile.TemporaryDirectory() as d:
+        _db(d, [])
+        db = gt.TrackDB(os.path.join(d, "index.json"), os.path.join(d, "absent.json"))
+        assert db.name("aaa001") is not None, "catalogue loads without signatures"
+        assert db.match([(float(i), 0.0) for i in range(20)], 400.0) is None
 
 
 if __name__ == "__main__":
@@ -1004,7 +1001,9 @@ The catalogue order in `t_name_and_layouts` sorts `("Oval","Full",False)`, `("Ov
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `python3 tests/test_gt7_tracks.py && python3 tools/lint.py`
-Expected: ALL PASS, lint clean. If `t_real_fixture_points_lie_on_nurburgring_gp` fails, print the distances: the four points measured 2.5 to 6.6 m from the bundled line when the plan was written; a large jump means the bundled `signatures.json` changed shape.
+Expected: ALL PASS, lint clean.
+
+Manual real-data check (not a test, needs network): `python3 src/racecast.py gt7-data update` is not there yet in this task, so run `python3 -c "import sys; sys.path.insert(0,'src/scripts'); import gt7_data; print(gt7_data.update('runtime', force=True))"`, then load `TrackDB.load('runtime')` and confirm with the four `~` packets of `tests/test_gt7_fixture.py` that `distance_m` to the Nürburgring GP row is below 10 m (2.5 to 6.6 m when the plan was written). Report the numbers; do not commit anything under `runtime/`.
 
 - [ ] **Step 5: Commit**
 
@@ -1933,9 +1932,11 @@ async function loadGt7Data() {
   const f = d.files || {};
   const rows = n => (f[n] && f[n].rows != null) ? f[n].rows : '?';
   const src = Object.values(f).some(x => x.source === 'runtime') ? 'updated' : 'bundled';
+  const sig = f['signatures.json'];
+  const recog = (sig && sig.source === 'missing') ? 'track signatures not downloaded yet'
+      : rows('signatures.json') + ' recognisable';
   $('d-gt7data').textContent = 'checked ' + fmtAgeS(d.checked) + ' · ' + rows('cars.csv') +
-      ' cars · ' + rows('index.json') + ' layouts · ' + rows('signatures.json') +
-      ' recognisable · ' + src;
+      ' cars · ' + rows('index.json') + ' layouts · ' + recog + ' · ' + src;
 }
 
 async function updateGt7Data() {
@@ -1984,7 +1985,7 @@ git commit -m "feat(cli,ui): racecast gt7-data and a GT7 data row in Settings (#
 Append to the part 1 telemetry recording paragraph:
 
 ```markdown
-**GT7 data and track recognition (#787).** `gt7_data` resolves each reference file (car tables from gt7info, `index.json`/`signatures.json` from gt7-datalogger-track-data) from `runtime/gt7/` when that copy validates, else from `src/assets/gt7/`; a relay start with telemetry runs `gt7_data.update` once per 24 h in a thread and swaps the new `CarDB`/`TrackDB` into the store (`RACECAST_GT7_DATA_UPDATE=0` turns it off). The lap accumulator keeps `(x, z)` every 20 m; after each closed lap `TrackDB.match` checks length (3 %), box, mean distance to the racing line (15 m) and driving direction, so a reverse layout is told apart from its forward twin. `/status` `telemetry.track` reports it; a session boundary clears it. The exporter decides the track per GT7 session and projects `lap_dist_m` onto the line. Learned signatures and recording assignments live in `runtime/gt7/learned-tracks.json`, which no update touches. Tests: `tests/test_gt7_data.py`, `tests/test_gt7_tracks.py`.
+**GT7 data and track recognition (#787).** `gt7_data` resolves each reference file (car tables from gt7info, `index.json`/`signatures.json` from gt7-datalogger-track-data) from `runtime/gt7/` when that copy validates, else from `src/assets/gt7/`; `signatures.json` never ships (its licence covers no redistribution), so recognition of catalogue tracks starts after the first successful update; a relay start with telemetry runs `gt7_data.update` once per 24 h in a thread and swaps the new `CarDB`/`TrackDB` into the store (`RACECAST_GT7_DATA_UPDATE=0` turns it off). The lap accumulator keeps `(x, z)` every 20 m; after each closed lap `TrackDB.match` checks length (3 %), box, mean distance to the racing line (15 m) and driving direction, so a reverse layout is told apart from its forward twin. `/status` `telemetry.track` reports it; a session boundary clears it. The exporter decides the track per GT7 session and projects `lap_dist_m` onto the line. Learned signatures and recording assignments live in `runtime/gt7/learned-tracks.json`, which no update touches. Tests: `tests/test_gt7_data.py`, `tests/test_gt7_tracks.py`.
 ```
 
 - [ ] **Step 2: Wiki**
@@ -1996,7 +1997,9 @@ Append to the part 1 telemetry recording paragraph:
 layout, including reverse layouts, from the car's positions, and the Director Panel shows
 it next to the car. It recognises the layouts that the community dataset
 [gt7-datalogger-track-data](https://github.com/jbhoorasingh/gt7-datalogger-track-data)
-has a racing line for (78 of 121 when this was written). The CSV export adds `track` and
+has a racing line for (78 of 121 when this was written). That racing-line file is not
+part of the package: the relay downloads it on its first start with internet access, so
+recognition starts after that. The CSV export adds `track` and
 `layout` to `laps.csv` and measures `lap_dist_m` along the racing line, so laps line up
 corner for corner. A track it cannot name can be taught once in the Control Center's
 Telemetry view.

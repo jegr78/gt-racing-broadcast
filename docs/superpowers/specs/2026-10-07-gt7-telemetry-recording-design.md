@@ -264,7 +264,7 @@ TDD, failing test first.
 | Files | Source | Licence |
 |---|---|---|
 | `cars.csv`, `maker.csv`, `cargrp.csv` | [ddm999/gt7info](https://github.com/ddm999/gt7info) `_data/db/` | MIT-0 |
-| `index.json`, `signatures.json` | [jbhoorasingh/gt7-datalogger-track-data](https://github.com/jbhoorasingh/gt7-datalogger-track-data) | CC0 (survey data, `index.json`); `signatures.json` also builds on MIT captures of [zetetos/gt-telemetry](https://github.com/zetetos/gt-telemetry) |
+| `index.json`, `signatures.json` | [jbhoorasingh/gt7-datalogger-track-data](https://github.com/jbhoorasingh/gt7-datalogger-track-data) | CC0 for `index.json`; `signatures.json` has no stated licence and is downloaded at runtime only |
 
 - `index.json` lists all 121 GT7 layouts: `official_id`, `track`, `layout`,
   `official_name`, `country`, `turns`, `length_m`, `reverse`. It is the catalogue for
@@ -277,9 +277,14 @@ TDD, failing test first.
 - On the real fixture packets the four `~` packets lie 2.5 to 6.6 m from the Nürburgring
   GP line and the three `A` packets 2 to 10 m from Suzuka; single points also fall into
   up to 35 bounding boxes, so recognition always works on a whole lap.
-- The bundled copies live in `src/assets/gt7/` beside the car tables, with the licence
-  texts (`LICENSE-track-data` with the CC0 dedication and the MIT notice of
-  zetetos/gt-telemetry). `src/assets/gt7/README.md` names all sources.
+- The bundled copies live in `src/assets/gt7/` beside the car tables, with
+  `LICENSE-track-data` (the CC0 dedication). `src/assets/gt7/README.md` names all
+  sources.
+- `signatures.json` is never bundled (`gt7_data.RUNTIME_ONLY`): the upstream CC0
+  dedication names only `tracks/` and `index.json`. Each install downloads it with the
+  first successful `update()`; until then only learned tracks are recognised. The
+  24 h gate does not hold back an update while a runtime-only file is missing, and
+  `status()` reports such a file as `missing`.
 
 ## Module `src/scripts/gt7_data.py`
 
@@ -293,10 +298,11 @@ TDD, failing test first.
   `<runtime_base>/gt7/updated.json`. Without `force` it returns at once when the last
   successful check is younger than 24 h. Any network or validation failure keeps the
   old file and is reported per file in the result; it never raises.
-- `status(runtime_base)` -> per file: source (`runtime` or `bundled`), last update,
+- `status(runtime_base)` -> per file: source (`runtime`, `bundled` or `missing`), last update,
   row count.
 - `tools/fetch-gt7-cars.py` becomes `tools/fetch-gt7-data.py`: it calls the same
-  download and validation and writes the bundled copies in `src/assets/gt7/`.
+  download and validation and writes the bundled copies in `src/assets/gt7/`
+  (every source except `RUNTIME_ONLY`).
 
 **Automatic.** A relay start with telemetry runs `update()` in a daemon thread. After
 a successful update the relay reloads its car database and track database in place.
