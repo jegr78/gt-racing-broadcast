@@ -256,7 +256,8 @@ def t_list_recordings_reports_duration_laps_partial():
         os.replace(w.path, w.path + ".part")
         (row,) = rec.list_recordings(d, count_laps=True)
         assert row["name"] == os.path.basename(w.path) + ".part"
-        assert row["duration_s"] == 20.0 and row["laps"] == 2 and row["partial"] is True
+        assert row["duration_s"] == 20.0 and row["partial"] is True, row
+        assert row["laps"] == 2, f"laps 1 and 2 are finalised, lap 3 is still open: {row['laps']}"
         (fast,) = rec.list_recordings(d)
         assert fast["laps"] is None and fast["partial"] is True, "the default reads only the header"
         assert fast["duration_s"] >= 0.0
@@ -266,7 +267,7 @@ def t_list_recordings_reports_duration_laps_partial():
 import csv  # noqa: E402
 
 
-def _tpkt(lap, speed=50.0, last_ms=-1, flags=None, throttle=255, steer=None):
+def _tpkt(lap, speed=50.0, last_ms=-1, flags=None, throttle=255, steer=None, best_ms=-1):
     size = 0x158 if steer is not None else 0x128
     b = bytearray(size)
     struct.pack_into("<I", b, 0, 0x47375330)
@@ -276,7 +277,7 @@ def _tpkt(lap, speed=50.0, last_ms=-1, flags=None, throttle=255, steer=None):
     for off in (tm.OFF_TYRE_FL, tm.OFF_TYRE_FR, tm.OFF_TYRE_RL, tm.OFF_TYRE_RR):
         struct.pack_into("<f", b, off, 80.0)
     struct.pack_into("<h", b, tm.OFF_LAP, lap)
-    struct.pack_into("<i", b, tm.OFF_BEST_MS, -1)
+    struct.pack_into("<i", b, tm.OFF_BEST_MS, best_ms)
     struct.pack_into("<i", b, tm.OFF_LAST_MS, last_ms)
     struct.pack_into("<H", b, tm.OFF_FLAGS, tm.FLAG_ON_TRACK if flags is None else flags)
     b[tm.OFF_THROTTLE] = throttle
@@ -328,6 +329,18 @@ def t_export_samples_and_laps():
         assert by_lap["0"]["status"] == "not counted" and by_lap["0"]["gt7_time_s"] == ""
         assert by_lap["1"]["start_t_s"] == "0.100" and by_lap["2"]["start_t_s"] == "10.100", laps
         assert by_lap["1"]["car"] == "Car #999999", "an id the tables do not know keeps its number"
+
+
+def t_list_and_export_count_the_same_laps():
+    with tempfile.TemporaryDirectory() as d:
+        items = [(1000.0 + i, "A", _tpkt(1, best_ms=60000)) for i in range(5)]
+        items += [(1005.0 + i, "A", _tpkt(1)) for i in range(5)]     # best wiped: new session
+        items += [(1010.0 + i, "A", _tpkt(2)) for i in range(5)]
+        src = _write(d, items).path
+        (row,) = rec.list_recordings(d, count_laps=True)
+        out = rec.export_csv(src, os.path.join(d, "out"))
+        assert row["laps"] == out["laps"] == 2, \
+            f"list and export must count the same engine laps: list {row['laps']}, export {out['laps']}"
 
 
 def t_export_all_keeps_paused_packets():

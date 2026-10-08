@@ -278,7 +278,8 @@ def _started_ts(header):
 
 
 def list_recordings(rec_dir, count_laps=False):
-    """One dict per readable recording in rec_dir, sorted by name; count_laps reads every packet."""
+    """One dict per readable recording in rec_dir, sorted by name. count_laps replays
+    every packet through the engine and reports the laps export_csv would write."""
     try:
         names = sorted(os.listdir(rec_dir))
     except OSError:
@@ -299,19 +300,18 @@ def list_recordings(rec_dir, count_laps=False):
                          "duration_s": max(0.0, os.path.getmtime(path) - start) if start else 0.0,
                          "laps": None, "partial": name.endswith(PART)})
             continue
-        first = last = prev_lap = None
-        laps = 0
+        first = last = None
+        laps = []
+        eng = gt7_telemetry.TelemetryEngine()
+        eng.on_lap = laps.append      # the same lap records export_csv writes
         for wall_ts, _kind, plain in r.packets():
             first = wall_ts if first is None else first
             last = wall_ts
-            lap = struct.unpack_from("<h", plain, gt7_telemetry.OFF_LAP)[0]
-            if prev_lap is not None and lap != prev_lap:
-                laps += 1
-            prev_lap = lap
+            eng.update(gt7_telemetry.parse_packet(plain), wall_ts)
         rows.append({"name": name, "path": path, "size": os.path.getsize(path),
                      "started": r.header.get("started", ""),
                      "duration_s": (last - first) if first is not None else 0.0,
-                     "laps": laps, "partial": name.endswith(PART)})
+                     "laps": len(laps), "partial": name.endswith(PART)})
     return rows
 
 
