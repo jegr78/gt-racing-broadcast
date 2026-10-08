@@ -243,7 +243,7 @@ class _LapAccumulator:
     Only the latter may become a completed/reference lap (see _finalise_lap)."""
     __slots__ = ("t0", "elapsed", "distance", "samples", "clean", "last_t",
                  "fuel_start", "fuel_end", "started_at_boundary", "pit", "stopped_s",
-                 "why")
+                 "why", "top_speed")
 
     def __init__(self, now, started_at_boundary=False):
         self.t0 = now
@@ -258,6 +258,7 @@ class _LapAccumulator:
         self.pit = False
         self.stopped_s = 0.0
         self.why = None               # first reason the lap went unclean or pit, for the log
+        self.top_speed = 0.0
 
     def _reject(self, why, pit=False):
         if pit:
@@ -278,6 +279,8 @@ class _LapAccumulator:
         if pkt.paused or pkt.loading or not pkt.on_track:
             self._reject("paused, loading or off track")
             return
+        if pkt.speed_mps > self.top_speed:
+            self.top_speed = pkt.speed_mps
         self.elapsed += dt
         self.distance += max(0.0, pkt.speed_mps) * dt
         if pkt.speed_mps < STOPPED_SPEED_MPS:             # standstill in the pit box
@@ -319,6 +322,8 @@ class TelemetryEngine:
         self._tyre_hist = deque()     # (t, (fl,fr,rl,rr)) over TYRE_AVG_WINDOW_S
         self._top_speed = 0.0
         self._delta_hist = deque()    # (t, delta) over DELTA_TREND_WINDOW_S; cleared per lap
+        self.session = 1
+        self.on_lap = None            # callable(dict) per closed lap; the recording exporter sets it
 
     def _is_session_boundary(self, pkt):
         """A new session (practice->quali->race, or a restart) is signalled by the
@@ -339,6 +344,8 @@ class TelemetryEngine:
         if acc is not None:                # the lap in progress never finishes
             LOG.info("GT7 lap %s %s: not counted (session change)",
                      self._lap_num, _fmt_time(acc.elapsed))
+            self._emit_lap(acc, "not counted", "session change")
+        self.session += 1
         LOG.info("GT7 session change (new lap counter %s): %s", pkt.lap,
                  "reference cleared" if self._ref is not None else "no reference yet")
         self._ref = None
@@ -390,6 +397,24 @@ class TelemetryEngine:
             while self._delta_hist and self._delta_hist[0][0] < dcut:
                 self._delta_hist.popleft()
 
+    def lap_started_at(self):
+        """Wall time of the current lap's first packet, or None before any packet."""
+        return self._acc.t0 if self._acc is not None else None
+
+    def lap_distance(self):
+        """Metres driven in the current lap, integrated from speed; None before any packet."""
+        return self._acc.distance if self._acc is not None else None
+
+    def _emit_lap(self, acc, status, reason):
+        if self.on_lap is None:
+            return
+        fuel = (acc.fuel_start - acc.fuel_end
+                if acc.fuel_start is not None and acc.fuel_end is not None else None)
+        self.on_lap({"session": self.session, "lap": self._lap_num, "start": acc.t0,
+                     "end": acc.last_t, "elapsed": acc.elapsed, "status": status,
+                     "reason": reason, "fuel_used": fuel, "top_speed_mps": acc.top_speed,
+                     "car_id": self._last.car_id if self._last is not None else None})
+
     def _finalise_lap(self):
         acc = self._acc
         if acc is None:
@@ -407,12 +432,15 @@ class TelemetryEngine:
         head = f"GT7 lap {self._lap_num} {_fmt_time(acc.elapsed)}"
         if why is not None:
             LOG.info("%s: not counted (%s)", head, why)
+            self._emit_lap(acc, "not counted", why)
             return
         if self._ref is None or acc.elapsed < self._ref["time"]:
             self._ref = {"time": acc.elapsed, "samples": acc.samples}
             LOG.info("%s: new reference, delta vs this lap from now on", head)
+            self._emit_lap(acc, "reference", "")
         else:
             LOG.info("%s: counted", head)
+            self._emit_lap(acc, "counted", "")
         self._lap_time_sum += acc.elapsed
         self._lap_time_n += 1
         if acc.fuel_start is not None and acc.fuel_end is not None:
