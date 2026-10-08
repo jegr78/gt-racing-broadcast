@@ -239,6 +239,13 @@ def t_resolve_config_kind_solo_with_template():
         assert cfg.kind == "solo" and cfg.template == "pov"
 
 
+def t_resolve_config_telemetry_record():
+    with tempfile.TemporaryDirectory() as td:
+        root = _mkroot(td)
+        _mkprofile(root, "s1", "NAME=Solo One\nKIND=solo\nTEMPLATE=pov\nTELEMETRY_RECORD=on\n")
+        assert m.resolve_config(root, environ={}).telemetry_record == "on"
+
+
 def t_resolve_config_discord_webhook_from_field():
     with tempfile.TemporaryDirectory() as td:
         root = _mkroot(td)

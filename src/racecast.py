@@ -225,6 +225,7 @@ def _profile_env_pairs(rc):
              ("RACECAST_DISCORD_VOICE_URL", rc.discord_voice_url),
              ("RACECAST_EVENT_TITLE", rc.event_title),
              ("RACECAST_GRAPHICS_TAKE", rc.graphics_take),
+             ("RACECAST_TELEMETRY_RECORD", rc.telemetry_record),
              ("RACECAST_PROFILE_NAME", rc.name),
              ("RACECAST_LOGO", rc.logo_path),
              ("RACECAST_KIND", rc.kind),   # endurance|solo; relay's --solo default
@@ -1438,6 +1439,14 @@ def _write_session_start(now=None):
             json.dump({"start": time.time() if now is None else now}, fh)
     except OSError as exc:
         print("note: could not write session.json ({}). Continuing.".format(exc))
+
+
+def _reset_telemetry_record():
+    """Drop the live recording switch so a new broadcast starts from TELEMETRY_RECORD."""
+    try:
+        os.remove(os.path.join(_runtime_dir(), "telemetry-record.json"))
+    except OSError:
+        pass  # no live toggle recorded yet
 
 
 def _is_continuation_start(rest):
@@ -4087,6 +4096,7 @@ def event_start(rest, _autojoin=True, _new_session=True):
     # recovery restart keeps the existing window so the report stays continuous.
     if _new_session and not _is_continuation_start(rest):
         _write_session_start()
+        _reset_telemetry_record()
     relay_start(_stint_args(rest) + _qualifying_args(rest) + _title_args(rest))
     if _qualifying_args(rest):   # verify the relay actually came up in qualifying mode
         _mm = qualifying_mode_mismatch_note(True, _relay_mode())

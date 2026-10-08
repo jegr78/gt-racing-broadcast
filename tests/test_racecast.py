@@ -1431,6 +1431,28 @@ def t_profile_env_vars_includes_graphics_take():
     assert m._profile_env_vars(rc)["RACECAST_GRAPHICS_TAKE"] == "direct"
 
 
+def t_profile_env_vars_includes_telemetry_record():
+    rc = m.pcfg.ResolvedConfig(profile="demo", name="Demo", sheet_id="abc",
+                               telemetry_record="1")
+    assert m._profile_env_vars(rc)["RACECAST_TELEMETRY_RECORD"] == "1"
+
+
+def t_reset_telemetry_record_removes_state_file():
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        state = os.path.join(d, "telemetry-record.json")
+        with open(state, "w", encoding="utf-8") as fh:
+            fh.write('{"active": false}')
+        real = m._runtime_dir
+        m._runtime_dir = lambda: d
+        try:
+            m._reset_telemetry_record()
+            assert not os.path.exists(state), "a new broadcast starts from the profile default"
+            m._reset_telemetry_record()            # absent file: no error
+        finally:
+            m._runtime_dir = real
+
+
 def t_profile_env_vars_includes_event_title():
     rc = m.pcfg.ResolvedConfig(profile="demo", name="Demo", sheet_id="abc",
                                event_title="GTEC - Round 4")
@@ -4686,7 +4708,7 @@ def t_profile_env_vars_includes_kind():
         discord_webhook_url = ""; obs_collection = ""; console_secret = ""
         discord_client_id = ""; discord_client_secret = ""; discord_voice_url = ""
         event_title = ""; graphics_take = ""; name = "Solo League"; logo_path = ""; kind = "solo"
-        template = ""
+        template = ""; telemetry_record = ""
     env = m._profile_env_vars(_RC())
     assert env["RACECAST_KIND"] == "solo"
     assert env["RACECAST_SHEET_ID"] == "abc"
