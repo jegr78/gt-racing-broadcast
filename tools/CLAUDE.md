@@ -150,9 +150,12 @@ python3 tools/e2e.py --real-league NAME   # local-only: drive the copied real-le
 python3 tools/e2e.py --playwright [--headed] [--shots DIR]  # optional rendered checks / visible browser / MCP-free screenshot tour
 runtime/pw-venv/bin/python tools/e2e.py --visual   # visual acceptance run -> runtime/visual-report/report.html
 
-# Refresh the vendored GT7 car tables (src/assets/gt7/, ddm999/gt7info, MIT-0) that name
-# the telemetry car id (#713). Run before a release when GT7 added cars.
-python3 tools/fetch-gt7-cars.py         # --dry-run lists added/removed car ids
+# Refresh the bundled GT7 reference data (src/assets/gt7/: car tables from
+# ddm999/gt7info, MIT-0; track catalogue index.json from
+# jbhoorasingh/gt7-datalogger-track-data, CC0) that name the telemetry car id (#713)
+# and track (#787). Run before a release when GT7 added cars or tracks. The track
+# signatures never ship; each install downloads them (gt7_data.RUNTIME_ONLY).
+python3 tools/fetch-gt7-data.py         # --dry-run lists added/removed cars and layouts
 
 # Fetch any missing HUD country flags from the sheet's Configuration tab
 python3 tools/fetch-flags.py            # adds missing -> src/assets/flags/ (keeps old)

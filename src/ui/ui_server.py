@@ -473,6 +473,13 @@ def make_handler(ctx):
                     return self._json({"ok": False,
                                        "error": f"could not read profile .env: {exc}"},
                                       code=500)
+            if path == "/api/gt7-data":
+                try:
+                    return self._json(ctx["gt7_data_status"]())
+                except Exception as exc:
+                    return self._json({"ok": False,
+                                       "error": f"could not read GT7 data: {exc}"},
+                                      code=500)
             if path == "/api/crew":
                 try:
                     return self._json(ctx["crew_read"]())
@@ -857,6 +864,14 @@ def make_handler(ctx):
                                        "error": f"could not fetch Google font: {exc}"},
                                       code=500)
                 return self._json(result, code=200 if result.get("ok") else 400)
+            if path == "/api/gt7-data/update":
+                try:
+                    result = ctx["gt7_data_update"]()
+                except Exception as exc:
+                    return self._json({"ok": False,
+                                       "error": f"could not update GT7 data: {exc}"},
+                                      code=500)
+                return self._json(result, code=200 if result.get("ok") else 502)
             if path == "/api/fonts/restore":
                 body = self._body_json()
                 if body is None:

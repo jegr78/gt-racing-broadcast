@@ -75,7 +75,12 @@ MIN_LAP_DIST = 100.0      # metres; started_at_boundary is the primary guard, so
 # constant, distance forced up) cannot grow it without bound. Normal laps decimate
 # to a few hundred samples; a lap that exceeds the cap is bogus and marked unclean.
 SAMPLE_MIN_DIST = 4.0     # metres between retained samples
-MAX_SAMPLES = 4000        # ~16 km at 4 m spacing, far past any real lap
+MAX_SAMPLES = 10000       # 40 km at 4 m spacing; the longest GT7 layout (Special Stage
+                          # Route X, ~30.3 km) must stay well inside the cap
+
+POINT_STEP_M = 20.0       # metres between kept positions (track recognition)
+MIN_TRACK_POINTS = 10     # same floor as gt7_tracks.MIN_POINTS
+MAX_POINTS = int(MAX_SAMPLES * SAMPLE_MIN_DIST / POINT_STEP_M)  # same distance ceiling as samples
 
 # A pit (in/out) lap is not representative: its time is inflated by the pit-lane
 # transit and the stationary service, and a refuel makes its fuel delta negative.
@@ -243,7 +248,7 @@ class _LapAccumulator:
     Only the latter may become a completed/reference lap (see _finalise_lap)."""
     __slots__ = ("t0", "elapsed", "distance", "samples", "clean", "last_t",
                  "fuel_start", "fuel_end", "started_at_boundary", "pit", "stopped_s",
-                 "why", "top_speed")
+                 "why", "top_speed", "points", "next_point_m")
 
     def __init__(self, now, started_at_boundary=False):
         self.t0 = now
@@ -259,6 +264,8 @@ class _LapAccumulator:
         self.stopped_s = 0.0
         self.why = None               # first reason the lap went unclean or pit, for the log
         self.top_speed = 0.0
+        self.points = []              # (x, z) every POINT_STEP_M (track recognition)
+        self.next_point_m = 0.0
 
     def _reject(self, why, pit=False):
         if pit:
@@ -283,6 +290,10 @@ class _LapAccumulator:
             self.top_speed = pkt.speed_mps
         self.elapsed += dt
         self.distance += max(0.0, pkt.speed_mps) * dt
+        if (pkt.pos_x is not None and self.distance >= self.next_point_m
+                and len(self.points) < MAX_POINTS):
+            self.points.append((pkt.pos_x, pkt.pos_z))
+            self.next_point_m = self.distance + POINT_STEP_M
         if pkt.speed_mps < STOPPED_SPEED_MPS:             # standstill in the pit box
             self.stopped_s += dt
             if self.stopped_s >= PIT_STOP_MIN_S:
@@ -324,6 +335,8 @@ class TelemetryEngine:
         self._delta_hist = deque()    # (t, delta) over DELTA_TREND_WINDOW_S; cleared per lap
         self.session = 1
         self.on_lap = None            # callable(dict) per closed lap; the recording exporter sets it
+        self.track_db = None    # gt7_tracks.TrackDB, or None (no track recognition)
+        self.track = None       # recognised layout, or {"candidates": [...]}
 
     def _is_session_boundary(self, pkt):
         """A new session (practice->quali->race, or a restart) is signalled by the
@@ -358,6 +371,7 @@ class TelemetryEngine:
         self._delta_hist.clear()
         self._lap_num = pkt.lap
         self._acc = _LapAccumulator(now, started_at_boundary=True)
+        self.track = None
 
     def update(self, pkt, now):
         pkt = _sanitize(pkt, self._last)
@@ -413,16 +427,34 @@ class TelemetryEngine:
         record = {"session": self.session, "lap": self._lap_num, "start": acc.t0,
                   "end": acc.last_t, "elapsed": acc.elapsed, "status": status,
                   "reason": reason, "fuel_used": fuel, "top_speed_mps": acc.top_speed,
-                  "car_id": self._last.car_id if self._last is not None else None}
+                  "car_id": self._last.car_id if self._last is not None else None,
+                  "points": list(acc.points), "distance_m": acc.distance}
         try:
             self.on_lap(record)
         except Exception as e:  # noqa: BLE001  a lap consumer must never stop the telemetry
             LOG.warning("GT7 lap consumer failed: %s", e)
 
+    def _detect_track(self, acc):
+        if self.track_db is None or (self.track is not None and "id" in self.track):
+            return
+        if len(acc.points) < MIN_TRACK_POINTS:        # a partial or stationary lap names nothing
+            return
+        try:
+            found = self.track_db.match(acc.points, acc.distance)
+            if not isinstance(found, dict):   # also covers None: no match
+                return
+            if "id" in found:
+                LOG.info("GT7 track: %s %s%s", found.get("track"), found.get("layout"),
+                         " (reverse)" if found.get("reverse") else "")
+            self.track = found
+        except Exception as e:  # noqa: BLE001  bad track data must not stop the telemetry
+            LOG.warning("GT7 track recognition failed: %s", e)
+
     def _finalise_lap(self):
         acc = self._acc
         if acc is None:
             return
+        self._detect_track(acc)
         why = None
         if not acc.clean or acc.pit:      # unclean, or an in/out lap (standstill or
             why = acc.why                 # refuel): never a reference, nor averaged
@@ -641,8 +673,9 @@ class TelemetryStore:
     """
 
     def __init__(self, path=None, units="metric", thresholds=(70, 85, 95), reset=False,
-                 view_path=None, cars=None, recorder=None):
+                 view_path=None, cars=None, recorder=None, tracks=None):
         self._eng = TelemetryEngine()
+        self._eng.track_db = tracks    # gt7_tracks.TrackDB (or None: no track recognition)
         self._cars = cars              # gt7_cars.CarDB (or None: no car names)
         self._view_path = view_path
         self._visible = self._load_visible()
@@ -699,6 +732,7 @@ class TelemetryStore:
         out["source"] = source
         out["visible"] = self.visible()
         out["car"] = self._lookup_car(snap["car_id"])
+        out["track"] = self.track()
         return out
 
     def _lookup_car(self, car_id):
@@ -709,6 +743,19 @@ class TelemetryStore:
         with self._lock:
             pkt = self._eng._last
         return self._lookup_car(pkt.car_id if pkt else None)
+
+    def has_tracks(self):
+        return self._eng.track_db is not None
+
+    def track(self):
+        with self._lock:
+            return dict(self._eng.track) if self._eng.track else None
+
+    def reload_data(self, cars, tracks):
+        """Swap in refreshed car and track data (after a GT7 data update)."""
+        with self._lock:
+            self._cars = cars
+            self._eng.track_db = tracks
 
     def visible(self):
         with self._lock:
