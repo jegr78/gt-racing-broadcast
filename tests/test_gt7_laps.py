@@ -117,22 +117,27 @@ def t_index_laps_status_time_car_and_track():
         path = write_circle_recording(d)
         idx = _index(path)
         assert [(lap["lap"], lap["status"]) for lap in idx["laps"]] == [
-            (1, "not counted"), (2, "reference"), (3, "reference"), (4, "counted")]
-        assert _lap(idx, 1)["gt7_time_s"] is None
-        assert (_lap(idx, 2)["gt7_time_s"], _lap(idx, 3)["time_s"]) == (20.0, 16.0)
+            (1, "not counted"), (2, "reference"), (3, "reference"), (4, "counted")], \
+            "a partial first lap, two new references, then a slower counted lap"
+        assert _lap(idx, 1)["gt7_time_s"] is None, "GT7 sends no time for the partial lap"
+        assert (_lap(idx, 2)["gt7_time_s"], _lap(idx, 3)["time_s"]) == (20.0, 16.0), \
+            "GT7's last_ms is the lap time"
         assert abs(_lap(idx, 2)["relay_time_s"] - 19.95) < 1e-6, \
             "the gap to the edge packet belongs to neither lap"
         lap2 = _lap(idx, 2)
-        assert lap2["car"] == "Mitsubishi Lancer Evolution IX" and lap2["car_id"] == CAR
-        assert (lap2["track_id"], lap2["track"], lap2["layout"]) == ("ring01", "Test Ring", "Full")
-        assert lap2["tyre_avg_c"] == [80.0, 81.0, 82.0, 83.0]
+        assert lap2["car"] == "Mitsubishi Lancer Evolution IX" and lap2["car_id"] == CAR, \
+            "the car is named from the car tables"
+        assert (lap2["track_id"], lap2["track"], lap2["layout"]) == \
+            ("ring01", "Test Ring", "Full"), "the matched layout labels the lap"
+        assert lap2["tyre_avg_c"] == [80.0, 81.0, 82.0, 83.0], "the mean of each tyre's samples"
         assert len(lap2["points"]) >= 10, "the learn flow needs the 20 m positions"
-        assert idx["rec"] == gt7_recording.recording_stem(path)
-        assert idx["start_ts"] == 1_700_000_000.0 and idx["end_ts"] > idx["start_ts"]
+        assert idx["rec"] == gt7_recording.recording_stem(path), "rec is the recording stem"
+        assert idx["start_ts"] == 1_700_000_000.0 and idx["end_ts"] > idx["start_ts"], \
+            "start_ts and end_ts are the first and last packet"
         assert lap2["start_t_s"] == 20.0, "counted from the first packet"
         assert idx["track"] == {"id": "ring01", "track": "Test Ring", "layout": "Full",
-                                "reverse": False}
-        assert idx["sessions"] == {"1": idx["track"]}
+                                "reverse": False}, "the display track is the session's layout"
+        assert idx["sessions"] == {"1": idx["track"]}, "one session, keyed as a string"
 
 
 def t_trace_follows_the_racing_line_every_5_m():
@@ -142,7 +147,7 @@ def t_trace_follows_the_racing_line_every_5_m():
         assert [p["d"] for p in tr[:3]] == [0.0, 5.0, 10.0] and tr[-1]["d"] == 995.0, tr[-1]
         mid = tr[100]
         assert abs(mid["t"] - 10.0) < 0.002 and mid["speed_kmh"] == 180.0, mid
-        assert (mid["throttle"], mid["brake"], mid["gear"]) == (100.0, 0.0, 4)
+        assert (mid["throttle"], mid["brake"], mid["gear"]) == (100.0, 0.0, 4), mid
         assert mid["steer_deg"] == 5.7, "0.1 rad of steering, positive to the left"
         assert abs(math.hypot(mid["x"], mid["z"]) - R) < 0.2, "positions stay on the circle"
         assert lap2["sectors"] == [4.0, 4.0, 4.0, 4.0, 3.9], lap2["sectors"]
@@ -153,9 +158,10 @@ def t_trace_uses_driven_distance_without_track():
         idx = _index(write_circle_recording(d), tracks=FakeTracks(known=False))
         lap2 = _lap(idx, 2)
         assert lap2["track_id"] is None and lap2["track"] == "" and idx["track"] is None
-        assert abs(lap2["trace"][100]["t"] - 10.0) < 0.002
-        assert abs(lap2["distance_m"] - 997.5) < 0.1
-        assert lap2["trace"][-1]["d"] == 995.0 and len(lap2["sectors"]) == 5
+        assert abs(lap2["trace"][100]["t"] - 10.0) < 0.002, lap2["trace"][100]
+        assert abs(lap2["distance_m"] - 997.5) < 0.1, lap2["distance_m"]
+        assert lap2["trace"][-1]["d"] == 995.0 and len(lap2["sectors"]) == 5, \
+            "the driven distance spans the trace and its sectors"
 
 
 def t_assignment_for_the_recording_wins():
@@ -163,7 +169,7 @@ def t_assignment_for_the_recording_wins():
         ft = FakeTracks(assigned="ring02")
         idx = _index(write_circle_recording(d), tracks=ft)
         assert "solo/x" in ft.keys, "the learned assignment is looked up by <profile>/<stem>"
-        assert {lap["track_id"] for lap in idx["laps"]} == {"ring02"}
+        assert {lap["track_id"] for lap in idx["laps"]} == {"ring02"}, "the assignment beats matching"
 
 
 def t_index_raises_recording_error_for_an_unreadable_file():
@@ -192,8 +198,8 @@ def t_index_cache_is_reused_until_something_changes():
         try:
             _index(path)
             assert os.path.basename(gl.cache_path(path)) == \
-                gt7_recording.recording_stem(path) + ".laps.json"
-            assert os.path.exists(gl.cache_path(path))
+                gt7_recording.recording_stem(path) + ".laps.json", "<stem>.laps.json"
+            assert os.path.exists(gl.cache_path(path)), "the build writes the cache"
             _index(path)
             assert len(builds) == 1, "an unchanged recording reads the cache"
             _index(path, version="v2")
@@ -202,13 +208,49 @@ def t_index_cache_is_reused_until_something_changes():
                 fh.write(b"\x00")                  # a truncated record the reader skips
             _index(path, version="v2")
             assert len(builds) == 3, "a grown recording rebuilds"
+            st = os.stat(path)
+            os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 5_000_000_000))
+            _index(path, version="v2")
+            assert len(builds) == 4, "a rewritten recording of the same size rebuilds"
             with open(gl.cache_path(path), "w", encoding="utf-8") as fh:
                 fh.write("{broken")
-            assert _index(path, version="v2")["laps"] and len(builds) == 4
+            assert _index(path, version="v2")["laps"] and len(builds) == 5, \
+                "a broken cache file rebuilds"
             with _data_version("v2"):
-                assert gl.cached(path, d) is not None
+                assert gl.cached(path, d) is not None, "cached() reads a valid cache"
         finally:
             gl._build = real
+
+
+def t_index_computes_the_data_version_once():
+    with tempfile.TemporaryDirectory() as d:
+        path = write_circle_recording(d)
+        calls = []
+        real = gl.gt7_data.data_version
+
+        def counting(base, bundled=None):
+            calls.append(1)
+            return "v1"
+        gl.gt7_data.data_version = counting
+        try:
+            for _ in range(2):        # a miss, then a hit
+                calls.clear()
+                gl.index(path, FakeTracks(), FakeCars(), d)
+                assert len(calls) == 1, f"one data_version per index() call, got {len(calls)}"
+        finally:
+            gl.gt7_data.data_version = real
+
+
+def t_write_cache_leaves_no_temp_file_on_failure():
+    with tempfile.TemporaryDirectory() as d:
+        target = os.path.join(d, "x.laps.json")
+        try:
+            gl._write_cache(target, {"bad": object()})
+        except TypeError:
+            pass  # expected: the dump rejects it
+        else:
+            raise AssertionError("a non-JSON value must not be written silently")
+        assert os.listdir(d) == [], f"the temp file is removed: {os.listdir(d)}"
 
 
 def t_pool_compares_counted_laps_of_the_same_track_and_car():
@@ -217,32 +259,36 @@ def t_pool_compares_counted_laps_of_the_same_track_and_car():
         b = _index(write_circle_recording(d, lap_secs=(20.0, 19.0, 18.0), t0=1_700_007_200.0))
         laps = gl.pool([a, b], "ring01", CAR)
         assert [lap["time_s"] for lap in laps] == [16.0, 18.0, 19.0, 20.0, 20.0], laps
-        assert all(lap["status"] in gl.COUNTED for lap in laps)
+        assert all(lap["status"] in gl.COUNTED for lap in laps), "only counted laps pool"
         assert gl.pool([a, b], "ring01", 1) == [], "another car never pools"
         unknown = _index(write_circle_recording(d, t0=1_700_014_400.0),
                          tracks=FakeTracks(known=False))
         assert gl.pool([a, unknown], None, CAR) == [], "an unknown track needs its session"
         mine = gl.pool([a, unknown], None, CAR, rec=unknown["rec"], session=1)
-        assert {lap["rec"] for lap in mine} == {unknown["rec"]} and len(mine) == 3
+        assert {lap["rec"] for lap in mine} == {unknown["rec"]} and len(mine) == 3, \
+            "the unknown track pools its own session's counted laps"
         brief = gl.summary(mine[0])
-        assert "trace" not in brief and "points" not in brief and "sectors" in brief
+        assert "trace" not in brief and "points" not in brief and "sectors" in brief, \
+            "a summary drops the trace and the points"
 
 
-class _BackTracks(FakeTracks):
-    """Projects onto the circle but reports 'back' for every sample listed in `back`."""
-    def __init__(self, back):
+class _NoneTracks(FakeTracks):
+    """Projects onto the circle but returns None for the sample indexes in `missing`."""
+    def __init__(self, missing):
         super().__init__()
-        self.back = back
+        self.missing = missing
 
     def project(self, points, oid):
         out = super().project(points, oid)
-        return [None if i in self.back else v for i, v in enumerate(out)]
+        return [None if i in self.missing else v for i, v in enumerate(out)]
 
 
-def _samples(ds, dt=0.1):
-    """Trace samples (t, d, kmh, thr, brk, steer, gear, x, z) on the circle at driven ds."""
-    return [(i * dt, d, 100.0, 50.0, 0.0, 0.0, 3, R * math.cos(d / R), R * math.sin(d / R))
-            for i, d in enumerate(ds)]
+def _samples(ds, dt=0.1, at=None):
+    """Trace samples (t, d, kmh, thr, brk, steer, gear, x, z) at driven ds, placed on the
+    circle at the arc lengths `at` (default ds)."""
+    at = ds if at is None else at
+    return [(i * dt, d, 100.0, 50.0, 0.0, 0.0, 3, R * math.cos(a / R), R * math.sin(a / R))
+            for i, (d, a) in enumerate(zip(ds, at, strict=True))]
 
 
 def t_trace_distance_strictly_rises_for_a_stop_and_a_step_back():
@@ -261,8 +307,24 @@ def t_trace_distance_strictly_rises_for_a_stop_and_a_step_back():
     assert ds == sorted(set(ds)) and ds[-1] == 20.0, ds
     assert tr[2]["t"] == 0.633, f"10 m lies between the 9 m and 15 m samples, the step back is dropped: {tr[2]}"
     assert gl.sectors(tr, gl.lap_length_m({"trace": tr}), step_m=10.0), "sector math accepts it"
-    gaps = gl._trace(stopped, _BackTracks({2, 3}), "ring01", 1000.0)
-    assert [p["d"] for p in gaps] == ds, "a None projection keeps the driven distance"
+
+
+def t_trace_none_projection_continues_from_the_last_projected_distance():
+    drv = [0.0, 10.0, 20.0, 30.0, 40.0, 50.0]
+    tr = gl._trace(_samples(drv, at=[1.1 * d for d in drv]), _NoneTracks({3}), "ring01", 1000.0)
+    assert tr[6]["t"] == 0.28, \
+        f"22 m projected plus 10 m driven puts the unprojected sample at 32 m: {tr[6]}"
+
+
+def t_trace_ignores_a_projection_onto_another_branch_of_the_line():
+    ds = [i * 10.0 for i in range(100)]
+    for jump in (400.0, -300.0):
+        at = list(ds)
+        at[20] += jump
+        tr = gl._trace(_samples(ds, dt=0.2, at=at), FakeTracks(), "ring01", 1000.0)
+        got = gl.sectors(tr, gl.lap_length_m({"trace": tr}))
+        assert got == [4.0, 4.0, 4.0, 4.0, 3.8], \
+            f"one sample projected {jump:+} m away must not distort the lap: {got}"
 
 
 def _trace(*sector_secs, sector=200.0, step=5.0):

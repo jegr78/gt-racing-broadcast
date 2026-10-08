@@ -227,22 +227,36 @@ def _stat_hash(paths):
     return h.hexdigest()[:16]
 
 
+_CONTENT = {}
+
+
+def _bundled_entry(name, path):
+    """A bundled file by name and content: a onefile binary unpacks it to a new temp dir
+    on every launch, so its path and mtime change while the content does not."""
+    try:
+        st = os.stat(path)
+        key = (path, st.st_size, st.st_mtime_ns)
+        if key not in _CONTENT:
+            with open(path, "rb") as fh:
+                _CONTENT[key] = hashlib.sha1(fh.read()).hexdigest()
+        return f"bundled/{name}|{_CONTENT[key]};"
+    except OSError:
+        return f"bundled/{name}|-;"
+
+
 def data_version(runtime_base, bundled=None):
-    """Changes whenever the track data or the learned tracks change (lap-index caches key on it).
-    A bundled file counts by name and size only: a onefile binary unpacks it to a new
-    temp dir on every launch."""
+    """Changes whenever the track data, the car tables or the learned tracks change
+    (lap-index caches key on it)."""
     h = hashlib.sha1()
     runtime = data_dir(runtime_base) if runtime_base else None
-    for name in ("index.json", "signatures.json"):
-        path = resolve(name, runtime_base, bundled)
+    cars = cars_dir(runtime_base, bundled)
+    files = [(n, resolve(n, runtime_base, bundled)) for n in ("index.json", "signatures.json")]
+    files += [(n, os.path.join(cars, n)) for n in sorted(CAR_TABLES)]
+    for name, path in files:
         if runtime and path == os.path.join(runtime, name):
             h.update(_stat_entry(path).encode("utf-8"))
-            continue
-        try:
-            size = os.path.getsize(path)
-        except OSError:
-            size = "-"
-        h.update(f"bundled/{name}|{size};".encode("utf-8"))
+        else:
+            h.update(_bundled_entry(name, path).encode("utf-8"))
     if runtime_base:
         h.update(_stat_entry(learned_path(runtime_base)).encode("utf-8"))
     return h.hexdigest()[:16]

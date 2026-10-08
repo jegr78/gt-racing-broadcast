@@ -171,6 +171,37 @@ def t_data_version_ignores_where_the_bundled_files_live():
             "a different bundled file still changes the version"
 
 
+def t_data_version_hashes_bundled_content():
+    with tempfile.TemporaryDirectory() as d:
+        b = _bundled(d)
+        base = os.path.join(d, "runtime")
+        v1 = gd.data_version(base, b)
+        path = os.path.join(b, "index.json")
+        with open(path, "rb") as fh:
+            data = fh.read()
+        k = data.index(b"1")
+        with open(path, "wb") as fh:
+            fh.write(data[:k] + b"2" + data[k + 1:])
+        os.utime(path, ns=(2_000_000_000, 2_000_000_000))
+        assert gd.data_version(base, b) != v1, "an edit that keeps the byte count changes the version"
+
+
+def t_data_version_counts_the_car_tables():
+    with tempfile.TemporaryDirectory() as d:
+        b = _bundled(d)
+        base = os.path.join(d, "runtime")
+        v1 = gd.data_version(base, b)
+        with open(os.path.join(b, "cars.csv"), "ab") as fh:
+            fh.write(b"9999,Car 9999,1\n")
+        v2 = gd.data_version(base, b)
+        assert v2 != v1, "a new bundled car table changes the version (cached car names)"
+        os.makedirs(gd.data_dir(base))
+        for name in gd.CAR_TABLES:
+            with open(os.path.join(gd.data_dir(base), name), "wb") as fh:
+                fh.write(GOOD[name])
+        assert gd.data_version(base, b) != v2, "downloaded car tables change the version"
+
+
 def t_update_tolerates_a_corrupt_stamp_file():
     with tempfile.TemporaryDirectory() as d:
         base = os.path.join(d, "runtime")

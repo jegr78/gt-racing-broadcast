@@ -20,6 +20,7 @@ COUNTED = ("reference", "counted")
 INDEX_VERSION = 1
 CACHE_SUFFIX = ".laps.json"
 DECIMATE_M = 2.0              # finer samples add nothing to a 5 m trace
+PROJECT_TOL_M = 50.0          # corner cutting moves the projection metres, another branch of the line far more
 
 
 def _time_at(trace, d):
@@ -82,10 +83,8 @@ def _stamp(path, runtime_base, bundled):
             "data_version": gt7_data.data_version(runtime_base, bundled)}
 
 
-def cached(path, runtime_base, bundled=None):
-    """The cached index while recording, track data and format are unchanged, else None."""
+def _read_cache(path, stamp):
     try:
-        stamp = _stamp(path, runtime_base, bundled)
         with open(cache_path(path), encoding="utf-8") as fh:
             data = json.load(fh)
     except (OSError, ValueError):
@@ -95,16 +94,25 @@ def cached(path, runtime_base, bundled=None):
     return data
 
 
+def cached(path, runtime_base, bundled=None):
+    """The cached index while recording, track data and format are unchanged, else None."""
+    try:
+        stamp = _stamp(path, runtime_base, bundled)
+    except OSError:
+        return None
+    return _read_cache(path, stamp)
+
+
 def index(path, track_db, cars, runtime_base, key=None, bundled=None):
     """The lap index of one recording, from the cache when still valid. `key` is
     "<profile>/<stem>", the learned track assignment's key."""
-    hit = cached(path, runtime_base, bundled)
-    if hit is not None:
-        return hit
     try:
         stamp = _stamp(path, runtime_base, bundled)
     except OSError as e:
         raise gt7_recording.RecordingError(f"{path}: {e}") from e
+    hit = _read_cache(path, stamp)
+    if hit is not None:
+        return hit
     data = _build(path, track_db, cars, key)
     data.update(stamp)
     _write_cache(cache_path(path), data)
@@ -112,18 +120,22 @@ def index(path, track_db, cars, runtime_base, key=None, bundled=None):
 
 
 def _write_cache(path, data):
+    """Atomic write; a failed write only costs the cache and never leaves a temp file."""
     tmp = None
     try:
         fd, tmp = tempfile.mkstemp(prefix=".laps-", suffix=".tmp", dir=os.path.dirname(path))
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(data, fh, separators=(",", ":"))
         os.replace(tmp, path)
+        tmp = None
     except OSError:
+        pass  # a read-only dir only costs the cache
+    finally:
         if tmp is not None:
             try:
                 os.unlink(tmp)
             except OSError:
-                pass  # already gone; a read-only dir only costs the cache
+                pass  # already gone
 
 
 def _sample(pkt, t, d):
@@ -152,6 +164,17 @@ def _station(x, pts, ds, j):
             "x": round(mix(7), 1), "z": round(mix(8), 1)}
 
 
+def _follow(proj, driven, length):
+    """Projected distances that stay within PROJECT_TOL_M of the previous one plus the
+    driven increment; a missing or implausible projection takes that expected value."""
+    out = []
+    for i, (p, d) in enumerate(zip(proj, driven, strict=True)):
+        expected = d if i == 0 else out[-1] + d - driven[i - 1]
+        s = None if p is None else gt7_recording.nearest_station(p, expected, length)
+        out.append(s if s is not None and abs(s - expected) <= PROJECT_TOL_M else expected)
+    return out
+
+
 def _trace(samples, track_db, track_id, length):
     """Samples resampled every STEP_M of lap distance: along the racing line when the
     track is known, else the driven distance."""
@@ -167,8 +190,7 @@ def _trace(samples, track_db, track_id, length):
     if track_id is not None and length:
         proj = track_db.project([(s[7], s[8]) for s in kept], track_id)
         if proj:
-            dists = [d if p is None else gt7_recording.nearest_station(p, d, length)
-                     for p, d in zip(proj, dists, strict=True)]
+            dists = _follow(proj, dists, length)
     pts, ds = [], []
     for s, d in zip(kept, dists, strict=True):
         d = max(0.0, d)
@@ -212,7 +234,7 @@ def _build(path, track_db, cars, key):
     laps, lap_samples, lap_tyres = [], [], []
     eng.on_lap = laps.append
     times = gt7_recording.LapTimeMatcher()
-    cur, tyre = [], [0.0, 0.0, 0.0, 0.0, 0]
+    cur, tail, tyre = [], None, [0.0, 0.0, 0.0, 0.0, 0]
     first = last = None
     for wall_ts, _kind, plain in rec.packets():
         first = wall_ts if first is None else first
@@ -222,16 +244,20 @@ def _build(path, track_db, cars, key):
         eng.update(pkt, wall_ts)
         for lap in laps[closed:]:
             times.lap_closed(lap, wall_ts)
-            lap_samples.append(cur)
+            lap_samples.append(cur if tail is None else cur + [tail])
             lap_tyres.append(tyre)
-            cur, tyre = [], [0.0, 0.0, 0.0, 0.0, 0]
+            cur, tail, tyre = [], None, [0.0, 0.0, 0.0, 0.0, 0]
         times.update(pkt, wall_ts)
         if not pkt.on_track or pkt.paused or pkt.loading:
             continue
         sample = _sample(pkt, wall_ts - eng.lap_started_at(), eng.lap_distance())
         if sample is None:
             continue
-        cur.append(sample)
+        if not cur or sample[1] >= cur[-1][1] + DECIMATE_M:    # _trace's rule, applied early
+            cur.append(sample)
+            tail = None
+        else:
+            tail = sample
         if all(math.isfinite(v) for v in pkt.tyre_temp):
             for i in range(4):
                 tyre[i] += pkt.tyre_temp[i]
@@ -239,10 +265,11 @@ def _build(path, track_db, cars, key):
     by_session = gt7_recording.session_tracks(laps, track_db, key)
     stem = gt7_recording.recording_stem(path)
     out = []
-    for lap, samples, tyres in zip(laps, lap_samples, lap_tyres, strict=True):
+    for i, (lap, tyres) in enumerate(zip(laps, lap_tyres, strict=True)):
         found = by_session.get(lap["session"])
         track_id = found["id"] if found and "id" in found else None
         length = track_db.line_length(track_id) if track_id is not None else None
+        samples, lap_samples[i] = lap_samples[i], None    # free each lap's samples once traced
         trace = _trace(samples, track_db, track_id, length)
         relay = round(lap["elapsed"], 3)
         gt7_s = lap["gt7_time_s"]
