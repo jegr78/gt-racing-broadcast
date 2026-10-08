@@ -449,23 +449,26 @@ def t_control_write_error_reported_until_next_set():
 
 
 def t_control_put_does_not_block_on_slow_close():
+    closing = threading.Event()
+
     class Slow:
         path, started, bytes, dropped, error = None, 1.0, 0, 0, None
         def put(self, *a): pass
         def close(self, timeout=5.0):
+            closing.set()
             time.sleep(1.0)
     with tempfile.TemporaryDirectory() as d:
         c = _control(d, default=True, writer_factory=Slow)
         c.put(1.0, "A", _plain())              # opens the (fake) writer
         th = threading.Thread(target=c.set_active, args=(False,))
         th.start()
-        time.sleep(0.05)                        # let set_active grab the lock and start closing
+        assert closing.wait(2.0), "set_active(False) never reached the writer's close()"
         t0 = time.monotonic()
-        c.put(2.0, "A", _plain())               # must not wait for the slow close()
+        c.put(2.0, "A", _plain())
         elapsed = time.monotonic() - t0
         th.join(timeout=2.0)
         c.close()
-        assert elapsed < 0.2, elapsed
+        assert elapsed < 0.2, f"put() must not wait for the slow close(): {elapsed:.2f} s"
 
 
 def t_control_put_does_not_recreate_writer_after_error():
