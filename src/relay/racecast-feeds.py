@@ -162,7 +162,7 @@ import cookie_jar  # the shared "jar holds a YouTube login" rule, same as prefli
 import placeholders  # transparent-graphic placeholder path -> hide pure-placeholder assets from the browser
 import gt7_crypto      # GT7 UDP telemetry: Salsa20 decrypt (solo/POV only, #324)
 import gt7_telemetry   # GT7 UDP telemetry: packet parser + TelemetryStore (solo/POV only, #324)
-import gt7_recording   # GT7 telemetry recording to disk (solo/POV only, #785)
+import gt7_recording   # GT7 telemetry recording to disk (solo/POV only)
 import gt7_cars        # GT7 car id -> car name, from the vendored src/assets/gt7 tables (#713)
 from services import external_tool_env  # de-PyInstaller the env for spawned external tools
 
@@ -6240,7 +6240,7 @@ def redact_console_status(full, roles):
         out.pop("handover_next", None)                # who submitted what is director business
         telem = full.get("telemetry")
         if isinstance(telem, dict) and "record" in telem:
-            # recording detail (file path, byte counters): director/producer only (#786).
+            # recording detail (file path, byte counters): director/producer only.
             out["telemetry"] = {k: v for k, v in telem.items() if k != "record"}
     return out
 

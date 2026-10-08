@@ -43,9 +43,8 @@ def _encode(wall_ts, kind_byte, payload):
 
 
 def _local_dt(ts):
-    """ts as a local-timezone datetime, via an explicit UTC tz so the conversion never
-    calls the platform's raw localtime(): on Windows that raises OSError (Errno 22)
-    for small ts, which near-epoch test fixtures hit."""
+    """ts as a local-timezone datetime; the explicit UTC step avoids Windows' localtime(),
+    which raises for small ts."""
     return datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc).astimezone()
 
 
@@ -57,8 +56,7 @@ def _header(profile, relay_version, started_ts):
 
 
 def _sanitize_error(e):
-    """A /status-safe message: never the OS path from an OSError, which reaches every
-    console role (#786). strerror has no path; fall back to the exception class name."""
+    """A /status-safe message without the OS path an OSError carries."""
     return (e.strerror or type(e).__name__) if isinstance(e, OSError) else type(e).__name__
 
 

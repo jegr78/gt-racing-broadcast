@@ -110,13 +110,11 @@ def t_write_error_stops_and_reports():
 
 
 def t_non_os_error_in_writer_stops_recording_and_reports():
-    # ord() on a multi-char kind raises TypeError, not OSError; _run must still
-    # stop the recording and report it, not die silently with error=None (#786).
     with tempfile.TemporaryDirectory() as d:
         w = rec.RecordingWriter(d, "Demo", "dev", flush_s=0.05)
-        w.put(1.0, "AB", _plain())
+        w.put(1.0, "AB", _plain())              # ord() on two chars raises TypeError
         w.close()
-        assert w.error == "TypeError", w.error
+        assert w.error == "TypeError", f"a non-OSError must still stop and report: {w.error}"
         assert os.path.exists(w.path + rec.PART), "a non-OSError failure must not be renamed clean"
         assert not os.path.exists(w.path)
 
@@ -195,14 +193,10 @@ def t_close_writes_queued_packets_before_finishing():
 
 
 def t_header_and_stem_survive_the_windows_near_epoch_localtime_bug():
-    # On Windows, datetime.fromtimestamp(ts).astimezone() (no tz) raises OSError
-    # (Errno 22) for small ts; the fix passes tz=utc explicitly. Simulate the
-    # Windows CRT behaviour here (this machine's libc tolerates small ts fine) so
-    # the regression is caught on any platform.
     import datetime as _dt
     _real = _dt.datetime
 
-    class StrictDatetime(_real):
+    class StrictDatetime(_real):              # Windows: fromtimestamp without tz fails for small ts
         @classmethod
         def fromtimestamp(cls, ts, tz=None):
             if tz is None:
@@ -217,7 +211,7 @@ def t_header_and_stem_survive_the_windows_near_epoch_localtime_bug():
             w = rec.RecordingWriter(d, "Demo", "dev", flush_s=0.05)
             w.put(1.0, "A", _plain())
             w.close()
-            assert w.error is None, w.error
+            assert w.error is None, f"a near-epoch ts must not need the platform localtime(): {w.error}"
     finally:
         rec.datetime.datetime = orig
 
@@ -489,8 +483,6 @@ def t_control_put_does_not_recreate_writer_after_error():
 
 
 def t_control_put_after_close_never_recreates_writer():
-    # The relay's shutdown() calls close() while the telemetry thread may still be
-    # in flight with one more packet (#786).
     calls = []
     class Fake:
         path, started, bytes, dropped, error = None, 1.0, 0, 0, None
@@ -504,7 +496,7 @@ def t_control_put_after_close_never_recreates_writer():
         c.put(1.0, "A", _plain())        # opens the first (fake) writer
         c.close()
         c.put(2.0, "A", _plain())        # arrives after close(): must stay a no-op
-        assert calls == [1], "a packet arriving after close() must not open a new file"
+        assert calls == [1], "a packet still in flight after the relay's close() must not open a new file"
 
 
 def t_status_elapsed_s_is_relay_clock_minus_since():

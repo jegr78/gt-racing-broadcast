@@ -183,7 +183,7 @@ class ResolvedConfig:
     discord_voice_url: str = ""      # league voice channel (fallback; Sheet override wins)
     event_title: str = ""        # optional free-text event title (Panel/Cockpit/Discord, #207)
     graphics_take: str = ""      # crew graphic takes: off (blank) | request | direct
-    telemetry_record: str = ""   # solo POV: record GT7 telemetry from relay start (#785)
+    telemetry_record: str = ""   # solo POV: record GT7 telemetry from relay start
     logo_path: str = ""          # absolute path, or "" if unset/missing
     profile_dir: str = ""
     runtime_dir: str = ""

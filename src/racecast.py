@@ -980,7 +980,7 @@ EVENT_VERBS = ("status", "start", "stop", "takeover")
 TAILSCALE_VERBS = ("up", "down", "status", "logs")
 OBS_VERBS = ("refresh", "collection", "logs", "stream-target", "benchmark")
 SHEET_VERBS = ("url", "open")           # active league's Google Sheet (from SHEET_ID)
-TELEMETRY_VERBS = ("record", "list", "export", "delete")   # GT7 telemetry recordings (#785)
+TELEMETRY_VERBS = ("record", "list", "export", "delete")   # GT7 telemetry recordings
 APP_VERBS = ("launch", "quit")          # GUI app control for the Control Center
 APP_CONTROLLED = ("obs", "discord", "tailscale")   # GUI apps racecast can launch + quit
 
@@ -1466,12 +1466,8 @@ def _telemetry_record_wanted(rc):
 
 
 def _sync_live_telemetry_record():
-    """Push the profile default to an already-running relay's live RecordControl.
-    _reset_telemetry_record() deletes telemetry-record.json, but a relay that was
-    already up does not re-read it (only a fresh RecordControl does), so the two
-    would otherwise disagree after a fresh `event start` (#786). Caller must gate
-    this on _relay_already_running_for_active_profile(); best-effort either way,
-    must never fail event start."""
+    """Push the profile default into a running relay, which does not re-read the deleted
+    state file. Best-effort; gate it on _relay_already_running_for_active_profile()."""
     try:
         want = _telemetry_record_wanted(_active_config())
         _relay_record_call("start" if want else "stop")
@@ -3184,10 +3180,7 @@ def _foreign_relay_profile():
 
 
 def _recording_sort_key(row):
-    """(started_ts, mtime): the header's started time, which two recordings begun in
-    the same second share (second resolution), so an mtime tie-break picks the one
-    actually written later (#786). A name sort is wrong here: "<stem>-2.gt7rec"
-    (a same-second collision) sorts before the bare "<stem>.gt7rec"."""
+    """(started_ts, mtime): mtime breaks the tie between recordings started in the same second."""
     import datetime
     try:
         started = datetime.datetime.fromisoformat(row["started"]).timestamp()

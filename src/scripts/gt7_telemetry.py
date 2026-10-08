@@ -652,7 +652,7 @@ class TelemetryStore:
         self._units = units
         self._thresholds = thresholds
         self._dirty_ref = None
-        self.recorder = recorder       # gt7_recording.RecordControl, or None (#786)
+        self.recorder = recorder       # gt7_recording.RecordControl, or None
         if reset:
             # Fresh session: the relay resets the reference on every start (spec §D)
             # so a stale lap from another track/car/session is never loaded. Drop

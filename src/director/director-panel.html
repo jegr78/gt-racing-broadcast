@@ -1106,7 +1106,7 @@ const CONFIG_SOLO = {
     // The HUD telemetry block (solo POV): relay state, no OBS item; hidden when the
     // relay serves no telemetry (see the /status handler).
     {label:"TELEMETRY", scene:"HUD", relay:"telemetry"},
-    // Records the GT7 telemetry trace to disk (#785); hidden without telemetry.
+    // Records the GT7 telemetry trace to disk; hidden without telemetry.
     {label:"REC", scene:"DISK", relay:"telemetry/record"},
   ],
   audio: [
@@ -1205,7 +1205,7 @@ function mkKey(label, tag, onClick){
 const macroKeys = [], sceneKeys = {}, toggleKeys = [];
 let povVisBtn = null;                 // the relay-driven POV visibility button (#130)
 let teleVisBtn = null;                // the relay-driven HUD telemetry show/hide button
-let teleRecBtn = null;                // the relay-driven telemetry recording button (#785)
+let teleRecBtn = null;                // the relay-driven telemetry recording button
 
 /* RED FLAG toggles the Standby Cover through the relay's /obs/source endpoint,
    using the last-known state from /obs/state. Built once and re-appended to #pgmBus

@@ -292,9 +292,6 @@ def t_resolve_recording_by_name_stem_and_latest():
 
 
 def t_resolve_recording_latest_picks_by_started_time_not_name_sort():
-    # Two recordings started in the same second collide onto <stem>.gt7rec and
-    # <stem>-2.gt7rec; "-2" sorts BEFORE the bare name lexicographically, so a
-    # name-sorted "latest" would return the older file (#786).
     import tempfile, importlib
     gr = importlib.import_module("gt7_recording")
     with tempfile.TemporaryDirectory() as d:
@@ -309,11 +306,10 @@ def t_resolve_recording_latest_picks_by_started_time_not_name_sort():
         w2.close()
         assert "-2" in os.path.basename(w2.path) and "-2" not in os.path.basename(w1.path)
         assert os.path.basename(w2.path) < os.path.basename(w1.path), "sanity: name order is reversed"
-        # w2 is the truly later recording (same started second, written after);
-        # pin distinct mtimes so the tie-break is deterministic on any filesystem.
-        os.utime(w1.path, (ts, ts))
+        os.utime(w1.path, (ts, ts))             # distinct mtimes on any filesystem
         os.utime(w2.path, (ts + 10, ts + 10))
-        assert m._resolve_recording(d, "latest") == w2.path
+        assert m._resolve_recording(d, "latest") == w2.path, \
+            "latest is the later of two same-second recordings, though its -2 name sorts first"
 
 
 def _stub_telemetry_cli(d, status, running="", active="demo", http_ok=True):
@@ -1655,9 +1651,6 @@ def t_telemetry_record_wanted_follows_profile_default():
 
 
 def t_sync_live_telemetry_record_pushes_the_profile_default_to_the_relay():
-    # A fresh `event start` deletes telemetry-record.json, but an already-running
-    # relay's live RecordControl does not re-read it (#786): push the resolved
-    # default explicitly so the two stay consistent.
     calls = []
     orig_cfg, orig_call = m._active_config, m._relay_record_call
     try:
@@ -1665,12 +1658,12 @@ def t_sync_live_telemetry_record_pushes_the_profile_default_to_the_relay():
             profile="demo", name="Demo", sheet_id="abc", telemetry_record="1")
         m._relay_record_call = calls.append
         m._sync_live_telemetry_record()
-        assert calls == ["start"], calls
+        assert calls == ["start"], f"a running relay must get the profile default pushed: {calls}"
         calls.clear()
         m._active_config = lambda: m.pcfg.ResolvedConfig(
             profile="demo", name="Demo", sheet_id="abc", telemetry_record="")
         m._sync_live_telemetry_record()
-        assert calls == ["stop"], calls
+        assert calls == ["stop"], f"a running relay must get the profile default pushed: {calls}"
     finally:
         m._active_config, m._relay_record_call = orig_cfg, orig_call
 

@@ -3472,15 +3472,13 @@ def t_backlog_in_status_and_health_snapshot():
 
 
 def t_redact_console_status_drops_telemetry_record_for_non_director():
-    # Recording file path and counters are producer detail (#786): keep the whole
-    # telemetry.record block director/producer-only over the Funnel, like feed URLs.
     full = {"feeds": {}, "telemetry": {"visible": True, "car": "911",
                                        "record": {"active": True, "error": "disk full"}}}
     kept = m.redact_console_status(full, ["director"])["telemetry"]
     assert kept["record"]["active"] is True and kept["record"]["error"] == "disk full"
     for roles in (["commentator"], ["race_control"], []):
         t = m.redact_console_status(full, roles)["telemetry"]
-        assert "record" not in t, roles
+        assert "record" not in t, f"recording path and counters are producer detail: {roles}"
         assert t["visible"] is True and t["car"] == "911"
     assert "telemetry" not in m.redact_console_status({"feeds": {}}, ["commentator"])
 

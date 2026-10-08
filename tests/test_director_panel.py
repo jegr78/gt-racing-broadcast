@@ -354,19 +354,16 @@ def t_solo_telemetry_toggle():
 
 
 def t_solo_telemetry_record_toggle():
-    # Solo POV: a REC key next to TELEMETRY starts/stops the GT7 recorder through
-    # the relay and reflects active/error state from /status.telemetry.record. (#785)
     html = _html()
     solo = _config_block(html, "CONFIG_SOLO")
     solo = solo[solo.index("vis:"):solo.index("audio:")]
-    assert 'label:"REC"' in solo and 'relay:"telemetry/record"' in solo
+    assert 'label:"REC"' in solo and 'relay:"telemetry/record"' in solo, \
+        "the solo panel needs a REC key that drives /telemetry/record"
     assert "teleRecBtn.hidden = !rec" in html
     assert 'teleRecBtn.classList.toggle("air", !!(rec && rec.active && !rec.error))' in html
     assert 'teleRecBtn.classList.toggle("warn", !!(rec && rec.error))' in html
-    # The elapsed time is the relay's clock (rec.elapsed_s), not the viewer's
-    # Date.now() against rec.since: a skewed browser clock must not show a wrong
-    # recording duration (#786).
-    assert "Date.now() / 1000 - rec.since" not in html
+    assert "Date.now() / 1000 - rec.since" not in html, \
+        "the elapsed time comes from the relay, a skewed browser clock must not change it"
     assert 'cost.textContent = rec && rec.active && rec.elapsed_s != null' in html
     assert 'fmtDur(rec.elapsed_s)' in html
 
