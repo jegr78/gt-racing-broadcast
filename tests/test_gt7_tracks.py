@@ -274,7 +274,7 @@ def t_learn_on_unwritable_path_raises_and_leaves_no_tmp_file():
         except OSError:
             pass
         assert db.assignment("solo-pov/x") is None, "write failed, nothing should be assigned"
-        assert not os.path.exists(lp + ".tmp")
+        assert not [f for f in os.listdir(d) if f.endswith(".tmp")]
 
 
 def t_learn_drops_non_finite_points_and_raises_when_too_few_remain():
@@ -336,6 +336,81 @@ def t_assignment_on_corrupt_learned_file_returns_none():
             fh.write("{not json")
         db = gt.TrackDB(os.path.join(d, "index.json"), os.path.join(d, "signatures.json"), lp)
         assert db.assignment("solo-pov/x") is None
+
+
+def t_non_string_reverse_official_id_tolerated_and_int_converted():
+    """I1: a malformed reverse.official_id (list, dict, int) must not raise out of
+    TrackDB.__init__; the int case still yields a usable, string row id."""
+    with tempfile.TemporaryDirectory() as d:
+        third = _loop(-5000, -5000, 900, 450)   # a third length/box, clear of OVAL and OTHER
+        rows = [_row("list001", "List", OVAL, {"official_id": ["x"]}),
+                _row("dict001", "Dict", third, {"official_id": {"y": 1}}),
+                _row("int001", "Int", OTHER, {"official_id": 5})]
+        db = _db(d, rows)                                       # must not raise
+        assert db.match(list(reversed(_lap(OVAL))), _length(OVAL)) is None, \
+            "a list reverse id yields no usable twin"
+        m = db.match(list(reversed(_lap(OTHER))), _length(OTHER))
+        assert m is not None and m["id"] == "5" and isinstance(m["id"], str), m
+
+
+def t_row_with_too_few_parsed_points_is_skipped():
+    """I2: a path whose raw length clears MIN_POINTS but where most entries fail to
+    parse must be skipped, not loaded as a near-degenerate line."""
+    with tempfile.TemporaryDirectory() as d:
+        few = {"official_id": "few001", "official_name": "Few", "length_m": 1.0,
+               "min_x": 0.0, "max_x": 100.0, "min_z": 0.0, "max_z": 100.0,
+               "path": [[1]] * 10 + [[0.0, 0.0], [100.0, 100.0]],   # only 2 points parse
+               "reverse": None, "ambiguous_with": [], "flags": []}
+        db = _db(d, [few])
+        assert db.name("few001") is None
+        assert db.match([(0.0, 0.0)] * gt.MIN_POINTS, 1.0) is None
+        assert db.project([(0.0, 0.0)], "few001") is None
+        assert db.line_length("few001") is None
+
+
+def t_zero_length_line_skipped_without_raising_in_match_and_project():
+    """I2: a path of identical points parses fine but has zero line length; _row
+    must drop it so match/project/line_length never hit ZeroDivisionError."""
+    with tempfile.TemporaryDirectory() as d:
+        xs, zs = [p[0] for p in OVAL], [p[1] for p in OVAL]
+        flat = {"official_id": "flat001", "official_name": "Flat", "length_m": _length(OVAL),
+                "min_x": min(xs), "max_x": max(xs), "min_z": min(zs), "max_z": max(zs),
+                "path": [[100.0, 200.0]] * 12, "reverse": None,
+                "ambiguous_with": [], "flags": []}
+        db = _db(d, [flat])
+        assert db.name("flat001") is None
+        assert db.match(_lap(OVAL), _length(OVAL)) is None    # must not raise ZeroDivisionError
+        assert db.project([(0.0, 0.0)], "flat001") is None
+        assert db.line_length("flat001") is None
+        assert db.distance_m("flat001", 0.0, 0.0) is None
+
+
+def t_layouts_tolerates_non_string_track_and_layout_fields():
+    """M3: an upstream index.json row with a non-string track/layout must not make
+    layouts()'s sort raise."""
+    with tempfile.TemporaryDirectory() as d:
+        cat = [{"official_id": "aaa001", "track": ["bad"], "layout": {"x": 1},
+                "reverse": False, "official_name": "Bad", "country": "X",
+                "turns": 1, "length_m": 100},
+               {"official_id": "bbb001", "track": "Ring", "layout": "Full",
+                "reverse": False, "official_name": "Ring", "country": "Y",
+                "turns": 2, "length_m": 200}]
+        db = _db(d, [], catalog=cat)
+        ids = [c["id"] for c in db.layouts()]              # must not raise in sorted()
+        assert set(ids) == {"aaa001", "bbb001"}, ids
+
+
+def t_assignment_ignores_non_string_values():
+    """M4: a hand-edited learned file may hold a non-string assignment value;
+    assignment(key) must treat it as unset rather than handing back a bad type."""
+    with tempfile.TemporaryDirectory() as d:
+        lp = os.path.join(d, "learned-tracks.json")
+        with open(lp, "w", encoding="utf-8") as fh:
+            json.dump({"format": "racecast-gt7-learned", "version": 1,
+                       "signatures": [], "assignments": {"p/x": ["bad"], "p/y": "bbb001"}}, fh)
+        db = gt.TrackDB(os.path.join(d, "index.json"), os.path.join(d, "signatures.json"), lp)
+        assert db.assignment("p/x") is None
+        assert db.assignment("p/y") == "bbb001"
 
 
 if __name__ == "__main__":

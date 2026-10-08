@@ -8,6 +8,7 @@ close to the line, and the driving direction separates a layout from its reverse
 import json
 import math
 import os
+import tempfile
 
 import gt7_data
 
@@ -101,12 +102,17 @@ def _row(raw, provenance=None):
     if not isinstance(path, list) or len(path) < MIN_POINTS:
         return None
     rev = raw.get("reverse")
-    reverse_id = rev.get("official_id") if isinstance(rev, dict) else None
+    rev_id = rev.get("official_id") if isinstance(rev, dict) else None
+    # only a str/int id names a usable twin; a list/dict would break the twin map
+    reverse_id = str(rev_id) if isinstance(rev_id, (str, int)) and not isinstance(rev_id, bool) else None
     try:
+        line = _Line(path)
+        if len(line.pts) < MIN_POINTS or line.length <= 0:
+            return None                # too few points parsed, or a degenerate (zero-length) line
         return {"id": str(raw["official_id"]), "length_m": float(raw["length_m"]),
                 "box": (float(raw["min_x"]), float(raw["max_x"]),
                         float(raw["min_z"]), float(raw["max_z"])),
-                "line": _Line(path),
+                "line": line,
                 "reverse": reverse_id,
                 "official_name": raw.get("official_name") or "",
                 "provenance": provenance or raw.get("provenance") or ""}
@@ -125,8 +131,8 @@ class TrackDB:
         for c in cfgs if isinstance(cfgs, list) else []:
             if isinstance(c, dict) and c.get("official_id"):
                 self._catalog[str(c["official_id"])] = {
-                    "id": str(c["official_id"]), "track": c.get("track") or "",
-                    "layout": c.get("layout") or "", "reverse": bool(c.get("reverse")),
+                    "id": str(c["official_id"]), "track": str(c.get("track") or ""),
+                    "layout": str(c.get("layout") or ""), "reverse": bool(c.get("reverse")),
                     "country": c.get("country") or "", "length_m": c.get("length_m"),
                     "official_name": c.get("official_name") or ""}
         self._shipped = {}
@@ -160,7 +166,7 @@ class TrackDB:
             row = _row(raw, "learned") if isinstance(raw, dict) else None
             if row:
                 learned[row["id"]] = row
-        self._assign = dict(doc["assignments"])
+        self._assign = {k: v for k, v in doc["assignments"].items() if isinstance(v, str)}
         self._rows = dict(self._shipped)
         self._rows.update(learned)                 # a learned row wins over the shipped one
         self._twins = {r["reverse"]: r["id"] for r in self._rows.values() if r["reverse"]}
@@ -249,17 +255,18 @@ class TrackDB:
         doc["signatures"].append(row)
         if key:
             doc["assignments"][key] = official_id
-        tmp = self._learned_path + ".tmp"
+        learned_dir = os.path.dirname(self._learned_path)
+        os.makedirs(learned_dir, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=learned_dir, prefix="learned-tracks.json.", suffix=".tmp")
         try:
-            os.makedirs(os.path.dirname(self._learned_path), exist_ok=True)
-            with open(tmp, "w", encoding="utf-8") as fh:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
                 json.dump(doc, fh)
             os.replace(tmp, self._learned_path)
-        except OSError:
+        except BaseException:
             try:
                 os.remove(tmp)
             except OSError:
-                pass  # the failed write may never have created it
+                pass  # already gone
             raise
         self._reload_learned()
 

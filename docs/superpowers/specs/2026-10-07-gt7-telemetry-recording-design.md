@@ -307,13 +307,16 @@ TDD, failing test first.
 **Automatic.** A relay start with telemetry runs `update()` in a daemon thread. After
 a successful update the relay reloads its car database and track database in place.
 
-**Manual.** `racecast gt7-data update [--force]` and `racecast gt7-data status`. The
-Control Center Settings view gets a "GT7 data" row with the age of the data and an
-**Update** button (route `POST /api/gt7-data/update`, `GET /api/gt7-data`).
-`cc-settings.png` is refreshed.
+**Manual.** `racecast gt7-data update` and `racecast gt7-data status`. The CLI accepts
+`--force` on `update` but does not advertise it: every manual update already forces a
+fetch, so the flag changes nothing observable. The Control Center Settings view gets a
+"GT7 data" row with the age of the data and an **Update** button (route `POST
+/api/gt7-data/update`, `GET /api/gt7-data`). `cc-settings.png` is refreshed.
 
-`gt7_cars.CarDB()` without a directory and the new track database both read through
-`gt7_data.resolve`.
+The new track database reads through `gt7_data.resolve` (runtime copy when present and
+valid, else the bundled one). `gt7_cars.CarDB()` without a directory does not: it reads
+`default_dir()` directly, i.e. the bundled tables in `src/assets/gt7/`, with no runtime
+override.
 
 ## Module `src/scripts/gt7_tracks.py`
 
@@ -346,12 +349,12 @@ Control Center Settings view gets a "GT7 data" row with the age of the data and 
 - `_LapAccumulator` also keeps `(pos_x, pos_z)` whenever the driven distance passed
   another 20 m; the lap record (`on_lap`) carries it as `points` plus `distance_m`.
 - `TelemetryEngine.track_db` (None by default) and `TelemetryEngine.track`: after each
-  closed lap with `distance_m` >= 80 % of the shortest candidate length, the engine
-  calls `track_db.match`. A single match sets `track` until the next session boundary;
+  closed lap with at least `MIN_TRACK_POINTS` recorded points, the engine calls
+  `track_db.match`. A single match sets `track` until the next session boundary;
   candidates set `track = {"candidates": [...]}` and keep trying on later laps.
 - `TelemetryStore.data()` and `/status` `telemetry.track` carry `track` (None until
   recognised). The Director Panel status strip shows `<track> - <layout>` next to the
-  car (`stTrack`), or `Track ?` with the candidate names as tooltip.
+  car (`stTrack`), or `Track ?` with the candidate ids as tooltip.
   `director-panel.png` is refreshed.
 
 ## Export

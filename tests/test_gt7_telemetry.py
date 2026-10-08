@@ -1196,7 +1196,7 @@ def t_engine_keeps_trying_while_ambiguous_and_survives_matcher_errors():
 
 def t_engine_survives_an_incomplete_or_non_dict_match_result():
     """A match result with an 'id' but missing keys, or a non-dict result, must
-    never raise into update(): the lap counter has to keep advancing (#787 review)."""
+    never raise into update(): the lap counter has to keep advancing."""
     class _Incomplete:
         def match(self, *a):
             return {"id": "x"}        # missing track/layout/reverse
@@ -1229,7 +1229,7 @@ def t_engine_survives_an_incomplete_or_non_dict_match_result():
 
 def t_lap_points_capped_under_flood():
     """A same-lap packet flood must not grow _LapAccumulator.points without bound,
-    mirroring the existing samples cap (#787 review)."""
+    mirroring the existing samples cap."""
     eng = tm.TelemetryEngine()
     t = 100.0
     eng.update(tm.parse_packet(_packet(speed_mps=90.0, lap=1)), t); t += 0.1
@@ -1240,10 +1240,9 @@ def t_lap_points_capped_under_flood():
 
 def t_long_real_lap_not_rejected_and_keeps_all_its_points():
     """The bundled catalogue's longest layout (Special Stage Route X, ~30.3 km) must
-    drive clean, not trip the sample-flood cap, and keep points across the whole
-    lap (#787 review round 2). 5 m/step (default _drive_xy speed) keeps the sample
-    count close to the real 4 m-spacing cap, unlike a coarser step that would never
-    flood regardless of MAX_SAMPLES."""
+    drive clean, not trip the sample-flood cap, and keep points across the whole lap;
+    5 m/step (default _drive_xy speed) keeps the sample count close to the real
+    4 m-spacing cap, unlike a coarser step that would never flood."""
     eng = tm.TelemetryEngine()
     laps = []
     eng.on_lap = laps.append
@@ -1257,7 +1256,7 @@ def t_long_real_lap_not_rejected_and_keeps_all_its_points():
 
 
 def t_short_lap_never_reaches_match():
-    """A lap under MIN_TRACK_POINTS points must never call TrackDB.match (#787 review)."""
+    """A lap under MIN_TRACK_POINTS points must never call TrackDB.match."""
     eng = tm.TelemetryEngine()
     fake = _FakeTracks({"id": "x", "track": "T", "layout": "L",
                          "reverse": False, "score_m": 1.0})

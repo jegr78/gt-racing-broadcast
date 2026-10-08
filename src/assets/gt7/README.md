@@ -6,8 +6,8 @@
 - `index.json` (every GT7 layout) comes from
   [jbhoorasingh/gt7-datalogger-track-data](https://github.com/jbhoorasingh/gt7-datalogger-track-data),
   licence `LICENSE-track-data`. The same repository's `signatures.json` (length, bounding
-  box and racing line of the layouts that can be recognised) does not ship: its licence
-  covers no redistribution, so each install downloads it into `runtime/gt7/`.
+  box and racing line of the layouts that can be recognised) does not ship: upstream
+  states no licence for it, so each install downloads it into `runtime/gt7/`.
   `src/scripts/gt7_tracks.py` names the track from both.
 
 Do not edit these files by hand. `python3 tools/fetch-gt7-data.py` refreshes the copy
