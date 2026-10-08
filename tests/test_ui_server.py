@@ -239,6 +239,18 @@ def _ctx(jobs=None, init_plan=None, init_step=None, profile_logo=None,
                                         "path": "/x/report.html",
                                         "summary": "1 session, 2 feeds"},
             "report_send": lambda path=None: {"ok": True},
+            "telemetry_recordings": lambda: {"ok": True, "recordings": [
+                {"name": "20261007-201503.gt7rec", "rec": "20261007-201503",
+                 "started": "2026-10-07T20:15:03+02:00", "size": 1000, "duration_s": 600.0,
+                 "laps": None, "partial": False, "recording": False, "indexed": False,
+                 "track": None}]},
+            "telemetry_laps": lambda rec=None, session=None, track=None, car=None: {
+                "ok": True, "laps": []},
+            "telemetry_lap": lambda rec, session, lap: {"ok": False, "error": "no lap"},
+            "telemetry_tracks": lambda: {"ok": True, "tracks": [
+                {"id": "suzuka01", "track": "Suzuka Circuit", "layout": "Full Course",
+                 "reverse": False}]},
+            "telemetry_learn": lambda rec, track_id: {"ok": True, "track": {"id": track_id}},
             "resources": lambda: {"available": False}}
 
 
@@ -2112,6 +2124,57 @@ def t_api_ps_save_rejects_bad_ip():
     finally:
         httpd.shutdown()
 
+
+def t_telemetry_routes_pass_their_arguments():
+    calls = []
+    ctx = _ctx()
+    ctx["telemetry_laps"] = lambda *a: calls.append(("laps",) + a) or {"ok": True, "laps": []}
+    ctx["telemetry_lap"] = lambda *a: calls.append(("lap",) + a) or {"ok": False, "error": "x"}
+    ctx["telemetry_learn"] = lambda *a: calls.append(("learn",) + a) or {
+        "ok": False, "error": "unknown track layout"}
+    httpd, port = _serve(ctx)
+    try:
+        code, body = _get(port, "/api/telemetry/recordings")
+        assert code == 200 and json.loads(body)["recordings"][0]["rec"] == "20261007-201503"
+        assert _get(port, "/api/telemetry/laps?rec=20261007-201503")[0] == 200
+        assert _get(port, "/api/telemetry/laps?track=&car=3424&rec=r&session=2")[0] == 200
+        code, body = _get(port, "/api/telemetry/lap?rec=r&session=1&lap=3")
+        assert code == 200 and json.loads(body)["ok"] is False, "a GET reports a miss in the body"
+        code, body = _get(port, "/api/telemetry/tracks")
+        assert code == 200 and json.loads(body)["tracks"][0]["id"] == "suzuka01"
+        code, _ = _post_json(port, "/api/telemetry/learn", {"rec": "r", "track_id": "x"})
+        assert code == 400, "a refused learn is a client error"
+        assert calls == [("laps", "20261007-201503", None, None, None),
+                         ("laps", "r", "2", "", "3424"),
+                         ("lap", "r", "1", "3"),
+                         ("learn", "r", "x")], calls
+    finally:
+        httpd.shutdown()
+
+
+def t_telemetry_routes_stay_json_on_errors():
+    ctx = _ctx()
+
+    def boom(*_a):
+        raise RuntimeError("disk")
+    ctx["telemetry_recordings"] = boom
+    httpd, port = _serve(ctx)
+    try:
+        code, body = _get(port, "/api/telemetry/recordings")
+        assert code == 500 and "disk" in json.loads(body)["error"]
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/api/telemetry/learn",
+                                     method="POST", data=b"{bad",
+                                     headers={"Content-Type": "application/json"})
+        try:
+            with _urlopen(req, timeout=5) as r:
+                code = r.status
+        except urllib.error.HTTPError as e:
+            code = e.code
+        assert code == 400, "a malformed body is refused"
+        code, body = _post_json(port, "/api/telemetry/learn", {"rec": "r", "track_id": "suzuka01"})
+        assert code == 200 and json.loads(body)["track"]["id"] == "suzuka01"
+    finally:
+        httpd.shutdown()
 
 
 def t_restore_fonts_button_confirms_before_forcing():

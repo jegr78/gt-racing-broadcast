@@ -120,6 +120,9 @@ def make_handler(ctx):
     init_plan(browser) -> dict (wizard plan: per-step done/kind/op/instruction),
     init_step(key) -> dict (run one non-job wizard step, {ok, done} | {ok: False, error}),
     profile_export(name, assets) -> dict, profile_import(path, force) -> dict,
+    telemetry_recordings() -> dict, telemetry_laps(rec, session, track, car) -> dict,
+    telemetry_lap(rec, session, lap) -> dict, telemetry_tracks() -> dict,
+    telemetry_learn(rec, track_id) -> dict (solo POV lap analysis, query strings in),
     jobs (ui_jobs.JobManager), log_sources {name: {files, dir, archives, read}},
     favicon_path (the brand SVG served at /favicon.svg),
     shutdown() (installed by serve())."""
@@ -570,6 +573,34 @@ def make_handler(ctx):
                     return self._json({"ok": False,
                                        "error": f"could not list backups: {exc}"},
                                       code=500)
+            if path == "/api/telemetry/recordings":
+                try:
+                    return self._json(ctx["telemetry_recordings"]())
+                except Exception as exc:
+                    return self._json({"ok": False,
+                                       "error": f"could not list recordings: {exc}"},
+                                      code=500)
+            if path in ("/api/telemetry/laps", "/api/telemetry/lap"):
+                q = parse_qs(urlparse(self.path).query or "", keep_blank_values=True)
+                arg = {k: v[0] for k, v in q.items()}
+                try:
+                    if path.endswith("/laps"):
+                        result = ctx["telemetry_laps"](arg.get("rec"), arg.get("session"),
+                                                       arg.get("track"), arg.get("car"))
+                    else:
+                        result = ctx["telemetry_lap"](arg.get("rec"), arg.get("session"),
+                                                      arg.get("lap"))
+                except Exception as exc:
+                    return self._json({"ok": False, "error": f"could not read laps: {exc}"},
+                                      code=500)
+                return self._json(result)
+            if path == "/api/telemetry/tracks":
+                try:
+                    return self._json(ctx["telemetry_tracks"]())
+                except Exception as exc:
+                    return self._json({"ok": False,
+                                       "error": f"could not list tracks: {exc}"},
+                                      code=500)
             if path == "/api/init/plan":
                 browser = parse_qs(urlparse(self.path).query or "").get(
                     "browser", ["firefox"])[0]
@@ -931,6 +962,17 @@ def make_handler(ctx):
                 except Exception as exc:
                     return self._json({"ok": False,
                                        "error": f"could not delete backup: {exc}"},
+                                      code=500)
+                return self._json(result, code=200 if result.get("ok") else 400)
+            if path == "/api/telemetry/learn":
+                body = self._body_json()
+                if body is None:
+                    return self._json({"ok": False, "error": "malformed JSON body"},
+                                      code=400)
+                try:
+                    result = ctx["telemetry_learn"](body.get("rec"), body.get("track_id"))
+                except Exception as exc:
+                    return self._json({"ok": False, "error": f"could not set the track: {exc}"},
                                       code=500)
                 return self._json(result, code=200 if result.get("ok") else 400)
             if path.startswith("/api/init/step/"):

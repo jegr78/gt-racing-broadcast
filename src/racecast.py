@@ -7631,6 +7631,11 @@ def run_ui(rest, fail=sys.exit, open_browser=True):
         "profile_import": profile_import_data,
         "report_generate": report_generate_data,
         "report_send": report_send_data,
+        "telemetry_recordings": telemetry_recordings_data,
+        "telemetry_laps": telemetry_laps_data,
+        "telemetry_lap": telemetry_lap_data,
+        "telemetry_tracks": telemetry_tracks_data,
+        "telemetry_learn": telemetry_learn_data,
         "jobs": jobs_mod.JobManager(
             lambda op_args: ops_mod.job_argv(op_args, IS_FROZEN,
                                              _rc_job_executable(),

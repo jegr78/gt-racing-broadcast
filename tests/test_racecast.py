@@ -924,6 +924,13 @@ def t_telemetry_delete_removes_an_interrupted_cache_write():
         assert os.path.exists(keep), "another recording's cache write stays"
 
 
+def t_control_center_wires_the_telemetry_routes():
+    with open(os.path.join(ROOT, "src", "racecast.py"), encoding="utf-8") as fh:
+        src = fh.read()
+    for key in ("recordings", "laps", "lap", "tracks", "learn"):
+        assert f'"telemetry_{key}": telemetry_{key}_data,' in src, key
+
+
 def t_route_obs_benchmark():
     action = m.route(["obs", "benchmark", "--window", "30"])
     assert action["command"] == "obs" and action["verb"] == "benchmark"
