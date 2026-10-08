@@ -253,6 +253,93 @@ def t_telemetry_loop_requests_extended_format_and_switches_once():
     assert store.trace(10)                    # the 'A' packets still fed the HUD
 
 
+def _recorder(d, default=False):
+    return m.gt7_recording.RecordControl(
+        os.path.join(d, "rec"), os.path.join(d, "telemetry-record.json"), default)
+
+
+def t_route_record_start_stop_toggle():
+    import json, tempfile
+    with tempfile.TemporaryDirectory() as d:
+        store = m.gt7_telemetry.TelemetryStore(None, recorder=_recorder(d))
+        srv, get = _serve(store)
+        try:
+            assert json.loads(get("/telemetry/record/start")[2])["active"] is True
+            assert json.loads(get("/telemetry/record/toggle")[2])["active"] is False
+            assert json.loads(get("/telemetry/record/stop")[2])["active"] is False
+            assert get("/telemetry/record/bogus")[0] == 404
+        finally:
+            srv.shutdown()
+            store.recorder.close()
+
+
+def t_route_record_404_without_store_or_recorder():
+    srv, get = _serve(None)
+    try:
+        assert get("/telemetry/record/start")[0] == 404
+    finally:
+        srv.shutdown()
+    srv, get = _serve(m.gt7_telemetry.TelemetryStore(None))
+    try:
+        assert get("/telemetry/record/start")[0] == 404
+    finally:
+        srv.shutdown()
+
+
+def t_status_reports_record_block():
+    import json, tempfile
+
+    class _StatusRelay:
+        def status(self):
+            return {}
+
+    with tempfile.TemporaryDirectory() as d:
+        store = m.gt7_telemetry.TelemetryStore(None, recorder=_recorder(d, default=True))
+        srv, get = _serve(store, relay=_StatusRelay())
+        try:
+            rec = json.loads(get("/status")[2])["telemetry"]["record"]
+            assert rec["active"] is True and rec["file"] is None and rec["error"] is None, rec
+        finally:
+            srv.shutdown()
+            store.recorder.close()
+
+
+def t_telemetry_loop_feeds_the_recorder():
+    import socket as _socket
+    import threading as _t
+    from test_gt7_fixture import EXT_TCS_HEX
+    ps_ip = "100.64.0.7"
+    stop = _t.Event()
+    packets = [bytes.fromhex(EXT_TCS_HEX)] * 3
+    got = []
+
+    class FakeRecorder:
+        def put(self, wall_ts, kind, plain):
+            got.append((kind, len(plain)))
+
+    class FakeSock:
+        def __init__(self, *a, **kw): pass
+        def setsockopt(self, *a): pass
+        def bind(self, addr): pass
+        def settimeout(self, s): pass
+        def close(self): pass
+        def sendto(self, data, addr): pass
+        def recvfrom(self, n):
+            if packets:
+                return packets.pop(), (ps_ip, 33740)
+            stop.set()
+            raise _socket.timeout()
+
+    store = m.gt7_telemetry.TelemetryStore(None, recorder=FakeRecorder())
+    real = m.socket.socket
+    m.socket.socket = FakeSock
+    try:
+        m._telemetry_loop(store, ps_ip, stop)
+    finally:
+        m.socket.socket = real
+    assert got == [("~", 0x158)] * 3, got
+
+
 def t_zz_no_test_reached_a_real_obs():
     # Sorted last: no test in this file may have attempted a real OBS connection.
     assert _obs_guard.CALLS == [], _obs_guard.CALLS[:3]

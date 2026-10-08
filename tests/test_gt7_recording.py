@@ -353,6 +353,25 @@ def t_control_put_does_not_recreate_writer_after_error():
         assert calls == [1], calls
 
 
+def t_control_put_after_close_never_recreates_writer():
+    # The relay's shutdown() calls close() while the telemetry thread may still be
+    # in flight with one more packet (#786): that packet must not open a new file.
+    calls = []
+    class Fake:
+        path, started, bytes, dropped, error = None, 1.0, 0, 0, None
+        def put(self, *a): pass
+        def close(self, timeout=5.0): pass
+    def factory():
+        calls.append(1)
+        return Fake()
+    with tempfile.TemporaryDirectory() as d:
+        c = _control(d, default=True, writer_factory=factory)
+        c.put(1.0, "A", _plain())        # opens the first (fake) writer
+        c.close()
+        c.put(2.0, "A", _plain())        # arrives after close(): must stay a no-op
+        assert calls == [1], calls
+
+
 def t_control_state_file_true_beats_default_false():
     with tempfile.TemporaryDirectory() as d:
         state = os.path.join(d, "telemetry-record.json")

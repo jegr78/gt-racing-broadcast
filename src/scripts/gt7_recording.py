@@ -376,6 +376,7 @@ class RecordControl:
         self._active = self._load(default)
         self._writer = None
         self._error = None
+        self._closed = False
         self._factory = writer_factory or (
             lambda: RecordingWriter(rec_dir, profile, relay_version))
 
@@ -400,7 +401,7 @@ class RecordControl:
     def put(self, wall_ts, kind, plain):
         bad = None
         with self._lock:
-            if not self._active or self._error is not None:
+            if self._closed or not self._active or self._error is not None:
                 return
             if self._writer is None:
                 try:
@@ -460,7 +461,11 @@ class RecordControl:
             return out
 
     def close(self):
+        """Terminal: stop accepting packets for good (the relay is exiting). Unlike
+        set_active(False), this never flips `active` or rewrites the state file, so
+        the next relay start resumes recording if it was on."""
         with self._lock:
+            self._closed = True
             w = self._detach_writer()
         if w is not None:
             w.close()

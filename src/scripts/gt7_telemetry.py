@@ -641,7 +641,7 @@ class TelemetryStore:
     """
 
     def __init__(self, path=None, units="metric", thresholds=(70, 85, 95), reset=False,
-                 view_path=None, cars=None):
+                 view_path=None, cars=None, recorder=None):
         self._eng = TelemetryEngine()
         self._cars = cars              # gt7_cars.CarDB (or None: no car names)
         self._view_path = view_path
@@ -652,6 +652,7 @@ class TelemetryStore:
         self._units = units
         self._thresholds = thresholds
         self._dirty_ref = None
+        self.recorder = recorder       # gt7_recording.RecordControl, or None (#786)
         if reset:
             # Fresh session: the relay resets the reference on every start (spec §D)
             # so a stale lap from another track/car/session is never loaded. Drop
@@ -673,6 +674,16 @@ class TelemetryStore:
                     self._remove_file()
                 else:                          # a new reference lap was set
                     self._save()
+
+    def record(self, wall_ts, kind, plain):
+        """Hand one accepted packet to the recorder, if any; never raises."""
+        rec = self.recorder
+        if rec is None:
+            return
+        try:
+            rec.put(wall_ts, kind, plain)
+        except Exception as e:  # noqa: BLE001  recording must never stop the telemetry loop
+            LOG.warning("telemetry recording failed: %s", e)
 
     def set_source(self, ip):
         """Record the console IP the listener latched (surfaced on /telemetry/data

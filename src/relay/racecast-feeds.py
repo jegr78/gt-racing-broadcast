@@ -162,6 +162,7 @@ import cookie_jar  # the shared "jar holds a YouTube login" rule, same as prefli
 import placeholders  # transparent-graphic placeholder path -> hide pure-placeholder assets from the browser
 import gt7_crypto      # GT7 UDP telemetry: Salsa20 decrypt (solo/POV only, #324)
 import gt7_telemetry   # GT7 UDP telemetry: packet parser + TelemetryStore (solo/POV only, #324)
+import gt7_recording   # GT7 telemetry recording to disk (solo/POV only, #785)
 import gt7_cars        # GT7 car id -> car name, from the vendored src/assets/gt7 tables (#713)
 from services import external_tool_env  # de-PyInstaller the env for spawned external tools
 
@@ -11180,6 +11181,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             if telemetry_store is not None:          # solo POV only; lights the panel toggle
                 base["telemetry"] = {"visible": telemetry_store.visible(),
                                      "car": telemetry_store.car()}  # panel status strip (#713)
+                if telemetry_store.recorder is not None:
+                    base["telemetry"]["record"] = telemetry_store.recorder.status()
             return base
         def _console_status_payload(self, roles):
             """Status for the Funnel-exposed /console mount. Feed stream URLs are
@@ -11364,6 +11367,17 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     if telemetry_store is None:
                         return self._send({"error": "telemetry disabled"}, 404)
                     return self._send({"samples": telemetry_store.trace(150)})
+                if len(p) == 3 and p[:2] == ["telemetry", "record"]:
+                    rec = telemetry_store.recorder if telemetry_store is not None else None
+                    if rec is None:
+                        return self._send({"error": "telemetry recording disabled"}, 404)
+                    if p[2] == "start":
+                        return self._send(rec.set_active(True))
+                    if p[2] == "stop":
+                        return self._send(rec.set_active(False))
+                    if p[2] == "toggle":
+                        return self._send(rec.toggle())
+                    return self._send({"error": "unknown record action"}, 404)
                 # Show/hide the HUD telemetry block (lobby, replay); persisted, so it
                 # survives a relay restart. Director Panel + Companion.
                 if len(p) == 2 and p[0] == "telemetry" and p[1] in ("show", "hide", "toggle"):
@@ -12369,7 +12383,9 @@ def _telemetry_loop(store, ps_ip, stop_evt, clock=time.monotonic):
             if plain is None:
                 continue
             heartbeat.on_packet(kind, clock())
-            store.update(gt7_telemetry.parse_packet(plain), time.time())
+            now_wall = time.time()
+            store.update(gt7_telemetry.parse_packet(plain), now_wall)
+            store.record(now_wall, kind, plain)
         except OSError as e:
             tlog.warning("telemetry socket error: %s. Reopening", e)
             try:
@@ -12961,15 +12977,25 @@ def main():
         _tthr = (float(os.environ.get("RACECAST_TELEMETRY_TYRE_COLD", 70)),
                  float(os.environ.get("RACECAST_TELEMETRY_TYRE_OPTIMAL_HI", 85)),
                  float(os.environ.get("RACECAST_TELEMETRY_TYRE_HOT_HI", 95)))
+        rec_dir = os.path.join(runtime, "telemetry-recordings")
+        for name in gt7_recording.finalize_partials(rec_dir):
+            LOG.info("telemetry recording %s finalised (left open by the previous relay)", name)
+        recorder = gt7_recording.RecordControl(
+            rec_dir, os.path.join(runtime, "telemetry-record.json"),
+            gt7_recording.record_default(os.environ),
+            profile=os.environ.get("RACECAST_PROFILE_NAME", ""),
+            relay_version=VERSION_LABEL)
         telemetry_store = gt7_telemetry.TelemetryStore(
             os.path.join(runtime, "telemetry.json"), units=_tunits, thresholds=_tthr,
             reset=True,          # fresh reference each relay start (spec §D), no stale cross-track lap
             view_path=os.path.join(runtime, "telemetry-view.json"),   # show/hide survives restarts
-            cars=gt7_cars.CarDB(os.path.join(assets_dir, "gt7")))     # car names (#713)
+            cars=gt7_cars.CarDB(os.path.join(assets_dir, "gt7")),     # car names (#713)
+            recorder=recorder)
         threading.Thread(target=_telemetry_loop,
                          args=(telemetry_store, args.gt7_ps_ip, stop_evt), daemon=True).start()
         LOG.info("GT7 telemetry listener started (bind 0.0.0.0:33740, ps_ip=%s)",
                 args.gt7_ps_ip or "<discovery>")
+        LOG.info("GT7 telemetry recording %s", "on" if recorder.status()["active"] else "off")
 
     # Broadcast-chat reader (#294): resolve the channel's live videoId set and
     # poll each stream's chat. Its own ~30 s resolve cadence, not args.poll, because
@@ -13064,6 +13090,8 @@ def main():
             LOG.warning("relay stopping with %d panel save(s) not confirmed in the "
                         "sheet; they are dropped", setup_ctl.saves.unconfirmed())
         LOG.info("Stopping feeds…")
+        if telemetry_store is not None and telemetry_store.recorder is not None:
+            telemetry_store.recorder.close()   # flush and rename before the hard exit
         stop_evt.set(); relay.shutdown(); os._exit(0)
     signal.signal(signal.SIGINT, shutdown)
     signal.signal(signal.SIGTERM, shutdown)
