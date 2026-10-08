@@ -77,9 +77,12 @@ def t_solo_health_never_crashes_with_auto_feed_arm():
     r = _solo_relay()
     r.manual_feed_arm = False
     now = _t.time()
+    r._desync_active, r._desync_since = True, now - 60   # stale state must be cleared
     r._refresh_health(now)
     assert r._desync == {"active": False}
-    assert r.status()["health"]["level"] in ("green", "yellow", "red")
+    assert r._desync_active is False and r._desync_since is None
+    s = r.status()                           # the /status payload, was a 500
+    assert s["mode"] == "solo" and set(s["health"]) == {"level", "reasons", "since_s"}
 
 
 def _get_json(srv, path, body=None):
