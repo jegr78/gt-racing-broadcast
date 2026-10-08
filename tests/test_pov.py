@@ -2740,6 +2740,41 @@ def t_maybe_auto_cover_no_obs_is_noop():
         m._obs_ws = saved
 
 
+def t_heartbeat_survives_a_failing_tick():
+    # One raising tick used to end the heartbeat thread for good: health, the
+    # Discord alerts and the health history then froze until a relay restart.
+    import logging
+    r = _relay(["a", "b"])
+    r._maybe_probe_obs = lambda now: None
+    ticks = []
+
+    def boom(now):
+        ticks.append(now)
+        raise KeyError(None)
+    r._refresh_health = boom
+
+    class _Stop:
+        def is_set(self):
+            return len(ticks) >= 3
+
+        def wait(self, timeout):
+            pass
+    r._hb_stop = _Stop()
+    logged = []
+
+    class _H(logging.Handler):
+        def emit(self, record):
+            logged.append(record)
+    h = _H(level=logging.ERROR)
+    m.LOG.addHandler(h)
+    try:
+        r._heartbeat_loop()
+    finally:
+        m.LOG.removeHandler(h)
+    assert len(ticks) == 3, ticks
+    assert len(logged) == 1, logged          # a repeating error is logged once
+
+
 class _FakeObsWs:
     """Fake _obs_ws for auto-cover tests: tracks a single Standby-Cover visibility flag."""
     STINT_SCENE = "Stint"
