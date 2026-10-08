@@ -2156,12 +2156,13 @@ def t_telemetry_routes_stay_json_on_errors():
     ctx = _ctx()
 
     def boom(*_a):
-        raise RuntimeError("disk")
+        raise RuntimeError("disk at /srv/league/rec.gt7rec")
     ctx["telemetry_recordings"] = boom
     httpd, port = _serve(ctx)
     try:
         code, body = _get(port, "/api/telemetry/recordings")
-        assert code == 500 and "disk" in json.loads(body)["error"]
+        err = json.loads(body)["error"]
+        assert code == 500 and "RuntimeError" in err and "/srv/league" not in err, err
         req = urllib.request.Request(f"http://127.0.0.1:{port}/api/telemetry/learn",
                                      method="POST", data=b"{bad",
                                      headers={"Content-Type": "application/json"})
@@ -2173,6 +2174,65 @@ def t_telemetry_routes_stay_json_on_errors():
         assert code == 400, "a malformed body is refused"
         code, body = _post_json(port, "/api/telemetry/learn", {"rec": "r", "track_id": "suzuka01"})
         assert code == 200 and json.loads(body)["track"]["id"] == "suzuka01"
+    finally:
+        httpd.shutdown()
+
+
+def t_telemetry_routes_500_paths_report_only_the_exception_type():
+    ctx = _ctx()
+
+    def boom(*_a):
+        raise RuntimeError("disk at /srv/league/rec.gt7rec")
+    ctx["telemetry_laps"] = boom
+    ctx["telemetry_lap"] = boom
+    ctx["telemetry_tracks"] = boom
+    ctx["telemetry_learn"] = boom
+    httpd, port = _serve(ctx)
+    try:
+        code, body = _get(port, "/api/telemetry/laps?rec=r")
+        err = json.loads(body)["error"]
+        assert code == 500 and "RuntimeError" in err and "/srv/league" not in err, err
+        code, body = _get(port, "/api/telemetry/lap?rec=r&session=1&lap=1")
+        err = json.loads(body)["error"]
+        assert code == 500 and "RuntimeError" in err and "/srv/league" not in err, err
+        code, body = _get(port, "/api/telemetry/tracks")
+        err = json.loads(body)["error"]
+        assert code == 500 and "RuntimeError" in err and "/srv/league" not in err, err
+        code, body = _post_json(port, "/api/telemetry/learn", {"rec": "r", "track_id": "x"})
+        err = json.loads(body)["error"]
+        assert code == 500 and "RuntimeError" in err and "/srv/league" not in err, err
+    finally:
+        httpd.shutdown()
+
+
+def t_telemetry_learn_rejects_a_non_object_json_body():
+    ctx = _ctx()
+    httpd, port = _serve(ctx)
+    try:
+        for bad in ([1, 2, 3], "x", 5, None):
+            code, body = _post_json(port, "/api/telemetry/learn", bad)
+            assert code == 400, (bad, code, body)
+    finally:
+        httpd.shutdown()
+
+
+def t_body_json_rejects_negative_and_oversized_content_length():
+    import http.client
+    ctx = _ctx()
+    httpd, port = _serve(ctx)
+    try:
+        payload = json.dumps({"rec": "r", "track_id": "x"}).encode("utf-8")
+        for length in ("-1", str(us.MAX_JSON_BODY_BYTES + 1)):
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            conn.putrequest("POST", "/api/telemetry/learn")
+            conn.putheader("Content-Type", "application/json")
+            conn.putheader("Content-Length", length)
+            conn.endheaders()
+            conn.send(payload)
+            resp = conn.getresponse()
+            assert resp.status == 400, (length, resp.status)
+            resp.read()
+            conn.close()
     finally:
         httpd.shutdown()
 

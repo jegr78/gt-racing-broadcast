@@ -17,6 +17,7 @@ DEFAULT_PORT = 8089
 TAIL_LINES = 40          # how much history a log stream starts with
 MAX_IMPORT_BYTES = 2 * 1024 * 1024 * 1024   # 2 GiB; profile bundles include media
 MAX_FONT_BYTES = 8 * 1024 * 1024            # 8 MiB; an overlay font is tiny
+MAX_JSON_BODY_BYTES = 16 * 1024 * 1024      # 16 MiB; overlay CSS may embed data: images
 
 
 def ui_port(env):
@@ -169,17 +170,21 @@ def make_handler(ctx):
             self.end_headers()
 
         def _body_json(self):
-            """Parsed JSON POST body; {} when absent/empty, None when malformed."""
+            """Parsed JSON POST body as a dict; {} when absent/empty, None when
+            negative, oversized, malformed, or not a JSON object."""
             try:
                 length = int(self.headers.get("Content-Length") or 0)
             except ValueError:
                 length = 0
-            if not length:
+            if length == 0:
                 return {}
+            if length < 0 or length > MAX_JSON_BODY_BYTES:
+                return None
             try:
-                return json.loads(self.rfile.read(length).decode("utf-8")) or {}
+                parsed = json.loads(self.rfile.read(length).decode("utf-8"))
             except Exception:
                 return None
+            return parsed if isinstance(parsed, dict) else None
 
         def _serve_file(self, full):
             ctype = self._CTYPES.get(os.path.splitext(full)[1].lower(),
@@ -578,7 +583,8 @@ def make_handler(ctx):
                     return self._json(ctx["telemetry_recordings"]())
                 except Exception as exc:
                     return self._json({"ok": False,
-                                       "error": f"could not list recordings: {exc}"},
+                                       "error": f"could not list recordings: "
+                                                f"{type(exc).__name__}"},
                                       code=500)
             if path in ("/api/telemetry/laps", "/api/telemetry/lap"):
                 q = parse_qs(urlparse(self.path).query or "", keep_blank_values=True)
@@ -591,7 +597,8 @@ def make_handler(ctx):
                         result = ctx["telemetry_lap"](arg.get("rec"), arg.get("session"),
                                                       arg.get("lap"))
                 except Exception as exc:
-                    return self._json({"ok": False, "error": f"could not read laps: {exc}"},
+                    return self._json({"ok": False,
+                                       "error": f"could not read laps: {type(exc).__name__}"},
                                       code=500)
                 return self._json(result)
             if path == "/api/telemetry/tracks":
@@ -599,7 +606,8 @@ def make_handler(ctx):
                     return self._json(ctx["telemetry_tracks"]())
                 except Exception as exc:
                     return self._json({"ok": False,
-                                       "error": f"could not list tracks: {exc}"},
+                                       "error": f"could not list tracks: "
+                                                f"{type(exc).__name__}"},
                                       code=500)
             if path == "/api/init/plan":
                 browser = parse_qs(urlparse(self.path).query or "").get(
@@ -972,7 +980,9 @@ def make_handler(ctx):
                 try:
                     result = ctx["telemetry_learn"](body.get("rec"), body.get("track_id"))
                 except Exception as exc:
-                    return self._json({"ok": False, "error": f"could not set the track: {exc}"},
+                    return self._json({"ok": False,
+                                       "error": f"could not set the track: "
+                                                f"{type(exc).__name__}"},
                                       code=500)
                 return self._json(result, code=200 if result.get("ok") else 400)
             if path.startswith("/api/init/step/"):

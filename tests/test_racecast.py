@@ -674,6 +674,14 @@ def t_telemetry_lap_data_returns_the_trace():
         assert m.telemetry_lap_data(stem, None, "3")["ok"] is False
 
 
+def t_telemetry_lap_data_refuses_the_open_file():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        path = tgl.write_circle_recording(rec_dir)
+        m._relay_record_status = lambda: {"active": True, "file": os.path.basename(path)}
+        assert m.telemetry_lap_data(_stem(path), "1", "3") == {
+            "ok": False, "error": "recording in progress: stop the recording to analyse it"}
+
+
 def t_telemetry_index_is_memoised_until_the_file_or_the_data_change():
     with _telemetry_sandbox() as (rec_dir, tgl):
         path = tgl.write_circle_recording(rec_dir)
@@ -732,6 +740,14 @@ def t_telemetry_learn_data_hides_the_path_of_a_failed_write():
         finally:
             gt7_tracks.TrackDB.learn = real
         assert d == {"ok": False, "error": "could not save the learned track: Permission denied"}, d
+
+
+def t_telemetry_learn_data_refuses_the_open_file():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        path = tgl.write_circle_recording(rec_dir)
+        m._relay_record_status = lambda: {"active": True, "file": os.path.basename(path)}
+        assert m.telemetry_learn_data(_stem(path), "ring01") == {
+            "ok": False, "error": "recording in progress: stop the recording to analyse it"}
 
 
 def t_telemetry_delete_removes_the_lap_index():
@@ -884,7 +900,10 @@ def t_telemetry_pool_and_list_skip_the_file_the_relay_writes():
         assert {lap["rec"] for lap in p["laps"]} == {_stem(a)}
         top = rows[0]
         assert top["recording"] is True and top["indexed"] is False and top["laps"] is None
-        assert mine["ok"] and len(mine["laps"]) == 3, "the open recording still opens on demand"
+        assert mine == {"ok": False,
+                        "error": "recording in progress: stop the recording to analyse it"}, \
+            "the open recording is refused, not indexed cold"
+        assert b not in touched, "refusing the open recording still never indexes it"
 
 
 def t_telemetry_delete_reports_a_leftover_instead_of_failing():

@@ -3504,6 +3504,10 @@ def telemetry_laps_data(rec=None, session=None, track=None, car=None):
             path = _find_recording(rec_dir, rec)
             if not path:
                 return {"ok": False, "error": f"no recording named {rec!r}"}
+            open_file = _relay_open_file()
+            if open_file and os.path.basename(path).startswith(open_file):
+                return {"ok": False,
+                        "error": "recording in progress: stop the recording to analyse it"}
             try:
                 idx = _telemetry_index(path)
             except gr.RecordingError:
@@ -3552,6 +3556,10 @@ def telemetry_lap_data(rec, session, lap):
         path = _find_recording(_telemetry_rec_dir(), rec)
         if not path:
             return {"ok": False, "error": f"no recording named {rec!r}"}
+        open_file = _relay_open_file()
+        if open_file and os.path.basename(path).startswith(open_file):
+            return {"ok": False,
+                    "error": "recording in progress: stop the recording to analyse it"}
         try:
             idx = _telemetry_full_index(path)
         except gr.RecordingError:
@@ -3585,6 +3593,10 @@ def telemetry_learn_data(rec, track_id):
         path = _find_recording(_telemetry_rec_dir(), rec)
         if not path:
             return {"ok": False, "error": f"no recording named {rec!r}"}
+        open_file = _relay_open_file()
+        if open_file and os.path.basename(path).startswith(open_file):
+            return {"ok": False,
+                    "error": "recording in progress: stop the recording to analyse it"}
         key = _telemetry_track_key(path)
         if key is None:
             return {"ok": False, "error": "no active profile"}
