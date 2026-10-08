@@ -54,8 +54,9 @@ def sectors(trace, length_m, step_m=SECTOR_M):
 
 
 def best_sectors(laps):
-    """Per sector the fastest time over the given laps that carry a trace."""
-    per_lap = [sectors(lap["trace"], lap_length_m(lap)) for lap in laps if lap.get("trace")]
+    """Per sector the fastest time over the given laps, from their sector times or traces."""
+    per_lap = [lap["sectors"] if "sectors" in lap else sectors(lap["trace"], lap_length_m(lap))
+               for lap in laps if "sectors" in lap or lap.get("trace")]
     n = max((len(s) for s in per_lap), default=0)
     best = []
     for i in range(n):
@@ -123,7 +124,8 @@ def _write_cache(path, data):
     """Atomic write; a failed write only costs the cache and never leaves a temp file."""
     tmp = None
     try:
-        fd, tmp = tempfile.mkstemp(prefix=".laps-", suffix=".tmp", dir=os.path.dirname(path))
+        prefix = os.path.basename(path)[:-len(".json")] + "-"     # "<stem>.laps-", deletable with it
+        fd, tmp = tempfile.mkstemp(prefix=prefix, suffix=".tmp", dir=os.path.dirname(path))
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(data, fh, separators=(",", ":"))
         os.replace(tmp, path)

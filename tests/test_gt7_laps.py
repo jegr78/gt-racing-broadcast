@@ -379,6 +379,31 @@ def t_best_sectors_and_theoretical_best():
     assert gl.best_sectors([short])[-1] == 3.6, "its own trace end closes the last sector"
 
 
+def t_best_sectors_reads_the_sectors_of_a_summary():
+    a = {"trace": _trace(4.0, 4.0, 4.0, 4.0, 4.0)}
+    b = {"trace": _trace(3.5, 4.5, 4.0, 4.2, 3.8)}
+    for lap in (a, b):
+        lap["sectors"] = gl.sectors(lap["trace"], gl.lap_length_m(lap))
+    brief = [gl.summary(a), gl.summary(b)]
+    assert gl.best_sectors(brief) == gl.best_sectors([a, b]) == [3.5, 4.0, 4.0, 4.0, 3.8], \
+        "a lap without its trace still has its sector times"
+    assert gl.theoretical_best(brief) == 19.3
+
+
+def t_write_cache_temp_file_carries_the_recording_stem():
+    with tempfile.TemporaryDirectory() as d:
+        target = os.path.join(d, "rec1.laps.json")
+        seen = []
+        real = gl.os.replace
+        gl.os.replace = lambda src, dst: seen.append(os.path.basename(src)) or real(src, dst)
+        try:
+            gl._write_cache(target, {"a": 1})
+        finally:
+            gl.os.replace = real
+        assert seen and seen[0].startswith("rec1.laps-") and seen[0].endswith(".tmp"), \
+            f"a leftover temp file names its recording: {seen}"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

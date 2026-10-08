@@ -550,6 +550,278 @@ def t_telemetry_record_without_relay_exits_nonzero():
         m._relay_record_call = real
 
 
+@contextlib.contextmanager
+def _telemetry_sandbox(fake_dbs=True):
+    """A profile 'solo' with an empty recordings dir and no relay; fake track and car
+    tables unless fake_dbs is False."""
+    import test_gt7_laps as tgl
+    saved = (m._telemetry_rec_dir, m._runtime_base_dir, m._active_profile_name,
+             m._telemetry_dbs, m._relay_record_status, m._running_relay_profile)
+    with tempfile.TemporaryDirectory() as td:
+        rec_dir = os.path.join(td, "runtime", "solo", "telemetry-recordings")
+        os.makedirs(rec_dir)
+        m._telemetry_rec_dir = lambda: rec_dir
+        m._runtime_base_dir = lambda: os.path.join(td, "runtime")
+        m._active_profile_name = lambda: "solo"
+        m._relay_record_status = lambda: None
+        m._running_relay_profile = lambda: ""
+        if fake_dbs:
+            m._telemetry_dbs = lambda: (tgl.FakeTracks(), tgl.FakeCars())
+        m._TELEMETRY_MEMO.clear()
+        try:
+            yield rec_dir, tgl
+        finally:
+            m._TELEMETRY_MEMO.clear()
+            (m._telemetry_rec_dir, m._runtime_base_dir, m._active_profile_name,
+             m._telemetry_dbs, m._relay_record_status, m._running_relay_profile) = saved
+
+
+def _stem(path):
+    return os.path.basename(path)[:-len(".gt7rec")]
+
+
+def t_find_recording_accepts_only_names_in_the_dir():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        path = tgl.write_circle_recording(rec_dir)
+        for q in (_stem(path), _stem(path) + ".gt7rec"):
+            assert m._find_recording(rec_dir, q) == path, q
+        for bad in ("", ".", "..", "../" + _stem(path), os.path.join("..", _stem(path)),
+                    "nope", None):
+            assert m._find_recording(rec_dir, bad) is None, bad
+
+
+def t_telemetry_track_key_needs_a_profile():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        path = tgl.write_circle_recording(rec_dir)
+        assert m._telemetry_track_key(path) == f"solo/{_stem(path)}"
+        m._active_profile_name = lambda: None
+        assert m._telemetry_track_key(path) is None, "never 'None/<stem>'"
+        assert m.telemetry_learn_data(_stem(path), "ring01") == {
+            "ok": False, "error": "no active profile"}
+
+
+def t_telemetry_recordings_data_newest_first_with_cached_track():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        old = tgl.write_circle_recording(rec_dir)
+        new = tgl.write_circle_recording(rec_dir, t0=1_700_007_200.0)
+        d = m.telemetry_recordings_data()
+        assert d["ok"] and [r["name"] for r in d["recordings"]] == \
+            [os.path.basename(new), os.path.basename(old)]
+        top = d["recordings"][0]
+        assert top["indexed"] is False and top["track"] is None and top["laps"] is None
+        assert top["recording"] is False and "path" not in top, "machine paths stay server-side"
+        m.telemetry_laps_data(rec=top["rec"])
+        top = m.telemetry_recordings_data()["recordings"][0]
+        assert top["indexed"] is True and top["track"]["id"] == "ring01" and top["laps"] == 4
+
+
+def t_telemetry_recordings_data_marks_the_file_the_relay_writes():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        old = tgl.write_circle_recording(rec_dir)
+        new = tgl.write_circle_recording(rec_dir, t0=1_700_007_200.0)
+        m._relay_record_status = lambda: {"active": True, "file": os.path.basename(new)}
+        rows = m.telemetry_recordings_data()["recordings"]
+        assert [r["recording"] for r in rows] == [True, False], \
+            f"only {os.path.basename(new)} is being written, not {os.path.basename(old)}"
+
+
+def t_telemetry_laps_data_for_a_recording_and_the_pool():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        a = tgl.write_circle_recording(rec_dir)
+        tgl.write_circle_recording(rec_dir, lap_secs=(20.0, 19.0, 18.0), t0=1_700_007_200.0)
+        d = m.telemetry_laps_data(rec=_stem(a))
+        assert d["ok"] and d["recording"]["rec"] == _stem(a) and len(d["laps"]) == 4
+        assert d["recording"]["start_ts"] == 1_700_000_000.0
+        assert "trace" not in d["laps"][0] and "points" not in d["laps"][0]
+        p = m.telemetry_laps_data(track="ring01", car=str(tgl.CAR))
+        assert p["ok"] and [lap["time_s"] for lap in p["laps"]] == [16.0, 18.0, 19.0, 20.0, 20.0]
+        assert p["reference"]["time_s"] == 16.0
+        assert p["best_sectors"] == [3.2, 3.2, 3.2, 3.2, 3.12], p["best_sectors"]
+        assert p["theoretical_best"] == 15.92
+        assert m.telemetry_laps_data(track="", car=str(tgl.CAR))["ok"] is False, \
+            "an unknown track compares only within one session"
+        mine = m.telemetry_laps_data(rec=_stem(a), session="1", track="", car=str(tgl.CAR))
+        assert mine["ok"] and mine["laps"] == [], "every lap of this recording has a track"
+        assert m.telemetry_laps_data(rec="../etc")["ok"] is False
+        assert m.telemetry_laps_data(track="ring01", car="x") == {
+            "ok": False, "error": "car and session must be numbers"}
+
+
+def t_telemetry_laps_data_names_a_broken_recording_without_its_path():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        import gt7_recording
+        stem = _stem(tgl.write_circle_recording(rec_dir))
+        real = m._telemetry_index
+
+        def broken(path, dbs=None):
+            raise gt7_recording.RecordingError(f"{path}: damaged")
+        m._telemetry_index = broken
+        try:
+            d = m.telemetry_laps_data(rec=stem)
+        finally:
+            m._telemetry_index = real
+        assert d["ok"] is False and rec_dir not in d["error"], d
+
+
+def t_telemetry_lap_data_returns_the_trace():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        stem = _stem(tgl.write_circle_recording(rec_dir))
+        d = m.telemetry_lap_data(stem, "1", "3")
+        assert d["ok"] and d["lap"]["lap"] == 3 and d["lap"]["trace"][0]["d"] == 0.0
+        assert (d["step_m"], d["sector_m"]) == (5.0, 200.0) and "points" not in d["lap"]
+        assert m.telemetry_lap_data(stem, "1", "99")["ok"] is False
+        assert m.telemetry_lap_data(stem, "x", "3")["ok"] is False
+        assert m.telemetry_lap_data(stem, None, "3")["ok"] is False
+
+
+def t_telemetry_index_is_memoised_until_the_file_or_the_data_change():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        path = tgl.write_circle_recording(rec_dir)
+        first = m._telemetry_index(path)
+        assert m._telemetry_index(path) is first, "an unchanged recording is not read again"
+        with open(path, "ab") as fh:
+            fh.write(b"\x00")
+        second = m._telemetry_index(path)
+        assert second is not first, "a grown recording is read again"
+        os.makedirs(os.path.join(m._runtime_base_dir(), "gt7"))
+        with open(os.path.join(m._runtime_base_dir(), "gt7", "learned-tracks.json"), "w",
+                  encoding="utf-8") as fh:
+            fh.write("{}")
+        assert m._telemetry_index(path) is not second, "a learned track is read again"
+        for k in range(m.TELEMETRY_MEMO_MAX + 1):
+            m._telemetry_index(tgl.write_circle_recording(
+                rec_dir, t0=1_700_007_200.0 + 3600 * k, n=40))
+        assert len(m._TELEMETRY_MEMO) == m.TELEMETRY_MEMO_MAX, "the memo stays bounded"
+        assert path not in m._TELEMETRY_MEMO, "the least recently used index goes first"
+
+
+def t_telemetry_tracks_data_lists_layouts():
+    with _telemetry_sandbox():
+        d = m.telemetry_tracks_data()
+        assert d == {"ok": True, "tracks": [{"id": "ring01", "track": "Test Ring",
+                                             "layout": "Full", "reverse": False}]}
+
+
+def t_telemetry_learn_data_records_the_assignment():
+    import gt7_tracks
+    with _telemetry_sandbox(fake_dbs=False) as (rec_dir, tgl):
+        stem = _stem(tgl.write_circle_recording(rec_dir))
+        base, bundled = m._runtime_base_dir(), m.resource_path("assets/gt7")
+        tid = gt7_tracks.TrackDB.load(base, bundled).layouts()[0]["id"]
+        assert m.telemetry_learn_data(stem, "no-such-layout")["ok"] is False
+        assert m.telemetry_learn_data("nope", tid)["ok"] is False
+        d = m.telemetry_learn_data(stem, tid)
+        assert d["ok"] and d["track"]["id"] == tid, d
+        assert gt7_tracks.TrackDB.load(base, bundled).assignment(f"solo/{stem}") == tid
+        laps = m.telemetry_laps_data(rec=stem)["laps"]
+        assert {lap["track_id"] for lap in laps} == {tid}, "the assignment wins for every session"
+
+
+def t_telemetry_learn_data_hides_the_path_of_a_failed_write():
+    import gt7_tracks
+    with _telemetry_sandbox(fake_dbs=False) as (rec_dir, tgl):
+        stem = _stem(tgl.write_circle_recording(rec_dir))
+        real = gt7_tracks.TrackDB.learn
+
+        def locked(self, *_a, **_k):
+            raise PermissionError(13, "Permission denied", os.path.join(rec_dir, "x.json"))
+        gt7_tracks.TrackDB.learn = locked
+        try:
+            tid = m._telemetry_dbs()[0].layouts()[0]["id"]
+            d = m.telemetry_learn_data(stem, tid)
+        finally:
+            gt7_tracks.TrackDB.learn = real
+        assert d == {"ok": False, "error": "could not save the learned track: Permission denied"}, d
+
+
+def t_telemetry_delete_removes_the_lap_index():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        path = tgl.write_circle_recording(rec_dir)
+        m.telemetry_laps_data(rec=_stem(path))
+        cache = os.path.join(rec_dir, _stem(path) + ".laps.json")
+        assert os.path.exists(cache) and path in m._TELEMETRY_MEMO
+        m.telemetry_delete_cmd([_stem(path)])
+        assert not os.path.exists(cache) and not os.path.exists(path)
+        assert path not in m._TELEMETRY_MEMO
+
+
+def t_telemetry_memo_holds_summaries_and_lap_data_the_full_trace():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        stem = _stem(tgl.write_circle_recording(rec_dir))
+        assert m.telemetry_laps_data(rec=stem)["ok"]
+        for _stamp, idx in m._TELEMETRY_MEMO.values():
+            assert all("trace" not in lap and "points" not in lap for lap in idx["laps"]), \
+                "the memo keeps no traces or points"
+        d = m.telemetry_lap_data(stem, "1", "3")
+        assert d["ok"] and len(d["lap"]["trace"]) > 100, "lap_data reads the full trace"
+        for _stamp, idx in m._TELEMETRY_MEMO.values():
+            assert all("trace" not in lap for lap in idx["laps"]), "lap_data never memoises a trace"
+
+
+def t_telemetry_index_builds_once_under_concurrent_requests():
+    import threading
+    import gt7_laps
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        path = tgl.write_circle_recording(rec_dir, n=40)
+        real, calls, gate = gt7_laps.index, [], threading.Event()
+
+        def slow(*a, **k):
+            calls.append(1)
+            gate.wait(2.0)
+            return real(*a, **k)
+        gt7_laps.index = slow
+        out = []
+        try:
+            threads = [threading.Thread(target=lambda: out.append(m._telemetry_index(path)))
+                       for _ in range(2)]
+            for t in threads:
+                t.start()
+            time.sleep(0.2)
+            gate.set()
+            for t in threads:
+                t.join()
+        finally:
+            gt7_laps.index = real
+        assert len(calls) == 1, f"two requests built the index {len(calls)} times"
+        assert len(out) == 2 and out[0] is out[1], "both requests get the one memo entry"
+
+
+def t_telemetry_data_functions_catch_any_error_without_paths():
+    import struct
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        stem = _stem(tgl.write_circle_recording(rec_dir))
+        real_index, real_full = m._telemetry_index, m._telemetry_full_index
+
+        def short(path, dbs=None):
+            raise struct.error("unpack requires a buffer of 4 bytes")
+        m._telemetry_index = m._telemetry_full_index = short
+        try:
+            results = [m.telemetry_laps_data(rec=stem),
+                       m.telemetry_laps_data(track="ring01", car=str(tgl.CAR)),
+                       m.telemetry_lap_data(stem, "1", "3"),
+                       m.telemetry_learn_data(stem, "ring01")]
+        finally:
+            m._telemetry_index, m._telemetry_full_index = real_index, real_full
+        for d in results[:1] + results[2:]:
+            assert d["ok"] is False and rec_dir not in d["error"], d
+        assert results[1]["ok"] and results[1]["laps"] == [], \
+            "one unreadable recording does not hide the pool"
+
+
+def t_telemetry_delete_removes_an_interrupted_cache_write():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        path = tgl.write_circle_recording(rec_dir, n=40)
+        other = tgl.write_circle_recording(rec_dir, t0=1_700_007_200.0, n=40)
+        tmp = os.path.join(rec_dir, _stem(path) + ".laps-abc123.tmp")
+        keep = os.path.join(rec_dir, _stem(other) + ".laps-def456.tmp")
+        for f in (tmp, keep):
+            with open(f, "w", encoding="utf-8") as fh:
+                fh.write("{")
+        m.telemetry_delete_cmd([_stem(path)])
+        assert not os.path.exists(tmp), "the interrupted cache write goes with the recording"
+        assert os.path.exists(keep), "another recording's cache write stays"
+
+
 def t_route_obs_benchmark():
     action = m.route(["obs", "benchmark", "--window", "30"])
     assert action["command"] == "obs" and action["verb"] == "benchmark"
