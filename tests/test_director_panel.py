@@ -353,6 +353,18 @@ def t_solo_telemetry_toggle():
     assert "teleVisBtn.hidden = !d.telemetry" in html
 
 
+def t_solo_telemetry_record_toggle():
+    # Solo POV: a REC key next to TELEMETRY starts/stops the GT7 recorder through
+    # the relay and reflects active/error state from /status.telemetry.record. (#785)
+    html = _html()
+    solo = _config_block(html, "CONFIG_SOLO")
+    solo = solo[solo.index("vis:"):solo.index("audio:")]
+    assert 'label:"REC"' in solo and 'relay:"telemetry/record"' in solo
+    assert "teleRecBtn.hidden = !rec" in html
+    assert 'teleRecBtn.classList.toggle("air", !!(rec && rec.active && !rec.error))' in html
+    assert 'teleRecBtn.classList.toggle("warn", !!(rec && rec.error))' in html
+
+
 def t_solo_status_strip_names_the_car():
     """The status strip shows the GT7 car from /status (telemetry.car), as text so a
     car name can never inject markup, and hides the pill without one. (#713)"""

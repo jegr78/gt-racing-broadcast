@@ -155,6 +155,7 @@
   button.k:disabled{opacity:.35;cursor:not-allowed}
   button.k .tag{display:block;font-size:8px;letter-spacing:.22em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
   button.k .cost{display:block;font-size:9px;font-weight:400;color:var(--amber);margin-top:3px}
+  button.k .cost[hidden]{display:none}  /* author display:block above beats the UA [hidden] rule */
   button.k.on{border-color:var(--live);background:linear-gradient(180deg,#15301f,#10261a);
     box-shadow:0 0 0 1px var(--live),0 0 18px var(--live-glow),inset 0 1px 0 rgba(255,255,255,.06)}
   button.k.on .tag{color:var(--live)}
@@ -2101,6 +2102,7 @@ async function relayPoll(){
                   teleRecBtn.appendChild(cost); }
       cost.textContent = rec && rec.active && rec.since
         ? fmtDur(Date.now() / 1000 - rec.since) : "";
+      cost.hidden = !cost.textContent;
     }
     const car = d.telemetry && d.telemetry.car;   // the GT7 car the driver is in (#713)
     $("#stCar").hidden = !car;
