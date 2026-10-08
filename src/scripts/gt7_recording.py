@@ -27,8 +27,11 @@ SUFFIX = ".gt7rec"
 PART = ".part"
 QUEUE_MAX = 600               # about 10 s of packets at 60 Hz
 FLUSH_S = 1.0
+RENAME_TRIES = 3
+RENAME_WAIT_S = 0.2
 _REC = struct.Struct("<dBH")
 _META = 0x00
+_DONE = object()              # close() sentinel: wakes the writer without waiting FLUSH_S
 
 
 class RecordingError(Exception):
@@ -107,7 +110,14 @@ class RecordingWriter:
 
     def close(self, timeout=5.0):
         self._stop.set()
+        if self._thread.is_alive():
+            try:
+                self._q.put(_DONE, timeout=min(timeout, self._flush_s))
+            except queue.Full:
+                pass  # the writer still ends after its next empty get() timeout
         self._thread.join(timeout)
+        if not self._thread.is_alive():
+            self._drain()             # a writer that died early leaves the sentinel behind
 
     def _open(self, first_ts):
         os.makedirs(self._dir, exist_ok=True)
@@ -125,6 +135,32 @@ class RecordingWriter:
         fh.write(data)
         self.bytes += len(data)
 
+    def _drain(self):
+        """Every packet still queued behind the close() sentinel."""
+        items = []
+        while True:
+            try:
+                item = self._q.get_nowait()
+            except queue.Empty:
+                return items
+            if item is not _DONE:
+                items.append(item)
+
+    def _rename(self):
+        """Drop the .part suffix, retrying while another process (Windows AV,
+        indexer) still holds the file; a lasting failure waits for finalize_partials."""
+        for attempt in range(RENAME_TRIES):
+            try:
+                os.replace(self.path + PART, self.path)
+                return
+            except OSError as e:
+                err = e
+            if attempt + 1 < RENAME_TRIES:
+                time.sleep(RENAME_WAIT_S)
+        self.error = _sanitize_error(err)
+        LOG.warning("could not finalise telemetry recording %s: %s; the next relay "
+                    "start finishes it", os.path.basename(self.path) + PART, err.strerror)
+
     def _run(self):
         fh = None
         written_drops = 0
@@ -135,13 +171,16 @@ class RecordingWriter:
                     item = self._q.get(timeout=self._flush_s)
                 except queue.Empty:
                     item = None
-                if item is not None:
-                    wall_ts, kind, plain = item
+                done = item is _DONE or (item is None and self._stop.is_set())
+                if item is _DONE:
+                    batch = self._drain()
+                else:
+                    batch = [] if item is None else [item]
+                for wall_ts, kind, plain in batch:
                     if fh is None:
                         fh = self._open(wall_ts)
                     self._write(fh, _encode(wall_ts, ord(kind), plain))
                 now = time.monotonic()
-                done = item is None and self._stop.is_set()
                 if fh is not None and (done or now - last_flush >= self._flush_s):
                     if self.dropped != written_drops:
                         written_drops = self.dropped
@@ -158,10 +197,10 @@ class RecordingWriter:
             if fh is not None:
                 try:
                     fh.close()
-                    if self.error is None:
-                        os.replace(self.path + PART, self.path)
                 except OSError as e:
                     self.error = self.error or _sanitize_error(e)
+                if self.error is None:
+                    self._rename()
 
 
 class Recording:

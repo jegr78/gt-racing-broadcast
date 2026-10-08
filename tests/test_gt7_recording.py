@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """GT7 telemetry recording: file format, writer, reader, switch and CSV export.
 Run: python3 tests/test_gt7_recording.py"""
-import importlib.util, json, os, struct, sys, tempfile, threading, time
+import importlib.util, json, logging, os, struct, sys, tempfile, threading, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -119,6 +119,79 @@ def t_non_os_error_in_writer_stops_recording_and_reports():
         assert w.error == "TypeError", w.error
         assert os.path.exists(w.path + rec.PART), "a non-OSError failure must not be renamed clean"
         assert not os.path.exists(w.path)
+
+
+class _Capture(logging.Handler):
+    def __init__(self):
+        super().__init__(logging.WARNING)
+        self.messages = []
+
+    def emit(self, record):
+        self.messages.append(record.getMessage())
+
+
+def _close_with_flaky_rename(d, failures):
+    """Write one packet and close while os.replace on the .part fails `failures` times."""
+    real_replace, real_wait = rec.os.replace, rec.RENAME_WAIT_S
+    calls = []
+
+    def flaky(src, dst):
+        if src.endswith(rec.PART):
+            calls.append(src)
+            if len(calls) <= failures:
+                raise PermissionError(13, "The process cannot access the file")
+        return real_replace(src, dst)
+    cap = _Capture()
+    rec.LOG.addHandler(cap)
+    rec.os.replace, rec.RENAME_WAIT_S = flaky, 0.01
+    try:
+        w = rec.RecordingWriter(d, "Demo", "dev", flush_s=0.05)
+        w.put(1.0, "A", _plain())
+        w.close()
+    finally:
+        rec.os.replace, rec.RENAME_WAIT_S = real_replace, real_wait
+        rec.LOG.removeHandler(cap)
+    return w, calls, cap.messages
+
+
+def t_rename_retries_a_transient_windows_lock():
+    with tempfile.TemporaryDirectory() as d:
+        w, calls, warnings = _close_with_flaky_rename(d, failures=2)
+        assert len(calls) == 3, f"two failed renames must be retried: {calls}"
+        assert w.error is None and os.path.exists(w.path), "the third attempt finishes the file"
+        assert not os.path.exists(w.path + rec.PART) and warnings == [], warnings
+
+
+def t_rename_that_keeps_failing_is_logged_and_left_for_finalize():
+    with tempfile.TemporaryDirectory() as d:
+        w, calls, warnings = _close_with_flaky_rename(d, failures=99)
+        assert len(calls) == rec.RENAME_TRIES, calls
+        assert os.path.exists(w.path + rec.PART) and not os.path.exists(w.path), \
+            "a failed rename leaves the .part for finalize_partials"
+        assert any(os.path.basename(w.path) in msg for msg in warnings), \
+            f"a failed rename must be logged: {warnings}"
+
+
+def t_close_wakes_an_idle_writer_at_once():
+    with tempfile.TemporaryDirectory() as d:
+        w = rec.RecordingWriter(d, "Demo", "dev", flush_s=5.0)
+        time.sleep(0.05)                        # let the writer block in its queue wait
+        t0 = time.monotonic()
+        w.close()
+        elapsed = time.monotonic() - t0
+        assert elapsed < 1.0, f"close() must not wait for the {5.0} s flush timeout: {elapsed:.2f} s"
+        assert not w._thread.is_alive(), "the writer thread must have finished"
+
+
+def t_close_writes_queued_packets_before_finishing():
+    with tempfile.TemporaryDirectory() as d:
+        w = rec.RecordingWriter(d, "Demo", "dev", flush_s=5.0)
+        items = [(1.0 + i, "A", _plain(fill=i)) for i in range(20)]
+        for item in items:
+            w.put(*item)
+        w.close()
+        assert list(rec.Recording(w.path).packets()) == items, "close() must drain every queued packet"
+        w.close()                               # a second close is a no-op
 
 
 def t_header_and_stem_survive_the_windows_near_epoch_localtime_bug():
