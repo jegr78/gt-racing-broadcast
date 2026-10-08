@@ -1108,6 +1108,19 @@ def t_engine_lap_distance_and_car_in_record():
     assert laps[-1]["car_id"] == 3424 and eng.lap_distance() == 0.0
 
 
+def t_engine_on_lap_failure_does_not_raise():
+    eng = tm.TelemetryEngine()
+
+    def boom(_record):
+        raise RuntimeError("consumer exploded")
+
+    eng.on_lap = boom
+    eng.update(tm.parse_packet(_packet(lap=0)), 99.0)
+    t = _feed_lap(eng, 100.0, 1, duration=10.0, speed=50.0)
+    assert eng.lap_started_at() == t
+    assert eng.session == 1
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

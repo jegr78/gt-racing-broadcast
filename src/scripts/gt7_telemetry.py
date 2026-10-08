@@ -410,10 +410,14 @@ class TelemetryEngine:
             return
         fuel = (acc.fuel_start - acc.fuel_end
                 if acc.fuel_start is not None and acc.fuel_end is not None else None)
-        self.on_lap({"session": self.session, "lap": self._lap_num, "start": acc.t0,
-                     "end": acc.last_t, "elapsed": acc.elapsed, "status": status,
-                     "reason": reason, "fuel_used": fuel, "top_speed_mps": acc.top_speed,
-                     "car_id": self._last.car_id if self._last is not None else None})
+        record = {"session": self.session, "lap": self._lap_num, "start": acc.t0,
+                  "end": acc.last_t, "elapsed": acc.elapsed, "status": status,
+                  "reason": reason, "fuel_used": fuel, "top_speed_mps": acc.top_speed,
+                  "car_id": self._last.car_id if self._last is not None else None}
+        try:
+            self.on_lap(record)
+        except Exception as e:  # noqa: BLE001  a lap consumer must never stop the telemetry
+            LOG.warning("GT7 lap consumer failed: %s", e)
 
     def _finalise_lap(self):
         acc = self._acc
