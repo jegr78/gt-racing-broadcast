@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.12.1](https://github.com/jegr78/gt-racing-broadcast/compare/v1.12.0...v1.12.1) (2026-10-08)
+
+
+### Bug Fixes
+
+* **relay:** keep a solo relay healthy with automatic feed arming ([#792](https://github.com/jegr78/gt-racing-broadcast/issues/792)) ([21b3324](https://github.com/jegr78/gt-racing-broadcast/commit/21b3324384681c1b446a89f6bf19a2f8693e942e))
+* **relay:** keep the heartbeat running after a failing tick ([#794](https://github.com/jegr78/gt-racing-broadcast/issues/794)) ([2663709](https://github.com/jegr78/gt-racing-broadcast/commit/2663709ba3cf20feeb5ed527c339909e0b94252d)), closes [#793](https://github.com/jegr78/gt-racing-broadcast/issues/793)
+* **relay:** skip the auto-cover tick in solo mode ([#796](https://github.com/jegr78/gt-racing-broadcast/issues/796)) ([0c7fb9d](https://github.com/jegr78/gt-racing-broadcast/commit/0c7fb9d496fd3c29e635543c55b9d783fba6eea4)), closes [#795](https://github.com/jegr78/gt-racing-broadcast/issues/795)
+
 ## [1.12.0](https://github.com/jegr78/gt-racing-broadcast/compare/v1.11.0...v1.12.0) (2026-10-07)
 
 
