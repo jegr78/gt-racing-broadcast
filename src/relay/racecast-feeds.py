@@ -9294,7 +9294,7 @@ class Relay:
         classified source_state (#502) is offline/ended, and lower it on confirmed-live
         recovery: keeping the HUD. Default-on; fires once per outage, re-arms on
         recovery, never fights the manual RED FLAG. Best-effort: never raises."""
-        if _obs_ws is None:
+        if _obs_ws is None or self.solo:      # solo: no A/B feed to cover
             return
         f = self.feeds[self.live_feed()]
         ss, off_since = f.source_state, f.offline_since

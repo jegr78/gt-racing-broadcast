@@ -69,6 +69,22 @@ def t_solo_heartbeat_paths_never_crash():
     r._maybe_auto_failover(now)              # must not KeyError on feeds[None]
 
 
+def t_solo_auto_cover_is_a_noop():
+    # Solo has no A/B feed to cover: the tick used to index feeds[None] and raise
+    # a KeyError on every poll (swallowed at debug level by the loop).
+    class _NoObs:
+        def __getattr__(self, name):
+            raise AssertionError("solo auto-cover must not touch OBS (%s)" % name)
+    saved = m._obs_ws
+    m._obs_ws = _NoObs()
+    try:
+        r = _solo_relay()
+        r._maybe_auto_cover(1000.0)
+        assert r._cover_fired is False and r._cover_auto_owned is False
+    finally:
+        m._obs_ws = saved
+
+
 def t_solo_health_never_crashes_with_auto_feed_arm():
     # RACECAST_MANUAL_FEED_ARM=0 (machine .env) turned off the early return in
     # _compute_desync; solo then indexed feeds[None], killed the heartbeat
