@@ -1238,6 +1238,24 @@ def t_lap_points_capped_under_flood():
     assert len(eng._acc.points) == tm.MAX_POINTS     # capped, not just bounded
 
 
+def t_long_real_lap_not_rejected_and_keeps_all_its_points():
+    """The bundled catalogue's longest layout (Special Stage Route X, ~30.3 km) must
+    drive clean, not trip the sample-flood cap, and keep points across the whole
+    lap (#787 review round 2). 5 m/step (default _drive_xy speed) keeps the sample
+    count close to the real 4 m-spacing cap, unlike a coarser step that would never
+    flood regardless of MAX_SAMPLES."""
+    eng = tm.TelemetryEngine()
+    laps = []
+    eng.on_lap = laps.append
+    eng.update(tm.parse_packet(_packet(lap=1)), 0.0)
+    t = _drive_xy(eng, 0.1, 2, 620.0)                  # ~31 km lap at 50 m/s
+    eng.update(tm.parse_packet(_packet(lap=3)), t)
+    rec = laps[-1]
+    assert rec["status"] in ("reference", "counted"), rec
+    assert rec["distance_m"] > 30000, rec["distance_m"]
+    assert 1500 <= len(rec["points"]) <= 1600, len(rec["points"])
+
+
 def t_short_lap_never_reaches_match():
     """A lap under MIN_TRACK_POINTS points must never call TrackDB.match (#787 review)."""
     eng = tm.TelemetryEngine()

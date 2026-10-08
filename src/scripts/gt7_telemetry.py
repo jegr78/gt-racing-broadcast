@@ -75,7 +75,8 @@ MIN_LAP_DIST = 100.0      # metres; started_at_boundary is the primary guard, so
 # constant, distance forced up) cannot grow it without bound. Normal laps decimate
 # to a few hundred samples; a lap that exceeds the cap is bogus and marked unclean.
 SAMPLE_MIN_DIST = 4.0     # metres between retained samples
-MAX_SAMPLES = 4000        # ~16 km at 4 m spacing, far past any real lap
+MAX_SAMPLES = 10000       # 40 km at 4 m spacing; the longest GT7 layout (Special Stage
+                          # Route X, ~30.3 km) must stay well inside the cap
 
 POINT_STEP_M = 20.0       # metres between kept positions (track recognition)
 MIN_TRACK_POINTS = 10     # same floor as gt7_tracks.MIN_POINTS
