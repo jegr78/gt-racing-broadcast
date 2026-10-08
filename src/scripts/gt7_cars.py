@@ -3,7 +3,7 @@
 
 Every GT7 telemetry packet carries the car id (gt7_telemetry.OFF_CAR_ID). The tables
 that name it come from the community database ddm999/gt7info (MIT-0), vendored under
-src/assets/gt7/ and refreshed with tools/fetch-gt7-cars.py. Stdlib only; loading
+src/assets/gt7/ and refreshed with tools/fetch-gt7-data.py. Stdlib only; loading
 never raises, so a missing or broken table only degrades the name to "Car #<id>".
 """
 import csv

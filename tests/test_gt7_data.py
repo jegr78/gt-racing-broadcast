@@ -166,6 +166,16 @@ def t_update_tolerates_a_corrupt_stamp_file():
         assert set(res["files"].values()) == {"updated"}, res
 
 
+def t_bundled_files_validate_and_carry_licence():
+    b = gd.bundled_dir()
+    for name in gd.SOURCES:
+        with open(os.path.join(b, name), "rb") as fh:
+            assert gd.validate(name, fh.read()) > 0, name
+    with open(os.path.join(b, "LICENSE-track-data"), encoding="utf-8") as fh:
+        text = fh.read()
+    assert "CC0" in text and "MIT License" in text and "zetetos" in text
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
