@@ -5,15 +5,18 @@ Stdlib only and no relay imports, so `racecast telemetry export` runs without a 
 File: one JSON header line, then records of float64 wall ts, uint8 kind, uint16
 length and the payload. Kind 0x00 is a meta record carrying {"dropped": n}.
 """
+import csv
 import datetime
 import json
 import logging
+import math
 import os
 import queue
 import struct
 import threading
 import time
 
+import gt7_cars
 import gt7_telemetry
 
 LOG = logging.getLogger("racecast.relay.telemetry")
@@ -259,3 +262,96 @@ def list_recordings(rec_dir, count_laps=False):
                      "duration_s": (last - first) if first is not None else 0.0,
                      "laps": laps, "partial": name.endswith(PART)})
     return rows
+
+
+SAMPLE_COLUMNS = (
+    "t_s", "session", "lap", "lap_t_s", "lap_dist_m", "on_track", "paused", "speed_kmh",
+    "throttle_pct", "brake_pct", "throttle_input_pct", "brake_input_pct", "steer_deg",
+    "gear", "rpm", "fuel_l", "tyre_fl_c", "tyre_fr_c", "tyre_rl_c", "tyre_rr_c",
+    "pos_x", "pos_y", "pos_z", "car_id")
+LAP_COLUMNS = (
+    "session", "lap", "start_t_s", "end_t_s", "gt7_time_s", "relay_time_s", "status",
+    "reason", "fuel_used_l", "top_speed_kmh", "car")
+GT7_TIME_WINDOW_S = 3.0       # GT7 updates last_ms shortly after the line
+
+
+def _fmt(excel):
+    def num(value, digits):
+        if value is None or not math.isfinite(value):
+            return ""
+        text = f"{value:.{digits}f}"
+        return text.replace(".", ",") if excel else text
+    return num
+
+
+def _pct(byte):
+    return None if byte is None else byte * 100.0 / 255.0
+
+
+def _car_name(cars, car_id):
+    car = cars.lookup(car_id) if car_id is not None else None
+    if car is None:
+        return ""
+    return f"{car['maker']} {car['name']}" if car.get("maker") else car["name"]
+
+
+def export_csv(path, out_dir, include_all=False, excel=False, cars=None):
+    """Write samples.csv and laps.csv for one recording into out_dir."""
+    cars = cars if cars is not None else gt7_cars.CarDB()
+    r = Recording(path)
+    num = _fmt(excel)
+    eng = gt7_telemetry.TelemetryEngine()
+    laps, waiting = [], []
+    eng.on_lap = laps.append
+    os.makedirs(out_dir, exist_ok=True)
+    delimiter = ";" if excel else ","
+    encoding = "utf-8-sig" if excel else "utf-8"
+    t0 = None
+    prev_last_ms = None
+    written = 0
+    with open(os.path.join(out_dir, "samples.csv"), "w", newline="",
+              encoding=encoding) as fh:
+        w = csv.writer(fh, delimiter=delimiter)
+        w.writerow(SAMPLE_COLUMNS)
+        for wall_ts, _kind, plain in r.packets():
+            t0 = wall_ts if t0 is None else t0
+            pkt = gt7_telemetry.parse_packet(plain)
+            closed = len(laps)
+            eng.update(pkt, wall_ts)
+            for lap in laps[closed:]:
+                lap["gt7_time_s"] = None
+                waiting.append((lap, wall_ts + GT7_TIME_WINDOW_S, prev_last_ms))
+            for item in list(waiting):
+                lap, deadline, before = item
+                if pkt.last_ms > 0 and pkt.last_ms != before:
+                    lap["gt7_time_s"] = pkt.last_ms / 1000.0
+                    waiting.remove(item)
+                elif wall_ts > deadline:
+                    waiting.remove(item)
+            prev_last_ms = pkt.last_ms
+            if not include_all and (not pkt.on_track or pkt.paused or pkt.loading):
+                continue
+            started = eng.lap_started_at()
+            steer = None if pkt.steer_rad is None else math.degrees(pkt.steer_rad)
+            w.writerow([
+                num(wall_ts - t0, 3), eng.session, pkt.lap,
+                num(wall_ts - started if started is not None else None, 3),
+                num(eng.lap_distance(), 1), int(pkt.on_track), int(pkt.paused), num(pkt.speed_mps * 3.6, 1),
+                num(_pct(pkt.throttle), 1), num(_pct(pkt.brake), 1),
+                num(_pct(pkt.throttle_input), 1), num(_pct(pkt.brake_input), 1),
+                num(steer, 1), pkt.gear, num(pkt.rpm, 0), num(pkt.fuel_level, 2),
+                *(num(v, 1) for v in pkt.tyre_temp),
+                num(pkt.pos_x, 2), num(pkt.pos_y, 2), num(pkt.pos_z, 2),
+                "" if pkt.car_id is None else pkt.car_id])
+            written += 1
+    with open(os.path.join(out_dir, "laps.csv"), "w", newline="", encoding=encoding) as fh:
+        w = csv.writer(fh, delimiter=delimiter)
+        w.writerow(LAP_COLUMNS)
+        for lap in laps:
+            w.writerow([
+                lap["session"], lap["lap"], num(lap["start"] - t0, 3),
+                num(lap["end"] - t0, 3), num(lap["gt7_time_s"], 3),
+                num(lap["elapsed"], 3), lap["status"], lap["reason"],
+                num(lap["fuel_used"], 2), num(lap["top_speed_mps"] * 3.6, 1),
+                _car_name(cars, lap["car_id"])])
+    return {"dir": out_dir, "samples": written, "laps": len(laps), "dropped": r.dropped}

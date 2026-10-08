@@ -144,6 +144,110 @@ def t_list_recordings_reports_duration_laps_partial():
         assert rec.recording_stem(row["path"]) == os.path.basename(w.path)[:-len(".gt7rec")]
 
 
+import csv  # noqa: E402
+
+
+def _tpkt(lap, speed=50.0, last_ms=-1, flags=None, throttle=255, steer=None):
+    size = 0x158 if steer is not None else 0x128
+    b = bytearray(size)
+    struct.pack_into("<I", b, 0, 0x47375330)
+    struct.pack_into("<f", b, tm.OFF_SPEED, speed)
+    struct.pack_into("<f", b, tm.OFF_FUEL_LEVEL, 50.0)
+    struct.pack_into("<f", b, tm.OFF_FUEL_CAP, 100.0)
+    for off in (tm.OFF_TYRE_FL, tm.OFF_TYRE_FR, tm.OFF_TYRE_RL, tm.OFF_TYRE_RR):
+        struct.pack_into("<f", b, off, 80.0)
+    struct.pack_into("<h", b, tm.OFF_LAP, lap)
+    struct.pack_into("<i", b, tm.OFF_BEST_MS, -1)
+    struct.pack_into("<i", b, tm.OFF_LAST_MS, last_ms)
+    struct.pack_into("<H", b, tm.OFF_FLAGS, tm.FLAG_ON_TRACK if flags is None else flags)
+    b[tm.OFF_THROTTLE] = throttle
+    struct.pack_into("<f", b, tm.OFF_RPM, 7000.0)
+    b[tm.OFF_GEAR] = 4
+    struct.pack_into("<i", b, tm.OFF_CAR_ID, 999999)
+    if steer is not None:
+        struct.pack_into("<f", b, tm.OFF_STEER, steer)
+    return bytes(b)
+
+
+def _session(d):
+    """Lap 0 (mid-lap connect), lap 1 of 10 s, lap 2 of 11 s, a paused packet, then
+    lap 3 starts; GT7 reports lap 1's time 0.5 s into lap 2."""
+    items = [(1000.0, "A", _tpkt(0))]
+    t = 1000.1
+    for lap, secs in ((1, 10.0), (2, 11.0)):
+        for i in range(int(secs * 10)):
+            last = 10000 if (lap == 2 and i >= 5) else -1
+            items.append((t, "A", _tpkt(lap, last_ms=last)))
+            t += 0.1
+    items.append((t, "A", _tpkt(2, last_ms=10000, flags=tm.FLAG_ON_TRACK | tm.FLAG_PAUSED)))
+    items.append((t + 0.1, "A", _tpkt(3, last_ms=10000)))
+    return _write(d, items).path
+
+
+def _rows(path, delimiter=","):
+    with open(path, encoding="utf-8-sig", newline="") as fh:
+        return list(csv.DictReader(fh, delimiter=delimiter))
+
+
+def t_export_samples_and_laps():
+    with tempfile.TemporaryDirectory() as d:
+        src = _session(d)
+        out = rec.export_csv(src, os.path.join(d, "out"))
+        assert out["laps"] == 3 and out["dropped"] == 0, out
+        samples = _rows(os.path.join(d, "out", "samples.csv"))
+        assert list(samples[0]) == list(rec.SAMPLE_COLUMNS)
+        assert out["samples"] == len(samples) and all(s["paused"] == "0" for s in samples)
+        first = samples[0]
+        assert first["t_s"] == "0.000" and first["throttle_pct"] == "100.0"
+        assert first["gear"] == "4" and first["rpm"] == "7000" and first["steer_deg"] == ""
+        lap1 = [s for s in samples if s["lap"] == "1"]
+        assert lap1[0]["lap_dist_m"] == "0.0" and lap1[-1]["lap_dist_m"] == "495.0", lap1[-1]
+        laps = _rows(os.path.join(d, "out", "laps.csv"))
+        assert list(laps[0]) == list(rec.LAP_COLUMNS)
+        by_lap = {r["lap"]: r for r in laps}
+        assert by_lap["1"]["status"] == "reference" and by_lap["1"]["gt7_time_s"] == "10.000"
+        assert by_lap["0"]["status"] == "not counted" and by_lap["0"]["gt7_time_s"] == ""
+        assert by_lap["1"]["start_t_s"] == "0.100" and by_lap["2"]["start_t_s"] == "10.100", laps
+        assert by_lap["1"]["car"] == "Car #999999", "an id the tables do not know keeps its number"
+
+
+def t_export_all_keeps_paused_packets():
+    with tempfile.TemporaryDirectory() as d:
+        src = _session(d)
+        rec.export_csv(src, os.path.join(d, "out"), include_all=True)
+        samples = _rows(os.path.join(d, "out", "samples.csv"))
+        assert any(s["paused"] == "1" for s in samples)
+
+
+def t_export_excel_uses_semicolon_and_decimal_comma():
+    with tempfile.TemporaryDirectory() as d:
+        src = _session(d)
+        rec.export_csv(src, os.path.join(d, "out"), excel=True)
+        with open(os.path.join(d, "out", "samples.csv"), "rb") as fh:
+            raw = fh.read()
+        assert raw.startswith(b"\xef\xbb\xbf"), "Excel needs the UTF-8 BOM"
+        row = _rows(os.path.join(d, "out", "samples.csv"), delimiter=";")[1]
+        assert row["t_s"] == "0,100" and row["throttle_pct"] == "100,0", row
+
+
+def t_export_car_name_from_tables():
+    class Cars:
+        def lookup(self, car_id):
+            return {"id": car_id, "maker": "Porsche", "name": "911 RSR", "group": "Gr.3"}
+    with tempfile.TemporaryDirectory() as d:
+        src = _session(d)
+        rec.export_csv(src, os.path.join(d, "out"), cars=Cars())
+        laps = _rows(os.path.join(d, "out", "laps.csv"))
+        assert {r["car"] for r in laps} == {"Porsche 911 RSR"}, laps
+
+
+def t_export_steering_in_degrees_positive_left():
+    with tempfile.TemporaryDirectory() as d:
+        w = _write(d, [(1.0, "~", _tpkt(1, steer=0.5))])
+        rec.export_csv(w.path, os.path.join(d, "out"))
+        assert _rows(os.path.join(d, "out", "samples.csv"))[0]["steer_deg"] == "28.6"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
