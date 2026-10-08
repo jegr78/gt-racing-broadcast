@@ -215,19 +215,33 @@ class TrackDB:
         return self._assign.get(key)
 
     def learn(self, official_id, points, length_m, key=None):
-        """Store a learned signature for `official_id` (and the recording assignment `key`)."""
+        """Store a learned signature for `official_id` (and the recording assignment `key`).
+
+        A user-triggered write: a write failure (OSError) propagates to the caller
+        instead of being swallowed, unlike the read paths elsewhere in this class."""
         if not self._learned_path:
             raise ValueError("no learned-tracks file configured")
-        if len(points) < MIN_POINTS:
-            raise ValueError("a lap needs at least %d position points" % MIN_POINTS)
-        xs, zs = [p[0] for p in points], [p[1] for p in points]
+        finite = []
+        for x, z in points:
+            try:
+                ok = math.isfinite(x) and math.isfinite(z)
+            except TypeError:
+                ok = False
+            if ok:
+                finite.append((x, z))
+        if len(finite) < MIN_POINTS:
+            raise ValueError("a lap needs at least %d finite position points" % MIN_POINTS)
+        xs, zs = [p[0] for p in finite], [p[1] for p in finite]
         info = self.name(official_id) or {}
+        prev = self._rows.get(official_id)
         row = {"official_id": official_id,
                "official_name": info.get("official_name") or official_id,
                "length_m": round(float(length_m), 1),
                "min_x": min(xs), "max_x": max(xs), "min_z": min(zs), "max_z": max(zs),
-               "provenance": "learned", "reverse": None, "ambiguous_with": [], "flags": [],
-               "path": [[round(x, 1), round(z, 1)] for x, z in points]}
+               "provenance": "learned",
+               "reverse": {"official_id": prev["reverse"]} if prev and prev["reverse"] else None,
+               "ambiguous_with": [], "flags": [],
+               "path": [[round(x, 1), round(z, 1)] for x, z in finite]}
         doc = self._read_learned()
         doc["format"], doc["version"] = LEARNED_FORMAT, 1
         doc["signatures"] = [r for r in doc["signatures"]
@@ -235,14 +249,18 @@ class TrackDB:
         doc["signatures"].append(row)
         if key:
             doc["assignments"][key] = official_id
+        tmp = self._learned_path + ".tmp"
         try:
             os.makedirs(os.path.dirname(self._learned_path), exist_ok=True)
-            tmp = self._learned_path + ".tmp"
             with open(tmp, "w", encoding="utf-8") as fh:
                 json.dump(doc, fh)
             os.replace(tmp, self._learned_path)
         except OSError:
-            return          # an unwritable learned file must not raise into the caller
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass  # the failed write may never have created it
+            raise
         self._reload_learned()
 
     def distance_m(self, official_id, x, z):

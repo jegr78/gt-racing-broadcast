@@ -260,7 +260,7 @@ def t_learn_adds_row_and_assignment_that_survive_reload():
             pass
 
 
-def t_learn_on_unwritable_path_does_not_raise():
+def t_learn_on_unwritable_path_raises_and_leaves_no_tmp_file():
     with tempfile.TemporaryDirectory() as d:
         _db(d, [])
         blocker = os.path.join(d, "blocker")
@@ -268,8 +268,65 @@ def t_learn_on_unwritable_path_does_not_raise():
             fh.write("not a directory")
         lp = os.path.join(blocker, "learned-tracks.json")       # makedirs must fail: not a dir
         db = gt.TrackDB(os.path.join(d, "index.json"), os.path.join(d, "signatures.json"), lp)
-        db.learn("bbb001", _lap(OTHER), _length(OTHER), key="solo-pov/x")  # must not raise
+        try:
+            db.learn("bbb001", _lap(OTHER), _length(OTHER), key="solo-pov/x")
+            raise AssertionError("learn on an unwritable path did not raise")
+        except OSError:
+            pass
         assert db.assignment("solo-pov/x") is None, "write failed, nothing should be assigned"
+        assert not os.path.exists(lp + ".tmp")
+
+
+def t_learn_drops_non_finite_points_and_raises_when_too_few_remain():
+    with tempfile.TemporaryDirectory() as d:
+        db = _db(d, [])
+        lap = _lap(OTHER)
+        db.learn("bbb001", lap, _length(OTHER), key="solo-pov/good")
+        bad = [(float("nan"), 0.0)] * (gt.MIN_POINTS - 1) + lap[:gt.MIN_POINTS - 1]
+        try:
+            db.learn("bbb001", bad, _length(OTHER), key="solo-pov/bad")
+            raise AssertionError("learn with too few finite points accepted")
+        except ValueError:
+            pass
+        assert db.assignment("solo-pov/bad") is None, "the failed learn must not write anything"
+        again = _db(d, [])
+        assert again.assignment("solo-pov/good") == "bbb001", "the earlier good row must survive"
+
+
+def t_learn_keeps_the_existing_row_reverse_twin():
+    with tempfile.TemporaryDirectory() as d:
+        db = _db(d, [_row("aaa001", "Oval", OVAL, {"official_id": "aaa002",
+                                                   "official_name": "Oval (Reverse)"})])
+        before = db.line_length("aaa002")
+        db.learn("aaa001", _lap(OVAL), _length(OVAL))
+        after = db.line_length("aaa002")
+        assert after is not None and abs(after - before) < 1.0, (before, after)
+        m = db.match(list(reversed(_lap(OVAL))), _length(OVAL))
+        assert m is not None and m.get("id") == "aaa002" and m.get("reverse") is True, m
+
+
+def t_relearning_same_id_replaces_its_row():
+    with tempfile.TemporaryDirectory() as d:
+        db = _db(d, [])
+        lp = os.path.join(d, "learned-tracks.json")
+        db.learn("bbb001", _lap(OTHER), _length(OTHER))
+        newer = _lap(OTHER, offset=5.0)
+        db.learn("bbb001", newer, _length(OTHER))
+        with open(lp, encoding="utf-8") as fh:
+            doc = json.load(fh)
+        rows = [r for r in doc["signatures"] if r.get("official_id") == "bbb001"]
+        assert len(rows) == 1, rows
+        assert rows[0]["path"][0] == [round(newer[0][0], 1), round(newer[0][1], 1)], rows[0]
+
+
+def t_learn_of_a_reverse_id_uses_its_own_path_for_project():
+    with tempfile.TemporaryDirectory() as d:
+        db = _db(d, [_row("aaa001", "Oval", OVAL, {"official_id": "aaa002",
+                                                   "official_name": "Oval (Reverse)"})])
+        rev_path = list(reversed(OVAL))
+        db.learn("aaa002", rev_path, _length(OVAL))
+        s = db.project([tuple(rev_path[0])], "aaa002")[0]
+        assert s is not None and s < 1.0, s
 
 
 def t_assignment_on_corrupt_learned_file_returns_none():
