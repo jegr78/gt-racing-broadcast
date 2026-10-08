@@ -946,7 +946,9 @@ git commit -m "feat(telemetry): cached lap index with 5 m traces and a compariso
   - `_find_recording(rec_dir, name) -> str | None`: the path `list_recordings` reports for a recording whose file name or stem is `name` (or the newest for `"latest"`); None for anything else (separators, `.`, `..`, empty, None, missing). Only names found by `os.listdir` match, so a crafted name never reaches the filesystem. `_resolve_recording(rec_dir, name)` keeps its signature and its `sys.exit` on a miss by wrapping it.
   - `_telemetry_track_key(path) -> str | None`: `"<profile>/<stem>"`, None without an active profile. `telemetry_export_cmd` and `telemetry_learn_data` use it; export also takes its databases from `_telemetry_dbs()`.
   - `_telemetry_dbs() -> (TrackDB, CarDB)`.
-  - `_telemetry_index(path, dbs=None) -> dict`: `gt7_laps.index` with `key=_telemetry_track_key(path)` and `bundled=resource_path("assets/gt7")`, memoised in `_TELEMETRY_MEMO` (`path -> ((size, mtime_ns, data_version), index)`, least recently used first, at most `TELEMETRY_MEMO_MAX = 8` paths). A memo hit skips the cache file and `_telemetry_dbs()`. Callers treat the result as read-only. Part 4 calls it with `(track_db, cars)`.
+  - `_telemetry_index(path, dbs=None) -> dict`: `gt7_laps.index` with `key=_telemetry_track_key(path)` and `bundled=resource_path("assets/gt7")`, memoised in `_TELEMETRY_MEMO` (`path -> ((size, mtime_ns, data_version), index)`, least recently used first, at most `TELEMETRY_MEMO_MAX = 64` paths). The memo holds the summary form (laps without `trace` and `points`). A memo hit skips the cache file and `_telemetry_dbs()`. Callers treat the result as read-only.
+  - `_telemetry_full_index(path, dbs=None) -> dict`: the index with every lap's `trace` and `points`, from the cache file (built when missing or stale), not memoised. `telemetry_lap_data`, `telemetry_learn_data` and part 4 use it.
+  - The pool and the recordings list never build the index of the file the relay is writing; the pool leaves it out.
   - `_telemetry_reason(exc) -> str`: an error text without the machine path an `OSError` carries.
   - `telemetry_recordings_data() -> {"ok", "recordings": [{"name", "rec", "started", "size", "duration_s", "laps", "partial", "recording", "indexed", "track"}]}` newest first by `_recording_sort_key`; `laps` and `track` come only from a still-valid cache (None before the first index), never builds an index; `recording` is true for the file the relay of this profile is writing, the same test `racecast telemetry list` uses; no machine paths.
   - `telemetry_laps_data(rec=None, session=None, track=None, car=None)`: all arguments are query strings or None.
@@ -2981,7 +2983,7 @@ running relay.
   comparison from the profile's GT7 recordings. `src/scripts/gt7_laps.py` builds a lap
   index per recording (5 m traces, 200 m sectors), cached as `<stem>.laps.json` and
   rebuilt when the recording's size/mtime or `gt7_data.data_version` change; the data
-  layer also memoises up to 8 indexes per process (`_telemetry_index`). Data
+  layer also memoises up to 64 index summaries per process (`_telemetry_index`). Data
   functions `telemetry_*_data` in `src/racecast.py`; routes `/api/telemetry/recordings`,
   `/api/telemetry/laps`, `/api/telemetry/lap`, `/api/telemetry/tracks`,
   `/api/telemetry/learn`. Charts and map are inline SVG in `control-center.html` (block
