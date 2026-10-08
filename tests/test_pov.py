@@ -3471,6 +3471,20 @@ def t_backlog_in_status_and_health_snapshot():
         (11.6, 3.1, None)
 
 
+def t_redact_console_status_drops_telemetry_record_for_non_director():
+    # telemetry.record.error can carry an OS path (#786); keep the whole block
+    # director/producer-only over the Funnel, same boundary as feed URLs.
+    full = {"feeds": {}, "telemetry": {"visible": True, "car": "911",
+                                       "record": {"active": True, "error": "disk full"}}}
+    kept = m.redact_console_status(full, ["director"])["telemetry"]
+    assert kept["record"]["active"] is True and kept["record"]["error"] == "disk full"
+    for roles in (["commentator"], ["race_control"], []):
+        t = m.redact_console_status(full, roles)["telemetry"]
+        assert "record" not in t, roles
+        assert t["visible"] is True and t["car"] == "911"
+    assert "telemetry" not in m.redact_console_status({"feeds": {}}, ["commentator"])
+
+
 def t_redact_console_status_reduces_the_mic_block_to_its_state():
     # review of #669: device name and OS endpoint ids are producer detail.
     full = {"feeds": {}, "mic": {"state": "repointed", "device": "Mikrofon (K66)",
