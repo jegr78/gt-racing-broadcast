@@ -259,6 +259,193 @@ def t_sheet_url_cmd_prints_url(capsys=None):
         m._active_sheet_url, m._open_url = old_url, old_open
 
 
+def t_route_telemetry_verbs():
+    for verb in ("record", "list", "export", "delete"):
+        assert m.route(["telemetry", verb, "x"]) == \
+            {"kind": "service", "command": "telemetry", "verb": verb, "rest": ["x"]}
+    _raises(lambda: m.route(["telemetry"]))
+    _raises(lambda: m.route(["telemetry", "bogus"]))
+
+
+def _rec_dir_with_one(d):
+    import importlib
+    gr = importlib.import_module("gt7_recording")
+    w = gr.RecordingWriter(d, "Demo", "dev", flush_s=0.05)
+    b = bytearray(0x128)
+    b[0:4] = (0x47375330).to_bytes(4, "little")
+    w.put(1000.0, "A", bytes(b))
+    w.close()
+    return os.path.basename(w.path)
+
+
+def t_resolve_recording_by_name_stem_and_latest():
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        name = _rec_dir_with_one(d)
+        stem = name[:-len(".gt7rec")]
+        for q in (name, stem, "latest"):
+            assert os.path.basename(m._resolve_recording(d, q)) == name, q
+        try:
+            m._resolve_recording(d, "nope"); raise AssertionError("unknown accepted")
+        except SystemExit as e:
+            assert "no recording" in str(e)
+
+
+def t_resolve_recording_latest_picks_by_started_time_not_name_sort():
+    import tempfile, importlib
+    gr = importlib.import_module("gt7_recording")
+    with tempfile.TemporaryDirectory() as d:
+        ts = 1760000000.0
+        b = bytearray(0x128)
+        b[0:4] = (0x47375330).to_bytes(4, "little")
+        w1 = gr.RecordingWriter(d, "Demo", "dev", flush_s=0.05)
+        w1.put(ts, "A", bytes(b))
+        w1.close()
+        w2 = gr.RecordingWriter(d, "Demo", "dev", flush_s=0.05)
+        w2.put(ts, "A", bytes(b))
+        w2.close()
+        assert "-2" in os.path.basename(w2.path) and "-2" not in os.path.basename(w1.path)
+        assert os.path.basename(w2.path) < os.path.basename(w1.path), "sanity: name order is reversed"
+        os.utime(w1.path, (ts, ts))             # distinct mtimes on any filesystem
+        os.utime(w2.path, (ts + 10, ts + 10))
+        assert m._resolve_recording(d, "latest") == w2.path, \
+            "latest is the later of two same-second recordings, though its -2 name sorts first"
+
+
+def _stub_telemetry_cli(d, status, running="", active="demo", http_ok=True):
+    """Point the telemetry commands at rec dir d and a fake relay; returns a restore callable."""
+    saved = (m._telemetry_rec_dir, m._relay_record_status, m._relay_record_call,
+             m._running_relay_profile, m._active_profile_name, m._relay_http_ok)
+    calls = []
+    m._telemetry_rec_dir = lambda: d
+    m._relay_record_status = lambda: status
+    m._relay_record_call = lambda verb: calls.append(verb) or status
+    m._running_relay_profile = lambda: running
+    m._active_profile_name = lambda: active
+    m._relay_http_ok = lambda: http_ok
+
+    def restore():
+        (m._telemetry_rec_dir, m._relay_record_status, m._relay_record_call,
+         m._running_relay_profile, m._active_profile_name, m._relay_http_ok) = saved
+    restore.calls = calls
+    return restore
+
+
+def t_telemetry_delete_refuses_the_open_file():
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        name = _rec_dir_with_one(d)
+        restore = _stub_telemetry_cli(d, {"active": True, "file": name}, running="demo")
+        try:
+            try:
+                m.telemetry_delete_cmd([name]); raise AssertionError("open file deleted")
+            except SystemExit as e:
+                assert "currently recording" in str(e)
+            m._relay_record_status = lambda: None
+            m.telemetry_delete_cmd([name])
+            assert not os.path.exists(os.path.join(d, name))
+        finally:
+            restore()
+
+
+def t_telemetry_delete_reports_os_errors():
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        name = _rec_dir_with_one(d)
+        os.makedirs(os.path.join(d, name[:-len(".gt7rec")]))      # an export folder
+        restore = _stub_telemetry_cli(d, None)
+        real_remove, real_rmtree = m.os.remove, m.shutil.rmtree
+
+        def locked(*_a, **_k):
+            raise PermissionError(13, "Permission denied", os.path.join(d, name))
+        try:
+            for target in ("remove", "rmtree"):
+                if target == "remove":
+                    m.os.remove = locked
+                else:
+                    m.os.remove, m.shutil.rmtree = real_remove, locked
+                try:
+                    m.telemetry_delete_cmd([name]); raise AssertionError(f"{target} error swallowed")
+                except SystemExit as e:
+                    assert str(e) == f"could not delete {name}: Permission denied", \
+                        f"a failed {target} must exit with a short message, not a traceback: {e}"
+        finally:
+            m.os.remove, m.shutil.rmtree = real_remove, real_rmtree
+            restore()
+
+
+def t_telemetry_record_refuses_a_relay_on_another_profile():
+    restore = _stub_telemetry_cli("unused", {"active": True, "file": None},
+                                  running="other-league", active="demo")
+    try:
+        for verb in ("start", "stop", "status"):
+            try:
+                m.telemetry_record_cmd([verb]); raise AssertionError(f"{verb} accepted")
+            except SystemExit as e:
+                assert "other-league" in str(e), f"the refusal must name the running profile: {e}"
+        assert restore.calls == [], f"no request may reach the foreign relay: {restore.calls}"
+    finally:
+        restore()
+
+
+def t_telemetry_list_ignores_the_open_file_of_a_relay_on_another_profile():
+    import io, tempfile, contextlib
+    with tempfile.TemporaryDirectory() as d:
+        name = _rec_dir_with_one(d)
+        restore = _stub_telemetry_cli(d, {"active": True, "file": name},
+                                      running="other-league", active="demo")
+        out = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out):
+                m.telemetry_list_cmd([])
+        finally:
+            restore()
+        text = out.getvalue()
+        assert "recording" not in text.split("\n")[0], \
+            f"another profile's open file must not mark this profile's recording: {text}"
+        assert "other-league" in text, f"list must say the relay runs another profile: {text}"
+
+
+def t_telemetry_delete_ignores_the_open_file_of_a_relay_on_another_profile():
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        name = _rec_dir_with_one(d)
+        restore = _stub_telemetry_cli(d, {"active": True, "file": name},
+                                      running="other-league", active="demo")
+        try:
+            m.telemetry_delete_cmd([name])
+        finally:
+            restore()
+        assert not os.path.exists(os.path.join(d, name)), \
+            "a relay on another profile does not hold this profile's file open"
+
+
+def t_telemetry_export_writes_next_to_recording():
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        name = _rec_dir_with_one(d)
+        real = m._telemetry_rec_dir
+        m._telemetry_rec_dir = lambda: d
+        try:
+            m.telemetry_export_cmd(["latest"])
+        finally:
+            m._telemetry_rec_dir = real
+        out = os.path.join(d, name[:-len(".gt7rec")])
+        assert os.path.exists(os.path.join(out, "samples.csv"))
+        assert os.path.exists(os.path.join(out, "laps.csv"))
+
+
+def t_telemetry_record_without_relay_exits_nonzero():
+    real = m._relay_record_call
+    m._relay_record_call = lambda verb: None
+    try:
+        m.telemetry_record_cmd(["start"]); raise AssertionError("no error without relay")
+    except SystemExit as e:
+        assert e.code not in (0, None)
+    finally:
+        m._relay_record_call = real
+
+
 def t_route_obs_benchmark():
     action = m.route(["obs", "benchmark", "--window", "30"])
     assert action["command"] == "obs" and action["verb"] == "benchmark"
@@ -1429,6 +1616,141 @@ def t_profile_env_vars_includes_graphics_take():
     rc = m.pcfg.ResolvedConfig(profile="demo", name="Demo", sheet_id="abc",
                                graphics_take="direct")
     assert m._profile_env_vars(rc)["RACECAST_GRAPHICS_TAKE"] == "direct"
+
+
+def t_profile_env_vars_includes_telemetry_record():
+    rc = m.pcfg.ResolvedConfig(profile="demo", name="Demo", sheet_id="abc",
+                               telemetry_record="1")
+    assert m._profile_env_vars(rc)["RACECAST_TELEMETRY_RECORD"] == "1"
+
+
+def t_reset_telemetry_record_removes_state_file():
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        state = os.path.join(d, "telemetry-record.json")
+        with open(state, "w", encoding="utf-8") as fh:
+            fh.write('{"active": false}')
+        real = m._runtime_dir
+        m._runtime_dir = lambda: d
+        try:
+            m._reset_telemetry_record()
+            assert not os.path.exists(state), "a new broadcast starts from the profile default"
+            m._reset_telemetry_record()            # absent file: no error
+        finally:
+            m._runtime_dir = real
+
+
+def t_telemetry_record_wanted_follows_profile_default():
+    rc = m.pcfg.ResolvedConfig(profile="demo", name="Demo", sheet_id="abc",
+                               telemetry_record="1")
+    assert m._telemetry_record_wanted(rc) is True
+    rc_off = m.pcfg.ResolvedConfig(profile="demo", name="Demo", sheet_id="abc",
+                                   telemetry_record="")
+    assert m._telemetry_record_wanted(rc_off) is False
+    assert m._telemetry_record_wanted(None) is False
+
+
+def t_sync_live_telemetry_record_pushes_the_profile_default_to_the_relay():
+    calls = []
+    orig_cfg, orig_call = m._active_config, m._relay_record_call
+    try:
+        m._active_config = lambda: m.pcfg.ResolvedConfig(
+            profile="demo", name="Demo", sheet_id="abc", telemetry_record="1")
+        m._relay_record_call = calls.append
+        m._sync_live_telemetry_record()
+        assert calls == ["start"], f"a running relay must get the profile default pushed: {calls}"
+        calls.clear()
+        m._active_config = lambda: m.pcfg.ResolvedConfig(
+            profile="demo", name="Demo", sheet_id="abc", telemetry_record="")
+        m._sync_live_telemetry_record()
+        assert calls == ["stop"], f"a running relay must get the profile default pushed: {calls}"
+    finally:
+        m._active_config, m._relay_record_call = orig_cfg, orig_call
+
+
+def t_sync_live_telemetry_record_never_raises():
+    orig = m._active_config
+    try:
+        def _boom():
+            raise RuntimeError("no profile resolves")
+        m._active_config = _boom
+        m._sync_live_telemetry_record()      # must not raise
+    finally:
+        m._active_config = orig
+
+
+def _stub_relay_signals(port_pids, pidfile_pid, http_ok, running, active):
+    """Stub every signal relay_start_plan reads; returns a restore callable."""
+    saved = (m.pt.pids_on_port, m.sv.read_pid, m.sv.pid_alive, m._relay_http_ok,
+             m._running_relay_profile, m._active_profile_name)
+    m.pt.pids_on_port = lambda port: list(port_pids) if port == m.RELAY_PORT else []
+    m.sv.read_pid = lambda path: pidfile_pid
+    m.sv.pid_alive = lambda pid: pid is not None
+    m._relay_http_ok = lambda: http_ok
+    m._running_relay_profile = lambda: running
+    m._active_profile_name = lambda: active
+
+    def restore():
+        (m.pt.pids_on_port, m.sv.read_pid, m.sv.pid_alive, m._relay_http_ok,
+         m._running_relay_profile, m._active_profile_name) = saved
+    return restore
+
+
+def t_relay_already_running_for_active_profile_requires_both():
+    cases = [
+        ((4242,), 4242, True, "demo", "demo", True, "our healthy relay on the active profile"),
+        ((4242,), 4242, False, "demo", "demo", False, "relay not answering"),
+        ((4242,), 4242, True, "other-league", "demo", False, "foreign-profile holder"),
+        ((4242,), 4242, True, "", "", False, "an empty stamp is an unknown profile"),
+        ((4242,), 999, True, "demo", "demo", False, "stamp matches but the port holder is not ours"),
+        ((), None, True, "demo", "demo", False, "nothing holds the control port"),
+    ]
+    for port_pids, pid, http_ok, running, active, want, why in cases:
+        restore = _stub_relay_signals(port_pids, pid, http_ok, running, active)
+        try:
+            got = m._relay_already_running_for_active_profile()
+        finally:
+            restore()
+        assert got is want, f"{why}: got {got}"
+
+
+def t_event_start_pushes_live_telemetry_record_only_when_relay_already_running():
+    import tempfile
+
+    class _Reached(Exception):
+        pass
+
+    def _drive(http_ok, running_profile, active_profile):
+        ev = m._event_modules()[0]
+        calls = []
+        saved = (m._event_gate_results, m._tailscale_connect, ev.app_running,
+                 m._runtime_dir, m._sync_live_telemetry_record, m.relay_start)
+        restore = _stub_relay_signals((4242,) if http_ok else (), 4242 if http_ok else None,
+                                      http_ok, running_profile, active_profile)
+        with tempfile.TemporaryDirectory() as tmp:
+            m._event_gate_results = lambda e, p: []
+            m._tailscale_connect = lambda e: "ok"
+            ev.app_running = lambda app, platform=None: True
+            m._runtime_dir = lambda: tmp
+            m._sync_live_telemetry_record = lambda: calls.append("sync")
+
+            def _boom(_rest):
+                raise _Reached()
+            m.relay_start = _boom
+            try:
+                m.event_start([])
+                raise AssertionError("expected to reach relay_start")
+            except _Reached:
+                return calls
+            finally:
+                restore()
+                (m._event_gate_results, m._tailscale_connect, ev.app_running,
+                 m._runtime_dir, m._sync_live_telemetry_record, m.relay_start) = saved
+
+    assert _drive(True, "demo", "demo") == ["sync"], "same relay, same profile: push it"
+    assert _drive(False, "", "demo") == [], "no relay yet: relay_start seeds state from scratch"
+    assert _drive(True, "other-league", "demo") == [], \
+        "a foreign-profile relay (e.g. mid `profile use --force`) must not get this profile's state pushed into it"
 
 
 def t_profile_env_vars_includes_event_title():
@@ -4686,7 +5008,7 @@ def t_profile_env_vars_includes_kind():
         discord_webhook_url = ""; obs_collection = ""; console_secret = ""
         discord_client_id = ""; discord_client_secret = ""; discord_voice_url = ""
         event_title = ""; graphics_take = ""; name = "Solo League"; logo_path = ""; kind = "solo"
-        template = ""
+        template = ""; telemetry_record = ""
     env = m._profile_env_vars(_RC())
     assert env["RACECAST_KIND"] == "solo"
     assert env["RACECAST_SHEET_ID"] == "abc"

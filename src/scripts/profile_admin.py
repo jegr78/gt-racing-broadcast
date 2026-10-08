@@ -201,7 +201,14 @@ def _solo_profile_env_text(display, template):
     still uses a Google Sheet, the same tabs as endurance MINUS the
     Schedule/Qualifying ones, so it carries SHEET_ID (#302). The matching OBS
     scene-collection source is materialized by `racecast setup` (#303)."""
-    return (
+    pov = (
+        "# OPTIONAL: record the GT7 telemetry trace to\n"
+        "# runtime/<profile>/telemetry-recordings/ from relay start (1 = on).\n"
+        "# The Director Panel REC key and `racecast telemetry record` toggle it live.\n"
+        "TELEMETRY_RECORD=\n"
+        "\n"
+    ) if template == "pov" else ""
+    head = (
         "# Solo profile (kind=solo): a single-event commentary/POV broadcast.\n"
         "# The main program is a local capture card + webcam in OBS (no A/B stint\n"
         "# feeds). It still uses a Google Sheet (below). Created by `racecast profile new`.\n"
@@ -237,10 +244,13 @@ def _solo_profile_env_text(display, template):
         "# Discord message (e.g. \"GT Racing - Round 4 - Le Mans\").\n"
         "EVENT_TITLE=\n"
         "\n"
+    )
+    tail = (
         "# OPTIONAL: per-console secret. Auto-provisioned on first relay start;\n"
         "# travels with `profile export`. Leave blank. Treat it like a password.\n"
         "CONSOLE_SECRET=\n"
     )
+    return head + pov + tail
 
 
 def create_profile(root, name, source="example", kind=cfg.DEFAULT_KIND,

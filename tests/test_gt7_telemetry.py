@@ -35,6 +35,9 @@ def _packet(**kw):
     b[tm.OFF_THROTTLE] = kw.get("throttle", 0)
     b[tm.OFF_BRAKE] = kw.get("brake", 0)
     struct.pack_into("<i", b, tm.OFF_CAR_ID, kw.get("car_id", 0))
+    struct.pack_into("<3f", b, tm.OFF_POS, *kw.get("pos", (0.0, 0.0, 0.0)))
+    struct.pack_into("<f", b, tm.OFF_RPM, kw.get("rpm", 0.0))
+    b[tm.OFF_GEAR] = kw.get("gear_byte", 0)
     return bytes(b)
 
 
@@ -70,6 +73,22 @@ def _ext_packet(**kw):
 def t_parse_car_id():
     """The car id sits in the base packet too, so it needs no extended format."""
     assert tm.parse_packet(_packet(car_id=3424)).car_id == 3424
+
+
+def t_parse_gear_rpm_position():
+    p = tm.parse_packet(_packet(gear_byte=0x24, rpm=7350.5, pos=(1.5, -2.0, 300.25)))
+    assert p.gear == 4, "gear is the low nibble of 0x90; the high nibble is ignored"
+    assert abs(p.rpm - 7350.5) < 1e-3
+    assert (p.pos_x, p.pos_y, p.pos_z) == (1.5, -2.0, 300.25)
+
+
+def t_sanitize_keeps_last_rpm_and_position_on_nan():
+    eng = tm.TelemetryEngine()
+    eng.update(tm.parse_packet(_packet(rpm=5000.0, pos=(1.0, 2.0, 3.0))), 1.0)
+    nan = float("nan")
+    eng.update(tm.parse_packet(_packet(rpm=nan, pos=(nan, nan, nan))), 1.1)
+    assert eng._last.rpm == 5000.0, "a non-finite rpm keeps the previous reading"
+    assert (eng._last.pos_x, eng._last.pos_y, eng._last.pos_z) == (1.0, 2.0, 3.0)
 
 
 class _Cars:
@@ -1037,6 +1056,69 @@ def t_laplog_session_change_without_reference():
         eng.update(tm.parse_packet(_packet(lap=3)), 99.0)         # mid-lap connect
         eng.update(tm.parse_packet(_packet(lap=1, speed_mps=0.0)), 100.0)
     assert "GT7 session change (new lap counter 1): no reference yet" in cap.lines, cap.lines
+
+
+def t_engine_emits_lap_records():
+    eng = tm.TelemetryEngine()
+    laps = []
+    eng.on_lap = laps.append
+    eng.update(tm.parse_packet(_packet(lap=0)), 99.0)
+    t = _feed_lap(eng, 100.0, 1, duration=10.0, speed=50.0)
+    _feed_lap(eng, t, 2, duration=11.0, speed=60.0)   # its last packet opens lap 3
+    assert [r["lap"] for r in laps] == [0, 1, 2], laps
+    assert laps[0]["status"] == "not counted" and "partial" in laps[0]["reason"]
+    assert laps[1]["status"] == "reference" and laps[1]["reason"] == ""
+    assert laps[2]["status"] == "counted"
+    assert abs(laps[2]["top_speed_mps"] - 60.0) < 1e-6
+    assert laps[1]["start"] == 100.0 and laps[1]["end"] < laps[2]["start"]
+    assert all(r["session"] == 1 for r in laps)
+
+
+def t_engine_session_change_emits_abandoned_lap_and_counts_session():
+    eng = tm.TelemetryEngine()
+    laps = []
+    eng.on_lap = laps.append
+    eng.update(tm.parse_packet(_packet(lap=1)), 99.0)
+    t = _feed_lap(eng, 100.0, 2, duration=5.0)   # ends with lap 3's first packet at t
+    assert eng.session == 1
+    eng.update(tm.parse_packet(_packet(lap=0, speed_mps=0.0)), t)
+    assert eng.session == 2
+    last = laps[-1]
+    assert (last["lap"], last["status"], last["reason"], last["session"]) == \
+        (3, "not counted", "session change", 1), last
+    assert eng.lap_started_at() == t
+
+
+def t_engine_without_on_lap_is_unchanged():
+    eng = tm.TelemetryEngine()
+    assert eng.on_lap is None and eng.lap_started_at() is None and eng.lap_distance() is None
+    eng.update(tm.parse_packet(_packet(lap=1)), 1.0)
+    assert eng.lap_started_at() == 1.0
+
+
+def t_engine_lap_distance_and_car_in_record():
+    eng = tm.TelemetryEngine()
+    laps = []
+    eng.on_lap = laps.append
+    eng.update(tm.parse_packet(_packet(lap=1, car_id=3424)), 1.0)
+    for i in range(1, 11):                                    # 1 s at 50 m/s
+        eng.update(tm.parse_packet(_packet(lap=1, speed_mps=50.0, car_id=3424)), 1.0 + i / 10)
+    assert abs(eng.lap_distance() - 50.0) < 1e-6, eng.lap_distance()
+    eng.update(tm.parse_packet(_packet(lap=2, car_id=3424)), 2.1)
+    assert laps[-1]["car_id"] == 3424 and eng.lap_distance() == 0.0
+
+
+def t_engine_on_lap_failure_does_not_raise():
+    eng = tm.TelemetryEngine()
+
+    def boom(_record):
+        raise RuntimeError("consumer exploded")
+
+    eng.on_lap = boom
+    eng.update(tm.parse_packet(_packet(lap=0)), 99.0)
+    t = _feed_lap(eng, 100.0, 1, duration=10.0, speed=50.0)
+    assert eng.lap_started_at() == t
+    assert eng.session == 1
 
 
 if __name__ == "__main__":

@@ -353,6 +353,21 @@ def t_solo_telemetry_toggle():
     assert "teleVisBtn.hidden = !d.telemetry" in html
 
 
+def t_solo_telemetry_record_toggle():
+    html = _html()
+    solo = _config_block(html, "CONFIG_SOLO")
+    solo = solo[solo.index("vis:"):solo.index("audio:")]
+    assert 'label:"REC"' in solo and 'relay:"telemetry/record"' in solo, \
+        "the solo panel needs a REC key that drives /telemetry/record"
+    assert "teleRecBtn.hidden = !rec" in html
+    assert 'teleRecBtn.classList.toggle("air", !!(rec && rec.active && !rec.error))' in html
+    assert 'teleRecBtn.classList.toggle("warn", !!(rec && rec.error))' in html
+    assert "Date.now() / 1000 - rec.since" not in html, \
+        "the elapsed time comes from the relay, a skewed browser clock must not change it"
+    assert 'cost.textContent = rec && rec.active && rec.elapsed_s != null' in html
+    assert 'fmtDur(rec.elapsed_s)' in html
+
+
 def t_solo_status_strip_names_the_car():
     """The status strip shows the GT7 car from /status (telemetry.car), as text so a
     car name can never inject markup, and hides the pill without one. (#713)"""
