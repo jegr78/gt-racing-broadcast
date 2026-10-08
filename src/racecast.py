@@ -1469,13 +1469,22 @@ def _sync_live_telemetry_record():
     """Push the profile default to an already-running relay's live RecordControl.
     _reset_telemetry_record() deletes telemetry-record.json, but a relay that was
     already up does not re-read it (only a fresh RecordControl does), so the two
-    would otherwise disagree after a fresh `event start` (#786). Best-effort: must
-    never fail event start."""
+    would otherwise disagree after a fresh `event start` (#786). Caller must gate
+    this on _relay_already_running_for_active_profile(); best-effort either way,
+    must never fail event start."""
     try:
         want = _telemetry_record_wanted(_active_config())
         _relay_record_call("start" if want else "stop")
     except Exception:  # noqa: BLE001  best-effort, event start must proceed either way
         pass
+
+
+def _relay_already_running_for_active_profile():
+    """True exactly when relay_start would no-op with action "running": a healthy
+    relay already up and serving the active profile. A foreign-profile holder
+    (e.g. mid `profile use --force`) must not have this profile's state pushed
+    into it before relay_start heals it away."""
+    return _relay_http_ok() and _running_relay_profile() == (_active_profile_name() or "")
 
 
 def _is_continuation_start(rest):
@@ -4252,10 +4261,10 @@ def event_start(rest, _autojoin=True, _new_session=True):
     # into this report. A fresh broadcast only, since a takeover or a mid-event
     # recovery restart keeps the existing window so the report stays continuous.
     if _new_session and not _is_continuation_start(rest):
-        was_running = _relay_http_ok()
+        was_running = _relay_already_running_for_active_profile()
         _write_session_start()
         _reset_telemetry_record()
-        if was_running:   # the relay's live RecordControl does not re-read the file
+        if was_running:   # same relay, same profile: it won't re-read the file itself
             _sync_live_telemetry_record()
     relay_start(_stint_args(rest) + _qualifying_args(rest) + _title_args(rest))
     if _qualifying_args(rest):   # verify the relay actually came up in qualifying mode

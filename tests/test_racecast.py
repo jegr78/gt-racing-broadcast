@@ -1597,24 +1597,46 @@ def t_sync_live_telemetry_record_never_raises():
         m._active_config = orig
 
 
+def t_relay_already_running_for_active_profile_requires_both():
+    orig = (m._relay_http_ok, m._running_relay_profile, m._active_profile_name)
+    try:
+        m._relay_http_ok = lambda: True
+        m._running_relay_profile = lambda: "demo"
+        m._active_profile_name = lambda: "demo"
+        assert m._relay_already_running_for_active_profile() is True
+        m._relay_http_ok = lambda: False
+        assert m._relay_already_running_for_active_profile() is False
+        m._relay_http_ok = lambda: True
+        m._running_relay_profile = lambda: "other-league"   # foreign-profile holder
+        assert m._relay_already_running_for_active_profile() is False
+    finally:
+        m._relay_http_ok, m._running_relay_profile, m._active_profile_name = orig
+
+
 def t_event_start_pushes_live_telemetry_record_only_when_relay_already_running():
+    # Must gate on BOTH http_ok and the running profile matching the active one:
+    # a foreign-profile relay (e.g. mid `profile use --force`) must not have this
+    # profile's TELEMETRY_RECORD default pushed into ITS state file before
+    # relay_start heals it away (#786).
     import tempfile
 
     class _Reached(Exception):
         pass
 
-    def _drive(http_ok):
+    def _drive(http_ok, running_profile, active_profile):
         ev = m._event_modules()[0]
         calls = []
         saved = (m._event_gate_results, m._tailscale_connect, ev.app_running,
-                 m._runtime_dir, m._relay_http_ok, m._sync_live_telemetry_record,
-                 m.relay_start)
+                 m._runtime_dir, m._relay_http_ok, m._running_relay_profile,
+                 m._active_profile_name, m._sync_live_telemetry_record, m.relay_start)
         with tempfile.TemporaryDirectory() as tmp:
             m._event_gate_results = lambda e, p: []
             m._tailscale_connect = lambda e: "ok"
             ev.app_running = lambda app, platform=None: True
             m._runtime_dir = lambda: tmp
             m._relay_http_ok = lambda: http_ok
+            m._running_relay_profile = lambda: running_profile
+            m._active_profile_name = lambda: active_profile
             m._sync_live_telemetry_record = lambda: calls.append("sync")
 
             def _boom(_rest):
@@ -1627,11 +1649,14 @@ def t_event_start_pushes_live_telemetry_record_only_when_relay_already_running()
                 return calls
             finally:
                 (m._event_gate_results, m._tailscale_connect, ev.app_running,
-                 m._runtime_dir, m._relay_http_ok, m._sync_live_telemetry_record,
+                 m._runtime_dir, m._relay_http_ok, m._running_relay_profile,
+                 m._active_profile_name, m._sync_live_telemetry_record,
                  m.relay_start) = saved
 
-    assert _drive(True) == ["sync"], "relay already running: push the live default"
-    assert _drive(False) == [], "no relay yet: relay_start will seed state from scratch"
+    assert _drive(True, "demo", "demo") == ["sync"], "same relay, same profile: push it"
+    assert _drive(False, "", "demo") == [], "no relay yet: relay_start seeds state from scratch"
+    assert _drive(True, "other-league", "demo") == [], \
+        "a foreign-profile relay must not get this profile's state pushed into it"
 
 
 def t_profile_env_vars_includes_event_title():
