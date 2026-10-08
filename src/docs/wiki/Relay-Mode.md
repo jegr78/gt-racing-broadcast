@@ -509,6 +509,22 @@ the driver's steering, from the extended telemetry packet (see below). It is the
 block, and stays hidden while GT7 sends only the base packet. `/telemetry/data`
 reports the angle as `steer_deg` (degrees, positive = left).
 
+**Telemetry recording (solo POV).** The relay can record the full GT7 telemetry trace
+for later analysis: throttle, brake, steering (extended packets only), speed, gear,
+rpm, fuel, tyre temperatures, position and lap times. Set `TELEMETRY_RECORD=1` in the
+profile to record from relay start, or toggle it live with the Director Panel's `REC`
+key, `/telemetry/record/start|stop|toggle` or `racecast telemetry record start|stop`.
+A live toggle survives a relay restart; a new `racecast event start` returns to the
+profile setting. Recordings land in `runtime/<profile>/telemetry-recordings/` (about
+75 MB per hour) and are never deleted automatically.
+
+`racecast telemetry list` shows them, `racecast telemetry export latest` writes
+`samples.csv` (one row per sample, 60 Hz, metric units, skipping menu/pause/loading
+packets unless `--all`) and `laps.csv` (one row per lap with GT7's lap time and
+whether the relay counted it) next to the recording. `--excel` writes a file a
+German Excel opens with a double click. `racecast telemetry delete <name>` removes
+a recording and its exported CSVs.
+
 **Telemetry packet format.** The relay asks GT7 for its extended telemetry packet,
 which adds the steering angle, the driver's pedal input and the car's accelerations
 to the base values. GT7 only changes the format of a stream that has stopped. So if

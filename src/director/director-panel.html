@@ -155,12 +155,15 @@
   button.k:disabled{opacity:.35;cursor:not-allowed}
   button.k .tag{display:block;font-size:8px;letter-spacing:.22em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
   button.k .cost{display:block;font-size:9px;font-weight:400;color:var(--amber);margin-top:3px}
+  button.k .cost[hidden]{display:none}  /* author display:block above beats the UA [hidden] rule */
   button.k.on{border-color:var(--live);background:linear-gradient(180deg,#15301f,#10261a);
     box-shadow:0 0 0 1px var(--live),0 0 18px var(--live-glow),inset 0 1px 0 rgba(255,255,255,.06)}
   button.k.on .tag{color:var(--live)}
   button.k.air{border-color:var(--air);background:linear-gradient(180deg,#331414,#26100f);
     box-shadow:0 0 0 1px var(--air),0 0 20px var(--air-glow),inset 0 1px 0 rgba(255,255,255,.06)}
   button.k.air .tag{color:var(--air)}
+  button.k.warn{border-color:var(--amber)}
+  button.k.warn .tag{color:var(--amber)}
   /* RED FLAG: red label while idle; .on (cover visible) lights red, not green */
   button.k.redflag{color:#ff8080}
   button.k.redflag.on{border-color:var(--air);background:linear-gradient(180deg,#331414,#26100f);
@@ -1103,6 +1106,8 @@ const CONFIG_SOLO = {
     // The HUD telemetry block (solo POV): relay state, no OBS item; hidden when the
     // relay serves no telemetry (see the /status handler).
     {label:"TELEMETRY", scene:"HUD", relay:"telemetry"},
+    // Records the GT7 telemetry trace to disk; hidden without telemetry.
+    {label:"REC", scene:"DISK", relay:"telemetry/record"},
   ],
   audio: [
     {label:"Game",         input:"Solo Capture Device"},
@@ -1200,6 +1205,7 @@ function mkKey(label, tag, onClick){
 const macroKeys = [], sceneKeys = {}, toggleKeys = [];
 let povVisBtn = null;                 // the relay-driven POV visibility button (#130)
 let teleVisBtn = null;                // the relay-driven HUD telemetry show/hide button
+let teleRecBtn = null;                // the relay-driven telemetry recording button
 
 /* RED FLAG toggles the Standby Cover through the relay's /obs/source endpoint,
    using the last-known state from /obs/state. Built once and re-appended to #pgmBus
@@ -1236,6 +1242,7 @@ function buildControls(cfg){
   Object.keys(sceneKeys).forEach(k=>delete sceneKeys[k]);
   povVisBtn = null;
   teleVisBtn = null;
+  teleRecBtn = null;
 
   cfg.macros.forEach((m, i)=>{
     const b = mkKey(m.label, "program", ()=>runMacro(m));
@@ -1268,6 +1275,7 @@ function buildControls(cfg){
     b._item = item; toggleKeys.push(b); $("#scnVisBus").appendChild(b);
     if (item.relay === "pov") povVisBtn = b;
     if (item.relay === "telemetry") teleVisBtn = b;
+    if (item.relay === "telemetry/record") teleRecBtn = b;
   });
 
   buildGraphicBuses();
@@ -2081,6 +2089,20 @@ async function relayPoll(){
     if (teleVisBtn){                      // /status carries telemetry only for solo POV
       teleVisBtn.hidden = !d.telemetry;
       teleVisBtn.classList.toggle("on", !!(d.telemetry && d.telemetry.visible));
+    }
+    if (teleRecBtn){                      // recording state; amber when the writer failed
+      const rec = d.telemetry && d.telemetry.record;
+      teleRecBtn.hidden = !rec;
+      teleRecBtn.classList.toggle("air", !!(rec && rec.active && !rec.error));
+      teleRecBtn.classList.toggle("warn", !!(rec && rec.error));
+      teleRecBtn.title = rec && rec.error ? "Recording stopped: " + rec.error
+        : rec && rec.file ? "Recording " + rec.file : "";
+      let cost = teleRecBtn.querySelector(".cost");
+      if (!cost){ cost = document.createElement("span"); cost.className = "cost";
+                  teleRecBtn.appendChild(cost); }
+      cost.textContent = rec && rec.active && rec.elapsed_s != null
+        ? fmtDur(rec.elapsed_s) : "";
+      cost.hidden = !cost.textContent;
     }
     const car = d.telemetry && d.telemetry.car;   // the GT7 car the driver is in (#713)
     $("#stCar").hidden = !car;

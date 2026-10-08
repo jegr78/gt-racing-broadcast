@@ -20,6 +20,8 @@
   racecast obs benchmark [--window S] [--settle S] [--scene NAME] [--keep-recording] [--json]   # FULL vs ROBUST on the on-air feed with a recording running; never while streaming
   racecast obs logs | tailscale logs         # tail OBS's log dir / the Tailscale status-snapshot log (same -f/--list/--archive flags)
   racecast sheet     url | open              # print / open the active league's Google Sheet (built from its SHEET_ID)
+  racecast telemetry record start|stop|status   # solo POV: record the GT7 telemetry trace (relay must run)
+  racecast telemetry list | export <name|latest> [--out DIR] [--all] [--excel] | delete <name>   # recordings of the active profile -> samples.csv + laps.csv
   racecast app launch|quit obs|discord|tailscale   # start / gracefully quit a GUI app (Control Center buttons)
   racecast discord   join | leave | status   # drive the desktop Discord client into/out of the league's voice channel
   racecast status                            # aggregate health of all services
@@ -225,6 +227,7 @@ def _profile_env_pairs(rc):
              ("RACECAST_DISCORD_VOICE_URL", rc.discord_voice_url),
              ("RACECAST_EVENT_TITLE", rc.event_title),
              ("RACECAST_GRAPHICS_TAKE", rc.graphics_take),
+             ("RACECAST_TELEMETRY_RECORD", rc.telemetry_record),
              ("RACECAST_PROFILE_NAME", rc.name),
              ("RACECAST_LOGO", rc.logo_path),
              ("RACECAST_KIND", rc.kind),   # endurance|solo; relay's --solo default
@@ -977,6 +980,7 @@ EVENT_VERBS = ("status", "start", "stop", "takeover")
 TAILSCALE_VERBS = ("up", "down", "status", "logs")
 OBS_VERBS = ("refresh", "collection", "logs", "stream-target", "benchmark")
 SHEET_VERBS = ("url", "open")           # active league's Google Sheet (from SHEET_ID)
+TELEMETRY_VERBS = ("record", "list", "export", "delete")   # GT7 telemetry recordings
 APP_VERBS = ("launch", "quit")          # GUI app control for the Control Center
 APP_CONTROLLED = ("obs", "discord", "tailscale")   # GUI apps racecast can launch + quit
 
@@ -1039,6 +1043,11 @@ def route(argv):
         if verb not in SHEET_VERBS:
             raise ValueError(f"usage: racecast sheet {{{'|'.join(SHEET_VERBS)}}}")
         return {"kind": "service", "command": "sheet", "verb": verb, "rest": rest[1:]}
+    if cmd == "telemetry":
+        verb = rest[0] if rest else None
+        if verb not in TELEMETRY_VERBS:
+            raise ValueError(f"usage: racecast telemetry {{{'|'.join(TELEMETRY_VERBS)}}}")
+        return {"kind": "service", "command": "telemetry", "verb": verb, "rest": rest[1:]}
     if cmd == "app":
         verb = rest[0] if rest else None
         if verb not in APP_VERBS:
@@ -1438,6 +1447,37 @@ def _write_session_start(now=None):
             json.dump({"start": time.time() if now is None else now}, fh)
     except OSError as exc:
         print("note: could not write session.json ({}). Continuing.".format(exc))
+
+
+def _reset_telemetry_record():
+    """Drop the live recording switch so a new broadcast starts from TELEMETRY_RECORD."""
+    try:
+        os.remove(os.path.join(_runtime_dir(), "telemetry-record.json"))
+    except OSError:
+        pass  # no live toggle recorded yet
+
+
+def _telemetry_record_wanted(rc):
+    """The active profile's TELEMETRY_RECORD default as a bool, per the same rules
+    the relay applies to RACECAST_TELEMETRY_RECORD. False when no profile resolves."""
+    import gt7_recording as gr
+    return gr.record_default(
+        {"RACECAST_TELEMETRY_RECORD": rc.telemetry_record if rc else ""})
+
+
+def _sync_live_telemetry_record():
+    """Push the profile default into a running relay, which does not re-read the deleted
+    state file. Best-effort; gate it on _relay_already_running_for_active_profile()."""
+    try:
+        want = _telemetry_record_wanted(_active_config())
+        _relay_record_call("start" if want else "stop")
+    except Exception:  # noqa: BLE001  best-effort, event start must proceed either way
+        pass
+
+
+def _relay_already_running_for_active_profile():
+    """True exactly when relay_start would no-op with action "running"."""
+    return relay_start_plan(**_relay_start_signals())[0] == "running"
 
 
 def _is_continuation_start(rest):
@@ -2394,6 +2434,23 @@ def relay_start_plan(*, port_pids, feed_pids, pidfile_pid, pidfile_alive,
     return ("heal", kill, reason)
 
 
+def _relay_start_signals():
+    """The keyword arguments relay_start_plan decides on, gathered from this machine.
+
+    The PID file is the un-scoped singleton (_relay_pid_path), so it finds the one
+    tracked relay even across a profile switch; pids_on_port finds EVERY listener
+    (incl. an untracked orphan / a Windows dual-bind split-brain) the PID file
+    cannot see."""
+    port_pids = pt.pids_on_port(RELAY_PORT)
+    pid = sv.read_pid(_relay_pid_path())
+    return {"port_pids": port_pids,
+            "feed_pids": sorted({p for fp in pt.FEED_PORTS for p in pt.pids_on_port(fp)}),
+            "pidfile_pid": pid, "pidfile_alive": sv.pid_alive(pid),
+            "running_profile": _running_relay_profile(),
+            "active_profile": _active_profile_name() or "",
+            "http_ok": _relay_http_ok() if port_pids else False}
+
+
 RELAY_START_VERIFY_S = 15   # seconds to confirm the freshly spawned relay bound its control port
 
 
@@ -2420,19 +2477,9 @@ def _spawn_relay_verified(argv, attempts=2, verify_s=RELAY_START_VERIFY_S):
 
 def relay_start(rest):
     stint = _stint_args(rest)   # validate early: fail fast BEFORE spawning the daemon
-    # Gather the signals for the pure plan. The PID file is the un-scoped singleton
-    # (_relay_pid_path), so it finds the one tracked relay even across a profile
-    # switch; pids_on_port finds EVERY listener (incl. an untracked orphan / a
-    # Windows dual-bind split-brain) the PID file cannot see.
-    port_pids = pt.pids_on_port(RELAY_PORT)
-    feed_pids = sorted({p for fp in pt.FEED_PORTS for p in pt.pids_on_port(fp)})
-    pid = sv.read_pid(_relay_pid_path())
-    action, kill_pids, reason = relay_start_plan(
-        port_pids=port_pids, feed_pids=feed_pids,
-        pidfile_pid=pid, pidfile_alive=sv.pid_alive(pid),
-        running_profile=_running_relay_profile(),
-        active_profile=_active_profile_name() or "",
-        http_ok=_relay_http_ok() if port_pids else False)
+    signals = _relay_start_signals()
+    pid = signals["pidfile_pid"]
+    action, kill_pids, reason = relay_start_plan(**signals)
     if action == "running":
         print(f"relay already running (pid {pid}).")
         if stint:
@@ -3100,6 +3147,153 @@ def sheet_url_cmd(_rest):
 def sheet_open_cmd(_rest):
     """Open the active league's Google Sheet in the default browser."""
     _open_url(_sheet_url_or_exit())
+
+
+def _telemetry_rec_dir():
+    return os.path.join(_runtime_dir(), "telemetry-recordings")
+
+
+def _relay_record_call(verb):
+    """GET /telemetry/record/<verb> on the local relay; None when unreachable or 404."""
+    try:
+        return http_util.get_json(
+            f"http://127.0.0.1:{RELAY_PORT}/telemetry/record/{verb}", timeout=5)
+    except Exception:
+        return None
+
+
+def _relay_record_status():
+    """The running relay's telemetry.record block from /status, or None."""
+    try:
+        st = http_util.get_json(f"http://127.0.0.1:{RELAY_PORT}/status", timeout=3)
+    except Exception:
+        return None
+    return ((st or {}).get("telemetry") or {}).get("record")
+
+
+def _foreign_relay_profile():
+    """The profile a reachable relay runs under when it is not the active one, else ""."""
+    running = _running_relay_profile()
+    if running and running != (_active_profile_name() or "") and _relay_http_ok():
+        return running
+    return ""
+
+
+def _recording_sort_key(row):
+    """(started_ts, mtime): mtime breaks the tie between recordings started in the same second."""
+    import datetime
+    try:
+        started = datetime.datetime.fromisoformat(row["started"]).timestamp()
+    except (TypeError, ValueError):
+        started = float("-inf")
+    try:
+        mtime = os.path.getmtime(row["path"])
+    except OSError:
+        mtime = 0.0
+    return (started, mtime)
+
+
+def _resolve_recording(rec_dir, name):
+    import gt7_recording as gr
+    rows = gr.list_recordings(rec_dir)
+    if name == "latest" and rows:
+        return max(rows, key=_recording_sort_key)["path"]
+    for row in rows:
+        if name in (row["name"], gr.recording_stem(row["path"])):
+            return row["path"]
+    sys.exit(f"no recording named {name!r} in {rec_dir} (see 'racecast telemetry list')")
+
+
+def telemetry_record_cmd(rest):
+    """Start, stop or report the relay's telemetry recording."""
+    verb = rest[0] if rest else None
+    if verb not in ("start", "stop", "status"):
+        sys.exit("usage: racecast telemetry record start|stop|status")
+    foreign = _foreign_relay_profile()
+    if foreign:
+        sys.exit(f"telemetry recording refused: the relay runs profile {foreign!r}, "
+                 f"not the active profile {_active_profile_name() or ''!r}")
+    out = _relay_record_status() if verb == "status" else _relay_record_call(verb)
+    if out is None:
+        sys.exit("telemetry recording unavailable: the relay is not running, or the "
+                 "active profile is not a solo POV broadcast")
+    state = "recording" if out.get("active") else "off"
+    print(f"telemetry recording: {state}" + (f" -> {out['file']}" if out.get("file") else ""))
+    if out.get("error"):
+        print(f"error: {out['error']}")
+
+
+def telemetry_list_cmd(_rest):
+    """List the active profile's recordings."""
+    import gt7_recording as gr
+    rec_dir = _telemetry_rec_dir()
+    rows = gr.list_recordings(rec_dir, count_laps=True)
+    foreign = _foreign_relay_profile()
+    note = f"note: the relay runs profile {foreign!r}, its recordings are not listed here"
+    if not rows:
+        print(f"no telemetry recordings in {rec_dir}")
+        if foreign:
+            print(note)
+        return
+    open_file = None if foreign else (_relay_record_status() or {}).get("file")
+    total = 0
+    for row in rows:
+        total += row["size"]
+        mark = ("recording" if open_file and row["name"].startswith(open_file)
+                else "unclosed" if row["partial"] else "")
+        print(f"{gr.recording_stem(row['path'])}  {row['size'] / 1e6:7.1f} MB  "
+              f"{row['duration_s'] / 60:6.1f} min  {row['laps']:4d} laps  {mark}".rstrip())
+    print(f"{len(rows)} recording(s), {total / 1e6:.1f} MB in {rec_dir}")
+    if foreign:
+        print(note)
+
+
+def telemetry_export_cmd(rest):
+    """Export one recording to samples.csv + laps.csv."""
+    import argparse
+    import gt7_cars
+    import gt7_recording as gr
+    ap = argparse.ArgumentParser(prog="racecast telemetry export")
+    ap.add_argument("name", help="recording name, its stem, or 'latest'")
+    ap.add_argument("--out", help="output directory (default: <recording>/ next to it)")
+    ap.add_argument("--all", action="store_true",
+                    help="keep menu, pause and loading packets")
+    ap.add_argument("--excel", action="store_true",
+                    help="semicolon + decimal comma + BOM for a German Excel")
+    args = ap.parse_args(rest)
+    rec_dir = _telemetry_rec_dir()
+    path = _resolve_recording(rec_dir, args.name)
+    out_dir = args.out or os.path.join(rec_dir, gr.recording_stem(path))
+    try:
+        res = gr.export_csv(path, out_dir, include_all=args.all, excel=args.excel,
+                            cars=gt7_cars.CarDB(resource_path("assets/gt7")))
+    except gr.RecordingError as e:
+        sys.exit(str(e))
+    print(f"wrote {res['samples']} samples and {res['laps']} laps to {res['dir']}")
+    if res["dropped"]:
+        print(f"note: {res['dropped']} packets were dropped while recording")
+
+
+def telemetry_delete_cmd(rest):
+    """Delete one recording (and its export folder)."""
+    import gt7_recording as gr
+    if len(rest) != 1:
+        sys.exit("usage: racecast telemetry delete <name>")
+    rec_dir = _telemetry_rec_dir()
+    path = _resolve_recording(rec_dir, rest[0])
+    name = os.path.basename(path)
+    open_file = None if _foreign_relay_profile() else (_relay_record_status() or {}).get("file")
+    if open_file and name.startswith(open_file):
+        sys.exit(f"{name} is currently recording; stop it first "
+                 "('racecast telemetry record stop')")
+    export_dir = os.path.join(rec_dir, gr.recording_stem(path))
+    try:
+        os.remove(path)
+        if os.path.isdir(export_dir):
+            shutil.rmtree(export_dir)
+    except OSError as e:
+        sys.exit(f"could not delete {name}: {e.strerror}")
+    print(f"deleted {name}")
 
 
 def _release_obs_feeds():
@@ -4086,7 +4280,11 @@ def event_start(rest, _autojoin=True, _new_session=True):
     # into this report. A fresh broadcast only, since a takeover or a mid-event
     # recovery restart keeps the existing window so the report stays continuous.
     if _new_session and not _is_continuation_start(rest):
+        was_running = _relay_already_running_for_active_profile()
         _write_session_start()
+        _reset_telemetry_record()
+        if was_running:   # same relay, same profile: it won't re-read the file itself
+            _sync_live_telemetry_record()
     relay_start(_stint_args(rest) + _qualifying_args(rest) + _title_args(rest))
     if _qualifying_args(rest):   # verify the relay actually came up in qualifying mode
         _mm = qualifying_mode_mismatch_note(True, _relay_mode())
@@ -4487,6 +4685,8 @@ DISPATCH = {
     ("obs", "stream-target"): obs_stream_target_cmd, ("obs", "benchmark"): obs_benchmark_cmd,
     ("obs", "logs"): obs_logs, ("tailscale", "logs"): tailscale_logs,
     ("sheet", "url"): sheet_url_cmd, ("sheet", "open"): sheet_open_cmd,
+    ("telemetry", "record"): telemetry_record_cmd, ("telemetry", "list"): telemetry_list_cmd,
+    ("telemetry", "export"): telemetry_export_cmd, ("telemetry", "delete"): telemetry_delete_cmd,
     ("app", "launch"): app_launch_cmd, ("app", "quit"): app_quit_cmd,
 }
 

@@ -156,6 +156,7 @@ In a solo **POV** profile Overlays also carries `TELEMETRY`: it shows or hides t
 HUD's whole GT7 telemetry block (panel, tyres, trace, values, delta, time of day),
 for example while waiting in the lobby or watching a replay. The webcam frame stays.
 The relay keeps the choice across restarts; the key lights while the block is shown.
+`REC` (solo POV) starts and stops the telemetry recording; it lights red with the elapsed time while recording and amber when writing failed (disk full).
 In a solo **POV** profile the status strip also names the car the driver is in, e.g.
 `CAR Alfa Romeo 155 2.5 V6 TI '93 · Gr.4`, read from the GT7 telemetry. The pill
 appears once the console sends telemetry and follows a car change.
