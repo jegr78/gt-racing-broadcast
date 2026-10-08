@@ -8844,35 +8844,47 @@ class Relay:
 
     def _heartbeat_loop(self):
         """Background tick: refresh health and push to Discord on a level change
-        only (degradation and recovery). Daemon thread; stops with the process."""
+        only (degradation and recovery). Daemon thread; stops with the process.
+        A raising tick is logged (once per distinct error) and the loop goes on:
+        an uncaught one used to end the thread and freeze health until a restart."""
+        last_error = None
         while not self._hb_stop.is_set():
-            now = time.time()
-            self._maybe_probe_obs(now)
-            self._sample_connectivity()
-            self._sample_inbound_gaps()
-            self._sample_consumer_backlogs()
             try:
-                self._backlog_shed_tick(now)    # reads the classification just sampled
-            except Exception as exc:            # noqa: BLE001  a remedy never breaks the heartbeat
-                LOG.debug("backlog shed error (%s)", exc)
-            h = self._refresh_health(now)
-            if self.health_store is not None:
-                try:
-                    self.health_store.record_tick(self._health_snapshot(now), now)
-                except Exception:  # noqa: BLE001  sampling is best-effort
-                    pass  # never let a store write break the heartbeat
-            if self.health_store is not None and (now - self._last_prune) > 86400:
-                try:
-                    self.health_store.prune(); self._last_prune = now
-                except Exception:  # noqa: BLE001  best-effort
-                    pass
-            if health_should_notify(self._notified_level, h["notify_level"]):
-                self._send_health_webhook(h["notify_level"], self.health_reasons, self._notified_level)
-                self._notified_level = h["notify_level"]
-            self._maybe_auto_failover(now)
-            self._record_render_counts()
-            self._record_consumer_overflows(now)
+                self._heartbeat_tick(time.time())
+                last_error = None
+            except Exception as exc:  # noqa: BLE001  a failing tick never ends the heartbeat
+                if repr(exc) != last_error:
+                    LOG.exception("heartbeat tick failed, health may be stale until it recovers")
+                last_error = repr(exc)
             self._hb_stop.wait(HEARTBEAT_INTERVAL_S)
+
+    def _heartbeat_tick(self, now):
+        """One heartbeat: sample, refresh health, record history, notify Discord."""
+        self._maybe_probe_obs(now)
+        self._sample_connectivity()
+        self._sample_inbound_gaps()
+        self._sample_consumer_backlogs()
+        try:
+            self._backlog_shed_tick(now)    # reads the classification just sampled
+        except Exception as exc:            # noqa: BLE001  a remedy never breaks the heartbeat
+            LOG.debug("backlog shed error (%s)", exc)
+        h = self._refresh_health(now)
+        if self.health_store is not None:
+            try:
+                self.health_store.record_tick(self._health_snapshot(now), now)
+            except Exception:  # noqa: BLE001  sampling is best-effort
+                pass  # never let a store write break the heartbeat
+        if self.health_store is not None and (now - self._last_prune) > 86400:
+            try:
+                self.health_store.prune(); self._last_prune = now
+            except Exception:  # noqa: BLE001  best-effort
+                pass
+        if health_should_notify(self._notified_level, h["notify_level"]):
+            self._send_health_webhook(h["notify_level"], self.health_reasons, self._notified_level)
+            self._notified_level = h["notify_level"]
+        self._maybe_auto_failover(now)
+        self._record_render_counts()
+        self._record_consumer_overflows(now)
 
     def _sample_inbound_gaps(self):
         """#535: read+reset each feed's interval max gap ONCE per heartbeat (the 2 s
