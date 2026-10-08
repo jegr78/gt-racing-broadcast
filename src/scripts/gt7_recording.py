@@ -1,0 +1,261 @@
+#!/usr/bin/env python3
+"""GT7 telemetry recording: the relay's decrypted packets on disk, read back, exported.
+
+Stdlib only and no relay imports, so `racecast telemetry export` runs without a relay.
+File: one JSON header line, then records of float64 wall ts, uint8 kind, uint16
+length and the payload. Kind 0x00 is a meta record carrying {"dropped": n}.
+"""
+import datetime
+import json
+import logging
+import os
+import queue
+import struct
+import threading
+import time
+
+import gt7_telemetry
+
+LOG = logging.getLogger("racecast.relay.telemetry")
+
+FORMAT = "racecast-gt7rec"
+VERSION = 1
+SUFFIX = ".gt7rec"
+PART = ".part"
+QUEUE_MAX = 600               # about 10 s of packets at 60 Hz
+FLUSH_S = 1.0
+_REC = struct.Struct("<dBH")
+_META = 0x00
+
+
+class RecordingError(Exception):
+    """A file that is not a readable racecast telemetry recording."""
+
+
+def _encode(wall_ts, kind_byte, payload):
+    return _REC.pack(wall_ts, kind_byte, len(payload)) + payload
+
+
+def _header(profile, relay_version, started_ts):
+    started = datetime.datetime.fromtimestamp(started_ts).astimezone().isoformat(
+        timespec="seconds")
+    return (json.dumps({"format": FORMAT, "version": VERSION, "profile": profile,
+                        "started": started, "relay_version": relay_version})
+            + "\n").encode("utf-8")
+
+
+def _free_path(rec_dir, stem):
+    """`<stem>.gt7rec` in rec_dir, or `<stem>-N.gt7rec` when that name (or its .part) exists."""
+    n = 1
+    while True:
+        name = stem + ("" if n == 1 else f"-{n}") + SUFFIX
+        path = os.path.join(rec_dir, name)
+        if not os.path.exists(path) and not os.path.exists(path + PART):
+            return path
+        n += 1
+
+
+def recording_stem(path):
+    name = os.path.basename(path)
+    if name.endswith(PART):
+        name = name[:-len(PART)]
+    return name[:-len(SUFFIX)] if name.endswith(SUFFIX) else name
+
+
+class RecordingWriter:
+    """Writes packets to `<rec_dir>/<start>.gt7rec.part` from its own thread and
+    renames the file on close. put() never blocks: a full queue drops the packet."""
+
+    def __init__(self, rec_dir, profile, relay_version, queue_max=QUEUE_MAX,
+                 flush_s=FLUSH_S):
+        self._dir = rec_dir
+        self._profile = profile
+        self._relay_version = relay_version
+        self._flush_s = flush_s
+        self._q = queue.Queue(maxsize=queue_max)
+        self._stop = threading.Event()
+        self.path = None
+        self.started = None
+        self.bytes = 0
+        self.dropped = 0
+        self.error = None
+        self._thread = threading.Thread(target=self._run, name="gt7-recorder", daemon=True)
+        self._thread.start()
+
+    def put(self, wall_ts, kind, plain):
+        if self.error is not None or self._stop.is_set():
+            return
+        try:
+            self._q.put_nowait((wall_ts, kind, plain))
+        except queue.Full:
+            self.dropped += 1
+
+    def close(self, timeout=5.0):
+        self._stop.set()
+        self._thread.join(timeout)
+
+    def _open(self, first_ts):
+        os.makedirs(self._dir, exist_ok=True)
+        stem = time.strftime("%Y%m%d-%H%M%S", time.localtime(first_ts))
+        path = _free_path(self._dir, stem)
+        fh = open(path + PART, "wb")  # noqa: SIM115  kept open across the writer loop
+        head = _header(self._profile, self._relay_version, first_ts)
+        fh.write(head)
+        self.started = first_ts
+        self.bytes = len(head)
+        self.path = path              # last: a visible path always has a start time
+        return fh
+
+    def _write(self, fh, data):
+        fh.write(data)
+        self.bytes += len(data)
+
+    def _run(self):
+        fh = None
+        written_drops = 0
+        last_flush = time.monotonic()
+        try:
+            while True:
+                try:
+                    item = self._q.get(timeout=self._flush_s)
+                except queue.Empty:
+                    item = None
+                if item is not None:
+                    wall_ts, kind, plain = item
+                    if fh is None:
+                        fh = self._open(wall_ts)
+                    self._write(fh, _encode(wall_ts, ord(kind), plain))
+                now = time.monotonic()
+                done = item is None and self._stop.is_set()
+                if fh is not None and (done or now - last_flush >= self._flush_s):
+                    if self.dropped != written_drops:
+                        written_drops = self.dropped
+                        meta = json.dumps({"dropped": written_drops}).encode("utf-8")
+                        self._write(fh, _encode(time.time(), _META, meta))
+                    fh.flush()
+                    last_flush = now
+                if done:
+                    break
+        except OSError as e:
+            self.error = str(e)
+            LOG.warning("telemetry recording stopped: %s", e)
+        finally:
+            if fh is not None:
+                try:
+                    fh.close()
+                    if self.error is None:
+                        os.replace(self.path + PART, self.path)
+                except OSError as e:
+                    self.error = self.error or str(e)
+
+
+class Recording:
+    """Read access to one recording file (finished or .part)."""
+
+    def __init__(self, path):
+        self.path = path
+        self.dropped = 0
+        try:
+            with open(path, "rb") as fh:
+                line = fh.readline()
+                self._offset = fh.tell()
+        except OSError as e:
+            raise RecordingError(f"{path}: {e}") from e
+        try:
+            header = json.loads(line.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            header = None
+        if not isinstance(header, dict) or header.get("format") != FORMAT:
+            raise RecordingError(f"{path}: not a racecast telemetry recording")
+        version = header.get("version")
+        if not isinstance(version, int) or version > VERSION:
+            raise RecordingError(
+                f"{path}: format version {version} is newer than this racecast "
+                f"reads ({VERSION}); update racecast")
+        self.header = header
+
+    def packets(self):
+        """Yield (wall_ts, kind, plain) per packet; a truncated last record ends it."""
+        with open(self.path, "rb") as fh:
+            fh.seek(self._offset)
+            while True:
+                head = fh.read(_REC.size)
+                if len(head) < _REC.size:
+                    return
+                wall_ts, kind, n = _REC.unpack(head)
+                payload = fh.read(n)
+                if len(payload) < n:
+                    return
+                if kind == _META:
+                    try:
+                        self.dropped = int(json.loads(payload.decode("utf-8"))["dropped"])
+                    except (ValueError, KeyError, TypeError, UnicodeDecodeError):
+                        pass  # a damaged meta record only loses the drop count
+                    continue
+                yield wall_ts, chr(kind), payload
+
+
+def finalize_partials(rec_dir):
+    """Rename every leftover `.gt7rec.part` in rec_dir to `.gt7rec`; returns the new names."""
+    try:
+        names = sorted(os.listdir(rec_dir))
+    except OSError:
+        return []
+    done = []
+    for name in names:
+        if not name.endswith(SUFFIX + PART):
+            continue
+        target = os.path.join(rec_dir, name[:-len(PART)])
+        if os.path.exists(target):    # _free_path alone would count this .part as taken
+            target = _free_path(rec_dir, name[:-len(SUFFIX + PART)])
+        try:
+            os.replace(os.path.join(rec_dir, name), target)
+            done.append(os.path.basename(target))
+        except OSError as e:
+            LOG.warning("could not finalise telemetry recording %s: %s", name, e)
+    return done
+
+
+def _started_ts(header):
+    try:
+        return datetime.datetime.fromisoformat(header.get("started", "")).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
+def list_recordings(rec_dir, count_laps=False):
+    """One dict per readable recording in rec_dir, sorted by name; count_laps reads every packet."""
+    try:
+        names = sorted(os.listdir(rec_dir))
+    except OSError:
+        return []
+    rows = []
+    for name in names:
+        if not (name.endswith(SUFFIX) or name.endswith(SUFFIX + PART)):
+            continue
+        path = os.path.join(rec_dir, name)
+        try:
+            r = Recording(path)
+        except RecordingError:
+            continue
+        if not count_laps:
+            start = _started_ts(r.header)
+            rows.append({"name": name, "path": path, "size": os.path.getsize(path),
+                         "started": r.header.get("started", ""),
+                         "duration_s": max(0.0, os.path.getmtime(path) - start) if start else 0.0,
+                         "laps": None, "partial": name.endswith(PART)})
+            continue
+        first = last = prev_lap = None
+        laps = 0
+        for wall_ts, _kind, plain in r.packets():
+            first = wall_ts if first is None else first
+            last = wall_ts
+            lap = struct.unpack_from("<h", plain, gt7_telemetry.OFF_LAP)[0]
+            if prev_lap is not None and lap != prev_lap:
+                laps += 1
+            prev_lap = lap
+        rows.append({"name": name, "path": path, "size": os.path.getsize(path),
+                     "started": r.header.get("started", ""),
+                     "duration_s": (last - first) if first is not None else 0.0,
+                     "laps": laps, "partial": name.endswith(PART)})
+    return rows
