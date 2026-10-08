@@ -291,6 +291,31 @@ def t_resolve_recording_by_name_stem_and_latest():
             assert "no recording" in str(e)
 
 
+def t_resolve_recording_latest_picks_by_started_time_not_name_sort():
+    # Two recordings started in the same second collide onto <stem>.gt7rec and
+    # <stem>-2.gt7rec; "-2" sorts BEFORE the bare name lexicographically, so a
+    # name-sorted "latest" would return the older file (#786).
+    import tempfile, importlib
+    gr = importlib.import_module("gt7_recording")
+    with tempfile.TemporaryDirectory() as d:
+        ts = 1760000000.0
+        b = bytearray(0x128)
+        b[0:4] = (0x47375330).to_bytes(4, "little")
+        w1 = gr.RecordingWriter(d, "Demo", "dev", flush_s=0.05)
+        w1.put(ts, "A", bytes(b))
+        w1.close()
+        w2 = gr.RecordingWriter(d, "Demo", "dev", flush_s=0.05)
+        w2.put(ts, "A", bytes(b))
+        w2.close()
+        assert "-2" in os.path.basename(w2.path) and "-2" not in os.path.basename(w1.path)
+        assert os.path.basename(w2.path) < os.path.basename(w1.path), "sanity: name order is reversed"
+        # w2 is the truly later recording (same started second, written after);
+        # pin distinct mtimes so the tie-break is deterministic on any filesystem.
+        os.utime(w1.path, (ts, ts))
+        os.utime(w2.path, (ts + 10, ts + 10))
+        assert m._resolve_recording(d, "latest") == w2.path
+
+
 def t_telemetry_delete_refuses_the_open_file():
     import tempfile
     with tempfile.TemporaryDirectory() as d:
@@ -1528,6 +1553,85 @@ def t_reset_telemetry_record_removes_state_file():
             m._reset_telemetry_record()            # absent file: no error
         finally:
             m._runtime_dir = real
+
+
+def t_telemetry_record_wanted_follows_profile_default():
+    rc = m.pcfg.ResolvedConfig(profile="demo", name="Demo", sheet_id="abc",
+                               telemetry_record="1")
+    assert m._telemetry_record_wanted(rc) is True
+    rc_off = m.pcfg.ResolvedConfig(profile="demo", name="Demo", sheet_id="abc",
+                                   telemetry_record="")
+    assert m._telemetry_record_wanted(rc_off) is False
+    assert m._telemetry_record_wanted(None) is False
+
+
+def t_sync_live_telemetry_record_pushes_the_profile_default_to_the_relay():
+    # A fresh `event start` deletes telemetry-record.json, but an already-running
+    # relay's live RecordControl does not re-read it (#786): push the resolved
+    # default explicitly so the two stay consistent.
+    calls = []
+    orig_cfg, orig_call = m._active_config, m._relay_record_call
+    try:
+        m._active_config = lambda: m.pcfg.ResolvedConfig(
+            profile="demo", name="Demo", sheet_id="abc", telemetry_record="1")
+        m._relay_record_call = calls.append
+        m._sync_live_telemetry_record()
+        assert calls == ["start"], calls
+        calls.clear()
+        m._active_config = lambda: m.pcfg.ResolvedConfig(
+            profile="demo", name="Demo", sheet_id="abc", telemetry_record="")
+        m._sync_live_telemetry_record()
+        assert calls == ["stop"], calls
+    finally:
+        m._active_config, m._relay_record_call = orig_cfg, orig_call
+
+
+def t_sync_live_telemetry_record_never_raises():
+    orig = m._active_config
+    try:
+        def _boom():
+            raise RuntimeError("no profile resolves")
+        m._active_config = _boom
+        m._sync_live_telemetry_record()      # must not raise
+    finally:
+        m._active_config = orig
+
+
+def t_event_start_pushes_live_telemetry_record_only_when_relay_already_running():
+    import tempfile
+
+    class _Reached(Exception):
+        pass
+
+    def _drive(http_ok):
+        ev = m._event_modules()[0]
+        calls = []
+        saved = (m._event_gate_results, m._tailscale_connect, ev.app_running,
+                 m._runtime_dir, m._relay_http_ok, m._sync_live_telemetry_record,
+                 m.relay_start)
+        with tempfile.TemporaryDirectory() as tmp:
+            m._event_gate_results = lambda e, p: []
+            m._tailscale_connect = lambda e: "ok"
+            ev.app_running = lambda app, platform=None: True
+            m._runtime_dir = lambda: tmp
+            m._relay_http_ok = lambda: http_ok
+            m._sync_live_telemetry_record = lambda: calls.append("sync")
+
+            def _boom(_rest):
+                raise _Reached()
+            m.relay_start = _boom
+            try:
+                m.event_start([])
+                raise AssertionError("expected to reach relay_start")
+            except _Reached:
+                return calls
+            finally:
+                (m._event_gate_results, m._tailscale_connect, ev.app_running,
+                 m._runtime_dir, m._relay_http_ok, m._sync_live_telemetry_record,
+                 m.relay_start) = saved
+
+    assert _drive(True) == ["sync"], "relay already running: push the live default"
+    assert _drive(False) == [], "no relay yet: relay_start will seed state from scratch"
 
 
 def t_profile_env_vars_includes_event_title():

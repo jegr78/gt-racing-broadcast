@@ -1457,6 +1457,27 @@ def _reset_telemetry_record():
         pass  # no live toggle recorded yet
 
 
+def _telemetry_record_wanted(rc):
+    """The active profile's TELEMETRY_RECORD default as a bool, per the same rules
+    the relay applies to RACECAST_TELEMETRY_RECORD. False when no profile resolves."""
+    import gt7_recording as gr
+    return gr.record_default(
+        {"RACECAST_TELEMETRY_RECORD": rc.telemetry_record if rc else ""})
+
+
+def _sync_live_telemetry_record():
+    """Push the profile default to an already-running relay's live RecordControl.
+    _reset_telemetry_record() deletes telemetry-record.json, but a relay that was
+    already up does not re-read it (only a fresh RecordControl does), so the two
+    would otherwise disagree after a fresh `event start` (#786). Best-effort: must
+    never fail event start."""
+    try:
+        want = _telemetry_record_wanted(_active_config())
+        _relay_record_call("start" if want else "stop")
+    except Exception:  # noqa: BLE001  best-effort, event start must proceed either way
+        pass
+
+
 def _is_continuation_start(rest):
     """True when this `event start` continues an in-progress broadcast rather than
     beginning a fresh one: any --stint/--part flag marks a mid-event bring-up (a local
@@ -3141,11 +3162,28 @@ def _relay_record_status():
     return ((st or {}).get("telemetry") or {}).get("record")
 
 
+def _recording_sort_key(row):
+    """(started_ts, mtime): the header's started time, which two recordings begun in
+    the same second share (second resolution), so an mtime tie-break picks the one
+    actually written later (#786). A name sort is wrong here: "<stem>-2.gt7rec"
+    (a same-second collision) sorts before the bare "<stem>.gt7rec"."""
+    import datetime
+    try:
+        started = datetime.datetime.fromisoformat(row["started"]).timestamp()
+    except (TypeError, ValueError):
+        started = float("-inf")
+    try:
+        mtime = os.path.getmtime(row["path"])
+    except OSError:
+        mtime = 0.0
+    return (started, mtime)
+
+
 def _resolve_recording(rec_dir, name):
     import gt7_recording as gr
     rows = gr.list_recordings(rec_dir)
     if name == "latest" and rows:
-        return rows[-1]["path"]
+        return max(rows, key=_recording_sort_key)["path"]
     for row in rows:
         if name in (row["name"], gr.recording_stem(row["path"])):
             return row["path"]
@@ -4214,8 +4252,11 @@ def event_start(rest, _autojoin=True, _new_session=True):
     # into this report. A fresh broadcast only, since a takeover or a mid-event
     # recovery restart keeps the existing window so the report stays continuous.
     if _new_session and not _is_continuation_start(rest):
+        was_running = _relay_http_ok()
         _write_session_start()
         _reset_telemetry_record()
+        if was_running:   # the relay's live RecordControl does not re-read the file
+            _sync_live_telemetry_record()
     relay_start(_stint_args(rest) + _qualifying_args(rest) + _title_args(rest))
     if _qualifying_args(rest):   # verify the relay actually came up in qualifying mode
         _mm = qualifying_mode_mismatch_note(True, _relay_mode())
