@@ -69,6 +69,22 @@ def t_solo_heartbeat_paths_never_crash():
     r._maybe_auto_failover(now)              # must not KeyError on feeds[None]
 
 
+def t_solo_health_never_crashes_with_auto_feed_arm():
+    # RACECAST_MANUAL_FEED_ARM=0 (machine .env) turned off the early return in
+    # _compute_desync; solo then indexed feeds[None], killed the heartbeat
+    # thread and turned /status into a 500 ("relay not responding").
+    import time as _t
+    r = _solo_relay()
+    r.manual_feed_arm = False
+    now = _t.time()
+    r._desync_active, r._desync_since = True, now - 60   # stale state must be cleared
+    r._refresh_health(now)
+    assert r._desync == {"active": False}
+    assert r._desync_active is False and r._desync_since is None
+    s = r.status()                           # the /status payload, was a 500
+    assert s["mode"] == "solo" and set(s["health"]) == {"level", "reasons", "since_s"}
+
+
 def _get_json(srv, path, body=None):
     import json, urllib.error, urllib.request
     url = "http://127.0.0.1:%d%s" % (srv.server_address[1], path)
