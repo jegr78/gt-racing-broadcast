@@ -160,6 +160,8 @@ The relay keeps the choice across restarts; the key lights while the block is sh
 In a solo **POV** profile the status strip also names the car the driver is in, e.g.
 `CAR Alfa Romeo 155 2.5 V6 TI '93 · Gr.4`, read from the GT7 telemetry. The pill
 appears once the console sends telemetry and follows a car change.
+`TRACK` names the recognised track and layout after the first full lap. `?` means
+several layouts fit; hover for their ids.
 
 ![The Director Panel in solo mode: feed/schedule controls hidden, solo scene switches, the Game/Webcam/Mic/POV audio mixer, and the POV editor with its own reload/stop](images/director-panel-solo.png)
 

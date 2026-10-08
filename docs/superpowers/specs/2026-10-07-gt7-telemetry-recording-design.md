@@ -264,7 +264,7 @@ TDD, failing test first.
 | Files | Source | Licence |
 |---|---|---|
 | `cars.csv`, `maker.csv`, `cargrp.csv` | [ddm999/gt7info](https://github.com/ddm999/gt7info) `_data/db/` | MIT-0 |
-| `index.json`, `signatures.json` | [jbhoorasingh/gt7-datalogger-track-data](https://github.com/jbhoorasingh/gt7-datalogger-track-data) | CC0 (survey data, `index.json`); `signatures.json` also builds on MIT captures of [zetetos/gt-telemetry](https://github.com/zetetos/gt-telemetry) |
+| `index.json`, `signatures.json` | [jbhoorasingh/gt7-datalogger-track-data](https://github.com/jbhoorasingh/gt7-datalogger-track-data) | CC0 for `index.json`; `signatures.json` has no stated licence and is downloaded at runtime only |
 
 - `index.json` lists all 121 GT7 layouts: `official_id`, `track`, `layout`,
   `official_name`, `country`, `turns`, `length_m`, `reverse`. It is the catalogue for
@@ -277,9 +277,14 @@ TDD, failing test first.
 - On the real fixture packets the four `~` packets lie 2.5 to 6.6 m from the Nürburgring
   GP line and the three `A` packets 2 to 10 m from Suzuka; single points also fall into
   up to 35 bounding boxes, so recognition always works on a whole lap.
-- The bundled copies live in `src/assets/gt7/` beside the car tables, with the licence
-  texts (`LICENSE-track-data` with the CC0 dedication and the MIT notice of
-  zetetos/gt-telemetry). `src/assets/gt7/README.md` names all sources.
+- The bundled copies live in `src/assets/gt7/` beside the car tables, with
+  `LICENSE-track-data` (the CC0 dedication). `src/assets/gt7/README.md` names all
+  sources.
+- `signatures.json` is never bundled (`gt7_data.RUNTIME_ONLY`): the upstream CC0
+  dedication names only `tracks/` and `index.json`. Each install downloads it with the
+  first successful `update()`; until then only learned tracks are recognised. The
+  24 h gate does not hold back an update while a runtime-only file is missing, and
+  `status()` reports such a file as `missing`.
 
 ## Module `src/scripts/gt7_data.py`
 
@@ -293,21 +298,25 @@ TDD, failing test first.
   `<runtime_base>/gt7/updated.json`. Without `force` it returns at once when the last
   successful check is younger than 24 h. Any network or validation failure keeps the
   old file and is reported per file in the result; it never raises.
-- `status(runtime_base)` -> per file: source (`runtime` or `bundled`), last update,
+- `status(runtime_base)` -> per file: source (`runtime`, `bundled` or `missing`), last update,
   row count.
 - `tools/fetch-gt7-cars.py` becomes `tools/fetch-gt7-data.py`: it calls the same
-  download and validation and writes the bundled copies in `src/assets/gt7/`.
+  download and validation and writes the bundled copies in `src/assets/gt7/`
+  (every source except `RUNTIME_ONLY`).
 
 **Automatic.** A relay start with telemetry runs `update()` in a daemon thread. After
 a successful update the relay reloads its car database and track database in place.
 
-**Manual.** `racecast gt7-data update [--force]` and `racecast gt7-data status`. The
-Control Center Settings view gets a "GT7 data" row with the age of the data and an
-**Update** button (route `POST /api/gt7-data/update`, `GET /api/gt7-data`).
-`cc-settings.png` is refreshed.
+**Manual.** `racecast gt7-data update` and `racecast gt7-data status`. The CLI accepts
+`--force` on `update` but does not advertise it: every manual update already forces a
+fetch, so the flag changes nothing observable. The Control Center Settings view gets a
+"GT7 data" row with the age of the data and an **Update** button (route `POST
+/api/gt7-data/update`, `GET /api/gt7-data`). `cc-settings.png` is refreshed.
 
-`gt7_cars.CarDB()` without a directory and the new track database both read through
-`gt7_data.resolve`.
+The new track database reads through `gt7_data.resolve` (runtime copy when present and
+valid, else the bundled one). `gt7_cars.CarDB()` without a directory does not: it reads
+`default_dir()` directly, i.e. the bundled tables in `src/assets/gt7/`, with no runtime
+override.
 
 ## Module `src/scripts/gt7_tracks.py`
 
@@ -319,7 +328,7 @@ Control Center Settings view gets a "GT7 data" row with the age of the data and 
   order:
   1. Candidates: rows whose `length_m` is within 3 % of `length_m` and whose box,
      widened by 50 m, contains every point.
-  2. Score: mean distance from each point to the nearest `path` point. Rows above 15 m
+  2. Score: mean distance from each point to the racing line (projected onto the nearest `path` segment, not the nearest vertex, since vertices lie 20 m apart). Rows above 15 m
      drop out.
   3. Direction: the sequence of nearest `path` indices, unwrapped modulo the path
      length, must mostly rise (forward) or fall (reverse). Falling selects the row's
@@ -340,12 +349,12 @@ Control Center Settings view gets a "GT7 data" row with the age of the data and 
 - `_LapAccumulator` also keeps `(pos_x, pos_z)` whenever the driven distance passed
   another 20 m; the lap record (`on_lap`) carries it as `points` plus `distance_m`.
 - `TelemetryEngine.track_db` (None by default) and `TelemetryEngine.track`: after each
-  closed lap with `distance_m` >= 80 % of the shortest candidate length, the engine
-  calls `track_db.match`. A single match sets `track` until the next session boundary;
+  closed lap with at least `MIN_TRACK_POINTS` recorded points, the engine calls
+  `track_db.match`. A single match sets `track` until the next session boundary;
   candidates set `track = {"candidates": [...]}` and keep trying on later laps.
 - `TelemetryStore.data()` and `/status` `telemetry.track` carry `track` (None until
   recognised). The Director Panel status strip shows `<track> - <layout>` next to the
-  car (`stTrack`), or `Track ?` with the candidate names as tooltip.
+  car (`stTrack`), or `Track ?` with the candidate ids as tooltip.
   `director-panel.png` is refreshed.
 
 ## Export

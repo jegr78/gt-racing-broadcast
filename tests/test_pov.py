@@ -3508,6 +3508,7 @@ def t_backlog_in_status_and_health_snapshot():
 
 def t_redact_console_status_drops_telemetry_record_for_non_director():
     full = {"feeds": {}, "telemetry": {"visible": True, "car": "911",
+                                       "track": {"id": "2066d9", "track": "Nurburgring"},
                                        "record": {"active": True, "error": "disk full"}}}
     kept = m.redact_console_status(full, ["director"])["telemetry"]
     assert kept["record"]["active"] is True and kept["record"]["error"] == "disk full"
@@ -3515,6 +3516,7 @@ def t_redact_console_status_drops_telemetry_record_for_non_director():
         t = m.redact_console_status(full, roles)["telemetry"]
         assert "record" not in t, f"recording path and counters are producer detail: {roles}"
         assert t["visible"] is True and t["car"] == "911"
+        assert t["track"]["id"] == "2066d9", f"the track is no secret, like the car: {roles}"
     assert "telemetry" not in m.redact_console_status({"feeds": {}}, ["commentator"])
 
 

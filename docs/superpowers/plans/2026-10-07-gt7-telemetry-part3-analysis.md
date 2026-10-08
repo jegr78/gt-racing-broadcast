@@ -32,6 +32,17 @@
 - Run single test files with `python3 tests/<file>.py`; one function with `python3 -c "import sys; sys.path.insert(0,'tests'); import <mod> as t; t.<fn>()"`. Lint with `python3 tools/lint.py` after every Python change.
 - Commit messages end with `Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>`.
 
+
+### Carry-overs from part 2 (read before Task 1)
+
+Part 2 landed with these differences from the text below; the code on the epic branch is the truth.
+- `signatures.json` never ships (`gt7_data.RUNTIME_ONLY`). Until the first successful update only learned tracks are recognised; `make-demo-recording.py` and every test must not rely on the real file.
+- `TrackDB.project` returns `list[float | None]` (None for a non-finite point) or None; consumers handle None slots.
+- `TrackDB.learn` raises `OSError` on a failed write and `ValueError` with fewer than 10 finite points; `telemetry_learn_data` maps both to `{"ok": false, "error": ...}`.
+- One shared helper builds the assignment key `"<profile>/<stem>"` and returns None without a profile; export (`racecast.telemetry_export_cmd`, today an inline f-string that can yield `"None/<stem>"`) and learn both use it.
+- `gt7_recording.session_tracks`: when an assigned id cannot be resolved by `name()`, fall back to matching instead of returning None for every session.
+- The relay picks up changed GT7 files within 60 s (`gt7_data` fingerprint poll), so a learned track reaches a running relay without restart.
+
 ## File Structure
 
 | File | Change | Responsibility |

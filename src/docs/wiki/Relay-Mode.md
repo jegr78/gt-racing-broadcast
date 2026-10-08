@@ -501,7 +501,8 @@ community database [ddm999/gt7info](https://github.com/ddm999/gt7info). The HUD 
 maker and model above the telemetry panel (the `Car` element in the overlay builder),
 and the Director Panel's status strip shows it too. `/telemetry/data` and `/status`
 (`telemetry.car`) report `{id, maker, name, group}`. A car added by a GT7 update after
-the tables were refreshed shows as `Car #<id>` until the next release updates them.
+the tables were refreshed shows as `Car #<id>` until the next GT7 data update
+(see Track recognition below).
 
 **Steering wheel (solo POV).** A wheel icon left of the telemetry panel turns with
 the driver's steering, from the extended telemetry packet (see below). It is the
@@ -524,6 +525,21 @@ packets unless `--all`) and `laps.csv` (one row per lap with GT7's lap time and
 whether the relay counted it) next to the recording. `--excel` writes a file a
 German Excel opens with a double click. `racecast telemetry delete <name>` removes
 a recording and its exported CSVs.
+
+**Track recognition (solo POV).** After the first full lap the relay names the track and
+layout, including reverse layouts, from the car's positions, and the Director Panel shows
+it next to the car. It recognises the layouts that the community dataset
+[gt7-datalogger-track-data](https://github.com/jbhoorasingh/gt7-datalogger-track-data)
+has a racing line for (78 of 121 when this was written). That racing-line file is not
+part of the package: the relay downloads it on its first start with internet access, and
+recognition starts after that. Laps up to 40 km are covered. The CSV export adds `track`
+and `layout` to `laps.csv` and measures `lap_dist_m` along the racing line, so laps line
+up corner for corner.
+
+When it starts with telemetry, the relay refreshes the car names and track data, at most
+once every 24 hours. `racecast gt7-data update` or **Settings -> GT7 data -> Update now**
+does it on demand, and a running relay uses the new data within a minute.
+`racecast gt7-data status` shows what is in use.
 
 **Telemetry packet format.** The relay asks GT7 for its extended telemetry packet,
 which adds the steering angle, the driver's pedal input and the car's accelerations

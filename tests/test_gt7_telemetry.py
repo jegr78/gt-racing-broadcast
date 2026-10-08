@@ -1121,6 +1121,153 @@ def t_engine_on_lap_failure_does_not_raise():
     assert eng.session == 1
 
 
+class _FakeTracks:
+    def __init__(self, result):
+        self.result, self.calls = result, []
+
+    def match(self, points, length_m):
+        self.calls.append((len(points), round(length_m)))
+        return self.result
+
+
+def _drive_xy(eng, t, lap, secs, speed=50.0):
+    """Drive `secs` along +x at `speed`, positions following the distance."""
+    x = 0.0
+    for _ in range(int(secs / 0.1)):
+        eng.update(tm.parse_packet(_packet(speed_mps=speed, lap=lap, pos=(x, 0.0, 0.0))), t)
+        t += 0.1
+        x += speed * 0.1
+    return t
+
+
+def t_lap_record_carries_points_every_20m():
+    eng = tm.TelemetryEngine()
+    laps = []
+    eng.on_lap = laps.append
+    eng.update(tm.parse_packet(_packet(lap=1)), 0.0)
+    t = _drive_xy(eng, 0.1, 2, 10.0)                       # 500 m
+    eng.update(tm.parse_packet(_packet(lap=3)), t)
+    pts = laps[-1]["points"]
+    assert 24 <= len(pts) <= 26, len(pts)
+    assert all(15.0 <= b[0] - a[0] <= 25.0 for a, b in zip(pts, pts[1:], strict=False)), pts[:4]
+    assert abs(laps[-1]["distance_m"] - 495.0) < 1e-6
+
+
+def t_engine_sets_track_after_a_matching_lap_and_resets_on_session_change():
+    eng = tm.TelemetryEngine()
+    found = {"id": "2066d9", "track": "Nürburgring", "layout": "Grand Prix",
+             "reverse": False, "score_m": 4.2}
+    eng.track_db = _FakeTracks(found)
+    eng.update(tm.parse_packet(_packet(lap=1)), 0.0)
+    t = _drive_xy(eng, 0.1, 2, 10.0)
+    eng.update(tm.parse_packet(_packet(lap=3)), t)
+    assert eng.track == found
+    n = len(eng.track_db.calls)
+    t = _drive_xy(eng, t + 0.1, 3, 10.0)
+    eng.update(tm.parse_packet(_packet(lap=4)), t)
+    assert len(eng.track_db.calls) == n, "a recognised track is not matched again"
+    eng.update(tm.parse_packet(_packet(lap=0)), t + 0.1)
+    assert eng.track is None
+
+
+def t_engine_keeps_trying_while_ambiguous_and_survives_matcher_errors():
+    eng = tm.TelemetryEngine()
+    fake = _FakeTracks({"candidates": ["a", "b"]})
+    eng.track_db = fake
+    eng.update(tm.parse_packet(_packet(lap=1)), 0.0)
+    t = _drive_xy(eng, 0.1, 2, 10.0)
+    eng.update(tm.parse_packet(_packet(lap=3)), t)
+    assert eng.track == {"candidates": ["a", "b"]}
+    n = len(fake.calls)
+
+    t = _drive_xy(eng, t + 0.1, 3, 10.0)
+    eng.update(tm.parse_packet(_packet(lap=4)), t)
+    assert len(fake.calls) == n + 1, "an ambiguous result keeps trying on the next lap"
+    assert eng.track == {"candidates": ["a", "b"]}
+
+    class Boom:
+        def match(self, *a):
+            raise RuntimeError("bad data")
+    eng.track_db = Boom()
+    t = _drive_xy(eng, t + 0.1, 4, 10.0)
+    eng.update(tm.parse_packet(_packet(lap=5)), t)        # must not raise
+    assert eng.track == {"candidates": ["a", "b"]}
+
+
+def t_engine_survives_an_incomplete_or_non_dict_match_result():
+    """A match result with an 'id' but missing keys, or a non-dict result, must
+    never raise into update(): the lap counter has to keep advancing."""
+    class _Incomplete:
+        def match(self, *a):
+            return {"id": "x"}        # missing track/layout/reverse
+
+    eng = tm.TelemetryEngine()
+    eng.track_db = _Incomplete()
+    eng.update(tm.parse_packet(_packet(lap=1)), 0.0)
+    t = _drive_xy(eng, 0.1, 2, 10.0)
+    eng.update(tm.parse_packet(_packet(lap=3)), t)        # must not raise
+    assert eng.track == {"id": "x"}
+    assert eng._lap_num == 3
+
+    class _NonDict:
+        def match(self, *a):
+            return ["not", "a", "dict"]
+
+    eng2 = tm.TelemetryEngine()
+    eng2.track_db = _NonDict()
+    eng2.update(tm.parse_packet(_packet(lap=1)), 0.0)
+    t2 = _drive_xy(eng2, 0.1, 2, 10.0)
+    eng2.update(tm.parse_packet(_packet(lap=3)), t2)      # must not raise
+    assert eng2.track is None
+    assert eng2._lap_num == 3
+
+    # the lap counter must keep advancing normally on the following lap too
+    t3 = _drive_xy(eng2, t2 + 0.1, 3, 10.0)
+    eng2.update(tm.parse_packet(_packet(lap=4)), t3)
+    assert eng2._lap_num == 4
+
+
+def t_lap_points_capped_under_flood():
+    """A same-lap packet flood must not grow _LapAccumulator.points without bound,
+    mirroring the existing samples cap."""
+    eng = tm.TelemetryEngine()
+    t = 100.0
+    eng.update(tm.parse_packet(_packet(speed_mps=90.0, lap=1)), t); t += 0.1
+    for _ in range(tm.MAX_SAMPLES + 500):     # flood, lap never changes
+        eng.update(tm.parse_packet(_packet(speed_mps=90.0, lap=1)), t); t += 0.1
+    assert len(eng._acc.points) == tm.MAX_POINTS     # capped, not just bounded
+
+
+def t_long_real_lap_not_rejected_and_keeps_all_its_points():
+    """The bundled catalogue's longest layout (Special Stage Route X, ~30.3 km) must
+    drive clean, not trip the sample-flood cap, and keep points across the whole lap;
+    5 m/step (default _drive_xy speed) keeps the sample count close to the real
+    4 m-spacing cap, unlike a coarser step that would never flood."""
+    eng = tm.TelemetryEngine()
+    laps = []
+    eng.on_lap = laps.append
+    eng.update(tm.parse_packet(_packet(lap=1)), 0.0)
+    t = _drive_xy(eng, 0.1, 2, 620.0)                  # ~31 km lap at 50 m/s
+    eng.update(tm.parse_packet(_packet(lap=3)), t)
+    rec = laps[-1]
+    assert rec["status"] in ("reference", "counted"), rec
+    assert rec["distance_m"] > 30000, rec["distance_m"]
+    assert 1500 <= len(rec["points"]) <= 1600, len(rec["points"])
+
+
+def t_short_lap_never_reaches_match():
+    """A lap under MIN_TRACK_POINTS points must never call TrackDB.match."""
+    eng = tm.TelemetryEngine()
+    fake = _FakeTracks({"id": "x", "track": "T", "layout": "L",
+                         "reverse": False, "score_m": 1.0})
+    eng.track_db = fake
+    eng.update(tm.parse_packet(_packet(lap=1)), 0.0)
+    t = _drive_xy(eng, 0.1, 2, 1.0)            # a few metres: well under 10 points
+    eng.update(tm.parse_packet(_packet(lap=3)), t)
+    assert fake.calls == []
+    assert eng.track is None
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

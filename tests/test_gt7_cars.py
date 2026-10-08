@@ -73,22 +73,13 @@ def t_default_dir_is_the_shipped_tables():
     assert os.path.normpath(gc.default_dir()) == os.path.normpath(SHIPPED)
 
 
-def t_fetch_tool_validates_a_download():
-    """tools/fetch-gt7-cars.py only replaces a table after it checked the columns
-    CarDB reads and, for cars.csv, a plausible row count."""
-    tool = _load("fetch_gt7_cars", ("tools", "fetch-gt7-cars.py"))
-    rows = "".join(f"{i},Car {i},1\n" for i in range(tool.MIN_CARS))
-    assert len(tool.validate("cars.csv", "ID,ShortName,Maker\n" + rows)) == tool.MIN_CARS
-    for name, text in (("cars.csv", "ID,ShortName,Maker\n1,A,1\n"),       # truncated
-                       ("maker.csv", "ID,Label\n1,X\n"),                    # renamed column
-                       ("cargrp.csv", "<html>rate limited</html>")):
-        try:
-            tool.validate(name, text)
-        except ValueError:
-            continue
-        raise AssertionError(f"{name} accepted: {text!r}")
-    with open(os.path.join(SHIPPED, "cars.csv"), encoding="utf-8", newline="") as f:
-        assert tool.validate("cars.csv", f.read())             # the shipped copy passes
+def t_fetch_tool_uses_the_shared_validator():
+    tool = _load("fetch_gt7_data", ("tools", "fetch-gt7-data.py"))
+    assert tool.gt7_data.SOURCES["cars.csv"].endswith("/cars.csv")
+    for name in tool.BUNDLED:
+        with open(os.path.join(SHIPPED, name), "rb") as f:
+            assert tool.gt7_data.validate(name, f.read()) > 0, f"bundled {name} must validate"
+    assert "signatures.json" not in tool.BUNDLED, "signatures.json is downloaded at runtime only"
 
 
 if __name__ == "__main__":

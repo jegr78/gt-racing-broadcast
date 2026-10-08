@@ -11,6 +11,8 @@ control of the old page was dropped."""
 import json
 import os
 import re
+import shutil
+import subprocess
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -381,6 +383,27 @@ def t_solo_status_strip_names_the_car():
     assert "function carLabel(car)" in html
 
 
+def t_solo_status_strip_names_the_track():
+    """The strip shows the recognised GT7 track (telemetry.track) as text, '?' with the
+    candidate ids as tooltip while ambiguous, and hides it when unknown or the relay is down."""
+    html = _html()
+    assert '<span class="st" id="stTrack" hidden>TRACK <b></b></span>' in html
+    assert html.index('id="stCar"') < html.index('id="stTrack"'), "the track sits after the car"
+    poll = html[html.index("async function relayPoll"):]
+    down = poll[poll.index("}catch(e){"):]
+    poll = poll[:poll.index("}catch(e){")]
+    assert "const trk = trackOf(d.telemetry);" in poll
+    assert '$("#stTrack").hidden = !trk;' in poll
+    assert '$("#stTrack b").textContent = trackLabel(trk);' in poll
+    assert '"Possible: " + trk.candidates.join(", ")' in poll
+    assert '$("#stTrack").hidden = true;' in down[:down.index("\n}\n")], \
+        "a stale track must not stay up while the relay is down"
+    fn = _func_src(html, "trackLabel")
+    assert 'if (t.candidates) return "?";' in fn
+    assert '(t.reverse ? " (reverse)" : "")' in fn
+    assert "#stTrack b{text-transform:none" in html, "track names keep their case"
+
+
 
 def _config_block(html, name):
     """The source text of `const <name> = {...};`, up to the closing `};`."""
@@ -495,6 +518,23 @@ def _area(html, name):
     ends = [j for j in (html.find('<div class="area"', i + 1), html.find('<div id="log">', i))
             if j != -1]
     return html[i:min(ends)]
+
+
+def t_track_pill_treats_an_empty_candidate_list_as_no_track():
+    node = shutil.which("node")
+    if not node:
+        print("  (node not installed, JS check skipped)")
+        return
+    html = _html()
+    js = _func_src(html, "trackOf") + "\n}\n" + _func_src(html, "trackLabel") + """
+}
+const r = [trackOf({track: {candidates: []}}), trackOf({track: {candidates: "x"}}),
+           trackOf(null), trackLabel(trackOf({track: {candidates: ["a", "b"]}})),
+           trackLabel(trackOf({track: {track: "Spa", layout: "Full"}}))];
+console.log(JSON.stringify(r));"""
+    out = subprocess.run([node, "-e", js], capture_output=True, text=True, errors="replace",
+                         check=True, timeout=30).stdout.strip()
+    assert out == '[null,null,null,"?","Spa - Full"]', out
 
 
 def _func_src(html, name):

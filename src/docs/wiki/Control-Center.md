@@ -184,6 +184,9 @@ Machine-wide (not league) configuration:
   **commentary mic**, then **Save** (writes `RACECAST_CAPTURE`, `RACECAST_MIC` and
   `RACECAST_MIC_NAME`). A solo profile adds the webcam; a solo commentary profile also
   the tyres/fuel capture, a solo POV profile the GT7 PlayStation IP.
+- **GT7 data** shows when the car and track data were last checked and how many cars and
+  layouts it knows. **Update now** fetches the latest copy; a running relay uses it within
+  a minute.
 
 > **CLI alternative:** edit `.env` in any text editor; `racecast cookies <browser>`;
 > `racecast device-scan`.

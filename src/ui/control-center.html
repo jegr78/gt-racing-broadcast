@@ -1001,6 +1001,13 @@
             <button onclick="op('cookies-twitch', false, {browser: $('browser-tw').value})">
               <svg viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Refresh Twitch login</button></div>
         </section>
+        <div class="viewhead"><h3>GT7 data</h3><span class="sub">car names and track recognition for solo POV telemetry. Shared across all leagues</span></div>
+        <section>
+          <div class="row"><span class="name">GT7 data</span>
+            <span class="dim grow" id="d-gt7data">…</span>
+            <button id="gt7data-update" onclick="updateGt7Data()" title="Fetch the latest car and track data now; a running relay uses it within a minute">
+              <svg viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Update now</button></div>
+        </section>
         <div class="viewhead"><h3>Overlay fonts</h3><span class="sub">machine-wide font library for the Overlay Builder. Shared across all leagues</span>
           <span class="vhbtns">
           <button id="font-restore" onclick="restoreBundledFonts()" title="Overwrite the fonts that ship with this install, in the library and in every league profile">
@@ -2539,6 +2546,7 @@ async function loadSettings(force) {
   $('env-err').hidden = true;
   loadFontLibrary();
   loadDevices();
+  loadGt7Data();
   let d;
   try { d = await (await fetch('/api/env', {cache: 'no-store'})).json(); }
   catch (e) { showEnvErr('Control Center not reachable.'); return; }
@@ -2744,6 +2752,47 @@ async function downloadCustomFont() {
   }
   $('font-custom').value = '';
   loadFontLibrary();
+}
+
+function fmtAgeS(ts) {
+  if (!ts) return 'never';
+  const s = Math.max(0, Date.now() / 1000 - ts);
+  if (s < 60) return 'just now';
+  if (s < 3600) return Math.round(s / 60) + ' min ago';
+  if (s < 86400) return Math.round(s / 3600) + ' h ago';
+  const days = Math.round(s / 86400);
+  return days + (days === 1 ? ' day ago' : ' days ago');
+}
+
+async function loadGt7Data() {
+  let d;
+  try { d = await (await fetch('/api/gt7-data', {cache: 'no-store'})).json(); }
+  catch (e) { $('d-gt7data').textContent = 'Control Center not reachable.'; return; }
+  if (!d.ok) { $('d-gt7data').textContent = d.error || 'unavailable'; return; }
+  const f = d.files || {};
+  const rows = n => (f[n] && f[n].rows != null) ? f[n].rows : '?';
+  const src = Object.values(f).some(x => x.source === 'runtime') ? 'updated' : 'bundled';
+  const sig = f['signatures.json'];
+  const recog = (sig && sig.source === 'missing') ? 'track signatures not downloaded yet'
+      : rows('signatures.json') + ' recognisable';
+  $('d-gt7data').textContent = 'checked ' + fmtAgeS(d.checked) + ' · ' + rows('cars.csv') +
+      ' cars · ' + rows('index.json') + ' layouts · ' + recog + ' · ' + src;
+}
+
+async function updateGt7Data() {
+  const b = $('gt7data-update'); b.disabled = true;
+  let d;
+  try {
+    d = await (await fetch('/api/gt7-data/update', {method: 'POST',
+        headers: {'Content-Type': 'application/json'}, body: '{}'})).json();
+  } catch (e) { d = {ok: false, error: 'Control Center not reachable.'}; }
+  b.disabled = false;
+  const errs = Object.entries(d.files || {}).filter(([, v]) => String(v).startsWith('error'));
+  if (!d.ok || errs.length) {
+    await alertModal((d.error ? d.error + '\n' : '') +
+        errs.map(([k, v]) => k + ': ' + v).join('\n'), {title: 'GT7 data'});
+  }
+  loadGt7Data();
 }
 
 async function restoreBundledFonts() {

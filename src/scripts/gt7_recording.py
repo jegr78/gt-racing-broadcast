@@ -320,7 +320,7 @@ SAMPLE_COLUMNS = (
     "pos_x", "pos_y", "pos_z", "car_id")
 LAP_COLUMNS = (
     "session", "lap", "start_t_s", "end_t_s", "gt7_time_s", "relay_time_s", "status",
-    "reason", "fuel_used_l", "top_speed_kmh", "car")
+    "reason", "fuel_used_l", "top_speed_kmh", "car", "track", "layout")
 GT7_TIME_WINDOW_S = 3.0       # GT7 updates last_ms shortly after the line
 
 
@@ -344,7 +344,60 @@ def _car_name(cars, car_id):
     return f"{car['maker']} {car['name']}" if car.get("maker") else car["name"]
 
 
-def export_csv(path, out_dir, include_all=False, excel=False, cars=None):
+def replay_laps(path):
+    """(header, laps, dropped): every lap the engine closes in one recording."""
+    r = Recording(path)
+    eng = gt7_telemetry.TelemetryEngine()
+    laps = []
+    eng.on_lap = laps.append
+    for wall_ts, _kind, plain in r.packets():
+        eng.update(gt7_telemetry.parse_packet(plain), wall_ts)
+    return r.header, laps, r.dropped
+
+
+def _brief(found):
+    return {k: found[k] for k in ("id", "track", "layout", "reverse")}
+
+
+def session_tracks(laps, tracks, key=None):
+    """The track of each GT7 session: a learned assignment, else the longest lap that matches."""
+    if tracks is None:
+        return {}
+    assigned = tracks.assignment(key) if key else None
+    out = {}
+    for session in sorted({lap["session"] for lap in laps}):
+        if assigned:
+            info = tracks.name(assigned)
+            out[session] = _brief(info) if info else None
+            continue
+        found = None
+        ranked = sorted((lap for lap in laps if lap["session"] == session and lap["points"]),
+                        key=lambda lap: lap["distance_m"], reverse=True)
+        for lap in ranked:
+            m = tracks.match(lap["points"], lap["distance_m"])
+            if m and "id" in m:
+                found = _brief(m)
+                break
+            found = found or m
+        out[session] = found
+    return out
+
+
+def _lap_dist(eng, pkt, by_session, tracks):
+    """Distance along the racing line when the session's track is known, else integrated."""
+    dist = eng.lap_distance()
+    found = by_session.get(eng.session)
+    if not found or "id" not in found or pkt.pos_x is None:
+        return dist
+    s = tracks.project([(pkt.pos_x, pkt.pos_z)], found["id"])
+    length = tracks.line_length(found["id"])
+    if not s or s[0] is None or not length:
+        return dist
+    ref = dist or 0.0
+    return min((s[0], s[0] - length, s[0] + length), key=lambda v: abs(v - ref))
+
+
+def export_csv(path, out_dir, include_all=False, excel=False, cars=None, tracks=None, key=None):
     """Write samples.csv and laps.csv for one recording into out_dir."""
     cars = cars if cars is not None else gt7_cars.CarDB()
     r = Recording(path)
@@ -352,6 +405,8 @@ def export_csv(path, out_dir, include_all=False, excel=False, cars=None):
     eng = gt7_telemetry.TelemetryEngine()
     laps, waiting = [], []
     eng.on_lap = laps.append
+    _h, closed, _d = replay_laps(path) if tracks is not None else (None, [], 0)
+    by_session = session_tracks(closed, tracks, key)
     os.makedirs(out_dir, exist_ok=True)
     delimiter = ";" if excel else ","
     encoding = "utf-8-sig" if excel else "utf-8"
@@ -385,7 +440,8 @@ def export_csv(path, out_dir, include_all=False, excel=False, cars=None):
             w.writerow([
                 num(wall_ts - t0, 3), eng.session, pkt.lap,
                 num(wall_ts - started if started is not None else None, 3),
-                num(eng.lap_distance(), 1), int(pkt.on_track), int(pkt.paused), num(pkt.speed_mps * 3.6, 1),
+                num(_lap_dist(eng, pkt, by_session, tracks), 1),
+                int(pkt.on_track), int(pkt.paused), num(pkt.speed_mps * 3.6, 1),
                 num(_pct(pkt.throttle), 1), num(_pct(pkt.brake), 1),
                 num(_pct(pkt.throttle_input), 1), num(_pct(pkt.brake_input), 1),
                 num(steer, 1), pkt.gear, num(pkt.rpm, 0), num(pkt.fuel_level, 2),
@@ -397,12 +453,15 @@ def export_csv(path, out_dir, include_all=False, excel=False, cars=None):
         w = csv.writer(fh, delimiter=delimiter)
         w.writerow(LAP_COLUMNS)
         for lap in laps:
+            found = by_session.get(lap["session"])
+            known = bool(found and "id" in found)
             w.writerow([
                 lap["session"], lap["lap"], num(lap["start"] - t0, 3),
                 num(lap["end"] - t0, 3), num(lap["gt7_time_s"], 3),
                 num(lap["elapsed"], 3), lap["status"], lap["reason"],
                 num(lap["fuel_used"], 2), num(lap["top_speed_mps"] * 3.6, 1),
-                _car_name(cars, lap["car_id"])])
+                _car_name(cars, lap["car_id"]),
+                found["track"] if known else "", found["layout"] if known else ""])
     return {"dir": out_dir, "samples": written, "laps": len(laps), "dropped": r.dropped}
 
 
