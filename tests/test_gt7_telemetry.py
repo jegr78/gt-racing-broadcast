@@ -1172,19 +1172,83 @@ def t_engine_sets_track_after_a_matching_lap_and_resets_on_session_change():
 
 def t_engine_keeps_trying_while_ambiguous_and_survives_matcher_errors():
     eng = tm.TelemetryEngine()
-    eng.track_db = _FakeTracks({"candidates": ["a", "b"]})
+    fake = _FakeTracks({"candidates": ["a", "b"]})
+    eng.track_db = fake
     eng.update(tm.parse_packet(_packet(lap=1)), 0.0)
     t = _drive_xy(eng, 0.1, 2, 10.0)
     eng.update(tm.parse_packet(_packet(lap=3)), t)
+    assert eng.track == {"candidates": ["a", "b"]}
+    n = len(fake.calls)
+
+    t = _drive_xy(eng, t + 0.1, 3, 10.0)
+    eng.update(tm.parse_packet(_packet(lap=4)), t)
+    assert len(fake.calls) == n + 1, "an ambiguous result keeps trying on the next lap"
     assert eng.track == {"candidates": ["a", "b"]}
 
     class Boom:
         def match(self, *a):
             raise RuntimeError("bad data")
     eng.track_db = Boom()
-    t = _drive_xy(eng, t + 0.1, 3, 10.0)
-    eng.update(tm.parse_packet(_packet(lap=4)), t)        # must not raise
+    t = _drive_xy(eng, t + 0.1, 4, 10.0)
+    eng.update(tm.parse_packet(_packet(lap=5)), t)        # must not raise
     assert eng.track == {"candidates": ["a", "b"]}
+
+
+def t_engine_survives_an_incomplete_or_non_dict_match_result():
+    """A match result with an 'id' but missing keys, or a non-dict result, must
+    never raise into update(): the lap counter has to keep advancing (#787 review)."""
+    class _Incomplete:
+        def match(self, *a):
+            return {"id": "x"}        # missing track/layout/reverse
+
+    eng = tm.TelemetryEngine()
+    eng.track_db = _Incomplete()
+    eng.update(tm.parse_packet(_packet(lap=1)), 0.0)
+    t = _drive_xy(eng, 0.1, 2, 10.0)
+    eng.update(tm.parse_packet(_packet(lap=3)), t)        # must not raise
+    assert eng.track == {"id": "x"}
+    assert eng._lap_num == 3
+
+    class _NonDict:
+        def match(self, *a):
+            return ["not", "a", "dict"]
+
+    eng2 = tm.TelemetryEngine()
+    eng2.track_db = _NonDict()
+    eng2.update(tm.parse_packet(_packet(lap=1)), 0.0)
+    t2 = _drive_xy(eng2, 0.1, 2, 10.0)
+    eng2.update(tm.parse_packet(_packet(lap=3)), t2)      # must not raise
+    assert eng2.track is None
+    assert eng2._lap_num == 3
+
+    # the lap counter must keep advancing normally on the following lap too
+    t3 = _drive_xy(eng2, t2 + 0.1, 3, 10.0)
+    eng2.update(tm.parse_packet(_packet(lap=4)), t3)
+    assert eng2._lap_num == 4
+
+
+def t_lap_points_capped_under_flood():
+    """A same-lap packet flood must not grow _LapAccumulator.points without bound,
+    mirroring the existing samples cap (#787 review)."""
+    eng = tm.TelemetryEngine()
+    t = 100.0
+    eng.update(tm.parse_packet(_packet(speed_mps=90.0, lap=1)), t); t += 0.1
+    for _ in range(tm.MAX_SAMPLES + 500):     # flood, lap never changes
+        eng.update(tm.parse_packet(_packet(speed_mps=90.0, lap=1)), t); t += 0.1
+    assert len(eng._acc.points) == tm.MAX_POINTS     # capped, not just bounded
+
+
+def t_short_lap_never_reaches_match():
+    """A lap under MIN_TRACK_POINTS points must never call TrackDB.match (#787 review)."""
+    eng = tm.TelemetryEngine()
+    fake = _FakeTracks({"id": "x", "track": "T", "layout": "L",
+                         "reverse": False, "score_m": 1.0})
+    eng.track_db = fake
+    eng.update(tm.parse_packet(_packet(lap=1)), 0.0)
+    t = _drive_xy(eng, 0.1, 2, 1.0)            # a few metres: well under 10 points
+    eng.update(tm.parse_packet(_packet(lap=3)), t)
+    assert fake.calls == []
+    assert eng.track is None
 
 
 if __name__ == "__main__":

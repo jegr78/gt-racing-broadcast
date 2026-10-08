@@ -79,6 +79,7 @@ MAX_SAMPLES = 4000        # ~16 km at 4 m spacing, far past any real lap
 
 POINT_STEP_M = 20.0       # metres between kept positions (track recognition)
 MIN_TRACK_POINTS = 10     # same floor as gt7_tracks.MIN_POINTS
+MAX_POINTS = int(MAX_SAMPLES * SAMPLE_MIN_DIST / POINT_STEP_M)  # same distance ceiling as samples
 
 # A pit (in/out) lap is not representative: its time is inflated by the pit-lane
 # transit and the stationary service, and a refuel makes its fuel delta negative.
@@ -288,8 +289,8 @@ class _LapAccumulator:
             self.top_speed = pkt.speed_mps
         self.elapsed += dt
         self.distance += max(0.0, pkt.speed_mps) * dt
-        if (pkt.pos_x is not None and math.isfinite(pkt.pos_x) and math.isfinite(pkt.pos_z)
-                and self.distance >= self.next_point_m):
+        if (pkt.pos_x is not None and self.distance >= self.next_point_m
+                and len(self.points) < MAX_POINTS):
             self.points.append((pkt.pos_x, pkt.pos_z))
             self.next_point_m = self.distance + POINT_STEP_M
         if pkt.speed_mps < STOPPED_SPEED_MPS:             # standstill in the pit box
@@ -333,8 +334,8 @@ class TelemetryEngine:
         self._delta_hist = deque()    # (t, delta) over DELTA_TREND_WINDOW_S; cleared per lap
         self.session = 1
         self.on_lap = None            # callable(dict) per closed lap; the recording exporter sets it
-        self.track_db = None           # gt7_tracks.TrackDB, or None (no track recognition)
-        self.track = None               # recognised layout, or {"candidates": [...]}
+        self.track_db = None    # gt7_tracks.TrackDB, or None (no track recognition)
+        self.track = None       # recognised layout, or {"candidates": [...]}
 
     def _is_session_boundary(self, pkt):
         """A new session (practice->quali->race, or a restart) is signalled by the
@@ -439,15 +440,14 @@ class TelemetryEngine:
             return
         try:
             found = self.track_db.match(acc.points, acc.distance)
+            if not isinstance(found, dict):   # also covers None: no match
+                return
+            if "id" in found:
+                LOG.info("GT7 track: %s %s%s", found.get("track"), found.get("layout"),
+                         " (reverse)" if found.get("reverse") else "")
+            self.track = found
         except Exception as e:  # noqa: BLE001  bad track data must not stop the telemetry
             LOG.warning("GT7 track recognition failed: %s", e)
-            return
-        if found is None:
-            return
-        if "id" in found:
-            LOG.info("GT7 track: %s %s%s", found["track"], found["layout"],
-                     " (reverse)" if found["reverse"] else "")
-        self.track = found
 
     def _finalise_lap(self):
         acc = self._acc
