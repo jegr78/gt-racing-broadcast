@@ -363,6 +363,12 @@ def t_solo_telemetry_record_toggle():
     assert "teleRecBtn.hidden = !rec" in html
     assert 'teleRecBtn.classList.toggle("air", !!(rec && rec.active && !rec.error))' in html
     assert 'teleRecBtn.classList.toggle("warn", !!(rec && rec.error))' in html
+    # The elapsed time is the relay's clock (rec.elapsed_s), not the viewer's
+    # Date.now() against rec.since: a skewed browser clock must not show a wrong
+    # recording duration (#786).
+    assert "Date.now() / 1000 - rec.since" not in html
+    assert 'cost.textContent = rec && rec.active && rec.elapsed_s != null' in html
+    assert 'fmtDur(rec.elapsed_s)' in html
 
 
 def t_solo_status_strip_names_the_car():

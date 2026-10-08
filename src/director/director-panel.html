@@ -2100,8 +2100,8 @@ async function relayPoll(){
       let cost = teleRecBtn.querySelector(".cost");
       if (!cost){ cost = document.createElement("span"); cost.className = "cost";
                   teleRecBtn.appendChild(cost); }
-      cost.textContent = rec && rec.active && rec.since
-        ? fmtDur(Date.now() / 1000 - rec.since) : "";
+      cost.textContent = rec && rec.active && rec.elapsed_s != null
+        ? fmtDur(rec.elapsed_s) : "";
       cost.hidden = !cost.textContent;
     }
     const car = d.telemetry && d.telemetry.car;   // the GT7 car the driver is in (#713)
