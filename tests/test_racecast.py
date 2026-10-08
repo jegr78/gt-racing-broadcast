@@ -259,6 +259,83 @@ def t_sheet_url_cmd_prints_url(capsys=None):
         m._active_sheet_url, m._open_url = old_url, old_open
 
 
+def t_route_telemetry_verbs():
+    for verb in ("record", "list", "export", "delete"):
+        assert m.route(["telemetry", verb, "x"]) == \
+            {"kind": "service", "command": "telemetry", "verb": verb, "rest": ["x"]}
+    _raises(lambda: m.route(["telemetry"]))
+    _raises(lambda: m.route(["telemetry", "bogus"]))
+
+
+def _rec_dir_with_one(d):
+    import importlib
+    gr = importlib.import_module("gt7_recording")
+    w = gr.RecordingWriter(d, "Demo", "dev", flush_s=0.05)
+    b = bytearray(0x128)
+    b[0:4] = (0x47375330).to_bytes(4, "little")
+    w.put(1000.0, "A", bytes(b))
+    w.close()
+    return os.path.basename(w.path)
+
+
+def t_resolve_recording_by_name_stem_and_latest():
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        name = _rec_dir_with_one(d)
+        stem = name[:-len(".gt7rec")]
+        for q in (name, stem, "latest"):
+            assert os.path.basename(m._resolve_recording(d, q)) == name, q
+        try:
+            m._resolve_recording(d, "nope"); raise AssertionError("unknown accepted")
+        except SystemExit as e:
+            assert "no recording" in str(e)
+
+
+def t_telemetry_delete_refuses_the_open_file():
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        name = _rec_dir_with_one(d)
+        real_dir, real_status = m._telemetry_rec_dir, m._relay_record_status
+        m._telemetry_rec_dir = lambda: d
+        m._relay_record_status = lambda: {"active": True, "file": name}
+        try:
+            try:
+                m.telemetry_delete_cmd([name]); raise AssertionError("open file deleted")
+            except SystemExit as e:
+                assert "currently recording" in str(e)
+            m._relay_record_status = lambda: None
+            m.telemetry_delete_cmd([name])
+            assert not os.path.exists(os.path.join(d, name))
+        finally:
+            m._telemetry_rec_dir, m._relay_record_status = real_dir, real_status
+
+
+def t_telemetry_export_writes_next_to_recording():
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        name = _rec_dir_with_one(d)
+        real = m._telemetry_rec_dir
+        m._telemetry_rec_dir = lambda: d
+        try:
+            m.telemetry_export_cmd(["latest"])
+        finally:
+            m._telemetry_rec_dir = real
+        out = os.path.join(d, name[:-len(".gt7rec")])
+        assert os.path.exists(os.path.join(out, "samples.csv"))
+        assert os.path.exists(os.path.join(out, "laps.csv"))
+
+
+def t_telemetry_record_without_relay_exits_nonzero():
+    real = m._relay_record_call
+    m._relay_record_call = lambda verb: None
+    try:
+        m.telemetry_record_cmd(["start"]); raise AssertionError("no error without relay")
+    except SystemExit as e:
+        assert e.code not in (0, None)
+    finally:
+        m._relay_record_call = real
+
+
 def t_route_obs_benchmark():
     action = m.route(["obs", "benchmark", "--window", "30"])
     assert action["command"] == "obs" and action["verb"] == "benchmark"

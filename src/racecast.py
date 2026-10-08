@@ -20,6 +20,8 @@
   racecast obs benchmark [--window S] [--settle S] [--scene NAME] [--keep-recording] [--json]   # FULL vs ROBUST on the on-air feed with a recording running; never while streaming
   racecast obs logs | tailscale logs         # tail OBS's log dir / the Tailscale status-snapshot log (same -f/--list/--archive flags)
   racecast sheet     url | open              # print / open the active league's Google Sheet (built from its SHEET_ID)
+  racecast telemetry record start|stop|status   # solo POV: record the GT7 telemetry trace (relay must run)
+  racecast telemetry list | export <name|latest> [--out DIR] [--all] [--excel] | delete <name>   # recordings of the active profile -> samples.csv + laps.csv
   racecast app launch|quit obs|discord|tailscale   # start / gracefully quit a GUI app (Control Center buttons)
   racecast discord   join | leave | status   # drive the desktop Discord client into/out of the league's voice channel
   racecast status                            # aggregate health of all services
@@ -978,6 +980,7 @@ EVENT_VERBS = ("status", "start", "stop", "takeover")
 TAILSCALE_VERBS = ("up", "down", "status", "logs")
 OBS_VERBS = ("refresh", "collection", "logs", "stream-target", "benchmark")
 SHEET_VERBS = ("url", "open")           # active league's Google Sheet (from SHEET_ID)
+TELEMETRY_VERBS = ("record", "list", "export", "delete")   # GT7 telemetry recordings (#785)
 APP_VERBS = ("launch", "quit")          # GUI app control for the Control Center
 APP_CONTROLLED = ("obs", "discord", "tailscale")   # GUI apps racecast can launch + quit
 
@@ -1040,6 +1043,11 @@ def route(argv):
         if verb not in SHEET_VERBS:
             raise ValueError(f"usage: racecast sheet {{{'|'.join(SHEET_VERBS)}}}")
         return {"kind": "service", "command": "sheet", "verb": verb, "rest": rest[1:]}
+    if cmd == "telemetry":
+        verb = rest[0] if rest else None
+        if verb not in TELEMETRY_VERBS:
+            raise ValueError(f"usage: racecast telemetry {{{'|'.join(TELEMETRY_VERBS)}}}")
+        return {"kind": "service", "command": "telemetry", "verb": verb, "rest": rest[1:]}
     if cmd == "app":
         verb = rest[0] if rest else None
         if verb not in APP_VERBS:
@@ -3111,6 +3119,117 @@ def sheet_open_cmd(_rest):
     _open_url(_sheet_url_or_exit())
 
 
+def _telemetry_rec_dir():
+    return os.path.join(_runtime_dir(), "telemetry-recordings")
+
+
+def _relay_record_call(verb):
+    """GET /telemetry/record/<verb> on the local relay; None when unreachable or 404."""
+    try:
+        return http_util.get_json(
+            f"http://127.0.0.1:{RELAY_PORT}/telemetry/record/{verb}", timeout=5)
+    except Exception:
+        return None
+
+
+def _relay_record_status():
+    """The running relay's telemetry.record block from /status, or None."""
+    try:
+        st = http_util.get_json(f"http://127.0.0.1:{RELAY_PORT}/status", timeout=3)
+    except Exception:
+        return None
+    return ((st or {}).get("telemetry") or {}).get("record")
+
+
+def _resolve_recording(rec_dir, name):
+    import gt7_recording as gr
+    rows = gr.list_recordings(rec_dir)
+    if name == "latest" and rows:
+        return rows[-1]["path"]
+    for row in rows:
+        if name in (row["name"], gr.recording_stem(row["path"])):
+            return row["path"]
+    sys.exit(f"no recording named {name!r} in {rec_dir} (see 'racecast telemetry list')")
+
+
+def telemetry_record_cmd(rest):
+    """Start, stop or report the relay's telemetry recording."""
+    verb = rest[0] if rest else None
+    if verb not in ("start", "stop", "status"):
+        sys.exit("usage: racecast telemetry record start|stop|status")
+    out = _relay_record_status() if verb == "status" else _relay_record_call(verb)
+    if out is None:
+        sys.exit("telemetry recording unavailable: the relay is not running, or the "
+                 "active profile is not a solo POV broadcast")
+    state = "recording" if out.get("active") else "off"
+    print(f"telemetry recording: {state}" + (f" -> {out['file']}" if out.get("file") else ""))
+    if out.get("error"):
+        print(f"error: {out['error']}")
+
+
+def telemetry_list_cmd(_rest):
+    """List the active profile's recordings."""
+    import gt7_recording as gr
+    rec_dir = _telemetry_rec_dir()
+    rows = gr.list_recordings(rec_dir, count_laps=True)
+    if not rows:
+        print(f"no telemetry recordings in {rec_dir}")
+        return
+    open_file = (_relay_record_status() or {}).get("file")
+    total = 0
+    for row in rows:
+        total += row["size"]
+        mark = ("recording" if open_file and row["name"].startswith(open_file)
+                else "unclosed" if row["partial"] else "")
+        print(f"{gr.recording_stem(row['path'])}  {row['size'] / 1e6:7.1f} MB  "
+              f"{row['duration_s'] / 60:6.1f} min  {row['laps']:4d} laps  {mark}".rstrip())
+    print(f"{len(rows)} recording(s), {total / 1e6:.1f} MB in {rec_dir}")
+
+
+def telemetry_export_cmd(rest):
+    """Export one recording to samples.csv + laps.csv."""
+    import argparse
+    import gt7_cars
+    import gt7_recording as gr
+    ap = argparse.ArgumentParser(prog="racecast telemetry export")
+    ap.add_argument("name", help="recording name, its stem, or 'latest'")
+    ap.add_argument("--out", help="output directory (default: <recording>/ next to it)")
+    ap.add_argument("--all", action="store_true",
+                    help="keep menu, pause and loading packets")
+    ap.add_argument("--excel", action="store_true",
+                    help="semicolon + decimal comma + BOM for a German Excel")
+    args = ap.parse_args(rest)
+    rec_dir = _telemetry_rec_dir()
+    path = _resolve_recording(rec_dir, args.name)
+    out_dir = args.out or os.path.join(rec_dir, gr.recording_stem(path))
+    try:
+        res = gr.export_csv(path, out_dir, include_all=args.all, excel=args.excel,
+                            cars=gt7_cars.CarDB(resource_path("assets/gt7")))
+    except gr.RecordingError as e:
+        sys.exit(str(e))
+    print(f"wrote {res['samples']} samples and {res['laps']} laps to {res['dir']}")
+    if res["dropped"]:
+        print(f"note: {res['dropped']} packets were dropped while recording")
+
+
+def telemetry_delete_cmd(rest):
+    """Delete one recording (and its export folder)."""
+    import gt7_recording as gr
+    if len(rest) != 1:
+        sys.exit("usage: racecast telemetry delete <name>")
+    rec_dir = _telemetry_rec_dir()
+    path = _resolve_recording(rec_dir, rest[0])
+    open_file = (_relay_record_status() or {}).get("file")
+    if open_file and os.path.basename(path).startswith(open_file):
+        sys.exit(f"{os.path.basename(path)} is currently recording; stop it first "
+                 "('racecast telemetry record stop')")
+    os.remove(path)
+    export_dir = os.path.join(rec_dir, gr.recording_stem(path))
+    if os.path.isdir(export_dir):
+        shutil.rmtree(export_dir)
+    print(f"deleted {os.path.basename(path)}")
+
+
 def _release_obs_feeds():
     """Make OBS (via obs-websocket) drop its connections to the just-killed
     feeds. Otherwise OBS keeps the half-dead connections and the kernel pins
@@ -4497,6 +4616,8 @@ DISPATCH = {
     ("obs", "stream-target"): obs_stream_target_cmd, ("obs", "benchmark"): obs_benchmark_cmd,
     ("obs", "logs"): obs_logs, ("tailscale", "logs"): tailscale_logs,
     ("sheet", "url"): sheet_url_cmd, ("sheet", "open"): sheet_open_cmd,
+    ("telemetry", "record"): telemetry_record_cmd, ("telemetry", "list"): telemetry_list_cmd,
+    ("telemetry", "export"): telemetry_export_cmd, ("telemetry", "delete"): telemetry_delete_cmd,
     ("app", "launch"): app_launch_cmd, ("app", "quit"): app_quit_cmd,
 }
 
