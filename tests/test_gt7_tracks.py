@@ -137,6 +137,13 @@ def t_distance_m_returns_none_for_non_finite_positions():
         assert db.distance_m("aaa001", float("inf"), 0.0) is None
 
 
+def t_project_returns_none_slots_for_non_finite_points():
+    with tempfile.TemporaryDirectory() as d:
+        db = _db(d, [_row("aaa001", "Oval", OVAL)])
+        s = db.project([(float("nan"), 0.0), (float("inf"), 0.0), tuple(OVAL[0])], "aaa001")
+        assert s[0] is None and s[1] is None and s[2] is not None and s[2] < 1.0, s
+
+
 def _midpoint_lap(path, start=7):
     """Driven points exactly on the polyline, each one a segment midpoint."""
     n = len(path)
@@ -217,6 +224,61 @@ def t_trackdb_never_raises_on_malformed_data():
         db = gt.TrackDB(ip, sp, lp)                        # must not raise
         assert db.layouts() == []                         # "configurations" wasn't a list
         assert db.name("aaa001") is not None               # the short point was skipped
+
+
+def t_project_runs_along_the_line_and_reverses():
+    with tempfile.TemporaryDirectory() as d:
+        db = _db(d, [_row("aaa001", "Oval", OVAL, {"official_id": "aaa002",
+                                                   "official_name": "Oval (Reverse)"})])
+        L = db.line_length("aaa001")
+        s = db.project([tuple(OVAL[0]), tuple(OVAL[10]), (OVAL[10][0] + 3, OVAL[10][1])],
+                       "aaa001")
+        assert s[0] < 1.0 and abs(s[1] - s[2]) < 3.5, s
+        expected = sum(math.dist(OVAL[i], OVAL[i + 1]) for i in range(10))
+        assert abs(s[1] - expected) < 1e-6, (s[1], expected)
+        r = db.project([tuple(OVAL[10])], "aaa002")[0]
+        assert abs(r - (L - s[1])) < 1e-6, (r, L - s[1])
+        assert db.project([(0, 0)], "nope") is None and db.line_length("nope") is None
+
+
+def t_learn_adds_row_and_assignment_that_survive_reload():
+    with tempfile.TemporaryDirectory() as d:
+        db = _db(d, [])
+        lap = _lap(OTHER)
+        assert db.match(lap, _length(OTHER)) is None
+        db.learn("bbb001", lap, _length(OTHER), key="solo-pov/20261007-201503")
+        again = _db(d, [])
+        m = again.match(lap, _length(OTHER))
+        assert m["id"] == "bbb001" and m["track"] == "Ring", m
+        assert again.assignment("solo-pov/20261007-201503") == "bbb001"
+        assert again.assignment("other/x") is None
+        try:
+            gt.TrackDB(os.path.join(d, "index.json"), os.path.join(d, "signatures.json")).learn(
+                "bbb001", lap, 1.0)
+            raise AssertionError("learn without a learned path accepted")
+        except ValueError:
+            pass
+
+
+def t_learn_on_unwritable_path_does_not_raise():
+    with tempfile.TemporaryDirectory() as d:
+        _db(d, [])
+        blocker = os.path.join(d, "blocker")
+        with open(blocker, "w", encoding="utf-8") as fh:
+            fh.write("not a directory")
+        lp = os.path.join(blocker, "learned-tracks.json")       # makedirs must fail: not a dir
+        db = gt.TrackDB(os.path.join(d, "index.json"), os.path.join(d, "signatures.json"), lp)
+        db.learn("bbb001", _lap(OTHER), _length(OTHER), key="solo-pov/x")  # must not raise
+        assert db.assignment("solo-pov/x") is None, "write failed, nothing should be assigned"
+
+
+def t_assignment_on_corrupt_learned_file_returns_none():
+    with tempfile.TemporaryDirectory() as d:
+        lp = os.path.join(d, "learned-tracks.json")
+        with open(lp, "w", encoding="utf-8") as fh:
+            fh.write("{not json")
+        db = gt.TrackDB(os.path.join(d, "index.json"), os.path.join(d, "signatures.json"), lp)
+        assert db.assignment("solo-pov/x") is None
 
 
 if __name__ == "__main__":

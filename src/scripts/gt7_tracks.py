@@ -7,6 +7,7 @@ close to the line, and the driving direction separates a layout from its reverse
 """
 import json
 import math
+import os
 
 import gt7_data
 
@@ -188,6 +189,61 @@ class TrackDB:
         if fwd is not None:
             return self._rows[fwd]["line"], True
         return None, False
+
+    def line_length(self, official_id):
+        line, _rev = self._line_for(official_id)
+        return line.length if line is not None else None
+
+    def project(self, points, official_id):
+        line, rev = self._line_for(official_id)
+        if line is None:
+            return None
+        out = []
+        for x, z in points:
+            try:
+                finite = math.isfinite(x) and math.isfinite(z)
+            except TypeError:
+                finite = False
+            if not finite:
+                out.append(None)
+                continue
+            s = line.station(x, z)
+            out.append((line.length - s) % line.length if rev else s)
+        return out
+
+    def assignment(self, key):
+        return self._assign.get(key)
+
+    def learn(self, official_id, points, length_m, key=None):
+        """Store a learned signature for `official_id` (and the recording assignment `key`)."""
+        if not self._learned_path:
+            raise ValueError("no learned-tracks file configured")
+        if len(points) < MIN_POINTS:
+            raise ValueError("a lap needs at least %d position points" % MIN_POINTS)
+        xs, zs = [p[0] for p in points], [p[1] for p in points]
+        info = self.name(official_id) or {}
+        row = {"official_id": official_id,
+               "official_name": info.get("official_name") or official_id,
+               "length_m": round(float(length_m), 1),
+               "min_x": min(xs), "max_x": max(xs), "min_z": min(zs), "max_z": max(zs),
+               "provenance": "learned", "reverse": None, "ambiguous_with": [], "flags": [],
+               "path": [[round(x, 1), round(z, 1)] for x, z in points]}
+        doc = self._read_learned()
+        doc["format"], doc["version"] = LEARNED_FORMAT, 1
+        doc["signatures"] = [r for r in doc["signatures"]
+                             if not (isinstance(r, dict) and r.get("official_id") == official_id)]
+        doc["signatures"].append(row)
+        if key:
+            doc["assignments"][key] = official_id
+        try:
+            os.makedirs(os.path.dirname(self._learned_path), exist_ok=True)
+            tmp = self._learned_path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump(doc, fh)
+            os.replace(tmp, self._learned_path)
+        except OSError:
+            return          # an unwritable learned file must not raise into the caller
+        self._reload_learned()
 
     def distance_m(self, official_id, x, z):
         try:
