@@ -355,3 +355,99 @@ def export_csv(path, out_dir, include_all=False, excel=False, cars=None):
                 num(lap["fuel_used"], 2), num(lap["top_speed_mps"] * 3.6, 1),
                 _car_name(cars, lap["car_id"])])
     return {"dir": out_dir, "samples": written, "laps": len(laps), "dropped": r.dropped}
+
+
+_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def record_default(environ):
+    """The profile's TELEMETRY_RECORD default as injected by the CLI."""
+    return str(environ.get("RACECAST_TELEMETRY_RECORD", "")).strip().lower() in _TRUTHY
+
+
+class RecordControl:
+    """The live recording switch plus the open writer. A valid `state_path`
+    ({"active": bool}) wins over `default`; every set/toggle rewrites it."""
+
+    def __init__(self, rec_dir, state_path, default, profile="", relay_version="dev",
+                 writer_factory=None):
+        self._lock = threading.Lock()
+        self._state_path = state_path
+        self._active = self._load(default)
+        self._writer = None
+        self._error = None
+        self._factory = writer_factory or (
+            lambda: RecordingWriter(rec_dir, profile, relay_version))
+
+    def _load(self, default):
+        try:
+            with open(self._state_path, encoding="utf-8") as fh:
+                v = json.load(fh).get("active")
+            return v if isinstance(v, bool) else bool(default)
+        except (OSError, ValueError, AttributeError):
+            return bool(default)
+
+    def _save(self):
+        try:
+            tmp = self._state_path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump({"active": self._active}, fh)
+            os.replace(tmp, self._state_path)
+        except OSError:
+            pass  # best-effort, never crash the relay
+
+    def put(self, wall_ts, kind, plain):
+        with self._lock:
+            if not self._active or self._error is not None:
+                return
+            if self._writer is None:
+                self._writer = self._factory()
+            w = self._writer
+            if w.error is not None:
+                self._error = w.error
+                self._writer = None
+                w.close()
+                return
+        w.put(wall_ts, kind, plain)
+
+    def _close_writer(self):
+        w, self._writer = self._writer, None
+        if w is not None:
+            w.close()
+
+    def set_active(self, on):
+        with self._lock:
+            self._active = bool(on)
+            self._error = None
+            if not self._active:
+                self._close_writer()
+            self._save()
+            return self._brief()
+
+    def toggle(self):
+        with self._lock:
+            self._active = not self._active
+            self._error = None
+            if not self._active:
+                self._close_writer()
+            self._save()
+            return self._brief()
+
+    def _brief(self):
+        w = self._writer
+        return {"active": self._active,
+                "file": os.path.basename(w.path) if w is not None and w.path else None,
+                "since": w.started if w is not None else None}
+
+    def status(self):
+        with self._lock:
+            out = self._brief()
+            w = self._writer
+            out["bytes"] = w.bytes if w is not None else 0
+            out["dropped"] = w.dropped if w is not None else 0
+            out["error"] = self._error or (w.error if w is not None else None)
+            return out
+
+    def close(self):
+        with self._lock:
+            self._close_writer()

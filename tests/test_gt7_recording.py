@@ -248,6 +248,74 @@ def t_export_steering_in_degrees_positive_left():
         assert _rows(os.path.join(d, "out", "samples.csv"))[0]["steer_deg"] == "28.6"
 
 
+def _control(d, default=False, **kw):
+    return rec.RecordControl(os.path.join(d, "rec"), os.path.join(d, "telemetry-record.json"),
+                             default, profile="Demo", relay_version="dev", **kw)
+
+
+def t_record_default_tokens():
+    for v in ("1", "true", "YES", " on "):
+        assert rec.record_default({"RACECAST_TELEMETRY_RECORD": v}) is True, v
+    for v in ("", "0", "off", "no", "maybe"):
+        assert rec.record_default({"RACECAST_TELEMETRY_RECORD": v}) is False, v
+    assert rec.record_default({}) is False
+
+
+def t_control_state_file_beats_profile_default():
+    with tempfile.TemporaryDirectory() as d:
+        c = _control(d, default=True)
+        assert c.status()["active"] is True, "no state file -> profile default"
+        c.set_active(False)
+        c.close()
+        assert _control(d, default=True).status()["active"] is False, "live toggle survives a restart"
+        with open(os.path.join(d, "telemetry-record.json"), "w") as fh:
+            fh.write("garbage")
+        assert _control(d, default=True).status()["active"] is True, "bad file -> default"
+
+
+def t_control_opens_file_on_first_packet_only():
+    with tempfile.TemporaryDirectory() as d:
+        c = _control(d, default=True)
+        assert c.status()["file"] is None and not os.path.exists(os.path.join(d, "rec"))
+        c.put(time.time(), "A", _plain())
+        for _ in range(50):
+            if c.status()["file"]:
+                break
+            time.sleep(0.02)
+        st = c.status()
+        assert st["file"].endswith(".gt7rec") and st["since"] is not None, st
+        c.close()
+        assert len(rec.list_recordings(os.path.join(d, "rec"))) == 1
+
+
+def t_control_off_ignores_packets_and_toggle_starts_new_file():
+    with tempfile.TemporaryDirectory() as d:
+        c = _control(d, default=False)
+        c.put(1.0, "A", _plain())
+        assert c.status()["file"] is None
+        assert c.toggle()["active"] is True
+        c.put(time.time(), "A", _plain())
+        c.toggle()                                   # off: closes the file
+        c.toggle()                                   # on again: next packet opens a new one
+        c.put(time.time() + 1, "A", _plain())
+        c.close()
+        assert len(rec.list_recordings(os.path.join(d, "rec"))) == 2
+
+
+def t_control_write_error_reported_until_next_set():
+    with tempfile.TemporaryDirectory() as d:
+        class Broken:
+            path, started, bytes, dropped, error = None, None, 0, 0, "disk full"
+            def put(self, *a): pass
+            def close(self, timeout=5.0): pass
+        c = _control(d, default=True, writer_factory=Broken)
+        c.put(1.0, "A", _plain())
+        st = c.status()
+        assert st["error"] == "disk full" and st["active"] is True, st
+        c.set_active(True)
+        assert c.status()["error"] is None, "a fresh start clears the error"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
