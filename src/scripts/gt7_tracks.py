@@ -6,12 +6,9 @@ signatures.json (plus learned rows): length within 3 %, inside the bounding box,
 close to the line, and the driving direction separates a layout from its reverse.
 """
 import json
-import logging
 import math
 
 import gt7_data
-
-LOG = logging.getLogger("racecast.relay.telemetry")
 
 LENGTH_TOL = 0.03
 BOX_MARGIN_M = 50.0
@@ -27,7 +24,12 @@ class _Line:
     """A closed racing line with cumulative distance and a grid for nearest-point lookups."""
 
     def __init__(self, path):
-        self.pts = [(float(p[0]), float(p[1])) for p in path]
+        self.pts = []
+        for p in path:
+            try:
+                self.pts.append((float(p[0]), float(p[1])))
+            except (IndexError, TypeError, ValueError):
+                continue                    # a short or non-numeric point is skipped
         self.cum = [0.0]
         for (x0, z0), (x1, z1) in zip(self.pts, self.pts[1:], strict=False):
             self.cum.append(self.cum[-1] + math.hypot(x1 - x0, z1 - z0))
@@ -37,8 +39,8 @@ class _Line:
         for i, (x, z) in enumerate(self.pts):
             self.grid.setdefault((int(x // GRID_M), int(z // GRID_M)), []).append(i)
 
-    def nearest(self, x, z):
-        """(index, distance) of the closest line point."""
+    def _nearest_index(self, x, z):
+        """Index of the closest vertex, via the grid (not a scan of the whole path)."""
         cx, cz = int(x // GRID_M), int(z // GRID_M)
         for r in (1, 2, 4, 8):
             best = None
@@ -49,13 +51,14 @@ class _Line:
                         if best is None or d < best[1]:
                             best = (i, d)
             if best is not None and best[1] <= r * GRID_M:   # nothing closer outside the ring
-                return best
-        return min(((i, math.hypot(px - x, pz - z)) for i, (px, pz) in enumerate(self.pts)),
-                   key=lambda t: t[1])
+                return best[0]
+        return min(range(len(self.pts)),
+                   key=lambda i: math.hypot(self.pts[i][0] - x, self.pts[i][1] - z))
 
-    def station(self, x, z):
-        """Distance along the line from its first point to the projection of (x, z)."""
-        i, _ = self.nearest(x, z)
+    def locate(self, x, z):
+        """(vertex index, distance to the line, station) of (x, z)'s projection onto
+        the two segments next to the nearest vertex."""
+        i = self._nearest_index(x, z)
         n = len(self.pts)
         best = None
         for a, b in (((i - 1) % n, i), (i, (i + 1) % n)):
@@ -67,7 +70,12 @@ class _Line:
             s = self.cum[a] + u * math.sqrt(seg2)
             if best is None or d < best[0]:
                 best = (d, s % self.length)
-        return best[1]
+        d, s = best
+        return i, d, s
+
+    def station(self, x, z):
+        """Distance along the line from its first point to the projection of (x, z)."""
+        return self.locate(x, z)[2]
 
 
 def _direction(indices, n):
@@ -91,15 +99,17 @@ def _row(raw, provenance=None):
     path = raw.get("path")
     if not isinstance(path, list) or len(path) < MIN_POINTS:
         return None
+    rev = raw.get("reverse")
+    reverse_id = rev.get("official_id") if isinstance(rev, dict) else None
     try:
         return {"id": str(raw["official_id"]), "length_m": float(raw["length_m"]),
                 "box": (float(raw["min_x"]), float(raw["max_x"]),
                         float(raw["min_z"]), float(raw["max_z"])),
                 "line": _Line(path),
-                "reverse": (raw.get("reverse") or {}).get("official_id"),
+                "reverse": reverse_id,
                 "official_name": raw.get("official_name") or "",
                 "provenance": provenance or raw.get("provenance") or ""}
-    except (KeyError, TypeError, ValueError):
+    except (KeyError, TypeError, ValueError, IndexError, AttributeError):
         return None
 
 
@@ -109,8 +119,9 @@ class TrackDB:
     def __init__(self, index_path, signatures_path, learned_path=None):
         self._learned_path = learned_path
         self._catalog = {}
-        doc = _read_json(index_path) or {}
-        for c in doc.get("configurations") or []:
+        doc = _read_json(index_path)
+        cfgs = doc.get("configurations") if isinstance(doc, dict) else None
+        for c in cfgs if isinstance(cfgs, list) else []:
             if isinstance(c, dict) and c.get("official_id"):
                 self._catalog[str(c["official_id"])] = {
                     "id": str(c["official_id"]), "track": c.get("track") or "",
@@ -118,8 +129,9 @@ class TrackDB:
                     "country": c.get("country") or "", "length_m": c.get("length_m"),
                     "official_name": c.get("official_name") or ""}
         self._shipped = {}
-        doc = _read_json(signatures_path) or {}
-        for raw in doc.get("signatures") or []:
+        doc = _read_json(signatures_path)
+        sigs = doc.get("signatures") if isinstance(doc, dict) else None
+        for raw in sigs if isinstance(sigs, list) else []:
             row = _row(raw) if isinstance(raw, dict) else None
             if row:
                 self._shipped[row["id"]] = row
@@ -134,11 +146,11 @@ class TrackDB:
     def _read_learned(self):
         doc = _read_json(self._learned_path) if self._learned_path else None
         if not isinstance(doc, dict) or doc.get("format") != LEARNED_FORMAT:
-            return {"format": LEARNED_FORMAT, "version": 1, "signatures": [],
-                    "assignments": {}}
-        doc.setdefault("signatures", [])
-        doc.setdefault("assignments", {})
-        return doc
+            return {"signatures": [], "assignments": {}}
+        sigs = doc.get("signatures")
+        assigns = doc.get("assignments")
+        return {"signatures": sigs if isinstance(sigs, list) else [],
+                "assignments": assigns if isinstance(assigns, dict) else {}}
 
     def _reload_learned(self):
         doc = self._read_learned()
@@ -147,7 +159,7 @@ class TrackDB:
             row = _row(raw, "learned") if isinstance(raw, dict) else None
             if row:
                 learned[row["id"]] = row
-        self._assign = dict(doc["assignments"]) if isinstance(doc["assignments"], dict) else {}
+        self._assign = dict(doc["assignments"])
         self._rows = dict(self._shipped)
         self._rows.update(learned)                 # a learned row wins over the shipped one
         self._twins = {r["reverse"]: r["id"] for r in self._rows.values() if r["reverse"]}
@@ -178,13 +190,20 @@ class TrackDB:
         return None, False
 
     def distance_m(self, official_id, x, z):
+        try:
+            finite = math.isfinite(x) and math.isfinite(z)
+        except TypeError:
+            return None
+        if not finite:
+            return None
         line, _rev = self._line_for(official_id)
-        return line.nearest(x, z)[1] if line is not None else None
+        return line.locate(x, z)[1] if line is not None else None
 
     def match(self, points, length_m):
         if not points or len(points) < MIN_POINTS or not length_m:
             return None
-        scored = []
+        scored = {}              # official_id -> lowest score_m seen, forward or reverse
+        via_reverse = set()
         for row in self._rows.values():
             ref = row["length_m"]
             if abs(ref - length_m) > LENGTH_TOL * ref:
@@ -193,21 +212,30 @@ class TrackDB:
             m = BOX_MARGIN_M
             if any(not (x0 - m <= x <= x1 + m and z0 - m <= z <= z1 + m) for x, z in points):
                 continue
-            near = [row["line"].nearest(x, z) for x, z in points]
-            score = sum(d for _i, d in near) / len(near)
+            located = [row["line"].locate(x, z) for x, z in points]
+            score = sum(d for _i, d, _s in located) / len(located)
             if score > MAX_SCORE_M:
                 continue
-            if _direction([i for i, _d in near], len(row["line"].pts)) >= 0:
-                scored.append((score, row["id"]))
+            forward = _direction([i for i, _d, _s in located], len(row["line"].pts)) >= 0
+            if forward:
+                oid = row["id"]
             elif row["reverse"]:
-                scored.append((score, row["reverse"]))
+                oid, forward = row["reverse"], False
+            else:
+                continue
+            if not forward:
+                via_reverse.add(oid)
+            if oid not in scored or score < scored[oid]:
+                scored[oid] = score
         if not scored:
             return None
-        scored.sort()
-        best_score, best_id = scored[0]
-        close = [oid for s, oid in scored if s - best_score <= AMBIGUOUS_M]
+        best_id, best_score = min(scored.items(), key=lambda kv: kv[1])
+        close = [oid for oid, s in scored.items() if s - best_score <= AMBIGUOUS_M]
         if len(close) > 1:
             return {"candidates": close}
-        info = self.name(best_id) or {"track": best_id, "layout": "", "reverse": False}
-        return {"id": best_id, "track": info["track"], "layout": info["layout"],
-                "reverse": info["reverse"], "score_m": round(best_score, 2)}
+        info = self.name(best_id)
+        reverse = info["reverse"] if info is not None else best_id in via_reverse
+        track = info["track"] if info is not None else best_id
+        layout = info["layout"] if info is not None else ""
+        return {"id": best_id, "track": track, "layout": layout,
+                "reverse": reverse, "score_m": round(best_score, 2)}
