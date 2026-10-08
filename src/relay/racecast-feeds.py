@@ -12367,6 +12367,44 @@ def _gt7_data_refresh(store, runtime_base, bundled, update=gt7_data.update):
         LOG.info("GT7 data update skipped: %s", e)
 
 
+def _gt7_data_watch_step(store, runtime_base, bundled, last):
+    """Reload the store when the GT7 data files differ from fingerprint `last`
+    (None takes the baseline); returns the fingerprint to compare against next."""
+    try:
+        fp = gt7_data.fingerprint(runtime_base, bundled)
+        if last is not None and fp != last:
+            store.reload_data(gt7_cars.CarDB(gt7_data.cars_dir(runtime_base, bundled)),
+                              gt7_tracks.TrackDB.load(runtime_base, bundled))
+            LOG.info("GT7 data reloaded (files changed on disk)")
+        return fp
+    except Exception as e:  # noqa: BLE001  keep the old fingerprint so the next poll retries
+        LOG.info("GT7 data reload skipped: %s", e)
+        return last
+
+
+def _gt7_data_watch(store, runtime_base, bundled, stop_evt, update_on=True,
+                    interval=60, update=gt7_data.update):
+    """Start-time update (unless opted out), then pick up files a manual update writes."""
+    if update_on:
+        _gt7_data_refresh(store, runtime_base, bundled, update=update)
+    last = _gt7_data_watch_step(store, runtime_base, bundled, None)
+    while not stop_evt.wait(interval):
+        last = _gt7_data_watch_step(store, runtime_base, bundled, last)
+
+
+def gt7_runtime_base(explicit, runtime, runtime_dir_given):
+    """--runtime-base, else the parent of --runtime-dir; without --runtime-dir the
+    runtime dir is already the machine base."""
+    if explicit:
+        return explicit
+    return os.path.dirname(runtime) if runtime_dir_given else runtime
+
+
+def gt7_data_update_enabled(environ):
+    return (environ.get("RACECAST_GT7_DATA_UPDATE", "1").strip().lower()
+            not in ("0", "false", "no", "off"))
+
+
 def _telemetry_loop(store, ps_ip, stop_evt, clock=time.monotonic):
     """Bind 33740, heartbeat per gt7_telemetry.HeartbeatPolicy (the extended '~'
     format, #711), decrypt+parse+feed each packet. Best-effort: any error logs and
@@ -13004,9 +13042,7 @@ def main():
                  float(os.environ.get("RACECAST_TELEMETRY_TYRE_OPTIMAL_HI", 85)),
                  float(os.environ.get("RACECAST_TELEMETRY_TYRE_HOT_HI", 95)))
         gt7_bundled = os.path.join(assets_dir, "gt7")
-        # Without --runtime-dir the runtime dir is already the machine base.
-        runtime_base = args.runtime_base or (os.path.dirname(runtime) if args.runtime_dir
-                                             else runtime)
+        runtime_base = gt7_runtime_base(args.runtime_base, runtime, bool(args.runtime_dir))
         rec_dir = os.path.join(runtime, "telemetry-recordings")
         for name in gt7_recording.finalize_partials(rec_dir):
             LOG.info("telemetry recording %s finalised (left open by the previous relay)", name)
@@ -13027,12 +13063,10 @@ def main():
         LOG.info("GT7 telemetry listener started (bind 0.0.0.0:33740, ps_ip=%s)",
                 args.gt7_ps_ip or "<discovery>")
         LOG.info("GT7 telemetry recording %s", "on" if recorder.status()["active"] else "off")
-        _update_on = (os.environ.get("RACECAST_GT7_DATA_UPDATE", "1").strip().lower()
-                      not in ("0", "false", "no", "off"))
-        if _update_on:
-            threading.Thread(target=_gt7_data_refresh,
-                             args=(telemetry_store, runtime_base, gt7_bundled),
-                             daemon=True).start()
+        threading.Thread(target=_gt7_data_watch,
+                         args=(telemetry_store, runtime_base, gt7_bundled, stop_evt,
+                               gt7_data_update_enabled(os.environ)),
+                         daemon=True).start()
 
     # Broadcast-chat reader (#294): resolve the channel's live videoId set and
     # poll each stream's chat. Its own ~30 s resolve cadence, not args.poll, because

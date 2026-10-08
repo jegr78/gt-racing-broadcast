@@ -2,7 +2,7 @@
 """Stdlib checks for the Control Center HTTP server, run against a real server on
 an ephemeral port so CI needs no fixed port.
 Run: python3 tests/test_ui_server.py"""
-import json, os, re, sys, tempfile, threading, time, urllib.error, urllib.parse, urllib.request
+import json, os, re, shutil, subprocess, sys, tempfile, threading, time, urllib.error, urllib.parse, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -1984,6 +1984,28 @@ def _cc_page():
     with open(os.path.join(ROOT, "src", "ui", "control-center.html"),
               encoding="utf-8") as fh:                # cp1252 on Windows would choke
         return fh.read()
+
+
+
+def _run_js(src):
+    """stdout of `src` under node, or None where node is not installed."""
+    node = shutil.which("node")
+    if not node:
+        print("  (node not installed, JS check skipped)")
+        return None
+    return subprocess.run([node, "-e", src], capture_output=True, text=True,
+                          errors="replace", check=True, timeout=30).stdout
+
+
+def t_gt7_data_age_reads_naturally():
+    page = _cc_page()
+    i = page.index("function fmtAgeS(")
+    fn = page[i:page.index("\n}\n", i) + 2]
+    out = _run_js(fn + """
+const now = Date.now() / 1000;
+console.log([fmtAgeS(0)].concat([20, 90, 7200, 86400, 3 * 86400].map(a => fmtAgeS(now - a))).join("|"));""")
+    if out is not None:
+        assert out.strip() == "never|just now|2 min ago|2 h ago|1 day ago|3 days ago", out
 
 
 def _row_classes(page, label):

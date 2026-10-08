@@ -407,6 +407,86 @@ def t_gt7_data_refresh_reloads_store_only_when_changed():
         assert len(calls) == 1, "a failed update keeps the loaded data"
 
 
+class _ReloadStore:
+    def __init__(self):
+        self.calls = []
+
+    def reload_data(self, cars, tracks):
+        self.calls.append((cars, tracks))
+
+
+def t_gt7_data_watch_step_reloads_only_when_the_fingerprint_changes():
+    import tempfile
+    store = _ReloadStore()
+    with tempfile.TemporaryDirectory() as d:
+        bundled = os.path.join(ROOT, "src", "assets", "gt7")
+        fp = m._gt7_data_watch_step(store, d, bundled, None)
+        assert store.calls == [] and fp, "the first step only takes the baseline"
+        assert m._gt7_data_watch_step(store, d, bundled, fp) == fp
+        assert store.calls == [], "unchanged files must not reload the store"
+        os.makedirs(m.gt7_data.data_dir(d))
+        with open(m.gt7_data.learned_path(d), "w", encoding="utf-8") as fh:
+            fh.write("{}")
+        fp2 = m._gt7_data_watch_step(store, d, bundled, fp)
+        assert fp2 != fp and len(store.calls) == 1, "a changed file reloads the store"
+        assert isinstance(store.calls[0][1], m.gt7_tracks.TrackDB), store.calls
+
+
+def t_gt7_data_watch_step_never_raises():
+    class _Boom:
+        def reload_data(self, cars, tracks):
+            raise RuntimeError("store gone")
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        bundled = os.path.join(ROOT, "src", "assets", "gt7")
+        assert m._gt7_data_watch_step(_Boom(), d, bundled, "stale") == "stale", \
+            "a failed reload keeps the old fingerprint so the next poll retries"
+
+
+def t_gt7_data_watch_polls_after_the_start_update():
+    import tempfile
+    store = _ReloadStore()
+    updates, waits = [], []
+
+    class _Stop:
+        def wait(self, timeout):
+            waits.append(timeout)
+            if len(waits) == 1:
+                os.makedirs(m.gt7_data.data_dir(d), exist_ok=True)
+                with open(m.gt7_data.learned_path(d), "a", encoding="utf-8") as fh:
+                    fh.write("{}")
+            return len(waits) > 2
+
+    with tempfile.TemporaryDirectory() as d:
+        bundled = os.path.join(ROOT, "src", "assets", "gt7")
+        m._gt7_data_watch(store, d, bundled, _Stop(), update_on=True,
+                            update=lambda base: updates.append(base) or
+                            {"checked": True, "changed": False, "files": {}})
+        assert updates == [d], "one start-time update"
+        assert waits == [60, 60, 60], waits
+        assert len(store.calls) == 1, "the file written between polls reloads once"
+        store.calls.clear(); waits.clear(); updates.clear()
+        m._gt7_data_watch(store, d, bundled, _Stop(), update_on=False,
+                            update=updates.append)
+        assert updates == [], "the opt-out skips the network update but keeps polling"
+        assert waits == [60, 60, 60], waits
+
+
+def t_gt7_runtime_base_defaults_to_the_parent_of_runtime_dir():
+    rt = os.path.join("x", "runtime", "league")
+    assert m.gt7_runtime_base(None, rt, True) == os.path.join("x", "runtime")
+    assert m.gt7_runtime_base(None, rt, False) == rt, "the default runtime dir is the base"
+    assert m.gt7_runtime_base("base", rt, True) == "base", "an explicit --runtime-base wins"
+
+
+def t_gt7_data_update_enabled_parses_the_opt_out():
+    assert m.gt7_data_update_enabled({}) is True
+    for off in ("0", "false", "No", " off "):
+        assert m.gt7_data_update_enabled({"RACECAST_GT7_DATA_UPDATE": off}) is False, off
+    for on in ("1", "yes", "", "true"):
+        assert m.gt7_data_update_enabled({"RACECAST_GT7_DATA_UPDATE": on}) is True, on
+
+
 def t_zz_no_test_reached_a_real_obs():
     # Sorted last: no test in this file may have attempted a real OBS connection.
     assert _obs_guard.CALLS == [], _obs_guard.CALLS[:3]

@@ -1005,7 +1005,7 @@
         <section>
           <div class="row"><span class="name">GT7 data</span>
             <span class="dim grow" id="d-gt7data">…</span>
-            <button id="gt7data-update" onclick="updateGt7Data()" title="Fetch the latest car and track data now">
+            <button id="gt7data-update" onclick="updateGt7Data()" title="Fetch the latest car and track data now; a running relay uses it within a minute">
               <svg viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Update now</button></div>
         </section>
         <div class="viewhead"><h3>Overlay fonts</h3><span class="sub">machine-wide font library for the Overlay Builder. Shared across all leagues</span>
@@ -2757,9 +2757,11 @@ async function downloadCustomFont() {
 function fmtAgeS(ts) {
   if (!ts) return 'never';
   const s = Math.max(0, Date.now() / 1000 - ts);
+  if (s < 60) return 'just now';
   if (s < 3600) return Math.round(s / 60) + ' min ago';
   if (s < 86400) return Math.round(s / 3600) + ' h ago';
-  return Math.round(s / 86400) + ' days ago';
+  const days = Math.round(s / 86400);
+  return days + (days === 1 ? ' day ago' : ' days ago');
 }
 
 async function loadGt7Data() {

@@ -11,6 +11,8 @@ control of the old page was dropped."""
 import json
 import os
 import re
+import shutil
+import subprocess
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -390,7 +392,7 @@ def t_solo_status_strip_names_the_track():
     poll = html[html.index("async function relayPoll"):]
     down = poll[poll.index("}catch(e){"):]
     poll = poll[:poll.index("}catch(e){")]
-    assert "const trk = d.telemetry && d.telemetry.track;" in poll
+    assert "const trk = trackOf(d.telemetry);" in poll
     assert '$("#stTrack").hidden = !trk;' in poll
     assert '$("#stTrack b").textContent = trackLabel(trk);' in poll
     assert '"Possible: " + trk.candidates.join(", ")' in poll
@@ -516,6 +518,23 @@ def _area(html, name):
     ends = [j for j in (html.find('<div class="area"', i + 1), html.find('<div id="log">', i))
             if j != -1]
     return html[i:min(ends)]
+
+
+def t_track_pill_treats_an_empty_candidate_list_as_no_track():
+    node = shutil.which("node")
+    if not node:
+        print("  (node not installed, JS check skipped)")
+        return
+    html = _html()
+    js = _func_src(html, "trackOf") + "\n}\n" + _func_src(html, "trackLabel") + """
+}
+const r = [trackOf({track: {candidates: []}}), trackOf({track: {candidates: "x"}}),
+           trackOf(null), trackLabel(trackOf({track: {candidates: ["a", "b"]}})),
+           trackLabel(trackOf({track: {track: "Spa", layout: "Full"}}))];
+console.log(JSON.stringify(r));"""
+    out = subprocess.run([node, "-e", js], capture_output=True, text=True, errors="replace",
+                         check=True, timeout=30).stdout.strip()
+    assert out == '[null,null,null,"?","Spa - Full"]', out
 
 
 def _func_src(html, name):

@@ -22,7 +22,7 @@
   racecast sheet     url | open              # print / open the active league's Google Sheet (built from its SHEET_ID)
   racecast telemetry record start|stop|status   # solo POV: record the GT7 telemetry trace (relay must run)
   racecast telemetry list | export <name|latest> [--out DIR] [--all] [--excel] | delete <name>   # recordings of the active profile -> samples.csv + laps.csv
-  racecast gt7-data  update [--force] | status   # GT7 car names + track recognition data (checked daily by the relay)
+  racecast gt7-data  update | status   # GT7 car names + track recognition data (the relay updates at start, at most once per 24 h, and picks up new files within a minute)
   racecast app launch|quit obs|discord|tailscale   # start / gracefully quit a GUI app (Control Center buttons)
   racecast discord   join | leave | status   # drive the desktop Discord client into/out of the league's voice channel
   racecast status                            # aggregate health of all services
@@ -3340,7 +3340,7 @@ def gt7_data_status_data():
 def gt7_data_update_cmd(rest):
     """Fetch the latest GT7 car and track data now."""
     if rest not in ([], ["--force"]):
-        sys.exit("usage: racecast gt7-data update [--force]")
+        sys.exit("usage: racecast gt7-data update")
     res = gt7_data_update_data()
     if "error" in res:
         sys.exit(res["error"])

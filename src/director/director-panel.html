@@ -2046,6 +2046,12 @@ function carLabel(car){               // "Alfa Romeo 155 2.5 V6 TI '93 · Gr.4";
   return car.group && car.group !== "N" ? name + " · " + car.group : name;
 }
 
+function trackOf(tel){                 // an empty candidate list means no track
+  const t = tel && tel.track;
+  if (!t || (t.candidates && !(Array.isArray(t.candidates) && t.candidates.length))) return null;
+  return t;
+}
+
 function trackLabel(t){               // "Nürburgring - Grand Prix (reverse)"; text only
   if (!t) return "";
   if (t.candidates) return "?";
@@ -2117,7 +2123,7 @@ async function relayPoll(){
     $("#stCar").hidden = !car;
     $("#stCar b").textContent = carLabel(car);
     $("#stCar").title = carLabel(car);            // the full name where the strip truncates
-    const trk = d.telemetry && d.telemetry.track;   // recognised after the first full lap
+    const trk = trackOf(d.telemetry);              // recognised after the first full lap
     $("#stTrack").hidden = !trk;
     $("#stTrack b").textContent = trackLabel(trk);
     $("#stTrack").title = trk && trk.candidates ? "Possible: " + trk.candidates.join(", ")

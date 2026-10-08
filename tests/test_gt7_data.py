@@ -197,6 +197,46 @@ def t_status_reports_a_missing_runtime_only_file():
         assert st["files"]["cars.csv"]["source"] == "bundled", st
 
 
+def t_fingerprint_covers_car_tables_tracks_and_learned_file():
+    with tempfile.TemporaryDirectory() as d:
+        b = _bundled(d)
+        base = os.path.join(d, "runtime")
+        seen = {gd.fingerprint(base, b)}
+        gd.update(base, force=True, fetch=_fetch(GOOD), now=1000.0)
+        seen.add(gd.fingerprint(base, b))
+        assert len(seen) == 2, "a runtime update changes the fingerprint"
+        cars = dict(GOOD, **{"cars.csv": _cars(401)})
+        gd.update(base, force=True, fetch=_fetch(cars), now=2000.0)
+        seen.add(gd.fingerprint(base, b))
+        assert len(seen) == 3, "a new car table alone changes the fingerprint"
+        with open(gd.learned_path(base), "w", encoding="utf-8") as fh:
+            fh.write("{}")
+        seen.add(gd.fingerprint(base, b))
+        assert len(seen) == 4, "a learned-tracks file changes the fingerprint"
+        gd.update(base, force=True, fetch=_fetch(cars), now=3000.0)
+        assert gd.fingerprint(base, b) in seen, "an unchanged update keeps the fingerprint"
+
+
+def t_write_ignores_a_leftover_fixed_tmp_name():
+    with tempfile.TemporaryDirectory() as d:
+        os.makedirs(os.path.join(d, "cars.csv.tmp"))     # blocks a fixed temp name
+        gd._write(d, "cars.csv", b"x")
+        with open(os.path.join(d, "cars.csv"), "rb") as fh:
+            assert fh.read() == b"x", "_write must use its own temp file"
+
+
+def t_write_removes_its_temp_file_on_failure():
+    with tempfile.TemporaryDirectory() as d:
+        os.makedirs(os.path.join(d, "index.json", "sub"))  # os.replace onto it fails
+        try:
+            gd._write(d, "index.json", b"x")
+        except OSError:
+            pass  # expected: the target is a directory
+        else:
+            raise AssertionError("replacing a directory must fail")
+        assert sorted(os.listdir(d)) == ["index.json"], os.listdir(d)
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

@@ -10,6 +10,7 @@ import hashlib
 import io
 import json
 import os
+import tempfile
 import time
 
 import http_util
@@ -141,10 +142,17 @@ def _read_stamp(d):
 
 def _write(d, name, data):
     os.makedirs(d, exist_ok=True)
-    tmp = os.path.join(d, name + ".tmp")
-    with open(tmp, "wb") as fh:
-        fh.write(data)
-    os.replace(tmp, os.path.join(d, name))
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=name + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+        os.replace(tmp, os.path.join(d, name))
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass  # already gone
+        raise
 
 
 def update(runtime_base, force=False, fetch=None, now=None):
@@ -204,12 +212,8 @@ def status(runtime_base, bundled=None):
     return {"checked": stamp.get("checked"), "files": out}
 
 
-def data_version(runtime_base, bundled=None):
-    """Changes whenever the track data or the learned tracks change (lap-index caches key on it)."""
+def _stat_hash(paths):
     h = hashlib.sha1()
-    paths = [resolve(n, runtime_base, bundled) for n in ("index.json", "signatures.json")]
-    if runtime_base:
-        paths.append(learned_path(runtime_base))
     for p in paths:
         try:
             st = os.stat(p)
@@ -217,3 +221,22 @@ def data_version(runtime_base, bundled=None):
         except OSError:
             h.update(f"{p}|-;".encode("utf-8"))
     return h.hexdigest()[:16]
+
+
+def data_version(runtime_base, bundled=None):
+    """Changes whenever the track data or the learned tracks change (lap-index caches key on it)."""
+    paths = [resolve(n, runtime_base, bundled) for n in ("index.json", "signatures.json")]
+    if runtime_base:
+        paths.append(learned_path(runtime_base))
+    return _stat_hash(paths)
+
+
+def fingerprint(runtime_base, bundled=None):
+    """Changes whenever any file a CarDB or TrackDB would load changes; stat calls only,
+    except that a changed runtime file is validated once."""
+    cars = cars_dir(runtime_base, bundled)
+    paths = [os.path.join(cars, n) for n in sorted(CAR_TABLES)]
+    paths += [resolve(n, runtime_base, bundled) for n in ("index.json", "signatures.json")]
+    if runtime_base:
+        paths.append(learned_path(runtime_base))
+    return _stat_hash(paths)
