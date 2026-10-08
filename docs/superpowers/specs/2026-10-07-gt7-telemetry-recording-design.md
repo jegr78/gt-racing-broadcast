@@ -88,11 +88,11 @@ The high nibble of `0x90` ("suggested gear" in community docs) reads 2 at 260 km
 every fixture and stays unparsed. `_sanitize` treats the new floats like the existing
 ones (a non-finite value keeps the previous reading, #717).
 
-`TelemetryEngine._finalise_lap` returns a lap record
-`{lap, start, end, elapsed, status, reason, fuel_used, top_speed}` (`status` is
-`reference`, `counted` or `not counted`) in addition to logging it, and
-`TelemetryEngine` exposes a `session` counter that `_reset_session` increments. Live
-behaviour does not change.
+`TelemetryEngine._finalise_lap` calls an `on_lap` callback (set by the recording
+exporter; `None` in live use) with a lap record `{session, lap, start, end, elapsed,
+status, reason, fuel_used, top_speed_mps, car_id}` (`status` is `reference`, `counted`
+or `not counted`) in addition to logging it, and `TelemetryEngine` exposes a `session`
+counter that `_reset_session` increments. Live behaviour does not change.
 
 ## Module `src/scripts/gt7_recording.py`
 
@@ -102,11 +102,14 @@ Stdlib only, no relay imports.
   into a bounded queue (`maxsize` 600, about 10 s) and never blocks. A full queue drops
   the packet and increments `dropped`. A writer thread opens the `.part` file on the
   first packet, writes buffered and flushes about once per second. `close()` drains the
-  queue, flushes and renames. An `OSError` stops the recording, sets `error` to the
-  message and logs a warning; the relay keeps running.
-- `read_recording(path)` -> `(header, iterator of (wall_ts, kind, plain))`. A truncated
-  last record is skipped silently. An unknown `format` or a `version` above 1 raises
-  `RecordingError` with a clear message.
+  queue, flushes and renames. An error (`OSError`, or any other exception a payload/kind
+  can raise) stops the recording, sets `error` to a sanitised message (never the OS
+  path: `strerror`, or the exception class name) and logs the full exception as a
+  warning; the relay keeps running, and the `.part` file is left unrenamed.
+- `Recording(path)`: reads the header, raising `RecordingError` with a clear message
+  for an unknown `format` or a `version` above 1, and exposes `.header`, `.dropped` and
+  a `packets()` iterator of `(wall_ts, kind, plain)`; a truncated last record is
+  skipped silently.
 - `export_csv(path, out_dir, include_all=False, excel=False)` writes `samples.csv` and
   `laps.csv` (below).
 - `list_recordings(dir, count_laps=False)` -> name, size, start, duration, lap count,
@@ -127,24 +130,36 @@ The live state is resolved in this order:
 
 `event_start` removes `telemetry-record.json` when it records a new session start
 (`_new_session` and not `_is_continuation_start`). A recovery restart with `--stint` or
-`--part` keeps it.
+`--part` keeps it. Deleting the file only resets the *next* relay start's default: a
+relay already running keeps its live `RecordControl` state (it loaded the file once, at
+construction), so a fresh `event start` against an already-running relay additionally
+pushes the resolved `TELEMETRY_RECORD` default to it over HTTP
+(`racecast.py`'s `_sync_live_telemetry_record`, via `/telemetry/record/start|stop`),
+best-effort, so the file and the live relay never disagree.
 
 When the state is on, the writer opens a new file on the first packet after relay start
 or after a toggle to on, so a relay without a console never creates empty files. Every
 relay start that records starts a new file. Stopping the relay closes the recording
-cleanly.
+cleanly. `RecordControl.close()` is the terminal form the relay's shutdown calls: it
+sets an internal `_closed` flag that makes every later `put()` a no-op, but unlike
+`set_active(False)` it never flips `active` or rewrites the state file, so the next
+relay start resumes recording if it was on.
 
 ## Relay
 
 - `TelemetryStore` takes an optional recorder. `_telemetry_loop` calls
   `store.record(time.time(), kind, plain)` for every packet it accepts (after the
   source check and `decrypt_typed`), including menu, pause and replay packets. The call
-  only enqueues, outside the store lock.
+  only enqueues, outside the store lock, and never raises into the UDP loop even if the
+  recorder itself is broken.
 - `GET /telemetry/record/start|stop|toggle` -> `{"active", "file", "since"}`; 404 when
   `telemetry_store` is None, like the other `/telemetry/*` routes. `console_policy`
   requires DIRECTOR, like `/telemetry/show|hide|toggle`.
-- `/status` extends the existing `telemetry` block with
-  `record: {active, file, since, bytes, dropped, error}`.
+- `/status` extends the existing `telemetry` block with `record: {active, file, since,
+  elapsed_s, bytes, dropped, error}`; `elapsed_s` is the relay's own wall clock minus
+  `since` (not the viewer's clock), so a skewed browser never shows a wrong duration.
+  Over the Funnel-exposed `/console` mount, `record` is director/producer-only
+  (`redact_console_status`): `error` can carry an OS path.
 
 ## CLI
 
@@ -204,8 +219,9 @@ LibreOffice and Google Sheets. When packets were dropped, the exporter prints th
 
 - **Director Panel:** a `REC` button next to `TELEMETRY` in the solo `vis` list,
   `relay: "telemetry/record"`. Hidden when `/status` has no telemetry block, red with
-  the elapsed time while recording, amber when `record.error` is set.
-  `director-panel.png` is refreshed in the same PR.
+  the elapsed time (`record.elapsed_s`) while recording, amber when `record.error` is
+  set. The REC key lives in the solo `vis` list, so `director-panel-solo.png` is
+  refreshed in the same PR, not the endurance `director-panel.png`.
 - **Control Center:** `profile_admin` writes an empty `TELEMETRY_RECORD=` into new solo
   POV profiles. No other change, so no `cc-*.png` refresh.
 
