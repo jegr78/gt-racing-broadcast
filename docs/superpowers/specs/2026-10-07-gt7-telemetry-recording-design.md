@@ -390,21 +390,27 @@ override.
 
 ## Module `src/scripts/gt7_laps.py`
 
-- `index(path, track_db, cars)` returns the lap index of one recording and caches it in
-  `<stem>.laps.json` next to the recording. The cache records the recording's size and
-  mtime and the SHA-256 of the track data (`updated.json`) plus the learned file's
-  mtime; any change rebuilds it.
+- `index(path, track_db, cars, runtime_base, key=None, bundled=None)` returns the lap
+  index of one recording and caches it in `<stem>.laps.json` next to the recording. The
+  cache records the recording's size and mtime and `gt7_data.data_version` (runtime track
+  files and the learned file by path, mtime and size; bundled files by name and size, so
+  a onefile binary's per-launch unpack dir does not invalidate it); any change rebuilds
+  it.
 - Per lap: the `laps.csv` fields plus `rec` (recording stem), `track_id`, `car_id`,
   `car`, `tyre_avg_c` (mean surface temperature per wheel over the lap), and `trace`:
   the lap resampled every 5 m of `lap_dist_m` with `t`, `speed_kmh`,
   `throttle`, `brake`, `steer_deg`, `gear`, `x`, `z`.
 - Each lap's track: its session's track, decided as in the part 2 export (a learned
-  assignment keyed `<profile>/<stem>` wins).
+  assignment keyed `<profile>/<stem>` wins; an assignment whose layout no longer
+  resolves falls back to matching). Car name, layout brief, the projection rule and GT7
+  lap-time matching are shared public helpers in `gt7_recording`, used by the export and
+  the index alike.
 - `sectors(trace, length_m, step_m=200)`: sector times from the trace, boundaries every
   200 m from the line, the last sector shorter, times interpolated at the boundaries.
 - `best_sectors(laps)`: per sector the minimum over the given counted laps;
   `theoretical_best` = their sum.
-- `delta(trace_a, trace_b)`: time of B minus time of A at each 5 m station.
+- The delta of B against A (time of B minus time of A at each 5 m station) is computed
+  in the page from the two traces it already holds; the module has no delta function.
 
 Comparisons pool counted laps of the same `track_id` and `car_id` across all
 recordings of the active profile.
@@ -413,7 +419,8 @@ recordings of the active profile.
 
 - Shown when the active profile is solo POV. It reads files through the `racecast.py`
   data layer and needs no running relay.
-- Left column: recordings (newest first), then the laps of the selected recording with
+- Left column: recordings (newest first; the one the relay is writing marked as
+  recording, as in `racecast telemetry list`), then the laps of the selected recording with
   time, status, car and track. A recording with an unknown or ambiguous track offers
   **Set track**: a choice from `TrackDB.layouts()` that calls `learn` with the
   recording's longest counted lap and stores the assignment.
@@ -431,12 +438,14 @@ recordings of the active profile.
   `GET /api/telemetry/lap?rec=&lap=&session=`, `GET /api/telemetry/tracks`,
   `POST /api/telemetry/learn` `{rec, track_id}`.
 - New wiki screenshot `cc-telemetry.png` from a synthetic demo recording (a tool under
-  `tools/` builds it from a signature's racing line), captured from a local dev build.
+  `tools/` builds it from a racing line of the downloaded `signatures.json`), captured
+  from a local dev build.
 
 ## Tests and docs
 
 - `tests/test_gt7_laps.py`: cache build and invalidation, resampling, sectors with a
-  short last sector, best sectors and theoretical best, delta.
+  short last sector, best sectors and theoretical best. The page's delta and path helpers
+  run under node in `tests/test_ui_server.py`.
 - `tests/test_ui_server.py` / `tests/test_racecast.py`: the five routes and their data
   functions; `learn` writes the learned file and the assignment.
 - Visual check of the view; wiki `Control-Center.md` with `cc-telemetry.png`.
