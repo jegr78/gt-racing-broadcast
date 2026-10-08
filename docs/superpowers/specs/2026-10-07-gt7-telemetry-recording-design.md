@@ -325,7 +325,7 @@ Control Center Settings view gets a "GT7 data" row with the age of the data and 
   order:
   1. Candidates: rows whose `length_m` is within 3 % of `length_m` and whose box,
      widened by 50 m, contains every point.
-  2. Score: mean distance from each point to the nearest `path` point. Rows above 15 m
+  2. Score: mean distance from each point to the racing line (projected onto the nearest `path` segment, not the nearest vertex, since vertices lie 20 m apart). Rows above 15 m
      drop out.
   3. Direction: the sequence of nearest `path` indices, unwrapped modulo the path
      length, must mostly rise (forward) or fall (reverse). Falling selects the row's
