@@ -9487,9 +9487,10 @@ class Relay:
         index-designated on-air feed (live_feed) not delivering while the other is
         = a ping-pong desync; debounced by HEALTH_CONNECTING_SETTLE_S. Stores the
         /status block in self._desync and logs on the active transition."""
-        if self.manual_feed_arm:
+        if self.manual_feed_arm or self.solo:
             # Manual mode intentionally disarms feeds; the index-derived desync
             # predicate would false-positive during arm-before-cut. Off here (#492).
+            # Solo has no A/B pair to ping-pong (live_feed() is None).
             with self._health_lock:
                 self._desync_active = False
                 self._desync_since = None
