@@ -72,14 +72,18 @@ def t_solo_heartbeat_paths_never_crash():
 def t_solo_auto_cover_is_a_noop():
     # Solo has no A/B feed to cover: the tick used to index feeds[None] and raise
     # a KeyError on every poll (swallowed at debug level by the loop).
+    touched = []
+
     class _NoObs:
         def __getattr__(self, name):
-            raise AssertionError("solo auto-cover must not touch OBS (%s)" % name)
+            touched.append(name)
+            raise AttributeError(name)
     saved = m._obs_ws
     m._obs_ws = _NoObs()
     try:
         r = _solo_relay()
         r._maybe_auto_cover(1000.0)
+        assert touched == [], "solo auto-cover must not touch OBS: %s" % touched
         assert r._cover_fired is False and r._cover_auto_owned is False
     finally:
         m._obs_ws = saved
