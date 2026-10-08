@@ -157,7 +157,9 @@ def build(out_dir, row, laps=6, hz=60, start=None, car_id=CAR_ID, profile="demo"
             if lap > laps:
                 tail = ts + 4.0
         s = s_next
-    w.close()
+    w.close(timeout=60.0)
+    if w.error or not os.path.isfile(w.path):
+        raise SystemExit(f"could not write the recording: {w.error or 'writer did not finish'}")
     return {"path": w.path, "official_id": row["official_id"],
             "official_name": row["official_name"], "lap_times": times}
 
