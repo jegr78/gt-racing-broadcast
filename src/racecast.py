@@ -927,7 +927,8 @@ def _relay_runtime_args():
     plus the shared cookie jar (see _cookies_path), and --overlay-dir when the
     active profile ships an overlay/ dir. Placed before the caller's rest so an
     explicit flag in rest still wins."""
-    return (["--runtime-dir", _runtime_dir(), "--cookies", _cookies_path()]
+    return (["--runtime-dir", _runtime_dir(), "--runtime-base", _runtime_base_dir(),
+             "--cookies", _cookies_path()]
             + _overlay_relay_args(_active_overlay_dir()))
 
 RELAY_PORT = 8088

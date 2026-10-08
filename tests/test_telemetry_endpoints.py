@@ -382,6 +382,31 @@ def t_store_reload_data_swaps_cars_and_tracks():
     assert store.has_tracks() and store._lookup_car(5)["maker"] == "New"
 
 
+def t_gt7_data_refresh_reloads_store_only_when_changed():
+    import tempfile
+    calls = []
+
+    class _Store:
+        def reload_data(self, cars, tracks):
+            calls.append((cars, tracks))
+
+    with tempfile.TemporaryDirectory() as d:
+        bundled = os.path.join(ROOT, "src", "assets", "gt7")
+        m._gt7_data_refresh(_Store(), d, bundled,
+                            update=lambda base: {"checked": True, "changed": False, "files": {}})
+        assert calls == [], "an unchanged update must not reload the store"
+        m._gt7_data_refresh(_Store(), d, bundled,
+                            update=lambda base: {"checked": True, "changed": True,
+                                                 "files": {"cars.csv": "updated"}})
+        assert len(calls) == 1 and len(calls[0][0]) > 400, "reloaded with the bundled car tables"
+        assert isinstance(calls[0][1], m.gt7_tracks.TrackDB), calls[0][1]
+
+        def boom(base):
+            raise RuntimeError("offline")
+        m._gt7_data_refresh(_Store(), d, bundled, update=boom)    # never raises
+        assert len(calls) == 1, "a failed update keeps the loaded data"
+
+
 def t_zz_no_test_reached_a_real_obs():
     # Sorted last: no test in this file may have attempted a real OBS connection.
     assert _obs_guard.CALLS == [], _obs_guard.CALLS[:3]

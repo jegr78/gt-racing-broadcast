@@ -164,6 +164,8 @@ import gt7_crypto      # GT7 UDP telemetry: Salsa20 decrypt (solo/POV only, #324
 import gt7_telemetry   # GT7 UDP telemetry: packet parser + TelemetryStore (solo/POV only, #324)
 import gt7_recording   # GT7 telemetry recording to disk (solo/POV only)
 import gt7_cars        # GT7 car id -> car name, from the vendored src/assets/gt7 tables (#713)
+import gt7_data        # GT7 reference data: bundled + runtime updates (#787)
+import gt7_tracks      # GT7 track recognition from lap positions (#787)
 from services import external_tool_env  # de-PyInstaller the env for spawned external tools
 
 # Module-level relay logger. main() attaches the file/console handlers via
@@ -12350,6 +12352,21 @@ GT7_RECV_PORT = 33740
 GT7_SEND_PORT = 33739
 
 
+def _gt7_data_refresh(store, runtime_base, bundled, update=gt7_data.update):
+    """Fetch newer GT7 car/track data (at most daily) and swap it into the running store."""
+    try:
+        res = update(runtime_base)
+        if res.get("changed"):
+            store.reload_data(gt7_cars.CarDB(gt7_data.cars_dir(runtime_base, bundled)),
+                              gt7_tracks.TrackDB.load(runtime_base, bundled))
+            LOG.info("GT7 data updated: %s", ", ".join(
+                f"{k} {v}" for k, v in sorted(res["files"].items())))
+        elif any(str(v).startswith("error") for v in res.get("files", {}).values()):
+            LOG.info("GT7 data update incomplete: %s", res["files"])
+    except Exception as e:  # noqa: BLE001  data refresh is best-effort
+        LOG.info("GT7 data update skipped: %s", e)
+
+
 def _telemetry_loop(store, ps_ip, stop_evt, clock=time.monotonic):
     """Bind 33740, heartbeat per gt7_telemetry.HeartbeatPolicy (the extended '~'
     format, #711), decrypt+parse+feed each packet. Best-effort: any error logs and
@@ -12583,6 +12600,9 @@ def main():
     ap.add_argument("--gt7-ps-ip", default=os.environ.get("RACECAST_GT7_PS_IP"),
                     help="PS4/PS5 IP for GT7 UDP telemetry (solo/POV). Empty -> "
                          "subnet-broadcast discovery.")
+    ap.add_argument("--runtime-base", default=None,
+                    help="machine runtime dir (shared GT7 data); default: parent of "
+                         "--runtime-dir")
     ap.add_argument("--ports", default="53001,53002")
     ap.add_argument("--stint", type=int, default=1,
                     help="1-based stint that is ON AIR right now (producer takeover): "
@@ -12983,6 +13003,10 @@ def main():
         _tthr = (float(os.environ.get("RACECAST_TELEMETRY_TYRE_COLD", 70)),
                  float(os.environ.get("RACECAST_TELEMETRY_TYRE_OPTIMAL_HI", 85)),
                  float(os.environ.get("RACECAST_TELEMETRY_TYRE_HOT_HI", 95)))
+        gt7_bundled = os.path.join(assets_dir, "gt7")
+        # Without --runtime-dir the runtime dir is already the machine base.
+        runtime_base = args.runtime_base or (os.path.dirname(runtime) if args.runtime_dir
+                                             else runtime)
         rec_dir = os.path.join(runtime, "telemetry-recordings")
         for name in gt7_recording.finalize_partials(rec_dir):
             LOG.info("telemetry recording %s finalised (left open by the previous relay)", name)
@@ -12995,13 +13019,20 @@ def main():
             os.path.join(runtime, "telemetry.json"), units=_tunits, thresholds=_tthr,
             reset=True,          # fresh reference each relay start (spec §D), no stale cross-track lap
             view_path=os.path.join(runtime, "telemetry-view.json"),   # show/hide survives restarts
-            cars=gt7_cars.CarDB(os.path.join(assets_dir, "gt7")),     # car names (#713)
+            cars=gt7_cars.CarDB(gt7_data.cars_dir(runtime_base, gt7_bundled)),
+            tracks=gt7_tracks.TrackDB.load(runtime_base, gt7_bundled),
             recorder=recorder)
         threading.Thread(target=_telemetry_loop,
                          args=(telemetry_store, args.gt7_ps_ip, stop_evt), daemon=True).start()
         LOG.info("GT7 telemetry listener started (bind 0.0.0.0:33740, ps_ip=%s)",
                 args.gt7_ps_ip or "<discovery>")
         LOG.info("GT7 telemetry recording %s", "on" if recorder.status()["active"] else "off")
+        _update_on = (os.environ.get("RACECAST_GT7_DATA_UPDATE", "1").strip().lower()
+                      not in ("0", "false", "no", "off"))
+        if _update_on:
+            threading.Thread(target=_gt7_data_refresh,
+                             args=(telemetry_store, runtime_base, gt7_bundled),
+                             daemon=True).start()
 
     # Broadcast-chat reader (#294): resolve the channel's live videoId set and
     # poll each stream's chat. Its own ~30 s resolve cadence, not args.poll, because

@@ -100,6 +100,8 @@
   /* The GT7 car keeps its own spelling ("e-tron", "TI '93") and truncates on a tablet. */
   #stCar{max-width:100%;min-width:0}
   #stCar b{text-transform:none;letter-spacing:0;min-width:0;overflow:hidden;text-overflow:ellipsis}
+  #stTrack{max-width:100%;min-width:0}
+  #stTrack b{text-transform:none;letter-spacing:0;min-width:0;overflow:hidden;text-overflow:ellipsis}
   .led{display:flex;align-items:center;gap:7px;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted)}
   .dot{width:12px;height:12px;border-radius:50%;background:#3a434d;box-shadow:0 0 0 3px rgba(255,255,255,.03)}
   .dot.on{background:var(--live);box-shadow:0 0 14px var(--live-glow),0 0 0 3px rgba(43,214,106,.12)}
@@ -667,6 +669,7 @@
       <span class="st" id="stPov">POV <b>—</b></span>
       <span class="st" id="stTimer">TIMER <b>—</b></span>
       <span class="st" id="stCar" hidden>CAR <b></b></span>
+      <span class="st" id="stTrack" hidden>TRACK <b></b></span>
     </div>
     <div class="led"><span class="dot" id="ledObs"></span>OBS</div>
     <div class="led"><span class="dot" id="ledRelay"></span>Relay</div>
@@ -2043,6 +2046,12 @@ function carLabel(car){               // "Alfa Romeo 155 2.5 V6 TI '93 · Gr.4";
   return car.group && car.group !== "N" ? name + " · " + car.group : name;
 }
 
+function trackLabel(t){               // "Nürburgring - Grand Prix (reverse)"; text only
+  if (!t) return "";
+  if (t.candidates) return "?";
+  return [t.track, t.layout].filter(Boolean).join(" - ") + (t.reverse ? " (reverse)" : "");
+}
+
 async function relayPoll(){
   try{
     const r = await fetch("/status", {cache:"no-store"});
@@ -2108,6 +2117,11 @@ async function relayPoll(){
     $("#stCar").hidden = !car;
     $("#stCar b").textContent = carLabel(car);
     $("#stCar").title = carLabel(car);            // the full name where the strip truncates
+    const trk = d.telemetry && d.telemetry.track;   // recognised after the first full lap
+    $("#stTrack").hidden = !trk;
+    $("#stTrack b").textContent = trackLabel(trk);
+    $("#stTrack").title = trk && trk.candidates ? "Possible: " + trk.candidates.join(", ")
+                                                : trackLabel(trk);
     if (!solo){
       const lines = [healthLine("A", d.feeds.A), healthLine("B", d.feeds.B)];
       if (d.pov && d.pov.state !== "stopped") lines.push(healthLine("POV", d.pov));
@@ -2202,6 +2216,7 @@ async function relayPoll(){
     }
     $("#stHealth").title = "relay unreachable";
     $("#stCar").hidden = true;             // no stale car while the relay is down
+    $("#stTrack").hidden = true;
     $("#feedHealth").innerHTML = "";
   }
 }

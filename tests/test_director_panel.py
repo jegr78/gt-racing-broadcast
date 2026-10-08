@@ -381,6 +381,27 @@ def t_solo_status_strip_names_the_car():
     assert "function carLabel(car)" in html
 
 
+def t_solo_status_strip_names_the_track():
+    """The strip shows the recognised GT7 track (telemetry.track) as text, '?' with the
+    candidate ids as tooltip while ambiguous, and hides it when unknown or the relay is down."""
+    html = _html()
+    assert '<span class="st" id="stTrack" hidden>TRACK <b></b></span>' in html
+    assert html.index('id="stCar"') < html.index('id="stTrack"'), "the track sits after the car"
+    poll = html[html.index("async function relayPoll"):]
+    down = poll[poll.index("}catch(e){"):]
+    poll = poll[:poll.index("}catch(e){")]
+    assert "const trk = d.telemetry && d.telemetry.track;" in poll
+    assert '$("#stTrack").hidden = !trk;' in poll
+    assert '$("#stTrack b").textContent = trackLabel(trk);' in poll
+    assert '"Possible: " + trk.candidates.join(", ")' in poll
+    assert '$("#stTrack").hidden = true;' in down[:down.index("\n}\n")], \
+        "a stale track must not stay up while the relay is down"
+    fn = _func_src(html, "trackLabel")
+    assert 'if (t.candidates) return "?";' in fn
+    assert '(t.reverse ? " (reverse)" : "")' in fn
+    assert "#stTrack b{text-transform:none" in html, "track names keep their case"
+
+
 
 def _config_block(html, name):
     """The source text of `const <name> = {...};`, up to the closing `};`."""

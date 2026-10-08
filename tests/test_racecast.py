@@ -2661,6 +2661,12 @@ def t_obs_ws_persist_default_on():
     assert feeds.obs_ws_persist_enabled({"RACECAST_OBS_WS_PERSIST": "0"}) is False
 
 
+def t_relay_runtime_args_pass_the_runtime_base():
+    args = m._relay_runtime_args()
+    i = args.index("--runtime-base")
+    assert args[i + 1] == m._runtime_base_dir(), args
+
+
 def t_relay_runtime_args_adds_overlay_when_dir_exists():
     import tempfile, os
     with tempfile.TemporaryDirectory() as tmp:
