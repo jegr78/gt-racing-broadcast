@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
-"""GT7 lap index: per-lap traces and mini-sectors from a telemetry recording.
+"""GT7 lap index: sector math over a lap trace.
 
-Stdlib only and no relay imports. index() replays a recording once through the same
-parse_packet and TelemetryEngine the HUD uses and caches the result as
-<stem>.laps.json next to the recording. A trace is one point every STEP_M metres of
-lap distance, starting at 0.0 on the line.
+Stdlib only and no relay imports. A trace is one point every STEP_M metres of lap
+distance, starting at 0.0 on the line.
 """
 import bisect
 import math

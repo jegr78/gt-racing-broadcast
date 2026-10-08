@@ -37,6 +37,12 @@ def t_sectors_short_last_sector():
     assert gl.sectors(short, gl.lap_length_m({"trace": short})) == [4.0, 4.0, 4.0, 4.0, 3.9]
 
 
+def t_sectors_interpolates_between_stations():
+    tr = _trace(4.0, 4.0, 4.0, 4.0, 4.0)
+    assert gl.sectors(tr, 1000.0, step_m=203.0) == [4.06, 4.06, 4.06, 4.06, 3.76], \
+        "boundaries at 203/406/609/812 fall between 5 m stations and must be interpolated"
+
+
 def t_sectors_beyond_the_trace_have_no_time():
     tr = _trace(4.0, 4.0, 4.0, 4.0, 4.0)[:-4]     # ends at 980 m
     assert gl.sectors(tr, 1000.0)[-1] is None, "no time is invented past the trace"
