@@ -159,7 +159,8 @@ relay start resumes recording if it was on.
   elapsed_s, bytes, dropped, error}`; `elapsed_s` is the relay's own wall clock minus
   `since` (not the viewer's clock), so a skewed browser never shows a wrong duration.
   Over the Funnel-exposed `/console` mount, `record` is director/producer-only
-  (`redact_console_status`): `error` can carry an OS path.
+  (`redact_console_status`): the file path and byte/drop counters are producer
+  detail, kept off the Funnel for every other role.
 
 ## CLI
 
@@ -243,12 +244,12 @@ TDD, failing test first.
   overflow, write error, header validation, CSV columns and filtering, `--excel`
   formatting, lap rows and `gt7_time_s` on synthetic packets.
 - `tests/test_gt7_fixture.py`: gear, rpm and position on the real packets.
-- `tests/test_gt7_telemetry.py`: lap record returned by `_finalise_lap`, session counter.
+- `tests/test_gt7_telemetry.py`: the `on_lap` callback's record, session counter.
 - `tests/test_telemetry_endpoints.py`: record endpoints, state precedence (file over
   profile key), `/status` block, file opened only on the first packet.
 - `console_policy`, CLI dispatch, the `event_start` reset, the pre-filled profile key.
 - Director Panel: `ui-visual-verification`, then `wiki-screenshots` for
-  `director-panel.png`.
+  `director-panel-solo.png`.
 
 ## Docs
 

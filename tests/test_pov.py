@@ -3472,8 +3472,8 @@ def t_backlog_in_status_and_health_snapshot():
 
 
 def t_redact_console_status_drops_telemetry_record_for_non_director():
-    # telemetry.record.error can carry an OS path (#786); keep the whole block
-    # director/producer-only over the Funnel, same boundary as feed URLs.
+    # Recording file path and counters are producer detail (#786): keep the whole
+    # telemetry.record block director/producer-only over the Funnel, like feed URLs.
     full = {"feeds": {}, "telemetry": {"visible": True, "car": "911",
                                        "record": {"active": True, "error": "disk full"}}}
     kept = m.redact_console_status(full, ["director"])["telemetry"]

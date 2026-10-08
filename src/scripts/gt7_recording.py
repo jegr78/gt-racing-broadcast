@@ -42,7 +42,7 @@ def _encode(wall_ts, kind_byte, payload):
 def _local_dt(ts):
     """ts as a local-timezone datetime, via an explicit UTC tz so the conversion never
     calls the platform's raw localtime(): on Windows that raises OSError (Errno 22)
-    for small ts, which near-epoch test fixtures (and a just-started recording) hit."""
+    for small ts, which near-epoch test fixtures hit."""
     return datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc).astimezone()
 
 
