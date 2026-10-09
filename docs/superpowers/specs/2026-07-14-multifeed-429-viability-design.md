@@ -183,7 +183,7 @@ is faithful; if a 1-feed public pull already misbehaves, fall back to arranged d
 
 ### FINAL MODEL (most accurate — supersedes everything below) — the AWS block is INTERMITTENT
 
-A faithful multi-region re-test (`tools/cloud/provision-iptest.sh` + `iptest-regions.sh`: a fresh
+A faithful multi-region re-test (`tools/cloud/provision-iptest.py` + `iptest-regions.py`: a fresh
 Ubuntu 24.04 box per region, real `racecast install-tools` toolchain, the real `racecast cookies`
 jar, the exact relay resolve command) resolved YouTube **cleanly in ALL three AWS regions — including
 eu-central-1, the same region as the "blocked" box** (`18.197.x`, `108.131.x`, `44.222.x` all

@@ -156,7 +156,7 @@ half-configured if the second call is lost.
      Overridable via `RACECAST_DISPLAY`. Best-effort and idempotent — if the app is already
      running, `event start` still just reports "already running". A pure, unit-tested helper
      resolves the launch environment; the subprocess spawn stays where it is.
-   - **Autostart at boot** (`tools/cloud/provision.sh`, maintainer): xfce autostart
+   - **Autostart at boot** (`tools/cloud/provision.py`, maintainer): xfce autostart
      `.desktop` entries for OBS + Discord, so they come up with the session at boot and
      `event start` finds them running. (Both mechanisms coexist: autostart is the default
      state, the `DISPLAY` fix is the on-demand path.)
@@ -290,7 +290,7 @@ Pure-first, stdlib runnable-script tests (new `tests/test_parts.py` unless noted
 - `src/racecast.py` — `event start` Part reset + `--part N`; pass `--producer-tab`/overlay
   args as needed.
 - `src/director/director-panel.html` — Part-aware control + typed-confirm modal + fallback.
-- `tools/cloud/provision.sh` — xfce autostart entries for OBS + Discord.
+- `tools/cloud/provision.py` — xfce autostart entries for OBS + Discord.
 - Tests: `tests/test_parts.py` *(new)*, plus extensions to `test_console.py`,
   `test_event.py`.
 - Docs: `director-panel.png`, `Run-an-event.md`, `tools/cloud/README.md`, `Sheet-Webhook.md`.

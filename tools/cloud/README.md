@@ -1,6 +1,6 @@
 # GPU box provisioning (cloud-producer spike, #395)
 
-`provision.sh` brings a fresh GCP GPU VM (Ubuntu 24.04, amd64) to "ready to onboard a
+`provision.py` brings a fresh GCP GPU VM (Ubuntu 24.04, amd64) to "ready to onboard a
 league": NVIDIA driver, xfce desktop (autologin), Firefox (deb), RustDesk, passwordless
 sudo, Tailscale join, plus the racecast toolchain and applications (`install-tools` /
 `install-apps`). It installs only what racecast does not cover and delegates the rest to
@@ -8,7 +8,7 @@ the racecast binary: it never re-implements the OBS/Tailscale installers.
 
 **Log in as `racecast`.** You connect to the box **directly as the `racecast` user**
 (`gcloud compute ssh racecast@racecast-box`); the GCP guest agent auto-creates that user on
-first connect (OS Login is off → metadata SSH keys). `provision.sh` then installs the whole
+first connect (OS Login is off → metadata SSH keys). `provision.py` then installs the whole
 event stack **directly into `/home/racecast`** (binary at `/home/racecast/racecast`, with
 `profiles/` + `runtime/` alongside. The home IS the install root, no nesting). Because you
 ARE `racecast`, every event command is plain `racecast <cmd>`: no `sudo`, no second user.
@@ -22,7 +22,7 @@ reproducibility mechanism instead (any league can stand up its own box the same 
 
 There are two boxes; both are controlled the same way once up (SSH in as `racecast`,
 `racecast <cmd>`), and both are managed day-to-day by the control wrappers in §5
-(`aws-box.sh` / `gcp-box.sh` → `status` / `start` / `stop` / `ssh`).
+(`aws-box.py` / `gcp-box.py` → `status` / `start` / `stop` / `ssh`).
 
 - **AWS** (current production box): `g4dn.xlarge` (Tesla T4) in `eu-central-1a`,
   instance `i-04d70428c19a484ef`. You reach it **directly over SSH with a key pair**,
@@ -31,11 +31,11 @@ There are two boxes; both are controlled the same way once up (SSH in as `raceca
   the machine, onboarding a league, per-event prep, going live) is identical.
 - **GCP**: `g2-standard-8` (L4) in `europe-west4-b`, instance `racecast-box`. Login is
   `gcloud compute ssh racecast@racecast-box` (OS Login off → the guest agent creates
-  the `racecast` user from the metadata SSH key). The create + `provision.sh`
+  the `racecast` user from the metadata SSH key). The create + `provision.py`
   walkthrough in §1–§2 is written for this path.
 
 The create/login layer differs per provider (§1 covers GCP); the racecast layer
-(§3–§4b: onboarding, cookies, Discord, `prepare-event.sh`, `event start`) is
+(§3–§4b: onboarding, cookies, Discord, `prepare-event.py`, `event start`) is
 provider-agnostic: it is all plain `racecast <cmd>` as the `racecast` user.
 
 ## 1. Create the instance (once)
@@ -79,21 +79,44 @@ Connect **as `racecast`** (the `racecast@` prefix, first connect creates the use
 run the script. **Manual, with output on screen (recommended for the first setup):**
 
 ```bash
-gcloud compute scp tools/cloud/provision.sh racecast@racecast-box:~/ --zone=europe-west4-b
+gcloud compute scp tools/cloud/provision.py tools/cloud/prepare-event.py racecast@racecast-box:~/ --zone=europe-west4-b
 gcloud compute ssh racecast@racecast-box --zone=europe-west4-b
-  $ sudo ./provision.sh        # idempotent: re-run after any red line
+  $ sudo python3 provision.py        # idempotent: re-run after any red line
 ```
 
-The script also copies `prepare-event.sh` into `~racecast/` for per-event prep (§4b); in startup-script mode where the file is absent, you can `scp` it up manually.
+Copy both files: when `prepare-event.py` sits next to `provision.py`, provision installs it
+as `~racecast/prepare-event.py` for per-event prep (§4b). Call the scripts through
+`python3`; a copy made from Windows carries no executable bit.
 
-**Reproduction one-liner: unattended startup-script (any league, from scratch):**
+**Unattended startup-script (any league, from scratch):**
 
 ```bash
 gcloud compute instances create racecast-box ... \
-  --metadata-from-file startup-script=tools/cloud/provision.sh
+  --metadata-from-file startup-script=tools/cloud/provision.py
 # watch the log:
 gcloud compute instances get-serial-port-output racecast-box --zone=europe-west4-b
 ```
+
+Compute Engine runs a startup-script on **every** boot, so provision runs again after each
+start. It is idempotent, and it reboots only once: on the first run that ends fully green it
+writes `/var/lib/racecast/provisioned` and reboots; later runs skip the reboot, and a run with
+a red line does not reboot either. That copy of provision has no sibling `prepare-event.py`,
+and Compute Engine passes no environment variables to a startup-script, so `TS_AUTHKEY`,
+`RACECAST_TAG` and `PROVISION_REBOOT` are unset. To set them, use a small wrapper as the
+startup-script that fetches both files and runs provision with the variables in front:
+
+```bash
+gcloud compute instances create racecast-box ... \
+  --metadata startup-script='#!/bin/sh
+cd /root
+curl -fsSL -O https://raw.githubusercontent.com/jegr78/gt-racing-broadcast/main/tools/cloud/provision.py
+curl -fsSL -O https://raw.githubusercontent.com/jegr78/gt-racing-broadcast/main/tools/cloud/prepare-event.py
+TS_AUTHKEY=tskey-... RACECAST_TAG=preview-main python3 provision.py'
+```
+
+A key in instance metadata is readable by anyone who can view the instance and by every
+process on the box through the metadata server. Use a tagged, short-lived key there, or
+leave `TS_AUTHKEY` out and finish the join by hand.
 
 Optional env (never commit these):
 
@@ -113,9 +136,10 @@ Optional env (never commit these):
   provision **generates** a strong random one; either way the first-boot oneshot applies it
   and writes the ID + password to `~racecast/rustdesk-access.txt`.
 - `RUSTDESK_VERSION`: pin a RustDesk release (default in the script; bump if outdated).
-- `PROVISION_REBOOT`: reboot at the end of provisioning to bring up the desktop session +
-  finish RustDesk setup. **Default on**; set `PROVISION_REBOOT=0` to opt out (then reboot
-  manually before connecting over RustDesk).
+- `PROVISION_REBOOT`: reboot at the end of the first fully green provisioning run to bring
+  up the desktop session + finish RustDesk setup. **Default on**; set `PROVISION_REBOOT=0` to
+  opt out (then reboot manually before connecting over RustDesk). Re-runs after that first
+  green run, and runs that end with a red line, never reboot.
 
 The script ends with a green/red verification block. A red line names the step to re-run.
 
@@ -131,11 +155,11 @@ join is done.
 
 ## 3. First boot — reboot, then connect over RustDesk
 
-- **Provision reboots automatically** at the end (default on; opt out with
-  `PROVISION_REBOOT=0`) so the `racecast` **autologin desktop** comes up on `:0` (OBS +
-  Discord autostart into it; RustDesk mirrors that display). The GPU driver itself loads
-  without a reboot, but the desktop session needs one, so let the reboot happen, or if you
-  opted out, reboot manually before connecting.
+- **Provision reboots automatically** at the end of its first fully green run (default on;
+  opt out with `PROVISION_REBOOT=0`) so the `racecast` **autologin desktop** comes up on `:0`
+  (OBS + Discord autostart into it; RustDesk mirrors that display). A run that ends with a
+  red line does not reboot; when the red line is a driver that built but is not loaded,
+  reboot by hand and run provision again.
 - **RustDesk is auto-configured**: no GUI password step. On that first boot the
   `racecast-rustdesk-setup` oneshot sets the password (generated by provision, or your
   `RUSTDESK_PASSWORD`), best-effort enables direct IP access, and writes the **ID +
@@ -150,7 +174,7 @@ join is done.
   the one `racecast` user.
 
 - **Event day is SSH-only: no RustDesk needed.** The autologin xfce session
-  comes up at boot (as `racecast`), and `provision.sh` installs autostart entries so OBS +
+  comes up at boot (as `racecast`), and `provision.py` installs autostart entries so OBS +
   Discord launch with it. From your laptop, `gcloud compute ssh racecast@racecast-box …`
   then plain `racecast preflight` and `racecast event start`. `event start` also
   (re)launches OBS/Discord into the running session over SSH (it sets `DISPLAY=:0`;
@@ -159,7 +183,7 @@ join is done.
 
 ## 4. Onboard a league (once per league, then reuse)
 
-Not part of `provision.sh`. This is the profile layer. The event tree lives directly in
+Not part of `provision.py`. This is the profile layer. The event tree lives directly in
 `/home/racecast` (binary at `/home/racecast/racecast`, with `profiles/` + `runtime/`
 alongside). Ship the league as a portable **profile bundle** and import it on the box.
 Because you SSH in as `racecast`, the whole flow is plain commands:
@@ -197,14 +221,14 @@ the token is cached (7-day refresh) and the auto-join is hands-free.
 
 Switch between already-onboarded leagues with `racecast profile use <name>`.
 
-## 4b. Prepare for an event (`prepare-event.sh`)
+## 4b. Prepare for an event (`prepare-event.py`)
 
-`provision.sh` drops `prepare-event.sh` into `~racecast/`. Before each event, SSH in as
+`provision.py` drops `prepare-event.py` into `~racecast/`. Before each event, SSH in as
 `racecast` and run it with the league profile:
 
 ```bash
 gcloud compute ssh racecast@racecast-box --zone=europe-west4-b
-  $ ./prepare-event.sh <league>            # + --no-twitch / --no-speedtest / --no-update
+  $ python3 prepare-event.py <league>      # + --no-twitch / --no-speedtest / --no-update
 ```
 
 It runs, in order: `racecast update` (with a **preview guard**, a deliberate
@@ -224,21 +248,24 @@ STOP the box after every event: a running GPU instance bills by the hour, a
 stopped one only its boot disk. The tailnet IP is stable across stop/start, so
 the box keeps its `100.x` address after a restart.
 
-Use the **control wrappers**: `aws-box.sh` for the AWS box, `gcp-box.sh` for the
+Use the **control wrappers**: `aws-box.py` for the AWS box, `gcp-box.py` for the
 GCP box. Each takes `status` (default), `start`, `stop`, `ip`, and `ssh`, so you
 never have to remember the instance id/zone:
 
 ```bash
-tools/cloud/aws-box.sh status     # cloud state + type + public IP
-tools/cloud/aws-box.sh start      # start, wait until running, print the SSH line
-tools/cloud/aws-box.sh stop       # stop -> billing drops to the EBS boot disk
-tools/cloud/aws-box.sh ssh        # ssh in as racecast over the tailnet
+tools/cloud/aws-box.py status     # cloud state + type + public IP
+tools/cloud/aws-box.py start      # start, wait until running, print the SSH line
+tools/cloud/aws-box.py stop       # stop -> billing drops to the EBS boot disk
+tools/cloud/aws-box.py ssh        # ssh in as racecast over the tailnet
 
-tools/cloud/gcp-box.sh status     # RUNNING | TERMINATED (= stopped) + type + external IP
-tools/cloud/gcp-box.sh start      # gcloud start is synchronous (waits for RUNNING)
-tools/cloud/gcp-box.sh stop
-tools/cloud/gcp-box.sh ssh        # gcloud compute ssh racecast@racecast-box
+tools/cloud/gcp-box.py status     # RUNNING | TERMINATED (= stopped) + type + external IP
+tools/cloud/gcp-box.py start      # gcloud start is synchronous (waits for RUNNING)
+tools/cloud/gcp-box.py stop
+tools/cloud/gcp-box.py ssh        # gcloud compute ssh racecast@racecast-box
 ```
+
+The wrappers are stdlib Python 3 and run on macOS, Linux and Windows. On Windows call them
+through the interpreter: `python tools\cloud\aws-box.py status`.
 
 Defaults target the current boxes (AWS `i-04d70428c19a484ef` in `eu-central-1`;
 GCP `racecast-box` in `europe-west4-b`); override per box with the env vars
@@ -255,26 +282,26 @@ gcloud compute instances stop racecast-box --zone europe-west4-b
 The one genuinely GPU-specific unknown is "does X start on the T4 with no monitor". Everything
 else is validatable without a GPU. De-risk in three tiers:
 
-1. **CPU dry-run (pennies).** Run `provision.sh` on a cheap non-GPU VM (the Stage 0/1
+1. **CPU dry-run (pennies).** Run `provision.py` on a cheap non-GPU VM (the Stage 0/1
    e2-micro). `has_nvidia_gpu()` auto-skips the driver + xorg steps, so the rest.
    Lightdm/autologin config, RustDesk + direct-IP over Tailscale, Firefox deb, `racecast
    install-tools`/`install-apps`, the verification block. Runs identically and catches
    the non-GPU bugs. Use `RACECAST_TAG=preview-main` so the *fixed* install code is what
    you test.
 2. **Isolated GPU smoke test (~15 min on the GPU box).** Before any OBS/onboarding:
-   `provision.sh` → reboot → check only the display lines of the verification block
+   `provision.py` → reboot → check only the display lines of the verification block
    (`nvidia-smi` lists Xorg as a GPU process, `pgrep Xorg`, `DISPLAY=:0 glxinfo` renderer
    is the T4 not `llvmpipe`, RustDesk shows the xfce desktop). Green = the risky part is
    proven; only then invest in OBS setup + NVENC (#421).
 3. **Fallback.** The live run's headless-X recipe (`nvidia-open` has no `nvidia-xconfig`,
-   so `provision.sh` writes `/etc/X11/xorg.conf` by hand. Single 1920×1080, BusID from
+   so `provision.py` writes `/etc/X11/xorg.conf` by hand. Single 1920×1080, BusID from
    `lspci`) is proven. If X still won't start, feed a CustomEDID (fake a 1080p monitor).
    NVENC encoding is independent of the X display, so it is never at risk while the desktop
    display is being tuned.
 
 ## Notes
 
-- `provision.sh` runs as root for the machine layer (driver, apt, sudoers) but installs
+- `provision.py` runs as root for the machine layer (driver, apt, sudoers) but installs
   racecast **straight into the `racecast` login user's home** (`/home/racecast`, user-owned,
   the binary at `/home/racecast/racecast`, no nested `racecast/` dir) and runs
   `install-tools`/`install-apps` **as that user**. So every event operation. Profile
