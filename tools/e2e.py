@@ -481,7 +481,8 @@ def run_visual(urls, outdir, headed=False, slowmo=0):
     return V.result_code(results)
 
 
-POV_PROFILE = "e2e-pov"
+# Named like the shipped profile, so a --keep screenshot shows the usual sidebar.
+POV_PROFILE = "solo-pov"
 
 
 def _pov_home(tmp, binary):
@@ -541,7 +542,7 @@ def _start_pov_ui(binary, tmp, env, timeout):
     return proc, url
 
 
-def _print_live_urls(relay_url, ui_url, token):
+def _print_live_urls(relay_url, ui_url, token, pov_url=None, pids=None):
     """With --keep the spawned relay and Control Center are left running: they
     started in their own session, so they outlive this process. Print the live
     surfaces so they can be opened in a browser for a visual walk-through."""
@@ -551,8 +552,14 @@ def _print_live_urls(relay_url, ui_url, token):
     print(f"  lower-third HUD:     {relay_url}/hud")
     print(f"  commentator cockpit: {relay_url}/cockpit?t={token}")
     print(f"  Control Center:      {ui_url}/")
-    print("  (stop them with:  pkill -f 'racecast.py relay run' ; "
-          "pkill -f 'racecast.py ui')")
+    if pov_url:
+        print(f"  solo POV Control Center (Telemetry): {pov_url}/")
+    if pids and os.name == "posix":
+        # Each child leads its own process group (_spawn), so this stops exactly these trees.
+        print("  (stop them with:  kill -- " + " ".join(f"-{pid}" for pid in pids) + ")")
+    else:
+        print("  (stop them with:  pkill -f 'racecast.py relay run' ; "
+              "pkill -f 'racecast.py ui')")
 
 
 def run_synthetic(args):
@@ -708,6 +715,7 @@ def run_synthetic(args):
             if any(r.status == "fail" for r in rendered):
                 code = 1
         print(E.summarize(results))
+        pov_url = None
         if args.visual:
             pov_ui, pov_url = _start_pov_ui(binary if args.binary is not None else None,
                                             tmp, env3, args.timeout)
@@ -718,7 +726,7 @@ def run_synthetic(args):
         if args.shots:
             _capture_shots(ctx, args.shots, headed=args.headed, slowmo=args.slowmo)
         if args.keep:
-            _print_live_urls(relay_url, ui_url, token)
+            _print_live_urls(relay_url, ui_url, token, pov_url, [p.pid for p in procs])
             print("  NOTE: the synthetic schedule was served in-process and stops "
                   "when this command exits, so the relay keeps only its cached schedule.")
         return code

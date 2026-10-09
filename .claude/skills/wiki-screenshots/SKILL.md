@@ -31,7 +31,7 @@ uniform "dev build" across all shots.
 | Discord login page | `/console/login` | `console-login.png` |
 | Race Control desk | `/console/race-control?t=<token>` | `console-race-control.png` |
 
-`cc-telemetry.png` needs a solo POV profile with recordings and the downloaded racing lines: `racecast gt7-data update` once, then `python3 tools/make-demo-recording.py --out runtime/solo-pov/telemetry-recordings` and `--profile solo-pov ui`.
+`cc-telemetry.png` needs a solo POV profile with indexed recordings. Without network and without touching `runtime/`: `runtime/pw-venv/bin/python tools/e2e.py --visual --keep` starts a dev-build solo POV Control Center in a temp dir (a learned demo track plus one indexed demo recording) and prints its URL; capture its Telemetry view, then run the `kill` line it prints (only the processes it started) and delete the temp dir it names.
 
 Wiki screenshots live in **`src/docs/wiki/images/<name>.png`**. The onboarding slides reuse
 the **same images** in **`src/docs/slides/assets/img/<name>.png`**: when a shot is used by a
