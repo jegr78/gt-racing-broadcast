@@ -38,7 +38,7 @@ documented for anyone (any league) who wants to stand up their own box.
 
 ## Architecture — two layers
 
-**Layer 1 — machine layer (`tools/cloud/provision.sh`, runs once on the box).**
+**Layer 1 — machine layer (`tools/cloud/provision.py`, runs once on the box).**
 Everything league-agnostic and secret-free. The script installs only what racecast does
 **not** cover — NVIDIA driver, xfce desktop, Firefox (deb), RustDesk, passwordless sudo,
 Tailscale **join** — and then delegates the toolchain and applications to the racecast
@@ -53,12 +53,13 @@ collection for the active profile) + import into OBS. Done once per league; swit
 between already-onboarded leagues afterwards is just `racecast profile use <name>`. This
 mirrors how racecast already separates machine state from profile state.
 
-## `tools/cloud/provision.sh` — specification
+## `tools/cloud/provision.py` — specification
 
-Runs as root — either invoked manually with `sudo ./provision.sh`, or as a GCP
+Runs as root — either invoked manually with `sudo ./provision.py`, or as a GCP
 startup-script on first boot (both modes documented; see below). Every step is
 **idempotent** (existence- or stamp-gated) so a re-run after a failed step is safe and
-does not redo completed work. English-only, POSIX-ish bash, `set -euo pipefail`.
+does not redo completed work. English-only, stdlib Python 3. It was first written in bash
+with `set -euo pipefail`; the Python port keeps that fail-fast behaviour explicitly.
 
 Steps, in order — split into "what racecast does not cover" and the two racecast
 delegations:
@@ -117,14 +118,14 @@ NVENC encoders, `ldconfig -p | grep nvidia-encode`, `tailscale status` is up,
 - **Manual (default, for first-time setup with eyes on it):**
   ```
   gcloud compute instances create spike-gpu ...        # Appendix A step 1
-  gcloud compute scp tools/cloud/provision.sh spike-gpu:~/ --zone=...
+  gcloud compute scp tools/cloud/provision.py spike-gpu:~/ --zone=...
   gcloud compute ssh spike-gpu --zone=...
-    $ sudo ./provision.sh                                # live output, re-runnable
+    $ sudo ./provision.py                                # live output, re-runnable
   ```
 - **GCP startup-script (reproduction one-liner, unattended):**
   ```
   gcloud compute instances create spike-gpu ... \
-    --metadata-from-file startup-script=tools/cloud/provision.sh
+    --metadata-from-file startup-script=tools/cloud/provision.py
   # log: gcloud compute instances get-serial-port-output spike-gpu
   ```
   Same script; because it is root-safe and idempotent it runs correctly in both. Serial
@@ -142,28 +143,28 @@ NVENC encoders, `ldconfig -p | grep nvidia-encode`, `tailscale status` is up,
 
 ## Deliverables
 
-1. `tools/cloud/provision.sh` — the script above.
-2. `tools/cloud/README.md` — create instance → run provision.sh (both modes) →
+1. `tools/cloud/provision.py` — the script above.
+2. `tools/cloud/README.md` — create instance → run provision.py (both modes) →
    per-league onboarding → stop/start cost control. Notes secrets (cookies, `TS_AUTHKEY`)
    never live in git.
 3. **Runbook Appendix A rewrite** — from the current manual step-by-step copy-paste flow
-   to: one persistent instance + `provision.sh` + profile-per-league. Snapshots marked
+   to: one persistent instance + `provision.py` + profile-per-league. Snapshots marked
    explicitly out of scope. Appendix B (NVENC #421) is unchanged.
 
 ## Validation (before spending GPU hours)
 
-Paper checks: `shellcheck tools/cloud/provision.sh` + `bash -n`; each command reviewed
+Paper checks: `python3 tools/lint.py` + `python3 tests/test_cloud_tools.py`; each command reviewed
 against its upstream doc; idempotency guards read through. Then a three-tier confidence
 build so the only thing left to prove on the (expensive) GPU box is the one GPU-specific
 unknown — "does X start on the T4 with no monitor":
 
-1. **CPU dry-run (pennies).** `provision.sh` runs on a cheap non-GPU VM; a `has_nvidia_gpu`
+1. **CPU dry-run (pennies).** `provision.py` runs on a cheap non-GPU VM; a `has_nvidia_gpu`
    guard auto-skips the driver + xorg steps, so lightdm/autologin, RustDesk direct-IP over
    Tailscale, Firefox deb, `install-tools`/`install-apps`, and the verification block are
    all validated GPU-free. Run with `RACECAST_TAG=preview-main` so the *fixed* install
    code is what gets exercised.
 2. **Isolated GPU smoke test (~15 min).** First thing on the GPU box, before OBS/onboarding:
-   `provision.sh` → reboot → check only the display lines of the verification block
+   `provision.py` → reboot → check only the display lines of the verification block
    (`nvidia-smi` lists Xorg, `pgrep Xorg`, `DISPLAY=:0 glxinfo` renderer is the T4 not
    `llvmpipe`, RustDesk shows the desktop). Green = the risk is retired.
 3. **Fallback.** If `--allow-empty-initial-configuration` misbehaves, feed a CustomEDID
@@ -195,7 +196,7 @@ correct, not unnecessary.
 ## Post-run amendment (2026-07-04)
 
 The first full GPU-box run superseded parts of steps 2–3 above and the driver risk item.
-`provision.sh` and the runbook's "Post-GPU-run findings" section are the source of truth;
+`provision.py` and the runbook's "Post-GPU-run findings" section are the source of truth;
 in short: (1) the driver is `nvidia-open` from the NVIDIA CUDA apt repo, **not**
 GoogleCloudPlatform/`install_gpu_driver.py` (its pinned 550 fails to build on Ubuntu
 24.04's kernel 6.17); (2) headless X is a **hand-written** `/etc/X11/xorg.conf` (BusID from

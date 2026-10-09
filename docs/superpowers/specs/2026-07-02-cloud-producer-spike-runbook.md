@@ -267,11 +267,11 @@ headroom on a busy multi-feed event.
 
 **NVIDIA driver — `nvidia-open`, not the deprecated installer.** GCP's
 `install_gpu_driver.py` pins driver 550.54.15, whose proprietary modules **fail to build**
-against Ubuntu 24.04's current kernel (6.17). `provision.sh` now installs `nvidia-open`
+against Ubuntu 24.04's current kernel (6.17). `provision.py` now installs `nvidia-open`
 (open kernel modules, DKMS) from the NVIDIA CUDA apt repo. (F2)
 
 **Headless X — hand-written `xorg.conf`.** `nvidia-xconfig` is not shipped with the open
-driver. `provision.sh` writes `/etc/X11/xorg.conf` directly (BusID from `lspci`, a single
+driver. `provision.py` writes `/etc/X11/xorg.conf` directly (BusID from `lspci`, a single
 1920×1080 mode — a larger `Virtual` desyncs RustDesk's absolute mouse mapping). (F3)
 
 **streamlink too old on Linux — the "relay bug" that wasn't.** The box's feed aborted with
@@ -291,9 +291,9 @@ step 2).
 
 ---
 
-## Appendix A — GCP T4/L4 provisioning (persistent instance + provision.sh)
+## Appendix A — GCP T4/L4 provisioning (persistent instance + provision.py)
 
-Model: **one long-lived instance**, provisioned once with `tools/cloud/provision.sh`,
+Model: **one long-lived instance**, provisioned once with `tools/cloud/provision.py`,
 reused for all events by switching racecast **profiles**. Stop it between events for cost;
 the tailnet IP is stable across stop/start. **No machine images/snapshots** — the script
 is the reproducibility mechanism (full detail + the per-league onboarding and cost-control
@@ -343,16 +343,16 @@ the NVIDIA driver, xfce, Firefox (deb), RustDesk, passwordless sudo, joins Tails
 runs `racecast install-tools` + `racecast install-apps --yes`. Idempotent — re-run after
 any red line.
 ```bash
-gcloud compute scp tools/cloud/provision.sh spike-gpu:~/ --zone=europe-west4-c
+gcloud compute scp tools/cloud/provision.py spike-gpu:~/ --zone=europe-west4-c
 gcloud compute ssh spike-gpu --zone=europe-west4-c
-  $ sudo ./provision.sh
+  $ sudo ./provision.py
 ```
 Until the Linux `install-tools`/`install-apps` fixes ship in a stable release —
 apt-update-first (#408/#412) **and** the streamlink-venv + obs-pipewire installs (#395) —
 install the current main preview instead: `gh workflow run preview.yml --ref main` once,
-then `sudo RACECAST_TAG=preview-main ./provision.sh`. Reproduction alternative
+then `sudo RACECAST_TAG=preview-main ./provision.py`. Reproduction alternative
 (unattended, any league): pass the script as a startup-script at create time —
-`--metadata-from-file startup-script=tools/cloud/provision.sh` — and read the serial-port
+`--metadata-from-file startup-script=tools/cloud/provision.py` — and read the serial-port
 output. Both modes are documented in `tools/cloud/README.md`.
 
 **Step 3 — finish in the GUI (once, over RustDesk on the `100.x` Tailscale IP).** Set the

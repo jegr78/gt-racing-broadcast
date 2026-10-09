@@ -140,13 +140,13 @@ From your laptop, once the box is up and you are SSHed in **as `racecast`**
 (`gcloud compute ssh racecast@racecast-box`):
 
 ```bash
-racecast profile use <league>     # (or let prepare-event.sh do the whole prep: below)
-./prepare-event.sh <league>       # update (preview-guarded) · cookies (YouTube+Twitch) ·
+racecast profile use <league>     # (or let prepare-event.py do the whole prep: below)
+./prepare-event.py <league>       # update (preview-guarded) · cookies (YouTube+Twitch) ·
                                   # graphics · media · brands · speedtest · fresh relay · preflight
-racecast event start              # go live (relay + OBS + Discord): prepare-event.sh does NOT
+racecast event start              # go live (relay + OBS + Discord): prepare-event.py does NOT
 ```
 
-`./prepare-event.sh <league>` orchestrates all the per-event prep steps before go-live:
+`./prepare-event.py <league>` orchestrates all the per-event prep steps before go-live:
 it runs `racecast update` (with a **preview guard**, a deliberate `preview-main` build
 is kept unless you confirm the downgrade to stable), `profile use`, YouTube **and** Twitch
 cookie refresh (pass `--no-twitch` to skip Twitch), graphics/media/brands refresh,

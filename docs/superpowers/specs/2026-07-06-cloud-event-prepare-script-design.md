@@ -5,11 +5,11 @@
 **Related:** #395 (cloud-producer spike), the provisioning design
 `docs/superpowers/specs/2026-07-03-gpu-box-provisioning-design.md`, the runbook
 `docs/superpowers/specs/2026-07-02-cloud-producer-spike-runbook.md` (Appendix A),
-`tools/cloud/provision.sh`, `tools/cloud/README.md`, wiki `Cloud-Producer.md`.
+`tools/cloud/provision.py`, `tools/cloud/README.md`, wiki `Cloud-Producer.md`.
 
 ## Context & goal
 
-`provision.sh` brings a fresh GCP GPU box to "ready to onboard a league" (the **machine
+`provision.py` brings a fresh GCP GPU box to "ready to onboard a league" (the **machine
 layer**). The recurring, **per-event** preparation on top of it — refresh the tool, pick the
 league, refresh cookies/graphics/media/brands, sanity-check the box — is today only prose in
 `Cloud-Producer.md` §4 and `Run-an-event.md` "Before you go live". This spec turns that prose
@@ -18,10 +18,10 @@ hand-typing the sequence, and so nothing is forgotten.
 
 **Two independent scripts, one hand-off:**
 
-- `tools/cloud/provision.sh` — existing machine-layer script. Its only change here: at the end
-  it **copies `prepare-event.sh` into the box** (`/home/racecast/`, racecast-owned, `+x`), so
+- `tools/cloud/provision.py` — existing machine-layer script. Its only change here: at the end
+  it **copies `prepare-event.py` into the box** (`/home/racecast/`, racecast-owned, `+x`), so
   the event script is present without a second upload.
-- `tools/cloud/prepare-event.sh` — new **on-box** event-prep script, run by the operator over
+- `tools/cloud/prepare-event.py` — new **on-box** event-prep script, run by the operator over
   SSH as the `racecast` user.
 
 Instance lifecycle (does the box exist? start it vs. create+provision) stays a **manual,
@@ -30,7 +30,7 @@ the two scripts; it is not part of either.
 
 ## Scope boundary (decided)
 
-`prepare-event.sh` covers the on-box, per-event preparation and **stops at "ready"**. It does
+`prepare-event.py` covers the on-box, per-event preparation and **stops at "ready"**. It does
 **not** go live: no `racecast event start`, no OBS stream key, no broadcast Part. Go-live stays
 a deliberate, separate operator/director action (Control Center "Start event" or
 `racecast event start`). This matches the operator's step list (which omitted `event start`).
@@ -43,14 +43,14 @@ a deliberate, separate operator/director action (Control Center "Start event" or
   **cannot** perform these over SSH; it **detects and instructs** instead (see §Readiness).
 - No change to the shipped `racecast` CLI. `relay stop` gains no `--force` flag — the "fresh
   relay" guarantee uses the existing `freeport --force` (see §Sequence, step 8).
-- Not a shipped artifact. Like `provision.sh`, it is maintainer cloud glue under
+- Not a shipped artifact. Like `provision.py`, it is maintainer cloud glue under
   `tools/cloud/` (outside `dist/`, so the "no `.sh` shipped" build check does not apply).
   English-only per the repo rule.
 
 ## CLI surface
 
 ```
-./prepare-event.sh <league> [--no-twitch] [--no-speedtest] [--no-update]
+./prepare-event.py <league> [--no-twitch] [--no-speedtest] [--no-update]
 ```
 
 - `<league>` (**required**) — the racecast profile name for this event. If omitted, or not
@@ -67,12 +67,12 @@ a deliberate, separate operator/director action (Control Center "Start event" or
 
 Intended to be run in an **interactive SSH session** (the operator logs in, then runs it), so
 the preview prompt and readiness output have a TTY. A non-interactive invocation
-(`ssh box --command="./prepare-event.sh …"`, no TTY) still works but takes the safe defaults
+(`ssh box --command="./prepare-event.py …"`, no TTY) still works but takes the safe defaults
 (see the update logic).
 
 ## Form & error philosophy
 
-- bash, `set -uo pipefail` (**not** `-e`: individual best-effort steps must be able to fail
+- stdlib Python 3, first written in bash with `set -uo pipefail` (**not** `-e`: individual best-effort steps must be able to fail
   without aborting the whole run — the readiness report at the end is the gate, not a mid-run
   `set -e` trip). English-only.
 - Runs **as `racecast`** on the box (not root). A guard checks this and the presence of the
@@ -135,7 +135,7 @@ update would *downgrade off the preview and re-break* streamlink/audio. Hence:
 
 ## Readiness report (the "ready" gate)
 
-After preflight, print a green/red block — mirroring `provision.sh`'s verification block — for
+After preflight, print a green/red block — mirroring `provision.py`'s verification block — for
 the **one-time-per-league manual items** that neither script can perform, each with the exact
 fix command. This folds the operator's "if newly provisioned, finish the manual setup" idea
 into a detect-and-instruct report that is also useful on every re-run:
@@ -153,26 +153,26 @@ join or the localized OBS collection — so the operator cannot miss it. Soft-st
 "advisory" items (e.g. Discord token) do not fail the exit code; they are surfaced but not
 blocking. Preflight's own red count contributes to the non-zero exit.
 
-## `provision.sh` change
+## `provision.py` change
 
 One added step near the end (after the racecast install, before/around the verification block):
-copy the sibling `prepare-event.sh` into `~racecast/prepare-event.sh`, `chown racecast:`,
-`chmod +x`. Idempotent (overwrite). When `provision.sh` runs as a GCP startup-script (the file
+copy the sibling `prepare-event.py` into `~racecast/prepare-event.py`, `chown racecast:`,
+`chmod +x`. Idempotent (overwrite). When `provision.py` runs as a GCP startup-script (the file
 is not beside it), this copy is best-effort and simply skipped with a note — the operator can
 `scp` it up in that mode; the primary path is the documented `gcloud compute scp` of the
 `tools/cloud/` directory.
 
 ## Documentation updates (same change)
 
-- `tools/cloud/README.md`: a new "Prepare for an event (`prepare-event.sh`)" section, and the
+- `tools/cloud/README.md`: a new "Prepare for an event (`prepare-event.py`)" section, and the
   copy-into-box note in §2.
 - `src/docs/wiki/Cloud-Producer.md` §4: replace the hand-typed command list with
-  `./prepare-event.sh <league>`, keeping the individual commands underneath as "what it does",
+  `./prepare-event.py <league>`, keeping the individual commands underneath as "what it does",
   and note the freeze caveat for `racecast update`.
 
 ## Validation
 
-- `shellcheck tools/cloud/prepare-event.sh` + `bash -n` (paper checks, like `provision.sh`).
+- `python3 tools/lint.py` + `python3 tests/test_cloud_tools.py` (paper checks, like `provision.py`).
 - **CPU dry-run possible for most of it:** the whole script is racecast-CLI orchestration with
   no GPU dependency, so it can be exercised on any box with racecast installed (the readiness
   checks degrade to red where the league isn't onboarded — which is the correct output).
