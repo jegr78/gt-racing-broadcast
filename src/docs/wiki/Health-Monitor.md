@@ -263,6 +263,30 @@ broadcast would hide a bad one (1.8% shown for a broadcast that skipped 23.5%).
 **Name resolution:** commentator names in the report come from the running relay's schedule.
 If the relay is not running at generation time, the report falls back to stint indices.
 
+**Telemetry (solo POV):** when the active profile is solo POV and a GT7 telemetry
+recording (see [Relay mode](Relay-Mode)) overlaps the report window, the report gains a
+Telemetry section. For each track and car it shows the best lap, the theoretical best
+(the fastest 200 m mini-sectors of the counted laps added up), the consistency (standard
+deviation of the counted lap times), fuel per lap and the average tyre temperature per
+wheel. Laps on an unknown track are grouped per GT7 session, as in the Control Center.
+A small chart plots every lap time in driving order, and a map draws the best lap with
+each mini-sector coloured from green (no time lost to the fastest counted lap in that
+sector) to red (the lap's largest loss). A table lists every lap with its number in
+driving order, GT7's lap number, its time, the relay's verdict and reason, fuel, top
+speed, car and track. Counted laps are the laps the relay counted on the HUD, including
+each new reference lap; lap times are GT7's own where they arrived. The theoretical best
+and the last mini-sector's colour need counted laps of equal length, which a known track
+always gives. On an unknown track the lengths usually differ, so the theoretical best
+shows `—` and the last mini-sector stays grey. Fuel per lap shows `—` when fuel
+consumption is off. The CLI summary and the Discord embed add one line such as
+`Best lap 1:58.432 (theoretical 1:57.910), 23 laps, Suzuka Circuit` for the track and
+car with the most counted laps. The report also reads the recording the relay is still
+writing, so the report at `event stop` covers the event that just ended; its last lap may
+be missing, and the report says so. Reading that open recording adds about 16 s per 3 h of
+recording to the report build. A recording that cannot be read is skipped; it never stops
+the report. If the section itself fails to render, the report shows "Telemetry could not
+be rendered." in its place. Endurance reports have no Telemetry section.
+
 **Discord:** `report send` requires `DISCORD_WEBHOOK_URL` in the active league's `profile.env`,
 the same key that health alerts use. See [Configuration](Configuration) or [Profiles](Profiles)
 for how to add it.

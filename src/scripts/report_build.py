@@ -581,6 +581,11 @@ def _fps_cell(q):
                                                         else "")
 
 
+def _scroll(table):
+    """A wide table scrolls inside the card on a phone instead of widening the page."""
+    return f"<div style='overflow-x:auto'>{table}</div>"
+
+
 def _telemetry_html(tel):
     """The solo POV telemetry section: figures, trend and map per track and car, then every lap."""
     import gt7_laps
@@ -604,8 +609,8 @@ def _telemetry_html(tel):
             f"<div class='kpi'><div class='n'>{_esc(n)}</div><div class='l'>{_esc(lbl)}</div></div>"
             for n, lbl in kpis) + "</div>")
         if g["tyre_avg_c"]:
-            parts.append(_table(["Average tyre temperature", "FL", "FR", "RL", "RR"],
-                                [["°C"] + [f"{v:.1f}" for v in g["tyre_avg_c"]]]))
+            parts.append(_scroll(_table(["Average tyre temperature", "FL", "FR", "RL", "RR"],
+                                        [["°C"] + [f"{v:.1f}" for v in g["tyre_avg_c"]]])))
         trend = rtel.svg_lap_trend(g["trend"])
         if trend:
             parts.append(trend)
@@ -627,8 +632,8 @@ def _telemetry_html(tel):
              "—" if r["fuel_l"] is None else f"{r['fuel_l']:.2f}",
              "—" if r["top_speed_kmh"] is None else f"{r['top_speed_kmh']:.0f}",
              r["car"] or "—", r["track"]) for r in tel["laps"]]
-    parts.append(_table(["#", "Lap", "Time", "Status", "Reason", "Fuel (L)",
-                         "Top speed (km/h)", "Car", "Track"], rows))
+    parts.append(_scroll(_table(["#", "Lap", "Time", "Status", "Reason", "Fuel (L)",
+                                 "Top speed (km/h)", "Car", "Track"], rows)))
     return "".join(parts)
 
 

@@ -508,6 +508,13 @@ def t_telemetry_section_renders_figures_trend_map_and_laps():
     assert "may be missing" not in html
 
 
+def t_telemetry_tables_scroll_inside_the_card():
+    html = rb.render_html(_solo_report())
+    tele = html[html.index("<h2>Telemetry</h2>"):html.index("<h2>Feed reliability</h2>")]
+    assert tele.count("<div style='overflow-x:auto'><table>") == 2, \
+        "the tyre and lap tables scroll on a phone instead of widening the page"
+
+
 def t_unknown_track_heading_names_recording_and_session():
     other = {"rec": "20261007-210000", "start_ts": 1500.0, "laps": [trt._lap(
         1, 5.0, trt._trace(45.0, 45.0), track_id=None, car_id=1234, car="Mazda Roadster",
