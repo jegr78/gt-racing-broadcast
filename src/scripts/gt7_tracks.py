@@ -221,12 +221,22 @@ class TrackDB:
         return self._assign.get(key)
 
     def learn(self, official_id, points, length_m, key=None):
-        """Store a learned signature for `official_id` (and the recording assignment `key`).
+        """Assign recording `key` to `official_id` and, when no downloaded racing line
+        exists for it, store `points` as its learned signature. True when a line was
+        learned, False when only the recording was assigned.
 
         A user-triggered write: a write failure (OSError) propagates to the caller
         instead of being swallowed, unlike the read paths elsewhere in this class."""
         if not self._learned_path:
             raise ValueError("no learned-tracks file configured")
+        doc = self._read_learned()
+        if official_id in self._shipped:
+            if not key:
+                raise ValueError("this layout has a downloaded racing line, "
+                                 "so only a recording can be assigned to it")
+            doc["assignments"][key] = official_id
+            self._write_learned(doc)
+            return False
         finite = []
         for x, z in points:
             try:
@@ -248,13 +258,16 @@ class TrackDB:
                "reverse": {"official_id": prev["reverse"]} if prev and prev["reverse"] else None,
                "ambiguous_with": [], "flags": [],
                "path": [[round(x, 1), round(z, 1)] for x, z in finite]}
-        doc = self._read_learned()
-        doc["format"], doc["version"] = LEARNED_FORMAT, 1
         doc["signatures"] = [r for r in doc["signatures"]
                              if not (isinstance(r, dict) and r.get("official_id") == official_id)]
         doc["signatures"].append(row)
         if key:
             doc["assignments"][key] = official_id
+        self._write_learned(doc)
+        return True
+
+    def _write_learned(self, doc):
+        doc["format"], doc["version"] = LEARNED_FORMAT, 1
         learned_dir = os.path.dirname(self._learned_path)
         os.makedirs(learned_dir, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=learned_dir, prefix="learned-tracks.json.", suffix=".tmp")

@@ -520,6 +520,7 @@
   .tm-dot-b { fill:var(--tm-b); stroke:var(--bg); stroke-width:1.5; }
   .tmset { display:flex; gap:8px; align-items:center; flex-wrap:wrap; padding:2px 0 8px; }
   .tmset select { flex:1; min-width:0; font:12px var(--mono); }
+  .tmnote { color:var(--dim); font:11px/1.5 var(--mono); margin:0 0 8px; }
   table.tmsec { font-size:12px; }
   table.tmsec td, table.tmsec th { padding:4px 6px; text-align:right;
                                    font-variant-numeric:tabular-nums; }
@@ -1270,6 +1271,7 @@
               <div class="tmset" id="tm-settrack" hidden>
                 <select id="tm-track-pick" aria-label="Track layout"></select>
                 <button id="tm-learn" onclick="tmLearn()">Set track</button></div>
+              <p class="tmnote" id="tm-note" hidden></p>
               <div class="tmlist" id="tm-laps"></div></section>
           </div>
           <section class="tmmain">
@@ -5231,6 +5233,7 @@ function tmClear(msg) {
   $('tm-rec-track').textContent = '';
   $('tm-laps').textContent = msg || '';
   $('tm-settrack').hidden = true;
+  $('tm-note').hidden = true;
 }
 function tmReset() {
   Object.keys(tmSeq).forEach(k => { tmSeq[k]++; });
@@ -5711,8 +5714,8 @@ async function tmLearn() {
   if (!sel.value || !rec || (row && row.recording)) return;
   const label = sel.options[sel.selectedIndex].textContent;
   if (!(await confirmModal('Set the track of ' + rec + ' to ' + label + '?\n'
-      + 'racecast learns the layout from the longest counted lap, so later recordings '
-      + 'on it are recognised.', {title: 'Set track'}))) return;
+      + 'Without a downloaded racing line for this layout, racecast learns it from the '
+      + 'longest counted lap, so later recordings on it are recognised.', {title: 'Set track'}))) return;
   if (seq !== tmSeq.rec) return;
   const btn = $('tm-learn');
   btn.disabled = true;
@@ -5728,6 +5731,10 @@ async function tmLearn() {
     if (!r.ok) { tmErr(r.error || 'could not set the track'); return; }
     tmErr('');
     tmSelectRec(rec);
+    $('tm-note').textContent = rec + ' now uses ' + label + '. ' + (r.learned
+      ? 'racecast learned the line from its longest counted lap, so later recordings on it are recognised.'
+      : 'The downloaded racing line for it stays as it is.');
+    $('tm-note').hidden = false;
   } catch (e) {
     if (seq === tmSeq.rec) tmErr('Control Center not reachable.');
   } finally {

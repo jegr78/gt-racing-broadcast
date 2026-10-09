@@ -2556,6 +2556,38 @@ console.log([refused, reload, tmState.rec, calls.filter(u => u.includes('rec=X')
             f"the server error shows, success reloads the recording, a late answer is dropped: {out!r}"
 
 
+def t_telemetry_learn_says_whether_a_line_was_learned():
+    out = _tm_node(_TM_TRACKS + """
+globalThis.confirmModal = async () => true;
+tmState.recs = [{rec: 'X'}];
+tmState.rec = 'X';
+tmShowSetTrack(null);
+await tick();
+answer('/tracks', tracks);
+await tick();
+const learn = async (learned) => {
+  $('tm-track-pick').value = '5'; $('tm-track-pick').selectedIndex = 2;
+  tmLearn();
+  await tick();
+  answer('/learn', {ok: true, learned, track: {id: '5'}});
+  await tick();
+  const note = [$('tm-note').hidden, $('tm-note').textContent].join(' ');
+  answer('rec=X', recLaps('X', []));
+  await tick();
+  return note;
+};
+const assigned = await learn(false), learnedNote = await learn(true);
+tmSelectRec('X');
+console.log([assigned, learnedNote, $('tm-note').hidden].join('|'));""")
+    if out is not None:
+        assert out.strip() == ("false X now uses Suzuka - Circuit. The downloaded racing line "
+                               "for it stays as it is."
+                               "|false X now uses Suzuka - Circuit. racecast learned the line "
+                               "from its longest counted lap, so later recordings on it are "
+                               "recognised.|true"), \
+            f"the note says whether a line was learned and goes with the next selection: {out!r}"
+
+
 def t_telemetry_live_recording_offers_no_set_track():
     out = _tm_node(_TM_TRACKS + """
 tmState.recs = [{rec: 'X', recording: true}];

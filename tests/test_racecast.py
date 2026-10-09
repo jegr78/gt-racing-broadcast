@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Stdlib checks for the racecast dispatcher routing. Run: python3 tests/test_racecast.py"""
-import contextlib, importlib.util, io, os, sys, tempfile, time
+import contextlib, importlib.util, io, json, os, sys, tempfile, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -719,10 +719,36 @@ def t_telemetry_learn_data_records_the_assignment():
         assert m.telemetry_learn_data(stem, "no-such-layout")["ok"] is False
         assert m.telemetry_learn_data("nope", tid)["ok"] is False
         d = m.telemetry_learn_data(stem, tid)
-        assert d["ok"] and d["track"]["id"] == tid, d
+        assert d["ok"] and d["track"]["id"] == tid and d["learned"] is True, d
         assert gt7_tracks.TrackDB.load(base, bundled).assignment(f"solo/{stem}") == tid
         laps = m.telemetry_laps_data(rec=stem)["laps"]
         assert {lap["track_id"] for lap in laps} == {tid}, "the assignment wins for every session"
+
+
+def t_telemetry_learn_data_keeps_a_downloaded_line():
+    import gt7_data, gt7_tracks
+    with _telemetry_sandbox(fake_dbs=False) as (rec_dir, tgl):
+        stem = _stem(tgl.write_circle_recording(rec_dir))
+        base, bundled = m._runtime_base_dir(), m.resource_path("assets/gt7")
+        cars = m._telemetry_dbs()[1]
+        tid = gt7_tracks.TrackDB.load(base, bundled).layouts()[0]["id"]
+        sig = os.path.join(base, "signatures.json")
+        os.makedirs(base, exist_ok=True)
+        with open(sig, "w", encoding="utf-8") as fh:
+            json.dump({"signatures": [{"official_id": tid, "official_name": "X", "length_m": 19.0,
+                                       "min_x": 9000.0, "max_x": 9019.0, "min_z": 9000.0,
+                                       "max_z": 9000.0, "reverse": None, "ambiguous_with": [],
+                                       "flags": [],
+                                       "path": [[9000.0 + i, 9000.0] for i in range(20)]}]}, fh)
+
+        def db():
+            return gt7_tracks.TrackDB(os.path.join(bundled, "index.json"), sig,
+                                      gt7_data.learned_path(base))
+        m._telemetry_dbs = lambda: (db(), cars)
+        d = m.telemetry_learn_data(stem, tid)
+        assert d["ok"] and d["learned"] is False, f"only the recording is assigned: {d}"
+        assert db().assignment(f"solo/{stem}") == tid
+        assert abs(db().line_length(tid) - 38.0) < 0.5, f"the downloaded line stays: {db().line_length(tid)}"
 
 
 def t_telemetry_learn_data_hides_the_path_of_a_failed_write():

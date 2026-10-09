@@ -3610,12 +3610,16 @@ def telemetry_learn_data(rec, track_id):
             return {"ok": False, "error": f"{rec} is not a readable recording"}
         counted = [lap for lap in idx["laps"]
                    if lap["status"] in gt7_laps.COUNTED and lap.get("points")]
-        if not counted:
-            return {"ok": False, "error": "this recording has no counted lap to learn the "
-                                          "track from"}
-        best = max(counted, key=lambda lap: lap["distance_m"])
-        tracks.learn(info["id"], best["points"], best["distance_m"], key=key)
-        return {"ok": True, "track": gr.brief_track(info)}
+        best = max(counted, key=lambda lap: lap["distance_m"]) if counted else None
+        try:
+            learned = tracks.learn(info["id"], best["points"] if best else [],
+                                   best["distance_m"] if best else 0.0, key=key)
+        except ValueError:
+            if best is None:
+                return {"ok": False, "error": "this recording has no counted lap to learn "
+                                              "the track from"}
+            raise
+        return {"ok": True, "track": gr.brief_track(info), "learned": bool(learned)}
     except ValueError as exc:
         return {"ok": False, "error": f"could not learn the track: {exc}"}
     except OSError as exc:

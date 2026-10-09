@@ -260,6 +260,29 @@ def t_learn_adds_row_and_assignment_that_survive_reload():
             pass
 
 
+def t_learn_onto_a_downloaded_line_only_assigns_the_recording():
+    with tempfile.TemporaryDirectory() as d:
+        db = _db(d, [_row("aaa001", "Oval", OVAL), _row("bbb001", "Ring", OTHER)])
+        mirrored = [(-x, z) for x, z in _lap(OVAL)]
+        assert db.learn("aaa001", mirrored, _length(OVAL), key="solo-pov/m") is False, \
+            "a downloaded line is kept, only the recording is assigned"
+        again = _db(d, [_row("aaa001", "Oval", OVAL), _row("bbb001", "Ring", OTHER)])
+        m = again.match(_lap(OVAL, offset=5.0), _length(OVAL))
+        assert m["id"] == "aaa001" and m["score_m"] < 6.0, f"a correct lap still matches: {m}"
+        assert again.assignment("solo-pov/m") == "aaa001"
+        with open(os.path.join(d, "learned-tracks.json"), encoding="utf-8") as fh:
+            assert json.load(fh)["signatures"] == [], "no learned row for a downloaded id"
+        assert again.learn("bbb001", [(0.0, 0.0)], 1.0, key="solo-pov/n") is False, \
+            "an assignment needs no usable lap"
+        try:
+            again.learn("aaa001", _lap(OVAL), _length(OVAL))
+            raise AssertionError("an assignment without a key was accepted")
+        except ValueError:
+            pass
+        assert again.learn("ccc001", _lap(TWIN, offset=900.0), _length(TWIN),
+                           key="solo-pov/t") is True, "an id without a downloaded line learns it"
+
+
 def t_learn_on_unwritable_path_raises_and_leaves_no_tmp_file():
     with tempfile.TemporaryDirectory() as d:
         _db(d, [])
@@ -298,7 +321,7 @@ def t_learn_keeps_the_existing_row_reverse_twin():
         db = _db(d, [_row("aaa001", "Oval", OVAL, {"official_id": "aaa002",
                                                    "official_name": "Oval (Reverse)"})])
         before = db.line_length("aaa002")
-        db.learn("aaa001", _lap(OVAL), _length(OVAL))
+        db.learn("aaa001", _lap(OVAL), _length(OVAL), key="solo-pov/x")
         after = db.line_length("aaa002")
         assert after is not None and abs(after - before) < 1.0, (before, after)
         m = db.match(list(reversed(_lap(OVAL))), _length(OVAL))
