@@ -2071,6 +2071,62 @@ def t_solo_device_rows_follow_the_template():
         "applyKindGating must set the template class"
 
 
+def _tm_script(page):
+    start = page.index("// Telemetry view (solo POV, #788)")
+    return page[start:page.index("// end of the Telemetry view", start)]
+
+
+def _tm_fn(tm, name):
+    i = tm.index("function " + name + "(")
+    return tm[i:tm.index("\n}\n", i) + 2]
+
+
+def t_telemetry_view_is_solo_pov_only():
+    page = _cc_page()
+    nav = re.search(r'<button class="([^"]*)" data-nav="telemetry"', page)
+    assert nav and "pov-only" in nav.group(1).split(), "the nav item exists for solo POV only"
+    view = re.search(r'<div class="([^"]*)" data-view="telemetry"', page)
+    assert view and {"view", "pov-only"} <= set(view.group(1).split()), \
+        "the view is hidden outside solo POV by the existing .pov-only rule"
+    show = page[page.index("function showView(name)"):page.index("let _reportPath")]
+    assert "name === 'telemetry'" in show, "opening the view loads the recordings"
+    gate = page[page.index("function applyKindGating(data)"):page.index("async function useProfile(")]
+    assert "currentView === 'telemetry'" in gate, "leaving solo POV leaves the Telemetry view"
+    assert "tmLoad()" in gate, "another solo POV profile shows its own recordings at once"
+    use = page[page.index("async function useProfile("):page.index("function onKindChange()")]
+    assert "tmReset()" in use, "another profile has other recordings"
+    tm = _tm_script(page)
+    assert "innerHTML" not in tm, "recording values reach the page only as text"
+    for route in ("/api/telemetry/recordings", "/api/telemetry/laps?", "/api/telemetry/lap?"):
+        assert route in tm, route
+    assert "tmRenderSectors()" in tm[tm.index("function tmRender()"):]
+
+
+def t_telemetry_times_read_as_lap_times():
+    tm = _tm_script(_cc_page())
+    out = _run_js(_tm_fn(tm, "tmTime") + _tm_fn(tm, "tmSigned") + """
+console.log([tmTime(83.456), tmTime(9.5), tmTime(3600), tmSigned(0.25), tmSigned(-1),
+             tmSigned(0.0001)].join("|"));""")
+    if out is not None:
+        assert out.strip() == "1:23.456|0:09.500|60:00.000|+0.250|-1.000|0.000", out
+
+
+def t_telemetry_recording_rows_mark_open_files_and_unindexed_laps():
+    tm = _tm_script(_cc_page())
+    fn = tm[tm.index("function tmRenderRecs()"):tm.index("async function tmSelectRec(")]
+    assert "r.recording ? ' (recording)'" in fn and "r.partial ? ' (unclosed)'" in fn
+    assert "r.laps == null ? ''" in fn, "the list has no lap count before the first index"
+
+
+def t_telemetry_open_recording_is_not_indexed_on_load():
+    tm = _tm_script(_cc_page())
+    load = _tm_fn(tm, "tmLoad")
+    assert "!r.recording" in load, "the first selection skips the file the relay is writing"
+    sel = _tm_fn(tm, "tmSelectRec")
+    assert "tmLapsReq" in sel, "a second click on a recording that is still indexing reuses the request"
+    assert "tmState.rec !== rec" in sel, "a late answer for another recording is ignored"
+
+
 def t_api_resources_route():
     ctx = _ctx()
     ctx["resources"] = lambda: {"available": True, "cpu_pct": 42.0, "cpu_level": "green",

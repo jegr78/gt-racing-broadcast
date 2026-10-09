@@ -472,6 +472,67 @@
   /* Within solo, the tyres/fuel crop exists only in the commentary collection and GT7
      telemetry only in the POV one. */
   body:not(.tpl-commentary) .commentary-only, body:not(.tpl-pov) .pov-only { display: none; }
+  /* Telemetry view (solo POV, #788): lap comparison drawn as inline SVG. */
+  .view[data-view="telemetry"] { max-width:1480px; --tm-a:var(--warn); --tm-b:var(--link); }
+  .tmgrid { display:grid; grid-template-columns:270px minmax(0,1fr) 340px; gap:14px;
+            align-items:start; }
+  .tmside, .tmmap { display:flex; flex-direction:column; gap:14px; min-width:0; }
+  .tmgrid section { padding:10px 12px; }
+  .tmlist { display:flex; flex-direction:column; max-height:36vh; overflow:auto;
+            color:var(--faint); font:12px var(--mono); }
+  .tmitem { display:grid; grid-template-columns:1fr auto; gap:2px 8px; width:100%;
+            min-height:0; text-align:left; background:transparent; border:0;
+            border-top:1px solid var(--line); border-radius:6px; padding:7px 8px;
+            color:var(--txt); font:12px var(--mono); }
+  .tmitem:first-child { border-top:0; }
+  .tmitem:hover { background:rgba(148,163,184,.08); }
+  .tmitem.sel { background:rgba(59,130,246,.14); box-shadow:inset 2px 0 0 var(--accent); }
+  .tmitem.nc { color:var(--dim); }
+  .tmitem .tmsub { grid-column:1 / -1; color:var(--dim); font-size:11px; overflow:hidden;
+                   text-overflow:ellipsis; white-space:nowrap; }
+  .tmpick { display:flex; flex-wrap:wrap; gap:10px 18px; align-items:center; margin:0 0 10px;
+            font:12px var(--mono); color:var(--dim); }
+  .tmpick label { display:inline-flex; align-items:center; gap:6px; max-width:100%;
+                  white-space:nowrap; }
+  .tmpick select { min-width:0; max-width:320px; font:12px var(--mono); }
+  .tmkey { display:inline-block; width:18px; height:3px; border-radius:2px; }
+  .tmkey.a { background:var(--tm-a); }
+  .tmkey.b { background:var(--tm-b); }
+  #tm-charts, #tm-map { display:block; width:100%; height:auto; }
+  #tm-charts text, #tm-map text { font:11px var(--mono); fill:var(--dim); }
+  #tm-charts text.tm-read { fill:var(--txt); }
+  #tm-charts text.tm-unit { fill:var(--faint); }
+  .tm-frame { fill:none; stroke:var(--line); }
+  .tm-zero { stroke:var(--off); stroke-dasharray:3 3; }
+  .tm-a { fill:none; stroke:var(--tm-a); stroke-width:1.4; }
+  .tm-b { fill:none; stroke:var(--tm-b); stroke-width:1.6; }
+  .tm-gain { fill:rgba(34,197,94,.28); }
+  .tm-loss { fill:rgba(239,68,68,.28); }
+  .tm-cursor { stroke:var(--txt); stroke-width:1; opacity:.55; pointer-events:none; }
+  .tm-seg { fill:none; stroke-width:4; stroke-linecap:round; }
+  .tm-seg.gain { stroke:var(--ok); }
+  .tm-seg.loss { stroke:var(--bad); }
+  .tm-seg.even { stroke:var(--off); }
+  .tm-line { fill:var(--txt); }
+  .tm-dot-a { fill:var(--tm-a); stroke:var(--bg); stroke-width:1.5; }
+  .tm-dot-b { fill:var(--tm-b); stroke:var(--bg); stroke-width:1.5; }
+  .tmset { display:flex; gap:8px; align-items:center; flex-wrap:wrap; padding:2px 0 8px; }
+  .tmset select { flex:1; min-width:0; font:12px var(--mono); }
+  table.tmsec { font-size:12px; }
+  table.tmsec td, table.tmsec th { padding:4px 6px; text-align:right;
+                                   font-variant-numeric:tabular-nums; }
+  table.tmsec td:first-child, table.tmsec th:first-child { text-align:left; }
+  table.tmsec td.gain { color:#4ADE80; }
+  table.tmsec td.loss { color:var(--bad-text); }
+  table.tmsec td.best { color:#C4B5FD; }
+  table.tmsec tfoot td { font-weight:600; border-bottom:0; }
+  .tmsecwrap { max-height:46vh; overflow:auto; }
+  @media (max-width: 1280px) {
+    .tmgrid { grid-template-columns:250px minmax(0,1fr); }
+    .tmmap { grid-column:1 / -1; flex-direction:row; flex-wrap:wrap; }
+    .tmmap section { flex:1 1 320px; }
+  }
+  @media (max-width: 860px) { .tmgrid { grid-template-columns:1fr; } }
 </style>
 </head>
 <body>
@@ -507,6 +568,8 @@
         <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="14" y2="17"/></svg>Logs</button>
       <button class="navitem" data-nav="report" onclick="showView('report')">
         <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="14" y2="17"/><line x1="8" y1="9" x2="10" y2="9"/></svg>Report</button>
+      <button class="navitem pov-only" data-nav="telemetry" onclick="showView('telemetry')">
+        <svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>Telemetry</button>
       <button class="navitem" data-nav="help" onclick="showView('help')">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>Help &amp; Docs</button>
     </div>
@@ -1190,6 +1253,40 @@
         </section>
       </div>
 
+      <!-- Telemetry (solo POV): lap comparison from the GT7 recordings, #788 -->
+      <div class="view pov-only" data-view="telemetry" hidden>
+        <div class="viewhead"><h2>Telemetry</h2>
+          <span class="sub">laps from this profile's GT7 recordings</span>
+          <span class="vhbtns"><button onclick="tmLoad()" title="Read the recordings again">
+            <svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Refresh</button></span></div>
+        <p class="enverr" id="tm-err" hidden></p>
+        <div class="tmgrid">
+          <div class="tmside">
+            <section><div class="viewhead"><h3>Recordings</h3></div>
+              <div class="tmlist" id="tm-recs"></div></section>
+            <section><div class="viewhead"><h3>Laps</h3><span class="sub" id="tm-rec-track"></span></div>
+              <div class="tmset" id="tm-settrack" hidden>
+                <select id="tm-track-pick" aria-label="Track layout"></select>
+                <button id="tm-learn" onclick="tmLearn()">Set track</button></div>
+              <div class="tmlist" id="tm-laps"></div></section>
+          </div>
+          <section class="tmmain">
+            <div class="tmpick">
+              <label><span class="tmkey a"></span>Lap A
+                <select id="tm-a" aria-label="Lap A (reference)" onchange="tmPick('a', this.value)"></select></label>
+              <label><span class="tmkey b"></span>Lap B
+                <select id="tm-b" aria-label="Lap B" onchange="tmPick('b', this.value)"></select></label>
+            </div>
+            <svg id="tm-charts" role="img" aria-label="Speed, throttle, brake, steering, gear and delta over lap distance"></svg>
+          </section>
+          <div class="tmmap">
+            <section><div class="viewhead"><h3>Track</h3><span class="sub" id="tm-map-sub"></span></div>
+              <svg id="tm-map" role="img" aria-label="Track map, mini-sectors green where lap B gains and red where it loses"></svg></section>
+            <section><div class="viewhead"><h3>Mini-sectors</h3><span class="sub" id="tm-sec-sub"></span></div>
+              <div class="tmsecwrap"><table class="prodtable tmsec" id="tm-sectors"></table></div></section>
+          </div>
+        </div>
+      </div>
       <!-- Post-Event Report -->
       <div class="view" data-view="report" hidden>
         <div class="viewhead"><h2>Post-Event Report</h2></div>
@@ -1283,6 +1380,7 @@ function showView(name) {
   if (name === 'preflight') loadSpeedtest();
   if (name === 'settings' && !settingsLoaded) { settingsLoaded = true; loadSettings(); }
   if (name === 'console') loadConsole();   // reload each visit: reflects toggles/links
+  if (name === 'telemetry' && !tmState.loaded) tmLoad();
   // First open only: start the default "All (live)" stream. The guard is its own
   // flag rather than !logES, because an archive selection leaves logES null (an
   // archive uses fetch, not SSE) and returning to Logs would clobber it.
@@ -3051,6 +3149,8 @@ function applyKindGating(data) {
   document.body.classList.toggle('solo', kind === 'solo');
   document.body.classList.toggle('tpl-pov', kind === 'solo' && template === 'pov');
   document.body.classList.toggle('tpl-commentary', kind === 'solo' && template !== 'pov');
+  if (currentView === 'telemetry' && !(kind === 'solo' && template === 'pov')) showView('home');
+  else if (currentView === 'telemetry' && !tmState.loaded) tmLoad();   // switched to another solo POV profile
 }
 
 async function useProfile(name) {
@@ -3072,6 +3172,7 @@ async function useProfile(name) {
   }
   $('profile-switch-note').hidden = true;
   activeProfile = d.active || name;
+  tmReset();                              // the recordings belong to the profile
   loadProfiles();
   loadProfileEnv();
   refresh();
@@ -5041,6 +5142,256 @@ async function quitConfirm() {
   if (code !== '0') return;                // failed: keep the CC open, error stays in the console
   blankAndQuit();
 }
+
+// Telemetry view (solo POV, #788): recordings -> laps -> lap A/B comparison.
+// Values from recordings reach the page only through textContent and SVG attributes.
+const TM_NS = 'http://www.w3.org/2000/svg';
+const tmState = {loaded: false, recs: [], rec: null, recLaps: [], pool: null,
+                 a: null, b: null, lapA: null, lapB: null, sectorM: 200, tracks: null,
+                 chart: null, map: null, cursor: null};
+const tmLapCache = new Map();
+const tmLapsReq = new Map();     // rec -> pending laps request, so a cold index runs once
+let tmSelSeq = 0;
+
+function tmKey(l) { return l.rec + '|' + l.session + '|' + l.lap; }
+function tmTime(s) {
+  if (s == null) return '—';
+  const ms = Math.round(s * 1000), m = Math.floor(ms / 60000), r = (ms % 60000) / 1000;
+  return m + ':' + (r < 10 ? '0' : '') + r.toFixed(3);
+}
+function tmSigned(v) {
+  if (v == null) return '—';
+  if (Math.abs(v) < 0.0005) return '0.000';
+  return (v > 0 ? '+' : '') + v.toFixed(3);
+}
+function tmEl(tag, attrs, parent) {
+  const e = document.createElementNS(TM_NS, tag);
+  Object.entries(attrs || {}).forEach(([k, v]) => e.setAttribute(k, v));
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function tmErr(msg) { const e = $('tm-err'); e.textContent = msg || ''; e.hidden = !msg; }
+async function tmGet(url) {
+  try { return await (await fetch(url, {cache: 'no-store'})).json(); }
+  catch (e) { return {ok: false, error: 'Control Center not reachable.'}; }
+}
+function tmTrackLabel(t) {
+  if (!t) return 'track unknown';
+  if (t.candidates) return 'track ambiguous';
+  return t.track + (t.layout ? ' - ' + t.layout : '');
+}
+function tmLapTrack(l) { return l.track ? l.track + (l.layout ? ' - ' + l.layout : '') : 'track unknown'; }
+
+function tmClear(msg) {
+  tmState.lapA = tmState.lapB = tmState.pool = tmState.a = tmState.b = null;
+  tmState.chart = tmState.map = tmState.cursor = null;
+  ['tm-charts', 'tm-map', 'tm-sectors', 'tm-a', 'tm-b', 'tm-map-sub', 'tm-rec-track',
+   'tm-sec-sub'].forEach(id => { $(id).textContent = ''; });
+  $('tm-laps').textContent = msg || '';
+  $('tm-settrack').hidden = true;
+}
+function tmReset() {
+  tmState.loaded = false; tmState.rec = null; tmState.recs = []; tmState.recLaps = [];
+  tmLapCache.clear();
+  tmLapsReq.clear();
+  $('tm-recs').textContent = '';
+  tmErr('');
+  tmClear('');
+}
+
+async function tmLoad() {
+  tmState.loaded = true;
+  tmLapCache.clear();
+  tmErr('');
+  const d = await tmGet('/api/telemetry/recordings');
+  if (!d.ok) { tmErr(d.error || 'could not list the recordings'); return; }
+  tmState.recs = d.recordings || [];
+  const keep = tmState.recs.find(r => r.rec === tmState.rec && !r.recording);
+  const first = keep || tmState.recs.find(r => !r.recording);
+  if (!first) {
+    tmState.rec = null;
+    tmState.recLaps = [];
+    tmRenderRecs();
+    tmClear(tmState.recs.length
+      ? 'The relay is still writing the only recording. Stop the recording to analyse it.'
+      : 'No recordings yet. The Director Panel REC key or TELEMETRY_RECORD=1 in the profile records a session.');
+    return;
+  }
+  tmSelectRec(first.rec);
+}
+
+function tmRenderRecs() {
+  const box = $('tm-recs');
+  box.textContent = '';
+  tmState.recs.forEach(r => {
+    const b = document.createElement('button');
+    b.className = 'tmitem' + (r.rec === tmState.rec ? ' sel' : '');
+    const name = document.createElement('span');
+    name.textContent = r.rec + (r.recording ? ' (recording)' : r.partial ? ' (unclosed)' : '');
+    const laps = document.createElement('span');
+    laps.textContent = r.laps == null ? '' : r.laps + ' laps';
+    const sub = document.createElement('span');
+    sub.className = 'tmsub';
+    sub.textContent = (r.recording ? 'being written' : r.indexed ? tmTrackLabel(r.track) : 'not indexed yet')
+      + ' · ' + Math.round(r.duration_s / 60) + ' min · ' + (r.size / 1e6).toFixed(1) + ' MB';
+    b.append(name, laps, sub);
+    b.onclick = () => tmSelectRec(r.rec);
+    box.appendChild(b);
+  });
+}
+
+async function tmSelectRec(rec) {
+  const seq = ++tmSelSeq;
+  tmState.rec = rec;
+  tmState.recLaps = [];
+  tmRenderRecs();
+  tmErr('');
+  tmClear('Indexing…');                             // the first open replays the whole recording
+  if (!tmLapsReq.has(rec)) {
+    tmLapsReq.set(rec, tmGet('/api/telemetry/laps?' + new URLSearchParams({rec}))
+      .finally(() => tmLapsReq.delete(rec)));
+  }
+  const d = await tmLapsReq.get(rec);
+  if (tmState.rec !== rec || seq !== tmSelSeq) return;   // a later pick owns the answer
+  if (!d.ok) { tmClear(''); tmErr(d.error || 'could not read the recording'); return; }
+  tmState.recLaps = d.laps || [];
+  const row = tmState.recs.find(r => r.rec === rec);
+  if (row) {
+    row.indexed = true; row.track = d.recording.track; row.laps = tmState.recLaps.length;
+    tmRenderRecs();
+  }
+  $('tm-rec-track').textContent = tmTrackLabel(d.recording.track);
+  const counted = tmState.recLaps.filter(l => l.status !== 'not counted');
+  const pick = (counted.length ? counted : tmState.recLaps).slice(-1)[0];
+  if (pick) tmSelectB(pick);
+  else tmClear('This recording has no laps.');
+}
+
+function tmRenderLaps() {
+  const box = $('tm-laps');
+  box.textContent = '';
+  if (!tmState.recLaps.length) { box.textContent = 'No laps in this recording.'; return; }
+  tmState.recLaps.forEach(l => {
+    const b = document.createElement('button');
+    b.className = 'tmitem' + (l.status === 'not counted' ? ' nc' : '')
+      + (tmKey(l) === tmState.b ? ' sel' : '');
+    const name = document.createElement('span');
+    name.textContent = 'Lap ' + l.lap + (l.session > 1 ? ' · session ' + l.session : '');
+    const time = document.createElement('span');
+    time.textContent = tmTime(l.time_s);
+    const sub = document.createElement('span');
+    sub.className = 'tmsub';
+    sub.textContent = [l.status === 'not counted' ? 'not counted: ' + l.reason : l.status,
+                       l.car || 'car unknown', tmLapTrack(l)].join(' · ');
+    sub.title = sub.textContent;
+    b.append(name, time, sub);
+    b.onclick = () => tmSelectB(l);
+    box.appendChild(b);
+  });
+}
+
+async function tmSelectB(l) {
+  const key = tmKey(l);
+  tmState.b = key;
+  tmRenderLaps();
+  const q = new URLSearchParams({car: l.car_id == null ? '' : String(l.car_id),
+                                 track: l.track_id == null ? '' : l.track_id});
+  if (l.track_id == null) { q.set('rec', l.rec); q.set('session', String(l.session)); }
+  const p = await tmGet('/api/telemetry/laps?' + q);
+  if (tmState.b !== key) return;
+  if (!p.ok) tmErr(p.error || 'could not load the comparable laps');
+  tmState.pool = p.ok ? p : {laps: [], best_sectors: [], theoretical_best: null, reference: null};
+  tmState.a = tmState.pool.reference ? tmKey(tmState.pool.reference) : null;
+  tmFillPickers(l);
+  await tmLoadPair();
+}
+
+function tmFillPickers(lapB) {
+  const pool = tmState.pool.laps || [];
+  const forB = pool.some(l => tmKey(l) === tmKey(lapB)) ? pool : pool.concat([lapB]);
+  [['tm-a', pool, tmState.a], ['tm-b', forB, tmState.b]].forEach(([id, list, cur]) => {
+    const sel = $(id);
+    sel.textContent = '';
+    if (!list.length) {
+      const o = document.createElement('option');
+      o.value = ''; o.textContent = 'no counted lap to compare';
+      sel.appendChild(o);
+    }
+    list.forEach(l => {
+      const o = document.createElement('option');
+      o.value = tmKey(l);
+      o.textContent = tmTime(l.time_s) + '  ' + l.rec + ' lap ' + l.lap
+        + (l.status === 'not counted' ? ' (not counted)' : '');
+      sel.appendChild(o);
+    });
+    sel.value = cur || '';
+  });
+}
+
+function tmPick(which, key) {
+  tmState[which] = key || null;
+  if (which === 'b') tmRenderLaps();
+  tmLoadPair();
+}
+
+async function tmFetchLap(key) {
+  if (tmLapCache.has(key)) return tmLapCache.get(key);
+  const [rec, session, lap] = key.split('|');
+  const d = await tmGet('/api/telemetry/lap?' + new URLSearchParams({rec, session, lap}));
+  if (!d.ok) { tmErr(d.error || 'could not load the lap'); return null; }
+  tmState.sectorM = d.sector_m || 200;
+  tmLapCache.set(key, d.lap);
+  return d.lap;
+}
+
+async function tmLoadPair() {
+  const want = [tmState.a, tmState.b];
+  const [a, b] = await Promise.all(want.map(k => (k ? tmFetchLap(k) : null)));
+  if (want[0] !== tmState.a || want[1] !== tmState.b) return;
+  tmState.lapA = a;
+  tmState.lapB = b;
+  tmRender();
+}
+
+function tmRender() {
+  const B = tmState.lapB;
+  $('tm-map-sub').textContent = B ? tmLapTrack(B) : '';
+  tmRenderSectors();
+}
+
+function tmRenderSectors() {
+  const t = $('tm-sectors');
+  t.textContent = '';
+  const A = tmState.lapA, B = tmState.lapB;
+  if (!B) return;
+  const best = (tmState.pool && tmState.pool.best_sectors) || [];
+  const sa = A ? A.sectors || [] : [], sb = B.sectors || [];
+  const head = t.createTHead().insertRow();
+  ['Sector', 'A', 'B', 'B-A', 'Best'].forEach(h => {
+    const th = document.createElement('th'); th.textContent = h; head.appendChild(th);
+  });
+  const body = t.createTBody();
+  const f = v => (v == null ? '—' : v.toFixed(3));
+  for (let i = 0; i < Math.max(sa.length, sb.length); i++) {
+    const ta = sa[i], tb = sb[i], bs = best[i];
+    const diff = ta != null && tb != null ? tb - ta : null;
+    const row = body.insertRow();
+    [String(i + 1), f(ta), f(tb), tmSigned(diff), f(bs)].forEach(v => { row.insertCell().textContent = v; });
+    if (diff != null && Math.abs(diff) >= 0.0005) row.cells[3].className = diff < 0 ? 'gain' : 'loss';
+    if (tb != null && bs != null && Math.abs(tb - bs) < 0.0005) row.cells[2].className = 'best';
+  }
+  const foot = t.createTFoot().insertRow();
+  const lapDiff = A && A.time_s != null && B.time_s != null ? B.time_s - A.time_s : null;
+  ['Lap', tmTime(A ? A.time_s : null), tmTime(B.time_s), tmSigned(lapDiff),
+   tmTime(tmState.pool ? tmState.pool.theoretical_best : null)].forEach(v => {
+    foot.insertCell().textContent = v;
+  });
+  foot.cells[4].title = 'Theoretical best: the sum of the best mini-sectors';
+  if (lapDiff != null && Math.abs(lapDiff) >= 0.0005) foot.cells[3].className = lapDiff < 0 ? 'gain' : 'loss';
+  const n = tmState.pool ? (tmState.pool.laps || []).length : 0;
+  $('tm-sec-sub').textContent = (tmState.sectorM || 200) + ' m' + (n ? ' · best of ' + n + ' laps' : '');
+}
+// end of the Telemetry view
 
 function _mbps(bps) { return bps == null ? '—' : (bps / 1e6).toFixed(2) + ' Mbps'; }
 function _lvlText(el, level, text) {
