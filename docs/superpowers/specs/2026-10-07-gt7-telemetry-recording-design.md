@@ -399,7 +399,13 @@ override.
   cache records the recording's size and mtime and `gt7_data.data_version` (runtime track
   files and the learned file by path, mtime and size; bundled files by name and content,
   so a onefile binary's per-launch unpack dir does not invalidate it); any change rebuilds
-  it.
+  it. The cache also holds a resume point after the last lap whose GT7 time is settled
+  (byte offset, engine and replay state, the raw laps so far, a check of the 64 bytes
+  before the offset). When only the recording grew (same data version, same header, the
+  checked bytes unchanged, each earlier session keeping its track), the index replays
+  only the bytes after that point; any doubt falls back to a full build. A growing
+  `.part` that was indexed once, by a report or the Control Center, then costs seconds
+  instead of a full replay.
 - Per lap: the `laps.csv` fields plus `rec` (recording stem), `track_id`, `car_id`,
   `car`, `tyre_avg_c` (mean surface temperature per wheel over the lap), and `trace`:
   the lap resampled every 5 m of `lap_dist_m` with `t`, `speed_kmh`,

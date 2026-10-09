@@ -228,11 +228,13 @@ class Recording:
                 f"reads ({VERSION}); update racecast")
         self.header = header
 
-    def packets(self):
-        """Yield (wall_ts, kind, plain) per packet; a truncated last record ends it and
-        a record too short to parse is skipped."""
+    def packets(self, start=None):
+        """Yield (wall_ts, kind, plain) per packet from the first record or from byte
+        offset `start`; a truncated last record ends it and a record too short to parse
+        is skipped. `pos` is the offset after the record just yielded."""
+        self.pos = self._offset if start is None else start
         with open(self.path, "rb") as fh:
-            fh.seek(self._offset)
+            fh.seek(self.pos)
             while True:
                 head = fh.read(_REC.size)
                 if len(head) < _REC.size:
@@ -241,6 +243,7 @@ class Recording:
                 payload = fh.read(n)
                 if len(payload) < n:
                     return
+                self.pos += _REC.size + n
                 if kind == _META:
                     try:
                         self.dropped = int(json.loads(payload.decode("utf-8"))["dropped"])
@@ -387,6 +390,18 @@ class LapTimeMatcher:
     def __init__(self):
         self._waiting = []
         self._prev_last_ms = None
+
+    def settled(self):
+        """True while no closed lap still waits for its GT7 time."""
+        return not self._waiting
+
+    def resume_state(self):
+        """JSON-safe state for restore(); only complete while settled()."""
+        return {"prev_last_ms": self._prev_last_ms}
+
+    def restore(self, state):
+        self._waiting = []
+        self._prev_last_ms = state["prev_last_ms"]
 
     def lap_closed(self, lap, wall_ts):
         """Register a lap the engine closed on this packet; call before update()."""

@@ -249,6 +249,97 @@ def t_index_cache_is_reused_until_something_changes():
             gl._build = real
 
 
+def _grow(src, part, upto):
+    """Copy src's bytes [current size of part, upto) onto part, as the relay appends."""
+    have = os.path.getsize(part) if os.path.exists(part) else 0
+    with open(src, "rb") as a, open(part, "ab") as b:
+        a.seek(have)
+        b.write(a.read(upto - have))
+
+
+def _without_stamp(idx):
+    return {k: v for k, v in idx.items() if k not in ("size", "mtime")}
+
+
+@contextlib.contextmanager
+def _packet_starts():
+    starts = []
+    real = gt7_recording.Recording.packets
+
+    def spy(self, start=None):
+        starts.append(start)
+        return real(self, start)
+    gt7_recording.Recording.packets = spy
+    try:
+        yield starts
+    finally:
+        gt7_recording.Recording.packets = real
+
+
+def t_a_growing_recording_replays_only_its_tail():
+    with tempfile.TemporaryDirectory() as d:
+        src = write_circle_recording(os.path.join(d, "src"),
+                                     lap_secs=(20.0, 20.0, 16.0, 20.0, 18.0, 19.0))
+        size = os.path.getsize(src)
+        cold = _without_stamp(_index(src))
+        part_dir = os.path.join(d, "live")
+        os.makedirs(part_dir)
+        part = os.path.join(part_dir, os.path.basename(src) + gt7_recording.PART)
+        for cut in (0.35, 0.6, 0.6, 0.83):
+            _grow(src, part, int(size * cut) + 7)    # +7 also tears a record in half
+            _index(part)
+        with _packet_starts() as starts:
+            _grow(src, part, size)
+            warm = _without_stamp(_index(part))
+        assert starts and starts[0] and starts[0] > size * 0.6, \
+            f"the replay must start at the cached resume point, not at 0: {starts}"
+        assert warm == dict(cold, name=os.path.basename(part)), \
+            "a resumed index must equal a cold build of the whole file"
+
+
+def _cold_copy(part, d, version):
+    """A cold index of part's current bytes under the same name in a fresh directory."""
+    import shutil
+    fresh = os.path.join(d, "cold")
+    shutil.rmtree(fresh, ignore_errors=True)
+    os.makedirs(fresh)
+    shutil.copyfile(part, os.path.join(fresh, os.path.basename(part)))
+    return _without_stamp(_index(os.path.join(fresh, os.path.basename(part)), version=version))
+
+
+def t_resume_falls_back_to_a_full_build_when_it_cannot_continue():
+    import json
+    with tempfile.TemporaryDirectory() as d:
+        src = write_circle_recording(os.path.join(d, "src"))
+        size = os.path.getsize(src)
+        live = os.path.join(d, "live")
+        part = os.path.join(live, os.path.basename(src) + gt7_recording.PART)
+        for spoil in ("data", "prefix", "blob"):
+            if os.path.isdir(live):
+                for name in os.listdir(live):
+                    os.remove(os.path.join(live, name))
+            else:
+                os.makedirs(live)
+            _grow(src, part, int(size * 0.7))
+            _index(part)
+            _grow(src, part, size)
+            with open(gl.cache_path(part), encoding="utf-8") as fh:
+                data = json.load(fh)
+            if spoil == "prefix":
+                with open(part, "r+b") as fh:
+                    fh.seek(data["resume"]["offset"] - 12)
+                    fh.write(b"\x01" * 4)        # a byte the cache already covered changed
+            elif spoil == "blob":
+                data["resume"]["eng"] = {"garbage": True}
+                with open(gl.cache_path(part), "w", encoding="utf-8") as fh:
+                    json.dump(data, fh)
+            version = "v2" if spoil == "data" else "v1"
+            with _packet_starts() as starts:
+                got = _without_stamp(_index(part, version=version))
+            assert starts[0] is None, f"{spoil}: a full replay from the start: {starts}"
+            assert got == _cold_copy(part, d, version), spoil
+
+
 def t_index_computes_the_data_version_once():
     with tempfile.TemporaryDirectory() as d:
         path = write_circle_recording(d)

@@ -411,6 +411,39 @@ class TelemetryEngine:
             while self._delta_hist and self._delta_hist[0][0] < dcut:
                 self._delta_hist.popleft()
 
+    def resume_state(self):
+        """A JSON-safe copy of everything later lap records depend on; the HUD's rolling
+        buffers are left out."""
+        acc = self._acc
+        return {
+            "session": self.session, "lap_num": self._lap_num,
+            "last": None if self._last is None else self._last._asdict(),
+            "acc": None if acc is None else {
+                k: list(getattr(acc, k)) if isinstance(getattr(acc, k), list) else getattr(acc, k)
+                for k in _LapAccumulator.__slots__},
+            "ref": self._ref,
+            "totals": [self._lap_time_sum, self._lap_time_n, self._lap_fuel_sum,
+                       self._lap_fuel_n, self._session_dist_m, self._top_speed]}
+
+    def restore(self, state):
+        """Continue from resume_state(), also after a JSON round trip."""
+        last = state["last"]
+        self._last = (None if last is None
+                      else GT7Packet(**dict(last, tyre_temp=tuple(last["tyre_temp"]))))
+        acc, a = None, state["acc"]
+        if a is not None:
+            acc = _LapAccumulator(a["t0"])
+            for k in _LapAccumulator.__slots__:
+                setattr(acc, k, a[k])
+            acc.samples = [tuple(p) for p in a["samples"]]
+            acc.points = [tuple(p) for p in a["points"]]
+        ref = state["ref"]
+        self._ref = None if ref is None else {
+            "time": ref["time"], "samples": [tuple(p) for p in ref["samples"]]}
+        (self._lap_time_sum, self._lap_time_n, self._lap_fuel_sum, self._lap_fuel_n,
+         self._session_dist_m, self._top_speed) = state["totals"]
+        self.session, self._lap_num, self._acc = state["session"], state["lap_num"], acc
+
     def lap_started_at(self):
         """Wall time of the current lap's first packet, or None before any packet."""
         return self._acc.t0 if self._acc is not None else None

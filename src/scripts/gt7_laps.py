@@ -21,6 +21,7 @@ COUNTED = ("reference", "counted")
 INDEX_VERSION = 3
 CACHE_SUFFIX = ".laps.json"
 DECIMATE_M = 2.0              # finer samples add nothing to a 5 m trace
+RESUME_CHECK = 64             # bytes before a resume point that must be unchanged to continue there
 
 
 def _time_at(trace, d):
@@ -96,15 +97,47 @@ def _stamp(path, runtime_base, bundled):
             "data_version": gt7_data.data_version(runtime_base, bundled)}
 
 
-def _read_cache(path, stamp):
+def _load_cache(path):
     try:
         with open(cache_path(path), encoding="utf-8") as fh:
             data = json.load(fh)
     except (OSError, ValueError):
         return None
-    if not isinstance(data, dict) or any(data.get(k) != v for k, v in stamp.items()):
-        return None
+    return data if isinstance(data, dict) else None
+
+
+def _valid(data, stamp):
+    return data is not None and all(data.get(k) == v for k, v in stamp.items())
+
+
+def _public(data):
+    """The index as callers see it, without the resume point."""
+    data.pop("resume", None)
     return data
+
+
+def _read_cache(path, stamp):
+    data = _load_cache(path)
+    return _public(data) if _valid(data, stamp) else None
+
+
+def _resumable(path, data, stamp):
+    """True when the stale cache `data` has a resume point the recording still matches."""
+    if (data is None or data.get("version") != INDEX_VERSION
+            or data.get("data_version") != stamp["data_version"]):
+        return False
+    point = data.get("resume")
+    if not isinstance(point, dict):
+        return False
+    try:
+        offset, check = point["offset"], bytes.fromhex(point["check"])
+        if not isinstance(offset, int) or offset > stamp["size"] or len(check) > offset:
+            return False
+        with open(path, "rb") as fh:
+            fh.seek(offset - len(check))
+            return fh.read(len(check)) == check
+    except (OSError, KeyError, TypeError, ValueError):
+        return False
 
 
 def cached(path, runtime_base, bundled=None):
@@ -123,13 +156,20 @@ def index(path, track_db, cars, runtime_base, key=None, bundled=None):
         stamp = _stamp(path, runtime_base, bundled)
     except OSError as e:
         raise gt7_recording.RecordingError(f"{path}: {e}") from e
-    hit = _read_cache(path, stamp)
-    if hit is not None:
-        return hit
-    data = _build(path, track_db, cars, key)
+    old = _load_cache(path)
+    if _valid(old, stamp):
+        return _public(old)
+    data = None
+    if _resumable(path, old, stamp):
+        try:
+            data = _build(path, track_db, cars, key, old)
+        except Exception:  # noqa: BLE001  any doubt about the old cache means a full build
+            data = None
+    if data is None:
+        data = _build(path, track_db, cars, key)
     data.update(stamp)
     _write_cache(cache_path(path), data)
-    return data
+    return _public(data)
 
 
 def _write_cache(path, data):
@@ -251,48 +291,111 @@ def _display_track(laps, by_session, track_db):
     return _track_info(by_session.get(max(driven, key=driven.get)), track_db)
 
 
-def _build(path, track_db, cars, key):
-    rec = gt7_recording.Recording(path)
-    eng = gt7_telemetry.TelemetryEngine()
-    laps, lap_samples, lap_tyres = [], [], []
-    eng.on_lap = laps.append
-    times = gt7_recording.LapTimeMatcher()
-    cur, tail, tyre = [], None, [0.0, 0.0, 0.0, 0.0, 0]
-    first = last = None
-    for wall_ts, _kind, plain in rec.packets():
-        first = wall_ts if first is None else first
-        last = wall_ts
-        pkt = gt7_telemetry.parse_packet(plain)
-        closed = len(laps)
+class _Replay:
+    """One pass of the lap index over a recording. It keeps a resume point after the last
+    lap whose GT7 time is settled, so the index of a grown recording continues there."""
+
+    def __init__(self, point=None):
+        self.eng = gt7_telemetry.TelemetryEngine()
+        self.laps = []
+        self.eng.on_lap = self.laps.append
+        self.times = gt7_recording.LapTimeMatcher()
+        self.lap_samples, self.lap_tyres = [], []
+        self.cur, self.tail, self.tyre = [], None, [0.0, 0.0, 0.0, 0.0, 0]
+        self.first = self.last = None
+        self.start, self.dropped, self.point = None, 0, None
+        if point is not None:
+            self.eng.restore(point["eng"])
+            self.times.restore(point["times"])
+            self.laps.extend(dict(lap, points=[tuple(p) for p in lap["points"]])
+                             for lap in point["raw_laps"])
+            self.cur = [tuple(x) for x in point["cur"]]
+            self.tail = None if point["tail"] is None else tuple(point["tail"])
+            self.tyre = list(point["tyre"])
+            self.first, self.last = point["first"], point["last"]
+            self.start, self.dropped = point["offset"], point["dropped"]
+            self.point = {k: v for k, v in point.items()
+                          if k not in ("raw_laps", "started", "check")}
+        self.reused = len(self.laps)
+
+    def run(self, rec):
+        rec.dropped = self.dropped
+        marked = len(self.laps)
+        for wall_ts, _kind, plain in rec.packets(self.start):
+            self._feed(wall_ts, gt7_telemetry.parse_packet(plain))
+            if len(self.laps) > marked and self.times.settled():
+                marked = len(self.laps)
+                self.point = {
+                    "offset": rec.pos, "laps": marked, "eng": self.eng.resume_state(),
+                    "times": self.times.resume_state(), "cur": list(self.cur),
+                    "tail": self.tail, "tyre": list(self.tyre), "first": self.first,
+                    "last": self.last, "dropped": rec.dropped}
+        self.dropped = rec.dropped
+
+    def _feed(self, wall_ts, pkt):
+        self.first = wall_ts if self.first is None else self.first
+        self.last = wall_ts
+        eng, times = self.eng, self.times
+        closed = len(self.laps)
         eng.update(pkt, wall_ts)
-        for lap in laps[closed:]:
+        for lap in self.laps[closed:]:
             times.lap_closed(lap, wall_ts)
-            lap_samples.append(cur if tail is None else cur + [tail])
-            lap_tyres.append(tyre)
-            cur, tail, tyre = [], None, [0.0, 0.0, 0.0, 0.0, 0]
+            self.lap_samples.append(self.cur if self.tail is None else self.cur + [self.tail])
+            self.lap_tyres.append(self.tyre)
+            self.cur, self.tail, self.tyre = [], None, [0.0, 0.0, 0.0, 0.0, 0]
         times.update(pkt, wall_ts)
         if not pkt.on_track or pkt.paused or pkt.loading:
-            continue
+            return
         sample = _sample(pkt, wall_ts - eng.lap_started_at(), eng.lap_distance())
         if sample is None:
-            continue
+            return
+        cur = self.cur
         if not cur or sample[1] >= cur[-1][1] + DECIMATE_M:    # _trace's rule, applied early
             cur.append(sample)
-            tail = None
+            self.tail = None
         else:
-            tail = sample
+            self.tail = sample
         if all(math.isfinite(v) for v in pkt.tyre_temp):
+            tyre = self.tyre
             for i in range(4):
                 tyre[i] += pkt.tyre_temp[i]
             tyre[4] += 1
+
+    def resume_point(self, rec):
+        """The JSON-safe resume point for the cache, or None before any settled lap."""
+        if self.point is None:
+            return None
+        offset = self.point["offset"]
+        with open(rec.path, "rb") as fh:
+            fh.seek(max(0, offset - RESUME_CHECK))
+            check = fh.read(offset - fh.tell())
+        return dict(self.point, raw_laps=self.laps[:self.point["laps"]],
+                    started=rec.header.get("started", ""), check=check.hex())
+
+
+def _build(path, track_db, cars, key, old=None):
+    """The lap index; with `old` (a stale cache whose resume point the file still
+    matches) only the bytes after that point are replayed."""
+    rec = gt7_recording.Recording(path)
+    replay = _Replay(old["resume"] if old is not None else None)
+    if old is not None and old["resume"]["started"] != rec.header.get("started", ""):
+        raise ValueError("another recording under the same name")
+    replay.run(rec)
+    laps = replay.laps
     by_session = gt7_recording.session_tracks(laps, track_db, key)
+    out = old["laps"][:replay.reused] if old is not None else []
+    for lap in out:
+        found = by_session.get(lap["session"])
+        if (found["id"] if found and "id" in found else None) != lap["track_id"]:
+            raise ValueError("a session's track changed, its traces need a full build")
     stem = gt7_recording.recording_stem(path)
-    out = []
-    for i, (lap, tyres) in enumerate(zip(laps, lap_tyres, strict=True)):
+    first = replay.first
+    for i, lap in enumerate(laps[replay.reused:]):
+        tyres = replay.lap_tyres[i]
         found = by_session.get(lap["session"])
         track_id = found["id"] if found and "id" in found else None
         length = track_db.line_length(track_id) if track_id is not None else None
-        samples, lap_samples[i] = lap_samples[i], None    # free each lap's samples once traced
+        samples, replay.lap_samples[i] = replay.lap_samples[i], None    # free each lap's samples once traced
         relay = round(lap["elapsed"], 3)
         gt7_s = lap["gt7_time_s"]
         time_s = gt7_s if gt7_s is not None else relay
@@ -317,10 +420,11 @@ def _build(path, track_db, cars, key):
             "sectors": sectors(trace, lap_length_m({"trace": trace})),
             "trace": trace})
     return {"rec": stem, "name": os.path.basename(path),
-            "started": rec.header.get("started", ""), "start_ts": first, "end_ts": last,
-            "dropped": rec.dropped, "track": _display_track(laps, by_session, track_db),
+            "started": rec.header.get("started", ""), "start_ts": first,
+            "end_ts": replay.last, "dropped": replay.dropped,
+            "track": _display_track(laps, by_session, track_db),
             "sessions": {str(s): _track_info(v, track_db) for s, v in by_session.items()},
-            "laps": out}
+            "laps": out, "resume": replay.resume_point(rec)}
 
 
 def summary(lap):
