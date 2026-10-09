@@ -5260,7 +5260,8 @@ function tmIndexAll() {
       if (job.joined) $('tm-note').hidden = true;
       if (r.code !== 0) {
         const bad = (r.lines || []).filter(l => l.includes('not indexed'));
-        tmNote('Some recordings could not be indexed: ' + (bad.length ? bad : r.lines).join('; '));
+        tmNote('Some recordings could not be indexed: '
+          + (bad.length ? bad : (r.lines || []).slice(-1)).join('; '));
       }
       tmRefreshRecs();
       return r;
@@ -5271,17 +5272,22 @@ function tmIndexAll() {
 }
 // `ask()` once more after the index job when the recording `rec` has no lap index yet. A
 // recording the job of this generation could not index answers with the job's line as an
-// error instead of starting it again.
-async function tmIndexed(rec, ask, stale) {
+// error instead of starting it again. `busy(true)` and `busy(false)` bracket the job.
+async function tmIndexed(rec, ask, stale, busy) {
   let d = await ask();
   if (d.ok && d.unindexed && tmIndexedGen !== tmLapGen) {
-    const job = await tmIndexAll();
+    if (busy) busy(true);
+    let job;
+    try { job = await tmIndexAll(); } finally { if (busy) busy(false); }
     if (stale()) return {ok: false, stale: true};
     if (job.error) return {ok: false, error: job.error};
     d = await ask();
   }
   if (!d.ok || !d.unindexed) return d;
-  const line = tmIndexLines.find(l => l.startsWith(rec + ': not indexed'));
+  const last = tmIndexLines[tmIndexLines.length - 1] || '';
+  const failed = /failed: (.*)$/.exec(last);
+  const line = tmIndexLines.find(l => l.startsWith(rec + ': not indexed'))
+    || (failed && failed[1].split(', ').includes(rec) ? last : '');
   return {ok: false, error: line || (d.note || rec + ' has no lap index yet')
     + '. Refresh runs the index job again.'};
 }
@@ -5831,7 +5837,8 @@ async function tmLearn() {
   try {
     const r = await tmIndexed(rec, async () => (await fetch('/api/telemetry/learn', {method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({rec, track_id: trackId})})).json(), () => seq !== tmSeq.rec);
+      body: JSON.stringify({rec, track_id: trackId})})).json(), () => seq !== tmSeq.rec,
+      on => { btn.textContent = on ? 'Indexing…' : 'Set track'; });
     if (r.ok) {                           // every cached index is now stale
       tmDropLaps();
       tmState.recs.forEach(x => { if (x.indexed) x.indexed = false; });

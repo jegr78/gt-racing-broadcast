@@ -180,7 +180,8 @@ New group `racecast telemetry`. Help strings stay ASCII.
   the recording, or into `DIR`.
 - `delete <name>`: refuses the file the running relay reports as open in `/status`.
 - `index` (part 3): builds the missing lap index of every closed recording and exits 1
-  when one fails; the Control Center runs it as the `telemetry-index` job.
+  when one fails, with a last line that names every recording it could not index; the
+  Control Center runs it as the `telemetry-index` job.
 
 `list`, `export` and `delete` read files only and do not need a relay. `--profile`
 works as for every other command.

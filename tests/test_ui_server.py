@@ -2768,6 +2768,54 @@ console.log(JSON.stringify([kept, jobs(), asks('/api/telemetry/learn'), tmLapGen
             f"Set track runs telemetry-index on a stale index, then learns once more: {out}"
 
 
+def t_telemetry_failure_outside_the_job_tail_still_names_the_recording():
+    out = _tm_node(_TM_UNINDEXED + """
+tmSelectRec('X');
+await tick();
+answer('rec=X', unindexed('X'));
+await tick();
+answer('/api/op/telemetry-index', {ok: true, job_id: 'j'});
+await tick();
+const tail = Array.from({length: 19}, (_, i) => 'R' + i + ': 4 laps')
+  .concat(['19 recording(s) indexed, 2 failed: W, X']);
+answer('/api/jobs/j', {ok: true, running: false, exit_code: 1, lines: tail});
+await tick();
+answer('rec=X', unindexed('X'));
+await tick();
+console.log(JSON.stringify([$('tm-err').textContent, $('tm-note').textContent]));""")
+    if out is not None:
+        err, note = json.loads(out)
+        want = "19 recording(s) indexed, 2 failed: W, X"
+        assert want in err and want in note, \
+            f"the summary line names a failure whose own line left the tail: {out}"
+
+
+def t_telemetry_set_track_shows_indexing_while_its_job_runs():
+    out = _tm_node(_TM_UNINDEXED + """
+globalThis.confirmModal = async () => true;
+tmState.rec = 'X';
+const pick = $('tm-track-pick'), o = new El('option');
+o.value = 't9'; o.textContent = 'Nine';
+pick.appendChild(o); pick.value = 't9'; pick.selectedIndex = 0;
+$('tm-learn').textContent = 'Set track';
+tmLearn();
+await tick();
+answer('/api/telemetry/learn', unindexed('X'));
+await tick();
+answer('/api/op/telemetry-index', {ok: true, job_id: 'j'});
+await tick();
+const during = $('tm-learn').textContent.replace(/\\u2026/g, '...');
+answer('/api/jobs/j', {ok: true, running: false, exit_code: 0, lines: []});
+await tick();
+const retry = $('tm-learn').textContent;
+answer('/api/telemetry/learn', {ok: true, track: {id: 't9'}, learned: true});
+await tick();
+console.log(JSON.stringify([during, retry, $('tm-learn').textContent]));""")
+    if out is not None:
+        assert json.loads(out) == ["Indexing...", "Set track", "Set track"], \
+            f"Set track shows Indexing while its job runs and its label afterwards: {out}"
+
+
 def t_telemetry_index_job_refreshes_the_recording_list():
     out = _tm_node("""
 const l1 = lap('R', 1, 80, 1);

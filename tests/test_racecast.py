@@ -746,6 +746,33 @@ def t_telemetry_index_cmd_names_a_failed_recording_once():
         assert line == f"{stem}: not indexed (bad header)", line
 
 
+def t_telemetry_index_cmd_ends_with_every_failed_recording():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        import gt7_recording
+        good = _stem(tgl.write_circle_recording(rec_dir))
+        bad = [_stem(tgl.write_circle_recording(rec_dir, t0=1_700_007_200.0 + 3600 * k, n=40))
+               for k in range(2)]
+        real = m._telemetry_index
+
+        def some_broken(path, dbs=None, stamp=None):
+            if _stem(path) in bad:
+                raise gt7_recording.RecordingError(f"{path}: damaged", reason="bad header")
+            return real(path, dbs, stamp)
+        m._telemetry_index = some_broken
+        out = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out):
+                try:
+                    m.telemetry_index_cmd([])
+                except SystemExit as e:
+                    assert e.code == 1, e.code
+        finally:
+            m._telemetry_index = real
+        last = out.getvalue().splitlines()[-1]
+        assert last == f"1 recording(s) indexed, 2 failed: {bad[0]}, {bad[1]}", \
+            f"the last line names every failed recording, {good} is not one: {last}"
+
+
 def _requests_without_build(stem, tid):
     return [m.telemetry_laps_data(rec=stem, build=False),
             m.telemetry_lap_data(stem, "1", "3", build=False),

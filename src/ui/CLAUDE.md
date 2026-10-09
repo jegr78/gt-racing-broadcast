@@ -43,7 +43,9 @@ Loaded when working under `src/ui/`.
   `/api/telemetry/learn` answer `unindexed: 1` for a recording without one. The page
   (`tmIndexed`, `tmIndexAll`) then runs the `telemetry-index` job (`racecast telemetry
   index`) once per lap generation, polls it through `/api/jobs/<id>` and asks once more;
-  still unindexed shows the job's "not indexed" line as an error. The CLI and the
+  still unindexed shows the job's "not indexed" line as an error, or its last line, which
+  names every recording the job could not index. Set track shows "Indexing…" on its
+  button while its job runs. The CLI and the
   event-stop report keep building. A counted
   lap's trace closes at the full lap length with the lap time, so its sectors add up. Data
   functions `telemetry_*_data` in `src/racecast.py`; routes `/api/telemetry/recordings`,

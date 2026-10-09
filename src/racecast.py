@@ -3327,19 +3327,20 @@ def telemetry_index_cmd(rest):
     """Build the lap index of every closed recording of the active profile that has none."""
     if rest:
         sys.exit("usage: racecast telemetry index")
-    counts = {"built": 0, "failed": 0}
+    built, failed = [0], []
 
     def report(stem, idx, exc):
         if exc is not None:
-            counts["failed"] += 1
+            failed.append(stem)
             print(f"{stem}: not indexed ({_telemetry_reason(exc)})", flush=True)
         else:
-            counts["built"] += 1
+            built[0] += 1
             print(f"{stem}: {len(idx['laps'])} laps", flush=True)
     _telemetry_pool_indexes(_telemetry_rec_dir(), True, report=report)
-    print(f"{counts['built']} recording(s) indexed"
-          + (f", {counts['failed']} failed" if counts["failed"] else ""))
-    if counts["failed"]:
+    # The last line names every failure: the Control Center reads only the output's tail.
+    print(f"{built[0]} recording(s) indexed"
+          + (f", {len(failed)} failed: {', '.join(failed)}" if failed else ""))
+    if failed:
         sys.exit(1)
 
 
