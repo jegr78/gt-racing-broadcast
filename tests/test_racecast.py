@@ -401,7 +401,6 @@ def _rec_dir_with_one(d):
 
 
 def t_resolve_recording_by_name_stem_and_latest():
-    import tempfile
     with tempfile.TemporaryDirectory() as d:
         name = _rec_dir_with_one(d)
         stem = name[:-len(".gt7rec")]
@@ -414,7 +413,7 @@ def t_resolve_recording_by_name_stem_and_latest():
 
 
 def t_resolve_recording_latest_picks_by_started_time_not_name_sort():
-    import tempfile, importlib
+    import importlib
     gr = importlib.import_module("gt7_recording")
     with tempfile.TemporaryDirectory() as d:
         ts = 1760000000.0
@@ -454,7 +453,6 @@ def _stub_telemetry_cli(d, status, running="", active="demo", http_ok=True):
 
 
 def t_telemetry_delete_refuses_the_open_file():
-    import tempfile
     with tempfile.TemporaryDirectory() as d:
         name = _rec_dir_with_one(d)
         restore = _stub_telemetry_cli(d, {"active": True, "file": name}, running="demo")
@@ -471,7 +469,6 @@ def t_telemetry_delete_refuses_the_open_file():
 
 
 def t_telemetry_delete_reports_os_errors():
-    import tempfile
     with tempfile.TemporaryDirectory() as d:
         name = _rec_dir_with_one(d)
         os.makedirs(os.path.join(d, name[:-len(".gt7rec")]))      # an export folder
@@ -511,7 +508,6 @@ def t_telemetry_record_refuses_a_relay_on_another_profile():
 
 
 def t_telemetry_list_ignores_the_open_file_of_a_relay_on_another_profile():
-    import io, tempfile, contextlib
     with tempfile.TemporaryDirectory() as d:
         name = _rec_dir_with_one(d)
         restore = _stub_telemetry_cli(d, {"active": True, "file": name},
@@ -529,7 +525,6 @@ def t_telemetry_list_ignores_the_open_file_of_a_relay_on_another_profile():
 
 
 def t_telemetry_delete_ignores_the_open_file_of_a_relay_on_another_profile():
-    import tempfile
     with tempfile.TemporaryDirectory() as d:
         name = _rec_dir_with_one(d)
         restore = _stub_telemetry_cli(d, {"active": True, "file": name},
@@ -543,7 +538,6 @@ def t_telemetry_delete_ignores_the_open_file_of_a_relay_on_another_profile():
 
 
 def t_telemetry_export_writes_next_to_recording():
-    import tempfile
     with tempfile.TemporaryDirectory() as d:
         name = _rec_dir_with_one(d)
         real = m._telemetry_rec_dir
@@ -561,7 +555,6 @@ def t_telemetry_export_writes_next_to_recording():
 
 def t_telemetry_export_failure_exits_with_a_clean_message():
     import struct
-    import tempfile
     import gt7_recording
     with tempfile.TemporaryDirectory() as d:
         name = _rec_dir_with_one(d)
@@ -1315,7 +1308,6 @@ def t_parse_env_text():
 
 
 def t_ensure_env_file_creates_once():
-    import tempfile
     with tempfile.TemporaryDirectory() as d:
         with open(os.path.join(d, ".env.example"), "w", encoding="utf-8") as fh:
             fh.write("RACECAST_SHEET_ID=\n")
@@ -1335,7 +1327,6 @@ def t_ensure_env_file_creates_once():
 
 
 def t_cleanup_old_binary():
-    import tempfile
     with tempfile.TemporaryDirectory() as d:
         old = os.path.join(d, "racecast-old.exe")
         with open(old, "wb") as fh:
@@ -1354,7 +1345,6 @@ def t_cleanup_old_binary_also_removes_ui():
     # install_ui renames a locked, running racecast-ui.exe aside to
     # racecast-ui-old.exe during a self-update; cleanup must sweep that too, not
     # only the main binary's racecast-old.exe.
-    import tempfile
     with tempfile.TemporaryDirectory() as d:
         ui_old = os.path.join(d, "racecast-ui-old.exe")
         with open(ui_old, "wb") as fh:
@@ -1364,7 +1354,6 @@ def t_cleanup_old_binary_also_removes_ui():
 
 
 def t_ensure_example_profile_seeds_once():
-    import tempfile
     with tempfile.TemporaryDirectory() as d:
         bundled = os.path.join(d, "bundled-example")
         os.makedirs(bundled)
@@ -1388,7 +1377,6 @@ def t_ensure_example_profile_seeds_once():
 
 
 def t_ensure_example_profile_without_bundle():
-    import tempfile
     with tempfile.TemporaryDirectory() as d:
         home = os.path.join(d, "home")
         os.makedirs(home)
@@ -1398,14 +1386,12 @@ def t_ensure_example_profile_without_bundle():
 
 
 def t_ensure_env_file_without_template():
-    import tempfile
     with tempfile.TemporaryDirectory() as d:
         assert m.ensure_env_file(d, frozen=True) is False
         assert not os.path.exists(os.path.join(d, ".env"))
 
 
 def t_ensure_env_file_copy_failure():
-    import tempfile
     def boom(src, dst):
         raise OSError("boom")
     with tempfile.TemporaryDirectory() as d:
@@ -1458,7 +1444,6 @@ def t_ensure_tool_path_adds_managed_bin():
     speedtest CLI on mac/Linux) into runtime/bin, never on the user's shell PATH.
     _ensure_tool_path() must prepend it so preflight and the spawned relay resolve
     them."""
-    import tempfile
     td = tempfile.mkdtemp()
     binr = os.path.join(td, "runtime", "bin")
     os.makedirs(binr)
@@ -1475,7 +1460,6 @@ def t_ensure_tool_path_adds_managed_bin():
 
 
 def t_ensure_tool_path_noop_when_bin_absent():
-    import tempfile
     td = tempfile.mkdtemp()                # runtime/bin does NOT exist here
     orig_rt, orig_path = m._runtime_base_dir, os.environ.get("PATH", "")
     m._runtime_base_dir = lambda: os.path.join(td, "runtime")
@@ -1489,10 +1473,9 @@ def t_ensure_tool_path_noop_when_bin_absent():
 
 
 def t_script_invocation_repo():
-    import sys as _sys
     kind, argv, _ = m._script_invocation("scripts/preflight.py", ["--quick"], False)
     assert kind == "subprocess"
-    assert argv[0] == _sys.executable
+    assert argv[0] == sys.executable
     assert argv[1].endswith(os.path.join("scripts", "preflight.py"))
     assert argv[-1] == "--quick"
 
@@ -1506,12 +1489,11 @@ def t_script_invocation_frozen():
 
 
 def t_relay_daemon_argv():
-    import sys as _sys
     repo = m._relay_daemon_argv(["--no-pov"], False)
-    assert repo[0] == _sys.executable and repo[1].endswith("racecast-feeds.py")
+    assert repo[0] == sys.executable and repo[1].endswith("racecast-feeds.py")
     assert "--runtime-dir" in repo and repo[-1] == "--no-pov"
     assert m._relay_daemon_argv(["--no-pov"], True) == \
-        [_sys.executable, "relay", "run", "--no-pov"]
+        [sys.executable, "relay", "run", "--no-pov"]
 
 
 def t_oneshot_extra():
@@ -1548,7 +1530,6 @@ def _oneshot_extra_cases():
     assert m._oneshot_extra("graphics", ["--out", "z"], R, B) == []
 
     # --overlay-css is injected for `setup` only when the passed path exists.
-    import tempfile
     with tempfile.TemporaryDirectory() as d:
         css = os.path.join(d, "hud.css")
         assert m._oneshot_extra("setup", [], R, B, overlay_css=css) == \
@@ -1585,7 +1566,6 @@ def t_sync_pov_transform_calls_setter_with_merged_box():
     # All three mapped slots ("pov" -> Stint/"Feed POV", "webcam" -> Program/"Solo
     # Webcam", "tyres-capture" -> Program/"Solo Tyres/Fuel Capture") must be synced
     # from one call, so capture every set_transform call.
-    import tempfile
     calls = []
 
     def fake_set(scene, source, transform):
@@ -1636,7 +1616,6 @@ def t_sync_pov_transform_only_hides_items_live():
     # only hides what the profile CSS hides. It never shows an item, because the
     # director's WEBCAM toggle may have hidden it on air; showing is the setup bake's
     # job. Feed POV is left to the director's live toggle.
-    import tempfile
     enabled = []
     with tempfile.TemporaryDirectory() as d:
         with open(os.path.join(d, "hud.css"), "w") as fh:
@@ -1655,7 +1634,6 @@ def t_sync_pov_transform_only_hides_items_live():
 def t_sync_pov_transform_reads_a_hud_css_that_is_not_utf8():
     # A stray byte in an imported hud.css must not crash relay start after the
     # relay spawned; the slot rules still apply.
-    import tempfile
     enabled = []
     with tempfile.TemporaryDirectory() as d:
         with open(os.path.join(d, "hud.css"), "wb") as fh:
@@ -1672,7 +1650,6 @@ def t_sync_pov_transform_reads_a_hud_css_that_is_not_utf8():
 
 
 def t_sync_pov_transform_targets_program_in_solo():
-    import tempfile
     calls = []
     with tempfile.TemporaryDirectory() as d:
         orig = m._active_overlay_dir
@@ -1688,7 +1665,6 @@ def t_sync_pov_transform_targets_program_in_solo():
 
 
 def _sync_output(result):
-    import contextlib, io, tempfile
     buf = io.StringIO()
     with tempfile.TemporaryDirectory() as d:
         orig = m._active_overlay_dir
@@ -1712,7 +1688,6 @@ def t_sync_pov_transform_reports_a_rejected_transform():
 
 
 def t_sync_pov_transform_reports_a_refused_show_or_hide():
-    import contextlib, io, tempfile
     buf = io.StringIO()
     with tempfile.TemporaryDirectory() as d:
         with open(os.path.join(d, "hud.css"), "w") as fh:
@@ -1737,7 +1712,6 @@ def t_sync_pov_transform_is_silent_for_a_slot_the_collection_lacks():
 
 
 def t_run_module_exit_codes():
-    import contextlib, io, sys as _sys, tempfile
     with tempfile.TemporaryDirectory() as td:
         script = os.path.join(td, "fake-tool.py")
         with open(script, "w", encoding="utf-8") as fh:
@@ -1748,18 +1722,17 @@ def t_run_module_exit_codes():
                      "    if sys.argv[1:] == ['--exit-str']:\n"
                      "        sys.exit('boom guide')\n"
                      "    return None\n")
-        before = list(_sys.argv)
+        before = list(sys.argv)
         assert m._run_module(script, ["--fail"]) == 3
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
             assert m._run_module(script, ["--exit-str"]) == 1
         assert "boom guide" in err.getvalue()  # sys.exit(str) must reach stderr
         assert m._run_module(script, []) == 0
-        assert _sys.argv == before
+        assert sys.argv == before
 
 
 def t_run_module_missing_main():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         script = os.path.join(td, "no-main.py")
         with open(script, "w", encoding="utf-8") as fh:
@@ -1796,7 +1769,6 @@ def t_export_route():
 
 
 def t_export_companion_writes_file():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         dst = os.path.join(td, "buttons.companionconfig")
         m.export_companion(["--out", dst])
@@ -1806,7 +1778,6 @@ def t_export_companion_writes_file():
 def t_export_companion_default_into_runtime():
     # No --out -> runtime/ (same home as the localized OBS collection), and the
     # dir is created on demand, NOT in the caller's cwd.
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         old = m._runtime_dir
         m._runtime_dir = lambda: os.path.join(td, "runtime")
@@ -1894,7 +1865,6 @@ def t_relay_start_warns_when_running_and_stint_ignored():
     # already-running + --stint: must tell the operator the flag was ignored.
     # Patch every signal so relay_start_plan returns "running": pid on the port,
     # alive PID, HTTP ok, and profile match.
-    import io, contextlib
     old_read = m.sv.read_pid
     old_alive = m.sv.pid_alive
     old_pids_on_port = m.pt.pids_on_port
@@ -1974,7 +1944,6 @@ def t_relay_start_retries_when_first_spawn_not_up():
     # so start_detached returns a PID for a child that died. relay_start must NOT claim
     # success on the first (failed) verify. It respawns once, and the port has
     # cleared by then.
-    import io, contextlib
     restore, calls = _relay_spawn_stubs([False, True])   # down, then up on retry
     try:
         buf = io.StringIO()
@@ -1989,7 +1958,6 @@ def t_relay_start_retries_when_first_spawn_not_up():
 
 
 def t_relay_start_refreshes_the_obs_pages():
-    import io, contextlib
     restore, _calls = _relay_spawn_stubs([True])
     refreshes = []
     m._refresh_obs_pages = lambda *a, **k: refreshes.append(k)
@@ -2005,7 +1973,6 @@ def t_relay_start_reports_failure_when_relay_never_comes_up():
     # If the relay never binds the control port, relay_start must report an HONEST
     # failure, never "relay started" for a dead child, which would make event-start
     # look green while the relay is down.
-    import io, contextlib
     restore, calls = _relay_spawn_stubs([False, False])   # down on both attempts
     try:
         buf = io.StringIO()
@@ -2023,7 +1990,6 @@ def t_relay_stop_releases_obs_feeds_after_kill():
     # AFTER the kill: a source rebuild against a live relay would reconnect.
     # Against the dead relay it just drops the half-dead connection, freeing
     # the feed ports (otherwise FIN_WAIT_1 -> preflight "port in use").
-    import io, contextlib
     calls = []
     old = (m.sv.read_pid, m.sv.pid_alive, m.sv.stop_pid, m._release_obs_feeds)
     m.sv.read_pid = lambda path: 4242
@@ -2042,7 +2008,6 @@ def t_relay_stop_releases_obs_feeds_after_kill():
 
 def t_relay_stop_skips_obs_release_when_kill_failed():
     # Relay may still be alive -> a rebuild would reconnect. Don't release.
-    import io, contextlib
     calls = []
     old = (m.sv.read_pid, m.sv.pid_alive, m.sv.stop_pid, m._release_obs_feeds)
     m.sv.read_pid = lambda path: 4242
@@ -2058,7 +2023,6 @@ def t_relay_stop_skips_obs_release_when_kill_failed():
 
 
 def t_relay_stop_skips_obs_when_relay_not_running():
-    import io, contextlib, tempfile
     calls = []
     old = (m.sv.read_pid, m.sv.pid_alive, m._release_obs_feeds, m._relay_pid_path)
     with tempfile.TemporaryDirectory() as tmp:
@@ -2075,7 +2039,6 @@ def t_relay_stop_skips_obs_when_relay_not_running():
 
 
 def t_streams_stop_releases_obs_feeds_when_feeds_exist():
-    import io, contextlib, tempfile
     calls = []
     old = (m._release_obs_feeds, m._run_script, m._streams_static_dir)
     with tempfile.TemporaryDirectory() as tmp:
@@ -2093,7 +2056,6 @@ def t_streams_stop_releases_obs_feeds_when_feeds_exist():
 
 
 def t_streams_stop_skips_obs_without_feed_pids():
-    import io, contextlib, tempfile
     calls = []
     old = (m._release_obs_feeds, m._run_script, m._streams_static_dir)
     with tempfile.TemporaryDirectory() as tmp:
@@ -2141,7 +2103,6 @@ def t_relay_serves_pages_false_when_any_fetch_fails():
 def t_refresh_obs_pages_reloads_even_when_pages_are_unchanged():
     # A source that loaded while the relay was down keeps CEF's error page; identical
     # page bytes must not skip the reload (#681).
-    import contextlib
     reloads = []
     fake_ws = type(sys)("obs_ws")
     fake_ws.refresh_browser_inputs = lambda needle: (reloads.append(needle) or ["HUD Overlay"], "")
@@ -2211,7 +2172,6 @@ def t_oneshot_extra_media_injects_cookies_when_present():
     # frozen binary stops 403-ing Intro/Outro (get-media's here-relative fallback
     # resolves into the PyInstaller bundle). Injected only when the jar exists and
     # the user didn't pass their own --cookies.
-    import tempfile
     with tempfile.TemporaryDirectory() as base:
         rd = os.path.join(base, "demo")
         open(os.path.join(base, "yt-cookies.txt"), "w").close()
@@ -2232,7 +2192,6 @@ def t_oneshot_extra_media_no_cookies_when_absent_or_user_supplied():
     assert m._oneshot_extra("media", [], os.path.join("/rt", "demo"), "/rt") == [
         "--out", os.path.join("/rt", "demo", "media")]
     # A user-supplied --cookies wins: nothing auto-injected.
-    import tempfile
     with tempfile.TemporaryDirectory() as base:
         rd = os.path.join(base, "demo")
         open(os.path.join(base, "yt-cookies.txt"), "w").close()
@@ -2342,7 +2301,6 @@ def t_profile_env_vars_includes_telemetry_record():
 
 
 def t_reset_telemetry_record_removes_state_file():
-    import tempfile
     with tempfile.TemporaryDirectory() as d:
         state = os.path.join(d, "telemetry-record.json")
         with open(state, "w", encoding="utf-8") as fh:
@@ -2432,7 +2390,6 @@ def t_relay_already_running_for_active_profile_requires_both():
 
 
 def t_event_start_pushes_live_telemetry_record_only_when_relay_already_running():
-    import tempfile
 
     class _Reached(Exception):
         pass
@@ -2499,7 +2456,6 @@ def t_profile_env_vars_includes_discord_webhook():
 
 
 def t_active_obs_collection_falls_back_to_constant_without_profile():
-    import tempfile
     import obs_ws
     saved = dict(os.environ)
     try:
@@ -2522,7 +2478,6 @@ def t_profile_runtime_scoping():
 
 
 def t_profiles_data_reports_active_logo_flag():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         prof = os.path.join(td, "profiles")
         os.makedirs(os.path.join(prof, "demo"))
@@ -2548,7 +2503,6 @@ def t_profiles_data_reports_active_logo_flag():
 
 
 def t_profiles_data_lists_active_and_available():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         prof = os.path.join(td, "profiles")
         os.makedirs(os.path.join(prof, "demo"))
@@ -2577,7 +2531,6 @@ def t_profiles_data_lists_active_and_available():
 
 
 def t_profiles_data_reports_kind():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         prof = os.path.join(td, "profiles")
         os.makedirs(os.path.join(prof, "demo"))
@@ -2603,7 +2556,6 @@ def t_profiles_data_reports_kind():
 
 
 def t_profiles_data_reports_template():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         prof = os.path.join(td, "profiles")
         envs = {"demo": "NAME=Demo\n", "pov1": "NAME=P\nKIND=solo\nTEMPLATE=pov\n",
@@ -2628,7 +2580,6 @@ def t_profiles_data_reports_template():
 
 
 def t_profile_use_data_switches_pointer():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         prof = os.path.join(td, "profiles", "demo")
         os.makedirs(prof)
@@ -2649,7 +2600,6 @@ def t_profile_use_data_switches_pointer():
 
 
 def t_profile_use_data_unknown_is_error():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         open(os.path.join(td, ".env.example"), "w").close()
         os.makedirs(os.path.join(td, "runtime"))
@@ -2664,7 +2614,6 @@ def t_profile_use_data_unknown_is_error():
 
 
 def t_profile_new_data_creates_from_example():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         ex = os.path.join(td, "profiles", "example")
         os.makedirs(ex)
@@ -2682,7 +2631,6 @@ def t_profile_new_data_creates_from_example():
 
 
 def t_profile_new_data_spaced_name_returns_slug():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         ex = os.path.join(td, "profiles", "example")
         os.makedirs(ex)
@@ -2700,7 +2648,6 @@ def t_profile_new_data_spaced_name_returns_slug():
 
 
 def t_profile_new_data_bad_name_is_error():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         os.makedirs(os.path.join(td, "profiles", "example"))
         open(os.path.join(td, ".env.example"), "w").close()
@@ -2746,7 +2693,6 @@ def t_profile_new_data_defaults_endurance():
 
 
 def t_profile_env_entries_data_reads_active():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         prof = os.path.join(td, "profiles", "demo")
         os.makedirs(prof)
@@ -2769,7 +2715,6 @@ def t_profile_env_entries_data_reads_active():
 
 
 def t_profile_env_entries_data_no_profile_is_error():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         open(os.path.join(td, ".env.example"), "w").close()
         os.makedirs(os.path.join(td, "runtime"))
@@ -2784,7 +2729,6 @@ def t_profile_env_entries_data_no_profile_is_error():
 
 
 def t_profile_env_write_data_persists_to_active():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         prof = os.path.join(td, "profiles", "demo")
         os.makedirs(prof)
@@ -2810,7 +2754,6 @@ def t_profile_env_write_data_persists_to_active():
 
 
 def t_profile_env_write_data_no_profile_is_error():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         open(os.path.join(td, ".env.example"), "w").close()
         os.makedirs(os.path.join(td, "runtime"))
@@ -2827,7 +2770,6 @@ def t_profile_env_write_data_no_profile_is_error():
 
 
 def t_overlay_read_absent_ok_empty():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         prof = os.path.join(td, "profiles", "demo")
         os.makedirs(prof)
@@ -2847,7 +2789,6 @@ def t_overlay_read_absent_ok_empty():
 
 
 def t_overlay_write_then_read_roundtrip():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         prof = os.path.join(td, "profiles", "demo")
         os.makedirs(prof)
@@ -2871,7 +2812,6 @@ def t_overlay_write_then_read_roundtrip():
 
 
 def t_overlay_rejects_unknown_page():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         prof = os.path.join(td, "profiles", "demo")
         os.makedirs(prof)
@@ -2892,7 +2832,6 @@ def t_overlay_rejects_unknown_page():
 
 
 def t_overlay_no_profile_is_error():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         open(os.path.join(td, ".env.example"), "w").close()
         os.makedirs(os.path.join(td, "runtime"))
@@ -2923,7 +2862,6 @@ def _mk_active_profile(td):
 
 
 def t_overlay_layout_write_compiles_and_persists():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         orig = _mk_active_profile(td)
         try:
@@ -2945,7 +2883,6 @@ def t_overlay_layout_write_compiles_and_persists():
 
 
 def t_overlay_layout_read_migrates_handwritten_css():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         orig = _mk_active_profile(td)
         od = os.path.join(td, "profiles", "demo", "overlay")
@@ -2962,14 +2899,13 @@ def t_overlay_layout_read_migrates_handwritten_css():
 
 
 def t_overlay_layout_folds_legacy_timer_css():
-    import tempfile, json as _json
     with tempfile.TemporaryDirectory() as td:
         orig = _mk_active_profile(td)
         od = os.path.join(td, "profiles", "demo", "overlay")
         os.makedirs(od)
         # Write a layout-hud.json so migration path is skipped (we test the fold path)
         with open(os.path.join(od, "layout-hud.json"), "w", encoding="utf-8") as fh:
-            _json.dump({"page": "hud", "slots": {}, "fonts": [], "customCss": ""}, fh)
+            json.dump({"page": "hud", "slots": {}, "fonts": [], "customCss": ""}, fh)
         # Write a real timer.css with actual CSS rules
         with open(os.path.join(od, "timer.css"), "w", encoding="utf-8") as fh:
             fh.write("#clock { color: #f4f4f4; }")
@@ -2985,14 +2921,13 @@ def t_overlay_layout_folds_legacy_timer_css():
 
 
 def t_overlay_layout_ignores_comment_only_timer_css():
-    import tempfile, json as _json
     with tempfile.TemporaryDirectory() as td:
         orig = _mk_active_profile(td)
         od = os.path.join(td, "profiles", "demo", "overlay")
         os.makedirs(od)
         # Write a layout-hud.json
         with open(os.path.join(od, "layout-hud.json"), "w", encoding="utf-8") as fh:
-            _json.dump({"page": "hud", "slots": {}, "fonts": [], "customCss": ""}, fh)
+            json.dump({"page": "hud", "slots": {}, "fonts": [], "customCss": ""}, fh)
         # Write a comment-only timer.css (the default scaffold, no real rules)
         with open(os.path.join(od, "timer.css"), "w", encoding="utf-8") as fh:
             fh.write("/* just the template, no rules */\n")
@@ -3019,7 +2954,6 @@ def t_overlay_slots_data_flags_telemetry_for_solo_pov_only():
     # The builder canvas lifts the HUD's runtime gating; the telemetry block must
     # only appear for a profile whose relay serves telemetry (solo + pov), never
     # in endurance or solo commentary, where the live HUD never shows it.
-    import tempfile
     # A shell-exported RACECAST_PROFILE would win over the temp root's only profile.
     saved_profile = os.environ.pop("RACECAST_PROFILE", None)
     try:
@@ -3055,7 +2989,6 @@ def t_overlay_slots_data_includes_flag_presets():
 
 
 def t_overlay_fonts_upload_then_list_and_serve():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         orig = _mk_active_profile(td)
         try:
@@ -3074,7 +3007,6 @@ def t_overlay_fonts_upload_then_list_and_serve():
 
 
 def t_machine_font_download_into_library():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         orig = _mk_active_profile(td)
         css = ('@font-face{font-family:Oswald;'
@@ -3113,7 +3045,6 @@ def _latin_cuts_css():
 def t_machine_font_download_saves_all_cuts():
     # The cuts path self-hosts regular + bold + italic + bold-italic so a slot can
     # render TRUE bold/italic; the base name is returned for the library entry.
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         orig = _mk_active_profile(td)
         try:
@@ -3136,7 +3067,6 @@ def t_machine_font_download_saves_all_cuts():
 def t_machine_font_download_single_cut_fallback():
     # A response without latin subset blocks (the legacy/stub shape) still self-hosts
     # one file, back-compat for families the cuts request cannot satisfy.
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         orig = _mk_active_profile(td)
         try:
@@ -3153,7 +3083,6 @@ def t_machine_font_download_single_cut_fallback():
 def t_machine_font_delete_removes_whole_family():
     # Deleting a base family also removes its cut siblings (else a half-deleted family
     # would break: a slot referencing it loses its bold/italic faces).
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         orig = _mk_active_profile(td)
         try:
@@ -3171,7 +3100,6 @@ def t_machine_font_delete_removes_whole_family():
 def t_overlay_save_copies_font_cut_siblings_into_profile():
     # Copy-on-save pulls the WHOLE family (base + bold + italic) into the profile so
     # `profile export` carries true bold/italic offline, and the CSS groups them.
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         orig = _mk_active_profile(td)
         try:
@@ -3191,7 +3119,6 @@ def t_overlay_save_copies_font_cut_siblings_into_profile():
 
 
 def t_restore_bundled_fonts_force_overwrites_library_and_profiles():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         orig = _mk_active_profile(td)
         other = os.path.join(td, "profiles", "league2")
@@ -3260,7 +3187,6 @@ def t_machine_font_download_rejects_unsafe_name():
 
 def t_machine_font_download_allows_uncurated_name():
     # Any syntactically valid family (not just the catalog) is fetchable.
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         orig = _mk_active_profile(td)
         try:
@@ -3280,7 +3206,6 @@ def t_machine_font_download_no_woff2_is_error():
 
 
 def t_machine_font_delete_removes_from_library():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         orig = _mk_active_profile(td)
         try:
@@ -3317,7 +3242,6 @@ def t_google_font_catalog_falls_back_to_curated():
 def t_overlay_save_copies_referenced_library_font_into_profile():
     # Copy-on-save: a design that references a library font copies it into the
     # profile (portable export) and emits its @font-face in the generated CSS.
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         orig = _mk_active_profile(td)
         try:
@@ -3337,7 +3261,6 @@ def t_overlay_save_copies_referenced_library_font_into_profile():
 
 
 def t_overlay_bg_path_present_and_absent():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         orig = _mk_active_profile(td)
         try:
@@ -3385,7 +3308,6 @@ def t_relay_runtime_args_pass_the_runtime_base():
 
 
 def t_relay_runtime_args_adds_overlay_when_dir_exists():
-    import tempfile, os
     with tempfile.TemporaryDirectory() as tmp:
         od = os.path.join(tmp, "overlay"); os.makedirs(od)
         assert m._overlay_relay_args(od) == ["--overlay-dir", od]
@@ -3404,7 +3326,6 @@ def t_servable_logo_path_allows_web_images_only():
 
 
 def t_profile_logo_returns_active_servable_path():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         prof = os.path.join(td, "profiles")
         os.makedirs(os.path.join(prof, "demo"))
@@ -3668,7 +3589,6 @@ def t_event_takeover_qualifying_and_override_forwarded():
 def t_event_takeover_pulls_event_title():
     # Takeover adopts producer A's on-air event title (#207), persisting it to
     # event.json BEFORE bring-up so the new relay loads it (mirrors the chat pull).
-    import json as _json
     restore = _with_env(RACECAST_SHEET_ID="S", RACECAST_SHEET_PUSH_URL="https://push")
     try:
         with _takeover_sandbox(
@@ -3679,7 +3599,7 @@ def t_event_takeover_pulls_event_title():
                 event_start=lambda a, **kw: None) as d:
             m.event_takeover(["100.64.1.2"])
             with open(os.path.join(d, "event.json"), encoding="utf-8") as fh:
-                assert _json.load(fh) == {"title": "GTEC - Round 4 - Nürburgring"}
+                assert json.load(fh) == {"title": "GTEC - Round 4 - Nürburgring"}
     finally:
         restore()
 
@@ -3841,7 +3761,6 @@ def t_discord_voice_target_sheet_failure_falls_back_to_env():
 
 
 def t_discord_cmd_join_uses_resolved_target():
-    import io, contextlib
     orig_client, orig_target = m._discord_voice_client, m._discord_voice_target
     calls = {}
 
@@ -3878,7 +3797,6 @@ def t_discord_cmd_join_without_target_exits():
 
 
 def t_discord_cmd_leave_does_not_resolve_target():
-    import io, contextlib
     orig_client, orig_target = m._discord_voice_client, m._discord_voice_target
     calls = {}
 
@@ -3911,7 +3829,6 @@ def t_discord_cmd_leave_failure_returns_nonzero():
 
     m._discord_voice_client = _FakeClient
     try:
-        import io, contextlib
         with contextlib.redirect_stdout(io.StringIO()):
             rc = m.discord_cmd(["leave"])
         assert rc == 1
@@ -3920,7 +3837,6 @@ def t_discord_cmd_leave_failure_returns_nonzero():
 
 
 def t_discord_cmd_status_reports_configured_target():
-    import io, contextlib
     orig_client, orig_target = m._discord_voice_client, m._discord_voice_target
     m._discord_voice_client = object
     m._discord_voice_target = lambda: ("111", "222")
@@ -3935,7 +3851,6 @@ def t_discord_cmd_status_reports_configured_target():
 
 
 def t_discord_cmd_status_reports_none_configured():
-    import io, contextlib
     orig_client, orig_target = m._discord_voice_client, m._discord_voice_target
     m._discord_voice_client = object
     m._discord_voice_target = lambda: None
@@ -3974,7 +3889,6 @@ def t_discord_cmd_requires_client_credentials():
 def t_discord_cmd_status_without_credentials_is_readonly():
     # status must never require creds or sys.exit; it reports the target and a
     # note that the Discord app is not configured.
-    import io, contextlib
     orig_target = m._discord_voice_target
     m._discord_voice_target = lambda: None
     restore = _with_env(RACECAST_DISCORD_CLIENT_ID=None, RACECAST_DISCORD_CLIENT_SECRET=None)
@@ -4007,7 +3921,6 @@ def t_main_dispatches_discord_join_leave_status():
 def t_set_env_key_preserves_other_keys():
     """_set_env_key must NOT drop other keys or comments: passing a single pair to
     the full-set _write_env_file wipes everything else."""
-    import tempfile
     with tempfile.TemporaryDirectory() as d:
         p = os.path.join(d, "profile.env")
         with open(p, "w", encoding="utf-8") as fh:
@@ -4068,7 +3981,6 @@ def t_links_roster_union():
 def t_links_cmd_prints_share_url_and_redirect_uri():
     # links_cmd must print a bare share URL and OAuth redirect URI after the
     # per-person link list.
-    import io, sys as _sys
     orig_roster = m._links_roster
     orig_magic = m._tailscale_magicdns
     orig_ip = m._tailscale_ip
@@ -4085,12 +3997,12 @@ def t_links_cmd_prints_share_url_and_redirect_uri():
         m._apply_active_profile_env = lambda: None
         m._console_versions_path = lambda: "/tmp/versions.json"
         buf = io.StringIO()
-        old_stdout = _sys.stdout
-        _sys.stdout = buf
+        old_stdout = sys.stdout
+        sys.stdout = buf
         try:
             m.links_cmd([])
         finally:
-            _sys.stdout = old_stdout
+            sys.stdout = old_stdout
         out = buf.getvalue()
         assert "/console/oauth/callback" in out, out
         assert "/console" in out, out
@@ -4120,7 +4032,6 @@ def t_funnel_auto_enabled_gate():
     # console_status_data(), whose real shape is {ok, has_secret, ...} with NO
     # "enabled" key; a gate on st["enabled"] makes the whole auto-enable path dead.
     # (#216)
-    import tempfile
     orig_env_file = m._env_file
     orig_status = m.console_status_data
     try:
@@ -4239,17 +4150,14 @@ def t_speedtest_is_a_runtime_dir_oneshot():
 
 
 def t_speedtest_op_registered():
-    import sys, os
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src", "ui"))
     import ui_ops
     assert ui_ops.OPS["speedtest"] == ["speedtest"]
 
 
 def t_speedtest_data_shape():
-    import tempfile
     d = tempfile.mkdtemp()
     # seed one record through the speedtest module the provider reads
-    import sys, os
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src", "scripts"))
     import speedtest as st
     st.append_record({"ts": 1, "download_mbps": 50.0, "upload_mbps": 20.0,
@@ -4501,7 +4409,6 @@ def t_event_title_read_from_relay_when_alive():
 
 def t_event_title_read_relay_unreachable_falls_back_to_file():
     # alive() True but the GET blows up -> read the persisted file instead.
-    import json, tempfile
     with tempfile.TemporaryDirectory() as dd:
         p = os.path.join(dd, "event.json")
         with open(p, "w", encoding="utf-8") as fh:
@@ -4514,7 +4421,6 @@ def t_event_title_read_relay_unreachable_falls_back_to_file():
 
 
 def t_event_title_read_file_then_default_when_relay_down():
-    import json, tempfile
     with tempfile.TemporaryDirectory() as dd:
         p = os.path.join(dd, "event.json")
         # no file -> profile default
@@ -4541,7 +4447,6 @@ def t_event_title_write_posts_to_relay_when_alive():
 
 
 def t_event_title_write_writes_file_when_relay_down():
-    import json, tempfile
     with tempfile.TemporaryDirectory() as dd:
         p = os.path.join(dd, "sub", "event.json")     # dir created on demand
         d = m.event_title_write_data("Round 6", alive=lambda: False, path=p,
@@ -4553,7 +4458,6 @@ def t_event_title_write_writes_file_when_relay_down():
 
 def t_event_title_write_applies_the_real_relay_sanitizer():
     # No sanitize seam -> exercises _event_title_sanitizer loading the relay rule.
-    import tempfile
     with tempfile.TemporaryDirectory() as dd:
         p = os.path.join(dd, "event.json")
         d = m.event_title_write_data("Round\n7\tCup", alive=lambda: False, path=p)
@@ -4592,7 +4496,6 @@ def _with_cockpit_secret_env_cleared(fn):
 
 
 def t_ensure_active_console_secret_generates_and_is_idempotent():
-    import tempfile
     def body():
         with tempfile.TemporaryDirectory() as dd:
             ppath = os.path.join(dd, "profile.env")
@@ -4613,7 +4516,6 @@ def t_ensure_active_console_secret_generates_and_is_idempotent():
 
 
 def t_ensure_active_console_secret_skips_example_and_missing():
-    import tempfile
     def body():
         with tempfile.TemporaryDirectory() as dd:
             ppath = os.path.join(dd, "profile.env")
@@ -4683,7 +4585,6 @@ def t_ensure_active_console_secret_provisions_after_a_profile_switch():
     # #768 end to end: profile A's secret is in the environment, the active profile
     # B has none. Applying B and ensuring the secret must provision B's own secret,
     # not hand back A's.
-    import tempfile
     def body():
         with tempfile.TemporaryDirectory() as dd:
             ppath = os.path.join(dd, "profile.env")
@@ -4714,7 +4615,6 @@ def t_ensure_active_console_secret_provisions_after_a_profile_switch():
 
 def t_apply_active_profile_env_switch_drops_the_previous_league_values():
     # The production path: two real profile dirs, switch the active one.
-    import tempfile
     keys = (*m.PROFILE_ENV_KEYS, m.PROFILE_ENV_MARKER)
     saved = {k: os.environ.pop(k, None) for k in keys}
     saved_fns = (m._active_profile_name, m._env_base, m._runtime_base_dir)
@@ -5023,7 +4923,6 @@ def t_relay_pid_is_singleton_top_level():
 
 
 def t_running_relay_dir_follows_profile_stamp():
-    import tempfile
     td = tempfile.mkdtemp()
     base = os.path.join(td, "runtime")
     os.makedirs(base)
@@ -5121,7 +5020,6 @@ def t_route_health_subcommand():
 
 
 def t_health_export_import_roundtrip():
-    import tempfile
     with tempfile.TemporaryDirectory() as d:
         db = os.path.join(d, "health-history.db")
         conn = m.hsmod.open_db(db)
@@ -5252,7 +5150,6 @@ def t_resolve_producer_name_env_then_hostname_fallback():
 
 
 def t_announce_takeover_writes_health_event_hermetic():
-    import tempfile
     orig_resolve = m._resolve_producer_name
     orig_wh = m._active_discord_webhook
     orig_dbpath = m._health_db_path
@@ -5405,14 +5302,13 @@ def t_part_index_rejects_bad():
 
 
 def t_write_part_reset_writes_file():
-    import json as _json, tempfile as _tf
-    d = _tf.mkdtemp()
+    d = tempfile.mkdtemp()
     orig = m._runtime_dir
     m._runtime_dir = lambda: d
     try:
         m._write_part_reset(2)
         with open(m._part_path(), encoding="utf-8") as fh:
-            assert _json.load(fh) == {"index": 2, "live": False}
+            assert json.load(fh) == {"index": 2, "live": False}
     finally:
         m._runtime_dir = orig
 
@@ -5454,16 +5350,14 @@ def t_standby_on_start_enabled_default_on_and_optout():
 
 
 def _obsws_module():
-    import sys as _sys
     SCRIPTS = os.path.join(ROOT, "src", "scripts")
-    if SCRIPTS not in _sys.path:
-        _sys.path.insert(0, SCRIPTS)
+    if SCRIPTS not in sys.path:
+        sys.path.insert(0, SCRIPTS)
     import obs_ws
     return obs_ws
 
 
 def t_check_scene_collection_switches_on_mismatch_when_enabled():
-    import io, contextlib
     obs_ws = _obsws_module()
     expected = "GT Racing Endurance — demo"
     st = obs_ws.scene_collection_status(
@@ -5490,7 +5384,6 @@ def t_check_scene_collection_switches_on_mismatch_when_enabled():
 
 
 def t_check_scene_collection_warns_not_switches_when_disabled():
-    import io, contextlib
     obs_ws = _obsws_module()
     expected = "GT Racing Endurance — demo"
     st = obs_ws.scene_collection_status(
@@ -5518,7 +5411,6 @@ def t_check_scene_collection_warns_not_switches_when_disabled():
 
 
 def t_check_scene_collection_warns_when_switch_fails():
-    import io, contextlib
     obs_ws = _obsws_module()
     expected = "GT Racing Endurance — demo"
     st = obs_ws.scene_collection_status(
@@ -5753,9 +5645,8 @@ def t_env_upsert_preserves_other_keys():
     # underlying writer) treats its entries as the complete set and drops any
     # unlisted real key, which would silently delete e.g. RACECAST_OBS_WS_PASSWORD
     # if a naive two-key write were used to persist device selection (#304).
-    import tempfile, os as _os
     d = tempfile.mkdtemp(prefix="racecast-envupsert-")
-    p = _os.path.join(d, ".env")
+    p = os.path.join(d, ".env")
     with open(p, "w", encoding="utf-8") as fh:
         fh.write("# machine knobs\nRACECAST_OBS_WS_PASSWORD=secret\nRACECAST_UI_PORT=8089\n")
     res = m.env_upsert_data({"RACECAST_WEBCAM": "cam0", "RACECAST_CAPTURE": "cap1"}, path=p)
@@ -5770,9 +5661,8 @@ def t_env_upsert_preserves_other_keys():
 
 
 def t_env_upsert_updates_existing_key_in_place():
-    import tempfile, os as _os
     d = tempfile.mkdtemp(prefix="racecast-envupsert2-")
-    p = _os.path.join(d, ".env")
+    p = os.path.join(d, ".env")
     with open(p, "w", encoding="utf-8") as fh:
         fh.write("RACECAST_WEBCAM=old\nRACECAST_UI_PORT=8089\n")
     m.env_upsert_data({"RACECAST_WEBCAM": "new"}, path=p)
@@ -5786,9 +5676,8 @@ def t_env_upsert_rejects_foreign_key_clearly():
     # A machine .env that already holds a non-RACECAST_ key (should never happen,
     # but the editor/device-scan must not blow up with the raw env_write_data
     # wording) gets a clear, device-context error and writes nothing. (#304)
-    import tempfile, os as _os
     d = tempfile.mkdtemp(prefix="racecast-envupsert-foreign-")
-    p = _os.path.join(d, ".env")
+    p = os.path.join(d, ".env")
     with open(p, "w", encoding="utf-8") as fh:
         fh.write("FOO=bar\nRACECAST_UI_PORT=8089\n")
     with open(p, encoding="utf-8") as fh:
@@ -5841,9 +5730,8 @@ def t_parse_device_scan_args_tyres():
 def t_devices_write_data_accepts_mic():
     # devices_write_data (the /api/devices/select backing) accepts a mic value and
     # upserts RACECAST_MIC without disturbing unrelated .env keys (#307).
-    import tempfile, os as _os
     d = tempfile.mkdtemp(prefix="racecast-devwrite-mic-")
-    p = _os.path.join(d, ".env")
+    p = os.path.join(d, ".env")
     with open(p, "w", encoding="utf-8") as fh:
         fh.write("RACECAST_OBS_WS_PASSWORD=secret\n")
     res = m.devices_write_data(None, None, "MIC-ID", path=p)
@@ -5856,9 +5744,8 @@ def t_devices_write_data_accepts_mic():
 def t_devices_write_data_accepts_tyres():
     # devices_write_data accepts a tyres/fuel capture value and upserts
     # RACECAST_TYRES_CAPTURE (Control Center parity with device-scan --tyres).
-    import tempfile, os as _os
     d = tempfile.mkdtemp(prefix="racecast-devwrite-tyres-")
-    p = _os.path.join(d, ".env")
+    p = os.path.join(d, ".env")
     with open(p, "w", encoding="utf-8") as fh:
         fh.write("RACECAST_OBS_WS_PASSWORD=secret\n")
     res = m.devices_write_data(None, None, None, "TYRE-ID", path=p)
@@ -5955,8 +5842,7 @@ def t_parse_gt7_discover_args():
 
 
 def t_ps_ip_write_validates_and_upserts(tmp_path=None):
-    import tempfile, os as _os
-    fd, path = tempfile.mkstemp(suffix=".env"); _os.close(fd)
+    fd, path = tempfile.mkstemp(suffix=".env"); os.close(fd)
     try:
         bad = m.ps_ip_write_data("not a host!", path=path)
         assert bad["ok"] is False and "invalid" in bad["error"].lower()
@@ -5965,7 +5851,7 @@ def t_ps_ip_write_validates_and_upserts(tmp_path=None):
         with open(path, encoding="utf-8") as f:
             assert "RACECAST_GT7_PS_IP=192.168.1.42" in f.read()
     finally:
-        _os.remove(path)
+        os.remove(path)
 
 
 def t_gt7_discover_cmd_single_save(capsys=None):
@@ -6122,8 +6008,7 @@ class _StubHttp:
         return self._get
 
     def get_json(self, url, *, headers=None, timeout=None):
-        import json as _json
-        return _json.loads(self._get.decode("utf-8"))
+        return json.loads(self._get.decode("utf-8"))
 
 
 def _with_stub_http(stub, fn):
@@ -6255,7 +6140,7 @@ def t_smoke_twitch_candidates_survives_a_junk_reply():
 
 
 def _http_error(code, body):
-    import io, urllib.error
+    import urllib.error
     return urllib.error.HTTPError("http://127.0.0.1/x", code, "err", {},
                                   io.BytesIO(body))
 
@@ -6598,7 +6483,6 @@ def _capture_open_url(env, platform="linux", which=lambda t: "/usr/bin/" + t,
             kw["stderr"].write(stderr_text)
         return _FakeOpenerProc(rc)
 
-    import contextlib
     saved_env = m.sv.external_tool_env
     buf = io.StringIO()
     try:
@@ -6694,8 +6578,7 @@ def t_device_name_for_maps_a_picked_value_to_its_name():
 
 def t_devices_write_data_stores_the_mic_name():
     # #668: the name lets the relay re-find a mic whose OS id changed.
-    import tempfile, os as _os
-    p = _os.path.join(tempfile.mkdtemp(prefix="racecast-devwrite-micname-"), ".env")
+    p = os.path.join(tempfile.mkdtemp(prefix="racecast-devwrite-micname-"), ".env")
     open(p, "w", encoding="utf-8").close()
     res = m.devices_write_data(None, None, "MIC-ID", mic_name="Mikrofon (K66)", path=p)
     assert res["ok"], res
