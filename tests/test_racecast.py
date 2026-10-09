@@ -746,6 +746,65 @@ def t_telemetry_index_cmd_names_a_failed_recording_once():
         assert line == f"{stem}: not indexed (bad header)", line
 
 
+def _requests_without_build(stem, tid):
+    return [m.telemetry_laps_data(rec=stem, build=False),
+            m.telemetry_lap_data(stem, "1", "3", build=False),
+            m.telemetry_learn_data(stem, tid, build=False)]
+
+
+def t_telemetry_requests_never_build_a_lap_index():
+    import gt7_laps
+    with _telemetry_sandbox(fake_dbs=False) as (rec_dir, tgl):
+        path = tgl.write_circle_recording(rec_dir)
+        stem, cache = _stem(path), os.path.join(rec_dir, _stem(path) + ".laps.json")
+        tid = m._telemetry_dbs()[0].layouts()[0]["id"]
+        real = gt7_laps.index
+
+        def no_replay(*_a, **_k):
+            raise AssertionError("a request replayed the recording")
+        gt7_laps.index = no_replay
+        try:
+            answers = _requests_without_build(stem, tid)
+        finally:
+            gt7_laps.index = real
+        want = {"ok": True, "unindexed": 1,
+                "note": f"{stem} has no lap index yet: racecast telemetry index builds it"}
+        assert answers == [want] * 3, f"each request answers unindexed: {answers}"
+        assert not os.path.exists(cache), "a request wrote a lap index"
+        with contextlib.redirect_stdout(io.StringIO()):
+            m.telemetry_index_cmd([])
+        assert os.path.exists(cache), "the CLI index command still builds"
+        laps, lap, learn = _requests_without_build(stem, tid)
+        assert laps["ok"] and len(laps["laps"]) == 4 and "unindexed" not in laps, laps
+        assert lap["ok"] and lap["lap"]["trace"], lap
+        assert learn["ok"] and learn["learned"] is True, learn
+
+
+def t_telemetry_requests_after_a_set_track_do_not_rebuild():
+    with _telemetry_sandbox(fake_dbs=False) as (rec_dir, tgl):
+        path = tgl.write_circle_recording(rec_dir)
+        stem, cache = _stem(path), os.path.join(rec_dir, _stem(path) + ".laps.json")
+        tid = m._telemetry_dbs()[0].layouts()[0]["id"]
+        assert m.telemetry_learn_data(stem, tid)["ok"], "the default form still builds"
+        mtime = os.stat(cache).st_mtime_ns
+        answers = _requests_without_build(stem, tid)
+        assert [a.get("unindexed") for a in answers] == [1, 1, 1], \
+            f"a Set track makes the index stale and no request rebuilds it: {answers}"
+        assert os.stat(cache).st_mtime_ns == mtime, "a request rewrote the stale index"
+
+
+def t_telemetry_requests_check_the_recording_before_the_index():
+    with _telemetry_sandbox(fake_dbs=False) as (rec_dir, tgl):
+        tid = m._telemetry_dbs()[0].layouts()[0]["id"]
+        for d in _requests_without_build("nope", tid):
+            assert d == {"ok": False, "error": "no recording named 'nope'"}, d
+        path = tgl.write_circle_recording(rec_dir)
+        m._relay_record_status = lambda: {"active": True, "file": os.path.basename(path)}
+        for d in _requests_without_build(_stem(path), tid):
+            assert d == {"ok": False, "error": "recording in progress: stop the recording "
+                                               "to analyse it"}, d
+
+
 def t_telemetry_list_counts_laps_from_the_cache():
     with _telemetry_sandbox() as (rec_dir, tgl):
         import gt7_recording as gr

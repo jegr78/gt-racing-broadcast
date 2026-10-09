@@ -477,10 +477,16 @@ recording and session.
 - Routes: `GET /api/telemetry/recordings`, `GET /api/telemetry/laps` in three forms
   (`?rec=` lists one recording's laps, `?track=&car=` is the pool of a known track,
   `?rec=&session=&track=&car=` with an empty `track` is the pool of an unknown track
-  within one session; a pool never builds an index, it returns `unindexed` and the page
-  runs the `telemetry-index` job, `racecast telemetry index`, then asks once more),
-  `GET /api/telemetry/lap?rec=&lap=&session=`, `GET /api/telemetry/tracks`,
-  `POST /api/telemetry/learn` `{rec, track_id}`.
+  within one session), `GET /api/telemetry/lap?rec=&lap=&session=`,
+  `GET /api/telemetry/tracks`, `POST /api/telemetry/learn` `{rec, track_id}`.
+- No request builds a lap index. A pool returns the laps of the recordings with a valid
+  index and counts the rest in `unindexed`; `?rec=`, `lap` and `learn` on a recording
+  without a valid index answer `{ok: true, unindexed: 1, note}`, after the checks for an
+  unknown recording and the file the relay is writing. The page then runs the
+  `telemetry-index` job (`racecast telemetry index`, once per lap generation, joining a
+  running one) and asks once more; a recording still without an index shows the job's
+  "not indexed" line as an error. The CLI (`index`, `export`) and the post-event report
+  still build.
 - New wiki screenshot `cc-telemetry.png` from a synthetic demo recording (a tool under
   `tools/` builds it from a racing line of the downloaded `signatures.json`), captured
   from a local dev build.

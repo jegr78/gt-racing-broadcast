@@ -3543,6 +3543,19 @@ def _telemetry_cached_brief(path, base, bundled, version=None):
     return _telemetry_memo_put(path, stamp, idx) if idx is not None else None
 
 
+def _telemetry_unindexed(rec):
+    """The answer of a request that found no valid lap index; the page then runs the
+    telemetry-index job."""
+    return {"ok": True, "unindexed": 1,
+            "note": f"{rec} has no lap index yet: racecast telemetry index builds it"}
+
+
+def _telemetry_cached_full(path):
+    """The full lap index from a still-valid cache file, else None; never builds."""
+    import gt7_laps
+    return gt7_laps.cached(path, _runtime_base_dir(), resource_path("assets/gt7"))
+
+
 def telemetry_recordings_data():
     """Control Center Telemetry view: the active profile's recordings, newest first, with
     the track from a still-valid lap index. Never builds an index and never raises."""
@@ -3609,9 +3622,9 @@ def _telemetry_pool_indexes(rec_dir, build, only=None, report=None):
 
 def telemetry_laps_data(rec=None, session=None, track=None, car=None, build=True):
     """One recording's laps (car None), or the counted laps comparable with a track and
-    car across the profile's recordings. Arguments are query strings. A pool without
-    `build` uses only recordings with a valid lap index and counts the rest in
-    `unindexed`. Never raises."""
+    car across the profile's recordings. Arguments are query strings. Without `build`
+    a recording without a valid lap index answers `unindexed: 1`, and a pool uses only
+    the recordings with one and counts the rest in `unindexed`. Never raises."""
     try:
         car_id = int(car) if car else None
         sess = int(session) if session else None
@@ -3629,10 +3642,16 @@ def telemetry_laps_data(rec=None, session=None, track=None, car=None, build=True
             if open_file and os.path.basename(path).startswith(open_file):
                 return {"ok": False,
                         "error": "recording in progress: stop the recording to analyse it"}
-            try:
-                idx = _telemetry_index(path)
-            except gr.RecordingError:
-                return {"ok": False, "error": f"{rec} is not a readable recording"}
+            if not build:
+                idx = _telemetry_cached_brief(path, _runtime_base_dir(),
+                                              resource_path("assets/gt7"))
+                if idx is None:
+                    return _telemetry_unindexed(rec)
+            else:
+                try:
+                    idx = _telemetry_index(path)
+                except gr.RecordingError:
+                    return {"ok": False, "error": f"{rec} is not a readable recording"}
             head = {k: idx.get(k) for k in ("rec", "name", "started", "start_ts", "end_ts",
                                             "dropped", "track")}
             return {"ok": True, "recording": head, "laps": [dict(lap) for lap in idx["laps"]]}
@@ -3652,8 +3671,9 @@ def telemetry_laps_data(rec=None, session=None, track=None, car=None, build=True
         return {"ok": False, "error": f"could not read the laps: {_telemetry_reason(exc, rec)}"}
 
 
-def telemetry_lap_data(rec, session, lap):
-    """One lap with its 5 m trace for the comparison charts. Never raises."""
+def telemetry_lap_data(rec, session, lap, build=True):
+    """One lap with its 5 m trace for the comparison charts. Without `build` a recording
+    without a valid lap index answers `unindexed: 1`. Never raises."""
     try:
         s, n = int(session), int(lap)
     except (TypeError, ValueError):
@@ -3668,10 +3688,15 @@ def telemetry_lap_data(rec, session, lap):
         if open_file and os.path.basename(path).startswith(open_file):
             return {"ok": False,
                     "error": "recording in progress: stop the recording to analyse it"}
-        try:
-            idx = _telemetry_full_index(path)
-        except gr.RecordingError:
-            return {"ok": False, "error": f"{rec} is not a readable recording"}
+        if not build:
+            idx = _telemetry_cached_full(path)
+            if idx is None:
+                return _telemetry_unindexed(rec)
+        else:
+            try:
+                idx = _telemetry_full_index(path)
+            except gr.RecordingError:
+                return {"ok": False, "error": f"{rec} is not a readable recording"}
         for row in idx["laps"]:
             if row["session"] == s and row["lap"] == n:
                 return {"ok": True, "lap": {k: v for k, v in row.items() if k != "points"},
@@ -3692,10 +3717,12 @@ def telemetry_tracks_data():
                 "error": f"could not load the track list: {_telemetry_reason(exc)}"}
 
 
-def telemetry_learn_data(rec, track_id):
+def telemetry_learn_data(rec, track_id, build=True):
     """Assign a recording to a layout. Without a downloaded racing line for the layout,
     also learn its line from the longest counted lap, so later recordings on it are
-    recognised; `learned` in the answer says whether that happened. Never raises."""
+    recognised; `learned` in the answer says whether that happened. Learning needs the
+    lap index: without `build` a recording without a valid one answers `unindexed: 1`.
+    Never raises."""
     try:
         import gt7_laps
         import gt7_recording as gr
@@ -3716,10 +3743,15 @@ def telemetry_learn_data(rec, track_id):
         if tracks.has_downloaded_line(info["id"]):
             learned = tracks.learn(info["id"], [], 0.0, key=key)
             return {"ok": True, "track": gr.brief_track(info), "learned": bool(learned)}
-        try:
-            idx = _telemetry_full_index(path, (tracks, cars))
-        except gr.RecordingError:
-            return {"ok": False, "error": f"{rec} is not a readable recording"}
+        if not build:
+            idx = _telemetry_cached_full(path)
+            if idx is None:
+                return _telemetry_unindexed(rec)
+        else:
+            try:
+                idx = _telemetry_full_index(path, (tracks, cars))
+            except gr.RecordingError:
+                return {"ok": False, "error": f"{rec} is not a readable recording"}
         counted = [lap for lap in idx["laps"]
                    if lap["status"] in gt7_laps.COUNTED and lap.get("points")]
         if not counted:

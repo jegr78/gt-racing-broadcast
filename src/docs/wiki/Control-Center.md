@@ -258,9 +258,10 @@ running relay.
 
 - **Recordings and laps.** Pick a recording, newest first, to list its laps with time,
   status (reference, counted, or not counted with the reason), car and track. The first
-  open replays the recording once and caches the result next to it as
-  `<stem>.laps.json`; later opens are instant until the recording or the GT7 track data
-  changes. The recording the relay is still writing shows as `(recording)` and cannot be
+  open shows "Indexing…" while the view runs the index job, the same as `racecast
+  telemetry index`: it replays the recording once and caches the result next to it as
+  `<stem>.laps.json`. Later opens are instant until the recording or the GT7 track data
+  changes. A recording the job cannot read shows the job's reason instead of its laps. The recording the relay is still writing shows as `(recording)` and cannot be
   picked: it stays out of every comparison, and the view analyses it only after the
   recording stops.
 - **Lap A and lap B.** Lap B is the lap you click. Lap A starts as the fastest counted
@@ -269,8 +270,9 @@ running relay.
   is not counted. When B has no such partner, lap A
   reads "no other lap to compare" and the charts show B alone. Laps on an unknown track
   compare only within their GT7 session. When other recordings have no cached laps yet,
-  for example after a Set track, the view indexes them in the background first ("Indexing
-  N recordings…").
+  for example after a Set track, the view runs the index job first ("Indexing
+  N recordings…"). No click in the view replays a recording itself: loading a lap or
+  setting a track on a recording without cached laps also waits for that job.
 - **Charts.** Speed, throttle, brake, steering, gear and the delta of B against A over
   lap distance. Below zero B is ahead, above zero behind. Hover to read both laps at one
   point; the map shows where that point is.

@@ -245,11 +245,11 @@ def _ctx(jobs=None, init_plan=None, init_step=None, profile_logo=None,
                  "track": None}]},
             "telemetry_laps": lambda rec=None, session=None, track=None, car=None, build=True: {
                 "ok": True, "laps": []},
-            "telemetry_lap": lambda rec, session, lap: {"ok": False, "error": "no lap"},
+            "telemetry_lap": lambda rec, session, lap, build=True: {"ok": False, "error": "no lap"},
             "telemetry_tracks": lambda: {"ok": True, "tracks": [
                 {"id": "suzuka01", "track": "Suzuka Circuit", "layout": "Full Course",
                  "reverse": False}]},
-            "telemetry_learn": lambda rec, track_id: {"ok": True, "track": {"id": track_id}},
+            "telemetry_learn": lambda rec, track_id, build=True: {"ok": True, "track": {"id": track_id}},
             "resources": lambda: {"available": False}}
 
 
@@ -2668,6 +2668,106 @@ console.log(JSON.stringify([$('tm-note').hidden, $('tm-note').textContent]));"""
         assert hidden is True, f"a join answered after a reset leaves the new view alone: {text!r}"
 
 
+_TM_UNINDEXED = """
+const unindexed = rec => ({ok: true, unindexed: 1,
+                           note: rec + ' has no lap index yet: racecast telemetry index builds it'});
+const jobs = () => calls.filter(u => u.includes('telemetry-index')).length;
+const asks = part => calls.filter(u => u.includes(part)).length;
+tmState.recs = [{rec: 'X', indexed: false, laps: null, duration_s: 60, size: 1e6, track: null}];
+"""
+
+
+def t_telemetry_first_open_indexes_the_recording_through_the_job():
+    out = _tm_node(_TM_UNINDEXED + """
+tmSelectRec('X');
+await tick();
+const status = $('tm-laps').textContent.replace(/\\u2026/g, '...');
+answer('rec=X', unindexed('X'));
+await tick();
+answer('/api/op/telemetry-index', {ok: true, job_id: 'j'});
+await tick();
+answer('/api/jobs/j', {ok: true, running: false, exit_code: 0, lines: ['X: 2 laps']});
+await tick();
+answer('rec=X', recLaps('X', [lap('X', 1, 80, 7), lap('X', 2, 81, 7)]));
+await tick();
+console.log(JSON.stringify([status, jobs(), asks('rec=X'), tmState.recLaps.length, tmState.b,
+                            $('tm-err').textContent, tmState.recs[0].indexed]));""")
+    if out is not None:
+        assert json.loads(out) == ["Indexing...", 1, 2, 2, "X|1|2", "", True], \
+            f"the first open runs telemetry-index once, then asks again and shows the laps: {out}"
+
+
+def t_telemetry_recording_the_job_cannot_index_shows_its_line_once():
+    out = _tm_node(_TM_UNINDEXED + """
+tmSelectRec('X');
+await tick();
+answer('rec=X', unindexed('X'));
+await tick();
+answer('/api/op/telemetry-index', {ok: true, job_id: 'j'});
+await tick();
+answer('/api/jobs/j', {ok: true, running: false, exit_code: 1,
+                       lines: ['X: not indexed (bad data)', '0 recording(s) indexed, 1 failed']});
+await tick();
+answer('rec=X', unindexed('X'));
+await tick();
+const first = $('tm-err').textContent;
+tmSelectRec('X');
+await tick();
+answer('rec=X', unindexed('X'));
+await tick();
+console.log(JSON.stringify([first, $('tm-err').textContent, jobs(), asks('rec=X'),
+                            tmState.recLaps.length, tmState.recs[0].indexed]));""")
+    if out is not None:
+        assert json.loads(out) == ["X: not indexed (bad data)", "X: not indexed (bad data)",
+                                   1, 3, 0, False], \
+            f"a recording the job cannot index shows the job's line and starts no second job: {out}"
+
+
+def t_telemetry_stale_lap_runs_the_index_job_and_asks_once_more():
+    out = _tm_node(_TM_UNINDEXED + """
+const got = tmFetchLap('X|1|2');
+await tick();
+answer('/lap?', unindexed('X'));
+await tick();
+answer('/api/op/telemetry-index', {ok: true, job_id: 'j'});
+await tick();
+answer('/api/jobs/j', {ok: true, running: false, exit_code: 0, lines: []});
+await tick();
+answer('/lap?', {ok: true, lap: lap('X', 2, 81, 7), sector_m: 200});
+const r = await got;
+console.log(JSON.stringify([jobs(), asks('/lap?'), r.lap && r.lap.lap, r.error || '',
+                            tmLapCache.has('X|1|2')]));""")
+    if out is not None:
+        assert json.loads(out) == [1, 2, 2, "", True], \
+            f"a stale lap runs telemetry-index, then asks once more: {out}"
+
+
+def t_telemetry_set_track_on_a_stale_index_runs_the_job_first():
+    out = _tm_node(_TM_UNINDEXED + """
+globalThis.confirmModal = async () => true;
+tmState.rec = 'X';
+const pick = $('tm-track-pick'), o = new El('option');
+o.value = 't9'; o.textContent = 'Nine';
+pick.appendChild(o); pick.value = 't9'; pick.selectedIndex = 0;
+const gen = tmLapGen;
+tmLearn();
+await tick();
+answer('/api/telemetry/learn', unindexed('X'));
+await tick();
+const kept = tmLapGen === gen;
+answer('/api/op/telemetry-index', {ok: true, job_id: 'j'});
+await tick();
+answer('/api/jobs/j', {ok: true, running: false, exit_code: 0, lines: []});
+await tick();
+answer('/api/telemetry/learn', {ok: true, track: {id: 't9'}, learned: true});
+await tick();
+console.log(JSON.stringify([kept, jobs(), asks('/api/telemetry/learn'), tmLapGen > gen,
+                            $('tm-err').textContent]));""")
+    if out is not None:
+        assert json.loads(out) == [True, 1, 2, True, ""], \
+            f"Set track runs telemetry-index on a stale index, then learns once more: {out}"
+
+
 def t_telemetry_index_job_refreshes_the_recording_list():
     out = _tm_node("""
 const l1 = lap('R', 1, 80, 1);
@@ -3076,8 +3176,9 @@ def t_telemetry_routes_pass_their_arguments():
     ctx = _ctx()
     ctx["telemetry_laps"] = lambda *a, **kw: calls.append(("laps",) + a + (kw,)) or {
         "ok": True, "laps": []}
-    ctx["telemetry_lap"] = lambda *a: calls.append(("lap",) + a) or {"ok": False, "error": "x"}
-    ctx["telemetry_learn"] = lambda *a: calls.append(("learn",) + a) or {
+    ctx["telemetry_lap"] = lambda *a, **kw: calls.append(("lap",) + a + (kw,)) or {
+        "ok": False, "error": "x"}
+    ctx["telemetry_learn"] = lambda *a, **kw: calls.append(("learn",) + a + (kw,)) or {
         "ok": False, "error": "unknown track layout"}
     httpd, port = _serve(ctx)
     try:
@@ -3093,8 +3194,9 @@ def t_telemetry_routes_pass_their_arguments():
         assert code == 400, "a refused learn is a client error"
         assert calls == [("laps", "20261007-201503", None, None, None, {"build": False}),
                          ("laps", "r", "2", "", "3424", {"build": False}),
-                         ("lap", "r", "1", "3"),
-                         ("learn", "r", "x")], calls
+                         ("lap", "r", "1", "3", {"build": False}),
+                         ("learn", "r", "x", {"build": False})], \
+            f"no request builds a lap index: {calls}"
     finally:
         httpd.shutdown()
 

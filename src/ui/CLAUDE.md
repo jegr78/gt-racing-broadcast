@@ -37,10 +37,14 @@ Loaded when working under `src/ui/`.
   rebuilt when the recording's size/mtime or `gt7_data.data_version` change; the data
   layer also memoises up to 4096 index summaries per process (`_telemetry_index`). One
   Set track changes `data_version` (it stats `learned-tracks.json`), so every index of the
-  profile needs a rebuild, about 16 s per 3 h recording. The pool form of
-  `/api/telemetry/laps` never builds: it pools the recordings with a valid index and
-  returns `unindexed`; the page then runs the `telemetry-index` job (`racecast telemetry
-  index`), polls it through `/api/jobs/<id>` and asks once more. A counted
+  profile needs a rebuild, about 16 s per 3 h recording. No request builds an index: the
+  routes pass `build=False`. A pool of `/api/telemetry/laps` uses the recordings with a
+  valid index and counts the rest in `unindexed`; `?rec=`, `/api/telemetry/lap` and
+  `/api/telemetry/learn` answer `unindexed: 1` for a recording without one. The page
+  (`tmIndexed`, `tmIndexAll`) then runs the `telemetry-index` job (`racecast telemetry
+  index`) once per lap generation, polls it through `/api/jobs/<id>` and asks once more;
+  still unindexed shows the job's "not indexed" line as an error. The CLI and the
+  event-stop report keep building. A counted
   lap's trace closes at the full lap length with the lap time, so its sectors add up. Data
   functions `telemetry_*_data` in `src/racecast.py`; routes `/api/telemetry/recordings`,
   `/api/telemetry/laps`, `/api/telemetry/lap`, `/api/telemetry/tracks`,

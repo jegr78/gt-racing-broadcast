@@ -5242,6 +5242,7 @@ function tmDropLaps() {
 // start it on every lap B.
 let tmIndexing = null;
 let tmIndexedGen = -1;
+let tmIndexLines = [];             // the output of that run, which names a recording it could not index
 function tmNote(text) { $('tm-note').textContent = text; $('tm-note').hidden = false; }
 function tmIndexAll() {
   if (!tmIndexing) {
@@ -5255,6 +5256,7 @@ function tmIndexAll() {
       const r = job.error ? job : await jobResult(job.job_id, 20);
       if (r.error || gen !== tmLapGen) return r;
       tmIndexedGen = gen;
+      tmIndexLines = r.lines || [];
       if (job.joined) $('tm-note').hidden = true;
       if (r.code !== 0) {
         const bad = (r.lines || []).filter(l => l.includes('not indexed'));
@@ -5266,6 +5268,22 @@ function tmIndexAll() {
     tmIndexing = p;
   }
   return tmIndexing;
+}
+// `ask()` once more after the index job when the recording `rec` has no lap index yet. A
+// recording the job of this generation could not index answers with the job's line as an
+// error instead of starting it again.
+async function tmIndexed(rec, ask, stale) {
+  let d = await ask();
+  if (d.ok && d.unindexed && tmIndexedGen !== tmLapGen) {
+    const job = await tmIndexAll();
+    if (stale()) return {ok: false, stale: true};
+    if (job.error) return {ok: false, error: job.error};
+    d = await ask();
+  }
+  if (!d.ok || !d.unindexed) return d;
+  const line = tmIndexLines.find(l => l.startsWith(rec + ': not indexed'));
+  return {ok: false, error: line || (d.note || rec + ' has no lap index yet')
+    + '. Refresh runs the index job again.'};
 }
 async function tmRefreshRecs() {
   const seq = tmSeq.load;
@@ -5381,8 +5399,9 @@ async function tmSelectRec(rec) {
   tmRenderRecs();
   tmErr('');
   $('tm-note').hidden = true;
-  tmClear('Indexing…');                             // the first open replays the whole recording
-  const d = await tmShared('/api/telemetry/laps?' + new URLSearchParams({rec}));
+  tmClear('Indexing…');                             // the first open runs the index job
+  const d = await tmIndexed(rec, () => tmShared('/api/telemetry/laps?' + new URLSearchParams({rec})),
+                            () => seq !== tmSeq.rec);
   if (seq !== tmSeq.rec) return;
   if (!d.ok) { tmClear(''); tmErr(d.error || 'could not read the recording'); return; }
   tmState.recLaps = d.laps || [];
@@ -5496,7 +5515,8 @@ async function tmFetchLap(key) {
   if (tmLapCache.has(key)) return {lap: tmLapCache.get(key)};
   const gen = tmLapGen;
   const [rec, session, lap] = key.split('|');
-  const d = await tmShared('/api/telemetry/lap?' + new URLSearchParams({rec, session, lap}));
+  const d = await tmIndexed(rec,
+    () => tmShared('/api/telemetry/lap?' + new URLSearchParams({rec, session, lap})), () => false);
   if (!d.ok) return {error: d.error || 'could not load the lap'};
   if (gen === tmLapGen) tmLapCache.set(key, d.lap);
   return {lap: d.lap, sectorM: d.sector_m};
@@ -5809,9 +5829,9 @@ async function tmLearn() {
   const btn = $('tm-learn');
   btn.disabled = true;
   try {
-    const r = await (await fetch('/api/telemetry/learn', {method: 'POST',
+    const r = await tmIndexed(rec, async () => (await fetch('/api/telemetry/learn', {method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({rec, track_id: trackId})})).json();
+      body: JSON.stringify({rec, track_id: trackId})})).json(), () => seq !== tmSeq.rec);
     if (r.ok) {                           // every cached index is now stale
       tmDropLaps();
       tmState.recs.forEach(x => { if (x.indexed) x.indexed = false; });

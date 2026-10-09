@@ -122,8 +122,9 @@ def make_handler(ctx):
     init_step(key) -> dict (run one non-job wizard step, {ok, done} | {ok: False, error}),
     profile_export(name, assets) -> dict, profile_import(path, force) -> dict,
     telemetry_recordings() -> dict, telemetry_laps(rec, session, track, car, build) -> dict,
-    telemetry_lap(rec, session, lap) -> dict, telemetry_tracks() -> dict,
-    telemetry_learn(rec, track_id) -> dict (solo POV lap analysis, query strings in),
+    telemetry_lap(rec, session, lap, build) -> dict, telemetry_tracks() -> dict,
+    telemetry_learn(rec, track_id, build) -> dict (solo POV lap analysis, query strings
+    in; the routes pass build=False, so no request builds a lap index),
     jobs (ui_jobs.JobManager), log_sources {name: {files, dir, archives, read}},
     favicon_path (the brand SVG served at /favicon.svg),
     shutdown() (installed by serve())."""
@@ -598,13 +599,12 @@ def make_handler(ctx):
                 arg = {k: v[0] for k, v in q.items()}
                 try:
                     if path.endswith("/laps"):
-                        # Never builds a missing index here: the page runs telemetry-index.
                         result = ctx["telemetry_laps"](arg.get("rec"), arg.get("session"),
                                                        arg.get("track"), arg.get("car"),
                                                        build=False)
                     else:
                         result = ctx["telemetry_lap"](arg.get("rec"), arg.get("session"),
-                                                      arg.get("lap"))
+                                                      arg.get("lap"), build=False)
                 except Exception as exc:
                     return self._json({"ok": False,
                                        "error": f"could not read laps: {type(exc).__name__}"},
@@ -985,7 +985,8 @@ def make_handler(ctx):
                     return self._json({"ok": False, "error": self._body_error},
                                       code=400)
                 try:
-                    result = ctx["telemetry_learn"](body.get("rec"), body.get("track_id"))
+                    result = ctx["telemetry_learn"](body.get("rec"), body.get("track_id"),
+                                                    build=False)
                 except Exception as exc:
                     return self._json({"ok": False,
                                        "error": f"could not set the track: "
