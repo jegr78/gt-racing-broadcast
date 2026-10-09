@@ -2119,6 +2119,18 @@ def t_telemetry_map_colours_mini_sectors():
     assert "tmRenderMap()" in _tm_fn(tm, "tmRender"), "every pair render redraws the map"
 
 
+def t_telemetry_set_track_confirms_then_learns():
+    tm = _tm_script(_cc_page())
+    learn = tm[tm.index("async function tmLearn()"):]
+    learn = learn[:learn.index("\n}\n")]
+    assert learn.index("confirmModal(") < learn.index("fetch('/api/telemetry/learn'"), \
+        "learning writes machine-wide data, so it is confirmed first"
+    assert "tmLapCache.clear()" in learn and "tmSelectRec(" in learn
+    assert "/api/telemetry/tracks" in tm
+    sel = tm[tm.index("async function tmSelectRec("):tm.index("function tmRenderLaps()")]
+    assert "tmShowSetTrack(d.recording.track)" in sel
+
+
 _TM_MAP_COUNT = """
 const drawn = () => {
   const n = {};
@@ -2446,6 +2458,117 @@ await tick();
 console.log([tmState.loaded, calls.length, $('tm-recs').textContent === ''].join('|'));""")
     if out is not None:
         assert out.strip() == "false|2|true", f"a failed list must not count as loaded: {out!r}"
+
+
+_TM_TRACKS = """
+const tracks = {ok: true, tracks: [
+  {id: '9', track: 'Suzuka', layout: 'East', reverse: false},
+  {id: '3', track: 'Brands Hatch', layout: 'Indy', reverse: false},
+  {id: '5', track: 'Suzuka', layout: 'Circuit', reverse: false},
+  {id: '7', track: 'Brands Hatch', layout: 'Grand Prix', reverse: true}]};
+const opts = () => $('tm-track-pick').options.map(o => o.value).join(',');
+"""
+
+
+def t_telemetry_set_track_lists_candidates_first_and_loads_once():
+    out = _tm_node(_TM_TRACKS + """
+tmState.recs = [{rec: 'X'}, {rec: 'Y'}, {rec: 'Z'}];
+tmSelectRec('X'); tmSelectRec('Y');
+await tick();
+answer('rec=X', {ok: true, recording: {rec: 'X', track: null}, laps: []});
+answer('rec=Y', {ok: true, recording: {rec: 'Y', track: {candidates: [{id: '5'}, {id: '9'}]}}, laps: []});
+await tick();
+const one = calls.filter(u => u.includes('/tracks')).length;
+answer('/tracks', tracks);
+await tick();
+const ambiguous = [$('tm-settrack').hidden, opts(), $('tm-track-pick').options[2].textContent].join(' ');
+tmSelectRec('Z');
+await tick();
+answer('rec=Z', {ok: true, recording: {rec: 'Z', track: {id: '9', track: 'Suzuka', layout: 'East'}}, laps: []});
+await tick();
+const known = $('tm-settrack').hidden;
+tmSelectRec('X');
+await tick();
+answer('rec=X', recLaps('X', []));
+await tick();
+console.log([one, ambiguous, known, $('tm-settrack').hidden, opts(),
+             calls.filter(u => u.includes('/tracks')).length].join('|'));""")
+    if out is not None:
+        assert out.strip() == ("1|false 5,9,7,3 Brands Hatch - Grand Prix (reverse)|true|false"
+                               "|7,3,5,9|1"), \
+            f"candidates first, the rest by track and layout, one track list per view load: {out!r}"
+
+
+def t_telemetry_set_track_failed_list_retries():
+    out = _tm_node(_TM_TRACKS + """
+tmShowSetTrack(null); tmShowSetTrack(null);
+await tick();
+const once = calls.length;
+answer('/tracks', {ok: false, error: 'no list'});
+await tick();
+const failed = [String(tmState.tracks), $('tm-err').textContent].join(',');
+tmShowSetTrack(null);
+await tick();
+answer('/tracks', tracks);
+await tick();
+console.log([once, failed, opts()].join('|'));""")
+    if out is not None:
+        assert out.strip() == "1|null,no list|7,3,5,9", \
+            f"a failed track list shows its error and is fetched again: {out!r}"
+
+
+def t_telemetry_learn_reloads_the_recording_and_drops_a_late_answer():
+    out = _tm_node(_TM_TRACKS + """
+globalThis.confirmModal = async () => true;
+tmState.recs = [{rec: 'X', indexed: true}, {rec: 'Y', indexed: true}];
+tmState.rec = 'X';
+tmShowSetTrack(null);
+await tick();
+answer('/tracks', tracks);
+await tick();
+$('tm-track-pick').value = '5'; $('tm-track-pick').selectedIndex = 2;
+tmLapCache.set('X|1|1', {});
+tmLearn();
+await tick();
+answer('/learn', {ok: false, error: 'recording in progress: stop the recording to analyse it'});
+await tick();
+const refused = $('tm-err').textContent;
+tmLearn();
+await tick();
+answer('/learn', {ok: true, track: {id: '5'}});
+await tick();
+const reload = [tmLapCache.size, calls.filter(u => u.includes('rec=X')).length, tmState.rec,
+                tmState.recs[1].indexed,
+                $('tm-err').hidden, $('tm-learn').disabled].join(',');
+answer('rec=X', recLaps('X', []));
+await tick();
+tmLearn();
+await tick();
+tmSelectRec('Y');
+await tick();
+answer('/learn', {ok: false, error: 'late'});
+await tick();
+console.log([refused, reload, tmState.rec, calls.filter(u => u.includes('rec=X')).length,
+             $('tm-err').textContent].join('|'));""")
+    if out is not None:
+        assert out.strip() == ("recording in progress: stop the recording to analyse it"
+                               "|0,1,X,false,true,false|Y|1|"), \
+            f"the server error shows, success reloads the recording, a late answer is dropped: {out!r}"
+
+
+def t_telemetry_live_recording_offers_no_set_track():
+    out = _tm_node(_TM_TRACKS + """
+tmState.recs = [{rec: 'X', recording: true}];
+tmSelectRec('X');
+await tick();
+answer('rec=X', {ok: false, error: 'recording in progress: stop the recording to analyse it'});
+await tick();
+tmState.rec = 'X';
+tmShowSetTrack(null);
+await tick();
+console.log([$('tm-settrack').hidden, calls.filter(u => u.includes('/tracks')).length].join('|'));""")
+    if out is not None:
+        assert out.strip() == "true|0", f"the file the relay writes cannot be learned from: {out!r}"
 
 
 def t_telemetry_view_follows_the_active_profile():

@@ -5235,6 +5235,7 @@ function tmClear(msg) {
 function tmReset() {
   Object.keys(tmSeq).forEach(k => { tmSeq[k]++; });
   tmState.loaded = false; tmState.rec = null; tmState.recs = []; tmState.recLaps = [];
+  tmState.tracks = null;
   tmLapCache.clear();
   tmLapsReq.clear();
   $('tm-recs').textContent = '';
@@ -5245,6 +5246,7 @@ function tmReset() {
 async function tmLoad() {
   const seq = ++tmSeq.load;
   tmLapCache.clear();
+  tmState.tracks = null;
   tmErr('');
   const d = await tmGet('/api/telemetry/recordings');
   if (seq !== tmSeq.load) return;
@@ -5312,6 +5314,7 @@ async function tmSelectRec(rec) {
   const pick = (counted.length ? counted : tmState.recLaps).slice(-1)[0];
   if (!pick) tmClear('This recording has no laps.');
   $('tm-rec-track').textContent = tmTrackLabel(d.recording.track);
+  tmShowSetTrack(d.recording.track);
   if (pick) tmSelectB(pick);
 }
 
@@ -5669,6 +5672,67 @@ function tmRefit() {
   if (cw && (!tmState.chart || Math.max(300, cw) !== tmState.chart.W)) tmRenderCharts();
   const mw = Math.round($('tm-map').getBoundingClientRect().width);
   if (mw && (!tmState.map || Math.max(200, mw) !== tmState.map.W)) tmRenderMap();
+}
+
+function tmTrackName(t) {
+  return t.track + (t.layout ? ' - ' + t.layout : '') + (t.reverse ? ' (reverse)' : '');
+}
+
+// The Set track row for an unknown or ambiguous recording; candidates come first.
+async function tmShowSetTrack(track) {
+  const seq = tmSeq.rec;
+  const row = tmState.recs.find(r => r.rec === tmState.rec);
+  $('tm-settrack').hidden = true;
+  if ((track && !track.candidates) || (row && row.recording)) return;
+  if (!tmState.tracks) {
+    const d = await tmShared('/api/telemetry/tracks');
+    if (seq !== tmSeq.rec) return;
+    if (!d.ok) { tmErr(d.error || 'could not load the track list'); return; }
+    tmState.tracks = (d.tracks || []).slice().sort((a, b) =>
+      a.track.localeCompare(b.track) || (a.layout || '').localeCompare(b.layout || ''));
+  }
+  const want = ((track && track.candidates) || []).map(c => String(c.id));
+  const list = want.map(id => tmState.tracks.find(t => t.id === id)).filter(Boolean)
+    .concat(tmState.tracks.filter(t => !want.includes(t.id)));
+  const sel = $('tm-track-pick');
+  sel.textContent = '';
+  list.forEach(t => {
+    const o = document.createElement('option');
+    o.value = t.id;
+    o.textContent = tmTrackName(t);
+    sel.appendChild(o);
+  });
+  $('tm-settrack').hidden = false;
+}
+
+async function tmLearn() {
+  const sel = $('tm-track-pick'), rec = tmState.rec, seq = tmSeq.rec;
+  const row = tmState.recs.find(r => r.rec === rec);
+  if (!sel.value || !rec || (row && row.recording)) return;
+  const label = sel.options[sel.selectedIndex].textContent;
+  if (!(await confirmModal('Set the track of ' + rec + ' to ' + label + '?\n'
+      + 'racecast learns the layout from the longest counted lap, so later recordings '
+      + 'on it are recognised.', {title: 'Set track'}))) return;
+  if (seq !== tmSeq.rec) return;
+  const btn = $('tm-learn');
+  btn.disabled = true;
+  try {
+    const r = await (await fetch('/api/telemetry/learn', {method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({rec, track_id: sel.value})})).json();
+    if (r.ok) {                           // the server rebuilds every index with the new track
+      tmLapCache.clear();
+      tmState.recs.forEach(x => { if (x.indexed) x.indexed = false; });
+    }
+    if (seq !== tmSeq.rec) return;
+    if (!r.ok) { tmErr(r.error || 'could not set the track'); return; }
+    tmErr('');
+    tmSelectRec(rec);
+  } catch (e) {
+    if (seq === tmSeq.rec) tmErr('Control Center not reachable.');
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 $('tm-charts').addEventListener('pointermove', tmHover);
