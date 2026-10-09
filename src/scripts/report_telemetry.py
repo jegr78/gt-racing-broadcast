@@ -5,9 +5,14 @@ Input is the lap index (gt7_laps.index) of every recording that overlaps the rep
 window; output is a JSON-safe block that report_build renders. Figures are per track
 and car and use counted laps only (the relay's verdicts, as on the HUD).
 """
+import html
 import statistics
 
 import gt7_laps
+
+GAP_GREEN = (0x2E, 0x7D, 0x32)
+GAP_RED = (0xC6, 0x28, 0x28)
+GREY = "#bdbdbd"
 
 
 def fmt_lap(seconds):
@@ -48,12 +53,42 @@ def _row(n, ts, lap):
             "car": lap.get("car") or "", "track": track_label(lap)}
 
 
+def gap_color(gap_s, worst_s):
+    """Linear from green (no loss to the best sector) to red (the lap's largest loss)."""
+    f = 0.0 if worst_s <= 0 else min(1.0, max(0.0, gap_s / worst_s))
+    r, g, b = (int(a + (c - a) * f + 0.5) for a, c in zip(GAP_GREEN, GAP_RED, strict=True))
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+def _sector_map(best, pool):
+    """The best lap's mini-sectors with the time each lost to the fastest counted lap;
+    a sector without a time on either side has gap None and is drawn grey."""
+    trace = best.get("trace") or []
+    own = best.get("sectors") or []
+    if len(trace) < 2 or not own or not pool:
+        return None
+    ref = gt7_laps.best_sectors(pool)
+    n = min(len(own), len(ref))
+    gaps = [max(0.0, own[i] - ref[i]) if own[i] is not None and ref[i] is not None else None
+            for i in range(n)]
+    worst = max((g for g in gaps if g is not None), default=0.0)
+    sectors = []
+    for i, gap in enumerate(gaps):
+        lo = i * gt7_laps.SECTOR_M
+        hi = (i + 1) * gt7_laps.SECTOR_M if i < n - 1 else float("inf")
+        pts = [[p["x"], p["z"]] for p in trace if lo <= p["d"] <= hi]
+        if len(pts) >= 2:
+            color = GREY if gap is None else gap_color(gap, worst)
+            sectors.append({"points": pts, "gap_s": gap, "color": color})
+    return {"sectors": sectors, "worst_gap_s": worst} if sectors else None
+
+
 def _group(key, members):
     track_id, car_id, *where = key
     rec, session = where or (None, None)
     first = members[0][1]
     valid = [(row, lap) for row, lap in members if row["counted"] and row["time_s"] is not None]
-    best_row = min(valid, key=lambda m: m[0]["time_s"])[0] if valid else None
+    best_row, best = min(valid, key=lambda m: m[0]["time_s"]) if valid else (None, None)
     times = [row["time_s"] for row, _lap in valid]
     timed = [lap for _row, lap in valid if lap.get("sectors")]
     # a different sector count (lengths straddling a sector boundary) makes sectors incomparable
@@ -79,6 +114,7 @@ def _group(key, members):
         "trend": [{"n": row["n"], "lap": row["lap"], "time_s": row["time_s"],
                    "counted": row["counted"], "best": row is best_row}
                   for row, _lap in members],
+        "map": _sector_map(best, timed) if best is not None else None,
     }
 
 
@@ -122,3 +158,69 @@ def summary_line(block):
     if g["track_name"]:
         parts.append(g["track_name"])
     return ", ".join(parts)
+
+
+def svg_lap_trend(trend, w=720, h=150):
+    """Lap times in driving order: counted laps dark, the best green, the rest grey and
+    clamped into the counted laps' range."""
+    pts = [p for p in trend if p.get("time_s") is not None]
+    if not pts:
+        return ""
+    left, right, top, bottom = 64, 12, 12, 12
+    scale = [p["time_s"] for p in pts if p["counted"]] or [p["time_s"] for p in pts]
+    lo, hi = min(scale), max(scale)
+    margin = (hi - lo) * 0.1 or 1.0
+    lo, hi = lo - margin, hi + margin
+    step = (w - left - right) / max(1, len(pts) - 1)
+    marks = []
+    for i, p in enumerate(pts):
+        x = left + i * step if len(pts) > 1 else (left + w - right) / 2
+        v = min(hi, max(lo, p["time_s"]))
+        y = top + (hi - v) / (hi - lo) * (h - top - bottom)
+        if p.get("best"):
+            fill, r = "#2e7d32", 5
+        elif p["counted"]:
+            fill, r = "#1c1e21", 3.5
+        else:
+            fill, r = GREY, 3.5
+        tip = html.escape(f"#{p['n']} (lap {p['lap']}): {fmt_lap(p['time_s'])}")
+        marks.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{r}" fill="{fill}">'
+                     f"<title>{tip}</title></circle>")
+    grid = "".join(
+        f'<line x1="{left}" y1="{y}" x2="{w - right}" y2="{y}" stroke="#eceef1"/>'
+        f'<text x="{left - 6}" y="{y + 4}" font-size="11" text-anchor="end" '
+        f'fill="#65676b">{fmt_lap(v)}</text>'
+        for y, v in ((top, hi), (h - bottom, lo)))
+    return (f'<svg viewBox="0 0 {w} {h}" width="100%" role="img" '
+            f'aria-label="Lap time trend">{grid}{"".join(marks)}</svg>')
+
+
+def svg_track_map(track_map, size=360, pad=14):
+    """The best lap's line from GT7 x/z (x right, z down), one polyline per mini-sector
+    in its gap colour, with a start/finish marker."""
+    if not track_map or not track_map.get("sectors"):
+        return ""
+    pts = [p for s in track_map["sectors"] for p in s["points"]]
+    x0, x1 = min(p[0] for p in pts), max(p[0] for p in pts)
+    z0, z1 = min(p[1] for p in pts), max(p[1] for p in pts)
+    inner = size - 2 * pad
+    k = inner / (max(x1 - x0, z1 - z0) or 1.0)
+    ox = pad + (inner - (x1 - x0) * k) / 2
+    oz = pad + (inner - (z1 - z0) * k) / 2
+
+    def xy(p):
+        return (ox + (p[0] - x0) * k, oz + (p[1] - z0) * k)
+
+    lines = []
+    for i, s in enumerate(track_map["sectors"], 1):
+        coords = " ".join(f"{x:.1f},{y:.1f}" for x, y in map(xy, s["points"]))
+        gap = "no time" if s["gap_s"] is None else f"+{s['gap_s']:.3f} s"
+        tip = html.escape(f"Sector {i}: {gap}")
+        lines.append(f'<polyline points="{coords}" fill="none" stroke="{s["color"]}" '
+                     f'stroke-width="5" stroke-linecap="round" stroke-linejoin="round">'
+                     f"<title>{tip}</title></polyline>")
+    sx, sy = xy(track_map["sectors"][0]["points"][0])
+    marker = (f'<circle cx="{sx:.1f}" cy="{sy:.1f}" r="5" fill="#ffffff" stroke="#1c1e21" '
+              f'stroke-width="2"><title>Start/finish</title></circle>')
+    return (f'<svg viewBox="0 0 {size} {size}" width="100%" role="img" '
+            f'aria-label="Track map of the best lap">{"".join(lines)}{marker}</svg>')

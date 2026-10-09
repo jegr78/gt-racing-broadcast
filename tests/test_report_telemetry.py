@@ -5,6 +5,7 @@ import math
 import os
 import statistics
 import sys
+import xml.etree.ElementTree as ET
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -235,6 +236,65 @@ def t_theoretical_best_skips_a_counted_lap_without_sectors():
     g = rtel.telemetry_block([idx], WINDOW)["groups"][0]
     assert abs(g["theoretical_s"] - 40.0) < 1e-6, \
         "a counted lap without sectors drops out, the theoretical best still comes from the rest"
+
+
+def t_gap_color_scale():
+    assert rtel.gap_color(0.0, 0.5) == "#2e7d32"
+    assert rtel.gap_color(0.5, 0.5) == "#c62828"
+    assert rtel.gap_color(0.25, 0.5) == "#7a532d", "halfway is the RGB midpoint, rounded half up"
+    assert rtel.gap_color(0.3, 0.0) == "#2e7d32", "a lap without any loss is all green"
+
+
+def t_map_colours_sectors_by_gap_to_best():
+    m = block()["groups"][0]["map"]
+    assert len(m["sectors"]) == 10, len(m["sectors"])
+    assert abs(m["worst_gap_s"] - (round(200 / 42, 3) - 4.0)) < 1e-9, m["worst_gap_s"]
+    assert [s["color"] for s in m["sectors"][:5]] == ["#2e7d32"] * 5, "no loss is green"
+    assert [s["color"] for s in m["sectors"][5:]] == ["#c62828"] * 5, "the largest loss is red"
+    assert all(len(s["points"]) >= 2 for s in m["sectors"])
+
+
+def t_map_greys_a_sector_without_time():
+    idx = session_index()
+    idx["laps"][2]["sectors"][0] = None
+    m = rtel.telemetry_block([idx], WINDOW)["groups"][0]["map"]
+    assert (m["sectors"][0]["gap_s"], m["sectors"][0]["color"]) == (None, "#bdbdbd"), m["sectors"][0]
+    assert m["sectors"][9]["color"] == "#c62828", "the other sectors keep their colours"
+
+
+def t_map_absent_when_the_best_lap_has_no_trace():
+    idx = session_index()
+    idx["laps"][2]["trace"] = []
+    g = rtel.telemetry_block([idx], WINDOW)["groups"][0]
+    assert g["map"] is None, "the map needs the best lap's x/z"
+    assert abs(g["theoretical_s"] - 40.0) < 1e-6, "the sector times still give the theoretical best"
+
+
+def t_svgs_are_well_formed_xml():
+    g = block()["groups"][0]
+    trend = ET.fromstring(rtel.svg_lap_trend(g["trend"]))
+    tmap = ET.fromstring(rtel.svg_track_map(g["map"]))
+    assert trend.tag == "svg" and tmap.tag == "svg"
+    fills = [c.get("fill") for c in trend.iter("circle")]
+    assert fills.count("#bdbdbd") == 1, "the pit lap is greyed"
+    assert fills.count("#2e7d32") == 1, "the best lap is green"
+    assert "#3 (lap 3): 0:43.810" in [t.text for t in trend.iter("title")], \
+        "the tooltip names the driving-order number next to GT7's lap number"
+    assert len(list(tmap.iter("polyline"))) == 10
+
+
+def t_trend_pins_a_slow_lap_to_the_top_edge():
+    trend = ET.fromstring(rtel.svg_lap_trend(block()["groups"][0]["trend"]))
+    circles = list(trend.iter("circle"))
+    pit = [c for c in circles if c.get("fill") == "#bdbdbd"][0]
+    assert float(pit.get("cy")) == min(float(c.get("cy")) for c in circles), \
+        "the 95 s pit lap sits on the top edge instead of stretching the scale"
+    assert all(12.0 <= float(c.get("cy")) <= 138.0 for c in circles)
+
+
+def t_svg_empty_inputs():
+    assert rtel.svg_lap_trend([]) == ""
+    assert rtel.svg_track_map(None) == ""
 
 
 def run():
