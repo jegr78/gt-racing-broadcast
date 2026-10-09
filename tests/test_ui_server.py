@@ -197,7 +197,6 @@ def _ctx(jobs=None, init_plan=None, init_step=None, profile_logo=None,
             "machine_font_delete": lambda name: {"ok": True, "removed": name},
             "fonts_restore": lambda force: {"ok": True, "library": [], "profiles": {}},
             "gt7_data_status": lambda: {"ok": True, "checked": None, "files": {}},
-            "gt7_data_update": lambda: {"ok": True, "changed": False, "files": {}},
             "overlay_font_upload": lambda name, data: {"ok": bool(name),
                                                        "name": name,
                                                        "_len": len(data)},
@@ -1686,6 +1685,32 @@ def _page_fn(page, name):
     return page[i:page.index("\n}\n", i) + 3]
 
 
+def t_job_snapshot_tail_takes_ascii_digits_only():
+    httpd, port = _serve(_ctx())
+    try:
+        job_id = json.loads(_post(port, "/api/op/echo")[1])["job_id"]
+        code, body = _get(port, "/api/jobs/" + job_id + "?tail=" + urllib.parse.quote("\u00b2"))
+        assert code == 200 and "lines" not in json.loads(body), (code, body)
+    finally:
+        httpd.shutdown()
+
+
+def t_op_already_running_names_the_running_job():
+    ctx = _ctx(jobs=ui_jobs.JobManager(
+        lambda a: [sys.executable, "-c", "import time; time.sleep(3)"]))
+    httpd, port = _serve(ctx)
+    try:
+        first = json.loads(_post(port, "/api/op/echo")[1])["job_id"]
+        try:
+            code, body = _post(port, "/api/op/echo")
+        except urllib.error.HTTPError as e:
+            code, body = e.code, e.read()
+        d = json.loads(body)
+        assert code == 409 and d["job_id"] == first and "already running" in d["error"], d
+    finally:
+        httpd.shutdown()
+
+
 def t_gt7_data_update_runs_as_a_job_and_says_updating():
     page = _cc_page()
     out = _run_js(_JOB_HARNESS + _job_fns(page) + _page_fn(page, "updateGt7Data") + """
@@ -2555,6 +2580,113 @@ console.log([status, asked, calls.filter(u => u.includes('telemetry-index')).len
     if out is not None:
         assert out.strip() == "Indexing 2 recordings...|2|1|3|S|1|1", \
             f"the pool runs telemetry-index once, then asks again and draws what it has: {out!r}"
+
+
+def t_telemetry_failed_index_job_runs_once_and_says_why():
+    out = _tm_node("""
+const l1 = lap('R', 1, 80, 1), l2 = lap('R', 2, 79, 1);
+tmState.recLaps = [l1, l2];
+tmSelectB(l1);
+await tick();
+answer('car=1', Object.assign(pool([l1]), {unindexed: 1}));
+await tick();
+answer('/api/op/telemetry-index', {ok: true, job_id: 'j'});
+await tick();
+answer('/api/jobs/j', {ok: true, running: false, exit_code: 1,
+                       lines: ['B: not indexed (bad header)', '0 recording(s) indexed, 1 failed']});
+await tick();
+answer('car=1', Object.assign(pool([l1]), {unindexed: 1}));
+await tick();
+tmSelectB(l2);
+await tick();
+answer('car=1', Object.assign(pool([l1, l2]), {unindexed: 1}));
+await tick();
+const once = calls.filter(u => u.includes('telemetry-index')).length;
+const note = [$('tm-note').hidden, $('tm-note').textContent, $('tm-err').textContent];
+tmLoad();
+await tick();
+answer('/recordings', {ok: true, recordings: []});
+await tick();
+tmState.recLaps = [l1];
+tmSelectB(l1);
+await tick();
+answer('car=1', Object.assign(pool([l1]), {unindexed: 1}));
+await tick();
+console.log([once, JSON.stringify(note), calls.filter(u => u.includes('telemetry-index')).length,
+             tmState.pool ? tmState.pool.laps.length : '-'].join('|'));""")
+    if out is not None:
+        once, note, again, _n = out.strip().split("|")
+        assert once == "1", f"a failing job is not restarted for every lap B: {out!r}"
+        hidden, text, err = json.loads(note)
+        assert hidden is False and "B: not indexed (bad header)" in text and err == "", \
+            f"the failed lines show once as a note, not as an error: {note}"
+        assert again == "2", f"Refresh re-arms the job: {out!r}"
+
+
+def t_telemetry_index_job_running_elsewhere_is_awaited_quietly():
+    out = _tm_node("""
+const l1 = lap('R', 1, 80, 1);
+tmState.recLaps = [l1];
+tmSelectB(l1);
+await tick();
+answer('car=1', Object.assign(pool([l1]), {unindexed: 1}));
+await tick();
+answer('/api/op/telemetry-index', {ok: false, error: 'telemetry-index is already running',
+                                   job_id: 'other'});
+await tick();
+const waiting = [$('tm-note').hidden, $('tm-note').textContent, $('tm-err').textContent];
+answer('/api/jobs/other', {ok: true, running: false, exit_code: 0, lines: []});
+await tick();
+const asked = calls.filter(u => u.includes('car=1')).length;
+answer('car=1', Object.assign(pool([l1, lap('S', 1, 78, 1)]), {unindexed: 0}));
+await tick();
+console.log(JSON.stringify([waiting, asked, tmState.pool.laps.length, $('tm-err').textContent,
+                            $('tm-note').hidden]));""")
+    if out is not None:
+        waiting, asked, n, err, hidden = json.loads(out)
+        assert waiting[0] is False and "another window" in waiting[1] and waiting[2] == "", \
+            f"a job from another tab is a neutral note, not a red banner: {waiting}"
+        assert (asked, n, err, hidden) == (2, 2, "", True), \
+            f"the page waits for that job, then asks once more: {out!r}"
+
+
+def t_telemetry_index_job_refreshes_the_recording_list():
+    out = _tm_node("""
+const l1 = lap('R', 1, 80, 1);
+tmState.recs = [{rec: 'R', indexed: true, laps: 1, duration_s: 60, size: 1e6, track: null},
+                {rec: 'S', indexed: false, laps: null, duration_s: 60, size: 1e6, track: null}];
+tmState.recLaps = [l1];
+tmSelectB(l1);
+await tick();
+answer('car=1', Object.assign(pool([l1]), {unindexed: 1}));
+await tick();
+answer('/api/op/telemetry-index', {ok: true, job_id: 'j'});
+await tick();
+answer('/api/jobs/j', {ok: true, running: false, exit_code: 0, lines: []});
+await tick();
+answer('/recordings', {ok: true, recordings: [
+  {rec: 'R', indexed: true, laps: 1, duration_s: 60, size: 1e6, track: null},
+  {rec: 'S', indexed: true, laps: 7, duration_s: 60, size: 1e6, track: null}]});
+await tick();
+console.log($('tm-recs').textContent);""")
+    if out is not None:
+        assert "7 laps" in out and "not indexed yet" not in out, \
+            f"the list shows what the job indexed: {out!r}"
+
+
+def t_telemetry_reset_drops_the_shared_index_job_and_refresh_the_lap_requests():
+    out = _tm_node("""
+tmIndexAll();
+await tick();
+const during = tmIndexing !== null;
+tmReset();
+const afterReset = tmIndexing;
+tmShared('/api/telemetry/lap?rec=R&session=1&lap=1');
+tmLoad();
+console.log([during, String(afterReset), tmLapsReq.size].join(','));""")
+    if out is not None:
+        assert out.strip() == "true,null,0", \
+            f"a reset forgets the old profile's job and Refresh the pending lap requests: {out!r}"
 
 
 def t_telemetry_pool_job_answer_for_another_lap_is_dropped():

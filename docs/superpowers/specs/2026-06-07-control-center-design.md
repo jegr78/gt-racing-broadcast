@@ -89,7 +89,9 @@ New modules under `src/ui/`:
   tailscale, OBS reachability, event readiness summary).
 - `POST /api/op/<name>` — run a structured op or start a job (body: params).
   Job start returns `{job_id}`.
-- `GET /api/jobs/<id>` — job status; `POST /api/jobs/<id>/cancel`.
+- `GET /api/jobs/<id>` — job status (`?tail=N`, at most 200, adds the last N output
+  lines); `POST /api/jobs/<id>/cancel`. A refused `POST /api/op/<name>` (409) names the
+  job of that op that already runs in `job_id`.
 - `GET /api/jobs/<id>/stream` — **SSE** live output (`text/event-stream`;
   works under the threaded server — one held connection per client).
 - `GET /api/logs/<service>/stream` — SSE tail of the existing `runtime/`

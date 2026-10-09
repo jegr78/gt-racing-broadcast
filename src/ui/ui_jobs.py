@@ -68,6 +68,13 @@ class JobManager:
                 self.logger.warning("[%s] action finished, exit -1 (%s)", op, exc)
         return job.id, None
 
+    def running(self, op):
+        """The id of the running job of `op`, or None."""
+        for job in list(self.jobs.values()):
+            if job.op == op and job.exit_code is None:
+                return job.id
+        return None
+
     def _reader(self, job):
         for raw in job.proc.stdout:
             line = raw.decode("utf-8", "replace").rstrip("\r\n")

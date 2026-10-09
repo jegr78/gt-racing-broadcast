@@ -2221,13 +2221,14 @@ function runOpAndWait(name, params) {
   });
 }
 
-// A quiet job: start it without the job console. Resolves to {job_id} or {error}.
+// A quiet job: start it without the job console. Resolves to {job_id} or {error, job_id?}.
 async function startJob(name, params) {
   try {
     const r = await (await fetch('/api/op/' + name, {method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({params: params || {}})})).json();
-    return r.ok ? {job_id: r.job_id} : {error: r.error || name + ' could not start'};
+    // A refused start names the job that already runs, when there is one.
+    return r.ok ? {job_id: r.job_id} : {error: r.error || name + ' could not start', job_id: r.job_id};
   } catch (e) { return {error: 'Control Center not reachable.'}; }
 }
 
@@ -5236,16 +5237,42 @@ function tmDropLaps() {
   tmLapCache.clear();
   tmLapsReq.clear();
 }
-// Builds the missing lap indexes in the telemetry-index job; pool requests share one run.
+// Builds the missing lap indexes in the telemetry-index job; pool requests share one run,
+// and it runs once per lap generation, so a recording that cannot be indexed does not
+// start it on every lap B.
 let tmIndexing = null;
+let tmIndexedGen = -1;
+function tmNote(text) { $('tm-note').textContent = text; $('tm-note').hidden = false; }
 function tmIndexAll() {
   if (!tmIndexing) {
-    tmIndexing = (async () => {
-      const job = await startJob('telemetry-index');
-      return job.error ? job : jobResult(job.job_id);
-    })().finally(() => { tmIndexing = null; });
+    const gen = tmLapGen;
+    const p = (async () => {
+      let job = await startJob('telemetry-index');
+      if (job.error && job.job_id) {
+        tmNote('Indexing runs in another window, waiting for it…');
+        job = {job_id: job.job_id, joined: true};
+      }
+      const r = job.error ? job : await jobResult(job.job_id, 20);
+      if (r.error || gen !== tmLapGen) return r;
+      tmIndexedGen = gen;
+      if (job.joined) $('tm-note').hidden = true;
+      if (r.code !== 0) {
+        const bad = (r.lines || []).filter(l => l.includes('not indexed'));
+        tmNote('Some recordings could not be indexed: ' + (bad.length ? bad : r.lines).join('; '));
+      }
+      tmRefreshRecs();
+      return r;
+    })().finally(() => { if (tmIndexing === p) tmIndexing = null; });
+    tmIndexing = p;
   }
   return tmIndexing;
+}
+async function tmRefreshRecs() {
+  const seq = tmSeq.load;
+  const d = await tmGet('/api/telemetry/recordings');
+  if (seq !== tmSeq.load || !d.ok) return;
+  tmState.recs = d.recordings || [];
+  tmRenderRecs();
 }
 function tmTrackName(t) {
   return t.track + (t.layout ? ' - ' + t.layout : '') + (t.reverse ? ' (reverse)' : '');
@@ -5287,6 +5314,7 @@ function tmReset() {
   tmState.loaded = false; tmState.rec = null; tmState.recs = []; tmState.recLaps = [];
   tmState.tracks = null;
   tmDropLaps();
+  tmIndexing = null;
   $('tm-note').hidden = true;
   $('tm-recs').textContent = '';
   tmErr('');
@@ -5295,8 +5323,7 @@ function tmReset() {
 
 async function tmLoad() {
   const seq = ++tmSeq.load;
-  tmLapGen++;
-  tmLapCache.clear();
+  tmDropLaps();
   tmState.tracks = null;
   $('tm-note').hidden = true;
   tmErr('');
@@ -5414,7 +5441,7 @@ async function tmSelectB(l) {
   if (l.track_id == null) { q.set('rec', l.rec); q.set('session', String(l.session)); }
   let p = await tmShared('/api/telemetry/laps?' + q);
   if (seq !== tmSeq.b) return;
-  if (p.ok && p.unindexed) {                        // asks once: a broken file stays unindexed
+  if (p.ok && p.unindexed && tmIndexedGen !== tmLapGen) {   // asks once: a broken file stays unindexed
     $('tm-sec-sub').textContent = 'Indexing ' + p.unindexed
       + (p.unindexed === 1 ? ' recording…' : ' recordings…');
     const job = await tmIndexAll();
@@ -5785,7 +5812,7 @@ async function tmLearn() {
     const r = await (await fetch('/api/telemetry/learn', {method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({rec, track_id: trackId})})).json();
-    if (r.ok) {                           // the server rebuilds every index with the new track
+    if (r.ok) {                           // every cached index is now stale
       tmDropLaps();
       tmState.recs.forEach(x => { if (x.indexed) x.indexed = false; });
     }

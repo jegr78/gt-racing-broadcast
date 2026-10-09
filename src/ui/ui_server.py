@@ -650,7 +650,7 @@ def make_handler(ctx):
                 if not snap:
                     return self._not_found("unknown job")
                 tail = (parse_qs(urlparse(self.path).query or "").get("tail") or ["0"])[0]
-                if tail.isdigit() and int(tail) > 0:    # the last output lines, for a page
+                if tail.isascii() and tail.isdigit() and int(tail) > 0:    # the last output lines, for a page
                     lines = ctx["jobs"].lines_since(job_id, 0)[0]
                     snap["lines"] = lines[-min(int(tail), 200):]
                 return self._json({"ok": True, **snap})
@@ -1034,7 +1034,8 @@ def make_handler(ctx):
                     return self._json({"ok": False, "error": str(exc)}, code=400)
                 job_id, err = ctx["jobs"].start(name, argv)
                 if err:
-                    return self._json({"ok": False, "error": err}, code=409)
+                    return self._json({"ok": False, "error": err,
+                                       "job_id": ctx["jobs"].running(name)}, code=409)
                 return self._json({"ok": True, "job_id": job_id})
             if path == "/api/quit":
                 self._json({"ok": True})
