@@ -607,6 +607,43 @@ def t_engine_session_reset_on_best_cleared():
     assert eng.snapshot()["has_reference"] is False
 
 
+def t_engine_session_change_on_teleport_before_any_best_lap():
+    """Leaving a session before a best lap exists and starting another track on the same
+    lap counter fires neither the lap nor the best signal; the jump in position does."""
+    eng = tm.TelemetryEngine()
+    for i in range(20):
+        eng.update(tm.parse_packet(_packet(lap=1, speed_mps=40.0, pos=(4.0 * i, 0.0, 0.0))),
+                   100.0 + 0.1 * i)
+    eng.update(tm.parse_packet(_packet(lap=1, flags=0, pos=(0.0, 0.0, 0.0))), 110.0)
+    eng.update(tm.parse_packet(_packet(lap=1, speed_mps=5.0, pos=(-3000.0, 0.0, 2500.0))), 120.0)
+    assert eng.session == 2, f"a track change before any best lap is a new session: {eng.session}"
+    for i in range(1, 20):
+        eng.update(tm.parse_packet(_packet(lap=1, speed_mps=40.0,
+                                           pos=(-3000.0 + 4.0 * i, 0.0, 2500.0))),
+                   120.0 + 0.1 * i)
+    assert eng.session == 2, f"driving on is not another session: {eng.session}"
+
+
+def t_engine_no_session_change_on_teleport_after_a_best_lap():
+    eng = tm.TelemetryEngine()
+    eng.update(tm.parse_packet(_packet(lap=0)), 99.0)
+    _feed_lap(eng, 100.0, 1, duration=10.0, speed=50.0)
+    eng.update(tm.parse_packet(_packet(lap=2, best_ms=60000, pos=(0.0, 0.0, 0.0))), 111.0)
+    eng.update(tm.parse_packet(_packet(lap=2, best_ms=60000, flags=0)), 111.5)
+    eng.update(tm.parse_packet(_packet(lap=2, best_ms=60000, pos=(-3000.0, 0.0, 2500.0))),
+               112.0)
+    assert eng.session == 1 and eng.snapshot()["has_reference"] is True, \
+        "with a best lap set, GT7 clears it on a new session, so a jump alone is no boundary"
+
+
+def t_engine_no_session_change_on_a_jump_while_driving():
+    eng = tm.TelemetryEngine()
+    eng.update(tm.parse_packet(_packet(lap=1, speed_mps=40.0, pos=(0.0, 0.0, 0.0))), 100.0)
+    eng.update(tm.parse_packet(_packet(lap=1, speed_mps=40.0, pos=(-3000.0, 0.0, 2500.0))),
+               100.1)
+    assert eng.session == 1, "a jump without leaving the track is no track change"
+
+
 def t_engine_no_reset_on_normal_lap_increment():
     eng = tm.TelemetryEngine()
     eng.update(tm.parse_packet(_packet(lap=0)), 99.0)

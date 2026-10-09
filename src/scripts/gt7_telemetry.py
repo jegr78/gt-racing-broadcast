@@ -78,6 +78,7 @@ SAMPLE_MIN_DIST = 4.0     # metres between retained samples
 MAX_SAMPLES = 10000       # 40 km at 4 m spacing; the longest GT7 layout (Special Stage
                           # Route X, ~30.3 km) must stay well inside the cap
 
+SESSION_JUMP_M = 500.0    # metres between on-track positions that only a new track explains
 POINT_STEP_M = 20.0       # metres between kept positions (track recognition)
 MIN_TRACK_POINTS = 10     # fewest points a lap needs to name or learn a track
 MAX_POINTS = int(MAX_SAMPLES * SAMPLE_MIN_DIST / POINT_STEP_M)  # same distance ceiling as samples
@@ -322,10 +323,12 @@ class TelemetryEngine:
     # feeds only the HUD or is wiring.
     RESUMED_ATTRS = ("session", "_lap_num", "_last", "_acc", "_ref", "_lap_time_sum",
                      "_lap_time_n", "_lap_fuel_sum", "_lap_fuel_n", "_session_dist_m",
-                     "_top_speed")
+                     "_top_speed", "_track_pos", "_left_track")
 
     def __init__(self):
         self._last = None                 # last GT7Packet
+        self._track_pos = None            # (x, z) of the last on-track packet
+        self._left_track = False          # an off-track packet came after it
         self._lap_num = None
         self._acc = None                  # current _LapAccumulator
         self._ref = None                  # reference (best) lap: {"time": s, "samples": [...]}
@@ -354,7 +357,9 @@ class TelemetryEngine:
             return True
         if self._last is not None and self._last.best_ms > 0 and pkt.best_ms == -1:
             return True                                    # best lap was wiped
-        return False
+        # Without a best lap neither signal can fire, so a jump to another track is one.
+        return (pkt.on_track and pkt.best_ms <= 0 and self._left_track
+                and self._track_pos is not None and pkt.pos_x is not None and math.dist(self._track_pos, (pkt.pos_x, pkt.pos_z)) > SESSION_JUMP_M)
 
     def _reset_session(self, now, pkt):
         """Drop everything derived from the previous session (possibly a different
@@ -398,6 +403,10 @@ class TelemetryEngine:
         if self._acc is not None:
             self._acc.add(pkt, now)
         self._last = pkt
+        if pkt.on_track and pkt.pos_x is not None:
+            self._track_pos, self._left_track = (pkt.pos_x, pkt.pos_z), False
+        elif not pkt.on_track:
+            self._left_track = True
         if self._trace_last_t is None or (now - self._trace_last_t) >= TRACE_MIN_DT:
             self._trace_last_t = now
             self._trace.append((now, pkt.throttle / 255.0, pkt.brake / 255.0))
@@ -427,7 +436,7 @@ class TelemetryEngine:
             "acc": None if acc is None else {
                 k: list(getattr(acc, k)) if isinstance(getattr(acc, k), list) else getattr(acc, k)
                 for k in _LapAccumulator.__slots__},
-            "ref": self._ref,
+            "ref": self._ref, "track_pos": self._track_pos, "left_track": self._left_track,
             "totals": [self._lap_time_sum, self._lap_time_n, self._lap_fuel_sum,
                        self._lap_fuel_n, self._session_dist_m, self._top_speed]}
 
@@ -449,6 +458,9 @@ class TelemetryEngine:
         (self._lap_time_sum, self._lap_time_n, self._lap_fuel_sum, self._lap_fuel_n,
          self._session_dist_m, self._top_speed) = state["totals"]
         self.session, self._lap_num, self._acc = state["session"], state["lap_num"], acc
+        pos = state["track_pos"]
+        self._track_pos = None if pos is None else tuple(pos)
+        self._left_track = state["left_track"]
 
     def lap_started_at(self):
         """Wall time of the current lap's first packet, or None before any packet."""

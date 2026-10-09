@@ -18,7 +18,7 @@ import gt7_telemetry
 STEP_M = 5.0
 SECTOR_M = 200.0
 COUNTED = ("reference", "counted")
-INDEX_VERSION = 3
+INDEX_VERSION = 4
 CACHE_SUFFIX = ".laps.json"
 DECIMATE_M = 2.0              # finer samples add nothing to a 5 m trace
 RESUME_CHECK = 64             # bytes before a resume point that must be unchanged to continue there
