@@ -651,6 +651,25 @@ def t_lap_dist_survives_a_non_finite_projected_position():
         assert lap1[50]["lap_dist_m"] != "", "a non-finite projection falls back to the integrated distance"
 
 
+class _UnknownAssignmentTracks(_Tracks):
+    """An assignment whose layout the track tables no longer name."""
+    def name(self, oid):
+        return None
+
+
+def t_session_tracks_falls_back_to_matching_for_an_unknown_assignment():
+    with tempfile.TemporaryDirectory() as d:
+        _h, laps, _dropped = rec.replay_laps(_xy_session(d))
+        got = rec.session_tracks(laps, _UnknownAssignmentTracks(assigned="gone01"), key="p/s")
+        assert got[1]["id"] == "aaa001", f"an unresolvable assignment falls back to matching: {got}"
+
+
+def t_nearest_station_picks_the_value_nearest_the_driven_distance():
+    assert rec.nearest_station(998.0, 1.0, 1000.0) == -2.0, "just behind the line is not a full lap"
+    assert rec.nearest_station(3.0, 999.0, 1000.0) == 1003.0
+    assert rec.nearest_station(500.0, 497.0, 1000.0) == 500.0
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

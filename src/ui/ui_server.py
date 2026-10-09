@@ -17,6 +17,7 @@ DEFAULT_PORT = 8089
 TAIL_LINES = 40          # how much history a log stream starts with
 MAX_IMPORT_BYTES = 2 * 1024 * 1024 * 1024   # 2 GiB; profile bundles include media
 MAX_FONT_BYTES = 8 * 1024 * 1024            # 8 MiB; an overlay font is tiny
+MAX_JSON_BODY_BYTES = 16 * 1024 * 1024      # 16 MiB; overlay CSS may embed data: images
 
 
 def ui_port(env):
@@ -120,6 +121,9 @@ def make_handler(ctx):
     init_plan(browser) -> dict (wizard plan: per-step done/kind/op/instruction),
     init_step(key) -> dict (run one non-job wizard step, {ok, done} | {ok: False, error}),
     profile_export(name, assets) -> dict, profile_import(path, force) -> dict,
+    telemetry_recordings() -> dict, telemetry_laps(rec, session, track, car) -> dict,
+    telemetry_lap(rec, session, lap) -> dict, telemetry_tracks() -> dict,
+    telemetry_learn(rec, track_id) -> dict (solo POV lap analysis, query strings in),
     jobs (ui_jobs.JobManager), log_sources {name: {files, dir, archives, read}},
     favicon_path (the brand SVG served at /favicon.svg),
     shutdown() (installed by serve())."""
@@ -166,17 +170,27 @@ def make_handler(ctx):
             self.end_headers()
 
         def _body_json(self):
-            """Parsed JSON POST body; {} when absent/empty, None when malformed."""
+            """Parsed JSON POST body as a dict; {} when absent/empty, None when
+            negative, oversized, malformed, or not a JSON object. On None,
+            `self._body_error` names the reason for the 400 answer."""
+            self._body_error = "malformed JSON body"
             try:
                 length = int(self.headers.get("Content-Length") or 0)
             except ValueError:
                 length = 0
-            if not length:
+            if length == 0:
                 return {}
+            if length < 0:
+                self._body_error = "invalid Content-Length"
+                return None
+            if length > MAX_JSON_BODY_BYTES:
+                self._body_error = "request body too large"
+                return None
             try:
-                return json.loads(self.rfile.read(length).decode("utf-8")) or {}
+                parsed = json.loads(self.rfile.read(length).decode("utf-8"))
             except Exception:
                 return None
+            return parsed if isinstance(parsed, dict) else None
 
         def _serve_file(self, full):
             ctype = self._CTYPES.get(os.path.splitext(full)[1].lower(),
@@ -570,6 +584,37 @@ def make_handler(ctx):
                     return self._json({"ok": False,
                                        "error": f"could not list backups: {exc}"},
                                       code=500)
+            if path == "/api/telemetry/recordings":
+                try:
+                    return self._json(ctx["telemetry_recordings"]())
+                except Exception as exc:
+                    return self._json({"ok": False,
+                                       "error": f"could not list recordings: "
+                                                f"{type(exc).__name__}"},
+                                      code=500)
+            if path in ("/api/telemetry/laps", "/api/telemetry/lap"):
+                q = parse_qs(urlparse(self.path).query or "", keep_blank_values=True)
+                arg = {k: v[0] for k, v in q.items()}
+                try:
+                    if path.endswith("/laps"):
+                        result = ctx["telemetry_laps"](arg.get("rec"), arg.get("session"),
+                                                       arg.get("track"), arg.get("car"))
+                    else:
+                        result = ctx["telemetry_lap"](arg.get("rec"), arg.get("session"),
+                                                      arg.get("lap"))
+                except Exception as exc:
+                    return self._json({"ok": False,
+                                       "error": f"could not read laps: {type(exc).__name__}"},
+                                      code=500)
+                return self._json(result)
+            if path == "/api/telemetry/tracks":
+                try:
+                    return self._json(ctx["telemetry_tracks"]())
+                except Exception as exc:
+                    return self._json({"ok": False,
+                                       "error": f"could not list tracks: "
+                                                f"{type(exc).__name__}"},
+                                      code=500)
             if path == "/api/init/plan":
                 browser = parse_qs(urlparse(self.path).query or "").get(
                     "browser", ["firefox"])[0]
@@ -628,7 +673,7 @@ def make_handler(ctx):
             if path == "/api/env":
                 body = self._body_json()
                 if body is None:
-                    return self._json({"ok": False, "error": "malformed JSON body"},
+                    return self._json({"ok": False, "error": self._body_error},
                                       code=400)
                 try:
                     result = ctx["env_write"](body.get("entries") or [])
@@ -640,7 +685,7 @@ def make_handler(ctx):
             if path == "/api/devices/select":
                 body = self._body_json()
                 if body is None:
-                    return self._json({"ok": False, "error": "malformed JSON body"},
+                    return self._json({"ok": False, "error": self._body_error},
                                       code=400)
                 try:
                     result = ctx["devices_write"](body.get("webcam"), body.get("capture"),
@@ -661,7 +706,7 @@ def make_handler(ctx):
             if path == "/api/ps/save":
                 body = self._body_json()
                 if body is None:
-                    return self._json({"ok": False, "error": "malformed JSON body"},
+                    return self._json({"ok": False, "error": self._body_error},
                                       code=400)
                 try:
                     result = ctx["ps_write"](body.get("ip"))
@@ -673,7 +718,7 @@ def make_handler(ctx):
             if path == "/api/event-title":
                 body = self._body_json()
                 if body is None:
-                    return self._json({"ok": False, "error": "malformed JSON body"},
+                    return self._json({"ok": False, "error": self._body_error},
                                       code=400)
                 try:
                     result = ctx["event_title_write"](body.get("title"))
@@ -685,7 +730,7 @@ def make_handler(ctx):
             if path == "/api/obs/stream-target":
                 body = self._body_json()
                 if body is None:
-                    return self._json({"ok": False, "error": "malformed JSON body",
+                    return self._json({"ok": False, "error": self._body_error,
                                        "note": "malformed request"}, code=400)
                 try:
                     result = ctx["obs_stream_target"]((body.get("part") or "").strip())
@@ -702,7 +747,7 @@ def make_handler(ctx):
             if path == "/api/report/send":
                 body = self._body_json()
                 if body is None:
-                    return self._json({"ok": False, "error": "malformed JSON body"},
+                    return self._json({"ok": False, "error": self._body_error},
                                       code=400)
                 try:
                     result = ctx["report_send"](body.get("path"))
@@ -714,7 +759,7 @@ def make_handler(ctx):
             if path == "/api/streams":
                 body = self._body_json()
                 if body is None:
-                    return self._json({"ok": False, "error": "malformed JSON body"},
+                    return self._json({"ok": False, "error": self._body_error},
                                       code=400)
                 try:
                     result = ctx["streams_write"](body.get("entries") or [])
@@ -726,7 +771,7 @@ def make_handler(ctx):
             if path == "/api/profile/use":
                 body = self._body_json()
                 if body is None:
-                    return self._json({"ok": False, "error": "malformed JSON body"},
+                    return self._json({"ok": False, "error": self._body_error},
                                       code=400)
                 try:
                     result = ctx["profile_use"](body.get("name"))
@@ -738,7 +783,7 @@ def make_handler(ctx):
             if path == "/api/profile/new":
                 body = self._body_json()
                 if body is None:
-                    return self._json({"ok": False, "error": "malformed JSON body"},
+                    return self._json({"ok": False, "error": self._body_error},
                                       code=400)
                 try:
                     result = ctx["profile_new"](
@@ -752,7 +797,7 @@ def make_handler(ctx):
             if path == "/api/profile/env":
                 body = self._body_json()
                 if body is None:
-                    return self._json({"ok": False, "error": "malformed JSON body"},
+                    return self._json({"ok": False, "error": self._body_error},
                                       code=400)
                 try:
                     result = ctx["profile_env_write"](body.get("entries") or [])
@@ -764,7 +809,7 @@ def make_handler(ctx):
             if path == "/api/crew":
                 body = self._body_json()
                 if body is None:
-                    return self._json({"ok": False, "error": "malformed JSON body"},
+                    return self._json({"ok": False, "error": self._body_error},
                                       code=400)
                 try:
                     result = ctx["crew_write"](body.get("row"), body.get("name"),
@@ -779,7 +824,7 @@ def make_handler(ctx):
             if path == "/api/crew/delete":
                 body = self._body_json()
                 if body is None:
-                    return self._json({"ok": False, "error": "malformed JSON body"},
+                    return self._json({"ok": False, "error": self._body_error},
                                       code=400)
                 try:
                     result = ctx["crew_delete"](body.get("row"))
@@ -791,21 +836,21 @@ def make_handler(ctx):
             if path == "/api/console/funnel":
                 body = self._body_json()
                 if body is None:
-                    return self._json({"ok": False, "error": "malformed JSON body"},
+                    return self._json({"ok": False, "error": self._body_error},
                                       code=400)
                 result = ctx["console_funnel"](bool(body.get("on")))
                 return self._json(result, code=200 if result.get("ok") else 400)
             if path == "/api/console/funnel-auto":
                 body = self._body_json()
                 if body is None:
-                    return self._json({"ok": False, "error": "malformed JSON body"},
+                    return self._json({"ok": False, "error": self._body_error},
                                       code=400)
                 result = ctx["console_set_funnel_auto"](bool(body.get("auto")))
                 return self._json(result, code=200 if result.get("ok") else 400)
             if path == "/api/console/revoke":
                 body = self._body_json()
                 if body is None:
-                    return self._json({"ok": False, "error": "malformed JSON body"},
+                    return self._json({"ok": False, "error": self._body_error},
                                       code=400)
                 result = ctx["console_revoke"](body.get("streamer") or "")
                 return self._json(result, code=200 if result.get("ok") else 400)
@@ -815,7 +860,7 @@ def make_handler(ctx):
             if path == "/api/overlay":
                 body = self._body_json()
                 if body is None:
-                    return self._json({"ok": False, "error": "malformed JSON body"},
+                    return self._json({"ok": False, "error": self._body_error},
                                       code=400)
                 try:
                     result = ctx["overlay_write"](body.get("page"), body.get("content"))
@@ -827,7 +872,7 @@ def make_handler(ctx):
             if path == "/api/overlay/layout":
                 body = self._body_json()
                 if body is None:
-                    return self._json({"ok": False, "error": "malformed JSON body"},
+                    return self._json({"ok": False, "error": self._body_error},
                                       code=400)
                 try:
                     result = ctx["overlay_layout_write"](body.get("page"),
@@ -855,7 +900,7 @@ def make_handler(ctx):
             if path == "/api/fonts/download":
                 body = self._body_json()
                 if body is None:
-                    return self._json({"ok": False, "error": "malformed JSON body"},
+                    return self._json({"ok": False, "error": self._body_error},
                                       code=400)
                 try:
                     result = ctx["machine_font_download"](body.get("name"))
@@ -875,7 +920,7 @@ def make_handler(ctx):
             if path == "/api/fonts/restore":
                 body = self._body_json()
                 if body is None:
-                    return self._json({"ok": False, "error": "malformed JSON body"},
+                    return self._json({"ok": False, "error": self._body_error},
                                       code=400)
                 try:
                     result = ctx["fonts_restore"](body.get("force") is True)
@@ -887,7 +932,7 @@ def make_handler(ctx):
             if path == "/api/fonts/delete":
                 body = self._body_json()
                 if body is None:
-                    return self._json({"ok": False, "error": "malformed JSON body"},
+                    return self._json({"ok": False, "error": self._body_error},
                                       code=400)
                 try:
                     result = ctx["machine_font_delete"](body.get("name"))
@@ -899,7 +944,7 @@ def make_handler(ctx):
             if path == "/api/backup":
                 body = self._body_json()
                 if body is None:
-                    return self._json({"ok": False, "error": "malformed JSON body"},
+                    return self._json({"ok": False, "error": self._body_error},
                                       code=400)
                 try:
                     result = ctx["backup_create"](
@@ -912,7 +957,7 @@ def make_handler(ctx):
             if path == "/api/backup/restore":
                 body = self._body_json()
                 if body is None:
-                    return self._json({"ok": False, "error": "malformed JSON body"},
+                    return self._json({"ok": False, "error": self._body_error},
                                       code=400)
                 try:
                     result = ctx["backup_restore"](body.get("slug"))
@@ -924,13 +969,26 @@ def make_handler(ctx):
             if path == "/api/backup/delete":
                 body = self._body_json()
                 if body is None:
-                    return self._json({"ok": False, "error": "malformed JSON body"},
+                    return self._json({"ok": False, "error": self._body_error},
                                       code=400)
                 try:
                     result = ctx["backup_delete"](body.get("slug"))
                 except Exception as exc:
                     return self._json({"ok": False,
                                        "error": f"could not delete backup: {exc}"},
+                                      code=500)
+                return self._json(result, code=200 if result.get("ok") else 400)
+            if path == "/api/telemetry/learn":
+                body = self._body_json()
+                if body is None:
+                    return self._json({"ok": False, "error": self._body_error},
+                                      code=400)
+                try:
+                    result = ctx["telemetry_learn"](body.get("rec"), body.get("track_id"))
+                except Exception as exc:
+                    return self._json({"ok": False,
+                                       "error": f"could not set the track: "
+                                                f"{type(exc).__name__}"},
                                       code=500)
                 return self._json(result, code=200 if result.get("ok") else 400)
             if path.startswith("/api/init/step/"):
@@ -967,7 +1025,7 @@ def make_handler(ctx):
                     return self._not_found(f"unknown operation: {name}")
                 body = self._body_json()
                 if body is None:
-                    return self._json({"ok": False, "error": "malformed JSON body"},
+                    return self._json({"ok": False, "error": self._body_error},
                                       code=400)
                 try:
                     argv = ctx["build_argv"](name, body.get("params"))

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """GT7 reference data: validation, runtime-over-bundled resolution, the update gate.
 Run: python3 tests/test_gt7_data.py"""
-import importlib.util, json, os, sys, tempfile
+import importlib.util, json, os, shutil, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -154,6 +154,52 @@ def t_data_version_changes_with_learned_file():
         with open(gd.learned_path(base), "w", encoding="utf-8") as fh:
             fh.write("{}")
         assert gd.data_version(base, b) != v1 and len(v1) == 16
+
+
+def t_data_version_ignores_where_the_bundled_files_live():
+    with tempfile.TemporaryDirectory() as d:
+        b1 = _bundled(d)
+        b2 = os.path.join(d, "unpacked")
+        shutil.copytree(b1, b2)
+        os.utime(os.path.join(b2, "index.json"), ns=(1_000_000_000, 1_000_000_000))
+        base = os.path.join(d, "runtime")
+        assert gd.data_version(base, b1) == gd.data_version(base, b2), \
+            "a onefile binary unpacks the same bundled files to a new dir per launch"
+        with open(os.path.join(b2, "index.json"), "ab") as fh:
+            fh.write(b" ")
+        assert gd.data_version(base, b1) != gd.data_version(base, b2), \
+            "a different bundled file still changes the version"
+
+
+def t_data_version_hashes_bundled_content():
+    with tempfile.TemporaryDirectory() as d:
+        b = _bundled(d)
+        base = os.path.join(d, "runtime")
+        v1 = gd.data_version(base, b)
+        path = os.path.join(b, "index.json")
+        with open(path, "rb") as fh:
+            data = fh.read()
+        k = data.index(b"1")
+        with open(path, "wb") as fh:
+            fh.write(data[:k] + b"2" + data[k + 1:])
+        os.utime(path, ns=(2_000_000_000, 2_000_000_000))
+        assert gd.data_version(base, b) != v1, "an edit that keeps the byte count changes the version"
+
+
+def t_data_version_counts_the_car_tables():
+    with tempfile.TemporaryDirectory() as d:
+        b = _bundled(d)
+        base = os.path.join(d, "runtime")
+        v1 = gd.data_version(base, b)
+        with open(os.path.join(b, "cars.csv"), "ab") as fh:
+            fh.write(b"9999,Car 9999,1\n")
+        v2 = gd.data_version(base, b)
+        assert v2 != v1, "a new bundled car table changes the version (cached car names)"
+        os.makedirs(gd.data_dir(base))
+        for name in gd.CAR_TABLES:
+            with open(os.path.join(gd.data_dir(base), name), "wb") as fh:
+                fh.write(GOOD[name])
+        assert gd.data_version(base, b) != v2, "downloaded car tables change the version"
 
 
 def t_update_tolerates_a_corrupt_stamp_file():

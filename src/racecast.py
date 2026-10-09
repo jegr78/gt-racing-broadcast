@@ -45,7 +45,7 @@
   racecast update [--check] [--yes] [--tag TAG]   # self-update the binary (--tag installs an exact release)
   racecast --version
 """
-import glob, io, json, os, re, shutil, sys, tempfile, time, webbrowser, zipfile
+import glob, io, json, os, re, shutil, sys, tempfile, threading, time, webbrowser, zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 # Adapters (added in later tasks) import sibling modules from scripts/ at module
@@ -3201,7 +3201,9 @@ def _recording_sort_key(row):
     return (started, mtime)
 
 
-def _resolve_recording(rec_dir, name):
+def _find_recording(rec_dir, name):
+    """Path of the recording `name` (file name, stem or 'latest') in rec_dir, or None.
+    Only names list_recordings found in rec_dir match, so a path never resolves."""
     import gt7_recording as gr
     rows = gr.list_recordings(rec_dir)
     if name == "latest" and rows:
@@ -3209,7 +3211,14 @@ def _resolve_recording(rec_dir, name):
     for row in rows:
         if name in (row["name"], gr.recording_stem(row["path"])):
             return row["path"]
-    sys.exit(f"no recording named {name!r} in {rec_dir} (see 'racecast telemetry list')")
+    return None
+
+
+def _resolve_recording(rec_dir, name):
+    path = _find_recording(rec_dir, name)
+    if path is None:
+        sys.exit(f"no recording named {name!r} in {rec_dir} (see 'racecast telemetry list')")
+    return path
 
 
 def telemetry_record_cmd(rest):
@@ -3259,10 +3268,7 @@ def telemetry_list_cmd(_rest):
 def telemetry_export_cmd(rest):
     """Export one recording to samples.csv + laps.csv."""
     import argparse
-    import gt7_cars
-    import gt7_data
     import gt7_recording as gr
-    import gt7_tracks
     ap = argparse.ArgumentParser(prog="racecast telemetry export")
     ap.add_argument("name", help="recording name, its stem, or 'latest'")
     ap.add_argument("--out", help="output directory (default: <recording>/ next to it)")
@@ -3274,13 +3280,10 @@ def telemetry_export_cmd(rest):
     rec_dir = _telemetry_rec_dir()
     path = _resolve_recording(rec_dir, args.name)
     out_dir = args.out or os.path.join(rec_dir, gr.recording_stem(path))
-    base = _runtime_base_dir()
-    bundled = resource_path("assets/gt7")
-    key = f"{_active_profile_name()}/{gr.recording_stem(path)}"
+    tracks, cars = _telemetry_dbs()
     try:
         res = gr.export_csv(path, out_dir, include_all=args.all, excel=args.excel,
-                            cars=gt7_cars.CarDB(gt7_data.cars_dir(base, bundled)),
-                            tracks=gt7_tracks.TrackDB.load(base, bundled), key=key)
+                            cars=cars, tracks=tracks, key=_telemetry_track_key(path))
     except gr.RecordingError as e:
         sys.exit(str(e))
     print(f"wrote {res['samples']} samples and {res['laps']} laps to {res['dir']}")
@@ -3289,25 +3292,342 @@ def telemetry_export_cmd(rest):
 
 
 def telemetry_delete_cmd(rest):
-    """Delete one recording (and its export folder)."""
+    """Delete one recording, its export folder and its lap index."""
+    import gt7_laps
     import gt7_recording as gr
     if len(rest) != 1:
         sys.exit("usage: racecast telemetry delete <name>")
     rec_dir = _telemetry_rec_dir()
     path = _resolve_recording(rec_dir, rest[0])
     name = os.path.basename(path)
-    open_file = None if _foreign_relay_profile() else (_relay_record_status() or {}).get("file")
+    open_file = _relay_open_file()
     if open_file and name.startswith(open_file):
         sys.exit(f"{name} is currently recording; stop it first "
                  "('racecast telemetry record stop')")
-    export_dir = os.path.join(rec_dir, gr.recording_stem(path))
+    stem = gr.recording_stem(path)
+    export_dir = os.path.join(rec_dir, stem)
     try:
         os.remove(path)
         if os.path.isdir(export_dir):
             shutil.rmtree(export_dir)
     except OSError as e:
         sys.exit(f"could not delete {name}: {e.strerror}")
+    with _TELEMETRY_LOCK:
+        _TELEMETRY_MEMO.pop(path, None)
+        _TELEMETRY_BUILD_LOCKS.pop(path, None)
+    tmp_prefix = stem + gt7_laps.CACHE_SUFFIX[:-len(".json")] + "-"
+    try:
+        leftovers = [os.path.join(rec_dir, f) for f in os.listdir(rec_dir)
+                     if f.startswith(tmp_prefix) and f.endswith(".tmp")]
+    except OSError as e:
+        leftovers = []
+        print(f"note: could not look for {tmp_prefix}*.tmp files: {e.strerror}")
     print(f"deleted {name}")
+    for f in [gt7_laps.cache_path(path)] + leftovers:
+        try:
+            os.remove(f)
+        except FileNotFoundError:
+            pass  # never indexed
+        except OSError as e:
+            print(f"note: could not remove {os.path.basename(f)}: {e.strerror}")
+
+
+_TELEMETRY_MEMO = {}          # path -> (stamp, lap index without traces), oldest first
+TELEMETRY_MEMO_MAX = 4096    # a few KB per lap in memory; a list scan over every recording must fit
+_TELEMETRY_LOCK = threading.Lock()      # guards the memo and the build-lock table
+_TELEMETRY_BUILD_LOCKS = {}             # path -> Lock, so one recording is never indexed twice at once
+
+
+def _telemetry_track_key(path):
+    """The learned-assignment key "<profile>/<stem>", or None without an active profile."""
+    import gt7_recording as gr
+    name = _active_profile_name()
+    return f"{name}/{gr.recording_stem(path)}" if name else None
+
+
+def _telemetry_dbs():
+    """(TrackDB, CarDB) for the lap index: the updated GT7 data when valid, else bundled."""
+    import gt7_cars
+    import gt7_data
+    import gt7_tracks
+    base, bundled = _runtime_base_dir(), resource_path("assets/gt7")
+    return (gt7_tracks.TrackDB.load(base, bundled),
+            gt7_cars.CarDB(gt7_data.cars_dir(base, bundled)))
+
+
+def _telemetry_data_version():
+    import gt7_data
+    return gt7_data.data_version(_runtime_base_dir(), resource_path("assets/gt7"))
+
+
+def _telemetry_stamp(path, version=None):
+    st = os.stat(path)
+    return (st.st_size, st.st_mtime_ns,
+            _telemetry_data_version() if version is None else version)
+
+
+def _relay_open_file():
+    """The file name the relay of the active profile is recording to, or None."""
+    return None if _foreign_relay_profile() else (_relay_record_status() or {}).get("file")
+
+
+def _telemetry_memo_get(path, stamp):
+    with _TELEMETRY_LOCK:
+        hit = _TELEMETRY_MEMO.pop(path, None)
+        if hit is None or hit[0] != stamp:
+            return None
+        _TELEMETRY_MEMO[path] = hit
+        return hit[1]
+
+
+def _telemetry_memo_put(path, stamp, idx):
+    """Store the index without traces and points; returns that summary form."""
+    import gt7_laps
+    brief = dict(idx, laps=[gt7_laps.summary(lap) for lap in idx["laps"]])
+    with _TELEMETRY_LOCK:
+        _TELEMETRY_MEMO.pop(path, None)
+        _TELEMETRY_MEMO[path] = (stamp, brief)
+        while len(_TELEMETRY_MEMO) > TELEMETRY_MEMO_MAX:
+            del _TELEMETRY_MEMO[next(iter(_TELEMETRY_MEMO))]
+    return brief
+
+
+def _telemetry_build_lock(path):
+    with _TELEMETRY_LOCK:
+        return _TELEMETRY_BUILD_LOCKS.setdefault(path, threading.Lock())
+
+
+def _telemetry_load(path, dbs, stamp=None):
+    """(full index, summary form) from the cache file, built when the cache is missing or
+    stale; refreshes the memo. `dbs` is a (TrackDB, CarDB), a callable returning one, or
+    None. The caller holds the recording's build lock."""
+    import gt7_laps
+    base, bundled = _runtime_base_dir(), resource_path("assets/gt7")
+    stamp = stamp or _telemetry_stamp(path)
+    idx = gt7_laps.cached(path, base, bundled)
+    if idx is None:
+        tracks, cars = dbs() if callable(dbs) else dbs or _telemetry_dbs()
+        idx = gt7_laps.index(path, tracks, cars, base, key=_telemetry_track_key(path),
+                             bundled=bundled)
+    return idx, _telemetry_memo_put(path, stamp, idx)
+
+
+def _telemetry_full_index(path, dbs=None):
+    """The full lap index of a recording of the active profile: every lap with its 5 m
+    `trace` and its `points`, read from the cache file and built when that is missing or
+    stale. `dbs` is an optional (TrackDB, CarDB). Not memoised, so it costs a cache-file
+    read per call; use it for one lap, learning or a report. Callers treat it as read-only."""
+    with _telemetry_build_lock(path):
+        return _telemetry_load(path, dbs)[0]
+
+
+def _telemetry_index(path, dbs=None, stamp=None):
+    """The lap index of a recording of the active profile in summary form (laps without
+    `trace` and `points`), memoised per process while the file and the GT7 data are
+    unchanged. The result is the memo entry itself: callers must not modify it."""
+    stamp = stamp or _telemetry_stamp(path)
+    hit = _telemetry_memo_get(path, stamp)
+    if hit is not None:
+        return hit
+    with _telemetry_build_lock(path):
+        hit = _telemetry_memo_get(path, stamp)    # built while we waited
+        return hit if hit is not None else _telemetry_load(path, dbs, stamp)[1]
+
+
+def _telemetry_reason(exc, rec=None):
+    """An error text that never carries a machine path: an OSError's strerror, our own
+    ValueError texts, and only the type name of anything else."""
+    import gt7_recording as gr
+    if isinstance(exc, OSError):
+        return exc.strerror or type(exc).__name__
+    if isinstance(exc, gr.RecordingError):
+        return f"{rec} is not a readable recording" if rec else "not a readable recording"
+    if isinstance(exc, ValueError):
+        return str(exc)
+    cls = type(exc)
+    return cls.__name__ if cls.__module__ == "builtins" else f"{cls.__module__}.{cls.__name__}"
+
+
+def _telemetry_cached_brief(path, base, bundled, version=None):
+    """The summary form from the memo or a still-valid cache file, else None; never builds."""
+    import gt7_laps
+    try:
+        stamp = _telemetry_stamp(path, version)
+    except OSError:
+        return None
+    hit = _telemetry_memo_get(path, stamp)
+    if hit is not None:
+        return hit
+    idx = gt7_laps.cached(path, base, bundled)
+    return _telemetry_memo_put(path, stamp, idx) if idx is not None else None
+
+
+def telemetry_recordings_data():
+    """Control Center Telemetry view: the active profile's recordings, newest first, with
+    the track from a still-valid lap index. Never builds an index and never raises."""
+    try:
+        import gt7_recording as gr
+        base, bundled = _runtime_base_dir(), resource_path("assets/gt7")
+        open_file, version = _relay_open_file(), _telemetry_data_version()
+        rows = []
+        for row in sorted(gr.list_recordings(_telemetry_rec_dir()), key=_recording_sort_key,
+                          reverse=True):
+            writing = bool(open_file and row["name"].startswith(open_file))
+            idx = None if writing else _telemetry_cached_brief(row["path"], base, bundled,
+                                                               version)
+            rows.append({"name": row["name"], "rec": gr.recording_stem(row["path"]),
+                         "started": row["started"], "size": row["size"],
+                         "duration_s": round(row["duration_s"], 1),
+                         "laps": len(idx["laps"]) if idx else None,
+                         "partial": row["partial"],
+                         "recording": writing,
+                         "indexed": idx is not None,
+                         "track": idx.get("track") if idx else None})
+        return {"ok": True, "recordings": rows}
+    except Exception as exc:
+        return {"ok": False,
+                "error": f"could not list telemetry recordings: {_telemetry_reason(exc)}"}
+
+
+def telemetry_laps_data(rec=None, session=None, track=None, car=None):
+    """One recording's laps (car None), or the counted laps comparable with a track and
+    car across the profile's recordings. Arguments are query strings. Never raises."""
+    try:
+        car_id = int(car) if car else None
+        sess = int(session) if session else None
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "car and session must be numbers"}
+    try:
+        import gt7_laps
+        import gt7_recording as gr
+        rec_dir = _telemetry_rec_dir()
+        if car is None:
+            path = _find_recording(rec_dir, rec)
+            if not path:
+                return {"ok": False, "error": f"no recording named {rec!r}"}
+            open_file = _relay_open_file()
+            if open_file and os.path.basename(path).startswith(open_file):
+                return {"ok": False,
+                        "error": "recording in progress: stop the recording to analyse it"}
+            try:
+                idx = _telemetry_index(path)
+            except gr.RecordingError:
+                return {"ok": False, "error": f"{rec} is not a readable recording"}
+            head = {k: idx.get(k) for k in ("rec", "name", "started", "start_ts", "end_ts",
+                                            "dropped", "track")}
+            return {"ok": True, "recording": head, "laps": [dict(lap) for lap in idx["laps"]]}
+        track_id = track or None
+        stem = gr.recording_stem(rec) if rec else None
+        if track_id is None and (stem is None or sess is None):
+            return {"ok": False, "error": "laps on an unknown track compare within one "
+                                          "session: pass rec and session"}
+        open_file, version = _relay_open_file(), _telemetry_data_version()
+        loaded, indexes = [], []
+
+        def dbs():
+            if not loaded:
+                loaded.append(_telemetry_dbs())
+            return loaded[0]
+        for row in gr.list_recordings(rec_dir):
+            if open_file and row["name"].startswith(open_file):
+                continue    # indexing a growing file would rebuild it on every request
+            try:
+                stamp = _telemetry_stamp(row["path"], version)
+                indexes.append(_telemetry_index(row["path"], dbs, stamp))
+            except Exception:  # noqa: BLE001  one unreadable recording must not hide the others
+                continue
+        laps = [dict(lap) for lap in gt7_laps.pool(indexes, track_id, car_id, rec=stem,
+                                                   session=sess)]
+        return {"ok": True, "laps": laps,
+                "best_sectors": gt7_laps.best_sectors(laps),
+                "theoretical_best": gt7_laps.theoretical_best(laps)}
+    except Exception as exc:
+        return {"ok": False, "error": f"could not read the laps: {_telemetry_reason(exc, rec)}"}
+
+
+def telemetry_lap_data(rec, session, lap):
+    """One lap with its 5 m trace for the comparison charts. Never raises."""
+    try:
+        s, n = int(session), int(lap)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "session and lap must be numbers"}
+    try:
+        import gt7_laps
+        import gt7_recording as gr
+        path = _find_recording(_telemetry_rec_dir(), rec)
+        if not path:
+            return {"ok": False, "error": f"no recording named {rec!r}"}
+        open_file = _relay_open_file()
+        if open_file and os.path.basename(path).startswith(open_file):
+            return {"ok": False,
+                    "error": "recording in progress: stop the recording to analyse it"}
+        try:
+            idx = _telemetry_full_index(path)
+        except gr.RecordingError:
+            return {"ok": False, "error": f"{rec} is not a readable recording"}
+        for row in idx["laps"]:
+            if row["session"] == s and row["lap"] == n:
+                return {"ok": True, "lap": {k: v for k, v in row.items() if k != "points"},
+                        "step_m": gt7_laps.STEP_M, "sector_m": gt7_laps.SECTOR_M}
+        return {"ok": False, "error": f"no lap {n} in session {s} of {rec}"}
+    except Exception as exc:
+        return {"ok": False, "error": f"could not read the lap: {_telemetry_reason(exc, rec)}"}
+
+
+def telemetry_tracks_data():
+    """Every GT7 layout for the Set track choice. Never raises."""
+    try:
+        tracks, _cars = _telemetry_dbs()
+        return {"ok": True, "tracks": [{k: t[k] for k in ("id", "track", "layout", "reverse")}
+                                       for t in tracks.layouts()]}
+    except Exception as exc:
+        return {"ok": False,
+                "error": f"could not load the track list: {_telemetry_reason(exc)}"}
+
+
+def telemetry_learn_data(rec, track_id):
+    """Assign a recording to a layout. Without a downloaded racing line for the layout,
+    also learn its line from the longest counted lap, so later recordings on it are
+    recognised; `learned` in the answer says whether that happened. Never raises."""
+    try:
+        import gt7_laps
+        import gt7_recording as gr
+        path = _find_recording(_telemetry_rec_dir(), rec)
+        if not path:
+            return {"ok": False, "error": f"no recording named {rec!r}"}
+        open_file = _relay_open_file()
+        if open_file and os.path.basename(path).startswith(open_file):
+            return {"ok": False,
+                    "error": "recording in progress: stop the recording to analyse it"}
+        key = _telemetry_track_key(path)
+        if key is None:
+            return {"ok": False, "error": "no active profile"}
+        tracks, cars = _telemetry_dbs()
+        info = tracks.name(str(track_id or ""))
+        if info is None:
+            return {"ok": False, "error": "unknown track layout"}
+        if tracks.has_downloaded_line(info["id"]):
+            learned = tracks.learn(info["id"], [], 0.0, key=key)
+            return {"ok": True, "track": gr.brief_track(info), "learned": bool(learned)}
+        try:
+            idx = _telemetry_full_index(path, (tracks, cars))
+        except gr.RecordingError:
+            return {"ok": False, "error": f"{rec} is not a readable recording"}
+        counted = [lap for lap in idx["laps"]
+                   if lap["status"] in gt7_laps.COUNTED and lap.get("points")]
+        if not counted:
+            return {"ok": False, "error": "this recording has no counted lap to learn the "
+                                          "track from"}
+        best = max(counted, key=lambda lap: lap["distance_m"])
+        learned = tracks.learn(info["id"], best["points"], best["distance_m"], key=key)
+        return {"ok": True, "track": gr.brief_track(info), "learned": bool(learned)}
+    except ValueError as exc:
+        return {"ok": False, "error": f"could not learn the track: {exc}"}
+    except OSError as exc:
+        return {"ok": False,
+                "error": f"could not save the learned track: {_telemetry_reason(exc)}"}
+    except Exception as exc:
+        return {"ok": False, "error": f"could not set the track: {_telemetry_reason(exc, rec)}"}
 
 
 def _gt7_data_module():
@@ -7328,6 +7648,11 @@ def run_ui(rest, fail=sys.exit, open_browser=True):
         "profile_import": profile_import_data,
         "report_generate": report_generate_data,
         "report_send": report_send_data,
+        "telemetry_recordings": telemetry_recordings_data,
+        "telemetry_laps": telemetry_laps_data,
+        "telemetry_lap": telemetry_lap_data,
+        "telemetry_tracks": telemetry_tracks_data,
+        "telemetry_learn": telemetry_learn_data,
         "jobs": jobs_mod.JobManager(
             lambda op_args: ops_mod.job_argv(op_args, IS_FROZEN,
                                              _rc_job_executable(),

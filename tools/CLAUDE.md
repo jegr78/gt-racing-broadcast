@@ -170,6 +170,7 @@ python3 tools/broadcast-chat-probe.py https://www.twitch.tv/SomeChannel     # or
 python3 tools/gt7-telemetry-probe.py --ps-ip 192.168.1.42   # heartbeat + decrypt + field dump
 # Stop the relay first: only one listener can own UDP 33740. It requests the extended
 # "~" format; a console still streaming "A" switches only after ~10 s of silence.
+python3 tools/make-demo-recording.py --out runtime/solo-pov/telemetry-recordings   # synthetic GT7 recording for the Telemetry view (needs runtime/gt7/signatures.json; --mirror: unknown track)
 
 # Publish the GitHub wiki from src/docs/wiki/ (maintainer; --dry-run to preview)
 python3 tools/sync-wiki.py

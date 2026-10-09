@@ -337,11 +337,41 @@ def _pct(byte):
     return None if byte is None else byte * 100.0 / 255.0
 
 
-def _car_name(cars, car_id):
-    car = cars.lookup(car_id) if car_id is not None else None
+def car_name(cars, car_id):
+    """"<maker> <name>" from the car tables; "" without a car id or tables."""
+    car = cars.lookup(car_id) if cars is not None and car_id is not None else None
     if car is None:
         return ""
     return f"{car['maker']} {car['name']}" if car.get("maker") else car["name"]
+
+
+def nearest_station(s, driven, length):
+    """The projected distance s, s - L or s + L closest to the driven distance."""
+    return min((s, s - length, s + length), key=lambda v: abs(v - driven))
+
+
+class LapTimeMatcher:
+    """Sets gt7_time_s on each closed lap from GT7's last_ms, which arrives shortly
+    after the line."""
+
+    def __init__(self):
+        self._waiting = []
+        self._prev_last_ms = None
+
+    def lap_closed(self, lap, wall_ts):
+        """Register a lap the engine closed on this packet; call before update()."""
+        lap["gt7_time_s"] = None
+        self._waiting.append((lap, wall_ts + GT7_TIME_WINDOW_S, self._prev_last_ms))
+
+    def update(self, pkt, wall_ts):
+        for item in list(self._waiting):
+            lap, deadline, before = item
+            if pkt.last_ms > 0 and pkt.last_ms != before:
+                lap["gt7_time_s"] = pkt.last_ms / 1000.0
+                self._waiting.remove(item)
+            elif wall_ts > deadline:
+                self._waiting.remove(item)
+        self._prev_last_ms = pkt.last_ms
 
 
 def replay_laps(path):
@@ -355,7 +385,8 @@ def replay_laps(path):
     return r.header, laps, r.dropped
 
 
-def _brief(found):
+def brief_track(found):
+    """A matched or named layout as {"id", "track", "layout", "reverse"}."""
     return {k: found[k] for k in ("id", "track", "layout", "reverse")}
 
 
@@ -366,9 +397,9 @@ def session_tracks(laps, tracks, key=None):
     assigned = tracks.assignment(key) if key else None
     out = {}
     for session in sorted({lap["session"] for lap in laps}):
-        if assigned:
-            info = tracks.name(assigned)
-            out[session] = _brief(info) if info else None
+        info = tracks.name(assigned) if assigned else None
+        if info:
+            out[session] = brief_track(info)
             continue
         found = None
         ranked = sorted((lap for lap in laps if lap["session"] == session and lap["points"]),
@@ -376,7 +407,7 @@ def session_tracks(laps, tracks, key=None):
         for lap in ranked:
             m = tracks.match(lap["points"], lap["distance_m"])
             if m and "id" in m:
-                found = _brief(m)
+                found = brief_track(m)
                 break
             found = found or m
         out[session] = found
@@ -393,8 +424,7 @@ def _lap_dist(eng, pkt, by_session, tracks):
     length = tracks.line_length(found["id"])
     if not s or s[0] is None or not length:
         return dist
-    ref = dist or 0.0
-    return min((s[0], s[0] - length, s[0] + length), key=lambda v: abs(v - ref))
+    return nearest_station(s[0], dist or 0.0, length)
 
 
 def export_csv(path, out_dir, include_all=False, excel=False, cars=None, tracks=None, key=None):
@@ -403,15 +433,15 @@ def export_csv(path, out_dir, include_all=False, excel=False, cars=None, tracks=
     r = Recording(path)
     num = _fmt(excel)
     eng = gt7_telemetry.TelemetryEngine()
-    laps, waiting = [], []
+    laps = []
     eng.on_lap = laps.append
+    times = LapTimeMatcher()
     _h, closed, _d = replay_laps(path) if tracks is not None else (None, [], 0)
     by_session = session_tracks(closed, tracks, key)
     os.makedirs(out_dir, exist_ok=True)
     delimiter = ";" if excel else ","
     encoding = "utf-8-sig" if excel else "utf-8"
     t0 = None
-    prev_last_ms = None
     written = 0
     with open(os.path.join(out_dir, "samples.csv"), "w", newline="",
               encoding=encoding) as fh:
@@ -423,16 +453,8 @@ def export_csv(path, out_dir, include_all=False, excel=False, cars=None, tracks=
             closed = len(laps)
             eng.update(pkt, wall_ts)
             for lap in laps[closed:]:
-                lap["gt7_time_s"] = None
-                waiting.append((lap, wall_ts + GT7_TIME_WINDOW_S, prev_last_ms))
-            for item in list(waiting):
-                lap, deadline, before = item
-                if pkt.last_ms > 0 and pkt.last_ms != before:
-                    lap["gt7_time_s"] = pkt.last_ms / 1000.0
-                    waiting.remove(item)
-                elif wall_ts > deadline:
-                    waiting.remove(item)
-            prev_last_ms = pkt.last_ms
+                times.lap_closed(lap, wall_ts)
+            times.update(pkt, wall_ts)
             if not include_all and (not pkt.on_track or pkt.paused or pkt.loading):
                 continue
             started = eng.lap_started_at()
@@ -460,7 +482,7 @@ def export_csv(path, out_dir, include_all=False, excel=False, cars=None, tracks=
                 num(lap["end"] - t0, 3), num(lap["gt7_time_s"], 3),
                 num(lap["elapsed"], 3), lap["status"], lap["reason"],
                 num(lap["fuel_used"], 2), num(lap["top_speed_mps"] * 3.6, 1),
-                _car_name(cars, lap["car_id"]),
+                car_name(cars, lap["car_id"]),
                 found["track"] if known else "", found["layout"] if known else ""])
     return {"dir": out_dir, "samples": written, "laps": len(laps), "dropped": r.dropped}
 

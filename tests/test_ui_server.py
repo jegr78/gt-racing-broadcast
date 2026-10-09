@@ -239,6 +239,18 @@ def _ctx(jobs=None, init_plan=None, init_step=None, profile_logo=None,
                                         "path": "/x/report.html",
                                         "summary": "1 session, 2 feeds"},
             "report_send": lambda path=None: {"ok": True},
+            "telemetry_recordings": lambda: {"ok": True, "recordings": [
+                {"name": "20261007-201503.gt7rec", "rec": "20261007-201503",
+                 "started": "2026-10-07T20:15:03+02:00", "size": 1000, "duration_s": 600.0,
+                 "laps": None, "partial": False, "recording": False, "indexed": False,
+                 "track": None}]},
+            "telemetry_laps": lambda rec=None, session=None, track=None, car=None: {
+                "ok": True, "laps": []},
+            "telemetry_lap": lambda rec, session, lap: {"ok": False, "error": "no lap"},
+            "telemetry_tracks": lambda: {"ok": True, "tracks": [
+                {"id": "suzuka01", "track": "Suzuka Circuit", "layout": "Full Course",
+                 "reverse": False}]},
+            "telemetry_learn": lambda rec, track_id: {"ok": True, "track": {"id": track_id}},
             "resources": lambda: {"available": False}}
 
 
@@ -1993,8 +2005,8 @@ def _run_js(src):
     if not node:
         print("  (node not installed, JS check skipped)")
         return None
-    return subprocess.run([node, "-e", src], capture_output=True, text=True,
-                          errors="replace", check=True, timeout=30).stdout
+    return subprocess.run([node, "-"], input=src, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", check=True, timeout=30).stdout
 
 
 def t_gt7_data_age_reads_naturally():
@@ -2059,6 +2071,601 @@ def t_solo_device_rows_follow_the_template():
         "applyKindGating must set the template class"
 
 
+def _tm_script(page):
+    start = page.index("// Telemetry view (solo POV, #788)")
+    return page[start:page.index("// end of the Telemetry view", start)]
+
+
+def _tm_fn(tm, name):
+    i = tm.index("function " + name + "(")
+    return tm[i:tm.index("\n}\n", i) + 2]
+
+
+def t_telemetry_view_is_solo_pov_only():
+    page = _cc_page()
+    nav = re.search(r'<button class="([^"]*)" data-nav="telemetry"', page)
+    assert nav and "pov-only" in nav.group(1).split(), "the nav item exists for solo POV only"
+    view = re.search(r'<div class="([^"]*)" data-view="telemetry"', page)
+    assert view and {"view", "pov-only"} <= set(view.group(1).split()), \
+        "the view is hidden outside solo POV by the existing .pov-only rule"
+    show = page[page.index("function showView(name)"):page.index("let _reportPath")]
+    assert "name === 'telemetry'" in show, "opening the view loads the recordings"
+    gate = page[page.index("function applyKindGating(data)"):page.index("async function useProfile(")]
+    assert "currentView === 'telemetry'" in gate, "leaving solo POV leaves the Telemetry view"
+    assert "tmLoad()" in gate, "another solo POV profile shows its own recordings at once"
+    use = page[page.index("async function useProfile("):page.index("function onKindChange()")]
+    assert "tmReset()" in use, "another profile has other recordings"
+    tm = _tm_script(page)
+    assert "innerHTML" not in tm, "recording values reach the page only as text"
+    for route in ("/api/telemetry/recordings", "/api/telemetry/laps?", "/api/telemetry/lap?"):
+        assert route in tm, route
+    assert "tmRenderSectors()" in tm[tm.index("function tmRender()"):]
+
+
+def t_telemetry_charts_share_one_cursor():
+    tm = _tm_script(_cc_page())
+    keys = re.findall(r"\{key: '(\w+)'", tm[tm.index("const TM_CH"):tm.index("];", tm.index("const TM_CH"))])
+    assert keys == ["speed_kmh", "throttle", "brake", "steer_deg", "gear", "delta"], keys
+    assert "addEventListener('pointermove', tmHover)" in tm
+    assert "tmRenderCharts()" in _tm_fn(tm, "tmRender"), "every pair render redraws the charts"
+
+
+def t_telemetry_map_colours_mini_sectors():
+    tm = _tm_script(_cc_page())
+    fn = tm[tm.index("function tmRenderMap()"):tm.index("function tmMapCursor(")]
+    assert "(p.z - z0) * s" in fn, "GT7 z runs downward on the map, as in the report"
+    assert "tmSecClass(diff)" in fn and "tm-seg" in fn
+    assert "tmMapCursor(ra, rb)" in tm[tm.index("function tmHover("):tm.index("function tmLeave(")]
+    assert "tmRenderMap()" in _tm_fn(tm, "tmRender"), "every pair render redraws the map"
+
+
+def t_telemetry_set_track_confirms_then_learns():
+    tm = _tm_script(_cc_page())
+    learn = tm[tm.index("async function tmLearn()"):]
+    learn = learn[:learn.index("\n}\n")]
+    assert learn.index("confirmModal(") < learn.index("fetch('/api/telemetry/learn'"), \
+        "learning writes machine-wide data, so it is confirmed first"
+    assert "tmLapCache.clear()" in learn and "tmSelectRec(" in learn
+    assert "/api/telemetry/tracks" in tm
+    sel = tm[tm.index("async function tmSelectRec("):tm.index("function tmRenderLaps()")]
+    assert "tmShowSetTrack(d.recording.track)" in sel
+
+
+_TM_MAP_COUNT = """
+const drawn = () => {
+  const n = {};
+  const walk = e => {
+    const a = e.attrs || {};
+    const k = e.tagName + (a.class ? '.' + a.class : '');
+    n[k] = (n[k] || 0) + 1;
+    if (e.tagName === 'text') n.note = (n.note || 0) + 1;
+    e.kids.forEach(walk);
+  };
+  $('tm-map').kids.forEach(walk);
+  return ['path.tm-a', 'path.tm-seg gain', 'path.tm-seg loss', 'path.tm-seg even', 'note']
+    .map(k => n[k] || 0).join(',');
+};
+const trace = n => Array.from({length: n}, (_, i) => ({d: i * 5, t: i, x: i, z: i * i}));
+"""
+
+
+def t_telemetry_map_draws_sectors_and_hides_cursor_past_the_lap():
+    out = _tm_node(_TM_MAP_COUNT + """
+tmState.sectorM = 10;
+tmState.lapA = {trace: trace(7), sectors: [1.5, 1.5, 3.0002]};
+tmState.lapB = {trace: trace(7), sectors: [1, 2, 3]};
+tmRenderMap();
+const pair = drawn();
+const P = tmState.map.P;
+const axes = [P({x: 6, z: 0})[0] > P({x: 0, z: 0})[0], P({x: 0, z: 36})[1] > P({x: 0, z: 0})[1]];
+tmMapCursor({x: 1, z: 1}, null);
+const vis = [tmState.map.dotA.attrs.visibility, tmState.map.dotB.attrs.visibility];
+tmState.lapA = null;
+tmRenderMap();
+const alone = drawn();
+tmState.lapB = {trace: trace(7).map(p => ({...p, x: null, z: null})), sectors: [1, 2, 3]};
+tmRenderMap();
+console.log([pair, axes.join(','), vis.join(','), alone, drawn(), String(tmState.map)].join('|'));""")
+    if out is not None:
+        assert out.strip() == "1,1,1,1,0|true,true|visible,hidden|0,0,0,3,0|0,0,0,0,1|null", \
+            f"B per mini-sector gain/loss/even, x right and z down, no dot past a lap: {out!r}"
+
+
+def t_telemetry_map_keeps_a_on_top_and_centres_the_layout():
+    out = _tm_node(_TM_MAP_COUNT + """
+tmState.sectorM = 10;
+tmState.lapA = {trace: trace(5), sectors: [1.5, 1.5]};
+tmState.lapB = {trace: trace(9), sectors: [1, 2, 3, 4]};
+tmRenderMap();
+const pair = drawn();
+const kids = $('tm-map').kids.map(k => k.tagName + '.' + ((k.attrs || {}).class || ''));
+const top = kids.indexOf('path.tm-a') > kids.lastIndexOf('path.tm-seg even');
+const tall = tmState.map.P({x: 0, z: 0})[0], W = tmState.map.W;
+const xs = [tall, tmState.map.P({x: 8, z: 0})[0]];
+tmState.lapA = null;
+tmState.lapB = {trace: trace(9).map(p => ({...p, x: p.z, z: p.x})), sectors: [1, 2, 3, 4]};
+tmRenderMap();
+const vb = $('tm-map').attrs.viewBox.split(' ').map(Number);
+const wide = [tmState.map.P({x: 0, z: 0}), tmState.map.P({x: 64, z: 8})];
+console.log([pair, top, Math.round(xs[0] + xs[1]) === W,
+             wide[0][0] === 12, Math.round(wide[1][0]) === W - 12,
+             wide[0][1] === 12, Math.round(wide[1][1]) === vb[3] - 12].join('|'));""")
+    if out is not None:
+        assert out.strip() == "1,1,1,2,0|true|true|true|true|true|true", \
+            f"A lies on top, a sector past A's end is even, the layout sits centred: {out!r}"
+
+
+def t_telemetry_sector_class_is_shared_by_map_and_table():
+    tm = _tm_script(_cc_page())
+    out = _run_js(_tm_fn(tm, "tmSecClass") + """
+console.log([null, 0.0004, -0.0004, 0.0005, -0.0005, 1].map(tmSecClass).join(','));""")
+    if out is not None:
+        assert out.strip() == "even,even,even,loss,gain,loss", out
+    for fn in ("tmRenderMap", "tmRenderSectors"):
+        body = tm[tm.index("function " + fn + "("):]
+        body = body[:body.index("\n}\n")]
+        assert "tmSecClass(" in body and "'gain'" not in body and "'loss'" not in body, \
+            f"{fn} uses the shared gain/loss rule"
+
+
+def t_telemetry_refit_redraws_only_on_a_width_change():
+    out = _tm_node(_TM_MAP_COUNT + """
+tmState.sectorM = 10;
+tmState.lapB = {trace: trace(7), sectors: [1, 2, 3]};
+tmRender();
+const first = [$('tm-charts').kids[0], $('tm-map').kids[0]];
+tmRefit();
+const same = [$('tm-charts').kids[0] === first[0], $('tm-map').kids[0] === first[1]];
+$('tm-charts').getBoundingClientRect = () => ({left: 0, width: 640});
+$('tm-map').getBoundingClientRect = () => ({left: 0, width: 300});
+tmRefit();
+const moved = [$('tm-charts').kids[0] === first[0], $('tm-map').kids[0] === first[1]];
+$('tm-charts').getBoundingClientRect = () => ({left: 0, width: 0});
+$('tm-map').getBoundingClientRect = () => ({left: 0, width: 0});
+const kept = $('tm-charts').kids[0];
+tmRefit();
+console.log([same.join(','), moved.join(','), $('tm-charts').kids[0] === kept, tmState.chart.W].join('|'));""")
+    if out is not None:
+        assert out.strip() == "true,true|false,false|true|640", \
+            f"a refit redraws only a changed width and skips a hidden view: {out!r}"
+
+
+def t_telemetry_showing_the_view_refits_a_loaded_pair():
+    page = _cc_page()
+    show = page[page.index("function showView(name)"):page.index("let _reportPath")]
+    assert "name === 'telemetry' && tmState.lapB) tmRefit()" in show, \
+        "a pair drawn while the view was hidden is redrawn at the real width"
+    tm = _tm_script(page)
+    resize = tm[tm.index("window.addEventListener('resize'"):]
+    assert "tmRefit()" in resize, "a resize redraws through the width check"
+
+
+def t_telemetry_delta_and_paths_follow_the_traces():
+    tm = _tm_script(_cc_page())
+    out = _run_js(_tm_fn(tm, "tmDelta") + _tm_fn(tm, "tmPath") + """
+const tr = ts => ts.map((t, i) => ({d: i * 5, t}));
+console.log(JSON.stringify(tmDelta({trace: tr([0, 1, 2])}, {trace: tr([0, 0.5, 1, 1.5])})));
+const rows = [{d: 0, v: 1}, {d: 5, v: 2}, {d: 10, v: null}, {d: 15, v: 3}];
+console.log(tmPath(rows, 'v', d => d, v => 10 * v, false));
+console.log(tmPath(rows.slice(0, 2), 'v', d => d, v => 10 * v, true));
+console.log(tmPath([], 'v', d => d, v => v, false));""")
+    if out is not None:
+        assert out.strip().splitlines() == [
+            '[{"d":0,"delta":0},{"d":5,"delta":-0.5},{"d":10,"delta":-1}]',
+            "M0.0 10.0L5.0 20.0M15.0 30.0", "M0.0 10.0H5.0V20.0", "M0 0"], \
+            "delta is B minus A over the stations both laps reach; a gap lifts the pen"
+
+
+def t_node_script_goes_through_stdin():
+    seen = []
+    real = subprocess.run
+    subprocess.run = lambda args, **kw: seen.append((args, kw)) or real(args, **kw)
+    try:
+        out = _run_js("console.log('x'.repeat(40000).length)")
+    finally:
+        subprocess.run = real
+    if out is not None:
+        assert out.strip() == "40000" and seen[0][0][1:] == ["-"] and "input" in seen[0][1], \
+            f"the script reaches node on stdin, so no command line grows with the page: {seen[0][0][1:]}"
+
+
+def t_telemetry_closing_point_off_the_grid_keeps_delta_and_hover_aligned():
+    out = _tm_node("""
+const tr = (ts, end) => ts.map((t, i) => ({d: i * 5, t, speed_kmh: 100, throttle: 50, brake: 0,
+                                         steer_deg: 0, gear: 3, x: i, z: 0}))
+  .concat([{d: end, t: ts.length, speed_kmh: 100, throttle: 50, brake: 0, steer_deg: 0, gear: 3,
+            x: 99, z: 0}]);
+const same = tmDelta({trace: tr([0, 1, 2], 12.3)}, {trace: tr([0, 0.5, 1], 12.3)});
+const apart = tmDelta({trace: tr([0, 1, 2], 12.3)}, {trace: tr([0, 0.5, 1, 1.5], 17.1)});
+tmState.lapA = {trace: tr([0, 1, 2, 3], 17.4)};
+tmState.lapB = {trace: tr([0, 0.5, 1], 12.3), sectors: [1]};
+tmRenderCharts();
+const maxD = tmState.chart.maxD;
+tmHover({clientX: 799});
+const edge = tmState.chart.panels[0].read.textContent.replace(/\u00b7/g, '-');
+console.log([JSON.stringify(same), JSON.stringify(apart), maxD, edge].join('|'));""")
+    if out is not None:
+        same, apart, max_d, edge = out.strip().split("|")
+        assert same.endswith('{"d":10,"delta":-1},{"d":12.3,"delta":0}]'), \
+            f"two laps closing at the same length pair their closing points: {same}"
+        assert "12.3" not in apart and "17.1" not in apart, \
+            f"closing points at different distances are never paired: {apart}"
+        assert max_d == "17.4", max_d
+        assert edge.startswith("0.02 km") and "100.0 / -" in edge, \
+            f"past B's closing point the hover shows A only: {edge!r}"
+
+
+def t_telemetry_charts_without_lap_a_show_b_alone():
+    out = _tm_node("""
+const trace = ts => ts.map((t, i) => ({d: i * 5, t, speed_kmh: 100 + i, throttle: 50, brake: 0,
+                                       steer_deg: i - 1, gear: 3}));
+const drawn = () => {
+  const n = {};
+  const walk = e => {
+    const a = e.attrs || {};
+    const k = e.tagName + (a.class ? '.' + a.class : '');
+    n[k] = (n[k] || 0) + 1;
+    if (e.tagName === 'text' && e._t === 'no lap A to compare') n.note = (n.note || 0) + 1;
+    e.kids.forEach(walk);
+  };
+  $('tm-charts').kids.forEach(walk);
+  return ['path.tm-a', 'path.tm-b', 'path.tm-gain', 'path.tm-loss', 'line.tm-zero', 'note']
+    .map(k => n[k] || 0).join(',');
+};
+tmState.lapA = null; tmState.lapB = {trace: trace([0, 1, 2, 3])};
+tmRenderCharts();
+const alone = drawn();
+tmState.lapA = {trace: trace([0, 1.1, 2.2])};
+tmRenderCharts();
+const pair = drawn();
+tmHover({clientX: 799});
+const late = tmState.chart.panels[5].read.textContent;
+tmClearPair('');
+console.log([alone, pair, JSON.stringify(late), String(tmState.chart), $('tm-charts').kids.length].join('|'));""")
+    if out is not None:
+        assert out.strip() == '0,5,0,0,1,1|5,6,1,1,2,0|""|null|0', \
+            f"without A only B is drawn, the delta panel holds a note and no zero line: {out!r}"
+
+
+def t_telemetry_times_read_as_lap_times():
+    tm = _tm_script(_cc_page())
+    out = _run_js(_tm_fn(tm, "tmTime") + _tm_fn(tm, "tmSigned") + """
+console.log([tmTime(83.456), tmTime(9.5), tmTime(3600), tmSigned(0.25), tmSigned(-1),
+             tmSigned(0.0001)].join("|"));""")
+    if out is not None:
+        assert out.strip() == "1:23.456|0:09.500|60:00.000|+0.250|-1.000|0.000", out
+
+
+def t_telemetry_track_label_names_a_reverse_layout():
+    tm = _tm_script(_cc_page())
+    out = _run_js(_tm_fn(tm, "tmTrackName") + _tm_fn(tm, "tmTrackLabel") + """
+console.log([tmTrackLabel(null), tmTrackLabel({candidates: []}),
+             tmTrackLabel({track: 'Alsace', layout: 'Village', reverse: true}),
+             tmTrackLabel({track: 'Ring', layout: '', reverse: false})].join('|'));""")
+    if out is not None:
+        assert out.strip() == "track unknown|track ambiguous|Alsace - Village (reverse)|Ring", \
+            f"the Laps label names the layout like the picker: {out!r}"
+
+
+def t_telemetry_recording_rows_mark_open_files_and_unindexed_laps():
+    tm = _tm_script(_cc_page())
+    fn = tm[tm.index("function tmRenderRecs()"):tm.index("async function tmSelectRec(")]
+    assert "r.recording ? ' (recording)'" in fn and "r.partial ? ' (unclosed)'" in fn
+    assert "r.laps == null ? ''" in fn, "the list has no lap count before the first index"
+
+
+_TM_HARNESS = r"""
+class El {
+  constructor(tag) { this.tagName = tag; this.kids = []; this.cells = []; this._t = '';
+                     this.hidden = false; this.disabled = false; this.className = '';
+                     this.value = ''; this.title = ''; this.selected = false; }
+  get textContent() { return this._t + this.kids.map(k => k.textContent).join(''); }
+  set textContent(v) { this._t = String(v); this.kids = []; this.cells = []; }
+  appendChild(c) { this.kids.push(c); return c; }
+  append(...c) { c.forEach(x => this.appendChild(x)); }
+  get options() { return this.kids.filter(k => k.tagName === 'option'); }
+  createTHead() { return this.appendChild(new El('sec')); }
+  createTBody() { return this.appendChild(new El('sec')); }
+  createTFoot() { return this.appendChild(new El('sec')); }
+  insertRow() { return this.appendChild(new El('tr')); }
+  insertCell() { const c = this.appendChild(new El('td')); this.cells.push(c); return c; }
+  setAttribute(k, v) { (this.attrs = this.attrs || {})[k] = String(v); }
+  addEventListener() {}
+  getBoundingClientRect() { return {left: 0, width: 800}; }
+}
+const window = {addEventListener() {}};
+const els = {};
+const $ = id => els[id] || (els[id] = new El(id));
+const document = {createElement: t => new El(t), createElementNS: (n, t) => new El(t)};
+const pending = [];
+const calls = [];
+globalThis.fetch = url => new Promise(res => { calls.push(url); pending.push({url, res}); });
+function answer(part, data) {
+  const hit = pending.filter(p => p.url.includes(part));
+  hit.forEach(p => { pending.splice(pending.indexOf(p), 1); p.res({json: async () => data}); });
+  return hit.length;
+}
+const tick = async () => { for (let i = 0; i < 20; i++) await new Promise(r => setTimeout(r, 0)); };
+const lap = (rec, n, t, car) => ({rec, session: 1, lap: n, time_s: t, status: 'counted',
+  car: 'Car', car_id: car, track_id: 't1', track: 'Track', layout: '', sectors: [t / 2, t / 2],
+  trace: []});
+const recLaps = (rec, laps) => ({ok: true, recording: {rec, track: null}, laps});
+const pool = laps => ({ok: true, laps, best_sectors: [], theoretical_best: null,
+                       reference: laps[0] || null});
+"""
+
+
+def _tm_node(body):
+    """stdout of `body` run against the Telemetry block with a fake DOM and fetch."""
+    return _run_js(_TM_HARNESS + _tm_script(_cc_page()) + "\n(async () => {\n" + body + "\n})();")
+
+
+def t_telemetry_open_recording_is_not_indexed_on_load():
+    tm = _tm_script(_cc_page())
+    load = _tm_fn(tm, "tmLoad")
+    assert "!r.recording" in load, "the first selection skips the file the relay is writing"
+
+
+def t_telemetry_late_laps_answer_for_another_recording_is_dropped():
+    out = _tm_node("""
+tmSelectRec('X'); tmSelectRec('X'); tmSelectRec('Y');
+await tick();
+const xCalls = calls.filter(u => u.includes('rec=X')).length;
+answer('rec=Y', recLaps('Y', [lap('Y', 1, 90, 7)]));
+await tick();
+answer('rec=X', recLaps('X', [lap('X', 1, 80, 7), lap('X', 2, 81, 7)]));
+await tick();
+console.log([xCalls, tmState.rec, tmState.recLaps.map(tmKey).join(','), tmState.b].join(' '));""")
+    if out is not None:
+        assert out.strip() == "1 Y Y|1|1 Y|1|1", \
+            f"one request per recording and the late answer for X must not win: {out!r}"
+
+
+def t_telemetry_late_pool_answer_for_another_lap_is_dropped():
+    out = _tm_node("""
+const l1 = lap('R', 1, 80, 1), l2 = lap('R', 2, 79, 2);
+tmState.recLaps = [l1, l2];
+tmSelectB(l1); tmSelectB(l2); tmSelectB(l2);
+await tick();
+const n2 = calls.filter(u => u.includes('car=2')).length;
+const status = $('tm-sec-sub').textContent.replace(/\\u2026/g, '...');
+answer('car=2', pool([l2, lap('S', 1, 78, 2)]));
+await tick();
+answer('car=1', pool([l1]));
+await tick();
+answer('/lap?', {ok: true, lap: lap('S', 1, 78, 2), sector_m: 200});
+await tick();
+console.log([n2, status, tmState.b, tmState.pool.laps.length].join('|'));""")
+    if out is not None:
+        assert out.strip() == "1|Loading comparable laps...|R|1|2|2", \
+            f"one pool request per query, a loading note and the newest lap wins: {out!r}"
+
+
+def t_telemetry_clearing_the_pair_drops_a_pending_load():
+    out = _tm_node("""
+const b = lap('R', 1, 80, 1);
+tmSelectB(b);
+await tick();
+answer('car=1', pool([b]));
+await tick();
+tmSelectB(b);
+await tick();
+answer('/lap?', {ok: true, lap: b, sector_m: 200});
+await tick();
+console.log([String(tmState.lapB), $('tm-sec-sub').textContent.replace(/\\u2026/g, '...')].join('|'));""")
+    if out is not None:
+        assert out.strip() == "null|Loading comparable laps...", \
+            f"a lap answer from before the clear must not draw under the loading note: {out!r}"
+
+
+def t_telemetry_reference_is_the_fastest_other_lap():
+    out = _tm_node("""
+const b = lap('R', 3, 79, 1);
+tmSelectB(b);
+await tick();
+answer('car=1', pool([b, lap('R', 1, 80, 1), lap('R', 2, 81, 1)]));
+await tick();
+const multi = tmState.a;
+tmSelectB(b);
+await tick();
+answer('car=1', pool([b]));
+await tick();
+answer('/lap?', {ok: true, lap: b, sector_m: 200});
+await tick();
+console.log([multi, String(tmState.a), $('tm-a').options.length, $('tm-a').disabled,
+             $('tm-sec-sub').textContent.replace(/\\u00b7/g, '-')].join('|'));""")
+    if out is not None:
+        assert out.strip() == "R|1|1|null|1|true|200 m - no other lap", \
+            f"A is the fastest lap other than B, and a lone lap says so: {out!r}"
+
+
+def t_telemetry_errors_leave_placeholders_and_no_stale_banner():
+    out = _tm_node("""
+tmState.recs = [{rec: 'X'}, {rec: 'Y'}];
+tmSelectRec('X');
+await tick();
+answer('rec=X', {ok: false, error: 'recording in progress: stop the recording to analyse it'});
+await tick();
+const placeholder = [$('tm-a').options.length, $('tm-a').options[0].disabled, $('tm-a').disabled].join(',');
+tmState.a = 'X|1|1'; tmState.b = 'X|1|2';
+tmLoadPair();
+tmSelectRec('Y');
+await tick();
+answer('/lap?', {ok: false, error: 'stale lap'});
+await tick();
+console.log([placeholder, $('tm-err').hidden, $('tm-err').textContent].join('|'));""")
+    if out is not None:
+        assert out.strip() == "1,true,true|true|", \
+            f"empty pickers carry a disabled placeholder and a stale lap error stays off the banner: {out!r}"
+
+
+def t_telemetry_failed_list_retries_on_the_next_visit():
+    out = _tm_node("""
+tmLoad(); tmLoad();
+await tick();
+answer('/recordings', {ok: false, error: 'boom'});
+await tick();
+console.log([tmState.loaded, calls.length, $('tm-recs').textContent === ''].join('|'));""")
+    if out is not None:
+        assert out.strip() == "false|2|true", f"a failed list must not count as loaded: {out!r}"
+
+
+_TM_TRACKS = """
+const tracks = {ok: true, tracks: [
+  {id: '9', track: 'Suzuka', layout: 'East', reverse: false},
+  {id: '3', track: 'Brands Hatch', layout: 'Indy', reverse: false},
+  {id: '5', track: 'Suzuka', layout: 'Circuit', reverse: false},
+  {id: '7', track: 'Brands Hatch', layout: 'Grand Prix', reverse: true}]};
+const opts = () => $('tm-track-pick').options.map(o => o.value).join(',');
+"""
+
+
+def t_telemetry_set_track_lists_candidates_first_and_loads_once():
+    out = _tm_node(_TM_TRACKS + """
+tmState.recs = [{rec: 'X'}, {rec: 'Y'}, {rec: 'Z'}];
+tmSelectRec('X'); tmSelectRec('Y');
+await tick();
+answer('rec=X', {ok: true, recording: {rec: 'X', track: null}, laps: []});
+answer('rec=Y', {ok: true, recording: {rec: 'Y', track: {candidates: [{id: '5'}, {id: '9'}]}}, laps: []});
+await tick();
+const one = calls.filter(u => u.includes('/tracks')).length;
+answer('/tracks', tracks);
+await tick();
+const ambiguous = [$('tm-settrack').hidden, opts(), $('tm-track-pick').options[2].textContent].join(' ');
+tmSelectRec('Z');
+await tick();
+answer('rec=Z', {ok: true, recording: {rec: 'Z', track: {id: '9', track: 'Suzuka', layout: 'East'}}, laps: []});
+await tick();
+const known = $('tm-settrack').hidden;
+tmSelectRec('X');
+await tick();
+answer('rec=X', recLaps('X', []));
+await tick();
+console.log([one, ambiguous, known, $('tm-settrack').hidden, opts(),
+             calls.filter(u => u.includes('/tracks')).length].join('|'));""")
+    if out is not None:
+        assert out.strip() == ("1|false 5,9,7,3 Brands Hatch - Grand Prix (reverse)|true|false"
+                               "|7,3,5,9|1"), \
+            f"candidates first, the rest by track and layout, one track list per view load: {out!r}"
+
+
+def t_telemetry_set_track_failed_list_retries():
+    out = _tm_node(_TM_TRACKS + """
+tmShowSetTrack(null); tmShowSetTrack(null);
+await tick();
+const once = calls.length;
+answer('/tracks', {ok: false, error: 'no list'});
+await tick();
+const failed = [String(tmState.tracks), $('tm-err').textContent].join(',');
+tmShowSetTrack(null);
+await tick();
+answer('/tracks', tracks);
+await tick();
+console.log([once, failed, opts()].join('|'));""")
+    if out is not None:
+        assert out.strip() == "1|null,no list|7,3,5,9", \
+            f"a failed track list shows its error and is fetched again: {out!r}"
+
+
+def t_telemetry_learn_reloads_the_recording_and_drops_a_late_answer():
+    out = _tm_node(_TM_TRACKS + """
+globalThis.confirmModal = async () => true;
+tmState.recs = [{rec: 'X', indexed: true}, {rec: 'Y', indexed: true}];
+tmState.rec = 'X';
+tmShowSetTrack(null);
+await tick();
+answer('/tracks', tracks);
+await tick();
+$('tm-track-pick').value = '5'; $('tm-track-pick').selectedIndex = 2;
+tmLapCache.set('X|1|1', {});
+let body = null;
+const realFetch = globalThis.fetch;
+globalThis.confirmModal = async () => { $('tm-track-pick').value = '9'; return true; };
+globalThis.fetch = (url, opts) => { if (opts && opts.body) body = JSON.parse(opts.body).track_id;
+                                    return realFetch(url); };
+tmLearn();
+await tick();
+answer('/learn', {ok: false, error: 'recording in progress: stop the recording to analyse it'});
+await tick();
+const refused = $('tm-err').textContent + (body === '5' ? '' : ' wrong id ' + body);
+globalThis.confirmModal = async () => true;
+tmLearn();
+await tick();
+answer('/learn', {ok: true, track: {id: '5'}});
+await tick();
+const reload = [tmLapCache.size, calls.filter(u => u.includes('rec=X')).length, tmState.rec,
+                tmState.recs[1].indexed,
+                $('tm-err').hidden, $('tm-learn').disabled].join(',');
+answer('rec=X', recLaps('X', []));
+await tick();
+tmLearn();
+await tick();
+tmSelectRec('Y');
+await tick();
+answer('/learn', {ok: false, error: 'late'});
+await tick();
+console.log([refused, reload, tmState.rec, calls.filter(u => u.includes('rec=X')).length,
+             $('tm-err').textContent].join('|'));""")
+    if out is not None:
+        assert out.strip() == ("recording in progress: stop the recording to analyse it"
+                               "|0,1,X,false,true,false|Y|1|"), \
+            f"the server error shows, success reloads the recording, a late answer is dropped: {out!r}"
+
+
+def t_telemetry_learn_says_whether_a_line_was_learned():
+    out = _tm_node(_TM_TRACKS + """
+globalThis.confirmModal = async () => true;
+tmState.recs = [{rec: 'X'}];
+tmState.rec = 'X';
+tmShowSetTrack(null);
+await tick();
+answer('/tracks', tracks);
+await tick();
+const learn = async (learned) => {
+  $('tm-track-pick').value = '5'; $('tm-track-pick').selectedIndex = 2;
+  tmLearn();
+  await tick();
+  answer('/learn', {ok: true, learned, track: {id: '5'}});
+  await tick();
+  answer('rec=X', recLaps('X', []));
+  await tick();
+  return [$('tm-note').hidden, $('tm-note').textContent].join(' ');
+};
+const assigned = await learn(false), learnedNote = await learn(true);
+tmSelectRec('X');
+console.log([assigned, learnedNote, $('tm-note').hidden].join('|'));""")
+    if out is not None:
+        assert out.strip() == ("false X now uses Suzuka - Circuit. The downloaded racing line "
+                               "for it stays as it is."
+                               "|false X now uses Suzuka - Circuit. racecast learned the line "
+                               "from its longest counted lap, so later recordings on it are "
+                               "recognised.|true"), \
+            (f"the note says whether a line was learned, survives a reload without laps "
+             f"and goes with the next selection: {out!r}")
+
+
+def t_telemetry_live_recording_offers_no_set_track():
+    out = _tm_node(_TM_TRACKS + """
+tmState.recs = [{rec: 'X', recording: true}];
+tmSelectRec('X');
+await tick();
+answer('rec=X', {ok: false, error: 'recording in progress: stop the recording to analyse it'});
+await tick();
+tmState.rec = 'X';
+tmShowSetTrack(null);
+await tick();
+console.log([$('tm-settrack').hidden, calls.filter(u => u.includes('/tracks')).length].join('|'));""")
+    if out is not None:
+        assert out.strip() == "true|0", f"the file the relay writes cannot be learned from: {out!r}"
+
+
+def t_telemetry_view_follows_the_active_profile():
+    page = _cc_page()
+    gate = page[page.index("function applyKindGating(data)"):page.index("async function useProfile(")]
+    assert "tmState.profile" in gate and "tmReset()" in gate, \
+        "every profile switch path (use, import) resets the Telemetry view"
+
+
 def t_api_resources_route():
     ctx = _ctx()
     ctx["resources"] = lambda: {"available": True, "cpu_pct": 42.0, "cpu_level": "green",
@@ -2112,6 +2719,127 @@ def t_api_ps_save_rejects_bad_ip():
     finally:
         httpd.shutdown()
 
+
+def t_telemetry_routes_pass_their_arguments():
+    calls = []
+    ctx = _ctx()
+    ctx["telemetry_laps"] = lambda *a: calls.append(("laps",) + a) or {"ok": True, "laps": []}
+    ctx["telemetry_lap"] = lambda *a: calls.append(("lap",) + a) or {"ok": False, "error": "x"}
+    ctx["telemetry_learn"] = lambda *a: calls.append(("learn",) + a) or {
+        "ok": False, "error": "unknown track layout"}
+    httpd, port = _serve(ctx)
+    try:
+        code, body = _get(port, "/api/telemetry/recordings")
+        assert code == 200 and json.loads(body)["recordings"][0]["rec"] == "20261007-201503"
+        assert _get(port, "/api/telemetry/laps?rec=20261007-201503")[0] == 200
+        assert _get(port, "/api/telemetry/laps?track=&car=3424&rec=r&session=2")[0] == 200
+        code, body = _get(port, "/api/telemetry/lap?rec=r&session=1&lap=3")
+        assert code == 200 and json.loads(body)["ok"] is False, "a GET reports a miss in the body"
+        code, body = _get(port, "/api/telemetry/tracks")
+        assert code == 200 and json.loads(body)["tracks"][0]["id"] == "suzuka01"
+        code, _ = _post_json(port, "/api/telemetry/learn", {"rec": "r", "track_id": "x"})
+        assert code == 400, "a refused learn is a client error"
+        assert calls == [("laps", "20261007-201503", None, None, None),
+                         ("laps", "r", "2", "", "3424"),
+                         ("lap", "r", "1", "3"),
+                         ("learn", "r", "x")], calls
+    finally:
+        httpd.shutdown()
+
+
+def t_telemetry_routes_stay_json_on_errors():
+    ctx = _ctx()
+
+    def boom(*_a):
+        raise RuntimeError("disk at /srv/league/rec.gt7rec")
+    ctx["telemetry_recordings"] = boom
+    httpd, port = _serve(ctx)
+    try:
+        code, body = _get(port, "/api/telemetry/recordings")
+        err = json.loads(body)["error"]
+        assert code == 500 and "RuntimeError" in err and "/srv/league" not in err, err
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/api/telemetry/learn",
+                                     method="POST", data=b"{bad",
+                                     headers={"Content-Type": "application/json"})
+        try:
+            with _urlopen(req, timeout=5) as r:
+                code = r.status
+        except urllib.error.HTTPError as e:
+            code = e.code
+        assert code == 400, "a malformed body is refused"
+        code, body = _post_json(port, "/api/telemetry/learn", {"rec": "r", "track_id": "suzuka01"})
+        assert code == 200 and json.loads(body)["track"]["id"] == "suzuka01"
+    finally:
+        httpd.shutdown()
+
+
+def t_telemetry_routes_500_paths_report_only_the_exception_type():
+    ctx = _ctx()
+
+    def boom(*_a):
+        raise RuntimeError("disk at /srv/league/rec.gt7rec")
+    ctx["telemetry_laps"] = boom
+    ctx["telemetry_lap"] = boom
+    ctx["telemetry_tracks"] = boom
+    ctx["telemetry_learn"] = boom
+    httpd, port = _serve(ctx)
+    try:
+        code, body = _get(port, "/api/telemetry/laps?rec=r")
+        err = json.loads(body)["error"]
+        assert code == 500 and "RuntimeError" in err and "/srv/league" not in err, err
+        code, body = _get(port, "/api/telemetry/lap?rec=r&session=1&lap=1")
+        err = json.loads(body)["error"]
+        assert code == 500 and "RuntimeError" in err and "/srv/league" not in err, err
+        code, body = _get(port, "/api/telemetry/tracks")
+        err = json.loads(body)["error"]
+        assert code == 500 and "RuntimeError" in err and "/srv/league" not in err, err
+        code, body = _post_json(port, "/api/telemetry/learn", {"rec": "r", "track_id": "x"})
+        err = json.loads(body)["error"]
+        assert code == 500 and "RuntimeError" in err and "/srv/league" not in err, err
+    finally:
+        httpd.shutdown()
+
+
+def t_telemetry_learn_rejects_a_non_object_json_body():
+    ctx = _ctx()
+    httpd, port = _serve(ctx)
+    try:
+        for bad in ([1, 2, 3], "x", 5, None):
+            code, body = _post_json(port, "/api/telemetry/learn", bad)
+            assert code == 400, (bad, code, body)
+    finally:
+        httpd.shutdown()
+
+
+def t_body_json_rejects_negative_and_oversized_content_length():
+    import http.client
+    ctx = _ctx()
+    httpd, port = _serve(ctx)
+    try:
+        payload = json.dumps({"rec": "r", "track_id": "x"}).encode("utf-8")
+        for path, length, body, want in (
+                ("/api/telemetry/learn", "-1", payload, "invalid Content-Length"),
+                ("/api/telemetry/learn", str(us.MAX_JSON_BODY_BYTES + 1), payload,
+                 "request body too large"),
+                ("/api/telemetry/learn", "5", b"{oops", "malformed JSON body"),
+                ("/api/profile/use", str(us.MAX_JSON_BODY_BYTES + 1), payload,
+                 "request body too large")):
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            conn.putrequest("POST", path)
+            conn.putheader("Content-Type", "application/json")
+            conn.putheader("Content-Length", length)
+            conn.endheaders()
+            conn.send(body)
+            resp = conn.getresponse()
+            err = json.loads(resp.read())["error"]
+            assert (resp.status, err) == (400, want), (path, length, resp.status, err)
+            conn.close()
+    finally:
+        httpd.shutdown()
+    with open(us.__file__, encoding="utf-8") as fh:
+        src = fh.read()
+    assert '"error": "malformed JSON body"' not in src, \
+        "every route reports the body error _body_json found"
 
 
 def t_restore_fonts_button_confirms_before_forcing():
