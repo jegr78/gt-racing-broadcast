@@ -409,12 +409,13 @@ def broadcast_timeline(events):
 
 def build_report(samples, events, name_for_stint, event_title, window, now,
                  host=None, prebuffer_s=hs.DEFAULT_FEED_PREBUFFER_S,
-                 backlog_warn_s=hs.FEED_BACKLOG_WARN_S):
+                 backlog_warn_s=hs.FEED_BACKLOG_WARN_S, telemetry=None):
     """Aggregate ONE session (already bucket-deduplicated) into the report dict.
     `window` = (from_ts, to_ts). `samples` is assumed non-empty (the caller guards).
     `host` is the producer machine's name, surfaced in the report so it is clear
     which box produced it. `prebuffer_s`/`backlog_warn_s` are the relay's fan-out
-    reserve and backlog threshold, which decide when the output counts as behind live."""
+    reserve and backlog threshold, which decide when the output counts as behind live.
+    `telemetry` is the solo POV block from report_telemetry.telemetry_block, or None."""
     frm, to = window
     duration_s = max(0.0, (to or 0) - (frm or 0))
     windows = on_air_windows(events, to)
@@ -484,6 +485,7 @@ def build_report(samples, events, name_for_stint, event_title, window, now,
         "overlap_approximate": bool(handovers),
         "broadcast_timeline": broadcast_timeline(events),
         "health_bands": health_bands,
+        "telemetry": telemetry,
     }
 
 
@@ -565,6 +567,8 @@ th{color:#65676b;font-weight:600;font-size:12px;text-transform:uppercase;letter-
 .finding.lvl-red{border-color:#c62828}
 .finding .head{font-size:16px;font-weight:700;margin:0 0 4px}
 .finding p{margin:4px 0;font-size:14px}.finding p.note{font-size:12px}
+h3{font-size:14px;margin:20px 0 8px}
+.tele-map{max-width:360px;margin:8px 0}
 """
 
 
@@ -575,6 +579,57 @@ def _fps_cell(q):
         return avg
     return f"{_fmt_fps(avg)} of {_fmt_fps(target)}" + (" \u26a0 below" if q.get("obs_fps_low")
                                                         else "")
+
+
+def _telemetry_html(tel):
+    """The solo POV telemetry section: figures, trend and map per track and car, then every lap."""
+    import gt7_laps
+    import report_telemetry as rtel
+
+    parts = ["<h2>Telemetry</h2>",
+             f"<p class='note'>{tel['laps_total']} laps from the GT7 telemetry recording, "
+             f"{tel['laps_counted']} counted by the relay as on the HUD. The figures use "
+             "counted laps only, timed by GT7 where its lap time arrived.</p>"]
+    for g in tel["groups"]:
+        where = f" · {g['rec']}, session {g['session']}" if g["rec"] else ""
+        parts.append(f"<h3>{_esc(g['track'])} · {_esc(g['car'] or 'Unknown car')}"
+                     f"{_esc(where)}</h3>")
+        cons, fuel = g["consistency_s"], g["fuel_per_lap_l"]
+        kpis = [(rtel.fmt_lap(g["best_s"]), "Best lap"),
+                (rtel.fmt_lap(g["theoretical_s"]), "Theoretical best"),
+                ("—" if cons is None else f"± {cons:.3f} s", "Consistency"),
+                ("—" if fuel is None else f"{fuel:.2f} L", "Fuel per lap"),
+                (f"{g['laps_counted']} of {g['laps_total']}", "Counted laps")]
+        parts.append("<div class='kpis'>" + "".join(
+            f"<div class='kpi'><div class='n'>{_esc(n)}</div><div class='l'>{_esc(lbl)}</div></div>"
+            for n, lbl in kpis) + "</div>")
+        if g["tyre_avg_c"]:
+            parts.append(_table(["Average tyre temperature", "FL", "FR", "RL", "RR"],
+                                [["°C"] + [f"{v:.1f}" for v in g["tyre_avg_c"]]]))
+        trend = rtel.svg_lap_trend(g["trend"])
+        if trend:
+            parts.append(trend)
+            parts.append("<p class='note'>Lap times in driving order: counted laps dark, "
+                         "the best lap green, other laps grey and pinned to the edge of "
+                         "the scale.</p>")
+        tmap = rtel.svg_track_map(g.get("map"))
+        if tmap:
+            parts.append(f"<div class='tele-map'>{tmap}</div>")
+            parts.append(f"<p class='note'>Best lap in {gt7_laps.SECTOR_M:.0f} m mini-sectors, "
+                         "coloured by the time it lost to the fastest counted lap in each: "
+                         "green no loss, red its largest loss "
+                         f"(+{g['map']['worst_gap_s']:.3f} s), linear in between, grey "
+                         "without a sector time.</p>")
+    if tel["partial"]:
+        parts.append("<p class='caveat'>A recording was still open when this report was "
+                     "built, so its last lap may be missing.</p>")
+    rows = [(r["n"], r["lap"], rtel.fmt_lap(r["time_s"]), r["status"], r["reason"] or "—",
+             "—" if r["fuel_l"] is None else f"{r['fuel_l']:.2f}",
+             "—" if r["top_speed_kmh"] is None else f"{r['top_speed_kmh']:.0f}",
+             r["car"] or "—", r["track"]) for r in tel["laps"]]
+    parts.append(_table(["#", "Lap", "Time", "Status", "Reason", "Fuel (L)",
+                         "Top speed (km/h)", "Car", "Track"], rows))
+    return "".join(parts)
 
 
 def render_html(report):
@@ -653,6 +708,12 @@ def render_html(report):
                      f"{_esc(_fmt_dur(oa['desync_seconds']))} of this event, so "
                      f"per-commentator attribution during those windows may be "
                      f"unreliable.</p>")
+
+    if report.get("telemetry"):
+        try:
+            parts.append(_telemetry_html(report["telemetry"]))
+        except Exception:
+            pass  # a malformed telemetry block must not fail the whole report
 
     if report["producer_handovers"]:
         parts.append("<h2>Producer handovers</h2>")
@@ -766,6 +827,12 @@ def render_summary_text(report):
              f"  {_fmt_date(hd['start'])} {_fmt_clock(hd['start'])}–{_fmt_clock(hd['end'])} "
              f"({_fmt_dur(hd['duration_s'])})",
              f"  Uptime {hd['uptime_pct']}% · {len(report['incidents'])} incident(s)"]
+    if report.get("telemetry"):
+        import report_telemetry as rtel
+        try:
+            lines.append(f"  {rtel.summary_line(report['telemetry'])}")
+        except Exception:
+            pass  # a malformed telemetry block must not fail the whole report
     if report.get("finding"):
         lines.append(f"  {report_finding_text(report)}")
     for f in report["feeds"]:
@@ -791,11 +858,18 @@ def report_finding_text(report):
 def report_discord_fields(report):
     """Pre-formatted KPI (name, value) pairs for the Discord report embed."""
     hd = report["header"]
-    return [("Uptime", f"{hd['uptime_pct']}%"),
-            ("On air", _fmt_dur(hd.get("on_air_s", hd["duration_s"]))),
-            ("Incidents", str(len(report["incidents"]))),
-            ("Session length", _fmt_dur(hd["duration_s"])),
-            ("Window", f"{_fmt_clock(hd['start'])}–{_fmt_clock(hd['end'])}")]
+    fields = [("Uptime", f"{hd['uptime_pct']}%"),
+              ("On air", _fmt_dur(hd.get("on_air_s", hd["duration_s"]))),
+              ("Incidents", str(len(report["incidents"]))),
+              ("Session length", _fmt_dur(hd["duration_s"])),
+              ("Window", f"{_fmt_clock(hd['start'])}–{_fmt_clock(hd['end'])}")]
+    if report.get("telemetry"):
+        import report_telemetry as rtel
+        try:
+            fields.append(("Telemetry", rtel.summary_line(report["telemetry"])))
+        except Exception:
+            pass  # a malformed telemetry block must not fail the whole report
+    return fields
 
 
 _LOG_TS_RE = re.compile(r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)")

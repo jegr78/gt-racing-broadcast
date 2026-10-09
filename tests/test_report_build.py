@@ -19,6 +19,12 @@ import sys
 sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))
 rb = _load("report_build", ("src", "scripts", "report_build.py"))
 
+import re
+import xml.etree.ElementTree as ET
+
+sys.path.insert(0, HERE)
+import test_report_telemetry as trt
+
 
 def _sample(ts, **kw):
     row = {"ts": ts, "kind": "periodic", "health_level": "green",
@@ -475,6 +481,69 @@ def t_timeline_prefers_event_label_over_part_index():
     # A labelless part event still falls back to "Part {index}".
     bare = [{"ts": 50, "type": "part_start", "metadata": {"index": 2}}]
     assert rb.broadcast_timeline(bare) == [{"ts": 50, "label": "Part 2 started"}]
+
+
+LINE = "Best lap 0:43.810 (theoretical 0:40.000), 3 laps, Suzuka Circuit"
+
+
+def _solo_report(*extra, **idx_kw):
+    idx = dict(trt.session_index(), **idx_kw)
+    tel = trt.rtel.telemetry_block([idx, *extra], trt.WINDOW)
+    return rb.build_report([_sample(0.0), _sample(30.0)], [], {}, "Solo", (0.0, 30.0),
+                           now=1000.0, telemetry=tel)
+
+
+def t_telemetry_section_renders_figures_trend_map_and_laps():
+    html = rb.render_html(_solo_report())
+    assert "<h2>Telemetry</h2>" in html
+    for text in ("0:43.810", "0:40.000", "± 0.561 s", "2.10 L", "3 of 4",
+                 "Suzuka Circuit - Full Course", "Porsche 911 RSR", "82.0", "pit",
+                 "not counted", "200 m mini-sectors", "+0.762 s", "<th>#</th>"):
+        assert text in html, text
+    svgs = re.findall(r"<svg\b.*?</svg>", html, re.S)
+    assert len(svgs) == 3, "health strip, lap trend, track map"
+    for svg in svgs:
+        ET.fromstring(svg)
+    assert html.index("<h2>Telemetry</h2>") < html.index("<h2>Feed reliability</h2>")
+    assert "may be missing" not in html
+
+
+def t_unknown_track_heading_names_recording_and_session():
+    other = {"rec": "20261007-210000", "start_ts": 1500.0, "laps": [trt._lap(
+        1, 5.0, trt._trace(45.0, 45.0), track_id=None, car_id=1234, car="Mazda Roadster",
+        rec="20261007-210000", session=2)]}
+    html = rb.render_html(_solo_report(other))
+    assert "<h3>Unknown track · Mazda Roadster · 20261007-210000, session 2</h3>" in html, \
+        "groups on an unknown track are per GT7 session, so the heading says which"
+    assert "<h3>Suzuka Circuit - Full Course · Porsche 911 RSR</h3>" in html
+
+
+def t_telemetry_section_absent_without_recordings():
+    rep = rb.build_report([_sample(0.0), _sample(30.0)], [], {}, "Endurance", (0.0, 30.0),
+                          now=1000.0)
+    assert rep["telemetry"] is None
+    assert "<h2>Telemetry</h2>" not in rb.render_html(rep)
+    assert "Best lap" not in rb.render_summary_text(rep)
+    assert "Telemetry" not in dict(rb.report_discord_fields(rep))
+
+
+def t_summary_and_discord_carry_the_best_lap_line():
+    rep = _solo_report()
+    assert "  " + LINE in rb.render_summary_text(rep).splitlines()
+    assert dict(rb.report_discord_fields(rep))["Telemetry"] == LINE
+
+
+def t_open_recording_adds_a_caveat():
+    assert "may be missing" in rb.render_html(_solo_report(partial=True))
+
+
+def t_telemetry_section_never_raises_on_a_malformed_block():
+    rep = rb.build_report([_sample(0.0), _sample(30.0)], [], {}, "Broken", (0.0, 30.0),
+                          now=1000.0, telemetry={"groups": [{}]})
+    html = rb.render_html(rep)
+    rb.render_summary_text(rep)
+    rb.report_discord_fields(rep)
+    assert "Feed reliability" in html, "a broken telemetry block must not take down the rest of the report"
 
 
 def run():
