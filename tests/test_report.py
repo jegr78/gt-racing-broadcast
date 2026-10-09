@@ -20,6 +20,16 @@ def _load(name, rel):
 rc = _load("racecast", ("src", "racecast.py"))
 hs = _load("health_store", ("src", "scripts", "health_store.py"))
 
+import contextlib
+import datetime
+import io
+
+import gt7_recording
+import report_telemetry as rtel
+
+sys.path.insert(0, HERE)
+import test_report_telemetry as trt
+
 
 def _seed_db(path):
     conn = hs.open_db(path)
@@ -39,15 +49,18 @@ def t_generate_writes_file(monkeypatch=None):
         reports = os.path.join(d, "reports")
         orig_db, orig_dir = rc._health_db_path, rc._runtime_dir
         orig_map, orig_title = rc._report_name_map, rc._report_event_title
+        orig_tel = rc._profile_has_telemetry
         rc._health_db_path = lambda: db
         rc._runtime_dir = lambda: d
         rc._report_name_map = lambda: {1: "Alice"}
         rc._report_event_title = lambda: "Unit Event"
+        rc._profile_has_telemetry = lambda: False
         try:
             rc.report_cmd(["generate"])
         finally:
             rc._health_db_path, rc._runtime_dir = orig_db, orig_dir
             rc._report_name_map, rc._report_event_title = orig_map, orig_title
+            rc._profile_has_telemetry = orig_tel
         files = os.listdir(reports)
         assert files and files[0].endswith(".html"), files
         with open(os.path.join(reports, files[0]), encoding="utf-8") as fh:
@@ -80,17 +93,18 @@ def t_generate_leads_with_the_backlog_finding():
                              "obs_fps_target": 60.0, "health_reasons": []}, "periodic")
         conn.close()
         orig = (rc._health_db_path, rc._runtime_dir, rc._report_name_map,
-                rc._report_event_title, rc._machine_env_value)
+                rc._report_event_title, rc._machine_env_value, rc._profile_has_telemetry)
         rc._health_db_path = lambda: db
         rc._runtime_dir = lambda: d
         rc._report_name_map = lambda: {}
         rc._report_event_title = lambda: "Unit Event"
         rc._machine_env_value = lambda k: ""
+        rc._profile_has_telemetry = lambda: False
         try:
             r = rc._build_report_file()
         finally:
             (rc._health_db_path, rc._runtime_dir, rc._report_name_map,
-             rc._report_event_title, rc._machine_env_value) = orig
+             rc._report_event_title, rc._machine_env_value, rc._profile_has_telemetry) = orig
         assert r["report"]["finding"]["headline"].startswith("Output ran behind live for 1m 30s")
         assert "fell behind real time" in r["summary"]
         assert "45.8 of 60" in r["html"]
@@ -101,8 +115,10 @@ def t_generate_no_data_exits():
         db = os.path.join(d, "health-history.db")
         conn = hs.open_db(db); hs.migrate(conn); conn.close()   # empty DB
         orig_db, orig_dir = rc._health_db_path, rc._runtime_dir
+        orig_tel = rc._profile_has_telemetry
         rc._health_db_path = lambda: db
         rc._runtime_dir = lambda: d
+        rc._profile_has_telemetry = lambda: False
         try:
             raised = False
             try:
@@ -112,6 +128,7 @@ def t_generate_no_data_exits():
             assert raised, "expected SystemExit on empty DB"
         finally:
             rc._health_db_path, rc._runtime_dir = orig_db, orig_dir
+            rc._profile_has_telemetry = orig_tel
 
 
 def t_send_no_webhook_exits():
@@ -169,7 +186,6 @@ def t_send_posts_multipart():
 
 
 def t_send_report_embed_zip():
-    import io
     import json
     import zipfile
 
@@ -231,7 +247,6 @@ def t_send_report_embed_leads_with_the_finding():
 
 
 def t_send_bundles_sliced_logs_and_host():
-    import io
     import json
     import time
     import zipfile
@@ -317,21 +332,157 @@ def t_report_includes_teardown_events_after_last_sample():
         conn.close()
         reports = os.path.join(d, "reports")
         orig = (rc._health_db_path, rc._runtime_dir,
-                rc._report_name_map, rc._report_event_title)
+                rc._report_name_map, rc._report_event_title, rc._profile_has_telemetry)
         rc._health_db_path = lambda: db
         rc._runtime_dir = lambda: d
         rc._report_name_map = lambda: {1: "Alice"}
         rc._report_event_title = lambda: "Q Event"
+        rc._profile_has_telemetry = lambda: False
         try:
             rc.report_cmd(["generate"])
         finally:
             (rc._health_db_path, rc._runtime_dir,
-             rc._report_name_map, rc._report_event_title) = orig
+             rc._report_name_map, rc._report_event_title, rc._profile_has_telemetry) = orig
         with open(os.path.join(reports, os.listdir(reports)[0]),
                   encoding="utf-8") as fh:
             html = fh.read()
         assert "Q ended" in html, \
             "part_end recorded after the last sample must still appear in the timeline"
+
+
+def t_recordings_in_window_by_start_and_duration():
+    t0 = datetime.datetime(2026, 10, 7, 20, 0, tzinfo=datetime.timezone.utc)
+    base = t0.timestamp()
+    rows = [{"name": "early", "started": t0.isoformat(), "duration_s": 600.0},
+            {"name": "late", "started": (t0 + datetime.timedelta(hours=2)).isoformat(),
+             "duration_s": 60.0},
+            {"name": "bad", "started": "", "duration_s": 5.0}]
+
+    def pick(frm, to):
+        return [r["name"] for r in rc._recordings_in_window(rows, frm, to)]
+
+    assert pick(base + 300, base + 900) == ["early"]
+    assert pick(base + 7000, base + 7230) == ["late"]
+    assert pick(base + 1000, base + 2000) == [], "no recording overlaps a gap between them"
+
+
+def t_report_telemetry_is_solo_pov_only():
+    def boom():
+        raise AssertionError("an endurance report must not look for recordings")
+    orig = (rc._profile_has_telemetry, rc._telemetry_rec_dir)
+    rc._profile_has_telemetry = lambda: False
+    rc._telemetry_rec_dir = boom
+    try:
+        assert rc._report_telemetry(0.0, 1.0) is None
+    finally:
+        rc._profile_has_telemetry, rc._telemetry_rec_dir = orig
+
+
+def t_report_telemetry_skips_a_broken_recording_and_reads_the_open_one():
+    started = "2026-10-07T20:00:00+02:00"
+    start = datetime.datetime.fromisoformat(started).timestamp()
+    rows = [{"name": f"{p}.gt7rec{ext}", "path": p, "size": 1, "started": started,
+             "duration_s": 600.0, "laps": None, "partial": bool(ext)}
+            for p, ext in (("a", ""), ("b", ""), ("c", ".part"))]
+    asked = []
+
+    def full_index(path, dbs=None):
+        asked.append(path)
+        if path == "b":
+            raise gt7_recording.RecordingError("/home/someone/b.gt7rec: corrupt")
+        lap = trt._lap(1, 5.0, status="not counted", reason="pit", relay=95.0, rec=path)
+        return {"rec": path, "started": started, "start_ts": start, "end_ts": start + 600,
+                "track": None, "laps": [lap]}
+
+    stubs = {"_profile_has_telemetry": lambda: True, "_telemetry_rec_dir": lambda: "unused",
+             "_telemetry_dbs": lambda: (None, None), "_telemetry_full_index": full_index,
+             "_relay_open_file": lambda: "c.gt7rec"}
+    orig = {k: getattr(rc, k) for k in stubs}
+    orig_list = gt7_recording.list_recordings
+    for k, v in stubs.items():
+        setattr(rc, k, v)
+    gt7_recording.list_recordings = lambda d: rows
+    out = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(out):
+            block = rc._report_telemetry(start, start + 600)
+    finally:
+        for k, v in orig.items():
+            setattr(rc, k, v)
+        gt7_recording.list_recordings = orig_list
+    assert asked == ["a", "b", "c"], "the report also indexes the recording the relay is writing"
+    assert block is not None and block["laps_total"] == 2, "the broken recording adds no lap"
+    assert block["partial"] is True, "the open recording marks the block partial"
+    assert "b.gt7rec is not a readable recording" in out.getvalue(), out.getvalue()
+    assert "/home/someone" not in out.getvalue(), "no machine path in the note"
+
+
+def t_generate_passes_the_window_to_telemetry():
+    with tempfile.TemporaryDirectory() as d:
+        db = os.path.join(d, "health-history.db")
+        _seed_db(db)
+        seen = []
+        tel = rtel.telemetry_block([trt.session_index()], trt.WINDOW)
+
+        def fake(frm, to):
+            seen.append((frm, to))
+            return tel
+
+        orig = (rc._health_db_path, rc._runtime_dir, rc._report_name_map,
+                rc._report_event_title, rc._report_telemetry)
+        rc._health_db_path = lambda: db
+        rc._runtime_dir = lambda: d
+        rc._report_name_map = lambda: {}
+        rc._report_event_title = lambda: "Solo Event"
+        rc._report_telemetry = fake
+        try:
+            r = rc._build_report_file()
+        finally:
+            (rc._health_db_path, rc._runtime_dir, rc._report_name_map,
+             rc._report_event_title, rc._report_telemetry) = orig
+        assert seen == [r["window"]], seen
+        assert "<h2>Telemetry</h2>" in r["html"]
+        assert "Best lap 0:43.810" in r["summary"]
+
+
+def t_recordings_in_window_drops_only_a_row_with_a_bad_duration():
+    t0 = datetime.datetime(2026, 10, 7, 20, 0, tzinfo=datetime.timezone.utc)
+    rows = [{"name": "bad", "started": t0.isoformat(), "duration_s": "n/a"},
+            {"name": "good", "started": t0.isoformat(), "duration_s": 600.0}]
+    names = [r["name"] for r in rc._recordings_in_window(rows, t0.timestamp(),
+                                                          t0.timestamp() + 60)]
+    assert names == ["good"], f"a malformed duration drops only its own row: {names}"
+
+
+def t_report_telemetry_outer_failure_is_a_path_free_note():
+    started = "2026-10-07T20:00:00+02:00"
+    start = datetime.datetime.fromisoformat(started).timestamp()
+    rows = [{"name": "a.gt7rec", "path": "a", "size": 1, "started": started,
+             "duration_s": 600.0, "laps": None, "partial": False}]
+    with tempfile.TemporaryDirectory() as d:
+        secret = os.path.join(d, "tracks.json")
+
+        def dbs():
+            raise OSError(2, "No such file or directory", secret)
+
+        stubs = {"_profile_has_telemetry": lambda: True, "_telemetry_rec_dir": lambda: d,
+                 "_telemetry_dbs": dbs}
+        orig = {k: getattr(rc, k) for k in stubs}
+        orig_list = gt7_recording.list_recordings
+        for k, v in stubs.items():
+            setattr(rc, k, v)
+        gt7_recording.list_recordings = lambda _d: rows
+        out = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out):
+                block = rc._report_telemetry(start, start + 600)
+        finally:
+            for k, v in orig.items():
+                setattr(rc, k, v)
+            gt7_recording.list_recordings = orig_list
+    assert block is None, "a failure outside one recording skips the section"
+    assert "note: telemetry section skipped" in out.getvalue(), out.getvalue()
+    assert d not in out.getvalue(), f"no machine path in the note: {out.getvalue()}"
 
 
 def run():

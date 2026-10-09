@@ -1619,6 +1619,50 @@ def _report_backlog_thresholds():
             "backlog_warn_s": hsmod.feed_backlog_warn_s(env)}
 
 
+def _recordings_in_window(rows, frm, to):
+    """The list_recordings rows whose span [started, started + duration_s] overlaps [frm, to]."""
+    import datetime
+    out = []
+    for r in rows:
+        try:
+            start = datetime.datetime.fromisoformat(r["started"]).timestamp()
+            duration = float(r.get("duration_s") or 0.0)
+        except (KeyError, TypeError, ValueError):
+            continue
+        if start <= to and start + duration >= frm:
+            out.append(r)
+    return out
+
+
+def _report_telemetry(frm, to):
+    """The report's telemetry block from the active profile's GT7 recordings in the
+    window, including the one the relay is still writing. Solo POV only; None when
+    nothing overlaps or the data is unreadable."""
+    if not _profile_has_telemetry():
+        return None
+    try:
+        import gt7_recording
+        import report_telemetry as rtel
+        rows = _recordings_in_window(gt7_recording.list_recordings(_telemetry_rec_dir()),
+                                     frm, to)
+        if not rows:
+            return None
+        dbs = _telemetry_dbs()
+        indexes = []
+        for r in rows:
+            try:
+                idx = _telemetry_full_index(r["path"], dbs)
+            except Exception as exc:  # noqa: BLE001  one broken recording must not drop the others
+                print(f"note: telemetry recording {r['name']} skipped "
+                      f"({_telemetry_reason(exc, r['name'])}).")
+                continue
+            indexes.append(dict(idx, partial=r["partial"]))
+        return rtel.telemetry_block(indexes, (frm, to))
+    except Exception as exc:  # noqa: BLE001  telemetry must never fail the report
+        print(f"note: telemetry section skipped ({_telemetry_reason(exc)}).")
+        return None
+
+
 def _build_report_file(frm=None, to=None, gap=None, out=None):
     """Core generator. Returns {'path','html','summary'}. Raises ValueError when the
     selected window has no samples."""
@@ -1650,6 +1694,7 @@ def _build_report_file(frm=None, to=None, gap=None, out=None):
     title = _qualifying_title(_report_event_title())
     report = rbuild.build_report(bucketed, events, _report_name_map(), title,
                                  (frm, to), time.time(), host=_report_host(),
+                                 telemetry=_report_telemetry(frm, to),
                                  **_report_backlog_thresholds())
     html = rbuild.render_html(report)
     os.makedirs(_reports_dir(), exist_ok=True)

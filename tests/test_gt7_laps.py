@@ -418,6 +418,17 @@ def t_best_sectors_and_theoretical_best():
     assert gl.best_sectors([short])[-1] == 3.6, "its own trace end closes the last sector"
 
 
+def t_theoretical_best_clamped_to_the_fastest_lap_time():
+    """Rounding each sector to the millisecond can sum above the lap that set every
+    one of them; the theoretical best must never beat the actual fastest lap."""
+    lap = {"sectors": [4.445] * 10, "time_s": 44.446}
+    assert gl.theoretical_best([lap]) == 44.446, \
+        "the rounded sector sum (44.450) must clamp to the lap's own time"
+    assert gl.theoretical_best([{"trace": []}]) is None, "a lap without a time still clamps nothing"
+    assert gl.theoretical_best([{"sectors": [4.445] * 10}]) == 44.45, \
+        "a lap without time_s is tolerated and left unclamped"
+
+
 def t_best_sectors_reads_the_sectors_of_a_summary():
     a = {"trace": _trace(4.0, 4.0, 4.0, 4.0, 4.0)}
     b = {"trace": _trace(3.5, 4.5, 4.0, 4.2, 3.8)}

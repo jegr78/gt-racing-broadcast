@@ -258,6 +258,27 @@ def t_list_recordings_reports_duration_laps_partial():
         assert rec.recording_stem(row["path"]) == os.path.basename(w.path)[:-len(".gt7rec")]
 
 
+def t_list_recordings_skips_a_file_that_vanishes_while_listing():
+    with tempfile.TemporaryDirectory() as d:
+        keep = _write(d, [(10.0, "A", _plain())])
+        gone = _write(d, [(20.0, "A", _plain())])
+        orig = os.path.getsize
+
+        def getsize(path):
+            if path == gone.path:
+                raise FileNotFoundError(2, "No such file or directory", path)
+            return orig(path)
+
+        rec.os.path.getsize = getsize
+        try:
+            for count in (False, True):
+                names = [r["name"] for r in rec.list_recordings(d, count_laps=count)]
+                assert names == [os.path.basename(keep.path)], \
+                    f"a file renamed during listing is skipped, not fatal: {names}"
+        finally:
+            rec.os.path.getsize = orig
+
+
 import csv  # noqa: E402
 
 
