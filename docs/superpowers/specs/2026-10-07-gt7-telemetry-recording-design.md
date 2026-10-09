@@ -414,10 +414,12 @@ override.
   the index alike.
 - `sectors(trace, length_m, step_m=200)`: sector times from the trace, boundaries every
   200 m from the line, the last sector shorter, times interpolated at the boundaries.
-  `lap_length_m(lap)` is the trace end, so every counted lap of a track is cut at the
-  same boundaries and its sectors add up to its lap time.
-- `best_sectors(laps)`: per sector the minimum over the given counted laps;
-  `theoretical_best` = their sum.
+  `lap_length_m(lap)` is the trace end (stored per lap as `length_m`, so the summary
+  form without traces keeps it), so every counted lap of a track is cut at the same
+  boundaries and its sectors add up to its lap time.
+- `best_sectors(laps)`: per sector the minimum over the given counted laps; the last
+  sector is None when the laps differ in length. `theoretical_best` = their sum, None
+  when a sector has none. The Control Center and the report share this rule.
 - The delta of B against A (time of B minus time of A at each 5 m station) is computed
   in the page from the two traces it already holds; the module has no delta function.
 

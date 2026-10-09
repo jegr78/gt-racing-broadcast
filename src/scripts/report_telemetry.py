@@ -71,9 +71,8 @@ def _finite_points(trace):
 
 def _sector_map(best, pool):
     """The best lap's mini-sectors with the time each lost to the fastest counted lap;
-    a sector without a time on either side has gap None and is drawn grey. The last
-    sector is also grey when the pool's laps close their trace at different lengths: its
-    stub then covers a different distance per lap, so its time is not comparable."""
+    a sector without a time on either side (gt7_laps.best_sectors blanks the last one
+    for unequal lap lengths) has gap None and is drawn grey."""
     trace = _finite_points(best.get("trace") or [])
     own = best.get("sectors") or []
     if len(trace) < 2 or not own or not pool:
@@ -82,9 +81,6 @@ def _sector_map(best, pool):
     n = min(len(own), len(ref))
     gaps = [max(0.0, own[i] - ref[i]) if own[i] is not None and ref[i] is not None else None
             for i in range(n)]
-    lengths = {gt7_laps.lap_length_m(lap) for lap in pool if lap.get("trace")}
-    if gaps and len(lengths) > 1:
-        gaps[-1] = None
     worst = max((g for g in gaps if g is not None), default=0.0)
     sectors = []
     for i, gap in enumerate(gaps):
@@ -105,9 +101,7 @@ def _group(key, members):
     best_row, best = min(valid, key=lambda m: m[0]["time_s"]) if valid else (None, None)
     times = [row["time_s"] for row, _lap in valid]
     timed = [lap for _row, lap in valid if lap.get("sectors")]
-    # different lap lengths make the sectors incomparable, even at the same sector count
-    lengths = {gt7_laps.lap_length_m(lap) for lap in timed if lap.get("trace")}
-    theoretical_s = gt7_laps.theoretical_best(timed) if timed and len(lengths) == 1 else None
+    theoretical_s = gt7_laps.theoretical_best(timed) if timed else None
     fuel = [lap["fuel_used_l"] for _row, lap in valid if lap.get("fuel_used_l") is not None]
     tyres = [lap["tyre_avg_c"] for _row, lap in valid
              if len(lap.get("tyre_avg_c") or []) == 4 and any(lap["tyre_avg_c"])]

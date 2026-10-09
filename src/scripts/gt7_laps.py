@@ -18,10 +18,9 @@ import gt7_telemetry
 STEP_M = 5.0
 SECTOR_M = 200.0
 COUNTED = ("reference", "counted")
-INDEX_VERSION = 2
+INDEX_VERSION = 3
 CACHE_SUFFIX = ".laps.json"
 DECIMATE_M = 2.0              # finer samples add nothing to a 5 m trace
-PROJECT_TOL_M = 50.0          # corner cutting moves the projection metres, another branch of the line far more
 
 
 def _time_at(trace, d):
@@ -37,7 +36,10 @@ def _time_at(trace, d):
 
 
 def lap_length_m(lap):
-    """A lap's length for sectors: where its trace ends, the full lap length for a counted lap."""
+    """A lap's length for sectors: where its trace ends, the full lap length for a counted
+    lap; 0.0 when unknown."""
+    if lap.get("length_m"):
+        return lap["length_m"]
     trace = lap.get("trace") or []
     return trace[-1]["d"] if trace else 0.0
 
@@ -55,20 +57,25 @@ def sectors(trace, length_m, step_m=SECTOR_M):
 
 
 def best_sectors(laps):
-    """Per sector the fastest time over the given laps, from their sector times or traces."""
+    """Per sector the fastest time over the given laps, from their sector times or traces.
+    The last sector is None when the laps end at different lengths: its stub then covers
+    a different distance per lap."""
+    used = [lap for lap in laps if "sectors" in lap or lap.get("trace")]
     per_lap = [lap["sectors"] if "sectors" in lap else sectors(lap["trace"], lap_length_m(lap))
-               for lap in laps if "sectors" in lap or lap.get("trace")]
+               for lap in used]
     n = max((len(s) for s in per_lap), default=0)
     best = []
     for i in range(n):
         vals = [s[i] for s in per_lap if i < len(s) and s[i] is not None]
         best.append(min(vals) if vals else None)
+    if best and len({lap_length_m(lap) for lap in used} - {0.0}) > 1:
+        best[-1] = None
     return best
 
 
 def theoretical_best(laps):
-    """Sum of the best sectors over the given laps, or None when a sector has no time.
-    Clamped to the fastest lap's own time_s: rounding every sector to the millisecond
+    """Sum of the best sectors over the given laps, or None when a sector has no time
+    (also when the laps differ in length, see best_sectors). Clamped to the fastest lap's own time_s: rounding every sector to the millisecond
     can sum a few ms above the lap that actually set them all."""
     best = best_sectors(laps)
     if not best or any(v is None for v in best):
@@ -172,13 +179,12 @@ def _station(x, pts, ds, j):
 
 
 def _follow(proj, driven, length):
-    """Projected distances that stay within PROJECT_TOL_M of the previous one plus the
-    driven increment; a missing or implausible projection takes that expected value."""
+    """Projected distances that follow the previous one plus the driven increment
+    (gt7_recording.follow_station)."""
     out = []
     for i, (p, d) in enumerate(zip(proj, driven, strict=True)):
         expected = d if i == 0 else out[-1] + d - driven[i - 1]
-        s = None if p is None else gt7_recording.nearest_station(p, expected, length)
-        out.append(s if s is not None and abs(s - expected) <= PROJECT_TOL_M else expected)
+        out.append(gt7_recording.follow_station(p, expected, length))
     return out
 
 
@@ -307,6 +313,7 @@ def _build(path, track_db, cars, key):
             "distance_m": round(lap.get("distance_m") or 0.0, 1),
             "tyre_avg_c": [round(s / tyres[4], 1) if tyres[4] else 0.0 for s in tyres[:4]],
             "points": [[round(x, 1), round(z, 1)] for x, z in lap.get("points") or []],
+            "length_m": lap_length_m({"trace": trace}),
             "sectors": sectors(trace, lap_length_m({"trace": trace})),
             "trace": trace})
     return {"rec": stem, "name": os.path.basename(path),

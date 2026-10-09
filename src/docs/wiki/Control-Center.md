@@ -273,7 +273,9 @@ running relay.
 - **Track map and mini-sectors.** Lap A is the thin line; lap B is split into 200 m
   mini-sectors, green where B is faster and red where it is slower. The table lists every
   mini-sector for A and B, the gap and the best time of any comparable lap; its last row
-  adds the theoretical best, the sum of the best mini-sectors.
+  adds the theoretical best, the sum of the best mini-sectors. When the comparable laps
+  end at different lengths, as on an unknown track, the last mini-sector's best and the
+  theoretical best show `—`, the same rule as the post-event report.
 - **Set track.** When racecast does not recognise the layout of a recording, or two
   layouts fit, pick it from the list. racecast assigns the recording to that layout. For
   a layout with a downloaded racing line, or the reverse of one, that is all. For any

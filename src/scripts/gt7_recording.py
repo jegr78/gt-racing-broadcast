@@ -323,6 +323,7 @@ LAP_COLUMNS = (
     "session", "lap", "start_t_s", "end_t_s", "gt7_time_s", "relay_time_s", "status",
     "reason", "fuel_used_l", "top_speed_kmh", "car", "track", "layout")
 GT7_TIME_WINDOW_S = 3.0       # GT7 updates last_ms shortly after the line
+PROJECT_TOL_M = 50.0          # corner cutting moves the projection metres, another branch of the line far more
 
 
 def _fmt(excel):
@@ -349,6 +350,15 @@ def car_name(cars, car_id):
 def nearest_station(s, driven, length):
     """The projected distance s, s - L or s + L closest to the driven distance."""
     return min((s, s - length, s + length), key=lambda v: abs(v - driven))
+
+
+def follow_station(s, expected, length):
+    """The station of projection s nearest `expected`, or `expected` itself when s is
+    None or lies more than PROJECT_TOL_M away (another branch of the line)."""
+    if s is None:
+        return expected
+    s = nearest_station(s, expected, length)
+    return s if abs(s - expected) <= PROJECT_TOL_M else expected
 
 
 class LapTimeMatcher:
@@ -415,17 +425,24 @@ def session_tracks(laps, tracks, key=None):
     return out
 
 
-def _lap_dist(eng, pkt, by_session, tracks):
-    """Distance along the racing line when the session's track is known, else integrated."""
+def _lap_dist(eng, pkt, by_session, tracks, prev):
+    """Distance along the racing line when the session's track is known, else integrated.
+    `prev` holds the last station of the current lap, so the export follows the lap
+    index's continuity rule."""
     dist = eng.lap_distance()
     found = by_session.get(eng.session)
     if not found or "id" not in found or pkt.pos_x is None:
         return dist
-    s = tracks.project([(pkt.pos_x, pkt.pos_z)], found["id"])
     length = tracks.line_length(found["id"])
-    if not s or s[0] is None or not length:
+    if not length:
         return dist
-    return nearest_station(s[0], dist or 0.0, length)
+    s = tracks.project([(pkt.pos_x, pkt.pos_z)], found["id"])
+    lap = (eng.session, eng.lap_started_at())
+    driven = dist or 0.0
+    expected = prev["s"] + driven - prev["d"] if prev.get("lap") == lap else driven
+    out = follow_station(s[0] if s else None, expected, length)
+    prev.update(lap=lap, s=out, d=driven)
+    return out
 
 
 def export_csv(path, out_dir, include_all=False, excel=False, cars=None, tracks=None, key=None):
@@ -437,13 +454,14 @@ def export_csv(path, out_dir, include_all=False, excel=False, cars=None, tracks=
     laps = []
     eng.on_lap = laps.append
     times = LapTimeMatcher()
-    _h, closed, _d = replay_laps(path) if tracks is not None else (None, [], 0)
-    by_session = session_tracks(closed, tracks, key)
+    _h, all_laps, _d = replay_laps(path) if tracks is not None else (None, [], 0)
+    by_session = session_tracks(all_laps, tracks, key)
     os.makedirs(out_dir, exist_ok=True)
     delimiter = ";" if excel else ","
     encoding = "utf-8-sig" if excel else "utf-8"
     t0 = None
     written = 0
+    station = {}
     with open(os.path.join(out_dir, "samples.csv"), "w", newline="",
               encoding=encoding) as fh:
         w = csv.writer(fh, delimiter=delimiter)
@@ -463,7 +481,7 @@ def export_csv(path, out_dir, include_all=False, excel=False, cars=None, tracks=
             w.writerow([
                 num(wall_ts - t0, 3), eng.session, pkt.lap,
                 num(wall_ts - started if started is not None else None, 3),
-                num(_lap_dist(eng, pkt, by_session, tracks), 1),
+                num(_lap_dist(eng, pkt, by_session, tracks, station), 1),
                 int(pkt.on_track), int(pkt.paused), num(pkt.speed_mps * 3.6, 1),
                 num(_pct(pkt.throttle), 1), num(_pct(pkt.brake), 1),
                 num(_pct(pkt.throttle_input), 1), num(_pct(pkt.brake_input), 1),

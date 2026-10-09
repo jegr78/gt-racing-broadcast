@@ -440,6 +440,27 @@ def t_best_sectors_reads_the_sectors_of_a_summary():
     assert gl.theoretical_best(brief) == 19.3
 
 
+def t_unequal_lap_lengths_blank_the_last_sector_and_the_theoretical_best():
+    a = {"trace": _trace(4.0, 4.0, 4.0, 4.0, 4.0)}
+    b = {"trace": _trace(3.5, 4.5, 4.0, 4.2, 3.8)[:-4]}      # ends at 980 m
+    for lap in (a, b):
+        lap["sectors"] = gl.sectors(lap["trace"], gl.lap_length_m(lap))
+        lap["length_m"] = gl.lap_length_m(lap)
+    brief = [gl.summary(a), gl.summary(b)]
+    assert gl.best_sectors(brief)[-1] is None, "a last sector of unequal length is not comparable"
+    assert gl.best_sectors(brief)[:4] == [3.5, 4.0, 4.0, 4.0]
+    assert gl.theoretical_best(brief) is None, \
+        "the Control Center pool (summaries) must agree with the report: no theoretical best"
+
+
+def t_index_laps_carry_their_length_for_the_summary_form():
+    with tempfile.TemporaryDirectory() as d:
+        idx = _index(write_circle_recording(d))
+        lap = _lap(idx, 2)
+        assert lap["length_m"] == gl.lap_length_m(lap) == lap["trace"][-1]["d"]
+        assert gl.lap_length_m(gl.summary(lap)) == lap["length_m"], "summary keeps the length"
+
+
 def t_write_cache_temp_file_carries_the_recording_stem():
     with tempfile.TemporaryDirectory() as d:
         target = os.path.join(d, "rec1.laps.json")

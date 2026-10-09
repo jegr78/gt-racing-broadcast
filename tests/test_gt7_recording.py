@@ -685,6 +685,30 @@ def t_session_tracks_falls_back_to_matching_for_an_unknown_assignment():
         assert got[1]["id"] == "aaa001", f"an unresolvable assignment falls back to matching: {got}"
 
 
+class _Figure8Tracks(_Tracks):
+    """A 600 m line that crosses itself: around x=800..830 the projection lands on the
+    other branch, 300 m further along."""
+    def project(self, points, oid):
+        return [(x + 300.0) % 600.0 if 800.0 <= x <= 830.0 else x % 600.0 for x, _z in points]
+
+
+def t_export_lap_dist_ignores_the_other_branch_of_a_crossover_like_the_index():
+    import gt7_laps
+    with tempfile.TemporaryDirectory() as d:
+        src = _xy_session(d)
+        rec.export_csv(src, os.path.join(d, "out"), tracks=_Figure8Tracks())
+        lap1 = [r for r in _rows(os.path.join(d, "out", "samples.csv")) if r["lap"] == "1"]
+        got = [float(r["lap_dist_m"]) for r in lap1]
+        steps = [b - a for a, b in zip(got, got[1:], strict=False)]
+        assert max(abs(s) for s in steps) <= rec.PROJECT_TOL_M, \
+            f"the export must not jump to the crossing branch: {got}"
+        xs = [float(r["pos_x"]) for r in lap1]
+        driven = [5.0 * i for i in range(len(xs))]
+        index = gt7_laps._follow(_Figure8Tracks().project([(x, 0.0) for x in xs], "aaa001"),
+                                 driven, 600.0)
+        assert [round(v, 1) for v in index] == got, "export and lap index use one projection rule"
+
+
 def t_nearest_station_picks_the_value_nearest_the_driven_distance():
     assert rec.nearest_station(998.0, 1.0, 1000.0) == -2.0, "just behind the line is not a full lap"
     assert rec.nearest_station(3.0, 999.0, 1000.0) == 1003.0
