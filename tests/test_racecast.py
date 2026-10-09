@@ -696,6 +696,8 @@ def t_telemetry_pool_without_build_reads_only_cached_indexes():
         m.telemetry_laps_data(rec=_stem(a))
         p = m.telemetry_laps_data(track="ring01", car=str(tgl.CAR), build=False)
         assert p["ok"] and p["unindexed"] == 1, p
+        assert p.get("data_version") == m._telemetry_data_version(), \
+            f"a pool names the data version it checked against: {p}"
         assert {lap["rec"] for lap in p["laps"]} == {_stem(a)}, "only the cached recording pools"
         assert gt7_laps.cached(b, m._runtime_base_dir()) is None, "the pool request built b"
         own = m.telemetry_laps_data(rec=_stem(a), session="1", track="", car=str(tgl.CAR),
@@ -795,7 +797,8 @@ def t_telemetry_requests_never_build_a_lap_index():
         finally:
             gt7_laps.index = real
         want = {"ok": True, "unindexed": 1,
-                "note": f"{stem} has no lap index yet: racecast telemetry index builds it"}
+                "note": f"{stem} has no lap index yet: racecast telemetry index builds it",
+                "data_version": m._telemetry_data_version()}
         assert answers == [want] * 3, f"each request answers unindexed: {answers}"
         assert not os.path.exists(cache), "a request wrote a lap index"
         with contextlib.redirect_stdout(io.StringIO()):
@@ -817,6 +820,8 @@ def t_telemetry_requests_after_a_set_track_do_not_rebuild():
         answers = _requests_without_build(stem, tid)
         assert [a.get("unindexed") for a in answers] == [1, 1, 1], \
             f"a Set track makes the index stale and no request rebuilds it: {answers}"
+        assert {a.get("data_version") for a in answers} == {m._telemetry_data_version()}, \
+            f"each answer names the data version it checked against: {answers}"
         assert os.stat(cache).st_mtime_ns == mtime, "a request rewrote the stale index"
 
 

@@ -2816,6 +2816,59 @@ console.log(JSON.stringify([during, retry, $('tm-learn').textContent]));""")
             f"Set track shows Indexing while its job runs and its label afterwards: {out}"
 
 
+def t_telemetry_new_data_version_allows_one_more_index_job():
+    out = _tm_node(_TM_UNINDEXED + """
+const v = (d, ver) => Object.assign(d, {data_version: ver});
+const finish = async (id, code) => {
+  answer('/api/op/telemetry-index', {ok: true, job_id: id});
+  await tick();
+  answer('/api/jobs/' + id, {ok: true, running: false, exit_code: code,
+                             lines: code ? ['X: not indexed (bad data)'] : []});
+  await tick();
+};
+tmSelectRec('X');
+await tick();
+answer('rec=X', v(unindexed('X'), 'v1'));
+await tick();
+await finish('j1', 1);
+answer('rec=X', v(unindexed('X'), 'v1'));
+await tick();
+tmSelectRec('X');
+await tick();
+answer('rec=X', v(unindexed('X'), 'v1'));
+await tick();
+const sameVersion = jobs();
+tmSelectRec('X');
+await tick();
+answer('rec=X', v(unindexed('X'), 'v2'));
+await tick();
+await finish('j2', 1);
+answer('rec=X', v(unindexed('X'), 'v2'));
+await tick();
+const err = $('tm-err').textContent;
+tmSelectRec('X');
+await tick();
+answer('rec=X', v(unindexed('X'), 'v2'));
+await tick();
+const l1 = lap('R', 1, 80, 1);
+tmState.recLaps = [l1];
+tmSelectB(l1);
+await tick();
+answer('car=1', v(Object.assign(pool([l1]), {unindexed: 1}), 'v3'));
+await tick();
+await finish('j3', 0);
+answer('car=1', v(Object.assign(pool([l1]), {unindexed: 1}), 'v3'));
+await tick();
+tmSelectB(l1);
+await tick();
+answer('car=1', v(Object.assign(pool([l1]), {unindexed: 1}), 'v3'));
+await tick();
+console.log(JSON.stringify([sameVersion, err, jobs()]));""")
+    if out is not None:
+        assert json.loads(out) == [1, "X: not indexed (bad data)", 3], \
+            f"one index job per GT7 data version, for a recording and for a pool: {out}"
+
+
 def t_telemetry_index_job_refreshes_the_recording_list():
     out = _tm_node("""
 const l1 = lap('R', 1, 80, 1);

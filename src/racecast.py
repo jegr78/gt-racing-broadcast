@@ -3546,9 +3546,11 @@ def _telemetry_cached_brief(path, base, bundled, version=None):
 
 def _telemetry_unindexed(rec):
     """The answer of a request that found no valid lap index; the page then runs the
-    telemetry-index job."""
+    telemetry-index job. `data_version` is read after the check, so a GT7 data change
+    during it names the newer version."""
     return {"ok": True, "unindexed": 1,
-            "note": f"{rec} has no lap index yet: racecast telemetry index builds it"}
+            "note": f"{rec} has no lap index yet: racecast telemetry index builds it",
+            "data_version": _telemetry_data_version()}
 
 
 def _telemetry_cached_full(path):
@@ -3666,6 +3668,7 @@ def telemetry_laps_data(rec=None, session=None, track=None, car=None, build=True
         laps = [dict(lap) for lap in gt7_laps.pool(indexes, track_id, car_id, rec=stem,
                                                    session=sess)]
         return {"ok": True, "laps": laps, "unindexed": unindexed,
+                "data_version": _telemetry_data_version(),
                 "best_sectors": gt7_laps.best_sectors(laps),
                 "theoretical_best": gt7_laps.theoretical_best(laps)}
     except Exception as exc:

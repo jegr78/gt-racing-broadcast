@@ -40,9 +40,11 @@ Loaded when working under `src/ui/`.
   profile needs a rebuild, about 16 s per 3 h recording. No request builds an index: the
   routes pass `build=False`. A pool of `/api/telemetry/laps` uses the recordings with a
   valid index and counts the rest in `unindexed`; `?rec=`, `/api/telemetry/lap` and
-  `/api/telemetry/learn` answer `unindexed: 1` for a recording without one. The page
-  (`tmIndexed`, `tmIndexAll`) then runs the `telemetry-index` job (`racecast telemetry
-  index`) once per lap generation, polls it through `/api/jobs/<id>` and asks once more;
+  `/api/telemetry/learn` answer `unindexed: 1` for a recording without one; every such
+  answer carries the `data_version` it was checked against. The page (`tmIndexed`,
+  `tmIndexAll`, `tmMayIndex`) then runs the `telemetry-index` job (`racecast telemetry
+  index`) once per lap generation and data version (the relay's background GT7 data
+  update can change it mid-generation), polls it through `/api/jobs/<id>` and asks once more;
   still unindexed shows the job's "not indexed" line as an error, or its last line, which
   names every recording the job could not index. Set track shows "Indexing…" on its
   button while its job runs. The CLI and the

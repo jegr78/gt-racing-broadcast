@@ -5238,13 +5238,19 @@ function tmDropLaps() {
   tmLapsReq.clear();
 }
 // Builds the missing lap indexes in the telemetry-index job; pool requests share one run,
-// and it runs once per lap generation, so a recording that cannot be indexed does not
-// start it on every lap B.
+// and it runs once per lap generation and GT7 data version, so a recording that cannot be
+// indexed does not start it on every lap B.
 let tmIndexing = null;
 let tmIndexedGen = -1;
+let tmIndexedVer = null;           // the data_version of the answer that started that run
 let tmIndexLines = [];             // the output of that run, which names a recording it could not index
 function tmNote(text) { $('tm-note').textContent = text; $('tm-note').hidden = false; }
-function tmIndexAll() {
+// True when an unindexed answer `d` may start the job: a new lap generation, or GT7 data
+// that changed since the last run, e.g. by the relay's background data update.
+function tmMayIndex(d) {
+  return tmIndexedGen !== tmLapGen || (d.data_version != null && d.data_version !== tmIndexedVer);
+}
+function tmIndexAll(ver) {
   if (!tmIndexing) {
     const gen = tmLapGen;
     const p = (async () => {
@@ -5256,6 +5262,7 @@ function tmIndexAll() {
       const r = job.error ? job : await jobResult(job.job_id, 20);
       if (r.error || gen !== tmLapGen) return r;
       tmIndexedGen = gen;
+      tmIndexedVer = ver;
       tmIndexLines = r.lines || [];
       if (job.joined) $('tm-note').hidden = true;
       if (r.code !== 0) {
@@ -5275,10 +5282,10 @@ function tmIndexAll() {
 // error instead of starting it again. `busy(true)` and `busy(false)` bracket the job.
 async function tmIndexed(rec, ask, stale, busy) {
   let d = await ask();
-  if (d.ok && d.unindexed && tmIndexedGen !== tmLapGen) {
+  for (let runs = 0; runs < 2 && d.ok && d.unindexed && tmMayIndex(d); runs++) {
     if (busy) busy(true);
     let job;
-    try { job = await tmIndexAll(); } finally { if (busy) busy(false); }
+    try { job = await tmIndexAll(d.data_version); } finally { if (busy) busy(false); }
     if (stale()) return {ok: false, stale: true};
     if (job.error) return {ok: false, error: job.error};
     d = await ask();
@@ -5339,6 +5346,7 @@ function tmReset() {
   tmState.tracks = null;
   tmDropLaps();
   tmIndexing = null;
+  tmIndexedVer = null;
   $('tm-note').hidden = true;
   $('tm-recs').textContent = '';
   tmErr('');
@@ -5466,10 +5474,10 @@ async function tmSelectB(l) {
   if (l.track_id == null) { q.set('rec', l.rec); q.set('session', String(l.session)); }
   let p = await tmShared('/api/telemetry/laps?' + q);
   if (seq !== tmSeq.b) return;
-  if (p.ok && p.unindexed && tmIndexedGen !== tmLapGen) {   // asks once: a broken file stays unindexed
+  if (p.ok && p.unindexed && tmMayIndex(p)) {   // asks once: a broken file stays unindexed
     $('tm-sec-sub').textContent = 'Indexing ' + p.unindexed
       + (p.unindexed === 1 ? ' recording…' : ' recordings…');
-    const job = await tmIndexAll();
+    const job = await tmIndexAll(p.data_version);
     if (seq !== tmSeq.b) return;
     if (job.error) tmErr(job.error);
     else p = await tmShared('/api/telemetry/laps?' + q);

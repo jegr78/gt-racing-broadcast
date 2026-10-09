@@ -482,10 +482,11 @@ recording and session.
   `GET /api/telemetry/tracks`, `POST /api/telemetry/learn` `{rec, track_id}`.
 - No request builds a lap index. A pool returns the laps of the recordings with a valid
   index and counts the rest in `unindexed`; `?rec=`, `lap` and `learn` on a recording
-  without a valid index answer `{ok: true, unindexed: 1, note}`, after the checks for an
-  unknown recording and the file the relay is writing. The page then runs the
-  `telemetry-index` job (`racecast telemetry index`, once per lap generation, joining a
-  running one) and asks once more; a recording still without an index shows the job's
+  without a valid index answer `{ok: true, unindexed: 1, note, data_version}`, after the
+  checks for an unknown recording and the file the relay is writing; a pool also names
+  its `data_version`. The page then runs the `telemetry-index` job (`racecast telemetry
+  index`, once per lap generation and data version, joining a running one) and asks once
+  more; a recording still without an index shows the job's
   "not indexed" line as an error. The CLI (`index`, `export`) and the post-event report
   still build.
 - New wiki screenshot `cc-telemetry.png` from a synthetic demo recording (a tool under
