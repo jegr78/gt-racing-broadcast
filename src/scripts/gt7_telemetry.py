@@ -347,23 +347,27 @@ class TelemetryEngine:
         self.track_db = None    # gt7_tracks.TrackDB, or None (no track recognition)
         self.track = None       # recognised layout, or {"candidates": [...]}
 
-    def _is_session_boundary(self, pkt):
-        """A new session (practice->quali->race, or a restart) is signalled by the
-        lap counter going backwards or the best lap clearing to -1. GT7 sends no
-        explicit session-change event, so we derive it from these two signals."""
+    def _session_boundary(self, pkt):
+        """How a new session starts, or None. GT7 sends no session-change event, so it
+        is derived: "line" when the lap counter goes backwards or the best lap clears
+        to -1; "mid-lap" when, without a best lap, the car reappears more than
+        SESSION_JUMP_M from where it left the track (a track change)."""
         if self._lap_num is None:
-            return False
-        if pkt.lap < self._lap_num:                       # lap counter went backwards
-            return True
+            return None
+        if pkt.lap < self._lap_num:
+            return "line"
         if self._last is not None and self._last.best_ms > 0 and pkt.best_ms == -1:
-            return True                                    # best lap was wiped
-        # Without a best lap neither signal can fire, so a jump to another track is one.
-        return (pkt.on_track and pkt.best_ms <= 0 and self._left_track
-                and self._track_pos is not None and pkt.pos_x is not None and math.dist(self._track_pos, (pkt.pos_x, pkt.pos_z)) > SESSION_JUMP_M)
+            return "line"
+        if (pkt.on_track and pkt.best_ms <= 0 and self._left_track
+                and self._track_pos is not None
+                and pkt.pos_x is not None
+                and math.dist(self._track_pos, (pkt.pos_x, pkt.pos_z)) > SESSION_JUMP_M):
+            return "mid-lap"
+        return None
 
-    def _reset_session(self, now, pkt):
+    def _reset_session(self, now, pkt, at_line=True):
         """Drop everything derived from the previous session (possibly a different
-        track/car) and re-open a fresh lap at the boundary."""
+        track/car) and open a fresh lap, at the line or mid-lap."""
         acc = self._acc
         if acc is not None:                # the lap in progress never finishes
             LOG.info("GT7 lap %s %s: not counted (session change)",
@@ -381,7 +385,7 @@ class TelemetryEngine:
         self._top_speed = 0.0
         self._delta_hist.clear()
         self._lap_num = pkt.lap
-        self._acc = _LapAccumulator(now, started_at_boundary=True)
+        self._acc = _LapAccumulator(now, started_at_boundary=at_line)
         self.track = None
 
     def update(self, pkt, now):
@@ -389,8 +393,8 @@ class TelemetryEngine:
         if self._lap_num is None:         # first packet: open a lap MID-lap (not a boundary)
             self._lap_num = pkt.lap
             self._acc = _LapAccumulator(now)                       # started_at_boundary=False
-        elif self._is_session_boundary(pkt):   # session change: wipe stale derived state
-            self._reset_session(now, pkt)
+        elif (boundary := self._session_boundary(pkt)) is not None:
+            self._reset_session(now, pkt, at_line=boundary == "line")
         elif pkt.lap != self._lap_num:    # lap-change edge: this new lap starts at the line
             self._finalise_lap()
             if self._acc is not None:     # bank the closing lap's driven distance

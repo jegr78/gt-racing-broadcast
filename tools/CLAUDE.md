@@ -85,9 +85,10 @@ tear down) is captured in the **`racecast-e2e`** skill, which builds on the
 views, the Director Panel, the cockpit and the Race Control desk (the two crew pages also at
 390 px) against the synthetic run, which serves a Crew roster (`--crew-csv-url`) and runs
 `tools/obs-sim.py`. The Telemetry view (`cc-telemetry`) exists only for a solo POV profile,
-so a second Control Center serves it from its own app home in the temp dir (`--keep` prints its URL) (a copy of `src/`
-or the binary, the shipped `solo-pov` profile, a learned demo track and one indexed
-`make-demo-recording.py` recording); every other surface keeps the first one.
+so a second Control Center serves it from its own app home in the temp dir: a copy of
+`src/` or the binary, the shipped `solo-pov` profile, a learned demo track and one indexed
+`make-demo-recording.py` recording. Every other surface keeps the first one. `--keep`
+prints the second Control Center's URL.
 `tools/visual-probe.js` reads element facts in the page;
 `tools/e2e_visual.py` applies six rules (page overflow, clipped text, a control left at the
 browser default on a dark surface, overlapping controls, WCAG AA contrast, console errors)

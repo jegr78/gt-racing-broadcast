@@ -622,6 +622,16 @@ def t_engine_session_change_on_teleport_before_any_best_lap():
                                            pos=(-3000.0 + 4.0 * i, 0.0, 2500.0))),
                    120.0 + 0.1 * i)
     assert eng.session == 2, f"driving on is not another session: {eng.session}"
+    laps = []
+    eng.on_lap = laps.append
+    for i in range(20, 400):
+        eng.update(tm.parse_packet(_packet(lap=1, speed_mps=40.0,
+                                           pos=(-3000.0 + 4.0 * i, 0.0, 2500.0))),
+                   120.0 + 0.1 * i)
+    eng.update(tm.parse_packet(_packet(lap=2, speed_mps=40.0, pos=(-1400.0, 0.0, 2500.0))),
+               160.0)
+    assert [lap["status"] for lap in laps] == ["not counted"], \
+        f"the stretch from the spawn point to the line is no lap: {laps}"
 
 
 def t_engine_no_session_change_on_teleport_after_a_best_lap():

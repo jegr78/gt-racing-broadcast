@@ -372,7 +372,10 @@ override.
   to -1, or, while no best lap exists, when the first on-track packet after an off-track
   phase lies more than 500 m (`SESSION_JUMP_M`) from the last on-track position. The
   third signal covers a track change before any best lap, where the first two cannot
-  fire; whether GT7 always clears the best lap on a track change is unverified.
+  fire; whether GT7 always clears the best lap on a track change is unverified. The new
+  lap after that jump starts mid-lap, so the stretch to the line is not counted. The
+  signal needs the off-track packets GT7 sends from its menus; a gap without packets
+  does not count, because a network dropout on a fast straight would split a session.
 - `TelemetryEngine.track_db` (None by default) and `TelemetryEngine.track`: after each
   closed lap with at least `MIN_TRACK_POINTS` recorded points, the engine calls
   `track_db.match`. A single match sets `track` until the next session boundary;

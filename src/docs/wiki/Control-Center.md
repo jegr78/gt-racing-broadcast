@@ -242,9 +242,10 @@ browser without a server.
 
 Click **Generate** to build the report. It runs `racecast report` as a background job;
 for a solo POV profile that also indexes the GT7 recordings in the report window, about
-16 s per 3 h of recording not yet indexed. The preview panel then shows the report. **Download .html** saves the file to your machine; **Send to Discord** posts
-the HTML file as an attachment to the league's Discord webhook channel. Discord shows
-it as a downloadable attachment that recipients open in a browser.
+16 s per 3 h of recording not yet indexed. The preview panel then shows the report.
+**Download .html** saves the file to your machine; **Send to Discord** posts the HTML
+file as an attachment to the league's Discord webhook channel. Discord shows it as a
+downloadable attachment that recipients open in a browser.
 
 > **CLI alternative:** `racecast report` (generate into `runtime/<profile>/reports/`),
 > `racecast report send [FILE]` (send the newest or a given file to Discord).
@@ -263,8 +264,9 @@ running relay.
   telemetry index`: it replays the recording once and caches the result next to it as
   `<stem>.laps.json`. Later opens are instant until the recording or the GT7 track data
   changes. A recording the job cannot read shows the job's reason instead of its laps.
-  The recording the relay is still writing shows as `(recording)` and cannot be picked: it stays out of every comparison, and the view analyses it only after the
-  recording stops.
+  The recording the relay is still writing shows as `(recording)` and cannot be picked:
+  it stays out of every comparison, and the view analyses it only after the recording
+  stops.
 - **Lap A and lap B.** Lap B is the lap you click. Lap A starts as the fastest counted
   lap other than B with the same track and car across all recordings of the profile.
   Both pickers list every comparable counted lap; B also shows the clicked lap when it
