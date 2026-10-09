@@ -502,6 +502,7 @@
   #tm-charts, #tm-map { display:block; width:100%; height:auto; }
   #tm-charts text, #tm-map text { font:11px var(--mono); fill:var(--dim); }
   #tm-charts text.tm-read { fill:var(--txt); }
+  .tm-readbg { fill:var(--card); opacity:.88; }
   #tm-charts text.tm-unit { fill:var(--faint); }
   .tm-frame { fill:none; stroke:var(--line); }
   .tm-zero { stroke:var(--off); stroke-dasharray:3 3; }
@@ -5155,6 +5156,16 @@ const tmState = {loaded: false, recs: [], rec: null, recLaps: [], pool: null,
                  a: null, b: null, lapA: null, lapB: null, sectorM: 200, tracks: null,
                  chart: null, map: null, cursor: null, profile: null};
 const tmLapCache = new Map();
+const TM_STEP = 5;                        // gt7_laps.STEP_M: one trace point per 5 m
+const TM_PAD = {l: 70, r: 10, t: 4, gap: 10, b: 22};
+const TM_CH = [
+  {key: 'speed_kmh', label: 'Speed', unit: 'km/h', h: 120, lo: 0},
+  {key: 'throttle', label: 'Throttle', unit: '%', h: 52, lo: 0, hi: 100},
+  {key: 'brake', label: 'Brake', unit: '%', h: 52, lo: 0, hi: 100},
+  {key: 'steer_deg', label: 'Steering', unit: 'deg', h: 70, sym: true},
+  {key: 'gear', label: 'Gear', unit: '', h: 52, lo: 0, step: true},
+  {key: 'delta', label: 'Delta B-A', unit: 's', h: 90, sym: true},
+];
 const tmLapsReq = new Map();     // url -> pending request, so a cold index runs once
 const tmSeq = {load: 0, rec: 0, b: 0, pair: 0};   // only the newest call of each kind renders
 
@@ -5406,6 +5417,7 @@ async function tmLoadPair() {
 function tmRender() {
   const B = tmState.lapB;
   $('tm-map-sub').textContent = B ? tmLapTrack(B) : '';
+  tmRenderCharts();
   tmRenderSectors();
 }
 
@@ -5443,6 +5455,143 @@ function tmRenderSectors() {
   $('tm-sec-sub').textContent = (tmState.sectorM || 200) + ' m'
     + (alone ? ' · no other lap to compare' : ' · best of ' + laps.length + ' laps');
 }
+function tmDelta(a, b) {
+  const n = Math.min(a.trace.length, b.trace.length), out = [];
+  for (let i = 0; i < n; i++) {
+    out.push({d: a.trace[i].d, delta: Math.round((b.trace[i].t - a.trace[i].t) * 1000) / 1000});
+  }
+  return out;
+}
+
+function tmPath(rows, key, X, Y, step) {
+  let d = '', pen = false;
+  rows.forEach(r => {
+    const v = r[key];
+    if (v == null) { pen = false; return; }
+    const x = X(r.d).toFixed(1), y = Y(v).toFixed(1);
+    d += !pen ? 'M' + x + ' ' + y : step ? 'H' + x + 'V' + y : 'L' + x + ' ' + y;
+    pen = true;
+  });
+  return d || 'M0 0';
+}
+
+function tmDeltaArea(svg, delta, X, Y) {
+  const y0 = Y(0), x0 = X(delta[0].d), x1 = X(delta[delta.length - 1].d);
+  let d = 'M' + x0.toFixed(1) + ' ' + y0.toFixed(1);
+  delta.forEach(r => { d += 'L' + X(r.d).toFixed(1) + ' ' + Y(r.delta).toFixed(1); });
+  d += 'L' + x1.toFixed(1) + ' ' + y0.toFixed(1) + 'Z';
+  const defs = tmEl('defs', {}, svg);
+  tmEl('rect', {x: x0, y: y0 - 2000, width: x1 - x0, height: 2000}, tmEl('clipPath', {id: 'tm-clip-up'}, defs));
+  tmEl('rect', {x: x0, y: y0, width: x1 - x0, height: 2000}, tmEl('clipPath', {id: 'tm-clip-dn'}, defs));
+  tmEl('path', {d, class: 'tm-loss', 'clip-path': 'url(#tm-clip-up)'}, svg);   // B behind
+  tmEl('path', {d, class: 'tm-gain', 'clip-path': 'url(#tm-clip-dn)'}, svg);   // B ahead
+}
+
+function tmTrace(l) { return (l && l.trace) || []; }
+
+function tmRenderCharts() {
+  const svg = $('tm-charts');
+  svg.textContent = '';
+  tmState.chart = tmState.cursor = null;
+  const A = tmState.lapA, B = tmState.lapB;
+  const ta = tmTrace(A), tb = tmTrace(B);
+  if (!tb.length) return;
+  const W = Math.max(300, Math.round(svg.getBoundingClientRect().width) || 760);
+  const H = TM_PAD.t + TM_CH.reduce((s, c) => s + c.h + TM_PAD.gap, 0) + TM_PAD.b;
+  svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+  const last = t => (t.length ? t[t.length - 1].d : 0);
+  const maxD = Math.max(last(ta), last(tb)) || 1;
+  const X = d => TM_PAD.l + d / maxD * (W - TM_PAD.l - TM_PAD.r);
+  const delta = ta.length ? tmDelta({trace: ta}, {trace: tb}) : [];
+  const panels = [];
+  let y = TM_PAD.t;
+  TM_CH.forEach(c => {
+    const series = c.key === 'delta' ? (delta.length ? [{cls: 'tm-b', rows: delta}] : [])
+      : [ta.length && {cls: 'tm-a', rows: ta}, {cls: 'tm-b', rows: tb}].filter(Boolean);
+    let vmin = Infinity, vmax = -Infinity;
+    series.forEach(s => s.rows.forEach(r => {
+      const v = r[c.key];
+      if (v != null) { if (v < vmin) vmin = v; if (v > vmax) vmax = v; }
+    }));
+    const any = vmin <= vmax;
+    let lo = c.lo != null ? c.lo : (any ? vmin : 0);
+    let hi = c.hi != null ? c.hi : (any ? vmax : 1);
+    if (c.sym) {
+      const m = Math.max(0.1, any ? Math.max(-vmin, vmax) : 0) * 1.1;
+      lo = -m; hi = m;
+    } else if (c.hi == null) {
+      hi = c.step ? Math.max(hi, 1) + 0.5 : Math.max(hi, lo + 1) * 1.05;
+    }
+    const top = y;
+    const Y = v => top + c.h - (v - lo) / (hi - lo) * c.h;
+    tmEl('rect', {x: TM_PAD.l, y: top, width: W - TM_PAD.l - TM_PAD.r, height: c.h, class: 'tm-frame'}, svg);
+    if (series.length && lo < 0 && hi > 0) {
+      tmEl('line', {x1: TM_PAD.l, x2: W - TM_PAD.r, y1: Y(0), y2: Y(0), class: 'tm-zero'}, svg);
+    }
+    tmEl('text', {x: 4, y: top + 13}, svg).textContent = c.label;
+    tmEl('text', {x: 4, y: top + 27, class: 'tm-unit'}, svg).textContent = c.unit;
+    if (c.key === 'delta') {
+      if (delta.length) tmDeltaArea(svg, delta, X, Y);
+      else tmEl('text', {x: TM_PAD.l + 8, y: top + c.h / 2 + 4, class: 'tm-unit'}, svg).textContent = 'no lap A to compare';
+    }
+    series.forEach(s => tmEl('path', {d: tmPath(s.rows, c.key, X, Y, c.step), class: s.cls}, svg));
+    const bg = tmEl('rect', {x: W - TM_PAD.r, y: top + 2, width: 0, height: 15, rx: 3, class: 'tm-readbg'}, svg);
+    panels.push({c, bg, read: tmEl('text', {x: W - TM_PAD.r - 6, y: top + 13, 'text-anchor': 'end', class: 'tm-read'}, svg)});
+    y += c.h + TM_PAD.gap;
+  });
+  // Ticks at least ~70 px apart, so the km labels never collide on a narrow pane.
+  const room = (W - TM_PAD.l - TM_PAD.r) / 70;
+  const tick = [200, 500, 1000, 2000, 5000].find(t => maxD / t <= room) || 10000;
+  for (let d = 0; d <= maxD; d += tick) {
+    const edge = X(d) > W - TM_PAD.r - 30;       // the last label must not run off the right edge
+    tmEl('text', {x: edge ? W - TM_PAD.r : X(d), y: H - 6, 'text-anchor': edge ? 'end' : 'middle'}, svg)
+      .textContent = (d / 1000).toFixed(1) + ' km';
+  }
+  tmState.cursor = tmEl('line', {class: 'tm-cursor', x1: -10, x2: -10, y1: TM_PAD.t, y2: H - TM_PAD.b}, svg);
+  tmState.chart = {X, maxD, W, panels};
+}
+
+function tmHover(ev) {
+  const ch = tmState.chart;
+  if (!ch) return;
+  const box = $('tm-charts').getBoundingClientRect();
+  const px = (ev.clientX - box.left) * ch.W / box.width;
+  const d = Math.max(0, Math.min(ch.maxD, (px - TM_PAD.l) / (ch.W - TM_PAD.l - TM_PAD.r) * ch.maxD));
+  const x = ch.X(d).toFixed(1);
+  tmState.cursor.setAttribute('x1', x);
+  tmState.cursor.setAttribute('x2', x);
+  const i = Math.round(d / TM_STEP);       // station i sits at i * TM_STEP metres
+  const at = l => { const t = tmTrace(l); return i < t.length ? t[i] : null; };
+  const ra = at(tmState.lapA), rb = at(tmState.lapB);
+  ch.panels.forEach((p, n) => {
+    const k = p.c.key;
+    const txt = k === 'delta' ? (ra && rb ? tmSigned(rb.t - ra.t) + ' s' : '')
+      : [ra, rb].map(r => (r && r[k] != null ? Number(r[k]).toFixed(k === 'gear' ? 0 : 1) : '-')).join(' / ');
+    p.read.textContent = (n === 0 ? (d / 1000).toFixed(2) + ' km · ' : '') + txt;
+    tmReadBg(p, ch.W);
+  });
+}
+
+function tmLeave() {
+  if (tmState.cursor) { tmState.cursor.setAttribute('x1', -10); tmState.cursor.setAttribute('x2', -10); }
+  if (tmState.chart) tmState.chart.panels.forEach(p => { p.read.textContent = ''; tmReadBg(p, tmState.chart.W); });
+}
+
+// Sized from the character count (11px mono is ~6.7px wide), so a hover never forces a layout.
+function tmReadBg(p, W) {
+  const w = p.read.textContent ? p.read.textContent.length * 6.7 + 8 : 0;
+  p.bg.setAttribute('x', W - TM_PAD.r - 2 - w);
+  p.bg.setAttribute('width', w);
+}
+
+$('tm-charts').addEventListener('pointermove', tmHover);
+$('tm-charts').addEventListener('pointerleave', tmLeave);
+let tmResizeQueued = false;
+window.addEventListener('resize', () => {
+  if (currentView !== 'telemetry' || !tmState.lapB || tmResizeQueued) return;
+  tmResizeQueued = true;
+  requestAnimationFrame(() => { tmResizeQueued = false; tmRenderCharts(); });
+});
 // end of the Telemetry view
 
 function _mbps(bps) { return bps == null ? '—' : (bps / 1e6).toFixed(2) + ' Mbps'; }

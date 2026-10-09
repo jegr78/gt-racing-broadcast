@@ -2102,6 +2102,62 @@ def t_telemetry_view_is_solo_pov_only():
     assert "tmRenderSectors()" in tm[tm.index("function tmRender()"):]
 
 
+def t_telemetry_charts_share_one_cursor():
+    tm = _tm_script(_cc_page())
+    keys = re.findall(r"\{key: '(\w+)'", tm[tm.index("const TM_CH"):tm.index("];", tm.index("const TM_CH"))])
+    assert keys == ["speed_kmh", "throttle", "brake", "steer_deg", "gear", "delta"], keys
+    assert "addEventListener('pointermove', tmHover)" in tm
+    assert "tmRenderCharts()" in tm[tm.index("function tmRender()"):]
+
+
+def t_telemetry_delta_and_paths_follow_the_traces():
+    tm = _tm_script(_cc_page())
+    out = _run_js(_tm_fn(tm, "tmDelta") + _tm_fn(tm, "tmPath") + """
+const tr = ts => ts.map((t, i) => ({d: i * 5, t}));
+console.log(JSON.stringify(tmDelta({trace: tr([0, 1, 2])}, {trace: tr([0, 0.5, 1, 1.5])})));
+const rows = [{d: 0, v: 1}, {d: 5, v: 2}, {d: 10, v: null}, {d: 15, v: 3}];
+console.log(tmPath(rows, 'v', d => d, v => 10 * v, false));
+console.log(tmPath(rows.slice(0, 2), 'v', d => d, v => 10 * v, true));
+console.log(tmPath([], 'v', d => d, v => v, false));""")
+    if out is not None:
+        assert out.strip().splitlines() == [
+            '[{"d":0,"delta":0},{"d":5,"delta":-0.5},{"d":10,"delta":-1}]',
+            "M0.0 10.0L5.0 20.0M15.0 30.0", "M0.0 10.0H5.0V20.0", "M0 0"], \
+            "delta is B minus A over the stations both laps reach; a gap lifts the pen"
+
+
+def t_telemetry_charts_without_lap_a_show_b_alone():
+    out = _tm_node("""
+const trace = ts => ts.map((t, i) => ({d: i * 5, t, speed_kmh: 100 + i, throttle: 50, brake: 0,
+                                       steer_deg: i - 1, gear: 3}));
+const drawn = () => {
+  const n = {};
+  const walk = e => {
+    const a = e.attrs || {};
+    const k = e.tagName + (a.class ? '.' + a.class : '');
+    n[k] = (n[k] || 0) + 1;
+    if (e.tagName === 'text' && e._t === 'no lap A to compare') n.note = (n.note || 0) + 1;
+    e.kids.forEach(walk);
+  };
+  $('tm-charts').kids.forEach(walk);
+  return ['path.tm-a', 'path.tm-b', 'path.tm-gain', 'path.tm-loss', 'line.tm-zero', 'note']
+    .map(k => n[k] || 0).join(',');
+};
+tmState.lapA = null; tmState.lapB = {trace: trace([0, 1, 2, 3])};
+tmRenderCharts();
+const alone = drawn();
+tmState.lapA = {trace: trace([0, 1.1, 2.2])};
+tmRenderCharts();
+const pair = drawn();
+tmHover({clientX: 799});
+const late = tmState.chart.panels[5].read.textContent;
+tmClearPair('');
+console.log([alone, pair, JSON.stringify(late), String(tmState.chart), $('tm-charts').kids.length].join('|'));""")
+    if out is not None:
+        assert out.strip() == '0,5,0,0,1,1|5,6,1,1,2,0|""|null|0', \
+            f"without A only B is drawn, the delta panel holds a note and no zero line: {out!r}"
+
+
 def t_telemetry_times_read_as_lap_times():
     tm = _tm_script(_cc_page())
     out = _run_js(_tm_fn(tm, "tmTime") + _tm_fn(tm, "tmSigned") + """
@@ -2133,8 +2189,11 @@ class El {
   createTFoot() { return this.appendChild(new El('sec')); }
   insertRow() { return this.appendChild(new El('tr')); }
   insertCell() { const c = this.appendChild(new El('td')); this.cells.push(c); return c; }
-  setAttribute() {}
+  setAttribute(k, v) { (this.attrs = this.attrs || {})[k] = String(v); }
+  addEventListener() {}
+  getBoundingClientRect() { return {left: 0, width: 800}; }
 }
+const window = {addEventListener() {}};
 const els = {};
 const $ = id => els[id] || (els[id] = new El(id));
 const document = {createElement: t => new El(t), createElementNS: (n, t) => new El(t)};
@@ -2148,7 +2207,8 @@ function answer(part, data) {
 }
 const tick = async () => { for (let i = 0; i < 20; i++) await new Promise(r => setTimeout(r, 0)); };
 const lap = (rec, n, t, car) => ({rec, session: 1, lap: n, time_s: t, status: 'counted',
-  car: 'Car', car_id: car, track_id: 't1', track: 'Track', layout: '', sectors: [t / 2, t / 2]});
+  car: 'Car', car_id: car, track_id: 't1', track: 'Track', layout: '', sectors: [t / 2, t / 2],
+  trace: []});
 const recLaps = (rec, laps) => ({ok: true, recording: {rec, track: null}, laps});
 const pool = laps => ({ok: true, laps, best_sectors: [], theoretical_best: null,
                        reference: laps[0] || null});
