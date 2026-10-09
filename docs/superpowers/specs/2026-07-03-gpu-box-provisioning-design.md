@@ -55,7 +55,7 @@ mirrors how racecast already separates machine state from profile state.
 
 ## `tools/cloud/provision.py` — specification
 
-Runs as root — either invoked manually with `sudo ./provision.py`, or as a GCP
+Runs as root — either invoked manually with `sudo python3 provision.py`, or as a GCP
 startup-script on first boot (both modes documented; see below). Every step is
 **idempotent** (existence- or stamp-gated) so a re-run after a failed step is safe and
 does not redo completed work. English-only, stdlib Python 3. It was first written in bash
@@ -118,9 +118,9 @@ NVENC encoders, `ldconfig -p | grep nvidia-encode`, `tailscale status` is up,
 - **Manual (default, for first-time setup with eyes on it):**
   ```
   gcloud compute instances create spike-gpu ...        # Appendix A step 1
-  gcloud compute scp tools/cloud/provision.py spike-gpu:~/ --zone=...
+  gcloud compute scp tools/cloud/provision.py tools/cloud/prepare-event.py spike-gpu:~/ --zone=...
   gcloud compute ssh spike-gpu --zone=...
-    $ sudo ./provision.py                                # live output, re-runnable
+    $ sudo python3 provision.py                          # live output, re-runnable
   ```
 - **GCP startup-script (reproduction one-liner, unattended):**
   ```

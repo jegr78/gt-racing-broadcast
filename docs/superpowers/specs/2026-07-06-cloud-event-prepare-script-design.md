@@ -50,7 +50,7 @@ a deliberate, separate operator/director action (Control Center "Start event" or
 ## CLI surface
 
 ```
-./prepare-event.py <league> [--no-twitch] [--no-speedtest] [--no-update]
+python3 prepare-event.py <league> [--no-twitch] [--no-speedtest] [--no-update]
 ```
 
 - `<league>` (**required**) — the racecast profile name for this event. If omitted, or not
@@ -67,7 +67,7 @@ a deliberate, separate operator/director action (Control Center "Start event" or
 
 Intended to be run in an **interactive SSH session** (the operator logs in, then runs it), so
 the preview prompt and readiness output have a TTY. A non-interactive invocation
-(`ssh box --command="./prepare-event.py …"`, no TTY) still works but takes the safe defaults
+(`ssh box --command="python3 prepare-event.py …"`, no TTY) still works but takes the safe defaults
 (see the update logic).
 
 ## Form & error philosophy
@@ -167,7 +167,7 @@ is not beside it), this copy is best-effort and simply skipped with a note — t
 - `tools/cloud/README.md`: a new "Prepare for an event (`prepare-event.py`)" section, and the
   copy-into-box note in §2.
 - `src/docs/wiki/Cloud-Producer.md` §4: replace the hand-typed command list with
-  `./prepare-event.py <league>`, keeping the individual commands underneath as "what it does",
+  `python3 prepare-event.py <league>`, keeping the individual commands underneath as "what it does",
   and note the freeze caveat for `racecast update`.
 
 ## Validation

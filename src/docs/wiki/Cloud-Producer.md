@@ -141,12 +141,12 @@ From your laptop, once the box is up and you are SSHed in **as `racecast`**
 
 ```bash
 racecast profile use <league>     # (or let prepare-event.py do the whole prep: below)
-./prepare-event.py <league>       # update (preview-guarded) · cookies (YouTube+Twitch) ·
+python3 prepare-event.py <league> # update (preview-guarded) · cookies (YouTube+Twitch) ·
                                   # graphics · media · brands · speedtest · fresh relay · preflight
 racecast event start              # go live (relay + OBS + Discord): prepare-event.py does NOT
 ```
 
-`./prepare-event.py <league>` orchestrates all the per-event prep steps before go-live:
+`python3 prepare-event.py <league>` orchestrates all the per-event prep steps before go-live:
 it runs `racecast update` (with a **preview guard**, a deliberate `preview-main` build
 is kept unless you confirm the downgrade to stable), `profile use`, YouTube **and** Twitch
 cookie refresh (pass `--no-twitch` to skip Twitch), graphics/media/brands refresh,
@@ -240,8 +240,9 @@ same session OBS runs in: so the remote desktop, OBS and the install tree are al
   instead use the box's **`100.x` IP** (direct IP, no public relay) once **Settings →
   Security → "Enable direct IP access"** is on, a one-click if the scripted toggle didn't
   take on your RustDesk build.
-- Provisioning **auto-reboots** at the end (default on; `PROVISION_REBOOT=0` opts out) to
-  start the autologin X session RustDesk shows. If the desktop is black, reboot once more.
+- Provisioning **auto-reboots** at the end of its first fully green run (default on;
+  `PROVISION_REBOOT=0` opts out) to start the autologin X session RustDesk shows. Later runs
+  and runs with a red line do not reboot. If the desktop is black, reboot once more.
 
 Then, per league, import the localized scene collection into OBS once:
 
