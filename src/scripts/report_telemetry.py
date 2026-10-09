@@ -6,6 +6,7 @@ window; output is a JSON-safe block that report_build renders. Figures are per t
 and car and use counted laps only (the relay's verdicts, as on the HUD).
 """
 import html
+import math
 import statistics
 
 import gt7_laps
@@ -16,8 +17,8 @@ GREY = "#bdbdbd"
 
 
 def fmt_lap(seconds):
-    """118.432 -> '1:58.432'; None -> the report's empty-cell mark."""
-    if seconds is None:
+    """118.432 -> '1:58.432'; None or a non-finite value -> the report's empty-cell mark."""
+    if seconds is None or not math.isfinite(seconds):
         return "—"
     m, ms = divmod(int(round(float(seconds) * 1000)), 60000)
     return f"{m}:{ms // 1000:02d}.{ms % 1000:03d}"
@@ -60,10 +61,20 @@ def gap_color(gap_s, worst_s):
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
+def _finite_points(trace):
+    """Trace points whose d/x/z are usable numbers; a corrupt cache must not blank the map."""
+    return [p for p in trace
+            if math.isfinite(p.get("d", float("nan")))
+            and math.isfinite(p.get("x", float("nan")))
+            and math.isfinite(p.get("z", float("nan")))]
+
+
 def _sector_map(best, pool):
     """The best lap's mini-sectors with the time each lost to the fastest counted lap;
-    a sector without a time on either side has gap None and is drawn grey."""
-    trace = best.get("trace") or []
+    a sector without a time on either side has gap None and is drawn grey. The last
+    sector is also grey when the pool's laps close their trace at different lengths: its
+    stub then covers a different distance per lap, so its time is not comparable."""
+    trace = _finite_points(best.get("trace") or [])
     own = best.get("sectors") or []
     if len(trace) < 2 or not own or not pool:
         return None
@@ -71,6 +82,9 @@ def _sector_map(best, pool):
     n = min(len(own), len(ref))
     gaps = [max(0.0, own[i] - ref[i]) if own[i] is not None and ref[i] is not None else None
             for i in range(n)]
+    lengths = {gt7_laps.lap_length_m(lap) for lap in pool if lap.get("trace")}
+    if gaps and len(lengths) > 1:
+        gaps[-1] = None
     worst = max((g for g in gaps if g is not None), default=0.0)
     sectors = []
     for i, gap in enumerate(gaps):
@@ -79,7 +93,7 @@ def _sector_map(best, pool):
         pts = [[p["x"], p["z"]] for p in trace if lo <= p["d"] <= hi]
         if len(pts) >= 2:
             color = GREY if gap is None else gap_color(gap, worst)
-            sectors.append({"points": pts, "gap_s": gap, "color": color})
+            sectors.append({"i": i + 1, "points": pts, "gap_s": gap, "color": color})
     return {"sectors": sectors, "worst_gap_s": worst} if sectors else None
 
 
@@ -91,9 +105,9 @@ def _group(key, members):
     best_row, best = min(valid, key=lambda m: m[0]["time_s"]) if valid else (None, None)
     times = [row["time_s"] for row, _lap in valid]
     timed = [lap for _row, lap in valid if lap.get("sectors")]
-    # a different sector count (lengths straddling a sector boundary) makes sectors incomparable
-    sector_counts = {len(lap["sectors"]) for lap in timed}
-    theoretical_s = gt7_laps.theoretical_best(timed) if timed and len(sector_counts) == 1 else None
+    # different lap lengths make the sectors incomparable, even at the same sector count
+    lengths = {gt7_laps.lap_length_m(lap) for lap in timed if lap.get("trace")}
+    theoretical_s = gt7_laps.theoretical_best(timed) if timed and len(lengths) == 1 else None
     fuel = [lap["fuel_used_l"] for _row, lap in valid if lap.get("fuel_used_l") is not None]
     tyres = [lap["tyre_avg_c"] for _row, lap in valid
              if len(lap.get("tyre_avg_c") or []) == 4 and any(lap["tyre_avg_c"])]
@@ -163,7 +177,7 @@ def summary_line(block):
 def svg_lap_trend(trend, w=720, h=150):
     """Lap times in driving order: counted laps dark, the best green, the rest grey and
     clamped into the counted laps' range."""
-    pts = [p for p in trend if p.get("time_s") is not None]
+    pts = [p for p in trend if p.get("time_s") is not None and math.isfinite(p["time_s"])]
     if not pts:
         return ""
     left, right, top, bottom = 64, 12, 12, 12
@@ -195,6 +209,19 @@ def svg_lap_trend(trend, w=720, h=150):
             f'aria-label="Lap time trend">{grid}{"".join(marks)}</svg>')
 
 
+def _thin(coords, min_px=1.0):
+    """Drop points closer than min_px to the last kept one; a sector's own first and
+    last point always stay so neighbouring sectors still join exactly."""
+    if len(coords) <= 2:
+        return coords
+    kept = [coords[0]]
+    for p in coords[1:-1]:
+        if math.hypot(p[0] - kept[-1][0], p[1] - kept[-1][1]) >= min_px:
+            kept.append(p)
+    kept.append(coords[-1])
+    return kept
+
+
 def svg_track_map(track_map, size=360, pad=14):
     """The best lap's line from GT7 x/z (x right, z down), one polyline per mini-sector
     in its gap colour, with a start/finish marker."""
@@ -212,10 +239,10 @@ def svg_track_map(track_map, size=360, pad=14):
         return (ox + (p[0] - x0) * k, oz + (p[1] - z0) * k)
 
     lines = []
-    for i, s in enumerate(track_map["sectors"], 1):
-        coords = " ".join(f"{x:.1f},{y:.1f}" for x, y in map(xy, s["points"]))
+    for s in track_map["sectors"]:
+        coords = " ".join(f"{x:.1f},{y:.1f}" for x, y in _thin([xy(p) for p in s["points"]]))
         gap = "no time" if s["gap_s"] is None else f"+{s['gap_s']:.3f} s"
-        tip = html.escape(f"Sector {i}: {gap}")
+        tip = html.escape(f"Sector {s['i']}: {gap}")
         lines.append(f'<polyline points="{coords}" fill="none" stroke="{s["color"]}" '
                      f'stroke-width="5" stroke-linecap="round" stroke-linejoin="round">'
                      f"<title>{tip}</title></polyline>")

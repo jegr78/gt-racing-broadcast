@@ -93,6 +93,8 @@ def t_fmt_lap():
     assert rtel.fmt_lap(43.81) == "0:43.810"
     assert rtel.fmt_lap(59.9996) == "1:00.000", "rounding to the millisecond carries into the minute"
     assert rtel.fmt_lap(None) == "—"
+    assert rtel.fmt_lap(float("nan")) == "—"
+    assert rtel.fmt_lap(float("inf")) == "—"
 
 
 def t_track_label_as_in_the_control_center():
@@ -295,6 +297,83 @@ def t_trend_pins_a_slow_lap_to_the_top_edge():
 def t_svg_empty_inputs():
     assert rtel.svg_lap_trend([]) == ""
     assert rtel.svg_track_map(None) == ""
+
+
+def t_theoretical_best_none_when_lap_lengths_differ():
+    """Two counted laps share the same sector count (10) but end at different lengths
+    (1998 m vs 1990 m), so the last sector's stub differs per lap and is incomparable,
+    even though the sector-count check alone would not catch it."""
+    idx = {"rec": REC, "started": "2026-10-07T20:00:00+02:00",
+           "start_ts": 1000.0, "end_ts": 1100.0, "track": None,
+           "laps": [_lap(1, 10.0, _straight_trace(1998.0, 50.0), track_id=None),
+                    _lap(2, 60.0, _straight_trace(1990.0, 49.0), track_id=None)]}
+    g = rtel.telemetry_block([idx], WINDOW)["groups"][0]
+    assert g["theoretical_s"] is None, \
+        "differing lap lengths must not produce a theoretical best from unequal stubs"
+    m = g["map"]
+    assert len(m["sectors"]) == 10, len(m["sectors"])
+    last = m["sectors"][-1]
+    assert (last["gap_s"], last["color"]) == (None, rtel.GREY), last
+    assert m["worst_gap_s"] == 0.0, "the incomparable last sector must not set the scale"
+    assert [s["color"] for s in m["sectors"][:-1]] == ["#2e7d32"] * 9, \
+        "the comparable sectors stay green, not pulled red by the bad stub"
+
+
+def t_theoretical_and_last_sector_unaffected_by_equal_lap_lengths():
+    """A known track closes every counted lap at the same line length, so the
+    length-equality guard must not blank the figures that already worked."""
+    g = block()["groups"][0]
+    assert g["theoretical_s"] is not None
+    last = g["map"]["sectors"][-1]
+    assert last["gap_s"] is not None and last["color"] != rtel.GREY, \
+        "equal lap lengths keep the last sector's gap comparable"
+
+
+def t_svg_trend_skips_non_finite_time():
+    trend = [{"n": 1, "lap": 1, "time_s": 40.0, "counted": True, "best": True},
+             {"n": 2, "lap": 2, "time_s": float("nan"), "counted": False, "best": False},
+             {"n": 3, "lap": 3, "time_s": float("inf"), "counted": False, "best": False}]
+    svg = rtel.svg_lap_trend(trend)
+    root = ET.fromstring(svg)
+    assert len(list(root.iter("circle"))) == 1, "nan/inf lap times must not reach the chart"
+
+
+def t_map_drops_non_finite_trace_points():
+    idx = session_index()
+    idx["laps"][2]["trace"][5]["x"] = float("nan")
+    g = rtel.telemetry_block([idx], WINDOW)["groups"][0]
+    assert g["map"] is not None
+    parsed = ET.fromstring(rtel.svg_track_map(g["map"]))
+    assert parsed.tag == "svg", "a corrupt trace point must not blank the map or break its XML"
+
+
+def t_track_map_thins_long_traces_but_sectors_still_join():
+    def seg(x0, x1):
+        return [[float(x), 0.0] for x in range(x0, x1 + 1, 5)]
+    tm = {"sectors": [{"i": 1, "points": seg(0, 10000), "gap_s": 0.0, "color": "#2e7d32"},
+                       {"i": 2, "points": seg(10000, 20000), "gap_s": 0.0, "color": "#c62828"}],
+          "worst_gap_s": 0.0}
+    svg = rtel.svg_track_map(tm)
+    root = ET.fromstring(svg)
+    polylines = list(root.iter("polyline"))
+    assert len(polylines) == 2
+    pts0 = polylines[0].get("points").split()
+    pts1 = polylines[1].get("points").split()
+    assert len(pts0) < 500 and len(pts1) < 500, "a long straight trace is thinned heavily"
+    assert pts0[-1] == pts1[0], "the shared sector boundary still joins exactly"
+
+
+def t_map_sector_tooltip_uses_its_own_index_even_when_a_sector_is_dropped():
+    """Sector 1 (index 1, 200..400 m) has only its boundary point and is dropped; the
+    sector after it must still read 'Sector 3', not be relabelled 'Sector 2'."""
+    trace = ([{"d": float(d), "x": float(d), "z": 0.0} for d in range(0, 201, 5)]
+             + [{"d": float(d), "x": float(d), "z": 0.0} for d in range(405, 2001, 5)])
+    best = {"trace": trace, "sectors": [1.0] * 10}
+    tm = rtel._sector_map(best, [best])
+    assert [s["i"] for s in tm["sectors"]] == [1, 3, 4, 5, 6, 7, 8, 9, 10], \
+        "the dropped sector must not shift the index of the ones after it"
+    svg = rtel.svg_track_map(tm)
+    assert "Sector 2:" not in svg and "Sector 3:" in svg
 
 
 def run():
