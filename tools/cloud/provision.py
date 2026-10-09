@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""provision.py: one-shot machine-layer provisioning for a GCP GPU box (Ubuntu 24.04)
-for the racecast cloud-producer spike (#395).
+"""provision.py: one-shot machine-layer provisioning for a cloud GPU box (Ubuntu 24.04)
+that runs racecast as a remote producer.
 
 Installs everything racecast does NOT cover: NVIDIA driver, xfce desktop,
 Firefox (deb, not snap), RustDesk, passwordless sudo, Tailscale join, then delegates
@@ -18,13 +18,11 @@ Optional environment:
                     browser, and WAITS); only a non-interactive run without a key defers it
                     to a one-line command the operator must run once.
   RACECAST_TAG      racecast release tag to install (default: latest = latest STABLE
-                    release). Set to `preview-main` to install the current main
-                    preview build: needed until the Linux install-tools/install-apps
-                    fixes land in a stable release: apt-update-first (#408/#412) AND
-                    the streamlink-venv >=8.2.0 + obs-pipewire-audio plugin installs
-                    (#395). Without them a fresh box gets a too-old streamlink (every
-                    cookie'd YouTube feed aborts) and no Discord audio plugin.
-                    `latest` never selects a pre-release, so this is opt-in.
+                    release; it never selects a pre-release). `preview-main` installs
+                    the current main preview build. A box needs a build whose Linux
+                    install-tools installs streamlink >= 8.2.0 and whose install-apps
+                    installs the obs-pipewire-audio plugin: without them every cookie'd
+                    YouTube feed aborts and Discord has no audio source.
   RACECAST_USER     the event user to create and target (default: racecast).
   RUSTDESK_VERSION  RustDesk release to install (default: pinned below; check for newer).
   RUSTDESK_PASSWORD RustDesk password to apply on first boot (default: generated).
@@ -353,6 +351,14 @@ def cuda_arch(machine):
     return "sbsa" if machine in ("aarch64", "arm64") else "x86_64"
 
 
+def rustdesk_deb_url(version, machine):
+    """The RustDesk release .deb for this CPU, or None when RustDesk ships none for it."""
+    arch = {"x86_64": "x86_64", "amd64": "x86_64", "aarch64": "aarch64", "arm64": "aarch64"}.get(machine)
+    if not arch:
+        return None
+    return f"https://github.com/rustdesk/rustdesk/releases/download/{version}/rustdesk-{version}-{arch}.deb"
+
+
 def release_url(tag, machine):
     asset = "racecast-linux-arm64.tar.gz" if machine in ("aarch64", "arm64") else "racecast-linux.tar.gz"
     if tag == "latest":
@@ -505,9 +511,14 @@ def step_rustdesk(h, user, env):
     if h.which("rustdesk"):
         ok("RustDesk already present")
     else:
+        machine = platform.machine()
+        url = rustdesk_deb_url(version, machine)
+        if not url:
+            print(f"provision.py: no RustDesk .deb for architecture '{machine}' (only x86_64 and aarch64)",
+                  file=sys.stderr)
+            sys.exit(1)
         deb = f"/tmp/rustdesk-{version}.deb"
-        strict(h.run(["curl", "-fsSL", f"https://github.com/rustdesk/rustdesk/releases/download/{version}/"
-                      f"rustdesk-{version}-x86_64.deb", "-o", deb]))
+        strict(h.run(["curl", "-fsSL", url, "-o", deb]))
         strict(h.run(["apt-get", "install", "-y", deb]))
         ok(f"RustDesk {version} installed")
     h.run(["systemctl", "enable", "--now", "rustdesk"], **QUIET)
@@ -589,8 +600,11 @@ def step_tailscale(h, user, env):
     if h.run(["tailscale", "status"], **QUIET) == 0:
         ok(f"already joined the tailnet ({tailnet_ip(h)})")
     elif env.get("TS_AUTHKEY"):
-        strict(h.run(["tailscale", "up", "--ssh", "--authkey", env["TS_AUTHKEY"], "--hostname", "racecast-box"]))
-        ok(f"joined the tailnet unattended ({tailnet_ip(h)})")
+        if h.run(["tailscale", "up", "--ssh", "--authkey", env["TS_AUTHKEY"], "--hostname", "racecast-box"]) == 0:
+            ok(f"joined the tailnet unattended ({tailnet_ip(h)})")
+        else:
+            warn("unattended tailnet join failed. Re-run: sudo tailscale up --ssh --authkey <key> "
+                 "--hostname racecast-box")
     elif h.isatty():
         log("   ACTION REQUIRED: approve this box into your tailnet.")
         log("   'tailscale up' prints a https://login.tailscale.com/… URL below; open it in your")

@@ -119,7 +119,7 @@ def sshopt(key):
 def provision_cmd(urls):
     first = urls.split(" ", 1)[0]
     return (f"sudo IPTEST_COOKIES=/tmp/yt-cookies.txt IPTEST_HARNESS=1 IPTEST_URLS='{first}' "
-            "python3 /tmp/provision-iptest.py 2>&1 | grep -E 'OK|RESOLVED|BOT-CHECK|MISSING|harness'")
+            "python3 /tmp/provision-iptest.py 2>&1 | grep -E 'OK|RESOLVED|BOT-CHECK|OTHER|MISSING|harness'")
 
 
 def cell_launch_cmd(cell, extra, survival):

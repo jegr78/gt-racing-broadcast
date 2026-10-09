@@ -103,7 +103,9 @@ def state(h, cfg):
 
 
 def external_ip(h, cfg):
-    return describe(h, cfg, "networkInterfaces[0].accessConfigs[0].natIP")
+    """The external IP, or "" when there is none or the lookup fails."""
+    rc, ip = describe(h, cfg, "networkInterfaces[0].accessConfigs[0].natIP")
+    return "" if rc else ip
 
 
 def status(h, cfg):
@@ -117,8 +119,7 @@ def status(h, cfg):
     print(f"GCP box {cfg['name']} ({ty}, {cfg['zone']})")
     print(f"  state:       {st}")
     if st == "RUNNING":
-        rc, ip = external_ip(h, cfg)
-        strict(rc)
+        ip = external_ip(h, cfg)
         print(f"  external IP: {ip or '<none>'}")
     print(f"  ssh:         gcloud compute ssh {cfg['ssh_user']}@{cfg['name']} --zone {cfg['zone']}"
           "   (tailnet 100.x is stable)")
@@ -165,8 +166,7 @@ def main(argv=None, env=None, h=None):
     elif action == "stop":
         stop(h, cfg)
     elif action == "ip":
-        rc, ip = external_ip(h, cfg)
-        strict(rc)
+        ip = external_ip(h, cfg)
         if not ip:
             die("no external IP (box not running?)")
         print(ip)

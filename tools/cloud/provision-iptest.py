@@ -176,8 +176,11 @@ def main(env=None, h=None):
 
     # Log in DIRECTLY as racecast with the key the box was launched with, copied from the invoking login user.
     ssh_src_user = env.get("SUDO_USER") or "ubuntu"
-    src_ak = home_field(checked(h, ["getent", "passwd", ssh_src_user], stderr=DEVNULL)) + "/.ssh/authorized_keys"
-    if h.isfile(src_ak):
+    rc, entry = h.capture(["getent", "passwd", ssh_src_user], stderr=DEVNULL)
+    src_ak = home_field(entry) + "/.ssh/authorized_keys"
+    if rc:
+        warn(f"no user {ssh_src_user} on this box: racecast SSH access not set up (set SUDO_USER)")
+    elif h.isfile(src_ak):
         strict(h.run(["install", "-d", "-o", user, "-g", user_group, "-m", "0700", user_home + "/.ssh"]))
         strict(h.run(["install", "-m", "0600", "-o", user, "-g", user_group, src_ak,
                       user_home + "/.ssh/authorized_keys"]))
@@ -232,22 +235,19 @@ def main(env=None, h=None):
 
     log("4/4  resolve test from this box's egress IP")
     cookie_arg = ["--cookies", cookies_dst] if h.isfile(cookies_dst) else []
-    print("  egress IP (as the internet sees it): ", end="")
-    strict(h.run(["curl", "-s", "https://api.ipify.org"]))
-    print()
+    rc, ip = h.capture(["curl", "-s", "https://api.ipify.org"])
+    print(f"  egress IP (as the internet sees it): {ip if rc == 0 else f'<unknown, curl exit {rc}>'}")
     path = os.environ.get("PATH", "")
     for u in urls.split():
         print(f"  --- {u} ---")
-        rc, out = h.capture(resolve_argv(user, rtbin, path, cookie_arg, u), stderr=subprocess.STDOUT)
-        # bash ran this as `out="$(... | head -1)"` under set -e + pipefail: a failed resolve ends the run here.
-        strict(rc)
+        # A failed resolve is a verdict (the bot check exits non-zero), so its exit status is not checked.
+        _, out = h.capture(resolve_argv(user, rtbin, path, cookie_arg, u), stderr=subprocess.STDOUT)
         out = first_line(out)
         print(verdict(out))
         if env.get("IPTEST_PULL", "0") == "1" and out[:4] == "http":
-            print("  pull 10s: ", end="")
-            rc, nbytes = h.count_bytes(pull_argv(user, rtbin, path, out))
-            strict(rc)
-            print(f"{nbytes} bytes")
+            # `timeout 10` always ends a live pull, so the byte count is the result, not the status.
+            _, nbytes = h.count_bytes(pull_argv(user, rtbin, path, out))
+            print(f"  pull 10s: {nbytes} bytes")
     if env.get("IPTEST_HARNESS", "0") == "1":
         log(f"deploy #505 harness source (as {user})")
         ref = env.get("IPTEST_HARNESS_REF") or "feat/505-multifeed-429-probe"

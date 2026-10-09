@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Stdlib checks for the cloud-box scripts in tools/cloud/. The expected argv, file contents
 and messages are the ones the former bash scripts produced. Run: python3 tests/test_cloud_tools.py"""
-import contextlib, importlib.util, io, os, sys, types
+import contextlib, importlib.util, io, os, re, sys, types
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -271,7 +271,9 @@ def t_gcp_status_and_ip():
     code, _, err = run_main(gcp.main, ["ip"], {}, _gcp_host(ip=""))
     assert code == 1 and err == "gcp-box: no external IP (box not running?)\n"
     code, out, err = run_main(gcp.main, ["ip"], {}, _gcp_host(extra=[("natIP", 4, "")]))
-    assert (code, out, err) == (4, "", ""), "unlike aws-box, a failed IP lookup ends the script (set -e)"
+    assert code == 1 and err == "gcp-box: no external IP (box not running?)\n", "a failed IP lookup counts as no IP"
+    code, out, _ = run_main(gcp.main, ["status"], {}, _gcp_host(extra=[("natIP", 4, "")]))
+    assert code == 0 and "  external IP: <none>\n" in out
 
 
 def t_gcp_start_stop_ssh():
@@ -476,11 +478,28 @@ def t_iptest_happy_run():
     assert out.rstrip().endswith("provision-iptest.py complete. Resolve verdict(s) above are the #505 answer for this IP")
 
 
-def t_iptest_failed_resolve_ends_the_run_like_bash():
-    h = _ipt_host(resolve=(1, "ERROR: Sign in to confirm you're not a bot\n"))
+def t_iptest_failed_resolve_prints_the_verdict():
+    h = _ipt_host(resolve=(1, "ERROR: [youtube] x: Sign in to confirm you\u2019re not a bot\nmore\n"))
+    code, out, _ = run_main(ipt.main, {"IPTEST_URLS": "https://a https://b"}, h)
+    assert code == 0, "a failed resolve is a test result, not a reason to stop"
+    assert out.count("  BOT-CHECK -> IP is YouTube-bot-blocked\n") == 2, "every URL gets its verdict"
+    assert out.rstrip().endswith("are the #505 answer for this IP")
+
+
+def t_iptest_verdicts_reach_the_runners():
+    for line in (ipt.verdict("https://x"), ipt.verdict("not a bot"), ipt.verdict("ERROR: 403")):
+        for cmd in (r505.provision_cmd("u"), regions.provision_cmd("u")):
+            pattern = cmd.split("grep -E '", 1)[1].rstrip("'")
+            assert re.search(pattern, line), f"{line!r} must pass the runner filter {pattern!r}"
+
+
+def t_iptest_survives_missing_login_user_and_network():
+    h = _ipt_host(extra=[(("getent", "passwd", "ubuntu"), 2, ""), (("curl", "-s"), 6, "")])
     code, out, _ = run_main(ipt.main, {}, h)
-    assert code == 1 and "BOT-CHECK" not in out, \
-        "bash set -e + pipefail aborted on the failed resolve before printing the verdict"
+    assert code == 0, "no ubuntu user (GCP) and no network for ipify must not end the run"
+    assert "no user ubuntu on this box: racecast SSH access not set up (set SUDO_USER)" in out
+    assert "  egress IP (as the internet sees it): <unknown, curl exit 6>\n" in out
+    assert not any(a[0] == "install" and "authorized_keys" in a[-1] for a in h.argvs())
 
 
 def t_iptest_without_cookies_and_not_root():
@@ -499,9 +518,9 @@ def t_iptest_pull_and_harness():
     assert code == 0 and "  pull 10s: 42 bytes\n" in out
     assert ["sudo", "-u", "racecast", "-H", "bash", "-lc", ipt.harness_script("r")] in h.argvs()
     assert "harness at /home/racecast/iro505 (ref r). Src/ + tools/ present" in out
-    h = _ipt_host(extra=[("streamlink --stdout", 124, "x")])
+    h = _ipt_host(extra=[("streamlink --stdout", 124, "x" * 9000)])
     code, out, _ = run_main(ipt.main, {"IPTEST_PULL": "1"}, h)
-    assert code == 124, "the 10 s timeout fails the pipeline, so bash ended the run here"
+    assert code == 0 and "  pull 10s: 9000 bytes\n" in out, "the 10 s timeout is how the pull ends, not a failure"
 
 
 # ---------------------------------------------------------------- iptest-505-run
@@ -518,7 +537,7 @@ def t_505_remote_commands_match_bash_bytes():
     assert r505.cell_done_cmd("x") == "grep -q '# done' ~/iro505/probe-runs/x.console 2>/dev/null"
     assert r505.provision_cmd("https://a https://b") == (
         "sudo IPTEST_COOKIES=/tmp/yt-cookies.txt IPTEST_HARNESS=1 IPTEST_URLS='https://a' "
-        "python3 /tmp/provision-iptest.py 2>&1 | grep -E 'OK|RESOLVED|BOT-CHECK|MISSING|harness'")
+        "python3 /tmp/provision-iptest.py 2>&1 | grep -E 'OK|RESOLVED|BOT-CHECK|OTHER|MISSING|harness'")
 
 
 def t_505_config_and_cells():
@@ -734,6 +753,29 @@ def t_prov_release_url_and_arch():
     assert prov.cuda_arch("arm64") == "sbsa" and prov.cuda_arch("x86_64") == "x86_64"
 
 
+def t_prov_rustdesk_deb_per_architecture():
+    assert prov.rustdesk_deb_url("1.3.8", "x86_64") == \
+        "https://github.com/rustdesk/rustdesk/releases/download/1.3.8/rustdesk-1.3.8-x86_64.deb"
+    assert prov.rustdesk_deb_url("1.3.8", "amd64").endswith("/rustdesk-1.3.8-x86_64.deb")
+    assert prov.rustdesk_deb_url("1.3.8", "aarch64").endswith("/rustdesk-1.3.8-aarch64.deb")
+    assert prov.rustdesk_deb_url("1.3.8", "arm64").endswith("/rustdesk-1.3.8-aarch64.deb")
+    assert prov.rustdesk_deb_url("1.3.8", "armv7l") is None
+    saved = prov.platform
+    prov.platform = types.SimpleNamespace(machine=lambda: "riscv64")
+    try:
+        code, _, err = run_main(prov.step_rustdesk, FakeHost(), "racecast", {})
+    finally:
+        prov.platform = saved
+    assert code == 1 and err == \
+        "provision.py: no RustDesk .deb for architecture 'riscv64' (only x86_64 and aarch64)\n"
+
+
+def t_cloud_docstrings_carry_no_issue_history():
+    for mod in (aws, gcp, prep, ipt, r505, regions, prov):
+        refs = set(re.findall(r"#\d+", mod.__doc__)) - {"#505"}
+        assert not refs, f"{mod.__name__} docstring cites {refs}: say what it does, not its history"
+
+
 def t_prov_password_alphabet():
     pw = prov.new_password()
     assert len(pw) == 16 and pw.isascii() and pw.isalnum()
@@ -868,8 +910,10 @@ def t_prov_tailscale_branches():
     assert "already joined the tailnet (100.64.0.9)" in out
     assert h.argvs()[-1] == ["tailscale", "set", "--operator=racecast"]
     h = FakeHost(rules=[(("tailscale", "status"), 1, ""), (("tailscale", "up"), 1, "")])
-    code, _, _ = run_main(prov.step_tailscale, h, "racecast", {"TS_AUTHKEY": "tskey"})
-    assert code == 1, "a failed unattended join ends provisioning (set -e)"
+    code, out, _ = run_main(prov.step_tailscale, h, "racecast", {"TS_AUTHKEY": "tskey"})
+    assert code == 0, "a failed unattended join must still reach the verification block"
+    assert ("unattended tailnet join failed. Re-run: sudo tailscale up --ssh --authkey <key> "
+            "--hostname racecast-box") in out
     assert ["tailscale", "up", "--ssh", "--authkey", "tskey", "--hostname", "racecast-box"] in h.argvs()
     h = FakeHost(tty=True, rules=[(("tailscale", "status"), 1, ""), (("tailscale", "up"), 1, "")])
     code, out, _ = run_main(prov.step_tailscale, h, "racecast", {})
