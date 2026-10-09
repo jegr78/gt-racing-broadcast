@@ -515,6 +515,33 @@ def t_telemetry_tables_scroll_inside_the_card():
         "the tyre and lap tables scroll on a phone instead of widening the page"
 
 
+def t_best_lap_kpi_names_the_driving_order_number():
+    html = rb.render_html(_solo_report())
+    assert "#3, lap 3" in html, "lap numbers repeat across sessions, the driving order does not"
+    assert "20261007-200000" not in html, "a single-recording group does not repeat its stem"
+
+
+def t_best_lap_kpi_names_the_recording_for_a_multi_recording_group():
+    second = {"rec": "20261007-210000", "start_ts": 1500.0, "end_ts": 1600.0,
+              "laps": [trt._lap(1, 5.0, trt._trace(50.0, 40.0), rec="20261007-210000")]}
+    html = rb.render_html(_solo_report(second))
+    assert "#3, lap 3, 20261007-200000" in html, \
+        "pooled across recordings, the KPI names which one set the best lap"
+
+
+def t_telemetry_intro_pluralizes_laps_and_recordings():
+    one = rb.render_html(_solo_report(laps=trt.session_index()["laps"][3:]))
+    assert "1 lap from the GT7 telemetry recording" in one
+    assert "1 laps" not in one
+    other = {"rec": "20261007-210000", "start_ts": 1500.0, "laps": [trt._lap(
+        1, 5.0, trt._trace(45.0, 45.0), track_id=None, car_id=1234, car="Mazda Roadster",
+        rec="20261007-210000")]}
+    multi = rb.render_html(_solo_report(other))
+    assert "from the GT7 telemetry recordings" in multi
+    single = rb.render_html(_solo_report())
+    assert "from the GT7 telemetry recording," in single and "recordings" not in single
+
+
 def t_unknown_track_heading_names_recording_and_session():
     other = {"rec": "20261007-210000", "start_ts": 1500.0, "laps": [trt._lap(
         1, 5.0, trt._trace(45.0, 45.0), track_id=None, car_id=1234, car="Mazda Roadster",
@@ -542,6 +569,29 @@ def t_summary_and_discord_carry_the_best_lap_line():
 
 def t_open_recording_adds_a_caveat():
     assert "may be missing" in rb.render_html(_solo_report(partial=True))
+
+
+def t_discord_telemetry_field_escapes_markdown_in_the_track_name():
+    idx = trt.session_index()
+    odd = "Nordschleife *_~`|>[]\\ Nord"
+    for lap in idx["laps"][:3]:
+        lap["track"] = odd
+    rep = _solo_report(**{"laps": idx["laps"]})
+    line = dict(rb.report_discord_fields(rep))["Telemetry"]
+    assert odd not in line, "unescaped markdown must not reach the Discord field"
+    for ch in "\\*_~`|>[]":
+        assert "\\" + ch in line, f"{ch!r} must be backslash-escaped"
+    summary = rb.render_summary_text(rep)
+    assert odd in summary, "the CLI/Control Center summary keeps the raw track name"
+
+
+def t_discord_telemetry_field_capped_at_1024_chars():
+    idx = trt.session_index()
+    for lap in idx["laps"][:3]:
+        lap["track"] = "x" * 2000
+    rep = _solo_report(**{"laps": idx["laps"]})
+    line = dict(rb.report_discord_fields(rep))["Telemetry"]
+    assert len(line) == 1024, "Discord embed field values are capped at 1024 characters"
 
 
 def t_telemetry_section_never_raises_on_a_malformed_block():

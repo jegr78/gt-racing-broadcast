@@ -67,11 +67,15 @@ def best_sectors(laps):
 
 
 def theoretical_best(laps):
-    """Sum of the best sectors over the given laps, or None when a sector has no time."""
+    """Sum of the best sectors over the given laps, or None when a sector has no time.
+    Clamped to the fastest lap's own time_s: rounding every sector to the millisecond
+    can sum a few ms above the lap that actually set them all."""
     best = best_sectors(laps)
     if not best or any(v is None for v in best):
         return None
-    return round(sum(best), 3)
+    theo = round(sum(best), 3)
+    times = [lap["time_s"] for lap in laps if lap.get("time_s") is not None]
+    return min(theo, min(times)) if times else theo
 
 
 def cache_path(path):

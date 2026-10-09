@@ -122,6 +122,15 @@ def t_block_figures():
     assert [p["best"] for p in g["trend"]] == [False, False, True, False]
 
 
+def t_group_counts_its_distinct_recordings():
+    assert block()["groups"][0]["recs"] == 1, "one recording in the fixture"
+    second = {"rec": "20261007-210000", "started": "2026-10-07T20:08:20+02:00",
+              "start_ts": 1500.0, "end_ts": 1600.0, "track": None,
+              "laps": [_lap(1, 5.0, _trace(50.0, 40.0), rec="20261007-210000")]}
+    g = rtel.telemetry_block([second, session_index()], WINDOW)["groups"][0]
+    assert g["recs"] == 2, "the same known track pools laps from both recordings"
+
+
 def t_tyre_average_skips_laps_without_tyre_data():
     idx = session_index()
     idx["laps"][1]["tyre_avg_c"] = [0.0, 0.0, 0.0, 0.0]
@@ -187,6 +196,15 @@ def t_summary_line():
     idx["laps"] = idx["laps"][3:]
     assert rtel.summary_line(rtel.telemetry_block([idx], WINDOW)) == \
         "1 lap, none counted, Suzuka Circuit"
+
+
+def t_summary_line_escapes_the_track_name_only_when_asked():
+    idx = session_index()
+    idx["laps"][0]["track"] = idx["laps"][1]["track"] = idx["laps"][2]["track"] = "A*B"
+    b = rtel.telemetry_block([idx], WINDOW)
+    assert rtel.summary_line(b).endswith("A*B"), "no escaping by default (the CLI summary)"
+    assert rtel.summary_line(b, esc=lambda s: s.replace("*", r"\*")).endswith(r"A\*B"), \
+        "the caller's escape applies to the track name, nowhere else in the line"
 
 
 def t_partial_flag_from_an_open_recording():

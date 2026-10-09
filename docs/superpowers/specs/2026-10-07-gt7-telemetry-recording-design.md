@@ -491,7 +491,11 @@ recording and session.
 
 ## Tests and docs
 
-- `tests/test_report_build.py`: figures, consistency,
-  section absent without recordings, summary line; SVG output is well-formed XML.
+- `tests/test_report_telemetry.py`: figures, groups, consistency, the equal-length
+  guard that blanks the theoretical best and the last mini-sector, fuel showing `—`
+  when consumption is off, summary line; SVG output is well-formed XML.
+- `tests/test_report_build.py`: section rendering, absence without recordings, the
+  Discord field, the open-recording caveat, and the "Telemetry could not be rendered"
+  fallback when the block itself fails to render.
 - Visual check of a rendered report; the post-event report section in wiki
   `Health-Monitor.md` describes the telemetry part.

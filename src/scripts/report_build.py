@@ -591,16 +591,25 @@ def _telemetry_html(tel):
     import gt7_laps
     import report_telemetry as rtel
 
+    recs = {r["rec"] for r in tel["laps"] if r["rec"]}
+    rec_word = "recording" if len(recs) <= 1 else "recordings"
     parts = ["<h2>Telemetry</h2>",
-             f"<p class='note'>{_esc(tel['laps_total'])} laps from the GT7 telemetry recording, "
-             f"{_esc(tel['laps_counted'])} counted by the relay as on the HUD. The figures use "
-             "counted laps only, timed by GT7 where its lap time arrived.</p>"]
+             f"<p class='note'>{_esc(rtel._count(tel['laps_total']))} from the GT7 telemetry "
+             f"{rec_word}, {_esc(tel['laps_counted'])} counted by the relay as on the HUD. "
+             "The figures use counted laps only, timed by GT7 where its lap time arrived.</p>"]
     for g in tel["groups"]:
         where = f" · {g['rec']}, session {g['session']}" if g["rec"] else ""
         parts.append(f"<h3>{_esc(g['track'])} · {_esc(g['car'] or 'Unknown car')}"
                      f"{_esc(where)}</h3>")
         cons, fuel = g["consistency_s"], g["fuel_per_lap_l"]
-        kpis = [(rtel.fmt_lap(g["best_s"]), "Best lap"),
+        best_lap = g.get("best_lap")
+        if best_lap:
+            best_label = f"Best lap · #{best_lap['n']}, lap {best_lap['lap']}"
+            if g["recs"] > 1 and best_lap.get("rec"):
+                best_label += f", {best_lap['rec']}"
+        else:
+            best_label = "Best lap"
+        kpis = [(rtel.fmt_lap(g["best_s"]), best_label),
                 (rtel.fmt_lap(g["theoretical_s"]), "Theoretical best"),
                 ("—" if cons is None else f"± {cons:.3f} s", "Consistency"),
                 ("—" if fuel is None else f"{fuel:.2f} L", "Fuel per lap"),
@@ -863,6 +872,16 @@ def report_finding_text(report):
     return " ".join(p for p in (fd.get("headline"), fd.get("cause")) if p)
 
 
+_DISCORD_MD_RE = re.compile(r"[\\*_~`|>\[\]]")
+_DISCORD_FIELD_MAX = 1024
+
+
+def _discord_escape(text):
+    """Backslash-escape Discord markdown so an odd upstream track name can't format
+    or link in the embed."""
+    return _DISCORD_MD_RE.sub(lambda m: "\\" + m.group(0), text)
+
+
 def report_discord_fields(report):
     """Pre-formatted KPI (name, value) pairs for the Discord report embed."""
     hd = report["header"]
@@ -874,7 +893,8 @@ def report_discord_fields(report):
     if report.get("telemetry"):
         try:
             import report_telemetry as rtel
-            fields.append(("Telemetry", rtel.summary_line(report["telemetry"])))
+            line = rtel.summary_line(report["telemetry"], esc=_discord_escape)
+            fields.append(("Telemetry", line[:_DISCORD_FIELD_MAX]))
         except Exception:
             pass  # a malformed telemetry block must not fail the whole report
     return fields

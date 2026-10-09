@@ -116,6 +116,7 @@ def _group(key, members):
         "track": track_label(first), "track_name": first.get("track") or "",
         "car": members[0][0]["car"],
         "laps_total": len(members), "laps_counted": len(valid),
+        "recs": len({row["rec"] for row, _lap in members}),
         "best_s": best_row["time_s"] if best_row else None,
         "best_lap": ({"n": best_row["n"], "session": best_row["session"],
                       "lap": best_row["lap"], "rec": best_row["rec"]} if best_row else None),
@@ -160,8 +161,10 @@ def telemetry_block(indexes, window):
             "partial": partial, "groups": groups}
 
 
-def summary_line(block):
-    """One line for the CLI summary and Discord: the track and car with the most counted laps."""
+def summary_line(block, esc=None):
+    """One line for the CLI summary and Discord: the track and car with the most counted
+    laps. `esc`, when given, escapes the track name only (an upstream track name reaches
+    this unsanitized, the rest of the line is our own text)."""
     g = block["groups"][0]
     if g["best_s"] is None:
         parts = [f"{_count(g['laps_total'])}, none counted"]
@@ -170,7 +173,7 @@ def summary_line(block):
                 if g["theoretical_s"] is not None else "")
         parts = [f"Best lap {fmt_lap(g['best_s'])}{theo}", _count(g["laps_counted"])]
     if g["track_name"]:
-        parts.append(g["track_name"])
+        parts.append(esc(g["track_name"]) if esc else g["track_name"])
     return ", ".join(parts)
 
 

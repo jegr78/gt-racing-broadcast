@@ -276,8 +276,10 @@ driving order, GT7's lap number, its time, the relay's verdict and reason, fuel,
 speed, car and track. Counted laps are the laps the relay counted on the HUD, including
 each new reference lap; lap times are GT7's own where they arrived. The theoretical best
 and the last mini-sector's colour need counted laps of equal length, which a known track
-always gives. On an unknown track the lengths usually differ, so the theoretical best
-shows `—` and the last mini-sector stays grey. Fuel per lap shows `—` when fuel
+usually gives. A learned assignment can name a catalog layout that has no racing line,
+so a lap on it closes at the driven distance instead and the lengths can differ. On an
+unknown track the lengths usually differ, so the theoretical best shows `—` and the last
+mini-sector stays grey. Fuel per lap shows `—` when fuel
 consumption is off. The CLI summary and the Discord embed add one line such as
 `Best lap 1:58.432 (theoretical 1:57.910), 23 laps, Suzuka Circuit` for the track and
 car with the most counted laps. The report also reads the recording the relay is still
