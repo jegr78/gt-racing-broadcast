@@ -7,6 +7,7 @@ turn facts into findings. Stdlib only, unit-tested by tests/test_e2e_visual.py."
 import collections
 import html
 import json
+import math
 import re
 
 Finding = collections.namedtuple("Finding", "rule selector detail")
@@ -244,6 +245,12 @@ CC_READY = "document.readyState === 'complete'"
 PREFLIGHT_READY = ("(() => { const s = document.getElementById('pf-summary');"
                    " return !!s && !s.textContent.startsWith('running'); })()")
 
+# The Telemetry view is ready once a lap pair is drawn: lap list, both chart traces and the sector table.
+TELEMETRY_READY = ("(() => { const q = s => document.querySelector(s);"
+                   " return !!q('#tm-laps .tmitem') && !!q('#tm-charts path.tm-a')"
+                   " && !!q('#tm-charts path.tm-b') && !!q('#tm-sectors tbody tr')"
+                   " && q('#tm-err').hidden; })()")
+
 SURFACES = [
     Surface("director-panel", "relay", "/panel", ("desktop",), None,
             "!!document.querySelector('#schedBody tr')", 15000),
@@ -262,7 +269,42 @@ SURFACES = [
     Surface("cc-quit-modal", "ui", "/", ("desktop",),
             "document.getElementById('quitmodal').showModal()",
             "!!document.querySelector('#quitmodal[open]')", 15000),
+    # Telemetry exists only for a solo POV profile, so a second Control Center serves it.
+    Surface("cc-telemetry", "ui_pov", "/", ("desktop",), "showView('telemetry')",
+            TELEMETRY_READY, 30000),
 ]
+
+DEMO_TRACK_ID = "e2e-demo"
+# A fixed start makes the demo recording, and so its laps, the same on every run.
+DEMO_REC_START = 1_760_000_000.0
+
+
+def demo_track_row(step=20.0):
+    """A closed, asymmetric ~2 km racing line in signatures.json row form, a point every ~step m."""
+    dense = []
+    for i in range(3600):
+        a = 2 * math.pi * i / 3600
+        r = 300.0 * (1 + 0.35 * math.cos(2 * a) + 0.12 * math.cos(3 * a))
+        dense.append((r * math.cos(a), r * math.sin(a)))
+    path, run = [dense[0]], 0.0
+    for p, q in zip(dense, dense[1:], strict=False):
+        run += math.dist(p, q)
+        if run >= step:
+            path.append(q)
+            run = 0.0
+    path = [[round(x, 1), round(z, 1)] for x, z in path]
+    xs, zs = [p[0] for p in path], [p[1] for p in path]
+    length = sum(math.dist(path[i], path[(i + 1) % len(path)]) for i in range(len(path)))
+    return {"official_id": DEMO_TRACK_ID, "official_name": "Demo Circuit",
+            "length_m": round(length, 1), "min_x": min(xs), "max_x": max(xs),
+            "min_z": min(zs), "max_z": max(zs), "path": path, "reverse": None,
+            "ambiguous_with": [], "flags": []}
+
+
+def demo_learned_tracks(row):
+    """A learned-tracks.json document that teaches *row*'s line, so no downloaded signatures.json is needed."""
+    return {"format": "racecast-gt7-learned", "version": 1,
+            "signatures": [dict(row, provenance="learned")], "assignments": {}}
 
 
 def surface_url(surface, urls):

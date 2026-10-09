@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Unit tests for the browser-free rules of the visual acceptance run (tools/e2e_visual.py)."""
-import os, sys
+import json, os, sys, tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src", "scripts"))
 import e2e_visual as v
+import gt7_tracks
 
 DARK = [19, 23, 28, 1]          # director-panel --panel
 WHITE_UA = "rgb(255, 255, 255)"
@@ -276,11 +278,38 @@ def t_surfaces_cover_all_four_uis():
 
 
 def t_surface_url_fills_tokens():
-    urls = {"ui": "http://127.0.0.1:1", "relay": "http://127.0.0.1:2", "token": "T", "rc_token": "R"}
+    urls = {"ui": "http://127.0.0.1:1", "ui_pov": "http://127.0.0.1:3",
+            "relay": "http://127.0.0.1:2", "token": "T", "rc_token": "R"}
     by = {s.name: s for s in v.SURFACES}
     assert v.surface_url(by["race-control"], urls) == "http://127.0.0.1:2/console/race-control?t=R"
     assert v.surface_url(by["cockpit"], urls) == "http://127.0.0.1:2/cockpit?t=T"
     assert v.surface_url(by["cc-home"], urls) == "http://127.0.0.1:1/"
+    assert v.surface_url(by["cc-telemetry"], urls) == "http://127.0.0.1:3/"
+
+
+def t_telemetry_surface_uses_the_solo_pov_control_center():
+    tel = [s for s in v.SURFACES if s.name == "cc-telemetry"]
+    assert len(tel) == 1 and tel[0].base == "ui_pov", tel
+    assert "telemetry" not in v.CC_VIEWS, "the main Control Center has no solo POV profile"
+    assert [s.name for s in v.SURFACES if s.base == "ui_pov"] == ["cc-telemetry"], \
+        "only the Telemetry view may render against the solo POV Control Center"
+    for sel in ("#tm-laps .tmitem", "#tm-charts path.tm-a", "#tm-sectors tbody tr", "#tm-err"):
+        assert sel in tel[0].ready, f"the ready check must wait for {sel}"
+
+
+def t_demo_learned_track_is_recognised():
+    row = v.demo_track_row()
+    assert row["official_id"] == v.DEMO_TRACK_ID
+    assert 1500 < row["length_m"] < 3000, row["length_m"]
+    with tempfile.TemporaryDirectory() as d:
+        learned = os.path.join(d, "learned-tracks.json")
+        with open(learned, "w", encoding="utf-8") as fh:
+            json.dump(v.demo_learned_tracks(row), fh)
+        db = gt7_tracks.TrackDB(os.path.join(d, "none.json"), os.path.join(d, "none.json"), learned)
+        assert db.name(v.DEMO_TRACK_ID)["track"] == "Demo Circuit", "the learned line names the track"
+        assert abs(db.line_length(v.DEMO_TRACK_ID) - row["length_m"]) < 1, \
+            "the learned line is usable without a downloaded signatures.json"
+        assert not db.has_downloaded_line(v.DEMO_TRACK_ID)
 
 
 def t_report_shows_findings_escaped_and_verdicts():

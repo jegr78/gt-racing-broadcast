@@ -4,7 +4,7 @@ src/ and assert the live HTTP surface. Synthetic mode is the default and runs in
 CI with no real Sheet, cookies, OBS or Tailscale; --real-league NAME is local-only.
 
 Maintainer tool, not shipped. Stdlib only."""
-import argparse, contextlib, os, shutil, signal, socket, subprocess, sys, tempfile, threading, time
+import argparse, contextlib, importlib.util, json, os, shutil, signal, socket, subprocess, sys, tempfile, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))
 import e2e_checks as E
 import e2e_visual as V
 import console_auth
+import gt7_data
 
 
 def _csv_server(files):
@@ -407,6 +408,16 @@ def _capture_shots(ctx, outdir, headed=False, slowmo=0):
     return written
 
 
+def _wait_until(page, expr, timeout_ms):
+    """Poll *expr* from Python until it is truthy. wait_for_function's in-page poller uses
+    eval, which the Control Center's CSP blocks once the first check comes back false."""
+    deadline = time.monotonic() + timeout_ms / 1000
+    while not page.evaluate(expr):
+        if time.monotonic() > deadline:
+            raise TimeoutError(f"not ready after {timeout_ms} ms: {expr}")
+        page.wait_for_timeout(200)
+
+
 def _visual_one(browser, surface, viewport, urls, outdir, probe, allow, used):
     """Render one surface in one viewport, screenshot it and judge it. Returns a SurfaceResult."""
     w, h = V.VIEWPORTS[viewport]
@@ -426,7 +437,7 @@ def _visual_one(browser, surface, viewport, urls, outdir, probe, allow, used):
         page.goto(V.surface_url(surface, urls), wait_until="domcontentloaded")
         if surface.prep:
             page.evaluate(surface.prep)
-        page.wait_for_function(surface.ready, timeout=surface.timeout_ms)
+        _wait_until(page, surface.ready, surface.timeout_ms)
         page.wait_for_timeout(V.SETTLE_MS)
         page.screenshot(path=os.path.join(outdir, shot), full_page=True)
         facts = page.evaluate(probe)
@@ -468,6 +479,66 @@ def run_visual(urls, outdir, headed=False, slowmo=0):
     print("visual acceptance:\n" + V.summarize(results, unused))
     print(f"--visual: report at {report}")
     return V.result_code(results)
+
+
+POV_PROFILE = "e2e-pov"
+
+
+def _pov_home(tmp, binary):
+    """An app home of its own for the solo POV Control Center, so its profile and runtime
+    stay out of the repo and the main Control Center keeps its profile. Returns (launcher, home)."""
+    home = os.path.join(tmp, "pov-app")
+    if binary:
+        os.makedirs(home)
+        dst = os.path.join(home, os.path.basename(binary))
+        shutil.copy2(binary, dst)
+        launcher = E.service_launcher(dst)
+    else:
+        # In src/ mode the CLI's profiles and runtime sit next to its src/ dir.
+        shutil.copytree(os.path.join(ROOT, "src"), os.path.join(home, "src"),
+                        ignore=shutil.ignore_patterns("__pycache__"))
+        launcher = E.service_launcher(None, sys.executable,
+                                      os.path.join(home, "src", "racecast.py"))
+    shutil.copytree(os.path.join(ROOT, "profiles", "solo-pov"),
+                    os.path.join(home, "profiles", POV_PROFILE))
+    return launcher, home
+
+
+def _seed_telemetry(home):
+    """Write a learned demo track and one demo recording into the POV app home."""
+    runtime = os.path.join(home, "runtime")
+    row = V.demo_track_row()
+    learned = gt7_data.learned_path(runtime)
+    os.makedirs(os.path.dirname(learned), exist_ok=True)
+    with open(learned, "w", encoding="utf-8") as fh:
+        json.dump(V.demo_learned_tracks(row), fh)
+    spec = importlib.util.spec_from_file_location(
+        "make_demo_recording", os.path.join(ROOT, "tools", "make-demo-recording.py"))
+    demo = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(demo)
+    demo.build(os.path.join(runtime, POV_PROFILE, "telemetry-recordings"), row, laps=4,
+               start=V.DEMO_REC_START, profile=POV_PROFILE)
+
+
+def _start_pov_ui(binary, tmp, env, timeout):
+    """Seed and index the demo telemetry, then start the solo POV Control Center.
+    Returns (process, url)."""
+    launcher, home = _pov_home(tmp, binary)
+    _seed_telemetry(home)
+    port = E.free_port()
+    envp = dict(env)
+    envp.update(RACECAST_PROFILE=POV_PROFILE, RACECAST_UI_PORT=str(port))
+    envp.pop("RACECAST_CONSOLE_SECRET", None)
+    # Indexed up front, so the view shows laps instead of the index job's progress.
+    r = subprocess.run(launcher + ["telemetry", "index"], env=envp, cwd=home,
+                       capture_output=True, text=True, errors="replace", timeout=timeout * 4)
+    if r.returncode != 0:
+        raise RuntimeError(f"racecast telemetry index failed: {(r.stdout + r.stderr).strip()}")
+    log = os.path.join(tmp, "ui-pov.log")
+    proc = _spawn(launcher + ["ui", "--no-browser"], envp, log, cwd=home)
+    url = f"http://127.0.0.1:{port}"
+    _wait_ready(url + "/api/ping", timeout, proc, log)
+    return proc, url
 
 
 def _print_live_urls(relay_url, ui_url, token):
@@ -638,7 +709,11 @@ def run_synthetic(args):
                 code = 1
         print(E.summarize(results))
         if args.visual:
-            urls = {"ui": ui_url, "relay": relay_url, "token": token, "rc_token": rc_token}
+            pov_ui, pov_url = _start_pov_ui(binary if args.binary is not None else None,
+                                            tmp, env3, args.timeout)
+            procs.append(pov_ui)
+            urls = {"ui": ui_url, "ui_pov": pov_url, "relay": relay_url, "token": token,
+                    "rc_token": rc_token}
             code = max(code, run_visual(urls, args.report, headed=args.headed, slowmo=args.slowmo))
         if args.shots:
             _capture_shots(ctx, args.shots, headed=args.headed, slowmo=args.slowmo)
