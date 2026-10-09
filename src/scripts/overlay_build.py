@@ -9,6 +9,7 @@ The editable slots are NOT hardcoded here: extract_slots() reads the data-edit
 markers from the base page (src/obs/hud.html), so the markup is the single source
 of truth and a new marked element becomes editable automatically.
 """
+import html
 import re
 
 # Font name and type whitelist, DUPLICATED from src/relay/racecast-feeds.py and
@@ -334,6 +335,13 @@ def base_body(html):
     </body>. It carries the slot elements the canvas renders, without page JS."""
     m = re.search(r"<body[^>]*>(.*?)(?:<script|</body>)", html, re.S)
     return m.group(1).strip() if m else ""
+
+
+def canvas_logo(body, logo_url):
+    """*body* with the league logo loaded from *logo_url* instead of the relay-only
+    /hud/logo. Without a URL the src is empty, which hides the slot through its
+    onerror like the live HUD does, without a request."""
+    return body.replace('src="/hud/logo"', f'src="{html.escape(logo_url or "", quote=True)}"')
 
 
 # Overlay slot id -> the OBS scene item that slot's box drives, as scene plus

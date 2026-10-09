@@ -3103,6 +3103,31 @@ def t_overlay_slots_data_flags_telemetry_for_solo_pov_only():
             os.environ["RACECAST_PROFILE"] = saved_profile
 
 
+def t_overlay_slots_data_points_the_logo_at_the_control_center():
+    saved_profile = os.environ.pop("RACECAST_PROFILE", None)
+    try:
+        for logo, want in (("LOGO=logo.svg\n", 'src="/api/profile/logo?p=lg"'), ("", 'src=""')):
+            with tempfile.TemporaryDirectory() as td:
+                pdir = os.path.join(td, "profiles", "lg")
+                os.makedirs(pdir)
+                open(os.path.join(td, ".env.example"), "w").close()
+                open(os.path.join(pdir, "logo.svg"), "w").close()
+                with open(os.path.join(pdir, "profile.env"), "w") as fh:
+                    fh.write("NAME=League\n" + logo)
+                os.makedirs(os.path.join(td, "runtime"))
+                orig_b, orig_r = m._env_base, m._runtime_base_dir
+                m._env_base = lambda *a, **k: td
+                m._runtime_base_dir = lambda: os.path.join(td, "runtime")
+                try:
+                    r = m.overlay_slots_data("hud")
+                finally:
+                    m._env_base, m._runtime_base_dir = orig_b, orig_r
+            assert r["ok"] and want in r["body"] and "/hud/logo" not in r["body"], (logo, want)
+    finally:
+        if saved_profile is not None:
+            os.environ["RACECAST_PROFILE"] = saved_profile
+
+
 def t_overlay_slots_data_includes_flag_presets():
     r = m.overlay_slots_data("hud")
     assert r["ok"], r

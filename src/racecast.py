@@ -6504,8 +6504,12 @@ def overlay_slots_data(page):
         html = _overlay_base_html(page)
         if not html:
             return {"ok": False, "error": "base page not bundled"}
+        active = _active_profile_name()
+        from urllib.parse import quote
+        logo = (f"/api/profile/logo?p={quote(active, safe='')}"
+                if active and profile_logo() else None)
         return {"ok": True, "page": page, "slots": ob.extract_slots(html),
-                "css": ob.base_style(html), "body": ob.base_body(html),
+                "css": ob.base_style(html), "body": ob.canvas_logo(ob.base_body(html), logo),
                 "sample": ob.SAMPLE.get(page, {}),
                 "flagPresets": [dict(p) for p in ob.FLAG_PRESETS],
                 "telemetry": _profile_has_telemetry()}

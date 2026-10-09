@@ -217,6 +217,18 @@ def t_ob_extract_slots_kind_derives_props():
     # no kind + explicit props -> the explicit list (back-compat fallback)
     assert by["d"]["props"] == ["left", "top"]
 
+def t_ob_canvas_logo_never_asks_for_the_relay_route():
+    with open(os.path.join(ROOT, "src", "obs", "hud.html"), encoding="utf-8") as f:
+        body = ob.base_body(f.read())
+    assert 'src="/hud/logo"' in body, "the live HUD loads its logo from the relay"
+    out = ob.canvas_logo(body, "/api/profile/logo?p=lg")
+    assert 'src="/api/profile/logo?p=lg"' in out and "/hud/logo" not in out, \
+        "the canvas must load the logo from the Control Center"
+    out = ob.canvas_logo(body, None)
+    assert "/hud/logo" not in out and 'src=""' in out, \
+        "without a logo an empty src hides the slot through onerror, with no request"
+
+
 def t_ob_extract_slots_from_real_hud():
     with open(os.path.join(ROOT, "src", "obs", "hud.html"), encoding="utf-8") as f:
         slots = ob.extract_slots(f.read())
