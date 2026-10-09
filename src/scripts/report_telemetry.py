@@ -42,7 +42,7 @@ def _key(lap):
     """A known track groups across recordings, an unknown one only within its recording
     and GT7 session, as gt7_laps.pool pools them."""
     if lap.get("track_id") is not None:
-        return (lap["track_id"], lap.get("car_id"))
+        return (lap["track_id"], lap.get("car_id"), None, None)
     return (None, lap.get("car_id"), lap.get("rec"), lap.get("session"))
 
 

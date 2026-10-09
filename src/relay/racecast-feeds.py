@@ -13054,7 +13054,7 @@ def main():
     # idles harmlessly when no console answers. telemetry_store stays None outside
     # a solo POV broadcast (endurance, solo COMMENTARY, or explicitly disabled), so
     # make_handler's /telemetry/* (Task 8) 404s cleanly and the HUD block self-hides.
-    telemetry_store = None
+    telemetry_store = rec_dir = runtime_base = gt7_bundled = None
     if telemetry_active(args.solo, os.environ):
         _tunits = os.environ.get("RACECAST_TELEMETRY_UNITS", "metric")
         _tthr = (float(os.environ.get("RACECAST_TELEMETRY_TYRE_COLD", 70)),
