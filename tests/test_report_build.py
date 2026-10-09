@@ -541,9 +541,43 @@ def t_telemetry_section_never_raises_on_a_malformed_block():
     rep = rb.build_report([_sample(0.0), _sample(30.0)], [], {}, "Broken", (0.0, 30.0),
                           now=1000.0, telemetry={"groups": [{}]})
     html = rb.render_html(rep)
-    rb.render_summary_text(rep)
-    rb.report_discord_fields(rep)
+    summary = rb.render_summary_text(rep)
+    fields = dict(rb.report_discord_fields(rep))
     assert "Feed reliability" in html, "a broken telemetry block must not take down the rest of the report"
+    assert "Telemetry could not be rendered." in html, \
+        "a render failure must leave a visible caveat, not a silently dropped section"
+    assert "Best lap" not in summary
+    assert "Telemetry" not in fields
+
+
+def t_render_summary_and_discord_survive_a_missing_telemetry_module():
+    # ImportError (e.g. a frozen build missing report_telemetry) must stay inside the
+    # per-surface guard, not escape render_summary_text/report_discord_fields.
+    rep = _solo_report()
+    had = "report_telemetry" in sys.modules
+    orig = sys.modules.get("report_telemetry")
+    sys.modules["report_telemetry"] = None
+    try:
+        summary = rb.render_summary_text(rep)
+        fields = dict(rb.report_discord_fields(rep))
+    finally:
+        if had:
+            sys.modules["report_telemetry"] = orig
+        else:
+            del sys.modules["report_telemetry"]
+    assert "Best lap" not in summary
+    assert "Telemetry" not in fields
+
+
+def t_telemetry_note_escapes_lap_counts():
+    tel = dict(trt.rtel.telemetry_block([trt.session_index()], trt.WINDOW))
+    tel["laps_total"] = "<script>total</script>"
+    tel["laps_counted"] = "<b>counted</b>"
+    html = rb._telemetry_html(tel)
+    assert "<script>total</script>" not in html
+    assert "<b>counted</b>" not in html
+    assert "&lt;script&gt;total&lt;/script&gt;" in html
+    assert "&lt;b&gt;counted&lt;/b&gt;" in html
 
 
 def run():

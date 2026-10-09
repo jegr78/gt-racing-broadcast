@@ -587,8 +587,8 @@ def _telemetry_html(tel):
     import report_telemetry as rtel
 
     parts = ["<h2>Telemetry</h2>",
-             f"<p class='note'>{tel['laps_total']} laps from the GT7 telemetry recording, "
-             f"{tel['laps_counted']} counted by the relay as on the HUD. The figures use "
+             f"<p class='note'>{_esc(tel['laps_total'])} laps from the GT7 telemetry recording, "
+             f"{_esc(tel['laps_counted'])} counted by the relay as on the HUD. The figures use "
              "counted laps only, timed by GT7 where its lap time arrived.</p>"]
     for g in tel["groups"]:
         where = f" · {g['rec']}, session {g['session']}" if g["rec"] else ""
@@ -713,7 +713,10 @@ def render_html(report):
         try:
             parts.append(_telemetry_html(report["telemetry"]))
         except Exception:
-            pass  # a malformed telemetry block must not fail the whole report
+            # a malformed telemetry block must not fail the whole report, but the
+            # producer needs to see the section failed rather than just vanished
+            parts.append("<h2>Telemetry</h2><p class='caveat'>Telemetry could not "
+                         "be rendered.</p>")
 
     if report["producer_handovers"]:
         parts.append("<h2>Producer handovers</h2>")
@@ -828,8 +831,8 @@ def render_summary_text(report):
              f"({_fmt_dur(hd['duration_s'])})",
              f"  Uptime {hd['uptime_pct']}% · {len(report['incidents'])} incident(s)"]
     if report.get("telemetry"):
-        import report_telemetry as rtel
         try:
+            import report_telemetry as rtel
             lines.append(f"  {rtel.summary_line(report['telemetry'])}")
         except Exception:
             pass  # a malformed telemetry block must not fail the whole report
@@ -864,8 +867,8 @@ def report_discord_fields(report):
               ("Session length", _fmt_dur(hd["duration_s"])),
               ("Window", f"{_fmt_clock(hd['start'])}–{_fmt_clock(hd['end'])}")]
     if report.get("telemetry"):
-        import report_telemetry as rtel
         try:
+            import report_telemetry as rtel
             fields.append(("Telemetry", rtel.summary_line(report["telemetry"])))
         except Exception:
             pass  # a malformed telemetry block must not fail the whole report
