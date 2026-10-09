@@ -298,6 +298,26 @@ def t_learn_onto_the_reverse_of_a_downloaded_line_only_assigns():
             assert json.load(fh)["signatures"] == [], "no learned row for the reverse twin"
 
 
+def t_a_downloaded_line_wins_over_an_earlier_learned_row():
+    with tempfile.TemporaryDirectory() as d:
+        mirrored = [(-x, z) for x, z in _lap(OVAL)]
+        assert _db(d, []).learn("aaa001", mirrored, _length(OVAL), key="solo-pov/a") is True
+        assert _db(d, []).learn("aaa002", mirrored, _length(OVAL), key="solo-pov/b") is True
+        shipped = _db(d, [_row("aaa001", "Oval", OVAL, {"official_id": "aaa002",
+                                                        "official_name": "Oval (Reverse)"})])
+        m = shipped.match(_lap(OVAL, offset=5.0), _length(OVAL))
+        assert m and m["id"] == "aaa001" and m["score_m"] < 6.0, f"the downloaded line wins: {m}"
+        m = shipped.match(list(reversed(_lap(OVAL))), _length(OVAL))
+        assert m and m["id"] == "aaa002", f"and its reverse twin too: {m}"
+        assert shipped.project([tuple(OVAL[0])], "aaa001")[0] < 1.0
+        assert shipped.assignment("solo-pov/a") == "aaa001"
+        assert shipped.assignment("solo-pov/b") == "aaa002"
+        with open(os.path.join(d, "learned-tracks.json"), encoding="utf-8") as fh:
+            assert len(json.load(fh)["signatures"]) == 2, "the learned rows stay in the file"
+        assert _db(d, []).project([mirrored[1]], "aaa001")[0] < 20.0, \
+            "without the download the learned rows apply again"
+
+
 def t_learn_on_unwritable_path_raises_and_leaves_no_tmp_file():
     with tempfile.TemporaryDirectory() as d:
         _db(d, [])

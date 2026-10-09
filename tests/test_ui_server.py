@@ -2204,7 +2204,7 @@ console.log([null, 0.0004, -0.0004, 0.0005, -0.0005, 1].map(tmSecClass).join(','
     for fn in ("tmRenderMap", "tmRenderSectors"):
         body = tm[tm.index("function " + fn + "("):]
         body = body[:body.index("\n}\n")]
-        assert "tmSecClass(" in body and "0.0005" not in body.replace("< 0.0005) row.cells[2]", ""), \
+        assert "tmSecClass(" in body and "'gain'" not in body and "'loss'" not in body, \
             f"{fn} uses the shared gain/loss rule"
 
 
@@ -2539,11 +2539,17 @@ answer('/tracks', tracks);
 await tick();
 $('tm-track-pick').value = '5'; $('tm-track-pick').selectedIndex = 2;
 tmLapCache.set('X|1|1', {});
+let body = null;
+const realFetch = globalThis.fetch;
+globalThis.confirmModal = async () => { $('tm-track-pick').value = '9'; return true; };
+globalThis.fetch = (url, opts) => { if (opts && opts.body) body = JSON.parse(opts.body).track_id;
+                                    return realFetch(url); };
 tmLearn();
 await tick();
 answer('/learn', {ok: false, error: 'recording in progress: stop the recording to analyse it'});
 await tick();
-const refused = $('tm-err').textContent;
+const refused = $('tm-err').textContent + (body === '5' ? '' : ' wrong id ' + body);
+globalThis.confirmModal = async () => true;
 tmLearn();
 await tick();
 answer('/learn', {ok: true, track: {id: '5'}});
@@ -2582,10 +2588,9 @@ const learn = async (learned) => {
   await tick();
   answer('/learn', {ok: true, learned, track: {id: '5'}});
   await tick();
-  const note = [$('tm-note').hidden, $('tm-note').textContent].join(' ');
   answer('rec=X', recLaps('X', []));
   await tick();
-  return note;
+  return [$('tm-note').hidden, $('tm-note').textContent].join(' ');
 };
 const assigned = await learn(false), learnedNote = await learn(true);
 tmSelectRec('X');
@@ -2596,7 +2601,8 @@ console.log([assigned, learnedNote, $('tm-note').hidden].join('|'));""")
                                "|false X now uses Suzuka - Circuit. racecast learned the line "
                                "from its longest counted lap, so later recordings on it are "
                                "recognised.|true"), \
-            f"the note says whether a line was learned and goes with the next selection: {out!r}"
+            (f"the note says whether a line was learned, survives a reload without laps "
+             f"and goes with the next selection: {out!r}")
 
 
 def t_telemetry_live_recording_offers_no_set_track():

@@ -3585,8 +3585,9 @@ def telemetry_tracks_data():
 
 
 def telemetry_learn_data(rec, track_id):
-    """Assign a recording to a layout and learn the layout from its longest counted lap,
-    so later recordings on it are recognised. Never raises."""
+    """Assign a recording to a layout. Without a downloaded racing line for the layout,
+    also learn its line from the longest counted lap, so later recordings on it are
+    recognised; `learned` in the answer says whether that happened. Never raises."""
     try:
         import gt7_laps
         import gt7_recording as gr
@@ -3604,21 +3605,20 @@ def telemetry_learn_data(rec, track_id):
         info = tracks.name(str(track_id or ""))
         if info is None:
             return {"ok": False, "error": "unknown track layout"}
+        if tracks.has_downloaded_line(info["id"]):
+            learned = tracks.learn(info["id"], [], 0.0, key=key)
+            return {"ok": True, "track": gr.brief_track(info), "learned": bool(learned)}
         try:
             idx = _telemetry_full_index(path, (tracks, cars))
         except gr.RecordingError:
             return {"ok": False, "error": f"{rec} is not a readable recording"}
         counted = [lap for lap in idx["laps"]
                    if lap["status"] in gt7_laps.COUNTED and lap.get("points")]
-        best = max(counted, key=lambda lap: lap["distance_m"]) if counted else None
-        try:
-            learned = tracks.learn(info["id"], best["points"] if best else [],
-                                   best["distance_m"] if best else 0.0, key=key)
-        except ValueError:
-            if best is None:
-                return {"ok": False, "error": "this recording has no counted lap to learn "
-                                              "the track from"}
-            raise
+        if not counted:
+            return {"ok": False, "error": "this recording has no counted lap to learn the "
+                                          "track from"}
+        best = max(counted, key=lambda lap: lap["distance_m"])
+        learned = tracks.learn(info["id"], best["points"], best["distance_m"], key=key)
         return {"ok": True, "track": gr.brief_track(info), "learned": bool(learned)}
     except ValueError as exc:
         return {"ok": False, "error": f"could not learn the track: {exc}"}

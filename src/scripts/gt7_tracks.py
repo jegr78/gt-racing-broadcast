@@ -2,8 +2,9 @@
 """GT7 track recognition: name the layout from one lap of car positions.
 
 A lap's (x, z) points every 20 m are compared with the racing lines in
-signatures.json (plus learned rows): length within 3 %, inside the bounding box,
-close to the line, and the driving direction separates a layout from its reverse.
+signatures.json (plus learned rows for layouts without one): length within 3 %,
+inside the bounding box, close to the line, and the driving direction separates a
+layout from its reverse.
 """
 import json
 import math
@@ -167,8 +168,10 @@ class TrackDB:
             if row:
                 learned[row["id"]] = row
         self._assign = {k: v for k, v in doc["assignments"].items() if isinstance(v, str)}
+        downloaded = self._downloaded_ids()
         self._rows = dict(self._shipped)
-        self._rows.update(learned)                 # a learned row wins over the shipped one
+        # A downloaded line always wins; its learned row stays in the file for when it goes.
+        self._rows.update({k: v for k, v in learned.items() if k not in downloaded})
         self._twins = {r["reverse"]: r["id"] for r in self._rows.values() if r["reverse"]}
 
     def name(self, official_id):
@@ -220,18 +223,25 @@ class TrackDB:
     def assignment(self, key):
         return self._assign.get(key)
 
+    def _downloaded_ids(self):
+        """Layout ids with a downloaded racing line: shipped rows and their reverse twins."""
+        return set(self._shipped) | {r["reverse"] for r in self._shipped.values() if r["reverse"]}
+
+    def has_downloaded_line(self, official_id):
+        """True when learn would only assign a recording to this layout."""
+        return official_id in self._downloaded_ids()
+
     def learn(self, official_id, points, length_m, key=None):
-        """Assign recording `key` to `official_id` and, when no downloaded racing line
-        exists for it (its own row or a downloaded forward line it reverses), store `points` as its learned signature. True when a line was
-        learned, False when only the recording was assigned.
+        """Assign recording `key` to `official_id`; store `points` as its learned line
+        only when the layout has no downloaded line (its own or one it reverses).
+        Returns True when a line was learned, False when only `key` was assigned.
 
         A user-triggered write: a write failure (OSError) propagates to the caller
         instead of being swallowed, unlike the read paths elsewhere in this class."""
         if not self._learned_path:
             raise ValueError("no learned-tracks file configured")
         doc = self._read_learned()
-        if official_id in self._shipped or any(
-                r["reverse"] == official_id for r in self._shipped.values()):
+        if official_id in self._downloaded_ids():
             if not key:
                 raise ValueError("this layout has a downloaded racing line, "
                                  "so only a recording can be assigned to it")

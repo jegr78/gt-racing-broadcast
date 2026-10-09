@@ -321,8 +321,9 @@ override.
 ## Module `src/scripts/gt7_tracks.py`
 
 - `TrackDB(index_path, signatures_path, learned_path=None)`: loads the catalogue, the
-  shipped signatures and the learned ones. Learned rows win over shipped rows with the
-  same `official_id`. `name(official_id)` -> `{id, track, layout, reverse, country,
+  shipped signatures and the learned ones. A downloaded line always wins: a learned row
+  whose id is shipped or is the reverse of a shipped row is ignored on load but stays in
+  the file, and assignments always apply. `name(official_id)` -> `{id, track, layout, reverse, country,
   length_m}` or None. `layouts()` -> the catalogue sorted by track and layout.
 - `match(points, length_m)` with `points` = `[(x, z), ...]` every ~20 m in driving
   order:
@@ -382,7 +383,7 @@ override.
   old file, `resolve` fallback; all downloads through an injected fetch.
 - `tests/test_gt7_tracks.py`: synthetic laps built from a real signature's `path`
   (forward, reverse, offset by 5 m, a wrong length, a different track), candidates for
-  an ambiguous pair, learned rows winning, `project`; the real `~` fixture points lie
+  an ambiguous pair, a downloaded line winning over a learned row, `project`; the real `~` fixture points lie
   near the Nürburgring GP line.
 - Relay `/status` `telemetry.track`, panel status strip (visual check), CLI
   `gt7-data`, Control Center route and Settings row (visual check).

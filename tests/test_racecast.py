@@ -745,7 +745,15 @@ def t_telemetry_learn_data_keeps_a_downloaded_line():
             return gt7_tracks.TrackDB(os.path.join(bundled, "index.json"), sig,
                                       gt7_data.learned_path(base))
         m._telemetry_dbs = lambda: (db(), cars)
-        d = m.telemetry_learn_data(stem, tid)
+        full = m._telemetry_full_index
+
+        def no_replay(*_a):
+            raise AssertionError("an assignment needs no lap index")
+        m._telemetry_full_index = no_replay
+        try:
+            d = m.telemetry_learn_data(stem, tid)
+        finally:
+            m._telemetry_full_index = full
         assert d["ok"] and d["learned"] is False, f"only the recording is assigned: {d}"
         assert db().assignment(f"solo/{stem}") == tid
         assert abs(db().line_length(tid) - 38.0) < 0.5, f"the downloaded line stays: {db().line_length(tid)}"
