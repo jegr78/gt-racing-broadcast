@@ -370,7 +370,7 @@ def t_gt7_data_update_cmd_prints_files_and_fails_when_all_fail():
 
     out = io.StringIO()
     with _fake_gt7_data(Fake), contextlib.redirect_stdout(out):
-        m.gt7_data_update_cmd(["--force"])
+        m.gt7_data_update_cmd([])
     assert "cars.csv: updated" in out.getvalue() and seen == [True], out.getvalue()
     Fake.files = {"cars.csv": "error: offline"}
     try:
@@ -380,12 +380,13 @@ def t_gt7_data_update_cmd_prints_files_and_fails_when_all_fail():
         assert "failed" in str(e.code), e.code
     else:
         raise AssertionError("an update where every file failed must exit non-zero")
-    try:
-        m.gt7_data_update_cmd(["--bogus"])
-    except SystemExit as e:
-        assert "usage" in str(e.code), e.code
-    else:
-        raise AssertionError("an unknown flag must print usage")
+    for flag in (["--bogus"], ["--force"]):
+        try:
+            m.gt7_data_update_cmd(flag)
+        except SystemExit as e:
+            assert "usage" in str(e.code), e.code
+        else:
+            raise AssertionError(f"{flag} must print usage: the update always forces")
 
 
 def _rec_dir_with_one(d):
@@ -568,7 +569,9 @@ def t_telemetry_export_failure_exits_with_a_clean_message():
         m._telemetry_rec_dir = lambda: d
         try:
             for exc in (OSError(28, "No space left on device", os.path.join(d, "out")),
-                        struct.error("unpack requires a buffer of 4 bytes")):
+                        struct.error("unpack requires a buffer of 4 bytes"),
+                        gt7_recording.RecordingError(os.path.join(d, name), "truncated header"),
+                        gt7_recording.RecordingError(os.path.join(d, name))):
                 def boom(*_a, _exc=exc, **_k):
                     raise _exc
                 gt7_recording.export_csv = boom
@@ -578,6 +581,8 @@ def t_telemetry_export_failure_exits_with_a_clean_message():
                 except SystemExit as e:
                     msg = str(e.code)
                 assert d not in msg and msg.startswith("could not export"), msg
+                stem = os.path.splitext(name)[0]
+                assert msg.count(stem) == 1, f"the recording is named once: {msg}"
         finally:
             m._telemetry_rec_dir, gt7_recording.export_csv = real_dir, real_export
 

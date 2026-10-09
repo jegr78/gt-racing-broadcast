@@ -594,7 +594,7 @@ def _telemetry_html(tel):
     recs = {r["rec"] for r in tel["laps"] if r["rec"]}
     rec_word = "recording" if len(recs) <= 1 else "recordings"
     parts = ["<h2>Telemetry</h2>",
-             f"<p class='note'>{_esc(rtel._count(tel['laps_total']))} from the GT7 telemetry "
+             f"<p class='note'>{_esc(rtel.lap_count(tel['laps_total']))} from the GT7 telemetry "
              f"{rec_word}, {_esc(tel['laps_counted'])} counted by the relay as on the HUD. "
              "The figures use counted laps only, timed by GT7 where its lap time arrived.</p>"]
     for g in tel["groups"]:

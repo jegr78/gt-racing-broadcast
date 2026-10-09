@@ -33,7 +33,8 @@ def track_label(lap):
     return f"{track} - {layout}" if layout else track
 
 
-def _count(n):
+def lap_count(n):
+    """'1 lap' or 'N laps'."""
     return f"{n} lap" if n == 1 else f"{n} laps"
 
 
@@ -163,11 +164,11 @@ def summary_line(block, esc=None):
     this unsanitized, the rest of the line is our own text)."""
     g = block["groups"][0]
     if g["best_s"] is None:
-        parts = [f"{_count(g['laps_total'])}, none counted"]
+        parts = [f"{lap_count(g['laps_total'])}, none counted"]
     else:
         theo = (f" (theoretical {fmt_lap(g['theoretical_s'])})"
                 if g["theoretical_s"] is not None else "")
-        parts = [f"Best lap {fmt_lap(g['best_s'])}{theo}", _count(g["laps_counted"])]
+        parts = [f"Best lap {fmt_lap(g['best_s'])}{theo}", lap_count(g["laps_counted"])]
     if g["track_name"]:
         parts.append(esc(g["track_name"]) if esc else g["track_name"])
     return ", ".join(parts)

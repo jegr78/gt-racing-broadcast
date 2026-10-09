@@ -140,7 +140,8 @@ def _read_stamp(d):
     return stamp
 
 
-def _write(d, name, data):
+def write_file(d, name, data):
+    """Replace d/name atomically through a unique temp file, removed on failure."""
     os.makedirs(d, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=d, prefix=name + ".", suffix=".tmp")
     try:
@@ -186,14 +187,14 @@ def update(runtime_base, force=False, fetch=None, now=None):
     for name, url in SOURCES.items():
         try:
             data = fetch(url)
-            validate(name, data)
             if isinstance(data, str):
                 data = data.encode("utf-8")
+            validate(name, data)
             sha = hashlib.sha256(data).hexdigest()
             if shas.get(name) == sha and os.path.exists(os.path.join(d, name)):
                 files[name] = "unchanged"
                 continue
-            _write(d, name, data)
+            write_file(d, name, data)
             shas[name], times[name] = sha, now
             files[name] = "updated"
         except Exception as e:  # noqa: BLE001  offline, a bad download or an unexpected
@@ -201,7 +202,7 @@ def update(runtime_base, force=False, fetch=None, now=None):
     fetched = any(not v.startswith("error") for v in files.values())
     if fetched:
         try:
-            _write(d, STAMP, json.dumps({"checked": now, "sha256": shas,
+            write_file(d, STAMP, json.dumps({"checked": now, "sha256": shas,
                                          "updated": times}).encode("utf-8"))
         except OSError:
             pass  # the next start simply checks again
@@ -258,15 +259,19 @@ def _bundled_entry(name, path):
         return f"bundled/{name}|-;"
 
 
+def _data_files(runtime_base, bundled):
+    """(name, path) of every reference file a CarDB or TrackDB loads."""
+    cars = cars_dir(runtime_base, bundled)
+    files = [(n, resolve(n, runtime_base, bundled)) for n in ("index.json", "signatures.json")]
+    return files + [(n, os.path.join(cars, n)) for n in sorted(CAR_TABLES)]
+
+
 def data_version(runtime_base, bundled=None):
     """Changes whenever the track data, the car tables or the learned tracks change
     (lap-index caches key on it)."""
     h = hashlib.sha1()
     runtime = data_dir(runtime_base) if runtime_base else None
-    cars = cars_dir(runtime_base, bundled)
-    files = [(n, resolve(n, runtime_base, bundled)) for n in ("index.json", "signatures.json")]
-    files += [(n, os.path.join(cars, n)) for n in sorted(CAR_TABLES)]
-    for name, path in files:
+    for name, path in _data_files(runtime_base, bundled):
         if runtime and path == os.path.join(runtime, name):
             h.update(_stat_entry(path).encode("utf-8"))
         else:
@@ -279,9 +284,7 @@ def data_version(runtime_base, bundled=None):
 def fingerprint(runtime_base, bundled=None):
     """Changes whenever any file a CarDB or TrackDB would load changes; stat calls only,
     except that a changed runtime file is validated once."""
-    cars = cars_dir(runtime_base, bundled)
-    paths = [os.path.join(cars, n) for n in sorted(CAR_TABLES)]
-    paths += [resolve(n, runtime_base, bundled) for n in ("index.json", "signatures.json")]
+    paths = [path for _name, path in _data_files(runtime_base, bundled)]
     if runtime_base:
         paths.append(learned_path(runtime_base))
     return _stat_hash(paths)

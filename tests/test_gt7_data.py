@@ -107,9 +107,11 @@ def t_update_writes_validated_files_and_gates_24h():
 def t_update_accepts_a_str_fetch_result_without_raising():
     with tempfile.TemporaryDirectory() as d:
         base = os.path.join(d, "runtime")
-        as_str = dict(GOOD, **{"index.json": _index().decode("utf-8")})
+        as_str = dict(GOOD, **{"index.json": _index().decode("utf-8"),
+                               "cars.csv": _cars().decode("utf-8")})
         res = gd.update(base, fetch=_fetch(as_str), now=1000.0)
         assert res["files"]["index.json"] == "updated", res
+        assert res["files"]["cars.csv"] == "updated", f"a str CSV validates like bytes: {res}"
         with open(os.path.join(gd.data_dir(base), "index.json"), "rb") as fh:
             assert fh.read() == _index(), "a str fetch result is encoded to utf-8 before writing"
 
@@ -266,16 +268,16 @@ def t_fingerprint_covers_car_tables_tracks_and_learned_file():
 def t_write_ignores_a_leftover_fixed_tmp_name():
     with tempfile.TemporaryDirectory() as d:
         os.makedirs(os.path.join(d, "cars.csv.tmp"))     # blocks a fixed temp name
-        gd._write(d, "cars.csv", b"x")
+        gd.write_file(d, "cars.csv", b"x")
         with open(os.path.join(d, "cars.csv"), "rb") as fh:
-            assert fh.read() == b"x", "_write must use its own temp file"
+            assert fh.read() == b"x", "write_file must use its own temp file"
 
 
 def t_write_removes_its_temp_file_on_failure():
     with tempfile.TemporaryDirectory() as d:
         os.makedirs(os.path.join(d, "index.json", "sub"))  # os.replace onto it fails
         try:
-            gd._write(d, "index.json", b"x")
+            gd.write_file(d, "index.json", b"x")
         except OSError:
             pass  # expected: the target is a directory
         else:
@@ -294,17 +296,17 @@ def t_update_errors_never_carry_a_runtime_path():
             "signatures.json": urllib.error.URLError(OSError(111, "Connection refused")),
             "cargrp.csv": urllib.error.HTTPError("https://x/cargrp.csv", 403, "Forbidden",
                                                  None, None)})
-        real = gd._write
+        real = gd.write_file
 
         def write(dir_, name, data):
             if name == "cars.csv":
                 raise PermissionError(13, "Permission denied", where)
             return real(dir_, name, data)
-        gd._write = write
+        gd.write_file = write
         try:
             res = gd.update(base, force=True, fetch=_fetch(broken), now=1000.0)
         finally:
-            gd._write = real
+            gd.write_file = real
         files = res["files"]
         assert files["cars.csv"] == "error: Permission denied", files
         assert files["index.json"] == "error: RuntimeError", files

@@ -79,7 +79,7 @@ MAX_SAMPLES = 10000       # 40 km at 4 m spacing; the longest GT7 layout (Specia
                           # Route X, ~30.3 km) must stay well inside the cap
 
 POINT_STEP_M = 20.0       # metres between kept positions (track recognition)
-MIN_TRACK_POINTS = 10     # same floor as gt7_tracks.MIN_POINTS
+MIN_TRACK_POINTS = 10     # fewest points a lap needs to name or learn a track
 MAX_POINTS = int(MAX_SAMPLES * SAMPLE_MIN_DIST / POINT_STEP_M)  # same distance ceiling as samples
 
 # A pit (in/out) lap is not representative: its time is inflated by the pit-lane

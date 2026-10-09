@@ -56,12 +56,8 @@ def main():
         print(f"{name}: {rows} rows")
     if args.dry_run:
         return 0
-    os.makedirs(GT7_DIR, exist_ok=True)
     for name, data in fetched.items():
-        tmp = os.path.join(GT7_DIR, name + ".tmp")
-        with open(tmp, "wb") as fh:
-            fh.write(data)
-        os.replace(tmp, os.path.join(GT7_DIR, name))
+        gt7_data.write_file(GT7_DIR, name, data)
     print("updated", GT7_DIR)
     return 0
 

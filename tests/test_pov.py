@@ -3514,7 +3514,7 @@ def t_redact_console_status_drops_telemetry_record_for_non_director():
     assert kept["record"]["active"] is True and kept["record"]["error"] == "disk full"
     for roles in (["commentator"], ["race_control"], []):
         t = m.redact_console_status(full, roles)["telemetry"]
-        assert "record" not in t, f"recording path and counters are producer detail: {roles}"
+        assert "record" not in t, f"recording file name and counters are producer detail: {roles}"
         assert t["visible"] is True and t["car"] == "911"
         assert t["track"]["id"] == "2066d9", f"the track is no secret, like the car: {roles}"
     assert "telemetry" not in m.redact_console_status({"feeds": {}}, ["commentator"])

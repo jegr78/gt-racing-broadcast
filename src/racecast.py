@@ -3363,8 +3363,7 @@ def telemetry_export_cmd(rest):
         res = gr.export_csv(path, out_dir, include_all=args.all, excel=args.excel,
                             cars=cars, tracks=tracks, key=_telemetry_track_key(path))
     except Exception as e:  # noqa: BLE001  a damaged file or a full disk ends in one line, not a traceback
-        sys.exit(f"could not export {os.path.basename(path)}: "
-                 f"{_telemetry_reason(e, os.path.basename(path))}")
+        sys.exit(f"could not export {os.path.basename(path)}: {_telemetry_reason(e)}")
     print(f"wrote {res['samples']} samples and {res['laps']} laps to {res['dir']}")
     if res["dropped"]:
         print(f"note: {res['dropped']} packets were dropped while recording")
@@ -3767,7 +3766,7 @@ def gt7_data_status_data():
 
 def gt7_data_update_cmd(rest):
     """Fetch the latest GT7 car and track data now."""
-    if rest not in ([], ["--force"]):
+    if rest:
         sys.exit("usage: racecast gt7-data update")
     res = gt7_data_update_data()
     if "error" in res:

@@ -13,14 +13,13 @@ import tempfile
 import threading
 
 import gt7_data
+from gt7_telemetry import MIN_TRACK_POINTS as MIN_POINTS
 
 LENGTH_TOL = 0.03
 BOX_MARGIN_M = 50.0
 MAX_SCORE_M = 15.0
 AMBIGUOUS_M = 3.0
 GRID_M = 50.0
-MIN_POINTS = 10
-POINT_STEP_M = 20.0
 LEARNED_FORMAT = "racecast-gt7-learned"
 _LEARN_LOCK = threading.Lock()   # TrackDBs of one process share learned-tracks.json
 
@@ -299,16 +298,6 @@ class TrackDB:
                 pass  # already gone
             raise
         self._reload_learned()
-
-    def distance_m(self, official_id, x, z):
-        try:
-            finite = math.isfinite(x) and math.isfinite(z)
-        except TypeError:
-            return None
-        if not finite:
-            return None
-        line, _rev = self._line_for(official_id)
-        return line.locate(x, z)[1] if line is not None else None
 
     def match(self, points, length_m):
         if not points or len(points) < MIN_POINTS or not length_m:

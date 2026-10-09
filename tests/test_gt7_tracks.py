@@ -120,21 +120,12 @@ def t_missing_signatures_file_still_loads_the_catalogue():
         assert db.match([(float(i), 0.0) for i in range(20)], 400.0) is None
 
 
-def t_distance_m_projects_onto_the_line_not_the_nearest_vertex():
-    with tempfile.TemporaryDirectory() as d:
-        straight = [[20.0 * i, 0.0] for i in range(20)]       # vertices 20 m apart on z=0
-        db = _db(d, [_row("aaa001", "Straight", straight)])
-        # (10, 2) is abeam the midpoint of the vertices at x=0 and x=20: 2 m from the
-        # line, ~10.2 m from the nearest vertex.
-        d_line = db.distance_m("aaa001", 10.0, 2.0)
-        assert d_line is not None and abs(d_line - 2.0) < 0.2, d_line
-
-
-def t_distance_m_returns_none_for_non_finite_positions():
-    with tempfile.TemporaryDirectory() as d:
-        db = _db(d, [_row("aaa001", "Oval", OVAL)])
-        assert db.distance_m("aaa001", float("nan"), 0.0) is None
-        assert db.distance_m("aaa001", float("inf"), 0.0) is None
+def t_locate_measures_the_distance_to_the_line_not_the_nearest_vertex():
+    line = gt._Line([[20.0 * i, 0.0] for i in range(20)])   # vertices 20 m apart on z=0
+    # (10, 2) is abeam the midpoint of the vertices at x=0 and x=20: 2 m from the
+    # line, ~10.2 m from the nearest vertex.
+    d_line = line.locate(10.0, 2.0)[1]
+    assert abs(d_line - 2.0) < 0.2, d_line
 
 
 def t_project_returns_none_slots_for_non_finite_points():
@@ -396,7 +387,7 @@ def t_assignment_on_corrupt_learned_file_returns_none():
 
 
 def t_non_string_reverse_official_id_tolerated_and_int_converted():
-    """I1: a malformed reverse.official_id (list, dict, int) must not raise out of
+    """A malformed reverse.official_id (list, dict, int) must not raise out of
     TrackDB.__init__; the int case still yields a usable, string row id."""
     with tempfile.TemporaryDirectory() as d:
         third = _loop(-5000, -5000, 900, 450)   # a third length/box, clear of OVAL and OTHER
@@ -411,7 +402,7 @@ def t_non_string_reverse_official_id_tolerated_and_int_converted():
 
 
 def t_row_with_too_few_parsed_points_is_skipped():
-    """I2: a path whose raw length clears MIN_POINTS but where most entries fail to
+    """A path whose raw length clears MIN_POINTS but where most entries fail to
     parse must be skipped, not loaded as a near-degenerate line."""
     with tempfile.TemporaryDirectory() as d:
         few = {"official_id": "few001", "official_name": "Few", "length_m": 1.0,
@@ -426,7 +417,7 @@ def t_row_with_too_few_parsed_points_is_skipped():
 
 
 def t_zero_length_line_skipped_without_raising_in_match_and_project():
-    """I2: a path of identical points parses fine but has zero line length; _row
+    """A path of identical points parses fine but has zero line length; _row
     must drop it so match/project/line_length never hit ZeroDivisionError."""
     with tempfile.TemporaryDirectory() as d:
         xs, zs = [p[0] for p in OVAL], [p[1] for p in OVAL]
@@ -439,11 +430,10 @@ def t_zero_length_line_skipped_without_raising_in_match_and_project():
         assert db.match(_lap(OVAL), _length(OVAL)) is None    # must not raise ZeroDivisionError
         assert db.project([(0.0, 0.0)], "flat001") is None
         assert db.line_length("flat001") is None
-        assert db.distance_m("flat001", 0.0, 0.0) is None
 
 
 def t_layouts_tolerates_non_string_track_and_layout_fields():
-    """M3: an upstream index.json row with a non-string track/layout must not make
+    """An upstream index.json row with a non-string track/layout must not make
     layouts()'s sort raise."""
     with tempfile.TemporaryDirectory() as d:
         cat = [{"official_id": "aaa001", "track": ["bad"], "layout": {"x": 1},
@@ -458,7 +448,7 @@ def t_layouts_tolerates_non_string_track_and_layout_fields():
 
 
 def t_assignment_ignores_non_string_values():
-    """M4: a hand-edited learned file may hold a non-string assignment value;
+    """A hand-edited learned file may hold a non-string assignment value;
     assignment(key) must treat it as unset rather than handing back a bad type."""
     with tempfile.TemporaryDirectory() as d:
         lp = os.path.join(d, "learned-tracks.json")

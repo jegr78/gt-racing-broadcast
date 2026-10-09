@@ -6242,7 +6242,7 @@ def redact_console_status(full, roles):
         out.pop("handover_next", None)                # who submitted what is director business
         telem = full.get("telemetry")
         if isinstance(telem, dict) and "record" in telem:
-            # recording detail (file path, byte counters): director/producer only.
+            # recording detail (file name, byte and drop counters): director/producer only.
             out["telemetry"] = {k: v for k, v in telem.items() if k != "record"}
     return out
 
