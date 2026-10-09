@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Stdlib checks for the cloud-box scripts in tools/cloud/. The expected argv, file contents
 and messages are the ones the former bash scripts produced. Run: python3 tests/test_cloud_tools.py"""
-import contextlib, importlib.util, io, os, re, sys, types
+import ast, contextlib, importlib.util, io, os, re, subprocess, sys, tempfile, types
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -31,8 +31,10 @@ prov.platform = X86
 class FakeHost:
     """Records every command; answers from rules keyed by an argv prefix tuple or a substring."""
 
-    def __init__(self, rules=(), which=(), files=None, execs=(), dirs=(), links=None, tty=False, answers=()):
+    def __init__(self, rules=(), which=(), files=None, execs=(), dirs=(), links=None, tty=False, answers=(),
+                 homes=None):
         self.rules = list(rules)
+        self.homes = {"racecast": "/home/racecast", "ubuntu": "/home/ubuntu"} if homes is None else homes
         self._which = set(which)
         self.files = dict(files or {})
         self.execs = set(execs)
@@ -92,6 +94,9 @@ class FakeHost:
     def write(self, path, text):
         self.calls.append(("write", path))
         self.files[path] = text
+
+    def home(self, user):
+        return self.homes.get(user)
 
     def realpath(self, path):
         return self.links.get(path, path)
@@ -318,7 +323,8 @@ def t_prep_args():
     assert (p.league, p.no_twitch, p.no_speedtest, p.no_update) == ("lg", True, True, True)
     code, out, _ = run_main(prep.main, ["lg", "--help"], {}, FakeHost())
     assert code == 0 and out == prep.USAGE
-    assert out.startswith("Usage: ./prepare-event.py <league> [--no-twitch] [--no-speedtest] [--no-update]\n")
+    assert out.startswith("Usage: python3 prepare-event.py <league> [--no-twitch] [--no-speedtest] [--no-update]\n")
+    assert not hasattr(prep, "Die")
     code, out, err = run_main(prep.main, ["--bogus"], {}, FakeHost())
     assert code == 1 and out == prep.USAGE and err == "\033[1;31m[error]\033[0m unknown flag: --bogus\n"
     code, _, err = run_main(prep.main, ["a", "b"], {}, FakeHost())
@@ -384,7 +390,7 @@ def t_prep_preview_guard():
 def t_prep_guards():
     code, _, err = run_main(prep.main, ["mylg", "--no-update"], {}, _prep_host(user="ubuntu"))
     assert code == 1 and err == ("\033[1;31m[error]\033[0m run as the 'racecast' user (current: 'ubuntu'). "
-                                 "Try: sudo -iu racecast ./prepare-event.py mylg --no-update\n")
+                                 "Try: sudo -iu racecast python3 prepare-event.py mylg --no-update\n")
     code, _, err = run_main(prep.main, ["mylg"], {"RACECAST_USER": "ops"}, _prep_host(user="ops"))
     assert code == 0
     code, out, err = run_main(prep.main, [], {}, _prep_host())
@@ -402,7 +408,7 @@ def t_prep_readiness_verdicts():
     assert "MISS\033[0m OBS collection not localized" in out
     assert "  \033[1;33m--\033[0m   no YouTube cookies yet." in out, "missing cookies only advise"
     assert "preflight reported issues (exit 3)" in out
-    assert err.endswith("NOT ready: fix the MISS lines above, then re-run:  ./prepare-event.py mylg\n")
+    assert err.endswith("NOT ready: fix the MISS lines above, then re-run:  python3 prepare-event.py mylg\n")
     files = dict(READY_FILES, **{"/home/racecast/profiles/mylg/profile.env": "NAME=x\nDISCORD_CLIENT_ID=1\n"})
     code, out, _ = run_main(prep.main, ["mylg"], {}, _prep_host(files=files))
     assert code == 0 and "league uses Discord but no voice token" in out
@@ -422,19 +428,17 @@ def _argvs_of(fn, argv, h):
 # ---------------------------------------------------------------- provision-iptest
 
 def _ipt_host(resolve=(0, "https://rr1.googlevideo.com/videoplayback?x=1\n"), uid="0", files=None, which=(),
-              execs=None, extra=()):
+              execs=None, extra=(), homes=None):
     rt = "/home/racecast/runtime/bin"
     rules = list(extra) + [
         (("id", "-u"), 0, uid + "\n"), (("id", "-gn"), 0, "racecast\n"),
-        (("getent", "passwd", "racecast"), 0, "racecast:x:1001:1001::/home/racecast:/bin/bash\n"),
-        (("getent", "passwd", "ubuntu"), 0, "ubuntu:x:1000:1000::/home/ubuntu:/bin/bash\n"),
         ("yt-dlp -g", resolve[0], resolve[1]),
         ((rt + "/streamlink", "--help"), 0, "usage\n  --http-cookies-file FILE\n"),
         ("--version", 0, "1.0\n")]
     files = {"/home/ubuntu/.ssh/authorized_keys": b"k\n", "/tmp/yt-cookies.txt": b"a\nb\nc\n",
              "/home/racecast/runtime/yt-cookies.txt": b"copied"} if files is None else files
     execs = {f"{rt}/{t}" for t in ("yt-dlp", "streamlink", "deno")} if execs is None else execs
-    return FakeHost(rules=rules, which=which, files=files, execs=execs)
+    return FakeHost(rules=rules, which=which, files=files, execs=execs, homes=homes)
 
 
 def t_iptest_resolve_and_pull_argv():
@@ -467,8 +471,8 @@ def t_iptest_happy_run():
     assert ["install", "-d", "-o", "racecast", "-g", "racecast", "-m", "0700", "/home/racecast/.ssh"] in a
     assert ["install", "-m", "0600", "-o", "racecast", "-g", "racecast", "/home/ubuntu/.ssh/authorized_keys",
             "/home/racecast/.ssh/authorized_keys"] in a
-    assert ["curl", "-fsSL", "https://github.com/jegr78/gt-racing-broadcast/releases/latest/download/"
-            "racecast-linux.tar.gz", "-o", "/tmp/racecast.tar.gz"] in a
+    assert ["curl", "-fsSL", "https://github.com/jegr78/gt-racing-broadcast/releases/latest/download/racecast-linux.tar.gz",
+            "-o", "/tmp/racecast.tar.gz"] in a
     assert ["ln", "-sf", "/home/racecast/racecast", "/usr/local/bin/racecast"] in a
     resolve = next(x for x in a if ipt.YTDLP_FMT in x)
     assert resolve[-4:] == ["--cookies", "/home/racecast/runtime/yt-cookies.txt", "--",
@@ -494,7 +498,7 @@ def t_iptest_verdicts_reach_the_runners():
 
 
 def t_iptest_survives_missing_login_user_and_network():
-    h = _ipt_host(extra=[(("getent", "passwd", "ubuntu"), 2, ""), (("curl", "-s"), 6, "")])
+    h = _ipt_host(extra=[(("curl", "-s"), 6, "")], homes={"racecast": "/home/racecast"})
     code, out, _ = run_main(ipt.main, {}, h)
     assert code == 0, "no ubuntu user (GCP) and no network for ipify must not end the run"
     assert "no user ubuntu on this box: racecast SSH access not set up (set SUDO_USER)" in out
@@ -776,10 +780,6 @@ def t_cloud_docstrings_carry_no_issue_history():
         assert not refs, f"{mod.__name__} docstring cites {refs}: say what it does, not its history"
 
 
-def t_prov_password_alphabet():
-    pw = prov.new_password()
-    assert len(pw) == 16 and pw.isascii() and pw.isalnum()
-
 
 def t_prov_gui_autostart_files():
     h = FakeHost(rules=[(("id", "-gn"), 0, "rcgrp\n")])
@@ -821,8 +821,8 @@ def t_prov_driver_install_path():
     a = h.argvs()
     i = a.index(["apt-key", "list"])
     assert a[i + 1:i + 6] == [
-        ["curl", "-fsSL", "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/"
-         "cuda-keyring_1.1-1_all.deb", "-o", "/tmp/cuda-keyring.deb"],
+        ["curl", "-fsSL", "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb",
+         "-o", "/tmp/cuda-keyring.deb"],
         ["dpkg", "-i", "/tmp/cuda-keyring.deb"], ["apt-get", "update"],
         ["apt-get", "install", "-y", "nvidia-open"], ["ldconfig"]]
     assert "driver module BUILT but not loaded. Reboot, then re-run provision.py" in out
@@ -838,21 +838,59 @@ def t_prov_cpu_dry_run_skips_gpu():
     assert not any(c[0] == "write" for c in h.calls)
 
 
-def t_prov_rustdesk_password_gate():
-    h = FakeHost(which={"rustdesk"}, files={"/etc/racecast/rustdesk-password": "keep"})
+def t_prov_rustdesk_password_never_passes_through_python():
+    h = FakeHost(which={"rustdesk"})
+    run_main(prov.step_rustdesk, h, "racecast", {"RUSTDESK_PASSWORD": "s3cret"})
+    cmd = prov.rustdesk_password_argv("/etc/racecast/rustdesk-password")
+    assert cmd in h.argvs() and cmd[:2] == ["sh", "-c"] and cmd[-1] == "/etc/racecast/rustdesk-password"
+    assert not any("s3cret" in " ".join(a) for a in h.argvs()), "the password never appears in an argv"
+    assert "/etc/racecast/rustdesk-password" not in h.files, "Python never writes the password file"
+    assert "umask 077" in cmd[2] and '"$RUSTDESK_PASSWORD"' in cmd[2]
+
+
+def t_prov_rustdesk_password_file_mode_and_gate():
+    if os.name == "nt" or not shutil_which("sh"):
+        return  # the generator runs on the Linux box; Windows has no sh
+    with tempfile.TemporaryDirectory() as d:
+        path = d + "/pw"
+        env = dict(os.environ, RUSTDESK_PASSWORD="pw from env")
+        assert subprocess.run(prov.rustdesk_password_argv(path), env=env).returncode == 0
+        assert _read(path) == "pw from env" and (os.stat(path).st_mode & 0o777) == 0o600
+        env["RUSTDESK_PASSWORD"] = "other"
+        subprocess.run(prov.rustdesk_password_argv(path), env=env)
+        assert _read(path) == "pw from env", "a non-empty password file is kept"
+        _truncate(path)
+        env.pop("RUSTDESK_PASSWORD")
+        subprocess.run(prov.rustdesk_password_argv(path), env=env)
+        generated = _read(path)
+        assert len(generated) == 16 and generated.isascii() and generated.isalnum(), generated
+        assert (os.stat(path).st_mode & 0o777) == 0o600
+
+
+def _read(path):
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+def _truncate(path):
+    with open(path, "w", encoding="utf-8"):
+        pass  # an empty file is what the gate test needs
+
+
+def shutil_which(name):
+    import shutil
+    return shutil.which(name)
+
+
+def t_prov_rustdesk_files():
+    h = FakeHost(which={"rustdesk"})
     run_main(prov.step_rustdesk, h, "racecast", {})
-    assert h.files["/etc/racecast/rustdesk-password"] == "keep" and ["chmod", "0600",
-                                                                     "/etc/racecast/rustdesk-password"] not in h.argvs()
-    h = FakeHost(which={"rustdesk"}, files={"/etc/racecast/rustdesk-password": ""})
-    run_main(prov.step_rustdesk, h, "racecast", {"RUSTDESK_PASSWORD": "pw"})
-    assert h.files["/etc/racecast/rustdesk-password"] == "pw", "an empty file is regenerated (-s gate)"
     assert h.files["/usr/local/sbin/racecast-rustdesk-setup"] == prov.rustdesk_helper("racecast")
     assert h.files["/etc/systemd/system/racecast-rustdesk-setup.service"] == prov.RUSTDESK_UNIT
     h = FakeHost()
     run_main(prov.step_rustdesk, h, "racecast", {"RUSTDESK_VERSION": "1.4.0"})
     assert ["curl", "-fsSL", "https://github.com/rustdesk/rustdesk/releases/download/1.4.0/rustdesk-1.4.0-x86_64.deb",
             "-o", "/tmp/rustdesk-1.4.0.deb"] in h.argvs()
-    assert len(h.files["/etc/racecast/rustdesk-password"]) == 16
 
 
 def t_prov_sudoers_validation():
@@ -877,19 +915,17 @@ def t_prov_firefox_snap_detection():
 
 
 def t_prov_racecast_install_and_dirs():
-    rules = [(("getent", "passwd"), 0, "racecast:x:1001:1001::/home/racecast:/bin/bash\n"), (("id", "-gn"), 0, "rc\n")]
-    h = FakeHost(rules=rules)
+    h = FakeHost(rules=[(("id", "-gn"), 0, "rc\n")])
     run_main(prov.step_racecast, h, "racecast", {"RACECAST_TAG": ""})
     a = h.argvs()
-    assert ["curl", "-fsSL", "https://github.com/jegr78/gt-racing-broadcast/releases/latest/download/"
-            "racecast-linux.tar.gz", "-o", "/tmp/racecast.tar.gz"] in a, "an empty RACECAST_TAG means latest"
+    assert ["curl", "-fsSL", "https://github.com/jegr78/gt-racing-broadcast/releases/latest/download/racecast-linux.tar.gz",
+            "-o", "/tmp/racecast.tar.gz"] in a, "an empty RACECAST_TAG means latest"
     assert ["tar", "-xzf", "/tmp/racecast.tar.gz", "-C", HOME] in a
     assert ["chown", "-R", "racecast:rc", HOME] in a
     assert a[-1] == ["install", "-d", "-o", "racecast", "-g", "rc", "-m", "0755", HOME + "/.config",
                      HOME + "/.config/obs-studio", HOME + "/.config/obs-studio/plugins"]
-    h = FakeHost(rules=[(("getent",), 2, "")])
-    code, _, _ = run_main(prov.step_racecast, h, "racecast", {})
-    assert code == 2, "an unknown user's home lookup fails the assignment under set -e"
+    code, _, err = run_main(prov.step_racecast, FakeHost(homes={}), "racecast", {})
+    assert code == 1 and err == "provision.py: no home directory for user racecast\n"
 
 
 def t_prov_install_steps_tolerate_failures():
@@ -909,12 +945,13 @@ def t_prov_tailscale_branches():
     code, out, _ = run_main(prov.step_tailscale, h, "racecast", {})
     assert "already joined the tailnet (100.64.0.9)" in out
     assert h.argvs()[-1] == ["tailscale", "set", "--operator=racecast"]
-    h = FakeHost(rules=[(("tailscale", "status"), 1, ""), (("tailscale", "up"), 1, "")])
+    h = FakeHost(rules=[(("tailscale", "status"), 1, ""), ("tailscale up", 1, "")])
     code, out, _ = run_main(prov.step_tailscale, h, "racecast", {"TS_AUTHKEY": "tskey"})
     assert code == 0, "a failed unattended join must still reach the verification block"
     assert ("unattended tailnet join failed. Re-run: sudo tailscale up --ssh --authkey <key> "
             "--hostname racecast-box") in out
-    assert ["tailscale", "up", "--ssh", "--authkey", "tskey", "--hostname", "racecast-box"] in h.argvs()
+    assert ["sh", "-c", 'exec tailscale up --ssh --authkey "$TS_AUTHKEY" --hostname racecast-box'] in h.argvs()
+    assert not any("tskey" in " ".join(a) for a in h.argvs()), "the auth key never appears in an argv"
     h = FakeHost(tty=True, rules=[(("tailscale", "status"), 1, ""), (("tailscale", "up"), 1, "")])
     code, out, _ = run_main(prov.step_tailscale, h, "racecast", {})
     assert code == 0 and "tailscale up did not complete." in out
@@ -964,27 +1001,47 @@ def t_prov_verification_verdicts():
     assert code == 1 and "obs: MISSING. Re-run install-apps" in out
 
 
+def t_prov_reboot_only_after_the_first_green_run():
+    h = FakeHost(files={prov.PROVISIONED_STAMP: ""})
+    code, out, _ = run_main(prov.finish, h, "racecast", 0, {})
+    assert code == 0 and ["reboot"] not in h.argvs(), "a startup-script re-run on every boot must not reboot again"
+    assert "already provisioned on an earlier run (/var/lib/racecast/provisioned): no reboot" in out
+    h = FakeHost()
+    code, out, _ = run_main(prov.finish, h, "racecast", 1, {})
+    assert code == 1 and ["reboot"] not in h.argvs(), "a red run does not reboot, it would loop as a startup-script"
+    assert prov.PROVISIONED_STAMP not in h.files
+    assert "not rebooting while a component is missing" in out
+    h = FakeHost()
+    run_main(prov.finish, h, "racecast", 0, {"PROVISION_REBOOT": "0"})
+    assert h.files.get(prov.PROVISIONED_STAMP) == "" and ["reboot"] not in h.argvs()
+
+
 def t_prov_finish_and_reboot_gate():
-    h = FakeHost(rules=[(("getent",), 0, "racecast:x:1:1::/home/racecast:/bin/bash\n")])
+    h = FakeHost()
     code, out, _ = run_main(prov.finish, h, "racecast", 0, {})
     assert code == 0 and ("sleep", 10) in h.calls and h.argvs()[-1] == ["reboot"]
+    assert h.files[prov.PROVISIONED_STAMP] == "" and ["install", "-d", "-m", "0755", "/var/lib/racecast"] in h.argvs()
     assert "provision.py complete. Box FULLY EQUIPPED" in out
     assert "      Event stack is owned by 'racecast' (its home: /home/racecast).\n" in out
     h = FakeHost()
-    code, out, _ = run_main(prov.finish, h, "racecast", 1, {"PROVISION_REBOOT": "0"})
-    assert code == 1 and ["reboot"] not in h.argvs()
-    assert "PROVISION_REBOOT=0: skipping the reboot." in out and "finished with MISSING components" in out
+    code, out, _ = run_main(prov.finish, h, "racecast", 0, {"PROVISION_REBOOT": "0"})
+    assert code == 0 and ["reboot"] not in h.argvs()
+    assert "PROVISION_REBOOT=0: skipping the reboot." in out
+    code, out, _ = run_main(prov.finish, FakeHost(), "racecast", 1, {"PROVISION_REBOOT": "0"})
+    assert code == 1 and "finished with MISSING components" in out
     code, _, _ = run_main(prov.finish, FakeHost(rules=[(("reboot",), 5, "")]), "racecast", 0, {"PROVISION_REBOOT": ""})
     assert code == 5, "an empty PROVISION_REBOOT means reboot; a failed reboot exits with its status"
 
 
 def t_prov_requires_root_and_creates_user():
     code, _, err = run_main(prov.main, {}, FakeHost(rules=[(("id", "-u"), 0, "1000\n")]), "/x")
-    assert code == 1 and err == "provision.py must run as root (use: sudo ./provision.py)\n"
-    h = FakeHost(rules=[(("getent", "passwd"), 2, ""), (("getent", "group", "plugdev"), 2, "")])
-    run_main(prov.ensure_user, h, "racecast")
+    assert code == 1 and err == "provision.py must run as root (use: sudo python3 provision.py)\n"
+    h = FakeHost(rules=[(("id", "-u", "racecast"), 1, ""), (("getent", "group", "plugdev"), 2, "")])
+    code, out, _ = run_main(prov.ensure_user, h, "racecast")
     a = h.argvs()
-    assert a[1] == ["useradd", "-m", "-s", "/bin/bash", "racecast"]
+    assert a[0] == ["id", "-u", "racecast"] and a[1] == ["useradd", "-m", "-s", "/bin/bash", "racecast"]
+    assert "created event user racecast (home /home/racecast)" in out
+    assert not any(x[:2] == ["getent", "passwd"] for x in a), "no passwd entry is read or printed"
     assert ["usermod", "-aG", "video", "racecast"] in a and ["usermod", "-aG", "plugdev", "racecast"] not in a
 
 
@@ -1013,7 +1070,160 @@ def t_scripts_are_python_and_self_contained():
         with open(os.path.join(CLOUD, n), encoding="utf-8") as f:
             src = f.read()
         assert src.startswith("#!/usr/bin/env python3\n"), n
-        assert "sys.path" not in src and "from scripts" not in src, f"{n} must not import repo modules"
+        for node in ast.walk(ast.parse(src)):
+            mods = [a.name for a in node.names] if isinstance(node, ast.Import) else \
+                [node.module or ""] if isinstance(node, ast.ImportFrom) else []
+            for mod in mods:
+                assert mod.split(".")[0] in sys.stdlib_module_names, f"{n} imports {mod}, which a bare box lacks"
+
+
+RUSTDESK_HELPER_EXPECTED = r"""#!/usr/bin/env bash
+# Managed by racecast provision.py. Configures RustDesk once the desktop session is up.
+set -u
+USER_NAME="racecast"
+uid="$(id -u "$USER_NAME" 2>/dev/null)" || exit 0
+run_as_user() { sudo -u "$USER_NAME" DISPLAY=:0 XDG_RUNTIME_DIR="/run/user/$uid" "$@"; }
+# Wait for the rustdesk server (spawned in the user session) to answer with an ID.
+rid=""
+for _ in $(seq 1 30); do
+  rid="$(run_as_user rustdesk --get-id 2>/dev/null | tr -dc '0-9')"
+  [ -n "$rid" ] && break
+  sleep 2
+done
+pw="$(cat /etc/racecast/rustdesk-password 2>/dev/null)"
+[ -n "$pw" ] && rustdesk --password "$pw" >/dev/null 2>&1
+# Enable direct IP access over the tailnet. The `--option` call is best-effort and did
+# NOT stick on some builds, so ALSO write direct-server into the config files directly,
+# with the service briefly stopped so rustdesk doesn't overwrite the edit on exit. This
+# makes the box reachable via its STABLE tailnet IP ("direct IP", port 21118). No
+# dependence on RustDesk's public rendezvous, and immune to the RustDesk ID drifting
+# across a stop/start. (rustdesk may run its --server as the display-manager user, so edit
+# root's, the user's, AND lightdm's config. Whichever exist.)
+run_as_user rustdesk --option direct-server Y >/dev/null 2>&1 || true
+systemctl stop rustdesk >/dev/null 2>&1 || true
+for cfg in "/root/.config/rustdesk/RustDesk2.toml" \
+           "/home/$USER_NAME/.config/rustdesk/RustDesk2.toml" \
+           "/var/lib/lightdm/.config/rustdesk/RustDesk2.toml"; do
+  [ -f "$cfg" ] || continue
+  grep -q 'direct-server' "$cfg" && continue
+  # Insert `direct-server = 'Y'` directly under the [options] table (append the table if
+  # absent). awk (not sed's GNU-only `a`) so it is portable + the value's single quotes
+  # ride in a -v var instead of shell-escaping. Atomic rewrite via a temp file.
+  awk -v line="direct-server = 'Y'" '
+    /^\[options\]/ && !ins { print; print line; ins=1; next }
+    { print }
+    END { if (!ins) { print ""; print "[options]"; print line } }
+  ' "$cfg" > "$cfg.racecast-tmp" && mv "$cfg.racecast-tmp" "$cfg"
+done
+systemctl start rustdesk >/dev/null 2>&1 || true
+# Re-read the tailnet IP (it may only come up after the join); retry briefly.
+ip=""
+for _ in $(seq 1 10); do
+  ip="$(tailscale ip -4 2>/dev/null | head -1)"
+  [ -n "$ip" ] && break
+  sleep 2
+done
+out="/home/$USER_NAME/rustdesk-access.txt"
+{
+  echo "RustDesk access for this box (user: $USER_NAME). Generated on first boot."
+  echo "  ID:         ${rid:-<run: rustdesk --get-id>}"
+  echo "  Password:   ${pw:-<unset. Set /etc/racecast/rustdesk-password + re-run>}"
+  echo "  Direct IP:  ${ip:-<tailscale ip -4>}   (tailnet, direct IP access enabled, port 21118)"
+  echo
+  echo "Connect from your laptop RustDesk either way:"
+  echo "  - Direct IP (recommended, tailnet-only): enter the Direct IP above + password"
+  echo "  - By ID: enter the ID above + password  (the ID can change across a stop/start; the Direct IP stays stable)"
+} > "$out"
+chown "$USER_NAME:$(id -gn "$USER_NAME")" "$out" 2>/dev/null || true
+chmod 0600 "$out" 2>/dev/null || true
+install -d /var/lib/racecast; : > /var/lib/racecast/rustdesk-configured
+"""
+
+OBS_LAUNCH_EXPECTED = r"""#!/bin/sh
+# Managed by racecast provision.py. Clear stale OBS crash sentinels so a hard-killed
+# session (cloud instance stop/reboot) never triggers OBS's "did not shut down properly /
+# Run in Safe Mode?" prompt on this unattended autologin box (Safe Mode also disables
+# obs-websocket, which the relay drives).
+rm -f "$HOME/.config/obs-studio/.sentinel/"run_* 2>/dev/null || true
+exec obs "$@"
+"""
+
+DISCORD_LAUNCH_EXPECTED = r"""#!/bin/sh
+# Managed by racecast provision.py. Start Discord with the plaintext password store
+# instead of the GNOME keyring: a passwordless-autologin account cannot auto-unlock the
+# keyring, so the keyring-backed store pops an "Unlock Keyring" dialog on every start.
+# --password-store=basic (a Chromium/Electron flag Discord honors) sidesteps it. The box
+# is single-user + tailnet-only, so plaintext app-token storage is an acceptable trade
+# for zero interactive prompts.
+exec discord --password-store=basic "$@"
+"""
+
+
+def t_host_home_lookup_without_passwd_output():
+    if os.name == "nt":
+        return  # "~user" expansion only means a passwd lookup on the Linux box
+    for mod in (prov, ipt):
+        assert mod.Host().home("no-such-user-racecast-test") is None, mod.__name__
+        assert mod.Host().home("root") not in (None, "~root"), mod.__name__
+        assert '"getent", "passwd"' not in _read(mod.__file__), f"{mod.__name__} reads no passwd entries"
+
+
+def t_prov_payloads_match_golden():
+    assert prov.rustdesk_helper("racecast") == RUSTDESK_HELPER_EXPECTED
+    assert prov.OBS_LAUNCH == OBS_LAUNCH_EXPECTED
+    assert prov.DISCORD_LAUNCH == DISCORD_LAUNCH_EXPECTED
+
+
+def t_prov_main_runs_the_steps_in_order():
+    h = FakeHost(files={"/opt/cloud/prepare-event.py": ""}, which={"racecast", "tailscale"}, rules=[
+        (("id", "-u", "racecast"), 0, "1001\n"), (("id", "-u"), 0, "0\n"), (("id", "-gn"), 0, "racecast\n"),
+        (("lspci",), 0, "00:03.0 Ethernet\n"), (("tailscale", "status"), 1, "")])
+    code, out, _ = run_main(prov.main, {"TS_AUTHKEY": "k", "PROVISION_REBOOT": "0"}, h, "/opt/cloud")
+    headers = [line.split("==>\033[0m ", 1)[1] for line in out.split("\n") if "==>\033[0m " in line]
+    steps = [x.split()[0] for x in headers if x[:1].isdigit()]
+    assert steps == [f"{i}/10" for i in range(1, 11)], steps
+    order = [next(i for i, x in enumerate(headers) if x.startswith(p)) for p in
+             ("10/10", "copying prepare-event.py", "verification:", "PROVISION_REBOOT=0")]
+    assert order == sorted(order), headers
+
+    def at(match):
+        return next(i for i, c in enumerate(h.calls) if match(c))
+    sudoers = at(lambda c: c == ("write", "/etc/sudoers.d/90-racecast"))
+    tools = at(lambda c: c[0] == "run" and c[1][-1:] == ["install-tools"])
+    join = at(lambda c: c[0] == "run" and c[1][:2] == ["sh", "-c"] and "tailscale up" in c[1][2])
+    copy = at(lambda c: c[0] == "run" and c[1][-1:] == ["/home/racecast/prepare-event.py"])
+    check = at(lambda c: c[0] == "run" and c[1][:3] == ["dpkg", "-s", "lightdm"])
+    assert sudoers < tools < join < copy < check, "sudoers, install-tools, join, copy, verification"
+    assert ["reboot"] not in h.argvs()
+
+
+def t_host_os_errors_map_to_126():
+    real = subprocess.run
+
+    def denied(*a, **kw):
+        raise PermissionError(13, "Permission denied")
+    subprocess.run = denied
+    try:
+        for mod in (aws, gcp, prep, ipt, r505, regions, prov):
+            host = mod.Host()
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                rc_run = host.run(["tool"])
+                rc_capture = host.capture(["tool"])[0]
+            assert (rc_run, rc_capture) == (126, 126), mod.__name__
+            assert err.getvalue() == "tool: Permission denied\ntool: Permission denied\n", (mod.__name__, err.getvalue())
+    finally:
+        subprocess.run = real
+
+
+def t_docstrings_describe_the_code_not_bash():
+    for mod in (aws, gcp, prep, ipt, r505, regions, prov):
+        with open(mod.__file__, encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
+                doc = ast.get_docstring(node) or ""
+                assert not re.search(r"\bbash\b|pipefail|set -e|\$\(|cut -d", doc), f"{mod.__name__}.{node.name}: {doc}"
 
 
 if __name__ == "__main__":

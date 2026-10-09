@@ -11,7 +11,7 @@ EVERYTHING not needed to resolve/pull a feed is STRIPPED vs provision.py: no NVI
 no xfce desktop, no Firefox, no RustDesk, no OBS/install-apps, no Tailscale join, no
 prepare-event. So it runs on a cheap CPU box (t3.small) in seconds, not a GPU box.
 
-Ubuntu 24.04, run as root:  sudo ./provision-iptest.py
+Ubuntu 24.04, run as root:  sudo python3 provision-iptest.py
 Self-contained (stdlib only, no repo imports): the iptest runners copy it onto the box.
 
 Env:
@@ -43,6 +43,11 @@ class Host:
     def which(self, name):
         return shutil.which(name)
 
+    def home(self, user):
+        """The user's home directory, or None for an unknown user."""
+        path = os.path.expanduser("~" + user)
+        return None if path.startswith("~") else path
+
     def isfile(self, path):
         return os.path.isfile(path)
 
@@ -62,24 +67,34 @@ class Host:
             if stderr is None:
                 print(f"{argv[0]}: command not found", file=sys.stderr)
             return 127
+        except OSError as e:
+            if stderr is None:
+                print(f"{argv[0]}: {e.strerror}", file=sys.stderr)
+            return 126
 
     def capture(self, argv, stderr=None):
-        """bash $(argv): (exit status, stdout without trailing newlines)."""
+        """Run argv; return (exit status, stdout without trailing newlines)."""
         sys.stdout.flush(); sys.stderr.flush()
         try:
             p = subprocess.run(argv, stdout=subprocess.PIPE, stderr=stderr,
                                text=True, errors="replace")
         except FileNotFoundError:
             return 127, ""
+        except OSError as e:
+            if stderr is None:
+                print(f"{argv[0]}: {e.strerror}", file=sys.stderr)
+            return 126, ""
         return p.returncode, p.stdout.rstrip("\n")
 
     def count_bytes(self, argv):
-        """bash `argv | wc -c` under pipefail: (pipeline status, byte count)."""
+        """Run argv; return (exit status, number of bytes it wrote to stdout)."""
         sys.stdout.flush(); sys.stderr.flush()
         try:
             p = subprocess.run(argv, stdout=subprocess.PIPE, stderr=DEVNULL)
         except FileNotFoundError:
             return 127, 0
+        except OSError:
+            return 126, 0
         return p.returncode, len(p.stdout)
 
 
@@ -96,7 +111,7 @@ def warn(msg):
 
 
 def strict(rc):
-    """bash set -e: a failed command ends the script with its status."""
+    """End the script with rc when the command failed."""
     if rc:
         sys.exit(rc)
 
@@ -106,16 +121,10 @@ def first_line(text):
 
 
 def checked(h, argv, stderr=None):
-    """A bash assignment from $(argv) under set -e: exits on failure, else the output."""
+    """The output of argv; a failed command ends the script."""
     rc, out = h.capture(argv, stderr=stderr)
     strict(rc)
     return out
-
-
-def home_field(passwd_line):
-    """`cut -d: -f6` of a passwd entry."""
-    parts = first_line(passwd_line).split(":")
-    return parts[5] if len(parts) > 5 else (parts[0] if len(parts) == 1 else "")
 
 
 def release_url(tag, machine):
@@ -168,17 +177,20 @@ def main(env=None, h=None):
         print("provision-iptest.py must run as root (sudo)", file=sys.stderr)
         sys.exit(1)
 
-    if h.run(["getent", "passwd", user], stdout=DEVNULL):
+    if h.run(["id", "-u", user], stdout=DEVNULL, stderr=DEVNULL):
         strict(h.run(["useradd", "-m", "-s", "/bin/bash", user]))
-        ok(f"created event user {user} ({home_field(h.capture(['getent', 'passwd', user])[1])})")
-    user_home = home_field(checked(h, ["getent", "passwd", user]))
+        ok(f"created event user {user} ({h.home(user) or ''})")
+    user_home = h.home(user)
+    if not user_home:
+        print(f"provision-iptest.py: no home directory for user {user}", file=sys.stderr)
+        sys.exit(1)
     user_group = checked(h, ["id", "-gn", user])
 
     # Log in DIRECTLY as racecast with the key the box was launched with, copied from the invoking login user.
     ssh_src_user = env.get("SUDO_USER") or "ubuntu"
-    rc, entry = h.capture(["getent", "passwd", ssh_src_user], stderr=DEVNULL)
-    src_ak = home_field(entry) + "/.ssh/authorized_keys"
-    if rc:
+    src_home = h.home(ssh_src_user)
+    src_ak = f"{src_home}/.ssh/authorized_keys"
+    if not src_home:
         warn(f"no user {ssh_src_user} on this box: racecast SSH access not set up (set SUDO_USER)")
     elif h.isfile(src_ak):
         strict(h.run(["install", "-d", "-o", user, "-g", user_group, "-m", "0700", user_home + "/.ssh"]))

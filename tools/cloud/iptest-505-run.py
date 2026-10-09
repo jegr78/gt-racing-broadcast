@@ -83,15 +83,23 @@ class Host:
             if stderr is None:
                 print(f"{argv[0]}: command not found", file=sys.stderr)
             return 127
+        except OSError as e:
+            if stderr is None:
+                print(f"{argv[0]}: {e.strerror}", file=sys.stderr)
+            return 126
 
     def capture(self, argv, stderr=None):
-        """bash $(argv): (exit status, stdout without trailing newlines)."""
+        """Run argv; return (exit status, stdout without trailing newlines)."""
         sys.stdout.flush(); sys.stderr.flush()
         try:
             p = subprocess.run(self._argv(argv), stdout=subprocess.PIPE, stderr=stderr,
                                text=True, errors="replace")
         except FileNotFoundError:
             return 127, ""
+        except OSError as e:
+            if stderr is None:
+                print(f"{argv[0]}: {e.strerror}", file=sys.stderr)
+            return 126, ""
         return p.returncode, p.stdout.rstrip("\n")
 
 

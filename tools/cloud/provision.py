@@ -7,7 +7,7 @@ Firefox (deb, not snap), RustDesk, passwordless sudo, Tailscale join, then deleg
 the toolchain + applications to the racecast binary (install-tools / install-apps).
 
 Idempotent: every step is existence-/stamp-gated; safe to re-run after a failure.
-Runs as root: `sudo ./provision.py`, or as a GCP startup-script (instance metadata).
+Runs as root: `sudo python3 provision.py`, or as a GCP startup-script (instance metadata).
 Self-contained (stdlib only, no repo imports) so the startup-script copy runs on its own.
 
 Optional environment:
@@ -31,7 +31,7 @@ Optional environment:
 NOT handled here: per-league onboarding the operator does once per league:
   racecast profiles, cookies, `racecast setup`, OBS scene import, RustDesk password.
 """
-import os, platform, re, secrets, shutil, string, subprocess, sys, time
+import os, platform, re, shutil, subprocess, sys, time
 
 RUSTDESK_DEFAULT_VERSION = "1.3.8"
 RACECAST_REPO = "jegr78/gt-racing-broadcast"
@@ -137,6 +137,7 @@ WantedBy=graphical.target
 MOZILLA_LIST = ("deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.asc] "
                 "https://packages.mozilla.org/apt mozilla main\n")
 MOZILLA_PIN = "Package: *\nPin: origin packages.mozilla.org\nPin-Priority: 1000\n"
+PROVISIONED_STAMP = "/var/lib/racecast/provisioned"
 OBS_BROWSER_SYSTEM = ("/usr/lib/x86_64-linux-gnu/obs-plugins/obs-browser.so", "/usr/lib/obs-plugins/obs-browser.so")
 
 
@@ -145,6 +146,11 @@ class Host:
 
     def which(self, name):
         return shutil.which(name)
+
+    def home(self, user):
+        """The user's home directory, or None for an unknown user."""
+        path = os.path.expanduser("~" + user)
+        return None if path.startswith("~") else path
 
     def realpath(self, path):
         return os.path.realpath(path)
@@ -159,7 +165,7 @@ class Host:
         return os.access(path, os.X_OK)
 
     def size(self, path):
-        """Size in bytes, or None when the path does not exist (bash -s is size > 0)."""
+        """Size in bytes, or None when the path does not exist."""
         try:
             return os.stat(path).st_size
         except OSError:
@@ -174,7 +180,7 @@ class Host:
             return None
 
     def write(self, path, text):
-        """bash `> path`: create or truncate; a failed redirection ends the script like set -e."""
+        """Create or truncate path with text; a failed write ends the script."""
         try:
             with open(path, "w", encoding="utf-8", newline="") as f:
                 f.write(text)
@@ -200,15 +206,23 @@ class Host:
             if stderr is None:
                 print(f"{argv[0]}: command not found", file=sys.stderr)
             return 127
+        except OSError as e:
+            if stderr is None:
+                print(f"{argv[0]}: {e.strerror}", file=sys.stderr)
+            return 126
 
     def capture(self, argv, stderr=None, env=None):
-        """bash $(argv): (exit status, stdout without trailing newlines)."""
+        """Run argv; return (exit status, stdout without trailing newlines)."""
         sys.stdout.flush(); sys.stderr.flush()
         try:
             p = subprocess.run(argv, stdout=subprocess.PIPE, stderr=stderr, env=env,
                                text=True, errors="replace")
         except FileNotFoundError:
             return 127, ""
+        except OSError as e:
+            if stderr is None:
+                print(f"{argv[0]}: {e.strerror}", file=sys.stderr)
+            return 126, ""
         return p.returncode, p.stdout.rstrip("\n")
 
 
@@ -225,7 +239,7 @@ def warn(msg):
 
 
 def strict(rc):
-    """bash set -e: a failed command ends the script with its status."""
+    """End the script with rc when the command failed."""
     if rc:
         sys.exit(rc)
 
@@ -234,18 +248,13 @@ def first_line(text):
     return text.split("\n", 1)[0]
 
 
-def home_field(passwd_line):
-    """`cut -d: -f6` of a passwd entry."""
-    parts = first_line(passwd_line).split(":")
-    return parts[5] if len(parts) > 5 else (parts[0] if len(parts) == 1 else "")
-
-
-def home_of(h, user, check=True):
-    """`$(getent passwd user | cut -d: -f6)`; check=True is an assignment under set -e + pipefail."""
-    rc, out = h.capture(["getent", "passwd", user])
-    if check:
-        strict(rc)
-    return home_field(out)
+def home_of(h, user):
+    """The user's home directory; an unknown user ends the script."""
+    home = h.home(user)
+    if not home:
+        print(f"provision.py: no home directory for user {user}", file=sys.stderr)
+        sys.exit(1)
+    return home
 
 
 def group_of(h, user, check=True):
@@ -256,12 +265,12 @@ def group_of(h, user, check=True):
 
 
 def version_of(h, argv):
-    """`$(argv 2>/dev/null | head -1)`."""
+    """First stdout line of argv, stderr discarded."""
     return first_line(h.capture(argv, stderr=DEVNULL)[1])
 
 
 def has_nvidia_gpu(h):
-    """`lspci | grep -i nvidia` under pipefail; false on a CPU-only dry-run box."""
+    """True when lspci succeeds and lists an NVIDIA device; false on a CPU-only dry-run box."""
     rc, out = h.capture(["lspci"], stderr=DEVNULL)
     return rc == 0 and "nvidia" in out.lower()
 
@@ -366,14 +375,18 @@ def release_url(tag, machine):
     return f"https://github.com/{RACECAST_REPO}/releases/download/{tag}/{asset}"
 
 
-def new_password():
-    """16 characters from A-Za-z0-9, the alphabet of `tr -dc 'A-Za-z0-9' </dev/urandom`."""
-    alphabet = string.ascii_letters + string.digits
-    return "".join(secrets.choice(alphabet) for _ in range(16))
+def rustdesk_password_argv(path):
+    """Write RUSTDESK_PASSWORD from the environment, or 16 random A-Za-z0-9 characters, to path
+    with mode 0600; a non-empty file is kept. The secret never passes through this process."""
+    script = ('umask 077; f="$1"; [ -s "$f" ] && exit 0; '
+              'if [ -n "${RUSTDESK_PASSWORD:-}" ]; then printf %s "$RUSTDESK_PASSWORD" > "$f"; '
+              "else LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 16 > \"$f\"; fi; "
+              'chmod 0600 "$f"')
+    return ["sh", "-c", script, "sh", path]
 
 
 def is_snap(h, path):
-    """`readlink -f path | grep /snap/` under pipefail."""
+    """True when path resolves into /snap/."""
     return "/snap/" in h.realpath(path)
 
 
@@ -402,9 +415,9 @@ def write_rustdesk_setup_helper(h, user_name):
 
 
 def ensure_user(h, user):
-    if h.run(["getent", "passwd", user], stdout=DEVNULL):
+    if h.run(["id", "-u", user], **QUIET):
         strict(h.run(["useradd", "-m", "-s", "/bin/bash", user]))
-        ok(f"created event user {user} (home {home_of(h, user, check=False)})")
+        ok(f"created event user {user} (home {home_of(h, user)})")
     # render+video for the GPU and NVENC, audio for PipeWire capture; absent groups are skipped.
     for g in ("video", "render", "audio", "plugdev"):
         if h.run(["getent", "group", g], stdout=DEVNULL) == 0:
@@ -423,13 +436,13 @@ def step_apt(h):
 
 
 def apt_key_has_cuda(h):
-    """`apt-key list | grep -qi cuda` under pipefail."""
+    """True when `apt-key list` succeeds and mentions cuda."""
     rc, keys = h.capture(["apt-key", "list"], stderr=DEVNULL)
     return rc == 0 and "cuda" in keys.lower()
 
 
 def dkms_built(h):
-    """`dkms status | grep -qi 'nvidia.*installed'` under pipefail."""
+    """True when `dkms status` succeeds and shows an installed nvidia module."""
     rc, out = h.capture(["dkms", "status"], stderr=DEVNULL)
     return rc == 0 and re.search("nvidia.*installed", out, re.IGNORECASE) is not None
 
@@ -485,7 +498,7 @@ def step_desktop(h, user):
     strict(h.run(["install", "-d", "-m", "0755", "/etc/lightdm/lightdm.conf.d"]))
     h.write("/etc/lightdm/lightdm.conf.d/50-racecast-autologin.conf", autologin_conf(user))
     ok(f"autologin configured for {user}")
-    write_gui_autostart(h, home_of(h, user, check=False), user)
+    write_gui_autostart(h, home_of(h, user), user)
     log("   GUI autostart written (OBS + Discord launch with the session; takes effect next boot)")
 
 
@@ -524,9 +537,7 @@ def step_rustdesk(h, user, env):
     h.run(["systemctl", "enable", "--now", "rustdesk"], **QUIET)
     # Password/ID/direct-IP need the graphical session, so a first-boot oneshot applies them.
     strict(h.run(["install", "-d", "-m", "0700", "/etc/racecast"]))
-    if not h.size("/etc/racecast/rustdesk-password"):
-        h.write("/etc/racecast/rustdesk-password", env.get("RUSTDESK_PASSWORD") or new_password())
-        strict(h.run(["chmod", "0600", "/etc/racecast/rustdesk-password"]))
+    strict(h.run(rustdesk_password_argv("/etc/racecast/rustdesk-password")))
     write_rustdesk_setup_helper(h, user)
     h.write("/etc/systemd/system/racecast-rustdesk-setup.service", RUSTDESK_UNIT)
     h.run(["systemctl", "enable", "racecast-rustdesk-setup.service"], **QUIET)
@@ -600,7 +611,8 @@ def step_tailscale(h, user, env):
     if h.run(["tailscale", "status"], **QUIET) == 0:
         ok(f"already joined the tailnet ({tailnet_ip(h)})")
     elif env.get("TS_AUTHKEY"):
-        if h.run(["tailscale", "up", "--ssh", "--authkey", env["TS_AUTHKEY"], "--hostname", "racecast-box"]) == 0:
+        # The key stays in the environment: sh hands it to tailscale, it never enters this process's argv.
+        if h.run(["sh", "-c", 'exec tailscale up --ssh --authkey "$TS_AUTHKEY" --hostname racecast-box']) == 0:
             ok(f"joined the tailnet unattended ({tailnet_ip(h)})")
         else:
             warn("unattended tailnet join failed. Re-run: sudo tailscale up --ssh --authkey <key> "
@@ -736,7 +748,7 @@ def finish(h, user, rc, env):
     print()
     if rc == 0:
         log("provision.py complete. Box FULLY EQUIPPED (every required component present).")
-        print(f"      Event stack is owned by '{user}' (its home: {home_of(h, user, check=False)}).")
+        print(f"      Event stack is owned by '{user}' (its home: {home_of(h, user)}).")
         print(f"      Log in as that user directly. 'gcloud compute ssh {user}@racecast-box'.")
         print("      Then run racecast plainly: 'racecast preflight', 'racecast event start', …")
         print("      If warned above, finish the tailnet join. The reboot below brings up the desktop")
@@ -747,15 +759,24 @@ def finish(h, user, rc, env):
         warn("NOT fully equipped. Fix the cause and re-run provision; it is idempotent and will")
         warn("install only what is still missing. Do NOT proceed to an event with a red line.")
 
-    # The reboot brings up the autologin desktop and runs the first-boot RustDesk config.
-    if (env.get("PROVISION_REBOOT") or "1") != "0":
+    # Only the first green run reboots: a startup-script runs on every boot and would loop otherwise.
+    first_green = rc == 0 and not h.exists(PROVISIONED_STAMP)
+    if first_green:
+        strict(h.run(["install", "-d", "-m", "0755", "/var/lib/racecast"]))
+        h.write(PROVISIONED_STAMP, "")
+    if (env.get("PROVISION_REBOOT") or "1") == "0":
+        log("PROVISION_REBOOT=0: skipping the reboot. Reboot manually to bring up the desktop")
+        log("session (RustDesk/OBS need X on :0) and run the first-boot RustDesk config.")
+    elif first_green:
         log("Rebooting in 10s to bring up the desktop session + finish RustDesk setup.")
         log("  Opt out with PROVISION_REBOOT=0. Press Ctrl-C now to cancel.")
         h.sleep(10)
         strict(h.run(["reboot"]))
+    elif rc == 0:
+        log(f"already provisioned on an earlier run ({PROVISIONED_STAMP}): no reboot.")
     else:
-        log("PROVISION_REBOOT=0: skipping the reboot. Reboot manually to bring up the desktop")
-        log("session (RustDesk/OBS need X on :0) and run the first-boot RustDesk config.")
+        log("not rebooting while a component is missing (a startup-script run would loop). Fix the")
+        log("cause and re-run, or reboot by hand: a driver that built but is not loaded needs one.")
     sys.exit(rc)
 
 
@@ -764,7 +785,7 @@ def main(env=None, h=None, here=None):
     h = h or Host()
     here = here or os.path.dirname(os.path.abspath(__file__))
     if h.capture(["id", "-u"])[1] != "0":
-        print("provision.py must run as root (use: sudo ./provision.py)", file=sys.stderr)
+        print("provision.py must run as root (use: sudo python3 provision.py)", file=sys.stderr)
         sys.exit(1)
     # One operational account owns the autologin session, OBS, sudoers and the install tree.
     user = env.get("RACECAST_USER") or "racecast"

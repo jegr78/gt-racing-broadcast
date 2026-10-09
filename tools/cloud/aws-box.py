@@ -45,31 +45,41 @@ class Host:
             if stderr is None:
                 print(f"{argv[0]}: command not found", file=sys.stderr)
             return 127
+        except OSError as e:
+            if stderr is None:
+                print(f"{argv[0]}: {e.strerror}", file=sys.stderr)
+            return 126
 
     def capture(self, argv, stderr=None):
-        """bash $(argv): (exit status, stdout without trailing newlines)."""
+        """Run argv; return (exit status, stdout without trailing newlines)."""
         sys.stdout.flush(); sys.stderr.flush()
         try:
             p = subprocess.run(self._argv(argv), stdout=subprocess.PIPE, stderr=stderr,
                                text=True, errors="replace")
         except FileNotFoundError:
             return 127, ""
+        except OSError as e:
+            if stderr is None:
+                print(f"{argv[0]}: {e.strerror}", file=sys.stderr)
+            return 126, ""
         return p.returncode, p.stdout.rstrip("\n")
 
     def exec(self, argv):
-        """Replace this process with argv (bash exec); on Windows run it and pass on its status."""
+        """Replace this process with argv; on Windows run it and exit with its status."""
         sys.stdout.flush(); sys.stderr.flush()
-        if os.name != "nt":
-            try:
+        try:
+            if os.name != "nt":
                 os.execvp(argv[0], argv)
-            except FileNotFoundError:
-                print(f"{argv[0]}: command not found", file=sys.stderr)
-                sys.exit(127)
-        exe = shutil.which(argv[0])
-        if not exe:
+            exe = shutil.which(argv[0])
+            if not exe:
+                raise FileNotFoundError(argv[0])
+            sys.exit(subprocess.call([exe] + list(argv[1:])))
+        except FileNotFoundError:
             print(f"{argv[0]}: command not found", file=sys.stderr)
             sys.exit(127)
-        sys.exit(subprocess.call([exe] + list(argv[1:])))
+        except OSError as e:
+            print(f"{argv[0]}: {e.strerror}", file=sys.stderr)
+            sys.exit(126)
 
 
 def die(msg):
@@ -78,7 +88,7 @@ def die(msg):
 
 
 def strict(rc):
-    """bash set -e: a failed command ends the script with its status."""
+    """End the script with rc when the command failed."""
     if rc:
         sys.exit(rc)
 

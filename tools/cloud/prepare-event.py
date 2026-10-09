@@ -3,12 +3,12 @@
 
 Runs the recurring event-prep sequence to "ready" (no go-live) and reports which
 one-time manual setup is still missing. Companion to tools/cloud/provision.py.
-Run as the `racecast` user on the box:  ./prepare-event.py <league> [flags]
+Run as the `racecast` user on the box:  python3 prepare-event.py <league> [flags]
 Self-contained (stdlib only, no repo imports): it is copied onto the box on its own.
 """
 import os, re, shutil, subprocess, sys
 
-USAGE = """Usage: ./prepare-event.py <league> [--no-twitch] [--no-speedtest] [--no-update]
+USAGE = """Usage: python3 prepare-event.py <league> [--no-twitch] [--no-speedtest] [--no-update]
 
   <league>        racecast profile name for this event (required; must be imported)
   --no-twitch     skip the Twitch cookie/auth refresh (default: run it alongside YouTube)
@@ -31,7 +31,7 @@ class Host:
         return os.path.realpath(path)
 
     def size(self, path):
-        """Size in bytes, or None when the path does not exist (bash -s is size > 0)."""
+        """Size in bytes, or None when the path does not exist."""
         try:
             return os.stat(path).st_size
         except OSError:
@@ -51,7 +51,7 @@ class Host:
             return False
 
     def ask(self, prompt):
-        """bash read -r -p: the prompt goes to stderr, surrounding blanks are stripped."""
+        """Prompt on stderr; return the answer without surrounding blanks."""
         sys.stderr.write(prompt)
         sys.stderr.flush()
         return sys.stdin.readline().strip(" \t\n")
@@ -65,20 +65,24 @@ class Host:
             if stderr is None:
                 print(f"{argv[0]}: command not found", file=sys.stderr)
             return 127
+        except OSError as e:
+            if stderr is None:
+                print(f"{argv[0]}: {e.strerror}", file=sys.stderr)
+            return 126
 
     def capture(self, argv, stderr=None):
-        """bash $(argv): (exit status, stdout without trailing newlines)."""
+        """Run argv; return (exit status, stdout without trailing newlines)."""
         sys.stdout.flush(); sys.stderr.flush()
         try:
             p = subprocess.run(argv, stdout=subprocess.PIPE, stderr=stderr,
                                text=True, errors="replace")
         except FileNotFoundError:
             return 127, ""
+        except OSError as e:
+            if stderr is None:
+                print(f"{argv[0]}: {e.strerror}", file=sys.stderr)
+            return 126, ""
         return p.returncode, p.stdout.rstrip("\n")
-
-
-class Die(SystemExit):
-    pass
 
 
 class Prep:
@@ -101,7 +105,7 @@ class Prep:
 
     def die(self, msg):
         print(f"\033[1;31m[error]\033[0m {msg}", file=sys.stderr)
-        raise Die(1)
+        sys.exit(1)
 
     def usage(self):
         print(USAGE, end="")
@@ -204,7 +208,7 @@ class Prep:
     def sanity_guard(self):
         if self.h.capture(["id", "-un"])[1] != self.user:
             self.die(f"run as the '{self.user}' user (current: '{self.h.capture(['id', '-un'])[1]}'). "
-                     f"Try: sudo -iu {self.user} ./prepare-event.py {' '.join(self.argv)}")
+                     f"Try: sudo -iu {self.user} python3 prepare-event.py {' '.join(self.argv)}")
         if not self.h.which("racecast"):
             self.die("racecast not on PATH")
         if not self.league:
@@ -224,7 +228,7 @@ class Prep:
         print(f"  \033[1;33m--\033[0m   {msg}")
 
     def tailnet_ips(self):
-        """(exit status, lines) of `tailscale ip -4 | grep -E '^100\\.'`."""
+        """(exit status of `tailscale ip -4`, its 100.x lines)."""
         rc, out = self.h.capture(["tailscale", "ip", "-4"], stderr=subprocess.DEVNULL)
         return rc, [line for line in out.split("\n") if re.match(r"100\.", line)]
 
@@ -283,7 +287,7 @@ class Prep:
             if self.soft_warnings > 0:
                 self.warn(f"{self.soft_warnings} soft warning(s) above. Review before going live")
             raise SystemExit(0)
-        self.die(f"NOT ready: fix the MISS lines above, then re-run:  ./prepare-event.py {self.league}")
+        self.die(f"NOT ready: fix the MISS lines above, then re-run:  python3 prepare-event.py {self.league}")
 
     def main(self):
         self.parse_args()
