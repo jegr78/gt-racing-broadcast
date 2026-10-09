@@ -13,6 +13,7 @@ import bisect
 import json
 import math
 import os
+import random
 import struct
 import sys
 import time
@@ -66,10 +67,10 @@ def _line(path):
     return seg, cum, curv
 
 
-def _speeds(seg, curv, lap, seed=0):
+def _speeds(seg, curv, lap, seed=0, phase0=0.0):
     """Target speed per line point for one lap: grip in corners, braking and traction."""
     n, total = len(seg), sum(seg)
-    base, phase = LAP_BASE[(lap + seed) % len(LAP_BASE)], 1.9 * lap
+    base, phase = LAP_BASE[(lap + seed) % len(LAP_BASE)], phase0 + 1.9 * lap
     v, pos = [], 0.0
     for i in range(n):
         pace = base * (1 + PACE_AMP * math.sin(2 * math.pi * PACE_WAVES * pos / total + phase))
@@ -124,12 +125,13 @@ def build(out_dir, row, laps=6, hz=60, start=None, car_id=CAR_ID, profile="demo"
     xs, zs = [p[0] for p in path], [p[1] for p in path]
     w = gt7_recording.RecordingWriter(out_dir, profile, "demo", queue_max=0)
     ts = start if start is not None else time.time() - 3600
-    seed = int(ts) % 7             # recordings started at different times get different laps
+    rng = random.Random(int(ts))   # recordings started at different times get different laps
+    seed, phase0 = rng.randrange(len(LAP_BASE)), rng.uniform(0, 2 * math.pi)
     dt = 1.0 / hz
     s = 0.6 * total               # the out-lap starts mid-lap, as after leaving the pits
     lap, lap_t, last_ms, fuel = 0, 0.0, -1, 60.0
     times, report_at, tail = [], None, None
-    v_lap = _speeds(seg, curv, lap, seed)
+    v_lap = _speeds(seg, curv, lap, seed, phase0)
     while tail is None or ts < tail:
         v = _at(cum, v_lap, s)
         acc = (_at(cum, v_lap, s + v * dt) - v) / dt
@@ -154,7 +156,7 @@ def build(out_dir, row, laps=6, hz=60, start=None, car_id=CAR_ID, profile="demo"
                 times.append(lap_t)
                 report_at = 0.5          # GT7 shows the lap time shortly after the line
             lap, lap_t = lap + 1, 0.0
-            v_lap = _speeds(seg, curv, lap, seed)
+            v_lap = _speeds(seg, curv, lap, seed, phase0)
             if lap > laps:
                 tail = ts + 4.0
         s = s_next

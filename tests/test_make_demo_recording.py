@@ -77,6 +77,14 @@ def t_demo_recording_is_recognised_and_laps_trade_sectors():
         assert all(lap["trace"][10]["steer_deg"] is not None for lap in timed)
 
 
+def t_recordings_started_apart_get_different_laps():
+    row = _row()
+    with tempfile.TemporaryDirectory() as d:
+        times = [demo.build(os.path.join(d, str(i)), row, laps=2, hz=20,
+                            start=1_700_000_000.0 + 56 * i)["lap_times"] for i in range(2)]
+        assert times[0] != times[1], f"two demo recordings repeat the same laps: {times}"
+
+
 def t_mirrored_demo_is_not_recognised():
     with tempfile.TemporaryDirectory() as d:
         _out, idx = _index(d, _row(), laps=2, mirror=True)
