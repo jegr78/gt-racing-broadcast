@@ -5236,6 +5236,17 @@ function tmDropLaps() {
   tmLapCache.clear();
   tmLapsReq.clear();
 }
+// Builds the missing lap indexes in the telemetry-index job; pool requests share one run.
+let tmIndexing = null;
+function tmIndexAll() {
+  if (!tmIndexing) {
+    tmIndexing = (async () => {
+      const job = await startJob('telemetry-index');
+      return job.error ? job : jobResult(job.job_id);
+    })().finally(() => { tmIndexing = null; });
+  }
+  return tmIndexing;
+}
 function tmTrackName(t) {
   return t.track + (t.layout ? ' - ' + t.layout : '') + (t.reverse ? ' (reverse)' : '');
 }
@@ -5401,8 +5412,17 @@ async function tmSelectB(l) {
   const q = new URLSearchParams({car: l.car_id == null ? '' : String(l.car_id),
                                  track: l.track_id == null ? '' : l.track_id});
   if (l.track_id == null) { q.set('rec', l.rec); q.set('session', String(l.session)); }
-  const p = await tmShared('/api/telemetry/laps?' + q);
+  let p = await tmShared('/api/telemetry/laps?' + q);
   if (seq !== tmSeq.b) return;
+  if (p.ok && p.unindexed) {                        // asks once: a broken file stays unindexed
+    $('tm-sec-sub').textContent = 'Indexing ' + p.unindexed
+      + (p.unindexed === 1 ? ' recording…' : ' recordings…');
+    const job = await tmIndexAll();
+    if (seq !== tmSeq.b) return;
+    if (job.error) tmErr(job.error);
+    else p = await tmShared('/api/telemetry/laps?' + q);
+    if (seq !== tmSeq.b) return;
+  }
   if (!p.ok) tmErr(p.error || 'could not load the comparable laps');
   tmState.pool = p.ok ? p : {laps: [], best_sectors: [], theoretical_best: null};
   tmState.a = tmDefaultA(key);

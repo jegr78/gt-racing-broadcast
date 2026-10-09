@@ -244,7 +244,7 @@ def _ctx(jobs=None, init_plan=None, init_step=None, profile_logo=None,
                  "started": "2026-10-07T20:15:03+02:00", "size": 1000, "duration_s": 600.0,
                  "laps": None, "partial": False, "recording": False, "indexed": False,
                  "track": None}]},
-            "telemetry_laps": lambda rec=None, session=None, track=None, car=None: {
+            "telemetry_laps": lambda rec=None, session=None, track=None, car=None, build=True: {
                 "ok": True, "laps": []},
             "telemetry_lap": lambda rec, session, lap: {"ok": False, "error": "no lap"},
             "telemetry_tracks": lambda: {"ok": True, "tracks": [
@@ -2486,7 +2486,9 @@ const pool = laps => ({ok: true, laps, best_sectors: [], theoretical_best: null,
 
 def _tm_node(body):
     """stdout of `body` run against the Telemetry block with a fake DOM and fetch."""
-    return _run_js(_TM_HARNESS + _tm_script(_cc_page()) + "\n(async () => {\n" + body + "\n})();")
+    page = _cc_page()
+    return _run_js(_TM_HARNESS + "const JOB_POLL_MS = 0;\n" + _job_fns(page) + _tm_script(page)
+                   + "\n(async () => {\n" + body + "\n})();")
 
 
 def t_telemetry_open_recording_is_not_indexed_on_load():
@@ -2528,6 +2530,51 @@ console.log([n2, status, tmState.b, tmState.pool.laps.length].join('|'));""")
     if out is not None:
         assert out.strip() == "1|Loading comparable laps...|R|1|2|2", \
             f"one pool request per query, a loading note and the newest lap wins: {out!r}"
+
+
+def t_telemetry_pool_indexes_missing_recordings_through_one_job():
+    out = _tm_node("""
+const l1 = lap('R', 1, 80, 1), l2 = lap('R', 2, 79, 1);
+tmState.recLaps = [l1, l2];
+tmSelectB(l1);
+await tick();
+answer('car=1', Object.assign(pool([l1]), {unindexed: 2}));
+await tick();
+const status = $('tm-sec-sub').textContent.replace(/\\u2026/g, '...');
+answer('/api/op/telemetry-index', {ok: true, job_id: 'j'});
+await tick();
+answer('/api/jobs/j', {ok: true, running: true, exit_code: null});
+await tick();
+answer('/api/jobs/j', {ok: true, running: false, exit_code: 0});
+await tick();
+const asked = calls.filter(u => u.includes('car=1')).length;
+answer('car=1', Object.assign(pool([l1, l2, lap('S', 1, 78, 1)]), {unindexed: 1}));
+await tick();
+console.log([status, asked, calls.filter(u => u.includes('telemetry-index')).length,
+             tmState.pool.laps.length, tmState.a].join('|'));""")
+    if out is not None:
+        assert out.strip() == "Indexing 2 recordings...|2|1|3|S|1|1", \
+            f"the pool runs telemetry-index once, then asks again and draws what it has: {out!r}"
+
+
+def t_telemetry_pool_job_answer_for_another_lap_is_dropped():
+    out = _tm_node("""
+const l1 = lap('R', 1, 80, 1), l2 = lap('R', 2, 79, 2);
+tmState.recLaps = [l1, l2];
+tmSelectB(l1);
+await tick();
+answer('car=1', Object.assign(pool([l1]), {unindexed: 1}));
+await tick();
+answer('/api/op/telemetry-index', {ok: false, error: 'telemetry-index is already running'});
+tmSelectB(l2);
+await tick();
+answer('car=2', pool([l2]));
+await tick();
+console.log([calls.filter(u => u.includes('car=1')).length, tmState.b, tmState.pool.laps.length,
+             $('tm-err').textContent].join('|'));""")
+    if out is not None:
+        assert out.strip() == "1|R|1|2|1|", \
+            f"a pool whose lap was replaced neither asks again nor shows its job error: {out!r}"
 
 
 def t_telemetry_clearing_the_pair_drops_a_pending_load():
@@ -2877,7 +2924,8 @@ def t_api_ps_save_rejects_bad_ip():
 def t_telemetry_routes_pass_their_arguments():
     calls = []
     ctx = _ctx()
-    ctx["telemetry_laps"] = lambda *a: calls.append(("laps",) + a) or {"ok": True, "laps": []}
+    ctx["telemetry_laps"] = lambda *a, **kw: calls.append(("laps",) + a + (kw,)) or {
+        "ok": True, "laps": []}
     ctx["telemetry_lap"] = lambda *a: calls.append(("lap",) + a) or {"ok": False, "error": "x"}
     ctx["telemetry_learn"] = lambda *a: calls.append(("learn",) + a) or {
         "ok": False, "error": "unknown track layout"}
@@ -2893,8 +2941,8 @@ def t_telemetry_routes_pass_their_arguments():
         assert code == 200 and json.loads(body)["tracks"][0]["id"] == "suzuka01"
         code, _ = _post_json(port, "/api/telemetry/learn", {"rec": "r", "track_id": "x"})
         assert code == 400, "a refused learn is a client error"
-        assert calls == [("laps", "20261007-201503", None, None, None),
-                         ("laps", "r", "2", "", "3424"),
+        assert calls == [("laps", "20261007-201503", None, None, None, {"build": False}),
+                         ("laps", "r", "2", "", "3424", {"build": False}),
                          ("lap", "r", "1", "3"),
                          ("learn", "r", "x")], calls
     finally:
@@ -2904,7 +2952,7 @@ def t_telemetry_routes_pass_their_arguments():
 def t_telemetry_routes_stay_json_on_errors():
     ctx = _ctx()
 
-    def boom(*_a):
+    def boom(*_a, **_kw):
         raise RuntimeError("disk at /srv/league/rec.gt7rec")
     ctx["telemetry_recordings"] = boom
     httpd, port = _serve(ctx)
@@ -2930,7 +2978,7 @@ def t_telemetry_routes_stay_json_on_errors():
 def t_telemetry_routes_500_paths_report_only_the_exception_type():
     ctx = _ctx()
 
-    def boom(*_a):
+    def boom(*_a, **_kw):
         raise RuntimeError("disk at /srv/league/rec.gt7rec")
     ctx["telemetry_laps"] = boom
     ctx["telemetry_lap"] = boom

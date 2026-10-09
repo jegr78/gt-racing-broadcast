@@ -116,6 +116,7 @@ def t_ops_registry_shape():
 
 def t_long_control_center_reads_run_as_jobs():
     assert ui_ops.OPS["gt7-data-update"] == ["gt7-data", "update"]
+    assert ui_ops.OPS["telemetry-index"] == ["telemetry", "index"]
 
 
 def t_job_argv_repo_mode():

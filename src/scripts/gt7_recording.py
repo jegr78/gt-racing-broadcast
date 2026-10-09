@@ -328,19 +328,28 @@ def list_recordings(rec_dir, count_laps=False):
                          "duration_s": max(0.0, mtime - start) if start else 0.0,
                          "laps": None, "partial": name.endswith(PART)})
             continue
-        first = last = None
-        laps = []
-        eng = gt7_telemetry.TelemetryEngine()
-        eng.on_lap = laps.append      # the same lap records export_csv writes
-        for wall_ts, _kind, plain in r.packets():
-            first = wall_ts if first is None else first
-            last = wall_ts
-            eng.update(gt7_telemetry.parse_packet(plain), wall_ts)
+        laps, duration = _replay_counts(r)
         rows.append({"name": name, "path": path, "size": size,
                      "started": r.header.get("started", ""),
-                     "duration_s": (last - first) if first is not None else 0.0,
-                     "laps": len(laps), "partial": name.endswith(PART)})
+                     "duration_s": duration, "laps": laps, "partial": name.endswith(PART)})
     return rows
+
+
+def _replay_counts(r):
+    first = last = None
+    laps = []
+    eng = gt7_telemetry.TelemetryEngine()
+    eng.on_lap = laps.append      # the same lap records export_csv writes
+    for wall_ts, _kind, plain in r.packets():
+        first = wall_ts if first is None else first
+        last = wall_ts
+        eng.update(gt7_telemetry.parse_packet(plain), wall_ts)
+    return len(laps), (last - first) if first is not None else 0.0
+
+
+def replay_counts(path):
+    """(laps, duration_s) of one recording by replaying every packet."""
+    return _replay_counts(Recording(path))
 
 
 SAMPLE_COLUMNS = (

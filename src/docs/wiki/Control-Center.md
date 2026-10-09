@@ -260,14 +260,17 @@ running relay.
   status (reference, counted, or not counted with the reason), car and track. The first
   open replays the recording once and caches the result next to it as
   `<stem>.laps.json`; later opens are instant until the recording or the GT7 track data
-  changes. The recording the relay is still writing shows as `(recording)`: it stays out
-  of every comparison, and the view analyses it only after the recording stops.
+  changes. The recording the relay is still writing shows as `(recording)` and cannot be
+  picked: it stays out of every comparison, and the view analyses it only after the
+  recording stops.
 - **Lap A and lap B.** Lap B is the lap you click. Lap A starts as the fastest counted
   lap other than B with the same track and car across all recordings of the profile.
   Both pickers list every comparable counted lap; B also shows the clicked lap when it
   is not counted. When B has no such partner, lap A
   reads "no other lap to compare" and the charts show B alone. Laps on an unknown track
-  compare only within their GT7 session.
+  compare only within their GT7 session. When other recordings have no cached laps yet,
+  for example after a Set track, the view indexes them in the background first ("Indexing
+  N recordings…").
 - **Charts.** Speed, throttle, brake, steering, gear and the delta of B against A over
   lap distance. Below zero B is ahead, above zero behind. Hover to read both laps at one
   point; the map shows where that point is.
@@ -289,7 +292,8 @@ The racing lines are not part of the package. Until racecast has downloaded them
 (`racecast gt7-data update`, or the first relay start with telemetry), it recognises
 only layouts learned with Set track, and every other recording starts as track unknown.
 
-> **CLI alternative:** `racecast telemetry export <name>` writes the same laps as CSV.
+> **CLI alternative:** `racecast telemetry export <name>` writes the same laps as CSV;
+> `racecast telemetry index` builds the missing lap caches ahead of time.
 
 ### Help & Docs
 

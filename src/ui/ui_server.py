@@ -121,7 +121,7 @@ def make_handler(ctx):
     init_plan(browser) -> dict (wizard plan: per-step done/kind/op/instruction),
     init_step(key) -> dict (run one non-job wizard step, {ok, done} | {ok: False, error}),
     profile_export(name, assets) -> dict, profile_import(path, force) -> dict,
-    telemetry_recordings() -> dict, telemetry_laps(rec, session, track, car) -> dict,
+    telemetry_recordings() -> dict, telemetry_laps(rec, session, track, car, build) -> dict,
     telemetry_lap(rec, session, lap) -> dict, telemetry_tracks() -> dict,
     telemetry_learn(rec, track_id) -> dict (solo POV lap analysis, query strings in),
     jobs (ui_jobs.JobManager), log_sources {name: {files, dir, archives, read}},
@@ -598,8 +598,10 @@ def make_handler(ctx):
                 arg = {k: v[0] for k, v in q.items()}
                 try:
                     if path.endswith("/laps"):
+                        # Never builds a missing index here: the page runs telemetry-index.
                         result = ctx["telemetry_laps"](arg.get("rec"), arg.get("session"),
-                                                       arg.get("track"), arg.get("car"))
+                                                       arg.get("track"), arg.get("car"),
+                                                       build=False)
                     else:
                         result = ctx["telemetry_lap"](arg.get("rec"), arg.get("session"),
                                                       arg.get("lap"))

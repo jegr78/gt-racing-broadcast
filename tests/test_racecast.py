@@ -690,6 +690,63 @@ def t_telemetry_laps_data_for_a_recording_and_the_pool():
             "ok": False, "error": "car and session must be numbers"}
 
 
+def t_telemetry_pool_without_build_reads_only_cached_indexes():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        import gt7_laps
+        a = tgl.write_circle_recording(rec_dir)
+        b = tgl.write_circle_recording(rec_dir, lap_secs=(20.0, 19.0, 18.0), t0=1_700_007_200.0)
+        m.telemetry_laps_data(rec=_stem(a))
+        p = m.telemetry_laps_data(track="ring01", car=str(tgl.CAR), build=False)
+        assert p["ok"] and p["unindexed"] == 1, p
+        assert {lap["rec"] for lap in p["laps"]} == {_stem(a)}, "only the cached recording pools"
+        assert gt7_laps.cached(b, m._runtime_base_dir()) is None, "the pool request built b"
+        own = m.telemetry_laps_data(rec=_stem(a), session="1", track="", car=str(tgl.CAR),
+                                    build=False)
+        assert own["unindexed"] == 0, "an unknown-track pool needs only its own recording"
+        full = m.telemetry_laps_data(track="ring01", car=str(tgl.CAR))
+        assert full["unindexed"] == 0 and len(full["laps"]) == 5, full
+
+
+def t_telemetry_index_cmd_builds_what_the_pool_lacks():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        a = tgl.write_circle_recording(rec_dir)
+        b = tgl.write_circle_recording(rec_dir, lap_secs=(20.0, 19.0, 18.0), t0=1_700_007_200.0)
+        m._relay_record_status = lambda: {"active": True, "file": os.path.basename(b)}
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            m.telemetry_index_cmd([])
+        m._TELEMETRY_MEMO.clear()
+        text = out.getvalue()
+        assert f"{_stem(a)}: 4 laps" in text and _stem(b) not in text, \
+            f"every closed recording is indexed, the open one skipped: {text}"
+        p = m.telemetry_laps_data(track="ring01", car=str(tgl.CAR), build=False)
+        assert p["unindexed"] == 0, p
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            m.telemetry_index_cmd([])
+        assert "0 recording(s) indexed" in out.getvalue(), out.getvalue()
+
+
+def t_telemetry_list_counts_laps_from_the_cache():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        import gt7_recording as gr
+        a = tgl.write_circle_recording(rec_dir)
+        b = tgl.write_circle_recording(rec_dir, lap_secs=(20.0, 19.0, 18.0), t0=1_700_007_200.0)
+        m.telemetry_laps_data(rec=_stem(a))
+        replayed = []
+        real = gr.replay_counts
+        gr.replay_counts = lambda path: replayed.append(os.path.basename(path)) or real(path)
+        out = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out):
+                m.telemetry_list_cmd([])
+        finally:
+            gr.replay_counts = real
+        lines = out.getvalue().splitlines()
+        assert replayed == [os.path.basename(b)], f"a cached recording is not replayed: {replayed}"
+        assert "   4 laps" in lines[0] and "   3 laps" in lines[1], lines
+
+
 def t_telemetry_laps_data_names_a_broken_recording_without_its_path():
     with _telemetry_sandbox() as (rec_dir, tgl):
         import gt7_recording

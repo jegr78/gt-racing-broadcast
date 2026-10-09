@@ -115,8 +115,9 @@ Stdlib only, no relay imports.
 - `list_recordings(dir, count_laps=False)` -> name, size, start, duration, lap count,
   `partial` flag (the file still ends in `.part`). By default it reads only the header
   (duration = file mtime minus `started`, no lap count), so the Control Center and the
-  report stay fast; `count_laps=True` reads every packet, which `racecast telemetry list`
-  does.
+  report stay fast; `count_laps=True` reads every packet. `racecast telemetry list`
+  takes lap count and duration from a valid lap index (part 3) and replays only a
+  recording without one.
 
 ## Switch and state
 
@@ -459,7 +460,8 @@ recording and session.
 - Routes: `GET /api/telemetry/recordings`, `GET /api/telemetry/laps` in three forms
   (`?rec=` lists one recording's laps, `?track=&car=` is the pool of a known track,
   `?rec=&session=&track=&car=` with an empty `track` is the pool of an unknown track
-  within one session),
+  within one session; a pool never builds an index, it returns `unindexed` and the page
+  runs the `telemetry-index` job, `racecast telemetry index`, then asks once more),
   `GET /api/telemetry/lap?rec=&lap=&session=`, `GET /api/telemetry/tracks`,
   `POST /api/telemetry/learn` `{rec, track_id}`.
 - New wiki screenshot `cc-telemetry.png` from a synthetic demo recording (a tool under

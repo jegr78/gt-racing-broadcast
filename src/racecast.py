@@ -22,6 +22,7 @@
   racecast sheet     url | open              # print / open the active league's Google Sheet (built from its SHEET_ID)
   racecast telemetry record start|stop|status   # solo POV: record the GT7 telemetry trace (relay must run)
   racecast telemetry list | export <name|latest> [--out DIR] [--all] [--excel] | delete <name>   # recordings of the active profile -> samples.csv + laps.csv
+  racecast telemetry index   # build the missing lap indexes (the Control Center runs it for lap comparison)
   racecast gt7-data  update | status   # GT7 car names + track recognition data (the relay updates at start, at most once per 24 h, and picks up new files within a minute)
   racecast app launch|quit obs|discord|tailscale   # start / gracefully quit a GUI app (Control Center buttons)
   racecast discord   join | leave | status   # drive the desktop Discord client into/out of the league's voice channel
@@ -982,7 +983,7 @@ EVENT_VERBS = ("status", "start", "stop", "takeover")
 TAILSCALE_VERBS = ("up", "down", "status", "logs")
 OBS_VERBS = ("refresh", "collection", "logs", "stream-target", "benchmark")
 SHEET_VERBS = ("url", "open")           # active league's Google Sheet (from SHEET_ID)
-TELEMETRY_VERBS = ("record", "list", "export", "delete")   # GT7 telemetry recordings
+TELEMETRY_VERBS = ("record", "list", "export", "delete", "index")   # GT7 telemetry recordings
 GT7DATA_VERBS = ("update", "status")      # GT7 reference data
 APP_VERBS = ("launch", "quit")          # GUI app control for the Control Center
 APP_CONTROLLED = ("obs", "discord", "tailscale")   # GUI apps racecast can launch + quit
@@ -3286,10 +3287,22 @@ def telemetry_record_cmd(rest):
 
 
 def telemetry_list_cmd(_rest):
-    """List the active profile's recordings."""
+    """List the active profile's recordings. Lap count and duration come from a valid lap
+    index; only a recording without one is replayed."""
     import gt7_recording as gr
     rec_dir = _telemetry_rec_dir()
-    rows = gr.list_recordings(rec_dir, count_laps=True)
+    rows = gr.list_recordings(rec_dir)
+    base, bundled = _runtime_base_dir(), resource_path("assets/gt7")
+    version = _telemetry_data_version()
+    for row in rows:
+        idx = _telemetry_cached_brief(row["path"], base, bundled, version)
+        if idx is not None and idx.get("start_ts") is not None and idx.get("end_ts") is not None:
+            row["laps"], row["duration_s"] = len(idx["laps"]), idx["end_ts"] - idx["start_ts"]
+            continue
+        try:
+            row["laps"], row["duration_s"] = gr.replay_counts(row["path"])
+        except (gr.RecordingError, OSError):    # e.g. the relay finalised a .part meanwhile
+            row["laps"] = 0
     foreign = _foreign_relay_profile()
     note = f"note: the relay runs profile {foreign!r}, its recordings are not listed here"
     if not rows:
@@ -3308,6 +3321,26 @@ def telemetry_list_cmd(_rest):
     print(f"{len(rows)} recording(s), {total / 1e6:.1f} MB in {rec_dir}")
     if foreign:
         print(note)
+
+
+def telemetry_index_cmd(rest):
+    """Build the lap index of every closed recording of the active profile that has none."""
+    if rest:
+        sys.exit("usage: racecast telemetry index")
+    counts = {"built": 0, "failed": 0}
+
+    def report(stem, idx, exc):
+        if exc is not None:
+            counts["failed"] += 1
+            print(f"{stem}: not indexed ({_telemetry_reason(exc, stem)})", flush=True)
+        else:
+            counts["built"] += 1
+            print(f"{stem}: {len(idx['laps'])} laps", flush=True)
+    _telemetry_pool_indexes(_telemetry_rec_dir(), True, report=report)
+    print(f"{counts['built']} recording(s) indexed"
+          + (f", {counts['failed']} failed" if counts["failed"] else ""))
+    if counts["failed"]:
+        sys.exit(1)
 
 
 def telemetry_export_cmd(rest):
@@ -3538,9 +3571,48 @@ def telemetry_recordings_data():
                 "error": f"could not list telemetry recordings: {_telemetry_reason(exc)}"}
 
 
-def telemetry_laps_data(rec=None, session=None, track=None, car=None):
+def _telemetry_pool_indexes(rec_dir, build, only=None, report=None):
+    """(summary indexes, count of recordings without one) of the profile's closed
+    recordings, or only of the recording named `only`. With `build` a missing index is
+    built (seconds per recording), else it is counted. `report(stem, idx, exc)` sees
+    each build."""
+    import gt7_recording as gr
+    base, bundled = _runtime_base_dir(), resource_path("assets/gt7")
+    open_file, version = _relay_open_file(), _telemetry_data_version()
+    loaded, indexes, unindexed = [], [], 0
+
+    def dbs():
+        if not loaded:
+            loaded.append(_telemetry_dbs())
+        return loaded[0]
+    for row in gr.list_recordings(rec_dir):
+        if open_file and row["name"].startswith(open_file):
+            continue    # indexing a growing file would rebuild it on every request
+        stem = gr.recording_stem(row["path"])
+        if only is not None and stem != only:
+            continue
+        idx = _telemetry_cached_brief(row["path"], base, bundled, version)
+        if idx is None and not build:
+            unindexed += 1
+            continue
+        if idx is None:
+            try:
+                idx = _telemetry_index(row["path"], dbs, _telemetry_stamp(row["path"], version))
+            except Exception as exc:  # noqa: BLE001  one unreadable recording must not hide the others
+                if report:
+                    report(stem, None, exc)
+                continue
+            if report:
+                report(stem, idx, None)
+        indexes.append(idx)
+    return indexes, unindexed
+
+
+def telemetry_laps_data(rec=None, session=None, track=None, car=None, build=True):
     """One recording's laps (car None), or the counted laps comparable with a track and
-    car across the profile's recordings. Arguments are query strings. Never raises."""
+    car across the profile's recordings. Arguments are query strings. A pool without
+    `build` uses only recordings with a valid lap index and counts the rest in
+    `unindexed`. Never raises."""
     try:
         car_id = int(car) if car else None
         sess = int(session) if session else None
@@ -3570,24 +3642,11 @@ def telemetry_laps_data(rec=None, session=None, track=None, car=None):
         if track_id is None and (stem is None or sess is None):
             return {"ok": False, "error": "laps on an unknown track compare within one "
                                           "session: pass rec and session"}
-        open_file, version = _relay_open_file(), _telemetry_data_version()
-        loaded, indexes = [], []
-
-        def dbs():
-            if not loaded:
-                loaded.append(_telemetry_dbs())
-            return loaded[0]
-        for row in gr.list_recordings(rec_dir):
-            if open_file and row["name"].startswith(open_file):
-                continue    # indexing a growing file would rebuild it on every request
-            try:
-                stamp = _telemetry_stamp(row["path"], version)
-                indexes.append(_telemetry_index(row["path"], dbs, stamp))
-            except Exception:  # noqa: BLE001  one unreadable recording must not hide the others
-                continue
+        indexes, unindexed = _telemetry_pool_indexes(rec_dir, build,
+                                                     stem if track_id is None else None)
         laps = [dict(lap) for lap in gt7_laps.pool(indexes, track_id, car_id, rec=stem,
                                                    session=sess)]
-        return {"ok": True, "laps": laps,
+        return {"ok": True, "laps": laps, "unindexed": unindexed,
                 "best_sectors": gt7_laps.best_sectors(laps),
                 "theoretical_best": gt7_laps.theoretical_best(laps)}
     except Exception as exc:
@@ -5124,6 +5183,7 @@ DISPATCH = {
     ("sheet", "url"): sheet_url_cmd, ("sheet", "open"): sheet_open_cmd,
     ("telemetry", "record"): telemetry_record_cmd, ("telemetry", "list"): telemetry_list_cmd,
     ("telemetry", "export"): telemetry_export_cmd, ("telemetry", "delete"): telemetry_delete_cmd,
+    ("telemetry", "index"): telemetry_index_cmd,
     ("gt7-data", "update"): gt7_data_update_cmd, ("gt7-data", "status"): gt7_data_status_cmd,
     ("app", "launch"): app_launch_cmd, ("app", "quit"): app_quit_cmd,
 }

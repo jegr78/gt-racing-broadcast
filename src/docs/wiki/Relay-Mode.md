@@ -524,7 +524,9 @@ profile setting. Recordings land in `runtime/<profile>/telemetry-recordings/` (a
 packets unless `--all`) and `laps.csv` (one row per lap with GT7's lap time and
 whether the relay counted it) next to the recording. `--excel` writes a file a
 German Excel opens with a double click. `racecast telemetry delete <name>` removes
-a recording, its exported CSVs and its cached lap index.
+a recording, its exported CSVs and its cached lap index. `racecast telemetry index`
+builds the lap index of every closed recording that has none, which the Control
+Center's lap comparison otherwise does on first use.
 
 **Track recognition (solo POV).** After the first full lap the relay names the track and
 layout, including reverse layouts, from the car's positions, and the Director Panel shows
