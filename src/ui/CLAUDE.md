@@ -31,6 +31,19 @@ Loaded when working under `src/ui/`.
   maintainer tool that builds the zip. A font a league's design uses is copied into that
   profile's `overlay/fonts/` on save (`_materialize_overlay_fonts`), so `profile export`
   stays self-contained; the relay/canvas serve it locally (no broadcast-time CDN).
+- **Telemetry** (solo POV only: the nav item and the view carry `pov-only`): lap
+  comparison from the profile's GT7 recordings. `src/scripts/gt7_laps.py` builds a lap
+  index per recording (5 m traces, 200 m sectors), cached as `<stem>.laps.json` and
+  rebuilt when the recording's size/mtime or `gt7_data.data_version` change; the data
+  layer also memoises up to 64 index summaries per process (`_telemetry_index`). Data
+  functions `telemetry_*_data` in `src/racecast.py`; routes `/api/telemetry/recordings`,
+  `/api/telemetry/laps`, `/api/telemetry/lap`, `/api/telemetry/tracks`,
+  `/api/telemetry/learn`. The recording the relay is writing is listed but refused by
+  laps/lap/learn. `learn` only assigns a layout that has a downloaded racing line
+  (`TrackDB.has_downloaded_line`) and learns the line otherwise. Charts and map are
+  inline SVG in `control-center.html` (block "Telemetry view"). Demo data for
+  screenshots: `tools/make-demo-recording.py`. Tests: `tests/test_gt7_laps.py`,
+  `tests/test_racecast.py`, `tests/test_ui_server.py`.
 
 ## Per-league overlay override + visual builder (moved from the root CLAUDE.md)
 - **Per-league overlay (optional).** `profiles/<name>/overlay/hud.css` (+ an optional

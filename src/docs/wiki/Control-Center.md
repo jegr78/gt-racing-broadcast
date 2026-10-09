@@ -247,6 +247,46 @@ it as a downloadable attachment that recipients open in a browser.
 > **CLI alternative:** `racecast report` (generate into `runtime/<profile>/reports/`),
 > `racecast report send [FILE]` (send the newest or a given file to Discord).
 
+### Telemetry
+
+![Control Center: Telemetry lap comparison](images/cc-telemetry.png)
+
+Solo POV profiles only. The view reads the profile's GT7 telemetry recordings
+(`runtime/<profile>/telemetry-recordings/`, see [Relay mode](Relay-Mode)) and needs no
+running relay.
+
+- **Recordings and laps.** Pick a recording, newest first, to list its laps with time,
+  status (reference, counted, or not counted with the reason), car and track. The first
+  open replays the recording once and caches the result next to it as
+  `<stem>.laps.json`; later opens are instant until the recording or the GT7 track data
+  changes. The recording the relay is still writing shows as `(recording)`: it stays out
+  of every comparison, and the view analyses it only after the recording stops.
+- **Lap A and lap B.** Lap B is the lap you click. Lap A starts as the fastest counted
+  lap other than B with the same track and car across all recordings of the profile.
+  Both pickers list every comparable counted lap. When B has no such partner, lap A
+  reads "no other lap to compare" and the charts show B alone. Laps on an unknown track
+  compare only within their GT7 session.
+- **Charts.** Speed, throttle, brake, steering, gear and the delta of B against A over
+  lap distance. Below zero B is ahead, above zero behind. Hover to read both laps at one
+  point; the map shows where that point is.
+- **Track map and mini-sectors.** Lap A is the thin line; lap B is split into 200 m
+  mini-sectors, green where B is faster and red where it is slower. The table lists every
+  mini-sector for A and B, the gap and the best time of any comparable lap; its last row
+  adds the theoretical best, the sum of the best mini-sectors.
+- **Set track.** When racecast does not recognise the layout of a recording, or two
+  layouts fit, pick it from the list. racecast assigns the recording to that layout. For
+  a layout with a downloaded racing line, or the reverse of one, that is all. For any
+  other layout racecast also learns the line from the recording's longest counted lap,
+  so later recordings on it are recognised. A downloaded racing line always takes
+  precedence over a learned one. The note under the button says which of the two
+  happened.
+
+The racing lines are not part of the package. Until racecast has downloaded them
+(`racecast gt7-data update`, or the first relay start with telemetry), it recognises
+only layouts learned with Set track, and every other recording starts as track unknown.
+
+> **CLI alternative:** `racecast telemetry export <name>` writes the same laps as CSV.
+
 ### Help & Docs
 
 ![Control Center: Help & Docs](images/cc-help.png)

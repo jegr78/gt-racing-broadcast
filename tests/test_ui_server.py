@@ -2436,7 +2436,7 @@ await tick();
 console.log([multi, String(tmState.a), $('tm-a').options.length, $('tm-a').disabled,
              $('tm-sec-sub').textContent.replace(/\\u00b7/g, '-')].join('|'));""")
     if out is not None:
-        assert out.strip() == "R|1|1|null|1|true|200 m - no other lap to compare", \
+        assert out.strip() == "R|1|1|null|1|true|200 m - no other lap", \
             f"A is the fastest lap other than B, and a lone lap says so: {out!r}"
 
 

@@ -5473,7 +5473,7 @@ function tmRenderSectors() {
   const laps = tmState.pool ? tmState.pool.laps || [] : [];
   const alone = !laps.some(l => tmKey(l) !== tmKey(B));
   $('tm-sec-sub').textContent = (tmState.sectorM || 200) + ' m'
-    + (alone ? ' · no other lap to compare' : ' · best of ' + laps.length + ' laps');
+    + (alone ? ' · no other lap' : ' · best of ' + laps.length + ' laps');
 }
 function tmDelta(a, b) {
   const n = Math.min(a.trace.length, b.trace.length), out = [];
