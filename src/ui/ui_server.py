@@ -1034,8 +1034,8 @@ def make_handler(ctx):
                     return self._json({"ok": False, "error": str(exc)}, code=400)
                 job_id, err = ctx["jobs"].start(name, argv)
                 if err:
-                    return self._json({"ok": False, "error": err,
-                                       "job_id": ctx["jobs"].running(name)}, code=409)
+                    return self._json({"ok": False, "error": err, "job_id": job_id},
+                                      code=409)
                 return self._json({"ok": True, "job_id": job_id})
             if path == "/api/quit":
                 self._json({"ok": True})
