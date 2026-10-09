@@ -341,6 +341,57 @@ def t_telemetry_loop_feeds_the_recorder():
     assert got == [("~", 0x158)] * 3, got
 
 
+def t_telemetry_loop_records_a_packet_the_parser_rejects():
+    import socket as _socket
+    import threading as _t
+    from test_gt7_fixture import EXT_TCS_HEX
+    ps_ip = "100.64.0.7"
+    stop = _t.Event()
+    packets = [bytes.fromhex(EXT_TCS_HEX)] * 3
+    got = []
+
+    class FakeRecorder:
+        def put(self, wall_ts, kind, plain):
+            got.append(kind)
+
+    class FakeSock:
+        def __init__(self, *a, **kw): pass
+        def setsockopt(self, *a): pass
+        def bind(self, addr): pass
+        def settimeout(self, s): pass
+        def close(self): pass
+        def sendto(self, data, addr): pass
+        def recvfrom(self, n):
+            if packets:
+                return packets.pop(), (ps_ip, 33740)
+            stop.set()
+            raise _socket.timeout()
+
+    class BrokenStore(m.gt7_telemetry.TelemetryStore):
+        def update(self, pkt, now):
+            raise ValueError("parser or engine bug")
+
+    store = BrokenStore(None, recorder=FakeRecorder())
+    real, wait = m.socket.socket, stop.wait
+    m.socket.socket = FakeSock
+    stop.wait = lambda *_a: False
+    try:
+        m._telemetry_loop(store, ps_ip, stop)
+    finally:
+        m.socket.socket = real
+        stop.wait = wait
+    assert got == ["~"] * 3, f"the raw packet is recorded before the parser runs: {got}"
+
+
+def t_relay_starts_telemetry_side_effects_only_after_the_control_port_bind():
+    import inspect
+    src = inspect.getsource(m.main)
+    bound = src.index("loopback_bind_failed(")
+    for call in ("finalize_partials(", "target=_telemetry_loop", "target=_gt7_data_watch"):
+        assert src.index(call) > bound, \
+            f"{call} must wait for the bind: a losing second relay must not touch the live one"
+
+
 def t_telemetry_store_record_swallows_a_raising_recorder():
     # A bad recorder (its put() raises) must never stop the UDP telemetry loop.
     class BoomRecorder:

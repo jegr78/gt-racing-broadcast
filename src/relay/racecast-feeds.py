@@ -12458,8 +12458,8 @@ def _telemetry_loop(store, ps_ip, stop_evt, clock=time.monotonic):
                 continue
             heartbeat.on_packet(kind, clock())
             now_wall = time.time()
-            store.update(gt7_telemetry.parse_packet(plain), now_wall)
             store.record(now_wall, kind, plain)
+            store.update(gt7_telemetry.parse_packet(plain), now_wall)
         except OSError as e:
             tlog.warning("telemetry socket error: %s. Reopening", e)
             try:
@@ -13057,8 +13057,6 @@ def main():
         gt7_bundled = os.path.join(assets_dir, "gt7")
         runtime_base = gt7_runtime_base(args.runtime_base, runtime, bool(args.runtime_dir))
         rec_dir = os.path.join(runtime, "telemetry-recordings")
-        for name in gt7_recording.finalize_partials(rec_dir):
-            LOG.info("telemetry recording %s finalised (left open by the previous relay)", name)
         recorder = gt7_recording.RecordControl(
             rec_dir, os.path.join(runtime, "telemetry-record.json"),
             gt7_recording.record_default(os.environ),
@@ -13071,15 +13069,6 @@ def main():
             cars=gt7_cars.CarDB(gt7_data.cars_dir(runtime_base, gt7_bundled)),
             tracks=gt7_tracks.TrackDB.load(runtime_base, gt7_bundled),
             recorder=recorder)
-        threading.Thread(target=_telemetry_loop,
-                         args=(telemetry_store, args.gt7_ps_ip, stop_evt), daemon=True).start()
-        LOG.info("GT7 telemetry listener started (bind 0.0.0.0:33740, ps_ip=%s)",
-                args.gt7_ps_ip or "<discovery>")
-        LOG.info("GT7 telemetry recording %s", "on" if recorder.status()["active"] else "off")
-        threading.Thread(target=_gt7_data_watch,
-                         args=(telemetry_store, runtime_base, gt7_bundled, stop_evt,
-                               gt7_data_update_enabled(os.environ)),
-                         daemon=True).start()
 
     # Broadcast-chat reader (#294): resolve the channel's live videoId set and
     # poll each stream's chat. Its own ~30 s resolve cadence, not args.poll, because
@@ -13165,6 +13154,22 @@ def main():
                  f"Another relay is probably already running. Stop it first "
                  f"('racecast relay stop'), then check 'racecast status' / 'racecast preflight' "
                  f"to see what holds the port.")
+
+    # Only a relay that owns the control port may touch the recordings, UDP 33740 and
+    # the GT7 data; a losing second start would rename the live relay's open file.
+    if telemetry_store is not None:
+        for name in gt7_recording.finalize_partials(rec_dir):
+            LOG.info("telemetry recording %s finalised (left open by the previous relay)", name)
+        threading.Thread(target=_telemetry_loop,
+                         args=(telemetry_store, args.gt7_ps_ip, stop_evt), daemon=True).start()
+        LOG.info("GT7 telemetry listener started (bind 0.0.0.0:33740, ps_ip=%s)",
+                 args.gt7_ps_ip or "<discovery>")
+        LOG.info("GT7 telemetry recording %s",
+                 "on" if telemetry_store.recorder.status()["active"] else "off")
+        threading.Thread(target=_gt7_data_watch,
+                         args=(telemetry_store, runtime_base, gt7_bundled, stop_evt,
+                               gt7_data_update_enabled(os.environ)),
+                         daemon=True).start()
 
     def shutdown(*_):
         # IMPORTANT: do NOT call shutdown() from the thread running serve_forever()
