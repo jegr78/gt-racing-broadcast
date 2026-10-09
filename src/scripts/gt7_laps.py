@@ -59,8 +59,8 @@ def sectors(trace, length_m, step_m=SECTOR_M):
 
 def best_sectors(laps):
     """Per sector the fastest time over the given laps, from their sector times or traces.
-    The last sector is None when the laps end at different lengths: its stub then covers
-    a different distance per lap."""
+    When the laps end at different lengths, every sector from the shortest lap's last
+    (its stub) onward is None: those cover a different distance per lap."""
     used = [lap for lap in laps if "sectors" in lap or lap.get("trace")]
     per_lap = [lap["sectors"] if "sectors" in lap else sectors(lap["trace"], lap_length_m(lap))
                for lap in used]
@@ -70,14 +70,16 @@ def best_sectors(laps):
         vals = [s[i] for s in per_lap if i < len(s) and s[i] is not None]
         best.append(min(vals) if vals else None)
     if best and len({lap_length_m(lap) for lap in used} - {0.0}) > 1:
-        best[-1] = None
+        cut = min((len(s) for s in per_lap if s), default=n) - 1
+        best[cut:] = [None] * (n - cut)
     return best
 
 
 def theoretical_best(laps):
     """Sum of the best sectors over the given laps, or None when a sector has no time
-    (also when the laps differ in length, see best_sectors). Clamped to the fastest lap's own time_s: rounding every sector to the millisecond
-    can sum a few ms above the lap that actually set them all."""
+    (also when the laps differ in length, see best_sectors). Clamped to the fastest lap's
+    own time_s: rounding every sector to the millisecond can sum a few ms above the lap
+    that actually set them all."""
     best = best_sectors(laps)
     if not best or any(v is None for v in best):
         return None
@@ -122,7 +124,8 @@ def _read_cache(path, stamp):
 
 
 def _resumable(path, data, stamp):
-    """True when the stale cache `data` has a resume point the recording still matches."""
+    """True when the stale cache `data` has a consistent resume point that the recording
+    still matches: same header, offset past it, unchanged bytes before the offset."""
     if (data is None or data.get("version") != INDEX_VERSION
             or data.get("data_version") != stamp["data_version"]):
         return False
@@ -130,33 +133,49 @@ def _resumable(path, data, stamp):
     if not isinstance(point, dict):
         return False
     try:
+        rec = gt7_recording.Recording(path)
         offset, check = point["offset"], bytes.fromhex(point["check"])
-        if not isinstance(offset, int) or offset > stamp["size"] or len(check) > offset:
+        n = point["laps"]
+        if (not isinstance(offset, int) or not rec.header_end <= offset <= stamp["size"]
+                or point["started"] != rec.header.get("started", "")
+                or not isinstance(n, int) or n != len(point["raw_laps"])
+                or len(data["laps"]) < n or len(check) > offset):
             return False
         with open(path, "rb") as fh:
             fh.seek(offset - len(check))
             return fh.read(len(check)) == check
-    except (OSError, KeyError, TypeError, ValueError):
+    except (OSError, gt7_recording.RecordingError, KeyError, TypeError, ValueError):
         return False
+
+
+def lookup(path, runtime_base, bundled=None):
+    """(the cached index while recording, track data and format are unchanged, else None;
+    the loaded cache file to hand to index() as `old`, so a stale one is read once)."""
+    try:
+        stamp = _stamp(path, runtime_base, bundled)
+    except OSError:
+        return None, None
+    data = _load_cache(path)
+    return (_public(data), None) if _valid(data, stamp) else (None, data)
 
 
 def cached(path, runtime_base, bundled=None):
     """The cached index while recording, track data and format are unchanged, else None."""
-    try:
-        stamp = _stamp(path, runtime_base, bundled)
-    except OSError:
-        return None
-    return _read_cache(path, stamp)
+    return lookup(path, runtime_base, bundled)[0]
 
 
-def index(path, track_db, cars, runtime_base, key=None, bundled=None):
+_READ = object()
+
+
+def index(path, track_db, cars, runtime_base, key=None, bundled=None, old=_READ):
     """The lap index of one recording, from the cache when still valid. `key` is
-    "<profile>/<stem>", the learned track assignment's key."""
+    "<profile>/<stem>", the learned track assignment's key; `old` is the cache file
+    lookup() already loaded."""
     try:
         stamp = _stamp(path, runtime_base, bundled)
     except OSError as e:
         raise gt7_recording.RecordingError(f"{path}: {e}") from e
-    old = _load_cache(path)
+    old = _load_cache(path) if old is _READ else old
     if _valid(old, stamp):
         return _public(old)
     data = None
@@ -378,8 +397,6 @@ def _build(path, track_db, cars, key, old=None):
     matches) only the bytes after that point are replayed."""
     rec = gt7_recording.Recording(path)
     replay = _Replay(old["resume"] if old is not None else None)
-    if old is not None and old["resume"]["started"] != rec.header.get("started", ""):
-        raise ValueError("another recording under the same name")
     replay.run(rec)
     laps = replay.laps
     by_session = gt7_recording.session_tracks(laps, track_db, key)

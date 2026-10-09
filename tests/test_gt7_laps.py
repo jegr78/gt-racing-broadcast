@@ -314,7 +314,12 @@ def t_resume_falls_back_to_a_full_build_when_it_cannot_continue():
         size = os.path.getsize(src)
         live = os.path.join(d, "live")
         part = os.path.join(live, os.path.basename(src) + gt7_recording.PART)
-        for spoil in ("data", "prefix", "blob"):
+        spoils = {"blob": lambda r, data: r.update(eng={"garbage": True}),
+                  "inside the header": lambda r, data: r.update(offset=0, check=""),
+                  "fewer cached laps": lambda r, data: data.update(laps=data["laps"][:1]),
+                  "lap count": lambda r, data: r.update(laps=r["laps"] + 1),
+                  "another recording": lambda r, data: r.update(started="2001-01-01T00:00:00")}
+        for spoil in ("data", "prefix", *spoils):
             if os.path.isdir(live):
                 for name in os.listdir(live):
                     os.remove(os.path.join(live, name))
@@ -329,8 +334,8 @@ def t_resume_falls_back_to_a_full_build_when_it_cannot_continue():
                 with open(part, "r+b") as fh:
                     fh.seek(data["resume"]["offset"] - 12)
                     fh.write(b"\x01" * 4)        # a byte the cache already covered changed
-            elif spoil == "blob":
-                data["resume"]["eng"] = {"garbage": True}
+            elif spoil in spoils:
+                spoils[spoil](data["resume"], data)
                 with open(gl.cache_path(part), "w", encoding="utf-8") as fh:
                     json.dump(data, fh)
             version = "v2" if spoil == "data" else "v1"
@@ -338,6 +343,96 @@ def t_resume_falls_back_to_a_full_build_when_it_cannot_continue():
                 got = _without_stamp(_index(part, version=version))
             assert starts[0] is None, f"{spoil}: a full replay from the start: {starts}"
             assert got == _cold_copy(part, d, version), spoil
+
+
+def t_resume_state_covers_every_engine_attribute():
+    hud_only = {"_trace", "_trace_last_t", "_tyre_hist", "_delta_hist", "track"}
+    wiring = {"on_lap", "track_db"}
+    attrs = set(vars(tm.TelemetryEngine()))
+    assert attrs == set(tm.TelemetryEngine.RESUMED_ATTRS) | hud_only | wiring, \
+        f"classify new engine attributes as resumed or HUD-only: {attrs ^ (set(tm.TelemetryEngine.RESUMED_ATTRS) | hud_only | wiring)}"
+    import json
+    eng = tm.TelemetryEngine()
+    for k in range(600):
+        eng.update(tm.parse_packet(_pkt(1 + k // 200, 50.0, 2 * math.pi * (k % 200) / 200)),
+                   1000.0 + k * 0.1)
+    back = tm.TelemetryEngine()
+    back.restore(json.loads(json.dumps(eng.resume_state())))
+    norm = lambda v: json.loads(json.dumps(v, default=lambda o: {k: getattr(o, k) for k in o.__slots__}))
+    for name in tm.TelemetryEngine.RESUMED_ATTRS:
+        assert norm(getattr(back, name)) == norm(getattr(eng, name)), f"{name} survives the resume"
+
+
+def _session_pkt(lap, speed, angle, radius, last_ms, best_ms, flags):
+    b = bytearray(_pkt(lap, speed, angle, last_ms))
+    struct.pack_into("<3f", b, tm.OFF_POS, radius * math.cos(angle), 0.0, radius * math.sin(angle))
+    struct.pack_into("<i", b, tm.OFF_BEST_MS, best_ms)
+    struct.pack_into("<H", b, tm.OFF_FLAGS, flags)
+    return bytes(b)
+
+
+def _write_sessions(rec_dir, rng):
+    """Session 1 starts on an unknown layout and moves onto the ring (its track changes),
+    session 2 resets the lap counter on the ring, session 3 is unknown; 1 % paused packets
+    and jittered timestamps."""
+    w = gt7_recording.RecordingWriter(rec_dir, "Solo", "dev", flush_s=0.05, queue_max=0)
+    plan = [(1200.0 / (2 * math.pi), [20.0, 21.0]), (R, [20.0, 19.0, 18.5]),
+            (R, [20.0, 19.5, 19.0]), (1500.0 / (2 * math.pi), [25.0, 24.0])]
+    t, lap, last_ms, best = 1_700_000_000.0, 1, -1, -1
+    for si, (radius, secs_list) in enumerate(plan):
+        if si >= 2:
+            lap, last_ms, best = 1, -1, -1
+        tail = si == len(plan) - 1
+        for li, secs in enumerate(secs_list + ([secs_list[-1]] if tail else [])):
+            n = rng.randint(120, 160)
+            dt, speed = secs / n, 2 * math.pi * radius / secs
+            for k in range(15 if tail and li == len(secs_list) else n):
+                if k == 5 and li >= 1:
+                    last_ms = round(secs_list[li - 1] * 1000)
+                    best = last_ms if best < 0 else min(best, last_ms)
+                flags = tm.FLAG_ON_TRACK | (tm.FLAG_PAUSED if rng.random() < 0.01 else 0)
+                w.put(t, "~", _session_pkt(lap, speed, 2 * math.pi * k / n, radius, last_ms,
+                                           best, flags))
+                t += dt * (1 + rng.uniform(-0.05, 0.05))
+            lap += 1
+    w.close()
+    return w.path
+
+
+def t_resume_matches_a_cold_build_across_sessions_and_a_track_change():
+    import random
+    rng = random.Random(7)
+    calls = {"resumed": 0, "fallback": 0}
+    real = gl._build
+
+    def spy(path, track_db, cars, key, old=None):
+        try:
+            out = real(path, track_db, cars, key, old)
+        except Exception:
+            calls["fallback"] += old is not None
+            raise
+        calls["resumed"] += old is not None
+        return out
+    with tempfile.TemporaryDirectory() as d:
+        src = _write_sessions(os.path.join(d, "src"), rng)
+        size = os.path.getsize(src)
+        live = os.path.join(d, "live")
+        os.makedirs(live)
+        part = os.path.join(live, os.path.basename(src) + gt7_recording.PART)
+        gl._build = spy
+        try:
+            for cut in (0.12, 0.21, 0.3, 0.47, 0.55, 0.71, 0.86, 1.0):
+                _grow(src, part, int(size * cut) - (3 if cut < 1 else 0))
+                got = _without_stamp(_index(part))
+                gl._build = real
+                want = _cold_copy(part, d, "v1")
+                gl._build = spy
+                assert got == dict(want, name=got["name"]), f"resumed != cold at {cut:.0%}"
+        finally:
+            gl._build = real
+        assert {len({lap["session"] for lap in got["laps"]})} == {3}, "three GT7 sessions"
+        assert calls["resumed"] >= 4 and calls["fallback"] >= 1, \
+            f"both the tail replay and the track-change fallback ran: {calls}"
 
 
 def t_index_computes_the_data_version_once():
@@ -529,6 +624,17 @@ def t_best_sectors_reads_the_sectors_of_a_summary():
     assert gl.best_sectors(brief) == gl.best_sectors([a, b]) == [3.5, 4.0, 4.0, 4.0, 3.8], \
         "a lap without its trace still has its sector times"
     assert gl.theoretical_best(brief) == 19.3
+
+
+def t_unequal_sector_counts_blank_every_sector_from_the_shortest_stub_on():
+    a = {"trace": _trace(4.0, 4.0, 4.0, 4.0, 4.0)}
+    b = {"trace": _trace(3.5, 3.5, 3.5, 3.0, 3.0)[:-4 - 40]}  # ends at 780 m: 4 sectors, a 180 m stub
+    for lap in (a, b):
+        lap["sectors"] = gl.sectors(lap["trace"], gl.lap_length_m(lap))
+        lap["length_m"] = gl.lap_length_m(lap)
+    assert len(b["sectors"]) == 4 and b["length_m"] == 780.0, b["length_m"]
+    assert gl.best_sectors([a, b]) == [3.5, 3.5, 3.5, None, None], \
+        "the 180 m stub must not count as the best of a full 200 m sector"
 
 
 def t_unequal_lap_lengths_blank_the_last_sector_and_the_theoretical_best():

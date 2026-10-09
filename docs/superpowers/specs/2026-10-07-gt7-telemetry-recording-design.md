@@ -406,6 +406,8 @@ override.
   only the bytes after that point; any doubt falls back to a full build. A growing
   `.part` that was indexed once, by a report or the Control Center, then costs seconds
   instead of a full replay.
+  Any change to the engine's lap verdicts or to the resume state bumps `INDEX_VERSION`,
+  so a resumed index never mixes laps from two code versions.
 - Per lap: the `laps.csv` fields plus `rec` (recording stem), `track_id`, `car_id`,
   `car`, `tyre_avg_c` (mean surface temperature per wheel over the lap), and `trace`:
   the lap resampled every 5 m of `lap_dist_m` with `t`, `speed_kmh`,

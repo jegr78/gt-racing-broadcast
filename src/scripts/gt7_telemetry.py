@@ -318,6 +318,12 @@ class TelemetryEngine:
     the fastest clean completed lap, stored as time-vs-distance samples.
     """
 
+    # What lap records depend on, carried by resume_state(); every other attribute
+    # feeds only the HUD or is wiring.
+    RESUMED_ATTRS = ("session", "_lap_num", "_last", "_acc", "_ref", "_lap_time_sum",
+                     "_lap_time_n", "_lap_fuel_sum", "_lap_fuel_n", "_session_dist_m",
+                     "_top_speed")
+
     def __init__(self):
         self._last = None                 # last GT7Packet
         self._lap_num = None

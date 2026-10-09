@@ -912,6 +912,36 @@ def t_telemetry_data_functions_catch_any_error_without_paths():
                 "one unreadable recording does not hide the pool"
 
 
+def t_telemetry_reason_keeps_the_path_free_reason_of_a_recording_error():
+    import gt7_recording
+    with tempfile.TemporaryDirectory() as td:
+        f = os.path.join(td, "new.gt7rec")
+        with open(f, "w", encoding="utf-8") as fh:
+            fh.write('{"format": "racecast-gt7rec", "version": 99}\n')
+        try:
+            gt7_recording.Recording(f)
+            raise AssertionError("a newer format must not be read")
+        except gt7_recording.RecordingError as e:
+            text = m._telemetry_reason(e, "new.gt7rec")
+        assert td not in text and "update racecast" in text and "new.gt7rec" in text, text
+
+
+def t_telemetry_full_index_reads_a_stale_cache_once():
+    import gt7_laps
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        path = tgl.write_circle_recording(rec_dir)
+        m._telemetry_full_index(path)
+        with open(path, "ab") as fh:
+            fh.write(b"\x00")                       # grown: the cache is stale now
+        loads, real = [], gt7_laps._load_cache
+        gt7_laps._load_cache = lambda p: loads.append(p) or real(p)
+        try:
+            assert m._telemetry_full_index(path)["laps"]
+        finally:
+            gt7_laps._load_cache = real
+        assert len(loads) == 1, f"one read of the stale cache per index: {len(loads)}"
+
+
 def t_telemetry_reason_names_no_path():
     import gt7_recording
     with tempfile.TemporaryDirectory() as td:

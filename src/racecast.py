@@ -3450,11 +3450,11 @@ def _telemetry_load(path, dbs, stamp=None):
     import gt7_laps
     base, bundled = _runtime_base_dir(), resource_path("assets/gt7")
     stamp = stamp or _telemetry_stamp(path)
-    idx = gt7_laps.cached(path, base, bundled)
+    idx, old = gt7_laps.lookup(path, base, bundled)
     if idx is None:
         tracks, cars = dbs() if callable(dbs) else dbs or _telemetry_dbs()
         idx = gt7_laps.index(path, tracks, cars, base, key=_telemetry_track_key(path),
-                             bundled=bundled)
+                             bundled=bundled, old=old)
     return idx, _telemetry_memo_put(path, stamp, idx)
 
 
@@ -3487,6 +3487,9 @@ def _telemetry_reason(exc, rec=None):
     if isinstance(exc, OSError):
         return exc.strerror or type(exc).__name__
     if isinstance(exc, gr.RecordingError):
+        reason = getattr(exc, "reason", None)
+        if reason:
+            return f"{rec}: {reason}" if rec else reason
         return f"{rec} is not a readable recording" if rec else "not a readable recording"
     if isinstance(exc, ValueError):
         return str(exc)

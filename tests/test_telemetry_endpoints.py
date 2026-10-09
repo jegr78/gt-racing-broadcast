@@ -372,15 +372,16 @@ def t_telemetry_loop_records_a_packet_the_parser_rejects():
             raise ValueError("parser or engine bug")
 
     store = BrokenStore(None, recorder=FakeRecorder())
-    real, wait = m.socket.socket, stop.wait
+    real, wait, waits = m.socket.socket, stop.wait, []
     m.socket.socket = FakeSock
-    stop.wait = lambda *_a: False
+    stop.wait = lambda *a: waits.append(a) or wait(*a)
     try:
         m._telemetry_loop(store, ps_ip, stop)
     finally:
         m.socket.socket = real
         stop.wait = wait
     assert got == ["~"] * 3, f"the raw packet is recorded before the parser runs: {got}"
+    assert waits == [], f"a rejected packet must not pause the loop for a second: {waits}"
 
 
 def t_relay_starts_telemetry_side_effects_only_after_the_control_port_bind():

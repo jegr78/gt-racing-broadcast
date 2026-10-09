@@ -12426,6 +12426,7 @@ def _telemetry_loop(store, ps_ip, stop_evt, clock=time.monotonic):
     sock = None
     heartbeat = gt7_telemetry.HeartbeatPolicy()
     dest = ps_ip
+    packet_failed = False
     while not stop_evt.is_set():
         try:
             if sock is None:
@@ -12459,7 +12460,12 @@ def _telemetry_loop(store, ps_ip, stop_evt, clock=time.monotonic):
             heartbeat.on_packet(kind, clock())
             now_wall = time.time()
             store.record(now_wall, kind, plain)
-            store.update(gt7_telemetry.parse_packet(plain), now_wall)
+            try:
+                store.update(gt7_telemetry.parse_packet(plain), now_wall)
+            except Exception as e:  # noqa: BLE001  a bad packet must not pause the loop, it is recorded already
+                if not packet_failed:
+                    tlog.error("telemetry packet rejected (logged once): %s", e)
+                packet_failed = True
         except OSError as e:
             tlog.warning("telemetry socket error: %s. Reopening", e)
             try:

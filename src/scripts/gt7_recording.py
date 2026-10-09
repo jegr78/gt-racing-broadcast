@@ -37,7 +37,12 @@ _DONE = object()              # close() sentinel: wakes the writer without waiti
 
 
 class RecordingError(Exception):
-    """A file that is not a readable racecast telemetry recording."""
+    """A file that is not a readable racecast telemetry recording; `reason` says why
+    without the path."""
+
+    def __init__(self, message, reason=None):
+        super().__init__(message)
+        self.reason = reason
 
 
 def _encode(wall_ts, kind_byte, payload):
@@ -214,18 +219,20 @@ class Recording:
                 line = fh.readline()
                 self._offset = fh.tell()
         except OSError as e:
-            raise RecordingError(f"{path}: {e}") from e
+            raise RecordingError(f"{path}: {e}", _sanitize_error(e)) from e
+        self.header_end = self._offset
         try:
             header = json.loads(line.decode("utf-8"))
         except (UnicodeDecodeError, ValueError):
             header = None
         if not isinstance(header, dict) or header.get("format") != FORMAT:
-            raise RecordingError(f"{path}: not a racecast telemetry recording")
+            raise RecordingError(f"{path}: not a racecast telemetry recording",
+                                 "not a racecast telemetry recording")
         version = header.get("version")
         if not isinstance(version, int) or version > VERSION:
-            raise RecordingError(
-                f"{path}: format version {version} is newer than this racecast "
-                f"reads ({VERSION}); update racecast")
+            reason = (f"format version {version} is newer than this racecast reads "
+                      f"({VERSION}); update racecast")
+            raise RecordingError(f"{path}: {reason}", reason)
         self.header = header
 
     def packets(self, start=None):
