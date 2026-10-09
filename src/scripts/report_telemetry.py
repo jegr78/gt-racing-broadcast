@@ -53,9 +53,12 @@ def _group(key, members):
     rec, session = where or (None, None)
     first = members[0][1]
     valid = [(row, lap) for row, lap in members if row["counted"] and row["time_s"] is not None]
-    best_row, best = min(valid, key=lambda m: m[0]["time_s"]) if valid else (None, None)
+    best_row = min(valid, key=lambda m: m[0]["time_s"])[0] if valid else None
     times = [row["time_s"] for row, _lap in valid]
     timed = [lap for _row, lap in valid if lap.get("sectors")]
+    # a different sector count (lengths straddling a sector boundary) makes sectors incomparable
+    sector_counts = {len(lap["sectors"]) for lap in timed}
+    theoretical_s = gt7_laps.theoretical_best(timed) if timed and len(sector_counts) == 1 else None
     fuel = [lap["fuel_used_l"] for _row, lap in valid if lap.get("fuel_used_l") is not None]
     tyres = [lap["tyre_avg_c"] for _row, lap in valid
              if len(lap.get("tyre_avg_c") or []) == 4 and any(lap["tyre_avg_c"])]
@@ -67,9 +70,10 @@ def _group(key, members):
         "best_s": best_row["time_s"] if best_row else None,
         "best_lap": ({"n": best_row["n"], "session": best_row["session"],
                       "lap": best_row["lap"], "rec": best_row["rec"]} if best_row else None),
-        "theoretical_s": gt7_laps.theoretical_best(timed) if timed else None,
+        "theoretical_s": theoretical_s,
         "consistency_s": statistics.pstdev(times) if len(times) >= 2 else None,
-        "fuel_per_lap_l": statistics.fmean(fuel) if fuel else None,
+        # all-zero fuel means consumption is off, not a real 0.0 L lap
+        "fuel_per_lap_l": statistics.fmean(fuel) if fuel and any(fuel) else None,
         "tyre_avg_c": ([statistics.fmean(t[i] for t in tyres) for i in range(4)]
                        if tyres else None),
         "trend": [{"n": row["n"], "lap": row["lap"], "time_s": row["time_s"],

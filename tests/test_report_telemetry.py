@@ -33,6 +33,21 @@ def _trace(first_mps, second_mps):
     return pts
 
 
+def _straight_trace(length_m, speed_mps, step=5.0):
+    """A straight-line trace of length_m at a constant speed, ending exactly at
+    length_m like a counted lap's trace (not necessarily on the step grid)."""
+    pts, d = [], 0.0
+    while d < length_m:
+        pts.append({"d": d, "t": d / speed_mps, "speed_kmh": speed_mps * 3.6,
+                    "throttle": 100, "brake": 0, "steer_deg": 0.0, "gear": 5,
+                    "x": d, "z": 0.0})
+        d += step
+    pts.append({"d": length_m, "t": length_m / speed_mps, "speed_kmh": speed_mps * 3.6,
+                "throttle": 100, "brake": 0, "steer_deg": 0.0, "gear": 5,
+                "x": length_m, "z": 0.0})
+    return pts
+
+
 def _lap(n, start, trace=None, status="counted", reason="", fuel=2.0,
          tyres=(80.0, 81.0, 70.0, 71.0), track_id=101, car_id=3424,
          car="Porsche 911 RSR", relay=None, rec=REC, session=1):
@@ -174,6 +189,52 @@ def t_summary_line():
 def t_partial_flag_from_an_open_recording():
     assert rtel.telemetry_block([dict(session_index(), partial=True)], WINDOW)["partial"] is True
     assert block()["partial"] is False
+
+
+def t_theoretical_best_none_when_sector_counts_differ():
+    """An unknown track closes each counted lap at its own distance; lengths straddling
+    a 200 m boundary give the laps a different sector count, so no theoretical best."""
+    idx = {"rec": REC, "started": "2026-10-07T20:00:00+02:00",
+           "start_ts": 1000.0, "end_ts": 1100.0, "track": None,
+           "laps": [_lap(1, 10.0, _straight_trace(1998.0, 50.0), track_id=None),
+                    _lap(2, 60.0, _straight_trace(2000.2, 49.0), track_id=None)]}
+    g = rtel.telemetry_block([idx], WINDOW)["groups"][0]
+    assert g["theoretical_s"] is None, \
+        "differing sector counts must not produce a theoretical best below the best lap"
+
+
+def t_fuel_per_lap_none_when_consumption_is_off():
+    idx = session_index()
+    for lap in idx["laps"][:3]:
+        lap["fuel_used_l"] = 0.0
+    g = rtel.telemetry_block([idx], WINDOW)["groups"][0]
+    assert g["fuel_per_lap_l"] is None, "all-zero fuel means consumption is off, not 0.00 L/lap"
+
+
+def t_fuel_per_lap_none_without_any_fuel_samples():
+    idx = session_index()
+    for lap in idx["laps"]:
+        lap["fuel_used_l"] = None
+    g = rtel.telemetry_block([idx], WINDOW)["groups"][0]
+    assert g["fuel_per_lap_l"] is None, "no fuel samples at all means no fuel figure either"
+
+
+def t_best_lap_tiebreak_keeps_the_earliest():
+    idx = {"rec": REC, "started": "2026-10-07T20:00:00+02:00",
+           "start_ts": 1000.0, "end_ts": 1200.0, "track": None,
+           "laps": [_lap(1, 10.0, _trace(50.0, 45.0)), _lap(2, 70.0, _trace(50.0, 45.0))]}
+    g = rtel.telemetry_block([idx], WINDOW)["groups"][0]
+    assert g["best_lap"]["n"] == 1, "a tie on best time keeps the earliest lap in driving order"
+
+
+def t_theoretical_best_skips_a_counted_lap_without_sectors():
+    idx = {"rec": REC, "started": "2026-10-07T20:00:00+02:00",
+           "start_ts": 1000.0, "end_ts": 1200.0, "track": None,
+           "laps": [_lap(1, 10.0, _trace(50.0, 50.0)), _lap(2, 70.0, _trace(45.0, 45.0))]}
+    idx["laps"][1]["sectors"] = []
+    g = rtel.telemetry_block([idx], WINDOW)["groups"][0]
+    assert abs(g["theoretical_s"] - 40.0) < 1e-6, \
+        "a counted lap without sectors drops out, the theoretical best still comes from the rest"
 
 
 def run():
