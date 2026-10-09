@@ -25,7 +25,7 @@
   - `gt7_laps.index(path, track_db, cars, runtime_base) -> {"rec", "started", "start_ts", "end_ts", "track", "laps"}`; each lap has `session, lap, start_t_s, end_t_s, gt7_time_s, relay_time_s, status, reason, fuel_used_l, top_speed_kmh, car, rec, track_id, car_id, tyre_avg_c, trace`; `trace` points carry `d, t, speed_kmh, throttle, brake, steer_deg, gear, x, z` every 5 m. The track is decided per GT7 session, so each lap carries its own `track_id`; a recording can span several tracks. The recording-level `track` field is not used here.
   - `gt7_laps.sectors(trace, length_m, step_m=200)`, `gt7_laps.best_sectors(laps)`, `gt7_laps.theoretical_best(laps)`.
   - `gt7_tracks.TrackDB.load(runtime_base, bundled=None)` and `TrackDB.name(official_id) -> {id, track, layout, reverse, country, length_m, official_name} | None`; `gt7_cars.CarDB(directory)`.
-  - Part 3 helpers in `racecast.py`: `_telemetry_dbs() -> (TrackDB, CarDB)` and `_telemetry_index(path, dbs=None)`, which passes the learned-assignment key `"<profile>/<stem>"` and the bundled dir to `gt7_laps.index`. The report uses these two, so it names cars and tracks exactly as the Control Center does.
+  - Part 3 helpers in `racecast.py`: `_telemetry_dbs() -> (TrackDB, CarDB)` and `_telemetry_full_index(path, dbs=None)` (laps with `trace` and `points`, read from the lap-index cache file, built when missing or stale; `_telemetry_index` returns the memoised summary form without traces), which passes the learned-assignment key `"<profile>/<stem>"` and the bundled dir to `gt7_laps.index`. The report uses these two, so it names cars and tracks exactly as the Control Center does.
   - `racecast.py`: `_runtime_base_dir()`, `resource_path("assets/gt7")`, `_profile_has_telemetry()` (line 5744), `_telemetry_rec_dir()` (part 1).
 - Decisions the tests pin:
   - A lap is **counted** when `status` is `"reference"` or `"counted"`. A reference lap is a valid lap that set a new best, so it belongs in every figure.
@@ -487,7 +487,7 @@ def _sector_map(best, pool):
     trace = best.get("trace") or []
     if len(trace) < 2 or not pool:
         return None
-    own = gt7_laps.sectors(trace, trace[-1]["d"], step_m=SECTOR_M)
+    own = gt7_laps.sectors(trace, gt7_laps.lap_length_m(best), step_m=SECTOR_M)
     ref = gt7_laps.best_sectors(pool)
     n = min(len(own), len(ref))
     if not n:
@@ -960,10 +960,13 @@ def _report_telemetry(frm, to):
         if not rows:
             return None
         track_db, cars = _telemetry_dbs()
+        open_file = _relay_open_file()
         indexes = []
         for r in rows:
+            if open_file and r["name"].startswith(open_file):
+                continue    # the file the relay is writing is analysed after it stops
             try:
-                idx = _telemetry_index(r["path"], (track_db, cars))
+                idx = _telemetry_full_index(r["path"], (track_db, cars))
             except Exception as exc:  # noqa: BLE001  one broken recording must not drop the others
                 print(f"note: telemetry recording {r['name']} skipped ({exc}).")
                 continue

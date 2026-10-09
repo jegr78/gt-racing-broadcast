@@ -260,6 +260,64 @@ def t_learn_adds_row_and_assignment_that_survive_reload():
             pass
 
 
+def t_learn_onto_a_downloaded_line_only_assigns_the_recording():
+    with tempfile.TemporaryDirectory() as d:
+        db = _db(d, [_row("aaa001", "Oval", OVAL), _row("bbb001", "Ring", OTHER)])
+        mirrored = [(-x, z) for x, z in _lap(OVAL)]
+        assert db.learn("aaa001", mirrored, _length(OVAL), key="solo-pov/m") is False, \
+            "a downloaded line is kept, only the recording is assigned"
+        again = _db(d, [_row("aaa001", "Oval", OVAL), _row("bbb001", "Ring", OTHER)])
+        m = again.match(_lap(OVAL, offset=5.0), _length(OVAL))
+        assert m["id"] == "aaa001" and m["score_m"] < 6.0, f"a correct lap still matches: {m}"
+        assert again.assignment("solo-pov/m") == "aaa001"
+        with open(os.path.join(d, "learned-tracks.json"), encoding="utf-8") as fh:
+            assert json.load(fh)["signatures"] == [], "no learned row for a downloaded id"
+        assert again.learn("bbb001", [(0.0, 0.0)], 1.0, key="solo-pov/n") is False, \
+            "an assignment needs no usable lap"
+        try:
+            again.learn("aaa001", _lap(OVAL), _length(OVAL))
+            raise AssertionError("an assignment without a key was accepted")
+        except ValueError:
+            pass
+        assert again.learn("ccc001", _lap(TWIN, offset=900.0), _length(TWIN),
+                           key="solo-pov/t") is True, "an id without a downloaded line learns it"
+
+
+def t_learn_onto_the_reverse_of_a_downloaded_line_only_assigns():
+    with tempfile.TemporaryDirectory() as d:
+        rows = [_row("aaa001", "Oval", OVAL, {"official_id": "aaa002",
+                                              "official_name": "Oval (Reverse)"})]
+        db = _db(d, rows)
+        before = db.project([tuple(OVAL[10])], "aaa002")[0]
+        assert db.learn("aaa002", [(-x, z) for x, z in OVAL], _length(OVAL),
+                        key="solo-pov/r") is False, "the reverse twin keeps the downloaded line"
+        again = _db(d, rows)
+        assert again.assignment("solo-pov/r") == "aaa002"
+        assert abs(again.project([tuple(OVAL[10])], "aaa002")[0] - before) < 1e-6
+        with open(os.path.join(d, "learned-tracks.json"), encoding="utf-8") as fh:
+            assert json.load(fh)["signatures"] == [], "no learned row for the reverse twin"
+
+
+def t_a_downloaded_line_wins_over_an_earlier_learned_row():
+    with tempfile.TemporaryDirectory() as d:
+        mirrored = [(-x, z) for x, z in _lap(OVAL)]
+        assert _db(d, []).learn("aaa001", mirrored, _length(OVAL), key="solo-pov/a") is True
+        assert _db(d, []).learn("aaa002", mirrored, _length(OVAL), key="solo-pov/b") is True
+        shipped = _db(d, [_row("aaa001", "Oval", OVAL, {"official_id": "aaa002",
+                                                        "official_name": "Oval (Reverse)"})])
+        m = shipped.match(_lap(OVAL, offset=5.0), _length(OVAL))
+        assert m and m["id"] == "aaa001" and m["score_m"] < 6.0, f"the downloaded line wins: {m}"
+        m = shipped.match(list(reversed(_lap(OVAL))), _length(OVAL))
+        assert m and m["id"] == "aaa002", f"and its reverse twin too: {m}"
+        assert shipped.project([tuple(OVAL[0])], "aaa001")[0] < 1.0
+        assert shipped.assignment("solo-pov/a") == "aaa001"
+        assert shipped.assignment("solo-pov/b") == "aaa002"
+        with open(os.path.join(d, "learned-tracks.json"), encoding="utf-8") as fh:
+            assert len(json.load(fh)["signatures"]) == 2, "the learned rows stay in the file"
+        assert _db(d, []).project([mirrored[1]], "aaa001")[0] < 20.0, \
+            "without the download the learned rows apply again"
+
+
 def t_learn_on_unwritable_path_raises_and_leaves_no_tmp_file():
     with tempfile.TemporaryDirectory() as d:
         _db(d, [])
@@ -298,7 +356,7 @@ def t_learn_keeps_the_existing_row_reverse_twin():
         db = _db(d, [_row("aaa001", "Oval", OVAL, {"official_id": "aaa002",
                                                    "official_name": "Oval (Reverse)"})])
         before = db.line_length("aaa002")
-        db.learn("aaa001", _lap(OVAL), _length(OVAL))
+        db.learn("aaa001", _lap(OVAL), _length(OVAL), key="solo-pov/x")
         after = db.line_length("aaa002")
         assert after is not None and abs(after - before) < 1.0, (before, after)
         m = db.match(list(reversed(_lap(OVAL))), _length(OVAL))
@@ -321,8 +379,7 @@ def t_relearning_same_id_replaces_its_row():
 
 def t_learn_of_a_reverse_id_uses_its_own_path_for_project():
     with tempfile.TemporaryDirectory() as d:
-        db = _db(d, [_row("aaa001", "Oval", OVAL, {"official_id": "aaa002",
-                                                   "official_name": "Oval (Reverse)"})])
+        db = _db(d, [])
         rev_path = list(reversed(OVAL))
         db.learn("aaa002", rev_path, _length(OVAL))
         s = db.project([tuple(rev_path[0])], "aaa002")[0]
