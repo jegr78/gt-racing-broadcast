@@ -66,7 +66,7 @@ Where each bus lives:
 | **PGM** (live column) | one-press program looks: `STINT`, `SPLIT`, `INTERVIEW`, `STANDBY`, `INTRO`, `OUTRO`, `TRAILER`, `INTERMISSION`, `RED FLAG` (same behavior as the Companion combos below) |
 | **FEEDS** (Troubleshoot) | **`ARM A/B` / `STOP A/B`** per feed, per-feed reloads, `RESET A/B → LIVE` (reconnect OBS to one feed, see [Dropping a backlog](#dropping-a-backlog)), POV reload/stop, `FEEDS → STINT…` |
 | **HUD** (HUD area) | the Stint label, Streamer, Session and Race Control dropdowns, they update the HUD live and write back to the Setup tab |
-| **Overlays** (live column) | picture-in-picture toggles: `POV`; in solo also `WEBCAM` and, for a POV profile, `TELEMETRY` |
+| **Overlays** (live column) | picture-in-picture toggles: `POV`; in solo also `WEBCAM` and, for a POV profile, `TELEMETRY`, plus the `REC` recording key (solo POV) |
 | **Raw scenes** (Troubleshoot) | scene switches without audio (the audio stays as it is) |
 | **TRANS** (live column) | transition selector for the next scene switch. **Cut**, **Fade** (default), or **Stinger** |
 | **GFX** (Graphics area) | graphics toggles (HUD, standings, schedule, results, weather, covers) |
@@ -156,14 +156,15 @@ In a solo **POV** profile Overlays also carries `TELEMETRY`: it shows or hides t
 HUD's whole GT7 telemetry block (panel, tyres, trace, values, delta, time of day),
 for example while waiting in the lobby or watching a replay. The webcam frame stays.
 The relay keeps the choice across restarts; the key lights while the block is shown.
-`REC` (solo POV) starts and stops the telemetry recording; it lights red with the elapsed time while recording and amber when writing failed (disk full).
+`REC` (solo POV) starts and stops the telemetry recording. It lights red with the
+elapsed time while recording, and amber when writing failed, for example on a full disk.
 In a solo **POV** profile the status strip also names the car the driver is in, e.g.
 `CAR Alfa Romeo 155 2.5 V6 TI '93 · Gr.4`, read from the GT7 telemetry. The pill
 appears once the console sends telemetry and follows a car change.
 `TRACK` names the recognised track and layout after the first full lap. `?` means
 several layouts fit; hover for their ids.
 
-![The Director Panel in solo mode: feed/schedule controls hidden, solo scene switches, the Game/Webcam/Mic/POV audio mixer, and the POV editor with its own reload/stop](images/director-panel-solo.png)
+![The Director Panel in solo POV mode on the Graphics view: CAR and TRACK pills in the status strip, CAPTURE/WEBCAM/POV previews instead of the A/B tiles, the solo scene keys, and WEBCAM, POV, TELEMETRY and REC in the Overlays card](images/director-panel-solo.png)
 
 > **"Race Control" here is the on-screen HUD banner** (the `RED FLAG`/`Driver Swaps`
 > dropdown you set, written to the Setup tab), **not** the read-only

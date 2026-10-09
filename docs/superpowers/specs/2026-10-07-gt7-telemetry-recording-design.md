@@ -48,12 +48,15 @@ work with.
 
 Path: `runtime/<profile>/telemetry-recordings/<YYYYMMDD-HHMMSS>.gt7rec`, local time of
 the first recorded packet. While open the file is named `<...>.gt7rec.part`; a clean
-stop renames it. On Windows `relay stop` ends the relay with `taskkill /F`, so no
-shutdown code runs there and every recording ends as a `.part` file. The writer
-therefore flushes about once per second (at most ~1 s of packets is lost), and every
-relay start that has telemetry renames leftover `.part` files in the directory to
-`.gt7rec` and logs each one. The content stays as written; the reader skips a
-truncated last record.
+stop renames it. On Windows `relay stop` first sends a plain `taskkill`, which a
+console process usually ignores, and after 10 s forces `taskkill /F /T`, so the
+shutdown code does not reliably run there and a recording can end as a `.part` file.
+The writer therefore flushes about once per second (at most ~1 s of packets is lost),
+and every relay start that has telemetry renames leftover `.part` files in the
+directory to `.gt7rec` and logs each one. It does so only after it bound the control
+port, so a second relay that loses the bind never touches the live file. A `.part`
+without a complete header line is removed instead. The content stays as written; the
+reader skips a truncated last record and any record too short to parse.
 
 Layout:
 
@@ -150,9 +153,10 @@ relay start resumes recording if it was on.
 
 - `TelemetryStore` takes an optional recorder. `_telemetry_loop` calls
   `store.record(time.time(), kind, plain)` for every packet it accepts (after the
-  source check and `decrypt_typed`), including menu, pause and replay packets. The call
-  only enqueues, outside the store lock, and never raises into the UDP loop even if the
-  recorder itself is broken.
+  source check and `decrypt_typed`), including menu, pause and replay packets. It
+  records before `parse_packet` and the engine update, so a packet the parser cannot
+  handle is still in the file. The call only enqueues, outside the store lock, and
+  never raises into the UDP loop even if the recorder itself is broken.
 - `GET /telemetry/record/start|stop|toggle` -> `{"active", "file", "since"}`; 404 when
   `telemetry_store` is None, like the other `/telemetry/*` routes. `console_policy`
   requires DIRECTOR, like `/telemetry/show|hide|toggle`.
@@ -160,7 +164,7 @@ relay start resumes recording if it was on.
   elapsed_s, bytes, dropped, error}`; `elapsed_s` is the relay's own wall clock minus
   `since` (not the viewer's clock), so a skewed browser never shows a wrong duration.
   Over the Funnel-exposed `/console` mount, `record` is director/producer-only
-  (`redact_console_status`): the file path and byte/drop counters are producer
+  (`redact_console_status`): the file name and byte/drop counters are producer
   detail, kept off the Funnel for every other role.
 
 ## CLI
@@ -175,6 +179,8 @@ New group `racecast telemetry`. Help strings stay ASCII.
 - `export <name|latest> [--out DIR] [--all] [--excel]`: writes into `<name>/` next to
   the recording, or into `DIR`.
 - `delete <name>`: refuses the file the running relay reports as open in `/status`.
+- `index` (part 3): builds the missing lap index of every closed recording and exits 1
+  when one fails; the Control Center runs it as the `telemetry-index` job.
 
 `list`, `export` and `delete` read files only and do not need a relay. `--profile`
 works as for every other command.
@@ -222,8 +228,10 @@ LibreOffice and Google Sheets. When packets were dropped, the exporter prints th
 - **Director Panel:** a `REC` button next to `TELEMETRY` in the solo `vis` list,
   `relay: "telemetry/record"`. Hidden when `/status` has no telemetry block, red with
   the elapsed time (`record.elapsed_s`) while recording, amber when `record.error` is
-  set. The REC key lives in the solo `vis` list, so `director-panel-solo.png` is
-  refreshed in the same PR, not the endurance `director-panel.png`.
+  set, plain without a time while the relay is unreachable. The panel builds the key
+  hidden and the first `/status` poll reveals it. The REC key lives in the solo `vis`
+  list, so `director-panel-solo.png` is refreshed in the same PR, not the endurance
+  `director-panel.png`.
 - **Control Center:** `profile_admin` writes an empty `TELEMETRY_RECORD=` into new solo
   POV profiles. No other change, so no `cc-*.png` refresh.
 
@@ -305,12 +313,16 @@ TDD, failing test first.
   download and validation and writes the bundled copies in `src/assets/gt7/`
   (every source except `RUNTIME_ONLY`).
 
-**Automatic.** A relay start with telemetry runs `update()` in a daemon thread. After
-a successful update the relay reloads its car database and track database in place.
+**Automatic.** A relay start with telemetry runs `update()` in a daemon thread, at most
+once per 24 h (`RACECAST_GT7_DATA_UPDATE=0` skips it). The same thread then compares
+`gt7_data.fingerprint` (a stat of every file a `CarDB` or `TrackDB` loads, the learned
+file included) every 60 s and swaps fresh databases into the store when it changed. So
+an automatic update, a manual `racecast gt7-data update` or a Set track in the Control
+Center reaches a running relay within a minute. `fingerprint` and `data_version` (part
+3) hash the same file list.
 
-**Manual.** `racecast gt7-data update` and `racecast gt7-data status`. The CLI accepts
-`--force` on `update` but does not advertise it: every manual update already forces a
-fetch, so the flag changes nothing observable. The Control Center Settings view gets a
+**Manual.** `racecast gt7-data update` and `racecast gt7-data status`. Every manual
+update forces a fetch, so `update` takes no flag. The Control Center Settings view gets a
 "GT7 data" row with the age of the data and an **Update now** button, which runs
 `racecast gt7-data update` as the `gt7-data-update` job and shows "updating…" in the
 row until the job ends (status route `GET /api/gt7-data`). `cc-settings.png` is
@@ -362,7 +374,7 @@ override.
 - `TelemetryStore.data()` and `/status` `telemetry.track` carry `track` (None until
   recognised). The Director Panel status strip shows `<track> - <layout>` next to the
   car (`stTrack`), or `Track ?` with the candidate ids as tooltip.
-  `director-panel.png` is refreshed.
+  `director-panel-solo.png` is refreshed.
 
 ## Export
 
@@ -407,8 +419,8 @@ override.
   before the offset). When only the recording grew (same data version, same header, the
   checked bytes unchanged, each earlier session keeping its track), the index replays
   only the bytes after that point; any doubt falls back to a full build. A growing
-  `.part` that was indexed once, by a report or the Control Center, then costs seconds
-  instead of a full replay.
+  `.part` that was indexed once, by an earlier report, then costs seconds
+  instead of a full replay. The Control Center never indexes the open file.
   Any change to the engine's lap verdicts or to the resume state bumps `INDEX_VERSION`,
   so a resumed index never mixes laps from two code versions.
 - Per lap: the `laps.csv` fields plus `rec` (recording stem), `track_id`, `car_id`,

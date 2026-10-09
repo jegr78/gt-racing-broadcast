@@ -117,6 +117,23 @@ environment before dispatching to:
   best-effort: any failure prints one notice and the stop continues.
   It also exposes a scene-collection check/switch (`GetSceneCollectionList` / `SetCurrentSceneCollection`): `racecast obs collection [set]`, a warning during `racecast event start`, a line in `racecast event status`, and the Control Center's OBS row. `racecast event start` auto-switches OBS to the active profile's collection by default (`RACECAST_OBS_COLLECTION_SWITCH=0` restores the old warn-only behaviour), safe because OBS refuses a switch while an output is active and none is active during bring-up; `event takeover` inherits it. The switch runs before the page-refresh hook (it rebuilds every source). The manual `racecast obs collection set` and the Control Center OBS-row button remain the explicit fallback. `racecast event start` also parks OBS on the **Standby** scene after the collection check and the forced page-refresh (Director Guide: start on Standby, then Start Streaming), default-on (`RACECAST_OBS_STANDBY_ON_START=0` opts out); it is best-effort and **never cuts a live program**, the switch is skipped when OBS output is already active (`obs_ws.switch_to_scene_if_idle`), which also makes a mid-event `event takeover` onto a streaming OBS a no-op. The canonical product name is `EXPECTED_SCENE_COLLECTION` (`GT Racing Endurance`), which mirrors the `name` field of `src/obs/GT_Racing_Endurance.json`; a localized per-league collection defaults to `GT Racing Endurance — <league>` (`PRODUCT_COLLECTION_PREFIX` + the profile name, unless the profile sets `OBS_COLLECTION`), so several leagues keep separate collections in one OBS. `racecast obs collection set` switches to the active profile's expected name.
 
+## GT7 telemetry modules (solo POV, epic #785)
+Five stdlib modules back the telemetry recording and analysis; the mechanisms live next to
+their callers, so read those sections first:
+- `gt7_recording` (recorder, reader, CSV export), `gt7_data` (car and track reference
+  files, `update`, `data_version`, `fingerprint`) and `gt7_tracks` (`TrackDB`: track
+  recognition, racing-line projection, learned tracks): `src/relay/CLAUDE.md`, paragraphs
+  "Telemetry recording" and "GT7 data and track recognition".
+- `gt7_laps` (cached lap index per recording, sectors, theoretical best):
+  `src/ui/CLAUDE.md`, the Telemetry view.
+- `report_telemetry` builds the report's Telemetry section from the lap indexes of the
+  recordings in the report window (`_report_telemetry` in `src/racecast.py`). It also
+  reads the recording the relay is still writing, because `event stop` builds the report
+  before the teardown.
+
+CLI groups: `racecast telemetry record|list|export|delete|index` and `racecast gt7-data
+update|status`. Spec: `docs/superpowers/specs/2026-10-07-gt7-telemetry-recording-design.md`.
+
 ## Console text encoding (full background, moved from the root CLAUDE.md)
 - **Console text encoding: the test matrix is not enough, the producer host is German
   Windows.** Python picks the *locale* codepage for text I/O, which is `cp1252` there
