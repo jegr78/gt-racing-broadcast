@@ -841,7 +841,7 @@ def t_prov_cpu_dry_run_skips_gpu():
 def t_prov_rustdesk_password_never_passes_through_python():
     h = FakeHost(which={"rustdesk"})
     run_main(prov.step_rustdesk, h, "racecast", {"RUSTDESK_PASSWORD": "s3cret"})
-    cmd = prov.rustdesk_password_argv("/etc/racecast/rustdesk-password")
+    cmd = prov.env_or_random_file_argv("/etc/racecast/rustdesk-password", "RUSTDESK_PASSWORD")
     assert cmd in h.argvs() and cmd[:2] == ["sh", "-c"] and cmd[-1] == "/etc/racecast/rustdesk-password"
     assert not any("s3cret" in " ".join(a) for a in h.argvs()), "the password never appears in an argv"
     assert "/etc/racecast/rustdesk-password" not in h.files, "Python never writes the password file"
@@ -854,14 +854,14 @@ def t_prov_rustdesk_password_file_mode_and_gate():
     with tempfile.TemporaryDirectory() as d:
         path = d + "/pw"
         env = dict(os.environ, RUSTDESK_PASSWORD="pw from env")
-        assert subprocess.run(prov.rustdesk_password_argv(path), env=env).returncode == 0
+        assert subprocess.run(prov.env_or_random_file_argv(path, "RUSTDESK_PASSWORD"), env=env).returncode == 0
         assert _read(path) == "pw from env" and (os.stat(path).st_mode & 0o777) == 0o600
         env["RUSTDESK_PASSWORD"] = "other"
-        subprocess.run(prov.rustdesk_password_argv(path), env=env)
+        subprocess.run(prov.env_or_random_file_argv(path, "RUSTDESK_PASSWORD"), env=env)
         assert _read(path) == "pw from env", "a non-empty password file is kept"
         _truncate(path)
         env.pop("RUSTDESK_PASSWORD")
-        subprocess.run(prov.rustdesk_password_argv(path), env=env)
+        subprocess.run(prov.env_or_random_file_argv(path, "RUSTDESK_PASSWORD"), env=env)
         generated = _read(path)
         assert len(generated) == 16 and generated.isascii() and generated.isalnum(), generated
         assert (os.stat(path).st_mode & 0o777) == 0o600

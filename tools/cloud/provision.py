@@ -375,11 +375,12 @@ def release_url(tag, machine):
     return f"https://github.com/{RACECAST_REPO}/releases/download/{tag}/{asset}"
 
 
-def rustdesk_password_argv(path):
-    """Write RUSTDESK_PASSWORD from the environment, or 16 random A-Za-z0-9 characters, to path
-    with mode 0600; a non-empty file is kept. The secret never passes through this process."""
+def env_or_random_file_argv(path, var):
+    """sh command that writes the environment variable `var`, or 16 random A-Za-z0-9 characters
+    when it is unset, to path with mode 0600. A non-empty file is kept. The value never passes
+    through this process."""
     script = ('umask 077; f="$1"; [ -s "$f" ] && exit 0; '
-              'if [ -n "${RUSTDESK_PASSWORD:-}" ]; then printf %s "$RUSTDESK_PASSWORD" > "$f"; '
+              f'if [ -n "${{{var}:-}}" ]; then printf %s "${var}" > "$f"; '
               "else LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 16 > \"$f\"; fi; "
               'chmod 0600 "$f"')
     return ["sh", "-c", script, "sh", path]
@@ -537,7 +538,7 @@ def step_rustdesk(h, user, env):
     h.run(["systemctl", "enable", "--now", "rustdesk"], **QUIET)
     # Password/ID/direct-IP need the graphical session, so a first-boot oneshot applies them.
     strict(h.run(["install", "-d", "-m", "0700", "/etc/racecast"]))
-    strict(h.run(rustdesk_password_argv("/etc/racecast/rustdesk-password")))
+    strict(h.run(env_or_random_file_argv("/etc/racecast/rustdesk-password", "RUSTDESK_PASSWORD")))
     write_rustdesk_setup_helper(h, user)
     h.write("/etc/systemd/system/racecast-rustdesk-setup.service", RUSTDESK_UNIT)
     h.run(["systemctl", "enable", "racecast-rustdesk-setup.service"], **QUIET)
