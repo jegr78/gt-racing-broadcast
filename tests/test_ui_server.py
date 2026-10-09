@@ -2650,6 +2650,24 @@ console.log(JSON.stringify([waiting, asked, tmState.pool.laps.length, $('tm-err'
             f"the page waits for that job, then asks once more: {out!r}"
 
 
+def t_telemetry_index_join_note_never_lands_on_a_reset_view():
+    out = _tm_node("""
+const l1 = lap('R', 1, 80, 1);
+tmState.recLaps = [l1];
+tmSelectB(l1);
+await tick();
+answer('car=1', Object.assign(pool([l1]), {unindexed: 1}));
+await tick();
+tmReset();
+answer('/api/op/telemetry-index', {ok: false, error: 'telemetry-index is already running',
+                                   job_id: 'other'});
+await tick();
+console.log(JSON.stringify([$('tm-note').hidden, $('tm-note').textContent]));""")
+    if out is not None:
+        hidden, text = json.loads(out)
+        assert hidden is True, f"a join answered after a reset leaves the new view alone: {text!r}"
+
+
 def t_telemetry_index_job_refreshes_the_recording_list():
     out = _tm_node("""
 const l1 = lap('R', 1, 80, 1);

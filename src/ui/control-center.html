@@ -5249,7 +5249,7 @@ function tmIndexAll() {
     const p = (async () => {
       let job = await startJob('telemetry-index');
       if (job.error && job.job_id) {
-        tmNote('Indexing runs in another window, waiting for it…');
+        if (gen === tmLapGen) tmNote('Indexing runs in another window, waiting for it…');
         job = {job_id: job.job_id, joined: true};
       }
       const r = job.error ? job : await jobResult(job.job_id, 20);
