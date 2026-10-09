@@ -487,7 +487,7 @@ def _sector_map(best, pool):
     trace = best.get("trace") or []
     if len(trace) < 2 or not pool:
         return None
-    own = gt7_laps.sectors(trace, trace[-1]["d"], step_m=SECTOR_M)
+    own = gt7_laps.sectors(trace, gt7_laps.lap_length_m(best), step_m=SECTOR_M)
     ref = gt7_laps.best_sectors(pool)
     n = min(len(own), len(ref))
     if not n:
@@ -960,8 +960,11 @@ def _report_telemetry(frm, to):
         if not rows:
             return None
         track_db, cars = _telemetry_dbs()
+        open_file = _relay_open_file()
         indexes = []
         for r in rows:
+            if open_file and r["name"].startswith(open_file):
+                continue    # the file the relay is writing is analysed after it stops
             try:
                 idx = _telemetry_full_index(r["path"], (track_db, cars))
             except Exception as exc:  # noqa: BLE001  one broken recording must not drop the others
