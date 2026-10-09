@@ -7688,7 +7688,6 @@ def run_ui(rest, fail=sys.exit, open_browser=True):
         "machine_font_delete": machine_font_delete_data,
         "fonts_restore": restore_bundled_fonts_data,
         "gt7_data_status": gt7_data_status_data,
-        "gt7_data_update": gt7_data_update_data,
         "backup_list": backup_list_data,
         "backup_create": backup_create_data,
         "backup_restore": backup_restore_data,

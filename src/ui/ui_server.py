@@ -645,7 +645,13 @@ def make_handler(ctx):
             if path.startswith("/api/jobs/"):
                 job_id = path.split("/")[3]
                 snap = ctx["jobs"].snapshot(job_id) if job_id else None
-                return self._json({"ok": True, **snap}) if snap else self._not_found("unknown job")
+                if not snap:
+                    return self._not_found("unknown job")
+                tail = (parse_qs(urlparse(self.path).query or "").get("tail") or ["0"])[0]
+                if tail.isdigit() and int(tail) > 0:    # the last output lines, for a page
+                    lines = ctx["jobs"].lines_since(job_id, 0)[0]
+                    snap["lines"] = lines[-min(int(tail), 200):]
+                return self._json({"ok": True, **snap})
             if path.startswith("/api/logs/") and path.endswith("/stream"):
                 name = path.split("/")[3]   # "aggregate" is another registry source
                 return self._stream_log(name) if name else self._not_found("unknown log")
@@ -910,15 +916,6 @@ def make_handler(ctx):
                                        "error": f"could not fetch Google font: {exc}"},
                                       code=500)
                 return self._json(result, code=200 if result.get("ok") else 400)
-            if path == "/api/gt7-data/update":
-                try:
-                    result = ctx["gt7_data_update"]()
-                except Exception as exc:
-                    return self._json({"ok": False,
-                                       "error": "could not update GT7 data: "
-                                                f"{type(exc).__name__}"},
-                                      code=500)
-                return self._json(result, code=200 if result.get("ok") else 502)
             if path == "/api/fonts/restore":
                 body = self._body_json()
                 if body is None:

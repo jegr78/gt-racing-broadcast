@@ -114,6 +114,10 @@ def t_ops_registry_shape():
         assert isinstance(argv, list) and all(isinstance(a, str) for a in argv), name
 
 
+def t_long_control_center_reads_run_as_jobs():
+    assert ui_ops.OPS["gt7-data-update"] == ["gt7-data", "update"]
+
+
 def t_job_argv_repo_mode():
     argv = ui_ops.job_argv(["relay", "start"], frozen=False,
                            executable="/usr/bin/python3", rc_script="/repo/src/racecast.py")

@@ -2221,6 +2221,31 @@ function runOpAndWait(name, params) {
   });
 }
 
+// A quiet job: start it without the job console. Resolves to {job_id} or {error}.
+async function startJob(name, params) {
+  try {
+    const r = await (await fetch('/api/op/' + name, {method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({params: params || {}})})).json();
+    return r.ok ? {job_id: r.job_id} : {error: r.error || name + ' could not start'};
+  } catch (e) { return {error: 'Control Center not reachable.'}; }
+}
+
+// Polls a job until it exits. Resolves to {code, lines} (its last `tail` output lines)
+// or {error} when the Control Center stops answering.
+const JOB_POLL_MS = 1000;
+async function jobResult(id, tail) {
+  for (;;) {
+    let s;
+    try {
+      s = await (await fetch('/api/jobs/' + id + '?tail=' + (tail || 0), {cache: 'no-store'})).json();
+    } catch (e) { return {error: 'Control Center not reachable.'}; }
+    if (!s.ok) return {error: s.error || 'unknown job'};
+    if (!s.running) return {code: s.exit_code, lines: s.lines || []};
+    await new Promise(r => setTimeout(r, JOB_POLL_MS));
+  }
+}
+
 async function cancelJob(ev) {
   if (ev) ev.stopPropagation();        // don't collapse the console on click
   if (!jobId) return;
@@ -2885,18 +2910,16 @@ async function loadGt7Data() {
 
 async function updateGt7Data() {
   const b = $('gt7data-update'); b.disabled = true;
-  let d;
-  try {
-    d = await (await fetch('/api/gt7-data/update', {method: 'POST',
-        headers: {'Content-Type': 'application/json'}, body: '{}'})).json();
-  } catch (e) { d = {ok: false, error: 'Control Center not reachable.'}; }
+  $('d-gt7data').textContent = 'updating…';
+  const job = await startJob('gt7-data-update');
+  const r = job.error ? job : await jobResult(job.job_id, 20);
   b.disabled = false;
-  const errs = Object.entries(d.files || {}).filter(([, v]) => String(v).startsWith('error'));
-  if (!d.ok || errs.length) {
-    await alertModal((d.error ? d.error + '\n' : '') +
-        errs.map(([k, v]) => k + ': ' + v).join('\n'), {title: 'GT7 data'});
-  }
   loadGt7Data();
+  const errs = (r.lines || []).filter(l => l.includes(': error'));
+  if (r.error || r.code !== 0 || errs.length) {
+    await alertModal(r.error || (errs.length ? errs : r.lines).join('\n') || 'GT7 data update failed',
+                     {title: 'GT7 data'});
+  }
 }
 
 async function restoreBundledFonts() {

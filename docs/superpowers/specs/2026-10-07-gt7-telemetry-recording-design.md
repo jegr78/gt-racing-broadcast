@@ -310,8 +310,10 @@ a successful update the relay reloads its car database and track database in pla
 **Manual.** `racecast gt7-data update` and `racecast gt7-data status`. The CLI accepts
 `--force` on `update` but does not advertise it: every manual update already forces a
 fetch, so the flag changes nothing observable. The Control Center Settings view gets a
-"GT7 data" row with the age of the data and an **Update** button (route `POST
-/api/gt7-data/update`, `GET /api/gt7-data`). `cc-settings.png` is refreshed.
+"GT7 data" row with the age of the data and an **Update now** button, which runs
+`racecast gt7-data update` as the `gt7-data-update` job and shows "updating…" in the
+row until the job ends (status route `GET /api/gt7-data`). `cc-settings.png` is
+refreshed.
 
 The new track database reads through `gt7_data.resolve` (runtime copy when present and
 valid, else the bundled one). `gt7_cars.CarDB()` without a directory does not: it reads

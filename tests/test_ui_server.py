@@ -1613,41 +1613,121 @@ def t_fonts_restore_route_passes_only_a_literal_true_force():
 
 
 def t_gt7_data_routes():
-    ctx = _ctx()
-    ctx["gt7_data_update"] = lambda: {"ok": True, "changed": True,
-                                      "files": {"cars.csv": "updated"}}
-    httpd, port = _serve(ctx)
+    httpd, port = _serve(_ctx())
     try:
         code, body = _get(port, "/api/gt7-data")
         assert code == 200 and json.loads(body)["ok"] is True, (code, body)
-        code, body = _post_json(port, "/api/gt7-data/update", {})
-        assert code == 200 and json.loads(body)["files"] == {"cars.csv": "updated"}, body
+        code, _b = _post_json(port, "/api/gt7-data/update", {})
+        assert code == 404, "the update runs as the gt7-data-update job, not in a request thread"
     finally:
         httpd.shutdown()
 
 
-def t_gt7_data_update_route_maps_failures():
+def t_gt7_data_status_route_hides_paths():
     ctx = _ctx()
-    ctx["gt7_data_update"] = lambda: {"ok": False, "changed": False,
-                                      "files": {"cars.csv": "error: offline"}}
+    hidden = os.path.join(os.sep, "home", "producer", "runtime", "gt7")
+
+    def locked():
+        raise PermissionError(13, "Permission denied", hidden)
+    ctx["gt7_data_status"] = locked
     httpd, port = _serve(ctx)
     try:
-        code, body = _post_json(port, "/api/gt7-data/update", {})
-        assert code == 502 and json.loads(body)["ok"] is False, (code, body)
-        ctx["gt7_data_update"] = lambda: 1 / 0
-        code, body = _post_json(port, "/api/gt7-data/update", {})
-        assert code == 500 and json.loads(body)["ok"] is False, (code, body)
-        hidden = os.path.join(os.sep, "home", "producer", "runtime", "gt7")
-
-        def locked():
-            raise PermissionError(13, "Permission denied", hidden)
-        ctx["gt7_data_update"] = ctx["gt7_data_status"] = locked
-        for code, body in (_post_json(port, "/api/gt7-data/update", {}),
-                           _get(port, "/api/gt7-data")):
-            text = body.decode() if isinstance(body, bytes) else body
-            assert code == 500 and hidden not in text, (code, text)
+        code, body = _get(port, "/api/gt7-data")
+        text = body.decode() if isinstance(body, bytes) else body
+        assert code == 500 and hidden not in text, (code, text)
     finally:
         httpd.shutdown()
+
+
+def t_job_snapshot_returns_the_output_tail_on_request():
+    ctx = _ctx(jobs=ui_jobs.JobManager(
+        lambda a: [sys.executable, "-c", "print('one'); print('two'); print('three')"]))
+    httpd, port = _serve(ctx)
+    try:
+        job_id = json.loads(_post(port, "/api/op/echo")[1])["job_id"]
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            snap = json.loads(_get(port, f"/api/jobs/{job_id}?tail=2")[1])
+            if snap["exit_code"] is not None:
+                break
+            time.sleep(0.1)
+        assert snap["lines"] == ["two", "three"], snap
+        assert "lines" not in json.loads(_get(port, f"/api/jobs/{job_id}")[1]), \
+            "a plain snapshot stays small"
+        assert len(json.loads(_get(port, f"/api/jobs/{job_id}?tail=999999")[1])["lines"]) == 3
+        assert _get(port, f"/api/jobs/{job_id}?tail=x")[0] == 200
+    finally:
+        httpd.shutdown()
+
+
+_JOB_HARNESS = r"""
+class El { constructor() { this.textContent = ''; this.disabled = false; } }
+const els = {};
+const $ = id => els[id] || (els[id] = new El());
+const pending = [], calls = [];
+globalThis.fetch = (url, opts) => new Promise(res => { calls.push(url); pending.push({url, res}); });
+function answer(part, data) {
+  const hit = pending.filter(p => p.url.includes(part));
+  hit.forEach(p => { pending.splice(pending.indexOf(p), 1); p.res({json: async () => data}); });
+  return hit.length;
+}
+const tick = async () => { for (let i = 0; i < 20; i++) await new Promise(r => setTimeout(r, 0)); };
+const JOB_POLL_MS = 0;
+"""
+
+
+def _job_fns(page):
+    return "".join(_page_fn(page, n) for n in ("startJob", "jobResult"))
+
+
+def _page_fn(page, name):
+    i = page.index("function " + name + "(")
+    i = page.rindex("\n", 0, i) + 1
+    return page[i:page.index("\n}\n", i) + 3]
+
+
+def t_gt7_data_update_runs_as_a_job_and_says_updating():
+    page = _cc_page()
+    out = _run_js(_JOB_HARNESS + _job_fns(page) + _page_fn(page, "updateGt7Data") + """
+const alerts = []; let loads = 0;
+globalThis.alertModal = async t => { alerts.push(t); };
+globalThis.loadGt7Data = () => { loads++; };
+(async () => {
+  updateGt7Data();
+  await tick();
+  const busy = [$('d-gt7data').textContent, $('gt7data-update').disabled].join(',');
+  answer('/api/op/gt7-data-update', {ok: true, job_id: 'j1'});
+  await tick();
+  answer('/api/jobs/j1', {ok: true, running: true, exit_code: null});
+  await tick();
+  const still = $('d-gt7data').textContent;
+  answer('/api/jobs/j1', {ok: true, running: false, exit_code: 1,
+                          lines: ['cars.csv: error: offline', 'GT7 data update failed (offline?)']});
+  await tick();
+  console.log([busy, still, $('gt7data-update').disabled, loads,
+               alerts.join('/').includes('cars.csv: error: offline'),
+               calls.filter(u => u.includes('/api/jobs/j1?tail=')).length].join('|'));
+})();""")
+    if out is not None:
+        assert out.strip() == "updating\u2026,true|updating\u2026|false|1|true|2", \
+            f"the row says updating while the job runs, the failure lines show after it: {out!r}"
+
+
+def t_gt7_data_update_shows_a_refused_start():
+    page = _cc_page()
+    out = _run_js(_JOB_HARNESS + _job_fns(page) + _page_fn(page, "updateGt7Data") + """
+const alerts = []; let loads = 0;
+globalThis.alertModal = async t => { alerts.push(t); };
+globalThis.loadGt7Data = () => { loads++; };
+(async () => {
+  updateGt7Data();
+  await tick();
+  answer('/api/op/gt7-data-update', {ok: false, error: 'gt7-data-update is already running'});
+  await tick();
+  console.log([alerts.join('/'), loads, $('gt7data-update').disabled].join('|'));
+})();""")
+    if out is not None:
+        assert out.strip() == "gt7-data-update is already running|1|false", out
 
 
 def t_ui_server_queues_a_browser_burst():
