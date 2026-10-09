@@ -468,13 +468,20 @@ recording and session.
 - `racecast report` collects the active profile's recordings whose time span overlaps
   the report window and reads their lap indexes. Without any, the section is absent;
   endurance reports are unchanged.
+- The report also indexes the recording the relay is still writing, because `event stop`
+  builds the report before the teardown; that one-time build costs about 16 s per 3 h of
+  recording, and the report says its last lap may be missing. The Control Center
+  Telemetry view keeps skipping the open file.
+- Figures are per track and car; laps on an unknown track group only within their
+  recording and GT7 session, the rule part 3 pools by.
 - HTML section "Telemetry":
   - key figures: best lap, theoretical best, consistency (standard deviation of the
     counted lap times), fuel per lap, average tyre temperature per wheel;
   - lap-time trend as a small SVG: counted laps as dots, other laps greyed;
   - track map of the best lap as SVG, mini-sectors coloured by the gap to the best
     sector time;
-  - the lap table: time, status, reason, fuel, top speed, car, track.
+  - the lap table: number in driving order, GT7 lap number, time, status, reason, fuel,
+    top speed, car, track.
 - One line `Best lap 1:58.432 (theoretical 1:57.910), 23 laps, Suzuka Circuit` goes into
   `render_summary_text` (CLI and Control Center summary) and, as a "Telemetry" field,
   into the Discord embed built by `report_discord_fields`. With several track and car
