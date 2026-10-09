@@ -263,7 +263,8 @@ running relay.
   of every comparison, and the view analyses it only after the recording stops.
 - **Lap A and lap B.** Lap B is the lap you click. Lap A starts as the fastest counted
   lap other than B with the same track and car across all recordings of the profile.
-  Both pickers list every comparable counted lap. When B has no such partner, lap A
+  Both pickers list every comparable counted lap; B also shows the clicked lap when it
+  is not counted. When B has no such partner, lap A
   reads "no other lap to compare" and the charts show B alone. Laps on an unknown track
   compare only within their GT7 session.
 - **Charts.** Speed, throttle, brake, steering, gear and the delta of B against A over

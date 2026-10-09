@@ -66,10 +66,10 @@ def _line(path):
     return seg, cum, curv
 
 
-def _speeds(seg, curv, lap):
+def _speeds(seg, curv, lap, seed=0):
     """Target speed per line point for one lap: grip in corners, braking and traction."""
     n, total = len(seg), sum(seg)
-    base, phase = LAP_BASE[lap % len(LAP_BASE)], 1.9 * lap
+    base, phase = LAP_BASE[(lap + seed) % len(LAP_BASE)], 1.9 * lap
     v, pos = [], 0.0
     for i in range(n):
         pace = base * (1 + PACE_AMP * math.sin(2 * math.pi * PACE_WAVES * pos / total + phase))
@@ -124,11 +124,12 @@ def build(out_dir, row, laps=6, hz=60, start=None, car_id=CAR_ID, profile="demo"
     xs, zs = [p[0] for p in path], [p[1] for p in path]
     w = gt7_recording.RecordingWriter(out_dir, profile, "demo", queue_max=0)
     ts = start if start is not None else time.time() - 3600
+    seed = int(ts) % 7             # recordings started at different times get different laps
     dt = 1.0 / hz
     s = 0.6 * total               # the out-lap starts mid-lap, as after leaving the pits
     lap, lap_t, last_ms, fuel = 0, 0.0, -1, 60.0
     times, report_at, tail = [], None, None
-    v_lap = _speeds(seg, curv, lap)
+    v_lap = _speeds(seg, curv, lap, seed)
     while tail is None or ts < tail:
         v = _at(cum, v_lap, s)
         acc = (_at(cum, v_lap, s + v * dt) - v) / dt
@@ -153,13 +154,14 @@ def build(out_dir, row, laps=6, hz=60, start=None, car_id=CAR_ID, profile="demo"
                 times.append(lap_t)
                 report_at = 0.5          # GT7 shows the lap time shortly after the line
             lap, lap_t = lap + 1, 0.0
-            v_lap = _speeds(seg, curv, lap)
+            v_lap = _speeds(seg, curv, lap, seed)
             if lap > laps:
                 tail = ts + 4.0
         s = s_next
     w.close(timeout=60.0)
     if w.error or not os.path.isfile(w.path):
         raise SystemExit(f"could not write the recording: {w.error or 'writer did not finish'}")
+    os.utime(w.path, (ts, ts))     # the recordings list derives the duration from the mtime
     return {"path": w.path, "official_id": row["official_id"],
             "official_name": row["official_name"], "lap_times": times}
 
