@@ -563,6 +563,7 @@ def _print_live_urls(relay_url, ui_url, token, pov_url=None, pids=None):
 
 
 def run_synthetic(args):
+    os.environ["RACECAST_UPDATE_CHECK"] = "0"   # every child inherits it: the run stays offline
     tmp = tempfile.mkdtemp(prefix="racecast-e2e-")
     procs, servers = [], []
     try:

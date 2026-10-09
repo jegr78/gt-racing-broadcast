@@ -649,6 +649,17 @@ def t_update_check_dev_build_skips():
     assert d["ok"] and d["update_available"] is False and d["latest"] is None
 
 
+def t_update_check_off_switch_makes_no_request():
+    def fetch():
+        raise AssertionError("the update check must not reach GitHub when switched off")
+    os.environ["RACECAST_UPDATE_CHECK"] = "0"
+    try:
+        d = rc.update_check_data(fetch=fetch, current="v1.2.0", frozen=True)
+    finally:
+        del os.environ["RACECAST_UPDATE_CHECK"]
+    assert d["ok"] and d["update_available"] is False and d["latest"] is None, d
+
+
 def t_update_check_frozen_preview_offers_latest():
     # a frozen preview binary has a non-semver version ('preview-main-<sha>') but is
     # a real installable artifact, so it offers the latest release, matching the

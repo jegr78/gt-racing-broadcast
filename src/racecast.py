@@ -5315,6 +5315,9 @@ def update_check_data(fetch=None, current=None, platform=None, frozen=None):
     if upd.parse_version(cur) is None and not frozen:   # source checkout, use `git pull`
         out["note"] = "development build: update check skipped"
         return out
+    if os.environ.get("RACECAST_UPDATE_CHECK") == "0":
+        out["note"] = "update check off (RACECAST_UPDATE_CHECK=0)"
+        return out
     try:
         release = (fetch or upd.fetch_latest)()
     except Exception:
