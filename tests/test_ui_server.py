@@ -2118,13 +2118,146 @@ def t_telemetry_recording_rows_mark_open_files_and_unindexed_laps():
     assert "r.laps == null ? ''" in fn, "the list has no lap count before the first index"
 
 
+_TM_HARNESS = r"""
+class El {
+  constructor(tag) { this.tagName = tag; this.kids = []; this.cells = []; this._t = '';
+                     this.hidden = false; this.disabled = false; this.className = '';
+                     this.value = ''; this.title = ''; this.selected = false; }
+  get textContent() { return this._t + this.kids.map(k => k.textContent).join(''); }
+  set textContent(v) { this._t = String(v); this.kids = []; this.cells = []; }
+  appendChild(c) { this.kids.push(c); return c; }
+  append(...c) { c.forEach(x => this.appendChild(x)); }
+  get options() { return this.kids.filter(k => k.tagName === 'option'); }
+  createTHead() { return this.appendChild(new El('sec')); }
+  createTBody() { return this.appendChild(new El('sec')); }
+  createTFoot() { return this.appendChild(new El('sec')); }
+  insertRow() { return this.appendChild(new El('tr')); }
+  insertCell() { const c = this.appendChild(new El('td')); this.cells.push(c); return c; }
+  setAttribute() {}
+}
+const els = {};
+const $ = id => els[id] || (els[id] = new El(id));
+const document = {createElement: t => new El(t), createElementNS: (n, t) => new El(t)};
+const pending = [];
+const calls = [];
+globalThis.fetch = url => new Promise(res => { calls.push(url); pending.push({url, res}); });
+function answer(part, data) {
+  const hit = pending.filter(p => p.url.includes(part));
+  hit.forEach(p => { pending.splice(pending.indexOf(p), 1); p.res({json: async () => data}); });
+  return hit.length;
+}
+const tick = async () => { for (let i = 0; i < 20; i++) await new Promise(r => setTimeout(r, 0)); };
+const lap = (rec, n, t, car) => ({rec, session: 1, lap: n, time_s: t, status: 'counted',
+  car: 'Car', car_id: car, track_id: 't1', track: 'Track', layout: '', sectors: [t / 2, t / 2]});
+const recLaps = (rec, laps) => ({ok: true, recording: {rec, track: null}, laps});
+const pool = laps => ({ok: true, laps, best_sectors: [], theoretical_best: null,
+                       reference: laps[0] || null});
+"""
+
+
+def _tm_node(body):
+    """stdout of `body` run against the Telemetry block with a fake DOM and fetch."""
+    return _run_js(_TM_HARNESS + _tm_script(_cc_page()) + "\n(async () => {\n" + body + "\n})();")
+
+
 def t_telemetry_open_recording_is_not_indexed_on_load():
     tm = _tm_script(_cc_page())
     load = _tm_fn(tm, "tmLoad")
     assert "!r.recording" in load, "the first selection skips the file the relay is writing"
-    sel = _tm_fn(tm, "tmSelectRec")
-    assert "tmLapsReq" in sel, "a second click on a recording that is still indexing reuses the request"
-    assert "tmState.rec !== rec" in sel, "a late answer for another recording is ignored"
+
+
+def t_telemetry_late_laps_answer_for_another_recording_is_dropped():
+    out = _tm_node("""
+tmSelectRec('X'); tmSelectRec('X'); tmSelectRec('Y');
+await tick();
+const xCalls = calls.filter(u => u.includes('rec=X')).length;
+answer('rec=Y', recLaps('Y', [lap('Y', 1, 90, 7)]));
+await tick();
+answer('rec=X', recLaps('X', [lap('X', 1, 80, 7), lap('X', 2, 81, 7)]));
+await tick();
+console.log([xCalls, tmState.rec, tmState.recLaps.map(tmKey).join(','), tmState.b].join(' '));""")
+    if out is not None:
+        assert out.strip() == "1 Y Y|1|1 Y|1|1", \
+            f"one request per recording and the late answer for X must not win: {out!r}"
+
+
+def t_telemetry_late_pool_answer_for_another_lap_is_dropped():
+    out = _tm_node("""
+const l1 = lap('R', 1, 80, 1), l2 = lap('R', 2, 79, 2);
+tmState.recLaps = [l1, l2];
+tmSelectB(l1); tmSelectB(l2); tmSelectB(l2);
+await tick();
+const n2 = calls.filter(u => u.includes('car=2')).length;
+const status = $('tm-sec-sub').textContent.replace(/\\u2026/g, '...');
+answer('car=2', pool([l2, lap('S', 1, 78, 2)]));
+await tick();
+answer('car=1', pool([l1]));
+await tick();
+answer('/lap?', {ok: true, lap: lap('S', 1, 78, 2), sector_m: 200});
+await tick();
+console.log([n2, status, tmState.b, tmState.pool.laps.length].join('|'));""")
+    if out is not None:
+        assert out.strip() == "1|Loading comparable laps...|R|1|2|2", \
+            f"one pool request per query, a loading note and the newest lap wins: {out!r}"
+
+
+def t_telemetry_reference_is_the_fastest_other_lap():
+    out = _tm_node("""
+const b = lap('R', 3, 79, 1);
+tmSelectB(b);
+await tick();
+answer('car=1', pool([b, lap('R', 1, 80, 1), lap('R', 2, 81, 1)]));
+await tick();
+const multi = tmState.a;
+tmSelectB(b);
+await tick();
+answer('car=1', pool([b]));
+await tick();
+answer('/lap?', {ok: true, lap: b, sector_m: 200});
+await tick();
+console.log([multi, String(tmState.a), $('tm-a').options.length, $('tm-a').disabled,
+             $('tm-sec-sub').textContent.replace(/\\u00b7/g, '-')].join('|'));""")
+    if out is not None:
+        assert out.strip() == "R|1|1|null|1|true|200 m - no other lap to compare", \
+            f"A is the fastest lap other than B, and a lone lap says so: {out!r}"
+
+
+def t_telemetry_errors_leave_placeholders_and_no_stale_banner():
+    out = _tm_node("""
+tmState.recs = [{rec: 'X'}, {rec: 'Y'}];
+tmSelectRec('X');
+await tick();
+answer('rec=X', {ok: false, error: 'recording in progress: stop the recording to analyse it'});
+await tick();
+const placeholder = [$('tm-a').options.length, $('tm-a').options[0].disabled, $('tm-a').disabled].join(',');
+tmState.a = 'X|1|1'; tmState.b = 'X|1|2';
+tmLoadPair();
+tmSelectRec('Y');
+await tick();
+answer('/lap?', {ok: false, error: 'stale lap'});
+await tick();
+console.log([placeholder, $('tm-err').hidden, $('tm-err').textContent].join('|'));""")
+    if out is not None:
+        assert out.strip() == "1,true,true|true|", \
+            f"empty pickers carry a disabled placeholder and a stale lap error stays off the banner: {out!r}"
+
+
+def t_telemetry_failed_list_retries_on_the_next_visit():
+    out = _tm_node("""
+tmLoad(); tmLoad();
+await tick();
+answer('/recordings', {ok: false, error: 'boom'});
+await tick();
+console.log([tmState.loaded, calls.length, $('tm-recs').textContent === ''].join('|'));""")
+    if out is not None:
+        assert out.strip() == "false|2|true", f"a failed list must not count as loaded: {out!r}"
+
+
+def t_telemetry_view_follows_the_active_profile():
+    page = _cc_page()
+    gate = page[page.index("function applyKindGating(data)"):page.index("async function useProfile(")]
+    assert "tmState.profile" in gate and "tmReset()" in gate, \
+        "every profile switch path (use, import) resets the Telemetry view"
 
 
 def t_api_resources_route():

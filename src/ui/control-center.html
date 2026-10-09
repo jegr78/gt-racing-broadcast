@@ -495,6 +495,7 @@
   .tmpick label { display:inline-flex; align-items:center; gap:6px; max-width:100%;
                   white-space:nowrap; }
   .tmpick select { min-width:0; max-width:320px; font:12px var(--mono); }
+  .tmpick select:disabled { opacity:.6; cursor:not-allowed; }
   .tmkey { display:inline-block; width:18px; height:3px; border-radius:2px; }
   .tmkey.a { background:var(--tm-a); }
   .tmkey.b { background:var(--tm-b); }
@@ -3149,6 +3150,10 @@ function applyKindGating(data) {
   document.body.classList.toggle('solo', kind === 'solo');
   document.body.classList.toggle('tpl-pov', kind === 'solo' && template === 'pov');
   document.body.classList.toggle('tpl-commentary', kind === 'solo' && template !== 'pov');
+  if (data && data.ok && data.active !== tmState.profile) {   // every switch path, import included
+    tmReset();
+    tmState.profile = data.active;
+  }
   if (currentView === 'telemetry' && !(kind === 'solo' && template === 'pov')) showView('home');
   else if (currentView === 'telemetry' && !tmState.loaded) tmLoad();   // switched to another solo POV profile
 }
@@ -5148,10 +5153,10 @@ async function quitConfirm() {
 const TM_NS = 'http://www.w3.org/2000/svg';
 const tmState = {loaded: false, recs: [], rec: null, recLaps: [], pool: null,
                  a: null, b: null, lapA: null, lapB: null, sectorM: 200, tracks: null,
-                 chart: null, map: null, cursor: null};
+                 chart: null, map: null, cursor: null, profile: null};
 const tmLapCache = new Map();
-const tmLapsReq = new Map();     // rec -> pending laps request, so a cold index runs once
-let tmSelSeq = 0;
+const tmLapsReq = new Map();     // url -> pending request, so a cold index runs once
+const tmSeq = {load: 0, rec: 0, b: 0, pair: 0};   // only the newest call of each kind renders
 
 function tmKey(l) { return l.rec + '|' + l.session + '|' + l.lap; }
 function tmTime(s) {
@@ -5175,6 +5180,10 @@ async function tmGet(url) {
   try { return await (await fetch(url, {cache: 'no-store'})).json(); }
   catch (e) { return {ok: false, error: 'Control Center not reachable.'}; }
 }
+function tmShared(url) {
+  if (!tmLapsReq.has(url)) tmLapsReq.set(url, tmGet(url).finally(() => tmLapsReq.delete(url)));
+  return tmLapsReq.get(url);
+}
 function tmTrackLabel(t) {
   if (!t) return 'track unknown';
   if (t.candidates) return 'track ambiguous';
@@ -5182,15 +5191,31 @@ function tmTrackLabel(t) {
 }
 function tmLapTrack(l) { return l.track ? l.track + (l.layout ? ' - ' + l.layout : '') : 'track unknown'; }
 
-function tmClear(msg) {
-  tmState.lapA = tmState.lapB = tmState.pool = tmState.a = tmState.b = null;
+function tmPlaceholder(id, text) {
+  const sel = $(id);
+  sel.textContent = '';
+  const o = document.createElement('option');
+  o.value = ''; o.textContent = text; o.disabled = true; o.selected = true;
+  sel.appendChild(o);
+  sel.disabled = true;
+}
+function tmClearPair(status) {
+  tmState.lapA = tmState.lapB = tmState.pool = tmState.a = null;
   tmState.chart = tmState.map = tmState.cursor = null;
-  ['tm-charts', 'tm-map', 'tm-sectors', 'tm-a', 'tm-b', 'tm-map-sub', 'tm-rec-track',
-   'tm-sec-sub'].forEach(id => { $(id).textContent = ''; });
+  ['tm-charts', 'tm-map', 'tm-sectors', 'tm-map-sub'].forEach(id => { $(id).textContent = ''; });
+  tmPlaceholder('tm-a', status ? 'loading…' : 'no lap');
+  tmPlaceholder('tm-b', status ? 'loading…' : 'no lap');
+  $('tm-sec-sub').textContent = status || '';
+}
+function tmClear(msg) {
+  tmClearPair('');
+  tmState.b = null;
+  $('tm-rec-track').textContent = '';
   $('tm-laps').textContent = msg || '';
   $('tm-settrack').hidden = true;
 }
 function tmReset() {
+  Object.keys(tmSeq).forEach(k => { tmSeq[k]++; });
   tmState.loaded = false; tmState.rec = null; tmState.recs = []; tmState.recLaps = [];
   tmLapCache.clear();
   tmLapsReq.clear();
@@ -5200,11 +5225,19 @@ function tmReset() {
 }
 
 async function tmLoad() {
-  tmState.loaded = true;
+  const seq = ++tmSeq.load;
   tmLapCache.clear();
   tmErr('');
   const d = await tmGet('/api/telemetry/recordings');
-  if (!d.ok) { tmErr(d.error || 'could not list the recordings'); return; }
+  if (seq !== tmSeq.load) return;
+  if (!d.ok) {
+    tmState.loaded = false; tmState.recs = []; tmState.rec = null; tmState.recLaps = [];
+    $('tm-recs').textContent = '';
+    tmClear('');
+    tmErr(d.error || 'could not list the recordings');
+    return;
+  }
+  tmState.loaded = true;
   tmState.recs = d.recordings || [];
   const keep = tmState.recs.find(r => r.rec === tmState.rec && !r.recording);
   const first = keep || tmState.recs.find(r => !r.recording);
@@ -5241,18 +5274,15 @@ function tmRenderRecs() {
 }
 
 async function tmSelectRec(rec) {
-  const seq = ++tmSelSeq;
+  const seq = ++tmSeq.rec;
+  tmSeq.b++;
   tmState.rec = rec;
   tmState.recLaps = [];
   tmRenderRecs();
   tmErr('');
   tmClear('Indexing…');                             // the first open replays the whole recording
-  if (!tmLapsReq.has(rec)) {
-    tmLapsReq.set(rec, tmGet('/api/telemetry/laps?' + new URLSearchParams({rec}))
-      .finally(() => tmLapsReq.delete(rec)));
-  }
-  const d = await tmLapsReq.get(rec);
-  if (tmState.rec !== rec || seq !== tmSelSeq) return;   // a later pick owns the answer
+  const d = await tmShared('/api/telemetry/laps?' + new URLSearchParams({rec}));
+  if (seq !== tmSeq.rec) return;
   if (!d.ok) { tmClear(''); tmErr(d.error || 'could not read the recording'); return; }
   tmState.recLaps = d.laps || [];
   const row = tmState.recs.find(r => r.rec === rec);
@@ -5260,11 +5290,11 @@ async function tmSelectRec(rec) {
     row.indexed = true; row.track = d.recording.track; row.laps = tmState.recLaps.length;
     tmRenderRecs();
   }
-  $('tm-rec-track').textContent = tmTrackLabel(d.recording.track);
   const counted = tmState.recLaps.filter(l => l.status !== 'not counted');
   const pick = (counted.length ? counted : tmState.recLaps).slice(-1)[0];
+  if (!pick) tmClear('This recording has no laps.');
+  $('tm-rec-track').textContent = tmTrackLabel(d.recording.track);
   if (pick) tmSelectB(pick);
-  else tmClear('This recording has no laps.');
 }
 
 function tmRenderLaps() {
@@ -5290,33 +5320,42 @@ function tmRenderLaps() {
   });
 }
 
+// The fastest pool lap other than B: comparing a lap with itself shows nothing.
+function tmDefaultA(bKey) {
+  const others = ((tmState.pool && tmState.pool.laps) || [])
+    .filter(l => tmKey(l) !== bKey && l.time_s != null);
+  others.sort((x, y) => x.time_s - y.time_s);
+  return others.length ? tmKey(others[0]) : null;
+}
+
 async function tmSelectB(l) {
+  const seq = ++tmSeq.b;
   const key = tmKey(l);
   tmState.b = key;
   tmRenderLaps();
+  tmClearPair('Loading comparable laps…');
   const q = new URLSearchParams({car: l.car_id == null ? '' : String(l.car_id),
                                  track: l.track_id == null ? '' : l.track_id});
   if (l.track_id == null) { q.set('rec', l.rec); q.set('session', String(l.session)); }
-  const p = await tmGet('/api/telemetry/laps?' + q);
-  if (tmState.b !== key) return;
+  const p = await tmShared('/api/telemetry/laps?' + q);
+  if (seq !== tmSeq.b) return;
   if (!p.ok) tmErr(p.error || 'could not load the comparable laps');
   tmState.pool = p.ok ? p : {laps: [], best_sectors: [], theoretical_best: null, reference: null};
-  tmState.a = tmState.pool.reference ? tmKey(tmState.pool.reference) : null;
+  if (tmState.a == null) tmState.a = tmDefaultA(key);    // keep an A picked meanwhile
   tmFillPickers(l);
   await tmLoadPair();
 }
 
 function tmFillPickers(lapB) {
   const pool = tmState.pool.laps || [];
-  const forB = pool.some(l => tmKey(l) === tmKey(lapB)) ? pool : pool.concat([lapB]);
-  [['tm-a', pool, tmState.a], ['tm-b', forB, tmState.b]].forEach(([id, list, cur]) => {
+  const bKey = tmKey(lapB);
+  const forA = pool.filter(l => tmKey(l) !== bKey);
+  const forB = pool.some(l => tmKey(l) === bKey) ? pool : pool.concat([lapB]);
+  [['tm-a', forA, tmState.a], ['tm-b', forB, tmState.b]].forEach(([id, list, cur]) => {
+    if (!list.length) { tmPlaceholder(id, 'no other lap to compare'); return; }
     const sel = $(id);
     sel.textContent = '';
-    if (!list.length) {
-      const o = document.createElement('option');
-      o.value = ''; o.textContent = 'no counted lap to compare';
-      sel.appendChild(o);
-    }
+    sel.disabled = false;
     list.forEach(l => {
       const o = document.createElement('option');
       o.value = tmKey(l);
@@ -5330,26 +5369,37 @@ function tmFillPickers(lapB) {
 
 function tmPick(which, key) {
   tmState[which] = key || null;
+  if (which === 'b' && tmState.pool) {
+    const lb = (tmState.pool.laps || []).concat(tmState.recLaps).find(l => tmKey(l) === key);
+    if (lb) {
+      if (tmState.a === key) tmState.a = tmDefaultA(key);
+      tmFillPickers(lb);
+    }
+  }
   if (which === 'b') tmRenderLaps();
   tmLoadPair();
 }
 
+// Resolves to {lap} or {error}; never writes page state, so a stale answer cannot leak.
 async function tmFetchLap(key) {
-  if (tmLapCache.has(key)) return tmLapCache.get(key);
+  if (tmLapCache.has(key)) return {lap: tmLapCache.get(key)};
   const [rec, session, lap] = key.split('|');
-  const d = await tmGet('/api/telemetry/lap?' + new URLSearchParams({rec, session, lap}));
-  if (!d.ok) { tmErr(d.error || 'could not load the lap'); return null; }
-  tmState.sectorM = d.sector_m || 200;
+  const d = await tmShared('/api/telemetry/lap?' + new URLSearchParams({rec, session, lap}));
+  if (!d.ok) return {error: d.error || 'could not load the lap'};
   tmLapCache.set(key, d.lap);
-  return d.lap;
+  return {lap: d.lap, sectorM: d.sector_m};
 }
 
 async function tmLoadPair() {
+  const seq = ++tmSeq.pair;
   const want = [tmState.a, tmState.b];
-  const [a, b] = await Promise.all(want.map(k => (k ? tmFetchLap(k) : null)));
-  if (want[0] !== tmState.a || want[1] !== tmState.b) return;
-  tmState.lapA = a;
-  tmState.lapB = b;
+  const [a, b] = await Promise.all(want.map(k => (k ? tmFetchLap(k) : {lap: null})));
+  if (seq !== tmSeq.pair || want[0] !== tmState.a || want[1] !== tmState.b) return;
+  const err = a.error || b.error;
+  if (err) tmErr(err);
+  tmState.sectorM = a.sectorM || b.sectorM || tmState.sectorM;
+  tmState.lapA = a.lap || null;
+  tmState.lapB = b.lap || null;
   tmRender();
 }
 
@@ -5388,8 +5438,10 @@ function tmRenderSectors() {
   });
   foot.cells[4].title = 'Theoretical best: the sum of the best mini-sectors';
   if (lapDiff != null && Math.abs(lapDiff) >= 0.0005) foot.cells[3].className = lapDiff < 0 ? 'gain' : 'loss';
-  const n = tmState.pool ? (tmState.pool.laps || []).length : 0;
-  $('tm-sec-sub').textContent = (tmState.sectorM || 200) + ' m' + (n ? ' · best of ' + n + ' laps' : '');
+  const laps = tmState.pool ? tmState.pool.laps || [] : [];
+  const alone = !laps.some(l => tmKey(l) !== tmKey(B));
+  $('tm-sec-sub').textContent = (tmState.sectorM || 200) + ' m'
+    + (alone ? ' · no other lap to compare' : ' · best of ' + laps.length + ' laps');
 }
 // end of the Telemetry view
 
