@@ -2005,8 +2005,8 @@ def _run_js(src):
     if not node:
         print("  (node not installed, JS check skipped)")
         return None
-    return subprocess.run([node, "-e", src], capture_output=True, text=True,
-                          errors="replace", check=True, timeout=30).stdout
+    return subprocess.run([node, "-"], input=src, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", check=True, timeout=30).stdout
 
 
 def t_gt7_data_age_reads_naturally():
@@ -2254,6 +2254,45 @@ console.log(tmPath([], 'v', d => d, v => v, false));""")
             '[{"d":0,"delta":0},{"d":5,"delta":-0.5},{"d":10,"delta":-1}]',
             "M0.0 10.0L5.0 20.0M15.0 30.0", "M0.0 10.0H5.0V20.0", "M0 0"], \
             "delta is B minus A over the stations both laps reach; a gap lifts the pen"
+
+
+def t_node_script_goes_through_stdin():
+    seen = []
+    real = subprocess.run
+    subprocess.run = lambda args, **kw: seen.append((args, kw)) or real(args, **kw)
+    try:
+        out = _run_js("console.log('x'.repeat(40000).length)")
+    finally:
+        subprocess.run = real
+    if out is not None:
+        assert out.strip() == "40000" and seen[0][0][1:] == ["-"] and "input" in seen[0][1], \
+            f"the script reaches node on stdin, so no command line grows with the page: {seen[0][0][1:]}"
+
+
+def t_telemetry_closing_point_off_the_grid_keeps_delta_and_hover_aligned():
+    out = _tm_node("""
+const tr = (ts, end) => ts.map((t, i) => ({d: i * 5, t, speed_kmh: 100, throttle: 50, brake: 0,
+                                         steer_deg: 0, gear: 3, x: i, z: 0}))
+  .concat([{d: end, t: ts.length, speed_kmh: 100, throttle: 50, brake: 0, steer_deg: 0, gear: 3,
+            x: 99, z: 0}]);
+const same = tmDelta({trace: tr([0, 1, 2], 12.3)}, {trace: tr([0, 0.5, 1], 12.3)});
+const apart = tmDelta({trace: tr([0, 1, 2], 12.3)}, {trace: tr([0, 0.5, 1, 1.5], 17.1)});
+tmState.lapA = {trace: tr([0, 1, 2, 3], 17.4)};
+tmState.lapB = {trace: tr([0, 0.5, 1], 12.3), sectors: [1]};
+tmRenderCharts();
+const maxD = tmState.chart.maxD;
+tmHover({clientX: 799});
+const edge = tmState.chart.panels[0].read.textContent.replace(/\u00b7/g, '-');
+console.log([JSON.stringify(same), JSON.stringify(apart), maxD, edge].join('|'));""")
+    if out is not None:
+        same, apart, max_d, edge = out.strip().split("|")
+        assert same.endswith('{"d":10,"delta":-1},{"d":12.3,"delta":0}]'), \
+            f"two laps closing at the same length pair their closing points: {same}"
+        assert "12.3" not in apart and "17.1" not in apart, \
+            f"closing points at different distances are never paired: {apart}"
+        assert max_d == "17.4", max_d
+        assert edge.startswith("0.02 km") and "100.0 / -" in edge, \
+            f"past B's closing point the hover shows A only: {edge!r}"
 
 
 def t_telemetry_charts_without_lap_a_show_b_alone():
@@ -2778,19 +2817,29 @@ def t_body_json_rejects_negative_and_oversized_content_length():
     httpd, port = _serve(ctx)
     try:
         payload = json.dumps({"rec": "r", "track_id": "x"}).encode("utf-8")
-        for length in ("-1", str(us.MAX_JSON_BODY_BYTES + 1)):
+        for path, length, body, want in (
+                ("/api/telemetry/learn", "-1", payload, "invalid Content-Length"),
+                ("/api/telemetry/learn", str(us.MAX_JSON_BODY_BYTES + 1), payload,
+                 "request body too large"),
+                ("/api/telemetry/learn", "5", b"{oops", "malformed JSON body"),
+                ("/api/profile/use", str(us.MAX_JSON_BODY_BYTES + 1), payload,
+                 "request body too large")):
             conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
-            conn.putrequest("POST", "/api/telemetry/learn")
+            conn.putrequest("POST", path)
             conn.putheader("Content-Type", "application/json")
             conn.putheader("Content-Length", length)
             conn.endheaders()
-            conn.send(payload)
+            conn.send(body)
             resp = conn.getresponse()
-            assert resp.status == 400, (length, resp.status)
-            resp.read()
+            err = json.loads(resp.read())["error"]
+            assert (resp.status, err) == (400, want), (path, length, resp.status, err)
             conn.close()
     finally:
         httpd.shutdown()
+    with open(us.__file__, encoding="utf-8") as fh:
+        src = fh.read()
+    assert '"error": "malformed JSON body"' not in src, \
+        "every route reports the body error _body_json found"
 
 
 def t_restore_fonts_button_confirms_before_forcing():

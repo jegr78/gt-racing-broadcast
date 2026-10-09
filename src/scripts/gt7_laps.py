@@ -2,7 +2,8 @@
 """GT7 lap index: per-lap traces of a recording, sector math, the cache and the comparison pool.
 
 Stdlib only and no relay imports. A trace is one point every STEP_M metres of lap
-distance, starting at 0.0 on the line.
+distance, starting at 0.0 on the line; a counted lap's trace ends with a point at the
+full lap length carrying the lap time.
 """
 import bisect
 import json
@@ -17,7 +18,7 @@ import gt7_telemetry
 STEP_M = 5.0
 SECTOR_M = 200.0
 COUNTED = ("reference", "counted")
-INDEX_VERSION = 1
+INDEX_VERSION = 2
 CACHE_SUFFIX = ".laps.json"
 DECIMATE_M = 2.0              # finer samples add nothing to a 5 m trace
 PROJECT_TOL_M = 50.0          # corner cutting moves the projection metres, another branch of the line far more
@@ -36,7 +37,7 @@ def _time_at(trace, d):
 
 
 def lap_length_m(lap):
-    """A lap's length for sectors: where its trace ends."""
+    """A lap's length for sectors: where its trace ends, the full lap length for a counted lap."""
     trace = lap.get("trace") or []
     return trace[-1]["d"] if trace else 0.0
 
@@ -177,9 +178,11 @@ def _follow(proj, driven, length):
     return out
 
 
-def _trace(samples, track_db, track_id, length):
+def _trace(samples, track_db, track_id, length, close=None):
     """Samples resampled every STEP_M of lap distance: along the racing line when the
-    track is known, else the driven distance."""
+    track is known, else the driven distance. `close` is (lap length, lap time): the trace
+    then ends with a station there, so every lap's sectors share their boundaries and add
+    up to the lap time."""
     if not samples:
         return []
     kept = [samples[0]]
@@ -207,7 +210,15 @@ def _trace(samples, track_db, track_id, length):
         while j + 1 < len(ds) and ds[j + 1] <= x:
             j += 1
         out.append(_station(x, pts, ds, j))
-    return out
+    if close is None or not close[0] or close[0] <= 0 or close[1] is None:
+        return out
+    stop = round(close[0], 1)
+    out = [p for p in out if p["d"] < stop]
+    while j + 1 < len(ds) and ds[j + 1] <= stop:
+        j += 1
+    last = _station(stop, pts, ds, j)
+    last["t"] = round(close[1], 3)
+    return out + [last]
 
 
 def _track_info(found, track_db):
@@ -272,14 +283,16 @@ def _build(path, track_db, cars, key):
         track_id = found["id"] if found and "id" in found else None
         length = track_db.line_length(track_id) if track_id is not None else None
         samples, lap_samples[i] = lap_samples[i], None    # free each lap's samples once traced
-        trace = _trace(samples, track_db, track_id, length)
         relay = round(lap["elapsed"], 3)
         gt7_s = lap["gt7_time_s"]
+        time_s = gt7_s if gt7_s is not None else relay
+        close = (length or lap.get("distance_m"), time_s) if lap["status"] in COUNTED else None
+        trace = _trace(samples, track_db, track_id, length, close)
         out.append({
             "rec": stem, "session": lap["session"], "lap": lap["lap"],
             "start_t_s": round(lap["start"] - first, 3), "end_t_s": round(lap["end"] - first, 3),
             "gt7_time_s": gt7_s, "relay_time_s": relay,
-            "time_s": gt7_s if gt7_s is not None else relay,
+            "time_s": time_s,
             "status": lap["status"], "reason": lap["reason"],
             "fuel_used_l": None if lap["fuel_used"] is None else round(lap["fuel_used"], 2),
             "top_speed_kmh": round(lap["top_speed_mps"] * 3.6, 1),

@@ -35,7 +35,10 @@ Loaded when working under `src/ui/`.
   comparison from the profile's GT7 recordings. `src/scripts/gt7_laps.py` builds a lap
   index per recording (5 m traces, 200 m sectors), cached as `<stem>.laps.json` and
   rebuilt when the recording's size/mtime or `gt7_data.data_version` change; the data
-  layer also memoises up to 64 index summaries per process (`_telemetry_index`). Data
+  layer also memoises up to 4096 index summaries per process (`_telemetry_index`). One
+  Set track changes `data_version` (it stats `learned-tracks.json`), so the next pool
+  request rebuilds every index of the profile, about 16 s per 3 h recording. A counted
+  lap's trace closes at the full lap length with the lap time, so its sectors add up. Data
   functions `telemetry_*_data` in `src/racecast.py`; routes `/api/telemetry/recordings`,
   `/api/telemetry/laps`, `/api/telemetry/lap`, `/api/telemetry/tracks`,
   `/api/telemetry/learn`. The recording the relay is writing is listed but refused by
@@ -43,7 +46,7 @@ Loaded when working under `src/ui/`.
   (`TrackDB.has_downloaded_line`) and learns the line otherwise. Charts and map are
   inline SVG in `control-center.html` (block "Telemetry view"). Demo data for
   screenshots: `tools/make-demo-recording.py`. Tests: `tests/test_gt7_laps.py`,
-  `tests/test_racecast.py`, `tests/test_ui_server.py`.
+  `tests/test_racecast.py`, `tests/test_ui_server.py`, `tests/test_make_demo_recording.py`.
 
 ## Per-league overlay override + visual builder (moved from the root CLAUDE.md)
 - **Per-league overlay (optional).** `profiles/<name>/overlay/hud.css` (+ an optional

@@ -3333,7 +3333,7 @@ def telemetry_delete_cmd(rest):
 
 
 _TELEMETRY_MEMO = {}          # path -> (stamp, lap index without traces), oldest first
-TELEMETRY_MEMO_MAX = 64      # a summary entry is about 1 MB; a list scan must fit
+TELEMETRY_MEMO_MAX = 4096    # a summary entry is tens of KB for a 3 h recording; a list scan must fit
 _TELEMETRY_LOCK = threading.Lock()      # guards the memo and the build-lock table
 _TELEMETRY_BUILD_LOCKS = {}             # path -> Lock, so one recording is never indexed twice at once
 
@@ -3399,13 +3399,14 @@ def _telemetry_build_lock(path):
 
 def _telemetry_load(path, dbs, stamp=None):
     """(full index, summary form) from the cache file, built when the cache is missing or
-    stale; refreshes the memo. The caller holds the recording's build lock."""
+    stale; refreshes the memo. `dbs` is a (TrackDB, CarDB), a callable returning one, or
+    None. The caller holds the recording's build lock."""
     import gt7_laps
     base, bundled = _runtime_base_dir(), resource_path("assets/gt7")
     stamp = stamp or _telemetry_stamp(path)
     idx = gt7_laps.cached(path, base, bundled)
     if idx is None:
-        tracks, cars = dbs or _telemetry_dbs()
+        tracks, cars = dbs() if callable(dbs) else dbs or _telemetry_dbs()
         idx = gt7_laps.index(path, tracks, cars, base, key=_telemetry_track_key(path),
                              bundled=bundled)
     return idx, _telemetry_memo_put(path, stamp, idx)
@@ -3521,25 +3522,25 @@ def telemetry_laps_data(rec=None, session=None, track=None, car=None):
             return {"ok": False, "error": "laps on an unknown track compare within one "
                                           "session: pass rec and session"}
         open_file, version = _relay_open_file(), _telemetry_data_version()
-        dbs, indexes = None, []
+        loaded, indexes = [], []
+
+        def dbs():
+            if not loaded:
+                loaded.append(_telemetry_dbs())
+            return loaded[0]
         for row in gr.list_recordings(rec_dir):
             if open_file and row["name"].startswith(open_file):
                 continue    # indexing a growing file would rebuild it on every request
             try:
                 stamp = _telemetry_stamp(row["path"], version)
-                idx = _telemetry_memo_get(row["path"], stamp)
-                if idx is None:
-                    dbs = dbs or _telemetry_dbs()
-                    idx = _telemetry_index(row["path"], dbs, stamp)
-                indexes.append(idx)
+                indexes.append(_telemetry_index(row["path"], dbs, stamp))
             except Exception:  # noqa: BLE001  one unreadable recording must not hide the others
                 continue
         laps = [dict(lap) for lap in gt7_laps.pool(indexes, track_id, car_id, rec=stem,
                                                    session=sess)]
         return {"ok": True, "laps": laps,
                 "best_sectors": gt7_laps.best_sectors(laps),
-                "theoretical_best": gt7_laps.theoretical_best(laps),
-                "reference": laps[0] if laps else None}
+                "theoretical_best": gt7_laps.theoretical_best(laps)}
     except Exception as exc:
         return {"ok": False, "error": f"could not read the laps: {_telemetry_reason(exc, rec)}"}
 

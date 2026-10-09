@@ -635,9 +635,9 @@ def t_telemetry_laps_data_for_a_recording_and_the_pool():
         assert "trace" not in d["laps"][0] and "points" not in d["laps"][0]
         p = m.telemetry_laps_data(track="ring01", car=str(tgl.CAR))
         assert p["ok"] and [lap["time_s"] for lap in p["laps"]] == [16.0, 18.0, 19.0, 20.0, 20.0]
-        assert p["reference"]["time_s"] == 16.0
-        assert p["best_sectors"] == [3.2, 3.2, 3.2, 3.2, 3.12], p["best_sectors"]
-        assert p["theoretical_best"] == 15.92
+        assert "reference" not in p, "the page picks lap A itself"
+        assert p["best_sectors"] == [3.2, 3.2, 3.2, 3.2, 3.2], p["best_sectors"]
+        assert p["theoretical_best"] == 16.0, "the 16 s lap owns every sector up to the line"
         assert m.telemetry_laps_data(track="", car=str(tgl.CAR))["ok"] is False, \
             "an unknown track compares only within one session"
         mine = m.telemetry_laps_data(rec=_stem(a), session="1", track="", car=str(tgl.CAR))
@@ -696,10 +696,15 @@ def t_telemetry_index_is_memoised_until_the_file_or_the_data_change():
                   encoding="utf-8") as fh:
             fh.write("{}")
         assert m._telemetry_index(path) is not second, "a learned track is read again"
-        for k in range(m.TELEMETRY_MEMO_MAX + 1):
-            m._telemetry_index(tgl.write_circle_recording(
-                rec_dir, t0=1_700_007_200.0 + 3600 * k, n=40))
-        assert len(m._TELEMETRY_MEMO) == m.TELEMETRY_MEMO_MAX, "the memo stays bounded"
+        assert m.TELEMETRY_MEMO_MAX >= 4096, "a list scan of every recording must fit the memo"
+        real_max, m.TELEMETRY_MEMO_MAX = m.TELEMETRY_MEMO_MAX, 3
+        try:
+            for k in range(m.TELEMETRY_MEMO_MAX + 1):
+                m._telemetry_index(tgl.write_circle_recording(
+                    rec_dir, t0=1_700_007_200.0 + 3600 * k, n=40))
+            assert len(m._TELEMETRY_MEMO) == m.TELEMETRY_MEMO_MAX, "the memo stays bounded"
+        finally:
+            m.TELEMETRY_MEMO_MAX = real_max
         assert path not in m._TELEMETRY_MEMO, "the least recently used index goes first"
 
 
@@ -884,11 +889,11 @@ def t_telemetry_laps_data_returns_copies_of_the_memo():
         d = m.telemetry_laps_data(rec=stem)
         d["laps"][0]["time_s"] = -1.0
         p = m.telemetry_laps_data(track="ring01", car=str(tgl.CAR))
-        p["laps"][0]["time_s"] = p["reference"]["time_s"] = -1.0
+        p["laps"][0]["time_s"] = -1.0
         assert m.telemetry_laps_data(rec=stem)["laps"][0]["time_s"] != -1.0, \
             "a caller editing a lap leaves the memo intact"
         again = m.telemetry_laps_data(track="ring01", car=str(tgl.CAR))
-        assert again["laps"][0]["time_s"] == 16.0 and again["reference"]["time_s"] == 16.0
+        assert again["laps"][0]["time_s"] == 16.0
 
 
 def t_telemetry_memo_holds_more_recordings_than_a_list_scans():
@@ -910,6 +915,24 @@ def t_telemetry_memo_holds_more_recordings_than_a_list_scans():
         finally:
             gt7_laps.cached = real
         assert reads == [], f"{len(reads)} cache-file reads for 10 memoised recordings"
+
+
+def t_telemetry_pool_loads_the_track_data_only_for_a_stale_cache():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        paths = [tgl.write_circle_recording(rec_dir, t0=1_700_000_000.0 + 3600 * k, n=40)
+                 for k in range(3)]
+        m.telemetry_laps_data(track="ring01", car=str(tgl.CAR))
+        fake, calls = m._telemetry_dbs, []
+        m._telemetry_dbs = lambda: calls.append(1) or fake()
+        pool = lambda: m.telemetry_laps_data(track="ring01", car=str(tgl.CAR))
+        m._TELEMETRY_MEMO.clear()
+        assert pool()["ok"] and calls == [], "valid cache files need no track database"
+        for path in paths[:2]:
+            st = os.stat(path)
+            os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 10**9))
+        m._TELEMETRY_MEMO.clear()
+        assert len(pool()["laps"]) == 9 and calls == [1], \
+            f"two stale caches share one database load, not {len(calls)}"
 
 
 def t_telemetry_pool_and_list_skip_the_file_the_relay_writes():

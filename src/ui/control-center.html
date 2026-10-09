@@ -5370,8 +5370,8 @@ async function tmSelectB(l) {
   const p = await tmShared('/api/telemetry/laps?' + q);
   if (seq !== tmSeq.b) return;
   if (!p.ok) tmErr(p.error || 'could not load the comparable laps');
-  tmState.pool = p.ok ? p : {laps: [], best_sectors: [], theoretical_best: null, reference: null};
-  if (tmState.a == null) tmState.a = tmDefaultA(key);    // keep an A picked meanwhile
+  tmState.pool = p.ok ? p : {laps: [], best_sectors: [], theoretical_best: null};
+  tmState.a = tmDefaultA(key);
   tmFillPickers(l);
   await tmLoadPair();
 }
@@ -5475,9 +5475,11 @@ function tmRenderSectors() {
   $('tm-sec-sub').textContent = (tmState.sectorM || 200) + ' m'
     + (alone ? ' · no other lap' : ' · best of ' + laps.length + ' laps');
 }
+// Pairs only stations at the same distance, so closing points of different lap lengths never meet.
 function tmDelta(a, b) {
   const n = Math.min(a.trace.length, b.trace.length), out = [];
   for (let i = 0; i < n; i++) {
+    if (a.trace[i].d !== b.trace[i].d) continue;
     out.push({d: a.trace[i].d, delta: Math.round((b.trace[i].t - a.trace[i].t) * 1000) / 1000});
   }
   return out;
@@ -5581,7 +5583,10 @@ function tmHover(ev) {
   tmState.cursor.setAttribute('x1', x);
   tmState.cursor.setAttribute('x2', x);
   const i = Math.round(d / TM_STEP);       // station i sits at i * TM_STEP metres
-  const at = l => { const t = tmTrace(l); return i < t.length ? t[i] : null; };
+  const at = l => {      // a closing point far off station i belongs to another distance
+    const r = tmTrace(l)[i];
+    return r && Math.abs(r.d - i * TM_STEP) < TM_STEP / 2 ? r : null;
+  };
   const ra = at(tmState.lapA), rb = at(tmState.lapB);
   ch.panels.forEach((p, n) => {
     const k = p.c.key;

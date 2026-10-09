@@ -397,13 +397,16 @@ override.
 - `index(path, track_db, cars, runtime_base, key=None, bundled=None)` returns the lap
   index of one recording and caches it in `<stem>.laps.json` next to the recording. The
   cache records the recording's size and mtime and `gt7_data.data_version` (runtime track
-  files and the learned file by path, mtime and size; bundled files by name and size, so
-  a onefile binary's per-launch unpack dir does not invalidate it); any change rebuilds
+  files and the learned file by path, mtime and size; bundled files by name and content,
+  so a onefile binary's per-launch unpack dir does not invalidate it); any change rebuilds
   it.
 - Per lap: the `laps.csv` fields plus `rec` (recording stem), `track_id`, `car_id`,
   `car`, `tyre_avg_c` (mean surface temperature per wheel over the lap), and `trace`:
   the lap resampled every 5 m of `lap_dist_m` with `t`, `speed_kmh`,
-  `throttle`, `brake`, `steer_deg`, `gear`, `x`, `z`.
+  `throttle`, `brake`, `steer_deg`, `gear`, `x`, `z`. A counted lap's trace ends with
+  one more point at the full lap length (the racing line's length on a known track, else
+  the lap's driven `distance_m`) carrying the lap time `time_s`; that point may lie off
+  the 5 m grid.
 - Each lap's track: its session's track, decided as in the part 2 export (a learned
   assignment keyed `<profile>/<stem>` wins; an assignment whose layout no longer
   resolves falls back to matching). Car name, layout brief, the projection rule and GT7
@@ -411,13 +414,16 @@ override.
   the index alike.
 - `sectors(trace, length_m, step_m=200)`: sector times from the trace, boundaries every
   200 m from the line, the last sector shorter, times interpolated at the boundaries.
+  `lap_length_m(lap)` is the trace end, so every counted lap of a track is cut at the
+  same boundaries and its sectors add up to its lap time.
 - `best_sectors(laps)`: per sector the minimum over the given counted laps;
   `theoretical_best` = their sum.
 - The delta of B against A (time of B minus time of A at each 5 m station) is computed
   in the page from the two traces it already holds; the module has no delta function.
 
 Comparisons pool counted laps of the same `track_id` and `car_id` across all
-recordings of the active profile.
+recordings of the active profile. Laps on an unknown track pool only within their own
+recording and session.
 
 ## Control Center view `Telemetry`
 
@@ -429,7 +435,7 @@ recordings of the active profile.
   **Set track**: a choice from `TrackDB.layouts()` that calls `learn` with the
   recording's longest counted lap and stores the assignment.
 - Lap A is the reference, by default the fastest counted lap of the same track and car
-  across all recordings; lap B is the selected lap. Both have a picker over all
+  across all recordings other than B; lap B is the selected lap. Both have a picker over all
   matching laps.
 - Main area: stacked charts over distance for speed, throttle, brake, steering and
   gear with both laps, then the delta curve of B against A; a shared cursor follows the
@@ -438,7 +444,10 @@ recordings of the active profile.
   and the theoretical best.
 - Inline SVG, no external library. The Control Center's existing colour tokens and
   dark theme apply.
-- Routes: `GET /api/telemetry/recordings`, `GET /api/telemetry/laps?track=&car=`,
+- Routes: `GET /api/telemetry/recordings`, `GET /api/telemetry/laps` in three forms
+  (`?rec=` lists one recording's laps, `?track=&car=` is the pool of a known track,
+  `?rec=&session=&track=&car=` with an empty `track` is the pool of an unknown track
+  within one session),
   `GET /api/telemetry/lap?rec=&lap=&session=`, `GET /api/telemetry/tracks`,
   `POST /api/telemetry/learn` `{rec, track_id}`.
 - New wiki screenshot `cc-telemetry.png` from a synthetic demo recording (a tool under

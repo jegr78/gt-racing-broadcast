@@ -75,13 +75,14 @@ def _pkt(lap, speed, angle, last_ms=-1):
 
 
 def write_circle_recording(rec_dir, lap_secs=(20.0, 20.0, 16.0, 20.0), t0=1_700_000_000.0,
-                           n=400):
-    """One lap per entry of lap_secs around the circle, `n` packets each; lap 1 is the
-    engine's partial first lap. From the 6th packet of a lap GT7's last_ms reports the
-    previous timed lap; 10 packets of one more lap close the last one."""
+                           n=400, ns=None):
+    """One lap per entry of lap_secs around the circle, `n` packets each (or ns[i] for
+    lap i); lap 1 is the engine's partial first lap. From the 6th packet of a lap GT7's
+    last_ms reports the previous timed lap; 10 packets of one more lap close the last one."""
     w = gt7_recording.RecordingWriter(rec_dir, "Solo", "dev", flush_s=0.05, queue_max=0)
     t, last_ms = t0, -1
     for li, secs in enumerate(list(lap_secs) + [lap_secs[-1]]):
+        n = ns[li] if ns and li < len(ns) else n
         dt, speed = secs / n, 1000.0 / secs
         for k in range(n if li < len(lap_secs) else 10):
             if li >= 2 and k == 5:
@@ -142,15 +143,20 @@ def t_index_laps_status_time_car_and_track():
 
 def t_trace_follows_the_racing_line_every_5_m():
     with tempfile.TemporaryDirectory() as d:
-        lap2 = _lap(_index(write_circle_recording(d)), 2)
+        idx = _index(write_circle_recording(d))
+        lap2 = _lap(idx, 2)
         tr = lap2["trace"]
-        assert [p["d"] for p in tr[:3]] == [0.0, 5.0, 10.0] and tr[-1]["d"] == 995.0, tr[-1]
+        assert [p["d"] for p in tr[:3]] == [0.0, 5.0, 10.0] and tr[-2]["d"] == 995.0, tr[-2]
+        assert (tr[-1]["d"], tr[-1]["t"]) == (1000.0, 20.0), \
+            f"a counted lap's trace closes at the line length with the lap time: {tr[-1]}"
         mid = tr[100]
         assert abs(mid["t"] - 10.0) < 0.002 and mid["speed_kmh"] == 180.0, mid
         assert (mid["throttle"], mid["brake"], mid["gear"]) == (100.0, 0.0, 4), mid
         assert mid["steer_deg"] == 5.7, "0.1 rad of steering, positive to the left"
         assert abs(math.hypot(mid["x"], mid["z"]) - R) < 0.2, "positions stay on the circle"
-        assert lap2["sectors"] == [4.0, 4.0, 4.0, 4.0, 3.9], lap2["sectors"]
+        assert lap2["sectors"] == [4.0, 4.0, 4.0, 4.0, 4.0], lap2["sectors"]
+        assert _lap(idx, 1)["trace"][-1]["d"] == 995.0, \
+            "a lap that is not counted keeps its own trace end"
 
 
 def t_trace_uses_driven_distance_without_track():
@@ -160,8 +166,29 @@ def t_trace_uses_driven_distance_without_track():
         assert lap2["track_id"] is None and lap2["track"] == "" and idx["track"] is None
         assert abs(lap2["trace"][100]["t"] - 10.0) < 0.002, lap2["trace"][100]
         assert abs(lap2["distance_m"] - 997.5) < 0.1, lap2["distance_m"]
-        assert lap2["trace"][-1]["d"] == 995.0 and len(lap2["sectors"]) == 5, \
-            "the driven distance spans the trace and its sectors"
+        assert lap2["trace"][-1]["d"] == lap2["distance_m"] and len(lap2["sectors"]) == 5, \
+            "without a track the trace closes at the driven lap distance"
+
+
+def t_counted_laps_close_at_the_line_so_sectors_add_up():
+    with tempfile.TemporaryDirectory() as d:
+        idx = _index(write_circle_recording(d, lap_secs=(20.0, 20.0, 19.0, 18.0),
+                                            ns=(400, 400, 200, 100)))
+        laps = [_lap(idx, n) for n in (2, 3, 4)]
+        assert len({lap["trace"][-2]["d"] for lap in laps}) > 1, \
+            "the fixture's laps end their 5 m grid at different distances"
+        for lap in laps:
+            tr = lap["trace"]
+            assert tr[-1]["d"] == 1000.0 and gl.lap_length_m(lap) == 1000.0, tr[-1]
+            ds, ts = [p["d"] for p in tr], [p["t"] for p in tr]
+            assert ds == sorted(set(ds)) and ts == sorted(ts), "d strictly rises, t never falls"
+            assert abs(sum(lap["sectors"]) - lap["time_s"]) <= 0.001, \
+                f"lap {lap['lap']}: sectors {lap['sectors']} must add up to {lap['time_s']}"
+        assert {len(lap["sectors"]) for lap in laps} == {5}, "same boundaries on every lap"
+        best = gl.best_sectors(laps)
+        assert best == [3.6, 3.6, 3.6, 3.6, 3.6], f"the 18 s lap owns every sector: {best}"
+        assert gl.theoretical_best(laps) == round(sum(best), 3) == 18.0, \
+            "the theoretical best equals the fastest lap when it owns every sector"
 
 
 def t_assignment_for_the_recording_wins():
@@ -307,6 +334,18 @@ def t_trace_distance_strictly_rises_for_a_stop_and_a_step_back():
     assert ds == sorted(set(ds)) and ds[-1] == 20.0, ds
     assert tr[2]["t"] == 0.633, f"10 m lies between the 9 m and 15 m samples, the step back is dropped: {tr[2]}"
     assert gl.sectors(tr, gl.lap_length_m({"trace": tr}), step_m=10.0), "sector math accepts it"
+
+
+def t_trace_closes_off_grid_below_and_beyond_its_samples():
+    drv = [0.0, 3.0, 6.0, 9.0, 12.0, 15.0, 18.0, 21.0]
+    short = gl._trace(_samples(drv), FakeTracks(known=False), None, None, close=(12.34, 9.9))
+    assert [p["d"] for p in short] == [0.0, 5.0, 10.0, 12.3] and short[-1]["t"] == 9.9, \
+        f"stations past the lap length go, the closing point sits at it: {short}"
+    long = gl._trace(_samples(drv), FakeTracks(known=False), None, None, close=(30.0, 9.9))
+    assert [p["d"] for p in long][-2:] == [20.0, 30.0] and long[-1]["speed_kmh"] == 100.0, \
+        f"a closing point past the last sample keeps that sample's values: {long[-1]}"
+    assert gl._trace(_samples(drv), FakeTracks(known=False), None, None, close=(0.0, 1.0)) \
+        == gl._trace(_samples(drv), FakeTracks(known=False), None, None), "no length, no closing"
 
 
 def t_trace_none_projection_continues_from_the_last_projected_distance():
