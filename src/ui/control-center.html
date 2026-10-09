@@ -5181,6 +5181,11 @@ function tmSigned(v) {
   if (Math.abs(v) < 0.0005) return '0.000';
   return (v > 0 ? '+' : '') + v.toFixed(3);
 }
+// Mini-sector colour for B minus A; under half a millisecond reads as even, like tmSigned.
+function tmSecClass(diff) {
+  if (diff == null || Math.abs(diff) < 0.0005) return 'even';
+  return diff < 0 ? 'gain' : 'loss';
+}
 function tmEl(tag, attrs, parent) {
   const e = document.createElementNS(TM_NS, tag);
   Object.entries(attrs || {}).forEach(([k, v]) => e.setAttribute(k, v));
@@ -5442,7 +5447,7 @@ function tmRenderSectors() {
     const diff = ta != null && tb != null ? tb - ta : null;
     const row = body.insertRow();
     [String(i + 1), f(ta), f(tb), tmSigned(diff), f(bs)].forEach(v => { row.insertCell().textContent = v; });
-    if (diff != null && Math.abs(diff) >= 0.0005) row.cells[3].className = diff < 0 ? 'gain' : 'loss';
+    if (tmSecClass(diff) !== 'even') row.cells[3].className = tmSecClass(diff);
     if (tb != null && bs != null && Math.abs(tb - bs) < 0.0005) row.cells[2].className = 'best';
   }
   const foot = t.createTFoot().insertRow();
@@ -5452,7 +5457,7 @@ function tmRenderSectors() {
     foot.insertCell().textContent = v;
   });
   foot.cells[4].title = 'Theoretical best: the sum of the best mini-sectors';
-  if (lapDiff != null && Math.abs(lapDiff) >= 0.0005) foot.cells[3].className = lapDiff < 0 ? 'gain' : 'loss';
+  if (tmSecClass(lapDiff) !== 'even') foot.cells[3].className = tmSecClass(lapDiff);
   const laps = tmState.pool ? tmState.pool.laps || [] : [];
   const alone = !laps.some(l => tmKey(l) !== tmKey(B));
   $('tm-sec-sub').textContent = (tmState.sectorM || 200) + ' m'
@@ -5600,21 +5605,23 @@ function tmRenderMap() {
   const ta = tmTrace(A), tb = tmTrace(B);
   if (!tb.length) return;
   const W = tmMapW(), pad = 12;
-  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity, any = false;
+  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity, hasB = false;
   [ta, tb].forEach(t => t.forEach(p => {
     if (!tmMapPt(p)) return;
     if (p.x < x0) x0 = p.x; if (p.x > x1) x1 = p.x;
     if (p.z < z0) z0 = p.z; if (p.z > z1) z1 = p.z;
-    any = any || t === tb;
+    hasB = hasB || t === tb;
   }));
-  if (!any) {
+  if (!hasB) {
     svg.setAttribute('viewBox', '0 0 ' + W + ' 24');
     tmEl('text', {x: 0, y: 15}, svg).textContent = 'no position data in this lap';
     return;
   }
   const s = (W - 2 * pad) / (Math.max(x1 - x0, z1 - z0) || 1);
-  svg.setAttribute('viewBox', '0 0 ' + W + ' ' + Math.round((z1 - z0) * s + 2 * pad));
-  const P = p => [pad + (p.x - x0) * s, pad + (p.z - z0) * s];
+  const H = Math.round((z1 - z0) * s + 2 * pad);
+  svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+  const ox = (W - (x1 - x0) * s) / 2, oz = (H - (z1 - z0) * s) / 2;   // centre the shorter axis
+  const P = p => [ox + (p.x - x0) * s, oz + (p.z - z0) * s];
   const line = pts => {
     let d = '', pen = false;
     pts.forEach(p => {
@@ -5624,8 +5631,6 @@ function tmRenderMap() {
     });
     return d;
   };
-  const da = line(ta);
-  if (da) tmEl('path', {d: da, class: 'tm-a'}, svg);
   const per = (tmState.sectorM || 200) / TM_STEP;      // stations per mini-sector
   const sa = A ? A.sectors || [] : [];
   (B.sectors || []).forEach((secB, i) => {
@@ -5633,10 +5638,11 @@ function tmRenderMap() {
     if (!d) return;
     const secA = sa[i];
     const diff = secA != null && secB != null ? secB - secA : null;
-    const cls = diff == null || Math.abs(diff) < 0.0005 ? 'even' : diff < 0 ? 'gain' : 'loss';
-    const path = tmEl('path', {d, class: 'tm-seg ' + cls}, svg);
+    const path = tmEl('path', {d, class: 'tm-seg ' + tmSecClass(diff)}, svg);
     tmEl('title', {}, path).textContent = 'Sector ' + (i + 1) + (diff == null ? '' : ': ' + tmSigned(diff) + ' s');
   });
+  const da = line(ta);
+  if (da) tmEl('path', {d: da, class: 'tm-a'}, svg);    // a thin line over B's colours
   const [sx, sy] = P(tb.find(tmMapPt));
   tmEl('circle', {cx: sx, cy: sy, r: 3.5, class: 'tm-line'}, svg);   // start/finish line
   const dot = cls => tmEl('circle', {r: 5, cx: 0, cy: 0, visibility: 'hidden', class: cls}, svg);

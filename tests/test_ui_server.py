@@ -2114,7 +2114,7 @@ def t_telemetry_map_colours_mini_sectors():
     tm = _tm_script(_cc_page())
     fn = tm[tm.index("function tmRenderMap()"):tm.index("function tmMapCursor(")]
     assert "(p.z - z0) * s" in fn, "GT7 z runs downward on the map, as in the report"
-    assert "'gain'" in fn and "'loss'" in fn and "tm-seg" in fn
+    assert "tmSecClass(diff)" in fn and "tm-seg" in fn
     assert "tmMapCursor(ra, rb)" in tm[tm.index("function tmHover("):tm.index("function tmLeave(")]
     assert "tmRenderMap()" in _tm_fn(tm, "tmRender"), "every pair render redraws the map"
 
@@ -2157,6 +2157,43 @@ console.log([pair, axes.join(','), vis.join(','), alone, drawn(), String(tmState
     if out is not None:
         assert out.strip() == "1,1,1,1,0|true,true|visible,hidden|0,0,0,3,0|0,0,0,0,1|null", \
             f"B per mini-sector gain/loss/even, x right and z down, no dot past a lap: {out!r}"
+
+
+def t_telemetry_map_keeps_a_on_top_and_centres_the_layout():
+    out = _tm_node(_TM_MAP_COUNT + """
+tmState.sectorM = 10;
+tmState.lapA = {trace: trace(5), sectors: [1.5, 1.5]};
+tmState.lapB = {trace: trace(9), sectors: [1, 2, 3, 4]};
+tmRenderMap();
+const pair = drawn();
+const kids = $('tm-map').kids.map(k => k.tagName + '.' + ((k.attrs || {}).class || ''));
+const top = kids.indexOf('path.tm-a') > kids.lastIndexOf('path.tm-seg even');
+const tall = tmState.map.P({x: 0, z: 0})[0], W = tmState.map.W;
+const xs = [tall, tmState.map.P({x: 8, z: 0})[0]];
+tmState.lapA = null;
+tmState.lapB = {trace: trace(9).map(p => ({...p, x: p.z, z: p.x})), sectors: [1, 2, 3, 4]};
+tmRenderMap();
+const vb = $('tm-map').attrs.viewBox.split(' ').map(Number);
+const wide = [tmState.map.P({x: 0, z: 0}), tmState.map.P({x: 64, z: 8})];
+console.log([pair, top, Math.round(xs[0] + xs[1]) === W,
+             wide[0][0] === 12, Math.round(wide[1][0]) === W - 12,
+             wide[0][1] === 12, Math.round(wide[1][1]) === vb[3] - 12].join('|'));""")
+    if out is not None:
+        assert out.strip() == "1,1,1,2,0|true|true|true|true|true|true", \
+            f"A lies on top, a sector past A's end is even, the layout sits centred: {out!r}"
+
+
+def t_telemetry_sector_class_is_shared_by_map_and_table():
+    tm = _tm_script(_cc_page())
+    out = _run_js(_tm_fn(tm, "tmSecClass") + """
+console.log([null, 0.0004, -0.0004, 0.0005, -0.0005, 1].map(tmSecClass).join(','));""")
+    if out is not None:
+        assert out.strip() == "even,even,even,loss,gain,loss", out
+    for fn in ("tmRenderMap", "tmRenderSectors"):
+        body = tm[tm.index("function " + fn + "("):]
+        body = body[:body.index("\n}\n")]
+        assert "tmSecClass(" in body and "0.0005" not in body.replace("< 0.0005) row.cells[2]", ""), \
+            f"{fn} uses the shared gain/loss rule"
 
 
 def t_telemetry_refit_redraws_only_on_a_width_change():
