@@ -470,6 +470,33 @@ def t_assignment_ignores_non_string_values():
         assert db.assignment("p/y") == "bbb001"
 
 
+
+def t_concurrent_learn_keeps_every_assignment():
+    import threading, time
+    with tempfile.TemporaryDirectory() as d:
+        dbs = [_db(d, [_row("aaa001", "Oval", OVAL)]) for _ in range(8)]
+        real = gt.TrackDB._read_learned
+
+        def slow(self):
+            doc = real(self)
+            time.sleep(0.02)
+            return doc
+        gt.TrackDB._read_learned = slow
+        try:
+            threads = [threading.Thread(target=db.learn, args=("aaa001", [], 0.0),
+                                        kwargs={"key": f"p/rec{i}"})
+                       for i, db in enumerate(dbs)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+        finally:
+            gt.TrackDB._read_learned = real
+        fresh = _db(d, [_row("aaa001", "Oval", OVAL)])
+        got = [fresh.assignment(f"p/rec{i}") for i in range(8)]
+        assert got == ["aaa001"] * 8, f"a concurrent learn must not drop another's assignment: {got}"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

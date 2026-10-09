@@ -365,6 +365,14 @@ def t_map_drops_non_finite_trace_points():
     assert parsed.tag == "svg", "a corrupt trace point must not blank the map or break its XML"
 
 
+def t_finite_points_skips_null_and_text_coordinates():
+    pts = [{"d": 0.0, "x": 1.0, "z": 2.0}, {"d": 5.0, "x": None, "z": 2.0},
+           {"d": "10", "x": 1.0, "z": 2.0}, {"d": 15.0, "x": 1.0, "z": "nan"},
+           {"d": 20.0, "x": True, "z": 2.0}, {"d": 25.0, "x": 3.0, "z": 4.0}]
+    assert [p["d"] for p in rtel._finite_points(pts)] == [0.0, 25.0], \
+        "a corrupt cache point is dropped, not raised on"
+
+
 def t_track_map_thins_long_traces_but_sectors_still_join():
     def seg(x0, x1):
         return [[float(x), 0.0] for x in range(x0, x1 + 1, 5)]

@@ -300,7 +300,8 @@ def t_gt7_data_update_data_forces_and_never_raises():
 
     with _fake_gt7_data(Fake):
         assert m.gt7_data_update_data()["ok"] is True and seen == [True]
-        assert m.gt7_data_status_data() == {"ok": False, "error": "could not read GT7 data: disk"}
+        assert m.gt7_data_status_data() == {"ok": False,
+                                            "error": "could not read GT7 data: RuntimeError"}
 
 
 def t_gt7_data_update_data_maps_errors():
@@ -318,7 +319,25 @@ def t_gt7_data_update_data_maps_errors():
         assert m.gt7_data_update_data()["ok"] is False, "every file failed -> not ok"
     with _fake_gt7_data(Boom):
         assert m.gt7_data_update_data() == {"ok": False,
-                                            "error": "could not update GT7 data: disk"}
+                                            "error": "could not update GT7 data: RuntimeError"}
+
+
+def t_gt7_data_wrappers_name_no_runtime_path():
+    where = os.path.join(os.sep, "home", "producer", "runtime", "gt7")
+
+    class Locked:
+        @staticmethod
+        def update(base, force=False):
+            raise PermissionError(13, "Permission denied", where)
+
+        @staticmethod
+        def status(base, bundled=None):
+            raise RuntimeError(f"cannot read {where}")
+
+    with _fake_gt7_data(Locked):
+        up, st = m.gt7_data_update_data(), m.gt7_data_status_data()
+    assert up["error"] == "could not update GT7 data: Permission denied", up
+    assert where not in st["error"] and st["ok"] is False, st
 
 
 def t_gt7_data_status_cmd_names_missing_signatures():
@@ -537,6 +556,30 @@ def t_telemetry_export_writes_next_to_recording():
         assert os.path.exists(os.path.join(out, "laps.csv"))
         with open(os.path.join(out, "laps.csv"), encoding="utf-8") as fh:
             assert fh.readline().rstrip().endswith(",track,layout")
+
+
+def t_telemetry_export_failure_exits_with_a_clean_message():
+    import struct
+    import tempfile
+    import gt7_recording
+    with tempfile.TemporaryDirectory() as d:
+        name = _rec_dir_with_one(d)
+        real_dir, real_export = m._telemetry_rec_dir, gt7_recording.export_csv
+        m._telemetry_rec_dir = lambda: d
+        try:
+            for exc in (OSError(28, "No space left on device", os.path.join(d, "out")),
+                        struct.error("unpack requires a buffer of 4 bytes")):
+                def boom(*_a, _exc=exc, **_k):
+                    raise _exc
+                gt7_recording.export_csv = boom
+                try:
+                    m.telemetry_export_cmd([name])
+                    raise AssertionError("a failed export must exit non-zero")
+                except SystemExit as e:
+                    msg = str(e.code)
+                assert d not in msg and msg.startswith("could not export"), msg
+        finally:
+            m._telemetry_rec_dir, gt7_recording.export_csv = real_dir, real_export
 
 
 def t_telemetry_record_without_relay_exits_nonzero():

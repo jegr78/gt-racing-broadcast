@@ -13,6 +13,7 @@ import math
 import os
 import queue
 import struct
+import tempfile
 import threading
 import time
 
@@ -31,6 +32,7 @@ RENAME_TRIES = 3
 RENAME_WAIT_S = 0.2
 _REC = struct.Struct("<dBH")
 _META = 0x00
+_MIN_PAYLOAD = gt7_telemetry.OFF_BRAKE + 1    # the shortest payload parse_packet can read
 _DONE = object()              # close() sentinel: wakes the writer without waiting FLUSH_S
 
 
@@ -227,7 +229,8 @@ class Recording:
         self.header = header
 
     def packets(self):
-        """Yield (wall_ts, kind, plain) per packet; a truncated last record ends it."""
+        """Yield (wall_ts, kind, plain) per packet; a truncated last record ends it and
+        a record too short to parse is skipped."""
         with open(self.path, "rb") as fh:
             fh.seek(self._offset)
             while True:
@@ -244,11 +247,19 @@ class Recording:
                     except (ValueError, KeyError, TypeError, UnicodeDecodeError):
                         pass  # a damaged meta record only loses the drop count
                     continue
+                if n < _MIN_PAYLOAD:
+                    continue
                 yield wall_ts, chr(kind), payload
 
 
+def _has_header_line(path):
+    with open(path, "rb") as fh:
+        return b"\n" in fh.read(4096)
+
+
 def finalize_partials(rec_dir):
-    """Rename every leftover `.gt7rec.part` in rec_dir to `.gt7rec`; returns the new names."""
+    """Rename every leftover `.gt7rec.part` in rec_dir to `.gt7rec` and remove one that
+    never got its header line (no reader would list it); returns the new names."""
     try:
         names = sorted(os.listdir(rec_dir))
     except OSError:
@@ -256,6 +267,14 @@ def finalize_partials(rec_dir):
     done = []
     for name in names:
         if not name.endswith(SUFFIX + PART):
+            continue
+        try:
+            if not _has_header_line(os.path.join(rec_dir, name)):
+                os.remove(os.path.join(rec_dir, name))
+                LOG.info("removed empty telemetry recording %s", name)
+                continue
+        except OSError as e:
+            LOG.warning("could not check telemetry recording %s: %s", name, e)
             continue
         target = os.path.join(rec_dir, name[:-len(PART)])
         if os.path.exists(target):    # _free_path alone would count this .part as taken
@@ -525,6 +544,7 @@ class RecordControl:
         self._active = self._load(default)
         self._writer = None
         self._error = None
+        self._state_error = None
         self._closed = False
         self._factory = writer_factory or (
             lambda: RecordingWriter(rec_dir, profile, relay_version))
@@ -538,14 +558,28 @@ class RecordControl:
             return bool(default)
 
     def _save(self):
+        """Persist the switch atomically; a failure shows as `state_error` in status()
+        and never stops the live switch."""
+        tmp = None
         try:
-            os.makedirs(os.path.dirname(self._state_path) or ".", exist_ok=True)
-            tmp = self._state_path + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as fh:
+            state_dir = os.path.dirname(self._state_path) or "."
+            os.makedirs(state_dir, exist_ok=True)
+            fd, tmp = tempfile.mkstemp(dir=state_dir, prefix="telemetry-record.", suffix=".tmp")
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
                 json.dump({"active": self._active}, fh)
             os.replace(tmp, self._state_path)
-        except OSError:
-            pass  # best-effort, never crash the relay
+            tmp = None
+            self._state_error = None
+        except OSError as e:
+            if self._state_error is None:
+                LOG.warning("could not save the telemetry recording switch: %s", e.strerror or e)
+            self._state_error = _sanitize_error(e)
+        finally:
+            if tmp is not None:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass  # already gone
 
     def put(self, wall_ts, kind, plain):
         bad = None
@@ -608,6 +642,7 @@ class RecordControl:
             out["bytes"] = w.bytes if w is not None else 0
             out["dropped"] = w.dropped if w is not None else 0
             out["error"] = self._error or (w.error if w is not None else None)
+            out["state_error"] = self._state_error
             since = out["since"]
             out["elapsed_s"] = None if since is None else max(
                 0.0, (time.time() if now is None else now) - since)

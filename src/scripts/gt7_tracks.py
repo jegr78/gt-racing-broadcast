@@ -10,6 +10,7 @@ import json
 import math
 import os
 import tempfile
+import threading
 
 import gt7_data
 
@@ -21,6 +22,7 @@ GRID_M = 50.0
 MIN_POINTS = 10
 POINT_STEP_M = 20.0
 LEARNED_FORMAT = "racecast-gt7-learned"
+_LEARN_LOCK = threading.Lock()   # TrackDBs of one process share learned-tracks.json
 
 
 class _Line:
@@ -238,6 +240,10 @@ class TrackDB:
 
         A user-triggered write: a write failure (OSError) propagates to the caller
         instead of being swallowed, unlike the read paths elsewhere in this class."""
+        with _LEARN_LOCK:
+            return self._learn(official_id, points, length_m, key)
+
+    def _learn(self, official_id, points, length_m, key):
         if not self._learned_path:
             raise ValueError("no learned-tracks file configured")
         doc = self._read_learned()

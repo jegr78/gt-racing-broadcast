@@ -242,6 +242,25 @@ def t_finalize_partials_renames_leftovers():
         assert rec.finalize_partials(os.path.join(d, "missing")) == []
 
 
+def t_finalize_partials_removes_a_part_without_a_header_line():
+    with tempfile.TemporaryDirectory() as d:
+        for name, body in (("20260101-100000.gt7rec.part", b""),
+                           ("20260101-110000.gt7rec.part", b'{"format": "racecast-gt7')):
+            with open(os.path.join(d, name), "wb") as fh:
+                fh.write(body)
+        assert rec.finalize_partials(d) == []
+        assert os.listdir(d) == [], "a stub the relay never wrote a header into is removed"
+
+
+def t_packets_skip_a_record_shorter_than_a_base_packet():
+    with tempfile.TemporaryDirectory() as d:
+        w = _write(d, [(1.0, "A", _plain()), (2.0, "A", b"short"), (3.0, "A", _plain(lap=2))])
+        got = [ts for ts, _k, _p in rec.Recording(w.path).packets()]
+        assert got == [1.0, 3.0], f"a damaged short record must not reach the parser: {got}"
+        out = rec.export_csv(w.path, os.path.join(d, "out"), include_all=True)
+        assert out["samples"] == 2, out
+
+
 def t_list_recordings_reports_duration_laps_partial():
     with tempfile.TemporaryDirectory() as d:
         items = [(10.0, "A", _plain(lap=1)), (20.0, "A", _plain(lap=2)),
@@ -587,6 +606,28 @@ def t_control_save_creates_missing_state_dir():
         assert os.path.exists(state), "a toggle must persist even into a missing directory"
         with open(state, encoding="utf-8") as fh:
             assert json.load(fh)["active"] is True
+
+
+def t_control_save_is_atomic_and_reports_a_failed_write():
+    with tempfile.TemporaryDirectory() as d:
+        c = _control(d)
+        real = rec.os.replace
+        rec.os.replace = lambda *a: (_ for _ in ()).throw(PermissionError(13, "Permission denied"))
+        try:
+            st = c.set_active(True)
+        finally:
+            rec.os.replace = real
+        assert st["active"] is True, "a failed state write must not stop the live switch"
+        assert c.status()["state_error"] == "Permission denied", c.status()
+        c.put(1000.0, "A", _plain())
+        assert c.status()["error"] is None, "recording still runs"
+        left = [n for n in os.listdir(d) if n.endswith(".tmp")]
+        assert left == [], f"no temp file is left behind: {left}"
+        c.set_active(False)
+        assert c.status()["state_error"] is None, "the next good write clears it"
+        c.close()
+        with open(os.path.join(d, "telemetry-record.json"), encoding="utf-8") as fh:
+            assert json.load(fh)["active"] is False
 
 
 class _Tracks:

@@ -133,7 +133,7 @@ def t_update_failure_keeps_old_file_and_retries():
         base = os.path.join(d, "runtime")
         gd.update(base, fetch=_fetch(GOOD), now=1000.0)
         broken = dict(GOOD, **{"signatures.json": b"<html>rate limited</html>",
-                               "index.json": OSError("offline")})
+                               "index.json": OSError(101, "offline")})
         res = gd.update(base, force=True, fetch=_fetch(broken), now=5000.0)
         assert res["files"]["signatures.json"].startswith("error")
         assert res["files"]["index.json"] == "error: offline"
@@ -282,6 +282,35 @@ def t_write_removes_its_temp_file_on_failure():
             raise AssertionError("replacing a directory must fail")
         assert sorted(os.listdir(d)) == ["index.json"], os.listdir(d)
 
+
+
+def t_update_errors_never_carry_a_runtime_path():
+    import urllib.error
+    with tempfile.TemporaryDirectory() as d:
+        base = os.path.join(d, "runtime")
+        where = os.path.join(base, "gt7", "cars.csv")
+        broken = dict(GOOD, **{
+            "index.json": RuntimeError(f"cannot open {where}"),
+            "signatures.json": urllib.error.URLError(OSError(111, "Connection refused")),
+            "cargrp.csv": urllib.error.HTTPError("https://x/cargrp.csv", 403, "Forbidden",
+                                                 None, None)})
+        real = gd._write
+
+        def write(dir_, name, data):
+            if name == "cars.csv":
+                raise PermissionError(13, "Permission denied", where)
+            return real(dir_, name, data)
+        gd._write = write
+        try:
+            res = gd.update(base, force=True, fetch=_fetch(broken), now=1000.0)
+        finally:
+            gd._write = real
+        files = res["files"]
+        assert files["cars.csv"] == "error: Permission denied", files
+        assert files["index.json"] == "error: RuntimeError", files
+        assert files["signatures.json"] == "error: Connection refused", files
+        assert files["cargrp.csv"] == "error: HTTP 403", files
+        assert d not in json.dumps(files), "no runtime path reaches the CLI or Control Center"
 
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):

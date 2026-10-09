@@ -492,7 +492,8 @@ def make_handler(ctx):
                     return self._json(ctx["gt7_data_status"]())
                 except Exception as exc:
                     return self._json({"ok": False,
-                                       "error": f"could not read GT7 data: {exc}"},
+                                       "error": "could not read GT7 data: "
+                                                f"{type(exc).__name__}"},
                                       code=500)
             if path == "/api/crew":
                 try:
@@ -914,7 +915,8 @@ def make_handler(ctx):
                     result = ctx["gt7_data_update"]()
                 except Exception as exc:
                     return self._json({"ok": False,
-                                       "error": f"could not update GT7 data: {exc}"},
+                                       "error": "could not update GT7 data: "
+                                                f"{type(exc).__name__}"},
                                       code=500)
                 return self._json(result, code=200 if result.get("ok") else 502)
             if path == "/api/fonts/restore":

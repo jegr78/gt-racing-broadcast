@@ -61,12 +61,14 @@ def gap_color(gap_s, worst_s):
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
+def _number(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+
 def _finite_points(trace):
     """Trace points whose d/x/z are usable numbers; a corrupt cache must not blank the map."""
     return [p for p in trace
-            if math.isfinite(p.get("d", float("nan")))
-            and math.isfinite(p.get("x", float("nan")))
-            and math.isfinite(p.get("z", float("nan")))]
+            if isinstance(p, dict) and all(_number(p.get(k)) for k in ("d", "x", "z"))]
 
 
 def _sector_map(best, pool):

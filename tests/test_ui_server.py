@@ -1637,6 +1637,15 @@ def t_gt7_data_update_route_maps_failures():
         ctx["gt7_data_update"] = lambda: 1 / 0
         code, body = _post_json(port, "/api/gt7-data/update", {})
         assert code == 500 and json.loads(body)["ok"] is False, (code, body)
+        hidden = os.path.join(os.sep, "home", "producer", "runtime", "gt7")
+
+        def locked():
+            raise PermissionError(13, "Permission denied", hidden)
+        ctx["gt7_data_update"] = ctx["gt7_data_status"] = locked
+        for code, body in (_post_json(port, "/api/gt7-data/update", {}),
+                           _get(port, "/api/gt7-data")):
+            text = body.decode() if isinstance(body, bytes) else body
+            assert code == 500 and hidden not in text, (code, text)
     finally:
         httpd.shutdown()
 

@@ -3329,8 +3329,9 @@ def telemetry_export_cmd(rest):
     try:
         res = gr.export_csv(path, out_dir, include_all=args.all, excel=args.excel,
                             cars=cars, tracks=tracks, key=_telemetry_track_key(path))
-    except gr.RecordingError as e:
-        sys.exit(str(e))
+    except Exception as e:  # noqa: BLE001  a damaged file or a full disk ends in one line, not a traceback
+        sys.exit(f"could not export {os.path.basename(path)}: "
+                 f"{_telemetry_reason(e, os.path.basename(path))}")
     print(f"wrote {res['samples']} samples and {res['laps']} laps to {res['dir']}")
     if res["dropped"]:
         print(f"note: {res['dropped']} packets were dropped while recording")
@@ -3689,7 +3690,7 @@ def gt7_data_update_data():
     try:
         res = _gt7_data_module().update(_runtime_base_dir(), force=True)
     except Exception as exc:  # noqa: BLE001  the Control Center shows the message instead
-        return {"ok": False, "error": f"could not update GT7 data: {exc}"}
+        return {"ok": False, "error": f"could not update GT7 data: {_telemetry_reason(exc)}"}
     return {"ok": _gt7_files_ok(res["files"]), "changed": res["changed"], "files": res["files"]}
 
 
@@ -3698,7 +3699,7 @@ def gt7_data_status_data():
     try:
         st = _gt7_data_module().status(_runtime_base_dir(), resource_path("assets/gt7"))
     except Exception as exc:  # noqa: BLE001  the Control Center shows the message instead
-        return {"ok": False, "error": f"could not read GT7 data: {exc}"}
+        return {"ok": False, "error": f"could not read GT7 data: {_telemetry_reason(exc)}"}
     return {"ok": True, "checked": st["checked"], "files": st["files"]}
 
 

@@ -155,6 +155,20 @@ def _write(d, name, data):
         raise
 
 
+def error_reason(e):
+    """A per-file error text without the machine path an OSError carries: the OS
+    message, our own validation text, else the exception's type name."""
+    if isinstance(e, http_util.HTTPError):
+        return f"HTTP {e.code}"
+    if isinstance(getattr(e, "reason", None), OSError):
+        e = e.reason              # urllib wraps the socket error
+    if isinstance(e, OSError):
+        return e.strerror or type(e).__name__
+    if isinstance(e, ValueError):
+        return str(e)
+    return type(e).__name__
+
+
 def update(runtime_base, force=False, fetch=None, now=None):
     """Fetch every source, keep only validated files; at most once per 24 h unless forced."""
     fetch = fetch or (lambda url: http_util.get_bytes(url, timeout=20))
@@ -183,7 +197,7 @@ def update(runtime_base, force=False, fetch=None, now=None):
             shas[name], times[name] = sha, now
             files[name] = "updated"
         except Exception as e:  # noqa: BLE001  offline, a bad download or an unexpected
-            files[name] = f"error: {e}"  # fetch/validate/write failure keeps the old file
+            files[name] = f"error: {error_reason(e)}"  # fetch/validate/write failure keeps the old file
     fetched = any(not v.startswith("error") for v in files.values())
     if fetched:
         try:
