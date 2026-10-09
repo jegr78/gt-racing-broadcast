@@ -1210,6 +1210,11 @@ let povVisBtn = null;                 // the relay-driven POV visibility button 
 let teleVisBtn = null;                // the relay-driven HUD telemetry show/hide button
 let teleRecBtn = null;                // the relay-driven telemetry recording button
 
+// Keys relayPoll reveals only when /status carries telemetry; hidden until then.
+function relayGated(item){
+  return item.relay === "telemetry" || item.relay === "telemetry/record";
+}
+
 /* RED FLAG toggles the Standby Cover through the relay's /obs/source endpoint,
    using the last-known state from /obs/state. Built once and re-appended to #pgmBus
    by every buildControls() call, so a solo rebuild never drops it; buildControls
@@ -1276,6 +1281,7 @@ function buildControls(cfg){
     const b = mkKey(item.label, item.scene,
                     ()=> item.relay ? relayCall(item.relay + "/toggle") : toggleSource(item, b));
     b._item = item; toggleKeys.push(b); $("#scnVisBus").appendChild(b);
+    b.hidden = relayGated(item);
     if (item.relay === "pov") povVisBtn = b;
     if (item.relay === "telemetry") teleVisBtn = b;
     if (item.relay === "telemetry/record") teleRecBtn = b;
@@ -2058,6 +2064,24 @@ function trackLabel(t){               // "Nürburgring - Grand Prix (reverse)"; 
   return [t.track, t.layout].filter(Boolean).join(" - ") + (t.reverse ? " (reverse)" : "");
 }
 
+// The REC key: red while recording, amber when the writer failed. `down` (relay
+// unreachable) drops that state but keeps the key where it is.
+function renderTeleRec(rec, down){
+  if (!teleRecBtn) return;
+  if (!down) teleRecBtn.hidden = !rec;
+  teleRecBtn.classList.toggle("air", !!(rec && rec.active && !rec.error));
+  teleRecBtn.classList.toggle("warn", !!(rec && rec.error));
+  teleRecBtn.title = down ? "relay unreachable"
+    : rec && rec.error ? "Recording stopped: " + rec.error
+    : rec && rec.file ? "Recording " + rec.file : "";
+  let cost = teleRecBtn.querySelector(".cost");
+  if (!cost){ cost = document.createElement("span"); cost.className = "cost";
+              teleRecBtn.appendChild(cost); }
+  cost.textContent = rec && rec.active && rec.elapsed_s != null
+    ? fmtDur(rec.elapsed_s) : "";
+  cost.hidden = !cost.textContent;
+}
+
 async function relayPoll(){
   try{
     const r = await fetch("/status", {cache:"no-store"});
@@ -2105,20 +2129,7 @@ async function relayPoll(){
       teleVisBtn.hidden = !d.telemetry;
       teleVisBtn.classList.toggle("on", !!(d.telemetry && d.telemetry.visible));
     }
-    if (teleRecBtn){                      // recording state; amber when the writer failed
-      const rec = d.telemetry && d.telemetry.record;
-      teleRecBtn.hidden = !rec;
-      teleRecBtn.classList.toggle("air", !!(rec && rec.active && !rec.error));
-      teleRecBtn.classList.toggle("warn", !!(rec && rec.error));
-      teleRecBtn.title = rec && rec.error ? "Recording stopped: " + rec.error
-        : rec && rec.file ? "Recording " + rec.file : "";
-      let cost = teleRecBtn.querySelector(".cost");
-      if (!cost){ cost = document.createElement("span"); cost.className = "cost";
-                  teleRecBtn.appendChild(cost); }
-      cost.textContent = rec && rec.active && rec.elapsed_s != null
-        ? fmtDur(rec.elapsed_s) : "";
-      cost.hidden = !cost.textContent;
-    }
+    renderTeleRec(d.telemetry && d.telemetry.record);
     const car = d.telemetry && d.telemetry.car;   // the GT7 car the driver is in (#713)
     $("#stCar").hidden = !car;
     $("#stCar b").textContent = carLabel(car);
@@ -2223,6 +2234,7 @@ async function relayPoll(){
     $("#stHealth").title = "relay unreachable";
     $("#stCar").hidden = true;             // no stale car while the relay is down
     $("#stTrack").hidden = true;
+    renderTeleRec(null, true);
     $("#feedHealth").innerHTML = "";
   }
 }
