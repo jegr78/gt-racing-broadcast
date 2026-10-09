@@ -289,13 +289,14 @@ def list_recordings(rec_dir, count_laps=False):
         path = os.path.join(rec_dir, name)
         try:
             r = Recording(path)
-        except RecordingError:
+            size, mtime = os.path.getsize(path), os.path.getmtime(path)
+        except (RecordingError, OSError):    # e.g. the relay finalised a .part meanwhile
             continue
         if not count_laps:
             start = _started_ts(r.header)
-            rows.append({"name": name, "path": path, "size": os.path.getsize(path),
+            rows.append({"name": name, "path": path, "size": size,
                          "started": r.header.get("started", ""),
-                         "duration_s": max(0.0, os.path.getmtime(path) - start) if start else 0.0,
+                         "duration_s": max(0.0, mtime - start) if start else 0.0,
                          "laps": None, "partial": name.endswith(PART)})
             continue
         first = last = None
@@ -306,7 +307,7 @@ def list_recordings(rec_dir, count_laps=False):
             first = wall_ts if first is None else first
             last = wall_ts
             eng.update(gt7_telemetry.parse_packet(plain), wall_ts)
-        rows.append({"name": name, "path": path, "size": os.path.getsize(path),
+        rows.append({"name": name, "path": path, "size": size,
                      "started": r.header.get("started", ""),
                      "duration_s": (last - first) if first is not None else 0.0,
                      "laps": len(laps), "partial": name.endswith(PART)})

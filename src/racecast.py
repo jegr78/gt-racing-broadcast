@@ -1626,9 +1626,10 @@ def _recordings_in_window(rows, frm, to):
     for r in rows:
         try:
             start = datetime.datetime.fromisoformat(r["started"]).timestamp()
+            duration = float(r.get("duration_s") or 0.0)
         except (KeyError, TypeError, ValueError):
             continue
-        if start <= to and start + float(r.get("duration_s") or 0.0) >= frm:
+        if start <= to and start + duration >= frm:
             out.append(r)
     return out
 
