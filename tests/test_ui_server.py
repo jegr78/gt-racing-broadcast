@@ -560,7 +560,6 @@ def _ctx_with_sources(tmp):
     """A ctx whose 'relay' log source points at tmp/logs, mirroring the
     {files, dir, archives, read} shape of racecast._log_sources(). Kept
     self-contained so this server test does not depend on racecast.py."""
-    import re as _re
     d = os.path.join(tmp, "logs")
 
     def files():
@@ -571,7 +570,7 @@ def _ctx_with_sources(tmp):
             return []
         out = [os.path.join(d, n) for n in names
                if os.path.isfile(os.path.join(d, n))
-               and not _re.search(r"\.\d{4}-\d{2}-\d{2}$", n)]
+               and not re.search(r"\.\d{4}-\d{2}-\d{2}$", n)]
         return sorted(out)
 
     def archives():
@@ -583,7 +582,7 @@ def _ctx_with_sources(tmp):
             names = []
         for name in names:
             for base in bases:
-                m = _re.fullmatch(_re.escape(base) + r"\.(\d{4}-\d{2}-\d{2})", name)
+                m = re.fullmatch(re.escape(base) + r"\.(\d{4}-\d{2}-\d{2})", name)
                 if m:
                     dates.add(m.group(1))
         return sorted(dates, reverse=True)
@@ -591,7 +590,7 @@ def _ctx_with_sources(tmp):
     def read(token):
         # Resolve a date token to the concatenated archive text; guard traversal.
         if (not token or "/" in token or "\\" in token or os.sep in token
-                or ".." in token or not _re.fullmatch(r"\d{4}-\d{2}-\d{2}", token)):
+                or ".." in token or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", token)):
             return None
         chunks = []
         for f in files():
@@ -677,10 +676,9 @@ def t_root_serves_the_page():
 def t_page_survives_its_bundled_file_being_deleted():
     # A frozen build unpacks the page into the OS temp dir, and the OS can reap that
     # dir under the running process. Serving from memory survives it.
-    import shutil as _shutil
     tmp = tempfile.mkdtemp()
     page = os.path.join(tmp, "control-center.html")
-    _shutil.copyfile(os.path.join(ROOT, "src", "ui", "control-center.html"), page)
+    shutil.copyfile(os.path.join(ROOT, "src", "ui", "control-center.html"), page)
     ctx = _ctx()
     ctx["page_path"] = page
     httpd, port = _serve(ctx)
@@ -693,7 +691,7 @@ def t_page_survives_its_bundled_file_being_deleted():
         assert b"racecast Control Center" in body
     finally:
         httpd.shutdown()
-        _shutil.rmtree(tmp, ignore_errors=True)
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def t_missing_page_reports_how_to_recover():
@@ -1834,7 +1832,6 @@ def t_overlay_font_serve_missing_is_404():
 
 
 def t_overlay_font_serve_returns_bytes_and_type():
-    import tempfile
     ctx = _ctx()
     fd, fpath = tempfile.mkstemp(suffix=".woff2")
     os.write(fd, b"FONTDATA"); os.close(fd)
@@ -1851,7 +1848,6 @@ def t_overlay_font_serve_returns_bytes_and_type():
 
 
 def t_profile_logo_route_serves_image_with_type():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         svg = os.path.join(td, "logo.svg")
         with open(svg, "wb") as fh:

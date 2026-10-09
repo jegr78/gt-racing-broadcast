@@ -85,7 +85,6 @@ def t_fetch_tool_uses_the_shared_validator():
 def t_fetch_tool_writes_through_gt7_data():
     import shutil
     import sys
-    import tempfile
     tool = _load("fetch_gt7_data", ("tools", "fetch-gt7-data.py"))
     with tempfile.TemporaryDirectory() as d:
         for name in tool.BUNDLED:

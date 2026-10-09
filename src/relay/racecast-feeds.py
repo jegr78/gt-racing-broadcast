@@ -10559,9 +10559,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 return companion_url
             bind_ip = None
             try:
-                import sys as _sys, json as _json
-                with open(companion_common.companion_config_path(_sys.platform)) as fh:
-                    bind_ip = (_json.load(fh).get("bind_ip") or "").strip() or None
+                with open(companion_common.companion_config_path(sys.platform)) as fh:
+                    bind_ip = (json.load(fh).get("bind_ip") or "").strip() or None
             except Exception:
                 bind_ip = None
             return console_proxy.resolve_companion_base(bind_ip, tailscale.detect_tailscale_ip())
@@ -10577,7 +10576,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             base = self._companion_base()
             u = urlsplit(base); host, cport = u.hostname or "127.0.0.1", u.port or 8000
             if console_proxy.is_websocket_upgrade(self.headers):
-                import socket, select
+                import select
                 try:
                     up = socket.create_connection((host, cport), timeout=5)
                 except OSError as e:

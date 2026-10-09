@@ -204,7 +204,6 @@ def t_allowlist_surface_is_a_full_regex():
 
 
 def t_load_allowlist_requires_a_reason():
-    import json, tempfile
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as fh:
         json.dump([{"surface": "s", "rule": "contrast", "selector": "#a", "reason": ""}], fh)
     try:
@@ -217,7 +216,6 @@ def t_load_allowlist_requires_a_reason():
 
 
 def t_load_allowlist_rejects_a_non_object_entry():
-    import json, tempfile
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as fh:
         json.dump(["#a"], fh)
     try:
@@ -230,7 +228,6 @@ def t_load_allowlist_rejects_a_non_object_entry():
 
 
 def t_load_allowlist_rejects_an_invalid_regex():
-    import json, tempfile
     with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as fh:
         json.dump([{"surface": "s", "rule": "contrast", "selector": "#a(", "reason": "r"}], fh)
     try:

@@ -25,7 +25,6 @@ def _mkoverlay(tmp, hud_css=None, timer_css=None, fonts=None):
     return od
 
 def t_splitscreen_page_wires_data_and_override():
-    import os
     path = os.path.join(ROOT, "src", "obs", "splitscreen.html")
     assert os.path.exists(path), "src/obs/splitscreen.html missing"
     with open(path, encoding="utf-8") as fh:
@@ -40,7 +39,6 @@ def t_splitscreen_is_an_overlay_page():
 
 
 def t_read_overlay_css_splitscreen_present():
-    import tempfile, os
     with tempfile.TemporaryDirectory() as od:
         with open(os.path.join(od, "splitscreen.css"), "w") as fh:
             fh.write("#split-left{color:#fff}")
@@ -786,7 +784,7 @@ def t_cc_preview_panel_hides_telemetry_fields_without_telemetry():
 
 
 def t_splitscreen_labels_source_in_collection_splitscreen_scene_only():
-    import os, json
+    import json
     with open(os.path.join(ROOT, "src", "obs", "GT_Racing_Endurance.json"),
               encoding="utf-8") as fh:
         d = json.load(fh)
@@ -1175,7 +1173,6 @@ def t_intermission_in_obs_page_paths():
 
 
 def t_read_overlay_css_intermission_present():
-    import tempfile, os
     with tempfile.TemporaryDirectory() as od:
         with open(os.path.join(od, "intermission.css"), "w") as fh:
             fh.write("#ichat{right:0}")
@@ -1183,7 +1180,6 @@ def t_read_overlay_css_intermission_present():
 
 
 def t_intermission_page_polls_broadcast_chat_and_links_override():
-    import os
     path = os.path.join(ROOT, "src", "obs", "intermission.html")
     assert os.path.exists(path), "src/obs/intermission.html missing"
     with open(path, encoding="utf-8") as fh:
