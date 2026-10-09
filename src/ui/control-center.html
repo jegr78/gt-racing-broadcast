@@ -488,6 +488,7 @@
   .tmitem:hover { background:rgba(148,163,184,.08); }
   .tmitem.sel { background:rgba(59,130,246,.14); box-shadow:inset 2px 0 0 var(--accent); }
   .tmitem.nc { color:var(--dim); }
+  .tmitem:disabled:hover { background:transparent; }
   .tmitem .tmsub { grid-column:1 / -1; color:var(--dim); font-size:11px; overflow:hidden;
                    text-overflow:ellipsis; white-space:nowrap; }
   .tmpick { display:flex; flex-wrap:wrap; gap:10px 18px; align-items:center; margin:0 0 10px;
@@ -5170,6 +5171,7 @@ const TM_CH = [
   {key: 'delta', label: 'Delta B-A', unit: 's', h: 90, sym: true},
 ];
 const tmLapsReq = new Map();     // url -> pending request, so a cold index runs once
+let tmLapGen = 0;                // bumped when cached laps go stale; older answers are not cached
 const tmSeq = {load: 0, rec: 0, b: 0, pair: 0};   // only the newest call of each kind renders
 
 function tmKey(l) { return l.rec + '|' + l.session + '|' + l.lap; }
@@ -5200,8 +5202,16 @@ async function tmGet(url) {
   catch (e) { return {ok: false, error: 'Control Center not reachable.'}; }
 }
 function tmShared(url) {
-  if (!tmLapsReq.has(url)) tmLapsReq.set(url, tmGet(url).finally(() => tmLapsReq.delete(url)));
+  if (!tmLapsReq.has(url)) {
+    const p = tmGet(url).finally(() => { if (tmLapsReq.get(url) === p) tmLapsReq.delete(url); });
+    tmLapsReq.set(url, p);
+  }
   return tmLapsReq.get(url);
+}
+function tmDropLaps() {
+  tmLapGen++;
+  tmLapCache.clear();
+  tmLapsReq.clear();
 }
 function tmTrackName(t) {
   return t.track + (t.layout ? ' - ' + t.layout : '') + (t.reverse ? ' (reverse)' : '');
@@ -5242,8 +5252,7 @@ function tmReset() {
   Object.keys(tmSeq).forEach(k => { tmSeq[k]++; });
   tmState.loaded = false; tmState.rec = null; tmState.recs = []; tmState.recLaps = [];
   tmState.tracks = null;
-  tmLapCache.clear();
-  tmLapsReq.clear();
+  tmDropLaps();
   $('tm-note').hidden = true;
   $('tm-recs').textContent = '';
   tmErr('');
@@ -5252,6 +5261,7 @@ function tmReset() {
 
 async function tmLoad() {
   const seq = ++tmSeq.load;
+  tmLapGen++;
   tmLapCache.clear();
   tmState.tracks = null;
   $('tm-note').hidden = true;
@@ -5296,7 +5306,8 @@ function tmRenderRecs() {
     sub.textContent = (r.recording ? 'being written' : r.indexed ? tmTrackLabel(r.track) : 'not indexed yet')
       + ' · ' + Math.round(r.duration_s / 60) + ' min · ' + (r.size / 1e6).toFixed(1) + ' MB';
     b.append(name, laps, sub);
-    b.onclick = () => tmSelectRec(r.rec);
+    if (r.recording) b.disabled = true;           // laps/lap/learn refuse the open file
+    else b.onclick = () => tmSelectRec(r.rec);
     box.appendChild(b);
   });
 }
@@ -5413,10 +5424,11 @@ function tmPick(which, key) {
 // Resolves to {lap} or {error}; never writes page state, so a stale answer cannot leak.
 async function tmFetchLap(key) {
   if (tmLapCache.has(key)) return {lap: tmLapCache.get(key)};
+  const gen = tmLapGen;
   const [rec, session, lap] = key.split('|');
   const d = await tmShared('/api/telemetry/lap?' + new URLSearchParams({rec, session, lap}));
   if (!d.ok) return {error: d.error || 'could not load the lap'};
-  tmLapCache.set(key, d.lap);
+  if (gen === tmLapGen) tmLapCache.set(key, d.lap);
   return {lap: d.lap, sectorM: d.sector_m};
 }
 
@@ -5731,7 +5743,7 @@ async function tmLearn() {
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({rec, track_id: trackId})})).json();
     if (r.ok) {                           // the server rebuilds every index with the new track
-      tmLapCache.clear();
+      tmDropLaps();
       tmState.recs.forEach(x => { if (x.indexed) x.indexed = false; });
     }
     if (seq !== tmSeq.rec) return;

@@ -2134,7 +2134,7 @@ def t_telemetry_set_track_confirms_then_learns():
     learn = learn[:learn.index("\n}\n")]
     assert learn.index("confirmModal(") < learn.index("fetch('/api/telemetry/learn'"), \
         "learning writes machine-wide data, so it is confirmed first"
-    assert "tmLapCache.clear()" in learn and "tmSelectRec(" in learn
+    assert "tmDropLaps()" in learn and "tmSelectRec(" in learn
     assert "/api/telemetry/tracks" in tm
     sel = tm[tm.index("async function tmSelectRec("):tm.index("function tmRenderLaps()")]
     assert "tmShowSetTrack(d.recording.track)" in sel
@@ -2619,6 +2619,71 @@ console.log([refused, reload, tmState.rec, calls.filter(u => u.includes('rec=X')
         assert out.strip() == ("recording in progress: stop the recording to analyse it"
                                "|0,1,X,false,true,false|Y|1|"), \
             f"the server error shows, success reloads the recording, a late answer is dropped: {out!r}"
+
+
+def t_telemetry_lap_answer_from_before_set_track_is_not_cached():
+    out = _tm_node(_TM_TRACKS + """
+globalThis.confirmModal = async () => true;
+tmState.recs = [{rec: 'R', indexed: true}];
+tmState.rec = 'R';
+tmShowSetTrack(null);
+await tick();
+answer('/tracks', tracks);
+await tick();
+$('tm-track-pick').value = '5'; $('tm-track-pick').selectedIndex = 2;
+tmFetchLap('R|1|1');
+await tick();
+tmLearn();
+await tick();
+answer('/learn', {ok: true, track: {id: '5'}});
+await tick();
+tmFetchLap('R|1|1');
+await tick();
+const lapCalls = calls.filter(u => u.includes('/lap?')).length;
+const old = pending.find(p => p.url.includes('/lap?'));
+pending.splice(pending.indexOf(old), 1);
+old.res({json: async () => ({ok: true, lap: {mark: 'pre'}, sector_m: 200})});
+await tick();
+const afterOld = [tmLapCache.has('R|1|1'),
+                  [...tmLapsReq.keys()].filter(u => u.includes('/lap?')).length].join(',');
+answer('/lap?', {ok: true, lap: {mark: 'post'}, sector_m: 200});
+await tick();
+console.log([lapCalls, afterOld, (tmLapCache.get('R|1|1') || {}).mark].join('|'));""")
+    if out is not None:
+        assert out.strip() == "2|false,1|post", \
+            f"a lap request from before Set track never fills the cache or the shared request: {out!r}"
+
+
+def t_telemetry_reset_and_reload_drop_a_pending_lap_answer():
+    out = _tm_node("""
+const res = [];
+for (const [fn, key] of [[tmReset, 'R|1|1'], [tmLoad, 'R|1|2']]) {
+  tmFetchLap(key);
+  await tick();
+  fn();
+  await tick();
+  answer('/lap?', {ok: true, lap: {mark: 'old'}, sector_m: 200});
+  answer('/recordings', {ok: true, recordings: []});
+  await tick();
+  res.push(tmLapCache.has(key));
+}
+console.log(res.join(','));""")
+    if out is not None:
+        assert out.strip() == "false,false", \
+            f"a lap answer from before a reset or reload is not cached: {out!r}"
+
+
+def t_telemetry_open_recording_row_is_not_clickable():
+    out = _tm_node("""
+tmState.recs = [{rec: 'A', recording: true, duration_s: 60, size: 1e6, laps: null},
+                {rec: 'B', duration_s: 60, size: 1e6, laps: 3, indexed: true, track: null}];
+tmRenderRecs();
+const [a, b] = $('tm-recs').kids;
+console.log([a.disabled, typeof a.onclick, b.disabled, typeof b.onclick].join(' '));""")
+    if out is not None:
+        assert out.strip() == "true undefined false function", \
+            f"the file the relay writes is listed but cannot be opened: {out!r}"
+    assert ".tmitem:disabled" in _cc_page(), "a disabled row needs its own look"
 
 
 def t_telemetry_learn_says_whether_a_line_was_learned():
