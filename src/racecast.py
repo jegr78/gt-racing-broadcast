@@ -3333,7 +3333,7 @@ def telemetry_delete_cmd(rest):
 
 
 _TELEMETRY_MEMO = {}          # path -> (stamp, lap index without traces), oldest first
-TELEMETRY_MEMO_MAX = 4096    # a summary entry is tens of KB for a 3 h recording; a list scan must fit
+TELEMETRY_MEMO_MAX = 4096    # a few KB per lap in memory; a list scan over every recording must fit
 _TELEMETRY_LOCK = threading.Lock()      # guards the memo and the build-lock table
 _TELEMETRY_BUILD_LOCKS = {}             # path -> Lock, so one recording is never indexed twice at once
 
