@@ -90,9 +90,9 @@ Loaded when working under `src/ui/`.
   travel with the checkout. Mac, Windows or Linux): Companion buttons via the
   **`companion-screenshots`** skill; Control Center / Director Panel / the
   `/console` + cockpit pages via the **`wiki-screenshots`** skill (it drives a
-  running dev-build instance with the Playwright MCP, takes an **element**
-  screenshot of the relevant card/modal, e.g. `#ov-modal .ovmodal-card`, so the
-  framing matches the existing images, and documents the reproducible fake-content
+  running dev-build instance with the Playwright MCP, takes a **full-window**
+  screenshot of the view, or an **element** screenshot of a modal such as
+  `#ov-modal .ovmodal-card`, so the framing matches the existing images, and documents the reproducible fake-content
   recipe: the `demo` profile + `tools/obs-sim.py` OBS stand-in, so the pages show a
   believable broadcast with no real OBS/league). Verify a published wiki render
   with **`wiki-visual-test`**. **Always capture Control Center screenshots from a local

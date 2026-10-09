@@ -70,9 +70,10 @@ cards show live content instead of "relay offline".
    machine's `runtime/active-profile` pointer, and the next real `event start` would then run
    the demo league. `--profile` applies to this one process only.
 2. Drive it with the Playwright MCP: `browser_navigate` → `http://127.0.0.1:8090/`, switch to
-   the view, then **element-screenshot the card/modal** (not a full-window grab) so the
-   framing matches the existing images, e.g. the overlay builder modal:
-   `browser_take_screenshot` with `element` ref for `#ov-modal .ovmodal-card`.
+   the view at a 1440x900 viewport, then take a **full-window** screenshot (sidebar and
+   "dev build" badge visible) so the framing matches the existing `cc-*.png`. A modal is the
+   exception: element-screenshot it, e.g. the overlay builder with `browser_take_screenshot`
+   and the `element` ref for `#ov-modal .ovmodal-card`.
 3. Save into `src/docs/wiki/images/cc-<view>.png` (and the slides copy if the deck uses it).
 4. Stop the UI: `pkill -f "racecast.py --profile demo ui"`.
 
@@ -238,7 +239,7 @@ Publish the wiki only on the user's go-ahead: `python3 tools/sync-wiki.py` (prev
 - **Why obs-sim, not real OBS:** the producer's real OBS may not be running, and even if it
   is, its program is whatever they happen to have on screen, not reproducible. obs-sim pins a
   fixed program still so the same shot regenerates byte-stably on any machine (incl. Windows).
-- **Element vs full-page:** Control Center cards/modals → **element** screenshot (match the
-  existing tight framing). The standalone `/console`/`/cockpit`/`/panel` pages → **full-page**.
+- **Element vs full-page:** Control Center views and the standalone `/console`/`/cockpit`/
+  `/panel` pages → **full-page**. Only modals (the overlay builder) → **element** screenshot.
 - **Always the dev build** for Control Center (`cc-*`) shots so the version badge is uniform;
   a real version baked into one shot goes stale at the next release.
