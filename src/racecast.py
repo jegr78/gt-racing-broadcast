@@ -1752,12 +1752,21 @@ def _send_report_core(path, report=None, window=None):
     http_util.post_multipart(webhook, fields=fields, files=files, timeout=15)
 
 
-def report_generate_data():
+def report_read_data(name):
+    """A report the report-generate job wrote, by its file name in the reports dir. The
+    Control Center generates through that job, so no request builds a lap index."""
     try:
-        r = _build_report_file()
-        return {"ok": True, "path": r["path"], "html": r["html"], "summary": r["summary"]}
-    except Exception as exc:  # noqa: BLE001  surface the message to the UI
-        return {"ok": False, "error": str(exc)}
+        names = [f for f in os.listdir(_reports_dir()) if f.endswith(".html")]
+    except OSError:
+        names = []
+    if not name or name not in names:
+        return {"ok": False, "error": f"no report named {name!r}"}
+    path = os.path.join(_reports_dir(), name)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return {"ok": True, "path": path, "html": fh.read()}
+    except OSError as exc:
+        return {"ok": False, "error": f"could not read the report: {_telemetry_reason(exc)}"}
 
 
 def report_send_data(path=None):
@@ -7789,7 +7798,7 @@ def run_ui(rest, fail=sys.exit, open_browser=True):
         "backup_delete": backup_delete_data,
         "profile_export": profile_export_data,
         "profile_import": profile_import_data,
-        "report_generate": report_generate_data,
+        "report_read": report_read_data,
         "report_send": report_send_data,
         "telemetry_recordings": telemetry_recordings_data,
         "telemetry_laps": telemetry_laps_data,

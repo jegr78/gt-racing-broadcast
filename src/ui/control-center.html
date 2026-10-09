@@ -1410,9 +1410,20 @@ async function reportGenerate() {
   const msg = $('report-msg');
   btn.disabled = true; msg.textContent = 'Generating…';
   try {
-    const r = await fetch('/api/report/generate', {method: 'POST',
-      headers: {'Content-Type': 'application/json'}, body: '{}'});
-    const data = await r.json();
+    // A report builds lap indexes, so it runs as a job; the page then reads the file it wrote.
+    let job = await startJob('report-generate');
+    if (job.error && job.job_id) job = {job_id: job.job_id};     // a run from another window
+    const r = job.error ? job : await jobResult(job.job_id, 20);
+    if (r.error) { msg.textContent = 'Error: ' + r.error; return; }
+    const lines = r.lines || [];
+    const written = lines.map(l => /^Report written -> (.+)$/.exec(l)).filter(Boolean).pop();
+    if (r.code !== 0 || !written) {
+      msg.textContent = 'Error: ' + (lines.slice(-1)[0] || 'the report failed').replace(/^racecast: /, '');
+      return;
+    }
+    const name = written[1].split(/[\\/]/).pop();
+    const data = await (await fetch('/api/report/read?name=' + encodeURIComponent(name),
+      {cache: 'no-store'})).json();
     if (!data.ok) { msg.textContent = 'Error: ' + (data.error || 'failed'); return; }
     _reportPath = data.path;
     const frame = $('report-frame');
@@ -5234,6 +5245,7 @@ function tmShared(url) {
 }
 function tmDropLaps() {
   tmLapGen++;
+  tmIndexLines = [];
   tmLapCache.clear();
   tmLapsReq.clear();
 }
@@ -5242,7 +5254,7 @@ function tmDropLaps() {
 // indexed does not start it on every lap B.
 let tmIndexing = null;
 let tmIndexedGen = -1;
-let tmIndexedVer = null;           // the data_version of the answer that started that run
+let tmIndexedVer = null;           // the data_version of the answer that started this page's last run
 let tmIndexLines = [];             // the output of that run, which names a recording it could not index
 function tmNote(text) { $('tm-note').textContent = text; $('tm-note').hidden = false; }
 // True when an unindexed answer `d` may start the job: a new lap generation, or GT7 data
@@ -5262,7 +5274,7 @@ function tmIndexAll(ver) {
       const r = job.error ? job : await jobResult(job.job_id, 20);
       if (r.error || gen !== tmLapGen) return r;
       tmIndexedGen = gen;
-      tmIndexedVer = ver;
+      if (!job.joined) tmIndexedVer = ver;          // a joined run's version is unknown
       tmIndexLines = r.lines || [];
       if (job.joined) $('tm-note').hidden = true;
       if (r.code !== 0) {
@@ -5530,7 +5542,9 @@ async function tmFetchLap(key) {
   const gen = tmLapGen;
   const [rec, session, lap] = key.split('|');
   const d = await tmIndexed(rec,
-    () => tmShared('/api/telemetry/lap?' + new URLSearchParams({rec, session, lap})), () => false);
+    () => tmShared('/api/telemetry/lap?' + new URLSearchParams({rec, session, lap})),
+    () => gen !== tmLapGen);
+  if (d.stale) return {error: ''};
   if (!d.ok) return {error: d.error || 'could not load the lap'};
   if (gen === tmLapGen) tmLapCache.set(key, d.lap);
   return {lap: d.lap, sectorM: d.sector_m};

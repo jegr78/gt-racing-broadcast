@@ -233,10 +233,9 @@ def _ctx(jobs=None, init_plan=None, init_step=None, profile_logo=None,
                 "ok": True, "row": row,
                 "_got": (row, name, director, producer, commentator, race_control, discord)},
             "crew_delete": lambda row: {"ok": True, "row": row, "_got": row},
-            "report_generate": lambda: {"ok": True,
-                                        "html": "<!doctype html><html></html>",
-                                        "path": "/x/report.html",
-                                        "summary": "1 session, 2 feeds"},
+            "report_read": lambda name: {"ok": True,
+                                         "html": "<!doctype html><html></html>",
+                                         "path": "/x/" + str(name)},
             "report_send": lambda path=None: {"ok": True},
             "telemetry_recordings": lambda: {"ok": True, "recordings": [
                 {"name": "20261007-201503.gt7rec", "rec": "20261007-201503",
@@ -1755,6 +1754,48 @@ globalThis.loadGt7Data = () => { loads++; };
         assert out.strip() == "gt7-data-update is already running|1|false", out
 
 
+def _report_run(job_answer):
+    page = _cc_page()
+    return _run_js(_JOB_HARNESS + _job_fns(page) + _page_fn(page, "reportGenerate") + """
+let _reportPath = null;
+(async () => {
+  reportGenerate();
+  await tick();
+  const busy = [$('report-msg').textContent, $('report-gen').disabled].join(',');
+  answer('/api/op/report-generate', {ok: true, job_id: 'r1'});
+  await tick();
+  answer('/api/jobs/r1', """ + job_answer + """);
+  await tick();
+  answer('/api/report/read?name=Event%202026-10-09.html',
+         {ok: true, path: '/reports/Event 2026-10-09.html', html: '<p>report</p>'});
+  await tick();
+  console.log(JSON.stringify([busy, $('report-msg').textContent, $('report-gen').disabled,
+    $('report-frame').srcdoc || '', calls.filter(u => u.includes('/api/report/read')).length,
+    calls.filter(u => u === '/api/report/generate').length]));
+})();""")
+
+
+def t_report_generates_in_a_job_and_shows_the_written_file():
+    out = _report_run("""{ok: true, running: false, exit_code: 0,
+                         lines: ['1 session', 'Report written -> /reports/Event 2026-10-09.html']}""")
+    if out is not None:
+        busy, msg, disabled, frame, reads, posts = json.loads(out)
+        assert busy == "Generating\u2026,true", busy
+        assert (msg, disabled, frame, reads, posts) == (
+            "Written to /reports/Event 2026-10-09.html", False, "<p>report</p>", 1, 0), \
+            f"the page runs report-generate, then reads the file the job wrote: {out}"
+
+
+def t_report_job_failure_shows_its_last_line():
+    out = _report_run("""{ok: true, running: false, exit_code: 1,
+                         lines: ['racecast: no health data for that window. Nothing to report.']}""")
+    if out is not None:
+        _busy, msg, disabled, frame, reads, _posts = json.loads(out)
+        assert (msg, disabled, frame, reads) == (
+            "Error: no health data for that window. Nothing to report.", False, "", 0), \
+            f"a failed report job shows its reason and reads no file: {out}"
+
+
 def t_ui_server_queues_a_browser_burst():
     httpd, _ = _serve(_ctx())
     try:
@@ -2077,14 +2118,20 @@ def t_api_crew_delete_post():
 def t_report_generate_and_send_routes():
     calls = {}
     ctx = _ctx()
-    ctx["report_generate"] = lambda: {"ok": True, "html": "<!doctype html><html></html>",
-                                      "path": "/x/r.html", "summary": "sum"}
+    ctx["report_read"] = lambda name: calls.update(read=name) or {
+        "ok": True, "html": "<!doctype html><html></html>", "path": "/x/r.html"}
     ctx["report_send"] = lambda path=None: calls.update(send=path) or {"ok": True}
     httpd, port = _serve(ctx)
     try:
-        code, body = _post_json(port, "/api/report/generate", {})
+        try:
+            code = _post_json(port, "/api/report/generate", {})[0]
+        except urllib.error.HTTPError as e:
+            code = e.code
+        assert code == 404, "a report runs as the report-generate job, not in a request thread"
+        code, body = _get(port, "/api/report/read?name=r.html")
         data = json.loads(body)
         assert code == 200 and data["ok"] is True and "<!doctype html>" in data["html"]
+        assert calls["read"] == "r.html", calls
         code, body = _post_json(port, "/api/report/send", {"path": "/x/r.html"})
         data = json.loads(body)
         assert code == 200 and data["ok"] is True
@@ -2867,6 +2914,104 @@ console.log(JSON.stringify([sameVersion, err, jobs()]));""")
     if out is not None:
         assert json.loads(out) == [1, "X: not indexed (bad data)", 3], \
             f"one index job per GT7 data version, for a recording and for a pool: {out}"
+
+
+def t_telemetry_joined_index_job_records_no_data_version():
+    out = _tm_node(_TM_UNINDEXED + """
+const v = (d, ver) => Object.assign(d, {data_version: ver});
+tmSelectRec('X');
+await tick();
+answer('rec=X', v(unindexed('X'), 'v1'));
+await tick();
+answer('/api/op/telemetry-index', {ok: false, error: 'telemetry-index is already running',
+                                   job_id: 'other'});
+await tick();
+answer('/api/jobs/other', {ok: true, running: false, exit_code: 0, lines: []});
+await tick();
+const joinedVer = tmIndexedVer;
+answer('rec=X', v(unindexed('X'), 'v1'));
+await tick();
+answer('/api/op/telemetry-index', {ok: true, job_id: 'j2'});
+await tick();
+answer('/api/jobs/j2', {ok: true, running: false, exit_code: 0, lines: []});
+await tick();
+answer('rec=X', recLaps('X', [lap('X', 1, 80, 7), lap('X', 2, 81, 7)]));
+await tick();
+console.log(JSON.stringify([joinedVer, jobs(), tmIndexedVer, tmState.recLaps.length,
+                            $('tm-err').textContent]));""")
+    if out is not None:
+        assert json.loads(out) == [None, 2, "v1", 2, ""], \
+            f"a joined run ran for an unknown version, so this page runs its own once: {out}"
+
+
+def t_telemetry_caller_joining_a_run_for_an_older_version_starts_one_more():
+    out = _tm_node(_TM_UNINDEXED + """
+const v = (d, ver) => Object.assign(d, {data_version: ver});
+const a = tmFetchLap('X|1|1');
+await tick();
+answer('rec=X&', v(unindexed('X'), 'v1'));
+await tick();
+const b = tmFetchLap('Y|1|1');
+await tick();
+answer('rec=Y&', v(unindexed('Y'), 'v2'));
+await tick();
+answer('/api/op/telemetry-index', {ok: true, job_id: 'j1'});
+await tick();
+answer('/api/jobs/j1', {ok: true, running: false, exit_code: 0, lines: []});
+await tick();
+answer('rec=X&', {ok: true, lap: lap('X', 1, 80, 7), sector_m: 200});
+answer('rec=Y&', v(unindexed('Y'), 'v2'));
+await tick();
+answer('/api/op/telemetry-index', {ok: true, job_id: 'j2'});
+await tick();
+answer('/api/jobs/j2', {ok: true, running: false, exit_code: 0, lines: []});
+await tick();
+answer('rec=Y&', {ok: true, lap: lap('Y', 1, 79, 7), sector_m: 200});
+const [ra, rb] = [await a, await b];
+console.log(JSON.stringify([jobs(), ra.lap && ra.lap.rec, rb.lap && rb.lap.rec,
+                            rb.error || '', tmIndexedVer]));""")
+    if out is not None:
+        assert json.loads(out) == [2, "X", "Y", "", "v2"], \
+            f"B joined A's run for v1, so exactly one more job runs for v2: {out}"
+
+
+def t_telemetry_new_lap_generation_forgets_the_old_job_lines():
+    out = _tm_node(_TM_UNINDEXED + """
+tmIndexAll();
+await tick();
+answer('/api/op/telemetry-index', {ok: true, job_id: 'j'});
+await tick();
+answer('/api/jobs/j', {ok: true, running: false, exit_code: 1,
+                       lines: ['X: not indexed (bad data)']});
+await tick();
+const before = tmIndexLines.length;
+tmDropLaps();
+const afterDrop = tmIndexLines.length;
+tmIndexLines = ['X: not indexed (bad data)'];
+tmReset();
+console.log(JSON.stringify([before, afterDrop, tmIndexLines.length]));""")
+    if out is not None:
+        assert json.loads(out) == [1, 0, 0], \
+            f"a new lap generation never shows lines of an older run: {out}"
+
+
+def t_telemetry_lap_fetch_from_an_old_generation_stops_after_the_job():
+    out = _tm_node(_TM_UNINDEXED + """
+const got = tmFetchLap('X|1|2');
+await tick();
+answer('/lap?', unindexed('X'));
+await tick();
+answer('/api/op/telemetry-index', {ok: true, job_id: 'j'});
+await tick();
+tmDropLaps();
+answer('/api/jobs/j', {ok: true, running: false, exit_code: 0, lines: []});
+let r = null;
+got.then(x => { r = x; });
+await tick();
+console.log(JSON.stringify([asks('/lap?'), r ? r.error : 'still asking', r ? r.lap : null]));""")
+    if out is not None:
+        assert json.loads(out) == [1, "", None], \
+            f"a lap fetch whose generation ended asks no more and shows no error: {out}"
 
 
 def t_telemetry_index_job_refreshes_the_recording_list():

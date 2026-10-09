@@ -510,7 +510,9 @@ recording and session.
 - The report also indexes the recording the relay is still writing, because `event stop`
   builds the report before the teardown; that one-time build costs about 16 s per 3 h of
   recording, and the report says its last lap may be missing. The Control Center
-  Telemetry view keeps skipping the open file.
+  Telemetry view keeps skipping the open file. The Control Center's Generate runs
+  `racecast report generate` as the `report-generate` job and then reads the written
+  file, so no request builds an index.
 - Figures are per track and car; laps on an unknown track group only within their
   recording and GT7 session, the rule part 3 pools by.
 - HTML section "Telemetry":

@@ -117,6 +117,8 @@ def t_ops_registry_shape():
 def t_long_control_center_reads_run_as_jobs():
     assert ui_ops.OPS["gt7-data-update"] == ["gt7-data", "update"]
     assert ui_ops.OPS["telemetry-index"] == ["telemetry", "index"]
+    assert ui_ops.OPS.get("report-generate") == ["report", "generate"], \
+        "a report builds lap indexes, so it runs as a job"
 
 
 def t_job_argv_repo_mode():
@@ -137,7 +139,7 @@ def t_ops_registry_routes_in_rc():
     for name, argv in ui_ops.OPS.items():
         action = rc.route(list(argv))
         assert action["kind"] in ("service", "oneshot", "export", "chat", "discord",
-                                  "freeport", "health"), name
+                                  "freeport", "health", "report"), name
 
 
 def t_build_argv_plain_and_unknown():

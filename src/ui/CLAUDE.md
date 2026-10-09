@@ -44,13 +44,15 @@ Loaded when working under `src/ui/`.
   answer carries the `data_version` it was checked against. The page (`tmIndexed`,
   `tmIndexAll`, `tmMayIndex`) then runs the `telemetry-index` job (`racecast telemetry
   index`) once per lap generation and data version (the relay's background GT7 data
-  update can change it mid-generation), polls it through `/api/jobs/<id>` and asks once more;
-  still unindexed shows the job's "not indexed" line as an error, or its last line, which
-  names every recording the job could not index. Set track shows "Indexing…" on its
-  button while its job runs. The CLI and the
-  event-stop report keep building. A counted
-  lap's trace closes at the full lap length with the lap time, so its sectors add up. Data
-  functions `telemetry_*_data` in `src/racecast.py`; routes `/api/telemetry/recordings`,
+  update can change it mid-generation; a joined run from another window records no
+  version), polls it through `/api/jobs/<id>` and asks once more; still unindexed shows
+  the job's "not indexed" line as an error, or its last line, which names every
+  recording the job could not index. Set track shows "Indexing…" on its button while
+  its job runs. The CLI and the event-stop report keep building; the Report view's
+  Generate runs `racecast report generate` as the `report-generate` job and reads the
+  written file through `GET /api/report/read?name=`. A counted lap's trace closes at
+  the full lap length with the lap time, so its sectors add up. Data functions
+  `telemetry_*_data` in `src/racecast.py`; routes `/api/telemetry/recordings`,
   `/api/telemetry/laps`, `/api/telemetry/lap`, `/api/telemetry/tracks`,
   `/api/telemetry/learn`. The recording the relay is writing is listed but refused by
   laps/lap/learn. `learn` only assigns a layout that has a downloaded racing line

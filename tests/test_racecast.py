@@ -837,6 +837,39 @@ def t_telemetry_requests_check_the_recording_before_the_index():
                                                "to analyse it"}, d
 
 
+def t_report_read_data_serves_only_written_reports():
+    with tempfile.TemporaryDirectory() as td:
+        real = m._reports_dir
+        m._reports_dir = lambda: td
+        try:
+            with open(os.path.join(td, "Event 2026-10-09.html"), "w", encoding="utf-8") as fh:
+                fh.write("<p>r</p>")
+            with open(os.path.join(td, "notes.txt"), "w", encoding="utf-8") as fh:
+                fh.write("x")
+            d = m.report_read_data("Event 2026-10-09.html")
+            assert d == {"ok": True, "path": os.path.join(td, "Event 2026-10-09.html"),
+                         "html": "<p>r</p>"}, d
+            for bad in ("notes.txt", "../Event 2026-10-09.html", "missing.html", "", None):
+                d = m.report_read_data(bad)
+                assert d["ok"] is False and td not in d["error"], (bad, d)
+        finally:
+            m._reports_dir = real
+
+
+def t_report_telemetry_still_builds_the_lap_index():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        path = tgl.write_circle_recording(rec_dir)
+        cache = os.path.join(rec_dir, _stem(path) + ".laps.json")
+        real = m._profile_has_telemetry
+        m._profile_has_telemetry = lambda: True
+        try:
+            block = m._report_telemetry(1_699_999_000.0, 1_700_001_000.0)
+        finally:
+            m._profile_has_telemetry = real
+        assert block is not None and os.path.exists(cache), \
+            "the CLI and event-stop report build the index they need"
+
+
 def t_telemetry_list_counts_laps_from_the_cache():
     with _telemetry_sandbox() as (rec_dir, tgl):
         import gt7_recording as gr

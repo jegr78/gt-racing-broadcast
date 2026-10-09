@@ -125,6 +125,8 @@ def make_handler(ctx):
     telemetry_lap(rec, session, lap, build) -> dict, telemetry_tracks() -> dict,
     telemetry_learn(rec, track_id, build) -> dict (solo POV lap analysis, query strings
     in; the routes pass build=False, so no request builds a lap index),
+    report_read(name) -> dict (a report the report-generate job wrote; generating builds
+    lap indexes, so it never runs in a request), report_send(path) -> dict,
     jobs (ui_jobs.JobManager), log_sources {name: {files, dir, archives, read}},
     favicon_path (the brand SVG served at /favicon.svg),
     shutdown() (installed by serve())."""
@@ -586,6 +588,15 @@ def make_handler(ctx):
                     return self._json({"ok": False,
                                        "error": f"could not list backups: {exc}"},
                                       code=500)
+            if path == "/api/report/read":
+                q = parse_qs(urlparse(self.path).query or "", keep_blank_values=True)
+                try:
+                    return self._json(ctx["report_read"]((q.get("name") or [""])[0]))
+                except Exception as exc:
+                    return self._json({"ok": False,
+                                       "error": f"could not read the report: "
+                                                f"{type(exc).__name__}"},
+                                      code=500)
             if path == "/api/telemetry/recordings":
                 try:
                     return self._json(ctx["telemetry_recordings"]())
@@ -746,13 +757,6 @@ def make_handler(ctx):
                 except Exception as exc:               # noqa: BLE001  provider is best-effort
                     return self._json({"ok": False, "note": str(exc)}, code=400)
                 return self._json(result, code=200 if result.get("ok") else 400)
-            if path == "/api/report/generate":
-                try:
-                    return self._json(ctx["report_generate"]())
-                except Exception as exc:
-                    return self._json({"ok": False,
-                                       "error": f"could not generate report: {exc}"},
-                                      code=500)
             if path == "/api/report/send":
                 body = self._body_json()
                 if body is None:
