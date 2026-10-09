@@ -472,6 +472,71 @@
   /* Within solo, the tyres/fuel crop exists only in the commentary collection and GT7
      telemetry only in the POV one. */
   body:not(.tpl-commentary) .commentary-only, body:not(.tpl-pov) .pov-only { display: none; }
+  /* Telemetry view (solo POV, #788): lap comparison drawn as inline SVG. */
+  .view[data-view="telemetry"] { max-width:1480px; --tm-a:var(--warn); --tm-b:var(--link); }
+  .tmgrid { display:grid; grid-template-columns:270px minmax(0,1fr) 340px; gap:14px;
+            align-items:start; }
+  .tmside, .tmmap { display:flex; flex-direction:column; gap:14px; min-width:0; }
+  .tmgrid section { padding:10px 12px; }
+  .tmlist { display:flex; flex-direction:column; max-height:36vh; overflow:auto;
+            color:var(--faint); font:12px var(--mono); }
+  .tmitem { display:grid; grid-template-columns:1fr auto; gap:2px 8px; width:100%;
+            min-height:0; text-align:left; background:transparent; border:0;
+            border-top:1px solid var(--line); border-radius:6px; padding:7px 8px;
+            color:var(--txt); font:12px var(--mono); }
+  .tmitem:first-child { border-top:0; }
+  .tmitem:hover { background:rgba(148,163,184,.08); }
+  .tmitem.sel { background:rgba(59,130,246,.14); box-shadow:inset 2px 0 0 var(--accent); }
+  .tmitem.nc { color:var(--dim); }
+  .tmitem:disabled:hover { background:transparent; }
+  .tmitem .tmsub { grid-column:1 / -1; color:var(--dim); font-size:11px; overflow:hidden;
+                   text-overflow:ellipsis; white-space:nowrap; }
+  .tmpick { display:flex; flex-wrap:wrap; gap:10px 18px; align-items:center; margin:0 0 10px;
+            font:12px var(--mono); color:var(--dim); }
+  .tmpick label { display:inline-flex; align-items:center; gap:6px; max-width:100%;
+                  white-space:nowrap; }
+  .tmpick select { min-width:0; max-width:320px; font:12px var(--mono); }
+  .tmpick select:disabled { opacity:.6; cursor:not-allowed; }
+  .tmkey { display:inline-block; width:18px; height:3px; border-radius:2px; }
+  .tmkey.a { background:var(--tm-a); }
+  .tmkey.b { background:var(--tm-b); }
+  #tm-charts, #tm-map { display:block; width:100%; height:auto; }
+  #tm-charts text, #tm-map text { font:11px var(--mono); fill:var(--dim); }
+  #tm-charts text.tm-read { fill:var(--txt); }
+  .tm-readbg { fill:var(--card); opacity:.88; }
+  #tm-charts text.tm-unit { fill:var(--faint); }
+  .tm-frame { fill:none; stroke:var(--line); }
+  .tm-zero { stroke:var(--off); stroke-dasharray:3 3; }
+  .tm-a { fill:none; stroke:var(--tm-a); stroke-width:1.4; }
+  .tm-b { fill:none; stroke:var(--tm-b); stroke-width:1.6; }
+  .tm-gain { fill:rgba(34,197,94,.28); }
+  .tm-loss { fill:rgba(239,68,68,.28); }
+  .tm-cursor { stroke:var(--txt); stroke-width:1; opacity:.55; pointer-events:none; }
+  .tm-seg { fill:none; stroke-width:4; stroke-linecap:round; }
+  .tm-seg.gain { stroke:var(--ok); }
+  .tm-seg.loss { stroke:var(--bad); }
+  .tm-seg.even { stroke:var(--off); }
+  .tm-line { fill:var(--txt); }
+  .tm-dot-a { fill:var(--tm-a); stroke:var(--bg); stroke-width:1.5; }
+  .tm-dot-b { fill:var(--tm-b); stroke:var(--bg); stroke-width:1.5; }
+  .tmset { display:flex; gap:8px; align-items:center; flex-wrap:wrap; padding:2px 0 8px; }
+  .tmset select { flex:1; min-width:0; font:12px var(--mono); }
+  .tmnote { color:var(--dim); font:11px/1.5 var(--mono); margin:0 0 8px; }
+  table.tmsec { font-size:12px; }
+  table.tmsec td, table.tmsec th { padding:4px 6px; text-align:right;
+                                   font-variant-numeric:tabular-nums; }
+  table.tmsec td:first-child, table.tmsec th:first-child { text-align:left; }
+  table.tmsec td.gain { color:#4ADE80; }
+  table.tmsec td.loss { color:var(--bad-text); }
+  table.tmsec td.best { color:#C4B5FD; }
+  table.tmsec tfoot td { font-weight:600; border-bottom:0; }
+  .tmsecwrap { max-height:46vh; overflow:auto; }
+  @media (max-width: 1280px) {
+    .tmgrid { grid-template-columns:250px minmax(0,1fr); }
+    .tmmap { grid-column:1 / -1; flex-direction:row; flex-wrap:wrap; }
+    .tmmap section { flex:1 1 320px; }
+  }
+  @media (max-width: 860px) { .tmgrid { grid-template-columns:1fr; } }
 </style>
 </head>
 <body>
@@ -507,6 +572,8 @@
         <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="14" y2="17"/></svg>Logs</button>
       <button class="navitem" data-nav="report" onclick="showView('report')">
         <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="14" y2="17"/><line x1="8" y1="9" x2="10" y2="9"/></svg>Report</button>
+      <button class="navitem pov-only" data-nav="telemetry" onclick="showView('telemetry')">
+        <svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>Telemetry</button>
       <button class="navitem" data-nav="help" onclick="showView('help')">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>Help &amp; Docs</button>
     </div>
@@ -1001,6 +1068,13 @@
             <button onclick="op('cookies-twitch', false, {browser: $('browser-tw').value})">
               <svg viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Refresh Twitch login</button></div>
         </section>
+        <div class="viewhead"><h3>GT7 data</h3><span class="sub">car names and track recognition for solo POV telemetry. Shared across all leagues</span></div>
+        <section>
+          <div class="row"><span class="name">GT7 data</span>
+            <span class="dim grow" id="d-gt7data">…</span>
+            <button id="gt7data-update" onclick="updateGt7Data()" title="Fetch the latest car and track data now; a running relay uses it within a minute">
+              <svg viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Update now</button></div>
+        </section>
         <div class="viewhead"><h3>Overlay fonts</h3><span class="sub">machine-wide font library for the Overlay Builder. Shared across all leagues</span>
           <span class="vhbtns">
           <button id="font-restore" onclick="restoreBundledFonts()" title="Overwrite the fonts that ship with this install, in the library and in every league profile">
@@ -1183,6 +1257,41 @@
         </section>
       </div>
 
+      <!-- Telemetry (solo POV): lap comparison from the GT7 recordings, #788 -->
+      <div class="view pov-only" data-view="telemetry" hidden>
+        <div class="viewhead"><h2>Telemetry</h2>
+          <span class="sub">laps from this profile's GT7 recordings</span>
+          <span class="vhbtns"><button onclick="tmLoad()" title="Read the recordings again">
+            <svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Refresh</button></span></div>
+        <p class="enverr" id="tm-err" hidden></p>
+        <div class="tmgrid">
+          <div class="tmside">
+            <section><div class="viewhead"><h3>Recordings</h3></div>
+              <div class="tmlist" id="tm-recs"></div></section>
+            <section><div class="viewhead"><h3>Laps</h3><span class="sub" id="tm-rec-track"></span></div>
+              <div class="tmset" id="tm-settrack" hidden>
+                <select id="tm-track-pick" aria-label="Track layout"></select>
+                <button id="tm-learn" onclick="tmLearn()">Set track</button></div>
+              <p class="tmnote" id="tm-note" hidden></p>
+              <div class="tmlist" id="tm-laps"></div></section>
+          </div>
+          <section class="tmmain">
+            <div class="tmpick">
+              <label><span class="tmkey a"></span>Lap A
+                <select id="tm-a" aria-label="Lap A (reference)" onchange="tmPick('a', this.value)"></select></label>
+              <label><span class="tmkey b"></span>Lap B
+                <select id="tm-b" aria-label="Lap B" onchange="tmPick('b', this.value)"></select></label>
+            </div>
+            <svg id="tm-charts" role="img" aria-label="Speed, throttle, brake, steering, gear and delta over lap distance"></svg>
+          </section>
+          <div class="tmmap">
+            <section><div class="viewhead"><h3>Track</h3><span class="sub" id="tm-map-sub"></span></div>
+              <svg id="tm-map" role="img" aria-label="Track map, mini-sectors green where lap B gains and red where it loses"></svg></section>
+            <section><div class="viewhead"><h3>Mini-sectors</h3><span class="sub" id="tm-sec-sub"></span></div>
+              <div class="tmsecwrap"><table class="prodtable tmsec" id="tm-sectors"></table></div></section>
+          </div>
+        </div>
+      </div>
       <!-- Post-Event Report -->
       <div class="view" data-view="report" hidden>
         <div class="viewhead"><h2>Post-Event Report</h2></div>
@@ -1276,6 +1385,8 @@ function showView(name) {
   if (name === 'preflight') loadSpeedtest();
   if (name === 'settings' && !settingsLoaded) { settingsLoaded = true; loadSettings(); }
   if (name === 'console') loadConsole();   // reload each visit: reflects toggles/links
+  if (name === 'telemetry' && !tmState.loaded) tmLoad();
+  else if (name === 'telemetry' && tmState.lapB) tmRefit();
   // First open only: start the default "All (live)" stream. The guard is its own
   // flag rather than !logES, because an archive selection leaves logES null (an
   // archive uses fetch, not SSE) and returning to Logs would clobber it.
@@ -1299,9 +1410,20 @@ async function reportGenerate() {
   const msg = $('report-msg');
   btn.disabled = true; msg.textContent = 'Generating…';
   try {
-    const r = await fetch('/api/report/generate', {method: 'POST',
-      headers: {'Content-Type': 'application/json'}, body: '{}'});
-    const data = await r.json();
+    // A report builds lap indexes, so it runs as a job; the page then reads the file it wrote.
+    let job = await startJob('report-generate');
+    if (job.error && job.job_id) job = {job_id: job.job_id};     // a run from another window
+    const r = job.error ? job : await jobResult(job.job_id, 20);
+    if (r.error) { msg.textContent = 'Error: ' + r.error; return; }
+    const lines = r.lines || [];
+    const written = lines.map(l => /^Report written -> (.+)$/.exec(l)).filter(Boolean).pop();
+    if (r.code !== 0 || !written) {
+      msg.textContent = 'Error: ' + (lines.slice(-1)[0] || 'the report failed').replace(/^racecast: /, '');
+      return;
+    }
+    const name = written[1].split(/[\\/]/).pop();
+    const data = await (await fetch('/api/report/read?name=' + encodeURIComponent(name),
+      {cache: 'no-store'})).json();
     if (!data.ok) { msg.textContent = 'Error: ' + (data.error || 'failed'); return; }
     _reportPath = data.path;
     const frame = $('report-frame');
@@ -2110,6 +2232,32 @@ function runOpAndWait(name, params) {
   });
 }
 
+// A quiet job: start it without the job console. Resolves to {job_id} or {error, job_id?}.
+async function startJob(name, params) {
+  try {
+    const r = await (await fetch('/api/op/' + name, {method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({params: params || {}})})).json();
+    // A refused start names the job that already runs, when there is one.
+    return r.ok ? {job_id: r.job_id} : {error: r.error || name + ' could not start', job_id: r.job_id};
+  } catch (e) { return {error: 'Control Center not reachable.'}; }
+}
+
+// Polls a job until it exits. Resolves to {code, lines} (its last `tail` output lines)
+// or {error} when the Control Center stops answering.
+const JOB_POLL_MS = 1000;
+async function jobResult(id, tail) {
+  for (;;) {
+    let s;
+    try {
+      s = await (await fetch('/api/jobs/' + id + '?tail=' + (tail || 0), {cache: 'no-store'})).json();
+    } catch (e) { return {error: 'Control Center not reachable.'}; }
+    if (!s.ok) return {error: s.error || 'unknown job'};
+    if (!s.running) return {code: s.exit_code, lines: s.lines || []};
+    await new Promise(r => setTimeout(r, JOB_POLL_MS));
+  }
+}
+
 async function cancelJob(ev) {
   if (ev) ev.stopPropagation();        // don't collapse the console on click
   if (!jobId) return;
@@ -2539,6 +2687,7 @@ async function loadSettings(force) {
   $('env-err').hidden = true;
   loadFontLibrary();
   loadDevices();
+  loadGt7Data();
   let d;
   try { d = await (await fetch('/api/env', {cache: 'no-store'})).json(); }
   catch (e) { showEnvErr('Control Center not reachable.'); return; }
@@ -2744,6 +2893,45 @@ async function downloadCustomFont() {
   }
   $('font-custom').value = '';
   loadFontLibrary();
+}
+
+function fmtAgeS(ts) {
+  if (!ts) return 'never';
+  const s = Math.max(0, Date.now() / 1000 - ts);
+  if (s < 60) return 'just now';
+  if (s < 3600) return Math.round(s / 60) + ' min ago';
+  if (s < 86400) return Math.round(s / 3600) + ' h ago';
+  const days = Math.round(s / 86400);
+  return days + (days === 1 ? ' day ago' : ' days ago');
+}
+
+async function loadGt7Data() {
+  let d;
+  try { d = await (await fetch('/api/gt7-data', {cache: 'no-store'})).json(); }
+  catch (e) { $('d-gt7data').textContent = 'Control Center not reachable.'; return; }
+  if (!d.ok) { $('d-gt7data').textContent = d.error || 'unavailable'; return; }
+  const f = d.files || {};
+  const rows = n => (f[n] && f[n].rows != null) ? f[n].rows : '?';
+  const src = Object.values(f).some(x => x.source === 'runtime') ? 'updated' : 'bundled';
+  const sig = f['signatures.json'];
+  const recog = (sig && sig.source === 'missing') ? 'track signatures not downloaded yet'
+      : rows('signatures.json') + ' recognisable';
+  $('d-gt7data').textContent = 'checked ' + fmtAgeS(d.checked) + ' · ' + rows('cars.csv') +
+      ' cars · ' + rows('index.json') + ' layouts · ' + recog + ' · ' + src;
+}
+
+async function updateGt7Data() {
+  const b = $('gt7data-update'); b.disabled = true;
+  $('d-gt7data').textContent = 'updating…';
+  const job = await startJob('gt7-data-update');
+  const r = job.error ? job : await jobResult(job.job_id, 20);
+  b.disabled = false;
+  loadGt7Data();
+  const errs = (r.lines || []).filter(l => l.includes(': error'));
+  if (r.error || r.code !== 0 || errs.length) {
+    await alertModal(r.error || (errs.length ? errs : r.lines).join('\n') || 'GT7 data update failed',
+                     {title: 'GT7 data'});
+  }
 }
 
 async function restoreBundledFonts() {
@@ -3002,6 +3190,12 @@ function applyKindGating(data) {
   document.body.classList.toggle('solo', kind === 'solo');
   document.body.classList.toggle('tpl-pov', kind === 'solo' && template === 'pov');
   document.body.classList.toggle('tpl-commentary', kind === 'solo' && template !== 'pov');
+  if (data && data.ok && data.active !== tmState.profile) {   // every switch path, import included
+    tmReset();
+    tmState.profile = data.active;
+  }
+  if (currentView === 'telemetry' && !(kind === 'solo' && template === 'pov')) showView('home');
+  else if (currentView === 'telemetry' && !tmState.loaded) tmLoad();   // switched to another solo POV profile
 }
 
 async function useProfile(name) {
@@ -3023,6 +3217,7 @@ async function useProfile(name) {
   }
   $('profile-switch-note').hidden = true;
   activeProfile = d.active || name;
+  tmReset();                              // the recordings belong to the profile
   loadProfiles();
   loadProfileEnv();
   refresh();
@@ -4992,6 +5187,708 @@ async function quitConfirm() {
   if (code !== '0') return;                // failed: keep the CC open, error stays in the console
   blankAndQuit();
 }
+
+// Telemetry view (solo POV, #788): recordings -> laps -> lap A/B comparison.
+// Values from recordings reach the page only through textContent and SVG attributes.
+const TM_NS = 'http://www.w3.org/2000/svg';
+const tmState = {loaded: false, recs: [], rec: null, recLaps: [], pool: null,
+                 a: null, b: null, lapA: null, lapB: null, sectorM: 200, tracks: null,
+                 chart: null, map: null, cursor: null, profile: null};
+const tmLapCache = new Map();
+const TM_STEP = 5;                        // gt7_laps.STEP_M: one trace point per 5 m
+const TM_PAD = {l: 70, r: 10, t: 4, gap: 10, b: 22};
+const TM_CH = [
+  {key: 'speed_kmh', label: 'Speed', unit: 'km/h', h: 120, lo: 0},
+  {key: 'throttle', label: 'Throttle', unit: '%', h: 52, lo: 0, hi: 100},
+  {key: 'brake', label: 'Brake', unit: '%', h: 52, lo: 0, hi: 100},
+  {key: 'steer_deg', label: 'Steering', unit: 'deg', h: 70, sym: true},
+  {key: 'gear', label: 'Gear', unit: '', h: 52, lo: 0, step: true},
+  {key: 'delta', label: 'Delta B-A', unit: 's', h: 90, sym: true},
+];
+const tmLapsReq = new Map();     // url -> pending request, so a cold index runs once
+let tmLapGen = 0;                // bumped when cached laps go stale; older answers are not cached
+const tmSeq = {load: 0, rec: 0, b: 0, pair: 0};   // only the newest call of each kind renders
+
+function tmKey(l) { return l.rec + '|' + l.session + '|' + l.lap; }
+function tmTime(s) {
+  if (s == null) return '—';
+  const ms = Math.round(s * 1000), m = Math.floor(ms / 60000), r = (ms % 60000) / 1000;
+  return m + ':' + (r < 10 ? '0' : '') + r.toFixed(3);
+}
+function tmSigned(v) {
+  if (v == null) return '—';
+  if (Math.abs(v) < 0.0005) return '0.000';
+  return (v > 0 ? '+' : '') + v.toFixed(3);
+}
+// Mini-sector colour for B minus A; under half a millisecond reads as even, like tmSigned.
+function tmSecClass(diff) {
+  if (diff == null || Math.abs(diff) < 0.0005) return 'even';
+  return diff < 0 ? 'gain' : 'loss';
+}
+function tmEl(tag, attrs, parent) {
+  const e = document.createElementNS(TM_NS, tag);
+  Object.entries(attrs || {}).forEach(([k, v]) => e.setAttribute(k, v));
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function tmErr(msg) { const e = $('tm-err'); e.textContent = msg || ''; e.hidden = !msg; }
+async function tmGet(url) {
+  try { return await (await fetch(url, {cache: 'no-store'})).json(); }
+  catch (e) { return {ok: false, error: 'Control Center not reachable.'}; }
+}
+function tmShared(url) {
+  if (!tmLapsReq.has(url)) {
+    const p = tmGet(url).finally(() => { if (tmLapsReq.get(url) === p) tmLapsReq.delete(url); });
+    tmLapsReq.set(url, p);
+  }
+  return tmLapsReq.get(url);
+}
+function tmDropLaps() {
+  tmLapGen++;
+  tmIndexLines = [];
+  tmLapCache.clear();
+  tmLapsReq.clear();
+}
+// Builds the missing lap indexes in the telemetry-index job; pool requests share one run,
+// and it runs once per lap generation and GT7 data version, so a recording that cannot be
+// indexed does not start it on every lap B.
+let tmIndexing = null;
+let tmIndexedGen = -1;
+let tmIndexedVer = null;           // the data_version of the answer that started this page's last run
+let tmIndexLines = [];             // the output of that run, which names a recording it could not index
+function tmNote(text) { $('tm-note').textContent = text; $('tm-note').hidden = false; }
+// True when an unindexed answer `d` may start the job: a new lap generation, or GT7 data
+// that changed since the last run, e.g. by the relay's background data update.
+function tmMayIndex(d) {
+  return tmIndexedGen !== tmLapGen || (d.data_version != null && d.data_version !== tmIndexedVer);
+}
+function tmIndexAll(ver) {
+  if (!tmIndexing) {
+    const gen = tmLapGen;
+    const p = (async () => {
+      let job = await startJob('telemetry-index');
+      if (job.error && job.job_id) {
+        if (gen === tmLapGen) tmNote('Indexing runs in another window, waiting for it…');
+        job = {job_id: job.job_id, joined: true};
+      }
+      const r = job.error ? job : await jobResult(job.job_id, 20);
+      if (r.error || gen !== tmLapGen) return r;
+      tmIndexedGen = gen;
+      if (!job.joined) tmIndexedVer = ver;          // a joined run's version is unknown
+      tmIndexLines = r.lines || [];
+      if (job.joined) $('tm-note').hidden = true;
+      if (r.code !== 0) {
+        const bad = (r.lines || []).filter(l => l.includes('not indexed'));
+        tmNote('Some recordings could not be indexed: '
+          + (bad.length ? bad : (r.lines || []).slice(-1)).join('; '));
+      }
+      tmRefreshRecs();
+      return r;
+    })().finally(() => { if (tmIndexing === p) tmIndexing = null; });
+    tmIndexing = p;
+  }
+  return tmIndexing;
+}
+// `ask()` once more after the index job when the recording `rec` has no lap index yet. A
+// recording the job of this generation could not index answers with the job's line as an
+// error instead of starting it again. `busy(true)` and `busy(false)` bracket the job.
+async function tmIndexed(rec, ask, stale, busy) {
+  let d = await ask();
+  for (let runs = 0; runs < 2 && d.ok && d.unindexed && tmMayIndex(d); runs++) {
+    if (busy) busy(true);
+    let job;
+    try { job = await tmIndexAll(d.data_version); } finally { if (busy) busy(false); }
+    if (stale()) return {ok: false, stale: true};
+    if (job.error) return {ok: false, error: job.error};
+    d = await ask();
+  }
+  if (!d.ok || !d.unindexed) return d;
+  const last = tmIndexLines[tmIndexLines.length - 1] || '';
+  const failed = /failed: (.*)$/.exec(last);
+  const line = tmIndexLines.find(l => l.startsWith(rec + ': not indexed'))
+    || (failed && failed[1].split(', ').includes(rec) ? last : '');
+  return {ok: false, error: line || (d.note || rec + ' has no lap index yet')
+    + '. Refresh runs the index job again.'};
+}
+async function tmRefreshRecs() {
+  const seq = tmSeq.load;
+  const d = await tmGet('/api/telemetry/recordings');
+  if (seq !== tmSeq.load || !d.ok) return;
+  tmState.recs = d.recordings || [];
+  tmRenderRecs();
+}
+function tmTrackName(t) {
+  return t.track + (t.layout ? ' - ' + t.layout : '') + (t.reverse ? ' (reverse)' : '');
+}
+
+function tmTrackLabel(t) {
+  if (!t) return 'track unknown';
+  if (t.candidates) return 'track ambiguous';
+  return tmTrackName(t);
+}
+function tmLapTrack(l) { return l.track ? l.track + (l.layout ? ' - ' + l.layout : '') : 'track unknown'; }
+
+function tmPlaceholder(id, text) {
+  const sel = $(id);
+  sel.textContent = '';
+  const o = document.createElement('option');
+  o.value = ''; o.textContent = text; o.disabled = true; o.selected = true;
+  sel.appendChild(o);
+  sel.disabled = true;
+}
+function tmClearPair(status) {
+  tmSeq.pair++;
+  tmState.lapA = tmState.lapB = tmState.pool = tmState.a = null;
+  tmState.chart = tmState.map = tmState.cursor = null;
+  ['tm-charts', 'tm-map', 'tm-sectors', 'tm-map-sub'].forEach(id => { $(id).textContent = ''; });
+  tmPlaceholder('tm-a', status ? 'loading…' : 'no lap');
+  tmPlaceholder('tm-b', status ? 'loading…' : 'no lap');
+  $('tm-sec-sub').textContent = status || '';
+}
+function tmClear(msg) {
+  tmClearPair('');
+  tmState.b = null;
+  $('tm-rec-track').textContent = '';
+  $('tm-laps').textContent = msg || '';
+  $('tm-settrack').hidden = true;
+}
+function tmReset() {
+  Object.keys(tmSeq).forEach(k => { tmSeq[k]++; });
+  tmState.loaded = false; tmState.rec = null; tmState.recs = []; tmState.recLaps = [];
+  tmState.tracks = null;
+  tmDropLaps();
+  tmIndexing = null;
+  tmIndexedVer = null;
+  $('tm-note').hidden = true;
+  $('tm-recs').textContent = '';
+  tmErr('');
+  tmClear('');
+}
+
+async function tmLoad() {
+  const seq = ++tmSeq.load;
+  tmDropLaps();
+  tmState.tracks = null;
+  $('tm-note').hidden = true;
+  tmErr('');
+  const d = await tmGet('/api/telemetry/recordings');
+  if (seq !== tmSeq.load) return;
+  if (!d.ok) {
+    tmState.loaded = false; tmState.recs = []; tmState.rec = null; tmState.recLaps = [];
+    $('tm-recs').textContent = '';
+    tmClear('');
+    tmErr(d.error || 'could not list the recordings');
+    return;
+  }
+  tmState.loaded = true;
+  tmState.recs = d.recordings || [];
+  const keep = tmState.recs.find(r => r.rec === tmState.rec && !r.recording);
+  const first = keep || tmState.recs.find(r => !r.recording);
+  if (!first) {
+    tmState.rec = null;
+    tmState.recLaps = [];
+    tmRenderRecs();
+    tmClear(tmState.recs.length
+      ? 'The relay is still writing the only recording. Stop the recording to analyse it.'
+      : 'No recordings yet. The Director Panel REC key or TELEMETRY_RECORD=1 in the profile records a session.');
+    return;
+  }
+  tmSelectRec(first.rec);
+}
+
+function tmRenderRecs() {
+  const box = $('tm-recs');
+  box.textContent = '';
+  tmState.recs.forEach(r => {
+    const b = document.createElement('button');
+    b.className = 'tmitem' + (r.rec === tmState.rec ? ' sel' : '');
+    const name = document.createElement('span');
+    name.textContent = r.rec + (r.recording ? ' (recording)' : r.partial ? ' (unclosed)' : '');
+    const laps = document.createElement('span');
+    laps.textContent = r.laps == null ? '' : r.laps + ' laps';
+    const sub = document.createElement('span');
+    sub.className = 'tmsub';
+    sub.textContent = (r.recording ? 'being written' : r.indexed ? tmTrackLabel(r.track) : 'not indexed yet')
+      + ' · ' + Math.round(r.duration_s / 60) + ' min · ' + (r.size / 1e6).toFixed(1) + ' MB';
+    b.append(name, laps, sub);
+    if (r.recording) b.disabled = true;           // laps/lap/learn refuse the open file
+    else b.onclick = () => tmSelectRec(r.rec);
+    box.appendChild(b);
+  });
+}
+
+async function tmSelectRec(rec) {
+  const seq = ++tmSeq.rec;
+  tmSeq.b++;
+  tmState.rec = rec;
+  tmState.recLaps = [];
+  tmRenderRecs();
+  tmErr('');
+  $('tm-note').hidden = true;
+  tmClear('Indexing…');                             // the first open runs the index job
+  const d = await tmIndexed(rec, () => tmShared('/api/telemetry/laps?' + new URLSearchParams({rec})),
+                            () => seq !== tmSeq.rec);
+  if (seq !== tmSeq.rec) return;
+  if (!d.ok) { tmClear(''); tmErr(d.error || 'could not read the recording'); return; }
+  tmState.recLaps = d.laps || [];
+  const row = tmState.recs.find(r => r.rec === rec);
+  if (row) {
+    row.indexed = true; row.track = d.recording.track; row.laps = tmState.recLaps.length;
+    tmRenderRecs();
+  }
+  const counted = tmState.recLaps.filter(l => l.status !== 'not counted');
+  const pick = (counted.length ? counted : tmState.recLaps).slice(-1)[0];
+  if (!pick) tmClear('This recording has no laps.');
+  $('tm-rec-track').textContent = tmTrackLabel(d.recording.track);
+  tmShowSetTrack(d.recording.track);
+  if (pick) tmSelectB(pick);
+}
+
+function tmRenderLaps() {
+  const box = $('tm-laps');
+  box.textContent = '';
+  if (!tmState.recLaps.length) { box.textContent = 'No laps in this recording.'; return; }
+  tmState.recLaps.forEach(l => {
+    const b = document.createElement('button');
+    b.className = 'tmitem' + (l.status === 'not counted' ? ' nc' : '')
+      + (tmKey(l) === tmState.b ? ' sel' : '');
+    const name = document.createElement('span');
+    name.textContent = 'Lap ' + l.lap + (l.session > 1 ? ' · session ' + l.session : '');
+    const time = document.createElement('span');
+    time.textContent = tmTime(l.time_s);
+    const sub = document.createElement('span');
+    sub.className = 'tmsub';
+    sub.textContent = [l.status === 'not counted' ? 'not counted: ' + l.reason : l.status,
+                       l.car || 'car unknown', tmLapTrack(l)].join(' · ');
+    sub.title = sub.textContent;
+    b.append(name, time, sub);
+    b.onclick = () => tmSelectB(l);
+    box.appendChild(b);
+  });
+}
+
+// The fastest pool lap other than B: comparing a lap with itself shows nothing.
+function tmDefaultA(bKey) {
+  const others = ((tmState.pool && tmState.pool.laps) || [])
+    .filter(l => tmKey(l) !== bKey && l.time_s != null);
+  others.sort((x, y) => x.time_s - y.time_s);
+  return others.length ? tmKey(others[0]) : null;
+}
+
+async function tmSelectB(l) {
+  const seq = ++tmSeq.b;
+  const key = tmKey(l);
+  tmState.b = key;
+  tmRenderLaps();
+  tmClearPair('Loading comparable laps…');
+  const q = new URLSearchParams({car: l.car_id == null ? '' : String(l.car_id),
+                                 track: l.track_id == null ? '' : l.track_id});
+  if (l.track_id == null) { q.set('rec', l.rec); q.set('session', String(l.session)); }
+  let p = await tmShared('/api/telemetry/laps?' + q);
+  if (seq !== tmSeq.b) return;
+  if (p.ok && p.unindexed && tmMayIndex(p)) {   // asks once: a broken file stays unindexed
+    $('tm-sec-sub').textContent = 'Indexing ' + p.unindexed
+      + (p.unindexed === 1 ? ' recording…' : ' recordings…');
+    const job = await tmIndexAll(p.data_version);
+    if (seq !== tmSeq.b) return;
+    if (job.error) tmErr(job.error);
+    else p = await tmShared('/api/telemetry/laps?' + q);
+    if (seq !== tmSeq.b) return;
+  }
+  if (!p.ok) tmErr(p.error || 'could not load the comparable laps');
+  tmState.pool = p.ok ? p : {laps: [], best_sectors: [], theoretical_best: null};
+  tmState.a = tmDefaultA(key);
+  tmFillPickers(l);
+  await tmLoadPair();
+}
+
+function tmFillPickers(lapB) {
+  const pool = tmState.pool.laps || [];
+  const bKey = tmKey(lapB);
+  const forA = pool.filter(l => tmKey(l) !== bKey);
+  const forB = pool.some(l => tmKey(l) === bKey) ? pool : pool.concat([lapB]);
+  [['tm-a', forA, tmState.a], ['tm-b', forB, tmState.b]].forEach(([id, list, cur]) => {
+    if (!list.length) { tmPlaceholder(id, 'no other lap to compare'); return; }
+    const sel = $(id);
+    sel.textContent = '';
+    sel.disabled = false;
+    list.forEach(l => {
+      const o = document.createElement('option');
+      o.value = tmKey(l);
+      o.textContent = tmTime(l.time_s) + '  ' + l.rec + ' lap ' + l.lap
+        + (l.status === 'not counted' ? ' (not counted)' : '');
+      sel.appendChild(o);
+    });
+    sel.value = cur || '';
+  });
+}
+
+function tmPick(which, key) {
+  tmState[which] = key || null;
+  if (which === 'b' && tmState.pool) {
+    const lb = (tmState.pool.laps || []).concat(tmState.recLaps).find(l => tmKey(l) === key);
+    if (lb) {
+      if (tmState.a === key) tmState.a = tmDefaultA(key);
+      tmFillPickers(lb);
+    }
+  }
+  if (which === 'b') tmRenderLaps();
+  tmLoadPair();
+}
+
+// Resolves to {lap} or {error}; never writes page state, so a stale answer cannot leak.
+async function tmFetchLap(key) {
+  if (tmLapCache.has(key)) return {lap: tmLapCache.get(key)};
+  const gen = tmLapGen;
+  const [rec, session, lap] = key.split('|');
+  const d = await tmIndexed(rec,
+    () => tmShared('/api/telemetry/lap?' + new URLSearchParams({rec, session, lap})),
+    () => gen !== tmLapGen);
+  if (d.stale) return {error: ''};
+  if (!d.ok) return {error: d.error || 'could not load the lap'};
+  if (gen === tmLapGen) tmLapCache.set(key, d.lap);
+  return {lap: d.lap, sectorM: d.sector_m};
+}
+
+async function tmLoadPair() {
+  const seq = ++tmSeq.pair;
+  const want = [tmState.a, tmState.b];
+  const [a, b] = await Promise.all(want.map(k => (k ? tmFetchLap(k) : {lap: null})));
+  if (seq !== tmSeq.pair || want[0] !== tmState.a || want[1] !== tmState.b) return;
+  const err = a.error || b.error;
+  if (err) tmErr(err);
+  tmState.sectorM = a.sectorM || b.sectorM || tmState.sectorM;
+  tmState.lapA = a.lap || null;
+  tmState.lapB = b.lap || null;
+  tmRender();
+}
+
+function tmRender() {
+  const B = tmState.lapB;
+  $('tm-map-sub').textContent = B ? tmLapTrack(B) : '';
+  tmRenderCharts();
+  tmRenderMap();
+  tmRenderSectors();
+}
+
+function tmRenderSectors() {
+  const t = $('tm-sectors');
+  t.textContent = '';
+  const A = tmState.lapA, B = tmState.lapB;
+  if (!B) return;
+  const best = (tmState.pool && tmState.pool.best_sectors) || [];
+  const sa = A ? A.sectors || [] : [], sb = B.sectors || [];
+  const head = t.createTHead().insertRow();
+  ['Sector', 'A', 'B', 'B-A', 'Best'].forEach(h => {
+    const th = document.createElement('th'); th.textContent = h; head.appendChild(th);
+  });
+  const body = t.createTBody();
+  const f = v => (v == null ? '—' : v.toFixed(3));
+  for (let i = 0; i < Math.max(sa.length, sb.length); i++) {
+    const ta = sa[i], tb = sb[i], bs = best[i];
+    const diff = ta != null && tb != null ? tb - ta : null;
+    const row = body.insertRow();
+    [String(i + 1), f(ta), f(tb), tmSigned(diff), f(bs)].forEach(v => { row.insertCell().textContent = v; });
+    if (tmSecClass(diff) !== 'even') row.cells[3].className = tmSecClass(diff);
+    if (tb != null && bs != null && Math.abs(tb - bs) < 0.0005) row.cells[2].className = 'best';
+  }
+  const foot = t.createTFoot().insertRow();
+  const lapDiff = A && A.time_s != null && B.time_s != null ? B.time_s - A.time_s : null;
+  ['Lap', tmTime(A ? A.time_s : null), tmTime(B.time_s), tmSigned(lapDiff),
+   tmTime(tmState.pool ? tmState.pool.theoretical_best : null)].forEach(v => {
+    foot.insertCell().textContent = v;
+  });
+  foot.cells[4].title = 'Theoretical best: the sum of the best mini-sectors';
+  if (tmSecClass(lapDiff) !== 'even') foot.cells[3].className = tmSecClass(lapDiff);
+  const laps = tmState.pool ? tmState.pool.laps || [] : [];
+  const alone = !laps.some(l => tmKey(l) !== tmKey(B));
+  $('tm-sec-sub').textContent = (tmState.sectorM || 200) + ' m'
+    + (alone ? ' · no other lap' : ' · best of ' + laps.length + ' laps');
+}
+// Pairs only stations at the same distance, so closing points of different lap lengths never meet.
+function tmDelta(a, b) {
+  const n = Math.min(a.trace.length, b.trace.length), out = [];
+  for (let i = 0; i < n; i++) {
+    if (a.trace[i].d !== b.trace[i].d) continue;
+    out.push({d: a.trace[i].d, delta: Math.round((b.trace[i].t - a.trace[i].t) * 1000) / 1000});
+  }
+  return out;
+}
+
+function tmPath(rows, key, X, Y, step) {
+  let d = '', pen = false;
+  rows.forEach(r => {
+    const v = r[key];
+    if (v == null) { pen = false; return; }
+    const x = X(r.d).toFixed(1), y = Y(v).toFixed(1);
+    d += !pen ? 'M' + x + ' ' + y : step ? 'H' + x + 'V' + y : 'L' + x + ' ' + y;
+    pen = true;
+  });
+  return d || 'M0 0';
+}
+
+function tmDeltaArea(svg, delta, X, Y) {
+  const y0 = Y(0), x0 = X(delta[0].d), x1 = X(delta[delta.length - 1].d);
+  let d = 'M' + x0.toFixed(1) + ' ' + y0.toFixed(1);
+  delta.forEach(r => { d += 'L' + X(r.d).toFixed(1) + ' ' + Y(r.delta).toFixed(1); });
+  d += 'L' + x1.toFixed(1) + ' ' + y0.toFixed(1) + 'Z';
+  const defs = tmEl('defs', {}, svg);
+  tmEl('rect', {x: x0, y: y0 - 2000, width: x1 - x0, height: 2000}, tmEl('clipPath', {id: 'tm-clip-up'}, defs));
+  tmEl('rect', {x: x0, y: y0, width: x1 - x0, height: 2000}, tmEl('clipPath', {id: 'tm-clip-dn'}, defs));
+  tmEl('path', {d, class: 'tm-loss', 'clip-path': 'url(#tm-clip-up)'}, svg);   // B behind
+  tmEl('path', {d, class: 'tm-gain', 'clip-path': 'url(#tm-clip-dn)'}, svg);   // B ahead
+}
+
+function tmTrace(l) { return (l && l.trace) || []; }
+
+function tmRenderCharts() {
+  const svg = $('tm-charts');
+  svg.textContent = '';
+  tmState.chart = tmState.cursor = null;
+  const A = tmState.lapA, B = tmState.lapB;
+  const ta = tmTrace(A), tb = tmTrace(B);
+  if (!tb.length) return;
+  const W = Math.max(300, Math.round(svg.getBoundingClientRect().width) || 760);
+  const H = TM_PAD.t + TM_CH.reduce((s, c) => s + c.h + TM_PAD.gap, 0) + TM_PAD.b;
+  svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+  const last = t => (t.length ? t[t.length - 1].d : 0);
+  const maxD = Math.max(last(ta), last(tb)) || 1;
+  const X = d => TM_PAD.l + d / maxD * (W - TM_PAD.l - TM_PAD.r);
+  const delta = ta.length ? tmDelta({trace: ta}, {trace: tb}) : [];
+  const panels = [];
+  let y = TM_PAD.t;
+  TM_CH.forEach(c => {
+    const series = c.key === 'delta' ? (delta.length ? [{cls: 'tm-b', rows: delta}] : [])
+      : [ta.length && {cls: 'tm-a', rows: ta}, {cls: 'tm-b', rows: tb}].filter(Boolean);
+    let vmin = Infinity, vmax = -Infinity;
+    series.forEach(s => s.rows.forEach(r => {
+      const v = r[c.key];
+      if (v != null) { if (v < vmin) vmin = v; if (v > vmax) vmax = v; }
+    }));
+    const any = vmin <= vmax;
+    let lo = c.lo != null ? c.lo : (any ? vmin : 0);
+    let hi = c.hi != null ? c.hi : (any ? vmax : 1);
+    if (c.sym) {
+      const m = Math.max(0.1, any ? Math.max(-vmin, vmax) : 0) * 1.1;
+      lo = -m; hi = m;
+    } else if (c.hi == null) {
+      hi = c.step ? Math.max(hi, 1) + 0.5 : Math.max(hi, lo + 1) * 1.05;
+    }
+    const top = y;
+    const Y = v => top + c.h - (v - lo) / (hi - lo) * c.h;
+    tmEl('rect', {x: TM_PAD.l, y: top, width: W - TM_PAD.l - TM_PAD.r, height: c.h, class: 'tm-frame'}, svg);
+    if (series.length && lo < 0 && hi > 0) {
+      tmEl('line', {x1: TM_PAD.l, x2: W - TM_PAD.r, y1: Y(0), y2: Y(0), class: 'tm-zero'}, svg);
+    }
+    tmEl('text', {x: 4, y: top + 13}, svg).textContent = c.label;
+    tmEl('text', {x: 4, y: top + 27, class: 'tm-unit'}, svg).textContent = c.unit;
+    if (c.key === 'delta') {
+      if (delta.length) tmDeltaArea(svg, delta, X, Y);
+      else tmEl('text', {x: TM_PAD.l + 8, y: top + c.h / 2 + 4, class: 'tm-unit'}, svg).textContent = 'no lap A to compare';
+    }
+    series.forEach(s => tmEl('path', {d: tmPath(s.rows, c.key, X, Y, c.step), class: s.cls}, svg));
+    const bg = tmEl('rect', {x: W - TM_PAD.r, y: top + 2, width: 0, height: 15, rx: 3, class: 'tm-readbg'}, svg);
+    panels.push({c, bg, read: tmEl('text', {x: W - TM_PAD.r - 6, y: top + 13, 'text-anchor': 'end', class: 'tm-read'}, svg)});
+    y += c.h + TM_PAD.gap;
+  });
+  // Ticks at least ~70 px apart, so the km labels never collide on a narrow pane.
+  const room = (W - TM_PAD.l - TM_PAD.r) / 70;
+  const tick = [200, 500, 1000, 2000, 5000].find(t => maxD / t <= room) || 10000;
+  for (let d = 0; d <= maxD; d += tick) {
+    const edge = X(d) > W - TM_PAD.r - 30;       // the last label must not run off the right edge
+    tmEl('text', {x: edge ? W - TM_PAD.r : X(d), y: H - 6, 'text-anchor': edge ? 'end' : 'middle'}, svg)
+      .textContent = (d / 1000).toFixed(1) + ' km';
+  }
+  tmState.cursor = tmEl('line', {class: 'tm-cursor', x1: -10, x2: -10, y1: TM_PAD.t, y2: H - TM_PAD.b}, svg);
+  tmState.chart = {X, maxD, W, panels};
+}
+
+function tmHover(ev) {
+  const ch = tmState.chart;
+  if (!ch) return;
+  const box = $('tm-charts').getBoundingClientRect();
+  const px = (ev.clientX - box.left) * ch.W / box.width;
+  const d = Math.max(0, Math.min(ch.maxD, (px - TM_PAD.l) / (ch.W - TM_PAD.l - TM_PAD.r) * ch.maxD));
+  const x = ch.X(d).toFixed(1);
+  tmState.cursor.setAttribute('x1', x);
+  tmState.cursor.setAttribute('x2', x);
+  const i = Math.round(d / TM_STEP);       // station i sits at i * TM_STEP metres
+  const at = l => {      // a closing point far off station i belongs to another distance
+    const r = tmTrace(l)[i];
+    return r && Math.abs(r.d - i * TM_STEP) < TM_STEP / 2 ? r : null;
+  };
+  const ra = at(tmState.lapA), rb = at(tmState.lapB);
+  ch.panels.forEach((p, n) => {
+    const k = p.c.key;
+    const txt = k === 'delta' ? (ra && rb ? tmSigned(rb.t - ra.t) + ' s' : '')
+      : [ra, rb].map(r => (r && r[k] != null ? Number(r[k]).toFixed(k === 'gear' ? 0 : 1) : '-')).join(' / ');
+    p.read.textContent = (n === 0 ? (d / 1000).toFixed(2) + ' km · ' : '') + txt;
+    tmReadBg(p, ch.W);
+  });
+  tmMapCursor(ra, rb);
+}
+
+function tmLeave() {
+  if (tmState.cursor) { tmState.cursor.setAttribute('x1', -10); tmState.cursor.setAttribute('x2', -10); }
+  if (tmState.chart) tmState.chart.panels.forEach(p => { p.read.textContent = ''; tmReadBg(p, tmState.chart.W); });
+  tmMapCursor(null, null);
+}
+
+// Sized from the character count (11px mono is ~6.7px wide), so a hover never forces a layout.
+function tmReadBg(p, W) {
+  const w = p.read.textContent ? p.read.textContent.length * 6.7 + 8 : 0;
+  p.bg.setAttribute('x', W - TM_PAD.r - 2 - w);
+  p.bg.setAttribute('width', w);
+}
+
+function tmMapPt(p) { return p && Number.isFinite(p.x) && Number.isFinite(p.z); }
+function tmMapW() { return Math.max(200, Math.round($('tm-map').getBoundingClientRect().width) || 320); }
+
+function tmRenderMap() {
+  const svg = $('tm-map');
+  svg.textContent = '';
+  tmState.map = null;
+  const A = tmState.lapA, B = tmState.lapB;
+  const ta = tmTrace(A), tb = tmTrace(B);
+  if (!tb.length) return;
+  const W = tmMapW(), pad = 12;
+  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity, hasB = false;
+  [ta, tb].forEach(t => t.forEach(p => {
+    if (!tmMapPt(p)) return;
+    if (p.x < x0) x0 = p.x; if (p.x > x1) x1 = p.x;
+    if (p.z < z0) z0 = p.z; if (p.z > z1) z1 = p.z;
+    hasB = hasB || t === tb;
+  }));
+  if (!hasB) {
+    svg.setAttribute('viewBox', '0 0 ' + W + ' 24');
+    tmEl('text', {x: 0, y: 15}, svg).textContent = 'no position data in this lap';
+    return;
+  }
+  const s = (W - 2 * pad) / (Math.max(x1 - x0, z1 - z0) || 1);
+  const H = Math.round((z1 - z0) * s + 2 * pad);
+  svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+  const ox = (W - (x1 - x0) * s) / 2, oz = (H - (z1 - z0) * s) / 2;   // centre the shorter axis
+  const P = p => [ox + (p.x - x0) * s, oz + (p.z - z0) * s];
+  const line = pts => {
+    let d = '', pen = false;
+    pts.forEach(p => {
+      if (!tmMapPt(p)) { pen = false; return; }
+      d += (pen ? 'L' : 'M') + P(p).map(v => v.toFixed(1)).join(' ');
+      pen = true;
+    });
+    return d;
+  };
+  const per = (tmState.sectorM || 200) / TM_STEP;      // stations per mini-sector
+  const sa = A ? A.sectors || [] : [];
+  (B.sectors || []).forEach((secB, i) => {
+    const d = line(tb.slice(Math.round(i * per), Math.round((i + 1) * per) + 1));
+    if (!d) return;
+    const secA = sa[i];
+    const diff = secA != null && secB != null ? secB - secA : null;
+    const path = tmEl('path', {d, class: 'tm-seg ' + tmSecClass(diff)}, svg);
+    tmEl('title', {}, path).textContent = 'Sector ' + (i + 1) + (diff == null ? '' : ': ' + tmSigned(diff) + ' s');
+  });
+  const da = line(ta);
+  if (da) tmEl('path', {d: da, class: 'tm-a'}, svg);    // a thin line over B's colours
+  const [sx, sy] = P(tb.find(tmMapPt));
+  tmEl('circle', {cx: sx, cy: sy, r: 3.5, class: 'tm-line'}, svg);   // start/finish line
+  const dot = cls => tmEl('circle', {r: 5, cx: 0, cy: 0, visibility: 'hidden', class: cls}, svg);
+  tmState.map = {P, W, dotA: dot('tm-dot-a'), dotB: dot('tm-dot-b')};
+}
+
+// A lap that does not reach the cursor distance (r null) shows no dot.
+function tmMapCursor(ra, rb) {
+  const m = tmState.map;
+  if (!m) return;
+  [[m.dotA, ra], [m.dotB, rb]].forEach(([dot, r]) => {
+    if (!tmMapPt(r)) { dot.setAttribute('visibility', 'hidden'); return; }
+    const [x, y] = m.P(r);
+    dot.setAttribute('cx', x.toFixed(1));
+    dot.setAttribute('cy', y.toFixed(1));
+    dot.setAttribute('visibility', 'visible');
+  });
+}
+
+// Redraws what a width change would distort; a hidden view (width 0) waits for showView.
+function tmRefit() {
+  if (!tmState.lapB) return;
+  const cw = Math.round($('tm-charts').getBoundingClientRect().width);
+  if (cw && (!tmState.chart || Math.max(300, cw) !== tmState.chart.W)) tmRenderCharts();
+  const mw = Math.round($('tm-map').getBoundingClientRect().width);
+  if (mw && (!tmState.map || Math.max(200, mw) !== tmState.map.W)) tmRenderMap();
+}
+
+// The Set track row for an unknown or ambiguous recording; candidates come first.
+async function tmShowSetTrack(track) {
+  const seq = tmSeq.rec;
+  const row = tmState.recs.find(r => r.rec === tmState.rec);
+  $('tm-settrack').hidden = true;
+  if ((track && !track.candidates) || (row && row.recording)) return;
+  if (!tmState.tracks) {
+    const d = await tmShared('/api/telemetry/tracks');
+    if (seq !== tmSeq.rec) return;
+    if (!d.ok) { tmErr(d.error || 'could not load the track list'); return; }
+    tmState.tracks = (d.tracks || []).slice().sort((a, b) =>
+      a.track.localeCompare(b.track) || (a.layout || '').localeCompare(b.layout || ''));
+  }
+  const want = ((track && track.candidates) || []).map(c => String(c.id));
+  const list = want.map(id => tmState.tracks.find(t => t.id === id)).filter(Boolean)
+    .concat(tmState.tracks.filter(t => !want.includes(t.id)));
+  const sel = $('tm-track-pick');
+  sel.textContent = '';
+  list.forEach(t => {
+    const o = document.createElement('option');
+    o.value = t.id;
+    o.textContent = tmTrackName(t);
+    sel.appendChild(o);
+  });
+  $('tm-settrack').hidden = false;
+}
+
+async function tmLearn() {
+  const sel = $('tm-track-pick'), rec = tmState.rec, seq = tmSeq.rec;
+  const row = tmState.recs.find(r => r.rec === rec);
+  if (!sel.value || !rec || (row && row.recording)) return;
+  const label = sel.options[sel.selectedIndex].textContent, trackId = sel.value;
+  if (!(await confirmModal('Set the track of ' + rec + ' to ' + label + '?\n'
+      + 'Without a downloaded racing line for this layout, racecast learns it from the '
+      + 'longest counted lap, so later recordings on it are recognised.', {title: 'Set track'}))) return;
+  if (seq !== tmSeq.rec) return;
+  const btn = $('tm-learn');
+  btn.disabled = true;
+  try {
+    const r = await tmIndexed(rec, async () => (await fetch('/api/telemetry/learn', {method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({rec, track_id: trackId})})).json(), () => seq !== tmSeq.rec,
+      on => { btn.textContent = on ? 'Indexing…' : 'Set track'; });
+    if (r.ok) {                           // every cached index is now stale
+      tmDropLaps();
+      tmState.recs.forEach(x => { if (x.indexed) x.indexed = false; });
+    }
+    if (seq !== tmSeq.rec) return;
+    if (!r.ok) { tmErr(r.error || 'could not set the track'); return; }
+    tmErr('');
+    tmSelectRec(rec);
+    $('tm-note').textContent = rec + ' now uses ' + label + '. ' + (r.learned
+      ? 'racecast learned the line from its longest counted lap, so later recordings on it are recognised.'
+      : 'The downloaded racing line for it stays as it is.');
+    $('tm-note').hidden = false;
+  } catch (e) {
+    if (seq === tmSeq.rec) tmErr('Control Center not reachable.');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+$('tm-charts').addEventListener('pointermove', tmHover);
+$('tm-charts').addEventListener('pointerleave', tmLeave);
+let tmResizeQueued = false;
+window.addEventListener('resize', () => {
+  if (currentView !== 'telemetry' || !tmState.lapB || tmResizeQueued) return;
+  tmResizeQueued = true;
+  requestAnimationFrame(() => { tmResizeQueued = false; tmRefit(); });
+});
+// end of the Telemetry view
 
 function _mbps(bps) { return bps == null ? '—' : (bps / 1e6).toFixed(2) + ' Mbps'; }
 function _lvlText(el, level, text) {

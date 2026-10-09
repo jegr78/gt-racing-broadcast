@@ -45,12 +45,12 @@ class JobManager:
                                 **_NO_WINDOW)
 
     def start(self, op, op_args):
-        """Start `op` unless one is still running. Returns (job_id, None) or
-        (None, error-text)."""
+        """Start `op` unless one is still running. Returns (job_id, None), or the
+        running job's id and an error text."""
         with self.lock:
             for job in self.jobs.values():
                 if job.op == op and job.exit_code is None:  # exit_code writes are atomic
-                    return None, f"{op} is already running"
+                    return job.id, f"{op} is already running"
             argv = self.argv_for(op_args)
             proc = self.spawn(argv)
             job = Job(uuid.uuid4().hex[:12], op, proc)

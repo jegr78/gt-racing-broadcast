@@ -47,6 +47,8 @@ DISCORD_CLIENT_SECRET=
 DISCORD_WEBHOOK_URL=
 # optional: crew graphic takes (off | direct)
 GRAPHICS_TAKE=
+# optional: GT7 telemetry recording (solo POV)
+TELEMETRY_RECORD=
 ```
 
 - **`NAME`**: display name shown in the CLI / Control Center / docs (not the HUD).
@@ -95,6 +97,9 @@ GRAPHICS_TAKE=
   air directly in `request` mode too. The director keeps full control either way and can
   change the mode per role live from the panel until the relay restarts. See
   [Console → Graphics](Console#graphics).
+- **`TELEMETRY_RECORD`** *(optional, solo POV)*: `1` records the GT7 telemetry trace from
+  relay start. The Director Panel `REC` key and `racecast telemetry record` toggle it live.
+  See [Relay mode](Relay-Mode).
 
 **Which profile is active** (resolution order): a global `--profile <name>` flag wins;
 then the machine `RACECAST_PROFILE` (or `.env`) value; then the `runtime/active-profile`

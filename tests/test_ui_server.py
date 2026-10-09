@@ -2,7 +2,7 @@
 """Stdlib checks for the Control Center HTTP server, run against a real server on
 an ephemeral port so CI needs no fixed port.
 Run: python3 tests/test_ui_server.py"""
-import json, os, re, sys, tempfile, threading, time, urllib.error, urllib.parse, urllib.request
+import json, os, re, shutil, subprocess, sys, tempfile, threading, time, urllib.error, urllib.parse, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -196,6 +196,7 @@ def _ctx(jobs=None, init_plan=None, init_step=None, profile_logo=None,
                                                    "name": (name or "") + ".woff2"},
             "machine_font_delete": lambda name: {"ok": True, "removed": name},
             "fonts_restore": lambda force: {"ok": True, "library": [], "profiles": {}},
+            "gt7_data_status": lambda: {"ok": True, "checked": None, "files": {}},
             "overlay_font_upload": lambda name, data: {"ok": bool(name),
                                                        "name": name,
                                                        "_len": len(data)},
@@ -232,11 +233,22 @@ def _ctx(jobs=None, init_plan=None, init_step=None, profile_logo=None,
                 "ok": True, "row": row,
                 "_got": (row, name, director, producer, commentator, race_control, discord)},
             "crew_delete": lambda row: {"ok": True, "row": row, "_got": row},
-            "report_generate": lambda: {"ok": True,
-                                        "html": "<!doctype html><html></html>",
-                                        "path": "/x/report.html",
-                                        "summary": "1 session, 2 feeds"},
+            "report_read": lambda name: {"ok": True,
+                                         "html": "<!doctype html><html></html>",
+                                         "path": "/x/" + str(name)},
             "report_send": lambda path=None: {"ok": True},
+            "telemetry_recordings": lambda: {"ok": True, "recordings": [
+                {"name": "20261007-201503.gt7rec", "rec": "20261007-201503",
+                 "started": "2026-10-07T20:15:03+02:00", "size": 1000, "duration_s": 600.0,
+                 "laps": None, "partial": False, "recording": False, "indexed": False,
+                 "track": None}]},
+            "telemetry_laps": lambda rec=None, session=None, track=None, car=None, build=True: {
+                "ok": True, "laps": []},
+            "telemetry_lap": lambda rec, session, lap, build=True: {"ok": False, "error": "no lap"},
+            "telemetry_tracks": lambda: {"ok": True, "tracks": [
+                {"id": "suzuka01", "track": "Suzuka Circuit", "layout": "Full Course",
+                 "reverse": False}]},
+            "telemetry_learn": lambda rec, track_id, build=True: {"ok": True, "track": {"id": track_id}},
             "resources": lambda: {"available": False}}
 
 
@@ -548,7 +560,6 @@ def _ctx_with_sources(tmp):
     """A ctx whose 'relay' log source points at tmp/logs, mirroring the
     {files, dir, archives, read} shape of racecast._log_sources(). Kept
     self-contained so this server test does not depend on racecast.py."""
-    import re as _re
     d = os.path.join(tmp, "logs")
 
     def files():
@@ -559,7 +570,7 @@ def _ctx_with_sources(tmp):
             return []
         out = [os.path.join(d, n) for n in names
                if os.path.isfile(os.path.join(d, n))
-               and not _re.search(r"\.\d{4}-\d{2}-\d{2}$", n)]
+               and not re.search(r"\.\d{4}-\d{2}-\d{2}$", n)]
         return sorted(out)
 
     def archives():
@@ -571,7 +582,7 @@ def _ctx_with_sources(tmp):
             names = []
         for name in names:
             for base in bases:
-                m = _re.fullmatch(_re.escape(base) + r"\.(\d{4}-\d{2}-\d{2})", name)
+                m = re.fullmatch(re.escape(base) + r"\.(\d{4}-\d{2}-\d{2})", name)
                 if m:
                     dates.add(m.group(1))
         return sorted(dates, reverse=True)
@@ -579,7 +590,7 @@ def _ctx_with_sources(tmp):
     def read(token):
         # Resolve a date token to the concatenated archive text; guard traversal.
         if (not token or "/" in token or "\\" in token or os.sep in token
-                or ".." in token or not _re.fullmatch(r"\d{4}-\d{2}-\d{2}", token)):
+                or ".." in token or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", token)):
             return None
         chunks = []
         for f in files():
@@ -665,10 +676,9 @@ def t_root_serves_the_page():
 def t_page_survives_its_bundled_file_being_deleted():
     # A frozen build unpacks the page into the OS temp dir, and the OS can reap that
     # dir under the running process. Serving from memory survives it.
-    import shutil as _shutil
     tmp = tempfile.mkdtemp()
     page = os.path.join(tmp, "control-center.html")
-    _shutil.copyfile(os.path.join(ROOT, "src", "ui", "control-center.html"), page)
+    shutil.copyfile(os.path.join(ROOT, "src", "ui", "control-center.html"), page)
     ctx = _ctx()
     ctx["page_path"] = page
     httpd, port = _serve(ctx)
@@ -681,7 +691,7 @@ def t_page_survives_its_bundled_file_being_deleted():
         assert b"racecast Control Center" in body
     finally:
         httpd.shutdown()
-        _shutil.rmtree(tmp, ignore_errors=True)
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def t_missing_page_reports_how_to_recover():
@@ -1598,6 +1608,192 @@ def t_fonts_restore_route_passes_only_a_literal_true_force():
         httpd.shutdown()
 
 
+def t_gt7_data_routes():
+    httpd, port = _serve(_ctx())
+    try:
+        code, body = _get(port, "/api/gt7-data")
+        assert code == 200 and json.loads(body)["ok"] is True, (code, body)
+        code, _b = _post_json(port, "/api/gt7-data/update", {})
+        assert code == 404, "the update runs as the gt7-data-update job, not in a request thread"
+    finally:
+        httpd.shutdown()
+
+
+def t_gt7_data_status_route_hides_paths():
+    ctx = _ctx()
+    hidden = os.path.join(os.sep, "home", "producer", "runtime", "gt7")
+
+    def locked():
+        raise PermissionError(13, "Permission denied", hidden)
+    ctx["gt7_data_status"] = locked
+    httpd, port = _serve(ctx)
+    try:
+        code, body = _get(port, "/api/gt7-data")
+        text = body.decode() if isinstance(body, bytes) else body
+        assert code == 500 and hidden not in text, (code, text)
+    finally:
+        httpd.shutdown()
+
+
+def t_job_snapshot_returns_the_output_tail_on_request():
+    ctx = _ctx(jobs=ui_jobs.JobManager(
+        lambda a: [sys.executable, "-c", "print('one'); print('two'); print('three')"]))
+    httpd, port = _serve(ctx)
+    try:
+        job_id = json.loads(_post(port, "/api/op/echo")[1])["job_id"]
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            snap = json.loads(_get(port, f"/api/jobs/{job_id}?tail=2")[1])
+            if snap["exit_code"] is not None:
+                break
+            time.sleep(0.1)
+        assert snap["lines"] == ["two", "three"], snap
+        assert "lines" not in json.loads(_get(port, f"/api/jobs/{job_id}")[1]), \
+            "a plain snapshot stays small"
+        assert len(json.loads(_get(port, f"/api/jobs/{job_id}?tail=999999")[1])["lines"]) == 3
+        assert _get(port, f"/api/jobs/{job_id}?tail=x")[0] == 200
+    finally:
+        httpd.shutdown()
+
+
+_JOB_HARNESS = r"""
+class El { constructor() { this.textContent = ''; this.disabled = false; } }
+const els = {};
+const $ = id => els[id] || (els[id] = new El());
+const pending = [], calls = [];
+globalThis.fetch = (url, opts) => new Promise(res => { calls.push(url); pending.push({url, res}); });
+function answer(part, data) {
+  const hit = pending.filter(p => p.url.includes(part));
+  hit.forEach(p => { pending.splice(pending.indexOf(p), 1); p.res({json: async () => data}); });
+  return hit.length;
+}
+const tick = async () => { for (let i = 0; i < 20; i++) await new Promise(r => setTimeout(r, 0)); };
+const JOB_POLL_MS = 0;
+"""
+
+
+def _job_fns(page):
+    return "".join(_page_fn(page, n) for n in ("startJob", "jobResult"))
+
+
+def _page_fn(page, name):
+    i = page.index("function " + name + "(")
+    i = page.rindex("\n", 0, i) + 1
+    return page[i:page.index("\n}\n", i) + 3]
+
+
+def t_job_snapshot_tail_takes_ascii_digits_only():
+    httpd, port = _serve(_ctx())
+    try:
+        job_id = json.loads(_post(port, "/api/op/echo")[1])["job_id"]
+        code, body = _get(port, "/api/jobs/" + job_id + "?tail=" + urllib.parse.quote("\u00b2"))
+        assert code == 200 and "lines" not in json.loads(body), (code, body)
+    finally:
+        httpd.shutdown()
+
+
+def t_op_already_running_names_the_running_job():
+    ctx = _ctx(jobs=ui_jobs.JobManager(
+        lambda a: [sys.executable, "-c", "import time; time.sleep(3)"]))
+    httpd, port = _serve(ctx)
+    try:
+        first = json.loads(_post(port, "/api/op/echo")[1])["job_id"]
+        try:
+            code, body = _post(port, "/api/op/echo")
+        except urllib.error.HTTPError as e:
+            code, body = e.code, e.read()
+        d = json.loads(body)
+        assert code == 409 and d["job_id"] == first and "already running" in d["error"], d
+    finally:
+        httpd.shutdown()
+
+
+def t_gt7_data_update_runs_as_a_job_and_says_updating():
+    page = _cc_page()
+    out = _run_js(_JOB_HARNESS + _job_fns(page) + _page_fn(page, "updateGt7Data") + """
+const alerts = []; let loads = 0;
+globalThis.alertModal = async t => { alerts.push(t); };
+globalThis.loadGt7Data = () => { loads++; };
+(async () => {
+  updateGt7Data();
+  await tick();
+  const busy = [$('d-gt7data').textContent, $('gt7data-update').disabled].join(',');
+  answer('/api/op/gt7-data-update', {ok: true, job_id: 'j1'});
+  await tick();
+  answer('/api/jobs/j1', {ok: true, running: true, exit_code: null});
+  await tick();
+  const still = $('d-gt7data').textContent;
+  answer('/api/jobs/j1', {ok: true, running: false, exit_code: 1,
+                          lines: ['cars.csv: error: offline', 'GT7 data update failed (offline?)']});
+  await tick();
+  console.log([busy, still, $('gt7data-update').disabled, loads,
+               alerts.join('/').includes('cars.csv: error: offline'),
+               calls.filter(u => u.includes('/api/jobs/j1?tail=')).length].join('|'));
+})();""")
+    if out is not None:
+        assert out.strip() == "updating\u2026,true|updating\u2026|false|1|true|2", \
+            f"the row says updating while the job runs, the failure lines show after it: {out!r}"
+
+
+def t_gt7_data_update_shows_a_refused_start():
+    page = _cc_page()
+    out = _run_js(_JOB_HARNESS + _job_fns(page) + _page_fn(page, "updateGt7Data") + """
+const alerts = []; let loads = 0;
+globalThis.alertModal = async t => { alerts.push(t); };
+globalThis.loadGt7Data = () => { loads++; };
+(async () => {
+  updateGt7Data();
+  await tick();
+  answer('/api/op/gt7-data-update', {ok: false, error: 'gt7-data-update is already running'});
+  await tick();
+  console.log([alerts.join('/'), loads, $('gt7data-update').disabled].join('|'));
+})();""")
+    if out is not None:
+        assert out.strip() == "gt7-data-update is already running|1|false", out
+
+
+def _report_run(job_answer):
+    page = _cc_page()
+    return _run_js(_JOB_HARNESS + _job_fns(page) + _page_fn(page, "reportGenerate") + """
+let _reportPath = null;
+(async () => {
+  reportGenerate();
+  await tick();
+  const busy = [$('report-msg').textContent, $('report-gen').disabled].join(',');
+  answer('/api/op/report-generate', {ok: true, job_id: 'r1'});
+  await tick();
+  answer('/api/jobs/r1', """ + job_answer + """);
+  await tick();
+  answer('/api/report/read?name=Event%202026-10-09.html',
+         {ok: true, path: '/reports/Event 2026-10-09.html', html: '<p>report</p>'});
+  await tick();
+  console.log(JSON.stringify([busy, $('report-msg').textContent, $('report-gen').disabled,
+    $('report-frame').srcdoc || '', calls.filter(u => u.includes('/api/report/read')).length,
+    calls.filter(u => u === '/api/report/generate').length]));
+})();""")
+
+
+def t_report_generates_in_a_job_and_shows_the_written_file():
+    out = _report_run("""{ok: true, running: false, exit_code: 0,
+                         lines: ['1 session', 'Report written -> /reports/Event 2026-10-09.html']}""")
+    if out is not None:
+        busy, msg, disabled, frame, reads, posts = json.loads(out)
+        assert busy == "Generating\u2026,true", busy
+        assert (msg, disabled, frame, reads, posts) == (
+            "Written to /reports/Event 2026-10-09.html", False, "<p>report</p>", 1, 0), \
+            f"the page runs report-generate, then reads the file the job wrote: {out}"
+
+
+def t_report_job_failure_shows_its_last_line():
+    out = _report_run("""{ok: true, running: false, exit_code: 1,
+                         lines: ['racecast: no health data for that window. Nothing to report.']}""")
+    if out is not None:
+        _busy, msg, disabled, frame, reads, _posts = json.loads(out)
+        assert (msg, disabled, frame, reads) == (
+            "Error: no health data for that window. Nothing to report.", False, "", 0), \
+            f"a failed report job shows its reason and reads no file: {out}"
+
+
 def t_ui_server_queues_a_browser_burst():
     httpd, _ = _serve(_ctx())
     try:
@@ -1636,7 +1832,6 @@ def t_overlay_font_serve_missing_is_404():
 
 
 def t_overlay_font_serve_returns_bytes_and_type():
-    import tempfile
     ctx = _ctx()
     fd, fpath = tempfile.mkstemp(suffix=".woff2")
     os.write(fd, b"FONTDATA"); os.close(fd)
@@ -1653,7 +1848,6 @@ def t_overlay_font_serve_returns_bytes_and_type():
 
 
 def t_profile_logo_route_serves_image_with_type():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         svg = os.path.join(td, "logo.svg")
         with open(svg, "wb") as fh:
@@ -1920,14 +2114,20 @@ def t_api_crew_delete_post():
 def t_report_generate_and_send_routes():
     calls = {}
     ctx = _ctx()
-    ctx["report_generate"] = lambda: {"ok": True, "html": "<!doctype html><html></html>",
-                                      "path": "/x/r.html", "summary": "sum"}
+    ctx["report_read"] = lambda name: calls.update(read=name) or {
+        "ok": True, "html": "<!doctype html><html></html>", "path": "/x/r.html"}
     ctx["report_send"] = lambda path=None: calls.update(send=path) or {"ok": True}
     httpd, port = _serve(ctx)
     try:
-        code, body = _post_json(port, "/api/report/generate", {})
+        try:
+            code = _post_json(port, "/api/report/generate", {})[0]
+        except urllib.error.HTTPError as e:
+            code = e.code
+        assert code == 404, "a report runs as the report-generate job, not in a request thread"
+        code, body = _get(port, "/api/report/read?name=r.html")
         data = json.loads(body)
         assert code == 200 and data["ok"] is True and "<!doctype html>" in data["html"]
+        assert calls["read"] == "r.html", calls
         code, body = _post_json(port, "/api/report/send", {"path": "/x/r.html"})
         data = json.loads(body)
         assert code == 200 and data["ok"] is True
@@ -1953,6 +2153,28 @@ def _cc_page():
     with open(os.path.join(ROOT, "src", "ui", "control-center.html"),
               encoding="utf-8") as fh:                # cp1252 on Windows would choke
         return fh.read()
+
+
+
+def _run_js(src):
+    """stdout of `src` under node, or None where node is not installed."""
+    node = shutil.which("node")
+    if not node:
+        print("  (node not installed, JS check skipped)")
+        return None
+    return subprocess.run([node, "-"], input=src, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", check=True, timeout=30).stdout
+
+
+def t_gt7_data_age_reads_naturally():
+    page = _cc_page()
+    i = page.index("function fmtAgeS(")
+    fn = page[i:page.index("\n}\n", i) + 2]
+    out = _run_js(fn + """
+const now = Date.now() / 1000;
+console.log([fmtAgeS(0)].concat([20, 90, 7200, 86400, 3 * 86400].map(a => fmtAgeS(now - a))).join("|"));""")
+    if out is not None:
+        assert out.strip() == "never|just now|2 min ago|2 h ago|1 day ago|3 days ago", out
 
 
 def _row_classes(page, label):
@@ -2004,6 +2226,1137 @@ def t_solo_device_rows_follow_the_template():
     assert ps and "pov-only" in ps.group(1).split(), "GT7 telemetry runs in solo POV only"
     assert "classList.toggle('tpl-pov'" in page and "classList.toggle('tpl-commentary'" in page, \
         "applyKindGating must set the template class"
+
+
+def _tm_script(page):
+    start = page.index("// Telemetry view (solo POV, #788)")
+    return page[start:page.index("// end of the Telemetry view", start)]
+
+
+def _tm_fn(tm, name):
+    i = tm.index("function " + name + "(")
+    return tm[i:tm.index("\n}\n", i) + 2]
+
+
+def t_telemetry_view_is_solo_pov_only():
+    page = _cc_page()
+    nav = re.search(r'<button class="([^"]*)" data-nav="telemetry"', page)
+    assert nav and "pov-only" in nav.group(1).split(), "the nav item exists for solo POV only"
+    view = re.search(r'<div class="([^"]*)" data-view="telemetry"', page)
+    assert view and {"view", "pov-only"} <= set(view.group(1).split()), \
+        "the view is hidden outside solo POV by the existing .pov-only rule"
+    show = page[page.index("function showView(name)"):page.index("let _reportPath")]
+    assert "name === 'telemetry'" in show, "opening the view loads the recordings"
+    gate = page[page.index("function applyKindGating(data)"):page.index("async function useProfile(")]
+    assert "currentView === 'telemetry'" in gate, "leaving solo POV leaves the Telemetry view"
+    assert "tmLoad()" in gate, "another solo POV profile shows its own recordings at once"
+    use = page[page.index("async function useProfile("):page.index("function onKindChange()")]
+    assert "tmReset()" in use, "another profile has other recordings"
+    tm = _tm_script(page)
+    assert "innerHTML" not in tm, "recording values reach the page only as text"
+    for route in ("/api/telemetry/recordings", "/api/telemetry/laps?", "/api/telemetry/lap?"):
+        assert route in tm, route
+    assert "tmRenderSectors()" in tm[tm.index("function tmRender()"):]
+
+
+def t_telemetry_charts_share_one_cursor():
+    tm = _tm_script(_cc_page())
+    keys = re.findall(r"\{key: '(\w+)'", tm[tm.index("const TM_CH"):tm.index("];", tm.index("const TM_CH"))])
+    assert keys == ["speed_kmh", "throttle", "brake", "steer_deg", "gear", "delta"], keys
+    assert "addEventListener('pointermove', tmHover)" in tm
+    assert "tmRenderCharts()" in _tm_fn(tm, "tmRender"), "every pair render redraws the charts"
+
+
+def t_telemetry_map_colours_mini_sectors():
+    tm = _tm_script(_cc_page())
+    fn = tm[tm.index("function tmRenderMap()"):tm.index("function tmMapCursor(")]
+    assert "(p.z - z0) * s" in fn, "GT7 z runs downward on the map, as in the report"
+    assert "tmSecClass(diff)" in fn and "tm-seg" in fn
+    assert "tmMapCursor(ra, rb)" in tm[tm.index("function tmHover("):tm.index("function tmLeave(")]
+    assert "tmRenderMap()" in _tm_fn(tm, "tmRender"), "every pair render redraws the map"
+
+
+def t_telemetry_set_track_confirms_then_learns():
+    tm = _tm_script(_cc_page())
+    learn = tm[tm.index("async function tmLearn()"):]
+    learn = learn[:learn.index("\n}\n")]
+    assert learn.index("confirmModal(") < learn.index("fetch('/api/telemetry/learn'"), \
+        "learning writes machine-wide data, so it is confirmed first"
+    assert "tmDropLaps()" in learn and "tmSelectRec(" in learn
+    assert "/api/telemetry/tracks" in tm
+    sel = tm[tm.index("async function tmSelectRec("):tm.index("function tmRenderLaps()")]
+    assert "tmShowSetTrack(d.recording.track)" in sel
+
+
+_TM_MAP_COUNT = """
+const drawn = () => {
+  const n = {};
+  const walk = e => {
+    const a = e.attrs || {};
+    const k = e.tagName + (a.class ? '.' + a.class : '');
+    n[k] = (n[k] || 0) + 1;
+    if (e.tagName === 'text') n.note = (n.note || 0) + 1;
+    e.kids.forEach(walk);
+  };
+  $('tm-map').kids.forEach(walk);
+  return ['path.tm-a', 'path.tm-seg gain', 'path.tm-seg loss', 'path.tm-seg even', 'note']
+    .map(k => n[k] || 0).join(',');
+};
+const trace = n => Array.from({length: n}, (_, i) => ({d: i * 5, t: i, x: i, z: i * i}));
+"""
+
+
+def t_telemetry_map_draws_sectors_and_hides_cursor_past_the_lap():
+    out = _tm_node(_TM_MAP_COUNT + """
+tmState.sectorM = 10;
+tmState.lapA = {trace: trace(7), sectors: [1.5, 1.5, 3.0002]};
+tmState.lapB = {trace: trace(7), sectors: [1, 2, 3]};
+tmRenderMap();
+const pair = drawn();
+const P = tmState.map.P;
+const axes = [P({x: 6, z: 0})[0] > P({x: 0, z: 0})[0], P({x: 0, z: 36})[1] > P({x: 0, z: 0})[1]];
+tmMapCursor({x: 1, z: 1}, null);
+const vis = [tmState.map.dotA.attrs.visibility, tmState.map.dotB.attrs.visibility];
+tmState.lapA = null;
+tmRenderMap();
+const alone = drawn();
+tmState.lapB = {trace: trace(7).map(p => ({...p, x: null, z: null})), sectors: [1, 2, 3]};
+tmRenderMap();
+console.log([pair, axes.join(','), vis.join(','), alone, drawn(), String(tmState.map)].join('|'));""")
+    if out is not None:
+        assert out.strip() == "1,1,1,1,0|true,true|visible,hidden|0,0,0,3,0|0,0,0,0,1|null", \
+            f"B per mini-sector gain/loss/even, x right and z down, no dot past a lap: {out!r}"
+
+
+def t_telemetry_map_keeps_a_on_top_and_centres_the_layout():
+    out = _tm_node(_TM_MAP_COUNT + """
+tmState.sectorM = 10;
+tmState.lapA = {trace: trace(5), sectors: [1.5, 1.5]};
+tmState.lapB = {trace: trace(9), sectors: [1, 2, 3, 4]};
+tmRenderMap();
+const pair = drawn();
+const kids = $('tm-map').kids.map(k => k.tagName + '.' + ((k.attrs || {}).class || ''));
+const top = kids.indexOf('path.tm-a') > kids.lastIndexOf('path.tm-seg even');
+const tall = tmState.map.P({x: 0, z: 0})[0], W = tmState.map.W;
+const xs = [tall, tmState.map.P({x: 8, z: 0})[0]];
+tmState.lapA = null;
+tmState.lapB = {trace: trace(9).map(p => ({...p, x: p.z, z: p.x})), sectors: [1, 2, 3, 4]};
+tmRenderMap();
+const vb = $('tm-map').attrs.viewBox.split(' ').map(Number);
+const wide = [tmState.map.P({x: 0, z: 0}), tmState.map.P({x: 64, z: 8})];
+console.log([pair, top, Math.round(xs[0] + xs[1]) === W,
+             wide[0][0] === 12, Math.round(wide[1][0]) === W - 12,
+             wide[0][1] === 12, Math.round(wide[1][1]) === vb[3] - 12].join('|'));""")
+    if out is not None:
+        assert out.strip() == "1,1,1,2,0|true|true|true|true|true|true", \
+            f"A lies on top, a sector past A's end is even, the layout sits centred: {out!r}"
+
+
+def t_telemetry_sector_class_is_shared_by_map_and_table():
+    tm = _tm_script(_cc_page())
+    out = _run_js(_tm_fn(tm, "tmSecClass") + """
+console.log([null, 0.0004, -0.0004, 0.0005, -0.0005, 1].map(tmSecClass).join(','));""")
+    if out is not None:
+        assert out.strip() == "even,even,even,loss,gain,loss", out
+    for fn in ("tmRenderMap", "tmRenderSectors"):
+        body = tm[tm.index("function " + fn + "("):]
+        body = body[:body.index("\n}\n")]
+        assert "tmSecClass(" in body and "'gain'" not in body and "'loss'" not in body, \
+            f"{fn} uses the shared gain/loss rule"
+
+
+def t_telemetry_refit_redraws_only_on_a_width_change():
+    out = _tm_node(_TM_MAP_COUNT + """
+tmState.sectorM = 10;
+tmState.lapB = {trace: trace(7), sectors: [1, 2, 3]};
+tmRender();
+const first = [$('tm-charts').kids[0], $('tm-map').kids[0]];
+tmRefit();
+const same = [$('tm-charts').kids[0] === first[0], $('tm-map').kids[0] === first[1]];
+$('tm-charts').getBoundingClientRect = () => ({left: 0, width: 640});
+$('tm-map').getBoundingClientRect = () => ({left: 0, width: 300});
+tmRefit();
+const moved = [$('tm-charts').kids[0] === first[0], $('tm-map').kids[0] === first[1]];
+$('tm-charts').getBoundingClientRect = () => ({left: 0, width: 0});
+$('tm-map').getBoundingClientRect = () => ({left: 0, width: 0});
+const kept = $('tm-charts').kids[0];
+tmRefit();
+console.log([same.join(','), moved.join(','), $('tm-charts').kids[0] === kept, tmState.chart.W].join('|'));""")
+    if out is not None:
+        assert out.strip() == "true,true|false,false|true|640", \
+            f"a refit redraws only a changed width and skips a hidden view: {out!r}"
+
+
+def t_telemetry_showing_the_view_refits_a_loaded_pair():
+    page = _cc_page()
+    show = page[page.index("function showView(name)"):page.index("let _reportPath")]
+    assert "name === 'telemetry' && tmState.lapB) tmRefit()" in show, \
+        "a pair drawn while the view was hidden is redrawn at the real width"
+    tm = _tm_script(page)
+    resize = tm[tm.index("window.addEventListener('resize'"):]
+    assert "tmRefit()" in resize, "a resize redraws through the width check"
+
+
+def t_telemetry_delta_and_paths_follow_the_traces():
+    tm = _tm_script(_cc_page())
+    out = _run_js(_tm_fn(tm, "tmDelta") + _tm_fn(tm, "tmPath") + """
+const tr = ts => ts.map((t, i) => ({d: i * 5, t}));
+console.log(JSON.stringify(tmDelta({trace: tr([0, 1, 2])}, {trace: tr([0, 0.5, 1, 1.5])})));
+const rows = [{d: 0, v: 1}, {d: 5, v: 2}, {d: 10, v: null}, {d: 15, v: 3}];
+console.log(tmPath(rows, 'v', d => d, v => 10 * v, false));
+console.log(tmPath(rows.slice(0, 2), 'v', d => d, v => 10 * v, true));
+console.log(tmPath([], 'v', d => d, v => v, false));""")
+    if out is not None:
+        assert out.strip().splitlines() == [
+            '[{"d":0,"delta":0},{"d":5,"delta":-0.5},{"d":10,"delta":-1}]',
+            "M0.0 10.0L5.0 20.0M15.0 30.0", "M0.0 10.0H5.0V20.0", "M0 0"], \
+            "delta is B minus A over the stations both laps reach; a gap lifts the pen"
+
+
+def t_node_script_goes_through_stdin():
+    seen = []
+    real = subprocess.run
+    subprocess.run = lambda args, **kw: seen.append((args, kw)) or real(args, **kw)
+    try:
+        out = _run_js("console.log('x'.repeat(40000).length)")
+    finally:
+        subprocess.run = real
+    if out is not None:
+        assert out.strip() == "40000" and seen[0][0][1:] == ["-"] and "input" in seen[0][1], \
+            f"the script reaches node on stdin, so no command line grows with the page: {seen[0][0][1:]}"
+
+
+def t_telemetry_closing_point_off_the_grid_keeps_delta_and_hover_aligned():
+    out = _tm_node("""
+const tr = (ts, end) => ts.map((t, i) => ({d: i * 5, t, speed_kmh: 100, throttle: 50, brake: 0,
+                                         steer_deg: 0, gear: 3, x: i, z: 0}))
+  .concat([{d: end, t: ts.length, speed_kmh: 100, throttle: 50, brake: 0, steer_deg: 0, gear: 3,
+            x: 99, z: 0}]);
+const same = tmDelta({trace: tr([0, 1, 2], 12.3)}, {trace: tr([0, 0.5, 1], 12.3)});
+const apart = tmDelta({trace: tr([0, 1, 2], 12.3)}, {trace: tr([0, 0.5, 1, 1.5], 17.1)});
+tmState.lapA = {trace: tr([0, 1, 2, 3], 17.4)};
+tmState.lapB = {trace: tr([0, 0.5, 1], 12.3), sectors: [1]};
+tmRenderCharts();
+const maxD = tmState.chart.maxD;
+tmHover({clientX: 799});
+const edge = tmState.chart.panels[0].read.textContent.replace(/\u00b7/g, '-');
+console.log([JSON.stringify(same), JSON.stringify(apart), maxD, edge].join('|'));""")
+    if out is not None:
+        same, apart, max_d, edge = out.strip().split("|")
+        assert same.endswith('{"d":10,"delta":-1},{"d":12.3,"delta":0}]'), \
+            f"two laps closing at the same length pair their closing points: {same}"
+        assert "12.3" not in apart and "17.1" not in apart, \
+            f"closing points at different distances are never paired: {apart}"
+        assert max_d == "17.4", max_d
+        assert edge.startswith("0.02 km") and "100.0 / -" in edge, \
+            f"past B's closing point the hover shows A only: {edge!r}"
+
+
+def t_telemetry_charts_without_lap_a_show_b_alone():
+    out = _tm_node("""
+const trace = ts => ts.map((t, i) => ({d: i * 5, t, speed_kmh: 100 + i, throttle: 50, brake: 0,
+                                       steer_deg: i - 1, gear: 3}));
+const drawn = () => {
+  const n = {};
+  const walk = e => {
+    const a = e.attrs || {};
+    const k = e.tagName + (a.class ? '.' + a.class : '');
+    n[k] = (n[k] || 0) + 1;
+    if (e.tagName === 'text' && e._t === 'no lap A to compare') n.note = (n.note || 0) + 1;
+    e.kids.forEach(walk);
+  };
+  $('tm-charts').kids.forEach(walk);
+  return ['path.tm-a', 'path.tm-b', 'path.tm-gain', 'path.tm-loss', 'line.tm-zero', 'note']
+    .map(k => n[k] || 0).join(',');
+};
+tmState.lapA = null; tmState.lapB = {trace: trace([0, 1, 2, 3])};
+tmRenderCharts();
+const alone = drawn();
+tmState.lapA = {trace: trace([0, 1.1, 2.2])};
+tmRenderCharts();
+const pair = drawn();
+tmHover({clientX: 799});
+const late = tmState.chart.panels[5].read.textContent;
+tmClearPair('');
+console.log([alone, pair, JSON.stringify(late), String(tmState.chart), $('tm-charts').kids.length].join('|'));""")
+    if out is not None:
+        assert out.strip() == '0,5,0,0,1,1|5,6,1,1,2,0|""|null|0', \
+            f"without A only B is drawn, the delta panel holds a note and no zero line: {out!r}"
+
+
+def t_telemetry_times_read_as_lap_times():
+    tm = _tm_script(_cc_page())
+    out = _run_js(_tm_fn(tm, "tmTime") + _tm_fn(tm, "tmSigned") + """
+console.log([tmTime(83.456), tmTime(9.5), tmTime(3600), tmSigned(0.25), tmSigned(-1),
+             tmSigned(0.0001)].join("|"));""")
+    if out is not None:
+        assert out.strip() == "1:23.456|0:09.500|60:00.000|+0.250|-1.000|0.000", out
+
+
+def t_telemetry_track_label_names_a_reverse_layout():
+    tm = _tm_script(_cc_page())
+    out = _run_js(_tm_fn(tm, "tmTrackName") + _tm_fn(tm, "tmTrackLabel") + """
+console.log([tmTrackLabel(null), tmTrackLabel({candidates: []}),
+             tmTrackLabel({track: 'Alsace', layout: 'Village', reverse: true}),
+             tmTrackLabel({track: 'Ring', layout: '', reverse: false})].join('|'));""")
+    if out is not None:
+        assert out.strip() == "track unknown|track ambiguous|Alsace - Village (reverse)|Ring", \
+            f"the Laps label names the layout like the picker: {out!r}"
+
+
+def t_telemetry_recording_rows_mark_open_files_and_unindexed_laps():
+    tm = _tm_script(_cc_page())
+    fn = tm[tm.index("function tmRenderRecs()"):tm.index("async function tmSelectRec(")]
+    assert "r.recording ? ' (recording)'" in fn and "r.partial ? ' (unclosed)'" in fn
+    assert "r.laps == null ? ''" in fn, "the list has no lap count before the first index"
+
+
+_TM_HARNESS = r"""
+class El {
+  constructor(tag) { this.tagName = tag; this.kids = []; this.cells = []; this._t = '';
+                     this.hidden = false; this.disabled = false; this.className = '';
+                     this.value = ''; this.title = ''; this.selected = false; }
+  get textContent() { return this._t + this.kids.map(k => k.textContent).join(''); }
+  set textContent(v) { this._t = String(v); this.kids = []; this.cells = []; }
+  appendChild(c) { this.kids.push(c); return c; }
+  append(...c) { c.forEach(x => this.appendChild(x)); }
+  get options() { return this.kids.filter(k => k.tagName === 'option'); }
+  createTHead() { return this.appendChild(new El('sec')); }
+  createTBody() { return this.appendChild(new El('sec')); }
+  createTFoot() { return this.appendChild(new El('sec')); }
+  insertRow() { return this.appendChild(new El('tr')); }
+  insertCell() { const c = this.appendChild(new El('td')); this.cells.push(c); return c; }
+  setAttribute(k, v) { (this.attrs = this.attrs || {})[k] = String(v); }
+  addEventListener() {}
+  getBoundingClientRect() { return {left: 0, width: 800}; }
+}
+const window = {addEventListener() {}};
+const els = {};
+const $ = id => els[id] || (els[id] = new El(id));
+const document = {createElement: t => new El(t), createElementNS: (n, t) => new El(t)};
+const pending = [];
+const calls = [];
+globalThis.fetch = url => new Promise(res => { calls.push(url); pending.push({url, res}); });
+function answer(part, data) {
+  const hit = pending.filter(p => p.url.includes(part));
+  hit.forEach(p => { pending.splice(pending.indexOf(p), 1); p.res({json: async () => data}); });
+  return hit.length;
+}
+const tick = async () => { for (let i = 0; i < 20; i++) await new Promise(r => setTimeout(r, 0)); };
+const lap = (rec, n, t, car) => ({rec, session: 1, lap: n, time_s: t, status: 'counted',
+  car: 'Car', car_id: car, track_id: 't1', track: 'Track', layout: '', sectors: [t / 2, t / 2],
+  trace: []});
+const recLaps = (rec, laps) => ({ok: true, recording: {rec, track: null}, laps});
+const pool = laps => ({ok: true, laps, best_sectors: [], theoretical_best: null,
+                       reference: laps[0] || null});
+"""
+
+
+def _tm_node(body):
+    """stdout of `body` run against the Telemetry block with a fake DOM and fetch."""
+    page = _cc_page()
+    return _run_js(_TM_HARNESS + "const JOB_POLL_MS = 0;\n" + _job_fns(page) + _tm_script(page)
+                   + "\n(async () => {\n" + body + "\n})();")
+
+
+def t_telemetry_open_recording_is_not_indexed_on_load():
+    tm = _tm_script(_cc_page())
+    load = _tm_fn(tm, "tmLoad")
+    assert "!r.recording" in load, "the first selection skips the file the relay is writing"
+
+
+def t_telemetry_late_laps_answer_for_another_recording_is_dropped():
+    out = _tm_node("""
+tmSelectRec('X'); tmSelectRec('X'); tmSelectRec('Y');
+await tick();
+const xCalls = calls.filter(u => u.includes('rec=X')).length;
+answer('rec=Y', recLaps('Y', [lap('Y', 1, 90, 7)]));
+await tick();
+answer('rec=X', recLaps('X', [lap('X', 1, 80, 7), lap('X', 2, 81, 7)]));
+await tick();
+console.log([xCalls, tmState.rec, tmState.recLaps.map(tmKey).join(','), tmState.b].join(' '));""")
+    if out is not None:
+        assert out.strip() == "1 Y Y|1|1 Y|1|1", \
+            f"one request per recording and the late answer for X must not win: {out!r}"
+
+
+def t_telemetry_late_pool_answer_for_another_lap_is_dropped():
+    out = _tm_node("""
+const l1 = lap('R', 1, 80, 1), l2 = lap('R', 2, 79, 2);
+tmState.recLaps = [l1, l2];
+tmSelectB(l1); tmSelectB(l2); tmSelectB(l2);
+await tick();
+const n2 = calls.filter(u => u.includes('car=2')).length;
+const status = $('tm-sec-sub').textContent.replace(/\\u2026/g, '...');
+answer('car=2', pool([l2, lap('S', 1, 78, 2)]));
+await tick();
+answer('car=1', pool([l1]));
+await tick();
+answer('/lap?', {ok: true, lap: lap('S', 1, 78, 2), sector_m: 200});
+await tick();
+console.log([n2, status, tmState.b, tmState.pool.laps.length].join('|'));""")
+    if out is not None:
+        assert out.strip() == "1|Loading comparable laps...|R|1|2|2", \
+            f"one pool request per query, a loading note and the newest lap wins: {out!r}"
+
+
+def t_telemetry_pool_indexes_missing_recordings_through_one_job():
+    out = _tm_node("""
+const l1 = lap('R', 1, 80, 1), l2 = lap('R', 2, 79, 1);
+tmState.recLaps = [l1, l2];
+tmSelectB(l1);
+await tick();
+answer('car=1', Object.assign(pool([l1]), {unindexed: 2}));
+await tick();
+const status = $('tm-sec-sub').textContent.replace(/\\u2026/g, '...');
+answer('/api/op/telemetry-index', {ok: true, job_id: 'j'});
+await tick();
+answer('/api/jobs/j', {ok: true, running: true, exit_code: null});
+await tick();
+answer('/api/jobs/j', {ok: true, running: false, exit_code: 0});
+await tick();
+const asked = calls.filter(u => u.includes('car=1')).length;
+answer('car=1', Object.assign(pool([l1, l2, lap('S', 1, 78, 1)]), {unindexed: 1}));
+await tick();
+console.log([status, asked, calls.filter(u => u.includes('telemetry-index')).length,
+             tmState.pool.laps.length, tmState.a].join('|'));""")
+    if out is not None:
+        assert out.strip() == "Indexing 2 recordings...|2|1|3|S|1|1", \
+            f"the pool runs telemetry-index once, then asks again and draws what it has: {out!r}"
+
+
+def t_telemetry_failed_index_job_runs_once_and_says_why():
+    out = _tm_node("""
+const l1 = lap('R', 1, 80, 1), l2 = lap('R', 2, 79, 1);
+tmState.recLaps = [l1, l2];
+tmSelectB(l1);
+await tick();
+answer('car=1', Object.assign(pool([l1]), {unindexed: 1}));
+await tick();
+answer('/api/op/telemetry-index', {ok: true, job_id: 'j'});
+await tick();
+answer('/api/jobs/j', {ok: true, running: false, exit_code: 1,
+                       lines: ['B: not indexed (bad header)', '0 recording(s) indexed, 1 failed']});
+await tick();
+answer('car=1', Object.assign(pool([l1]), {unindexed: 1}));
+await tick();
+tmSelectB(l2);
+await tick();
+answer('car=1', Object.assign(pool([l1, l2]), {unindexed: 1}));
+await tick();
+const once = calls.filter(u => u.includes('telemetry-index')).length;
+const note = [$('tm-note').hidden, $('tm-note').textContent, $('tm-err').textContent];
+tmLoad();
+await tick();
+answer('/recordings', {ok: true, recordings: []});
+await tick();
+tmState.recLaps = [l1];
+tmSelectB(l1);
+await tick();
+answer('car=1', Object.assign(pool([l1]), {unindexed: 1}));
+await tick();
+console.log([once, JSON.stringify(note), calls.filter(u => u.includes('telemetry-index')).length,
+             tmState.pool ? tmState.pool.laps.length : '-'].join('|'));""")
+    if out is not None:
+        once, note, again, _n = out.strip().split("|")
+        assert once == "1", f"a failing job is not restarted for every lap B: {out!r}"
+        hidden, text, err = json.loads(note)
+        assert hidden is False and "B: not indexed (bad header)" in text and err == "", \
+            f"the failed lines show once as a note, not as an error: {note}"
+        assert again == "2", f"Refresh re-arms the job: {out!r}"
+
+
+def t_telemetry_index_job_running_elsewhere_is_awaited_quietly():
+    out = _tm_node("""
+const l1 = lap('R', 1, 80, 1);
+tmState.recLaps = [l1];
+tmSelectB(l1);
+await tick();
+answer('car=1', Object.assign(pool([l1]), {unindexed: 1}));
+await tick();
+answer('/api/op/telemetry-index', {ok: false, error: 'telemetry-index is already running',
+                                   job_id: 'other'});
+await tick();
+const waiting = [$('tm-note').hidden, $('tm-note').textContent, $('tm-err').textContent];
+answer('/api/jobs/other', {ok: true, running: false, exit_code: 0, lines: []});
+await tick();
+const asked = calls.filter(u => u.includes('car=1')).length;
+answer('car=1', Object.assign(pool([l1, lap('S', 1, 78, 1)]), {unindexed: 0}));
+await tick();
+console.log(JSON.stringify([waiting, asked, tmState.pool.laps.length, $('tm-err').textContent,
+                            $('tm-note').hidden]));""")
+    if out is not None:
+        waiting, asked, n, err, hidden = json.loads(out)
+        assert waiting[0] is False and "another window" in waiting[1] and waiting[2] == "", \
+            f"a job from another tab is a neutral note, not a red banner: {waiting}"
+        assert (asked, n, err, hidden) == (2, 2, "", True), \
+            f"the page waits for that job, then asks once more: {out!r}"
+
+
+def t_telemetry_index_join_note_never_lands_on_a_reset_view():
+    out = _tm_node("""
+const l1 = lap('R', 1, 80, 1);
+tmState.recLaps = [l1];
+tmSelectB(l1);
+await tick();
+answer('car=1', Object.assign(pool([l1]), {unindexed: 1}));
+await tick();
+tmReset();
+answer('/api/op/telemetry-index', {ok: false, error: 'telemetry-index is already running',
+                                   job_id: 'other'});
+await tick();
+console.log(JSON.stringify([$('tm-note').hidden, $('tm-note').textContent]));""")
+    if out is not None:
+        hidden, text = json.loads(out)
+        assert hidden is True, f"a join answered after a reset leaves the new view alone: {text!r}"
+
+
+_TM_UNINDEXED = """
+const unindexed = rec => ({ok: true, unindexed: 1,
+                           note: rec + ' has no lap index yet: racecast telemetry index builds it'});
+const jobs = () => calls.filter(u => u.includes('telemetry-index')).length;
+const asks = part => calls.filter(u => u.includes(part)).length;
+tmState.recs = [{rec: 'X', indexed: false, laps: null, duration_s: 60, size: 1e6, track: null}];
+"""
+
+
+def t_telemetry_first_open_indexes_the_recording_through_the_job():
+    out = _tm_node(_TM_UNINDEXED + """
+tmSelectRec('X');
+await tick();
+const status = $('tm-laps').textContent.replace(/\\u2026/g, '...');
+answer('rec=X', unindexed('X'));
+await tick();
+answer('/api/op/telemetry-index', {ok: true, job_id: 'j'});
+await tick();
+answer('/api/jobs/j', {ok: true, running: false, exit_code: 0, lines: ['X: 2 laps']});
+await tick();
+answer('rec=X', recLaps('X', [lap('X', 1, 80, 7), lap('X', 2, 81, 7)]));
+await tick();
+console.log(JSON.stringify([status, jobs(), asks('rec=X'), tmState.recLaps.length, tmState.b,
+                            $('tm-err').textContent, tmState.recs[0].indexed]));""")
+    if out is not None:
+        assert json.loads(out) == ["Indexing...", 1, 2, 2, "X|1|2", "", True], \
+            f"the first open runs telemetry-index once, then asks again and shows the laps: {out}"
+
+
+def t_telemetry_recording_the_job_cannot_index_shows_its_line_once():
+    out = _tm_node(_TM_UNINDEXED + """
+tmSelectRec('X');
+await tick();
+answer('rec=X', unindexed('X'));
+await tick();
+answer('/api/op/telemetry-index', {ok: true, job_id: 'j'});
+await tick();
+answer('/api/jobs/j', {ok: true, running: false, exit_code: 1,
+                       lines: ['X: not indexed (bad data)', '0 recording(s) indexed, 1 failed']});
+await tick();
+answer('rec=X', unindexed('X'));
+await tick();
+const first = $('tm-err').textContent;
+tmSelectRec('X');
+await tick();
+answer('rec=X', unindexed('X'));
+await tick();
+console.log(JSON.stringify([first, $('tm-err').textContent, jobs(), asks('rec=X'),
+                            tmState.recLaps.length, tmState.recs[0].indexed]));""")
+    if out is not None:
+        assert json.loads(out) == ["X: not indexed (bad data)", "X: not indexed (bad data)",
+                                   1, 3, 0, False], \
+            f"a recording the job cannot index shows the job's line and starts no second job: {out}"
+
+
+def t_telemetry_stale_lap_runs_the_index_job_and_asks_once_more():
+    out = _tm_node(_TM_UNINDEXED + """
+const got = tmFetchLap('X|1|2');
+await tick();
+answer('/lap?', unindexed('X'));
+await tick();
+answer('/api/op/telemetry-index', {ok: true, job_id: 'j'});
+await tick();
+answer('/api/jobs/j', {ok: true, running: false, exit_code: 0, lines: []});
+await tick();
+answer('/lap?', {ok: true, lap: lap('X', 2, 81, 7), sector_m: 200});
+const r = await got;
+console.log(JSON.stringify([jobs(), asks('/lap?'), r.lap && r.lap.lap, r.error || '',
+                            tmLapCache.has('X|1|2')]));""")
+    if out is not None:
+        assert json.loads(out) == [1, 2, 2, "", True], \
+            f"a stale lap runs telemetry-index, then asks once more: {out}"
+
+
+def t_telemetry_set_track_on_a_stale_index_runs_the_job_first():
+    out = _tm_node(_TM_UNINDEXED + """
+globalThis.confirmModal = async () => true;
+tmState.rec = 'X';
+const pick = $('tm-track-pick'), o = new El('option');
+o.value = 't9'; o.textContent = 'Nine';
+pick.appendChild(o); pick.value = 't9'; pick.selectedIndex = 0;
+const gen = tmLapGen;
+tmLearn();
+await tick();
+answer('/api/telemetry/learn', unindexed('X'));
+await tick();
+const kept = tmLapGen === gen;
+answer('/api/op/telemetry-index', {ok: true, job_id: 'j'});
+await tick();
+answer('/api/jobs/j', {ok: true, running: false, exit_code: 0, lines: []});
+await tick();
+answer('/api/telemetry/learn', {ok: true, track: {id: 't9'}, learned: true});
+await tick();
+console.log(JSON.stringify([kept, jobs(), asks('/api/telemetry/learn'), tmLapGen > gen,
+                            $('tm-err').textContent]));""")
+    if out is not None:
+        assert json.loads(out) == [True, 1, 2, True, ""], \
+            f"Set track runs telemetry-index on a stale index, then learns once more: {out}"
+
+
+def t_telemetry_failure_outside_the_job_tail_still_names_the_recording():
+    out = _tm_node(_TM_UNINDEXED + """
+tmSelectRec('X');
+await tick();
+answer('rec=X', unindexed('X'));
+await tick();
+answer('/api/op/telemetry-index', {ok: true, job_id: 'j'});
+await tick();
+const tail = Array.from({length: 19}, (_, i) => 'R' + i + ': 4 laps')
+  .concat(['19 recording(s) indexed, 2 failed: W, X']);
+answer('/api/jobs/j', {ok: true, running: false, exit_code: 1, lines: tail});
+await tick();
+answer('rec=X', unindexed('X'));
+await tick();
+console.log(JSON.stringify([$('tm-err').textContent, $('tm-note').textContent]));""")
+    if out is not None:
+        err, note = json.loads(out)
+        want = "19 recording(s) indexed, 2 failed: W, X"
+        assert want in err and want in note, \
+            f"the summary line names a failure whose own line left the tail: {out}"
+
+
+def t_telemetry_set_track_shows_indexing_while_its_job_runs():
+    out = _tm_node(_TM_UNINDEXED + """
+globalThis.confirmModal = async () => true;
+tmState.rec = 'X';
+const pick = $('tm-track-pick'), o = new El('option');
+o.value = 't9'; o.textContent = 'Nine';
+pick.appendChild(o); pick.value = 't9'; pick.selectedIndex = 0;
+$('tm-learn').textContent = 'Set track';
+tmLearn();
+await tick();
+answer('/api/telemetry/learn', unindexed('X'));
+await tick();
+answer('/api/op/telemetry-index', {ok: true, job_id: 'j'});
+await tick();
+const during = $('tm-learn').textContent.replace(/\\u2026/g, '...');
+answer('/api/jobs/j', {ok: true, running: false, exit_code: 0, lines: []});
+await tick();
+const retry = $('tm-learn').textContent;
+answer('/api/telemetry/learn', {ok: true, track: {id: 't9'}, learned: true});
+await tick();
+console.log(JSON.stringify([during, retry, $('tm-learn').textContent]));""")
+    if out is not None:
+        assert json.loads(out) == ["Indexing...", "Set track", "Set track"], \
+            f"Set track shows Indexing while its job runs and its label afterwards: {out}"
+
+
+def t_telemetry_new_data_version_allows_one_more_index_job():
+    out = _tm_node(_TM_UNINDEXED + """
+const v = (d, ver) => Object.assign(d, {data_version: ver});
+const finish = async (id, code) => {
+  answer('/api/op/telemetry-index', {ok: true, job_id: id});
+  await tick();
+  answer('/api/jobs/' + id, {ok: true, running: false, exit_code: code,
+                             lines: code ? ['X: not indexed (bad data)'] : []});
+  await tick();
+};
+tmSelectRec('X');
+await tick();
+answer('rec=X', v(unindexed('X'), 'v1'));
+await tick();
+await finish('j1', 1);
+answer('rec=X', v(unindexed('X'), 'v1'));
+await tick();
+tmSelectRec('X');
+await tick();
+answer('rec=X', v(unindexed('X'), 'v1'));
+await tick();
+const sameVersion = jobs();
+tmSelectRec('X');
+await tick();
+answer('rec=X', v(unindexed('X'), 'v2'));
+await tick();
+await finish('j2', 1);
+answer('rec=X', v(unindexed('X'), 'v2'));
+await tick();
+const err = $('tm-err').textContent;
+tmSelectRec('X');
+await tick();
+answer('rec=X', v(unindexed('X'), 'v2'));
+await tick();
+const l1 = lap('R', 1, 80, 1);
+tmState.recLaps = [l1];
+tmSelectB(l1);
+await tick();
+answer('car=1', v(Object.assign(pool([l1]), {unindexed: 1}), 'v3'));
+await tick();
+await finish('j3', 0);
+answer('car=1', v(Object.assign(pool([l1]), {unindexed: 1}), 'v3'));
+await tick();
+tmSelectB(l1);
+await tick();
+answer('car=1', v(Object.assign(pool([l1]), {unindexed: 1}), 'v3'));
+await tick();
+console.log(JSON.stringify([sameVersion, err, jobs()]));""")
+    if out is not None:
+        assert json.loads(out) == [1, "X: not indexed (bad data)", 3], \
+            f"one index job per GT7 data version, for a recording and for a pool: {out}"
+
+
+def t_telemetry_joined_index_job_records_no_data_version():
+    out = _tm_node(_TM_UNINDEXED + """
+const v = (d, ver) => Object.assign(d, {data_version: ver});
+tmSelectRec('X');
+await tick();
+answer('rec=X', v(unindexed('X'), 'v1'));
+await tick();
+answer('/api/op/telemetry-index', {ok: false, error: 'telemetry-index is already running',
+                                   job_id: 'other'});
+await tick();
+answer('/api/jobs/other', {ok: true, running: false, exit_code: 0, lines: []});
+await tick();
+const joinedVer = tmIndexedVer;
+answer('rec=X', v(unindexed('X'), 'v1'));
+await tick();
+answer('/api/op/telemetry-index', {ok: true, job_id: 'j2'});
+await tick();
+answer('/api/jobs/j2', {ok: true, running: false, exit_code: 0, lines: []});
+await tick();
+answer('rec=X', recLaps('X', [lap('X', 1, 80, 7), lap('X', 2, 81, 7)]));
+await tick();
+console.log(JSON.stringify([joinedVer, jobs(), tmIndexedVer, tmState.recLaps.length,
+                            $('tm-err').textContent]));""")
+    if out is not None:
+        assert json.loads(out) == [None, 2, "v1", 2, ""], \
+            f"a joined run ran for an unknown version, so this page runs its own once: {out}"
+
+
+def t_telemetry_caller_joining_a_run_for_an_older_version_starts_one_more():
+    out = _tm_node(_TM_UNINDEXED + """
+const v = (d, ver) => Object.assign(d, {data_version: ver});
+const a = tmFetchLap('X|1|1');
+await tick();
+answer('rec=X&', v(unindexed('X'), 'v1'));
+await tick();
+const b = tmFetchLap('Y|1|1');
+await tick();
+answer('rec=Y&', v(unindexed('Y'), 'v2'));
+await tick();
+answer('/api/op/telemetry-index', {ok: true, job_id: 'j1'});
+await tick();
+answer('/api/jobs/j1', {ok: true, running: false, exit_code: 0, lines: []});
+await tick();
+answer('rec=X&', {ok: true, lap: lap('X', 1, 80, 7), sector_m: 200});
+answer('rec=Y&', v(unindexed('Y'), 'v2'));
+await tick();
+answer('/api/op/telemetry-index', {ok: true, job_id: 'j2'});
+await tick();
+answer('/api/jobs/j2', {ok: true, running: false, exit_code: 0, lines: []});
+await tick();
+answer('rec=Y&', {ok: true, lap: lap('Y', 1, 79, 7), sector_m: 200});
+const [ra, rb] = [await a, await b];
+console.log(JSON.stringify([jobs(), ra.lap && ra.lap.rec, rb.lap && rb.lap.rec,
+                            rb.error || '', tmIndexedVer]));""")
+    if out is not None:
+        assert json.loads(out) == [2, "X", "Y", "", "v2"], \
+            f"B joined A's run for v1, so exactly one more job runs for v2: {out}"
+
+
+def t_telemetry_new_lap_generation_forgets_the_old_job_lines():
+    out = _tm_node(_TM_UNINDEXED + """
+tmIndexAll();
+await tick();
+answer('/api/op/telemetry-index', {ok: true, job_id: 'j'});
+await tick();
+answer('/api/jobs/j', {ok: true, running: false, exit_code: 1,
+                       lines: ['X: not indexed (bad data)']});
+await tick();
+const before = tmIndexLines.length;
+tmDropLaps();
+const afterDrop = tmIndexLines.length;
+tmIndexLines = ['X: not indexed (bad data)'];
+tmReset();
+console.log(JSON.stringify([before, afterDrop, tmIndexLines.length]));""")
+    if out is not None:
+        assert json.loads(out) == [1, 0, 0], \
+            f"a new lap generation never shows lines of an older run: {out}"
+
+
+def t_telemetry_lap_fetch_from_an_old_generation_stops_after_the_job():
+    out = _tm_node(_TM_UNINDEXED + """
+const got = tmFetchLap('X|1|2');
+await tick();
+answer('/lap?', unindexed('X'));
+await tick();
+answer('/api/op/telemetry-index', {ok: true, job_id: 'j'});
+await tick();
+tmDropLaps();
+answer('/api/jobs/j', {ok: true, running: false, exit_code: 0, lines: []});
+let r = null;
+got.then(x => { r = x; });
+await tick();
+console.log(JSON.stringify([asks('/lap?'), r ? r.error : 'still asking', r ? r.lap : null]));""")
+    if out is not None:
+        assert json.loads(out) == [1, "", None], \
+            f"a lap fetch whose generation ended asks no more and shows no error: {out}"
+
+
+def t_telemetry_index_job_refreshes_the_recording_list():
+    out = _tm_node("""
+const l1 = lap('R', 1, 80, 1);
+tmState.recs = [{rec: 'R', indexed: true, laps: 1, duration_s: 60, size: 1e6, track: null},
+                {rec: 'S', indexed: false, laps: null, duration_s: 60, size: 1e6, track: null}];
+tmState.recLaps = [l1];
+tmSelectB(l1);
+await tick();
+answer('car=1', Object.assign(pool([l1]), {unindexed: 1}));
+await tick();
+answer('/api/op/telemetry-index', {ok: true, job_id: 'j'});
+await tick();
+answer('/api/jobs/j', {ok: true, running: false, exit_code: 0, lines: []});
+await tick();
+answer('/recordings', {ok: true, recordings: [
+  {rec: 'R', indexed: true, laps: 1, duration_s: 60, size: 1e6, track: null},
+  {rec: 'S', indexed: true, laps: 7, duration_s: 60, size: 1e6, track: null}]});
+await tick();
+console.log($('tm-recs').textContent);""")
+    if out is not None:
+        assert "7 laps" in out and "not indexed yet" not in out, \
+            f"the list shows what the job indexed: {out!r}"
+
+
+def t_telemetry_reset_drops_the_shared_index_job_and_refresh_the_lap_requests():
+    out = _tm_node("""
+tmIndexAll();
+await tick();
+const during = tmIndexing !== null;
+tmReset();
+const afterReset = tmIndexing;
+tmShared('/api/telemetry/lap?rec=R&session=1&lap=1');
+tmLoad();
+console.log([during, String(afterReset), tmLapsReq.size].join(','));""")
+    if out is not None:
+        assert out.strip() == "true,null,0", \
+            f"a reset forgets the old profile's job and Refresh the pending lap requests: {out!r}"
+
+
+def t_telemetry_pool_job_answer_for_another_lap_is_dropped():
+    out = _tm_node("""
+const l1 = lap('R', 1, 80, 1), l2 = lap('R', 2, 79, 2);
+tmState.recLaps = [l1, l2];
+tmSelectB(l1);
+await tick();
+answer('car=1', Object.assign(pool([l1]), {unindexed: 1}));
+await tick();
+answer('/api/op/telemetry-index', {ok: false, error: 'telemetry-index is already running'});
+tmSelectB(l2);
+await tick();
+answer('car=2', pool([l2]));
+await tick();
+console.log([calls.filter(u => u.includes('car=1')).length, tmState.b, tmState.pool.laps.length,
+             $('tm-err').textContent].join('|'));""")
+    if out is not None:
+        assert out.strip() == "1|R|1|2|1|", \
+            f"a pool whose lap was replaced neither asks again nor shows its job error: {out!r}"
+
+
+def t_telemetry_clearing_the_pair_drops_a_pending_load():
+    out = _tm_node("""
+const b = lap('R', 1, 80, 1);
+tmSelectB(b);
+await tick();
+answer('car=1', pool([b]));
+await tick();
+tmSelectB(b);
+await tick();
+answer('/lap?', {ok: true, lap: b, sector_m: 200});
+await tick();
+console.log([String(tmState.lapB), $('tm-sec-sub').textContent.replace(/\\u2026/g, '...')].join('|'));""")
+    if out is not None:
+        assert out.strip() == "null|Loading comparable laps...", \
+            f"a lap answer from before the clear must not draw under the loading note: {out!r}"
+
+
+def t_telemetry_reference_is_the_fastest_other_lap():
+    out = _tm_node("""
+const b = lap('R', 3, 79, 1);
+tmSelectB(b);
+await tick();
+answer('car=1', pool([b, lap('R', 1, 80, 1), lap('R', 2, 81, 1)]));
+await tick();
+const multi = tmState.a;
+tmSelectB(b);
+await tick();
+answer('car=1', pool([b]));
+await tick();
+answer('/lap?', {ok: true, lap: b, sector_m: 200});
+await tick();
+console.log([multi, String(tmState.a), $('tm-a').options.length, $('tm-a').disabled,
+             $('tm-sec-sub').textContent.replace(/\\u00b7/g, '-')].join('|'));""")
+    if out is not None:
+        assert out.strip() == "R|1|1|null|1|true|200 m - no other lap", \
+            f"A is the fastest lap other than B, and a lone lap says so: {out!r}"
+
+
+def t_telemetry_errors_leave_placeholders_and_no_stale_banner():
+    out = _tm_node("""
+tmState.recs = [{rec: 'X'}, {rec: 'Y'}];
+tmSelectRec('X');
+await tick();
+answer('rec=X', {ok: false, error: 'recording in progress: stop the recording to analyse it'});
+await tick();
+const placeholder = [$('tm-a').options.length, $('tm-a').options[0].disabled, $('tm-a').disabled].join(',');
+tmState.a = 'X|1|1'; tmState.b = 'X|1|2';
+tmLoadPair();
+tmSelectRec('Y');
+await tick();
+answer('/lap?', {ok: false, error: 'stale lap'});
+await tick();
+console.log([placeholder, $('tm-err').hidden, $('tm-err').textContent].join('|'));""")
+    if out is not None:
+        assert out.strip() == "1,true,true|true|", \
+            f"empty pickers carry a disabled placeholder and a stale lap error stays off the banner: {out!r}"
+
+
+def t_telemetry_failed_list_retries_on_the_next_visit():
+    out = _tm_node("""
+tmLoad(); tmLoad();
+await tick();
+answer('/recordings', {ok: false, error: 'boom'});
+await tick();
+console.log([tmState.loaded, calls.length, $('tm-recs').textContent === ''].join('|'));""")
+    if out is not None:
+        assert out.strip() == "false|2|true", f"a failed list must not count as loaded: {out!r}"
+
+
+_TM_TRACKS = """
+const tracks = {ok: true, tracks: [
+  {id: '9', track: 'Suzuka', layout: 'East', reverse: false},
+  {id: '3', track: 'Brands Hatch', layout: 'Indy', reverse: false},
+  {id: '5', track: 'Suzuka', layout: 'Circuit', reverse: false},
+  {id: '7', track: 'Brands Hatch', layout: 'Grand Prix', reverse: true}]};
+const opts = () => $('tm-track-pick').options.map(o => o.value).join(',');
+"""
+
+
+def t_telemetry_set_track_lists_candidates_first_and_loads_once():
+    out = _tm_node(_TM_TRACKS + """
+tmState.recs = [{rec: 'X'}, {rec: 'Y'}, {rec: 'Z'}];
+tmSelectRec('X'); tmSelectRec('Y');
+await tick();
+answer('rec=X', {ok: true, recording: {rec: 'X', track: null}, laps: []});
+answer('rec=Y', {ok: true, recording: {rec: 'Y', track: {candidates: [{id: '5'}, {id: '9'}]}}, laps: []});
+await tick();
+const one = calls.filter(u => u.includes('/tracks')).length;
+answer('/tracks', tracks);
+await tick();
+const ambiguous = [$('tm-settrack').hidden, opts(), $('tm-track-pick').options[2].textContent].join(' ');
+tmSelectRec('Z');
+await tick();
+answer('rec=Z', {ok: true, recording: {rec: 'Z', track: {id: '9', track: 'Suzuka', layout: 'East'}}, laps: []});
+await tick();
+const known = $('tm-settrack').hidden;
+tmSelectRec('X');
+await tick();
+answer('rec=X', recLaps('X', []));
+await tick();
+console.log([one, ambiguous, known, $('tm-settrack').hidden, opts(),
+             calls.filter(u => u.includes('/tracks')).length].join('|'));""")
+    if out is not None:
+        assert out.strip() == ("1|false 5,9,7,3 Brands Hatch - Grand Prix (reverse)|true|false"
+                               "|7,3,5,9|1"), \
+            f"candidates first, the rest by track and layout, one track list per view load: {out!r}"
+
+
+def t_telemetry_set_track_failed_list_retries():
+    out = _tm_node(_TM_TRACKS + """
+tmShowSetTrack(null); tmShowSetTrack(null);
+await tick();
+const once = calls.length;
+answer('/tracks', {ok: false, error: 'no list'});
+await tick();
+const failed = [String(tmState.tracks), $('tm-err').textContent].join(',');
+tmShowSetTrack(null);
+await tick();
+answer('/tracks', tracks);
+await tick();
+console.log([once, failed, opts()].join('|'));""")
+    if out is not None:
+        assert out.strip() == "1|null,no list|7,3,5,9", \
+            f"a failed track list shows its error and is fetched again: {out!r}"
+
+
+def t_telemetry_learn_reloads_the_recording_and_drops_a_late_answer():
+    out = _tm_node(_TM_TRACKS + """
+globalThis.confirmModal = async () => true;
+tmState.recs = [{rec: 'X', indexed: true}, {rec: 'Y', indexed: true}];
+tmState.rec = 'X';
+tmShowSetTrack(null);
+await tick();
+answer('/tracks', tracks);
+await tick();
+$('tm-track-pick').value = '5'; $('tm-track-pick').selectedIndex = 2;
+tmLapCache.set('X|1|1', {});
+let body = null;
+const realFetch = globalThis.fetch;
+globalThis.confirmModal = async () => { $('tm-track-pick').value = '9'; return true; };
+globalThis.fetch = (url, opts) => { if (opts && opts.body) body = JSON.parse(opts.body).track_id;
+                                    return realFetch(url); };
+tmLearn();
+await tick();
+answer('/learn', {ok: false, error: 'recording in progress: stop the recording to analyse it'});
+await tick();
+const refused = $('tm-err').textContent + (body === '5' ? '' : ' wrong id ' + body);
+globalThis.confirmModal = async () => true;
+tmLearn();
+await tick();
+answer('/learn', {ok: true, track: {id: '5'}});
+await tick();
+const reload = [tmLapCache.size, calls.filter(u => u.includes('rec=X')).length, tmState.rec,
+                tmState.recs[1].indexed,
+                $('tm-err').hidden, $('tm-learn').disabled].join(',');
+answer('rec=X', recLaps('X', []));
+await tick();
+tmLearn();
+await tick();
+tmSelectRec('Y');
+await tick();
+answer('/learn', {ok: false, error: 'late'});
+await tick();
+console.log([refused, reload, tmState.rec, calls.filter(u => u.includes('rec=X')).length,
+             $('tm-err').textContent].join('|'));""")
+    if out is not None:
+        assert out.strip() == ("recording in progress: stop the recording to analyse it"
+                               "|0,1,X,false,true,false|Y|1|"), \
+            f"the server error shows, success reloads the recording, a late answer is dropped: {out!r}"
+
+
+def t_telemetry_lap_answer_from_before_set_track_is_not_cached():
+    out = _tm_node(_TM_TRACKS + """
+globalThis.confirmModal = async () => true;
+tmState.recs = [{rec: 'R', indexed: true}];
+tmState.rec = 'R';
+tmShowSetTrack(null);
+await tick();
+answer('/tracks', tracks);
+await tick();
+$('tm-track-pick').value = '5'; $('tm-track-pick').selectedIndex = 2;
+tmFetchLap('R|1|1');
+await tick();
+tmLearn();
+await tick();
+answer('/learn', {ok: true, track: {id: '5'}});
+await tick();
+tmFetchLap('R|1|1');
+await tick();
+const lapCalls = calls.filter(u => u.includes('/lap?')).length;
+const old = pending.find(p => p.url.includes('/lap?'));
+pending.splice(pending.indexOf(old), 1);
+old.res({json: async () => ({ok: true, lap: {mark: 'pre'}, sector_m: 200})});
+await tick();
+const afterOld = [tmLapCache.has('R|1|1'),
+                  [...tmLapsReq.keys()].filter(u => u.includes('/lap?')).length].join(',');
+answer('/lap?', {ok: true, lap: {mark: 'post'}, sector_m: 200});
+await tick();
+console.log([lapCalls, afterOld, (tmLapCache.get('R|1|1') || {}).mark].join('|'));""")
+    if out is not None:
+        assert out.strip() == "2|false,1|post", \
+            f"a lap request from before Set track never fills the cache or the shared request: {out!r}"
+
+
+def t_telemetry_reset_and_reload_drop_a_pending_lap_answer():
+    out = _tm_node("""
+const res = [];
+for (const [fn, key] of [[tmReset, 'R|1|1'], [tmLoad, 'R|1|2']]) {
+  tmFetchLap(key);
+  await tick();
+  fn();
+  await tick();
+  answer('/lap?', {ok: true, lap: {mark: 'old'}, sector_m: 200});
+  answer('/recordings', {ok: true, recordings: []});
+  await tick();
+  res.push(tmLapCache.has(key));
+}
+console.log(res.join(','));""")
+    if out is not None:
+        assert out.strip() == "false,false", \
+            f"a lap answer from before a reset or reload is not cached: {out!r}"
+
+
+def t_telemetry_open_recording_row_is_not_clickable():
+    out = _tm_node("""
+tmState.recs = [{rec: 'A', recording: true, duration_s: 60, size: 1e6, laps: null},
+                {rec: 'B', duration_s: 60, size: 1e6, laps: 3, indexed: true, track: null}];
+tmRenderRecs();
+const [a, b] = $('tm-recs').kids;
+console.log([a.disabled, typeof a.onclick, b.disabled, typeof b.onclick].join(' '));""")
+    if out is not None:
+        assert out.strip() == "true undefined false function", \
+            f"the file the relay writes is listed but cannot be opened: {out!r}"
+    assert ".tmitem:disabled" in _cc_page(), "a disabled row needs its own look"
+
+
+def t_telemetry_learn_says_whether_a_line_was_learned():
+    out = _tm_node(_TM_TRACKS + """
+globalThis.confirmModal = async () => true;
+tmState.recs = [{rec: 'X'}];
+tmState.rec = 'X';
+tmShowSetTrack(null);
+await tick();
+answer('/tracks', tracks);
+await tick();
+const learn = async (learned) => {
+  $('tm-track-pick').value = '5'; $('tm-track-pick').selectedIndex = 2;
+  tmLearn();
+  await tick();
+  answer('/learn', {ok: true, learned, track: {id: '5'}});
+  await tick();
+  answer('rec=X', recLaps('X', []));
+  await tick();
+  return [$('tm-note').hidden, $('tm-note').textContent].join(' ');
+};
+const assigned = await learn(false), learnedNote = await learn(true);
+tmSelectRec('X');
+console.log([assigned, learnedNote, $('tm-note').hidden].join('|'));""")
+    if out is not None:
+        assert out.strip() == ("false X now uses Suzuka - Circuit. The downloaded racing line "
+                               "for it stays as it is."
+                               "|false X now uses Suzuka - Circuit. racecast learned the line "
+                               "from its longest counted lap, so later recordings on it are "
+                               "recognised.|true"), \
+            (f"the note says whether a line was learned, survives a reload without laps "
+             f"and goes with the next selection: {out!r}")
+
+
+def t_telemetry_live_recording_offers_no_set_track():
+    out = _tm_node(_TM_TRACKS + """
+tmState.recs = [{rec: 'X', recording: true}];
+tmSelectRec('X');
+await tick();
+answer('rec=X', {ok: false, error: 'recording in progress: stop the recording to analyse it'});
+await tick();
+tmState.rec = 'X';
+tmShowSetTrack(null);
+await tick();
+console.log([$('tm-settrack').hidden, calls.filter(u => u.includes('/tracks')).length].join('|'));""")
+    if out is not None:
+        assert out.strip() == "true|0", f"the file the relay writes cannot be learned from: {out!r}"
+
+
+def t_telemetry_view_follows_the_active_profile():
+    page = _cc_page()
+    gate = page[page.index("function applyKindGating(data)"):page.index("async function useProfile(")]
+    assert "tmState.profile" in gate and "tmReset()" in gate, \
+        "every profile switch path (use, import) resets the Telemetry view"
 
 
 def t_api_resources_route():
@@ -2059,6 +3412,130 @@ def t_api_ps_save_rejects_bad_ip():
     finally:
         httpd.shutdown()
 
+
+def t_telemetry_routes_pass_their_arguments():
+    calls = []
+    ctx = _ctx()
+    ctx["telemetry_laps"] = lambda *a, **kw: calls.append(("laps",) + a + (kw,)) or {
+        "ok": True, "laps": []}
+    ctx["telemetry_lap"] = lambda *a, **kw: calls.append(("lap",) + a + (kw,)) or {
+        "ok": False, "error": "x"}
+    ctx["telemetry_learn"] = lambda *a, **kw: calls.append(("learn",) + a + (kw,)) or {
+        "ok": False, "error": "unknown track layout"}
+    httpd, port = _serve(ctx)
+    try:
+        code, body = _get(port, "/api/telemetry/recordings")
+        assert code == 200 and json.loads(body)["recordings"][0]["rec"] == "20261007-201503"
+        assert _get(port, "/api/telemetry/laps?rec=20261007-201503")[0] == 200
+        assert _get(port, "/api/telemetry/laps?track=&car=3424&rec=r&session=2")[0] == 200
+        code, body = _get(port, "/api/telemetry/lap?rec=r&session=1&lap=3")
+        assert code == 200 and json.loads(body)["ok"] is False, "a GET reports a miss in the body"
+        code, body = _get(port, "/api/telemetry/tracks")
+        assert code == 200 and json.loads(body)["tracks"][0]["id"] == "suzuka01"
+        code, _ = _post_json(port, "/api/telemetry/learn", {"rec": "r", "track_id": "x"})
+        assert code == 400, "a refused learn is a client error"
+        assert calls == [("laps", "20261007-201503", None, None, None, {"build": False}),
+                         ("laps", "r", "2", "", "3424", {"build": False}),
+                         ("lap", "r", "1", "3", {"build": False}),
+                         ("learn", "r", "x", {"build": False})], \
+            f"no request builds a lap index: {calls}"
+    finally:
+        httpd.shutdown()
+
+
+def t_telemetry_routes_stay_json_on_errors():
+    ctx = _ctx()
+
+    def boom(*_a, **_kw):
+        raise RuntimeError("disk at /srv/league/rec.gt7rec")
+    ctx["telemetry_recordings"] = boom
+    httpd, port = _serve(ctx)
+    try:
+        code, body = _get(port, "/api/telemetry/recordings")
+        err = json.loads(body)["error"]
+        assert code == 500 and "RuntimeError" in err and "/srv/league" not in err, err
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/api/telemetry/learn",
+                                     method="POST", data=b"{bad",
+                                     headers={"Content-Type": "application/json"})
+        try:
+            with _urlopen(req, timeout=5) as r:
+                code = r.status
+        except urllib.error.HTTPError as e:
+            code = e.code
+        assert code == 400, "a malformed body is refused"
+        code, body = _post_json(port, "/api/telemetry/learn", {"rec": "r", "track_id": "suzuka01"})
+        assert code == 200 and json.loads(body)["track"]["id"] == "suzuka01"
+    finally:
+        httpd.shutdown()
+
+
+def t_telemetry_routes_500_paths_report_only_the_exception_type():
+    ctx = _ctx()
+
+    def boom(*_a, **_kw):
+        raise RuntimeError("disk at /srv/league/rec.gt7rec")
+    ctx["telemetry_laps"] = boom
+    ctx["telemetry_lap"] = boom
+    ctx["telemetry_tracks"] = boom
+    ctx["telemetry_learn"] = boom
+    httpd, port = _serve(ctx)
+    try:
+        code, body = _get(port, "/api/telemetry/laps?rec=r")
+        err = json.loads(body)["error"]
+        assert code == 500 and "RuntimeError" in err and "/srv/league" not in err, err
+        code, body = _get(port, "/api/telemetry/lap?rec=r&session=1&lap=1")
+        err = json.loads(body)["error"]
+        assert code == 500 and "RuntimeError" in err and "/srv/league" not in err, err
+        code, body = _get(port, "/api/telemetry/tracks")
+        err = json.loads(body)["error"]
+        assert code == 500 and "RuntimeError" in err and "/srv/league" not in err, err
+        code, body = _post_json(port, "/api/telemetry/learn", {"rec": "r", "track_id": "x"})
+        err = json.loads(body)["error"]
+        assert code == 500 and "RuntimeError" in err and "/srv/league" not in err, err
+    finally:
+        httpd.shutdown()
+
+
+def t_telemetry_learn_rejects_a_non_object_json_body():
+    ctx = _ctx()
+    httpd, port = _serve(ctx)
+    try:
+        for bad in ([1, 2, 3], "x", 5, None):
+            code, body = _post_json(port, "/api/telemetry/learn", bad)
+            assert code == 400, (bad, code, body)
+    finally:
+        httpd.shutdown()
+
+
+def t_body_json_rejects_negative_and_oversized_content_length():
+    import http.client
+    ctx = _ctx()
+    httpd, port = _serve(ctx)
+    try:
+        payload = json.dumps({"rec": "r", "track_id": "x"}).encode("utf-8")
+        for path, length, body, want in (
+                ("/api/telemetry/learn", "-1", payload, "invalid Content-Length"),
+                ("/api/telemetry/learn", str(us.MAX_JSON_BODY_BYTES + 1), payload,
+                 "request body too large"),
+                ("/api/telemetry/learn", "5", b"{oops", "malformed JSON body"),
+                ("/api/profile/use", str(us.MAX_JSON_BODY_BYTES + 1), payload,
+                 "request body too large")):
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            conn.putrequest("POST", path)
+            conn.putheader("Content-Type", "application/json")
+            conn.putheader("Content-Length", length)
+            conn.endheaders()
+            conn.send(body)
+            resp = conn.getresponse()
+            err = json.loads(resp.read())["error"]
+            assert (resp.status, err) == (400, want), (path, length, resp.status, err)
+            conn.close()
+    finally:
+        httpd.shutdown()
+    with open(us.__file__, encoding="utf-8") as fh:
+        src = fh.read()
+    assert '"error": "malformed JSON body"' not in src, \
+        "every route reports the body error _body_json found"
 
 
 def t_restore_fonts_button_confirms_before_forcing():

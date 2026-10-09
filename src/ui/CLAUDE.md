@@ -31,6 +31,35 @@ Loaded when working under `src/ui/`.
   maintainer tool that builds the zip. A font a league's design uses is copied into that
   profile's `overlay/fonts/` on save (`_materialize_overlay_fonts`), so `profile export`
   stays self-contained; the relay/canvas serve it locally (no broadcast-time CDN).
+- **Telemetry** (solo POV only: the nav item and the view carry `pov-only`): lap
+  comparison from the profile's GT7 recordings. `src/scripts/gt7_laps.py` builds a lap
+  index per recording (5 m traces, 200 m sectors), cached as `<stem>.laps.json` and
+  rebuilt when the recording's size/mtime or `gt7_data.data_version` change; the data
+  layer also memoises up to 4096 index summaries per process (`_telemetry_index`). One
+  Set track changes `data_version` (it stats `learned-tracks.json`), so every index of the
+  profile needs a rebuild, about 16 s per 3 h recording. No request builds an index: the
+  routes pass `build=False`. A pool of `/api/telemetry/laps` uses the recordings with a
+  valid index and counts the rest in `unindexed`; `?rec=`, `/api/telemetry/lap` and
+  `/api/telemetry/learn` answer `unindexed: 1` for a recording without one; every such
+  answer carries the `data_version` it was checked against. The page (`tmIndexed`,
+  `tmIndexAll`, `tmMayIndex`) then runs the `telemetry-index` job (`racecast telemetry
+  index`) once per lap generation and data version (the relay's background GT7 data
+  update can change it mid-generation; a joined run from another window records no
+  version), polls it through `/api/jobs/<id>` and asks once more; still unindexed shows
+  the job's "not indexed" line as an error, or its last line, which names every
+  recording the job could not index. Set track shows "Indexing…" on its button while
+  its job runs. The CLI and the event-stop report keep building; the Report view's
+  Generate runs `racecast report generate` as the `report-generate` job and reads the
+  written file through `GET /api/report/read?name=`. A counted lap's trace closes at
+  the full lap length with the lap time, so its sectors add up. Data functions
+  `telemetry_*_data` in `src/racecast.py`; routes `/api/telemetry/recordings`,
+  `/api/telemetry/laps`, `/api/telemetry/lap`, `/api/telemetry/tracks`,
+  `/api/telemetry/learn`. The recording the relay is writing is listed but refused by
+  laps/lap/learn. `learn` only assigns a layout that has a downloaded racing line
+  (`TrackDB.has_downloaded_line`) and learns the line otherwise. Charts and map are
+  inline SVG in `control-center.html` (block "Telemetry view"). Demo data for
+  screenshots: `tools/make-demo-recording.py`. Tests: `tests/test_gt7_laps.py`,
+  `tests/test_racecast.py`, `tests/test_ui_server.py`, `tests/test_make_demo_recording.py`.
 
 ## Per-league overlay override + visual builder (moved from the root CLAUDE.md)
 - **Per-league overlay (optional).** `profiles/<name>/overlay/hud.css` (+ an optional
@@ -71,9 +100,9 @@ Loaded when working under `src/ui/`.
   travel with the checkout. Mac, Windows or Linux): Companion buttons via the
   **`companion-screenshots`** skill; Control Center / Director Panel / the
   `/console` + cockpit pages via the **`wiki-screenshots`** skill (it drives a
-  running dev-build instance with the Playwright MCP, takes an **element**
-  screenshot of the relevant card/modal, e.g. `#ov-modal .ovmodal-card`, so the
-  framing matches the existing images, and documents the reproducible fake-content
+  running dev-build instance with the Playwright MCP, takes a **full-window**
+  screenshot of the view, or an **element** screenshot of a modal such as
+  `#ov-modal .ovmodal-card`, so the framing matches the existing images, and documents the reproducible fake-content
   recipe: the `demo` profile + `tools/obs-sim.py` OBS stand-in, so the pages show a
   believable broadcast with no real OBS/league). Verify a published wiki render
   with **`wiki-visual-test`**. **Always capture Control Center screenshots from a local

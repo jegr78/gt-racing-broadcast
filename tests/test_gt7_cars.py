@@ -73,22 +73,39 @@ def t_default_dir_is_the_shipped_tables():
     assert os.path.normpath(gc.default_dir()) == os.path.normpath(SHIPPED)
 
 
-def t_fetch_tool_validates_a_download():
-    """tools/fetch-gt7-cars.py only replaces a table after it checked the columns
-    CarDB reads and, for cars.csv, a plausible row count."""
-    tool = _load("fetch_gt7_cars", ("tools", "fetch-gt7-cars.py"))
-    rows = "".join(f"{i},Car {i},1\n" for i in range(tool.MIN_CARS))
-    assert len(tool.validate("cars.csv", "ID,ShortName,Maker\n" + rows)) == tool.MIN_CARS
-    for name, text in (("cars.csv", "ID,ShortName,Maker\n1,A,1\n"),       # truncated
-                       ("maker.csv", "ID,Label\n1,X\n"),                    # renamed column
-                       ("cargrp.csv", "<html>rate limited</html>")):
+def t_fetch_tool_uses_the_shared_validator():
+    tool = _load("fetch_gt7_data", ("tools", "fetch-gt7-data.py"))
+    assert tool.gt7_data.SOURCES["cars.csv"].endswith("/cars.csv")
+    for name in tool.BUNDLED:
+        with open(os.path.join(SHIPPED, name), "rb") as f:
+            assert tool.gt7_data.validate(name, f.read()) > 0, f"bundled {name} must validate"
+    assert "signatures.json" not in tool.BUNDLED, "signatures.json is downloaded at runtime only"
+
+
+def t_fetch_tool_writes_through_gt7_data():
+    import shutil
+    import sys
+    tool = _load("fetch_gt7_data", ("tools", "fetch-gt7-data.py"))
+    with tempfile.TemporaryDirectory() as d:
+        for name in tool.BUNDLED:
+            shutil.copy(os.path.join(SHIPPED, name), d)
+
+        def get_bytes(url, timeout=None):
+            with open(os.path.join(SHIPPED, url.rsplit("/", 1)[1]), "rb") as f:
+                return f.read()
+        written = []
+        real_get, real_write, real_dir = tool.http_util.get_bytes, tool.gt7_data.write_file, tool.GT7_DIR
+        real_argv = sys.argv
+        tool.http_util.get_bytes, tool.GT7_DIR, sys.argv = get_bytes, d, ["fetch-gt7-data.py"]
+        tool.gt7_data.write_file = lambda dir_, name, data: (written.append(name),
+                                                             real_write(dir_, name, data))
         try:
-            tool.validate(name, text)
-        except ValueError:
-            continue
-        raise AssertionError(f"{name} accepted: {text!r}")
-    with open(os.path.join(SHIPPED, "cars.csv"), encoding="utf-8", newline="") as f:
-        assert tool.validate("cars.csv", f.read())             # the shipped copy passes
+            assert tool.main() == 0
+        finally:
+            tool.http_util.get_bytes, tool.gt7_data.write_file = real_get, real_write
+            tool.GT7_DIR, sys.argv = real_dir, real_argv
+        assert sorted(written) == sorted(tool.BUNDLED), f"every file goes through write_file: {written}"
+        assert sorted(os.listdir(d)) == sorted(tool.BUNDLED), f"no temp file is left: {os.listdir(d)}"
 
 
 if __name__ == "__main__":

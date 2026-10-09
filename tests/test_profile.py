@@ -180,6 +180,11 @@ def t_create_solo_profile_defaults_template():
         assert m.cfg.parse_profile(root, "s1")["TEMPLATE"] == m.cfg.SOLO_TEMPLATES[0]
 
 
+def t_solo_pov_profile_prefills_telemetry_record():
+    assert "\nTELEMETRY_RECORD=\n" in m._solo_profile_env_text("Solo", "pov")
+    assert "TELEMETRY_RECORD" not in m._solo_profile_env_text("Solo", "commentary")
+
+
 def t_create_profile_accepts_spaces_via_slug_and_sets_display_name():
     with tempfile.TemporaryDirectory() as td:
         root = _mkroot_with_example(td)

@@ -114,6 +114,13 @@ def t_ops_registry_shape():
         assert isinstance(argv, list) and all(isinstance(a, str) for a in argv), name
 
 
+def t_long_control_center_reads_run_as_jobs():
+    assert ui_ops.OPS["gt7-data-update"] == ["gt7-data", "update"]
+    assert ui_ops.OPS["telemetry-index"] == ["telemetry", "index"]
+    assert ui_ops.OPS.get("report-generate") == ["report", "generate"], \
+        "a report builds lap indexes, so it runs as a job"
+
+
 def t_job_argv_repo_mode():
     argv = ui_ops.job_argv(["relay", "start"], frozen=False,
                            executable="/usr/bin/python3", rc_script="/repo/src/racecast.py")
@@ -132,7 +139,7 @@ def t_ops_registry_routes_in_rc():
     for name, argv in ui_ops.OPS.items():
         action = rc.route(list(argv))
         assert action["kind"] in ("service", "oneshot", "export", "chat", "discord",
-                                  "freeport", "health"), name
+                                  "freeport", "health", "report"), name
 
 
 def t_build_argv_plain_and_unknown():
@@ -640,6 +647,17 @@ def t_update_check_dev_build_skips():
     d = rc.update_check_data(fetch=lambda: _release("v9.9.9"), current="dev",
                               frozen=False)
     assert d["ok"] and d["update_available"] is False and d["latest"] is None
+
+
+def t_update_check_off_switch_makes_no_request():
+    def fetch():
+        raise AssertionError("the update check must not reach GitHub when switched off")
+    os.environ["RACECAST_UPDATE_CHECK"] = "0"
+    try:
+        d = rc.update_check_data(fetch=fetch, current="v1.2.0", frozen=True)
+    finally:
+        del os.environ["RACECAST_UPDATE_CHECK"]
+    assert d["ok"] and d["update_available"] is False and d["latest"] is None, d
 
 
 def t_update_check_frozen_preview_offers_latest():

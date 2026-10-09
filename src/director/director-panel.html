@@ -100,6 +100,8 @@
   /* The GT7 car keeps its own spelling ("e-tron", "TI '93") and truncates on a tablet. */
   #stCar{max-width:100%;min-width:0}
   #stCar b{text-transform:none;letter-spacing:0;min-width:0;overflow:hidden;text-overflow:ellipsis}
+  #stTrack{max-width:100%;min-width:0}
+  #stTrack b{text-transform:none;letter-spacing:0;min-width:0;overflow:hidden;text-overflow:ellipsis}
   .led{display:flex;align-items:center;gap:7px;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted)}
   .dot{width:12px;height:12px;border-radius:50%;background:#3a434d;box-shadow:0 0 0 3px rgba(255,255,255,.03)}
   .dot.on{background:var(--live);box-shadow:0 0 14px var(--live-glow),0 0 0 3px rgba(43,214,106,.12)}
@@ -155,12 +157,15 @@
   button.k:disabled{opacity:.35;cursor:not-allowed}
   button.k .tag{display:block;font-size:8px;letter-spacing:.22em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
   button.k .cost{display:block;font-size:9px;font-weight:400;color:var(--amber);margin-top:3px}
+  button.k .cost[hidden]{display:none}  /* author display:block above beats the UA [hidden] rule */
   button.k.on{border-color:var(--live);background:linear-gradient(180deg,#15301f,#10261a);
     box-shadow:0 0 0 1px var(--live),0 0 18px var(--live-glow),inset 0 1px 0 rgba(255,255,255,.06)}
   button.k.on .tag{color:var(--live)}
   button.k.air{border-color:var(--air);background:linear-gradient(180deg,#331414,#26100f);
     box-shadow:0 0 0 1px var(--air),0 0 20px var(--air-glow),inset 0 1px 0 rgba(255,255,255,.06)}
   button.k.air .tag{color:var(--air)}
+  button.k.warn{border-color:var(--amber)}
+  button.k.warn .tag{color:var(--amber)}
   /* RED FLAG: red label while idle; .on (cover visible) lights red, not green */
   button.k.redflag{color:#ff8080}
   button.k.redflag.on{border-color:var(--air);background:linear-gradient(180deg,#331414,#26100f);
@@ -664,6 +669,7 @@
       <span class="st" id="stPov">POV <b>—</b></span>
       <span class="st" id="stTimer">TIMER <b>—</b></span>
       <span class="st" id="stCar" hidden>CAR <b></b></span>
+      <span class="st" id="stTrack" hidden>TRACK <b></b></span>
     </div>
     <div class="led"><span class="dot" id="ledObs"></span>OBS</div>
     <div class="led"><span class="dot" id="ledRelay"></span>Relay</div>
@@ -1103,6 +1109,8 @@ const CONFIG_SOLO = {
     // The HUD telemetry block (solo POV): relay state, no OBS item; hidden when the
     // relay serves no telemetry (see the /status handler).
     {label:"TELEMETRY", scene:"HUD", relay:"telemetry"},
+    // Records the GT7 telemetry trace to disk; hidden without telemetry.
+    {label:"REC", scene:"DISK", relay:"telemetry/record"},
   ],
   audio: [
     {label:"Game",         input:"Solo Capture Device"},
@@ -1200,6 +1208,12 @@ function mkKey(label, tag, onClick){
 const macroKeys = [], sceneKeys = {}, toggleKeys = [];
 let povVisBtn = null;                 // the relay-driven POV visibility button (#130)
 let teleVisBtn = null;                // the relay-driven HUD telemetry show/hide button
+let teleRecBtn = null;                // the relay-driven telemetry recording button
+
+// Keys relayPoll reveals only when /status carries telemetry; hidden until then.
+function relayGated(item){
+  return item.relay === "telemetry" || item.relay === "telemetry/record";
+}
 
 /* RED FLAG toggles the Standby Cover through the relay's /obs/source endpoint,
    using the last-known state from /obs/state. Built once and re-appended to #pgmBus
@@ -1236,6 +1250,7 @@ function buildControls(cfg){
   Object.keys(sceneKeys).forEach(k=>delete sceneKeys[k]);
   povVisBtn = null;
   teleVisBtn = null;
+  teleRecBtn = null;
 
   cfg.macros.forEach((m, i)=>{
     const b = mkKey(m.label, "program", ()=>runMacro(m));
@@ -1266,8 +1281,10 @@ function buildControls(cfg){
     const b = mkKey(item.label, item.scene,
                     ()=> item.relay ? relayCall(item.relay + "/toggle") : toggleSource(item, b));
     b._item = item; toggleKeys.push(b); $("#scnVisBus").appendChild(b);
+    b.hidden = relayGated(item);
     if (item.relay === "pov") povVisBtn = b;
     if (item.relay === "telemetry") teleVisBtn = b;
+    if (item.relay === "telemetry/record") teleRecBtn = b;
   });
 
   buildGraphicBuses();
@@ -2035,6 +2052,36 @@ function carLabel(car){               // "Alfa Romeo 155 2.5 V6 TI '93 · Gr.4";
   return car.group && car.group !== "N" ? name + " · " + car.group : name;
 }
 
+function trackOf(tel){                 // an empty candidate list means no track
+  const t = tel && tel.track;
+  if (!t || (t.candidates && !(Array.isArray(t.candidates) && t.candidates.length))) return null;
+  return t;
+}
+
+function trackLabel(t){               // "Nürburgring - Grand Prix (reverse)"; text only
+  if (!t) return "";
+  if (t.candidates) return "?";
+  return [t.track, t.layout].filter(Boolean).join(" - ") + (t.reverse ? " (reverse)" : "");
+}
+
+// The REC key: red while recording, amber when the writer failed. `down` (relay
+// unreachable) drops that state but keeps the key where it is.
+function renderTeleRec(rec, down){
+  if (!teleRecBtn) return;
+  if (!down) teleRecBtn.hidden = !rec;
+  teleRecBtn.classList.toggle("air", !!(rec && rec.active && !rec.error));
+  teleRecBtn.classList.toggle("warn", !!(rec && rec.error));
+  teleRecBtn.title = down ? "relay unreachable"
+    : rec && rec.error ? "Recording stopped: " + rec.error
+    : rec && rec.file ? "Recording " + rec.file : "";
+  let cost = teleRecBtn.querySelector(".cost");
+  if (!cost){ cost = document.createElement("span"); cost.className = "cost";
+              teleRecBtn.appendChild(cost); }
+  cost.textContent = rec && rec.active && rec.elapsed_s != null
+    ? fmtDur(rec.elapsed_s) : "";
+  cost.hidden = !cost.textContent;
+}
+
 async function relayPoll(){
   try{
     const r = await fetch("/status", {cache:"no-store"});
@@ -2082,10 +2129,16 @@ async function relayPoll(){
       teleVisBtn.hidden = !d.telemetry;
       teleVisBtn.classList.toggle("on", !!(d.telemetry && d.telemetry.visible));
     }
+    renderTeleRec(d.telemetry && d.telemetry.record);
     const car = d.telemetry && d.telemetry.car;   // the GT7 car the driver is in (#713)
     $("#stCar").hidden = !car;
     $("#stCar b").textContent = carLabel(car);
     $("#stCar").title = carLabel(car);            // the full name where the strip truncates
+    const trk = trackOf(d.telemetry);              // recognised after the first full lap
+    $("#stTrack").hidden = !trk;
+    $("#stTrack b").textContent = trackLabel(trk);
+    $("#stTrack").title = trk && trk.candidates ? "Possible: " + trk.candidates.join(", ")
+                                                : trackLabel(trk);
     if (!solo){
       const lines = [healthLine("A", d.feeds.A), healthLine("B", d.feeds.B)];
       if (d.pov && d.pov.state !== "stopped") lines.push(healthLine("POV", d.pov));
@@ -2180,6 +2233,8 @@ async function relayPoll(){
     }
     $("#stHealth").title = "relay unreachable";
     $("#stCar").hidden = true;             // no stale car while the relay is down
+    $("#stTrack").hidden = true;
+    renderTeleRec(null, true);
     $("#feedHealth").innerHTML = "";
   }
 }

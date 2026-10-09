@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Stdlib checks for the racecast dispatcher routing. Run: python3 tests/test_racecast.py"""
-import contextlib, importlib.util, io, os, sys, tempfile, time
+import contextlib, importlib.util, io, json, os, sys, tempfile, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -259,6 +259,1027 @@ def t_sheet_url_cmd_prints_url(capsys=None):
         m._active_sheet_url, m._open_url = old_url, old_open
 
 
+def t_route_telemetry_verbs():
+    for verb in ("record", "list", "export", "delete"):
+        assert m.route(["telemetry", verb, "x"]) == \
+            {"kind": "service", "command": "telemetry", "verb": verb, "rest": ["x"]}
+    _raises(lambda: m.route(["telemetry"]))
+    _raises(lambda: m.route(["telemetry", "bogus"]))
+
+
+def t_route_gt7_data_verbs():
+    for verb in ("update", "status"):
+        assert m.route(["gt7-data", verb]) == \
+            {"kind": "service", "command": "gt7-data", "verb": verb, "rest": []}
+    _raises(lambda: m.route(["gt7-data"]))
+    _raises(lambda: m.route(["gt7-data", "bogus"]))
+
+
+@contextlib.contextmanager
+def _fake_gt7_data(fake):
+    real = m._gt7_data_module
+    m._gt7_data_module = lambda: fake
+    try:
+        yield
+    finally:
+        m._gt7_data_module = real
+
+
+def t_gt7_data_update_data_forces_and_never_raises():
+    seen = []
+
+    class Fake:
+        @staticmethod
+        def update(base, force=False):
+            seen.append(force)
+            return {"checked": True, "changed": True, "files": {"cars.csv": "updated"}}
+
+        @staticmethod
+        def status(base, bundled=None):
+            raise RuntimeError("disk")
+
+    with _fake_gt7_data(Fake):
+        assert m.gt7_data_update_data()["ok"] is True and seen == [True]
+        assert m.gt7_data_status_data() == {"ok": False,
+                                            "error": "could not read GT7 data: RuntimeError"}
+
+
+def t_gt7_data_update_data_maps_errors():
+    class AllFailed:
+        @staticmethod
+        def update(base, force=False):
+            return {"checked": True, "changed": False, "files": {"cars.csv": "error: offline"}}
+
+    class Boom:
+        @staticmethod
+        def update(base, force=False):
+            raise RuntimeError("disk")
+
+    with _fake_gt7_data(AllFailed):
+        assert m.gt7_data_update_data()["ok"] is False, "every file failed -> not ok"
+    with _fake_gt7_data(Boom):
+        assert m.gt7_data_update_data() == {"ok": False,
+                                            "error": "could not update GT7 data: RuntimeError"}
+
+
+def t_gt7_data_wrappers_name_no_runtime_path():
+    where = os.path.join(os.sep, "home", "producer", "runtime", "gt7")
+
+    class Locked:
+        @staticmethod
+        def update(base, force=False):
+            raise PermissionError(13, "Permission denied", where)
+
+        @staticmethod
+        def status(base, bundled=None):
+            raise RuntimeError(f"cannot read {where}")
+
+    with _fake_gt7_data(Locked):
+        up, st = m.gt7_data_update_data(), m.gt7_data_status_data()
+    assert up["error"] == "could not update GT7 data: Permission denied", up
+    assert where not in st["error"] and st["ok"] is False, st
+
+
+def t_gt7_data_status_cmd_names_missing_signatures():
+    class Fake:
+        @staticmethod
+        def status(base, bundled=None):
+            return {"checked": None, "files": {
+                "cars.csv": {"source": "bundled", "updated": None, "rows": 500},
+                "signatures.json": {"source": "missing", "updated": None, "rows": None}}}
+
+    out = io.StringIO()
+    with _fake_gt7_data(Fake), contextlib.redirect_stdout(out):
+        m.gt7_data_status_cmd([])
+    text = out.getvalue()
+    assert "last check: never" in text, text
+    assert "cars.csv: bundled, 500 rows" in text, text
+    assert "signatures.json: not downloaded yet" in text and "gt7-data update" in text, text
+
+
+def t_gt7_data_update_cmd_prints_files_and_fails_when_all_fail():
+    seen = []
+
+    class Fake:
+        files = {"cars.csv": "updated", "index.json": "unchanged"}
+
+        @classmethod
+        def update(cls, base, force=False):
+            seen.append(force)
+            return {"checked": True, "changed": True, "files": cls.files}
+
+    out = io.StringIO()
+    with _fake_gt7_data(Fake), contextlib.redirect_stdout(out):
+        m.gt7_data_update_cmd([])
+    assert "cars.csv: updated" in out.getvalue() and seen == [True], out.getvalue()
+    Fake.files = {"cars.csv": "error: offline"}
+    try:
+        with _fake_gt7_data(Fake), contextlib.redirect_stdout(io.StringIO()):
+            m.gt7_data_update_cmd([])
+    except SystemExit as e:
+        assert "failed" in str(e.code), e.code
+    else:
+        raise AssertionError("an update where every file failed must exit non-zero")
+    for flag in (["--bogus"], ["--force"]):
+        try:
+            m.gt7_data_update_cmd(flag)
+        except SystemExit as e:
+            assert "usage" in str(e.code), e.code
+        else:
+            raise AssertionError(f"{flag} must print usage: the update always forces")
+
+
+def _rec_dir_with_one(d):
+    import importlib
+    gr = importlib.import_module("gt7_recording")
+    w = gr.RecordingWriter(d, "Demo", "dev", flush_s=0.05)
+    b = bytearray(0x128)
+    b[0:4] = (0x47375330).to_bytes(4, "little")
+    w.put(1000.0, "A", bytes(b))
+    w.close()
+    return os.path.basename(w.path)
+
+
+def t_resolve_recording_by_name_stem_and_latest():
+    with tempfile.TemporaryDirectory() as d:
+        name = _rec_dir_with_one(d)
+        stem = name[:-len(".gt7rec")]
+        for q in (name, stem, "latest"):
+            assert os.path.basename(m._resolve_recording(d, q)) == name, q
+        try:
+            m._resolve_recording(d, "nope"); raise AssertionError("unknown accepted")
+        except SystemExit as e:
+            assert "no recording" in str(e)
+
+
+def t_resolve_recording_latest_picks_by_started_time_not_name_sort():
+    import importlib
+    gr = importlib.import_module("gt7_recording")
+    with tempfile.TemporaryDirectory() as d:
+        ts = 1760000000.0
+        b = bytearray(0x128)
+        b[0:4] = (0x47375330).to_bytes(4, "little")
+        w1 = gr.RecordingWriter(d, "Demo", "dev", flush_s=0.05)
+        w1.put(ts, "A", bytes(b))
+        w1.close()
+        w2 = gr.RecordingWriter(d, "Demo", "dev", flush_s=0.05)
+        w2.put(ts, "A", bytes(b))
+        w2.close()
+        assert "-2" in os.path.basename(w2.path) and "-2" not in os.path.basename(w1.path)
+        assert os.path.basename(w2.path) < os.path.basename(w1.path), "sanity: name order is reversed"
+        os.utime(w1.path, (ts, ts))             # distinct mtimes on any filesystem
+        os.utime(w2.path, (ts + 10, ts + 10))
+        assert m._resolve_recording(d, "latest") == w2.path, \
+            "latest is the later of two same-second recordings, though its -2 name sorts first"
+
+
+def _stub_telemetry_cli(d, status, running="", active="demo", http_ok=True):
+    """Point the telemetry commands at rec dir d and a fake relay; returns a restore callable."""
+    saved = (m._telemetry_rec_dir, m._relay_record_status, m._relay_record_call,
+             m._running_relay_profile, m._active_profile_name, m._relay_http_ok)
+    calls = []
+    m._telemetry_rec_dir = lambda: d
+    m._relay_record_status = lambda: status
+    m._relay_record_call = lambda verb: calls.append(verb) or status
+    m._running_relay_profile = lambda: running
+    m._active_profile_name = lambda: active
+    m._relay_http_ok = lambda: http_ok
+
+    def restore():
+        (m._telemetry_rec_dir, m._relay_record_status, m._relay_record_call,
+         m._running_relay_profile, m._active_profile_name, m._relay_http_ok) = saved
+    restore.calls = calls
+    return restore
+
+
+def t_telemetry_delete_refuses_the_open_file():
+    with tempfile.TemporaryDirectory() as d:
+        name = _rec_dir_with_one(d)
+        restore = _stub_telemetry_cli(d, {"active": True, "file": name}, running="demo")
+        try:
+            try:
+                m.telemetry_delete_cmd([name]); raise AssertionError("open file deleted")
+            except SystemExit as e:
+                assert "currently recording" in str(e)
+            m._relay_record_status = lambda: None
+            m.telemetry_delete_cmd([name])
+            assert not os.path.exists(os.path.join(d, name))
+        finally:
+            restore()
+
+
+def t_telemetry_delete_reports_os_errors():
+    with tempfile.TemporaryDirectory() as d:
+        name = _rec_dir_with_one(d)
+        os.makedirs(os.path.join(d, name[:-len(".gt7rec")]))      # an export folder
+        restore = _stub_telemetry_cli(d, None)
+        real_remove, real_rmtree = m.os.remove, m.shutil.rmtree
+
+        def locked(*_a, **_k):
+            raise PermissionError(13, "Permission denied", os.path.join(d, name))
+        try:
+            for target in ("remove", "rmtree"):
+                if target == "remove":
+                    m.os.remove = locked
+                else:
+                    m.os.remove, m.shutil.rmtree = real_remove, locked
+                try:
+                    m.telemetry_delete_cmd([name]); raise AssertionError(f"{target} error swallowed")
+                except SystemExit as e:
+                    assert str(e) == f"could not delete {name}: Permission denied", \
+                        f"a failed {target} must exit with a short message, not a traceback: {e}"
+        finally:
+            m.os.remove, m.shutil.rmtree = real_remove, real_rmtree
+            restore()
+
+
+def t_telemetry_record_refuses_a_relay_on_another_profile():
+    restore = _stub_telemetry_cli("unused", {"active": True, "file": None},
+                                  running="other-league", active="demo")
+    try:
+        for verb in ("start", "stop", "status"):
+            try:
+                m.telemetry_record_cmd([verb]); raise AssertionError(f"{verb} accepted")
+            except SystemExit as e:
+                assert "other-league" in str(e), f"the refusal must name the running profile: {e}"
+        assert restore.calls == [], f"no request may reach the foreign relay: {restore.calls}"
+    finally:
+        restore()
+
+
+def t_telemetry_list_ignores_the_open_file_of_a_relay_on_another_profile():
+    with tempfile.TemporaryDirectory() as d:
+        name = _rec_dir_with_one(d)
+        restore = _stub_telemetry_cli(d, {"active": True, "file": name},
+                                      running="other-league", active="demo")
+        out = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out):
+                m.telemetry_list_cmd([])
+        finally:
+            restore()
+        text = out.getvalue()
+        assert "recording" not in text.split("\n")[0], \
+            f"another profile's open file must not mark this profile's recording: {text}"
+        assert "other-league" in text, f"list must say the relay runs another profile: {text}"
+
+
+def t_telemetry_delete_ignores_the_open_file_of_a_relay_on_another_profile():
+    with tempfile.TemporaryDirectory() as d:
+        name = _rec_dir_with_one(d)
+        restore = _stub_telemetry_cli(d, {"active": True, "file": name},
+                                      running="other-league", active="demo")
+        try:
+            m.telemetry_delete_cmd([name])
+        finally:
+            restore()
+        assert not os.path.exists(os.path.join(d, name)), \
+            "a relay on another profile does not hold this profile's file open"
+
+
+def t_telemetry_export_writes_next_to_recording():
+    with tempfile.TemporaryDirectory() as d:
+        name = _rec_dir_with_one(d)
+        real = m._telemetry_rec_dir
+        m._telemetry_rec_dir = lambda: d
+        try:
+            m.telemetry_export_cmd(["latest"])
+        finally:
+            m._telemetry_rec_dir = real
+        out = os.path.join(d, name[:-len(".gt7rec")])
+        assert os.path.exists(os.path.join(out, "samples.csv"))
+        assert os.path.exists(os.path.join(out, "laps.csv"))
+        with open(os.path.join(out, "laps.csv"), encoding="utf-8") as fh:
+            assert fh.readline().rstrip().endswith(",track,layout")
+
+
+def t_telemetry_export_failure_exits_with_a_clean_message():
+    import struct
+    import gt7_recording
+    with tempfile.TemporaryDirectory() as d:
+        name = _rec_dir_with_one(d)
+        real_dir, real_export = m._telemetry_rec_dir, gt7_recording.export_csv
+        m._telemetry_rec_dir = lambda: d
+        try:
+            for exc in (OSError(28, "No space left on device", os.path.join(d, "out")),
+                        struct.error("unpack requires a buffer of 4 bytes"),
+                        gt7_recording.RecordingError(os.path.join(d, name), "truncated header"),
+                        gt7_recording.RecordingError(os.path.join(d, name))):
+                def boom(*_a, _exc=exc, **_k):
+                    raise _exc
+                gt7_recording.export_csv = boom
+                try:
+                    m.telemetry_export_cmd([name])
+                    raise AssertionError("a failed export must exit non-zero")
+                except SystemExit as e:
+                    msg = str(e.code)
+                assert d not in msg and msg.startswith("could not export"), msg
+                stem = os.path.splitext(name)[0]
+                assert msg.count(stem) == 1, f"the recording is named once: {msg}"
+        finally:
+            m._telemetry_rec_dir, gt7_recording.export_csv = real_dir, real_export
+
+
+def t_telemetry_record_without_relay_exits_nonzero():
+    real = m._relay_record_call
+    m._relay_record_call = lambda verb: None
+    try:
+        m.telemetry_record_cmd(["start"]); raise AssertionError("no error without relay")
+    except SystemExit as e:
+        assert e.code not in (0, None)
+    finally:
+        m._relay_record_call = real
+
+
+@contextlib.contextmanager
+def _telemetry_sandbox(fake_dbs=True):
+    """A profile 'solo' with an empty recordings dir and no relay; fake track and car
+    tables unless fake_dbs is False."""
+    import test_gt7_laps as tgl
+    saved = (m._telemetry_rec_dir, m._runtime_base_dir, m._active_profile_name,
+             m._telemetry_dbs, m._relay_record_status, m._running_relay_profile)
+    with tempfile.TemporaryDirectory() as td:
+        rec_dir = os.path.join(td, "runtime", "solo", "telemetry-recordings")
+        os.makedirs(rec_dir)
+        m._telemetry_rec_dir = lambda: rec_dir
+        m._runtime_base_dir = lambda: os.path.join(td, "runtime")
+        m._active_profile_name = lambda: "solo"
+        m._relay_record_status = lambda: None
+        m._running_relay_profile = lambda: ""
+        if fake_dbs:
+            m._telemetry_dbs = lambda: (tgl.FakeTracks(), tgl.FakeCars())
+        m._TELEMETRY_MEMO.clear()
+        try:
+            yield rec_dir, tgl
+        finally:
+            m._TELEMETRY_MEMO.clear()
+            (m._telemetry_rec_dir, m._runtime_base_dir, m._active_profile_name,
+             m._telemetry_dbs, m._relay_record_status, m._running_relay_profile) = saved
+
+
+def _stem(path):
+    return os.path.basename(path)[:-len(".gt7rec")]
+
+
+def t_find_recording_accepts_only_names_in_the_dir():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        path = tgl.write_circle_recording(rec_dir)
+        for q in (_stem(path), _stem(path) + ".gt7rec"):
+            assert m._find_recording(rec_dir, q) == path, q
+        for bad in ("", ".", "..", "../" + _stem(path), os.path.join("..", _stem(path)),
+                    "nope", None):
+            assert m._find_recording(rec_dir, bad) is None, bad
+
+
+def t_telemetry_track_key_needs_a_profile():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        path = tgl.write_circle_recording(rec_dir)
+        assert m._telemetry_track_key(path) == f"solo/{_stem(path)}"
+        m._active_profile_name = lambda: None
+        assert m._telemetry_track_key(path) is None, "never 'None/<stem>'"
+        assert m.telemetry_learn_data(_stem(path), "ring01") == {
+            "ok": False, "error": "no active profile"}
+
+
+def t_telemetry_recordings_data_newest_first_with_cached_track():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        old = tgl.write_circle_recording(rec_dir)
+        new = tgl.write_circle_recording(rec_dir, t0=1_700_007_200.0)
+        d = m.telemetry_recordings_data()
+        assert d["ok"] and [r["name"] for r in d["recordings"]] == \
+            [os.path.basename(new), os.path.basename(old)]
+        top = d["recordings"][0]
+        assert top["indexed"] is False and top["track"] is None and top["laps"] is None
+        assert top["recording"] is False and "path" not in top, "machine paths stay server-side"
+        m.telemetry_laps_data(rec=top["rec"])
+        top = m.telemetry_recordings_data()["recordings"][0]
+        assert top["indexed"] is True and top["track"]["id"] == "ring01" and top["laps"] == 4
+
+
+def t_telemetry_recordings_data_marks_the_file_the_relay_writes():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        old = tgl.write_circle_recording(rec_dir)
+        new = tgl.write_circle_recording(rec_dir, t0=1_700_007_200.0)
+        m._relay_record_status = lambda: {"active": True, "file": os.path.basename(new)}
+        rows = m.telemetry_recordings_data()["recordings"]
+        assert [r["recording"] for r in rows] == [True, False], \
+            f"only {os.path.basename(new)} is being written, not {os.path.basename(old)}"
+
+
+def t_telemetry_laps_data_for_a_recording_and_the_pool():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        a = tgl.write_circle_recording(rec_dir)
+        tgl.write_circle_recording(rec_dir, lap_secs=(20.0, 19.0, 18.0), t0=1_700_007_200.0)
+        d = m.telemetry_laps_data(rec=_stem(a))
+        assert d["ok"] and d["recording"]["rec"] == _stem(a) and len(d["laps"]) == 4
+        assert d["recording"]["start_ts"] == 1_700_000_000.0
+        assert "trace" not in d["laps"][0] and "points" not in d["laps"][0]
+        p = m.telemetry_laps_data(track="ring01", car=str(tgl.CAR))
+        assert p["ok"] and [lap["time_s"] for lap in p["laps"]] == [16.0, 18.0, 19.0, 20.0, 20.0]
+        assert "reference" not in p, "the page picks lap A itself"
+        assert p["best_sectors"] == [3.2, 3.2, 3.2, 3.2, 3.2], p["best_sectors"]
+        assert p["theoretical_best"] == 16.0, "the 16 s lap owns every sector up to the line"
+        assert m.telemetry_laps_data(track="", car=str(tgl.CAR))["ok"] is False, \
+            "an unknown track compares only within one session"
+        mine = m.telemetry_laps_data(rec=_stem(a), session="1", track="", car=str(tgl.CAR))
+        assert mine["ok"] and mine["laps"] == [], "every lap of this recording has a track"
+        assert m.telemetry_laps_data(rec="../etc")["ok"] is False
+        assert m.telemetry_laps_data(track="ring01", car="x") == {
+            "ok": False, "error": "car and session must be numbers"}
+
+
+def t_telemetry_pool_without_build_reads_only_cached_indexes():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        import gt7_laps
+        a = tgl.write_circle_recording(rec_dir)
+        b = tgl.write_circle_recording(rec_dir, lap_secs=(20.0, 19.0, 18.0), t0=1_700_007_200.0)
+        m.telemetry_laps_data(rec=_stem(a))
+        p = m.telemetry_laps_data(track="ring01", car=str(tgl.CAR), build=False)
+        assert p["ok"] and p["unindexed"] == 1, p
+        assert p.get("data_version") == m._telemetry_data_version(), \
+            f"a pool names the data version it checked against: {p}"
+        assert {lap["rec"] for lap in p["laps"]} == {_stem(a)}, "only the cached recording pools"
+        assert gt7_laps.cached(b, m._runtime_base_dir()) is None, "the pool request built b"
+        own = m.telemetry_laps_data(rec=_stem(a), session="1", track="", car=str(tgl.CAR),
+                                    build=False)
+        assert own["unindexed"] == 0, "an unknown-track pool needs only its own recording"
+        full = m.telemetry_laps_data(track="ring01", car=str(tgl.CAR))
+        assert full["unindexed"] == 0 and len(full["laps"]) == 5, full
+
+
+def t_telemetry_index_cmd_builds_what_the_pool_lacks():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        a = tgl.write_circle_recording(rec_dir)
+        b = tgl.write_circle_recording(rec_dir, lap_secs=(20.0, 19.0, 18.0), t0=1_700_007_200.0)
+        m._relay_record_status = lambda: {"active": True, "file": os.path.basename(b)}
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            m.telemetry_index_cmd([])
+        m._TELEMETRY_MEMO.clear()
+        text = out.getvalue()
+        assert f"{_stem(a)}: 4 laps" in text and _stem(b) not in text, \
+            f"every closed recording is indexed, the open one skipped: {text}"
+        p = m.telemetry_laps_data(track="ring01", car=str(tgl.CAR), build=False)
+        assert p["unindexed"] == 0, p
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            m.telemetry_index_cmd([])
+        assert "0 recording(s) indexed" in out.getvalue(), out.getvalue()
+
+
+def t_telemetry_index_cmd_names_a_failed_recording_once():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        import gt7_recording
+        stem = _stem(tgl.write_circle_recording(rec_dir))
+
+        def broken(path, dbs=None, stamp=None):
+            raise gt7_recording.RecordingError(f"{path}: damaged", reason="bad header")
+        real, m._telemetry_index = m._telemetry_index, broken
+        out = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out):
+                try:
+                    m.telemetry_index_cmd([])
+                except SystemExit as e:
+                    assert e.code == 1, e.code
+        finally:
+            m._telemetry_index = real
+        line = out.getvalue().splitlines()[0]
+        assert line == f"{stem}: not indexed (bad header)", line
+
+
+def t_telemetry_index_cmd_ends_with_every_failed_recording():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        import gt7_recording
+        good = _stem(tgl.write_circle_recording(rec_dir))
+        bad = [_stem(tgl.write_circle_recording(rec_dir, t0=1_700_007_200.0 + 3600 * k, n=40))
+               for k in range(2)]
+        real = m._telemetry_index
+
+        def some_broken(path, dbs=None, stamp=None):
+            if _stem(path) in bad:
+                raise gt7_recording.RecordingError(f"{path}: damaged", reason="bad header")
+            return real(path, dbs, stamp)
+        m._telemetry_index = some_broken
+        out = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out):
+                try:
+                    m.telemetry_index_cmd([])
+                except SystemExit as e:
+                    assert e.code == 1, e.code
+        finally:
+            m._telemetry_index = real
+        last = out.getvalue().splitlines()[-1]
+        assert last == f"1 recording(s) indexed, 2 failed: {bad[0]}, {bad[1]}", \
+            f"the last line names every failed recording, {good} is not one: {last}"
+
+
+def _requests_without_build(stem, tid):
+    return [m.telemetry_laps_data(rec=stem, build=False),
+            m.telemetry_lap_data(stem, "1", "3", build=False),
+            m.telemetry_learn_data(stem, tid, build=False)]
+
+
+def t_telemetry_requests_never_build_a_lap_index():
+    import gt7_laps
+    with _telemetry_sandbox(fake_dbs=False) as (rec_dir, tgl):
+        path = tgl.write_circle_recording(rec_dir)
+        stem, cache = _stem(path), os.path.join(rec_dir, _stem(path) + ".laps.json")
+        tid = m._telemetry_dbs()[0].layouts()[0]["id"]
+        real = gt7_laps.index
+
+        def no_replay(*_a, **_k):
+            raise AssertionError("a request replayed the recording")
+        gt7_laps.index = no_replay
+        try:
+            answers = _requests_without_build(stem, tid)
+        finally:
+            gt7_laps.index = real
+        want = {"ok": True, "unindexed": 1,
+                "note": f"{stem} has no lap index yet: racecast telemetry index builds it",
+                "data_version": m._telemetry_data_version()}
+        assert answers == [want] * 3, f"each request answers unindexed: {answers}"
+        assert not os.path.exists(cache), "a request wrote a lap index"
+        with contextlib.redirect_stdout(io.StringIO()):
+            m.telemetry_index_cmd([])
+        assert os.path.exists(cache), "the CLI index command still builds"
+        laps, lap, learn = _requests_without_build(stem, tid)
+        assert laps["ok"] and len(laps["laps"]) == 4 and "unindexed" not in laps, laps
+        assert lap["ok"] and lap["lap"]["trace"], lap
+        assert learn["ok"] and learn["learned"] is True, learn
+
+
+def t_telemetry_requests_after_a_set_track_do_not_rebuild():
+    with _telemetry_sandbox(fake_dbs=False) as (rec_dir, tgl):
+        path = tgl.write_circle_recording(rec_dir)
+        stem, cache = _stem(path), os.path.join(rec_dir, _stem(path) + ".laps.json")
+        tid = m._telemetry_dbs()[0].layouts()[0]["id"]
+        assert m.telemetry_learn_data(stem, tid)["ok"], "the default form still builds"
+        mtime = os.stat(cache).st_mtime_ns
+        answers = _requests_without_build(stem, tid)
+        assert [a.get("unindexed") for a in answers] == [1, 1, 1], \
+            f"a Set track makes the index stale and no request rebuilds it: {answers}"
+        assert {a.get("data_version") for a in answers} == {m._telemetry_data_version()}, \
+            f"each answer names the data version it checked against: {answers}"
+        assert os.stat(cache).st_mtime_ns == mtime, "a request rewrote the stale index"
+
+
+def t_telemetry_requests_check_the_recording_before_the_index():
+    with _telemetry_sandbox(fake_dbs=False) as (rec_dir, tgl):
+        tid = m._telemetry_dbs()[0].layouts()[0]["id"]
+        for d in _requests_without_build("nope", tid):
+            assert d == {"ok": False, "error": "no recording named 'nope'"}, d
+        path = tgl.write_circle_recording(rec_dir)
+        m._relay_record_status = lambda: {"active": True, "file": os.path.basename(path)}
+        for d in _requests_without_build(_stem(path), tid):
+            assert d == {"ok": False, "error": "recording in progress: stop the recording "
+                                               "to analyse it"}, d
+
+
+def t_report_read_data_serves_only_written_reports():
+    with tempfile.TemporaryDirectory() as td:
+        real = m._reports_dir
+        m._reports_dir = lambda: td
+        try:
+            with open(os.path.join(td, "Event 2026-10-09.html"), "w", encoding="utf-8") as fh:
+                fh.write("<p>r</p>")
+            with open(os.path.join(td, "notes.txt"), "w", encoding="utf-8") as fh:
+                fh.write("x")
+            d = m.report_read_data("Event 2026-10-09.html")
+            assert d == {"ok": True, "path": os.path.join(td, "Event 2026-10-09.html"),
+                         "html": "<p>r</p>"}, d
+            for bad in ("notes.txt", "../Event 2026-10-09.html", "missing.html", "", None):
+                d = m.report_read_data(bad)
+                assert d["ok"] is False and td not in d["error"], (bad, d)
+        finally:
+            m._reports_dir = real
+
+
+def t_report_telemetry_still_builds_the_lap_index():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        path = tgl.write_circle_recording(rec_dir)
+        cache = os.path.join(rec_dir, _stem(path) + ".laps.json")
+        real = m._profile_has_telemetry
+        m._profile_has_telemetry = lambda: True
+        try:
+            block = m._report_telemetry(1_699_999_000.0, 1_700_001_000.0)
+        finally:
+            m._profile_has_telemetry = real
+        assert block is not None and os.path.exists(cache), \
+            "the CLI and event-stop report build the index they need"
+
+
+def t_telemetry_list_counts_laps_from_the_cache():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        import gt7_recording as gr
+        a = tgl.write_circle_recording(rec_dir)
+        b = tgl.write_circle_recording(rec_dir, lap_secs=(20.0, 19.0, 18.0), t0=1_700_007_200.0)
+        m.telemetry_laps_data(rec=_stem(a))
+        replayed = []
+        real = gr.replay_counts
+        gr.replay_counts = lambda path: replayed.append(os.path.basename(path)) or real(path)
+        out = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out):
+                m.telemetry_list_cmd([])
+        finally:
+            gr.replay_counts = real
+        lines = out.getvalue().splitlines()
+        assert replayed == [os.path.basename(b)], f"a cached recording is not replayed: {replayed}"
+        assert "   4 laps" in lines[0] and "   3 laps" in lines[1], lines
+
+
+def t_telemetry_laps_data_names_a_broken_recording_without_its_path():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        import gt7_recording
+        stem = _stem(tgl.write_circle_recording(rec_dir))
+        real = m._telemetry_index
+
+        def broken(path, dbs=None):
+            raise gt7_recording.RecordingError(f"{path}: damaged")
+        m._telemetry_index = broken
+        try:
+            d = m.telemetry_laps_data(rec=stem)
+        finally:
+            m._telemetry_index = real
+        assert d["ok"] is False and rec_dir not in d["error"], d
+
+
+def t_telemetry_lap_data_returns_the_trace():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        stem = _stem(tgl.write_circle_recording(rec_dir))
+        d = m.telemetry_lap_data(stem, "1", "3")
+        assert d["ok"] and d["lap"]["lap"] == 3 and d["lap"]["trace"][0]["d"] == 0.0
+        assert (d["step_m"], d["sector_m"]) == (5.0, 200.0) and "points" not in d["lap"]
+        assert m.telemetry_lap_data(stem, "1", "99")["ok"] is False
+        assert m.telemetry_lap_data(stem, "x", "3")["ok"] is False
+        assert m.telemetry_lap_data(stem, None, "3")["ok"] is False
+
+
+def t_telemetry_lap_data_refuses_the_open_file():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        path = tgl.write_circle_recording(rec_dir)
+        m._relay_record_status = lambda: {"active": True, "file": os.path.basename(path)}
+        assert m.telemetry_lap_data(_stem(path), "1", "3") == {
+            "ok": False, "error": "recording in progress: stop the recording to analyse it"}
+
+
+def t_telemetry_index_is_memoised_until_the_file_or_the_data_change():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        path = tgl.write_circle_recording(rec_dir)
+        first = m._telemetry_index(path)
+        assert m._telemetry_index(path) is first, "an unchanged recording is not read again"
+        with open(path, "ab") as fh:
+            fh.write(b"\x00")
+        second = m._telemetry_index(path)
+        assert second is not first, "a grown recording is read again"
+        os.makedirs(os.path.join(m._runtime_base_dir(), "gt7"))
+        with open(os.path.join(m._runtime_base_dir(), "gt7", "learned-tracks.json"), "w",
+                  encoding="utf-8") as fh:
+            fh.write("{}")
+        assert m._telemetry_index(path) is not second, "a learned track is read again"
+        assert m.TELEMETRY_MEMO_MAX >= 4096, "a list scan of every recording must fit the memo"
+        real_max, m.TELEMETRY_MEMO_MAX = m.TELEMETRY_MEMO_MAX, 3
+        try:
+            for k in range(m.TELEMETRY_MEMO_MAX + 1):
+                m._telemetry_index(tgl.write_circle_recording(
+                    rec_dir, t0=1_700_007_200.0 + 3600 * k, n=40))
+            assert len(m._TELEMETRY_MEMO) == m.TELEMETRY_MEMO_MAX, "the memo stays bounded"
+        finally:
+            m.TELEMETRY_MEMO_MAX = real_max
+        assert path not in m._TELEMETRY_MEMO, "the least recently used index goes first"
+
+
+def t_telemetry_tracks_data_lists_layouts():
+    with _telemetry_sandbox():
+        d = m.telemetry_tracks_data()
+        assert d == {"ok": True, "tracks": [{"id": "ring01", "track": "Test Ring",
+                                             "layout": "Full", "reverse": False}]}
+
+
+def t_telemetry_learn_data_records_the_assignment():
+    import gt7_tracks
+    with _telemetry_sandbox(fake_dbs=False) as (rec_dir, tgl):
+        stem = _stem(tgl.write_circle_recording(rec_dir))
+        base, bundled = m._runtime_base_dir(), m.resource_path("assets/gt7")
+        tid = gt7_tracks.TrackDB.load(base, bundled).layouts()[0]["id"]
+        assert m.telemetry_learn_data(stem, "no-such-layout")["ok"] is False
+        assert m.telemetry_learn_data("nope", tid)["ok"] is False
+        d = m.telemetry_learn_data(stem, tid)
+        assert d["ok"] and d["track"]["id"] == tid and d["learned"] is True, d
+        assert gt7_tracks.TrackDB.load(base, bundled).assignment(f"solo/{stem}") == tid
+        laps = m.telemetry_laps_data(rec=stem)["laps"]
+        assert {lap["track_id"] for lap in laps} == {tid}, "the assignment wins for every session"
+
+
+def t_telemetry_learn_data_keeps_a_downloaded_line():
+    import gt7_data, gt7_tracks
+    with _telemetry_sandbox(fake_dbs=False) as (rec_dir, tgl):
+        stem = _stem(tgl.write_circle_recording(rec_dir))
+        base, bundled = m._runtime_base_dir(), m.resource_path("assets/gt7")
+        cars = m._telemetry_dbs()[1]
+        tid = gt7_tracks.TrackDB.load(base, bundled).layouts()[0]["id"]
+        sig = os.path.join(base, "signatures.json")
+        os.makedirs(base, exist_ok=True)
+        with open(sig, "w", encoding="utf-8") as fh:
+            json.dump({"signatures": [{"official_id": tid, "official_name": "X", "length_m": 19.0,
+                                       "min_x": 9000.0, "max_x": 9019.0, "min_z": 9000.0,
+                                       "max_z": 9000.0, "reverse": None, "ambiguous_with": [],
+                                       "flags": [],
+                                       "path": [[9000.0 + i, 9000.0] for i in range(20)]}]}, fh)
+
+        def db():
+            return gt7_tracks.TrackDB(os.path.join(bundled, "index.json"), sig,
+                                      gt7_data.learned_path(base))
+        m._telemetry_dbs = lambda: (db(), cars)
+        full = m._telemetry_full_index
+
+        def no_replay(*_a):
+            raise AssertionError("an assignment needs no lap index")
+        m._telemetry_full_index = no_replay
+        try:
+            d = m.telemetry_learn_data(stem, tid)
+        finally:
+            m._telemetry_full_index = full
+        assert d["ok"] and d["learned"] is False, f"only the recording is assigned: {d}"
+        assert db().assignment(f"solo/{stem}") == tid
+        assert abs(db().line_length(tid) - 38.0) < 0.5, f"the downloaded line stays: {db().line_length(tid)}"
+
+
+def t_telemetry_learn_data_hides_the_path_of_a_failed_write():
+    import gt7_tracks
+    with _telemetry_sandbox(fake_dbs=False) as (rec_dir, tgl):
+        stem = _stem(tgl.write_circle_recording(rec_dir))
+        real = gt7_tracks.TrackDB.learn
+
+        def locked(self, *_a, **_k):
+            raise PermissionError(13, "Permission denied", os.path.join(rec_dir, "x.json"))
+        gt7_tracks.TrackDB.learn = locked
+        try:
+            tid = m._telemetry_dbs()[0].layouts()[0]["id"]
+            d = m.telemetry_learn_data(stem, tid)
+        finally:
+            gt7_tracks.TrackDB.learn = real
+        assert d == {"ok": False, "error": "could not save the learned track: Permission denied"}, d
+
+
+def t_telemetry_learn_data_refuses_the_open_file():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        path = tgl.write_circle_recording(rec_dir)
+        m._relay_record_status = lambda: {"active": True, "file": os.path.basename(path)}
+        assert m.telemetry_learn_data(_stem(path), "ring01") == {
+            "ok": False, "error": "recording in progress: stop the recording to analyse it"}
+
+
+def t_telemetry_delete_removes_the_lap_index():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        path = tgl.write_circle_recording(rec_dir)
+        m.telemetry_laps_data(rec=_stem(path))
+        cache = os.path.join(rec_dir, _stem(path) + ".laps.json")
+        assert os.path.exists(cache) and path in m._TELEMETRY_MEMO
+        m.telemetry_delete_cmd([_stem(path)])
+        assert not os.path.exists(cache) and not os.path.exists(path)
+        assert path not in m._TELEMETRY_MEMO
+
+
+def t_telemetry_memo_holds_summaries_and_lap_data_the_full_trace():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        stem = _stem(tgl.write_circle_recording(rec_dir))
+        assert m.telemetry_laps_data(rec=stem)["ok"]
+        for _stamp, idx in m._TELEMETRY_MEMO.values():
+            assert all("trace" not in lap and "points" not in lap for lap in idx["laps"]), \
+                "the memo keeps no traces or points"
+        d = m.telemetry_lap_data(stem, "1", "3")
+        assert d["ok"] and len(d["lap"]["trace"]) > 100, "lap_data reads the full trace"
+        for _stamp, idx in m._TELEMETRY_MEMO.values():
+            assert all("trace" not in lap for lap in idx["laps"]), "lap_data never memoises a trace"
+        full = m._telemetry_full_index(m._find_recording(rec_dir, stem),
+                                       (tgl.FakeTracks(), tgl.FakeCars()))
+        assert all(lap["trace"] and "points" in lap for lap in full["laps"]), \
+            "the full index keeps every lap's trace and points"
+
+
+def t_telemetry_index_builds_once_under_concurrent_requests():
+    import threading
+    import gt7_laps
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        path = tgl.write_circle_recording(rec_dir, n=40)
+        real, calls, gate = gt7_laps.index, [], threading.Event()
+
+        def slow(*a, **k):
+            calls.append(1)
+            gate.wait(2.0)
+            return real(*a, **k)
+        gt7_laps.index = slow
+        out = []
+        try:
+            threads = [threading.Thread(target=lambda: out.append(m._telemetry_index(path)))
+                       for _ in range(2)]
+            for t in threads:
+                t.start()
+            time.sleep(0.2)
+            gate.set()
+            for t in threads:
+                t.join()
+        finally:
+            gt7_laps.index = real
+        assert len(calls) == 1, f"two requests built the index {len(calls)} times"
+        assert len(out) == 2 and out[0] is out[1], "both requests get the one memo entry"
+
+
+def t_telemetry_data_functions_catch_any_error_without_paths():
+    import struct
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        stem = _stem(tgl.write_circle_recording(rec_dir))
+        real_index, real_full = m._telemetry_index, m._telemetry_full_index
+        for exc in (struct.error("unpack requires a buffer of 4 bytes"),
+                    RuntimeError(f"broken file {os.path.join(rec_dir, stem)}.gt7rec"),
+                    KeyError(rec_dir)):
+            def boom(path, dbs=None, _exc=exc, **_k):
+                raise _exc
+            m._telemetry_index = m._telemetry_full_index = boom
+            try:
+                results = [m.telemetry_laps_data(rec=stem),
+                           m.telemetry_laps_data(track="ring01", car=str(tgl.CAR)),
+                           m.telemetry_lap_data(stem, "1", "3"),
+                           m.telemetry_learn_data(stem, "ring01")]
+            finally:
+                m._telemetry_index, m._telemetry_full_index = real_index, real_full
+            for d in results[:1] + results[2:]:
+                assert d["ok"] is False and rec_dir not in d["error"], d
+            assert results[1]["ok"] and results[1]["laps"] == [], \
+                "one unreadable recording does not hide the pool"
+
+
+def t_telemetry_reason_keeps_the_path_free_reason_of_a_recording_error():
+    import gt7_recording
+    with tempfile.TemporaryDirectory() as td:
+        f = os.path.join(td, "new.gt7rec")
+        with open(f, "w", encoding="utf-8") as fh:
+            fh.write('{"format": "racecast-gt7rec", "version": 99}\n')
+        try:
+            gt7_recording.Recording(f)
+            raise AssertionError("a newer format must not be read")
+        except gt7_recording.RecordingError as e:
+            text = m._telemetry_reason(e, "new.gt7rec")
+        assert td not in text and "update racecast" in text and "new.gt7rec" in text, text
+
+
+def t_telemetry_full_index_reads_a_stale_cache_once():
+    import gt7_laps
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        path = tgl.write_circle_recording(rec_dir)
+        m._telemetry_full_index(path)
+        with open(path, "ab") as fh:
+            fh.write(b"\x00")                       # grown: the cache is stale now
+        loads, real = [], gt7_laps._load_cache
+        gt7_laps._load_cache = lambda p: loads.append(p) or real(p)
+        try:
+            assert m._telemetry_full_index(path)["laps"]
+        finally:
+            gt7_laps._load_cache = real
+        assert len(loads) == 1, f"one read of the stale cache per index: {len(loads)}"
+
+
+def t_telemetry_reason_names_no_path():
+    import gt7_recording
+    with tempfile.TemporaryDirectory() as td:
+        f = os.path.join(td, "a.gt7rec")
+        assert m._telemetry_reason(PermissionError(13, "Permission denied", f)) == \
+            "Permission denied"
+        assert m._telemetry_reason(gt7_recording.RecordingError(f"{f}: bad"), "a") == \
+            "a is not a readable recording"
+        assert m._telemetry_reason(ValueError("need 10 points")) == "need 10 points", \
+            "our own ValueError texts pass through"
+        assert m._telemetry_reason(RuntimeError(f"broken {f}")) == "RuntimeError", \
+            "an unexpected error shows only its type"
+
+
+def t_telemetry_laps_data_returns_copies_of_the_memo():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        stem = _stem(tgl.write_circle_recording(rec_dir))
+        d = m.telemetry_laps_data(rec=stem)
+        d["laps"][0]["time_s"] = -1.0
+        p = m.telemetry_laps_data(track="ring01", car=str(tgl.CAR))
+        p["laps"][0]["time_s"] = -1.0
+        assert m.telemetry_laps_data(rec=stem)["laps"][0]["time_s"] != -1.0, \
+            "a caller editing a lap leaves the memo intact"
+        again = m.telemetry_laps_data(track="ring01", car=str(tgl.CAR))
+        assert again["laps"][0]["time_s"] == 16.0
+
+
+def t_telemetry_memo_holds_more_recordings_than_a_list_scans():
+    import gt7_laps
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        for k in range(10):
+            tgl.write_circle_recording(rec_dir, t0=1_700_000_000.0 + 3600 * k, n=40)
+        rows = m.telemetry_recordings_data()["recordings"]
+        for r in rows:
+            m.telemetry_laps_data(rec=r["rec"])
+        real, reads = gt7_laps.cached, []
+        gt7_laps.cached = lambda *a, **k: reads.append(1) or real(*a, **k)
+        try:
+            for _ in range(2):
+                m.telemetry_recordings_data()
+                for r in rows:
+                    m.telemetry_laps_data(rec=r["rec"])
+                m.telemetry_laps_data(track="ring01", car=str(tgl.CAR))
+        finally:
+            gt7_laps.cached = real
+        assert reads == [], f"{len(reads)} cache-file reads for 10 memoised recordings"
+
+
+def t_telemetry_pool_loads_the_track_data_only_for_a_stale_cache():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        paths = [tgl.write_circle_recording(rec_dir, t0=1_700_000_000.0 + 3600 * k, n=40)
+                 for k in range(3)]
+        m.telemetry_laps_data(track="ring01", car=str(tgl.CAR))
+        fake, calls = m._telemetry_dbs, []
+        m._telemetry_dbs = lambda: calls.append(1) or fake()
+        pool = lambda: m.telemetry_laps_data(track="ring01", car=str(tgl.CAR))
+        m._TELEMETRY_MEMO.clear()
+        assert pool()["ok"] and calls == [], "valid cache files need no track database"
+        for path in paths[:2]:
+            st = os.stat(path)
+            os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 10**9))
+        m._TELEMETRY_MEMO.clear()
+        assert len(pool()["laps"]) == 9 and calls == [1], \
+            f"two stale caches share one database load, not {len(calls)}"
+
+
+def t_telemetry_pool_and_list_skip_the_file_the_relay_writes():
+    import gt7_laps
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        a = tgl.write_circle_recording(rec_dir)
+        b = tgl.write_circle_recording(rec_dir, lap_secs=(20.0, 19.0, 18.0), t0=1_700_007_200.0)
+        m._relay_record_status = lambda: {"active": True, "file": os.path.basename(b)}
+        real_index, real_cached, touched = gt7_laps.index, gt7_laps.cached, []
+
+        def spy(fn):
+            return lambda path, *a, **k: touched.append(path) or fn(path, *a, **k)
+        gt7_laps.index, gt7_laps.cached = spy(real_index), spy(real_cached)
+        try:
+            p = m.telemetry_laps_data(track="ring01", car=str(tgl.CAR))
+            rows = m.telemetry_recordings_data()["recordings"]
+            assert b not in touched, "the pool and the list never index the open recording"
+            mine = m.telemetry_laps_data(rec=_stem(b))
+        finally:
+            gt7_laps.index, gt7_laps.cached = real_index, real_cached
+        assert [lap["time_s"] for lap in p["laps"]] == [16.0, 20.0, 20.0], p["laps"]
+        assert {lap["rec"] for lap in p["laps"]} == {_stem(a)}
+        top = rows[0]
+        assert top["recording"] is True and top["indexed"] is False and top["laps"] is None
+        assert mine == {"ok": False,
+                        "error": "recording in progress: stop the recording to analyse it"}, \
+            "the open recording is refused, not indexed cold"
+        assert b not in touched, "refusing the open recording still never indexes it"
+
+
+def t_telemetry_delete_reports_a_leftover_instead_of_failing():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        path = tgl.write_circle_recording(rec_dir, n=40)
+        m.telemetry_laps_data(rec=_stem(path))
+        real = m.os.remove
+
+        def remove(f):
+            if f.endswith(".laps.json"):
+                raise PermissionError(13, "Permission denied", f)
+            real(f)
+        m.os.remove = remove
+        out = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out):
+                m.telemetry_delete_cmd([_stem(path)])
+        finally:
+            m.os.remove = real
+        assert not os.path.exists(path)
+        text = out.getvalue()
+        assert "deleted" in text and _stem(path) + ".laps.json" in text \
+            and "Permission denied" in text, text
+
+
+def t_telemetry_delete_removes_an_interrupted_cache_write():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        path = tgl.write_circle_recording(rec_dir, n=40)
+        other = tgl.write_circle_recording(rec_dir, t0=1_700_007_200.0, n=40)
+        tmp = os.path.join(rec_dir, _stem(path) + ".laps-abc123.tmp")
+        keep = os.path.join(rec_dir, _stem(other) + ".laps-def456.tmp")
+        for f in (tmp, keep):
+            with open(f, "w", encoding="utf-8") as fh:
+                fh.write("{")
+        m.telemetry_delete_cmd([_stem(path)])
+        assert not os.path.exists(tmp), "the interrupted cache write goes with the recording"
+        assert os.path.exists(keep), "another recording's cache write stays"
+
+
+def t_control_center_wires_the_telemetry_routes():
+    with open(os.path.join(ROOT, "src", "racecast.py"), encoding="utf-8") as fh:
+        src = fh.read()
+    for key in ("recordings", "laps", "lap", "tracks", "learn"):
+        assert f'"telemetry_{key}": telemetry_{key}_data,' in src, key
+
+
 def t_route_obs_benchmark():
     action = m.route(["obs", "benchmark", "--window", "30"])
     assert action["command"] == "obs" and action["verb"] == "benchmark"
@@ -411,7 +1432,6 @@ def t_parse_env_text():
 
 
 def t_ensure_env_file_creates_once():
-    import tempfile
     with tempfile.TemporaryDirectory() as d:
         with open(os.path.join(d, ".env.example"), "w", encoding="utf-8") as fh:
             fh.write("RACECAST_SHEET_ID=\n")
@@ -431,7 +1451,6 @@ def t_ensure_env_file_creates_once():
 
 
 def t_cleanup_old_binary():
-    import tempfile
     with tempfile.TemporaryDirectory() as d:
         old = os.path.join(d, "racecast-old.exe")
         with open(old, "wb") as fh:
@@ -450,7 +1469,6 @@ def t_cleanup_old_binary_also_removes_ui():
     # install_ui renames a locked, running racecast-ui.exe aside to
     # racecast-ui-old.exe during a self-update; cleanup must sweep that too, not
     # only the main binary's racecast-old.exe.
-    import tempfile
     with tempfile.TemporaryDirectory() as d:
         ui_old = os.path.join(d, "racecast-ui-old.exe")
         with open(ui_old, "wb") as fh:
@@ -460,7 +1478,6 @@ def t_cleanup_old_binary_also_removes_ui():
 
 
 def t_ensure_example_profile_seeds_once():
-    import tempfile
     with tempfile.TemporaryDirectory() as d:
         bundled = os.path.join(d, "bundled-example")
         os.makedirs(bundled)
@@ -484,7 +1501,6 @@ def t_ensure_example_profile_seeds_once():
 
 
 def t_ensure_example_profile_without_bundle():
-    import tempfile
     with tempfile.TemporaryDirectory() as d:
         home = os.path.join(d, "home")
         os.makedirs(home)
@@ -494,14 +1510,12 @@ def t_ensure_example_profile_without_bundle():
 
 
 def t_ensure_env_file_without_template():
-    import tempfile
     with tempfile.TemporaryDirectory() as d:
         assert m.ensure_env_file(d, frozen=True) is False
         assert not os.path.exists(os.path.join(d, ".env"))
 
 
 def t_ensure_env_file_copy_failure():
-    import tempfile
     def boom(src, dst):
         raise OSError("boom")
     with tempfile.TemporaryDirectory() as d:
@@ -554,7 +1568,6 @@ def t_ensure_tool_path_adds_managed_bin():
     speedtest CLI on mac/Linux) into runtime/bin, never on the user's shell PATH.
     _ensure_tool_path() must prepend it so preflight and the spawned relay resolve
     them."""
-    import tempfile
     td = tempfile.mkdtemp()
     binr = os.path.join(td, "runtime", "bin")
     os.makedirs(binr)
@@ -571,7 +1584,6 @@ def t_ensure_tool_path_adds_managed_bin():
 
 
 def t_ensure_tool_path_noop_when_bin_absent():
-    import tempfile
     td = tempfile.mkdtemp()                # runtime/bin does NOT exist here
     orig_rt, orig_path = m._runtime_base_dir, os.environ.get("PATH", "")
     m._runtime_base_dir = lambda: os.path.join(td, "runtime")
@@ -585,10 +1597,9 @@ def t_ensure_tool_path_noop_when_bin_absent():
 
 
 def t_script_invocation_repo():
-    import sys as _sys
     kind, argv, _ = m._script_invocation("scripts/preflight.py", ["--quick"], False)
     assert kind == "subprocess"
-    assert argv[0] == _sys.executable
+    assert argv[0] == sys.executable
     assert argv[1].endswith(os.path.join("scripts", "preflight.py"))
     assert argv[-1] == "--quick"
 
@@ -602,12 +1613,11 @@ def t_script_invocation_frozen():
 
 
 def t_relay_daemon_argv():
-    import sys as _sys
     repo = m._relay_daemon_argv(["--no-pov"], False)
-    assert repo[0] == _sys.executable and repo[1].endswith("racecast-feeds.py")
+    assert repo[0] == sys.executable and repo[1].endswith("racecast-feeds.py")
     assert "--runtime-dir" in repo and repo[-1] == "--no-pov"
     assert m._relay_daemon_argv(["--no-pov"], True) == \
-        [_sys.executable, "relay", "run", "--no-pov"]
+        [sys.executable, "relay", "run", "--no-pov"]
 
 
 def t_oneshot_extra():
@@ -644,7 +1654,6 @@ def _oneshot_extra_cases():
     assert m._oneshot_extra("graphics", ["--out", "z"], R, B) == []
 
     # --overlay-css is injected for `setup` only when the passed path exists.
-    import tempfile
     with tempfile.TemporaryDirectory() as d:
         css = os.path.join(d, "hud.css")
         assert m._oneshot_extra("setup", [], R, B, overlay_css=css) == \
@@ -681,7 +1690,6 @@ def t_sync_pov_transform_calls_setter_with_merged_box():
     # All three mapped slots ("pov" -> Stint/"Feed POV", "webcam" -> Program/"Solo
     # Webcam", "tyres-capture" -> Program/"Solo Tyres/Fuel Capture") must be synced
     # from one call, so capture every set_transform call.
-    import tempfile
     calls = []
 
     def fake_set(scene, source, transform):
@@ -732,7 +1740,6 @@ def t_sync_pov_transform_only_hides_items_live():
     # only hides what the profile CSS hides. It never shows an item, because the
     # director's WEBCAM toggle may have hidden it on air; showing is the setup bake's
     # job. Feed POV is left to the director's live toggle.
-    import tempfile
     enabled = []
     with tempfile.TemporaryDirectory() as d:
         with open(os.path.join(d, "hud.css"), "w") as fh:
@@ -751,7 +1758,6 @@ def t_sync_pov_transform_only_hides_items_live():
 def t_sync_pov_transform_reads_a_hud_css_that_is_not_utf8():
     # A stray byte in an imported hud.css must not crash relay start after the
     # relay spawned; the slot rules still apply.
-    import tempfile
     enabled = []
     with tempfile.TemporaryDirectory() as d:
         with open(os.path.join(d, "hud.css"), "wb") as fh:
@@ -768,7 +1774,6 @@ def t_sync_pov_transform_reads_a_hud_css_that_is_not_utf8():
 
 
 def t_sync_pov_transform_targets_program_in_solo():
-    import tempfile
     calls = []
     with tempfile.TemporaryDirectory() as d:
         orig = m._active_overlay_dir
@@ -784,7 +1789,6 @@ def t_sync_pov_transform_targets_program_in_solo():
 
 
 def _sync_output(result):
-    import contextlib, io, tempfile
     buf = io.StringIO()
     with tempfile.TemporaryDirectory() as d:
         orig = m._active_overlay_dir
@@ -808,7 +1812,6 @@ def t_sync_pov_transform_reports_a_rejected_transform():
 
 
 def t_sync_pov_transform_reports_a_refused_show_or_hide():
-    import contextlib, io, tempfile
     buf = io.StringIO()
     with tempfile.TemporaryDirectory() as d:
         with open(os.path.join(d, "hud.css"), "w") as fh:
@@ -833,7 +1836,6 @@ def t_sync_pov_transform_is_silent_for_a_slot_the_collection_lacks():
 
 
 def t_run_module_exit_codes():
-    import contextlib, io, sys as _sys, tempfile
     with tempfile.TemporaryDirectory() as td:
         script = os.path.join(td, "fake-tool.py")
         with open(script, "w", encoding="utf-8") as fh:
@@ -844,18 +1846,17 @@ def t_run_module_exit_codes():
                      "    if sys.argv[1:] == ['--exit-str']:\n"
                      "        sys.exit('boom guide')\n"
                      "    return None\n")
-        before = list(_sys.argv)
+        before = list(sys.argv)
         assert m._run_module(script, ["--fail"]) == 3
         err = io.StringIO()
         with contextlib.redirect_stderr(err):
             assert m._run_module(script, ["--exit-str"]) == 1
         assert "boom guide" in err.getvalue()  # sys.exit(str) must reach stderr
         assert m._run_module(script, []) == 0
-        assert _sys.argv == before
+        assert sys.argv == before
 
 
 def t_run_module_missing_main():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         script = os.path.join(td, "no-main.py")
         with open(script, "w", encoding="utf-8") as fh:
@@ -892,7 +1893,6 @@ def t_export_route():
 
 
 def t_export_companion_writes_file():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         dst = os.path.join(td, "buttons.companionconfig")
         m.export_companion(["--out", dst])
@@ -902,7 +1902,6 @@ def t_export_companion_writes_file():
 def t_export_companion_default_into_runtime():
     # No --out -> runtime/ (same home as the localized OBS collection), and the
     # dir is created on demand, NOT in the caller's cwd.
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         old = m._runtime_dir
         m._runtime_dir = lambda: os.path.join(td, "runtime")
@@ -990,7 +1989,6 @@ def t_relay_start_warns_when_running_and_stint_ignored():
     # already-running + --stint: must tell the operator the flag was ignored.
     # Patch every signal so relay_start_plan returns "running": pid on the port,
     # alive PID, HTTP ok, and profile match.
-    import io, contextlib
     old_read = m.sv.read_pid
     old_alive = m.sv.pid_alive
     old_pids_on_port = m.pt.pids_on_port
@@ -1070,7 +2068,6 @@ def t_relay_start_retries_when_first_spawn_not_up():
     # so start_detached returns a PID for a child that died. relay_start must NOT claim
     # success on the first (failed) verify. It respawns once, and the port has
     # cleared by then.
-    import io, contextlib
     restore, calls = _relay_spawn_stubs([False, True])   # down, then up on retry
     try:
         buf = io.StringIO()
@@ -1085,7 +2082,6 @@ def t_relay_start_retries_when_first_spawn_not_up():
 
 
 def t_relay_start_refreshes_the_obs_pages():
-    import io, contextlib
     restore, _calls = _relay_spawn_stubs([True])
     refreshes = []
     m._refresh_obs_pages = lambda *a, **k: refreshes.append(k)
@@ -1101,7 +2097,6 @@ def t_relay_start_reports_failure_when_relay_never_comes_up():
     # If the relay never binds the control port, relay_start must report an HONEST
     # failure, never "relay started" for a dead child, which would make event-start
     # look green while the relay is down.
-    import io, contextlib
     restore, calls = _relay_spawn_stubs([False, False])   # down on both attempts
     try:
         buf = io.StringIO()
@@ -1119,7 +2114,6 @@ def t_relay_stop_releases_obs_feeds_after_kill():
     # AFTER the kill: a source rebuild against a live relay would reconnect.
     # Against the dead relay it just drops the half-dead connection, freeing
     # the feed ports (otherwise FIN_WAIT_1 -> preflight "port in use").
-    import io, contextlib
     calls = []
     old = (m.sv.read_pid, m.sv.pid_alive, m.sv.stop_pid, m._release_obs_feeds)
     m.sv.read_pid = lambda path: 4242
@@ -1138,7 +2132,6 @@ def t_relay_stop_releases_obs_feeds_after_kill():
 
 def t_relay_stop_skips_obs_release_when_kill_failed():
     # Relay may still be alive -> a rebuild would reconnect. Don't release.
-    import io, contextlib
     calls = []
     old = (m.sv.read_pid, m.sv.pid_alive, m.sv.stop_pid, m._release_obs_feeds)
     m.sv.read_pid = lambda path: 4242
@@ -1154,7 +2147,6 @@ def t_relay_stop_skips_obs_release_when_kill_failed():
 
 
 def t_relay_stop_skips_obs_when_relay_not_running():
-    import io, contextlib, tempfile
     calls = []
     old = (m.sv.read_pid, m.sv.pid_alive, m._release_obs_feeds, m._relay_pid_path)
     with tempfile.TemporaryDirectory() as tmp:
@@ -1171,7 +2163,6 @@ def t_relay_stop_skips_obs_when_relay_not_running():
 
 
 def t_streams_stop_releases_obs_feeds_when_feeds_exist():
-    import io, contextlib, tempfile
     calls = []
     old = (m._release_obs_feeds, m._run_script, m._streams_static_dir)
     with tempfile.TemporaryDirectory() as tmp:
@@ -1189,7 +2180,6 @@ def t_streams_stop_releases_obs_feeds_when_feeds_exist():
 
 
 def t_streams_stop_skips_obs_without_feed_pids():
-    import io, contextlib, tempfile
     calls = []
     old = (m._release_obs_feeds, m._run_script, m._streams_static_dir)
     with tempfile.TemporaryDirectory() as tmp:
@@ -1237,7 +2227,6 @@ def t_relay_serves_pages_false_when_any_fetch_fails():
 def t_refresh_obs_pages_reloads_even_when_pages_are_unchanged():
     # A source that loaded while the relay was down keeps CEF's error page; identical
     # page bytes must not skip the reload (#681).
-    import contextlib
     reloads = []
     fake_ws = type(sys)("obs_ws")
     fake_ws.refresh_browser_inputs = lambda needle: (reloads.append(needle) or ["HUD Overlay"], "")
@@ -1307,7 +2296,6 @@ def t_oneshot_extra_media_injects_cookies_when_present():
     # frozen binary stops 403-ing Intro/Outro (get-media's here-relative fallback
     # resolves into the PyInstaller bundle). Injected only when the jar exists and
     # the user didn't pass their own --cookies.
-    import tempfile
     with tempfile.TemporaryDirectory() as base:
         rd = os.path.join(base, "demo")
         open(os.path.join(base, "yt-cookies.txt"), "w").close()
@@ -1328,7 +2316,6 @@ def t_oneshot_extra_media_no_cookies_when_absent_or_user_supplied():
     assert m._oneshot_extra("media", [], os.path.join("/rt", "demo"), "/rt") == [
         "--out", os.path.join("/rt", "demo", "media")]
     # A user-supplied --cookies wins: nothing auto-injected.
-    import tempfile
     with tempfile.TemporaryDirectory() as base:
         rd = os.path.join(base, "demo")
         open(os.path.join(base, "yt-cookies.txt"), "w").close()
@@ -1431,6 +2418,139 @@ def t_profile_env_vars_includes_graphics_take():
     assert m._profile_env_vars(rc)["RACECAST_GRAPHICS_TAKE"] == "direct"
 
 
+def t_profile_env_vars_includes_telemetry_record():
+    rc = m.pcfg.ResolvedConfig(profile="demo", name="Demo", sheet_id="abc",
+                               telemetry_record="1")
+    assert m._profile_env_vars(rc)["RACECAST_TELEMETRY_RECORD"] == "1"
+
+
+def t_reset_telemetry_record_removes_state_file():
+    with tempfile.TemporaryDirectory() as d:
+        state = os.path.join(d, "telemetry-record.json")
+        with open(state, "w", encoding="utf-8") as fh:
+            fh.write('{"active": false}')
+        real = m._runtime_dir
+        m._runtime_dir = lambda: d
+        try:
+            m._reset_telemetry_record()
+            assert not os.path.exists(state), "a new broadcast starts from the profile default"
+            m._reset_telemetry_record()            # absent file: no error
+        finally:
+            m._runtime_dir = real
+
+
+def t_telemetry_record_wanted_follows_profile_default():
+    rc = m.pcfg.ResolvedConfig(profile="demo", name="Demo", sheet_id="abc",
+                               telemetry_record="1")
+    assert m._telemetry_record_wanted(rc) is True
+    rc_off = m.pcfg.ResolvedConfig(profile="demo", name="Demo", sheet_id="abc",
+                                   telemetry_record="")
+    assert m._telemetry_record_wanted(rc_off) is False
+    assert m._telemetry_record_wanted(None) is False
+
+
+def t_sync_live_telemetry_record_pushes_the_profile_default_to_the_relay():
+    calls = []
+    orig_cfg, orig_call = m._active_config, m._relay_record_call
+    try:
+        m._active_config = lambda: m.pcfg.ResolvedConfig(
+            profile="demo", name="Demo", sheet_id="abc", telemetry_record="1")
+        m._relay_record_call = calls.append
+        m._sync_live_telemetry_record()
+        assert calls == ["start"], f"a running relay must get the profile default pushed: {calls}"
+        calls.clear()
+        m._active_config = lambda: m.pcfg.ResolvedConfig(
+            profile="demo", name="Demo", sheet_id="abc", telemetry_record="")
+        m._sync_live_telemetry_record()
+        assert calls == ["stop"], f"a running relay must get the profile default pushed: {calls}"
+    finally:
+        m._active_config, m._relay_record_call = orig_cfg, orig_call
+
+
+def t_sync_live_telemetry_record_never_raises():
+    orig = m._active_config
+    try:
+        def _boom():
+            raise RuntimeError("no profile resolves")
+        m._active_config = _boom
+        m._sync_live_telemetry_record()      # must not raise
+    finally:
+        m._active_config = orig
+
+
+def _stub_relay_signals(port_pids, pidfile_pid, http_ok, running, active):
+    """Stub every signal relay_start_plan reads; returns a restore callable."""
+    saved = (m.pt.pids_on_port, m.sv.read_pid, m.sv.pid_alive, m._relay_http_ok,
+             m._running_relay_profile, m._active_profile_name)
+    m.pt.pids_on_port = lambda port: list(port_pids) if port == m.RELAY_PORT else []
+    m.sv.read_pid = lambda path: pidfile_pid
+    m.sv.pid_alive = lambda pid: pid is not None
+    m._relay_http_ok = lambda: http_ok
+    m._running_relay_profile = lambda: running
+    m._active_profile_name = lambda: active
+
+    def restore():
+        (m.pt.pids_on_port, m.sv.read_pid, m.sv.pid_alive, m._relay_http_ok,
+         m._running_relay_profile, m._active_profile_name) = saved
+    return restore
+
+
+def t_relay_already_running_for_active_profile_requires_both():
+    cases = [
+        ((4242,), 4242, True, "demo", "demo", True, "our healthy relay on the active profile"),
+        ((4242,), 4242, False, "demo", "demo", False, "relay not answering"),
+        ((4242,), 4242, True, "other-league", "demo", False, "foreign-profile holder"),
+        ((4242,), 4242, True, "", "", False, "an empty stamp is an unknown profile"),
+        ((4242,), 999, True, "demo", "demo", False, "stamp matches but the port holder is not ours"),
+        ((), None, True, "demo", "demo", False, "nothing holds the control port"),
+    ]
+    for port_pids, pid, http_ok, running, active, want, why in cases:
+        restore = _stub_relay_signals(port_pids, pid, http_ok, running, active)
+        try:
+            got = m._relay_already_running_for_active_profile()
+        finally:
+            restore()
+        assert got is want, f"{why}: got {got}"
+
+
+def t_event_start_pushes_live_telemetry_record_only_when_relay_already_running():
+
+    class _Reached(Exception):
+        pass
+
+    def _drive(http_ok, running_profile, active_profile):
+        ev = m._event_modules()[0]
+        calls = []
+        saved = (m._event_gate_results, m._tailscale_connect, ev.app_running,
+                 m._runtime_dir, m._sync_live_telemetry_record, m.relay_start)
+        restore = _stub_relay_signals((4242,) if http_ok else (), 4242 if http_ok else None,
+                                      http_ok, running_profile, active_profile)
+        with tempfile.TemporaryDirectory() as tmp:
+            m._event_gate_results = lambda e, p: []
+            m._tailscale_connect = lambda e: "ok"
+            ev.app_running = lambda app, platform=None: True
+            m._runtime_dir = lambda: tmp
+            m._sync_live_telemetry_record = lambda: calls.append("sync")
+
+            def _boom(_rest):
+                raise _Reached()
+            m.relay_start = _boom
+            try:
+                m.event_start([])
+                raise AssertionError("expected to reach relay_start")
+            except _Reached:
+                return calls
+            finally:
+                restore()
+                (m._event_gate_results, m._tailscale_connect, ev.app_running,
+                 m._runtime_dir, m._sync_live_telemetry_record, m.relay_start) = saved
+
+    assert _drive(True, "demo", "demo") == ["sync"], "same relay, same profile: push it"
+    assert _drive(False, "", "demo") == [], "no relay yet: relay_start seeds state from scratch"
+    assert _drive(True, "other-league", "demo") == [], \
+        "a foreign-profile relay (e.g. mid `profile use --force`) must not get this profile's state pushed into it"
+
+
 def t_profile_env_vars_includes_event_title():
     rc = m.pcfg.ResolvedConfig(profile="demo", name="Demo", sheet_id="abc",
                                event_title="GTEC - Round 4")
@@ -1460,7 +2580,6 @@ def t_profile_env_vars_includes_discord_webhook():
 
 
 def t_active_obs_collection_falls_back_to_constant_without_profile():
-    import tempfile
     import obs_ws
     saved = dict(os.environ)
     try:
@@ -1483,7 +2602,6 @@ def t_profile_runtime_scoping():
 
 
 def t_profiles_data_reports_active_logo_flag():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         prof = os.path.join(td, "profiles")
         os.makedirs(os.path.join(prof, "demo"))
@@ -1509,7 +2627,6 @@ def t_profiles_data_reports_active_logo_flag():
 
 
 def t_profiles_data_lists_active_and_available():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         prof = os.path.join(td, "profiles")
         os.makedirs(os.path.join(prof, "demo"))
@@ -1538,7 +2655,6 @@ def t_profiles_data_lists_active_and_available():
 
 
 def t_profiles_data_reports_kind():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         prof = os.path.join(td, "profiles")
         os.makedirs(os.path.join(prof, "demo"))
@@ -1564,7 +2680,6 @@ def t_profiles_data_reports_kind():
 
 
 def t_profiles_data_reports_template():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         prof = os.path.join(td, "profiles")
         envs = {"demo": "NAME=Demo\n", "pov1": "NAME=P\nKIND=solo\nTEMPLATE=pov\n",
@@ -1589,7 +2704,6 @@ def t_profiles_data_reports_template():
 
 
 def t_profile_use_data_switches_pointer():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         prof = os.path.join(td, "profiles", "demo")
         os.makedirs(prof)
@@ -1610,7 +2724,6 @@ def t_profile_use_data_switches_pointer():
 
 
 def t_profile_use_data_unknown_is_error():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         open(os.path.join(td, ".env.example"), "w").close()
         os.makedirs(os.path.join(td, "runtime"))
@@ -1625,7 +2738,6 @@ def t_profile_use_data_unknown_is_error():
 
 
 def t_profile_new_data_creates_from_example():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         ex = os.path.join(td, "profiles", "example")
         os.makedirs(ex)
@@ -1643,7 +2755,6 @@ def t_profile_new_data_creates_from_example():
 
 
 def t_profile_new_data_spaced_name_returns_slug():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         ex = os.path.join(td, "profiles", "example")
         os.makedirs(ex)
@@ -1661,7 +2772,6 @@ def t_profile_new_data_spaced_name_returns_slug():
 
 
 def t_profile_new_data_bad_name_is_error():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         os.makedirs(os.path.join(td, "profiles", "example"))
         open(os.path.join(td, ".env.example"), "w").close()
@@ -1707,7 +2817,6 @@ def t_profile_new_data_defaults_endurance():
 
 
 def t_profile_env_entries_data_reads_active():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         prof = os.path.join(td, "profiles", "demo")
         os.makedirs(prof)
@@ -1730,7 +2839,6 @@ def t_profile_env_entries_data_reads_active():
 
 
 def t_profile_env_entries_data_no_profile_is_error():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         open(os.path.join(td, ".env.example"), "w").close()
         os.makedirs(os.path.join(td, "runtime"))
@@ -1745,7 +2853,6 @@ def t_profile_env_entries_data_no_profile_is_error():
 
 
 def t_profile_env_write_data_persists_to_active():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         prof = os.path.join(td, "profiles", "demo")
         os.makedirs(prof)
@@ -1771,7 +2878,6 @@ def t_profile_env_write_data_persists_to_active():
 
 
 def t_profile_env_write_data_no_profile_is_error():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         open(os.path.join(td, ".env.example"), "w").close()
         os.makedirs(os.path.join(td, "runtime"))
@@ -1788,7 +2894,6 @@ def t_profile_env_write_data_no_profile_is_error():
 
 
 def t_overlay_read_absent_ok_empty():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         prof = os.path.join(td, "profiles", "demo")
         os.makedirs(prof)
@@ -1808,7 +2913,6 @@ def t_overlay_read_absent_ok_empty():
 
 
 def t_overlay_write_then_read_roundtrip():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         prof = os.path.join(td, "profiles", "demo")
         os.makedirs(prof)
@@ -1832,7 +2936,6 @@ def t_overlay_write_then_read_roundtrip():
 
 
 def t_overlay_rejects_unknown_page():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         prof = os.path.join(td, "profiles", "demo")
         os.makedirs(prof)
@@ -1853,7 +2956,6 @@ def t_overlay_rejects_unknown_page():
 
 
 def t_overlay_no_profile_is_error():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         open(os.path.join(td, ".env.example"), "w").close()
         os.makedirs(os.path.join(td, "runtime"))
@@ -1884,7 +2986,6 @@ def _mk_active_profile(td):
 
 
 def t_overlay_layout_write_compiles_and_persists():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         orig = _mk_active_profile(td)
         try:
@@ -1906,7 +3007,6 @@ def t_overlay_layout_write_compiles_and_persists():
 
 
 def t_overlay_layout_read_migrates_handwritten_css():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         orig = _mk_active_profile(td)
         od = os.path.join(td, "profiles", "demo", "overlay")
@@ -1923,14 +3023,13 @@ def t_overlay_layout_read_migrates_handwritten_css():
 
 
 def t_overlay_layout_folds_legacy_timer_css():
-    import tempfile, json as _json
     with tempfile.TemporaryDirectory() as td:
         orig = _mk_active_profile(td)
         od = os.path.join(td, "profiles", "demo", "overlay")
         os.makedirs(od)
         # Write a layout-hud.json so migration path is skipped (we test the fold path)
         with open(os.path.join(od, "layout-hud.json"), "w", encoding="utf-8") as fh:
-            _json.dump({"page": "hud", "slots": {}, "fonts": [], "customCss": ""}, fh)
+            json.dump({"page": "hud", "slots": {}, "fonts": [], "customCss": ""}, fh)
         # Write a real timer.css with actual CSS rules
         with open(os.path.join(od, "timer.css"), "w", encoding="utf-8") as fh:
             fh.write("#clock { color: #f4f4f4; }")
@@ -1946,14 +3045,13 @@ def t_overlay_layout_folds_legacy_timer_css():
 
 
 def t_overlay_layout_ignores_comment_only_timer_css():
-    import tempfile, json as _json
     with tempfile.TemporaryDirectory() as td:
         orig = _mk_active_profile(td)
         od = os.path.join(td, "profiles", "demo", "overlay")
         os.makedirs(od)
         # Write a layout-hud.json
         with open(os.path.join(od, "layout-hud.json"), "w", encoding="utf-8") as fh:
-            _json.dump({"page": "hud", "slots": {}, "fonts": [], "customCss": ""}, fh)
+            json.dump({"page": "hud", "slots": {}, "fonts": [], "customCss": ""}, fh)
         # Write a comment-only timer.css (the default scaffold, no real rules)
         with open(os.path.join(od, "timer.css"), "w", encoding="utf-8") as fh:
             fh.write("/* just the template, no rules */\n")
@@ -1980,7 +3078,6 @@ def t_overlay_slots_data_flags_telemetry_for_solo_pov_only():
     # The builder canvas lifts the HUD's runtime gating; the telemetry block must
     # only appear for a profile whose relay serves telemetry (solo + pov), never
     # in endurance or solo commentary, where the live HUD never shows it.
-    import tempfile
     # A shell-exported RACECAST_PROFILE would win over the temp root's only profile.
     saved_profile = os.environ.pop("RACECAST_PROFILE", None)
     try:
@@ -2006,6 +3103,31 @@ def t_overlay_slots_data_flags_telemetry_for_solo_pov_only():
             os.environ["RACECAST_PROFILE"] = saved_profile
 
 
+def t_overlay_slots_data_points_the_logo_at_the_control_center():
+    saved_profile = os.environ.pop("RACECAST_PROFILE", None)
+    try:
+        for logo, want in (("LOGO=logo.svg\n", 'src="/api/profile/logo?p=lg"'), ("", 'src=""')):
+            with tempfile.TemporaryDirectory() as td:
+                pdir = os.path.join(td, "profiles", "lg")
+                os.makedirs(pdir)
+                open(os.path.join(td, ".env.example"), "w").close()
+                open(os.path.join(pdir, "logo.svg"), "w").close()
+                with open(os.path.join(pdir, "profile.env"), "w") as fh:
+                    fh.write("NAME=League\n" + logo)
+                os.makedirs(os.path.join(td, "runtime"))
+                orig_b, orig_r = m._env_base, m._runtime_base_dir
+                m._env_base = lambda *a, **k: td
+                m._runtime_base_dir = lambda: os.path.join(td, "runtime")
+                try:
+                    r = m.overlay_slots_data("hud")
+                finally:
+                    m._env_base, m._runtime_base_dir = orig_b, orig_r
+            assert r["ok"] and want in r["body"] and "/hud/logo" not in r["body"], (logo, want)
+    finally:
+        if saved_profile is not None:
+            os.environ["RACECAST_PROFILE"] = saved_profile
+
+
 def t_overlay_slots_data_includes_flag_presets():
     r = m.overlay_slots_data("hud")
     assert r["ok"], r
@@ -2016,7 +3138,6 @@ def t_overlay_slots_data_includes_flag_presets():
 
 
 def t_overlay_fonts_upload_then_list_and_serve():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         orig = _mk_active_profile(td)
         try:
@@ -2035,7 +3156,6 @@ def t_overlay_fonts_upload_then_list_and_serve():
 
 
 def t_machine_font_download_into_library():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         orig = _mk_active_profile(td)
         css = ('@font-face{font-family:Oswald;'
@@ -2074,7 +3194,6 @@ def _latin_cuts_css():
 def t_machine_font_download_saves_all_cuts():
     # The cuts path self-hosts regular + bold + italic + bold-italic so a slot can
     # render TRUE bold/italic; the base name is returned for the library entry.
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         orig = _mk_active_profile(td)
         try:
@@ -2097,7 +3216,6 @@ def t_machine_font_download_saves_all_cuts():
 def t_machine_font_download_single_cut_fallback():
     # A response without latin subset blocks (the legacy/stub shape) still self-hosts
     # one file, back-compat for families the cuts request cannot satisfy.
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         orig = _mk_active_profile(td)
         try:
@@ -2114,7 +3232,6 @@ def t_machine_font_download_single_cut_fallback():
 def t_machine_font_delete_removes_whole_family():
     # Deleting a base family also removes its cut siblings (else a half-deleted family
     # would break: a slot referencing it loses its bold/italic faces).
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         orig = _mk_active_profile(td)
         try:
@@ -2132,7 +3249,6 @@ def t_machine_font_delete_removes_whole_family():
 def t_overlay_save_copies_font_cut_siblings_into_profile():
     # Copy-on-save pulls the WHOLE family (base + bold + italic) into the profile so
     # `profile export` carries true bold/italic offline, and the CSS groups them.
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         orig = _mk_active_profile(td)
         try:
@@ -2152,7 +3268,6 @@ def t_overlay_save_copies_font_cut_siblings_into_profile():
 
 
 def t_restore_bundled_fonts_force_overwrites_library_and_profiles():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         orig = _mk_active_profile(td)
         other = os.path.join(td, "profiles", "league2")
@@ -2221,7 +3336,6 @@ def t_machine_font_download_rejects_unsafe_name():
 
 def t_machine_font_download_allows_uncurated_name():
     # Any syntactically valid family (not just the catalog) is fetchable.
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         orig = _mk_active_profile(td)
         try:
@@ -2241,7 +3355,6 @@ def t_machine_font_download_no_woff2_is_error():
 
 
 def t_machine_font_delete_removes_from_library():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         orig = _mk_active_profile(td)
         try:
@@ -2278,7 +3391,6 @@ def t_google_font_catalog_falls_back_to_curated():
 def t_overlay_save_copies_referenced_library_font_into_profile():
     # Copy-on-save: a design that references a library font copies it into the
     # profile (portable export) and emits its @font-face in the generated CSS.
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         orig = _mk_active_profile(td)
         try:
@@ -2298,7 +3410,6 @@ def t_overlay_save_copies_referenced_library_font_into_profile():
 
 
 def t_overlay_bg_path_present_and_absent():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         orig = _mk_active_profile(td)
         try:
@@ -2339,8 +3450,13 @@ def t_obs_ws_persist_default_on():
     assert feeds.obs_ws_persist_enabled({"RACECAST_OBS_WS_PERSIST": "0"}) is False
 
 
+def t_relay_runtime_args_pass_the_runtime_base():
+    args = m._relay_runtime_args()
+    i = args.index("--runtime-base")
+    assert args[i + 1] == m._runtime_base_dir(), args
+
+
 def t_relay_runtime_args_adds_overlay_when_dir_exists():
-    import tempfile, os
     with tempfile.TemporaryDirectory() as tmp:
         od = os.path.join(tmp, "overlay"); os.makedirs(od)
         assert m._overlay_relay_args(od) == ["--overlay-dir", od]
@@ -2359,7 +3475,6 @@ def t_servable_logo_path_allows_web_images_only():
 
 
 def t_profile_logo_returns_active_servable_path():
-    import tempfile
     with tempfile.TemporaryDirectory() as td:
         prof = os.path.join(td, "profiles")
         os.makedirs(os.path.join(prof, "demo"))
@@ -2623,7 +3738,6 @@ def t_event_takeover_qualifying_and_override_forwarded():
 def t_event_takeover_pulls_event_title():
     # Takeover adopts producer A's on-air event title (#207), persisting it to
     # event.json BEFORE bring-up so the new relay loads it (mirrors the chat pull).
-    import json as _json
     restore = _with_env(RACECAST_SHEET_ID="S", RACECAST_SHEET_PUSH_URL="https://push")
     try:
         with _takeover_sandbox(
@@ -2634,7 +3748,7 @@ def t_event_takeover_pulls_event_title():
                 event_start=lambda a, **kw: None) as d:
             m.event_takeover(["100.64.1.2"])
             with open(os.path.join(d, "event.json"), encoding="utf-8") as fh:
-                assert _json.load(fh) == {"title": "GTEC - Round 4 - Nürburgring"}
+                assert json.load(fh) == {"title": "GTEC - Round 4 - Nürburgring"}
     finally:
         restore()
 
@@ -2796,7 +3910,6 @@ def t_discord_voice_target_sheet_failure_falls_back_to_env():
 
 
 def t_discord_cmd_join_uses_resolved_target():
-    import io, contextlib
     orig_client, orig_target = m._discord_voice_client, m._discord_voice_target
     calls = {}
 
@@ -2833,7 +3946,6 @@ def t_discord_cmd_join_without_target_exits():
 
 
 def t_discord_cmd_leave_does_not_resolve_target():
-    import io, contextlib
     orig_client, orig_target = m._discord_voice_client, m._discord_voice_target
     calls = {}
 
@@ -2866,7 +3978,6 @@ def t_discord_cmd_leave_failure_returns_nonzero():
 
     m._discord_voice_client = _FakeClient
     try:
-        import io, contextlib
         with contextlib.redirect_stdout(io.StringIO()):
             rc = m.discord_cmd(["leave"])
         assert rc == 1
@@ -2875,7 +3986,6 @@ def t_discord_cmd_leave_failure_returns_nonzero():
 
 
 def t_discord_cmd_status_reports_configured_target():
-    import io, contextlib
     orig_client, orig_target = m._discord_voice_client, m._discord_voice_target
     m._discord_voice_client = object
     m._discord_voice_target = lambda: ("111", "222")
@@ -2890,7 +4000,6 @@ def t_discord_cmd_status_reports_configured_target():
 
 
 def t_discord_cmd_status_reports_none_configured():
-    import io, contextlib
     orig_client, orig_target = m._discord_voice_client, m._discord_voice_target
     m._discord_voice_client = object
     m._discord_voice_target = lambda: None
@@ -2929,7 +4038,6 @@ def t_discord_cmd_requires_client_credentials():
 def t_discord_cmd_status_without_credentials_is_readonly():
     # status must never require creds or sys.exit; it reports the target and a
     # note that the Discord app is not configured.
-    import io, contextlib
     orig_target = m._discord_voice_target
     m._discord_voice_target = lambda: None
     restore = _with_env(RACECAST_DISCORD_CLIENT_ID=None, RACECAST_DISCORD_CLIENT_SECRET=None)
@@ -2962,7 +4070,6 @@ def t_main_dispatches_discord_join_leave_status():
 def t_set_env_key_preserves_other_keys():
     """_set_env_key must NOT drop other keys or comments: passing a single pair to
     the full-set _write_env_file wipes everything else."""
-    import tempfile
     with tempfile.TemporaryDirectory() as d:
         p = os.path.join(d, "profile.env")
         with open(p, "w", encoding="utf-8") as fh:
@@ -3023,7 +4130,6 @@ def t_links_roster_union():
 def t_links_cmd_prints_share_url_and_redirect_uri():
     # links_cmd must print a bare share URL and OAuth redirect URI after the
     # per-person link list.
-    import io, sys as _sys
     orig_roster = m._links_roster
     orig_magic = m._tailscale_magicdns
     orig_ip = m._tailscale_ip
@@ -3040,12 +4146,12 @@ def t_links_cmd_prints_share_url_and_redirect_uri():
         m._apply_active_profile_env = lambda: None
         m._console_versions_path = lambda: "/tmp/versions.json"
         buf = io.StringIO()
-        old_stdout = _sys.stdout
-        _sys.stdout = buf
+        old_stdout = sys.stdout
+        sys.stdout = buf
         try:
             m.links_cmd([])
         finally:
-            _sys.stdout = old_stdout
+            sys.stdout = old_stdout
         out = buf.getvalue()
         assert "/console/oauth/callback" in out, out
         assert "/console" in out, out
@@ -3075,7 +4181,6 @@ def t_funnel_auto_enabled_gate():
     # console_status_data(), whose real shape is {ok, has_secret, ...} with NO
     # "enabled" key; a gate on st["enabled"] makes the whole auto-enable path dead.
     # (#216)
-    import tempfile
     orig_env_file = m._env_file
     orig_status = m.console_status_data
     try:
@@ -3194,17 +4299,14 @@ def t_speedtest_is_a_runtime_dir_oneshot():
 
 
 def t_speedtest_op_registered():
-    import sys, os
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src", "ui"))
     import ui_ops
     assert ui_ops.OPS["speedtest"] == ["speedtest"]
 
 
 def t_speedtest_data_shape():
-    import tempfile
     d = tempfile.mkdtemp()
     # seed one record through the speedtest module the provider reads
-    import sys, os
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src", "scripts"))
     import speedtest as st
     st.append_record({"ts": 1, "download_mbps": 50.0, "upload_mbps": 20.0,
@@ -3456,7 +4558,6 @@ def t_event_title_read_from_relay_when_alive():
 
 def t_event_title_read_relay_unreachable_falls_back_to_file():
     # alive() True but the GET blows up -> read the persisted file instead.
-    import json, tempfile
     with tempfile.TemporaryDirectory() as dd:
         p = os.path.join(dd, "event.json")
         with open(p, "w", encoding="utf-8") as fh:
@@ -3469,7 +4570,6 @@ def t_event_title_read_relay_unreachable_falls_back_to_file():
 
 
 def t_event_title_read_file_then_default_when_relay_down():
-    import json, tempfile
     with tempfile.TemporaryDirectory() as dd:
         p = os.path.join(dd, "event.json")
         # no file -> profile default
@@ -3496,7 +4596,6 @@ def t_event_title_write_posts_to_relay_when_alive():
 
 
 def t_event_title_write_writes_file_when_relay_down():
-    import json, tempfile
     with tempfile.TemporaryDirectory() as dd:
         p = os.path.join(dd, "sub", "event.json")     # dir created on demand
         d = m.event_title_write_data("Round 6", alive=lambda: False, path=p,
@@ -3508,7 +4607,6 @@ def t_event_title_write_writes_file_when_relay_down():
 
 def t_event_title_write_applies_the_real_relay_sanitizer():
     # No sanitize seam -> exercises _event_title_sanitizer loading the relay rule.
-    import tempfile
     with tempfile.TemporaryDirectory() as dd:
         p = os.path.join(dd, "event.json")
         d = m.event_title_write_data("Round\n7\tCup", alive=lambda: False, path=p)
@@ -3547,7 +4645,6 @@ def _with_cockpit_secret_env_cleared(fn):
 
 
 def t_ensure_active_console_secret_generates_and_is_idempotent():
-    import tempfile
     def body():
         with tempfile.TemporaryDirectory() as dd:
             ppath = os.path.join(dd, "profile.env")
@@ -3568,7 +4665,6 @@ def t_ensure_active_console_secret_generates_and_is_idempotent():
 
 
 def t_ensure_active_console_secret_skips_example_and_missing():
-    import tempfile
     def body():
         with tempfile.TemporaryDirectory() as dd:
             ppath = os.path.join(dd, "profile.env")
@@ -3638,7 +4734,6 @@ def t_ensure_active_console_secret_provisions_after_a_profile_switch():
     # #768 end to end: profile A's secret is in the environment, the active profile
     # B has none. Applying B and ensuring the secret must provision B's own secret,
     # not hand back A's.
-    import tempfile
     def body():
         with tempfile.TemporaryDirectory() as dd:
             ppath = os.path.join(dd, "profile.env")
@@ -3669,7 +4764,6 @@ def t_ensure_active_console_secret_provisions_after_a_profile_switch():
 
 def t_apply_active_profile_env_switch_drops_the_previous_league_values():
     # The production path: two real profile dirs, switch the active one.
-    import tempfile
     keys = (*m.PROFILE_ENV_KEYS, m.PROFILE_ENV_MARKER)
     saved = {k: os.environ.pop(k, None) for k in keys}
     saved_fns = (m._active_profile_name, m._env_base, m._runtime_base_dir)
@@ -3978,7 +5072,6 @@ def t_relay_pid_is_singleton_top_level():
 
 
 def t_running_relay_dir_follows_profile_stamp():
-    import tempfile
     td = tempfile.mkdtemp()
     base = os.path.join(td, "runtime")
     os.makedirs(base)
@@ -4076,7 +5169,6 @@ def t_route_health_subcommand():
 
 
 def t_health_export_import_roundtrip():
-    import tempfile
     with tempfile.TemporaryDirectory() as d:
         db = os.path.join(d, "health-history.db")
         conn = m.hsmod.open_db(db)
@@ -4207,7 +5299,6 @@ def t_resolve_producer_name_env_then_hostname_fallback():
 
 
 def t_announce_takeover_writes_health_event_hermetic():
-    import tempfile
     orig_resolve = m._resolve_producer_name
     orig_wh = m._active_discord_webhook
     orig_dbpath = m._health_db_path
@@ -4360,14 +5451,13 @@ def t_part_index_rejects_bad():
 
 
 def t_write_part_reset_writes_file():
-    import json as _json, tempfile as _tf
-    d = _tf.mkdtemp()
+    d = tempfile.mkdtemp()
     orig = m._runtime_dir
     m._runtime_dir = lambda: d
     try:
         m._write_part_reset(2)
         with open(m._part_path(), encoding="utf-8") as fh:
-            assert _json.load(fh) == {"index": 2, "live": False}
+            assert json.load(fh) == {"index": 2, "live": False}
     finally:
         m._runtime_dir = orig
 
@@ -4409,16 +5499,14 @@ def t_standby_on_start_enabled_default_on_and_optout():
 
 
 def _obsws_module():
-    import sys as _sys
     SCRIPTS = os.path.join(ROOT, "src", "scripts")
-    if SCRIPTS not in _sys.path:
-        _sys.path.insert(0, SCRIPTS)
+    if SCRIPTS not in sys.path:
+        sys.path.insert(0, SCRIPTS)
     import obs_ws
     return obs_ws
 
 
 def t_check_scene_collection_switches_on_mismatch_when_enabled():
-    import io, contextlib
     obs_ws = _obsws_module()
     expected = "GT Racing Endurance — demo"
     st = obs_ws.scene_collection_status(
@@ -4445,7 +5533,6 @@ def t_check_scene_collection_switches_on_mismatch_when_enabled():
 
 
 def t_check_scene_collection_warns_not_switches_when_disabled():
-    import io, contextlib
     obs_ws = _obsws_module()
     expected = "GT Racing Endurance — demo"
     st = obs_ws.scene_collection_status(
@@ -4473,7 +5560,6 @@ def t_check_scene_collection_warns_not_switches_when_disabled():
 
 
 def t_check_scene_collection_warns_when_switch_fails():
-    import io, contextlib
     obs_ws = _obsws_module()
     expected = "GT Racing Endurance — demo"
     st = obs_ws.scene_collection_status(
@@ -4686,7 +5772,7 @@ def t_profile_env_vars_includes_kind():
         discord_webhook_url = ""; obs_collection = ""; console_secret = ""
         discord_client_id = ""; discord_client_secret = ""; discord_voice_url = ""
         event_title = ""; graphics_take = ""; name = "Solo League"; logo_path = ""; kind = "solo"
-        template = ""
+        template = ""; telemetry_record = ""
     env = m._profile_env_vars(_RC())
     assert env["RACECAST_KIND"] == "solo"
     assert env["RACECAST_SHEET_ID"] == "abc"
@@ -4708,9 +5794,8 @@ def t_env_upsert_preserves_other_keys():
     # underlying writer) treats its entries as the complete set and drops any
     # unlisted real key, which would silently delete e.g. RACECAST_OBS_WS_PASSWORD
     # if a naive two-key write were used to persist device selection (#304).
-    import tempfile, os as _os
     d = tempfile.mkdtemp(prefix="racecast-envupsert-")
-    p = _os.path.join(d, ".env")
+    p = os.path.join(d, ".env")
     with open(p, "w", encoding="utf-8") as fh:
         fh.write("# machine knobs\nRACECAST_OBS_WS_PASSWORD=secret\nRACECAST_UI_PORT=8089\n")
     res = m.env_upsert_data({"RACECAST_WEBCAM": "cam0", "RACECAST_CAPTURE": "cap1"}, path=p)
@@ -4725,9 +5810,8 @@ def t_env_upsert_preserves_other_keys():
 
 
 def t_env_upsert_updates_existing_key_in_place():
-    import tempfile, os as _os
     d = tempfile.mkdtemp(prefix="racecast-envupsert2-")
-    p = _os.path.join(d, ".env")
+    p = os.path.join(d, ".env")
     with open(p, "w", encoding="utf-8") as fh:
         fh.write("RACECAST_WEBCAM=old\nRACECAST_UI_PORT=8089\n")
     m.env_upsert_data({"RACECAST_WEBCAM": "new"}, path=p)
@@ -4741,9 +5825,8 @@ def t_env_upsert_rejects_foreign_key_clearly():
     # A machine .env that already holds a non-RACECAST_ key (should never happen,
     # but the editor/device-scan must not blow up with the raw env_write_data
     # wording) gets a clear, device-context error and writes nothing. (#304)
-    import tempfile, os as _os
     d = tempfile.mkdtemp(prefix="racecast-envupsert-foreign-")
-    p = _os.path.join(d, ".env")
+    p = os.path.join(d, ".env")
     with open(p, "w", encoding="utf-8") as fh:
         fh.write("FOO=bar\nRACECAST_UI_PORT=8089\n")
     with open(p, encoding="utf-8") as fh:
@@ -4796,9 +5879,8 @@ def t_parse_device_scan_args_tyres():
 def t_devices_write_data_accepts_mic():
     # devices_write_data (the /api/devices/select backing) accepts a mic value and
     # upserts RACECAST_MIC without disturbing unrelated .env keys (#307).
-    import tempfile, os as _os
     d = tempfile.mkdtemp(prefix="racecast-devwrite-mic-")
-    p = _os.path.join(d, ".env")
+    p = os.path.join(d, ".env")
     with open(p, "w", encoding="utf-8") as fh:
         fh.write("RACECAST_OBS_WS_PASSWORD=secret\n")
     res = m.devices_write_data(None, None, "MIC-ID", path=p)
@@ -4811,9 +5893,8 @@ def t_devices_write_data_accepts_mic():
 def t_devices_write_data_accepts_tyres():
     # devices_write_data accepts a tyres/fuel capture value and upserts
     # RACECAST_TYRES_CAPTURE (Control Center parity with device-scan --tyres).
-    import tempfile, os as _os
     d = tempfile.mkdtemp(prefix="racecast-devwrite-tyres-")
-    p = _os.path.join(d, ".env")
+    p = os.path.join(d, ".env")
     with open(p, "w", encoding="utf-8") as fh:
         fh.write("RACECAST_OBS_WS_PASSWORD=secret\n")
     res = m.devices_write_data(None, None, None, "TYRE-ID", path=p)
@@ -4910,8 +5991,7 @@ def t_parse_gt7_discover_args():
 
 
 def t_ps_ip_write_validates_and_upserts(tmp_path=None):
-    import tempfile, os as _os
-    fd, path = tempfile.mkstemp(suffix=".env"); _os.close(fd)
+    fd, path = tempfile.mkstemp(suffix=".env"); os.close(fd)
     try:
         bad = m.ps_ip_write_data("not a host!", path=path)
         assert bad["ok"] is False and "invalid" in bad["error"].lower()
@@ -4920,7 +6000,7 @@ def t_ps_ip_write_validates_and_upserts(tmp_path=None):
         with open(path, encoding="utf-8") as f:
             assert "RACECAST_GT7_PS_IP=192.168.1.42" in f.read()
     finally:
-        _os.remove(path)
+        os.remove(path)
 
 
 def t_gt7_discover_cmd_single_save(capsys=None):
@@ -5077,8 +6157,7 @@ class _StubHttp:
         return self._get
 
     def get_json(self, url, *, headers=None, timeout=None):
-        import json as _json
-        return _json.loads(self._get.decode("utf-8"))
+        return json.loads(self._get.decode("utf-8"))
 
 
 def _with_stub_http(stub, fn):
@@ -5210,7 +6289,7 @@ def t_smoke_twitch_candidates_survives_a_junk_reply():
 
 
 def _http_error(code, body):
-    import io, urllib.error
+    import urllib.error
     return urllib.error.HTTPError("http://127.0.0.1/x", code, "err", {},
                                   io.BytesIO(body))
 
@@ -5553,7 +6632,6 @@ def _capture_open_url(env, platform="linux", which=lambda t: "/usr/bin/" + t,
             kw["stderr"].write(stderr_text)
         return _FakeOpenerProc(rc)
 
-    import contextlib
     saved_env = m.sv.external_tool_env
     buf = io.StringIO()
     try:
@@ -5649,8 +6727,7 @@ def t_device_name_for_maps_a_picked_value_to_its_name():
 
 def t_devices_write_data_stores_the_mic_name():
     # #668: the name lets the relay re-find a mic whose OS id changed.
-    import tempfile, os as _os
-    p = _os.path.join(tempfile.mkdtemp(prefix="racecast-devwrite-micname-"), ".env")
+    p = os.path.join(tempfile.mkdtemp(prefix="racecast-devwrite-micname-"), ".env")
     open(p, "w", encoding="utf-8").close()
     res = m.devices_write_data(None, None, "MIC-ID", mic_name="Mikrofon (K66)", path=p)
     assert res["ok"], res

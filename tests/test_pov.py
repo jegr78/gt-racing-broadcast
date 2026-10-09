@@ -804,8 +804,7 @@ def t_pov_name_reads_pov_source_row():
 
 
 def t_hud_page_has_pov_name_slot_and_gating():
-    import os as _os
-    path = _os.path.join(ROOT, "src", "obs", "hud.html")
+    path = os.path.join(ROOT, "src", "obs", "hud.html")
     with open(path, encoding="utf-8") as fh:
         html = fh.read()
     # The name slot exists and is a builder slot (data-edit marker).
@@ -1560,7 +1559,6 @@ def t_sanitize_reason():
 
 
 def t_reload_records_substitution_on_url_swap():
-    import tempfile
     # a stub whose refresh() applies a staged URL change (mimics the operator
     # editing the on-air row's URL then pressing Reload)
     class _Staged(_StubSource):
@@ -1599,7 +1597,6 @@ def t_reload_records_substitution_on_url_swap():
 
 
 def t_latest_and_annotate_substitution():
-    import tempfile
     td = tempfile.mkdtemp()
     r = _relay(["uA", "uB"])
     r.health_store = m.HealthStore(os.path.join(td, "h.db"))
@@ -3211,7 +3208,6 @@ def t_av_watcher_joins_a_line_the_writer_split_across_two_polls():
     # The defect this watcher can have: OBS is still writing when we read, readline()
     # hands back a fragment, and both halves parse to nothing, so the event is gone.
     # The tail holds the remainder until the newline arrives.
-    import tempfile
     LINE = ("22:52:21.790: Source Feed A audio is lagging (over by 5415.66 ms) "
             "at max audio buffering. Restarting source audio.\n")
     r = _make_min_relay()
@@ -3237,7 +3233,6 @@ def t_av_watcher_joins_a_line_the_writer_split_across_two_polls():
 def t_av_watcher_ignores_a_log_directory_entry_that_is_not_a_regular_file():
     # A FIFO named *.txt would block open() and hang this thread for good; a symlink
     # would point the parser somewhere else entirely. list_logs filters to real files.
-    import tempfile
     with tempfile.TemporaryDirectory() as d:
         fifo = os.path.join(d, "trap.txt")
         try:
@@ -3257,7 +3252,6 @@ def t_relay_shutdown_stops_the_av_watcher():
     r = _make_min_relay()
     orig = m.logsetup.obs_log_dir
     try:
-        import tempfile
         with tempfile.TemporaryDirectory() as d:
             m.logsetup.obs_log_dir = lambda *a, **k: d
             r._start_av_watcher()
@@ -3273,7 +3267,6 @@ def t_av_watcher_start_never_takes_the_relay_down_with_it():
     # so a wrong attribute inside it reaches production untested: the relay logs through
     # the module-level LOG, not self.log. Both branches are exercised here, with no OBS
     # directory at all and with one that exists.
-    import tempfile
     r = _make_min_relay()
     orig = m.logsetup.obs_log_dir
     try:
@@ -3400,9 +3393,8 @@ def t_av_serving_age_tells_an_expected_disturbance_from_an_unexplained_one():
     # The classification hinges on this one reading. A paused or connecting feed must
     # return None, or a repair on a feed the relay is not even serving is waved through
     # as "explained by the restart". (#619)
-    import time as _t
     r = _make_min_relay()
-    r.A.phase = "serving"; r.A.paused = False; r.A.phase_since = _t.time() - 8.0
+    r.A.phase = "serving"; r.A.paused = False; r.A.phase_since = time.time() - 8.0
     assert 7.0 < r._serving_age("A") < 9.5
     r.A.paused = True
     assert r._serving_age("A") is None
@@ -3504,6 +3496,20 @@ def t_backlog_in_status_and_health_snapshot():
     snap = r._health_snapshot(123.0)
     assert (snap["feed_a_backlog_s"], snap["feed_b_backlog_s"], snap["pov_backlog_s"]) == \
         (11.6, 3.1, None)
+
+
+def t_redact_console_status_drops_telemetry_record_for_non_director():
+    full = {"feeds": {}, "telemetry": {"visible": True, "car": "911",
+                                       "track": {"id": "2066d9", "track": "Nurburgring"},
+                                       "record": {"active": True, "error": "disk full"}}}
+    kept = m.redact_console_status(full, ["director"])["telemetry"]
+    assert kept["record"]["active"] is True and kept["record"]["error"] == "disk full"
+    for roles in (["commentator"], ["race_control"], []):
+        t = m.redact_console_status(full, roles)["telemetry"]
+        assert "record" not in t, f"recording file name and counters are producer detail: {roles}"
+        assert t["visible"] is True and t["car"] == "911"
+        assert t["track"]["id"] == "2066d9", f"the track is no secret, like the car: {roles}"
+    assert "telemetry" not in m.redact_console_status({"feeds": {}}, ["commentator"])
 
 
 def t_redact_console_status_reduces_the_mic_block_to_its_state():

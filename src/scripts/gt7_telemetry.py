@@ -21,6 +21,9 @@ LOG = logging.getLogger("racecast.relay.telemetry")
 
 # Packet 'A' field offsets (little-endian).
 OFF_MAGIC = 0x00
+OFF_POS = 0x04          # car position x/y/z, metres (float x3)
+OFF_RPM = 0x3C          # engine rpm (float)
+OFF_GEAR = 0x90         # low nibble = current gear (uint8)
 OFF_SPEED = 0x4C        # metres/second (float)
 OFF_FUEL_LEVEL = 0x44   # litres in tank (float)
 OFF_FUEL_CAP = 0x48     # tank capacity (float)
@@ -72,7 +75,13 @@ MIN_LAP_DIST = 100.0      # metres; started_at_boundary is the primary guard, so
 # constant, distance forced up) cannot grow it without bound. Normal laps decimate
 # to a few hundred samples; a lap that exceeds the cap is bogus and marked unclean.
 SAMPLE_MIN_DIST = 4.0     # metres between retained samples
-MAX_SAMPLES = 4000        # ~16 km at 4 m spacing, far past any real lap
+MAX_SAMPLES = 10000       # 40 km at 4 m spacing; the longest GT7 layout (Special Stage
+                          # Route X, ~30.3 km) must stay well inside the cap
+
+SESSION_JUMP_M = 500.0    # metres between on-track positions that only a new track explains
+POINT_STEP_M = 20.0       # metres between kept positions (track recognition)
+MIN_TRACK_POINTS = 10     # fewest points a lap needs to name or learn a track
+MAX_POINTS = int(MAX_SAMPLES * SAMPLE_MIN_DIST / POINT_STEP_M)  # same distance ceiling as samples
 
 # A pit (in/out) lap is not representative: its time is inflated by the pit-lane
 # transit and the stationary service, and a refuel makes its fuel delta negative.
@@ -89,7 +98,8 @@ GT7Packet = namedtuple("GT7Packet", [
     "flags", "on_track", "paused", "loading",
     "car_id",
     "steer_rad", "sway", "heave", "surge", "throttle_input", "brake_input",
-], defaults=(None,) * 7)   # None when the packet is too short to carry the field
+    "gear", "rpm", "pos_x", "pos_y", "pos_z",
+], defaults=(None,) * 12)   # None when the packet is too short to carry the field
 
 
 def _opt_float(plain, off):
@@ -135,6 +145,11 @@ def parse_packet(plain):
         surge=_opt_float(plain, OFF_SURGE),
         throttle_input=_opt_byte(plain, OFF_THROTTLE_INPUT),
         brake_input=_opt_byte(plain, OFF_BRAKE_INPUT),
+        gear=plain[OFF_GEAR] & 0x0F,
+        rpm=struct.unpack_from("<f", plain, OFF_RPM)[0],
+        pos_x=struct.unpack_from("<f", plain, OFF_POS)[0],
+        pos_y=struct.unpack_from("<f", plain, OFF_POS + 4)[0],
+        pos_z=struct.unpack_from("<f", plain, OFF_POS + 8)[0],
     )
 
 
@@ -219,6 +234,10 @@ def _sanitize(pkt, last):
         sway=keep("sway", None),
         heave=keep("heave", None),
         surge=keep("surge", None),
+        rpm=keep("rpm", 0.0),
+        pos_x=keep("pos_x", 0.0),
+        pos_y=keep("pos_y", 0.0),
+        pos_z=keep("pos_z", 0.0),
     )
 
 
@@ -230,7 +249,7 @@ class _LapAccumulator:
     Only the latter may become a completed/reference lap (see _finalise_lap)."""
     __slots__ = ("t0", "elapsed", "distance", "samples", "clean", "last_t",
                  "fuel_start", "fuel_end", "started_at_boundary", "pit", "stopped_s",
-                 "why")
+                 "why", "top_speed", "points", "next_point_m")
 
     def __init__(self, now, started_at_boundary=False):
         self.t0 = now
@@ -245,6 +264,9 @@ class _LapAccumulator:
         self.pit = False
         self.stopped_s = 0.0
         self.why = None               # first reason the lap went unclean or pit, for the log
+        self.top_speed = 0.0
+        self.points = []              # (x, z) every POINT_STEP_M (track recognition)
+        self.next_point_m = 0.0
 
     def _reject(self, why, pit=False):
         if pit:
@@ -265,8 +287,14 @@ class _LapAccumulator:
         if pkt.paused or pkt.loading or not pkt.on_track:
             self._reject("paused, loading or off track")
             return
+        if pkt.speed_mps > self.top_speed:
+            self.top_speed = pkt.speed_mps
         self.elapsed += dt
         self.distance += max(0.0, pkt.speed_mps) * dt
+        if (pkt.pos_x is not None and self.distance >= self.next_point_m
+                and len(self.points) < MAX_POINTS):
+            self.points.append((pkt.pos_x, pkt.pos_z))
+            self.next_point_m = self.distance + POINT_STEP_M
         if pkt.speed_mps < STOPPED_SPEED_MPS:             # standstill in the pit box
             self.stopped_s += dt
             if self.stopped_s >= PIT_STOP_MIN_S:
@@ -291,8 +319,16 @@ class TelemetryEngine:
     the fastest clean completed lap, stored as time-vs-distance samples.
     """
 
+    # What lap records depend on, carried by resume_state(); every other attribute
+    # feeds only the HUD or is wiring.
+    RESUMED_ATTRS = ("session", "_lap_num", "_last", "_acc", "_ref", "_lap_time_sum",
+                     "_lap_time_n", "_lap_fuel_sum", "_lap_fuel_n", "_session_dist_m",
+                     "_top_speed", "_track_pos", "_left_track")
+
     def __init__(self):
         self._last = None                 # last GT7Packet
+        self._track_pos = None            # (x, z) of the last on-track packet
+        self._left_track = False          # an off-track packet came after it
         self._lap_num = None
         self._acc = None                  # current _LapAccumulator
         self._ref = None                  # reference (best) lap: {"time": s, "samples": [...]}
@@ -306,26 +342,38 @@ class TelemetryEngine:
         self._tyre_hist = deque()     # (t, (fl,fr,rl,rr)) over TYRE_AVG_WINDOW_S
         self._top_speed = 0.0
         self._delta_hist = deque()    # (t, delta) over DELTA_TREND_WINDOW_S; cleared per lap
+        self.session = 1
+        self.on_lap = None            # callable(dict) per closed lap; the recording exporter sets it
+        self.track_db = None    # gt7_tracks.TrackDB, or None (no track recognition)
+        self.track = None       # recognised layout, or {"candidates": [...]}
 
-    def _is_session_boundary(self, pkt):
-        """A new session (practice->quali->race, or a restart) is signalled by the
-        lap counter going backwards or the best lap clearing to -1. GT7 sends no
-        explicit session-change event, so we derive it from these two signals."""
+    def _session_boundary(self, pkt):
+        """How a new session starts, or None. GT7 sends no session-change event, so it
+        is derived: "line" when the lap counter goes backwards or the best lap clears
+        to -1; "mid-lap" when, without a best lap, the car reappears more than
+        SESSION_JUMP_M from where it left the track (a track change)."""
         if self._lap_num is None:
-            return False
-        if pkt.lap < self._lap_num:                       # lap counter went backwards
-            return True
+            return None
+        if pkt.lap < self._lap_num:
+            return "line"
         if self._last is not None and self._last.best_ms > 0 and pkt.best_ms == -1:
-            return True                                    # best lap was wiped
-        return False
+            return "line"
+        if (pkt.on_track and pkt.best_ms <= 0 and self._left_track
+                and self._track_pos is not None
+                and pkt.pos_x is not None
+                and math.dist(self._track_pos, (pkt.pos_x, pkt.pos_z)) > SESSION_JUMP_M):
+            return "mid-lap"
+        return None
 
-    def _reset_session(self, now, pkt):
+    def _reset_session(self, now, pkt, at_line=True):
         """Drop everything derived from the previous session (possibly a different
-        track/car) and re-open a fresh lap at the boundary."""
+        track/car) and open a fresh lap, at the line or mid-lap."""
         acc = self._acc
         if acc is not None:                # the lap in progress never finishes
             LOG.info("GT7 lap %s %s: not counted (session change)",
                      self._lap_num, _fmt_time(acc.elapsed))
+            self._emit_lap(acc, "not counted", "session change")
+        self.session += 1
         LOG.info("GT7 session change (new lap counter %s): %s", pkt.lap,
                  "reference cleared" if self._ref is not None else "no reference yet")
         self._ref = None
@@ -337,15 +385,16 @@ class TelemetryEngine:
         self._top_speed = 0.0
         self._delta_hist.clear()
         self._lap_num = pkt.lap
-        self._acc = _LapAccumulator(now, started_at_boundary=True)
+        self._acc = _LapAccumulator(now, started_at_boundary=at_line)
+        self.track = None
 
     def update(self, pkt, now):
         pkt = _sanitize(pkt, self._last)
         if self._lap_num is None:         # first packet: open a lap MID-lap (not a boundary)
             self._lap_num = pkt.lap
             self._acc = _LapAccumulator(now)                       # started_at_boundary=False
-        elif self._is_session_boundary(pkt):   # session change: wipe stale derived state
-            self._reset_session(now, pkt)
+        elif (boundary := self._session_boundary(pkt)) is not None:
+            self._reset_session(now, pkt, at_line=boundary == "line")
         elif pkt.lap != self._lap_num:    # lap-change edge: this new lap starts at the line
             self._finalise_lap()
             if self._acc is not None:     # bank the closing lap's driven distance
@@ -358,6 +407,10 @@ class TelemetryEngine:
         if self._acc is not None:
             self._acc.add(pkt, now)
         self._last = pkt
+        if pkt.on_track and pkt.pos_x is not None:
+            self._track_pos, self._left_track = (pkt.pos_x, pkt.pos_z), False
+        elif not pkt.on_track:
+            self._left_track = True
         if self._trace_last_t is None or (now - self._trace_last_t) >= TRACE_MIN_DT:
             self._trace_last_t = now
             self._trace.append((now, pkt.throttle / 255.0, pkt.brake / 255.0))
@@ -377,10 +430,86 @@ class TelemetryEngine:
             while self._delta_hist and self._delta_hist[0][0] < dcut:
                 self._delta_hist.popleft()
 
+    def resume_state(self):
+        """A JSON-safe copy of everything later lap records depend on; the HUD's rolling
+        buffers are left out."""
+        acc = self._acc
+        return {
+            "session": self.session, "lap_num": self._lap_num,
+            "last": None if self._last is None else self._last._asdict(),
+            "acc": None if acc is None else {
+                k: list(getattr(acc, k)) if isinstance(getattr(acc, k), list) else getattr(acc, k)
+                for k in _LapAccumulator.__slots__},
+            "ref": self._ref, "track_pos": self._track_pos, "left_track": self._left_track,
+            "totals": [self._lap_time_sum, self._lap_time_n, self._lap_fuel_sum,
+                       self._lap_fuel_n, self._session_dist_m, self._top_speed]}
+
+    def restore(self, state):
+        """Continue from resume_state(), also after a JSON round trip."""
+        last = state["last"]
+        self._last = (None if last is None
+                      else GT7Packet(**dict(last, tyre_temp=tuple(last["tyre_temp"]))))
+        acc, a = None, state["acc"]
+        if a is not None:
+            acc = _LapAccumulator(a["t0"])
+            for k in _LapAccumulator.__slots__:
+                setattr(acc, k, a[k])
+            acc.samples = [tuple(p) for p in a["samples"]]
+            acc.points = [tuple(p) for p in a["points"]]
+        ref = state["ref"]
+        self._ref = None if ref is None else {
+            "time": ref["time"], "samples": [tuple(p) for p in ref["samples"]]}
+        (self._lap_time_sum, self._lap_time_n, self._lap_fuel_sum, self._lap_fuel_n,
+         self._session_dist_m, self._top_speed) = state["totals"]
+        self.session, self._lap_num, self._acc = state["session"], state["lap_num"], acc
+        pos = state["track_pos"]
+        self._track_pos = None if pos is None else tuple(pos)
+        self._left_track = state["left_track"]
+
+    def lap_started_at(self):
+        """Wall time of the current lap's first packet, or None before any packet."""
+        return self._acc.t0 if self._acc is not None else None
+
+    def lap_distance(self):
+        """Metres driven in the current lap, integrated from speed; None before any packet."""
+        return self._acc.distance if self._acc is not None else None
+
+    def _emit_lap(self, acc, status, reason):
+        if self.on_lap is None:
+            return
+        fuel = (acc.fuel_start - acc.fuel_end
+                if acc.fuel_start is not None and acc.fuel_end is not None else None)
+        record = {"session": self.session, "lap": self._lap_num, "start": acc.t0,
+                  "end": acc.last_t, "elapsed": acc.elapsed, "status": status,
+                  "reason": reason, "fuel_used": fuel, "top_speed_mps": acc.top_speed,
+                  "car_id": self._last.car_id if self._last is not None else None,
+                  "points": list(acc.points), "distance_m": acc.distance}
+        try:
+            self.on_lap(record)
+        except Exception as e:  # noqa: BLE001  a lap consumer must never stop the telemetry
+            LOG.warning("GT7 lap consumer failed: %s", e)
+
+    def _detect_track(self, acc):
+        if self.track_db is None or (self.track is not None and "id" in self.track):
+            return
+        if len(acc.points) < MIN_TRACK_POINTS:        # a partial or stationary lap names nothing
+            return
+        try:
+            found = self.track_db.match(acc.points, acc.distance)
+            if not isinstance(found, dict):   # also covers None: no match
+                return
+            if "id" in found:
+                LOG.info("GT7 track: %s %s%s", found.get("track"), found.get("layout"),
+                         " (reverse)" if found.get("reverse") else "")
+            self.track = found
+        except Exception as e:  # noqa: BLE001  bad track data must not stop the telemetry
+            LOG.warning("GT7 track recognition failed: %s", e)
+
     def _finalise_lap(self):
         acc = self._acc
         if acc is None:
             return
+        self._detect_track(acc)
         why = None
         if not acc.clean or acc.pit:      # unclean, or an in/out lap (standstill or
             why = acc.why                 # refuel): never a reference, nor averaged
@@ -394,12 +523,15 @@ class TelemetryEngine:
         head = f"GT7 lap {self._lap_num} {_fmt_time(acc.elapsed)}"
         if why is not None:
             LOG.info("%s: not counted (%s)", head, why)
+            self._emit_lap(acc, "not counted", why)
             return
         if self._ref is None or acc.elapsed < self._ref["time"]:
             self._ref = {"time": acc.elapsed, "samples": acc.samples}
             LOG.info("%s: new reference, delta vs this lap from now on", head)
+            self._emit_lap(acc, "reference", "")
         else:
             LOG.info("%s: counted", head)
+            self._emit_lap(acc, "counted", "")
         self._lap_time_sum += acc.elapsed
         self._lap_time_n += 1
         if acc.fuel_start is not None and acc.fuel_end is not None:
@@ -596,8 +728,9 @@ class TelemetryStore:
     """
 
     def __init__(self, path=None, units="metric", thresholds=(70, 85, 95), reset=False,
-                 view_path=None, cars=None):
+                 view_path=None, cars=None, recorder=None, tracks=None):
         self._eng = TelemetryEngine()
+        self._eng.track_db = tracks    # gt7_tracks.TrackDB (or None: no track recognition)
         self._cars = cars              # gt7_cars.CarDB (or None: no car names)
         self._view_path = view_path
         self._visible = self._load_visible()
@@ -607,6 +740,7 @@ class TelemetryStore:
         self._units = units
         self._thresholds = thresholds
         self._dirty_ref = None
+        self.recorder = recorder       # gt7_recording.RecordControl, or None
         if reset:
             # Fresh session: the relay resets the reference on every start (spec §D)
             # so a stale lap from another track/car/session is never loaded. Drop
@@ -629,6 +763,16 @@ class TelemetryStore:
                 else:                          # a new reference lap was set
                     self._save()
 
+    def record(self, wall_ts, kind, plain):
+        """Hand one accepted packet to the recorder, if any; never raises."""
+        rec = self.recorder
+        if rec is None:
+            return
+        try:
+            rec.put(wall_ts, kind, plain)
+        except Exception as e:  # noqa: BLE001  recording must never stop the telemetry loop
+            LOG.warning("telemetry recording failed: %s", e)
+
     def set_source(self, ip):
         """Record the console IP the listener latched (surfaced on /telemetry/data
         so `racecast gt7-discover` can read it without a second 33740 bind)."""
@@ -643,6 +787,7 @@ class TelemetryStore:
         out["source"] = source
         out["visible"] = self.visible()
         out["car"] = self._lookup_car(snap["car_id"])
+        out["track"] = self.track()
         return out
 
     def _lookup_car(self, car_id):
@@ -653,6 +798,19 @@ class TelemetryStore:
         with self._lock:
             pkt = self._eng._last
         return self._lookup_car(pkt.car_id if pkt else None)
+
+    def has_tracks(self):
+        return self._eng.track_db is not None
+
+    def track(self):
+        with self._lock:
+            return dict(self._eng.track) if self._eng.track else None
+
+    def reload_data(self, cars, tracks):
+        """Swap in refreshed car and track data (after a GT7 data update)."""
+        with self._lock:
+            self._cars = cars
+            self._eng.track_db = tracks
 
     def visible(self):
         with self._lock:

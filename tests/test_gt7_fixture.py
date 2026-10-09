@@ -193,6 +193,21 @@ def t_real_base_packet_has_no_extended_fields():
     assert p.steer_rad is None and p.throttle_input is None and p.sway is None
 
 
+def t_fixture_gear_rpm_position():
+    expect = {
+        "PKT_THROTTLE_HEX": (5, 7796.0, (-627.39, 12.26, -229.95)),
+        "PKT_BRAKE_HEX": (6, 6859.0, (-775.91, 17.54, -417.9)),
+        "PKT_LAP_HEX": (5, 7932.0, (-655.33, 12.87, -245.04)),
+        "EXT_TCS_HEX": (4, 11757.0, (-997.69, 144.8, 1802.85)),
+    }
+    for name, (gear, rpm, pos) in expect.items():
+        p = tm.parse_packet(gc.decrypt_packet(bytes.fromhex(globals()[name])))
+        assert p.gear == gear, (name, p.gear)
+        assert abs(p.rpm - rpm) < 1.0, (name, p.rpm)
+        got = (round(p.pos_x, 2), round(p.pos_y, 2), round(p.pos_z, 2))
+        assert got == pos, (name, got)
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

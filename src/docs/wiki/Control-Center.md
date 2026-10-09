@@ -184,6 +184,10 @@ Machine-wide (not league) configuration:
   **commentary mic**, then **Save** (writes `RACECAST_CAPTURE`, `RACECAST_MIC` and
   `RACECAST_MIC_NAME`). A solo profile adds the webcam; a solo commentary profile also
   the tyres/fuel capture, a solo POV profile the GT7 PlayStation IP.
+- **GT7 data** shows when the car and track data were last checked and how many cars and
+  layouts it knows. **Update now** fetches the latest copy in the background (the row says
+  "updating…" until it ends, a failed file opens a message); a running relay uses it
+  within a minute.
 
 > **CLI alternative:** edit `.env` in any text editor; `racecast cookies <browser>`;
 > `racecast device-scan`.
@@ -236,13 +240,65 @@ activity, incidents and quality metrics: generated from the relay's health histo
 The artifact is a **self-contained HTML file** (all assets inline) that opens in any
 browser without a server.
 
-Click **Generate** to build the report. The preview panel shows a formatted text
-summary. **Download .html** saves the file to your machine; **Send to Discord** posts
-the HTML file as an attachment to the league's Discord webhook channel. Discord shows
-it as a downloadable attachment that recipients open in a browser.
+Click **Generate** to build the report. It runs `racecast report` as a background job;
+for a solo POV profile that also indexes the GT7 recordings in the report window, about
+16 s per 3 h of recording not yet indexed. The preview panel then shows the report.
+**Download .html** saves the file to your machine; **Send to Discord** posts the HTML
+file as an attachment to the league's Discord webhook channel. Discord shows it as a
+downloadable attachment that recipients open in a browser.
 
 > **CLI alternative:** `racecast report` (generate into `runtime/<profile>/reports/`),
 > `racecast report send [FILE]` (send the newest or a given file to Discord).
+
+### Telemetry
+
+![Control Center: Telemetry lap comparison](images/cc-telemetry.png)
+
+Solo POV profiles only. The view reads the profile's GT7 telemetry recordings
+(`runtime/<profile>/telemetry-recordings/`, see [Relay mode](Relay-Mode)) and needs no
+running relay.
+
+- **Recordings and laps.** Pick a recording, newest first, to list its laps with time,
+  status (reference, counted, or not counted with the reason), car and track. The first
+  open shows "Indexing…" while the view runs the index job, the same as `racecast
+  telemetry index`: it replays the recording once and caches the result next to it as
+  `<stem>.laps.json`. Later opens are instant until the recording or the GT7 track data
+  changes. A recording the job cannot read shows the job's reason instead of its laps.
+  The recording the relay is still writing shows as `(recording)` and cannot be picked:
+  it stays out of every comparison, and the view analyses it only after the recording
+  stops.
+- **Lap A and lap B.** Lap B is the lap you click. Lap A starts as the fastest counted
+  lap other than B with the same track and car across all recordings of the profile.
+  Both pickers list every comparable counted lap; B also shows the clicked lap when it
+  is not counted. When B has no such partner, lap A
+  reads "no other lap to compare" and the charts show B alone. Laps on an unknown track
+  compare only within their GT7 session. When other recordings have no cached laps yet,
+  for example after a Set track, the view runs the index job first ("Indexing
+  N recordings…"). No click in the view replays a recording itself: loading a lap or
+  setting a track on a recording without cached laps also waits for that job.
+- **Charts.** Speed, throttle, brake, steering, gear and the delta of B against A over
+  lap distance. Below zero B is ahead, above zero behind. Hover to read both laps at one
+  point; the map shows where that point is.
+- **Track map and mini-sectors.** Lap A is the thin line; lap B is split into 200 m
+  mini-sectors, green where B is faster and red where it is slower. The table lists every
+  mini-sector for A and B, the gap and the best time of any comparable lap; its last row
+  adds the theoretical best, the sum of the best mini-sectors. When the comparable laps
+  end at different lengths, as on an unknown track, the last mini-sector's best and the
+  theoretical best show `—`, the same rule as the post-event report.
+- **Set track.** When racecast does not recognise the layout of a recording, or two
+  layouts fit, pick it from the list. racecast assigns the recording to that layout. For
+  a layout with a downloaded racing line, or the reverse of one, that is all. For any
+  other layout racecast also learns the line from the recording's longest counted lap,
+  so later recordings on it are recognised. A downloaded racing line always takes
+  precedence over a learned one. The note under the button says which of the two
+  happened.
+
+The racing lines are not part of the package. Until racecast has downloaded them
+(`racecast gt7-data update`, or the first relay start with telemetry), it recognises
+only layouts learned with Set track, and every other recording starts as track unknown.
+
+> **CLI alternative:** `racecast telemetry export <name>` writes the same laps as CSV;
+> `racecast telemetry index` builds the missing lap caches ahead of time.
 
 ### Help & Docs
 

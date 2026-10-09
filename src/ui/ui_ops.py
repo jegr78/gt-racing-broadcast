@@ -47,6 +47,9 @@ OPS = {
     "chat-clear": ["chat", "clear"],
     "health-export": ["health", "export"],
     "health-import": ["health", "import"],
+    "gt7-data-update": ["gt7-data", "update"],
+    "telemetry-index": ["telemetry", "index"],
+    "report-generate": ["report", "generate"],   # builds lap indexes, so never in a request
 }
 
 # Browsers get-cookies can export from (yt-dlp --cookies-from-browser names).

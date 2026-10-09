@@ -253,6 +253,292 @@ def t_telemetry_loop_requests_extended_format_and_switches_once():
     assert store.trace(10)                    # the 'A' packets still fed the HUD
 
 
+def _recorder(d, default=False):
+    return m.gt7_recording.RecordControl(
+        os.path.join(d, "rec"), os.path.join(d, "telemetry-record.json"), default)
+
+
+def t_route_record_start_stop_toggle():
+    import json, tempfile
+    with tempfile.TemporaryDirectory() as d:
+        store = m.gt7_telemetry.TelemetryStore(None, recorder=_recorder(d))
+        srv, get = _serve(store)
+        try:
+            assert json.loads(get("/telemetry/record/start")[2])["active"] is True
+            assert json.loads(get("/telemetry/record/toggle")[2])["active"] is False
+            assert json.loads(get("/telemetry/record/stop")[2])["active"] is False
+            assert get("/telemetry/record/bogus")[0] == 404
+        finally:
+            srv.shutdown()
+            store.recorder.close()
+
+
+def t_route_record_404_without_store_or_recorder():
+    srv, get = _serve(None)
+    try:
+        assert get("/telemetry/record/start")[0] == 404
+    finally:
+        srv.shutdown()
+    srv, get = _serve(m.gt7_telemetry.TelemetryStore(None))
+    try:
+        assert get("/telemetry/record/start")[0] == 404
+    finally:
+        srv.shutdown()
+
+
+def t_status_reports_record_block():
+    import json, tempfile
+
+    class _StatusRelay:
+        def status(self):
+            return {}
+
+    with tempfile.TemporaryDirectory() as d:
+        store = m.gt7_telemetry.TelemetryStore(None, recorder=_recorder(d, default=True))
+        srv, get = _serve(store, relay=_StatusRelay())
+        try:
+            rec = json.loads(get("/status")[2])["telemetry"]["record"]
+            assert rec["active"] is True and rec["file"] is None and rec["error"] is None, rec
+            assert rec["elapsed_s"] is None, "no open file yet -> no elapsed time"
+        finally:
+            srv.shutdown()
+            store.recorder.close()
+
+
+def t_telemetry_loop_feeds_the_recorder():
+    import socket as _socket
+    import threading as _t
+    from test_gt7_fixture import EXT_TCS_HEX
+    ps_ip = "100.64.0.7"
+    stop = _t.Event()
+    packets = [bytes.fromhex(EXT_TCS_HEX)] * 3
+    got = []
+
+    class FakeRecorder:
+        def put(self, wall_ts, kind, plain):
+            got.append((kind, len(plain)))
+
+    class FakeSock:
+        def __init__(self, *a, **kw): pass
+        def setsockopt(self, *a): pass
+        def bind(self, addr): pass
+        def settimeout(self, s): pass
+        def close(self): pass
+        def sendto(self, data, addr): pass
+        def recvfrom(self, n):
+            if packets:
+                return packets.pop(), (ps_ip, 33740)
+            stop.set()
+            raise _socket.timeout()
+
+    store = m.gt7_telemetry.TelemetryStore(None, recorder=FakeRecorder())
+    real = m.socket.socket
+    m.socket.socket = FakeSock
+    try:
+        m._telemetry_loop(store, ps_ip, stop)
+    finally:
+        m.socket.socket = real
+    assert got == [("~", 0x158)] * 3, got
+
+
+def t_telemetry_loop_records_a_packet_the_parser_rejects():
+    import socket as _socket
+    import threading as _t
+    from test_gt7_fixture import EXT_TCS_HEX
+    ps_ip = "100.64.0.7"
+    stop = _t.Event()
+    packets = [bytes.fromhex(EXT_TCS_HEX)] * 3
+    got = []
+
+    class FakeRecorder:
+        def put(self, wall_ts, kind, plain):
+            got.append(kind)
+
+    class FakeSock:
+        def __init__(self, *a, **kw): pass
+        def setsockopt(self, *a): pass
+        def bind(self, addr): pass
+        def settimeout(self, s): pass
+        def close(self): pass
+        def sendto(self, data, addr): pass
+        def recvfrom(self, n):
+            if packets:
+                return packets.pop(), (ps_ip, 33740)
+            stop.set()
+            raise _socket.timeout()
+
+    class BrokenStore(m.gt7_telemetry.TelemetryStore):
+        def update(self, pkt, now):
+            raise ValueError("parser or engine bug")
+
+    store = BrokenStore(None, recorder=FakeRecorder())
+    real, wait, waits = m.socket.socket, stop.wait, []
+    m.socket.socket = FakeSock
+    stop.wait = lambda *a: waits.append(a) or wait(*a)
+    try:
+        m._telemetry_loop(store, ps_ip, stop)
+    finally:
+        m.socket.socket = real
+        stop.wait = wait
+    assert got == ["~"] * 3, f"the raw packet is recorded before the parser runs: {got}"
+    assert waits == [], f"a rejected packet must not pause the loop for a second: {waits}"
+
+
+def t_relay_starts_telemetry_side_effects_only_after_the_control_port_bind():
+    import inspect
+    src = inspect.getsource(m.main)
+    bound = src.index("loopback_bind_failed(")
+    for call in ("finalize_partials(", "target=_telemetry_loop", "target=_gt7_data_watch"):
+        assert src.index(call) > bound, \
+            f"{call} must wait for the bind: a losing second relay must not touch the live one"
+
+
+def t_telemetry_store_record_swallows_a_raising_recorder():
+    # A bad recorder (its put() raises) must never stop the UDP telemetry loop.
+    class BoomRecorder:
+        def put(self, wall_ts, kind, plain):
+            raise RuntimeError("disk full")
+
+    store = m.gt7_telemetry.TelemetryStore(None, recorder=BoomRecorder())
+    store.record(1.0, "A", b"x")          # must not raise
+
+
+def t_status_reports_track_only_with_track_db():
+    import json
+
+    class _StatusRelay:
+        def status(self):
+            return {}
+
+    class _Tracks:
+        def match(self, points, length_m):
+            return None
+
+    store = m.gt7_telemetry.TelemetryStore(None, tracks=_Tracks())
+    srv, get = _serve(store, relay=_StatusRelay())
+    try:
+        tel = json.loads(get("/status")[2])["telemetry"]
+        assert "track" in tel and tel["track"] is None, tel
+        assert json.loads(get("/telemetry/data")[2])["track"] is None
+    finally:
+        srv.shutdown()
+
+
+def t_store_reload_data_swaps_cars_and_tracks():
+    class _Cars:
+        def lookup(self, car_id):
+            return {"id": car_id, "maker": "New", "name": "Car", "group": None}
+    store = m.gt7_telemetry.TelemetryStore(None)
+    assert not store.has_tracks()
+    store.reload_data(_Cars(), object())
+    assert store.has_tracks() and store._lookup_car(5)["maker"] == "New"
+
+
+def t_gt7_data_refresh_reloads_store_only_when_changed():
+    import tempfile
+    calls = []
+
+    class _Store:
+        def reload_data(self, cars, tracks):
+            calls.append((cars, tracks))
+
+    with tempfile.TemporaryDirectory() as d:
+        bundled = os.path.join(ROOT, "src", "assets", "gt7")
+        m._gt7_data_refresh(_Store(), d, bundled,
+                            update=lambda base: {"checked": True, "changed": False, "files": {}})
+        assert calls == [], "an unchanged update must not reload the store"
+        m._gt7_data_refresh(_Store(), d, bundled,
+                            update=lambda base: {"checked": True, "changed": True,
+                                                 "files": {"cars.csv": "updated"}})
+        assert len(calls) == 1 and len(calls[0][0]) > 400, "reloaded with the bundled car tables"
+        assert isinstance(calls[0][1], m.gt7_tracks.TrackDB), calls[0][1]
+
+        def boom(base):
+            raise RuntimeError("offline")
+        m._gt7_data_refresh(_Store(), d, bundled, update=boom)    # never raises
+        assert len(calls) == 1, "a failed update keeps the loaded data"
+
+
+class _ReloadStore:
+    def __init__(self):
+        self.calls = []
+
+    def reload_data(self, cars, tracks):
+        self.calls.append((cars, tracks))
+
+
+def t_gt7_data_watch_step_reloads_only_when_the_fingerprint_changes():
+    import tempfile
+    store = _ReloadStore()
+    with tempfile.TemporaryDirectory() as d:
+        bundled = os.path.join(ROOT, "src", "assets", "gt7")
+        fp = m._gt7_data_watch_step(store, d, bundled, None)
+        assert store.calls == [] and fp, "the first step only takes the baseline"
+        assert m._gt7_data_watch_step(store, d, bundled, fp) == fp
+        assert store.calls == [], "unchanged files must not reload the store"
+        os.makedirs(m.gt7_data.data_dir(d))
+        with open(m.gt7_data.learned_path(d), "w", encoding="utf-8") as fh:
+            fh.write("{}")
+        fp2 = m._gt7_data_watch_step(store, d, bundled, fp)
+        assert fp2 != fp and len(store.calls) == 1, "a changed file reloads the store"
+        assert isinstance(store.calls[0][1], m.gt7_tracks.TrackDB), store.calls
+
+
+def t_gt7_data_watch_step_never_raises():
+    class _Boom:
+        def reload_data(self, cars, tracks):
+            raise RuntimeError("store gone")
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        bundled = os.path.join(ROOT, "src", "assets", "gt7")
+        assert m._gt7_data_watch_step(_Boom(), d, bundled, "stale") == "stale", \
+            "a failed reload keeps the old fingerprint so the next poll retries"
+
+
+def t_gt7_data_watch_polls_after_the_start_update():
+    import tempfile
+    store = _ReloadStore()
+    updates, waits = [], []
+
+    class _Stop:
+        def wait(self, timeout):
+            waits.append(timeout)
+            if len(waits) == 1:
+                os.makedirs(m.gt7_data.data_dir(d), exist_ok=True)
+                with open(m.gt7_data.learned_path(d), "a", encoding="utf-8") as fh:
+                    fh.write("{}")
+            return len(waits) > 2
+
+    with tempfile.TemporaryDirectory() as d:
+        bundled = os.path.join(ROOT, "src", "assets", "gt7")
+        m._gt7_data_watch(store, d, bundled, _Stop(), update_on=True,
+                            update=lambda base: updates.append(base) or
+                            {"checked": True, "changed": False, "files": {}})
+        assert updates == [d], "one start-time update"
+        assert waits == [60, 60, 60], waits
+        assert len(store.calls) == 1, "the file written between polls reloads once"
+        store.calls.clear(); waits.clear(); updates.clear()
+        m._gt7_data_watch(store, d, bundled, _Stop(), update_on=False,
+                            update=updates.append)
+        assert updates == [], "the opt-out skips the network update but keeps polling"
+        assert waits == [60, 60, 60], waits
+
+
+def t_gt7_runtime_base_defaults_to_the_parent_of_runtime_dir():
+    rt = os.path.join("x", "runtime", "league")
+    assert m.gt7_runtime_base(None, rt, True) == os.path.join("x", "runtime")
+    assert m.gt7_runtime_base(None, rt, False) == rt, "the default runtime dir is the base"
+    assert m.gt7_runtime_base("base", rt, True) == "base", "an explicit --runtime-base wins"
+
+
+def t_gt7_data_update_enabled_parses_the_opt_out():
+    assert m.gt7_data_update_enabled({}) is True
+    for off in ("0", "false", "No", " off "):
+        assert m.gt7_data_update_enabled({"RACECAST_GT7_DATA_UPDATE": off}) is False, off
+    for on in ("1", "yes", "", "true"):
+        assert m.gt7_data_update_enabled({"RACECAST_GT7_DATA_UPDATE": on}) is True, on
+
+
 def t_zz_no_test_reached_a_real_obs():
     # Sorted last: no test in this file may have attempted a real OBS connection.
     assert _obs_guard.CALLS == [], _obs_guard.CALLS[:3]

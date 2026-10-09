@@ -165,8 +165,11 @@ Returns the response. Unit-tested for boundary framing, part ordering, and the U
 - A new **Report** view: a "Generate report" action → runs the generator (op registry /
   job), then renders the produced HTML inline (iframe `srcdoc` of the self-contained
   document), with **Download .html** and **Send to Discord** buttons.
-- Routes: `/api/report/generate` (produces + returns the HTML + path) and
-  `/api/report/send` (invokes the send path; surfaces the "no webhook" error verbatim).
+- Routes: Generate runs the `report-generate` job (`racecast report generate`), because
+  the report builds GT7 lap indexes (part 4 of the telemetry spec) and no Control Center
+  request builds one; `GET /api/report/read?name=` then returns the file the job named
+  in its "Report written -> <path>" line, only a `.html` file in the reports dir.
+  `/api/report/send` invokes the send path and surfaces the "no webhook" error verbatim.
 - Reuses the existing structured-provider / op-registry pattern; no new auth surface.
 
 ## Edge cases & failure modes

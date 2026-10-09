@@ -25,7 +25,6 @@ def _mkoverlay(tmp, hud_css=None, timer_css=None, fonts=None):
     return od
 
 def t_splitscreen_page_wires_data_and_override():
-    import os
     path = os.path.join(ROOT, "src", "obs", "splitscreen.html")
     assert os.path.exists(path), "src/obs/splitscreen.html missing"
     with open(path, encoding="utf-8") as fh:
@@ -40,7 +39,6 @@ def t_splitscreen_is_an_overlay_page():
 
 
 def t_read_overlay_css_splitscreen_present():
-    import tempfile, os
     with tempfile.TemporaryDirectory() as od:
         with open(os.path.join(od, "splitscreen.css"), "w") as fh:
             fh.write("#split-left{color:#fff}")
@@ -216,6 +214,18 @@ def t_ob_extract_slots_kind_derives_props():
         "extras are appended after the kind set, de-duplicated"
     # no kind + explicit props -> the explicit list (back-compat fallback)
     assert by["d"]["props"] == ["left", "top"]
+
+def t_ob_canvas_logo_never_asks_for_the_relay_route():
+    with open(os.path.join(ROOT, "src", "obs", "hud.html"), encoding="utf-8") as f:
+        body = ob.base_body(f.read())
+    assert 'src="/hud/logo"' in body, "the live HUD loads its logo from the relay"
+    out = ob.canvas_logo(body, "/api/profile/logo?p=lg")
+    assert 'src="/api/profile/logo?p=lg"' in out and "/hud/logo" not in out, \
+        "the canvas must load the logo from the Control Center"
+    out = ob.canvas_logo(body, None)
+    assert "/hud/logo" not in out and 'src=""' in out, \
+        "without a logo an empty src hides the slot through onerror, with no request"
+
 
 def t_ob_extract_slots_from_real_hud():
     with open(os.path.join(ROOT, "src", "obs", "hud.html"), encoding="utf-8") as f:
@@ -774,7 +784,7 @@ def t_cc_preview_panel_hides_telemetry_fields_without_telemetry():
 
 
 def t_splitscreen_labels_source_in_collection_splitscreen_scene_only():
-    import os, json
+    import json
     with open(os.path.join(ROOT, "src", "obs", "GT_Racing_Endurance.json"),
               encoding="utf-8") as fh:
         d = json.load(fh)
@@ -1163,7 +1173,6 @@ def t_intermission_in_obs_page_paths():
 
 
 def t_read_overlay_css_intermission_present():
-    import tempfile, os
     with tempfile.TemporaryDirectory() as od:
         with open(os.path.join(od, "intermission.css"), "w") as fh:
             fh.write("#ichat{right:0}")
@@ -1171,7 +1180,6 @@ def t_read_overlay_css_intermission_present():
 
 
 def t_intermission_page_polls_broadcast_chat_and_links_override():
-    import os
     path = os.path.join(ROOT, "src", "obs", "intermission.html")
     assert os.path.exists(path), "src/obs/intermission.html missing"
     with open(path, encoding="utf-8") as fh:

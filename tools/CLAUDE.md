@@ -84,7 +84,12 @@ tear down) is captured in the **`racecast-e2e`** skill, which builds on the
 **Visual acceptance run** (`--visual [--report DIR]`, #772): renders the 13 Control Center
 views, the Director Panel, the cockpit and the Race Control desk (the two crew pages also at
 390 px) against the synthetic run, which serves a Crew roster (`--crew-csv-url`) and runs
-`tools/obs-sim.py`. `tools/visual-probe.js` reads element facts in the page;
+`tools/obs-sim.py`. The Telemetry view (`cc-telemetry`) exists only for a solo POV profile,
+so a second Control Center serves it from its own app home in the temp dir: a copy of
+`src/` or the binary, the shipped `solo-pov` profile, a learned demo track and one indexed
+`make-demo-recording.py` recording. Every other surface keeps the first one. `--keep`
+prints the second Control Center's URL.
+`tools/visual-probe.js` reads element facts in the page;
 `tools/e2e_visual.py` applies six rules (page overflow, clipped text, a control left at the
 browser default on a dark surface, overlapping controls, WCAG AA contrast, console errors)
 and writes `DIR/report.html` plus screenshots. Any finding fails the run (exit 1); a missing
@@ -150,9 +155,12 @@ python3 tools/e2e.py --real-league NAME   # local-only: drive the copied real-le
 python3 tools/e2e.py --playwright [--headed] [--shots DIR]  # optional rendered checks / visible browser / MCP-free screenshot tour
 runtime/pw-venv/bin/python tools/e2e.py --visual   # visual acceptance run -> runtime/visual-report/report.html
 
-# Refresh the vendored GT7 car tables (src/assets/gt7/, ddm999/gt7info, MIT-0) that name
-# the telemetry car id (#713). Run before a release when GT7 added cars.
-python3 tools/fetch-gt7-cars.py         # --dry-run lists added/removed car ids
+# Refresh the bundled GT7 reference data (src/assets/gt7/: car tables from
+# ddm999/gt7info, MIT-0; track catalogue index.json from
+# jbhoorasingh/gt7-datalogger-track-data, CC0) that name the telemetry car id (#713)
+# and track (#787). Run before a release when GT7 added cars or tracks. The track
+# signatures never ship; each install downloads them (gt7_data.RUNTIME_ONLY).
+python3 tools/fetch-gt7-data.py         # --dry-run lists added/removed cars and layouts
 
 # Fetch any missing HUD country flags from the sheet's Configuration tab
 python3 tools/fetch-flags.py            # adds missing -> src/assets/flags/ (keeps old)
@@ -167,6 +175,7 @@ python3 tools/broadcast-chat-probe.py https://www.twitch.tv/SomeChannel     # or
 python3 tools/gt7-telemetry-probe.py --ps-ip 192.168.1.42   # heartbeat + decrypt + field dump
 # Stop the relay first: only one listener can own UDP 33740. It requests the extended
 # "~" format; a console still streaming "A" switches only after ~10 s of silence.
+python3 tools/make-demo-recording.py --out runtime/solo-pov/telemetry-recordings   # synthetic GT7 recording for the Telemetry view (needs runtime/gt7/signatures.json; --mirror: unknown track)
 
 # Publish the GitHub wiki from src/docs/wiki/ (maintainer; --dry-run to preview)
 python3 tools/sync-wiki.py

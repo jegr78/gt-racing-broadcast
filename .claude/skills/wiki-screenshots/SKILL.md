@@ -24,12 +24,14 @@ uniform "dev build" across all shots.
 
 | Surface | URL (dev build) | Image file(s) |
 |---|---|---|
-| Control Center views | `racecast ui` → `/#<view>` | `src/docs/wiki/images/cc-<view>.png` (home, relay, streams, logs, profile, overlay-builder, crew-console, crew-editor, settings, setup, tools, apps, preflight, help) |
+| Control Center views | `racecast ui` → `/#<view>` | `src/docs/wiki/images/cc-<view>.png` (home, relay, streams, logs, profile, overlay-builder, crew-console, crew-editor, settings, setup, tools, apps, preflight, help, telemetry) |
 | Director Panel | `/panel` or `/console/panel` | `director-panel.png` |
 | Commentator Cockpit | `/cockpit?t=<token>` | `console-cockpit.png` |
 | Crew Console launcher | `/console?t=<token>` | `console-landing.png` |
 | Discord login page | `/console/login` | `console-login.png` |
 | Race Control desk | `/console/race-control?t=<token>` | `console-race-control.png` |
+
+`cc-telemetry.png` needs a solo POV profile with indexed recordings. Without network and without touching `runtime/`: `runtime/pw-venv/bin/python tools/e2e.py --visual --keep` starts a dev-build solo POV Control Center in a temp dir (a learned demo track plus one indexed demo recording) and prints its URL; capture its Telemetry view, then run the `kill` line it prints (only the processes it started) and delete the temp dir it names.
 
 Wiki screenshots live in **`src/docs/wiki/images/<name>.png`**. The onboarding slides reuse
 the **same images** in **`src/docs/slides/assets/img/<name>.png`**: when a shot is used by a
@@ -68,9 +70,10 @@ cards show live content instead of "relay offline".
    machine's `runtime/active-profile` pointer, and the next real `event start` would then run
    the demo league. `--profile` applies to this one process only.
 2. Drive it with the Playwright MCP: `browser_navigate` → `http://127.0.0.1:8090/`, switch to
-   the view, then **element-screenshot the card/modal** (not a full-window grab) so the
-   framing matches the existing images, e.g. the overlay builder modal:
-   `browser_take_screenshot` with `element` ref for `#ov-modal .ovmodal-card`.
+   the view at a 1440x900 viewport, then take a **full-window** screenshot (sidebar and
+   "dev build" badge visible) so the framing matches the existing `cc-*.png`. A modal is the
+   exception: element-screenshot it, e.g. the overlay builder with `browser_take_screenshot`
+   and the `element` ref for `#ov-modal .ovmodal-card`.
 3. Save into `src/docs/wiki/images/cc-<view>.png` (and the slides copy if the deck uses it).
 4. Stop the UI: `pkill -f "racecast.py --profile demo ui"`.
 
@@ -236,7 +239,7 @@ Publish the wiki only on the user's go-ahead: `python3 tools/sync-wiki.py` (prev
 - **Why obs-sim, not real OBS:** the producer's real OBS may not be running, and even if it
   is, its program is whatever they happen to have on screen, not reproducible. obs-sim pins a
   fixed program still so the same shot regenerates byte-stably on any machine (incl. Windows).
-- **Element vs full-page:** Control Center cards/modals → **element** screenshot (match the
-  existing tight framing). The standalone `/console`/`/cockpit`/`/panel` pages → **full-page**.
+- **Element vs full-page:** Control Center views and the standalone `/console`/`/cockpit`/
+  `/panel` pages → **full-page**. Only modals (the overlay builder) → **element** screenshot.
 - **Always the dev build** for Control Center (`cc-*`) shots so the version badge is uniform;
   a real version baked into one shot goes stale at the next release.

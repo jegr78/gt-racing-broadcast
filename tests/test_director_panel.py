@@ -2,8 +2,9 @@
 """Stdlib structural checks for the Director Panel frame.
 Run: python3 tests/test_director_panel.py
 
-There is no JS runtime here: these assert markup and presence-of-code anchors over
-the served HTML string. Runtime behavior is verified in the render pass.
+Most tests assert markup and presence-of-code anchors over the served HTML string; a
+few run single page functions under node when it is installed. Runtime behavior is
+verified in the render pass.
 
 The panel is a fixed frame (#728): topic navigation, the live column, one workspace
 area at a time and the chat rail. These tests guard that structure and that no
@@ -11,6 +12,8 @@ control of the old page was dropped."""
 import json
 import os
 import re
+import shutil
+import subprocess
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -353,6 +356,21 @@ def t_solo_telemetry_toggle():
     assert "teleVisBtn.hidden = !d.telemetry" in html
 
 
+def t_solo_telemetry_record_toggle():
+    html = _html()
+    solo = _config_block(html, "CONFIG_SOLO")
+    solo = solo[solo.index("vis:"):solo.index("audio:")]
+    assert 'label:"REC"' in solo and 'relay:"telemetry/record"' in solo, \
+        "the solo panel needs a REC key that drives /telemetry/record"
+    assert "teleRecBtn.hidden = !rec" in html
+    assert 'teleRecBtn.classList.toggle("air", !!(rec && rec.active && !rec.error))' in html
+    assert 'teleRecBtn.classList.toggle("warn", !!(rec && rec.error))' in html
+    assert "Date.now() / 1000 - rec.since" not in html, \
+        "the elapsed time comes from the relay, a skewed browser clock must not change it"
+    assert 'cost.textContent = rec && rec.active && rec.elapsed_s != null' in html
+    assert 'fmtDur(rec.elapsed_s)' in html
+
+
 def t_solo_status_strip_names_the_car():
     """The status strip shows the GT7 car from /status (telemetry.car), as text so a
     car name can never inject markup, and hides the pill without one. (#713)"""
@@ -364,6 +382,27 @@ def t_solo_status_strip_names_the_car():
     assert '$("#stCar").hidden = !car;' in poll
     assert '$("#stCar b").textContent = carLabel(car);' in poll
     assert "function carLabel(car)" in html
+
+
+def t_solo_status_strip_names_the_track():
+    """The strip shows the recognised GT7 track (telemetry.track) as text, '?' with the
+    candidate ids as tooltip while ambiguous, and hides it when unknown or the relay is down."""
+    html = _html()
+    assert '<span class="st" id="stTrack" hidden>TRACK <b></b></span>' in html
+    assert html.index('id="stCar"') < html.index('id="stTrack"'), "the track sits after the car"
+    poll = html[html.index("async function relayPoll"):]
+    down = poll[poll.index("}catch(e){"):]
+    poll = poll[:poll.index("}catch(e){")]
+    assert "const trk = trackOf(d.telemetry);" in poll
+    assert '$("#stTrack").hidden = !trk;' in poll
+    assert '$("#stTrack b").textContent = trackLabel(trk);' in poll
+    assert '"Possible: " + trk.candidates.join(", ")' in poll
+    assert '$("#stTrack").hidden = true;' in down[:down.index("\n}\n")], \
+        "a stale track must not stay up while the relay is down"
+    fn = _func_src(html, "trackLabel")
+    assert 'if (t.candidates) return "?";' in fn
+    assert '(t.reverse ? " (reverse)" : "")' in fn
+    assert "#stTrack b{text-transform:none" in html, "track names keep their case"
 
 
 
@@ -480,6 +519,95 @@ def _area(html, name):
     ends = [j for j in (html.find('<div class="area"', i + 1), html.find('<div id="log">', i))
             if j != -1]
     return html[i:min(ends)]
+
+
+def _run_js(src):
+    """stdout of `src` under node, or None where node is not installed."""
+    node = shutil.which("node")
+    if not node:
+        print("  (node not installed, JS check skipped)")
+        return None
+    return subprocess.run([node, "-"], input=src, capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", check=True, timeout=30).stdout
+
+
+def t_track_pill_treats_an_empty_candidate_list_as_no_track():
+    html = _html()
+    out = _run_js(_func_src(html, "trackOf") + "\n}\n" + _func_src(html, "trackLabel") + """
+}
+const r = [trackOf({track: {candidates: []}}), trackOf({track: {candidates: "x"}}),
+           trackOf(null), trackLabel(trackOf({track: {candidates: ["a", "b"]}})),
+           trackLabel(trackOf({track: {track: "Spa", layout: "Full"}}))];
+console.log(JSON.stringify(r));""")
+    if out is not None:
+        assert out.strip() == '[null,null,null,"?","Spa - Full"]', out
+
+
+def t_node_script_goes_through_stdin():
+    seen = []
+    real = subprocess.run
+    subprocess.run = lambda args, **kw: seen.append((args, kw)) or real(args, **kw)
+    try:
+        out = _run_js("console.log('x'.repeat(40000).length)")
+    finally:
+        subprocess.run = real
+    if out is not None:
+        assert out.strip() == "40000" and seen[0][0][1:] == ["-"] and "input" in seen[0][1], \
+            f"the script reaches node on stdin, so no command line grows with the page: {seen[0][0][1:]}"
+
+
+_REC_HARNESS = r"""
+class El {
+  constructor() { this.hidden = false; this.title = ''; this.kids = []; this.cls = new Set();
+                  this.textContent = ''; this.className = '';
+                  this.classList = {toggle: (c, on) => on ? this.cls.add(c) : this.cls.delete(c),
+                                    remove: (...c) => c.forEach(x => this.cls.delete(x))}; }
+  querySelector(sel) { return this.kids.find(k => '.' + k.className === sel) || null; }
+  appendChild(c) { this.kids.push(c); return c; }
+}
+const document = {createElement: () => new El()};
+let teleRecBtn = new El();
+const state = () => [teleRecBtn.hidden, [...teleRecBtn.cls].sort().join('+') || '-',
+                     JSON.stringify(teleRecBtn.querySelector('.cost') ?
+                                    teleRecBtn.querySelector('.cost').textContent : null)].join(' ');
+"""
+
+
+def t_rec_key_drops_its_live_state_when_the_relay_is_down():
+    html = _html()
+    out = _run_js(_REC_HARNESS + _func_src(html, "fmtDur") + "\n}\n"
+                  + _func_src(html, "renderTeleRec") + """
+}
+renderTeleRec({active: true, elapsed_s: 125, file: 'a.gt7rec'});
+const live = state();
+renderTeleRec(null, true);
+const down = state() + ' ' + JSON.stringify(teleRecBtn.title);
+renderTeleRec({active: false, error: 'No space left on device'});
+renderTeleRec(null, true);
+const warnDown = state();
+renderTeleRec(null);
+console.log([live, down, warnDown, state()].join('|'));""")
+    if out is not None:
+        live, down, warn_down, gone = out.strip().split("|")
+        assert live.startswith("false air ") and live != 'false air ""', live
+        assert down == 'false - "" "relay unreachable"', \
+            f"a down relay must not leave REC red with a frozen elapsed time: {down}"
+        assert warn_down.startswith("false - "), f"nor amber: {warn_down}"
+        assert gone.startswith("true "), f"a relay without telemetry hides REC: {gone}"
+
+
+def t_relay_driven_keys_start_hidden():
+    html = _html()
+    out = _run_js(_func_src(html, "relayGated") + """
+}
+console.log([relayGated({relay: 'telemetry'}), relayGated({relay: 'telemetry/record'}),
+             relayGated({relay: 'pov'}), relayGated({source: 'Solo Webcam'})].join(' '));""")
+    if out is not None:
+        assert out.strip() == "true true false false", \
+            f"only keys relayPoll reveals start hidden, POV stays visible: {out!r}"
+    build = _func_src(html, "buildControls")
+    assert "b.hidden = relayGated(item)" in build, \
+        "TELEMETRY and REC are created hidden, so a solo commentary profile never flashes them"
 
 
 def _func_src(html, name):

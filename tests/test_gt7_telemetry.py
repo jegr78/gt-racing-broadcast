@@ -35,6 +35,9 @@ def _packet(**kw):
     b[tm.OFF_THROTTLE] = kw.get("throttle", 0)
     b[tm.OFF_BRAKE] = kw.get("brake", 0)
     struct.pack_into("<i", b, tm.OFF_CAR_ID, kw.get("car_id", 0))
+    struct.pack_into("<3f", b, tm.OFF_POS, *kw.get("pos", (0.0, 0.0, 0.0)))
+    struct.pack_into("<f", b, tm.OFF_RPM, kw.get("rpm", 0.0))
+    b[tm.OFF_GEAR] = kw.get("gear_byte", 0)
     return bytes(b)
 
 
@@ -70,6 +73,22 @@ def _ext_packet(**kw):
 def t_parse_car_id():
     """The car id sits in the base packet too, so it needs no extended format."""
     assert tm.parse_packet(_packet(car_id=3424)).car_id == 3424
+
+
+def t_parse_gear_rpm_position():
+    p = tm.parse_packet(_packet(gear_byte=0x24, rpm=7350.5, pos=(1.5, -2.0, 300.25)))
+    assert p.gear == 4, "gear is the low nibble of 0x90; the high nibble is ignored"
+    assert abs(p.rpm - 7350.5) < 1e-3
+    assert (p.pos_x, p.pos_y, p.pos_z) == (1.5, -2.0, 300.25)
+
+
+def t_sanitize_keeps_last_rpm_and_position_on_nan():
+    eng = tm.TelemetryEngine()
+    eng.update(tm.parse_packet(_packet(rpm=5000.0, pos=(1.0, 2.0, 3.0))), 1.0)
+    nan = float("nan")
+    eng.update(tm.parse_packet(_packet(rpm=nan, pos=(nan, nan, nan))), 1.1)
+    assert eng._last.rpm == 5000.0, "a non-finite rpm keeps the previous reading"
+    assert (eng._last.pos_x, eng._last.pos_y, eng._last.pos_z) == (1.0, 2.0, 3.0)
 
 
 class _Cars:
@@ -588,6 +607,53 @@ def t_engine_session_reset_on_best_cleared():
     assert eng.snapshot()["has_reference"] is False
 
 
+def t_engine_session_change_on_teleport_before_any_best_lap():
+    """Leaving a session before a best lap exists and starting another track on the same
+    lap counter fires neither the lap nor the best signal; the jump in position does."""
+    eng = tm.TelemetryEngine()
+    for i in range(20):
+        eng.update(tm.parse_packet(_packet(lap=1, speed_mps=40.0, pos=(4.0 * i, 0.0, 0.0))),
+                   100.0 + 0.1 * i)
+    eng.update(tm.parse_packet(_packet(lap=1, flags=0, pos=(0.0, 0.0, 0.0))), 110.0)
+    eng.update(tm.parse_packet(_packet(lap=1, speed_mps=5.0, pos=(-3000.0, 0.0, 2500.0))), 120.0)
+    assert eng.session == 2, f"a track change before any best lap is a new session: {eng.session}"
+    for i in range(1, 20):
+        eng.update(tm.parse_packet(_packet(lap=1, speed_mps=40.0,
+                                           pos=(-3000.0 + 4.0 * i, 0.0, 2500.0))),
+                   120.0 + 0.1 * i)
+    assert eng.session == 2, f"driving on is not another session: {eng.session}"
+    laps = []
+    eng.on_lap = laps.append
+    for i in range(20, 400):
+        eng.update(tm.parse_packet(_packet(lap=1, speed_mps=40.0,
+                                           pos=(-3000.0 + 4.0 * i, 0.0, 2500.0))),
+                   120.0 + 0.1 * i)
+    eng.update(tm.parse_packet(_packet(lap=2, speed_mps=40.0, pos=(-1400.0, 0.0, 2500.0))),
+               160.0)
+    assert [lap["status"] for lap in laps] == ["not counted"], \
+        f"the stretch from the spawn point to the line is no lap: {laps}"
+
+
+def t_engine_no_session_change_on_teleport_after_a_best_lap():
+    eng = tm.TelemetryEngine()
+    eng.update(tm.parse_packet(_packet(lap=0)), 99.0)
+    _feed_lap(eng, 100.0, 1, duration=10.0, speed=50.0)
+    eng.update(tm.parse_packet(_packet(lap=2, best_ms=60000, pos=(0.0, 0.0, 0.0))), 111.0)
+    eng.update(tm.parse_packet(_packet(lap=2, best_ms=60000, flags=0)), 111.5)
+    eng.update(tm.parse_packet(_packet(lap=2, best_ms=60000, pos=(-3000.0, 0.0, 2500.0))),
+               112.0)
+    assert eng.session == 1 and eng.snapshot()["has_reference"] is True, \
+        "with a best lap set, GT7 clears it on a new session, so a jump alone is no boundary"
+
+
+def t_engine_no_session_change_on_a_jump_while_driving():
+    eng = tm.TelemetryEngine()
+    eng.update(tm.parse_packet(_packet(lap=1, speed_mps=40.0, pos=(0.0, 0.0, 0.0))), 100.0)
+    eng.update(tm.parse_packet(_packet(lap=1, speed_mps=40.0, pos=(-3000.0, 0.0, 2500.0))),
+               100.1)
+    assert eng.session == 1, "a jump without leaving the track is no track change"
+
+
 def t_engine_no_reset_on_normal_lap_increment():
     eng = tm.TelemetryEngine()
     eng.update(tm.parse_packet(_packet(lap=0)), 99.0)
@@ -1037,6 +1103,216 @@ def t_laplog_session_change_without_reference():
         eng.update(tm.parse_packet(_packet(lap=3)), 99.0)         # mid-lap connect
         eng.update(tm.parse_packet(_packet(lap=1, speed_mps=0.0)), 100.0)
     assert "GT7 session change (new lap counter 1): no reference yet" in cap.lines, cap.lines
+
+
+def t_engine_emits_lap_records():
+    eng = tm.TelemetryEngine()
+    laps = []
+    eng.on_lap = laps.append
+    eng.update(tm.parse_packet(_packet(lap=0)), 99.0)
+    t = _feed_lap(eng, 100.0, 1, duration=10.0, speed=50.0)
+    _feed_lap(eng, t, 2, duration=11.0, speed=60.0)   # its last packet opens lap 3
+    assert [r["lap"] for r in laps] == [0, 1, 2], laps
+    assert laps[0]["status"] == "not counted" and "partial" in laps[0]["reason"]
+    assert laps[1]["status"] == "reference" and laps[1]["reason"] == ""
+    assert laps[2]["status"] == "counted"
+    assert abs(laps[2]["top_speed_mps"] - 60.0) < 1e-6
+    assert laps[1]["start"] == 100.0 and laps[1]["end"] < laps[2]["start"]
+    assert all(r["session"] == 1 for r in laps)
+
+
+def t_engine_session_change_emits_abandoned_lap_and_counts_session():
+    eng = tm.TelemetryEngine()
+    laps = []
+    eng.on_lap = laps.append
+    eng.update(tm.parse_packet(_packet(lap=1)), 99.0)
+    t = _feed_lap(eng, 100.0, 2, duration=5.0)   # ends with lap 3's first packet at t
+    assert eng.session == 1
+    eng.update(tm.parse_packet(_packet(lap=0, speed_mps=0.0)), t)
+    assert eng.session == 2
+    last = laps[-1]
+    assert (last["lap"], last["status"], last["reason"], last["session"]) == \
+        (3, "not counted", "session change", 1), last
+    assert eng.lap_started_at() == t
+
+
+def t_engine_without_on_lap_is_unchanged():
+    eng = tm.TelemetryEngine()
+    assert eng.on_lap is None and eng.lap_started_at() is None and eng.lap_distance() is None
+    eng.update(tm.parse_packet(_packet(lap=1)), 1.0)
+    assert eng.lap_started_at() == 1.0
+
+
+def t_engine_lap_distance_and_car_in_record():
+    eng = tm.TelemetryEngine()
+    laps = []
+    eng.on_lap = laps.append
+    eng.update(tm.parse_packet(_packet(lap=1, car_id=3424)), 1.0)
+    for i in range(1, 11):                                    # 1 s at 50 m/s
+        eng.update(tm.parse_packet(_packet(lap=1, speed_mps=50.0, car_id=3424)), 1.0 + i / 10)
+    assert abs(eng.lap_distance() - 50.0) < 1e-6, eng.lap_distance()
+    eng.update(tm.parse_packet(_packet(lap=2, car_id=3424)), 2.1)
+    assert laps[-1]["car_id"] == 3424 and eng.lap_distance() == 0.0
+
+
+def t_engine_on_lap_failure_does_not_raise():
+    eng = tm.TelemetryEngine()
+
+    def boom(_record):
+        raise RuntimeError("consumer exploded")
+
+    eng.on_lap = boom
+    eng.update(tm.parse_packet(_packet(lap=0)), 99.0)
+    t = _feed_lap(eng, 100.0, 1, duration=10.0, speed=50.0)
+    assert eng.lap_started_at() == t
+    assert eng.session == 1
+
+
+class _FakeTracks:
+    def __init__(self, result):
+        self.result, self.calls = result, []
+
+    def match(self, points, length_m):
+        self.calls.append((len(points), round(length_m)))
+        return self.result
+
+
+def _drive_xy(eng, t, lap, secs, speed=50.0):
+    """Drive `secs` along +x at `speed`, positions following the distance."""
+    x = 0.0
+    for _ in range(int(secs / 0.1)):
+        eng.update(tm.parse_packet(_packet(speed_mps=speed, lap=lap, pos=(x, 0.0, 0.0))), t)
+        t += 0.1
+        x += speed * 0.1
+    return t
+
+
+def t_lap_record_carries_points_every_20m():
+    eng = tm.TelemetryEngine()
+    laps = []
+    eng.on_lap = laps.append
+    eng.update(tm.parse_packet(_packet(lap=1)), 0.0)
+    t = _drive_xy(eng, 0.1, 2, 10.0)                       # 500 m
+    eng.update(tm.parse_packet(_packet(lap=3)), t)
+    pts = laps[-1]["points"]
+    assert 24 <= len(pts) <= 26, len(pts)
+    assert all(15.0 <= b[0] - a[0] <= 25.0 for a, b in zip(pts, pts[1:], strict=False)), pts[:4]
+    assert abs(laps[-1]["distance_m"] - 495.0) < 1e-6
+
+
+def t_engine_sets_track_after_a_matching_lap_and_resets_on_session_change():
+    eng = tm.TelemetryEngine()
+    found = {"id": "2066d9", "track": "Nürburgring", "layout": "Grand Prix",
+             "reverse": False, "score_m": 4.2}
+    eng.track_db = _FakeTracks(found)
+    eng.update(tm.parse_packet(_packet(lap=1)), 0.0)
+    t = _drive_xy(eng, 0.1, 2, 10.0)
+    eng.update(tm.parse_packet(_packet(lap=3)), t)
+    assert eng.track == found
+    n = len(eng.track_db.calls)
+    t = _drive_xy(eng, t + 0.1, 3, 10.0)
+    eng.update(tm.parse_packet(_packet(lap=4)), t)
+    assert len(eng.track_db.calls) == n, "a recognised track is not matched again"
+    eng.update(tm.parse_packet(_packet(lap=0)), t + 0.1)
+    assert eng.track is None
+
+
+def t_engine_keeps_trying_while_ambiguous_and_survives_matcher_errors():
+    eng = tm.TelemetryEngine()
+    fake = _FakeTracks({"candidates": ["a", "b"]})
+    eng.track_db = fake
+    eng.update(tm.parse_packet(_packet(lap=1)), 0.0)
+    t = _drive_xy(eng, 0.1, 2, 10.0)
+    eng.update(tm.parse_packet(_packet(lap=3)), t)
+    assert eng.track == {"candidates": ["a", "b"]}
+    n = len(fake.calls)
+
+    t = _drive_xy(eng, t + 0.1, 3, 10.0)
+    eng.update(tm.parse_packet(_packet(lap=4)), t)
+    assert len(fake.calls) == n + 1, "an ambiguous result keeps trying on the next lap"
+    assert eng.track == {"candidates": ["a", "b"]}
+
+    class Boom:
+        def match(self, *a):
+            raise RuntimeError("bad data")
+    eng.track_db = Boom()
+    t = _drive_xy(eng, t + 0.1, 4, 10.0)
+    eng.update(tm.parse_packet(_packet(lap=5)), t)        # must not raise
+    assert eng.track == {"candidates": ["a", "b"]}
+
+
+def t_engine_survives_an_incomplete_or_non_dict_match_result():
+    """A match result with an 'id' but missing keys, or a non-dict result, must
+    never raise into update(): the lap counter has to keep advancing."""
+    class _Incomplete:
+        def match(self, *a):
+            return {"id": "x"}        # missing track/layout/reverse
+
+    eng = tm.TelemetryEngine()
+    eng.track_db = _Incomplete()
+    eng.update(tm.parse_packet(_packet(lap=1)), 0.0)
+    t = _drive_xy(eng, 0.1, 2, 10.0)
+    eng.update(tm.parse_packet(_packet(lap=3)), t)        # must not raise
+    assert eng.track == {"id": "x"}
+    assert eng._lap_num == 3
+
+    class _NonDict:
+        def match(self, *a):
+            return ["not", "a", "dict"]
+
+    eng2 = tm.TelemetryEngine()
+    eng2.track_db = _NonDict()
+    eng2.update(tm.parse_packet(_packet(lap=1)), 0.0)
+    t2 = _drive_xy(eng2, 0.1, 2, 10.0)
+    eng2.update(tm.parse_packet(_packet(lap=3)), t2)      # must not raise
+    assert eng2.track is None
+    assert eng2._lap_num == 3
+
+    # the lap counter must keep advancing normally on the following lap too
+    t3 = _drive_xy(eng2, t2 + 0.1, 3, 10.0)
+    eng2.update(tm.parse_packet(_packet(lap=4)), t3)
+    assert eng2._lap_num == 4
+
+
+def t_lap_points_capped_under_flood():
+    """A same-lap packet flood must not grow _LapAccumulator.points without bound,
+    mirroring the existing samples cap."""
+    eng = tm.TelemetryEngine()
+    t = 100.0
+    eng.update(tm.parse_packet(_packet(speed_mps=90.0, lap=1)), t); t += 0.1
+    for _ in range(tm.MAX_SAMPLES + 500):     # flood, lap never changes
+        eng.update(tm.parse_packet(_packet(speed_mps=90.0, lap=1)), t); t += 0.1
+    assert len(eng._acc.points) == tm.MAX_POINTS     # capped, not just bounded
+
+
+def t_long_real_lap_not_rejected_and_keeps_all_its_points():
+    """The bundled catalogue's longest layout (Special Stage Route X, ~30.3 km) must
+    drive clean, not trip the sample-flood cap, and keep points across the whole lap;
+    5 m/step (default _drive_xy speed) keeps the sample count close to the real
+    4 m-spacing cap, unlike a coarser step that would never flood."""
+    eng = tm.TelemetryEngine()
+    laps = []
+    eng.on_lap = laps.append
+    eng.update(tm.parse_packet(_packet(lap=1)), 0.0)
+    t = _drive_xy(eng, 0.1, 2, 620.0)                  # ~31 km lap at 50 m/s
+    eng.update(tm.parse_packet(_packet(lap=3)), t)
+    rec = laps[-1]
+    assert rec["status"] in ("reference", "counted"), rec
+    assert rec["distance_m"] > 30000, rec["distance_m"]
+    assert 1500 <= len(rec["points"]) <= 1600, len(rec["points"])
+
+
+def t_short_lap_never_reaches_match():
+    """A lap under MIN_TRACK_POINTS points must never call TrackDB.match."""
+    eng = tm.TelemetryEngine()
+    fake = _FakeTracks({"id": "x", "track": "T", "layout": "L",
+                         "reverse": False, "score_m": 1.0})
+    eng.track_db = fake
+    eng.update(tm.parse_packet(_packet(lap=1)), 0.0)
+    t = _drive_xy(eng, 0.1, 2, 1.0)            # a few metres: well under 10 points
+    eng.update(tm.parse_packet(_packet(lap=3)), t)
+    assert fake.calls == []
+    assert eng.track is None
 
 
 if __name__ == "__main__":

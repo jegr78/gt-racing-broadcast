@@ -77,7 +77,7 @@ def t_duplicate_op_refused_while_running():
     job_id, err = jm.start("slow", [])
     assert err is None
     _id2, err2 = jm.start("slow", [])
-    assert _id2 is None and "already running" in err2
+    assert _id2 == job_id and "already running" in err2, "a refused start names the running job"
     _wait_done(jm, job_id)
     job_id3, err3 = jm.start("slow", [])      # finished -> may run again
     assert err3 is None and job_id3 != job_id
