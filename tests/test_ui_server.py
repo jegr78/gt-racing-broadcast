@@ -2107,7 +2107,88 @@ def t_telemetry_charts_share_one_cursor():
     keys = re.findall(r"\{key: '(\w+)'", tm[tm.index("const TM_CH"):tm.index("];", tm.index("const TM_CH"))])
     assert keys == ["speed_kmh", "throttle", "brake", "steer_deg", "gear", "delta"], keys
     assert "addEventListener('pointermove', tmHover)" in tm
-    assert "tmRenderCharts()" in tm[tm.index("function tmRender()"):]
+    assert "tmRenderCharts()" in _tm_fn(tm, "tmRender"), "every pair render redraws the charts"
+
+
+def t_telemetry_map_colours_mini_sectors():
+    tm = _tm_script(_cc_page())
+    fn = tm[tm.index("function tmRenderMap()"):tm.index("function tmMapCursor(")]
+    assert "(p.z - z0) * s" in fn, "GT7 z runs downward on the map, as in the report"
+    assert "'gain'" in fn and "'loss'" in fn and "tm-seg" in fn
+    assert "tmMapCursor(ra, rb)" in tm[tm.index("function tmHover("):tm.index("function tmLeave(")]
+    assert "tmRenderMap()" in _tm_fn(tm, "tmRender"), "every pair render redraws the map"
+
+
+_TM_MAP_COUNT = """
+const drawn = () => {
+  const n = {};
+  const walk = e => {
+    const a = e.attrs || {};
+    const k = e.tagName + (a.class ? '.' + a.class : '');
+    n[k] = (n[k] || 0) + 1;
+    if (e.tagName === 'text') n.note = (n.note || 0) + 1;
+    e.kids.forEach(walk);
+  };
+  $('tm-map').kids.forEach(walk);
+  return ['path.tm-a', 'path.tm-seg gain', 'path.tm-seg loss', 'path.tm-seg even', 'note']
+    .map(k => n[k] || 0).join(',');
+};
+const trace = n => Array.from({length: n}, (_, i) => ({d: i * 5, t: i, x: i, z: i * i}));
+"""
+
+
+def t_telemetry_map_draws_sectors_and_hides_cursor_past_the_lap():
+    out = _tm_node(_TM_MAP_COUNT + """
+tmState.sectorM = 10;
+tmState.lapA = {trace: trace(7), sectors: [1.5, 1.5, 3.0002]};
+tmState.lapB = {trace: trace(7), sectors: [1, 2, 3]};
+tmRenderMap();
+const pair = drawn();
+const P = tmState.map.P;
+const axes = [P({x: 6, z: 0})[0] > P({x: 0, z: 0})[0], P({x: 0, z: 36})[1] > P({x: 0, z: 0})[1]];
+tmMapCursor({x: 1, z: 1}, null);
+const vis = [tmState.map.dotA.attrs.visibility, tmState.map.dotB.attrs.visibility];
+tmState.lapA = null;
+tmRenderMap();
+const alone = drawn();
+tmState.lapB = {trace: trace(7).map(p => ({...p, x: null, z: null})), sectors: [1, 2, 3]};
+tmRenderMap();
+console.log([pair, axes.join(','), vis.join(','), alone, drawn(), String(tmState.map)].join('|'));""")
+    if out is not None:
+        assert out.strip() == "1,1,1,1,0|true,true|visible,hidden|0,0,0,3,0|0,0,0,0,1|null", \
+            f"B per mini-sector gain/loss/even, x right and z down, no dot past a lap: {out!r}"
+
+
+def t_telemetry_refit_redraws_only_on_a_width_change():
+    out = _tm_node(_TM_MAP_COUNT + """
+tmState.sectorM = 10;
+tmState.lapB = {trace: trace(7), sectors: [1, 2, 3]};
+tmRender();
+const first = [$('tm-charts').kids[0], $('tm-map').kids[0]];
+tmRefit();
+const same = [$('tm-charts').kids[0] === first[0], $('tm-map').kids[0] === first[1]];
+$('tm-charts').getBoundingClientRect = () => ({left: 0, width: 640});
+$('tm-map').getBoundingClientRect = () => ({left: 0, width: 300});
+tmRefit();
+const moved = [$('tm-charts').kids[0] === first[0], $('tm-map').kids[0] === first[1]];
+$('tm-charts').getBoundingClientRect = () => ({left: 0, width: 0});
+$('tm-map').getBoundingClientRect = () => ({left: 0, width: 0});
+const kept = $('tm-charts').kids[0];
+tmRefit();
+console.log([same.join(','), moved.join(','), $('tm-charts').kids[0] === kept, tmState.chart.W].join('|'));""")
+    if out is not None:
+        assert out.strip() == "true,true|false,false|true|640", \
+            f"a refit redraws only a changed width and skips a hidden view: {out!r}"
+
+
+def t_telemetry_showing_the_view_refits_a_loaded_pair():
+    page = _cc_page()
+    show = page[page.index("function showView(name)"):page.index("let _reportPath")]
+    assert "name === 'telemetry' && tmState.lapB) tmRefit()" in show, \
+        "a pair drawn while the view was hidden is redrawn at the real width"
+    tm = _tm_script(page)
+    resize = tm[tm.index("window.addEventListener('resize'"):]
+    assert "tmRefit()" in resize, "a resize redraws through the width check"
 
 
 def t_telemetry_delta_and_paths_follow_the_traces():
@@ -2259,6 +2340,23 @@ console.log([n2, status, tmState.b, tmState.pool.laps.length].join('|'));""")
     if out is not None:
         assert out.strip() == "1|Loading comparable laps...|R|1|2|2", \
             f"one pool request per query, a loading note and the newest lap wins: {out!r}"
+
+
+def t_telemetry_clearing_the_pair_drops_a_pending_load():
+    out = _tm_node("""
+const b = lap('R', 1, 80, 1);
+tmSelectB(b);
+await tick();
+answer('car=1', pool([b]));
+await tick();
+tmSelectB(b);
+await tick();
+answer('/lap?', {ok: true, lap: b, sector_m: 200});
+await tick();
+console.log([String(tmState.lapB), $('tm-sec-sub').textContent.replace(/\\u2026/g, '...')].join('|'));""")
+    if out is not None:
+        assert out.strip() == "null|Loading comparable laps...", \
+            f"a lap answer from before the clear must not draw under the loading note: {out!r}"
 
 
 def t_telemetry_reference_is_the_fastest_other_lap():

@@ -1383,6 +1383,7 @@ function showView(name) {
   if (name === 'settings' && !settingsLoaded) { settingsLoaded = true; loadSettings(); }
   if (name === 'console') loadConsole();   // reload each visit: reflects toggles/links
   if (name === 'telemetry' && !tmState.loaded) tmLoad();
+  else if (name === 'telemetry' && tmState.lapB) tmRefit();
   // First open only: start the default "All (live)" stream. The guard is its own
   // flag rather than !logES, because an archive selection leaves logES null (an
   // archive uses fetch, not SSE) and returning to Logs would clobber it.
@@ -5211,6 +5212,7 @@ function tmPlaceholder(id, text) {
   sel.disabled = true;
 }
 function tmClearPair(status) {
+  tmSeq.pair++;
   tmState.lapA = tmState.lapB = tmState.pool = tmState.a = null;
   tmState.chart = tmState.map = tmState.cursor = null;
   ['tm-charts', 'tm-map', 'tm-sectors', 'tm-map-sub'].forEach(id => { $(id).textContent = ''; });
@@ -5418,6 +5420,7 @@ function tmRender() {
   const B = tmState.lapB;
   $('tm-map-sub').textContent = B ? tmLapTrack(B) : '';
   tmRenderCharts();
+  tmRenderMap();
   tmRenderSectors();
 }
 
@@ -5570,11 +5573,13 @@ function tmHover(ev) {
     p.read.textContent = (n === 0 ? (d / 1000).toFixed(2) + ' km · ' : '') + txt;
     tmReadBg(p, ch.W);
   });
+  tmMapCursor(ra, rb);
 }
 
 function tmLeave() {
   if (tmState.cursor) { tmState.cursor.setAttribute('x1', -10); tmState.cursor.setAttribute('x2', -10); }
   if (tmState.chart) tmState.chart.panels.forEach(p => { p.read.textContent = ''; tmReadBg(p, tmState.chart.W); });
+  tmMapCursor(null, null);
 }
 
 // Sized from the character count (11px mono is ~6.7px wide), so a hover never forces a layout.
@@ -5584,13 +5589,89 @@ function tmReadBg(p, W) {
   p.bg.setAttribute('width', w);
 }
 
+function tmMapPt(p) { return p && Number.isFinite(p.x) && Number.isFinite(p.z); }
+function tmMapW() { return Math.max(200, Math.round($('tm-map').getBoundingClientRect().width) || 320); }
+
+function tmRenderMap() {
+  const svg = $('tm-map');
+  svg.textContent = '';
+  tmState.map = null;
+  const A = tmState.lapA, B = tmState.lapB;
+  const ta = tmTrace(A), tb = tmTrace(B);
+  if (!tb.length) return;
+  const W = tmMapW(), pad = 12;
+  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity, any = false;
+  [ta, tb].forEach(t => t.forEach(p => {
+    if (!tmMapPt(p)) return;
+    if (p.x < x0) x0 = p.x; if (p.x > x1) x1 = p.x;
+    if (p.z < z0) z0 = p.z; if (p.z > z1) z1 = p.z;
+    any = any || t === tb;
+  }));
+  if (!any) {
+    svg.setAttribute('viewBox', '0 0 ' + W + ' 24');
+    tmEl('text', {x: 0, y: 15}, svg).textContent = 'no position data in this lap';
+    return;
+  }
+  const s = (W - 2 * pad) / (Math.max(x1 - x0, z1 - z0) || 1);
+  svg.setAttribute('viewBox', '0 0 ' + W + ' ' + Math.round((z1 - z0) * s + 2 * pad));
+  const P = p => [pad + (p.x - x0) * s, pad + (p.z - z0) * s];
+  const line = pts => {
+    let d = '', pen = false;
+    pts.forEach(p => {
+      if (!tmMapPt(p)) { pen = false; return; }
+      d += (pen ? 'L' : 'M') + P(p).map(v => v.toFixed(1)).join(' ');
+      pen = true;
+    });
+    return d;
+  };
+  const da = line(ta);
+  if (da) tmEl('path', {d: da, class: 'tm-a'}, svg);
+  const per = (tmState.sectorM || 200) / TM_STEP;      // stations per mini-sector
+  const sa = A ? A.sectors || [] : [];
+  (B.sectors || []).forEach((secB, i) => {
+    const d = line(tb.slice(Math.round(i * per), Math.round((i + 1) * per) + 1));
+    if (!d) return;
+    const secA = sa[i];
+    const diff = secA != null && secB != null ? secB - secA : null;
+    const cls = diff == null || Math.abs(diff) < 0.0005 ? 'even' : diff < 0 ? 'gain' : 'loss';
+    const path = tmEl('path', {d, class: 'tm-seg ' + cls}, svg);
+    tmEl('title', {}, path).textContent = 'Sector ' + (i + 1) + (diff == null ? '' : ': ' + tmSigned(diff) + ' s');
+  });
+  const [sx, sy] = P(tb.find(tmMapPt));
+  tmEl('circle', {cx: sx, cy: sy, r: 3.5, class: 'tm-line'}, svg);   // start/finish line
+  const dot = cls => tmEl('circle', {r: 5, cx: 0, cy: 0, visibility: 'hidden', class: cls}, svg);
+  tmState.map = {P, W, dotA: dot('tm-dot-a'), dotB: dot('tm-dot-b')};
+}
+
+// A lap that does not reach the cursor distance (r null) shows no dot.
+function tmMapCursor(ra, rb) {
+  const m = tmState.map;
+  if (!m) return;
+  [[m.dotA, ra], [m.dotB, rb]].forEach(([dot, r]) => {
+    if (!tmMapPt(r)) { dot.setAttribute('visibility', 'hidden'); return; }
+    const [x, y] = m.P(r);
+    dot.setAttribute('cx', x.toFixed(1));
+    dot.setAttribute('cy', y.toFixed(1));
+    dot.setAttribute('visibility', 'visible');
+  });
+}
+
+// Redraws what a width change would distort; a hidden view (width 0) waits for showView.
+function tmRefit() {
+  if (!tmState.lapB) return;
+  const cw = Math.round($('tm-charts').getBoundingClientRect().width);
+  if (cw && (!tmState.chart || Math.max(300, cw) !== tmState.chart.W)) tmRenderCharts();
+  const mw = Math.round($('tm-map').getBoundingClientRect().width);
+  if (mw && (!tmState.map || Math.max(200, mw) !== tmState.map.W)) tmRenderMap();
+}
+
 $('tm-charts').addEventListener('pointermove', tmHover);
 $('tm-charts').addEventListener('pointerleave', tmLeave);
 let tmResizeQueued = false;
 window.addEventListener('resize', () => {
   if (currentView !== 'telemetry' || !tmState.lapB || tmResizeQueued) return;
   tmResizeQueued = true;
-  requestAnimationFrame(() => { tmResizeQueued = false; tmRenderCharts(); });
+  requestAnimationFrame(() => { tmResizeQueued = false; tmRefit(); });
 });
 // end of the Telemetry view
 
