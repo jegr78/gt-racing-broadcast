@@ -2297,6 +2297,17 @@ console.log([tmTime(83.456), tmTime(9.5), tmTime(3600), tmSigned(0.25), tmSigned
         assert out.strip() == "1:23.456|0:09.500|60:00.000|+0.250|-1.000|0.000", out
 
 
+def t_telemetry_track_label_names_a_reverse_layout():
+    tm = _tm_script(_cc_page())
+    out = _run_js(_tm_fn(tm, "tmTrackName") + _tm_fn(tm, "tmTrackLabel") + """
+console.log([tmTrackLabel(null), tmTrackLabel({candidates: []}),
+             tmTrackLabel({track: 'Alsace', layout: 'Village', reverse: true}),
+             tmTrackLabel({track: 'Ring', layout: '', reverse: false})].join('|'));""")
+    if out is not None:
+        assert out.strip() == "track unknown|track ambiguous|Alsace - Village (reverse)|Ring", \
+            f"the Laps label names the layout like the picker: {out!r}"
+
+
 def t_telemetry_recording_rows_mark_open_files_and_unindexed_laps():
     tm = _tm_script(_cc_page())
     fn = tm[tm.index("function tmRenderRecs()"):tm.index("async function tmSelectRec(")]

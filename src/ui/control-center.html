@@ -5203,10 +5203,14 @@ function tmShared(url) {
   if (!tmLapsReq.has(url)) tmLapsReq.set(url, tmGet(url).finally(() => tmLapsReq.delete(url)));
   return tmLapsReq.get(url);
 }
+function tmTrackName(t) {
+  return t.track + (t.layout ? ' - ' + t.layout : '') + (t.reverse ? ' (reverse)' : '');
+}
+
 function tmTrackLabel(t) {
   if (!t) return 'track unknown';
   if (t.candidates) return 'track ambiguous';
-  return t.track + (t.layout ? ' - ' + t.layout : '');
+  return tmTrackName(t);
 }
 function tmLapTrack(l) { return l.track ? l.track + (l.layout ? ' - ' + l.layout : '') : 'track unknown'; }
 
@@ -5675,10 +5679,6 @@ function tmRefit() {
   if (cw && (!tmState.chart || Math.max(300, cw) !== tmState.chart.W)) tmRenderCharts();
   const mw = Math.round($('tm-map').getBoundingClientRect().width);
   if (mw && (!tmState.map || Math.max(200, mw) !== tmState.map.W)) tmRenderMap();
-}
-
-function tmTrackName(t) {
-  return t.track + (t.layout ? ' - ' + t.layout : '') + (t.reverse ? ' (reverse)' : '');
 }
 
 // The Set track row for an unknown or ambiguous recording; candidates come first.

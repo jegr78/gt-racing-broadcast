@@ -222,7 +222,7 @@ class TrackDB:
 
     def learn(self, official_id, points, length_m, key=None):
         """Assign recording `key` to `official_id` and, when no downloaded racing line
-        exists for it, store `points` as its learned signature. True when a line was
+        exists for it (its own row or a downloaded forward line it reverses), store `points` as its learned signature. True when a line was
         learned, False when only the recording was assigned.
 
         A user-triggered write: a write failure (OSError) propagates to the caller
@@ -230,7 +230,8 @@ class TrackDB:
         if not self._learned_path:
             raise ValueError("no learned-tracks file configured")
         doc = self._read_learned()
-        if official_id in self._shipped:
+        if official_id in self._shipped or any(
+                r["reverse"] == official_id for r in self._shipped.values()):
             if not key:
                 raise ValueError("this layout has a downloaded racing line, "
                                  "so only a recording can be assigned to it")

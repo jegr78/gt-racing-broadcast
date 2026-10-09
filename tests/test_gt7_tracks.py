@@ -283,6 +283,21 @@ def t_learn_onto_a_downloaded_line_only_assigns_the_recording():
                            key="solo-pov/t") is True, "an id without a downloaded line learns it"
 
 
+def t_learn_onto_the_reverse_of_a_downloaded_line_only_assigns():
+    with tempfile.TemporaryDirectory() as d:
+        rows = [_row("aaa001", "Oval", OVAL, {"official_id": "aaa002",
+                                              "official_name": "Oval (Reverse)"})]
+        db = _db(d, rows)
+        before = db.project([tuple(OVAL[10])], "aaa002")[0]
+        assert db.learn("aaa002", [(-x, z) for x, z in OVAL], _length(OVAL),
+                        key="solo-pov/r") is False, "the reverse twin keeps the downloaded line"
+        again = _db(d, rows)
+        assert again.assignment("solo-pov/r") == "aaa002"
+        assert abs(again.project([tuple(OVAL[10])], "aaa002")[0] - before) < 1e-6
+        with open(os.path.join(d, "learned-tracks.json"), encoding="utf-8") as fh:
+            assert json.load(fh)["signatures"] == [], "no learned row for the reverse twin"
+
+
 def t_learn_on_unwritable_path_raises_and_leaves_no_tmp_file():
     with tempfile.TemporaryDirectory() as d:
         _db(d, [])
@@ -344,8 +359,7 @@ def t_relearning_same_id_replaces_its_row():
 
 def t_learn_of_a_reverse_id_uses_its_own_path_for_project():
     with tempfile.TemporaryDirectory() as d:
-        db = _db(d, [_row("aaa001", "Oval", OVAL, {"official_id": "aaa002",
-                                                   "official_name": "Oval (Reverse)"})])
+        db = _db(d, [])
         rev_path = list(reversed(OVAL))
         db.learn("aaa002", rev_path, _length(OVAL))
         s = db.project([tuple(rev_path[0])], "aaa002")[0]

@@ -340,8 +340,9 @@ override.
   `signatures.json` shape (box from the points, `path` = points, `provenance:
   "learned"`) into `learned-tracks.json`, atomically, and with `key`
   (`"<profile>/<stem>"`) records the assignment of that recording to the layout.
-  A layout that has a downloaded racing line keeps it: `learn` then records only the
-  assignment (it needs `key`) and returns False; it returns True when it wrote a line.
+  A layout that has a downloaded racing line, or reverses one, keeps it: `learn` then
+  records only the assignment (it needs `key`) and returns False; it returns True when
+  it wrote a line.
   `assignment(key)` reads it back. Updates never touch this file.
 - `project(points, official_id)` -> per point the distance along the row's `path` from
   its start (the line), for `lap_dist_m`.
