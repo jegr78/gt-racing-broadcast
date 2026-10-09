@@ -328,28 +328,32 @@ def list_recordings(rec_dir, count_laps=False):
                          "duration_s": max(0.0, mtime - start) if start else 0.0,
                          "laps": None, "partial": name.endswith(PART)})
             continue
-        laps, duration = _replay_counts(r)
+        laps, first, last = _replay(r)
         rows.append({"name": name, "path": path, "size": size,
                      "started": r.header.get("started", ""),
-                     "duration_s": duration, "laps": laps, "partial": name.endswith(PART)})
+                     "duration_s": (last - first) if first is not None else 0.0,
+                     "laps": len(laps), "partial": name.endswith(PART)})
     return rows
 
 
-def _replay_counts(r):
+def _replay(r):
+    """(laps, first wall time, last wall time): every lap the engine closes, the same lap
+    records export_csv writes."""
     first = last = None
     laps = []
     eng = gt7_telemetry.TelemetryEngine()
-    eng.on_lap = laps.append      # the same lap records export_csv writes
+    eng.on_lap = laps.append
     for wall_ts, _kind, plain in r.packets():
         first = wall_ts if first is None else first
         last = wall_ts
         eng.update(gt7_telemetry.parse_packet(plain), wall_ts)
-    return len(laps), (last - first) if first is not None else 0.0
+    return laps, first, last
 
 
 def replay_counts(path):
     """(laps, duration_s) of one recording by replaying every packet."""
-    return _replay_counts(Recording(path))
+    laps, first, last = _replay(Recording(path))
+    return len(laps), (last - first) if first is not None else 0.0
 
 
 SAMPLE_COLUMNS = (
@@ -438,11 +442,7 @@ class LapTimeMatcher:
 def replay_laps(path):
     """(header, laps, dropped): every lap the engine closes in one recording."""
     r = Recording(path)
-    eng = gt7_telemetry.TelemetryEngine()
-    laps = []
-    eng.on_lap = laps.append
-    for wall_ts, _kind, plain in r.packets():
-        eng.update(gt7_telemetry.parse_packet(plain), wall_ts)
+    laps = _replay(r)[0]
     return r.header, laps, r.dropped
 
 

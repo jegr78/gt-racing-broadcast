@@ -727,6 +727,27 @@ def t_telemetry_index_cmd_builds_what_the_pool_lacks():
         assert "0 recording(s) indexed" in out.getvalue(), out.getvalue()
 
 
+def t_telemetry_index_cmd_names_a_failed_recording_once():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        import gt7_recording
+        stem = _stem(tgl.write_circle_recording(rec_dir))
+
+        def broken(path, dbs=None, stamp=None):
+            raise gt7_recording.RecordingError(f"{path}: damaged", reason="bad header")
+        real, m._telemetry_index = m._telemetry_index, broken
+        out = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out):
+                try:
+                    m.telemetry_index_cmd([])
+                except SystemExit as e:
+                    assert e.code == 1, e.code
+        finally:
+            m._telemetry_index = real
+        line = out.getvalue().splitlines()[0]
+        assert line == f"{stem}: not indexed (bad header)", line
+
+
 def t_telemetry_list_counts_laps_from_the_cache():
     with _telemetry_sandbox() as (rec_dir, tgl):
         import gt7_recording as gr

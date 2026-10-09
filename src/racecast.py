@@ -3332,7 +3332,7 @@ def telemetry_index_cmd(rest):
     def report(stem, idx, exc):
         if exc is not None:
             counts["failed"] += 1
-            print(f"{stem}: not indexed ({_telemetry_reason(exc, stem)})", flush=True)
+            print(f"{stem}: not indexed ({_telemetry_reason(exc)})", flush=True)
         else:
             counts["built"] += 1
             print(f"{stem}: {len(idx['laps'])} laps", flush=True)
@@ -3748,7 +3748,7 @@ def _gt7_files_ok(files):
 
 
 def gt7_data_update_data():
-    """Force a GT7 data update for the Control Center; never raises."""
+    """Force a GT7 data update for `racecast gt7-data update`; never raises."""
     try:
         res = _gt7_data_module().update(_runtime_base_dir(), force=True)
     except Exception as exc:  # noqa: BLE001  the Control Center shows the message instead
