@@ -275,6 +275,10 @@ running relay.
   The recording the relay is still writing shows as `(recording)` and cannot be picked:
   it stays out of every comparison, and the view analyses it only after the recording
   stops.
+- **Delete a recording.** **Delete** on the Recordings card removes the selected
+  recording, its CSV export and its lap index after a confirmation, the same as
+  `racecast telemetry delete <name>`. It cannot be undone. The recording the relay is
+  still writing cannot be deleted: stop the recording first.
 - **Lap A and lap B.** Lap B is the lap you click. Lap A starts as the fastest counted
   lap other than B with the same track and car across all recordings of the profile.
   Both pickers list every comparable counted lap; B also shows the clicked lap when it
