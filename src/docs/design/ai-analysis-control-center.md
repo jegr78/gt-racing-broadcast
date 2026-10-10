@@ -56,3 +56,9 @@ selection and delayed-response invalidation, validated text-only reports, escape
 HTML download, exact lap and comparison navigation, validation failure, cancellation
 and explicit/external profile switching. Ordinary telemetry uses the existing live
 callbacks while the provider is a controlled Python process. All data is synthetic.
+
+Nine new guards were falsified individually from the committed implementation:
+selection profile binding, positive reference IDs, selected-only shift replay,
+stale enrichment, backend request-profile binding, delayed preview generation,
+settings refresh invalidation, response-profile binding and comparison identity.
+Each failed its intended assertion before the committed file was restored.
