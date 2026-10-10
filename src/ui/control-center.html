@@ -5437,7 +5437,8 @@ function tmRenderSummary(sum) {
     const grp = document.createElement('div');
     grp.className = 'tmgrp';
     const h = document.createElement('h3');
-    h.textContent = [g.track, g.car].filter(Boolean).join(' · ');
+    h.textContent = [g.track, g.car, ...('context_confirmed' in g ?
+      [g.compound || 'Tyres unknown', g.context_confirmed ? 'Context confirmed' : 'Context unconfirmed'] : [])].filter(Boolean).join(' · ');
     grp.appendChild(h);
     const tile = (value, label, title) => {
       if (value == null) return;

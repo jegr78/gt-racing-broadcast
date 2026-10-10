@@ -2848,7 +2848,7 @@ def t_context_action_does_not_follow_a_target_switch_while_waiting_for_save():
     out = _run_js(script + """
 let calls=0, release;
 global.fetch=async()=>{calls++;return {json:async()=>({ok:false})}};
-global.$=()=>({textContent:'',className:''});
+global.$=()=>({textContent:'',className:'',querySelectorAll:()=>[]});
 tc.doc={revision:0};tc.reply={profile:'p'};tc.data={};
 tcSave=()=>new Promise(resolve=>{release=resolve});
 (async()=>{const action=tcAction('restore',{revision:0});tc.generation++;tc.target='another';
