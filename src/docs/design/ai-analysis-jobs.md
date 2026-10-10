@@ -76,3 +76,12 @@ cycle refactor from #835 has been integrated before final verification.
 Additional guard falsification rejected omission of the installed Codex runtime
 file, omission of OS user identity and choosing an actual model from mixed model
 usage. Each failed its intended assertion; production files were restored.
+
+
+Windows CI caught Ctrl+C scratch cleanup preceding process termination: a live
+Windows working directory cannot be removed, so PermissionError masked the
+cancelled state. A cross-platform ordering fixture reproduced it. The inner
+finally now cleans the owned tree before TemporaryDirectory exits; the Windows
+Job Object is terminated and polled to zero active descendants before its handle
+is released. Ordering and descendant-wait guards were independently falsified at
+the intended assertions. No timeout was increased.
