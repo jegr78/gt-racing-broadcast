@@ -643,15 +643,18 @@ def export_csv(path, out_dir, include_all=False, excel=False, cars=None, tracks=
         columns = ['rec', 'session', 'lap', 'reference_id', 'stint_id', 'compound', 'from_gear', 'to_gear',
                    'gear_change_t_s', 'last_old_gear_rpm', 'pre_cut_t_s', 'pre_cut_rpm', 'post_t_s', 'post_rpm',
                    'phase_status', 'phase_method', 'acceleration_target_rpm', 'acceleration_deviation_rpm',
-                   'economy_target_rpm', 'economy_deviation_rpm', 'intentional_shortshift']
+                   'economy_target_rpm', 'economy_deviation_rpm', 'intentional_shortshift', 'neutral_bridge']
         with open(os.path.join(os.path.realpath(out_dir), 'shifts.csv'), 'w', newline='', encoding='utf-8-sig' if excel else 'utf-8') as f:
             writer = csv.DictWriter(f, fieldnames=columns, delimiter=';' if excel else ',')
             writer.writeheader()
             for row in shift_analysis.get('laps', []):
                 analysis = row.get('shift_analysis') or {}
                 for event in analysis.get('shifts', []):
-                    writer.writerow({k: {'rec': row.get('rec'), 'session': row['session'], 'lap': row['lap'],
-                                         'reference_id': analysis.get('reference_id')}.get(k, event.get(k)) for k in columns})
+                    values = {k: {'rec': row.get('rec'), 'session': row['session'], 'lap': row['lap'],
+                                  'reference_id': analysis.get('reference_id')}.get(k, event.get(k)) for k in columns}
+                    if excel:
+                        values = {k: num(v, 6) if isinstance(v, float) else v for k, v in values.items()}
+                    writer.writerow(values)
     return {"dir": out_dir, "samples": written, "laps": len(laps), "dropped": r.dropped,
             "context_error": context_error}
 
