@@ -358,7 +358,7 @@ running relay.
 
 ![Control Center: telemetry channels](images/cc-telemetry-channels.png)
 
-- **Vehicle shift references & observed shifts.** The selected lap's GT7 car ID resolves
+- **Vehicle shift references & observed upshifts.** The selected lap's GT7 car ID resolves
   a local reference. **Update external reference for this car** explicitly downloads
   source curves, ratios and revbar data into machine-local runtime. Ordinary lookup is
   offline and an update failure preserves the previous cache. Unsupported or malformed
@@ -389,6 +389,8 @@ running relay.
   provenance and phase observations; later updates do not rewrite saved outputs.
 
 ![Control Center: shift references and observations](images/cc-telemetry-shifts.png)
+
+The illustration uses authored synthetic reference values; no external curve is bundled.
 
 - **Track map and mini-sectors.** Lap A is the thin line; lap B is split into 200 m
   mini-sectors, green where B is faster and red where it is slower (the legend under the

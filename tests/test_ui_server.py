@@ -3014,6 +3014,24 @@ console.log(JSON.stringify([title,note.text,tc.draft['settings.1.title']?.length
         assert json.loads(out) == ['saved title', 'saved note', 2001, 16001], \
             'oversized text must remain draft while valid values remain saveable'
 
+def t_wide_shift_tables_scroll_inside_the_comparison_panel():
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print('  (Playwright unavailable; shift overflow checked during visual acceptance)')
+        return
+    style = _cc_page().split('<style>', 1)[1].split('</style>', 1)[0]
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page()
+        page.set_content('<style>'+style+'</style><div id="tm-shift-values" style="width:460px"><div class="tmsecwrap">'
+                         '<table class="prodtable tmsec"><tr>'+''.join('<th>Acceleration reference target RPM</th>' for _ in range(10))+
+                         '</tr></table></div></div>')
+        fits = page.locator('#tm-shift-values').evaluate('(el)=>el.scrollWidth <= el.clientWidth+2')
+        assert fits, 'wide shift tables must scroll inside their comparison panel'
+        browser.close()
+
+
 def t_context_event_shift_fields_preserve_targets_and_provenance():
     with open(os.path.join(ROOT, 'src', 'ui', 'telemetry-context.js'), encoding='utf-8') as f:
         script = f.read()
