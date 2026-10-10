@@ -4150,7 +4150,9 @@ def _telemetry_shift_analysis(path, index, row):
                             session.get('confirmed', False), observed['observed_ratios'])
     result.update(display_alerts=observed['display_alerts'],
                   time_basis='Receiver-clock seconds from recorded lap boundary',
-                  warnings=warnings+observed['ratio_warnings'])
+                  capture_complete=bool(row.get('capture_complete')),
+                  warnings=warnings+observed['ratio_warnings']+
+                           ([] if row.get('capture_complete') else ['Partial lap capture; shift phases can be incomplete']))
     result['reference_id'] = hashlib.sha256(json.dumps(result['reference'], sort_keys=True,
                                                        allow_nan=False).encode()).hexdigest()
     with _TELEMETRY_LOCK:
@@ -4179,7 +4181,8 @@ def telemetry_shifts_data(rec, session, lap):
         if index is None:
             raise ValueError('recording needs a current lap index')
         index = _telemetry_with_context(index, path)
-        row = next((r for r in index['laps'] if r['session'] == s and r['lap'] == n), None)
+        rows = index['laps']+([index['open_lap']] if index.get('open_lap') else [])
+        row = next((r for r in rows if r['session'] == s and r['lap'] == n), None)
         if row is None:
             raise ValueError('selected lap is unavailable')
         return {'ok': True, 'profile': _active_profile_name(), 'rec': rec, 'session': s, 'lap': n,

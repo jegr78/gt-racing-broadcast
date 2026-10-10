@@ -1129,6 +1129,17 @@ def t_shift_analysis_uses_the_recorded_car_and_manual_context_without_network():
         assert not bad['ok'] and bad.get('invalid') and 'number' in bad['error']
 
 
+def t_closed_recordings_expose_shift_lookup_for_their_final_partial_segment():
+    with _telemetry_sandbox() as (rec_dir, fixture):
+        path = fixture.write_circle_recording(rec_dir)
+        stem = _stem(path)
+        m.telemetry_lap_data(stem, '1', '3')
+        final = m._telemetry_cached_full(path)['open_lap']
+        reply = m.telemetry_shifts_data(stem, str(final['session']), str(final['lap']))
+        assert reply['ok'] and reply['analysis']['reference']['car_id'] == fixture.CAR, \
+            'a closed capture must retain available references for its final partial segment'
+
+
 def t_active_capture_is_refused_before_shift_packet_reads():
     with _telemetry_sandbox() as (rec_dir, fixture):
         path = fixture.write_circle_recording(rec_dir)
