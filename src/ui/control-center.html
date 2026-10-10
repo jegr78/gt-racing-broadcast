@@ -5447,7 +5447,7 @@ function tmRenderSummary(sum) {
          'Standard deviation of the counted lap times');
     tile(g.fuel_per_lap_l != null ? g.fuel_per_lap_l.toFixed(2) + ' L' : null, 'fuel per lap');
     tile(g.laps_counted + ' of ' + g.laps_total, 'pace laps',
-         'Laps the relay counted, as on the HUD');
+         'Laps with an eligible capture and valid comparison clock');
     tile(g.tyre_avg_c ? g.tyre_avg_c.map(v => v.toFixed(1)).join(' · ') + ' °C' : null,
          'tyres FL · FR · RL · RR', 'Average tyre temperature over the counted laps');
     tmTrend(grp, g.trend || [], ordered);
@@ -5654,6 +5654,7 @@ function tmRenderLaps() {
                  l.time_s == null && l.relay_time_s != null ? l.relay_time_s.toFixed(3) + ' s captured' : '',
                  nc ? (l.reasons || [l.reason]).filter(Boolean).join('; ') : '',
                  l.trace_complete === false && l.capture_complete ? 'Partial distance trace' : '',
+                 l.trace_complete && l.time_valid === false ? 'Invalid comparison clock' : '',
                  (l.car || '') !== car ? l.car || 'car unknown' : '',
                  tmLapTrack(l) !== track ? tmLapTrack(l) : ''].filter(Boolean);
     if (odd.length) {

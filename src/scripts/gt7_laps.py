@@ -17,6 +17,7 @@ import gt7_telemetry
 
 STEP_M = 5.0
 SECTOR_M = 200.0
+MAX_TRACE_M = gt7_telemetry.MAX_SAMPLES * gt7_telemetry.SAMPLE_MIN_DIST
 COUNTED = ("reference", "counted")
 INDEX_VERSION = 5
 CACHE_SUFFIX = ".laps.json"
@@ -273,6 +274,9 @@ def _trace(samples, track_db, track_id, length, close=None):
         pts.append(s)
         ds.append(d)
     end = min(ds[-1], length) if length else ds[-1]
+    if (not math.isfinite(end) or not 0 <= end <= MAX_TRACE_M
+            or (close and (not math.isfinite(close[0]) or close[0] > MAX_TRACE_M))):
+        return []  # corrupt finite speed must not allocate millions of stations
     out, j = [], 0
     for i in range(int(end // STEP_M) + 1):
         x = i * STEP_M
@@ -291,7 +295,7 @@ def _trace(samples, track_db, track_id, length, close=None):
     # A valid boundary packet is included by _Replay, so interpolation reaches
     # the line without flattening the last metres to the last pre-line sample.
     first_t, span = out[0]["t"], last["t"] - out[0]["t"]
-    if span <= 0:
+    if not math.isfinite(span) or span <= 0:
         return out  # no captured interval: do not invent a complete lap
     full = out + [last]
     for p in full:
@@ -438,17 +442,20 @@ def _indexed_lap(stem, lap, samples, tyres, first, track_db, cars, found, open_l
         "length_m": lap_length_m({"trace": trace}),
         "sectors": sectors(trace, lap_length_m({"trace": trace})),
         "trace": trace}
-    complete_trace = bool(close and len(trace) >= 2 and trace[0]["t"] == 0.0
-                          and trace[-1]["d"] == round(close[0], 1)
-                          and trace[-1]["t"] == round(close[1], 3)
-                          and all(a["t"] <= b["t"] for a, b in zip(trace, trace[1:], strict=False)))
+    complete_trace = bool(close and len(trace) >= 2 and trace[0]["d"] == 0.0
+                          and trace[-1]["d"] == round(close[0], 1))
+    time_valid = bool(complete_trace and trace[0]["t"] == 0.0
+                      and trace[-1]["t"] == round(close[1], 3)
+                      and all(math.isfinite(p["t"]) for p in trace)
+                      and all(a["t"] <= b["t"] for a, b in zip(trace, trace[1:], strict=False)))
     row.update(capture_complete=lap["capture_complete"], trace_complete=complete_trace,
+               time_valid=time_valid,
                data_quality=lap["data_quality"], reasons=lap["reasons"],
-               pace_eligible=lap["status"] in COUNTED and complete_trace,
+               pace_eligible=lap["status"] in COUNTED and complete_trace and time_valid,
                is_reference=lap["status"] == "reference", after_service=after_service,
                lap_role=("pit" if lap["pit"] else "partial" if not lap["capture_complete"]
                          else "first" if lap["lap"] == 1 else "regular"),
-               time_basis="lap-normalized receiver clock" if complete_trace else "receiver clock")
+               time_basis="lap-normalized receiver clock" if time_valid else "receiver clock")
     return row
 
 

@@ -174,6 +174,41 @@ def t_trace_normalizes_the_whole_lap_clock_not_only_the_finish():
     assert min(secs) >= 0 and abs(sum(secs) - 110.104) < .001
 
 
+def t_corrupt_open_distance_is_visible_without_unbounded_resampling():
+    with tempfile.TemporaryDirectory() as d:
+        w = gt7_recording.RecordingWriter(d, "Solo", "dev", queue_max=0)
+        w.put(100.0, "~", _pkt(1, 100_000_000.0, 0.0))
+        w.put(101.0, "~", _pkt(1, 100_000_000.0, .1))
+        w.close()
+        real = gl._station
+        calls = []
+        def bounded(*args):
+            calls.append(1)
+            assert len(calls) <= 10, "unsafe distance entered an unbounded station loop"
+            return real(*args)
+        gl._station = bounded
+        try:
+            idx = _index(w.path, tracks=FakeTracks(known=False))
+        finally:
+            gl._station = real
+        assert not idx['laps'] and idx['open_lap']['lap'] == 1
+        assert not idx['open_lap']['trace'] and not idx['open_lap']['pace_eligible']
+        assert not calls, "reject the implausible distance before allocating stations"
+
+
+def t_geometric_trace_coverage_is_separate_from_clock_validity():
+    with tempfile.TemporaryDirectory() as d:
+        replay = gl._Replay()
+        replay.run(gt7_recording.Recording(write_circle_recording(d)))
+        lap = replay.laps[1]
+        samples = [(t, dist, 100.0, 100.0, 0.0, 0.0, 3, dist, 0.0)
+                   for t, dist in ((0.0, 0.0), (5.0, 100.0), (4.0, 200.0), (10.0, 300.0))]
+        row = gl._indexed_lap('test', lap, samples, [0, 0, 0, 0, 0], 0,
+                              FakeTracks(known=False), FakeCars(), None)
+        assert row['trace_complete'], "every distance station is present despite the backwards clock"
+        assert not row['time_valid'] and not row['pace_eligible']
+
+
 def t_index_separates_capture_pace_reference_and_the_open_tail():
     with tempfile.TemporaryDirectory() as d:
         idx = _index(write_circle_recording(d))
