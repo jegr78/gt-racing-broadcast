@@ -358,6 +358,40 @@ running relay.
 
 ![Control Center: telemetry channels](images/cc-telemetry-channels.png)
 
+- **Vehicle shift references & observed upshifts.** The selected lap's GT7 car ID resolves
+  a local reference. **Update external reference for this car** explicitly downloads
+  source curves, ratios and revbar data into machine-local runtime. Ordinary lookup is
+  offline and an update failure preserves the previous cache. Unsupported or malformed
+  data show unavailable components. External curves and code are not bundled.
+- **Acceleration reference.** The independent piecewise-linear calculation compares
+  normalized power before and after the adjacent ratio change at equal road speed.
+  It assumes full throttle, sufficient grip and instantaneous shifts. Decoded gearbox
+  ratios take precedence over stock source ratios. A range-capped target is partial,
+  not a confirmed rev limit. Matching ratios do not confirm the power shape for an event.
+  Power and torque are each independently normalized to a maximum of 100, not physical
+  HP, kW or Nm. The curve endpoint, display alerts, source revbar and separately
+  confirmed rev limit have distinct labels. Source commit, SHA-256, fetch date and
+  calculation method remain available; the source supplies no per-curve measurement
+  date, GT7 revision or fuel-consumption map.
+- **Recorded phases.** The table uses original time packets. It infers pre-cut RPM
+  from stable drive/cut samples and post RPM from the engaged new-gear bracket.
+  The last old-gear packet can already be cut. Capture gaps, skipped gears and neutral
+  bridges retain explicit missing/ambiguous phases. Comparisons are for observed
+  upshifts; early shifts can be intentional for fuel saving, traction or cornering.
+  Acceleration and manually entered stint economy targets have separate neutral RPM
+  deviations. A power lookup does not establish an optimum fuel-saving target.
+- **Manual event table.** Add an event-specific acceleration table in **Context & notes**,
+  or copy locally calculated targets into an unconfirmed event table. Record vehicle,
+  intended configuration and provenance, then confirm session and table applicability
+  separately. Templates retain the reference while requiring new session confirmation.
+  Updates never replace these manual values. Confirming a table does not confirm a
+  separately displayed external curve. Reports and CSV exports freeze reference values,
+  provenance and phase observations; later updates do not rewrite saved outputs.
+
+![Control Center: shift references and observations](images/cc-telemetry-shifts.png)
+
+The illustration uses authored synthetic reference values; no external curve is bundled.
+
 - **Track map and mini-sectors.** Lap A is the thin line; lap B is split into 200 m
   mini-sectors, green where B is faster and red where it is slower (the legend under the
   map). The table lists every mini-sector with its distance, the times of A and B, the gap

@@ -12,6 +12,17 @@ sys.path.insert(0, os.path.join(ROOT, "src", "ui"))
 import ui_ops
 
 
+def t_shift_reference_job_only_accepts_a_bounded_car_id():
+    assert ui_ops.build_argv('shift-reference-update', {'car_id': 485}) == ['telemetry', 'shift-update', '485']
+    for value in ('../485', '--help', True, -1, 10000000):
+        try:
+            ui_ops.build_argv('shift-reference-update', {'car_id': value})
+        except ValueError:
+            pass  # arbitrary paths and argv values are rejected
+        else:
+            raise AssertionError('shift update job must validate its car ID')
+
+
 def t_relay_status_data_running():
     d = rc.relay_status_data(read_pid=lambda p: 4242,
                               alive=lambda pid: True,

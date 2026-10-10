@@ -2696,6 +2696,31 @@ console.log(String(box.hidden));""")
                          "tm-tr nc,tm-tr,tm-tr best|R|1|2"), \
             f"the summary repeats the report's figures and a trend dot picks lap B: {first!r}"
         assert second == "true", "no summary hides the section"
+def t_shift_route_keeps_domain_errors_and_blocks_foreign_origins():
+    seen = []
+    ctx = _ctx()
+    ctx['telemetry_shifts'] = lambda rec, session, lap: seen.append((rec, session, lap)) or {'ok': True, 'analysis': {'reference': {'car_id': 485}}}
+    httpd, port = _serve(ctx)
+    try:
+        status, raw = _get(port, '/api/telemetry/shifts?rec=R&session=1&lap=3')
+        assert status == 200 and json.loads(raw)['analysis']['reference']['car_id'] == 485
+        assert seen == [('R', '1', '3')]
+        request = urllib.request.Request(f'http://127.0.0.1:{port}/api/telemetry/shifts?rec=R&session=1&lap=3', headers={'Origin': 'null'})
+        try:
+            _urlopen(request)
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 403 and json.loads(exc.read()) == {'ok': False, 'error': 'foreign context origin'}
+        else:
+            raise AssertionError('foreign shift reads must be refused')
+        assert len(seen) == 1, 'blocked shift reads cannot reach recording analysis'
+        ctx['telemetry_shifts'] = lambda *a: {'ok': False, 'invalid': True, 'error': 'invalid shift lap'}
+        status, raw = _get(port, '/api/telemetry/shifts?rec=R&session=1&lap=bad')
+        assert status == 400 and json.loads(raw) == {'ok': False, 'invalid': True, 'error': 'invalid shift lap'}
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
 def t_telemetry_context_routes_keep_domain_errors_and_reject_foreign_origins():
     seen = []
     ctx = _ctx()
@@ -2988,6 +3013,79 @@ console.log(JSON.stringify([title,note.text,tc.draft['settings.1.title']?.length
     if out is not None:
         assert json.loads(out) == ['saved title', 'saved note', 2001, 16001], \
             'oversized text must remain draft while valid values remain saveable'
+
+def t_wide_shift_tables_scroll_inside_the_comparison_panel():
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print('  (Playwright unavailable; shift overflow checked during visual acceptance)')
+        return
+    style = _cc_page().split('<style>', 1)[1].split('</style>', 1)[0]
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page()
+        page.set_content('<style>'+style+'</style><div id="tm-shift-values" style="width:460px"><div class="tmsecwrap">'
+                         '<table class="prodtable tmsec"><tr>'+''.join('<th>Acceleration reference target RPM</th>' for _ in range(10))+
+                         '</tr></table></div></div>')
+        fits = page.locator('#tm-shift-values').evaluate('(el)=>el.scrollWidth <= el.clientWidth+2')
+        assert fits, 'wide shift tables must scroll inside their comparison panel'
+        browser.close()
+
+
+def t_context_event_shift_fields_preserve_targets_and_provenance():
+    with open(os.path.join(ROOT, 'src', 'ui', 'telemetry-context.js'), encoding='utf-8') as f:
+        script = f.read()
+    out = _run_js(script + """
+const fields={};global.$=id=>({append(){},textContent:''});tc.data={sessions:{'1':{settings:{},shift_reference:{car_id:485,
+ targets:{'2':5500},configuration:'Fixed event',provenance:'Own test',confirmed:false}}}};tc.session='1';
+global.document={createElement:()=>({append(){},textContent:'',className:''})};
+tcField=(_p,label,value,_type,setter)=>{fields[label]={value,setter};};
+tcShiftReference();fields['Event reference gear 2 -> 3'].setter(5600);
+fields['Event table applicability confirmed'].setter(true);console.log(JSON.stringify(tcSession().shift_reference));
+""")
+    if out is not None:
+        value = json.loads(out)
+        assert value['targets']['2'] == 5600 and value['confirmed'] and value['provenance'] == 'Own test', \
+            'manual event editor must retain target values and provenance'
+
+
+def t_context_refresh_invalidates_shift_analysis_even_when_the_lap_key_stays_the_same():
+    out = _tm_node("""
+tmState.rec='R';tmState.b='R|1|3';tmState.recLaps=[];tmShiftState.analysis={reference:{kind:'old'}};
+tmShiftState.pair='R|1|3';tmDropLaps=()=>{};tmSelectRec=async()=>{};
+await tmRefreshContext('R');console.log(JSON.stringify([tmShiftState.analysis,tmShiftState.pair,tmShiftState.generation]));
+""")
+    if out is not None:
+        assert json.loads(out) == [None, None, 1], \
+            'edited context must invalidate shift targets for the same selected lap'
+
+
+def t_shift_lookup_discards_a_previous_lap_response():
+    out = _tm_node("""
+tmState.lapB=lap('R',3,16,7);$('tm-shift-box').open=true;let reply;
+tmGet=()=>new Promise(r=>reply=r);tmShiftStatus=()=>{};tmShiftRender=()=>{};
+const loading=tmShiftLoad();await tick();tmState.lapB=lap('R',4,16,7);
+reply({ok:true,analysis:{reference:{kind:'external'},shifts:[]}});await loading;
+console.log(JSON.stringify(tmShiftState.analysis));
+""")
+    if out is not None:
+        assert json.loads(out) is None, 'late shift lookup must not appear under another lap'
+
+
+def t_shift_panel_keeps_economy_and_acceleration_deviations_separate():
+    out = _tm_node("""
+tmShiftState.analysis={reference:{kind:'manual-event',car_id:485,event_confirmed:true,
+ targets:[{gear:2,rpm:5500,status:'manual'}],configuration:'Own event'},
+ shifts:[{from_gear:2,to_gear:3,pre_cut_rpm:5600,post_rpm:4350,
+ acceleration_target_rpm:5500,economy_target_rpm:5300,acceleration_deviation_rpm:100,
+ economy_deviation_rpm:300,phase_status:'measured'}]};
+tmShiftRender();const all=(e,out=[])=>{out.push(e.textContent);(e.kids||[]).forEach(k=>all(k,out));return out;};
+console.log(all($('tm-shift-values')).join('|'));
+""")
+    if out is not None:
+        assert 'Acceleration delta' in out and 'Economy delta' in out and '5600' in out and '5300' in out, \
+            'shift panel must show neutral separate target comparisons'
+
 
 def t_channel_detail_discards_answers_for_a_previous_lap_or_selection():
     out = _tm_node("""

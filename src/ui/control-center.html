@@ -568,6 +568,7 @@
   .tmset select { flex:1; min-width:0; font:12px var(--mono); }
   .tmnote { color:var(--dim); font:11px/1.5 var(--mono); margin:0 0 8px; }
   table.tmsec { font-size:12px; }
+  .tmsecwrap {max-width:100%;overflow-x:auto}
   table.tmsec td, table.tmsec th { padding:4px 5px; text-align:right; white-space:nowrap;
                                    font-variant-numeric:tabular-nums; }
   table.tmsec td:first-child, table.tmsec th:first-child { text-align:left; }
@@ -583,6 +584,8 @@
   }
   @media (max-width: 860px) { .tmgrid { grid-template-columns:1fr; } }
   .tcgrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:12px; }
+  .tcshift {grid-column:1/-1}
+  #tm-shift-values {overflow-wrap:anywhere}
   .tcfield { display:flex; flex-direction:column; gap:5px; font-size:12px; color:var(--dim); }
   .tcfield input,.tcfield select,.tcrow textarea { width:100%; min-width:0; padding:8px; background:var(--bg); border:1px solid var(--line); border-radius:6px; color:var(--text); }
   .tcrow { margin:10px 0; padding:12px; border:1px solid var(--line); border-radius:8px; }
@@ -1350,6 +1353,11 @@
                 <label>To <input id="tm-channel-end" aria-label="Channel window end" type="number" min="0" step="any" style="width:100px" oninput="tmChannelInvalidate()"></label>
                 <button onclick="tmChannelLoad()">Load window</button></div>
               <p id="tm-channel-status" class="sub" role="status"></p><div id="tm-channel-charts"></div>
+            </details>
+            <details id="tm-shift-box" ontoggle="tmShiftLoad()"><summary>Vehicle shift references &amp; observed upshifts</summary>
+              <div class="row"><button onclick="tmShiftLoad()">Read local lookup</button><button id="tm-shift-update" onclick="tmShiftUpdate()">Update external reference for this car</button>
+                <button id="tm-shift-copy" onclick="tmShiftCopy()" disabled>Copy targets to event table</button></div>
+              <p id="tm-shift-status" class="sub" role="status"></p><div id="tm-shift-values"></div>
             </details>
             <svg id="tm-charts" role="img" aria-label="Speed, throttle, brake, steering, gear and delta over lap distance"></svg>
           </section>
@@ -5778,6 +5786,8 @@ function tmFillPickers(lapB) {
 
 async function tmRefreshContext(rec) {
   const selected = tmState.b;
+  tmShiftState.generation++;tmShiftState.analysis=null;tmShiftState.pair=null;
+  $('tm-shift-values').textContent='';
   tmDropLaps();await tmSelectRec(rec);
   if (tmState.rec !== rec) return;
   const previous = tmState.recLaps.find(l => tmKey(l) === selected);
@@ -5838,6 +5848,7 @@ function tmRender() {
   tmRenderSectors();
   tmRenderLargerSectors();
   tmChannelRefresh();
+  tmShiftRefresh();
 }
 
 function tmRenderSectors() {
@@ -6436,6 +6447,87 @@ if(typeof document!=='undefined'&&document.addEventListener)document.addEventLis
  if(fields.length&&e.shiftKey&&document.activeElement===fields[0]){e.preventDefault();fields.at(-1).focus();}
  else if(fields.length&&!e.shiftKey&&document.activeElement===fields.at(-1)){e.preventDefault();fields[0].focus();}}
 });
+
+
+// Vehicle-specific post-session lookup. Ordinary reads remain offline.
+const tmShiftState={analysis:null,generation:0,pair:null,updating:null};
+function tmShiftStatus(text,error=false){$('tm-shift-status').textContent=text;$('tm-shift-status').className=error?'enverr':'sub';}
+function tmShiftIdentity(){return JSON.stringify([tmState.profile,tmState.lapB&&tmKey(tmState.lapB)]);}
+function tmShiftRefresh(){
+ const pair=tmShiftIdentity();if(pair===tmShiftState.pair)return;
+ tmShiftState.pair=pair;tmShiftState.generation++;tmShiftState.analysis=null;$('tm-shift-values').textContent='';
+ if($('tm-shift-box').open)tmShiftLoad();
+}
+async function tmShiftLoad(){
+ if(!$('tm-shift-box').open)return;
+ const B=tmState.lapB;if(!B){tmShiftStatus('Select a recorded lap');return;}
+ const identity=tmShiftIdentity(),gen=++tmShiftState.generation;
+ tmShiftState.analysis=null;$('tm-shift-values').textContent='';tmShiftStatus('Reading local reference and original shift phases…');
+ let answer;try{answer=await tmGet('/api/telemetry/shifts?'+new URLSearchParams({rec:B.rec,session:B.session,lap:B.lap}));}
+ catch(_e){answer={ok:false,error:'Could not load shift observations'};}
+ if(gen!==tmShiftState.generation||identity!==tmShiftIdentity())return;
+ if(!answer.ok){tmShiftStatus(answer.error||'Shift lookup unavailable',true);return;}
+ tmShiftState.analysis=answer.analysis;tmShiftRender();tmShiftStatus((answer.analysis.warnings||[]).join(' · ')||answer.analysis.time_basis||'Local reference');
+}
+function tmShiftTable(root,headers,rows){
+ const wrap=document.createElement('div');wrap.className='tmsecwrap';const table=document.createElement('table');table.className='prodtable tmsec';
+ const head=table.createTHead().insertRow();headers.forEach(h=>{const th=document.createElement('th');th.textContent=h;head.append(th);});
+ const body=table.createTBody();for(const values of rows){const row=body.insertRow();for(const value of values)row.insertCell().textContent=value==null?'unavailable':String(value);}
+ wrap.append(table);root.append(wrap);
+}
+function tmShiftRender(){
+ const root=$('tm-shift-values');root.textContent='';const analysis=tmShiftState.analysis;if(!analysis)return;
+ const ref=analysis.reference||{},say=(text,parent=root)=>{const p=document.createElement('p');p.className='sub';p.textContent=text;parent.append(p);};
+ say('Car ID '+ref.car_id+' · '+ref.kind+' · '+(ref.event_confirmed?'Event-confirmed table':'Event applicability unverified')+(ref.configuration?' · '+ref.configuration:''));
+ say('Full-throttle, sufficient-grip acceleration reference. Earlier shifts may save fuel, manage traction or prepare braking. Deviations are neutral; power curves do not establish optimum fuel-saving targets.');
+ const metadata=document.createElement('details'),metaTitle=document.createElement('summary');metaTitle.textContent='Reference source & applicability';metadata.append(metaTitle);root.append(metadata);
+ const source=ref.source||{};if(source.identity)say(source.identity+' · commit '+source.commit+' · fetched '+source.fetched_at+' · '+(ref.algorithm||'manual event table'),metadata);
+ if(source.hashes)say('Source SHA-256 · '+JSON.stringify(source.hashes),metadata);
+ if(ref.provenance)say(ref.provenance,metadata);
+ const show=v=>v==null?'unavailable':JSON.stringify(v);
+ say('Source ratios '+show(ref.source_ratios)+' · decoded gearbox '+show(ref.observed_ratios)+' · reference ratio source '+(ref.ratio_source||'manual table')+' · matching ratios '+show(ref.ratios_match),metadata);
+ say('Curve RPM range '+show(ref.curve_range_rpm)+' · source revbar indication '+show(ref.revbar_rpm)+' · recorded display alerts '+show(analysis.display_alerts)+' · separately confirmed rev limit '+show(ref.rev_limit_rpm),metadata);
+ if(ref.support)say('Availability · '+Object.entries(ref.support).map(([k,v])=>k.replaceAll('_',' ')+': '+(v?'available':'unavailable')).join(' · '),metadata);
+ for(const warning of ref.warnings||[])say(warning,metadata);
+ tmShiftTable(root,['Outgoing gear','Acceleration reference RPM','Availability'],(ref.targets||[]).map(t=>[t.gear,t.rpm==null?null:Math.round(t.rpm*10)/10,t.status]));
+ if(ref.curve?.length){
+  say(ref.curve_units||'Power and torque each normalized to maximum 100; no physical HP/kW/Nm');
+  const svg=tmEl('svg',{viewBox:'0 0 760 160',role:'img','aria-label':'Normalized source power and torque versus RPM',class:'tm-channel-chart'},root);
+  const lo=ref.curve[0].rpm,hi=ref.curve.at(-1).rpm,X=r=>50+(r-lo)/(hi-lo||1)*680,Y=v=>130-v;
+  tmEl('rect',{x:50,y:30,width:680,height:100,class:'tm-frame'},svg);
+  for(const [key,cls] of [['power','tm-b'],['torque','tm-a']])tmEl('path',{d:ref.curve.map((p,i)=>(i?'L':'M')+X(p.rpm)+' '+Y(p[key])).join(''),class:cls},svg);
+  tmEl('text',{x:4,y:36},svg).textContent='100%';tmEl('text',{x:15,y:130},svg).textContent='0%';
+  tmEl('text',{x:50,y:150},svg).textContent=lo+' RPM';tmEl('text',{x:650,y:150},svg).textContent=hi+' RPM';
+  say('Blue: normalized power · amber: normalized torque. A confirmed manual target table does not confirm this external curve shape.');
+  const detail=document.createElement('details'),title=document.createElement('summary');title.textContent='All normalized source values';detail.append(title);root.append(detail);
+  tmShiftTable(detail,['RPM','Power (%)','Torque (%)'],ref.curve.map(p=>[p.rpm,p.power,p.torque]));
+ }
+ const signed=v=>v==null?null:(v>0?'+':'')+Math.round(v);
+ tmShiftTable(root,['Shift','Pre-cut RPM','Post RPM','Acceleration target','Acceleration delta','Economy target','Economy delta','Stint / compound','Phase'],
+  (analysis.shifts||[]).map(s=>[s.from_gear+' → '+s.to_gear,s.pre_cut_rpm,s.post_rpm,s.acceleration_target_rpm,signed(s.acceleration_deviation_rpm),
+   s.economy_target_rpm,signed(s.economy_deviation_rpm),[s.stint_id,s.compound].filter(Boolean).join(' / '),s.phase_status]));
+ say('Pre-cut is inferred from stable drive/cut phases in original packets; the last old-gear packet may already be cut. Missing or ambiguous phases remain unavailable. Post RPM uses an engaged new-gear bracket.');
+ $('tm-shift-copy').disabled=ref.kind!=='external'||!(ref.targets||[]).some(t=>t.rpm!=null);
+}
+async function tmShiftUpdate(){
+ const B=tmState.lapB;if(!B||!Number.isInteger(B.car_id)||tmShiftState.updating)return;
+ const identity=tmShiftIdentity(),owner={};tmShiftState.updating=owner;const button=$('tm-shift-update');button.disabled=true;
+ tmShiftStatus('Explicitly updating this vehicle from the source…');
+ try{const job=await startJob('shift-reference-update',{car_id:B.car_id}),answer=job.error?job:await jobResult(job.job_id,60);
+  if(identity!==tmShiftIdentity())return;
+  if(answer.error||answer.code!==0){tmShiftStatus(answer.error||(answer.lines||[]).join(' · ')||'Update failed; previous cache retained',true);return;}
+  await tmShiftLoad();
+ }catch(_e){if(identity===tmShiftIdentity())tmShiftStatus('Update failed; previous cache retained',true);}
+ finally{if(tmShiftState.updating===owner){tmShiftState.updating=null;button.disabled=false;}}
+}
+async function tmShiftCopy(){
+ const B=tmState.lapB,ref=tmShiftState.analysis?.reference;if(!B||ref?.kind!=='external')return;
+ const identity=tmShiftIdentity(),targets=Object.fromEntries((ref.targets||[]).filter(t=>t.rpm!=null).map(t=>[String(t.gear),t.rpm]));
+ await tcOpen();if(identity!==tmShiftIdentity()||tc.target!==B.rec)return;
+ tc.session=String(B.session);tcSession().shift_reference={car_id:B.car_id,targets,configuration:'',confirmed:false,
+  provenance:'Copied acceleration calculation '+ref.algorithm+' · '+ref.source?.identity+' · commit '+ref.source?.commit+' · '+JSON.stringify(ref.source?.hashes)};
+ tcRender();tcChanged();tcStatus('Copied as unconfirmed event table. Enter intended configuration and confirm applicability separately.');
+}
 
 // end of the Telemetry view
 

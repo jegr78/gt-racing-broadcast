@@ -520,14 +520,18 @@ def _lap_dist(eng, pkt, by_session, tracks, prev):
     return out
 
 
-def export_csv(path, out_dir, include_all=False, excel=False, cars=None, tracks=None, key=None, diagnostics=False, track_analysis=None):
+def export_csv(path, out_dir, include_all=False, excel=False, cars=None, tracks=None, key=None, diagnostics=False,
+               track_analysis=None, shift_analysis=None):
     """Write samples.csv and laps.csv for one recording into out_dir."""
     cars = cars if cars is not None else gt7_cars.CarDB()
     r = Recording(path)
     import gt7_context
     context_error = None
     try:
-        context_snapshot = (track_analysis.get('context_snapshot') if track_analysis else None) or gt7_context.Store.for_recording(path).export()
+        context_snapshot = (shift_analysis.get('context_snapshot') if shift_analysis is not None
+                            and shift_analysis.get('context_snapshot') is not None else
+                            (track_analysis.get('context_snapshot') if track_analysis else None)
+                            or gt7_context.Store.for_recording(path).export())
     except (OSError, ValueError, RecordingError):
         context_error = 'saved context is unavailable; raw measurements are still exported'
         context_snapshot = {'format': gt7_context.FORMAT, 'version': gt7_context.VERSION,
@@ -632,6 +636,25 @@ def export_csv(path, out_dir, include_all=False, excel=False, cars=None, tracks=
                                  num(larger['times_s'][i], 6), row.get('compound') or '',
                                  int(bool(row.get('context_confirmed'))), int(bool(row.get('comparison_eligible')))))
     gt7_context._atomic(os.path.join(os.path.realpath(out_dir), "context.json"), context_snapshot)
+    if shift_analysis is not None:
+        gt7_context._atomic(os.path.join(os.path.realpath(out_dir), 'shift-references.json'),
+                            {'format': 'racecast-shift-reference-snapshot', 'version': 1,
+                             'references': shift_analysis.get('shift_reference_snapshots', {})})
+        columns = ['rec', 'session', 'lap', 'reference_id', 'stint_id', 'compound', 'from_gear', 'to_gear',
+                   'gear_change_t_s', 'last_old_gear_rpm', 'pre_cut_t_s', 'pre_cut_rpm', 'post_t_s', 'post_rpm',
+                   'phase_status', 'phase_method', 'acceleration_target_rpm', 'acceleration_deviation_rpm',
+                   'economy_target_rpm', 'economy_deviation_rpm', 'intentional_shortshift', 'neutral_bridge']
+        with open(os.path.join(os.path.realpath(out_dir), 'shifts.csv'), 'w', newline='', encoding='utf-8-sig' if excel else 'utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=columns, delimiter=';' if excel else ',')
+            writer.writeheader()
+            for row in shift_analysis.get('laps', []):
+                analysis = row.get('shift_analysis') or {}
+                for event in analysis.get('shifts', []):
+                    values = {k: {'rec': row.get('rec'), 'session': row['session'], 'lap': row['lap'],
+                                  'reference_id': analysis.get('reference_id')}.get(k, event.get(k)) for k in columns}
+                    if excel:
+                        values = {k: num(v, 6) if isinstance(v, float) else v for k, v in values.items()}
+                    writer.writerow(values)
     return {"dir": out_dir, "samples": written, "laps": len(laps), "dropped": r.dropped,
             "context_error": context_error}
 

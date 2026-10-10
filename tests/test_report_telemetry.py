@@ -439,6 +439,21 @@ def t_report_html_keeps_mini_sector_composition_in_diagnostics():
     assert 'Theoretical best' not in report, 'mini-sector best sum must not be a theoretical-lap headline'
 
 
+def t_report_retains_shift_reference_snapshots_and_neutral_observations():
+    idx = session_index()
+    reference = {'kind': 'manual-event', 'car_id': 485, 'event_confirmed': True,
+                 'targets': [{'gear': 2, 'rpm': 5500, 'status': 'manual'}],
+                 'configuration': 'Fixed test', 'provenance': 'Own test'}
+    idx['shift_reference_snapshots'] = {'ref': reference}
+    idx['laps'][1]['shift_analysis'] = {'reference_id': 'ref', 'reference': reference,
+                                      'shifts': [{'from_gear': 2, 'to_gear': 3, 'pre_cut_rpm': 5600,
+                                                  'acceleration_deviation_rpm': 100}]}
+    block = rtel.telemetry_block([idx], (1000, 2000))
+    assert block.get('shift_reference_snapshots') == {'ref': reference}, \
+        'saved reports must retain the shift reference values and provenance'
+    assert any((row.get('shift_analysis') or {}).get('shifts') for row in block['laps'])
+
+
 def run():
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

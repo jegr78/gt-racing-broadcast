@@ -122,6 +122,31 @@ def _strategy(v):
     return v
 
 
+def validate_shift_reference(value):
+    """Manual declaration schema is independent of the optional curve lookup engine."""
+    value = copy.deepcopy(_object(value))
+    _bounded(value)
+    _keys(value, {'car_id', 'targets', 'configuration', 'provenance', 'confirmed', 'rev_limit_rpm'})
+    car = value.get('car_id')
+    if isinstance(car, bool) or not isinstance(car, int) or not 0 < car <= 9999999:
+        raise ValueError('car ID must be a positive integer')
+    if not isinstance(value.get('confirmed'), bool):
+        raise ValueError('event reference confirmation must be a boolean')
+    for key in ('configuration', 'provenance'):
+        _text(value.get(key), 2000)
+        if value['confirmed'] and not value[key].strip():
+            raise ValueError('confirmed event table requires configuration and provenance')
+    targets = _object(value.get('targets'))
+    if not targets or any(k not in {str(g) for g in range(1, 16)} for k in targets):
+        raise ValueError('event reference needs valid outgoing gear targets')
+    for label, rpm in [('event target RPM', v) for v in targets.values()] + (
+            [('manually confirmed rev limit', value['rev_limit_rpm'])] if value.get('rev_limit_rpm') is not None else []):
+        _number(rpm, label)
+        if not 0 < rpm <= 50000:
+            raise ValueError(label+' must be positive and in range')
+    return value
+
+
 def validate_data(data):
     data = copy.deepcopy(_object(data))
     _bounded(data)
@@ -206,7 +231,7 @@ def validate_data(data):
             if origin.get('kind') not in {'manual', 'template', 'copied'}:
                 raise ValueError('invalid context origin')
         if session.get('shift_reference') is not None:
-            _object(session['shift_reference'])  # interpretation belongs to the shift-reference module
+            session['shift_reference'] = validate_shift_reference(session['shift_reference'])
     if data.get('track_definition') is not None:
         _object(data['track_definition'])  # bounded snapshot; track module validates its geometry
     return data
@@ -453,14 +478,18 @@ def templates(recdir):
             _token(key)
             _text(template.get('name'), 200)
             validate_settings(template.get('settings'))
+            if template.get('shift_reference') is not None:
+                validate_shift_reference(template['shift_reference'])
         return copy.deepcopy(doc)
 
 
-def save_template(recdir, key, name, settings):
+def save_template(recdir, key, name, settings, shift_reference=None):
     with _LOCK, _file_lock(os.path.join(_profile_root(recdir), 'telemetry-templates.json')):
         doc = templates(recdir)
         doc['templates'][_token(key)] = {'name': _text(name, 200),
                                        'settings': validate_settings(settings)}
+        if shift_reference is not None:
+            doc['templates'][key]['shift_reference'] = validate_shift_reference(shift_reference)
         _atomic(os.path.join(_profile_root(recdir), 'telemetry-templates.json'), doc)
         return doc
 
@@ -478,6 +507,10 @@ def apply_template(data, template, session=1):
     target = result['sessions'].setdefault(str(session), {})
     target['settings'] = validate_settings(template['settings'])
     target['confirmed'] = False  # choosing a template does not confirm its current applicability
+    if template.get('shift_reference') is not None:
+        target['shift_reference'] = copy.deepcopy(template['shift_reference'])
+    else:
+        target.pop('shift_reference', None)
     target['origin'] = {'kind': 'template'}
     return validate_data(result)
 
@@ -490,6 +523,8 @@ def copy_session(data, source, target):
     result['sessions'][str(target)] = {'settings': copy.deepcopy(previous['settings']),
                                       'confirmed': False, 'stints': [],
                                       'origin': {'kind': 'copied', 'session': source}}
+    if previous.get('shift_reference') is not None:
+        result['sessions'][str(target)]['shift_reference'] = copy.deepcopy(previous['shift_reference'])
     return validate_data(result)
 
 

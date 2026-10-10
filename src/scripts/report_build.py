@@ -659,6 +659,41 @@ def _telemetry_html(tel):
              r["car"] or "—", r["track"]) for r in tel["laps"]]
     parts.append(_scroll(_table(["#", "Lap", "Time", "Status", "Reason", "Fuel (L)",
                                  "Top speed (km/h)", "Car", "Track"], rows)))
+    references = tel.get('shift_reference_snapshots', {})
+    if references:
+        parts.append('<h3>Shift references</h3><p>Neutral RPM deviations; earlier shifts may be intentional. '
+                     'Acceleration references do not establish optimum fuel targets. Pre-cut phases are inferred from recorded samples.</p>')
+        for identity, ref in references.items():
+            status = 'Event-confirmed' if ref.get('event_confirmed') else 'Event applicability unverified'
+            source = ref.get('source') or {}
+            parts.append('<p>'+_esc('Reference ID '+identity)+'</p>')
+            parts.append('<p>'+_esc(str(ref.get('car_id'))+' · '+ref.get('kind', '')+' · '+status+' · '+
+                                  ref.get('configuration', '')+' · '+ref.get('provenance', '')+' · '+
+                                  source.get('identity', '')+' · '+source.get('commit', '')+' · '+source.get('fetched_at', ''))+'</p>')
+            parts.append(_scroll(_table(['Outgoing gear', 'Acceleration reference RPM', 'Availability'],
+                                        [(t['gear'], t.get('rpm'), t.get('status')) for t in ref.get('targets', [])])))
+            if ref.get('curve'):
+                parts.append('<p>'+_esc(ref.get('curve_units', 'Each source curve independently normalized to maximum 100'))+'</p>')
+                parts.append('<details><summary>Normalized source curve</summary>'+_scroll(_table(
+                    ['RPM', 'Normalized power (%)', 'Normalized torque (%)'],
+                    [(p['rpm'], p['power'], p['torque']) for p in ref['curve']]))+'</details>')
+            if source.get('hashes'):
+                parts.append('<p>'+_esc('Source SHA-256 '+str(source['hashes']))+'</p>')
+            parts.append('<p>'+_esc('Algorithm '+ref.get('algorithm', 'manual')+' · Curve range '+str(ref.get('curve_range_rpm'))+
+                                  ' · Display revbar '+str(ref.get('revbar_rpm'))+' · Confirmed rev limit '+str(ref.get('rev_limit_rpm'))+
+                                  ' · Ratio source '+ref.get('ratio_source', 'manual')+' · Source ratios '+str(ref.get('source_ratios'))+
+                                  ' · Decoded ratios '+str(ref.get('observed_ratios')))+'<br>'+_esc(' '.join(ref.get('warnings', [])))+'</p>')
+        observations = []
+        for row in tel['laps']:
+            analysis = row.get('shift_analysis') or {}
+            for event in analysis.get('shifts', []):
+                observations.append((row['rec'], row['session'], row['lap'], event.get('stint_id'),
+                                     str(event.get('from_gear'))+' -> '+str(event.get('to_gear')),
+                                     event.get('pre_cut_rpm'), event.get('post_rpm'), event.get('acceleration_target_rpm'),
+                                     event.get('acceleration_deviation_rpm'), event.get('economy_target_rpm'),
+                                     event.get('economy_deviation_rpm'), event.get('phase_status')))
+        parts.append(_scroll(_table(['Recording', 'Session', 'Lap', 'Stint', 'Shift', 'Pre-cut RPM', 'Post RPM',
+                                    'Acceleration target', 'Delta RPM', 'Economy target', 'Economy delta RPM', 'Phase'], observations)))
     return "".join(parts)
 
 

@@ -561,6 +561,23 @@ def t_telemetry_section_absent_without_recordings():
     assert "Telemetry" not in dict(rb.report_discord_fields(rep))
 
 
+def t_report_shift_values_and_event_applicability_are_explicit_and_escaped():
+    report = _solo_report()
+    ref = {'kind': 'manual-event', 'car_id': 485, 'event_confirmed': True,
+           'configuration': '<own event>', 'provenance': 'Own source',
+           'targets': [{'gear': 2, 'rpm': 5500, 'status': 'manual'}]}
+    report['telemetry']['shift_reference_snapshots'] = {'ref': ref}
+    report['telemetry']['laps'][0]['shift_analysis'] = {'reference_id': 'ref', 'shifts': [
+        {'from_gear': 2, 'to_gear': 3, 'pre_cut_rpm': 5600, 'post_rpm': 4300,
+         'acceleration_target_rpm': 5500, 'economy_target_rpm': 5300,
+         'acceleration_deviation_rpm': 100, 'economy_deviation_rpm': 300,
+         'phase_status': 'measured', 'stint_id': 'medium'}]}
+    html = rb.render_html(report)
+    assert 'Shift references' in html and 'Event-confirmed' in html and '&lt;own event&gt;' in html, \
+        'report must retain and escape event reference applicability'
+    assert 'Pre-cut RPM' in html and 'Economy target' in html and '5600' in html and '5300' in html
+
+
 def t_summary_and_discord_carry_the_best_lap_line():
     rep = _solo_report()
     assert "  " + LINE in rb.render_summary_text(rep).splitlines()

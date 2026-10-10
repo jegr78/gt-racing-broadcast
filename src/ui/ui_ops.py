@@ -49,11 +49,19 @@ OPS = {
     "health-import": ["health", "import"],
     "gt7-data-update": ["gt7-data", "update"],
     "telemetry-index": ["telemetry", "index"],
+    "shift-reference-update": ["telemetry", "shift-update"],
     "report-generate": ["report", "generate"],   # builds lap indexes, so never in a request
 }
 
 # Browsers get-cookies can export from (yt-dlp --cookies-from-browser names).
 BROWSERS = ("firefox", "chrome", "edge", "brave", "safari")
+
+
+def _car_arg(value):
+    s = str(value)
+    if not s.isascii() or not s.isdigit() or not 0 < int(s) <= 9999999:
+        raise ValueError('car ID must be a positive integer in range')
+    return [str(int(s))]
 
 
 def _browser_arg(value):
@@ -130,6 +138,7 @@ def _file_arg(value):
 # op name -> {param name: validator(value) -> argv fragment}. Ops absent here
 # accept no parameters at all.
 PARAMS = {
+    "shift-reference-update": {"car_id": _car_arg},
     "cookies": {"browser": _browser_arg},
     "cookies-twitch": {"browser": _browser_arg},
     "event-start": {"stint": _stint_arg, "qualifying": _qualifying_flag},
@@ -144,6 +153,7 @@ PARAMS = {
 # op name -> tuple of param names that must be present (non-empty). Params not
 # listed here are optional; build_argv skips an absent or empty one.
 REQUIRED = {
+    "shift-reference-update": ("car_id",),
     "health-import": ("file",),
 }
 

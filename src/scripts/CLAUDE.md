@@ -123,7 +123,14 @@ from supplied definitions. Derived analysis joins the current snapshot without c
 raw lap indexes; reports and exports freeze its fingerprint/version. Larger-sector
 composition uses eligible, pairwise context-compatible sources; mini-sector sums remain
 diagnostics. HTTP edits use recording/profile identity and revision guards.
-Five stdlib modules back the telemetry recording and analysis; the mechanisms live next to
+
+`gt7_shifts` independently calculates normalized power-equality references and brackets
+original upshift phases. Fixed-source explicit updates use bounded HTTP and atomically
+replace machine-local caches; analysis never requests the network. Recorded ratios,
+external curves, manual event tables and stint economy targets remain distinct.
+Context/templates retain manual provenance, while reports/exports freeze the values used.
+CLI: `telemetry shifts <name> --lap N [--session N]` and `telemetry shift-update CAR_ID`.
+These stdlib modules back the telemetry recording and analysis; the mechanisms live next to
 their callers, so read those sections first:
 - `gt7_recording` (recorder, reader, CSV export), `gt7_data` (car and track reference
   files, `update`, `data_version`, `fingerprint`) and `gt7_tracks` (`TrackDB`: track
