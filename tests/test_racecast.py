@@ -1451,7 +1451,8 @@ def t_telemetry_memo_holds_more_recordings_than_a_list_scans():
             tgl.write_circle_recording(rec_dir, t0=1_700_000_000.0 + 3600 * k, n=40)
         rows = m.telemetry_recordings_data()["recordings"]
         for r in rows:
-            m.telemetry_laps_data(rec=r["rec"])
+            answer = m.telemetry_laps_data(rec=r["rec"])
+            assert all(lap.get('larger_sectors') for lap in answer['laps']), 'warm-cache proof must include actual derived sector data'
         real, reads = gt7_laps.cached, []
         gt7_laps.cached = lambda *a, **k: reads.append(1) or real(*a, **k)
         try:

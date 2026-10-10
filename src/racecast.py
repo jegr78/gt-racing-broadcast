@@ -3615,7 +3615,7 @@ def _telemetry_with_definitions(result, data, path):
             except FileNotFoundError:
                 files.append((candidate, None, None))
     stamp = _telemetry_stamp(path)
-    key = (tuple(sorted(stamp.items())), result.get('context_revision'),
+    key = (stamp, result.get('context_revision'),
            json.dumps(data, sort_keys=True), tuple(files))
     with _TELEMETRY_LOCK:
         cached = _TELEMETRY_DERIVED_MEMO.get(path)
