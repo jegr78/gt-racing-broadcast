@@ -249,6 +249,9 @@ def _ctx(jobs=None, init_plan=None, init_step=None, profile_logo=None,
                 {"id": "suzuka01", "track": "Suzuka Circuit", "layout": "Full Course",
                  "reverse": False}]},
             "telemetry_learn": lambda rec, track_id, build=True: {"ok": True, "track": {"id": track_id}},
+            "telemetry_delete": lambda rec: ({"ok": True, "deleted": rec + ".gt7rec", "notes": []}
+                                             if rec == "r" else
+                                             {"ok": False, "error": f"no recording named {rec!r}"}),
             "resources": lambda: {"available": False}}
 
 
@@ -3641,6 +3644,26 @@ def t_telemetry_routes_500_paths_report_only_the_exception_type():
         code, body = _post_json(port, "/api/telemetry/learn", {"rec": "r", "track_id": "x"})
         err = json.loads(body)["error"]
         assert code == 500 and "RuntimeError" in err and "/srv/league" not in err, err
+    finally:
+        httpd.shutdown()
+
+
+def t_telemetry_delete_route_answers_by_outcome():
+    ctx = _ctx()
+    httpd, port = _serve(ctx)
+    try:
+        code, body = _post_json(port, "/api/telemetry/delete", {"rec": "r"})
+        assert code == 200 and json.loads(body)["deleted"] == "r.gt7rec", body
+        code, body = _post_json(port, "/api/telemetry/delete", {"rec": "nope"})
+        assert code == 400 and "no recording named" in json.loads(body)["error"], body
+    finally:
+        httpd.shutdown()
+    ctx["telemetry_delete"] = lambda rec: (_ for _ in ()).throw(RuntimeError("disk at /srv/x"))
+    httpd, port = _serve(ctx)
+    try:
+        code, body = _post_json(port, "/api/telemetry/delete", {"rec": "r"})
+        err = json.loads(body)["error"]
+        assert code == 500 and "RuntimeError" in err and "/srv/x" not in err, err
     finally:
         httpd.shutdown()
 

@@ -123,7 +123,8 @@ def make_handler(ctx):
     profile_export(name, assets) -> dict, profile_import(path, force) -> dict,
     telemetry_recordings() -> dict, telemetry_laps(rec, session, track, car, build) -> dict,
     telemetry_lap(rec, session, lap, build) -> dict, telemetry_tracks() -> dict,
-    telemetry_learn(rec, track_id, build) -> dict (solo POV lap analysis, query strings
+    telemetry_learn(rec, track_id, build) -> dict,
+    telemetry_delete(rec) -> dict (solo POV lap analysis, query strings
     in; the routes pass build=False, so no request builds a lap index),
     report_read(name) -> dict (a report the report-generate job wrote; generating builds
     lap indexes, so it never runs in a request), report_send(path) -> dict,
@@ -981,6 +982,19 @@ def make_handler(ctx):
                 except Exception as exc:
                     return self._json({"ok": False,
                                        "error": f"could not delete backup: {exc}"},
+                                      code=500)
+                return self._json(result, code=200 if result.get("ok") else 400)
+            if path == "/api/telemetry/delete":
+                body = self._body_json()
+                if body is None:
+                    return self._json({"ok": False, "error": self._body_error},
+                                      code=400)
+                try:
+                    result = ctx["telemetry_delete"](body.get("rec"))
+                except Exception as exc:
+                    return self._json({"ok": False,
+                                       "error": f"could not delete the recording: "
+                                                f"{type(exc).__name__}"},
                                       code=500)
                 return self._json(result, code=200 if result.get("ok") else 400)
             if path == "/api/telemetry/learn":

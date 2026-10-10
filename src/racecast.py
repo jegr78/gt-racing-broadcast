@@ -3379,19 +3379,17 @@ def telemetry_export_cmd(rest):
         print(f"note: {res['dropped']} packets were dropped while recording")
 
 
-def telemetry_delete_cmd(rest):
-    """Delete one recording, its export folder and its lap index."""
+def _telemetry_delete_path(rec_dir, path):
+    """Delete the recording at `path`, its export folder and its lap index. Returns
+    (error, notes): `error` is the refusal or failure text (None on success), `notes` name
+    leftovers that could not be removed. Shared by the CLI and the Control Center."""
     import gt7_laps
     import gt7_recording as gr
-    if len(rest) != 1:
-        sys.exit("usage: racecast telemetry delete <name>")
-    rec_dir = _telemetry_rec_dir()
-    path = _resolve_recording(rec_dir, rest[0])
     name = os.path.basename(path)
     open_file = _relay_open_file()
     if open_file and name.startswith(open_file):
-        sys.exit(f"{name} is currently recording; stop it first "
-                 "('racecast telemetry record stop')")
+        return (f"{name} is currently recording; stop it first "
+                "('racecast telemetry record stop')"), []
     stem = gr.recording_stem(path)
     export_dir = os.path.join(rec_dir, stem)
     try:
@@ -3399,25 +3397,57 @@ def telemetry_delete_cmd(rest):
         if os.path.isdir(export_dir):
             shutil.rmtree(export_dir)
     except OSError as e:
-        sys.exit(f"could not delete {name}: {e.strerror}")
+        return f"could not delete {name}: {e.strerror}", []
     with _TELEMETRY_LOCK:
         _TELEMETRY_MEMO.pop(path, None)
         _TELEMETRY_BUILD_LOCKS.pop(path, None)
+    notes = []
     tmp_prefix = stem + gt7_laps.CACHE_SUFFIX[:-len(".json")] + "-"
     try:
         leftovers = [os.path.join(rec_dir, f) for f in os.listdir(rec_dir)
                      if f.startswith(tmp_prefix) and f.endswith(".tmp")]
     except OSError as e:
         leftovers = []
-        print(f"note: could not look for {tmp_prefix}*.tmp files: {e.strerror}")
-    print(f"deleted {name}")
+        notes.append(f"could not look for {tmp_prefix}*.tmp files: {e.strerror}")
     for f in [gt7_laps.cache_path(path)] + leftovers:
         try:
             os.remove(f)
         except FileNotFoundError:
             pass  # never indexed
         except OSError as e:
-            print(f"note: could not remove {os.path.basename(f)}: {e.strerror}")
+            notes.append(f"could not remove {os.path.basename(f)}: {e.strerror}")
+    return None, notes
+
+
+def telemetry_delete_cmd(rest):
+    """Delete one recording, its export folder and its lap index."""
+    if len(rest) != 1:
+        sys.exit("usage: racecast telemetry delete <name>")
+    rec_dir = _telemetry_rec_dir()
+    path = _resolve_recording(rec_dir, rest[0])
+    error, notes = _telemetry_delete_path(rec_dir, path)
+    if error:
+        sys.exit(error)
+    print(f"deleted {os.path.basename(path)}")
+    for note in notes:
+        print(f"note: {note}")
+
+
+def telemetry_delete_data(rec):
+    """The Control Center's delete: one recording of the active profile by name, the same
+    as `racecast telemetry delete`. {ok, deleted, notes} or {ok: False, error}; the error
+    never carries a machine path. Never raises."""
+    try:
+        rec_dir = _telemetry_rec_dir()
+        path = _find_recording(rec_dir, rec)
+        if not path:
+            return {"ok": False, "error": f"no recording named {rec!r}"}
+        error, notes = _telemetry_delete_path(rec_dir, path)
+        if error:
+            return {"ok": False, "error": error}
+        return {"ok": True, "deleted": os.path.basename(path), "notes": notes}
+    except Exception as exc:  # noqa: BLE001  a route answers, it never raises
+        return {"ok": False, "error": f"could not delete the recording: {type(exc).__name__}"}
 
 
 _TELEMETRY_MEMO = {}          # path -> (stamp, lap index without traces), oldest first
@@ -7830,6 +7860,7 @@ def run_ui(rest, fail=sys.exit, open_browser=True):
         "telemetry_lap": telemetry_lap_data,
         "telemetry_tracks": telemetry_tracks_data,
         "telemetry_learn": telemetry_learn_data,
+        "telemetry_delete": telemetry_delete_data,
         "jobs": jobs_mod.JobManager(
             lambda op_args: ops_mod.job_argv(op_args, IS_FROZEN,
                                              _rc_job_executable(),
