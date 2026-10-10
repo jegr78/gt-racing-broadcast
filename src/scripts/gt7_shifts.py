@@ -312,3 +312,37 @@ class Cache:
         with gc._LOCK, gc._file_lock(path):
             gc._atomic(path, value)
         return self.read(car)
+
+
+def recorded_rows(path, index, lap):
+    """Read bounded original packets in sparse-seek chunks, never distance samples."""
+    import gt7_channel_detail as detail
+    duration = lap.get('end_t_s', 0)-lap.get('start_t_s', 0)
+    number(duration, 'observed lap duration', high=3600)
+    rows, ratio_sets = [], []
+    keys = ['rpm', 'gear', 'throttle_pct', 'clutch_engagement', 'gearbox_rpm', 'alert_min_rpm', 'alert_max_rpm']
+    for start in range(0, math.ceil(duration), 30):
+        end = min(start+30, duration)
+        part = detail.window(path, index, lap, keys, 'time', start, end)
+        for row in part['rows']:
+            if not rows or row['t'] > rows[-1]['t']:
+                rows.append(row)
+        if len(rows) > MAX_ROWS:
+            raise ValueError('shift observation exceeds the packet bound')
+        values = detail.window(path, index, lap, ['gear_ratio_'+str(g) for g in range(1, 9)],
+                               'time', start, min(start+.1, duration))['rows']
+        for row in values:
+            ratios = []
+            for gear in range(1, 9):
+                r = row['gear_ratio_'+str(gear)]
+                if r is None:
+                    break
+                ratios.append(r)
+            if len(ratios) >= 2:
+                ratios = validate_ratios(ratios)
+                if not any(len(ratios) == len(other) and all(abs(a-b) < .001 for a, b in zip(ratios, other, strict=True))
+                           for other in ratio_sets):
+                    ratio_sets.append(ratios)
+    return {'rows': rows, 'observed_ratios': ratio_sets[0] if len(ratio_sets) == 1 else None,
+            'ratio_warnings': ['Decoded gearbox differs within this lap'] if len(ratio_sets) > 1 else [],
+            'display_alerts': {k: rows[0].get(k) if rows else None for k in ('alert_min_rpm', 'alert_max_rpm')}}

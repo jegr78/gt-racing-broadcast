@@ -114,6 +114,62 @@ def t_explicit_source_update_is_pinned_bounded_atomic_and_offline_afterwards():
         finally:http_util.open_url=original
 
 
+def t_recorded_reader_keeps_original_phase_packets_and_decoded_ratios():
+    import struct
+    import test_gt7_laps as fixture
+    import gt7_recording as recording
+    with tempfile.TemporaryDirectory() as root:
+        path = fixture.write_circle_recording(root, n=1200)
+        offsets = []
+        capture = recording.Recording(path)
+        for _ts, _kind, packet in capture.packets():
+            if struct.unpack_from('<h', packet, 0x74)[0] == 3:
+                offsets.append(capture.pos-len(packet))
+        with open(path, 'r+b') as stream:
+            for i, offset in enumerate(offsets):
+                stream.seek(offset+0x104)
+                stream.write(struct.pack('<6f', 3, 2, 1.5, 1.2, 1, .8))
+                stream.seek(offset+0xF8)
+                stream.write(struct.pack('<f', 1))
+                if 100 <= i < 110:
+                    phase = rows()[i-100]
+                    stream.seek(offset+0x3C);stream.write(struct.pack('<f', phase['rpm']))
+                    stream.seek(offset+0x90);stream.write(bytes([phase['gear'], round(phase['throttle_pct']*255/100)]))
+                    stream.seek(offset+0xF8);stream.write(struct.pack('<f', phase['clutch_engagement']))
+        index = fixture._index(path)
+        lap = fixture._lap(index, 3)
+        observed = shifts.recorded_rows(path, index, lap)
+        assert abs(observed['observed_ratios'][1]-2) < 1e-6
+        events = shifts.detect_shifts(observed['rows'])
+        assert any(e['pre_cut_rpm'] == 5660 and e['last_old_gear_rpm'] == 5300 for e in events), \
+            'reader must preserve the original pre-cut phase and decoded gearbox'
+        assert len(observed['rows']) > 1000 and all(b['t'] > a['t'] for a, b in zip(observed['rows'], observed['rows'][1:], strict=False)), \
+            'raw phase packets stay ordered and distinct'
+
+
+def t_context_and_templates_validate_and_retain_event_reference_provenance():
+    import gt7_context as context
+    manual = {'car_id': 485, 'targets': {'2': 5600}, 'configuration': 'Fixed BoP',
+              'provenance': 'Own test', 'confirmed': True}
+    data = {'notes': [], 'sessions': {'1': {'settings': {}, 'confirmed': True, 'shift_reference': manual}}}
+    invalid = copy.deepcopy(data)
+    invalid['sessions']['1']['shift_reference']['targets']['2'] = -1
+    try:
+        context.validate_data(invalid)
+    except ValueError:
+        pass  # invalid manual table cannot become saved event context
+    else:
+        raise AssertionError('context must validate manual shift targets')
+    with tempfile.TemporaryDirectory() as root:
+        doc = context.save_template(root, 'event', 'Own event', {}, shift_reference=manual)
+        copied = context.apply_template(data, doc['templates']['event'], 2)
+        target = copied['sessions']['2']
+        assert target['shift_reference'] == manual and not target['confirmed'], \
+            'template reference provenance survives but new event applicability needs confirmation'
+        again = context.copy_session(data, 1, 3)['sessions']['3']
+        assert again['shift_reference'] == manual and not again['confirmed']
+
+
 if __name__ == '__main__':
     for name, fn in sorted(globals().items()):
         if name.startswith('t_') and callable(fn):

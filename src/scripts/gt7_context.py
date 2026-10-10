@@ -206,7 +206,8 @@ def validate_data(data):
             if origin.get('kind') not in {'manual', 'template', 'copied'}:
                 raise ValueError('invalid context origin')
         if session.get('shift_reference') is not None:
-            _object(session['shift_reference'])  # interpretation belongs to the shift-reference module
+            import gt7_shifts
+            session['shift_reference'] = gt7_shifts.manual_reference(session['shift_reference'])
     if data.get('track_definition') is not None:
         _object(data['track_definition'])  # bounded snapshot; track module validates its geometry
     return data
@@ -453,14 +454,20 @@ def templates(recdir):
             _token(key)
             _text(template.get('name'), 200)
             validate_settings(template.get('settings'))
+            if template.get('shift_reference') is not None:
+                import gt7_shifts
+                gt7_shifts.manual_reference(template['shift_reference'])
         return copy.deepcopy(doc)
 
 
-def save_template(recdir, key, name, settings):
+def save_template(recdir, key, name, settings, shift_reference=None):
     with _LOCK, _file_lock(os.path.join(_profile_root(recdir), 'telemetry-templates.json')):
         doc = templates(recdir)
         doc['templates'][_token(key)] = {'name': _text(name, 200),
                                        'settings': validate_settings(settings)}
+        if shift_reference is not None:
+            import gt7_shifts
+            doc['templates'][key]['shift_reference'] = gt7_shifts.manual_reference(shift_reference)
         _atomic(os.path.join(_profile_root(recdir), 'telemetry-templates.json'), doc)
         return doc
 
@@ -478,6 +485,10 @@ def apply_template(data, template, session=1):
     target = result['sessions'].setdefault(str(session), {})
     target['settings'] = validate_settings(template['settings'])
     target['confirmed'] = False  # choosing a template does not confirm its current applicability
+    if template.get('shift_reference') is not None:
+        target['shift_reference'] = copy.deepcopy(template['shift_reference'])
+    else:
+        target.pop('shift_reference', None)
     target['origin'] = {'kind': 'template'}
     return validate_data(result)
 
@@ -490,6 +501,8 @@ def copy_session(data, source, target):
     result['sessions'][str(target)] = {'settings': copy.deepcopy(previous['settings']),
                                       'confirmed': False, 'stints': [],
                                       'origin': {'kind': 'copied', 'session': source}}
+    if previous.get('shift_reference') is not None:
+        result['sessions'][str(target)]['shift_reference'] = copy.deepcopy(previous['shift_reference'])
     return validate_data(result)
 
 

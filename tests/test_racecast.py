@@ -1098,6 +1098,37 @@ def t_telemetry_index_is_memoised_until_the_file_or_the_data_change():
         assert path not in m._TELEMETRY_MEMO, "the least recently used index goes first"
 
 
+def t_shift_analysis_uses_the_recorded_car_and_manual_context_without_network():
+    import http_util
+    with _telemetry_sandbox() as (rec_dir, fixture):
+        path = fixture.write_circle_recording(rec_dir)
+        stem = _stem(path)
+        m.telemetry_lap_data(stem, '1', '3')
+        context = m.telemetry_context_read_data(stem)
+        data = context['context']['data']
+        data['sessions']['1'] = {'settings': {}, 'confirmed': True,
+                                 'shift_reference': {'car_id': fixture.CAR, 'targets': {'2': 5500},
+                                                     'configuration': 'Fixed test', 'provenance': 'Own event test', 'confirmed': True}}
+        saved = m.telemetry_context_write_data({'rec': stem, 'profile': context['profile'],
+                                                'source_id': context['context']['source_id'],
+                                                'expected_revision': 0, 'data': data})
+        assert saved['ok'], saved
+        original = http_util.open_url
+        try:
+            http_util.open_url = lambda *a, **k: (_ for _ in ()).throw(AssertionError('lookup must remain offline'))
+            reply = m.telemetry_shifts_data(stem, '1', '3')
+        finally:
+            http_util.open_url = original
+        assert reply['ok'] and reply['analysis']['reference']['car_id'] == fixture.CAR, \
+            'shift lookup must resolve the recorded vehicle'
+        assert reply['analysis']['reference']['kind'] == 'manual-event'
+        assert reply['analysis']['reference']['event_confirmed']
+        assert reply['analysis']['reference']['targets'][0]['rpm'] == 5500
+        assert m.telemetry_shifts_data(stem, '1', '3') == reply, 'warm lookup must retain its reference snapshot'
+        bad = m.telemetry_shifts_data(stem, '1', 'missing')
+        assert not bad['ok'] and bad.get('invalid') and 'number' in bad['error']
+
+
 def t_telemetry_tracks_data_lists_layouts():
     with _telemetry_sandbox():
         d = m.telemetry_tracks_data()

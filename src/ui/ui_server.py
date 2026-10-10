@@ -660,6 +660,17 @@ def make_handler(ctx):
                 except Exception as exc:
                     result = {'ok': False, 'error': 'could not read track definition: '+type(exc).__name__}
                 return self._context_result(result)
+            if path == '/api/telemetry/shifts':
+                if not self._context_allowed():
+                    return None
+                q = parse_qs(urlparse(self.path).query or '', keep_blank_values=True)
+                try:
+                    result = ctx['telemetry_shifts']((q.get('rec') or [None])[0],
+                                                     (q.get('session') or [None])[0],
+                                                     (q.get('lap') or [None])[0])
+                except Exception as exc:
+                    result = {'ok': False, 'error': 'could not read shifts: '+type(exc).__name__}
+                return self._context_result(result)
             if path == '/api/telemetry/context':
                 if not self._context_allowed():
                     return None

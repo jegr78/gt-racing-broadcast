@@ -983,7 +983,7 @@ EVENT_VERBS = ("status", "start", "stop", "takeover")
 TAILSCALE_VERBS = ("up", "down", "status", "logs")
 OBS_VERBS = ("refresh", "collection", "logs", "stream-target", "benchmark")
 SHEET_VERBS = ("url", "open")           # active league's Google Sheet (from SHEET_ID)
-TELEMETRY_VERBS = ("record", "list", "export", "delete", "index")   # GT7 telemetry recordings
+TELEMETRY_VERBS = ("record", "list", "export", "delete", "index", "shifts", "shift-update")   # GT7 telemetry recordings
 GT7DATA_VERBS = ("update", "status")      # GT7 reference data
 APP_VERBS = ("launch", "quit")          # GUI app control for the Control Center
 APP_CONTROLLED = ("obs", "discord", "tailscale")   # GUI apps racecast can launch + quit
@@ -3578,7 +3578,7 @@ def telemetry_context_write_data(payload):
             store.save(doc['data'], expected, doc.get('draft', {}), operation='select-track-variant')
         elif action == 'save-template':
             gc.save_template(_telemetry_rec_dir(), payload.get('template_id'), payload.get('name'),
-                             payload.get('settings'))
+                             payload.get('settings'), shift_reference=payload.get('shift_reference'))
         elif action == 'delete-template':
             gc.delete_template(_telemetry_rec_dir(), payload.get('template_id'))
         else:
@@ -4112,6 +4112,120 @@ def telemetry_track_definition_write_data(payload):
         return telemetry_track_definition_read_data(payload['rec'], payload['session'], payload['lap'])
     except Exception as exc:
         return _telemetry_context_error(exc)
+
+_TELEMETRY_SHIFT_MEMO = {}
+
+
+def _telemetry_shift_analysis(path, index, row):
+    import copy
+    import hashlib
+    import gt7_shifts as shifts
+    doc = index.get('context_snapshot')
+    if doc is None:
+        doc = _telemetry_context_store(index['rec'])[0].read()
+    session = doc['data']['sessions'].get(str(row['session']), {})
+    cache = shifts.Cache(_runtime_base_dir())
+    source_path = cache.path(row['car_id']) if row.get('car_id') else None
+    try:
+        st = os.stat(source_path) if source_path else None
+        source_stamp = (st.st_mtime_ns, st.st_size) if st else None
+    except FileNotFoundError:
+        source_stamp = None
+    key = (_telemetry_stamp(path), row['session'], row['lap'], doc['revision'], source_stamp)
+    with _TELEMETRY_LOCK:
+        hit = _TELEMETRY_SHIFT_MEMO.get((path, row['session'], row['lap']))
+    if hit and hit[0] == key:
+        return copy.deepcopy(hit[1])
+    warnings = []
+    try:
+        external = cache.read(row['car_id']) if row.get('car_id') else None
+    except (OSError, ValueError) as exc:
+        external = None
+        warnings.append('External shift reference unavailable: '+_telemetry_reason(exc))
+    observed = shifts.recorded_rows(path, index, row)
+    result = shifts.analyse(observed['rows'], row, external, session.get('shift_reference'),
+                            session.get('confirmed', False), observed['observed_ratios'])
+    result.update(display_alerts=observed['display_alerts'],
+                  time_basis='Receiver-clock seconds from recorded lap boundary',
+                  warnings=warnings+observed['ratio_warnings'])
+    result['reference_id'] = hashlib.sha256(json.dumps(result['reference'], sort_keys=True,
+                                                       allow_nan=False).encode()).hexdigest()
+    with _TELEMETRY_LOCK:
+        item = (path, row['session'], row['lap'])
+        _TELEMETRY_SHIFT_MEMO.pop(item, None)
+        _TELEMETRY_SHIFT_MEMO[item] = (key, copy.deepcopy(result))
+        while len(_TELEMETRY_SHIFT_MEMO) > 64:
+            del _TELEMETRY_SHIFT_MEMO[next(iter(_TELEMETRY_SHIFT_MEMO))]
+    return result
+
+
+def telemetry_shifts_data(rec, session, lap):
+    """Offline post-session reference lookup; no index replay or source update in HTTP."""
+    try:
+        try:
+            s, n = int(str(session)), int(str(lap))
+        except (ValueError, TypeError):
+            raise ValueError('shift session and lap must be numbers') from None
+        path = _find_recording(_telemetry_rec_dir(), rec)
+        if path is None:
+            raise FileNotFoundError('recording not found')
+        open_file = _relay_open_file()
+        if path.endswith('.part') or open_file and os.path.basename(path).startswith(open_file):
+            raise ValueError('recording in progress: stop the recording to analyse shifts')
+        index = _telemetry_cached_full(path)
+        if index is None:
+            raise ValueError('recording needs a current lap index')
+        index = _telemetry_with_context(index, path)
+        row = next((r for r in index['laps'] if r['session'] == s and r['lap'] == n), None)
+        if row is None:
+            raise ValueError('selected lap is unavailable')
+        return {'ok': True, 'profile': _active_profile_name(), 'rec': rec, 'session': s, 'lap': n,
+                'analysis': _telemetry_shift_analysis(path, index, row)}
+    except Exception as exc:
+        return _telemetry_context_error(exc)
+
+
+def _telemetry_with_shifts(index, path):
+    """Explicit report/export snapshot; optional shift failures do not erase other data."""
+    import copy
+    result = copy.deepcopy(index)
+    result['shift_reference_snapshots'] = {}
+    for row in result['laps']:
+        try:
+            analysis = _telemetry_shift_analysis(path, result, row)
+            row['shift_analysis'] = analysis
+            result['shift_reference_snapshots'][analysis['reference_id']] = copy.deepcopy(analysis['reference'])
+        except Exception as exc:
+            row['shift_analysis'] = {'unavailable': True, 'error': _telemetry_reason(exc)}
+    return result
+
+
+def telemetry_shift_update_cmd(rest):
+    import gt7_shifts
+    if len(rest) != 1 or not str(rest[0]).isascii() or not str(rest[0]).isdigit():
+        sys.exit('usage: racecast telemetry shift-update CAR_ID')
+    try:
+        result = gt7_shifts.Cache(_runtime_base_dir()).update(int(rest[0]))
+    except Exception as exc:
+        sys.exit('shift source update failed: '+_telemetry_reason(exc))
+    print('shift source car '+str(result['car_id'])+' at '+result['source']['commit'])
+    print('curve: '+('available' if result['curve'] else 'unavailable')+
+          '; source ratios: '+('available' if result['ratios'] else 'unavailable'))
+
+
+def telemetry_shifts_cmd(rest):
+    import argparse
+    parser = argparse.ArgumentParser(prog='racecast telemetry shifts')
+    parser.add_argument('recording')
+    parser.add_argument('--session', type=int, default=1)
+    parser.add_argument('--lap', type=int, required=True)
+    args = parser.parse_args(rest)
+    path = _resolve_recording(_telemetry_rec_dir(), args.recording)
+    _telemetry_full_index(path)
+    reply = telemetry_shifts_data(os.path.basename(path).removesuffix('.gt7rec'), args.session, args.lap)
+    if not reply['ok']:
+        sys.exit(reply['error'])
+    print(json.dumps(reply['analysis'], ensure_ascii=True, indent=2))
 
 
 def telemetry_tracks_data():
@@ -5623,6 +5737,8 @@ DISPATCH = {
     ("telemetry", "record"): telemetry_record_cmd, ("telemetry", "list"): telemetry_list_cmd,
     ("telemetry", "export"): telemetry_export_cmd, ("telemetry", "delete"): telemetry_delete_cmd,
     ("telemetry", "index"): telemetry_index_cmd,
+    ("telemetry", "shifts"): telemetry_shifts_cmd,
+    ("telemetry", "shift-update"): telemetry_shift_update_cmd,
     ("gt7-data", "update"): gt7_data_update_cmd, ("gt7-data", "status"): gt7_data_status_cmd,
     ("app", "launch"): app_launch_cmd, ("app", "quit"): app_quit_cmd,
 }
@@ -8208,6 +8324,7 @@ def run_ui(rest, fail=sys.exit, open_browser=True):
         "telemetry_channels": telemetry_channels_data,
         'telemetry_definition_read': telemetry_track_definition_read_data,
         'telemetry_definition_write': telemetry_track_definition_write_data,
+        "telemetry_shifts": telemetry_shifts_data,
         "telemetry_tracks": telemetry_tracks_data,
         "telemetry_learn": telemetry_learn_data,
         "telemetry_delete": telemetry_delete_data,
