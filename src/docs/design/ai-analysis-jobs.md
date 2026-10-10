@@ -72,3 +72,7 @@ Claude 2.1.296 on macOS returned structured output with reported model
 The full local suite also caught missing standalone-binary hidden imports for the
 four AI modules. These are registered in the build script, and the shared import
 cycle refactor from #835 has been integrated before final verification.
+
+Additional guard falsification rejected omission of the installed Codex runtime
+file, omission of OS user identity and choosing an actual model from mixed model
+usage. Each failed its intended assertion; production files were restored.
