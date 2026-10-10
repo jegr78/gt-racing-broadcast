@@ -19,7 +19,7 @@ STEP_M = 5.0
 SECTOR_M = 200.0
 MAX_TRACE_M = gt7_telemetry.MAX_SAMPLES * gt7_telemetry.SAMPLE_MIN_DIST
 COUNTED = ("reference", "counted")
-INDEX_VERSION = 5
+INDEX_VERSION = 6
 CACHE_SUFFIX = ".laps.json"
 DECIMATE_M = 2.0              # finer samples add nothing to a 5 m trace
 RESUME_CHECK = 64             # bytes before a resume point that must be unchanged to continue there
@@ -335,6 +335,7 @@ class _Replay:
         self.eng.on_lap = self.laps.append
         self.times = gt7_recording.LapTimeMatcher()
         self.lap_samples, self.lap_tyres = [], []
+        self.cur_events = []
         self.cur, self.tail, self.tyre = [], None, [0.0, 0.0, 0.0, 0.0, 0]
         self.first = self.last = None
         self.start, self.dropped, self.point = None, 0, None
@@ -346,6 +347,7 @@ class _Replay:
             self.cur = [tuple(x) for x in point["cur"]]
             self.tail = None if point["tail"] is None else tuple(point["tail"])
             self.tyre = list(point["tyre"])
+            self.cur_events = list(point.get('cur_events', []))
             self.first, self.last = point["first"], point["last"]
             self.start, self.dropped = point["offset"], point["dropped"]
             self.point = {k: v for k, v in point.items()
@@ -362,7 +364,8 @@ class _Replay:
                 self.point = {
                     "offset": rec.pos, "laps": marked, "eng": self.eng.resume_state(),
                     "times": self.times.resume_state(), "cur": list(self.cur),
-                    "tail": self.tail, "tyre": list(self.tyre), "first": self.first,
+                    "tail": self.tail, "tyre": list(self.tyre), "cur_events": list(self.cur_events),
+                    "first": self.first,
                     "last": self.last, "dropped": rec.dropped}
         self.dropped = rec.dropped
 
@@ -371,8 +374,11 @@ class _Replay:
         self.last = wall_ts
         eng, times = self.eng, self.times
         closed = len(self.laps)
+        previous, previous_session = eng._last, eng.session
         eng.update(pkt, wall_ts)
         for lap in self.laps[closed:]:
+            lap['service_events'] = list(self.cur_events)
+            self.cur_events = []
             times.lap_closed(lap, wall_ts)
             samples = self.cur if self.tail is None else self.cur + [self.tail]
             if lap["status"] in COUNTED:
@@ -385,6 +391,20 @@ class _Replay:
             self.lap_tyres.append(self.tyre)
             self.cur, self.tail, self.tyre = [], None, [0.0, 0.0, 0.0, 0.0, 0]
         times.update(pkt, wall_ts)
+        if (previous is not None and previous.lap == pkt.lap and previous_session == eng.session
+                and pkt.on_track):
+            known = {e['kind'] for e in self.cur_events}
+            def event(kind):
+                if kind not in known and math.isfinite(wall_ts - self.first):
+                    self.cur_events.append({'kind': kind, 'source': 'inferred',
+                                            't_s': round(wall_ts - self.first, 3)})
+            if (all(math.isfinite(t) for t in previous.tyre_temp + pkt.tyre_temp)
+                    and all(a - b >= 4.0 for a, b in zip(previous.tyre_temp, pkt.tyre_temp, strict=True))):
+                event('tyre_reset')
+            if pkt.fuel_capacity > 0 and pkt.fuel_level - previous.fuel_level > .05:
+                event('refuel')
+            if eng._acc is not None and 'pit lap: standstill' in eng._acc.reasons:
+                event('standstill')
         if not pkt.on_track or pkt.paused or pkt.loading:
             return
         sample = _sample(pkt, wall_ts - eng.lap_started_at(), eng.lap_distance())
@@ -431,6 +451,7 @@ def _indexed_lap(stem, lap, samples, tyres, first, track_db, cars, found, open_l
         "time_s": time_s,
         "status": lap["status"], "reason": lap["reason"],
         "fuel_used_l": None if lap["fuel_used"] is None else round(lap["fuel_used"], 2),
+        "fuel_start_l": lap.get("fuel_start_l"), "fuel_end_l": lap.get("fuel_end_l"),
         "top_speed_kmh": round(lap["top_speed_mps"] * 3.6, 1),
         "car_id": lap["car_id"], "car": gt7_recording.car_name(cars, lap["car_id"]),
         "track_id": track_id,
@@ -441,7 +462,7 @@ def _indexed_lap(stem, lap, samples, tyres, first, track_db, cars, found, open_l
         "points": [[round(x, 1), round(z, 1)] for x, z in lap.get("points") or []],
         "length_m": lap_length_m({"trace": trace}),
         "sectors": sectors(trace, lap_length_m({"trace": trace})),
-        "trace": trace}
+        "trace": trace, "service_events": list(lap.get('service_events', []))}
     complete_trace = bool(close and len(trace) >= 2 and trace[0]["d"] == 0.0
                           and trace[-1]["d"] == round(close[0], 1))
     time_valid = bool(complete_trace and trace[0]["t"] == 0.0
@@ -482,6 +503,8 @@ def _build(path, track_db, cars, key, old=None):
                                 after_service=bool(previous and previous["pit"]
                                                    and previous["session"] == lap["session"])))
     unfinished = replay.eng.open_lap_record()
+    if unfinished is not None:
+        unfinished['service_events'] = list(replay.cur_events)
     open_lap = None
     if unfinished is not None and (replay.cur or replay.tail):
         samples = replay.cur if replay.tail is None else replay.cur + [replay.tail]

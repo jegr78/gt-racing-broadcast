@@ -16,6 +16,7 @@ import struct
 import tempfile
 import threading
 import time
+import uuid
 
 import gt7_cars
 import gt7_telemetry
@@ -55,10 +56,11 @@ def _local_dt(ts):
     return datetime.datetime.fromtimestamp(ts, tz=datetime.timezone.utc).astimezone()
 
 
-def _header(profile, relay_version, started_ts):
+def _header(profile, relay_version, started_ts, recording_id=None):
     started = _local_dt(started_ts).isoformat(timespec="seconds")
     return (json.dumps({"format": FORMAT, "version": VERSION, "profile": profile,
-                        "started": started, "relay_version": relay_version})
+                        "started": started, "relay_version": relay_version,
+                        "recording_id": recording_id or uuid.uuid4().hex})
             + "\n").encode("utf-8")
 
 
@@ -73,7 +75,10 @@ def _free_path(rec_dir, stem):
     while True:
         name = stem + ("" if n == 1 else f"-{n}") + SUFFIX
         path = os.path.join(rec_dir, name)
-        if not os.path.exists(path) and not os.path.exists(path + PART):
+        stem_path = path[:-len(SUFFIX)]
+        if not any(os.path.exists(p) for p in (path, path + PART, stem_path + ".context.json",
+                                               stem_path + ".context.json.lock",
+                                               stem_path + ".context-history")):
             return path
         n += 1
 
@@ -102,6 +107,8 @@ class RecordingWriter:
         self.bytes = 0
         self.dropped = 0
         self.error = None
+        self.recording_id = uuid.uuid4().hex
+        self._context_thread = None
         self._thread = threading.Thread(target=self._run, name="gt7-recorder", daemon=True)
         self._thread.start()
 
@@ -123,17 +130,28 @@ class RecordingWriter:
         self._thread.join(timeout)
         if not self._thread.is_alive():
             self._drain()             # a writer that died early leaves the sentinel behind
+        if self._context_thread is not None:
+            self._context_thread.join(min(timeout, 2.0))
 
     def _open(self, first_ts):
         os.makedirs(self._dir, exist_ok=True)
         stem = _local_dt(first_ts).strftime("%Y%m%d-%H%M%S")
         path = _free_path(self._dir, stem)
         fh = open(path + PART, "wb")  # noqa: SIM115  kept open across the writer loop
-        head = _header(self._profile, self._relay_version, first_ts)
+        head = _header(self._profile, self._relay_version, first_ts, self.recording_id)
         fh.write(head)
         self.started = first_ts
         self.bytes = len(head)
         self.path = path              # last: a visible path always has a start time
+        fh.flush()  # the companion identity is readable before its independent worker starts
+        def attach():
+            try:
+                import gt7_context
+                gt7_context.attach_prepared(path, self._dir, self.recording_id)
+            except Exception as exc:  # noqa: BLE001  optional notes must never stop recording
+                LOG.warning("could not attach prepared telemetry context: %s", _sanitize_error(exc))
+        self._context_thread = threading.Thread(target=attach, name="gt7-context", daemon=True)
+        self._context_thread.start()
         return fh
 
     def _write(self, fh, data):
@@ -499,6 +517,14 @@ def export_csv(path, out_dir, include_all=False, excel=False, cars=None, tracks=
     """Write samples.csv and laps.csv for one recording into out_dir."""
     cars = cars if cars is not None else gt7_cars.CarDB()
     r = Recording(path)
+    import gt7_context
+    context_error = None
+    try:
+        context_snapshot = gt7_context.Store.for_recording(path).export()
+    except (OSError, ValueError, RecordingError):
+        context_error = 'saved context is unavailable; raw measurements are still exported'
+        context_snapshot = {'format': gt7_context.FORMAT, 'version': gt7_context.VERSION,
+                            'available': False, 'error': context_error}
     num = _fmt(excel)
     eng = gt7_telemetry.TelemetryEngine()
     laps = []
@@ -553,7 +579,9 @@ def export_csv(path, out_dir, include_all=False, excel=False, cars=None, tracks=
                 num(lap["fuel_used"], 2), num(lap["top_speed_mps"] * 3.6, 1),
                 car_name(cars, lap["car_id"]),
                 found["track"] if known else "", found["layout"] if known else ""])
-    return {"dir": out_dir, "samples": written, "laps": len(laps), "dropped": r.dropped}
+    gt7_context._atomic(os.path.join(os.path.realpath(out_dir), 'context.json'), context_snapshot)
+    return {"dir": out_dir, "samples": written, "laps": len(laps), "dropped": r.dropped,
+            "context_error": context_error}
 
 
 _TRUTHY = {"1", "true", "yes", "on"}

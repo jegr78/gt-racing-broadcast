@@ -697,6 +697,23 @@ def t_page_survives_its_bundled_file_being_deleted():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def t_context_editor_script_survives_bundle_eviction():
+    with tempfile.TemporaryDirectory() as td:
+        page = os.path.join(td, 'control-center.html')
+        script = os.path.join(td, 'telemetry-context.js')
+        shutil.copyfile(_ctx()['page_path'], page)
+        shutil.copyfile(os.path.join(ROOT, 'src', 'ui', 'telemetry-context.js'), script)
+        ctx = _ctx()
+        ctx['page_path'] = page
+        httpd, port = _serve(ctx)
+        try:
+            os.unlink(script)
+            code, body = _get(port, '/telemetry-context.js')
+            assert code == 200 and b'async function tcSave' in body
+        finally:
+            httpd.shutdown()
+
+
 def t_missing_page_reports_how_to_recover():
     # Never read and never on disk, so the message must say that a restart helps.
     ctx = _ctx()
@@ -2551,9 +2568,9 @@ tmPick('a', tmKey(tmState.recLaps[1]));
 console.log($('tm-laps').kids.map(r => r.className).join('|'));""")
     if out is not None:
         rows, times, titles, after = out.strip().split("\n")
-        assert rows == ("tmitem nc=Lap 0not for pace0:06.000paused, loading or off track|"
-                        "tmitem=Lap 1best so far1:56.000|tmitem sel=Lap 2pace1:57.000|"
-                        "tmitem is-a=Lap 3best so far1:50.000|tmitem=Lap 4pace1:51.000Other Car"), \
+        assert rows == ("tmitem nc=Lap 0not for pace0:06.000Start fuel unknown · Tyre age unknown · paused, loading or off track|"
+                        "tmitem=Lap 1best so far1:56.000Start fuel unknown · Tyre age unknown|tmitem sel=Lap 2pace1:57.000Start fuel unknown · Tyre age unknown|"
+                        "tmitem is-a=Lap 3best so far1:50.000Start fuel unknown · Tyre age unknown|tmitem=Lap 4pace1:51.000Start fuel unknown · Tyre age unknown · Other Car"), \
             f"one line per lap; a car shows only where it differs from the recording: {rows!r}"
         assert times == "tmtime|tmtime|tmtime|tmtime best|tmtime", \
             f"the fastest counted lap is marked: {times!r}"
@@ -2679,6 +2696,44 @@ console.log(String(box.hidden));""")
                          "tm-tr nc,tm-tr,tm-tr best|R|1|2"), \
             f"the summary repeats the report's figures and a trend dot picks lap B: {first!r}"
         assert second == "true", "no summary hides the section"
+def t_telemetry_context_routes_keep_domain_errors_and_reject_foreign_origins():
+    seen = []
+    ctx = _ctx()
+    ctx['telemetry_context_read'] = lambda rec=None, before=None: seen.append((rec, before)) or {'ok': True}
+    ctx['telemetry_context_write'] = lambda body: seen.append(body) or {'ok': False, 'conflict': True,
+                                                                     'error': 'context changed elsewhere'}
+    httpd, port = _serve(ctx)
+    try:
+        status, raw = _get(port, '/api/telemetry/context?rec=R&before=4')
+        assert status == 200 and json.loads(raw)['ok'] and seen == [('R', '4')]
+        status, raw = _post_json(port, '/api/telemetry/context', {'rec': 'R'})
+        assert status == 409 and json.loads(raw) == {'ok': False, 'conflict': True,
+                                                    'error': 'context changed elsewhere'}
+        before = len(seen)
+        for headers, error in (({'Origin': 'https://foreign.example'}, 'cross-origin request blocked'),
+                               ({'Host': f'foreign.example:{port}'}, 'cross-origin request blocked'),
+                               ({'Origin': 'null'}, 'foreign context origin'),
+                               ({'Origin': f'http://localhost:{port + 1}'}, 'foreign context origin')):
+            request = urllib.request.Request(f'http://127.0.0.1:{port}/api/telemetry/context',
+                                             method='POST', data=b'{}', headers=headers)
+            try:
+                _urlopen(request)
+            except urllib.error.HTTPError as exc:
+                assert exc.code == 403 and json.loads(exc.read())['error'] == error
+            else:
+                raise AssertionError('foreign origins/hosts must not edit local recording notes')
+        assert len(seen) == before, 'refused requests must not reach the mutation callback'
+        ctx['telemetry_context_write'] = lambda body: {'ok': False, 'invalid': True, 'error': 'invalid stint'}
+        status, raw = _post_json(port, '/api/telemetry/context', {})
+        assert status == 400 and json.loads(raw)['error'] == 'invalid stint'
+        ctx['telemetry_context_read'] = lambda *args: {'ok': False, 'not_found': True, 'error': 'recording not found'}
+        status, raw = _get(port, '/api/telemetry/context?rec=missing')
+        assert status == 404 and json.loads(raw)['error'] == 'recording not found'
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
 def t_telemetry_delete_asks_first_then_reloads_the_recordings():
     out = _tm_node("""
 let ok = false, asked = '';
@@ -2771,6 +2826,168 @@ def _tm_node(body):
     page = _cc_page()
     return _run_js(_TM_HARNESS + "const JOB_POLL_MS = 0;\n" + _job_fns(page) + _tm_script(page)
                    + "\n(async () => {\n" + body + "\n})();")
+
+
+def t_context_concurrent_waiter_retains_failed_save_without_retry():
+    with open(os.path.join(ROOT, 'src', 'ui', 'telemetry-context.js'), encoding='utf-8') as f:
+        script = f.read()
+    out = _run_js(script + """
+let calls=0;
+global.fetch=async()=>{calls++;return {json:async()=>({ok:false})}};
+tc.doc={revision:0};tc.reply={profile:'p'};tc.data={};tc.dirty=true;
+tc.pending=Promise.resolve(false);
+(async()=>{const ok=await tcSave();console.log(JSON.stringify({ok,calls,dirty:tc.dirty}));})();
+""")
+    if out is not None:
+        assert json.loads(out) == {'ok': False, 'calls': 0, 'dirty': True}
+
+
+def t_context_action_does_not_follow_a_target_switch_while_waiting_for_save():
+    with open(os.path.join(ROOT, 'src', 'ui', 'telemetry-context.js'), encoding='utf-8') as f:
+        script = f.read()
+    out = _run_js(script + """
+let calls=0, release;
+global.fetch=async()=>{calls++;return {json:async()=>({ok:false})}};
+global.$=()=>({textContent:'',className:'',querySelectorAll:()=>[]});
+tc.doc={revision:0};tc.reply={profile:'p'};tc.data={};
+tcSave=()=>new Promise(resolve=>{release=resolve});
+(async()=>{const action=tcAction('restore',{revision:0});tc.generation++;tc.target='another';
+release(true);await action;console.log(calls);})();
+""")
+    if out is not None:
+        assert out.strip() == '0', 'queued action must retain its original recording identity'
+
+
+def t_context_exclusion_is_distinct_from_measured_pace_rejection():
+    out = _tm_node("""
+tmState.recLaps = [Object.assign(lap('R',1,80,7), {pace_eligible:true,comparison_eligible:false,analysis_role:'warmup'}),
+ Object.assign(lap('R',2,81,7), {pace_eligible:false,comparison_eligible:false,reasons:['sample gap']})];
+tmRenderLaps();console.log(JSON.stringify($('tm-laps').kids.map(row=>{
+ const b=row.kids.find(e=>e.className.split(' ').includes('tmbadge'));return [b.textContent,b.title];})));""")
+    if out is not None:
+        assert json.loads(out) == [['not for comparison', 'Excluded from default comparison: warmup'],
+                                  ['not for pace', 'Excluded from pace: sample gap']], \
+            'context exclusions must not masquerade as measured pace errors'
+
+
+def t_strategy_change_starts_with_a_separate_copy_of_stint_defaults():
+    with open(os.path.join(ROOT, 'src', 'ui', 'telemetry-context.js'), encoding='utf-8') as f:
+        script = f.read()
+    out = _run_js(script + """
+tcStints=()=>{};tcChanged=()=>{};
+const stint={start_lap:5,strategy:{fuel_map:2,shortshift:true,targets:{'2':6000}}};
+tcAddStrategyChange(stint);
+const change=stint.strategy_changes[0];
+console.log(JSON.stringify(change));change.strategy.targets['2']=6200;
+console.log(stint.strategy.targets['2']);
+""")
+    if out is not None:
+        row, original = out.strip().split('\n')
+        assert json.loads(row) == {'lap': 5, 'strategy': {'fuel_map': 2, 'shortshift': True,
+                                                       'targets': {'2': 6000}}}
+        assert original == '6000', 'editing a later strategy must not overwrite stint defaults'
+
+
+def t_context_draft_survives_reload_when_local_storage_is_unavailable():
+    with open(os.path.join(ROOT, 'src', 'ui', 'telemetry-context.js'), encoding='utf-8') as f:
+        script = f.read()
+    out = _run_js(script + """
+const els={};global.$=id=>els[id]||=( {hidden:false,value:'R',textContent:'',className:'',focus(){},querySelectorAll(){return []}});
+global.localStorage={setItem(){throw Error('quota');},getItem(){throw Error('disabled');},removeItem(){}};
+global.tmState={rec:'R'};tcRender=()=>{};tcStatus=()=>{};
+tc.target='R';tc.doc={source_id:'same',revision:1};tc.reply={profile:'p'};
+tc.data={notes:[{text:'unsaved'}],sessions:{}};tc.draft={fuel:'1e'};tc.dirty=true;tcKeepDraft();
+global.tmGet=async()=>({ok:true,profile:'p',context:{source_id:'same',revision:1,data:{notes:[],sessions:{}},draft:{}},sessions:['1']});
+(async()=>{tc.open=true;await tcLoad('R');clearTimeout(tc.timer);console.log(JSON.stringify([tc.data.notes,tc.draft,tc.dirty]));})();
+""")
+    if out is not None:
+        assert json.loads(out) == [[{'text': 'unsaved'}], {'fuel': '1e'}, True], \
+            'failed persistent backup must retain the draft in this window'
+
+
+def t_failed_context_load_does_not_retarget_the_previous_editor_data():
+    with open(os.path.join(ROOT, 'src', 'ui', 'telemetry-context.js'), encoding='utf-8') as f:
+        script = f.read()
+    out = _run_js(script + """
+const els={};global.$=id=>els[id]||=( {hidden:false,value:'B',textContent:'',className:'',querySelectorAll(){return []}});
+global.tmState={rec:'A'};global.tmGet=async()=>({ok:false,error:'unreadable'});tcStatus=()=>{};
+tc.target='A';tc.doc={source_id:'same',revision:1};tc.reply={profile:'p'};tc.data={notes:[],sessions:{}};
+(async()=>{tc.open=true;await tcLoad('B');console.log(JSON.stringify([tc.target,tc.doc.source_id,$('tc-target').value]));})();
+""")
+    if out is not None:
+        assert json.loads(out) == ['A', 'same', 'A'], \
+            'failed loading cannot relabel old data as another recording'
+
+
+def t_context_loading_blocks_saves_and_recording_copies_keep_separate_drafts():
+    with open(os.path.join(ROOT, 'src', 'ui', 'telemetry-context.js'), encoding='utf-8') as f:
+        script = f.read()
+    out = _run_js(script + """
+const els={};global.$=id=>els[id]||=({hidden:false,value:'B',querySelectorAll(){return []}});
+global.localStorage={setItem(){},getItem(){return null;}};global.tmState={rec:'A'};
+tcRender=()=>{};tcStatus=()=>{};tc.target='A';tc.doc={source_id:'same',revision:1};tc.reply={profile:'p'};
+tc.data={notes:[{text:'A draft'}],sessions:{}};tc.draft={};tc.dirty=true;tcKeepDraft();
+let resolve,posts=0;global.tmGet=()=>new Promise(r=>resolve=r);global.fetch=()=>{posts++;throw Error('must not POST while loading');};
+(async()=>{tc.open=true;const loading=tcLoad('B');const saved=await tcSave();
+resolve({ok:true,profile:'p',context:{source_id:'same',revision:1,data:{notes:[],sessions:{}},draft:{}},sessions:['1']});
+await loading;clearTimeout(tc.timer);console.log(JSON.stringify([saved,tc.target,tc.data.notes,tc.dirty,posts]));})();
+""")
+    if out is not None:
+        assert json.loads(out) == [False, 'B', [], False, 0], \
+            'loading must prevent saves and copied recordings must not share editor drafts'
+
+
+def t_closing_during_context_load_releases_controls_before_reopening():
+    with open(os.path.join(ROOT, 'src', 'ui', 'telemetry-context.js'), encoding='utf-8') as f:
+        script = f.read()
+    out = _run_js(script + """
+const control={id:'tc-target',disabled:false};const els={};
+global.$=id=>els[id]||=({hidden:false,value:'R',querySelectorAll(){return [control]}});
+global.localStorage={getItem(){return null;}};global.tmState={rec:'R'};tcRender=()=>{};tcStatus=()=>{};
+const answers=[];global.tmGet=()=>new Promise(r=>answers.push(r));
+const reply={ok:true,profile:'p',context:{source_id:'R',revision:0,data:{notes:[],sessions:{}},draft:{}},sessions:['1']};
+(async()=>{tc.open=true;const first=tcLoad('R');await tcClose();tc.open=true;const second=tcLoad('R');
+answers[1](reply);await second;answers[0](reply);await first;clearTimeout(tc.timer);
+console.log(JSON.stringify([tc.loading,control.disabled,tc.open]));})();
+""")
+    if out is not None:
+        assert json.loads(out) == [False, False, True], \
+            'closing an unfinished load must release controls before reopening'
+
+
+def t_closing_during_context_action_does_not_disable_the_reopened_editor():
+    with open(os.path.join(ROOT, 'src', 'ui', 'telemetry-context.js'), encoding='utf-8') as f:
+        script = f.read()
+    out = _run_js(script + """
+const control={id:'tc-target',disabled:false};const els={};global.$=id=>els[id]||=({hidden:false,value:'A',querySelectorAll(){return [control]}});
+global.localStorage={getItem(){return null;}};global.tmState={rec:'A'};tcRender=()=>{};tcStatus=()=>{};
+tc.open=true;tc.target='A';tc.doc={revision:1,source_id:'id'};tc.reply={profile:'p'};tc.data={notes:[],sessions:{}};
+let actionReply,loadReply;global.fetch=()=>new Promise(r=>actionReply=r);global.tmGet=()=>new Promise(r=>loadReply=r);
+(async()=>{const action=tcAction('restore',{revision:0});await Promise.resolve();await Promise.resolve();
+await tcClose();tc.open=true;const load=tcLoad('A');actionReply({json:async()=>({ok:false})});await action;
+const stillLoading=control.disabled;
+loadReply({ok:true,profile:'p',context:{revision:1,source_id:'id',data:{notes:[],sessions:{}},draft:{}},sessions:['1']});
+await load;console.log(JSON.stringify([stillLoading,tc.loading,control.disabled,tc.open]));})();
+""")
+    if out is not None:
+        assert json.loads(out) == [True, False, False, True], \
+            'cancelled actions must neither unlock a new load nor keep its controls disabled'
+
+
+def t_long_context_text_is_drafted_without_blocking_other_valid_values():
+    with open(os.path.join(ROOT, 'src', 'ui', 'telemetry-context.js'), encoding='utf-8') as f:
+        script = f.read()
+    out = _run_js(script + """
+global.document={createElement:()=>({value:'',append(){},setAttribute(){},classList:{add(){},remove(){}}})};
+tc.draft={};tcChanged=()=>{};const parent={append(){}};let title='saved title';
+const field=tcField(parent,'Title',title,'text',v=>title=v,'settings.1.title');
+field.value='x'.repeat(2001);field.oninput();
+const note={id:'n1',text:'saved note'};const text=tcNoteField(note);text.value='n'.repeat(16001);text.oninput();
+console.log(JSON.stringify([title,note.text,tc.draft['settings.1.title']?.length,tc.draft['note.n1.text']?.length]));
+""")
+    if out is not None:
+        assert json.loads(out) == ['saved title', 'saved note', 2001, 16001], \
+            'oversized text must remain draft while valid values remain saveable'
 
 
 def t_telemetry_open_recording_is_not_indexed_on_load():
@@ -2929,7 +3146,7 @@ _TM_UNINDEXED = """
 const unindexed = rec => ({ok: true, unindexed: 1,
                            note: rec + ' has no lap index yet: racecast telemetry index builds it'});
 const jobs = () => calls.filter(u => u.includes('telemetry-index')).length;
-const asks = part => calls.filter(u => u.includes(part)).length;
+const asks = part => calls.filter(u => u.includes(part)&&(!part.startsWith('rec=')||!u.includes('car='))).length;
 tmState.recs = [{rec: 'X', indexed: false, laps: null, duration_s: 60, size: 1e6, track: null}];
 """
 

@@ -578,6 +578,15 @@
     .tmmap section { flex:1 1 320px; }
   }
   @media (max-width: 860px) { .tmgrid { grid-template-columns:1fr; } }
+  .tcgrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:12px; }
+  .tcfield { display:flex; flex-direction:column; gap:5px; font-size:12px; color:var(--dim); }
+  .tcfield input,.tcfield select,.tcrow textarea { width:100%; min-width:0; padding:8px; background:var(--bg); border:1px solid var(--line); border-radius:6px; color:var(--text); }
+  .tcrow { margin:10px 0; padding:12px; border:1px solid var(--line); border-radius:8px; }
+  .tcrow textarea { margin:10px 0; }
+  .tcinvalid { border-color:#ed7777 !important; }
+  #tm-context-modal .ovmodal-card { max-width:1100px; max-height:92vh; }
+  #tm-context-modal .ovmodal-body { display:grid; gap:14px; }
+  #tm-context-modal details > summary { cursor:pointer; padding:8px 0; font-weight:600; }
 </style>
 </head>
 <body>
@@ -1302,7 +1311,7 @@
       <div class="view pov-only" data-view="telemetry" hidden>
         <div class="viewhead"><h2>Telemetry</h2>
           <span class="sub">laps from this profile's GT7 recordings</span>
-          <span class="vhbtns"><button onclick="tmLoad()" title="Read the recordings again">
+          <span class="vhbtns"><button onclick="tcOpen()">Context &amp; notes</button><button onclick="tcOpen(true)">Prepare next recording</button><button onclick="tmLoad()" title="Read the recordings again">
             <svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Refresh</button></span></div>
         <p class="enverr" id="tm-err" hidden></p>
         <section class="tmsum" id="tm-summary" hidden></section>
@@ -1320,6 +1329,8 @@
               <div class="tmlist" id="tm-laps"></div></section>
           </div>
           <section class="tmmain">
+            <label class="sub"><input type="checkbox" id="tm-compare-all" onchange="tmComparisonMode()"> Compare other conditions and roles</label>
+            <p class="sub" id="tm-conditions"></p>
             <div class="tmpick">
               <label><span class="tmkey a"></span>Lap A
                 <select id="tm-a" aria-label="Lap A (reference)" onchange="tmPick('a', this.value)"></select></label>
@@ -5426,7 +5437,8 @@ function tmRenderSummary(sum) {
     const grp = document.createElement('div');
     grp.className = 'tmgrp';
     const h = document.createElement('h3');
-    h.textContent = [g.track, g.car].filter(Boolean).join(' · ');
+    h.textContent = [g.track, g.car, ...('context_confirmed' in g ?
+      [g.compound || 'Tyres unknown', g.context_confirmed ? 'Context confirmed' : 'Context unconfirmed'] : [])].filter(Boolean).join(' · ');
     grp.appendChild(h);
     const tile = (value, label, title) => {
       if (value == null) return;
@@ -5607,7 +5619,7 @@ async function tmSelectRec(rec) {
     row.indexed = true; row.track = d.recording.track; row.laps = tmState.recLaps.length;
     tmRenderRecs();
   }
-  const counted = tmState.recLaps.filter(l => l.pace_eligible ?? l.status !== 'not counted');
+  const counted = tmState.recLaps.filter(l => l.comparison_eligible ?? l.pace_eligible ?? l.status !== 'not counted');
   const pick = (counted.length ? counted : tmState.recLaps).slice(-1)[0];
   if (!pick) tmClear('This recording has no laps.');
   $('tm-rec-track').textContent = tmTrackLabel(d.recording.track);
@@ -5627,11 +5639,12 @@ function tmRenderLaps() {
     return [...n.entries()].sort((x, y) => y[1] - x[1])[0][0];
   };
   const car = usual(l => l.car || ''), track = usual(tmLapTrack);
-  const fast = laps.filter(l => (l.pace_eligible ?? l.status !== 'not counted') && l.time_s != null)
+  const fast = laps.filter(l => (l.comparison_eligible ?? l.pace_eligible ?? l.status !== 'not counted') && l.time_s != null)
     .reduce((m, l) => (m && m.time_s <= l.time_s ? m : l), null);
   let sel = null;
   laps.forEach(l => {
-    const nc = !(l.pace_eligible ?? l.status !== 'not counted'), key = tmKey(l);
+    const nc = !(l.comparison_eligible ?? l.pace_eligible ?? l.status !== 'not counted'), key = tmKey(l);
+    const contextual = l.pace_eligible === true && l.comparison_eligible === false;
     const b = document.createElement('button');
     b.className = 'tmitem' + (nc ? ' nc' : '') + (key === tmState.b ? ' sel'
       : key === tmState.a ? ' is-a' : '');
@@ -5640,8 +5653,10 @@ function tmRenderLaps() {
     const badge = document.createElement('span');
     badge.className = 'tmbadge' + (l.status === 'reference' ? ' ref' : '');
     badge.textContent = l.capture_complete === false ? 'partial' : l.lap_role === 'pit' ? 'pit'
-      : nc ? 'not for pace' : l.status === 'reference' ? 'best so far' : 'pace';
-    badge.title = nc ? 'Excluded from pace: ' + ((l.reasons || [l.reason]).filter(Boolean).join('; ') || 'no reason recorded')
+      : nc ? (contextual ? 'not for comparison' : 'not for pace') : l.status === 'reference' ? 'best so far' : 'pace';
+    badge.title = nc && contextual ? 'Excluded from default comparison: '
+      + ([l.analysis_role !== 'regular' ? l.analysis_role : '', ...(l.context_warnings || [])].filter(Boolean).join('; ') || 'context conditions')
+      : nc ? 'Excluded from pace: ' + ((l.reasons || [l.reason]).filter(Boolean).join('; ') || 'no reason recorded')
       : l.status === 'reference' ? 'Reference: the fastest lap so far when it was driven; '
         + 'the live HUD delta ran against it' : '';
     const time = document.createElement('span');
@@ -5649,8 +5664,12 @@ function tmRenderLaps() {
     time.textContent = tmTime(l.time_s);
     if (l === fast) time.title = 'Fastest counted lap of this recording';
     b.append(name, badge, time);
-    const odd = [l.lap_role === 'first' ? 'First lap' : '',
-                 l.after_service ? 'After inferred service; tyres unconfirmed' : '',
+    const odd = [l.analysis_role === 'warmup' ? 'Warmup lap' : l.lap_role === 'first' ? 'First lap' : '',
+                 l.compounds?.length ? l.compounds.join(' / ') : '',
+                 l.fuel_start_l != null ? 'Start fuel '+l.fuel_start_l.toFixed(1)+' L (measured)' : 'Start fuel unknown',
+                 l.tyre_age_laps != null ? 'Tyre age: '+l.tyre_age_laps+' lap boundaries since declared initial stint / tyre service' : 'Tyre age unknown',
+                 ...(l.context_warnings || []),
+                 l.after_service && !l.compound ? 'After inferred service; tyres unconfirmed' : '',
                  l.time_s == null && l.relay_time_s != null ? l.relay_time_s.toFixed(3) + ' s captured' : '',
                  nc ? (l.reasons || [l.reason]).filter(Boolean).join('; ') : '',
                  l.trace_complete === false && l.capture_complete ? 'Partial distance trace' : '',
@@ -5692,7 +5711,8 @@ async function tmSelectB(l) {
   tmClearPair('Loading comparable laps…');
   const q = new URLSearchParams({car: l.car_id == null ? '' : String(l.car_id),
                                  track: l.track_id == null ? '' : l.track_id});
-  if (l.track_id == null) { q.set('rec', l.rec); q.set('session', String(l.session)); }
+  q.set('rec', l.rec); q.set('session', String(l.session)); q.set('lap', String(l.lap));
+  if ($('tm-compare-all').checked) q.set('compare_all', '1');
   let p = await tmShared('/api/telemetry/laps?' + q);
   if (seq !== tmSeq.b) return;
   if (p.ok && p.unindexed && tmMayIndex(p)) {   // asks once: a broken file stays unindexed
@@ -5706,6 +5726,7 @@ async function tmSelectB(l) {
   }
   if (!p.ok) tmErr(p.error || 'could not load the comparable laps');
   tmState.pool = p.ok ? p : {laps: [], best_sectors: [], theoretical_best: null};
+  $('tm-conditions').textContent = p.ok ? (p.comparison_warnings || []).join(' · ') : '';
   tmState.a = tmDefaultA(key);
   tmRenderLaps();                                   // mark lap A
   tmFillPickers(l);
@@ -5733,6 +5754,20 @@ function tmFillPickers(lapB) {
     });
     sel.value = cur || '';
   });
+}
+
+async function tmRefreshContext(rec) {
+  const selected = tmState.b;
+  tmDropLaps();await tmSelectRec(rec);
+  if (tmState.rec !== rec) return;
+  const previous = tmState.recLaps.find(l => tmKey(l) === selected);
+  if (previous) await tmSelectB(previous);
+}
+
+function tmComparisonMode() {
+  tmDropLaps();
+  const lap = tmState.recLaps.find(l => tmKey(l) === tmState.b);
+  if (lap) tmSelectB(lap);
 }
 
 function tmPick(which, key) {
@@ -5947,6 +5982,8 @@ function tmHover(ev) {
     return r && Math.abs(r.d - i * TM_STEP) < TM_STEP / 2 ? r : null;
   };
   const ra = at(tmState.lapA), rb = at(tmState.lapB);
+  tmState.noteCursorKey = tmState.lapB ? tmKey(tmState.lapB) : null;
+  tmState.noteCursor = rb && tmMapPt(rb) ? {x: rb.x, z: rb.z, d: rb.d, t: rb.t} : null;
   ch.panels.forEach((p, n) => {
     const k = p.c.key;
     const txt = k === 'delta' ? (ra && rb ? tmSigned(rb.t - ra.t) + ' s' : '')
@@ -6193,5 +6230,33 @@ assetsLoaded = true; fetchAssetFiles();
     <button class="primary" id="cmodal-ok" value="ok" autofocus>OK</button>
   </form>
 </dialog>
+
+<div class="ovmodal" id="tm-context-modal" role="dialog" aria-modal="true" aria-labelledby="tc-title" hidden>
+ <div class="ovmodal-card"><div class="ovmodal-head"><b id="tc-title">Telemetry context &amp; notes</b><span id="tc-status" class="sub"></span>
+  <button id="tc-close" style="margin-left:auto" onclick="tcClose()">Close</button></div>
+ <div class="ovmodal-body">
+  <div class="tcgrid"><label class="tcfield">Context for<select id="tc-target" onchange="tcSelectTarget(this.value)"></select></label>
+   <label class="tcfield">GT7 session<select id="tc-session" onchange="tc.session=this.value;tcRender()"></select></label>
+   <button onclick="tcAddSession()">Add session</button>
+   <label class="tcfield">Copy settings from session<input id="tc-copy-session" type="number" min="1" value="1"></label>
+   <button onclick="tcAction('copy-session',{source_session:Number($('tc-copy-session').value),session:Number(tc.session)})">Copy as unconfirmed proposal</button></div>
+  <p id="tc-sources" class="sub"></p>
+  <div id="tc-local-draft" hidden><p>Your unsaved draft is retained locally.</p><button onclick="tcRestoreLocal()">Restore my draft as a new edit</button><button onclick="tcLoad(tc.target)">Reload saved context</button></div>
+  <details open><summary>Race settings</summary>
+   <div class="tcgrid"><select id="tc-template"></select><button onclick="tcAction('apply-template',{template_id:$('tc-template').value,session:Number(tc.session)})">Apply template as proposal</button>
+    <input id="tc-template-name" aria-label="Template name" placeholder="Template name"><button onclick="tcSaveTemplate()">Save settings template</button>
+    <button onclick="tcAction('delete-template',{template_id:$('tc-template').value})">Remove selected template</button></div>
+   <div id="tc-settings" class="tcgrid"></div>
+   <label><input type="checkbox" id="tc-confirmed" onchange="tcSession().confirmed=this.checked;tcChanged()"> Supplied settings confirmed for this session</label>
+  </details>
+  <details><summary>Stints, tyres &amp; fuel strategy</summary><p class="sub">The initial stint starts with its indicated lap. Later stints start at service within the indicated lap; a pit lap may contain two compounds. Proposed times need manual confirmation.</p>
+   <div id="tc-stints"></div><button onclick="tcAddStint()">Add stint</button></details>
+  <details open><summary>Observations &amp; notes</summary><div id="tc-notes"></div><button onclick="tcAddNote()">Add note</button></details>
+  <details><summary>Lap role corrections</summary><p class="sub">Overrides supplement capture inference; they cannot turn missing measurements into a complete lap.</p>
+   <input id="tc-role-lap" type="number" min="0" aria-label="Lap to override"><button onclick="tcAddRole()">Add role override</button><div id="tc-roles"></div></details>
+  <details><summary>Earlier context versions</summary><select id="tc-history"></select><button onclick="tcRestoreHistory()">Restore selected whole-context revision</button>
+   <button onclick="tcOlderHistory()">Show older revisions</button></details>
+ </div></div></div>
+<script src="/telemetry-context.js"></script>
 </body>
 </html>

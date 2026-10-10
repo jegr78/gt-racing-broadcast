@@ -1657,7 +1657,7 @@ def _report_telemetry(frm, to):
                 print(f"note: telemetry recording {r['name']} skipped "
                       f"({_telemetry_reason(exc, r['name'])}).")
                 continue
-            indexes.append(dict(idx, partial=r["partial"]))
+            indexes.append(dict(_telemetry_with_context(idx, r["path"]), partial=r["partial"]))
         return rtel.telemetry_block(indexes, (frm, to))
     except Exception as exc:  # noqa: BLE001  telemetry must never fail the report
         print(f"note: telemetry section skipped ({_telemetry_reason(exc)}).")
@@ -3377,6 +3377,8 @@ def telemetry_export_cmd(rest):
     print(f"wrote {res['samples']} samples and {res['laps']} laps to {res['dir']}")
     if res["dropped"]:
         print(f"note: {res['dropped']} packets were dropped while recording")
+    if res.get('context_error'):
+        print('note: ' + res['context_error'])
 
 
 def _telemetry_delete_path(rec_dir, path):
@@ -3409,6 +3411,11 @@ def _telemetry_delete_path(rec_dir, path):
     except OSError as e:
         leftovers = []
         notes.append(f"could not look for {tmp_prefix}*.tmp files: {e.strerror}")
+    try:
+        import gt7_context
+        gt7_context.delete_recording(path)
+    except (OSError, ValueError) as exc:
+        notes.append('could not remove recording context: ' + _telemetry_reason(exc))
     for f in [gt7_laps.cache_path(path)] + leftovers:
         try:
             os.remove(f)
@@ -3455,6 +3462,136 @@ _TELEMETRY_MEMO = {}          # path -> (stamp, lap index without traces), oldes
 TELEMETRY_MEMO_MAX = 4096    # a few KB per lap in memory; a list scan over every recording must fit
 _TELEMETRY_LOCK = threading.Lock()      # guards the memo and the build-lock table
 _TELEMETRY_BUILD_LOCKS = {}             # path -> Lock, so one recording is never indexed twice at once
+
+
+def _telemetry_context_store(rec):
+    import gt7_context as gc
+    rec_dir = _telemetry_rec_dir()
+    if rec in (None, ''):
+        return gc.Store.prepared(rec_dir), None
+    path = _find_recording(rec_dir, rec) if isinstance(rec, str) else None
+    if not path:
+        raise FileNotFoundError(2, 'recording not found')
+    return gc.Store.for_recording(path), path
+
+
+def _telemetry_context_response(store, path, before=None):
+    import gt7_context as gc
+    doc = store.read()
+    result = {'ok': True, 'profile': _active_profile_name(), 'context': doc,
+              'prepared': path is None, 'recording_active': False,
+              'sessions': sorted(doc['data']['sessions'], key=int), 'service_hints': []}
+    try:
+        result['templates'] = gc.templates(_telemetry_rec_dir())['templates']
+    except (OSError, ValueError) as exc:
+        result['templates'], result['templates_error'] = {}, _telemetry_reason(exc)
+    try:
+        result['history'] = store.history(before=int(before) if before is not None else None)
+    except (OSError, ValueError) as exc:
+        result['history'], result['history_error'] = [], _telemetry_reason(exc)
+    if path is not None:
+        open_file = _relay_open_file()
+        result['recording_active'] = bool(open_file and os.path.basename(path).startswith(open_file))
+        idx = None if result['recording_active'] else _telemetry_cached_brief(
+            path, _runtime_base_dir(), resource_path('assets/gt7'))
+        if idx:
+            result['sessions'] = sorted(set(result['sessions']) |
+                                        {str(l['session']) for l in idx['laps']}, key=int)
+            result['service_hints'] = [dict(session=l['session'], lap=l['lap'],
+                                           events=l.get('service_events', []),
+                                           start_t_s=l['start_t_s'], end_t_s=l['end_t_s'])
+                                       for l in idx['laps'] if l.get('lap_role') == 'pit' or l.get('service_events')]
+    if not result['sessions']:
+        result['sessions'] = ['1']
+    return result
+
+
+def _telemetry_context_error(exc):
+    import gt7_context as gc
+    import gt7_recording as gr
+    if isinstance(exc, gc.Conflict):
+        return {'ok': False, 'error': str(exc), 'conflict': True}
+    if isinstance(exc, FileNotFoundError):
+        return {'ok': False, 'error': 'recording not found', 'not_found': True}
+    if isinstance(exc, (ValueError, gr.RecordingError)):
+        return {'ok': False, 'error': _telemetry_reason(exc), 'invalid': True}
+    return {'ok': False, 'error': 'could not access context: ' + _telemetry_reason(exc)}
+
+
+def telemetry_context_read_data(rec=None, before=None):
+    """Context is editable even while the capture is being written; never replay in a request."""
+    try:
+        store, path = _telemetry_context_store(rec)
+        return _telemetry_context_response(store, path, before)
+    except Exception as exc:  # noqa: BLE001  a context failure must not hide raw telemetry
+        return _telemetry_context_error(exc)
+
+
+def telemetry_context_write_data(payload):
+    import gt7_context as gc
+    try:
+        if not isinstance(payload, dict):
+            raise ValueError('context request must be an object')
+        if payload.get('profile') != _active_profile_name():
+            raise gc.Conflict('active profile changed; reload before saving')
+        store, path = _telemetry_context_store(payload.get('rec'))
+        if payload.get('source_id') != store.source_id:
+            raise gc.Conflict('recording identity changed; reload before saving')
+        action = payload.get('action', 'save')
+        expected = payload.get('expected_revision')
+        if action == 'save':
+            store.save(payload.get('data'), expected, payload.get('draft'))
+        elif action == 'restore':
+            store.restore(payload.get('revision'), expected)
+        elif action in ('apply-template', 'copy-session'):
+            doc = store.read()
+            session = gc._number(payload.get('session', 1), 'session', True)
+            if action == 'apply-template':
+                template = gc.templates(_telemetry_rec_dir())['templates'].get(payload.get('template_id'))
+                if template is None:
+                    raise ValueError('template not found')
+                data = gc.apply_template(doc['data'], template, session)
+            else:
+                source = gc._number(payload.get('source_session'), 'source session', True)
+                data = gc.copy_session(doc['data'], source, session)
+            store.save(data, expected, operation=action)
+        elif action == 'save-template':
+            gc.save_template(_telemetry_rec_dir(), payload.get('template_id'), payload.get('name'),
+                             payload.get('settings'))
+        elif action == 'delete-template':
+            gc.delete_template(_telemetry_rec_dir(), payload.get('template_id'))
+        else:
+            raise ValueError('unknown context action')
+        return _telemetry_context_response(store, path)
+    except Exception as exc:  # noqa: BLE001  no metadata error may escape a request
+        return _telemetry_context_error(exc)
+
+
+def _telemetry_with_context(idx, path):
+    """Join optional manual context without changing a memoized/rebuildable raw index."""
+    import gt7_context as gc
+    try:
+        doc = gc.Store.for_recording(path).read()
+        data, revision, error = doc['data'], doc['revision'], None
+    except Exception as exc:  # noqa: BLE001  broken notes never discard captured laps
+        data, revision, error = {}, None, _telemetry_reason(exc)
+    snapshot = {k: v for k, v in doc.items() if k not in {'draft', 'operation'}} if error is None else None
+    rows = idx['laps'] + ([idx['open_lap']] if idx.get('open_lap') else [])
+    lookup = {(l['session'], l['lap']): l for l in rows}
+    previous, annotated = {}, []
+    for lap in rows:
+        annotated.append(gc.annotate(data, lap, lap_lookup=lookup,
+                                     previous_lap=previous.get(lap['session'])))
+        previous[lap['session']] = lap['lap']
+    result = dict(idx, laps=annotated[:len(idx['laps'])], context_revision=revision,
+                  context_snapshot=snapshot)
+    if idx.get('open_lap'):
+        result['open_lap'] = annotated[-1]
+    if error:
+        result['context_error'] = error
+        for lap in result['laps']:
+            lap['context_warnings'].append('Saved context is unavailable')
+    return result
 
 
 def _telemetry_track_key(path):
@@ -3661,7 +3798,7 @@ def _telemetry_pool_indexes(rec_dir, build, only=None, report=None):
                 continue
             if report:
                 report(stem, idx, None)
-        indexes.append(idx)
+        indexes.append(_telemetry_with_context(idx, row["path"]))
     return indexes, unindexed
 
 
@@ -3682,7 +3819,7 @@ def _telemetry_summary(idx):
             "groups": groups}
 
 
-def telemetry_laps_data(rec=None, session=None, track=None, car=None, build=True):
+def telemetry_laps_data(rec=None, session=None, track=None, car=None, build=True, lap=None, compare_all=False):
     """One recording's laps (car None), or the counted laps comparable with a track and
     car across the profile's recordings. Arguments are query strings. Without `build`
     a recording without a valid lap index answers `unindexed: 1`, and a pool uses only
@@ -3693,8 +3830,13 @@ def telemetry_laps_data(rec=None, session=None, track=None, car=None, build=True
     except (TypeError, ValueError):
         return {"ok": False, "error": "car and session must be numbers"}
     try:
+        reference_lap = int(lap) if lap is not None else None
+    except (TypeError, ValueError):
+        return {'ok': False, 'error': 'lap must be a number'}
+    try:
         import gt7_laps
         import gt7_recording as gr
+        import gt7_context as gc
         rec_dir = _telemetry_rec_dir()
         if car is None:
             path = _find_recording(rec_dir, rec)
@@ -3714,12 +3856,14 @@ def telemetry_laps_data(rec=None, session=None, track=None, car=None, build=True
                     idx = _telemetry_index(path)
                 except gr.RecordingError:
                     return {"ok": False, "error": f"{rec} is not a readable recording"}
+            idx = _telemetry_with_context(idx, path)
             head = {k: idx.get(k) for k in ("rec", "name", "started", "start_ts", "end_ts",
                                             "dropped", "track")}
             head["completed_laps"] = sum(bool(lap.get("capture_complete")) for lap in idx["laps"])
             head["partial_segments"] = len(idx["laps"]) - head["completed_laps"] + bool(idx.get("open_lap"))
             return {"ok": True, "recording": head, "laps": [dict(lap) for lap in idx["laps"]],
                     "open_lap": dict(idx["open_lap"]) if idx.get("open_lap") else None,
+                    "context_revision": idx.get('context_revision'),
                     "summary": _telemetry_summary(idx)}
         track_id = track or None
         stem = gr.recording_stem(rec) if rec else None
@@ -3728,9 +3872,16 @@ def telemetry_laps_data(rec=None, session=None, track=None, car=None, build=True
                                           "session: pass rec and session"}
         indexes, unindexed = _telemetry_pool_indexes(rec_dir, build,
                                                      stem if track_id is None else None)
-        laps = [dict(lap) for lap in gt7_laps.pool(indexes, track_id, car_id, rec=stem,
-                                                   session=sess)]
-        return {"ok": True, "laps": laps, "unindexed": unindexed,
+        candidates = gt7_laps.pool(indexes, track_id, car_id, rec=stem, session=sess)
+        reference = next((l for idx in indexes if idx.get('rec') == stem
+                          for l in idx['laps'] if l['session'] == sess and l['lap'] == reference_lap), None)
+        broader = compare_all is True or str(compare_all).lower() in {'1', 'true', 'on'}
+        laps = [dict(l) for l in candidates if broader or
+                (gc.compatible(reference, l) if reference else l.get('comparison_eligible', True))]
+        confirmed = bool(laps and all(l.get('context_confirmed') for l in laps))
+        return {"ok": True, "laps": laps, "context_confirmed": confirmed,
+                "comparison_warnings": (['Includes other conditions or roles'] if broader else []) +
+                                       ([] if confirmed else ['Comparison conditions unconfirmed']), "unindexed": unindexed,
                 "data_version": _telemetry_data_version(),
                 "best_sectors": gt7_laps.best_sectors(laps),
                 "theoretical_best": gt7_laps.theoretical_best(laps)}
@@ -3764,6 +3915,7 @@ def telemetry_lap_data(rec, session, lap, build=True):
                 idx = _telemetry_full_index(path)
             except gr.RecordingError:
                 return {"ok": False, "error": f"{rec} is not a readable recording"}
+        idx = _telemetry_with_context(idx, path)
         available = idx["laps"] + ([idx["open_lap"]] if idx.get("open_lap") else [])
         for row in available:
             if row["session"] == s and row["lap"] == n:
@@ -7868,6 +8020,8 @@ def run_ui(rest, fail=sys.exit, open_browser=True):
         "telemetry_tracks": telemetry_tracks_data,
         "telemetry_learn": telemetry_learn_data,
         "telemetry_delete": telemetry_delete_data,
+        "telemetry_context_read": telemetry_context_read_data,
+        "telemetry_context_write": telemetry_context_write_data,
         "jobs": jobs_mod.JobManager(
             lambda op_args: ops_mod.job_argv(op_args, IS_FROZEN,
                                              _rc_job_executable(),
