@@ -164,6 +164,22 @@ def t_recorded_reader_keeps_original_phase_packets_and_decoded_ratios():
             'raw phase packets stay ordered and distinct'
 
 
+def t_manual_context_validation_does_not_depend_on_the_lookup_engine():
+    import types
+    import gt7_context as context
+    original = sys.modules.get('gt7_shifts')
+    def unavailable(_value):
+        raise AssertionError('manual context validation must not require the lookup engine')
+    manual = {'car_id': 485, 'targets': {'2': 5500}, 'configuration': 'Own event',
+              'provenance': 'Own test', 'confirmed': True}
+    try:
+        sys.modules['gt7_shifts'] = types.SimpleNamespace(manual_reference=unavailable)
+        result = context.validate_data({'notes': [], 'sessions': {'1': {'settings': {}, 'shift_reference': manual}}})
+        assert result['sessions']['1']['shift_reference'] == manual
+    finally:
+        sys.modules['gt7_shifts'] = original
+
+
 def t_context_and_templates_validate_and_retain_event_reference_provenance():
     import gt7_context as context
     manual = {'car_id': 485, 'targets': {'2': 5600}, 'configuration': 'Fixed BoP',

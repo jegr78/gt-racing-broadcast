@@ -99,24 +99,7 @@ def calculate(points, ratios):
 
 
 def manual_reference(value):
-    value = copy.deepcopy(gc._object(value))
-    gc._bounded(value)
-    gc._keys(value, {'car_id', 'targets', 'configuration', 'provenance', 'confirmed', 'rev_limit_rpm'})
-    car_id(value.get('car_id'))
-    if not isinstance(value.get('confirmed'), bool):
-        raise ValueError('event reference confirmation must be a boolean')
-    for key in ('configuration', 'provenance'):
-        gc._text(value.get(key), 2000)
-        if value['confirmed'] and not value[key].strip():
-            raise ValueError('confirmed event table requires configuration and provenance')
-    targets = gc._object(value.get('targets'))
-    if not targets or any(k not in {str(g) for g in range(1, 16)} for k in targets):
-        raise ValueError('event reference needs valid outgoing gear targets')
-    for rpm in targets.values():
-        number(rpm, 'event target RPM')
-    if value.get('rev_limit_rpm') is not None:
-        number(value['rev_limit_rpm'], 'manually confirmed rev limit')
-    return value
+    return gc.validate_shift_reference(value)
 
 
 def _driving(row):
