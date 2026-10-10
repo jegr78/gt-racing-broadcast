@@ -295,7 +295,7 @@ def t_confirmed_event_tables_require_configuration_and_provenance():
 def t_export_freezes_shift_reference_values_and_phase_observations():
     import csv
     import test_gt7_laps as fixture
-    import gt7_recording as recording
+    import gt7_export
     with tempfile.TemporaryDirectory() as root:
         path = fixture.write_circle_recording(root)
         index = fixture._index(path)
@@ -307,7 +307,7 @@ def t_export_freezes_shift_reference_values_and_phase_observations():
             {'from_gear': 2, 'to_gear': 3, 'pre_cut_rpm': 5600, 'post_rpm': 4350,
              'acceleration_deviation_rpm': 100, 'economy_target_rpm': 5300}]}
         output = os.path.join(root, 'export')
-        recording.export_csv(path, output, shift_analysis=index)
+        gt7_export.export_csv(path, output, shift_analysis=index)
         with open(os.path.join(output, 'shift-references.json'), encoding='utf-8') as f:
             saved = json.load(f)
         with open(os.path.join(output, 'shifts.csv'), newline='', encoding='utf-8') as f:
@@ -324,7 +324,7 @@ def t_export_freezes_shift_reference_values_and_phase_observations():
 def t_excel_shift_export_uses_the_existing_decimal_comma_convention():
     import csv
     import test_gt7_laps as fixture
-    import gt7_recording as recording
+    import gt7_export
     with tempfile.TemporaryDirectory() as root:
         path = fixture.write_circle_recording(root)
         index = fixture._index(path)
@@ -332,7 +332,7 @@ def t_excel_shift_export_uses_the_existing_decimal_comma_convention():
             {'from_gear': 2, 'to_gear': 3, 'pre_cut_t_s': 1.125,
              'acceleration_target_rpm': 5500.75, 'neutral_bridge': True}]}
         output = os.path.join(root, 'export')
-        recording.export_csv(path, output, excel=True, shift_analysis=index)
+        gt7_export.export_csv(path, output, excel=True, shift_analysis=index)
         with open(os.path.join(output, 'shifts.csv'), newline='', encoding='utf-8-sig') as f:
             rows = list(csv.DictReader(f, delimiter=';'))
         assert ',' in rows[0]['pre_cut_t_s'] and ',' in rows[0]['acceleration_target_rpm'], \

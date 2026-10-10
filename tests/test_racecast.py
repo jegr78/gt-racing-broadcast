@@ -555,10 +555,11 @@ def t_telemetry_export_writes_next_to_recording():
 
 def t_telemetry_export_failure_exits_with_a_clean_message():
     import struct
+    import gt7_export
     import gt7_recording
     with tempfile.TemporaryDirectory() as d:
         name = _rec_dir_with_one(d)
-        real_dir, real_export = m._telemetry_rec_dir, gt7_recording.export_csv
+        real_dir, real_export = m._telemetry_rec_dir, gt7_export.export_csv
         m._telemetry_rec_dir = lambda: d
         try:
             for exc in (OSError(28, "No space left on device", os.path.join(d, "out")),
@@ -567,7 +568,7 @@ def t_telemetry_export_failure_exits_with_a_clean_message():
                         gt7_recording.RecordingError(os.path.join(d, name))):
                 def boom(*_a, _exc=exc, **_k):
                     raise _exc
-                gt7_recording.export_csv = boom
+                gt7_export.export_csv = boom
                 try:
                     m.telemetry_export_cmd([name])
                     raise AssertionError("a failed export must exit non-zero")
@@ -577,7 +578,7 @@ def t_telemetry_export_failure_exits_with_a_clean_message():
                 stem = os.path.splitext(name)[0]
                 assert msg.count(stem) == 1, f"the recording is named once: {msg}"
         finally:
-            m._telemetry_rec_dir, gt7_recording.export_csv = real_dir, real_export
+            m._telemetry_rec_dir, gt7_export.export_csv = real_dir, real_export
 
 
 def t_telemetry_record_without_relay_exits_nonzero():

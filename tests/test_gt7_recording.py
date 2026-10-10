@@ -10,12 +10,16 @@ sys.path.insert(0, os.path.join(ROOT, "src", "scripts"))   # gt7_recording impor
 
 def _load(name, rel):
     spec = importlib.util.spec_from_file_location(name, os.path.join(ROOT, *rel))
-    mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod  # gt7_export's own `import gt7_recording` must get this instance
+    spec.loader.exec_module(mod)
     return mod
 
 
 tm = _load("gt7_telemetry", ("src", "scripts", "gt7_telemetry.py"))
 rec = _load("gt7_recording", ("src", "scripts", "gt7_recording.py"))
+gx = _load("gt7_export", ("src", "scripts", "gt7_export.py"))
+assert gx.gr is rec, "export and recording tests share one gt7_recording module"
 
 
 def _plain(lap=1, size=0x128, fill=0):
@@ -41,7 +45,7 @@ def t_csv_export_includes_current_context_but_not_drafts_or_revision_history():
         store.save({'notes': [{'id': 'race', 'scope': 'recording', 'text': 'Fixed BoP test'}]},
                    expected=0, draft={'laps': '2e'})
         out = os.path.join(d, 'export')
-        rec.export_csv(w.path, out)
+        gx.export_csv(w.path, out)
         with open(os.path.join(out, 'context.json'), encoding='utf-8') as f:
             exported = json.load(f)
         assert exported['data']['notes'][0]['text'] == 'Fixed BoP test'
@@ -273,7 +277,7 @@ def t_packets_skip_a_record_shorter_than_a_base_packet():
         w = _write(d, [(1.0, "A", _plain()), (2.0, "A", b"short"), (3.0, "A", _plain(lap=2))])
         got = [ts for ts, _k, _p in rec.Recording(w.path).packets()]
         assert got == [1.0, 3.0], f"a damaged short record must not reach the parser: {got}"
-        out = rec.export_csv(w.path, os.path.join(d, "out"), include_all=True)
+        out = gx.export_csv(w.path, os.path.join(d, "out"), include_all=True)
         assert out["samples"] == 2, out
 
 
@@ -362,10 +366,10 @@ def _rows(path, delimiter=","):
 def t_export_samples_and_laps():
     with tempfile.TemporaryDirectory() as d:
         src = _session(d)
-        out = rec.export_csv(src, os.path.join(d, "out"))
+        out = gx.export_csv(src, os.path.join(d, "out"))
         assert out["laps"] == 3 and out["dropped"] == 0, out
         samples = _rows(os.path.join(d, "out", "samples.csv"))
-        assert list(samples[0]) == list(rec.SAMPLE_COLUMNS)
+        assert list(samples[0]) == list(gx.SAMPLE_COLUMNS)
         assert out["samples"] == len(samples) and all(s["paused"] == "0" for s in samples)
         first = samples[0]
         assert first["t_s"] == "0.000" and first["throttle_pct"] == "100.0"
@@ -373,7 +377,7 @@ def t_export_samples_and_laps():
         lap1 = [s for s in samples if s["lap"] == "1"]
         assert lap1[0]["lap_dist_m"] == "0.0" and lap1[-1]["lap_dist_m"] == "495.0", lap1[-1]
         laps = _rows(os.path.join(d, "out", "laps.csv"))
-        assert list(laps[0]) == list(rec.LAP_COLUMNS)
+        assert list(laps[0]) == list(gx.LAP_COLUMNS)
         by_lap = {r["lap"]: r for r in laps}
         assert by_lap["1"]["status"] == "reference" and by_lap["1"]["gt7_time_s"] == "10.000"
         assert by_lap["0"]["status"] == "not counted" and by_lap["0"]["gt7_time_s"] == ""
@@ -388,7 +392,7 @@ def t_list_and_export_count_the_same_laps():
         items += [(1010.0 + i, "A", _tpkt(2)) for i in range(5)]
         src = _write(d, items).path
         (row,) = rec.list_recordings(d, count_laps=True)
-        out = rec.export_csv(src, os.path.join(d, "out"))
+        out = gx.export_csv(src, os.path.join(d, "out"))
         assert row["laps"] == out["laps"] == 2, \
             f"list and export must count the same engine laps: list {row['laps']}, export {out['laps']}"
 
@@ -396,7 +400,7 @@ def t_list_and_export_count_the_same_laps():
 def t_export_all_keeps_paused_packets():
     with tempfile.TemporaryDirectory() as d:
         src = _session(d)
-        rec.export_csv(src, os.path.join(d, "out"), include_all=True)
+        gx.export_csv(src, os.path.join(d, "out"), include_all=True)
         samples = _rows(os.path.join(d, "out", "samples.csv"))
         assert any(s["paused"] == "1" for s in samples)
 
@@ -404,7 +408,7 @@ def t_export_all_keeps_paused_packets():
 def t_export_excel_uses_semicolon_and_decimal_comma():
     with tempfile.TemporaryDirectory() as d:
         src = _session(d)
-        rec.export_csv(src, os.path.join(d, "out"), excel=True)
+        gx.export_csv(src, os.path.join(d, "out"), excel=True)
         with open(os.path.join(d, "out", "samples.csv"), "rb") as fh:
             raw = fh.read()
         assert raw.startswith(b"\xef\xbb\xbf"), "Excel needs the UTF-8 BOM"
@@ -418,7 +422,7 @@ def t_export_car_name_from_tables():
             return {"id": car_id, "maker": "Porsche", "name": "911 RSR", "group": "Gr.3"}
     with tempfile.TemporaryDirectory() as d:
         src = _session(d)
-        rec.export_csv(src, os.path.join(d, "out"), cars=Cars())
+        gx.export_csv(src, os.path.join(d, "out"), cars=Cars())
         laps = _rows(os.path.join(d, "out", "laps.csv"))
         assert {r["car"] for r in laps} == {"Porsche 911 RSR"}, laps
 
@@ -426,13 +430,45 @@ def t_export_car_name_from_tables():
 def t_export_steering_in_degrees_positive_left():
     with tempfile.TemporaryDirectory() as d:
         w = _write(d, [(1.0, "~", _tpkt(1, steer=0.5))])
-        rec.export_csv(w.path, os.path.join(d, "out"))
+        gx.export_csv(w.path, os.path.join(d, "out"))
         assert _rows(os.path.join(d, "out", "samples.csv"))[0]["steer_deg"] == "28.6"
 
 
 def _control(d, default=False, **kw):
     return rec.RecordControl(os.path.join(d, "rec"), os.path.join(d, "telemetry-record.json"),
                              default, profile="Demo", relay_version="dev", **kw)
+
+
+def t_writer_hands_the_opened_recording_to_on_open_once():
+    calls = []
+    with tempfile.TemporaryDirectory() as d:
+        w = _write(d, [(1000.0, "A", _plain()), (1001.0, "A", _plain())],
+                   on_open=lambda *a: calls.append(a))
+        assert calls == [(w.path, d, w.recording_id)], calls
+
+
+def t_failed_on_open_never_stops_the_packet_writer():
+    def attach_notes(*_a):
+        raise OSError(13, "access denied")
+    cap = _Capture()
+    rec.LOG.addHandler(cap)
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            w = _write(d, [(1000.0, "A", _plain()), (1001.0, "A", _plain())], on_open=attach_notes)
+            assert w.error is None and len(list(rec.Recording(w.path).packets())) == 2
+    finally:
+        rec.LOG.removeHandler(cap)
+    assert any("attach_notes" in m for m in cap.messages), f"the log names the failed hook: {cap.messages}"
+
+
+def t_control_passes_on_open_to_its_writer():
+    calls = []
+    with tempfile.TemporaryDirectory() as d:
+        c = _control(d, default=True, on_open=lambda path, *_a: calls.append(path))
+        c.put(time.time(), "A", _plain())
+        c.close()
+        assert [os.path.basename(p) for p in calls] == \
+            [r["name"] for r in rec.list_recordings(os.path.join(d, "rec"))], calls
 
 
 def t_record_default_tokens():
@@ -690,7 +726,7 @@ def t_session_tracks_and_columns():
         assert rec.session_tracks(laps, _Tracks(assigned="zzz"), key="p/s")[1]["track"] == \
             "Assigned", "a learned assignment wins"
         assert rec.session_tracks(laps, None) == {}
-        rec.export_csv(src, os.path.join(d, "out"), tracks=_Tracks())
+        gx.export_csv(src, os.path.join(d, "out"), tracks=_Tracks())
         lap1 = [r for r in _rows(os.path.join(d, "out", "laps.csv")) if r["lap"] == "1"][0]
         assert (lap1["track"], lap1["layout"]) == ("Oval", "Full")
 
@@ -698,7 +734,7 @@ def t_session_tracks_and_columns():
 def t_projected_distance_stays_continuous_across_the_line():
     with tempfile.TemporaryDirectory() as d:
         src = _xy_session(d)
-        rec.export_csv(src, os.path.join(d, "out"), tracks=_Tracks())
+        gx.export_csv(src, os.path.join(d, "out"), tracks=_Tracks())
         lap1 = [r for r in _rows(os.path.join(d, "out", "samples.csv")) if r["lap"] == "1"]
         first = float(lap1[0]["lap_dist_m"])
         assert first == -10.0, "590 m on a 600 m line right after the edge reads as -10 m"
@@ -724,7 +760,7 @@ def t_lap_dist_survives_a_non_finite_projected_position():
             x += 5.0
         items.append((t, "A", _tpkt(2)))
         src = _write(d, items).path
-        rec.export_csv(src, os.path.join(d, "out"), tracks=_NanAwareTracks())  # must not raise
+        gx.export_csv(src, os.path.join(d, "out"), tracks=_NanAwareTracks())  # must not raise
         lap1 = [r for r in _rows(os.path.join(d, "out", "samples.csv")) if r["lap"] == "1"]
         assert lap1[50]["lap_dist_m"] != "", "a non-finite projection falls back to the integrated distance"
 
@@ -753,7 +789,7 @@ def t_export_lap_dist_ignores_the_other_branch_of_a_crossover_like_the_index():
     import gt7_laps
     with tempfile.TemporaryDirectory() as d:
         src = _xy_session(d)
-        rec.export_csv(src, os.path.join(d, "out"), tracks=_Figure8Tracks())
+        gx.export_csv(src, os.path.join(d, "out"), tracks=_Figure8Tracks())
         lap1 = [r for r in _rows(os.path.join(d, "out", "samples.csv")) if r["lap"] == "1"]
         got = [float(r["lap_dist_m"]) for r in lap1]
         steps = [b - a for a, b in zip(got, got[1:], strict=False)]

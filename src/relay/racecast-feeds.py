@@ -163,6 +163,7 @@ import placeholders  # transparent-graphic placeholder path -> hide pure-placeho
 import gt7_crypto      # GT7 UDP telemetry: Salsa20 decrypt (solo/POV only, #324)
 import gt7_telemetry   # GT7 UDP telemetry: packet parser + TelemetryStore (solo/POV only, #324)
 import gt7_recording   # GT7 telemetry recording to disk (solo/POV only)
+import gt7_context     # prepared session notes attached to each new recording
 import gt7_cars        # GT7 car id -> car name, from the vendored src/assets/gt7 tables (#713)
 import gt7_data        # GT7 reference data: bundled + runtime updates (#787)
 import gt7_tracks      # GT7 track recognition from lap positions (#787)
@@ -13066,7 +13067,8 @@ def main():
             rec_dir, os.path.join(runtime, "telemetry-record.json"),
             gt7_recording.record_default(os.environ),
             profile=os.environ.get("RACECAST_PROFILE_NAME", ""),
-            relay_version=VERSION_LABEL)
+            relay_version=VERSION_LABEL,
+            on_open=gt7_context.attach_prepared)
         telemetry_store = gt7_telemetry.TelemetryStore(
             os.path.join(runtime, "telemetry.json"), units=_tunits, thresholds=_tthr,
             reset=True,          # fresh reference each relay start (spec §D), no stale cross-track lap

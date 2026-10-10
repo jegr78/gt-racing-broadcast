@@ -3358,6 +3358,7 @@ def telemetry_index_cmd(rest):
 def telemetry_export_cmd(rest):
     """Export one recording to samples.csv + laps.csv."""
     import argparse
+    import gt7_export as gx
     import gt7_recording as gr
     ap = argparse.ArgumentParser(prog="racecast telemetry export")
     ap.add_argument("name", help="recording name, its stem, or 'latest'")
@@ -3374,7 +3375,7 @@ def telemetry_export_cmd(rest):
     tracks, cars = _telemetry_dbs()
     try:
         analysis = _telemetry_with_shifts(_telemetry_with_context(_telemetry_full_index(path), path), path)
-        res = gr.export_csv(path, out_dir, include_all=args.all, excel=args.excel,
+        res = gx.export_csv(path, out_dir, include_all=args.all, excel=args.excel,
                             cars=cars, tracks=tracks, key=_telemetry_track_key(path), diagnostics=args.diagnostics,
                             track_analysis=analysis, shift_analysis=analysis)
     except Exception as e:  # noqa: BLE001  a damaged file or a full disk ends in one line, not a traceback
