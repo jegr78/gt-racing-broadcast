@@ -146,6 +146,21 @@ def t_distance_interpolation_does_not_label_nonfinite_measurements_as_values():
                 assert state['clutch_engagement'] != 'value', 'an interpolated missing value must retain its unavailable state'
 
 
+def t_corrupt_sparse_anchors_are_refused_before_reading_arbitrary_capture_bytes():
+    with tempfile.TemporaryDirectory() as td:
+        path = fixture.write_circle_recording(td)
+        idx = fixture._index(path)
+        lap = fixture._lap(idx, 3)
+        for bad in [[[-1, -10]], [[0, r.Recording(path).header_end+1]], [['oops', 10]]]:
+            altered = dict(idx, raw_seek=bad)
+            try:
+                detail.window(path, altered, lap, ['rpm'], 'time', 0, 1, fixture.FakeTracks())
+            except ValueError as exc:
+                assert 'channel index' in str(exc), 'corrupt seeks require an explicit index failure'
+            else:
+                raise AssertionError('unverified seek anchors must not decode arbitrary bytes as telemetry')
+
+
 if __name__ == '__main__':
     for name, fn in sorted(globals().items()):
         if name.startswith('t_') and callable(fn):

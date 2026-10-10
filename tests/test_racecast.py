@@ -979,6 +979,18 @@ def t_telemetry_channel_detail_reuses_the_index_and_refuses_invalid_or_active_so
         assert not active['ok'] and 'recording in progress' in active['error']
 
 
+def t_channel_api_rejects_boolean_bounds_and_fractional_session_numbers():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        path = tgl.write_circle_recording(rec_dir)
+        stem = _stem(path)
+        m.telemetry_lap_data(stem, '1', '3')
+        for session in (True, 1.5):
+            response = m.telemetry_channels_data(stem, session, 3, keys='rpm', axis='time', start=0, end=1)
+            assert not response['ok'] and 'session and lap' in response['error'], 'invalid session identity must not become a valid lap request'
+        response = m.telemetry_channels_data(stem, 1, 3, keys='rpm', axis='time', start=True, end=2)
+        assert not response['ok'] and 'boolean' in response['error'], 'boolean bounds must not become measured time values'
+
+
 def t_telemetry_lap_data_returns_the_trace():
     with _telemetry_sandbox() as (rec_dir, tgl):
         stem = _stem(tgl.write_circle_recording(rec_dir))

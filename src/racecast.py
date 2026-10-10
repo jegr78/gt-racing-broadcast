@@ -3929,11 +3929,17 @@ def telemetry_lap_data(rec, session, lap, build=True):
 
 def telemetry_channels_data(rec=None, session=None, lap=None, keys=None, axis='distance', start=None, end=None):
     """Catalog or bounded selected detail. HTTP never builds or replays a whole index."""
+    import math
     import gt7_channels
     import gt7_channel_detail
     if rec is None:
         return {'ok': True, 'channels': gt7_channels.descriptors(), 'schema_version': gt7_channels.SCHEMA_VERSION}
     try:
+        if any(isinstance(v, bool) or isinstance(v, float) and (not math.isfinite(v) or int(v) != v)
+               for v in (session, lap)):
+            raise ValueError('session and lap require integer identifiers')
+        if isinstance(start, bool) or isinstance(end, bool):
+            raise ValueError('boolean window bounds are invalid')
         s, n = int(session), int(lap)
         keys = keys.split(',') if isinstance(keys, str) else keys
         low = 0 if start is None else float(start)

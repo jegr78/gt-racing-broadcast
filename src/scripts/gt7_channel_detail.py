@@ -2,11 +2,13 @@
 """Bounded, selected post-session channels using the recording index's sparse seeks."""
 import bisect
 import math
+import os
 import gt7_channels
 
 MAX_CHANNELS = 8
 MAX_WINDOW_S = 30.0
 MAX_RAW_ROWS = 5000
+MAX_SEEK_ROWS = 100000
 _BY_KEY = {d['key']: d for d in gt7_channels.descriptors()}
 
 def window(path, index, lap, keys, axis='distance', start=0, end=None, tracks=None):
@@ -32,10 +34,30 @@ def window(path, index, lap, keys, axis='distance', start=0, end=None, tracks=No
     seek = index.get('raw_seek') or []
     if not seek:
         raise ValueError('recording needs an updated channel index')
+    recording = gt7_recording.Recording(path)
+    size = os.path.getsize(path)
+    if not isinstance(seek, list) or len(seek) > MAX_SEEK_ROWS:
+        raise ValueError('invalid channel index seek list')
+    previous_seek = None
+    for point in seek:
+        if (not isinstance(point, (list, tuple)) or len(point) != 2
+                or isinstance(point[0], bool) or not isinstance(point[0], (int, float))
+                or not math.isfinite(point[0]) or point[0] < 0
+                or isinstance(point[1], bool) or not isinstance(point[1], int)
+                or not recording.header_end <= point[1] <= size-gt7_recording._REC.size
+                or previous_seek and (point[0] <= previous_seek[0] or point[1] <= previous_seek[1])):
+            raise ValueError('invalid channel index seek anchor')
+        previous_seek = point
     target = lap['start_t_s'] + (start if axis == 'time' else 0)
     nearest = max(0, bisect.bisect_right([p[0] for p in seek], target)-1)
     offset = seek[nearest][1]
-    recording = gt7_recording.Recording(path)
+    with open(path, 'rb') as capture:
+        capture.seek(offset)
+        stamp, kind, length = gt7_recording._REC.unpack(capture.read(gt7_recording._REC.size))
+    if (not math.isfinite(stamp) or abs(stamp-index['start_ts']-seek[nearest][0]) > .002
+            or chr(kind) not in {'A', 'B', '~'} or length < gt7_recording._MIN_PAYLOAD
+            or offset+gt7_recording._REC.size+length > size):
+        raise ValueError('channel index anchor does not match the capture')
     base, low, high = index['start_ts'], lap['start_t_s'], lap['end_t_s']
     raw, previous, driven = [], None, 0.0
     inspect_keys = list(dict.fromkeys(keys + ['pos_x', 'pos_z', 'speed_kmh']))
