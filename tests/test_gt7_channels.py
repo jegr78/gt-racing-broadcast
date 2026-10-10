@@ -207,6 +207,40 @@ def t_each_detail_resource_limit_reports_its_own_domain_failure():
             detail.MAX_RAW_ROWS = real
 
 
+def t_seek_list_and_packet_scan_limits_fail_before_unbounded_work():
+    with tempfile.TemporaryDirectory() as td:
+        path = fixture.write_circle_recording(td)
+        idx = fixture._index(path)
+        lap = fixture._lap(idx, 3)
+        limit = detail.MAX_SEEK_ROWS
+        detail.MAX_SEEK_ROWS = 2
+        try:
+            try:
+                detail.window(path, idx, lap, ['rpm'], 'time', 0, 1, fixture.FakeTracks())
+            except ValueError as exc:
+                assert 'seek list' in str(exc)
+            else:
+                raise AssertionError('channel seek lists must respect their resource bound')
+        finally:
+            detail.MAX_SEEK_ROWS = limit
+        real = r.Recording
+        plain = fixture._pkt(3, 50, 0)
+        class FloodRecording(real):
+            def packets(self, start=None):
+                for _ in range(120001):
+                    yield idx['start_ts']+lap['start_t_s']-1, '~', plain
+        r.Recording = FloodRecording
+        try:
+            try:
+                detail.window(path, idx, lap, ['rpm'], 'time', 0, 1, fixture.FakeTracks())
+            except ValueError as exc:
+                assert 'packet read limit' in str(exc)
+            else:
+                raise AssertionError('out-of-window packets must still respect the scan bound')
+        finally:
+            r.Recording = real
+
+
 if __name__ == '__main__':
     for name, fn in sorted(globals().items()):
         if name.startswith('t_') and callable(fn):
