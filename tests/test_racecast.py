@@ -1087,9 +1087,10 @@ def t_telemetry_delete_data_removes_a_recording_for_the_control_center():
         for gone in (path, cache, os.path.join(rec_dir, _stem(path))):
             assert not os.path.exists(gone), gone
         assert path not in m._TELEMETRY_MEMO and os.path.exists(keep), "only that recording goes"
-        for bad in ("", "../etc", _stem(path)):
+        for bad in ("", "../etc", _stem(path), "latest"):
             r = m.telemetry_delete_data(bad)
             assert r["ok"] is False and "no recording named" in r["error"], (bad, r)
+        assert os.path.exists(keep), "a delete names its recording: 'latest' is no name"
 
 
 def t_telemetry_delete_data_refuses_the_open_file_without_a_path():

@@ -3439,7 +3439,8 @@ def telemetry_delete_data(rec):
     never carries a machine path. Never raises."""
     try:
         rec_dir = _telemetry_rec_dir()
-        path = _find_recording(rec_dir, rec)
+        # exact names only: the CLI's 'latest' shortcut has no place in a delete request
+        path = _find_recording(rec_dir, rec) if rec != "latest" else None
         if not path:
             return {"ok": False, "error": f"no recording named {rec!r}"}
         error, notes = _telemetry_delete_path(rec_dir, path)
