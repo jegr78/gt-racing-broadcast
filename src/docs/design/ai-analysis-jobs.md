@@ -40,3 +40,18 @@ Independent review found and corrected descendant survival after normal parent
 exit, Windows execution before Job Object assignment and repeated POSIX group
 termination. Controlled tests cover all three. Unvalidated output remains
 `awaiting_validation`; missing/invalid output never completes a report.
+
+
+Guard falsification on the committed implementation: individually disabled
+machine admission, package file allowlist, snapshot fingerprint, preview binding,
+opt-in, profile-source binding, diagnostic bound, output-link protection,
+same-origin enforcement and descendant termination. Every mutation failed the
+intended behavioral assertion; production files were restored from the commit.
+The preview mutation exposed a test cleanup race and the snapshot mutation an
+unguarded error lookup; the tests now assert the intended failed state directly.
+
+Controlled subprocess tests passed on native Linux and macOS. The macOS run
+also caught a Darwin zombie-only process-group signalling error: the runner now
+reaps an exited leader before signalling remaining descendants. No real provider
+inference or private recording was used for these fixtures. Windows native proof
+and all real subscription integrations are recorded with the release workflow.
