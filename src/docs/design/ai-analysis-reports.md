@@ -69,7 +69,7 @@ independently hides any retained body unless the outcome is completed. Raw outpu
 and immutable inputs remain available for diagnosis/manual retry.
 
 
-Twenty guards were individually falsified from the committed implementation:
+Twenty-one guards were individually falsified from the committed implementation:
 strict integer types, unknown fields, existing lap, trace-bound location, exact
 facts, three priorities, artifact-profile binding, prompt hashes, relevant stale
 changes, unrelated revision exclusion, HTML and Markdown escaping, incomplete
@@ -78,3 +78,11 @@ conflicting lap identities, deletion admission, visible foreign-profile guidance
 and recording-identity navigation. Each failed the intended assertion and was
 restored from the commit. The last two ran in the real local browser against
 an isolated dev-build fixture. No native credentials or private capture was used.
+
+Explicit comparison paths allow evidence from directly comparable laps or laps
+sharing the selected reference. Unconnected lap evidence remains rejected. This
+guard was independently falsified from the committed implementation. A real
+subscription-authenticated Linux Codex 0.162.1 run with gpt-6.1-sol completed the
+full package, strict validation, history and HTML/input-ZIP export pipeline.
+Separate native runs verified unavailable-model failure and cancellation without
+a completed report or a retained machine lease. All telemetry was synthetic.
