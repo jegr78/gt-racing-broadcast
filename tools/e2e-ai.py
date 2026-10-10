@@ -63,6 +63,19 @@ async def verify(page,fixture,port):
     assert '&lt;script&gt;' in html and '<script>window.aiInjected' not in html
     await page.locator('#ai-report').get_by_role('button',name='Compare with S1 lap 3').first.click()
     await page.wait_for_function('() => tmState.lapA?.lap === 3 && tmState.lapB?.lap === 2')
+    async def replaced_reference(route):
+        response=await route.fetch();data=await response.json()
+        if data.get('lap',{}).get('lap')==3:data['lap']['recording_id']='0'*32
+        await route.fulfill(json=data)
+    await page.route('**/api/telemetry/lap?*',replaced_reference)
+    await page.evaluate('() => tmLapCache.clear()')
+    await page.locator('#ai-report').get_by_role('button',name='Compare with S1 lap 3').first.click()
+    for _ in range(40):
+        if 'Comparison recording identity changed' in await page.locator('#tm-err').inner_text():break
+        await asyncio.sleep(.05)
+    assert 'Comparison recording identity changed' in await page.locator('#tm-err').inner_text(),'changed comparison identity accepted'
+    await page.unroute('**/api/telemetry/lap?*',replaced_reference)
+    await page.evaluate('() => tmLapCache.clear()')
     # Opening a report uses the real ordinary telemetry callbacks and exact identity.
     await page.locator('#ai-report').get_by_role('button',name='Open lap at 500 m').first.click()
     await page.wait_for_function('() => tmState.lapB?.lap === 2 && tmState.lapB.recording_id')
