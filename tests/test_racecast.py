@@ -1011,6 +1011,9 @@ def t_track_definition_editor_apply_is_explicit_scoped_and_revisioned():
         foreign = dict(payload, profile='elsewhere', expected_revision=1)
         denied = m.telemetry_track_definition_write_data(foreign)
         assert not denied['ok'] and denied.get('conflict') and 'profile' in denied['error']
+        replaced = m.telemetry_track_definition_write_data(dict(payload, source_id='other', expected_revision=1))
+        assert not replaced['ok'] and replaced.get('conflict') and 'identity' in replaced['error'], \
+            'a replaced recording must not authorize a shared map edit'
         current = m.telemetry_track_definition_read_data(stem, '1', '3')
         assert current['definition']['reviewed'] and current['revision'] == 1
 
