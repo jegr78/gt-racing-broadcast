@@ -19,7 +19,7 @@ STEP_M = 5.0
 SECTOR_M = 200.0
 MAX_TRACE_M = gt7_telemetry.MAX_SAMPLES * gt7_telemetry.SAMPLE_MIN_DIST
 COUNTED = ("reference", "counted")
-INDEX_VERSION = 6
+INDEX_VERSION = 7
 CACHE_SUFFIX = ".laps.json"
 DECIMATE_M = 2.0              # finer samples add nothing to a 5 m trace
 RESUME_CHECK = 64             # bytes before a resume point that must be unchanged to continue there
@@ -338,6 +338,7 @@ class _Replay:
         self.cur_events = []
         self.cur, self.tail, self.tyre = [], None, [0.0, 0.0, 0.0, 0.0, 0]
         self.first = self.last = None
+        self.raw_seek = []
         self.start, self.dropped, self.point = None, 0, None
         if point is not None:
             self.eng.restore(point["eng"])
@@ -349,6 +350,7 @@ class _Replay:
             self.tyre = list(point["tyre"])
             self.cur_events = list(point.get('cur_events', []))
             self.first, self.last = point["first"], point["last"]
+            self.raw_seek = [tuple(p) for p in point.get("raw_seek", [])]
             self.start, self.dropped = point["offset"], point["dropped"]
             self.point = {k: v for k, v in point.items()
                           if k not in ("raw_laps", "started", "check")}
@@ -358,6 +360,9 @@ class _Replay:
         rec.dropped = self.dropped
         marked = len(self.laps)
         for wall_ts, _kind, plain in rec.packets(self.start):
+            relative = wall_ts - (self.first if self.first is not None else wall_ts)
+            if math.isfinite(relative) and (not self.raw_seek or relative >= self.raw_seek[-1][0] + 2):
+                self.raw_seek.append((relative, rec.record_start))
             self._feed(wall_ts, gt7_telemetry.parse_packet(plain))
             if len(self.laps) > marked and self.times.settled():
                 marked = len(self.laps)
@@ -365,7 +370,7 @@ class _Replay:
                     "offset": rec.pos, "laps": marked, "eng": self.eng.resume_state(),
                     "times": self.times.resume_state(), "cur": list(self.cur),
                     "tail": self.tail, "tyre": list(self.tyre), "cur_events": list(self.cur_events),
-                    "first": self.first,
+                    "first": self.first, "raw_seek": list(self.raw_seek),
                     "last": self.last, "dropped": rec.dropped}
         self.dropped = rec.dropped
 
@@ -515,6 +520,7 @@ def _build(path, track_db, cars, key, old=None):
                                 and previous["session"] == unfinished["session"]))
     return {"rec": stem, "name": os.path.basename(path),
             "started": rec.header.get("started", ""), "start_ts": first,
+            "raw_seek": replay.raw_seek,
             "end_ts": replay.last, "dropped": replay.dropped,
             "track": _display_track(laps, by_session, track_db),
             "sessions": {str(s): _track_info(v, track_db) for s, v in by_session.items()},

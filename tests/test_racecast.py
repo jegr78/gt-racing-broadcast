@@ -959,6 +959,38 @@ def t_telemetry_laps_data_names_a_broken_recording_without_its_path():
         assert d["ok"] is False and rec_dir not in d["error"], d
 
 
+def t_telemetry_channel_detail_reuses_the_index_and_refuses_invalid_or_active_sources():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        path = tgl.write_circle_recording(rec_dir)
+        stem = _stem(path)
+        unknown = m.telemetry_channels_data(stem, '1', '3', keys='rpm', axis='time', start='1', end='2')
+        assert unknown.get('unindexed') == 1, 'channel requests must not build a capture index'
+        m.telemetry_lap_data(stem, '1', '3')
+        answer = m.telemetry_channels_data(stem, '1', '3', keys='rpm,gear', axis='time', start='1', end='2')
+        assert answer['ok'] and answer['detail']['rows'] and answer['detail']['availability']['gear']['constant']
+        assert 'throttle_pct' not in answer['detail']['rows'][0], 'detail carries only selected channels'
+        assert m.telemetry_channels_data()['channels']
+        bad = m.telemetry_channels_data(stem, '1', '3', keys='rpm', axis='time', start='0', end='100')
+        assert not bad['ok'] and '30 seconds' in bad['error']
+        missing = m.telemetry_channels_data('../elsewhere', '1', '3', keys='rpm')
+        assert not missing['ok'] and 'no recording named' in missing['error']
+        m._relay_record_status = lambda: {'active': True, 'file': os.path.basename(path)}
+        active = m.telemetry_channels_data(stem, '1', '3', keys='rpm')
+        assert not active['ok'] and 'recording in progress' in active['error']
+
+
+def t_channel_api_rejects_boolean_bounds_and_fractional_session_numbers():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        path = tgl.write_circle_recording(rec_dir)
+        stem = _stem(path)
+        m.telemetry_lap_data(stem, '1', '3')
+        for session in (True, 1.5):
+            response = m.telemetry_channels_data(stem, session, 3, keys='rpm', axis='time', start=0, end=1)
+            assert not response['ok'] and 'session and lap' in response['error'], 'invalid session identity must not become a valid lap request'
+        response = m.telemetry_channels_data(stem, 1, 3, keys='rpm', axis='time', start=True, end=2)
+        assert not response['ok'] and 'boolean' in response['error'], 'boolean bounds must not become measured time values'
+
+
 def t_telemetry_lap_data_returns_the_trace():
     with _telemetry_sandbox() as (rec_dir, tgl):
         stem = _stem(tgl.write_circle_recording(rec_dir))

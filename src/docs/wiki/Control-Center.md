@@ -29,8 +29,14 @@ side and share the `runtime/` folder next to them.
   stop the relay, Companion, or streams: those are independent and keep running.
 - **Port busy?** Set `RACECAST_UI_PORT` in `.env` to a free port and relaunch.
 
-> **CLI alternative:** `racecast ui` runs the same server in a terminal (add
-> `--no-browser` to skip opening a tab). `racecast ui` and `racecast-ui` are interchangeable.
+> **CLI alternative:** `racecast telemetry export <name>` writes samples/laps CSV with a current
+> `context.json` snapshot, excluding drafts/history. `--diagnostics` adds `diagnostics.csv`.
+> Existing `samples.csv` columns remain at the start; confirmed channels and `__state` columns follow.
+> `channels.json` documents schema version, units, offsets, sentinels and compatibility columns.
+> Missing, unset and nonfinite values have blank numerical cells and distinct state values; genuine zero remains zero.
+> The historical `throttle_input_pct` and `brake_input_pct` names remain for compatibility, with their disputed
+> driver/filter interpretation documented. Neither represents a newly verified driver-input sensor.
+> `racecast telemetry index` builds the missing lap caches ahead of time.
 
 ## Security: keep it local
 
@@ -327,12 +333,31 @@ running relay.
   reads "no other lap to compare" and the charts show B alone. Laps on an unknown track
   compare only within their GT7 session. When other recordings have no cached laps yet,
   for example after a Set track, the view runs the index job first ("Indexing
-  N recordings…"). No click in the view replays a recording itself: loading a lap or
+  N recordings…"). No request rebuilds the full recording index: loading a lap or
   setting a track on a recording without cached laps also waits for that job.
 - **Charts.** Speed, throttle, brake, steering, gear and the delta of B against A over
   lap distance, each with its value range on the left. Below zero B is ahead, above zero
   behind; the delta panel ends with the final gap. Hover to read both laps at one point;
   the map shows where that point is.
+- **All channels & time detail.** Open this section and select up to eight values,
+  including constants, clutch/gearbox data and simulator flags. Distance is the default
+  comparison axis. A time window spans at most 30 seconds and reads each retained
+  original packet, preserving short cuts and stationary service events. Time windows
+  use receiver-clock seconds from the recorded lap boundary; distance views retain
+  the indexed lap's clock and common reference geometry. Partial and rejected laps
+  retain their receiver-clock label. Missing timing coverage stays unavailable.
+  Select **Load window** after changing the channels or bounds. Each chart reports
+  units, source offset, packet/derived provenance, constant values and counts of
+  available, missing, unset and nonfinite values. Flags and discrete values use steps.
+- **Raw diagnostics.** The separate checkbox offers uncertain fields and flag meanings.
+  Hover shows the native interpretation and original bytes at the cursor. These values
+  have no claimed physical units or validated sensor meaning. Quaternion components
+  are dimensionless; RPM display-alert thresholds are separate from a confirmed rev limit.
+  GT7 may report constant simulation values, including temperatures; a constant value
+  does not establish a changing real sensor measurement.
+
+![Control Center: telemetry channels](images/cc-telemetry-channels.png)
+
 - **Track map and mini-sectors.** Lap A is the thin line; lap B is split into 200 m
   mini-sectors, green where B is faster and red where it is slower (the legend under the
   map). The table lists every mini-sector with its distance, the times of A and B, the gap

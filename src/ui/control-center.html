@@ -537,8 +537,8 @@
   .tmkey { display:inline-block; width:18px; height:3px; border-radius:2px; }
   .tmkey.a { background:var(--tm-a); }
   .tmkey.b { background:var(--tm-b); }
-  #tm-charts, #tm-map { display:block; width:100%; height:auto; }
-  #tm-charts text, #tm-map text { font:11px var(--mono); fill:var(--dim); }
+  #tm-charts, #tm-map, .tm-channel-chart { display:block; width:100%; height:auto; }
+  #tm-charts text, #tm-map text, .tm-channel-chart text { font:11px var(--mono); fill:var(--dim); }
   #tm-charts text.tm-read { fill:var(--txt); }
   .tm-readbg { fill:var(--card); opacity:.88; }
   #tm-charts text.tm-unit { fill:var(--faint); }
@@ -1337,6 +1337,16 @@
               <label><span class="tmkey b"></span>Lap B
                 <select id="tm-b" aria-label="Lap B" onchange="tmPick('b', this.value)"></select></label>
             </div>
+            <details id="tm-channel-box" ontoggle="tmChannelOpen()"><summary>All channels &amp; time detail</summary>
+              <p class="sub">Select up to eight channels. Constant values and status flags remain readable. Distance is the default comparison axis.</p>
+              <label><input id="tm-channel-diagnostics" type="checkbox" onchange="tmChannelChoices()"> Raw diagnostics, uncertain meaning / units</label>
+              <select id="tm-channel-select" multiple size="6" aria-label="Telemetry channels" style="width:100%;min-width:0" onchange="tmChannelInvalidate()"></select>
+              <div class="row"><label>Axis <select id="tm-channel-axis" aria-label="Channel axis" onchange="tmChannelBounds()"><option value="distance">Distance (m)</option><option value="time">Raw time (s)</option></select></label>
+                <label>From <input id="tm-channel-start" aria-label="Channel window start" type="number" min="0" step="any" style="width:100px" oninput="tmChannelInvalidate()"></label>
+                <label>To <input id="tm-channel-end" aria-label="Channel window end" type="number" min="0" step="any" style="width:100px" oninput="tmChannelInvalidate()"></label>
+                <button onclick="tmChannelLoad()">Load window</button></div>
+              <p id="tm-channel-status" class="sub" role="status"></p><div id="tm-channel-charts"></div>
+            </details>
             <svg id="tm-charts" role="img" aria-label="Speed, throttle, brake, steering, gear and delta over lap distance"></svg>
           </section>
           <div class="tmmap">
@@ -5816,6 +5826,7 @@ function tmRender() {
   tmRenderCharts();
   tmRenderMap();
   tmRenderSectors();
+  tmChannelRefresh();
 }
 
 function tmRenderSectors() {
@@ -6156,6 +6167,93 @@ window.addEventListener('resize', () => {
   tmResizeQueued = true;
   requestAnimationFrame(() => { tmResizeQueued = false; tmRefit(); });
 });
+// Expanded channel detail is loaded on demand, separate from the compact default charts.
+const tmChannelState = {catalog:null, generation:0, details:null, pair:null};
+function tmChannelStatus(text, error=false) {
+ $('tm-channel-status').textContent=text;$('tm-channel-status').className=error?'enverr':'sub';
+}
+function tmChannelKeys() {return [...$('tm-channel-select').selectedOptions].map(o=>o.value);}
+function tmChannelIdentity() {return JSON.stringify([tmState.profile,tmState.lapA&&tmKey(tmState.lapA),tmState.lapB&&tmKey(tmState.lapB),tmChannelKeys(),$('tm-channel-axis').value,$('tm-channel-start').value,$('tm-channel-end').value,$('tm-channel-diagnostics').checked]);}
+function tmChannelInvalidate() {tmChannelState.generation++;tmChannelState.details=null;$('tm-channel-charts').textContent='';tmChannelStatus('Selection changed; load the window to apply it.');}
+function tmChannelChoices() {
+ const select=$('tm-channel-select'), old=tmChannelKeys();select.textContent='';
+ for(const d of tmChannelState.catalog||[]){if(d.diagnostic!==$('tm-channel-diagnostics').checked)continue;
+  const o=document.createElement('option');o.value=d.key;o.textContent=d.label+' · '+d.unit+(d.diagnostic?' · '+d.offset:'');
+  o.title=d.source+(d.uncertainty?' · '+d.uncertainty:'');o.selected=old.includes(d.key)||(!old.length&&d.key==='rpm');select.append(o);}
+ tmChannelState.generation++;tmChannelState.details=null;$('tm-channel-charts').textContent='';
+ tmChannelStatus($('tm-channel-diagnostics').checked?'Raw diagnostic interpretations have unverified meanings or units.':'Select up to eight channels, including constants and flags.');
+}
+function tmChannelBounds() {
+ const B=tmState.lapB, time=$('tm-channel-axis').value==='time';
+ $('tm-channel-start').value='0';$('tm-channel-end').value=B?String(time?Math.min(30,B.end_t_s-B.start_t_s):B.length_m):'';
+ tmChannelState.generation++;tmChannelState.details=null;$('tm-channel-charts').textContent='';
+ tmChannelStatus(time?'Receive-clock seconds from the lap boundary. At most 30 seconds; every retained packet remains visible.':'Metres along the common reference geometry when available; otherwise driven distance.');
+}
+async function tmChannelOpen() {
+ if(!$('tm-channel-box').open)return;
+ if(!tmChannelState.catalog){const d=await tmGet('/api/telemetry/channels');
+  if(!d.ok){tmChannelStatus(d.error||'Channel catalog unavailable',true);return;}
+  tmChannelState.catalog=d.channels;tmChannelChoices();}
+ tmChannelBounds();
+ if(tmChannelKeys().length&&tmState.lapB)await tmChannelLoad();
+}
+function tmChannelRefresh() {
+ const pair=JSON.stringify([tmState.profile,tmState.a,tmState.b]);
+ if(pair===tmChannelState.pair)return;
+ tmChannelState.pair=pair;tmChannelState.generation++;tmChannelState.details=null;$('tm-channel-charts').textContent='';
+ if($('tm-channel-box').open)tmChannelOpen();
+}
+async function tmChannelLoad() {
+ const gen=++tmChannelState.generation, identity=tmChannelIdentity();
+ const keys=tmChannelKeys(), axis=$('tm-channel-axis').value,start=$('tm-channel-start').value,end=$('tm-channel-end').value;
+ const B=tmState.lapB,A=tmState.lapA;
+ if(!B){tmChannelStatus('Select a recorded lap',true);return;}
+ if(!keys.length||keys.length>8){tmChannelStatus('Select between one and eight channels',true);return;}
+ tmChannelStatus('Loading selected channels…');
+ const ask=l=>l?tmGet('/api/telemetry/channels?'+new URLSearchParams({rec:l.rec,session:l.session,lap:l.lap,keys:keys.join(','),axis,start,end})):Promise.resolve(null);
+ let results;try{results=await Promise.all([ask(A),ask(B)]);}catch(_e){if(gen===tmChannelState.generation)tmChannelStatus('Could not load channel detail',true);return;}
+ if(gen!==tmChannelState.generation||identity!==tmChannelIdentity())return;
+ if(!results[1]?.ok||results[1].unindexed){tmChannelStatus(results[1]?.error||'Refresh to rebuild the recording index',true);return;}
+ tmChannelState.details=results.map(r=>r?.ok?r.detail:null);tmChannelRender();
+ const warning=results[0]&&!results[0].ok?' · Lap A unavailable for this window: '+results[0].error:'';
+ tmChannelStatus(results[1].detail.time_basis+' · '+results[1].detail.distance_basis+warning);
+}
+function tmChannelRender() {
+ const root=$('tm-channel-charts');root.textContent='';const details=tmChannelState.details;if(!details)return;
+ const B=details[1],A=details[0], axis=B.axis==='time'?'t':'d';
+ for(const channel of B.channels){
+  const card=document.createElement('div'),caption=document.createElement('p');caption.className='sub';
+  const available=B.availability[channel.key];
+  caption.textContent=channel.label+' · '+channel.unit+' · '+channel.provenance+' · '+channel.offset+
+   (available.constant?' · constant '+available.min:'')+' · '+Object.entries(available.states).map(([k,n])=>k+' '+n).join(', ');
+  caption.title=channel.source+(channel.uncertainty?' · '+channel.uncertainty:'');card.append(caption);
+  const svg=tmEl('svg',{class:'tm-channel-chart',role:'img','aria-label':channel.label+' over '+(axis==='t'?'raw lap time':'lap distance')});card.append(svg);
+  const W=Math.max(300,Math.round(root.getBoundingClientRect().width)||760),H=130;
+  svg.setAttribute('viewBox','0 0 '+W+' '+H);
+  const sets=[A&&{rows:A.rows,cls:'tm-a'}, {rows:B.rows,cls:'tm-b'}].filter(Boolean);
+  const finite=sets.flatMap(s=>s.rows.map(r=>r[channel.key])).filter(v=>v!=null&&Number.isFinite(v));
+  const xs=sets.flatMap(s=>s.rows.map(r=>r[axis])).filter(v=>v!=null&&Number.isFinite(v));
+  if(!finite.length||!xs.length){tmEl('text',{x:10,y:40},svg).textContent='No available values in this window';root.append(card);continue;}
+  let lo=Math.min(...finite),hi=Math.max(...finite);if(lo===hi){lo-=.5;hi+=.5;}
+  const xmin=Math.min(...xs),xmax=Math.max(...xs),X=v=>40+(v-xmin)/(xmax-xmin||1)*(W-50),Y=v=>105-(v-lo)/(hi-lo)*95;
+  tmEl('rect',{x:40,y:10,width:W-50,height:95,class:'tm-frame'},svg);
+  for(const set of sets){let path='',prior=null;
+   for(const row of set.rows){const value=row[channel.key],x=row[axis];if(value==null||x==null){prior=null;continue;}
+    const px=X(x).toFixed(2),py=Y(value).toFixed(2);
+    path+=prior==null?'M'+px+' '+py:channel.type==='step'?'H'+px+'V'+py:'L'+px+' '+py;prior=value;}
+   tmEl('path',{d:path,class:set.cls},svg);}
+  tmEl('text',{x:2,y:18},svg).textContent=hi.toFixed(1);tmEl('text',{x:2,y:105},svg).textContent=lo.toFixed(1);
+  tmEl('text',{x:40,y:125},svg).textContent=xmin.toFixed(2)+(axis==='t'?' s':' m');
+  tmEl('text',{x:W-10,y:125,'text-anchor':'end'},svg).textContent=xmax.toFixed(2)+(axis==='t'?' s':' m');
+  const read=document.createElement('p');read.className='sub';card.append(read);
+  svg.onpointermove=e=>{const box=svg.getBoundingClientRect(),at=xmin+((e.clientX-box.left)*W/box.width-40)/(W-50)*(xmax-xmin);
+   const row=B.rows.reduce((best,r,i)=>!best||Math.abs(r[axis]-at)<Math.abs(best.row[axis]-at)?{row:r,i}:best,null);
+   if(!row)return;const value=row.row[channel.key],state=B.states[row.i][channel.key],raw=B.raw[row.i][channel.key];
+   read.textContent=row.row[axis].toFixed(3)+(axis==='t'?' s':' m')+' · B '+(value==null?state:value.toFixed(4)+' '+channel.unit)+(channel.diagnostic?' · raw '+(raw==null?'missing':'0x'+raw):'');};
+  root.append(card);
+ }
+}
+
 // end of the Telemetry view
 
 function _mbps(bps) { return bps == null ? '—' : (bps / 1e6).toFixed(2) + ' Mbps'; }
