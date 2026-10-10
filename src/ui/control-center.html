@@ -5575,7 +5575,7 @@ async function tmLoad() {
       : 'No recordings yet. The Director Panel REC key or TELEMETRY_RECORD=1 in the profile records a session.');
     return;
   }
-  tmSelectRec(first.rec);
+  await tmSelectRec(first.rec);
 }
 
 function tmRenderRecs() {
@@ -5652,8 +5652,44 @@ async function tmSelectRec(rec) {
   if (!pick) tmClear('This recording has no laps.');
   $('tm-rec-track').textContent = tmTrackLabel(d.recording.track);
   tmShowSetTrack(d.recording.track);
-  if (pick) tmSelectB(pick);
+  if (pick) await tmSelectB(pick);
 }
+
+// Opens a validated report reference in the existing lap-comparison view.
+async function tmOpenReference(ref) {
+  if (!ref || typeof ref.rec !== 'string' || !ref.rec || /[\\/]/.test(ref.rec)
+      || !Number.isInteger(ref.session) || ref.session < 1 || !Number.isInteger(ref.lap) || ref.lap < 1
+      || typeof ref.recording_id !== 'string' || !/^(?:[a-f0-9]{32}|[a-f0-9]{64})$/.test(ref.recording_id)
+      || (ref.location_m != null && (!Number.isFinite(ref.location_m) || ref.location_m < 0))) {
+    tmErr('Invalid report telemetry reference.'); return false;
+  }
+  const profile = ref.profile || tmState.profile;
+  if (profile !== tmState.profile) {
+    const message = 'This reference belongs to another profile. Select that profile explicitly first.';
+    tmErr(message); alertModal(message, {title:'Report reference'}); return false;
+  }
+  if (!tmState.loaded) await tmLoad();
+  if (profile !== tmState.profile) return false;
+  showView('telemetry');
+  const stem = value => String(value).replace(/\.gt7rec$/, '');
+  const recording = tmState.recs.find(r => stem(r.rec) === stem(ref.rec) && !r.recording);
+  if (!recording) { tmErr('The referenced recording is unavailable in this profile.'); return false; }
+  await tmSelectRec(recording.rec);
+  if (profile !== tmState.profile || tmState.rec !== recording.rec) return false;
+  const lap = tmState.recLaps.find(l => l.session === ref.session && l.lap === ref.lap);
+  if (!lap) { tmErr('The referenced lap is unavailable.'); return false; }
+  await tmSelectB(lap);
+  if (profile !== tmState.profile || tmState.b !== tmKey(lap)) return false;
+  if (tmState.lapB?.recording_id !== ref.recording_id) {
+    tmClear('The recording identity changed; the historical report snapshot is retained.'); return false;
+  }
+  if (ref.location_m != null && tmState.chart) {
+    const chart = tmState.chart, box = $('tm-charts').getBoundingClientRect();
+    tmHover({clientX: box.left + chart.X(Math.min(ref.location_m, chart.maxD)) / chart.W * box.width});
+  }
+  return true;
+}
+
 
 function tmRenderLaps() {
   const box = $('tm-laps');
@@ -6559,6 +6595,22 @@ setInterval(refreshResources, 2000);
 setInterval(renderTimer, 1000);          // tick the Home race-timer clock locally
 checkUpdate();                           // one-shot GitHub release check (cached server-side)
 // Populate the active-league sidebar badge regardless of which view opens first.
+// Export links wait for profile gating; they never switch profiles implicitly.
+(() => {
+ const query = new URLSearchParams(location.search);
+ if (!query.has('rec') || !query.has('session') || !query.has('lap')) return;
+ const observer = new MutationObserver(() => {
+   if (!tmState.profile) return;
+   observer.disconnect();
+   if (!document.body.classList.contains('tpl-pov')) {
+     alertModal('Select the report\'s solo POV profile explicitly before opening its telemetry reference.', {title:'Report reference'}); return;
+   }
+   tmOpenReference({rec:query.get('rec'),session:Number(query.get('session')),lap:Number(query.get('lap')),
+     recording_id:query.get('recording_id'),profile:query.get('profile'),
+     location_m:query.has('location_m')?Number(query.get('location_m')):null}).catch(() => tmErr('Could not open the report telemetry reference.'));
+ });
+ observer.observe(document.body,{attributes:true,attributeFilter:['class']});
+})();
 profilesLoaded = true; loadProfiles();
 onKindChange();                          // derive the new-profile dialog's Template/Copy-from visibility from the Kind select (not just static hidden attrs)
 initPreviewOptin();                      // restore preview opt-in state from localStorage

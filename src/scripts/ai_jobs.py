@@ -1,6 +1,7 @@
 """One machine-wide, explicitly admitted subscription CLI analysis process tree."""
 import copy
 import datetime
+import hashlib
 import json
 import os
 import re
@@ -313,7 +314,6 @@ class Runner:
                        progress='Preparing isolated analysis package',error=None,report=None,
                        quota_notice='Cancellation cannot recover already consumed subscription quota.')
             # Hash includes executable identity without exporting the machine path.
-            import hashlib
             state['agent_fingerprint']=hashlib.sha256(json.dumps(cfg,sort_keys=True).encode()).hexdigest()
             _save(directory/'run.json',state)
             active=dict(state,directory=str(directory));_save(self.active_path,active)
@@ -338,6 +338,8 @@ class Runner:
         try:
             if Path(prepared_package).resolve()!=(directory/'package').resolve():
                 snapshot_package(prepared_package,directory/'package',frozen)
+            state['input_file_fingerprints']={name:hashlib.sha256((directory/'package'/name).read_bytes()).hexdigest()
+                                                for name in ('detail.json','summary.md','manifest.json','result-schema.json')}
             self._update(directory,state,'starting','Checking installed CLI and subscription authentication')
             probe=adapter.probe(env=dict(os.environ))
             state['provider_version']=probe.get('version')

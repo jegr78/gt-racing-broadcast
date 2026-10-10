@@ -208,6 +208,8 @@ def make_handler(ctx):
                 if operation=='settings':return self._json({'ok':True,'enabled':False,'agents':[],'last':{}})
                 if operation=='status':return self._json({'ok':True,'busy':False,'active':None})
                 return self._ai_result({'ok':False,'error':{'code':'disabled','message':'AI analysis is disabled'}})
+            if operation=='export':
+                payload=dict(payload,origin='http://127.0.0.1:'+str(self.server.server_address[1]))
             try:result=callback(operation,payload)
             except Exception:
                 result={'ok':False,'error':{'code':'execution_failed','message':'Analysis operation failed'}}

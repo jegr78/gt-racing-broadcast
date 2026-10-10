@@ -176,6 +176,18 @@ def t_only_selected_context_and_complete_note_preview():
         assert 'UNSELECTED_LAP_SECRET' not in notes
 
 
+def t_copied_lap_identity_cannot_overwrite_selected_facts():
+    import copy
+    import dataclasses
+    with tempfile.TemporaryDirectory() as d:
+        original=source(Path(d)/'telemetry-recordings')
+        index=copy.deepcopy(original.index);index['laps'][0]['time_s']=999
+        index['laps'][0]['trace'][1]['t']=499.5;index['laps'][0]['trace'][2]['t']=999
+        conflicting=dataclasses.replace(original,index=index)
+        expect(lambda:a.build(original,1,references=[(conflicting,1,2)]),'invalid_source')
+        assert a.build(original,1,references=[(original,1,2)])['references']
+
+
 if __name__=='__main__':
     for n,f in sorted(globals().copy().items()):
         if n.startswith('t_'):f();print('PASS',n)

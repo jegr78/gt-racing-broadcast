@@ -257,6 +257,17 @@ def _comparison(source, row, other, ref):
                 interpretation='Observed difference with remaining context confounders, not recoverable time')
 
 
+def lap_map(laps):
+    """One stable capture identity cannot represent conflicting factual snapshots."""
+    known={}
+    for lap in laps:
+        existing=known.get(lap['id'])
+        if existing and any(existing[key]!=lap[key] for key in ('metrics','derived','trace')):
+            raise PackageError('invalid_source','Selected/reference lap identity has conflicting measurements or annotations; choose another reference or rebuild the indexes')
+        known.setdefault(lap['id'],lap)  # Selected recording remains the canonical view for identical copies.
+    return known
+
+
 def _facts(laps, comparisons, summary):
     facts = {}
     def collect(base, value, provenance):
@@ -327,6 +338,7 @@ def build(source, session, laps=None, references=(), candidates=(), template='se
                                          session=s, context=_context_snapshot(other, s, [n]),
                                          index_version=other.index['version'], data_version=other.index.get('data_version')))
         comparisons.extend(_comparison(source, r, other, ref) for r in matches)
+    lap_map(items+refs)
     if not refs:
         for row in eligible:
             pool = [r for r in eligible if _same_context(source, row, source, r)]

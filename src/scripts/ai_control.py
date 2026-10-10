@@ -118,7 +118,7 @@ class Controller:
         raw=doc.pop('bytes')
         return dict(doc,ok=True,encoding='base64',content=base64.b64encode(raw).decode('ascii'))
 
-    def export(self,job_id,kind):return self._download(_translate(self.reports.export,job_id,kind))
+    def export(self,job_id,kind,origin=None):return self._download(_translate(self.reports.export,job_id,kind,origin=origin))
 
     def export_preview(self,payload):
         package,_manifest,adapter,_model,confirm,_availability=self._prepare(payload)

@@ -3338,7 +3338,7 @@ def ai_request_data(operation,payload=None):
         if operation=='status':return control.status()
         if operation=='job':return control.job(payload.get('id'))
         if operation=='history':return control.history(payload.get('rec'))
-        if operation=='export':return control.export(payload.get('id'),payload.get('format'))
+        if operation=='export':return control.export(payload.get('id'),payload.get('format'),origin=payload.get('origin'))
         if operation=='package-export':return control.export_preview(payload)
         if operation=='cancel':return control.cancel(payload.get('id'))
         raise ai_control.ControlError('invalid_selection','Unknown analysis operation')
@@ -4140,7 +4140,8 @@ def telemetry_lap_data(rec, session, lap, build=True):
         available = idx["laps"] + ([idx["open_lap"]] if idx.get("open_lap") else [])
         for row in available:
             if row["session"] == s and row["lap"] == n:
-                return {"ok": True, "lap": {k: v for k, v in row.items() if k != "points"},
+                return {"ok": True, "lap": dict({k: v for k, v in row.items() if k != "points"},
+                                    recording_id=(idx.get("context_snapshot") or {}).get("source_id")),
                         "step_m": gt7_laps.STEP_M, "sector_m": gt7_laps.SECTOR_M}
         return {"ok": False, "error": f"no lap {n} in session {s} of {rec}"}
     except Exception as exc:

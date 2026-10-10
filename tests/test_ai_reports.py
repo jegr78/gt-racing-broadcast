@@ -2,6 +2,7 @@
 """Validate facts/references, immutable history and untrusted report exports."""
 import copy
 import io
+import hashlib
 import json
 import sys
 import tempfile
@@ -64,6 +65,10 @@ def t_schema_measurement_reference_and_priorities():
         bad=copy.deepcopy(valid);bad['findings'][0]['location_m']=float('nan');variants.append(bad)
         for bad in variants:fail(lambda bad=bad:r.validate(bad,p))
         assert valid['findings'][0]['evidence'][0].get('provenance') is None
+        ambiguous=copy.deepcopy(p);duplicate=copy.deepcopy(p['laps'][0]);duplicate['metrics']['time_s']=999;ambiguous['references'].append(duplicate)
+        ambiguous['facts'][duplicate['id']+'/time_s']['value']=999;claim=copy.deepcopy(valid)
+        for item in claim['findings']+claim['exercises']:item['evidence'][0]['value']=999
+        fail(lambda:r.validate(claim,ambiguous))
 
 
 def t_history_provenance_exports_and_profile_scope():
@@ -71,14 +76,17 @@ def t_history_provenance_exports_and_profile_scope():
         s,p,run,store=setup(d)
         assert run['state']=='completed',run
         found=store.get(run['id']);assert not found['stale']
+        assert found.get('input_file_fingerprints',{}).get('summary.md')==hashlib.sha256((Path(run['directory'])/'package/summary.md').read_bytes()).hexdigest()
         assert found['report']['language']=='de' and found['package_fingerprint']==p['fingerprint']
         assert store.history(s.name)['runs'][0]['id']==run['id']
         other=r.Store(Path(d)/'other','other',Path(d)/'machine')
         fail(lambda:other.get(run['id']),'not_found')
         fail(lambda:store.get('../outside'),'invalid_job')
-        document=store.export(run['id'],'html')['bytes'].decode()
+        document=store.export(run['id'],'html',origin='http://127.0.0.1:8123')['bytes'].decode()
+        assert 'href="http://127.0.0.1:8123/?' in document
+        fail(lambda:store.export(run['id'],'html',origin='https://foreign.example.test'),'invalid_selection')
         assert '<script>alert(1)</script>' not in document and '&lt;script&gt;' in document
-        assert 'Measured evidence' in document and 'Provenance' in document and 'unproven' in document
+        assert 'Validated package facts' in document and 'Provenance' in document and 'unproven' in document
         assert 'requested_model' in document and 'time_s' in document and 'location_m=500' in document
         markdown=store.export(run['id'],'markdown')['bytes'].decode()
         assert '\\!\\[untrusted' in markdown and '## Limitations' in markdown and 'package_fingerprint' in markdown
@@ -87,6 +95,10 @@ def t_history_provenance_exports_and_profile_scope():
             assert set(z.namelist())=={'detail.json','summary.md','manifest.json','result-schema.json'}
             assert json.loads(z.read('detail.json'))==p
         assert not any('executable' in a for a in found['agent'])
+        directory=Path(run['directory']);prompt=directory/'package/summary.md';original_prompt=prompt.read_bytes();prompt.write_text('unselected changed prompt')
+        fail(lambda:store.get(run['id']),'invalid_artifact')
+        fail(lambda:store.export(run['id'],'package'),'invalid_artifact')
+        prompt.write_bytes(original_prompt)
         directory=Path(run['directory']);(directory/'structured-output.json').write_text('{}')
         fail(lambda:store.get(run['id']))
         assert not store.history()['runs']
@@ -167,6 +179,21 @@ def t_deleted_or_changed_reference_cannot_start_after_preview():
             except ai_jobs.JobError as e:assert e.code=='stale_source'
             else:raise AssertionError('changed reference admitted an orphan analysis')
             assert not runner.status('profile')['busy']
+
+
+def t_resolved_telemetry_lap_exposes_its_recording_identity():
+    import test_racecast
+    race=test_racecast.m
+    with tempfile.TemporaryDirectory() as d:
+        source=fixtures.source(Path(d)/'profile/telemetry-recordings')
+        original={name:getattr(race,name) for name in ('_telemetry_rec_dir','_telemetry_full_index','_relay_open_file','_runtime_base_dir')}
+        try:
+            race._telemetry_rec_dir=lambda:source.root;race._telemetry_full_index=lambda path:source.index
+            race._relay_open_file=lambda:None;race._runtime_base_dir=lambda:str(Path(d)/'machine')
+            response=race.telemetry_lap_data(source.name,1,2)
+            assert response['ok'] and response['lap'].get('recording_id')==source.identity
+        finally:
+            for name,value in original.items():setattr(race,name,value)
 
 
 def t_recording_delete_removes_analysis_and_keeps_machine_settings():
