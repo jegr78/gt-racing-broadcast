@@ -174,6 +174,9 @@ def t_distance_time_provenance_follows_the_indexed_lap_quality():
             assert result['time_basis'] == lap['time_basis'], 'distance channels must retain the indexed time provenance'
             if n == 1:
                 assert not lap['time_valid'] and 'normalized' not in result['time_basis']
+        missing = detail.window(path, idx, dict(lap, trace=[]), ['rpm'], 'distance', 100, 200, fixture.FakeTracks())
+        assert 'unavailable' in missing['time_basis']
+        assert all(row['t'] is None for row in missing['rows']), 'missing indexed coverage cannot invent measured timestamps'
 
 
 def t_each_detail_resource_limit_reports_its_own_domain_failure():
