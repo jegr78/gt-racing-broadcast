@@ -584,6 +584,7 @@
   @media (max-width: 860px) { .tmgrid { grid-template-columns:1fr; } }
   .tcgrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:12px; }
   .tcshift {grid-column:1/-1}
+  #tm-shift-values {overflow-wrap:anywhere}
   .tcfield { display:flex; flex-direction:column; gap:5px; font-size:12px; color:var(--dim); }
   .tcfield input,.tcfield select,.tcrow textarea { width:100%; min-width:0; padding:8px; background:var(--bg); border:1px solid var(--line); border-radius:6px; color:var(--text); }
   .tcrow { margin:10px 0; padding:12px; border:1px solid var(--line); border-radius:8px; }
@@ -1352,7 +1353,7 @@
                 <button onclick="tmChannelLoad()">Load window</button></div>
               <p id="tm-channel-status" class="sub" role="status"></p><div id="tm-channel-charts"></div>
             </details>
-            <details id="tm-shift-box" ontoggle="tmShiftLoad()"><summary>Vehicle shift references &amp; observed shifts</summary>
+            <details id="tm-shift-box" ontoggle="tmShiftLoad()"><summary>Vehicle shift references &amp; observed upshifts</summary>
               <div class="row"><button onclick="tmShiftLoad()">Read local lookup</button><button id="tm-shift-update" onclick="tmShiftUpdate()">Update external reference for this car</button>
                 <button id="tm-shift-copy" onclick="tmShiftCopy()" disabled>Copy targets to event table</button></div>
               <p id="tm-shift-status" class="sub" role="status"></p><div id="tm-shift-values"></div>
@@ -6475,17 +6476,18 @@ function tmShiftTable(root,headers,rows){
 }
 function tmShiftRender(){
  const root=$('tm-shift-values');root.textContent='';const analysis=tmShiftState.analysis;if(!analysis)return;
- const ref=analysis.reference||{},say=text=>{const p=document.createElement('p');p.className='sub';p.textContent=text;root.append(p);};
+ const ref=analysis.reference||{},say=(text,parent=root)=>{const p=document.createElement('p');p.className='sub';p.textContent=text;parent.append(p);};
  say('Car ID '+ref.car_id+' · '+ref.kind+' · '+(ref.event_confirmed?'Event-confirmed table':'Event applicability unverified')+(ref.configuration?' · '+ref.configuration:''));
  say('Full-throttle, sufficient-grip acceleration reference. Earlier shifts may save fuel, manage traction or prepare braking. Deviations are neutral; power curves do not establish optimum fuel-saving targets.');
- const source=ref.source||{};if(source.identity)say(source.identity+' · commit '+source.commit+' · fetched '+source.fetched_at+' · '+(ref.algorithm||'manual event table'));
- if(source.hashes)say('Source SHA-256 · '+JSON.stringify(source.hashes));
- if(ref.provenance)say(ref.provenance);
+ const metadata=document.createElement('details'),metaTitle=document.createElement('summary');metaTitle.textContent='Reference source & applicability';metadata.append(metaTitle);root.append(metadata);
+ const source=ref.source||{};if(source.identity)say(source.identity+' · commit '+source.commit+' · fetched '+source.fetched_at+' · '+(ref.algorithm||'manual event table'),metadata);
+ if(source.hashes)say('Source SHA-256 · '+JSON.stringify(source.hashes),metadata);
+ if(ref.provenance)say(ref.provenance,metadata);
  const show=v=>v==null?'unavailable':JSON.stringify(v);
- say('Source ratios '+show(ref.source_ratios)+' · decoded gearbox '+show(ref.observed_ratios)+' · reference ratio source '+(ref.ratio_source||'manual table')+' · matching ratios '+show(ref.ratios_match));
- say('Curve RPM range '+show(ref.curve_range_rpm)+' · source revbar indication '+show(ref.revbar_rpm)+' · recorded display alerts '+show(analysis.display_alerts)+' · separately confirmed rev limit '+show(ref.rev_limit_rpm));
- if(ref.support)say('Availability · '+Object.entries(ref.support).map(([k,v])=>k.replaceAll('_',' ')+': '+(v?'available':'unavailable')).join(' · '));
- for(const warning of ref.warnings||[])say(warning);
+ say('Source ratios '+show(ref.source_ratios)+' · decoded gearbox '+show(ref.observed_ratios)+' · reference ratio source '+(ref.ratio_source||'manual table')+' · matching ratios '+show(ref.ratios_match),metadata);
+ say('Curve RPM range '+show(ref.curve_range_rpm)+' · source revbar indication '+show(ref.revbar_rpm)+' · recorded display alerts '+show(analysis.display_alerts)+' · separately confirmed rev limit '+show(ref.rev_limit_rpm),metadata);
+ if(ref.support)say('Availability · '+Object.entries(ref.support).map(([k,v])=>k.replaceAll('_',' ')+': '+(v?'available':'unavailable')).join(' · '),metadata);
+ for(const warning of ref.warnings||[])say(warning,metadata);
  tmShiftTable(root,['Outgoing gear','Acceleration reference RPM','Availability'],(ref.targets||[]).map(t=>[t.gear,t.rpm==null?null:Math.round(t.rpm*10)/10,t.status]));
  if(ref.curve?.length){
   say(ref.curve_units||'Power and torque each normalized to maximum 100; no physical HP/kW/Nm');

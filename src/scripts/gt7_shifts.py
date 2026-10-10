@@ -107,6 +107,8 @@ def manual_reference(value):
         raise ValueError('event reference confirmation must be a boolean')
     for key in ('configuration', 'provenance'):
         gc._text(value.get(key), 2000)
+        if value['confirmed'] and not value[key].strip():
+            raise ValueError('confirmed event table requires configuration and provenance')
     targets = gc._object(value.get('targets'))
     if not targets or any(k not in {str(g) for g in range(1, 16)} for k in targets):
         raise ValueError('event reference needs valid outgoing gear targets')

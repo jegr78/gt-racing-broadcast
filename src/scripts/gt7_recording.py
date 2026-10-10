@@ -528,7 +528,10 @@ def export_csv(path, out_dir, include_all=False, excel=False, cars=None, tracks=
     import gt7_context
     context_error = None
     try:
-        context_snapshot = (track_analysis.get('context_snapshot') if track_analysis else None) or gt7_context.Store.for_recording(path).export()
+        context_snapshot = (shift_analysis.get('context_snapshot') if shift_analysis is not None
+                            and shift_analysis.get('context_snapshot') is not None else
+                            (track_analysis.get('context_snapshot') if track_analysis else None)
+                            or gt7_context.Store.for_recording(path).export())
     except (OSError, ValueError, RecordingError):
         context_error = 'saved context is unavailable; raw measurements are still exported'
         context_snapshot = {'format': gt7_context.FORMAT, 'version': gt7_context.VERSION,

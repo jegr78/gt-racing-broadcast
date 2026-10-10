@@ -186,6 +186,42 @@ def t_context_and_templates_validate_and_retain_event_reference_provenance():
         assert again['shift_reference'] == manual and not again['confirmed']
 
 
+def t_source_payloads_and_packet_observations_are_independently_bounded():
+    import io
+    import http_util
+    original = http_util.open_url
+    with tempfile.TemporaryDirectory() as root:
+        try:
+            http_util.open_url = lambda *a, **k: io.BytesIO(b'x'*(shifts.MAX_DOWNLOAD+1))
+            try:
+                shifts.Cache(root).update(485)
+            except ValueError as exc:
+                assert 'download bound' in str(exc)
+            else:
+                raise AssertionError('oversized source downloads must be refused')
+        finally:
+            http_util.open_url = original
+        try:
+            shifts.detect_shifts([{}]*(shifts.MAX_ROWS+1))
+        except ValueError as exc:
+            assert 'packet bound' in str(exc)
+        else:
+            raise AssertionError('oversized phase rows must be refused')
+
+
+def t_confirmed_event_tables_require_configuration_and_provenance():
+    valid = {'car_id': 485, 'targets': {'2': 5500}, 'confirmed': True,
+             'configuration': 'Fixed event BoP', 'provenance': 'Own event test'}
+    for field in ('configuration', 'provenance'):
+        value = dict(valid, **{field: ''})
+        try:
+            shifts.manual_reference(value)
+        except ValueError:
+            pass  # applicability needs explicit intended configuration and source
+        else:
+            raise AssertionError('confirmed event table must name configuration and provenance')
+
+
 def t_export_freezes_shift_reference_values_and_phase_observations():
     import csv
     import test_gt7_laps as fixture
@@ -196,6 +232,7 @@ def t_export_freezes_shift_reference_values_and_phase_observations():
         manual = {'kind': 'manual-event', 'car_id': fixture.CAR, 'event_confirmed': True,
                   'targets': [{'gear': 2, 'rpm': 5500}], 'configuration': 'Own event', 'provenance': 'Own test'}
         index['shift_reference_snapshots'] = {'ref': manual}
+        index['context_snapshot'] = {'revision': 42, 'data': {'notes': [], 'sessions': {}}}
         index['laps'][0]['shift_analysis'] = {'reference_id': 'ref', 'reference': manual, 'shifts': [
             {'from_gear': 2, 'to_gear': 3, 'pre_cut_rpm': 5600, 'post_rpm': 4350,
              'acceleration_deviation_rpm': 100, 'economy_target_rpm': 5300}]}
@@ -206,6 +243,9 @@ def t_export_freezes_shift_reference_values_and_phase_observations():
         with open(os.path.join(output, 'shifts.csv'), newline='', encoding='utf-8') as f:
             events = list(csv.DictReader(f))
         assert saved['references']['ref'] == manual and events[0]['pre_cut_rpm'] == '5600'
+        with open(os.path.join(output, 'context.json'), encoding='utf-8') as f:
+            assert json.load(f) == index['context_snapshot'], \
+                'export context must be the same snapshot as its shift reference analysis'
         manual['targets'][0]['rpm'] = 6000
         with open(os.path.join(output, 'shift-references.json'), encoding='utf-8') as f:
             assert json.load(f) == saved, 'later reference edits cannot rewrite exported values'
