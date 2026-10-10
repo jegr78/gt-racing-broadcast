@@ -166,16 +166,22 @@ def detect_shifts(rows):
 
 def reference(external, manual, car, confirmed, observed_ratios=None):
     warnings = []
+    external = external if external and external.get('car_id') == car else {}
     if manual is not None:
         manual = manual_reference(manual)
         if manual['car_id'] == car:
             return {'kind': 'manual-event', 'car_id': car, 'event_confirmed': bool(confirmed and manual['confirmed']),
                     'targets': [{'gear': int(g), 'rpm': rpm, 'status': 'manual'} for g, rpm in sorted(manual['targets'].items(), key=lambda p: int(p[0]))],
                     'configuration': manual['configuration'], 'provenance': manual['provenance'],
+                    'curve': external.get('curve'), 'curve_event_confirmed': False,
+                    'curve_units': 'External power and torque each normalized to maximum 100; external curve unverified for this event',
+                    'curve_range_rpm': [external['curve'][0]['rpm'], external['curve'][-1]['rpm']] if external.get('curve') else None,
+                    'source': external.get('source'), 'source_ratios': external.get('ratios'),
+                    'observed_ratios': observed_ratios, 'ratio_source': 'decoded transmission' if observed_ratios else 'unavailable',
+                    'revbar_rpm': external.get('revbar_rpm'), 'algorithm': 'manual-event-table',
                     'rev_limit_rpm': manual.get('rev_limit_rpm') if confirmed and manual['confirmed'] else None,
                     'snapshot': manual, 'warnings': warnings}
         warnings.append('Manual event reference belongs to a different vehicle')
-    external = external if external and external.get('car_id') == car else {}
     curve = external.get('curve')
     ratios = observed_ratios or external.get('ratios')
     targets = calculate(curve, ratios) if curve and ratios else []

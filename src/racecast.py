@@ -1657,7 +1657,7 @@ def _report_telemetry(frm, to):
                 print(f"note: telemetry recording {r['name']} skipped "
                       f"({_telemetry_reason(exc, r['name'])}).")
                 continue
-            indexes.append(dict(_telemetry_with_context(idx, r["path"]), partial=r["partial"]))
+            indexes.append(dict(_telemetry_with_shifts(_telemetry_with_context(idx, r["path"]), r['path']), partial=r["partial"]))
         return rtel.telemetry_block(indexes, (frm, to))
     except Exception as exc:  # noqa: BLE001  telemetry must never fail the report
         print(f"note: telemetry section skipped ({_telemetry_reason(exc)}).")
@@ -3371,9 +3371,10 @@ def telemetry_export_cmd(rest):
     out_dir = args.out or os.path.join(rec_dir, gr.recording_stem(path))
     tracks, cars = _telemetry_dbs()
     try:
+        analysis = _telemetry_with_shifts(_telemetry_with_context(_telemetry_full_index(path), path), path)
         res = gr.export_csv(path, out_dir, include_all=args.all, excel=args.excel,
                             cars=cars, tracks=tracks, key=_telemetry_track_key(path), diagnostics=args.diagnostics,
-                            track_analysis=_telemetry_with_context(_telemetry_full_index(path), path))
+                            track_analysis=analysis, shift_analysis=analysis)
     except Exception as e:  # noqa: BLE001  a damaged file or a full disk ends in one line, not a traceback
         sys.exit(f"could not export {os.path.basename(path)}: {_telemetry_reason(e)}")
     print(f"wrote {res['samples']} samples and {res['laps']} laps to {res['dir']}")

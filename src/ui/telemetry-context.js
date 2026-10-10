@@ -157,7 +157,7 @@ function tcRender() {
  $('tc-confirmed').checked=!!s.confirmed;
  const templates=$('tc-template');templates.textContent='';const none=tcEl('option','Choose settings template');none.value='';templates.append(none);
  for(const [key,t] of Object.entries(tc.reply.templates||{})){const o=tcEl('option',t.name);o.value=key;templates.append(o);}
- tcStints();tcNotes();tcRoles();tcHistory();
+ tcShiftReference();tcStints();tcNotes();tcRoles();tcHistory();
  $('tc-sources').textContent=tc.reply.recording_active?'The capture is active. Analysis becomes available after recording stops.':
   tc.target?'Manual context supplements measurements. Missing values remain unknown.':'Preparation is attached once to the next recording; later GT7 sessions need a new confirmation.';
  const warnings=[tc.reply.templates_error?'Templates unavailable: '+tc.reply.templates_error:'',
@@ -170,7 +170,7 @@ function tcAddSession() {
 }
 function tcSaveTemplate() {
  const name=$('tc-template-name').value.trim();if(!name){tcStatus('Enter a template name',true);return;}
- tcAction('save-template',{template_id:tcUID(),name,settings:tcSession().settings});
+ tcAction('save-template',{template_id:tcUID(),name,settings:tcSession().settings,shift_reference:tcSession().shift_reference});
 }
 function tcHistory() {
  const el=$('tc-history');el.textContent='';const none=tcEl('option','Choose an earlier whole-context revision');none.value='';el.append(none);
@@ -277,3 +277,23 @@ if(typeof document!=='undefined'&&document.addEventListener)document.addEventLis
 
 async function tcOlderHistory(){if(!await tcSave())return;const h=tc.reply?.history||[];if(h.length)tcLoad(tc.target,Math.min(...h.map(r=>r.revision)));}
 function tcRestoreHistory(){const value=$('tc-history').value;if(value!=='')tcAction('restore',{revision:Number(value)});}
+
+function tcShiftReference(){
+ const root=$('tc-settings'),session=tcSession(),box=tcEl('div',null,'tcfield tcshift');
+ root.append(box);box.append(tcEl('b','Event-specific acceleration reference'));
+ const ref=session.shift_reference;
+ if(!ref){const add=tcEl('button','Add manual event shift table');add.onclick=()=>{
+  session.shift_reference={car_id:tmState.lapB?.car_id||null,targets:{},configuration:'',provenance:'Manual event reference',confirmed:false};
+  tcRender();tcChanged();};box.append(add);return;}
+ box.append(tcEl('p','Enter at least one outgoing-gear RPM target. These acceleration references are separate from stint fuel-saving targets. Configuration and provenance describe applicability; external updates never overwrite this table.','sub'));
+ const key='shift.'+tc.session+'.';
+ tcField(box,'Event reference car ID',ref.car_id,'required-integer',v=>ref.car_id=v,key+'car');
+ tcField(box,'Intended event configuration',ref.configuration,'text',v=>ref.configuration=v,key+'configuration');
+ tcField(box,'Event reference provenance',ref.provenance,'text',v=>ref.provenance=v,key+'provenance');
+ tcField(box,'Event table applicability confirmed',ref.confirmed,'boolean',v=>ref.confirmed=v===true,key+'confirmed');
+ tcField(box,'Manually confirmed rev limit RPM (optional)',ref.rev_limit_rpm,'number',v=>{if(v==null)delete ref.rev_limit_rpm;else ref.rev_limit_rpm=v;},key+'limit');
+ const targets=tcEl('div',null,'tcgrid');box.append(targets);
+ for(let gear=1;gear<=15;gear++)tcField(targets,'Event reference gear '+gear+' -> '+(gear+1),ref.targets?.[String(gear)],'number',
+  v=>{ref.targets||={};if(v==null)delete ref.targets[String(gear)];else ref.targets[String(gear)]=v;},key+'target.'+gear);
+ const remove=tcEl('button','Remove event reference');remove.onclick=()=>{delete session.shift_reference;tcRender();tcChanged();};box.append(remove);
+}

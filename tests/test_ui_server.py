@@ -2989,6 +2989,50 @@ console.log(JSON.stringify([title,note.text,tc.draft['settings.1.title']?.length
         assert json.loads(out) == ['saved title', 'saved note', 2001, 16001], \
             'oversized text must remain draft while valid values remain saveable'
 
+def t_context_event_shift_fields_preserve_targets_and_provenance():
+    with open(os.path.join(ROOT, 'src', 'ui', 'telemetry-context.js'), encoding='utf-8') as f:
+        script = f.read()
+    out = _run_js(script + """
+const fields={};global.$=id=>({append(){},textContent:''});tc.data={sessions:{'1':{settings:{},shift_reference:{car_id:485,
+ targets:{'2':5500},configuration:'Fixed event',provenance:'Own test',confirmed:false}}}};tc.session='1';
+global.document={createElement:()=>({append(){},textContent:'',className:''})};
+tcField=(_p,label,value,_type,setter)=>{fields[label]={value,setter};};
+tcShiftReference();fields['Event reference gear 2 -> 3'].setter(5600);
+fields['Event table applicability confirmed'].setter(true);console.log(JSON.stringify(tcSession().shift_reference));
+""")
+    if out is not None:
+        value = json.loads(out)
+        assert value['targets']['2'] == 5600 and value['confirmed'] and value['provenance'] == 'Own test', \
+            'manual event editor must retain target values and provenance'
+
+
+def t_shift_lookup_discards_a_previous_lap_response():
+    out = _tm_node("""
+tmState.lapB=lap('R',3,16,7);$('tm-shift-box').open=true;let reply;
+tmGet=()=>new Promise(r=>reply=r);tmShiftStatus=()=>{};tmShiftRender=()=>{};
+const loading=tmShiftLoad();await tick();tmState.lapB=lap('R',4,16,7);
+reply({ok:true,analysis:{reference:{kind:'external'},shifts:[]}});await loading;
+console.log(JSON.stringify(tmShiftState.analysis));
+""")
+    if out is not None:
+        assert json.loads(out) is None, 'late shift lookup must not appear under another lap'
+
+
+def t_shift_panel_keeps_economy_and_acceleration_deviations_separate():
+    out = _tm_node("""
+tmShiftState.analysis={reference:{kind:'manual-event',car_id:485,event_confirmed:true,
+ targets:[{gear:2,rpm:5500,status:'manual'}],configuration:'Own event'},
+ shifts:[{from_gear:2,to_gear:3,pre_cut_rpm:5600,post_rpm:4350,
+ acceleration_target_rpm:5500,economy_target_rpm:5300,acceleration_deviation_rpm:100,
+ economy_deviation_rpm:300,phase_status:'measured'}]};
+tmShiftRender();const all=(e,out=[])=>{out.push(e.textContent);(e.kids||[]).forEach(k=>all(k,out));return out;};
+console.log(all($('tm-shift-values')).join('|'));
+""")
+    if out is not None:
+        assert 'Acceleration delta' in out and 'Economy delta' in out and '5600' in out and '5300' in out, \
+            'shift panel must show neutral separate target comparisons'
+
+
 def t_channel_detail_discards_answers_for_a_previous_lap_or_selection():
     out = _tm_node("""
 $('tm-channel-box').open=true;tmState.lapA=null;tmState.lapB=lap('R',3,16,7);

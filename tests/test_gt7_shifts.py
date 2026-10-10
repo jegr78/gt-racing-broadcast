@@ -71,6 +71,8 @@ def t_manual_event_reference_remains_separate_from_source_updates_and_economy_ta
               'source':{'identity':'Test source','commit':'a'*40,'fetched_at':'test'}}
     result=shifts.analyse(rows(),lap,external,manual,True)
     assert result['reference']['kind']=='manual-event' and result['reference']['event_confirmed']
+    assert result['reference'].get('curve') == curve() and not result['reference'].get('curve_event_confirmed', True), \
+        'manual targets must not confirm a separately cached external power shape'
     event=result['shifts'][0]
     assert event['acceleration_target_rpm']==5600 and event['economy_target_rpm']==5400
     assert event['acceleration_deviation_rpm']==60 and event['economy_deviation_rpm']==260
@@ -168,6 +170,31 @@ def t_context_and_templates_validate_and_retain_event_reference_provenance():
             'template reference provenance survives but new event applicability needs confirmation'
         again = context.copy_session(data, 1, 3)['sessions']['3']
         assert again['shift_reference'] == manual and not again['confirmed']
+
+
+def t_export_freezes_shift_reference_values_and_phase_observations():
+    import csv
+    import test_gt7_laps as fixture
+    import gt7_recording as recording
+    with tempfile.TemporaryDirectory() as root:
+        path = fixture.write_circle_recording(root)
+        index = fixture._index(path)
+        manual = {'kind': 'manual-event', 'car_id': fixture.CAR, 'event_confirmed': True,
+                  'targets': [{'gear': 2, 'rpm': 5500}], 'configuration': 'Own event', 'provenance': 'Own test'}
+        index['shift_reference_snapshots'] = {'ref': manual}
+        index['laps'][0]['shift_analysis'] = {'reference_id': 'ref', 'reference': manual, 'shifts': [
+            {'from_gear': 2, 'to_gear': 3, 'pre_cut_rpm': 5600, 'post_rpm': 4350,
+             'acceleration_deviation_rpm': 100, 'economy_target_rpm': 5300}]}
+        output = os.path.join(root, 'export')
+        recording.export_csv(path, output, shift_analysis=index)
+        with open(os.path.join(output, 'shift-references.json'), encoding='utf-8') as f:
+            saved = json.load(f)
+        with open(os.path.join(output, 'shifts.csv'), newline='', encoding='utf-8') as f:
+            events = list(csv.DictReader(f))
+        assert saved['references']['ref'] == manual and events[0]['pre_cut_rpm'] == '5600'
+        manual['targets'][0]['rpm'] = 6000
+        with open(os.path.join(output, 'shift-references.json'), encoding='utf-8') as f:
+            assert json.load(f) == saved, 'later reference edits cannot rewrite exported values'
 
 
 if __name__ == '__main__':

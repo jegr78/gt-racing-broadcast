@@ -68,7 +68,8 @@ def _row(n, ts, lap):
             "status": lap.get("status") or "", "reason": lap.get("reason") or "",
             "counted": lap.get("comparison_eligible", gt7_laps.pace_eligible(lap)),
             "fuel_l": lap.get("fuel_used_l"), "top_speed_kmh": lap.get("top_speed_kmh"),
-            "car": lap.get("car") or "", "track": track_label(lap)}
+            "car": lap.get("car") or "", "track": track_label(lap),
+            "shift_analysis": lap.get('shift_analysis')}
 
 
 def gap_color(gap_s, worst_s):
@@ -155,7 +156,7 @@ def telemetry_block(indexes, window):
     """The report's telemetry block for the laps that start inside window=(from_ts,
     to_ts), or None when there are none."""
     frm, to = window
-    picked, partial, snapshots, definitions = [], False, {}, {}
+    picked, partial, snapshots, definitions, references = [], False, {}, {}, {}
     for idx in indexes:
         found = False
         for lap in idx.get("laps") or []:
@@ -168,6 +169,7 @@ def telemetry_block(indexes, window):
             snapshots[idx["rec"]] = idx["context_snapshot"]
         if found:
             definitions.update(idx.get('track_definition_snapshots', {}))
+            references.update(idx.get('shift_reference_snapshots', {}))
     if not picked:
         return None
     picked.sort(key=lambda p: p[0])
@@ -179,6 +181,7 @@ def telemetry_block(indexes, window):
     groups.sort(key=lambda g: (-g["laps_counted"],
                                g["best_s"] if g["best_s"] is not None else float("inf")))
     return {"laps": rows, "laps_total": len(rows), "context_snapshots": snapshots, "track_definition_snapshots": definitions,
+            "shift_reference_snapshots": references,
             "laps_counted": sum(1 for r in rows if r["counted"]),
             "partial": partial, "groups": groups}
 
