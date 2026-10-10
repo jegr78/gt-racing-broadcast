@@ -58,7 +58,7 @@ def t_schema_measurement_reference_and_priorities():
         variants=[]
         for field,value in [('lap_id','nonexistent'),('location_m',1001),('location_m',-1)]:
             bad=copy.deepcopy(valid);bad['findings'][0][field]=value;variants.append(bad)
-        for evidence in ({'fact_id':'unknown','value':1},{'fact_id':p['laps'][0]['id']+'/time_s','value':999},{'fact_id':p['laps'][0]['id']+'/time_s','value':True},{'fact_id':p['laps'][1]['id']+'/time_s','value':p['laps'][1]['metrics']['time_s']}):
+        for evidence in ({'fact_id':'unknown','value':1},{'fact_id':p['laps'][0]['id']+'/time_s','value':999},{'fact_id':p['laps'][0]['id']+'/time_s','value':True}):
             bad=copy.deepcopy(valid);bad['findings'][0]['evidence']=[evidence];variants.append(bad)
         bad=copy.deepcopy(valid);bad['findings'][0].update(lap_id='unknown',evidence=[dict(fact_id='selection/mean_time_s',value=p['summary']['mean_time_s'])]);variants.append(bad)
         bad=copy.deepcopy(valid);bad['exercises']=bad['exercises'][:2];variants.append(bad)
@@ -67,11 +67,25 @@ def t_schema_measurement_reference_and_priorities():
         bad=copy.deepcopy(valid);bad['version']=True;variants.append(bad)
         bad=copy.deepcopy(valid);bad['findings'][0]['location_m']=float('nan');variants.append(bad)
         for bad in variants:fail(lambda bad=bad:r.validate(bad,p))
+        comparable=copy.deepcopy(valid);comparable['findings'][0]['evidence'].append(dict(fact_id=p['laps'][1]['id']+'/time_s',value=p['laps'][1]['metrics']['time_s']))
+        assert r.validate(comparable,p)['findings'][0]['evidence']
+        unrelated=copy.deepcopy(p);unrelated['comparisons']=[]
+        fail(lambda:r.validate(comparable,unrelated))
         assert valid['findings'][0]['evidence'][0].get('provenance') is None
         ambiguous=copy.deepcopy(p);duplicate=copy.deepcopy(p['laps'][0]);duplicate['metrics']['time_s']=999;ambiguous['references'].append(duplicate)
         ambiguous['facts'][duplicate['id']+'/time_s']['value']=999;claim=copy.deepcopy(valid)
         for item in claim['findings']+claim['exercises']:item['evidence'][0]['value']=999
         fail(lambda:r.validate(claim,ambiguous))
+
+
+def t_comparable_lap_evidence_can_follow_the_shared_reference():
+    with tempfile.TemporaryDirectory() as d:
+        source=fixtures.source(Path(d)/'telemetry-recordings',[fixtures.row(2,time=101),fixtures.row(3,time=100),fixtures.row(4,time=102)])
+        package=ai_package.build(source,1);output=result(package)
+        output['findings'][0]['evidence'].append(dict(fact_id=package['laps'][2]['id']+'/time_s',value=102))
+        assert r.validate(output,package)['findings'][0]['evidence'][-1]['value']==102
+        package['comparisons']=[]
+        fail(lambda:r.validate(output,package))
 
 
 def t_history_provenance_exports_and_profile_scope():

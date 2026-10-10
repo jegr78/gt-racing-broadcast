@@ -48,10 +48,20 @@ def _related(fact_id,lap_id,package):
         try:comparison=package['comparisons'][int(fact_id.split('/')[1])]
         except (ValueError,IndexError,KeyError):return False
         return lap_id in (comparison['lap_id'],comparison['reference_id'])
-    return fact_id.startswith(lap_id+'/')
+    if fact_id.startswith(lap_id+'/'):return True
+    other=next((lap['id'] for lap in package['laps']+package['references'] if fact_id.startswith(lap['id']+'/')),None)
+    if not other:return False
+    reachable={lap_id};pending=[lap_id]
+    while pending:
+        current=pending.pop()
+        for comparison in package['comparisons']:
+            pair={comparison['lap_id'],comparison['reference_id']}
+            if current in pair:
+                for neighbour in pair-reachable:reachable.add(neighbour);pending.append(neighbour)
+    return other in reachable
 
 
-def fact_label(fact_id):
+def fact_label(fact_id,package=None):
     labels={'time_s':'Lap time (s)','gt7_time_s':'GT7 lap time (s)','relay_time_s':'Receiver lap time (s)',
             'fuel_used_l':'Fuel used (L)','fuel_start_l':'Starting fuel (L)','fuel_end_l':'Ending fuel (L)',
             'top_speed_kmh':'Top speed (km/h)','tyre_avg_c':'Mean tyre temperature (C)','length_m':'Lap length (m)',
@@ -59,7 +69,12 @@ def fact_label(fact_id):
             'best_time_s':'Best selected lap time (s)','population_stddev_s':'Population standard deviation (s)',
             'selected_gt7_total_s':'Sum of selected GT7 lap times (s)','usable_laps':'Usable lap count','excluded_laps':'Excluded lap count'}
     short=re.sub(r'^[0-9a-f]+/session/[0-9]+/lap/[0-9]+/','',fact_id)
-    return labels.get(short,labels.get(fact_id.split('/')[-1],short.replace('/',' · ').replace('_',' ')))
+    label=labels.get(short,labels.get(fact_id.split('/')[-1],short.replace('/',' · ').replace('_',' ')))
+    match=re.match(r'^([0-9a-f]+/session/([0-9]+)/lap/([0-9]+))/',fact_id)
+    if match:
+        lap=next((lap for lap in (package or {}).get('laps',[])+(package or {}).get('references',[]) if lap['id']==match.group(1)),{})
+        return (lap.get('rec','Selected recording')+' · S'+match.group(2)+' lap '+match.group(3)+' · '+label)
+    return label
 
 
 def validate(result,package):
@@ -170,7 +185,7 @@ class Store:
                     run.update(state='interrupted',progress='Process ended without a completed report; retained artifacts are incomplete')
         if run.get('report'):
             for item in run['report']['findings']+run['report']['exercises']:
-                for evidence in item['evidence']:evidence['label']=fact_label(evidence['fact_id'])
+                for evidence in item['evidence']:evidence['label']=fact_label(evidence['fact_id'],package)
         return dict(run,ok=True)
     def history(self,rec=None):
         items=[]
@@ -241,7 +256,7 @@ def render(run,package,kind,origin=None):
                 if item.get('possible_causes'):out+=['Possible causes: '+_markdown('; '.join(item['possible_causes'])),'']
                 q=urlencode(dict({k:v for k,v in item['telemetry'].items() if v is not None},profile=run['profile']))
                 out+=['[Telemetry reference]('+linkbase+'/?'+q+'#telemetry)','', 'Validated package facts:','']
-                out += ['- '+_markdown(e.get('label',fact_label(e['fact_id'])))+': '+_markdown(e['value'])+' ('+_markdown(e['provenance'])+')' for e in item['evidence']]
+                out += ['- '+_markdown(e.get('label',fact_label(e['fact_id'],package)))+': '+_markdown(e['value'])+' ('+_markdown(e['provenance'])+')' for e in item['evidence']]
                 out+=['']
         out+=['## Limitations','']+['- '+_markdown(v) for v in report['limitations']]+['','## Provenance','','```json',json.dumps(provenance,indent=2,ensure_ascii=False),'```','']
         return '\n'.join(out)
@@ -256,7 +271,7 @@ def render(run,package,kind,origin=None):
             if item.get('possible_causes'):out+=['<p>Possible causes: '+esc('; '.join(item['possible_causes']))+'</p>']
             q=urlencode(dict({k:v for k,v in item['telemetry'].items() if v is not None},profile=run['profile']))
             out+=['<a href="'+esc(linkbase+'/?'+q+'#telemetry')+'">Telemetry reference</a><h4>Validated package facts</h4><ul>']
-            out+=['<li title="'+esc(e['fact_id'])+'">'+esc(e.get('label',fact_label(e['fact_id'])))+': '+esc(e['value'])+' ('+esc(e['provenance'])+')</li>' for e in item['evidence']]
+            out+=['<li title="'+esc(e['fact_id'])+'">'+esc(e.get('label',fact_label(e['fact_id'],package)))+': '+esc(e['value'])+' ('+esc(e['provenance'])+')</li>' for e in item['evidence']]
             out+=['</ul></article>']
     out+=['<h2>Limitations</h2><ul>']+['<li>'+esc(v)+'</li>' for v in report['limitations']]+['</ul><h2>Provenance</h2><pre>'+esc(json.dumps(provenance,indent=2,ensure_ascii=False))+'</pre></body></html>']
     return '\n'.join(out)
