@@ -480,17 +480,36 @@
   .tmgrid section { padding:10px 12px; }
   .tmlist { display:flex; flex-direction:column; max-height:36vh; overflow:auto;
             color:var(--faint); font:12px var(--mono); }
+  #tm-laps { max-height:min(66vh, 620px); }
   .tmitem { display:grid; grid-template-columns:1fr auto; gap:2px 8px; width:100%;
-            min-height:0; text-align:left; background:transparent; border:0;
+            flex-shrink:0; text-align:left; background:transparent; border:0;
             border-top:1px solid var(--line); border-radius:6px; padding:7px 8px;
             color:var(--txt); font:12px var(--mono); }
+  #tm-laps .tmitem { grid-template-columns:1fr auto auto; align-items:center; padding:6px 8px; }
   .tmitem:first-child { border-top:0; }
   .tmitem:hover { background:rgba(148,163,184,.08); }
-  .tmitem.sel { background:rgba(59,130,246,.14); box-shadow:inset 2px 0 0 var(--accent); }
+  .tmitem.sel { background:rgba(96,165,250,.14); box-shadow:inset 3px 0 0 var(--tm-b); }
+  .tmitem.is-a { box-shadow:inset 3px 0 0 var(--tm-a); }
   .tmitem.nc { color:var(--dim); }
   .tmitem:disabled:hover { background:transparent; }
   .tmitem .tmsub { grid-column:1 / -1; color:var(--dim); font-size:11px; overflow:hidden;
                    text-overflow:ellipsis; white-space:nowrap; }
+  .tmitem .tmtime { font-variant-numeric:tabular-nums; }
+  .tmitem .tmtime.best { color:#C4B5FD; font-weight:600; }
+  .tmbadge { font-size:10px; line-height:1; padding:2px 5px; border-radius:4px;
+             border:1px solid var(--line); color:var(--dim); white-space:nowrap; }
+  .tmbadge:empty { display:none; }
+  .tmbadge.ref { color:var(--link); border-color:rgba(96,165,250,.45); }
+  .tmlegend { display:flex; flex-wrap:wrap; gap:4px 14px; margin:8px 0 0; color:var(--dim);
+              font:11px var(--mono); }
+  .tmlegend span { display:inline-flex; align-items:center; gap:6px; }
+  .tmlegend i { display:inline-block; width:14px; height:4px; border-radius:2px; }
+  .tmlegend i.dot { width:7px; height:7px; border-radius:50%; background:var(--txt); }
+  .tmlegend i.gain { background:var(--ok); }
+  .tmlegend i.loss { background:var(--bad); }
+  .tmlegend i.even { background:var(--off); }
+  .tmlegend i.a { height:2px; background:var(--tm-a); }
+  .tmlegend i.best { background:#C4B5FD; }
   .tmpick { display:flex; flex-wrap:wrap; gap:10px 18px; align-items:center; margin:0 0 10px;
             font:12px var(--mono); color:var(--dim); }
   .tmpick label { display:inline-flex; align-items:center; gap:6px; max-width:100%;
@@ -505,10 +524,14 @@
   #tm-charts text.tm-read { fill:var(--txt); }
   .tm-readbg { fill:var(--card); opacity:.88; }
   #tm-charts text.tm-unit { fill:var(--faint); }
+  #tm-charts text.tm-axis { font-size:10px; fill:var(--faint); }
+  #tm-charts text.tm-final { font-weight:600; }
+  #tm-charts text.tm-final.gain { fill:#4ADE80; }
+  #tm-charts text.tm-final.loss { fill:var(--bad-text); }
   .tm-frame { fill:none; stroke:var(--line); }
   .tm-zero { stroke:var(--off); stroke-dasharray:3 3; }
-  .tm-a { fill:none; stroke:var(--tm-a); stroke-width:1.4; }
-  .tm-b { fill:none; stroke:var(--tm-b); stroke-width:1.6; }
+  .tm-a { fill:none; stroke:var(--tm-a); stroke-width:1.6; }
+  .tm-b { fill:none; stroke:var(--tm-b); stroke-width:1.4; stroke-opacity:.85; }
   .tm-gain { fill:rgba(34,197,94,.28); }
   .tm-loss { fill:rgba(239,68,68,.28); }
   .tm-cursor { stroke:var(--txt); stroke-width:1; opacity:.55; pointer-events:none; }
@@ -530,7 +553,7 @@
   table.tmsec td.loss { color:var(--bad-text); }
   table.tmsec td.best { color:#C4B5FD; }
   table.tmsec tfoot td { font-weight:600; border-bottom:0; }
-  .tmsecwrap { max-height:46vh; overflow:auto; }
+  table.tmsec td:nth-child(2) { color:var(--dim); }
   @media (max-width: 1280px) {
     .tmgrid { grid-template-columns:250px minmax(0,1fr); }
     .tmmap { grid-column:1 / -1; flex-direction:row; flex-wrap:wrap; }
@@ -1286,9 +1309,16 @@
           </section>
           <div class="tmmap">
             <section><div class="viewhead"><h3>Track</h3><span class="sub" id="tm-map-sub"></span></div>
-              <svg id="tm-map" role="img" aria-label="Track map, mini-sectors green where lap B gains and red where it loses"></svg></section>
+              <svg id="tm-map" role="img" aria-label="Track map, mini-sectors green where lap B gains and red where it loses"></svg>
+              <div class="tmlegend" id="tm-map-legend" hidden>
+                <span><i class="gain"></i>B faster</span><span><i class="loss"></i>B slower</span>
+                <span><i class="even"></i>even</span><span><i class="a"></i>lap A line</span>
+                <span><i class="dot"></i>start/finish</span></div></section>
             <section><div class="viewhead"><h3>Mini-sectors</h3><span class="sub" id="tm-sec-sub"></span></div>
-              <div class="tmsecwrap"><table class="prodtable tmsec" id="tm-sectors"></table></div></section>
+              <div class="tmsecwrap"><table class="prodtable tmsec" id="tm-sectors"></table></div>
+              <div class="tmlegend" id="tm-sec-legend" hidden>
+                <span><i class="gain"></i>B faster than A</span><span><i class="loss"></i>B slower</span>
+                <span><i class="best"></i>best of all comparable laps</span></div></section>
           </div>
         </div>
       </div>
@@ -5196,15 +5226,27 @@ const tmState = {loaded: false, recs: [], rec: null, recLaps: [], pool: null,
                  chart: null, map: null, cursor: null, profile: null};
 const tmLapCache = new Map();
 const TM_STEP = 5;                        // gt7_laps.STEP_M: one trace point per 5 m
-const TM_PAD = {l: 70, r: 10, t: 4, gap: 10, b: 22};
+const TM_PAD = {l: 104, r: 10, t: 4, gap: 10, b: 22};
 const TM_CH = [
-  {key: 'speed_kmh', label: 'Speed', unit: 'km/h', h: 120, lo: 0},
-  {key: 'throttle', label: 'Throttle', unit: '%', h: 52, lo: 0, hi: 100},
-  {key: 'brake', label: 'Brake', unit: '%', h: 52, lo: 0, hi: 100},
-  {key: 'steer_deg', label: 'Steering', unit: 'deg', h: 70, sym: true},
-  {key: 'gear', label: 'Gear', unit: '', h: 52, lo: 0, step: true},
-  {key: 'delta', label: 'Delta B-A', unit: 's', h: 90, sym: true},
+  {key: 'speed_kmh', label: 'Speed', unit: 'km/h', h: 130, lo: 0},
+  {key: 'throttle', label: 'Throttle', unit: '%', h: 72, lo: 0, hi: 100},
+  {key: 'brake', label: 'Brake', unit: '%', h: 72, lo: 0, hi: 100},
+  {key: 'steer_deg', label: 'Steering', unit: 'deg', h: 80, sym: true},
+  {key: 'gear', label: 'Gear', unit: '', h: 60, lo: 0, step: true},
+  {key: 'delta', label: 'Delta B-A', unit: 's', h: 100, sym: true},
 ];
+// The values a panel labels on its left edge, top to bottom: a fixed scale its ends, a
+// symmetric one its largest swing and zero, any other the measured min and max.
+function tmTicks(c, vmin, vmax) {
+  if (!(vmin <= vmax)) return [];
+  if (c.hi != null) return [c.hi, c.lo];
+  if (c.sym) { const m = Math.max(-vmin, vmax); return m > 0 ? [m, 0, -m] : [0]; }
+  return vmax > vmin ? [vmax, vmin] : [vmax];
+}
+function tmTickText(c, v) {
+  if (c.key !== 'delta') return String(Math.round(v));
+  return v === 0 ? '0' : (v > 0 ? '+' : '') + v.toFixed(2);
+}
 const tmLapsReq = new Map();     // url -> pending request, so a cold index runs once
 let tmLapGen = 0;                // bumped when cached laps go stale; older answers are not cached
 const tmSeq = {load: 0, rec: 0, b: 0, pair: 0};   // only the newest call of each kind renders
@@ -5317,8 +5359,12 @@ async function tmRefreshRecs() {
   tmState.recs = d.recordings || [];
   tmRenderRecs();
 }
+// GT7 names some tracks after their only layout ("Grand Valley - Highway 1" + "Highway 1"):
+// a layout already ending the track name is not appended twice.
 function tmTrackName(t) {
-  return t.track + (t.layout ? ' - ' + t.layout : '') + (t.reverse ? ' (reverse)' : '');
+  const lay = t.layout || '';
+  const dup = lay && t.track.toLowerCase().endsWith(lay.toLowerCase());
+  return t.track + (lay && !dup ? ' - ' + lay : '') + (t.reverse ? ' (reverse)' : '');
 }
 
 function tmTrackLabel(t) {
@@ -5326,7 +5372,7 @@ function tmTrackLabel(t) {
   if (t.candidates) return 'track ambiguous';
   return tmTrackName(t);
 }
-function tmLapTrack(l) { return l.track ? l.track + (l.layout ? ' - ' + l.layout : '') : 'track unknown'; }
+function tmLapTrack(l) { return l.track ? tmTrackName({track: l.track, layout: l.layout}) : 'track unknown'; }
 
 function tmPlaceholder(id, text) {
   const sel = $(id);
@@ -5341,6 +5387,7 @@ function tmClearPair(status) {
   tmState.lapA = tmState.lapB = tmState.pool = tmState.a = null;
   tmState.chart = tmState.map = tmState.cursor = null;
   ['tm-charts', 'tm-map', 'tm-sectors', 'tm-map-sub'].forEach(id => { $(id).textContent = ''; });
+  $('tm-map-legend').hidden = $('tm-sec-legend').hidden = true;
   tmPlaceholder('tm-a', status ? 'loading…' : 'no lap');
   tmPlaceholder('tm-b', status ? 'loading…' : 'no lap');
   $('tm-sec-sub').textContent = status || '';
@@ -5447,21 +5494,43 @@ async function tmSelectRec(rec) {
 function tmRenderLaps() {
   const box = $('tm-laps');
   box.textContent = '';
-  if (!tmState.recLaps.length) { box.textContent = 'No laps in this recording.'; return; }
-  tmState.recLaps.forEach(l => {
+  const laps = tmState.recLaps;
+  if (!laps.length) { box.textContent = 'No laps in this recording.'; return; }
+  // The car and track most laps share stay off the rows; only a lap that differs names its own.
+  const usual = f => {
+    const n = new Map();
+    laps.forEach(l => n.set(f(l), (n.get(f(l)) || 0) + 1));
+    return [...n.entries()].sort((x, y) => y[1] - x[1])[0][0];
+  };
+  const car = usual(l => l.car || ''), track = usual(tmLapTrack);
+  const fast = laps.filter(l => l.status !== 'not counted' && l.time_s != null)
+    .reduce((m, l) => (m && m.time_s <= l.time_s ? m : l), null);
+  laps.forEach(l => {
+    const nc = l.status === 'not counted', key = tmKey(l);
     const b = document.createElement('button');
-    b.className = 'tmitem' + (l.status === 'not counted' ? ' nc' : '')
-      + (tmKey(l) === tmState.b ? ' sel' : '');
+    b.className = 'tmitem' + (nc ? ' nc' : '') + (key === tmState.b ? ' sel'
+      : key === tmState.a ? ' is-a' : '');
     const name = document.createElement('span');
-    name.textContent = 'Lap ' + l.lap + (l.session > 1 ? ' · session ' + l.session : '');
+    name.textContent = 'Lap ' + l.lap + (l.session > 1 ? ' · S' + l.session : '');
+    const badge = document.createElement('span');
+    badge.className = 'tmbadge' + (l.status === 'reference' ? ' ref' : '');
+    badge.textContent = nc ? 'not counted' : l.status === 'reference' ? 'ref' : '';
+    badge.title = nc ? 'Not counted: ' + (l.reason || 'no reason recorded')
+      : l.status === 'reference' ? 'Reference: the fastest lap so far when it was driven; '
+        + 'the live HUD delta ran against it' : '';
     const time = document.createElement('span');
+    time.className = 'tmtime' + (l === fast ? ' best' : '');
     time.textContent = tmTime(l.time_s);
-    const sub = document.createElement('span');
-    sub.className = 'tmsub';
-    sub.textContent = [l.status === 'not counted' ? 'not counted: ' + l.reason : l.status,
-                       l.car || 'car unknown', tmLapTrack(l)].join(' · ');
-    sub.title = sub.textContent;
-    b.append(name, time, sub);
+    if (l === fast) time.title = 'Fastest counted lap of this recording';
+    b.append(name, badge, time);
+    const odd = [nc ? l.reason : '', (l.car || '') !== car ? l.car || 'car unknown' : '',
+                 tmLapTrack(l) !== track ? tmLapTrack(l) : ''].filter(Boolean);
+    if (odd.length) {
+      const sub = document.createElement('span');
+      sub.className = 'tmsub';
+      sub.textContent = sub.title = odd.join(' · ');
+      b.append(sub);
+    }
     b.onclick = () => tmSelectB(l);
     box.appendChild(b);
   });
@@ -5498,6 +5567,7 @@ async function tmSelectB(l) {
   if (!p.ok) tmErr(p.error || 'could not load the comparable laps');
   tmState.pool = p.ok ? p : {laps: [], best_sectors: [], theoretical_best: null};
   tmState.a = tmDefaultA(key);
+  tmRenderLaps();                                   // mark lap A
   tmFillPickers(l);
   await tmLoadPair();
 }
@@ -5507,6 +5577,7 @@ function tmFillPickers(lapB) {
   const bKey = tmKey(lapB);
   const forA = pool.filter(l => tmKey(l) !== bKey);
   const forB = pool.some(l => tmKey(l) === bKey) ? pool : pool.concat([lapB]);
+  const multi = new Set(forB.map(l => l.rec)).size > 1;   // name the recording only then
   [['tm-a', forA, tmState.a], ['tm-b', forB, tmState.b]].forEach(([id, list, cur]) => {
     if (!list.length) { tmPlaceholder(id, 'no other lap to compare'); return; }
     const sel = $(id);
@@ -5515,8 +5586,9 @@ function tmFillPickers(lapB) {
     list.forEach(l => {
       const o = document.createElement('option');
       o.value = tmKey(l);
-      o.textContent = tmTime(l.time_s) + '  ' + l.rec + ' lap ' + l.lap
-        + (l.status === 'not counted' ? ' (not counted)' : '');
+      o.textContent = ['Lap ' + l.lap + (l.session > 1 ? ' S' + l.session : ''), tmTime(l.time_s),
+                       multi ? l.rec : '', l.status === 'not counted' ? 'not counted' : '']
+        .filter(Boolean).join(' · ');
       sel.appendChild(o);
     });
     sel.value = cur || '';
@@ -5532,7 +5604,7 @@ function tmPick(which, key) {
       tmFillPickers(lb);
     }
   }
-  if (which === 'b') tmRenderLaps();
+  tmRenderLaps();                                   // the A and B markers follow the pickers
   tmLoadPair();
 }
 
@@ -5575,31 +5647,36 @@ function tmRenderSectors() {
   const t = $('tm-sectors');
   t.textContent = '';
   const A = tmState.lapA, B = tmState.lapB;
+  $('tm-sec-legend').hidden = !B;
   if (!B) return;
   const best = (tmState.pool && tmState.pool.best_sectors) || [];
   const sa = A ? A.sectors || [] : [], sb = B.sectors || [];
   const head = t.createTHead().insertRow();
-  ['Sector', 'A', 'B', 'B-A', 'Best'].forEach(h => {
+  ['Sector', 'km', 'A', 'B', 'B-A', 'Best'].forEach(h => {
     const th = document.createElement('th'); th.textContent = h; head.appendChild(th);
   });
   const body = t.createTBody();
   const f = v => (v == null ? '—' : v.toFixed(3));
-  for (let i = 0; i < Math.max(sa.length, sb.length); i++) {
+  const sm = tmState.sectorM || 200, n = Math.max(sa.length, sb.length);
+  // The last sector runs to the end of lap B, which is rarely a whole sector length.
+  const trB = tmTrace(B), endM = trB.length ? trB[trB.length - 1].d : n * sm;
+  const km = i => (i * sm / 1000).toFixed(1) + '–' + (Math.min((i + 1) * sm, i === n - 1 ? endM : Infinity) / 1000).toFixed(1);
+  for (let i = 0; i < n; i++) {
     const ta = sa[i], tb = sb[i], bs = best[i];
     const diff = ta != null && tb != null ? tb - ta : null;
     const row = body.insertRow();
-    [String(i + 1), f(ta), f(tb), tmSigned(diff), f(bs)].forEach(v => { row.insertCell().textContent = v; });
-    if (tmSecClass(diff) !== 'even') row.cells[3].className = tmSecClass(diff);
-    if (tb != null && bs != null && Math.abs(tb - bs) < 0.0005) row.cells[2].className = 'best';
+    [String(i + 1), km(i), f(ta), f(tb), tmSigned(diff), f(bs)].forEach(v => { row.insertCell().textContent = v; });
+    if (tmSecClass(diff) !== 'even') row.cells[4].className = tmSecClass(diff);
+    if (tb != null && bs != null && Math.abs(tb - bs) < 0.0005) row.cells[3].className = 'best';
   }
   const foot = t.createTFoot().insertRow();
   const lapDiff = A && A.time_s != null && B.time_s != null ? B.time_s - A.time_s : null;
-  ['Lap', tmTime(A ? A.time_s : null), tmTime(B.time_s), tmSigned(lapDiff),
+  ['Lap', '', tmTime(A ? A.time_s : null), tmTime(B.time_s), tmSigned(lapDiff),
    tmTime(tmState.pool ? tmState.pool.theoretical_best : null)].forEach(v => {
     foot.insertCell().textContent = v;
   });
-  foot.cells[4].title = 'Theoretical best: the sum of the best mini-sectors';
-  if (tmSecClass(lapDiff) !== 'even') foot.cells[3].className = tmSecClass(lapDiff);
+  foot.cells[5].title = 'Theoretical best: the sum of the best mini-sectors';
+  if (tmSecClass(lapDiff) !== 'even') foot.cells[4].className = tmSecClass(lapDiff);
   const laps = tmState.pool ? tmState.pool.laps || [] : [];
   const alone = !laps.some(l => tmKey(l) !== tmKey(B));
   $('tm-sec-sub').textContent = (tmState.sectorM || 200) + ' m'
@@ -5682,9 +5759,18 @@ function tmRenderCharts() {
     }
     tmEl('text', {x: 4, y: top + 13}, svg).textContent = c.label;
     tmEl('text', {x: 4, y: top + 27, class: 'tm-unit'}, svg).textContent = c.unit;
+    tmTicks(c, vmin, vmax).forEach(v => {
+      const ty = Math.max(top + 10, Math.min(top + c.h - 2, Y(v) + 3.5));
+      tmEl('text', {x: TM_PAD.l - 6, y: ty, 'text-anchor': 'end', class: 'tm-axis'}, svg)
+        .textContent = tmTickText(c, v);
+    });
     if (c.key === 'delta') {
-      if (delta.length) tmDeltaArea(svg, delta, X, Y);
-      else tmEl('text', {x: TM_PAD.l + 8, y: top + c.h / 2 + 4, class: 'tm-unit'}, svg).textContent = 'no lap A to compare';
+      if (delta.length) {
+        tmDeltaArea(svg, delta, X, Y);
+        const end = delta[delta.length - 1].delta;    // B minus A where both laps end
+        tmEl('text', {x: W - TM_PAD.r - 6, y: top + c.h - 6, 'text-anchor': 'end',
+                      class: 'tm-final ' + tmSecClass(end)}, svg).textContent = tmSigned(end) + ' s';
+      } else tmEl('text', {x: TM_PAD.l + 8, y: top + c.h / 2 + 4, class: 'tm-unit'}, svg).textContent = 'no lap A to compare';
     }
     series.forEach(s => tmEl('path', {d: tmPath(s.rows, c.key, X, Y, c.step), class: s.cls}, svg));
     const bg = tmEl('rect', {x: W - TM_PAD.r, y: top + 2, width: 0, height: 15, rx: 3, class: 'tm-readbg'}, svg);
@@ -5790,6 +5876,7 @@ function tmRenderMap() {
   });
   const da = line(ta);
   if (da) tmEl('path', {d: da, class: 'tm-a'}, svg);    // a thin line over B's colours
+  $('tm-map-legend').hidden = false;
   const [sx, sy] = P(tb.find(tmMapPt));
   tmEl('circle', {cx: sx, cy: sy, r: 3.5, class: 'tm-line'}, svg);   // start/finish line
   const dot = cls => tmEl('circle', {r: 5, cx: 0, cy: 0, visibility: 'hidden', class: cls}, svg);

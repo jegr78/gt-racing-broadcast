@@ -2504,6 +2504,121 @@ console.log([tmTrackLabel(null), tmTrackLabel({candidates: []}),
             f"the Laps label names the layout like the picker: {out!r}"
 
 
+def t_telemetry_track_label_drops_a_layout_the_track_name_carries():
+    tm = _tm_script(_cc_page())
+    out = _run_js(_tm_fn(tm, "tmTrackName") + _tm_fn(tm, "tmTrackLabel") + _tm_fn(tm, "tmLapTrack") + """
+console.log([tmTrackLabel({track: 'Grand Valley - Highway 1', layout: 'Highway 1', reverse: false}),
+             tmTrackLabel({track: 'Grand Valley - Highway 1', layout: 'highway 1', reverse: true}),
+             tmLapTrack({track: 'Grand Valley - Highway 1', layout: 'Highway 1'}),
+             tmLapTrack({track: 'Alsace', layout: 'Village'}),
+             tmLapTrack({track: '', layout: ''})].join('|'));""")
+    if out is not None:
+        assert out.strip() == ("Grand Valley - Highway 1|Grand Valley - Highway 1 (reverse)|"
+                               "Grand Valley - Highway 1|Alsace - Village|track unknown"), \
+            f"a layout already ending the track name is not repeated: {out!r}"
+
+
+def t_telemetry_list_rows_keep_their_height_and_scroll():
+    page = _cc_page()
+    item = re.search(r"\n  \.tmitem \{([^}]*)\}", page).group(1)
+    assert "flex-shrink:0" in item and "min-height:0" not in item, \
+        f"a lap row must not shrink to fit the capped list, the list scrolls instead: {item!r}"
+    wrap = re.search(r"\n  \.tmsecwrap \{([^}]*)\}", page)
+    assert wrap is None or "max-height" not in wrap.group(1), \
+        "the mini-sector table flows with the page instead of a nested scroll box"
+
+
+def t_telemetry_lap_rows_show_status_badges_markers_and_only_odd_cars():
+    out = _tm_node("""
+const mk = (n, t, status, reason, car) => Object.assign(lap('R', n, t, 7),
+  {status, reason: reason || '', car: car || 'Car'});
+tmState.recLaps = [mk(0, 6, 'not counted', 'paused, loading or off track'), mk(1, 116, 'reference'),
+                   mk(2, 117, 'counted'), mk(3, 110, 'reference'), mk(4, 111, 'counted', '', 'Other Car')];
+tmState.b = tmKey(tmState.recLaps[2]);
+tmState.a = tmKey(tmState.recLaps[3]);
+tmRenderLaps();
+const rows = $('tm-laps').kids;
+const span = (r, cls) => r.kids.find(k => (k.className || '').split(' ').includes(cls));
+console.log(rows.map(r => r.className + '=' + r.textContent).join('|'));
+console.log(rows.map(r => span(r, 'tmtime').className).join('|'));
+console.log([span(rows[0], 'tmbadge').title, span(rows[1], 'tmbadge').title].join('|'));
+tmPick('a', tmKey(tmState.recLaps[1]));
+console.log($('tm-laps').kids.map(r => r.className).join('|'));""")
+    if out is not None:
+        rows, times, titles, after = out.strip().split("\n")
+        assert rows == ("tmitem nc=Lap 0not counted0:06.000paused, loading or off track|"
+                        "tmitem=Lap 1ref1:56.000|tmitem sel=Lap 21:57.000|"
+                        "tmitem is-a=Lap 3ref1:50.000|tmitem=Lap 41:51.000Other Car"), \
+            f"one line per lap; a car shows only where it differs from the recording: {rows!r}"
+        assert times == "tmtime|tmtime|tmtime|tmtime best|tmtime", \
+            f"the fastest counted lap is marked: {times!r}"
+        assert titles.startswith("Not counted: paused, loading or off track") \
+            and "fastest lap so far" in titles, f"badges explain themselves: {titles!r}"
+        assert after == "tmitem nc|tmitem is-a|tmitem sel|tmitem|tmitem", \
+            f"picking lap A moves the A marker: {after!r}"
+
+
+def t_telemetry_pickers_name_the_lap_before_the_recording():
+    out = _tm_node("""
+const l1 = lap('R', 1, 80, 1), l2 = lap('R', 2, 79.5, 1);
+tmState.pool = {laps: [l1, l2]}; tmState.a = tmKey(l1); tmState.b = tmKey(l2);
+tmFillPickers(l2);
+const one = $('tm-a').options.map(o => o.textContent).join(',');
+const nc = Object.assign(lap('S', 3, 81, 1), {status: 'not counted'});
+tmState.pool = {laps: [l1, l2, nc]};
+tmFillPickers(l2);
+console.log(one + '|' + $('tm-a').options.map(o => o.textContent).join(','));""")
+    if out is not None:
+        assert out.strip() == ("Lap 1 · 1:20.000|Lap 1 · 1:20.000 · R,"
+                               "Lap 3 · 1:21.000 · S · not counted"), \
+            f"lap and time first, the recording only when the pool spans several: {out!r}"
+
+
+def t_telemetry_charts_label_the_value_range_and_the_final_delta():
+    out = _tm_node("""
+const trace = ts => ts.map((t, i) => ({d: i * 5, t, speed_kmh: 100 + i, throttle: 50, brake: 0,
+                                       steer_deg: i - 1, gear: 3}));
+tmState.lapA = {trace: trace([0, 1.1, 2.2])};
+tmState.lapB = {trace: trace([0, 1, 2, 3])};
+tmRenderCharts();
+const axis = [], fin = [];
+$('tm-charts').kids.forEach(e => {
+  const c = (e.attrs || {}).class || '';
+  if (c === 'tm-axis') axis.push(e.textContent);
+  if (c.startsWith('tm-final')) fin.push(c + '=' + e.textContent);
+});
+console.log(axis.join(',') + '|' + fin.join(','));""")
+    if out is not None:
+        assert out.strip() == ("103,100,100,0,100,0,2,0,-2,3,+0.20,0,-0.20|"
+                               "tm-final gain=-0.200 s"), \
+            f"each panel labels its range top to bottom, delta its zero and final value: {out!r}"
+
+
+def t_telemetry_map_and_sectors_carry_legends_and_distances():
+    page = _cc_page()
+    for lid in ("tm-map-legend", "tm-sec-legend"):
+        assert f'id="{lid}"' in page, f"#{lid} explains the colours"
+    out = _tm_node("""
+const pt = i => ({d: i * 5, t: i, speed_kmh: 100, throttle: 0, brake: 0, steer_deg: 0, gear: 3,
+                  x: i, z: i % 3});
+const trace = Array.from({length: 81}, (_, i) => pt(i));
+tmClearPair('');
+const cleared = [$('tm-map-legend').hidden, $('tm-sec-legend').hidden].join(',');
+tmState.sectorM = 200;
+tmState.lapA = {trace, sectors: [10, 11], time_s: 21};
+tmState.lapB = {trace, sectors: [9.5, 11.2], time_s: 20.7};
+tmState.pool = {laps: [], best_sectors: [9.5, 11], theoretical_best: 20.5};
+tmRender();
+const shown = [$('tm-map-legend').hidden, $('tm-sec-legend').hidden].join(',');
+const t = $('tm-sectors');
+const cells = sec => sec.kids.map(r => r.kids.map(c => c.textContent).join(' '));
+console.log([cleared, shown, cells(t.kids[0])[0], cells(t.kids[1])[1]].join('|'));""")
+    if out is not None:
+        assert out.strip() == ("true,true|false,false|Sector km A B B-A Best|"
+                               "2 0.2–0.4 11.000 11.200 +0.200 11.000"), \
+            f"legends follow the drawn lap and each sector names its distance: {out!r}"
+
+
 def t_telemetry_recording_rows_mark_open_files_and_unindexed_laps():
     tm = _tm_script(_cc_page())
     fn = tm[tm.index("function tmRenderRecs()"):tm.index("async function tmSelectRec(")]
