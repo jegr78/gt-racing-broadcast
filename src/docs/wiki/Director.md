@@ -52,6 +52,9 @@ The page is a fixed frame of four columns, so nothing you need on air scrolls aw
   divider between them (or focus it and use the arrow keys) to share the height; the
   panel remembers the split.
 
+The header status pills shorten or move to their own row as available space changes,
+including when the event title or other header controls grow.
+
 Below 1600 px width the navigation collapses to letters; the `«`/`»` key does the same
 on a wide screen. Below 1280 px the chats move into a drawer opened by the **Chats**
 button in the header, which also counts unread crew messages. Below 900 px (a phone)
