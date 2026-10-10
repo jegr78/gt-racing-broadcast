@@ -196,3 +196,14 @@ update|status`. Spec: `docs/superpowers/specs/2026-10-07-gt7-telemetry-recording
 #   never leave the tailnet.
 # - --profile NAME runs ONE command against a non-active profile.
 ```
+
+## Optional AI telemetry inputs (epic #816)
+
+`ai_package` prepares immutable inputs for one completed GT7 session. It freezes
+selected effective context, source/index/calculation identities and selected
+track/shift references; profile-local reference suggestions are never implicit
+selections. Racecast computes facts and comparison deltas before the agent runs.
+Templates distinguish evidence from interpretation and avoid strategy advice.
+Packages require good complete trace timing and have provider-specific size limits.
+The manifest shows all included context/notes and cloud transmission before start.
+Detailed contracts and evidence: `src/docs/design/ai-analysis-packages.md`.
