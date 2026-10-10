@@ -60,15 +60,22 @@ async function tcOpen(prepared=false) {
  await tcLoad(prepared?null:tmState.rec);$('tc-target').focus();
 }
 async function tcClose() {
- await tcSave();tc.open=false;tc.generation++;$('tm-context-modal').hidden=true;tc.returnFocus?.focus?.();
+ await tcSave();tc.open=false;tc.generation++;tcReleaseLoad();$('tm-context-modal').hidden=true;tc.returnFocus?.focus?.();
+}
+function tcReleaseLoad() {
+ tc.loading=false;
+ for(const [control,disabled] of tc.loadControls||[])control.disabled=disabled;
+ tc.loadControls=null;
 }
 async function tcLoad(rec, before=null) {
+ tcReleaseLoad();
  const gen=++tc.generation;tc.loading=true;tcStatus('Loading context…');
  const controls=[...($('tm-context-modal').querySelectorAll?.('button,input,select,textarea')||[])].filter(e=>e.id!=='tc-close');
  const disabled=controls.map(e=>e.disabled);controls.forEach(e=>e.disabled=true);
+ tc.loadControls=controls.map((e,i)=>[e,disabled[i]]);
  const q=new URLSearchParams();if(rec)q.set('rec',rec);if(before!=null)q.set('before',before);
  let d;try{d=await tmGet('/api/telemetry/context?'+q);}catch(_e){d={ok:false,error:'Context unavailable'};}
- finally{if(gen===tc.generation){tc.loading=false;controls.forEach((e,i)=>e.disabled=disabled[i]);}}
+ finally{if(gen===tc.generation)tcReleaseLoad();}
  if(gen!==tc.generation||!tc.open)return;
  if(!d.ok||!d.context){$('tc-target').value=tc.target||'';tcStatus(d.error||'Context unavailable',true);return;}
  tc.target=rec||null;if(tc.target!==tmState.rec)tc.position=null;

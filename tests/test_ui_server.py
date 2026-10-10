@@ -2937,6 +2937,24 @@ await loading;clearTimeout(tc.timer);console.log(JSON.stringify([saved,tc.target
             'loading must prevent saves and copied recordings must not share editor drafts'
 
 
+def t_closing_during_context_load_releases_controls_before_reopening():
+    with open(os.path.join(ROOT, 'src', 'ui', 'telemetry-context.js'), encoding='utf-8') as f:
+        script = f.read()
+    out = _run_js(script + """
+const control={id:'tc-target',disabled:false};const els={};
+global.$=id=>els[id]||=({hidden:false,value:'R',querySelectorAll(){return [control]}});
+global.localStorage={getItem(){return null;}};global.tmState={rec:'R'};tcRender=()=>{};tcStatus=()=>{};
+const answers=[];global.tmGet=()=>new Promise(r=>answers.push(r));
+const reply={ok:true,profile:'p',context:{source_id:'R',revision:0,data:{notes:[],sessions:{}},draft:{}},sessions:['1']};
+(async()=>{tc.open=true;const first=tcLoad('R');await tcClose();tc.open=true;const second=tcLoad('R');
+answers[1](reply);await second;answers[0](reply);await first;clearTimeout(tc.timer);
+console.log(JSON.stringify([tc.loading,control.disabled,tc.open]));})();
+""")
+    if out is not None:
+        assert json.loads(out) == [False, False, True], \
+            'closing an unfinished load must release controls before reopening'
+
+
 def t_telemetry_open_recording_is_not_indexed_on_load():
     tm = _tm_script(_cc_page())
     load = _tm_fn(tm, "tmLoad")
