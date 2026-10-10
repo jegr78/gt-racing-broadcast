@@ -2866,7 +2866,8 @@ tmRenderLaps();console.log(JSON.stringify($('tm-laps').kids.map(row=>{
  const b=row.kids.find(e=>e.className.split(' ').includes('tmbadge'));return [b.textContent,b.title];})));""")
     if out is not None:
         assert json.loads(out) == [['not for comparison', 'Excluded from default comparison: warmup'],
-                                  ['not for pace', 'Excluded from pace: sample gap']]
+                                  ['not for pace', 'Excluded from pace: sample gap']], \
+            'context exclusions must not masquerade as measured pace errors'
 
 
 def t_strategy_change_starts_with_a_separate_copy_of_stint_defaults():

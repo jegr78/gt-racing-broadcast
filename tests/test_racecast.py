@@ -1181,7 +1181,10 @@ def t_telemetry_context_data_is_profile_scoped_and_usable_during_recording():
         assert saved['ok'] and saved['context']['revision'] == 1
         bad = dict(payload, profile='another-profile')
         refused = m.telemetry_context_write_data(bad)
-        assert not refused['ok'] and refused['conflict']
+        assert not refused['ok'] and refused['conflict'] and refused['error'].startswith('active profile changed')
+        foreign = dict(payload, source_id='wrong-recording', expected_revision=1)
+        refused = m.telemetry_context_write_data(foreign)
+        assert not refused['ok'] and refused['conflict'] and refused['error'].startswith('recording identity changed')
         stale = m.telemetry_context_write_data(payload)
         assert not stale['ok'] and stale['conflict']
         assert not m.telemetry_context_read_data('../outside')['ok']

@@ -301,6 +301,70 @@ def t_economy_target_comparison_checks_each_known_gear_without_inventing_missing
     assert c.compatible(reference, candidate), 'equivalent integer/float targets match'
 
 
+def t_integral_revision_numbers_resolve_the_same_saved_history():
+    with tempfile.TemporaryDirectory() as td:
+        store = c.Store.for_recording(recording(td))
+        store.save(data(), 0)
+        store.save({}, 1)
+        restored = store.restore(1.0, 2.0)
+        assert restored['revision'] == 3 and restored['data']['notes'] == data()['notes']
+
+
+def invalid(call, message):
+    try:
+        call()
+    except ValueError:
+        return
+    raise AssertionError(message)
+
+
+def t_json_shape_number_identifier_and_size_guards():
+    invalid(lambda: c._object(None), 'non-object context must be rejected')
+    invalid(lambda: c._list([None] * (c.MAX_ITEMS + 1)), 'oversized item lists must be rejected')
+    invalid(lambda: c._token('../other'), 'unsafe identifiers must be rejected')
+    invalid(lambda: c._text('x' * 16001), 'oversized text must be rejected')
+    invalid(lambda: c._keys({'typo': 1}, {'notes'}), 'unsupported fields must be rejected')
+    invalid(lambda: c._number(True, 'number'), 'booleans must not become numeric settings')
+    invalid(lambda: c._number(1.5, 'lap', True), 'fractional laps must be rejected')
+    invalid(lambda: c._bounded({'text': 'x' * c.MAX_BYTES}), 'oversized JSON must be rejected')
+    changed = data()
+    changed['notes'][0]['position']['x'] = True
+    invalid(lambda: c.validate_data(changed), 'boolean coordinates must be rejected')
+
+
+def t_loaded_context_size_format_and_identity_are_enforced():
+    with tempfile.TemporaryDirectory() as td:
+        path = Path(td, 'large.json')
+        path.write_text(json.dumps({'text': 'x' * c.MAX_BYTES}))
+        try:
+            c._load(str(path))
+        except ValueError as exc:
+            assert str(exc) == 'context is too large', 'oversized reads must report the bounded size error'
+        else:
+            raise AssertionError('oversized context files must be rejected')
+        store = c.Store.for_recording(recording(td))
+        doc = store.save(data(), 0)
+        bad = dict(doc, version=999)
+        c._atomic(store.path, bad)
+        invalid(store.read, 'unsupported context versions must be rejected')
+        bad = dict(doc, source_id='another-recording')
+        c._atomic(store.path, bad)
+        invalid(store.read, 'foreign context identities must be rejected')
+
+
+def t_replaced_capture_identity_cannot_receive_old_context():
+    with tempfile.TemporaryDirectory() as td:
+        path = recording(td)
+        store = c.Store.for_recording(path)
+        store.save(data(), 0)
+        head, payload = Path(path).read_bytes().split(b'\n', 1)
+        header = json.loads(head)
+        header['recording_id'] = 'f' * 32
+        Path(path).write_bytes(json.dumps(header).encode() + b'\n' + payload)
+        invalid(lambda: store.save({}, 1), 'a replaced capture must reject old context edits')
+        assert store.read()['revision'] == 1
+
+
 if __name__ == '__main__':
     for name, fn in sorted(globals().copy().items()):
         if name.startswith('t_') and callable(fn):

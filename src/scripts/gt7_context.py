@@ -353,7 +353,7 @@ class Store:
                 raise ValueError('unsupported context format/version')
             if doc.get('source_id') != self.source_id:
                 raise ValueError('context belongs to another recording')
-            _number(doc.get('revision'), 'revision', True)
+            doc['revision'] = _number(doc.get('revision'), 'revision', True)
             doc['data'] = validate_data(doc.get('data'))
             _object(doc.get('draft', {}))
             return copy.deepcopy(doc)
@@ -408,7 +408,7 @@ class Store:
             return out
 
     def restore(self, revision, expected):
-        _number(revision, 'revision', True)
+        revision = _number(revision, 'revision', True)
         with _LOCK:
             previous = _load(os.path.join(self.history_dir, str(revision) + '.json.gz'), compressed=True)
             if previous is None or previous.get('source_id') != self.source_id:
