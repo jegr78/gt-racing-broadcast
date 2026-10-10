@@ -23,6 +23,8 @@
   racecast telemetry record start|stop|status   # solo POV: record the GT7 telemetry trace (relay must run)
   racecast telemetry list | export <name|latest> [--out DIR] [--all] [--excel] | delete <name>   # recordings of the active profile -> samples.csv + laps.csv
   racecast telemetry index   # build the missing lap indexes (the Control Center runs it for lap comparison)
+  racecast telemetry shifts <name> --lap N [--session N]   # offline shift references and recorded phases
+  racecast telemetry shift-update CAR_ID   # explicitly update the local external reference for one vehicle
   racecast gt7-data  update | status   # GT7 car names + track recognition data (the relay updates at start, at most once per 24 h, and picks up new files within a minute)
   racecast app launch|quit obs|discord|tailscale   # start / gracefully quit a GUI app (Control Center buttons)
   racecast discord   join | leave | status   # drive the desktop Discord client into/out of the league's voice channel

@@ -2696,6 +2696,31 @@ console.log(String(box.hidden));""")
                          "tm-tr nc,tm-tr,tm-tr best|R|1|2"), \
             f"the summary repeats the report's figures and a trend dot picks lap B: {first!r}"
         assert second == "true", "no summary hides the section"
+def t_shift_route_keeps_domain_errors_and_blocks_foreign_origins():
+    seen = []
+    ctx = _ctx()
+    ctx['telemetry_shifts'] = lambda rec, session, lap: seen.append((rec, session, lap)) or {'ok': True, 'analysis': {'reference': {'car_id': 485}}}
+    httpd, port = _serve(ctx)
+    try:
+        status, raw = _get(port, '/api/telemetry/shifts?rec=R&session=1&lap=3')
+        assert status == 200 and json.loads(raw)['analysis']['reference']['car_id'] == 485
+        assert seen == [('R', '1', '3')]
+        request = urllib.request.Request(f'http://127.0.0.1:{port}/api/telemetry/shifts?rec=R&session=1&lap=3', headers={'Origin': 'null'})
+        try:
+            _urlopen(request)
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 403 and json.loads(exc.read()) == {'ok': False, 'error': 'foreign context origin'}
+        else:
+            raise AssertionError('foreign shift reads must be refused')
+        assert len(seen) == 1, 'blocked shift reads cannot reach recording analysis'
+        ctx['telemetry_shifts'] = lambda *a: {'ok': False, 'invalid': True, 'error': 'invalid shift lap'}
+        status, raw = _get(port, '/api/telemetry/shifts?rec=R&session=1&lap=bad')
+        assert status == 400 and json.loads(raw) == {'ok': False, 'invalid': True, 'error': 'invalid shift lap'}
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
 def t_telemetry_context_routes_keep_domain_errors_and_reject_foreign_origins():
     seen = []
     ctx = _ctx()
@@ -3004,6 +3029,17 @@ fields['Event table applicability confirmed'].setter(true);console.log(JSON.stri
         value = json.loads(out)
         assert value['targets']['2'] == 5600 and value['confirmed'] and value['provenance'] == 'Own test', \
             'manual event editor must retain target values and provenance'
+
+
+def t_context_refresh_invalidates_shift_analysis_even_when_the_lap_key_stays_the_same():
+    out = _tm_node("""
+tmState.rec='R';tmState.b='R|1|3';tmState.recLaps=[];tmShiftState.analysis={reference:{kind:'old'}};
+tmShiftState.pair='R|1|3';tmDropLaps=()=>{};tmSelectRec=async()=>{};
+await tmRefreshContext('R');console.log(JSON.stringify([tmShiftState.analysis,tmShiftState.pair,tmShiftState.generation]));
+""")
+    if out is not None:
+        assert json.loads(out) == [None, None, 1], \
+            'edited context must invalidate shift targets for the same selected lap'
 
 
 def t_shift_lookup_discards_a_previous_lap_response():

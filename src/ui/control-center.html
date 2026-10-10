@@ -5784,6 +5784,8 @@ function tmFillPickers(lapB) {
 
 async function tmRefreshContext(rec) {
   const selected = tmState.b;
+  tmShiftState.generation++;tmShiftState.analysis=null;tmShiftState.pair=null;
+  $('tm-shift-values').textContent='';
   tmDropLaps();await tmSelectRec(rec);
   if (tmState.rec !== rec) return;
   const previous = tmState.recLaps.find(l => tmKey(l) === selected);

@@ -131,12 +131,18 @@ def detect_shifts(rows):
     for i in range(1, len(rows)):
         old, new = rows[i-1], rows[i]
         a, b = old.get('gear'), new.get('gear')
+        bridged = a in (None, 0)
+        if bridged and isinstance(b, int) and b > 0:
+            known = next((r for r in reversed(rows[max(0, i-40):i])
+                          if new['t']-.6 <= r['t'] < new['t'] and isinstance(r.get('gear'), int) and r['gear'] > 0), None)
+            a = known['gear'] if known else None
+            old = known or old
         if not isinstance(a, int) or not isinstance(b, int) or not 1 <= a < b <= 15:
             continue
         t = new['t']
         before = [r for r in rows[max(0, i-30):i] if t-.4 <= r['t'] < t and r.get('gear') == a]
         after = [r for r in rows[i:min(len(rows), i+40)] if t <= r['t'] <= t+.6]
-        contiguous = (b == a+1 and len(before) >= 3 and
+        contiguous = (not bridged and b == a+1 and len(before) >= 3 and
                       all(0 < y['t']-x['t'] <= .06 for x, y in zip(before+[new], (before+[new])[1:], strict=False)))
         candidates = [(j, r) for j, r in enumerate(before) if _driving(r) and j >= 1
                       and _driving(before[j-1]) and r['rpm'] >= before[j-1]['rpm']-25]
@@ -149,6 +155,8 @@ def detect_shifts(rows):
         post = None
         if contiguous:
             for x, y in zip(after, after[1:], strict=False):
+                if not 0 < y['t']-x['t'] <= .06:
+                    break
                 if (x.get('gear') == y.get('gear') == b and _driving(x) and _driving(y)
                         and 0 < y['t']-x['t'] <= .06):
                     post = x
@@ -160,6 +168,7 @@ def detect_shifts(rows):
                     'pre_cut_rpm': pre['rpm'] if pre else None, 'pre_cut_t_s': pre['t'] if pre else None,
                     'post_rpm': post['rpm'] if post else None, 'post_t_s': post['t'] if post else None,
                     'phase_status': 'measured' if pre and post else 'ambiguous/missing',
+                    'neutral_bridge': bridged,
                     'phase_method': 'Stable full-drive samples before cut; first engaged new-gear bracket. Sampled phase inference.'})
     return out
 

@@ -60,6 +60,20 @@ def t_missing_or_ambiguous_phase_is_explicit_instead_of_last_packet_fallback():
     for row in data:row['clutch_engagement']=None
     event=shifts.detect_shifts(data)[0]
     assert event['pre_cut_rpm'] is None and event['post_rpm'] is None
+    data=rows()
+    for row in data[7:]:row['t']+=.2
+    event=shifts.detect_shifts(data)[0]
+    assert event['post_rpm'] is None and event['phase_status']!='measured', \
+        'a capture gap cannot confirm the engaged post-shift phase'
+
+
+def t_neutral_bridge_remains_an_explicit_ambiguous_upshift():
+    data=rows()
+    data[5]['gear']=0
+    events=shifts.detect_shifts(data)
+    assert len(events)==1 and events[0]['from_gear']==2 and events[0]['to_gear']==3, \
+        'neutral transitions must retain the observed upshift with unknown phase'
+    assert events[0]['pre_cut_rpm'] is None and events[0]['phase_status']!='measured'
 
 def t_manual_event_reference_remains_separate_from_source_updates_and_economy_targets():
     manual={'car_id':485,'targets':{'2':5600},'configuration':'Fixed event BoP',
