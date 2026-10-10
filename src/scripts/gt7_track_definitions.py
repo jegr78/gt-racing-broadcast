@@ -170,6 +170,9 @@ class Store:
 def project_definition(definition, tracks):
     definition = validate_definition(definition)
     layout = definition['layout_id']
+    identity = tracks.name(layout)
+    if not identity or identity.get('reverse') != definition['reverse']:
+        raise ValueError('track reference direction does not match the definition')
     length = tracks.line_length(layout)
     if length is None or not math.isfinite(length) or not 0 < length <= gt7_laps.MAX_TRACE_M:
         raise ValueError('track reference geometry is unavailable')

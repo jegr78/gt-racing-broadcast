@@ -130,6 +130,17 @@ def t_invalid_geometry_identifiers_and_review_claims_preserve_the_applied_overri
             raise AssertionError('reversed boundaries cannot fabricate positive source sectors')
 
 
+def t_reverse_definitions_cannot_project_as_confirmed_forward_geometry():
+    altered = definition()
+    altered['reverse'] = True
+    try:
+        td.project_definition(altered, fixture.FakeTracks())
+    except ValueError as exc:
+        assert 'direction' in str(exc)
+    else:
+        raise AssertionError('forward geometry cannot confirm a reverse definition')
+
+
 if __name__ == '__main__':
     for name, fn in sorted(globals().items()):
         if name.startswith('t_') and callable(fn):
