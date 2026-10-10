@@ -483,7 +483,7 @@ def t_timeline_prefers_event_label_over_part_index():
     assert rb.broadcast_timeline(bare) == [{"ts": 50, "label": "Part 2 started"}]
 
 
-LINE = "Best lap 0:43.810 (theoretical 0:40.000), 3 laps, Suzuka Circuit"
+LINE = "Best lap 0:43.810, 3 laps, Suzuka Circuit"
 
 
 def _solo_report(*extra, **idx_kw):

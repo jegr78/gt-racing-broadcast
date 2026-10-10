@@ -612,14 +612,27 @@ def _telemetry_html(tel):
                 best_label += f", {best_lap['rec']}"
         else:
             best_label = "Best lap"
+        sector_theory = g.get('sector_theory') or {}
+        sector_label = 'Sector best' if sector_theory.get('confirmed') else 'Unconfirmed sector sum'
         kpis = [(rtel.fmt_lap(g["best_s"]), best_label),
-                (rtel.fmt_lap(g["theoretical_s"]), "Theoretical best"),
+                (rtel.fmt_lap(sector_theory.get('time_s')), sector_label if sector_theory else 'Sector best unavailable'),
                 ("—" if cons is None else f"± {cons:.3f} s", "Consistency"),
                 ("—" if fuel is None else f"{fuel:.2f} L", "Fuel per lap"),
                 (f"{g['laps_counted']} of {g['laps_total']}", "Counted laps")]
         parts.append("<div class='kpis'>" + "".join(
             f"<div class='kpi'><div class='n'>{_esc(n)}</div><div class='l'>{_esc(lbl)}</div></div>"
             for n, lbl in kpis) + "</div>")
+        if sector_theory.get('best_sectors'):
+            parts.append(f"<p class='note'>{_esc(sector_theory['variant_name'])} · definition "
+                         f"{_esc(sector_theory['definition_version'])}. Ideal sector composition; "
+                         "entry-speed dependencies remain.</p>")
+            parts.append(_scroll(_table(['Sector', 'Best', 'Source lap'], [
+                [row['name'], rtel.fmt_lap(row['time_s']),
+                 f"{row['source']['rec']} · S{row['source']['session']} lap {row['source']['lap']}"]
+                for row in sector_theory['best_sectors']])))
+        parts.append("<details><summary>Mini-sector diagnostics</summary>"
+                     f"<p>Mini-sector diagnostic sum: {_esc(rtel.fmt_lap(g['theoretical_s']))}. "
+                     "This fine-segment composition is diagnostic and is not a predicted achievable lap.</p></details>")
         if g["tyre_avg_c"]:
             parts.append(_scroll(_table(["Average tyre temperature", "FL", "FR", "RL", "RR"],
                                         [["°C"] + [f"{v:.1f}" for v in g["tyre_avg_c"]]])))

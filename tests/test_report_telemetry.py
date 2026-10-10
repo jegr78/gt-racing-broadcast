@@ -197,7 +197,7 @@ def t_unknown_track_groups_per_session():
 
 def t_summary_line():
     assert rtel.summary_line(block()) == \
-        "Best lap 0:43.810 (theoretical 0:40.000), 3 laps, Suzuka Circuit"
+        "Best lap 0:43.810, 3 laps, Suzuka Circuit"
     idx = session_index()
     idx["laps"] = idx["laps"][3:]
     assert rtel.summary_line(rtel.telemetry_block([idx], WINDOW)) == \
@@ -406,6 +406,37 @@ def t_map_sector_tooltip_uses_its_own_index_even_when_a_sector_is_dropped():
         "the dropped sector must not shift the index of the ones after it"
     svg = rtel.svg_track_map(tm)
     assert "Sector 2:" not in svg and "Sector 3:" in svg
+
+
+def t_larger_sector_headline_retains_source_laps_and_definition_snapshot():
+    import tempfile
+    import gt7_track_definitions as td
+    import test_gt7_track_definitions as defs
+    import test_gt7_laps as fixture
+    with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as bundle:
+        store = td.Store(root, bundle)
+        store.save(defs.definition(), 0)
+        laps = [defs.lap(2, (4, 4, 4, 4)), defs.lap(3, (3, 5, 3, 5))]
+        for n, lap in enumerate(laps):
+            lap.update(start_t_s=n*20, time_s=16, status='counted', fuel_used_l=None,
+                       tyre_avg_c=[], car='Test car', track='Test ring', layout='Full',
+                       sectors=td.gt7_laps.sectors(lap['trace'], 1000))
+        idx = td.annotate_index({'rec': 'R', 'start_ts': 0, 'laps': laps}, {}, store, fixture.FakeTracks())
+        block = rtel.telemetry_block([idx], (-1, 100))
+        group = block['groups'][0]
+        assert group.get('sector_theory') and group['sector_theory']['confirmed'], 'larger sectors must replace the headline composition'
+        assert len(group['sector_theory']['best_sectors']) == 3
+        assert group['sector_theory']['time_s'] > group['mini_sector_sum_s']
+        assert block['track_definition_snapshots'], 'saved report blocks must retain the applied definition'
+        line = rtel.summary_line(block)
+        assert 'sector best' in line and 'theoretical 0:' not in line
+
+
+def t_report_html_keeps_mini_sector_composition_in_diagnostics():
+    import report_build
+    report = report_build._telemetry_html(block())
+    assert 'Mini-sector diagnostic sum' in report
+    assert 'Theoretical best' not in report, 'mini-sector best sum must not be a theoretical-lap headline'
 
 
 def run():

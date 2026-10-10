@@ -3372,7 +3372,8 @@ def telemetry_export_cmd(rest):
     tracks, cars = _telemetry_dbs()
     try:
         res = gr.export_csv(path, out_dir, include_all=args.all, excel=args.excel,
-                            cars=cars, tracks=tracks, key=_telemetry_track_key(path), diagnostics=args.diagnostics)
+                            cars=cars, tracks=tracks, key=_telemetry_track_key(path), diagnostics=args.diagnostics,
+                            track_analysis=_telemetry_with_context(_telemetry_full_index(path), path))
     except Exception as e:  # noqa: BLE001  a damaged file or a full disk ends in one line, not a traceback
         sys.exit(f"could not export {os.path.basename(path)}: {_telemetry_reason(e)}")
     print(f"wrote {res['samples']} samples and {res['laps']} laps to {res['dir']}")
@@ -3460,6 +3461,8 @@ def telemetry_delete_data(rec):
 
 
 _TELEMETRY_MEMO = {}          # path -> (stamp, lap index without traces), oldest first
+_TELEMETRY_DERIVED_MEMO = {}
+_TELEMETRY_DEFINITION_DBS = {}
 TELEMETRY_MEMO_MAX = 4096    # a few KB per lap in memory; a list scan over every recording must fit
 _TELEMETRY_LOCK = threading.Lock()      # guards the memo and the build-lock table
 _TELEMETRY_BUILD_LOCKS = {}             # path -> Lock, so one recording is never indexed twice at once
@@ -3556,6 +3559,23 @@ def telemetry_context_write_data(payload):
                 source = gc._number(payload.get('source_session'), 'source session', True)
                 data = gc.copy_session(doc['data'], source, session)
             store.save(data, expected, operation=action)
+        elif action == 'select-track-variant':
+            if path is None:
+                raise ValueError('select sector variants on a recorded GT7 session')
+            doc = store.read()
+            selected = telemetry_track_definition_read_data(payload.get('rec'), payload.get('session'), payload.get('lap'))
+            if not selected.get('ok'):
+                raise ValueError(selected.get('error', 'sector definition unavailable'))
+            definition = selected['definition']
+            if payload.get('variant_id') not in {v['id'] for v in definition['variants']}:
+                raise ValueError('selected larger-sector variant is unavailable')
+            session = gc._number(payload.get('session'), 'session', True)
+            if doc['data'].get('track_definition') is None:
+                doc['data']['track_definition'] = {}
+            choices = doc['data']['track_definition'].setdefault('selections', {})
+            choices[str(session)] = {'layout_id': definition['layout_id'], 'reverse': definition['reverse'],
+                                     'variant_id': payload['variant_id']}
+            store.save(doc['data'], expected, doc.get('draft', {}), operation='select-track-variant')
         elif action == 'save-template':
             gc.save_template(_telemetry_rec_dir(), payload.get('template_id'), payload.get('name'),
                              payload.get('settings'))
@@ -3566,6 +3586,59 @@ def telemetry_context_write_data(payload):
         return _telemetry_context_response(store, path)
     except Exception as exc:  # noqa: BLE001  no metadata error may escape a request
         return _telemetry_context_error(exc)
+
+
+def _telemetry_definition_dbs():
+    key = (_runtime_base_dir(), resource_path('assets/gt7'), _telemetry_data_version())
+    with _TELEMETRY_LOCK:
+        if key not in _TELEMETRY_DEFINITION_DBS:
+            _TELEMETRY_DEFINITION_DBS.clear()
+            _TELEMETRY_DEFINITION_DBS[key] = _telemetry_dbs()
+        return _TELEMETRY_DEFINITION_DBS[key]
+
+
+def _telemetry_with_definitions(result, data, path):
+    import copy
+    import gt7_track_definitions as td
+    tracks = _telemetry_definition_dbs()[0]
+    store = _telemetry_definition_store()
+    files = []
+    for layout in sorted({r.get('track_id') for r in result['laps'] if r.get('track_id')}):
+        identity = tracks.name(layout)
+        if not identity:
+            continue
+        override = store.path(layout, identity['reverse'])
+        for candidate in (override, os.path.join(store.bundled, os.path.basename(override))):
+            try:
+                st = os.stat(candidate)
+                files.append((candidate, st.st_mtime_ns, st.st_size))
+            except FileNotFoundError:
+                files.append((candidate, None, None))
+    stamp = _telemetry_stamp(path)
+    key = (stamp, result.get('context_revision'),
+           json.dumps(data, sort_keys=True), tuple(files))
+    with _TELEMETRY_LOCK:
+        cached = _TELEMETRY_DERIVED_MEMO.get(path)
+    if cached is not None and cached[0] == key:
+        output = dict(result, track_definition_snapshots=copy.deepcopy(cached[2]))
+        derived = cached[1]
+        output['laps'] = [dict(r, **copy.deepcopy(derived.get((r['session'], r['lap']), {}))) for r in result['laps']]
+        if result.get('open_lap'):
+            r = result['open_lap']
+            output['open_lap'] = dict(r, **copy.deepcopy(derived.get((r['session'], r['lap']), {})))
+        return output
+    full = result if all(r.get('trace') for r in result['laps']) else _telemetry_cached_full(path)
+    output = td.annotate_index(result, data, store, tracks, full)
+    fields = {'track_definition_warnings', 'larger_sectors', 'corner_metrics', 'combination_metrics',
+              'definition_fingerprint', 'sector_variant_id', 'track_definition'}
+    rows = output['laps']+([output['open_lap']] if output.get('open_lap') else [])
+    derived = {(r['session'], r['lap']): {k: copy.deepcopy(v) for k, v in r.items() if k in fields} for r in rows}
+    with _TELEMETRY_LOCK:
+        _TELEMETRY_DERIVED_MEMO.pop(path, None)
+        _TELEMETRY_DERIVED_MEMO[path] = (key, derived, copy.deepcopy(output['track_definition_snapshots']))
+        while len(_TELEMETRY_DERIVED_MEMO) > 64:
+            del _TELEMETRY_DERIVED_MEMO[next(iter(_TELEMETRY_DERIVED_MEMO))]
+    return output
 
 
 def _telemetry_with_context(idx, path):
@@ -3592,6 +3665,10 @@ def _telemetry_with_context(idx, path):
         result['context_error'] = error
         for lap in result['laps']:
             lap['context_warnings'].append('Saved context is unavailable')
+    try:
+        result = _telemetry_with_definitions(result, data, path)
+    except Exception as exc:  # noqa: BLE001  optional markers never discard packet/context analysis
+        result['track_definition_error'] = type(exc).__name__
     return result
 
 
@@ -3880,10 +3957,16 @@ def telemetry_laps_data(rec=None, session=None, track=None, car=None, build=True
         laps = [dict(l) for l in candidates if broader or
                 (gc.compatible(reference, l) if reference else l.get('comparison_eligible', True))]
         confirmed = bool(laps and all(l.get('context_confirmed') for l in laps))
+        import gt7_track_definitions as td
+        sector_reference = reference or next((l for l in laps if l.get('track_definition')), None)
+        sector_theory = (td.theoretical(laps, sector_reference['track_definition'],
+                                       sector_reference['sector_variant_id'])
+                         if sector_reference and sector_reference.get('track_definition') else None)
         return {"ok": True, "laps": laps, "context_confirmed": confirmed,
                 "comparison_warnings": (['Includes other conditions or roles'] if broader else []) +
                                        ([] if confirmed else ['Comparison conditions unconfirmed']), "unindexed": unindexed,
                 "data_version": _telemetry_data_version(),
+                "sector_theory": sector_theory,
                 "best_sectors": gt7_laps.best_sectors(laps),
                 "theoretical_best": gt7_laps.theoretical_best(laps)}
     except Exception as exc:
@@ -3964,6 +4047,71 @@ def telemetry_channels_data(rec=None, session=None, lap=None, keys=None, axis='d
         return {'ok': False, 'error': str(exc)}
     except Exception as exc:
         return {'ok': False, 'error': 'could not read channel detail: ' + _telemetry_reason(exc, rec)}
+
+
+def _telemetry_definition_store():
+    import gt7_track_definitions as td
+    return td.Store(_runtime_base_dir(), resource_path('assets/gt7/track-definitions'))
+
+
+def _telemetry_definition_scope(rec, session, lap):
+    import gt7_context
+    s, n = int(str(session)), int(str(lap))
+    path = _find_recording(_telemetry_rec_dir(), rec)
+    if path is None:
+        raise FileNotFoundError('recording not found')
+    open_file = _relay_open_file()
+    if path.endswith('.part') or open_file and os.path.basename(path).startswith(open_file):
+        raise ValueError('recording in progress: stop the recording to edit its map')
+    index = _telemetry_cached_full(path)
+    if index is None:
+        raise ValueError('recording needs a current lap index')
+    row = next((r for r in index['laps']+([index['open_lap']] if index.get('open_lap') else [])
+                if r['session'] == s and r['lap'] == n), None)
+    if row is None:
+        raise ValueError('selected lap is unavailable')
+    tracks, _cars = _telemetry_dbs()
+    identity = tracks.name(row['track_id']) if row.get('track_id') else None
+    if not identity:
+        raise ValueError('set the track layout before editing shared markers')
+    geometry = max((r for r in index['laps'] if r.get('track_id') == row['track_id'] and r.get('trace')),
+                   key=lambda r: r.get('length_m') or 0, default=row)
+    return path, row, identity, tracks, geometry, gt7_context.source_identity(path)
+
+
+def telemetry_track_definition_read_data(rec, session, lap):
+    import gt7_track_definitions as td
+    try:
+        _path, row, identity, tracks, geometry, source_id = _telemetry_definition_scope(rec, session, lap)
+        stored = _telemetry_definition_store().read(row['track_id'], identity['reverse'])
+        definition = stored['definition'] or td.proposals(geometry['trace'], row['track_id'], identity['reverse'])
+        return {'ok': True, **stored, 'definition': definition, 'projection': td.project_definition(definition, tracks),
+                'geometry': [{'d': p['d'], 'x': p['x'], 'z': p['z']} for p in geometry.get('trace', [])],
+                'profile': _active_profile_name(), 'source_id': source_id,
+                'rec': rec, 'session': row['session'], 'lap': row['lap']}
+    except Exception as exc:
+        return _telemetry_context_error(exc)
+
+
+def telemetry_track_definition_write_data(payload):
+    import gt7_context as gc
+    import gt7_track_definitions as td
+    try:
+        gc._object(payload)
+        if payload.get('profile') != _active_profile_name():
+            raise gc.Conflict('active profile changed; reload before applying map edits')
+        _path, row, identity, tracks, _geometry, source_id = _telemetry_definition_scope(
+            payload.get('rec'), payload.get('session'), payload.get('lap'))
+        if payload.get('source_id') != source_id:
+            raise gc.Conflict('recording identity changed; reload before applying map edits')
+        definition = td.validate_definition(payload.get('definition'))
+        if definition['layout_id'] != row['track_id'] or definition['reverse'] != identity['reverse']:
+            raise ValueError('map edits belong to another layout or driving direction')
+        td.project_definition(definition, tracks)
+        _telemetry_definition_store().save(definition, payload.get('expected_revision'))
+        return telemetry_track_definition_read_data(payload['rec'], payload['session'], payload['lap'])
+    except Exception as exc:
+        return _telemetry_context_error(exc)
 
 
 def telemetry_tracks_data():
@@ -8058,6 +8206,8 @@ def run_ui(rest, fail=sys.exit, open_browser=True):
         "telemetry_laps": telemetry_laps_data,
         "telemetry_lap": telemetry_lap_data,
         "telemetry_channels": telemetry_channels_data,
+        'telemetry_definition_read': telemetry_track_definition_read_data,
+        'telemetry_definition_write': telemetry_track_definition_write_data,
         "telemetry_tracks": telemetry_tracks_data,
         "telemetry_learn": telemetry_learn_data,
         "telemetry_delete": telemetry_delete_data,
