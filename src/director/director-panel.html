@@ -1985,6 +1985,8 @@ function fitStrip(){
     if (over()) s.classList.add("compact");
   }
 }
+// Adjacent title/font/control changes can shrink the strip without resizing its header.
+new ResizeObserver(fitStrip).observe($(".strip"));
 new ResizeObserver(fitStrip).observe($(".strip").parentElement);
 new MutationObserver(fitStrip).observe($(".strip"), {childList:true, subtree:true, characterData:true});
 /* Event title (#207): header display and inline editor */

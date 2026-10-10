@@ -856,6 +856,38 @@ def t_sync_state_reads_sync_rows_and_skips_race_rows_in_qualifying():
     assert 'relayMode !== "qualifying"' in html          # race-row states only in race
 
 
+def t_strip_refits_when_adjacent_content_changes_its_available_width():
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print('  (Playwright unavailable; rendered strip check runs with visual acceptance)')
+        return
+    page = _html()
+    css = re.search(r'<style>(.*?)</style>', page, re.S).group(1)
+    header = re.search(r'<header>.*?</header>', page, re.S).group(0)
+    start = page.index('function fitStrip(){')
+    end = page.index('/* Event title', start)
+    code = 'const $=s=>document.querySelector(s);' + page[start:end]
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        try:
+            tab = browser.new_page(viewport={'width': 1280, 'height': 800})
+            errors = []
+            tab.on('pageerror', lambda error: errors.append(str(error)))
+            tab.set_content('<style>' + css + '</style><div class="app">' + header + '</div>'
+                            '<script>' + code + '</script>')
+            tab.evaluate("() => {const b=$('.brand');b.style.flex='0 0 200px';fitStrip();}")
+            tab.evaluate("() => new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))")
+            assert tab.evaluate("() => $('.strip').scrollWidth <= $('.strip').clientWidth")
+            tab.evaluate("() => {$('.brand').style.flex='0 0 450px';}")
+            tab.evaluate("() => new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))")
+            assert tab.evaluate("() => $('.strip').scrollWidth <= $('.strip').clientWidth"), \
+                'status pills must refit when adjacent content shrinks their box without resizing header'
+            assert not errors, 'resizing must not create observer loops or script errors'
+        finally:
+            browser.close()
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
