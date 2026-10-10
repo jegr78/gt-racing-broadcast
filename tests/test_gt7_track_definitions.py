@@ -162,7 +162,7 @@ def t_supplied_grand_valley_uses_reviewed_publisher_numbering_and_coaching_secti
         assert doc['corners'][0]['direction'] == 'left' and doc['corners'][-1]['direction'] == 'right'
         assert len(doc['variants'][0]['boundaries']) == 4
         assert doc['variants'][0]['kind'] == 'coaching' and doc['variants'][0]['reviewed']
-        assert any('gran-turismo.com' in source for source in doc['provenance'])
+        assert 'Numbering source: https://www.gran-turismo.com/images/c/i1A6jF5Br1UgB.png' in doc['provenance']
         assert store.read('c2fd94', True)['definition'] is None, 'forward anchors must not imply reverse-layout coverage'
 
 
