@@ -2679,6 +2679,44 @@ console.log(String(box.hidden));""")
                          "tm-tr nc,tm-tr,tm-tr best|R|1|2"), \
             f"the summary repeats the report's figures and a trend dot picks lap B: {first!r}"
         assert second == "true", "no summary hides the section"
+def t_telemetry_context_routes_keep_domain_errors_and_reject_foreign_origins():
+    seen = []
+    ctx = _ctx()
+    ctx['telemetry_context_read'] = lambda rec=None, before=None: seen.append((rec, before)) or {'ok': True}
+    ctx['telemetry_context_write'] = lambda body: seen.append(body) or {'ok': False, 'conflict': True,
+                                                                     'error': 'context changed elsewhere'}
+    httpd, port = _serve(ctx)
+    try:
+        status, raw = _get(port, '/api/telemetry/context?rec=R&before=4')
+        assert status == 200 and json.loads(raw)['ok'] and seen == [('R', '4')]
+        status, raw = _post_json(port, '/api/telemetry/context', {'rec': 'R'})
+        assert status == 409 and json.loads(raw) == {'ok': False, 'conflict': True,
+                                                    'error': 'context changed elsewhere'}
+        before = len(seen)
+        for headers, error in (({'Origin': 'https://foreign.example'}, 'cross-origin request blocked'),
+                               ({'Host': f'foreign.example:{port}'}, 'cross-origin request blocked'),
+                               ({'Origin': 'null'}, 'foreign context origin'),
+                               ({'Origin': f'http://localhost:{port + 1}'}, 'foreign context origin')):
+            request = urllib.request.Request(f'http://127.0.0.1:{port}/api/telemetry/context',
+                                             method='POST', data=b'{}', headers=headers)
+            try:
+                _urlopen(request)
+            except urllib.error.HTTPError as exc:
+                assert exc.code == 403 and json.loads(exc.read())['error'] == error
+            else:
+                raise AssertionError('foreign origins/hosts must not edit local recording notes')
+        assert len(seen) == before, 'refused requests must not reach the mutation callback'
+        ctx['telemetry_context_write'] = lambda body: {'ok': False, 'invalid': True, 'error': 'invalid stint'}
+        status, raw = _post_json(port, '/api/telemetry/context', {})
+        assert status == 400 and json.loads(raw)['error'] == 'invalid stint'
+        ctx['telemetry_context_read'] = lambda *args: {'ok': False, 'not_found': True, 'error': 'recording not found'}
+        status, raw = _get(port, '/api/telemetry/context?rec=missing')
+        assert status == 404 and json.loads(raw)['error'] == 'recording not found'
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
 def t_telemetry_delete_asks_first_then_reloads_the_recordings():
     out = _tm_node("""
 let ok = false, asked = '';
@@ -2771,6 +2809,19 @@ def _tm_node(body):
     page = _cc_page()
     return _run_js(_TM_HARNESS + "const JOB_POLL_MS = 0;\n" + _job_fns(page) + _tm_script(page)
                    + "\n(async () => {\n" + body + "\n})();")
+
+
+def t_context_concurrent_waiter_retains_failed_save_without_retry():
+    script = open(os.path.join(ROOT, 'src', 'ui', 'telemetry-context.js'), encoding='utf-8').read()
+    out = _run_js(script + """
+let calls=0;
+global.fetch=async()=>{calls++;return {json:async()=>({ok:false})}};
+tc.doc={revision:0};tc.reply={profile:'p'};tc.data={};tc.dirty=true;
+tc.pending=Promise.resolve(false);
+(async()=>{const ok=await tcSave();console.log(JSON.stringify({ok,calls,dirty:tc.dirty}));})();
+""")
+    if out is not None:
+        assert json.loads(out) == {'ok': False, 'calls': 0, 'dirty': True}
 
 
 def t_telemetry_open_recording_is_not_indexed_on_load():

@@ -209,6 +209,28 @@ def t_geometric_trace_coverage_is_separate_from_clock_validity():
         assert not row['time_valid'] and not row['pace_eligible']
 
 
+def t_possible_tyre_service_is_an_unconfirmed_timestamped_proposal():
+    real = globals()['_pkt']
+    def tyres(lap, speed, angle, last_ms=-1):
+        b = bytearray(real(lap, speed, angle, last_ms))
+        if lap == 2 and angle >= math.pi:
+            for off in (tm.OFF_TYRE_FL, tm.OFF_TYRE_FR, tm.OFF_TYRE_RL, tm.OFF_TYRE_RR):
+                struct.pack_into('<f', b, off, 60.0)
+        return bytes(b)
+    globals()['_pkt'] = tyres
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            idx = _index(write_circle_recording(d))
+    finally:
+        globals()['_pkt'] = real
+    lap = _lap(idx, 2)
+    events = lap['service_events']
+    assert events and events[0]['kind'] == 'tyre_reset' and events[0]['source'] == 'inferred'
+    assert abs(events[0]['t_s'] - 30.0) < .1, 'use recording time, not a whole-lap guess'
+    assert lap['lap_role'] == 'regular' and lap['pace_eligible'], \
+        'a temperature proposal is not a confirmed service/compound assignment'
+
+
 def t_index_separates_capture_pace_reference_and_the_open_tail():
     with tempfile.TemporaryDirectory() as d:
         idx = _index(write_circle_recording(d))

@@ -167,6 +167,31 @@ def make_handler(ctx):
             self.end_headers()
             self.wfile.write(body)
 
+        def _context_allowed(self, mutation=False):
+            """Keep local context unavailable to foreign browser origins/DNS-rebinding hosts."""
+            try:
+                port = self.server.server_address[1]
+                host = self.headers.get('Host') or f'127.0.0.1:{port}'
+                parsed = urlparse('http://' + host)
+                allowed = (parsed.hostname in {'127.0.0.1', 'localhost', '::1'}
+                           and (parsed.port or 80) == port and parsed.username is None)
+                origin = self.headers.get('Origin')
+                if origin:
+                    op = urlparse(origin)
+                    allowed = allowed and op.scheme in {'http', 'https'} and op.netloc.lower() == host.lower()
+            except ValueError:
+                allowed = False
+            if not allowed:
+                if mutation:
+                    self._drain_refused_body()
+                self._json({'ok': False, 'error': 'foreign context origin'}, code=403)
+            return allowed
+
+        def _context_result(self, result):
+            code = (200 if result.get('ok') else 409 if result.get('conflict') else
+                    404 if result.get('not_found') else 400 if result.get('invalid') else 500)
+            return self._json(result, code=code)
+
         def _not_found(self, what="not found"):
             self._json({"ok": False, "error": what}, code=404)
 
@@ -620,6 +645,22 @@ def make_handler(ctx):
                                        "error": f"could not read the report: "
                                                 f"{type(exc).__name__}"},
                                       code=500)
+            if path == '/telemetry-context.js':
+                try:
+                    with open(os.path.join(os.path.dirname(ctx['page_path']), 'telemetry-context.js'), 'rb') as f:
+                        return self._send_bytes(f.read(), 'application/javascript; charset=utf-8')
+                except OSError:
+                    return self._not_found('context editor unavailable')
+            if path == '/api/telemetry/context':
+                if not self._context_allowed():
+                    return None
+                q = parse_qs(urlparse(self.path).query or '', keep_blank_values=True)
+                try:
+                    result = ctx['telemetry_context_read']((q.get('rec') or [None])[0],
+                                                          (q.get('before') or [None])[0])
+                except Exception as exc:
+                    result = {'ok': False, 'error': 'could not read context: ' + type(exc).__name__}
+                return self._context_result(result)
             if path == "/api/telemetry/recordings":
                 try:
                     return self._json(ctx["telemetry_recordings"]())
@@ -633,9 +674,11 @@ def make_handler(ctx):
                 arg = {k: v[0] for k, v in q.items()}
                 try:
                     if path.endswith("/laps"):
+                        options = {'build': False}
+                        if 'lap' in arg or 'compare_all' in arg:
+                            options.update(lap=arg.get('lap'), compare_all=arg.get('compare_all', False))
                         result = ctx["telemetry_laps"](arg.get("rec"), arg.get("session"),
-                                                       arg.get("track"), arg.get("car"),
-                                                       build=False)
+                                                       arg.get("track"), arg.get("car"), **options)
                     else:
                         result = ctx["telemetry_lap"](arg.get("rec"), arg.get("session"),
                                                       arg.get("lap"), build=False)
@@ -704,6 +747,7 @@ def make_handler(ctx):
             if not _allowed(self):
                 return self._json({"ok": False, "error": "unauthorized"}, code=401)
             if not request_csrf_ok(self.headers):
+                self._drain_refused_body()
                 return self._json({"ok": False, "error": "cross-origin request blocked"},
                                   code=403)
             path = urlparse(self.path).path
@@ -1006,6 +1050,17 @@ def make_handler(ctx):
                                        "error": f"could not delete backup: {exc}"},
                                       code=500)
                 return self._json(result, code=200 if result.get("ok") else 400)
+            if path == '/api/telemetry/context':
+                if not self._context_allowed(mutation=True):
+                    return None
+                body = self._body_json()
+                if body is None:
+                    return self._json({'ok': False, 'error': self._body_error}, code=400)
+                try:
+                    result = ctx['telemetry_context_write'](body)
+                except Exception as exc:
+                    result = {'ok': False, 'error': 'could not save context: ' + type(exc).__name__}
+                return self._context_result(result)
             if path == "/api/telemetry/delete":
                 body = self._body_json()
                 if body is None:

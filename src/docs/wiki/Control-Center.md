@@ -276,9 +276,31 @@ running relay.
   it stays out of every comparison, and the view analyses it only after the recording
   stops.
 - **Delete a recording.** **Delete** on the Recordings card removes the selected
-  recording, its CSV export and its lap index after a confirmation, the same as
+  recording, its context and context history, CSV export and lap index after a confirmation, the same as
   `racecast telemetry delete <name>`. It cannot be undone. The recording the relay is
   still writing cannot be deleted: stop the recording first.
+- **Context & notes.** Add race settings, per-session confirmations, stints, fuel maps,
+  intentional shortshifting and notes before, during or after capture. The context editor
+  can select an active recording even while its lap analysis is unavailable. Recording
+  notes apply to the whole file; session and lap notes keep their own scope. Hover a chart
+  before opening the editor to attach that position to a note for the selected lap.
+  Valid edits save automatically; unfinished numeric inputs remain drafts. Concurrent
+  edits report a conflict and retain your local draft. Earlier whole-context revisions
+  can be restored as a new revision. Measurements and raw capture bytes remain unchanged.
+- **Prepare next recording and templates.** Preparation attaches once to the next capture.
+  Templates copy settings into the selected session as an unconfirmed proposal; changing
+  a template does not change existing recordings. Copying another session also requires
+  fresh confirmation and does not carry over its stint boundaries. Missing values remain
+  unknown. Templates and preparation belong to the profile.
+- **Stint service and comparison.** Enter the lap and optional recording time at which
+  service occurred. Temperature resets, refuelling and standstill produce proposed times,
+  never confirmed tyre compounds. A pit lap can contain both RM and RH. Each confirmed
+  tyre change has a configurable number of complete warmup laps (including zero).
+  Default comparisons exclude contextual first, pit and warmup laps, different confirmed
+  compounds and known differences in race settings or fuel strategy. **Compare other
+  conditions / roles** explicitly broadens the pool; numerical quality checks still apply.
+  Unknown context remains inspectable and is labelled unconfirmed. Reports group known
+  compounds, conditions and strategies separately.
 - **Capture and pace.** Every recorded segment remains selectable, including the
   partial segment before the first lap and the unfinished segment after the last lap.
   An unfinished segment shows captured seconds, not an invented completed lap time.
@@ -324,7 +346,7 @@ The racing lines are not part of the package. Until racecast has downloaded them
 (`racecast gt7-data update`, or the first relay start with telemetry), it recognises
 only layouts learned with Set track, and every other recording starts as track unknown.
 
-> **CLI alternative:** `racecast telemetry export <name>` writes the same laps as CSV;
+> **CLI alternative:** `racecast telemetry export <name>` writes the same laps as CSV with a current `context.json` snapshot (excluding drafts and revision history);
 > `racecast telemetry index` builds the missing lap caches ahead of time.
 
 ### Help & Docs

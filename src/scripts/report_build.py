@@ -595,12 +595,15 @@ def _telemetry_html(tel):
     rec_word = "recording" if len(recs) <= 1 else "recordings"
     parts = ["<h2>Telemetry</h2>",
              f"<p class='note'>{_esc(rtel.lap_count(tel['laps_total']))} from the GT7 telemetry "
-             f"{rec_word}, {_esc(tel['laps_counted'])} counted by the relay as on the HUD. "
-             "The figures use counted laps only, timed by GT7 where its lap time arrived.</p>"]
+             f"{rec_word}, {_esc(tel['laps_counted'])} eligible for context comparisons. "
+             "The figures use complete pace laps and exclude contextual first, pit and warmup roles. Missing context remains unconfirmed. GT7 supplies completed lap times.</p>"]
     for g in tel["groups"]:
         where = f" · {g['rec']}, session {g['session']}" if g["rec"] else ""
         parts.append(f"<h3>{_esc(g['track'])} · {_esc(g['car'] or 'Unknown car')}"
                      f"{_esc(where)}</h3>")
+        parts.append(f"<p class='note'>Tyres: {_esc(g.get('compound') or 'unknown')} · "
+                     f"context {'confirmed' if g.get('context_confirmed') else 'unconfirmed'}. "
+                     "Groups separate known race settings and fuel strategies.</p>")
         cons, fuel = g["consistency_s"], g["fuel_per_lap_l"]
         best_lap = g.get("best_lap")
         if best_lap:

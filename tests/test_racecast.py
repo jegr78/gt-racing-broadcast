@@ -902,6 +902,25 @@ def t_report_telemetry_still_builds_the_lap_index():
             "the CLI and event-stop report build the index they need"
 
 
+def t_report_telemetry_uses_current_context_without_reindex():
+    import gt7_context as gc
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        path = tgl.write_circle_recording(rec_dir)
+        m.telemetry_laps_data(rec=_stem(path))
+        gc.Store.for_recording(path).save({'sessions': {'1': {
+            'confirmed': True, 'settings': {'bop': True}, 'stints': [
+                {'id': 'rm', 'start_lap': 1, 'compound': 'RM', 'confirmed': True,
+                 'tyre_service': False, 'warmup_laps': 0}]}}}, expected=0)
+        real = m._profile_has_telemetry
+        m._profile_has_telemetry = lambda: True
+        try:
+            block = m._report_telemetry(1_699_999_000.0, 1_700_001_000.0)
+        finally:
+            m._profile_has_telemetry = real
+        assert block['groups'][0]['compound'] == 'RM', 'report must join current context'
+        assert block['groups'][0]['context_confirmed']
+
+
 def t_telemetry_list_counts_laps_from_the_cache():
     with _telemetry_sandbox() as (rec_dir, tgl):
         import gt7_recording as gr
@@ -1113,6 +1132,70 @@ def t_telemetry_delete_data_refuses_the_open_file_without_a_path():
         assert d == {"ok": False, "error": f"could not delete {os.path.basename(path)}: "
                                           "Permission denied"}, d
         assert rec_dir not in d["error"], "machine paths stay server-side"
+
+
+def t_telemetry_comparisons_follow_context_revisions_without_reindexing():
+    import gt7_context as gc
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        path = tgl.write_circle_recording(rec_dir)
+        stem = _stem(path)
+        raw = m.telemetry_laps_data(rec=stem)
+        settings = {'notes': [], 'sessions': {'1': {'confirmed': True, 'settings': {'bop': True},
+                     'stints': [{'id': 'rm', 'start_lap': 1, 'compound': 'RM', 'confirmed': True,
+                                 'tyre_service': False, 'warmup_laps': 0},
+                                {'id': 'rh', 'start_lap': 2, 'compound': 'RH', 'confirmed': True,
+                                 'tyre_service': True, 'warmup_laps': 1}]}}}
+        store = gc.Store.for_recording(path)
+        store.save(settings, expected=0)
+        indexed_stamp = os.stat(gc._stem(path) + '.laps.json').st_mtime_ns
+        answer = m.telemetry_laps_data(rec=stem)
+        lap = next(l for l in answer['laps'] if l['lap'] == 3)
+        assert lap['analysis_role'] == 'warmup' and not lap['comparison_eligible']
+        pool = m.telemetry_laps_data(rec=stem, session='1', lap='4', track='ring01', car=str(tgl.CAR))
+        assert [l['lap'] for l in pool['laps']] == [4], pool
+        broader = m.telemetry_laps_data(rec=stem, session='1', lap='4', track='ring01',
+                                       car=str(tgl.CAR), compare_all=True)
+        assert {l['lap'] for l in broader['laps']} == {2, 3, 4}
+        settings['sessions']['1']['stints'][1]['warmup_laps'] = 0
+        store.save(settings, expected=1)
+        updated = m.telemetry_laps_data(rec=stem, session='1', lap='4', track='ring01', car=str(tgl.CAR))
+        assert {l['lap'] for l in updated['laps']} == {3, 4}
+        assert os.stat(gc._stem(path) + '.laps.json').st_mtime_ns == indexed_stamp, \
+            'context edits join existing measurements rather than rebuilding the raw index'
+        assert [l['gt7_time_s'] for l in answer['laps']] == [l['gt7_time_s'] for l in raw['laps']]
+
+
+def t_telemetry_context_data_is_profile_scoped_and_usable_during_recording():
+    import gt7_context as context
+    import test_gt7_context as tc
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        path = tgl.write_circle_recording(rec_dir)
+        stem = _stem(path)
+        get = m.telemetry_context_read_data(stem)
+        assert get['ok'] and get['context']['revision'] == 0
+        payload = {'rec': stem, 'profile': get['profile'], 'source_id': get['context']['source_id'],
+                   'expected_revision': 0, 'action': 'save', 'data': tc.data()}
+        saved = m.telemetry_context_write_data(payload)
+        assert saved['ok'] and saved['context']['revision'] == 1
+        bad = dict(payload, profile='another-profile')
+        refused = m.telemetry_context_write_data(bad)
+        assert not refused['ok'] and refused['conflict']
+        stale = m.telemetry_context_write_data(payload)
+        assert not stale['ok'] and stale['conflict']
+        assert not m.telemetry_context_read_data('../outside')['ok']
+        real = m._relay_open_file
+        m._relay_open_file = lambda: os.path.basename(path)
+        try:
+            assert m.telemetry_context_read_data(stem)['ok'], 'notes remain editable while recording'
+        finally:
+            m._relay_open_file = real
+        assert context.Store.for_recording(path).read()['revision'] == 1
+        m.telemetry_delete_data(stem)
+        assert not os.path.exists(context.Store(_context_path(path), 'unused').path)
+
+
+def _context_path(path):
+    return path[:-len('.gt7rec')] + '.context.json'
 
 
 def t_telemetry_exposes_an_open_capture_without_inventing_a_finished_lap():

@@ -33,6 +33,22 @@ def _write(d, items, **kw):
     return w
 
 
+def t_csv_export_includes_current_context_but_not_drafts_or_revision_history():
+    import gt7_context as context
+    with tempfile.TemporaryDirectory() as d:
+        w = _write(d, [(1000.0, 'A', _plain()), (1001.0, 'A', _plain())])
+        store = context.Store.for_recording(w.path)
+        store.save({'notes': [{'id': 'race', 'scope': 'recording', 'text': 'Fixed BoP test'}]},
+                   expected=0, draft={'laps': '2e'})
+        out = os.path.join(d, 'export')
+        rec.export_csv(w.path, out)
+        with open(os.path.join(out, 'context.json'), encoding='utf-8') as f:
+            exported = json.load(f)
+        assert exported['data']['notes'][0]['text'] == 'Fixed BoP test'
+        assert 'draft' not in exported and 'history' not in exported
+        assert exported['source_id'] == store.source_id
+
+
 def t_roundtrip_header_and_packets():
     with tempfile.TemporaryDirectory() as d:
         items = [(1000.0 + i / 60, "~", _plain(lap=1, size=0x158, fill=i)) for i in range(5)]

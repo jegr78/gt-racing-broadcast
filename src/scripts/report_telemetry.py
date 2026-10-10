@@ -6,6 +6,7 @@ window; output is a JSON-safe block that report_build renders. Figures are per t
 and car and use counted laps only (the relay's verdicts, as on the HUD).
 """
 import html
+import json
 import math
 import statistics
 
@@ -46,15 +47,22 @@ def _key(lap):
     """A known track groups across recordings, an unknown one only within its recording
     and GT7 session, as gt7_laps.pool pools them."""
     if lap.get("track_id") is not None:
-        return (lap["track_id"], lap.get("car_id"), None, None)
-    return (None, lap.get("car_id"), lap.get("rec"), lap.get("session"))
+        base = (lap["track_id"], lap.get("car_id"), None, None)
+    else:
+        base = (None, lap.get("car_id"), lap.get("rec"), lap.get("session"))
+    context = lap.get('compound')
+    strategy = json.dumps(lap.get('strategy', {}), sort_keys=True)
+    settings = lap.get('context_settings', {})
+    group_settings = json.dumps({k: settings.get(k) for k in (
+        'bop', 'fixed_setup', 'fuel_x', 'tyre_x', 'time_progression', 'time_of_day')}, sort_keys=True)
+    return base + (context, strategy, group_settings)
 
 
 def _row(n, ts, lap):
     return {"n": n, "ts": ts, "rec": lap.get("rec") or "", "session": lap.get("session"),
             "lap": lap.get("lap"), "time_s": lap.get("time_s"),
             "status": lap.get("status") or "", "reason": lap.get("reason") or "",
-            "counted": gt7_laps.pace_eligible(lap),
+            "counted": lap.get("comparison_eligible", gt7_laps.pace_eligible(lap)),
             "fuel_l": lap.get("fuel_used_l"), "top_speed_kmh": lap.get("top_speed_kmh"),
             "car": lap.get("car") or "", "track": track_label(lap)}
 
@@ -101,8 +109,7 @@ def _sector_map(best, pool):
 
 
 def _group(key, members):
-    track_id, car_id, *where = key
-    rec, session = where or (None, None)
+    track_id, car_id, rec, session, compound, _strategy, _settings = key
     first = members[0][1]
     valid = [(row, lap) for row, lap in members if row["counted"] and row["time_s"] is not None]
     best_row, best = min(valid, key=lambda m: m[0]["time_s"]) if valid else (None, None)
@@ -115,7 +122,8 @@ def _group(key, members):
     return {
         "track_id": track_id, "car_id": car_id, "rec": rec, "session": session,
         "track": track_label(first), "track_name": first.get("track") or "",
-        "car": members[0][0]["car"],
+        "car": members[0][0]["car"], "compound": compound,
+        "context_confirmed": all(l.get('context_confirmed', False) for _r, l in members),
         "laps_total": len(members), "laps_counted": len(valid),
         "recs": len({row["rec"] for row, _lap in members}),
         "best_s": best_row["time_s"] if best_row else None,
