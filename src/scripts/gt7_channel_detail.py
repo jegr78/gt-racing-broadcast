@@ -133,14 +133,19 @@ def window(path, index, lap, keys, axis='distance', start=0, end=None, tracks=No
                                  'values': values})
         raw = stations
     availability = {}
+    distance_time_basis = 'unavailable (indexed timing coverage missing)'
     if axis == 'distance':
         trace = lap.get('trace') or []
+        if trace:
+            distance_time_basis = lap.get('time_basis', 'receiver clock')
         distances = [p['d'] for p in trace]
         for point in raw:
             j = bisect.bisect_right(distances, point['d'])-1
             if 0 <= j < len(trace)-1:
                 a, b = trace[j:j+2]
                 point['t'] = a['t']+(b['t']-a['t'])*(point['d']-a['d'])/(b['d']-a['d'])
+            else:
+                point['t'] = None  # uncovered timing never inherits an unrelated raw time
     for key in keys:
         vals = [p['values'][key]['value'] for p in raw if p['values'][key]['value'] is not None]
         states = {state: sum(p['values'][key]['state'] == state for p in raw)
@@ -154,5 +159,5 @@ def window(path, index, lap, keys, axis='distance', start=0, end=None, tracks=No
             'availability': availability, 'axis': axis, 'seek_offset': offset,
             'channels': [d for d in gt7_channels.descriptors() if d['key'] in keys], 'schema_version': gt7_channels.SCHEMA_VERSION,
             'time_basis': ('receiver clock, seconds from recorded lap boundary' if axis == 'time'
-                           else 'indexed lap-normalized clock'),
+                           else distance_time_basis),
             'distance_basis': distance_basis}

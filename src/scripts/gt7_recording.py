@@ -605,7 +605,7 @@ def export_csv(path, out_dir, include_all=False, excel=False, cars=None, tracks=
         json.dump({'format': 'racecast-telemetry-channels', 'version': gt7_channels.SCHEMA_VERSION,
                    'channels': CONFIRMED_CHANNELS, 'diagnostics': DIAGNOSTIC_CHANNELS if diagnostics else [],
                    'states': {'value': 'including genuine zero', 'missing': 'packet does not contain the field',
-                              'unset': 'declared sentinel, raw representation retained in diagnostics',
+                              'unset': 'declared sentinel recorded in its channel descriptor',
                               'nonfinite': 'NaN or infinity, blank numerical CSV cell'},
                    'axes': {'t_s': 'receiver clock from first recording packet',
                             'lap_t_s': 'receiver clock from recorded lap boundary',

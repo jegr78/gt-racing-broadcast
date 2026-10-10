@@ -161,6 +161,18 @@ def t_corrupt_sparse_anchors_are_refused_before_reading_arbitrary_capture_bytes(
                 raise AssertionError('unverified seek anchors must not decode arbitrary bytes as telemetry')
 
 
+def t_distance_time_provenance_follows_the_indexed_lap_quality():
+    with tempfile.TemporaryDirectory() as td:
+        path = fixture.write_circle_recording(td)
+        idx = fixture._index(path)
+        for n in (1, 3):
+            lap = fixture._lap(idx, n)
+            result = detail.window(path, idx, lap, ['rpm'], 'distance', 100, 200, fixture.FakeTracks())
+            assert result['time_basis'] == lap['time_basis'], 'distance channels must retain the indexed time provenance'
+            if n == 1:
+                assert not lap['time_valid'] and 'normalized' not in result['time_basis']
+
+
 if __name__ == '__main__':
     for name, fn in sorted(globals().items()):
         if name.startswith('t_') and callable(fn):
