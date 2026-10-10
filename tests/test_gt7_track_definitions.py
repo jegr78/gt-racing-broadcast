@@ -26,6 +26,16 @@ def definition():
             'default_variant': 'coach-3'}
 
 
+def t_anchor_rejects_nonfinite_coordinates_before_projection():
+    for value in (float('nan'), float('inf'), -float('inf')):
+        try:
+            td.anchor({'x': value, 'z': 0})
+        except ValueError:
+            pass
+        else:
+            raise AssertionError('nonfinite coordinates must be refused before projection')
+
+
 def t_world_anchors_project_consistently_without_catalogue_length_scaling():
     doc = definition()
     projected = td.project_definition(doc, fixture.FakeTracks())
