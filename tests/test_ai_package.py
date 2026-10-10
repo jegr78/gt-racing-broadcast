@@ -16,6 +16,7 @@ import gt7_laps
 def expect(fn, code):
     try: fn()
     except a.PackageError as e: assert e.code == code, (e.code, code)
+    except Exception as e: raise AssertionError('expected semantic failure '+code+', got '+type(e).__name__) from e
     else: raise AssertionError('expected ' + code)
 
 
@@ -90,6 +91,9 @@ def t_live_incomplete_profile_and_stale_guards():
         expect(lambda:a.load_source(root,s.name+'.part',s.index),'incomplete_session')
         unfinished=source(Path(d)/'unfinished',completed=False)
         expect(lambda:a.build(unfinished,1),'incomplete_session')
+        changed=source(Path(d)/'changed')
+        with open(changed.path,'ab') as f: f.write(b'changed')
+        expect(lambda:a.build(changed,1),'stale_source')
 
 
 def t_quality_and_compatible_references():
