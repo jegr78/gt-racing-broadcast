@@ -671,7 +671,7 @@ def make_handler(ctx):
                     return self._serve_bytes(_pages.read(_context_script), 'application/javascript; charset=utf-8')
                 except OSError:
                     return self._not_found('context editor unavailable')
-            if path in ('/api/ai/settings','/api/ai/probe','/api/ai/status','/api/ai/job'):
+            if path in ('/api/ai/settings','/api/ai/probe','/api/ai/status','/api/ai/job','/api/ai/history','/api/ai/export'):
                 if not self._context_allowed(structured=True):return None
                 query=parse_qs(urlparse(self.path).query or '',keep_blank_values=True)
                 return self._ai_call(path.rsplit('/',1)[1],{k:v[0] for k,v in query.items()})
@@ -1102,7 +1102,7 @@ def make_handler(ctx):
                                        "error": f"could not delete backup: {exc}"},
                                       code=500)
                 return self._json(result, code=200 if result.get("ok") else 400)
-            if path in ('/api/ai/settings','/api/ai/preview','/api/ai/start','/api/ai/cancel'):
+            if path in ('/api/ai/settings','/api/ai/preview','/api/ai/start','/api/ai/cancel','/api/ai/package-export'):
                 if not self._context_allowed(mutation=True,structured=True):return None
                 body=self._body_json()
                 if body is None:

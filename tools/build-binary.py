@@ -116,6 +116,7 @@ def build_target(launcher, workdir, version_file, sep, entry, name, windowed):
            "--hidden-import", "gt7_shifts",
            "--hidden-import", "ai_agents", "--hidden-import", "ai_package",
            "--hidden-import", "ai_jobs", "--hidden-import", "ai_control",
+           "--hidden-import", "ai_reports",
            "--hidden-import", "gt7_channels", "--hidden-import", "gt7_channel_detail",
            "--hidden-import", "report_telemetry",
            "--add-data", f"{version_file}{sep}src"]

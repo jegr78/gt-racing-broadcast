@@ -17,6 +17,7 @@ from pathlib import Path
 import ai_agents
 import ai_package
 import gt7_context
+import gt7_recording
 
 MAX_OUTPUT_BYTES = 4*1024*1024
 TERMINAL = {'completed','awaiting_validation','failed','cancelled','timed_out'}
@@ -286,6 +287,20 @@ class Runner:
         job_id=uuid.uuid4().hex
         directory=self.profile_root/'telemetry-analyses'/ident/job_id
         try:
+            if 'source' in package:
+                sources=[(selection.get('recording'),ident,package['source'].get('sha256'))]
+                for ref in package.get('references',[]):
+                    provenance=next((p for p in package['reference_provenance'] if p['recording_id']==ref['recording_id']),{})
+                    sources.append((ref['rec']+'.gt7rec',ref['recording_id'],provenance.get('sha256')))
+                for name,source_id,digest in dict.fromkeys(sources):
+                    if not isinstance(name,str) or Path(name).name!=name or '/' in name or '\\' in name or not name.endswith('.gt7rec'):
+                        raise JobError('invalid_package','Invalid profile recording name')
+                    path=self.profile_root/'telemetry-recordings'/name
+                    try:
+                        current=(path.is_file() and not path.is_symlink() and path.resolve().parent==(self.profile_root/'telemetry-recordings').resolve()
+                                 and gt7_context.source_identity(str(path))==source_id and ai_package.file_hash(path)==digest)
+                    except (OSError,ValueError,KeyError,TypeError,gt7_recording.RecordingError):current=False
+                    if not current:raise JobError('stale_source','Selected recording/reference changed or was deleted after preview; prepare a new selection')
             if not directory.resolve().is_relative_to(self.profile_root):
                 raise JobError('invalid_package','Analysis artifact directory leaves the profile')
             directory.mkdir(parents=True)
