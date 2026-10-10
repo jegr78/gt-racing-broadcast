@@ -52,7 +52,7 @@ Loaded when working under `src/ui/`.
   Generate runs `racecast report generate` as the `report-generate` job and reads the
   written file through `GET /api/report/read?name=`. A counted lap's trace closes at
   the full lap length with a common zero-based, lap-normalized receiver clock, so its
-  sectors add up without a backwards closing point. Index version 5 separates capture
+  sectors add up without a backwards closing point. Index version 7 retains sparse recording seek offsets and separates capture
   completeness, trace coverage, roles, pace eligibility and historical reference status.
   The unfinished tail is `open_lap`, not an extra completed lap; API lists expose it
   separately and the single-lap endpoint can retrieve its trace. Data functions
@@ -66,6 +66,14 @@ Loaded when working under `src/ui/`.
   laps/lap/learn/delete. `learn` only assigns a layout that has a downloaded racing line
   (`TrackDB.has_downloaded_line`) and learns the line otherwise. Charts and map are
   inline SVG in `control-center.html` (block "Telemetry view"). Demo data for
+  Expanded channel detail is decoded on demand by `gt7_channels.py` and
+  `gt7_channel_detail.py`, through `GET /api/telemetry/channels`. Catalog requests are
+  lightweight; selected-channel windows reuse sparse byte offsets from the index,
+  with raw time windows bounded to 30 s / 5000 packets and at most eight channels.
+  The inline channel UI loads only while expanded, discards stale lap/selection answers,
+  reports constants/availability and keeps uncertain raw fields separate. CSV retains
+  its legacy column prefix, appends confirmed fields/states and documents them in
+  `channels.json`; `--diagnostics` adds a separate raw export.
   screenshots: `tools/make-demo-recording.py`. Tests: `tests/test_gt7_laps.py`,
   `tests/test_racecast.py`, `tests/test_ui_server.py`, `tests/test_make_demo_recording.py`.
 
