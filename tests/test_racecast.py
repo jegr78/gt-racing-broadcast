@@ -7085,6 +7085,23 @@ def t_devices_write_data_stores_the_mic_name():
     assert "RACECAST_MIC=MIC-ID" in text and "RACECAST_MIC_NAME=Mikrofon (K66)" in text, text
 
 
+def t_ai_analysis_cli_routes_and_defaults_to_preview():
+    action=m.route(['telemetry','analyze','fixture','--session','1','--agent','coach'])
+    assert action['verb']=='analyze'
+    calls=[];original=m.ai_request_data
+    try:
+        def request(op,payload):calls.append((op,payload));return {'ok':True}
+        m.ai_request_data=request
+        out=io.StringIO()
+        with contextlib.redirect_stdout(out):
+            m.telemetry_analyze_cmd(['fixture','--session','1','--agent','coach','--laps','2,3','--reference','ref:1:8'])
+        assert calls[0][0]=='preview' and calls[0][1]['laps']==[2,3]
+        assert calls[0][1]['references']==[{'rec':'ref','session':1,'lap':8}]
+        assert json.loads(out.getvalue())['ok'] is True
+        assert 'telemetry analyze' in m.usage_for('telemetry')
+    finally:m.ai_request_data=original
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

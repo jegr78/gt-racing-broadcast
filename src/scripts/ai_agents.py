@@ -9,9 +9,12 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
+import gt7_context
 from dataclasses import dataclass
 from pathlib import Path
 
+_SETTINGS_LOCK = threading.RLock()
 SETTINGS_VERSION = 1
 PROVIDERS = ('codex', 'claude')
 TEMPLATES = ('driving-technique', 'consistency', 'session-overview')
@@ -24,6 +27,10 @@ AUTH_ENV = {
     'claude': ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL',
                'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_USE_FOUNDRY'),
 }
+
+
+def _invalid_constant(value):
+    raise ValueError('Non-JSON constant: '+value)
 
 
 class AgentError(ValueError):
@@ -100,6 +107,24 @@ class Settings:
             raise AgentError('invalid_settings', 'AI settings are unreadable; restore or correct the machine settings') from e
 
     def save(self, doc):
+        try:
+            with _SETTINGS_LOCK, gt7_context._file_lock(self.path):
+                return self._save(doc)
+        except gt7_context.Conflict as e:
+            raise AgentError('settings_busy', 'Machine settings are busy; retry the edit explicitly') from e
+
+    def update_last(self, agent, model, template):
+        try:
+            with _SETTINGS_LOCK, gt7_context._file_lock(self.path):
+                current = self.read()
+                if any(a['id'] == agent for a in current['agents']):
+                    current['last'] = dict(agent=agent, model=model, template=template)
+                    return self._save(current)
+                return current
+        except gt7_context.Conflict as e:
+            raise AgentError('settings_busy', 'Machine settings are busy; last selection was not saved') from e
+
+    def _save(self, doc):
         validated = settings(doc)
         directory = os.path.dirname(self.path)
         os.makedirs(directory, exist_ok=True)
@@ -126,8 +151,27 @@ class Invocation:
 
 def _probe_command(argv, run, env):
     completed = run(argv, stdin=subprocess.DEVNULL, capture_output=True,
-                    text=True, encoding='utf-8', errors='replace', timeout=10, env=env)
+                    text=True, encoding='utf-8', errors='replace', timeout=10, env=env, creationflags=0x08000000 if os.name == 'nt' else 0)
     return completed.returncode, (completed.stdout or completed.stderr).strip()
+
+
+def _codex_runtime_files(executable):
+    """Read only the CLI files required inside its own sandbox, never their parents."""
+    exe=Path(executable).resolve();files={str(exe)}
+    if exe.name=='codex.js' and exe.parent.name=='bin':
+        root=exe.parent.parent
+        for pattern in ('vendor/*/bin/codex*','node_modules/@openai/codex-*/vendor/*/bin/codex*'):
+            for binary in root.glob(pattern):
+                if binary.name in ('codex','codex.exe') and binary.is_file():files.add(str(binary.resolve()))
+        for binary in root.parent.glob('codex-*/vendor/*/bin/codex*'):
+            if binary.name in ('codex','codex.exe') and binary.is_file():files.add(str(binary.resolve()))
+    return sorted(files)
+
+
+def _codex_permissions(executable,package,output):
+    paths={':root':'deny',':minimal':'read',str(package):'read',str(output):'write'}
+    paths.update({p:'read' for p in _codex_runtime_files(executable)})
+    return 'permissions.racecast={filesystem={'+','.join(json.dumps(k)+'='+json.dumps(v) for k,v in paths.items())+'},network={enabled=false}}'
 
 
 class Adapter:
@@ -209,8 +253,8 @@ class Adapter:
         except (ValueError, OSError, subprocess.TimeoutExpired, RecursionError):
             return []  # Catalogue failure never starts an inference or changes the model.
 
-    def invocation(self, package, output, schema, probe, model=None):
-        """Fail closed; caller must re-probe immediately before spawning."""
+    def check_execution(self, probe, model=None):
+        """Check model/auth/extension policy without spawning or writing files."""
         if probe.get('status') != 'ready' or probe.get('auth') != 'subscription':
             raise AgentError(probe.get('status', 'auth_unknown'), probe.get('guidance', 'Check subscription login'))
         if not self.executable or any(flag not in probe.get('capabilities', []) for flag in REQUIRED_FLAGS[self.provider]):
@@ -218,12 +262,20 @@ class Adapter:
         model = _text(self.config['model'] if model is None else model, 'model')
         if probe.get('models') and model not in probe['models']:
             raise AgentError('unavailable_model', 'Requested model is unavailable; choose another explicitly')
+        personal = self.config['personal']
+        if personal['mcp']:
+            raise AgentError('isolation_unavailable', 'Personal MCP servers can access files outside CLI sandboxing. Disable MCP for the background job; use the exported package manually if these servers are required.')
+        if self.provider == 'claude' and any(personal.values()):
+            raise AgentError('isolation_unavailable', 'Selective personal Claude configuration is not verified with restricted execution. Disable personal extensions or run the exported package manually.')
+        return model
+
+    def invocation(self, package, output, schema, probe, model=None):
+        """Fail closed; caller must re-probe immediately before spawning."""
+        model = self.check_execution(probe, model)
         package, output, schema = Path(package).resolve(), Path(output).resolve(), Path(schema).resolve()
         if not package.is_dir() or not output.is_dir() or package == output or package in output.parents or output in package.parents or schema.parent != package or not schema.is_file():
             raise AgentError('invalid_paths', 'Use separate package and output directories and a package-local schema')
         personal = self.config['personal']
-        if personal['mcp']:
-            raise AgentError('isolation_unavailable', 'Personal MCP servers can access files outside CLI sandboxing. Disable MCP for the background job; use the exported package manually if these servers are required.')
         result = output / 'result.json'
         if self.provider == 'codex':
             argv = [self.executable, 'exec', '--ignore-user-config', '--ignore-rules', '--strict-config',
@@ -232,9 +284,7 @@ class Adapter:
                     '--output-last-message', str(result)]
             overrides = ['model_provider="openai"', 'forced_login_method="chatgpt"',
                          'approval_policy="on-request"', 'default_permissions="racecast"',
-                         'permissions.racecast={filesystem={":root"="deny",":minimal"="read",'
-                         + json.dumps(str(package)) + '="read",' + json.dumps(str(output))
-                         + '="write"},network={enabled=false}}', 'web_search="disabled"',
+                         _codex_permissions(self.executable,package,output), 'web_search="disabled"',
                          'features.hooks=false', 'features.plugins=false', 'features.apps=false',
                          'features.multi_agent=false', 'shell_environment_policy.inherit="none"']
             if not personal['instructions']:
@@ -245,8 +295,6 @@ class Adapter:
                 argv += ['-c', value]
             argv.append('-')
         else:
-            if any(personal.values()):
-                raise AgentError('isolation_unavailable', 'Selective personal Claude configuration is not verified with restricted execution. Disable personal extensions or run the exported package manually.')
             argv = [self.executable, '--print', '--restricted', '--safe-mode', '--no-session-persistence',
                     '--no-chrome', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}',
                     '--permission-mode', 'dontAsk', '--tools', 'Read', '--allowedTools', 'Read',
@@ -254,13 +302,24 @@ class Adapter:
                     '--settings', '{"disableAllHooks":true}']
         return Invocation(argv, str(package), str(result), self.config['timeout'], self.provider)
 
+    def reported_model(self,raw):
+        """Preserve provider-reported metadata even when the run fails validation."""
+        if self.provider!='claude':return None
+        try:doc=json.loads(raw,parse_constant=_invalid_constant)
+        except (ValueError,RecursionError):return None
+        usage=doc.get('modelUsage') if isinstance(doc,dict) else None
+        if isinstance(usage,dict) and len(usage)==1:
+            model=next(iter(usage))
+            if isinstance(model,str) and model and len(model)<=200:return model
+        return None
+
     def extract(self, raw, events):
         """Return unvalidated structured data, never a normal telemetry report."""
-        actual = None
+        actual = self.reported_model(raw)
         if any(e.get('type') in ('error', 'turn.failed') for e in events if isinstance(e, dict)):
             raise AgentError('provider_failed', 'Provider reported a failed turn; inspect local diagnostics')
         try:
-            doc = json.loads(raw)
+            doc = json.loads(raw, parse_constant=_invalid_constant)
         except (ValueError, RecursionError) as e:
             raise AgentError('invalid_output', 'Provider output is not structured JSON') from e
         if not isinstance(doc, dict):
@@ -270,9 +329,6 @@ class Adapter:
                 raise AgentError('approval_required', 'Interactive permission required. Export the package and run the provider manually with scoped permissions.')
             if doc.get('is_error'):
                 raise AgentError('provider_failed', 'Provider reported an error; inspect local diagnostics')
-            usage = doc.get('modelUsage', {})
-            if isinstance(usage, dict) and len(usage) == 1:
-                actual = next(iter(usage))
             doc = doc.get('structured_output')
             if not isinstance(doc, dict):
                 raise AgentError('invalid_output', 'Provider omitted structured output')
