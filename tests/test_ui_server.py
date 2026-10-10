@@ -3004,6 +3004,24 @@ console.log(JSON.stringify(tmChannelState.details));
         assert json.loads(out) is None, 'late raw detail must not appear under a different lap'
 
 
+def t_track_editor_geometry_has_a_visible_stroke_outside_the_telemetry_view():
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print('  (Playwright unavailable; editor stroke checked during visual acceptance)')
+        return
+    page_source = _cc_page()
+    style = page_source.split('<style>', 1)[1].split('</style>', 1)[0]
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page()
+        page.set_content('<style>'+style+'</style><div id="tm-editor-modal"><svg id="tm-editor-map"><path class="tm-a" d="M0 0L100 100"/></svg></div>')
+        stroke = page.locator('#tm-editor-map path').evaluate('(el)=>getComputedStyle(el).stroke')
+        assert stroke not in ('none', 'transparent', 'rgba(0, 0, 0, 0)'), \
+            'editor geometry must remain visible outside the telemetry view color scope'
+        browser.close()
+
+
 def t_larger_sector_summary_does_not_promote_the_mini_sum():
     out = _tm_node("""
 tmRenderSummary({laps_total:2,laps_counted:2,groups:[{track:'Ring',car:'Car',best_s:16,
