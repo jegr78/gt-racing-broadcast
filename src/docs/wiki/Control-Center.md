@@ -258,8 +258,16 @@ Solo POV profiles only. The view reads the profile's GT7 telemetry recordings
 (`runtime/<profile>/telemetry-recordings/`, see [Relay mode](Relay-Mode)) and needs no
 running relay.
 
-- **Recordings and laps.** Pick a recording, newest first, to list its laps with time,
-  status (reference, counted, or not counted with the reason), car and track. The first
+- **Summary.** Above the comparison, the figures of the post-event report for the picked
+  recording, one block per track and car: best lap, theoretical best, consistency
+  (standard deviation of the counted lap times), fuel per lap, counted laps, the average
+  tyre temperatures and the lap-time trend in driving order (the best lap green, laps that
+  were not counted grey). Click a dot in the trend to make that lap lap B.
+- **Recordings and laps.** Pick a recording, newest first, to list its laps with time.
+  `ref` marks a lap that was the fastest so far when it was driven (the live HUD delta ran
+  against it), `not counted` a rejected lap with the reason below it. The fastest counted
+  lap is purple, lap A carries an orange bar and lap B a blue one. A lap names its car or
+  track only when it differs from the rest of the recording. The first
   open shows "Indexing…" while the view runs the index job, the same as `racecast
   telemetry index`: it replays the recording once and caches the result next to it as
   `<stem>.laps.json`. Later opens are instant until the recording or the GT7 track data
@@ -277,11 +285,13 @@ running relay.
   N recordings…"). No click in the view replays a recording itself: loading a lap or
   setting a track on a recording without cached laps also waits for that job.
 - **Charts.** Speed, throttle, brake, steering, gear and the delta of B against A over
-  lap distance. Below zero B is ahead, above zero behind. Hover to read both laps at one
-  point; the map shows where that point is.
+  lap distance, each with its value range on the left. Below zero B is ahead, above zero
+  behind; the delta panel ends with the final gap. Hover to read both laps at one point;
+  the map shows where that point is.
 - **Track map and mini-sectors.** Lap A is the thin line; lap B is split into 200 m
-  mini-sectors, green where B is faster and red where it is slower. The table lists every
-  mini-sector for A and B, the gap and the best time of any comparable lap; its last row
+  mini-sectors, green where B is faster and red where it is slower (the legend under the
+  map). The table lists every mini-sector with its distance, the times of A and B, the gap
+  and the best time of any comparable lap (purple where B set it); its last row
   adds the theoretical best, the sum of the best mini-sectors. When the comparable laps
   end at different lengths, as on an unknown track, the last mini-sector's best and the
   theoretical best show `—`, the same rule as the post-event report.
