@@ -327,6 +327,23 @@ def source_identity(path):
     return hashlib.sha256(head + record).hexdigest()
 
 
+def _context_envelope(doc, source_id):
+    """Validate metadata before exposing it as JSON or resolving a historical snapshot."""
+    _object(doc)
+    _bounded(doc)
+    if doc.get('format') != FORMAT or _number(doc.get('version'), 'version', True) != VERSION:
+        raise ValueError('unsupported context format/version')
+    if doc.get('source_id') != source_id:
+        raise ValueError('context belongs to another recording')
+    doc['revision'] = _number(doc.get('revision'), 'revision', True)
+    if doc.get('updated_at') is not None:
+        _number(doc['updated_at'], 'context timestamp')
+    if 'operation' in doc:
+        _text(doc['operation'], 200)
+    _object(doc.get('draft', {}))
+    return doc
+
+
 class Store:
     def __init__(self, path, source_id, capture_path=None):
         self.path = os.path.join(os.path.realpath(os.path.dirname(os.path.abspath(path))), os.path.basename(path))
@@ -349,13 +366,8 @@ class Store:
                 return {'format': FORMAT, 'version': VERSION, 'source_id': self.source_id,
                         'revision': 0, 'updated_at': None, 'data': {'notes': [], 'sessions': {}},
                         'draft': {}}
-            if not isinstance(doc, dict) or doc.get('format') != FORMAT or doc.get('version') != VERSION:
-                raise ValueError('unsupported context format/version')
-            if doc.get('source_id') != self.source_id:
-                raise ValueError('context belongs to another recording')
-            doc['revision'] = _number(doc.get('revision'), 'revision', True)
+            _context_envelope(doc, self.source_id)
             doc['data'] = validate_data(doc.get('data'))
-            _object(doc.get('draft', {}))
             return copy.deepcopy(doc)
 
     def _check_capture(self):
@@ -403,6 +415,9 @@ class Store:
             for revision in versions[:min(100, max(1, limit))]:
                 doc = _load(os.path.join(self.history_dir, str(revision) + '.json.gz'), compressed=True)
                 if doc is not None:
+                    _context_envelope(doc, self.source_id)
+                    if doc['revision'] != revision:
+                        raise ValueError('history revision does not match its file')
                     out.append({'revision': revision, 'updated_at': doc.get('updated_at'),
                                 'operation': doc.get('operation', 'edit')})
             return out
@@ -411,8 +426,11 @@ class Store:
         revision = _number(revision, 'revision', True)
         with _LOCK:
             previous = _load(os.path.join(self.history_dir, str(revision) + '.json.gz'), compressed=True)
-            if previous is None or previous.get('source_id') != self.source_id:
+            if previous is None:
                 raise ValueError('no matching context revision')
+            _context_envelope(previous, self.source_id)
+            if previous['revision'] != revision:
+                raise ValueError('history revision does not match its file')
             return self.save(previous['data'], expected, operation='restore ' + str(revision))
 
     def export(self):
@@ -431,6 +449,7 @@ def templates(recdir):
         if len(values) > MAX_ITEMS:
             raise ValueError('too many templates')
         for key, template in values.items():
+            _object(template)
             _token(key)
             _text(template.get('name'), 200)
             validate_settings(template.get('settings'))

@@ -139,6 +139,9 @@ function tcRender() {
  tcStints();tcNotes();tcRoles();tcHistory();
  $('tc-sources').textContent=tc.reply.recording_active?'The capture is active. Analysis becomes available after recording stops.':
   tc.target?'Manual context supplements measurements. Missing values remain unknown.':'Preparation is attached once to the next recording; later GT7 sessions need a new confirmation.';
+ const warnings=[tc.reply.templates_error?'Templates unavailable: '+tc.reply.templates_error:'',
+                 tc.reply.history_error?'History unavailable: '+tc.reply.history_error:''].filter(Boolean);
+ if(warnings.length)$('tc-sources').textContent+=' '+warnings.join(' · ');
 }
 function tcAddSession() {
  const n=Math.max(0,...Object.keys(tc.data.sessions).map(Number),...tc.reply.sessions.map(Number))+1;
@@ -150,7 +153,7 @@ function tcSaveTemplate() {
 }
 function tcHistory() {
  const el=$('tc-history');el.textContent='';const none=tcEl('option','Choose an earlier whole-context revision');none.value='';el.append(none);
- for(const h of tc.reply.history||[]){const text='Revision '+h.revision+(h.updated_at?' · '+new Date(h.updated_at*1000).toLocaleString():'');const o=tcEl('option',text);o.value=String(h.revision);el.append(o);}
+ for(const h of tc.reply.history||[]){const text='Revision '+h.revision+(h.updated_at!=null?' · '+new Date(h.updated_at*1000).toLocaleString():'');const o=tcEl('option',text);o.value=String(h.revision);el.append(o);}
 }
 function tcButton(parent,text,fn,cls='') {const b=tcEl('button',text,cls);b.type='button';b.onclick=fn;parent.append(b);return b;}
 function tcStints() {

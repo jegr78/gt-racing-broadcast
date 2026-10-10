@@ -365,6 +365,20 @@ def t_replaced_capture_identity_cannot_receive_old_context():
         assert store.read()['revision'] == 1
 
 
+def t_context_metadata_is_valid_json_and_unsupported_history_is_not_restored():
+    with tempfile.TemporaryDirectory() as td:
+        store = c.Store.for_recording(recording(td))
+        doc = store.save(data(), 0)
+        corrupt = dict(doc, updated_at=float('nan'))
+        Path(store.path).write_text(json.dumps(corrupt))
+        invalid(store.read, 'non-finite context metadata must be rejected')
+        c._atomic(store.path, doc)
+        previous = dict(doc, version=999)
+        c._atomic(os.path.join(store.history_dir, '1.json.gz'), previous, compressed=True)
+        invalid(lambda: store.restore(1, 1), 'unsupported history versions must not be restored')
+        assert store.read()['revision'] == 1
+
+
 if __name__ == '__main__':
     for name, fn in sorted(globals().copy().items()):
         if name.startswith('t_') and callable(fn):

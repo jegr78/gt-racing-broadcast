@@ -298,8 +298,10 @@ running relay.
   service occurred. Temperature resets, refuelling and standstill produce proposed times,
   never confirmed tyre compounds. A pit lap can contain both RM and RH. Each confirmed
   tyre change has a configurable number of complete warmup laps (including zero).
-  Each lap shows its measured starting fuel load and tyre age since the declared initial
-  stint or last confirmed tyre change, without assuming equal conditions. Default
+  Each lap shows its measured starting fuel load and the number of lap boundaries since
+  the declared initial stint or last confirmed tyre change. This tyre-age proxy includes
+  a partial service lap and does not establish prior wear at capture start or a wear percentage.
+  It does not assume equal conditions. Default
   comparisons exclude contextual first, pit and warmup laps, mixed known fuel strategies within a lap, different confirmed
   compounds and known differences in race settings or fuel strategy. **Compare other
   conditions / roles** explicitly broadens the pool; numerical quality checks still apply.

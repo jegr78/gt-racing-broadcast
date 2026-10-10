@@ -1199,6 +1199,27 @@ def t_telemetry_context_data_is_profile_scoped_and_usable_during_recording():
         assert not os.path.exists(context.Store(_context_path(path), 'unused').path)
 
 
+def t_corrupt_optional_templates_or_history_do_not_hide_valid_recording_notes():
+    import gt7_context as gc
+    import test_gt7_context as tc
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        path = tgl.write_circle_recording(rec_dir)
+        store = gc.Store.for_recording(path)
+        store.save(tc.data(), 0)
+        templates = os.path.join(gc._profile_root(rec_dir), 'telemetry-templates.json')
+        gc._atomic(templates, {'version': 1, 'templates': {'bad': None}})
+        reply = m.telemetry_context_read_data(_stem(path))
+        assert reply['ok'] and reply['context']['data']['notes'] == tc.data()['notes'], \
+            'invalid optional templates must not hide saved notes'
+        assert reply['templates'] == {} and reply['templates_error']
+        gc._atomic(templates, {'version': 1, 'templates': {}})
+        gc._atomic(os.path.join(store.history_dir, '0.json.gz'), [], compressed=True)
+        reply = m.telemetry_context_read_data(_stem(path))
+        assert reply['ok'] and reply['context']['data']['notes'] == tc.data()['notes'], \
+            'invalid optional history must not hide saved notes'
+        assert reply['history'] == [] and reply['history_error']
+
+
 def _context_path(path):
     return path[:-len('.gt7rec')] + '.context.json'
 

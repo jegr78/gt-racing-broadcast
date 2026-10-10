@@ -5667,7 +5667,7 @@ function tmRenderLaps() {
     const odd = [l.analysis_role === 'warmup' ? 'Warmup lap' : l.lap_role === 'first' ? 'First lap' : '',
                  l.compounds?.length ? l.compounds.join(' / ') : '',
                  l.fuel_start_l != null ? 'Start fuel '+l.fuel_start_l.toFixed(1)+' L (measured)' : 'Start fuel unknown',
-                 l.tyre_age_laps != null ? 'Tyre age '+l.tyre_age_laps+' laps since confirmed service' : 'Tyre age unknown',
+                 l.tyre_age_laps != null ? 'Tyre age: '+l.tyre_age_laps+' lap boundaries since declared initial stint / tyre service' : 'Tyre age unknown',
                  ...(l.context_warnings || []),
                  l.after_service && !l.compound ? 'After inferred service; tyres unconfirmed' : '',
                  l.time_s == null && l.relay_time_s != null ? l.relay_time_s.toFixed(3) + ' s captured' : '',
