@@ -5872,7 +5872,7 @@ function tmRenderSectors() {
    tmTime(tmState.pool ? tmState.pool.theoretical_best : null)].forEach(v => {
     foot.insertCell().textContent = v;
   });
-  foot.cells[5].title = 'Theoretical best: the sum of the best mini-sectors';
+  foot.cells[5].title = 'Diagnostic mini-sector sum; fine-segment composition';
   if (tmSecClass(lapDiff) !== 'even') foot.cells[4].className = tmSecClass(lapDiff);
   const laps = tmState.pool ? tmState.pool.laps || [] : [];
   const alone = !laps.some(l => tmKey(l) !== tmKey(B));
