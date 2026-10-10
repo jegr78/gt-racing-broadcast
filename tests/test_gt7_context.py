@@ -258,6 +258,22 @@ def t_unconfirmed_proposals_cannot_exclude_measured_comparisons():
     assert unknown['strategy'] == {}, 'unconfirmed stint strategy remains a proposal'
 
 
+def t_incomplete_or_unscoped_location_cannot_replace_valid_notes():
+    with tempfile.TemporaryDirectory() as td:
+        store = c.Store.for_recording(recording(td))
+        store.save(data(), 0)
+        for position, scope in (({'d': 100}, 'lap'), ({'x': 1, 'z': 2}, 'session')):
+            changed = data()
+            changed['notes'][0].update(position=position, scope=scope)
+            try:
+                store.save(changed, 1)
+            except ValueError:
+                pass  # an incomplete position is an invalid edit, not an invented location
+            else:
+                raise AssertionError('location notes require world X/Z and a source lap')
+            assert store.read()['revision'] == 1 and store.read()['data']['notes'] == data()['notes']
+
+
 if __name__ == '__main__':
     for name, fn in sorted(globals().copy().items()):
         if name.startswith('t_') and callable(fn):

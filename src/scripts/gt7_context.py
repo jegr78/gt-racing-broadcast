@@ -149,6 +149,8 @@ def validate_data(data):
             _number(n.get('lap'), 'note lap', True)
         if n.get('position') is not None:
             pos = _object(n['position'])
+            if n['scope'] != 'lap' or not {'x', 'z'} <= pos.keys():
+                raise ValueError('location notes require world X/Z and a source lap')
             _keys(pos, {'x', 'y', 'z', 'd', 't', 'reference_version'})
             for v in pos.values():
                 if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
