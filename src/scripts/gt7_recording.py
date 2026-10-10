@@ -6,6 +6,7 @@ File: one JSON header line, then records of float64 wall ts, uint8 kind, uint16
 length and the payload. Kind 0x00 is a meta record carrying {"dropped": n}.
 """
 import csv
+from contextlib import nullcontext
 import datetime
 import json
 import logging
@@ -19,6 +20,7 @@ import time
 import uuid
 
 import gt7_cars
+import gt7_channels
 import gt7_telemetry
 
 LOG = logging.getLogger("racecast.relay.telemetry")
@@ -375,11 +377,15 @@ def replay_counts(path):
     return len(laps), (last - first) if first is not None else 0.0
 
 
-SAMPLE_COLUMNS = (
+LEGACY_SAMPLE_COLUMNS = (
     "t_s", "session", "lap", "lap_t_s", "lap_dist_m", "on_track", "paused", "speed_kmh",
     "throttle_pct", "brake_pct", "throttle_input_pct", "brake_input_pct", "steer_deg",
     "gear", "rpm", "fuel_l", "tyre_fl_c", "tyre_fr_c", "tyre_rl_c", "tyre_rr_c",
     "pos_x", "pos_y", "pos_z", "car_id")
+CONFIRMED_CHANNELS = gt7_channels.descriptors(False)
+DIAGNOSTIC_CHANNELS = gt7_channels.descriptors(True)
+EXTRA_CHANNEL_COLUMNS = tuple(d['key'] for d in CONFIRMED_CHANNELS if d['key'] not in LEGACY_SAMPLE_COLUMNS)
+SAMPLE_COLUMNS = LEGACY_SAMPLE_COLUMNS + EXTRA_CHANNEL_COLUMNS + tuple(d['key']+'__state' for d in CONFIRMED_CHANNELS)
 LAP_COLUMNS = (
     "session", "lap", "start_t_s", "end_t_s", "gt7_time_s", "relay_time_s", "status",
     "reason", "fuel_used_l", "top_speed_kmh", "car", "track", "layout")
@@ -514,7 +520,7 @@ def _lap_dist(eng, pkt, by_session, tracks, prev):
     return out
 
 
-def export_csv(path, out_dir, include_all=False, excel=False, cars=None, tracks=None, key=None):
+def export_csv(path, out_dir, include_all=False, excel=False, cars=None, tracks=None, key=None, diagnostics=False):
     """Write samples.csv and laps.csv for one recording into out_dir."""
     cars = cars if cars is not None else gt7_cars.CarDB()
     r = Recording(path)
@@ -539,10 +545,15 @@ def export_csv(path, out_dir, include_all=False, excel=False, cars=None, tracks=
     t0 = None
     written = 0
     station = {}
-    with open(os.path.join(out_dir, "samples.csv"), "w", newline="",
-              encoding=encoding) as fh:
+    with open(os.path.join(out_dir, "samples.csv"), "w", newline="", encoding=encoding) as fh, \
+            (open(os.path.join(out_dir, "diagnostics.csv"), "w", newline="", encoding=encoding)
+             if diagnostics else nullcontext()) as raw_fh:
         w = csv.writer(fh, delimiter=delimiter)
         w.writerow(SAMPLE_COLUMNS)
+        raw_writer = csv.writer(raw_fh, delimiter=delimiter) if raw_fh else None
+        if raw_writer:
+            raw_writer.writerow(('t_s', 'session', 'lap') + tuple(
+                d['key']+suffix for d in DIAGNOSTIC_CHANNELS for suffix in ('', '__state', '__raw')))
         for wall_ts, _kind, plain in r.packets():
             t0 = wall_ts if t0 is None else t0
             pkt = gt7_telemetry.parse_packet(plain)
@@ -553,6 +564,7 @@ def export_csv(path, out_dir, include_all=False, excel=False, cars=None, tracks=
             times.update(pkt, wall_ts)
             if not include_all and (not pkt.on_track or pkt.paused or pkt.loading):
                 continue
+            decoded = gt7_channels.decode(plain)
             started = eng.lap_started_at()
             steer = None if pkt.steer_rad is None else math.degrees(pkt.steer_rad)
             w.writerow([
@@ -565,7 +577,16 @@ def export_csv(path, out_dir, include_all=False, excel=False, cars=None, tracks=
                 num(steer, 1), pkt.gear, num(pkt.rpm, 0), num(pkt.fuel_level, 2),
                 *(num(v, 1) for v in pkt.tyre_temp),
                 num(pkt.pos_x, 2), num(pkt.pos_y, 2), num(pkt.pos_z, 2),
-                "" if pkt.car_id is None else pkt.car_id])
+                "" if pkt.car_id is None else pkt.car_id]
+                + [num(decoded[k]['value'], 6) for k in EXTRA_CHANNEL_COLUMNS]
+                + [decoded[d['key']]['state'] for d in CONFIRMED_CHANNELS])
+            if raw_writer:
+                values = [num(wall_ts-t0, 3), eng.session, pkt.lap]
+                for descriptor in DIAGNOSTIC_CHANNELS:
+                    value = decoded[descriptor['key']]
+                    values.extend((num(value['value'], 6), value['state'],
+                                   '0x'+value['raw'] if value['raw'] is not None else ''))
+                raw_writer.writerow(values)
             written += 1
     with open(os.path.join(out_dir, "laps.csv"), "w", newline="", encoding=encoding) as fh:
         w = csv.writer(fh, delimiter=delimiter)
@@ -580,7 +601,20 @@ def export_csv(path, out_dir, include_all=False, excel=False, cars=None, tracks=
                 num(lap["fuel_used"], 2), num(lap["top_speed_mps"] * 3.6, 1),
                 car_name(cars, lap["car_id"]),
                 found["track"] if known else "", found["layout"] if known else ""])
-    gt7_context._atomic(os.path.join(os.path.realpath(out_dir), 'context.json'), context_snapshot)
+    with open(os.path.join(out_dir, 'channels.json'), 'w', encoding='utf-8') as schema:
+        json.dump({'format': 'racecast-telemetry-channels', 'version': gt7_channels.SCHEMA_VERSION,
+                   'channels': CONFIRMED_CHANNELS, 'diagnostics': DIAGNOSTIC_CHANNELS if diagnostics else [],
+                   'states': {'value': 'including genuine zero', 'missing': 'packet does not contain the field',
+                              'unset': 'declared sentinel, raw representation retained in diagnostics',
+                              'nonfinite': 'NaN or infinity, blank numerical CSV cell'},
+                   'axes': {'t_s': 'receiver clock from first recording packet',
+                            'lap_t_s': 'receiver clock from recorded lap boundary',
+                            'lap_dist_m': 'reference geometry when available, otherwise driven distance'},
+                   'compatibility': {k: {'offset': off, 'unit': '% from byte / 255',
+                                         'uncertainty': 'Driver vs filtered/assisted input interpretation is disputed'}
+                                     for k, off in [('throttle_input_pct', '0x13c'), ('brake_input_pct', '0x13d')]}},
+                  schema, ensure_ascii=False, indent=2, allow_nan=False)
+    gt7_context._atomic(os.path.join(os.path.realpath(out_dir), "context.json"), context_snapshot)
     return {"dir": out_dir, "samples": written, "laps": len(laps), "dropped": r.dropped,
             "context_error": context_error}
 

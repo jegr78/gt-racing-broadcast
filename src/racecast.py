@@ -3362,6 +3362,7 @@ def telemetry_export_cmd(rest):
     ap.add_argument("--out", help="output directory (default: <recording>/ next to it)")
     ap.add_argument("--all", action="store_true",
                     help="keep menu, pause and loading packets")
+    ap.add_argument("--diagnostics", action="store_true", help="write uncertain raw fields separately to diagnostics.csv")
     ap.add_argument("--excel", action="store_true",
                     help="semicolon + decimal comma + BOM for a German Excel")
     args = ap.parse_args(rest)
@@ -3371,7 +3372,7 @@ def telemetry_export_cmd(rest):
     tracks, cars = _telemetry_dbs()
     try:
         res = gr.export_csv(path, out_dir, include_all=args.all, excel=args.excel,
-                            cars=cars, tracks=tracks, key=_telemetry_track_key(path))
+                            cars=cars, tracks=tracks, key=_telemetry_track_key(path), diagnostics=args.diagnostics)
     except Exception as e:  # noqa: BLE001  a damaged file or a full disk ends in one line, not a traceback
         sys.exit(f"could not export {os.path.basename(path)}: {_telemetry_reason(e)}")
     print(f"wrote {res['samples']} samples and {res['laps']} laps to {res['dir']}")

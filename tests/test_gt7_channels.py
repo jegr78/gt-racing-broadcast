@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Confirmed packet channels, diagnostic uncertainty and bounded raw-detail reads."""
 import json
+import csv
 import math
 import os
 import struct
@@ -9,6 +10,7 @@ import tempfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, 'src', 'scripts'))
 import gt7_channels as c
+import gt7_channel_detail as detail
 import gt7_recording as r
 import test_gt7_laps as fixture
 
@@ -60,16 +62,16 @@ def t_raw_time_window_preserves_single_packet_cut_and_uses_sparse_capture_offset
             f.write(b'\0')
         idx = fixture._index(path)
         lap = fixture._lap(idx, 3)
-        result = c.window(path, idx, lap, ['throttle_pct', 'gear'], 'time', 1, 2, fixture.FakeTracks())
+        result = detail.window(path, idx, lap, ['throttle_pct', 'gear'], 'time', 1, 2, fixture.FakeTracks())
         assert any(row['throttle_pct'] == 0 for row in result['rows']), 'a one-packet cut must survive temporal detail'
         assert len(result['rows']) < 100 and result['seek_offset'] > recording.header_end
         assert result['time_basis'] == 'receiver clock, seconds from recorded lap boundary'
         assert result['availability']['gear']['constant']
         for keys, axis, start, end in [(['no_such_channel'], 'time', 0, 1), (['rpm'], 'time', 0, 31), (['rpm'], 'time', 3, 2), (['rpm'], 'bad', 0, 1)]:
             try:
-                c.window(path, idx, lap, keys, axis, start, end, fixture.FakeTracks())
+                detail.window(path, idx, lap, keys, axis, start, end, fixture.FakeTracks())
             except ValueError:
-                pass
+                pass  # a refused detail request is the expected domain failure
             else:
                 raise AssertionError('invalid channel/window request must fail with a domain error')
 
@@ -79,17 +81,69 @@ def t_distance_windows_use_common_geometry_and_refuse_unbounded_allocations():
         path = fixture.write_circle_recording(td)
         idx = fixture._index(path)
         lap = fixture._lap(idx, 3)
-        result = c.window(path, idx, lap, ['rpm', 'on_track'], 'distance', 100, 200, fixture.FakeTracks())
+        result = detail.window(path, idx, lap, ['rpm', 'on_track'], 'distance', 100, 200, fixture.FakeTracks())
         assert result['rows'][0]['d'] == 100 and result['rows'][-1]['d'] == 200
         assert result['distance_basis'] == 'reference geometry'
         assert all(row['on_track'] == 1 for row in result['rows'])
         for axis, start, end in [('distance', 0, 1001), ('time', 100, 101)]:
             try:
-                c.window(path, idx, lap, ['rpm'], axis, start, end, fixture.FakeTracks())
+                detail.window(path, idx, lap, ['rpm'], axis, start, end, fixture.FakeTracks())
             except ValueError as exc:
                 assert 'recorded lap' in str(exc)
             else:
                 raise AssertionError('windows outside the recorded lap must be rejected before allocation')
+
+
+def t_csv_preserves_legacy_columns_and_exports_confirmed_states_with_optional_diagnostics():
+    with tempfile.TemporaryDirectory() as td:
+        path = fixture.write_circle_recording(td, n=100)
+        out = os.path.join(td, 'export')
+        r.export_csv(path, out, diagnostics=True)
+        with open(os.path.join(out, 'samples.csv'), newline='', encoding='utf-8') as f:
+            rows = list(csv.DictReader(f))
+        expected = ('t_s', 'session', 'lap', 'lap_t_s', 'lap_dist_m', 'on_track', 'paused', 'speed_kmh',
+                    'throttle_pct', 'brake_pct', 'throttle_input_pct', 'brake_input_pct', 'steer_deg',
+                    'gear', 'rpm', 'fuel_l', 'tyre_fl_c', 'tyre_fr_c', 'tyre_rl_c', 'tyre_rr_c',
+                    'pos_x', 'pos_y', 'pos_z', 'car_id')
+        assert tuple(rows[0])[:len(expected)] == expected, 'existing CSV names and order must remain intact'
+        assert rows[0]['water_temp_c'] == '0.000000' and rows[0]['water_temp_c__state'] == 'value'
+        assert rows[0]['gear_ratio_2'] == '' and rows[0]['gear_ratio_2__state'] == 'unset'
+        with open(os.path.join(out, 'channels.json'), encoding='utf-8') as f:
+            schema = json.load(f)
+        assert schema['version'] == c.SCHEMA_VERSION
+        assert {d['key'] for d in schema['channels']} == {d['key'] for d in c.descriptors(False)}
+        assert schema['compatibility']['throttle_input_pct']['uncertainty']
+        with open(os.path.join(out, 'diagnostics.csv'), newline='', encoding='utf-8') as f:
+            raw = list(csv.DictReader(f))
+        assert len(raw) == len(rows) and raw[0]['raw_0x12c__raw'] == '0x00000000'
+        other = os.path.join(td, 'normal-only')
+        r.export_csv(path, other)
+        assert not os.path.exists(os.path.join(other, 'diagnostics.csv'))
+
+
+def t_distance_interpolation_does_not_label_nonfinite_measurements_as_values():
+    with tempfile.TemporaryDirectory() as td:
+        path = fixture.write_circle_recording(td)
+        recording = r.Recording(path)
+        seen = 0
+        for _ts, _kind, plain in recording.packets():
+            if struct.unpack_from('<h', plain, 0x74)[0] == 3:
+                seen += 1
+                if seen == 41:
+                    with open(path, 'r+b') as f:
+                        f.seek(recording.pos-len(plain)+0xF8)
+                        f.write(struct.pack('<f', float('nan')))
+                    break
+        idx = fixture._index(path)
+        class ShiftedTracks(fixture.FakeTracks):
+            def project(self, points, oid):
+                return [(d+.1) % 1000 for d in super().project(points, oid)]
+        result = detail.window(path, idx, fixture._lap(idx, 3), ['clutch_engagement'],
+                               'distance', 90, 120, ShiftedTracks())
+        assert any(row['clutch_engagement'] is None for row in result['rows'])
+        for row, state in zip(result['rows'], result['states'], strict=True):
+            if row['clutch_engagement'] is None:
+                assert state['clutch_engagement'] != 'value', 'an interpolated missing value must retain its unavailable state'
 
 
 if __name__ == '__main__':
