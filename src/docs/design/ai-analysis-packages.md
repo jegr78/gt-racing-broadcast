@@ -77,3 +77,10 @@ A read-only check on a copied real recording rebuilt 21 index rows, recognized
 one completed session and packaged three usable laps in 349,791 detail bytes
 and 4,805 summary bytes. Index and package preparation took 4.75 seconds locally.
 The original recording and analysis examples were not modified or bundled.
+
+Guard mutations separately removed partial-file, index-stamp, selection,
+completion, changed-source, selected-lap, usable-data, reference-profile,
+reference-compatibility, provider and package-limit checks. Each failed at the
+intended assertion, including semantic error form. Separate mutations restoring
+all stints, omitting reference notes and accepting all trace qualities failed
+privacy/preview/quality assertions. The committed implementation was restored.
