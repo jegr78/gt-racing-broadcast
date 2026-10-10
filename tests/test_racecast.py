@@ -1038,6 +1038,18 @@ def t_sector_variant_selection_is_session_scoped_and_preserves_notes_and_drafts(
         assert m.telemetry_lap_data(stem, '1', '3')['lap']['sector_variant_id'] == 'provisional-3'
 
 
+def t_comparison_pool_reports_larger_sector_sources_without_promoting_proposals():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        path = tgl.write_circle_recording(rec_dir)
+        stem = _stem(path)
+        m.telemetry_lap_data(stem, '1', '3')
+        pool = m.telemetry_laps_data(rec=stem, session='1', lap='3', track='ring01', car=str(tgl.CAR))
+        theory = pool.get('sector_theory')
+        assert theory and len(theory['best_sectors']) == 3, 'larger-sector pool must expose each best source'
+        assert all(s['source']['rec'] == stem and s['source']['lap'] >= 2 for s in theory['best_sectors'])
+        assert not theory['confirmed'], 'proposed divisions cannot become confirmed pool bests'
+
+
 def t_telemetry_lap_data_returns_the_trace():
     with _telemetry_sandbox() as (rec_dir, tgl):
         stem = _stem(tgl.write_circle_recording(rec_dir))

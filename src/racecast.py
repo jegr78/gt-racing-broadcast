@@ -3957,10 +3957,16 @@ def telemetry_laps_data(rec=None, session=None, track=None, car=None, build=True
         laps = [dict(l) for l in candidates if broader or
                 (gc.compatible(reference, l) if reference else l.get('comparison_eligible', True))]
         confirmed = bool(laps and all(l.get('context_confirmed') for l in laps))
+        import gt7_track_definitions as td
+        sector_reference = reference or next((l for l in laps if l.get('track_definition')), None)
+        sector_theory = (td.theoretical(laps, sector_reference['track_definition'],
+                                       sector_reference['sector_variant_id'])
+                         if sector_reference and sector_reference.get('track_definition') else None)
         return {"ok": True, "laps": laps, "context_confirmed": confirmed,
                 "comparison_warnings": (['Includes other conditions or roles'] if broader else []) +
                                        ([] if confirmed else ['Comparison conditions unconfirmed']), "unindexed": unindexed,
                 "data_version": _telemetry_data_version(),
+                "sector_theory": sector_theory,
                 "best_sectors": gt7_laps.best_sectors(laps),
                 "theoretical_best": gt7_laps.theoretical_best(laps)}
     except Exception as exc:

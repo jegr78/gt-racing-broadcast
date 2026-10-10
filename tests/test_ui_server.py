@@ -3015,6 +3015,19 @@ console.log(walk($('tm-summary')).filter(e=>e.className==='tmtile').map(e=>e.tex
         assert '0:15.200sector best' in out and 'theoretical best' not in out, 'larger sectors must govern the theoretical headline'
 
 
+def t_larger_sector_comparison_labels_the_best_source_and_confirmation():
+    out = _tm_node("""
+tmState.lapA=null;tmState.lapB=lap('R',3,16,7);
+tmState.lapB.track_definition={reviewed:false,version:1,numbering_scheme:'Proposal',corners:[],variants:[{id:'three',name:'Three',kind:'provisional'}]};
+tmState.lapB.larger_sectors={variant_id:'three',names:['S1'],times_s:[5],bounds_m:[0,100]};
+tmState.pool={sector_theory:{variant_id:'three',confirmed:false,best_sectors:[{name:'S1',time_s:4.5,source:{rec:'Other',session:2,lap:7,compound:'RM'}}]}};
+tmRenderLargerSectors();console.log($('tm-larger-sectors').kids.map(e=>e.textContent).join('|'));
+""")
+    if out is not None:
+        assert '0:04.500' in out and 'Other' in out and 'lap 7' in out and 'unconfirmed' in out, \
+            'sector comparison must identify its best source and provisional status'
+
+
 def t_map_editor_does_not_overwrite_a_reopened_draft_with_a_late_apply():
     out = _tm_node("""
 $('tm-editor-modal').querySelectorAll=()=>[];tmEditorStatus=()=>{};tmEditorRender=()=>{};

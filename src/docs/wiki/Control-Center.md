@@ -362,9 +362,31 @@ running relay.
   mini-sectors, green where B is faster and red where it is slower (the legend under the
   map). The table lists every mini-sector with its distance, the times of A and B, the gap
   and the best time of any comparable lap (purple where B set it); its last row
-  adds the theoretical best, the sum of the best mini-sectors. When the comparable laps
+  adds a diagnostic mini-sector sum. When the comparable laps
   end at different lengths, as on an unknown track, the last mini-sector's best and the
-  theoretical best show `—`, the same rule as the post-event report.
+  diagnostic sum show `—`, the same rule as the post-event report.
+- **Corners and larger sectors.** Reviewed markers have stable identities and show
+  turn numbers on the map. Grand Valley uses the publisher's 19 numbered corners;
+  the catalogue's count of 18 stays visible as a different source. Its supplied three
+  coaching sections are reviewed divisions, not verified GT7 timing splits. Other
+  layouts offer visibly unreviewed geometry proposals. Nominal track length and
+  reference-line distance are separate measurements.
+- **Edit track markers.** Open the map editor to edit turn number, name, direction
+  and entry/anchor/exit world coordinates, or click the map to move the selected
+  anchor. Add corners, connected combinations and named sector variants with any
+  supported number of boundaries. Changes remain drafts until **Apply shared
+  definition**. Definitions are shared across profiles on this machine; overrides
+  remain separate from the supplied base. A stale edit requires reloading.
+- **Sector definition.** Select a named division for this session. Verified reviewed
+  game splits take precedence by default when available; an explicit choice is kept.
+  Larger-sector bests show their source recording, session, lap and compound. A
+  confirmed ideal composition requires complete eligible timing, reviewed boundaries
+  and confirmed comparable conditions. Missing context or provisional divisions show
+  an unconfirmed sum. Entry speed across sector boundaries can prevent achieving the
+  composed time in one lap. Reports and exports retain the definition/version used;
+  later edits do not move spatial notes or rewrite saved outputs.
+
+![Control Center: shared track marker editor](images/cc-track-editor.png)
 - **Set track.** When racecast does not recognise the layout of a recording, or two
   layouts fit, pick it from the list. racecast assigns the recording to that layout. For
   a layout with a downloaded racing line, or the reverse of one, that is all. For any
@@ -377,7 +399,9 @@ The racing lines are not part of the package. Until racecast has downloaded them
 (`racecast gt7-data update`, or the first relay start with telemetry), it recognises
 only layouts learned with Set track, and every other recording starts as track unknown.
 
-> **CLI alternative:** `racecast telemetry export <name>` writes the same laps as CSV with a current `context.json` snapshot (excluding drafts and revision history);
+> **CLI alternative:** `racecast telemetry export <name>` writes laps/channels CSV,
+> `sectors.csv`, and current `context.json` and `track-definitions.json` snapshots
+> excluding drafts and revision history;
 > `racecast telemetry index` builds the missing lap caches ahead of time.
 
 ### Help & Docs

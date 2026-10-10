@@ -6417,6 +6417,11 @@ function tmRenderLargerSectors(){
  const compatible=A?.definition_fingerprint===B.definition_fingerprint&&A?.sector_variant_id===B.sector_variant_id;
  larger.names.forEach((name,i)=>{const row=document.createElement('p');const b=larger.times_s[i],a=compatible?A?.larger_sectors?.times_s[i]:null;
   row.textContent=name+' · '+(larger.bounds_m[i]/1000).toFixed(2)+'–'+(larger.bounds_m[i+1]/1000).toFixed(2)+' km · B '+tmTime(b)+(a!=null&&b!=null?' · A '+tmTime(a)+' · '+tmSigned(b-a)+' s':'');root.append(row);});
+ const theory=tmState.pool?.sector_theory;
+ if(theory?.variant_id===larger.variant_id){
+  for(const sector of theory.best_sectors||[]){const row=document.createElement('p'),source=sector.source||{};
+   row.className='sub';row.textContent=sector.name+' best '+tmTime(sector.time_s)+' · '+(theory.confirmed?'confirmed':'unconfirmed')+' · '+(source.rec||'unknown recording')+' · session '+source.session+' · lap '+source.lap+' · '+(source.compound||'unknown compound');root.append(row);}
+ }
  const metrics=document.createElement('details'),label=document.createElement('summary');label.textContent='Corner / combination measurements';metrics.append(label);
  for(const corner of B.corner_metrics||[]){const text=document.createElement('p');text.className='sub';text.textContent='T'+corner.number+(corner.name?' '+corner.name:'')+' · '+corner.direction+' · '+tmTime(corner.time_s)+' · entry / anchor / exit '+[corner.entry_speed_kmh,corner.anchor_speed_kmh,corner.exit_speed_kmh].map(v=>v==null?'unknown':v.toFixed(1)).join(' / ')+' km/h · min '+(corner.min_speed_kmh==null?'unknown':corner.min_speed_kmh.toFixed(1))+' km/h';metrics.append(text);}
  for(const combination of B.combination_metrics||[]){const text=document.createElement('p');text.className='sub';text.textContent=combination.name+' · '+combination.numbers.map(n=>'T'+n).join(' / ')+' · '+tmTime(combination.time_s);metrics.append(text);}

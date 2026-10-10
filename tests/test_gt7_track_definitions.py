@@ -187,6 +187,22 @@ def t_analysis_joins_definition_snapshots_without_mutating_raw_indexes():
         assert empty['laps'][0]['larger_sectors'], 'clearing optional selection metadata must preserve analysis'
 
 
+def t_verified_game_divisions_are_preferred_without_overriding_a_session_choice():
+    with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as bundle:
+        store = td.Store(root, bundle)
+        doc = definition()
+        game = copy.deepcopy(doc['variants'][0])
+        game.update(id='game-3', name='Verified game splits', kind='game', evidence='Own in-game split observation')
+        doc['variants'].append(game)
+        store.save(doc, 0)
+        raw = {'rec': 'R', 'laps': [lap(2, (4, 4, 4, 4))], 'open_lap': None}
+        assert td.annotate_index(raw, {}, store, fixture.FakeTracks())['laps'][0]['sector_variant_id'] == 'game-3', \
+            'verified game sectors should be the default when available'
+        context = {'track_definition': {'selections': {'1': {'layout_id': 'ring01', 'reverse': False, 'variant_id': 'coach-3'}}}}
+        assert td.annotate_index(raw, context, store, fixture.FakeTracks())['laps'][0]['sector_variant_id'] == 'coach-3', \
+            'an explicit session selection must retain its coaching division'
+
+
 def t_csv_export_freezes_applied_sector_and_definition_snapshots():
     import csv
     import json

@@ -358,7 +358,9 @@ def annotate_index(index, context, store, tracks, full_index=None):
         projected = definitions.get(key)
         if projected is not None:
             selected = selections.get(str(row['session']))
-            variant_id = projected['default_variant']
+            variant_id = next((v['id'] for v in projected['variants']
+                               if projected['reviewed'] and v['reviewed'] and v['kind'] == 'game'),
+                              projected['default_variant'])
             if selected:
                 if (not isinstance(selected, dict) or selected.get('layout_id') != layout
                         or selected.get('reverse') != identity['reverse']
