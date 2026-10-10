@@ -23,8 +23,10 @@ def window(path, index, lap, keys, axis='distance', start=0, end=None, tracks=No
     end = (min(MAX_WINDOW_S, lap['end_t_s']-lap['start_t_s']) if axis == 'time'
            else lap.get('length_m')) if end is None else end
     if any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v)
-           for v in (start, end)) or not 0 <= start < end:
-        raise ValueError('window bounds must be finite and ordered')
+           for v in (start, end)):
+        raise ValueError('window bounds must be finite numbers')
+    if not 0 <= start < end:
+        raise ValueError('window bounds must be ordered')
     if axis == 'time' and end-start > MAX_WINDOW_S:
         raise ValueError('raw time windows must not exceed 30 seconds')
     extent = lap['end_t_s']-lap['start_t_s'] if axis == 'time' else lap.get('length_m')

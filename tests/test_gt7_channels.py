@@ -185,7 +185,7 @@ def t_each_detail_resource_limit_reports_its_own_domain_failure():
             (['rpm']*0, 'time', 0, 1, 'between 1 and 8'),
             ([d['key'] for d in c.descriptors(False)[:9]], 'time', 0, 1, 'between 1 and 8'),
             (['rpm'], 'time', 0, 31, '30 seconds'),
-            (['rpm'], 'time', float('nan'), 1, 'finite and ordered'),
+            (['rpm'], 'time', float('nan'), 1, 'finite numbers'),
             (['rpm'], 'distance', 0, 1001, 'recorded lap')]
         for keys, axis, start, end, message in requests:
             try:
