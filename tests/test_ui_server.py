@@ -2638,7 +2638,7 @@ const all = walk(box, []);
 const tiles = all.filter(e => e.className === 'tmtile').map(e => e.textContent);
 const dots = all.filter(e => e.tagName === 'circle').map(e => (e.attrs || {}).class);
 const hit = all.filter(e => e.tagName === 'circle')[2];
-hit.onclick();
+if (typeof hit.onclick === 'function') hit.onclick();
 console.log([box.hidden, tiles.join(','), dots.join(','), tmState.b].join('|'));
 tmRenderSummary(null);
 console.log(String(box.hidden));""")

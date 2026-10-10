@@ -693,6 +693,7 @@ def t_telemetry_laps_data_summarises_a_recording_like_the_report():
         import report_telemetry as rtel
         a = tgl.write_circle_recording(rec_dir)
         d = m.telemetry_laps_data(rec=_stem(a))
+        assert d.get("summary") is not None, f"a recording answer carries its summary: {sorted(d)}"
         s = d["summary"]
         assert s["laps_total"] == 4 and len(s["groups"]) == 1, s
         g = s["groups"][0]
