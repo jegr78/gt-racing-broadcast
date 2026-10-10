@@ -536,9 +536,9 @@ def _memberships(stints, lap):
     def member(stint, lo, hi):
         if lo is not None and hi is not None and lo == hi:
             return
-        strategy = copy.deepcopy(stint.get('strategy', {})) if stint else {}
+        strategy = copy.deepcopy(stint.get('strategy', {})) if stint and stint.get('confirmed') else {}
         changes = sorted(stint.get('strategy_changes', []),
-                         key=lambda c: (c['lap'], c.get('recording_s') or -1)) if stint else []
+                         key=lambda c: (c['lap'], c.get('recording_s') or -1)) if stint and stint.get('confirmed') else []
         def append(segment_lo, segment_hi):
             out.append({'stint_id': stint.get('id') if stint else None,
                         'compound': stint.get('compound') if stint and stint.get('confirmed') else None,
@@ -608,6 +608,7 @@ def annotate(data, lap):
                   context_confirmed=confirmed, context_warnings=list(dict.fromkeys(warnings)),
                   analysis_role=role, strategy=strategy, strategies=strategies,
                   context_settings=copy.deepcopy(session.get('settings', {})),
+                  settings_confirmed=bool(session.get('confirmed')),
                   stint_id=stint.get('id') if stint else None,
                   tyre_age_laps=n - tyre_stints[-1]['start_lap'] if tyre_stints and compound else None,
                   comparison_eligible=bool(lap.get('pace_eligible', lap.get('status') in ('counted', 'reference'))
@@ -621,7 +622,8 @@ def compatible(reference, candidate):
         return False
     if reference.get('compound') and candidate.get('compound') != reference['compound']:
         return False
-    sa, sb = reference.get('context_settings', {}), candidate.get('context_settings', {})
+    sa = reference.get('context_settings', {}) if reference.get('settings_confirmed', True) else {}
+    sb = candidate.get('context_settings', {}) if candidate.get('settings_confirmed', True) else {}
     if any(sa.get(k) is not None and sb.get(k) is not None and sa[k] != sb[k]
            for k in ('bop', 'fixed_setup', 'tyre_x', 'fuel_x', 'time_progression', 'time_of_day')):
         return False

@@ -102,13 +102,16 @@ async function tcSave() {
  const ok=await tc.pending;tc.pending=null;return ok;
 }
 async function tcAction(action, extra={}) {
- if(!await tcSave()||!tc.doc)return;
  const gen=tc.generation,target=tc.target;
+ if(!await tcSave()||!tc.doc||gen!==tc.generation||target!==tc.target)return;
  if((action==='restore'&&!Number.isInteger(extra.revision))||(['apply-template','delete-template'].includes(action)&&!extra.template_id))return;
  const payload={rec:tc.target,profile:tc.reply.profile,source_id:tc.doc.source_id,
   expected_revision:tc.doc.revision,action,...extra};
+ const controls=[...$('tm-context-modal').querySelectorAll('button,input,select,textarea')].filter(e=>e.id!=='tc-close');
+ const disabled=controls.map(e=>e.disabled);controls.forEach(e=>e.disabled=true);
  let d;try{const r=await fetch('/api/telemetry/context',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});d=await r.json();}
  catch(_e){tcStatus('Could not apply the change',true);return;}
+ finally{controls.forEach((e,i)=>e.disabled=disabled[i]);}
  if(gen!==tc.generation||target!==tc.target)return;
  if(!d.ok){tcStatus(d.error||'Could not apply the change',true);return;}
  tc.reply=d;tc.doc=d.context;tc.data=tcClone(d.context.data);tc.draft=tcClone(d.context.draft||{});

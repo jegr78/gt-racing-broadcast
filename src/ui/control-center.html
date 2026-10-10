@@ -6229,7 +6229,7 @@ assetsLoaded = true; fetchAssetFiles();
 
 <div class="ovmodal" id="tm-context-modal" role="dialog" aria-modal="true" aria-labelledby="tc-title" hidden>
  <div class="ovmodal-card"><div class="ovmodal-head"><b id="tc-title">Telemetry context &amp; notes</b><span id="tc-status" class="sub"></span>
-  <button style="margin-left:auto" onclick="tcClose()">Close</button></div>
+  <button id="tc-close" style="margin-left:auto" onclick="tcClose()">Close</button></div>
  <div class="ovmodal-body">
   <div class="tcgrid"><label class="tcfield">Context for<select id="tc-target" onchange="tcSelectTarget(this.value)"></select></label>
    <label class="tcfield">GT7 session<select id="tc-session" onchange="tc.session=this.value;tcRender()"></select></label>

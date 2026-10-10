@@ -2568,9 +2568,9 @@ tmPick('a', tmKey(tmState.recLaps[1]));
 console.log($('tm-laps').kids.map(r => r.className).join('|'));""")
     if out is not None:
         rows, times, titles, after = out.strip().split("\n")
-        assert rows == ("tmitem nc=Lap 0not for pace0:06.000paused, loading or off track|"
-                        "tmitem=Lap 1best so far1:56.000|tmitem sel=Lap 2pace1:57.000|"
-                        "tmitem is-a=Lap 3best so far1:50.000|tmitem=Lap 4pace1:51.000Other Car"), \
+        assert rows == ("tmitem nc=Lap 0not for pace0:06.000Start fuel unknown · Tyre age unknown · paused, loading or off track|"
+                        "tmitem=Lap 1best so far1:56.000Start fuel unknown · Tyre age unknown|tmitem sel=Lap 2pace1:57.000Start fuel unknown · Tyre age unknown|"
+                        "tmitem is-a=Lap 3best so far1:50.000Start fuel unknown · Tyre age unknown|tmitem=Lap 4pace1:51.000Start fuel unknown · Tyre age unknown · Other Car"), \
             f"one line per lap; a car shows only where it differs from the recording: {rows!r}"
         assert times == "tmtime|tmtime|tmtime|tmtime best|tmtime", \
             f"the fastest counted lap is marked: {times!r}"
@@ -2840,6 +2840,22 @@ tc.pending=Promise.resolve(false);
 """)
     if out is not None:
         assert json.loads(out) == {'ok': False, 'calls': 0, 'dirty': True}
+
+
+def t_context_action_does_not_follow_a_target_switch_while_waiting_for_save():
+    with open(os.path.join(ROOT, 'src', 'ui', 'telemetry-context.js'), encoding='utf-8') as f:
+        script = f.read()
+    out = _run_js(script + """
+let calls=0, release;
+global.fetch=async()=>{calls++;return {json:async()=>({ok:false})}};
+global.$=()=>({textContent:'',className:''});
+tc.doc={revision:0};tc.reply={profile:'p'};tc.data={};
+tcSave=()=>new Promise(resolve=>{release=resolve});
+(async()=>{const action=tcAction('restore',{revision:0});tc.generation++;tc.target='another';
+release(true);await action;console.log(calls);})();
+""")
+    if out is not None:
+        assert out.strip() == '0', 'queued action must retain its original recording identity'
 
 
 def t_telemetry_open_recording_is_not_indexed_on_load():

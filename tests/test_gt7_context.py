@@ -243,6 +243,21 @@ def t_midlap_strategy_changes_preserve_both_segments():
     assert row['lap_role'] == 'regular' and row['analysis_role'] == 'regular'
 
 
+def t_unconfirmed_proposals_cannot_exclude_measured_comparisons():
+    proposed = data()
+    proposed['sessions']['1']['confirmed'] = False
+    proposed['sessions']['1']['settings']['fuel_x'] = 99
+    proposed['sessions']['1']['stints'][0]['confirmed'] = False
+    lap = {'session': 1, 'lap': 8, 'start_t_s': 700, 'end_t_s': 800,
+           'lap_role': 'regular', 'pace_eligible': True}
+    unknown = c.annotate(proposed, lap)
+    reference = c.annotate({}, lap)
+    reference['context_settings'] = {'fuel_x': 4}
+    reference['settings_confirmed'] = True
+    assert c.compatible(reference, unknown), 'proposed conditions must not govern comparisons'
+    assert unknown['strategy'] == {}, 'unconfirmed stint strategy remains a proposal'
+
+
 if __name__ == '__main__':
     for name, fn in sorted(globals().copy().items()):
         if name.startswith('t_') and callable(fn):
