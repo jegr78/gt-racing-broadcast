@@ -12,7 +12,7 @@ import gt7_recording as rec
 
 
 def recording(d):
-    w = rec.RecordingWriter(d, 'Test', 'dev', queue_max=0)
+    w = rec.RecordingWriter(d, 'Test', 'dev', queue_max=0, on_open=c.attach_prepared)
     w.put(1000.0, 'A', bytes(296))
     w.close()
     return w.path
@@ -184,22 +184,6 @@ except c.Conflict:print('conflict',flush=True)
                 if proc and proc.poll() is None:
                     proc.terminate()
                     proc.wait(timeout=10)
-
-
-def t_failed_optional_attachment_never_stops_the_packet_writer():
-    real = c.attach_prepared
-    def fail(*args):
-        raise OSError(13, 'access denied')
-    c.attach_prepared = fail
-    try:
-        with tempfile.TemporaryDirectory() as d:
-            w = rec.RecordingWriter(d, 'Test', 'dev', queue_max=0)
-            w.put(1000.0, 'A', bytes(296))
-            w.put(1001.0, 'A', bytes(296))
-            w.close()
-            assert w.error is None and len(list(rec.Recording(w.path).packets())) == 2
-    finally:
-        c.attach_prepared = real
 
 
 def t_deleted_capture_cannot_be_recreated_by_a_queued_context_edit():

@@ -16,6 +16,8 @@ import tempfile
 import threading
 import time
 
+import gt7_recording
+
 FORMAT = 'racecast-telemetry-context'
 VERSION = 1
 MAX_BYTES = 1024 * 1024
@@ -338,7 +340,6 @@ def _profile_root(recdir):
 
 def source_identity(path):
     """Stable across .part finalization and file copies; legacy captures use their first record."""
-    import gt7_recording
     rec = gt7_recording.Recording(path)
     identity = rec.header.get('recording_id')
     if isinstance(identity, str) and re.fullmatch('[0-9a-f]{32}', identity):

@@ -11,6 +11,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, 'src', 'scripts'))
 import gt7_channels as c
 import gt7_channel_detail as detail
+import gt7_export as gx
 import gt7_recording as r
 import test_gt7_laps as fixture
 
@@ -99,7 +100,7 @@ def t_csv_preserves_legacy_columns_and_exports_confirmed_states_with_optional_di
     with tempfile.TemporaryDirectory() as td:
         path = fixture.write_circle_recording(td, n=100)
         out = os.path.join(td, 'export')
-        r.export_csv(path, out, diagnostics=True)
+        gx.export_csv(path, out, diagnostics=True)
         with open(os.path.join(out, 'samples.csv'), newline='', encoding='utf-8') as f:
             rows = list(csv.DictReader(f))
         expected = ('t_s', 'session', 'lap', 'lap_t_s', 'lap_dist_m', 'on_track', 'paused', 'speed_kmh',
@@ -118,7 +119,7 @@ def t_csv_preserves_legacy_columns_and_exports_confirmed_states_with_optional_di
             raw = list(csv.DictReader(f))
         assert len(raw) == len(rows) and raw[0]['raw_0x12c__raw'] == '0x00000000'
         other = os.path.join(td, 'normal-only')
-        r.export_csv(path, other)
+        gx.export_csv(path, other)
         assert not os.path.exists(os.path.join(other, 'diagnostics.csv'))
 
 

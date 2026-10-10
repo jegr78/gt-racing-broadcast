@@ -216,7 +216,7 @@ def t_verified_game_divisions_are_preferred_without_overriding_a_session_choice(
 def t_csv_export_freezes_applied_sector_and_definition_snapshots():
     import csv
     import json
-    import gt7_recording
+    import gt7_export
     with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as bundle:
         path = fixture.write_circle_recording(root)
         idx = fixture._index(path)
@@ -224,7 +224,7 @@ def t_csv_export_freezes_applied_sector_and_definition_snapshots():
         store.save(definition(), 0)
         analysed = td.annotate_index(idx, {}, store, fixture.FakeTracks())
         output = os.path.join(root, 'export')
-        gt7_recording.export_csv(path, output, track_analysis=analysed)
+        gt7_export.export_csv(path, output, track_analysis=analysed)
         with open(os.path.join(output, 'track-definitions.json'), encoding='utf-8') as f:
             snapshot = json.load(f)
         with open(os.path.join(output, 'sectors.csv'), newline='', encoding='utf-8') as f:
