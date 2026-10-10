@@ -2955,6 +2955,25 @@ console.log(JSON.stringify([tc.loading,control.disabled,tc.open]));})();
             'closing an unfinished load must release controls before reopening'
 
 
+def t_closing_during_context_action_does_not_disable_the_reopened_editor():
+    with open(os.path.join(ROOT, 'src', 'ui', 'telemetry-context.js'), encoding='utf-8') as f:
+        script = f.read()
+    out = _run_js(script + """
+const control={id:'tc-target',disabled:false};const els={};global.$=id=>els[id]||=({hidden:false,value:'A',querySelectorAll(){return [control]}});
+global.localStorage={getItem(){return null;}};global.tmState={rec:'A'};tcRender=()=>{};tcStatus=()=>{};
+tc.open=true;tc.target='A';tc.doc={revision:1,source_id:'id'};tc.reply={profile:'p'};tc.data={notes:[],sessions:{}};
+let actionReply,loadReply;global.fetch=()=>new Promise(r=>actionReply=r);global.tmGet=()=>new Promise(r=>loadReply=r);
+(async()=>{const action=tcAction('restore',{revision:0});await Promise.resolve();await Promise.resolve();
+await tcClose();tc.open=true;const load=tcLoad('A');actionReply({json:async()=>({ok:false})});await action;
+const stillLoading=control.disabled;
+loadReply({ok:true,profile:'p',context:{revision:1,source_id:'id',data:{notes:[],sessions:{}},draft:{}},sessions:['1']});
+await load;console.log(JSON.stringify([stillLoading,tc.loading,control.disabled,tc.open]));})();
+""")
+    if out is not None:
+        assert json.loads(out) == [True, False, False, True], \
+            'cancelled actions must neither unlock a new load nor keep its controls disabled'
+
+
 def t_telemetry_open_recording_is_not_indexed_on_load():
     tm = _tm_script(_cc_page())
     load = _tm_fn(tm, "tmLoad")
