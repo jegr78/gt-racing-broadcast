@@ -35,7 +35,7 @@ def t_preview_and_explicit_confirmed_start():
         assert preview['can_start'] and preview['confirm_preview']
         assert preview['manifest']['transmission'] and all(a.calls==0 for a in adapters)
         failure(lambda:control.start(payload),'preview_required')
-        failure(lambda:control.start(dict(payload,confirm_preview='0'*64)),'preview_changed')
+        failure(lambda:control.start(dict(payload,confirm_preview='0'*64),background=False),'preview_changed')
         started=control.start(dict(payload,confirm_preview=preview['confirm_preview']),background=False)
         assert started['state']=='awaiting_validation' and adapters[-1].calls==1
         assert control.job(started['id'])['profile']=='profile'

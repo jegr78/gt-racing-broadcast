@@ -38,6 +38,9 @@ def t_route_and_foreign_origin():
         code,doc=request(port,'/api/ai/job?id=abc',headers={'Host':'foreign.example.test'})
         assert code==403 and doc['error']['code']=='foreign_origin'
         assert len(calls)==before
+        code,doc=request(port,'/api/ai/job?id=abc',headers={'Origin':'http://localhost:1'})
+        assert code==403 and doc['error']['code']=='foreign_origin'
+        assert len(calls)==before
         code,doc=request(port,'/api/ai/preview',[])
         assert code==400 and doc['error']['code']=='invalid_json'
     finally:server.shutdown();server.server_close()
