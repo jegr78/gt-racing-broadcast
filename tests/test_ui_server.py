@@ -2888,6 +2888,55 @@ console.log(stint.strategy.targets['2']);
         assert original == '6000', 'editing a later strategy must not overwrite stint defaults'
 
 
+def t_context_draft_survives_reload_when_local_storage_is_unavailable():
+    with open(os.path.join(ROOT, 'src', 'ui', 'telemetry-context.js'), encoding='utf-8') as f:
+        script = f.read()
+    out = _run_js(script + """
+const els={};global.$=id=>els[id]||=( {hidden:false,value:'R',textContent:'',className:'',focus(){},querySelectorAll(){return []}});
+global.localStorage={setItem(){throw Error('quota');},getItem(){throw Error('disabled');},removeItem(){}};
+global.tmState={rec:'R'};tcRender=()=>{};tcStatus=()=>{};
+tc.target='R';tc.doc={source_id:'same',revision:1};tc.reply={profile:'p'};
+tc.data={notes:[{text:'unsaved'}],sessions:{}};tc.draft={fuel:'1e'};tc.dirty=true;tcKeepDraft();
+global.tmGet=async()=>({ok:true,profile:'p',context:{source_id:'same',revision:1,data:{notes:[],sessions:{}},draft:{}},sessions:['1']});
+(async()=>{tc.open=true;await tcLoad('R');clearTimeout(tc.timer);console.log(JSON.stringify([tc.data.notes,tc.draft,tc.dirty]));})();
+""")
+    if out is not None:
+        assert json.loads(out) == [[{'text': 'unsaved'}], {'fuel': '1e'}, True], \
+            'failed persistent backup must retain the draft in this window'
+
+
+def t_failed_context_load_does_not_retarget_the_previous_editor_data():
+    with open(os.path.join(ROOT, 'src', 'ui', 'telemetry-context.js'), encoding='utf-8') as f:
+        script = f.read()
+    out = _run_js(script + """
+const els={};global.$=id=>els[id]||=( {hidden:false,value:'B',textContent:'',className:'',querySelectorAll(){return []}});
+global.tmState={rec:'A'};global.tmGet=async()=>({ok:false,error:'unreadable'});tcStatus=()=>{};
+tc.target='A';tc.doc={source_id:'same',revision:1};tc.reply={profile:'p'};tc.data={notes:[],sessions:{}};
+(async()=>{tc.open=true;await tcLoad('B');console.log(JSON.stringify([tc.target,tc.doc.source_id,$('tc-target').value]));})();
+""")
+    if out is not None:
+        assert json.loads(out) == ['A', 'same', 'A'], \
+            'failed loading cannot relabel old data as another recording'
+
+
+def t_context_loading_blocks_saves_and_recording_copies_keep_separate_drafts():
+    with open(os.path.join(ROOT, 'src', 'ui', 'telemetry-context.js'), encoding='utf-8') as f:
+        script = f.read()
+    out = _run_js(script + """
+const els={};global.$=id=>els[id]||=({hidden:false,value:'B',querySelectorAll(){return []}});
+global.localStorage={setItem(){},getItem(){return null;}};global.tmState={rec:'A'};
+tcRender=()=>{};tcStatus=()=>{};tc.target='A';tc.doc={source_id:'same',revision:1};tc.reply={profile:'p'};
+tc.data={notes:[{text:'A draft'}],sessions:{}};tc.draft={};tc.dirty=true;tcKeepDraft();
+let resolve;global.tmGet=()=>new Promise(r=>resolve=r);global.fetch=()=>{throw Error('must not POST while loading');};
+(async()=>{tc.open=true;const loading=tcLoad('B');const saved=await tcSave();
+resolve({ok:true,profile:'p',context:{source_id:'same',revision:1,data:{notes:[],sessions:{}},draft:{}},sessions:['1']});
+await loading;clearTimeout(tc.timer);console.log(JSON.stringify([saved,tc.target,tc.data.notes,tc.dirty]));})();
+""")
+    if out is not None:
+        assert json.loads(out) == [False, 'B', [], False], \
+            'loading must prevent saves and copied recordings must not share editor drafts'
+
+
 def t_telemetry_open_recording_is_not_indexed_on_load():
     tm = _tm_script(_cc_page())
     load = _tm_fn(tm, "tmLoad")

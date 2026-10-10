@@ -1,6 +1,6 @@
 /* Recording-owned context, optional preparation and profile templates. */
 const tc = {open:false, target:null, doc:null, data:null, draft:{}, reply:null, session:'1',
-  serial:0, dirty:false, pending:null, timer:null, generation:0, position:null};
+  serial:0, dirty:false, pending:null, timer:null, generation:0, position:null, backups:new Map(), loading:false};
 const TC_FIELDS = [
  ['title','Race / test name','text'], ['laps','Race laps','integer'], ['duration_min','Race duration (min)','number'],
  ['start_type','Start',[['','Unknown'],['rolling','Rolling'],['standing','Standing']]],
@@ -23,10 +23,13 @@ function tcStatus(text, error=false) { $('tc-status').textContent=text; $('tc-st
 function tcSession() {
  return tc.data.sessions[tc.session] ||= {settings:{},confirmed:false,stints:[],lap_roles:{}};
 }
-function tcLocalKey() { return tc.doc ? 'racecast-context-draft:'+String(tc.reply.profile)+':'+tc.doc.source_id : null; }
+function tcLocalKey() { return tc.doc ? 'racecast-context-draft:'+String(tc.reply.profile)+':'+tc.doc.source_id+':'+String(tc.target||'prepared').replace(/\.part$/, '') : null; }
 function tcKeepDraft() {
- try { if(tc.doc)localStorage.setItem(tcLocalKey(),JSON.stringify({revision:tc.doc.revision,data:tc.data,draft:tc.draft})); } catch(_e) { /* server draft saving remains available */ }
+ if(!tc.doc)return;
+ const backup=tcClone({revision:tc.doc.revision,data:tc.data,draft:tc.draft});tc.backups.set(tcLocalKey(),backup);
+ try { localStorage.setItem(tcLocalKey(),JSON.stringify(backup)); } catch(_e) { /* The in-window backup remains available. */ }
 }
+function tcBackup() { let backup=tc.backups.get(tcLocalKey());if(!backup)try{backup=JSON.parse(localStorage.getItem(tcLocalKey()));}catch(_e){}return backup; }
 function tcChanged() {
  tc.serial++;tc.dirty=true;tcKeepDraft();tcStatus('Saving…');clearTimeout(tc.timer);
  tc.timer=setTimeout(()=>tcSave(),650);
@@ -60,14 +63,18 @@ async function tcClose() {
  await tcSave();tc.open=false;tc.generation++;$('tm-context-modal').hidden=true;tc.returnFocus?.focus?.();
 }
 async function tcLoad(rec, before=null) {
- const gen=++tc.generation;tc.target=rec||null;if(tc.target!==tmState.rec)tc.position=null;tcStatus('Loading context…');
+ const gen=++tc.generation;tc.loading=true;tcStatus('Loading context…');
+ const controls=[...($('tm-context-modal').querySelectorAll?.('button,input,select,textarea')||[])].filter(e=>e.id!=='tc-close');
+ const disabled=controls.map(e=>e.disabled);controls.forEach(e=>e.disabled=true);
  const q=new URLSearchParams();if(rec)q.set('rec',rec);if(before!=null)q.set('before',before);
- const d=await tmGet('/api/telemetry/context?'+q);
+ let d;try{d=await tmGet('/api/telemetry/context?'+q);}catch(_e){d={ok:false,error:'Context unavailable'};}
+ finally{if(gen===tc.generation){tc.loading=false;controls.forEach((e,i)=>e.disabled=disabled[i]);}}
  if(gen!==tc.generation||!tc.open)return;
- if(!d.ok||!d.context){tcStatus(d.error||'Context unavailable',true);return;}
+ if(!d.ok||!d.context){$('tc-target').value=tc.target||'';tcStatus(d.error||'Context unavailable',true);return;}
+ tc.target=rec||null;if(tc.target!==tmState.rec)tc.position=null;
  tc.reply=d;tc.doc=d.context;tc.data=tcClone(tc.doc.data);tc.draft=tcClone(tc.doc.draft||{});tc.dirty=false;
  tc.session=d.sessions.includes(tc.session)?tc.session:d.sessions[0]||'1';
- let backup=null;try{backup=JSON.parse(localStorage.getItem(tcLocalKey()));}catch(_e){}
+ const backup=tcBackup();
  $('tc-local-draft').hidden=!backup;
  if(backup&&backup.revision===tc.doc.revision){tc.data=backup.data;tc.draft=backup.draft||{};tc.dirty=true;}
  tcRender();tcStatus(d.recording_active?'Recording continues; notes remain editable':
@@ -81,6 +88,7 @@ async function tcSelectTarget(value) {
 }
 async function tcSave() {
  clearTimeout(tc.timer);
+ if(tc.loading)return false;
  if(tc.pending){const ok=await tc.pending;if(!ok)return false;if(tc.dirty)return tcSave();return true;}
  if(!tc.doc||!tc.dirty)return true;
  const gen=tc.generation,serial=tc.serial,target=tc.target;
@@ -92,7 +100,7 @@ async function tcSave() {
   if(gen!==tc.generation)return d.ok;
   if(!d.ok){tcStatus(d.error||'Could not save context',true);return false;}
   const changed=d.context.revision!==tc.doc.revision;tc.doc=d.context;tc.reply=d;
-  if(serial===tc.serial){tc.dirty=false;try{localStorage.removeItem(tcLocalKey());}catch(_e){}}
+  if(serial===tc.serial){tc.dirty=false;tc.backups.delete(tcLocalKey());try{localStorage.removeItem(tcLocalKey());}catch(_e){}}
   else {tcKeepDraft();tc.timer=setTimeout(()=>tcSave(),400);}
   tcHistory();tcStatus(Object.keys(tc.draft).length?'Saved valid values; unfinished inputs retained as draft':
     'Saved · revision '+tc.doc.revision);
@@ -119,7 +127,7 @@ async function tcAction(action, extra={}) {
  if(tc.target===tmState.rec)await tmRefreshContext(tc.target);
 }
 function tcRestoreLocal() {
- let backup;try{backup=JSON.parse(localStorage.getItem(tcLocalKey()));}catch(_e){}
+ const backup=tcBackup();
  if(!backup)return;tc.data=backup.data;tc.draft=backup.draft||{};tcRender();tcChanged();
 }
 function tcRender() {
