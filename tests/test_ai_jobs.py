@@ -162,7 +162,7 @@ def t_cross_process_lease_and_prepared_snapshot_guard():
         assert adapter.calls==0
         (pkg/'unrelated.txt').unlink();(pkg/'detail.json').write_text('{}')
         result=runner.run(package(),pkg,adapter)
-        assert result['error']['code']=='invalid_package' and adapter.calls==0
+        assert result['state']=='failed' and result['error']['code']=='invalid_package' and adapter.calls==0
 
 
 def t_success_still_terminates_closed_stream_descendants():
