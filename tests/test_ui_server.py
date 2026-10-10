@@ -2989,6 +2989,20 @@ console.log(JSON.stringify([title,note.text,tc.draft['settings.1.title']?.length
         assert json.loads(out) == ['saved title', 'saved note', 2001, 16001], \
             'oversized text must remain draft while valid values remain saveable'
 
+def t_channel_detail_discards_answers_for_a_previous_lap_or_selection():
+    out = _tm_node("""
+$('tm-channel-box').open=true;tmState.lapA=null;tmState.lapB=lap('R',3,16,7);
+tmChannelState.catalog=[{key:'rpm',label:'RPM',unit:'rpm',diagnostic:false,type:'continuous'}];
+$('tm-channel-select').selectedOptions=[{value:'rpm'}];$('tm-channel-axis').value='time';
+$('tm-channel-start').value='0';$('tm-channel-end').value='2';
+let reply;tmGet=()=>new Promise(r=>reply=r);
+const pending=tmChannelLoad();await tick();tmState.lapB=lap('R',4,16,7);
+reply({ok:true,detail:{rows:[{t:1,rpm:6000}],channels:[{key:'rpm'}]}});await pending;
+console.log(JSON.stringify(tmChannelState.details));
+""")
+    if out is not None:
+        assert json.loads(out) is None, 'late raw detail must not appear under a different lap'
+
 
 def t_telemetry_open_recording_is_not_indexed_on_load():
     tm = _tm_script(_cc_page())
@@ -3896,6 +3910,27 @@ def t_telemetry_routes_stay_json_on_errors():
         assert code == 400, "a malformed body is refused"
         code, body = _post_json(port, "/api/telemetry/learn", {"rec": "r", "track_id": "suzuka01"})
         assert code == 200 and json.loads(body)["track"]["id"] == "suzuka01"
+    finally:
+        httpd.shutdown()
+
+
+def t_telemetry_channel_route_forwards_selected_windows_and_domain_errors():
+    ctx = _ctx()
+    calls = []
+    def channels(**kw):
+        calls.append(kw)
+        if kw.get('keys') == 'bad':
+            return {'ok': False, 'error': 'unknown telemetry channel'}
+        return {'ok': True, 'detail': {'rows': [{'rpm': 6000}], 'axis': kw.get('axis')}}
+    ctx['telemetry_channels'] = channels
+    httpd, port = _serve(ctx)
+    try:
+        code, body = _get(port, '/api/telemetry/channels?rec=R&session=1&lap=2&keys=rpm,gear&axis=time&start=1&end=2')
+        assert code == 200 and json.loads(body)['detail']['rows'] == [{'rpm': 6000}], body
+        assert calls[-1] == {'rec': 'R', 'session': '1', 'lap': '2', 'keys': 'rpm,gear',
+                             'axis': 'time', 'start': '1', 'end': '2'}
+        code, body = _get(port, '/api/telemetry/channels?keys=bad')
+        assert code == 400 and json.loads(body)['error'] == 'unknown telemetry channel', body
     finally:
         httpd.shutdown()
 

@@ -3927,6 +3927,39 @@ def telemetry_lap_data(rec, session, lap, build=True):
         return {"ok": False, "error": f"could not read the lap: {_telemetry_reason(exc, rec)}"}
 
 
+def telemetry_channels_data(rec=None, session=None, lap=None, keys=None, axis='distance', start=None, end=None):
+    """Catalog or bounded selected detail. HTTP never builds or replays a whole index."""
+    import gt7_channels
+    import gt7_channel_detail
+    if rec is None:
+        return {'ok': True, 'channels': gt7_channels.descriptors(), 'schema_version': gt7_channels.SCHEMA_VERSION}
+    try:
+        s, n = int(session), int(lap)
+        keys = keys.split(',') if isinstance(keys, str) else keys
+        low = 0 if start is None else float(start)
+        high = None if end is None else float(end)
+        path = _find_recording(_telemetry_rec_dir(), rec)
+        if not path:
+            return {'ok': False, 'error': f'no recording named {rec!r}'}
+        open_file = _relay_open_file()
+        if path.endswith('.part') or open_file and os.path.basename(path).startswith(open_file):
+            return {'ok': False, 'error': 'recording in progress: stop the recording to analyse it'}
+        idx = _telemetry_cached_full(path)
+        if idx is None:
+            return _telemetry_unindexed(rec)
+        rows = idx['laps'] + ([idx['open_lap']] if idx.get('open_lap') else [])
+        row = next((r for r in rows if r['session'] == s and r['lap'] == n), None)
+        if row is None:
+            return {'ok': False, 'error': f'no lap {n} in session {s} of {rec}'}
+        tracks, _cars = _telemetry_dbs()
+        detail = gt7_channel_detail.window(path, idx, row, keys or [], axis, low, high, tracks)
+        return {'ok': True, 'rec': rec, 'session': s, 'lap': n, 'detail': detail}
+    except (ValueError, TypeError) as exc:
+        return {'ok': False, 'error': str(exc)}
+    except Exception as exc:
+        return {'ok': False, 'error': 'could not read channel detail: ' + _telemetry_reason(exc, rec)}
+
+
 def telemetry_tracks_data():
     """Every GT7 layout for the Set track choice. Never raises."""
     try:
@@ -8018,6 +8051,7 @@ def run_ui(rest, fail=sys.exit, open_browser=True):
         "telemetry_recordings": telemetry_recordings_data,
         "telemetry_laps": telemetry_laps_data,
         "telemetry_lap": telemetry_lap_data,
+        "telemetry_channels": telemetry_channels_data,
         "telemetry_tracks": telemetry_tracks_data,
         "telemetry_learn": telemetry_learn_data,
         "telemetry_delete": telemetry_delete_data,

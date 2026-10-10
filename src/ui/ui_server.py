@@ -687,6 +687,14 @@ def make_handler(ctx):
                                        "error": f"could not read laps: {type(exc).__name__}"},
                                       code=500)
                 return self._json(result)
+            if path == "/api/telemetry/channels":
+                q = parse_qs(urlparse(self.path).query or "", keep_blank_values=True)
+                args = {k: v[0] for k, v in q.items() if k in {'rec', 'session', 'lap', 'keys', 'axis', 'start', 'end'}}
+                try:
+                    result = ctx['telemetry_channels'](**args)
+                except Exception as exc:
+                    return self._json({'ok': False, 'error': 'could not read channel detail: '+type(exc).__name__}, code=500)
+                return self._json(result, code=200 if result.get('ok') else 400)
             if path == "/api/telemetry/tracks":
                 try:
                     return self._json(ctx["telemetry_tracks"]())
