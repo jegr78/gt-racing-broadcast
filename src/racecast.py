@@ -3632,6 +3632,19 @@ def _telemetry_pool_indexes(rec_dir, build, only=None, report=None):
     return indexes, unindexed
 
 
+def _telemetry_summary(idx):
+    """The post-event report's telemetry figures for one recording, one group per track and
+    car, so the Telemetry view shows the report's numbers. Without the map: the view draws
+    its own. None when the recording has no laps."""
+    import report_telemetry
+    block = report_telemetry.telemetry_block([idx], (float("-inf"), float("inf")))
+    if block is None:
+        return None
+    groups = [{k: v for k, v in g.items() if k != "map"} for g in block["groups"]]
+    return {"laps_total": block["laps_total"], "laps_counted": block["laps_counted"],
+            "groups": groups}
+
+
 def telemetry_laps_data(rec=None, session=None, track=None, car=None, build=True):
     """One recording's laps (car None), or the counted laps comparable with a track and
     car across the profile's recordings. Arguments are query strings. Without `build`
@@ -3666,7 +3679,8 @@ def telemetry_laps_data(rec=None, session=None, track=None, car=None, build=True
                     return {"ok": False, "error": f"{rec} is not a readable recording"}
             head = {k: idx.get(k) for k in ("rec", "name", "started", "start_ts", "end_ts",
                                             "dropped", "track")}
-            return {"ok": True, "recording": head, "laps": [dict(lap) for lap in idx["laps"]]}
+            return {"ok": True, "recording": head, "laps": [dict(lap) for lap in idx["laps"]],
+                    "summary": _telemetry_summary(idx)}
         track_id = track or None
         stem = gr.recording_stem(rec) if rec else None
         if track_id is None and (stem is None or sess is None):

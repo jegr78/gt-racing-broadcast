@@ -102,6 +102,10 @@ def t_track_label_as_in_the_control_center():
         "Suzuka Circuit - Full Course"
     assert rtel.track_label({"track": "Nürburgring", "layout": ""}) == "Nürburgring"
     assert rtel.track_label({"track": "", "layout": ""}) == "Unknown track"
+    assert rtel.track_label({"track": "Grand Valley - Highway 1", "layout": "Highway 1"}) == \
+        "Grand Valley - Highway 1", "a layout already ending the track name is not repeated"
+    assert rtel.track_label({"track": "Grand Valley - Highway 1", "layout": "highway 1"}) == \
+        "Grand Valley - Highway 1"
 
 
 def t_block_figures():

@@ -2619,6 +2619,39 @@ console.log([cleared, shown, cells(t.kids[0])[0], cells(t.kids[1])[1]].join('|')
             f"legends follow the drawn lap and each sector names its distance: {out!r}"
 
 
+def t_telemetry_summary_shows_the_report_figures_and_a_clickable_trend():
+    page = _cc_page()
+    assert 'id="tm-summary"' in page, "the view carries the per-recording summary"
+    out = _tm_node("""
+const l = (n, t, status, st) => Object.assign(lap('R', n, t, 7), {status, start_t_s: st});
+tmState.recLaps = [l(1, 116, 'reference', 10), l(0, 6, 'not counted', 4), l(2, 110, 'counted', 130)];
+tmRenderSummary({laps_total: 3, laps_counted: 2, groups: [{
+  track: 'Grand Valley - Highway 1', car: "Nissan GT-R GT500 '99", laps_total: 3, laps_counted: 2,
+  best_s: 110.104, best_lap: {n: 3, lap: 2}, theoretical_s: 108.937, consistency_s: 1.9991,
+  fuel_per_lap_l: 7.744, tyre_avg_c: [78.61, 74.4, 71.6, 69.2],
+  trend: [{n: 1, lap: 0, time_s: 6, counted: false, best: false},
+          {n: 2, lap: 1, time_s: 116, counted: true, best: false},
+          {n: 3, lap: 2, time_s: 110.104, counted: true, best: true}]}]});
+const box = $('tm-summary');
+const walk = (e, out) => { out.push(e); (e.kids || []).forEach(k => walk(k, out)); return out; };
+const all = walk(box, []);
+const tiles = all.filter(e => e.className === 'tmtile').map(e => e.textContent);
+const dots = all.filter(e => e.tagName === 'circle').map(e => (e.attrs || {}).class);
+const hit = all.filter(e => e.tagName === 'circle')[2];
+hit.onclick();
+console.log([box.hidden, tiles.join(','), dots.join(','), tmState.b].join('|'));
+tmRenderSummary(null);
+console.log(String(box.hidden));""")
+    if out is not None:
+        first, second = out.strip().split("\n")
+        assert first == ("false|1:50.104best lap · lap 2,1:48.937theoretical best,"
+                         "± 1.999 sconsistency,7.74 Lfuel per lap,2 of 3counted laps,"
+                         "78.6 · 74.4 · 71.6 · 69.2 °Ctyres FL · FR · RL · RR|"
+                         "tm-tr nc,tm-tr,tm-tr best|R|1|2"), \
+            f"the summary repeats the report's figures and a trend dot picks lap B: {first!r}"
+        assert second == "true", "no summary hides the section"
+
+
 def t_telemetry_recording_rows_mark_open_files_and_unindexed_laps():
     tm = _tm_script(_cc_page())
     fn = tm[tm.index("function tmRenderRecs()"):tm.index("async function tmSelectRec(")]
