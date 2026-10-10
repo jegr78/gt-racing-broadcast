@@ -4,6 +4,7 @@ import copy
 import io
 import hashlib
 import json
+import shutil
 import sys
 import tempfile
 import zipfile
@@ -27,6 +28,7 @@ def result(package):
 def fail(fn,code='invalid_report'):
     try:fn()
     except r.ReportError as e:assert e.code==code,(e.code,code)
+    except Exception as e:raise AssertionError('expected semantic '+code+', got '+type(e).__name__) from e
     else:raise AssertionError('expected '+code)
 
 
@@ -58,6 +60,7 @@ def t_schema_measurement_reference_and_priorities():
             bad=copy.deepcopy(valid);bad['findings'][0][field]=value;variants.append(bad)
         for evidence in ({'fact_id':'unknown','value':1},{'fact_id':p['laps'][0]['id']+'/time_s','value':999},{'fact_id':p['laps'][0]['id']+'/time_s','value':True},{'fact_id':p['laps'][1]['id']+'/time_s','value':p['laps'][1]['metrics']['time_s']}):
             bad=copy.deepcopy(valid);bad['findings'][0]['evidence']=[evidence];variants.append(bad)
+        bad=copy.deepcopy(valid);bad['findings'][0].update(lap_id='unknown',evidence=[dict(fact_id='selection/mean_time_s',value=p['summary']['mean_time_s'])]);variants.append(bad)
         bad=copy.deepcopy(valid);bad['exercises']=bad['exercises'][:2];variants.append(bad)
         bad=copy.deepcopy(valid);bad['exercises'][1]['priority']=1;variants.append(bad)
         bad=copy.deepcopy(valid);bad['findings'][0]['measured_loss_s']=12;variants.append(bad)
@@ -80,6 +83,9 @@ def t_history_provenance_exports_and_profile_scope():
         assert found['report']['language']=='de' and found['package_fingerprint']==p['fingerprint']
         assert store.history(s.name)['runs'][0]['id']==run['id']
         other=r.Store(Path(d)/'other','other',Path(d)/'machine')
+        fail(lambda:other.get(run['id']),'not_found')
+        destination=Path(d)/'other/telemetry-analyses'/p['selection']['recording_id']/run['id']
+        shutil.copytree(run['directory'],destination)
         fail(lambda:other.get(run['id']),'not_found')
         fail(lambda:store.get('../outside'),'invalid_job')
         document=store.export(run['id'],'html',origin='http://127.0.0.1:8123')['bytes'].decode()
@@ -145,7 +151,7 @@ def t_incomplete_and_cancelled_runs_never_export_reports():
     with tempfile.TemporaryDirectory() as d:
         s,p,run,store=setup(d);directory=Path(run['directory']);meta=json.loads((directory/'run.json').read_text())
         for state in ('cancelled','failed','timed_out','awaiting_validation','running'):
-            doc=dict(meta,state=state,report=None);ai_jobs._save(directory/'run.json',doc)
+            doc=dict(meta,state=state,report=meta['report']);ai_jobs._save(directory/'run.json',doc)
             found=store.get(run['id']);assert found['report'] is None
             if state=='running':assert found['state']=='interrupted'
             fail(lambda:store.export(run['id'],'html'),'incomplete_report')

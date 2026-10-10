@@ -51,6 +51,17 @@ def _related(fact_id,lap_id,package):
     return fact_id.startswith(lap_id+'/')
 
 
+def fact_label(fact_id):
+    labels={'time_s':'Lap time (s)','gt7_time_s':'GT7 lap time (s)','relay_time_s':'Receiver lap time (s)',
+            'fuel_used_l':'Fuel used (L)','fuel_start_l':'Starting fuel (L)','fuel_end_l':'Ending fuel (L)',
+            'top_speed_kmh':'Top speed (km/h)','tyre_avg_c':'Mean tyre temperature (C)','length_m':'Lap length (m)',
+            'delta_s':'Observed time difference (s)','mean_time_s':'Mean selected lap time (s)',
+            'best_time_s':'Best selected lap time (s)','population_stddev_s':'Population standard deviation (s)',
+            'selected_gt7_total_s':'Sum of selected GT7 lap times (s)','usable_laps':'Usable lap count','excluded_laps':'Excluded lap count'}
+    short=re.sub(r'^[0-9a-f]+/session/[0-9]+/lap/[0-9]+/','',fact_id)
+    return labels.get(short,labels.get(fact_id.split('/')[-1],short.replace('/',' · ').replace('_',' ')))
+
+
 def validate(result,package):
     """Validate measurements/references; narrative interpretations remain unproven."""
     _schema(result,ai_package.RESULT_SCHEMA)
@@ -152,11 +163,14 @@ class Store:
             if checked!=run.get('report'):raise ReportError('invalid_artifact','Stored report differs from validated output')
             run.update(stale(package,self.source_factory) if check_stale and self.source_factory else dict(stale=False,reason=None))
         else:
-            run.update(stale=False,reason=None)
+            run.update(stale=False,reason=None,report=None)
             if run['state'] not in ai_jobs.TERMINAL:
                 status=ai_jobs.Runner(self.machine,self.root,self.profile).status(self.profile)
                 if not status['busy'] or not status['active'] or status['active'].get('id')!=job_id:
                     run.update(state='interrupted',progress='Process ended without a completed report; retained artifacts are incomplete')
+        if run.get('report'):
+            for item in run['report']['findings']+run['report']['exercises']:
+                for evidence in item['evidence']:evidence['label']=fact_label(evidence['fact_id'])
         return dict(run,ok=True)
     def history(self,rec=None):
         items=[]
@@ -170,6 +184,7 @@ class Store:
         return dict(ok=True,profile=self.profile,runs=items[:200])
     def export(self,job_id,kind,origin=None):
         if origin is not None:
+            if not isinstance(origin,str):raise ReportError('invalid_selection','Export links require the local Control Center origin')
             try:
                 parsed=urlparse(origin)
                 valid=(parsed.scheme=='http' and parsed.hostname in {'127.0.0.1','localhost','::1'}
@@ -226,7 +241,7 @@ def render(run,package,kind,origin=None):
                 if item.get('possible_causes'):out+=['Possible causes: '+_markdown('; '.join(item['possible_causes'])),'']
                 q=urlencode(dict({k:v for k,v in item['telemetry'].items() if v is not None},profile=run['profile']))
                 out+=['[Telemetry reference]('+linkbase+'/?'+q+'#telemetry)','', 'Validated package facts:','']
-                out += ['- '+_markdown(e['fact_id'])+': '+_markdown(e['value'])+' ('+_markdown(e['provenance'])+')' for e in item['evidence']]
+                out += ['- '+_markdown(e.get('label',fact_label(e['fact_id'])))+': '+_markdown(e['value'])+' ('+_markdown(e['provenance'])+')' for e in item['evidence']]
                 out+=['']
         out+=['## Limitations','']+['- '+_markdown(v) for v in report['limitations']]+['','## Provenance','','```json',json.dumps(provenance,indent=2,ensure_ascii=False),'```','']
         return '\n'.join(out)
@@ -241,7 +256,7 @@ def render(run,package,kind,origin=None):
             if item.get('possible_causes'):out+=['<p>Possible causes: '+esc('; '.join(item['possible_causes']))+'</p>']
             q=urlencode(dict({k:v for k,v in item['telemetry'].items() if v is not None},profile=run['profile']))
             out+=['<a href="'+esc(linkbase+'/?'+q+'#telemetry')+'">Telemetry reference</a><h4>Validated package facts</h4><ul>']
-            out+=['<li>'+esc(e['fact_id'])+': '+esc(e['value'])+' ('+esc(e['provenance'])+')</li>' for e in item['evidence']]
+            out+=['<li title="'+esc(e['fact_id'])+'">'+esc(e.get('label',fact_label(e['fact_id'])))+': '+esc(e['value'])+' ('+esc(e['provenance'])+')</li>' for e in item['evidence']]
             out+=['</ul></article>']
     out+=['<h2>Limitations</h2><ul>']+['<li>'+esc(v)+'</li>' for v in report['limitations']]+['</ul><h2>Provenance</h2><pre>'+esc(json.dumps(provenance,indent=2,ensure_ascii=False))+'</pre></body></html>']
     return '\n'.join(out)

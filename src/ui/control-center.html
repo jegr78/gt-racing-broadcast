@@ -5610,7 +5610,7 @@ async function tmDelete() {
   if (!row || row.recording) return;
   const laps = row.laps == null ? '' : ' (' + row.laps + ' laps)';
   if (!(await confirmModal('Delete the recording ' + rec + laps + '?\n'
-      + 'This removes the recording, its CSV export, lap index, AI analyses and their input packages. It cannot be undone.',
+      + 'This removes the recording, its context/history, CSV export, lap index, recording-owned AI analyses and their input packages. It cannot be undone.',
       {title: 'Delete recording', okLabel: 'Delete'}))) return;
   if (rec !== tmState.rec) return;                 // the selection moved while the dialog was open
   const btn = $('tm-del');

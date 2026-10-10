@@ -457,13 +457,16 @@ class Runner:
                     if tree:tree.close()
                     for reader in readers:reader.join(2)
         except KeyboardInterrupt:
+            state['report']=None
             state['error']={'code':'cancelled','message':'Analysis interrupted; consumed subscription quota is not recoverable'}
             self._update(directory,state,'cancelled',state['error']['message'])
         except (JobError,ai_agents.AgentError) as e:
+            state['report']=None
             state['error']={'code':e.code,'message':str(e)}
             phase=e.code if e.code in ('cancelled','timed_out') else 'failed'
             self._update(directory,state,phase,str(e))
         except Exception as e:
+            state['report']=None
             (directory/'runner-error.log').write_text(type(e).__name__+': '+str(e),encoding='utf-8')
             state['error']={'code':'execution_failed','message':'Analysis execution failed; inspect saved local diagnostics'}
             self._update(directory,state,'failed',state['error']['message'])

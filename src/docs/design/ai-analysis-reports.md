@@ -61,3 +61,9 @@ Self-review reproduced conflicting factual snapshots sharing a stable lap ID
 now refuses that ambiguity before inference, and validation independently refuses
 it as an invalid report. Identical copies retain the selected recording as their
 canonical telemetry view. Both failure paths have behavioral regression tests.
+
+
+A controlled persistence failure after validation exposed a completed report body
+on a failed run. Failure handlers now clear normal report bodies, and history
+independently hides any retained body unless the outcome is completed. Raw output
+and immutable inputs remain available for diagnosis/manual retry.
