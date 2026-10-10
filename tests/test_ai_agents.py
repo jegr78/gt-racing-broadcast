@@ -120,6 +120,7 @@ def t_output():
     result = claude.extract(json.dumps({'type':'result', 'is_error':False, 'structured_output':{'ok':True},
                                        'modelUsage':{'actual':{}}}), [])
     assert result['actual_model'] == 'actual'
+    assert claude.reported_model(json.dumps({'is_error':True,'modelUsage':{'reported-failed':{}}}))=='reported-failed'
     failure(lambda: claude.extract('{"is_error":true}', []), 'provider_failed')
     failure(lambda: claude.extract('{"permission_denials":[{}]}', []), 'approval_required')
     failure(lambda: claude.extract('{"result":"plain"}', []), 'invalid_output')
@@ -160,6 +161,20 @@ else:
         assert completed.returncode == 0
         assert cli.extract(Path(inv.output).read_text(), [json.loads(completed.stdout)])['result'] == {'ok':True}
 
+
+
+
+def t_codex_runtime_file_is_readable_without_exposing_parent():
+    with tempfile.TemporaryDirectory() as d:
+     root=Path(d);wrapper=root/'codex/bin/codex.js';wrapper.parent.mkdir(parents=True);wrapper.write_text('fixture')
+     binary=root/'codex/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex';binary.parent.mkdir(parents=True);binary.write_text('fixture')
+     unrelated=root/'unselected-private.txt';unrelated.write_text('not part of the runtime')
+     pkg=root/'package';out=root/'output';pkg.mkdir();out.mkdir();schema=pkg/'schema.json';schema.write_text('{}')
+     cli=a.Adapter(config(),which=lambda _:str(wrapper));probe=cli.probe(run=Fake(),env={});inv=cli.invocation(pkg,out,schema,probe)
+     permission=next(arg for arg in inv.argv if arg.startswith('permissions.racecast='))
+     assert json.dumps(str(binary.resolve()))+'="read"' in permission, 'Codex native runtime is hidden from its own sandbox'
+     assert str(unrelated) not in permission
+     assert json.dumps(str(binary.parent)) not in permission
 
 if __name__ == '__main__':
     for name, fn in sorted(globals().copy().items()):

@@ -20,7 +20,7 @@ import gt7_context
 
 MAX_OUTPUT_BYTES = 4*1024*1024
 TERMINAL = {'completed','awaiting_validation','failed','cancelled','timed_out'}
-ENV_KEYS = {'PATH','HOME','USERPROFILE','HOMEDRIVE','HOMEPATH','SYSTEMROOT','WINDIR',
+ENV_KEYS = {'PATH','HOME','USER','LOGNAME','USERNAME','USERPROFILE','HOMEDRIVE','HOMEPATH','SYSTEMROOT','WINDIR',
             'APPDATA','LOCALAPPDATA','PROGRAMFILES','PROGRAMFILES(X86)',
             'TEMP','TMP','TMPDIR','LANG','LC_ALL','CODEX_HOME','CLAUDE_CONFIG_DIR',
             'SSL_CERT_FILE','SSL_CERT_DIR','NODE_EXTRA_CA_CERTS','HTTPS_PROXY','HTTP_PROXY','NO_PROXY'}
@@ -220,7 +220,7 @@ def _diagnostic_code(text):
         return 'unavailable_model','The selected model is unavailable. Choose a model explicitly; no fallback was used.'
     if any(s in lower for s in ('rate limit','quota','usage limit')):
         return 'provider_limit','The provider rejected this run because of a limit. Retry deliberately when available.'
-    if any(s in lower for s in ('not logged in','authentication failed','login required')):
+    if any(s in lower for s in ('not logged in','authentication failed','login required','failed to refresh oauth token')):
         return 'logged_out','Log in with the provider subscription CLI externally.'
     return 'provider_failed','The provider invocation failed; inspect saved local diagnostics.'
 
@@ -385,6 +385,8 @@ class Runner:
                 if reader_errors:raise JobError('execution_failed','Could not retain provider diagnostics')
                 if overflow.is_set():raise JobError('output_limit','Provider diagnostics exceeded the output bound')
                 diagnostics=stderr.read_text(encoding='utf-8',errors='replace')
+                if adapter.provider=='claude':
+                    state['actual_model']=adapter.reported_model(stdout.read_text(encoding='utf-8',errors='replace'))
                 if proc.returncode:
                     code,message=_diagnostic_code(diagnostics+stdout.read_text(encoding='utf-8',errors='replace'))
                     raise JobError(code,message)
@@ -394,6 +396,7 @@ class Runner:
                         raise JobError('invalid_output','Provider omitted a bounded regular result file')
                     raw=regular_output_bytes(result_path).decode('utf-8','replace')
                 else:raw=stdout.read_text(encoding='utf-8',errors='replace')
+                state['actual_model']=adapter.reported_model(raw)
                 try:extracted=adapter.extract(raw,events)
                 except ai_agents.AgentError as e:
                     if e.code=='provider_failed':

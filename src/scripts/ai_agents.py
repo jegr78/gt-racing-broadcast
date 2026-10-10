@@ -155,6 +155,25 @@ def _probe_command(argv, run, env):
     return completed.returncode, (completed.stdout or completed.stderr).strip()
 
 
+def _codex_runtime_files(executable):
+    """Read only the CLI files required inside its own sandbox, never their parents."""
+    exe=Path(executable).resolve();files={str(exe)}
+    if exe.name=='codex.js' and exe.parent.name=='bin':
+        root=exe.parent.parent
+        for pattern in ('vendor/*/bin/codex*','node_modules/@openai/codex-*/vendor/*/bin/codex*'):
+            for binary in root.glob(pattern):
+                if binary.name in ('codex','codex.exe') and binary.is_file():files.add(str(binary.resolve()))
+        for binary in root.parent.glob('codex-*/vendor/*/bin/codex*'):
+            if binary.name in ('codex','codex.exe') and binary.is_file():files.add(str(binary.resolve()))
+    return sorted(files)
+
+
+def _codex_permissions(executable,package,output):
+    paths={':root':'deny',':minimal':'read',str(package):'read',str(output):'write'}
+    paths.update({p:'read' for p in _codex_runtime_files(executable)})
+    return 'permissions.racecast={filesystem={'+','.join(json.dumps(k)+'='+json.dumps(v) for k,v in paths.items())+'},network={enabled=false}}'
+
+
 class Adapter:
     def __init__(self, config, which=shutil.which):
         self.config = agent_config(config)
@@ -265,9 +284,7 @@ class Adapter:
                     '--output-last-message', str(result)]
             overrides = ['model_provider="openai"', 'forced_login_method="chatgpt"',
                          'approval_policy="on-request"', 'default_permissions="racecast"',
-                         'permissions.racecast={filesystem={":root"="deny",":minimal"="read",'
-                         + json.dumps(str(package)) + '="read",' + json.dumps(str(output))
-                         + '="write"},network={enabled=false}}', 'web_search="disabled"',
+                         _codex_permissions(self.executable,package,output), 'web_search="disabled"',
                          'features.hooks=false', 'features.plugins=false', 'features.apps=false',
                          'features.multi_agent=false', 'shell_environment_policy.inherit="none"']
             if not personal['instructions']:
@@ -285,9 +302,20 @@ class Adapter:
                     '--settings', '{"disableAllHooks":true}']
         return Invocation(argv, str(package), str(result), self.config['timeout'], self.provider)
 
+    def reported_model(self,raw):
+        """Preserve provider-reported metadata even when the run fails validation."""
+        if self.provider!='claude':return None
+        try:doc=json.loads(raw,parse_constant=_invalid_constant)
+        except (ValueError,RecursionError):return None
+        usage=doc.get('modelUsage') if isinstance(doc,dict) else None
+        if isinstance(usage,dict) and len(usage)==1:
+            model=next(iter(usage))
+            if isinstance(model,str) and model and len(model)<=200:return model
+        return None
+
     def extract(self, raw, events):
         """Return unvalidated structured data, never a normal telemetry report."""
-        actual = None
+        actual = self.reported_model(raw)
         if any(e.get('type') in ('error', 'turn.failed') for e in events if isinstance(e, dict)):
             raise AgentError('provider_failed', 'Provider reported a failed turn; inspect local diagnostics')
         try:
@@ -301,9 +329,6 @@ class Adapter:
                 raise AgentError('approval_required', 'Interactive permission required. Export the package and run the provider manually with scoped permissions.')
             if doc.get('is_error'):
                 raise AgentError('provider_failed', 'Provider reported an error; inspect local diagnostics')
-            usage = doc.get('modelUsage', {})
-            if isinstance(usage, dict) and len(usage) == 1:
-                actual = next(iter(usage))
             doc = doc.get('structured_output')
             if not isinstance(doc, dict):
                 raise AgentError('invalid_output', 'Provider omitted structured output')

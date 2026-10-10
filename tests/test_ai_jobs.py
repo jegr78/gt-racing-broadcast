@@ -70,6 +70,7 @@ else:
         self.calls+=1
         self.scratch_output=Path(out)
         return ai_agents.Invocation([sys.executable,str(self.script),self.behavior,str(Path(out)/'result.json')],str(pkg),str(Path(out)/'result.json'),self.config['timeout'],'codex')
+    def reported_model(self,raw):return None
     def extract(self,raw,events):return ai_agents.Adapter(dict(id='fake',name='Fake',provider='codex',model='exact')).extract(raw,events)
 
 
@@ -143,9 +144,9 @@ def t_timeout_and_clean_environment():
         result=runner.run(package(),pkg,FakeAdapter(d,'tree'))
         assert result['state']=='timed_out' and result['error']['code']=='timed_out'
         assert result['report'] is None
-        env=j.execution_env(dict(os.environ,RACECAST_CONSOLE_SECRET='private',OPENAI_API_KEY='private'))
+        env=j.execution_env(dict(os.environ,USER='fixture-user',RACECAST_CONSOLE_SECRET='private',OPENAI_API_KEY='private'))
         assert 'RACECAST_CONSOLE_SECRET' not in env and 'OPENAI_API_KEY' not in env
-        assert 'PATH' in env
+        assert 'PATH' in env and env.get('USER')=='fixture-user'
 
 
 def t_cross_process_lease_and_prepared_snapshot_guard():

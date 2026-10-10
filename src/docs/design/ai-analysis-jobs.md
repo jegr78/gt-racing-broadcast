@@ -55,3 +55,20 @@ also caught a Darwin zombie-only process-group signalling error: the runner now
 reaps an exited leader before signalling remaining descendants. No real provider
 inference or private recording was used for these fixtures. Windows native proof
 and all real subscription integrations are recorded with the release workflow.
+
+
+Real subscription probes exposed two installation/environment cases: Codex's npm
+native executable needs read permission for that exact installed file inside its
+own sandbox; no installation parent directory is permitted. Claude on macOS
+needs `USER` to find its existing keychain login. The runner preserves OS user
+identity and still removes provider/API and Racecast secrets. A Mac SSH session
+cannot read GUI keychain credentials, so native Claude tests ran in the user's
+local Terminal session without copying credentials. Codex 0.162.1 on Linux/macOS
+read a synthetic package value exactly while outside reads/writes stayed blocked.
+Claude 2.1.296 on macOS returned structured output with reported model
+`claude-haiku-5-5`; an outside-read attempt was separately rejected as
+`approval_required`. Single reported model metadata is retained even on failure.
+
+The full local suite also caught missing standalone-binary hidden imports for the
+four AI modules. These are registered in the build script, and the shared import
+cycle refactor from #835 has been integrated before final verification.
