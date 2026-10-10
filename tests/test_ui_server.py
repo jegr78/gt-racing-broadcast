@@ -2576,22 +2576,21 @@ console.log(one + '|' + $('tm-a').options.map(o => o.textContent).join(','));"""
 
 def t_telemetry_charts_label_the_value_range_and_the_final_delta():
     out = _tm_node("""
-const trace = ts => ts.map((t, i) => ({d: i * 5, t, speed_kmh: 100 + i, throttle: 50, brake: 0,
-                                       steer_deg: i - 1, gear: 3}));
+const trace = (ts, g) => ts.map((t, i) => ({d: i * 5, t, speed_kmh: 100 + 40 * i, throttle: 50,
+                                            brake: 0, steer_deg: i - 1, gear: g ? g[i] : 3}));
+const labels = cls => $('tm-charts').kids.filter(e => ((e.attrs || {}).class || '').startsWith(cls))
+  .map(e => (cls === 'tm-final' ? e.attrs.class + '=' : '') + e.textContent);
 tmState.lapA = {trace: trace([0, 1.1, 2.2])};
 tmState.lapB = {trace: trace([0, 1, 2, 3])};
 tmRenderCharts();
-const axis = [], fin = [];
-$('tm-charts').kids.forEach(e => {
-  const c = (e.attrs || {}).class || '';
-  if (c === 'tm-axis') axis.push(e.textContent);
-  if (c.startsWith('tm-final')) fin.push(c + '=' + e.textContent);
-});
-console.log(axis.join(',') + '|' + fin.join(','));""")
+const axis = labels('tm-axis'), fin = labels('tm-final');
+tmState.lapA = null;
+tmState.lapB = {trace: trace([0, 1, 2, 3], [6, 7, 7, 6])};
+tmRenderCharts();
+console.log([axis.join(','), fin.join(','), labels('tm-axis').slice(-1)].join('|'));""")
     if out is not None:
-        assert out.strip() == ("103,100,100,0,100,0,2,0,-2,3,+0.20,0,-0.20|"
-                               "tm-final gain=-0.200 s"), \
-            f"each panel labels its range top to bottom, delta its zero and final value: {out!r}"
+        assert out.strip() == ("220,100,100,0,100,0,2,0,-2,3,+0.20,0,-0.20|"
+                               "tm-final gain=-0.200 s|7"),             f"each panel labels its range top to bottom, delta its zero and final value; "             f"labels closer than 10 px keep only the upper (gear 7 over 6): {out!r}"
 
 
 def t_telemetry_map_and_sectors_carry_legends_and_distances():

@@ -474,7 +474,7 @@
   body:not(.tpl-commentary) .commentary-only, body:not(.tpl-pov) .pov-only { display: none; }
   /* Telemetry view (solo POV, #788): lap comparison drawn as inline SVG. */
   .view[data-view="telemetry"] { max-width:1480px; --tm-a:var(--warn); --tm-b:var(--link); }
-  .tmgrid { display:grid; grid-template-columns:270px minmax(0,1fr) 340px; gap:14px;
+  .tmgrid { display:grid; grid-template-columns:270px minmax(0,1fr) 384px; gap:14px;
             align-items:start; }
   .tmside, .tmmap { display:flex; flex-direction:column; gap:14px; min-width:0; }
   .tmsum { padding:10px 12px; margin:0 0 14px; }
@@ -485,7 +485,7 @@
             border:1px solid var(--line); border-radius:8px; }
   .tmtile b { font:600 18px var(--mono); font-variant-numeric:tabular-nums; }
   .tmtile span { color:var(--dim); font-size:11px; }
-  .tmtrend { flex:1 1 340px; min-width:0; height:auto; display:block; }
+  .tmtrend { flex:1 1 100%; min-width:0; height:auto; display:block; }
   .tmtrend text { font:10px var(--mono); fill:var(--faint); }
   .tmtrend line { stroke:var(--line); }
   .tm-tr { fill:var(--txt); cursor:pointer; }
@@ -561,7 +561,7 @@
   .tmset select { flex:1; min-width:0; font:12px var(--mono); }
   .tmnote { color:var(--dim); font:11px/1.5 var(--mono); margin:0 0 8px; }
   table.tmsec { font-size:12px; }
-  table.tmsec td, table.tmsec th { padding:4px 6px; text-align:right;
+  table.tmsec td, table.tmsec th { padding:4px 5px; text-align:right; white-space:nowrap;
                                    font-variant-numeric:tabular-nums; }
   table.tmsec td:first-child, table.tmsec th:first-child { text-align:left; }
   table.tmsec td.gain { color:#4ADE80; }
@@ -5239,7 +5239,7 @@ async function quitConfirm() {
 const TM_NS = 'http://www.w3.org/2000/svg';
 const tmState = {loaded: false, recs: [], rec: null, recLaps: [], pool: null,
                  a: null, b: null, lapA: null, lapB: null, sectorM: 200, tracks: null,
-                 chart: null, map: null, cursor: null, profile: null};
+                 chart: null, map: null, cursor: null, profile: null, summary: null};
 const tmLapCache = new Map();
 const TM_STEP = 5;                        // gt7_laps.STEP_M: one trace point per 5 m
 const TM_PAD = {l: 104, r: 10, t: 4, gap: 10, b: 22};
@@ -5412,6 +5412,7 @@ function tmClearPair(status) {
 // block per track and car, with the lap-time trend; a trend dot picks that lap as B.
 function tmRenderSummary(sum) {
   const box = $('tm-summary');
+  tmState.summary = sum || null;
   box.textContent = '';
   box.hidden = !(sum && sum.groups && sum.groups.length);
   if (box.hidden) return;
@@ -5454,7 +5455,9 @@ function tmTrend(parent, trend, ordered) {
   const pts = trend.filter(p => p.time_s != null && Number.isFinite(p.time_s));
   if (!pts.length) return;
   const svg = tmEl('svg', {class: 'tmtrend', role: 'img', 'aria-label': 'Lap time trend'}, parent);
-  const W = 520, H = 96, L = 58, R = 8, T = 8, Bm = 8;
+  // Drawn at the box's own width, so dots and labels keep their size (a hidden view: 900).
+  const W = Math.max(300, Math.round($('tm-summary').getBoundingClientRect().width) - 24 || 900);
+  const H = 96, L = 70, R = 10, T = 8, Bm = 8;
   svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
   const scale = pts.filter(p => p.counted).map(p => p.time_s);
   const ref = scale.length ? scale : pts.map(p => p.time_s);
@@ -5463,12 +5466,12 @@ function tmTrend(parent, trend, ordered) {
   lo -= m; hi += m;
   [[T, hi], [H - Bm, lo]].forEach(([y, v]) => {
     tmEl('line', {x1: L, x2: W - R, y1: y, y2: y}, svg);
-    tmEl('text', {x: L - 6, y: y + 3.5, 'text-anchor': 'end'}, svg).textContent = tmTime(v);
+    tmEl('text', {x: L - 10, y: y + 3.5, 'text-anchor': 'end'}, svg).textContent = tmTime(v);
   });
-  const step = (W - L - R) / Math.max(1, pts.length - 1);
+  const x0 = L + 8, step = (W - x0 - R) / Math.max(1, pts.length - 1);   // clear of the labels
   pts.forEach((p, i) => {
     const v = Math.min(hi, Math.max(lo, p.time_s));
-    const c = tmEl('circle', {cx: pts.length > 1 ? L + i * step : (L + W - R) / 2,
+    const c = tmEl('circle', {cx: pts.length > 1 ? x0 + i * step : (x0 + W - R) / 2,
       cy: T + (hi - v) / (hi - lo) * (H - T - Bm), r: p.best ? 5 : 3.5,
       class: 'tm-tr' + (p.best ? ' best' : p.counted ? '' : ' nc')}, svg);
     tmEl('title', {}, c).textContent = 'Lap ' + p.lap + ': ' + tmTime(p.time_s)
@@ -5593,6 +5596,7 @@ function tmRenderLaps() {
   const car = usual(l => l.car || ''), track = usual(tmLapTrack);
   const fast = laps.filter(l => l.status !== 'not counted' && l.time_s != null)
     .reduce((m, l) => (m && m.time_s <= l.time_s ? m : l), null);
+  let sel = null;
   laps.forEach(l => {
     const nc = l.status === 'not counted', key = tmKey(l);
     const b = document.createElement('button');
@@ -5621,7 +5625,15 @@ function tmRenderLaps() {
     }
     b.onclick = () => tmSelectB(l);
     box.appendChild(b);
+    if (key === tmState.b) sel = b;
   });
+  // Lap B is often the last lap: scroll the list, never the page, to keep it in view.
+  if (sel) {
+    const r = sel.getBoundingClientRect(), bx = box.getBoundingClientRect();
+    if (r.top < bx.top || r.bottom > bx.bottom) {
+      box.scrollTop += r.top - bx.top - (box.clientHeight - r.height) / 2;
+    }
+  }
 }
 
 // The fastest pool lap other than B: comparing a lap with itself shows nothing.
@@ -5847,8 +5859,11 @@ function tmRenderCharts() {
     }
     tmEl('text', {x: 4, y: top + 13}, svg).textContent = c.label;
     tmEl('text', {x: 4, y: top + 27, class: 'tm-unit'}, svg).textContent = c.unit;
+    let lastTy = -Infinity;
     tmTicks(c, vmin, vmax).forEach(v => {
       const ty = Math.max(top + 10, Math.min(top + c.h - 2, Y(v) + 3.5));
+      if (ty - lastTy < 10) return;                  // two labels would overlap: keep the upper
+      lastTy = ty;
       tmEl('text', {x: TM_PAD.l - 6, y: ty, 'text-anchor': 'end', class: 'tm-axis'}, svg)
         .textContent = tmTickText(c, v);
     });
@@ -5986,6 +6001,7 @@ function tmMapCursor(ra, rb) {
 
 // Redraws what a width change would distort; a hidden view (width 0) waits for showView.
 function tmRefit() {
+  if (tmState.summary) tmRenderSummary(tmState.summary);
   if (!tmState.lapB) return;
   const cw = Math.round($('tm-charts').getBoundingClientRect().width);
   if (cw && (!tmState.chart || Math.max(300, cw) !== tmState.chart.W)) tmRenderCharts();
@@ -6059,7 +6075,7 @@ $('tm-charts').addEventListener('pointermove', tmHover);
 $('tm-charts').addEventListener('pointerleave', tmLeave);
 let tmResizeQueued = false;
 window.addEventListener('resize', () => {
-  if (currentView !== 'telemetry' || !tmState.lapB || tmResizeQueued) return;
+  if (currentView !== 'telemetry' || !(tmState.lapB || tmState.summary) || tmResizeQueued) return;
   tmResizeQueued = true;
   requestAnimationFrame(() => { tmResizeQueued = false; tmRefit(); });
 });
