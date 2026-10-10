@@ -249,7 +249,7 @@ class _LapAccumulator:
     Only the latter may become a completed/reference lap (see _finalise_lap)."""
     __slots__ = ("t0", "elapsed", "distance", "samples", "clean", "last_t",
                  "fuel_start", "fuel_end", "started_at_boundary", "pit", "stopped_s",
-                 "why", "top_speed", "points", "next_point_m")
+                 "why", "reasons", "top_speed", "points", "next_point_m")
 
     def __init__(self, now, started_at_boundary=False):
         self.t0 = now
@@ -263,7 +263,8 @@ class _LapAccumulator:
         self.started_at_boundary = started_at_boundary
         self.pit = False
         self.stopped_s = 0.0
-        self.why = None               # first reason the lap went unclean or pit, for the log
+        self.why = None               # first reason retained for legacy consumers
+        self.reasons = []
         self.top_speed = 0.0
         self.points = []              # (x, z) every POINT_STEP_M (track recognition)
         self.next_point_m = 0.0
@@ -273,6 +274,8 @@ class _LapAccumulator:
             self.pit = True
         else:
             self.clean = False
+        if why not in self.reasons:
+            self.reasons.append(why)
         if self.why is None:
             self.why = why
 
@@ -372,7 +375,7 @@ class TelemetryEngine:
         if acc is not None:                # the lap in progress never finishes
             LOG.info("GT7 lap %s %s: not counted (session change)",
                      self._lap_num, _fmt_time(acc.elapsed))
-            self._emit_lap(acc, "not counted", "session change")
+            self._emit_lap(acc, "not counted", "session change", closed=False)
         self.session += 1
         LOG.info("GT7 session change (new lap counter %s): %s", pkt.lap,
                  "reference cleared" if self._ref is not None else "no reference yet")
@@ -396,6 +399,8 @@ class TelemetryEngine:
         elif (boundary := self._session_boundary(pkt)) is not None:
             self._reset_session(now, pkt, at_line=boundary == "line")
         elif pkt.lap != self._lap_num:    # lap-change edge: this new lap starts at the line
+            if self._acc is not None and now - self._acc.last_t > 2.0:
+                self._acc._reject("data gap over 2 s")
             self._finalise_lap()
             if self._acc is not None:     # bank the closing lap's driven distance
                 self._session_dist_m += self._acc.distance
@@ -474,16 +479,30 @@ class TelemetryEngine:
         """Metres driven in the current lap, integrated from speed; None before any packet."""
         return self._acc.distance if self._acc is not None else None
 
-    def _emit_lap(self, acc, status, reason):
-        if self.on_lap is None:
-            return
+    def _lap_record(self, acc, status, reason, closed=True):
         fuel = (acc.fuel_start - acc.fuel_end
                 if acc.fuel_start is not None and acc.fuel_end is not None else None)
         record = {"session": self.session, "lap": self._lap_num, "start": acc.t0,
                   "end": acc.last_t, "elapsed": acc.elapsed, "status": status,
                   "reason": reason, "fuel_used": fuel, "top_speed_mps": acc.top_speed,
                   "car_id": self._last.car_id if self._last is not None else None,
-                  "points": list(acc.points), "distance_m": acc.distance}
+                  "points": list(acc.points), "distance_m": acc.distance,
+                  "capture_complete": bool(closed and acc.started_at_boundary),
+                  "data_quality": "ok" if acc.clean else "interrupted",
+                  "pit": acc.pit,
+                  "reasons": list(dict.fromkeys(acc.reasons + ([reason] if reason else [])))}
+        return record
+
+    def open_lap_record(self):
+        """A read-only snapshot of the unfinished capture, never a completed GT7 lap."""
+        if self._acc is None:
+            return None
+        return self._lap_record(self._acc, "not counted", "recording ended mid-lap", closed=False)
+
+    def _emit_lap(self, acc, status, reason, closed=True):
+        if self.on_lap is None:
+            return
+        record = self._lap_record(acc, status, reason, closed)
         try:
             self.on_lap(record)
         except Exception as e:  # noqa: BLE001  a lap consumer must never stop the telemetry

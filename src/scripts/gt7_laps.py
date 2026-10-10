@@ -17,8 +17,9 @@ import gt7_telemetry
 
 STEP_M = 5.0
 SECTOR_M = 200.0
+MAX_TRACE_M = gt7_telemetry.MAX_SAMPLES * gt7_telemetry.SAMPLE_MIN_DIST
 COUNTED = ("reference", "counted")
-INDEX_VERSION = 4
+INDEX_VERSION = 5
 CACHE_SUFFIX = ".laps.json"
 DECIMATE_M = 2.0              # finer samples add nothing to a 5 m trace
 RESUME_CHECK = 64             # bytes before a resume point that must be unchanged to continue there
@@ -273,6 +274,9 @@ def _trace(samples, track_db, track_id, length, close=None):
         pts.append(s)
         ds.append(d)
     end = min(ds[-1], length) if length else ds[-1]
+    if (not math.isfinite(end) or not 0 <= end <= MAX_TRACE_M
+            or (close and (not math.isfinite(close[0]) or close[0] > MAX_TRACE_M))):
+        return []  # corrupt finite speed must not allocate millions of stations
     out, j = [], 0
     for i in range(int(end // STEP_M) + 1):
         x = i * STEP_M
@@ -286,8 +290,19 @@ def _trace(samples, track_db, track_id, length, close=None):
     while j + 1 < len(ds) and ds[j + 1] <= stop:
         j += 1
     last = _station(stop, pts, ds, j)
-    last["t"] = round(close[1], 3)
-    return out + [last]
+    # Receiver-clock samples and GT7's settled duration have different boundary
+    # delays. Reconcile the entire captured interval, not just its closing point.
+    # A valid boundary packet is included by _Replay, so interpolation reaches
+    # the line without flattening the last metres to the last pre-line sample.
+    first_t, span = out[0]["t"], last["t"] - out[0]["t"]
+    if not math.isfinite(span) or span <= 0:
+        return out  # no captured interval: do not invent a complete lap
+    full = out + [last]
+    for p in full:
+        p["t"] = round((p["t"] - first_t) * close[1] / span, 3)
+    full[0]["t"] = 0.0
+    full[-1]["t"] = round(close[1], 3)
+    return full
 
 
 def _track_info(found, track_db):
@@ -359,7 +374,14 @@ class _Replay:
         eng.update(pkt, wall_ts)
         for lap in self.laps[closed:]:
             times.lap_closed(lap, wall_ts)
-            self.lap_samples.append(self.cur if self.tail is None else self.cur + [self.tail])
+            samples = self.cur if self.tail is None else self.cur + [self.tail]
+            if lap["status"] in COUNTED:
+                dt = max(0.0, wall_ts - lap["end"])
+                boundary = _sample(pkt, wall_ts - lap["start"],
+                                   lap["distance_m"] + max(0.0, samples[-1][2] / 3.6 if samples else 0.0) * dt)
+                if boundary is not None:
+                    samples = samples + [boundary]
+            self.lap_samples.append(samples)
             self.lap_tyres.append(self.tyre)
             self.cur, self.tail, self.tyre = [], None, [0.0, 0.0, 0.0, 0.0, 0]
         times.update(pkt, wall_ts)
@@ -392,6 +414,51 @@ class _Replay:
                     started=rec.header.get("started", ""), check=check.hex())
 
 
+def _indexed_lap(stem, lap, samples, tyres, first, track_db, cars, found, open_lap=False,
+                 after_service=False):
+    track_id = found["id"] if found and "id" in found else None
+    length = track_db.line_length(track_id) if track_id is not None else None
+    relay = round(lap["elapsed"], 3)
+    gt7_s = lap.get("gt7_time_s")
+    time_s = None if open_lap else (gt7_s if gt7_s is not None else relay)
+    close = (length or (samples[-1][1] if samples else lap.get("distance_m")), time_s) \
+        if lap["status"] in COUNTED else None
+    trace = _trace(samples, track_db, track_id, length, close)
+    row = {
+        "rec": stem, "session": lap["session"], "lap": lap["lap"],
+        "start_t_s": round(lap["start"] - first, 3), "end_t_s": round(lap["end"] - first, 3),
+        "gt7_time_s": gt7_s, "relay_time_s": relay,
+        "time_s": time_s,
+        "status": lap["status"], "reason": lap["reason"],
+        "fuel_used_l": None if lap["fuel_used"] is None else round(lap["fuel_used"], 2),
+        "top_speed_kmh": round(lap["top_speed_mps"] * 3.6, 1),
+        "car_id": lap["car_id"], "car": gt7_recording.car_name(cars, lap["car_id"]),
+        "track_id": track_id,
+        "track": found["track"] if track_id is not None else "",
+        "layout": found["layout"] if track_id is not None else "",
+        "distance_m": round(lap.get("distance_m") or 0.0, 1),
+        "tyre_avg_c": [round(s / tyres[4], 1) if tyres[4] else 0.0 for s in tyres[:4]],
+        "points": [[round(x, 1), round(z, 1)] for x, z in lap.get("points") or []],
+        "length_m": lap_length_m({"trace": trace}),
+        "sectors": sectors(trace, lap_length_m({"trace": trace})),
+        "trace": trace}
+    complete_trace = bool(close and len(trace) >= 2 and trace[0]["d"] == 0.0
+                          and trace[-1]["d"] == round(close[0], 1))
+    time_valid = bool(complete_trace and trace[0]["t"] == 0.0
+                      and trace[-1]["t"] == round(close[1], 3)
+                      and all(math.isfinite(p["t"]) for p in trace)
+                      and all(a["t"] <= b["t"] for a, b in zip(trace, trace[1:], strict=False)))
+    row.update(capture_complete=lap["capture_complete"], trace_complete=complete_trace,
+               time_valid=time_valid,
+               data_quality=lap["data_quality"], reasons=lap["reasons"],
+               pace_eligible=lap["status"] in COUNTED and complete_trace and time_valid,
+               is_reference=lap["status"] == "reference", after_service=after_service,
+               lap_role=("pit" if lap["pit"] else "partial" if not lap["capture_complete"]
+                         else "first" if lap["lap"] == 1 else "regular"),
+               time_basis="lap-normalized receiver clock" if time_valid else "receiver clock")
+    return row
+
+
 def _build(path, track_db, cars, key, old=None):
     """The lap index; with `old` (a stale cache whose resume point the file still
     matches) only the bytes after that point are replayed."""
@@ -408,45 +475,37 @@ def _build(path, track_db, cars, key, old=None):
     stem = gt7_recording.recording_stem(path)
     first = replay.first
     for i, lap in enumerate(laps[replay.reused:]):
-        tyres = replay.lap_tyres[i]
-        found = by_session.get(lap["session"])
-        track_id = found["id"] if found and "id" in found else None
-        length = track_db.line_length(track_id) if track_id is not None else None
-        samples, replay.lap_samples[i] = replay.lap_samples[i], None    # free each lap's samples once traced
-        relay = round(lap["elapsed"], 3)
-        gt7_s = lap["gt7_time_s"]
-        time_s = gt7_s if gt7_s is not None else relay
-        close = (length or lap.get("distance_m"), time_s) if lap["status"] in COUNTED else None
-        trace = _trace(samples, track_db, track_id, length, close)
-        out.append({
-            "rec": stem, "session": lap["session"], "lap": lap["lap"],
-            "start_t_s": round(lap["start"] - first, 3), "end_t_s": round(lap["end"] - first, 3),
-            "gt7_time_s": gt7_s, "relay_time_s": relay,
-            "time_s": time_s,
-            "status": lap["status"], "reason": lap["reason"],
-            "fuel_used_l": None if lap["fuel_used"] is None else round(lap["fuel_used"], 2),
-            "top_speed_kmh": round(lap["top_speed_mps"] * 3.6, 1),
-            "car_id": lap["car_id"], "car": gt7_recording.car_name(cars, lap["car_id"]),
-            "track_id": track_id,
-            "track": found["track"] if track_id is not None else "",
-            "layout": found["layout"] if track_id is not None else "",
-            "distance_m": round(lap.get("distance_m") or 0.0, 1),
-            "tyre_avg_c": [round(s / tyres[4], 1) if tyres[4] else 0.0 for s in tyres[:4]],
-            "points": [[round(x, 1), round(z, 1)] for x, z in lap.get("points") or []],
-            "length_m": lap_length_m({"trace": trace}),
-            "sectors": sectors(trace, lap_length_m({"trace": trace})),
-            "trace": trace})
+        previous = laps[replay.reused + i - 1] if replay.reused + i else None
+        samples, replay.lap_samples[i] = replay.lap_samples[i], None
+        out.append(_indexed_lap(stem, lap, samples, replay.lap_tyres[i], first,
+                                track_db, cars, by_session.get(lap["session"]),
+                                after_service=bool(previous and previous["pit"]
+                                                   and previous["session"] == lap["session"])))
+    unfinished = replay.eng.open_lap_record()
+    open_lap = None
+    if unfinished is not None and (replay.cur or replay.tail):
+        samples = replay.cur if replay.tail is None else replay.cur + [replay.tail]
+        previous = laps[-1] if laps else None
+        open_lap = _indexed_lap(stem, unfinished, samples, replay.tyre, first,
+                                track_db, cars, by_session.get(unfinished["session"]),
+                                open_lap=True, after_service=bool(previous and previous["pit"]
+                                and previous["session"] == unfinished["session"]))
     return {"rec": stem, "name": os.path.basename(path),
             "started": rec.header.get("started", ""), "start_ts": first,
             "end_ts": replay.last, "dropped": replay.dropped,
             "track": _display_track(laps, by_session, track_db),
             "sessions": {str(s): _track_info(v, track_db) for s, v in by_session.items()},
-            "laps": out, "resume": replay.resume_point(rec)}
+            "laps": out, "open_lap": open_lap, "resume": replay.resume_point(rec)}
 
 
 def summary(lap):
     """A lap without its trace and positions, for lists."""
     return {k: v for k, v in lap.items() if k not in ("trace", "points")}
+
+
+def pace_eligible(lap):
+    """Explicit numerical eligibility, with compatibility for old caller-made summaries."""
+    return lap.get("pace_eligible", lap.get("status") in COUNTED)
 
 
 def pool(indexes, track_id, car_id, rec=None, session=None):
@@ -455,7 +514,7 @@ def pool(indexes, track_id, car_id, rec=None, session=None):
     out = []
     for idx in indexes:
         for lap in idx.get("laps", []):
-            if lap["status"] not in COUNTED or lap["car_id"] != car_id:
+            if not pace_eligible(lap) or lap["car_id"] != car_id:
                 continue
             if track_id is not None:
                 if lap["track_id"] != track_id:

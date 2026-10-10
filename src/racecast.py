@@ -3503,6 +3503,8 @@ def _telemetry_memo_put(path, stamp, idx):
     """Store the index without traces and points; returns that summary form."""
     import gt7_laps
     brief = dict(idx, laps=[gt7_laps.summary(lap) for lap in idx["laps"]])
+    if idx.get("open_lap") is not None:
+        brief["open_lap"] = gt7_laps.summary(idx["open_lap"])
     with _TELEMETRY_LOCK:
         _TELEMETRY_MEMO.pop(path, None)
         _TELEMETRY_MEMO[path] = (stamp, brief)
@@ -3714,7 +3716,10 @@ def telemetry_laps_data(rec=None, session=None, track=None, car=None, build=True
                     return {"ok": False, "error": f"{rec} is not a readable recording"}
             head = {k: idx.get(k) for k in ("rec", "name", "started", "start_ts", "end_ts",
                                             "dropped", "track")}
+            head["completed_laps"] = sum(bool(lap.get("capture_complete")) for lap in idx["laps"])
+            head["partial_segments"] = len(idx["laps"]) - head["completed_laps"] + bool(idx.get("open_lap"))
             return {"ok": True, "recording": head, "laps": [dict(lap) for lap in idx["laps"]],
+                    "open_lap": dict(idx["open_lap"]) if idx.get("open_lap") else None,
                     "summary": _telemetry_summary(idx)}
         track_id = track or None
         stem = gr.recording_stem(rec) if rec else None
@@ -3759,7 +3764,8 @@ def telemetry_lap_data(rec, session, lap, build=True):
                 idx = _telemetry_full_index(path)
             except gr.RecordingError:
                 return {"ok": False, "error": f"{rec} is not a readable recording"}
-        for row in idx["laps"]:
+        available = idx["laps"] + ([idx["open_lap"]] if idx.get("open_lap") else [])
+        for row in available:
             if row["session"] == s and row["lap"] == n:
                 return {"ok": True, "lap": {k: v for k, v in row.items() if k != "points"},
                         "step_m": gt7_laps.STEP_M, "sector_m": gt7_laps.SECTOR_M}

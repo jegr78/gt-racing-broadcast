@@ -1115,6 +1115,21 @@ def t_telemetry_delete_data_refuses_the_open_file_without_a_path():
         assert rec_dir not in d["error"], "machine paths stay server-side"
 
 
+def t_telemetry_exposes_an_open_capture_without_inventing_a_finished_lap():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        stem = _stem(tgl.write_circle_recording(rec_dir))
+        d = m.telemetry_laps_data(rec=stem)
+        assert len(d["laps"]) == 4
+        assert d["open_lap"]["lap"] == 5 and d["open_lap"]["time_s"] is None
+        tail = m.telemetry_lap_data(stem, "1", "5")
+        assert tail["ok"] and tail["lap"]["trace"]
+        assert not tail["lap"]["capture_complete"] and not tail["lap"]["pace_eligible"]
+        for _stamp, idx in m._TELEMETRY_MEMO.values():
+            assert "trace" not in idx["open_lap"] and "points" not in idx["open_lap"]
+        missing = m.telemetry_lap_data(stem, "1", "99")
+        assert missing["ok"] is False and missing["error"] == f"no lap 99 in session 1 of {stem}"
+
+
 def t_telemetry_memo_holds_summaries_and_lap_data_the_full_trace():
     with _telemetry_sandbox() as (rec_dir, tgl):
         stem = _stem(tgl.write_circle_recording(rec_dir))

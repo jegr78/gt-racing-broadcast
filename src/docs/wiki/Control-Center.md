@@ -279,6 +279,19 @@ running relay.
   recording, its CSV export and its lap index after a confirmation, the same as
   `racecast telemetry delete <name>`. It cannot be undone. The recording the relay is
   still writing cannot be deleted: stop the recording first.
+- **Capture and pace.** Every recorded segment remains selectable, including the
+  partial segment before the first lap and the unfinished segment after the last lap.
+  An unfinished segment shows captured seconds, not an invented completed lap time.
+  Capture completeness, distance-trace coverage and pace eligibility are separate.
+  Both `reference` and `counted` admit a regular lap; **best so far** marks a historical
+  live reference, not a stronger data-quality verdict. Pit laps show all detected
+  reasons. **After inferred service; tyres unconfirmed** identifies the next lap without
+  claiming a confirmed tyre change or warmup period.
+- **Lap clock.** Complete pace traces include the closing boundary sample. Their entire
+  receiver-clock interval is normalized to the matched GT7 lap duration, beginning at
+  zero and ending at that duration. This prevents a backwards final sector when receiver
+  timing differs from GT7. Raw packet times and GT7 lap times are preserved; this is a
+  reconciled comparison clock, not a claim that every network arrival was a simulation tick.
 - **Lap A and lap B.** Lap B is the lap you click. Lap A starts as the fastest counted
   lap other than B with the same track and car across all recordings of the profile.
   Both pickers list every comparable counted lap; B also shows the clicked lap when it

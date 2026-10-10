@@ -159,6 +159,77 @@ def t_trace_follows_the_racing_line_every_5_m():
             "a lap that is not counted keeps its own trace end"
 
 
+def t_trace_normalizes_the_whole_lap_clock_not_only_the_finish():
+    samples = [(0.017 + d * 110.191 / 5006.4, d, 180.0, 100.0, 0.0,
+                0.0, 4, d, 0.0) for d in (0.0, 1000.0, 3000.0, 5000.0, 5006.4)]
+    tr = gl._trace(samples, FakeTracks(known=False), None, 5006.4,
+                   close=(5006.4, 110.104))
+    assert tr[0]["t"] == 0.0, "a delayed first sample must not lose the start of the lap"
+    assert tr[-1]["t"] == 110.104, "GT7 remains the authoritative full-lap duration"
+    assert all(a["t"] <= b["t"] for a, b in zip(tr, tr[1:], strict=False)), \
+        "replacing only the endpoint makes the last stations run backwards"
+    assert abs(tr[200]["t"] - 110.104 * 1000 / 5006.4) < .001, \
+        "reconcile the entire clock, not just clamp the final sector"
+    secs = gl.sectors(tr, 5006.4)
+    assert min(secs) >= 0 and abs(sum(secs) - 110.104) < .001
+
+
+def t_corrupt_open_distance_is_visible_without_unbounded_resampling():
+    with tempfile.TemporaryDirectory() as d:
+        w = gt7_recording.RecordingWriter(d, "Solo", "dev", queue_max=0)
+        w.put(100.0, "~", _pkt(1, 100_000_000.0, 0.0))
+        w.put(101.0, "~", _pkt(1, 100_000_000.0, .1))
+        w.close()
+        real = gl._station
+        calls = []
+        def bounded(*args):
+            calls.append(1)
+            assert len(calls) <= 10, "unsafe distance entered an unbounded station loop"
+            return real(*args)
+        gl._station = bounded
+        try:
+            idx = _index(w.path, tracks=FakeTracks(known=False))
+        finally:
+            gl._station = real
+        assert not idx['laps'] and idx['open_lap']['lap'] == 1
+        assert not idx['open_lap']['trace'] and not idx['open_lap']['pace_eligible']
+        assert not calls, "reject the implausible distance before allocating stations"
+
+
+def t_geometric_trace_coverage_is_separate_from_clock_validity():
+    with tempfile.TemporaryDirectory() as d:
+        replay = gl._Replay()
+        replay.run(gt7_recording.Recording(write_circle_recording(d)))
+        lap = replay.laps[1]
+        samples = [(t, dist, 100.0, 100.0, 0.0, 0.0, 3, dist, 0.0)
+                   for t, dist in ((0.0, 0.0), (5.0, 100.0), (4.0, 200.0), (10.0, 300.0))]
+        row = gl._indexed_lap('test', lap, samples, [0, 0, 0, 0, 0], 0,
+                              FakeTracks(known=False), FakeCars(), None)
+        assert row['trace_complete'], "every distance station is present despite the backwards clock"
+        assert not row['time_valid'] and not row['pace_eligible']
+
+
+def t_index_separates_capture_pace_reference_and_the_open_tail():
+    with tempfile.TemporaryDirectory() as d:
+        idx = _index(write_circle_recording(d))
+        assert not _lap(idx, 1)["capture_complete"]
+        for n in (2, 3, 4):
+            lap = _lap(idx, n)
+            assert lap["capture_complete"] and lap["trace_complete"] and lap["pace_eligible"]
+            assert lap["is_reference"] == (lap["status"] == "reference")
+        tail = idx["open_lap"]
+        assert tail["lap"] == 5 and tail["gt7_time_s"] is None and tail["time_s"] is None
+        assert not tail["capture_complete"] and not tail["pace_eligible"]
+        assert tail["relay_time_s"] > 0 and tail["trace"]
+        assert tail not in gl.pool([idx], "ring01", CAR)
+
+
+def t_degenerate_clock_cannot_manufacture_a_complete_trace():
+    samples = [(1.0, d, 100.0, 100.0, 0.0, 0.0, 3, d, 0.0) for d in (0.0, 100.0)]
+    tr = gl._trace(samples, FakeTracks(known=False), None, 100.0, close=(100.0, 20.0))
+    assert not tr or tr[-1]["t"] != 20.0, "no captured time span means no invented full lap"
+
+
 def t_trace_uses_driven_distance_without_track():
     with tempfile.TemporaryDirectory() as d:
         idx = _index(write_circle_recording(d), tracks=FakeTracks(known=False))
@@ -166,8 +237,8 @@ def t_trace_uses_driven_distance_without_track():
         assert lap2["track_id"] is None and lap2["track"] == "" and idx["track"] is None
         assert abs(lap2["trace"][100]["t"] - 10.0) < 0.002, lap2["trace"][100]
         assert abs(lap2["distance_m"] - 997.5) < 0.1, lap2["distance_m"]
-        assert lap2["trace"][-1]["d"] == lap2["distance_m"] and len(lap2["sectors"]) == 5, \
-            "without a track the trace closes at the driven lap distance"
+        assert lap2["trace"][-1]["d"] == 1000.0 and len(lap2["sectors"]) == 5, \
+            "without a track the trace includes the distance to the closing boundary packet"
 
 
 def t_counted_laps_close_at_the_line_so_sectors_add_up():
@@ -175,8 +246,8 @@ def t_counted_laps_close_at_the_line_so_sectors_add_up():
         idx = _index(write_circle_recording(d, lap_secs=(20.0, 20.0, 19.0, 18.0),
                                             ns=(400, 400, 200, 100)))
         laps = [_lap(idx, n) for n in (2, 3, 4)]
-        assert len({lap["trace"][-2]["d"] for lap in laps}) > 1, \
-            "the fixture's laps end their 5 m grid at different distances"
+        assert all(lap["trace"][-2]["d"] == 995.0 for lap in laps), \
+            "the boundary packet completes the final grid even for sparse captures"
         for lap in laps:
             tr = lap["trace"]
             assert tr[-1]["d"] == 1000.0 and gl.lap_length_m(lap) == 1000.0, tr[-1]

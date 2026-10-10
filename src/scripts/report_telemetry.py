@@ -54,7 +54,7 @@ def _row(n, ts, lap):
     return {"n": n, "ts": ts, "rec": lap.get("rec") or "", "session": lap.get("session"),
             "lap": lap.get("lap"), "time_s": lap.get("time_s"),
             "status": lap.get("status") or "", "reason": lap.get("reason") or "",
-            "counted": lap.get("status") in gt7_laps.COUNTED,
+            "counted": gt7_laps.pace_eligible(lap),
             "fuel_l": lap.get("fuel_used_l"), "top_speed_kmh": lap.get("top_speed_kmh"),
             "car": lap.get("car") or "", "track": track_label(lap)}
 

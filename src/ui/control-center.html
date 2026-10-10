@@ -5446,8 +5446,8 @@ function tmRenderSummary(sum) {
     tile(g.consistency_s != null ? '± ' + g.consistency_s.toFixed(3) + ' s' : null, 'consistency',
          'Standard deviation of the counted lap times');
     tile(g.fuel_per_lap_l != null ? g.fuel_per_lap_l.toFixed(2) + ' L' : null, 'fuel per lap');
-    tile(g.laps_counted + ' of ' + g.laps_total, 'counted laps',
-         'Laps the relay counted, as on the HUD');
+    tile(g.laps_counted + ' of ' + g.laps_total, 'pace laps',
+         'Laps with an eligible capture and valid comparison clock');
     tile(g.tyre_avg_c ? g.tyre_avg_c.map(v => v.toFixed(1)).join(' · ') + ' °C' : null,
          'tyres FL · FR · RL · RR', 'Average tyre temperature over the counted laps');
     tmTrend(grp, g.trend || [], ordered);
@@ -5547,7 +5547,9 @@ function tmRenderRecs() {
     const name = document.createElement('span');
     name.textContent = r.rec + (r.recording ? ' (recording)' : r.partial ? ' (unclosed)' : '');
     const laps = document.createElement('span');
-    laps.textContent = r.laps == null ? '' : r.laps + ' laps';
+    laps.textContent = r.completed_laps != null ? r.completed_laps + ' complete laps'
+      + (r.partial_segments ? ' · ' + r.partial_segments + ' partial' : '')
+      : r.laps == null ? '' : r.laps + ' lap segments';
     const sub = document.createElement('span');
     sub.className = 'tmsub';
     sub.textContent = (r.recording ? 'being written' : r.indexed ? tmTrackLabel(r.track) : 'not indexed yet')
@@ -5597,14 +5599,15 @@ async function tmSelectRec(rec) {
                             () => seq !== tmSeq.rec);
   if (seq !== tmSeq.rec) return;
   if (!d.ok) { tmClear(''); tmErr(d.error || 'could not read the recording'); return; }
-  tmState.recLaps = d.laps || [];
+  tmState.recLaps = (d.laps || []).concat(d.open_lap ? [d.open_lap] : []);
   tmRenderSummary(d.summary);
   const row = tmState.recs.find(r => r.rec === rec);
   if (row) {
+    row.completed_laps = d.recording.completed_laps; row.partial_segments = d.recording.partial_segments;
     row.indexed = true; row.track = d.recording.track; row.laps = tmState.recLaps.length;
     tmRenderRecs();
   }
-  const counted = tmState.recLaps.filter(l => l.status !== 'not counted');
+  const counted = tmState.recLaps.filter(l => l.pace_eligible ?? l.status !== 'not counted');
   const pick = (counted.length ? counted : tmState.recLaps).slice(-1)[0];
   if (!pick) tmClear('This recording has no laps.');
   $('tm-rec-track').textContent = tmTrackLabel(d.recording.track);
@@ -5624,11 +5627,11 @@ function tmRenderLaps() {
     return [...n.entries()].sort((x, y) => y[1] - x[1])[0][0];
   };
   const car = usual(l => l.car || ''), track = usual(tmLapTrack);
-  const fast = laps.filter(l => l.status !== 'not counted' && l.time_s != null)
+  const fast = laps.filter(l => (l.pace_eligible ?? l.status !== 'not counted') && l.time_s != null)
     .reduce((m, l) => (m && m.time_s <= l.time_s ? m : l), null);
   let sel = null;
   laps.forEach(l => {
-    const nc = l.status === 'not counted', key = tmKey(l);
+    const nc = !(l.pace_eligible ?? l.status !== 'not counted'), key = tmKey(l);
     const b = document.createElement('button');
     b.className = 'tmitem' + (nc ? ' nc' : '') + (key === tmState.b ? ' sel'
       : key === tmState.a ? ' is-a' : '');
@@ -5636,8 +5639,9 @@ function tmRenderLaps() {
     name.textContent = 'Lap ' + l.lap + (l.session > 1 ? ' · S' + l.session : '');
     const badge = document.createElement('span');
     badge.className = 'tmbadge' + (l.status === 'reference' ? ' ref' : '');
-    badge.textContent = nc ? 'not counted' : l.status === 'reference' ? 'ref' : '';
-    badge.title = nc ? 'Not counted: ' + (l.reason || 'no reason recorded')
+    badge.textContent = l.capture_complete === false ? 'partial' : l.lap_role === 'pit' ? 'pit'
+      : nc ? 'not for pace' : l.status === 'reference' ? 'best so far' : 'pace';
+    badge.title = nc ? 'Excluded from pace: ' + ((l.reasons || [l.reason]).filter(Boolean).join('; ') || 'no reason recorded')
       : l.status === 'reference' ? 'Reference: the fastest lap so far when it was driven; '
         + 'the live HUD delta ran against it' : '';
     const time = document.createElement('span');
@@ -5645,7 +5649,13 @@ function tmRenderLaps() {
     time.textContent = tmTime(l.time_s);
     if (l === fast) time.title = 'Fastest counted lap of this recording';
     b.append(name, badge, time);
-    const odd = [nc ? l.reason : '', (l.car || '') !== car ? l.car || 'car unknown' : '',
+    const odd = [l.lap_role === 'first' ? 'First lap' : '',
+                 l.after_service ? 'After inferred service; tyres unconfirmed' : '',
+                 l.time_s == null && l.relay_time_s != null ? l.relay_time_s.toFixed(3) + ' s captured' : '',
+                 nc ? (l.reasons || [l.reason]).filter(Boolean).join('; ') : '',
+                 l.trace_complete === false && l.capture_complete ? 'Partial distance trace' : '',
+                 l.trace_complete && l.time_valid === false ? 'Invalid comparison clock' : '',
+                 (l.car || '') !== car ? l.car || 'car unknown' : '',
                  tmLapTrack(l) !== track ? tmLapTrack(l) : ''].filter(Boolean);
     if (odd.length) {
       const sub = document.createElement('span');
