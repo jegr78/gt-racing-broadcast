@@ -651,6 +651,15 @@ def make_handler(ctx):
                     return self._serve_bytes(_pages.read(_context_script), 'application/javascript; charset=utf-8')
                 except OSError:
                     return self._not_found('context editor unavailable')
+            if path == '/api/telemetry/definition':
+                if not self._context_allowed():
+                    return None
+                q = parse_qs(urlparse(self.path).query or '', keep_blank_values=True)
+                try:
+                    result = ctx['telemetry_definition_read'](*[(q.get(k) or [None])[0] for k in ('rec', 'session', 'lap')])
+                except Exception as exc:
+                    result = {'ok': False, 'error': 'could not read track definition: '+type(exc).__name__}
+                return self._context_result(result)
             if path == '/api/telemetry/context':
                 if not self._context_allowed():
                     return None
@@ -1058,6 +1067,17 @@ def make_handler(ctx):
                                        "error": f"could not delete backup: {exc}"},
                                       code=500)
                 return self._json(result, code=200 if result.get("ok") else 400)
+            if path == '/api/telemetry/definition':
+                if not self._context_allowed(mutation=True):
+                    return None
+                data = self._body_json()
+                if data is None:
+                    return self._json({'ok': False, 'error': self._body_error}, code=400)
+                try:
+                    result = ctx['telemetry_definition_write'](data)
+                except Exception as exc:
+                    result = {'ok': False, 'error': 'could not save track definition: '+type(exc).__name__}
+                return self._context_result(result)
             if path == '/api/telemetry/context':
                 if not self._context_allowed(mutation=True):
                     return None

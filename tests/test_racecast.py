@@ -699,7 +699,7 @@ def t_telemetry_laps_data_summarises_a_recording_like_the_report():
         g = s["groups"][0]
         assert g["best_s"] == 16.0 and g["laps_counted"] == g["laps_total"] - 1, g
         assert "map" not in g, "the view draws its own map, the summary stays small"
-        idx = m._telemetry_index(a)
+        idx = m._telemetry_with_context(m._telemetry_index(a), a)
         want = rtel.telemetry_block([idx], (float("-inf"), float("inf")))["groups"][0]
         want.pop("map")
         assert g == want, "the view and the post-event report show the same figures"
@@ -989,6 +989,53 @@ def t_channel_api_rejects_boolean_bounds_and_fractional_session_numbers():
             assert not response['ok'] and 'session and lap' in response['error'], 'invalid session identity must not become a valid lap request'
         response = m.telemetry_channels_data(stem, 1, 3, keys='rpm', axis='time', start=True, end=2)
         assert not response['ok'] and 'boolean' in response['error'], 'boolean bounds must not become measured time values'
+
+
+def t_track_definition_editor_apply_is_explicit_scoped_and_revisioned():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        path = tgl.write_circle_recording(rec_dir)
+        stem = _stem(path)
+        m.telemetry_lap_data(stem, '1', '3')
+        read = m.telemetry_track_definition_read_data(stem, '1', '3')
+        assert read['ok'] and read['definition']['reviewed'] is False
+        draft = read['definition']
+        draft['numbering_scheme'] = 'Reviewed synthetic test'
+        draft['reviewed'] = True
+        draft['variants'][0].update(kind='coaching', reviewed=True)
+        payload = {'rec': stem, 'session': 1, 'lap': 3, 'profile': read['profile'],
+                   'source_id': read['source_id'], 'expected_revision': read['revision'], 'definition': draft}
+        saved = m.telemetry_track_definition_write_data(payload)
+        assert saved['ok'] and saved['revision'] == 1
+        stale = m.telemetry_track_definition_write_data(payload)
+        assert not stale['ok'] and stale.get('conflict') and 'changed' in stale['error']
+        foreign = dict(payload, profile='elsewhere', expected_revision=1)
+        denied = m.telemetry_track_definition_write_data(foreign)
+        assert not denied['ok'] and denied.get('conflict') and 'profile' in denied['error']
+        current = m.telemetry_track_definition_read_data(stem, '1', '3')
+        assert current['definition']['reviewed'] and current['revision'] == 1
+
+
+def t_sector_variant_selection_is_session_scoped_and_preserves_notes_and_drafts():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        path = tgl.write_circle_recording(rec_dir)
+        stem = _stem(path)
+        m.telemetry_lap_data(stem, '1', '3')
+        context = m.telemetry_context_read_data(stem)
+        initial = {'rec': stem, 'profile': context['profile'], 'source_id': context['context']['source_id'],
+                   'expected_revision': context['context']['revision'], 'action': 'save',
+                   'data': {'notes': [{'id': 'keep', 'scope': 'recording', 'text': 'Keep notes'}],
+                            'sessions': {}, 'track_definition': None}, 'draft': {'fuel': '1e'}}
+        context = m.telemetry_context_write_data(initial)
+        payload = {'rec': stem, 'profile': context['profile'], 'source_id': context['context']['source_id'],
+                   'expected_revision': context['context']['revision'], 'action': 'select-track-variant',
+                   'session': 1, 'lap': 3, 'variant_id': 'provisional-3'}
+        selected = m.telemetry_context_write_data(payload)
+        assert selected['ok'], selected
+        assert selected['context']['data']['notes'][0]['text'] == 'Keep notes'
+        assert selected['context']['draft'] == {'fuel': '1e'}
+        choice = selected['context']['data']['track_definition']['selections']['1']
+        assert choice == {'layout_id': 'ring01', 'reverse': False, 'variant_id': 'provisional-3'}
+        assert m.telemetry_lap_data(stem, '1', '3')['lap']['sector_variant_id'] == 'provisional-3'
 
 
 def t_telemetry_lap_data_returns_the_trace():

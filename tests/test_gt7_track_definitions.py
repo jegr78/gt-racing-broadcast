@@ -166,6 +166,51 @@ def t_sector_finish_uses_the_same_rounded_station_as_completed_traces():
     assert abs(sum(times)-16) < 1e-6
 
 
+def t_analysis_joins_definition_snapshots_without_mutating_raw_indexes():
+    with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as bundle:
+        store = td.Store(root, bundle)
+        store.save(definition(), 0)
+        raw = {'rec': 'R', 'laps': [lap(2, (4, 4, 4, 4))], 'open_lap': None}
+        before = copy.deepcopy(raw)
+        analysed = td.annotate_index(raw, {}, store, fixture.FakeTracks())
+        assert raw == before, 'derived sector analysis cannot mutate a cached raw index'
+        row = analysed['laps'][0]
+        assert len(row['larger_sectors']['times_s']) == 3
+        assert row['sector_variant_id'] == 'coach-3'
+        assert len(row['corner_metrics']) == 1
+        assert analysed['track_definition_snapshots'][row['definition_fingerprint']]['corners'][0]['id'] == 'turn-a'
+        context = {'track_definition': {'selections': {'1': {'layout_id': 'elsewhere', 'reverse': False, 'variant_id': 'unknown'}}}}
+        conflict = td.annotate_index(raw, context, store, fixture.FakeTracks())['laps'][0]
+        assert conflict['track_definition_warnings'], 'a stale selection must remain visible'
+        assert not td.theoretical([conflict], conflict['track_definition'], conflict['sector_variant_id'])['confirmed'], 'a conflicting selection cannot produce a confirmed sector best'
+        empty = td.annotate_index(raw, {'track_definition': None}, store, fixture.FakeTracks())
+        assert empty['laps'][0]['larger_sectors'], 'clearing optional selection metadata must preserve analysis'
+
+
+def t_csv_export_freezes_applied_sector_and_definition_snapshots():
+    import csv
+    import json
+    import gt7_recording
+    with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as bundle:
+        path = fixture.write_circle_recording(root)
+        idx = fixture._index(path)
+        store = td.Store(root, bundle)
+        store.save(definition(), 0)
+        analysed = td.annotate_index(idx, {}, store, fixture.FakeTracks())
+        output = os.path.join(root, 'export')
+        gt7_recording.export_csv(path, output, track_analysis=analysed)
+        with open(os.path.join(output, 'track-definitions.json'), encoding='utf-8') as f:
+            snapshot = json.load(f)
+        with open(os.path.join(output, 'sectors.csv'), newline='', encoding='utf-8') as f:
+            sectors = list(csv.DictReader(f))
+        assert snapshot['definitions'] and any(s['variant_id'] == 'coach-3' for s in sectors)
+        changed = definition()
+        changed['corners'][0]['number'] = 9
+        store.save(changed, 1)
+        with open(os.path.join(output, 'track-definitions.json'), encoding='utf-8') as f:
+            assert json.load(f) == snapshot, 'later map edits cannot rewrite an exported definition'
+
+
 if __name__ == '__main__':
     for name, fn in sorted(globals().items()):
         if name.startswith('t_') and callable(fn):

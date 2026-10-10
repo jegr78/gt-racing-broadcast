@@ -158,7 +158,7 @@ class Store:
         with gt7_context._LOCK, gt7_context._file_lock(path):
             current = self.read(definition['layout_id'], definition['reverse'])
             if current['revision'] != expected:
-                raise ValueError('track definition changed; reload before applying')
+                raise gt7_context.Conflict('track definition changed; reload before applying')
             revision = expected+1
             base_version = current['base']['version'] if current['base'] else 0
             definition['version'] = max(revision+base_version, definition['version'])
@@ -220,8 +220,12 @@ def theoretical(laps, definition, variant_id):
     for lap in laps:
         if not _eligible(lap):
             continue
-        times = sector_times(lap, variant)
-        if any(t is None for t in times):
+        stored = lap.get('larger_sectors') or {}
+        times = stored.get('times_s') if (stored.get('variant_id') == variant_id
+                 and lap.get('definition_fingerprint') == definition['fingerprint']
+                 and stored.get('bounds_m') == variant['bounds_m']) else sector_times(lap, variant)
+        if (not isinstance(times, list) or len(times) != len(variant['sector_names'])
+                or any(t is None or not isinstance(t, (int, float)) or not math.isfinite(t) or t < 0 for t in times)):
             continue
         for group in groups:
             if all(lap.get('track_id') == other.get('track_id') and lap.get('car_id') == other.get('car_id')
@@ -236,7 +240,8 @@ def theoretical(laps, definition, variant_id):
         confirmed = definition['reviewed'] and variant['reviewed'] and variant['kind'] != 'provisional'
         for sector, name in enumerate(variant['sector_names']):
             source, times = min(group, key=lambda item: item[1][sector])
-            confirmed = confirmed and bool(source.get('context_confirmed') and source.get('compound'))
+            confirmed = confirmed and bool(source.get('context_confirmed') and source.get('compound')
+                                           and not source.get('track_definition_warnings'))
             best.append({'name': name, 'time_s': times[sector],
                          'source': {k: source.get(k) for k in ('rec', 'session', 'lap', 'compound')},
                          'start_m': variant['bounds_m'][sector], 'end_m': variant['bounds_m'][sector+1]})
@@ -279,6 +284,8 @@ def proposals(trace, layout, reverse):
     peaks = []
     for i in range(4, len(trace)-4):
         a, b, c = trace[i-4], trace[i], trace[i+4]
+        if b['d'] <= 30 or b['d'] >= length-30:
+            continue  # boundary-crossing bends need explicit authored review
         u, v = (b['x']-a['x'], b['z']-a['z']), (c['x']-b['x'], c['z']-b['z'])
         cross, dot = u[0]*v[1]-u[1]*v[0], u[0]*v[0]+u[1]*v[1]
         angle = abs(math.atan2(cross, dot))
@@ -303,3 +310,95 @@ def proposals(trace, layout, reverse):
                                   'kind': 'provisional', 'reviewed': False, 'boundaries': bounds,
                                   'sector_names': ['Section 1', 'Section 2', 'Section 3']}],
                                 'default_variant': 'provisional-3'})
+
+
+def annotate_index(index, context, store, tracks, full_index=None):
+    """Current analysis uses current definitions; saved output retains the applied snapshot."""
+    result = dict(index)
+    snapshots = {}
+    rows = index.get('laps', [])+([index['open_lap']] if index.get('open_lap') else [])
+    full_rows = (full_index or index).get('laps', [])+(
+        [(full_index or index)['open_lap']] if (full_index or index).get('open_lap') else [])
+    traces = {(r['session'], r['lap']): r for r in full_rows}
+    track_context = context.get('track_definition') or {}
+    selections = track_context.get('selections', {}) if isinstance(track_context, dict) else {}
+    if not isinstance(selections, dict):
+        selections = {}
+    definitions, errors = {}, {}
+    for row in rows:
+        layout = row.get('track_id')
+        identity = tracks.name(layout) if layout else None
+        if not identity:
+            continue
+        key = (layout, identity['reverse'])
+        if key in definitions or key in errors:
+            continue
+        try:
+            saved = store.read(*key)
+            definition = saved['definition']
+            if definition is None:
+                source = max((r for r in full_rows if r.get('track_id') == layout and r.get('trace')),
+                             key=lambda r: r.get('length_m') or 0, default=None)
+                if source is None:
+                    continue
+                definition = proposals(source['trace'], *key)
+            projected = project_definition(definition, tracks)
+            projected['storage_source'] = saved['source']
+            definitions[key] = projected
+            snapshots[projected['fingerprint']] = definition
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            errors[key] = str(exc) if isinstance(exc, ValueError) else type(exc).__name__
+    annotated = []
+    for row in rows:
+        output = dict(row)
+        output.update(track_definition_warnings=[], larger_sectors=None, corner_metrics=[], combination_metrics=[])
+        layout = row.get('track_id')
+        identity = tracks.name(layout) if layout else None
+        key = (layout, identity['reverse']) if identity else None
+        projected = definitions.get(key)
+        if projected is not None:
+            selected = selections.get(str(row['session']))
+            variant_id = projected['default_variant']
+            if selected:
+                if (not isinstance(selected, dict) or selected.get('layout_id') != layout
+                        or selected.get('reverse') != identity['reverse']
+                        or selected.get('variant_id') not in {v['id'] for v in projected['variants']}):
+                    output['track_definition_warnings'].append('Selected sector definition no longer matches this layout/variant')
+                else:
+                    variant_id = selected['variant_id']
+            variant = next(v for v in projected['variants'] if v['id'] == variant_id)
+            trace_source = dict(row, trace=traces.get((row['session'], row['lap']), {}).get('trace', []))
+            output.update(definition_fingerprint=projected['fingerprint'], sector_variant_id=variant_id,
+                          track_definition=projected,
+                          larger_sectors={'variant_id': variant_id, 'name': variant['name'],
+                                          'kind': variant['kind'], 'reviewed': variant['reviewed'] and projected['reviewed']
+                                          and not output['track_definition_warnings'],
+                                          'bounds_m': variant['bounds_m'], 'names': variant['sector_names'],
+                                          'times_s': sector_times(trace_source, variant)},
+                          corner_metrics=corner_metrics(trace_source, projected),
+                          combination_metrics=combination_metrics(trace_source, projected))
+        elif key in errors:
+            output['track_definition_warnings'].append('Track definition unavailable: '+errors[key])
+        else:
+            output['track_definition_warnings'].append('No confirmed marker or sector definition for this layout')
+        annotated.append(output)
+    result['laps'] = annotated[:len(index.get('laps', []))]
+    if index.get('open_lap'):
+        result['open_lap'] = annotated[-1]
+    result['track_definition_snapshots'] = snapshots
+    return result
+
+
+def combination_metrics(lap, definition):
+    out = []
+    trace = lap.get('trace', [])
+    for combination in definition.get('combinations', []):
+        selected = [c for c in definition['corners'] if c['id'] in combination['corner_ids']]
+        if not selected:
+            continue
+        start, end = min(c['entry_m'] for c in selected), max(c['exit_m'] for c in selected)
+        times = [gt7_laps._time_at(trace, d) for d in (start, end)]
+        out.append({'id': combination['id'], 'name': combination['name'],
+                    'numbers': [c['number'] for c in sorted(selected, key=lambda c: c['apex_m'])],
+                    'start_m': start, 'end_m': end, 'time_s': None if None in times else times[1]-times[0]})
+    return out

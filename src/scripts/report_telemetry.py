@@ -59,7 +59,7 @@ def _key(lap):
     settings = lap.get('context_settings', {}) if lap.get('settings_confirmed', True) else {}
     group_settings = json.dumps({k: settings.get(k) for k in (
         'bop', 'fixed_setup', 'fuel_x', 'tyre_x', 'time_progression', 'time_of_day')}, sort_keys=True)
-    return base + (context, strategy, group_settings)
+    return base + (context, strategy, group_settings, lap.get('definition_fingerprint'), lap.get('sector_variant_id'))
 
 
 def _row(n, ts, lap):
@@ -113,13 +113,18 @@ def _sector_map(best, pool):
 
 
 def _group(key, members):
-    track_id, car_id, rec, session, compound, _strategy, _settings = key
+    track_id, car_id, rec, session, compound, _strategy, _settings = key[:7]
     first = members[0][1]
     valid = [(row, lap) for row, lap in members if row["counted"] and row["time_s"] is not None]
     best_row, best = min(valid, key=lambda m: m[0]["time_s"]) if valid else (None, None)
     times = [row["time_s"] for row, _lap in valid]
     timed = [lap for _row, lap in valid if lap.get("sectors")]
     theoretical_s = gt7_laps.theoretical_best(timed) if timed else None
+    sector_theory = None
+    if first.get('track_definition') and first.get('sector_variant_id'):
+        import gt7_track_definitions
+        sector_theory = gt7_track_definitions.theoretical(
+            [lap for _row, lap in valid], first['track_definition'], first['sector_variant_id'])
     fuel = [lap["fuel_used_l"] for _row, lap in valid if lap.get("fuel_used_l") is not None]
     tyres = [lap["tyre_avg_c"] for _row, lap in valid
              if len(lap.get("tyre_avg_c") or []) == 4 and any(lap["tyre_avg_c"])]
@@ -133,7 +138,7 @@ def _group(key, members):
         "best_s": best_row["time_s"] if best_row else None,
         "best_lap": ({"n": best_row["n"], "session": best_row["session"],
                       "lap": best_row["lap"], "rec": best_row["rec"]} if best_row else None),
-        "theoretical_s": theoretical_s,
+        "theoretical_s": theoretical_s, "mini_sector_sum_s": theoretical_s, "sector_theory": sector_theory,
         "consistency_s": statistics.pstdev(times) if len(times) >= 2 else None,
         # all-zero fuel means consumption is off, not a real 0.0 L lap
         "fuel_per_lap_l": statistics.fmean(fuel) if fuel and any(fuel) else None,
@@ -150,7 +155,7 @@ def telemetry_block(indexes, window):
     """The report's telemetry block for the laps that start inside window=(from_ts,
     to_ts), or None when there are none."""
     frm, to = window
-    picked, partial, snapshots = [], False, {}
+    picked, partial, snapshots, definitions = [], False, {}, {}
     for idx in indexes:
         found = False
         for lap in idx.get("laps") or []:
@@ -161,6 +166,8 @@ def telemetry_block(indexes, window):
         partial = partial or (found and bool(idx.get("partial")))
         if found and idx.get("context_snapshot") is not None:
             snapshots[idx["rec"]] = idx["context_snapshot"]
+        if found:
+            definitions.update(idx.get('track_definition_snapshots', {}))
     if not picked:
         return None
     picked.sort(key=lambda p: p[0])
@@ -171,7 +178,7 @@ def telemetry_block(indexes, window):
     groups = [_group(key, members) for key, members in by_key.items()]
     groups.sort(key=lambda g: (-g["laps_counted"],
                                g["best_s"] if g["best_s"] is not None else float("inf")))
-    return {"laps": rows, "laps_total": len(rows), "context_snapshots": snapshots,
+    return {"laps": rows, "laps_total": len(rows), "context_snapshots": snapshots, "track_definition_snapshots": definitions,
             "laps_counted": sum(1 for r in rows if r["counted"]),
             "partial": partial, "groups": groups}
 
@@ -184,8 +191,9 @@ def summary_line(block, esc=None):
     if g["best_s"] is None:
         parts = [f"{lap_count(g['laps_total'])}, none counted"]
     else:
-        theo = (f" (theoretical {fmt_lap(g['theoretical_s'])})"
-                if g["theoretical_s"] is not None else "")
+        theory = g.get('sector_theory')
+        theo = (f" ({'sector best' if theory.get('confirmed') else 'unconfirmed sector sum'} {fmt_lap(theory['time_s'])})"
+                if theory and theory.get('time_s') is not None else "")
         parts = [f"Best lap {fmt_lap(g['best_s'])}{theo}", lap_count(g["laps_counted"])]
     if g["track_name"]:
         parts.append(esc(g["track_name"]) if esc else g["track_name"])

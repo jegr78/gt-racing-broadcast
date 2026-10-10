@@ -112,6 +112,7 @@ def build_target(launcher, workdir, version_file, sep, entry, name, windowed):
            "--hidden-import", "gt7_data", "--hidden-import", "gt7_tracks",
            "--hidden-import", "gt7_laps",
            "--hidden-import", "gt7_context",
+           "--hidden-import", "gt7_track_definitions",
            "--hidden-import", "gt7_channels", "--hidden-import", "gt7_channel_detail",
            "--hidden-import", "report_telemetry",
            "--add-data", f"{version_file}{sep}src"]

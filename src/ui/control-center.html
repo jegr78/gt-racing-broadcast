@@ -546,6 +546,8 @@
   #tm-charts text.tm-final { font-weight:600; }
   #tm-charts text.tm-final.gain { fill:#4ADE80; }
   #tm-charts text.tm-final.loss { fill:var(--bad-text); }
+  #tm-editor-map text {font:12px var(--mono);fill:var(--txt)}
+  .tm-marker {fill:var(--tm-b)} .tm-marker-selected {fill:#C4B5FD} .tm-boundary {fill:#4ADE80}
   .tm-frame { fill:none; stroke:var(--line); }
   .tm-zero { stroke:var(--off); stroke-dasharray:3 3; }
   .tm-a { fill:none; stroke:var(--tm-a); stroke-width:1.6; }
@@ -1356,6 +1358,9 @@
                 <span><i class="gain"></i>B faster</span><span><i class="loss"></i>B slower</span>
                 <span><i class="even"></i>even</span><span><i class="a"></i>lap A line</span>
                 <span><i class="dot"></i>start/finish</span></div></section>
+            <section><div class="viewhead"><h3>Larger sectors</h3><button onclick="tmEditorOpen()">Edit markers / sectors</button></div>
+              <select id="tm-sector-variant" aria-label="Larger-sector variant" onchange="tmSelectSectorVariant(this.value)"></select>
+              <p class="sub" id="tm-large-status"></p><div id="tm-larger-sectors"></div></section>
             <section><div class="viewhead"><h3>Mini-sectors</h3><span class="sub" id="tm-sec-sub"></span></div>
               <div class="tmsecwrap"><table class="prodtable tmsec" id="tm-sectors"></table></div>
               <div class="tmlegend" id="tm-sec-legend" hidden>
@@ -5463,8 +5468,11 @@ function tmRenderSummary(sum) {
     const bl = g.best_lap;
     tile(g.best_s != null ? tmTime(g.best_s) : null,
          'best lap' + (bl ? ' · lap ' + bl.lap + (bl.session > 1 ? ' S' + bl.session : '') : ''));
-    tile(g.theoretical_s != null ? tmTime(g.theoretical_s) : null, 'theoretical best',
-         'The sum of the best mini-sectors of the counted laps');
+    const theory=g.sector_theory;
+    tile(theory?.time_s!=null?tmTime(theory.time_s):null, theory?.confirmed?'sector best':'unconfirmed sector sum',
+         'Ideal larger-sector composition; entry-speed dependencies remain');
+    if(g.theoretical_s!=null){const diagnostic=document.createElement('details'),title=document.createElement('summary'),value=document.createElement('span');
+      title.textContent='Mini-sector diagnostic sum';value.textContent=tmTime(g.theoretical_s)+' · fine-segment composition';diagnostic.append(title,value);grp.append(diagnostic);}
     tile(g.consistency_s != null ? '± ' + g.consistency_s.toFixed(3) + ' s' : null, 'consistency',
          'Standard deviation of the counted lap times');
     tile(g.fuel_per_lap_l != null ? g.fuel_per_lap_l.toFixed(2) + ' L' : null, 'fuel per lap');
@@ -5826,6 +5834,7 @@ function tmRender() {
   tmRenderCharts();
   tmRenderMap();
   tmRenderSectors();
+  tmRenderLargerSectors();
   tmChannelRefresh();
 }
 
@@ -6070,6 +6079,12 @@ function tmRenderMap() {
   $('tm-map-legend').hidden = false;
   const [sx, sy] = P(tb.find(tmMapPt));
   tmEl('circle', {cx: sx, cy: sy, r: 3.5, class: 'tm-line'}, svg);   // start/finish line
+  for(const corner of B.track_definition?.corners||[]){if(!tmMapPt(corner.apex))continue;
+    const [cx,cy]=P(corner.apex);if(cx<0||cx>W||cy<0||cy>H)continue;
+    const circle=tmEl('circle',{cx,cy,r:3,class:'tm-marker'},svg);
+    tmEl('title',{},circle).textContent='Turn '+corner.number+(corner.name?' · '+corner.name:'')+' · '+corner.direction;
+    tmEl('text',{x:cx+4,y:cy-4,'font-size':10},svg).textContent=(B.track_definition.reviewed?'T':'P')+corner.number;
+  }
   const dot = cls => tmEl('circle', {r: 5, cx: 0, cy: 0, visibility: 'hidden', class: cls}, svg);
   tmState.map = {P, W, dotA: dot('tm-dot-a'), dotB: dot('tm-dot-b')};
 }
@@ -6254,6 +6269,167 @@ function tmChannelRender() {
  }
 }
 
+// Shared world-coordinate track editor. Draft changes apply only through the explicit button.
+const tmEditor = {open:false,generation:0,reply:null,draft:null,mode:'apex',corner:0,boundary:1};
+function tmEditorStatus(text,error=false){$('tm-editor-status').textContent=text;$('tm-editor-status').className=error?'enverr':'sub';}
+function tmEditorClone(v){return JSON.parse(JSON.stringify(v));}
+async function tmEditorOpen(){
+ const B=tmState.lapB;if(!B)return;
+ const gen=++tmEditor.generation,key=tmKey(B),profile=tmState.profile;
+ tmEditor.open=true;tmEditor.reply=null;tmEditor.draft=null;$('tm-editor-fields').textContent='';$('tm-editor-map').textContent='';$('tm-editor-modal').hidden=false;const owner=tmEditorLock();tmEditorStatus('Loading shared track definition…');
+ let d;try{d=await tmGet('/api/telemetry/definition?'+new URLSearchParams({rec:B.rec,session:B.session,lap:B.lap}));}catch(_e){d={ok:false,error:'Could not load the shared definition'};}finally{tmEditorRelease(owner);}
+ if(gen!==tmEditor.generation||!tmEditor.open||!tmState.lapB||tmKey(tmState.lapB)!==key||tmState.profile!==profile)return;
+ if(!d.ok){tmEditorStatus(d.error||'Track definition unavailable',true);return;}
+ tmEditor.reply=d;tmEditor.draft=tmEditorClone(d.definition);tmEditor.corner=0;tmEditor.boundary=1;tmEditorRender();
+ tmEditorStatus('Shared on this machine. Draft edits do not change analysis until Apply.');
+}
+function tmEditorRelease(owner=tmEditor.controls){if(!owner||owner!==tmEditor.controls)return;for(const [element,disabled] of owner)element.disabled=disabled;tmEditor.controls=null;tmEditor.busy=false;}
+function tmEditorLock(){tmEditorRelease();const owner=[...$('tm-editor-modal').querySelectorAll('button,input,select,textarea')].filter(e=>e.id!=='tm-editor-close').map(e=>[e,e.disabled]);tmEditor.controls=owner;tmEditor.busy=true;for(const [e] of owner)e.disabled=true;return owner;}
+function tmEditorClose(){tmEditorRelease();tmEditor.open=false;tmEditor.generation++;$('tm-editor-modal').hidden=true;}
+function tmEditorField(parent,label,value,setter,numeric=false){
+ const wrap=document.createElement('label');wrap.className='tcfield';const title=document.createElement('span');title.textContent=label;
+ const input=document.createElement(label==='Provenance notes'?'textarea':'input');if(label==='Provenance notes')input.rows=3;else input.type='text';input.value=value??'';input.setAttribute('aria-label',label);
+ input.oninput=()=>{setter(numeric?(input.value.trim()===''?null:Number(input.value)):input.value);tmEditorMap();};wrap.append(title,input);parent.append(wrap);return input;
+}
+function tmEditorSelect(parent,label,value,options,setter){
+ const wrap=document.createElement('label');wrap.className='tcfield';const title=document.createElement('span');title.textContent=label;
+ const select=document.createElement('select');select.setAttribute('aria-label',label);
+ for(const [v,t] of options){const option=document.createElement('option');option.value=v;option.textContent=t;select.append(option);}
+ select.value=value;select.onchange=()=>{setter(select.value);tmEditorRender();};wrap.append(title,select);parent.append(wrap);return select;
+}
+function tmEditorRender(){
+ const root=$('tm-editor-fields');root.textContent='';const d=tmEditor.draft;if(!d)return;
+ $('tm-editor-reviewed').checked=d.reviewed;$('tm-editor-info').textContent=d.layout_id+' · '+(d.reverse?'reverse':'forward')+' · '+tmEditor.reply.source+' · version '+d.version;
+ tmEditorField(root,'Numbering scheme',d.numbering_scheme,v=>d.numbering_scheme=v);
+ tmEditorField(root,'Provenance notes',d.provenance.join('\n'),v=>d.provenance=v.split('\n'));
+ tmEditorSelect(root,'Selected corner',String(tmEditor.corner),d.corners.map((c,i)=>[String(i),'T'+c.number+(c.name?' · '+c.name:'')]),v=>tmEditor.corner=Number(v));
+ const corner=d.corners[tmEditor.corner];
+ if(corner){tmEditorField(root,'Corner number',corner.number,v=>corner.number=v,true);tmEditorField(root,'Corner name',corner.name,v=>corner.name=v);
+  tmEditorSelect(root,'Corner direction',corner.direction,[['left','Left'],['right','Right'],['unknown','Unknown']],v=>corner.direction=v);
+  tmEditorSelect(root,'Map edit target',tmEditor.mode,[['entry','Corner entry'],['apex','Corner apex'],['exit','Corner exit'],['boundary','Sector boundary']],v=>tmEditor.mode=v);
+  for(const key of ['entry','apex','exit'])for(const axis of ['x','z'])tmEditorField(root,key+' '+axis.toUpperCase(),corner[key][axis],v=>corner[key][axis]=v,true);
+ }
+ tmEditorSelect(root,'Default sector variant',d.default_variant,d.variants.map(v=>[v.id,v.name]),v=>d.default_variant=v);
+ const variant=d.variants.find(v=>v.id===d.default_variant);if(variant){
+  tmEditorField(root,'Variant name',variant.name,v=>variant.name=v);
+  tmEditorSelect(root,'Sector kind',variant.kind,[['coaching','Coaching sections'],['game','GT7 game splits'],['provisional','Provisional division']],v=>{variant.kind=v;if(v==='provisional')variant.reviewed=false;});
+  tmEditorSelect(root,'Sector boundaries reviewed',String(variant.reviewed),[['false','Unreviewed'],['true','Reviewed']],v=>variant.reviewed=v==='true');
+  tmEditorField(root,'Verification evidence (required for reviewed GT7 splits)',variant.evidence||'',v=>variant.evidence=v);
+  tmEditorSelect(root,'Selected sector boundary',String(tmEditor.boundary),variant.boundaries.map((_p,i)=>[String(i),i===0?'Start/finish':i===variant.boundaries.length-1?'Closing start/finish':'End of sector '+i]),v=>{tmEditor.boundary=Number(v);tmEditor.mode='boundary';});
+  const point=variant.boundaries[tmEditor.boundary]||variant.boundaries[0];
+  for(const axis of ['x','z'])tmEditorField(root,'Boundary '+axis.toUpperCase(),point[axis],v=>point[axis]=v,true);
+  variant.sector_names.forEach((name,i)=>tmEditorField(root,'Sector '+(i+1)+' name',name,v=>variant.sector_names[i]=v));
+ }
+ (d.combinations||[]).forEach(combination=>{
+  tmEditorField(root,'Combination name',combination.name,v=>combination.name=v);
+  const wrap=document.createElement('label');wrap.className='tcfield';wrap.append(document.createTextNode('Connected corners'));
+  const select=document.createElement('select');select.multiple=true;select.size=4;select.setAttribute('aria-label','Connected corners');
+  for(const corner of d.corners){const option=document.createElement('option');option.value=corner.id;option.textContent='T'+corner.number+(corner.name?' '+corner.name:'');option.selected=combination.corner_ids.includes(corner.id);select.append(option);}
+  select.onchange=()=>combination.corner_ids=[...select.selectedOptions].map(o=>o.value);wrap.append(select);root.append(wrap);
+ });
+ tmEditorMap();
+}
+function tmEditorMap(){
+ const svg=$('tm-editor-map');svg.textContent='';const d=tmEditor.draft,geometry=tmEditor.reply?.geometry||[];if(!d||!geometry.length)return;
+ const W=520,H=430,xs=geometry.map(p=>p.x),zs=geometry.map(p=>p.z);
+ const xmin=Math.min(...xs),xmax=Math.max(...xs),zmin=Math.min(...zs),zmax=Math.max(...zs);
+ const scale=Math.min((W-40)/(xmax-xmin||1),(H-40)/(zmax-zmin||1)),P=p=>[20+(p.x-xmin)*scale,20+(p.z-zmin)*scale];
+ svg.setAttribute('viewBox','0 0 '+W+' '+H);svg.style.width='100%';
+ tmEl('path',{d:geometry.map((p,i)=>{const [x,y]=P(p);return(i?'L':'M')+x+' '+y;}).join(''),class:'tm-a'},svg);
+ const dot=(point,label,cls)=>{if(!point||!Number.isFinite(point.x)||!Number.isFinite(point.z))return;
+  const [x,y]=P(point);tmEl('circle',{cx:x,cy:y,r:4,class:cls},svg);
+  tmEl('text',{x:x+6,y:y-5},svg).textContent=label;};
+ d.corners.forEach((corner,i)=>{for(const key of ['entry','apex','exit'])dot(corner[key],key==='apex'?'T'+corner.number:'',i===tmEditor.corner?'tm-marker-selected':'tm-marker');});
+ const variant=d.variants.find(v=>v.id===d.default_variant);variant?.boundaries.slice(0,-1).forEach((p,i)=>dot(p,i===0?'S/F':'S'+i,'tm-boundary'));
+ svg.onpointerdown=e=>{if(tmEditor.busy)return;const box=svg.getBoundingClientRect(),x=(e.clientX-box.left)*W/box.width,y=(e.clientY-box.top)*H/box.height;
+  const point={x:Math.round((xmin+(x-20)/scale)*10)/10,z:Math.round((zmin+(y-20)/scale)*10)/10};
+  if(tmEditor.mode==='boundary'&&variant){variant.boundaries[tmEditor.boundary]=point;
+   if(tmEditor.boundary===0)variant.boundaries[variant.boundaries.length-1]=tmEditorClone(point);
+   if(tmEditor.boundary===variant.boundaries.length-1)variant.boundaries[0]=tmEditorClone(point);
+  }else if(d.corners[tmEditor.corner])d.corners[tmEditor.corner][tmEditor.mode]=point;
+  tmEditorRender();tmEditorStatus('Draft position changed. Apply to update shared analysis.');};
+}
+function tmEditorAddCorner(){
+ const g=tmEditor.reply?.geometry||[];if(!g.length)return;
+ const at=f=>tmEditorClone(g[Math.min(g.length-1,Math.round((g.length-1)*f))]);
+ const point=f=>{const p=at(f);return{x:p.x,z:p.z};},d=tmEditor.draft;
+ d.corners.push({id:'corner-'+Date.now().toString(36)+Math.random().toString(36).slice(2,8),
+  number:Math.max(0,...d.corners.map(c=>c.number))+1,name:'',direction:'unknown',entry:point(.15),apex:point(.2),exit:point(.25)});
+ tmEditor.corner=d.corners.length-1;d.reviewed=false;tmEditorRender();
+}
+function tmEditorRemoveCorner(){if(!tmEditor.draft)return;const d=tmEditor.draft,id=d.corners[tmEditor.corner]?.id;d.combinations=(d.combinations||[]).map(c=>({...c,corner_ids:c.corner_ids.filter(v=>v!==id)})).filter(c=>c.corner_ids.length);tmEditor.draft.corners.splice(tmEditor.corner,1);tmEditor.corner=Math.max(0,tmEditor.corner-1);tmEditorRender();}
+function tmEditorAddVariant(){
+ const d=tmEditor.draft;if(!d)return;const source=d.variants.find(v=>v.id===d.default_variant);if(!source)return;
+ const variant=tmEditorClone(source);variant.id='variant-'+Date.now().toString(36);variant.name='New coaching division';variant.kind='coaching';variant.reviewed=false;
+ d.variants.push(variant);d.default_variant=variant.id;tmEditor.boundary=1;tmEditorRender();
+}
+function tmEditorAddBoundary(){
+ if(!tmEditor.draft)return;const v=tmEditor.draft.variants.find(v=>v.id===tmEditor.draft.default_variant);if(!v)return;
+ const i=Math.max(1,Math.min(v.boundaries.length-1,tmEditor.boundary)),a=v.boundaries[i-1],b=v.boundaries[i];
+ const geometry=tmEditor.reply.geometry;
+ const nearest=p=>geometry.reduce((best,r)=>!best||(r.x-p.x)**2+(r.z-p.z)**2<(best.x-p.x)**2+(best.z-p.z)**2?r:best,null);
+ const da=i===1?0:nearest(a).d,db=i===v.boundaries.length-1?geometry.at(-1).d:nearest(b).d;
+ const middle=geometry.reduce((best,r)=>!best||Math.abs(r.d-(da+db)/2)<Math.abs(best.d-(da+db)/2)?r:best,null);
+ v.boundaries.splice(i,0,{x:middle.x,z:middle.z});v.sector_names.splice(i-1,0,'New section');v.reviewed=false;tmEditor.boundary=i;tmEditor.mode='boundary';tmEditorRender();
+}
+function tmEditorRemoveBoundary(){
+ if(!tmEditor.draft)return;const v=tmEditor.draft.variants.find(v=>v.id===tmEditor.draft.default_variant),i=tmEditor.boundary;
+ if(!v||i<=0||i>=v.boundaries.length-1)return;
+ v.boundaries.splice(i,1);v.sector_names.splice(i-1,1);v.reviewed=false;tmEditor.boundary=Math.min(i,v.boundaries.length-1);tmEditorRender();
+}
+function tmEditorAddCombination(){if(!tmEditor.draft||!tmEditor.draft.corners.length)return;
+ (tmEditor.draft.combinations||=[]).push({id:'combination-'+Date.now().toString(36),name:'Connected sequence',corner_ids:[tmEditor.draft.corners[tmEditor.corner].id]});tmEditorRender();}
+async function tmEditorApply(){
+ const d=tmEditor.reply;if(!d||!tmEditor.draft)return;
+ const gen=tmEditor.generation, draft=tmEditorClone(tmEditor.draft);
+ const payload={rec:d.rec,session:d.session,lap:d.lap,profile:d.profile,source_id:d.source_id,expected_revision:d.revision,definition:draft};
+ const owner=tmEditorLock();tmEditorStatus('Applying shared definition…');
+ let answer;try{const r=await fetch('/api/telemetry/definition',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});answer=await r.json();}
+ catch(_e){if(gen===tmEditor.generation)tmEditorStatus('Could not apply; draft remains in this editor',true);return;}
+ finally{tmEditorRelease(owner);}
+ if(gen!==tmEditor.generation||!tmEditor.open)return;
+ if(!answer.ok){tmEditorStatus(answer.error||'Could not apply definition',true);return;}
+ tmEditor.reply=answer;tmEditor.draft=tmEditorClone(answer.definition);tmEditorRender();tmEditorStatus('Applied shared definition · revision '+answer.revision);
+ await tmRefreshContext(d.rec);
+}
+async function tmSelectSectorVariant(value){
+ const B=tmState.lapB;if(!B)return;
+ const key=tmKey(B),profile=tmState.profile;
+ const context=await tmGet('/api/telemetry/context?'+new URLSearchParams({rec:B.rec}));
+ if(!context.ok||!tmState.lapB||tmKey(tmState.lapB)!==key||tmState.profile!==profile)return;
+ const payload={rec:B.rec,profile:context.profile,source_id:context.context.source_id,
+  expected_revision:context.context.revision,action:'select-track-variant',session:B.session,lap:B.lap,variant_id:value};
+ const r=await fetch('/api/telemetry/context',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}),answer=await r.json();
+ if(!tmState.lapB||tmKey(tmState.lapB)!==key||tmState.profile!==profile)return;
+ if(!answer.ok){$('tm-large-status').textContent=answer.error||'Could not select sector variant';return;}
+ await tmRefreshContext(B.rec);
+}
+function tmRenderLargerSectors(){
+ const root=$('tm-larger-sectors');root.textContent='';const B=tmState.lapB,A=tmState.lapA,select=$('tm-sector-variant');select.textContent='';
+ const definition=B?.track_definition,larger=B?.larger_sectors;
+ $('tm-large-status').textContent=(B?.track_definition_warnings||[]).join(' · ');
+ if(!definition||!larger){$('tm-large-status').textContent||='No reviewed marker/sector definition for this layout';return;}
+ for(const variant of definition.variants){const option=document.createElement('option');option.value=variant.id;
+  option.textContent=variant.name+' · '+variant.kind+(variant.reviewed?'':' · unreviewed');select.append(option);}
+ select.value=larger.variant_id;
+ $('tm-large-status').textContent=[definition.reviewed?'Reviewed definition':'Unreviewed proposals','v'+definition.version,
+  definition.numbering_scheme,definition.catalogue_turns!=null&&definition.corners.length!==definition.catalogue_turns?'Catalogue '+definition.catalogue_turns+' / this scheme '+definition.corners.length:'',...(B.track_definition_warnings||[])].filter(Boolean).join(' · ');
+ const compatible=A?.definition_fingerprint===B.definition_fingerprint&&A?.sector_variant_id===B.sector_variant_id;
+ larger.names.forEach((name,i)=>{const row=document.createElement('p');const b=larger.times_s[i],a=compatible?A?.larger_sectors?.times_s[i]:null;
+  row.textContent=name+' · '+(larger.bounds_m[i]/1000).toFixed(2)+'–'+(larger.bounds_m[i+1]/1000).toFixed(2)+' km · B '+tmTime(b)+(a!=null&&b!=null?' · A '+tmTime(a)+' · '+tmSigned(b-a)+' s':'');root.append(row);});
+ const metrics=document.createElement('details'),label=document.createElement('summary');label.textContent='Corner / combination measurements';metrics.append(label);
+ for(const corner of B.corner_metrics||[]){const text=document.createElement('p');text.className='sub';text.textContent='T'+corner.number+(corner.name?' '+corner.name:'')+' · '+corner.direction+' · '+tmTime(corner.time_s)+' · entry / anchor / exit '+[corner.entry_speed_kmh,corner.anchor_speed_kmh,corner.exit_speed_kmh].map(v=>v==null?'unknown':v.toFixed(1)).join(' / ')+' km/h · min '+(corner.min_speed_kmh==null?'unknown':corner.min_speed_kmh.toFixed(1))+' km/h';metrics.append(text);}
+ for(const combination of B.combination_metrics||[]){const text=document.createElement('p');text.className='sub';text.textContent=combination.name+' · '+combination.numbers.map(n=>'T'+n).join(' / ')+' · '+tmTime(combination.time_s);metrics.append(text);}
+ root.append(metrics);
+}
+
+if(typeof document!=='undefined'&&document.addEventListener)document.addEventListener('keydown',e=>{
+ if(!tmEditor.open)return;if(e.key==='Escape'){e.preventDefault();tmEditorClose();}
+ if(e.key==='Tab'){const fields=[...$('tm-editor-modal').querySelectorAll('button,input,select,textarea')].filter(f=>!f.disabled&&f.offsetParent!==null);
+ if(fields.length&&e.shiftKey&&document.activeElement===fields[0]){e.preventDefault();fields.at(-1).focus();}
+ else if(fields.length&&!e.shiftKey&&document.activeElement===fields.at(-1)){e.preventDefault();fields[0].focus();}}
+});
+
 // end of the Telemetry view
 
 function _mbps(bps) { return bps == null ? '—' : (bps / 1e6).toFixed(2) + ' Mbps'; }
@@ -6356,5 +6532,18 @@ assetsLoaded = true; fetchAssetFiles();
    <button onclick="tcOlderHistory()">Show older revisions</button></details>
  </div></div></div>
 <script src="/telemetry-context.js"></script>
+<div class="ovmodal" id="tm-editor-modal" hidden role="dialog" aria-modal="true" aria-labelledby="tm-editor-title">
+ <div class="ovmodal-card"><div class="ovmodal-head"><b id="tm-editor-title">Track markers &amp; sector definitions</b>
+  <button id="tm-editor-close" style="margin-left:auto" onclick="tmEditorClose()">Cancel / close</button></div>
+ <div class="ovmodal-body"><p id="tm-editor-info" class="sub"></p><p id="tm-editor-status" class="sub" role="status"></p>
+  <p class="sub">Shared across profiles on this machine. Select an entry, apex, exit or sector boundary, then click the map to move its world anchor. Apply makes the draft available to new analyses; saved reports retain their snapshots.</p>
+  <svg id="tm-editor-map" role="img" aria-label="Editable track geometry and world anchors"></svg>
+  <label><input id="tm-editor-reviewed" type="checkbox" onchange="tmEditor.draft.reviewed=this.checked"> Definition reviewed; candidate numbers and geometry have been checked</label>
+  <div class="row"><button onclick="tmEditorAddCorner()">Add corner</button><button onclick="tmEditorRemoveCorner()">Remove selected corner</button>
+   <button onclick="tmEditorAddCombination()">Add connected sequence</button><button onclick="tmEditorAddVariant()">Add named sector variant</button><button onclick="tmEditorAddBoundary()">Add sector boundary</button>
+   <button onclick="tmEditorRemoveBoundary()">Remove selected boundary</button>
+   <button id="tm-editor-apply" onclick="tmEditorApply()">Apply shared definition</button></div>
+  <div class="tcgrid" id="tm-editor-fields"></div>
+ </div></div></div>
 </body>
 </html>

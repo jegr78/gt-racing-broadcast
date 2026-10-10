@@ -2690,7 +2690,7 @@ tmRenderSummary(null);
 console.log(String(box.hidden));""")
     if out is not None:
         first, second = out.strip().split("\n")
-        assert first == ("false|1:50.104best lap · lap 2,1:48.937theoretical best,"
+        assert first == ("false|1:50.104best lap · lap 2,"
                          "± 1.999 sconsistency,7.74 Lfuel per lap,2 of 3pace laps,"
                          "78.6 · 74.4 · 71.6 · 69.2 °Ctyres FL · FR · RL · RR|"
                          "tm-tr nc,tm-tr,tm-tr best|R|1|2"), \
@@ -3002,6 +3002,41 @@ console.log(JSON.stringify(tmChannelState.details));
 """)
     if out is not None:
         assert json.loads(out) is None, 'late raw detail must not appear under a different lap'
+
+
+def t_larger_sector_summary_does_not_promote_the_mini_sum():
+    out = _tm_node("""
+tmRenderSummary({laps_total:2,laps_counted:2,groups:[{track:'Ring',car:'Car',best_s:16,
+ theoretical_s:14.8,sector_theory:{time_s:15.2,confirmed:true,variant_name:'Coaching three'},laps_counted:2,laps_total:2,trend:[]}]});
+const walk=(e,out=[])=>{out.push(e);(e.kids||[]).forEach(k=>walk(k,out));return out;};
+console.log(walk($('tm-summary')).filter(e=>e.className==='tmtile').map(e=>e.textContent).join('|'));
+""")
+    if out is not None:
+        assert '0:15.200sector best' in out and 'theoretical best' not in out, 'larger sectors must govern the theoretical headline'
+
+
+def t_map_editor_does_not_overwrite_a_reopened_draft_with_a_late_apply():
+    out = _tm_node("""
+$('tm-editor-modal').querySelectorAll=()=>[];tmEditorStatus=()=>{};tmEditorRender=()=>{};
+tmEditor.open=true;tmEditor.reply={rec:'R',session:1,lap:3,profile:'solo',source_id:'id',revision:0};
+tmEditor.draft={name:'old'};let reply;global.fetch=()=>new Promise(r=>reply=r);
+const applying=tmEditorApply();await tick();tmEditorClose();tmEditor.open=true;tmEditor.generation++;tmEditor.draft={name:'new'};
+reply({json:async()=>({ok:true,definition:{name:'old applied'},revision:1})});await applying;
+console.log(JSON.stringify(tmEditor.draft));
+""")
+    if out is not None:
+        assert json.loads(out) == {'name': 'new'}, 'late map apply must not replace a reopened draft'
+
+
+def t_track_map_labels_reviewed_corners_and_separates_geometry_proposals():
+    out = _tm_node("""
+tmState.lapA=null;tmState.lapB=lap('R',3,16,7);tmState.lapB.trace=[{d:0,t:0,x:0,z:0},{d:100,t:16,x:100,z:100}];
+tmState.lapB.track_definition={reviewed:true,corners:[{number:7,name:'Bend',direction:'left',apex:{x:50,z:50}}]};
+tmRenderMap();console.log($('tm-map').kids.filter(e=>e.tagName==='text').map(e=>e.textContent).join(','));
+tmState.lapB.track_definition.reviewed=false;tmRenderMap();console.log($('tm-map').kids.filter(e=>e.tagName==='text').map(e=>e.textContent).join(','));
+""")
+    if out is not None:
+        assert out.strip().splitlines() == ['T7', 'P7'], 'proposal numbering cannot masquerade as reviewed turns'
 
 
 def t_telemetry_open_recording_is_not_indexed_on_load():
@@ -3931,6 +3966,28 @@ def t_telemetry_channel_route_forwards_selected_windows_and_domain_errors():
                              'axis': 'time', 'start': '1', 'end': '2'}
         code, body = _get(port, '/api/telemetry/channels?keys=bad')
         assert code == 400 and json.loads(body)['error'] == 'unknown telemetry channel', body
+    finally:
+        httpd.shutdown()
+
+
+def t_track_definition_routes_retain_conflict_errors_and_origin_guards():
+    ctx = _ctx()
+    ctx['telemetry_definition_read'] = lambda rec, session, lap: {'ok': True, 'revision': 0}
+    ctx['telemetry_definition_write'] = lambda data: {'ok': False, 'conflict': True, 'error': 'track definition changed'}
+    httpd, port = _serve(ctx)
+    try:
+        code, body = _get(port, '/api/telemetry/definition?rec=R&session=1&lap=3')
+        assert code == 200 and json.loads(body)['revision'] == 0, body
+        code, body = _post_json(port, '/api/telemetry/definition', {'rec': 'R'})
+        assert code == 409 and json.loads(body)['error'] == 'track definition changed', body
+        request = urllib.request.Request(f'http://127.0.0.1:{port}/api/telemetry/definition',
+            data=b'{}', method='POST', headers={'Content-Type': 'application/json', 'Origin': 'null'})
+        try:
+            with _urlopen(request) as response:
+                code, body = response.status, response.read()
+        except urllib.error.HTTPError as response:
+            code, body = response.code, response.read()
+        assert code == 403 and 'origin' in json.loads(body)['error'], body
     finally:
         httpd.shutdown()
 

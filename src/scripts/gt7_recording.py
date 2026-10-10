@@ -520,14 +520,14 @@ def _lap_dist(eng, pkt, by_session, tracks, prev):
     return out
 
 
-def export_csv(path, out_dir, include_all=False, excel=False, cars=None, tracks=None, key=None, diagnostics=False):
+def export_csv(path, out_dir, include_all=False, excel=False, cars=None, tracks=None, key=None, diagnostics=False, track_analysis=None):
     """Write samples.csv and laps.csv for one recording into out_dir."""
     cars = cars if cars is not None else gt7_cars.CarDB()
     r = Recording(path)
     import gt7_context
     context_error = None
     try:
-        context_snapshot = gt7_context.Store.for_recording(path).export()
+        context_snapshot = (track_analysis.get('context_snapshot') if track_analysis else None) or gt7_context.Store.for_recording(path).export()
     except (OSError, ValueError, RecordingError):
         context_error = 'saved context is unavailable; raw measurements are still exported'
         context_snapshot = {'format': gt7_context.FORMAT, 'version': gt7_context.VERSION,
@@ -614,6 +614,23 @@ def export_csv(path, out_dir, include_all=False, excel=False, cars=None, tracks=
                                          'uncertainty': 'Driver vs filtered/assisted input interpretation is disputed'}
                                      for k, off in [('throttle_input_pct', '0x13c'), ('brake_input_pct', '0x13d')]}},
                   schema, ensure_ascii=False, indent=2, allow_nan=False)
+    definitions = track_analysis.get('track_definition_snapshots', {}) if track_analysis else {}
+    gt7_context._atomic(os.path.join(os.path.realpath(out_dir), 'track-definitions.json'),
+                        {'format': 'racecast-track-definition-snapshot', 'version': 1, 'definitions': definitions})
+    with open(os.path.join(out_dir, 'sectors.csv'), 'w', newline='', encoding=encoding) as fh:
+        writer = csv.writer(fh, delimiter=delimiter)
+        writer.writerow(('rec', 'session', 'lap', 'variant_id', 'definition_version', 'definition_fingerprint',
+                         'sector', 'start_m', 'end_m', 'time_s', 'compound', 'context_confirmed', 'comparison_eligible'))
+        for row in (track_analysis or {}).get('laps', []):
+            larger = row.get('larger_sectors')
+            if not larger:
+                continue
+            for i, name in enumerate(larger['names']):
+                writer.writerow((row['rec'], row['session'], row['lap'], larger['variant_id'],
+                                 row['track_definition']['version'], row['definition_fingerprint'], name,
+                                 num(larger['bounds_m'][i], 3), num(larger['bounds_m'][i+1], 3),
+                                 num(larger['times_s'][i], 6), row.get('compound') or '',
+                                 int(bool(row.get('context_confirmed'))), int(bool(row.get('comparison_eligible')))))
     gt7_context._atomic(os.path.join(os.path.realpath(out_dir), "context.json"), context_snapshot)
     return {"dir": out_dir, "samples": written, "laps": len(laps), "dropped": r.dropped,
             "context_error": context_error}
