@@ -30,8 +30,9 @@ def track_label(lap):
     if not track:
         return "Unknown track"
     layout = lap.get("layout") or ""
-    # GT7 names some tracks after their only layout ("Grand Valley - Highway 1" + "Highway 1")
-    if not layout or track.lower().endswith(layout.lower()):
+    # GT7 names some tracks after their only layout ("Grand Valley - Highway 1" + "Highway 1");
+    # only a whole trailing name part counts, so "Nordschleife" + "Schleife" keeps both.
+    if not layout or track.lower() == layout.lower() or track.lower().endswith(" " + layout.lower()):
         return track
     return f"{track} - {layout}"
 

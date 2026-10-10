@@ -707,6 +707,19 @@ def t_telemetry_laps_data_summarises_a_recording_like_the_report():
         assert brief["summary"] == s, "the cached brief index summarises the same"
 
 
+def t_telemetry_summary_failure_keeps_the_lap_list():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        import report_telemetry as rtel
+        a = tgl.write_circle_recording(rec_dir)
+        real = rtel.telemetry_block
+        rtel.telemetry_block = lambda *a, **k: (_ for _ in ()).throw(ValueError("bad index"))
+        try:
+            d = m.telemetry_laps_data(rec=_stem(a))
+        finally:
+            rtel.telemetry_block = real
+        assert d["ok"] and len(d["laps"]) == 4 and d["summary"] is None,             f"a summary that cannot be built leaves the laps readable: {d.get('error')}"
+
+
 def t_telemetry_pool_without_build_reads_only_cached_indexes():
     with _telemetry_sandbox() as (rec_dir, tgl):
         import gt7_laps

@@ -3635,9 +3635,13 @@ def _telemetry_pool_indexes(rec_dir, build, only=None, report=None):
 def _telemetry_summary(idx):
     """The post-event report's telemetry figures for one recording, one group per track and
     car, so the Telemetry view shows the report's numbers. Without the map: the view draws
-    its own. None when the recording has no laps."""
+    its own. None when the recording has no laps, or when the figures cannot be built: the
+    lap list must stay readable without them."""
     import report_telemetry
-    block = report_telemetry.telemetry_block([idx], (float("-inf"), float("inf")))
+    try:
+        block = report_telemetry.telemetry_block([idx], (float("-inf"), float("inf")))
+    except Exception:  # noqa: BLE001  a summary never breaks the lap list
+        return None
     if block is None:
         return None
     groups = [{k: v for k, v in g.items() if k != "map"} for g in block["groups"]]

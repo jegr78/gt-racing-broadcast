@@ -2511,10 +2511,12 @@ console.log([tmTrackLabel({track: 'Grand Valley - Highway 1', layout: 'Highway 1
              tmTrackLabel({track: 'Grand Valley - Highway 1', layout: 'highway 1', reverse: true}),
              tmLapTrack({track: 'Grand Valley - Highway 1', layout: 'Highway 1'}),
              tmLapTrack({track: 'Alsace', layout: 'Village'}),
-             tmLapTrack({track: '', layout: ''})].join('|'));""")
+             tmLapTrack({track: '', layout: ''}),
+             tmLapTrack({track: 'Nordschleife', layout: 'Schleife'})].join('|'));""")
     if out is not None:
         assert out.strip() == ("Grand Valley - Highway 1|Grand Valley - Highway 1 (reverse)|"
-                               "Grand Valley - Highway 1|Alsace - Village|track unknown"), \
+                               "Grand Valley - Highway 1|Alsace - Village|track unknown|"
+                               "Nordschleife - Schleife"), \
             f"a layout already ending the track name is not repeated: {out!r}"
 
 

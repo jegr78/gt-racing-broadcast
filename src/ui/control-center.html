@@ -5378,8 +5378,8 @@ async function tmRefreshRecs() {
 // GT7 names some tracks after their only layout ("Grand Valley - Highway 1" + "Highway 1"):
 // a layout already ending the track name is not appended twice.
 function tmTrackName(t) {
-  const lay = t.layout || '';
-  const dup = lay && t.track.toLowerCase().endsWith(lay.toLowerCase());
+  const lay = t.layout || '', tl = t.track.toLowerCase(), ll = lay.toLowerCase();
+  const dup = lay && (tl === ll || tl.endsWith(' ' + ll));   // a whole trailing name part only
   return t.track + (lay && !dup ? ' - ' + lay : '') + (t.reverse ? ' (reverse)' : '');
 }
 

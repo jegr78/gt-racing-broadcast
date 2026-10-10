@@ -106,6 +106,8 @@ def t_track_label_as_in_the_control_center():
         "Grand Valley - Highway 1", "a layout already ending the track name is not repeated"
     assert rtel.track_label({"track": "Grand Valley - Highway 1", "layout": "highway 1"}) == \
         "Grand Valley - Highway 1"
+    assert rtel.track_label({"track": "Nordschleife", "layout": "Schleife"}) == \
+        "Nordschleife - Schleife", "only a whole trailing name part counts as the layout"
 
 
 def t_block_figures():
