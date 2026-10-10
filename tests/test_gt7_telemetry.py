@@ -712,6 +712,36 @@ def t_format_surfaces_avg_lap():
     assert tm.format_snapshot(snap, "metric", (70, 85, 95))["avg_lap"] is None
 
 
+def t_gap_at_the_closing_boundary_is_not_a_pace_lap():
+    eng = tm.TelemetryEngine()
+    rows = []
+    eng.on_lap = rows.append
+    eng.update(tm.parse_packet(_packet(lap=1, speed_mps=20)), 100.0)
+    for i in range(1, 10):
+        eng.update(tm.parse_packet(_packet(lap=2, speed_mps=20)), 100.0 + i)
+    eng.update(tm.parse_packet(_packet(lap=3, speed_mps=20)), 115.0)
+    assert rows[-1]["status"] == "not counted", "a missing closing interval must not install a reference"
+    assert rows[-1]["data_quality"] == "interrupted"
+    assert "data gap over 2 s" in rows[-1]["reasons"]
+
+
+def t_lap_emission_preserves_processing_and_service_reasons_separately():
+    eng = tm.TelemetryEngine()
+    rows = []
+    eng.on_lap = rows.append
+    eng.update(tm.parse_packet(_packet(lap=1)), 100.0)
+    eng.update(tm.parse_packet(_packet(lap=2)), 101.0)
+    eng.update(tm.parse_packet(_packet(lap=2, flags=tm.FLAG_ON_TRACK | tm.FLAG_LOADING)), 102.0)
+    for i in range(3, 7):
+        eng.update(tm.parse_packet(_packet(lap=2, speed_mps=0)), 100.0 + i)
+    eng.update(tm.parse_packet(_packet(lap=2, fuel_level=80)), 107.0)
+    eng.update(tm.parse_packet(_packet(lap=3)), 108.0)
+    lap = rows[-1]
+    assert lap["capture_complete"] and lap["pit"]
+    assert lap["reasons"] == ["paused, loading or off track", "pit lap: standstill", "pit lap: refuel"]
+    assert lap["reason"] == lap["reasons"][0], "legacy consumers retain the first reason"
+
+
 def t_engine_pit_lap_via_standstill_excluded():
     eng = tm.TelemetryEngine()
     eng.update(tm.parse_packet(_packet(lap=0)), 99.0)

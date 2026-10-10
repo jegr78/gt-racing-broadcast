@@ -51,7 +51,11 @@ Loaded when working under `src/ui/`.
   its job runs. The CLI and the event-stop report keep building; the Report view's
   Generate runs `racecast report generate` as the `report-generate` job and reads the
   written file through `GET /api/report/read?name=`. A counted lap's trace closes at
-  the full lap length with the lap time, so its sectors add up. Data functions
+  the full lap length with a common zero-based, lap-normalized receiver clock, so its
+  sectors add up without a backwards closing point. Index version 5 separates capture
+  completeness, trace coverage, roles, pace eligibility and historical reference status.
+  The unfinished tail is `open_lap`, not an extra completed lap; API lists expose it
+  separately and the single-lap endpoint can retrieve its trace. Data functions
   `telemetry_*_data` in `src/racecast.py`; routes `/api/telemetry/recordings`,
   `/api/telemetry/laps`, `/api/telemetry/lap`, `/api/telemetry/tracks`,
   `/api/telemetry/learn`, `/api/telemetry/delete` (POST `{rec}`, `telemetry_delete_data`,

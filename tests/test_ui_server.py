@@ -2551,13 +2551,13 @@ tmPick('a', tmKey(tmState.recLaps[1]));
 console.log($('tm-laps').kids.map(r => r.className).join('|'));""")
     if out is not None:
         rows, times, titles, after = out.strip().split("\n")
-        assert rows == ("tmitem nc=Lap 0not counted0:06.000paused, loading or off track|"
-                        "tmitem=Lap 1ref1:56.000|tmitem sel=Lap 21:57.000|"
-                        "tmitem is-a=Lap 3ref1:50.000|tmitem=Lap 41:51.000Other Car"), \
+        assert rows == ("tmitem nc=Lap 0not for pace0:06.000paused, loading or off track|"
+                        "tmitem=Lap 1best so far1:56.000|tmitem sel=Lap 2pace1:57.000|"
+                        "tmitem is-a=Lap 3best so far1:50.000|tmitem=Lap 4pace1:51.000Other Car"), \
             f"one line per lap; a car shows only where it differs from the recording: {rows!r}"
         assert times == "tmtime|tmtime|tmtime|tmtime best|tmtime", \
             f"the fastest counted lap is marked: {times!r}"
-        assert titles.startswith("Not counted: paused, loading or off track") \
+        assert titles.startswith("Excluded from pace: paused, loading or off track") \
             and "fastest lap so far" in titles, f"badges explain themselves: {titles!r}"
         assert after == "tmitem nc|tmitem is-a|tmitem sel|tmitem|tmitem", \
             f"picking lap A moves the A marker: {after!r}"
@@ -2623,6 +2623,31 @@ console.log([cleared, shown, cells(t.kids[0])[0], cells(t.kids[1])[1]].join('|')
             f"legends follow the drawn lap and each sector names its distance: {out!r}"
 
 
+def t_telemetry_lap_rows_separate_partial_pit_and_after_service_evidence():
+    out = _tm_node("""
+const mk = (n, t, props) => Object.assign(lap('R', n, t, 7), {car: 'Car'}, props);
+tmState.recLaps = [
+ mk(0, 6, {status: 'not counted', capture_complete: false, pace_eligible: false}),
+ mk(13, 142, {status: 'not counted', capture_complete: true, pace_eligible: false,
+              lap_role: 'pit', trace_complete: false,
+              reasons: ['paused, loading or off track', 'pit lap: standstill', 'pit lap: refuel']}),
+ mk(14, 116, {status: 'counted', capture_complete: true, pace_eligible: true,
+              trace_complete: true, after_service: true}),
+ mk(21, null, {status: 'not counted', capture_complete: false, pace_eligible: false,
+               relay_time_s: 4.071, reasons: ['recording ended mid-lap']})];
+tmRenderLaps();
+console.log($('tm-laps').kids.map(r => r.textContent).join('|'));
+""")
+    if out is not None:
+        rows = out.strip().split('|')
+        assert len(rows) == 4 and 'Lap 0partial' in rows[0]
+        assert 'Lap 13pit' in rows[1] and all(r in rows[1] for r in (
+            'paused, loading or off track', 'pit lap: standstill', 'pit lap: refuel'))
+        assert 'Partial distance trace' in rows[1], 'a complete capture need not have a complete course trace'
+        assert 'Lap 14pace' in rows[2] and 'After inferred service; tyres unconfirmed' in rows[2]
+        assert 'Lap 21partial' in rows[3] and '4.071 s captured' in rows[3]
+
+
 def t_telemetry_summary_shows_the_report_figures_and_a_clickable_trend():
     page = _cc_page()
     assert 'id="tm-summary"' in page, "the view carries the per-recording summary"
@@ -2649,7 +2674,7 @@ console.log(String(box.hidden));""")
     if out is not None:
         first, second = out.strip().split("\n")
         assert first == ("false|1:50.104best lap · lap 2,1:48.937theoretical best,"
-                         "± 1.999 sconsistency,7.74 Lfuel per lap,2 of 3counted laps,"
+                         "± 1.999 sconsistency,7.74 Lfuel per lap,2 of 3pace laps,"
                          "78.6 · 74.4 · 71.6 · 69.2 °Ctyres FL · FR · RL · RR|"
                          "tm-tr nc,tm-tr,tm-tr best|R|1|2"), \
             f"the summary repeats the report's figures and a trend dot picks lap B: {first!r}"
@@ -3219,7 +3244,7 @@ answer('/recordings', {ok: true, recordings: [
 await tick();
 console.log($('tm-recs').textContent);""")
     if out is not None:
-        assert "7 laps" in out and "not indexed yet" not in out, \
+        assert "7 lap segments" in out and "not indexed yet" not in out, \
             f"the list shows what the job indexed: {out!r}"
 
 
