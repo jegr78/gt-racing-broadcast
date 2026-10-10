@@ -83,3 +83,15 @@ output validity, unavailable-model behavior, interactive permissions, provider
 failure, timeout and process-tree cancellation. Use synthetic telemetry and no
 credentials or private recordings in committed evidence. Until this matrix is
 complete, the feature is not release-verified.
+
+Guard falsification disabled each checked condition in isolation and observed the
+intended assertion fail, then restored the committed implementation. Checked
+settings field allowlists, duplicate IDs, timeout bounds, API overrides, probe
+capabilities, invocation login/capabilities/model/path/MCP checks, permission
+denial and provider error classification, object-shaped results and failed events.
+The result-object mutation initially survived, revealing a missing JSON-list test;
+that negative test now fails when the object guard is removed.
+
+The self-review corrected CLI TOML parsing using the installed non-billable parser.
+An independent read-only security pass found no confirmed findings. Its runtime
+limits remain explicit above and are reviewed again with the job runner.
