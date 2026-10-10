@@ -1305,7 +1305,9 @@
         <section class="tmsum" id="tm-summary" hidden></section>
         <div class="tmgrid">
           <div class="tmside">
-            <section><div class="viewhead"><h3>Recordings</h3></div>
+            <section><div class="viewhead"><h3>Recordings</h3>
+                <span class="vhbtns"><button id="tm-del" onclick="tmDelete()" disabled
+                  title="Delete the selected recording">Delete</button></span></div>
               <div class="tmlist" id="tm-recs"></div></section>
             <section><div class="viewhead"><h3>Laps</h3><span class="sub" id="tm-rec-track"></span></div>
               <div class="tmset" id="tm-settrack" hidden>
@@ -5552,6 +5554,31 @@ function tmRenderRecs() {
     else b.onclick = () => tmSelectRec(r.rec);
     box.appendChild(b);
   });
+  const sel = tmState.recs.find(r => r.rec === tmState.rec);
+  $('tm-del').disabled = !sel || !!sel.recording;   // the relay's open file is never deleted
+}
+
+// Deletes the selected recording, its CSV export and its lap index (racecast telemetry
+// delete), after a confirmation; the list then reloads and selects the next recording.
+async function tmDelete() {
+  const rec = tmState.rec, row = tmState.recs.find(r => r.rec === rec);
+  if (!row || row.recording) return;
+  const laps = row.laps == null ? '' : ' (' + row.laps + ' laps)';
+  if (!(await confirmModal('Delete the recording ' + rec + laps + '?\n'
+      + 'This removes the recording, its CSV export and its lap index. It cannot be undone.',
+      {title: 'Delete recording', okLabel: 'Delete'}))) return;
+  if (rec !== tmState.rec) return;                 // the selection moved while the dialog was open
+  const btn = $('tm-del');
+  btn.disabled = true;
+  let d;
+  try {
+    d = await (await fetch('/api/telemetry/delete', {method: 'POST',
+      headers: {'Content-Type': 'application/json'}, body: JSON.stringify({rec})})).json();
+  } catch (e) { d = {ok: false, error: 'Control Center not reachable.'}; }
+  if (!d.ok) { tmErr(d.error || 'could not delete the recording'); btn.disabled = false; return; }
+  tmState.rec = null;
+  await tmLoad();
+  if (d.notes && d.notes.length) tmNote('Deleted ' + d.deleted + '. ' + d.notes.join('; '));
 }
 
 async function tmSelectRec(rec) {

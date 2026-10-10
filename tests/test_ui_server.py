@@ -2654,6 +2654,42 @@ console.log(String(box.hidden));""")
                          "tm-tr nc,tm-tr,tm-tr best|R|1|2"), \
             f"the summary repeats the report's figures and a trend dot picks lap B: {first!r}"
         assert second == "true", "no summary hides the section"
+def t_telemetry_delete_asks_first_then_reloads_the_recordings():
+    out = _tm_node("""
+let ok = false, asked = '';
+globalThis.confirmModal = async (body) => { asked = body; return ok; };
+tmState.recs = [{rec: 'A', laps: 21, recording: false}, {rec: 'B', laps: null, recording: true}];
+tmState.rec = 'A';
+tmRenderRecs();
+const enabled = !$('tm-del').disabled;
+await tmDelete();
+const cancelled = calls.filter(u => u.includes('/api/telemetry/delete')).length;
+ok = true;
+const p = tmDelete();
+await tick();
+answer('/api/telemetry/delete', {ok: true, deleted: 'A.gt7rec', notes: []});
+await tick();
+const reloaded = calls.filter(u => u.includes('/api/telemetry/recordings')).length;
+answer('/api/telemetry/recordings', {ok: true, recordings: []});
+await p; await tick();
+tmState.recs = [{rec: 'B', recording: true}]; tmState.rec = 'B'; tmRenderRecs();
+const openOff = $('tm-del').disabled;
+const before = calls.length;
+await tmDelete();
+console.log([enabled, cancelled, reloaded, openOff, calls.length - before,
+             /A/.test(asked) && /21 laps/.test(asked) && /cannot be undone/.test(asked)].join('|'));
+tmState.recs = [{rec: 'C', laps: 2, recording: false}]; tmState.rec = 'C'; tmRenderRecs();
+const q = tmDelete();
+await tick();
+answer('/api/telemetry/delete', {ok: false, error: 'C.gt7rec is currently recording'});
+await q;
+console.log([$('tm-err').hidden, $('tm-err').textContent, $('tm-del').disabled].join('|'));""")
+    if out is not None:
+        first, second = out.strip().split("\n")
+        assert first == "true|0|1|true|0|true", \
+            f"delete asks first, a cancel sends nothing, the list reloads, the open file is off: {first!r}"
+        assert second == "false|C.gt7rec is currently recording|false", \
+            f"a refused delete shows the reason and keeps the button usable: {second!r}"
 
 
 def t_telemetry_recording_rows_mark_open_files_and_unindexed_laps():
