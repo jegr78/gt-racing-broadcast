@@ -2927,13 +2927,13 @@ const els={};global.$=id=>els[id]||=({hidden:false,value:'B',querySelectorAll(){
 global.localStorage={setItem(){},getItem(){return null;}};global.tmState={rec:'A'};
 tcRender=()=>{};tcStatus=()=>{};tc.target='A';tc.doc={source_id:'same',revision:1};tc.reply={profile:'p'};
 tc.data={notes:[{text:'A draft'}],sessions:{}};tc.draft={};tc.dirty=true;tcKeepDraft();
-let resolve;global.tmGet=()=>new Promise(r=>resolve=r);global.fetch=()=>{throw Error('must not POST while loading');};
+let resolve,posts=0;global.tmGet=()=>new Promise(r=>resolve=r);global.fetch=()=>{posts++;throw Error('must not POST while loading');};
 (async()=>{tc.open=true;const loading=tcLoad('B');const saved=await tcSave();
 resolve({ok:true,profile:'p',context:{source_id:'same',revision:1,data:{notes:[],sessions:{}},draft:{}},sessions:['1']});
-await loading;clearTimeout(tc.timer);console.log(JSON.stringify([saved,tc.target,tc.data.notes,tc.dirty]));})();
+await loading;clearTimeout(tc.timer);console.log(JSON.stringify([saved,tc.target,tc.data.notes,tc.dirty,posts]));})();
 """)
     if out is not None:
-        assert json.loads(out) == [False, 'B', [], False], \
+        assert json.loads(out) == [False, 'B', [], False, 0], \
             'loading must prevent saves and copied recordings must not share editor drafts'
 
 
