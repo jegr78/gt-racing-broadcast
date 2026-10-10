@@ -3576,10 +3576,17 @@ def _telemetry_with_context(idx, path):
     except Exception as exc:  # noqa: BLE001  broken notes never discard captured laps
         data, revision, error = {}, None, _telemetry_reason(exc)
     snapshot = {k: v for k, v in doc.items() if k not in {'draft', 'operation'}} if error is None else None
-    result = dict(idx, laps=[gc.annotate(data, l) for l in idx['laps']], context_revision=revision,
+    rows = idx['laps'] + ([idx['open_lap']] if idx.get('open_lap') else [])
+    lookup = {(l['session'], l['lap']): l for l in rows}
+    previous, annotated = {}, []
+    for lap in rows:
+        annotated.append(gc.annotate(data, lap, lap_lookup=lookup,
+                                     previous_lap=previous.get(lap['session'])))
+        previous[lap['session']] = lap['lap']
+    result = dict(idx, laps=annotated[:len(idx['laps'])], context_revision=revision,
                   context_snapshot=snapshot)
     if idx.get('open_lap'):
-        result['open_lap'] = gc.annotate(data, idx['open_lap'])
+        result['open_lap'] = annotated[-1]
     if error:
         result['context_error'] = error
         for lap in result['laps']:

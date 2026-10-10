@@ -379,6 +379,79 @@ def t_context_metadata_is_valid_json_and_unsupported_history_is_not_restored():
         assert store.read()['revision'] == 1
 
 
+def t_explicit_lap_role_wins_over_warmup_but_unknown_restores_derivation():
+    context = data()
+    context['sessions']['1']['stints'][1]['warmup_laps'] = 2
+    context['sessions']['1']['lap_roles'] = {'14': 'regular', '15': 'unknown'}
+    base = {'session': 1, 'pace_eligible': True, 'lap_role': 'regular',
+            'start_t_s': 1300, 'end_t_s': 1410}
+    ready = c.annotate(context, dict(base, lap=14))
+    assert ready['analysis_role'] == 'regular' and ready['comparison_eligible'], \
+        'explicit manual regular role must override automatic warmup'
+    warm = c.annotate(context, dict(base, lap=15))
+    assert warm['analysis_role'] == 'warmup' and not warm['comparison_eligible']
+    context['sessions']['1']['lap_roles']['13'] = 'unknown'
+    pit = c.annotate(context, dict(base, lap=13, start_t_s=1100, end_t_s=1300))
+    assert pit['analysis_role'] == 'pit', 'unknown role must permit confirmed service derivation'
+
+
+def t_new_inferred_service_is_not_confirmed_by_an_older_stint_declaration():
+    base = {'session': 1, 'pace_eligible': True, 'lap_role': 'regular',
+            'start_t_s': 1700, 'end_t_s': 1810, 'lap': 18, 'after_service': True}
+    row = c.annotate(data(), base)
+    assert not row['context_confirmed'] and row['context_warnings'], \
+        'an older confirmed service cannot confirm a new inferred event'
+    context = data()
+    context['sessions']['1']['stints'][1].update(compound='RM', tyre_service=False)
+    row = c.annotate(context, dict(base, lap=14, start_t_s=1300, end_t_s=1410))
+    assert row['context_confirmed'] and not row['context_warnings'], \
+        'explicit no-tyre-change at the matching service is known, not unknown'
+
+
+def t_a_timed_first_declared_stint_retains_unknown_pre_service_membership():
+    context = data()
+    context['sessions']['1']['stints'] = [context['sessions']['1']['stints'][1]]
+    pit = {'session': 1, 'lap': 13, 'pace_eligible': False, 'lap_role': 'pit',
+           'capture_complete': True, 'start_t_s': 1100, 'end_t_s': 1300}
+    lookup = {(1, 13): pit}
+    row = c.annotate(context, pit)
+    assert [(m['compound'], m['start_t_s'], m['end_t_s']) for m in row['memberships']] == [
+        (None, 1100, 1290), ('RH', 1290, 1300)], 'first timed service must not invent the earlier compound'
+    warm = c.annotate(context, dict(pit, lap=14, start_t_s=1300, end_t_s=1410,
+                                    lap_role='regular', pace_eligible=True), lap_lookup=lookup)
+    assert warm['analysis_role'] == 'warmup', 'first full lap follows the timed initial service'
+
+
+def t_conflicting_service_times_and_compound_statements_stay_unconfirmed():
+    context = data()
+    pit = {'session': 1, 'lap': 13, 'capture_complete': True,
+           'start_t_s': 1100, 'end_t_s': 1300}
+    lap = dict(pit, lap=15, start_t_s=1410, end_t_s=1520, pace_eligible=True, lap_role='regular')
+    lookup = {(1, 13): pit}
+    context['sessions']['1']['stints'][1]['start_recording_s'] = 2000
+    row = c.annotate(context, lap, lap_lookup=lookup)
+    assert not row['context_confirmed'] and not row['comparison_eligible'], \
+        'a conflicting service time stays visible throughout its stint'
+    assert 'Service time outside recorded lap' in row['context_warnings']
+    context = data()
+    context['sessions']['1']['stints'][1]['tyre_service'] = False
+    row = c.annotate(context, lap, lap_lookup=lookup)
+    assert not row['context_confirmed'] and not row['comparison_eligible'], \
+        'a compound change cannot silently agree with no tyre change'
+    assert row['pace_eligible'] and row['compound'] == 'RH'
+
+
+def t_restoring_identical_values_still_creates_a_traceable_revision():
+    with tempfile.TemporaryDirectory() as td:
+        store = c.Store.for_recording(recording(td))
+        store.save(data(), 0)
+        store.save({}, 1)
+        store.restore(1, 2)
+        restored = store.restore(1, 3)
+        assert restored['revision'] == 4, 'every restore must create a new revision'
+        assert store.history()[0]['revision'] == 3
+
+
 if __name__ == '__main__':
     for name, fn in sorted(globals().copy().items()):
         if name.startswith('t_') and callable(fn):

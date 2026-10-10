@@ -379,7 +379,7 @@ class Store:
         if source_identity(path) != self.source_id:
             raise ValueError('recording identity changed')
 
-    def save(self, data, expected, draft=None, operation='edit'):
+    def save(self, data, expected, draft=None, operation='edit', force_revision=False):
         _number(expected, 'expected revision', True)
         self._check_capture()
         with _LOCK, _file_lock(self.path):
@@ -390,7 +390,7 @@ class Store:
             normalized = validate_data(data)
             draft = copy.deepcopy(_object(draft or {}))
             _bounded(draft)
-            changed = normalized != current['data']
+            changed = force_revision or normalized != current['data']
             doc = dict(current, data=normalized, draft=draft,
                        revision=current['revision'] + int(changed), updated_at=time.time(),
                        operation=operation)
@@ -431,7 +431,7 @@ class Store:
             _context_envelope(previous, self.source_id)
             if previous['revision'] != revision:
                 raise ValueError('history revision does not match its file')
-            return self.save(previous['data'], expected, operation='restore ' + str(revision))
+            return self.save(previous['data'], expected, operation='restore ' + str(revision), force_revision=True)
 
     def export(self):
         doc = self.read()
@@ -549,7 +549,7 @@ def _memberships(stints, lap):
         if t is not None and start is not None and end is not None and not start <= t <= end:
             warnings.append('Service time outside recorded lap')
             t = None
-        if not i or (t is not None and start is not None and t <= start):
+        if (not i and stint.get('start_recording_s') is None) or (t is not None and start is not None and t <= start):
             active = stint
         else:
             boundaries.append((stint, t))
@@ -583,7 +583,7 @@ def _memberships(stints, lap):
         member(active, lo, t)
         active, lo = stint, t
     member(active, lo, end)
-    return out, list(dict.fromkeys(warnings)), bool(boundaries)
+    return out, list(dict.fromkeys(warnings)), any(s.get('confirmed') for s, _t in boundaries)
 
 
 def _strategy_conflicts(strategies):
@@ -600,28 +600,37 @@ def _strategy_conflicts(strategies):
     return False
 
 
-def annotate(data, lap):
+def annotate(data, lap, lap_lookup=None, previous_lap=None):
     """Context overlay: retain original measured fields, add analysis roles and provenance."""
     result = dict(lap)
     session = data.get('sessions', {}).get(str(lap['session']), {})
     stints = sorted(session.get('stints', []),
                     key=lambda s: (s['start_lap'], s.get('start_recording_s') or -1))
     n = lap['lap']
+    lap_lookup = lap_lookup or {(lap['session'], n): lap}
     prior = [s for s in stints if s['start_lap'] <= n]
     stint = prior[-1] if prior else None
     memberships, warnings, service_in_lap = _memberships(stints, lap)
     compounds = list(dict.fromkeys(m['compound'] for m in memberships if m['compound']))
     compound = compounds[0] if len(compounds) == 1 and all(m['compound'] for m in memberships) else None
-    role = session.get('lap_roles', {}).get(str(n), lap.get('lap_role', 'regular'))
+    manual_role = session.get('lap_roles', {}).get(str(n))
+    derive_role = manual_role in (None, 'unknown')
+    role = manual_role or lap.get('lap_role', 'regular')
     if role == 'unknown':
         role = lap.get('lap_role', 'regular')
-    if service_in_lap and all(m['confirmed'] for m in memberships):
+    if service_in_lap:
         if lap.get('lap_role') != 'pit':
             warnings.append('Manual service has no matching capture inference')
-        if str(n) not in session.get('lap_roles', {}):
+        if derive_role:
             role = 'pit'
-    if stint and stint.get('confirmed') and stint.get('tyre_service') and role == 'regular':
-        first_full = stint['start_lap'] if stints and stint is stints[0] else stint['start_lap'] + 1
+    if stint and stint.get('confirmed') and stint.get('tyre_service') and role == 'regular' and derive_role:
+        boundary = lap_lookup.get((lap['session'], stint['start_lap']))
+        t = stint.get('start_recording_s')
+        at_start = bool(boundary and boundary.get('capture_complete', True)
+                        and t is not None and boundary.get('start_t_s') is not None
+                        and t <= boundary['start_t_s'])
+        initial = stints and stint is stints[0]
+        first_full = stint['start_lap'] if at_start or initial and t is None else stint['start_lap'] + 1
         if first_full <= n < first_full + stint.get('warmup_laps', 1):
             role = 'warmup'
     strategies = []
@@ -632,14 +641,32 @@ def annotate(data, lap):
     strategy_conflict = _strategy_conflicts(strategies)
     if strategy_conflict:
         warnings.append('Mixed fuel strategy within lap')
-    confirmed = bool(session.get('confirmed') and compound and all(m['confirmed'] for m in memberships)
-                     and not warnings)
     if not session.get('confirmed'):
         warnings.append('Race settings unconfirmed')
     if compound is None:
         warnings.append('Mixed compounds during service' if len(compounds) > 1 else 'Tyre compound unconfirmed')
-    if lap.get('after_service') and not (stint and stint.get('tyre_service')):
-        warnings.append('Inferred service has no confirmed tyre assignment')
+    preceding = previous_lap if previous_lap is not None else n - 1
+    decision = bool(stint and stint.get('confirmed') and stint['start_lap'] == preceding
+                    and stint.get('tyre_service') is not None)
+    if lap.get('after_service') and not decision:
+        warnings.append('Inferred service has no matching confirmed tyre-service decision')
+    declaration_conflict = False
+    if stint:
+        boundary = lap_lookup.get((lap['session'], stint['start_lap']))
+        t = stint.get('start_recording_s')
+        if (boundary and t is not None and boundary.get('start_t_s') is not None
+                and boundary.get('end_t_s') is not None
+                and not boundary['start_t_s'] <= t <= boundary['end_t_s']):
+            declaration_conflict = True
+            warnings.append('Service time outside recorded lap')
+        earlier = prior[-2] if len(prior) > 1 else None
+        if (earlier and earlier.get('confirmed') and stint.get('confirmed')
+                and earlier.get('compound') and stint.get('compound')
+                and earlier['compound'] != stint['compound'] and stint.get('tyre_service') is False):
+            declaration_conflict = True
+            warnings.append('Compound change contradicts no tyre change')
+    confirmed = bool(session.get('confirmed') and compound and all(m['confirmed'] for m in memberships)
+                     and not warnings)
     tyre_stints = [s for s in prior if s.get('confirmed') and
                    (s.get('tyre_service') or stints and s is stints[0])]
     result.update(compounds=compounds, compound=compound, memberships=memberships,
@@ -651,7 +678,7 @@ def annotate(data, lap):
                   tyre_age_laps=n - tyre_stints[-1]['start_lap'] if tyre_stints and compound else None,
                   comparison_eligible=bool(lap.get('pace_eligible', lap.get('status') in ('counted', 'reference'))
                                            and role not in {'first', 'pit', 'warmup', 'partial'}
-                                           and not strategy_conflict))
+                                           and not strategy_conflict and not declaration_conflict))
     return result
 
 
