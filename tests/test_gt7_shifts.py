@@ -29,7 +29,8 @@ def t_curve_endpoint_is_a_partial_reference_not_a_confirmed_rev_limit():
 def t_malformed_curves_and_ratios_cannot_fabricate_targets():
     for points in ([curve()[1],curve()[0]],curve()+[curve()[-1]],
                    [dict(curve()[0],power=float('nan')),curve()[1]],
-                   [dict(curve()[0],power=999),curve()[1]]):
+                   [dict(curve()[0],power=999),curve()[1]],
+                   [dict(p, power=p['power']*.99) for p in curve()]):
         try:shifts.validate_curve(points)
         except ValueError:pass # expected malformed data
         else:raise AssertionError('invalid source curve must be rejected')
@@ -207,6 +208,34 @@ def t_source_payloads_and_packet_observations_are_independently_bounded():
             assert 'packet bound' in str(exc)
         else:
             raise AssertionError('oversized phase rows must be refused')
+
+
+def t_unsupported_source_components_do_not_invent_targets_and_manual_tables_stay_usable():
+    import io
+    import http_util
+    original = http_util.open_url
+    with tempfile.TemporaryDirectory() as root:
+        def missing(url, **kwargs):
+            if url.endswith('/commits/main'):
+                return io.BytesIO(json.dumps({'sha': 'a'*40}).encode())
+            if url.endswith('.tsv'):
+                raise http_util.HTTPError(url, 404, 'missing curve', None, None)
+            return io.BytesIO(b'{}')
+        try:
+            http_util.open_url = missing
+            source = shifts.Cache(root).update(485)
+        finally:
+            http_util.open_url = original
+        result = shifts.reference(source, None, 485, True)
+        assert result['targets'] == [] and not any(result['support'].values()), \
+            'missing source components must remain unavailable'
+        partial = dict(source, curve=curve())
+        assert shifts.reference(partial, None, 485, True)['targets'] == []
+        observed = shifts.reference(partial, None, 485, True, [2, 1])
+        assert observed['targets'][0]['rpm'] == 5600 and observed['ratio_source'] == 'decoded transmission'
+        manual = {'car_id': 485, 'targets': {'2': 5500}, 'configuration': 'Own event',
+                  'provenance': 'Own test', 'confirmed': True}
+        assert shifts.reference(source, manual, 485, True)['targets'][0]['rpm'] == 5500
 
 
 def t_confirmed_event_tables_require_configuration_and_provenance():
