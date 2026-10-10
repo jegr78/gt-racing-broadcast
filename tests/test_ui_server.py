@@ -2995,7 +2995,7 @@ $('tm-channel-box').open=true;tmState.lapA=null;tmState.lapB=lap('R',3,16,7);
 tmChannelState.catalog=[{key:'rpm',label:'RPM',unit:'rpm',diagnostic:false,type:'continuous'}];
 $('tm-channel-select').selectedOptions=[{value:'rpm'}];$('tm-channel-axis').value='time';
 $('tm-channel-start').value='0';$('tm-channel-end').value='2';
-let reply;tmGet=()=>new Promise(r=>reply=r);
+let reply;tmGet=()=>new Promise(r=>reply=r);tmChannelRender=()=>{};tmChannelStatus=()=>{};
 const pending=tmChannelLoad();await tick();tmState.lapB=lap('R',4,16,7);
 reply({ok:true,detail:{rows:[{t:1,rpm:6000}],channels:[{key:'rpm'}]}});await pending;
 console.log(JSON.stringify(tmChannelState.details));

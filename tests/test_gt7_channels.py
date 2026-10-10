@@ -29,6 +29,7 @@ def t_decoding_keeps_geometry_gearbox_units_and_constant_zero_distinct():
     assert rows['speed_kmh'] == {'value': 0.0, 'state': 'value', 'raw': '00000000'}
     normal = {d['key']: d for d in c.descriptors() if not d['diagnostic']}
     assert normal['rotation_w']['unit'] == '1' and normal['wheel_fl_rad_s']['unit'] == 'rad/s'
+    assert all(d['type'] == 'step' for d in c.descriptors(True)), 'diagnostic packet interpretations must not be interpolated'
     assert 'raw_0x12c' not in normal and 'throttle_input_pct' not in normal
     assert normal['alert_max_rpm']['label'] != 'Rev limit'
 
@@ -157,6 +158,8 @@ def t_corrupt_sparse_anchors_are_refused_before_reading_arbitrary_capture_bytes(
                 detail.window(path, altered, lap, ['rpm'], 'time', 0, 1, fixture.FakeTracks())
             except ValueError as exc:
                 assert 'channel index' in str(exc), 'corrupt seeks require an explicit index failure'
+            except (OSError, TypeError, IndexError) as exc:
+                raise AssertionError('invalid seek anchors require a channel index domain failure') from exc
             else:
                 raise AssertionError('unverified seek anchors must not decode arbitrary bytes as telemetry')
 
@@ -171,6 +174,37 @@ def t_distance_time_provenance_follows_the_indexed_lap_quality():
             assert result['time_basis'] == lap['time_basis'], 'distance channels must retain the indexed time provenance'
             if n == 1:
                 assert not lap['time_valid'] and 'normalized' not in result['time_basis']
+
+
+def t_each_detail_resource_limit_reports_its_own_domain_failure():
+    with tempfile.TemporaryDirectory() as td:
+        path = fixture.write_circle_recording(td, lap_secs=(45, 45, 45, 45), n=400)
+        idx = fixture._index(path)
+        lap = fixture._lap(idx, 3)
+        requests = [
+            (['rpm']*0, 'time', 0, 1, 'between 1 and 8'),
+            ([d['key'] for d in c.descriptors(False)[:9]], 'time', 0, 1, 'between 1 and 8'),
+            (['rpm'], 'time', 0, 31, '30 seconds'),
+            (['rpm'], 'time', float('nan'), 1, 'finite and ordered'),
+            (['rpm'], 'distance', 0, 1001, 'recorded lap')]
+        for keys, axis, start, end, message in requests:
+            try:
+                detail.window(path, idx, lap, keys, axis, start, end, fixture.FakeTracks())
+            except ValueError as exc:
+                assert message in str(exc), 'each resource bound requires its own domain failure'
+            else:
+                raise AssertionError('a breached detail resource limit must fail before reading')
+        real = detail.MAX_RAW_ROWS
+        detail.MAX_RAW_ROWS = 2
+        try:
+            try:
+                detail.window(path, idx, lap, ['rpm'], 'time', 0, 1, fixture.FakeTracks())
+            except ValueError as exc:
+                assert 'too many packets' in str(exc)
+            else:
+                raise AssertionError('raw detail must respect its packet output limit')
+        finally:
+            detail.MAX_RAW_ROWS = real
 
 
 if __name__ == '__main__':
