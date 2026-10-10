@@ -211,8 +211,49 @@ def t_interruption_retains_cancelled_artifact_and_manual_guidance():
             j.time.sleep=interrupt
             result=runner.run(package(),pkg,FakeAdapter(d,'tree'))
         finally:j.time.sleep=original
-        assert result['state']=='cancelled' and result['finished_at']
+        assert result['state']=='cancelled' and result['finished_at'],result
         assert not runner.status('p')['busy']
+
+
+def t_interruption_cleans_tree_before_temporary_directory_exit():
+    with tempfile.TemporaryDirectory() as d:
+        pkg=prepared(d);runner=j.Runner(Path(d)/'machine',Path(d)/'profile','p')
+        original_temp=j.tempfile.TemporaryDirectory;original_sleep=j.time.sleep;original_kill=j.terminate_tree
+        exited=[];cleaned=[]
+        class CheckedTemp(original_temp):
+            def __exit__(self,*args):
+                exited.append(bool(cleaned))
+                return super().__exit__(*args)
+        def kill(proc,tree=None):
+            original_kill(proc,tree);cleaned.append(True)
+        def interrupt(_seconds):
+            j.time.sleep=original_sleep
+            raise KeyboardInterrupt()
+        try:
+            j.tempfile.TemporaryDirectory=CheckedTemp;j.terminate_tree=kill;j.time.sleep=interrupt
+            result=runner.run(package(),pkg,FakeAdapter(d,'tree'))
+        finally:
+            j.tempfile.TemporaryDirectory=original_temp;j.terminate_tree=original_kill;j.time.sleep=original_sleep
+        assert exited==[True], 'temporary directory cleanup preceded process-tree cleanup'
+        assert result['state']=='cancelled',result
+
+
+def t_windows_tree_waits_for_descendants_before_releasing_handle():
+    calls=[]
+    class Kernel:
+        def TerminateJobObject(self,handle,code):calls.append('terminate');return True
+        def QueryInformationJobObject(self,handle,kind,pointer,size,returned):
+            calls.append('query');pointer._obj.active=1 if calls.count('query')==1 else 0
+            return True
+        def CloseHandle(self,handle):calls.append('close')
+    tree=object.__new__(j.WindowsTree);tree.handle=1;tree.kernel=Kernel()
+    tree.close();tree.close()
+    assert calls==['terminate','query','query','close'] and tree.handle is None
+    class FailedKernel(Kernel):
+        def QueryInformationJobObject(self,*args):return False
+    tree=object.__new__(j.WindowsTree);tree.handle=1;tree.kernel=FailedKernel()
+    error(tree.close,'cleanup_failed')
+    assert tree.handle is None and calls[-1]=='close'
 
 
 def t_tree_cleanup_is_not_repeated_after_validation():

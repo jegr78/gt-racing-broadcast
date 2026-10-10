@@ -90,6 +90,8 @@ class WindowsTree:
         self.kernel.SetInformationJobObject.argtypes=[ct.c_void_p,ct.c_int,ct.c_void_p,ct.c_uint32]
         self.kernel.AssignProcessToJobObject.argtypes=[ct.c_void_p,ct.c_void_p]
         self.kernel.CloseHandle.argtypes=[ct.c_void_p]
+        self.kernel.TerminateJobObject.argtypes=[ct.c_void_p,ct.c_uint32]
+        self.kernel.QueryInformationJobObject.argtypes=[ct.c_void_p,ct.c_int,ct.c_void_p,ct.c_uint32,ct.c_void_p]
         self.handle=self.kernel.CreateJobObjectW(None,None)
         info=Extended();info.basic.flags=0x2000  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
         if not self.handle or not self.kernel.SetInformationJobObject(self.handle,9,ct.byref(info),ct.sizeof(info)):
@@ -133,8 +135,24 @@ class WindowsTree:
         finally:self.kernel.CloseHandle(snapshot)
         if not resumed:raise JobError('isolation_unavailable','Could not resume the owned analysis process')
     def close(self):
-        if self.handle:
-            self.kernel.CloseHandle(self.handle);self.handle=None
+        if not self.handle:return
+        import ctypes as ct
+        class Accounting(ct.Structure):
+            _fields_=[('times',ct.c_longlong*4),('faults',ct.c_uint32),('total',ct.c_uint32),
+                      ('active',ct.c_uint32),('terminated',ct.c_uint32)]
+        handle=self.handle;self.handle=None
+        try:
+            if not self.kernel.TerminateJobObject(handle,1):
+                raise JobError('cleanup_failed','Windows could not terminate the owned analysis Job Object')
+            deadline=time.monotonic()+10
+            while True:
+                info=Accounting()
+                if not self.kernel.QueryInformationJobObject(handle,1,ct.byref(info),ct.sizeof(info),None):
+                    raise JobError('cleanup_failed','Windows could not confirm analysis descendant termination')
+                if info.active==0:break
+                if time.monotonic()>=deadline:raise JobError('cleanup_failed','Windows analysis descendants did not terminate')
+                time.sleep(.01)
+        finally:self.kernel.CloseHandle(handle)
 
 
 def terminate_tree(proc,tree=None):
@@ -313,109 +331,114 @@ class Runner:
             if probe.get('status')!='ready':
                 raise JobError(probe.get('status','auth_unknown'),probe.get('guidance','Check provider login externally'))
             with tempfile.TemporaryDirectory(prefix='racecast-ai-') as scratch:
-                pkg=Path(scratch).resolve()/'package';out=pkg.parent/'output'
-                shutil.copytree(directory/'package',pkg);out.mkdir()
-                if any(p.is_symlink() for p in pkg.rglob('*')):
-                    raise JobError('invalid_package','Analysis packages cannot contain symlinks')
-                invocation=adapter.invocation(pkg,out,pkg/'result-schema.json',probe,model=state['requested_model'])
-                save_manual_invocation(directory,invocation,pkg,out)
-                if (_load(self.cancel_path) or {}).get('id')==state['id']:
-                    raise JobError('cancelled','Analysis cancelled before provider invocation')
-                flags={'creationflags':0x08000204} if os.name=='nt' else {'start_new_session':True}
-                tree=WindowsTree()
-                proc=subprocess.Popen(invocation.argv,cwd=invocation.cwd,env=execution_env(os.environ),
-                                      stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,**flags)
-                tree.attach(proc)
-                state['started_at']=_now()
-                self._update(directory,state,'running','Provider invocation started')
-                def drain_impl(stream,target,parse=False):
-                    count=0;pending=b''
-                    with open(target,'wb') as f:
-                        while True:
-                            chunk=stream.read1(8192)
-                            if not chunk:break
-                            count+=len(chunk)
-                            if count>MAX_OUTPUT_BYTES:overflow.set();break
-                            f.write(chunk)
-                            if parse:
-                                pending+=chunk
-                                lines=pending.split(b'\n');pending=lines.pop()
-                                if len(pending)>MAX_OUTPUT_BYTES:overflow.set();break
-                                for line in lines:
-                                    try:event=json.loads(line.decode('utf-8','replace'))
-                                    except ValueError:continue  # Provider diagnostics can be plain text.
-                                    if isinstance(event,dict):events.append(event)
-                    stream.close()
-                def drain(stream,target,parse=False):
-                    try:drain_impl(stream,target,parse)
-                    except Exception as exc:
-                        reader_errors.append(type(exc).__name__);overflow.set()
-                    finally:stream.close()
-                stdout=directory/'stdout.log';stderr=directory/'stderr.log'
-                for stream,target,parse in ((proc.stdout,stdout,True),(proc.stderr,stderr,False)):
-                    reader=threading.Thread(target=drain,args=(stream,target,parse),daemon=True)
-                    readers.append(reader);reader.start()
-                summary=(pkg/'summary.md').read_bytes()
-                def send_prompt():
-                    try:proc.stdin.write(summary)
-                    except BrokenPipeError:pass  # Classify early CLI rejection from its diagnostics.
-                    finally:
-                        try:proc.stdin.close()
-                        except BrokenPipeError:pass  # The CLI can exit before reading the prompt.
-                writer=threading.Thread(target=send_prompt,daemon=True)
-                readers.append(writer);writer.start()
-                deadline=time.monotonic()+invocation.timeout*self.timeout_scale
-                reason=None
-                while True:
+                try:
+                    pkg=Path(scratch).resolve()/'package';out=pkg.parent/'output'
+                    shutil.copytree(directory/'package',pkg);out.mkdir()
+                    if any(p.is_symlink() for p in pkg.rglob('*')):
+                        raise JobError('invalid_package','Analysis packages cannot contain symlinks')
+                    invocation=adapter.invocation(pkg,out,pkg/'result-schema.json',probe,model=state['requested_model'])
+                    save_manual_invocation(directory,invocation,pkg,out)
                     if (_load(self.cancel_path) or {}).get('id')==state['id']:
-                        reason=JobError('cancelled','Analysis cancelled; consumed subscription quota is not recoverable');break
-                    if overflow.is_set():reason=JobError('output_limit','Provider diagnostics exceeded the output bound');break
-                    if time.monotonic()>=deadline:reason=JobError('timed_out','Analysis exceeded the configured timeout');break
-                    if proc.poll() is not None:break
-                    time.sleep(.05)
-                if reason:cleanup_tree()
-                else:proc.wait()
-                for reader in readers:reader.join(2)
-                if any(reader.is_alive() for reader in readers):
+                        raise JobError('cancelled','Analysis cancelled before provider invocation')
+                    flags={'creationflags':0x08000204} if os.name=='nt' else {'start_new_session':True}
+                    tree=WindowsTree()
+                    proc=subprocess.Popen(invocation.argv,cwd=invocation.cwd,env=execution_env(os.environ),
+                                          stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,**flags)
+                    tree.attach(proc)
+                    state['started_at']=_now()
+                    self._update(directory,state,'running','Provider invocation started')
+                    def drain_impl(stream,target,parse=False):
+                        count=0;pending=b''
+                        with open(target,'wb') as f:
+                            while True:
+                                chunk=stream.read1(8192)
+                                if not chunk:break
+                                count+=len(chunk)
+                                if count>MAX_OUTPUT_BYTES:overflow.set();break
+                                f.write(chunk)
+                                if parse:
+                                    pending+=chunk
+                                    lines=pending.split(b'\n');pending=lines.pop()
+                                    if len(pending)>MAX_OUTPUT_BYTES:overflow.set();break
+                                    for line in lines:
+                                        try:event=json.loads(line.decode('utf-8','replace'))
+                                        except ValueError:continue  # Provider diagnostics can be plain text.
+                                        if isinstance(event,dict):events.append(event)
+                        stream.close()
+                    def drain(stream,target,parse=False):
+                        try:drain_impl(stream,target,parse)
+                        except Exception as exc:
+                            reader_errors.append(type(exc).__name__);overflow.set()
+                        finally:stream.close()
+                    stdout=directory/'stdout.log';stderr=directory/'stderr.log'
+                    for stream,target,parse in ((proc.stdout,stdout,True),(proc.stderr,stderr,False)):
+                        reader=threading.Thread(target=drain,args=(stream,target,parse),daemon=True)
+                        readers.append(reader);reader.start()
+                    summary=(pkg/'summary.md').read_bytes()
+                    def send_prompt():
+                        try:proc.stdin.write(summary)
+                        except BrokenPipeError:pass  # Classify early CLI rejection from its diagnostics.
+                        finally:
+                            try:proc.stdin.close()
+                            except BrokenPipeError:pass  # The CLI can exit before reading the prompt.
+                    writer=threading.Thread(target=send_prompt,daemon=True)
+                    readers.append(writer);writer.start()
+                    deadline=time.monotonic()+invocation.timeout*self.timeout_scale
+                    reason=None
+                    while True:
+                        if (_load(self.cancel_path) or {}).get('id')==state['id']:
+                            reason=JobError('cancelled','Analysis cancelled; consumed subscription quota is not recoverable');break
+                        if overflow.is_set():reason=JobError('output_limit','Provider diagnostics exceeded the output bound');break
+                        if time.monotonic()>=deadline:reason=JobError('timed_out','Analysis exceeded the configured timeout');break
+                        if proc.poll() is not None:break
+                        time.sleep(.05)
+                    if reason:cleanup_tree()
+                    else:proc.wait()
+                    for reader in readers:reader.join(2)
+                    if any(reader.is_alive() for reader in readers):
+                        cleanup_tree()
+                        raise JobError('cleanup_failed','A provider descendant retained the output pipe')
                     cleanup_tree()
-                    raise JobError('cleanup_failed','A provider descendant retained the output pipe')
-                cleanup_tree()
-                retain_output(out,directory/'output')
-                if reason:raise reason
-                if reader_errors:raise JobError('execution_failed','Could not retain provider diagnostics')
-                if overflow.is_set():raise JobError('output_limit','Provider diagnostics exceeded the output bound')
-                diagnostics=stderr.read_text(encoding='utf-8',errors='replace')
-                if adapter.provider=='claude':
-                    state['actual_model']=adapter.reported_model(stdout.read_text(encoding='utf-8',errors='replace'))
-                if proc.returncode:
-                    code,message=_diagnostic_code(diagnostics+stdout.read_text(encoding='utf-8',errors='replace'))
-                    raise JobError(code,message)
-                result_path=Path(invocation.output)
-                if adapter.provider=='codex':
-                    if not result_path.is_file() or result_path.is_symlink() or result_path.stat().st_size>MAX_OUTPUT_BYTES:
-                        raise JobError('invalid_output','Provider omitted a bounded regular result file')
-                    raw=regular_output_bytes(result_path).decode('utf-8','replace')
-                else:raw=stdout.read_text(encoding='utf-8',errors='replace')
-                state['actual_model']=adapter.reported_model(raw)
-                try:extracted=adapter.extract(raw,events)
-                except ai_agents.AgentError as e:
-                    if e.code=='provider_failed':
+                    retain_output(out,directory/'output')
+                    if reason:raise reason
+                    if reader_errors:raise JobError('execution_failed','Could not retain provider diagnostics')
+                    if overflow.is_set():raise JobError('output_limit','Provider diagnostics exceeded the output bound')
+                    diagnostics=stderr.read_text(encoding='utf-8',errors='replace')
+                    if adapter.provider=='claude':
+                        state['actual_model']=adapter.reported_model(stdout.read_text(encoding='utf-8',errors='replace'))
+                    if proc.returncode:
                         code,message=_diagnostic_code(diagnostics+stdout.read_text(encoding='utf-8',errors='replace'))
-                        raise JobError(code,message) from e
-                    raise
-                state['actual_model']=extracted['actual_model']
-                _save(directory/'structured-output.json',extracted['result'])
-                if validate is None:
-                    self._update(directory,state,'awaiting_validation','Output saved; report validation is pending')
-                else:
-                    try:
-                        report=validate(extracted['result'],frozen)
-                        if not isinstance(report,dict):raise ValueError('validator did not return a report')
-                    except Exception as e:
-                        (directory/'validation-error.log').write_text(type(e).__name__+': '+str(e),encoding='utf-8')
-                        raise JobError('validation_failed','Structured output did not validate; inspect saved local diagnostics') from e
-                    state['report']=report
-                    self._update(directory,state,'completed','Validated analysis completed')
+                        raise JobError(code,message)
+                    result_path=Path(invocation.output)
+                    if adapter.provider=='codex':
+                        if not result_path.is_file() or result_path.is_symlink() or result_path.stat().st_size>MAX_OUTPUT_BYTES:
+                            raise JobError('invalid_output','Provider omitted a bounded regular result file')
+                        raw=regular_output_bytes(result_path).decode('utf-8','replace')
+                    else:raw=stdout.read_text(encoding='utf-8',errors='replace')
+                    state['actual_model']=adapter.reported_model(raw)
+                    try:extracted=adapter.extract(raw,events)
+                    except ai_agents.AgentError as e:
+                        if e.code=='provider_failed':
+                            code,message=_diagnostic_code(diagnostics+stdout.read_text(encoding='utf-8',errors='replace'))
+                            raise JobError(code,message) from e
+                        raise
+                    state['actual_model']=extracted['actual_model']
+                    _save(directory/'structured-output.json',extracted['result'])
+                    if validate is None:
+                        self._update(directory,state,'awaiting_validation','Output saved; report validation is pending')
+                    else:
+                        try:
+                            report=validate(extracted['result'],frozen)
+                            if not isinstance(report,dict):raise ValueError('validator did not return a report')
+                        except Exception as e:
+                            (directory/'validation-error.log').write_text(type(e).__name__+': '+str(e),encoding='utf-8')
+                            raise JobError('validation_failed','Structured output did not validate; inspect saved local diagnostics') from e
+                        state['report']=report
+                        self._update(directory,state,'completed','Validated analysis completed')
+                finally:
+                    cleanup_tree()  # Windows cannot remove a live process's working directory.
+                    if tree:tree.close()
+                    for reader in readers:reader.join(2)
         except KeyboardInterrupt:
             state['error']={'code':'cancelled','message':'Analysis interrupted; consumed subscription quota is not recoverable'}
             self._update(directory,state,'cancelled',state['error']['message'])
