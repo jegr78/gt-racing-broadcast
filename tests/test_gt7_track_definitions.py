@@ -31,7 +31,7 @@ def t_anchor_rejects_nonfinite_coordinates_before_projection():
         try:
             td.anchor({'x': value, 'z': 0})
         except ValueError:
-            pass
+            pass  # nonfinite input is rejected before geometry projection
         else:
             raise AssertionError('nonfinite coordinates must be refused before projection')
 
