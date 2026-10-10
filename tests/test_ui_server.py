@@ -2662,7 +2662,8 @@ tmState.recs = [{rec: 'A', laps: 21, recording: false}, {rec: 'B', laps: null, r
 tmState.rec = 'A';
 tmRenderRecs();
 const enabled = !$('tm-del').disabled;
-await tmDelete();
+tmDelete();                                    // not awaited: a delete that skipped the dialog would hang
+await tick();
 const cancelled = calls.filter(u => u.includes('/api/telemetry/delete')).length;
 ok = true;
 const p = tmDelete();
