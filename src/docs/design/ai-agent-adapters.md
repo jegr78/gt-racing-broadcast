@@ -95,3 +95,8 @@ that negative test now fails when the object guard is removed.
 The self-review corrected CLI TOML parsing using the installed non-billable parser.
 An independent read-only security pass found no confirmed findings. Its runtime
 limits remain explicit above and are reviewed again with the job runner.
+
+CI caught a fixture reproducibility gap: some fake-provider cases still used real
+executable discovery, so installed local CLIs masked their dependency. All fake
+cases now inject executable discovery; the focused suite also passes with an
+empty PATH. No production timeout or retry behavior changed.

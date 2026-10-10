@@ -76,10 +76,10 @@ def t_probes():
         assert conflict['status'] == 'auth_conflict' and 'secret' not in json.dumps(conflict)
         assert cli.probe(run=Fake(provider, help_text='old'), env={})['status'] == 'unsupported_version'
     assert a.Adapter(config(), which=lambda _: None).probe(env={})['status'] == 'missing_executable'
-    assert a.Adapter(config()).probe(run=Fake(auth='Logged in using an API key'), env={})['status'] == 'auth_conflict'
-    assert a.Adapter(config()).probe(run=Fake(auth='Not logged in'), env={})['status'] == 'logged_out'
-    assert a.Adapter(config()).probe(run=Fake(auth='new unknown output'), env={})['status'] == 'auth_unknown'
-    assert a.Adapter(config('claude')).probe(run=Fake('claude', auth='{}'), env={})['status'] == 'auth_unknown'
+    assert a.Adapter(config(), which=lambda _: sys.executable).probe(run=Fake(auth='Logged in using an API key'), env={})['status'] == 'auth_conflict'
+    assert a.Adapter(config(), which=lambda _: sys.executable).probe(run=Fake(auth='Not logged in'), env={})['status'] == 'logged_out'
+    assert a.Adapter(config(), which=lambda _: sys.executable).probe(run=Fake(auth='new unknown output'), env={})['status'] == 'auth_unknown'
+    assert a.Adapter(config('claude'), which=lambda _: sys.executable).probe(run=Fake('claude', auth='{}'), env={})['status'] == 'auth_unknown'
 
 
 def t_invocation_and_guards():
@@ -104,18 +104,18 @@ def t_invocation_and_guards():
             failure(lambda cli=cli, p=p: cli.invocation(pkg, pkg, schema, p), 'invalid_paths')
             failure(lambda cli=cli, p=p: cli.invocation(pkg, out, schema, dict(p, models=['different'])), 'unavailable_model')
             failure(lambda cli=cli, p=p: cli.invocation(pkg, out, schema, dict(p, capabilities=[])), 'unsupported_version')
-            personal = a.Adapter(config(provider, mode='personal', personal={'mcp': True}))
+            personal = a.Adapter(config(provider, mode='personal', personal={'mcp': True}), which=lambda _: sys.executable)
             failure(lambda personal=personal, p=p: personal.invocation(pkg, out, schema, p), 'isolation_unavailable')
 
 
 def t_output():
-    codex = a.Adapter(config())
+    codex = a.Adapter(config(), which=lambda _: sys.executable)
     result = codex.extract('{"ok":true}', [{'type':'turn.completed'}])
     assert result['result'] == {'ok': True} and result['actual_model'] is None
     failure(lambda: codex.extract('not json', []), 'invalid_output')
     failure(lambda: codex.extract('[]', []), 'invalid_output')
     failure(lambda: codex.extract('{}', [{'type':'turn.failed'}]), 'provider_failed')
-    claude = a.Adapter(config('claude'))
+    claude = a.Adapter(config('claude'), which=lambda _: sys.executable)
     result = claude.extract(json.dumps({'type':'result', 'is_error':False, 'structured_output':{'ok':True},
                                        'modelUsage':{'actual':{}}}), [])
     assert result['actual_model'] == 'actual'
@@ -149,7 +149,7 @@ else:
             return subprocess.run([sys.executable, str(script)] + argv[1:], **kw)
         cli = a.Adapter(config(), which=lambda _: sys.executable)
         assert cli.discover_models(run=run, env={}) == ['specific']
-        assert a.Adapter(config('claude')).discover_models(run=run, env={}) == []
+        assert a.Adapter(config('claude'), which=lambda _: sys.executable).discover_models(run=run, env={}) == []
         pkg = Path(d) / 'package'; out = Path(d) / 'output'
         pkg.mkdir(); out.mkdir(); schema = pkg / 'schema.json'; schema.write_text('{}')
         inv = cli.invocation(pkg, out, schema, cli.probe(run=run, env={}))
