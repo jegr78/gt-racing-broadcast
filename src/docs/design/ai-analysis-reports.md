@@ -67,3 +67,14 @@ A controlled persistence failure after validation exposed a completed report bod
 on a failed run. Failure handlers now clear normal report bodies, and history
 independently hides any retained body unless the outcome is completed. Raw output
 and immutable inputs remain available for diagnosis/manual retry.
+
+
+Twenty guards were individually falsified from the committed implementation:
+strict integer types, unknown fields, existing lap, trace-bound location, exact
+facts, three priorities, artifact-profile binding, prompt hashes, relevant stale
+changes, unrelated revision exclusion, HTML and Markdown escaping, incomplete
+bodies in history, persistence-failure bodies, reference admission, source hashes,
+conflicting lap identities, deletion admission, visible foreign-profile guidance
+and recording-identity navigation. Each failed the intended assertion and was
+restored from the commit. The last two ran in the real local browser against
+an isolated dev-build fixture. No native credentials or private capture was used.
