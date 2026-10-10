@@ -477,6 +477,9 @@
   .tmgrid { display:grid; grid-template-columns:270px minmax(0,1fr) 384px; gap:14px;
             align-items:start; }
   .tmside, .tmmap { display:flex; flex-direction:column; gap:14px; min-width:0; }
+  .tmside .viewhead button { min-height:26px; padding:3px 9px; font-size:12px; }
+  .tmside .viewhead button.danger:hover:not(:disabled) { border-color:var(--bad);
+                                                         background:rgba(239,68,68,.12); }
   .tmsum { padding:10px 12px; margin:0 0 14px; }
   .tmgrp { display:flex; flex-wrap:wrap; align-items:center; gap:10px 14px; }
   .tmgrp + .tmgrp { margin-top:12px; padding-top:12px; border-top:1px solid var(--line); }
@@ -1306,8 +1309,8 @@
         <div class="tmgrid">
           <div class="tmside">
             <section><div class="viewhead"><h3>Recordings</h3>
-                <span class="vhbtns"><button id="tm-del" onclick="tmDelete()" disabled
-                  title="Delete the selected recording">Delete</button></span></div>
+                <span class="vhbtns"><button class="danger" id="tm-del" onclick="tmDelete()" disabled
+                  title="Delete the selected recording"><svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>Delete</button></span></div>
               <div class="tmlist" id="tm-recs"></div></section>
             <section><div class="viewhead"><h3>Laps</h3><span class="sub" id="tm-rec-track"></span></div>
               <div class="tmset" id="tm-settrack" hidden>
