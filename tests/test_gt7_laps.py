@@ -765,6 +765,15 @@ def t_write_cache_temp_file_carries_the_recording_stem():
             f"a leftover temp file names its recording: {seen}"
 
 
+def t_index_retains_measured_start_and_end_fuel_load():
+    with tempfile.TemporaryDirectory() as td:
+        path = write_circle_recording(td)
+        idx = gl.index(path, FakeTracks(), None, td)
+        row = idx['laps'][1]
+        assert row['fuel_start_l'] is not None and row['fuel_end_l'] is not None
+        assert abs(row['fuel_start_l'] - row['fuel_end_l'] - row['fuel_used_l']) < .02
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

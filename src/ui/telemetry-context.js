@@ -160,6 +160,8 @@ function tcStints() {
   tcField(grid,'Tyre compound',stint.compound,TC_TYRES.map(v=>[v,v||'Unknown']),v=>stint.compound=v,key+'compound');
   tcField(grid,'Assignment confirmed',stint.confirmed,'boolean',v=>stint.confirmed=v,key+'confirmed');
   tcField(grid,'Tyres changed',stint.tyre_service,'boolean',v=>stint.tyre_service=v,key+'service');
+  tcField(grid,'Refuelled during service',stint.refuel,'boolean',v=>stint.refuel=v,key+'refuel');
+  tcField(grid,'Manually reported refuel amount (L)',stint.refuel_l,'number',v=>stint.refuel_l=v,key+'refuel_l');
   tcField(grid,'Complete warmup laps after change',stint.warmup_laps,'required-integer',v=>stint.warmup_laps=v,key+'warmup');
   const service=tcEl('select');const unset=tcEl('option','Service time unknown');unset.value='';service.append(unset);
   for(const hint of tc.reply.service_hints||[]){if(String(hint.session)!==tc.session)continue;
@@ -236,5 +238,5 @@ if(typeof document!=='undefined'&&document.addEventListener)document.addEventLis
   else if(fields.length&&!e.shiftKey&&document.activeElement===fields.at(-1)){e.preventDefault();fields[0].focus();}}
 });
 
-function tcOlderHistory(){const h=tc.reply?.history||[];if(h.length)tcLoad(tc.target,Math.min(...h.map(r=>r.revision)));}
+async function tcOlderHistory(){if(!await tcSave())return;const h=tc.reply?.history||[];if(h.length)tcLoad(tc.target,Math.min(...h.map(r=>r.revision)));}
 function tcRestoreHistory(){const value=$('tc-history').value;if(value!=='')tcAction('restore',{revision:Number(value)});}

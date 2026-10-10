@@ -919,6 +919,8 @@ def t_report_telemetry_uses_current_context_without_reindex():
             m._profile_has_telemetry = real
         assert block['groups'][0]['compound'] == 'RM', 'report must join current context'
         assert block['groups'][0]['context_confirmed']
+        assert block['context_snapshots'][_stem(path)]['revision'] == 1
+        assert 'draft' not in block['context_snapshots'][_stem(path)]
 
 
 def t_telemetry_list_counts_laps_from_the_cache():

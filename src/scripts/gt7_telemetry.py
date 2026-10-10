@@ -484,7 +484,9 @@ class TelemetryEngine:
                 if acc.fuel_start is not None and acc.fuel_end is not None else None)
         record = {"session": self.session, "lap": self._lap_num, "start": acc.t0,
                   "end": acc.last_t, "elapsed": acc.elapsed, "status": status,
-                  "reason": reason, "fuel_used": fuel, "top_speed_mps": acc.top_speed,
+                  "reason": reason, "fuel_used": fuel,
+                  "fuel_start_l": acc.fuel_start, "fuel_end_l": acc.fuel_end,
+                  "top_speed_mps": acc.top_speed,
                   "car_id": self._last.car_id if self._last is not None else None,
                   "points": list(acc.points), "distance_m": acc.distance,
                   "capture_complete": bool(closed and acc.started_at_boundary),

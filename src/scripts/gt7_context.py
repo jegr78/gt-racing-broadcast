@@ -169,7 +169,7 @@ def validate_data(data):
         for stint in stints:
             _object(stint)
             _keys(stint, {'id', 'start_lap', 'start_recording_s', 'compound', 'confirmed',
-                         'tyre_service', 'warmup_laps', 'strategy', 'strategy_changes', 'note'})
+                         'tyre_service', 'refuel', 'refuel_l', 'warmup_laps', 'strategy', 'strategy_changes', 'note'})
             ident = _token(stint.get('id'))
             if ident in stint_ids:
                 raise ValueError('duplicate stint identifier')
@@ -179,7 +179,9 @@ def validate_data(data):
                 _number(stint['start_recording_s'], 'service time')
             if stint.get('compound') is not None and stint['compound'] not in COMPOUNDS:
                 raise ValueError('unsupported stint compound')
-            for k in ('confirmed', 'tyre_service'):
+            if stint.get('refuel_l') is not None:
+                _number(stint['refuel_l'], 'manual refuel amount')
+            for k in ('confirmed', 'tyre_service', 'refuel'):
                 if stint.get(k) is not None and not isinstance(stint[k], bool):
                     raise ValueError(k + ' must be true, false or unknown')
             _number(stint.get('warmup_laps', 1), 'warmup laps', True)
@@ -500,7 +502,7 @@ def delete_recording(path):
         try:
             os.remove(context)
         except FileNotFoundError:
-            pass
+            pass  # metadata may never have been created
         history = context[:-5] + '-history'
         if os.path.isdir(history):
             shutil.rmtree(history)
@@ -509,7 +511,7 @@ def delete_recording(path):
         try:
             os.remove(context + '.lock')
         except FileNotFoundError:
-            pass
+            pass  # metadata may never have been created
 
 
 def _memberships(stints, lap):
@@ -600,7 +602,8 @@ def annotate(data, lap):
         warnings.append('Mixed compounds during service' if len(compounds) > 1 else 'Tyre compound unconfirmed')
     if lap.get('after_service') and not (stint and stint.get('tyre_service')):
         warnings.append('Inferred service has no confirmed tyre assignment')
-    tyre_stints = [s for s in prior if s.get('confirmed') and s.get('tyre_service')]
+    tyre_stints = [s for s in prior if s.get('confirmed') and
+                   (s.get('tyre_service') or stints and s is stints[0])]
     result.update(compounds=compounds, compound=compound, memberships=memberships,
                   context_confirmed=confirmed, context_warnings=list(dict.fromkeys(warnings)),
                   analysis_role=role, strategy=strategy, strategies=strategies,

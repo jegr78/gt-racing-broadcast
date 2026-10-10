@@ -146,7 +146,7 @@ def telemetry_block(indexes, window):
     """The report's telemetry block for the laps that start inside window=(from_ts,
     to_ts), or None when there are none."""
     frm, to = window
-    picked, partial = [], False
+    picked, partial, snapshots = [], False, {}
     for idx in indexes:
         found = False
         for lap in idx.get("laps") or []:
@@ -155,6 +155,8 @@ def telemetry_block(indexes, window):
                 picked.append((ts, lap))
                 found = True
         partial = partial or (found and bool(idx.get("partial")))
+        if found and idx.get("context_snapshot") is not None:
+            snapshots[idx["rec"]] = idx["context_snapshot"]
     if not picked:
         return None
     picked.sort(key=lambda p: p[0])
@@ -165,7 +167,7 @@ def telemetry_block(indexes, window):
     groups = [_group(key, members) for key, members in by_key.items()]
     groups.sort(key=lambda g: (-g["laps_counted"],
                                g["best_s"] if g["best_s"] is not None else float("inf")))
-    return {"laps": rows, "laps_total": len(rows),
+    return {"laps": rows, "laps_total": len(rows), "context_snapshots": snapshots,
             "laps_counted": sum(1 for r in rows if r["counted"]),
             "partial": partial, "groups": groups}
 

@@ -254,6 +254,8 @@ downloadable attachment that recipients open in a browser.
 
 ![Control Center: Telemetry lap comparison](images/cc-telemetry.png)
 
+![Telemetry context editor](images/cc-context.png)
+
 Solo POV profiles only. The view reads the profile's GT7 telemetry recordings
 (`runtime/<profile>/telemetry-recordings/`, see [Relay mode](Relay-Mode)) and needs no
 running relay.
@@ -296,7 +298,9 @@ running relay.
   service occurred. Temperature resets, refuelling and standstill produce proposed times,
   never confirmed tyre compounds. A pit lap can contain both RM and RH. Each confirmed
   tyre change has a configurable number of complete warmup laps (including zero).
-  Default comparisons exclude contextual first, pit and warmup laps, different confirmed
+  Each lap shows its measured starting fuel load and tyre age since the declared initial
+  stint or last confirmed tyre change, without assuming equal conditions. Default
+  comparisons exclude contextual first, pit and warmup laps, different confirmed
   compounds and known differences in race settings or fuel strategy. **Compare other
   conditions / roles** explicitly broadens the pool; numerical quality checks still apply.
   Unknown context remains inspectable and is labelled unconfirmed. Reports group known

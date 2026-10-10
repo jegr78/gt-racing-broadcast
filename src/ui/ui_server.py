@@ -139,7 +139,8 @@ def make_handler(ctx):
     # Lazy caching would not save a page that nobody opens before the OS temp-dir
     # cleaner runs, and this server is meant to be left running.
     _pages = bundle_cache.BundleCache()
-    _pages.prewarm([ctx["page_path"]])
+    _context_script = os.path.join(os.path.dirname(ctx["page_path"]), "telemetry-context.js")
+    _pages.prewarm([ctx["page_path"], _context_script])
 
     class Handler(BaseHTTPRequestHandler):
         _CTYPES = {".png": "image/png", ".jpg": "image/jpeg",
@@ -647,8 +648,7 @@ def make_handler(ctx):
                                       code=500)
             if path == '/telemetry-context.js':
                 try:
-                    with open(os.path.join(os.path.dirname(ctx['page_path']), 'telemetry-context.js'), 'rb') as f:
-                        return self._send_bytes(f.read(), 'application/javascript; charset=utf-8')
+                    return self._serve_bytes(_pages.read(_context_script), 'application/javascript; charset=utf-8')
                 except OSError:
                     return self._not_found('context editor unavailable')
             if path == '/api/telemetry/context':

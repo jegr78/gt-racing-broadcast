@@ -62,7 +62,7 @@ def t_conflict_and_invalid_data_preserve_last_good_context():
         try:
             s.save(data(), expected=0)
         except c.Conflict:
-            pass
+            pass  # expected stale-revision refusal
         else:
             raise AssertionError('stale revisions must not overwrite another edit')
         for bad in ({'notes': 'not a list'}, {'sessions': {'../x': {}}},
@@ -71,7 +71,7 @@ def t_conflict_and_invalid_data_preserve_last_good_context():
             try:
                 s.save(bad, expected=1)
             except ValueError:
-                pass
+                pass  # invalid input must preserve the prior revision
             else:
                 raise AssertionError('invalid fields must not become confirmed context')
         assert s.read()['revision'] == 1

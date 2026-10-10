@@ -3575,7 +3575,9 @@ def _telemetry_with_context(idx, path):
         data, revision, error = doc['data'], doc['revision'], None
     except Exception as exc:  # noqa: BLE001  broken notes never discard captured laps
         data, revision, error = {}, None, _telemetry_reason(exc)
-    result = dict(idx, laps=[gc.annotate(data, l) for l in idx['laps']], context_revision=revision)
+    snapshot = {k: v for k, v in doc.items() if k not in {'draft', 'operation'}} if error is None else None
+    result = dict(idx, laps=[gc.annotate(data, l) for l in idx['laps']], context_revision=revision,
+                  context_snapshot=snapshot)
     if idx.get('open_lap'):
         result['open_lap'] = gc.annotate(data, idx['open_lap'])
     if error:
@@ -3871,7 +3873,8 @@ def telemetry_laps_data(rec=None, session=None, track=None, car=None, build=True
                 (gc.compatible(reference, l) if reference else l.get('comparison_eligible', True))]
         confirmed = bool(laps and all(l.get('context_confirmed') for l in laps))
         return {"ok": True, "laps": laps, "context_confirmed": confirmed,
-                "comparison_warnings": [] if confirmed else ['Comparison conditions unconfirmed'], "unindexed": unindexed,
+                "comparison_warnings": (['Includes other conditions or roles'] if broader else []) +
+                                       ([] if confirmed else ['Comparison conditions unconfirmed']), "unindexed": unindexed,
                 "data_version": _telemetry_data_version(),
                 "best_sectors": gt7_laps.best_sectors(laps),
                 "theoretical_best": gt7_laps.theoretical_best(laps)}

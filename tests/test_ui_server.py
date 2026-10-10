@@ -697,6 +697,23 @@ def t_page_survives_its_bundled_file_being_deleted():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def t_context_editor_script_survives_bundle_eviction():
+    with tempfile.TemporaryDirectory() as td:
+        page = os.path.join(td, 'control-center.html')
+        script = os.path.join(td, 'telemetry-context.js')
+        shutil.copyfile(_ctx()['page_path'], page)
+        shutil.copyfile(os.path.join(ROOT, 'src', 'ui', 'telemetry-context.js'), script)
+        ctx = _ctx()
+        ctx['page_path'] = page
+        httpd, port = _serve(ctx)
+        try:
+            os.unlink(script)
+            code, body = _get(port, '/telemetry-context.js')
+            assert code == 200 and b'async function tcSave' in body
+        finally:
+            httpd.shutdown()
+
+
 def t_missing_page_reports_how_to_recover():
     # Never read and never on disk, so the message must say that a restart helps.
     ctx = _ctx()
@@ -2812,7 +2829,8 @@ def _tm_node(body):
 
 
 def t_context_concurrent_waiter_retains_failed_save_without_retry():
-    script = open(os.path.join(ROOT, 'src', 'ui', 'telemetry-context.js'), encoding='utf-8').read()
+    with open(os.path.join(ROOT, 'src', 'ui', 'telemetry-context.js'), encoding='utf-8') as f:
+        script = f.read()
     out = _run_js(script + """
 let calls=0;
 global.fetch=async()=>{calls++;return {json:async()=>({ok:false})}};
@@ -2980,7 +2998,7 @@ _TM_UNINDEXED = """
 const unindexed = rec => ({ok: true, unindexed: 1,
                            note: rec + ' has no lap index yet: racecast telemetry index builds it'});
 const jobs = () => calls.filter(u => u.includes('telemetry-index')).length;
-const asks = part => calls.filter(u => u.includes(part)).length;
+const asks = part => calls.filter(u => u.includes(part)&&(!part.startsWith('rec=')||!u.includes('car='))).length;
 tmState.recs = [{rec: 'X', indexed: false, laps: null, duration_s: 60, size: 1e6, track: null}];
 """
 
