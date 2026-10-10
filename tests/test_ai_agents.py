@@ -121,6 +121,7 @@ def t_output():
                                        'modelUsage':{'actual':{}}}), [])
     assert result['actual_model'] == 'actual'
     assert claude.reported_model(json.dumps({'is_error':True,'modelUsage':{'reported-failed':{}}}))=='reported-failed'
+    assert claude.reported_model(json.dumps({'modelUsage':{'one':{},'two':{}}})) is None
     failure(lambda: claude.extract('{"is_error":true}', []), 'provider_failed')
     failure(lambda: claude.extract('{"permission_denials":[{}]}', []), 'approval_required')
     failure(lambda: claude.extract('{"result":"plain"}', []), 'invalid_output')
