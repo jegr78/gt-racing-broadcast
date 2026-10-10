@@ -64,6 +64,7 @@ def t_selection_identity_and_facts():
         assert package['summary']['selected_gt7_total_s']==201
         assert package['facts']['selection/mean_time_s']['value']==100.5
         assert package['language']=='de' and 'Smooth exits' in a.prompt(package)
+        assert a.preview(package,'codex')['lap_contexts'][0]['car']=='Fixture'
         assert len({r['id'] for r in package['laps']})==2
         assert 'unrelated note' not in json.dumps(package)
         assert package['context']['revision']==1
@@ -186,6 +187,28 @@ def t_copied_lap_identity_cannot_overwrite_selected_facts():
         conflicting=dataclasses.replace(original,index=index)
         expect(lambda:a.build(original,1,references=[(conflicting,1,2)]),'invalid_source')
         assert a.build(original,1,references=[(original,1,2)])['references']
+
+
+def t_optional_shift_enrichment_only_reads_selected_usable_laps():
+    import dataclasses
+    with tempfile.TemporaryDirectory() as d:
+        origin=source(Path(d)/'profile/telemetry-recordings')
+        calls=[]
+        def enrich(original,session,laps):
+            calls.append((session,laps));index=copy.deepcopy(original.index)
+            for row in index['laps']:
+                if row['session']==session and row['lap'] in laps:
+                    row['shift_analysis']={'reference_id':'synthetic-reference','reference':{'source':'synthetic'},'observed_count':2}
+            index['shift_reference_snapshots']={'synthetic-reference':{'source':'synthetic'}}
+            return dataclasses.replace(original,index=index)
+        package=a.build(origin,1,laps=[2],enrich_source=enrich)
+        assert calls==[(1,[2])]
+        assert package['laps'][0]['derived']['shift_analysis']['observed_count']==2
+        assert package['shift_reference_snapshots']=={'synthetic-reference':{'source':'synthetic'}}
+        assert 'shift_analysis' not in origin.index['laps'][0]
+        assert a.build(origin,1,laps=[3])['shift_reference_snapshots']=={}
+        for session,lap in ((True,2),(1,True),(0,2),(1,0)):
+            expect(lambda session=session,lap=lap:a.build(origin,1,references=[(origin,session,lap)]),'invalid_selection')
 
 
 if __name__=='__main__':

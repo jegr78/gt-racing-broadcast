@@ -465,3 +465,77 @@ and the guide links open the always-current pages on this wiki.
 > This page is generated from `src/docs/wiki/` in the
 > [main repository](https://github.com/jegr78/gt-racing-broadcast): don't edit it
 > here by hand. See [Build & maintenance](Build-and-maintenance).
+
+### Optional AI telemetry analysis
+
+![Control Center: optional AI settings](images/cc-ai-settings.png)
+
+AI analysis is disabled by default. Ordinary telemetry, charts and comparisons work
+without either provider CLI. In **General Settings**, enable the feature and save
+one or more named Codex or Claude Code configurations. Choose the executable if it
+is not on PATH, a default model, timeout and agent mode. **Check CLI / login** probes
+the installed tool and existing subscription login without model inference. Model
+suggestions depend on the installed CLI; you can enter an exact model name manually.
+The same provider can have multiple configurations.
+
+Install and sign in with the provider's own tools before using Racecast:
+[Codex authentication](https://developers.openai.com/codex/auth/) and
+[Claude Code authentication](https://code.claude.com/docs/en/authentication).
+Racecast stores configuration, not provider credentials. It never installs agents,
+changes login, silently selects another model or falls back to API billing.
+A ready CLI does not guarantee subscription quota or access to a selected model.
+On macOS, subscription credentials in the GUI keychain can be unavailable to an
+SSH session. Use the authenticated local desktop session for the provider CLI.
+
+**Isolated** is the default mode. The job can read the prepared package and write
+its dedicated output, with no blanket approval bypass. **Personal** permits
+explicitly selected instructions or skills only where the adapter can preserve
+isolation. Personal content may add information beyond the telemetry preview.
+Background MCP use is refused because external servers cannot be confined to the
+package. Selective Claude customizations currently require a manual external run.
+Interactive approval requirements stop the background job with manual-run guidance.
+
+In **Telemetry**, open a recording and choose **Prepare analysis selection**.
+Select one completed GT7 session and the completed laps to inspect. Technically
+unusable laps show exclusion reasons. Choose **Session overview**, **Driving
+technique** or **Consistency**, an agent/model, goals/questions and report language.
+Reference suggestions are unchecked until you choose them explicitly. Your own
+session best is a valid reference; without an external reference the package does
+not establish an ideal line or optimal braking points. Context confirmation, car,
+layout, tyres, settings and objective constrain comparisons. Unknown tracks cannot
+support cross-recording comparisons.
+
+![Control Center: analysis preview](images/cc-ai-preview.png)
+
+Choose **Preview selected data** to inspect included notes, selected/reference
+laps, data sizes and quality/comparability limitations. A local CLI process can send
+these selected inputs to the provider's cloud models. Read that disclosure before
+**Start this analysis**. Changing the selection, model, context or profile requires
+a new preview. An oversized package requires fewer laps/references or shorter notes.
+**Export preview package** downloads the four input files without invoking a model.
+Stopping a recording never starts analysis automatically.
+
+One job can run on the machine, across the UI and `racecast telemetry analyze`.
+The default timeout is ten minutes and is configurable per agent. Progress and
+**Cancel active analysis** operate on the spawned process tree. Cancellation cannot
+recover quota already consumed. There are no automatic retries or repair calls.
+CLI, login, model, quota, approval, timeout and validation failures show guidance.
+Choose **Prepare a new run** to deliberately inspect and start another package.
+
+![Control Center: saved analysis](images/cc-ai-report.png)
+
+A completed report displays supplied facts with provenance, interpretations and
+possible causes as unproven, and three exercises with priorities 1, 2 and 3.
+Telemetry links open the referenced lap and metre position in the existing
+comparison view. Saved history is scoped to the active profile/recording; switching
+profiles clears the displayed selection and artifacts. Relevant source/context or
+reference changes mark an old report stale without altering its original inputs.
+Failed, cancelled or interrupted jobs retain diagnostics and input packages but
+never show a normal report. Each run retains its report language, requested model,
+actual model when reported, provider/config identity and versions.
+
+Export a completed report as HTML or Markdown, or export its input package
+separately. HTML links require the Control Center at the recorded local address
+and the intended profile selected. Recording deletion removes its owned analyses
+and input packages after the existing confirmation; machine agent settings remain.
+Private recordings and provider credentials are excluded from automated fixtures.

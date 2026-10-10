@@ -3307,6 +3307,24 @@ def _ai_source(name, profile_root, machine, profile):
     return dataclasses.replace(source,index=joined)
 
 
+
+def _ai_enrich_source(source, session, laps):
+    """Replay bounded offline shift detail only for the selected usable laps."""
+    import gt7_recording
+    import copy
+    import dataclasses
+    index=copy.deepcopy(source.index)
+    snapshots=index.setdefault('shift_reference_snapshots',{})
+    for row in index['laps']:
+        if row['session']!=session or row['lap'] not in laps:continue
+        try:
+            analysis=_telemetry_shift_analysis(source.path,index,row)
+            row['shift_analysis']=analysis
+            snapshots[analysis['reference_id']]=copy.deepcopy(analysis['reference'])
+        except (OSError,ValueError,KeyError,gt7_recording.RecordingError) as exc:
+            row['shift_analysis']={'unavailable':True,'error':_telemetry_reason(exc)}
+    return dataclasses.replace(source,index=index)
+
 def _ai_controller():
     import ai_control
     profile=_active_profile_name() or ''
@@ -3314,7 +3332,7 @@ def _ai_controller():
     root=_profile_runtime(machine,profile)
     import ai_reports
     return ai_control.Controller(machine,root,profile,
-                                 lambda name:_ai_source(name,root,machine,profile),validate=ai_reports.validate)
+                                 lambda name:_ai_source(name,root,machine,profile),validate=ai_reports.validate,enrich_source=_ai_enrich_source)
 
 
 def ai_request_data(operation,payload=None):
@@ -3325,6 +3343,8 @@ def ai_request_data(operation,payload=None):
     payload={} if payload is None else payload
     try:
         control=_ai_controller()
+        if operation not in ('settings','settings-save','probe') and payload.get('profile',control.profile)!=control.profile:
+            raise ai_control.ControlError('profile_changed','Active profile changed; select it explicitly and reload analysis')
         if operation=='settings':return dict(control.settings.read(),ok=True)
         if operation=='settings-save':return dict(control.settings.save(payload),ok=True)
         if operation=='probe':
@@ -3333,6 +3353,8 @@ def ai_request_data(operation,payload=None):
             adapter=ai_agents.Adapter(cfg)
             result=adapter.probe();result['model_suggestions']=adapter.discover_models()
             return dict(result,ok=True,id=cfg['id'])
+        if operation=='selection':return control.selection(payload.get('rec'))
+        if operation=='references':return control.references(payload.get('rec'),payload.get('session'))
         if operation=='preview':return control.preview(payload)
         if operation=='start':return control.start(payload)
         if operation=='status':return control.status()

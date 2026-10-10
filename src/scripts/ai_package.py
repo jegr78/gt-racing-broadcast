@@ -286,7 +286,7 @@ def _facts(laps, comparisons, summary):
     return facts
 
 
-def build(source, session, laps=None, references=(), candidates=(), template='session-overview', goal='', questions='', language=None, ui_language='en'):
+def build(source, session, laps=None, references=(), candidates=(), template='session-overview', goal='', questions='', language=None, ui_language='en', enrich_source=None):
     if not _positive(session) or template not in TEMPLATES:
         raise PackageError('invalid_selection', 'Choose one session and a supported analysis template')
     available = _rows(source, session)
@@ -316,11 +316,16 @@ def build(source, session, laps=None, references=(), candidates=(), template='se
         raise PackageError('no_usable_laps', 'No technically usable laps remain; reduce or correct the selection')
     if len({r['lap'] for r in available}) != len(available):
         raise PackageError('invalid_source', 'Duplicate lap identities in the session')
+    if enrich_source:
+        source=enrich_source(source,session,[r['lap'] for r in eligible])
+        eligible=[r for r in _rows(source,session) if r['lap'] in {n['lap'] for n in eligible}]
     items = [_lap(source, r) for r in eligible]
     refs, comparisons, reference_provenance = [], [], []
     seen = set()
     snapshot_sources = [(source, eligible)]
     for other, s, n in references:
+        if not _positive(s) or not _positive(n):
+            raise PackageError('invalid_selection','Reference session and lap must be positive integers')
         if other.root != source.root:
             raise PackageError('invalid_source', 'Reference belongs to another profile')
         if s not in other.completed or file_hash(other.path) != other.sha256:
@@ -329,6 +334,9 @@ def build(source, session, laps=None, references=(), candidates=(), template='se
         matches = [r for r in eligible if ref and _same_context(source, r, other, ref)]
         if not matches:
             raise PackageError('incompatible_reference', 'Reference has no usable compatible selected lap')
+        if enrich_source:
+            other=enrich_source(other,s,[n])
+            ref=next(r for r in _rows(other,s) if r['lap']==n)
         ident = lap_id(other, ref)
         if ident in seen:
             raise PackageError('invalid_selection', 'Reference selected more than once')
@@ -365,6 +373,10 @@ def build(source, session, laps=None, references=(), candidates=(), template='se
         if not r.get('track_id'): limitations.append('Unknown track; cross-recording comparison is unavailable.')
         limitations.extend(r.get('context_warnings', []))
         limitations.extend(r.get('track_definition_warnings', []))
+        shift=r.get('shift_analysis') or {}
+        if shift.get('unavailable'):limitations.append('Optional shift detail unavailable for selected lap')
+        limitations.extend(shift.get('warnings',[]))
+        limitations.extend((shift.get('reference') or {}).get('warnings',[]))
         if r.get('data_quality') != 'ok': limitations.append('Capture quality needs review; inspect lap quality and gaps.')
     snapshots = {'track_definition_snapshots': {}, 'shift_reference_snapshots': {}}
     for origin, selected_rows in snapshot_sources:
@@ -452,6 +464,11 @@ def preview(package, provider):
                 notes=_included_notes(package), limitations=package['limitations'],
                 template=package['template'], goal=package['goal'], questions=package['questions'],
                 contexts=[package['context']]+[r['context'] for r in package['reference_provenance']],
+                lap_contexts=[dict(rec=r['rec'],session=r['session'],lap=r['lap'],car=r.get('car') or 'Unknown car',
+                    layout=r.get('layout') or r.get('track') or 'Unknown track',compound=r['context'].get('compound') or 'Unknown tyres',
+                    role=r['context'].get('analysis_role') or 'Unknown role',confirmed=r['context'].get('context_confirmed',False),
+                    settings=r['context'].get('context_settings',{}),objective=r['context'].get('strategy',{}))
+                    for r in package['laps']+package['references']],
                 detail_bytes=detail_size, summary_bytes=summary_size, limits=dict(limits),
                 files=['detail.json','summary.md','manifest.json','result-schema.json'], language=package['language'])
 

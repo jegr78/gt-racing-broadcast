@@ -1452,6 +1452,8 @@ let currentView = 'home', lastStatus = null;
 
 function showView(name) {
   currentView = name;
+  if (name === 'settings') window.RacecastAI?.settings();
+  if (name === 'telemetry') {window.RacecastAI?.status();window.RacecastAI?.history();}
   document.querySelectorAll('[data-view]').forEach(v => {
     v.hidden = v.dataset.view !== name;
   });
@@ -3280,6 +3282,7 @@ function applyKindGating(data) {
   if (data && data.ok && data.active !== tmState.profile) {   // every switch path, import included
     tmReset();
     tmState.profile = data.active;
+    window.RacecastAI?.reset(data.active);
   }
   if (currentView === 'telemetry' && !(kind === 'solo' && template === 'pov')) showView('home');
   else if (currentView === 'telemetry' && !tmState.loaded) tmLoad();   // switched to another solo POV profile
@@ -5627,6 +5630,7 @@ async function tmDelete() {
 }
 
 async function tmSelectRec(rec) {
+  if (tmState.rec !== rec) window.RacecastAI?.reset(tmState.profile);
   const seq = ++tmSeq.rec;
   tmSeq.b++;
   tmState.rec = rec;
@@ -6683,6 +6687,7 @@ assetsLoaded = true; fetchAssetFiles();
    <button onclick="tcOlderHistory()">Show older revisions</button></details>
  </div></div></div>
 <script src="/telemetry-context.js"></script>
+<script src="/ai-analysis.js"></script>
 <div class="ovmodal" id="tm-editor-modal" hidden role="dialog" aria-modal="true" aria-labelledby="tm-editor-title">
  <div class="ovmodal-card"><div class="ovmodal-head"><b id="tm-editor-title">Track markers &amp; sector definitions</b>
   <button id="tm-editor-close" style="margin-left:auto" onclick="tmEditorClose()">Cancel / close</button></div>
