@@ -1075,6 +1075,46 @@ def t_telemetry_delete_removes_the_lap_index():
         assert path not in m._TELEMETRY_MEMO
 
 
+def t_telemetry_delete_data_removes_a_recording_for_the_control_center():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        path = tgl.write_circle_recording(rec_dir)
+        keep = tgl.write_circle_recording(rec_dir, t0=1_700_007_200.0)
+        m.telemetry_laps_data(rec=_stem(path))
+        cache = os.path.join(rec_dir, _stem(path) + ".laps.json")
+        os.makedirs(os.path.join(rec_dir, _stem(path)))                 # an export folder
+        d = m.telemetry_delete_data(_stem(path))
+        assert d == {"ok": True, "deleted": os.path.basename(path), "notes": []}, d
+        for gone in (path, cache, os.path.join(rec_dir, _stem(path))):
+            assert not os.path.exists(gone), gone
+        assert path not in m._TELEMETRY_MEMO and os.path.exists(keep), "only that recording goes"
+        for bad in ("", "../etc", _stem(path), "latest"):
+            r = m.telemetry_delete_data(bad)
+            assert r["ok"] is False and "no recording named" in r["error"], (bad, r)
+        assert os.path.exists(keep), "a delete names its recording: 'latest' is no name"
+
+
+def t_telemetry_delete_data_refuses_the_open_file_without_a_path():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        path = tgl.write_circle_recording(rec_dir)
+        m._relay_record_status = lambda: {"active": True, "file": os.path.basename(path)}
+        m._running_relay_profile = lambda: "solo"
+        d = m.telemetry_delete_data(_stem(path))
+        assert d["ok"] is False and "currently recording" in d["error"] and os.path.exists(path), d
+        m._relay_record_status = lambda: None
+        real = m.os.remove
+
+        def locked(f):
+            raise PermissionError(13, "Permission denied", f)
+        m.os.remove = locked
+        try:
+            d = m.telemetry_delete_data(_stem(path))
+        finally:
+            m.os.remove = real
+        assert d == {"ok": False, "error": f"could not delete {os.path.basename(path)}: "
+                                          "Permission denied"}, d
+        assert rec_dir not in d["error"], "machine paths stay server-side"
+
+
 def t_telemetry_memo_holds_summaries_and_lap_data_the_full_trace():
     with _telemetry_sandbox() as (rec_dir, tgl):
         stem = _stem(tgl.write_circle_recording(rec_dir))

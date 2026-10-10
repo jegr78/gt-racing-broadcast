@@ -54,10 +54,12 @@ Loaded when working under `src/ui/`.
   the full lap length with the lap time, so its sectors add up. Data functions
   `telemetry_*_data` in `src/racecast.py`; routes `/api/telemetry/recordings`,
   `/api/telemetry/laps`, `/api/telemetry/lap`, `/api/telemetry/tracks`,
-  `/api/telemetry/learn`. A recording's `/api/telemetry/laps?rec=` answer also carries
-  `summary` (`_telemetry_summary`: `report_telemetry.telemetry_block` without the map), so
-  the view's summary row shows the post-event report's figures. The recording the relay
-  is writing is listed but refused by laps/lap/learn. `learn` only assigns a layout that has a downloaded racing line
+  `/api/telemetry/learn`, `/api/telemetry/delete` (POST `{rec}`, `telemetry_delete_data`,
+  which shares `_telemetry_delete_path` with `racecast telemetry delete`). A recording's
+  `/api/telemetry/laps?rec=` answer also carries `summary` (`_telemetry_summary`:
+  `report_telemetry.telemetry_block` without the map), so the view's summary row shows the
+  post-event report's figures. The recording the relay is writing is listed but refused by
+  laps/lap/learn/delete. `learn` only assigns a layout that has a downloaded racing line
   (`TrackDB.has_downloaded_line`) and learns the line otherwise. Charts and map are
   inline SVG in `control-center.html` (block "Telemetry view"). Demo data for
   screenshots: `tools/make-demo-recording.py`. Tests: `tests/test_gt7_laps.py`,

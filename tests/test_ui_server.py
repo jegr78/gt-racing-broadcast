@@ -249,6 +249,9 @@ def _ctx(jobs=None, init_plan=None, init_step=None, profile_logo=None,
                 {"id": "suzuka01", "track": "Suzuka Circuit", "layout": "Full Course",
                  "reverse": False}]},
             "telemetry_learn": lambda rec, track_id, build=True: {"ok": True, "track": {"id": track_id}},
+            "telemetry_delete": lambda rec: ({"ok": True, "deleted": rec + ".gt7rec", "notes": []}
+                                             if rec == "r" else
+                                             {"ok": False, "error": f"no recording named {rec!r}"}),
             "resources": lambda: {"available": False}}
 
 
@@ -2651,6 +2654,43 @@ console.log(String(box.hidden));""")
                          "tm-tr nc,tm-tr,tm-tr best|R|1|2"), \
             f"the summary repeats the report's figures and a trend dot picks lap B: {first!r}"
         assert second == "true", "no summary hides the section"
+def t_telemetry_delete_asks_first_then_reloads_the_recordings():
+    out = _tm_node("""
+let ok = false, asked = '';
+globalThis.confirmModal = async (body) => { asked = body; return ok; };
+tmState.recs = [{rec: 'A', laps: 21, recording: false}, {rec: 'B', laps: null, recording: true}];
+tmState.rec = 'A';
+tmRenderRecs();
+const enabled = !$('tm-del').disabled;
+tmDelete();                                    // not awaited: a delete that skipped the dialog would hang
+await tick();
+const cancelled = calls.filter(u => u.includes('/api/telemetry/delete')).length;
+ok = true;
+const p = tmDelete();
+await tick();
+answer('/api/telemetry/delete', {ok: true, deleted: 'A.gt7rec', notes: []});
+await tick();
+const reloaded = calls.filter(u => u.includes('/api/telemetry/recordings')).length;
+answer('/api/telemetry/recordings', {ok: true, recordings: []});
+await p; await tick();
+tmState.recs = [{rec: 'B', recording: true}]; tmState.rec = 'B'; tmRenderRecs();
+const openOff = $('tm-del').disabled;
+const before = calls.length;
+await tmDelete();
+console.log([enabled, cancelled, reloaded, openOff, calls.length - before,
+             /A/.test(asked) && /21 laps/.test(asked) && /cannot be undone/.test(asked)].join('|'));
+tmState.recs = [{rec: 'C', laps: 2, recording: false}]; tmState.rec = 'C'; tmRenderRecs();
+const q = tmDelete();
+await tick();
+answer('/api/telemetry/delete', {ok: false, error: 'C.gt7rec is currently recording'});
+await q;
+console.log([$('tm-err').hidden, $('tm-err').textContent, $('tm-del').disabled].join('|'));""")
+    if out is not None:
+        first, second = out.strip().split("\n")
+        assert first == "true|0|1|true|0|true", \
+            f"delete asks first, a cancel sends nothing, the list reloads, the open file is off: {first!r}"
+        assert second == "false|C.gt7rec is currently recording|false", \
+            f"a refused delete shows the reason and keeps the button usable: {second!r}"
 
 
 def t_telemetry_recording_rows_mark_open_files_and_unindexed_laps():
@@ -3645,6 +3685,26 @@ def t_telemetry_routes_500_paths_report_only_the_exception_type():
         httpd.shutdown()
 
 
+def t_telemetry_delete_route_answers_by_outcome():
+    ctx = _ctx()
+    httpd, port = _serve(ctx)
+    try:
+        code, body = _post_json(port, "/api/telemetry/delete", {"rec": "r"})
+        assert code == 200 and json.loads(body)["deleted"] == "r.gt7rec", body
+        code, body = _post_json(port, "/api/telemetry/delete", {"rec": "nope"})
+        assert code == 400 and "no recording named" in json.loads(body)["error"], body
+    finally:
+        httpd.shutdown()
+    ctx["telemetry_delete"] = lambda rec: (_ for _ in ()).throw(RuntimeError("disk at /srv/x"))
+    httpd, port = _serve(ctx)
+    try:
+        code, body = _post_json(port, "/api/telemetry/delete", {"rec": "r"})
+        err = json.loads(body)["error"]
+        assert code == 500 and "RuntimeError" in err and "/srv/x" not in err, err
+    finally:
+        httpd.shutdown()
+
+
 def t_telemetry_learn_rejects_a_non_object_json_body():
     ctx = _ctx()
     httpd, port = _serve(ctx)
@@ -3654,6 +3714,39 @@ def t_telemetry_learn_rejects_a_non_object_json_body():
             assert code == 400, (bad, code, body)
     finally:
         httpd.shutdown()
+
+
+def t_refused_body_answer_reaches_the_client():
+    # A refused body was answered without reading it; closing a socket with unread bytes
+    # makes Windows reset the connection, so the client got WinError 10053, not the 400.
+    import http.client
+    import time
+    ctx = _ctx()
+    httpd, port = _serve(ctx)
+    lost = []
+    try:
+        payload = b"x" * 16384
+        for i in range(30):
+            length = "-1" if i % 2 else str(us.MAX_JSON_BODY_BYTES + 1)
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            try:
+                conn.putrequest("POST", "/api/telemetry/delete")
+                conn.putheader("Content-Type", "application/json")
+                conn.putheader("Content-Length", length)
+                conn.endheaders()
+                conn.send(payload)
+                time.sleep(0.1)     # the server has answered and closed: a reset arrives now
+                resp = conn.getresponse()
+                if resp.status != 400:
+                    lost.append((i, resp.status))
+                resp.read()
+            except (ConnectionError, OSError) as e:
+                lost.append((i, type(e).__name__))
+            finally:
+                conn.close()
+    finally:
+        httpd.shutdown()
+    assert lost == [], f"every refused body must still reach the client as a 400: {lost[:5]}"
 
 
 def t_body_json_rejects_negative_and_oversized_content_length():
