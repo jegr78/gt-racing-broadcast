@@ -261,6 +261,7 @@ class Recording:
         with open(self.path, "rb") as fh:
             fh.seek(self.pos)
             while True:
+                self.record_start = self.pos
                 head = fh.read(_REC.size)
                 if len(head) < _REC.size:
                     return
