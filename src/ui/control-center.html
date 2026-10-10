@@ -5644,6 +5644,7 @@ function tmRenderLaps() {
   let sel = null;
   laps.forEach(l => {
     const nc = !(l.comparison_eligible ?? l.pace_eligible ?? l.status !== 'not counted'), key = tmKey(l);
+    const contextual = l.pace_eligible === true && l.comparison_eligible === false;
     const b = document.createElement('button');
     b.className = 'tmitem' + (nc ? ' nc' : '') + (key === tmState.b ? ' sel'
       : key === tmState.a ? ' is-a' : '');
@@ -5652,8 +5653,10 @@ function tmRenderLaps() {
     const badge = document.createElement('span');
     badge.className = 'tmbadge' + (l.status === 'reference' ? ' ref' : '');
     badge.textContent = l.capture_complete === false ? 'partial' : l.lap_role === 'pit' ? 'pit'
-      : nc ? 'not for pace' : l.status === 'reference' ? 'best so far' : 'pace';
-    badge.title = nc ? 'Excluded from pace: ' + ((l.reasons || [l.reason]).filter(Boolean).join('; ') || 'no reason recorded')
+      : nc ? (contextual ? 'not for comparison' : 'not for pace') : l.status === 'reference' ? 'best so far' : 'pace';
+    badge.title = nc && contextual ? 'Excluded from default comparison: '
+      + ([l.analysis_role !== 'regular' ? l.analysis_role : '', ...(l.context_warnings || [])].filter(Boolean).join('; ') || 'context conditions')
+      : nc ? 'Excluded from pace: ' + ((l.reasons || [l.reason]).filter(Boolean).join('; ') || 'no reason recorded')
       : l.status === 'reference' ? 'Reference: the fastest lap so far when it was driven; '
         + 'the live HUD delta ran against it' : '';
     const time = document.createElement('span');

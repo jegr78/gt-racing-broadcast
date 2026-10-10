@@ -596,7 +596,7 @@ def _telemetry_html(tel):
     parts = ["<h2>Telemetry</h2>",
              f"<p class='note'>{_esc(rtel.lap_count(tel['laps_total']))} from the GT7 telemetry "
              f"{rec_word}, {_esc(tel['laps_counted'])} eligible for context comparisons. "
-             "The figures use complete pace laps and exclude contextual first, pit and warmup roles. Missing context remains unconfirmed. GT7 supplies completed lap times.</p>"]
+             "The figures use complete pace laps and exclude contextual first, pit and warmup roles and mixed fuel strategies. Missing context remains unconfirmed. GT7 supplies completed lap times.</p>"]
     for g in tel["groups"]:
         where = f" · {g['rec']}, session {g['session']}" if g["rec"] else ""
         parts.append(f"<h3>{_esc(g['track'])} · {_esc(g['car'] or 'Unknown car')}"

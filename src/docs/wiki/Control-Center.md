@@ -300,7 +300,7 @@ running relay.
   tyre change has a configurable number of complete warmup laps (including zero).
   Each lap shows its measured starting fuel load and tyre age since the declared initial
   stint or last confirmed tyre change, without assuming equal conditions. Default
-  comparisons exclude contextual first, pit and warmup laps, different confirmed
+  comparisons exclude contextual first, pit and warmup laps, mixed known fuel strategies within a lap, different confirmed
   compounds and known differences in race settings or fuel strategy. **Compare other
   conditions / roles** explicitly broadens the pool; numerical quality checks still apply.
   Unknown context remains inspectable and is labelled unconfirmed. Reports group known

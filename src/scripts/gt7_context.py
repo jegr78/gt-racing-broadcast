@@ -567,6 +567,20 @@ def _memberships(stints, lap):
     return out, list(dict.fromkeys(warnings)), bool(boundaries)
 
 
+def _strategy_conflicts(strategies):
+    """Only contradictory known driving settings count; unknowns and free notes do not."""
+    for key in ('fuel_map', 'shortshift'):
+        values = [s[key] for s in strategies if s.get(key) is not None]
+        if values and any(v != values[0] for v in values[1:]):
+            return True
+    gears = {gear for s in strategies for gear in s.get('targets', {})}
+    for gear in gears:
+        values = [s['targets'][gear] for s in strategies if gear in s.get('targets', {})]
+        if values and any(v != values[0] for v in values[1:]):
+            return True
+    return False
+
+
 def annotate(data, lap):
     """Context overlay: retain original measured fields, add analysis roles and provenance."""
     result = dict(lap)
@@ -596,6 +610,9 @@ def annotate(data, lap):
         if m['strategy'] not in strategies:
             strategies.append(m['strategy'])
     strategy = strategies[0] if len(strategies) == 1 else {}
+    strategy_conflict = _strategy_conflicts(strategies)
+    if strategy_conflict:
+        warnings.append('Mixed fuel strategy within lap')
     confirmed = bool(session.get('confirmed') and compound and all(m['confirmed'] for m in memberships)
                      and not warnings)
     if not session.get('confirmed'):
@@ -614,7 +631,8 @@ def annotate(data, lap):
                   stint_id=stint.get('id') if stint else None,
                   tyre_age_laps=n - tyre_stints[-1]['start_lap'] if tyre_stints and compound else None,
                   comparison_eligible=bool(lap.get('pace_eligible', lap.get('status') in ('counted', 'reference'))
-                                           and role not in {'first', 'pit', 'warmup', 'partial'}))
+                                           and role not in {'first', 'pit', 'warmup', 'partial'}
+                                           and not strategy_conflict))
     return result
 
 
@@ -629,6 +647,6 @@ def compatible(reference, candidate):
     if any(sa.get(k) is not None and sb.get(k) is not None and sa[k] != sb[k]
            for k in ('bop', 'fixed_setup', 'tyre_x', 'fuel_x', 'time_progression', 'time_of_day')):
         return False
-    a, b = reference.get('strategy', {}), candidate.get('strategy', {})
-    return not any(a.get(k) is not None and b.get(k) is not None and a[k] != b[k]
-                   for k in ('fuel_map', 'shortshift', 'targets'))
+    a = reference.get('strategies') or [reference.get('strategy', {})]
+    b = candidate.get('strategies') or [candidate.get('strategy', {})]
+    return not _strategy_conflicts(a + b)

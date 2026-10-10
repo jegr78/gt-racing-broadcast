@@ -51,7 +51,11 @@ def _key(lap):
     else:
         base = (None, lap.get("car_id"), lap.get("rec"), lap.get("session"))
     context = lap.get('compound')
-    strategy = json.dumps(lap.get('strategy', {}), sort_keys=True)
+    strategies = lap.get('strategies') or [lap.get('strategy', {})]
+    signatures = {json.dumps({k: s[k] for k in ('fuel_map', 'shortshift', 'targets')
+                              if s.get(k) is not None and (k != 'targets' or s[k])}, sort_keys=True)
+                  for s in strategies}
+    strategy = json.dumps(sorted(signatures))
     settings = lap.get('context_settings', {}) if lap.get('settings_confirmed', True) else {}
     group_settings = json.dumps({k: settings.get(k) for k in (
         'bop', 'fixed_setup', 'fuel_x', 'tyre_x', 'time_progression', 'time_of_day')}, sort_keys=True)

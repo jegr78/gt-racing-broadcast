@@ -182,9 +182,13 @@ function tcStints() {
    tcField(row,'From recording time (optional)',change.recording_s,'number',v=>change.recording_s=v,key+'change.'+j+'.time');
    change.strategy||={};tcStrategy(row,change.strategy,key+'change.'+j+'.strategy.');
    tcButton(row,'Remove change',()=>{stint.strategy_changes.splice(j,1);tcStints();tcChanged();});changes.append(row);});
-  tcButton(card,'Add strategy change',()=>{(stint.strategy_changes||=[]).push({lap:stint.start_lap,strategy:{}});tcStints();tcChanged();});
+  tcButton(card,'Add strategy change',()=>tcAddStrategyChange(stint));
   root.append(card);
  });
+}
+function tcAddStrategyChange(stint) {
+ (stint.strategy_changes||=[]).push({lap:stint.start_lap,strategy:tcClone(stint.strategy||{})});
+ tcStints();tcChanged();
 }
 function tcStrategy(parent,strategy,key) {
  const grid=tcEl('div',null,'tcgrid');parent.append(grid);

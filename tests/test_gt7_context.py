@@ -274,6 +274,33 @@ def t_incomplete_or_unscoped_location_cannot_replace_valid_notes():
             assert store.read()['revision'] == 1 and store.read()['data']['notes'] == data()['notes']
 
 
+def t_mixed_known_strategy_cannot_enter_a_default_comparison_as_unknown():
+    context = data()
+    context['sessions']['1']['stints'][0]['strategy'] = {'fuel_map': 1}
+    context['sessions']['1']['stints'][0]['strategy_changes'] = [
+        {'lap': 8, 'recording_s': 750, 'strategy': {'fuel_map': 2}}]
+    base = {'session': 1, 'start_t_s': 700, 'end_t_s': 800,
+            'lap_role': 'regular', 'pace_eligible': True}
+    reference = c.annotate(context, dict(base, lap=7))
+    mixed = c.annotate(context, dict(base, lap=8))
+    assert not c.compatible(reference, mixed), 'mixed known strategies must not behave as unknown'
+    assert not mixed['comparison_eligible'] and not mixed['context_confirmed']
+    assert mixed['pace_eligible'], 'context never rewrites measured pace eligibility'
+    assert 'Mixed fuel strategy within lap' in mixed['context_warnings']
+    unknown = c.annotate({}, dict(base, lap=9))
+    assert c.compatible(unknown, reference), 'missing strategy still allows labelled inspection'
+
+
+def t_economy_target_comparison_checks_each_known_gear_without_inventing_missing_targets():
+    reference = {'strategy': {'targets': {'2': 6000}}}
+    candidate = {'comparison_eligible': True, 'strategy': {'targets': {'2': 6100}}}
+    assert not c.compatible(reference, candidate), 'different known RPM targets must be excluded'
+    candidate['strategy']['targets'] = {'3': 6200}
+    assert c.compatible(reference, candidate), 'disjoint partial targets are unknown, not contradictory'
+    candidate['strategy']['targets'] = {'2': 6000.0}
+    assert c.compatible(reference, candidate), 'equivalent integer/float targets match'
+
+
 if __name__ == '__main__':
     for name, fn in sorted(globals().copy().items()):
         if name.startswith('t_') and callable(fn):

@@ -2858,6 +2858,35 @@ release(true);await action;console.log(calls);})();
         assert out.strip() == '0', 'queued action must retain its original recording identity'
 
 
+def t_context_exclusion_is_distinct_from_measured_pace_rejection():
+    out = _tm_node("""
+tmState.recLaps = [Object.assign(lap('R',1,80,7), {pace_eligible:true,comparison_eligible:false,analysis_role:'warmup'}),
+ Object.assign(lap('R',2,81,7), {pace_eligible:false,comparison_eligible:false,reasons:['sample gap']})];
+tmRenderLaps();console.log(JSON.stringify($('tm-laps').kids.map(row=>{
+ const b=row.kids.find(e=>e.className.split(' ').includes('tmbadge'));return [b.textContent,b.title];})));""")
+    if out is not None:
+        assert json.loads(out) == [['not for comparison', 'Excluded from default comparison: warmup'],
+                                  ['not for pace', 'Excluded from pace: sample gap']]
+
+
+def t_strategy_change_starts_with_a_separate_copy_of_stint_defaults():
+    with open(os.path.join(ROOT, 'src', 'ui', 'telemetry-context.js'), encoding='utf-8') as f:
+        script = f.read()
+    out = _run_js(script + """
+tcStints=()=>{};tcChanged=()=>{};
+const stint={start_lap:5,strategy:{fuel_map:2,shortshift:true,targets:{'2':6000}}};
+tcAddStrategyChange(stint);
+const change=stint.strategy_changes[0];
+console.log(JSON.stringify(change));change.strategy.targets['2']=6200;
+console.log(stint.strategy.targets['2']);
+""")
+    if out is not None:
+        row, original = out.strip().split('\n')
+        assert json.loads(row) == {'lap': 5, 'strategy': {'fuel_map': 2, 'shortshift': True,
+                                                       'targets': {'2': 6000}}}
+        assert original == '6000', 'editing a later strategy must not overwrite stint defaults'
+
+
 def t_telemetry_open_recording_is_not_indexed_on_load():
     tm = _tm_script(_cc_page())
     load = _tm_fn(tm, "tmLoad")
