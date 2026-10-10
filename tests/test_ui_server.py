@@ -2974,6 +2974,22 @@ await load;console.log(JSON.stringify([stillLoading,tc.loading,control.disabled,
             'cancelled actions must neither unlock a new load nor keep its controls disabled'
 
 
+def t_long_context_text_is_drafted_without_blocking_other_valid_values():
+    with open(os.path.join(ROOT, 'src', 'ui', 'telemetry-context.js'), encoding='utf-8') as f:
+        script = f.read()
+    out = _run_js(script + """
+global.document={createElement:()=>({value:'',append(){},setAttribute(){},classList:{add(){},remove(){}}})};
+tc.draft={};tcChanged=()=>{};const parent={append(){}};let title='saved title';
+const field=tcField(parent,'Title',title,'text',v=>title=v,'settings.1.title');
+field.value='x'.repeat(2001);field.oninput();
+const note={id:'n1',text:'saved note'};const text=tcNoteField(note);text.value='n'.repeat(16001);text.oninput();
+console.log(JSON.stringify([title,note.text,tc.draft['settings.1.title']?.length,tc.draft['note.n1.text']?.length]));
+""")
+    if out is not None:
+        assert json.loads(out) == ['saved title', 'saved note', 2001, 16001], \
+            'oversized text must remain draft while valid values remain saveable'
+
+
 def t_telemetry_open_recording_is_not_indexed_on_load():
     tm = _tm_script(_cc_page())
     load = _tm_fn(tm, "tmLoad")

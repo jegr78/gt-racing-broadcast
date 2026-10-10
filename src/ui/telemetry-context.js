@@ -48,6 +48,7 @@ function tcField(parent, label, value, type, setter, key) {
   if(Array.isArray(type)){parsed=raw===''?null:raw==='true'?true:raw==='false'?false:raw;}
   else if(['number','integer','required-integer'].includes(type)) {parsed=raw.trim()===''?null:Number(raw);valid=parsed===null?type!=='required-integer':Number.isFinite(parsed)&&parsed>=0&&(type==='number'||Number.isInteger(parsed));}
   else if(type==='tyres'){parsed=raw.split(',').map(v=>v.trim().toUpperCase()).filter(Boolean);valid=parsed.every(v=>TC_TYRES.includes(v));}
+  else if(type==='text')valid=raw.length<=(/^stint\.[^.]+\.note$/.test(key)?16000:2000);
   if(valid){delete tc.draft[key];setter(parsed);input.classList.remove('tcinvalid');}
   else {tc.draft[key]=raw;input.classList.add('tcinvalid');}
   tcChanged();
@@ -226,6 +227,12 @@ function tcAddStint() {
   compound:null,confirmed:false,tyre_service:s.stints.length?null:false,warmup_laps:s.stints.length?1:0,strategy:{}});
  tcStints();tcChanged();
 }
+function tcNoteField(note) {
+ const key='note.'+note.id+'.text',text=tcEl('textarea');text.rows=3;text.value=tc.draft[key]??note.text;text.setAttribute('aria-label','Note text');
+ if(key in tc.draft)text.classList.add('tcinvalid');
+ text.oninput=()=>{if(text.value.length<=16000){note.text=text.value;delete tc.draft[key];text.classList.remove('tcinvalid');}
+  else{tc.draft[key]=text.value;text.classList.add('tcinvalid');}tcChanged();};return text;
+}
 function tcNotes() {
  const root=$('tc-notes');root.textContent='';
  (tc.data.notes||[]).forEach((note,i)=>{
@@ -233,7 +240,7 @@ function tcNotes() {
   const card=tcEl('section',null,'tcrow');const grid=tcEl('div',null,'tcgrid');card.append(grid);
   tcField(grid,'Note applies to',note.scope,[['recording','Whole recording'],['session','This GT7 session'],['lap','A lap']],v=>{note.scope=v;if(v!=='recording')note.session=Number(tc.session);if(v==='lap')note.lap??=1;else delete note.position;tcNotes();},'note.'+note.id+'.scope');
   if(note.scope==='lap')tcField(grid,'Lap',note.lap,'required-integer',v=>{note.lap=v;delete note.position;},'note.'+note.id+'.lap');
-  const text=tcEl('textarea');text.rows=3;text.value=note.text;text.setAttribute('aria-label','Note text');text.oninput=()=>{note.text=text.value;tcChanged();};card.append(text);
+  card.append(tcNoteField(note));
   if(note.position)card.append(tcEl('p','Track position attached · x '+note.position.x.toFixed(1)+' / z '+note.position.z.toFixed(1),'sub'));
   if(tc.position&&note.scope==='lap'&&tc.target===tmState.rec&&note.session===tmState.lapB?.session&&note.lap===tmState.lapB?.lap)tcButton(card,'Attach current chart position',()=>{note.position=tcClone(tc.position);tcNotes();tcChanged();});
   tcButton(card,'Remove note',()=>{tc.data.notes.splice(i,1);tcNotes();tcChanged();});root.append(card);
