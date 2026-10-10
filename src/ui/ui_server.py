@@ -168,7 +168,7 @@ def make_handler(ctx):
             self.end_headers()
             self.wfile.write(body)
 
-        def _context_allowed(self, mutation=False):
+        def _context_allowed(self, mutation=False, structured=False):
             """Keep local context unavailable to foreign browser origins/DNS-rebinding hosts."""
             try:
                 port = self.server.server_address[1]
@@ -185,13 +185,33 @@ def make_handler(ctx):
             if not allowed:
                 if mutation:
                     self._drain_refused_body()
-                self._json({'ok': False, 'error': 'foreign context origin'}, code=403)
+                self._json({'ok': False, 'error': {'code':'foreign_origin','message':'foreign analysis origin'} if structured else 'foreign context origin'}, code=403)
             return allowed
 
         def _context_result(self, result):
             code = (200 if result.get('ok') else 409 if result.get('conflict') else
                     404 if result.get('not_found') else 400 if result.get('invalid') else 500)
             return self._json(result, code=code)
+
+        def _ai_result(self, result):
+            error=result.get('error') or {}
+            code=error.get('code') if isinstance(error,dict) else 'execution_failed'
+            status=(200 if result.get('ok') else
+                    409 if code in {'busy','settings_busy','preview_changed','profile_changed','stale_source','unindexed'} else
+                    403 if code=='disabled' else 404 if code=='not_found' else
+                    413 if code=='package_too_large' else 500 if code in {'execution_failed','preparation_failed'} else 400)
+            return self._json(result,code=status)
+
+        def _ai_call(self, operation, payload):
+            callback=ctx.get('ai_request')
+            if callback is None:
+                if operation=='settings':return self._json({'ok':True,'enabled':False,'agents':[],'last':{}})
+                if operation=='status':return self._json({'ok':True,'busy':False,'active':None})
+                return self._ai_result({'ok':False,'error':{'code':'disabled','message':'AI analysis is disabled'}})
+            try:result=callback(operation,payload)
+            except Exception:
+                result={'ok':False,'error':{'code':'execution_failed','message':'Analysis operation failed'}}
+            return self._ai_result(result)
 
         def _not_found(self, what="not found"):
             self._json({"ok": False, "error": what}, code=404)
@@ -343,7 +363,7 @@ def make_handler(ctx):
             if not _allowed(self):
                 return self._json({"ok": False, "error": "unauthorized"}, code=401)
             if not request_csrf_ok(self.headers):
-                return self._json({"ok": False, "error": "cross-origin request blocked"},
+                return self._json({"ok": False, "error": {"code":"foreign_origin","message":"foreign analysis origin"} if urlparse(self.path).path.startswith("/api/ai/") else "cross-origin request blocked"},
                                   code=403)
             path = urlparse(self.path).path
             if path == "/":
@@ -651,6 +671,10 @@ def make_handler(ctx):
                     return self._serve_bytes(_pages.read(_context_script), 'application/javascript; charset=utf-8')
                 except OSError:
                     return self._not_found('context editor unavailable')
+            if path in ('/api/ai/settings','/api/ai/probe','/api/ai/status','/api/ai/job'):
+                if not self._context_allowed(structured=True):return None
+                query=parse_qs(urlparse(self.path).query or '',keep_blank_values=True)
+                return self._ai_call(path.rsplit('/',1)[1],{k:v[0] for k,v in query.items()})
             if path == '/api/telemetry/definition':
                 if not self._context_allowed():
                     return None
@@ -776,7 +800,7 @@ def make_handler(ctx):
                 return self._json({"ok": False, "error": "unauthorized"}, code=401)
             if not request_csrf_ok(self.headers):
                 self._drain_refused_body()
-                return self._json({"ok": False, "error": "cross-origin request blocked"},
+                return self._json({"ok": False, "error": {"code":"foreign_origin","message":"foreign analysis origin"} if urlparse(self.path).path.startswith("/api/ai/") else "cross-origin request blocked"},
                                   code=403)
             path = urlparse(self.path).path
             if path.startswith("/api/jobs/") and path.endswith("/cancel"):
@@ -1078,6 +1102,13 @@ def make_handler(ctx):
                                        "error": f"could not delete backup: {exc}"},
                                       code=500)
                 return self._json(result, code=200 if result.get("ok") else 400)
+            if path in ('/api/ai/settings','/api/ai/preview','/api/ai/start','/api/ai/cancel'):
+                if not self._context_allowed(mutation=True,structured=True):return None
+                body=self._body_json()
+                if body is None:
+                    return self._ai_result({'ok':False,'error':{'code':'invalid_json','message':self._body_error}})
+                operation='settings-save' if path.endswith('/settings') else path.rsplit('/',1)[1]
+                return self._ai_call(operation,body)
             if path == '/api/telemetry/definition':
                 if not self._context_allowed(mutation=True):
                     return None

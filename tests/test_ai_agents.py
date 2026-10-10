@@ -113,6 +113,7 @@ def t_output():
     result = codex.extract('{"ok":true}', [{'type':'turn.completed'}])
     assert result['result'] == {'ok': True} and result['actual_model'] is None
     failure(lambda: codex.extract('not json', []), 'invalid_output')
+    failure(lambda: codex.extract('{"value":NaN}', []), 'invalid_output')
     failure(lambda: codex.extract('[]', []), 'invalid_output')
     failure(lambda: codex.extract('{}', [{'type':'turn.failed'}]), 'provider_failed')
     claude = a.Adapter(config('claude'), which=lambda _: sys.executable)

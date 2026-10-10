@@ -22,6 +22,9 @@
   racecast sheet     url | open              # print / open the active league's Google Sheet (built from its SHEET_ID)
   racecast telemetry record start|stop|status   # solo POV: record the GT7 telemetry trace (relay must run)
   racecast telemetry list | export <name|latest> [--out DIR] [--all] [--excel] | delete <name>   # recordings of the active profile -> samples.csv + laps.csv
+  racecast telemetry analyze <name> --session N --agent ID [--laps N,N] [--template TEMPLATE] [--goal TEXT] [--questions TEXT] [--model NAME] [--language LANG] [--reference REC:S:L]   # preview selected cloud-provider input
+  racecast telemetry analyze <name> --session N --agent ID --start --confirm-preview HASH   # explicitly start the reviewed immutable input
+  racecast telemetry analyze --status | --cancel JOB_ID   # one machine-wide analysis; cancellation does not recover quota
   racecast telemetry index   # build the missing lap indexes (the Control Center runs it for lap comparison)
   racecast telemetry shifts <name> --lap N [--session N]   # offline shift references and recorded phases
   racecast telemetry shift-update CAR_ID   # explicitly update the local external reference for one vehicle
@@ -985,7 +988,7 @@ EVENT_VERBS = ("status", "start", "stop", "takeover")
 TAILSCALE_VERBS = ("up", "down", "status", "logs")
 OBS_VERBS = ("refresh", "collection", "logs", "stream-target", "benchmark")
 SHEET_VERBS = ("url", "open")           # active league's Google Sheet (from SHEET_ID)
-TELEMETRY_VERBS = ("record", "list", "export", "delete", "index", "shifts", "shift-update")   # GT7 telemetry recordings
+TELEMETRY_VERBS = ("record", "list", "export", "delete", "index", "shifts", "shift-update", "analyze")   # GT7 telemetry recordings
 GT7DATA_VERBS = ("update", "status")      # GT7 reference data
 APP_VERBS = ("launch", "quit")          # GUI app control for the Control Center
 APP_CONTROLLED = ("obs", "discord", "tailscale")   # GUI apps racecast can launch + quit
@@ -3276,6 +3279,112 @@ def _resolve_recording(rec_dir, name):
     if path is None:
         sys.exit(f"no recording named {name!r} in {rec_dir} (see 'racecast telemetry list')")
     return path
+
+
+def _ai_source(name, profile_root, machine, profile):
+    import ai_control
+    import ai_package
+    import dataclasses
+    import gt7_laps
+    import gt7_tracks
+    import gt7_track_definitions as td
+    rec_dir=os.path.join(profile_root,'telemetry-recordings')
+    path=_find_recording(rec_dir,name)
+    if path is None:raise ai_control.ControlError('not_found','Recording not found in the active profile')
+    bundled=resource_path('assets/gt7')
+    idx=gt7_laps.cached(path,machine,bundled)
+    if idx is None:raise ai_control.ControlError('unindexed','Run racecast telemetry index for this profile before preparing analysis')
+    source=ai_package.load_source(rec_dir,os.path.basename(path),idx)
+    context_rows=[]
+    for session in sorted({r['session'] for r in idx['laps']}):
+        context_rows.extend(ai_package._rows(source,session))
+    joined=dict(idx,laps=context_rows,context_snapshot=source.context)
+    tracks=gt7_tracks.TrackDB.load(machine,bundled)
+    store=td.Store(machine,resource_path('assets/gt7/track-definitions'))
+    try:joined=td.annotate_index(joined,source.context['data'],store,tracks,idx)
+    except (ValueError,OSError,KeyError):
+        joined['track_definition_error']='Optional track definitions unavailable'
+    return dataclasses.replace(source,index=joined)
+
+
+def _ai_controller():
+    import ai_control
+    profile=_active_profile_name() or ''
+    machine=_runtime_base_dir()
+    root=_profile_runtime(machine,profile)
+    return ai_control.Controller(machine,root,profile,
+                                 lambda name:_ai_source(name,root,machine,profile))
+
+
+def ai_request_data(operation,payload=None):
+    import ai_control
+    import ai_agents
+    import ai_jobs
+    import ai_package
+    payload={} if payload is None else payload
+    try:
+        control=_ai_controller()
+        if operation=='settings':return dict(control.settings.read(),ok=True)
+        if operation=='settings-save':return dict(control.settings.save(payload),ok=True)
+        if operation=='probe':
+            cfg=next((a for a in control.settings.read()['agents'] if a['id']==payload.get('id')),None)
+            if cfg is None:raise ai_control.ControlError('invalid_selection','Choose a registered agent configuration')
+            adapter=ai_agents.Adapter(cfg)
+            result=adapter.probe();result['model_suggestions']=adapter.discover_models()
+            return dict(result,ok=True,id=cfg['id'])
+        if operation=='preview':return control.preview(payload)
+        if operation=='start':return control.start(payload)
+        if operation=='status':return control.status()
+        if operation=='job':return control.job(payload.get('id'))
+        if operation=='cancel':return control.cancel(payload.get('id'))
+        raise ai_control.ControlError('invalid_selection','Unknown analysis operation')
+    except (ai_control.ControlError,ai_agents.AgentError,ai_jobs.JobError,ai_package.PackageError) as exc:
+        return {'ok':False,'error':{'code':exc.code,'message':str(exc)}}
+    except Exception:
+        return {'ok':False,'error':{'code':'preparation_failed','message':'Analysis preparation failed; inspect the recording/index/context'}}
+
+
+def telemetry_analyze_cmd(rest):
+    import argparse
+    ap=argparse.ArgumentParser(prog='racecast telemetry analyze')
+    ap.add_argument('name',nargs='?',help='recording name or stem')
+    ap.add_argument('--session',type=int,help='completed GT7 session number')
+    ap.add_argument('--laps',help='comma-separated completed lap numbers')
+    ap.add_argument('--agent',help='named machine agent configuration ID')
+    ap.add_argument('--model',help='explicit model name, no fallback')
+    ap.add_argument('--template',choices=('driving-technique','consistency','session-overview'))
+    ap.add_argument('--goal',default='',help='practice goal')
+    ap.add_argument('--questions',default='',help='additional questions')
+    ap.add_argument('--language',help='report language, default UI language')
+    ap.add_argument('--reference',action='append',default=[],help='explicit recording:session:lap reference')
+    ap.add_argument('--start',action='store_true',help='explicitly start the confirmed analysis')
+    ap.add_argument('--confirm-preview',help='fingerprint from a reviewed preview')
+    ap.add_argument('--status',action='store_true',help='show machine-wide analysis status')
+    ap.add_argument('--cancel',metavar='JOB_ID',help='cancel the owned analysis process tree')
+    args=ap.parse_args(rest)
+    if args.status or args.cancel:
+        result=ai_request_data('cancel' if args.cancel else 'status',{'id':args.cancel})
+    else:
+        if not args.name or args.session is None:ap.error('recording and --session are required')
+        try:
+            refs=[]
+            for value in args.reference:
+                name,session,lap=value.rsplit(':',2)
+                refs.append(dict(rec=name,session=int(session),lap=int(lap)))
+            payload=dict(rec=args.name,session=args.session,agent=args.agent,goal=args.goal,
+                         questions=args.questions,references=refs)
+            if args.laps:payload['laps']=[int(n) for n in args.laps.split(',')]
+        except ValueError:ap.error('laps/references require numeric session and lap identifiers')
+        for key in ('model','template','language','confirm_preview'):
+            value=getattr(args,key)
+            if value is not None:payload[key]=value
+        if args.start:
+            import ai_control
+            try:result=_ai_controller().start(payload,background=False)
+            except ai_control.ControlError as exc:result={'ok':False,'error':{'code':exc.code,'message':str(exc)}}
+        else:result=ai_request_data('preview',payload)
+    print(json.dumps(result,ensure_ascii=True,indent=2))
+    if not result.get('ok'):sys.exit(1)
 
 
 def telemetry_record_cmd(rest):
@@ -5744,6 +5853,7 @@ DISPATCH = {
     ("telemetry", "record"): telemetry_record_cmd, ("telemetry", "list"): telemetry_list_cmd,
     ("telemetry", "export"): telemetry_export_cmd, ("telemetry", "delete"): telemetry_delete_cmd,
     ("telemetry", "index"): telemetry_index_cmd,
+    ("telemetry", "analyze"): telemetry_analyze_cmd,
     ("telemetry", "shifts"): telemetry_shifts_cmd,
     ("telemetry", "shift-update"): telemetry_shift_update_cmd,
     ("gt7-data", "update"): gt7_data_update_cmd, ("gt7-data", "status"): gt7_data_status_cmd,
@@ -8325,6 +8435,7 @@ def run_ui(rest, fail=sys.exit, open_browser=True):
         "profile_import": profile_import_data,
         "report_read": report_read_data,
         "report_send": report_send_data,
+        "ai_request": ai_request_data,
         "telemetry_recordings": telemetry_recordings_data,
         "telemetry_laps": telemetry_laps_data,
         "telemetry_lap": telemetry_lap_data,

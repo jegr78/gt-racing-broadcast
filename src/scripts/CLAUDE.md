@@ -207,3 +207,15 @@ Templates distinguish evidence from interpretation and avoid strategy advice.
 Packages require good complete trace timing and have provider-specific size limits.
 The manifest shows all included context/notes and cloud transmission before start.
 Detailed contracts and evidence: `src/docs/design/ai-analysis-packages.md`.
+
+
+`ai_control` shares explicit preview/fingerprint confirmation between `telemetry
+analyze` and same-origin `/api/ai/*` callbacks. `ai_jobs` owns a machine-wide OS
+lease, freezes the profile destination, and runs one isolated provider invocation.
+Windows uses a suspended process assigned to a kill-on-close Job Object before
+execution; POSIX uses an owned process group. Both clean descendants on normal
+exit, timeout and cancellation. Output is bounded and remains incomplete until a
+report validator accepts it. Run artifacts retain input, diagnostics and the same
+restricted manual invocation for deliberate retry. Settings preferences use a
+locked reload/update so concurrent agent edits are preserved.
+Details: `src/docs/design/ai-analysis-jobs.md`.
