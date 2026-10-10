@@ -141,6 +141,31 @@ def t_reverse_definitions_cannot_project_as_confirmed_forward_geometry():
         raise AssertionError('forward geometry cannot confirm a reverse definition')
 
 
+def t_supplied_grand_valley_uses_reviewed_publisher_numbering_and_coaching_sections():
+    with tempfile.TemporaryDirectory() as root:
+        store = td.Store(root, os.path.join(ROOT, 'src', 'assets', 'gt7', 'track-definitions'))
+        item = store.read('c2fd94', False)
+        doc = item['definition']
+        assert doc and doc['reviewed'], 'Grand Valley needs a supplied reviewed definition'
+        assert [c['number'] for c in doc['corners']] == list(range(1, 20))
+        assert doc['catalogue_turns'] == 18 and doc['nominal_length_m'] == 5099
+        assert doc['corners'][0]['direction'] == 'left' and doc['corners'][-1]['direction'] == 'right'
+        assert len(doc['variants'][0]['boundaries']) == 4
+        assert doc['variants'][0]['kind'] == 'coaching' and doc['variants'][0]['reviewed']
+        assert any('gran-turismo.com' in source for source in doc['provenance'])
+        assert store.read('c2fd94', True)['definition'] is None, 'forward anchors must not imply reverse-layout coverage'
+
+
+def t_sector_finish_uses_the_same_rounded_station_as_completed_traces():
+    class PreciseLength(fixture.FakeTracks):
+        def line_length(self, oid):
+            return 1000.04
+    projected = td.project_definition(definition(), PreciseLength())
+    times = td.sector_times(lap(2, (4, 4, 4, 4)), projected['variants'][0])
+    assert all(t is not None for t in times), 'full source traces must cover the larger-sector finish'
+    assert abs(sum(times)-16) < 1e-6
+
+
 if __name__ == '__main__':
     for name, fn in sorted(globals().items()):
         if name.startswith('t_') and callable(fn):

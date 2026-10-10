@@ -193,7 +193,7 @@ def project_definition(definition, tracks):
         ss = stations(variant['boundaries'])
         if min(ss[0], length-ss[0]) > gt7_laps.STEP_M*10 or min(ss[-1], length-ss[-1]) > gt7_laps.STEP_M*10:
             raise ValueError('sector endpoints must match the reference start/finish')
-        bounds = [0.0]+ss[1:-1]+[length]
+        bounds = [0.0]+ss[1:-1]+[round(length, 1)]  # same closing station as indexed complete traces
         if any(b-a < 1 for a, b in zip(bounds, bounds[1:], strict=False)):
             raise ValueError('sector boundaries must follow driving order with nonzero lengths')
         variant['bounds_m'] = bounds

@@ -1,0 +1,416 @@
+{
+  "format": "racecast-track-definition",
+  "version": 1,
+  "layout_id": "c2fd94",
+  "reverse": false,
+  "reviewed": true,
+  "numbering_scheme": "Gran Turismo World Finals 2023 publisher diagram, 19 numbered turns",
+  "nominal_length_m": 5099,
+  "catalogue_turns": 18,
+  "provenance": [
+    "Racecast-authored world anchors, reviewed 2026-10-10 against the publisher diagram.",
+    "Numbering source: https://www.gran-turismo.com/images/c/i1A6jF5Br1UgB.png",
+    "Catalogue reports 18 turns; the publisher diagram labels 19. These are distinct numbering schemes.",
+    "Coordinates are authored from vehicle telemetry, not copied from a distributed racing line or map image.",
+    "Entry/apex/exit are fixed spatial coaching anchors, not detected speed minima or a guaranteed optimum line.",
+    "No verified GT7 game split boundaries are supplied; coaching boundaries keep connected sequences intact."
+  ],
+  "corners": [
+    {
+      "id": "gv-1",
+      "number": 1,
+      "name": "",
+      "direction": "left",
+      "entry": {
+        "x": 90.7,
+        "z": 1037.9
+      },
+      "apex": {
+        "x": 88.3,
+        "z": 1176.7
+      },
+      "exit": {
+        "x": 130.7,
+        "z": 1309.9
+      }
+    },
+    {
+      "id": "gv-2",
+      "number": 2,
+      "name": "",
+      "direction": "right",
+      "entry": {
+        "x": 136.3,
+        "z": 1339.6
+      },
+      "apex": {
+        "x": 117.8,
+        "z": 1385.9
+      },
+      "exit": {
+        "x": 15.5,
+        "z": 1324.9
+      }
+    },
+    {
+      "id": "gv-3",
+      "number": 3,
+      "name": "",
+      "direction": "left",
+      "entry": {
+        "x": -45.6,
+        "z": 1215.6
+      },
+      "apex": {
+        "x": -141.5,
+        "z": 1128.6
+      },
+      "exit": {
+        "x": -251.0,
+        "z": 1094.9
+      }
+    },
+    {
+      "id": "gv-4",
+      "number": 4,
+      "name": "",
+      "direction": "right",
+      "entry": {
+        "x": -279.6,
+        "z": 1086.0
+      },
+      "apex": {
+        "x": -336.0,
+        "z": 1054.1
+      },
+      "exit": {
+        "x": -382.3,
+        "z": 1001.8
+      }
+    },
+    {
+      "id": "gv-5",
+      "number": 5,
+      "name": "",
+      "direction": "left",
+      "entry": {
+        "x": -392.3,
+        "z": 984.4
+      },
+      "apex": {
+        "x": -423.6,
+        "z": 921.8
+      },
+      "exit": {
+        "x": -492.7,
+        "z": 849.6
+      }
+    },
+    {
+      "id": "gv-6",
+      "number": 6,
+      "name": "",
+      "direction": "right",
+      "entry": {
+        "x": -561.4,
+        "z": 808.6
+      },
+      "apex": {
+        "x": -628.3,
+        "z": 744.5
+      },
+      "exit": {
+        "x": -515.6,
+        "z": 751.9
+      }
+    },
+    {
+      "id": "gv-7",
+      "number": 7,
+      "name": "",
+      "direction": "left",
+      "entry": {
+        "x": -456.4,
+        "z": 819.4
+      },
+      "apex": {
+        "x": -373.9,
+        "z": 869.8
+      },
+      "exit": {
+        "x": -323.3,
+        "z": 864.8
+      }
+    },
+    {
+      "id": "gv-8",
+      "number": 8,
+      "name": "",
+      "direction": "left",
+      "entry": {
+        "x": -318.7,
+        "z": 862.7
+      },
+      "apex": {
+        "x": -286.7,
+        "z": 833.2
+      },
+      "exit": {
+        "x": -280.0,
+        "z": 798.3
+      }
+    },
+    {
+      "id": "gv-9",
+      "number": 9,
+      "name": "",
+      "direction": "right",
+      "entry": {
+        "x": -280.2,
+        "z": 793.3
+      },
+      "apex": {
+        "x": -280.1,
+        "z": 768.4
+      },
+      "exit": {
+        "x": -260.3,
+        "z": 723.0
+      }
+    },
+    {
+      "id": "gv-10",
+      "number": 10,
+      "name": "",
+      "direction": "right",
+      "entry": {
+        "x": -254.0,
+        "z": 715.4
+      },
+      "apex": {
+        "x": -196.4,
+        "z": 679.5
+      },
+      "exit": {
+        "x": -147.8,
+        "z": 689.0
+      }
+    },
+    {
+      "id": "gv-11",
+      "number": 11,
+      "name": "",
+      "direction": "left",
+      "entry": {
+        "x": -143.6,
+        "z": 690.5
+      },
+      "apex": {
+        "x": -110.0,
+        "z": 684.8
+      },
+      "exit": {
+        "x": -114.6,
+        "z": 597.8
+      }
+    },
+    {
+      "id": "gv-12",
+      "number": 12,
+      "name": "",
+      "direction": "left",
+      "entry": {
+        "x": -139.0,
+        "z": 410.5
+      },
+      "apex": {
+        "x": -167.9,
+        "z": 329.0
+      },
+      "exit": {
+        "x": -252.0,
+        "z": 364.7
+      }
+    },
+    {
+      "id": "gv-13",
+      "number": 13,
+      "name": "",
+      "direction": "right",
+      "entry": {
+        "x": -267.3,
+        "z": 378.3
+      },
+      "apex": {
+        "x": -324.8,
+        "z": 393.1
+      },
+      "exit": {
+        "x": -388.9,
+        "z": 335.7
+      }
+    },
+    {
+      "id": "gv-14",
+      "number": 14,
+      "name": "",
+      "direction": "right",
+      "entry": {
+        "x": -467.8,
+        "z": -197.3
+      },
+      "apex": {
+        "x": -428.7,
+        "z": -254.6
+      },
+      "exit": {
+        "x": -367.7,
+        "z": -219.3
+      }
+    },
+    {
+      "id": "gv-15",
+      "number": 15,
+      "name": "",
+      "direction": "left",
+      "entry": {
+        "x": -365.1,
+        "z": -215.0
+      },
+      "apex": {
+        "x": -328.4,
+        "z": -184.0
+      },
+      "exit": {
+        "x": -299.2,
+        "z": -189.7
+      }
+    },
+    {
+      "id": "gv-16",
+      "number": 16,
+      "name": "",
+      "direction": "right",
+      "entry": {
+        "x": -294.7,
+        "z": -191.8
+      },
+      "apex": {
+        "x": -275.4,
+        "z": -197.4
+      },
+      "exit": {
+        "x": -217.8,
+        "z": -183.6
+      }
+    },
+    {
+      "id": "gv-17",
+      "number": 17,
+      "name": "",
+      "direction": "right",
+      "entry": {
+        "x": -128.2,
+        "z": -139.7
+      },
+      "apex": {
+        "x": -64.3,
+        "z": -93.2
+      },
+      "exit": {
+        "x": -12.2,
+        "z": 3.3
+      }
+    },
+    {
+      "id": "gv-18",
+      "number": 18,
+      "name": "",
+      "direction": "left",
+      "entry": {
+        "x": 5.1,
+        "z": 49.9
+      },
+      "apex": {
+        "x": 44.3,
+        "z": 113.6
+      },
+      "exit": {
+        "x": 107.4,
+        "z": 170.5
+      }
+    },
+    {
+      "id": "gv-19",
+      "number": 19,
+      "name": "",
+      "direction": "right",
+      "entry": {
+        "x": 134.4,
+        "z": 199.7
+      },
+      "apex": {
+        "x": 169.9,
+        "z": 265.0
+      },
+      "exit": {
+        "x": 182.6,
+        "z": 358.4
+      }
+    }
+  ],
+  "combinations": [
+    {
+      "id": "gv-7-11",
+      "name": "T7–T11 linked sequence",
+      "corner_ids": [
+        "gv-7",
+        "gv-8",
+        "gv-9",
+        "gv-10",
+        "gv-11"
+      ]
+    },
+    {
+      "id": "gv-14-16",
+      "name": "T14–T16 linked sequence",
+      "corner_ids": [
+        "gv-14",
+        "gv-15",
+        "gv-16"
+      ]
+    }
+  ],
+  "variants": [
+    {
+      "id": "coaching-3",
+      "name": "Coaching: three connected sections",
+      "kind": "coaching",
+      "reviewed": true,
+      "boundaries": [
+        {
+          "x": 102.1,
+          "z": 959.6
+        },
+        {
+          "x": -513.7,
+          "z": 836.0
+        },
+        {
+          "x": -401.5,
+          "z": 287.5
+        },
+        {
+          "x": 102.1,
+          "z": 959.6
+        }
+      ],
+      "sector_names": [
+        "Start / T1–T5",
+        "T6–T13",
+        "T14 / finish"
+      ]
+    }
+  ],
+  "default_variant": "coaching-3"
+}
