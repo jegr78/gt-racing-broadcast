@@ -35,7 +35,7 @@ def t_malformed_curves_and_ratios_cannot_fabricate_targets():
         except ValueError:pass # expected malformed data
         else:raise AssertionError('invalid source curve must be rejected')
     for ratios in ([1,2],[1,0],[1,float('nan')],[True,1]):
-        try:shifts.calculate(curve(),ratios)
+        try:shifts.validate_ratios(ratios)
         except ValueError:pass # expected malformed gearbox
         else:raise AssertionError('invalid ratios must be rejected')
 
@@ -210,6 +210,30 @@ def t_source_payloads_and_packet_observations_are_independently_bounded():
             raise AssertionError('oversized phase rows must be refused')
 
 
+def t_source_revision_is_validated_before_downloading_components():
+    import io
+    import http_util
+    original = http_util.open_url
+    with tempfile.TemporaryDirectory() as root:
+        calls = []
+        def fetch(url, **kwargs):
+            calls.append(url)
+            if len(calls) > 1:
+                raise AssertionError('invalid revision cannot select component URLs')
+            return io.BytesIO(b'{"sha":"../other"}')
+        try:
+            http_util.open_url = fetch
+            try:
+                shifts.Cache(root).update(485)
+            except ValueError as exc:
+                assert 'commit identity' in str(exc)
+            else:
+                raise AssertionError('invalid source revision must be refused')
+        finally:
+            http_util.open_url = original
+        assert calls == [shifts.SOURCE_API]
+
+
 def t_unsupported_source_components_do_not_invent_targets_and_manual_tables_stay_usable():
     import io
     import http_util
@@ -232,7 +256,8 @@ def t_unsupported_source_components_do_not_invent_targets_and_manual_tables_stay
         partial = dict(source, curve=curve())
         assert shifts.reference(partial, None, 485, True)['targets'] == []
         observed = shifts.reference(partial, None, 485, True, [2, 1])
-        assert observed['targets'][0]['rpm'] == 5600 and observed['ratio_source'] == 'decoded transmission'
+        assert observed['targets'] and observed['targets'][0]['rpm'] == 5600 and observed['ratio_source'] == 'decoded transmission', \
+            'decoded ratios must provide targets independently of missing source ratios'
         manual = {'car_id': 485, 'targets': {'2': 5500}, 'configuration': 'Own event',
                   'provenance': 'Own test', 'confirmed': True}
         assert shifts.reference(source, manual, 485, True)['targets'][0]['rpm'] == 5500
