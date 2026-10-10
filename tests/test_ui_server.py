@@ -3716,6 +3716,39 @@ def t_telemetry_learn_rejects_a_non_object_json_body():
         httpd.shutdown()
 
 
+def t_refused_body_answer_reaches_the_client():
+    # A refused body was answered without reading it; closing a socket with unread bytes
+    # makes Windows reset the connection, so the client got WinError 10053, not the 400.
+    import http.client
+    import time
+    ctx = _ctx()
+    httpd, port = _serve(ctx)
+    lost = []
+    try:
+        payload = b"x" * 16384
+        for i in range(30):
+            length = "-1" if i % 2 else str(us.MAX_JSON_BODY_BYTES + 1)
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+            try:
+                conn.putrequest("POST", "/api/telemetry/delete")
+                conn.putheader("Content-Type", "application/json")
+                conn.putheader("Content-Length", length)
+                conn.endheaders()
+                conn.send(payload)
+                time.sleep(0.1)     # the server has answered and closed: a reset arrives now
+                resp = conn.getresponse()
+                if resp.status != 400:
+                    lost.append((i, resp.status))
+                resp.read()
+            except (ConnectionError, OSError) as e:
+                lost.append((i, type(e).__name__))
+            finally:
+                conn.close()
+    finally:
+        httpd.shutdown()
+    assert lost == [], f"every refused body must still reach the client as a 400: {lost[:5]}"
+
+
 def t_body_json_rejects_negative_and_oversized_content_length():
     import http.client
     ctx = _ctx()
