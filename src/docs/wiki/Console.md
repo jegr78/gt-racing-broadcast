@@ -173,11 +173,11 @@ never allows browsing the entire archive. Revoke a reference there to stop futur
 reads. Previously transmitted browser data cannot be recalled. Deletion or
 replacement invalidates a grant; review and share a changed source explicitly.
 
-This first delivery supplies the access foundation and a protected availability
-page; live session preparation, analysis routes and the full desk follow in the
-remaining delivery issues.
+The [Race Engineer desk](Race-Engineer) provides live instruments, current and prior
+lap analysis, shared historical references, context and Crew chat. Select laps and
+zoom independently of other Engineers; no operational controls are exposed.
 
-![Race Engineer: protected access and shared references](images/console-race-engineer-access.png)
+![Race Engineer analysis desk](images/console-race-engineer-desktop.png)
 
 The relay collects shared live analysis whenever the profile's Engineer switch
 is enabled and accepted GT7 packets arrive. It does not wait for a browser and does
@@ -193,6 +193,6 @@ Evicted details are explicit. With a matching recording, local background reads
 can restore them; without recording, history is volatile and disappears on restart.
 Recovered recordings remain history. Authorized analysis routes now provide thin current
 values, version-aware history, asynchronous lap/reference detail and shared A/B metrics.
-The complete desk follows in the remaining UI delivery. See the
+See the [Engineer guide](Race-Engineer) for selection, reconnect and compact-phone behavior, and the
 [analysis API contract](https://github.com/jegr78/gt-racing-broadcast/blob/main/src/docs/design/race-engineer-api.md)
 for identities, states and limits.

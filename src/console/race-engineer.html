@@ -1,32 +1,137 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Race Engineer</title>
-<style>:root{color-scheme:dark}body{margin:0;background:#0a0c0f;color:#e6e6e6;font:16px system-ui}main{max-width:1000px;margin:auto;padding:28px}a{color:#8ab4ff}section{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:20px}li{margin:8px 0}#status{color:#b7c3d3}</style>
+<style>
+:root{color-scheme:dark;--bg:#0b0d10;--panel:#151a22;--edge:#344052;--ink:#ecf1f8;--muted:#b5c2d2;--blue:#8ab4ff;--orange:#ffd08a}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px system-ui}main{max-width:1600px;margin:auto;padding:20px}a{color:var(--blue)}header{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}h1{font-size:26px;margin:10px 0}h2{font-size:18px;margin:0 0 12px}p{line-height:1.5}section,.card{background:var(--panel);border:1px solid var(--edge);border-radius:10px;padding:16px;margin-top:16px}.sub{color:var(--muted);font-size:13px}#status{font-weight:650}#notice{color:var(--orange);min-height:22px}#receipt{font-variant-numeric:tabular-nums}#instruments{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}.value{padding:12px;border:1px solid var(--edge);border-radius:8px;background:#10151d}.value span{display:block;color:var(--muted);font-size:12px}.value strong{display:block;font-size:26px;margin:5px 0;font-variant-numeric:tabular-nums}.dim #instruments,.dim #plots{opacity:.5}.controls{display:flex;flex-wrap:wrap;gap:12px;align-items:end}.controls label{display:flex;flex-direction:column;gap:6px;flex:1;min-width:150px}.controls .check{flex:0 0 auto;flex-direction:row;align-items:center;min-width:120px;min-height:44px}select,input,button{font:inherit;color:var(--ink);background:#10151d;border:1px solid var(--edge);border-radius:6px;padding:9px;min-height:42px;max-width:100%}button{cursor:pointer}button:hover{border-color:var(--blue)}button:disabled{opacity:.5;cursor:default}input[type=checkbox]{min-height:0;width:18px;height:18px;accent-color:#72a7ff}input[type=range]{padding:0}#plots{display:grid;grid-template-columns:1.4fr 1fr;gap:16px}.plot-card{min-width:0}svg{display:block;width:100%;height:auto;background:#0f141c;border-radius:8px}svg text{fill:var(--muted);font:12px system-ui}#context-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.scroll{overflow-x:auto}table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}th,td{text-align:right;padding:8px;border-bottom:1px solid var(--edge);white-space:nowrap}th:first-child,td:first-child{text-align:left}th{color:var(--muted)}#references{padding-left:22px}#references li{margin:6px 0}#chatlog{max-height:180px;overflow:auto;white-space:pre-wrap}#chat-form{display:flex;gap:10px;margin-top:10px}#chatin{flex:1;min-width:0}.mobile-note{display:none}.badge{padding:6px 10px;border:1px solid var(--edge);border-radius:20px;color:var(--muted)}[hidden]{display:none!important}
+@media(max-width:1200px){#instruments{grid-template-columns:repeat(3,minmax(0,1fr))}#plots{grid-template-columns:1fr}#context-grid{grid-template-columns:1fr}}
+@media(max-width:600px){main{padding:12px}h1{font-size:23px}#instruments{grid-template-columns:repeat(2,minmax(0,1fr))}.value strong{font-size:23px}.controls label{min-width:130px}#analysis{display:none}.mobile-note{display:block}.badge{font-size:12px}section{padding:12px}#chat-form{flex-wrap:wrap}}
+</style>
+<script>window.RC_API_BASE="__RC_API_BASE__";window.RC_API=p=>(window.RC_API_BASE||'')+p;if(location.search)history.replaceState({},'',location.pathname);</script>
+</head><body><main>
+<header><div><a href="/console">Console</a><h1>Race Engineer</h1></div><span class="badge">Read-only · one GT7 source</span></header>
+<p id="status" role="status">Checking current access…</p><p id="receipt" class="sub">Waiting for measured telemetry</p><p id="notice" role="status"></p>
+<div id="protected" hidden>
+<section aria-label="Live instruments"><div id="instruments">
+<div class="value"><span>Speed · km/h</span><strong id="speed">Unavailable</strong></div><div class="value"><span>Gear</span><strong id="gear">Unavailable</strong></div><div class="value"><span>Engine · RPM</span><strong id="rpm">Unavailable</strong></div><div class="value"><span>Throttle · %</span><strong id="throttle">Unavailable</strong></div><div class="value"><span>Brake · %</span><strong id="brake">Unavailable</strong></div><div class="value"><span>Observed lap · s</span><strong id="lap-time">Unavailable</strong></div>
+<div class="value"><span>Fuel · L</span><strong id="fuel">Unavailable</strong></div><div class="value"><span>Tyres FL / FR · °C</span><strong id="tyres-front">Unavailable</strong></div><div class="value"><span>Tyres RL / RR · °C</span><strong id="tyres-rear">Unavailable</strong></div><div class="value"><span>Live observed delta · s</span><strong id="delta">Unavailable</strong></div><div class="value"><span>Retained eligible best · s</span><strong id="best">Unavailable</strong></div><div class="value"><span>Retained-detail theoretical · s</span><strong id="theory">Unavailable</strong></div>
+</div><p id="source-state" class="sub"></p></section>
+<section><div class="controls"><label>Session<select id="session"></select></label><label>Lap B · inspect<select id="lap-b"></select></label><label class="check"><input id="follow" type="checkbox" checked>Follow live</label><span id="new-laps" class="sub" role="status"></span></div><p id="lap-state" class="sub">Waiting for analysis</p><p class="mobile-note sub">Charts, map and extensive comparison are available on tablet and desktop.</p></section>
+<div id="analysis">
+<section><div class="controls"><label>Reference source<select id="reference-source"><option value="">Selected session</option></select></label><label>Lap A · reference<select id="lap-a"></select></label><label>Chart channel<select id="channel"><option value="speed_kmh">Speed · km/h</option><option value="throttle">Throttle · %</option><option value="brake">Brake · %</option><option value="steer_deg">Steering · degrees</option><option value="gear">Gear</option></select></label></div><p id="comparison-state" class="sub">Choose an eligible reference lap</p><div class="controls"><label>Distance from · m<input id="zoom-from" type="number" min="0" value="0"></label><label>Distance to · m<input id="zoom-to" type="number" min="1" value="1000"></label><button id="zoom-reset" type="button">Full distance</button></div></section>
+<div id="plots"><section class="plot-card"><h2>Distance comparison</h2><p class="sub">A blue · B orange · delta B − A. Provisional values end at observed distance.</p><svg id="chart" viewBox="0 0 720 300" aria-label="Telemetry chart" role="img"></svg><svg id="delta-chart" viewBox="0 0 720 170" aria-label="Time delta chart" role="img"></svg></section><section class="plot-card"><h2>Track map</h2><p class="sub">Measured world coordinates and current reviewed markers</p><svg id="map" viewBox="0 0 480 420" aria-label="Measured lap track map" role="img"></svg></section></div>
+<section><h2>Mini-sectors</h2><p class="sub">Diagnostic 200 m segments. A partly driven sector and future sectors stay empty.</p><div class="scroll"><table id="sectors"><thead><tr><th>Sector</th><th>A · s</th><th>B · s</th><th>B − A · s</th></tr></thead><tbody></tbody></table></div></section>
+</div>
+<div id="context-grid"><section><h2>Analysis context</h2><p id="context" class="sub">No selected lap</p><ul id="notes"></ul><p id="limitations" class="sub"></p><div id="larger-sectors" class="sub"></div></section><section><h2>Shared references</h2><ul id="references"></ul><p id="history-state" class="sub"></p><p class="sub">References include producer context and notes. Previously transmitted data cannot be recalled. Feedback uses your team's existing voice channel.</p></section></div>
+<section><h2>Crew chat</h2><div id="chatlog" role="log" aria-label="Crew chat"></div><form id="chat-form"><input id="chatin" aria-label="Crew message" maxlength="1000" placeholder="Message your crew"><button id="chatsend" type="submit">Send</button></form><p id="chat-status" class="sub"></p></section>
+</div></main><!--__CREW_FRAME__-->
 <script>
-window.RC_API_BASE="__RC_API_BASE__";
-window.RC_API=p=>(window.RC_API_BASE || '')+p;
-if(location.search)history.replaceState({},'',location.pathname);
-</script></head><body>
-<main><a id="back" href="/console">Console</a><h1>Race Engineer</h1>
-<section><p id="status" role="status">Checking current access…</p><div id="protected" hidden>
-<p>Your Engineer role and the producer's profile opt-in allow access. Live analysis is unavailable in this version.</p>
-<h2>Shared references</h2><ul id="references"></ul>
-<p>Shared references include producer context and notes. Feedback uses your team's existing voice channel. Previously transmitted data cannot be recalled.</p>
-</div></section></main>
-<!--__CREW_FRAME__-->
-<script>
-let timer,busy=false,stopped=false;
-async function refreshAccess(){
- if(busy || stopped)return;busy=true;
- const protectedView=document.getElementById('protected'),refs=document.getElementById('references');
- try{
-  const response=await fetch(RC_API('/race-engineer/access'));
-  const data=await response.json();
-  if(!response.ok)throw new Error(data.error?.message || 'Access was removed.');
-  refs.replaceChildren();
-  for(const reference of data.references){const row=document.createElement('li');row.textContent=reference.label;refs.append(row);}
-  protectedView.hidden=false;document.getElementById('status').textContent='Engineer access enabled. Live analysis unavailable.';
- }catch(error){protectedView.hidden=true;refs.replaceChildren();document.getElementById('status').textContent=error.message;stopped=true;clearInterval(timer);}finally{busy=false;}
+'use strict';
+const $=id=>document.getElementById(id), num=(v,d=1)=>typeof v==='number'&&Number.isFinite(v)?v.toFixed(d):'Unavailable';
+const state={stopped:false,busy:false,analysisBusy:false,epoch:0,generation:null,snapshot:null,received:0,connected:false,problem:null,historyRevision:null,laps:[],sessions:[],refs:[],refLaps:[],refSource:'',a:'',b:'',session:'',follow:true,zoom:null,detail:null,pair:null,known:new Set(),newLaps:0,analysisAvailable:false,lastAccess:0,lastChat:0,controllers:new Set()};
+let timer;
+function say(text){$('notice').textContent=text;}
+function clearPlots(){for(const id of ['chart','delta-chart','map'])$(id).replaceChildren();$('sectors').tBodies[0].replaceChildren();$('delta').textContent='Unavailable';$('context').textContent='No selected lap';$('notes').replaceChildren();$('limitations').textContent='';$('larger-sectors').textContent='';state.detail=null;state.pair=null;}
+function stop(message){state.stopped=true;state.epoch++;clearInterval(timer);for(const c of state.controllers)c.abort();state.controllers.clear();state.snapshot=null;state.laps=[];state.sessions=[];state.refs=[];state.refLaps=[];state.a=state.b=state.session=state.refSource='';state.zoom=null;state.known.clear();state.connected=false;clearPlots();$('protected').hidden=true;for(const id of ['references','notes','chatlog','larger-sectors','session','lap-a','lap-b','reference-source'])$(id).replaceChildren();for(const el of document.querySelectorAll('.value strong'))el.textContent='Unavailable';for(const id of ['source-state','history-state','lap-state','comparison-state','new-laps'])$(id).textContent='';$('chatin').value='';$('context').textContent='';$('limitations').textContent='';$('receipt').textContent='';$('status').textContent=message;}
+class AccessLost extends Error{}
+class ReferenceLost extends Error{}
+class SourceUnavailable extends Error{}
+async function request(route,query={},method='GET',body=null){
+ const epoch=state.epoch, controller=new AbortController();state.controllers.add(controller);const timeout=setTimeout(()=>controller.abort(),4000);
+ try{const qs=new URLSearchParams(query),response=await fetch(RC_API(route)+(qs.size?'?'+qs:''),{method,signal:controller.signal,cache:'no-store',headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):null});
+  const data=await response.json();if(epoch!==state.epoch||state.stopped)throw new AccessLost('Access state changed');
+  if(response.status===401||response.status===403||response.status===503&&data.error?.code==='source_unavailable'){stop(data.error?.message||'Engineer access was removed');throw new AccessLost('Access was removed');}
+  if(response.status===410)throw new ReferenceLost(data.error?.message||'Shared reference unavailable');
+  if(response.status===503&&['source_unavailable','analysis_unavailable'].includes(data.error?.code))throw new SourceUnavailable(data.error.message);
+  if(!response.ok)throw new Error(data.error?.message||'Analysis temporarily unavailable');return data;
+ }finally{clearTimeout(timeout);state.controllers.delete(controller);}
 }
-timer=setInterval(refreshAccess,1000);refreshAccess();
+function resetGeneration(generation){if(state.generation&&state.generation!==generation){state.epoch++;state.laps=[];state.sessions=[];state.known.clear();state.historyRevision=null;state.a=state.b=state.session=state.refSource='';state.refLaps=[];state.zoom=null;state.newLaps=0;clearPlots();say('Relay restarted. A new live generation is active; previous recordings remain history.');}state.generation=generation;}
+function options(id,rows,selected,empty){const el=$(id);el.replaceChildren();if(empty!==undefined){const o=document.createElement('option');o.value='';o.textContent=empty;el.append(o);}for(const row of rows){const o=document.createElement('option');o.value=row.id;o.textContent=row.label;el.append(o);}if(selected&&!rows.some(r=>r.id===selected)){const o=document.createElement('option');o.value=selected;o.textContent='Unavailable selection';el.append(o);}el.value=selected;}
+function lapLabel(r){return `Lap ${r.lap} · ${r.state==='provisional'?'provisional':num(r.time_s,3)+' s'}${r.detail_state==='evicted'?' · evicted':''}${!r.comparison_eligible&&r.state!=='provisional'?' · limited':''}`;}
+function selections(){
+ const current=state.snapshot?.current;const all=state.laps.concat(state.refLaps,current?[current]:[]);
+ if(state.follow&&current){state.b=current.id;state.session=current.session_id;}
+ if(!state.b){const rows=all.filter(r=>!state.session||r.session_id===state.session);if(rows.length){state.b=rows.at(-1).id;state.session=rows.at(-1).session_id;}}
+ const sessions=state.sessions.map(s=>({id:s.id,label:`${s.track||'Unknown track'} · car ${s.car_id??'unknown'} · ${s.laps} laps`}));
+ for(const r of state.refLaps)if(!sessions.some(s=>s.id===r.session_id))sessions.push({id:r.session_id,label:'Shared reference session'});
+ options('session',sessions,state.session,'Waiting for session');
+ options('lap-b',all.filter(r=>r.session_id===state.session).map(r=>({id:r.id,label:lapLabel(r)})),state.b,'Choose lap');
+ const pool=state.refSource?state.refLaps:state.laps.filter(r=>r.session_id===state.session);
+ const eligible=pool.filter(r=>r.comparison_eligible);if(!state.a&&eligible.length)state.a=eligible.reduce((a,b)=>a.time_s<b.time_s?a:b).id;
+ options('lap-a',eligible.map(r=>({id:r.id,label:lapLabel(r)})),state.a,'No reference');
+ options('reference-source',state.refs.map(r=>({id:r.id,label:r.label})),state.refSource,'Selected session');
+ $('follow').checked=state.follow;$('new-laps').textContent=state.newLaps?`${state.newLaps} newly completed lap${state.newLaps===1?'':'s'}`:'';
+}
+function instruments(snap){const v=snap.instruments||{};for(const [id,value,d] of [['speed',v.speed_kmh,0],['gear',v.gear,0],['rpm',v.rpm,0],['throttle',v.throttle,0],['brake',v.brake,0],['fuel',v.fuel_l,1],['lap-time',snap.current?.elapsed_s,3],['best',snap.best_s,3],['theory',snap.theoretical_s,3]])$(id).textContent=num(value,d);
+ const tyres=v.tyres_c||[];$('tyres-front').textContent=num(tyres[0],0)+' / '+num(tyres[1],0);$('tyres-rear').textContent=num(tyres[2],0)+' / '+num(tyres[3],0);
+ $('source-state').textContent=snap.current?`${snap.current.track||'Unknown track'} · ${snap.current.car||'Unknown car'} · lap ${snap.current.lap} · observed prefix only`:'Waiting for a lap';
+ $('history-state').textContent=`History: ${snap.history}. Eight sessions / 512 summaries / 16 detailed laps. Older details may be evicted; recording-backed recovery runs in the background.`;
+}
+function age(){if(state.stopped||!state.snapshot)return;const r=state.snapshot.receipt||{},since=(performance.now()-state.received)/1000,age=r.age_s==null?null:r.age_s+since,packetAge=r.packet_age_s==null?null:r.packet_age_s+since;
+ const disconnected=!state.connected||since>=5,stale=packetAge!=null&&packetAge>=5;
+ const label=state.problem||(disconnected?'Browser disconnected':stale?'Telemetry stale':({live:'Telemetry live',paused:'Game paused',menu:'Game menu',loading:'Game loading',waiting:'Waiting for telemetry',preparing:'Preparing telemetry',delayed:'Analysis delayed',stale:'Telemetry stale'}[r.state]||'Telemetry unavailable'));
+ $('status').textContent=label;$('protected').classList.toggle('dim',disconnected||stale||r.state==='paused'||r.state==='menu'||r.state==='delayed');
+ $('receipt').textContent=`Receipt: ${r.packet_received_at==null?'Unavailable':new Date(r.packet_received_at*1000).toLocaleTimeString()} · data age: ${age==null?'Unavailable':num(age,1)+' s'} · packet age: ${packetAge==null?'Unavailable':num(packetAge,1)+' s'}`;
+}
+const ns='http://www.w3.org/2000/svg';function svg(tag,attrs={},text){const node=document.createElementNS(ns,tag);for(const [k,v]of Object.entries(attrs))node.setAttribute(k,String(v));if(text!==undefined)node.textContent=text;return node;}
+function graph(id,series,key,height){const el=$(id);el.replaceChildren();const rows=series.flatMap(s=>s.rows),bounds=state.zoom||[0,Math.max(1,...rows.map(p=>p.d))],min=bounds[0],max=Math.max(min+1,bounds[1]);const visible=rows.filter(p=>p.d>=min&&p.d<=max&&typeof p[key]==='number');let lo=Math.min(0,...visible.map(p=>p[key])),hi=Math.max(1,...visible.map(p=>p[key]));if(hi===lo)hi=lo+1;
+ const X=d=>52+(d-min)/(max-min)*650,Y=v=>height-30-(v-lo)/(hi-lo)*(height-55);el.append(svg('path',{d:`M52 20V${height-30}H702`,stroke:'#566377',fill:'none'}));
+ for(let i=0;i<4;i++){const d=min+(max-min)*i/3;el.append(svg('text',{x:X(d),y:height-9,'text-anchor':i===3?'end':'middle'},num(d,0)+' m'));}
+ el.append(svg('text',{x:8,y:24},num(hi,1)),svg('text',{x:8,y:height-30},num(lo,1)));
+ for(const s of series){let path='',pen=false;for(const p of s.rows){if(p.d<min||p.d>max||typeof p[key]!=='number'){pen=false;continue;}path+=(pen?'L':'M')+X(p.d).toFixed(1)+' '+Y(p[key]).toFixed(1);pen=true;}el.append(svg('path',{d:path,stroke:s.color,fill:'none','stroke-width':2}));}
+}
+function render(){const B=state.detail,A=state.pair?.a,pair=state.pair;clearPlots();state.detail=B;state.pair=pair;if(!B)return;
+ const trace=B.trace||[],length=Math.max(1,B.length_m||trace.at(-1)?.d||0,A?.length_m||0);if(!state.zoom&&!['zoom-from','zoom-to'].includes(document.activeElement?.id)){$('zoom-from').value=0;$('zoom-to').value=Math.round(length);}
+ graph('chart',[{rows:A?.trace||[],color:'#8ab4ff'},{rows:trace,color:'#ffd08a'}],$('channel').value,300);
+ graph('delta-chart',[{rows:pair?.delta||[],color:'#a8dfbd'}],'delta',170);
+ const map=$('map'),points=(A?.trace||[]).concat(trace).filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.z));
+ if(points.length){const xs=points.map(p=>p.x),zs=points.map(p=>p.z),xmin=Math.min(...xs),xmax=Math.max(...xs),zmin=Math.min(...zs),zmax=Math.max(...zs),scale=Math.min(420/Math.max(1,xmax-xmin),360/Math.max(1,zmax-zmin)),X=x=>30+(x-xmin)*scale,Y=z=>30+(z-zmin)*scale;
+  for(const [rows,color]of [[A?.trace||[],'#8ab4ff'],[trace,'#ffd08a']])map.append(svg('path',{d:rows.filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.z)).map((p,i)=>(i?'L':'M')+X(p.x).toFixed(1)+' '+Y(p.z).toFixed(1)).join(''),stroke:color,fill:'none','stroke-width':2}));
+  const last=trace.at(-1);if(last&&Number.isFinite(last.x)&&Number.isFinite(last.z))map.append(svg('circle',{cx:X(last.x),cy:Y(last.z),r:5,fill:'#ffd08a'}));
+  if(B.larger_sectors?.reviewed)for(const c of B.corner_metrics||[]){const p=trace.find(p=>p.d>=c.apex_m);if(p)map.append(svg('text',{x:X(p.x)+5,y:Y(p.z)},'T'+c.number));}
+ }
+ const observed=trace.at(-1)?.d||0;const sectors=pair?.mini_sectors||{a:[],b:(B.sectors||[]).map((v,i)=>B.state==='provisional'&&(i+1)*200>observed?null:v),delta:[]},body=$('sectors').tBodies[0];for(let i=0;i<Math.max(sectors.a.length,sectors.b.length);i++){const row=body.insertRow();for(const v of [String(i+1),num(sectors.a[i],3),num(sectors.b[i],3),num(sectors.delta[i],3)])row.insertCell().textContent=v;}
+ const end=pair?.delta?.at(-1);$('delta').textContent=pair?.compatible&&end&&B.id===state.snapshot?.current?.id?num(end.delta,3):'Unavailable';
+ $('context').textContent=`Lap ${B.lap} · ${B.state} · quality ${B.data_quality||'unknown'} · context revision ${B.context_revision??'unavailable'} · ${B.compound||'compound unconfirmed'} · tyre age ${B.tyre_age_laps??'unknown'} laps · stint ${B.stint_id||'unknown'}. Declared settings: ${JSON.stringify(B.context_settings||{})}. Declared strategy: ${JSON.stringify(B.strategy||{})}.`;
+ $('notes').replaceChildren();for(const n of B.notes||[]){const li=document.createElement('li');li.textContent=n.text;$('notes').append(li);}
+ $('limitations').textContent=[...(pair?.warnings||B.context_warnings||[]),...(B.track_definition_warnings||[])].filter((x,i,a)=>a.indexOf(x)===i).join(' · ');
+ $('larger-sectors').textContent=B.larger_sectors?`${B.larger_sectors.name} · ${B.larger_sectors.reviewed?'reviewed':'unconfirmed'} · ${(B.larger_sectors.times_s||[]).map(v=>num(v,3)).join(' / ')} s`:'No confirmed larger-sector definition';
+}
+function revoke(message){state.epoch++;state.refSource='';state.refLaps=[];if(state.a.startsWith('r:'))state.a='';if(state.b.startsWith('r:')){state.b=state.snapshot?.current?.id||'';state.session=state.snapshot?.session_id||'';}clearPlots();say(message||'Shared reference was revoked or removed. Its protected view has been cleared.');}
+async function access(){const data=await request('/race-engineer/access');state.analysisAvailable=!!data.analysis_available;state.refs=data.references||[];$('references').replaceChildren();for(const r of state.refs){const li=document.createElement('li');li.textContent=r.label;$('references').append(li);}if(state.refSource&&!state.refs.some(r=>r.id===state.refSource))revoke();$('protected').hidden=false;return data;}
+async function selection(){const epoch=state.epoch,a=state.a,b=state.b;if(!b)return;const result=await request('/race-engineer/lap',{id:b});if(epoch!==state.epoch||b!==state.b||a!==state.a)return;
+ $('lap-state').textContent=`Selected lap: ${result.state}${result.lap?' · '+result.lap.state:''}`;
+ if(result.state!=='ready'){clearPlots();$('context').textContent='Selected detail '+result.state;$('notes').replaceChildren();return;}state.detail=result.lap;state.pair=null;
+ if(a){const pair=await request('/race-engineer/compare',{a,b});if(epoch!==state.epoch||b!==state.b||a!==state.a)return;
+  if(pair.state==='ready'){if(!pair.compatible&&state.follow){state.a='';say('Reference cleared because the live lap changed to an incompatible pool.');}else{state.pair=pair;state.detail=pair.b;}$('comparison-state').textContent=pair.compatible?(pair.provisional?'Provisional observed-prefix comparison':'Confirmed eligible comparison · lap B − A '+num(pair.lap_delta_s,3)+' s'):'Comparison outside eligible pool';}
+  else $('comparison-state').textContent='Comparison '+pair.state;
+ }else $('comparison-state').textContent='Choose an eligible reference lap';render();
+}
+async function chat(){try{const data=await request('/chat/data');$('chatlog').replaceChildren();for(const m of data.messages||[]){const row=document.createElement('div');row.textContent=(m.user||'Crew')+': '+m.text;$('chatlog').append(row);}}catch(e){if(e instanceof AccessLost)throw e;$('chat-status').textContent='Crew chat temporarily unavailable';}}
+async function tick(){if(state.busy||state.stopped)return;state.busy=true;try{
+ const now=performance.now();let granted;if(now-state.lastAccess>=900||!state.generation){granted=await access();state.lastAccess=now;}
+ if(!state.analysisAvailable){$('status').textContent='Engineer access enabled. Live analysis unavailable.';return;}
+ const snap=await request('/race-engineer/snapshot');resetGeneration(snap.generation);state.snapshot=snap;state.received=performance.now();state.connected=true;state.problem=null;instruments(snap);age();
+ selections();refreshAnalysis(snap);
+ }catch(e){if(!(e instanceof AccessLost)){state.connected=false;state.problem=e instanceof SourceUnavailable?'Telemetry source unavailable':'Browser disconnected · reconnecting';$('status').textContent=state.problem;age();}}finally{state.busy=false;}}
+async function refreshAnalysis(snap){if(state.analysisBusy||state.stopped)return;state.analysisBusy=true;try{
+ if(state.historyRevision!==snap.history_revision){const h=await request('/race-engineer/history',state.historyRevision==null?{}:{since:state.historyRevision});if(h.generation!==state.generation)return;
+  if(h.changed){if(state.known.size)state.newLaps+=h.laps.filter(r=>!state.known.has(r.id)).length;state.laps=h.laps;state.sessions=h.sessions;state.known=new Set(h.laps.map(r=>r.id));}state.historyRevision=h.revision;}
+ if(state.refSource){const ref=await request('/race-engineer/reference',{id:state.refSource});if(ref.state==='ready')state.refLaps=ref.laps;else $('comparison-state').textContent='Reference '+ref.state;}
+ selections();await selection();
+ if(state.a&&state.b!==state.snapshot?.current?.id&&state.snapshot?.current){const a=state.a,b=state.snapshot.current.id,live=await request('/race-engineer/compare',{a,b});if(a===state.a&&b===state.snapshot?.current?.id)$('delta').textContent=live.state==='ready'&&live.compatible&&live.delta.length?num(live.delta.at(-1).delta,3):'Unavailable';}
+ const now=performance.now();if(now-state.lastChat>=3000){await chat();state.lastChat=now;}
+ }catch(e){if(e instanceof ReferenceLost){revoke(e.message);selections();}else if(!(e instanceof AccessLost))$('comparison-state').textContent='Analysis temporarily unavailable';}finally{state.analysisBusy=false;}}
+function changed(){state.epoch++;clearPlots();state.zoom=null;selections();tick();}
+$('session').addEventListener('change',()=>{state.follow=false;state.session=$('session').value;state.b='';state.a='';changed();});
+$('lap-b').addEventListener('change',()=>{state.follow=false;state.b=$('lap-b').value;changed();});
+$('lap-a').addEventListener('change',()=>{state.a=$('lap-a').value;changed();});
+$('reference-source').addEventListener('change',()=>{state.refSource=$('reference-source').value;state.refLaps=[];state.a='';changed();});
+$('follow').addEventListener('change',()=>{state.follow=$('follow').checked;changed();});
+$('channel').addEventListener('change',render);
+for(const id of ['zoom-from','zoom-to'])$(id).addEventListener('change',()=>{const a=Number($('zoom-from').value),b=Number($('zoom-to').value);if(Number.isFinite(a)&&Number.isFinite(b)&&a>=0&&b>a){state.zoom=[a,b];render();}});
+$('zoom-reset').addEventListener('click',()=>{state.zoom=null;render();});
+$('chat-form').addEventListener('submit',async e=>{e.preventDefault();const text=$('chatin').value.trim();if(!text||state.stopped)return;try{await request('/chat/send',{},'POST',{text});$('chatin').value='';await chat();}catch(e){if(!(e instanceof AccessLost))$('chat-status').textContent='Crew message could not be sent';}});
+window.EngineerDesk={state,tick,age};timer=setInterval(tick,500);setInterval(age,250);tick();
 </script></body></html>

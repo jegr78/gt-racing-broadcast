@@ -31,6 +31,7 @@
 - [Configuration &amp; secrets](Configuration)
 - [Remote access &amp; the Funnel](Remote-access)
 - [Console &amp; cockpit setup](Console-Setup)
+- [Race Engineer](Race-Engineer)
 - [League profiles](Profiles)
 - [HUD overlays](HUD-Overlays)
 - [Static mode](Static-Mode)
