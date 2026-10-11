@@ -101,7 +101,7 @@ never goes through yt-dlp).
 
 This is the runbook for a program that plays **later and later** behind the commentator's
 stream: slow picture, stuttering, distorted sound. It matters most when the producer
-machine runs remote (a [cloud box](Cloud-Producer)) with nobody in front of it, because
+machine runs remote (a [Linux producer](Linux-Producer)) with nobody in front of it, because
 then everything below happens from the Director Panel.
 
 ### What a backlog is

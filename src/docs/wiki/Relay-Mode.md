@@ -534,14 +534,14 @@ layout, including reverse layouts, from the car's positions, and the Director Pa
 it next to the car. It recognises the layouts that the community dataset
 [gt7-datalogger-track-data](https://github.com/jbhoorasingh/gt7-datalogger-track-data)
 has a racing line for (78 of 121 when this was written). That racing-line file is not
-part of the package: the relay downloads it on its first start with internet access, and
-recognition starts after that. Laps up to 40 km are covered. The CSV export adds `track`
+part of the package: run `racecast gt7-data update` before the event to download it.
+Recognition starts after the data is available. Laps up to 40 km are covered. The CSV export adds `track`
 and `layout` to `laps.csv`. On a known track it measures `lap_dist_m` along the racing
 line, so laps line up corner for corner; on an unknown track it is the distance driven
 since the line.
 
-When it starts with telemetry, the relay refreshes the car names and track data, at most
-once every 24 hours. `racecast gt7-data update` or **Settings -> GT7 data -> Update now**
+Relay-start downloads are disabled by default. Set `RACECAST_GT7_DATA_UPDATE=1`
+explicitly to enable refreshes at most once every 24 hours. `racecast gt7-data update` or **Settings -> GT7 data -> Update now**
 does it on demand, and a running relay uses the new data within a minute.
 `racecast gt7-data status` shows what is in use.
 

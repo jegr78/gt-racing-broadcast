@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Stdlib unit checks for the Director Panel live preview. Run: python3 tests/test_feed_preview.py"""
-import importlib.util, json, os, threading, time, urllib.error, urllib.request
+import importlib.util, json, os, threading, time, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)

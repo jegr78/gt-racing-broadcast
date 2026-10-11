@@ -518,7 +518,7 @@ def t_gt7_data_watch_polls_after_the_start_update():
         assert waits == [60, 60, 60], waits
         assert len(store.calls) == 1, "the file written between polls reloads once"
         store.calls.clear(); waits.clear(); updates.clear()
-        m._gt7_data_watch(store, d, bundled, _Stop(), update_on=False,
+        m._gt7_data_watch(store, d, bundled, _Stop(),
                             update=updates.append)
         assert updates == [], "the opt-out skips the network update but keeps polling"
         assert waits == [60, 60, 60], waits
@@ -532,10 +532,10 @@ def t_gt7_runtime_base_defaults_to_the_parent_of_runtime_dir():
 
 
 def t_gt7_data_update_enabled_parses_the_opt_out():
-    assert m.gt7_data_update_enabled({}) is True
-    for off in ("0", "false", "No", " off "):
+    assert m.gt7_data_update_enabled({}) is False
+    for off in ("0", "false", "No", " off ", "", "unknown"):
         assert m.gt7_data_update_enabled({"RACECAST_GT7_DATA_UPDATE": off}) is False, off
-    for on in ("1", "yes", "", "true"):
+    for on in ("1", "yes", "on", "true"):
         assert m.gt7_data_update_enabled({"RACECAST_GT7_DATA_UPDATE": on}) is True, on
 
 

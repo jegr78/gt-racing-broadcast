@@ -6808,7 +6808,9 @@ class CrewSource:
         with self.lock:return [self._member(row) for row in self.rows]
 
     def race_engineer_keys(self):
-        return {asset_key(row[0]) for row in self.get_members() if row[6] and row[0].strip()}
+        return {
+            asset_key(row[0]) for row in self.get_members() if row[6] and row[0].strip()
+        }
 
     def discord_map(self):
         """{discord_username_lower: crew_name} from the Crew tab's Discord column.
@@ -6881,13 +6883,15 @@ class CrewSource:
             i = int(row) - 1
             cur = rows[i] if 0 <= i < len(rows) else ("", False, False, False, False, "")
             cur_n, cur_d, cur_p, cur_c, cur_rc, cur_x, cur_re = self._member(cur)
-            entry = (cur_n if name is None else (name or "").strip(),
-                     cur_d if director is None else bool(director),
-                     cur_p if producer is None else bool(producer),
-                     cur_c if commentator is None else bool(commentator),
-                     cur_rc if race_control is None else bool(race_control),
-                     cur_x if discord is None else (discord or "").strip(),
-                     cur_re if race_engineer is None else bool(race_engineer))
+            entry = (
+                cur_n if name is None else (name or "").strip(),
+                cur_d if director is None else bool(director),
+                cur_p if producer is None else bool(producer),
+                cur_c if commentator is None else bool(commentator),
+                cur_rc if race_control is None else bool(race_control),
+                cur_x if discord is None else (discord or "").strip(),
+                cur_re if race_engineer is None else bool(race_engineer),
+            )
             if 0 <= i < len(rows):
                 rows[i] = entry
             elif i == len(rows) and entry[0]:
@@ -7492,14 +7496,19 @@ class SetupControl(PushHealth):
                    "commentator": bool(commentator),
                    "race_control": bool(race_control), "discord": discord}
         if race_engineer is not None:
-            payload["race_engineer"]=bool(race_engineer)
+            payload["race_engineer"] = bool(race_engineer)
         ok, err = self._sync_push(payload, "crew")
         if ok and self.crew_source is not None:
-            self.crew_source.inject_row(rownum, name=name, director=bool(director),
-                                        producer=bool(producer),
-                                        commentator=bool(commentator),
-                                        race_control=bool(race_control), discord=discord,
-                                        race_engineer=race_engineer)
+            self.crew_source.inject_row(
+                rownum,
+                name=name,
+                director=bool(director),
+                producer=bool(producer),
+                commentator=bool(commentator),
+                race_control=bool(race_control),
+                discord=discord,
+                race_engineer=race_engineer,
+            )
         return {"ok": True, "row": rownum} if ok else {"error": err}
 
     def crew_delete(self, row):
@@ -10382,8 +10391,9 @@ class QuietThreadingHTTPServer(ThreadingHTTPServer):
 # serves the launcher (Login with Discord) instead of a naked 401 JSON page.
 def engineer_page_for(console_page):
     """The discovered Console directory works for source, flat packages and binaries."""
-    if not console_page:return None
-    page=os.path.join(os.path.dirname(console_page),"race-engineer.html")
+    if not console_page:
+        return None
+    page = os.path.join(os.path.dirname(console_page), "race-engineer.html")
     return page if os.path.isfile(page) else None
 
 
@@ -11041,14 +11051,29 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 self._send_file(path, ctype)
                 return None
             if sub and sub[0]=="race-engineer":
-                if method != "GET" or not (sub == ["race-engineer"] or len(sub) == 2 and sub[1] in race_engineer_api.ROUTES | {"access"}):
-                    return self._send({"error":{"code":"not_found","message":"Unknown readonly Engineer route"}},404)
+                if method != "GET" or not (
+                    sub == ["race-engineer"]
+                    or len(sub) == 2
+                    and sub[1] in race_engineer_api.ROUTES | {"access"}
+                ):
+                    return self._send(
+                        {
+                            "error": {
+                                "code": "not_found",
+                                "message": "Unknown readonly Engineer route",
+                            }
+                        },
+                        404,
+                    )
                 if console_policy.decide(roles,sub,method,has_step_up)!=console_policy.ALLOW:
                     return self._send({"error":{"code":"forbidden","message":"Race Engineer capability is required"}},403)
                 try:
                     if engineer_access is None:raise race_engineer_access.AccessError("feature_disabled","The producer has not enabled Race Engineer")
-                    access = (engineer_access.authorize(roles) if sub in (["race-engineer"], ["race-engineer", "access"])
-                              else engineer_access._authorized_doc(roles))
+                    access = (
+                        engineer_access.authorize(roles)
+                        if sub in (["race-engineer"], ["race-engineer", "access"])
+                        else engineer_access._authorized_doc(roles)
+                    )
                 except race_engineer_access.AccessError as exc:
                     status=403 if exc.code in ("feature_disabled","forbidden") else 503
                     return self._send({"error":{"code":exc.code,"message":str(exc)}},status)
@@ -11069,15 +11094,26 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         engineer_access._authorized_doc(self._console_roles(subject))
                         for source, path in sources.items():
                             if engineer_access.reference(source, self._console_roles(subject)) != path:
-                                raise race_engineer_access.AccessError('reference_unavailable', 'Shared reference unavailable')
+                                raise race_engineer_access.AccessError(
+                                    "reference_unavailable", "Shared reference unavailable"
+                                )
                     except race_engineer_access.AccessError as exc:
                         status = 403 if exc.code in ('forbidden', 'feature_disabled') else 410 if exc.code == 'reference_unavailable' else 400 if exc.code == 'invalid_query' else 503
                         return self._send({'error': {'code': exc.code, 'message': str(exc)}}, status)
                     except (OSError, ValueError, TypeError):
                         return self._send({'error': {'code': 'analysis_unavailable', 'message': 'Analysis is temporarily unavailable'}}, 503)
                     return self._send(result)
-                if not engineer_page_path:return self._send({"error":{"code":"not_found","message":"Engineer page unavailable"}},404)
-                self._send_page(engineer_page_path,"/console",cookie_token=self._cockpit_token(),cookie_path="/console")
+                if not engineer_page_path:
+                    return self._send(
+                        {"error": {"code": "not_found", "message": "Engineer page unavailable"}},
+                        404,
+                    )
+                self._send_page(
+                    engineer_page_path,
+                    "/console",
+                    cookie_token=self._cockpit_token(),
+                    cookie_path="/console",
+                )
                 return None
             # Race Control monitoring desk (#244): a read-only page + ONE new data
             # endpoint, both gated on the race_control capability. The redacted
@@ -12480,9 +12516,9 @@ def _gt7_data_watch_step(store, runtime_base, bundled, last):
         return last
 
 
-def _gt7_data_watch(store, runtime_base, bundled, stop_evt, update_on=True,
+def _gt7_data_watch(store, runtime_base, bundled, stop_evt, update_on=False,
                     interval=60, update=gt7_data.update):
-    """Start-time update (unless opted out), then pick up files a manual update writes."""
+    """Optional start-time download, then pick up files a manual update writes."""
     if update_on:
         _gt7_data_refresh(store, runtime_base, bundled, update=update)
     last = _gt7_data_watch_step(store, runtime_base, bundled, None)
@@ -12499,23 +12535,34 @@ def gt7_runtime_base(explicit, runtime, runtime_dir_given):
 
 
 def gt7_data_update_enabled(environ):
-    return (environ.get("RACECAST_GT7_DATA_UPDATE", "1").strip().lower()
-            not in ("0", "false", "no", "off"))
+    return (environ.get("RACECAST_GT7_DATA_UPDATE", "0").strip().lower()
+            in ("1", "true", "yes", "on"))
 
 
 def engineer_live_for(access, telemetry, rec_dir, runtime_base, bundled):
     """One profile-owned worker, started independently of Console readers."""
+
     def recording_path():
         recorder = telemetry.recorder
-        name = recorder.status().get('file') if recorder else None
+        name = recorder.status().get("file") if recorder else None
         if not name or os.path.basename(name) != name:
             return None
         path = os.path.join(rec_dir, name)
-        return path + gt7_recording.PART if os.path.isfile(path + gt7_recording.PART) else path
+        return (
+            path + gt7_recording.PART
+            if os.path.isfile(path + gt7_recording.PART)
+            else path
+        )
+
     store = race_engineer_live.Store(
-        lambda: access.read()['enabled'], tracks=telemetry._eng.track_db, cars=telemetry._cars,
-        runtime_base=runtime_base, bundled=bundled, recording_source=recording_path,
-        context_source=lambda: gt7_context.Store.prepared(rec_dir).read())
+        lambda: access.read()["enabled"],
+        tracks=telemetry._eng.track_db,
+        cars=telemetry._cars,
+        runtime_base=runtime_base,
+        bundled=bundled,
+        recording_source=recording_path,
+        context_source=lambda: gt7_context.Store.prepared(rec_dir).read(),
+    )
     store.api = race_engineer_api.Service(store)
     telemetry.engineer = store
     return store
@@ -13207,48 +13254,65 @@ def main():
     threading.Thread(target=preview_manager.run, daemon=True).start()
     program_audio_service = (ProgramAudioService(relay, LOG)
                              if relay.program_audio else None)
-    engineer_access=race_engineer_access.Store(runtime,available=telemetry_active(args.solo,os.environ))
-    engineer_live = engineer_live_for(engineer_access, telemetry_store, rec_dir, runtime_base,
-                                      gt7_bundled) if telemetry_store is not None else None
-    engineer_page_path=engineer_page_for(console_page_path)
-    handler = make_handler(relay, panel_path, hud_source, hud_path, assets_dir,
-                           timer_store, setup_ctl,
-                           overlay_dir=args.overlay_dir, chat_store=chat_store,
-                           cue_store=cue_store,
-                           preview_path=preview_path, graphics_dir=graphics_dir,
-                           splitscreen_path=splitscreen_path,
-                           intermission_path=intermission_path,
-                           cockpit_page_path=cockpit_page_path,
-                           console_secret=console_secret,
-                           discord_client_id=discord_client_id,
-                           discord_client_secret=discord_client_secret,
-                           console_versions_path=console_versions_path,
-                           submission_store=submission_store,
-                           event_store=event_store,
-                           console_page_path=console_page_path,
-                           race_control_page_path=race_control_page_path,
-                           buttons_page_path=buttons_page_path,
-                           health_store=relay.health_store,
-                           health_monitor_page_path=health_monitor_page_path,
-                           uplot_dir=uplot_dir,
-                           brands_dir=brands_dir,
-                           crew_source=crew_source,
-                           event_notes_source=event_notes_source,
-                           broadcast_chat_store=broadcast_chat_store,
-                           broadcast_chat_supervisor=_bc_supervisor,
-                           logo_path=args.logo,
-                           preview_manager=preview_manager,
-                           program_audio_service=program_audio_service,
-                           app_version=VERSION_LABEL,
-                           flag_graphic_store=flag_graphic_store,
-                           graphics_take=os.environ.get("RACECAST_GRAPHICS_TAKE", ""),
-                           channel_source=channel_source,
-                           producer_source=producer_source,
-                           part_store=part_store,
-                           channel_csv_url=channel_csv_url,
-                           push_url=push_url,
-                           telemetry_store=telemetry_store,engineer_access=engineer_access,
-                           engineer_page_path=engineer_page_path)
+    engineer_access = race_engineer_access.Store(
+        runtime, available=telemetry_active(args.solo, os.environ)
+    )
+    engineer_live = (
+        engineer_live_for(
+            engineer_access, telemetry_store, rec_dir, runtime_base, gt7_bundled
+        )
+        if telemetry_store is not None
+        else None
+    )
+    engineer_page_path = engineer_page_for(console_page_path)
+    handler = make_handler(
+        relay,
+        panel_path,
+        hud_source,
+        hud_path,
+        assets_dir,
+        timer_store,
+        setup_ctl,
+        overlay_dir=args.overlay_dir,
+        chat_store=chat_store,
+        cue_store=cue_store,
+        preview_path=preview_path,
+        graphics_dir=graphics_dir,
+        splitscreen_path=splitscreen_path,
+        intermission_path=intermission_path,
+        cockpit_page_path=cockpit_page_path,
+        console_secret=console_secret,
+        discord_client_id=discord_client_id,
+        discord_client_secret=discord_client_secret,
+        console_versions_path=console_versions_path,
+        submission_store=submission_store,
+        event_store=event_store,
+        console_page_path=console_page_path,
+        race_control_page_path=race_control_page_path,
+        buttons_page_path=buttons_page_path,
+        health_store=relay.health_store,
+        health_monitor_page_path=health_monitor_page_path,
+        uplot_dir=uplot_dir,
+        brands_dir=brands_dir,
+        crew_source=crew_source,
+        event_notes_source=event_notes_source,
+        broadcast_chat_store=broadcast_chat_store,
+        broadcast_chat_supervisor=_bc_supervisor,
+        logo_path=args.logo,
+        preview_manager=preview_manager,
+        program_audio_service=program_audio_service,
+        app_version=VERSION_LABEL,
+        flag_graphic_store=flag_graphic_store,
+        graphics_take=os.environ.get("RACECAST_GRAPHICS_TAKE", ""),
+        channel_source=channel_source,
+        producer_source=producer_source,
+        part_store=part_store,
+        channel_csv_url=channel_csv_url,
+        push_url=push_url,
+        telemetry_store=telemetry_store,
+        engineer_access=engineer_access,
+        engineer_page_path=engineer_page_path,
+    )
     bind_addrs = resolve_bind_addresses(
         args.bind, detect_tailscale_ip() if args.bind == "auto" else None)
     servers, bound_addrs = [], []

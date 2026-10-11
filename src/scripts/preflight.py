@@ -600,6 +600,14 @@ def _obs_benchmark_line(preflight_file, runtime_dir):
         return None
 
 
+def classify_python(version=None):
+    import python_runtime
+    version = sys.version_info if version is None else version
+    message = python_runtime.requirement(version)
+    return Result(FAIL, "python3", message) if message else Result(
+        PASS, "python3", ".".join(str(value) for value in version[:3]))
+
+
 def gather(preflight_file, runtime_dir=None, cookies_opt=None):
     """Run every check and return a list of (section_title, [Result])."""
     hardware = [
@@ -620,9 +628,7 @@ def gather(preflight_file, runtime_dir=None, cookies_opt=None):
             floor = classify_streamlink_version(version)
             if floor is not None:
                 tools.append(floor)
-    py = sys.version.split()[0]
-    tools.append(Result(PASS, "python3", py) if sys.version_info >= (3, 8)
-                 else Result(FAIL, "python3", f"{py}, need 3.8+"))
+    tools.append(classify_python())
     if sys.platform.startswith("linux"):   # OS floor: deno needs glibc 2.35
         try:
             import platform as _pf
