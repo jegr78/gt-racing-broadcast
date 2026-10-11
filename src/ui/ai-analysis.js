@@ -7,6 +7,7 @@ const node=(tag,text,parent)=>{const e=document.createElement(tag);if(text!=null
 const error=doc=>doc?.error?.message||'Analysis operation failed';
 async function request(operation,payload=null){
  const url='/api/ai/'+operation,scoped=!['settings','probe'].includes(operation),profile=tmState.profile;
+ if(scoped&&!profile)return {ok:false,error:{code:'invalid_profile',message:'Select a profile before using analysis.'}};
  if(scoped){if(payload&&!payload.query)payload={...payload,profile};else payload={query:{...payload?.query,profile}};}
  try {const response=await fetch(url+(payload?.query?'?'+new URLSearchParams(payload.query):''),payload&&!payload.query?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}:{});const doc=await response.json();if(scoped&&(profile!==tmState.profile||(doc.profile&&doc.profile!==profile)))return {ok:false,error:{code:'profile_changed',message:'Active profile changed. Reload the selection explicitly.'}};return doc;}
  catch(_e){return {ok:false,error:{message:'Control Center not reachable. Your telemetry remains available.'}};}
@@ -159,7 +160,7 @@ async function openComparison(item,profile,reference){
  tmState.a=key;tmFillPickers(tmState.lapB);tmRenderLaps();await tmLoadPair();
  if(item.location_m!=null){const chart=tmState.chart;if(chart){const rect=$id('tm-charts').getBoundingClientRect();tmHover({clientX:rect.left+chart.X(Math.min(item.location_m,chart.maxD))/chart.W*rect.width});} }
 }
-function reset(profile){state.profile=profile;state.generation++;state.selection=null;state.preview=null;state.job=null;state.lastJob=null;['ai-report','ai-history','ai-preview','ai-laps','ai-references','ai-selection-status','ai-run-status'].forEach(id=>say(id,''));$id('ai-start').disabled=true;$id('ai-export-preview').disabled=true;$id('ai-preview-button').disabled=true;}
+function reset(profile){state.profile=profile;state.generation++;state.selection=null;state.preview=null;state.job=null;state.lastJob=null;['ai-report','ai-history','ai-preview','ai-laps','ai-references','ai-selection-status','ai-run-status'].forEach(id=>say(id,''));$id('ai-start').disabled=true;$id('ai-export-preview').disabled=true;$id('ai-preview-button').disabled=true;if(profile&&currentView==='telemetry'){status();history();}}
 function init(){
  const settingsCard=node('section',null,document.querySelector('[data-view="settings"]'));settingsCard.id='ai-settings';settingsCard.className='card rcai';
  settingsCard.innerHTML=`<h3>Optional AI telemetry analysis</h3><p>Uses your existing Codex or Claude Code subscription CLI. Install and sign in externally. Racecast never installs an agent or selects API billing.</p>
@@ -181,7 +182,7 @@ function init(){
  $id('ai-load-selection').onclick=selection;$id('ai-session').onchange=renderLaps;$id('ai-preview-button').onclick=preview;$id('ai-start').onclick=start;$id('ai-export-preview').onclick=exportPreview;$id('ai-cancel').onclick=cancel;$id('ai-history-refresh').onclick=history;
  ['ai-model','ai-template','ai-goal','ai-questions','ai-language'].forEach(id=>$id(id).oninput=invalidate);
  $id('ai-agent').onchange=()=>{const a=state.settings?.agents.find(a=>a.id===$id('ai-agent').value);$id('ai-model').value=a?.model||'';invalidate();};
- window.RacecastAI={settings,selection,reset,status,history};settings();
+ window.RacecastAI={settings,selection,reset,status,history};settings().then(()=>{if(tmState.profile&&currentView==='telemetry'){status();history();}});
  setInterval(()=>{if(currentView==='telemetry')status();},1500);
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();

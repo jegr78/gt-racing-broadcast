@@ -57,11 +57,11 @@ HTML download, exact lap and comparison navigation, validation failure, cancella
 and explicit/external profile switching. Ordinary telemetry uses the existing live
 callbacks while the provider is a controlled Python process. All data is synthetic.
 
-Eleven new guards were falsified individually from the committed implementation:
+Twelve new guards were falsified individually from the committed implementation:
 selection profile binding, positive reference IDs, selected-only shift replay,
 stale enrichment, backend request-profile binding, delayed preview generation,
 settings refresh invalidation, response-profile binding, comparison identity,
-completion generation and completion job identity.
+completion generation, completion job identity and initialized-profile requests.
 Each failed its intended assertion before the committed file was restored.
 
 The final maintainer verifier repeated the complete native Linux Codex pipeline
@@ -74,3 +74,10 @@ Self-review reproduced a completed job disappearing from the UI when a future
 goal was edited during its response. The watcher now keeps that job until its
 completion is displayed. An older completion response also cannot clear a newer
 job watcher. Both delayed-response browser cases have red/green regressions.
+
+CI exposed a fast-startup race: opening Telemetry before its profile loaded sent
+profile=null status/history requests. The backend correctly rejected them with 409.
+The client now defers profile-related requests until that profile is known and
+loads history/status when initialization finishes. A browser request listener
+reproduced the null-profile requests before the fix; all 20 visual surfaces then
+passed without suppressions or timeout changes.

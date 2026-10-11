@@ -14,6 +14,11 @@ async def verify(page,fixture,port):
     errors=[];page.on('pageerror',lambda error:errors.append(error.stack))
     await page.goto('http://127.0.0.1:'+str(port))
     await page.wait_for_function('() => window.RacecastAI && tmState.profile === "profile"')
+    premature=[];page.on('request',lambda request:premature.append(request.url) if '/api/ai/' in request.url and 'profile=null' in request.url else None)
+    await page.evaluate('() => {tmState.profile=null;RacecastAI.reset(null);showView("telemetry");}')
+    await asyncio.sleep(.2)
+    assert not premature,'profile-scoped AI requests were sent before profile initialization'
+    await page.evaluate('() => {tmState.profile="profile";RacecastAI.reset("profile");}')
     await page.evaluate('() => showView("settings")')
     await page.evaluate('() => RacecastAI.settings()')
     await page.locator('#ai-configs').select_option('coach');await page.locator('#ai-check').click()
