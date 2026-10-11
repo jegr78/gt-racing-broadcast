@@ -239,7 +239,7 @@ def _diagnostic_code(text):
         return 'approval_required','Interactive approval is required. Export the saved package and run the provider manually with scoped permissions.'
     if 'mxc' in lower and any(s in lower for s in ('unavailable','not available','not supported','unsupported','not permitted','prohibited')):
         return 'isolation_unavailable','The Windows MXC sandbox is unavailable. Use a supported Windows environment, choose another provider explicitly, or export the package for a scoped manual run; no administrative fallback was used.'
-    if 'model' in lower and any(s in lower for s in ('unavailable','not available','not found','not supported')):
+    if 'model' in lower and any(s in lower for s in ('unavailable','not available','not found','not supported','unrecognized_model','may not exist')):
         return 'unavailable_model','The selected model is unavailable. Choose a model explicitly; no fallback was used.'
     if any(s in lower for s in ('rate limit','quota','usage limit')):
         return 'provider_limit','The provider rejected this run because of a limit. Retry deliberately when available.'

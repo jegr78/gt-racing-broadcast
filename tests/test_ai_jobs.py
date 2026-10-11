@@ -48,6 +48,8 @@ elif mode=='approval':
  print('interactive approval required',file=sys.stderr);sys.exit(2)
 elif mode=='mxc':
  print('Windows MXC sandbox is unavailable on this device',file=sys.stderr);sys.exit(2)
+elif mode=='claude_model':
+ print('[claude-code:unrecognized_model] {\"model\":\"racecast-no-such-model\"}',file=sys.stderr);sys.exit(2)
 elif mode=='model':
  print('model unavailable',file=sys.stderr);sys.exit(2)
 elif mode=='symlink':
@@ -109,7 +111,7 @@ def t_success_handoff_and_frozen_profile():
 def t_failure_classification_and_no_retry():
     with tempfile.TemporaryDirectory() as d:
         pkg=prepared(d);runner=j.Runner(Path(d)/'machine',Path(d)/'profile','profile')
-        for mode,code in [('approval','approval_required'),('model','unavailable_model'),('mxc','isolation_unavailable'),('malformed','invalid_output'),('large','output_limit'),('symlink','invalid_output')]:
+        for mode,code in [('approval','approval_required'),('model','unavailable_model'),('mxc','isolation_unavailable'),('claude_model','unavailable_model'),('malformed','invalid_output'),('large','output_limit'),('symlink','invalid_output')]:
             adapter=FakeAdapter(d,mode)
             result=runner.run(package(),pkg,adapter)
             assert result['state']=='failed' and result['error']['code']==code,(mode,result)

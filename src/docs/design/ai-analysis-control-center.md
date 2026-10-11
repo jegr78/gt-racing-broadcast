@@ -74,13 +74,14 @@ HTML download, exact lap and comparison navigation, validation failure, cancella
 and explicit/external profile switching. Ordinary telemetry uses the existing live
 callbacks while the provider is a controlled Python process. All data is synthetic.
 
-Seventeen guards were falsified individually from the committed implementation:
+Eighteen guards were falsified individually from the committed implementation:
 selection profile binding, positive reference IDs, selected-only shift replay,
 stale enrichment, backend request-profile binding, delayed preview generation,
 settings refresh invalidation, response-profile binding, comparison identity,
 completion generation, completion job identity, initialized-profile requests,
 MXC-only backend selection, unified Windows execution, Windows runtime propagation,
-command environment filtering and unavailable-MXC guidance.
+command environment filtering, unavailable-MXC guidance and Claude unknown-model
+diagnostics.
 Each failed its intended assertion before the committed file was restored.
 
 The final native checks covered all six platform/provider combinations, including
