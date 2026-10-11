@@ -147,7 +147,7 @@ async def main():
                     await route.fulfill(json=data)
                 await page.route('**/race-engineer/snapshot', moving_car)
                 await page.wait_for_function('() => EngineerDesk.state.snapshot?.instruments?.position?.x === 0')
-                await page.wait_for_function('(cx) => document.querySelector("#map circle[data-live-car]")?.getAttribute("cx") !== cx', arg=before_car)
+                assert await page.locator('#map circle[data-live-car]').get_attribute('cx') != before_car, 'snapshot position did not move the manual-view car'
                 assert await page.evaluate('() => EngineerDesk.state.b') == old
                 assert await page.locator('#map circle').count() == 1, 'selected trace endpoint was also drawn as a car'
                 async def missing_car(route):
@@ -156,7 +156,8 @@ async def main():
                     await route.fulfill(json=data)
                 await page.unroute('**/race-engineer/snapshot', moving_car)
                 await page.route('**/race-engineer/snapshot', missing_car)
-                await page.wait_for_function('() => EngineerDesk.state.snapshot?.instruments?.position === null && document.querySelectorAll("#map circle").length === 0')
+                await page.wait_for_function('() => EngineerDesk.state.snapshot?.instruments?.position === null')
+                assert await page.locator('#map circle').count() == 0, 'missing position retained a car marker'
                 await page.unroute('**/race-engineer/snapshot', missing_car)
                 async def another_track(route):
                     response = await route.fetch(); data = await response.json()
@@ -164,7 +165,8 @@ async def main():
                     data['current']['session_id'] = 'unrelated-session'
                     await route.fulfill(json=data)
                 await page.route('**/race-engineer/snapshot', another_track)
-                await page.wait_for_function('() => EngineerDesk.state.snapshot?.current?.track_id === "unrelated-track" && document.querySelectorAll("#map circle").length === 0')
+                await page.wait_for_function('() => EngineerDesk.state.snapshot?.current?.track_id === "unrelated-track"')
+                assert await page.locator('#map circle').count() == 0, 'unrelated historical map retained a current car'
                 await page.unroute('**/race-engineer/snapshot', another_track)
                 context=gate.m.gt7_context.Store.prepared(str(fixture.root/fixture.profile/'telemetry-recordings'))
                 doc=context.read();doc['data']['notes']=[{'id':'ui-note','scope':'lap','session':1,'lap':2,'text':'Producer note revision'}]

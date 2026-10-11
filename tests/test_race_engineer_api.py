@@ -63,7 +63,7 @@ def t_session_car_and_measured_position_survive_the_public_projection():
         try:
             history = service.history(None)
             assert history['sessions'][0]['laps'] == 0
-            assert history['sessions'][0]['car'] == service.snapshot()['current']['car']
+            assert history['sessions'][0].get('car') == service.snapshot()['current']['car'], 'public session lost its vehicle name'
             assert 'Lancer' in history['sessions'][0]['car']
             position = service.snapshot()['instruments']['position']
             assert position == dict(x=packet.pos_x, z=packet.pos_z)
