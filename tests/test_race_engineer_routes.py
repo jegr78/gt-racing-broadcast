@@ -90,7 +90,8 @@ def t_producer_settings_bind_profile_and_stable_reference_identity():
 
 def t_local_http_profile_origin_and_error_contract():
     import http.client
-    from engineer_ui_fixture import Fixture,web_fixture
+    from engineer_ui_fixture import Fixture
+    from ai_ui_fixture import web_fixture
     with tempfile.TemporaryDirectory() as d:
         ui=Fixture(d);server,port=web_fixture._serve(ui.context())
         def request(method,path,body=None,origin=None):

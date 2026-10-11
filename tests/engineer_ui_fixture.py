@@ -5,7 +5,6 @@ import urllib.request
 from pathlib import Path
 
 from ai_ui_fixture import Fixture as Base
-from ai_ui_fixture import web_fixture as web_fixture
 import test_console_gate as gate
 import race_engineer_access
 

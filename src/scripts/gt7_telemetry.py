@@ -357,6 +357,9 @@ class TelemetryEngine:
         SESSION_JUMP_M from where it left the track (a track change)."""
         if self._lap_num is None:
             return None
+        if (self._last is not None and self._last.car_id is not None
+                and pkt.car_id is not None and self._last.car_id != pkt.car_id):
+            return "mid-lap"
         if pkt.lap < self._lap_num:
             return "line"
         if self._last is not None and self._last.best_ms > 0 and pkt.best_ms == -1:
@@ -749,7 +752,7 @@ class TelemetryStore:
     """
 
     def __init__(self, path=None, units="metric", thresholds=(70, 85, 95), reset=False,
-                 view_path=None, cars=None, recorder=None, tracks=None):
+                 view_path=None, cars=None, recorder=None, tracks=None, engineer=None):
         self._eng = TelemetryEngine()
         self._eng.track_db = tracks    # gt7_tracks.TrackDB (or None: no track recognition)
         self._cars = cars              # gt7_cars.CarDB (or None: no car names)
@@ -762,6 +765,8 @@ class TelemetryStore:
         self._thresholds = thresholds
         self._dirty_ref = None
         self.recorder = recorder       # gt7_recording.RecordControl, or None
+        self.engineer = engineer       # Optional nonblocking shared analysis consumer.
+        self._engineer_failed = False
         if reset:
             # Fresh session: the relay resets the reference on every start (spec §D)
             # so a stale lap from another track/car/session is never loaded. Drop
@@ -783,6 +788,13 @@ class TelemetryStore:
                     self._remove_file()
                 else:                          # a new reference lap was set
                     self._save()
+        if self.engineer is not None:
+            try:
+                self.engineer.put(pkt, now)
+            except Exception as exc:  # noqa: BLE001  analysis must never stop telemetry or broadcast
+                if not self._engineer_failed:
+                    LOG.warning("Engineer ingestion failed: %s", type(exc).__name__)
+                self._engineer_failed = True
 
     def record(self, wall_ts, kind, plain):
         """Hand one accepted packet to the recorder, if any; never raises."""
