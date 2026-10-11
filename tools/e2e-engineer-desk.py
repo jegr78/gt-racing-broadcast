@@ -32,8 +32,8 @@ async def main():
                 assert await page.locator('#zoom-to').input_value() == '1000'
                 old=fixture.live.snapshot()['laps'][1]['id']
                 await page.locator('#lap-b').select_option(old)
-                await page.wait_for_function('(id) => EngineerDesk.state.detail?.id === id',arg=old)
                 assert not await page.locator('#follow').is_checked()
+                await page.wait_for_function('(id) => EngineerDesk.state.detail?.id === id',arg=old)
                 await page.locator('#zoom-from').fill('100');await page.locator('#zoom-from').press('Tab')
                 await page.locator('#zoom-to').fill('700');await page.locator('#zoom-to').press('Tab')
                 assert await page.evaluate('() => EngineerDesk.state.zoom') == [100,700]
@@ -78,6 +78,7 @@ async def main():
                 fixture.access().update(revoke=source,expected=2)
                 await page.wait_for_function('() => EngineerDesk.state.refSource === "" && document.getElementById("notice").textContent.includes("revoked")')
                 ref_release.set();await page.unroute_all(behavior='wait')
+                await page.wait_for_function('() => !EngineerDesk.state.analysisBusy')
                 assert await page.evaluate('() => EngineerDesk.state.refLaps.length') == 0, 'late revoked reference restored history'
                 await page.locator('#chatin').fill('Synthetic crew feedback <script>safe</script>')
                 await page.locator('#chatsend').click()
