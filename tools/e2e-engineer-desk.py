@@ -6,6 +6,8 @@ import tempfile
 from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'tests'))
+sys.path.insert(0,str(ROOT/'tools'))
+import e2e_visual
 from engineer_ui_fixture import Fixture, gate
 
 
@@ -26,6 +28,8 @@ async def main():
                 errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
                 await page.wait_for_function('() => EngineerDesk.state.pair?.state === "ready"')
                 assert await page.locator('#chart path').count() >= 2
+                assert await page.locator('#sectors tbody tr').first.locator('td').nth(2).inner_text() == 'Unavailable'
+                assert await page.locator('#zoom-to').input_value() == '1000'
                 old=fixture.live.snapshot()['laps'][1]['id']
                 await page.locator('#lap-b').select_option(old)
                 await page.wait_for_function('(id) => EngineerDesk.state.detail?.id === id',arg=old)
@@ -62,8 +66,19 @@ async def main():
                 await page.wait_for_function('() => EngineerDesk.state.refLaps.length > 0')
                 await page.wait_for_function('() => EngineerDesk.state.pair?.state === "ready"')
                 assert not await page.evaluate('() => !!window.injected')
+                ref_captured=asyncio.Event();ref_release=asyncio.Event()
+                async def held_reference(route):
+                    response=await route.fetch();data=await response.json();ref_captured.set();await ref_release.wait()
+                    await route.fulfill(json=data)
+                await page.route('**/race-engineer/reference?*',held_reference)
+                await asyncio.wait_for(ref_captured.wait(),timeout=5)
+                before=await page.evaluate('() => EngineerDesk.state.received')
+                await asyncio.sleep(.6)
+                assert await page.evaluate('() => EngineerDesk.state.received') > before, 'detail request blocked current-value refresh'
                 fixture.access().update(revoke=source,expected=2)
                 await page.wait_for_function('() => EngineerDesk.state.refSource === "" && document.getElementById("notice").textContent.includes("revoked")')
+                ref_release.set();await page.unroute_all(behavior='wait')
+                assert await page.evaluate('() => EngineerDesk.state.refLaps.length') == 0, 'late revoked reference restored history'
                 await page.locator('#chatin').fill('Synthetic crew feedback <script>safe</script>')
                 await page.locator('#chatsend').click()
                 await page.wait_for_function('() => document.getElementById("chatlog").textContent.includes("Synthetic crew feedback")')
@@ -86,6 +101,9 @@ async def main():
                     await page.set_viewport_size({'width':width,'height':height})
                     assert await page.evaluate('() => document.documentElement.scrollWidth <= innerWidth'),name
                     await page.evaluate('() => window.scrollTo(0,0)')
+                    facts=await page.evaluate((ROOT/'tools/visual-probe.js').read_text())
+                    findings=e2e_visual.evaluate(facts,errors)
+                    assert not findings,(name,findings)
                     if '--shots' in sys.argv:
                         await page.screenshot(path=str(ROOT/f'src/docs/wiki/images/console-race-engineer-{name}.png'),full_page=True)
                 # The same handler now reads a new real relay generation.
@@ -100,6 +118,7 @@ async def main():
                 await page.wait_for_function('(generation) => EngineerDesk.state.generation === generation',arg=fixture.live.generation)
                 assert await page.evaluate('() => EngineerDesk.state.zoom') is None
                 assert 'new live generation' in await page.locator('#notice').inner_text()
+                await page.wait_for_function('() => EngineerDesk.state.detail?.state === "confirmed"')
                 # Hold an already prepared protected response while access is revoked.
                 captured=asyncio.Event();release=asyncio.Event()
                 async def delayed(route):
@@ -109,7 +128,8 @@ async def main():
                 await page.route('**/race-engineer/lap?*',delayed)
                 await captured.wait()
                 fixture.crew.inject_row(1,race_engineer=False)
-                await page.wait_for_function('() => EngineerDesk.state.stopped && document.getElementById("protected").hidden')
+                await page.wait_for_function('() => EngineerDesk.state.stopped')
+                assert await page.locator('#protected').evaluate('(el) => el.hidden'), 'revocation left protected view visible'
                 release.set();await page.unroute_all(behavior='wait')
                 count=[];page.on('request',lambda r:count.append(r.url))
                 await asyncio.sleep(1.2)
@@ -119,13 +139,15 @@ async def main():
                 await page.goto(f'http://127.0.0.1:{server.server_port}/console/race-engineer?t={token}')
                 await page.wait_for_selector('#protected:not([hidden])')
                 fixture.access().update(enabled=False,expected=4)
-                await page.wait_for_function('() => EngineerDesk.state.stopped && document.getElementById("protected").hidden')
+                await page.wait_for_function('() => EngineerDesk.state.stopped')
+                assert await page.locator('#protected').evaluate('(el) => el.hidden'), 'revocation left protected view visible'
                 assert 'disabled' in await page.locator('#status').inner_text()
                 assert not errors,errors
                 await browser.close()
         finally:
             server.shutdown();server.server_close();fixture.live.close()
-    print('PASS Engineer desk live instruments')
+    print('PASS Engineer desk live, selection, context, reconnect, revocation and three responsive views')
+    return None
 
 
 if __name__=='__main__':asyncio.run(main())

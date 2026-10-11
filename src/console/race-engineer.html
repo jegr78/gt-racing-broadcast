@@ -28,19 +28,21 @@
 <script>
 'use strict';
 const $=id=>document.getElementById(id), num=(v,d=1)=>typeof v==='number'&&Number.isFinite(v)?v.toFixed(d):'Unavailable';
-const state={stopped:false,busy:false,analysisBusy:false,epoch:0,generation:null,snapshot:null,received:0,connected:false,historyRevision:null,laps:[],sessions:[],refs:[],refLaps:[],refSource:'',a:'',b:'',session:'',follow:true,zoom:null,detail:null,pair:null,known:new Set(),newLaps:0,analysisAvailable:false,lastAccess:0,lastChat:0,controllers:new Set()};
+const state={stopped:false,busy:false,analysisBusy:false,epoch:0,generation:null,snapshot:null,received:0,connected:false,problem:null,historyRevision:null,laps:[],sessions:[],refs:[],refLaps:[],refSource:'',a:'',b:'',session:'',follow:true,zoom:null,detail:null,pair:null,known:new Set(),newLaps:0,analysisAvailable:false,lastAccess:0,lastChat:0,controllers:new Set()};
 let timer;
 function say(text){$('notice').textContent=text;}
 function clearPlots(){for(const id of ['chart','delta-chart','map'])$(id).replaceChildren();$('sectors').tBodies[0].replaceChildren();$('delta').textContent='Unavailable';$('context').textContent='No selected lap';$('notes').replaceChildren();$('limitations').textContent='';$('larger-sectors').textContent='';state.detail=null;state.pair=null;}
 function stop(message){state.stopped=true;state.epoch++;clearInterval(timer);for(const c of state.controllers)c.abort();state.controllers.clear();state.snapshot=null;state.laps=[];state.sessions=[];state.refs=[];state.refLaps=[];state.a=state.b=state.session=state.refSource='';state.zoom=null;state.known.clear();state.connected=false;clearPlots();$('protected').hidden=true;for(const id of ['references','notes','chatlog','larger-sectors','session','lap-a','lap-b','reference-source'])$(id).replaceChildren();for(const el of document.querySelectorAll('.value strong'))el.textContent='Unavailable';for(const id of ['source-state','history-state','lap-state','comparison-state','new-laps'])$(id).textContent='';$('chatin').value='';$('context').textContent='';$('limitations').textContent='';$('receipt').textContent='';$('status').textContent=message;}
 class AccessLost extends Error{}
 class ReferenceLost extends Error{}
+class SourceUnavailable extends Error{}
 async function request(route,query={},method='GET',body=null){
  const epoch=state.epoch, controller=new AbortController();state.controllers.add(controller);const timeout=setTimeout(()=>controller.abort(),4000);
  try{const qs=new URLSearchParams(query),response=await fetch(RC_API(route)+(qs.size?'?'+qs:''),{method,signal:controller.signal,cache:'no-store',headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):null});
   const data=await response.json();if(epoch!==state.epoch||state.stopped)throw new AccessLost('Access state changed');
   if(response.status===401||response.status===403){stop(data.error?.message||'Engineer access was removed');throw new AccessLost('Access was removed');}
   if(response.status===410)throw new ReferenceLost(data.error?.message||'Shared reference unavailable');
+  if(response.status===503&&['source_unavailable','analysis_unavailable'].includes(data.error?.code))throw new SourceUnavailable(data.error.message);
   if(!response.ok)throw new Error(data.error?.message||'Analysis temporarily unavailable');return data;
  }finally{clearTimeout(timeout);state.controllers.delete(controller);}
 }
@@ -68,7 +70,7 @@ function instruments(snap){const v=snap.instruments||{};for(const [id,value,d] o
 }
 function age(){if(state.stopped||!state.snapshot)return;const r=state.snapshot.receipt||{},since=(performance.now()-state.received)/1000,age=r.age_s==null?null:r.age_s+since,packetAge=r.packet_age_s==null?null:r.packet_age_s+since;
  const disconnected=!state.connected||since>=5,stale=packetAge!=null&&packetAge>=5;
- const label=disconnected?'Browser disconnected':stale?'Telemetry stale':({live:'Telemetry live',paused:'Game paused',menu:'Game menu',loading:'Game loading',waiting:'Waiting for telemetry',preparing:'Preparing telemetry',delayed:'Analysis delayed',stale:'Telemetry stale'}[r.state]||'Telemetry unavailable');
+ const label=state.problem||(disconnected?'Browser disconnected':stale?'Telemetry stale':({live:'Telemetry live',paused:'Game paused',menu:'Game menu',loading:'Game loading',waiting:'Waiting for telemetry',preparing:'Preparing telemetry',delayed:'Analysis delayed',stale:'Telemetry stale'}[r.state]||'Telemetry unavailable'));
  $('status').textContent=label;$('protected').classList.toggle('dim',disconnected||stale||r.state==='paused'||r.state==='menu'||r.state==='delayed');
  $('receipt').textContent=`Receipt: ${r.packet_received_at==null?'Unavailable':new Date(r.packet_received_at*1000).toLocaleTimeString()} · data age: ${age==null?'Unavailable':num(age,1)+' s'} · packet age: ${packetAge==null?'Unavailable':num(packetAge,1)+' s'}`;
 }
@@ -80,7 +82,7 @@ function graph(id,series,key,height){const el=$(id);el.replaceChildren();const r
  for(const s of series){let path='',pen=false;for(const p of s.rows){if(p.d<min||p.d>max||typeof p[key]!=='number'){pen=false;continue;}path+=(pen?'L':'M')+X(p.d).toFixed(1)+' '+Y(p[key]).toFixed(1);pen=true;}el.append(svg('path',{d:path,stroke:s.color,fill:'none','stroke-width':2}));}
 }
 function render(){const B=state.detail,A=state.pair?.a,pair=state.pair;clearPlots();state.detail=B;state.pair=pair;if(!B)return;
- const trace=B.trace||[],length=Math.max(1,B.length_m||trace.at(-1)?.d||1000);if(!state.zoom){$('zoom-from').value=0;$('zoom-to').value=Math.round(length);}
+ const trace=B.trace||[],length=Math.max(1,B.length_m||trace.at(-1)?.d||0,A?.length_m||0);if(!state.zoom){$('zoom-from').value=0;$('zoom-to').value=Math.round(length);}
  graph('chart',[{rows:A?.trace||[],color:'#8ab4ff'},{rows:trace,color:'#ffd08a'}],$('channel').value,300);
  graph('delta-chart',[{rows:pair?.delta||[],color:'#a8dfbd'}],'delta',170);
  const map=$('map'),points=(A?.trace||[]).concat(trace).filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.z));
@@ -89,7 +91,7 @@ function render(){const B=state.detail,A=state.pair?.a,pair=state.pair;clearPlot
   const last=trace.at(-1);if(last&&Number.isFinite(last.x)&&Number.isFinite(last.z))map.append(svg('circle',{cx:X(last.x),cy:Y(last.z),r:5,fill:'#ffd08a'}));
   if(B.larger_sectors?.reviewed)for(const c of B.corner_metrics||[]){const p=trace.find(p=>p.d>=c.apex_m);if(p)map.append(svg('text',{x:X(p.x)+5,y:Y(p.z)},'T'+c.number));}
  }
- const sectors=pair?.mini_sectors||{a:[],b:B.sectors||[],delta:[]},body=$('sectors').tBodies[0];for(let i=0;i<Math.max(sectors.a.length,sectors.b.length);i++){const row=body.insertRow();for(const v of [String(i+1),num(sectors.a[i],3),num(sectors.b[i],3),num(sectors.delta[i],3)])row.insertCell().textContent=v;}
+ const observed=trace.at(-1)?.d||0;const sectors=pair?.mini_sectors||{a:[],b:(B.sectors||[]).map((v,i)=>B.state==='provisional'&&(i+1)*200>observed?null:v),delta:[]},body=$('sectors').tBodies[0];for(let i=0;i<Math.max(sectors.a.length,sectors.b.length);i++){const row=body.insertRow();for(const v of [String(i+1),num(sectors.a[i],3),num(sectors.b[i],3),num(sectors.delta[i],3)])row.insertCell().textContent=v;}
  const end=pair?.delta?.at(-1);$('delta').textContent=pair?.compatible&&end&&B.id===state.snapshot?.current?.id?num(end.delta,3):'Unavailable';
  $('context').textContent=`Lap ${B.lap} · ${B.state} · quality ${B.data_quality||'unknown'} · context revision ${B.context_revision??'unavailable'} · ${B.compound||'compound unconfirmed'} · tyre age ${B.tyre_age_laps??'unknown'} laps · stint ${B.stint_id||'unknown'}. Declared settings: ${JSON.stringify(B.context_settings||{})}. Declared strategy: ${JSON.stringify(B.strategy||{})}.`;
  $('notes').replaceChildren();for(const n of B.notes||[]){const li=document.createElement('li');li.textContent=n.text;$('notes').append(li);}
@@ -110,9 +112,9 @@ async function chat(){try{const data=await request('/chat/data');$('chatlog').re
 async function tick(){if(state.busy||state.stopped)return;state.busy=true;try{
  const now=performance.now();let granted;if(now-state.lastAccess>=900||!state.generation){granted=await access();state.lastAccess=now;}
  if(!state.analysisAvailable){$('status').textContent='Engineer access enabled. Live analysis unavailable.';return;}
- const snap=await request('/race-engineer/snapshot');resetGeneration(snap.generation);state.snapshot=snap;state.received=performance.now();state.connected=true;instruments(snap);age();
+ const snap=await request('/race-engineer/snapshot');resetGeneration(snap.generation);state.snapshot=snap;state.received=performance.now();state.connected=true;state.problem=null;instruments(snap);age();
  selections();refreshAnalysis(snap);
- }catch(e){if(!(e instanceof AccessLost)){state.connected=false;$('status').textContent='Browser disconnected · reconnecting';age();}}finally{state.busy=false;}}
+ }catch(e){if(!(e instanceof AccessLost)){state.connected=false;state.problem=e instanceof SourceUnavailable?'Telemetry source unavailable':'Browser disconnected · reconnecting';$('status').textContent=state.problem;age();}}finally{state.busy=false;}}
 async function refreshAnalysis(snap){if(state.analysisBusy||state.stopped)return;state.analysisBusy=true;try{
  if(state.historyRevision!==snap.history_revision){const h=await request('/race-engineer/history',state.historyRevision==null?{}:{since:state.historyRevision});if(h.generation!==state.generation)return;
   if(h.changed){if(state.known.size)state.newLaps+=h.laps.filter(r=>!state.known.has(r.id)).length;state.laps=h.laps;state.sessions=h.sessions;state.known=new Set(h.laps.map(r=>r.id));}state.historyRevision=h.revision;}
