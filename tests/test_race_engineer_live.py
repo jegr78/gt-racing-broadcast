@@ -255,6 +255,90 @@ def t_late_recovery_target_is_not_declared_exhausted():
             live._bounded_recording = original
 
 
+def t_epoch_recovery_and_context_bindings_require_the_actual_source():
+    import gt7_context
+    from test_gt7_laps import _pkt
+    enabled = [True]
+    with tempfile.TemporaryDirectory() as d:
+        path = write_circle_recording(d)
+        source = gt7_context.source_identity(path)
+        with live.Store(lambda: enabled[0], tracks=FakeTracks(), cars=FakeCars(),
+                        queue_max=4096, details_max=2) as store:
+            p = tm.parse_packet(_pkt(1, 30, 0))
+            for i in range(3):
+                store.put(p._replace(car_id=i + 1), 100 + i * 5)
+            assert store.flush()
+            store.bind_recording(path)
+            assert store._session_offset > 0
+            enabled[0] = False
+            store.refresh_enabled()
+            enabled[0] = True
+            store.refresh_enabled()
+            feed(store, path)
+            old = next(r for r in store.snapshot()['laps'] if r['lap'] == 2)
+            assert old['recording_session'] >= 1
+            assert store.detail(old['id'])['state'] == 'pending'
+            assert store.wait_recovery(10)
+            assert store.detail(old['id'])['state'] == 'ready'
+            with open(path, 'rb') as f:
+                raw = f.read()
+            with open(path, 'wb') as f:
+                f.write(raw.replace(source.encode(), ('1' * len(source)).encode(), 1))
+            replacement = gt7_context.Store.for_recording(path)
+            replacement.save({'notes': [], 'sessions': {'1': {'confirmed': True,
+                'stints': [{'id': 'new', 'start_lap': 1, 'confirmed': True,
+                            'compound': 'RH'}]}}}, 0)
+            store._read_context()
+            snap = store.snapshot()
+            assert snap['warnings'] and snap['context_revision'] is None
+            assert snap['current']['compound'] is None
+
+
+def t_telemetry_consumer_is_additive_and_failures_do_not_stop_the_store():
+    from test_gt7_laps import _pkt
+    class Consumer:
+        def __init__(self):
+            self.values = []
+        def put(self, pkt, wall):
+            self.values.append((pkt, wall))
+    consumer = Consumer()
+    store = tm.TelemetryStore(engineer=consumer)
+    p = tm.parse_packet(_pkt(1, 30, 0))
+    store.update(p, 100)
+    assert consumer.values == [(p, 100)]
+    assert store.recorder is None
+    class Broken:
+        def put(self, *_args):
+            raise ValueError('synthetic preparation failure')
+    store.engineer = Broken()
+    store.update(p, 101)
+    assert store.data()['lap'] == 1
+
+
+def t_relay_collection_follows_the_profile_without_a_browser_or_recording():
+    import test_console_gate as fixture
+    import race_engineer_access
+    from test_gt7_laps import _pkt
+    with tempfile.TemporaryDirectory() as d:
+        access = race_engineer_access.Store(d, available=True)
+        telemetry = tm.TelemetryStore()
+        store = fixture.m.engineer_live_for(access, telemetry, os.path.join(d, 'telemetry-recordings'), d, None)
+        try:
+            pkt = tm.parse_packet(_pkt(1, 30, 0))
+            assert not store.put(pkt, 100)
+            access.update(enabled=True, expected=0)
+            store.refresh_enabled()
+            telemetry.update(pkt, 100)
+            assert store.flush()
+            assert store.snapshot()['current'] is not None
+            assert telemetry.recorder is None, 'Engineer opt-in started a recording'
+            access.update(enabled=False, expected=1)
+            store.refresh_enabled()
+            assert not store.put(pkt, 101)
+        finally:
+            store.close()
+
+
 if __name__ == '__main__':
     for name, fn in sorted(list(globals().items())):
         if name.startswith('t_'):

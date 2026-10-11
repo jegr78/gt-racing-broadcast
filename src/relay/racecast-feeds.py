@@ -164,6 +164,7 @@ import gt7_crypto      # GT7 UDP telemetry: Salsa20 decrypt (solo/POV only, #324
 import gt7_telemetry   # GT7 UDP telemetry: packet parser + TelemetryStore (solo/POV only, #324)
 import gt7_recording   # GT7 telemetry recording to disk (solo/POV only)
 import race_engineer_access
+import race_engineer_live
 import gt7_context     # prepared session notes attached to each new recording
 import gt7_cars        # GT7 car id -> car name, from the vendored src/assets/gt7 tables (#713)
 import gt7_data        # GT7 reference data: bundled + runtime updates (#787)
@@ -12472,6 +12473,23 @@ def gt7_data_update_enabled(environ):
             not in ("0", "false", "no", "off"))
 
 
+def engineer_live_for(access, telemetry, rec_dir, runtime_base, bundled):
+    """One profile-owned worker, started independently of Console readers."""
+    def recording_path():
+        recorder = telemetry.recorder
+        name = recorder.status().get('file') if recorder else None
+        if not name or os.path.basename(name) != name:
+            return None
+        path = os.path.join(rec_dir, name)
+        return path + gt7_recording.PART if os.path.isfile(path + gt7_recording.PART) else path
+    store = race_engineer_live.Store(
+        lambda: access.read()['enabled'], tracks=telemetry._eng.track_db, cars=telemetry._cars,
+        runtime_base=runtime_base, bundled=bundled, recording_source=recording_path,
+        context_source=lambda: gt7_context.Store.prepared(rec_dir).read())
+    telemetry.engineer = store
+    return store
+
+
 def _telemetry_loop(store, ps_ip, stop_evt, clock=time.monotonic):
     """Bind 33740, heartbeat per gt7_telemetry.HeartbeatPolicy (the extended '~'
     format, #711), decrypt+parse+feed each packet. Best-effort: any error logs and
@@ -13159,6 +13177,8 @@ def main():
     program_audio_service = (ProgramAudioService(relay, LOG)
                              if relay.program_audio else None)
     engineer_access=race_engineer_access.Store(runtime,available=telemetry_active(args.solo,os.environ))
+    engineer_live = engineer_live_for(engineer_access, telemetry_store, rec_dir, runtime_base,
+                                      gt7_bundled) if telemetry_store is not None else None
     engineer_page_path=engineer_page_for(console_page_path)
     handler = make_handler(relay, panel_path, hud_source, hud_path, assets_dir,
                            timer_store, setup_ctl,
@@ -13245,6 +13265,8 @@ def main():
         LOG.info("Stopping feeds…")
         if telemetry_store is not None and telemetry_store.recorder is not None:
             telemetry_store.recorder.close()   # flush and rename before the hard exit
+        if engineer_live is not None:
+            engineer_live.close()
         stop_evt.set(); relay.shutdown(); os._exit(0)
     signal.signal(signal.SIGINT, shutdown)
     signal.signal(signal.SIGTERM, shutdown)
