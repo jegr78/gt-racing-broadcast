@@ -553,7 +553,7 @@ class Store:
                 if row is None and target in cached['requested']:
                     if not (identity and path.endswith('.part')):
                         return {'state': 'unavailable', 'lap': None}
-                    if cached['end_wall'] is not None and start is not None and cached['end_wall'] > start + gt7_recording.GT7_TIME_WINDOW_S + 2:
+                    if cached['end_wall'] is not None and identity.get('_end_wall') is not None and cached['end_wall'] > identity['_end_wall'] + gt7_recording.GT7_TIME_WINDOW_S + 2:
                         return {'state': 'unavailable', 'lap': None}
                     if stamp[4] == cached['prefix_size']:
                         return {'state': 'pending', 'lap': None}

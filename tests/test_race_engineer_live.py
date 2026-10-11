@@ -589,6 +589,34 @@ def t_recording_header_and_stop_do_not_misbind_future_laps():
             assert store.snapshot()['history'] == 'volatile'
 
 
+def t_recorded_prefix_ending_midlap_waits_until_the_known_lap_end():
+    with tempfile.TemporaryDirectory() as d:
+        path = write_circle_recording(d)
+        rec = gr.Recording(path)
+        for wall, _kind, _plain in rec.packets():
+            if wall >= 1_700_000_030.0:
+                prefix = rec.pos
+                break
+        with open(path, 'rb') as f:
+            raw = f.read()
+        part = path + '.part'
+        with open(part, 'wb') as f:
+            f.write(raw[:prefix])
+        with live.Store(lambda: True, tracks=FakeTracks(), cars=FakeCars(), queue_max=4096,
+                        details_max=2) as store:
+            store.bind_recording(part)
+            feed(store, path)
+            brief = next(r for r in store.snapshot()['laps'] if r['lap'] == 2)
+            assert store.detail(brief['id'])['state'] == 'pending'
+            assert store.wait_recovery(10)
+            assert store.detail(brief['id'])['state'] == 'pending'
+            with open(part, 'ab') as f:
+                f.write(raw[prefix:])
+            assert store.detail(brief['id'])['state'] == 'pending'
+            assert store.wait_recovery(10)
+            assert store.detail(brief['id'])['state'] == 'ready'
+
+
 if __name__ == '__main__':
     for name, fn in sorted(list(globals().items())):
         if name.startswith('t_'):
