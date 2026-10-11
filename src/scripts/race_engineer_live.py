@@ -589,7 +589,7 @@ class Store:
                 try:
                     stat = os.stat(filename)
                     stamps.append((filename, stat.st_size, stat.st_mtime_ns))
-                except FileNotFoundError:
+                except OSError:
                     stamps.append((filename, None, None))
         self._definition_stamp = tuple(stamps)
 

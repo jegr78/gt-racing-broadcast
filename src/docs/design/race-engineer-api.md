@@ -31,10 +31,28 @@ Errors use `{error: {code, message}}` with generic messages.
 
 The access route retains its existing grant list and adds live analysis availability.
 Unknown/duplicate query keys, invalid revisions and malformed IDs return 400. Unknown
-routes and write methods return 404. Revoked reference selectors return 410 with
+routes and POST methods return 404. Other unsupported methods use the HTTP server's 501 response. Revoked reference selectors return 410 with
 `reference_unavailable`; role/feature loss returns 403. No route builds a full index
 on its HTTP thread. Reference data remain historical and cannot replace live values.
 
 Manual notes and context are explicitly shared by the producer. Automatic projections
 omit paths, filenames, recorder counters, source addresses, streams and credentials.
 Measured channels remain distinct from declared context and inferred capture quality.
+
+
+## Preparation limits and verified assurances
+
+Comparison preparation uses one worker, at most sixteen queued pairs and sixteen
+cached replies totaling at most 16 MiB. A reply is at most 2 MiB. These limits also
+apply to failed work; oversize results are explicitly unavailable. Multiple readers
+of the same measured/context/definition pair share one task. Current detail updates
+remain provisional and never contribute to confirmed best or theoretical values.
+
+Six focused tests exercise real signed HTTP, context/definition revisions, compact
+and incremental publications, comparison math and bounded concurrent preparation.
+The actual Control Center delta function is executed in Chromium against the same
+inputs, including negative half-millisecond rounding and unequal closing stations.
+Twelve assurances were individually falsified and restored: thin snapshots,
+incremental history, recursive projection, query allowlist, post-preparation grant
+validation, observed-sector coverage, context/track pool rules, cache count/bytes,
+entry bytes and definition revision invalidation.

@@ -235,6 +235,22 @@ def t_preparation_cache_bounds_apply_to_failures_and_large_results():
         finally: service.close()
 
 
+def t_optional_definition_permissions_do_not_stop_relay_collection():
+    from unittest.mock import patch
+    import os
+    original = os.stat
+    def denied(path,*args,**kwargs):
+        if 'track-definitions' in str(path):
+            raise PermissionError('optional definition permission denied')
+        return original(path,*args,**kwargs)
+    with tempfile.TemporaryDirectory() as d:
+        with patch.object(live.os,'stat',side_effect=denied):
+            with live.Store(lambda: False, tracks=FakeTracks(), cars=FakeCars(), runtime_base=d) as store:
+                assert store._worker.is_alive() and store._reader.is_alive()
+                store._refresh_definitions()
+                assert store.snapshot()['enabled'] is False
+
+
 if __name__ == '__main__':
     for name, fn in sorted(list(globals().items())):
         if name.startswith('t_') and callable(fn): fn(); print('PASS', name)
