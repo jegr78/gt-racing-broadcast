@@ -93,5 +93,6 @@ async def main():
         finally:
             server.shutdown();server.server_close();fixture.live.close()
     print('PASS Engineer desk display cleanup: all eight items')
+    return None
 
 if __name__=='__main__':asyncio.run(main())
