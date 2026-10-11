@@ -251,6 +251,31 @@ def t_optional_definition_permissions_do_not_stop_relay_collection():
                 assert store.snapshot()['enabled'] is False
 
 
+def t_recorded_sector_selection_uses_recording_session_and_keeps_live_identity():
+    import copy
+    import gt7_track_definitions as td
+    from test_gt7_track_definitions import definition, lap
+    with tempfile.TemporaryDirectory() as d:
+        definitions = td.Store(d, str(Path(d)/'bundle'))
+        data = definition(); chosen = copy.deepcopy(data['variants'][0])
+        chosen.update(id='producer-choice',name='Producer chosen sectors')
+        data['variants'].append(chosen); definitions.save(data,0)
+        # Collection has already reached live session 2; a recorder started there
+        # has its own session 1. Producer choices belong to the recording context.
+        row = lap(2,(4,4,4,4)); row.update(session=2,recording_session=1,
+            id='a'*32+':l4',session_id='a'*32+':s3',_context_source='prepared')
+        context = {'notes': [], 'sessions': {}, 'track_definition': {'selections': {
+            '1': {'layout_id':'ring01','reverse':False,'variant_id':'producer-choice'}}}}
+        with live.Store(lambda: True,tracks=FakeTracks(),runtime_base=d) as store:
+            store._context = context
+            annotated = store._annotate(row)
+            assert annotated['sector_variant_id'] == 'producer-choice', 'live counter selected the wrong recording-context variant'
+            assert annotated['session'] == 2 and annotated['recording_session'] == 1
+            assert annotated['id'] == row['id'] and annotated['session_id'] == row['session_id']
+            expected = td.annotate_index({'laps':[dict(row,session=1)]},context,definitions,FakeTracks())['laps'][0]
+            assert annotated['larger_sectors'] == expected['larger_sectors']
+
+
 if __name__ == '__main__':
     for name, fn in sorted(list(globals().items())):
         if name.startswith('t_') and callable(fn): fn(); print('PASS', name)

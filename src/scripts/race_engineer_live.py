@@ -163,7 +163,10 @@ def _decorate(row, context, definitions, tracks):
         note['scope'] == 'recording' or note.get('session') == row.get('recording_session', row['session'])
         and (note['scope'] == 'session' or note.get('lap') == row['lap'])]
     if definitions is not None and tracks is not None:
-        result = gt7_track_definitions.annotate_index({'laps': [result]}, context, definitions, tracks)['laps'][0]
+        session = result['session']
+        measured = dict(result, session=result.get('recording_session', session))
+        result = gt7_track_definitions.annotate_index({'laps': [measured]}, context, definitions, tracks)['laps'][0]
+        result['session'] = session
     return result
 
 
