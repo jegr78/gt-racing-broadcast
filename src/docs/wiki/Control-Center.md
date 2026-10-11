@@ -486,6 +486,15 @@ changes login, silently selects another model or falls back to API billing.
 A ready CLI does not guarantee subscription quota or access to a selected model.
 On macOS, subscription credentials in the GUI keychain can be unavailable to an
 SSH session. Use the authenticated local desktop session for the provider CLI.
+Provider checks use the OS user running Racecast; a login under another OS user
+does not sign in this process.
+
+Windows Codex background runs require the MXC sandbox and unified command
+execution, verified with CLI 0.162.1. Racecast requires MXC explicitly and never
+falls back to administrative sandbox setup. If MXC is unavailable, use a supported
+Windows environment, choose Claude explicitly, or export the package for a scoped
+manual run. Runtime environment paths are preserved; profile/API secrets are not
+passed to model commands.
 
 **Isolated** is the default mode. The job can read the prepared package and write
 its dedicated output, with no blanket approval bypass. **Personal** permits

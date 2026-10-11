@@ -27,19 +27,36 @@ The command can consume subscription quota and is a maintainer check, not CI.
 | Platform/provider | Observed CLI version | Existing subscription | Real result/confinement | Native failure/cancel |
 | --- | --- | --- | --- | --- |
 | Linux Codex | 0.162.1 | reused | full strict report/history/export passed; outside synthetic reads/writes blocked | unavailable model and cancellation passed |
-| macOS Codex | 0.162.1 | reused | structured package probe passed; outside synthetic reads/writes blocked | controlled native process fixtures passed; real provider lifecycle pending |
-| macOS Claude Code | 2.1.296 | reused in GUI Terminal | structured package probe passed; outside Read refused with approval guidance | real provider cancellation pending |
-| Windows Codex | 0.162.1 | authentication probe passed | real model run pending | controlled Windows CI process-tree checks passed; real provider lifecycle pending |
-| Windows Claude Code | 2.1.284 | authentication probe passed | real model run pending | real provider lifecycle pending |
-| Linux Claude Code | 2.1.296 | refresh failed; current CLI status reports no login | real model run pending | real provider lifecycle pending |
+| macOS Codex | 0.162.1 | reused | strict report/history/export passed; outside synthetic reads/writes blocked | unavailable model and cancellation passed |
+| macOS Claude Code | 2.1.296 | reused in GUI Terminal | strict report/history/export passed; outside Read refused with approval guidance | unavailable model and cancellation passed |
+| Windows Codex | 0.162.1 | reused | strict report/history/export passed with mandatory MXC; outside synthetic reads/writes blocked | unavailable model and cancellation passed |
+| Windows Claude Code | 2.1.284 | reused | strict report/history/export passed; outside Read refused with approval guidance | unavailable model and cancellation passed |
+| Linux Claude Code | 2.1.296 | reused in the signed-in OS user context | strict report/history/export passed; outside Read refused with approval guidance | unavailable model and cancellation passed |
 
-macOS SSH and the desktop keychain are distinct execution contexts. The confirmed
-GUI subscription works with the runner's preserved USER identity; no credentials
-were copied. Subsequent Mac/Windows SSH connectivity became unavailable. The Linux
-Claude CLI reports an OAuth refresh failure and then no current CLI login; this does
-not establish the user's login state in another Claude application. These pending
-native checks keep #821 and its parent open. Do not describe this matrix as complete
-or release-ready until the remaining actual integrations have passed.
+macOS SSH and the desktop keychain are distinct execution contexts. The GUI
+subscription works with the runner's preserved USER identity. On Linux the existing
+Claude session belonged to another OS user than the Codex workspace process; the
+native verification reused that signed-in user without copying credentials or
+reauthenticating. Each application checks the subscription of its own OS user.
+
+The macOS and Windows checks used synthetic frozen packages prepared on the
+supported Python toolchain, then ran the real native adapters, runner, strict
+validator, profile-owned history and exports. The selected models were
+`gpt-6.1-sol` and `haiku`; Claude reported `claude-haiku-5-5` on Linux/macOS and
+`claude-haiku-4-5-20251001` on Windows. Codex did not report an actual model name.
+
+Native Windows verification exposed disabled sandbox recognition and missing
+runtime environment locations. Windows Codex now explicitly requires MXC and
+unified command execution. It inherits only an explicit list of Windows runtime
+paths and identity variables, while root-deny file permissions and disabled tool
+network access remain active. There is no elevated/unelevated fallback or automatic
+administrative setup. Missing MXC is an actionable `isolation_unavailable` failure
+with no normal report. A native canary verified that the package remained readable
+while outside synthetic reads and writes received access denied.
+
+The independent security review rejected the initial elevated fallback, which
+could trigger administrative setup when MXC was unavailable. The final adapter
+selects MXC directly. See the [official Windows sandbox documentation](https://learn.chatgpt.com/docs/windows/windows-sandbox).
 
 ## Review and browser evidence
 
@@ -57,18 +74,18 @@ HTML download, exact lap and comparison navigation, validation failure, cancella
 and explicit/external profile switching. Ordinary telemetry uses the existing live
 callbacks while the provider is a controlled Python process. All data is synthetic.
 
-Twelve new guards were falsified individually from the committed implementation:
+Seventeen guards were falsified individually from the committed implementation:
 selection profile binding, positive reference IDs, selected-only shift replay,
 stale enrichment, backend request-profile binding, delayed preview generation,
 settings refresh invalidation, response-profile binding, comparison identity,
-completion generation, completion job identity and initialized-profile requests.
+completion generation, completion job identity, initialized-profile requests,
+MXC-only backend selection, unified Windows execution, Windows runtime propagation,
+command environment filtering and unavailable-MXC guidance.
 Each failed its intended assertion before the committed file was restored.
 
-The final maintainer verifier repeated the complete native Linux Codex pipeline
-on the UI implementation with model gpt-6.1-sol: validated report/history/exports,
-unavailable-model failure and cancellation all passed. A separate direct restricted,
-tools-disabled Linux Claude invocation independently returned "OAuth session expired
-and could not be refreshed", with zero API duration and zero token usage.
+The final native checks covered all six platform/provider combinations, including
+strict reports, exports, explicit unavailable-model failures and cancellation.
+All inputs were synthetic; no credentials or private recordings entered CI.
 
 Self-review reproduced a completed job disappearing from the UI when a future
 goal was edited during its response. The watcher now keeps that job until its

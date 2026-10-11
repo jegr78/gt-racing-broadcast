@@ -24,6 +24,7 @@ MAX_OUTPUT_BYTES = 4*1024*1024
 TERMINAL = {'completed','awaiting_validation','failed','cancelled','timed_out'}
 ENV_KEYS = {'PATH','HOME','USER','LOGNAME','USERNAME','USERPROFILE','HOMEDRIVE','HOMEPATH','SYSTEMROOT','WINDIR',
             'APPDATA','LOCALAPPDATA','PROGRAMFILES','PROGRAMFILES(X86)',
+            'PROGRAMDATA','ALLUSERSPROFILE','PROGRAMW6432','SYSTEMDRIVE','COMSPEC',
             'TEMP','TMP','TMPDIR','LANG','LC_ALL','CODEX_HOME','CLAUDE_CONFIG_DIR',
             'SSL_CERT_FILE','SSL_CERT_DIR','NODE_EXTRA_CA_CERTS','HTTPS_PROXY','HTTP_PROXY','NO_PROXY'}
 
@@ -236,6 +237,8 @@ def _diagnostic_code(text):
     lower=text.lower()
     if any(s in lower for s in ('approval required','approval_required','permission denied','permission_denied','permission prompt','interactive approval')):
         return 'approval_required','Interactive approval is required. Export the saved package and run the provider manually with scoped permissions.'
+    if 'mxc' in lower and any(s in lower for s in ('unavailable','not available','not supported','unsupported','not permitted','prohibited')):
+        return 'isolation_unavailable','The Windows MXC sandbox is unavailable. Use a supported Windows environment, choose another provider explicitly, or export the package for a scoped manual run; no administrative fallback was used.'
     if 'model' in lower and any(s in lower for s in ('unavailable','not available','not found','not supported')):
         return 'unavailable_model','The selected model is unavailable. Choose a model explicitly; no fallback was used.'
     if any(s in lower for s in ('rate limit','quota','usage limit')):

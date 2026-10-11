@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import gt7_context
@@ -22,6 +23,9 @@ REQUIRED_FLAGS = {
     'codex': ('--ignore-user-config', '--ignore-rules', '--strict-config', '--output-schema', '--json', '--ephemeral'),
     'claude': ('--restricted', '--safe-mode', '--json-schema', '--strict-mcp-config', '--permission-mode', '--tools'),
 }
+WINDOWS_RUNTIME_ENV = ('PATH','SYSTEMROOT','WINDIR','PROGRAMFILES','PROGRAMFILES(X86)',
+                       'PROGRAMW6432','PROGRAMDATA','ALLUSERSPROFILE','SYSTEMDRIVE','COMSPEC','TEMP','TMP',
+                       'USERPROFILE','HOMEDRIVE','HOMEPATH','APPDATA','LOCALAPPDATA','USERNAME')
 AUTH_ENV = {
     'codex': ('OPENAI_API_KEY', 'CODEX_API_KEY', 'OPENAI_BASE_URL', 'CODEX_ACCESS_TOKEN'),
     'claude': ('ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL',
@@ -287,6 +291,12 @@ class Adapter:
                          _codex_permissions(self.executable,package,output), 'web_search="disabled"',
                          'features.hooks=false', 'features.plugins=false', 'features.apps=false',
                          'features.multi_agent=false', 'shell_environment_policy.inherit="none"']
+            if sys.platform == 'win32':
+                # MXC is mandatory; never provision an elevated fallback. The
+                # shell also needs Windows runtime locations, never host secrets.
+                overrides[-1]='shell_environment_policy.inherit="all"'
+                overrides.extend(['windows.sandbox="mxc"','features.unified_exec=true',
+                    'shell_environment_policy.filters={'+','.join(json.dumps(k)+'="include"' for k in WINDOWS_RUNTIME_ENV)+'}'])
             if not personal['instructions']:
                 overrides.append('project_doc_max_bytes=0')
             if not personal['skills']:
