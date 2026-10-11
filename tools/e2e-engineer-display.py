@@ -23,6 +23,11 @@ async def main():
                 await page.goto(f'http://127.0.0.1:{server.server_port}/console/race-engineer?t={token}')
                 await page.wait_for_function('() => EngineerDesk.state.pair?.state === "ready" && !EngineerDesk.state.analysisBusy')
                 await page.evaluate('() => {clearInterval(timer);state.savedB=structuredClone(state.detail);state.savedPair=structuredClone(state.pair);}')
+                await page.evaluate('() => {state.savedLaps=state.laps;state.laps=[{session_id:"previous",comparison_eligible:true}];instruments({...state.snapshot,current:{...state.snapshot.current,session_id:"new"},best_s:null,theoretical_s:null});}')
+                assert await page.locator('#best').inner_text() == 'No eligible lap', 'previous session hid the empty best state'
+                assert await page.locator('#theory').inner_text() == 'No eligible lap', 'previous session hid the empty theoretical state'
+                await page.evaluate('() => {state.laps=state.savedLaps;instruments(state.snapshot);}')
+
                 context=await page.locator('#context').inner_text()
                 assert '{}' not in context and 'Declared settings' not in context, 'empty JSON remained in context'
                 body=await page.locator('body').inner_text()
@@ -71,6 +76,9 @@ async def main():
                     ('state.pair.a.larger_sectors.times_s=[null,6,6]', 'state.pair.a.larger_sectors.times_s=[4,6,6]')]:
                     await page.evaluate('() => {'+mutation+';render();}')
                     assert '-1.000' not in await page.locator('#larger-sectors').inner_text(), 'unmatched reference sections claimed a delta'
+                    if 'times_s=[null' in mutation:
+                        assert await table.locator('tbody tr').first.locator('td').nth(3).inner_text() == 'Unavailable', 'missing section time produced a delta'
+
                     await page.evaluate('() => {'+restore+';render();}')
                 await page.evaluate('() => {state.pair.definition_compatible=false;render();}')
                 assert '-1.000' not in await page.locator('#larger-sectors').inner_text(), 'mismatched sections claimed a delta'
