@@ -289,6 +289,11 @@ def t_unknown_track_recovery_keeps_the_live_pool_without_relabeling_archive_rows
             assert restored['session_id'] == current['session_id']
             assert gt7_comparison.compare(restored,current)['compatible'], 'recovery changed the unknown-track live cohort'
             assert restored['rec'] == store.generation and restored['session'] == old['session']
+            mapped_identity = dict(old,session=2,recording_session=1,session_id=store.generation+':s999')
+            mapped = store.recording_detail(gt7_context.source_identity(path),path,1,2,identity=mapped_identity)['lap']
+            mapped_current = dict(current,session=2,session_id=mapped_identity['session_id'])
+            assert gt7_comparison.compare(mapped,mapped_current)['compatible'], 'recovery lost the independent live session counter'
+            assert mapped['session'] == 2 and mapped['recording_session'] == 1
             archived = store.recording_detail(gt7_context.source_identity(path),path,1,2)['lap']
             assert archived['rec'] == gt7_context.source_identity(path) and archived['session'] == 1
             assert not gt7_comparison.compare(archived,current)['compatible'], 'unknown archive sources must not enter the live pool'
