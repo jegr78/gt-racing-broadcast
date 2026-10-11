@@ -83,7 +83,7 @@ def t_growing_provisional_pair_serves_completed_prefix_and_refreshes():
         path = write_circle_recording(d, n=200)
         packets = [(wall, gt7_telemetry.parse_packet(plain))
                    for wall, _, plain in gt7_recording.Recording(path).packets()]
-        with live.Store(lambda: True, tracks=FakeTracks(), cars=FakeCars(), queue_max=4096) as store:
+        with live.Store(lambda: True, tracks=FakeTracks(), cars=FakeCars(), runtime_base=d, queue_max=4096) as store:
             service = api.Service(store)
             try:
                 initial = [(wall, packet) for wall, packet in packets if packet.lap < 4]
@@ -102,6 +102,8 @@ def t_growing_provisional_pair_serves_completed_prefix_and_refreshes():
                         store.put(packet, wall)
                     assert store.flush(10)
                     current = store.snapshot()["current"]
+                    assert current["track_definition"]["storage_source"] == "unsupported"
+                    assert current["definition_fingerprint"] != previous["b"]["definition_fingerprint"], "fixture must also grow its automatic geometry proposal"
                     assert current["id"] == b and current["state"] == "provisional"
                     result = query()
                     assert result["state"] == "ready", "growing trace hid the completed pair"
@@ -119,6 +121,8 @@ def t_growing_provisional_pair_serves_completed_prefix_and_refreshes():
                         detail = original(identity, reference)
                         if identity == b:
                             detail["lap"][field] = value
+                            if field == "definition_fingerprint":
+                                detail["lap"]["track_definition"]["storage_source"] = "override"
                         return detail
                     service._detail = revised
                     assert query()["state"] == "pending", "semantic change reused stale provisional analysis"

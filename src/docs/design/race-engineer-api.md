@@ -53,7 +53,9 @@ remain provisional and never contribute to confirmed best or theoretical values.
 Provisional comparisons cache one completed result per ordered pair and semantic
 context. Measured trace growth schedules at most one concurrent refresh per pair
 and returns that completed observed prefix while the refresh runs. Context, notes,
-strategy, quality, source/session and definition changes invalidate reuse. Content
+strategy, quality, source/session and stored/supplied definition changes invalidate reuse.
+Unsaved geometry proposals derive from the growing prefix and refresh with measured
+content instead of invalidating the semantic pair. Content
 hashes suppress repeated unchanged work; hashes are evicted with their replies.
 Each read still resolves both selectors and current reference authorization.
 Growing-packet and pending-browser regressions cover #851; complete reference or

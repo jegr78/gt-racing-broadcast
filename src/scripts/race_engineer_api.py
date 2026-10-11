@@ -278,6 +278,13 @@ class Service:
                     "fuel_used_l",
                     "top_speed_kmh",
                 }
+                if (
+                    (row.get("track_definition") or {}).get("storage_source")
+                    == "unsupported"
+                ):
+                    # Unsaved geometry proposals are derived from this growing
+                    # prefix. They are measured content, not an external edit.
+                    fields = fields - {"definition_fingerprint"}
                 stable.append(
                     dict(
                         project(row, fields),
