@@ -340,6 +340,17 @@ class Store:
         self._sessions[sid] = dict(self._sessions[sid], laps=self._sessions[sid]['laps'] + 1)
         while len(self._summaries) > self._summaries_max:
             self._drop_summary(next(iter(self._summaries)))
+        self._trim_details(sid)
+
+    def _trim_details(self, sid):
+        for lid, row in list(self._details.items()):
+            size = len(json.dumps(row, allow_nan=False).encode('utf-8'))
+            if size > ENTRY_BYTES_MAX:
+                self._details.pop(lid)
+                self._sizes.pop(lid, None)
+                self._summaries[lid] = dict(self._summaries[lid], detail_state='unavailable')
+            else:
+                self._sizes[lid] = size
         while len(self._details) > self._details_max or sum(self._sizes.values()) > DETAIL_BYTES_MAX:
             old = next((n for n, r in self._details.items() if r['session_id'] != sid), next(iter(self._details)))
             del self._details[old]
@@ -564,6 +575,7 @@ class Store:
                 self._context, self._context_revision = doc['data'], doc['revision']
                 self._details = collections.OrderedDict((lid, self._annotate(row) if row.get('_context_source') == key[0] else row) for lid, row in self._details.items())
                 self._summaries = collections.OrderedDict((lid, _summary(self._annotate(row)) if row.get('_context_source') == key[0] else row) for lid, row in self._summaries.items())
+                self._trim_details(self._published['session_id'])
                 self._publish()
         except (OSError, ValueError, TypeError, gt7_recording.RecordingError):
             error = 'Context unavailable; comparison conditions unconfirmed'
@@ -573,6 +585,7 @@ class Store:
                 self._context_error = error
                 self._details = collections.OrderedDict((lid, self._annotate(row)) for lid, row in self._details.items())
                 self._summaries = collections.OrderedDict((lid, _summary(self._annotate(row))) for lid, row in self._summaries.items())
+                self._trim_details(self._published['session_id'])
                 self._publish()
 
     def flush(self, timeout=5):
@@ -593,7 +606,9 @@ class Store:
     def stats(self):
         return {'details': len(self._details), 'summaries': len(self._summaries),
                 'sessions': len(self._sessions), 'samples': len(self._replay.cur),
-                'dropped': self._dropped, 'replays': self._replays}
+                'dropped': self._dropped, 'replays': self._replays,
+                'detail_bytes': sum(self._sizes.values()),
+                'recovery_bytes': sum(self._recovery_sizes.values())}
 
     def close(self):
         self._stop.set()

@@ -178,3 +178,18 @@ page; live session preparation, analysis routes and the full desk follow in the
 remaining delivery issues.
 
 ![Race Engineer: protected access and shared references](images/console-race-engineer-access.png)
+
+The relay collects shared live analysis whenever the profile's Engineer switch
+is enabled and accepted GT7 packets arrive. It does not wait for a browser and does
+not start recording. Confirmed laps use GT7's lap time and the same validated traces
+as recording analysis; unfinished laps stop at observed distance. Five seconds
+without packets marks retained measurements stale. Game pause, loading and menu
+states remain distinct.
+
+Memory is finite: eight sessions, 512 lap summaries, sixteen detailed completed
+laps and 16 MiB of serialized detail data, plus the protected active lap. Older
+session details go first, then oldest completed details in a long current session.
+Evicted details are explicit. With a matching recording, local background reads
+can restore them; without recording, history is volatile and disappears on restart.
+Recovered recordings remain history. Analysis routes and the complete desk follow
+in the remaining delivery issues.

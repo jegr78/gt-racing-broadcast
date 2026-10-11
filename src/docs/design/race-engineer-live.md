@@ -28,3 +28,17 @@ longer have selectable identities. Recording-backed recovery is local and shared
 it never replaces current instruments, generation or active lap. Without recording
 history disappears on restart. Pre-restart recordings must be explicitly granted
 by the producer before the Console can request their preparation.
+
+The recorder's session counter can differ from live collection, especially when
+collection is toggled or recording begins mid-session. Recovery matches the
+observed absolute lap start and GT7 lap number instead of assuming those counters
+are equal. A context session that cannot yet be mapped stays unconfirmed. Valid
+background recovery can establish the mapping without replacing live instruments.
+Context caches include the bound recording identity and revision; a replacement,
+missing or invalid sidecar clears prior confirmations until a valid read returns.
+
+The independent review reproduced and corrected worker termination after source
+deletion, cached-summary reads after identity replacement, late recovery target
+loss, context revision collisions across sources, stale confirmation after context
+failure, epoch-offset reuse and unvalidated context source replacement. Focused
+fixtures cover each case, including recovery after valid context returns.
