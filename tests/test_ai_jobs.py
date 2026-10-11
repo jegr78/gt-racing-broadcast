@@ -128,7 +128,14 @@ def t_cancel_tree_and_machine_admission():
         result=[];adapter=FakeAdapter(d,'tree')
         th=threading.Thread(target=lambda:result.append(runner.run(package(),pkg,adapter)))
         th.start()
-        wait_for(lambda:runner.status('a')['active'] and runner.status('a')['active']['state']=='running')
+        def running():
+            active = runner.status('a')['active']
+            if result:
+                errors = [p.read_text(encoding='utf-8',errors='replace')
+                          for p in (Path(d)/'profileA').glob('**/runner-error.log')]
+                raise AssertionError('Provider ended before running: '+json.dumps(result)+'; diagnostics: '+repr(errors))
+            return bool(active and active['state'] == 'running')
+        wait_for(running)
         active=runner.status('a')['active'];job=active['id']
         wait_for((adapter.scratch_output/'child.pid').exists)
         other=j.Runner(machine,Path(d)/'profileB','b')

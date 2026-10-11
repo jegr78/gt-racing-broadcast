@@ -251,6 +251,54 @@ def t_optional_definition_permissions_do_not_stop_relay_collection():
                 assert store.snapshot()['enabled'] is False
 
 
+def t_recorded_sector_selection_uses_recording_session_and_keeps_live_identity():
+    import copy
+    import gt7_track_definitions as td
+    from test_gt7_track_definitions import definition, lap
+    with tempfile.TemporaryDirectory() as d:
+        definitions = td.Store(d, str(Path(d)/'bundle'))
+        data = definition(); chosen = copy.deepcopy(data['variants'][0])
+        chosen.update(id='producer-choice',name='Producer chosen sectors')
+        data['variants'].append(chosen); definitions.save(data,0)
+        # Collection has already reached live session 2; a recorder started there
+        # has its own session 1. Producer choices belong to the recording context.
+        row = lap(2,(4,4,4,4)); row.update(session=2,recording_session=1,
+            id='a'*32+':l4',session_id='a'*32+':s3',_context_source='prepared')
+        context = {'notes': [], 'sessions': {}, 'track_definition': {'selections': {
+            '1': {'layout_id':'ring01','reverse':False,'variant_id':'producer-choice'}}}}
+        with live.Store(lambda: True,tracks=FakeTracks(),runtime_base=d) as store:
+            store._context = context
+            annotated = store._annotate(row)
+            assert annotated['sector_variant_id'] == 'producer-choice', 'live counter selected the wrong recording-context variant'
+            assert annotated['session'] == 2 and annotated['recording_session'] == 1
+            assert annotated['id'] == row['id'] and annotated['session_id'] == row['session_id']
+            expected = td.annotate_index({'laps':[dict(row,session=1)]},context,definitions,FakeTracks())['laps'][0]
+            assert annotated['larger_sectors'] == expected['larger_sectors']
+
+
+def t_unknown_track_recovery_keeps_the_live_pool_without_relabeling_archive_rows():
+    with tempfile.TemporaryDirectory() as d:
+        path = write_circle_recording(d)
+        with live.Store(lambda: True,tracks=FakeTracks(known=False),cars=FakeCars(),
+                        details_max=1,queue_max=4096) as store:
+            feed(store,path); before = store.snapshot()
+            old = next(r for r in before['laps'] if r['lap'] == 2)
+            store.bind_recording(path)
+            restored = wait_ready(lambda:store.detail(old['id']))['lap']
+            current = store.snapshot()['current']
+            assert restored['session_id'] == current['session_id']
+            assert gt7_comparison.compare(restored,current)['compatible'], 'recovery changed the unknown-track live cohort'
+            assert restored['rec'] == store.generation and restored['session'] == old['session']
+            mapped_identity = dict(old,session=2,recording_session=1,session_id=store.generation+':s999')
+            mapped = store.recording_detail(gt7_context.source_identity(path),path,1,2,identity=mapped_identity)['lap']
+            mapped_current = dict(current,session=2,session_id=mapped_identity['session_id'])
+            assert gt7_comparison.compare(mapped,mapped_current)['compatible'], 'recovery lost the independent live session counter'
+            assert mapped['session'] == 2 and mapped['recording_session'] == 1
+            archived = store.recording_detail(gt7_context.source_identity(path),path,1,2)['lap']
+            assert archived['rec'] == gt7_context.source_identity(path) and archived['session'] == 1
+            assert not gt7_comparison.compare(archived,current)['compatible'], 'unknown archive sources must not enter the live pool'
+
+
 if __name__ == '__main__':
     for name, fn in sorted(list(globals().items())):
         if name.startswith('t_') and callable(fn): fn(); print('PASS', name)
