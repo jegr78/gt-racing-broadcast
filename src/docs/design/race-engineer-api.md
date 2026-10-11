@@ -50,6 +50,15 @@ apply to failed work; oversize results are explicitly unavailable. Multiple read
 of the same measured/context/definition pair share one task. Current detail updates
 remain provisional and never contribute to confirmed best or theoretical values.
 
+Provisional comparisons cache one completed result per ordered pair and semantic
+context. Measured trace growth schedules at most one concurrent refresh per pair
+and returns that completed observed prefix while the refresh runs. Context, notes,
+strategy, quality, source/session and definition changes invalidate reuse. Content
+hashes suppress repeated unchanged work; hashes are evicted with their replies.
+Each read still resolves both selectors and current reference authorization.
+Growing-packet and pending-browser regressions cover #851; complete reference or
+latest confirmed outlines independently stabilize map and full chart bounds.
+
 Six focused tests exercise real signed HTTP, context/definition revisions, compact
 and incremental publications, comparison math and bounded concurrent preparation.
 The actual Control Center delta function is executed in Chromium against the same

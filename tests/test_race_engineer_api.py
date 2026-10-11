@@ -76,6 +76,104 @@ def t_shared_comparison_matches_control_center_and_observed_prefix():
             finally: service.close()
 
 
+def t_growing_provisional_pair_serves_completed_prefix_and_refreshes():
+    import gt7_recording
+    import gt7_telemetry
+    with tempfile.TemporaryDirectory() as d:
+        path = write_circle_recording(d, n=200)
+        packets = [(wall, gt7_telemetry.parse_packet(plain))
+                   for wall, _, plain in gt7_recording.Recording(path).packets()]
+        with live.Store(lambda: True, tracks=FakeTracks(), cars=FakeCars(), queue_max=4096) as store:
+            service = api.Service(store)
+            try:
+                initial = [(wall, packet) for wall, packet in packets if packet.lap < 4]
+                growing = [(wall, packet) for wall, packet in packets if packet.lap == 4]
+                for wall, packet in initial + growing[:40]:
+                    store.put(packet, wall)
+                assert store.flush(10)
+                snap = store.snapshot()
+                a = next(row["id"] for row in snap["laps"] if row["comparison_eligible"])
+                b = snap["current"]["id"]
+                query = lambda: service.compare(a, b, lambda _: None)
+                previous = wait_ready(query)
+                assert previous["compatible"] and previous["provisional"]
+                for start in (40, 80, 120):
+                    for wall, packet in growing[start:start+40]:
+                        store.put(packet, wall)
+                    assert store.flush(10)
+                    current = store.snapshot()["current"]
+                    assert current["id"] == b and current["state"] == "provisional"
+                    result = query()
+                    assert result["state"] == "ready", "growing trace hid the completed pair"
+                    assert result["provisional"] and result["mini_sectors"]["a"]
+                    assert result["delta"] and result["b"]["distance_m"] <= current["distance_m"]
+                    latest = wait_ready(query, matches=lambda r, current=current:
+                        r.get("b", {}).get("distance_m") == current["distance_m"])
+                    assert latest["b"]["distance_m"] > previous["b"]["distance_m"]
+                    assert any(v is not None for v in latest["mini_sectors"]["b"])
+                    previous = latest
+                original = service._detail
+                for field, value in (("context_revision", 999), ("definition_fingerprint", "new-definition"),
+                                     ("strategy", {"fuel_map": 7}), ("notes", [{"id": "new", "scope": "lap", "text": "Changed"}])):
+                    def revised(identity, reference, field=field, value=value):
+                        detail = original(identity, reference)
+                        if identity == b:
+                            detail["lap"][field] = value
+                        return detail
+                    service._detail = revised
+                    assert query()["state"] == "pending", "semantic change reused stale provisional analysis"
+                    changed = wait_ready(query)
+                    assert changed["b"][field] == value
+                service._detail = original
+            finally:
+                service.close()
+
+
+def t_provisional_refresh_coalesces_readers_while_preparation_is_blocked():
+    with tempfile.TemporaryDirectory() as d:
+        with live.Store(lambda: True, tracks=FakeTracks(), cars=FakeCars(), queue_max=4096) as store:
+            feed(store, write_circle_recording(d))
+            service = api.Service(store)
+            release, entered = threading.Event(), threading.Event()
+            try:
+                snap = store.snapshot()
+                a = next(row["id"] for row in snap["laps"] if row["comparison_eligible"])
+                b = snap["current"]["id"]
+                query = lambda: service.compare(a, b, lambda _: None)
+                before = wait_ready(query)
+                original_detail, original_prepare = service._detail, service._prepare
+                revision = [0]
+                calls = []
+                def growing(identity, reference):
+                    result = original_detail(identity, reference)
+                    if identity == b:
+                        result["lap"]["distance_m"] += revision[0]
+                    return result
+                def held(rows):
+                    calls.append(1)
+                    entered.set()
+                    assert release.wait(5)
+                    return original_prepare(rows)
+                service._detail, service._prepare = growing, held
+                revision[0] = 10
+                assert query()["state"] == "ready"
+                assert entered.wait(2)
+                started = time.monotonic()
+                for n in range(20, 60):
+                    revision[0] = n
+                    result = query()
+                    assert result["b"]["distance_m"] == before["b"]["distance_m"]
+                assert time.monotonic() - started < 1
+                assert len(calls) == 1 and len(service._pending) == 1 and service._queue.qsize() == 0
+                release.set()
+                latest = wait_ready(query, matches=lambda r:
+                    r.get("b", {}).get("distance_m") == before["b"]["distance_m"] + revision[0])
+                assert latest["provisional"]
+            finally:
+                release.set()
+                service.close()
+
+
 def t_http_current_access_reference_revoke_and_query_boundaries():
     import threading
     import urllib.request
@@ -341,7 +439,7 @@ def t_preparation_cache_bounds_apply_to_failures_and_large_results():
         try:
             for n in range(30):
                 service._remember('small'+str(n), dict(state='unavailable'))
-            assert len(service._cache) <= 16
+            assert len(service._cache) <= 16 and set(service._versions) == set(service._cache)
             for n in range(30):
                 service._remember(str(n), dict(state='unavailable', data='x' * 1200000))
             assert len(service._cache) <= 16 and sum(len(json.dumps(r).encode()) for r in service._cache.values()) <= 16777216

@@ -180,6 +180,7 @@ class Service:
         self._lock = threading.Lock()
         self._queue = queue.Queue(maxsize=16)
         self._cache = collections.OrderedDict()
+        self._versions = {}
         self._pending = set()
         self._stop = threading.Event()
         self._worker = threading.Thread(
@@ -260,17 +261,53 @@ class Service:
         key = hashlib.sha256(
             json.dumps(rows, sort_keys=True, allow_nan=False).encode()
         ).hexdigest()
+        content = key
+        if any(row.get("state") == "provisional" for row in rows):
+            # Measured prefixes grow, but semantic context and authorization must
+            # still invalidate completed work. Keep one refresh per stable pair.
+            stable = []
+            for row in rows:
+                if row.get("state") != "provisional":
+                    stable.append(row)
+                    continue
+                fields = FIELDS - {
+                    "version",
+                    "elapsed_s",
+                    "distance_m",
+                    "length_m",
+                    "fuel_used_l",
+                    "top_speed_kmh",
+                }
+                stable.append(
+                    dict(
+                        project(row, fields),
+                        context_settings=row.get("context_settings", {}),
+                        strategy=row.get("strategy", {}),
+                        notes=row.get("notes", []),
+                        rec=row.get("rec"),
+                        session=row.get("session"),
+                    )
+                )
+            key = hashlib.sha256(
+                json.dumps(stable, sort_keys=True, allow_nan=False).encode()
+            ).hexdigest()
         with self._lock:
-            if key in self._cache:
+            cached = self._cache.get(key)
+            if cached is not None and self._versions.get(key) == content:
                 return copy.deepcopy(self._cache[key])
             if key not in self._pending:
                 try:
-                    self._queue.put_nowait((key, rows))
+                    self._queue.put_nowait((key, content, rows))
                     self._pending.add(key)
                 except queue.Full:
-                    return dict(
-                        version=1, generation=self.live.generation, state="unavailable"
-                    )
+                    if cached is None:
+                        return dict(
+                            version=1,
+                            generation=self.live.generation,
+                            state="unavailable",
+                        )
+            if cached is not None:
+                return copy.deepcopy(cached)
         return dict(version=1, generation=self.live.generation, state="pending")
 
     def _prepare(self, rows):
@@ -284,35 +321,39 @@ class Service:
             **gt7_comparison.compare(a, b),
         )
 
-    def _remember(self, key, result):
+    def _remember(self, key, result, content=None):
         if len(json.dumps(result, allow_nan=False).encode()) > 2097152:
             result = dict(
                 version=1, generation=self.live.generation, state="unavailable"
             )
         with self._lock:
             self._cache[key] = result
+            self._cache.move_to_end(key)
+            self._versions[key] = content
             while (
                 len(self._cache) > 16
                 or sum(len(json.dumps(r).encode()) for r in self._cache.values())
                 > 16777216
             ):
-                self._cache.popitem(last=False)
+                old, _ = self._cache.popitem(last=False)
+                self._versions.pop(old, None)
 
     def _run(self):
         while not self._stop.is_set():
             try:
-                key, rows = self._queue.get(timeout=0.1)
+                key, content, rows = self._queue.get(timeout=0.1)
             except queue.Empty:
                 continue
             try:
                 result = self._prepare(rows)
-                self._remember(key, result)
+                self._remember(key, result, content)
             except (ValueError, TypeError, KeyError, OSError):
                 self._remember(
                     key,
                     dict(
                         version=1, generation=self.live.generation, state="unavailable"
                     ),
+                    content,
                 )
             finally:
                 with self._lock:

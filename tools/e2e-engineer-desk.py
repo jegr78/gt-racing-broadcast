@@ -30,6 +30,62 @@ async def main():
                 assert await page.locator('#chart path').count() >= 2
                 assert await page.locator('#sectors tbody tr').first.locator('td').nth(2).inner_text() == 'Unavailable'
                 assert await page.locator('#zoom-to').input_value() == '1000'
+                # A pending comparison must still use a completed lap as the outline.
+                async def pending_pair(route):
+                    await route.fulfill(json=dict(version=1, generation=fixture.live.generation, state='pending'))
+                await page.route('**/race-engineer/compare?*', pending_pair)
+                await page.wait_for_function('() => document.getElementById("comparison-state").textContent === "Comparison pending"')
+                assert await page.locator('#zoom-to').input_value() == '1000', 'pending comparison lost full-lap distance'
+                assert await page.locator('#map path').first.get_attribute('data-outline') == 'complete', 'pending comparison lost stable outline'
+                assert await page.locator('#chart text').all_inner_texts() and '1000 m' in await page.locator('#chart').text_content()
+                assert '1000 m' in await page.locator('#delta-chart').text_content(), 'empty delta lost full-lap range'
+                # No eligible A: use the latest confirmed session lap independently.
+                async def no_eligible_reference(route):
+                    response = await route.fetch()
+                    data = await response.json()
+                    for row in data.get('laps', []):
+                        row['comparison_eligible'] = False
+                    await route.fulfill(json=data)
+                await page.route('**/race-engineer/history*', no_eligible_reference)
+                await page.evaluate('() => {EngineerDesk.state.historyRevision = null;}')
+                await page.wait_for_function('() => EngineerDesk.state.laps.length && EngineerDesk.state.laps.every(r => !r.comparison_eligible)')
+                await page.locator('#lap-a').select_option('')
+                latest_confirmed = [r for r in fixture.live.snapshot()['laps'] if r['state'] == 'confirmed'][-1]['id']
+                await page.wait_for_function('(id) => !EngineerDesk.state.a && EngineerDesk.state.outline?.id === id', arg=latest_confirmed)
+                assert await page.locator('#zoom-to').input_value() == '1000'
+                await page.unroute('**/race-engineer/history*', no_eligible_reference)
+                await page.evaluate('() => {EngineerDesk.state.historyRevision = null;}')
+                await page.wait_for_function('() => EngineerDesk.state.a && document.getElementById("comparison-state").textContent === "Comparison pending"')
+                outline = await page.locator('#map path').first.get_attribute('d')
+                import gt7_recording, gt7_telemetry
+                packets = [(wall, gt7_telemetry.parse_packet(plain)) for wall, _, plain in gt7_recording.Recording(fixture.live_path).packets()]
+                last_wall, last_packet = packets[-1]
+                for wall, packet in packets[10:40]:
+                    fixture.live.put(packet._replace(lap=last_packet.lap, last_ms=last_packet.last_ms), last_wall+wall-packets[0][0]+.1)
+                assert fixture.live.flush(10)
+                before_distance = fixture.live.snapshot()['current']['distance_m']
+                await page.wait_for_function('(d) => EngineerDesk.state.detail?.distance_m >= d', arg=before_distance)
+                assert await page.locator('#map path').first.get_attribute('d') == outline, 'growing prefix rescaled outline'
+                async def outside_outline(route):
+                    response = await route.fetch()
+                    data = await response.json()
+                    if data.get('lap', {}).get('state') == 'provisional':
+                        data['lap']['trace'][-1]['x'] += 500
+                        data['lap']['trace'][-1]['z'] += 500
+                    await route.fulfill(json=data)
+                await page.route('**/race-engineer/lap?*', outside_outline)
+                await page.wait_for_function('() => EngineerDesk.state.detail?.trace?.at(-1)?.x > 300')
+                assert await page.locator('#map path').first.get_attribute('d') == outline, 'live coordinate outside outline changed map bounds'
+                await page.unroute('**/race-engineer/lap?*', outside_outline)
+                await page.unroute('**/race-engineer/compare?*', pending_pair)
+                await page.wait_for_function('() => EngineerDesk.state.pair?.state === "ready" && EngineerDesk.state.pair?.delta?.length > 0')
+                assert await page.locator('#delta').inner_text() != 'Unavailable'
+                assert await page.locator('#sectors tbody tr').first.locator('td').nth(1).inner_text() != 'Unavailable'
+                if '--shots' in sys.argv:
+                    for width,height,name in [(1440,1050,'desktop'),(1024,1100,'tablet'),(390,900,'phone')]:
+                        await page.set_viewport_size({'width':width,'height':height})
+                        await page.screenshot(path=str(ROOT/f'src/docs/wiki/images/console-race-engineer-{name}.png'),full_page=True)
+                    await page.set_viewport_size({'width':1440,'height':1050})
                 old=fixture.live.snapshot()['laps'][1]['id']
                 await page.locator('#lap-b').select_option(old)
                 assert not await page.locator('#follow').is_checked()
@@ -108,8 +164,6 @@ async def main():
                     facts=await page.evaluate((ROOT/'tools/visual-probe.js').read_text())
                     findings=e2e_visual.evaluate(facts,errors)
                     assert not findings,(name,findings)
-                    if '--shots' in sys.argv:
-                        await page.screenshot(path=str(ROOT/f'src/docs/wiki/images/console-race-engineer-{name}.png'),full_page=True)
                 # The same handler now reads a new real relay generation.
                 import race_engineer_live as live
                 import race_engineer_api as api
