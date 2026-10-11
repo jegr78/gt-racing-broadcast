@@ -376,10 +376,12 @@ def t_active_recording_prefix_survives_appends_and_detects_changed_measurements(
                 assert store.detail(brief['id'])['state'] == 'ready'
                 assert store.stats()['replays'] == 1, 'reader replayed after a normal append'
                 rec = gr.Recording(part)
+                offset = None
                 for _wall, _kind, plain in rec.packets():
                     if tm.parse_packet(plain).lap == 2:
                         offset = rec.record_start + gr._REC.size + tm.OFF_SPEED
                         break
+                assert offset is not None, 'fixture has no timed lap to modify'
                 with open(part, 'r+b') as f:
                     f.seek(offset)
                     f.write(struct.pack('<f', 55.0))
@@ -482,10 +484,12 @@ def t_unconfirmed_recorded_prefix_retries_after_confirming_append():
     with tempfile.TemporaryDirectory() as d:
         path = write_circle_recording(d)
         rec = gr.Recording(path)
+        prefix = None
         for _wall, _kind, plain in rec.packets():
             if tm.parse_packet(plain).lap == 3:
                 prefix = rec.pos
                 break
+        assert prefix is not None, 'fixture has no closing lap boundary'
         with open(path, 'rb') as f:
             raw = f.read()
         part = path + '.part'
@@ -533,10 +537,12 @@ def t_prefix_byte_boundary_excludes_later_packets():
     with tempfile.TemporaryDirectory() as d:
         path = write_circle_recording(d)
         rec = gr.Recording(path)
+        prefix = None
         for _wall, _kind, plain in rec.packets():
             if tm.parse_packet(plain).lap == 3:
                 prefix = rec.pos
                 break
+        assert prefix is not None, 'fixture has no closing lap boundary'
         result = live._bounded_recording(path, gt7_context.source_identity(path),
                                         FakeTracks(), FakeCars(), {(1, 2, None)}, limit=prefix)
         assert {r['lap'] for r in result['laps']} <= {1, 2}
@@ -593,10 +599,12 @@ def t_recorded_prefix_ending_midlap_waits_until_the_known_lap_end():
     with tempfile.TemporaryDirectory() as d:
         path = write_circle_recording(d)
         rec = gr.Recording(path)
+        prefix = None
         for wall, _kind, _plain in rec.packets():
             if wall >= 1_700_000_030.0:
                 prefix = rec.pos
                 break
+        assert prefix is not None, 'fixture ends before the requested mid-lap prefix'
         with open(path, 'rb') as f:
             raw = f.read()
         part = path + '.part'

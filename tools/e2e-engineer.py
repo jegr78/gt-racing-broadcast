@@ -6,7 +6,8 @@ import tempfile
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'tests'))
-from engineer_ui_fixture import Fixture,web_fixture,gate
+from engineer_ui_fixture import Fixture,gate
+from ai_ui_fixture import web_fixture
 
 
 async def verify(pw,fixture,ui,console,shots=False):
@@ -28,7 +29,7 @@ async def verify(pw,fixture,ui,console,shots=False):
     await first_captured.wait()
     await page.locator('#engineer-enabled').check();await page.locator('#engineer-save').click()
     await page.wait_for_function('() => document.getElementById("engineer-status").textContent.startsWith("Engineer access is enabled")')
-    first_release.set();await old_pending;await page.unroute_all(behavior='wait')
+    first_release.set();assert await old_pending is None;await page.unroute_all(behavior='wait')
     assert await page.locator('#engineer-enabled').is_checked(),'older settings response overwrote a newer save'
     assert fixture.access().read()['enabled']
     await page.locator('#engineer-label').fill('<img src=x onerror="window.engineerInjected=true">')
@@ -85,7 +86,7 @@ async def verify(pw,fixture,ui,console,shots=False):
     pending=asyncio.create_task(page.evaluate('() => RacecastEngineer.settings()'))
     await captured.wait();await page.evaluate('() => useProfile("other")')
     await page.wait_for_function('() => tmState.profile==="other"')
-    release.set();await pending;await page.unroute_all(behavior='wait')
+    release.set();assert await pending is None;await page.unroute_all(behavior='wait')
     assert await page.locator('#engineer-grants li').count()==0
     await page.evaluate('() => useProfile("profile")')
     await page.wait_for_function('() => tmState.profile==="profile"')
