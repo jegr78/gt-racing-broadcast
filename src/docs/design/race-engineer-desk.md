@@ -11,3 +11,27 @@ Requirements and evidence for #826.
 | Reconnect and generation lifecycle | Retained selection/zoom, generation identity | Connection restored retains selected lap | Relay generation change resets view visibly | Two generations of real live store |
 | Desktop/tablet/phone and existing Crew chat | Responsive layout and existing chat routes | Three rendered viewports, chat roundtrip | No overflow, no operational controls, safe text rendering | Screenshots and visual rules |
 | Producer activation and operational limits | Operator wiki and matched screenshots | Published content and images | Volatile/evicted/recovery states explained | Published wiki browser verification |
+
+
+## Browser lifecycle evidence
+
+The real signed Console fixture uses shared synthetic GT7 packets and independent
+browsers. It verifies measured instruments, provisional empty sectors, manual
+selection and zoom, new-lap notifications, producer note revisions, shared reference
+revocation during a held reply, pause/menu/stale/missing channels, chat, network
+reconnect, new relay generation and role/feature/source access loss during held
+detail responses. Instrument refresh continues while analysis responses are pending.
+
+Live values poll approximately twice per second independently of larger detail and
+comparison replies. Local monotonic age continues during network interruptions.
+Authoritative role, opt-in and source access loss clears all protected state, aborts
+requests and stops polling. Technical analysis errors retry without pretending to
+have received new values. The shared server workers prepare comparisons and recovery;
+selection and zoom remain local to each browser.
+
+Desktop, tablet and compact phone screenshots were rendered and inspected. The
+existing visual probe's six rules pass at 1440, 1024 and 390 px, and all twenty
+ordinary application surfaces pass their visual run. The existing producer access
+browser workflow still passes. Independent security review reproduced the source
+authorization distinction; its correction has a failing-then-passing runtime proof
+and the final review has no open findings.

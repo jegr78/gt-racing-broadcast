@@ -34,7 +34,10 @@ async def main():
                 await page.locator('#lap-b').select_option(old)
                 assert not await page.locator('#follow').is_checked()
                 await page.wait_for_function('(id) => EngineerDesk.state.detail?.id === id',arg=old)
-                await page.locator('#zoom-from').fill('100');await page.locator('#zoom-from').press('Tab')
+                await page.locator('#zoom-from').fill('100')
+                await asyncio.sleep(.7)
+                assert await page.locator('#zoom-from').input_value() == '100', 'refresh overwrote focused distance input'
+                await page.locator('#zoom-from').press('Tab')
                 await page.locator('#zoom-to').fill('700');await page.locator('#zoom-to').press('Tab')
                 assert await page.evaluate('() => EngineerDesk.state.zoom') == [100,700]
                 context=gate.m.gt7_context.Store.prepared(str(fixture.root/fixture.profile/'telemetry-recordings'))
