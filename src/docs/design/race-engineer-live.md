@@ -42,3 +42,12 @@ deletion, cached-summary reads after identity replacement, late recovery target
 loss, context revision collisions across sources, stale confirmation after context
 failure, epoch-offset reuse and unvalidated context source replacement. Focused
 fixtures cover each case, including recovery after valid context returns.
+
+Twenty-eight assurances were individually broken at their intended assertions
+and restored: collection/profile ownership, queue and history/sample/byte caps,
+GT7 confirmation, stale receipt, source/context identity, context failure,
+late recovery targets, prefix byte/integrity/append behavior, original measurement
+identity, pending/expiry boundaries, recorder lifecycle and known comparison
+conditions. The budget fixtures force actual serialized context growth. Active
+recording tests include both a mid-lap prefix and a prefix closed before its GT7
+time arrives. An expired confirmation is unavailable rather than retried forever.
