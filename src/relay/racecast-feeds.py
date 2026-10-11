@@ -10378,6 +10378,13 @@ class QuietThreadingHTTPServer(ThreadingHTTPServer):
 # Human-facing /console PAGE routes (segment tuples, sans the leading "console").
 # A GET to one of these with a missing/invalid token, when OAuth is configured,
 # serves the launcher (Login with Discord) instead of a naked 401 JSON page.
+def engineer_page_for(console_page):
+    """The discovered Console directory works for source, flat packages and binaries."""
+    if not console_page:return None
+    page=os.path.join(os.path.dirname(console_page),"race-engineer.html")
+    return page if os.path.isfile(page) else None
+
+
 _CONSOLE_PAGE_GETS = frozenset({(), ("cockpit",), ("panel",),
                                 ("health-monitor",), ("race-control",), ("race-engineer",), ("buttons",)})
 
@@ -13152,7 +13159,7 @@ def main():
     program_audio_service = (ProgramAudioService(relay, LOG)
                              if relay.program_audio else None)
     engineer_access=race_engineer_access.Store(runtime,available=telemetry_active(args.solo,os.environ))
-    engineer_page_path=os.path.join(os.path.dirname(here),"console","race-engineer.html")
+    engineer_page_path=engineer_page_for(console_page_path)
     handler = make_handler(relay, panel_path, hud_source, hud_path, assets_dir,
                            timer_store, setup_ctl,
                            overlay_dir=args.overlay_dir, chat_store=chat_store,

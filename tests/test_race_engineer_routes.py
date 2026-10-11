@@ -116,6 +116,17 @@ def t_local_http_profile_origin_and_error_contract():
         finally:server.shutdown();server.server_close()
 
 
+def t_engineer_page_resolves_in_source_flat_package_and_frozen_layouts():
+    with tempfile.TemporaryDirectory() as d:
+        for relative in ('src/console','package','frozen/console'):
+            root=Path(d)/relative;root.mkdir(parents=True)
+            console=root/'console.html';console.write_text('Console')
+            engineer=root/'race-engineer.html';engineer.write_text('Engineer')
+            assert fixture.m.engineer_page_for(str(console))==str(engineer)
+            engineer.unlink();assert fixture.m.engineer_page_for(str(console)) is None
+        assert fixture.m.engineer_page_for(None) is None
+
+
 if __name__=='__main__':
     for name,fn in sorted(list(globals().items())):
         if name.startswith('t_') and callable(fn):fn();print('PASS',name)
