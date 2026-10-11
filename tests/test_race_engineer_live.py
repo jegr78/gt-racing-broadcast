@@ -412,12 +412,34 @@ def t_active_samples_and_context_revisions_respect_byte_budgets():
             feed(store, path)
             before = store.stats()['detail_bytes']
             context = gt7_context.Store.for_recording(path)
-            context.save({'notes': [], 'sessions': {'1': {'confirmed': True,
-                'stints': [{'id': 'initial', 'start_lap': 1, 'confirmed': True,
-                            'compound': 'RM', 'strategy': {'fuel_map': 1}}]}}}, 0)
             with patch.object(live, 'DETAIL_BYTES_MAX', before + 1):
+                context.save({'notes': [], 'sessions': {'1': {'confirmed': True,
+                    'stints': [{'id': 'initial', 'start_lap': 1, 'confirmed': True,
+                                'compound': 'RM', 'strategy': {'fuel_map': 1,
+                                'note': 'Synthetic economy context ' * 40}}]}}}, 0)
                 store._read_context()
                 assert store.stats()['detail_bytes'] <= before + 1
+
+
+def t_context_revision_rechecks_the_individual_entry_budget():
+    import gt7_context
+    from unittest.mock import patch
+    with tempfile.TemporaryDirectory() as d:
+        path = write_circle_recording(d)
+        with live.Store(lambda: True, tracks=FakeTracks(), cars=FakeCars(), queue_max=4096) as store:
+            store.bind_recording(path)
+            feed(store, path)
+            count = store.stats()['details']
+            cap = max(store._sizes.values()) + 1
+            context = gt7_context.Store.for_recording(path)
+            with patch.object(live, 'ENTRY_BYTES_MAX', cap):
+                context.save({'notes': [], 'sessions': {'1': {'confirmed': True,
+                    'stints': [{'id': 'initial', 'start_lap': 1, 'confirmed': True,
+                                'compound': 'RM', 'strategy': {'fuel_map': 1,
+                                'note': 'Synthetic economy context ' * 40}}]}}}, 0)
+                store._read_context()
+                assert store.stats()['details'] < count
+                assert all(size <= cap for size in store._sizes.values())
 
 
 def t_recovery_refuses_a_prefix_changed_during_preparation():
