@@ -591,9 +591,10 @@ class Store:
                              os.path.join(self._definitions.bundled, os.path.basename(self._definitions.path(identity['id'], identity['reverse'])))):
                 try:
                     stat = os.stat(filename)
-                    stamps.append((filename, stat.st_size, stat.st_mtime_ns))
+                    stamps.append((filename, stat.st_dev, stat.st_ino, stat.st_size,
+                                   stat.st_mtime_ns, stat.st_ctime_ns))
                 except OSError:
-                    stamps.append((filename, None, None))
+                    stamps.append((filename, None, None, None, None, None))
         self._definition_stamp = tuple(stamps)
 
     def _record_stamp(self, source, path):
