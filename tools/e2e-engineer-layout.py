@@ -53,6 +53,7 @@ async def main():
                     positions=await page.evaluate('() => ["lap-time","delta","best","race-position"].map(id=>{const r=document.getElementById(id).getBoundingClientRect();return {x:r.x,y:r.y};})')
                     if width>600:
                         assert max(p['y'] for p in positions)-min(p['y'] for p in positions)<2, 'headline metrics were not one row'
+                        assert all(a['x']<b['x'] for a,b in zip(positions,positions[1:],strict=False)), 'headline metric order differs from the approved draft'
                     else:
                         assert abs(positions[0]['y']-positions[1]['y'])<2 and abs(positions[2]['y']-positions[3]['y'])<2, 'phone headline did not use two rows'
                     assert await page.locator('#channel').evaluate('(el)=>!!el.closest(".plot-card")'), 'chart controls were separated from charts'
