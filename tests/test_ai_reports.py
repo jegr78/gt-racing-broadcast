@@ -95,6 +95,8 @@ def t_history_provenance_exports_and_profile_scope():
         found=store.get(run['id']);assert not found['stale']
         assert found.get('input_file_fingerprints',{}).get('summary.md')==hashlib.sha256((Path(run['directory'])/'package/summary.md').read_bytes()).hexdigest()
         assert found['report']['language']=='de' and found['package_fingerprint']==p['fingerprint']
+        assert found['report']['findings'][0]['comparisons'][0]['lap']==3
+        assert found['report']['findings'][0]['comparisons'][0]['recording_id']==p['selection']['recording_id']
         assert store.history(s.name)['runs'][0]['id']==run['id']
         other=r.Store(Path(d)/'other','other',Path(d)/'machine')
         fail(lambda:other.get(run['id']),'not_found')

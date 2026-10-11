@@ -113,12 +113,12 @@ def _relevance(package):
     prune(doc);return ai_package.fingerprint(doc)
 
 
-def stale(package,source_factory):
+def stale(package,source_factory,enrich_source=None):
     try:
         selection=package['selection'];source=source_factory(selection['recording'])
         refs=[(source_factory(r['rec']),r['session'],r['lap']) for r in package['references']]
         current=ai_package.build(source,selection['session'],laps=selection['laps'],references=refs,
-            template=package['template'],goal=package['goal'],questions=package['questions'],language=package['language'])
+            template=package['template'],goal=package['goal'],questions=package['questions'],language=package['language'],enrich_source=enrich_source)
         return dict(stale=_relevance(package)!=_relevance(current),reason='Relevant source, context or reference definitions changed' if _relevance(package)!=_relevance(current) else None)
     except (ValueError,OSError,KeyError,ai_package.gt7_recording.RecordingError):
         return dict(stale=True,reason='Current source/context/reference selection is unavailable; the historical snapshot is retained')
@@ -158,9 +158,9 @@ def verify_input_files(directory,root,run,required=False):
 
 
 class Store:
-    def __init__(self,profile_root,profile,machine,source_factory=None):
+    def __init__(self,profile_root,profile,machine,source_factory=None,enrich_source=None):
         self.root=Path(profile_root).resolve();self.profile=profile;self.machine=Path(machine).resolve()
-        self.base=self.root/'telemetry-analyses';self.source_factory=source_factory
+        self.base=self.root/'telemetry-analyses';self.source_factory=source_factory;self.enrich_source=enrich_source
     def directory(self,job_id):
         if not isinstance(job_id,str) or not re.fullmatch('[0-9a-f]{32}',job_id):raise ReportError('invalid_job','Invalid analysis job ID')
         for path in self.base.glob('*/'+job_id):
@@ -176,7 +176,7 @@ class Store:
             package=read_package(directory,self.root)
             checked=validate(_read(directory/'structured-output.json',self.root),package)
             if checked!=run.get('report'):raise ReportError('invalid_artifact','Stored report differs from validated output')
-            run.update(stale(package,self.source_factory) if check_stale and self.source_factory else dict(stale=False,reason=None))
+            run.update(stale(package,self.source_factory,self.enrich_source) if check_stale and self.source_factory else dict(stale=False,reason=None))
         else:
             run.update(stale=False,reason=None,report=None)
             if run['state'] not in ai_jobs.TERMINAL:
@@ -186,6 +186,9 @@ class Store:
         if run.get('report'):
             for item in run['report']['findings']+run['report']['exercises']:
                 for evidence in item['evidence']:evidence['label']=fact_label(evidence['fact_id'],package)
+                partners={c['reference_id'] for c in package['comparisons'] if c['lap_id']==item['lap_id'] and c['reference_id']!=item['lap_id']}
+                item['comparisons']=[dict(rec=lap['rec'],session=lap['session'],lap=lap['lap'],recording_id=lap['recording_id'])
+                    for lap in ai_package.lap_map(package['laps']+package['references']).values() if lap['id'] in partners]
         return dict(run,ok=True)
     def history(self,rec=None):
         items=[]
