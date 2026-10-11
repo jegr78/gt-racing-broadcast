@@ -12,7 +12,7 @@ The standing release PR is outside this work.
   return the latest completed authorized comparison while refreshing it; stabilize
   map bounds and chart distance against a complete outline. Use the replay fixture
   while developing the reusable tool in #856.
-- [ ] #856: package recording replay as a maintainer tool with temporary copied
+- [x] #856: package recording replay as a maintainer tool with temporary copied
   sources, signed engineer access, paced/accelerated playback, bounded pre-feed,
   explicit data update and offline fallback; run synthetic checks in CI.
 - [ ] #852: show car and granted reference names, reset manual new-lap notices,
