@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.13.0](https://github.com/jegr78/gt-racing-broadcast/compare/v1.12.1...v1.13.0) (2026-10-11)
+
+
+### Features
+
+* **telemetry:** add editable session context and notes ([#827](https://github.com/jegr78/gt-racing-broadcast/issues/827)) ([e71051d](https://github.com/jegr78/gt-racing-broadcast/commit/e71051d579d70f4430a567bc006b3799c35d008d))
+* **telemetry:** add reviewed corners, larger sectors and a shared track editor ([#831](https://github.com/jegr78/gt-racing-broadcast/issues/831)) ([36f2f52](https://github.com/jegr78/gt-racing-broadcast/commit/36f2f52e2ee246057b5cc8890f2b37e0912c66ea))
+* **telemetry:** add subscription CLI agent adapters ([#833](https://github.com/jegr78/gt-racing-broadcast/issues/833)) ([e7ac632](https://github.com/jegr78/gt-racing-broadcast/commit/e7ac632e9b94a8b96c4caea0b3ecab97735520ef))
+* **telemetry:** add vehicle shift references and recorded upshift comparisons ([#832](https://github.com/jegr78/gt-racing-broadcast/issues/832)) ([2c9c08c](https://github.com/jegr78/gt-racing-broadcast/commit/2c9c08c57d8897bc72e63115458bbc80f19b7e4c))
+* **telemetry:** build AI analysis packages and evidence templates ([#834](https://github.com/jegr78/gt-racing-broadcast/issues/834)) ([5138c0b](https://github.com/jegr78/gt-racing-broadcast/commit/5138c0b1e6ee15917c7d2d5a6fa5bbf992e8a543))
+* **telemetry:** expose recorded channels and raw time detail ([#828](https://github.com/jegr78/gt-racing-broadcast/issues/828)) ([eea9d8f](https://github.com/jegr78/gt-racing-broadcast/commit/eea9d8f19e7b2020c9e488b6f27767c5072b2b60))
+* **telemetry:** GT7 telemetry recording, track recognition and lap analysis ([#785](https://github.com/jegr78/gt-racing-broadcast/issues/785)) ([#802](https://github.com/jegr78/gt-racing-broadcast/issues/802)) ([a2f64e1](https://github.com/jegr78/gt-racing-broadcast/commit/a2f64e13eb55900d15f8b24fd67157f29715a1b8))
+* **telemetry:** run explicitly confirmed AI analysis jobs ([#836](https://github.com/jegr78/gt-racing-broadcast/issues/836)) ([6293d6f](https://github.com/jegr78/gt-racing-broadcast/commit/6293d6fbd018fcaf051783334d7b4b7651c51556))
+* **telemetry:** validate and retain AI analysis reports ([#837](https://github.com/jegr78/gt-racing-broadcast/issues/837)) ([c73266b](https://github.com/jegr78/gt-racing-broadcast/commit/c73266b11b6f1e1c4ca2aa5b12af8abe3c6ac833))
+* **ui:** delete a telemetry recording from the Telemetry view ([#808](https://github.com/jegr78/gt-racing-broadcast/issues/808)) ([f1841d0](https://github.com/jegr78/gt-racing-broadcast/commit/f1841d03ca45518044bdc5bf4014ebac9920a7d4))
+
+
+### Bug Fixes
+
+* **telemetry:** reconcile lap timing and distinguish capture quality ([#815](https://github.com/jegr78/gt-racing-broadcast/issues/815)) ([ed7f7af](https://github.com/jegr78/gt-racing-broadcast/commit/ed7f7afc8df3e11de4a00d0bc55d2b3c2b7a7ac4))
+* **ui:** make the Telemetry view readable and show the report's figures ([#806](https://github.com/jegr78/gt-racing-broadcast/issues/806)) ([e1073d0](https://github.com/jegr78/gt-racing-broadcast/commit/e1073d022cd86524fc544be5afedc6f85f82c9e9))
+
 ## [1.12.1](https://github.com/jegr78/gt-racing-broadcast/compare/v1.12.0...v1.12.1) (2026-10-08)
 
 
