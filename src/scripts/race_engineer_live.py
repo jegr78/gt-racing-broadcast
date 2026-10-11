@@ -507,7 +507,7 @@ class Store:
     def bind_recording(self, path):
         """Local producer association, never a Console path selector."""
         source = gt7_context.source_identity(path)
-        if self._recording is None or self._recording[1] != source:
+        if self._recording is None or self._recording_started is None or self._recording[1] != source:
             self._session_offset = self._replay.eng.session - 1
             packet = next(gt7_recording.Recording(path).packets(), None)
             self._recording_started = packet[0] if packet else None
