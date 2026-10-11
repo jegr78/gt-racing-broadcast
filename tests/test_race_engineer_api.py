@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Versioned public projections, shared math and signed request-level authorization."""
 import json
+import os
+import threading
 import sys
 import tempfile
 import time
@@ -16,12 +18,13 @@ import test_console_gate as gate
 from test_race_engineer_live import feed, FakeCars, FakeTracks, write_circle_recording
 
 
-def wait_ready(fn):
+def wait_ready(fn, matches=None):
     end = time.monotonic() + 10
     while time.monotonic() < end:
         result = fn()
         if result['state'] != 'pending':
-            return result
+            if matches is None or matches(result):
+                return result
         time.sleep(.01)
     raise AssertionError('shared work never completed')
 
@@ -193,31 +196,143 @@ def t_notes_context_and_definition_edits_change_prepared_analysis():
         data['notes'] = [{'id':'note-a','scope':'lap','session':1,'lap':2,'text':'Declared coaching note'}]
         context.save(data, doc['revision'])
         with live.Store(lambda: True, tracks=FakeTracks(), cars=FakeCars(), runtime_base=d, queue_max=4096) as store:
-            store.bind_recording(path); feed(store,path); store._read_context()
+            store.bind_recording(path); feed(store,path)
             service = api.Service(store)
             try:
                 h = service.history(None); row = next(r for r in h['laps'] if r['lap'] == 2)
-                detail = service.lap(row['id'],lambda _id: None)['lap']
+                detail = wait_ready(lambda: service.lap(row['id'],lambda _id: None),
+                    matches=lambda r: r.get('lap',{}).get('context_revision') == doc['revision']+1)['lap']
                 assert detail['notes'][0]['text'] == 'Declared coaching note'
                 assert 'session' not in detail['notes'][0]
                 ds = td.Store(d, str(Path(d)/'bundled'))
                 saved = ds.save(definition(),0)
-                store._refresh_definitions(); store._read_context()
-                detail = service.lap(row['id'],lambda _id: None)['lap']
+                detail = wait_ready(lambda: service.lap(row['id'],lambda _id: None),
+                    matches=lambda r: r.get('lap',{}).get('definition_fingerprint') == td.fingerprint(saved['definition']))['lap']
                 assert detail['larger_sectors']['reviewed'] and detail['corner_metrics'][0]['number'] == 1
                 expected = td.annotate_index({'laps':[store.detail(row['id'])['lap']]}, data, ds, FakeTracks())['laps'][0]
                 assert detail['larger_sectors'] == expected['larger_sectors']
                 assert service.history(h['revision'])['changed']
                 doc = context.read(); doc['data']['notes'][0]['text'] = 'New producer revision'
-                context.save(doc['data'],doc['revision']); store._read_context()
-                updated = service.lap(row['id'],lambda _id: None)['lap']
+                context.save(doc['data'],doc['revision'])
+                updated = wait_ready(lambda: service.lap(row['id'],lambda _id: None),
+                    matches=lambda r: r.get('lap',{}).get('context_revision') == doc['revision']+1)['lap']
                 assert updated['notes'][0]['text'] == 'New producer revision' and updated['context_revision'] != detail['context_revision']
                 changed = definition(); changed['corners'][0]['number'] = 7
-                ds.save(changed,saved['revision']); store._refresh_definitions(); store._read_context()
-                updated = service.lap(row['id'],lambda _id: None)['lap']
+                saved = ds.save(changed,saved['revision'])
+                updated = wait_ready(lambda: service.lap(row['id'],lambda _id: None),
+                    matches=lambda r: r.get('lap',{}).get('definition_fingerprint') == td.fingerprint(saved['definition']))['lap']
                 assert updated['definition_fingerprint'] != detail['definition_fingerprint']
                 assert updated['corner_metrics'][0]['number'] == 7
             finally: service.close()
+
+
+def t_definition_replacement_with_equal_size_and_mtime_invalidates_analysis():
+    import gt7_track_definitions as td
+    from test_gt7_track_definitions import definition
+    with tempfile.TemporaryDirectory() as d:
+        path=write_circle_recording(d);ds=td.Store(d,str(Path(d)/'bundled'))
+        saved=ds.save(definition(),0)
+        with live.Store(lambda:True,tracks=FakeTracks(),cars=FakeCars(),runtime_base=d,queue_max=4096) as store:
+            store.bind_recording(path);feed(store,path)
+            store.close()  # Isolate invalidation from the periodic worker's timing.
+            store._refresh_definitions();store._read_context()
+            row=next(r for r in store.history(None)['laps'] if r['lap']==2)
+            before=store.detail(row['id'])['lap']
+            recovery_stamp=store._record_stamp(gt7_context.source_identity(path),path)
+            filename=ds.path('ring01',False);original=os.stat(filename)
+            changed=definition();changed['corners'][0]['number']=7
+            ds.save(changed,saved['revision'])
+            os.utime(filename,ns=(original.st_atime_ns,original.st_mtime_ns))
+            replacement=os.stat(filename)
+            assert replacement.st_size==original.st_size and replacement.st_mtime_ns==original.st_mtime_ns
+            assert replacement.st_ino!=original.st_ino, 'fixture did not atomically replace the definition'
+            store._refresh_definitions();store._read_context()
+            after=store.detail(row['id'])['lap']
+            assert after['definition_fingerprint']!=before['definition_fingerprint'], 'equal size/mtime hid a replaced definition'
+            assert after['corner_metrics'][0]['number']==7
+            assert store._record_stamp(gt7_context.source_identity(path),path)!=recovery_stamp
+
+
+def t_recorded_definition_replacement_invalidates_prepared_cache():
+    import gt7_track_definitions as td
+    from test_gt7_track_definitions import definition
+    with tempfile.TemporaryDirectory() as d:
+        path=write_circle_recording(d);source=gt7_context.source_identity(path)
+        ds=td.Store(d,str(Path(d)/'bundled'));saved=ds.save(definition(),0)
+        with live.Store(lambda:True,tracks=FakeTracks(),cars=FakeCars(),runtime_base=d) as store:
+            refresh=store._refresh_definitions
+            store._refresh_definitions=lambda:None  # Keep the timestamp collision deterministic.
+            service=api.Service(store)
+            try:
+                query=lambda:service.lap(f'r:{source}:1:2',lambda _:path)
+                before=wait_ready(query)['lap'];replays=store.stats()['replays']
+                filename=ds.path('ring01',False);original=os.stat(filename)
+                changed=definition();changed['corners'][0]['number']=7
+                saved=ds.save(changed,saved['revision'])
+                os.utime(filename,ns=(original.st_atime_ns,original.st_mtime_ns));refresh()
+                after=wait_ready(query,matches=lambda r:r.get('lap',{}).get('definition_fingerprint')==td.fingerprint(saved['definition']))['lap']
+                assert after['corner_metrics'][0]['number']==7
+                assert before['definition_fingerprint']!=after['definition_fingerprint']
+                assert store.stats()['replays']>replays, 'old prepared cache was reused'
+            finally:service.close()
+
+
+def t_recorded_context_replacement_with_equal_stat_invalidates_preparation():
+    with tempfile.TemporaryDirectory() as d:
+        path=write_circle_recording(d);source=gt7_context.source_identity(path)
+        context=gt7_context.Store.for_recording(path)
+        data=context.read()['data'];data['notes']=[{'id':'n','scope':'recording','text':'Old'}]
+        saved=context.save(data,0)
+        with live.Store(lambda:True,tracks=FakeTracks(),cars=FakeCars(),runtime_base=d) as store:
+            service=api.Service(store)
+            try:
+                query=lambda:service.lap(f'r:{source}:1:2',lambda _:path)
+                before=wait_ready(query)['lap'];original=os.stat(context.path)
+                original_doc=json.loads(Path(context.path).read_text())
+                data['notes'][0]['text']='New';context.save(data,saved['revision'])
+                replacement=json.loads(Path(context.path).read_text())
+                replacement['updated_at']=original_doc['updated_at']
+                gt7_context._atomic(context.path,replacement)
+                os.utime(context.path,ns=(original.st_atime_ns,original.st_mtime_ns))
+                assert os.stat(context.path).st_size==original.st_size
+                after=wait_ready(query)['lap']
+                assert after['context_revision']!=before['context_revision'], 'equal-stat context replacement reused old preparation'
+                assert after['notes'][0]['text']=='New'
+            finally:service.close()
+
+
+def t_expected_definition_waits_for_worker_publication_in_progress():
+    import gt7_track_definitions as td
+    from test_gt7_track_definitions import definition
+    with tempfile.TemporaryDirectory() as d:
+        path=write_circle_recording(d);ds=td.Store(d,str(Path(d)/'bundled'))
+        saved=ds.save(definition(),0)
+        with live.Store(lambda:True,tracks=FakeTracks(),cars=FakeCars(),runtime_base=d,queue_max=4096) as store:
+            store.bind_recording(path);feed(store,path)
+            row=next(r for r in store.history(None)['laps'] if r['lap']==2)
+            service=api.Service(store);entered=threading.Event();release=threading.Event()
+            original=store._annotate
+            def held(row):
+                if threading.current_thread() is store._worker and not release.is_set():
+                    entered.set();assert release.wait(5), 'publication barrier not released'
+                return original(row)
+            try:
+                before=service.lap(row['id'],lambda _:None)['lap']
+                store._annotate=held
+                changed=definition();changed['corners'][0]['number']=7
+                updated=ds.save(changed,saved['revision'])
+                assert entered.wait(5), 'worker did not start updating definition'
+                store._read_context()  # Reproduces the old test's concurrent direct call.
+                assert service.lap(row['id'],lambda _:None)['lap']['definition_fingerprint']==before['definition_fingerprint']
+                def read_and_release():
+                    result=service.lap(row['id'],lambda _:None)
+                    release.set()
+                    return result
+                result=wait_ready(read_and_release,matches=lambda result:
+                    result['lap']['definition_fingerprint']==td.fingerprint(updated['definition']))
+                assert result['lap']['corner_metrics'][0]['number']==7
+            finally:
+                release.set();service.close()
 
 
 def t_preparation_cache_bounds_apply_to_failures_and_large_results():

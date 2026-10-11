@@ -77,9 +77,9 @@ def _record_stamp(source, path):
     context_path = gt7_context._stem(path) + '.context.json'
     try:
         ctx = os.stat(context_path)
-        context_stamp = (ctx.st_size, ctx.st_mtime_ns)
+        context_stamp = (ctx.st_dev, ctx.st_ino, ctx.st_size, ctx.st_mtime_ns, ctx.st_ctime_ns)
     except FileNotFoundError:
-        context_stamp = (0, 0)
+        context_stamp = (None, None, None, None, None)
     return source, os.path.realpath(path), st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, context_stamp
 
 
@@ -591,9 +591,10 @@ class Store:
                              os.path.join(self._definitions.bundled, os.path.basename(self._definitions.path(identity['id'], identity['reverse'])))):
                 try:
                     stat = os.stat(filename)
-                    stamps.append((filename, stat.st_size, stat.st_mtime_ns))
+                    stamps.append((filename, stat.st_dev, stat.st_ino, stat.st_size,
+                                   stat.st_mtime_ns, stat.st_ctime_ns))
                 except OSError:
-                    stamps.append((filename, None, None))
+                    stamps.append((filename, None, None, None, None, None))
         self._definition_stamp = tuple(stamps)
 
     def _record_stamp(self, source, path):

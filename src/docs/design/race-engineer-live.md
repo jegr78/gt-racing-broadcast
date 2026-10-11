@@ -51,3 +51,8 @@ identity, pending/expiry boundaries, recorder lifecycle and known comparison
 conditions. The budget fixtures force actual serialized context growth. Active
 recording tests include both a mid-lap prefix and a prefix closed before its GT7
 time arrives. An expired confirmation is unavailable rather than retried forever.
+
+Track-definition stamps include device/inode identity and ctime as well as size
+and mtime, so atomic replacements with equal size/mtime invalidate live and
+recording-backed preparation. Integration tests await exact public fingerprints
+and context revisions from the worker. Evidence: `engineer-definition-invalidation.md`.

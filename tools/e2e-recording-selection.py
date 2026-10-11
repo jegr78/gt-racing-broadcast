@@ -95,8 +95,17 @@ def main():
                 page.wait_for_function('() => tmState.lapB?.compound === "RH"')
                 page.locator('#tm-compare-all').uncheck()
                 page.wait_for_function('() => tmState.pool?.laps.length === 3')
+                page.evaluate("""() => {
+                    window.subsetOriginal=tmReloadRecordingPool;window.subsetSettled=false;
+                    tmReloadRecordingPool=async()=>{try{return await window.subsetOriginal();}
+                        finally{window.subsetSettled=true;}};
+                }""")
                 page.get_by_role('button',name='Only this recording',exact=True).click()
-                page.wait_for_function('() => tmState.pool !== null')
+                page.wait_for_function('() => window.subsetSettled')
+                page.evaluate("""() => {
+                    tmReloadRecordingPool=window.subsetOriginal;
+                    delete window.subsetOriginal;delete window.subsetSettled;
+                }""")
                 assert page.evaluate('() => tmState.lapB?.compound === "RM"'),'excluded B conditions blocked the included recording'
                 page.locator('#tm-recording-options input').nth(1).check()
                 page.wait_for_function('() => tmState.pool?.laps.length === 2')
