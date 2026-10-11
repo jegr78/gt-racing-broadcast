@@ -22,6 +22,18 @@ def main():
         ctx['telemetry_recordings']=fixture.m.telemetry_recordings_data
         ctx['telemetry_laps']=fixture.m.telemetry_laps_data
         ctx['telemetry_lap']=fixture.m.telemetry_lap_data
+        primary=fixture.m.telemetry_lap_data(fixture._stem(new),'1','3')['lap']
+        reference=fixture.m.telemetry_lap_data(fixture._stem(old),'1','2')['lap']
+        def target(lap):
+            return {k:lap[k] for k in ('rec','session','lap','recording_id')}
+        report=dict(language='en',findings=[dict(priority=1,title='Saved comparison',
+            telemetry=target(primary),comparisons=[target(reference)],evidence=[])],exercises=[],limitations=[])
+        def ai(operation,payload):
+            if operation=='settings':return dict(ok=True,enabled=False,agents=[])
+            if operation=='history':return dict(ok=True,profile='solo',runs=[dict(id='saved',created_at=1700000000,state='completed')])
+            if operation=='job':return dict(ok=True,profile='solo',state='completed',report=report)
+            return dict(ok=True,busy=False)
+        ctx['ai_request']=ai
         server,port=web._serve(ctx)
         try:
             with sync_playwright() as pw:
@@ -55,7 +67,22 @@ def main():
                 assert page.locator('#tm-a option').inner_text()=='no other lap to compare'
                 assert page.locator('#tm-b option').inner_text()=='no included lap'
                 page.wait_for_function('() => !tmState.lapA && !tmState.lapB')
-                print('PASS browser: default, grouped labels/order/bests, all/only, empty selection')
+                page.get_by_role('button',name='Only this recording',exact=True).click()
+                page.wait_for_function('() => tmState.lapB')
+                page.evaluate('() => RacecastAI.history()')
+                page.locator('#ai-history button').first.click()
+                page.locator('#ai-report').get_by_role('button',name='Compare with S1 lap 2').click()
+                page.wait_for_function('''() => document.getElementById('tm-err').textContent.includes('unavailable')
+                    || (tmState.lapA && tmState.lapB && tmState.lapA.rec !== tmState.lapB.rec)''')
+                assert page.evaluate('() => tmState.lapA.rec !== tmState.lapB.rec'),'saved cross-recording comparison lost'
+                page.get_by_role('button',name='Only this recording',exact=True).click()
+                page.wait_for_function('() => tmState.lapB && tmState.included.size === 1')
+                report['findings'][0]['comparisons'][0]['recording_id']='0'*32
+                page.locator('#ai-history button').first.click()
+                page.locator('#ai-report').get_by_role('button',name='Compare with S1 lap 2').click()
+                page.wait_for_function('() => document.getElementById("tm-err").textContent.includes("Comparison recording identity changed") || tmState.included.size > 1')
+                assert page.evaluate('() => tmState.included.size === 1 && tmState.lapA.rec === tmState.lapB.rec'),'replaced reference expanded selection'
+                print('PASS browser: default, grouped labels/order/bests, all/only, empty selection, saved comparison and replaced identity')
                 browser.close()
         finally:
             server.shutdown();server.server_close()

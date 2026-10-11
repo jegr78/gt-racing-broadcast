@@ -151,12 +151,18 @@ async function openRun(id){
 }
 async function openComparison(item,profile,reference){
  if(!await tmOpenReference({...item.telemetry,profile}))return;
- const primary=tmState.b,stem=v=>String(v).replace(/\.gt7rec$/,'');
- const target=(tmState.pool?.laps||[]).find(l=>stem(l.rec)===stem(reference.rec)&&l.session===reference.session&&l.lap===reference.lap);
- if(!target){tmErr('The saved comparison reference is unavailable in the current telemetry pool.');return;}
- const key=tmKey(target),data=await tmFetchLap(key);
- if(profile!==tmState.profile||primary!==tmState.b)return;
+ const primary=tmState.b,primaryLap=tmState.lapB,generation=tmSeq.b,stem=v=>String(v).replace(/\.gt7rec$/,'');
+ const recording=tmState.recs.find(r=>stem(r.rec)===stem(reference.rec)&&!r.recording);
+ if(!recording){tmErr('The saved comparison recording is unavailable.');return;}
+ const key=tmKey({rec:recording.rec,session:reference.session,lap:reference.lap}),data=await tmFetchLap(key);
+ if(profile!==tmState.profile||primary!==tmState.b||generation!==tmSeq.b)return;
  if(data.lap?.recording_id!==reference.recording_id){tmErr('Comparison recording identity changed. The historical report remains a snapshot.');return;}
+ if(!tmState.included.has(recording.rec)){
+  tmState.included.add(recording.rec);const reloaded=tmSeq.b+1;await tmSelectB(primaryLap);
+  if(profile!==tmState.profile||primary!==tmState.b||reloaded!==tmSeq.b)return;
+ }
+ const target=(tmState.pool?.laps||[]).find(l=>tmKey(l)===key);
+ if(!target){tmErr('The saved comparison reference is unavailable in the current telemetry pool.');return;}
  tmState.a=key;tmFillPickers(tmState.lapB);tmRenderLaps();await tmLoadPair();
  if(item.location_m!=null){const chart=tmState.chart;if(chart){const rect=$id('tm-charts').getBoundingClientRect();tmHover({clientX:rect.left+chart.X(Math.min(item.location_m,chart.maxD))/chart.W*rect.width});} }
 }

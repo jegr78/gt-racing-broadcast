@@ -9,6 +9,7 @@ Selection lasts for this page visit and defaults to the selected recording.
 | Offer readable comparable recordings | Pool metadata and tmRecordingLabel | Weekday/date/time/count, newest first | Undated name safely falls back to stem | Real browser with two recordings |
 | Group A/B by recording in driving order | tmFillPickers | optgroups, local best and overall best labels | No fallback when selected recording has no other pace lap | Browser DOM and rendered screenshot |
 | Keep all comparison surfaces consistent | tmSelectB and recording menu | Checkbox/all/only-this updates pool, charts and Best | Excluded B cleared; old asynchronous reply discarded | Held-response browser test |
+| Preserve explicit saved report comparisons | ai-analysis.openComparison | Confirm identity then include requested recording | Replaced identity never expands selection | Cross-recording report browser callback |
 | Default and reset selection correctly | tmSelectRec and tmReset | Only selected recording by default | Profile change clears previous selection | Browser callbacks |
 
 The HTTP `recs` query is a comma-separated list of recording stems. An omitted

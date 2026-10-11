@@ -2596,6 +2596,36 @@ console.log(one + '|' + $('tm-a').options.map(o => o.textContent).join(','));"""
             f"lap and time stay inside recording groups: {out!r}"
 
 
+def t_saved_comparison_respects_newer_selection_during_fetch_and_reload():
+    with open(os.path.join(ROOT,'src','ui','ai-analysis.js'),encoding='utf-8') as file:
+        script=file.read()
+    start=script.index('async function openComparison(')
+    function=script[start:script.index('\nfunction reset(',start)]
+    out=_run_js(function+"""
+let tmState,tmSeq,release,mode,loads;
+const reference={rec:'S',session:1,lap:2,recording_id:'identity'};
+const tmKey=l=>[l.rec,l.session,l.lap].join('|');
+const tmOpenReference=async()=>true,tmErr=()=>{},tmFillPickers=()=>{},tmRenderLaps=()=>{};
+const tmLoadPair=async()=>{loads++;};
+const tmFetchLap=async()=>mode==='fetch'?new Promise(resolve=>release=resolve):{lap:{recording_id:'identity'}};
+const tmSelectB=async()=>{tmSeq.b++;tmState.pool={laps:[reference]};if(mode==='reload')await new Promise(resolve=>release=resolve);};
+const tick=async()=>{for(let i=0;i<10;i++)await new Promise(resolve=>setTimeout(resolve,0));};
+(async()=>{
+ for(mode of ['fetch','reload']){
+  loads=0;tmSeq={b:1};tmState={b:'R|1|3',profile:'p',lapB:{rec:'R',session:1,lap:3},
+      recs:[{rec:'R'},{rec:'S'}],included:new Set(['R']),pool:{laps:[]}};
+  const pending=openComparison({telemetry:{}},'p',reference);await tick();
+  tmSeq.b++;release({lap:{recording_id:'identity'}});await pending;
+  console.log(JSON.stringify({mode,loads,a:tmState.a||null,included:tmState.included.size}));
+ }
+})();
+""")
+    if out is not None:
+        results=[json.loads(line) for line in out.splitlines()]
+        assert results==[{'mode':'fetch','loads':0,'a':None,'included':1},
+                         {'mode':'reload','loads':0,'a':None,'included':2}],out
+
+
 def t_telemetry_recording_selection_has_no_implicit_other_reference():
     out = _tm_node("""
 const b=lap('R',2,79,1);tmState.rec='R';tmState.included=new Set(['R']);
