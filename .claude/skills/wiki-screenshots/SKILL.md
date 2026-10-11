@@ -243,3 +243,24 @@ Publish the wiki only on the user's go-ahead: `python3 tools/sync-wiki.py` (prev
   `/panel` pages → **full-page**. Only modals (the overlay builder) → **element** screenshot.
 - **Always the dev build** for Control Center (`cc-*`) shots so the version badge is uniform;
   a real version baked into one shot goes stale at the next release.
+
+
+## Race Engineer moving-data fixture
+
+`python3 tools/engineer-replay.py RECORDING.gt7rec --skip-minutes 5 --speed 1`
+serves the production signed desk on a free loopback port, without relay feeds,
+OBS or UDP. The URL is printed locally. Optional `--reference FILE` and
+`--reference-label LABEL` grant copied historical references with their context.
+Use existing valid GT7 reference data from the runtime, or explicitly request
+`--update-data` into the temporary replay runtime. Python 3.12+ is required.
+
+Open the printed URL in Playwright and capture the desk at 1440, 1024 and 390 px.
+After EOF the desk remains available until Ctrl+C. Source files and machine
+settings are untouched; the temporary copies disappear on exit. Keep private
+recordings, access tokens and private-data screenshots out of Git.
+
+For committed documentation images, use the deterministic synthetic production
+fixture: `runtime/pw-venv/bin/python tools/e2e-engineer-desk.py --shots`. It writes
+`console-race-engineer-{desktop,tablet,phone}.png` under `src/docs/wiki/images/`.
+The replay tool's `--check` separately exercises a genuinely growing recording
+through signed HTTP; it exits after its checks and is not a persistent server.
