@@ -108,8 +108,28 @@ def t_pacing_speed_and_large_skipped_prefix_keep_recorded_time_without_drops():
         with replay.ReplaySession(
             path, speed=2, skip_minutes=2, clock=lambda: now[0], waiter=wait
         ) as session:
+            import threading
+
+            release = threading.Event()
+            consume, flush = session.store._consume, session.flush
+
+            def held_first_packet(item):
+                assert release.wait(10)
+                consume(item)
+
+            def release_at_flush(on_batch=None):
+                release.set()
+                flush(on_batch)
+
+            session.store._consume, session.flush = held_first_packet, release_at_flush
             seen = []
-            session.play(lambda r: seen.append((r.packets, r.position_s, now[0])))
+            try:
+                session.play(lambda r: seen.append((r.packets, r.position_s, now[0])))
+            finally:
+                release.set()
+            assert session.store.stats()["dropped"] == 0, (
+                "bounded pre-feed dropped input under worker pressure"
+            )
             assert abs(now[0] - 1000 - (session.position_s - 120) / 2) < 0.00001, (
                 "speed/skip changed pacing deadline"
             )
