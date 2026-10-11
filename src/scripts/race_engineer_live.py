@@ -520,10 +520,19 @@ class Store:
                        if start is not None else cached['details'].get((session, lap)))
                 if row is None and target in cached['requested'] and (start is None or
                         cached['end_wall'] is not None and start < cached['end_wall']):
-                    return {'state': 'unavailable', 'lap': None}
+                    if not (identity and path.endswith('.part')):
+                        return {'state': 'unavailable', 'lap': None}
+                    if stamp[4] == cached['prefix_size']:
+                        return {'state': 'pending', 'lap': None}
                 if row is not None:
                     if identity and identity.get('measurement_hash') != row.get('measurement_hash'):
-                        return {'state': 'unavailable', 'lap': None}
+                        incomplete = row.get('gt7_time_s') is None or not row.get('capture_complete')
+                        if not (path.endswith('.part') and incomplete):
+                            return {'state': 'unavailable', 'lap': None}
+                        if stamp[4] == cached['prefix_size']:
+                            return {'state': 'pending', 'lap': None}
+                        row = None
+                if row is not None:
                     row = copy.deepcopy(row)
                     if identity is not None:
                         row.update({k: identity[k] for k in ('id', 'session_id', 'version', 'state', 'recording_session')})

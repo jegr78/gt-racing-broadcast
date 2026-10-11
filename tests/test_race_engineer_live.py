@@ -455,6 +455,36 @@ def t_recovery_refuses_a_prefix_changed_during_preparation():
             live._bounded_recording = original
 
 
+def t_unconfirmed_recorded_prefix_retries_after_confirming_append():
+    with tempfile.TemporaryDirectory() as d:
+        path = write_circle_recording(d)
+        rec = gr.Recording(path)
+        for _wall, _kind, plain in rec.packets():
+            if tm.parse_packet(plain).lap == 3:
+                prefix = rec.pos
+                break
+        with open(path, 'rb') as f:
+            raw = f.read()
+        part = path + '.part'
+        with open(part, 'wb') as f:
+            f.write(raw[:prefix])
+        with live.Store(lambda: True, tracks=FakeTracks(), cars=FakeCars(),
+                        queue_max=4096, details_max=2) as store:
+            store.bind_recording(part)
+            feed(store, path)
+            brief = next(r for r in store.snapshot()['laps'] if r['lap'] == 2)
+            assert store.detail(brief['id'])['state'] == 'pending'
+            assert store.wait_recovery(10)
+            assert store.detail(brief['id'])['state'] == 'pending'
+            assert store.stats()['replays'] == 1
+            with open(part, 'ab') as f:
+                f.write(raw[prefix:])
+            assert store.detail(brief['id'])['state'] == 'pending'
+            assert store.wait_recovery(10)
+            assert store.detail(brief['id'])['state'] == 'ready'
+            assert store.stats()['replays'] == 2
+
+
 if __name__ == '__main__':
     for name, fn in sorted(list(globals().items())):
         if name.startswith('t_'):
