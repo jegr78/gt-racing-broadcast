@@ -81,13 +81,13 @@ function graph(id,series,key,height,length=1){const el=$(id);el.replaceChildren(
  el.append(svg('text',{x:8,y:24},num(hi,1)),svg('text',{x:8,y:height-30},num(lo,1)));
  for(const s of series){let path='',pen=false;for(const p of s.rows){if(p.d<min||p.d>max||typeof p[key]!=='number'){pen=false;continue;}path+=(pen?'L':'M')+X(p.d).toFixed(1)+' '+Y(p[key]).toFixed(1);pen=true;}el.append(svg('path',{d:path,stroke:s.color,fill:'none','stroke-width':2}));}
 }
-function render(){const B=state.detail,A=state.outline||state.pair?.a,pair=state.pair;clearPlots(false);state.detail=B;state.pair=pair;if(!B&&!A)return;
- const trace=B?.trace||[],length=Math.max(1,A?.length_m||A?.trace?.at(-1)?.d||B?.length_m||trace.at(-1)?.d||0);if(!state.zoom&&!['zoom-from','zoom-to'].includes(document.activeElement?.id)){$('zoom-from').value=0;$('zoom-to').value=Math.round(length);}
+function render(){const B=state.detail,pair=state.pair,outline=pair?.a?.trace_complete?pair.a:state.outline,A=pair?.a||(state.outline?.id===state.a?state.outline:null);clearPlots(false);state.detail=B;state.pair=pair;if(!B&&!outline)return;
+ const trace=B?.trace||[],length=Math.max(1,outline?.length_m||outline?.trace?.at(-1)?.d||B?.length_m||trace.at(-1)?.d||0);if(!state.zoom&&!['zoom-from','zoom-to'].includes(document.activeElement?.id)){$('zoom-from').value=0;$('zoom-to').value=Math.round(length);}
  graph('chart',[{rows:A?.trace||[],color:'#8ab4ff'},{rows:trace,color:'#ffd08a'}],$('channel').value,300,length);
  graph('delta-chart',[{rows:pair?.delta||[],color:'#a8dfbd'}],'delta',170,length);
- const map=$('map'),points=(A?.trace?.length?A.trace:trace).filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.z));
+ const map=$('map'),points=(outline?.trace?.length?outline.trace:trace).filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.z));
  if(points.length){const xs=points.map(p=>p.x),zs=points.map(p=>p.z),xmin=Math.min(...xs),xmax=Math.max(...xs),zmin=Math.min(...zs),zmax=Math.max(...zs),scale=Math.min(420/Math.max(1,xmax-xmin),360/Math.max(1,zmax-zmin)),X=x=>30+(x-xmin)*scale,Y=z=>30+(z-zmin)*scale;
-  for(const [rows,color]of [[A?.trace||[],'#8ab4ff'],[trace,'#ffd08a']])map.append(svg('path',{d:rows.filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.z)).map((p,i)=>(i?'L':'M')+X(p.x).toFixed(1)+' '+Y(p.z).toFixed(1)).join(''),stroke:color,fill:'none','stroke-width':2,'data-outline':rows===A?.trace?'complete':'observed'}));
+  for(const [rows,color]of [[outline?.trace||[],'#8ab4ff'],[trace,'#ffd08a']])map.append(svg('path',{d:rows.filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.z)).map((p,i)=>(i?'L':'M')+X(p.x).toFixed(1)+' '+Y(p.z).toFixed(1)).join(''),stroke:color,fill:'none','stroke-width':2,'data-outline':rows===outline?.trace?'complete':'observed'}));
   const last=trace.at(-1);if(last&&Number.isFinite(last.x)&&Number.isFinite(last.z))map.append(svg('circle',{cx:X(last.x),cy:Y(last.z),r:5,fill:'#ffd08a'}));
   if(B?.larger_sectors?.reviewed)for(const c of B.corner_metrics||[]){const p=trace.find(p=>p.d>=c.apex_m);if(p)map.append(svg('text',{x:X(p.x)+5,y:Y(p.z)},'T'+c.number));}
  }

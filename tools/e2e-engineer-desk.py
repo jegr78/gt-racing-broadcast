@@ -53,6 +53,7 @@ async def main():
                 latest_confirmed = [r for r in fixture.live.snapshot()['laps'] if r['state'] == 'confirmed'][-1]['id']
                 await page.wait_for_function('(id) => !EngineerDesk.state.a && EngineerDesk.state.outline?.id === id', arg=latest_confirmed)
                 assert await page.locator('#zoom-to').input_value() == '1000'
+                assert await page.locator('#chart path').nth(1).get_attribute('d') == '', 'fallback outline masqueraded as selected A'
                 await page.unroute('**/race-engineer/history*', no_eligible_reference)
                 await page.evaluate('() => {EngineerDesk.state.historyRevision = null;}')
                 await page.wait_for_function('() => EngineerDesk.state.a && document.getElementById("comparison-state").textContent === "Comparison pending"')
@@ -81,6 +82,27 @@ async def main():
                 await page.wait_for_function('() => EngineerDesk.state.pair?.state === "ready" && EngineerDesk.state.pair?.delta?.length > 0')
                 assert await page.locator('#delta').inner_text() != 'Unavailable'
                 assert await page.locator('#sectors tbody tr').first.locator('td').nth(1).inner_text() != 'Unavailable'
+                # A detail can become ready between outline and compare reads.
+                selected_a = await page.evaluate('() => EngineerDesk.state.a')
+                missed = [False]
+                async def recovering_a(route):
+                    from urllib.parse import parse_qs, urlsplit
+                    identity = parse_qs(urlsplit(route.request.url).query).get('id', [''])[0]
+                    if identity == selected_a and not missed[0]:
+                        missed[0] = True
+                        await route.fulfill(json=dict(version=1, generation=fixture.live.generation, state='pending'))
+                    else:
+                        await route.continue_()
+                await page.route('**/race-engineer/lap?*', recovering_a)
+                await page.locator('#lap-a').select_option(selected_a)
+                await page.wait_for_function('(id) => EngineerDesk.state.pair?.a?.id === id && !EngineerDesk.state.analysisBusy', arg=selected_a)
+                assert missed[0]
+                # Selected fast A must appear above the slower B, even if the
+                # temporary map outline came from a slower completed lap.
+                left_path = await page.locator('#chart path').nth(1).get_attribute('d')
+                right_path = await page.locator('#chart path').nth(2).get_attribute('d')
+                assert float(left_path.split('L')[0].split()[1]) < float(right_path.split('L')[0].split()[1]), 'ready comparison chart used the fallback lap instead of selected A'
+                await page.unroute('**/race-engineer/lap?*', recovering_a)
                 if '--shots' in sys.argv:
                     for width,height,name in [(1440,1050,'desktop'),(1024,1100,'tablet'),(390,900,'phone')]:
                         await page.set_viewport_size({'width':width,'height':height})
