@@ -114,7 +114,7 @@ def build_target(launcher, workdir, version_file, sep, entry, name, windowed):
            "--hidden-import", "gt7_context", "--hidden-import", "gt7_export",
            "--hidden-import", "gt7_track_definitions",
            "--hidden-import", "gt7_shifts",
-           "--hidden-import", "ai_agents", "--hidden-import", "ai_package",
+           "--hidden-import", "ai_agents", "--hidden-import", "race_engineer_access", "--hidden-import", "ai_package",
            "--hidden-import", "ai_jobs", "--hidden-import", "ai_control",
            "--hidden-import", "ai_reports",
            "--hidden-import", "gt7_channels", "--hidden-import", "gt7_channel_detail",

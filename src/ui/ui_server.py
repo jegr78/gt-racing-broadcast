@@ -141,7 +141,8 @@ def make_handler(ctx):
     _pages = bundle_cache.BundleCache()
     _context_script = os.path.join(os.path.dirname(ctx["page_path"]), "telemetry-context.js")
     _ai_script = os.path.join(os.path.dirname(ctx["page_path"]), "ai-analysis.js")
-    _pages.prewarm([ctx["page_path"], _context_script, _ai_script])
+    _engineer_script = os.path.join(os.path.dirname(ctx["page_path"]), "race-engineer.js")
+    _pages.prewarm([ctx["page_path"], _context_script, _ai_script, _engineer_script])
 
     class Handler(BaseHTTPRequestHandler):
         _CTYPES = {".png": "image/png", ".jpg": "image/jpeg",
@@ -193,6 +194,13 @@ def make_handler(ctx):
             code = (200 if result.get('ok') else 409 if result.get('conflict') else
                     404 if result.get('not_found') else 400 if result.get('invalid') else 500)
             return self._json(result, code=code)
+
+        def _engineer_call(self,write,data):
+            try:result=ctx['engineer_write' if write else 'engineer_read'](data)
+            except (KeyError,OSError,ValueError,TypeError):result={'ok':False,'error':{'code':'access_failed','message':'Engineer settings are unavailable'}}
+            error=(result.get('error') or {}).get('code')
+            code=200 if result.get('ok') else 409 if error in ('profile_changed','conflict') else 404 if error=='reference_unavailable' else 400
+            return self._json(result,code=code)
 
         def _ai_result(self, result):
             error=result.get('error') or {}
@@ -366,7 +374,7 @@ def make_handler(ctx):
             if not _allowed(self):
                 return self._json({"ok": False, "error": "unauthorized"}, code=401)
             if not request_csrf_ok(self.headers):
-                return self._json({"ok": False, "error": {"code":"foreign_origin","message":"foreign analysis origin"} if urlparse(self.path).path.startswith("/api/ai/") else "cross-origin request blocked"},
+                return self._json({"ok": False, "error": {"code":"foreign_origin","message":"foreign analysis origin"} if urlparse(self.path).path.startswith(("/api/ai/","/api/engineer")) else "cross-origin request blocked"},
                                   code=403)
             path = urlparse(self.path).path
             if path == "/":
@@ -669,6 +677,13 @@ def make_handler(ctx):
                                        "error": f"could not read the report: "
                                                 f"{type(exc).__name__}"},
                                       code=500)
+            if path == '/race-engineer.js':
+                try:return self._serve_bytes(_pages.read(_engineer_script),'application/javascript; charset=utf-8')
+                except OSError:return self._not_found('Engineer settings interface unavailable')
+            if path == '/api/engineer':
+                if not self._context_allowed(structured=True):return None
+                query=parse_qs(urlparse(self.path).query or '',keep_blank_values=True)
+                return self._engineer_call(False,{k:v[0] for k,v in query.items()})
             if path == '/ai-analysis.js':
                 try:return self._serve_bytes(_pages.read(_ai_script), 'application/javascript; charset=utf-8')
                 except OSError:return self._not_found('analysis interface unavailable')
@@ -806,7 +821,7 @@ def make_handler(ctx):
                 return self._json({"ok": False, "error": "unauthorized"}, code=401)
             if not request_csrf_ok(self.headers):
                 self._drain_refused_body()
-                return self._json({"ok": False, "error": {"code":"foreign_origin","message":"foreign analysis origin"} if urlparse(self.path).path.startswith("/api/ai/") else "cross-origin request blocked"},
+                return self._json({"ok": False, "error": {"code":"foreign_origin","message":"foreign analysis origin"} if urlparse(self.path).path.startswith(("/api/ai/","/api/engineer")) else "cross-origin request blocked"},
                                   code=403)
             path = urlparse(self.path).path
             if path.startswith("/api/jobs/") and path.endswith("/cancel"):
@@ -953,7 +968,8 @@ def make_handler(ctx):
                     result = ctx["crew_write"](body.get("row"), body.get("name"),
                                                body.get("director"), body.get("producer"),
                                                body.get("commentator"), body.get("race_control"),
-                                               body.get("discord"))
+                                               body.get("discord"),
+                                               **({"race_engineer":body["race_engineer"]} if "race_engineer" in body else {}))
                 except Exception as exc:
                     return self._json({"ok": False,
                                        "error": f"could not write crew row: {exc}"},
@@ -1108,6 +1124,11 @@ def make_handler(ctx):
                                        "error": f"could not delete backup: {exc}"},
                                       code=500)
                 return self._json(result, code=200 if result.get("ok") else 400)
+            if path == '/api/engineer':
+                if not self._context_allowed(mutation=True,structured=True):return None
+                body=self._body_json()
+                if not isinstance(body,dict):return self._json({'ok':False,'error':{'code':'invalid_settings','message':'Use a JSON object'}},code=400)
+                return self._engineer_call(True,body)
             if path in ('/api/ai/settings','/api/ai/preview','/api/ai/start','/api/ai/cancel','/api/ai/package-export'):
                 if not self._context_allowed(mutation=True,structured=True):return None
                 body=self._body_json()

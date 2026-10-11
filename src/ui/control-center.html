@@ -880,11 +880,11 @@
             <button onclick="loadCrew()">
               <svg viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Reload</button></div>
           <div class="enverr" id="crew-err" hidden></div>
-          <div class="envhead"><span style="width:28px;flex:0 0 auto">#</span><span class="v">Name</span><span style="width:84px;flex:0 0 auto;text-align:center">Commentator</span><span style="width:60px;flex:0 0 auto;text-align:center">Director</span><span style="width:60px;flex:0 0 auto;text-align:center">Producer</span><span style="width:84px;flex:0 0 auto;text-align:center">Race Control</span><span class="v">Discord</span><span style="width:136px;flex:0 0 auto"></span></div>
+          <div class="envhead"><span style="width:28px;flex:0 0 auto">#</span><span class="v">Name</span><span style="width:84px;flex:0 0 auto;text-align:center">Commentator</span><span style="width:60px;flex:0 0 auto;text-align:center">Director</span><span style="width:60px;flex:0 0 auto;text-align:center">Producer</span><span style="width:84px;flex:0 0 auto;text-align:center">Race Control</span><span style="width:84px;flex:0 0 auto;text-align:center">Race Engineer</span><span class="v">Discord</span><span style="width:136px;flex:0 0 auto"></span></div>
           <div id="crew-rows"></div>
           <div class="addrow"><button onclick="crewAddRow()">
             <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Add person</button></div>
-          <p class="envhint"><b>Commentator/Director/Producer/Race Control</b> tag who reaches which /console surface; <b>Race Control</b> is a read-only monitoring desk (program, schedule, timer &amp; chat). <b>Discord</b> is the username used for Login-with-Discord (case-insensitive). Commentator is also granted automatically to anyone in the live Schedule. Needs the Sheet <b>Crew</b> tab + the <b>crew</b> webhook action (wiki: Sheet-Webhook).</p>
+          <p class="envhint"><b>Commentator/Director/Producer/Race Control/Race Engineer</b> tag who reaches which /console surface; <b>Race Control</b> is a read-only monitoring desk (program, schedule, timer &amp; chat). <b>Race Engineer</b> permits read-only telemetry only after the producer enables it in Telemetry. Producers inherit Engineer capability; other roles require the checkbox. <b>Discord</b> is the username used for Login-with-Discord (case-insensitive). Commentator is also granted automatically to anyone in the live Schedule. Needs the Sheet <b>Crew</b> tab + the <b>crew</b> webhook action (wiki: Sheet-Webhook).</p>
         </section>
 
         <section id="overlay-section">
@@ -1453,7 +1453,7 @@ let currentView = 'home', lastStatus = null;
 function showView(name) {
   currentView = name;
   if (name === 'settings') window.RacecastAI?.settings();
-  if (name === 'telemetry') {window.RacecastAI?.status();window.RacecastAI?.history();}
+  if (name === 'telemetry') {window.RacecastAI?.status();window.RacecastAI?.history();window.RacecastEngineer?.settings();}
   document.querySelectorAll('[data-view]').forEach(v => {
     v.hidden = v.dataset.view !== name;
   });
@@ -3283,6 +3283,7 @@ function applyKindGating(data) {
     tmReset();
     tmState.profile = data.active;
     window.RacecastAI?.reset(data.active);
+    window.RacecastEngineer?.reset(data.active);
   }
   if (currentView === 'telemetry' && !(kind === 'solo' && template === 'pov')) showView('home');
   else if (currentView === 'telemetry' && !tmState.loaded) tmLoad();   // switched to another solo POV profile
@@ -4841,11 +4842,11 @@ async function loadCrew() {
   if (!d.ok) { showProfileErr('crew-err', d.error || 'could not load crew'); return; }
   (d.entries || []).forEach(e => c.appendChild(
       crewRow(e.row, e.name, e.commentator, e.director, e.producer,
-              e.race_control, e.discord)));
+              e.race_control, e.discord, e.race_engineer)));
 }
 
 // Build one editable crew row (row is 1-based).
-function crewRow(row, name, commentator, director, producer, race_control, discord) {
+function crewRow(row, name, commentator, director, producer, race_control, discord, race_engineer=false) {
   const wrap = document.createElement('div');
   wrap.className = 'envrow';
   wrap.dataset.crewRow = row;
@@ -4875,6 +4876,7 @@ function crewRow(row, name, commentator, director, producer, race_control, disco
   const {cell: dirCell, chk: dirChk} = mkChk('Director', director, 60);
   const {cell: prodCell, chk: prodChk} = mkChk('Producer', producer, 60);
   const {cell: rcCell, chk: rcChk} = mkChk('Race Control', race_control, 84);
+  const {cell: reCell, chk: reChk} = mkChk('Race Engineer', race_engineer, 84);
 
   const discInp = document.createElement('input');
   discInp.type = 'text';
@@ -4889,7 +4891,7 @@ function crewRow(row, name, commentator, director, producer, race_control, disco
   const saveBtn = document.createElement('button');
   saveBtn.textContent = 'Save';
   saveBtn.title = 'Save this row';
-  saveBtn.onclick = () => crewSave(wrap, row, nameInp, comChk, dirChk, prodChk, rcChk, discInp, saveBtn);
+  saveBtn.onclick = () => crewSave(wrap, row, nameInp, comChk, dirChk, prodChk, rcChk, reChk, discInp, saveBtn);
 
   const delBtn = document.createElement('button');
   delBtn.className = 'danger';
@@ -4898,11 +4900,11 @@ function crewRow(row, name, commentator, director, producer, race_control, disco
   delBtn.onclick = () => crewDelete(row);
 
   actions.append(saveBtn, delBtn);
-  wrap.append(num, nameInp, comCell, dirCell, prodCell, rcCell, discInp, actions);
+  wrap.append(num, nameInp, comCell, dirCell, prodCell, rcCell, reCell, discInp, actions);
   return wrap;
 }
 
-async function crewSave(wrap, row, nameInp, comChk, dirChk, prodChk, rcChk, discInp, btn) {
+async function crewSave(wrap, row, nameInp, comChk, dirChk, prodChk, rcChk, reChk, discInp, btn) {
   $('crew-err').hidden = true;
   const name = nameInp.value.trim();
   if (!name) { showProfileErr('crew-err', 'Name is required.'); nameInp.focus(); return; }
@@ -4913,7 +4915,7 @@ async function crewSave(wrap, row, nameInp, comChk, dirChk, prodChk, rcChk, disc
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({row, name, commentator: comChk.checked,
             director: dirChk.checked, producer: prodChk.checked,
-            race_control: rcChk.checked,
+            race_control: rcChk.checked, race_engineer: reChk.checked,
             discord: discInp.value.trim()})})).json();
   } catch (e) { showProfileErr('crew-err', 'Control Center not reachable.'); btn.disabled = false; return; }
   if (!d.ok) { showProfileErr('crew-err', d.error || 'could not save crew entry'); btn.disabled = false; return; }
@@ -6688,6 +6690,7 @@ assetsLoaded = true; fetchAssetFiles();
  </div></div></div>
 <script src="/telemetry-context.js"></script>
 <script src="/ai-analysis.js"></script>
+<script src="/race-engineer.js"></script>
 <div class="ovmodal" id="tm-editor-modal" hidden role="dialog" aria-modal="true" aria-labelledby="tm-editor-title">
  <div class="ovmodal-card"><div class="ovmodal-head"><b id="tm-editor-title">Track markers &amp; sector definitions</b>
   <button id="tm-editor-close" style="margin-left:auto" onclick="tmEditorClose()">Cancel / close</button></div>

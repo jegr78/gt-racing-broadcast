@@ -92,7 +92,7 @@ def t_resolve_director_and_producer_from_crew():
     crew = [("Alice", True, True), ("Bob", True, False)]
     # Alice is producer, and producer additively implies director and race_control.
     assert m.resolve_roles(crew, set(), "alice") == {
-        "director", "producer", "race_control"}
+        "director", "producer", "race_control", "race_engineer"}
     assert m.resolve_roles(crew, set(), "bob") == {"director"}
 
 
@@ -103,10 +103,10 @@ def t_resolve_producer_implies_director_and_race_control():
     # the /console pages.
     crew = [("Alice", False, True)]
     assert m.resolve_roles(crew, set(), "alice") == {
-        "producer", "director", "race_control"}
+        "producer", "director", "race_control", "race_engineer"}
     # A producer who is also in the schedule keeps commentator as well.
     assert m.resolve_roles(crew, {"alice"}, "alice") == {
-        "producer", "director", "race_control", "commentator"}
+        "producer", "director", "race_control", "race_engineer", "commentator"}
     assert m.resolve_roles([("Bob", True, False)], set(), "bob") == {"director"}, \
         "a non-producer is unaffected; no implication leaks to plain directors"
 
@@ -122,7 +122,7 @@ def t_resolve_name_normalized_via_asset_key():
     crew = [("Alice O'Brien", False, True)]
     # producer implies director and race_control
     assert m.resolve_roles(crew, set(), subject) == {
-        "producer", "director", "race_control"}
+        "producer", "director", "race_control", "race_engineer"}
 
 
 def t_resolve_unknown_subject_is_empty():
@@ -185,9 +185,9 @@ def t_crew_data_endpoint_returns_rows():
         assert status == 200, status
         assert body == {"rows": [
             {"name": "Alice", "director": True, "producer": True,
-             "commentator": False, "race_control": False, "discord": "alice_d"},
+             "commentator": False, "race_control": False, "discord": "alice_d", "race_engineer": False},
             {"name": "Bob", "director": True, "producer": False,
-             "commentator": True, "race_control": True, "discord": ""}]}, body
+             "commentator": True, "race_control": True, "discord": "", "race_engineer": False}]}, body
     finally:
         srv.shutdown()
 
@@ -329,6 +329,30 @@ def t_crew_csv_url_derivation():
         "a custom schedule URL leaves no tab to derive the roster from"
     assert m.crew_csv_url("SHEET", "Crew", sheet_csv_url="http://h/s.csv",
                           override="http://h/c.csv") == "http://h/c.csv"
+
+
+def t_race_engineer_is_additive_and_producer_inherits():
+    assert 'race_engineer' in m.resolve_roles([('Owner',False,True)],set(),'owner')
+    assert 'race_engineer' not in m.resolve_roles([('Director',True,False)],set(),'director')
+    assert m.resolve_roles([],set(),'engineer',crew_race_engineer_keys={'engineer'})=={'race_engineer'}
+    assert m.resolve_roles([('Engineer',True,False)],set(),'engineer',crew_race_engineer_keys={'engineer'})=={'director','race_engineer'}
+    assert 'race_engineer' not in m.resolve_roles([],{'alice'},'alice',crew_race_control_keys={'alice'})
+
+
+def t_race_engineer_header_and_partial_roundtrip_preserve_legacy_discord():
+    cs=m.CrewSource('')
+    cs.rows=m.CrewSource._parse_full('Discord,Race Engineer,Name,Director,Commentator,Race Control\nalice_d,TRUE,Alice,,TRUE,\n')
+    assert cs.race_engineer_keys()=={'alice'}
+    assert cs.discord_map()=={'alice_d':'Alice'}
+    assert cs.get_members()==[('Alice',False,False,True,False,'alice_d',True)]
+    cs.inject_row(1, director=True)
+    assert cs.race_engineer_keys()=={'alice'} and cs.discord_map()=={'alice_d':'Alice'}
+    cs.inject_row(1,race_engineer=False)
+    assert not cs.race_engineer_keys() and cs.get()==[('Alice',True,False)]
+    cs.rows=[('Legacy',True,False,False,True,'legacy_d')]
+    assert not cs.race_engineer_keys() and cs.discord_map()=={'legacy_d':'Legacy'}
+    cs.rows=m.CrewSource._parse_full('Name,Director,Producer,Discord\nLegacy,TRUE,,legacy_d\n')
+    assert not cs.race_engineer_keys() and cs.get_members()[0][5]=='legacy_d'
 
 
 if __name__ == "__main__":

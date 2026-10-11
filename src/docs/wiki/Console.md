@@ -150,3 +150,31 @@ re-issuing the link.
 > This page is generated from `src/docs/wiki/` in the
 > [main repository](https://github.com/jegr78/gt-racing-broadcast): don't edit it
 > here by hand. See [Build & maintenance](Build-and-maintenance).
+
+
+## Race Engineer access
+
+Assign the additive **Race Engineer** Crew checkbox, then redeploy the current
+[Sheet webhook](Sheet-Webhook) so the new field persists. Producers inherit
+Engineer capability. Directors, Commentators and Race Control need the explicit
+checkbox; an Engineer alone receives no broadcast controls. Existing Crew chat
+remains available and feedback uses the team's voice channel.
+
+The producer enables **Allow Race Engineer** in the local Control Center's
+**Telemetry** view of a solo POV profile. The switch defaults off. The Console
+launcher shows availability; `/console/race-engineer` and its access check require
+a valid current Console identity, current Engineer capability and current profile
+opt-in on every request. Removing a role or disabling access clears an open
+protected page on its next poll. No localhost Control Center API is funnelled.
+
+Producers explicitly share historical references in the same Telemetry card. A
+grant includes analysis context and notes, uses a stable recording identity and
+never allows browsing the entire archive. Revoke a reference there to stop future
+reads. Previously transmitted browser data cannot be recalled. Deletion or
+replacement invalidates a grant; review and share a changed source explicitly.
+
+This first delivery supplies the access foundation and a protected availability
+page; live session preparation, analysis routes and the full desk follow in the
+remaining delivery issues.
+
+![Race Engineer: protected access and shared references](images/console-race-engineer-access.png)

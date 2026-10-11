@@ -24,13 +24,13 @@ machine and the panel's HUD row + URLs section are display-only.
 | `schedule` | **Schedule** tab (or the **Qualifying** tab when the payload carries `"tab":"Qualifying"`), **physical row N** (the panel sends the CSV line number automatically): URL + Streamer + Stint label, located by the `URL`/`Streamer`/`Stint` headers in row 1 (falls back to fixed cols A/B with no header row); row `last+1` appends. The Stint cell is only written when a `Stint` header exists. The Qualifying tab has the **same structure** as the Schedule tab. **Neither tab may have leading blank rows**, the gviz CSV export maps physical sheet rows to CSV lines 1:1 when the tab starts at row 1. A header row is silently skipped when reading but its physical line number is still used when writing. |
 | `pov` | POV tab **row 2**: the `url` and/or `name` cell, located by header text (so the columns may move) |
 | `teams` | Setup tab: the cell **below** the `Team <slot>` header (slot 1–3 → `A6`/`B6`/`C6` in the shipped layout): found by text, same as the other Setup fields. The Overlay tab only mirrors them read-only |
-| `crew` | **Crew** tab (`Name \| Commentator \| Director \| Producer \| Race Control \| Discord`, header in row 1). `{"action":"crew","row":N,"name":..,"commentator":bool,"director":bool,"producer":bool,"race_control":bool,"discord":".."}` writes **data row N** (sheet row N+1; `row last+1` appends). Columns are located **by header text** (any order; extra columns are ignored), so a pre-existing `Name\|Director\|Producer` tab is auto-extended with the `Commentator`, `Race Control` and `Discord` columns on first write. `commentator`/`director`/`producer`/`race_control` are written as **`TRUE`/`FALSE` booleans** (checkbox-compatible, never the string `X`, which would break a Google Sheets checkbox cell); `discord` is the verbatim username. `{"action":"crew","row":N,"delete":true}` deletes data row N (rows shift up). The tab must start at row 1 with the header and have no interior blank rows (the Control Center editor maintains this). |
+| `crew` | **Crew** tab (`Name \| Commentator \| Director \| Producer \| Race Control \| Discord \| Race Engineer`, header in row 1). `{"action":"crew","row":N,"name":..,"commentator":bool,"director":bool,"producer":bool,"race_control":bool,"discord":".."}` writes **data row N** (sheet row N+1; `row last+1` appends). Columns are located **by header text** (any order; extra columns are ignored), so a pre-existing `Name\|Director\|Producer` tab is auto-extended with the `Commentator`, `Race Control` and `Discord` columns on first write. `commentator`/`director`/`producer`/`race_control` are written as **`TRUE`/`FALSE` booleans** (checkbox-compatible, never the string `X`, which would break a Google Sheets checkbox cell); `discord` is the verbatim username. `{"action":"crew","row":N,"delete":true}` deletes data row N (rows shift up). The tab must start at row 1 with the header and have no interior blank rows (the Control Center editor maintains this). |
 
 The relay only sends Setup values that exist in the Configuration tab's
 vocabulary columns: the same lists the sheet's own dropdowns use.
 
 > **Crew-tab coordination:** the `crew` action requires a **Crew** tab in the league's
-> Sheet (columns `Name | Commentator | Director | Producer | Race Control | Discord`,
+> Sheet (columns `Name | Commentator | Director | Producer | Race Control | Discord | Race Engineer`,
 > header in row 1) **and** the redeployed script that handles `crew`. Without it,
 > director/producer/race-control roles simply resolve to empty: commentators still
 > work from the Schedule: and the Control Center crew editor surfaces an
@@ -81,7 +81,7 @@ read-only.
 ## Crew
 
 The `crew` action maintains the **Crew** tab, the per-person roster used by the relay
-to resolve `/console` roles (commentator/director/producer/**race control**) and to match
+to resolve `/console` roles (commentator/director/producer/**race control**/**race engineer**) and to match
 a Discord login to a crew member. The Control Center's crew editor reads the tab via the
 relay (`/crew/data`) and writes changes back through the `crew` webhook action
 (`/api/crew`, `/api/crew/delete` in the Control Center API, which POST to the relay, which
@@ -95,7 +95,7 @@ chat). It is unrelated to the director-only HUD **Race Control** banner (the Set
 banner is `racecontrol`, and they never collide.
 
 **Tab structure:** one header row
-(`Name | Commentator | Director | Producer | Race Control | Discord`) at row 1; data rows
+(`Name | Commentator | Director | Producer | Race Control | Discord | Race Engineer`) at row 1; data rows
 below it; no interior blank rows. Both the read and write paths are **header-aware**,
 they locate each column by its header text, so the columns may sit in any order and extra
 columns are ignored. The Control Center editor maintains the no-blank-rows invariant.
@@ -407,6 +407,9 @@ events where all Parts share one key already configured in OBS.
      setFlag('Director', p.director);
      setFlag('Producer', p.producer);
      setFlag('Race Control', p.race_control);
+     if (Object.prototype.hasOwnProperty.call(p, 'race_engineer')) {
+       setFlag('Race Engineer', p.race_engineer);
+     }
      setText('Discord', (p.discord || '').toString().trim());
    }
    ```
@@ -463,7 +466,7 @@ directly for role resolution, so roles work if the tab is populated by hand. The
 handover HUD update (Setup tab via the `setup` action) and serving the qualifying
 stream read-only both keep working regardless.
 Add a **Qualifying** tab (same columns as Schedule) and redeploy to enable it.
-Add a **Crew** tab (`Name | Commentator | Director | Producer | Race Control | Discord`,
+Add a **Crew** tab (`Name | Commentator | Director | Producer | Race Control | Discord | Race Engineer`,
 header in row 1) and redeploy to enable the crew editor's write-back.
 
 ## Security
@@ -472,3 +475,11 @@ The URL+key is a write credential for the Sheet: treat it like the other
 `profile.env` secrets (never commit it). The endpoints the panel uses sit on the
 relay's unauthenticated control server: the tailnet is the trust boundary,
 same as all other `/panel` controls.
+
+
+The additive **Race Engineer** column uses `race_engineer` in a Crew write.
+Redeploy the script above before assigning the role through the Crew editor. A
+legacy write omitting `race_engineer` preserves an existing Engineer flag; a
+legacy sheet without the header grants no Engineer capability. The new column
+is appended when explicitly written, preserving existing columns and Discord
+identities. Engineer is separate from Race Control and Director.

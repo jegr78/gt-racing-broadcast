@@ -24,6 +24,7 @@ PRODUCER = "producer"
 # "race_control" and the director-only HUD Setup banner is "racecontrol", so the
 # two never collide.
 RACE_CONTROL = "race_control"
+RACE_ENGINEER = "race_engineer"
 ANY = "any"
 
 # Decision outcomes returned by decide().
@@ -110,6 +111,9 @@ def min_capability(segments, method="GET"):
         return Requirement(DIRECTOR, False)
     if p and p[0] == "substitution":            # /substitution/latest (GET) + /note (POST)
         return Requirement(DIRECTOR, False)
+
+    if method=="GET" and p in (["race-engineer"],["race-engineer","access"]):
+        return Requirement(RACE_ENGINEER,False)
 
     # Race control: the page, its redacted-schedule data endpoint, and the
     # quick-note send plus presets (#244, #376). The desk reuses the ANY cockpit

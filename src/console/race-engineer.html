@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Race Engineer</title>
+<style>:root{color-scheme:dark}body{margin:0;background:#0a0c0f;color:#e6e6e6;font:16px system-ui}main{max-width:1000px;margin:auto;padding:28px}a{color:#8ab4ff}section{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:20px}li{margin:8px 0}#status{color:#b7c3d3}</style>
+<script>
+window.RC_API_BASE="__RC_API_BASE__";
+window.RC_API=p=>(window.RC_API_BASE || '')+p;
+if(location.search)history.replaceState({},'',location.pathname);
+</script></head><body>
+<main><a id="back" href="/console">Console</a><h1>Race Engineer</h1>
+<section><p id="status" role="status">Checking current access…</p><div id="protected" hidden>
+<p>Your Engineer role and the producer's profile opt-in allow access. Live analysis is unavailable in this version.</p>
+<h2>Shared references</h2><ul id="references"></ul>
+<p>Shared references include producer context and notes. Feedback uses your team's existing voice channel. Previously transmitted data cannot be recalled.</p>
+</div></section></main>
+<!--__CREW_FRAME__-->
+<script>
+let timer,busy=false,stopped=false;
+async function refreshAccess(){
+ if(busy || stopped)return;busy=true;
+ const protectedView=document.getElementById('protected'),refs=document.getElementById('references');
+ try{
+  const response=await fetch(RC_API('/race-engineer/access'));
+  const data=await response.json();
+  if(!response.ok)throw new Error(data.error?.message || 'Access was removed.');
+  refs.replaceChildren();
+  for(const reference of data.references){const row=document.createElement('li');row.textContent=reference.label;refs.append(row);}
+  protectedView.hidden=false;document.getElementById('status').textContent='Engineer access enabled. Live analysis unavailable.';
+ }catch(error){protectedView.hidden=true;refs.replaceChildren();document.getElementById('status').textContent=error.message;stopped=true;clearInterval(timer);}finally{busy=false;}
+}
+timer=setInterval(refreshAccess,1000);refreshAccess();
+</script></body></html>

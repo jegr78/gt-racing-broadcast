@@ -76,6 +76,11 @@
       out.push(card(RC_API('/cockpit'), 'Commentator Cockpit', 'Program monitor, tally, chat, stint links'));
     if (roles.indexOf('race_control') !== -1)
       out.push(card(RC_API('/race-control'), 'Race Control', 'Read-only monitor: program, schedule, timer & chat'));
+    var engineerIndex=-1;
+    if (roles.indexOf('race_engineer') !== -1) {
+      engineerIndex=out.length;
+      out.push('<div class="card"><div class="t">Race Engineer</div><div class="d">Checking producer access…</div></div>');
+    }
     if (roles.indexOf('director') !== -1)
       out.push(card(RC_API('/panel'), 'Director Panel', 'Feed, schedule, timer, HUD & submissions control'));
     var menu = document.getElementById('menu');
@@ -91,6 +96,15 @@
       render();
     }
     render();
+    if (engineerIndex!==-1) {
+      fetch(RC_API('/race-engineer/access')).then(function(response){
+        return response.ok;
+      }).then(function(allowed){
+        out[engineerIndex]=allowed?card(RC_API('/race-engineer'),'Race Engineer','Read-only telemetry and explicitly shared references'):
+          '<div class="card" style="opacity:.65"><div class="t">Race Engineer</div><div class="d">Unavailable. Ask the producer to enable Engineer access for a solo POV telemetry profile.</div></div>';
+        render();
+      }).catch(function(){out[engineerIndex]='<div class="card"><div class="t">Race Engineer unavailable</div><div class="d">The relay connection could not be checked.</div></div>';render();});
+    }
     if (roles.indexOf('director') !== -1) {
       // Companion buttons over Funnel (#236): only when a new-enough Companion is up.
       fetch(RC_API('/buttons/health')).then(function (r) { return r.json(); }).then(function (h) {

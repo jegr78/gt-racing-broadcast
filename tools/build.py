@@ -73,6 +73,7 @@ def main():
     cp("obs/intermission.html", "intermission.html")  # /intermission chat-box overlay
     cp("cockpit/cockpit.html", "cockpit.html")
     cp("racecontrol/race-control.html", "race-control.html")
+    cp("console/race-engineer.html", "race-engineer.html")
     cp("console/console.html", "console.html")        # /console launcher (#216)
     cp("console/buttons.html", "buttons.html")         # /console/buttons wrapper (#236)
     cp("console/health-monitor.html", "health-monitor.html")  # /health-monitor dashboard
@@ -206,6 +207,7 @@ def main():
         "splitscreen page shipped": os.path.isfile(os.path.join(PKG, "splitscreen.html")),
         "cockpit page shipped": os.path.isfile(os.path.join(PKG, "cockpit.html")),
         "race-control page shipped": os.path.isfile(os.path.join(PKG, "race-control.html")),
+        "race engineer page shipped": os.path.isfile(os.path.join(PKG, "race-engineer.html")),
         "console launcher shipped": os.path.isfile(os.path.join(PKG, "console.html")),
         "console buttons page shipped": os.path.isfile(os.path.join(PKG, "buttons.html")),
         "health monitor page shipped": os.path.isfile(os.path.join(PKG, "health-monitor.html")),

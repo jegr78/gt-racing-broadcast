@@ -71,6 +71,8 @@ result={'version':1,'findings':[dict(priority=1,title='<script>window.aiInjected
         ctx['profile_use']=use
         ctx['profile_env_read']=lambda:dict(ok=True,entries=[])
         ctx['ai_request']=self.ai
+        ctx['engineer_read']=lambda data:dict(ok=True,profile=self.profile,available=False,
+            enabled=False,revision=0,recordings=[],grants=[])
         rec=self.source.index['rec'];rows=self.source.index['laps'];track={'track':'Fixture track','layout':'Forward'}
         recording=dict(rec=rec,name=self.source.name,indexed=True,recording=False,laps=2,completed_laps=2,partial_segments=0,track=track)
         ctx['telemetry_recordings']=lambda:dict(ok=True,recordings=[recording] if self.profile=='profile' else [])
