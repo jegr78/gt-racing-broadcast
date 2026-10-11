@@ -505,6 +505,22 @@ def t_confirmed_best_and_theory_respect_known_strategy_changes():
             assert snap['theoretical_s'] == 20.0
 
 
+def t_prefix_byte_boundary_excludes_later_packets():
+    import gt7_context
+    with tempfile.TemporaryDirectory() as d:
+        path = write_circle_recording(d)
+        rec = gr.Recording(path)
+        for _wall, _kind, plain in rec.packets():
+            if tm.parse_packet(plain).lap == 3:
+                prefix = rec.pos
+                break
+        result = live._bounded_recording(path, gt7_context.source_identity(path),
+                                        FakeTracks(), FakeCars(), {(1, 2, None)}, limit=prefix)
+        assert {r['lap'] for r in result['laps']} <= {1, 2}
+        lap = result['details'][(1, 2)]
+        assert lap['gt7_time_s'] is None
+
+
 if __name__ == '__main__':
     for name, fn in sorted(list(globals().items())):
         if name.startswith('t_'):
