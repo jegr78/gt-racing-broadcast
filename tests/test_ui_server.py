@@ -3701,7 +3701,7 @@ answer('/recordings', {ok: true, recordings: [
 await tick();
 console.log($('tm-recs').textContent);""")
     if out is not None:
-        assert "7 lap segments" in out and "not indexed yet" not in out, \
+        assert "7 laps" in out and "not indexed yet" not in out, \
             f"the list shows what the job indexed: {out!r}"
 
 
