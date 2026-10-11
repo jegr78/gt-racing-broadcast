@@ -165,6 +165,7 @@ import gt7_telemetry   # GT7 UDP telemetry: packet parser + TelemetryStore (solo
 import gt7_recording   # GT7 telemetry recording to disk (solo/POV only)
 import race_engineer_access
 import race_engineer_live
+import race_engineer_api
 import gt7_context     # prepared session notes attached to each new recording
 import gt7_cars        # GT7 car id -> car name, from the vendored src/assets/gt7 tables (#713)
 import gt7_data        # GT7 reference data: bundled + runtime updates (#787)
@@ -11034,7 +11035,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 self._send_file(path, ctype)
                 return None
             if sub and sub[0]=="race-engineer":
-                if method!="GET" or sub not in (["race-engineer"],["race-engineer","access"]):
+                if method != "GET" or not (sub == ["race-engineer"] or len(sub) == 2 and sub[1] in race_engineer_api.ROUTES | {"access"}):
                     return self._send({"error":{"code":"not_found","message":"Unknown readonly Engineer route"}},404)
                 if console_policy.decide(roles,sub,method,has_step_up)!=console_policy.ALLOW:
                     return self._send({"error":{"code":"forbidden","message":"Race Engineer capability is required"}},403)
@@ -11045,7 +11046,29 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     status=403 if exc.code in ("feature_disabled","forbidden") else 503
                     return self._send({"error":{"code":exc.code,"message":str(exc)}},status)
                 if sub==["race-engineer","access"]:
-                    return self._send(dict(access,analysis_available=False))
+                    return self._send(dict(access, analysis_available=bool(telemetry_store and getattr(getattr(telemetry_store, "engineer", None), "api", None))))
+                if len(sub) == 2:
+                    service = getattr(getattr(telemetry_store, 'engineer', None), 'api', None)
+                    if service is None:
+                        return self._send({'error': {'code': 'analysis_unavailable', 'message': 'Live analysis is unavailable'}}, 503)
+                    sources = {}
+                    def reference(source):
+                        path = engineer_access.reference(source, self._console_roles(subject))
+                        sources[source] = path
+                        return path
+                    try:
+                        result = service.request(sub[1], parse_qs(urlparse(self.path).query, keep_blank_values=True), reference)
+                        # Recheck after preparing the reply, including cache hits.
+                        engineer_access._authorized_doc(self._console_roles(subject))
+                        for source, path in sources.items():
+                            if engineer_access.reference(source, self._console_roles(subject)) != path:
+                                raise race_engineer_access.AccessError('reference_unavailable', 'Shared reference unavailable')
+                    except race_engineer_access.AccessError as exc:
+                        status = 403 if exc.code in ('forbidden', 'feature_disabled') else 410 if exc.code == 'reference_unavailable' else 400 if exc.code == 'invalid_query' else 503
+                        return self._send({'error': {'code': exc.code, 'message': str(exc)}}, status)
+                    except (OSError, ValueError, TypeError):
+                        return self._send({'error': {'code': 'analysis_unavailable', 'message': 'Analysis is temporarily unavailable'}}, 503)
+                    return self._send(result)
                 if not engineer_page_path:return self._send({"error":{"code":"not_found","message":"Engineer page unavailable"}},404)
                 self._send_page(engineer_page_path,"/console",cookie_token=self._cockpit_token(),cookie_path="/console")
                 return None
@@ -12486,6 +12509,7 @@ def engineer_live_for(access, telemetry, rec_dir, runtime_base, bundled):
         lambda: access.read()['enabled'], tracks=telemetry._eng.track_db, cars=telemetry._cars,
         runtime_base=runtime_base, bundled=bundled, recording_source=recording_path,
         context_source=lambda: gt7_context.Store.prepared(rec_dir).read())
+    store.api = race_engineer_api.Service(store)
     telemetry.engineer = store
     return store
 
