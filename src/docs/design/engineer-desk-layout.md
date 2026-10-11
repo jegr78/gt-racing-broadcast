@@ -18,3 +18,8 @@ A diagnostic 200 m segment crossing a larger-section boundary appears in both
 affected disclosures. Section gains use their exact reviewed boundaries; these
 segments are inspection aids and are not added to manufacture a section total.
 The standalone full mini-sector table remains available in one disclosure.
+
+Disclosure state and keyboard focus survive regular analysis refreshes. The
+current definition/variant identifies that state; a new definition or a cleared
+selection/access view resets it. A browser regression observes three complete
+signed polling cycles while the section remains expanded and focused.

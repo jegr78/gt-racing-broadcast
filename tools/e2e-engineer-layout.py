@@ -22,6 +22,17 @@ async def main():
                 token=gate.m.console_auth.mint_token(gate.SECRET,'engineer')
                 await page.goto(f'http://127.0.0.1:{server.server_port}/console/race-engineer?t={token}')
                 await page.wait_for_function('() => EngineerDesk.state.pair?.state === "ready"')
+                first_detail=page.locator('#larger-sectors [data-section]').first.locator('details')
+                await first_detail.locator('summary').click()
+                for _ in range(3):
+                    stamp=await page.evaluate('() => EngineerDesk.state.received')
+                    await page.wait_for_function('(stamp)=>EngineerDesk.state.received>stamp&&!EngineerDesk.state.analysisBusy',arg=stamp)
+                    assert await first_detail.evaluate('(el)=>el.open'), 'analysis refresh closed an expanded section'
+                    assert await first_detail.locator('summary').evaluate('(el)=>el===document.activeElement'), 'analysis refresh lost disclosure keyboard focus'
+                await first_detail.locator('summary').click()
+                stamp=await page.evaluate('() => EngineerDesk.state.received')
+                await page.wait_for_function('(stamp)=>EngineerDesk.state.received>stamp&&!EngineerDesk.state.analysisBusy',arg=stamp)
+                assert not await first_detail.evaluate('(el)=>el.open'), 'analysis refresh reopened a collapsed section'
                 for width,height in ((1440,1050),(1024,1100),(390,900)):
                     await page.set_viewport_size(dict(width=width,height=height))
                     assert await page.evaluate('() => document.documentElement.scrollWidth<=innerWidth'), 'approved layout overflowed'
@@ -50,7 +61,19 @@ async def main():
                     await page.locator('.mini-details summary').click()
                 await page.evaluate('() => clearInterval(timer)')
                 await page.wait_for_function('() => !EngineerDesk.state.busy && !EngineerDesk.state.analysisBusy')
-                await page.evaluate('() => {state.savedLayoutPair=state.pair;state.savedLayoutDetail=state.detail;state.pair={...state.pair,delta:[]};render();}')
+                await page.evaluate('() => {state.savedLayoutPair=state.pair;state.savedLayoutDetail=state.detail;}')
+                await first_detail.locator('summary').click()
+                await page.evaluate('() => render()')
+                assert await page.evaluate('() => state.sectionOpen.size') > 0
+                await page.evaluate('() => {state.detail={...state.detail,definition_fingerprint:"new-definition"};render();}')
+                assert not await first_detail.evaluate('(el)=>el.open'), 'new section definition inherited old disclosure state'
+                await page.evaluate('() => {state.detail=state.savedLayoutDetail;render();}')
+                await first_detail.locator('summary').click()
+                await page.evaluate('() => render()')
+                await page.evaluate('() => clearPlots()')
+                assert await page.evaluate('() => state.sectionOpen.size') == 0, 'cleared selection retained section state'
+                await page.evaluate('() => {state.detail=state.savedLayoutDetail;state.pair={...state.savedLayoutPair,delta:[]};render();}')
+
                 assert 'Waiting for matching distance samples' in await page.locator('#selection-summary').inner_text(), 'empty provisional comparison claimed a measured distance'
                 await page.evaluate('() => {state.pair={...state.savedLayoutPair,delta:state.savedLayoutPair.delta.slice(0,2)};render();}')
                 expected_distance=await page.evaluate('() => state.pair.delta.at(-1).d.toFixed(0)')
