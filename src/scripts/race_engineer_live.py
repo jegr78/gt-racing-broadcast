@@ -24,10 +24,10 @@ DETAIL_BYTES_MAX = 16 * 1024 * 1024
 ENTRY_BYTES_MAX = 1024 * 1024
 RECOVERY_MAX = 8
 STALE_S = 5.0
-SUMMARY_FIELDS = frozenset(('id', 'session_id', 'version', 'context_revision',
+SUMMARY_FIELDS = frozenset(('_context_source', 'id', 'session_id', 'version', 'context_revision',
     'recording_session', 'session', 'lap', 'state', 'detail_state', 'gt7_time_s',
     'time_s', 'relay_time_s', 'status', 'reason', 'car_id', 'car', 'track_id', 'track',
-    'layout', 'distance_m', 'length_m', 'fuel_used_l', 'top_speed_kmh',
+    'layout', 'distance_m', 'length_m', 'fuel_used_l', 'top_speed_kmh', 'lap_role', 'after_service',
     'capture_complete', 'trace_complete', 'time_valid', 'data_quality', 'reasons',
     'pace_eligible', 'comparison_eligible', 'analysis_role', 'compound',
     'context_confirmed', 'context_warnings', 'tyre_age_laps', 'start_t_s', 'end_t_s'))
@@ -109,7 +109,7 @@ class Store:
     """All expensive work is shared. Readers receive copies of immutable publications."""
     def __init__(self, enabled, tracks=None, cars=None, runtime_base=None, bundled=None,
                  clock=time.monotonic, queue_max=PACKETS_MAX, details_max=DETAILS_MAX,
-                 summaries_max=SUMMARIES_MAX):
+                 summaries_max=SUMMARIES_MAX, recording_source=None, context_source=None):
         self.generation = uuid.uuid4().hex
         self._enabled_source, self._clock = enabled, clock
         self._tracks, self._cars = tracks, cars
@@ -130,6 +130,11 @@ class Store:
         self._values = {}
         self._last_publish = None
         self._recording = None
+        self._recording_source, self._context_source = recording_source, context_source
+        self._bindings = {}
+        self._session_offset = 0
+        self._recording_started = None
+        self._context_key = None
         self._recovery, self._tasks = collections.OrderedDict(), {}
         self._recovery_sizes = {}
         self._replays = 0
@@ -173,6 +178,7 @@ class Store:
             self._details.clear()
             self._sessions.clear()
             self._sizes.clear()
+            self._bindings.clear()
             self._receipt = None
             self._values = {}
             self._revision += 1
@@ -196,11 +202,16 @@ class Store:
         while not self._stop.is_set():
             if time.monotonic() - checked >= .2:
                 self.refresh_enabled()
+                self._sync_recording()
                 self._read_context()
                 checked = time.monotonic()
             try:
                 item = self._queue.get(timeout=.1)
             except queue.Empty:
+                if self._receipt and self._replay.laps:
+                    wall = self._receipt[1] + max(0.0, self._clock() - self._receipt[0])
+                    if self._finish(wall):
+                        self._publish()
                 continue
             try:
                 if item[0] == self._epoch and self._enabled:
@@ -226,6 +237,13 @@ class Store:
             replay.tail = None
             if replay.eng._acc is not None:
                 replay.eng._acc._reject('Engineer active sample limit')
+        finished = self._finish(wall)
+        if finished or self._last_publish is None or mono - self._last_publish >= .5:
+            self._publish()
+            self._last_publish = mono
+
+    def _finish(self, wall):
+        replay = self._replay
         finished = False
         while replay.laps:
             lap = replay.laps[0]
@@ -245,9 +263,7 @@ class Store:
             row.update(state='confirmed' if row['gt7_time_s'] is not None else 'unconfirmed')
             self._retain(self._identify(row, lap))
             finished = True
-        if finished or self._last_publish is None or mono - self._last_publish >= .5:
-            self._publish()
-            self._last_publish = mono
+        return finished
 
     def _identify(self, row, raw):
         engine_session = raw['session']
@@ -275,15 +291,24 @@ class Store:
             self._identities[lap_key] = lid
         return dict(row, id=lid, session_id=sid, version=1,
                     context_revision=self._context_revision,
-                    recording_session=engine_session)
+                    recording_session=engine_session - self._session_offset,
+                    _context_source=self._recording[1] if self._recording else 'prepared')
 
     def _annotate(self, row):
-        return dict(gt7_context.annotate(self._context, row),
+        measured = dict(row, session=row.get('recording_session', row['session']))
+        lookup = {(r.get('recording_session', r['session']), r['lap']): r
+                  for r in self._summaries.values() if r.get('_context_source') == row.get('_context_source')}
+        lookup[(measured['session'], measured['lap'])] = measured
+        return dict(gt7_context.annotate(self._context, measured, lap_lookup=lookup),
+                    session=row['session'],
                     context_revision=self._context_revision)
 
     def _retain(self, row):
         row = self._annotate(row)
         lid, sid = row['id'], row['session_id']
+        if (self._recording and self._recording_started is not None
+                and row['start_t_s'] + self._replay.first >= self._recording_started):
+            self._bindings[lid] = self._recording
         size = len(json.dumps(row, allow_nan=False).encode('utf-8'))
         self._summaries[lid] = dict(_summary(row), detail_state='ready' if size <= ENTRY_BYTES_MAX else 'unavailable')
         if size <= ENTRY_BYTES_MAX:
@@ -302,6 +327,7 @@ class Store:
         self._summaries.pop(lid, None)
         self._details.pop(lid, None)
         self._sizes.pop(lid, None)
+        self._bindings.pop(lid, None)
         self._identities = {k: v for k, v in self._identities.items() if v != lid}
 
     def _trim_sessions(self):
@@ -366,14 +392,39 @@ class Store:
         brief = next((r for r in doc['laps'] if r['id'] == lid), None)
         if brief is None:
             return {'state': 'unavailable', 'lap': None}
-        if self._recording is None:
+        binding = self._bindings.get(lid)
+        if binding is None:
             return {'state': brief['detail_state'], 'lap': None}
-        path, source = self._recording
+        path, source = binding
+        if not os.path.isfile(path) and path.endswith('.part'):
+            path = path[:-5]
         return self.recording_detail(source, path, brief['recording_session'], brief['lap'], identity=brief)
 
     def bind_recording(self, path):
         """Local producer association, never a Console path selector."""
-        self._recording = (os.path.realpath(path), gt7_context.source_identity(path))
+        source = gt7_context.source_identity(path)
+        if self._recording is None or self._recording[1] != source:
+            self._session_offset = self._replay.eng.session - 1
+            packet = next(gt7_recording.Recording(path).packets(), None)
+            self._recording_started = packet[0] if packet else None
+            self._context_key = None
+        self._recording = (os.path.realpath(path), source)
+        if self._recording_started is not None and self._replay.first is not None:
+            for lid, row in self._summaries.items():
+                if row['start_t_s'] + self._replay.first >= self._recording_started:
+                    self._bindings.setdefault(lid, self._recording)
+
+    def _sync_recording(self):
+        if self._recording_source is None:
+            return
+        try:
+            path = self._recording_source()
+            if path:
+                source = gt7_context.source_identity(path)
+                if self._recording is None or self._recording != (os.path.realpath(path), source):
+                    self.bind_recording(path)
+        except (OSError, ValueError, gt7_recording.RecordingError):
+            pass  # The recorder may not have flushed its new header yet; try next tick.
 
     def recording_detail(self, source, path, session, lap, identity=None):
         """Caller must authorize source on every read, including pending/cached reads."""
@@ -445,27 +496,33 @@ class Store:
                             old, _ = self._recovery.popitem(last=False)
                             self._recovery_sizes.pop(old, None)
             except (OSError, ValueError, TypeError, gt7_recording.RecordingError):
-                pass
+                pass  # Missing/invalid local sources remain pending or unavailable to readers.
             finally:
                 with self._lock:
                     self._tasks.pop(stamp, None)
                 self._recovery_queue.task_done()
 
     def _read_context(self):
-        if self._recording is None:
+        if self._recording is None and self._context_source is None:
             return
         try:
-            doc = gt7_context.Store.for_recording(self._recording[0]).read()
-            if doc['revision'] != self._context_revision:
-                self._context, self._context_revision = doc['data'], doc['revision']
-                self._details = collections.OrderedDict((lid, self._annotate(row)) for lid, row in self._details.items())
-                self._summaries = collections.OrderedDict((lid, self._annotate(row)) for lid, row in self._summaries.items())
-                self._publish()
+            path = self._recording[0] if self._recording else None
+            if path and not os.path.isfile(path) and path.endswith('.part'):
+                path = path[:-5]
+            doc = gt7_context.Store.for_recording(path).read() if path else self._context_source()
+            key = (doc['source_id'], doc['revision'])
             self._context_error = None
+            if key != self._context_key:
+                self._context_key = key
+                self._context, self._context_revision = doc['data'], doc['revision']
+                self._details = collections.OrderedDict((lid, self._annotate(row) if row.get('_context_source') == key[0] else row) for lid, row in self._details.items())
+                self._summaries = collections.OrderedDict((lid, _summary(self._annotate(row)) if row.get('_context_source') == key[0] else row) for lid, row in self._summaries.items())
+                self._publish()
         except (OSError, ValueError, TypeError, gt7_recording.RecordingError):
             error = 'Context unavailable; comparison conditions unconfirmed'
             if self._context_error != error:
                 self._context, self._context_revision = {'notes': [], 'sessions': {}}, None
+                self._context_key = None
                 self._context_error = error
                 self._details = collections.OrderedDict((lid, self._annotate(row)) for lid, row in self._details.items())
                 self._summaries = collections.OrderedDict((lid, _summary(self._annotate(row))) for lid, row in self._summaries.items())
