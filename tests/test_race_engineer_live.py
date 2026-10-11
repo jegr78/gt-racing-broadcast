@@ -221,6 +221,7 @@ def t_recovery_source_replacement_and_deleted_context_fail_closed():
             with open(path, 'wb') as f:
                 f.write(data.replace(source.encode(), ('0' * len(source)).encode(), 1))
             os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns))
+            assert store.recording_detail(source, path, 1, 2)['state'] == 'unavailable'
             assert store.recording_snapshot(source, path)['state'] == 'unavailable'
             os.unlink(path)
             store._read_context()
@@ -541,6 +542,51 @@ def t_prefix_byte_boundary_excludes_later_packets():
         assert {r['lap'] for r in result['laps']} <= {1, 2}
         lap = result['details'][(1, 2)]
         assert lap['gt7_time_s'] is None
+
+
+def t_recorded_confirmation_expiry_is_unavailable_not_endless_pending():
+    import struct
+    with tempfile.TemporaryDirectory() as d:
+        path = write_circle_recording(d)
+        part = path + '.part'
+        with open(path, 'rb') as src, open(part, 'wb') as dst:
+            dst.write(src.readline())
+            for wall, kind, plain in gr.Recording(path).packets():
+                packet = bytearray(plain)
+                struct.pack_into('<i', packet, tm.OFF_LAST_MS, -1)
+                dst.write(gr._encode(wall, ord(kind), packet))
+        with live.Store(lambda: True, tracks=FakeTracks(), cars=FakeCars(), queue_max=4096,
+                        details_max=2) as store:
+            store.bind_recording(part)
+            feed(store, path)
+            brief = next(r for r in store.snapshot()['laps'] if r['lap'] == 2)
+            assert store.detail(brief['id'])['state'] == 'pending'
+            assert store.wait_recovery(10)
+            assert store.detail(brief['id'])['state'] == 'unavailable'
+
+
+def t_recording_header_and_stop_do_not_misbind_future_laps():
+    with tempfile.TemporaryDirectory() as d:
+        path = write_circle_recording(d)
+        part = path + '.part'
+        with open(path, 'rb') as f:
+            header, remaining = f.readline(), f.read()
+        with open(part, 'wb') as f:
+            f.write(header)
+        active = [part]
+        with live.Store(lambda: True, tracks=FakeTracks(), cars=FakeCars(), queue_max=4096,
+                        recording_source=lambda: active[0]) as store:
+            store._sync_recording()
+            assert store._recording_started is None
+            with open(part, 'ab') as f:
+                f.write(remaining)
+            store._sync_recording()
+            assert store._recording_started == 1_700_000_000.0
+            active[0] = None
+            store._sync_recording()
+            feed(store, path)
+            assert not store._bindings, 'stopped recording claimed later live laps'
+            assert store.snapshot()['history'] == 'volatile'
 
 
 if __name__ == '__main__':

@@ -182,6 +182,7 @@ class Store:
         self._values = {}
         self._last_publish = None
         self._recording = None
+        self._recording_current = recording_source is None
         self._recording_source, self._context_source = recording_source, context_source
         self._bindings = {}
         self._session_offset = 0
@@ -212,7 +213,8 @@ class Store:
                 'context_revision': self._context_revision, 'enabled': self._enabled,
                 'session_id': None, 'current': None, 'instruments': {}, 'receipt': None,
                 'sessions': [], 'laps': [], 'best_s': None, 'theoretical_s': None,
-                'history': 'recording-backed' if self._recording else 'volatile',
+                'history': ('recording-backed' if self._recording and self._recording_current
+                            else 'mixed' if self._bindings else 'volatile'),
                 'warnings': []}
 
     def refresh_enabled(self):
@@ -387,7 +389,7 @@ class Store:
         row['measurement_hash'] = _measurement_hash(row)
         row = self._annotate(row)
         lid, sid = row['id'], row['session_id']
-        if (self._recording and self._recording_started is not None
+        if (self._recording and self._recording_current and self._recording_started is not None
                 and row['start_t_s'] + self._replay.first >= self._recording_started):
             self._bindings[lid] = self._recording
         size = len(json.dumps(row, allow_nan=False).encode('utf-8'))
@@ -523,9 +525,11 @@ class Store:
             return
         try:
             path = self._recording_source()
+            self._recording_current = bool(path)
             if path:
                 source = gt7_context.source_identity(path)
-                if self._recording is None or self._recording != (os.path.realpath(path), source):
+                if (self._recording is None or self._recording_started is None
+                        or self._recording != (os.path.realpath(path), source)):
                     self.bind_recording(path)
         except (OSError, ValueError, gt7_recording.RecordingError):
             pass  # The recorder may not have flushed its new header yet; try next tick.
@@ -546,15 +550,17 @@ class Store:
                 row = (next((r for r in cached['details'].values() if r['lap'] == lap
                              and abs(r['_start_wall'] - start) <= .2), None)
                        if start is not None else cached['details'].get((session, lap)))
-                if row is None and target in cached['requested'] and (start is None or
-                        cached['end_wall'] is not None and start < cached['end_wall']):
+                if row is None and target in cached['requested']:
                     if not (identity and path.endswith('.part')):
+                        return {'state': 'unavailable', 'lap': None}
+                    if cached['end_wall'] is not None and start is not None and cached['end_wall'] > start + gt7_recording.GT7_TIME_WINDOW_S + 2:
                         return {'state': 'unavailable', 'lap': None}
                     if stamp[4] == cached['prefix_size']:
                         return {'state': 'pending', 'lap': None}
                 if row is not None:
                     if identity and identity.get('measurement_hash') != row.get('measurement_hash'):
-                        incomplete = row.get('gt7_time_s') is None or not row.get('capture_complete')
+                        incomplete = (row.get('gt7_time_s') is None and cached['end_wall'] is not None
+                                      and cached['end_wall'] <= row['_end_wall'] + gt7_recording.GT7_TIME_WINDOW_S + 2)
                         if not (path.endswith('.part') and incomplete):
                             return {'state': 'unavailable', 'lap': None}
                         if stamp[4] == cached['prefix_size']:
