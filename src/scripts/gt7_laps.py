@@ -19,7 +19,7 @@ STEP_M = 5.0
 SECTOR_M = 200.0
 MAX_TRACE_M = gt7_telemetry.MAX_SAMPLES * gt7_telemetry.SAMPLE_MIN_DIST
 COUNTED = ("reference", "counted")
-INDEX_VERSION = 7
+INDEX_VERSION = 8
 CACHE_SUFFIX = ".laps.json"
 DECIMATE_M = 2.0              # finer samples add nothing to a 5 m trace
 RESUME_CHECK = 64             # bytes before a resume point that must be unchanged to continue there
@@ -458,6 +458,7 @@ def _indexed_lap(stem, lap, samples, tyres, first, track_db, cars, found, open_l
         "fuel_used_l": None if lap["fuel_used"] is None else round(lap["fuel_used"], 2),
         "fuel_start_l": lap.get("fuel_start_l"), "fuel_end_l": lap.get("fuel_end_l"),
         "top_speed_kmh": round(lap["top_speed_mps"] * 3.6, 1),
+        "line_position": lap.get("line_position"), "line_car_count": lap.get("line_car_count"),
         "car_id": lap["car_id"], "car": gt7_recording.car_name(cars, lap["car_id"]),
         "track_id": track_id,
         "track": found["track"] if track_id is not None else "",

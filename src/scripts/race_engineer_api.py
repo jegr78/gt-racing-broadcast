@@ -33,6 +33,8 @@ FIELDS = frozenset((
     "length_m",
     "fuel_used_l",
     "top_speed_kmh",
+    "line_position",
+    "line_car_count",
     "lap_role",
     "after_service",
     "capture_complete",

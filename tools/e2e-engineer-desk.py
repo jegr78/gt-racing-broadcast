@@ -17,6 +17,10 @@ async def main():
         fixture=Fixture(root)
         fixture.access().update(enabled=True,expected=0)
         server=fixture.console(with_live=True); fixture.feed_live()
+        import gt7_recording, gt7_telemetry
+        wall, _, raw = list(gt7_recording.Recording(fixture.live_path).packets())[-1]
+        fixture.live.put(gt7_telemetry.parse_packet(raw)._replace(race_position=15, car_count=15), wall + .02)
+        assert fixture.live.flush(10)
         try:
             async with async_playwright() as pw:
                 browser=await pw.chromium.launch(headless=True)
@@ -25,6 +29,8 @@ async def main():
                 await page.goto(f'http://127.0.0.1:{server.server_port}/console/race-engineer?t={token}')
                 await page.wait_for_function('() => document.getElementById("speed")?.textContent.includes("180")',timeout=5000)
                 assert await page.locator('#rpm').inner_text() == '7000'
+                assert await page.locator('#race-position').inner_text() == 'P15/15', 'measured race position missing'
+                assert 'finish P3/15' in await page.evaluate('() => lapLabel({lap:2,state:"confirmed",time_s:20,line_position:3,line_car_count:15,comparison_eligible:true})'), 'lap option lost line position'
                 await page.wait_for_function('() => EngineerDesk.state.historyRevision !== null')
                 assert 'Mitsubishi Lancer Evolution IX' in await page.locator('#session option:checked').inner_text(), 'session car name missing'
                 fallback = await page.evaluate('() => {const saved=EngineerDesk.state.sessions;EngineerDesk.state.sessions=saved.map(r=>({...r,car:null}));selections();const label=document.querySelector("#session option:checked").textContent;EngineerDesk.state.sessions=saved;selections();return label;}')
@@ -153,11 +159,14 @@ async def main():
                 async def missing_car(route):
                     response = await route.fetch(); data = await response.json()
                     data['instruments']['position'] = None
+                    data['instruments']['race_position'] = None
+                    data['instruments']['car_count'] = None
                     await route.fulfill(json=data)
                 await page.unroute('**/race-engineer/snapshot', moving_car)
                 await page.route('**/race-engineer/snapshot', missing_car)
                 await page.wait_for_function('() => EngineerDesk.state.snapshot?.instruments?.position === null')
                 assert await page.locator('#map circle').count() == 0, 'missing position retained a car marker'
+                assert await page.locator('#race-position').inner_text() == 'Unavailable', 'missing race position retained a place'
                 await page.unroute('**/race-engineer/snapshot', missing_car)
                 async def another_track(route):
                     response = await route.fetch(); data = await response.json()

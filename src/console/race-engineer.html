@@ -13,6 +13,7 @@
 <p id="status" role="status">Checking current access…</p><p id="receipt" class="sub">Waiting for measured telemetry</p><p id="notice" role="status"></p>
 <div id="protected" hidden>
 <section aria-label="Live instruments"><div id="instruments">
+<div class="value"><span>Race position</span><strong id="race-position">Unavailable</strong></div>
 <div class="value"><span>Speed · km/h</span><strong id="speed">Unavailable</strong></div><div class="value"><span>Gear</span><strong id="gear">Unavailable</strong></div><div class="value"><span>Engine · RPM</span><strong id="rpm">Unavailable</strong></div><div class="value"><span>Throttle · %</span><strong id="throttle">Unavailable</strong></div><div class="value"><span>Brake · %</span><strong id="brake">Unavailable</strong></div><div class="value"><span>Observed lap · s</span><strong id="lap-time">Unavailable</strong></div>
 <div class="value"><span>Fuel · L</span><strong id="fuel">Unavailable</strong></div><div class="value"><span>Tyres FL / FR · °C</span><strong id="tyres-front">Unavailable</strong></div><div class="value"><span>Tyres RL / RR · °C</span><strong id="tyres-rear">Unavailable</strong></div><div class="value"><span>Live observed delta · s</span><strong id="delta">Unavailable</strong></div><div class="value"><span>Retained eligible best · s</span><strong id="best">Unavailable</strong></div><div class="value"><span>Retained-detail theoretical · s</span><strong id="theory">Unavailable</strong></div>
 </div><p id="source-state" class="sub"></p></section>
@@ -48,7 +49,7 @@ async function request(route,query={},method='GET',body=null){
 }
 function resetGeneration(generation){if(state.generation&&state.generation!==generation){state.epoch++;state.laps=[];state.sessions=[];state.known.clear();state.historyRevision=null;state.a=state.b=state.session=state.refSource='';state.refLaps=[];state.zoom=null;state.newLaps=0;clearPlots();say('Relay restarted. A new live generation is active; previous recordings remain history.');}state.generation=generation;}
 function options(id,rows,selected,empty){const el=$(id);el.replaceChildren();if(empty!==undefined){const o=document.createElement('option');o.value='';o.textContent=empty;el.append(o);}for(const row of rows){const o=document.createElement('option');o.value=row.id;o.textContent=row.label;el.append(o);}if(selected&&!rows.some(r=>r.id===selected)){const o=document.createElement('option');o.value=selected;o.textContent='Unavailable selection';el.append(o);}el.value=selected;}
-function lapLabel(r){return `Lap ${r.lap} · ${r.state==='provisional'?'provisional':num(r.time_s,3)+' s'}${r.detail_state==='evicted'?' · evicted':''}${!r.comparison_eligible&&r.state!=='provisional'?' · limited':''}`;}
+function lapLabel(r){return `Lap ${r.lap} · ${r.state==='provisional'?'provisional':num(r.time_s,3)+' s'}${r.line_position!=null&&r.line_car_count!=null?' · finish P'+r.line_position+'/'+r.line_car_count:''}${r.detail_state==='evicted'?' · evicted':''}${!r.comparison_eligible&&r.state!=='provisional'?' · limited':''}`;}
 function carLabel(row){return row.car||('car '+(row.car_id??'unknown'));}
 function referenceLabel(row){const source=row.session_id?.split(':')[1];return state.refs.find(r=>r.id===source)?.label||'Shared reference';}
 function selections(){
@@ -65,7 +66,7 @@ function selections(){
  options('reference-source',state.refs.map(r=>({id:r.id,label:r.label})),state.refSource,'Selected session');
  $('follow').checked=state.follow;$('new-laps').textContent=state.newLaps?`${state.newLaps} newly completed lap${state.newLaps===1?'':'s'}`:'';
 }
-function instruments(snap){const v=snap.instruments||{};for(const [id,value,d] of [['speed',v.speed_kmh,0],['gear',v.gear,0],['rpm',v.rpm,0],['throttle',v.throttle,0],['brake',v.brake,0],['fuel',v.fuel_l,1],['lap-time',snap.current?.elapsed_s,3],['best',snap.best_s,3],['theory',snap.theoretical_s,3]])$(id).textContent=num(value,d);
+function instruments(snap){const v=snap.instruments||{};$('race-position').textContent=v.race_position!=null&&v.car_count!=null?`P${v.race_position}/${v.car_count}`:'Unavailable';for(const [id,value,d] of [['speed',v.speed_kmh,0],['gear',v.gear,0],['rpm',v.rpm,0],['throttle',v.throttle,0],['brake',v.brake,0],['fuel',v.fuel_l,1],['lap-time',snap.current?.elapsed_s,3],['best',snap.best_s,3],['theory',snap.theoretical_s,3]])$(id).textContent=num(value,d);
  const tyres=v.tyres_c||[];$('tyres-front').textContent=num(tyres[0],0)+' / '+num(tyres[1],0);$('tyres-rear').textContent=num(tyres[2],0)+' / '+num(tyres[3],0);
  $('source-state').textContent=snap.current?`${snap.current.track||'Unknown track'} · ${snap.current.car||'Unknown car'} · lap ${snap.current.lap} · observed prefix only`:'Waiting for a lap';
  $('history-state').textContent=`History: ${snap.history}. Eight sessions / 512 summaries / 16 detailed laps. Older details may be evicted; recording-backed recovery runs in the background.`;

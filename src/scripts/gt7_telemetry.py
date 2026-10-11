@@ -35,6 +35,8 @@ OFF_LAP = 0x74          # current lap (int16)
 OFF_BEST_MS = 0x78      # best lap time, ms (int32; -1 = none)
 OFF_LAST_MS = 0x7C      # last lap time, ms (int32; -1 = none)
 OFF_DAY_PROGRESSION = 0x80  # time of day on track, ms since midnight (int32)
+OFF_RACE_POSITION = 0x84  # own race position (int16; -1 = no session)
+OFF_CAR_COUNT = 0x86      # number of cars (int16; -1 = no session)
 OFF_FLAGS = 0x8E        # simulator flags (uint16 bitfield)
 OFF_THROTTLE = 0x91     # 0-255 (uint8)
 OFF_BRAKE = 0x92        # 0-255 (uint8)
@@ -98,8 +100,8 @@ GT7Packet = namedtuple("GT7Packet", [
     "flags", "on_track", "paused", "loading",
     "car_id",
     "steer_rad", "sway", "heave", "surge", "throttle_input", "brake_input",
-    "gear", "rpm", "pos_x", "pos_y", "pos_z",
-], defaults=(None,) * 12)   # None when the packet is too short to carry the field
+    "gear", "rpm", "pos_x", "pos_y", "pos_z", "race_position", "car_count",
+], defaults=(None,) * 14)   # None when the packet is too short to carry the field
 
 
 def _opt_float(plain, off):
@@ -118,6 +120,9 @@ def parse_packet(plain):
     """Parse a decrypted packet buffer of any type into a GT7Packet. Fields the
     packet type does not carry are None."""
     flags = struct.unpack_from("<H", plain, OFF_FLAGS)[0]
+    position, cars = struct.unpack_from("<hh", plain, OFF_RACE_POSITION)
+    cars = cars if cars > 0 else None
+    position = position if cars is not None and 1 <= position <= cars else None
     return GT7Packet(
         speed_mps=struct.unpack_from("<f", plain, OFF_SPEED)[0],
         fuel_level=struct.unpack_from("<f", plain, OFF_FUEL_LEVEL)[0],
@@ -150,6 +155,7 @@ def parse_packet(plain):
         pos_x=struct.unpack_from("<f", plain, OFF_POS)[0],
         pos_y=struct.unpack_from("<f", plain, OFF_POS + 4)[0],
         pos_z=struct.unpack_from("<f", plain, OFF_POS + 8)[0],
+        race_position=position, car_count=cars,
     )
 
 
@@ -404,7 +410,7 @@ class TelemetryEngine:
         elif pkt.lap != self._lap_num:    # lap-change edge: this new lap starts at the line
             if self._acc is not None and now - self._acc.last_t > 2.0:
                 self._acc._reject("data gap over 2 s")
-            self._finalise_lap()
+            self._finalise_lap(pkt)
             if self._acc is not None:     # bank the closing lap's driven distance
                 self._session_dist_m += self._acc.distance
             self._lap_num = pkt.lap
@@ -504,10 +510,14 @@ class TelemetryEngine:
             return None
         return self._lap_record(self._acc, "not counted", "recording ended mid-lap", closed=False)
 
-    def _emit_lap(self, acc, status, reason, closed=True):
+    def _emit_lap(self, acc, status, reason, closed=True, line_packet=None):
         if self.on_lap is None:
             return
         record = self._lap_record(acc, status, reason, closed)
+        if line_packet is not None and (not line_packet.on_track or line_packet.loading):
+            line_packet = None
+        record["line_position"] = line_packet.race_position if line_packet is not None else None
+        record["line_car_count"] = line_packet.car_count if line_packet is not None else None
         try:
             self.on_lap(record)
         except Exception as e:  # noqa: BLE001  a lap consumer must never stop the telemetry
@@ -529,7 +539,7 @@ class TelemetryEngine:
         except Exception as e:  # noqa: BLE001  bad track data must not stop the telemetry
             LOG.warning("GT7 track recognition failed: %s", e)
 
-    def _finalise_lap(self):
+    def _finalise_lap(self, line_packet=None):
         acc = self._acc
         if acc is None:
             return
@@ -547,15 +557,15 @@ class TelemetryEngine:
         head = f"GT7 lap {self._lap_num} {_fmt_time(acc.elapsed)}"
         if why is not None:
             LOG.info("%s: not counted (%s)", head, why)
-            self._emit_lap(acc, "not counted", why)
+            self._emit_lap(acc, "not counted", why, line_packet=line_packet)
             return
         if self._ref is None or acc.elapsed < self._ref["time"]:
             self._ref = {"time": acc.elapsed, "samples": acc.samples}
             LOG.info("%s: new reference, delta vs this lap from now on", head)
-            self._emit_lap(acc, "reference", "")
+            self._emit_lap(acc, "reference", "", line_packet=line_packet)
         else:
             LOG.info("%s: counted", head)
-            self._emit_lap(acc, "counted", "")
+            self._emit_lap(acc, "counted", "", line_packet=line_packet)
         self._lap_time_sum += acc.elapsed
         self._lap_time_n += 1
         if acc.fuel_start is not None and acc.fuel_end is not None:
