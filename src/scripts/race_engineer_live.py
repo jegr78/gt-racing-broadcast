@@ -160,6 +160,7 @@ class Store:
         self._identities, self._session_keys = {}, {}
         self._sizes = {}
         self._receipt = None
+        self._last_packet = None
         self._values = {}
         self._last_publish = None
         self._recording = None
@@ -219,6 +220,7 @@ class Store:
             self._context = {'notes': [], 'sessions': {}}
             self._context_revision = 0
             self._receipt = None
+            self._last_packet = None
             self._values = {}
             self._revision += 1
             with self._lock:
@@ -229,8 +231,9 @@ class Store:
         """UDP path: no disk access, parsing, replay or blocking queue insertion."""
         if not self._enabled or self._stop.is_set() or not math.isfinite(wall_ts):
             return False
+        self._last_packet = (wall_ts, self._clock())
         try:
-            self._queue.put_nowait((self._epoch, pkt, wall_ts, self._clock()))
+            self._queue.put_nowait((self._epoch, pkt, wall_ts, self._last_packet[1]))
             return True
         except queue.Full:
             self._dropped += 1
@@ -436,13 +439,19 @@ class Store:
             doc = self._published
         result = copy.deepcopy(doc)
         receipt = doc['receipt']
+        packet = self._last_packet
+        packet_age = max(0.0, self._clock() - packet[1]) if packet else None
         if receipt is None:
-            result['receipt'] = {'age_s': None, 'received_at': None, 'state': 'waiting'}
+            result['receipt'] = {'age_s': None, 'received_at': None,
+                                 'state': 'preparing' if packet else 'waiting'}
         else:
             mono, wall, state = receipt
             age = max(0.0, self._clock() - mono)
             result['receipt'] = {'age_s': round(age, 3), 'received_at': wall,
-                                 'state': 'stale' if age >= STALE_S else state}
+                                 'state': ('stale' if packet_age is None or packet_age >= STALE_S
+                                           else 'delayed' if age >= STALE_S else state)}
+        result['receipt'].update(packet_age_s=round(packet_age, 3) if packet_age is not None else None,
+                                 packet_received_at=packet[0] if packet else None)
         return result
 
     def detail(self, lid):

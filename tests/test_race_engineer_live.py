@@ -119,8 +119,11 @@ def t_ingestion_does_not_wait_for_analysis_and_overflow_is_visible():
         start = time.monotonic()
         accepted = [store.put(p, 101 + i) for i in range(10)]
         elapsed = time.monotonic() - start
+        pending = store.snapshot()
         block.set()
         assert elapsed < .1 and not all(accepted), 'ingestion waited for preparation'
+        assert pending['receipt']['state'] == 'preparing'
+        assert pending['receipt']['packet_age_s'] < .1
         assert store.flush()
         assert store.stats()['dropped'] > 0
         assert not store.snapshot()['current']['pace_eligible']
