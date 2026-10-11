@@ -199,7 +199,7 @@ class Service:
         if result["changed"]:
             result["laps"] = [public_lap(r, False) for r in result["laps"]]
             result["sessions"] = [
-                project(s, ("id", "car_id", "track_id", "track", "laps"))
+                project(s, ("id", "car_id", "car", "track_id", "track", "laps"))
                 for s in result["sessions"]
             ]
         return result
@@ -278,10 +278,9 @@ class Service:
                     "fuel_used_l",
                     "top_speed_kmh",
                 }
-                if (
-                    (row.get("track_definition") or {}).get("storage_source")
-                    == "unsupported"
-                ):
+                if (row.get("track_definition") or {}).get(
+                    "storage_source"
+                ) == "unsupported":
                     # Unsaved geometry proposals are derived from this growing
                     # prefix. They are measured content, not an external edit.
                     fields = fields - {"definition_fingerprint"}

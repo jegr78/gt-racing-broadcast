@@ -17,6 +17,8 @@ and live delta describe received data; neither advances without new packets.
 Receipt time, data age and packet age remain visible.
 
 Select **Session** and **Lap B** to inspect retained current or prior-session laps.
+Sessions show the track, vehicle name and lap count; unknown names fall back to
+the car ID. Shared session and reference-lap options include the producer's label.
 Select an eligible **Lap A** from the selected session, or choose a producer-shared
 **Reference source**. The charts use the same validated distance stations, sector
 and context rules as the local Control Center. Blue is A, orange is B, delta is
@@ -32,13 +34,16 @@ the retained detailed pool, not an unlimited full-session archive.
 
 Change the chart channel or distance limits to inspect braking, throttle, speed,
 steering or gear. **Full distance** resets zoom. The map uses measured world
-coordinates. Larger sectors and corner markers keep their reviewed/unconfirmed
+coordinates. The car marker comes from the latest measured snapshot, independently of
+the selected lap endpoint. Missing coordinates and unrelated historical tracks
+do not show a current car. Larger sectors and corner markers keep their reviewed/unconfirmed
 status. Unknown tracks compare only within the same source and session; known
 car, compound or strategy contradictions prevent the default comparison.
 
 **Follow live** selects the newest active lap. Manually choosing a session or lap
-turns it off. New completed-lap notifications continue without changing your chosen
-lap or zoom. Each browser has its own selection. Producer context revisions,
+turns it off. While it is off, new completed-lap notifications continue without
+changing your chosen lap or zoom. Following live again or selecting the newest
+current/completed lap clears the notice. Each browser has its own selection. Producer context revisions,
 shared notes and limitations update without resetting that selection.
 
 ## Connection, history and access

@@ -52,6 +52,34 @@ def t_thin_snapshot_history_revision_and_private_projection():
             finally: service.close()
 
 
+def t_session_car_and_measured_position_survive_the_public_projection():
+    import gt7_telemetry
+    from test_gt7_laps import _pkt
+    with live.Store(lambda: True, tracks=FakeTracks(), cars=FakeCars()) as store:
+        packet = gt7_telemetry.parse_packet(_pkt(1, 30, .5))
+        store.put(packet, 100)
+        assert store.flush(10)
+        service = api.Service(store)
+        try:
+            history = service.history(None)
+            assert history['sessions'][0]['laps'] == 0
+            assert history['sessions'][0]['car'] == service.snapshot()['current']['car']
+            assert 'Lancer' in history['sessions'][0]['car']
+            position = service.snapshot()['instruments']['position']
+            assert position == dict(x=packet.pos_x, z=packet.pos_z)
+            store.put(packet._replace(pos_x=float('nan')), 101)
+            assert store.flush(10)
+            assert service.snapshot()['instruments']['position'] is None
+            store.put(packet._replace(on_track=False), 102)
+            assert store.flush(10)
+            assert service.snapshot()['instruments']['position'] is None
+            store.put(packet._replace(loading=True), 103)
+            assert store.flush(10)
+            assert service.snapshot()['instruments']['position'] is None
+        finally:
+            service.close()
+
+
 def t_shared_comparison_matches_control_center_and_observed_prefix():
     with tempfile.TemporaryDirectory() as d:
         with live.Store(lambda: True, tracks=FakeTracks(), cars=FakeCars(), runtime_base=d, queue_max=4096) as store:
