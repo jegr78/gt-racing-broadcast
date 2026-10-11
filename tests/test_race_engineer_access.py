@@ -2,6 +2,7 @@
 """Profile-owned grants and every-read access checks using synthetic recordings."""
 import json
 import os
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -116,6 +117,43 @@ def t_settings_paths_cannot_point_at_another_profile():
             label='Foreign source',signature=[st.st_dev,st.st_ino,st.st_size,st.st_mtime_ns])
         store.path.write_text(json.dumps(doc))
         rejected(lambda:store.authorize({'race_engineer'}),'invalid_settings')
+
+
+def t_linked_recording_root_cannot_reuse_another_profiles_grants():
+    with tempfile.TemporaryDirectory() as d:
+        other=fixture.source(Path(d)/'other/telemetry-recordings')
+        store=access.Store(Path(d)/'profile',available=True);store.update(enabled=True,expected=0)
+        try:store.recdir.symlink_to(Path(other.path).parent,target_is_directory=True)
+        except OSError:
+            if os.name!='nt':raise
+            subprocess.run(['cmd','/c','mklink','/J',str(store.recdir),str(Path(other.path).parent)],
+                check=True,capture_output=True,encoding='utf8',errors='replace')
+        st=Path(other.path).stat();doc=store.read()
+        doc['grants'][other.identity]=dict(name=other.name,label='Foreign reference',
+            signature=[st.st_dev,st.st_ino,st.st_size,st.st_mtime_ns])
+        store.path.write_text(json.dumps(doc))
+        rejected(lambda:store.authorize({'race_engineer'}),'invalid_settings')
+
+
+def t_replaced_sources_are_rejected_before_header_parsing():
+    with tempfile.TemporaryDirectory() as d:
+        root=Path(d)/'profile';source=fixture.source(root/'telemetry-recordings')
+        store=access.Store(root,available=True);store.update(enabled=True,grant=source.identity,expected=0)
+        with Path(source.path).open('ab') as f:f.write(b'changed')
+        with patch.object(gt7_context,'source_identity',side_effect=AssertionError('Changed source must not be parsed')):
+            rejected(lambda:store.reference(source.identity,{'race_engineer'}),'reference_unavailable')
+
+
+def t_source_replacement_between_metadata_checks_is_rejected():
+    with tempfile.TemporaryDirectory() as d:
+        root=Path(d)/'profile';source=fixture.source(root/'telemetry-recordings')
+        store=access.Store(root,available=True);store.update(enabled=True,grant=source.identity,expected=0)
+        original=store._source
+        def changed(name):
+            with Path(source.path).open('ab') as f:f.write(b'changed')
+            return original(name)
+        with patch.object(store,'_source',side_effect=changed):
+            rejected(lambda:store.reference(source.identity,{'race_engineer'}),'reference_unavailable')
 
 
 if __name__=='__main__':

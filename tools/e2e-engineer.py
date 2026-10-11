@@ -81,6 +81,7 @@ async def verify(pw,fixture,ui,console,shots=False):
         await page.locator('#crew-rows').evaluate('(node) => node.parentElement.scrollIntoView({block:"center"})')
         await page.screenshot(path=str(ROOT/'src/docs/wiki/images/cc-crew-editor.png'))
         await page.evaluate('() => showView("telemetry")');await page.wait_for_function('() => !document.getElementById("engineer-save").disabled')
+        await page.locator('[data-view="telemetry"] .viewhead').scroll_into_view_if_needed()
         await page.screenshot(path=str(ROOT/'src/docs/wiki/images/cc-telemetry.png'))
     assert not errors,errors
     await browser.close()
