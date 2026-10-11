@@ -225,6 +225,9 @@ def t_preparation_cache_bounds_apply_to_failures_and_large_results():
         service = api.Service(store)
         try:
             for n in range(30):
+                service._remember('small'+str(n), dict(state='unavailable'))
+            assert len(service._cache) <= 16
+            for n in range(30):
                 service._remember(str(n), dict(state='unavailable', data='x' * 1200000))
             assert len(service._cache) <= 16 and sum(len(json.dumps(r).encode()) for r in service._cache.values()) <= 16777216
             service._remember('oversized',dict(state='ready', data='x' * 2200000))
