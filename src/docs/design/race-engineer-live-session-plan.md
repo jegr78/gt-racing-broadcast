@@ -17,7 +17,7 @@ The standing release PR is outside this work.
   explicit data update and offline fallback; run synthetic checks in CI.
 - [x] #852: show car and granted reference names, reset manual new-lap notices,
   and draw the current snapshot's car independently from selected lap traces.
-- [ ] #854: parse validated race position/car count, publish instruments and
+- [x] #854: parse validated race position/car count, publish instruments and
   lap-line position, and display position on the desk.
 - [ ] #853: implement all eight display cleanup items as planned; record any deferred
   items explicitly.
