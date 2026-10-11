@@ -18,8 +18,18 @@ async def verify(pw,fixture,ui,console,shots=False):
     await page.evaluate('() => showView("telemetry")')
     await page.wait_for_function('() => !document.getElementById("engineer-save").disabled')
     assert not await page.locator('#engineer-enabled').is_checked()
+    first_captured=asyncio.Event();first_release=asyncio.Event()
+    async def old_settings(route):
+        response=await route.fetch();data=await response.json();first_captured.set();await first_release.wait()
+        await route.fulfill(json=data)
+        return None
+    await page.route('**/api/engineer?*',old_settings)
+    old_pending=asyncio.create_task(page.evaluate('() => RacecastEngineer.settings()'))
+    await first_captured.wait()
     await page.locator('#engineer-enabled').check();await page.locator('#engineer-save').click()
     await page.wait_for_function('() => document.getElementById("engineer-status").textContent.startsWith("Engineer access is enabled")')
+    first_release.set();await old_pending;await page.unroute_all(behavior='wait')
+    assert await page.locator('#engineer-enabled').is_checked(),'older settings response overwrote a newer save'
     assert fixture.access().read()['enabled']
     await page.locator('#engineer-label').fill('<img src=x onerror="window.engineerInjected=true">')
     await page.locator('#engineer-grant').click();await page.wait_for_selector('#engineer-grants li')
@@ -54,6 +64,15 @@ async def verify(pw,fixture,ui,console,shots=False):
     fixture.access().update(enabled=False,expected=3)
     await engineer.wait_for_function('() => document.getElementById("protected").hidden')
     assert 'disabled' in await engineer.locator('#status').inner_text()
+    async def foreign_settings(route):
+        response=await route.fetch();data=await response.json();data['profile']='other'
+        data['grants']=[{'id':'f'*32,'label':'OTHER_PROFILE_PRIVATE_REFERENCE'}]
+        await route.fulfill(json=data)
+        return None
+    await page.route('**/api/engineer?*',foreign_settings)
+    await page.evaluate('() => RacecastEngineer.settings()')
+    assert 'OTHER_PROFILE_PRIVATE_REFERENCE' not in await page.locator('#engineer-settings').inner_text()
+    await page.unroute_all(behavior='wait')
     # A delayed producer response cannot restore the previous profile's grants.
     await page.evaluate('() => showView("telemetry")')
     await page.wait_for_function('() => !document.getElementById("engineer-save").disabled')
@@ -81,7 +100,7 @@ async def verify(pw,fixture,ui,console,shots=False):
         await page.locator('#crew-rows').evaluate('(node) => node.parentElement.scrollIntoView({block:"center"})')
         await page.screenshot(path=str(ROOT/'src/docs/wiki/images/cc-crew-editor.png'))
         await page.evaluate('() => showView("telemetry")');await page.wait_for_function('() => !document.getElementById("engineer-save").disabled')
-        await page.locator('[data-view="telemetry"] .viewhead').scroll_into_view_if_needed()
+        await page.locator('[data-view="telemetry"] > .viewhead').scroll_into_view_if_needed()
         await page.screenshot(path=str(ROOT/'src/docs/wiki/images/cc-telemetry.png'))
     assert not errors,errors
     await browser.close()
