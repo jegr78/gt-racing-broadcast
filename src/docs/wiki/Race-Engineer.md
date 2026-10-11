@@ -22,6 +22,11 @@ Select an eligible **Lap A** from the selected session, or choose a producer-sha
 and context rules as the local Control Center. Blue is A, orange is B, delta is
 B minus A. The current lap is provisional; future curve sections and incomplete
 200 m sectors remain empty. Confirmed best and theoretical values exclude it.
+While the lap grows, comparison retains the latest completed observed prefix and
+refreshes it in the background. Its displayed distance identifies that prefix.
+The map uses the complete selected reference lap as its outline, or the latest
+confirmed session lap when no reference is available. Its outline and full-distance
+chart range stay stable while the live trace grows, including during preparation.
 The displayed best uses retained eligible summaries. The theoretical value uses
 the retained detailed pool, not an unlimited full-session archive.
 

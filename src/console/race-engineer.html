@@ -28,10 +28,10 @@
 <script>
 'use strict';
 const $=id=>document.getElementById(id), num=(v,d=1)=>typeof v==='number'&&Number.isFinite(v)?v.toFixed(d):'Unavailable';
-const state={stopped:false,busy:false,analysisBusy:false,epoch:0,generation:null,snapshot:null,received:0,connected:false,problem:null,historyRevision:null,laps:[],sessions:[],refs:[],refLaps:[],refSource:'',a:'',b:'',session:'',follow:true,zoom:null,detail:null,pair:null,known:new Set(),newLaps:0,analysisAvailable:false,lastAccess:0,lastChat:0,controllers:new Set()};
+const state={stopped:false,busy:false,analysisBusy:false,epoch:0,generation:null,snapshot:null,received:0,connected:false,problem:null,historyRevision:null,laps:[],sessions:[],refs:[],refLaps:[],refSource:'',a:'',b:'',session:'',follow:true,zoom:null,detail:null,pair:null,outline:null,known:new Set(),newLaps:0,analysisAvailable:false,lastAccess:0,lastChat:0,controllers:new Set()};
 let timer;
 function say(text){$('notice').textContent=text;}
-function clearPlots(){for(const id of ['chart','delta-chart','map'])$(id).replaceChildren();$('sectors').tBodies[0].replaceChildren();$('delta').textContent='Unavailable';$('context').textContent='No selected lap';$('notes').replaceChildren();$('limitations').textContent='';$('larger-sectors').textContent='';state.detail=null;state.pair=null;}
+function clearPlots(clearOutline=true){if(clearOutline)state.outline=null;for(const id of ['chart','delta-chart','map'])$(id).replaceChildren();$('sectors').tBodies[0].replaceChildren();$('delta').textContent='Unavailable';$('context').textContent='No selected lap';$('notes').replaceChildren();$('limitations').textContent='';$('larger-sectors').textContent='';state.detail=null;state.pair=null;}
 function stop(message){state.stopped=true;state.epoch++;clearInterval(timer);for(const c of state.controllers)c.abort();state.controllers.clear();state.snapshot=null;state.laps=[];state.sessions=[];state.refs=[];state.refLaps=[];state.a=state.b=state.session=state.refSource='';state.zoom=null;state.known.clear();state.connected=false;clearPlots();$('protected').hidden=true;for(const id of ['references','notes','chatlog','larger-sectors','session','lap-a','lap-b','reference-source'])$(id).replaceChildren();for(const el of document.querySelectorAll('.value strong'))el.textContent='Unavailable';for(const id of ['source-state','history-state','lap-state','comparison-state','new-laps'])$(id).textContent='';$('chatin').value='';$('context').textContent='';$('limitations').textContent='';$('receipt').textContent='';$('status').textContent=message;}
 class AccessLost extends Error{}
 class ReferenceLost extends Error{}
@@ -75,22 +75,23 @@ function age(){if(state.stopped||!state.snapshot)return;const r=state.snapshot.r
  $('receipt').textContent=`Receipt: ${r.packet_received_at==null?'Unavailable':new Date(r.packet_received_at*1000).toLocaleTimeString()} · data age: ${age==null?'Unavailable':num(age,1)+' s'} · packet age: ${packetAge==null?'Unavailable':num(packetAge,1)+' s'}`;
 }
 const ns='http://www.w3.org/2000/svg';function svg(tag,attrs={},text){const node=document.createElementNS(ns,tag);for(const [k,v]of Object.entries(attrs))node.setAttribute(k,String(v));if(text!==undefined)node.textContent=text;return node;}
-function graph(id,series,key,height){const el=$(id);el.replaceChildren();const rows=series.flatMap(s=>s.rows),bounds=state.zoom||[0,Math.max(1,...rows.map(p=>p.d))],min=bounds[0],max=Math.max(min+1,bounds[1]);const visible=rows.filter(p=>p.d>=min&&p.d<=max&&typeof p[key]==='number');let lo=Math.min(0,...visible.map(p=>p[key])),hi=Math.max(1,...visible.map(p=>p[key]));if(hi===lo)hi=lo+1;
+function graph(id,series,key,height,length=1){const el=$(id);el.replaceChildren();const rows=series.flatMap(s=>s.rows),bounds=state.zoom||[0,Math.max(1,length)],min=bounds[0],max=Math.max(min+1,bounds[1]);const visible=rows.filter(p=>p.d>=min&&p.d<=max&&typeof p[key]==='number');let lo=Math.min(0,...visible.map(p=>p[key])),hi=Math.max(1,...visible.map(p=>p[key]));if(hi===lo)hi=lo+1;
  const X=d=>52+(d-min)/(max-min)*650,Y=v=>height-30-(v-lo)/(hi-lo)*(height-55);el.append(svg('path',{d:`M52 20V${height-30}H702`,stroke:'#566377',fill:'none'}));
  for(let i=0;i<4;i++){const d=min+(max-min)*i/3;el.append(svg('text',{x:X(d),y:height-9,'text-anchor':i===3?'end':'middle'},num(d,0)+' m'));}
  el.append(svg('text',{x:8,y:24},num(hi,1)),svg('text',{x:8,y:height-30},num(lo,1)));
  for(const s of series){let path='',pen=false;for(const p of s.rows){if(p.d<min||p.d>max||typeof p[key]!=='number'){pen=false;continue;}path+=(pen?'L':'M')+X(p.d).toFixed(1)+' '+Y(p[key]).toFixed(1);pen=true;}el.append(svg('path',{d:path,stroke:s.color,fill:'none','stroke-width':2}));}
 }
-function render(){const B=state.detail,A=state.pair?.a,pair=state.pair;clearPlots();state.detail=B;state.pair=pair;if(!B)return;
- const trace=B.trace||[],length=Math.max(1,B.length_m||trace.at(-1)?.d||0,A?.length_m||0);if(!state.zoom&&!['zoom-from','zoom-to'].includes(document.activeElement?.id)){$('zoom-from').value=0;$('zoom-to').value=Math.round(length);}
- graph('chart',[{rows:A?.trace||[],color:'#8ab4ff'},{rows:trace,color:'#ffd08a'}],$('channel').value,300);
- graph('delta-chart',[{rows:pair?.delta||[],color:'#a8dfbd'}],'delta',170);
- const map=$('map'),points=(A?.trace||[]).concat(trace).filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.z));
+function render(){const B=state.detail,pair=state.pair,outline=pair?.a?.trace_complete?pair.a:state.outline,A=pair?.a||(state.outline?.id===state.a?state.outline:null);clearPlots(false);state.detail=B;state.pair=pair;if(!B&&!outline)return;
+ const trace=B?.trace||[],length=Math.max(1,outline?.length_m||outline?.trace?.at(-1)?.d||B?.length_m||trace.at(-1)?.d||0);if(!state.zoom&&!['zoom-from','zoom-to'].includes(document.activeElement?.id)){$('zoom-from').value=0;$('zoom-to').value=Math.round(length);}
+ graph('chart',[{rows:A?.trace||[],color:'#8ab4ff'},{rows:trace,color:'#ffd08a'}],$('channel').value,300,length);
+ graph('delta-chart',[{rows:pair?.delta||[],color:'#a8dfbd'}],'delta',170,length);
+ const map=$('map'),points=(outline?.trace?.length?outline.trace:trace).filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.z));
  if(points.length){const xs=points.map(p=>p.x),zs=points.map(p=>p.z),xmin=Math.min(...xs),xmax=Math.max(...xs),zmin=Math.min(...zs),zmax=Math.max(...zs),scale=Math.min(420/Math.max(1,xmax-xmin),360/Math.max(1,zmax-zmin)),X=x=>30+(x-xmin)*scale,Y=z=>30+(z-zmin)*scale;
-  for(const [rows,color]of [[A?.trace||[],'#8ab4ff'],[trace,'#ffd08a']])map.append(svg('path',{d:rows.filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.z)).map((p,i)=>(i?'L':'M')+X(p.x).toFixed(1)+' '+Y(p.z).toFixed(1)).join(''),stroke:color,fill:'none','stroke-width':2}));
+  for(const [rows,color]of [[outline?.trace||[],'#8ab4ff'],[trace,'#ffd08a']])map.append(svg('path',{d:rows.filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.z)).map((p,i)=>(i?'L':'M')+X(p.x).toFixed(1)+' '+Y(p.z).toFixed(1)).join(''),stroke:color,fill:'none','stroke-width':2,'data-outline':rows===outline?.trace?'complete':'observed'}));
   const last=trace.at(-1);if(last&&Number.isFinite(last.x)&&Number.isFinite(last.z))map.append(svg('circle',{cx:X(last.x),cy:Y(last.z),r:5,fill:'#ffd08a'}));
-  if(B.larger_sectors?.reviewed)for(const c of B.corner_metrics||[]){const p=trace.find(p=>p.d>=c.apex_m);if(p)map.append(svg('text',{x:X(p.x)+5,y:Y(p.z)},'T'+c.number));}
+  if(B?.larger_sectors?.reviewed)for(const c of B.corner_metrics||[]){const p=trace.find(p=>p.d>=c.apex_m);if(p)map.append(svg('text',{x:X(p.x)+5,y:Y(p.z)},'T'+c.number));}
  }
+ if(!B)return;
  const observed=trace.at(-1)?.d||0;const sectors=pair?.mini_sectors||{a:[],b:(B.sectors||[]).map((v,i)=>B.state==='provisional'&&(i+1)*200>observed?null:v),delta:[]},body=$('sectors').tBodies[0];for(let i=0;i<Math.max(sectors.a.length,sectors.b.length);i++){const row=body.insertRow();for(const v of [String(i+1),num(sectors.a[i],3),num(sectors.b[i],3),num(sectors.delta[i],3)])row.insertCell().textContent=v;}
  const end=pair?.delta?.at(-1);$('delta').textContent=pair?.compatible&&end&&B.id===state.snapshot?.current?.id?num(end.delta,3):'Unavailable';
  $('context').textContent=`Lap ${B.lap} · ${B.state} · quality ${B.data_quality||'unknown'} · context revision ${B.context_revision??'unavailable'} · ${B.compound||'compound unconfirmed'} · tyre age ${B.tyre_age_laps??'unknown'} laps · stint ${B.stint_id||'unknown'}. Declared settings: ${JSON.stringify(B.context_settings||{})}. Declared strategy: ${JSON.stringify(B.strategy||{})}.`;
@@ -100,11 +101,19 @@ function render(){const B=state.detail,A=state.pair?.a,pair=state.pair;clearPlot
 }
 function revoke(message){state.epoch++;state.refSource='';state.refLaps=[];if(state.a.startsWith('r:'))state.a='';if(state.b.startsWith('r:')){state.b=state.snapshot?.current?.id||'';state.session=state.snapshot?.session_id||'';}clearPlots();say(message||'Shared reference was revoked or removed. Its protected view has been cleared.');}
 async function access(){const data=await request('/race-engineer/access');state.analysisAvailable=!!data.analysis_available;state.refs=data.references||[];$('references').replaceChildren();for(const r of state.refs){const li=document.createElement('li');li.textContent=r.label;$('references').append(li);}if(state.refSource&&!state.refs.some(r=>r.id===state.refSource))revoke();$('protected').hidden=false;return data;}
-async function selection(){const epoch=state.epoch,a=state.a,b=state.b;if(!b)return;const result=await request('/race-engineer/lap',{id:b});if(epoch!==state.epoch||b!==state.b||a!==state.a)return;
+async function selection(){const epoch=state.epoch,a=state.a,b=state.b;if(!b)return;
+ const latest=state.laps.filter(r=>r.session_id===state.session&&r.state==='confirmed'&&r.trace_complete).at(-1);
+ const outlineId=a||latest?.id;
+ state.outline=null;
+ if(outlineId){const outline=await request('/race-engineer/lap',{id:outlineId});if(epoch!==state.epoch||b!==state.b||a!==state.a)return;
+  if(outline.state==='ready'&&outline.lap.trace_complete)state.outline=outline.lap;
+  else if(a&&latest&&latest.id!==a){const fallback=await request('/race-engineer/lap',{id:latest.id});if(epoch!==state.epoch||b!==state.b||a!==state.a)return;if(fallback.state==='ready'&&fallback.lap.trace_complete)state.outline=fallback.lap;}
+ }
+ const result=await request('/race-engineer/lap',{id:b});if(epoch!==state.epoch||b!==state.b||a!==state.a)return;
  $('lap-state').textContent=`Selected lap: ${result.state}${result.lap?' · '+result.lap.state:''}`;
- if(result.state!=='ready'){clearPlots();$('context').textContent='Selected detail '+result.state;$('notes').replaceChildren();return;}state.detail=result.lap;state.pair=null;
+ if(result.state!=='ready'){clearPlots(false);render();$('context').textContent='Selected detail '+result.state;$('notes').replaceChildren();return;}state.detail=result.lap;state.pair=null;
  if(a){const pair=await request('/race-engineer/compare',{a,b});if(epoch!==state.epoch||b!==state.b||a!==state.a)return;
-  if(pair.state==='ready'){if(!pair.compatible&&state.follow){state.a='';say('Reference cleared because the live lap changed to an incompatible pool.');}else{state.pair=pair;state.detail=pair.b;}$('comparison-state').textContent=pair.compatible?(pair.provisional?'Provisional observed-prefix comparison':'Confirmed eligible comparison · lap B − A '+num(pair.lap_delta_s,3)+' s'):'Comparison outside eligible pool';}
+  if(pair.state==='ready'){if(!pair.compatible&&state.follow){state.a='';say('Reference cleared because the live lap changed to an incompatible pool.');}else{state.pair=pair;state.detail=pair.b;}$('comparison-state').textContent=pair.compatible?(pair.provisional?'Provisional comparison · observed '+num(pair.b.distance_m,0)+' m':'Confirmed eligible comparison · lap B − A '+num(pair.lap_delta_s,3)+' s'):'Comparison outside eligible pool';}
   else $('comparison-state').textContent='Comparison '+pair.state;
  }else $('comparison-state').textContent='Choose an eligible reference lap';render();
 }
