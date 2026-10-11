@@ -82,7 +82,29 @@ def main():
                 page.locator('#ai-report').get_by_role('button',name='Compare with S1 lap 2').click()
                 page.wait_for_function('() => document.getElementById("tm-err").textContent.includes("Comparison recording identity changed") || tmState.included.size > 1')
                 assert page.evaluate('() => tmState.included.size === 1 && tmState.lapA.rec === tmState.lapB.rec'),'replaced reference expanded selection'
-                print('PASS browser: default, grouped labels/order/bests, all/only, empty selection, saved comparison and replaced identity')
+                import gt7_context
+                for path,compound in ((old,'RH'),(new,'RM')):
+                    gt7_context.Store.for_recording(path).save(dict(notes=[],sessions={'1':dict(
+                        confirmed=True,settings={},stints=[dict(id='first',start_lap=1,compound=compound,
+                        confirmed=True,tyre_service=False,warmup_laps=0)])}),expected=0)
+                page.evaluate('() => tmDropLaps()')
+                page.locator('#tm-compare-all').check()
+                page.get_by_role('button',name='All recordings',exact=True).click()
+                page.wait_for_function('() => tmState.pool?.laps.length === 5')
+                page.locator('#tm-b').select_option(fixture._stem(old)+'|1|2')
+                page.wait_for_function('() => tmState.lapB?.compound === "RH"')
+                page.locator('#tm-compare-all').uncheck()
+                page.wait_for_function('() => tmState.pool?.laps.length === 3')
+                page.get_by_role('button',name='Only this recording',exact=True).click()
+                page.wait_for_function('() => tmState.pool !== null')
+                assert page.evaluate('() => tmState.lapB?.compound === "RM"'),'excluded B conditions blocked the included recording'
+                page.locator('#tm-recording-options input').nth(1).check()
+                page.wait_for_function('() => tmState.pool?.laps.length === 2')
+                page.locator('#tm-recording-options input').first.uncheck()
+                page.wait_for_function('() => tmState.lapB?.compound === "RH"')
+                assert page.locator('#tm-b optgroup').count()==1
+                assert page.evaluate('() => tmState.pool.theoretical_best')==16
+                print('PASS browser: recording selection, saved references and condition changes')
                 browser.close()
         finally:
             server.shutdown();server.server_close()

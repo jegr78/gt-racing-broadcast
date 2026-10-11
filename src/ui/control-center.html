@@ -5292,7 +5292,7 @@ async function quitConfirm() {
 // Telemetry view (solo POV, #788): recordings -> laps -> lap A/B comparison.
 // Values from recordings reach the page only through textContent and SVG attributes.
 const TM_NS = 'http://www.w3.org/2000/svg';
-const tmState = {included: null, available: [], loaded: false, recs: [], rec: null, recLaps: [], pool: null,
+const tmState = {included: null, available: [], anchor: null, loaded: false, recs: [], rec: null, recLaps: [], pool: null,
                  a: null, b: null, lapA: null, lapB: null, sectorM: 200, tracks: null,
                  chart: null, map: null, cursor: null, profile: null, summary: null};
 const tmLapCache = new Map();
@@ -5550,7 +5550,7 @@ function tmClear(msg) {
 }
 function tmReset() {
   Object.keys(tmSeq).forEach(k => { tmSeq[k]++; });
-  tmState.included = null; tmState.available = [];
+  tmState.included = null; tmState.available = []; tmState.anchor = null;
   tmState.loaded = false; tmState.rec = null; tmState.recs = []; tmState.recLaps = [];
   tmRenderRecordingMenu();
   tmState.tracks = null;
@@ -5645,7 +5645,7 @@ async function tmSelectRec(rec) {
   if (tmState.rec !== rec) window.RacecastAI?.reset(tmState.profile);
   const seq = ++tmSeq.rec;
   tmSeq.b++;
-  if (tmState.rec !== rec) tmState.included = null;
+  if (tmState.rec !== rec) { tmState.included = null; tmState.anchor = null; }
   tmState.rec = rec;
   tmState.recLaps = [];
   tmRenderRecs();
@@ -5787,6 +5787,7 @@ function tmDefaultA(bKey) {
 async function tmSelectB(l) {
   const seq = ++tmSeq.b;
   const key = tmKey(l);
+  tmState.anchor = l;
   tmState.b = key;
   tmRenderLaps();
   tmClearPair('Loading comparable laps…');
@@ -5859,11 +5860,36 @@ function tmChooseRecordings(all) {
                                : tmState.rec ? [tmState.rec] : []);
   tmReloadRecordingPool();
 }
-function tmReloadRecordingPool() {
-  const lap = (tmState.pool?.laps || []).concat(tmState.recLaps).find(l => tmKey(l) === tmState.b)
-    || tmState.recLaps.slice(-1)[0];
-  if (lap) tmSelectB(lap);
+async function tmReloadRecordingPool() {
+  const known = (tmState.pool?.laps || []).concat(tmState.recLaps);
+  const anchor = tmState.anchor || known.find(l => tmKey(l) === tmState.b);
+  if (!anchor) return;
+  const pick = laps => {
+    const included = laps.filter(l => tmState.included.has(l.rec) && l.car_id === anchor.car_id
+      && l.track_id === anchor.track_id && (anchor.track_id != null
+        || l.rec === anchor.rec && l.session === anchor.session));
+    return included.find(l => tmKey(l) === tmState.b)
+      || included.filter(l => l.comparison_eligible ?? l.pace_eligible ?? l.status !== 'not counted').slice(-1)[0]
+      || included.slice(-1)[0];
+  };
+  let lap = pick(known);
+  if (!lap && tmState.included.size) {
+    const seq = ++tmSeq.b, rec = [...tmState.included][0];
+    tmClearPair('Loading included recording…'); tmState.b = null;
+    const d = await tmIndexed(rec, () => tmShared('/api/telemetry/laps?' + new URLSearchParams({rec})),
+                              () => seq !== tmSeq.b);
+    if (seq !== tmSeq.b) return;
+    if (!d.ok) tmErr(d.error || 'Could not read the included recording.');
+    lap = pick((d.laps || []).concat(d.open_lap ? [d.open_lap] : []));
+    if (!lap) {
+      tmState.pool = {laps: [], best_sectors: [], theoretical_best: null};
+      tmRenderRecordingMenu(); tmPlaceholder('tm-a', 'no other lap to compare');
+      tmPlaceholder('tm-b', 'no included lap'); tmRender(); return;
+    }
+  }
+  await tmSelectB(lap || anchor);
 }
+
 function tmFillPickers(lapB) {
   const pool = tmState.pool.laps || [];
   const bKey = tmKey(lapB);

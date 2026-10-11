@@ -2626,6 +2626,34 @@ const tick=async()=>{for(let i=0;i<10;i++)await new Promise(resolve=>setTimeout(
                          {'mode':'reload','loads':0,'a':None,'included':2}],out
 
 
+def t_recording_subset_keeps_the_selected_track_and_car():
+    out=_tm_node("""
+const anchor=lap('S',2,79,1),same=lap('R',2,78,1),otherCar=lap('R',3,77,2);
+const otherTrack={...lap('R',4,76,1),track_id:'t2'};
+tmState.anchor=anchor;tmState.b=tmKey(anchor);tmState.pool={laps:[anchor]};
+tmState.recLaps=[same,otherCar,otherTrack];tmState.included=new Set(['R']);
+let chosen;tmSelectB=async lap=>chosen=tmKey(lap);
+await tmReloadRecordingPool();console.log(chosen);
+""")
+    if out is not None:
+        assert out.strip()=='R|1|2',out
+
+
+def t_recording_subset_discards_a_previous_included_recording_load():
+    out=_tm_node("""
+const r=lap('R',2,79,1),s=lap('S',2,78,1);
+tmState.rec='R';tmState.recs=[{rec:'R'},{rec:'S'}];tmState.recLaps=[r];
+tmState.b=tmKey(r);tmState.anchor=r;tmState.pool={laps:[r]};tmState.included=new Set(['S']);
+let release;tmIndexed=async()=>new Promise(resolve=>release=resolve);
+const pending=tmReloadRecordingPool();await tick();
+tmSeq.b++;tmState.included=new Set(['R']);tmState.b=tmKey(r);tmState.pool={laps:[r]};
+release(recLaps('S',[s]));await pending;
+console.log(JSON.stringify({b:tmState.b,count:tmState.pool.laps.length,included:[...tmState.included]}));
+""")
+    if out is not None:
+        assert json.loads(out)=={'b':'R|1|2','count':1,'included':['R']},out
+
+
 def t_telemetry_recording_selection_has_no_implicit_other_reference():
     out = _tm_node("""
 const b=lap('R',2,79,1);tmState.rec='R';tmState.included=new Set(['R']);

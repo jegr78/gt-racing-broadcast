@@ -16,3 +16,8 @@ The HTTP `recs` query is a comma-separated list of recording stems. An omitted
 query preserves the existing API pool; an explicit empty list selects nothing.
 Names resolve only within the active profile. Available recording metadata is
 returned independently of the chosen subset so the menu can add excluded files.
+
+When B is excluded, its conditions no longer define the comparison. The page
+selects an included lap with the same track/car, loading a selected recording
+when its laps are absent from the current pool. A newer selection invalidates
+that load. Explicit condition/role comparison settings remain in force.
