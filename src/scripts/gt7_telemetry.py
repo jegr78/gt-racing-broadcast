@@ -357,6 +357,9 @@ class TelemetryEngine:
         SESSION_JUMP_M from where it left the track (a track change)."""
         if self._lap_num is None:
             return None
+        if (self._last is not None and self._last.car_id is not None
+                and pkt.car_id is not None and self._last.car_id != pkt.car_id):
+            return "mid-lap"
         if pkt.lap < self._lap_num:
             return "line"
         if self._last is not None and self._last.best_ms > 0 and pkt.best_ms == -1:
