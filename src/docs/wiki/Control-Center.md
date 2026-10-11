@@ -566,4 +566,4 @@ The profile retains at most 128 explicit grants.
 
 Use **Reload access settings** after a conflicting save or an external change.
 The Control Center stays local; Engineer Console routes cannot change recording,
-context, track assignment or broadcast state. See [Console](Console#race-engineer-access).
+context, track assignment or broadcast state. See the [Race Engineer desk](Race-Engineer) and [Console access](Console#race-engineer-access).

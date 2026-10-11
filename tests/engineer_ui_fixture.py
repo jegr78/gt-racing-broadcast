@@ -64,16 +64,32 @@ class Fixture(Base):
         ctx.update(crew_read=crew_read,crew_write=crew_write)
         return ctx
 
-    def console(self):
+    def console(self, with_live=False):
         m=gate.m
         relay=m.Relay(gate._FakeSource([],[]),[53001,53002],str(self.root))
         control=m.SetupControl('https://example.test',None,crew_source=self.crew)
         def push(payload,label):self.writes.append(payload);return True,None
         control._sync_push=push
+        telemetry = None
+        if with_live:
+            from types import SimpleNamespace
+            import race_engineer_live as live
+            import race_engineer_api as api
+            from test_race_engineer_live import FakeTracks, FakeCars, feed, write_circle_recording
+            path = write_circle_recording(str(self.root/self.profile/'telemetry-recordings'))
+            self.live_clock = 10.0
+            self.live = live.Store(lambda: self.access().read()['enabled'], tracks=FakeTracks(), cars=FakeCars(),
+                runtime_base=str(self.root), queue_max=4096, clock=lambda: self.live_clock,
+                context_source=lambda: gate.m.gt7_context.Store.prepared(str(self.root/self.profile/'telemetry-recordings')).read())
+            self.live.api = api.Service(self.live)
+            self.live_path = path
+            self.feed_live = lambda: (self.live.refresh_enabled(), feed(self.live, self.live_path))
+            telemetry = SimpleNamespace(engineer=self.live)
+        self.telemetry = telemetry
         handler=m.make_handler(relay,console_secret=gate.SECRET,crew_source=self.crew,setup_ctl=control,
             chat_store=m.ChatStore(str(self.root/'chat.json')),
             console_page_path=str(gate.ROOT+'/src/console/console.html'),
-            engineer_access=self.access(),engineer_page_path=str(Path(gate.ROOT)/'src/console/race-engineer.html'))
+            telemetry_store=telemetry, engineer_access=self.access(),engineer_page_path=str(Path(gate.ROOT)/'src/console/race-engineer.html'))
         server=m.ThreadingHTTPServer(('127.0.0.1',0),handler)
         self.console_server=server
         threading.Thread(target=server.serve_forever,daemon=True).start()
