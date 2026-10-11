@@ -131,6 +131,9 @@ async def main():
                 assert float(left_path.split('L')[0].split()[1]) < float(right_path.split('L')[0].split()[1]), 'ready comparison chart used the fallback lap instead of selected A'
                 await page.unroute('**/race-engineer/lap?*', recovering_a)
                 if '--shots' in sys.argv:
+                    fixture.live.put(gt7_telemetry.parse_packet(raw)._replace(race_position=15, car_count=15), fixture.live._receipt[1]+.01)
+                    assert fixture.live.flush(10)
+                    await page.wait_for_function('() => document.getElementById("race-position").textContent === "P15/15"')
                     for width,height,name in [(1440,1050,'desktop'),(1024,1100,'tablet'),(390,900,'phone')]:
                         await page.set_viewport_size({'width':width,'height':height})
                         await page.screenshot(path=str(ROOT/f'src/docs/wiki/images/console-race-engineer-{name}.png'),full_page=True)
