@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Shared live preparation uses the exact offline packets and numerical helpers."""
 import concurrent.futures
+import json
 import os
 import sys
 import tempfile
@@ -95,7 +96,14 @@ def t_bounds_eviction_concurrent_readers_and_async_recovery():
             assert store.snapshot()['current']['id'] == snap['current']['id']
             with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
                 reads = list(pool.map(lambda _: store.snapshot(), range(40)))
-            assert all(r['revision'] == reads[0]['revision'] for r in reads)
+            versions = {}
+            for result in reads:
+                payload = json.dumps({k: v for k, v in result.items() if k != 'receipt'}, sort_keys=True)
+                revision = result['revision']
+                versions.setdefault(revision, payload)
+                assert versions[revision] == payload, 'read mixed fields from different publications'
+                assert result['generation'] == snap['generation']
+                assert result['current']['id'] == snap['current']['id']
             assert store.stats()['replays'] == 1
             recovered['lap']['trace'].clear()
             assert store.detail(old['id'])['lap']['trace'], 'reader mutated shared history'
