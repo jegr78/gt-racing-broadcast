@@ -10,6 +10,11 @@ the current Sheet webhook when adding the Crew field.
 
 ## Live values and analysis
 
+Current lap, live delta, best completed time and race position lead the desk.
+Fuel, theoretical best and tyres follow, with compact speed/gear/RPM/pedal values.
+Select the comparison before inspecting the charts; channel and distance controls
+are attached to the chart.
+
 The desk reads the existing single GT7 source of a solo POV profile. Speed, gear,
 RPM, throttle/brake, race position, observed lap time, fuel and tyre temperatures refresh roughly
 twice per second. Missing measurements say **Unavailable**. The observed lap clock
@@ -40,8 +45,11 @@ Change the chart channel or distance limits to inspect braking, throttle, speed,
 steering or gear. **Full distance** resets zoom. The map uses measured world
 coordinates. The car marker comes from the latest measured snapshot, independently of
 the selected lap endpoint. Missing coordinates and unrelated historical tracks
-do not show a current car. Reviewed larger sections show named A/B times and gain or loss when both laps
-use the same confirmed definition. Unconfirmed definitions retain their status.
+do not show a current car. Reviewed larger sections show named A/B times and gain or loss in separate groups
+when both laps use the same confirmed definition. Expand each group to inspect its
+diagnostic mini-sectors, or open the full diagnostic table below. A segment that
+spans a section boundary appears in both affected groups; each section gain uses
+its exact reviewed boundaries. Unconfirmed definitions retain their status.
 A short trailing mini-sector is grouped with its predecessor for display; shared
 analysis values are unchanged. Curves show their channel units, delta has a zero
 line, and an empty comparison has a message, retains known distance and omits artificial axes. Turn labels
@@ -86,9 +94,10 @@ shared Engineer notes, video monitor or extra driver ingestion is added.
 
 ## Smaller screens
 
-Tablet supports the full analysis desk. Smartphone shows compact instruments,
-status, session/lap selection, context and Crew chat. Extensive charts, comparison
-controls and map are designed for larger screens.
+Desktop and tablet place the charts beside the map. Smartphone stacks them while
+keeping comparison feedback, source/lap selection, channel/zoom controls and
+reviewed section summaries available. Its main values use two columns. Context,
+notes, shared references and Crew chat follow the analysis on every screen.
 
 ![Compact phone view](images/console-race-engineer-phone.png)
 
