@@ -55,6 +55,8 @@ SUMMARY_FIELDS = frozenset((
     "length_m",
     "fuel_used_l",
     "top_speed_kmh",
+    "line_position",
+    "line_car_count",
     "lap_role",
     "after_service",
     "capture_complete",
@@ -143,6 +145,8 @@ def instruments(pkt):
         "position": {"x": x, "z": z}
         if pkt.on_track and not pkt.loading and x is not None and z is not None
         else None,
+        "race_position": pkt.race_position if pkt.on_track and not pkt.loading else None,
+        "car_count": pkt.car_count if pkt.on_track and not pkt.loading else None,
         "speed_kmh": _finite(pkt.speed_mps * 3.6),
         "gear": _finite(pkt.gear),
         "rpm": _finite(pkt.rpm),

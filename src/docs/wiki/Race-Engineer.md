@@ -11,10 +11,13 @@ the current Sheet webhook when adding the Crew field.
 ## Live values and analysis
 
 The desk reads the existing single GT7 source of a solo POV profile. Speed, gear,
-RPM, throttle/brake, observed lap time, fuel and tyre temperatures refresh roughly
+RPM, throttle/brake, race position, observed lap time, fuel and tyre temperatures refresh roughly
 twice per second. Missing measurements say **Unavailable**. The observed lap clock
 and live delta describe received data; neither advances without new packets.
-Receipt time, data age and packet age remain visible.
+Race position reads **P15/15**, for example, from GT7's own-car position and field
+size. Missing or inconsistent readings remain unavailable. Completed lap options
+include the position measured at the line when GT7 provided it. No gaps to
+other cars are inferred. Receipt time, data age and packet age remain visible.
 
 Select **Session** and **Lap B** to inspect retained current or prior-session laps.
 Sessions show the track, vehicle name and lap count; unknown names fall back to
