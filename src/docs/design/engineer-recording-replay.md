@@ -23,3 +23,9 @@ CLI proposal: `python3 tools/engineer-replay.py RECORDING [--reference FILE]
 [--data-runtime DIR] [--update-data]`. `--check` creates synthetic input and exits
 after checking the actual HTTP analysis flow. Normal playback keeps the desk
 available after EOF until Ctrl+C; packet receipt then naturally becomes stale.
+
+The loopback HTTP server binds without reverse DNS. A macOS CI startup timeout
+was traced to `socket.getfqdn()` inside the standard HTTP server bind, before
+the startup-failure injection. The replay fixes its local server name and keeps
+the actual bound port; a regression forbids DNS and serves a signed snapshot.
+The failed-startup test retains its ten-second deadline.

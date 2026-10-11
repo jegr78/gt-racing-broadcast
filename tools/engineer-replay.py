@@ -7,6 +7,7 @@ import json
 import math
 import secrets
 import shutil
+import socketserver
 import struct
 import sys
 import tempfile
@@ -205,7 +206,15 @@ class ReplaySession:
                 def log_message(self, *_args):
                     pass  # Keep frequent browser polls out of the replay operator's console.
 
-            self.server = module.ThreadingHTTPServer(("127.0.0.1", self.port), Handler)
+            class LoopbackServer(module.ThreadingHTTPServer):
+                def server_bind(self):
+                    # HTTPServer otherwise does reverse DNS even for numeric loopback.
+                    # The replay needs no resolved host name; macOS DNS can block startup.
+                    socketserver.TCPServer.server_bind(self)
+                    self.server_name = "localhost"
+                    self.server_port = self.server_address[1]
+
+            self.server = LoopbackServer(("127.0.0.1", self.port), Handler)
             self.origin = f"http://127.0.0.1:{self.server.server_port}"
             self.url = self.origin + "/console/race-engineer?t=" + self.token
             self._http_thread = threading.Thread(

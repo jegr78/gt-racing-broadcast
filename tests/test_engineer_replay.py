@@ -294,6 +294,18 @@ phase("DONE")
         assert result.returncode == 0, result.stdout + result.stderr
 
 
+
+def t_loopback_server_binding_does_not_resolve_dns():
+    from unittest.mock import patch
+    with tempfile.TemporaryDirectory() as d:
+        source = write_circle_recording(d, n=100)
+        with patch('socket.getfqdn', side_effect=AssertionError('loopback replay attempted DNS during binding')):
+            with replay.ReplaySession(source) as session:
+                assert session.server.server_name == 'localhost'
+                assert session.server.server_port == session.server.server_address[1]
+                status, data = request(session, '/console/race-engineer/snapshot')
+                assert status == 200 and data['generation'], 'DNS-free replay did not serve a signed snapshot'
+
 if __name__ == "__main__":
     for name, fn in sorted(list(globals().items())):
         if name.startswith("t_") and callable(fn):
