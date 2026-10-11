@@ -115,7 +115,7 @@ async function status(){
  const generation=state.generation,result=await request('status');if(generation!==state.generation||!result.ok)return;
  const active=result.active;$id('ai-cancel').disabled=!result.busy;
  if(active){state.job=active.id;state.lastJob=active.id;say('ai-run-status',active.foreign?'An analysis is running in another profile. Its data remain hidden.':active.state+' · '+active.progress);}
- else if(state.job){const id=state.job;state.job=null;await openRun(id);await history();}
+ else if(state.job){const id=state.job;await openRun(id);if(generation===state.generation&&state.job===id)state.job=null;await history();}
 }
 async function cancel(){if(!state.job)return;const result=await request('cancel',{id:state.job});say('ai-run-status',result.ok?'Cancellation requested. Already consumed subscription quota cannot be recovered.':error(result));}
 async function history(){

@@ -52,8 +52,39 @@ async def verify(page,fixture,port):
     await page.locator('#ai-preview-button').click();await page.locator('#ai-goal').fill('changed again')
     await asyncio.sleep(.5);assert await page.locator('#ai-start').is_disabled()
     await page.unroute('**/api/ai/preview',delayed)
+    arrived=asyncio.Event();finished=asyncio.Event()
+    async def delayed_job(route):
+        response=await route.fetch();arrived.set();await asyncio.sleep(.3);await route.fulfill(response=response);finished.set()
+        return None
+    await page.route('**/api/ai/job?*',delayed_job)
     await preview();await page.locator('#ai-start').click()
-    await page.wait_for_selector('#ai-report article',timeout=15000)
+    await asyncio.wait_for(arrived.wait(),10)
+    await page.locator('#ai-goal').fill('Prepare a future goal while this run finishes')
+    await asyncio.wait_for(finished.wait(),5)
+    await page.unroute('**/api/ai/job?*',delayed_job)
+    try:await page.wait_for_selector('#ai-report article',timeout=6000)
+    except Exception as error:raise AssertionError('completed job was lost after editing a future goal') from error
+    # A second machine-wide job can finish while an older completion reply is held.
+    held=asyncio.Event();release=asyncio.Event();delivered=asyncio.Event();captured=False
+    async def older_completion(route):
+        nonlocal captured
+        response=await route.fetch()
+        if not captured:
+            captured=True;held.set();await release.wait();await route.fulfill(response=response);delivered.set()
+        else:await route.fulfill(response=response)
+        return None
+    await page.route('**/api/ai/job?*',older_completion)
+    await preview();await page.locator('#ai-start').click();await asyncio.wait_for(held.wait(),10)
+    fixture.delay=.2;control=fixture.control();external=dict(rec=fixture.source.name,session=1,agent='coach',model='EXTERNAL_NEW_JOB',language='de')
+    reviewed=control.preview(external);control.start(dict(external,confirm_preview=reviewed['confirm_preview']))
+    await page.evaluate('() => RacecastAI.status()')
+    for _ in range(100):
+        if not control.status()['busy']:break
+        await asyncio.sleep(.02)
+    assert not control.status()['busy']
+    release.set();await asyncio.wait_for(delivered.wait(),5);await page.unroute('**/api/ai/job?*',older_completion)
+    try:await page.wait_for_function('() => document.getElementById("ai-report").textContent.includes("EXTERNAL_NEW_JOB")',timeout=6000)
+    except Exception as error:raise AssertionError('older completion discarded the newer completed job') from error
     assert await page.locator('#ai-report article').count()==4
     assert await page.evaluate('() => window.aiInjected') is None
     assert 'Report language: de' in await page.locator('#ai-report').inner_text()
