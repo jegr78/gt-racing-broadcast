@@ -138,7 +138,11 @@ def _finite(value):
 
 def instruments(pkt):
     """Only measured channels; a missing/nonfinite channel stays unavailable."""
+    x, z = _finite(pkt.pos_x), _finite(pkt.pos_z)
     return {
+        "position": {"x": x, "z": z}
+        if pkt.on_track and not pkt.loading and x is not None and z is not None
+        else None,
         "speed_kmh": _finite(pkt.speed_mps * 3.6),
         "gear": _finite(pkt.gear),
         "rpm": _finite(pkt.rpm),
@@ -601,6 +605,7 @@ class Store:
             self._sessions[sid] = {
                 "id": sid,
                 "car_id": row["car_id"],
+                "car": row.get("car"),
                 "track_id": track,
                 "track": row.get("track", ""),
                 "laps": 0,
@@ -610,6 +615,7 @@ class Store:
             self._sessions[sid] = dict(
                 self._sessions[sid], track_id=track, track=row.get("track", "")
             )
+        self._sessions[sid]["car"] = row.get("car")
         lap_key = (self._epoch, engine_session, raw["lap"], raw["start"])
         lid = self._identities.get(lap_key)
         if lid is None:

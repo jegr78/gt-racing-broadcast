@@ -25,6 +25,10 @@ async def main():
                 await page.goto(f'http://127.0.0.1:{server.server_port}/console/race-engineer?t={token}')
                 await page.wait_for_function('() => document.getElementById("speed")?.textContent.includes("180")',timeout=5000)
                 assert await page.locator('#rpm').inner_text() == '7000'
+                await page.wait_for_function('() => EngineerDesk.state.historyRevision !== null')
+                assert 'Mitsubishi Lancer Evolution IX' in await page.locator('#session option:checked').inner_text(), 'session car name missing'
+                fallback = await page.evaluate('() => {const saved=EngineerDesk.state.sessions;EngineerDesk.state.sessions=saved.map(r=>({...r,car:null}));selections();const label=document.querySelector("#session option:checked").textContent;EngineerDesk.state.sessions=saved;selections();return label;}')
+                assert 'car 3424' in fallback, 'unknown car name did not fall back to id'
                 errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
                 await page.wait_for_function('() => EngineerDesk.state.pair?.state === "ready"')
                 assert await page.locator('#chart path').count() >= 2
@@ -37,6 +41,23 @@ async def main():
                 await page.wait_for_function('() => document.getElementById("comparison-state").textContent === "Comparison pending"')
                 assert await page.locator('#zoom-to').input_value() == '1000', 'pending comparison lost full-lap distance'
                 assert await page.locator('#map path').first.get_attribute('data-outline') == 'complete', 'pending comparison lost stable outline'
+                outline_entered, outline_release = asyncio.Event(), asyncio.Event()
+                selected_outline = await page.evaluate('() => EngineerDesk.state.a')
+                async def held_outline(route):
+                    from urllib.parse import parse_qs, urlsplit
+                    if parse_qs(urlsplit(route.request.url).query).get('id', [''])[0] == selected_outline:
+                        response = await route.fetch(); data = await response.json()
+                        outline_entered.set(); await outline_release.wait()
+                        await route.fulfill(json=data)
+                    else:
+                        await route.continue_()
+                stable_outline = await page.locator('#map path').first.get_attribute('d')
+                await page.route('**/race-engineer/lap?*', held_outline)
+                await asyncio.wait_for(outline_entered.wait(), timeout=5)
+                received = await page.evaluate('() => EngineerDesk.state.received')
+                await page.wait_for_function('(r) => EngineerDesk.state.received > r', arg=received)
+                assert await page.locator('#map path').first.get_attribute('d') == stable_outline, 'snapshot marker refresh discarded a pending complete outline'
+                outline_release.set(); await page.unroute('**/race-engineer/lap?*', held_outline)
                 assert await page.locator('#chart text').all_inner_texts() and '1000 m' in await page.locator('#chart').text_content()
                 assert '1000 m' in await page.locator('#delta-chart').text_content(), 'empty delta lost full-lap range'
                 # No eligible A: use the latest confirmed session lap independently.
@@ -118,6 +139,54 @@ async def main():
                 await page.locator('#zoom-from').press('Tab')
                 await page.locator('#zoom-to').fill('700');await page.locator('#zoom-to').press('Tab')
                 assert await page.evaluate('() => EngineerDesk.state.zoom') == [100,700]
+                await page.wait_for_selector('#map circle[data-live-car]')
+                before_car = await page.locator('#map circle[data-live-car]').get_attribute('cx')
+                async def moving_car(route):
+                    response = await route.fetch(); data = await response.json()
+                    data['instruments']['position'] = {'x': 0, 'z': 159.2}
+                    await route.fulfill(json=data)
+                await page.route('**/race-engineer/snapshot', moving_car)
+                await page.wait_for_function('() => EngineerDesk.state.snapshot?.instruments?.position?.x === 0')
+                assert await page.locator('#map circle[data-live-car]').get_attribute('cx') != before_car, 'snapshot position did not move the manual-view car'
+                assert await page.evaluate('() => EngineerDesk.state.b') == old
+                assert await page.locator('#map circle').count() == 1, 'selected trace endpoint was also drawn as a car'
+                async def missing_car(route):
+                    response = await route.fetch(); data = await response.json()
+                    data['instruments']['position'] = None
+                    await route.fulfill(json=data)
+                await page.unroute('**/race-engineer/snapshot', moving_car)
+                await page.route('**/race-engineer/snapshot', missing_car)
+                await page.wait_for_function('() => EngineerDesk.state.snapshot?.instruments?.position === null')
+                assert await page.locator('#map circle').count() == 0, 'missing position retained a car marker'
+                await page.unroute('**/race-engineer/snapshot', missing_car)
+                async def another_track(route):
+                    response = await route.fetch(); data = await response.json()
+                    data['current']['track_id'] = 'unrelated-track'
+                    data['current']['session_id'] = 'unrelated-session'
+                    await route.fulfill(json=data)
+                await page.route('**/race-engineer/snapshot', another_track)
+                await page.wait_for_function('() => EngineerDesk.state.snapshot?.current?.track_id === "unrelated-track"')
+                assert await page.locator('#map circle').count() == 0, 'unrelated historical map retained a current car'
+                await page.unroute('**/race-engineer/snapshot', another_track)
+                await page.wait_for_function('() => document.getElementById("delta").textContent !== "Unavailable"')
+                pair_entered, pair_release, pair_done = asyncio.Event(), asyncio.Event(), asyncio.Event()
+                async def held_manual_pair(route):
+                    from urllib.parse import parse_qs, urlsplit
+                    if parse_qs(urlsplit(route.request.url).query).get('b', [''])[0] == old:
+                        response = await route.fetch(); data = await response.json()
+                        pair_entered.set(); await pair_release.wait()
+                        await route.fulfill(json=data); pair_done.set()
+                    else:
+                        await route.continue_()
+                await page.route('**/race-engineer/compare?*', held_manual_pair)
+                await asyncio.wait_for(pair_entered.wait(), timeout=5)
+                live_delta = await page.locator('#delta').inner_text()
+                assert live_delta != 'Unavailable', 'manual comparison had no live delta before snapshot'
+                before_snapshot = await page.evaluate('() => EngineerDesk.state.received')
+                await page.wait_for_function('(stamp) => EngineerDesk.state.received > stamp', arg=before_snapshot)
+                assert await page.locator('#delta').inner_text() == live_delta, 'snapshot marker update cleared a pending manual live delta'
+                pair_release.set(); await asyncio.wait_for(pair_done.wait(), timeout=5)
+                await page.unroute('**/race-engineer/compare?*', held_manual_pair)
                 context=gate.m.gt7_context.Store.prepared(str(fixture.root/fixture.profile/'telemetry-recordings'))
                 doc=context.read();doc['data']['notes']=[{'id':'ui-note','scope':'lap','session':1,'lap':2,'text':'Producer note revision'}]
                 context.save(doc['data'],doc['revision'])
@@ -131,6 +200,19 @@ async def main():
                 await page.wait_for_function('() => EngineerDesk.state.newLaps > 0')
                 assert await page.evaluate('() => EngineerDesk.state.b') == old
                 assert await page.evaluate('() => EngineerDesk.state.zoom') == [100,700]
+                revision = fixture.live.history(None)['revision']
+                await other.wait_for_function('(revision) => EngineerDesk.state.historyRevision === revision', arg=revision)
+                assert await other.evaluate('() => EngineerDesk.state.newLaps') == 0, 'following live accumulated a notice'
+                await page.locator('#follow').check()
+                assert await page.evaluate('() => EngineerDesk.state.newLaps') == 0, 'following live did not clear the notice'
+                await page.locator('#follow').uncheck()
+                fixture.feed_live()
+                await page.wait_for_function('() => EngineerDesk.state.newLaps > 0')
+                current_session = fixture.live.snapshot()['session_id']
+                newest = fixture.live.snapshot()['laps'][-1]['id']
+                await page.locator('#session').select_option(current_session)
+                await page.locator('#lap-b').select_option(newest)
+                assert await page.evaluate('() => EngineerDesk.state.newLaps') == 0, 'newest completed lap did not clear the notice'
                 fixture.live_clock=16.0
                 await page.wait_for_function('() => document.getElementById("status").textContent === "Telemetry stale"')
                 assert await page.locator('#protected').evaluate('(el) => el.classList.contains("dim")')
@@ -145,6 +227,9 @@ async def main():
                 await page.wait_for_function('(id) => [...document.getElementById("reference-source").options].some(o=>o.value===id)',arg=source)
                 await page.locator('#reference-source').select_option(source)
                 await page.wait_for_function('() => EngineerDesk.state.refLaps.length > 0')
+                shared_label = '<img src=x onerror="window.injected=true">'
+                assert shared_label in ' '.join(await page.locator('#session option').all_text_contents()), 'reference session lost its granted label'
+                assert shared_label in ' '.join(await page.locator('#lap-a option').all_text_contents()), 'reference laps lost their granted label'
                 await page.wait_for_function('() => EngineerDesk.state.pair?.state === "ready"')
                 assert not await page.evaluate('() => !!window.injected')
                 ref_captured=asyncio.Event();ref_release=asyncio.Event()

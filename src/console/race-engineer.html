@@ -28,10 +28,10 @@
 <script>
 'use strict';
 const $=id=>document.getElementById(id), num=(v,d=1)=>typeof v==='number'&&Number.isFinite(v)?v.toFixed(d):'Unavailable';
-const state={stopped:false,busy:false,analysisBusy:false,epoch:0,generation:null,snapshot:null,received:0,connected:false,problem:null,historyRevision:null,laps:[],sessions:[],refs:[],refLaps:[],refSource:'',a:'',b:'',session:'',follow:true,zoom:null,detail:null,pair:null,outline:null,known:new Set(),newLaps:0,analysisAvailable:false,lastAccess:0,lastChat:0,controllers:new Set()};
+const state={stopped:false,busy:false,analysisBusy:false,epoch:0,generation:null,snapshot:null,received:0,connected:false,problem:null,historyRevision:null,laps:[],sessions:[],refs:[],refLaps:[],refSource:'',a:'',b:'',session:'',follow:true,zoom:null,detail:null,pair:null,outline:null,mapFrame:null,known:new Set(),newLaps:0,analysisAvailable:false,lastAccess:0,lastChat:0,controllers:new Set()};
 let timer;
 function say(text){$('notice').textContent=text;}
-function clearPlots(clearOutline=true){if(clearOutline)state.outline=null;for(const id of ['chart','delta-chart','map'])$(id).replaceChildren();$('sectors').tBodies[0].replaceChildren();$('delta').textContent='Unavailable';$('context').textContent='No selected lap';$('notes').replaceChildren();$('limitations').textContent='';$('larger-sectors').textContent='';state.detail=null;state.pair=null;}
+function clearPlots(clearOutline=true){state.mapFrame=null;if(clearOutline)state.outline=null;for(const id of ['chart','delta-chart','map'])$(id).replaceChildren();$('sectors').tBodies[0].replaceChildren();$('delta').textContent='Unavailable';$('context').textContent='No selected lap';$('notes').replaceChildren();$('limitations').textContent='';$('larger-sectors').textContent='';state.detail=null;state.pair=null;}
 function stop(message){state.stopped=true;state.epoch++;clearInterval(timer);for(const c of state.controllers)c.abort();state.controllers.clear();state.snapshot=null;state.laps=[];state.sessions=[];state.refs=[];state.refLaps=[];state.a=state.b=state.session=state.refSource='';state.zoom=null;state.known.clear();state.connected=false;clearPlots();$('protected').hidden=true;for(const id of ['references','notes','chatlog','larger-sectors','session','lap-a','lap-b','reference-source'])$(id).replaceChildren();for(const el of document.querySelectorAll('.value strong'))el.textContent='Unavailable';for(const id of ['source-state','history-state','lap-state','comparison-state','new-laps'])$(id).textContent='';$('chatin').value='';$('context').textContent='';$('limitations').textContent='';$('receipt').textContent='';$('status').textContent=message;}
 class AccessLost extends Error{}
 class ReferenceLost extends Error{}
@@ -49,17 +49,19 @@ async function request(route,query={},method='GET',body=null){
 function resetGeneration(generation){if(state.generation&&state.generation!==generation){state.epoch++;state.laps=[];state.sessions=[];state.known.clear();state.historyRevision=null;state.a=state.b=state.session=state.refSource='';state.refLaps=[];state.zoom=null;state.newLaps=0;clearPlots();say('Relay restarted. A new live generation is active; previous recordings remain history.');}state.generation=generation;}
 function options(id,rows,selected,empty){const el=$(id);el.replaceChildren();if(empty!==undefined){const o=document.createElement('option');o.value='';o.textContent=empty;el.append(o);}for(const row of rows){const o=document.createElement('option');o.value=row.id;o.textContent=row.label;el.append(o);}if(selected&&!rows.some(r=>r.id===selected)){const o=document.createElement('option');o.value=selected;o.textContent='Unavailable selection';el.append(o);}el.value=selected;}
 function lapLabel(r){return `Lap ${r.lap} · ${r.state==='provisional'?'provisional':num(r.time_s,3)+' s'}${r.detail_state==='evicted'?' · evicted':''}${!r.comparison_eligible&&r.state!=='provisional'?' · limited':''}`;}
+function carLabel(row){return row.car||('car '+(row.car_id??'unknown'));}
+function referenceLabel(row){const source=row.session_id?.split(':')[1];return state.refs.find(r=>r.id===source)?.label||'Shared reference';}
 function selections(){
  const current=state.snapshot?.current;const all=state.laps.concat(state.refLaps,current?[current]:[]);
  if(state.follow&&current){state.b=current.id;state.session=current.session_id;}
  if(!state.b){const rows=all.filter(r=>!state.session||r.session_id===state.session);if(rows.length){state.b=rows.at(-1).id;state.session=rows.at(-1).session_id;}}
- const sessions=state.sessions.map(s=>({id:s.id,label:`${s.track||'Unknown track'} · car ${s.car_id??'unknown'} · ${s.laps} laps`}));
- for(const r of state.refLaps)if(!sessions.some(s=>s.id===r.session_id))sessions.push({id:r.session_id,label:'Shared reference session'});
+ const sessions=state.sessions.map(s=>({id:s.id,label:`${s.track||'Unknown track'} · ${carLabel(s)} · ${s.laps} laps`}));
+ for(const r of state.refLaps)if(!sessions.some(s=>s.id===r.session_id))sessions.push({id:r.session_id,label:`${referenceLabel(r)} · session ${r.session_id.split(':').at(-1)} · ${r.track||'Unknown track'} · ${carLabel(r)} · ${state.refLaps.filter(l=>l.session_id===r.session_id).length} laps`});
  options('session',sessions,state.session,'Waiting for session');
  options('lap-b',all.filter(r=>r.session_id===state.session).map(r=>({id:r.id,label:lapLabel(r)})),state.b,'Choose lap');
  const pool=state.refSource?state.refLaps:state.laps.filter(r=>r.session_id===state.session);
  const eligible=pool.filter(r=>r.comparison_eligible);if(!state.a&&eligible.length)state.a=eligible.reduce((a,b)=>a.time_s<b.time_s?a:b).id;
- options('lap-a',eligible.map(r=>({id:r.id,label:lapLabel(r)})),state.a,'No reference');
+ options('lap-a',eligible.map(r=>({id:r.id,label:(r.id.startsWith('r:')?referenceLabel(r)+' · ':'')+lapLabel(r)})),state.a,'No reference');
  options('reference-source',state.refs.map(r=>({id:r.id,label:r.label})),state.refSource,'Selected session');
  $('follow').checked=state.follow;$('new-laps').textContent=state.newLaps?`${state.newLaps} newly completed lap${state.newLaps===1?'':'s'}`:'';
 }
@@ -81,6 +83,7 @@ function graph(id,series,key,height,length=1){const el=$(id);el.replaceChildren(
  el.append(svg('text',{x:8,y:24},num(hi,1)),svg('text',{x:8,y:height-30},num(lo,1)));
  for(const s of series){let path='',pen=false;for(const p of s.rows){if(p.d<min||p.d>max||typeof p[key]!=='number'){pen=false;continue;}path+=(pen?'L':'M')+X(p.d).toFixed(1)+' '+Y(p[key]).toFixed(1);pen=true;}el.append(svg('path',{d:path,stroke:s.color,fill:'none','stroke-width':2}));}
 }
+function renderMarker(){const map=$('map');for(const node of map.querySelectorAll('[data-live-car]'))node.remove();const frame=state.mapFrame,position=state.snapshot?.instruments?.position,current=state.snapshot?.current,plane=frame?.plane,sameTrack=current&&plane&&(plane.track_id&&plane.track_id===current.track_id||plane.session_id===current.session_id);if(frame&&position&&sameTrack&&Number.isFinite(position.x)&&Number.isFinite(position.z))map.append(svg('circle',{cx:30+(position.x-frame.xmin)*frame.scale,cy:30+(position.z-frame.zmin)*frame.scale,r:5,fill:'#ffd08a','data-live-car':'true','aria-label':'Live car position'}));}
 function render(){const B=state.detail,pair=state.pair,outline=pair?.a?.trace_complete?pair.a:state.outline,A=pair?.a||(state.outline?.id===state.a?state.outline:null);clearPlots(false);state.detail=B;state.pair=pair;if(!B&&!outline)return;
  const trace=B?.trace||[],length=Math.max(1,outline?.length_m||outline?.trace?.at(-1)?.d||B?.length_m||trace.at(-1)?.d||0);if(!state.zoom&&!['zoom-from','zoom-to'].includes(document.activeElement?.id)){$('zoom-from').value=0;$('zoom-to').value=Math.round(length);}
  graph('chart',[{rows:A?.trace||[],color:'#8ab4ff'},{rows:trace,color:'#ffd08a'}],$('channel').value,300,length);
@@ -88,7 +91,7 @@ function render(){const B=state.detail,pair=state.pair,outline=pair?.a?.trace_co
  const map=$('map'),points=(outline?.trace?.length?outline.trace:trace).filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.z));
  if(points.length){const xs=points.map(p=>p.x),zs=points.map(p=>p.z),xmin=Math.min(...xs),xmax=Math.max(...xs),zmin=Math.min(...zs),zmax=Math.max(...zs),scale=Math.min(420/Math.max(1,xmax-xmin),360/Math.max(1,zmax-zmin)),X=x=>30+(x-xmin)*scale,Y=z=>30+(z-zmin)*scale;
   for(const [rows,color]of [[outline?.trace||[],'#8ab4ff'],[trace,'#ffd08a']])map.append(svg('path',{d:rows.filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.z)).map((p,i)=>(i?'L':'M')+X(p.x).toFixed(1)+' '+Y(p.z).toFixed(1)).join(''),stroke:color,fill:'none','stroke-width':2,'data-outline':rows===outline?.trace?'complete':'observed'}));
-  const last=trace.at(-1);if(last&&Number.isFinite(last.x)&&Number.isFinite(last.z))map.append(svg('circle',{cx:X(last.x),cy:Y(last.z),r:5,fill:'#ffd08a'}));
+  state.mapFrame={xmin,zmin,scale,plane:outline||B};renderMarker();
   if(B?.larger_sectors?.reviewed)for(const c of B.corner_metrics||[]){const p=trace.find(p=>p.d>=c.apex_m);if(p)map.append(svg('text',{x:X(p.x)+5,y:Y(p.z)},'T'+c.number));}
  }
  if(!B)return;
@@ -104,7 +107,7 @@ async function access(){const data=await request('/race-engineer/access');state.
 async function selection(){const epoch=state.epoch,a=state.a,b=state.b;if(!b)return;
  const latest=state.laps.filter(r=>r.session_id===state.session&&r.state==='confirmed'&&r.trace_complete).at(-1);
  const outlineId=a||latest?.id;
- state.outline=null;
+ if(state.outline&&state.outline.id!==outlineId&&state.outline.id!==latest?.id)state.outline=null;
  if(outlineId){const outline=await request('/race-engineer/lap',{id:outlineId});if(epoch!==state.epoch||b!==state.b||a!==state.a)return;
   if(outline.state==='ready'&&outline.lap.trace_complete)state.outline=outline.lap;
   else if(a&&latest&&latest.id!==a){const fallback=await request('/race-engineer/lap',{id:latest.id});if(epoch!==state.epoch||b!==state.b||a!==state.a)return;if(fallback.state==='ready'&&fallback.lap.trace_complete)state.outline=fallback.lap;}
@@ -121,12 +124,12 @@ async function chat(){try{const data=await request('/chat/data');$('chatlog').re
 async function tick(){if(state.busy||state.stopped)return;state.busy=true;try{
  const now=performance.now();let granted;if(now-state.lastAccess>=900||!state.generation){granted=await access();state.lastAccess=now;}
  if(!state.analysisAvailable){$('status').textContent='Engineer access enabled. Live analysis unavailable.';return;}
- const snap=await request('/race-engineer/snapshot');resetGeneration(snap.generation);state.snapshot=snap;state.received=performance.now();state.connected=true;state.problem=null;instruments(snap);age();
+ const snap=await request('/race-engineer/snapshot');resetGeneration(snap.generation);state.snapshot=snap;state.received=performance.now();state.connected=true;state.problem=null;instruments(snap);age();renderMarker();
  selections();refreshAnalysis(snap);
  }catch(e){if(!(e instanceof AccessLost)){state.connected=false;state.problem=e instanceof SourceUnavailable?'Telemetry source unavailable':'Browser disconnected · reconnecting';$('status').textContent=state.problem;age();}}finally{state.busy=false;}}
 async function refreshAnalysis(snap){if(state.analysisBusy||state.stopped)return;state.analysisBusy=true;try{
  if(state.historyRevision!==snap.history_revision){const h=await request('/race-engineer/history',state.historyRevision==null?{}:{since:state.historyRevision});if(h.generation!==state.generation)return;
-  if(h.changed){if(state.known.size)state.newLaps+=h.laps.filter(r=>!state.known.has(r.id)).length;state.laps=h.laps;state.sessions=h.sessions;state.known=new Set(h.laps.map(r=>r.id));}state.historyRevision=h.revision;}
+  if(h.changed){if(!state.follow&&state.historyRevision!==null)state.newLaps+=h.laps.filter(r=>!state.known.has(r.id)).length;state.laps=h.laps;state.sessions=h.sessions;state.known=new Set(h.laps.map(r=>r.id));}state.historyRevision=h.revision;}
  if(state.refSource){const ref=await request('/race-engineer/reference',{id:state.refSource});if(ref.state==='ready')state.refLaps=ref.laps;else $('comparison-state').textContent='Reference '+ref.state;}
  selections();await selection();
  if(state.a&&state.b!==state.snapshot?.current?.id&&state.snapshot?.current){const a=state.a,b=state.snapshot.current.id,live=await request('/race-engineer/compare',{a,b});if(a===state.a&&b===state.snapshot?.current?.id)$('delta').textContent=live.state==='ready'&&live.compatible&&live.delta.length?num(live.delta.at(-1).delta,3):'Unavailable';}
@@ -134,10 +137,10 @@ async function refreshAnalysis(snap){if(state.analysisBusy||state.stopped)return
  }catch(e){if(e instanceof ReferenceLost){revoke(e.message);selections();}else if(!(e instanceof AccessLost))$('comparison-state').textContent='Analysis temporarily unavailable';}finally{state.analysisBusy=false;}}
 function changed(){state.epoch++;clearPlots();state.zoom=null;selections();tick();}
 $('session').addEventListener('change',()=>{state.follow=false;state.session=$('session').value;state.b='';state.a='';changed();});
-$('lap-b').addEventListener('change',()=>{state.follow=false;state.b=$('lap-b').value;changed();});
+$('lap-b').addEventListener('change',()=>{state.follow=false;state.b=$('lap-b').value;if(state.b===state.snapshot?.current?.id||state.b===state.laps.at(-1)?.id)state.newLaps=0;changed();});
 $('lap-a').addEventListener('change',()=>{state.a=$('lap-a').value;changed();});
 $('reference-source').addEventListener('change',()=>{state.refSource=$('reference-source').value;state.refLaps=[];state.a='';changed();});
-$('follow').addEventListener('change',()=>{state.follow=$('follow').checked;changed();});
+$('follow').addEventListener('change',()=>{state.follow=$('follow').checked;if(state.follow)state.newLaps=0;changed();});
 $('channel').addEventListener('change',render);
 for(const id of ['zoom-from','zoom-to'])$(id).addEventListener('change',()=>{const a=Number($('zoom-from').value),b=Number($('zoom-to').value);if(Number.isFinite(a)&&Number.isFinite(b)&&a>=0&&b>a){state.zoom=[a,b];render();}});
 $('zoom-reset').addEventListener('click',()=>{state.zoom=null;render();});
