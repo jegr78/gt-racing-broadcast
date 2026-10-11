@@ -38,6 +38,10 @@ def t_preview_and_explicit_confirmed_start():
         failure(lambda:control.start(dict(payload,confirm_preview='0'*64),background=False),'preview_changed')
         started=control.start(dict(payload,confirm_preview=preview['confirm_preview']),background=False)
         assert started['state']=='awaiting_validation' and adapters[-1].calls==1
+        assert control.history(source.name)['runs'][0]['state']=='awaiting_validation'
+        exported=control.export(started['id'],'package')
+        assert exported['encoding']=='base64' and exported['mime']=='application/zip'
+        assert control.export_preview(dict(payload,confirm_preview=preview['confirm_preview']))['content']
         assert control.job(started['id'])['profile']=='profile'
         other=c.Controller(control.machine,Path(d)/'other','other',lambda name:source)
         failure(lambda:other.job(started['id']),'not_found')

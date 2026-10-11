@@ -1,13 +1,13 @@
 """Explicit preview/confirmation shared by telemetry CLI and local HTTP callbacks."""
 import copy
-import json
-import re
+import base64
 import tempfile
 from pathlib import Path
 
 import ai_agents
 import ai_jobs
 import ai_package
+import ai_reports
 
 REQUEST_KEYS={'profile','rec','session','laps','references','agent','model','template',
               'goal','questions','language','ui_language','confirm_preview'}
@@ -19,7 +19,7 @@ class ControlError(ValueError):
 
 def _translate(fn,*args,**kwargs):
     try:return fn(*args,**kwargs)
-    except (ai_agents.AgentError,ai_jobs.JobError,ai_package.PackageError) as e:
+    except (ai_agents.AgentError,ai_jobs.JobError,ai_package.PackageError,ai_reports.ReportError) as e:
         raise ControlError(e.code,str(e)) from e
 
 
@@ -29,6 +29,7 @@ class Controller:
         self.source_factory=source_factory;self.adapter_factory=adapter_factory;self.validate=validate
         self.settings=ai_agents.Settings(self.machine)
         self.runner=ai_jobs.Runner(self.machine,self.profile_root,profile)
+        self.reports=ai_reports.Store(self.profile_root,profile,self.machine,source_factory)
 
     def _prepare(self,payload):
         if not isinstance(payload,dict) or set(payload)-REQUEST_KEYS:
@@ -108,17 +109,23 @@ class Controller:
             pass  # Preference persistence must not discard an admitted run.
         return result
 
-    def job(self,job_id):
-        if not isinstance(job_id,str) or not re.fullmatch('[0-9a-f]{32}',job_id):
-            raise ControlError('invalid_job','Invalid analysis job ID')
-        base=self.profile_root/'telemetry-analyses'
-        for path in base.glob('*/'+job_id+'/run.json'):
-            if not path.resolve().is_relative_to(self.profile_root) or path.is_symlink():continue
-            try:doc=json.loads(path.read_text(encoding='utf-8'))
-            except (ValueError,OSError):continue  # Corrupt artifacts are not normal reports.
-            if doc.get('profile')==self.profile and doc.get('id')==job_id:
-                return dict(doc,ok=True)
-        raise ControlError('not_found','Analysis job not found in the active profile')
+    def job(self,job_id):return _translate(self.reports.get,job_id)
+
+    def history(self,rec=None):return _translate(self.reports.history,rec)
+
+    @staticmethod
+    def _download(doc):
+        raw=doc.pop('bytes')
+        return dict(doc,ok=True,encoding='base64',content=base64.b64encode(raw).decode('ascii'))
+
+    def export(self,job_id,kind,origin=None):return self._download(_translate(self.reports.export,job_id,kind,origin=origin))
+
+    def export_preview(self,payload):
+        package,_manifest,adapter,_model,confirm,_availability=self._prepare(payload)
+        if payload.get('confirm_preview')!=confirm:
+            raise ControlError('preview_changed','Preview the exact package before exporting it')
+        raw=_translate(ai_reports.export_package,package,adapter.provider)
+        return self._download(dict(bytes=raw,mime='application/zip',filename='racecast-input-'+package['fingerprint'][:12]+'.zip'))
 
     def status(self):
         result=self.runner.status(self.profile)

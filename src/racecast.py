@@ -3312,8 +3312,9 @@ def _ai_controller():
     profile=_active_profile_name() or ''
     machine=_runtime_base_dir()
     root=_profile_runtime(machine,profile)
+    import ai_reports
     return ai_control.Controller(machine,root,profile,
-                                 lambda name:_ai_source(name,root,machine,profile))
+                                 lambda name:_ai_source(name,root,machine,profile),validate=ai_reports.validate)
 
 
 def ai_request_data(operation,payload=None):
@@ -3336,6 +3337,9 @@ def ai_request_data(operation,payload=None):
         if operation=='start':return control.start(payload)
         if operation=='status':return control.status()
         if operation=='job':return control.job(payload.get('id'))
+        if operation=='history':return control.history(payload.get('rec'))
+        if operation=='export':return control.export(payload.get('id'),payload.get('format'),origin=payload.get('origin'))
+        if operation=='package-export':return control.export_preview(payload)
         if operation=='cancel':return control.cancel(payload.get('id'))
         raise ai_control.ControlError('invalid_selection','Unknown analysis operation')
     except (ai_control.ControlError,ai_agents.AgentError,ai_jobs.JobError,ai_package.PackageError) as exc:
@@ -3496,7 +3500,22 @@ def telemetry_export_cmd(rest):
         print('note: ' + res['context_error'])
 
 
-def _telemetry_delete_path(rec_dir, path):
+def _telemetry_delete_path(rec_dir,path):
+    """Serialize source deletion with machine-wide analysis admission."""
+    import ai_jobs
+    import gt7_context
+    import gt7_recording
+    lease=ai_jobs.Lease(_runtime_base_dir())
+    try:lease.acquire()
+    except ai_jobs.JobError:return 'An AI analysis is running; cancel it or wait before deleting recordings',[]
+    try:
+        try:identity=gt7_context.source_identity(path)
+        except (OSError,ValueError,gt7_recording.RecordingError):identity=None
+        return _telemetry_delete_path_locked(rec_dir,path,identity)
+    finally:lease.close()
+
+
+def _telemetry_delete_path_locked(rec_dir, path, analysis_identity):
     """Delete the recording at `path`, its export folder and its lap index. Returns
     (error, notes): `error` is the refusal or failure text (None on success), `notes` name
     leftovers that could not be removed. Shared by the CLI and the Control Center."""
@@ -3538,6 +3557,11 @@ def _telemetry_delete_path(rec_dir, path):
             pass  # never indexed
         except OSError as e:
             notes.append(f"could not remove {os.path.basename(f)}: {e.strerror}")
+    try:
+        import ai_reports
+        ai_reports.delete_recording_analyses(os.path.dirname(os.path.abspath(rec_dir)),analysis_identity,os.path.basename(path))
+    except (OSError,ValueError) as exc:
+        notes.append('could not remove recording analyses: '+_telemetry_reason(exc))
     return None, notes
 
 
@@ -4116,7 +4140,8 @@ def telemetry_lap_data(rec, session, lap, build=True):
         available = idx["laps"] + ([idx["open_lap"]] if idx.get("open_lap") else [])
         for row in available:
             if row["session"] == s and row["lap"] == n:
-                return {"ok": True, "lap": {k: v for k, v in row.items() if k != "points"},
+                return {"ok": True, "lap": dict({k: v for k, v in row.items() if k != "points"},
+                                    recording_id=(idx.get("context_snapshot") or {}).get("source_id")),
                         "step_m": gt7_laps.STEP_M, "sector_m": gt7_laps.SECTOR_M}
         return {"ok": False, "error": f"no lap {n} in session {s} of {rec}"}
     except Exception as exc:

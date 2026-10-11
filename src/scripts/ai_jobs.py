@@ -1,6 +1,7 @@
 """One machine-wide, explicitly admitted subscription CLI analysis process tree."""
 import copy
 import datetime
+import hashlib
 import json
 import os
 import re
@@ -17,6 +18,7 @@ from pathlib import Path
 import ai_agents
 import ai_package
 import gt7_context
+import gt7_recording
 
 MAX_OUTPUT_BYTES = 4*1024*1024
 TERMINAL = {'completed','awaiting_validation','failed','cancelled','timed_out'}
@@ -286,6 +288,20 @@ class Runner:
         job_id=uuid.uuid4().hex
         directory=self.profile_root/'telemetry-analyses'/ident/job_id
         try:
+            if 'source' in package:
+                sources=[(selection.get('recording'),ident,package['source'].get('sha256'))]
+                for ref in package.get('references',[]):
+                    provenance=next((p for p in package['reference_provenance'] if p['recording_id']==ref['recording_id']),{})
+                    sources.append((ref['rec']+'.gt7rec',ref['recording_id'],provenance.get('sha256')))
+                for name,source_id,digest in dict.fromkeys(sources):
+                    if not isinstance(name,str) or Path(name).name!=name or '/' in name or '\\' in name or not name.endswith('.gt7rec'):
+                        raise JobError('invalid_package','Invalid profile recording name')
+                    path=self.profile_root/'telemetry-recordings'/name
+                    try:
+                        current=(path.is_file() and not path.is_symlink() and path.resolve().parent==(self.profile_root/'telemetry-recordings').resolve()
+                                 and gt7_context.source_identity(str(path))==source_id and ai_package.file_hash(path)==digest)
+                    except (OSError,ValueError,KeyError,TypeError,gt7_recording.RecordingError):current=False
+                    if not current:raise JobError('stale_source','Selected recording/reference changed or was deleted after preview; prepare a new selection')
             if not directory.resolve().is_relative_to(self.profile_root):
                 raise JobError('invalid_package','Analysis artifact directory leaves the profile')
             directory.mkdir(parents=True)
@@ -298,7 +314,6 @@ class Runner:
                        progress='Preparing isolated analysis package',error=None,report=None,
                        quota_notice='Cancellation cannot recover already consumed subscription quota.')
             # Hash includes executable identity without exporting the machine path.
-            import hashlib
             state['agent_fingerprint']=hashlib.sha256(json.dumps(cfg,sort_keys=True).encode()).hexdigest()
             _save(directory/'run.json',state)
             active=dict(state,directory=str(directory));_save(self.active_path,active)
@@ -323,6 +338,8 @@ class Runner:
         try:
             if Path(prepared_package).resolve()!=(directory/'package').resolve():
                 snapshot_package(prepared_package,directory/'package',frozen)
+            state['input_file_fingerprints']={name:hashlib.sha256((directory/'package'/name).read_bytes()).hexdigest()
+                                                for name in ('detail.json','summary.md','manifest.json','result-schema.json')}
             self._update(directory,state,'starting','Checking installed CLI and subscription authentication')
             probe=adapter.probe(env=dict(os.environ))
             state['provider_version']=probe.get('version')
@@ -440,13 +457,16 @@ class Runner:
                     if tree:tree.close()
                     for reader in readers:reader.join(2)
         except KeyboardInterrupt:
+            state['report']=None
             state['error']={'code':'cancelled','message':'Analysis interrupted; consumed subscription quota is not recoverable'}
             self._update(directory,state,'cancelled',state['error']['message'])
         except (JobError,ai_agents.AgentError) as e:
+            state['report']=None
             state['error']={'code':e.code,'message':str(e)}
             phase=e.code if e.code in ('cancelled','timed_out') else 'failed'
             self._update(directory,state,phase,str(e))
         except Exception as e:
+            state['report']=None
             (directory/'runner-error.log').write_text(type(e).__name__+': '+str(e),encoding='utf-8')
             state['error']={'code':'execution_failed','message':'Analysis execution failed; inspect saved local diagnostics'}
             self._update(directory,state,'failed',state['error']['message'])

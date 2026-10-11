@@ -256,6 +256,18 @@ def t_windows_tree_waits_for_descendants_before_releasing_handle():
     assert tree.handle is None and calls[-1]=='close'
 
 
+def t_persistence_failure_never_returns_a_completed_report():
+    with tempfile.TemporaryDirectory() as d:
+        pkg=prepared(d);runner=j.Runner(Path(d)/'machine',Path(d)/'profile','p')
+        original=runner._update
+        def update(directory,state,phase,progress):
+            original(directory,state,phase,progress)
+            if phase=='completed':raise OSError('controlled persistence failure')
+        runner._update=update
+        result=runner.run(package(),pkg,FakeAdapter(d),validate=lambda result,_p:{'validated':result})
+        assert result['state']=='failed' and result['report'] is None,result
+
+
 def t_tree_cleanup_is_not_repeated_after_validation():
     with tempfile.TemporaryDirectory() as d:
         pkg=prepared(d);runner=j.Runner(Path(d)/'machine',Path(d)/'profile','p')

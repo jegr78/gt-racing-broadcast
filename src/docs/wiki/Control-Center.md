@@ -284,9 +284,15 @@ running relay.
   it stays out of every comparison, and the view analyses it only after the recording
   stops.
 - **Delete a recording.** **Delete** on the Recordings card removes the selected
-  recording, its context and context history, CSV export and lap index after a confirmation, the same as
+  recording, its context and context history, CSV export, lap index, recording-owned AI analyses and their input packages after a confirmation, the same as
   `racecast telemetry delete <name>`. It cannot be undone. The recording the relay is
-  still writing cannot be deleted: stop the recording first.
+  still writing cannot be deleted: stop the recording first. While an AI analysis is
+  active, cancel it or wait before deleting recordings. Shared machine agent settings
+  remain available. Reference snapshots already frozen in another recording's report
+  stay with that report and become stale if their source disappears.
+
+  ![Recording deletion also removes its AI analyses and input packages](images/cc-telemetry-delete.png)
+
 - **Context & notes.** Add race settings, per-session confirmations, stints, fuel maps,
   intentional shortshifting and notes before, during or after capture. The context editor
   can select an active recording even while its lap analysis is unavailable. Recording

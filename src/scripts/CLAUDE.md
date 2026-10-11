@@ -219,3 +219,17 @@ report validator accepts it. Run artifacts retain input, diagnostics and the sam
 restricted manual invocation for deliberate retry. Settings preferences use a
 locked reload/update so concurrent agent edits are preserved.
 Details: `src/docs/design/ai-analysis-jobs.md`.
+
+
+`ai_reports` validates the strict result schema, existing selected lap/location
+references and exact supplied facts. It attaches safe telemetry targets, distinct
+exercise priorities and source provenance; interpretation truth is unproven.
+Normal reports require a valid frozen output plus unchanged input/prompt hashes.
+Profile-owned history derives stale/interrupted status without rewriting artifacts.
+Relevant staleness rebuilds the same selection, ignoring unrelated context-revision
+increments. HTML escapes all provider text and Markdown escapes active link/image
+syntax. HTTP exports use the current loopback origin; report links validate the
+profile and recording identity before opening the existing lap comparison.
+Recording deletion shares machine admission with jobs and removes owned artifacts;
+references are revalidated under that lease before a new run can begin. Machine
+agent settings survive deletion. See `src/docs/design/ai-analysis-reports.md`.
