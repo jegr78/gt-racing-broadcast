@@ -13,3 +13,7 @@ Marker coordinates come from the current measured snapshot, independent of selec
 trace endpoints and comparison preparation. A known matching layout or the same
 live session supplies the coordinate cohort; an unrelated historical map does not
 claim a current car. Paused/stale values retain the desk's existing dimmed state.
+
+Snapshot-only marker updates preserve the last calculated live delta while a
+manual comparison request is pending. A browser regression holds that response
+and observes a newer snapshot before checking the unchanged delta.

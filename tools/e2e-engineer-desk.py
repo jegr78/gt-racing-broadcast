@@ -168,6 +168,25 @@ async def main():
                 await page.wait_for_function('() => EngineerDesk.state.snapshot?.current?.track_id === "unrelated-track"')
                 assert await page.locator('#map circle').count() == 0, 'unrelated historical map retained a current car'
                 await page.unroute('**/race-engineer/snapshot', another_track)
+                await page.wait_for_function('() => document.getElementById("delta").textContent !== "Unavailable"')
+                pair_entered, pair_release, pair_done = asyncio.Event(), asyncio.Event(), asyncio.Event()
+                async def held_manual_pair(route):
+                    from urllib.parse import parse_qs, urlsplit
+                    if parse_qs(urlsplit(route.request.url).query).get('b', [''])[0] == old:
+                        response = await route.fetch(); data = await response.json()
+                        pair_entered.set(); await pair_release.wait()
+                        await route.fulfill(json=data); pair_done.set()
+                    else:
+                        await route.continue_()
+                await page.route('**/race-engineer/compare?*', held_manual_pair)
+                await asyncio.wait_for(pair_entered.wait(), timeout=5)
+                live_delta = await page.locator('#delta').inner_text()
+                assert live_delta != 'Unavailable', 'manual comparison had no live delta before snapshot'
+                before_snapshot = await page.evaluate('() => EngineerDesk.state.received')
+                await page.wait_for_function('(stamp) => EngineerDesk.state.received > stamp', arg=before_snapshot)
+                assert await page.locator('#delta').inner_text() == live_delta, 'snapshot marker update cleared a pending manual live delta'
+                pair_release.set(); await asyncio.wait_for(pair_done.wait(), timeout=5)
+                await page.unroute('**/race-engineer/compare?*', held_manual_pair)
                 context=gate.m.gt7_context.Store.prepared(str(fixture.root/fixture.profile/'telemetry-recordings'))
                 doc=context.read();doc['data']['notes']=[{'id':'ui-note','scope':'lap','session':1,'lap':2,'text':'Producer note revision'}]
                 context.save(doc['data'],doc['revision'])
