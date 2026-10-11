@@ -33,7 +33,7 @@ flowchart LR
 - **Setting up a machine for the first time?** → [Set up the broadcast PC](Set-up-the-broadcast-PC)
   (on Arch, read [this supplement](Arch-Linux) alongside it: worked through on CachyOS)
 - **Running a show today?** → [Run an event](Run-an-event)
-- **Producing from a cloud GPU box?** → [Remote producer (cloud GPU box)](Cloud-Producer)
+- **Preparing a Linux producer?** → [Linux producer requirements](Linux-Producer)
 - **You're the remote director?** → [Director setup](Director-Setup) (first
   time), then the [Director guide](Director)
 - **You run the league (Sheet + Discord)?** → [League owner setup](League-Owner-Setup)

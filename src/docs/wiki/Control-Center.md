@@ -450,7 +450,7 @@ The illustration uses authored synthetic reference values; no external curve is 
   happened.
 
 The racing lines are not part of the package. Until racecast has downloaded them
-(`racecast gt7-data update`, or the first relay start with telemetry), it recognises
+(`racecast gt7-data update`, or an explicitly enabled relay-start update), it recognises
 only layouts learned with Set track, and every other recording starts as track unknown.
 
 > **CLI alternative:** `racecast telemetry export <name>` writes laps/channels CSV,

@@ -8,7 +8,7 @@
 - [Set up the broadcast PC](Set-up-the-broadcast-PC)
 - [… on Arch Linux (CachyOS)](Arch-Linux)
 - [Run an event](Run-an-event)
-- [Remote producer (cloud GPU box)](Cloud-Producer)
+- [Linux producer requirements](Linux-Producer)
 - [Director setup](Director-Setup)
 - [Director guide](Director)
 - [The Console launcher](Console)

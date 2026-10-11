@@ -65,3 +65,7 @@ python3 tools/sync-wiki.py    # mirror src/docs/wiki/ to the GitHub wiki (--dry-
 The onboarding decks under `src/docs/slides/` (including the printable role cheat sheet)
 publish to GitHub Pages via the dispatch-only `.github/workflows/pages.yml`. Before
 publishing, run the slide-overflow guard (`tools/check-slides.py`, needs a Playwright venv).
+
+Source execution requires **Python 3.12 or newer**, matching the lowest CI version.
+The packaged Racecast binaries include their interpreter. Linux applications and
+libraries are listed in the [Linux producer guide](https://github.com/jegr78/gt-racing-broadcast/wiki/Linux-Producer).

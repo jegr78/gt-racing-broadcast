@@ -141,7 +141,9 @@ def make_handler(ctx):
     _pages = bundle_cache.BundleCache()
     _context_script = os.path.join(os.path.dirname(ctx["page_path"]), "telemetry-context.js")
     _ai_script = os.path.join(os.path.dirname(ctx["page_path"]), "ai-analysis.js")
-    _engineer_script = os.path.join(os.path.dirname(ctx["page_path"]), "race-engineer.js")
+    _engineer_script = os.path.join(
+        os.path.dirname(ctx["page_path"]), "race-engineer.js"
+    )
     _pages.prewarm([ctx["page_path"], _context_script, _ai_script, _engineer_script])
 
     class Handler(BaseHTTPRequestHandler):
@@ -195,33 +197,82 @@ def make_handler(ctx):
                     404 if result.get('not_found') else 400 if result.get('invalid') else 500)
             return self._json(result, code=code)
 
-        def _engineer_call(self,write,data):
-            try:result=ctx['engineer_write' if write else 'engineer_read'](data)
-            except (KeyError,OSError,ValueError,TypeError):result={'ok':False,'error':{'code':'access_failed','message':'Engineer settings are unavailable'}}
-            error=(result.get('error') or {}).get('code')
-            code=200 if result.get('ok') else 409 if error in ('profile_changed','conflict') else 404 if error=='reference_unavailable' else 400
-            return self._json(result,code=code)
+        def _engineer_call(self, write, data):
+            try:
+                result = ctx["engineer_write" if write else "engineer_read"](data)
+            except (KeyError, OSError, ValueError, TypeError):
+                result = {
+                    "ok": False,
+                    "error": {
+                        "code": "access_failed",
+                        "message": "Engineer settings are unavailable",
+                    },
+                }
+            error = (result.get("error") or {}).get("code")
+            code = (
+                200
+                if result.get("ok")
+                else 409
+                if error in ("profile_changed", "conflict")
+                else 404
+                if error == "reference_unavailable"
+                else 400
+            )
+            return self._json(result, code=code)
 
         def _ai_result(self, result):
-            error=result.get('error') or {}
-            code=error.get('code') if isinstance(error,dict) else 'execution_failed'
-            status=(200 if result.get('ok') else
-                    409 if code in {'busy','settings_busy','preview_changed','profile_changed','stale_source','unindexed'} else
-                    403 if code=='disabled' else 404 if code=='not_found' else
-                    413 if code=='package_too_large' else 500 if code in {'execution_failed','preparation_failed'} else 400)
-            return self._json(result,code=status)
+            error = result.get("error") or {}
+            code = error.get("code") if isinstance(error, dict) else "execution_failed"
+            status = (
+                200
+                if result.get("ok")
+                else 409
+                if code
+                in {
+                    "busy",
+                    "settings_busy",
+                    "preview_changed",
+                    "profile_changed",
+                    "stale_source",
+                    "unindexed",
+                }
+                else 403
+                if code == "disabled"
+                else 404
+                if code == "not_found"
+                else 413
+                if code == "package_too_large"
+                else 500
+                if code in {"execution_failed", "preparation_failed"}
+                else 400
+            )
+            return self._json(result, code=status)
 
         def _ai_call(self, operation, payload):
-            callback=ctx.get('ai_request')
+            callback = ctx.get("ai_request")
             if callback is None:
-                if operation=='settings':return self._json({'ok':True,'enabled':False,'agents':[],'last':{}})
-                if operation=='status':return self._json({'ok':True,'busy':False,'active':None})
-                return self._ai_result({'ok':False,'error':{'code':'disabled','message':'AI analysis is disabled'}})
-            if operation=='export':
-                payload=dict(payload,origin='http://127.0.0.1:'+str(self.server.server_address[1]))
-            try:result=callback(operation,payload)
+                if operation == "settings":
+                    return self._json({"ok": True, "enabled": False, "agents": [], "last": {}})
+                if operation == "status":
+                    return self._json({"ok": True, "busy": False, "active": None})
+                return self._ai_result({
+                    "ok": False,
+                    "error": {"code": "disabled", "message": "AI analysis is disabled"},
+                })
+            if operation == "export":
+                payload = dict(
+                    payload, origin="http://127.0.0.1:" + str(self.server.server_address[1])
+                )
+            try:
+                result = callback(operation, payload)
             except Exception:
-                result={'ok':False,'error':{'code':'execution_failed','message':'Analysis operation failed'}}
+                result = {
+                    "ok": False,
+                    "error": {
+                        "code": "execution_failed",
+                        "message": "Analysis operation failed",
+                    },
+                }
             return self._ai_result(result)
 
         def _not_found(self, what="not found"):

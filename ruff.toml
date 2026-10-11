@@ -5,20 +5,23 @@
 # The rule set is deliberately narrow: this codebase intentionally uses compact
 # one-liners (`try: ... except OSError: pass` with an explanatory comment, the
 # CodeQL convention), semicolons and grouped imports, so style rules (E1/E2/
-# E4/E7, line length) stay OFF. S110 (try/except/pass) also stays off: it
+# E4/E7, line length) stay OFF outside the AI/Race Engineer modules. S110 (try/except/pass) also stays off: it
 # cannot see the explanatory comments CodeQL accepts and would re-flag every
 # documented block. INSTEAD, tools/lint.py carries a small in-house guard that
 # reproduces CodeQL's py/empty-except exactly (empty handler + no comment, minus
 # the benign raise-in-try / optional-import idioms CodeQL ignores), so a missing
 # comment fails this gate pre-push rather than surfacing post-merge. CodeQL
 # remains the deep security scanner (taint tracking); ruff is the fast mechanical gate.
-target-version = "py311"
+target-version = "py312"
+preview = true
 
 # dist/, runtime/, incoming/ are covered by .gitignore (respected by default).
 
 [lint]
 select = [
     "F",       # pyflakes: unused imports/variables, undefined names, f-string bugs
+    "E2",      # spacing, scoped to AI/Race Engineer modules below
+    "E70",     # no compound one-line statements in those modules
     "E9",      # syntax / io errors
     "PLE",     # pylint errors (e.g. bad string formatting, nonlocal misuse)
     "B",       # bugbear: mutable defaults, loop-var capture, useless expressions
@@ -28,3 +31,6 @@ select = [
     "N805",    # first method argument must be 'self' (CodeQL py/not-named-self)
     "PLW0108", # unnecessary lambda                  (CodeQL py/unnecessary-lambda)
 ]
+
+[lint.per-file-ignores]
+"!src/scripts/{ai_*,race_engineer_*}.py" = ["E2", "E70"]

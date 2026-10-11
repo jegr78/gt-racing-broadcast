@@ -191,3 +191,7 @@ Editing the toolkit, running the tests and lint, building the distributable and 
 standalone binaries, and the maintainer workflows (OBS-collection round-trip, wiki and
 Pages publishing) all live in **[CONTRIBUTING.md](CONTRIBUTING.md)**: with `CLAUDE.md`
 as the deep-architecture reference.
+
+Source execution requires **Python 3.12 or newer**, matching the lowest CI version.
+The packaged Racecast binaries include their interpreter. Linux applications and
+libraries are listed in the [Linux producer guide](https://github.com/jegr78/gt-racing-broadcast/wiki/Linux-Producer).
