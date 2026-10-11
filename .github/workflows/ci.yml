@@ -114,6 +114,8 @@ jobs:
           python-version: "3.12"
       - name: Run the synthetic e2e harness (relay + Control Center bring-up)
         run: python tools/e2e.py
+      - name: Growing recording replay through the Engineer desk
+        run: python tools/engineer-replay.py --check
 
   visual:
     # Visual acceptance run: renders Control Center, Director Panel, cockpit and

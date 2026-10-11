@@ -8,7 +8,7 @@ The standing release PR is outside this work.
 ## Sequence and delivery checklist
 
 - [x] Read parent/children, current main, open PRs, worktrees and remote branches.
-- [ ] #851: reproduce a growing provisional lap with stepped production packets;
+- [x] #851: reproduce a growing provisional lap with stepped production packets;
   return the latest completed authorized comparison while refreshing it; stabilize
   map bounds and chart distance against a complete outline. Use the replay fixture
   while developing the reusable tool in #856.
@@ -19,10 +19,12 @@ The standing release PR is outside this work.
   and draw the current snapshot's car independently from selected lap traces.
 - [ ] #854: parse validated race position/car count, publish instruments and
   lap-line position, and display position on the desk.
-- [ ] #853: implement the producer-selected display cleanup; scope decision
-  pending. Record any deferred items explicitly.
-- [ ] #855: render layout drafts at 1440, 1024 and 390 px and link them in the issue.
-- [ ] #855: obtain the expressly required producer approval of a concrete draft.
+- [ ] #853: implement all eight display cleanup items as planned; record any deferred
+  items explicitly.
+- [x] #855: render layout drafts at 1440, 1024 and 390 px and link them in the issue.
+- [x] #855: obtain the expressly required producer approval of a concrete draft.
+  Proposal A at `d0131a9` in #859 was explicitly approved in the working chat and
+  recorded in #855.
 - [ ] #855: implement the approved draft and verify all three viewports.
 - [ ] Verify all children and parent scope, close #850, reconcile tracker and
   remove only this run's merged topic branches.

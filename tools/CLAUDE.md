@@ -103,6 +103,44 @@ runs it on every PR and uploads the report. Local setup:
 `python3 -m venv runtime/pw-venv && runtime/pw-venv/bin/pip install playwright==1.63.0 &&
 runtime/pw-venv/bin/python -m playwright install chromium`.
 
+## Engineer recording replay (`tools/engineer-replay.py`)
+
+Maintainer-only, Python 3.12+. It serves the production signed Engineer desk on a
+free loopback port from temporary copies of a finalized recording and optional
+labelled reference recordings. It starts no relay feeds, OBS or UDP listener.
+Only Engineer analysis and temporary Crew chat routes are served; broadcast
+control endpoints are unavailable.
+
+```bash
+python3 tools/engineer-replay.py recording.gt7rec --speed 1 --skip-minutes 5
+python3 tools/engineer-replay.py recording.gt7rec --reference reference.gt7rec --reference-label "Morning practice"
+python3 tools/engineer-replay.py --check
+```
+
+Open the printed signed desk URL. After playback completes the desk remains
+available until Ctrl+C; packet receipt naturally becomes stale. Originals and
+machine configuration remain untouched, and owned workers stop before temporary
+copies are removed. Reference context sidecars are copied and explicitly granted
+with the reference. Do not commit private captures or the printed access token.
+
+Original packet timestamps drive analysis even at accelerated speed. Wall-clock
+pacing uses the selected speed; skipped packets are pre-fed in bounded flushed
+batches. The default reads valid files from `runtime/gt7/` and falls back to bundled
+car/catalogue data. Use `--data-runtime DIR` for another existing runtime cache;
+`--update-data` explicitly downloads into the temporary runtime only. Without
+cached signatures, offline recognition may stay unknown, but measured geometry
+and same-session comparison remain available.
+
+`--check` uses real synthetic packets, a temporary learned circuit and signed HTTP.
+It checks advancing snapshots, confirmed/offline-equal lap times and sectors,
+plus available delta/A sectors on multiple growing provisional prefixes. The
+CI e2e job runs it, and `tests/test_engineer_replay.py` covers pacing, large skipped
+prefixes, private copies, route boundaries, updates and cancellation.
+
+For inspecting the real desk or capturing development screenshots, use the
+printed URL with Playwright at 1440, 1024 and 390 px. The reproducible committed
+wiki images continue to use synthetic data; see the wiki-screenshots skill.
+
 ## Prove a text-only change (`tools/ast-gate.py` + `tools/html-gate.py`)
 Two maintainer gates for a pass that is supposed to touch comments and prose only.
 Both compare the working tree against a base ref and are read-only.
