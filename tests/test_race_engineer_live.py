@@ -485,6 +485,26 @@ def t_unconfirmed_recorded_prefix_retries_after_confirming_append():
             assert store.stats()['replays'] == 2
 
 
+def t_confirmed_best_and_theory_respect_known_strategy_changes():
+    import gt7_context
+    with tempfile.TemporaryDirectory() as d:
+        path = write_circle_recording(d, lap_secs=(20.0, 16.0, 20.0, 20.0))
+        context = gt7_context.Store.for_recording(path)
+        context.save({'notes': [], 'sessions': {'1': {'confirmed': True,
+            'stints': [{'id': 'initial', 'start_lap': 1, 'confirmed': True,
+                        'compound': 'RM', 'strategy': {'fuel_map': 1},
+                        'strategy_changes': [{'lap': 3, 'recording_s': 36.0,
+                                              'strategy': {'fuel_map': 2}}]}]}}}, 0)
+        with live.Store(lambda: True, tracks=FakeTracks(), cars=FakeCars(), queue_max=4096) as store:
+            store.bind_recording(path)
+            store._read_context()
+            feed(store, path)
+            snap = store.snapshot()
+            assert snap['current']['strategy']['fuel_map'] == 2
+            assert snap['best_s'] == 20.0, 'known incompatible fuel strategy contaminated best'
+            assert snap['theoretical_s'] == 20.0
+
+
 if __name__ == '__main__':
     for name, fn in sorted(list(globals().items())):
         if name.startswith('t_'):

@@ -35,7 +35,19 @@ SUMMARY_FIELDS = frozenset(('measurement_hash', '_context_source', 'id', 'sessio
 
 
 def _summary(row):
-    return {k: v for k, v in row.items() if k in SUMMARY_FIELDS}
+    result = {k: v for k, v in row.items() if k in SUMMARY_FIELDS}
+    # Eligible laps have no contradictory known strategy values. Preserve just
+    # those constraints for shared compatible(), without repeating free notes.
+    strategy = {}
+    for declared in row.get('strategies') or [row.get('strategy', {})]:
+        strategy.update({k: declared[k] for k in ('fuel_map', 'shortshift') if declared.get(k) is not None})
+        if declared.get('targets'):
+            strategy.setdefault('targets', {}).update(declared['targets'])
+    result.update(context_settings={k: v for k, v in row.get('context_settings', {}).items()
+                                   if k in ('bop', 'fixed_setup', 'tyre_x', 'fuel_x', 'time_progression', 'time_of_day')},
+                  settings_confirmed=row.get('settings_confirmed', False),
+                  strategy=strategy, strategies=[strategy])
+    return result
 
 
 def _measurement_hash(row):
@@ -421,9 +433,11 @@ class Store:
         doc = self._empty()
         sid = current['session_id'] if current else None
         pool = [r for r in self._details.values() if r['session_id'] == sid
-                and r.get('comparison_eligible') and r['state'] == 'confirmed']
+                and r.get('comparison_eligible') and r['state'] == 'confirmed'
+                and gt7_context.compatible(current or {}, r)]
         eligible = [r for r in self._summaries.values() if r['session_id'] == sid
-                    and r.get('comparison_eligible') and r['state'] == 'confirmed']
+                    and r.get('comparison_eligible') and r['state'] == 'confirmed'
+                    and gt7_context.compatible(current or {}, r)]
         doc.update(revision=self._revision, current=current, session_id=sid,
                    instruments=self._values, receipt=self._receipt,
                    sessions=list(self._sessions.values()), laps=list(self._summaries.values()),
