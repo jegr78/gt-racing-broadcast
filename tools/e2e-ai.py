@@ -36,6 +36,7 @@ async def verify(page,fixture,port):
     async def preview():
         await page.locator('#ai-preview-button').click()
         await page.wait_for_function('() => !document.getElementById("ai-start").disabled')
+        return None
     await page.locator('#ai-model').fill('alternate');await preview()
     await page.evaluate('() => RacecastAI.settings()')
     assert await page.locator('#ai-model').input_value()=='alternate'
@@ -113,6 +114,7 @@ async def verify(page,fixture,port):
     assert fixture.control().history()['runs']
     assert not errors,errors
     print('PASS browser: explicit preview/start, changed/delayed inputs, text-only report/export/lap, validation failure, cancellation, profile isolation')
+    return None  # The repository distinguishes coroutine results from synchronous procedures.
 
 
 async def main():
@@ -126,6 +128,7 @@ async def main():
                 await verify(page,fixture,port)
                 await browser.close()
         finally:server.shutdown();server.server_close()
+    return None
 
 
 if __name__=='__main__':asyncio.run(main())

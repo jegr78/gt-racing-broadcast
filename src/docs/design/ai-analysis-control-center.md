@@ -62,3 +62,9 @@ selection profile binding, positive reference IDs, selected-only shift replay,
 stale enrichment, backend request-profile binding, delayed preview generation,
 settings refresh invalidation, response-profile binding and comparison identity.
 Each failed its intended assertion before the committed file was restored.
+
+The final maintainer verifier repeated the complete native Linux Codex pipeline
+on the UI implementation with model gpt-6.1-sol: validated report/history/exports,
+unavailable-model failure and cancellation all passed. A separate direct restricted,
+tools-disabled Linux Claude invocation independently returned "OAuth session expired
+and could not be refreshed", with zero API duration and zero token usage.
