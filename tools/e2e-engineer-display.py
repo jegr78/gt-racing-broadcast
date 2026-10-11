@@ -71,7 +71,7 @@ async def main():
                     ('state.pair.a.larger_sectors.reviewed=false', 'state.pair.a.larger_sectors.reviewed=true'),
                     ('state.pair.a.larger_sectors.variant_id="other"', 'state.pair.a.larger_sectors.variant_id="three"'),
                     ('state.pair.a.larger_sectors.bounds_m=[0,301,700,1003]', 'state.pair.a.larger_sectors.bounds_m=[0,300,700,1003]'),
-                    ('state.pair.a.larger_sectors.bounds_m=[0,300,1003]', 'state.pair.a.larger_sectors.bounds_m=[0,300,700,1003]'),
+                    ('state.pair.a.larger_sectors.bounds_m=[0,300,700,1003,1100]', 'state.pair.a.larger_sectors.bounds_m=[0,300,700,1003]'),
                     ('state.pair.compatible=false', 'state.pair.compatible=true'),
                     ('state.pair.a.larger_sectors.times_s=[null,6,6]', 'state.pair.a.larger_sectors.times_s=[4,6,6]')]:
                     await page.evaluate('() => {'+mutation+';render();}')

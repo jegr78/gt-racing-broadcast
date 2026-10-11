@@ -85,7 +85,7 @@ function graph(id,series,key,height,length=1){const el=$(id);el.replaceChildren(
  const X=d=>52+(d-min)/(max-min)*650,Y=v=>height-30-(v-lo)/(hi-lo)*(height-55);el.append(svg('path',{d:`M52 20V${height-30}H702`,stroke:'#566377',fill:'none'}));
  if(key==='delta')el.append(svg('path',{d:`M52 ${Y(0)}H702`,stroke:'#8995a5','stroke-dasharray':'4 4','data-zero':'true',fill:'none'}));
  for(let i=0;i<4;i++){const d=min+(max-min)*i/3;el.append(svg('text',{x:X(d),y:height-9,'text-anchor':i===3?'end':'middle'},num(d,0)+' m'));}
- el.append(svg('text',{x:8,y:24},num(hi,key==='delta'?3:1)+' '+unit),svg('text',{x:8,y:height-30},num(lo,key==='delta'?3:1)+' '+unit));
+ el.append(svg('text',{x:46,y:24,'text-anchor':'end'},num(hi,key==='delta'?3:1)),svg('text',{x:46,y:height-30,'text-anchor':'end'},num(lo,key==='delta'?3:1)));if(unit)el.append(svg('text',{x:702,y:16,'text-anchor':'end'},unit));
  for(const s of series){let path='',pen=false;for(const p of s.rows){if(p.d<min||p.d>max||!Number.isFinite(p[key])){pen=false;continue;}path+=(pen?'L':'M')+X(p.d).toFixed(1)+' '+Y(p[key]).toFixed(1);pen=true;}el.append(svg('path',{d:path,stroke:s.color,fill:'none','stroke-width':2}));}
 }
 function cellValue(cell,value,future=false,empty='Unavailable',difference=false){cell.textContent=Number.isFinite(value)?num(value,3):future?'Not yet driven':empty;cell.classList.toggle('not-driven',!Number.isFinite(value)&&future);if(difference&&Number.isFinite(value))cell.classList.toggle(value<0?'gain':'loss',value!==0);}
