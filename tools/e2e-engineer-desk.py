@@ -119,7 +119,9 @@ async def main():
                 await page.wait_for_function('(generation) => EngineerDesk.state.generation === generation',arg=fixture.live.generation)
                 assert await page.evaluate('() => EngineerDesk.state.zoom') is None
                 assert 'new live generation' in await page.locator('#notice').inner_text()
-                await page.wait_for_function('() => EngineerDesk.state.detail?.state === "confirmed"')
+                chosen=fixture.live.snapshot()['laps'][1]['id']
+                await page.locator('#lap-b').select_option(chosen)
+                await page.wait_for_function('(id) => EngineerDesk.state.detail?.id === id',arg=chosen)
                 # Hold an already prepared protected response while access is revoked.
                 captured=asyncio.Event();release=asyncio.Event()
                 async def delayed(route):
@@ -143,6 +145,22 @@ async def main():
                 await page.wait_for_function('() => EngineerDesk.state.stopped')
                 assert await page.locator('#protected').evaluate('(el) => el.hidden'), 'revocation left protected view visible'
                 assert 'disabled' in await page.locator('#status').inner_text()
+                fixture.access().update(enabled=True,expected=5);fixture.feed_live()
+                await page.goto(f'http://127.0.0.1:{server.server_port}/console/race-engineer?t={token}')
+                await page.wait_for_function('() => EngineerDesk.state.pair?.state === "ready"')
+                source_captured=asyncio.Event();source_release=asyncio.Event()
+                async def held_source(route):
+                    response=await route.fetch();data=await response.json();source_captured.set();await source_release.wait()
+                    try: await route.fulfill(json=data)
+                    except Exception: pass  # Access loss already aborted this response.
+                await page.route('**/race-engineer/lap?*',held_source)
+                await asyncio.wait_for(source_captured.wait(),timeout=5)
+                fixture.console_access.available=False
+                await page.wait_for_function('() => document.getElementById("status").textContent.includes("unavailable")')
+                assert await page.evaluate('() => EngineerDesk.state.stopped && document.getElementById("protected").hidden'), 'source authorization loss retained protected data'
+                source_release.set();await page.unroute_all(behavior='wait')
+                assert await page.evaluate('() => EngineerDesk.state.snapshot === null && !EngineerDesk.state.detail')
+                assert not await page.locator('#chart path').count()
                 assert not errors,errors
                 await browser.close()
         finally:

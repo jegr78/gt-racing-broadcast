@@ -40,7 +40,7 @@ async function request(route,query={},method='GET',body=null){
  const epoch=state.epoch, controller=new AbortController();state.controllers.add(controller);const timeout=setTimeout(()=>controller.abort(),4000);
  try{const qs=new URLSearchParams(query),response=await fetch(RC_API(route)+(qs.size?'?'+qs:''),{method,signal:controller.signal,cache:'no-store',headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):null});
   const data=await response.json();if(epoch!==state.epoch||state.stopped)throw new AccessLost('Access state changed');
-  if(response.status===401||response.status===403){stop(data.error?.message||'Engineer access was removed');throw new AccessLost('Access was removed');}
+  if(response.status===401||response.status===403||response.status===503&&data.error?.code==='source_unavailable'){stop(data.error?.message||'Engineer access was removed');throw new AccessLost('Access was removed');}
   if(response.status===410)throw new ReferenceLost(data.error?.message||'Shared reference unavailable');
   if(response.status===503&&['source_unavailable','analysis_unavailable'].includes(data.error?.code))throw new SourceUnavailable(data.error.message);
   if(!response.ok)throw new Error(data.error?.message||'Analysis temporarily unavailable');return data;
@@ -82,7 +82,7 @@ function graph(id,series,key,height){const el=$(id);el.replaceChildren();const r
  for(const s of series){let path='',pen=false;for(const p of s.rows){if(p.d<min||p.d>max||typeof p[key]!=='number'){pen=false;continue;}path+=(pen?'L':'M')+X(p.d).toFixed(1)+' '+Y(p[key]).toFixed(1);pen=true;}el.append(svg('path',{d:path,stroke:s.color,fill:'none','stroke-width':2}));}
 }
 function render(){const B=state.detail,A=state.pair?.a,pair=state.pair;clearPlots();state.detail=B;state.pair=pair;if(!B)return;
- const trace=B.trace||[],length=Math.max(1,B.length_m||trace.at(-1)?.d||0,A?.length_m||0);if(!state.zoom){$('zoom-from').value=0;$('zoom-to').value=Math.round(length);}
+ const trace=B.trace||[],length=Math.max(1,B.length_m||trace.at(-1)?.d||0,A?.length_m||0);if(!state.zoom&&!['zoom-from','zoom-to'].includes(document.activeElement?.id)){$('zoom-from').value=0;$('zoom-to').value=Math.round(length);}
  graph('chart',[{rows:A?.trace||[],color:'#8ab4ff'},{rows:trace,color:'#ffd08a'}],$('channel').value,300);
  graph('delta-chart',[{rows:pair?.delta||[],color:'#a8dfbd'}],'delta',170);
  const map=$('map'),points=(A?.trace||[]).concat(trace).filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.z));

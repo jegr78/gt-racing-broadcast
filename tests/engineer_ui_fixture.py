@@ -86,10 +86,11 @@ class Fixture(Base):
             self.feed_live = lambda: (self.live.refresh_enabled(), feed(self.live, self.live_path))
             telemetry = SimpleNamespace(engineer=self.live)
         self.telemetry = telemetry
+        self.console_access = self.access()
         handler=m.make_handler(relay,console_secret=gate.SECRET,crew_source=self.crew,setup_ctl=control,
             chat_store=m.ChatStore(str(self.root/'chat.json')),
             console_page_path=str(gate.ROOT+'/src/console/console.html'),
-            telemetry_store=telemetry, engineer_access=self.access(),engineer_page_path=str(Path(gate.ROOT)/'src/console/race-engineer.html'))
+            telemetry_store=telemetry, engineer_access=self.console_access,engineer_page_path=str(Path(gate.ROOT)/'src/console/race-engineer.html'))
         server=m.ThreadingHTTPServer(('127.0.0.1',0),handler)
         self.console_server=server
         threading.Thread(target=server.serve_forever,daemon=True).start()
