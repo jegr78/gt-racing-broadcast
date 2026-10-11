@@ -248,26 +248,37 @@ def t_setup_thread_failure_cleans_copies_and_started_analysis_workers():
 
     with tempfile.TemporaryDirectory() as d:
         source = Path(write_circle_recording(d, n=100))
-        script = """import sys, tempfile, threading
+        script = """import sys, tempfile, threading, time, faulthandler
+faulthandler.dump_traceback_later(3, repeat=True)
+def phase(name):
+    print(name, time.monotonic(), flush=True)
+phase("START")
 from pathlib import Path
 sys.path.insert(0, str(Path.cwd()/'tests'))
+phase("IMPORT_BEGIN")
 import test_engineer_replay as t
+phase("IMPORT_DONE")
 from unittest.mock import patch
 tempfile.tempdir = sys.argv[2]
 original = threading.Thread.start
 def fail_http(thread):
     if getattr(thread._target, '__name__', '') == 'serve_forever':
+        phase("FAULT_INJECTED")
         raise RuntimeError('simulated HTTP worker startup failure')
     return original(thread)
 session = t.replay.ReplaySession(sys.argv[1])
 with patch.object(threading.Thread, 'start', fail_http):
+    phase("ENTER_BEGIN")
     try:
         with session:
             raise AssertionError('HTTP startup failure was ignored')
     except RuntimeError as exc:
+        phase("CLEANUP_RETURNED")
         assert 'simulated HTTP worker' in str(exc)
 assert not session.runtime.exists(), 'setup failure leaked private copies'
 assert not session.store._worker.is_alive() and not session.store._reader.is_alive()
+faulthandler.cancel_dump_traceback_later()
+phase("DONE")
 """
         try:
             result = subprocess.run(
@@ -279,7 +290,7 @@ assert not session.store._worker.is_alive() and not session.store._reader.is_ali
                 timeout=10,
             )
         except subprocess.TimeoutExpired as exc:
-            raise AssertionError("setup failure stranded replay resources") from exc
+            raise AssertionError("setup failure child exceeded its startup/cleanup budget\n" + repr(exc.stdout) + "\n" + repr(exc.stderr)) from exc
         assert result.returncode == 0, result.stdout + result.stderr
 
 
