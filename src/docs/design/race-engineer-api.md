@@ -70,3 +70,11 @@ Recording-backed live recovery restores both opaque IDs and the private live
 source/session cohort used by the shared unknown-track comparison rule. Ordinary
 archive reads keep their own source/session identity; recovery cannot turn an
 authorized archive into the current live source.
+
+The final session-identity audit adds two regression scenarios: a recording's
+manual sector choice after live collection reached another session, and restored
+unknown-track detail that must stay in its original live comparison cohort. Five
+assurances were individually falsified and restored: recorded selection, original
+live counter, recovered live source/session and isolation from ordinary archive
+rows. The correction changes private annotation identity only, without extending
+public response fields, authorization or producer operations.
