@@ -48,3 +48,13 @@ one roster snapshot to avoid mixing capabilities from different revisions.
 Limits: 128 explicit grants, a 128 KiB access document and a producer inventory
 bounded to 4096 recording entries. Console readers inspect only granted sources;
 they do not run the producer archive inventory or build recording indexes.
+
+Twenty assurances were falsified individually from the committed implementation:
+role requirement, opt-in, source availability for reads and writes, enablement
+type, optimistic revision, reference ID format, recording-root boundary, source
+identity, source signatures before parsing and after metadata checks, grant/archive/
+document bounds, producer profile binding, successful empty roster, canonical Crew
+API, one role snapshot, newest settings responses and response-profile binding.
+Every mutation failed its intended assertion and was restored before final gates.
+All 20 ordinary visual surfaces were clean; the Engineer browser workflow runs in
+visual CI. Changed screenshots use synthetic data and the dev-build UI.
