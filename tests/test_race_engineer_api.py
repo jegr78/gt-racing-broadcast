@@ -276,6 +276,24 @@ def t_recorded_sector_selection_uses_recording_session_and_keeps_live_identity()
             assert annotated['larger_sectors'] == expected['larger_sectors']
 
 
+def t_unknown_track_recovery_keeps_the_live_pool_without_relabeling_archive_rows():
+    with tempfile.TemporaryDirectory() as d:
+        path = write_circle_recording(d)
+        with live.Store(lambda: True,tracks=FakeTracks(known=False),cars=FakeCars(),
+                        details_max=1,queue_max=4096) as store:
+            feed(store,path); before = store.snapshot()
+            old = next(r for r in before['laps'] if r['lap'] == 2)
+            store.bind_recording(path)
+            restored = wait_ready(lambda:store.detail(old['id']))['lap']
+            current = store.snapshot()['current']
+            assert restored['session_id'] == current['session_id']
+            assert gt7_comparison.compare(restored,current)['compatible'], 'recovery changed the unknown-track live cohort'
+            assert restored['rec'] == store.generation and restored['session'] == old['session']
+            archived = store.recording_detail(gt7_context.source_identity(path),path,1,2)['lap']
+            assert archived['rec'] == gt7_context.source_identity(path) and archived['session'] == 1
+            assert not gt7_comparison.compare(archived,current)['compatible'], 'unknown archive sources must not enter the live pool'
+
+
 if __name__ == '__main__':
     for name, fn in sorted(list(globals().items())):
         if name.startswith('t_') and callable(fn): fn(); print('PASS', name)

@@ -10,6 +10,7 @@ Requirements and evidence for #825, within #822.
 | Thin current values and version-aware history | Live publication | Current trace omitted, unchanged histories omitted | Context/session changes advance history revision | Concurrent readers |
 | Shared numerical and context rules | Shared comparison helper, lap/context/definition modules | Offline trace, sectors, delta and eligibility equality | Unknown track, compound/strategy conflicts, provisional future | Synthetic packets and recording |
 | Shared bounded asynchronous preparation | One comparison worker, existing recovery worker | Identical clients reuse a prepared pair | Slow preparation cannot block HTTP or ingestion, bounded queue/cache | Barrier-controlled preparation |
+| Restored live detail retains its comparison cohort | Shared recovery identity overlay | Unknown-track recovered detail compares within its original live session | Raw archive rows retain their separate source/session identity | Real bounded eviction and recording recovery |
 | Recorded sector selection with independent live identity | Worker definition decoration | Recording session selection matches offline analysis | Different live/recorded counters must not choose a default variant | Annotated live row retains its opaque live IDs |
 | Current context and reviewed definitions | Live/recovery worker annotation | Context revisions and read-only notes | Invalid context and definition remain unconfirmed | Producer context edits |
 
@@ -64,3 +65,8 @@ live collection when a recorder starts later or collection is toggled. Definitio
 annotation maps to that recording counter and restores the live counter afterward;
 opaque live session/lap identities do not change. The regression fixture compares
 the selected variant and larger sectors with the ordinary recording analysis.
+
+Recording-backed live recovery restores both opaque IDs and the private live
+source/session cohort used by the shared unknown-track comparison rule. Ordinary
+archive reads keep their own source/session identity; recovery cannot turn an
+authorized archive into the current live source.
