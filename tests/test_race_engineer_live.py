@@ -236,6 +236,7 @@ def t_late_recovery_target_is_not_declared_exhausted():
             result = original(*args)
             reached.set()
             assert release.wait(5)
+            result['requested'] = set(args[4])  # EOF barrier, before the replay seals its targets.
             return result
         live._bounded_recording = held
         try:

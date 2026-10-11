@@ -25,7 +25,7 @@ ENTRY_BYTES_MAX = 1024 * 1024
 RECOVERY_MAX = 8
 STALE_S = 5.0
 SUMMARY_FIELDS = frozenset(('_context_source', 'id', 'session_id', 'version', 'context_revision',
-    'recording_session', 'session', 'lap', 'state', 'detail_state', 'gt7_time_s',
+    '_start_wall', '_end_wall', 'recording_session', 'session', 'lap', 'state', 'detail_state', 'gt7_time_s',
     'time_s', 'relay_time_s', 'status', 'reason', 'car_id', 'car', 'track_id', 'track',
     'layout', 'distance_m', 'length_m', 'fuel_used_l', 'top_speed_kmh', 'lap_role', 'after_service',
     'capture_complete', 'trace_complete', 'time_valid', 'data_quality', 'reasons',
@@ -80,6 +80,7 @@ def _bounded_recording(path, source, tracks, cars, targets):
             found = gt7_recording.session_tracks([raw], tracks).get(raw['session'])
             row = gt7_laps._indexed_lap(source, raw, samples, tyres, replay.first, tracks, cars, found)
             row = dict(gt7_context.annotate(context['data'], row), context_revision=context['revision'])
+            row.update(_start_wall=raw['start'], _end_wall=raw['end'])
             key = (row['session'], row['lap'])
             summaries[key] = _summary(row)
             while len(summaries) > SUMMARIES_MAX:
@@ -88,7 +89,10 @@ def _bounded_recording(path, source, tracks, cars, targets):
             if size <= ENTRY_BYTES_MAX:
                 details[key], sizes[key] = row, size
             while len(details) > DETAILS_MAX or sum(sizes.values()) > DETAIL_BYTES_MAX:
-                old = next((k for k in details if k not in targets), next(iter(details)))
+                def wanted(k):
+                    return any(k[1] == t[1] and (k[0] == t[0] if t[2] is None
+                               else abs(details[k]['_start_wall'] - t[2]) <= .2) for t in targets)
+                old = next((k for k in details if not wanted(k)), next(iter(details)))
                 details.pop(old)
                 sizes.pop(old)
     for wall, _kind, plain in gt7_recording.Recording(path).packets():
@@ -134,6 +138,7 @@ class Store:
         self._bindings = {}
         self._session_offset = 0
         self._recording_started = None
+        self._mapping_known = True
         self._context_key = None
         self._recovery, self._tasks = collections.OrderedDict(), {}
         self._recovery_sizes = {}
@@ -179,6 +184,11 @@ class Store:
             self._sessions.clear()
             self._sizes.clear()
             self._bindings.clear()
+            self._session_offset = 0
+            self._mapping_known = self._recording is None
+            self._context_key = None
+            self._context = {'notes': [], 'sessions': {}}
+            self._context_revision = 0
             self._receipt = None
             self._values = {}
             self._revision += 1
@@ -224,6 +234,9 @@ class Store:
     def _consume(self, item):
         _epoch, pkt, wall, mono = item
         replay = self._replay
+        if replay.first is None and self._recording and self._recording_started is not None:
+            self._mapping_known = abs(wall - self._recording_started) <= .2
+            self._session_offset = 0
         replay._feed(wall, pkt)
         self._receipt = (mono, wall, 'loading' if pkt.loading else 'paused' if pkt.paused
                          else 'menu' if not pkt.on_track else 'live')
@@ -261,7 +274,13 @@ class Store:
             if row['gt7_time_s'] is None:
                 row.update(time_s=None, pace_eligible=False, time_valid=False)
             row.update(state='confirmed' if row['gt7_time_s'] is not None else 'unconfirmed')
-            self._retain(self._identify(row, lap))
+            row = self._identify(row, lap)
+            if not self._mapping_known and self._recording and row['capture_complete']:
+                path, source = self._recording
+                if not os.path.isfile(path) and path.endswith('.part'):
+                    path = path[:-5]
+                self.recording_detail(source, path, row['recording_session'], row['lap'], identity=row)
+            self._retain(row)
             finished = True
         return finished
 
@@ -292,6 +311,7 @@ class Store:
         return dict(row, id=lid, session_id=sid, version=1,
                     context_revision=self._context_revision,
                     recording_session=engine_session - self._session_offset,
+                    _start_wall=raw['start'], _end_wall=raw['end'],
                     _context_source=self._recording[1] if self._recording else 'prepared')
 
     def _annotate(self, row):
@@ -299,9 +319,13 @@ class Store:
         lookup = {(r.get('recording_session', r['session']), r['lap']): r
                   for r in self._summaries.values() if r.get('_context_source') == row.get('_context_source')}
         lookup[(measured['session'], measured['lap'])] = measured
-        return dict(gt7_context.annotate(self._context, measured, lap_lookup=lookup),
+        data = self._context if self._mapping_known or self._recording is None else {}
+        result = dict(gt7_context.annotate(data, measured, lap_lookup=lookup),
                     session=row['session'],
-                    context_revision=self._context_revision)
+                    context_revision=self._context_revision if data is self._context else None)
+        if data is not self._context:
+            result['context_warnings'].append('Recording session mapping unavailable')
+        return result
 
     def _retain(self, row):
         row = self._annotate(row)
@@ -407,6 +431,8 @@ class Store:
             self._session_offset = self._replay.eng.session - 1
             packet = next(gt7_recording.Recording(path).packets(), None)
             self._recording_started = packet[0] if packet else None
+            self._mapping_known = (self._replay.first is None or self._recording_started is not None
+                                   and self._recording_started >= self._replay.first)
             self._context_key = None
         self._recording = (os.path.realpath(path), source)
         if self._recording_started is not None and self._replay.first is not None:
@@ -434,11 +460,15 @@ class Store:
             stamp = _record_stamp(source, path)
         except (OSError, ValueError, gt7_recording.RecordingError):
             return {'state': 'unavailable', 'lap': None}
+        start = identity.get('_start_wall') if identity else None
+        target = (session, lap, start)
         with self._lock:
             cached = self._recovery.get(stamp)
             if cached is not None:
-                row = cached['details'].get((session, lap))
-                if row is None and (session, lap) in cached['requested']:
+                row = (next((r for r in cached['details'].values() if r['lap'] == lap
+                             and abs(r['_start_wall'] - start) <= .2), None)
+                       if start is not None else cached['details'].get((session, lap)))
+                if row is None and target in cached['requested']:
                     return {'state': 'unavailable', 'lap': None}
                 if row is not None:
                     row = copy.deepcopy(row)
@@ -448,11 +478,11 @@ class Store:
             if stamp not in self._tasks:
                 try:
                     self._recovery_queue.put_nowait((stamp, path))
-                    self._tasks[stamp] = {(session, lap)}
+                    self._tasks[stamp] = {target}
                 except queue.Full:
                     return {'state': 'unavailable', 'lap': None}
             elif len(self._tasks[stamp]) < DETAILS_MAX:
-                self._tasks[stamp].add((session, lap))
+                self._tasks[stamp].add(target)
             else:
                 return {'state': 'unavailable', 'lap': None}
         return {'state': 'pending', 'lap': None}
@@ -510,6 +540,23 @@ class Store:
             if path and not os.path.isfile(path) and path.endswith('.part'):
                 path = path[:-5]
             doc = gt7_context.Store.for_recording(path).read() if path else self._context_source()
+            expected = self._recording[1] if self._recording else 'prepared'
+            if doc['source_id'] != expected:
+                raise ValueError('Context source identity changed')
+            if not self._mapping_known:
+                with self._lock:
+                    recovered = [cache for stamp, cache in self._recovery.items() if stamp[0] == expected]
+                for current in reversed(list(self._summaries.values())):
+                    match = next((row for cache in recovered for row in cache['details'].values()
+                                  if row['lap'] == current['lap']
+                                  and abs(row['_start_wall'] - current['_start_wall']) <= .2), None)
+                    if match is not None:
+                        self._session_offset = current['session'] - match['session']
+                        self._mapping_known = True
+                        self._context_key = None
+                        self._details = collections.OrderedDict((lid, dict(row, recording_session=row['session'] - self._session_offset) if row.get('_context_source') == expected else row) for lid, row in self._details.items())
+                        self._summaries = collections.OrderedDict((lid, dict(row, recording_session=row['session'] - self._session_offset) if row.get('_context_source') == expected else row) for lid, row in self._summaries.items())
+                        break
             key = (doc['source_id'], doc['revision'])
             self._context_error = None
             if key != self._context_key:
