@@ -169,6 +169,12 @@ mode can't be used. Edit the channel/port list here and start/stop the set.
 Tailscale and Discord. **Tools** does the same for the command-line tools
 (`yt-dlp`, `streamlink`, `ffmpeg`, `deno`), with **Install all** / **Update all**.
 
+OBS launch waits up to 30 seconds for an existing OBS process to exit. If it is
+still running, or its status cannot be checked, Racecast refuses to start another
+instance. OBS quit also waits for confirmed process exit and reports a timeout
+if shutdown is still in progress. It never forces OBS to terminate. The same
+launch check applies to `racecast event start`.
+
 ![Control Center: Tools](images/cc-tools.png)
 
 > **CLI alternative:** `racecast install-apps`, `racecast install-tools` (add `--update` to

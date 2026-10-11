@@ -6400,11 +6400,14 @@ def _launch(ev, popen, app="obs"):
     style injects the same way (preflight.tool_version(run=…))."""
     import install_apps
     saved = install_apps.app_present
+    saved_wait = m._wait_for_obs_exit
     try:
+        m._wait_for_obs_exit = lambda: True
         install_apps.app_present = lambda a, platform: True
         return m._event_launch(ev, app, popen=popen, sleep=lambda _s: None)
     finally:
         install_apps.app_present = saved
+        m._wait_for_obs_exit = saved_wait
 
 
 def t_event_launch_strips_the_pyinstaller_library_path():
@@ -6474,10 +6477,13 @@ def t_gui_spawn_keeps_quiet_about_a_healthy_app():
     out = io.StringIO()
     saved_stdout = sys.stdout
     sys.stdout = out
+    saved_wait = m._wait_for_obs_exit
+    m._wait_for_obs_exit = lambda: True
     try:
         note = m._gui_spawn(["/usr/bin/obs"], None, None, "obs",
                             popen=lambda argv, **kw: _FakeProc(), sleep=lambda _s: None)
     finally:
+        m._wait_for_obs_exit = saved_wait
         sys.stdout = saved_stdout
     assert note == ""
     assert out.getvalue() == "", out.getvalue()

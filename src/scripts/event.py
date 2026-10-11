@@ -67,6 +67,48 @@ def app_running(app, platform=None):
     return False
 
 
+def app_running_checked(app, platform=None, timeout=5, run=None):
+    """Probe process presence; an unknown status raises instead of permitting launch."""
+    platform = sys.platform if platform is None else platform
+    run = subprocess.run if run is None else run
+    for name in _names(app, platform):
+        try:
+            out = run(probe_command(name, platform), capture_output=True,
+                      text=True, errors="replace", timeout=timeout,
+                      **services.no_window_kwargs())
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise OSError(f"cannot confirm {app} process status: {exc}") from exc
+        allowed = (0,) if platform.startswith("win") else (0, 1)
+        if out.returncode not in allowed or (platform.startswith("win") and not out.stdout.strip()):
+            raise OSError(f"cannot confirm {app} process status (probe exit {out.returncode})")
+        if parse_probe(platform, out.returncode, out.stdout, name):
+            return True
+    return False
+
+
+def wait_for_app_exit(app, timeout=30, interval=0.25, clock=None, sleep=None,
+                      probe=None, progress=None):
+    """Return confirmed absence, or False at the deadline. Probe errors propagate."""
+    clock = time.monotonic if clock is None else clock
+    sleep = time.sleep if sleep is None else sleep
+    probe = (lambda budget: app_running_checked(app, timeout=budget)) if probe is None else probe
+    deadline = clock() + timeout
+    notified = False
+    while True:
+        remaining = deadline - clock()
+        if remaining <= 0:
+            return False
+        if not probe(min(5, remaining)):
+            return clock() <= deadline
+        if progress is not None and not notified:
+            progress()
+            notified = True
+        remaining = deadline - clock()
+        if remaining <= 0:
+            return False
+        sleep(min(interval, remaining))
+
+
 def wait_until_up(probes, timeout=60, interval=5, clock=time.monotonic,
                   sleep=time.sleep):
     """Poll `probes` ({name: callable -> bool}) until all pass or `timeout`
