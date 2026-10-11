@@ -2591,9 +2591,98 @@ tmState.pool = {laps: [l1, l2, nc]};
 tmFillPickers(l2);
 console.log(one + '|' + $('tm-a').options.map(o => o.textContent).join(','));""")
     if out is not None:
-        assert out.strip() == ("Lap 1 · 1:20.000|Lap 1 · 1:20.000 · R,"
-                               "Lap 3 · 1:21.000 · S · not counted"), \
-            f"lap and time first, the recording only when the pool spans several: {out!r}"
+        assert out.strip() == ("Lap 1 · 1:20.000|Lap 1 · 1:20.000,"
+                               "Lap 3 · 1:21.000 · not counted"), \
+            f"lap and time stay inside recording groups: {out!r}"
+
+
+def t_saved_comparison_respects_newer_selection_during_fetch_and_reload():
+    with open(os.path.join(ROOT,'src','ui','ai-analysis.js'),encoding='utf-8') as file:
+        script=file.read()
+    start=script.index('async function openComparison(')
+    function=script[start:script.index('\nfunction reset(',start)]
+    out=_run_js(function+"""
+let tmState,tmSeq,release,mode,loads;
+const reference={rec:'S',session:1,lap:2,recording_id:'identity'};
+const tmKey=l=>[l.rec,l.session,l.lap].join('|');
+const tmOpenReference=async()=>true,tmErr=()=>{},tmFillPickers=()=>{},tmRenderLaps=()=>{};
+const tmLoadPair=async()=>{loads++;};
+const tmFetchLap=async()=>mode==='fetch'?new Promise(resolve=>release=resolve):{lap:{recording_id:'identity'}};
+const tmSelectB=async()=>{tmSeq.b++;tmState.pool={laps:[reference]};if(mode==='reload')await new Promise(resolve=>release=resolve);};
+const tick=async()=>{for(let i=0;i<10;i++)await new Promise(resolve=>setTimeout(resolve,0));};
+(async()=>{
+ for(mode of ['fetch','reload']){
+  loads=0;tmSeq={b:1};tmState={b:'R|1|3',profile:'p',lapB:{rec:'R',session:1,lap:3},
+      recs:[{rec:'R'},{rec:'S'}],included:new Set(['R']),pool:{laps:[]}};
+  const pending=openComparison({telemetry:{}},'p',reference);await tick();
+  tmSeq.b++;release({lap:{recording_id:'identity'}});await pending;
+  console.log(JSON.stringify({mode,loads,a:tmState.a||null,included:tmState.included.size}));
+ }
+})();
+""")
+    if out is not None:
+        results=[json.loads(line) for line in out.splitlines()]
+        assert results==[{'mode':'fetch','loads':0,'a':None,'included':1},
+                         {'mode':'reload','loads':0,'a':None,'included':2}],out
+
+
+def t_recording_subset_keeps_the_selected_track_and_car():
+    out=_tm_node("""
+const anchor=lap('S',2,79,1),same=lap('R',2,78,1),otherCar=lap('R',3,77,2);
+const otherTrack={...lap('R',4,76,1),track_id:'t2'};
+tmState.anchor=anchor;tmState.b=tmKey(anchor);tmState.pool={laps:[anchor]};
+tmState.recLaps=[same,otherCar,otherTrack];tmState.included=new Set(['R']);
+let chosen;tmSelectB=async lap=>chosen=tmKey(lap);
+await tmReloadRecordingPool();console.log(chosen);
+""")
+    if out is not None:
+        assert out.strip()=='R|1|2',out
+
+
+def t_recording_subset_discards_a_previous_included_recording_load():
+    out=_tm_node("""
+const r=lap('R',2,79,1),s=lap('S',2,78,1);
+tmState.rec='R';tmState.recs=[{rec:'R'},{rec:'S'}];tmState.recLaps=[r];
+tmState.b=tmKey(r);tmState.anchor=r;tmState.pool={laps:[r]};tmState.included=new Set(['S']);
+let release;tmIndexed=async()=>new Promise(resolve=>release=resolve);
+const pending=tmReloadRecordingPool();await tick();
+tmSeq.b++;tmState.included=new Set(['R']);tmState.b=tmKey(r);tmState.pool={laps:[r]};
+release(recLaps('S',[s]));await pending;
+console.log(JSON.stringify({b:tmState.b,count:tmState.pool.laps.length,included:[...tmState.included]}));
+""")
+    if out is not None:
+        assert json.loads(out)=={'b':'R|1|2','count':1,'included':['R']},out
+
+
+def t_telemetry_recording_selection_has_no_implicit_other_reference():
+    out = _tm_node("""
+const b=lap('R',2,79,1);tmState.rec='R';tmState.included=new Set(['R']);
+tmState.recs=[{rec:'R'},{rec:'S'}];tmState.pool={laps:[b]};
+tmState.a=tmDefaultA(tmKey(b));tmState.b=tmKey(b);tmFillPickers(b);
+console.log(JSON.stringify({a:tmState.a,text:$('tm-a').textContent,groups:$('tm-b').kids.map(k=>k.title)}));
+tmReset();console.log($('tm-recording-options').textContent);
+""")
+    if out is not None:
+        result,reset=out.split('\n',1)
+        assert json.loads(result)=={'a':None,'text':'no other lap to compare','groups':['R']},out
+        assert not reset.strip(), 'profile reset retained recording choices'
+
+
+def t_telemetry_recording_selection_discards_a_previous_pool_response():
+    out = _tm_node("""
+const l1=lap('R',1,80,1),l2=lap('R',2,79,1);
+tmState.rec='R';tmState.recLaps=[l1,l2];tmState.included=new Set(['R']);
+tmLoadPair=async()=>{};
+const old=tmSelectB(l2);await tick();
+tmState.included=new Set();
+const current=tmSelectB(l2);await tick();
+answer('recs=&',pool([]));await current;
+answer('recs=R&',pool([l1,l2]));await tick();
+console.log(JSON.stringify({count:tmState.pool?.laps.length ?? null,b:tmState.b,a:tmState.a,
+    disabled:$('tm-a').disabled && $('tm-b').disabled}));
+""")
+    if out is not None:
+        assert json.loads(out)=={'count':0,'b':None,'a':None,'disabled':True}, out
 
 
 def t_telemetry_charts_label_the_value_range_and_the_final_delta():
@@ -2802,19 +2891,19 @@ def t_telemetry_recording_rows_mark_open_files_and_unindexed_laps():
     tm = _tm_script(_cc_page())
     fn = tm[tm.index("function tmRenderRecs()"):tm.index("async function tmSelectRec(")]
     assert "r.recording ? ' (recording)'" in fn and "r.partial ? ' (unclosed)'" in fn
-    assert "r.laps == null ? ''" in fn, "the list has no lap count before the first index"
+    assert 'tmRecordingLabel(r)' in fn
 
 
 _TM_HARNESS = r"""
 class El {
   constructor(tag) { this.tagName = tag; this.kids = []; this.cells = []; this._t = '';
                      this.hidden = false; this.disabled = false; this.className = '';
-                     this.value = ''; this.title = ''; this.selected = false; }
+                     this.value = ''; this.title = ''; this.selected = false; this.style = {}; }
   get textContent() { return this._t + this.kids.map(k => k.textContent).join(''); }
   set textContent(v) { this._t = String(v); this.kids = []; this.cells = []; }
   appendChild(c) { this.kids.push(c); return c; }
   append(...c) { c.forEach(x => this.appendChild(x)); }
-  get options() { return this.kids.filter(k => k.tagName === 'option'); }
+  get options() { return this.kids.flatMap(k => k.tagName === 'option' ? [k] : k.tagName === 'optgroup' ? k.options : []); }
   createTHead() { return this.appendChild(new El('sec')); }
   createTBody() { return this.appendChild(new El('sec')); }
   createTFoot() { return this.appendChild(new El('sec')); }
@@ -2827,7 +2916,8 @@ class El {
 const window = {addEventListener() {}};
 const els = {};
 const $ = id => els[id] || (els[id] = new El(id));
-const document = {createElement: t => new El(t), createElementNS: (n, t) => new El(t)};
+const document = {createElement: t => new El(t), createElementNS: (n, t) => new El(t),
+  createTextNode: text => {const e=new El('text');e.textContent=text;return e;}};
 const pending = [];
 const calls = [];
 globalThis.fetch = url => new Promise(res => { calls.push(url); pending.push({url, res}); });
@@ -3639,7 +3729,7 @@ answer('/recordings', {ok: true, recordings: [
 await tick();
 console.log($('tm-recs').textContent);""")
     if out is not None:
-        assert "7 lap segments" in out and "not indexed yet" not in out, \
+        assert "7 laps" in out and "not indexed yet" not in out, \
             f"the list shows what the job indexed: {out!r}"
 
 

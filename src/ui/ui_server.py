@@ -740,6 +740,8 @@ def make_handler(ctx):
                 try:
                     if path.endswith("/laps"):
                         options = {'build': False}
+                        if 'recs' in arg:
+                            options['recs'] = arg['recs']
                         if 'lap' in arg or 'compare_all' in arg:
                             options.update(lap=arg.get('lap'), compare_all=arg.get('compare_all', False))
                         result = ctx["telemetry_laps"](arg.get("rec"), arg.get("session"),

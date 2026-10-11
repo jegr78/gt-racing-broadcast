@@ -498,6 +498,11 @@
   .tmgrid section { padding:10px 12px; }
   .tmlist { display:flex; flex-direction:column; max-height:36vh; overflow:auto;
             color:var(--faint); font:12px var(--mono); }
+  #tm-recording-menu { margin-bottom:10px; }
+  #tm-recording-menu summary { cursor:pointer; color:var(--txt); }
+  #tm-recording-options { max-height:240px; overflow:auto; display:grid; gap:8px; margin-top:10px; }
+  #tm-recording-options label { display:flex; align-items:center; gap:8px; }
+  #tm-recording-menu .row { margin-top:10px; }
   #tm-laps { max-height:min(66vh, 620px); }
   .tmitem { display:grid; grid-template-columns:1fr auto; gap:2px 8px; width:100%;
             flex-shrink:0; text-align:left; background:transparent; border:0;
@@ -1336,6 +1341,10 @@
               <div class="tmlist" id="tm-laps"></div></section>
           </div>
           <section class="tmmain">
+            <details id="tm-recording-menu"><summary id="tm-recording-caption">Compare: this recording</summary>
+              <div class="row"><button onclick="tmChooseRecordings(false)">Only this recording</button>
+                <button onclick="tmChooseRecordings(true)">All recordings</button></div>
+              <div id="tm-recording-options"></div></details>
             <label class="sub"><input type="checkbox" id="tm-compare-all" onchange="tmComparisonMode()"> Compare other conditions and roles</label>
             <p class="sub" id="tm-conditions"></p>
             <div class="tmpick">
@@ -5283,7 +5292,7 @@ async function quitConfirm() {
 // Telemetry view (solo POV, #788): recordings -> laps -> lap A/B comparison.
 // Values from recordings reach the page only through textContent and SVG attributes.
 const TM_NS = 'http://www.w3.org/2000/svg';
-const tmState = {loaded: false, recs: [], rec: null, recLaps: [], pool: null,
+const tmState = {included: null, available: [], anchor: null, loaded: false, recs: [], rec: null, recLaps: [], pool: null,
                  a: null, b: null, lapA: null, lapB: null, sectorM: 200, tracks: null,
                  chart: null, map: null, cursor: null, profile: null, summary: null};
 const tmLapCache = new Map();
@@ -5541,7 +5550,9 @@ function tmClear(msg) {
 }
 function tmReset() {
   Object.keys(tmSeq).forEach(k => { tmSeq[k]++; });
+  tmState.included = null; tmState.available = []; tmState.anchor = null;
   tmState.loaded = false; tmState.rec = null; tmState.recs = []; tmState.recLaps = [];
+  tmRenderRecordingMenu();
   tmState.tracks = null;
   tmDropLaps();
   tmIndexing = null;
@@ -5590,16 +5601,15 @@ function tmRenderRecs() {
     const b = document.createElement('button');
     b.className = 'tmitem' + (r.rec === tmState.rec ? ' sel' : '');
     const name = document.createElement('span');
-    name.textContent = r.rec + (r.recording ? ' (recording)' : r.partial ? ' (unclosed)' : '');
-    const laps = document.createElement('span');
-    laps.textContent = r.completed_laps != null ? r.completed_laps + ' complete laps'
-      + (r.partial_segments ? ' · ' + r.partial_segments + ' partial' : '')
-      : r.laps == null ? '' : r.laps + ' lap segments';
+    b.title = r.rec;
+    name.textContent = tmRecordingLabel(r) + (r.recording ? ' (recording)' : r.partial ? ' (unclosed)' : '');
+    name.style.gridColumn = '1 / -1';
     const sub = document.createElement('span');
     sub.className = 'tmsub';
     sub.textContent = (r.recording ? 'being written' : r.indexed ? tmTrackLabel(r.track) : 'not indexed yet')
-      + ' · ' + Math.round(r.duration_s / 60) + ' min · ' + (r.size / 1e6).toFixed(1) + ' MB';
-    b.append(name, laps, sub);
+      + ' · ' + Math.round(r.duration_s / 60) + ' min · ' + (r.size / 1e6).toFixed(1) + ' MB'
+      + (r.partial_segments ? ' · ' + r.partial_segments + ' partial' : '');
+    b.append(name, sub);
     if (r.recording) b.disabled = true;           // laps/lap/learn refuse the open file
     else b.onclick = () => tmSelectRec(r.rec);
     box.appendChild(b);
@@ -5635,6 +5645,7 @@ async function tmSelectRec(rec) {
   if (tmState.rec !== rec) window.RacecastAI?.reset(tmState.profile);
   const seq = ++tmSeq.rec;
   tmSeq.b++;
+  if (tmState.rec !== rec) { tmState.included = null; tmState.anchor = null; }
   tmState.rec = rec;
   tmState.recLaps = [];
   tmRenderRecs();
@@ -5776,11 +5787,14 @@ function tmDefaultA(bKey) {
 async function tmSelectB(l) {
   const seq = ++tmSeq.b;
   const key = tmKey(l);
+  tmState.anchor = l;
   tmState.b = key;
   tmRenderLaps();
   tmClearPair('Loading comparable laps…');
   const q = new URLSearchParams({car: l.car_id == null ? '' : String(l.car_id),
                                  track: l.track_id == null ? '' : l.track_id});
+  if (tmState.included === null) tmState.included = new Set([tmState.rec || l.rec]);
+  q.set('recs', [...tmState.included].join(','));
   q.set('rec', l.rec); q.set('session', String(l.session)); q.set('lap', String(l.lap));
   if ($('tm-compare-all').checked) q.set('compare_all', '1');
   let p = await tmShared('/api/telemetry/laps?' + q);
@@ -5797,30 +5811,112 @@ async function tmSelectB(l) {
   if (!p.ok) tmErr(p.error || 'could not load the comparable laps');
   tmState.pool = p.ok ? p : {laps: [], best_sectors: [], theoretical_best: null};
   $('tm-conditions').textContent = p.ok ? (p.comparison_warnings || []).join(' · ') : '';
+  tmState.available = p.recordings || [];
+  tmRenderRecordingMenu();
+  if (!tmState.included.has(l.rec) && p.ok && p.laps.length) return tmSelectB(p.laps[0]);
+  if (!tmState.included.has(l.rec)) tmState.b = null;
   tmState.a = tmDefaultA(key);
   tmRenderLaps();                                   // mark lap A
   tmFillPickers(l);
   await tmLoadPair();
 }
 
+function tmRecordingLabel(row) {
+  let date = row.start_ts != null ? new Date(row.start_ts * 1000) : new Date(row.started || '');
+  if (!Number.isFinite(date.getTime())) {
+    const match = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})$/.exec(row.rec || '');
+    if (match) date = new Date(+match[1], +match[2]-1, +match[3], +match[4], +match[5], +match[6]);
+  }
+  const pad = n => String(n).padStart(2, '0');
+  const name = Number.isFinite(date.getTime())
+    ? ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][date.getDay()] + ' ' + pad(date.getDate()) + '.'
+      + pad(date.getMonth()+1) + '. ' + pad(date.getHours()) + ':' + pad(date.getMinutes())
+    : row.rec;
+  const count = row.completed_laps ?? row.laps;
+  return name + (count != null ? ' · ' + count + (count === 1 ? ' lap' : ' laps') : '');
+}
+function tmRenderRecordingMenu() {
+  const box = $('tm-recording-options'); box.textContent = '';
+  const rows = tmState.available.slice();
+  const own = tmState.recs.find(r => r.rec === tmState.rec);
+  if (own && !rows.some(r => r.rec === own.rec)) rows.push(own);
+  rows.sort((a,b) => (b.start_ts || 0) - (a.start_ts || 0));
+  const chosen = rows.filter(r => tmState.included?.has(r.rec)).length;
+  $('tm-recording-caption').textContent = chosen === 1 && tmState.included?.has(tmState.rec)
+    ? 'Compare: this recording' : 'Compare: ' + chosen + ' of ' + rows.length + ' recordings';
+  rows.forEach(row => {
+    const label = document.createElement('label'), input = document.createElement('input');
+    input.type = 'checkbox'; input.checked = tmState.included?.has(row.rec) || false;
+    label.title = row.rec; label.append(input, document.createTextNode(tmRecordingLabel(row)));
+    input.onchange = () => {
+      if (input.checked) tmState.included.add(row.rec); else tmState.included.delete(row.rec);
+      tmReloadRecordingPool();
+    };
+    box.append(label);
+  });
+}
+function tmChooseRecordings(all) {
+  tmState.included = new Set(all ? tmState.available.map(r => r.rec).concat(tmState.rec ? [tmState.rec] : [])
+                               : tmState.rec ? [tmState.rec] : []);
+  tmReloadRecordingPool();
+}
+async function tmReloadRecordingPool() {
+  const known = (tmState.pool?.laps || []).concat(tmState.recLaps);
+  const anchor = tmState.anchor || known.find(l => tmKey(l) === tmState.b);
+  if (!anchor) return;
+  const pick = laps => {
+    const included = laps.filter(l => tmState.included.has(l.rec) && l.car_id === anchor.car_id
+      && l.track_id === anchor.track_id && (anchor.track_id != null
+        || l.rec === anchor.rec && l.session === anchor.session));
+    return included.find(l => tmKey(l) === tmState.b)
+      || included.filter(l => l.comparison_eligible ?? l.pace_eligible ?? l.status !== 'not counted').slice(-1)[0]
+      || included.slice(-1)[0];
+  };
+  let lap = pick(known);
+  if (!lap && tmState.included.size) {
+    const seq = ++tmSeq.b, rec = [...tmState.included][0];
+    tmClearPair('Loading included recording…'); tmState.b = null;
+    const d = await tmIndexed(rec, () => tmShared('/api/telemetry/laps?' + new URLSearchParams({rec})),
+                              () => seq !== tmSeq.b);
+    if (seq !== tmSeq.b) return;
+    if (!d.ok) tmErr(d.error || 'Could not read the included recording.');
+    lap = pick((d.laps || []).concat(d.open_lap ? [d.open_lap] : []));
+    if (!lap) {
+      tmState.pool = {laps: [], best_sectors: [], theoretical_best: null};
+      tmRenderRecordingMenu(); tmPlaceholder('tm-a', 'no other lap to compare');
+      tmPlaceholder('tm-b', 'no included lap'); tmRender(); return;
+    }
+  }
+  await tmSelectB(lap || anchor);
+}
+
 function tmFillPickers(lapB) {
   const pool = tmState.pool.laps || [];
   const bKey = tmKey(lapB);
   const forA = pool.filter(l => tmKey(l) !== bKey);
-  const forB = pool.some(l => tmKey(l) === bKey) ? pool : pool.concat([lapB]);
-  const multi = new Set(forB.map(l => l.rec)).size > 1;   // name the recording only then
+  const forB = pool.some(l => tmKey(l) === bKey) || !tmState.included?.has(lapB.rec) ? pool : pool.concat([lapB]);
+  const eligible = pool.filter(l => l.time_s != null && (l.pace_eligible ?? l.status !== 'not counted'));
+  const overall = Math.min(...eligible.map(l => l.time_s));
   [['tm-a', forA, tmState.a], ['tm-b', forB, tmState.b]].forEach(([id, list, cur]) => {
-    if (!list.length) { tmPlaceholder(id, 'no other lap to compare'); return; }
-    const sel = $(id);
-    sel.textContent = '';
-    sel.disabled = false;
-    list.forEach(l => {
-      const o = document.createElement('option');
-      o.value = tmKey(l);
-      o.textContent = ['Lap ' + l.lap + (l.session > 1 ? ' S' + l.session : ''), tmTime(l.time_s),
-                       multi ? l.rec : '', l.status === 'not counted' ? 'not counted' : '']
-        .filter(Boolean).join(' · ');
-      sel.appendChild(o);
+    if (!list.length) { tmPlaceholder(id, id === 'tm-a' ? 'no other lap to compare' : 'no included lap'); return; }
+    const sel = $(id); sel.textContent = ''; sel.disabled = false;
+    const names = [...new Set(list.map(l => l.rec))];
+    names.sort((a,b) => (tmState.recs.find(r=>r.rec===b)?.start_ts || 0) - (tmState.recs.find(r=>r.rec===a)?.start_ts || 0));
+    names.forEach(rec => {
+      const group = document.createElement('optgroup');
+      const row = tmState.available.find(r=>r.rec===rec) || tmState.recs.find(r=>r.rec===rec) || {rec};
+      group.label = tmRecordingLabel(row); group.title = rec;
+      const best = Math.min(...eligible.filter(l=>l.rec===rec).map(l=>l.time_s));
+      list.filter(l=>l.rec===rec).sort((a,b)=>a.session-b.session || a.lap-b.lap).forEach(l => {
+        const option = document.createElement('option'); option.value = tmKey(l); option.title = rec;
+        const counted = eligible.some(e=>tmKey(e)===tmKey(l));
+        option.textContent = ['Lap ' + l.lap + (l.session > 1 ? ' S' + l.session : ''), tmTime(l.time_s),
+          counted && l.time_s === best ? 'recording best' : '',
+          counted && l.time_s === overall ? 'overall best' : '',
+          !counted ? 'not counted' : ''].filter(Boolean).join(' · ');
+        group.append(option);
+      });
+      sel.append(group);
     });
     sel.value = cur || '';
   });
@@ -5838,7 +5934,7 @@ async function tmRefreshContext(rec) {
 
 function tmComparisonMode() {
   tmDropLaps();
-  const lap = tmState.recLaps.find(l => tmKey(l) === tmState.b);
+  const lap = (tmState.pool?.laps || []).concat(tmState.recLaps).find(l => tmKey(l) === tmState.b);
   if (lap) tmSelectB(lap);
 }
 
@@ -5847,11 +5943,10 @@ function tmPick(which, key) {
   if (which === 'b' && tmState.pool) {
     const lb = (tmState.pool.laps || []).concat(tmState.recLaps).find(l => tmKey(l) === key);
     if (lb) {
-      if (tmState.a === key) tmState.a = tmDefaultA(key);
-      tmFillPickers(lb);
+      return tmSelectB(lb);
     }
   }
-  tmRenderLaps();                                   // the A and B markers follow the pickers
+  tmRenderLaps();
   tmLoadPair();
 }
 
