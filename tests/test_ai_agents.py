@@ -177,6 +177,29 @@ def t_codex_runtime_file_is_readable_without_exposing_parent():
      assert str(unrelated) not in permission
      assert json.dumps(str(binary.parent)) not in permission
 
+def t_windows_codex_has_native_sandbox_and_runtime_environment():
+    from unittest.mock import patch
+    with tempfile.TemporaryDirectory() as d:
+        pkg=Path(d)/'package';out=Path(d)/'output';pkg.mkdir();out.mkdir()
+        schema=pkg/'schema.json';schema.write_text('{}')
+        cli=a.Adapter(config(),which=lambda _:sys.executable)
+        probe=cli.probe(run=Fake(),env={})
+        with patch.object(sys,'platform','win32'):
+            inv=cli.invocation(pkg,out,schema,probe)
+        assert 'windows.sandbox="mxc"' in inv.argv
+        assert 'features.unified_exec=true' in inv.argv
+        assert not any('elevated' in arg or 'prefer_mxc' in arg for arg in inv.argv)
+        assert 'shell_environment_policy.inherit="all"' in inv.argv
+        filters=next(arg for arg in inv.argv if arg.startswith('shell_environment_policy.filters='))
+        assert '"SYSTEMROOT"="include"' in filters and '"PROGRAMDATA"="include"' in filters
+        assert '"HOME"=' not in filters and 'TOKEN' not in filters and 'KEY' not in filters
+        assert any('filesystem={":root"="deny"' in arg for arg in inv.argv)
+        with patch.object(sys,'platform','linux'):
+            inv=cli.invocation(pkg,out,schema,probe)
+        assert 'shell_environment_policy.inherit="none"' in inv.argv
+        assert not any(arg.startswith('windows.sandbox=') for arg in inv.argv)
+
+
 if __name__ == '__main__':
     for name, fn in sorted(globals().copy().items()):
         if name.startswith('t_'):

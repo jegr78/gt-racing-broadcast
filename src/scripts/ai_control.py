@@ -24,12 +24,42 @@ def _translate(fn,*args,**kwargs):
 
 
 class Controller:
-    def __init__(self,machine,profile_root,profile,source_factory,adapter_factory=ai_agents.Adapter,validate=None):
+    def __init__(self,machine,profile_root,profile,source_factory,adapter_factory=ai_agents.Adapter,validate=None,enrich_source=None):
         self.machine=Path(machine).resolve();self.profile_root=Path(profile_root).resolve();self.profile=profile
-        self.source_factory=source_factory;self.adapter_factory=adapter_factory;self.validate=validate
+        self.source_factory=source_factory;self.adapter_factory=adapter_factory;self.validate=validate;self.enrich_source=enrich_source
         self.settings=ai_agents.Settings(self.machine)
         self.runner=ai_jobs.Runner(self.machine,self.profile_root,profile)
-        self.reports=ai_reports.Store(self.profile_root,profile,self.machine,source_factory)
+        self.reports=ai_reports.Store(self.profile_root,profile,self.machine,source_factory,enrich_source)
+
+    def selection(self,rec):
+        settings=_translate(self.settings.read)
+        if not settings['enabled']:raise ControlError('disabled','Enable optional analysis in machine settings first')
+        source=_translate(self.source_factory,rec)
+        if source.root!=str((self.profile_root/'telemetry-recordings').resolve()):raise ControlError('invalid_source','Recording belongs to another profile')
+        sessions=[]
+        for session in source.completed:
+            rows=ai_package._rows(source,session)
+            sessions.append(dict(session=session,laps=[dict(lap=r['lap'],usable=ai_package._usable(r),
+                  reasons=r.get('reasons',[])+([] if ai_package._usable(r) else ['Incomplete capture or unusable trace timing'])) for r in rows if r['lap']>0]))
+        return dict(ok=True,profile=self.profile,rec=source.name,sessions=sessions)
+
+    def references(self,rec,session):
+        settings=_translate(self.settings.read)
+        if not settings['enabled']:raise ControlError('disabled','Enable optional analysis in machine settings first')
+        try:session=int(str(session))
+        except ValueError:raise ControlError('invalid_selection','Select a numeric GT7 session') from None
+        source=_translate(self.source_factory,rec)
+        if source.root!=str((self.profile_root/'telemetry-recordings').resolve()):raise ControlError('invalid_source','Recording belongs to another profile')
+        if session not in source.completed:raise ControlError('incomplete_session','Select a completed GT7 session')
+        candidates=[]
+        for path in sorted((self.profile_root/'telemetry-recordings').glob('*.gt7rec'))[:100]:
+            if len(candidates)>=100:break
+            try:candidate=_translate(self.source_factory,path.name)
+            except ControlError:continue
+            candidates.append(candidate)
+        suggestions=ai_package.suggest_references(source,session,candidates)
+        return dict(ok=True,profile=self.profile,suggestions=[dict(rec=r['recording'],session=r['session'],lap=r['lap'],time_s=r['time_s'],
+            kind='same-session reference' if r['id'].startswith(source.identity+'/session/'+str(session)+'/') else 'explicit comparable recording/session') for r in suggestions[:100]])
 
     def _prepare(self,payload):
         if not isinstance(payload,dict) or set(payload)-REQUEST_KEYS:
@@ -67,7 +97,7 @@ class Controller:
         package=_translate(ai_package.build,source,payload.get('session'),laps=payload.get('laps'),references=refs,
                            template=payload.get('template',settings['last'].get('template') or 'session-overview'),
                            goal=payload.get('goal',''),questions=payload.get('questions',''),
-                           language=payload.get('language'),ui_language=payload.get('ui_language','en'))
+                           language=payload.get('language'),ui_language=payload.get('ui_language','en'),enrich_source=self.enrich_source)
         manifest=_translate(ai_package.preview,package,config['provider'])
         adapter=self.adapter_factory(copy.deepcopy(config))
         binding=dict(package=package['fingerprint'],agent=config,model=model.strip(),profile=self.profile)
@@ -80,10 +110,11 @@ class Controller:
         return package,manifest,adapter,model,confirm,availability
 
     def preview(self,payload):
-        package,manifest,_adapter,_model,confirm,availability=self._prepare(payload)
+        package,manifest,adapter,model,confirm,availability=self._prepare(payload)
         return dict(ok=True,profile=self.profile,confirm_preview=confirm,manifest=manifest,
                     availability=availability,can_start=availability['status']=='ready',
-                    package_fingerprint=package['fingerprint'])
+                    package_fingerprint=package['fingerprint'],requested_model=model,
+                    agent={k:copy.deepcopy(adapter.config[k]) for k in ('id','name','provider','mode','personal')})
 
     def start(self,payload,background=True):
         if not isinstance(payload,dict) or not payload.get('confirm_preview'):

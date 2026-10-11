@@ -140,7 +140,8 @@ def make_handler(ctx):
     # cleaner runs, and this server is meant to be left running.
     _pages = bundle_cache.BundleCache()
     _context_script = os.path.join(os.path.dirname(ctx["page_path"]), "telemetry-context.js")
-    _pages.prewarm([ctx["page_path"], _context_script])
+    _ai_script = os.path.join(os.path.dirname(ctx["page_path"]), "ai-analysis.js")
+    _pages.prewarm([ctx["page_path"], _context_script, _ai_script])
 
     class Handler(BaseHTTPRequestHandler):
         _CTYPES = {".png": "image/png", ".jpg": "image/jpeg",
@@ -668,12 +669,15 @@ def make_handler(ctx):
                                        "error": f"could not read the report: "
                                                 f"{type(exc).__name__}"},
                                       code=500)
+            if path == '/ai-analysis.js':
+                try:return self._serve_bytes(_pages.read(_ai_script), 'application/javascript; charset=utf-8')
+                except OSError:return self._not_found('analysis interface unavailable')
             if path == '/telemetry-context.js':
                 try:
                     return self._serve_bytes(_pages.read(_context_script), 'application/javascript; charset=utf-8')
                 except OSError:
                     return self._not_found('context editor unavailable')
-            if path in ('/api/ai/settings','/api/ai/probe','/api/ai/status','/api/ai/job','/api/ai/history','/api/ai/export'):
+            if path in ('/api/ai/settings','/api/ai/probe','/api/ai/status','/api/ai/job','/api/ai/history','/api/ai/export','/api/ai/selection','/api/ai/references'):
                 if not self._context_allowed(structured=True):return None
                 query=parse_qs(urlparse(self.path).query or '',keep_blank_values=True)
                 return self._ai_call(path.rsplit('/',1)[1],{k:v[0] for k,v in query.items()})

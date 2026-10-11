@@ -128,3 +128,10 @@ Loaded when working under `src/ui/`.
   is the only fully reproducible one. If you refresh a single `cc-*.png`, still use the
   dev build so it matches the rest. Publishing the wiki itself stays a separate
   `tools/sync-wiki.py` step, but the image must already be committed in the repo.
+
+Optional AI analysis lives in `ai-analysis.js`, loaded as a same-origin cached asset.
+Machine settings are shared; completed session/lap/reference selection, explicit
+preview/start, progress/cancel/history and text-only reports remain profile-bound.
+Selection/profile changes invalidate pending previews and discard asynchronous old
+responses. `tools/e2e-ai.py` exercises the real callbacks with a synthetic provider
+process and no credentials; the visual CI job runs it alongside normal views.

@@ -131,6 +131,8 @@ jobs:
           python -m playwright install --with-deps chromium
       - name: Run the visual acceptance run
         run: python tools/e2e.py --visual --report visual-report
+      - name: Verify the optional analysis browser workflow
+        run: python tools/e2e-ai.py
       - name: Upload the report
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1

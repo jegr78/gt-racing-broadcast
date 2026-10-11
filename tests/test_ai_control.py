@@ -76,6 +76,36 @@ def t_unverified_isolation_has_manual_guidance_and_exportable_preview():
         assert preview['manifest']['laps']
 
 
+def t_completed_selection_and_explicit_suggestions_are_profile_bound():
+    with tempfile.TemporaryDirectory() as d:
+        control,store,source,adapters=setup(d)
+        selected=control.selection(source.name)
+        assert selected['profile']=='profile' and selected['rec']==source.name
+        assert [s['session'] for s in selected['sessions']]==[1]
+        assert selected['sessions'][0]['laps'] and all(l['lap']>0 for l in selected['sessions'][0]['laps'])
+        refs=control.references(source.name,'1')
+        assert refs['suggestions'] and all(set(r)=={'rec','session','lap','time_s','kind'} for r in refs['suggestions'])
+        assert all(r['session']==1 for r in refs['suggestions']) and not adapters
+        failure(lambda:control.references(source.name,'invalid'),'invalid_selection')
+        failure(lambda:control.references(source.name,'2'),'incomplete_session')
+        failure(lambda:control.references(source.name,True),'invalid_selection')
+        foreign=c.Controller(control.machine,Path(d)/'other','other',lambda name:source)
+        failure(lambda:foreign.selection(source.name),'invalid_source')
+        failure(lambda:foreign.references(source.name,'1'),'invalid_source')
+        document=store.read();document['enabled']=False;store.save(document)
+        failure(lambda:control.selection(source.name),'disabled')
+        failure(lambda:control.references(source.name,'1'),'disabled')
+
+
+def t_preview_discloses_agent_mode_and_exact_model_without_local_paths():
+    with tempfile.TemporaryDirectory() as d:
+        control,store,source,_=setup(d)
+        preview=control.preview(dict(rec=source.name,session=1,agent='coach',model='manual-model'))
+        assert preview['requested_model']=='manual-model'
+        assert preview['agent']==dict(id='coach',name='Coach',provider='codex',mode='isolated',personal={'instructions':False,'skills':False,'mcp':False})
+        assert 'executable' not in preview['agent']
+
+
 if __name__=='__main__':
     for n,f in sorted(globals().copy().items()):
         if n.startswith('t_'):f();print('PASS',n)
