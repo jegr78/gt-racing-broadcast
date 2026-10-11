@@ -393,6 +393,68 @@ def t_active_recording_prefix_survives_appends_and_detects_changed_measurements(
             live._bounded_recording = original
 
 
+def t_active_samples_and_context_revisions_respect_byte_budgets():
+    import gt7_context
+    from test_gt7_laps import _pkt
+    from unittest.mock import patch
+    with patch.object(live, 'SAMPLES_MAX', 8):
+        with live.Store(lambda: True, queue_max=4096) as store:
+            pkt = tm.parse_packet(_pkt(1, 50, 0))
+            for i in range(100):
+                store.put(pkt, 100 + i * .1)
+            assert store.flush()
+            assert store.stats()['samples'] <= 8
+            assert store.snapshot()['current']['data_quality'] == 'interrupted'
+    with tempfile.TemporaryDirectory() as d:
+        path = write_circle_recording(d)
+        with live.Store(lambda: True, tracks=FakeTracks(), cars=FakeCars(), queue_max=4096) as store:
+            store.bind_recording(path)
+            feed(store, path)
+            before = store.stats()['detail_bytes']
+            context = gt7_context.Store.for_recording(path)
+            context.save({'notes': [], 'sessions': {'1': {'confirmed': True,
+                'stints': [{'id': 'initial', 'start_lap': 1, 'confirmed': True,
+                            'compound': 'RM', 'strategy': {'fuel_map': 1}}]}}}, 0)
+            with patch.object(live, 'DETAIL_BYTES_MAX', before + 1):
+                store._read_context()
+                assert store.stats()['detail_bytes'] <= before + 1
+
+
+def t_recovery_refuses_a_prefix_changed_during_preparation():
+    import gt7_context
+    from test_gt7_laps import _pkt
+    with tempfile.TemporaryDirectory() as d:
+        path = write_circle_recording(d)
+        part = path + '.part'
+        os.rename(path, part)
+        source = gt7_context.source_identity(part)
+        original = live._bounded_recording
+        reached, release = threading.Event(), threading.Event()
+        def held(*args, **kwargs):
+            result = original(*args, **kwargs)
+            reached.set()
+            assert release.wait(5)
+            return result
+        live._bounded_recording = held
+        try:
+            with live.Store(lambda: True, tracks=FakeTracks(), cars=FakeCars()) as store:
+                store.recording_detail(source, part, 1, 2)
+                assert reached.wait(5)
+                with open(part, 'r+b') as f:
+                    f.seek(-8, os.SEEK_END)
+                    old = f.read(1)
+                    f.seek(-1, os.SEEK_CUR)
+                    f.write(bytes([old[0] ^ 1]))
+                    f.seek(0, os.SEEK_END)
+                    f.write(gr._encode(1_700_000_080.6, ord('~'), _pkt(5, 50, .2, 20000)))
+                release.set()
+                assert store.wait_recovery(10)
+                assert not store._recovery, 'changed prefix was published as verified'
+        finally:
+            release.set()
+            live._bounded_recording = original
+
+
 if __name__ == '__main__':
     for name, fn in sorted(list(globals().items())):
         if name.startswith('t_'):
