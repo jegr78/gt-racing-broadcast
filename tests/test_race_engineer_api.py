@@ -277,6 +277,30 @@ def t_recorded_definition_replacement_invalidates_prepared_cache():
             finally:service.close()
 
 
+def t_recorded_context_replacement_with_equal_stat_invalidates_preparation():
+    with tempfile.TemporaryDirectory() as d:
+        path=write_circle_recording(d);source=gt7_context.source_identity(path)
+        context=gt7_context.Store.for_recording(path)
+        data=context.read()['data'];data['notes']=[{'id':'n','scope':'recording','text':'Old'}]
+        saved=context.save(data,0)
+        with live.Store(lambda:True,tracks=FakeTracks(),cars=FakeCars(),runtime_base=d) as store:
+            service=api.Service(store)
+            try:
+                query=lambda:service.lap(f'r:{source}:1:2',lambda _:path)
+                before=wait_ready(query)['lap'];original=os.stat(context.path)
+                original_doc=json.loads(Path(context.path).read_text())
+                data['notes'][0]['text']='New';context.save(data,saved['revision'])
+                replacement=json.loads(Path(context.path).read_text())
+                replacement['updated_at']=original_doc['updated_at']
+                gt7_context._atomic(context.path,replacement)
+                os.utime(context.path,ns=(original.st_atime_ns,original.st_mtime_ns))
+                assert os.stat(context.path).st_size==original.st_size
+                after=wait_ready(query)['lap']
+                assert after['context_revision']!=before['context_revision'], 'equal-stat context replacement reused old preparation'
+                assert after['notes'][0]['text']=='New'
+            finally:service.close()
+
+
 def t_expected_definition_waits_for_worker_publication_in_progress():
     import gt7_track_definitions as td
     from test_gt7_track_definitions import definition
