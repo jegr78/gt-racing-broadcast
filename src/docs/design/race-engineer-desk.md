@@ -35,3 +35,9 @@ ordinary application surfaces pass their visual run. The existing producer acces
 browser workflow still passes. Independent security review reproduced the source
 authorization distinction; its correction has a failing-then-passing runtime proof
 and the final review has no open findings.
+
+Nine assurances were individually broken at their intended browser assertions and
+restored: manual selection stops following, revoked reference replies cannot restore
+history, stale instruments dim, new generations reset zoom, reference labels remain
+text, revoked views hide and clear, source authorization loss stops access, and live
+refresh preserves a focused distance input.
