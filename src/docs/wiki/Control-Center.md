@@ -278,6 +278,14 @@ running relay.
   tyre temperatures and the lap-time trend in driving order (the best lap green, laps that
   were not counted grey). Click a dot in the trend to make that lap lap B.
 - **Recordings and laps.** Pick a recording, newest first, to list its laps with time.
+  Recording labels show weekday, date, start time and lap count; hover for the file stem.
+  **Compare: this recording** above the charts opens a scrollable list of recordings
+  with the same track and car. Only the selected recording is included by default.
+  Use **All recordings**, **Only this recording**, or the checkboxes to change the pool.
+  This choice lasts for the page visit. Lap A/B are grouped by recording, in driving
+  order, with separate recording-best and overall-best labels. Excluded recordings
+  contribute to neither picker nor the comparison's Best column or theoretical sums.
+  If there is no other counted lap in the selection, lap A stays empty.
   `ref` marks a lap that was the fastest so far when it was driven (the live HUD delta ran
   against it), `not counted` a rejected lap with the reason below it. The fastest counted
   lap is purple, lap A carries an orange bar and lap B a blue one. A lap names its car or

@@ -2591,9 +2591,40 @@ tmState.pool = {laps: [l1, l2, nc]};
 tmFillPickers(l2);
 console.log(one + '|' + $('tm-a').options.map(o => o.textContent).join(','));""")
     if out is not None:
-        assert out.strip() == ("Lap 1 · 1:20.000|Lap 1 · 1:20.000 · R,"
-                               "Lap 3 · 1:21.000 · S · not counted"), \
-            f"lap and time first, the recording only when the pool spans several: {out!r}"
+        assert out.strip() == ("Lap 1 · 1:20.000|Lap 1 · 1:20.000,"
+                               "Lap 3 · 1:21.000 · not counted"), \
+            f"lap and time stay inside recording groups: {out!r}"
+
+
+def t_telemetry_recording_selection_has_no_implicit_other_reference():
+    out = _tm_node("""
+const b=lap('R',2,79,1);tmState.rec='R';tmState.included=new Set(['R']);
+tmState.recs=[{rec:'R'},{rec:'S'}];tmState.pool={laps:[b]};
+tmState.a=tmDefaultA(tmKey(b));tmState.b=tmKey(b);tmFillPickers(b);
+console.log(JSON.stringify({a:tmState.a,text:$('tm-a').textContent,groups:$('tm-b').kids.map(k=>k.title)}));
+tmReset();console.log($('tm-recording-options').textContent);
+""")
+    if out is not None:
+        result,reset=out.split('\n',1)
+        assert json.loads(result)=={'a':None,'text':'no other lap to compare','groups':['R']},out
+        assert not reset.strip(), 'profile reset retained recording choices'
+
+
+def t_telemetry_recording_selection_discards_a_previous_pool_response():
+    out = _tm_node("""
+const l1=lap('R',1,80,1),l2=lap('R',2,79,1);
+tmState.rec='R';tmState.recLaps=[l1,l2];tmState.included=new Set(['R']);
+tmLoadPair=async()=>{};
+const old=tmSelectB(l2);await tick();
+tmState.included=new Set();
+const current=tmSelectB(l2);await tick();
+answer('recs=&',pool([]));await current;
+answer('recs=R&',pool([l1,l2]));await tick();
+console.log(JSON.stringify({count:tmState.pool?.laps.length ?? null,b:tmState.b,a:tmState.a,
+    disabled:$('tm-a').disabled && $('tm-b').disabled}));
+""")
+    if out is not None:
+        assert json.loads(out)=={'count':0,'b':None,'a':None,'disabled':True}, out
 
 
 def t_telemetry_charts_label_the_value_range_and_the_final_delta():
@@ -2802,19 +2833,19 @@ def t_telemetry_recording_rows_mark_open_files_and_unindexed_laps():
     tm = _tm_script(_cc_page())
     fn = tm[tm.index("function tmRenderRecs()"):tm.index("async function tmSelectRec(")]
     assert "r.recording ? ' (recording)'" in fn and "r.partial ? ' (unclosed)'" in fn
-    assert "r.laps == null ? ''" in fn, "the list has no lap count before the first index"
+    assert 'tmRecordingLabel(r)' in fn
 
 
 _TM_HARNESS = r"""
 class El {
   constructor(tag) { this.tagName = tag; this.kids = []; this.cells = []; this._t = '';
                      this.hidden = false; this.disabled = false; this.className = '';
-                     this.value = ''; this.title = ''; this.selected = false; }
+                     this.value = ''; this.title = ''; this.selected = false; this.style = {}; }
   get textContent() { return this._t + this.kids.map(k => k.textContent).join(''); }
   set textContent(v) { this._t = String(v); this.kids = []; this.cells = []; }
   appendChild(c) { this.kids.push(c); return c; }
   append(...c) { c.forEach(x => this.appendChild(x)); }
-  get options() { return this.kids.filter(k => k.tagName === 'option'); }
+  get options() { return this.kids.flatMap(k => k.tagName === 'option' ? [k] : k.tagName === 'optgroup' ? k.options : []); }
   createTHead() { return this.appendChild(new El('sec')); }
   createTBody() { return this.appendChild(new El('sec')); }
   createTFoot() { return this.appendChild(new El('sec')); }
@@ -2827,7 +2858,8 @@ class El {
 const window = {addEventListener() {}};
 const els = {};
 const $ = id => els[id] || (els[id] = new El(id));
-const document = {createElement: t => new El(t), createElementNS: (n, t) => new El(t)};
+const document = {createElement: t => new El(t), createElementNS: (n, t) => new El(t),
+  createTextNode: text => {const e=new El('text');e.textContent=text;return e;}};
 const pending = [];
 const calls = [];
 globalThis.fetch = url => new Promise(res => { calls.push(url); pending.push({url, res}); });

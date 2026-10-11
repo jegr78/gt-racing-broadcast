@@ -39,7 +39,11 @@ Loaded when working under `src/ui/`.
   Set track changes `data_version` (it stats `learned-tracks.json`), so every index of the
   profile needs a rebuild, about 16 s per 3 h recording. No request builds an index: the
   routes pass `build=False`. A pool of `/api/telemetry/laps` uses the recordings with a
-  valid index and counts the rest in `unindexed`; `?rec=`, `/api/telemetry/lap` and
+  valid index and counts the rest in `unindexed`. The optional `recs` query restricts
+  the pool and all best/theoretical values to explicit recording stems; empty selects
+  none. Available recording metadata remains independent of this subset. The page
+  defaults to the selected recording, groups pickers in driving order and keeps its
+  checkbox choice in page memory. Details: `src/docs/design/telemetry-recording-selection.md`; `?rec=`, `/api/telemetry/lap` and
   `/api/telemetry/learn` answer `unindexed: 1` for a recording without one; every such
   answer carries the `data_version` it was checked against. The page (`tmIndexed`,
   `tmIndexAll`, `tmMayIndex`) then runs the `telemetry-index` job (`racecast telemetry

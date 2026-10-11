@@ -4003,6 +4003,8 @@ def telemetry_recordings_data():
                                                                version)
             rows.append({"name": row["name"], "rec": gr.recording_stem(row["path"]),
                          "started": row["started"], "size": row["size"],
+                         "start_ts": idx.get("start_ts") if idx else None,
+                         "completed_laps": sum(bool(l.get("capture_complete")) for l in idx["laps"]) if idx else None,
                          "duration_s": round(row["duration_s"], 1),
                          "laps": len(idx["laps"]) if idx else None,
                          "partial": row["partial"],
@@ -4069,7 +4071,7 @@ def _telemetry_summary(idx):
             "groups": groups}
 
 
-def telemetry_laps_data(rec=None, session=None, track=None, car=None, build=True, lap=None, compare_all=False):
+def telemetry_laps_data(rec=None, session=None, track=None, car=None, build=True, lap=None, compare_all=False, recs=None):
     """One recording's laps (car None), or the counted laps comparable with a track and
     car across the profile's recordings. Arguments are query strings. Without `build`
     a recording without a valid lap index answers `unindexed: 1`, and a pool uses only
@@ -4122,7 +4124,29 @@ def telemetry_laps_data(rec=None, session=None, track=None, car=None, build=True
                                           "session: pass rec and session"}
         indexes, unindexed = _telemetry_pool_indexes(rec_dir, build,
                                                      stem if track_id is None else None)
+        selected = None
+        if recs is not None:
+            if not isinstance(recs, str):
+                return {"ok": False, "error": "invalid recording selection"}
+            selected = set()
+            for name in recs.split(',') if recs else []:
+                path = _find_recording(rec_dir, name)
+                if not path:
+                    return {"ok": False, "error": "invalid recording selection: recording unavailable"}
+                selected.add(gr.recording_stem(path))
         candidates = gt7_laps.pool(indexes, track_id, car_id, rec=stem, session=sess)
+        available = {idx['rec'] for idx in indexes if any(
+            l.get('car_id') == car_id and (l.get('track_id') == track_id if track_id is not None
+                else l.get('track_id') is None and idx['rec'] == stem and l.get('session') == sess)
+            for l in idx['laps'])}
+        recordings = [{k: idx.get(k) for k in ('rec', 'started', 'start_ts')}
+                      | {'laps': len(idx['laps']),
+                         'completed_laps': sum(bool(l.get('capture_complete')) for l in idx['laps'])}
+                      for idx in indexes if idx['rec'] in available]
+        recordings.sort(key=lambda row: row.get('start_ts') or 0, reverse=True)
+        if selected is not None:
+            candidates = [l for l in candidates if l['rec'] in selected]
+
         reference = next((l for idx in indexes if idx.get('rec') == stem
                           for l in idx['laps'] if l['session'] == sess and l['lap'] == reference_lap), None)
         broader = compare_all is True or str(compare_all).lower() in {'1', 'true', 'on'}
@@ -4134,7 +4158,7 @@ def telemetry_laps_data(rec=None, session=None, track=None, car=None, build=True
         sector_theory = (td.theoretical(laps, sector_reference['track_definition'],
                                        sector_reference['sector_variant_id'])
                          if sector_reference and sector_reference.get('track_definition') else None)
-        return {"ok": True, "laps": laps, "context_confirmed": confirmed,
+        return {"ok": True, "laps": laps, "recordings": recordings, "context_confirmed": confirmed,
                 "comparison_warnings": (['Includes other conditions or roles'] if broader else []) +
                                        ([] if confirmed else ['Comparison conditions unconfirmed']), "unindexed": unindexed,
                 "data_version": _telemetry_data_version(),

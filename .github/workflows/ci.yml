@@ -133,6 +133,8 @@ jobs:
         run: python tools/e2e.py --visual --report visual-report
       - name: Verify the optional analysis browser workflow
         run: python tools/e2e-ai.py
+      - name: Recording selection browser workflow
+        run: python tools/e2e-recording-selection.py
       - name: Race Engineer access browser workflow
         run: python tools/e2e-engineer.py
       - name: Race Engineer analysis desk browser workflow
