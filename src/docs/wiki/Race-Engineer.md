@@ -17,7 +17,7 @@ and live delta describe received data; neither advances without new packets.
 Race position reads **P15/15**, for example, from GT7's own-car position and field
 size. Missing or inconsistent readings remain unavailable. Completed lap options
 include the position measured at the line when GT7 provided it. No gaps to
-other cars are inferred. Receipt time, data age and packet age remain visible.
+other cars are inferred. Receipt time and age of the last telemetry packet remain visible.
 
 Select **Session** and **Lap B** to inspect retained current or prior-session laps.
 Sessions show the track, vehicle name and lap count; unknown names fall back to
@@ -26,7 +26,8 @@ Select an eligible **Lap A** from the selected session, or choose a producer-sha
 **Reference source**. The charts use the same validated distance stations, sector
 and context rules as the local Control Center. Blue is A, orange is B, delta is
 B minus A. The current lap is provisional; future curve sections and incomplete
-200 m sectors remain empty. Confirmed best and theoretical values exclude it.
+200 m sectors say **Not yet driven** in muted text. Missing measurements remain
+**Unavailable**, and untimed lap zero reads **Out lap**. Confirmed best and theoretical values exclude it.
 While the lap grows, comparison retains the latest completed observed prefix and
 refreshes it in the background. Its displayed distance identifies that prefix.
 The map uses the complete selected reference lap as its outline, or the latest
@@ -39,8 +40,13 @@ Change the chart channel or distance limits to inspect braking, throttle, speed,
 steering or gear. **Full distance** resets zoom. The map uses measured world
 coordinates. The car marker comes from the latest measured snapshot, independently of
 the selected lap endpoint. Missing coordinates and unrelated historical tracks
-do not show a current car. Larger sectors and corner markers keep their reviewed/unconfirmed
-status. Unknown tracks compare only within the same source and session; known
+do not show a current car. Reviewed larger sections show named A/B times and gain or loss when both laps
+use the same confirmed definition. Unconfirmed definitions retain their status.
+A short trailing mini-sector is grouped with its predecessor for display; shared
+analysis values are unchanged. Curves show their channel units, delta has a zero
+line, and an empty comparison has a message, retains known distance and omits artificial axes. Turn labels
+avoid overlaps and have a textual legend. Declared settings and strategy use named
+values rather than raw JSON. Unknown tracks compare only within the same source and session; known
 car, compound or strategy contradictions prevent the default comparison.
 
 **Follow live** selects the newest active lap. Manually choosing a session or lap

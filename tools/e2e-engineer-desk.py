@@ -16,7 +16,11 @@ async def main():
     with tempfile.TemporaryDirectory(prefix='racecast-desk-browser-') as root:
         fixture=Fixture(root)
         fixture.access().update(enabled=True,expected=0)
-        server=fixture.console(with_live=True); fixture.feed_live()
+        server=fixture.console(with_live=True)
+        if '--shots' in sys.argv:
+            from test_gt7_track_definitions import definition
+            fixture.live._definitions.save(definition(), 0)
+        fixture.feed_live()
         import gt7_recording, gt7_telemetry
         wall, _, raw = list(gt7_recording.Recording(fixture.live_path).packets())[-1]
         fixture.live.put(gt7_telemetry.parse_packet(raw)._replace(race_position=15, car_count=15), wall + .02)
@@ -38,7 +42,7 @@ async def main():
                 errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
                 await page.wait_for_function('() => EngineerDesk.state.pair?.state === "ready"')
                 assert await page.locator('#chart path').count() >= 2
-                assert await page.locator('#sectors tbody tr').first.locator('td').nth(2).inner_text() == 'Unavailable'
+                assert await page.locator('#sectors tbody tr').first.locator('td').nth(2).inner_text() == 'Not yet driven'
                 assert await page.locator('#zoom-to').input_value() == '1000'
                 # A pending comparison must still use a completed lap as the outline.
                 async def pending_pair(route):
