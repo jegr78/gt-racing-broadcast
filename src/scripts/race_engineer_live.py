@@ -103,6 +103,7 @@ def _bounded_recording(path, source, tracks, cars, targets, limit=None, stopped=
     replay.eng.track_db = tracks
     context = gt7_context.Store.for_recording(path).read()
     summaries, details = collections.OrderedDict(), collections.OrderedDict()
+    previous = collections.OrderedDict()
     sizes = {}
     def drain(wall, final=False):
         while replay.laps:
@@ -113,7 +114,11 @@ def _bounded_recording(path, source, tracks, cars, targets, limit=None, stopped=
             replay.times._waiting = [p for p in replay.times._waiting if p[0] is not raw]
             samples, tyres = replay.lap_samples.pop(0), replay.lap_tyres.pop(0)
             found = gt7_recording.session_tracks([raw], tracks).get(raw['session'])
-            row = gt7_laps._indexed_lap(source, raw, samples, tyres, replay.first, tracks, cars, found)
+            row = gt7_laps._indexed_lap(source, raw, samples, tyres, replay.first, tracks, cars, found,
+                                       after_service=previous.get(raw['session'], (None, False))[1])
+            previous[raw['session']] = (raw['lap'], raw['pit'])
+            while len(previous) > SESSIONS_MAX:
+                previous.popitem(last=False)
             row['measurement_hash'] = _measurement_hash(row)
             row = dict(gt7_context.annotate(context['data'], row), context_revision=context['revision'])
             row.update(_start_wall=raw['start'], _end_wall=raw['end'])
@@ -171,6 +176,7 @@ class Store:
         self._sessions = collections.OrderedDict()
         self._identities, self._session_keys = {}, {}
         self._sizes = {}
+        self._closed_previous = collections.OrderedDict()
         self._receipt = None
         self._last_packet = None
         self._values = {}
@@ -225,6 +231,7 @@ class Store:
             self._details.clear()
             self._sessions.clear()
             self._sizes.clear()
+            self._closed_previous.clear()
             self._bindings.clear()
             self._session_offset = 0
             self._mapping_known = self._recording is None
@@ -314,7 +321,11 @@ class Store:
             replay.times._waiting = [p for p in replay.times._waiting if p[0] is not lap]
             found = gt7_recording.session_tracks([lap], self._tracks).get(lap['session'])
             row = gt7_laps._indexed_lap(self.generation, lap, samples, tyres, replay.first,
-                                       self._tracks, self._cars, found)
+                                       self._tracks, self._cars, found,
+                                       after_service=self._closed_previous.get(lap['session'], (None, False))[1])
+            self._closed_previous[lap['session']] = (lap['lap'], lap['pit'])
+            while len(self._closed_previous) > SESSIONS_MAX:
+                self._closed_previous.popitem(last=False)
             if row['gt7_time_s'] is None:
                 row.update(time_s=None, pace_eligible=False, time_valid=False)
             row.update(state='confirmed' if row['gt7_time_s'] is not None else 'unconfirmed')
@@ -364,7 +375,8 @@ class Store:
                   for r in self._summaries.values() if r.get('_context_source') == row.get('_context_source')}
         lookup[(measured['session'], measured['lap'])] = measured
         data = self._context if self._mapping_known or self._recording is None else {}
-        result = dict(gt7_context.annotate(data, measured, lap_lookup=lookup),
+        preceding = max((n for s, n in lookup if s == measured['session'] and n < measured['lap']), default=None)
+        result = dict(gt7_context.annotate(data, measured, lap_lookup=lookup, previous_lap=preceding),
                     session=row['session'],
                     context_revision=self._context_revision if data is self._context else None)
         if data is not self._context:
@@ -422,10 +434,12 @@ class Store:
         raw = replay.eng.open_lap_record()
         current = None
         if raw is not None and (replay.cur or replay.tail):
+            raw['service_events'] = list(replay.cur_events)
             samples = replay.cur if replay.tail is None else replay.cur + [replay.tail]
             current = gt7_laps._indexed_lap(self.generation, raw, samples, replay.tyre,
                                            replay.first, self._tracks, self._cars,
-                                           replay.eng.track, open_lap=True)
+                                           replay.eng.track, open_lap=True,
+                                           after_service=self._closed_previous.get(raw['session'], (None, False))[1])
             current = self._annotate(self._identify(dict(current, state='provisional'), raw))
             current['pace_eligible'] = False
             current['comparison_eligible'] = False
