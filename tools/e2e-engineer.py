@@ -8,11 +8,19 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'tests'))
 from engineer_ui_fixture import Fixture,gate
 from ai_ui_fixture import web_fixture
+import gt7_comparison
 
 
 async def verify(pw,fixture,ui,console,shots=False):
     browser=await pw.chromium.launch(headless=True)
     page=await browser.new_page(viewport={'width':1440,'height':900})
+    # Execute the actual Control Center function in Chromium against shared API math.
+    control = (ROOT/'src/ui/control-center.html').read_text()
+    delta_source = control[control.index('function tmDelta(a, b) {'):control.index('function tmPath(', control.index('function tmDelta(a, b) {'))]
+    for a, b in [([{'d':0,'t':0},{'d':5,'t':1},{'d':8,'t':2}], [{'d':0,'t':0},{'d':5,'t':1.12},{'d':9,'t':2}]),
+                 ([{'d':0,'t':0},{'d':5,'t':1}], [{'d':0,'t':-.0005},{'d':5,'t':.9995}])]:
+        measured = await page.evaluate('([a,b]) => {'+delta_source+'; return tmDelta({trace:a},{trace:b});}', [a,b])
+        assert measured == gt7_comparison.delta(a,b), 'Engineer delta differs from Control Center'
     errors=[];page.on('pageerror',lambda error:errors.append(error.stack))
     await page.goto('http://127.0.0.1:'+str(ui))
     await page.wait_for_function('() => tmState.profile==="profile" && window.RacecastEngineer')

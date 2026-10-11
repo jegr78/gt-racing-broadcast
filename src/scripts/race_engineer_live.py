@@ -11,6 +11,7 @@ import time
 import uuid
 
 import gt7_context
+import gt7_track_definitions
 import gt7_laps
 import gt7_recording
 import gt7_telemetry
@@ -31,7 +32,7 @@ SUMMARY_FIELDS = frozenset(('measurement_hash', '_context_source', 'id', 'sessio
     'layout', 'distance_m', 'length_m', 'fuel_used_l', 'top_speed_kmh', 'lap_role', 'after_service',
     'capture_complete', 'trace_complete', 'time_valid', 'data_quality', 'reasons',
     'pace_eligible', 'comparison_eligible', 'analysis_role', 'compound',
-    'context_confirmed', 'context_warnings', 'tyre_age_laps', 'start_t_s', 'end_t_s'))
+    'elapsed_s', 'observed_from_line', 'provisional_comparison_eligible', 'definition_fingerprint', 'sector_variant_id', 'track_definition_warnings', 'context_confirmed', 'context_warnings', 'tyre_age_laps', 'start_t_s', 'end_t_s'))
 
 
 def _summary(row):
@@ -97,7 +98,7 @@ def _prefix_digest(path, size, stopped=None):
     return digest.hexdigest()
 
 
-def _bounded_recording(path, source, tracks, cars, targets, limit=None, stopped=None):
+def _bounded_recording(path, source, tracks, cars, targets, limit=None, stopped=None, definitions=None):
     """Streaming local replay with finite retention, including explicitly requested laps."""
     replay = gt7_laps._Replay()
     replay.eng.track_db = tracks
@@ -121,6 +122,7 @@ def _bounded_recording(path, source, tracks, cars, targets, limit=None, stopped=
                 previous.popitem(last=False)
             row['measurement_hash'] = _measurement_hash(row)
             row = dict(gt7_context.annotate(context['data'], row), context_revision=context['revision'])
+            row = _decorate(row, context['data'], definitions, tracks)
             row.update(_start_wall=raw['start'], _end_wall=raw['end'])
             key = (row['session'], row['lap'])
             summaries[key] = _summary(row)
@@ -155,6 +157,16 @@ def _bounded_recording(path, source, tracks, cars, targets, limit=None, stopped=
             'notes': context['data'].get('notes', []), 'end_wall': replay.last}
 
 
+def _decorate(row, context, definitions, tracks):
+    result = dict(row)
+    result['notes'] = [note for note in context.get('notes', []) if
+        note['scope'] == 'recording' or note.get('session') == row.get('recording_session', row['session'])
+        and (note['scope'] == 'session' or note.get('lap') == row['lap'])]
+    if definitions is not None and tracks is not None:
+        result = gt7_track_definitions.annotate_index({'laps': [result]}, context, definitions, tracks)['laps'][0]
+    return result
+
+
 class Store:
     """All expensive work is shared. Readers receive copies of immutable publications."""
     def __init__(self, enabled, tracks=None, cars=None, runtime_base=None, bundled=None,
@@ -164,6 +176,10 @@ class Store:
         self._enabled_source, self._clock = enabled, clock
         self._tracks, self._cars = tracks, cars
         self._runtime_base, self._bundled = runtime_base, bundled
+        self._definitions = gt7_track_definitions.Store(runtime_base, os.path.join(bundled or os.path.join(os.path.dirname(__file__), '..', 'assets', 'gt7'), 'track-definitions')) if runtime_base else None
+        self._definition_stamp = ()
+        self._history_revision = 0
+        self._history_hash = None
         self._queue = queue.Queue(maxsize=queue_max)
         self._recovery_queue = queue.Queue(maxsize=16)
         self._stop = threading.Event()
@@ -197,6 +213,7 @@ class Store:
         self._context_error = None
         self._replay = self._new_replay()
         self._published = self._empty()
+        self._refresh_definitions()
         self.refresh_enabled()
         self._worker = threading.Thread(target=self._run, name='engineer-live', daemon=True)
         self._reader = threading.Thread(target=self._recover, name='engineer-recovery', daemon=True)
@@ -266,6 +283,7 @@ class Store:
             if time.monotonic() - checked >= .2:
                 self.refresh_enabled()
                 self._sync_recording()
+                self._refresh_definitions()
                 self._read_context()
                 checked = time.monotonic()
             try:
@@ -383,7 +401,7 @@ class Store:
                     context_revision=self._context_revision if data is self._context else None)
         if data is not self._context:
             result['context_warnings'].append('Recording session mapping unavailable')
-        return result
+        return _decorate(result, data, self._definitions, self._tracks)
 
     def _retain(self, row):
         row['measurement_hash'] = _measurement_hash(row)
@@ -442,7 +460,15 @@ class Store:
                                            replay.first, self._tracks, self._cars,
                                            replay.eng.track, open_lap=True,
                                            after_service=self._closed_previous.get(raw['session'], (None, False))[1])
-            current = self._annotate(self._identify(dict(current, state='provisional'), raw))
+            current.update(state='provisional', elapsed_s=raw['elapsed'],
+                           observed_from_line=replay.eng._acc.started_at_boundary,
+                           lap_role='pit' if raw['pit'] else 'regular' if replay.eng._acc.started_at_boundary else 'partial',
+                           reason='Current lap is provisional', reasons=list(raw['reasons'][:-1]))
+            current = self._annotate(self._identify(current, raw))
+            current['provisional_comparison_eligible'] = bool(current['observed_from_line'] and raw['data_quality'] == 'ok'
+                and current['analysis_role'] not in ('pit', 'partial', 'warmup')
+                and 'Mixed fuel strategy within lap' not in current['context_warnings']
+                and 'Service time outside recorded lap' not in current['context_warnings'])
             current['pace_eligible'] = False
             current['comparison_eligible'] = False
         self._revision += 1
@@ -460,13 +486,22 @@ class Store:
                    best_s=min((r['time_s'] for r in eligible), default=None),
                    theoretical_s=gt7_laps.theoretical_best(pool),
                    warnings=[self._context_error] if self._context_error else [])
+        digest = hashlib.sha256(json.dumps([doc['sessions'], doc['laps']], sort_keys=True, allow_nan=False).encode()).hexdigest()
+        if digest != self._history_hash:
+            self._history_revision += 1
+            self._history_hash = digest
+        doc['history_revision'] = self._history_revision
         with self._lock:
             self._published = doc
             self._detail_publication = dict(self._details)
 
-    def snapshot(self):
+    def snapshot(self, compact=False):
         with self._lock:
             doc = self._published
+        if compact:
+            doc = {k: v for k, v in doc.items() if k not in ('laps', 'sessions')}
+            if doc['current']:
+                doc = dict(doc, current=_summary(doc['current']))
         result = copy.deepcopy(doc)
         receipt = doc['receipt']
         packet = self._last_packet
@@ -482,6 +517,15 @@ class Store:
                                            else 'delayed' if age >= STALE_S else state)}
         result['receipt'].update(packet_age_s=round(packet_age, 3) if packet_age is not None else None,
                                  packet_received_at=packet[0] if packet else None)
+        return result
+
+    def history(self, since=None):
+        with self._lock:
+            doc = self._published
+        revision = doc.get('history_revision', self._history_revision)
+        result = dict(version=1, generation=self.generation, revision=revision, changed=since != revision)
+        if result['changed']:
+            result.update(laps=copy.deepcopy(doc['laps']), sessions=copy.deepcopy(doc['sessions']))
         return result
 
     def detail(self, lid):
@@ -534,12 +578,31 @@ class Store:
         except (OSError, ValueError, gt7_recording.RecordingError):
             pass  # The recorder may not have flushed its new header yet; try next tick.
 
+    def _refresh_definitions(self):
+        if not self._definitions or not self._tracks:
+            return
+        layouts = self._tracks.layouts() if hasattr(self._tracks, 'layouts') else []
+        stamps = []
+        for identity in layouts[:4096]:
+            for filename in (self._definitions.path(identity['id'], identity['reverse']),
+                             os.path.join(self._definitions.bundled, os.path.basename(self._definitions.path(identity['id'], identity['reverse'])))):
+                try:
+                    stat = os.stat(filename)
+                    stamps.append((filename, stat.st_size, stat.st_mtime_ns))
+                except OSError:
+                    stamps.append((filename, None, None))
+        self._definition_stamp = tuple(stamps)
+
+    def _record_stamp(self, source, path):
+        stamp = _record_stamp(source, path)
+        return stamp[:6] + (stamp[6] + (self._definition_stamp,),)
+
     def recording_detail(self, source, path, session, lap, identity=None):
         """Caller must authorize source on every read, including pending/cached reads."""
         try:
             if gt7_context.source_identity(path) != source:
                 return {'state': 'unavailable', 'lap': None}
-            stamp = _record_stamp(source, path)
+            stamp = self._record_stamp(source, path)
         except (OSError, ValueError, gt7_recording.RecordingError):
             return {'state': 'unavailable', 'lap': None}
         start = identity.get('_start_wall') if identity else None
@@ -611,7 +674,7 @@ class Store:
         try:
             if gt7_context.source_identity(path) != source:
                 return {'state': 'unavailable', 'laps': []}
-            stamp = _record_stamp(source, path)
+            stamp = self._record_stamp(source, path)
         except (OSError, ValueError, gt7_recording.RecordingError):
             return {'state': 'unavailable', 'laps': []}
         with self._lock:
@@ -634,11 +697,11 @@ class Store:
                     targets = set(self._tasks[stamp])
                 digest = _prefix_digest(path, stamp[4], self._stop.is_set)
                 idx = _bounded_recording(path, stamp[0], self._tracks, self._cars, targets,
-                                         limit=stamp[4], stopped=self._stop.is_set)
+                                         limit=stamp[4], stopped=self._stop.is_set, definitions=self._definitions)
                 size = (sum(len(json.dumps(v).encode('utf-8')) for v in idx['details'].values())
                         + len(json.dumps(idx['laps']).encode('utf-8'))
                         + len(json.dumps(idx['notes']).encode('utf-8')))
-                now = _record_stamp(stamp[0], path)
+                now = self._record_stamp(stamp[0], path)
                 unchanged = now == stamp
                 appended = (path.endswith('.part') and now[:4] == stamp[:4]
                             and now[6] == stamp[6] and now[4] >= stamp[4]
@@ -685,7 +748,7 @@ class Store:
                         self._details = collections.OrderedDict((lid, dict(row, recording_session=row['session'] - self._session_offset) if row.get('_context_source') == expected else row) for lid, row in self._details.items())
                         self._summaries = collections.OrderedDict((lid, dict(row, recording_session=row['session'] - self._session_offset) if row.get('_context_source') == expected else row) for lid, row in self._summaries.items())
                         break
-            key = (doc['source_id'], doc['revision'])
+            key = (doc['source_id'], doc['revision'], self._definition_stamp)
             self._context_error = None
             if key != self._context_key:
                 self._context_key = key
@@ -728,6 +791,8 @@ class Store:
                 'recovery_bytes': sum(self._recovery_sizes.values())}
 
     def close(self):
+        if getattr(self, 'api', None) is not None:
+            self.api.close()
         self._stop.set()
         self._worker.join(timeout=5)
         self._reader.join(timeout=5)

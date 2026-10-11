@@ -191,5 +191,8 @@ laps and 16 MiB of serialized detail data, plus the protected active lap. Older
 session details go first, then oldest completed details in a long current session.
 Evicted details are explicit. With a matching recording, local background reads
 can restore them; without recording, history is volatile and disappears on restart.
-Recovered recordings remain history. Analysis routes and the complete desk follow
-in the remaining delivery issues.
+Recovered recordings remain history. Authorized analysis routes now provide thin current
+values, version-aware history, asynchronous lap/reference detail and shared A/B metrics.
+The complete desk follows in the remaining UI delivery. See the
+[analysis API contract](https://github.com/jegr78/gt-racing-broadcast/blob/main/src/docs/design/race-engineer-api.md)
+for identities, states and limits.
