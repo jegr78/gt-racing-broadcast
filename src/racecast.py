@@ -6847,6 +6847,27 @@ def _console_internal_host(ip):
     return ip or "127.0.0.1"
 
 
+def engineer_request_data(write=False,payload=None):
+    """Local producer controls; Console clients never reach this API."""
+    import race_engineer_access
+    payload=payload or {}
+    try:
+        profile=_active_profile_name()
+        if not profile or payload.get('profile')!=profile:
+            raise race_engineer_access.AccessError('profile_changed','Select the active profile explicitly and reload Engineer settings')
+        store=race_engineer_access.Store(_profile_runtime(_runtime_base_dir(),profile),available=_profile_has_telemetry())
+        if _active_profile_name()!=profile:
+            raise race_engineer_access.AccessError('profile_changed','Active profile changed; reload Engineer settings')
+        doc=store.update(**{k:payload[k] for k in ('enabled','grant','revoke','label','expected') if k in payload}) if write else store.read()
+        return dict(ok=True,profile=profile,available=store.available,enabled=doc['enabled'],revision=doc['revision'],
+                    analysis_available=False,grants=[dict(id=ident,label=g['label'],context_shared=True) for ident,g in doc['grants'].items()],
+                    recordings=store.recordings())
+    except race_engineer_access.AccessError as exc:
+        return dict(ok=False,error=dict(code=exc.code,message=str(exc)))
+    except (OSError,ValueError,TypeError):
+        return dict(ok=False,error=dict(code='access_failed',message='Engineer settings could not be read or saved'))
+
+
 def crew_entries_data():
     """Crew roster for the Control Center, read live from the running relay's
     /crew/data. {ok, entries:[{row,name,director,producer}]} or {ok:false, error}."""
@@ -6864,22 +6885,24 @@ def crew_entries_data():
                 "producer": bool(row.get("producer")),
                 "commentator": bool(row.get("commentator")),
                 "race_control": bool(row.get("race_control")),
+                "race_engineer": bool(row.get("race_engineer")),
                 "discord": row.get("discord") or ""}
                for i, row in enumerate(data.get("rows") or [], start=1)]
     return {"ok": True, "entries": entries}
 
 
 def crew_write_data(row, name, director, producer, commentator=False,
-                    race_control=False, discord=""):
+                    race_control=False, discord="", race_engineer=None):
     """Write one crew row via the relay's /crew/set (the relay holds the webhook
     URL, the Control Center never POSTs to SHEET_PUSH_URL directly)."""
     try:
+        extra={} if race_engineer is None else {"race_engineer":bool(race_engineer)}
         return _relay_post_json(
             "http://127.0.0.1:%d/crew/set" % RELAY_PORT,
             {"row": row, "name": name,
              "director": bool(director), "producer": bool(producer),
              "commentator": bool(commentator), "race_control": bool(race_control),
-             "discord": (discord or "").strip()})
+             "discord": (discord or "").strip(), **extra})
     except Exception as exc:
         return {"ok": False,
                 "error": "relay not reachable (start the relay): %s" % exc}
@@ -8453,6 +8476,8 @@ def run_ui(rest, fail=sys.exit, open_browser=True):
         "crew_read": crew_entries_data,
         "crew_write": crew_write_data,
         "crew_delete": crew_delete_data,
+        "engineer_read": lambda data:engineer_request_data(False,data),
+        "engineer_write": lambda data:engineer_request_data(True,data),
         "console_status": console_status_data,
         "console_funnel": console_funnel_data,
         "console_set_funnel_auto": console_set_funnel_auto_data,

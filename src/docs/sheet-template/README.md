@@ -23,3 +23,8 @@ without `.csv`), and **File → Import → Upload** each CSV into its tab (impor
 | `Crew.csv` | Crew | relay |
 | `Producer.csv` | Producer | Control Center |
 | `Assets.csv` | Assets | `racecast graphics` / `media` |
+
+The Crew template includes an additive **Race Engineer** checkbox. Redeploy the
+current Sheet webhook before editing it. A Producer inherits Engineer access;
+other roles require explicit assignment plus the producer's solo POV profile
+opt-in. Existing columns keep their header-based meaning.

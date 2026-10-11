@@ -1,4 +1,4 @@
-Name,Commentator,Director,Producer,Race Control,Discord
-Sample Commentator,TRUE,FALSE,FALSE,FALSE,sample_caster
-Sample Director,FALSE,TRUE,TRUE,FALSE,sample_director
-Sample Marshal,FALSE,FALSE,FALSE,TRUE,sample_marshal
+Name,Commentator,Director,Producer,Race Control,Discord,Race Engineer
+Sample Commentator,TRUE,FALSE,FALSE,FALSE,sample_caster,FALSE
+Sample Director,FALSE,TRUE,TRUE,FALSE,sample_director,FALSE
+Sample Marshal,FALSE,FALSE,FALSE,TRUE,sample_marshal,FALSE

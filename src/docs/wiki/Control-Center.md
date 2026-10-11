@@ -548,3 +548,22 @@ separately. HTML links require the Control Center at the recorded local address
 and the intended profile selected. Recording deletion removes its owned analyses
 and input packages after the existing confirmation; machine agent settings remain.
 Private recordings and provider credentials are excluded from automated fixtures.
+
+
+## Race Engineer activation and reference sharing
+
+In a solo POV profile, **Telemetry → Race Engineer access** controls the
+profile-owned opt-in. **Allow Race Engineer** starts disabled. Save access changes
+explicitly. Assigned Engineers and Producers then use their existing Console
+identity; other roles do not receive Engineer access automatically.
+
+Choose a historical recording and **Share recording and context** to grant that
+one source's analysis data, context and notes. A readable shared label replaces
+the producer's filename in the Console. **Revoke** stops future reads. Already
+transmitted data cannot be recalled. Changed, replaced or deleted sources require
+producer review; a filename never transfers permission to an unrelated recording.
+The profile retains at most 128 explicit grants.
+
+Use **Reload access settings** after a conflicting save or an external change.
+The Control Center stays local; Engineer Console routes cannot change recording,
+context, track assignment or broadcast state. See [Console](Console#race-engineer-access).

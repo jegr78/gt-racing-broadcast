@@ -163,6 +163,7 @@ import placeholders  # transparent-graphic placeholder path -> hide pure-placeho
 import gt7_crypto      # GT7 UDP telemetry: Salsa20 decrypt (solo/POV only, #324)
 import gt7_telemetry   # GT7 UDP telemetry: packet parser + TelemetryStore (solo/POV only, #324)
 import gt7_recording   # GT7 telemetry recording to disk (solo/POV only)
+import race_engineer_access
 import gt7_context     # prepared session notes attached to each new recording
 import gt7_cars        # GT7 car id -> car name, from the vendored src/assets/gt7 tables (#713)
 import gt7_data        # GT7 reference data: bundled + runtime updates (#787)
@@ -1829,7 +1830,7 @@ def asset_key(s):
     return re.sub(r"[^a-z0-9-]", "", s)
 
 def resolve_roles(crew_rows, schedule_keys, subject, crew_commentator_keys=frozenset(),
-                  crew_race_control_keys=frozenset()):
+                  crew_race_control_keys=frozenset(), crew_race_engineer_keys=frozenset()):
     """Resolve a verified identity *subject* to its capability set for this event.
 
     crew_rows: iterable of (name, is_director, is_producer) from CrewSource.get().
@@ -1848,7 +1849,7 @@ def resolve_roles(crew_rows, schedule_keys, subject, crew_commentator_keys=froze
     - "race_control" iff subject carries the Crew Race Control flag.
     An unknown subject (no crew row, not in the schedule) yields the empty set.
     Roles are additive (a person may be e.g. both director and race_control).
-    A producer oversees the whole event, so "producer" IMPLIES "director"
+    A producer oversees the whole event, so "producer" IMPLIES "race_engineer", "director"
     (broadcast control) and "race_control" (read-only monitoring): a producer can
     follow and, if needed, steer the event from the /console pages without a
     separate Crew flag. The producer-only step-up ops (set/stint, mode, takeover)
@@ -1860,6 +1861,8 @@ def resolve_roles(crew_rows, schedule_keys, subject, crew_commentator_keys=froze
         roles.add("commentator")
     if subject in crew_race_control_keys:
         roles.add("race_control")
+    if subject in crew_race_engineer_keys:
+        roles.add("race_engineer")
     for name, is_dir, is_prod in crew_rows:
         if asset_key(name) != subject:
             continue
@@ -1868,7 +1871,7 @@ def resolve_roles(crew_rows, schedule_keys, subject, crew_commentator_keys=froze
         if is_prod:
             roles.add("producer")
     if "producer" in roles:
-        roles.update(("director", "race_control"))
+        roles.update(("director", "race_control", "race_engineer"))
     return roles
 
 
@@ -1962,6 +1965,7 @@ CREW_COMMENTATOR_HEADERS = ("commentator",)
 # (mirrors Commentator), no positional fallback. NB: the role string is
 # "race_control"; the unrelated director-only HUD banner is "racecontrol".
 CREW_RACE_CONTROL_HEADERS = ("race control", "race-control", "racecontrol", "rc")
+CREW_RACE_ENGINEER_HEADERS = ("race engineer", "race-engineer", "race_engineer")
 CREW_DISCORD_HEADERS = ("discord", "discord handle", "discord username")
 CREW_TRUTHY = frozenset({"x", "yes", "true", "1", "y", "✓"})
 
@@ -6688,7 +6692,7 @@ class CrewSource:
         self.csv_url = csv_url
         self.cache_path = cache_path
         self.lock = threading.Lock()
-        self.rows = []             # canonical: [(name, is_dir, is_prod, is_commentator, is_race_control, discord)]
+        self.rows = []             # canonical seven fields: append is_race_engineer after discord
         self.last_ok = None
         self.last_error = None
 
@@ -6717,7 +6721,7 @@ class CrewSource:
 
     @staticmethod
     def _parse_full(text):
-        """CSV -> [(name, is_dir, is_prod, is_commentator, is_race_control, discord)].
+        """CSV -> seven-field members; Engineer is appended after the legacy Discord field.
 
         Header mode (opt-in): if a recognized Name header is present, all columns
         are located by header text (so they may move and extras are ignored).
@@ -6737,6 +6741,7 @@ class CrewSource:
             com_i = _col(CREW_COMMENTATOR_HEADERS)
             rc_i = _col(CREW_RACE_CONTROL_HEADERS)
             dis_i = _col(CREW_DISCORD_HEADERS)
+            re_i = _col(CREW_RACE_ENGINEER_HEADERS)
 
             def _cell(i, row):
                 return row[i] if i is not None and len(row) > i else ""
@@ -6755,11 +6760,12 @@ class CrewSource:
                     _crew_truthy(_cell(com_i, r)),
                     _crew_truthy(_cell(rc_i, r)),
                     (_cell(dis_i, r) or "").strip(),
+                    _crew_truthy(_cell(re_i, r)),
                 ))
             return out
         # Positional fallback: name/dir/prod only; no commentator/race-control/discord.
         triples = CrewSource._parse_rows_positional(text)
-        return [(n, d, p, False, False, "") for (n, d, p) in triples]
+        return [(n, d, p, False, False, "", False) for (n, d, p) in triples]
 
     @staticmethod
     def _parse_rows(text):
@@ -6771,25 +6777,42 @@ class CrewSource:
         header): col0=name, col1=director, col2=producer, dropping a leading
         header-like row. Rows with an empty name are skipped."""
         full = CrewSource._parse_full(text)
-        result = [(n, d, p) for (n, d, p, _c, _rc, _x) in full]
+        result = [tuple(row[:3]) for row in full]
         return result or None
 
     def get(self):
         """Back-compat 3-tuple roster (name, is_dir, is_prod) for resolve_roles."""
         with self.lock:
-            return [(n, d, p) for (n, d, p, _c, _rc, _x) in self.rows]
+            return [tuple(row[:3]) for row in self.rows]
 
     def get_full(self):
         """Full 6-tuple roster
         (name, is_dir, is_prod, is_commentator, is_race_control, discord)."""
         with self.lock:
-            return list(self.rows)
+            return [self._member(row)[:6] for row in self.rows]
+
+    @staticmethod
+    def _member(row):
+        """Canonical member with an appended Engineer flag; keep legacy positions."""
+        row=tuple(row)
+        if len(row)==3:return row+(False,False,"",False)
+        if len(row)==5:return row[:4]+(False,row[4],False)
+        if len(row)==6:return row+(False,)
+        if len(row)!=7:raise ValueError("Invalid Crew row")
+        return row
+
+    def get_members(self):
+        """Canonical seven-field members, including the independent Engineer flag."""
+        with self.lock:return [self._member(row) for row in self.rows]
+
+    def race_engineer_keys(self):
+        return {asset_key(row[0]) for row in self.get_members() if row[6] and row[0].strip()}
 
     def discord_map(self):
         """{discord_username_lower: crew_name} from the Crew tab's Discord column.
         Empty handles are skipped. Last write wins on a duplicate handle."""
         with self.lock:
-            full = list(self.rows)
+            full = [self._member(row)[:6] for row in self.rows]
         out = {}
         for name, _d, _p, _c, _rc, discord in full:
             h = (discord or "").strip().lower()
@@ -6800,13 +6823,13 @@ class CrewSource:
     def commentator_keys(self):
         """asset_key set of crew names whose Commentator flag is truthy (A1 union)."""
         with self.lock:
-            full = list(self.rows)
+            full = [self._member(row)[:6] for row in self.rows]
         return {asset_key(n) for (n, _d, _p, c, _rc, _x) in full if c and (n or "").strip()}
 
     def race_control_keys(self):
         """asset_key set of crew names whose Race Control flag is truthy (#244)."""
         with self.lock:
-            full = list(self.rows)
+            full = [self._member(row)[:6] for row in self.rows]
         return {asset_key(n) for (n, _d, _p, _c, rc, _x) in full if rc and (n or "").strip()}
 
     def _fetch_text(self, timeout=15):
@@ -6837,10 +6860,6 @@ class CrewSource:
         if text is None:
             return False
         rows = self._parse_full(text)
-        if not rows:
-            self.last_error = ("Crew tab reachable, but no rows found "
-                               "(correct tab name? a Name column?)")
-            return False
         with self.lock:
             self.rows = rows
             self.last_ok = time.time()
@@ -6848,7 +6867,7 @@ class CrewSource:
         return True
 
     def inject_row(self, row, name=None, director=None, producer=None,
-                   commentator=None, race_control=None, discord=None):
+                   commentator=None, race_control=None, discord=None, race_engineer=None):
         """Optimistically merge a Control-Center crew write into the in-memory
         roster so /crew/data reflects it before the next sheet poll. `row` is the
         1-based data-row index (header excluded); row == len+1 appends a row whose
@@ -6859,13 +6878,14 @@ class CrewSource:
             rows = list(self.rows)
             i = int(row) - 1
             cur = rows[i] if 0 <= i < len(rows) else ("", False, False, False, False, "")
-            cur_n, cur_d, cur_p, cur_c, cur_rc, cur_x = cur
+            cur_n, cur_d, cur_p, cur_c, cur_rc, cur_x, cur_re = self._member(cur)
             entry = (cur_n if name is None else (name or "").strip(),
                      cur_d if director is None else bool(director),
                      cur_p if producer is None else bool(producer),
                      cur_c if commentator is None else bool(commentator),
                      cur_rc if race_control is None else bool(race_control),
-                     cur_x if discord is None else (discord or "").strip())
+                     cur_x if discord is None else (discord or "").strip(),
+                     cur_re if race_engineer is None else bool(race_engineer))
             if 0 <= i < len(rows):
                 rows[i] = entry
             elif i == len(rows) and entry[0]:
@@ -7448,7 +7468,7 @@ class SetupControl(PushHealth):
 
     # -- crew roster writes (Crew tab: Name | Commentator | Director | Producer | Discord) --
     def crew_set(self, row, name=None, director=None, producer=None,
-                 commentator=None, race_control=None, discord=None):
+                 commentator=None, race_control=None, discord=None, race_engineer=None):
         """Write one Crew tab row via the webhook (per-row, mirrors schedule).
         `name` is free text (crew may be director/producer-only people, not in
         the streamer vocabulary); director/producer/commentator/race_control are
@@ -7469,12 +7489,15 @@ class SetupControl(PushHealth):
                    "director": bool(director), "producer": bool(producer),
                    "commentator": bool(commentator),
                    "race_control": bool(race_control), "discord": discord}
+        if race_engineer is not None:
+            payload["race_engineer"]=bool(race_engineer)
         ok, err = self._sync_push(payload, "crew")
         if ok and self.crew_source is not None:
             self.crew_source.inject_row(rownum, name=name, director=bool(director),
                                         producer=bool(producer),
                                         commentator=bool(commentator),
-                                        race_control=bool(race_control), discord=discord)
+                                        race_control=bool(race_control), discord=discord,
+                                        race_engineer=race_engineer)
         return {"ok": True, "row": rownum} if ok else {"error": err}
 
     def crew_delete(self, row):
@@ -10356,7 +10379,7 @@ class QuietThreadingHTTPServer(ThreadingHTTPServer):
 # A GET to one of these with a missing/invalid token, when OAuth is configured,
 # serves the launcher (Login with Discord) instead of a naked 401 JSON page.
 _CONSOLE_PAGE_GETS = frozenset({(), ("cockpit",), ("panel",),
-                                ("health-monitor",), ("race-control",), ("buttons",)})
+                                ("health-monitor",), ("race-control",), ("race-engineer",), ("buttons",)})
 
 
 # The largest request body the control server reads (a parsed POST, or one drained
@@ -10380,7 +10403,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                  preview_manager=None, program_audio_service=None, brands_dir=None,
                  flag_graphic_store=None, graphics_take="off", app_version="dev",
                  channel_source=None, producer_source=None, part_store=None,
-                 channel_csv_url=None, push_url=None, telemetry_store=None):
+                 channel_csv_url=None, push_url=None, telemetry_store=None, engineer_access=None, engineer_page_path=None):
     # Shared across all H instances (one limiter per relay). The CHAT limiter is
     # keyed on the authenticated streamer (per-commentator). The AUTH-FAILURE
     # limiter is keyed on the source IP, which behind Tailscale Funnel collapses to
@@ -10867,10 +10890,18 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 rows = src.get_rows()
             else:
                 rows = getattr(src, "rows", []) or []
-            crew = crew_source.get() if crew_source else []
-            ckeys = crew_source.commentator_keys() if crew_source else frozenset()
-            rckeys = crew_source.race_control_keys() if crew_source else frozenset()
-            return resolve_roles(crew, schedule_keys(rows), subject, ckeys, rckeys)
+            if crew_source and hasattr(crew_source,"get_members"):
+                members=crew_source.get_members()  # One locked roster revision for every capability.
+                crew=[row[:3] for row in members]
+                ckeys={asset_key(row[0]) for row in members if row[3]}
+                rckeys={asset_key(row[0]) for row in members if row[4]}
+                rekeys={asset_key(row[0]) for row in members if row[6]}
+            else:
+                crew = crew_source.get() if crew_source else []
+                ckeys = crew_source.commentator_keys() if crew_source else frozenset()
+                rckeys = crew_source.race_control_keys() if crew_source else frozenset()
+                rekeys = crew_source.race_engineer_keys() if crew_source and hasattr(crew_source,"race_engineer_keys") else frozenset()
+            return resolve_roles(crew, schedule_keys(rows), subject, ckeys, rckeys, rekeys)
 
         def _console_gate(self, p, method):
             """Authorize a /console/* request and return the segment list to fall
@@ -10993,6 +11024,22 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 ext = os.path.splitext(path)[1].lower()
                 ctype = _LOGO_CTYPES.get(ext, "image/png")
                 self._send_file(path, ctype)
+                return None
+            if sub and sub[0]=="race-engineer":
+                if method!="GET" or sub not in (["race-engineer"],["race-engineer","access"]):
+                    return self._send({"error":{"code":"not_found","message":"Unknown readonly Engineer route"}},404)
+                if console_policy.decide(roles,sub,method,has_step_up)!=console_policy.ALLOW:
+                    return self._send({"error":{"code":"forbidden","message":"Race Engineer capability is required"}},403)
+                try:
+                    if engineer_access is None:raise race_engineer_access.AccessError("feature_disabled","The producer has not enabled Race Engineer")
+                    access=engineer_access.authorize(roles)
+                except race_engineer_access.AccessError as exc:
+                    status=403 if exc.code in ("feature_disabled","forbidden") else 503
+                    return self._send({"error":{"code":exc.code,"message":str(exc)}},status)
+                if sub==["race-engineer","access"]:
+                    return self._send(dict(access,analysis_available=False))
+                if not engineer_page_path:return self._send({"error":{"code":"not_found","message":"Engineer page unavailable"}},404)
+                self._send_page(engineer_page_path,"/console",cookie_token=self._cockpit_token(),cookie_path="/console")
                 return None
             # Race Control monitoring desk (#244): a read-only page + ONE new data
             # endpoint, both gated on the race_control capability. The redacted
@@ -11729,12 +11776,12 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     # ingress never reaches it (same trust model as
                     # /schedule/data). Lets the `racecast links` CLI enumerate
                     # Crew ∪ Schedule over loopback. Empty when crew is disabled.
-                    rows = crew_source.get_full() if crew_source else []
+                    rows = (crew_source.get_members() if hasattr(crew_source,"get_members") else crew_source.get_full()) if crew_source else []
                     return self._send({"rows": [
                         {"name": n, "director": bool(d), "producer": bool(pr),
                          "commentator": bool(c), "race_control": bool(rc),
-                         "discord": x or ""}
-                        for (n, d, pr, c, rc, x) in rows]})
+                         "discord": x or "", "race_engineer": bool(re)}
+                        for (n, d, pr, c, rc, x, re) in (CrewSource._member(row) for row in rows)]})
                 if p == ["event-notes", "data"]:
                     # League-owner notes shown as a modal in the three console
                     # pages. Read-only; one shared list for all roles. Mirrored
@@ -12309,7 +12356,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         body.get("row"), body.get("name"),
                         body.get("director"), body.get("producer"),
                         body.get("commentator"), body.get("race_control"),
-                        body.get("discord")))
+                        body.get("discord"), body.get("race_engineer")))
                 if p == ["crew", "delete"]:
                     return self._send(setup_ctl.crew_delete(body.get("row")))
                 if p == ["pov", "set"]:
@@ -13104,6 +13151,8 @@ def main():
     threading.Thread(target=preview_manager.run, daemon=True).start()
     program_audio_service = (ProgramAudioService(relay, LOG)
                              if relay.program_audio else None)
+    engineer_access=race_engineer_access.Store(runtime,available=telemetry_active(args.solo,os.environ))
+    engineer_page_path=os.path.join(os.path.dirname(here),"console","race-engineer.html")
     handler = make_handler(relay, panel_path, hud_source, hud_path, assets_dir,
                            timer_store, setup_ctl,
                            overlay_dir=args.overlay_dir, chat_store=chat_store,
@@ -13140,7 +13189,8 @@ def main():
                            part_store=part_store,
                            channel_csv_url=channel_csv_url,
                            push_url=push_url,
-                           telemetry_store=telemetry_store)
+                           telemetry_store=telemetry_store,engineer_access=engineer_access,
+                           engineer_page_path=engineer_page_path)
     bind_addrs = resolve_bind_addresses(
         args.bind, detect_tailscale_ip() if args.bind == "auto" else None)
     servers, bound_addrs = [], []

@@ -5361,9 +5361,9 @@ def t_crew_entries_data_maps_relay_rows():
     # row=undefined and every edit of an existing person fails.
     assert out["entries"] == [
         {"row": 1, "name": "Dana", "director": True, "producer": False,
-         "commentator": False, "race_control": False, "discord": "dana_d"},
+         "commentator": False, "race_control": False, "discord": "dana_d", "race_engineer": False},
         {"row": 2, "name": "Pia", "director": False, "producer": True,
-         "commentator": True, "race_control": True, "discord": ""}]
+         "commentator": True, "race_control": True, "discord": "", "race_engineer": False}]
     assert [e["row"] for e in out["entries"]] == [1, 2]
     assert seen["url"].endswith("/crew/data")
 
