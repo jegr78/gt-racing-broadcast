@@ -108,7 +108,8 @@ def t_http_current_access_reference_revoke_and_query_boundaries():
                     status, data = request(route,query,subject='director')
                     assert status == 403 and data['error']['code'] == 'forbidden'
                     assert request(route,query,subject='owner')[0] == 200
-                    assert request(route,query,subject=None)[0] == 401
+                    status, missing = request(route,query,subject=None)
+                    assert status == 401 and missing['error']['code'] == 'unauthorized'
                 for query in ('profile=other','path=../private','since=-1','since=0&since=1'):
                     status, data = request('history',query)
                     assert status == 400 and data['error']['code'] == 'invalid_query'
@@ -118,7 +119,23 @@ def t_http_current_access_reference_revoke_and_query_boundaries():
                 archived = next(r['id'] for r in ref['laps'] if r['comparison_eligible'])
                 detail = wait_ready(lambda: request('lap','id='+archived)[1]); assert detail['state'] == 'ready'
                 assert 'rec' not in detail['lap'] and 'recording_session' not in detail['lap']
-                settings.update(revoke=source, expected=1)
+                status, missing = request('reference','id='+'f'*32)
+                assert status == 410 and missing['error']['code'] == 'reference_unavailable'
+                status, missing = request('lap','id=r:'+'f'*32+':1:2')
+                assert status == 410 and missing['error']['code'] == 'reference_unavailable'
+                status, missing = request('lap','id=../private')
+                assert status == 400 and missing['error']['code'] == 'invalid_query'
+                original_reference = store.api.reference
+                def revoking_reference(source_id, source_path):
+                    result = original_reference(source_id,source_path)
+                    settings.update(revoke=source,expected=1)
+                    return result
+                store.api.reference = revoking_reference
+                status, missing = request('reference','id='+source)
+                assert status == 410 and missing['error']['code'] == 'reference_unavailable'
+                store.api.reference = original_reference
+                settings.update(grant=source,expected=2)
+                settings.update(revoke=source, expected=3)
                 for route, query in [('reference','id='+source),('lap','id='+archived),
                                      ('compare','a='+archived+'&b='+snap['current']['id'])]:
                     status, data = request(route,query)
@@ -126,7 +143,7 @@ def t_http_current_access_reference_revoke_and_query_boundaries():
                 crew.inject_row(1,race_engineer=False)
                 status, data = request('snapshot'); assert status == 403 and data['error']['code'] == 'forbidden'
                 crew.inject_row(1,race_engineer=True)
-                settings.update(enabled=False, expected=2)
+                settings.update(enabled=False, expected=4)
                 status, data = request('snapshot'); assert status == 403 and data['error']['code'] == 'feature_disabled'
             finally:
                 server.shutdown(); server.server_close()
@@ -201,6 +218,18 @@ def t_notes_context_and_definition_edits_change_prepared_analysis():
                 assert updated['definition_fingerprint'] != detail['definition_fingerprint']
                 assert updated['corner_metrics'][0]['number'] == 7
             finally: service.close()
+
+
+def t_preparation_cache_bounds_apply_to_failures_and_large_results():
+    with live.Store(lambda: True) as store:
+        service = api.Service(store)
+        try:
+            for n in range(30):
+                service._remember(str(n), dict(state='unavailable', data='x' * 1200000))
+            assert len(service._cache) <= 16 and sum(len(json.dumps(r).encode()) for r in service._cache.values()) <= 16777216
+            service._remember('oversized',dict(state='ready', data='x' * 2200000))
+            assert service._cache['oversized']['state'] == 'unavailable'
+        finally: service.close()
 
 
 if __name__ == '__main__':

@@ -15,7 +15,8 @@ def compare(a, b):
     provisional = a.get('state') == 'provisional' or b.get('state') == 'provisional'
     # A current lap can be inspected against a confirmed eligible reference. Its
     # observed prefix never enters a confirmed best/theoretical pool.
-    ref, candidate = (b, a) if a.get('state') == 'provisional' else (a, b)
+    ref, candidate = ((a, b) if a.get('state') == 'provisional' else
+                      (b, a) if b.get('state') == 'provisional' else (a, b))
     candidates = gt7_laps.pool([{'laps': [candidate]}], ref.get('track_id'),
                                ref.get('car_id'), ref.get('rec'), ref.get('session'))
     compatible = bool(candidates and gt7_context.compatible(ref, candidate)

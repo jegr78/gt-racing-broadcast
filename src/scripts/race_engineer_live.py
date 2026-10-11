@@ -213,6 +213,7 @@ class Store:
         self._context_error = None
         self._replay = self._new_replay()
         self._published = self._empty()
+        self._refresh_definitions()
         self.refresh_enabled()
         self._worker = threading.Thread(target=self._run, name='engineer-live', daemon=True)
         self._reader = threading.Thread(target=self._recover, name='engineer-recovery', daemon=True)

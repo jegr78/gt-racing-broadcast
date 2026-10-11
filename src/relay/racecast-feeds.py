@@ -10970,7 +10970,13 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     self._send_page(console_page_path, "/console")
                     return None
                 # API calls, non-GET, or OAuth-off installs: the rate-limited 401.
-                self._console_deny()
+                if sub and sub[0] == 'race-engineer':
+                    client = self.client_address[0] if self.client_address else '?'
+                    limited = not _console_authfail_rl.allow(client)
+                    self._send({'error': {'code': 'rate_limited' if limited else 'unauthorized',
+                                         'message': 'Console identity is required'}}, 429 if limited else 401)
+                else:
+                    self._console_deny()
                 return None
             roles = self._console_roles(subject)
             # Step-up secret header.
@@ -11041,7 +11047,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     return self._send({"error":{"code":"forbidden","message":"Race Engineer capability is required"}},403)
                 try:
                     if engineer_access is None:raise race_engineer_access.AccessError("feature_disabled","The producer has not enabled Race Engineer")
-                    access=engineer_access.authorize(roles)
+                    access = (engineer_access.authorize(roles) if sub in (["race-engineer"], ["race-engineer", "access"])
+                              else engineer_access._authorized_doc(roles))
                 except race_engineer_access.AccessError as exc:
                     status=403 if exc.code in ("feature_disabled","forbidden") else 503
                     return self._send({"error":{"code":exc.code,"message":str(exc)}},status)

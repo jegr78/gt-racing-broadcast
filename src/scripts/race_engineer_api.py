@@ -137,6 +137,14 @@ class Service:
         return dict(version=1, generation=self.live.generation, state='ready',
                     a=public_lap(a), b=public_lap(b), **gt7_comparison.compare(a, b))
 
+    def _remember(self, key, result):
+        if len(json.dumps(result, allow_nan=False).encode()) > 2097152:
+            result = dict(version=1, generation=self.live.generation, state='unavailable')
+        with self._lock:
+            self._cache[key] = result
+            while len(self._cache) > 16 or sum(len(json.dumps(r).encode()) for r in self._cache.values()) > 16777216:
+                self._cache.popitem(last=False)
+
     def _run(self):
         while not self._stop.is_set():
             try:
@@ -145,17 +153,9 @@ class Service:
                 continue
             try:
                 result = self._prepare(rows)
-                size = len(json.dumps(result, allow_nan=False).encode())
-                with self._lock:
-                    if size > 2097152:
-                        result = dict(version=1, generation=self.live.generation, state='unavailable')
-                    if result:
-                        self._cache[key] = result
-                        while len(self._cache) > 16 or sum(len(json.dumps(r).encode()) for r in self._cache.values()) > 16777216:
-                            self._cache.popitem(last=False)
+                self._remember(key, result)
             except (ValueError, TypeError, KeyError, OSError):
-                with self._lock:
-                    self._cache[key] = dict(version=1, generation=self.live.generation, state='unavailable')
+                self._remember(key, dict(version=1, generation=self.live.generation, state='unavailable'))
             finally:
                 with self._lock:
                     self._pending.discard(key)
