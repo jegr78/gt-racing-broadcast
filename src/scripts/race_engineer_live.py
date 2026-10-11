@@ -1,6 +1,7 @@
 """One bounded live analysis worker and one shared local recording recovery worker."""
 import collections
 import copy
+import hashlib
 import json
 import math
 import os
@@ -24,7 +25,7 @@ DETAIL_BYTES_MAX = 16 * 1024 * 1024
 ENTRY_BYTES_MAX = 1024 * 1024
 RECOVERY_MAX = 8
 STALE_S = 5.0
-SUMMARY_FIELDS = frozenset(('_context_source', 'id', 'session_id', 'version', 'context_revision',
+SUMMARY_FIELDS = frozenset(('measurement_hash', '_context_source', 'id', 'session_id', 'version', 'context_revision',
     '_start_wall', '_end_wall', 'recording_session', 'session', 'lap', 'state', 'detail_state', 'gt7_time_s',
     'time_s', 'relay_time_s', 'status', 'reason', 'car_id', 'car', 'track_id', 'track',
     'layout', 'distance_m', 'length_m', 'fuel_used_l', 'top_speed_kmh', 'lap_role', 'after_service',
@@ -35,6 +36,13 @@ SUMMARY_FIELDS = frozenset(('_context_source', 'id', 'session_id', 'version', 'c
 
 def _summary(row):
     return {k: v for k, v in row.items() if k in SUMMARY_FIELDS}
+
+
+def _measurement_hash(row):
+    keys = ('gt7_time_s', 'trace', 'sectors', 'points', 'fuel_used_l', 'car_id',
+            'capture_complete', 'data_quality', 'distance_m')
+    raw = json.dumps({k: row.get(k) for k in keys}, sort_keys=True, allow_nan=False).encode('utf-8')
+    return hashlib.sha256(raw).hexdigest()
 
 
 def _finite(value):
@@ -62,7 +70,22 @@ def _record_stamp(source, path):
     return source, os.path.realpath(path), st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, context_stamp
 
 
-def _bounded_recording(path, source, tracks, cars, targets):
+def _prefix_digest(path, size, stopped=None):
+    digest = hashlib.sha256()
+    with open(path, 'rb') as fh:
+        remaining = size
+        while remaining:
+            if stopped and stopped():
+                raise ValueError('Recovery stopped')
+            chunk = fh.read(min(65536, remaining))
+            if not chunk:
+                raise ValueError('Recording prefix truncated')
+            digest.update(chunk)
+            remaining -= len(chunk)
+    return digest.hexdigest()
+
+
+def _bounded_recording(path, source, tracks, cars, targets, limit=None, stopped=None):
     """Streaming local replay with finite retention, including explicitly requested laps."""
     replay = gt7_laps._Replay()
     replay.eng.track_db = tracks
@@ -79,6 +102,7 @@ def _bounded_recording(path, source, tracks, cars, targets):
             samples, tyres = replay.lap_samples.pop(0), replay.lap_tyres.pop(0)
             found = gt7_recording.session_tracks([raw], tracks).get(raw['session'])
             row = gt7_laps._indexed_lap(source, raw, samples, tyres, replay.first, tracks, cars, found)
+            row['measurement_hash'] = _measurement_hash(row)
             row = dict(gt7_context.annotate(context['data'], row), context_revision=context['revision'])
             row.update(_start_wall=raw['start'], _end_wall=raw['end'])
             key = (row['session'], row['lap'])
@@ -95,7 +119,12 @@ def _bounded_recording(path, source, tracks, cars, targets):
                 old = next((k for k in details if not wanted(k)), next(iter(details)))
                 details.pop(old)
                 sizes.pop(old)
-    for wall, _kind, plain in gt7_recording.Recording(path).packets():
+    recording = gt7_recording.Recording(path)
+    for wall, _kind, plain in recording.packets():
+        if stopped and stopped():
+            raise ValueError('Recovery stopped')
+        if limit is not None and recording.pos > limit:
+            break
         replay._feed(wall, gt7_telemetry.parse_packet(plain))
         if len(replay.cur) > SAMPLES_MAX:
             del replay.cur[SAMPLES_MAX:]
@@ -106,7 +135,7 @@ def _bounded_recording(path, source, tracks, cars, targets):
     drain(replay.last or 0, final=True)
     return {'laps': list(summaries.values()), 'details': details,
             'requested': set(targets), 'context_revision': context['revision'],
-            'notes': context['data'].get('notes', [])}
+            'notes': context['data'].get('notes', []), 'end_wall': replay.last}
 
 
 class Store:
@@ -328,6 +357,7 @@ class Store:
         return result
 
     def _retain(self, row):
+        row['measurement_hash'] = _measurement_hash(row)
         row = self._annotate(row)
         lid, sid = row['id'], row['session_id']
         if (self._recording and self._recording_started is not None
@@ -474,18 +504,28 @@ class Store:
         start = identity.get('_start_wall') if identity else None
         target = (session, lap, start)
         with self._lock:
-            cached = self._recovery.get(stamp)
+            cached = self._cached_recording(stamp, path)
             if cached is not None:
                 row = (next((r for r in cached['details'].values() if r['lap'] == lap
                              and abs(r['_start_wall'] - start) <= .2), None)
                        if start is not None else cached['details'].get((session, lap)))
-                if row is None and target in cached['requested']:
+                if row is None and target in cached['requested'] and (start is None or
+                        cached['end_wall'] is not None and start < cached['end_wall']):
                     return {'state': 'unavailable', 'lap': None}
                 if row is not None:
+                    if identity and identity.get('measurement_hash') != row.get('measurement_hash'):
+                        return {'state': 'unavailable', 'lap': None}
                     row = copy.deepcopy(row)
                     if identity is not None:
                         row.update({k: identity[k] for k in ('id', 'session_id', 'version', 'state', 'recording_session')})
                     return {'state': 'ready', 'lap': row, 'context_revision': cached['context_revision']}
+            running = next((key for key in self._tasks if path.endswith('.part')
+                            and key[:4] == stamp[:4] and key[6] == stamp[6]), stamp)
+            if running != stamp:
+                if len(self._tasks[running]) < DETAILS_MAX:
+                    self._tasks[running].add(target)
+                    return {'state': 'pending', 'lap': None}
+                return {'state': 'unavailable', 'lap': None}
             if stamp not in self._tasks:
                 try:
                     self._recovery_queue.put_nowait((stamp, path))
@@ -498,6 +538,22 @@ class Store:
                 return {'state': 'unavailable', 'lap': None}
         return {'state': 'pending', 'lap': None}
 
+    def _cached_recording(self, stamp, path):
+        """Under _lock. Closed files use exact signatures; active files keep frozen prefixes."""
+        if not path.endswith('.part'):
+            return self._recovery.get(stamp)
+        for key, cached in reversed(list(self._recovery.items())):
+            if key[:4] != stamp[:4] or key[6] != stamp[6]:
+                continue
+            if (stamp[4] < cached['checked_size'] or
+                    stamp[4] == cached['checked_size'] and stamp[5] != cached['checked_mtime']):
+                self._recovery.pop(key)
+                self._recovery_sizes.pop(key, None)
+                continue
+            cached['checked_size'], cached['checked_mtime'] = stamp[4], stamp[5]
+            return cached
+        return None
+
     def recording_snapshot(self, source, path):
         """Bounded summaries, prepared once per current source/context signature."""
         try:
@@ -507,7 +563,7 @@ class Store:
         except (OSError, ValueError, gt7_recording.RecordingError):
             return {'state': 'unavailable', 'laps': []}
         with self._lock:
-            cached = self._recovery.get(stamp)
+            cached = self._cached_recording(stamp, path)
         if cached is None:
             status = self.recording_detail(source, path, 0, 0)
             return {'state': status['state'], 'laps': []}
@@ -524,11 +580,20 @@ class Store:
                 self._replays += 1
                 with self._lock:
                     targets = set(self._tasks[stamp])
-                idx = _bounded_recording(path, stamp[0], self._tracks, self._cars, targets)
+                digest = _prefix_digest(path, stamp[4], self._stop.is_set)
+                idx = _bounded_recording(path, stamp[0], self._tracks, self._cars, targets,
+                                         limit=stamp[4], stopped=self._stop.is_set)
                 size = (sum(len(json.dumps(v).encode('utf-8')) for v in idx['details'].values())
                         + len(json.dumps(idx['laps']).encode('utf-8'))
                         + len(json.dumps(idx['notes']).encode('utf-8')))
-                if (gt7_context.source_identity(path) == stamp[0] and _record_stamp(stamp[0], path) == stamp
+                now = _record_stamp(stamp[0], path)
+                unchanged = now == stamp
+                appended = (path.endswith('.part') and now[:4] == stamp[:4]
+                            and now[6] == stamp[6] and now[4] >= stamp[4]
+                            and _prefix_digest(path, stamp[4], self._stop.is_set) == digest)
+                idx.update(prefix_size=stamp[4], prefix_digest=digest,
+                           checked_size=now[4], checked_mtime=now[5])
+                if (gt7_context.source_identity(path) == stamp[0] and (unchanged or appended)
                         and size <= DETAIL_BYTES_MAX):
                     with self._lock:
                         self._recovery[stamp] = idx

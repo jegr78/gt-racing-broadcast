@@ -232,8 +232,8 @@ def t_late_recovery_target_is_not_declared_exhausted():
         source = gt7_context.source_identity(path)
         original = live._bounded_recording
         reached, release = threading.Event(), threading.Event()
-        def held(*args):
-            result = original(*args)
+        def held(*args, **kwargs):
+            result = original(*args, **kwargs)
             reached.set()
             assert release.wait(5)
             result['requested'] = set(args[4])  # EOF barrier, before the replay seals its targets.
@@ -337,6 +337,57 @@ def t_relay_collection_follows_the_profile_without_a_browser_or_recording():
             assert not store.put(pkt, 101)
         finally:
             store.close()
+
+
+def t_active_recording_prefix_survives_appends_and_detects_changed_measurements():
+    import struct
+    from test_gt7_laps import _pkt
+    with tempfile.TemporaryDirectory() as d:
+        path = write_circle_recording(d)
+        part = path + '.part'
+        os.rename(path, part)
+        original = live._bounded_recording
+        reached, release = threading.Event(), threading.Event()
+        def held(*args, **kwargs):
+            result = original(*args, **kwargs)
+            reached.set()
+            assert release.wait(5)
+            return result
+        live._bounded_recording = held
+        try:
+            with live.Store(lambda: True, tracks=FakeTracks(), cars=FakeCars(),
+                            queue_max=4096, details_max=2) as store:
+                store.bind_recording(part)
+                feed(store, part)
+                brief = next(r for r in store.snapshot()['laps'] if r['lap'] == 2)
+                assert store.detail(brief['id'])['state'] == 'pending'
+                assert reached.wait(5)
+                with open(part, 'ab') as f:
+                    f.write(gr._encode(1_700_000_080.6, ord('~'), _pkt(5, 50, .2, 20000)))
+                release.set()
+                assert store.wait_recovery(10)
+                assert store.detail(brief['id'])['state'] == 'ready'
+                with open(part, 'ab') as f:
+                    f.write(gr._encode(1_700_000_080.65, ord('~'), _pkt(5, 50, .21, 20000)))
+                assert store.detail(brief['id'])['state'] == 'ready'
+                assert store.stats()['replays'] == 1, 'reader replayed after a normal append'
+                rec = gr.Recording(part)
+                for _wall, _kind, plain in rec.packets():
+                    if tm.parse_packet(plain).lap == 2:
+                        offset = rec.record_start + gr._REC.size + tm.OFF_SPEED
+                        break
+                with open(part, 'r+b') as f:
+                    f.seek(offset)
+                    f.write(struct.pack('<f', 55.0))
+                assert store.detail(brief['id'])['state'] == 'pending'
+                assert store.wait_recovery(10)
+                assert store.detail(brief['id'])['state'] == 'unavailable'
+                with open(part, 'r+b') as f:
+                    f.truncate(100)
+                assert store.detail(brief['id'])['state'] != 'ready'
+        finally:
+            release.set()
+            live._bounded_recording = original
 
 
 if __name__ == '__main__':
