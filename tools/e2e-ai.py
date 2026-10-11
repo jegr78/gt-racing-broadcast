@@ -51,11 +51,22 @@ async def verify(page,fixture,port):
     assert not fixture.control().history()['runs'],'preview invoked a provider'
     await page.locator('#ai-goal').fill('changed');assert await page.locator('#ai-start').is_disabled()
     # A delayed old preview must not restore permission to start changed inputs.
+    preview_arrived=asyncio.Event();preview_release=asyncio.Event();preview_delivered=asyncio.Event()
     async def delayed(route):
-        response=await route.fetch();await asyncio.sleep(.3);await route.fulfill(response=response)
-    await page.route('**/api/ai/preview',delayed)
-    await page.locator('#ai-preview-button').click();await page.locator('#ai-goal').fill('changed again')
-    await asyncio.sleep(.5);assert await page.locator('#ai-start').is_disabled()
+        response=await route.fetch();preview_arrived.set();await preview_release.wait()
+        await route.fulfill(response=response);preview_delivered.set()
+        return None
+    await page.route('**/api/ai/preview',delayed,times=1)
+    await page.evaluate('''() => {const button=document.getElementById('ai-preview-button');
+        window.originalPreview=button.onclick;window.previewSettled=false;
+        button.onclick=async event => {await window.originalPreview(event);window.previewSettled=true;};}''')
+    await page.locator('#ai-preview-button').click();await asyncio.wait_for(preview_arrived.wait(),10)
+    await page.locator('#ai-goal').fill('changed again');preview_release.set()
+    await asyncio.wait_for(preview_delivered.wait(),5)
+    await page.wait_for_function('() => window.previewSettled')
+    await page.evaluate('''() => {document.getElementById('ai-preview-button').onclick=window.originalPreview;
+        delete window.originalPreview;delete window.previewSettled;}''')
+    assert await page.locator('#ai-start').is_disabled()
     await page.unroute('**/api/ai/preview',delayed)
     arrived=asyncio.Event();finished=asyncio.Event()
     async def delayed_job(route):

@@ -2741,14 +2741,27 @@ def app_quit_cmd(rest):
     cmd = ev.quit_command(name, sys.platform)
     if cmd is None:
         sys.exit(f"app: cannot quit {name} on this system.")
+    deadline = time.monotonic() + OBS_EXIT_WAIT_S
     try:
-        rc = subprocess.run(cmd, capture_output=True).returncode
+        kwargs = {"timeout": OBS_EXIT_WAIT_S} if name == "obs" else {}
+        rc = subprocess.run(cmd, capture_output=True, **kwargs).returncode
+    except subprocess.TimeoutExpired:
+        sys.exit("app: OBS quit request timed out; no forced termination was attempted.")
     except OSError as exc:
         sys.exit(f"app: failed to quit {name} ({exc}).")
-    if rc == 0:
-        print(f"Asked {name} to quit.")
-    else:
+    if rc != 0:
         sys.exit(f"app: {name} did not quit (exit {rc}). It may not be running.")
+    if name != "obs":
+        print(f"Asked {name} to quit.")
+        return
+    try:
+        exited = _wait_for_obs_exit(timeout=max(0, deadline - time.monotonic()))
+    except OSError as exc:
+        sys.exit(f"app: cannot confirm OBS exit ({exc}); no forced termination was attempted.")
+    if not exited:
+        sys.exit("app: OBS is still running or shutting down after 30 seconds; "
+                 "no forced termination was attempted. Wait before launching again.")
+    print("OBS exited.")
 
 
 def obs_refresh_cmd(_rest):
@@ -5215,6 +5228,16 @@ def _gui_child_env(app, ev=None):
     return env, overrides
 
 
+OBS_EXIT_WAIT_S = 30
+
+
+def _wait_for_obs_exit(timeout=OBS_EXIT_WAIT_S):
+    ev = _event_modules()[0]
+    return ev.wait_for_app_exit("obs", timeout=timeout,
+        progress=lambda: print("obs: waiting for the existing process to exit (up to 30 seconds)...",
+                               flush=True))
+
+
 def _gui_spawn(argv, cwd, env, app, popen=None, sleep=None):
     """Launch a GUI app and surface an IMMEDIATE death in its own words.
 
@@ -5226,6 +5249,9 @@ def _gui_spawn(argv, cwd, env, app, popen=None, sleep=None):
     Raises OSError like Popen; returns the note it printed ("" when the app is
     still alive).
     """
+    if app == "obs" and not _wait_for_obs_exit():
+        raise OSError("OBS is still running or shutting down after 30 seconds; "
+                      "no second instance started. Wait for OBS to exit and try again")
     popen = subprocess.Popen if popen is None else popen
     sleep = time.sleep if sleep is None else sleep
     with tempfile.TemporaryFile() as fh:
