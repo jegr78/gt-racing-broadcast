@@ -11,7 +11,7 @@ the current Sheet webhook when adding the Crew field.
 ## Live values and analysis
 
 The producer can replay a profile recording through the running relay. The desk
-then reads **Replay · Recorded session · speed×** and receives the same source as
+then reads **Replay · Recorded session and capture date · speed×** and receives the same source as
 the broadcast HUD. It exposes a display label, never the producer's filename.
 
 ![Engineer desk receiving a replay](images/console-race-engineer-replay.png)

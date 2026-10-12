@@ -36,7 +36,8 @@ confirmation is suspended for that source. Batches of 64 packets drain the bound
 analysis queue before prefeed enters the paced interval. Every stop and EOF resets
 the HUD engine and retires the replay generation before UDP consumers resume.
 
-The public source label is independent of private filenames and recording headers.
+The public source label uses the validated capture date and never the private
+filename or free-form profile metadata. Unreadable dates retain a generic label.
 On-air start checks fresh OBS health, falling back to the known streaming state if
 OBS is unreachable. Control Center obtains status through ordinary CLI jobs and
 confirms before passing --on-air. No new relay proxy is added.

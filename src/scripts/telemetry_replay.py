@@ -1,5 +1,6 @@
 """Profile-owned telemetry replay through the running relay's normal consumers."""
 import math
+import datetime
 import threading
 import time
 from pathlib import Path
@@ -110,6 +111,15 @@ class Controller:
             self._stop = threading.Event()
             # Deliberately independent of the private filename and header profile.
             label = "Recorded session"
+            try:
+                started = datetime.datetime.fromisoformat(gt7_recording.Recording(str(path)).header.get("started"))
+                if started.tzinfo is not None:
+                    started = started.astimezone(datetime.timezone.utc)
+                    label += started.strftime(" %Y-%m-%d %H:%M UTC")
+                else:
+                    label += started.strftime(" %Y-%m-%d %H:%M")
+            except (ValueError, TypeError, OSError, gt7_recording.RecordingError):
+                pass  # Legacy or malformed date metadata keeps the generic safe label.
             with self._lock:
                 try:
                     self._reset(True, label, speed)

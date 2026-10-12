@@ -181,6 +181,7 @@ def t_prefeed_and_switch():
             snapshot = engineer.snapshot()
             assert engineer.generation != generation
             assert snapshot["replay"]["active"]
+            assert snapshot["replay"]["label"] == "Recorded session 2023-11-14 22:13 UTC"
             assert "private-name" not in str(snapshot["replay"])
             assert engineer.stats()["dropped"] == 0
             assert not recorded, "Replay wrote its packets to the active recorder"
