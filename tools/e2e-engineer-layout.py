@@ -157,9 +157,14 @@ async def main():
                  state.refSource='';state.follow=true;state.laps=[{...lap,id:'unknown',track_id:null,session_id:cur.session_id,time_s:1},{...lap,id:'known',track_id:'layout',session_id:cur.session_id,time_s:2}];
                  state.snapshot={...saved.snapshot,current:{...cur,track_id:'layout'}};const known=pick();
                  state.snapshot={...saved.snapshot,current:{...cur,track_id:null}};const unknown=pick();
-                 state.rejected.add('unknown|'+cur.id);const rejected=pick();
-                 Object.assign(state,saved);state.rejected.clear();selections();return {known,unknown,rejected};}''')
-                assert picks == {'known':'known','unknown':'unknown','rejected':''}, f'automatic reference ignored the comparable pool: {picks}'
+                 state.rejected.add('unknown|'+cur.id);const rejected=pick();state.rejected.clear();
+                 state.snapshot={...saved.snapshot,current:{...cur,track_id:'layout',provisional_comparison_eligible:false}};const closed=pick();
+                 Object.assign(state,saved);state.rejected.clear();selections();return {known,unknown,rejected,closed};}''')
+                assert picks == {'known':'known','unknown':'unknown','rejected':'','closed':''}, f'automatic reference ignored the comparable pool: {picks}'
+                summary=await page.evaluate('''() => {state.note='';state.detail={...state.savedLayoutDetail,state:'provisional',provisional_comparison_eligible:false};state.pair=null;render();const text=$('selection-summary').textContent;state.detail=state.savedLayoutDetail;state.pair=state.savedLayoutPair;render();return text;}''')
+                assert summary.startswith('Lap B is not comparable yet'), f'an ineligible lap B blamed the reference: {summary}'
+                summary=await page.evaluate('''() => {state.note='';state.detail={...state.savedLayoutDetail,state:'confirmed',comparison_eligible:false};state.pair=null;render();const text=$('selection-summary').textContent;state.detail=state.savedLayoutDetail;state.pair=state.savedLayoutPair;render();return text;}''')
+                assert summary.startswith('Lap B is outside the comparable pool'), f'an excluded completed lap B was reported as pending: {summary}'
                 await page.locator('#channel').select_option('brake')
                 await page.locator('#zoom-from').fill('100');await page.locator('#zoom-to').fill('700');await page.locator('#zoom-to').dispatch_event('change')
                 assert await page.evaluate('() => EngineerDesk.state.zoom') == [100,700], 'phone controls did not apply zoom'

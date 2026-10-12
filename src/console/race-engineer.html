@@ -65,6 +65,7 @@ function options(id,rows,selected,empty){const el=$(id);el.replaceChildren();if(
 function lapLabel(r){if(r.lap<=0)return 'Out lap · not timed';return `Lap ${r.lap} · ${r.state==='provisional'?'in progress':r.time_s==null?'Not timed':num(r.time_s,3)+' s'}${r.line_position!=null&&r.line_car_count!=null?' · finish P'+r.line_position+'/'+r.line_car_count:''}${r.detail_state==='evicted'?' · detail no longer kept':''}${!r.comparison_eligible&&r.state!=='provisional'?' · excluded from best':''}`;}
 // The automatic reference follows gt7_laps.pool: same car, same track, or the same session while the track is unknown.
 function sameCohort(r,b){return !!b&&r.car_id===b.car_id&&(b.track_id?r.track_id===b.track_id:!r.track_id&&r.session_id===b.session_id);}
+function comparable(row){return !!row&&(row.state==='provisional'?row.provisional_comparison_eligible:row.comparison_eligible)!==false;}
 function carLabel(row){return row.car||('car '+(row.car_id??'unknown'));}
 function referenceLabel(row){const source=row.session_id?.split(':')[1];return state.refs.find(r=>r.id===source)?.label||'Shared reference';}
 function selections(){
@@ -76,7 +77,7 @@ function selections(){
  options('session',sessions,state.session,'Waiting for session');
  options('lap-b',all.filter(r=>r.session_id===state.session).map(r=>({id:r.id,label:lapLabel(r)})),state.b,'Choose lap');
  const pool=state.refSource?state.refLaps:state.laps.filter(r=>r.session_id===state.session);
- const eligible=pool.filter(r=>r.comparison_eligible),lapB=all.find(r=>r.id===state.b),usable=eligible.filter(r=>sameCohort(r,lapB)&&!state.rejected.has(r.id+'|'+state.b));if(!state.a&&usable.length)state.a=usable.reduce((a,b)=>a.time_s<b.time_s?a:b).id;
+ const eligible=pool.filter(r=>r.comparison_eligible),lapB=all.find(r=>r.id===state.b),usable=eligible.filter(r=>sameCohort(r,lapB)&&!state.rejected.has(r.id+'|'+state.b));if(!state.a&&usable.length&&comparable(lapB))state.a=usable.reduce((a,b)=>a.time_s<b.time_s?a:b).id;
  options('lap-a',eligible.map(r=>({id:r.id,label:(r.id.startsWith('r:')?referenceLabel(r)+' · ':'')+lapLabel(r)})),state.a,'No reference');
  options('reference-source',state.refs.map(r=>({id:r.id,label:r.label})),state.refSource,'Selected session');
  $('follow').checked=state.follow;$('new-laps').textContent=state.newLaps?`${state.newLaps} newly completed lap${state.newLaps===1?'':'s'}`:'';
@@ -129,7 +130,7 @@ function render(){const B=state.detail,pair=state.pair,outline=pair?.a?.trace_co
  }
  if(!B)return;
  const observed=trace.at(-1)?.d||0;const sectors=pair?.mini_sectors||{a:[],b:(B.sectors||[]).map((v,i)=>B.state==='provisional'&&(i+1)*200>observed?null:v),delta:[]},body=$('sectors').tBodies[0];for(const item of miniRows(sectors,length)){const row=body.insertRow(),future=B.state==='provisional'&&item.end>observed;row.insertCell().textContent=item.label;cellValue(row.insertCell(),item.a,false,A?'Unavailable':'No reference');cellValue(row.insertCell(),item.b,future);cellValue(row.insertCell(),item.delta,future,'Unavailable',true);}
- const end=pair?.delta?.at(-1);$('selection-summary').textContent=state.note||(pair?.compatible&&A?`Lap B ${B.lap} compared with A ${A.lap} · ${pair.provisional?(end?'delta through '+num(end.d,0)+' m':'Waiting for matching distance samples'):(Number.isFinite(pair.lap_delta_s)?signed(pair.lap_delta_s)+' s B − A':'Comparison time unavailable')}`:pair&&!pair.compatible?'Selected laps are outside the comparable pool':state.a?'Preparing selected comparison':'Choose an eligible reference to compare the selected lap');showDelta(pair?.compatible&&end&&B.id===state.snapshot?.current?.id?end.delta:null,end?.d);
+ const end=pair?.delta?.at(-1);$('selection-summary').textContent=state.note||(!comparable(B)?(B.state==='provisional'?'Lap B is not comparable yet: out lap, pit lap or first lap of a stint':'Lap B is outside the comparable pool: out lap, pit lap, first lap of a stint or incomplete data'):pair?.compatible&&A?`Lap B ${B.lap} compared with A ${A.lap} · ${pair.provisional?(end?'delta through '+num(end.d,0)+' m':'Waiting for matching distance samples'):(Number.isFinite(pair.lap_delta_s)?signed(pair.lap_delta_s)+' s B − A':'Comparison time unavailable')}`:pair&&!pair.compatible?'Selected laps are outside the comparable pool':state.a?'Preparing selected comparison':'Choose an eligible reference to compare the selected lap');showDelta(pair?.compatible&&end&&B.id===state.snapshot?.current?.id?end.delta:null,end?.d);
  $('context').textContent=readableContext(B);
  $('notes').replaceChildren();for(const n of B.notes||[]){const li=document.createElement('li');li.textContent=n.text;$('notes').append(li);}
  $('limitations').textContent=[...(pair?.warnings||B.context_warnings||[]),...(B.track_definition_warnings||[])].filter((x,i,a)=>a.indexOf(x)===i).join(' · ');
@@ -148,7 +149,7 @@ async function selection(){const epoch=state.epoch,a=state.a,b=state.b;if(!b)ret
  const result=await request('/race-engineer/lap',{id:b});if(epoch!==state.epoch||b!==state.b||a!==state.a)return;
  if(result.state!=='ready'){state.note=result.state==='pending'?'Preparing selected lap detail':'Selected lap detail unavailable';clearPlots(false);render();$('context').textContent=state.note;$('notes').replaceChildren();return;}state.detail=result.lap;state.pair=null;
  if(a){const pair=await request('/race-engineer/compare',{a,b});if(epoch!==state.epoch||b!==state.b||a!==state.a)return;
-  if(pair.state==='ready'){if(!pair.compatible&&state.follow){state.rejected.add(a+'|'+b);state.a='';say('Reference cleared because the live lap changed to an incompatible pool.');}else{state.pair=pair;state.detail=pair.b;}}
+  if(pair.state==='ready'){if(!pair.compatible&&!comparable(pair.b)){state.detail=pair.b||state.detail;}else if(!pair.compatible&&state.follow){state.rejected.add(a+'|'+b);state.a='';say('Reference cleared because the live lap changed to an incompatible pool.');}else{state.pair=pair;state.detail=pair.b;}}
   else if(pair.state==='unavailable')state.note='Comparison unavailable';
  }render();
 }
