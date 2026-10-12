@@ -27,3 +27,7 @@ signed polling cycles while the section remains expanded and focused.
 Phone headline labels reserve two lines with a fixed line height. CI exposed
 font-dependent wrapping of the best-lap label; a browser regression forces that
 label onto two lines and checks that numeric values in each grid row stay aligned.
+
+The comparison card keeps one feedback line. Selection, preparation and error
+states share it, so two distances never appear side by side. Chart viewBoxes follow
+the rendered width so axis text stays at its CSS size on phones.

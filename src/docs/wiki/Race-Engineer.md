@@ -24,7 +24,10 @@ workflow. Without recording, those laps are lost. The desk states this limitatio
 Current lap, live delta, best completed time and race position lead the desk.
 Fuel, theoretical best and tyres follow, with compact speed/gear/RPM/pedal values.
 Select the comparison before inspecting the charts; channel and distance controls
-are attached to the chart.
+are attached to the chart. One line below the selection reports the comparison:
+the distance the delta covers, the lap time difference, or why none is shown yet.
+The delta tile names the distance it covers, the best tile names its lap. A loss
+carries a **+** sign, so gain and loss do not depend on color.
 
 The desk reads the existing single GT7 source of a solo POV profile. Speed, gear,
 RPM, throttle/brake, race position, observed lap time, fuel and tyre temperatures refresh roughly
@@ -60,7 +63,9 @@ do not show a current car. Reviewed larger sections show named A/B times and gai
 when both laps use the same confirmed definition. Expand each group to inspect its
 diagnostic mini-sectors, or open the full diagnostic table below. A segment that
 spans a section boundary appears in both affected groups; each section gain uses
-its exact reviewed boundaries. Unconfirmed definitions retain their status.
+its exact reviewed boundaries. Each group shows its distance range and the number
+of its mini-sectors. On a lap in progress, the group the car is in says **Still driving**
+and later groups say **Not reached**. Unconfirmed definitions retain their status.
 A short trailing mini-sector is grouped with its predecessor for display; shared
 analysis values are unchanged. Curves show their channel units, delta has a zero
 line, and an empty comparison has a message, retains known distance and omits artificial axes. Turn labels
