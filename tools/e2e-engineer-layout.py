@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Verify the approved Engineer layout with the real signed desk at three widths."""
 import asyncio
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -39,6 +40,23 @@ async def main():
                     for selector in ('#chart','#delta-chart','#map','#lap-a','#reference-source','#channel','#zoom-to','#selection-summary'):
                         assert await page.locator(selector).is_visible(), f'{width}: essential analysis hidden: {selector}'
                     assert await page.locator('#selection-summary').inner_text(), 'phone selected comparison had no feedback'
+                    lines=await page.evaluate('() => [...document.getElementById("selection-summary").closest("section").querySelectorAll("p")].filter(p=>p.offsetParent&&p.textContent.trim()).map(p=>p.textContent)')
+                    assert len(lines)==1, f'{width}: comparison feedback was split over several lines: {lines}'
+                    assert not any(word in lines[0].split() for word in ('ready','pending','provisional','confirmed')), f'feedback exposed raw analysis states: {lines[0]}'
+                    await page.evaluate('() => new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))')
+                    for chart in ('#chart','#delta-chart'):
+                        height=await page.evaluate('(sel)=>document.querySelector(sel+" text").getBoundingClientRect().height',chart)
+                        assert height>=10, f'{width}: {chart} axis text rendered {height:.1f} px high'
+                    taps=await page.locator('#larger-sectors summary, .mini-details summary').evaluate_all('(nodes)=>nodes.map(n=>n.getBoundingClientRect().height)')
+                    assert width>600 or min(taps)>=44, f'phone disclosure tap targets too small: {taps}'
+                    cards=await page.evaluate('''() => {const B=state.detail,bounds=B.larger_sectors.bounds_m,observed=B.trace.at(-1).d;return [...document.querySelectorAll('#larger-sectors [data-section]')].map((card,i)=>({text:card.innerText,expected:B.state!=='provisional'||bounds[i+1]<=observed?null:bounds[i]<=observed?'Still driving':'Not reached',range:Math.round(bounds[i])+'–'+Math.round(bounds[i+1])+' m'}));}''')
+                    for card in cards:
+                        assert card['range'] in card['text'], f'section card lacked its distance range: {card}'
+                        assert re.search(r'\d+ diagnostic mini-sectors',card['text']), f'section card lacked its mini-sector count: {card}'
+                        if card['expected']:
+                            assert card['expected'] in card['text'] and 'Not yet driven' not in card['text'], f'section progress was not distinguished: {card}'
+                    assert re.fullmatch(r'Against A · through \d+ m',await page.locator('#delta + small').inner_text()), 'live delta lacked its reference distance'
+                    assert re.fullmatch(r'Lap \d+ · this session',await page.locator('#best + small').inner_text()), 'best lap lacked its lap number'
                     assert await page.locator('#larger-sectors [data-section]').count() == 3, 'reviewed sections were not grouped'
                     detail=page.locator('#larger-sectors [data-section]').first.locator('details')
                     await detail.locator('summary').click()
@@ -96,6 +114,9 @@ async def main():
                 await page.evaluate('() => showDelta(-.25)')
                 assert 'gain' in (await page.locator('#delta').get_attribute('class') or '') and 'loss' not in (await page.locator('#delta').get_attribute('class') or ''), 'negative delta lost gain emphasis'
                 await page.evaluate('() => showDelta(.25)')
+                assert await page.locator('#delta').inner_text() == '+0.250', 'positive delta relied on color alone'
+                signed=await page.evaluate('() => {const td=document.createElement("td");cellValue(td,.5,false,"Unavailable",true);return td.textContent;}')
+                assert signed == '+0.500', 'positive sector difference relied on color alone'
                 assert 'loss' in (await page.locator('#delta').get_attribute('class') or '') and 'gain' not in (await page.locator('#delta').get_attribute('class') or ''), 'positive delta retained the previous gain'
                 await page.evaluate('() => showDelta(0)')
                 assert await page.locator('#delta').inner_text() == '0.000' and not (await page.locator('#delta').get_attribute('class') or ''), 'zero delta retained a gain or loss'
