@@ -43,7 +43,10 @@ Select **Session** and **Lap B** to inspect retained current or prior-session la
 Sessions show the track, vehicle name and lap count; unknown names fall back to
 the car ID. Shared session and reference-lap options include the producer's label.
 Select an eligible **Lap A** from the selected session, or choose a producer-shared
-**Reference source**. The charts use the same validated distance stations, sector
+**Reference source**. Without a choice, the desk takes the fastest eligible lap with the
+same car and track, or from the same session while the track is unknown. While lap B is
+an out lap, pit lap or first lap of a stint, it chooses none and says so; a chosen
+reference stays selected. The charts use the same validated distance stations, sector
 and context rules as the local Control Center. Blue is A, orange is B, delta is
 B minus A. The current lap is provisional; future curve sections and incomplete
 200 m sectors say **Not yet driven** in muted text. Missing measurements remain
