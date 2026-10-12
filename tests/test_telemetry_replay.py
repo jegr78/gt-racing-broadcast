@@ -165,7 +165,9 @@ def t_prefeed_and_switch():
         path = root / "private-name.gt7rec"
         Path(write_circle_recording(str(root))).rename(path)
         engineer = race_engineer_live.Store(lambda: True, tracks=FakeTracks(), cars=FakeCars(), queue_max=64)
-        store = gt7_telemetry.TelemetryStore(engineer=engineer)
+        from types import SimpleNamespace
+        recorded = []
+        store = gt7_telemetry.TelemetryStore(engineer=engineer, recorder=SimpleNamespace(put=lambda *packet: recorded.append(packet)))
         control = telemetry_replay.Controller(store, root)
         try:
             generation = engineer.generation
@@ -178,6 +180,7 @@ def t_prefeed_and_switch():
             assert snapshot["replay"]["active"]
             assert "private-name" not in str(snapshot["replay"])
             assert engineer.stats()["dropped"] == 0
+            assert not recorded, "Replay wrote its packets to the active recorder"
             assert control.udp_update(None, 100) is False
             replay_generation = engineer.generation
             control.stop()
