@@ -218,7 +218,10 @@ def run(now, runtime_dir, runner=subprocess.run, which=shutil.which):
         raise SpeedtestUnavailable(
             "Ookla speedtest CLI not found. Run `racecast install-tools` "
             "(or install it manually).")
-    proc = runner(run_argv(binary), capture_output=True, text=True)
+    # The CLI writes UTF-8 JSON; the locale default (cp1252 on German Windows)
+    # would turn "Telefónica" into "TelefÃ³nica" (#869).
+    proc = runner(run_argv(binary), capture_output=True, text=True,
+                  encoding="utf-8", errors="replace")
     out = (proc.stdout or "").strip()
     if proc.returncode != 0 or not out:
         err = (proc.stderr or "").strip() or "no output"
