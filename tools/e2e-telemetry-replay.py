@@ -23,6 +23,8 @@ async def main():
         fixture.access().update(enabled=True, expected=0)
         relay = fixture.console(with_live=True, solo=True)
         fixture.telemetry.replay = telemetry_replay.Controller(fixture.telemetry, fixture.root / fixture.profile / "telemetry-recordings")
+        import gt7_recording
+        fixture.telemetry.recorder = gt7_recording.RecordControl(str(fixture.root/fixture.profile/"telemetry-recordings"),str(fixture.root/fixture.profile/"record.json"),False)
         fixture.live._clock = time.monotonic
         Path(fixture.source.path).write_bytes(Path(fixture.live_path).read_bytes())
         from test_gt7_laps import _index, FakeTracks, FakeCars
@@ -126,6 +128,7 @@ async def main():
             ui.shutdown(); ui.server_close()
             relay.shutdown(); relay.server_close()
             fixture.live.close()
+            fixture.telemetry.recorder.close()
     return 0
 
 

@@ -22,8 +22,10 @@ Checklist
 - [x] Control Center, Director, HUD and Engineer labels
 - [x] Import and collision handling
 - [x] Tests, e2e, screenshots and operator documentation
-- [ ] Guard falsification and independent review
-- [ ] Complete local gates, CI, squash merge and tracker/wiki reconciliation
+- [x] Guard falsification and independent review
+
+Finalization follows `next-issue`: complete local gates and CI, verify squash merge,
+then reconcile the tracker and publish the committed wiki.
 
 The source lock orders update/reset against replay and UDP. UDP display updates
 use a nonblocking acquisition during a switch; raw recording happens before this

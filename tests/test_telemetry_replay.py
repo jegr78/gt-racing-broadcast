@@ -80,9 +80,12 @@ def t_udp_does_not_wait_for_source_switch():
     worker.start()
     try:
         assert held.wait(1)
+        from test_gt7_laps import _pkt
+        packet = gt7_telemetry.parse_packet(_pkt(1,30,0))
         started = time.monotonic()
-        assert control.udp_update(None, 100) is False
+        result = control.udp_update(packet, 100)
         assert time.monotonic() - started < .1, "UDP reception blocked behind source reset"
+        assert result is False
     finally:
         release.set()
         worker.join()
