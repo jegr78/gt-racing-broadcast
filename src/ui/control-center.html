@@ -5662,7 +5662,6 @@ async function tmImport(){
  const file=prompt('Local path to a .gt7rec recording:');if(!file)return;
  const result=await tmReplayOp('telemetry-import',{file});if(result?.ok)await tmLoad();
 }
-setInterval(()=>tmReplayPoll(),2500);
 
 // Deletes the selected recording, its CSV export and its lap index (racecast telemetry
 // delete), after a confirmation; the list then reloads and selects the next recording.
@@ -6737,6 +6736,7 @@ async function refreshResources() {
 }
 refresh();
 setInterval(refresh, 3000);
+setInterval(()=>tmReplayPoll(),2500);
 refreshResources();
 setInterval(refreshResources, 2000);
 setInterval(renderTimer, 1000);          // tick the Home race-timer clock locally
