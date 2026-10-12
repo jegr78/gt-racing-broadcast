@@ -41,6 +41,7 @@ async def main():
                 assert 'car 3424' in fallback, 'unknown car name did not fall back to id'
                 errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
                 await page.wait_for_function('() => EngineerDesk.state.pair?.state === "ready"')
+                await page.locator('.mini-details summary').click()
                 assert await page.locator('#chart path').count() >= 2
                 assert await page.locator('#sectors tbody tr').first.locator('td').nth(2).inner_text() == 'Not yet driven'
                 assert await page.locator('#zoom-to').input_value() == '1000'
@@ -138,6 +139,7 @@ async def main():
                     fixture.live.put(gt7_telemetry.parse_packet(raw)._replace(race_position=15, car_count=15), fixture.live._receipt[1]+.01)
                     assert fixture.live.flush(10)
                     await page.wait_for_function('() => document.getElementById("race-position").textContent === "P15/15"')
+                    await page.locator('.mini-details summary').click()
                     for width,height,name in [(1440,1050,'desktop'),(1024,1100,'tablet'),(390,900,'phone')]:
                         await page.set_viewport_size({'width':width,'height':height})
                         await page.screenshot(path=str(ROOT/f'src/docs/wiki/images/console-race-engineer-{name}.png'),full_page=True)

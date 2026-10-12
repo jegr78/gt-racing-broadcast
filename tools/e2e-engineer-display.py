@@ -28,6 +28,7 @@ async def main():
                 assert await page.locator('#theory').inner_text() == 'No eligible lap', 'previous session hid the empty theoretical state'
                 await page.evaluate('() => {state.laps=state.savedLaps;instruments(state.snapshot);}')
 
+                await page.locator('.mini-details summary').click()
                 context=await page.locator('#context').inner_text()
                 assert '{}' not in context and 'Declared settings' not in context, 'empty JSON remained in context'
                 body=await page.locator('body').inner_text()
@@ -60,8 +61,8 @@ async def main():
                 assert await page.locator('#sectors tbody tr').last.locator('td').nth(2).inner_text() == 'Unavailable', 'missing tail produced a summed time'
                 # Only matching reviewed definitions may show a larger-sector delta.
                 await page.evaluate('''() => {const sections={reviewed:true,name:"Three race sections",names:["Opening","Middle","Closing"],bounds_m:[0,300,700,1003],times_s:[3,7,6],variant_id:"three"};state.detail={...state.detail,larger_sectors:sections,definition_fingerprint:"same",sector_variant_id:"three",corner_metrics:Array.from({length:8},(_,i)=>({number:i+1,apex_m:1003}))};state.pair={...state.pair,b:state.detail,a:{...state.detail,larger_sectors:{...sections,times_s:[4,6,6]}},definition_compatible:true};render();}''')
-                table=page.locator('#larger-sectors table')
-                assert await table.locator('tbody tr').count() == 3, 'reviewed sections were not structured'
+                table=page.locator('#larger-sectors')
+                assert await table.locator('[data-section]').count() == 3, 'reviewed sections were not structured'
                 text=await table.inner_text()
                 assert 'Opening' in text and '-1.000' in text and '1.000' in text, 'reviewed sections lost gain/loss'
                 boxes=await page.locator('#map text[data-turn]').evaluate_all('(nodes) => nodes.map(n=>{const r=n.getBBox();return {x:r.x,y:r.y,w:r.width,h:r.height};})')
@@ -77,7 +78,7 @@ async def main():
                     await page.evaluate('() => {'+mutation+';render();}')
                     assert '-1.000' not in await page.locator('#larger-sectors').inner_text(), 'unmatched reference sections claimed a delta'
                     if 'times_s=[null' in mutation:
-                        assert await table.locator('tbody tr').first.locator('td').nth(3).inner_text() == 'Unavailable', 'missing section time produced a delta'
+                        assert await table.locator('[data-section]').first.locator('.section-delta').inner_text() == 'Unavailable', 'missing section time produced a delta'
 
                     await page.evaluate('() => {'+restore+';render();}')
                 await page.evaluate('() => {state.pair.definition_compatible=false;render();}')

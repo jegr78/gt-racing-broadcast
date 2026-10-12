@@ -19,15 +19,18 @@ The standing release PR is outside this work.
   and draw the current snapshot's car independently from selected lap traces.
 - [x] #854: parse validated race position/car count, publish instruments and
   lap-line position, and display position on the desk.
-- [ ] #853: implement all eight display cleanup items as planned; record any deferred
-  items explicitly.
+- [x] #853: implement all eight display cleanup items as planned; none of the eight items are deferred.
 - [x] #855: render layout drafts at 1440, 1024 and 390 px and link them in the issue.
 - [x] #855: obtain the expressly required producer approval of a concrete draft.
   Proposal A at `d0131a9` in #859 was explicitly approved in the working chat and
   recorded in #855.
-- [ ] #855: implement the approved draft and verify all three viewports.
-- [ ] Verify all children and parent scope, close #850, reconcile tracker and
-  remove only this run's merged topic branches.
+- [x] #855: implement the approved draft and verify all three viewports.
+- [x] Verify implementation and local evidence for all six native children;
+  no feature work is deferred.
+
+After the last verified merge, reconcile and close parent #850, publish its
+canonical wiki state and remove only this run's proven merged topic branches.
+Those tracker operations follow the per-issue completion checklist below.
 
 ## Requirements and evidence matrix
 
