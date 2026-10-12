@@ -330,7 +330,7 @@ class _Replay:
     lap whose GT7 time is settled, so the index of a grown recording continues there."""
 
     def __init__(self, point=None):
-        self.eng = gt7_telemetry.TelemetryEngine()
+        self.eng = gt7_telemetry.TelemetryEngine(log_laps=False)
         self.laps = []
         self.eng.on_lap = self.laps.append
         self.times = gt7_recording.LapTimeMatcher()

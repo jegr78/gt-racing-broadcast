@@ -175,6 +175,10 @@ class TrackDB:
         self._rows.update({k: v for k, v in learned.items() if k not in downloaded})
         self._twins = {r["reverse"]: r["id"] for r in self._rows.values() if r["reverse"]}
 
+    def recognisable(self):
+        """True when at least one downloaded or learned signature can name a lap."""
+        return bool(self._rows)
+
     def name(self, official_id):
         info = self._catalog.get(official_id)
         if info is not None:

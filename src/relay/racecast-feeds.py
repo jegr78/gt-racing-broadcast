@@ -12601,6 +12601,7 @@ def engineer_live_for(access, telemetry, rec_dir, runtime_base, bundled):
     )
     store.api = race_engineer_api.Service(store)
     telemetry.engineer = store
+    telemetry.data_listeners.append(store.reload_data)
     return store
 
 

@@ -1345,6 +1345,74 @@ def t_short_lap_never_reaches_match():
     assert eng.track is None
 
 
+def _official(eng, t, lap, last_ms, after=0.1):
+    """One packet of the next lap carrying GT7's lap time for the lap just closed."""
+    eng.update(tm.parse_packet(_packet(speed_mps=50.0, lap=lap, last_ms=last_ms)), t + after)
+    return t + after
+
+
+def t_engine_best_and_average_use_gt7_lap_time():
+    eng = tm.TelemetryEngine()
+    eng.update(tm.parse_packet(_packet(lap=0)), 99.0)
+    t = _feed_lap(eng, 100.0, 1, duration=10.0, speed=50.0)
+    relay = eng.snapshot()["best_s"]
+    assert relay is not None and abs(relay - 9.7) > 0.05, "fixture must differ from the GT7 time"
+    t = _official(eng, t, 2, 9700)
+    s = eng.snapshot()
+    assert s["best_s"] == 9.7, f"HUD best ignored GT7's lap time: {s['best_s']}"
+    assert abs(s["avg_lap_s"] - 9.7) < 1e-9, f"HUD average ignored GT7's lap time: {s['avg_lap_s']}"
+    t = _feed_lap(eng, t, 2, duration=11.0, speed=50.0)
+    _official(eng, t, 3, 10800)
+    s = eng.snapshot()
+    assert s["best_s"] == 9.7, "a slower lap replaced the official best"
+    assert abs(s["avg_lap_s"] - (9.7 + 10.8) / 2) < 1e-9, f"average mixed relay and GT7 times: {s['avg_lap_s']}"
+
+
+def t_engine_gt7_lap_time_window_and_unchanged_value():
+    eng = tm.TelemetryEngine()
+    eng.update(tm.parse_packet(_packet(lap=0, last_ms=5000)), 99.0)
+    t = _drive(eng, 100.0, 1, 10.0, last_ms=5000)
+    eng.update(tm.parse_packet(_packet(speed_mps=50.0, lap=2, last_ms=5000)), t)
+    relay = eng.snapshot()["best_s"]
+    assert relay is not None and relay != 5.0
+    _official(eng, t, 2, 5000)
+    assert eng.snapshot()["best_s"] == relay, "an unchanged GT7 value was taken as the new lap time"
+    _official(eng, t, 2, 9876, after=tm.GT7_TIME_WINDOW_S + 0.5)
+    assert eng.snapshot()["best_s"] == relay, "a GT7 value after the window was assigned to the closed lap"
+
+
+def t_format_band_follows_displayed_value():
+    snap = {"speed_mps": 0.0, "tyre_temp": (69.6, 69.4, 85.4, 95.4),
+            "tyre_temp_avg": (69.6, 69.4, 85.4, 95.4), "top_speed_mps": 0.0,
+            "lap": 1, "current_lap_s": 0.0, "best_s": None, "delta_s": None,
+            "predicted_s": None, "has_reference": False, "time_of_day_ms": None,
+            "fuel": {"level": 1.0, "per_lap": None, "laps_remaining": None, "time_remaining_s": None}}
+    out = tm.format_snapshot(snap, "metric", (70, 85, 95))
+    assert [(t["value"], t["band"]) for t in out["tyres"]] == [
+        (70, "optimal"), (69, "cold"), (85, "optimal"), (95, "hot")], out["tyres"]
+    out = tm.format_snapshot(dict(snap, tyre_temp=(69.6, 70.0, 70.0, 70.0)), "imperial", (70, 85, 95))
+    assert [(t["value"], t["band"]) for t in out["tyres"]][:2] == [(157, "cold"), (158, "optimal")], out["tyres"]
+
+
+def t_engine_lap_log_can_be_silenced():
+    with _LapLog() as cap:
+        eng = tm.TelemetryEngine(log_laps=False)
+        eng.update(tm.parse_packet(_packet(lap=0)), 99.0)
+        t = _feed_lap(eng, 100.0, 1, duration=10.0, speed=50.0)
+        _feed_lap(eng, t, 2, duration=11.0, speed=50.0)
+    assert not [line for line in cap.lines if line.startswith("GT7 ")], cap.lines
+
+
+def t_store_reload_data_reaches_listeners():
+    st = tm.TelemetryStore()
+    seen = []
+    st.data_listeners.append(lambda cars, tracks: seen.append((cars, tracks)))
+    cars, tracks = object(), object()
+    st.reload_data(cars, tracks)
+    assert seen == [(cars, tracks)], "a GT7 data reload did not reach the Engineer analysis"
+    assert st._eng.track_db is tracks
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

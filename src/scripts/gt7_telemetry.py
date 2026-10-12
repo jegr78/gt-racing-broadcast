@@ -18,6 +18,8 @@ from collections import deque, namedtuple
 # The relay's telemetry logger: one line per finished lap says whether it became
 # the reference, counted, or why it was rejected (why the delta is not up yet).
 LOG = logging.getLogger("racecast.relay.telemetry")
+_SILENT = logging.getLogger("racecast.relay.telemetry.silent")
+_SILENT.disabled = True
 
 # Packet 'A' field offsets (little-endian).
 OFF_MAGIC = 0x00
@@ -83,6 +85,7 @@ MAX_SAMPLES = 10000       # 40 km at 4 m spacing; the longest GT7 layout (Specia
 SESSION_JUMP_M = 500.0    # metres between on-track positions that only a new track explains
 POINT_STEP_M = 20.0       # metres between kept positions (track recognition)
 MIN_TRACK_POINTS = 10     # fewest points a lap needs to name or learn a track
+GT7_TIME_WINDOW_S = 3.0   # GT7 updates last_ms shortly after the line
 MAX_POINTS = int(MAX_SAMPLES * SAMPLE_MIN_DIST / POINT_STEP_M)  # same distance ceiling as samples
 
 # A pit (in/out) lap is not representative: its time is inflated by the pit-lane
@@ -320,6 +323,10 @@ class _LapAccumulator:
             self._reject("pit lap: refuel", pit=True)
 
 
+def _official_times():
+    return {"pending": None, "best": None, "ref": None, "correction": 0.0}
+
+
 class TelemetryEngine:
     """Consumes GT7Packets (timestamp injected) and derives lap/delta/predicted.
 
@@ -334,7 +341,9 @@ class TelemetryEngine:
                      "_lap_time_n", "_lap_fuel_sum", "_lap_fuel_n", "_session_dist_m",
                      "_top_speed", "_track_pos", "_left_track")
 
-    def __init__(self):
+    def __init__(self, log_laps=True):
+        self._log = LOG if log_laps else _SILENT   # analysis copies must not repeat the HUD verdicts
+        self._official = _official_times()       # GT7's own lap times for the HUD best/average
         self._last = None                 # last GT7Packet
         self._track_pos = None            # (x, z) of the last on-track packet
         self._left_track = False          # an off-track packet came after it
@@ -382,13 +391,14 @@ class TelemetryEngine:
         track/car) and open a fresh lap, at the line or mid-lap."""
         acc = self._acc
         if acc is not None:                # the lap in progress never finishes
-            LOG.info("GT7 lap %s %s: not counted (session change)",
+            self._log.info("GT7 lap %s %s: not counted (session change)",
                      self._lap_num, _fmt_time(acc.elapsed))
             self._emit_lap(acc, "not counted", "session change", closed=False)
         self.session += 1
-        LOG.info("GT7 session change (new lap counter %s): %s", pkt.lap,
+        self._log.info("GT7 session change (new lap counter %s): %s", pkt.lap,
                  "reference cleared" if self._ref is not None else "no reference yet")
         self._ref = None
+        self._official = _official_times()
         self._lap_time_sum = 0.0
         self._lap_time_n = 0
         self._lap_fuel_sum = 0.0
@@ -418,6 +428,7 @@ class TelemetryEngine:
             self._delta_hist.clear()
             if self._last is not None:    # seed the new lap's start-of-lap fuel reading
                 self._acc.fuel_start = self._last.fuel_level
+        self._take_official(pkt, now)
         if self._acc is not None:
             self._acc.add(pkt, now)
         self._last = pkt
@@ -533,7 +544,7 @@ class TelemetryEngine:
             if not isinstance(found, dict):   # also covers None: no match
                 return
             if "id" in found:
-                LOG.info("GT7 track: %s %s%s", found.get("track"), found.get("layout"),
+                self._log.info("GT7 track: %s %s%s", found.get("track"), found.get("layout"),
                          " (reverse)" if found.get("reverse") else "")
             self.track = found
         except Exception as e:  # noqa: BLE001  bad track data must not stop the telemetry
@@ -556,15 +567,19 @@ class TelemetryEngine:
             why = "too short"
         head = f"GT7 lap {self._lap_num} {_fmt_time(acc.elapsed)}"
         if why is not None:
-            LOG.info("%s: not counted (%s)", head, why)
+            self._log.info("%s: not counted (%s)", head, why)
             self._emit_lap(acc, "not counted", why, line_packet=line_packet)
             return
-        if self._ref is None or acc.elapsed < self._ref["time"]:
+        new_ref = self._ref is None or acc.elapsed < self._ref["time"]
+        before = self._last.last_ms if self._last is not None else None
+        self._official["pending"] = (new_ref, acc.elapsed, before, acc.last_t + GT7_TIME_WINDOW_S)
+        if new_ref:
             self._ref = {"time": acc.elapsed, "samples": acc.samples}
-            LOG.info("%s: new reference, delta vs this lap from now on", head)
+            self._official["ref"] = None
+            self._log.info("%s: new reference, delta vs this lap from now on", head)
             self._emit_lap(acc, "reference", "", line_packet=line_packet)
         else:
-            LOG.info("%s: counted", head)
+            self._log.info("%s: counted", head)
             self._emit_lap(acc, "counted", "", line_packet=line_packet)
         self._lap_time_sum += acc.elapsed
         self._lap_time_n += 1
@@ -602,9 +617,27 @@ class TelemetryEngine:
             return None
         return acc.elapsed - self._ref_time_at(acc.distance)
 
+    def _take_official(self, pkt, now):
+        """Assign GT7's lap time to the lap closed last, as gt7_recording.LapTimeMatcher does."""
+        official = self._official
+        if official["pending"] is None:
+            return
+        is_ref, elapsed, before, deadline = official["pending"]
+        if now > deadline:
+            official["pending"] = None
+        elif pkt.last_ms > 0 and pkt.last_ms != before:
+            t = pkt.last_ms / 1000.0
+            official["pending"] = None
+            official["correction"] += t - elapsed
+            official["best"] = t if official["best"] is None else min(official["best"], t)
+            if is_ref:
+                official["ref"] = t
+
     def _avg_lap_s(self):
-        """Session mean of the admitted clean laps (s), or None before any lap."""
-        return self._lap_time_sum / self._lap_time_n if self._lap_time_n else None
+        """Session mean of the admitted clean laps (s), GT7's time where known; None before any lap."""
+        if not self._lap_time_n:
+            return None
+        return (self._lap_time_sum + self._official["correction"]) / self._lap_time_n
 
     def _fuel(self):
         pkt = self._last
@@ -636,10 +669,11 @@ class TelemetryEngine:
         has_ref = self._ref is not None
         delta = predicted = best = None
         if has_ref:
-            best = self._ref["time"]
+            ref_time = self._official["ref"] if self._official["ref"] is not None else self._ref["time"]
+            best = ref_time if self._official["best"] is None else min(ref_time, self._official["best"])
             delta = self._current_delta()
             if delta is not None:
-                predicted = best + delta
+                predicted = ref_time + delta
         delta_dir = None
         if has_ref and len(self._delta_hist) >= 2:
             diff = self._delta_hist[-1][1] - self._delta_hist[0][1]
@@ -713,10 +747,12 @@ def format_snapshot(snap, units, thresholds):
     dist = snap.get("session_dist_m", 0.0) * (0.000621371 if imperial else 0.001)
     avgs = snap["tyre_temp_avg"]
     tyres = []
+    shown = tuple(t * 9 / 5 + 32 for t in thresholds) if imperial else thresholds
     for i, c in enumerate(snap["tyre_temp"]):
         val = c * 9 / 5 + 32 if imperial else c
         a = avgs[i] * 9 / 5 + 32 if imperial else avgs[i]
-        tyres.append({"value": round(val), "avg": round(a), "band": _band(c, thresholds)})
+        # The band follows the displayed number, so "70" is never coloured cold.
+        tyres.append({"value": round(val), "avg": round(a), "band": _band(round(val), shown)})
     fuel = snap["fuel"]
     lvl = fuel["level"] * (0.2641720 if imperial else 1.0)   # L -> gal
     return {
@@ -778,6 +814,7 @@ class TelemetryStore:
         self._dirty_ref = None
         self.recorder = recorder       # gt7_recording.RecordControl, or None
         self.engineer = engineer       # Optional nonblocking shared analysis consumer.
+        self.data_listeners = []       # callables(cars, tracks) for each GT7 data reload
         self._engineer_failed = False
         if reset:
             # Fresh session: the relay resets the reference on every start (spec §D)
@@ -874,6 +911,8 @@ class TelemetryStore:
         with self._lock:
             self._cars = cars
             self._eng.track_db = tracks
+        for listener in list(self.data_listeners):
+            listener(cars, tracks)
 
     def visible(self):
         with self._lock:
