@@ -45,7 +45,8 @@ the car ID. Shared session and reference-lap options include the producer's labe
 Select an eligible **Lap A** from the selected session, or choose a producer-shared
 **Reference source**. Without a choice, the desk takes the fastest eligible lap with the
 same car and track, or from the same session while the track is unknown. While lap B is
-an out lap, pit lap or first lap of a stint, it chooses none and says so; a chosen
+an out lap, pit lap or first lap of a stint, or while its track is still being
+recognised in the first lap of a session, it chooses none and says so; a chosen
 reference stays selected. The charts use the same validated distance stations, sector
 and context rules as the local Control Center. Blue is A, orange is B, delta is
 B minus A. The current lap is provisional; future curve sections and incomplete
