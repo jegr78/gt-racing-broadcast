@@ -298,6 +298,7 @@
   <!-- Solo-mode telemetry block (#324): self-gating on /telemetry/data 200 vs 404,
        so it stays invisible in endurance, which has no such endpoint. -->
   <div id="tele" style="display:none">
+    <div id="tele-replay" class="el" style="left:1522px;top:633px;color:#ffd08a;background:rgba(16,22,30,.85);padding:3px 8px;font-weight:700" hidden>REPLAY</div>
     <!-- Panel background + webcam frame: builder box slots for position and size
          only, the look stays in the CSS rules above. "webcam" also drives the OBS
          "Solo Webcam" transform on export and live, mirroring #pov (#324). -->
@@ -461,6 +462,7 @@
         }
         if (!r.ok) return;
         const d = await r.json();
+        document.getElementById("tele-replay").hidden = !(d.replay?.active && d.replay_marker !== false);
         alive = true; tele.style.display = "";
         tele.classList.toggle("tele-off", d.visible === false);
         const wheels = ["fl", "fr", "rl", "rr"];

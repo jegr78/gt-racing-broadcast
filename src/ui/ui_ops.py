@@ -3,6 +3,7 @@ trigger, and how to build the child argv. The UI server routes /api/op/<name>
 through this table and build_argv() only, so the HTTP surface can never run
 arbitrary commands or pass free-form args."""
 import re
+import math
 
 # name -> base racecast argv. Installs always run with --yes: jobs have no stdin
 # (DEVNULL), so an interactive prompt would silently read EOF and decline.
@@ -48,6 +49,10 @@ OPS = {
     "health-export": ["health", "export"],
     "health-import": ["health", "import"],
     "gt7-data-update": ["gt7-data", "update"],
+    "telemetry-replay-start": ["telemetry", "replay", "start"],
+    "telemetry-replay-stop": ["telemetry", "replay", "stop"],
+    "telemetry-replay-status": ["telemetry", "replay", "status"],
+    "telemetry-import": ["telemetry", "import"],
     "telemetry-index": ["telemetry", "index"],
     "shift-reference-update": ["telemetry", "shift-update"],
     "report-generate": ["report", "generate"],   # builds lap indexes, so never in a request
@@ -135,9 +140,28 @@ def _file_arg(value):
     return [s]
 
 
+def _recording_arg(value):
+    name = str(value)
+    if not name.endswith(".gt7rec") or "/" in name or "\\" in name:
+        raise ValueError("Select a finalized recording")
+    return _file_arg(name)
+
+
+def _number_arg(flag, value, minimum, maximum):
+    number = float(value)
+    if not math.isfinite(number) or number < minimum or number > maximum:
+        raise ValueError("Replay option outside allowed range")
+    return [flag, str(number)]
+
+
 # op name -> {param name: validator(value) -> argv fragment}. Ops absent here
 # accept no parameters at all.
 PARAMS = {
+    "telemetry-replay-start": {"name": _recording_arg,
+        "speed": lambda v: _number_arg("--speed", v, .001, 100),
+        "from": lambda v: _number_arg("--from", v, 0, 10080),
+        "on_air": lambda v: ["--on-air"] if v is True else []},
+    "telemetry-import": {"file": _file_arg},
     "shift-reference-update": {"car_id": _car_arg},
     "cookies": {"browser": _browser_arg},
     "cookies-twitch": {"browser": _browser_arg},
@@ -153,6 +177,8 @@ PARAMS = {
 # op name -> tuple of param names that must be present (non-empty). Params not
 # listed here are optional; build_argv skips an absent or empty one.
 REQUIRED = {
+    "telemetry-replay-start": ("name",),
+    "telemetry-import": ("file",),
     "shift-reference-update": ("car_id",),
     "health-import": ("file",),
 }

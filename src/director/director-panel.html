@@ -668,6 +668,7 @@
       <span class="st" id="stB">B <b>—</b></span>
       <span class="st" id="stPov">POV <b>—</b></span>
       <span class="st" id="stTimer">TIMER <b>—</b></span>
+      <span class="st" id="stReplay" hidden>REPLAY</span>
       <span class="st" id="stCar" hidden>CAR <b></b></span>
       <span class="st" id="stTrack" hidden>TRACK <b></b></span>
     </div>
@@ -1111,6 +1112,7 @@ const CONFIG_SOLO = {
     {label:"TELEMETRY", scene:"HUD", relay:"telemetry"},
     // Records the GT7 telemetry trace to disk; hidden without telemetry.
     {label:"REC", scene:"DISK", relay:"telemetry/record"},
+    {label:"REPLAY MARKER", scene:"HUD", relay:"telemetry/replay-marker"},
   ],
   audio: [
     {label:"Game",         input:"Solo Capture Device"},
@@ -1208,11 +1210,12 @@ function mkKey(label, tag, onClick){
 const macroKeys = [], sceneKeys = {}, toggleKeys = [];
 let povVisBtn = null;                 // the relay-driven POV visibility button (#130)
 let teleVisBtn = null;                // the relay-driven HUD telemetry show/hide button
+let teleMarkerBtn = null;
 let teleRecBtn = null;                // the relay-driven telemetry recording button
 
 // Keys relayPoll reveals only when /status carries telemetry; hidden until then.
 function relayGated(item){
-  return item.relay === "telemetry" || item.relay === "telemetry/record";
+  return item.relay === "telemetry" || item.relay === "telemetry/record" || item.relay === "telemetry/replay-marker";
 }
 
 /* RED FLAG toggles the Standby Cover through the relay's /obs/source endpoint,
@@ -1251,6 +1254,7 @@ function buildControls(cfg){
   povVisBtn = null;
   teleVisBtn = null;
   teleRecBtn = null;
+  teleMarkerBtn = null;
 
   cfg.macros.forEach((m, i)=>{
     const b = mkKey(m.label, "program", ()=>runMacro(m));
@@ -1285,6 +1289,7 @@ function buildControls(cfg){
     if (item.relay === "pov") povVisBtn = b;
     if (item.relay === "telemetry") teleVisBtn = b;
     if (item.relay === "telemetry/record") teleRecBtn = b;
+    if (item.relay === "telemetry/replay-marker") teleMarkerBtn = b;
   });
 
   buildGraphicBuses();
@@ -2131,6 +2136,8 @@ async function relayPoll(){
       teleVisBtn.hidden = !d.telemetry;
       teleVisBtn.classList.toggle("on", !!(d.telemetry && d.telemetry.visible));
     }
+    if (teleMarkerBtn) { teleMarkerBtn.hidden = !d.telemetry; teleMarkerBtn.classList.toggle("on", d.telemetry?.replay_marker !== false); }
+    $("#stReplay").hidden = !d.telemetry?.replay?.active;
     renderTeleRec(d.telemetry && d.telemetry.record);
     const car = d.telemetry && d.telemetry.car;   // the GT7 car the driver is in (#713)
     $("#stCar").hidden = !car;

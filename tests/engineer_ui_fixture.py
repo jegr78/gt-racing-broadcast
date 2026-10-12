@@ -64,15 +64,15 @@ class Fixture(Base):
         ctx.update(crew_read=crew_read,crew_write=crew_write)
         return ctx
 
-    def console(self, with_live=False):
+    def console(self, with_live=False, solo=False):
         m=gate.m
-        relay=m.Relay(gate._FakeSource([],[]),[53001,53002],str(self.root))
+        relay=m.Relay(gate._FakeSource([],[]),[53001,53002],str(self.root),solo=solo)
+        self.relay = relay
         control=m.SetupControl('https://example.test',None,crew_source=self.crew)
         def push(payload,label):self.writes.append(payload);return True,None
         control._sync_push=push
         telemetry = None
         if with_live:
-            from types import SimpleNamespace
             import race_engineer_live as live
             import race_engineer_api as api
             from test_race_engineer_live import FakeTracks, FakeCars, feed, write_circle_recording
@@ -84,10 +84,12 @@ class Fixture(Base):
             self.live.api = api.Service(self.live)
             self.live_path = path
             self.feed_live = lambda: (self.live.refresh_enabled(), feed(self.live, self.live_path))
-            telemetry = SimpleNamespace(engineer=self.live)
+            telemetry = gate.m.gt7_telemetry.TelemetryStore(engineer=self.live)
         self.telemetry = telemetry
         self.console_access = self.access()
-        handler=m.make_handler(relay,console_secret=gate.SECRET,crew_source=self.crew,setup_ctl=control,
+        handler=m.make_handler(relay, panel_path=str(Path(gate.ROOT)/"src/director/director-panel.html"),
+            hud_path=str(Path(gate.ROOT)/"src/obs/hud.html"),
+            hud_source=m.HudSource("", "", str(self.root/"hud-cache.json")), console_secret=gate.SECRET,crew_source=self.crew,setup_ctl=control,
             chat_store=m.ChatStore(str(self.root/'chat.json')),
             console_page_path=str(gate.ROOT+'/src/console/console.html'),
             telemetry_store=telemetry, engineer_access=self.console_access,engineer_page_path=str(Path(gate.ROOT)/'src/console/race-engineer.html'))

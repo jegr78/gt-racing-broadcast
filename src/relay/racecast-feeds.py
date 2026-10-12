@@ -162,6 +162,8 @@ import cookie_jar  # the shared "jar holds a YouTube login" rule, same as prefli
 import placeholders  # transparent-graphic placeholder path -> hide pure-placeholder assets from the browser
 import gt7_crypto      # GT7 UDP telemetry: Salsa20 decrypt (solo/POV only, #324)
 import gt7_telemetry   # GT7 UDP telemetry: packet parser + TelemetryStore (solo/POV only, #324)
+from contextlib import nullcontext
+import telemetry_replay
 import gt7_recording   # GT7 telemetry recording to disk (solo/POV only)
 import race_engineer_access
 import race_engineer_live
@@ -11319,12 +11321,17 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     feeds, schedule_rows(relay),
                     submission_store.list() if submission_store else [])
             if telemetry_store is not None:          # solo POV only; lights the panel toggle
-                base["telemetry"] = {"visible": telemetry_store.visible(),
-                                     "car": telemetry_store.car()}  # panel status strip (#713)
-                if telemetry_store.recorder is not None:
-                    base["telemetry"]["record"] = telemetry_store.recorder.status()
-                if telemetry_store.has_tracks():
-                    base["telemetry"]["track"] = telemetry_store.track()
+                control = telemetry_store.replay
+                with control._lock if control else nullcontext():
+                    base["telemetry"] = {"visible": telemetry_store.visible(),
+                                         "car": telemetry_store.car()}  # panel status strip (#713)
+                    if telemetry_store.replay is not None:
+                        base["telemetry"]["replay"] = telemetry_store.replay.status()
+                    base["telemetry"]["replay_marker"] = telemetry_store._replay_marker
+                    if telemetry_store.recorder is not None:
+                        base["telemetry"]["record"] = telemetry_store.recorder.status()
+                    if telemetry_store.has_tracks():
+                        base["telemetry"]["track"] = telemetry_store.track()
             return base
         def _console_status_payload(self, roles):
             """Status for the Funnel-exposed /console mount. Feed stream URLs are
@@ -11509,6 +11516,38 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     if telemetry_store is None:
                         return self._send({"error": "telemetry disabled"}, 404)
                     return self._send({"samples": telemetry_store.trace(150)})
+                if len(p) == 3 and p[:2] == ["telemetry", "replay"]:
+                    control = telemetry_store.replay if telemetry_store is not None else None
+                    if control is None:
+                        return self._send({"error": "telemetry replay disabled"}, 404)
+                    if p[2] == "status":
+                        return self._send(dict(control.status(), on_air=(getattr(relay, "obs_stats", {}) or {}).get("stream_active") is True))
+                    if p[2] == "stop":
+                        return self._send(control.stop())
+                    if p[2] != "start":
+                        return self._send({"error": "unknown replay action"}, 404)
+                    qs = parse_qs(urlparse(self.path).query)
+                    try:
+                        reachable, stats, _note = relay._obs.get_health_stats()
+                        streaming = stats.get("stream_active") is True
+                        if not reachable:
+                            streaming = (getattr(relay, "obs_stats", {}) or {}).get("stream_active") is True
+                        if streaming and qs.get("on-air", [""])[0] != "1":
+                            return self._send({"error": "OBS is streaming; confirm with --on-air",
+                                               "code": "on_air_confirmation"}, 409)
+                        return self._send(control.start(qs.get("name", [""])[0],
+                                                       qs.get("speed", ["1"])[0],
+                                                       qs.get("from", ["0"])[0]))
+                    except telemetry_replay.ReplayError as exc:
+                        return self._send({"error": str(exc), "code": exc.code},
+                                          409 if exc.code == "replay_active" else 400)
+                if len(p) == 3 and p[:2] == ["telemetry", "replay-marker"]:
+                    if telemetry_store is None:
+                        return self._send({"error": "telemetry disabled"}, 404)
+                    if p[2] not in ("show", "hide", "toggle"):
+                        return self._send({"error": "unknown marker action"}, 404)
+                    return self._send(telemetry_store.set_replay_marker(
+                        None if p[2] == "toggle" else p[2] == "show"))
                 if len(p) == 3 and p[:2] == ["telemetry", "record"]:
                     rec = telemetry_store.recorder if telemetry_store is not None else None
                     if rec is None:
@@ -12611,7 +12650,11 @@ def _telemetry_loop(store, ps_ip, stop_evt, clock=time.monotonic):
             now_wall = time.time()
             store.record(now_wall, kind, plain)
             try:
-                store.update(gt7_telemetry.parse_packet(plain), now_wall)
+                packet = gt7_telemetry.parse_packet(plain)
+                if getattr(store, "replay", None) is not None:
+                    store.replay.udp_update(packet, now_wall)
+                else:
+                    store.update(packet, now_wall)
             except Exception as e:  # noqa: BLE001  a bad packet must not pause the loop, it is recorded already
                 if not packet_failed:
                     tlog.error("telemetry packet rejected (logged once): %s", e)
@@ -13264,6 +13307,8 @@ def main():
         if telemetry_store is not None
         else None
     )
+    if telemetry_store is not None:
+        telemetry_store.replay = telemetry_replay.Controller(telemetry_store, rec_dir)
     engineer_page_path = engineer_page_for(console_page_path)
     handler = make_handler(
         relay,
@@ -13360,6 +13405,8 @@ def main():
         LOG.info("Stopping feeds…")
         if telemetry_store is not None and telemetry_store.recorder is not None:
             telemetry_store.recorder.close()   # flush and rename before the hard exit
+        if telemetry_store is not None and telemetry_store.replay is not None:
+            telemetry_store.replay.stop()
         if engineer_live is not None:
             engineer_live.close()
         stop_evt.set(); relay.shutdown(); os._exit(0)

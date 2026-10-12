@@ -10,6 +10,17 @@ the current Sheet webhook when adding the Crew field.
 
 ## Live values and analysis
 
+The producer can replay a profile recording through the running relay. The desk
+then reads **Replay · Recorded session · speed×** and receives the same source as
+the broadcast HUD. It exposes a display label, never the producer's filename.
+
+![Engineer desk receiving a replay](images/console-race-engineer-replay.png)
+
+Every switch starts a separate pool, including stop and end of file. Live laps
+driven during replay are absent from the live pool. With recording enabled their
+details remain recoverable from the recording through the existing shared-reference
+workflow. Without recording, those laps are lost. The desk states this limitation.
+
 Current lap, live delta, best completed time and race position lead the desk.
 Fuel, theoretical best and tyres follow, with compact speed/gear/RPM/pedal values.
 Select the comparison before inspecting the charts; channel and distance controls

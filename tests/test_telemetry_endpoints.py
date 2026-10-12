@@ -149,7 +149,7 @@ def t_status_reports_telemetry_visibility():
     store = m.gt7_telemetry.TelemetryStore(None)
     srv, get = _serve(store, relay=_StatusRelay())
     try:
-        assert json.loads(get("/status")[2])["telemetry"] == {"visible": True, "car": None}
+        assert json.loads(get("/status")[2])["telemetry"] == {"visible": True, "car": None, "replay_marker": True}
     finally:
         srv.shutdown()
     srv, get = _serve(None, relay=_StatusRelay())
@@ -305,7 +305,7 @@ def t_status_reports_record_block():
             store.recorder.close()
 
 
-def t_telemetry_loop_feeds_the_recorder():
+def t_telemetry_loop_feeds_the_recorder(replay=False):
     import socket as _socket
     import threading as _t
     from test_gt7_fixture import EXT_TCS_HEX
@@ -332,6 +332,9 @@ def t_telemetry_loop_feeds_the_recorder():
             raise _socket.timeout()
 
     store = m.gt7_telemetry.TelemetryStore(None, recorder=FakeRecorder())
+    if replay:
+        store.replay = m.telemetry_replay.Controller(store, "unused")
+        store.replay._state["active"] = True
     real = m.socket.socket
     m.socket.socket = FakeSock
     try:
@@ -339,6 +342,12 @@ def t_telemetry_loop_feeds_the_recorder():
     finally:
         m.socket.socket = real
     assert got == [("~", 0x158)] * 3, got
+    if replay:
+        assert store._eng._last is None, "Live UDP reached display consumers during replay"
+
+
+def t_telemetry_loop_records_udp_during_replay():
+    t_telemetry_loop_feeds_the_recorder(replay=True)
 
 
 def t_telemetry_loop_records_a_packet_the_parser_rejects():

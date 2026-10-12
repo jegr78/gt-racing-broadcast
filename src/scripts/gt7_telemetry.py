@@ -768,6 +768,8 @@ class TelemetryStore:
         self._cars = cars              # gt7_cars.CarDB (or None: no car names)
         self._view_path = view_path
         self._visible = self._load_visible()
+        self.replay = None
+        self._replay_marker = self._load_marker()
         self._lock = threading.Lock()
         self._source = None            # latched console IP (discovery/UX), or None
         self._path = path
@@ -788,6 +790,16 @@ class TelemetryStore:
                     pass  # no stale file to clear
         else:
             self._load()
+
+    def reset_analysis(self, metadata):
+        with self._lock:
+            tracks = self._eng.track_db
+            self._eng = TelemetryEngine()
+            self._eng.track_db = tracks
+            self._dirty_ref = None
+            self._remove_file()
+        if self.engineer is not None:
+            self.engineer.reset(metadata)
 
     def update(self, pkt, now):
         with self._lock:
@@ -823,10 +835,18 @@ class TelemetryStore:
             self._source = ip
 
     def data(self):
+        if self.replay is not None:
+            with self.replay._lock:
+                return self._data()
+        return self._data()
+
+    def _data(self):
         with self._lock:
             snap = self._eng.snapshot()
             source = self._source
         out = format_snapshot(snap, self._units, self._thresholds)
+        out["replay"] = self.replay.status() if self.replay else {"active": False}
+        out["replay_marker"] = self._replay_marker
         out["source"] = source
         out["visible"] = self.visible()
         out["car"] = self._lookup_car(snap["car_id"])
@@ -885,13 +905,27 @@ class TelemetryStore:
         except (OSError, ValueError, AttributeError):
             return True
 
+    def _load_marker(self):
+        try:
+            with open(self._view_path, encoding="utf-8") as fh:
+                value = json.load(fh).get("replay_marker")
+            return value if isinstance(value, bool) else True
+        except (OSError, ValueError, TypeError, AttributeError):
+            return True
+
+    def set_replay_marker(self, on=None):
+        with self._lock:
+            self._replay_marker = not self._replay_marker if on is None else bool(on)
+            self._save_visible()
+            return {"replay_marker": self._replay_marker}
+
     def _save_visible(self):
         if not self._view_path:
             return
         try:
             tmp = self._view_path + ".tmp"
             with open(tmp, "w", encoding="utf-8") as fh:
-                json.dump({"visible": self._visible}, fh)
+                json.dump({"visible": self._visible, "replay_marker": self._replay_marker}, fh)
             os.replace(tmp, self._view_path)
         except OSError:
             pass                               # best-effort, never crash the relay
