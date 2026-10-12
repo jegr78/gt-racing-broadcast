@@ -96,6 +96,9 @@ def _serve_one(conn, image_data_uri, scene):
             resp = {"currentProgramSceneName": scene, "sceneName": scene}
         elif rtype == "GetSourceScreenshot":
             resp = {"imageData": image_data_uri}
+        elif rtype == "GetStreamStatus":
+            resp = {"outputActive": False, "outputReconnecting": False,
+                    "outputDuration": 0, "outputBytes": 0}
         else:                                          # everything else: bare OK
             resp = {}
         _send_json(conn, {"op": 7, "d": {

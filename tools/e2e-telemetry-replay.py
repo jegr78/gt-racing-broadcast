@@ -61,6 +61,8 @@ async def main():
                 await page.goto(f"http://127.0.0.1:{ui.server_port}/")
                 await page.evaluate("() => showView('telemetry')")
                 await page.locator("#tm-replay:not([disabled])").wait_for()
+                statuses = await page.evaluate("() => Promise.all([tmReplayOp('telemetry-replay-status'),tmReplayOp('telemetry-replay-status')])")
+                assert all(reply is not None and "active" in reply for reply in statuses), "Concurrent status callers did not join the same CLI job"
                 await page.locator("#tm-replay-from").fill("1")
                 await page.locator("#tm-replay").click()
                 try:

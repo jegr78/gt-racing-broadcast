@@ -5629,7 +5629,8 @@ function tmRenderRecs() {
 
 let tmReplayBusy=false,tmReplayStatus=null;
 async function tmReplayOp(name,params,quiet=false) {
- const job=await startJob(name,params);
+ let job=await startJob(name,params);
+ if(name==='telemetry-replay-status'&&job.error&&job.job_id)job={job_id:job.job_id};
  if(job.error){if(!quiet)tmErr(job.error);return null;}
  const result=await jobResult(job.job_id,30);
  if(result.error||result.code!==0){if(!quiet)tmErr(result.error||(result.lines||[]).map(x=>typeof x==='string'?x:x.text||'').join('\n')||'Replay command failed');return null;}
