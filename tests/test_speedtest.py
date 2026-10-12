@@ -196,6 +196,27 @@ def t_run_parses_and_appends(tmp=None):
     assert m.load_latest(d)["ts"] == NOW           # persisted
 
 
+def t_run_decodes_cli_output_as_utf8():
+    # #869: the Ookla CLI writes UTF-8; without an explicit encoding Python decodes
+    # with the locale code page (cp1252 on German Windows): "TelefÃ³nica".
+    import tempfile
+    seen = {}
+
+    class _Proc:
+        returncode = 0
+        stdout = OOKLA_JSON
+        stderr = ""
+
+    def runner(*a, **k):
+        seen.update(k)
+        return _Proc()
+
+    m.run(now=NOW, runtime_dir=tempfile.mkdtemp(), runner=runner,
+          which=lambda n: "/usr/bin/speedtest")
+    assert seen.get("encoding") == "utf-8", seen
+    assert seen.get("errors") == "replace", seen
+
+
 def t_run_raises_on_nonzero_exit():
     class _Proc:
         returncode = 1
