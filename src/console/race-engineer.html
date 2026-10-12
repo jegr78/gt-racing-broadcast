@@ -66,6 +66,8 @@ function lapLabel(r){if(r.lap<=0)return 'Out lap · not timed';return `Lap ${r.l
 // The automatic reference follows gt7_laps.pool: same car, same track, or the same session while the track is unknown.
 function sameCohort(r,b){return !!b&&r.car_id===b.car_id&&(b.track_id?r.track_id===b.track_id:!r.track_id&&r.session_id===b.session_id);}
 function comparable(row){return !!row&&(row.state==='provisional'?row.provisional_comparison_eligible:row.comparison_eligible)!==false;}
+// Only the first timed lap of a session can still gain a track when it completes.
+function recognising(row){return row?.state==='provisional'&&!row.track_id&&state.snapshot?.track_recognition!==false&&!state.laps.some(r=>r.session_id===row.session_id&&r.lap>=1&&r.state!=='provisional');}
 function carLabel(row){return row.car||('car '+(row.car_id??'unknown'));}
 function referenceLabel(row){const source=row.session_id?.split(':')[1];return state.refs.find(r=>r.id===source)?.label||'Shared reference';}
 function selections(){
@@ -151,7 +153,7 @@ async function selection(){const epoch=state.epoch,a=state.a,b=state.b;if(!b)ret
  const result=await request('/race-engineer/lap',{id:b});if(epoch!==state.epoch||b!==state.b||a!==state.a)return;
  if(result.state!=='ready'){state.note=result.state==='pending'?'Preparing selected lap detail':'Selected lap detail unavailable';clearPlots(false);render();$('context').textContent=state.note;$('notes').replaceChildren();return;}state.detail=result.lap;state.pair=null;
  if(a){const pair=await request('/race-engineer/compare',{a,b});if(epoch!==state.epoch||b!==state.b||a!==state.a)return;
-  if(pair.state==='ready'){if(!pair.compatible&&!comparable(pair.b)){state.detail=pair.b||state.detail;}else if(!pair.compatible&&pair.b?.state==='provisional'&&!pair.b.track_id&&pair.a?.track_id){state.detail=pair.b;state.note='Lap B is not comparable yet: the track is recognised when this lap completes';}else if(!pair.compatible&&state.follow){state.rejected.add(a+'|'+b);state.a='';say('Reference cleared because the live lap changed to an incompatible pool.');}else{state.pair=pair;state.detail=pair.b;}}
+  if(pair.state==='ready'){if(!pair.compatible&&!comparable(pair.b)){state.detail=pair.b||state.detail;}else if(!pair.compatible&&recognising(pair.b)&&pair.a?.track_id){state.detail=pair.b;state.note='Lap B is not comparable yet: the track is recognised when this lap completes';}else if(!pair.compatible&&state.follow){state.rejected.add(a+'|'+b);state.a='';say('Reference cleared because the live lap changed to an incompatible pool.');}else{state.pair=pair;state.detail=pair.b;}}
   else if(pair.state==='unavailable')state.note='Comparison unavailable';
  }render();
 }
