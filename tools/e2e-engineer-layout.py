@@ -153,6 +153,13 @@ async def main():
                 await page.evaluate('() => clearPlots()')
                 assert not await page.locator('#larger-sectors').is_visible(), 'an empty section card stayed visible'
                 await page.evaluate('() => {state.pair=state.savedLayoutPair;state.detail=state.savedLayoutDetail;render();}')
+                picks=await page.evaluate('''() => {const saved={laps:state.laps,snapshot:state.snapshot,a:state.a,b:state.b,follow:state.follow,refSource:state.refSource},cur=state.snapshot.current,lap={...state.snapshot.current,state:'confirmed',comparison_eligible:true},pick=()=>{state.a='';selections();return state.a;};
+                 state.refSource='';state.follow=true;state.laps=[{...lap,id:'unknown',track_id:null,session_id:cur.session_id,time_s:1},{...lap,id:'known',track_id:'layout',session_id:cur.session_id,time_s:2}];
+                 state.snapshot={...saved.snapshot,current:{...cur,track_id:'layout'}};const known=pick();
+                 state.snapshot={...saved.snapshot,current:{...cur,track_id:null}};const unknown=pick();
+                 state.rejected.add('unknown|'+cur.id);const rejected=pick();
+                 Object.assign(state,saved);state.rejected.clear();selections();return {known,unknown,rejected};}''')
+                assert picks == {'known':'known','unknown':'unknown','rejected':''}, f'automatic reference ignored the comparable pool: {picks}'
                 await page.locator('#channel').select_option('brake')
                 await page.locator('#zoom-from').fill('100');await page.locator('#zoom-to').fill('700');await page.locator('#zoom-to').dispatch_event('change')
                 assert await page.evaluate('() => EngineerDesk.state.zoom') == [100,700], 'phone controls did not apply zoom'

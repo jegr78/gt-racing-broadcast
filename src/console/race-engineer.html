@@ -39,7 +39,7 @@
 <script>
 'use strict';
 const $=id=>document.getElementById(id), num=(v,d=1)=>typeof v==='number'&&Number.isFinite(v)?v.toFixed(d):'Unavailable', signed=(v,d=3)=>(Number.isFinite(v)&&v>0?'+':'')+num(v,d);
-const state={stopped:false,busy:false,analysisBusy:false,epoch:0,generation:null,snapshot:null,received:0,connected:false,problem:null,historyRevision:null,laps:[],sessions:[],refs:[],refLaps:[],refSource:'',a:'',b:'',session:'',follow:true,zoom:null,detail:null,pair:null,outline:null,mapFrame:null,sectionView:'',sectionOpen:new Set(),sectionFocus:null,note:'',resizeFrame:0,known:new Set(),newLaps:0,analysisAvailable:false,lastAccess:0,lastChat:0,controllers:new Set()};
+const state={stopped:false,busy:false,analysisBusy:false,epoch:0,generation:null,snapshot:null,received:0,connected:false,problem:null,historyRevision:null,laps:[],sessions:[],refs:[],refLaps:[],refSource:'',a:'',b:'',session:'',follow:true,zoom:null,detail:null,pair:null,outline:null,mapFrame:null,sectionView:'',sectionOpen:new Set(),sectionFocus:null,note:'',resizeFrame:0,known:new Set(),rejected:new Set(),newLaps:0,analysisAvailable:false,lastAccess:0,lastChat:0,controllers:new Set()};
 let timer;
 function showDelta(value,distance){const el=$('delta');el.textContent=signed(value);$('delta-note').textContent=Number.isFinite(value)&&Number.isFinite(distance)?`Against A · through ${num(distance,0)} m`:'Against the selected reference';el.classList.toggle('gain',Number.isFinite(value)&&value<0);el.classList.toggle('loss',Number.isFinite(value)&&value>0);}
 function say(text){$('notice').textContent=text;}
@@ -58,11 +58,13 @@ async function request(route,query={},method='GET',body=null){
   if(!response.ok)throw new Error(data.error?.message||'Analysis temporarily unavailable');return data;
  }finally{clearTimeout(timeout);state.controllers.delete(controller);}
 }
-function resetGeneration(snap){const generation=snap.generation;if(state.generation&&state.generation!==generation){const was=!!state.snapshot?.replay?.active,now=!!snap.replay?.active;state.epoch++;state.laps=[];state.sessions=[];state.known.clear();state.historyRevision=null;state.b=state.session='';if(!state.a.startsWith('r:'))state.a='';state.zoom=null;state.newLaps=0;clearPlots();
+function resetGeneration(snap){const generation=snap.generation;if(state.generation&&state.generation!==generation){const was=!!state.snapshot?.replay?.active,now=!!snap.replay?.active;state.epoch++;state.laps=[];state.sessions=[];state.known.clear();state.historyRevision=null;state.rejected.clear();state.b=state.session='';if(!state.a.startsWith('r:'))state.a='';state.zoom=null;state.newLaps=0;clearPlots();
  // A source switch also starts a new generation; shared references do not depend on it.
  say(now&&!was?'Replay started. Live laps received meanwhile are not shown until it ends.':was&&!now?'Replay ended. Live telemetry resumed; the replay laps are no longer listed.':now?'A different replay started. The previous replay laps are no longer listed.':'Relay restarted. A new live generation is active; previous recordings remain history.');}state.generation=generation;}
 function options(id,rows,selected,empty){const el=$(id);el.replaceChildren();if(empty!==undefined){const o=document.createElement('option');o.value='';o.textContent=empty;el.append(o);}for(const row of rows){const o=document.createElement('option');o.value=row.id;o.textContent=row.label;el.append(o);}if(selected&&!rows.some(r=>r.id===selected)){const o=document.createElement('option');o.value=selected;o.textContent='Unavailable selection';el.append(o);}el.value=selected;}
 function lapLabel(r){if(r.lap<=0)return 'Out lap · not timed';return `Lap ${r.lap} · ${r.state==='provisional'?'in progress':r.time_s==null?'Not timed':num(r.time_s,3)+' s'}${r.line_position!=null&&r.line_car_count!=null?' · finish P'+r.line_position+'/'+r.line_car_count:''}${r.detail_state==='evicted'?' · detail no longer kept':''}${!r.comparison_eligible&&r.state!=='provisional'?' · excluded from best':''}`;}
+// The automatic reference follows gt7_laps.pool: same car, same track, or the same session while the track is unknown.
+function sameCohort(r,b){return !!b&&r.car_id===b.car_id&&(b.track_id?r.track_id===b.track_id:!r.track_id&&r.session_id===b.session_id);}
 function carLabel(row){return row.car||('car '+(row.car_id??'unknown'));}
 function referenceLabel(row){const source=row.session_id?.split(':')[1];return state.refs.find(r=>r.id===source)?.label||'Shared reference';}
 function selections(){
@@ -74,7 +76,7 @@ function selections(){
  options('session',sessions,state.session,'Waiting for session');
  options('lap-b',all.filter(r=>r.session_id===state.session).map(r=>({id:r.id,label:lapLabel(r)})),state.b,'Choose lap');
  const pool=state.refSource?state.refLaps:state.laps.filter(r=>r.session_id===state.session);
- const eligible=pool.filter(r=>r.comparison_eligible);if(!state.a&&eligible.length)state.a=eligible.reduce((a,b)=>a.time_s<b.time_s?a:b).id;
+ const eligible=pool.filter(r=>r.comparison_eligible),lapB=all.find(r=>r.id===state.b),usable=eligible.filter(r=>sameCohort(r,lapB)&&!state.rejected.has(r.id+'|'+state.b));if(!state.a&&usable.length)state.a=usable.reduce((a,b)=>a.time_s<b.time_s?a:b).id;
  options('lap-a',eligible.map(r=>({id:r.id,label:(r.id.startsWith('r:')?referenceLabel(r)+' · ':'')+lapLabel(r)})),state.a,'No reference');
  options('reference-source',state.refs.map(r=>({id:r.id,label:r.label})),state.refSource,'Selected session');
  $('follow').checked=state.follow;$('new-laps').textContent=state.newLaps?`${state.newLaps} newly completed lap${state.newLaps===1?'':'s'}`:'';
@@ -146,7 +148,7 @@ async function selection(){const epoch=state.epoch,a=state.a,b=state.b;if(!b)ret
  const result=await request('/race-engineer/lap',{id:b});if(epoch!==state.epoch||b!==state.b||a!==state.a)return;
  if(result.state!=='ready'){state.note=result.state==='pending'?'Preparing selected lap detail':'Selected lap detail unavailable';clearPlots(false);render();$('context').textContent=state.note;$('notes').replaceChildren();return;}state.detail=result.lap;state.pair=null;
  if(a){const pair=await request('/race-engineer/compare',{a,b});if(epoch!==state.epoch||b!==state.b||a!==state.a)return;
-  if(pair.state==='ready'){if(!pair.compatible&&state.follow){state.a='';say('Reference cleared because the live lap changed to an incompatible pool.');}else{state.pair=pair;state.detail=pair.b;}}
+  if(pair.state==='ready'){if(!pair.compatible&&state.follow){state.rejected.add(a+'|'+b);state.a='';say('Reference cleared because the live lap changed to an incompatible pool.');}else{state.pair=pair;state.detail=pair.b;}}
   else if(pair.state==='unavailable')state.note='Comparison unavailable';
  }render();
 }
