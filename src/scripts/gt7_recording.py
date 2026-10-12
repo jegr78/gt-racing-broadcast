@@ -378,7 +378,7 @@ def replay_counts(path):
     return len(laps), (last - first) if first is not None else 0.0
 
 
-GT7_TIME_WINDOW_S = 3.0       # GT7 updates last_ms shortly after the line
+GT7_TIME_WINDOW_S = gt7_telemetry.GT7_TIME_WINDOW_S
 PROJECT_TOL_M = 50.0          # corner cutting moves the projection metres, another branch of the line far more
 
 

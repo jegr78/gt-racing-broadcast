@@ -334,6 +334,7 @@ class Store:
         self.generation = uuid.uuid4().hex
         self._enabled_source, self._clock = enabled, clock
         self._tracks, self._cars = tracks, cars
+        self._pending_data = None
         self._runtime_base, self._bundled = runtime_base, bundled
         self._definitions = (
             gt7_track_definitions.Store(
@@ -468,6 +469,16 @@ class Store:
             self._published = self._empty()
             self._detail_publication = {}
 
+    def reload_data(self, cars, tracks):
+        """Called from the GT7 data watcher; the worker swaps the tables between packets."""
+        self._pending_data = (cars, tracks)
+
+    def _apply_data(self):
+        pending, self._pending_data = self._pending_data, None
+        if pending is not None:
+            self._cars, self._tracks = pending
+            self._replay.eng.track_db = self._tracks
+
     def reset(self, metadata, timeout=5):
         """Bound admission and acknowledgement; expired commands cannot publish later."""
         if self._stop.is_set():
@@ -500,6 +511,7 @@ class Store:
         checked = time.monotonic()
         while not self._stop.is_set():
             if time.monotonic() - checked >= 0.2:
+                self._apply_data()
                 self.refresh_enabled()
                 self._sync_recording()
                 self._refresh_definitions()
@@ -890,6 +902,8 @@ class Store:
             packet_age_s=round(packet_age, 3) if packet_age is not None else None,
             packet_received_at=packet[0] if packet else None,
         )
+        recognisable = getattr(self._tracks, "recognisable", None)
+        result["track_recognition"] = bool(recognisable()) if recognisable else False
         return result
 
     def history(self, since=None):

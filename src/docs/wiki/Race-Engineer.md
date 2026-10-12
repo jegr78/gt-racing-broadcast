@@ -31,18 +31,23 @@ carries a **+** sign, so gain and loss do not depend on color.
 
 The desk reads the existing single GT7 source of a solo POV profile. Speed, gear,
 RPM, throttle/brake, race position, observed lap time, fuel and tyre temperatures refresh roughly
-twice per second. Missing measurements say **Unavailable**. The observed lap clock
+twice per second. Missing measurements say **Unavailable**, without their unit. The observed lap clock
 and live delta describe received data; neither advances without new packets.
 Race position reads **P15/15**, for example, from GT7's own-car position and field
 size. Missing or inconsistent readings remain unavailable. Completed lap options
 include the position measured at the line when GT7 provided it. No gaps to
-other cars are inferred. Receipt time and age of the last telemetry packet remain visible.
+other cars are inferred. Receipt time (24-hour) and age of the last telemetry packet remain
+visible. During a replay the line shows the recorded time in UTC instead.
 
 Select **Session** and **Lap B** to inspect retained current or prior-session laps.
 Sessions show the track, vehicle name and lap count; unknown names fall back to
 the car ID. Shared session and reference-lap options include the producer's label.
 Select an eligible **Lap A** from the selected session, or choose a producer-shared
-**Reference source**. The charts use the same validated distance stations, sector
+**Reference source**. Without a choice, the desk takes the fastest eligible lap with the
+same car and track, or from the same session while the track is unknown. While lap B is
+an out lap, pit lap or first lap of a stint, or while its track is still being
+recognised in the first lap of a session, it chooses none and says so; a chosen
+reference stays selected. The charts use the same validated distance stations, sector
 and context rules as the local Control Center. Blue is A, orange is B, delta is
 B minus A. The current lap is provisional; future curve sections and incomplete
 200 m sectors say **Not yet driven** in muted text. Missing measurements remain
@@ -69,8 +74,9 @@ and later groups say **Not reached**. Unconfirmed definitions retain their statu
 A short trailing mini-sector is grouped with its predecessor for display; shared
 analysis values are unchanged. Curves show their channel units, delta has a zero
 line, and an empty comparison has a message, retains known distance and omits artificial axes. Turn labels
-avoid overlaps and have a textual legend. Declared settings and strategy use named
-values rather than raw JSON. Unknown tracks compare only within the same source and session; known
+sit on the complete reference outline, also ahead of the car, avoid overlaps and have a textual legend. Declared settings and strategy use named
+values rather than raw JSON. When the producer's relay has no track recognition data yet, the
+desk says so next to **Unknown track**. Unknown tracks compare only within the same source and session; known
 car, compound or strategy contradictions prevent the default comparison.
 
 **Follow live** selects the newest active lap. Manually choosing a session or lap
@@ -83,8 +89,9 @@ shared notes and limitations update without resetting that selection.
 
 Pause, menu, loading, preparation delay, stale telemetry and browser disconnection
 have distinct labels. Five seconds without packets dims retained values. A browser
-connection interruption keeps selection and zoom while it retries. A relay restart
-shows a new generation and clears the old live selection and zoom. Explicitly
+connection interruption keeps selection and zoom while it retries. A relay restart, and a
+replay starting or ending, starts a new generation and clears the live selection and zoom.
+The notice names which of them happened. A selected shared reference stays selected. Explicitly
 shared recordings remain selectable historical sources and never replace live values.
 
 Collection starts with the profile opt-in and incoming packets, without waiting for

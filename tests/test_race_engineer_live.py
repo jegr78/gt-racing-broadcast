@@ -77,6 +77,28 @@ def t_stale_pause_generation_and_collection_switch():
             assert restart.generation != store.generation
 
 
+def t_gt7_data_reload_reaches_the_running_analysis():
+    class Tracks:
+        def __init__(self, recognisable):
+            self._recognisable = recognisable
+        def recognisable(self):
+            return self._recognisable
+        def match(self, points, distance):
+            return None
+    old, new, cars = Tracks(False), Tracks(True), FakeCars()
+    with live.Store(lambda: True, tracks=old) as store:
+        assert store.snapshot()['track_recognition'] is False, 'missing recognition data was not reported'
+        store.reload_data(cars, new)
+        deadline = time.monotonic() + 5
+        while store._tracks is not new and time.monotonic() < deadline:
+            time.sleep(.05)
+        assert store._tracks is new and store._cars is cars, 'reloaded GT7 data did not reach the analysis'
+        assert store._replay.eng.track_db is new, 'the running lap engine kept the old track data'
+        assert store.snapshot()['track_recognition'] is True, 'recognition state ignored the reloaded data'
+    with live.Store(lambda: True) as store:
+        assert store.snapshot()['track_recognition'] is False, 'no track data reported as recognisable'
+
+
 def t_bounds_eviction_concurrent_readers_and_async_recovery():
     with tempfile.TemporaryDirectory() as d:
         path = write_circle_recording(d, lap_secs=tuple(20.0 - i * .1 for i in range(12)), n=100)
@@ -344,6 +366,12 @@ def t_relay_collection_follows_the_profile_without_a_browser_or_recording():
             assert store.flush()
             assert store.snapshot()['current'] is not None
             assert telemetry.recorder is None, 'Engineer opt-in started a recording'
+            tracks = FakeTracks()
+            telemetry.reload_data(FakeCars(), tracks)
+            deadline = time.monotonic() + 5
+            while store._tracks is not tracks and time.monotonic() < deadline:
+                time.sleep(.05)
+            assert store._tracks is tracks, 'a relay GT7 data reload skipped the Engineer analysis'
             access.update(enabled=False, expected=1)
             store.refresh_enabled()
             assert not store.put(pkt, 101)

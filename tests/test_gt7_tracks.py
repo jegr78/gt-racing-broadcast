@@ -70,6 +70,7 @@ def t_match_forward_and_reverse():
         db = _db(d, [_row("aaa001", "Oval", OVAL, {"official_id": "aaa002",
                                                    "official_name": "Oval (Reverse)"}),
                      _row("bbb001", "Ring", OTHER)])
+        assert db.recognisable() is True, "downloaded signatures are recognisable"
         L = _length(OVAL)
         m = db.match(_lap(OVAL, offset=5.0), L * 1.01)
         assert m["id"] == "aaa001" and m["layout"] == "Full" and m["reverse"] is False, m
@@ -118,6 +119,7 @@ def t_missing_signatures_file_still_loads_the_catalogue():
         db = gt.TrackDB(os.path.join(d, "index.json"), os.path.join(d, "absent.json"))
         assert db.name("aaa001") is not None, "catalogue loads without signatures"
         assert db.match([(float(i), 0.0) for i in range(20)], 400.0) is None
+        assert db.recognisable() is False, "a catalogue without signatures recognises nothing"
 
 
 def t_locate_measures_the_distance_to_the_line_not_the_nearest_vertex():
