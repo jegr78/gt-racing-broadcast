@@ -73,7 +73,7 @@ function selections(){
  if(state.follow&&current){state.b=current.id;state.session=current.session_id;}
  if(!state.b){const rows=all.filter(r=>!state.session||r.session_id===state.session);if(rows.length){state.b=rows.at(-1).id;state.session=rows.at(-1).session_id;}}
  const sessions=state.sessions.map(s=>({id:s.id,label:`${s.track||'Unknown track'} · ${carLabel(s)} · ${s.laps} laps`}));
- for(const r of state.refLaps)if(!sessions.some(s=>s.id===r.session_id))sessions.push({id:r.session_id,label:`${referenceLabel(r)} · session ${r.session_id.split(':').at(-1)} · ${r.track||'Unknown track'} · ${carLabel(r)} · ${state.refLaps.filter(l=>l.session_id===r.session_id).length} laps`});
+ for(const r of state.refLaps)if(!sessions.some(s=>s.id===r.session_id))sessions.push({id:r.session_id,label:`${referenceLabel(r)} · session ${r.session_id.split(':').at(-1)} · ${state.refLaps.find(l=>l.session_id===r.session_id&&l.track)?.track||'Unknown track'} · ${carLabel(r)} · ${state.refLaps.filter(l=>l.session_id===r.session_id).length} laps`});
  options('session',sessions,state.session,'Waiting for session');
  options('lap-b',all.filter(r=>r.session_id===state.session).map(r=>({id:r.id,label:lapLabel(r)})),state.b,'Choose lap');
  const pool=state.refSource?state.refLaps:state.laps.filter(r=>r.session_id===state.session);
