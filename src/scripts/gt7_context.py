@@ -399,11 +399,19 @@ class Store:
     def _check_capture(self):
         if self.capture_path is None:
             return
-        path = self.capture_path if os.path.isfile(self.capture_path) else self.capture_path + '.part'
-        if not os.path.isfile(path):
-            raise ValueError('recording no longer available')
-        if source_identity(path) != self.source_id:
-            raise ValueError('recording identity changed')
+        # Finalization moves .part -> final once. Read the identity directly and
+        # recheck final after a missing .part; stat-then-open loses that transition.
+        for path in (self.capture_path, self.capture_path + '.part', self.capture_path):
+            try:
+                identity = source_identity(path)
+            except (gt7_recording.RecordingError, OSError) as exc:
+                if isinstance(exc, FileNotFoundError) or isinstance(exc.__cause__, FileNotFoundError):
+                    continue  # It may have finalized between these two reads.
+                raise ValueError('recording no longer available') from exc
+            if identity != self.source_id:
+                raise ValueError('recording identity changed')
+            return
+        raise ValueError('recording no longer available')
 
     def save(self, data, expected, draft=None, operation='edit', force_revision=False):
         _number(expected, 'expected revision', True)
