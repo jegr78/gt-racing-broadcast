@@ -125,6 +125,34 @@ async def main():
                     assert await page.locator('#delta').inner_text() == 'Unavailable' and not (await page.locator('#delta').get_attribute('class') or ''), 'nonfinite delta claimed a gain or loss'
                 await page.evaluate('() => showDelta(null)')
                 assert await page.locator('#delta').inner_text() == 'Unavailable' and not (await page.locator('#delta').get_attribute('class') or ''), 'missing delta retained gain/loss emphasis'
+                observed=await page.evaluate('() => state.detail.trace.at(-1).d')
+                ahead=await page.evaluate('(d) => (state.detail.corner_metrics||[]).filter(c=>c.apex_m>d).map(c=>"T"+c.number)',observed)
+                labels=await page.locator('#map [data-turn]').all_text_contents()
+                assert not ahead or set(ahead)&set(labels), f'turns ahead of the car had no map label: ahead {ahead}, labels {labels}'
+                await page.evaluate('() => {state.snapshot={...state.snapshot,receipt:{...state.snapshot.receipt,packet_received_at:1700000000},replay:{active:true,label:"Recorded session",speed:4}};state.received=performance.now();age();}')
+                assert await page.locator('#receipt').inner_text() == 'Recorded: 22:13:20 UTC · last packet: '+(await page.evaluate('() => num(state.snapshot.receipt.packet_age_s,1)'))+' s', 'replay receipt did not use the UTC recorded time'
+                await page.evaluate('() => {state.snapshot={...state.snapshot,replay:{active:false}};age();}')
+                assert re.match(r'Receipt: \d{1,2}:\d\d:\d\d · ', await page.locator('#receipt').inner_text()), 'live receipt was not a 24-hour time'
+                await page.evaluate('() => {state.generation="g1";state.snapshot={...state.snapshot,replay:{active:false}};state.refSource="ref";state.a="r:ref:1:2";resetGeneration({generation:"g2",replay:{active:true}});}')
+                assert (await page.locator('#notice').inner_text()).startswith('Replay started.'), 'replay start was reported as something else'
+                assert await page.evaluate('() => [state.refSource,state.a]') == ['ref','r:ref:1:2'], 'a source switch cleared the shared reference'
+                await page.evaluate('() => {state.snapshot={...state.snapshot,replay:{active:true}};resetGeneration({generation:"g3",replay:{active:false,live_gap:true}});}')
+                assert (await page.locator('#notice').inner_text()).startswith('Replay ended.'), 'replay end was reported as a relay restart'
+                await page.evaluate('() => {state.snapshot={...state.snapshot,replay:{active:true}};resetGeneration({generation:"g4",replay:{active:true}});}')
+                assert (await page.locator('#notice').inner_text()).startswith('A different replay started.'), 'a replay switch was not named'
+                await page.evaluate('() => {state.snapshot={...state.snapshot,replay:{active:false}};state.a="live-lap";resetGeneration({generation:"g5",replay:{active:false}});}')
+                assert (await page.locator('#notice').inner_text()).startswith('Relay restarted.') and await page.evaluate('() => state.a') == '', 'a relay restart kept a live reference'
+                await page.evaluate('() => instruments({instruments:{},current:{lap:3,track:null,car:"Car"},track_recognition:false})')
+                assert all(await page.locator('[data-unit-for]').evaluate_all('(nodes)=>nodes.map(n=>n.hidden)')), 'units stayed beside unavailable values'
+                assert [await page.locator(t).inner_text() for t in ('#tyres-front','#tyres-rear')] == ['Unavailable','Unavailable'], 'unavailable tyre pairs repeated the placeholder'
+                assert (await page.locator('#source-state').inner_text()).startswith('Unknown track · track recognition data not loaded'), 'missing recognition data was not named'
+                await page.evaluate('() => instruments({instruments:{speed_kmh:120,rpm:5000,throttle:40,brake:0,tyres_c:[80,null,null,null]},current:{lap:3,track:null,car:"Car"},track_recognition:true})')
+                assert not any(await page.locator('[data-unit-for]').evaluate_all('(nodes)=>nodes.map(n=>n.hidden)')), 'units were hidden beside measured values'
+                assert await page.locator('#tyres-front').inner_text() == '80 / Unavailable', 'a partly measured tyre pair lost its value'
+                assert (await page.locator('#source-state').inner_text()).startswith('Unknown track · Car'), 'recognisable data still blamed the track data'
+                await page.evaluate('() => clearPlots()')
+                assert not await page.locator('#larger-sectors').is_visible(), 'an empty section card stayed visible'
+                await page.evaluate('() => {state.pair=state.savedLayoutPair;state.detail=state.savedLayoutDetail;render();}')
                 await page.locator('#channel').select_option('brake')
                 await page.locator('#zoom-from').fill('100');await page.locator('#zoom-to').fill('700');await page.locator('#zoom-to').dispatch_event('change')
                 assert await page.evaluate('() => EngineerDesk.state.zoom') == [100,700], 'phone controls did not apply zoom'

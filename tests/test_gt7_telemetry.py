@@ -1374,7 +1374,7 @@ def t_engine_gt7_lap_time_window_and_unchanged_value():
     t = _drive(eng, 100.0, 1, 10.0, last_ms=5000)
     eng.update(tm.parse_packet(_packet(speed_mps=50.0, lap=2, last_ms=5000)), t)
     relay = eng.snapshot()["best_s"]
-    assert relay is not None and relay != 5.0
+    assert relay is not None and relay != 5.0, "an unchanged GT7 value was taken at the line"
     _official(eng, t, 2, 5000)
     assert eng.snapshot()["best_s"] == relay, "an unchanged GT7 value was taken as the new lap time"
     _official(eng, t, 2, 9876, after=tm.GT7_TIME_WINDOW_S + 0.5)
