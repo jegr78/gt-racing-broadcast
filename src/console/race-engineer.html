@@ -149,7 +149,7 @@ async function selection(){const epoch=state.epoch,a=state.a,b=state.b;if(!b)ret
  const result=await request('/race-engineer/lap',{id:b});if(epoch!==state.epoch||b!==state.b||a!==state.a)return;
  if(result.state!=='ready'){state.note=result.state==='pending'?'Preparing selected lap detail':'Selected lap detail unavailable';clearPlots(false);render();$('context').textContent=state.note;$('notes').replaceChildren();return;}state.detail=result.lap;state.pair=null;
  if(a){const pair=await request('/race-engineer/compare',{a,b});if(epoch!==state.epoch||b!==state.b||a!==state.a)return;
-  if(pair.state==='ready'){if(!pair.compatible&&!comparable(pair.b)){state.detail=pair.b||state.detail;}else if(!pair.compatible&&state.follow){state.rejected.add(a+'|'+b);state.a='';say('Reference cleared because the live lap changed to an incompatible pool.');}else{state.pair=pair;state.detail=pair.b;}}
+  if(pair.state==='ready'){if(!pair.compatible&&!comparable(pair.b)){state.detail=pair.b||state.detail;}else if(!pair.compatible&&pair.b?.state==='provisional'&&!pair.b.track_id&&pair.a?.track_id){state.detail=pair.b;state.note='Lap B is not comparable yet: the track is recognised when this lap completes';}else if(!pair.compatible&&state.follow){state.rejected.add(a+'|'+b);state.a='';say('Reference cleared because the live lap changed to an incompatible pool.');}else{state.pair=pair;state.detail=pair.b;}}
   else if(pair.state==='unavailable')state.note='Comparison unavailable';
  }render();
 }
