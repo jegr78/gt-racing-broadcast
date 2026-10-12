@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Release follow-up boundaries with no provider or infrastructure side effects."""
 import importlib.util
+import json
 import pathlib
 import subprocess
 import shutil
@@ -42,12 +43,12 @@ class Hardening(unittest.TestCase):
     @unittest.skipUnless(shutil.which('ruff'),'Ruff style behavior checked by lint job')
     def test_style_rules_are_scoped_and_detect_compound_statements(self):
         def check(name,source):
-            return subprocess.run(['ruff','check','--stdin-filename',name,'-'],input=source,
+            return subprocess.run(['ruff','check','--output-format','json','--stdin-filename',name,'-'],input=source,
                 cwd=ROOT,capture_output=True,text=True,errors='replace')
         bad=check('src/scripts/ai_jobs.py','x=1; y=2\n')
         self.assertNotEqual(bad.returncode,0)
-        self.assertIn('E702',bad.stdout)
-        self.assertIn('E225',bad.stdout)
+        codes={d['code'] for d in json.loads(bad.stdout)}
+        self.assertTrue({'E702','E225'}<=codes,f'scoped style rules missing from {codes}')
         self.assertEqual(check('src/scripts/ai_jobs.py','x = 1\ny = 2\n').returncode,0)
         self.assertEqual(check('src/scripts/services.py','x=1; y=2\n').returncode,0)
 
