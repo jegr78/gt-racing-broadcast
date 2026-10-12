@@ -126,7 +126,8 @@ async def main():
             ui.shutdown(); ui.server_close()
             relay.shutdown(); relay.server_close()
             fixture.live.close()
+    return 0
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    sys.exit(asyncio.run(main()))

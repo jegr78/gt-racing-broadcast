@@ -11521,26 +11521,23 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     if control is None:
                         return self._send({"error": "telemetry replay disabled"}, 404)
                     if p[2] == "status":
-                        return self._send(dict(control.status(), on_air=(getattr(relay, "obs_stats", {}) or {}).get("stream_active") is True))
+                        return self._send(dict(control.status(), on_air=telemetry_replay.needs_on_air_confirmation(relay)))
                     if p[2] == "stop":
                         return self._send(control.stop())
                     if p[2] != "start":
                         return self._send({"error": "unknown replay action"}, 404)
                     qs = parse_qs(urlparse(self.path).query)
                     try:
-                        reachable, stats, _note = relay._obs.get_health_stats()
-                        streaming = stats.get("stream_active") is True
-                        if not reachable:
-                            streaming = (getattr(relay, "obs_stats", {}) or {}).get("stream_active") is True
+                        streaming = telemetry_replay.needs_on_air_confirmation(relay)
                         if streaming and qs.get("on-air", [""])[0] != "1":
-                            return self._send({"error": "OBS is streaming; confirm with --on-air",
+                            return self._send({"error": "OBS is streaming or its streaming state is unknown; confirm with --on-air",
                                                "code": "on_air_confirmation"}, 409)
                         return self._send(control.start(qs.get("name", [""])[0],
                                                        qs.get("speed", ["1"])[0],
                                                        qs.get("from", ["0"])[0]))
                     except telemetry_replay.ReplayError as exc:
                         return self._send({"error": str(exc), "code": exc.code},
-                                          409 if exc.code == "replay_active" else 400)
+                                          503 if exc.code == "analysis_unavailable" else 409 if exc.code == "replay_active" else 400)
                 if len(p) == 3 and p[:2] == ["telemetry", "replay-marker"]:
                     if telemetry_store is None:
                         return self._send({"error": "telemetry disabled"}, 404)

@@ -21,6 +21,13 @@ def t_source_guards():
         root.mkdir()
         path = root / "drive.gt7rec"
         Path(write_circle_recording(str(root))).rename(path)
+        content = path.read_bytes()
+        (root.parent / path.name).write_bytes(content)
+        (root / 'a').mkdir()
+        (root / 'a' / path.name).write_bytes(content)
+        (root / 'a\\drive.gt7rec').write_bytes(content)
+        (root / 'drive.csv').write_bytes(content)
+        (root / '-drive.gt7rec').write_bytes(content)
         control = telemetry_replay.Controller(gt7_telemetry.TelemetryStore(), root)
         for name in ("../drive.gt7rec", "a/drive.gt7rec", "a\\drive.gt7rec", "drive.csv", "", "-drive.gt7rec"):
             try:
@@ -32,7 +39,7 @@ def t_source_guards():
         try:
             link.symlink_to(path)
         except OSError:
-            pass
+            pass  # Windows may not permit creation of a symbolic link.
         else:
             try:
                 control.start(link.name)
@@ -81,13 +88,83 @@ def t_udp_does_not_wait_for_source_switch():
         worker.join()
 
 
+def t_reset_failure_returns_udp_and_hides_unacknowledged_analysis():
+    from types import SimpleNamespace
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp) / "telemetry-recordings"
+        root.mkdir()
+        path = Path(write_circle_recording(str(root)))
+        failures = [True]
+        def reset(_metadata):
+            if failures[0]:
+                raise ValueError("Analysis reset timed out")
+        analysis = SimpleNamespace(reset=reset, put=lambda *args: True, flush=lambda: True)
+        store = gt7_telemetry.TelemetryStore(engineer=analysis)
+        control = telemetry_replay.Controller(store, root)
+        try:
+            control.start(path.name)
+            raise AssertionError("Failed admission accepted")
+        except telemetry_replay.ReplayError as exc:
+            assert exc.code == "analysis_unavailable"
+        assert not control.status()["active"] and control.status()["error"]
+        assert store.engineer is None
+        failures[0] = False
+        control.start(path.name)
+        assert store.engineer is analysis
+        failures[0] = True
+        control.stop()
+        assert not control.status()["active"] and control.status()["error"]
+        assert store.engineer is None
+        import gt7_recording
+        wall, _, plain = next(gt7_recording.Recording(str(path)).packets())
+        assert control.udp_update(gt7_telemetry.parse_packet(plain), wall)
+        assert store._eng._last is not None
+        failures[0] = False
+        control.stop()
+        assert store.engineer is analysis and control.status()["error"] is None
+
+
+def t_reset_timeout_cancels_late_command_and_bounds_queue_admission():
+    from test_gt7_laps import _pkt
+    store = race_engineer_live.Store(lambda: True, tracks=FakeTracks(), queue_max=1)
+    entered, release = threading.Event(), threading.Event()
+    original = store._consume
+    def held(item):
+        entered.set()
+        release.wait(5)
+        original(item)
+    store._consume = held
+    metadata = dict(active=True,label="Expired replay",speed=1)
+    try:
+        assert store.put(gt7_telemetry.parse_packet(_pkt(1,30,0)),100)
+        assert entered.wait(1)
+        start = time.monotonic()
+        try:
+            store.reset(metadata,timeout=.05)
+            raise AssertionError("Unacknowledged reset accepted")
+        except ValueError as exc:
+            assert "timed out" in str(exc)
+        try:
+            store.reset(metadata,timeout=.05)
+            raise AssertionError("Full queue admitted reset")
+        except ValueError as exc:
+            assert "queue is full" in str(exc)
+        assert time.monotonic()-start < .5
+        release.set()
+        assert store.flush()
+        assert not store.snapshot()["replay"]["active"], "Expired reset applied after timeout"
+    finally:
+        release.set()
+        store.close()
+
+
 def t_prefeed_and_switch():
     with tempfile.TemporaryDirectory() as temp:
         root = Path(temp) / "telemetry-recordings"
         root.mkdir()
         path = root / "private-name.gt7rec"
         Path(write_circle_recording(str(root))).rename(path)
-        engineer = race_engineer_live.Store(lambda: True, tracks=FakeTracks(), cars=FakeCars())
+        engineer = race_engineer_live.Store(lambda: True, tracks=FakeTracks(), cars=FakeCars(), queue_max=64)
         store = gt7_telemetry.TelemetryStore(engineer=engineer)
         control = telemetry_replay.Controller(store, root)
         try:
@@ -138,6 +215,16 @@ def t_http_guards_and_marker():
             status, _, body = get(route + "&on-air=1")
             assert status == 409 and json.loads(body)["code"] == "replay_active"
             assert get("/telemetry/replay/stop")[0] == 200
+            relay.obs_stats = {"stream_active": True}
+            for reachable in (True, False):
+                relay._obs.get_health_stats = lambda reachable=reachable: (reachable, {}, "Stream status unavailable")
+                status, _, body = get(route)
+                assert status == 409 and json.loads(body)["code"] == "on_air_confirmation"
+                assert json.loads(get("/telemetry/replay/status")[2])["on_air"]
+            relay.obs_stats = {}
+            relay._obs.get_health_stats = lambda: (True, {}, "Stream status unavailable")
+            status, _, body = get(route)
+            assert status == 409 and json.loads(body)["code"] == "on_air_confirmation"
             status, _, body = get("/telemetry/replay-marker/hide")
             assert status == 200 and json.loads(body) == {"replay_marker": False}
             assert not gt7_telemetry.TelemetryStore(view_path=store._view_path).data()["replay_marker"]
@@ -188,6 +275,24 @@ def t_import_and_argv():
             except Exception as exc:
                 assert type(exc).__name__ == "RecordingError", exc
             assert not (root / "destination" / invalid.name).exists()
+            race = original / "race.gt7rec"
+            race.write_bytes(path.read_bytes())
+            race_target = root / "destination" / race.name
+            real_open = Path.open
+            def concurrent_file(self, mode="r", *args, **kwargs):
+                if self == race_target and mode in ("xb", "wb") and not self.exists():
+                    with real_open(self, "wb") as stream:
+                        stream.write(b"concurrent recording")
+                return real_open(self, mode, *args, **kwargs)
+            Path.open = concurrent_file
+            try:
+                try:
+                    rc.telemetry_import_data(str(race))
+                    raise AssertionError("Concurrent collision overwritten")
+                except FileExistsError:
+                    assert race_target.read_bytes() == b"concurrent recording"
+            finally:
+                Path.open = real_open
         finally:
             rc._telemetry_rec_dir = saved
         assert ui_ops.build_argv("telemetry-replay-start", {"name": path.name,"speed":2,"from":1,"on_air":True}) == ["telemetry", "replay", "start", path.name, "--speed", "2.0", "--from", "1.0", "--on-air"]
@@ -203,12 +308,12 @@ def t_offline_parity_and_udp_recording():
         path = Path(write_circle_recording(str(root), n=100))
         expected = _index(str(path))
         for speed in (1, 2, 100):
-            engineer = race_engineer_live.Store(lambda: True, tracks=FakeTracks(), cars=FakeCars())
+            engineer = race_engineer_live.Store(lambda: True, tracks=FakeTracks(), cars=FakeCars(), queue_max=64)
             captured = []
             class Store(gt7_telemetry.TelemetryStore):
-                def reset_analysis(self, metadata, captured=captured):
+                def reset_analysis(self, metadata, captured=captured, analysis=engineer):
                     if not metadata["active"]:
-                        captured.append((self.engineer.snapshot(), dict(self.engineer._details)))
+                        captured.append((analysis.snapshot(), dict(analysis._details)))
                     super().reset_analysis(metadata)
             store = Store(engineer=engineer)
             now = [0.0]

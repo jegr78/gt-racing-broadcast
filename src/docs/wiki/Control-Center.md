@@ -267,7 +267,8 @@ downloadable attachment that recipients open in a browser.
 **Replay selected recording** sends telemetry through the running solo POV relay.
 Choose speed and a start minute, then start. The status shows elapsed recording
 time and total duration; **Stop replay** returns all consumers to live UDP.
-If OBS streams, confirm the on-air replay before starting. The relay checks OBS
+If OBS streams or an OBS connection cannot report whether it streams, confirm the
+on-air replay before starting. The relay checks OBS
 again when the command arrives. Live packets continue recording during replay,
 but only the replay reaches the HUD, Director and Engineer.
 
@@ -289,6 +290,8 @@ Speeds above zero through 100× are supported. The recorded clock still drives
 lap analysis. Skipped packets prepare the earlier laps without playback pauses.
 Each source switch clears the displayed reference, fuel history and analysis pool.
 Replay never records its own packets. End of file also returns to live UDP.
+If analysis cannot acknowledge a source switch, live telemetry resumes with analysis
+unavailable and the status explains the failure. Stop again to retry the live reset.
 
 ![Control Center: Telemetry lap comparison](images/cc-telemetry.png)
 

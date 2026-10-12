@@ -468,12 +468,21 @@ class Store:
             self._published = self._empty()
             self._detail_publication = {}
 
-    def reset(self, metadata):
-        """Reset on the analysis worker after all preceding packets were consumed."""
-        done = threading.Event()
-        self._queue.put(("reset", dict(metadata), done))
-        if not done.wait(10):
+    def reset(self, metadata, timeout=5):
+        """Bound admission and acknowledgement; expired commands cannot publish later."""
+        if self._stop.is_set():
+            raise ValueError("Analysis worker is stopped")
+        done, cancelled, failures = threading.Event(), threading.Event(), []
+        end = time.monotonic() + timeout
+        try:
+            self._queue.put(("reset", dict(metadata), done, cancelled, failures), timeout=timeout)
+        except queue.Full as exc:
+            raise ValueError("Analysis reset queue is full") from exc
+        if not done.wait(max(0, end - time.monotonic())):
+            cancelled.set()
             raise ValueError("Analysis reset timed out")
+        if failures:
+            raise ValueError("Analysis reset failed")
 
     def put(self, pkt, wall_ts):
         """UDP path: no disk access, parsing, replay or blocking queue insertion."""
@@ -506,9 +515,15 @@ class Store:
                 continue
             try:
                 if item[0] == "reset":
-                    self._source_replay = item[1]
-                    self._reset_generation(new_source=True)
-                    item[2].set()
+                    try:
+                        if not item[3].is_set():
+                            self._source_replay = item[1]
+                            self._reset_generation(new_source=True)
+                    except (ValueError, TypeError, OSError, OverflowError):
+                        item[4].append(True)
+                        raise
+                    finally:
+                        item[2].set()
                 elif item[0] == self._epoch and self._enabled:
                     self._consume(item)
             except (ValueError, TypeError, OSError, OverflowError):

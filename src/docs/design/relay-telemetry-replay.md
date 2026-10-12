@@ -38,3 +38,10 @@ The public source label is independent of private filenames and recording header
 On-air start checks fresh OBS health, falling back to the known streaming state if
 OBS is unreachable. Control Center obtains status through ordinary CLI jobs and
 confirms before passing --on-air. No new relay proxy is added.
+
+Review corrections bound both reset queue admission and acknowledgement. Expired
+commands are cancelled. During a source switch the old Engineer API is detached
+until acknowledgement. If reset fails, HUD/UDP resume with analysis unavailable;
+a later Stop retries the live reset. Status retains the error without a ghost
+active replay. Reachable OBS with missing streaming evidence requires explicit
+confirmation, including when the last known streaming state was active.

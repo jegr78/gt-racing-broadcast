@@ -11,6 +11,17 @@ import race_engineer_access
 BATCH = 64
 
 
+def needs_on_air_confirmation(relay):
+    """Fresh off-air evidence wins; incomplete OBS replies preserve active state."""
+    reachable, stats, _note = relay._obs.get_health_stats()
+    active = stats.get("stream_active")
+    if isinstance(active, bool):
+        return active
+    cached = (getattr(relay, "obs_stats", {}) or {}).get("stream_active")
+    # An open OBS session with no stream answer is unknown, never proved off-air.
+    return bool(reachable) or cached is True
+
+
 class ReplayError(ValueError):
     def __init__(self, code, message):
         self.code = code
@@ -35,6 +46,7 @@ class Controller:
         self.store = store
         self.directory = Path(directory)
         self.clock = clock
+        self._analysis = store.engineer
         self._lock = threading.RLock()
         self._operations = threading.Lock()
         self._stop = threading.Event()
@@ -48,7 +60,14 @@ class Controller:
 
     def _reset(self, active, label="", speed=1.0):
         metadata = dict(active=active, label=label, speed=speed, live_gap=not active)
+        # Hide the old analysis API until the worker acknowledges the new source.
+        # A timed-out command may finish late; it remains detached until a later
+        # successful reset runs after it in worker order.
+        self.store.engineer = None
         self.store.reset_analysis(metadata)
+        if self._analysis is not None:
+            self._analysis.reset(metadata)
+        self.store.engineer = self._analysis
 
     def udp_update(self, packet, wall):
         # Switching may wait for analysis; the UDP thread must keep recording.
@@ -92,7 +111,11 @@ class Controller:
             # Deliberately independent of the private filename and header profile.
             label = "Recorded session"
             with self._lock:
-                self._reset(True, label, speed)
+                try:
+                    self._reset(True, label, speed)
+                except (ValueError, OSError) as exc:
+                    self._state["error"] = "Replay analysis could not reset; retry after the worker recovers"
+                    raise ReplayError("analysis_unavailable", self._state["error"]) from exc
                 self._state = dict(active=True, label=label, speed=speed,
                                    position_s=0.0, duration_s=0.0, error=None)
             self._thread = threading.Thread(target=self._run, args=(path, speed, skip * 60),
@@ -102,9 +125,17 @@ class Controller:
 
     def stop(self):
         with self._operations:
+            was_running = self._thread is not None and self._thread.is_alive()
             self._stop.set()
             if self._thread is not None:
                 self._thread.join()
+            if not was_running and self._analysis is not None and self.store.engineer is None:
+                with self._lock:
+                    try:
+                        self._reset(False)
+                        self._state["error"] = None
+                    except (ValueError, OSError):
+                        self._state["error"] = "Live analysis could not reset; telemetry resumed without analysis"
             return self.status()
 
     def _run(self, path, speed, skip):
@@ -157,6 +188,9 @@ class Controller:
             error = str(exc) if isinstance(exc, ValueError) else "Recording could not be replayed"
         finally:
             with self._lock:
-                self._reset(False)
+                try:
+                    self._reset(False)
+                except (ValueError, OSError):
+                    error = "Live analysis could not reset; telemetry resumed without analysis"
                 self._state["active"] = False
                 self._state["error"] = error
