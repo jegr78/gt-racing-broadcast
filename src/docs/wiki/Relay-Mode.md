@@ -494,6 +494,9 @@ flag with `python3 tools/fetch-flags.py` (fetches only what is missing). Flags:
 stays). The relay stores the choice in `runtime/<profile>/telemetry-view.json`, so it
 survives a relay restart; `/telemetry/data` and `/status` (`telemetry.visible`) report
 it. Outside a solo POV broadcast these routes answer 404, like `/telemetry/data`.
+The block's best and average lap show GT7's own lap time, which arrives shortly after
+the line; until then they show the time the relay measured from the packets. The delta
+and its reference lap stay on the relay-measured clock.
 
 **Car name (solo POV).** Every GT7 telemetry packet carries a car id. The relay
 resolves it to maker, model and class through the car tables it ships with, from the
