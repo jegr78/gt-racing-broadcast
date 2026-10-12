@@ -49,7 +49,7 @@ async def main():
                 async def pending_pair(route):
                     await route.fulfill(json=dict(version=1, generation=fixture.live.generation, state='pending'))
                 await page.route('**/race-engineer/compare?*', pending_pair)
-                await page.wait_for_function('() => document.getElementById("comparison-state").textContent === "Comparison pending"')
+                await page.wait_for_function('() => document.getElementById("selection-summary").textContent === "Preparing selected comparison"')
                 assert await page.locator('#zoom-to').input_value() == '1000', 'pending comparison lost full-lap distance'
                 assert await page.locator('#map path').first.get_attribute('data-outline') == 'complete', 'pending comparison lost stable outline'
                 outline_entered, outline_release = asyncio.Event(), asyncio.Event()
@@ -88,7 +88,7 @@ async def main():
                 assert await page.locator('#chart path').nth(1).get_attribute('d') == '', 'fallback outline masqueraded as selected A'
                 await page.unroute('**/race-engineer/history*', no_eligible_reference)
                 await page.evaluate('() => {EngineerDesk.state.historyRevision = null;}')
-                await page.wait_for_function('() => EngineerDesk.state.a && document.getElementById("comparison-state").textContent === "Comparison pending"')
+                await page.wait_for_function('() => EngineerDesk.state.a && document.getElementById("selection-summary").textContent === "Preparing selected comparison"')
                 outline = await page.locator('#map path').first.get_attribute('d')
                 import gt7_recording, gt7_telemetry
                 packets = [(wall, gt7_telemetry.parse_packet(plain)) for wall, _, plain in gt7_recording.Recording(fixture.live_path).packets()]
