@@ -23,3 +23,7 @@ Disclosure state and keyboard focus survive regular analysis refreshes. The
 current definition/variant identifies that state; a new definition or a cleared
 selection/access view resets it. A browser regression observes three complete
 signed polling cycles while the section remains expanded and focused.
+
+Phone headline labels reserve two lines with a fixed line height. CI exposed
+font-dependent wrapping of the best-lap label; a browser regression forces that
+label onto two lines and checks that numeric values in each grid row stay aligned.

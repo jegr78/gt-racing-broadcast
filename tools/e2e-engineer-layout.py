@@ -50,6 +50,8 @@ async def main():
 
                     await detail.locator('summary').click()
 
+                    if width==390:
+                        await page.locator('#best').evaluate('(el)=>{el.previousElementSibling.replaceChildren(document.createTextNode("Best"),document.createElement("br"),document.createTextNode("completed · s"));}')
                     positions=await page.evaluate('() => ["lap-time","delta","best","race-position"].map(id=>{const r=document.getElementById(id).getBoundingClientRect();return {x:r.x,y:r.y};})')
                     if width>600:
                         assert max(p['y'] for p in positions)-min(p['y'] for p in positions)<2, 'headline metrics were not one row'
