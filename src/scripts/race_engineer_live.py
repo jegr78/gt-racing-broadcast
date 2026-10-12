@@ -355,6 +355,7 @@ class Store:
         self._stop = threading.Event()
         self._lock = threading.Lock()
         self._enabled = False
+        self._source_replay = dict(active=False, label="", speed=1.0)
         self._epoch, self._sequence, self._revision = 0, 0, 0
         self._dropped, self._seen_drops = 0, 0
         self._details_max, self._summaries_max = details_max, summaries_max
@@ -425,6 +426,7 @@ class Store:
                 else "volatile"
             ),
             "warnings": [],
+            "replay": dict(self._source_replay),
         }
 
     def refresh_enabled(self):
@@ -435,28 +437,52 @@ class Store:
             enabled = False
         if enabled != self._enabled:
             self._enabled = enabled
-            self._epoch += 1
-            self._replay = self._new_replay()
-            self._identities.clear()
-            self._session_keys.clear()
-            self._summaries.clear()
-            self._details.clear()
-            self._sessions.clear()
-            self._sizes.clear()
-            self._closed_previous.clear()
-            self._bindings.clear()
-            self._session_offset = 0
-            self._mapping_known = self._recording is None
-            self._context_key = None
-            self._context = {"notes": [], "sessions": {}}
-            self._context_revision = 0
-            self._receipt = None
-            self._last_packet = None
-            self._values = {}
-            self._revision += 1
-            with self._lock:
-                self._published = self._empty()
-                self._detail_publication = {}
+            self._reset_generation()
+
+    def _reset_generation(self, new_source=False):
+        if new_source:
+            self.generation = uuid.uuid4().hex
+            self._recording = None
+            self._recording_started = None
+            self._recording_current = self._recording_source is None and not self._source_replay["active"]
+        self._epoch += 1
+        self._replay = self._new_replay()
+        self._identities.clear()
+        self._session_keys.clear()
+        self._summaries.clear()
+        self._details.clear()
+        self._sessions.clear()
+        self._sizes.clear()
+        self._closed_previous.clear()
+        self._bindings.clear()
+        self._session_offset = 0
+        self._mapping_known = self._recording is None
+        self._context_key = None
+        self._context = {"notes": [], "sessions": {}}
+        self._context_revision = 0
+        self._receipt = None
+        self._last_packet = None
+        self._values = {}
+        self._revision += 1
+        with self._lock:
+            self._published = self._empty()
+            self._detail_publication = {}
+
+    def reset(self, metadata, timeout=5):
+        """Bound admission and acknowledgement; expired commands cannot publish later."""
+        if self._stop.is_set():
+            raise ValueError("Analysis worker is stopped")
+        done, cancelled, failures = threading.Event(), threading.Event(), []
+        end = time.monotonic() + timeout
+        try:
+            self._queue.put(("reset", dict(metadata), done, cancelled, failures), timeout=timeout)
+        except queue.Full as exc:
+            raise ValueError("Analysis reset queue is full") from exc
+        if not done.wait(max(0, end - time.monotonic())):
+            cancelled.set()
+            raise ValueError("Analysis reset timed out")
+        if failures:
+            raise ValueError("Analysis reset failed")
 
     def put(self, pkt, wall_ts):
         """UDP path: no disk access, parsing, replay or blocking queue insertion."""
@@ -482,13 +508,23 @@ class Store:
             try:
                 item = self._queue.get(timeout=0.1)
             except queue.Empty:
-                if self._receipt and self._replay.laps:
+                if not self._source_replay["active"] and self._receipt and self._replay.laps:
                     wall = self._receipt[1] + max(0.0, self._clock() - self._receipt[0])
                     if self._finish(wall):
                         self._publish()
                 continue
             try:
-                if item[0] == self._epoch and self._enabled:
+                if item[0] == "reset":
+                    try:
+                        if not item[3].is_set():
+                            self._source_replay = item[1]
+                            self._reset_generation(new_source=True)
+                    except (ValueError, TypeError, OSError, OverflowError):
+                        item[4].append(True)
+                        raise
+                    finally:
+                        item[2].set()
+                elif item[0] == self._epoch and self._enabled:
                     self._consume(item)
             except (ValueError, TypeError, OSError, OverflowError):
                 self._context_error = "Live preparation unavailable for this input"
@@ -918,7 +954,7 @@ class Store:
                     self._bindings.setdefault(lid, self._recording)
 
     def _sync_recording(self):
-        if self._recording_source is None:
+        if self._source_replay["active"] or self._recording_source is None:
             return
         try:
             path = self._recording_source()
@@ -1171,6 +1207,8 @@ class Store:
                 self._recovery_queue.task_done()
 
     def _read_context(self):
+        if self._source_replay["active"]:
+            return
         if self._recording is None and self._context_source is None:
             return
         try:

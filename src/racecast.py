@@ -20,6 +20,8 @@
   racecast obs benchmark [--window S] [--settle S] [--scene NAME] [--keep-recording] [--json]   # FULL vs ROBUST on the on-air feed with a recording running; never while streaming
   racecast obs logs | tailscale logs         # tail OBS's log dir / the Tailscale status-snapshot log (same -f/--list/--archive flags)
   racecast sheet     url | open              # print / open the active league's Google Sheet (built from its SHEET_ID)
+  racecast telemetry replay start <name|latest> [--speed X] [--from MIN] [--on-air] | stop | status
+  racecast telemetry import <file.gt7rec>   # copy recording and optional lap index into active profile
   racecast telemetry record start|stop|status   # solo POV: record the GT7 telemetry trace (relay must run)
   racecast telemetry list | export <name|latest> [--out DIR] [--all] [--excel] | delete <name>   # recordings of the active profile -> samples.csv + laps.csv
   racecast telemetry analyze <name> --session N --agent ID [--laps N,N] [--template TEMPLATE] [--goal TEXT] [--questions TEXT] [--model NAME] [--language LANG] [--reference REC:S:L]   # preview selected cloud-provider input
@@ -990,7 +992,7 @@ EVENT_VERBS = ("status", "start", "stop", "takeover")
 TAILSCALE_VERBS = ("up", "down", "status", "logs")
 OBS_VERBS = ("refresh", "collection", "logs", "stream-target", "benchmark")
 SHEET_VERBS = ("url", "open")           # active league's Google Sheet (from SHEET_ID)
-TELEMETRY_VERBS = ("record", "list", "export", "delete", "index", "shifts", "shift-update", "analyze")   # GT7 telemetry recordings
+TELEMETRY_VERBS = ("replay", "import", "record", "list", "export", "delete", "index", "shifts", "shift-update", "analyze")   # GT7 telemetry recordings
 GT7DATA_VERBS = ("update", "status")      # GT7 reference data
 APP_VERBS = ("launch", "quit")          # GUI app control for the Control Center
 APP_CONTROLLED = ("obs", "discord", "tailscale")   # GUI apps racecast can launch + quit
@@ -3524,6 +3526,95 @@ def telemetry_analyze_cmd(rest):
         sys.exit(1)
 
 
+def telemetry_replay_cmd(rest):
+    """Control a replay in the active profile's running relay."""
+    import argparse
+    from urllib.parse import urlencode
+    parser = argparse.ArgumentParser(prog="racecast telemetry replay")
+    parser.add_argument("action", choices=("start", "stop", "status"))
+    parser.add_argument("name", nargs="?")
+    parser.add_argument("--speed", type=float, default=1.0, help="Playback speed, > 0 and <= 100")
+    parser.add_argument("--from", dest="skip", type=float, default=0.0, help="Start position in minutes")
+    parser.add_argument("--on-air", action="store_true", help="Confirm replay reaches the streaming HUD")
+    args = parser.parse_args(rest)
+    if _foreign_relay_profile():
+        sys.exit("telemetry replay refused: relay runs another profile")
+    query = {}
+    if args.action == "start":
+        if not args.name:
+            parser.error("start requires a recording name or latest")
+        if args.name == "latest":
+            import gt7_recording
+            rows = [r for r in gt7_recording.list_recordings(_telemetry_rec_dir()) if not r["partial"]]
+            if not rows:
+                sys.exit("No finalized recordings in the active profile")
+            args.name = max(rows, key=_recording_sort_key)["name"]
+        query = {"name": args.name, "speed": args.speed, "from": args.skip,
+                 "on-air": "1" if args.on_air else "0"}
+    elif args.name:
+        parser.error("stop and status take no recording name")
+    try:
+        out = http_util.get_json(
+            f"http://127.0.0.1:{RELAY_PORT}/telemetry/replay/{args.action}?" + urlencode(query), timeout=15)
+    except Exception as exc:
+        try:
+            error = json.load(exc).get("error")
+        except (ValueError, TypeError, AttributeError, OSError):
+            error = None
+        sys.exit(error or "Telemetry replay unavailable: start the solo POV relay first")
+    if out.get("error"):
+        sys.exit(out["error"])
+    print(json.dumps(out, ensure_ascii=True))
+
+
+def telemetry_import_data(filename):
+    """Validate and exclusively copy one capture and its optional lap index."""
+    import shutil
+    from pathlib import Path
+    import gt7_recording
+    source = Path(filename)
+    if source.suffix != ".gt7rec" or source.is_symlink() or not source.is_file():
+        raise ValueError("Import requires a regular .gt7rec recording")
+    gt7_recording.Recording(str(source))
+    root = Path(_telemetry_rec_dir())
+    if root.is_symlink():
+        raise ValueError("Recording directory must not be a symlink")
+    root.mkdir(parents=True, exist_ok=True)
+    target = root / source.name
+    sidecar = source.with_suffix(".laps.json")
+    destination = target.with_suffix(".laps.json")
+    if target.exists() or target.is_symlink() or Path(str(target) + ".part").exists() or destination.exists() or destination.is_symlink():
+        raise ValueError("A recording or lap index with this name already exists")
+    if sidecar.is_symlink():
+        raise ValueError("Lap index must not be a symlink")
+    created = []
+    try:
+        for src, dst in [(source, target)] + ([(sidecar, destination)] if sidecar.is_file() else []):
+            with dst.open("xb") as out:
+                created.append(dst)
+                with src.open("rb") as inp:
+                    shutil.copyfileobj(inp, out)
+    except Exception:
+        for path in created:
+            path.unlink(missing_ok=True)
+        raise
+    return {"ok": True, "name": target.name}
+
+
+def telemetry_import_cmd(rest):
+    import argparse
+    parser = argparse.ArgumentParser(prog="racecast telemetry import")
+    parser.add_argument("file", help="Local .gt7rec recording to copy into the active profile")
+    args = parser.parse_args(rest)
+    try:
+        out = telemetry_import_data(args.file)
+    except (OSError, ValueError) as exc:
+        sys.exit(str(exc))
+    except Exception:
+        sys.exit("Unreadable telemetry recording header")
+    print(json.dumps(out, ensure_ascii=True))
+
+
 def telemetry_record_cmd(rest):
     """Start, stop or report the relay's telemetry recording."""
     verb = rest[0] if rest else None
@@ -6045,6 +6136,7 @@ DISPATCH = {
     ("obs", "stream-target"): obs_stream_target_cmd, ("obs", "benchmark"): obs_benchmark_cmd,
     ("obs", "logs"): obs_logs, ("tailscale", "logs"): tailscale_logs,
     ("sheet", "url"): sheet_url_cmd, ("sheet", "open"): sheet_open_cmd,
+    ("telemetry", "replay"): telemetry_replay_cmd, ("telemetry", "import"): telemetry_import_cmd,
     ("telemetry", "record"): telemetry_record_cmd, ("telemetry", "list"): telemetry_list_cmd,
     ("telemetry", "export"): telemetry_export_cmd, ("telemetry", "delete"): telemetry_delete_cmd,
     ("telemetry", "index"): telemetry_index_cmd,

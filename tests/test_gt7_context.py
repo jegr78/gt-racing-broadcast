@@ -79,6 +79,51 @@ def t_conflict_and_invalid_data_preserve_last_good_context():
         assert saved['revision'] == 1 and saved['draft'] == {'fuel_x': '1e'}
 
 
+def t_capture_finalization_between_identity_reads_preserves_preparation():
+    with tempfile.TemporaryDirectory() as d:
+        recdir = os.path.join(d, 'telemetry-recordings')
+        path = recording(recdir)
+        identity = c.source_identity(path)
+        part = path + '.part'
+        os.rename(path, part)
+        preparation = c.Store.prepared(recdir)
+        preparation.save(data(), 0)
+        original = c.source_identity
+        moved = []
+        def finalized_during_read(candidate):
+            if candidate == part and not moved:
+                os.rename(part, path)
+                moved.append(True)
+            return original(candidate)
+        c.source_identity = finalized_during_read
+        try:
+            assert c.attach_prepared(path, recdir, identity)
+        finally:
+            c.source_identity = original
+        assert moved, 'test did not exercise finalization between capture reads'
+        assert c.Store.for_recording(path).read()['data']['sessions']['1']['settings']['laps'] == 20
+        assert preparation.read()['data']['sessions'] == {}
+
+
+def t_invalid_final_capture_never_falls_back_to_matching_partial():
+    with tempfile.TemporaryDirectory() as d:
+        recdir = os.path.join(d, 'telemetry-recordings')
+        path = recording(recdir)
+        identity = c.source_identity(path)
+        os.rename(path, path + '.part')
+        with open(path, 'wb') as stream:
+            stream.write(b'{}\n')
+        preparation = c.Store.prepared(recdir)
+        preparation.save(data(), 0)
+        try:
+            c.attach_prepared(path, recdir, identity)
+            raise AssertionError('Invalid final capture admitted context from partial')
+        except ValueError as exc:
+            assert 'recording no longer available' in str(exc)
+        assert preparation.read()['data']['sessions']['1']['settings']['laps'] == 20
+        assert not os.path.exists(c._stem(path) + '.context.json')
+
+
 def t_prepared_context_is_consumed_once_and_templates_are_snapshots():
     with tempfile.TemporaryDirectory() as d:
         recdir = os.path.join(d, 'telemetry-recordings')

@@ -521,6 +521,62 @@ def _seed_telemetry(home):
                start=V.DEMO_REC_START, profile=POV_PROFILE)
 
 
+def _check_relay_replay(launcher, env, tmp, cookies, run_cwd, procs, servers, timeout):
+    """Real solo relay, synthetic capture, signed Engineer and advancing consumers."""
+    from pathlib import Path
+    import race_engineer_access
+    runtime = Path(tmp) / "runtime-replay"
+    runtime.mkdir()
+    _seed_telemetry(tmp)
+    seeded = Path(tmp) / "runtime" / POV_PROFILE / "telemetry-recordings"
+    directory = runtime / "telemetry-recordings"
+    shutil.copytree(seeded, directory)
+    access = race_engineer_access.Store(runtime, available=True)
+    access.update(enabled=True, expected=0)
+    crew, crew_base = _csv_server({"/crew.csv": "Name,Director,Producer,Commentator,Race Control,Discord,Race Engineer\nEngineer,,,,,,x\n", "/schedule.csv": "URL,Streamer,Stint\n"})
+    servers.append(crew)
+    port = E.free_port()
+    local_env = dict(env, RACECAST_TEMPLATE="pov", RACECAST_TELEMETRY="1",
+                     RACECAST_TELEMETRY_RECORD="0", RACECAST_GT7_DATA_UPDATE="0", RACECAST_GT7_PS_IP="127.0.0.1")
+    log = os.path.join(tmp, "relay-replay.log")
+    proc = _spawn(launcher + ["relay", "run", "--solo", "--bind", "127.0.0.1",
+                              "--http-port", str(port), "--cookies", cookies,
+                              "--sheet-csv-url", crew_base + "/schedule.csv",
+                              "--crew-csv-url", crew_base + "/crew.csv",
+                              "--runtime-dir", str(runtime)], local_env, log, cwd=run_cwd)
+    procs.append(proc)
+    base = f"http://127.0.0.1:{port}"
+    _wait_ready(base + "/status", timeout, proc, log)
+    recording = next(directory.glob("*.gt7rec"))
+    from urllib.parse import urlencode
+    start = base + "/telemetry/replay/start?" + urlencode({"name":recording.name,"speed":2})
+    status, doc = E._get_json(start)
+    assert status == 200 and doc["active"], (status, doc)
+    token = console_auth.mint_token(env["RACECAST_CONSOLE_SECRET"], console_auth.streamer_key("Engineer"))
+    end = time.monotonic() + timeout
+    initial = None
+    advanced = False
+    while time.monotonic() < end:
+        status, st = E._get_json(base + "/status")
+        ts, telemetry = E._get_json(base + "/telemetry/data")
+        es, engineer = E._get_json(base + "/console/race-engineer/snapshot?t=" + token)
+        assert status == ts == es == 200, (status,ts,es,engineer)
+        position = st["telemetry"]["replay"]["position_s"]
+        if initial is None:
+            initial = position
+        if position > initial + .5 and telemetry["speed"] > 0 and engineer.get("current"):
+            assert telemetry["replay"]["active"] and engineer["replay"]["active"]
+            assert recording.name not in json.dumps(engineer)
+            advanced = True
+            break
+        time.sleep(.1)
+    assert advanced, "Replay did not advance HUD, status and signed Engineer"
+    status, stopped = E._get_json(base + "/telemetry/replay/stop")
+    assert status == 200 and not stopped["active"]
+    assert len(list(directory.glob("*.gt7rec"))) == 1 and not list(directory.glob("*.part"))
+    print("  [PASS] relay telemetry replay advances all consumers and stops without recording")
+
+
 def _start_pov_ui(binary, tmp, env, timeout):
     """Seed and index the demo telemetry, then start the solo POV Control Center.
     Returns (process, url)."""
@@ -716,6 +772,7 @@ def run_synthetic(args):
             if any(r.status == "fail" for r in rendered):
                 code = 1
         print(E.summarize(results))
+        _check_relay_replay(launcher, env, tmp, dummy_cookies, run_cwd, procs, servers, args.timeout)
         pov_url = None
         if args.visual:
             pov_ui, pov_url = _start_pov_ui(binary if args.binary is not None else None,

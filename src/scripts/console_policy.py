@@ -82,7 +82,7 @@ def min_capability(segments, method="GET"):
         return Requirement(DIRECTOR, False)
     if len(p) == 2 and p[0] == "telemetry" and p[1] in ("show", "hide", "toggle"):
         return Requirement(DIRECTOR, False)   # HUD telemetry block show/hide
-    if len(p) == 3 and p[:2] == ["telemetry", "record"]:
+    if len(p) == 3 and p[0] == "telemetry" and p[1] in ("record", "replay-marker", "replay"):
         return Requirement(DIRECTOR, False)   # telemetry recording start/stop/toggle
     if len(p) == 3 and p[0] == "feed" and p[2] in ("activate", "deactivate", "quality"):
         return Requirement(DIRECTOR, False)   # feed arm/disarm (#492) + quality profile (#493)

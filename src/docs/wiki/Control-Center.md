@@ -264,6 +264,35 @@ downloadable attachment that recipients open in a browser.
 
 ### Telemetry
 
+**Replay selected recording** sends telemetry through the running solo POV relay.
+Choose speed and a start minute, then start. The status shows elapsed recording
+time and total duration; **Stop replay** returns all consumers to live UDP.
+If OBS streams or an OBS connection cannot report whether it streams, confirm the
+on-air replay before starting. The relay checks OBS
+again when the command arrives. Live packets continue recording during replay,
+but only the replay reaches the HUD, Director and Engineer.
+
+**Import recording** asks for a local `.gt7rec` path. It validates the header and
+copies the recording and optional `.laps.json` into the active profile. Existing
+names are refused. The original files remain untouched.
+
+CLI equivalents:
+
+```text
+racecast telemetry import <file.gt7rec>
+racecast telemetry replay start <name.gt7rec|latest> --speed 2 --from 1
+racecast telemetry replay start latest --on-air
+racecast telemetry replay status
+racecast telemetry replay stop
+```
+
+Speeds above zero through 100× are supported. The recorded clock still drives
+lap analysis. Skipped packets prepare the earlier laps without playback pauses.
+Each source switch clears the displayed reference, fuel history and analysis pool.
+Replay never records its own packets. End of file also returns to live UDP.
+If analysis cannot acknowledge a source switch, live telemetry resumes with analysis
+unavailable and the status explains the failure. Stop again to retry the live reset.
+
 ![Control Center: Telemetry lap comparison](images/cc-telemetry.png)
 
 ![Telemetry context editor](images/cc-context.png)

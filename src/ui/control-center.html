@@ -1325,6 +1325,14 @@
           <span class="sub">laps from this profile's GT7 recordings</span>
           <span class="vhbtns"><button onclick="tcOpen()">Context &amp; notes</button><button onclick="tcOpen(true)">Prepare next recording</button><button onclick="tmLoad()" title="Read the recordings again">
             <svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Refresh</button></span></div>
+        <section class="row" style="flex-wrap:wrap;gap:10px" aria-label="Telemetry replay controls">
+          <button id="tm-replay" onclick="tmReplayStart()" disabled>Replay selected recording</button>
+          <label>Speed <input id="tm-replay-speed" type="number" value="1" min="0.001" max="100" step="0.5" style="width:70px"></label>
+          <label>From minute <input id="tm-replay-from" type="number" value="0" min="0" max="10080" style="width:80px"></label>
+          <button id="tm-replay-stop" onclick="tmReplayOp('telemetry-replay-stop')" disabled>Stop replay</button>
+          <button onclick="tmImport()">Import recording</button>
+          <span id="tm-replay-status" role="status">Replay unavailable</span>
+        </section>
         <p class="enverr" id="tm-err" hidden></p>
         <section class="tmsum" id="tm-summary" hidden></section>
         <div class="tmgrid">
@@ -5615,7 +5623,44 @@ function tmRenderRecs() {
     box.appendChild(b);
   });
   const sel = tmState.recs.find(r => r.rec === tmState.rec);
+  $('tm-replay').disabled = !sel || !!sel.recording || !!sel.partial;
   $('tm-del').disabled = !sel || !!sel.recording;   // the relay's open file is never deleted
+}
+
+let tmReplayBusy=false,tmReplayStatus=null;
+async function tmReplayOp(name,params,quiet=false) {
+ let job=await startJob(name,params);
+ if(name==='telemetry-replay-status'&&job.error&&job.job_id)job={job_id:job.job_id};
+ if(job.error){if(!quiet)tmErr(job.error);return null;}
+ const result=await jobResult(job.job_id,30);
+ if(result.error||result.code!==0){if(!quiet)tmErr(result.error||(result.lines||[]).map(x=>typeof x==='string'?x:x.text||'').join('\n')||'Replay command failed');return null;}
+ const lines=(result.lines||[]).map(x=>typeof x==='string'?x:x.text||'');
+ for(const line of lines.reverse()){try{return JSON.parse(line);}catch(_e){/* job logs also contain plain text */}}
+ return null;
+}
+async function tmReplayPoll(){
+ if(currentView!=='telemetry'||tmReplayBusy)return;
+ tmReplayBusy=true;
+ try{
+  tmReplayStatus=await tmReplayOp('telemetry-replay-status',{},true);
+  const s=tmReplayStatus;
+  $('tm-replay-status').textContent=s?.active?`Replay · ${s.label} · ${s.speed}× · ${Math.floor(s.position_s)} / ${Math.floor(s.duration_s)} s`:s?.error||(s?'Live UDP source':'Relay replay unavailable');
+  $('tm-replay-stop').disabled=!s?.active;
+ }finally{tmReplayBusy=false;}
+}
+async function tmReplayStart(){
+ const row=tmState.recs.find(r=>r.rec===tmState.rec);if(!row||row.recording||row.partial)return;
+ const status=await tmReplayOp('telemetry-replay-status');if(!status)return;
+ let confirmed=false;
+ if(status.on_air){confirmed=await confirmModal('Replay telemetry will reach the streaming broadcast HUD. Start on air?',{title:'On-air replay',okLabel:'Start replay'});if(!confirmed)return;}
+ const params={name:row.name,speed:$('tm-replay-speed').value,from:$('tm-replay-from').value,on_air:confirmed};
+ const result=await tmReplayOp('telemetry-replay-start',params);
+ // The relay checks fresh OBS state too; a stream may start while the dialog was open.
+ if(result)await tmReplayPoll();
+}
+async function tmImport(){
+ const file=prompt('Local path to a .gt7rec recording:');if(!file)return;
+ const result=await tmReplayOp('telemetry-import',{file});if(result?.ok)await tmLoad();
 }
 
 // Deletes the selected recording, its CSV export and its lap index (racecast telemetry
@@ -6691,6 +6736,7 @@ async function refreshResources() {
 }
 refresh();
 setInterval(refresh, 3000);
+setInterval(()=>tmReplayPoll(),2500);
 refreshResources();
 setInterval(refreshResources, 2000);
 setInterval(renderTimer, 1000);          // tick the Home race-timer clock locally

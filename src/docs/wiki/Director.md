@@ -167,7 +167,14 @@ appears once the console sends telemetry and follows a car change.
 `TRACK` names the recognised track and layout after the first full lap. `?` means
 several layouts fit; hover for their ids.
 
-![The Director Panel in solo POV mode on the Graphics view: CAR and TRACK pills in the status strip, CAPTURE/WEBCAM/POV previews instead of the A/B tiles, the solo scene keys, and WEBCAM, POV, TELEMETRY and REC in the Overlays card](images/director-panel-solo.png)
+![The Director Panel in solo POV mode with its replay status and telemetry controls](images/director-panel-solo.png)
+
+A producer-started telemetry replay shows **REPLAY** in the status strip. The
+**REPLAY MARKER** key toggles the HUD's REPLAY text independently of telemetry
+visibility. This choice persists per profile and defaults to on. Replay may be
+on air only after the producer confirms it in the CLI or Control Center.
+
+![Broadcast telemetry with the replay marker enabled](images/hud-telemetry-replay.png)
 
 > **"Race Control" here is the on-screen HUD banner** (the `RED FLAG`/`Driver Swaps`
 > dropdown you set, written to the Setup tab), **not** the read-only

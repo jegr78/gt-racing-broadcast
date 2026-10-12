@@ -137,6 +137,13 @@ plus available delta/A sectors on multiple growing provisional prefixes. The
 CI e2e job runs it, and `tests/test_engineer_replay.py` covers pacing, large skipped
 prefixes, private copies, route boundaries, updates and cancellation.
 
+`tools/e2e-telemetry-replay.py` checks operator replay controls with real CLI jobs,
+signed Engineer HTTP, on-air confirmation, import and the persisted HUD marker.
+The visual CI job runs it. `--shots` refreshes the Control Center telemetry,
+solo Director, replay Engineer and replay HUD wiki images from synthetic captures.
+`tools/e2e.py` also starts a solo relay and checks that all replay consumers advance
+without a replay-created recording. Source design: `src/docs/design/relay-telemetry-replay.md`.
+
 For inspecting the real desk or capturing development screenshots, use the
 printed URL with Playwright at 1440, 1024 and 390 px. The reproducible committed
 wiki images continue to use synthetic data; see the wiki-screenshots skill.
