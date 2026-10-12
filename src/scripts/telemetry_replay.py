@@ -118,7 +118,7 @@ class Controller:
                     label += started.strftime(" %Y-%m-%d %H:%M UTC")
                 else:
                     label += started.strftime(" %Y-%m-%d %H:%M")
-            except (ValueError, TypeError, OSError, gt7_recording.RecordingError):
+            except (ValueError, TypeError, OverflowError, OSError, gt7_recording.RecordingError):
                 pass  # Legacy or malformed date metadata keeps the generic safe label.
             with self._lock:
                 try:

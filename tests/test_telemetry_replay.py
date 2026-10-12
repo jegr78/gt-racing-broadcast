@@ -68,6 +68,24 @@ def t_clock():
     assert not telemetry_replay.pace(20, stop, lambda: now[0], wait)
 
 
+def t_malformed_capture_date_keeps_safe_label():
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp) / "telemetry-recordings"
+        root.mkdir()
+        path = Path(write_circle_recording(str(root)))
+        _header, packets = path.read_bytes().split(b"\n",1)
+        header = json.loads(_header)
+        control = telemetry_replay.Controller(gt7_telemetry.TelemetryStore(),root)
+        for started in ("<img src=x onerror=alert(1)>", "0001-01-01T00:00:00+01:00", "9999-12-31T23:59:59-01:00"):
+            header["started"] = started
+            path.write_bytes(json.dumps(header).encode()+b"\n"+packets)
+            try:
+                result = control.start(path.name)
+                assert result["label"] == "Recorded session"
+            finally:
+                control.stop()
+
+
 def t_udp_does_not_wait_for_source_switch():
     store = gt7_telemetry.TelemetryStore()
     control = telemetry_replay.Controller(store, "unused")
