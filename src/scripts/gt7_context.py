@@ -305,6 +305,33 @@ def _load(path, compressed=False):
         raise ValueError('context is not readable JSON') from exc
 
 
+def _retry_windows_file_operation(operation):
+    """Windows readers can briefly deny replacement/deletion of an open file."""
+    deadline = time.monotonic() + 2.0
+    delay = .01
+    while True:
+        try:
+            return operation()
+        except OSError as exc:
+            if os.name != 'nt' or getattr(exc, 'winerror', None) not in (5, 32, 33):
+                raise
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise
+            time.sleep(min(delay, remaining))
+            delay = min(delay * 2, .1)
+
+
+def _unlink(path, missing_ok=False):
+    def remove():
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            if not missing_ok:
+                raise
+    _retry_windows_file_operation(remove)
+
+
 def _atomic(path, doc, compressed=False):
     raw = _bounded(doc)
     directory = os.path.dirname(os.path.abspath(path))
@@ -317,10 +344,10 @@ def _atomic(path, doc, compressed=False):
             f.write(gzip.compress(raw) if compressed else raw)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp, path)
+        _retry_windows_file_operation(lambda: os.replace(tmp, path))
     finally:
         if os.path.exists(tmp):
-            os.unlink(tmp)
+            _unlink(tmp, missing_ok=True)
 
 
 def _stem(path):

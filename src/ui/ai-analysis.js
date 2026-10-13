@@ -1,7 +1,7 @@
 /* Optional post-session analysis. Provider text is always displayed as text. */
 (() => {
 'use strict';
-const state={settings:null,profile:null,generation:0,preview:null,selection:null,job:null,lastJob:null};
+const state={settings:null,settingsDirty:false,settingsBusy:false,models:{},profile:null,generation:0,preview:null,selection:null,job:null,lastJob:null};
 const $id=id=>document.getElementById(id);
 const node=(tag,text,parent)=>{const e=document.createElement(tag);if(text!=null)e.textContent=text;if(parent)parent.append(e);return e;};
 const error=doc=>doc?.error?.message||'Analysis operation failed';
@@ -16,48 +16,99 @@ function say(id,text){$id(id).textContent=text||'';}
 function option(select,value,label){const o=new Option(label,value);select.append(o);}
 function invalidate(){state.generation++;state.preview=null;$id('ai-start').disabled=true;$id('ai-export-preview').disabled=true;say('ai-preview','Selection changed. Prepare and inspect a new preview.');}
 function personal(){return {instructions:$id('ai-instructions').checked,skills:$id('ai-skills').checked,mcp:$id('ai-mcp').checked};}
+function modelSuggestions(){
+ for(const [listId,agentId,provider] of [
+  ['ai-model-suggestions',$id('ai-configs').value,$id('ai-provider').value],
+  ['ai-run-model-suggestions',$id('ai-agent').value,state.settings?.agents.find(a=>a.id===$id('ai-agent').value)?.provider]
+ ]){
+  const list=$id(listId),cached=state.models[agentId];list.textContent='';
+  if(cached&&cached.provider===provider)cached.models.forEach(m=>option(list,m,m));
+ }
+}
+function settingsStatus(text,kind='info'){
+ const status=$id('ai-settings-status');status.textContent=text;status.dataset.kind=kind;
+}
+function settingsControls(){
+ const selected=!!$id('ai-configs').value;
+ $id('ai-save').disabled=!state.settings||state.settingsBusy;
+ $id('ai-save-enabled').disabled=!state.settings||state.settingsBusy||$id('ai-enabled').checked===state.settings.enabled;
+ $id('ai-save').textContent=state.settingsBusy?'Saving…':selected?'Save configuration':'Save new configuration';
+ $id('ai-remove').disabled=!selected||state.settingsBusy;
+ $id('ai-check').disabled=!selected||state.settingsDirty||state.settingsBusy;
+ const supported=$id('ai-mode').value==='personal'&&$id('ai-provider').value==='codex';
+ ['instructions','skills','mcp'].forEach(k=>{
+  const input=$id('ai-'+k);input.disabled=state.settingsBusy||!supported||k==='mcp';
+  if(!supported||k==='mcp')input.checked=false;
+ });
+ say('ai-mode-help',$id('ai-mode').value==='isolated'?'Isolated mode uses no personal instructions or skills. Choose Personal to include them.':supported?'Choose which personal instructions and skills to include.':'Personal Claude instructions and skills are unavailable for background analysis.');
+}
+function settingsChanged(){
+ state.settingsDirty=true;settingsControls();settingsStatus('Unsaved changes. Save before checking the CLI.','pending');say('ai-probe','');
+}
 function populateConfig(config={}){
  $id('ai-name').value=config.name||'';$id('ai-provider').value=config.provider||'codex';$id('ai-executable').value=config.executable||'';
  $id('ai-config-model').value=config.model||'';$id('ai-timeout').value=config.timeout||600;$id('ai-mode').value=config.mode||'isolated';
- ['instructions','skills','mcp'].forEach(k=>$id('ai-'+k).checked=!!config.personal?.[k]);say('ai-probe','');
+ ['instructions','skills','mcp'].forEach(k=>$id('ai-'+k).checked=!!config.personal?.[k]);say('ai-probe','');settingsControls();modelSuggestions();
 }
 async function settings(){
- const doc=await request('settings');if(!doc.ok){say('ai-settings-status',error(doc));return;}
- state.settings=doc;$id('ai-enabled').checked=doc.enabled;
- const select=$id('ai-configs'),selected=select.value;select.textContent='';option(select,'','New configuration');
- doc.agents.forEach(a=>option(select,a.id,a.name+' · '+a.provider));select.value=selected&&doc.agents.some(a=>a.id===selected)?selected:'';
- populateConfig(doc.agents.find(a=>a.id===select.value));refreshAgents();
+ const doc=await request('settings');if(!doc.ok){settingsStatus(error(doc),'error');return;}
+ renderSettings(doc,$id('ai-configs').value);
+ settingsStatus($id('ai-configs').value?'Saved configuration loaded.':'Enter a name, choose a provider, then save the configuration.');
 }
-function refreshAgents(){
+function renderSettings(doc,selected=''){
+ const previousProvider=state.settings?.agents.find(a=>a.id===$id('ai-agent').value)?.provider;
+ state.settingsDirty=false;
+ state.settings=doc;$id('ai-enabled').checked=doc.enabled;
+ const select=$id('ai-configs');select.textContent='';option(select,'','New configuration');
+ doc.agents.forEach(a=>option(select,a.id,a.name+' · '+a.provider));select.value=selected&&doc.agents.some(a=>a.id===selected)?selected:'';
+ populateConfig(doc.agents.find(a=>a.id===select.value));refreshAgents(previousProvider===doc.agents.find(a=>a.id===$id('ai-agent').value)?.provider);
+}
+function refreshAgents(preserveModel=true){
  const select=$id('ai-agent'),previous=select.value,model=$id('ai-model').value,chosen=select.value||state.settings?.last?.agent;select.textContent='';
  (state.settings?.agents||[]).forEach(a=>option(select,a.id,a.name+' · '+a.provider));
  if(chosen&&state.settings.agents.some(a=>a.id===chosen))select.value=chosen;
- const agent=state.settings?.agents.find(a=>a.id===select.value);$id('ai-model').value=previous===select.value&&model?model:(state.settings?.last?.agent===select.value?state.settings.last.model:null)||agent?.model||'';
+ const agent=state.settings?.agents.find(a=>a.id===select.value);$id('ai-model').value=preserveModel&&previous===select.value&&model?model:(state.settings?.last?.agent===select.value?state.settings.last.model:null)||agent?.model||'';
+ modelSuggestions();
  $id('ai-load-selection').disabled=!state.settings?.enabled;
  if(!previous&&state.settings?.last?.template)$id('ai-template').value=state.settings.last.template;
  invalidate();
  $id('ai-controls').hidden=!state.settings?.enabled;
  say('ai-disabled',state.settings?.enabled?'':'Optional AI analysis is disabled. Enable it in General Settings. Existing telemetry and saved analyses remain available.');
 }
-async function saveSettings(remove=false){
- if(!state.settings)return;
+async function saveSettings(remove=false,enableOnly=false){
+ if(!state.settings||state.settingsBusy)return;
  const selected=$id('ai-configs').value,doc=structuredClone(state.settings);delete doc.ok;let savedId=selected;
+ const name=$id('ai-name').value.trim();
+ if(!remove&&!enableOnly&&!name){settingsStatus('Enter a configuration name before saving.','error');$id('ai-name').focus();return;}
+ if(!remove&&!enableOnly&&!$id('ai-timeout').checkValidity()){settingsStatus('Timeout must be a whole number from 10 to 3600 seconds.','error');$id('ai-timeout').focus();return;}
  if(remove){if(!selected)return;doc.agents=doc.agents.filter(a=>a.id!==selected);if(doc.last?.agent===selected)doc.last={};}
- else if($id('ai-name').value.trim()){
+ else if(!enableOnly){
   const id=selected||'agent-'+crypto.randomUUID();
   const configuration={id,name:$id('ai-name').value.trim(),provider:$id('ai-provider').value,executable:$id('ai-executable').value.trim(),model:$id('ai-config-model').value.trim(),timeout:Number($id('ai-timeout').value),mode:$id('ai-mode').value,personal:personal()};
+  if(doc.last?.agent===id&&doc.agents.find(a=>a.id===id)?.provider!==configuration.provider)delete doc.last.model;
   doc.agents=doc.agents.filter(a=>a.id!==id);doc.agents.push(configuration);savedId=id;
  }
  doc.enabled=$id('ai-enabled').checked;
- const result=await request('settings',doc);say('ai-settings-status',result.ok?'Analysis settings saved.':error(result));
- if(result.ok){state.settings=result;await settings();if(savedId&&result.agents.some(a=>a.id===savedId)){$id('ai-configs').value=savedId;populateConfig(result.agents.find(a=>a.id===savedId));}invalidate();}
+ state.settingsBusy=true;
+ const fields=[...$id('ai-settings').querySelectorAll('input,select')];fields.forEach(e=>e.disabled=true);settingsControls();settingsStatus('Saving analysis settings…','pending');
+ const result=await request('settings',doc);
+ state.settingsBusy=false;fields.forEach(e=>e.disabled=false);
+ if(result.ok){
+  if(enableOnly){state.settings=result;refreshAgents();settingsControls();settingsStatus('Analysis is '+(result.enabled?'enabled':'disabled')+' on this machine.'+(state.settingsDirty?' Configuration edits are still unsaved.':''),'success');}
+  else {renderSettings(result,remove?'':savedId);settingsStatus(remove?'Configuration removed.':'Configuration "'+name+'" saved. Analysis is '+(result.enabled?'enabled':'disabled')+' on this machine. You can now check the CLI / login.','success');}
+ }
+ else {settingsControls();settingsStatus('Could not save: '+error(result),'error');}
 }
 async function probe(){
  const id=$id('ai-configs').value;if(!id){say('ai-probe','Save a named configuration before checking its CLI.');return;}
+ if(state.settingsDirty||state.settingsBusy)return;
+ const provider=$id('ai-provider').value;
  say('ai-probe','Checking installed CLI and existing subscription login…');
  const result=await request('probe',{query:{id}});
+ if(result.ok)state.models[id]={provider,models:result.model_suggestions||[]};
+ modelSuggestions();
+ if(id!==$id('ai-configs').value||provider!==$id('ai-provider').value||state.settingsDirty)return;
  say('ai-probe',result.ok?result.status+' · '+(result.version||'version unavailable')+(result.guidance?' · '+result.guidance:''):error(result));
- const list=$id('ai-model-suggestions');list.textContent='';(result.model_suggestions||[]).forEach(m=>option(list,m,m));
 }
 async function selection(){
  if(!state.settings)await settings();
@@ -170,24 +221,30 @@ function reset(profile){state.profile=profile;state.generation++;state.selection
 function init(){
  const settingsCard=node('section',null,document.querySelector('[data-view="settings"]'));settingsCard.id='ai-settings';settingsCard.className='card rcai';
  settingsCard.innerHTML=`<h3>Optional AI telemetry analysis</h3><p>Uses your existing Codex or Claude Code subscription CLI. Install and sign in externally. Racecast never installs an agent or selects API billing.</p>
- <label><input id="ai-enabled" type="checkbox"> Enable analysis on this machine</label>
- <div class="rcai-grid"><label>Named configurations<select id="ai-configs"></select></label><label>Name<input id="ai-name"></label><label>Provider<select id="ai-provider"><option value="codex">Codex</option><option value="claude">Claude Code</option></select></label><label>Executable (optional)<input id="ai-executable" placeholder="CLI command or full executable path"></label><label>Default model<input id="ai-config-model" list="ai-model-suggestions"></label><label>Timeout (seconds)<input id="ai-timeout" type="number" min="10" max="3600" value="600"></label><label>Agent mode<select id="ai-mode"><option value="isolated">Isolated</option><option value="personal">Personal</option></select></label></div>
+ <label><input id="ai-enabled" type="checkbox"> Enable analysis on this machine</label> <button id="ai-save-enabled" disabled>Save enable / disable</button>
+ <p>Create a named configuration, save it, then check the CLI / login.</p>
+ <div class="rcai-grid"><label>Named configurations<select id="ai-configs"></select></label><label>Name (required)<input id="ai-name" maxlength="200" placeholder="e.g. Codex telemetry"></label><label>Provider<select id="ai-provider"><option value="codex">Codex</option><option value="claude">Claude Code</option></select></label><label>Executable (optional)<input id="ai-executable" placeholder="CLI command or full executable path"></label><label>Default model<input id="ai-config-model" list="ai-model-suggestions" placeholder="Exact model name for this provider"></label><label>Timeout (seconds)<input id="ai-timeout" type="number" min="10" max="3600" step="1" value="600" required></label><label>Agent mode<select id="ai-mode"><option value="isolated">Isolated</option><option value="personal">Personal</option></select></label></div>
+ <p id="ai-mode-help"></p>
  <p>Personal content must be chosen explicitly. MCP servers cannot be confined to the analysis package; use a manual run externally when needed. Selective personal Claude customizations are currently unavailable for background jobs.</p>
  <label><input id="ai-instructions" type="checkbox"> Include personal instructions</label> <label><input id="ai-skills" type="checkbox"> Include personal skills</label> <label><input id="ai-mcp" type="checkbox"> Request personal MCP</label>
- <div class="row"><button id="ai-save">Save analysis settings</button><button id="ai-remove">Remove configuration</button><button id="ai-check">Check CLI / login</button></div><p id="ai-settings-status" role="status"></p><p id="ai-probe" role="status"></p><datalist id="ai-model-suggestions"></datalist>`;
+ <div class="row rcai-settings-actions"><button id="ai-save" disabled>Save new configuration</button><button id="ai-check" disabled>Check CLI / login</button><button id="ai-remove" disabled>Remove configuration</button><p id="ai-settings-status" role="status" aria-live="polite" aria-atomic="true"></p></div><p id="ai-probe" role="status"></p><datalist id="ai-model-suggestions"></datalist><datalist id="ai-run-model-suggestions"></datalist>`;
  const card=node('section',null,document.querySelector('[data-view="telemetry"]'));card.id='ai-analysis';card.className='card rcai';
  card.innerHTML=`<h3>Post-session AI analysis</h3><p id="ai-disabled"></p><div class="row"><button id="ai-load-selection">Prepare analysis selection</button><button id="ai-history-refresh">Refresh history</button></div><div id="ai-controls" hidden>
- <p id="ai-selection-status" role="status"></p><div class="rcai-grid"><label>Completed GT7 session<select id="ai-session"></select></label><label>Template<select id="ai-template"><option value="session-overview">Session overview</option><option value="driving-technique">Driving technique</option><option value="consistency">Consistency</option></select></label><label>Agent<select id="ai-agent"></select></label><label>Model<input id="ai-model" list="ai-model-suggestions"></label><label>Report language<input id="ai-language" value="en" maxlength="40"></label></div>
+ <p id="ai-selection-status" role="status"></p><div class="rcai-grid"><label>Completed GT7 session<select id="ai-session"></select></label><label>Template<select id="ai-template"><option value="session-overview">Session overview</option><option value="driving-technique">Driving technique</option><option value="consistency">Consistency</option></select></label><label>Agent<select id="ai-agent"></select></label><label>Model<input id="ai-model" list="ai-run-model-suggestions"></label><label>Report language<input id="ai-language" value="en" maxlength="40"></label></div>
  <h4>Completed laps</h4><div id="ai-laps" class="rcai-options"></div><h4>Optional compatible references · none selected automatically</h4><div id="ai-references" class="rcai-options"></div><div class="rcai-grid"><label>Practice goal<textarea id="ai-goal" maxlength="4000"></textarea></label><label>Additional questions<textarea id="ai-questions" maxlength="4000"></textarea></label></div>
  <div class="row"><button id="ai-preview-button" disabled>Preview selected data</button><button id="ai-export-preview" disabled>Export preview package</button><button id="ai-start" disabled>Start this analysis</button></div><div id="ai-preview"></div></div>
  <p>One analysis can run on this machine. Subscription quota/model availability are not guaranteed. Cancellation cannot recover already consumed quota.</p><div class="row"><button id="ai-cancel" disabled>Cancel active analysis</button></div><p id="ai-run-status" role="status"></p><h4>Saved analysis history</h4><div id="ai-history"></div><div id="ai-report"></div>`;
  const style=node('style',`.rcai{overflow-wrap:anywhere}.rcai-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:14px 0}.rcai-grid label{display:flex;flex-direction:column;gap:6px;min-width:0}.rcai input:not([type=checkbox]),.rcai select,.rcai textarea{width:100%;min-width:0;padding:8px;background:var(--card2);color:var(--txt);border:1px solid var(--line);border-radius:6px;font:inherit}.rcai textarea{min-height:80px}.rcai-options{display:flex;flex-wrap:wrap;gap:12px}.rcai pre{white-space:pre-wrap;font-size:12px}.rcai article{border-top:1px solid var(--line);padding-top:10px}.rcai button{margin:4px}`);document.head.append(style);
-  $id('ai-mode').onchange=()=>{if($id('ai-mode').value==='isolated')['instructions','skills','mcp'].forEach(k=>$id('ai-'+k).checked=false);};
- $id('ai-configs').onchange=()=>populateConfig(state.settings?.agents.find(a=>a.id===$id('ai-configs').value));
+ node('style',`#ai-save{background:var(--accent-strong);border-color:var(--accent-strong);font-weight:600}.rcai-settings-actions #ai-settings-status{flex-basis:100%;margin:0 4px;padding:10px 12px;border:1px solid var(--line);border-radius:6px}.rcai-settings-actions [data-kind=error]{color:var(--bad-text);border-color:var(--bad)!important}.rcai-settings-actions [data-kind=success]{color:#4ADE80}.rcai-settings-actions [data-kind=pending]{color:#FCD34D}.rcai input:disabled{opacity:.5}`,document.head);
+ $id('ai-settings').querySelectorAll('input,select').forEach(e=>{if(!['ai-configs','ai-enabled'].includes(e.id))e.addEventListener(e.tagName==='SELECT'||e.type==='checkbox'?'change':'input',settingsChanged);});
+ $id('ai-enabled').onchange=()=>{settingsControls();settingsStatus('Unsaved enable setting. Click Save enable / disable.','pending');};
+ $id('ai-save-enabled').onclick=()=>saveSettings(false,true);
+ $id('ai-provider').addEventListener('change',()=>{$id('ai-config-model').value='';modelSuggestions();});
+ $id('ai-configs').onchange=()=>{state.settingsDirty=false;populateConfig(state.settings?.agents.find(a=>a.id===$id('ai-configs').value));settingsStatus($id('ai-configs').value?'Saved configuration loaded.':'Enter a name, choose a provider, then save the configuration.');};
  $id('ai-save').onclick=()=>saveSettings();$id('ai-remove').onclick=()=>saveSettings(true);$id('ai-check').onclick=probe;
  $id('ai-load-selection').onclick=selection;$id('ai-session').onchange=renderLaps;$id('ai-preview-button').onclick=preview;$id('ai-start').onclick=start;$id('ai-export-preview').onclick=exportPreview;$id('ai-cancel').onclick=cancel;$id('ai-history-refresh').onclick=history;
  ['ai-model','ai-template','ai-goal','ai-questions','ai-language'].forEach(id=>$id(id).oninput=invalidate);
- $id('ai-agent').onchange=()=>{const a=state.settings?.agents.find(a=>a.id===$id('ai-agent').value);$id('ai-model').value=a?.model||'';invalidate();};
+ $id('ai-agent').onchange=()=>{const a=state.settings?.agents.find(a=>a.id===$id('ai-agent').value);$id('ai-model').value=a?.model||'';modelSuggestions();invalidate();};
  window.RacecastAI={settings,selection,reset,status,history};settings().then(()=>{if(tmState.profile&&currentView==='telemetry'){status();history();}});
  setInterval(()=>{if(currentView==='telemetry')status();},1500);
 }
