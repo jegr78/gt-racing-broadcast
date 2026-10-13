@@ -10,6 +10,15 @@ sys.path.insert(0,str(ROOT/'tools'))
 import e2e_visual
 from engineer_ui_fixture import Fixture, gate
 
+PROGRAM_SVG = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900">'
+               '<defs><linearGradient id="s" x2="0" y2="1"><stop offset="0" stop-color="#3d5a80"/>'
+               '<stop offset="1" stop-color="#98c1d9"/></linearGradient></defs>'
+               '<rect width="1600" height="560" fill="url(#s)"/><rect y="560" width="1600" height="340" fill="#3a3f47"/>'
+               '<path d="M0 900 L700 560 H900 L1600 900Z" fill="#23272e"/>'
+               '<rect x="660" y="640" width="280" height="110" rx="18" fill="#c0392b"/>'
+               '<rect x="40" y="40" width="360" height="70" rx="8" fill="#0b1018" opacity=".8"/>'
+               '<text x="64" y="88" font-family="sans-serif" font-size="38" fill="#eef4fc">P15 · LAP 3</text></svg>')
+
 
 async def main():
     from playwright.async_api import async_playwright
@@ -140,6 +149,10 @@ async def main():
                     assert fixture.live.flush(10)
                     await page.wait_for_function('() => document.getElementById("race-position").textContent === "P15/15"')
                     await page.locator('.mini-details summary').click()
+                    # The fixture has no OBS: give the program still a synthetic frame.
+                    await page.route('**/cockpit/program?*', lambda route: route.fulfill(
+                        content_type='image/svg+xml', body=PROGRAM_SVG))
+                    await page.wait_for_selector('#program-frame.loaded', timeout=8000)
                     for width,height,name in [(1440,1050,'desktop'),(1024,1100,'tablet'),(390,900,'phone')]:
                         await page.set_viewport_size({'width':width,'height':height})
                         await page.screenshot(path=str(ROOT/f'src/docs/wiki/images/console-race-engineer-{name}.png'),full_page=True)
