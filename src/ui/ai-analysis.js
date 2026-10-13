@@ -5,6 +5,7 @@ const state={settings:null,settingsDirty:false,settingsBusy:false,models:{},prof
 const $id=id=>document.getElementById(id);
 const node=(tag,text,parent)=>{const e=document.createElement(tag);if(text!=null)e.textContent=text;if(parent)parent.append(e);return e;};
 const error=doc=>doc?.error?.message||'Analysis operation failed';
+const FINISHED=new Set(['completed','awaiting_validation','failed','cancelled','timed_out']);
 async function request(operation,payload=null){
  const url='/api/ai/'+operation,scoped=!['settings','probe'].includes(operation),profile=tmState.profile;
  if(scoped&&!profile)return {ok:false,error:{code:'invalid_profile',message:'Select a profile before using analysis.'}};
@@ -165,8 +166,10 @@ async function exportPreview(){if(state.preview)download(await request('package-
 async function exportRun(id,format){download(await request('export',{query:{id,format}}));}
 async function status(){
  const generation=state.generation,result=await request('status');if(generation!==state.generation||!result.ok)return;
- const active=result.active;$id('ai-cancel').disabled=!result.busy;
- if(active){state.job=active.id;state.lastJob=active.id;say('ai-run-status',active.foreign?'An analysis is running in another profile. Its data remain hidden.':active.state+' · '+active.progress);}
+ // The runner keeps a finished run's terminal state in the active record until its cleanup
+ // ends: show that run's own result instead of a terminal status above the previous report.
+ const active=result.active,finished=active&&!active.foreign&&FINISHED.has(active.state);$id('ai-cancel').disabled=!result.busy;
+ if(active&&!finished){state.job=active.id;state.lastJob=active.id;say('ai-run-status',active.foreign?'An analysis is running in another profile. Its data remain hidden.':active.state+' · '+active.progress);}
  else if(state.job){const id=state.job;await openRun(id);if(generation===state.generation&&state.job===id)state.job=null;await history();}
 }
 async function cancel(){if(!state.job)return;const result=await request('cancel',{id:state.job});say('ai-run-status',result.ok?'Cancellation requested. Already consumed subscription quota cannot be recovered.':error(result));}
