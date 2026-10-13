@@ -252,6 +252,10 @@ def _read(path, root, *, max_bytes=ai_jobs.MAX_OUTPUT_BYTES):
             "invalid_artifact", "Analysis artifact leaves the active profile"
         )
     try:
+        if path.name == "run.json":
+            with ai_jobs._state_io(path):
+                raw = ai_jobs.regular_output_bytes(path, max_bytes=max_bytes)
+            return json.loads(raw, parse_constant=_nonfinite)
         return json.loads(
             ai_jobs.regular_output_bytes(path, max_bytes=max_bytes),
             parse_constant=_nonfinite,

@@ -4,7 +4,9 @@ import json
 import os
 import sys
 import tempfile
+import threading
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src' / 'scripts'))
 import gt7_context as c
@@ -479,6 +481,99 @@ def t_restoring_identical_values_still_creates_a_traceable_revision():
         restored = store.restore(1, 3)
         assert restored['revision'] == 4, 'every restore must create a new revision'
         assert store.history()[0]['revision'] == 3
+
+
+def t_atomic_retries_only_transient_windows_conflicts_and_bounds_failure():
+    with tempfile.TemporaryDirectory() as td:
+        path=os.path.join(td,'ai-job.json')
+        for platform,code,recover in [('nt',5,True),('nt',32,True),('nt',33,True),
+                                      ('nt',5,False),('nt',2,False),('posix',5,False)]:
+            c._atomic(path,{'state':'queued'})
+            clock=[0.0];attempts=[];sleeps=[];real_replace=os.replace
+            conflict=PermissionError('controlled file access conflict');conflict.winerror=code
+            def replace(source,destination,attempts=attempts,recover=recover,conflict=conflict,real_replace=real_replace):
+                attempts.append(1)
+                if not recover or len(attempts)<3:
+                    raise conflict
+                return real_replace(source,destination)
+            def sleep(seconds,sleeps=sleeps,clock=clock):
+                sleeps.append(seconds);clock[0]+=seconds
+            with mock.patch.object(c.os,'name',platform), \
+                 mock.patch.object(c.os,'replace',side_effect=replace), \
+                 mock.patch.object(c.time,'monotonic',side_effect=lambda clock=clock:clock[0]), \
+                 mock.patch.object(c.time,'sleep',side_effect=sleep):
+                if recover:
+                    c._atomic(path,{'state':'running'})
+                else:
+                    try:c._atomic(path,{'state':'running'})
+                    except PermissionError as exc:assert exc is conflict
+                    else:raise AssertionError('permanent failure was hidden')
+            assert c._load(path)=={'state':'running' if recover else 'queued'}
+            assert not list(Path(td).glob('.context-*.tmp'))
+            if recover:
+                assert len(attempts)==3 and len(sleeps)==2
+            elif platform=='nt' and code==5:
+                assert clock[0]==2.0 and 1<len(attempts)<30,'retry exceeded its bounded window'
+            else:
+                assert len(attempts)==1 and not sleeps,'unrelated error was retried'
+
+
+def t_atomic_waits_for_windows_reader_and_keeps_old_snapshot():
+    if os.name != 'nt':
+        return
+    with tempfile.TemporaryDirectory() as td:
+        path=os.path.join(td,'ai-job.json')
+        c._atomic(path,{'state':'queued'})
+        attempted=threading.Event();finished=threading.Event();errors=[]
+        real_replace=os.replace
+        def replace(source,destination):
+            attempted.set()
+            return real_replace(source,destination)
+        def write():
+            try:c._atomic(path,{'state':'running'})
+            except OSError as exc:errors.append(exc)
+            finally:finished.set()
+        with mock.patch.object(c.os,'replace',side_effect=replace):
+            with open(path,'rb') as reader:
+                writer=threading.Thread(target=write);writer.start()
+                try:
+                    assert attempted.wait(2),'writer never attempted replacement'
+                    assert not finished.wait(.1),'writer gave up while a temporary read handle was open'
+                    assert json.load(reader)=={'state':'queued'},'atomic update changed the old snapshot'
+                finally:
+                    reader.close();writer.join(3)
+        assert not writer.is_alive() and not errors,errors
+        assert c._load(path)=={'state':'running'}
+        assert not list(Path(td).glob('.context-*.tmp'))
+
+
+def t_unlink_waits_for_windows_reader_and_keeps_missing_ok():
+    if os.name != 'nt':
+        return
+    with tempfile.TemporaryDirectory() as td:
+        path=os.path.join(td,'ai-job.json');c._atomic(path,{'state':'finished'})
+        attempted=threading.Event();finished=threading.Event();errors=[];real_unlink=os.unlink
+        def unlink(target):
+            attempted.set()
+            return real_unlink(target)
+        def remove():
+            try:c._unlink(path,missing_ok=True)
+            except OSError as exc:errors.append(exc)
+            finally:finished.set()
+        with mock.patch.object(c.os,'unlink',side_effect=unlink):
+            with open(path,'rb') as reader:
+                worker=threading.Thread(target=remove);worker.start()
+                try:
+                    assert attempted.wait(2)
+                    assert not finished.wait(.1),'cleanup failed while a temporary reader was open'
+                finally:
+                    reader.close();worker.join(3)
+        assert not worker.is_alive() and not errors,errors
+        assert not os.path.exists(path)
+        c._unlink(path,missing_ok=True)
+        try:c._unlink(path)
+        except FileNotFoundError:pass  # Missing files must still fail without missing_ok.
+        else:raise AssertionError('missing file was silently ignored')
 
 
 if __name__ == '__main__':

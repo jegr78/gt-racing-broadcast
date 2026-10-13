@@ -7,6 +7,7 @@ import sys
 import tempfile
 import threading
 import time
+from unittest import mock
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'src/scripts'))
 import ai_jobs as j
@@ -91,6 +92,72 @@ def wait_for(fn,timeout=5):
         if fn():return
         time.sleep(.02)
     raise AssertionError('state did not arrive')
+
+
+def t_continuous_status_polling_preserves_every_atomic_snapshot():
+    with tempfile.TemporaryDirectory() as d:
+        path=Path(d)/'ai-job.json';j._save(path,{'sequence':0,'payload':'x'*16000})
+        stop=threading.Event();errors=[];reads=[0,0]
+        def poll(index):
+            try:
+                while not stop.is_set():
+                    doc=j._load(path)
+                    assert doc is not None and len(doc['payload'])==16000,'polling lost a valid snapshot'
+                    reads[index]+=1
+            except BaseException as exc:errors.append(exc);stop.set()
+        workers=[threading.Thread(target=poll,args=(i,)) for i in range(2)]
+        for worker in workers:worker.start()
+        try:
+            for sequence in range(1,201):j._save(path,{'sequence':sequence,'payload':'x'*16000})
+        finally:
+            stop.set()
+            for worker in workers:worker.join(3)
+        assert not errors,errors
+        assert all(not worker.is_alive() for worker in workers)
+        assert sum(reads)>0 and j._load(path)['sequence']==200
+
+
+def t_reader_in_another_process_excludes_status_replacement():
+    with tempfile.TemporaryDirectory() as d:
+        path=Path(d)/'ai-job.json';j._save(path,{'state':'queued'})
+        code="""import sys,json
+sys.path.insert(0,sys.argv[1]);import ai_jobs as j
+with j._state_io(sys.argv[2]),open(sys.argv[2],encoding='utf-8') as reader:
+ print('ready',flush=True);sys.stdin.readline();print(reader.read(),flush=True)
+"""
+        attempted=threading.Event();errors=[];real_replace=os.replace
+        def replace(source,destination):
+            attempted.set();return real_replace(source,destination)
+        def write():
+            try:j._save(path,{'state':'running'})
+            except OSError as exc:errors.append(exc)
+        with subprocess.Popen([sys.executable,'-c',code,str(Path(j.__file__).parent),str(path)],
+            stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
+            text=True,encoding='utf-8',errors='replace') as reader:
+            assert reader.stdout.readline().strip()=='ready'
+            with mock.patch.object(j.gt7_context.os,'replace',side_effect=replace):
+                writer=threading.Thread(target=write);writer.start()
+                try:
+                    assert not attempted.wait(.1),'writer did not honor another process reader lock'
+                finally:
+                    output,stderr=reader.communicate(input='\n',timeout=3);writer.join(3)
+            assert reader.returncode==0,stderr
+            assert json.loads(output)=={'state':'queued'}
+        assert not writer.is_alive() and not errors,errors
+        assert attempted.is_set() and j._load(path)=={'state':'running'}
+
+
+def t_failed_start_cleanup_always_releases_machine_admission():
+    with tempfile.TemporaryDirectory() as d:
+        runner=j.Runner(Path(d)/'machine',Path(d)/'profile','p')
+        pkg=prepared(d);adapter=FakeAdapter(d)
+        with mock.patch.object(j,'snapshot_package',side_effect=OSError('bad snapshot')), \
+             mock.patch.object(j.gt7_context,'_unlink',side_effect=PermissionError('permanent cleanup failure')):
+            try:runner.start(package(),pkg,adapter)
+            except PermissionError:pass  # The persistent cleanup failure must remain visible.
+            else:raise AssertionError('failed cleanup was hidden')
+        lease=j.Lease(runner.machine).acquire();lease.close()
+        assert adapter.calls==0
 
 
 def t_success_handoff_and_frozen_profile():

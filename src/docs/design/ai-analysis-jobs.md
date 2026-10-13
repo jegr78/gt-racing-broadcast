@@ -1,5 +1,17 @@
 # AI analysis job requirements
 
+Status readers and writers share thread and process locks so polling closes its
+read handle before atomic replacement or deletion of `ai-job.json` or `run.json`.
+Every reader receives a complete snapshot. Foreign readers can still block file
+operations, which retry Windows access/sharing/lock errors
+5, 32 and 33 for at most two seconds, with a bounded backoff. Other errors and
+POSIX failures propagate immediately. Atomic writes preserve the previous JSON
+until replacement succeeds and remove temporary files on failure. Job admission
+and provider permissions are unchanged. Tests hold native Windows read handles
+open during replacement and cleanup and verify permanent-error propagation.
+Failed package admission always releases the machine lease, including when
+status cleanup fails permanently.
+
 Requirement matrix for #819. Execution binds a frozen package/configuration and
 never changes provider/model or starts a repair invocation.
 
