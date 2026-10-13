@@ -151,7 +151,7 @@ async def verify(page,fixture,port):
     async with page.expect_download() as pending:
         await page.get_by_role('button',name='Export html',exact=True).click()
     download=await pending.value
-    html=Path(await download.path()).read_text()
+    html=Path(await download.path()).read_text(encoding="utf-8")
     assert '&lt;script&gt;' in html and '<script>window.aiInjected' not in html
     await page.locator('#ai-report').get_by_role('button',name='Compare with S1 lap 3').first.click()
     await page.wait_for_function('() => tmState.lapA?.lap === 3 && tmState.lapB?.lap === 2')
