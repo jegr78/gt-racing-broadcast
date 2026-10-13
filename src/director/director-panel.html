@@ -428,6 +428,8 @@
   .bus.preview>.cap{flex:0 0 auto;width:100%;padding-top:0}
   /* 4-up preview: PROGRAM and FEED A/B/POV as equal 16:9 tiles, audio below */
   .preview .pvbody{margin-top:6px;display:grid;grid-template-columns:1.6fr 1fr 1fr 1fr;gap:8px;align-items:start}
+  /* the grid display above beats the UA [hidden] rule: without this HIDE leaves the tiles on screen */
+  .preview .pvbody[hidden]{display:none}
   .pvfeeds{display:contents}
   #pgmAudioBar{grid-column:1 / -1}
   .pvframe{position:relative;width:100%;aspect-ratio:16/9;display:flex;align-items:center;justify-content:center;
@@ -3183,7 +3185,12 @@ const PV_FEED_MS = 1000;
 const pvFeedTimers = {};
 let pvTimer = null;
 let pvLevelTimer = null;
+// Bumped by every SHOW and HIDE. A program probe still in flight when the preview
+// is hidden must not reschedule itself, else each HIDE/SHOW leaves one more loop.
+let pvGen = 0;
+let pgmAudioStop = () => {};
 function pvSetProgram(){
+  const gen = pvGen;
   const frame = $("#pvProgramFrame"), img = $("#pvProgram");
   const ph = frame.querySelector(".pvph"), txt = ph.querySelector(".pvphtxt");
   // Probe with a fresh image each cycle and reschedule only after it resolves. Never
@@ -3193,9 +3200,11 @@ function pvSetProgram(){
   // the obs-ws 2 s timeout, longer than a fixed poll interval. Mirrors the cockpit and
   // race-control pollProgram: it cannot overlap and recovers once OBS delivers. (#520)
   const next = new Image();
-  next.onload = () => { img.src = next.src; frame.classList.add("loaded");
+  next.onload = () => { if (gen !== pvGen) return;
+    img.src = next.src; frame.classList.add("loaded");
     ph.classList.remove("err"); pvTimer = setTimeout(pvSetProgram, 1500); };
-  next.onerror = () => { frame.classList.remove("loaded"); ph.classList.add("err");
+  next.onerror = () => { if (gen !== pvGen) return;
+    frame.classList.remove("loaded"); ph.classList.add("err");
     txt.textContent = "OBS unreachable"; pvTimer = setTimeout(pvSetProgram, 3000); };
   next.src = RC_API("/preview/program") + "?ts=" + Date.now();
 }
@@ -3213,6 +3222,11 @@ function pgmAudioInit(endpoint) {
   au.volume = parseFloat(vol.value);
   vol.addEventListener('input', function () { au.volume = parseFloat(vol.value); });
   var on = false;
+  // HIDE stops the audio with the pictures: an invisible stream keeps playing otherwise.
+  pgmAudioStop = function () {
+    if (!on) return;
+    on = false; au.pause(); au.removeAttribute('src'); au.load(); setBtn();
+  };
   btn.addEventListener('click', function () {
     on = !on;
     if (on) {
@@ -3228,17 +3242,23 @@ function pgmAudioInit(endpoint) {
     btn.setAttribute('aria-pressed', on ? 'true' : 'false');
   }
 }
+function pvHalt(){
+  pvGen++;
+  if(pvTimer){ clearTimeout(pvTimer); pvTimer = null; }
+  document.querySelectorAll(".pvtile").forEach(pvStopFeed);
+  if(pvLevelTimer){ clearInterval(pvLevelTimer); pvLevelTimer = null; }
+}
 function pvStart(){
+  pvHalt();         // idempotent: a second SHOW never stacks a second poll loop
   $("#pvBody").hidden = false; $("#pvToggle").textContent = "HIDE";
   pvSetProgram();   // self-reschedules via setTimeout after each onload/onerror
   document.querySelectorAll(".pvtile").forEach(pvStartFeed);
   pvLevelTimer = setInterval(pvPollLevels, PV_FEED_MS); pvPollLevels();
 }
 function pvStop(){
+  pvHalt();         // clearTimeout + generation bump: an in-flight probe cannot reschedule
   $("#pvBody").hidden = true; $("#pvToggle").textContent = "SHOW";
-  if(pvTimer){ clearTimeout(pvTimer); pvTimer = null; }
-  document.querySelectorAll(".pvtile").forEach(pvStopFeed);
-  if(pvLevelTimer){ clearInterval(pvLevelTimer); pvLevelTimer = null; }
+  pgmAudioStop();
 }
 $("#pvToggle").onclick = () => {
   const opening = $("#pvBody").hidden;
