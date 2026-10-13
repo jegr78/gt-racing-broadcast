@@ -60,10 +60,14 @@ The preview includes selected IDs, references, all included primary/reference
 context and notes, goals/questions, limitations, byte counts and an explicit
 subscription-cloud transmission statement. It never starts an agent.
 
-Conservative limits are 48 KB summary/1 MB detail/40 laps for Codex and
-40 KB summary/800 KB detail/30 laps for Claude, including references. These are
+Limits are 48 KB summary/8 MiB detail/40 laps for Codex and
+40 KB summary/8 MiB detail/30 laps for Claude, including references. All selected
+trace points retain their original values; no downsampling or rounding is used
+to fit the package. Input snapshot, history and export readers use the same detail
+bound; provider output retains its separate 4 MiB bound. These are
 application limits, not guarantees about provider context windows or entitlement.
-Oversize inputs require a smaller selection; no splitting or repair calls occur.
+Oversize errors report actual and allowed detail bytes, summary bytes and lap
+counts. Oversize inputs require a smaller selection; no splitting or repair calls occur.
 The selected report language defaults to the UI language and can be overridden.
 
 ## Review and runtime evidence

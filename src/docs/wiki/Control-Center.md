@@ -521,6 +521,15 @@ the installed tool and existing subscription login without model inference. Mode
 suggestions depend on the installed CLI; you can enter an exact model name manually.
 The same provider can have multiple configurations.
 
+For a new configuration, enter a name and click **Save new configuration**.
+The message below the buttons confirms the saved name or explains a save error.
+Edits show **Unsaved changes**; **Check CLI / login** becomes available after saving.
+In **Isolated** mode, personal instructions and skills are disabled. To include
+them with Codex, choose **Personal** and select each option explicitly. Personal
+MCP and selective Claude customizations are unavailable for background analysis.
+Model suggestions belong to the checked configuration. Changing the provider
+clears the draft model so a Codex model is not carried into a Claude configuration.
+
 Install and sign in with the provider's own tools before using Racecast:
 [Codex authentication](https://developers.openai.com/codex/auth/) and
 [Claude Code authentication](https://code.claude.com/docs/en/authentication).

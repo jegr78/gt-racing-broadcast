@@ -334,7 +334,8 @@ def snapshot_package(prepared, destination, frozen):
     files = {}
     for name in names:
         p = prepared / name
-        if p.is_symlink() or not p.is_file() or p.stat().st_size > 2 * 1024 * 1024:
+        limit = ai_package.MAX_DETAIL_BYTES if name == "detail.json" else 2 * 1024 * 1024
+        if p.is_symlink() or not p.is_file() or p.stat().st_size > limit:
             raise JobError(
                 "invalid_package",
                 "Prepared package files must be bounded regular files",
@@ -359,7 +360,7 @@ def snapshot_package(prepared, destination, frozen):
         (destination / name).write_bytes(raw)
 
 
-def regular_output_bytes(path):
+def regular_output_bytes(path, *, max_bytes=MAX_OUTPUT_BYTES):
     path = Path(path)
     if path.is_symlink():
         raise JobError("invalid_output", "Provider result cannot be a symlink")
@@ -377,14 +378,14 @@ def regular_output_bytes(path):
         if (
             not stat.S_ISREG(st.st_mode)
             or st.st_nlink != 1
-            or st.st_size > MAX_OUTPUT_BYTES
+            or st.st_size > max_bytes
         ):
             raise JobError(
                 "invalid_output",
                 "Provider result must be a bounded unlinked regular file",
             )
-        raw = f.read(MAX_OUTPUT_BYTES + 1)
-        if len(raw) > MAX_OUTPUT_BYTES:
+        raw = f.read(max_bytes + 1)
+        if len(raw) > max_bytes:
             raise JobError("invalid_output", "Provider result exceeds the output bound")
         return raw
 

@@ -16,9 +16,10 @@ import gt7_recording
 PACKAGE_VERSION = 1
 CALCULATION_VERSION = "selection-and-section-deltas-v1"
 TEMPLATES = ("driving-technique", "consistency", "session-overview")
+MAX_DETAIL_BYTES = 8 * 1024 * 1024
 LIMITS = {
-    "codex": {"summary_bytes": 48000, "detail_bytes": 1000000, "laps": 40},
-    "claude": {"summary_bytes": 40000, "detail_bytes": 800000, "laps": 30},
+    "codex": {"summary_bytes": 48000, "detail_bytes": MAX_DETAIL_BYTES, "laps": 40},
+    "claude": {"summary_bytes": 40000, "detail_bytes": MAX_DETAIL_BYTES, "laps": 30},
 }
 TRACE_KEYS = {"d", "t", "speed_kmh", "throttle", "brake", "steer", "gear", "x", "z"}
 METRICS = (
@@ -845,7 +846,11 @@ def preview(package, provider):
     ):
         raise PackageError(
             "package_too_large",
-            "Selection exceeds the one-invocation package limit; select fewer laps/references or shorter notes",
+            "Selection exceeds the analysis package limit: "
+            f"detail {detail_size:,}/{limits['detail_bytes']:,} bytes; "
+            f"summary {summary_size:,}/{limits['summary_bytes']:,} bytes; "
+            f"laps/references {len(package['laps']) + len(package['references'])}/{limits['laps']}. "
+            "Select fewer laps/references or shorten context notes.",
         )
     return dict(
         version=1,
