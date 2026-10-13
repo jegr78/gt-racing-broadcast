@@ -11,6 +11,34 @@ from ai_ui_fixture import web_fixture
 import gt7_comparison
 
 
+async def save_engineer_role(page, fixture, enabled):
+    row = page.locator('[data-crew-row="1"]')
+    await row.get_by_label('Race Engineer', exact=True).set_checked(enabled)
+    writes_before = len(fixture.writes)
+    # Save reloads the roster only after the POST succeeds. Arm both observers
+    # before clicking so neither response can race past the test.
+    async with page.expect_response(lambda r: r.url.endswith('/api/crew') and r.request.method == 'GET') as reload:
+        async with page.expect_response(lambda r: r.url.endswith('/api/crew') and r.request.method == 'POST') as saved:
+            await row.get_by_role('button', name='Save', exact=True).click()
+        response = await saved.value
+        assert response.ok and (await response.json()).get('ok'), 'crew save failed'
+        payload = response.request.post_data_json
+        assert payload['row'] == 1 and payload['race_engineer'] is enabled, payload
+    response = await reload.value
+    roster = await response.json()
+    assert response.ok and roster.get('ok'), 'saved crew roster could not reload'
+    entry = next(e for e in roster['entries'] if e['row'] == 1)
+    assert entry['race_engineer'] is enabled, entry
+    await page.wait_for_function('''enabled => {
+        const checkbox = document.querySelector('[data-crew-row="1"] input[aria-label="Race Engineer"]');
+        return checkbox !== null && checkbox.checked === enabled;
+    }''', arg=enabled)
+    assert len(fixture.writes) == writes_before + 1, fixture.writes
+    assert fixture.writes[-1]['row'] == 1 and fixture.writes[-1]['race_engineer'] is enabled
+    assert ('engineer' in fixture.crew.race_engineer_keys()) is enabled
+    return None
+
+
 async def verify(pw,fixture,ui,console,shots=False):
     browser=await pw.chromium.launch(headless=True)
     page=await browser.new_page(viewport={'width':1440,'height':900})
@@ -44,15 +72,15 @@ async def verify(pw,fixture,ui,console,shots=False):
     await page.locator('#engineer-grant').click();await page.wait_for_selector('#engineer-grants li')
     assert not await page.evaluate('() => !!window.engineerInjected')
     await page.evaluate('() => showView("profile")');await page.wait_for_selector('[data-crew-row="1"]')
-    row=page.locator('[data-crew-row="1"]')
-    await row.get_by_label('Race Engineer',exact=True).uncheck();await row.get_by_role('button',name='Save',exact=True).click()
-    await page.wait_for_function('() => !document.querySelector("[data-crew-row=\\\"1\\\"] input[aria-label=\\\"Race Engineer\\\"]").checked')
-    assert fixture.writes and fixture.writes[-1]['race_engineer'] is False
-    await row.get_by_label('Race Engineer',exact=True).check();await row.get_by_role('button',name='Save',exact=True).click()
-    for _ in range(50):
-        if 'engineer' in fixture.crew.race_engineer_keys():break
-        await asyncio.sleep(.05)
-    assert 'engineer' in fixture.crew.race_engineer_keys()
+    # Exercise both network gaps: the checkbox changes before persistence, and
+    # loadCrew temporarily removes its rows while the saved roster is fetched.
+    async def slow_crew(route):
+        await asyncio.sleep(.15)
+        await route.continue_()
+    await page.route('**/api/crew', slow_crew)
+    await save_engineer_role(page, fixture, False)
+    await save_engineer_role(page, fixture, True)
+    await page.unroute('**/api/crew', slow_crew)
     engineer=await browser.new_page(viewport={'width':1280,'height':900})
     engineer.on('pageerror',lambda error:errors.append(error.stack))
     token=gate.m.console_auth.mint_token(gate.SECRET,'engineer')
