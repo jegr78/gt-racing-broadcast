@@ -196,8 +196,54 @@ def t_program_preview_self_reschedules_no_wedge():
         "pvSetProgram must probe with a fresh new Image() each cycle (never abort a pending reused-img load)"
     assert "setTimeout(pvSetProgram" in body, \
         "pvSetProgram must self-reschedule via setTimeout after onload/onerror (auto-recover)"
-    assert "clearTimeout" in _func_body(h, "pvStop"), \
+    assert "pvHalt()" in _func_body(h, "pvStop") and "clearTimeout" in _func_body(h, "pvHalt"), \
         "pvStop must clearTimeout the program-preview poll handle (no leaked poll after HIDE)"
+
+
+def t_preview_body_honors_hidden_rule():
+    # `.preview .pvbody{display:grid}` is an author rule that beats the UA
+    # `[hidden]{display:none}`: without an explicit override HIDE stops the polls
+    # but leaves the frozen, dimmed tiles on screen.
+    assert ".preview .pvbody[hidden]{display:none}" in _html()
+
+
+_PV_HARNESS = r"""
+const probes = [], timers = [];
+class Image { constructor() { probes.push(this); } }
+const setTimeout = (fn, ms) => { timers.push(fn); return timers.length; };
+const clearTimeout = id => { if (id) timers[id - 1] = null; };
+const setInterval = () => 1, clearInterval = () => {};
+const el = () => ({hidden: true, textContent: '', classList: {add() {}, remove() {}},
+                   querySelector: () => el()});
+const nodes = {}; const $ = sel => nodes[sel] || (nodes[sel] = el());
+const document = {querySelectorAll: () => []};
+const RC_API = p => p, fetch = () => new Promise(() => {});
+const PV_FEED_MS = 1000, pvFeedTimers = {}, pvStartFeed = () => {}, pvStopFeed = () => {};
+let pvTimer = null, pvLevelTimer = null, pvGen = 0, audioStops = 0;
+let pgmAudioStop = () => { audioStops++; };
+const live = () => timers.filter(Boolean).length;
+"""
+
+
+def t_preview_hide_drops_an_in_flight_program_probe():
+    # A /preview/program screenshot can take ~2 s. HIDE during that request used to
+    # leave its onload free to schedule the next poll, so every HIDE/SHOW cycle
+    # stacked one more program-poll loop behind a hidden preview.
+    html = _html()
+    funcs = "".join(_func_src(html, n) + "\n}\n" for n in
+                    ("pvSetProgram", "pvHalt", "pvStart", "pvStop", "pvPollLevels"))
+    out = _run_js(_PV_HARNESS + funcs + """
+pvStart();
+const inFlight = probes.at(-1);
+pvStop();
+inFlight.onload();
+const afterHide = live();
+pvStart(); pvStart();
+probes.at(-1).onload(); probes.at(-2).onload();
+console.log([afterHide, live(), $("#pvBody").hidden, audioStops].join(' '));""")
+    if out is not None:
+        assert out.strip() == "0 1 false 1", \
+            f"hidden preview must not poll; repeated SHOW must run one loop; HIDE stops audio: {out!r}"
 
 
 def t_stint_macro_resolves_the_on_air_feed_on_the_relay():
