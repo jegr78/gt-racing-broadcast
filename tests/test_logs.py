@@ -443,6 +443,38 @@ def t_no_argparse_help_string_carries_non_ascii():
     assert not offenders, "non-ASCII in argparse help: " + ", ".join(offenders)
 
 
+def _implicit_path_text_calls(source):
+    import ast
+    offenders = []
+    for node in ast.walk(ast.parse(source)):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr in ("read_text", "write_text")):
+            continue
+        index = 0 if node.func.attr == "read_text" else 1
+        encoding = next((kw.value for kw in node.keywords if kw.arg == "encoding"),
+                        node.args[index] if len(node.args) > index else None)
+        if encoding is None or (isinstance(encoding, ast.Constant) and encoding.value is None):
+            offenders.append(node.lineno)
+    return offenders
+
+
+def t_maintainer_text_files_have_explicit_encoding():
+    # Windows defaults to cp1252 unless UTF-8 mode is enabled. These files are
+    # UTF-8 regardless of the host locale, so reads AND writes must opt in.
+    from pathlib import Path
+    offenders = []
+    for path in sorted((Path(ROOT) / "tools").rglob("*.py")):
+        for line in _implicit_path_text_calls(path.read_text(encoding="utf-8")):
+            offenders.append(f"{path.relative_to(ROOT)}:{line}")
+    assert not offenders, "implicit text file encoding: " + ", ".join(offenders)
+
+
+def t_maintainer_encoding_guard_detects_implicit_and_none_encodings():
+    assert _implicit_path_text_calls("p.read_text(); p.write_text('x')") == [1, 1]
+    assert _implicit_path_text_calls("p.read_text(encoding=None); p.write_text('x', None)") == [1, 1]
+    assert not _implicit_path_text_calls("p.read_text('utf-8'); p.write_text('x', encoding='utf-8')")
+
+
 def t_the_relay_hardens_stdio_before_it_builds_its_help():
     # The relay is started directly as well as spawned, so inheriting
     # PYTHONIOENCODING is not enough, and the order is the point: argparse

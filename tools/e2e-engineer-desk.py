@@ -330,7 +330,7 @@ async def main():
                     await page.set_viewport_size({'width':width,'height':height})
                     assert await page.evaluate('() => document.documentElement.scrollWidth <= innerWidth'),name
                     await page.evaluate('() => window.scrollTo(0,0)')
-                    facts=await page.evaluate((ROOT/'tools/visual-probe.js').read_text())
+                    facts=await page.evaluate((ROOT/'tools/visual-probe.js').read_text(encoding="utf-8"))
                     findings=e2e_visual.evaluate(facts,errors)
                     assert not findings,(name,findings)
                 # The same handler now reads a new real relay generation.

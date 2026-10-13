@@ -53,10 +53,10 @@ def main():
         time.sleep(.05)
     assert runner.cancel(job)
     while time.monotonic()<deadline and runner.status('profile')['busy']:time.sleep(.05)
-    cancelled=json.loads(next((profile/'telemetry-analyses').glob('*/'+job+'/run.json')).read_text())
+    cancelled=json.loads(next((profile/'telemetry-analyses').glob('*/'+job+'/run.json')).read_text(encoding="utf-8"))
     assert cancelled['state']=='cancelled' and cancelled['report'] is None and not runner.status('profile')['busy']
     proof['cancellation']='cancelled; no report; machine lease released'
-    (root/'proof.json').write_text(json.dumps(proof,indent=2))
+    (root/'proof.json').write_text(json.dumps(proof,indent=2),encoding="utf-8")
     print(json.dumps(proof,indent=2));return 0
 
 
