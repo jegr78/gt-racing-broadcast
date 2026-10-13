@@ -31,6 +31,7 @@ function settingsStatus(text,kind='info'){
 function settingsControls(){
  const selected=!!$id('ai-configs').value;
  $id('ai-save').disabled=!state.settings||state.settingsBusy;
+ $id('ai-save-enabled').disabled=!state.settings||state.settingsBusy||$id('ai-enabled').checked===state.settings.enabled;
  $id('ai-save').textContent=state.settingsBusy?'Saving…':selected?'Save configuration':'Save new configuration';
  $id('ai-remove').disabled=!selected||state.settingsBusy;
  $id('ai-check').disabled=!selected||state.settingsDirty||state.settingsBusy;
@@ -74,14 +75,14 @@ function refreshAgents(preserveModel=true){
  $id('ai-controls').hidden=!state.settings?.enabled;
  say('ai-disabled',state.settings?.enabled?'':'Optional AI analysis is disabled. Enable it in General Settings. Existing telemetry and saved analyses remain available.');
 }
-async function saveSettings(remove=false){
+async function saveSettings(remove=false,enableOnly=false){
  if(!state.settings||state.settingsBusy)return;
  const selected=$id('ai-configs').value,doc=structuredClone(state.settings);delete doc.ok;let savedId=selected;
  const name=$id('ai-name').value.trim();
- if(!remove&&!name){settingsStatus('Enter a configuration name before saving.','error');$id('ai-name').focus();return;}
- if(!remove&&!$id('ai-timeout').checkValidity()){settingsStatus('Timeout must be a whole number from 10 to 3600 seconds.','error');$id('ai-timeout').focus();return;}
+ if(!remove&&!enableOnly&&!name){settingsStatus('Enter a configuration name before saving.','error');$id('ai-name').focus();return;}
+ if(!remove&&!enableOnly&&!$id('ai-timeout').checkValidity()){settingsStatus('Timeout must be a whole number from 10 to 3600 seconds.','error');$id('ai-timeout').focus();return;}
  if(remove){if(!selected)return;doc.agents=doc.agents.filter(a=>a.id!==selected);if(doc.last?.agent===selected)doc.last={};}
- else {
+ else if(!enableOnly){
   const id=selected||'agent-'+crypto.randomUUID();
   const configuration={id,name:$id('ai-name').value.trim(),provider:$id('ai-provider').value,executable:$id('ai-executable').value.trim(),model:$id('ai-config-model').value.trim(),timeout:Number($id('ai-timeout').value),mode:$id('ai-mode').value,personal:personal()};
   if(doc.last?.agent===id&&doc.agents.find(a=>a.id===id)?.provider!==configuration.provider)delete doc.last.model;
@@ -92,7 +93,10 @@ async function saveSettings(remove=false){
  const fields=[...$id('ai-settings').querySelectorAll('input,select')];fields.forEach(e=>e.disabled=true);settingsControls();settingsStatus('Saving analysis settings…','pending');
  const result=await request('settings',doc);
  state.settingsBusy=false;fields.forEach(e=>e.disabled=false);
- if(result.ok){renderSettings(result,remove?'':savedId);settingsStatus(remove?'Configuration removed.':'Configuration "'+name+'" saved. Analysis is '+(result.enabled?'enabled':'disabled')+' on this machine. You can now check the CLI / login.','success');}
+ if(result.ok){
+  if(enableOnly){state.settings=result;refreshAgents();settingsControls();settingsStatus('Analysis is '+(result.enabled?'enabled':'disabled')+' on this machine.'+(state.settingsDirty?' Configuration edits are still unsaved.':''),'success');}
+  else {renderSettings(result,remove?'':savedId);settingsStatus(remove?'Configuration removed.':'Configuration "'+name+'" saved. Analysis is '+(result.enabled?'enabled':'disabled')+' on this machine. You can now check the CLI / login.','success');}
+ }
  else {settingsControls();settingsStatus('Could not save: '+error(result),'error');}
 }
 async function probe(){
@@ -217,7 +221,7 @@ function reset(profile){state.profile=profile;state.generation++;state.selection
 function init(){
  const settingsCard=node('section',null,document.querySelector('[data-view="settings"]'));settingsCard.id='ai-settings';settingsCard.className='card rcai';
  settingsCard.innerHTML=`<h3>Optional AI telemetry analysis</h3><p>Uses your existing Codex or Claude Code subscription CLI. Install and sign in externally. Racecast never installs an agent or selects API billing.</p>
- <label><input id="ai-enabled" type="checkbox"> Enable analysis on this machine</label>
+ <label><input id="ai-enabled" type="checkbox"> Enable analysis on this machine</label> <button id="ai-save-enabled" disabled>Save enable / disable</button>
  <p>Create a named configuration, save it, then check the CLI / login.</p>
  <div class="rcai-grid"><label>Named configurations<select id="ai-configs"></select></label><label>Name (required)<input id="ai-name" maxlength="200" placeholder="e.g. Codex telemetry"></label><label>Provider<select id="ai-provider"><option value="codex">Codex</option><option value="claude">Claude Code</option></select></label><label>Executable (optional)<input id="ai-executable" placeholder="CLI command or full executable path"></label><label>Default model<input id="ai-config-model" list="ai-model-suggestions" placeholder="Exact model name for this provider"></label><label>Timeout (seconds)<input id="ai-timeout" type="number" min="10" max="3600" step="1" value="600" required></label><label>Agent mode<select id="ai-mode"><option value="isolated">Isolated</option><option value="personal">Personal</option></select></label></div>
  <p id="ai-mode-help"></p>
@@ -232,7 +236,9 @@ function init(){
  <p>One analysis can run on this machine. Subscription quota/model availability are not guaranteed. Cancellation cannot recover already consumed quota.</p><div class="row"><button id="ai-cancel" disabled>Cancel active analysis</button></div><p id="ai-run-status" role="status"></p><h4>Saved analysis history</h4><div id="ai-history"></div><div id="ai-report"></div>`;
  const style=node('style',`.rcai{overflow-wrap:anywhere}.rcai-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:14px 0}.rcai-grid label{display:flex;flex-direction:column;gap:6px;min-width:0}.rcai input:not([type=checkbox]),.rcai select,.rcai textarea{width:100%;min-width:0;padding:8px;background:var(--card2);color:var(--txt);border:1px solid var(--line);border-radius:6px;font:inherit}.rcai textarea{min-height:80px}.rcai-options{display:flex;flex-wrap:wrap;gap:12px}.rcai pre{white-space:pre-wrap;font-size:12px}.rcai article{border-top:1px solid var(--line);padding-top:10px}.rcai button{margin:4px}`);document.head.append(style);
  node('style',`#ai-save{background:var(--accent-strong);border-color:var(--accent-strong);font-weight:600}.rcai-settings-actions #ai-settings-status{flex-basis:100%;margin:0 4px;padding:10px 12px;border:1px solid var(--line);border-radius:6px}.rcai-settings-actions [data-kind=error]{color:var(--bad-text);border-color:var(--bad)!important}.rcai-settings-actions [data-kind=success]{color:#4ADE80}.rcai-settings-actions [data-kind=pending]{color:#FCD34D}.rcai input:disabled{opacity:.5}`,document.head);
- $id('ai-settings').querySelectorAll('input,select').forEach(e=>{if(e.id!=='ai-configs')e.addEventListener(e.tagName==='SELECT'||e.type==='checkbox'?'change':'input',settingsChanged);});
+ $id('ai-settings').querySelectorAll('input,select').forEach(e=>{if(!['ai-configs','ai-enabled'].includes(e.id))e.addEventListener(e.tagName==='SELECT'||e.type==='checkbox'?'change':'input',settingsChanged);});
+ $id('ai-enabled').onchange=()=>{settingsControls();settingsStatus('Unsaved enable setting. Click Save enable / disable.','pending');};
+ $id('ai-save-enabled').onclick=()=>saveSettings(false,true);
  $id('ai-provider').addEventListener('change',()=>{$id('ai-config-model').value='';modelSuggestions();});
  $id('ai-configs').onchange=()=>{state.settingsDirty=false;populateConfig(state.settings?.agents.find(a=>a.id===$id('ai-configs').value));settingsStatus($id('ai-configs').value?'Saved configuration loaded.':'Enter a name, choose a provider, then save the configuration.');};
  $id('ai-save').onclick=()=>saveSettings();$id('ai-remove').onclick=()=>saveSettings(true);$id('ai-check').onclick=probe;

@@ -522,6 +522,9 @@ suggestions depend on the installed CLI; you can enter an exact model name manua
 The same provider can have multiple configurations.
 
 For a new configuration, enter a name and click **Save new configuration**.
+To save only the machine-wide enable switch, click **Save enable / disable**
+next to the checkbox. This also works without configurations and preserves
+unsaved configuration edits.
 The message below the buttons confirms the saved name or explains a save error.
 Edits show **Unsaved changes**; **Check CLI / login** becomes available after saving.
 In **Isolated** mode, personal instructions and skills are disabled. To include
