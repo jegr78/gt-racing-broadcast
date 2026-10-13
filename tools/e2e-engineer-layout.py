@@ -71,6 +71,10 @@ async def main():
                     if width==390:
                         await page.locator('#best').evaluate('(el)=>{el.previousElementSibling.replaceChildren(document.createTextNode("Best"),document.createElement("br"),document.createTextNode("completed · s"));}')
                     positions=await page.evaluate('() => ["lap-time","delta","best","race-position"].map(id=>{const r=document.getElementById(id).getBoundingClientRect();return {x:r.x,y:r.y};})')
+                    # The program still sits beside the headline only where four tiles keep
+                    # their width; narrower, it stacks below so the labels never wrap.
+                    program=await page.evaluate('() => {const p=document.getElementById("program-card").getBoundingClientRect(),h=document.getElementById("instruments").getBoundingClientRect();return {beside:p.left>=h.right,below:p.top>=h.bottom};}')
+                    assert program['beside'] if width>1100 else program['below'], f'{width}: program still placement {program}'
                     if width>600:
                         assert max(p['y'] for p in positions)-min(p['y'] for p in positions)<2, 'headline metrics were not one row'
                         assert all(a['x']<b['x'] for a,b in zip(positions,positions[1:],strict=False)), 'headline metric order differs from the approved draft'

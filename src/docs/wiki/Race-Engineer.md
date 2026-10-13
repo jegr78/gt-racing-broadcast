@@ -29,7 +29,7 @@ the distance the delta covers, the lap time difference, or why none is shown yet
 The delta tile names the distance it covers, the best tile names its lap. A loss
 carries a **+** sign, so gain and loss do not depend on color.
 
-The **Program · OBS** tile beside the live values shows a still of the running OBS
+The **Program · OBS** tile beside the live values (below them on narrower screens) shows a still of the running OBS
 program, refreshed about every 1.5 s, the same still Race Control shows. **Hide**
 folds it to a small bar and the browser remembers the choice. The still is only
 fetched while the tile is open and the tab is visible, and it stops with the access.
