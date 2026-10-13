@@ -11,7 +11,7 @@ import threading
 import gt7_comparison
 from race_engineer_access import AccessError
 
-ROUTES = frozenset(("snapshot", "history", "lap", "reference", "compare"))
+ROUTES = frozenset(("snapshot", "history", "lap", "reference", "compare", "trace"))
 FIELDS = frozenset((
     "id",
     "session_id",
@@ -375,6 +375,7 @@ class Service:
             "lap": {"id"},
             "reference": {"id"},
             "compare": {"a", "b"},
+            "trace": {"since"},
         }[route]
         query = {k: v for k, v in query.items() if k != "t"}
         if set(query) - allowed or any(len(v) != 1 or not v[0] for v in query.values()):
@@ -383,6 +384,11 @@ class Service:
             )
         if route == "snapshot":
             return self.snapshot()
+        if route == "trace":
+            since = query.get("since", [None])[0]
+            if since is not None and not re.fullmatch(r"[0-9]{1,12}(?:\.[0-9]{1,6})?", since):
+                raise AccessError("invalid_query", "Invalid trace time")
+            return self.live.inputs(float(since) if since is not None else None)
         if route == "history":
             since = query.get("since", [None])[0]
             if since is not None and not re.fullmatch(r"[0-9]{1,16}", since):

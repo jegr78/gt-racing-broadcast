@@ -27,6 +27,9 @@ DETAIL_BYTES_MAX = 16 * 1024 * 1024
 ENTRY_BYTES_MAX = 1024 * 1024
 RECOVERY_MAX = 8
 STALE_S = 5.0
+# Throttle/brake history for the desk's input trace, decimated like the HUD's.
+INPUT_TRACE_S = 6.0
+INPUT_TRACE_DT = gt7_telemetry.TRACE_MIN_DT
 SUMMARY_FIELDS = frozenset((
     "measurement_hash",
     "_context_source",
@@ -371,6 +374,7 @@ class Store:
         self._receipt = None
         self._last_packet = None
         self._values = {}
+        self._inputs = collections.deque()
         self._last_publish = None
         self._recording = None
         self._recording_current = recording_source is None
@@ -464,6 +468,8 @@ class Store:
         self._receipt = None
         self._last_packet = None
         self._values = {}
+        with self._lock:
+            self._inputs.clear()
         self._revision += 1
         with self._lock:
             self._published = self._empty()
@@ -566,6 +572,7 @@ class Store:
             else "live",
         )
         self._values = instruments(pkt)
+        self._record_inputs(pkt, mono)
         if self._dropped != self._seen_drops:
             if replay.eng._acc is not None:
                 replay.eng._acc._reject("Engineer preparation queue overflow")
@@ -866,6 +873,27 @@ class Store:
         with self._lock:
             self._published = doc
             self._detail_publication = dict(self._details)
+
+    def _record_inputs(self, pkt, mono):
+        with self._lock:
+            if self._inputs and mono - self._inputs[-1][0] < INPUT_TRACE_DT * .9:  # packet jitter
+                return
+            self._inputs.append((mono, pkt.throttle / 255, pkt.brake / 255))
+            while self._inputs[0][0] < mono - INPUT_TRACE_S:
+                self._inputs.popleft()
+
+    def inputs(self, since=None):
+        """Recent throttle/brake samples (0..1) on the receipt clock, newest last."""
+        with self._lock:
+            rows = [r for r in self._inputs if since is None or round(r[0], 3) > since]
+        return {
+            "version": 1,
+            "generation": self.generation,
+            "samples": [
+                {"t": round(t, 3), "throttle": round(thr, 3), "brake": round(brk, 3)}
+                for t, thr, brk in rows
+            ],
+        }
 
     def snapshot(self, compact=False):
         with self._lock:

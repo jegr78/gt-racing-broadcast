@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Real signed Engineer desk, shared synthetic preparation and independent browsers."""
 import asyncio
+import json
 import sys
 import tempfile
 from pathlib import Path
@@ -18,6 +19,20 @@ PROGRAM_SVG = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900">'
                '<rect x="660" y="640" width="280" height="110" rx="18" fill="#c0392b"/>'
                '<rect x="40" y="40" width="360" height="70" rx="8" fill="#0b1018" opacity=".8"/>'
                '<text x="64" y="88" font-family="sans-serif" font-size="38" fill="#eef4fc">P15 · LAP 3</text></svg>')
+
+
+def _input_trace():
+    """5 s at 30 Hz: full throttle, a braking zone, then a progressive exit."""
+    rows = []
+    for i in range(150):
+        t = i / 30
+        brake = (min(1.0, (t - 1.6) * 4) if t < 2.2 else max(0.0, 1 - (t - 2.2) / .8)) if 1.6 <= t < 3.0 else 0.0
+        throttle = 1.0 if t < 1.6 else 0.0 if t < 3.0 else min(1.0, (t - 3.0) * .7)
+        rows.append({'t': round(500 + t, 3), 'throttle': round(throttle, 3), 'brake': round(brake, 3)})
+    return rows
+
+
+INPUT_TRACE = _input_trace()
 
 
 async def main():
@@ -45,6 +60,9 @@ async def main():
                 assert await page.locator('#race-position').inner_text() == 'P15/15', 'measured race position missing'
                 assert 'finish P3/15' in await page.evaluate('() => lapLabel({lap:2,state:"confirmed",time_s:20,line_position:3,line_car_count:15,comparison_eligible:true})'), 'lap option lost line position'
                 await page.wait_for_function('() => EngineerDesk.state.historyRevision !== null')
+                # Follow live compares the live lap with the lap just completed, not the fastest.
+                previous=next(r['id'] for r in fixture.live.snapshot()['laps'] if r['lap']==4)
+                await page.wait_for_function('(id) => EngineerDesk.state.a === id',arg=previous,timeout=5000)
                 assert 'Mitsubishi Lancer Evolution IX' in await page.locator('#session option:checked').inner_text(), 'session car name missing'
                 fallback = await page.evaluate('() => {const saved=EngineerDesk.state.sessions;EngineerDesk.state.sessions=saved.map(r=>({...r,car:null}));selections();const label=document.querySelector("#session option:checked").textContent;EngineerDesk.state.sessions=saved;selections();return label;}')
                 assert 'car 3424' in fallback, 'unknown car name did not fall back to id'
@@ -148,11 +166,24 @@ async def main():
                     fixture.live.put(gt7_telemetry.parse_packet(raw)._replace(race_position=15, car_count=15), fixture.live._receipt[1]+.01)
                     assert fixture.live.flush(10)
                     await page.wait_for_function('() => document.getElementById("race-position").textContent === "P15/15"')
+                    # Earlier steps changed A; show the Follow live default (the lap just completed).
+                    await page.locator('#lap-a').select_option(previous)
+                    await page.wait_for_function('(id) => EngineerDesk.state.pair?.a?.id === id',arg=previous)
                     await page.locator('.mini-details summary').click()
                     # The fixture has no OBS: give the program still a synthetic frame.
                     await page.route('**/cockpit/program?*', lambda route: route.fulfill(
                         content_type='image/svg+xml', body=PROGRAM_SVG))
                     await page.wait_for_selector('#program-frame.loaded', timeout=8000)
+                    # A still fixture: give the input trace 5 s of a braking zone instead.
+                    gen=fixture.live.generation
+                    async def input_trace(route):
+                        rows=[] if 'since=' in route.request.url else INPUT_TRACE
+                        await route.fulfill(content_type='application/json',body=json.dumps({'generation':gen,'samples':rows}))
+                    await page.route('**/race-engineer/trace*', input_trace)
+                    await page.evaluate('() => {EngineerDesk.trc.rows=[];EngineerDesk.trc.offset=null;}')
+                    await page.wait_for_function('() => EngineerDesk.trc.rows.length > 100')
+                    # The live delta grows between the fixture's two samples: losing time now.
+                    await page.wait_for_function('() => document.getElementById("delta-trend").textContent === "\\u25b2"')
                     for width,height,name in [(1440,1050,'desktop'),(1024,1100,'tablet'),(390,900,'phone')]:
                         await page.set_viewport_size({'width':width,'height':height})
                         await page.screenshot(path=str(ROOT/f'src/docs/wiki/images/console-race-engineer-{name}.png'),full_page=True)
