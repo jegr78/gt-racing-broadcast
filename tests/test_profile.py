@@ -185,6 +185,13 @@ def t_solo_pov_profile_prefills_telemetry_record():
     assert "TELEMETRY_RECORD" not in m._solo_profile_env_text("Solo", "commentary")
 
 
+def t_solo_profile_prefills_discord_webhook():
+    # Health alerts and the post-event report go to the league webhook in solo
+    # too; the Control Center's profile.env editor only shows keys that exist.
+    for template in m.cfg.SOLO_TEMPLATES:
+        assert "\nDISCORD_WEBHOOK_URL=\n" in m._solo_profile_env_text("Solo", template)
+
+
 def t_create_profile_accepts_spaces_via_slug_and_sets_display_name():
     with tempfile.TemporaryDirectory() as td:
         root = _mkroot_with_example(td)
