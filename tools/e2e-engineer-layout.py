@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Verify the approved Engineer layout with the real signed desk at three widths."""
 import asyncio
+import json
 import re
 import sys
 import tempfile
@@ -8,6 +9,58 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'tests'))
 from engineer_ui_fixture import Fixture, gate
+
+
+async def render_after_query(page):
+    # Reproduce a render between Playwright's selector query and its separate
+    # evaluate_all call. The replaced sector nodes remain in the old array.
+    await page.evaluate('''() => {
+        const D = Document.prototype.querySelectorAll, E = Element.prototype.querySelectorAll;
+        let armed = true;
+        const hook = original => function(selector) {
+            const nodes = original.call(this, selector);
+            if (armed && [...nodes].some(n => n.matches('summary') && n.closest('#larger-sectors'))) {
+                armed = false;
+                Document.prototype.querySelectorAll = D;
+                Element.prototype.querySelectorAll = E;
+                queueMicrotask(() => render());
+            }
+            return nodes;
+        };
+        Document.prototype.querySelectorAll = hook(D);
+        Element.prototype.querySelectorAll = hook(E);
+    }''')
+    return None
+
+
+async def settle_analysis(page):
+    await page.wait_for_function('''() => {
+        const s = EngineerDesk.state;
+        return !s.busy && !s.analysisBusy && s.pair?.state === 'ready'
+            && s.pair.a?.id === s.a && s.pair.b?.id === s.b
+            && s.detail?.id === s.b;
+    }''')
+    await page.evaluate('() => new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))')
+    return None
+
+
+async def layout_snapshot(page):
+    # Query and measure in one synchronous browser call. evaluate_all uses an
+    # array captured by an earlier selector call; a render can detach its nodes.
+    return await page.evaluate('''() => {
+        const s = EngineerDesk.state;
+        const targets = [...document.querySelectorAll('#larger-sectors summary, .mini-details summary')].map(el => {
+            const style = getComputedStyle(el), ancestors = [];
+            for (let parent = el.parentElement; parent; parent = parent.parentElement) {
+                const css = getComputedStyle(parent);
+                ancestors.push({tag:parent.tagName,id:parent.id,display:css.display,visibility:css.visibility,hidden:parent.hidden});
+            }
+            return {height:el.getBoundingClientRect().height,connected:el.isConnected,
+                display:style.display,visibility:style.visibility,ancestors};
+        });
+        return {a:s.a,b:s.b,busy:s.busy,analysisBusy:s.analysisBusy,pair:s.pair,detail:s.detail,
+            deltaReference:document.querySelector('#delta + small').textContent,targets};
+    }''')
 
 async def main():
     from playwright.async_api import async_playwright
@@ -34,8 +87,26 @@ async def main():
                 stamp=await page.evaluate('() => EngineerDesk.state.received')
                 await page.wait_for_function('(stamp)=>EngineerDesk.state.received>stamp&&!EngineerDesk.state.analysisBusy',arg=stamp)
                 assert not await first_detail.evaluate('(el)=>el.open'), 'analysis refresh reopened a collapsed section'
+                # Finish the live refresh checks, then deliberately hold the next
+                # comparison open while selection() has cleared its old pair.
+                await page.evaluate('() => clearInterval(timer)')
+                await page.wait_for_function('() => !state.busy && !state.analysisBusy')
+                compare_started = asyncio.Event()
+                async def slow_compare(route):
+                    compare_started.set()
+                    await asyncio.sleep(1)
+                    await route.continue_()
+                await page.route('**/race-engineer/compare?*', slow_compare)
+                await page.evaluate('() => {EngineerDesk.tick();}')
+                await asyncio.wait_for(compare_started.wait(), timeout=10)
+                assert await page.evaluate('() => state.analysisBusy && state.pair === null'), 'delayed comparison did not exercise the pending selection'
+                # Geometry checks use one settled current selection. Polling is
+                # paused above; in-flight work must finish before any measurement.
+                await settle_analysis(page)
+                await page.unroute('**/race-engineer/compare?*', slow_compare)
                 for width,height in ((1440,1050),(1024,1100),(390,900)):
                     await page.set_viewport_size(dict(width=width,height=height))
+                    await settle_analysis(page)
                     assert await page.evaluate('() => document.documentElement.scrollWidth<=innerWidth'), 'approved layout overflowed'
                     for selector in ('#chart','#delta-chart','#map','#lap-a','#reference-source','#channel','#zoom-to','#selection-summary'):
                         assert await page.locator(selector).is_visible(), f'{width}: essential analysis hidden: {selector}'
@@ -43,19 +114,23 @@ async def main():
                     lines=await page.evaluate('() => [...document.getElementById("selection-summary").closest("section").querySelectorAll("p")].filter(p=>p.offsetParent&&p.textContent.trim()).map(p=>p.textContent)')
                     assert len(lines)==1, f'{width}: comparison feedback was split over several lines: {lines}'
                     assert not any(word in lines[0].split() for word in ('ready','pending','provisional','confirmed')), f'feedback exposed raw analysis states: {lines[0]}'
-                    await page.evaluate('() => new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))')
                     for chart in ('#chart','#delta-chart'):
                         height=await page.evaluate('(sel)=>document.querySelector(sel+" text").getBoundingClientRect().height',chart)
                         assert height>=10, f'{width}: {chart} axis text rendered {height:.1f} px high'
-                    taps=await page.locator('#larger-sectors summary, .mini-details summary').evaluate_all('(nodes)=>nodes.map(n=>n.getBoundingClientRect().height)')
-                    assert width>600 or min(taps)>=44, f'phone disclosure tap targets too small: {taps}'
+                    if width == 390:
+                        await render_after_query(page)
+                    measured = await layout_snapshot(page)
+                    taps = [node['height'] for node in measured['targets']]
+                    assert len(taps) == 4, f'missing disclosure targets: {json.dumps(measured)}'
+                    assert all(node['connected'] for node in measured['targets']), f'detached disclosure measurement: {json.dumps(measured)}'
+                    assert width>600 or min(taps)>=44, f'phone disclosure tap targets too small: {json.dumps(measured)}'
                     cards=await page.evaluate('''() => {const B=state.detail,bounds=B.larger_sectors.bounds_m,observed=B.trace.at(-1).d;return [...document.querySelectorAll('#larger-sectors [data-section]')].map((card,i)=>({text:card.innerText,expected:B.state!=='provisional'||bounds[i+1]<=observed?null:bounds[i]<=observed?'Still driving':'Not reached',range:Math.round(bounds[i])+'–'+Math.round(bounds[i+1])+' m'}));}''')
                     for card in cards:
                         assert card['range'] in card['text'], f'section card lacked its distance range: {card}'
                         assert re.search(r'\d+ diagnostic mini-sectors',card['text']), f'section card lacked its mini-sector count: {card}'
                         if card['expected']:
                             assert card['expected'] in card['text'] and 'Not yet driven' not in card['text'], f'section progress was not distinguished: {card}'
-                    assert re.fullmatch(r'Against A · through \d+ m',await page.locator('#delta + small').inner_text()), 'live delta lacked its reference distance'
+                    assert re.fullmatch(r'Against A · through \d+ m', measured['deltaReference']), f'live delta lacked its reference distance: {json.dumps(measured)}'
                     assert re.fullmatch(r'Lap \d+ · this session',await page.locator('#best + small').inner_text()), 'best lap lacked its lap number'
                     assert await page.locator('#larger-sectors [data-section]').count() == 3, 'reviewed sections were not grouped'
                     detail=page.locator('#larger-sectors [data-section]').first.locator('details')
@@ -84,8 +159,6 @@ async def main():
                     await page.locator('.mini-details summary').click()
                     assert await page.locator('#sectors').is_visible(), 'diagnostic sectors could not be expanded'
                     await page.locator('.mini-details summary').click()
-                await page.evaluate('() => clearInterval(timer)')
-                await page.wait_for_function('() => !EngineerDesk.state.busy && !EngineerDesk.state.analysisBusy')
                 await page.evaluate('() => {state.savedLayoutPair=state.pair;state.savedLayoutDetail=state.detail;}')
                 await first_detail.locator('summary').click()
                 await page.evaluate('() => render()')
