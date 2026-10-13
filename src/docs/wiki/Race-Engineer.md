@@ -27,7 +27,10 @@ Select the comparison before inspecting the charts; channel and distance control
 are attached to the chart. One line below the selection reports the comparison:
 the distance the delta covers, the lap time difference, or why none is shown yet.
 The delta tile names the distance it covers, the best tile names its lap. A loss
-carries a **+** sign, so gain and loss do not depend on color.
+carries a **+** sign, so gain and loss do not depend on color. As in the broadcast
+HUD, an arrow next to the delta shows the trend over the last 1.5 s: **▲** the gap
+grows (losing time now), **▼** it shrinks (gaining time now). Changes below 0.02 s
+show no arrow, and a new reference or a new live lap starts the trend over.
 
 The **Program · OBS** tile beside the live values (below them on narrower screens) shows a still of the running OBS
 program, refreshed about every 1.5 s, the same still Race Control shows. **Hide**
@@ -35,8 +38,9 @@ folds it to a small bar and the browser remembers the choice. The still is only
 fetched while the tile is open and the tab is visible, and it stops with the access.
 
 The desk reads the existing single GT7 source of a solo POV profile. Speed, gear,
-RPM, throttle/brake, race position, observed lap time, fuel and tyre temperatures refresh roughly
-twice per second. Missing measurements say **Unavailable**, without their unit. The observed lap clock
+RPM, throttle/brake, steering angle (degrees with **L**/**R**), race position, observed lap time, fuel and tyre temperatures refresh roughly
+twice per second. Below them, an input trace draws throttle (green) and brake (red)
+over the last five seconds, like the HUD trace. Missing measurements say **Unavailable**, without their unit. The observed lap clock
 and live delta describe received data; neither advances without new packets.
 Race position reads **P15/15**, for example, from GT7's own-car position and field
 size. Missing or inconsistent readings remain unavailable. Completed lap options
@@ -48,8 +52,12 @@ Select **Session** and **Lap B** to inspect retained current or prior-session la
 Sessions show the track, vehicle name and lap count; unknown names fall back to
 the car ID. Shared session and reference-lap options include the producer's label.
 Select an eligible **Lap A** from the selected session, or choose a producer-shared
-**Reference source**. Without a choice, the desk takes the fastest eligible lap with the
-same car and track, or from the same session while the track is unknown. While lap B is
+**Reference source**. With **Follow live**, every new live lap becomes B and the lap
+just completed becomes A, so each lap is compared with the one before it. A lap you
+choose as A holds until the next lap starts. A selected shared reference source is
+kept. When the completed lap is not comparable, or has not arrived within a few
+seconds, the desk takes the fastest eligible lap with the same car and track, or from
+the same session while the track is unknown. While lap B is
 an out lap, pit lap or first lap of a stint, or while its track is still being
 recognised in the first lap of a session, it chooses none and says so; a chosen
 reference stays selected. The charts use the same validated distance stations, sector

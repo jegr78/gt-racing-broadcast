@@ -30,6 +30,9 @@ Errors use `{error: {code, message}}` with generic messages.
 - `reference?id=GRANT`: asynchronous authorized reference summaries and shared notes.
 - `compare?a=LAP_ID&b=LAP_ID`: shared asynchronous A/B result. Delta is B minus A.
   Archived lap IDs are `r:GRANT:SESSION:LAP` and never resolve without a current grant.
+- `trace?since=T`: the last six seconds of throttle and brake (0..1), decimated to about
+  30 samples per second, on the relay's receipt clock `t`. `since` returns only newer
+  samples; a new generation starts an empty history. It feeds the desk's input trace.
 
 The access route retains its existing grant list and adds live analysis availability.
 Unknown/duplicate query keys, invalid revisions and malformed IDs return 400. Unknown
