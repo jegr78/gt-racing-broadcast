@@ -104,7 +104,7 @@ def t_continuous_status_polling_preserves_every_atomic_snapshot():
                     doc=j._load(path)
                     assert doc is not None and len(doc['payload'])==16000,'polling lost a valid snapshot'
                     reads[index]+=1
-            except BaseException as exc:errors.append(exc);stop.set()
+            except Exception as exc:errors.append(exc);stop.set()
         workers=[threading.Thread(target=poll,args=(i,)) for i in range(2)]
         for worker in workers:worker.start()
         try:
