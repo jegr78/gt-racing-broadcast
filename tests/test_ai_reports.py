@@ -48,6 +48,46 @@ def setup(root,reference=False):
     return s,p,run,store
 
 
+def t_full_session_package_survives_snapshot_history_and_export():
+    with tempfile.TemporaryDirectory() as d:
+        root=Path(d);profile=root/'profile'
+        rows=[]
+        for lap in range(1,21):
+            row=fixtures.row(lap,time=120+lap/100)
+            row['length_m']=12000
+            row['trace']=[dict(d=i*5,t=row['time_s']*i/2400,
+                speed_kmh=150.123,throttle=80.456,brake=0.123,
+                steer=0.456,gear=4,x=i*1.234,z=i*2.345) for i in range(2401)]
+            rows.append(row)
+        source=fixtures.source(profile/'telemetry-recordings',rows)
+        package=ai_package.build(source,1)
+        assert len(package['laps'])==20
+        assert sum(len(lap['trace']) for lap in package['laps'])==48020
+        for lap,row in zip(package['laps'],rows,strict=True):
+            assert lap['trace']==row['trace']
+            assert lap['metrics']['time_s']==row['time_s']
+        prepared=root/'prepared'
+        for provider in ai_package.LIMITS:
+            manifest=ai_package.preview(package,provider)
+            assert ai_jobs.MAX_OUTPUT_BYTES < manifest['detail_bytes'] < ai_package.MAX_DETAIL_BYTES
+        ai_package.write(package,prepared,'codex')
+        store=r.Store(profile,'profile',root/'machine',lambda _name:source)
+        job_id='a'*32
+        directory=store.base/source.identity/job_id;directory.mkdir(parents=True)
+        ai_jobs.snapshot_package(prepared,directory/'package',package)
+        assert r.read_package(directory,profile)==package
+        hashes={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in prepared.iterdir()}
+        run={'profile':'profile','id':job_id,'input_file_fingerprints':hashes}
+        (directory/'run.json').write_text(json.dumps(run),encoding='utf-8')
+        r.verify_input_files(directory,profile,run,required=True)
+        assert len(r.validate(result(package),package)['exercises'])==3
+        for archive in (r.export_package(package,'claude'),store.export(job_id,'package')['bytes']):
+            with zipfile.ZipFile(io.BytesIO(archive)) as exported:
+                assert json.loads(exported.read('detail.json'))==package
+        # Larger input bounds must not relax the provider's output bound.
+        jobs.error(lambda:ai_jobs.regular_output_bytes(prepared/'detail.json'),'invalid_output')
+
+
 def t_schema_measurement_reference_and_priorities():
     with tempfile.TemporaryDirectory() as d:
         s=fixtures.source(Path(d)/'telemetry-recordings');p=ai_package.build(s,1);valid=result(p)

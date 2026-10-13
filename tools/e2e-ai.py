@@ -10,6 +10,50 @@ sys.path.insert(0,str(ROOT/'tests'))
 from ai_ui_fixture import Fixture,web_fixture
 
 
+async def verify_settings_toggle(page,fixture,port):
+    original=fixture.settings.read()
+    try:
+        await page.goto('http://127.0.0.1:'+str(port))
+        await page.wait_for_function('() => window.RacecastAI && tmState.profile === "profile"')
+        await page.reload()
+        await page.wait_for_function('() => window.RacecastAI && document.getElementById("ai-configs").options.length === 2')
+        await page.evaluate('() => showView("settings")')
+        assert await page.locator('#ai-configs').input_value()==''
+        assert await page.locator('#ai-save-enabled').count()==1,'machine toggle needs its own save action'
+        async def save_enabled(enabled):
+            await page.locator('#ai-enabled').set_checked(enabled)
+            await page.locator('#ai-save-enabled').click()
+            await page.wait_for_function('() => document.getElementById("ai-settings-status").dataset.kind === "success"')
+            assert fixture.settings.read()['enabled'] is enabled
+            assert await page.locator('#ai-save-enabled').is_disabled()
+            return None
+        await save_enabled(False)
+        assert fixture.settings.read()['agents']==original['agents']
+        await save_enabled(True)
+        # An invalid configuration draft must not prevent disabling analysis or get discarded.
+        await page.locator('#ai-name').fill('Unsaved coach')
+        await page.locator('#ai-timeout').fill('9')
+        await save_enabled(False)
+        assert await page.locator('#ai-name').input_value()=='Unsaved coach'
+        assert await page.locator('#ai-timeout').input_value()=='9'
+        assert fixture.settings.read()['agents']==original['agents']
+        await page.locator('#ai-save').click()
+        assert 'Timeout must' in await page.locator('#ai-settings-status').inner_text()
+        await save_enabled(True)
+        await page.locator('#ai-configs').select_option('coach')
+        await page.locator('#ai-remove').click()
+        await page.wait_for_function('() => document.getElementById("ai-configs").options.length === 1')
+        assert not fixture.settings.read()['agents']
+        await save_enabled(False)
+        await save_enabled(True)
+        assert not fixture.settings.read()['agents'],'saving the machine switch created a configuration'
+        assert await page.locator('#ai-check').is_disabled()
+        print('PASS browser settings: enable/disable after reload and last deletion; invalid drafts preserved')
+    finally:
+        fixture.settings.save(original)
+    return None
+
+
 async def verify(page,fixture,port):
     errors=[];page.on('pageerror',lambda error:errors.append(error.stack))
     await page.goto('http://127.0.0.1:'+str(port))
@@ -172,6 +216,7 @@ async def main():
             async with async_playwright() as pw:
                 browser=await pw.chromium.launch(headless=True)
                 page=await browser.new_page(viewport={'width':1280,'height':900})
+                await verify_settings_toggle(page,fixture,port)
                 await verify(page,fixture,port)
                 await browser.close()
         finally:server.shutdown();server.server_close()

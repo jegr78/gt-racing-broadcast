@@ -1,6 +1,7 @@
 """One machine-wide, explicitly admitted subscription CLI analysis process tree."""
 
 import copy
+import contextlib
 import datetime
 import hashlib
 import json
@@ -22,6 +23,7 @@ import gt7_context
 import gt7_recording
 
 MAX_OUTPUT_BYTES = 4 * 1024 * 1024
+_STATE_IO_LOCK = threading.RLock()
 TERMINAL = {"completed", "awaiting_validation", "failed", "cancelled", "timed_out"}
 ENV_KEYS = {
     "PATH",
@@ -74,16 +76,34 @@ def _now():
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
+@contextlib.contextmanager
+def _state_io(path):
+    """Close readers before replacing/removing status, across threads and processes."""
+    with _STATE_IO_LOCK, gt7_context._file_lock(str(path)):
+        yield
+
+
 def _load(path):
-    try:
+    def read():
         with open(path, encoding="utf-8") as f:
             return json.load(f)
+    try:
+        if not Path(path).exists():
+            return None
+        with _state_io(path):
+            return gt7_context._retry_windows_file_operation(read)
     except (OSError, ValueError):
         return None
 
 
 def _save(path, doc):
-    gt7_context._atomic(str(path), doc)
+    with _state_io(path):
+        gt7_context._atomic(str(path), doc)
+
+
+def _remove_state(path):
+    with _state_io(path):
+        gt7_context._unlink(str(path), missing_ok=True)
 
 
 class Lease:
@@ -334,7 +354,8 @@ def snapshot_package(prepared, destination, frozen):
     files = {}
     for name in names:
         p = prepared / name
-        if p.is_symlink() or not p.is_file() or p.stat().st_size > 2 * 1024 * 1024:
+        limit = ai_package.MAX_DETAIL_BYTES if name == "detail.json" else 2 * 1024 * 1024
+        if p.is_symlink() or not p.is_file() or p.stat().st_size > limit:
             raise JobError(
                 "invalid_package",
                 "Prepared package files must be bounded regular files",
@@ -359,7 +380,7 @@ def snapshot_package(prepared, destination, frozen):
         (destination / name).write_bytes(raw)
 
 
-def regular_output_bytes(path):
+def regular_output_bytes(path, *, max_bytes=MAX_OUTPUT_BYTES):
     path = Path(path)
     if path.is_symlink():
         raise JobError("invalid_output", "Provider result cannot be a symlink")
@@ -377,14 +398,14 @@ def regular_output_bytes(path):
         if (
             not stat.S_ISREG(st.st_mode)
             or st.st_nlink != 1
-            or st.st_size > MAX_OUTPUT_BYTES
+            or st.st_size > max_bytes
         ):
             raise JobError(
                 "invalid_output",
                 "Provider result must be a bounded unlinked regular file",
             )
-        raw = f.read(MAX_OUTPUT_BYTES + 1)
-        if len(raw) > MAX_OUTPUT_BYTES:
+        raw = f.read(max_bytes + 1)
+        if len(raw) > max_bytes:
             raise JobError("invalid_output", "Provider result exceeds the output bound")
         return raw
 
@@ -985,7 +1006,7 @@ class Runner:
                 _save(directory / "run.json", state)
                 active = _load(self.active_path)
                 if active and active.get("id") == state["id"]:
-                    self.active_path.unlink(missing_ok=True)
+                    _remove_state(self.active_path)
             finally:
                 if tree:
                     tree.close()
@@ -999,8 +1020,10 @@ class Runner:
         try:
             snapshot_package(prepared_package, claimed[1] / "package", frozen)
         except BaseException:
-            self.active_path.unlink(missing_ok=True)
-            claimed[0].close()
+            try:
+                _remove_state(self.active_path)
+            finally:
+                claimed[0].close()
             raise
         prepared_package = claimed[1] / "package"
         worker = threading.Thread(

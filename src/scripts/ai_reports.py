@@ -245,14 +245,21 @@ def _nonfinite(value):
     raise ValueError("Non-finite artifact JSON")
 
 
-def _read(path, root):
+def _read(path, root, *, max_bytes=ai_jobs.MAX_OUTPUT_BYTES):
     path = Path(path)
     if not path.resolve().is_relative_to(Path(root).resolve()):
         raise ReportError(
             "invalid_artifact", "Analysis artifact leaves the active profile"
         )
     try:
-        return json.loads(ai_jobs.regular_output_bytes(path), parse_constant=_nonfinite)
+        if path.name == "run.json":
+            with ai_jobs._state_io(path):
+                raw = ai_jobs.regular_output_bytes(path, max_bytes=max_bytes)
+            return json.loads(raw, parse_constant=_nonfinite)
+        return json.loads(
+            ai_jobs.regular_output_bytes(path, max_bytes=max_bytes),
+            parse_constant=_nonfinite,
+        )
     except (ValueError, OSError, ai_jobs.JobError) as e:
         raise ReportError(
             "invalid_artifact", "Analysis artifact is not valid bounded local JSON"
@@ -260,7 +267,10 @@ def _read(path, root):
 
 
 def read_package(directory, root):
-    package = _read(Path(directory) / "package/detail.json", root)
+    package = _read(
+        Path(directory) / "package/detail.json", root,
+        max_bytes=ai_package.MAX_DETAIL_BYTES,
+    )
     if not isinstance(package, dict):
         raise ReportError("invalid_artifact", "Input package is not an object")
     expected = copy.deepcopy(package)
@@ -286,7 +296,8 @@ def verify_input_files(directory, root, run, required=False):
                 "invalid_artifact", "Input file leaves the active profile"
             )
         try:
-            actual = hashlib.sha256(ai_jobs.regular_output_bytes(path)).hexdigest()
+            limit = ai_package.MAX_DETAIL_BYTES if name == "detail.json" else ai_jobs.MAX_OUTPUT_BYTES
+            actual = hashlib.sha256(ai_jobs.regular_output_bytes(path, max_bytes=limit)).hexdigest()
         except (OSError, ai_jobs.JobError) as e:
             raise ReportError("invalid_artifact", "Input file is unavailable") from e
         if actual != digest:
@@ -429,7 +440,11 @@ class Store:
             )
             read_package(directory, self.root)
             files = {
-                name: ai_jobs.regular_output_bytes(directory / "package" / name)
+                name: ai_jobs.regular_output_bytes(
+                    directory / "package" / name,
+                    max_bytes=ai_package.MAX_DETAIL_BYTES
+                    if name == "detail.json" else ai_jobs.MAX_OUTPUT_BYTES,
+                )
                 for name in (
                     "detail.json",
                     "summary.md",
