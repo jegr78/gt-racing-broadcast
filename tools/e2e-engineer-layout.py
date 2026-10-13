@@ -34,6 +34,28 @@ async def main():
                 stamp=await page.evaluate('() => EngineerDesk.state.received')
                 await page.wait_for_function('(stamp)=>EngineerDesk.state.received>stamp&&!EngineerDesk.state.analysisBusy',arg=stamp)
                 assert not await first_detail.evaluate('(el)=>el.open'), 'analysis refresh reopened a collapsed section'
+                # Finish the live refresh checks, then deliberately hold the next
+                # comparison open while selection() has cleared its old pair.
+                await page.evaluate('() => clearInterval(timer)')
+                await page.wait_for_function('() => !state.busy && !state.analysisBusy')
+                compare_started = asyncio.Event()
+                async def slow_compare(route):
+                    compare_started.set()
+                    await asyncio.sleep(1)
+                    await route.continue_()
+                await page.route('**/race-engineer/compare?*', slow_compare)
+                await page.evaluate('() => {EngineerDesk.tick();}')
+                await asyncio.wait_for(compare_started.wait(), timeout=10)
+                assert await page.evaluate('() => state.analysisBusy && state.pair === null'), 'delayed comparison did not exercise the pending selection'
+                # Geometry checks use one settled current selection. Polling is
+                # paused above; in-flight work must finish before any measurement.
+                await page.wait_for_function('''() => {
+                    const s = EngineerDesk.state;
+                    return !s.busy && !s.analysisBusy && s.pair?.state === 'ready'
+                        && s.pair.a?.id === s.a && s.pair.b?.id === s.b
+                        && s.detail?.id === s.b;
+                }''')
+                await page.unroute('**/race-engineer/compare?*', slow_compare)
                 for width,height in ((1440,1050),(1024,1100),(390,900)):
                     await page.set_viewport_size(dict(width=width,height=height))
                     assert await page.evaluate('() => document.documentElement.scrollWidth<=innerWidth'), 'approved layout overflowed'
@@ -84,8 +106,6 @@ async def main():
                     await page.locator('.mini-details summary').click()
                     assert await page.locator('#sectors').is_visible(), 'diagnostic sectors could not be expanded'
                     await page.locator('.mini-details summary').click()
-                await page.evaluate('() => clearInterval(timer)')
-                await page.wait_for_function('() => !EngineerDesk.state.busy && !EngineerDesk.state.analysisBusy')
                 await page.evaluate('() => {state.savedLayoutPair=state.pair;state.savedLayoutDetail=state.detail;}')
                 await first_detail.locator('summary').click()
                 await page.evaluate('() => render()')
