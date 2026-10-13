@@ -244,6 +244,11 @@ def _solo_profile_env_text(display, template):
         "# Discord message (e.g. \"GT Racing - Round 4 - Le Mans\").\n"
         "EVENT_TITLE=\n"
         "\n"
+        "# OPTIONAL: a Discord channel webhook. When set, the relay posts live\n"
+        "# broadcast-health alerts there (each @here-pings the channel) and\n"
+        "# `event stop` sends the post-event report. Blank = no Discord push.\n"
+        "DISCORD_WEBHOOK_URL=\n"
+        "\n"
     )
     tail = (
         "# OPTIONAL: per-console secret. Auto-provisioned on first relay start;\n"
