@@ -41,3 +41,7 @@ The same local origin retains existing browser drafts. UI preferences and the la
 `tests/test_telemetry_workspace.py` covers request-local profile resolution, concurrent requests, child pinning, invalid profiles and local-origin refusal. Existing telemetry/context/AI tests retain their domain assertions against the extracted production functions.
 
 `tools/e2e-telemetry-workspace.py` uses temporary copies of the source app, two real profile archives, real callbacks and CLI subprocesses, without a live relay. It checks independent profile/context/export ownership, delayed deletion confirmation, launcher reuse, distance cursor/zoom, reload and responsive tasks. `tools/e2e-ai.py`, `tools/e2e-engineer.py` and `tools/e2e-telemetry-replay.py` cover the preserved AI, sharing and broadcast replay workflows. Full visual acceptance includes the dedicated tasks and the retained Control Center controls.
+
+Notes opened from Analysis and AI preparation use the analysed lap B recording,
+including comparisons across recordings. Archive deletion and CSV export continue
+to use the selected archive recording.

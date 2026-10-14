@@ -656,10 +656,13 @@ function tmFillPickers(lapB) {
 }
 
 async function tmRefreshContext(rec) {
+  if (!rec || ![tmState.rec,tmState.lapA?.rec,tmState.lapB?.rec].includes(rec)) return;
   const selected = tmState.b;
   tmShiftState.generation++;tmShiftState.analysis=null;tmShiftState.pair=null;
   $('tm-shift-values').textContent='';
-  tmDropLaps();await tmSelectRec(rec);
+  tmDropLaps();
+  if (rec !== tmState.rec) {await tmReloadRecordingPool();return;}
+  await tmSelectRec(rec);
   if (tmState.rec !== rec) return;
   const previous = tmState.recLaps.find(l => tmKey(l) === selected);
   if (previous) await tmSelectB(previous);

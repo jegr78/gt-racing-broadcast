@@ -113,10 +113,11 @@ async function probe(){
 }
 async function selection(){
  if(!state.settings)await settings();
- if(!state.settings?.enabled||!tmState.rec)return;
+ const rec=tmState.lapB?.rec||tmState.rec;
+ if(!state.settings?.enabled||!rec)return;
  state.profile=tmState.profile;invalidate();$id('ai-preview-button').disabled=true;const generation=state.generation;
  say('ai-selection-status','Loading completed sessions and explicit reference suggestions…');
- const result=await request('selection',{query:{rec:tmState.rec}});
+ const result=await request('selection',{query:{rec}});
  if(generation!==state.generation||(result.ok&&result.profile!==tmState.profile))return;
  if(!result.ok){say('ai-selection-status',error(result));return;}
  state.selection=result;$id('ai-preview-button').disabled=!result.sessions.length;const select=$id('ai-session');select.textContent='';result.sessions.forEach(s=>option(select,s.session,'Session '+s.session));

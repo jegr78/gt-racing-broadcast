@@ -28,14 +28,20 @@ def main():
         ctx['telemetry_recordings']=fixture.m.telemetry_recordings_data
         ctx['telemetry_laps']=fixture.m.telemetry_laps_data
         ctx['telemetry_lap']=fixture.m.telemetry_lap_data
+        ctx['telemetry_context_read']=fixture.m.telemetry_context_read_data
+        ctx['telemetry_context_write']=fixture.m.telemetry_context_write_data
         primary=fixture.m.telemetry_lap_data(fixture._stem(new),'1','3')['lap']
         reference=fixture.m.telemetry_lap_data(fixture._stem(old),'1','2')['lap']
         def target(lap):
             return {k:lap[k] for k in ('rec','session','lap','recording_id')}
         report=dict(language='en',findings=[dict(priority=1,title='Saved comparison',
             telemetry=target(primary),comparisons=[target(reference)],evidence=[])],exercises=[],limitations=[])
+        selected_recordings=[]
         def ai(operation,payload):
-            if operation=='settings':return dict(ok=True,enabled=False,agents=[])
+            if operation=='settings':return dict(ok=True,enabled=True,agents=[])
+            if operation=='selection':
+                selected_recordings.append(payload['rec'])
+                return dict(ok=True,profile='solo',rec=payload['rec'],sessions=[])
             if operation=='history':return dict(ok=True,profile='solo',runs=[dict(id='saved',created_at=1700000000,state='completed')])
             if operation=='job':return dict(ok=True,profile='solo',state='completed',report=report)
             return dict(ok=True,busy=False)
@@ -62,6 +68,14 @@ def main():
                 assert numbers==sorted(numbers),'laps must remain in driving order'
                 page.locator('#tm-recording-options input').first.uncheck()
                 page.wait_for_function('() => tmState.lapB && tmState.lapB.rec !== tmState.rec')
+                page.evaluate('() => tcOpen()')
+                page.wait_for_function('() => tc.doc && !tc.loading')
+                assert page.evaluate('() => tc.target === tmState.lapB.rec'), 'Notes must follow analysed lap B, including cross-recording comparisons'
+                page.evaluate('() => tcAddNote()')
+                assert page.evaluate('() => tc.data.notes.at(-1).scope === "lap" && tc.data.notes.at(-1).lap === tmState.lapB.lap')
+                page.evaluate('() => {tc.data.notes.pop();tc.dirty=false;return tcClose();}')
+                page.evaluate('() => RacecastAI.selection()')
+                assert selected_recordings[-1] == page.evaluate('() => tmState.lapB.rec'), 'AI selection must follow analysed lap B'
                 assert page.locator('#tm-b optgroup').count()==1
                 assert page.evaluate('() => tmState.pool.laps.every(l=>tmState.included.has(l.rec))')
                 open_recording_menu(page)

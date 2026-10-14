@@ -120,7 +120,8 @@ def server(ai_busy=False):
            "ai_request": lambda op, payload: {"ok": True, "profile": m._active_profile_name()},
            "ops": {"telemetry-index": ["telemetry", "index"], "relay-start": ["relay", "start"]},
            "build_argv": lambda name, params: ["telemetry", "index"],
-           "jobs": type("Jobs", (), {"start": lambda self, name, argv: ("/".join(argv), None)})()}
+           "jobs": type("Jobs", (), {"start": lambda self, name, argv: ("/".join(argv), None),
+                                    "snapshot": lambda self, job_id: {"id": job_id, "profile": "beta", "exit_code": 0}})()}
     srv = us.serve(ctx, "127.0.0.1", 0)
     thread = threading.Thread(target=srv.serve_forever, daemon=True)
     thread.start()
@@ -160,6 +161,14 @@ def t_scoped_jobs_pin_the_child_profile_and_refuse_broadcast_operations():
         assert code == 200 and json.loads(body)["job_id"] == "--profile/beta/telemetry/index"
         code, body = request("/api/op/relay-start?profile=beta", {})
         assert code == 400 and json.loads(body)["error"]["code"] == "invalid_operation"
+
+
+def t_job_queries_refuse_another_analysis_profile():
+    with profiles(), server() as request:
+        code,body=request("/api/jobs/owned?profile=beta")
+        assert code==200 and json.loads(body)["profile"]=="beta"
+        code,body=request("/api/jobs/owned?profile=alpha")
+        assert code==404 and json.loads(body)["error"]["code"]=="profile_mismatch"
 
 
 def t_unknown_profiles_and_foreign_origins_fail_with_explicit_errors():
