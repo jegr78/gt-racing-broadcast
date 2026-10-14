@@ -249,7 +249,7 @@ function init(){
  ['ai-model','ai-template','ai-goal','ai-questions','ai-language'].forEach(id=>$id(id).oninput=invalidate);
  $id('ai-agent').onchange=()=>{const a=state.settings?.agents.find(a=>a.id===$id('ai-agent').value);$id('ai-model').value=a?.model||'';modelSuggestions();invalidate();};
  window.RacecastAI={settings,selection,reset,status,history};settings().then(()=>{if(tmState.profile&&currentView==='telemetry'){status();history();}});
- setInterval(()=>{if(currentView==='telemetry')status();},1500);
+ setInterval(()=>{if(currentView==='telemetry'||currentView==='reports')status();},1500);
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
 })();

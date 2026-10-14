@@ -11,6 +11,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 import logsetup   # re-open-per-poll log tailing (scripts/ on sys.path via racecast)
 import http_util
 import bundle_cache
+from contextlib import ExitStack, nullcontext
 
 APP_ID = "racecast-control-center"
 DEFAULT_PORT = 8089
@@ -21,6 +22,7 @@ MAX_JSON_BODY_BYTES = 16 * 1024 * 1024      # 16 MiB; overlay CSS may embed data
 # Refused bodies are read (not parsed) up to this much before the 400, see _drain_refused_body.
 DRAIN_LIMIT_BYTES = 1024 * 1024
 DRAIN_TIMEOUT_S = 0.05
+ANALYSIS_OPS = frozenset({"telemetry-index", "telemetry-import", "telemetry-export", "shift-reference-update", "gt7-data-update"})
 
 
 def ui_port(env):
@@ -144,7 +146,12 @@ def make_handler(ctx):
     _engineer_script = os.path.join(
         os.path.dirname(ctx["page_path"]), "race-engineer.js"
     )
-    _pages.prewarm([ctx["page_path"], _context_script, _ai_script, _engineer_script])
+    _workspace = os.path.join(os.path.dirname(ctx["page_path"]), "telemetry.html")
+    _workspace_script = os.path.join(os.path.dirname(ctx["page_path"]), "telemetry-workspace.js")
+    _shared_assets = {"/ui-base.css": ("ui-base.css", "text/css; charset=utf-8"),
+                      "/telemetry-shell.js": ("telemetry-shell.js", "application/javascript; charset=utf-8")}
+    _pages.prewarm([ctx["page_path"], _context_script, _ai_script, _engineer_script, _workspace, _workspace_script]
+                   + [os.path.join(os.path.dirname(ctx["page_path"]), filename) for filename, _ctype in _shared_assets.values()])
 
     class Handler(BaseHTTPRequestHandler):
         _CTYPES = {".png": "image/png", ".jpg": "image/jpeg",
@@ -421,7 +428,38 @@ def make_handler(ctx):
                 return None
             return tmp
 
+        def _analysis_request(self, method):
+            """Scope analysis callbacks, including child argv, without process-global mutation."""
+            path = urlparse(self.path).path
+            query = parse_qs(urlparse(self.path).query, keep_blank_values=True)
+            self.analysis_profile = None
+            if "profile" not in query or not path.startswith(("/api/telemetry/", "/api/ai/", "/api/op/", "/api/jobs/")):
+                return method()
+            if not _allowed(self):
+                return self._json({"ok": False, "error": "unauthorized"}, code=401)
+            if not self._context_allowed(mutation=self.command == "POST", structured=True):
+                return None
+            values = query["profile"]
+            if len(values) != 1 or not values[0]:
+                return self._json({"ok": False, "error": {"code": "invalid_profile", "message": "Select one analysis profile"}}, code=400)
+            self.analysis_profile = values[0]
+            scope = ctx.get("telemetry_profile_scope", lambda _name: nullcontext())
+            stack = ExitStack()
+            try:
+                stack.enter_context(scope(self.analysis_profile))
+            except ValueError:
+                return self._json({"ok": False, "error": {"code": "invalid_profile", "message": "Select an existing analysis profile"}}, code=400)
+            with stack:
+                if path.startswith('/api/jobs/'):
+                    job = ctx['jobs'].snapshot(path.split('/')[3])
+                    if job is None or job.get('profile') != self.analysis_profile:
+                        return self._json({'ok': False, 'error': {'code': 'profile_mismatch', 'message': 'Job unavailable in this analysis profile'}}, code=404)
+                return method()
+
         def do_GET(self):
+            return self._analysis_request(self._get)
+
+        def _get(self):
             if not _allowed(self):
                 return self._json({"ok": False, "error": "unauthorized"}, code=401)
             if not request_csrf_ok(self.headers):
@@ -430,10 +468,25 @@ def make_handler(ctx):
             path = urlparse(self.path).path
             if path == "/":
                 return self._page()
+            if path in _shared_assets:
+                filename, ctype = _shared_assets[path]
+                try:
+                    return self._serve_bytes(_pages.read(os.path.join(os.path.dirname(ctx["page_path"]), filename)), ctype)
+                except OSError:
+                    return self._not_found("Local UI asset unavailable")
+            if path in ("/telemetry", "/telemetry/"):
+                if not self._context_allowed(structured=True):
+                    return None
+                return self._page(_workspace)
+            if path == "/telemetry-workspace.js":
+                try:
+                    return self._serve_bytes(_pages.read(_workspace_script), "application/javascript; charset=utf-8")
+                except OSError:
+                    return self._not_found("Telemetry workspace unavailable")
             if path == "/favicon.svg":          # the racecast "rc" mark (#57)
                 return self._serve_file(ctx["favicon_path"])
             if path == "/api/ping":
-                return self._json({"app": APP_ID, "version": ctx["version"]})
+                return self._json({"app": APP_ID, "version": ctx["version"], "features": ["telemetry-workspace"]})
             if path == "/api/status":
                 try:
                     return self._json({"ok": True, **ctx["status"]()})
@@ -870,6 +923,9 @@ def make_handler(ctx):
             return self._not_found()
 
         def do_POST(self):
+            return self._analysis_request(self._post)
+
+        def _post(self):
             if not _allowed(self):
                 return self._json({"ok": False, "error": "unauthorized"}, code=401)
             if not request_csrf_ok(self.headers):
@@ -1268,6 +1324,8 @@ def make_handler(ctx):
                 return self._json(result, code=200 if result.get("ok") else 400)
             if path.startswith("/api/op/"):
                 name = path[len("/api/op/"):]
+                if self.analysis_profile and name not in ANALYSIS_OPS:
+                    return self._json({"ok": False, "error": {"code": "invalid_operation", "message": "This operation belongs to the broadcast profile"}}, code=400)
                 if name not in ctx["ops"]:
                     return self._not_found(f"unknown operation: {name}")
                 body = self._body_json()
@@ -1276,6 +1334,9 @@ def make_handler(ctx):
                                       code=400)
                 try:
                     argv = ctx["build_argv"](name, body.get("params"))
+                    profile = self.analysis_profile or (ctx.get("telemetry_default_profile", lambda: None)() if name in ANALYSIS_OPS else None)
+                    if profile:
+                        argv = ["--profile", profile] + argv
                 except ValueError as exc:
                     return self._json({"ok": False, "error": str(exc)}, code=400)
                 job_id, err = ctx["jobs"].start(name, argv)
@@ -1284,6 +1345,11 @@ def make_handler(ctx):
                                       code=409)
                 return self._json({"ok": True, "job_id": job_id})
             if path == "/api/quit":
+                state = ctx.get("shutdown_state", lambda: {})()
+                if state.get("ai_busy"):
+                    body = self._body_json()
+                    if body is None or body.get("confirm") is not True:
+                        return self._json({"ok": False, "error": {"code": "active_work", "message": "An AI analysis is running. Stopping the UI service interrupts it and disconnects both interfaces."}}, code=409)
                 self._json({"ok": True})
                 # shutdown() blocks until serve_forever() returns, so never call it
                 # from a request thread directly.
@@ -1291,12 +1357,12 @@ def make_handler(ctx):
                 return None
             return self._not_found()
 
-        def _page(self):
+        def _page(self, page_path=None):
             # Served from memory after the first read: a frozen build unpacks this
             # page into the OS temp dir, which the OS reaps on a schedule while we
             # keep running, so reading per request eventually fails.
             try:
-                body = _pages.read(ctx["page_path"])
+                body = _pages.read(page_path or ctx["page_path"])
             except OSError:
                 return self._not_found(bundle_cache.eviction_hint(ctx["page_path"]))
             self.send_response(200)

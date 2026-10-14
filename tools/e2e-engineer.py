@@ -43,7 +43,7 @@ async def verify(pw,fixture,ui,console,shots=False):
     browser=await pw.chromium.launch(headless=True)
     page=await browser.new_page(viewport={'width':1440,'height':900})
     # Execute the actual Control Center function in Chromium against shared API math.
-    control = (ROOT/'src/ui/control-center.html').read_text(encoding="utf-8")
+    control = (ROOT/'src/ui/telemetry-workspace.js').read_text(encoding="utf-8")
     delta_source = control[control.index('function tmDelta(a, b) {'):control.index('function tmPath(', control.index('function tmDelta(a, b) {'))]
     for a, b in [([{'d':0,'t':0},{'d':5,'t':1},{'d':8,'t':2}], [{'d':0,'t':0},{'d':5,'t':1.12},{'d':9,'t':2}]),
                  ([{'d':0,'t':0},{'d':5,'t':1}], [{'d':0,'t':-.0005},{'d':5,'t':.9995}])]:

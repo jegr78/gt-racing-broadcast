@@ -12,11 +12,13 @@ import os, subprocess, threading, uuid
 # flag at the job root suppresses the whole tree. The constant is inlined because
 # ui_jobs is import-isolated from scripts/ in its test.
 _NO_WINDOW = {"creationflags": 0x08000000} if os.name == "nt" else {}
+MACHINE_OPS = frozenset({"gt7-data-update", "shift-reference-update"})
 
 
 class Job:
-    def __init__(self, job_id, op, proc):
+    def __init__(self, job_id, op, proc, profile=None):
         self.id, self.op, self.proc = job_id, op, proc
+        self.profile = profile
         self.lines = []          # decoded output lines (head-trimmed, see dropped)
         self.dropped = 0         # lines trimmed off the head; keeps indices stable
         self.exit_code = None
@@ -48,12 +50,13 @@ class JobManager:
         """Start `op` unless one is still running. Returns (job_id, None), or the
         running job's id and an error text."""
         with self.lock:
+            profile = op_args[1] if op_args[:1] == ["--profile"] else None
             for job in self.jobs.values():
-                if job.op == op and job.exit_code is None:  # exit_code writes are atomic
+                if job.op == op and (job.profile == profile or op in MACHINE_OPS) and job.exit_code is None:  # exit_code writes are atomic
                     return job.id, f"{op} is already running"
             argv = self.argv_for(op_args)
             proc = self.spawn(argv)
-            job = Job(uuid.uuid4().hex[:12], op, proc)
+            job = Job(uuid.uuid4().hex[:12], op, proc, profile)
             self.jobs[job.id] = job
         if self.logger:
             self.logger.info("[%s] action started, argv: %s", op, " ".join(argv))
@@ -93,7 +96,7 @@ class JobManager:
         if job is None:
             return None
         with job.lock:
-            return {"id": job.id, "op": job.op,
+            return {"id": job.id, "op": job.op, "profile": job.profile,
                     "running": job.exit_code is None, "exit_code": job.exit_code,
                     "cancelled": job.cancelled}
 

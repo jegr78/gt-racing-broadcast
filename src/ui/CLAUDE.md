@@ -31,8 +31,11 @@ Loaded when working under `src/ui/`.
   maintainer tool that builds the zip. A font a league's design uses is copied into that
   profile's `overlay/fonts/` on save (`_materialize_overlay_fonts`), so `profile export`
   stays self-contained; the relay/canvas serve it locally (no broadcast-time CDN).
-- **Telemetry** (solo POV only: the nav item and the view carry `pov-only`): lap
-  comparison from the profile's GT7 recordings. `src/scripts/gt7_laps.py` builds a lap
+- **Telemetry workspace** (`/telemetry`, `racecast telemetry ui`): local archive
+  analysis with a request-scoped profile independent of the broadcast profile.
+  The Control Center retains solo POV sharing/replay controls only. See
+  `src/docs/design/telemetry-workspace.md`. Lap comparison uses the selected
+  analysis profile's GT7 recordings. `src/scripts/gt7_laps.py` builds a lap
   index per recording (5 m traces, 200 m sectors), cached as `<stem>.laps.json` and
   rebuilt when the recording's size/mtime or `gt7_data.data_version` change; the data
   layer also memoises up to 4096 index summaries per process (`_telemetry_index`). One
@@ -69,7 +72,7 @@ Loaded when working under `src/ui/`.
   post-event report's figures. The recording the relay is writing is listed but refused by
   laps/lap/learn/delete. `learn` only assigns a layout that has a downloaded racing line
   (`TrackDB.has_downloaded_line`) and learns the line otherwise. Charts and map are
-  inline SVG in `control-center.html` (block "Telemetry view"). Demo data for
+  inline SVG rendered by `telemetry-workspace.js` in `telemetry.html`. Demo data for
   Expanded channel detail is decoded on demand by `gt7_channels.py` and
   `gt7_channel_detail.py`, through `GET /api/telemetry/channels`. Catalog requests are
   lightweight; selected-channel windows reuse sparse byte offsets from the index,
@@ -133,7 +136,8 @@ Loaded when working under `src/ui/`.
   dev build so it matches the rest. Publishing the wiki itself stays a separate
   `tools/sync-wiki.py` step, but the image must already be committed in the repo.
 
-Optional AI analysis lives in `ai-analysis.js`, loaded as a same-origin cached asset.
+Optional AI analysis lives in `ai-analysis.js`, loaded by the dedicated workspace
+as a same-origin cached asset.
 Machine settings are shared; completed session/lap/reference selection, explicit
 preview/start, progress/cancel/history and text-only reports remain profile-bound.
 Selection/profile changes invalidate pending previews and discard asynchronous old

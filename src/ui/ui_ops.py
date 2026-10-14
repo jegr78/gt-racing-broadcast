@@ -53,6 +53,7 @@ OPS = {
     "telemetry-replay-stop": ["telemetry", "replay", "stop"],
     "telemetry-replay-status": ["telemetry", "replay", "status"],
     "telemetry-import": ["telemetry", "import"],
+    "telemetry-export": ["telemetry", "export"],
     "telemetry-index": ["telemetry", "index"],
     "shift-reference-update": ["telemetry", "shift-update"],
     "report-generate": ["report", "generate"],   # builds lap indexes, so never in a request
@@ -162,6 +163,7 @@ PARAMS = {
         "from": lambda v: _number_arg("--from", v, 0, 10080),
         "on_air": lambda v: ["--on-air"] if v is True else []},
     "telemetry-import": {"file": _file_arg},
+    "telemetry-export": {"name": _recording_arg},
     "shift-reference-update": {"car_id": _car_arg},
     "cookies": {"browser": _browser_arg},
     "cookies-twitch": {"browser": _browser_arg},
@@ -179,6 +181,7 @@ PARAMS = {
 REQUIRED = {
     "telemetry-replay-start": ("name",),
     "telemetry-import": ("file",),
+    "telemetry-export": ("name",),
     "shift-reference-update": ("car_id",),
     "health-import": ("file",),
 }

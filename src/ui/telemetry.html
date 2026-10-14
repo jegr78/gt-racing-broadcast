@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Racecast Telemetry</title><link rel="icon" href="/favicon.svg"><link rel="stylesheet" href="/ui-base.css">
+<style>
+body.workspace input:not([type=checkbox]):not([type=range]),body.workspace select{background:var(--card2);color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:8px;font:inherit;max-width:100%}
+body.workspace input[type=range]{accent-color:var(--link)}
+body.workspace {height:100vh;overflow:hidden;--tm-a:var(--warn);--tm-b:var(--link)}
+.workspace-shell{height:100%;display:flex;flex-direction:column;min-width:0}
+.workspace-header{display:flex;align-items:center;flex-wrap:wrap;gap:14px;padding:16px 24px;border-bottom:1px solid var(--line);background:var(--card2)}
+.workspace-header h1{font-size:20px;margin:0}.workspace-header label{display:flex;align-items:center;gap:8px}.workspace-header a{margin-left:auto;color:var(--link)}
+.workspace-nav{display:flex;gap:6px;padding:10px 24px;border-bottom:1px solid var(--line);flex-wrap:wrap}.workspace-nav .active{background:var(--accent-strong);border-color:var(--link)}
+.workspace main{overflow:auto;flex:1;padding:24px;min-width:0}.workspace .view{max-width:none;margin:0}.workspace .view[data-view="telemetry"]{max-width:none;--tm-a:var(--link);--tm-b:var(--warn)}
+.workspace .tmgrid{grid-template-columns:220px minmax(0,1fr);gap:16px}.workspace .tmgrid.has-inspector{grid-template-columns:220px minmax(0,1fr) 300px}
+.workspace .tmmain{min-width:0}.workspace .tmmap{min-width:0}.workspace .tmside .tmlist{max-height:28vh}
+.workspace #tm-laps{max-height:60vh}.workspace .tmpick{display:flex;flex-wrap:wrap;gap:14px}.workspace .tmpick label{flex:1;min-width:180px}
+.workspace .row{border:0;padding:8px 0;background:transparent}
+.workspace .workspace-tools{margin:12px 0}.workspace-zoom{flex-wrap:wrap;margin-bottom:16px}.workspace-zoom label{display:flex;gap:8px;align-items:center}
+.workspace-zoom input[type=number]{width:100px}.cursor-control{flex:1;min-width:200px}.cursor-control input{flex:1;min-width:70px}
+.archive-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:16px;margin-top:20px}.archive-card{text-align:left;display:grid;gap:12px;padding:18px;min-width:0;background:var(--card);border:1px solid var(--line);border-radius:12px;color:var(--txt)}
+.archive-card strong{font-size:16px}.archive-card .sub{white-space:normal;overflow-wrap:anywhere}.archive-card.selected{border-color:var(--link)}
+.workspace section{min-width:0}.workspace .workspace-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+#workspace-status{overflow-wrap:anywhere;white-space:pre-wrap}
+.workspace-empty{padding:30px;background:var(--card);border:1px dashed var(--line);border-radius:12px;grid-column:1/-1}.workspace #ai-analysis{margin-top:16px}
+.workspace .viewhead .vhbtns{flex-wrap:wrap}.workspace #tm-summary{margin-top:16px}.workspace .tmsum{max-height:220px;overflow:auto}
+.workspace #workspace-profile{min-width:140px;max-width:240px}.workspace .muted,.workspace .sub{color:var(--dim)}
+@media(max-width:1150px){.workspace .tmgrid,.workspace .tmgrid.has-inspector{grid-template-columns:190px minmax(0,1fr)}.workspace .tmmap{grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}}
+@media(max-width:700px){.workspace-header{padding:12px;gap:10px}.workspace-header a{margin-left:0}.workspace-nav{padding:8px 12px}.workspace main{padding:12px}.workspace .tmgrid,.workspace .tmgrid.has-inspector{grid-template-columns:minmax(0,1fr)}.workspace .tmside{display:grid;grid-template-columns:minmax(0,1fr)}.workspace .tmmap{grid-template-columns:minmax(0,1fr)}.workspace .tmpick label{min-width:0;flex:1 1 100%}.workspace .workspace-zoom label{flex-wrap:wrap}.workspace .viewhead{flex-wrap:wrap}.workspace .tmside .tmlist{max-height:230px}.workspace .archive-grid{grid-template-columns:minmax(0,1fr)}}
+</style></head><body class="workspace"><div class="workspace-shell">
+<header class="workspace-header"><h1>Telemetry</h1><span id="ver" class="ver"></span><span class="badge">Local workspace</span><label>Analysis profile <select id="workspace-profile" aria-label="Analysis profile" onchange="workspaceProfile(this.value)"></select></label><span id="workspace-broadcast" class="sub"></span><a href="/" target="_blank" rel="noopener">Control Center</a><button onclick="workspaceQuit()">Stop UI service</button></header>
+<nav class="workspace-nav" aria-label="Telemetry tasks"><button data-nav="archive" onclick="showView('archive')">Archive</button><button data-nav="telemetry" onclick="showView('telemetry')">Analysis</button><button data-nav="reports" onclick="showView('reports')">Reports</button><button data-nav="settings" onclick="showView('settings')">Data management</button></nav>
+<main><p id="workspace-status" role="status" class="enverr" hidden></p>
+<div class="view" data-view="archive"><div class="workspace-heading"><div><h2>Recording archive</h2><p class="sub">Choose a session, then compare your laps against a reference.</p></div><div class="row"><button onclick="tmImport()">Import recording</button><button onclick="tmLoad()">Refresh archive</button><button id="workspace-last" onclick="workspaceLast()" hidden>Open last comparison</button></div></div><div id="workspace-archive" class="archive-grid"></div></div>
+      <div class="view" data-view="telemetry" hidden>
+        <div class="viewhead"><h2>Lap analysis</h2>
+          <span class="sub">Reference A / analysed lap B</span>
+          <span class="vhbtns"><button onclick="tmLoad()" title="Read the recordings again">
+            <svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Refresh</button></span></div>
+        <p class="enverr" id="tm-err" hidden></p>
+        <details id="workspace-session-summary" hidden><summary>Session overview</summary><section class="tmsum" id="tm-summary" hidden></section></details>
+        <div class="row workspace-tools"><button onclick="workspaceInspector()" id="workspace-details" aria-expanded="false">Map &amp; sectors</button><button onclick="workspaceAI()">AI analysis</button><button onclick="tcOpen()">Notes &amp; context</button><button onclick="showView('settings')">Data management</button></div><div class="row workspace-zoom"><label>From (m)<input id="workspace-start" type="number" min="0" step="5"></label><label>To (m)<input id="workspace-end" type="number" min="0" step="5"></label><button onclick="workspaceZoom()">Apply zoom</button><button onclick="workspaceZoom(true)">Full lap</button><label class="cursor-control">Distance <input id="workspace-cursor" type="range" min="0" max="1" step="5" value="0" oninput="workspaceSeek(Number(this.value))"><output id="workspace-distance">0 m</output></label></div><div class="tmgrid">
+          <div class="tmside">
+            <section><div class="viewhead"><h3>Recordings</h3>
+                <span class="vhbtns"><button class="danger" id="tm-del" onclick="tmDelete()" disabled
+                  title="Delete the selected recording"><svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>Delete</button></span></div>
+              <div class="tmlist" id="tm-recs"></div></section>
+            <section><div class="viewhead"><h3>Laps</h3><span class="sub" id="tm-rec-track"></span></div>
+              <div class="tmset" id="tm-settrack" hidden>
+                <select id="tm-track-pick" aria-label="Track layout"></select>
+                <button id="tm-learn" onclick="tmLearn()">Set track</button></div>
+              <p class="tmnote" id="tm-note" hidden></p>
+              <div class="tmlist" id="tm-laps"></div></section>
+          </div>
+          <section class="tmmain">
+            <details id="tm-recording-menu"><summary id="tm-recording-caption">Compare: this recording</summary>
+              <div class="row"><button onclick="tmChooseRecordings(false)">Only this recording</button>
+                <button onclick="tmChooseRecordings(true)">All recordings</button></div>
+              <div id="tm-recording-options"></div></details>
+            <label class="sub"><input type="checkbox" id="tm-compare-all" onchange="tmComparisonMode()"> Compare other conditions and roles</label>
+            <p class="sub" id="tm-conditions"></p>
+            <div class="tmpick">
+              <label><span class="tmkey a"></span>Reference A
+                <select id="tm-a" aria-label="Lap A (reference)" onchange="tmPick('a', this.value)"></select></label>
+              <label><span class="tmkey b"></span>Analysed lap B
+                <select id="tm-b" aria-label="Lap B" onchange="tmPick('b', this.value)"></select></label>
+            </div>
+            <details id="tm-channel-box" ontoggle="tmChannelOpen()"><summary>All channels &amp; time detail</summary>
+              <p class="sub">Select up to eight channels. Constant values and status flags remain readable. Distance is the default comparison axis.</p>
+              <label><input id="tm-channel-diagnostics" type="checkbox" onchange="tmChannelChoices()"> Raw diagnostics, uncertain meaning / units</label>
+              <select id="tm-channel-select" multiple size="6" aria-label="Telemetry channels" style="width:100%;min-width:0" onchange="tmChannelInvalidate()"></select>
+              <div class="row"><label>Axis <select id="tm-channel-axis" aria-label="Channel axis" onchange="tmChannelBounds()"><option value="distance">Distance (m)</option><option value="time">Raw time (s)</option></select></label>
+                <label>From <input id="tm-channel-start" aria-label="Channel window start" type="number" min="0" step="any" style="width:100px" oninput="tmChannelInvalidate()"></label>
+                <label>To <input id="tm-channel-end" aria-label="Channel window end" type="number" min="0" step="any" style="width:100px" oninput="tmChannelInvalidate()"></label>
+                <button onclick="tmChannelLoad()">Load window</button></div>
+              <p id="tm-channel-status" class="sub" role="status"></p><div id="tm-channel-charts"></div>
+            </details>
+            <svg id="tm-charts" role="img" aria-label="Speed, throttle, brake, steering, gear and delta over lap distance"></svg>
+          </section>
+          <div class="tmmap" id="workspace-inspector" hidden>
+            <section><div class="viewhead"><h3>Track</h3><span class="sub" id="tm-map-sub"></span></div>
+              <svg id="tm-map" role="img" aria-label="Track map, mini-sectors green where lap B gains and red where it loses"></svg>
+              <div class="tmlegend" id="tm-map-legend" hidden>
+                <span><i class="gain"></i>B faster</span><span><i class="loss"></i>B slower</span>
+                <span><i class="even"></i>even</span><span><i class="a"></i>lap A line</span>
+                <span><i class="dot"></i>start/finish</span></div></section>
+            <section><div class="viewhead"><h3>Larger sectors</h3><button onclick="tmEditorOpen()">Edit markers / sectors</button></div>
+              <select id="tm-sector-variant" aria-label="Larger-sector variant" onchange="tmSelectSectorVariant(this.value)"></select>
+              <p class="sub" id="tm-large-status"></p><div id="tm-larger-sectors"></div></section>
+            <section><div class="viewhead"><h3>Mini-sectors</h3><span class="sub" id="tm-sec-sub"></span></div>
+              <div class="tmsecwrap"><table class="prodtable tmsec" id="tm-sectors"></table></div>
+              <div class="tmlegend" id="tm-sec-legend" hidden>
+                <span><i class="gain"></i>B faster than A</span><span><i class="loss"></i>B slower</span>
+                <span><i class="best"></i>best of all comparable laps</span></div></section>
+          </div>
+        </div>
+      </div>
+
+<div class="view" data-view="reports" hidden><h2>Analysis reports</h2><p class="sub">Saved reports and immutable input packages belong to the selected analysis profile.</p><button onclick="RacecastAI.history()">Refresh history</button><div id="workspace-reports"></div></div>
+<div class="view" data-view="settings" hidden><h2>Data management</h2><p class="sub">Track definitions, external vehicle references and AI provider settings are shared across all profiles on this machine.</p><section><h3>Selected recording</h3><p id="workspace-selected" class="sub">Choose a recording in Archive.</p><div class="row"><button onclick="tmShowSetTrack(null);showView('telemetry')">Assign track</button><button onclick="tmEditorOpen()">Edit shared markers / sectors</button><button onclick="tcOpen(true)">Prepare next recording</button><button onclick="tcOpen()">Recording context &amp; templates</button><button onclick="workspaceExport()">Export CSV</button></div></section>
+            <details id="tm-shift-box" ontoggle="tmShiftLoad()"><summary>Vehicle shift references &amp; observed upshifts</summary>
+              <div class="row"><button onclick="tmShiftLoad()">Read local lookup</button><button id="tm-shift-update" onclick="tmShiftUpdate()">Update external reference for this car</button>
+                <button id="tm-shift-copy" onclick="tmShiftCopy()" disabled>Copy targets to event table</button></div>
+              <p id="tm-shift-status" class="sub" role="status"></p><div id="tm-shift-values"></div>
+            </details>
+</div></main></div>
+<dialog id="cmodal" class="updmodal">
+  <h3 id="cmodal-title"></h3>
+  <p id="cmodal-body" class="cmodal-body"></p>
+  <form method="dialog" class="updactions">
+    <span style="flex:1"></span>
+    <button id="cmodal-cancel" value="cancel">Cancel</button>
+    <button class="primary" id="cmodal-ok" value="ok" autofocus>OK</button>
+  </form>
+</dialog>
+
+<div class="ovmodal" id="tm-context-modal" role="dialog" aria-modal="true" aria-labelledby="tc-title" hidden>
+ <div class="ovmodal-card"><div class="ovmodal-head"><b id="tc-title">Telemetry context &amp; notes</b><span id="tc-status" class="sub"></span>
+  <button id="tc-close" style="margin-left:auto" onclick="tcClose()">Close</button></div>
+ <div class="ovmodal-body">
+  <div class="tcgrid"><label class="tcfield">Context for<select id="tc-target" onchange="tcSelectTarget(this.value)"></select></label>
+   <label class="tcfield">GT7 session<select id="tc-session" onchange="tc.session=this.value;tcRender()"></select></label>
+   <button onclick="tcAddSession()">Add session</button>
+   <label class="tcfield">Copy settings from session<input id="tc-copy-session" type="number" min="1" value="1"></label>
+   <button onclick="tcAction('copy-session',{source_session:Number($('tc-copy-session').value),session:Number(tc.session)})">Copy as unconfirmed proposal</button></div>
+  <p id="tc-sources" class="sub"></p>
+  <div id="tc-local-draft" hidden><p>Your unsaved draft is retained locally.</p><button onclick="tcRestoreLocal()">Restore my draft as a new edit</button><button onclick="tcLoad(tc.target)">Reload saved context</button></div>
+  <details open><summary>Race settings</summary>
+   <div class="tcgrid"><select id="tc-template"></select><button onclick="tcAction('apply-template',{template_id:$('tc-template').value,session:Number(tc.session)})">Apply template as proposal</button>
+    <input id="tc-template-name" aria-label="Template name" placeholder="Template name"><button onclick="tcSaveTemplate()">Save settings template</button>
+    <button onclick="tcAction('delete-template',{template_id:$('tc-template').value})">Remove selected template</button></div>
+   <div id="tc-settings" class="tcgrid"></div>
+   <label><input type="checkbox" id="tc-confirmed" onchange="tcSession().confirmed=this.checked;tcChanged()"> Supplied settings confirmed for this session</label>
+  </details>
+  <details><summary>Stints, tyres &amp; fuel strategy</summary><p class="sub">The initial stint starts with its indicated lap. Later stints start at service within the indicated lap; a pit lap may contain two compounds. Proposed times need manual confirmation.</p>
+   <div id="tc-stints"></div><button onclick="tcAddStint()">Add stint</button></details>
+  <details open><summary>Observations &amp; notes</summary><div id="tc-notes"></div><button onclick="tcAddNote()">Add note</button></details>
+  <details><summary>Lap role corrections</summary><p class="sub">Overrides supplement capture inference; they cannot turn missing measurements into a complete lap.</p>
+   <input id="tc-role-lap" type="number" min="0" aria-label="Lap to override"><button onclick="tcAddRole()">Add role override</button><div id="tc-roles"></div></details>
+  <details><summary>Earlier context versions</summary><select id="tc-history"></select><button onclick="tcRestoreHistory()">Restore selected whole-context revision</button>
+   <button onclick="tcOlderHistory()">Show older revisions</button></details>
+ </div></div></div>
+<div class="ovmodal" id="tm-editor-modal" hidden role="dialog" aria-modal="true" aria-labelledby="tm-editor-title">
+ <div class="ovmodal-card"><div class="ovmodal-head"><b id="tm-editor-title">Track markers &amp; sector definitions</b>
+  <button id="tm-editor-close" style="margin-left:auto" onclick="tmEditorClose()">Cancel / close</button></div>
+ <div class="ovmodal-body"><p id="tm-editor-info" class="sub"></p><p id="tm-editor-status" class="sub" role="status"></p>
+  <p class="sub">Shared across profiles on this machine. Select an entry, apex, exit or sector boundary, then click the map to move its world anchor. Apply makes the draft available to new analyses; saved reports retain their snapshots.</p>
+  <svg id="tm-editor-map" role="img" aria-label="Editable track geometry and world anchors"></svg>
+  <label><input id="tm-editor-reviewed" type="checkbox" onchange="tmEditor.draft.reviewed=this.checked"> Definition reviewed; candidate numbers and geometry have been checked</label>
+  <div class="row"><button onclick="tmEditorAddCorner()">Add corner</button><button onclick="tmEditorRemoveCorner()">Remove selected corner</button>
+   <button onclick="tmEditorAddCombination()">Add connected sequence</button><button onclick="tmEditorAddVariant()">Add named sector variant</button><button onclick="tmEditorAddBoundary()">Add sector boundary</button>
+   <button onclick="tmEditorRemoveBoundary()">Remove selected boundary</button>
+   <button id="tm-editor-apply" onclick="tmEditorApply()">Apply shared definition</button></div>
+  <div class="tcgrid" id="tm-editor-fields"></div>
+ </div></div></div>
+
+<script src="/telemetry-shell.js"></script><script src="/telemetry-workspace.js"></script><script src="/telemetry-context.js"></script><script src="/ai-analysis.js"></script><script>window.addEventListener('DOMContentLoaded',workspaceInit);</script>
+</body></html>

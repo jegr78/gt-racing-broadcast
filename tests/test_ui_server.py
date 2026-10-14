@@ -2170,9 +2170,10 @@ def t_panel_link_has_no_obs_credential_fragment():
 
 
 def _cc_page():
-    with open(os.path.join(ROOT, "src", "ui", "control-center.html"),
-              encoding="utf-8") as fh:                # cp1252 on Windows would choke
-        return fh.read()
+    with open(os.path.join(ROOT, "src", "ui", "control-center.html"), encoding="utf-8") as fh:
+        page = fh.read()
+    with open(os.path.join(ROOT, "src", "ui", "ui-base.css"), encoding="utf-8") as fh:
+        return page.replace('<link rel="stylesheet" href="/ui-base.css">', '<style>' + fh.read() + '</style>')
 
 
 
@@ -2248,9 +2249,14 @@ def t_solo_device_rows_follow_the_template():
         "applyKindGating must set the template class"
 
 
+def _telemetry_page():
+    with open(os.path.join(ROOT, "src", "ui", "telemetry.html"), encoding="utf-8") as fh:
+        return fh.read()
+
+
 def _tm_script(page):
-    start = page.index("// Telemetry view (solo POV, #788)")
-    return page[start:page.index("// end of the Telemetry view", start)]
+    with open(os.path.join(ROOT, "src", "ui", "telemetry-workspace.js"), encoding="utf-8") as fh:
+        return "function workspaceArchive() {}\nfunction workspaceSelection() {}\nfunction workspaceCursor() {}\n" + fh.read()
 
 
 def _tm_fn(tm, name):
@@ -2282,7 +2288,7 @@ def t_telemetry_view_is_solo_pov_only():
 def t_telemetry_charts_share_one_cursor():
     tm = _tm_script(_cc_page())
     keys = re.findall(r"\{key: '(\w+)'", tm[tm.index("const TM_CH"):tm.index("];", tm.index("const TM_CH"))])
-    assert keys == ["speed_kmh", "throttle", "brake", "steer_deg", "gear", "delta"], keys
+    assert keys == ["delta", "speed_kmh", "throttle", "brake", "steer_deg", "gear"], keys
     assert "addEventListener('pointermove', tmHover)" in tm
     assert "tmRenderCharts()" in _tm_fn(tm, "tmRender"), "every pair render redraws the charts"
 
@@ -2409,8 +2415,9 @@ console.log([same.join(','), moved.join(','), $('tm-charts').kids[0] === kept, t
 
 def t_telemetry_showing_the_view_refits_a_loaded_pair():
     page = _cc_page()
-    show = page[page.index("function showView(name)"):page.index("let _reportPath")]
-    assert "name === 'telemetry' && tmState.lapB) tmRefit()" in show, \
+    with open(os.path.join(ROOT, "src", "ui", "telemetry-shell.js"), encoding="utf-8") as fh:
+        show = fh.read()
+    assert "requestAnimationFrame(() => tmRefit())" in show, \
         "a pair drawn while the view was hidden is redrawn at the real width"
     tm = _tm_script(page)
     resize = tm[tm.index("window.addEventListener('resize'"):]
@@ -2459,7 +2466,7 @@ tmState.lapB = {trace: tr([0, 0.5, 1], 12.3), sectors: [1]};
 tmRenderCharts();
 const maxD = tmState.chart.maxD;
 tmHover({clientX: 799});
-const edge = tmState.chart.panels[0].read.textContent.replace(/\u00b7/g, '-');
+const edge = tmState.chart.panels.find(p=>p.c.key==='speed_kmh').read.textContent.replace(/\u00b7/g, '-');
 console.log([JSON.stringify(same), JSON.stringify(apart), maxD, edge].join('|'));""")
     if out is not None:
         same, apart, max_d, edge = out.strip().split("|")
@@ -2468,7 +2475,7 @@ console.log([JSON.stringify(same), JSON.stringify(apart), maxD, edge].join('|'))
         assert "12.3" not in apart and "17.1" not in apart, \
             f"closing points at different distances are never paired: {apart}"
         assert max_d == "17.4", max_d
-        assert edge.startswith("0.02 km") and "100.0 / -" in edge, \
+        assert edge == "100.0 / -", \
             f"past B's closing point the hover shows A only: {edge!r}"
 
 
@@ -2496,7 +2503,7 @@ tmState.lapA = {trace: trace([0, 1.1, 2.2])};
 tmRenderCharts();
 const pair = drawn();
 tmHover({clientX: 799});
-const late = tmState.chart.panels[5].read.textContent;
+const late = tmState.chart.panels.find(p=>p.c.key==='delta').read.textContent;
 tmClearPair('');
 console.log([alone, pair, JSON.stringify(late), String(tmState.chart), $('tm-charts').kids.length].join('|'));""")
     if out is not None:
@@ -2700,12 +2707,12 @@ tmState.lapB = {trace: trace([0, 1, 2, 3], [6, 7, 7, 6])};
 tmRenderCharts();
 console.log([axis.join(','), fin.join(','), labels('tm-axis').slice(-1)].join('|'));""")
     if out is not None:
-        assert out.strip() == ("220,100,100,0,100,0,2,0,-2,3,+0.20,0,-0.20|"
+        assert out.strip() == ("+0.20,0,-0.20,220,100,100,0,100,0,2,0,-2,3|"
                                "tm-final gain=-0.200 s|7"),             f"each panel labels its range top to bottom, delta its zero and final value; "             f"labels closer than 10 px keep only the upper (gear 7 over 6): {out!r}"
 
 
 def t_telemetry_map_and_sectors_carry_legends_and_distances():
-    page = _cc_page()
+    page = _telemetry_page()
     for lid in ("tm-map-legend", "tm-sec-legend"):
         assert f'id="{lid}"' in page, f"#{lid} explains the colours"
     out = _tm_node("""
@@ -2755,7 +2762,7 @@ console.log($('tm-laps').kids.map(r => r.textContent).join('|'));
 
 
 def t_telemetry_summary_shows_the_report_figures_and_a_clickable_trend():
-    page = _cc_page()
+    page = _telemetry_page()
     assert 'id="tm-summary"' in page, "the view carries the per-recording summary"
     out = _tm_node("""
 const l = (n, t, status, st) => Object.assign(lap('R', n, t, 7), {status, start_t_s: st});
@@ -4347,7 +4354,8 @@ def t_every_button_icon_is_styled():
     # An unstyled inline SVG renders as a black filled shape that fills the button.
     with open(os.path.join(ROOT, "src", "ui", "control-center.html"), encoding="utf-8") as fh:
         html = fh.read()
-    style = html[html.index("<style"):html.index("</style>")]
+    with open(os.path.join(ROOT, "src", "ui", "ui-base.css"), encoding="utf-8") as fh:
+        style = fh.read()
     assert re.search(r"(?:^|[{},])\s*button svg\s*[,{]", style, re.M), \
         "buttons outside .row need a base icon rule"
     assert "cap.title = cap.textContent" in html, "an ellipsized asset name needs its full text as a tooltip"

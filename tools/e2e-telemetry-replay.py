@@ -47,7 +47,8 @@ async def main():
         code = ("import sys;sys.path.insert(0,sys.argv[1]);import racecast as rc;"
                 "rc.RELAY_PORT=int(sys.argv[2]);rc._foreign_relay_profile=lambda:'';"
                 "rc._telemetry_rec_dir=lambda:sys.argv[3];"
-                "rc.telemetry_import_cmd(sys.argv[6:]) if sys.argv[5]=='import' else rc.telemetry_replay_cmd(sys.argv[6:])")
+                "args=rc.pa.split_profile_flag(sys.argv[4:])[0];"
+                "rc.telemetry_import_cmd(args[2:]) if args[1]=='import' else rc.telemetry_replay_cmd(args[2:])")
         context["jobs"] = ui_jobs.JobManager(lambda args: [sys.executable, "-c", code, str(ROOT / "src"),
             str(relay.server_port), str(fixture.root / fixture.profile / "telemetry-recordings"), *args])
         ui = gate.m.ThreadingHTTPServer(("127.0.0.1", 0), ui_server.make_handler(context))
@@ -114,6 +115,9 @@ async def main():
                 imported = Path(temp) / "imported.gt7rec"
                 imported.write_bytes(Path(fixture.live_path).read_bytes())
                 imported.with_suffix(".laps.json").write_text('{"version":8}',encoding="utf8")
+                page = await browser.new_page(viewport={"width":1440,"height":1050})
+                await page.goto(f"http://127.0.0.1:{ui.server_port}/telemetry")
+                await page.wait_for_function("() => tmState.loaded && !!tmState.profile")
                 page.once("dialog", lambda dialog: dialog.accept(str(imported)))
                 await page.get_by_role("button",name="Import recording",exact=True).click()
                 target = fixture.root / fixture.profile / "telemetry-recordings" / imported.name

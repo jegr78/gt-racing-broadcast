@@ -9,6 +9,12 @@ import test_racecast as fixture
 import test_ui_server as web
 
 
+def open_recording_menu(page):
+    page.get_by_role('button',name='Analysis',exact=True).click()
+    if page.locator('#tm-recording-menu').get_attribute('open') is None:
+        page.locator('#tm-recording-menu summary').click()
+
+
 def main():
     from playwright.sync_api import sync_playwright
     with fixture._telemetry_sandbox() as (root,tgl):
@@ -39,7 +45,7 @@ def main():
             with sync_playwright() as pw:
                 browser=pw.chromium.launch(headless=True)
                 page=browser.new_page(viewport={'width':1440,'height':1000})
-                page.goto('http://127.0.0.1:'+str(port))
+                page.goto('http://127.0.0.1:'+str(port)+'/telemetry')
                 page.wait_for_function('() => tmState.profile === "solo"')
                 page.evaluate('() => showView("telemetry")')
                 page.wait_for_function('() => tmState.lapB')
@@ -58,6 +64,7 @@ def main():
                 page.wait_for_function('() => tmState.lapB && tmState.lapB.rec !== tmState.rec')
                 assert page.locator('#tm-b optgroup').count()==1
                 assert page.evaluate('() => tmState.pool.laps.every(l=>tmState.included.has(l.rec))')
+                open_recording_menu(page)
                 page.get_by_role('button',name='Only this recording',exact=True).click()
                 page.wait_for_function('() => tmState.pool?.laps.length === 2')
                 assert page.locator('#tm-b optgroup').count()==1
@@ -67,18 +74,30 @@ def main():
                 assert page.locator('#tm-a option').inner_text()=='no other lap to compare'
                 assert page.locator('#tm-b option').inner_text()=='no included lap'
                 page.wait_for_function('() => !tmState.lapA && !tmState.lapB')
+                open_recording_menu(page)
                 page.get_by_role('button',name='Only this recording',exact=True).click()
                 page.wait_for_function('() => tmState.lapB')
+                page.evaluate('() => showView("reports")')
                 page.evaluate('() => RacecastAI.history()')
+                page.evaluate('() => showView("reports")')
                 page.locator('#ai-history button').first.click()
+                page.evaluate('() => showView("reports")')
                 page.locator('#ai-report').get_by_role('button',name='Compare with S1 lap 2').click()
                 page.wait_for_function('''() => document.getElementById('tm-err').textContent.includes('unavailable')
                     || (tmState.lapA && tmState.lapB && tmState.lapA.rec !== tmState.lapB.rec)''')
                 assert page.evaluate('() => tmState.lapA.rec !== tmState.lapB.rec'),'saved cross-recording comparison lost'
+                previous=page.evaluate('() => [tmState.a,tmState.b,[...tmState.included].sort()]')
+                page.reload();page.wait_for_function('() => tmState.loaded && !!tmState.lapB')
+                page.locator('#workspace-last').click()
+                page.wait_for_function('() => !!tmState.lapA && tmState.lapA.rec !== tmState.lapB.rec')
+                assert page.evaluate('() => [tmState.a,tmState.b,[...tmState.included].sort()]')==previous,'last comparison changed source or recording subset after reload'
+                open_recording_menu(page)
                 page.get_by_role('button',name='Only this recording',exact=True).click()
                 page.wait_for_function('() => tmState.lapB && tmState.included.size === 1')
                 report['findings'][0]['comparisons'][0]['recording_id']='0'*32
+                page.evaluate('() => showView("reports")')
                 page.locator('#ai-history button').first.click()
+                page.evaluate('() => showView("reports")')
                 page.locator('#ai-report').get_by_role('button',name='Compare with S1 lap 2').click()
                 page.wait_for_function('() => document.getElementById("tm-err").textContent.includes("Comparison recording identity changed") || tmState.included.size > 1')
                 assert page.evaluate('() => tmState.included.size === 1 && tmState.lapA.rec === tmState.lapB.rec'),'replaced reference expanded selection'
@@ -100,6 +119,7 @@ def main():
                     tmReloadRecordingPool=async()=>{try{return await window.subsetOriginal();}
                         finally{window.subsetSettled=true;}};
                 }""")
+                open_recording_menu(page)
                 page.get_by_role('button',name='Only this recording',exact=True).click()
                 page.wait_for_function('() => window.subsetSettled')
                 page.evaluate("""() => {
