@@ -588,7 +588,7 @@ def render(run, package, kind, origin=None):
                     )
                 )
                 out += [
-                    "[Telemetry reference](" + linkbase + "/?" + q + "#telemetry)",
+                    "[Telemetry reference](" + linkbase + "/telemetry?" + q + "#telemetry)",
                     "",
                     "Validated package facts:",
                     "",
@@ -651,7 +651,7 @@ def render(run, package, kind, origin=None):
             )
             out += [
                 '<a href="'
-                + esc(linkbase + "/?" + q + "#telemetry")
+                + esc(linkbase + "/telemetry?" + q + "#telemetry")
                 + '">Telemetry reference</a><h4>Validated package facts</h4><ul>'
             ]
             out += [

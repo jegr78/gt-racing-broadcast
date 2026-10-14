@@ -1,4 +1,8 @@
-# Optional AI Control Center workflow
+# Optional AI Telemetry workflow
+
+The local UI moved to the [Telemetry workspace](telemetry-workspace.md) in #887.
+Machine settings are under Data management; saved history/results are under Reports.
+Profile selection is request-scoped and independent of broadcast selection.
 
 Requirement matrix for #821. Existing telemetry works independently of provider tooling.
 

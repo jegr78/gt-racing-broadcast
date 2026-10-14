@@ -5,6 +5,7 @@
 
 **For operators**
 - [The Control Center](Control-Center)
+- [Telemetry archive and analysis](Telemetry)
 - [Set up the broadcast PC](Set-up-the-broadcast-PC)
 - [… on Arch Linux (CachyOS)](Arch-Linux)
 - [Run an event](Run-an-event)

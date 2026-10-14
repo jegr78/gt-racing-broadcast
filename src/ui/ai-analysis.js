@@ -11,7 +11,7 @@ async function request(operation,payload=null){
  if(scoped&&!profile)return {ok:false,error:{code:'invalid_profile',message:'Select a profile before using analysis.'}};
  if(scoped){if(payload&&!payload.query)payload={...payload,profile};else payload={query:{...payload?.query,profile}};}
  try {const response=await fetch(url+(payload?.query?'?'+new URLSearchParams(payload.query):''),payload&&!payload.query?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}:{});const doc=await response.json();if(scoped&&(profile!==tmState.profile||(doc.profile&&doc.profile!==profile)))return {ok:false,error:{code:'profile_changed',message:'Active profile changed. Reload the selection explicitly.'}};return doc;}
- catch(_e){return {ok:false,error:{message:'Control Center not reachable. Your telemetry remains available.'}};}
+ catch(_e){return {ok:false,error:{message:'Local UI service not reachable. Your telemetry remains available.'}};}
 }
 function say(id,text){$id(id).textContent=text||'';}
 function option(select,value,label){const o=new Option(label,value);select.append(o);}
@@ -74,7 +74,7 @@ function refreshAgents(preserveModel=true){
  if(!previous&&state.settings?.last?.template)$id('ai-template').value=state.settings.last.template;
  invalidate();
  $id('ai-controls').hidden=!state.settings?.enabled;
- say('ai-disabled',state.settings?.enabled?'':'Optional AI analysis is disabled. Enable it in General Settings. Existing telemetry and saved analyses remain available.');
+ say('ai-disabled',state.settings?.enabled?'':'Optional AI analysis is disabled. Enable it in Data management. Existing telemetry and saved analyses remain available.');
 }
 async function saveSettings(remove=false,enableOnly=false){
  if(!state.settings||state.settingsBusy)return;
@@ -113,10 +113,11 @@ async function probe(){
 }
 async function selection(){
  if(!state.settings)await settings();
- if(!state.settings?.enabled||!tmState.rec)return;
+ const rec=tmState.lapB?.rec||tmState.rec;
+ if(!state.settings?.enabled||!rec)return;
  state.profile=tmState.profile;invalidate();$id('ai-preview-button').disabled=true;const generation=state.generation;
  say('ai-selection-status','Loading completed sessions and explicit reference suggestions…');
- const result=await request('selection',{query:{rec:tmState.rec}});
+ const result=await request('selection',{query:{rec}});
  if(generation!==state.generation||(result.ok&&result.profile!==tmState.profile))return;
  if(!result.ok){say('ai-selection-status',error(result));return;}
  state.selection=result;$id('ai-preview-button').disabled=!result.sessions.length;const select=$id('ai-session');select.textContent='';result.sessions.forEach(s=>option(select,s.session,'Session '+s.session));
@@ -249,7 +250,7 @@ function init(){
  ['ai-model','ai-template','ai-goal','ai-questions','ai-language'].forEach(id=>$id(id).oninput=invalidate);
  $id('ai-agent').onchange=()=>{const a=state.settings?.agents.find(a=>a.id===$id('ai-agent').value);$id('ai-model').value=a?.model||'';modelSuggestions();invalidate();};
  window.RacecastAI={settings,selection,reset,status,history};settings().then(()=>{if(tmState.profile&&currentView==='telemetry'){status();history();}});
- setInterval(()=>{if(currentView==='telemetry')status();},1500);
+ setInterval(()=>{if(currentView==='telemetry'||currentView==='reports')status();},1500);
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
 })();

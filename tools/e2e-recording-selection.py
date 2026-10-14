@@ -9,6 +9,12 @@ import test_racecast as fixture
 import test_ui_server as web
 
 
+def open_recording_menu(page):
+    page.get_by_role('button',name='Analysis',exact=True).click()
+    if page.locator('#tm-recording-menu').get_attribute('open') is None:
+        page.locator('#tm-recording-menu summary').click()
+
+
 def main():
     from playwright.sync_api import sync_playwright
     with fixture._telemetry_sandbox() as (root,tgl):
@@ -22,14 +28,20 @@ def main():
         ctx['telemetry_recordings']=fixture.m.telemetry_recordings_data
         ctx['telemetry_laps']=fixture.m.telemetry_laps_data
         ctx['telemetry_lap']=fixture.m.telemetry_lap_data
+        ctx['telemetry_context_read']=fixture.m.telemetry_context_read_data
+        ctx['telemetry_context_write']=fixture.m.telemetry_context_write_data
         primary=fixture.m.telemetry_lap_data(fixture._stem(new),'1','3')['lap']
         reference=fixture.m.telemetry_lap_data(fixture._stem(old),'1','2')['lap']
         def target(lap):
             return {k:lap[k] for k in ('rec','session','lap','recording_id')}
         report=dict(language='en',findings=[dict(priority=1,title='Saved comparison',
             telemetry=target(primary),comparisons=[target(reference)],evidence=[])],exercises=[],limitations=[])
+        selected_recordings=[]
         def ai(operation,payload):
-            if operation=='settings':return dict(ok=True,enabled=False,agents=[])
+            if operation=='settings':return dict(ok=True,enabled=True,agents=[])
+            if operation=='selection':
+                selected_recordings.append(payload['rec'])
+                return dict(ok=True,profile='solo',rec=payload['rec'],sessions=[])
             if operation=='history':return dict(ok=True,profile='solo',runs=[dict(id='saved',created_at=1700000000,state='completed')])
             if operation=='job':return dict(ok=True,profile='solo',state='completed',report=report)
             return dict(ok=True,busy=False)
@@ -39,7 +51,7 @@ def main():
             with sync_playwright() as pw:
                 browser=pw.chromium.launch(headless=True)
                 page=browser.new_page(viewport={'width':1440,'height':1000})
-                page.goto('http://127.0.0.1:'+str(port))
+                page.goto('http://127.0.0.1:'+str(port)+'/telemetry')
                 page.wait_for_function('() => tmState.profile === "solo"')
                 page.evaluate('() => showView("telemetry")')
                 page.wait_for_function('() => tmState.lapB')
@@ -56,8 +68,17 @@ def main():
                 assert numbers==sorted(numbers),'laps must remain in driving order'
                 page.locator('#tm-recording-options input').first.uncheck()
                 page.wait_for_function('() => tmState.lapB && tmState.lapB.rec !== tmState.rec')
+                page.evaluate('() => tcOpen()')
+                page.wait_for_function('() => tc.doc && !tc.loading')
+                assert page.evaluate('() => tc.target === tmState.lapB.rec'), 'Notes must follow analysed lap B, including cross-recording comparisons'
+                page.evaluate('() => tcAddNote()')
+                assert page.evaluate('() => tc.data.notes.at(-1).scope === "lap" && tc.data.notes.at(-1).lap === tmState.lapB.lap')
+                page.evaluate('() => {tc.data.notes.pop();tc.dirty=false;return tcClose();}')
+                page.evaluate('() => RacecastAI.selection()')
+                assert selected_recordings[-1] == page.evaluate('() => tmState.lapB.rec'), 'AI selection must follow analysed lap B'
                 assert page.locator('#tm-b optgroup').count()==1
                 assert page.evaluate('() => tmState.pool.laps.every(l=>tmState.included.has(l.rec))')
+                open_recording_menu(page)
                 page.get_by_role('button',name='Only this recording',exact=True).click()
                 page.wait_for_function('() => tmState.pool?.laps.length === 2')
                 assert page.locator('#tm-b optgroup').count()==1
@@ -67,18 +88,46 @@ def main():
                 assert page.locator('#tm-a option').inner_text()=='no other lap to compare'
                 assert page.locator('#tm-b option').inner_text()=='no included lap'
                 page.wait_for_function('() => !tmState.lapA && !tmState.lapB')
+                open_recording_menu(page)
                 page.get_by_role('button',name='Only this recording',exact=True).click()
                 page.wait_for_function('() => tmState.lapB')
+                page.evaluate('() => showView("reports")')
                 page.evaluate('() => RacecastAI.history()')
+                page.evaluate('() => showView("reports")')
                 page.locator('#ai-history button').first.click()
+                page.evaluate('() => showView("reports")')
                 page.locator('#ai-report').get_by_role('button',name='Compare with S1 lap 2').click()
                 page.wait_for_function('''() => document.getElementById('tm-err').textContent.includes('unavailable')
                     || (tmState.lapA && tmState.lapB && tmState.lapA.rec !== tmState.lapB.rec)''')
                 assert page.evaluate('() => tmState.lapA.rec !== tmState.lapB.rec'),'saved cross-recording comparison lost'
+                previous=page.evaluate('() => [tmState.a,tmState.b,[...tmState.included].sort()]')
+                page.reload();page.wait_for_function('() => tmState.loaded && !!tmState.lapB')
+                page.locator('#workspace-last').click()
+                page.wait_for_function('() => !!tmState.lapA && tmState.lapA.rec !== tmState.lapB.rec')
+                assert page.evaluate('() => [tmState.a,tmState.b,[...tmState.included].sort()]')==previous,'last comparison changed source or recording subset after reload'
+                page.evaluate("""async () => {
+                    window.savedComparison=workspaceSaved();
+                    const changed={...window.savedComparison,reference:{...window.savedComparison.reference,recording_id:'0'.repeat(32)}};
+                    localStorage.setItem('racecast-telemetry-comparison:'+tmState.profile,JSON.stringify(changed));
+                    await workspaceLast();
+                }""")
+                assert page.evaluate('() => !tmState.lapA && document.getElementById("tm-err").textContent.includes("unavailable or changed")'), 'Last comparison must not substitute a changed reference'
+                page.evaluate("""async () => {
+                    localStorage.setItem('racecast-telemetry-comparison:'+tmState.profile,JSON.stringify({...window.savedComparison,reference:null}));
+                    await workspaceLast();
+                }""")
+                assert page.evaluate('() => !tmState.lapA'), 'Last comparison must preserve an explicit absent reference'
+                page.evaluate("""async () => {
+                    localStorage.setItem('racecast-telemetry-comparison:'+tmState.profile,JSON.stringify(window.savedComparison));
+                    await workspaceLast();delete window.savedComparison;
+                }""")
+                open_recording_menu(page)
                 page.get_by_role('button',name='Only this recording',exact=True).click()
                 page.wait_for_function('() => tmState.lapB && tmState.included.size === 1')
                 report['findings'][0]['comparisons'][0]['recording_id']='0'*32
+                page.evaluate('() => showView("reports")')
                 page.locator('#ai-history button').first.click()
+                page.evaluate('() => showView("reports")')
                 page.locator('#ai-report').get_by_role('button',name='Compare with S1 lap 2').click()
                 page.wait_for_function('() => document.getElementById("tm-err").textContent.includes("Comparison recording identity changed") || tmState.included.size > 1')
                 assert page.evaluate('() => tmState.included.size === 1 && tmState.lapA.rec === tmState.lapB.rec'),'replaced reference expanded selection'
@@ -100,6 +149,7 @@ def main():
                     tmReloadRecordingPool=async()=>{try{return await window.subsetOriginal();}
                         finally{window.subsetSettled=true;}};
                 }""")
+                open_recording_menu(page)
                 page.get_by_role('button',name='Only this recording',exact=True).click()
                 page.wait_for_function('() => window.subsetSettled')
                 page.evaluate("""() => {

@@ -270,7 +270,7 @@ def t_surfaces_cover_all_four_uis():
     assert len(v.CC_VIEWS) == 13, v.CC_VIEWS
     assert "cc-quit-modal" in names, "the primary buttons only live in modals, so one modal must be a surface"
     phone = {s.name for s in v.SURFACES if "phone" in s.viewports}
-    assert phone == {"cockpit", "race-control"}, phone
+    assert phone == {"cockpit", "race-control", "telemetry-archive", "telemetry-analysis"}, phone
     assert len({s.name for s in v.SURFACES}) == len(v.SURFACES), "surface names must be unique"
 
 
@@ -288,10 +288,15 @@ def t_telemetry_surface_uses_the_solo_pov_control_center():
     tel = [s for s in v.SURFACES if s.name == "cc-telemetry"]
     assert len(tel) == 1 and tel[0].base == "ui_pov", tel
     assert "telemetry" not in v.CC_VIEWS, "the main Control Center has no solo POV profile"
-    assert [s.name for s in v.SURFACES if s.base == "ui_pov"] == ["cc-telemetry"], \
-        "only the Telemetry view may render against the solo POV Control Center"
+    workspace = {"telemetry-archive", "telemetry-analysis", "telemetry-data", "telemetry-reports"}
+    assert {s.name for s in v.SURFACES if s.base == "ui_pov"} == {"cc-telemetry"} | workspace
+    assert "#tm-replay-recording option" in tel[0].ready, "producer controls must wait for replay sources"
+    for surface in v.SURFACES:
+        if surface.name in workspace:
+            assert surface.path == "/telemetry", "analysis must render the dedicated workspace"
+    analysis = next(s for s in v.SURFACES if s.name == "telemetry-analysis")
     for sel in ("#tm-laps .tmitem", "#tm-charts path.tm-a", "#tm-sectors tbody tr", "#tm-err"):
-        assert sel in tel[0].ready, f"the ready check must wait for {sel}"
+        assert sel in analysis.ready, f"the ready check must wait for {sel}"
 
 
 def t_demo_learned_track_is_recognised():

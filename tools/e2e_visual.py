@@ -271,7 +271,15 @@ SURFACES = [
             "!!document.querySelector('#quitmodal[open]')", 15000),
     # Telemetry exists only for a solo POV profile, so a second Control Center serves it.
     Surface("cc-telemetry", "ui_pov", "/", ("desktop",), "showView('telemetry')",
+            "!!document.querySelector('#tm-replay-recording option')", 30000),
+    Surface("telemetry-archive", "ui_pov", "/telemetry", ("desktop", "phone"), None,
+            "!!document.querySelector('.archive-card')", 30000),
+    Surface("telemetry-analysis", "ui_pov", "/telemetry", ("desktop", "phone"), "showView('telemetry')",
             TELEMETRY_READY, 30000),
+    Surface("telemetry-data", "ui_pov", "/telemetry", ("desktop",), "showView('settings')",
+            "!!document.querySelector('#ai-settings')", 30000),
+    Surface("telemetry-reports", "ui_pov", "/telemetry", ("desktop",), "showView('reports')",
+            "!!document.querySelector('#ai-history')", 30000),
 ]
 
 DEMO_TRACK_ID = "e2e-demo"

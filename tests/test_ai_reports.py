@@ -145,7 +145,8 @@ def t_history_provenance_exports_and_profile_scope():
         fail(lambda:other.get(run['id']),'not_found')
         fail(lambda:store.get('../outside'),'invalid_job')
         document=store.export(run['id'],'html',origin='http://127.0.0.1:8123')['bytes'].decode()
-        assert 'href="http://127.0.0.1:8123/?' in document
+        assert 'href="http://127.0.0.1:8123/telemetry?' in document
+        assert 'profile=profile' in document and 'recording_id=' in document
         fail(lambda:store.export(run['id'],'html',origin='https://foreign.example.test'),'invalid_selection')
         assert '<script>alert(1)</script>' not in document and '&lt;script&gt;' in document
         assert 'Validated package facts' in document and 'Provenance' in document and 'unproven' in document

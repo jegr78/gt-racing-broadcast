@@ -13,7 +13,7 @@ from ai_ui_fixture import Fixture,web_fixture
 async def verify_settings_toggle(page,fixture,port):
     original=fixture.settings.read()
     try:
-        await page.goto('http://127.0.0.1:'+str(port))
+        await page.goto('http://127.0.0.1:'+str(port)+'/telemetry')
         await page.wait_for_function('() => window.RacecastAI && tmState.profile === "profile"')
         await page.reload()
         await page.wait_for_function('() => window.RacecastAI && document.getElementById("ai-configs").options.length === 2')
@@ -56,10 +56,10 @@ async def verify_settings_toggle(page,fixture,port):
 
 async def verify(page,fixture,port):
     errors=[];page.on('pageerror',lambda error:errors.append(error.stack))
-    await page.goto('http://127.0.0.1:'+str(port))
+    await page.goto('http://127.0.0.1:'+str(port)+'/telemetry')
     await page.wait_for_function('() => window.RacecastAI && tmState.profile === "profile"')
     premature=[];page.on('request',lambda request:premature.append(request.url) if '/api/ai/' in request.url and 'profile=null' in request.url else None)
-    await page.evaluate('() => {tmState.profile=null;RacecastAI.reset(null);showView("telemetry");}')
+    await page.evaluate('() => {tmState.profile=null;RacecastAI.reset(null);workspaceAI();}')
     await asyncio.sleep(.2)
     assert not premature,'profile-scoped AI requests were sent before profile initialization'
     await page.evaluate('() => {tmState.profile="profile";RacecastAI.reset("profile");}')
@@ -76,17 +76,19 @@ async def verify(page,fixture,port):
     await page.wait_for_function('() => !document.getElementById("ai-load-selection").disabled')
     await page.locator('#ai-remove').click()
     await page.wait_for_function('() => document.getElementById("ai-configs").options.length === 2')
-    await page.evaluate('() => showView("telemetry")')
+    await page.evaluate('() => workspaceAI()')
     await page.wait_for_function('() => tmState.lapB && tmState.lapB.recording_id')
     before=fixture.control().history()['runs'];assert not before
     await page.locator('#ai-load-selection').click();await page.wait_for_selector('#ai-laps input')
     assert await page.locator('#ai-references input:checked').count()==0
     await page.locator('#ai-language').fill('de')
     async def preview():
+        await page.evaluate('() => workspaceAI()')
         await page.locator('#ai-preview-button').click()
         await page.wait_for_function('() => !document.getElementById("ai-start").disabled')
         return None
     await page.locator('#ai-model').fill('alternate');await preview()
+    if '--shots' in sys.argv:await page.screenshot(path=str(ROOT/'src/docs/wiki/images/cc-ai-preview.png'))
     await page.evaluate('() => RacecastAI.settings()')
     assert await page.locator('#ai-model').input_value()=='alternate'
     assert await page.locator('#ai-start').is_disabled()
@@ -100,7 +102,7 @@ async def verify(page,fixture,port):
         response=await route.fetch();preview_arrived.set();await preview_release.wait()
         await route.fulfill(response=response);preview_delivered.set()
         return None
-    await page.route('**/api/ai/preview',delayed,times=1)
+    await page.route('**/api/ai/preview*',delayed,times=1)
     await page.evaluate('''() => {const button=document.getElementById('ai-preview-button');
         window.originalPreview=button.onclick;window.previewSettled=false;
         button.onclick=async event => {await window.originalPreview(event);window.previewSettled=true;};}''')
@@ -111,7 +113,7 @@ async def verify(page,fixture,port):
     await page.evaluate('''() => {document.getElementById('ai-preview-button').onclick=window.originalPreview;
         delete window.originalPreview;delete window.previewSettled;}''')
     assert await page.locator('#ai-start').is_disabled()
-    await page.unroute('**/api/ai/preview',delayed)
+    await page.unroute('**/api/ai/preview*',delayed)
     arrived=asyncio.Event();finished=asyncio.Event()
     async def delayed_job(route):
         response=await route.fetch();arrived.set();await asyncio.sleep(.3);await route.fulfill(response=response);finished.set()
@@ -122,7 +124,7 @@ async def verify(page,fixture,port):
     await page.locator('#ai-goal').fill('Prepare a future goal while this run finishes')
     await asyncio.wait_for(finished.wait(),5)
     await page.unroute('**/api/ai/job?*',delayed_job)
-    try:await page.wait_for_selector('#ai-report article',timeout=6000)
+    try:await page.wait_for_selector('#ai-report article',timeout=6000,state='attached')
     except Exception as error:raise AssertionError('completed job was lost after editing a future goal') from error
     # A second machine-wide job can finish while an older completion reply is held.
     held=asyncio.Event();release=asyncio.Event();delivered=asyncio.Event();captured=False
@@ -148,11 +150,15 @@ async def verify(page,fixture,port):
     assert await page.locator('#ai-report article').count()==4
     assert await page.evaluate('() => window.aiInjected') is None
     assert 'Report language: de' in await page.locator('#ai-report').inner_text()
+    await page.evaluate('() => showView("reports")')
+    if '--shots' in sys.argv:
+        await page.screenshot(path=str(ROOT/'src/docs/wiki/images/cc-ai-report.png'))
     async with page.expect_download() as pending:
         await page.get_by_role('button',name='Export html',exact=True).click()
     download=await pending.value
     html=Path(await download.path()).read_text(encoding="utf-8")
     assert '&lt;script&gt;' in html and '<script>window.aiInjected' not in html
+    await page.evaluate('() => showView("reports")')
     await page.locator('#ai-report').get_by_role('button',name='Compare with S1 lap 3').first.click()
     await page.wait_for_function('() => tmState.lapA?.lap === 3 && tmState.lapB?.lap === 2')
     async def replaced_reference(route):
@@ -161,6 +167,7 @@ async def verify(page,fixture,port):
         await route.fulfill(json=data)
     await page.route('**/api/telemetry/lap?*',replaced_reference)
     await page.evaluate('() => tmLapCache.clear()')
+    await page.evaluate('() => showView("reports")')
     await page.locator('#ai-report').get_by_role('button',name='Compare with S1 lap 3').first.click()
     for _ in range(40):
         if 'Comparison recording identity changed' in await page.locator('#tm-err').inner_text():break
@@ -169,6 +176,7 @@ async def verify(page,fixture,port):
     await page.unroute('**/api/telemetry/lap?*',replaced_reference)
     await page.evaluate('() => tmLapCache.clear()')
     # Opening a report uses the real ordinary telemetry callbacks and exact identity.
+    await page.evaluate('() => showView("reports")')
     await page.locator('#ai-report').get_by_role('button',name='Open lap at 500 m').first.click()
     await page.wait_for_function('() => tmState.lapB?.lap === 2 && tmState.lapB.recording_id')
     assert await page.evaluate('() => tmState.lapB.lap')==2
@@ -198,7 +206,7 @@ async def verify(page,fixture,port):
     await page.evaluate('() => RacecastAI.history()')
     assert 'OTHER_PROFILE_PRIVATE_MODEL'  not in await page.locator('#ai-history').inner_text()
     assert await page.evaluate('() => tmState.profile')=='profile'
-    await page.evaluate('() => useProfile("other")')
+    await page.evaluate('() => workspaceProfile("other")')
     await page.wait_for_function('() => tmState.profile === "other"')
     assert await page.locator('#ai-report').inner_text()==''
     assert 'Synthetic coach' not in await page.locator('#ai-history').inner_text()
@@ -217,6 +225,12 @@ async def main():
                 browser=await pw.chromium.launch(headless=True)
                 page=await browser.new_page(viewport={'width':1280,'height':900})
                 await verify_settings_toggle(page,fixture,port)
+                if '--shots' in sys.argv:
+                    await page.reload()
+                    await page.wait_for_function('() => tmState.profile && window.RacecastAI')
+                    await page.evaluate('() => showView("settings")')
+                    await page.evaluate('() => RacecastAI.settings()')
+                    await page.screenshot(path=str(ROOT/'src/docs/wiki/images/cc-ai-settings.png'))
                 await verify(page,fixture,port)
                 await browser.close()
         finally:server.shutdown();server.server_close()

@@ -1,7 +1,7 @@
 # Race Engineer
 
 Open **Console → Race Engineer** with your existing signed link or Discord login.
-The producer enables **Allow Race Engineer** in the local Telemetry view. Assign the
+The producer enables **Allow Race Engineer** in the Control Center Telemetry controls. Assign the
 additive Race Engineer Crew checkbox to each Engineer; Producers inherit access.
 Directors, Commentators and Race Control require that explicit checkbox. Redeploy
 the current Sheet webhook when adding the Crew field.
@@ -61,7 +61,7 @@ the same session while the track is unknown. While lap B is
 an out lap, pit lap or first lap of a stint, or while its track is still being
 recognised in the first lap of a session, it chooses none and says so; a chosen
 reference stays selected. The charts use the same validated distance stations, sector
-and context rules as the local Control Center. Blue is A, orange is B, delta is
+and context rules as the local Telemetry workspace. Blue is A, orange is B, delta is
 B minus A. The current lap is provisional; future curve sections and incomplete
 200 m sectors say **Not yet driven** in muted text. Missing measurements remain
 **Unavailable**, and untimed lap zero reads **Out lap**. Confirmed best and theoretical values exclude it.

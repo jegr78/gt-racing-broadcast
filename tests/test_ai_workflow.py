@@ -33,7 +33,9 @@ def t_selection_and_reference_http_semantics_and_origin():
             assert status==403 and not doc['ok'] and doc['error']['code']=='foreign_origin',(status,doc)
             fixture.profile='other'
             status,doc=get('/api/ai/history?profile=profile')
-            assert status==409 and doc['error']['code']=='profile_changed'
+            assert status==200 and doc['profile']=='profile' and fixture.profile=='other', (status,doc)
+            status,doc=get('/api/ai/history?profile=missing')
+            assert status==400 and doc['error']['code']=='invalid_profile', (status,doc)
             fixture.profile='profile'
             settings=fixture.settings.read();settings['enabled']=False;fixture.settings.save(settings)
             status,doc=get('/api/ai/selection?'+query)

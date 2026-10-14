@@ -1,5 +1,7 @@
 """Synthetic Control Center with real AI controller/store/process callbacks."""
 import sys
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -15,11 +17,28 @@ import test_ui_server as web_fixture
 
 class Fixture:
     def __init__(self,root):
+        self._analysis_profile=ContextVar('fixture_analysis_profile',default=None)
         self.root=Path(root);self.profile='profile';self.delay=.5;self.invalid=False;self.title='<script>window.aiInjected=true</script>'
         self.source=package_fixture.source(self.root/'profile/telemetry-recordings')
         self.sources={'profile':self.source}
         self.settings=ai_agents.Settings(self.root/'machine')
         self.settings.save(dict(enabled=True,agents=[dict(id='coach',name='Synthetic coach',provider='codex',model='exact')]))
+
+    @property
+    def profile(self):
+        return self._analysis_profile.get() or self._broadcast_profile
+
+    @profile.setter
+    def profile(self,value):
+        self._broadcast_profile=value
+
+    @contextmanager
+    def analysis_scope(self,name):
+        if name not in ('profile','other'):
+            raise ValueError('Unknown analysis profile')
+        token=self._analysis_profile.set(name)
+        try:yield
+        finally:self._analysis_profile.reset(token)
 
     def adapter(self,cfg):
         adapter=job_fixture.FakeAdapter(self.root);adapter.config=ai_agents.agent_config(cfg)
@@ -64,6 +83,7 @@ result={'version':1,'findings':[dict(priority=1,title='<script>window.aiInjected
 
     def context(self):
         ctx=web_fixture._ctx();ctx['version']='dev'
+        ctx['telemetry_profile_scope']=self.analysis_scope
         ctx['status']=lambda:{'relay':{'alive':False},'version':'dev','streams':[],'companion':{'running':False}}
         ctx['update_check']=lambda force=False:dict(ok=True,current='dev',latest=None,update_available=False,note='development build')
         ctx['profiles']=lambda:dict(ok=True,active=self.profile,profiles=[dict(name=n,kind='solo',template='pov') for n in ('profile','other')])

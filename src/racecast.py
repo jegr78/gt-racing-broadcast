@@ -21,6 +21,7 @@
   racecast obs logs | tailscale logs         # tail OBS's log dir / the Tailscale status-snapshot log (same -f/--list/--archive flags)
   racecast sheet     url | open              # print / open the active league's Google Sheet (built from its SHEET_ID)
   racecast telemetry replay start <name|latest> [--speed X] [--from MIN] [--on-air] | stop | status
+  racecast telemetry ui [--no-browser]       # local archive analysis workspace, independent of the broadcast profile
   racecast telemetry import <file.gt7rec>   # copy recording and optional lap index into active profile
   racecast telemetry record start|stop|status   # solo POV: record the GT7 telemetry trace (relay must run)
   racecast telemetry list | export <name|latest> [--out DIR] [--all] [--excel] | delete <name>   # recordings of the active profile -> samples.csv + laps.csv
@@ -62,6 +63,8 @@ sys.path.insert(0, os.path.join(HERE, "scripts"))
 import python_runtime
 python_runtime.ensure_supported()
 import subprocess
+from contextlib import contextmanager
+from contextvars import ContextVar
 import services as sv
 import init_setup as ins
 import config as pcfg    # 'pcfg' (not 'cfg'): avoids F811 clash with local `cfg = json.loads(...)` dicts elsewhere in this file
@@ -198,10 +201,30 @@ def _profile_runtime(base_runtime, profile_name):
     else the base (fresh machine / no profile yet)."""
     return os.path.join(base_runtime, profile_name) if profile_name else base_runtime
 
+_analysis_profile = ContextVar("analysis_profile", default=None)
+_telemetry_launch_profile = None
+
+
+@contextmanager
+def telemetry_profile_scope(name):
+    """Bind only this request to a validated archive; never change process env/pointer."""
+    root = _env_base(IS_FROZEN, _real_executable(), HERE)
+    if not pa.valid_profile_name(name) or name not in pcfg.list_profiles(root):
+        raise ValueError("Select an existing analysis profile")
+    token = _analysis_profile.set(name)
+    try:
+        yield
+    finally:
+        _analysis_profile.reset(token)
+
+
 def _active_profile_name():
     """The active profile name (tolerant): RACECAST_PROFILE env / the active
     pointer / the sole profile -- or None if none can be resolved, so commands
     that do not need a profile still work."""
+    selected = _analysis_profile.get()
+    if selected is not None:
+        return selected
     root = _env_base(IS_FROZEN, _real_executable(), HERE)
     try:
         return pcfg.resolve_active_profile(
@@ -992,7 +1015,7 @@ EVENT_VERBS = ("status", "start", "stop", "takeover")
 TAILSCALE_VERBS = ("up", "down", "status", "logs")
 OBS_VERBS = ("refresh", "collection", "logs", "stream-target", "benchmark")
 SHEET_VERBS = ("url", "open")           # active league's Google Sheet (from SHEET_ID)
-TELEMETRY_VERBS = ("replay", "import", "record", "list", "export", "delete", "index", "shifts", "shift-update", "analyze")   # GT7 telemetry recordings
+TELEMETRY_VERBS = ("ui", "replay", "import", "record", "list", "export", "delete", "index", "shifts", "shift-update", "analyze")   # GT7 telemetry recordings
 GT7DATA_VERBS = ("update", "status")      # GT7 reference data
 APP_VERBS = ("launch", "quit")          # GUI app control for the Control Center
 APP_CONTROLLED = ("obs", "discord", "tailscale")   # GUI apps racecast can launch + quit
@@ -3450,6 +3473,17 @@ def ai_request_data(operation, payload=None):
                 "message": "Analysis preparation failed; inspect the recording/index/context",
             },
         }
+
+
+def telemetry_ui_cmd(rest):
+    """Open the archive workspace through the common local UI service."""
+    if any(arg != "--no-browser" for arg in rest):
+        sys.exit("usage: racecast telemetry ui [--no-browser] [--profile NAME]")
+    from urllib.parse import urlencode
+    profile = _telemetry_launch_profile or _active_profile_name()
+    destination = "/telemetry" + ("?" + urlencode({"profile": profile}) if profile else "")
+    return run_ui(rest, open_browser="--no-browser" not in rest, destination=destination)
+
 
 
 def telemetry_analyze_cmd(rest):
@@ -6141,6 +6175,7 @@ DISPATCH = {
     ("telemetry", "export"): telemetry_export_cmd, ("telemetry", "delete"): telemetry_delete_cmd,
     ("telemetry", "index"): telemetry_index_cmd,
     ("telemetry", "analyze"): telemetry_analyze_cmd,
+    ("telemetry", "ui"): telemetry_ui_cmd,
     ("telemetry", "shifts"): telemetry_shifts_cmd,
     ("telemetry", "shift-update"): telemetry_shift_update_cmd,
     ("gt7-data", "update"): gt7_data_update_cmd, ("gt7-data", "status"): gt7_data_status_cmd,
@@ -8638,7 +8673,8 @@ def ui_cmd(rest):
     return run_ui(rest, fail=sys.exit, open_browser="--no-browser" not in rest)
 
 
-def run_ui(rest, fail=sys.exit, open_browser=True):
+
+def run_ui(rest, fail=sys.exit, open_browser=True, destination="/"):
     """Shared Control Center server core for both entrypoints. `fail(msg)` is
     called on a fatal startup error (port taken / bind failure): the CLI passes
     sys.exit; racecast_ui passes a native-dialog variant. Returns None when the
@@ -8649,9 +8685,16 @@ def run_ui(rest, fail=sys.exit, open_browser=True):
     port = srv.ui_port(os.environ)
     instance = srv.probe_instance("127.0.0.1", port)
     if instance == "ours":
+        if destination.startswith("/telemetry"):
+            try:
+                supported = "telemetry-workspace" in http_util.get_json(_http_url("127.0.0.1", port, "/api/ping"), timeout=2).get("features", [])
+            except Exception:
+                supported = False
+            if not supported:
+                return fail("racecast: restart the running UI service to load the Telemetry workspace. Closing its browser window does not restart it.")
         print(f"Control Center already running on port {port}. Opening the browser.")
         if open_browser:
-            _open_url(_http_url("127.0.0.1", port, "/"))
+            _open_url(_http_url("127.0.0.1", port, destination))
         return None
     if instance == "foreign":
         return fail(f"racecast: port {port} is in use by another application. Set "
@@ -8782,6 +8825,9 @@ def run_ui(rest, fail=sys.exit, open_browser=True):
         "report_send": report_send_data,
         "ai_request": ai_request_data,
         "telemetry_recordings": telemetry_recordings_data,
+        "telemetry_profile_scope": telemetry_profile_scope,
+        "telemetry_default_profile": _active_profile_name,
+        "shutdown_state": lambda: {"ai_busy": bool(_ai_controller().status().get("busy"))},
         "telemetry_laps": telemetry_laps_data,
         "telemetry_lap": telemetry_lap_data,
         "telemetry_channels": telemetry_channels_data,
@@ -8809,8 +8855,8 @@ def run_ui(rest, fail=sys.exit, open_browser=True):
     except OSError as exc:
         return fail(f"racecast: could not bind port {port} ({exc}). Set RACECAST_UI_PORT "
                     "in .env to a free port and retry.")
-    url = _http_url("127.0.0.1", port, "/")
-    print(f"Control Center: {url}  (Ctrl+C or the Quit button stops it)")
+    url = _http_url("127.0.0.1", port, destination)
+    print(f"Local UI service: {url}  (Ctrl+C or Stop UI service stops both interfaces)")
     if open_browser:
         _open_url(url)
     try:
@@ -8862,7 +8908,9 @@ def _bootstrap(argv):
     _ensure_ssl_certs()
     _ensure_tool_path()    # Finder/Dock launch truncates PATH past Homebrew (#38)
     argv, profile = pa.split_profile_flag(argv)
-    if profile:
+    global _telemetry_launch_profile
+    _telemetry_launch_profile = profile if argv[:2] == ["telemetry", "ui"] else None
+    if profile and _telemetry_launch_profile is None:
         os.environ["RACECAST_PROFILE"] = profile   # M3 consumers read this
     _apply_active_profile_env()   # inject the active profile's sheet config for children
     return argv

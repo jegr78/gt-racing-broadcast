@@ -58,7 +58,7 @@ function tcField(parent, label, value, type, setter, key) {
 async function tcOpen(prepared=false) {
  tc.open=true;tc.returnFocus=document.activeElement;tc.position=!prepared&&tmState.lapB&&tmState.noteCursorKey===tmKey(tmState.lapB)&&tmState.noteCursor?tcClone(tmState.noteCursor):null;
  $('tm-context-modal').hidden=false;
- await tcLoad(prepared?null:tmState.rec);$('tc-target').focus();
+ await tcLoad(prepared?null:(tmState.lapB?.rec||tmState.rec));$('tc-target').focus();
 }
 async function tcClose() {
  await tcSave();tc.open=false;tc.generation++;tcReleaseAction();tcReleaseLoad();$('tm-context-modal').hidden=true;tc.returnFocus?.focus?.();
@@ -84,7 +84,7 @@ async function tcLoad(rec, before=null) {
  finally{if(gen===tc.generation)tcReleaseLoad();}
  if(gen!==tc.generation||!tc.open)return;
  if(!d.ok||!d.context){$('tc-target').value=tc.target||'';tcStatus(d.error||'Context unavailable',true);return;}
- tc.target=rec||null;if(tc.target!==tmState.rec)tc.position=null;
+ tc.target=rec||null;if(tc.target!==tmState.lapB?.rec)tc.position=null;
  tc.reply=d;tc.doc=d.context;tc.data=tcClone(tc.doc.data);tc.draft=tcClone(tc.doc.draft||{});tc.dirty=false;
  tc.session=d.sessions.includes(tc.session)?tc.session:d.sessions[0]||'1';
  const backup=tcBackup();
@@ -117,7 +117,7 @@ async function tcSave() {
   else {tcKeepDraft();tc.timer=setTimeout(()=>tcSave(),400);}
   tcHistory();tcStatus(Object.keys(tc.draft).length?'Saved valid values; unfinished inputs retained as draft':
     'Saved · revision '+tc.doc.revision);
-  if(changed&&target===tmState.rec)await tmRefreshContext(target);
+  if(changed)await tmRefreshContext(target);
   return true;
  })();
  const ok=await tc.pending;tc.pending=null;return ok;
@@ -137,7 +137,7 @@ async function tcAction(action, extra={}) {
  if(!d.ok){tcStatus(d.error||'Could not apply the change',true);return;}
  tc.reply=d;tc.doc=d.context;tc.data=tcClone(d.context.data);tc.draft=tcClone(d.context.draft||{});
  tcRender();tcStatus('Saved · revision '+tc.doc.revision);
- if(tc.target===tmState.rec)await tmRefreshContext(tc.target);
+ await tmRefreshContext(tc.target);
 }
 function tcRestoreLocal() {
  const backup=tcBackup();
@@ -242,12 +242,12 @@ function tcNotes() {
   if(note.scope==='lap')tcField(grid,'Lap',note.lap,'required-integer',v=>{note.lap=v;delete note.position;},'note.'+note.id+'.lap');
   card.append(tcNoteField(note));
   if(note.position)card.append(tcEl('p','Track position attached · x '+note.position.x.toFixed(1)+' / z '+note.position.z.toFixed(1),'sub'));
-  if(tc.position&&note.scope==='lap'&&tc.target===tmState.rec&&note.session===tmState.lapB?.session&&note.lap===tmState.lapB?.lap)tcButton(card,'Attach current chart position',()=>{note.position=tcClone(tc.position);tcNotes();tcChanged();});
+  if(tc.position&&note.scope==='lap'&&tc.target===tmState.lapB?.rec&&note.session===tmState.lapB?.session&&note.lap===tmState.lapB?.lap)tcButton(card,'Attach current chart position',()=>{note.position=tcClone(tc.position);tcNotes();tcChanged();});
   tcButton(card,'Remove note',()=>{tc.data.notes.splice(i,1);tcNotes();tcChanged();});root.append(card);
  });
 }
 function tcAddNote() {
- const here=tc.target===tmState.rec&&tmState.lapB&&Number(tc.session)===tmState.lapB.session;
+ const here=tc.target===tmState.lapB?.rec&&tmState.lapB&&Number(tc.session)===tmState.lapB.session;
  tc.data.notes||=[];tc.data.notes.push({id:tcUID(),scope:here?'lap':tc.target?'session':'recording',
   session:Number(tc.session),lap:here?tmState.lapB.lap:1,text:''});tcNotes();tcChanged();
 }
