@@ -11,7 +11,7 @@ async function request(operation,payload=null){
  if(scoped&&!profile)return {ok:false,error:{code:'invalid_profile',message:'Select a profile before using analysis.'}};
  if(scoped){if(payload&&!payload.query)payload={...payload,profile};else payload={query:{...payload?.query,profile}};}
  try {const response=await fetch(url+(payload?.query?'?'+new URLSearchParams(payload.query):''),payload&&!payload.query?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}:{});const doc=await response.json();if(scoped&&(profile!==tmState.profile||(doc.profile&&doc.profile!==profile)))return {ok:false,error:{code:'profile_changed',message:'Active profile changed. Reload the selection explicitly.'}};return doc;}
- catch(_e){return {ok:false,error:{message:'Control Center not reachable. Your telemetry remains available.'}};}
+ catch(_e){return {ok:false,error:{message:'Local UI service not reachable. Your telemetry remains available.'}};}
 }
 function say(id,text){$id(id).textContent=text||'';}
 function option(select,value,label){const o=new Option(label,value);select.append(o);}
@@ -74,7 +74,7 @@ function refreshAgents(preserveModel=true){
  if(!previous&&state.settings?.last?.template)$id('ai-template').value=state.settings.last.template;
  invalidate();
  $id('ai-controls').hidden=!state.settings?.enabled;
- say('ai-disabled',state.settings?.enabled?'':'Optional AI analysis is disabled. Enable it in General Settings. Existing telemetry and saved analyses remain available.');
+ say('ai-disabled',state.settings?.enabled?'':'Optional AI analysis is disabled. Enable it in Data management. Existing telemetry and saved analyses remain available.');
 }
 async function saveSettings(remove=false,enableOnly=false){
  if(!state.settings||state.settingsBusy)return;

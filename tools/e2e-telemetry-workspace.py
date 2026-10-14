@@ -56,6 +56,7 @@ async def verify(base, home, launcher, env, shots):
         await other.wait_for_function('() => tc.doc && !tc.loading')
         await other.get_by_label('Race / test name', exact=True).fill('Beta-only context')
         await other.evaluate('() => tcSave()')
+        if shots:await other.screenshot(path=str(ROOT/'src/docs/wiki/images/cc-context.png'))
         await other.get_by_role('button', name='Close', exact=True).click()
         beta = Path(home)/'runtime/beta/telemetry-recordings'
         alpha = Path(home)/'runtime/alpha/telemetry-recordings'
@@ -63,6 +64,7 @@ async def verify(base, home, launcher, env, shots):
         assert not any('Beta-only context' in p.read_text(encoding='utf-8') for p in alpha.glob('*.context.json'))
         # A profile change during Delete confirmation must never delete a same-named source.
         await other.locator('#tm-del').click()
+        if shots:await other.screenshot(path=str(ROOT/'src/docs/wiki/images/cc-telemetry-delete.png'))
         await other.evaluate('() => workspaceProfile("alpha")')
         await other.locator('#cmodal-ok').click()
         await other.wait_for_timeout(200)
@@ -91,7 +93,23 @@ async def verify(base, home, launcher, env, shots):
                 if shots and width==1440:
                     label={'telemetry':'analysis','settings':'data'}.get(view,view)
                     await other.screenshot(path=str(ROOT/'src/docs/wiki/images'/('telemetry-'+label+'.png')))
-                    if view=='telemetry':await other.locator('.tmmain').screenshot(path='/tmp/racecast-887-analysis-element.png')
+                    if view=='telemetry':
+                        await other.locator('.tmmain').screenshot(path='/tmp/racecast-887-analysis-element.png')
+                        await other.screenshot(path=str(ROOT/'src/docs/wiki/images/cc-telemetry-channels.png'))
+        if shots:
+            await other.set_viewport_size({'width':1440,'height':1050})
+            await other.evaluate('() => showView("settings")')
+            await other.locator('#tm-shift-box summary').click()
+            await other.wait_for_function('() => document.getElementById("tm-shift-status").textContent !== "Reading…"')
+            await other.screenshot(path=str(ROOT/'src/docs/wiki/images/cc-telemetry-shifts.png'))
+            await other.evaluate('() => tmEditorOpen()')
+            await other.wait_for_function('() => tmEditor.draft && !tmEditor.busy')
+            await other.screenshot(path=str(ROOT/'src/docs/wiki/images/cc-track-editor.png'))
+            await other.evaluate('() => tmEditorClose()')
+        await other.evaluate('() => tmEditorOpen()')
+        await other.wait_for_function('() => tmEditor.draft && !tmEditor.busy')
+        assert await other.get_by_label('Provenance notes',exact=True).evaluate('element => getComputedStyle(element).backgroundColor !== "rgb(255, 255, 255)"'), 'Track-editor textarea must use the dark theme'
+        await other.evaluate('() => tmEditorClose()')
         await other.reload()
         await other.wait_for_function('() => tmState.loaded && !!tmState.profile')
         assert await other.locator('#workspace-last').is_visible()

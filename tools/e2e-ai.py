@@ -88,6 +88,7 @@ async def verify(page,fixture,port):
         await page.wait_for_function('() => !document.getElementById("ai-start").disabled')
         return None
     await page.locator('#ai-model').fill('alternate');await preview()
+    if '--shots' in sys.argv:await page.screenshot(path=str(ROOT/'src/docs/wiki/images/cc-ai-preview.png'))
     await page.evaluate('() => RacecastAI.settings()')
     assert await page.locator('#ai-model').input_value()=='alternate'
     assert await page.locator('#ai-start').is_disabled()

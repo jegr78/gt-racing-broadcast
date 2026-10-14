@@ -105,6 +105,22 @@ def main():
                 page.locator('#workspace-last').click()
                 page.wait_for_function('() => !!tmState.lapA && tmState.lapA.rec !== tmState.lapB.rec')
                 assert page.evaluate('() => [tmState.a,tmState.b,[...tmState.included].sort()]')==previous,'last comparison changed source or recording subset after reload'
+                page.evaluate("""async () => {
+                    window.savedComparison=workspaceSaved();
+                    const changed={...window.savedComparison,reference:{...window.savedComparison.reference,recording_id:'0'.repeat(32)}};
+                    localStorage.setItem('racecast-telemetry-comparison:'+tmState.profile,JSON.stringify(changed));
+                    await workspaceLast();
+                }""")
+                assert page.evaluate('() => !tmState.lapA && document.getElementById("tm-err").textContent.includes("unavailable or changed")'), 'Last comparison must not substitute a changed reference'
+                page.evaluate("""async () => {
+                    localStorage.setItem('racecast-telemetry-comparison:'+tmState.profile,JSON.stringify({...window.savedComparison,reference:null}));
+                    await workspaceLast();
+                }""")
+                assert page.evaluate('() => !tmState.lapA'), 'Last comparison must preserve an explicit absent reference'
+                page.evaluate("""async () => {
+                    localStorage.setItem('racecast-telemetry-comparison:'+tmState.profile,JSON.stringify(window.savedComparison));
+                    await workspaceLast();delete window.savedComparison;
+                }""")
                 open_recording_menu(page)
                 page.get_by_role('button',name='Only this recording',exact=True).click()
                 page.wait_for_function('() => tmState.lapB && tmState.included.size === 1')

@@ -577,7 +577,7 @@
   .tcshift {grid-column:1/-1}
   #tm-shift-values {overflow-wrap:anywhere}
   .tcfield { display:flex; flex-direction:column; gap:5px; font-size:12px; color:var(--dim); }
-  .tcfield input,.tcfield select,.tcrow textarea { width:100%; min-width:0; padding:8px; background:var(--bg); border:1px solid var(--line); border-radius:6px; color:var(--text); }
+  .tcfield input,.tcfield select,.tcfield textarea,.tcrow textarea { width:100%; min-width:0; padding:8px; background:var(--bg); border:1px solid var(--line); border-radius:6px; color:var(--text); }
   .tcrow { margin:10px 0; padding:12px; border:1px solid var(--line); border-radius:8px; }
   .tcrow textarea { margin:10px 0; }
   .tcinvalid { border-color:#ed7777 !important; }
