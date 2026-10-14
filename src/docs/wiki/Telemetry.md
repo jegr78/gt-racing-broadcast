@@ -326,5 +326,3 @@ separately. HTML links require the Telemetry workspace at the recorded local add
 and the explicit analysis profile in the link. Recording deletion removes its owned analyses
 and input packages after the existing confirmation; machine agent settings remain.
 Private recordings and provider credentials are excluded from automated fixtures.
-
-

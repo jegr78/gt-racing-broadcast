@@ -328,7 +328,7 @@ function tmRenderRecs() {
     box.appendChild(b);
   });
   const sel = tmState.recs.find(r => r.rec === tmState.rec);
-  
+
   $('tm-del').disabled = !sel || !!sel.recording;   // the relay's open file is never deleted
 }
 
@@ -1408,4 +1408,3 @@ async function tmShiftCopy(){
   provenance:'Copied acceleration calculation '+ref.algorithm+' · '+ref.source?.identity+' · commit '+ref.source?.commit+' · '+JSON.stringify(ref.source?.hashes)};
  tcRender();tcChanged();tcStatus('Copied as unconfirmed event table. Enter intended configuration and confirm applicability separately.');
 }
-
