@@ -830,7 +830,7 @@ def t_list_duration_ignores_incomplete_meta_and_nonfinite_records_and_refreshes(
         w = _write(d, [(10.0, 'A', _plain()), (30.0, 'A', _plain())])
         assert rec.list_recordings(d)[0]['duration_s'] == 20.0
         with open(w.path, 'ab') as stream:
-            stream.write(rec._encode(900, rec._META, b'{"dropped":1}'))
+            stream.write(rec._encode(900, rec._META, b'{"dropped":1}' + b' ' * 300))
             stream.write(rec._encode(float('nan'), ord('A'), _plain()))
             stream.write(rec._REC.pack(1000, ord('A'), len(_plain())) + b'bad')
         assert rec.list_recordings(d)[0]['duration_s'] == 20.0
