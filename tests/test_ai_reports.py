@@ -4,6 +4,7 @@ import copy
 import io
 import hashlib
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -69,6 +70,21 @@ def t_failed_run_diagnostics_are_bounded_and_do_not_follow_symlinks():
         assert logs['stderr.log'] == 'x' * 16384 + '\n[truncated]'
         assert 'runner-error.log' not in logs
         assert reply['report'] is None
+
+
+def t_failed_run_diagnostics_reject_hardlinks_and_missing_files():
+    with tempfile.TemporaryDirectory() as d:
+        _, _, run, store = setup(d)
+        directory = store.directory(run['id'])
+        saved = json.loads((directory / 'run.json').read_text())
+        saved.update(state='failed', report=None)
+        (directory / 'run.json').write_text(json.dumps(saved))
+        private = Path(d) / 'private.txt'
+        private.write_text('outside-profile secret')
+        os.link(private, directory / 'runner-error.log')
+        (directory / 'validation-error.log').mkdir()
+        (directory / 'stderr.log').unlink(missing_ok=True)
+        assert store.get(run['id'])['diagnostics'] == []
 
 
 def t_full_session_package_survives_snapshot_history_and_export():

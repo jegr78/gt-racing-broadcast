@@ -393,12 +393,13 @@ class Store:
         if run["state"] in ai_jobs.TERMINAL and run["state"] != "completed":
             for name in ("validation-error.log", "runner-error.log", "stderr.log"):
                 path = directory / name
-                if path.is_file() and not path.is_symlink():
-                    with path.open("rb") as stream:
-                        raw = stream.read(16385)
-                    if raw:
-                        diagnostics.append(dict(name=name, text=raw[:16384].decode("utf-8", "replace")
-                                                + ("\n[truncated]" if len(raw) > 16384 else "")))
+                try:
+                    raw = ai_jobs.regular_output_bytes(path, max_bytes=16385, prefix=True)
+                except (ai_jobs.JobError, OSError):
+                    continue
+                if raw:
+                    diagnostics.append(dict(name=name, text=raw[:16384].decode("utf-8", "replace")
+                                            + ("\n[truncated]" if len(raw) > 16384 else "")))
         return dict(run, diagnostics=diagnostics, ok=True)
 
     def history(self, rec=None):

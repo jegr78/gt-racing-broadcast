@@ -380,7 +380,8 @@ def snapshot_package(prepared, destination, frozen):
         (destination / name).write_bytes(raw)
 
 
-def regular_output_bytes(path, *, max_bytes=MAX_OUTPUT_BYTES):
+def regular_output_bytes(path, *, max_bytes=MAX_OUTPUT_BYTES, prefix=False):
+    """Read a single-link regular file; prefix is only for truncated diagnostics."""
     path = Path(path)
     if path.is_symlink():
         raise JobError("invalid_output", "Provider result cannot be a symlink")
@@ -398,13 +399,13 @@ def regular_output_bytes(path, *, max_bytes=MAX_OUTPUT_BYTES):
         if (
             not stat.S_ISREG(st.st_mode)
             or st.st_nlink != 1
-            or st.st_size > max_bytes
+            or (not prefix and st.st_size > max_bytes)
         ):
             raise JobError(
                 "invalid_output",
                 "Provider result must be a bounded unlinked regular file",
             )
-        raw = f.read(max_bytes + 1)
+        raw = f.read(max_bytes if prefix else max_bytes + 1)
         if len(raw) > max_bytes:
             raise JobError("invalid_output", "Provider result exceeds the output bound")
         return raw
