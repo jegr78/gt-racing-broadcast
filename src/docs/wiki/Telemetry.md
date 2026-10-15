@@ -51,6 +51,9 @@ running relay.
   tyre temperatures and the lap-time trend in driving order (the best lap green, laps that
   were not counted grey). Click a dot in the trend to make that lap lap B.
 - **Recordings and laps.** Pick a recording, newest first, to list its laps with time.
+  Duration comes from the first and last complete stored packet, so copying or
+  importing a recording does not change it. Listing scans record headers without
+  decoding telemetry or rebuilding indexes; unchanged files reuse a bounded cache.
   Recording labels show weekday, date, start time and lap count; hover for the file stem.
   **Compare: this recording** above the charts opens a scrollable list of recordings
   with the same track and car. Only the selected recording is included by default.

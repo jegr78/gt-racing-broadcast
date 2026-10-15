@@ -36,6 +36,13 @@ Storage formats and directories remain unchanged:
 
 The same local origin retains existing browser drafts. UI preferences and the last comparison use profile-specific browser storage. Destructive operations retain active-recording and AI-admission safeguards; a profile switch during a confirmation invalidates that operation.
 
+Recording duration uses the first and last finite timestamps of complete packet
+records, independent of the filesystem modification time or the lap index. A bounded
+4096-entry cache keys the header-only scan by path, size, timestamps and inode.
+Growing or replaced files are rescanned, and incomplete tails and metadata records
+do not extend capture duration. This also keeps report-window filtering independent
+of file copy times.
+
 ## Verification
 
 `tests/test_telemetry_workspace.py` covers request-local profile resolution, concurrent requests, child pinning, invalid profiles and local-origin refusal. Existing telemetry/context/AI tests retain their domain assertions against the extracted production functions.
