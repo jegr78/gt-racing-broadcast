@@ -137,8 +137,12 @@ async def verify(base, home, launcher, env, shots):
         await other.wait_for_function('() => tmEditor.draft && !tmEditor.busy')
         assert await other.get_by_label('Provenance notes',exact=True).evaluate('element => getComputedStyle(element).backgroundColor !== "rgb(255, 255, 255)"'), 'Track-editor textarea must use the dark theme'
         await other.evaluate('() => tmEditorClose()')
+        # The selected task now survives startup; the last-comparison action belongs to Archive.
+        await other.get_by_role('button', name='Data management', exact=True).first.click()
         await other.reload()
-        await other.wait_for_function('() => tmState.loaded && !!tmState.profile')
+        await other.wait_for_function('() => tmState.loaded && !!tmState.profile && currentView === "settings"')
+        assert await other.locator('[data-view="settings"]').is_visible()
+        await other.get_by_role('button', name='Archive', exact=True).click()
         assert await other.locator('#workspace-last').is_visible()
         await other.locator('#workspace-last').click()
         await other.wait_for_function('() => currentView === "telemetry" && !!tmState.lapB?.recording_id')
