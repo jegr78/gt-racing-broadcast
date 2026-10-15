@@ -127,7 +127,7 @@ function workspaceInspector() {
   const visible = $('workspace-inspector').hidden;
   $('workspace-inspector').hidden = !visible;
   $('workspace-details').setAttribute('aria-expanded', String(visible));
-  document.querySelector('.tmgrid').classList.toggle('has-inspector', visible);
+  if(visible)$('workspace-inspector').scrollIntoView({block:'nearest'});
   requestAnimationFrame(() => tmRefit());
 }
 function workspaceAI() {
@@ -144,9 +144,7 @@ function workspaceZoom(reset=false) {
   tmRenderCharts();tmRenderMap();workspaceSeek(Number($('workspace-cursor').value));
 }
 function workspaceSeek(distance) {
-  const chart=tmState.chart;if(!chart)return;
-  const box=$('tm-charts').getBoundingClientRect();
-  tmHover({clientX:box.left+chart.X(distance)/chart.W*box.width});
+  tmSeek(distance);
 }
 function workspaceCursor(distance) {
   $('workspace-cursor').value=String(distance);$('workspace-distance').textContent=Math.round(distance)+' m';

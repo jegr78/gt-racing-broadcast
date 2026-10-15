@@ -12,7 +12,7 @@ both local interfaces and requires acknowledgement of an active AI analysis.
   local `.gt7rec` path here. In-progress captures remain protected from analysis/deletion.
 - **Analysis** shows reference A and analysed lap B in wide, aligned traces. Set a
   distance window for all charts; the distance slider also works with keyboard arrows.
-  **Map & sectors** reveals supporting geometry and timing. **Notes & context** opens
+  The numbered track map stays beside the graphs, follows the selected distance and retains that position when you move away. **Sectors & markers** opens the timing detail below the graphs. **Notes & context** opens
   recording annotations. Analysis profile selection never changes broadcast selection.
 - **Reports** shows saved AI runs, validated findings and exports. Links reopen the exact
   analysis profile and verify the recording identity.
@@ -364,3 +364,11 @@ a practice attempt and a measurable check. Comparison differences are not promis
 of recoverable time.
 
 ![Visual driver report with measured channel comparisons](images/cc-ai-visual-report.png)
+
+Turn numbers in report maps and the workspace use the saved marker definitions.
+`T` identifies reviewed turns; `P` identifies provisional geometry proposals.
+Passages show the turn number and metre position together. Missing numbering is
+stated explicitly. On smaller screens the map moves above the charts. The shared
+marker editor retains its numbered world anchors.
+
+![Numbered map and persistent telemetry position](images/telemetry-analysis.png)

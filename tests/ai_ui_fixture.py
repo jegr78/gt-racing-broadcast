@@ -98,7 +98,8 @@ result['findings'][0].update(topic='throttle',observation='Measured throttle var
         ctx['engineer_read']=lambda data:dict(ok=True,profile=self.profile,available=False,
             enabled=False,revision=0,recordings=[],grants=[])
         rec=self.source.index['rec'];rows=self.source.index['laps'];track={'track':'Fixture track','layout':'Forward'}
-        recording=dict(rec=rec,name=self.source.name,indexed=True,recording=False,laps=2,completed_laps=2,partial_segments=0,track=track)
+        recording=dict(rec=rec,name=self.source.name,indexed=True,recording=False,laps=2,completed_laps=2,partial_segments=0,track=track,
+                       size=Path(self.source.path).stat().st_size,duration_s=sum(row['time_s'] for row in rows),started='1970-01-01T00:16:40+00:00')
         ctx['telemetry_recordings']=lambda:dict(ok=True,recordings=[recording] if self.profile=='profile' else [])
         ctx['telemetry_laps']=lambda *a,**kw:dict(ok=True,recording=recording,laps=rows,best_sectors=[],theoretical_best=None,comparison_warnings=[],unindexed=0,sector_m=500)
         ctx['telemetry_lap']=lambda name,session,lap,**kw:dict(ok=True,lap=dict(next(r for r in rows if r['session']==int(session) and r['lap']==int(lap)),recording_id=self.source.identity),sector_m=500)

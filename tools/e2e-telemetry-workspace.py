@@ -49,9 +49,14 @@ async def verify(base, home, launcher, env, shots):
         assert pointer.read_text(encoding='utf-8').strip() == 'alpha'
         assert await other.locator('#workspace-broadcast').inner_text() == 'Broadcast profile: alpha'
         assert await other.locator('#tm-charts').bounding_box() is not None
+        assert await other.locator('#workspace-trackpane').is_visible()
+        track_box=await other.locator('#workspace-trackpane').bounding_box()
+        graph_box=await other.locator('#tm-charts').bounding_box()
+        assert track_box['x']>=graph_box['x']+graph_box['width']
         assert not await other.locator('#workspace-inspector').is_visible()
         await other.locator('#workspace-details').click()
         assert await other.locator('#workspace-inspector').is_visible()
+        assert await other.locator('#workspace-trackpane').is_visible()
         await other.locator('#workspace-start').fill('100')
         await other.locator('#workspace-end').fill('500')
         await other.get_by_role('button', name='Apply zoom', exact=True).click()
@@ -61,6 +66,11 @@ async def verify(base, home, launcher, env, shots):
         for _ in range(40):await other.locator('#workspace-cursor').press('ArrowRight')
         assert await other.locator('#workspace-distance').inner_text() == '300 m'
         assert await other.evaluate('() => Number(tmState.cursor.getAttribute("x1")) > 0')
+        assert await other.evaluate('() => tmState.map.dotB.getAttribute("visibility") === "visible"')
+        selected_position=await other.locator('#tm-map-position').inner_text()
+        await other.locator('#workspace-details').hover()
+        assert await other.locator('#tm-map-position').inner_text()==selected_position
+        assert await other.evaluate('() => tmState.map.dotB.getAttribute("visibility") === "visible"')
         await other.get_by_role('button', name='Full lap', exact=True).click()
         assert await other.evaluate('() => tmState.chart.minD') == 0
         await other.get_by_role('button', name='Notes & context', exact=True).click()
@@ -101,6 +111,12 @@ async def verify(base, home, launcher, env, shots):
                 await other.evaluate('name => showView(name)',view)
                 await other.wait_for_timeout(100)
                 assert await other.evaluate('() => document.documentElement.scrollWidth <= innerWidth && document.querySelector("main").scrollWidth <= document.querySelector("main").clientWidth'), (width,view)
+                if view=='telemetry':
+                    assert await other.locator('#workspace-trackpane').is_visible()
+                    if width>=1024:
+                        track_box=await other.locator('#workspace-trackpane').bounding_box()
+                        graph_box=await other.locator('#tm-charts').bounding_box()
+                        assert track_box['x']>=graph_box['x']+graph_box['width'],width
                 if shots and width==1440:
                     label={'telemetry':'analysis','settings':'data'}.get(view,view)
                     await other.screenshot(path=str(ROOT/'src/docs/wiki/images'/('telemetry-'+label+'.png')))

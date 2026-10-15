@@ -27,7 +27,11 @@ def channels(trace, corners):
             throttle_threshold_pct=95,
         )
         speed = [p for p in points if finite(p.get("speed_kmh"))]
-        slowest = min(speed, key=lambda p: p["speed_kmh"]) if len(speed) == len(points) else None
+        slowest = (
+            min(speed, key=lambda p: p["speed_kmh"])
+            if len(speed) == len(points)
+            else None
+        )
         throttle = [p["throttle"] for p in points if finite(p.get("throttle"))]
         steering = [abs(p["steer_deg"]) for p in points if finite(p.get("steer_deg"))]
         row["mean_throttle_pct"] = (
@@ -48,7 +52,9 @@ def channels(trace, corners):
             and finite(p.get("throttle"))
             and p["throttle"] >= 95
         ]
-        row["full_throttle_after_min_m"] = powered[0]["d"] if powered and len(throttle) == len(points) else None
+        row["full_throttle_after_min_m"] = (
+            powered[0]["d"] if powered and len(throttle) == len(points) else None
+        )
         # Do not label an entry/exit sample as a detected pedal transition.
         braked = [p for p in points if finite(p.get("brake")) and p["brake"] >= 5]
         brake_complete = all(finite(p.get("brake")) for p in points)
@@ -209,3 +215,51 @@ def focus(package, limit=4):
         if len(output) >= limit:
             break
     return output
+
+
+def passage(package, lap, distance):
+    """Identify the passage using this lap's saved marker snapshot, never a live catalogue."""
+    if not finite(distance):
+        return ""
+    derived = lap.get("derived", {})
+    definition = package.get("track_definition_snapshots", {}).get(
+        derived.get("definition_fingerprint"), {}
+    )
+    numbers = {
+        corner["id"]: corner.get("number") for corner in definition.get("corners", [])
+    }
+    rows = sorted(
+        (
+            row
+            for row in derived.get("corner_metrics", [])
+            if row.get("id") in numbers
+            and row.get("number") == numbers[row["id"]]
+            and finite(row.get("apex_m"))
+        ),
+        key=lambda row: row["apex_m"],
+    )
+    prefix = "T" if definition.get("reviewed") else "P"
+    metre = str(round(distance)) + " m"
+    inside = [
+        row
+        for row in rows
+        if finite(row.get("entry_m"))
+        and finite(row.get("exit_m"))
+        and row["entry_m"] <= distance <= row["exit_m"]
+    ]
+    if inside:
+        corner = min(inside, key=lambda row: abs(row["apex_m"] - distance))
+        return prefix + str(corner["number"]) + " · " + metre
+    before = next((row for row in reversed(rows) if row["apex_m"] < distance), None)
+    after = next((row for row in rows if row["apex_m"] > distance), None)
+    if before and after:
+        return (
+            prefix
+            + str(before["number"])
+            + "–"
+            + prefix
+            + str(after["number"])
+            + " · "
+            + metre
+        )
+    return metre

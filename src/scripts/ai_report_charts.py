@@ -3,6 +3,7 @@
 import html
 import math
 import statistics
+import track_map_labels
 import ai_driver_review as driver
 
 COLORS = ("#22d3ee", "#fb7185", "#a78bfa", "#fbbf24", "#34d399")
@@ -143,7 +144,7 @@ def trace_chart(title, series, start, end, unit, de=False, bounds=None):
     )
 
 
-def line_chart(lap, reference, start, end, de=False, overview=False):
+def line_chart(lap, reference, start, end, de=False, overview=False, definition=None):
     own = [p for p in lap.get("trace", []) if overview or start <= p["d"] <= end]
     other = (
         [p for p in reference.get("trace", []) if overview or start <= p["d"] <= end]
@@ -170,9 +171,10 @@ def line_chart(lap, reference, start, end, de=False, overview=False):
         )
     xmin, xmax = min(p["x"] for p in rows), max(p["x"] for p in rows)
     zmin, zmax = min(p["z"] for p in rows), max(p["z"] for p in rows)
-    scale = min(550 / max(1, xmax - xmin), 215 / max(1, zmax - zmin))
+    height = 360 if overview else 250
+    scale = min(550 / max(1, xmax - xmin), (height - 35) / max(1, zmax - zmin))
     x = lambda v: 320 + (v - (xmin + xmax) / 2) * scale
-    y = lambda v: 125 - (v - (zmin + zmax) / 2) * scale
+    y = lambda v: height / 2 + (v - (zmin + zmax) / 2) * scale
     parts = []
     for points, color, dash in (
         (other, "#a8b3c7", True),
@@ -208,6 +210,22 @@ def line_chart(lap, reference, start, end, de=False, overview=False):
                 parts.append(
                     f'<circle cx="{x(point["x"]):.2f}" cy="{y(point["z"]):.2f}" r="1.8" fill="{COLORS[0]}"/>'
                 )
+    corners = (definition or {}).get("corners", [])
+    if not overview:
+        located = {
+            row.get("id")
+            for row in lap.get("derived", {}).get("corner_metrics", [])
+            if driver.finite(row.get("apex_m")) and start <= row["apex_m"] <= end
+        }
+        corners = [corner for corner in corners if corner.get("id") in located]
+    labels = track_map_labels.render(
+        corners,
+        lambda point: (x(point["x"]), y(point["z"])),
+        640,
+        height,
+        reviewed=(definition or {}).get("reviewed", False),
+    )
+    parts.append(labels)
     caption = (
         lap_label(lap, de)
         + (" · türkis" if de else " · cyan")
@@ -224,11 +242,24 @@ def line_chart(lap, reference, start, end, de=False, overview=False):
         if de
         else "Measured positions, equal x/z scale. No ideal line."
     )
+    caption += " " + (
+        (
+            "Kurvennummern aus gespeicherten Markierungen."
+            if de
+            else "Turn numbers use saved markers."
+        )
+        if labels
+        else (
+            "Keine gespeicherten Kurvennummern für diesen Kartenausschnitt."
+            if de
+            else "No saved turn numbers for this map window."
+        )
+    )
     return (
         "<figure><h3>"
         + esc(title)
         + "</h3>"
-        + _svg(title, "".join(parts), height=250)
+        + _svg(title, "".join(parts), height=height)
         + "<figcaption>"
         + esc(caption)
         + "</figcaption></figure>"
@@ -425,6 +456,10 @@ def render(package, report):
             + str(round(end))
             + " m"
         )
+        heading = driver.passage(package, lap, distance) + " · " + heading
+        definition = package.get("track_definition_snapshots", {}).get(
+            lap.get("derived", {}).get("definition_fingerprint")
+        )
         identity = lap.get("rec", "") + " · S" + str(lap.get("session", ""))
         if ref:
             identity += (
@@ -446,8 +481,8 @@ def render(package, report):
                 else "Compatible comparison context; fuel load and tyre age can still differ. An observed difference is not guaranteed recoverable time."
             )
             + '</p><div class="chart-grid">',
-            line_chart(lap, ref, start, end, de, overview=True),
-            line_chart(lap, ref, start, end, de),
+            line_chart(lap, ref, start, end, de, overview=True, definition=definition),
+            line_chart(lap, ref, start, end, de, definition=definition),
         ]
         if not ref:
             output.append(

@@ -402,6 +402,8 @@ class Store:
         if run.get("report"):
             run["report"]["limitations"] = [ai_report_text.limitation(v, package) for v in run["report"]["limitations"]]
             for item in run["report"]["findings"] + run["report"]["exercises"]:
+                lap = next(lap for lap in package["laps"] + package["references"] if lap["id"] == item["lap_id"])
+                item["location_label"] = ai_driver_review.passage(package, lap, item["location_m"])
                 for evidence in item["evidence"]:
                     evidence["label"] = fact_label(evidence["fact_id"], package)
                     evidence["display_value"] = ai_report_text.display_value(evidence["value"], package)

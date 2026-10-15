@@ -147,3 +147,11 @@ and returns HTML inline. It uses the selected analysis-profile scope and the sam
 origin/Host checks as other analysis routes. The response is not cached, cannot be
 framed and carries CSP and nosniff headers. The app links to this stable URL in a
 new tab; HTML/Markdown/input-package downloads remain explicit secondary actions.
+
+
+All report maps draw the saved turn numbers with separated callouts. Reviewed turns
+use T numbers; provisional geometry uses P numbers. Missing numbering is explicit.
+The AI report, post-event map and telemetry workspace use x-right/z-down orientation.
+Finding cards and chart windows identify their turn and metre position together,
+using the frozen definition fingerprint and matching corner ID/number. Current
+shared marker edits cannot change the identity of a historical report passage.

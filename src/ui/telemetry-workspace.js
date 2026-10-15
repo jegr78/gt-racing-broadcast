@@ -3,7 +3,7 @@
 const TM_NS = 'http://www.w3.org/2000/svg';
 const tmState = {included: null, available: [], anchor: null, loaded: false, recs: [], rec: null, recLaps: [], pool: null,
                  a: null, b: null, lapA: null, lapB: null, sectorM: 200, tracks: null,
-                 chart: null, map: null, cursor: null, profile: null, summary: null};
+                 chart: null, map: null, cursor: null, positionD:0, positionKey:null, profile: null, summary: null};
 const tmLapCache = new Map();
 const TM_STEP = 5;                        // gt7_laps.STEP_M: one trace point per 5 m
 const TM_PAD = {l: 104, r: 10, t: 4, gap: 10, b: 22};
@@ -167,7 +167,8 @@ function tmClearPair(status) {
   tmSeq.pair++;
   tmState.lapA = tmState.lapB = tmState.pool = tmState.a = null;
   tmState.chart = tmState.map = tmState.cursor = null;
-  ['tm-charts', 'tm-map', 'tm-sectors', 'tm-map-sub'].forEach(id => { $(id).textContent = ''; });
+  tmState.positionD=0;tmState.positionKey=null;
+  ['tm-charts', 'tm-map', 'tm-sectors', 'tm-map-sub', 'tm-map-position', 'tm-map-numbering'].forEach(id => { $(id).textContent = ''; });
   $('tm-map-legend').hidden = $('tm-sec-legend').hidden = true;
   tmPlaceholder('tm-a', status ? 'loading…' : 'no lap');
   tmPlaceholder('tm-b', status ? 'loading…' : 'no lap');
@@ -722,6 +723,7 @@ function tmRender() {
   tmRenderLargerSectors();
   tmChannelRefresh();
   tmShiftRefresh();
+  if(B)tmSeek(tmState.positionD);
 }
 
 function tmRenderSectors() {
@@ -886,15 +888,12 @@ function tmHover(ev) {
   const px = (ev.clientX - box.left) * ch.W / box.width;
   const d = Math.max(ch.minD, Math.min(ch.maxD, ch.minD+(px - TM_PAD.l) / (ch.W - TM_PAD.l - TM_PAD.r) * (ch.maxD-ch.minD)));
   workspaceCursor(d);
+  tmState.positionD=d;tmState.positionKey=tmPositionKey();
   const x = ch.X(d).toFixed(1);
   tmState.cursor.setAttribute('x1', x);
   tmState.cursor.setAttribute('x2', x);
-  const i = Math.round(d / TM_STEP);       // station i sits at i * TM_STEP metres
-  const at = l => {      // a closing point far off station i belongs to another distance
-    const r = tmTrace(l)[i];
-    return r && Math.abs(r.d - i * TM_STEP) < TM_STEP / 2 ? r : null;
-  };
-  const ra = at(tmState.lapA), rb = at(tmState.lapB);
+  const ra = tmAtDistance(tmState.lapA,d), rb = tmAtDistance(tmState.lapB,d);
+  $('tm-map-position').textContent=tmPassageLabel(tmState.lapB,rb?.d??d)+(tmMapPt(rb)?'':' · position unavailable');
   tmState.noteCursorKey = tmState.lapB ? tmKey(tmState.lapB) : null;
   tmState.noteCursor = rb && tmMapPt(rb) ? {x: rb.x, z: rb.z, d: rb.d, t: rb.t} : null;
   ch.panels.forEach(p => {
@@ -908,9 +907,32 @@ function tmHover(ev) {
 }
 
 function tmLeave() {
-  if (tmState.cursor) { tmState.cursor.setAttribute('x1', -10); tmState.cursor.setAttribute('x2', -10); }
-  if (tmState.chart) tmState.chart.panels.forEach(p => { p.read.textContent = ''; tmReadBg(p, tmState.chart.W); });
-  tmMapCursor(null, null);
+  // Keep the selected distance visible while the driver reads the map or findings.
+}
+function tmPositionKey(){return tmState.lapB?tmKey(tmState.lapB)+'|'+(tmState.lapB.recording_id||''):null;}
+function tmAtDistance(lap,distance){
+  const station=Math.round(distance/TM_STEP),row=tmTrace(lap)[station];
+  return row&&Math.abs(row.d-station*TM_STEP)<TM_STEP/2?row:null;
+}
+function tmPassageLabel(lap,distance){
+  const prefix=lap?.track_definition?.reviewed?'T':'P';
+  const corners=(lap?.corner_metrics||[]).filter(c=>Number.isFinite(c.apex_m)&&Number.isInteger(c.number)).sort((a,b)=>a.apex_m-b.apex_m);
+  const inside=corners.filter(c=>Number.isFinite(c.entry_m)&&Number.isFinite(c.exit_m)&&c.entry_m<=distance&&distance<=c.exit_m)
+    .sort((a,b)=>Math.abs(a.apex_m-distance)-Math.abs(b.apex_m-distance))[0];
+  const metre=Math.round(distance)+' m';if(inside)return prefix+inside.number+' · '+metre;
+  const before=[...corners].reverse().find(c=>c.apex_m<distance),after=corners.find(c=>c.apex_m>distance);
+  return before&&after?'Between '+prefix+before.number+' and '+prefix+after.number+' · '+metre:metre;
+}
+function tmSeek(distance){
+  const chart=tmState.chart;if(!chart)return;
+  const box=$('tm-charts').getBoundingClientRect();if(!box.width)return;
+  tmHover({clientX:box.left+chart.X(Math.max(chart.minD,Math.min(chart.maxD,distance)))/chart.W*box.width});
+}
+function tmRestoreMapPosition(){
+  if(tmState.positionKey!==tmPositionKey()){tmState.positionKey=tmPositionKey();tmState.positionD=0;}
+  const d=tmState.positionD,point=tmAtDistance(tmState.lapB,d);
+  tmMapCursor(tmAtDistance(tmState.lapA,d),point);
+  $('tm-map-position').textContent=tmPassageLabel(tmState.lapB,point?.d??d)+(tmMapPt(point)?'':' · position unavailable');
 }
 
 // Sized from the character count (11px mono is ~6.7px wide), so a hover never forces a layout.
@@ -927,8 +949,11 @@ function tmRenderMap() {
   const svg = $('tm-map');
   svg.textContent = '';
   tmState.map = null;
+  if(tmState.positionKey!==tmPositionKey()){tmState.positionKey=tmPositionKey();tmState.positionD=0;}
   const A = tmState.lapA, B = tmState.lapB;
   const ta = tmTrace(A), tb = tmTrace(B);
+  $('tm-map-position').textContent='Position unavailable for this lap.';
+  $('tm-map-numbering').textContent='';$('tm-map-legend').hidden=true;
   if (!tb.length) return;
   const W = tmMapW(), pad = 12;
   let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity, hasB = false;
@@ -941,10 +966,13 @@ function tmRenderMap() {
   if (!hasB) {
     svg.setAttribute('viewBox', '0 0 ' + W + ' 24');
     tmEl('text', {x: 0, y: 15}, svg).textContent = 'no position data in this lap';
+    $('tm-map-position').textContent='Position unavailable for this lap.';
+    $('tm-map-numbering').textContent='';
     return;
   }
   const s = (W - 2 * pad) / (Math.max(x1 - x0, z1 - z0) || 1);
-  const H = Math.round((z1 - z0) * s + 2 * pad);
+  const sides=[0,0];for(const corner of B.track_definition?.corners||[]){if(tmMapPt(corner.apex))sides[corner.apex.x>=(x0+x1)/2?1:0]++;}
+  const H = Math.max(72,Math.round((z1-z0)*s+2*pad),Math.max(...sides)*16+28);
   svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
   const ox = (W - (x1 - x0) * s) / 2, oz = (H - (z1 - z0) * s) / 2;   // centre the shorter axis
   const P = p => [ox + (p.x - x0) * s, oz + (p.z - z0) * s];
@@ -972,14 +1000,25 @@ function tmRenderMap() {
   $('tm-map-legend').hidden = false;
   const [sx, sy] = P(tb.find(tmMapPt));
   tmEl('circle', {cx: sx, cy: sy, r: 3.5, class: 'tm-line'}, svg);   // start/finish line
-  for(const corner of B.track_definition?.corners||[]){if(!tmMapPt(corner.apex))continue;
-    const [cx,cy]=P(corner.apex);if(cx<0||cx>W||cy<0||cy>H)continue;
-    const circle=tmEl('circle',{cx,cy,r:3,class:'tm-marker'},svg);
-    tmEl('title',{},circle).textContent='Turn '+corner.number+(corner.name?' · '+corner.name:'')+' · '+corner.direction;
-    tmEl('text',{x:cx+4,y:cy-4,'font-size':10},svg).textContent=(B.track_definition.reviewed?'T':'P')+corner.number;
-  }
+  tmCornerLabels(svg,B.track_definition?.corners||[],P,W,H,!!B.track_definition?.reviewed);
+  $('tm-map-numbering').textContent=B.track_definition?.corners?.length?
+    (B.track_definition.reviewed?'Turn numbers from saved reviewed markers.':'P numbers are provisional geometry markers.'):'No saved turn numbering for this track.';
   const dot = cls => tmEl('circle', {r: 5, cx: 0, cy: 0, visibility: 'hidden', class: cls}, svg);
   tmState.map = {P, W, dotA: dot('tm-dot-a'), dotB: dot('tm-dot-b')};
+  tmRestoreMapPosition();
+}
+
+function tmCornerLabels(svg,corners,project,W,H,reviewed){
+  const groups=[[],[]],seen=new Set();
+  for(const corner of corners){if(!Number.isInteger(corner.number)||corner.number<=0||seen.has(corner.number)||!tmMapPt(corner.apex))continue;
+    const [x,y]=project(corner.apex);if(!Number.isFinite(x)||!Number.isFinite(y)||x<0||x>W||y<0||y>H)continue;
+    seen.add(corner.number);groups[x>=W/2?1:0].push({corner,x,y});}
+  groups.forEach((rows,side)=>{rows.sort((a,b)=>a.y-b.y);const gap=Math.min(16,(H-28)/Math.max(1,rows.length-1));let previous=-100;
+    rows.forEach(({corner,x,y},i)=>{const labelY=Math.min(H-10-(rows.length-i-1)*gap,Math.max(16+i*gap,y+4,previous+gap));previous=labelY;
+      tmEl('path',{d:'M'+x+','+y+'L'+(side?W-38:38)+','+(labelY-4),class:'tm-corner-leader'},svg);
+      const dot=tmEl('circle',{cx:x,cy:y,r:3,class:'tm-marker'},svg);tmEl('title',{},dot).textContent=(reviewed?'Turn ':'Provisional marker ')+corner.number+(corner.name?' · '+corner.name:'');
+      tmEl('text',{x:side?W-10:10,y:labelY,'text-anchor':side?'end':'start',class:'tm-corner-label'},svg).textContent=(reviewed?'T':'P')+corner.number;
+    });});
 }
 
 // A lap that does not reach the cursor distance (r null) shows no dot.
@@ -1003,6 +1042,7 @@ function tmRefit() {
   if (cw && (!tmState.chart || Math.max(300, cw) !== tmState.chart.W)) tmRenderCharts();
   const mw = Math.round($('tm-map').getBoundingClientRect().width);
   if (mw && (!tmState.map || Math.max(200, mw) !== tmState.map.W)) tmRenderMap();
+  tmSeek(tmState.positionD);
 }
 
 // The Set track row for an unknown or ambiguous recording; candidates come first.

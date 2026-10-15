@@ -5,6 +5,7 @@ Input is the lap index (gt7_laps.index) of every recording that overlaps the rep
 window; output is a JSON-safe block that report_build renders. Figures are per track
 and car and use counted laps only (the relay's verdicts, as on the HUD).
 """
+import track_map_labels
 import html
 import json
 import math
@@ -110,7 +111,9 @@ def _sector_map(best, pool):
         if len(pts) >= 2:
             color = GREY if gap is None else gap_color(gap, worst)
             sectors.append({"i": i + 1, "points": pts, "gap_s": gap, "color": color})
-    return {"sectors": sectors, "worst_gap_s": worst} if sectors else None
+    return {"sectors": sectors, "worst_gap_s": worst,
+            "corners": (best.get("track_definition") or {}).get("corners", []),
+            "reviewed": (best.get("track_definition") or {}).get("reviewed", False)} if sectors else None
 
 
 def _group(key, members):
@@ -278,5 +281,8 @@ def svg_track_map(track_map, size=360, pad=14):
     sx, sy = xy(track_map["sectors"][0]["points"][0])
     marker = (f'<circle cx="{sx:.1f}" cy="{sy:.1f}" r="5" fill="#ffffff" stroke="#1c1e21" '
               f'stroke-width="2"><title>Start/finish</title></circle>')
+    labels = track_map_labels.render(track_map.get("corners", []), lambda point: xy([point["x"], point["z"]]), size, size, reviewed=track_map.get("reviewed", False), foreground="#202734", outline="#ffffff")
+    if not labels:
+        labels = f'<text x="{pad}" y="{size - 2}" fill="#202734" font-size="11">No saved turn numbering</text>'
     return (f'<svg viewBox="0 0 {size} {size}" width="100%" role="img" '
-            f'aria-label="Track map of the best lap">{"".join(lines)}{marker}</svg>')
+            f'aria-label="Track map of the best lap">{"".join(lines)}{marker}{labels}</svg>')
