@@ -179,7 +179,12 @@ def t_darwin_zombie_group_is_only_accepted_after_reap_and_absence_probe():
     proc = mock.Mock(pid=12345)
     proc.poll.return_value = None
     proc.wait.return_value = 0
-    with mock.patch.object(j.os, 'name', 'posix'), mock.patch.object(j.sys, 'platform', 'darwin'), mock.patch.object(j.signal, 'SIGKILL', 9, create=True), mock.patch.object(j.os, 'killpg', create=True, side_effect=[PermissionError(1, 'zombie-only group'), ProcessLookupError()]) as kill:
+    def signal_group(_pid, sig):
+        if sig == 9:
+            raise PermissionError(1, 'zombie-only group')
+        assert proc.wait.called, 'Probe must follow the owned leader reap'
+        raise ProcessLookupError()
+    with mock.patch.object(j.os, 'name', 'posix'), mock.patch.object(j.sys, 'platform', 'darwin'), mock.patch.object(j.signal, 'SIGKILL', 9, create=True), mock.patch.object(j.os, 'killpg', create=True, side_effect=signal_group) as kill:
         j.terminate_tree(proc)
     assert kill.call_args_list == [mock.call(proc.pid, 9), mock.call(proc.pid, 0)]
     assert proc.wait.called

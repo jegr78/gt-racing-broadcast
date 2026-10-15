@@ -341,10 +341,13 @@ def terminate_tree(proc, tree=None):
             # a new process could have reused the released group identity.
             try:
                 proc.wait(timeout=10)
+            except (OSError, subprocess.TimeoutExpired) as reap_error:
+                raise JobError("cleanup_failed", "Could not reap the owned analysis process") from reap_error
+            try:
                 os.killpg(proc.pid, 0)
             except ProcessLookupError:
-                pass
-            except (OSError, subprocess.TimeoutExpired) as probe_error:
+                pass  # The non-destructive probe confirms the group disappeared.
+            except OSError as probe_error:
                 raise JobError("cleanup_failed", "Could not confirm analysis process group termination") from probe_error
             else:
                 raise JobError("cleanup_failed", "The analysis process group remains after termination")
