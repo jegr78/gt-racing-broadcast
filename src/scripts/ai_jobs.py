@@ -10,6 +10,7 @@ import re
 import shutil
 import stat
 import signal
+import sys
 import subprocess
 import tempfile
 import threading
@@ -332,6 +333,21 @@ def terminate_tree(proc, tree=None):
             os.killpg(proc.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass  # The owned group already exited.
+        except PermissionError as exc:
+            if sys.platform != "darwin":
+                raise JobError("cleanup_failed", "Could not terminate the owned analysis process group") from exc
+            # Darwin returns EPERM for a zombie-only group. Reap the owned
+            # leader, then accept only proven group absence. Never retry SIGKILL:
+            # a new process could have reused the released group identity.
+            try:
+                proc.wait(timeout=10)
+                os.killpg(proc.pid, 0)
+            except ProcessLookupError:
+                pass
+            except (OSError, subprocess.TimeoutExpired) as probe_error:
+                raise JobError("cleanup_failed", "Could not confirm analysis process group termination") from probe_error
+            else:
+                raise JobError("cleanup_failed", "The analysis process group remains after termination")
     try:
         proc.wait(timeout=10)
     except subprocess.TimeoutExpired:

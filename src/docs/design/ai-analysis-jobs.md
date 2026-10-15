@@ -97,3 +97,9 @@ finally now cleans the owned tree before TemporaryDirectory exits; the Windows
 Job Object is terminated and polled to zero active descendants before its handle
 is released. Ordering and descendant-wait guards were independently falsified at
 the intended assertions. No timeout was increased.
+
+On Darwin, a provider can exit between the leader poll and the group signal.
+XNU can return EPERM for a zombie-only group. The runner reaps its owned leader
+and accepts cleanup only when a non-destructive signal-zero probe confirms the
+group no longer exists. A remaining, inaccessible or unconfirmed group is a
+cleanup failure. It never retries SIGKILL after releasing the process identity.
