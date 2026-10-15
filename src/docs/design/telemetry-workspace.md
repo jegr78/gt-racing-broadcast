@@ -13,6 +13,11 @@ The workspace has four tasks:
 - **Reports** contains profile-owned AI histories and text-only validated results. Explicit preview/start/cancel and package export remain available from the selected analysis.
 - **Data management** contains recording context/preparation/templates, CSV export, track/sector editing, vehicle reference maintenance and machine-wide AI configuration.
 
+Direct workspace links preserve the supported task hash on startup and reload.
+Unknown tasks fall back to Archive; explicit profile changes reset the task to
+Archive. Recording/lap evidence query parameters retain priority and their identity
+validation before opening Analysis.
+
 The Control Center retains producer Engineer opt-in/grants, broadcast replay including the on-air confirmation, and the workspace entry. The remote Race Engineer Desk remains read-only and keeps its existing roles, opt-in, opaque references and historical grants. The new local workspace does not expose an additional remote archive or editor.
 
 Live UDP reception, recording, replay and live Engineer computation remain relay-owned. Archive work and AI operate on existing profile files with no running relay.

@@ -22,6 +22,17 @@ async def verify(base, home, launcher, env, shots):
         errors = []
         page = await context.new_page()
         page.on('pageerror', lambda error: errors.append(str(error)))
+        # Requested tasks survive a direct link and reload; explicit profile changes reset.
+        await page.goto(base + '/telemetry?profile=alpha#reports')
+        await page.wait_for_function('() => tmState.loaded && currentView === "reports"')
+        assert await page.locator('[data-view="reports"]').is_visible()
+        await page.reload()
+        await page.wait_for_function('() => tmState.loaded && currentView === "reports"')
+        await page.locator('#workspace-profile').select_option('beta')
+        await page.wait_for_function('() => tmState.loaded && tmState.profile === "beta" && currentView === "archive"')
+        await page.goto(base + '/telemetry?profile=alpha#settings')
+        await page.wait_for_function('() => tmState.loaded && currentView === "settings"')
+        assert await page.locator('[data-view="settings"]').is_visible()
         await page.goto(base + '/telemetry?profile=alpha')
         await page.wait_for_function('() => tmState.loaded && !!tmState.lapB?.recording_id')
         assert await page.locator('[data-view="archive"]').is_visible()

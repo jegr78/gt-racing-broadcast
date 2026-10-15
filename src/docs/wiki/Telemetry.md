@@ -41,6 +41,9 @@ shift targets remain recording/profile context snapshots.
 
 ![Telemetry context editor](images/cc-context.png)
 
+Direct links to Archive, Analysis, Reports and Data management keep their task
+on reload. Switching the analysis profile returns to Archive.
+
 The workspace reads the selected analysis profile's GT7 telemetry recordings
 (`runtime/<profile>/telemetry-recordings/`, see [Relay mode](Relay-Mode)) and needs no
 running relay.

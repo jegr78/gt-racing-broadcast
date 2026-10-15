@@ -167,6 +167,7 @@ async function workspaceQuit() {
   document.body.replaceChildren();const message=document.createElement('p');message.textContent='UI service stopped. You can close this tab.';document.body.append(message);
 }
 async function workspaceInit() {
+  const requestedView=location.hash.slice(1);
   $('cmodal').addEventListener('close',()=>{const resolve=modalResolve;modalResolve=null;resolve?.($('cmodal').returnValue==='ok');});
   const ai=$('ai-analysis');
   if(ai){const details=document.createElement('details');details.id='workspace-ai';const summary=document.createElement('summary');summary.textContent='Post-session AI analysis';details.append(summary,ai);document.querySelector('[data-view="telemetry"]').append(details);
@@ -184,4 +185,5 @@ async function workspaceInit() {
   if(!profiles.some(profile=>profile.name===chosen)){workspaceStatus('Select an existing analysis profile.');return;}
   $('workspace-profile').value=chosen;await workspaceProfile(chosen);
   if(query.has('rec'))await tmOpenReference({profile:chosen,rec:query.get('rec'),session:Number(query.get('session')),lap:Number(query.get('lap')),recording_id:query.get('recording_id'),location_m:query.has('location_m')?Number(query.get('location_m')):null});
+  else showView(['archive','telemetry','reports','settings'].includes(requestedView)?requestedView:'archive');
 }
