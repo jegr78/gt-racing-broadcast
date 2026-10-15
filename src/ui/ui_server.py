@@ -4,6 +4,7 @@ Same construction as the relay's control server (ThreadingHTTPServer +
 make_handler closure). It binds 127.0.0.1 only; serve() and _allowed() are the
 bind and auth seams.
 Spec: docs/superpowers/specs/2026-06-07-control-center-design.md."""
+import base64
 import json, os, queue, shutil, tempfile, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
@@ -255,7 +256,7 @@ def make_handler(ctx):
             )
             return self._json(result, code=status)
 
-        def _ai_call(self, operation, payload):
+        def _ai_call(self, operation, payload, inline=False):
             callback = ctx.get("ai_request")
             if callback is None:
                 if operation == "settings":
@@ -280,6 +281,22 @@ def make_handler(ctx):
                         "message": "Analysis operation failed",
                     },
                 }
+            if inline and result.get("ok"):
+                try:
+                    raw = base64.b64decode(result["content"], validate=True)
+                except (KeyError, ValueError, TypeError):
+                    return self._ai_result(dict(ok=False, error=dict(code="execution_failed", message="Report could not be opened")))
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Disposition", "inline")
+                self.send_header("Content-Length", str(len(raw)))
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.send_header("X-Frame-Options", "DENY")
+                self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; object-src 'none'; frame-ancestors 'none'")
+                self.end_headers()
+                self.wfile.write(raw)
+                return None
             return self._ai_result(result)
 
         def _not_found(self, what="not found"):
@@ -796,6 +813,10 @@ def make_handler(ctx):
                     return self._serve_bytes(_pages.read(_context_script), 'application/javascript; charset=utf-8')
                 except OSError:
                     return self._not_found('context editor unavailable')
+            if path == '/api/ai/report':
+                if not self._context_allowed(structured=True):return None
+                query=parse_qs(urlparse(self.path).query or '',keep_blank_values=True)
+                return self._ai_call('export', dict({k:v[0] for k,v in query.items()}, format='html'), inline=True)
             if path in ('/api/ai/settings','/api/ai/probe','/api/ai/status','/api/ai/job','/api/ai/history','/api/ai/export','/api/ai/selection','/api/ai/references'):
                 if not self._context_allowed(structured=True):return None
                 query=parse_qs(urlparse(self.path).query or '',keep_blank_values=True)

@@ -47,6 +47,10 @@ from pathlib import Path
 sys.stdin.read();p=json.loads(Path('detail.json').read_text());lap=p['laps'][0]
 e=[{'fact_id':lap['id']+'/time_s','value':lap['metrics']['time_s']}];ref={'lap_id':lap['id'],'location_m':500,'evidence':e}
 result={'version':1,'findings':[dict(priority=1,title='<script>window.aiInjected=true</script>',interpretation='Observed lap time; exit variation is a hypothesis.',possible_causes=['Unproven throttle timing'],**ref)],'exercises':[dict(priority=n,action='Practice smooth exits '+str(n),check='Compare supplied lap times',**ref) for n in (1,2,3)],'limitations':['Synthetic telemetry and controlled CLI; no provider account used.']}
+result.update(version=2,summary='Practice a measured exit transition.',technical_notes=[])
+partner=next((c['reference_id'] for c in p['comparisons'] if c['lap_id']==lap['id'] and c['reference_id']!=lap['id']),None)
+for item in result['findings']+result['exercises']:item['reference_id']=partner
+result['findings'][0].update(topic='throttle',observation='Measured throttle varies.',action='Repeat the exit smoothly.',check='Compare the next exit trace.')
 """
         code=code.replace(repr('<script>window.aiInjected=true</script>'),repr(self.title))
         code+='time.sleep('+repr(self.delay)+')\n'
@@ -94,7 +98,8 @@ result={'version':1,'findings':[dict(priority=1,title='<script>window.aiInjected
         ctx['engineer_read']=lambda data:dict(ok=True,profile=self.profile,available=False,
             enabled=False,revision=0,recordings=[],grants=[])
         rec=self.source.index['rec'];rows=self.source.index['laps'];track={'track':'Fixture track','layout':'Forward'}
-        recording=dict(rec=rec,name=self.source.name,indexed=True,recording=False,laps=2,completed_laps=2,partial_segments=0,track=track)
+        recording=dict(rec=rec,name=self.source.name,indexed=True,recording=False,laps=2,completed_laps=2,partial_segments=0,track=track,
+                       size=Path(self.source.path).stat().st_size,duration_s=sum(row['time_s'] for row in rows),started='1970-01-01T00:16:40+00:00')
         ctx['telemetry_recordings']=lambda:dict(ok=True,recordings=[recording] if self.profile=='profile' else [])
         ctx['telemetry_laps']=lambda *a,**kw:dict(ok=True,recording=recording,laps=rows,best_sectors=[],theoretical_best=None,comparison_warnings=[],unindexed=0,sector_m=500)
         ctx['telemetry_lap']=lambda name,session,lap,**kw:dict(ok=True,lap=dict(next(r for r in rows if r['session']==int(session) and r['lap']==int(lap)),recording_id=self.source.identity),sector_m=500)

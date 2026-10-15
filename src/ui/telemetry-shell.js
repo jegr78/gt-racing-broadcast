@@ -87,10 +87,10 @@ function workspaceSaved() {
   try {return JSON.parse(localStorage.getItem('racecast-telemetry-comparison:'+tmState.profile));}
   catch (_error) {return null;}
 }
-function workspaceSelection() {
+function workspaceSelection(persist=true) {
   const lap = tmState.lapB;
   $('workspace-selected').textContent = tmState.rec ? tmState.profile+' · '+tmState.rec+(lap ? ' · '+tmLapTrack(lap)+' · vehicle '+(lap.car_id || 'unknown') : '') : 'Choose a recording in Archive.';
-  if (currentView === 'telemetry' && lap?.recording_id) {
+  if (persist && currentView === 'telemetry' && lap?.recording_id) {
     const reference = tmState.lapA;
     try {localStorage.setItem('racecast-telemetry-comparison:'+tmState.profile, JSON.stringify({profile:tmState.profile, rec:lap.rec, session:lap.session, lap:lap.lap, recording_id:lap.recording_id,
       included:[...(tmState.included||[])],compare_all:$('tm-compare-all').checked,reference:reference?.recording_id ? {rec:reference.rec,session:reference.session,lap:reference.lap,recording_id:reference.recording_id}:null}));}
@@ -127,7 +127,7 @@ function workspaceInspector() {
   const visible = $('workspace-inspector').hidden;
   $('workspace-inspector').hidden = !visible;
   $('workspace-details').setAttribute('aria-expanded', String(visible));
-  document.querySelector('.tmgrid').classList.toggle('has-inspector', visible);
+  if(visible)$('workspace-inspector').scrollIntoView({block:'nearest'});
   requestAnimationFrame(() => tmRefit());
 }
 function workspaceAI() {
@@ -144,9 +144,7 @@ function workspaceZoom(reset=false) {
   tmRenderCharts();tmRenderMap();workspaceSeek(Number($('workspace-cursor').value));
 }
 function workspaceSeek(distance) {
-  const chart=tmState.chart;if(!chart)return;
-  const box=$('tm-charts').getBoundingClientRect();
-  tmHover({clientX:box.left+chart.X(distance)/chart.W*box.width});
+  tmSeek(distance);
 }
 function workspaceCursor(distance) {
   $('workspace-cursor').value=String(distance);$('workspace-distance').textContent=Math.round(distance)+' m';
@@ -167,6 +165,7 @@ async function workspaceQuit() {
   document.body.replaceChildren();const message=document.createElement('p');message.textContent='UI service stopped. You can close this tab.';document.body.append(message);
 }
 async function workspaceInit() {
+  const requestedView=location.hash.slice(1);
   $('cmodal').addEventListener('close',()=>{const resolve=modalResolve;modalResolve=null;resolve?.($('cmodal').returnValue==='ok');});
   const ai=$('ai-analysis');
   if(ai){const details=document.createElement('details');details.id='workspace-ai';const summary=document.createElement('summary');summary.textContent='Post-session AI analysis';details.append(summary,ai);document.querySelector('[data-view="telemetry"]').append(details);
@@ -184,4 +183,5 @@ async function workspaceInit() {
   if(!profiles.some(profile=>profile.name===chosen)){workspaceStatus('Select an existing analysis profile.');return;}
   $('workspace-profile').value=chosen;await workspaceProfile(chosen);
   if(query.has('rec'))await tmOpenReference({profile:chosen,rec:query.get('rec'),session:Number(query.get('session')),lap:Number(query.get('lap')),recording_id:query.get('recording_id'),location_m:query.has('location_m')?Number(query.get('location_m')):null});
+  else showView(['archive','telemetry','reports','settings'].includes(requestedView)?requestedView:'archive');
 }

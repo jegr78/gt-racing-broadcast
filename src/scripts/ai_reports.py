@@ -1,7 +1,6 @@
 """Deterministic validation, profile-owned history and safe report/input exports."""
 
 import copy
-import html
 import hashlib
 import io
 import json
@@ -11,8 +10,10 @@ import shutil
 import tempfile
 import zipfile
 from pathlib import Path
-from urllib.parse import urlencode, urlparse
+from urllib.parse import urlparse
 
+import ai_driver_review
+import ai_report_text
 import ai_jobs
 import ai_package
 
@@ -116,11 +117,17 @@ def fact_label(fact_id, package=None):
         "usable_laps": "Usable lap count",
         "excluded_laps": "Excluded lap count",
     }
+    de = ai_report_text.german(package or {})
+    labels.update(ai_report_text.DE_FACTS if de else ai_report_text.EN_FACTS)
     short = re.sub(r"^[0-9a-f]+/session/[0-9]+/lap/[0-9]+/", "", fact_id)
     label = labels.get(
         short,
         labels.get(fact_id.split("/")[-1], short.replace("/", " · ").replace("_", " ")),
     )
+    if de and fact_id.split("/")[-1] not in labels:
+        label = "Messwert · " + short
+    if fact_id.endswith("/time_s") and "/derived/" in fact_id:
+        label = "Abschnittszeit (s)" if de else "Section time (s)"
     match = re.match(r"^([0-9a-f]+/session/([0-9]+)/lap/([0-9]+))/", fact_id)
     if match:
         lap = next(
@@ -132,11 +139,21 @@ def fact_label(fact_id, package=None):
             ),
             {},
         )
+        if "/corner_metrics/" in fact_id:
+            try:
+                index = int(fact_id.split("/corner_metrics/", 1)[1].split("/")[0])
+                derived = lap.get("derived", {})
+                row = derived.get("corner_metrics", [])[index] if index >= 0 else {}
+                definition = (package or {}).get("track_definition_snapshots", {}).get(derived.get("definition_fingerprint"), {})
+                if any(corner.get("id") == row.get("id") and corner.get("number") == row.get("number") for corner in definition.get("corners", [])):
+                    label = ("T" if definition.get("reviewed") else "P") + str(row["number"]) + " · " + label
+            except (ValueError, IndexError):
+                pass  # Missing historic marker identity keeps the generic metric label.
         return (
-            lap.get("rec", "Selected recording")
+            lap.get("rec", "Ausgewählte Aufzeichnung" if de else "Selected recording")
             + " · S"
             + match.group(2)
-            + " lap "
+            + (" Runde " if de else " lap ")
             + match.group(3)
             + " · "
             + label
@@ -146,18 +163,25 @@ def fact_label(fact_id, package=None):
 
 def validate(result, package):
     """Validate measurements/references; narrative interpretations remain unproven."""
-    _schema(result, ai_package.RESULT_SCHEMA)
+    _schema(result, ai_package.result_schema(package))
     try:
         laps = ai_package.lap_map(package["laps"] + package["references"])
     except ai_package.PackageError as e:
         _fail(str(e))
-    if sorted(e["priority"] for e in result["exercises"]) != [1, 2, 3]:
+    v2 = package.get("report_schema_version", 1) == 2
+    priorities = [e["priority"] for e in result["exercises"]]
+    if (not v2 and sorted(priorities) != [1, 2, 3]) or len(priorities) != len(set(priorities)):
         _fail("Exercises require distinct priorities 1, 2 and 3")
     report = copy.deepcopy(result)
     for item in report["findings"] + report["exercises"]:
         lap = laps.get(item["lap_id"])
         if lap is None:
             _fail("Result references a nonexistent selected lap")
+        reference = laps.get(item.get("reference_id"))
+        if v2 and item.get("reference_id") is not None and not ai_driver_review.pair_allowed(package, lap, reference):
+            _fail("Result references an undeclared or incompatible comparison")
+        if v2 and item.get("topic") not in (None, "consistency") and item["location_m"] is None:
+            _fail("Technique findings require a location on the lap")
         location = item["location_m"]
         end = lap["trace"][-1]["d"]
         if location is not None and not 0 <= location <= end:
@@ -168,7 +192,19 @@ def validate(result, package):
                 _fail("Unknown evidence fact ID: " + evidence["fact_id"][:160])
             if evidence["value"] != fact["value"]:
                 _fail("Evidence value differs from the frozen package fact: " + evidence["fact_id"][:160])
-            if not _related(evidence["fact_id"], item["lap_id"], package):
+            related = _related(evidence["fact_id"], item["lap_id"], package)
+            if v2:
+                fact_id = evidence["fact_id"]
+                related = fact_id.startswith(lap["id"] + "/") or bool(reference and fact_id.startswith(reference["id"] + "/"))
+                if item.get("topic") == "consistency" and fact_id.startswith("selection/"):
+                    related = True
+                if fact_id.startswith("comparison/") and reference:
+                    try:
+                        pair = package["comparisons"][int(fact_id.split("/")[1])]
+                        related = {pair["lap_id"], pair["reference_id"]} == {lap["id"], reference["id"]}
+                    except (ValueError, IndexError, KeyError):
+                        related = False
+            if not related:
                 _fail("Evidence refers to a lap outside this item's declared comparison: " + evidence["fact_id"][:160])
             evidence["provenance"] = fact["provenance"]
         item["telemetry"] = dict(
@@ -368,15 +404,21 @@ class Store:
                         progress="Process ended without a completed report; retained artifacts are incomplete",
                     )
         if run.get("report"):
+            run["report"]["limitations"] = [ai_report_text.limitation(v, package) for v in run["report"]["limitations"]]
             for item in run["report"]["findings"] + run["report"]["exercises"]:
+                lap = next(lap for lap in package["laps"] + package["references"] if lap["id"] == item["lap_id"])
+                item["location_label"] = ai_driver_review.passage(package, lap, item["location_m"])
                 for evidence in item["evidence"]:
                     evidence["label"] = fact_label(evidence["fact_id"], package)
+                    evidence["display_value"] = ai_report_text.display_value(evidence["value"], package)
                 partners = {
                     c["reference_id"]
                     for c in package["comparisons"]
                     if c["lap_id"] == item["lap_id"]
                     and c["reference_id"] != item["lap_id"]
                 }
+                if run["report"].get("version") == 2:
+                    partners = {item.get("reference_id")} - {None}
                 item["comparisons"] = [
                     dict(
                         rec=lap["rec"],
@@ -514,180 +556,9 @@ def export_package(package, provider):
         })
 
 
-def _markdown(value):
-    return re.sub(r"([\\`*_{}\[\]()<>#+!|])", r"\\\1", str(value))
-
-
 def render(run, package, kind, origin=None):
-    report = run["report"]
-    sections = []
-    linkbase = origin or ""
-    for label, rows in [
-        ("Findings", report["findings"]),
-        ("Exercises", report["exercises"]),
-    ]:
-        sections.append((label, rows))
-    provenance = {
-        k: run.get(k)
-        for k in (
-            "id",
-            "profile",
-            "selection",
-            "package_fingerprint",
-            "agent",
-            "agent_fingerprint",
-            "provider_version",
-            "requested_model",
-            "actual_model",
-            "created_at",
-            "started_at",
-            "finished_at",
-            "state",
-            "input_file_fingerprints",
-        )
-    }
-    provenance["input"] = {
-        k: package[k]
-        for k in (
-            "version",
-            "schema_version",
-            "calculation_version",
-            "source",
-            "context",
-            "reference_provenance",
-            "track_definition_snapshots",
-            "shift_reference_snapshots",
-            "template",
-            "template_version",
-            "goal",
-            "questions",
-            "language",
-        )
-    }
-    if kind == "markdown":
-        out = [
-            "# Racecast analysis",
-            "",
-            "Language: " + _markdown(report["language"]),
-            "",
-            "Supplied factual values below were checked against the immutable package and retain their measured, calculated or external provenance. Interpretations and possible causes remain unproven.",
-            "",
-        ]
-        for label, rows in sections:
-            out += ["## " + label, ""]
-            for item in rows:
-                out += [
-                    "### Priority "
-                    + str(item["priority"])
-                    + ": "
-                    + _markdown(item.get("title", item.get("action"))),
-                    "",
-                ]
-                for field in ("interpretation", "check"):
-                    if field in item:
-                        out += [_markdown(item[field]), ""]
-                if item.get("possible_causes"):
-                    out += [
-                        "Possible causes: "
-                        + _markdown("; ".join(item["possible_causes"])),
-                        "",
-                    ]
-                q = urlencode(
-                    dict(
-                        {k: v for k, v in item["telemetry"].items() if v is not None},
-                        profile=run["profile"],
-                    )
-                )
-                out += [
-                    "[Telemetry reference](" + linkbase + "/telemetry?" + q + "#telemetry)",
-                    "",
-                    "Validated package facts:",
-                    "",
-                ]
-                out += [
-                    "- "
-                    + _markdown(e.get("label", fact_label(e["fact_id"], package)))
-                    + ": "
-                    + _markdown(e["value"])
-                    + " ("
-                    + _markdown(e["provenance"])
-                    + ")"
-                    for e in item["evidence"]
-                ]
-                out += [""]
-        out += (
-            ["## Limitations", ""]
-            + ["- " + _markdown(v) for v in report["limitations"]]
-            + [
-                "",
-                "## Provenance",
-                "",
-                "```json",
-                json.dumps(provenance, indent=2, ensure_ascii=False),
-                "```",
-                "",
-            ]
-        )
-        return "\n".join(out)
-    esc = lambda v: html.escape(str(v), quote=True)
-    out = [
-        '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; style-src \'unsafe-inline\'"><title>Racecast analysis</title><style>body{max-width:960px;margin:2rem auto;padding:1rem;font:16px system-ui;line-height:1.5}pre{white-space:pre-wrap;overflow-wrap:anywhere}li{margin:.4rem 0}article{border-top:1px solid #aaa;padding-top:1rem}</style><body><h1>Racecast analysis</h1><p>Language: '
-        + esc(report["language"])
-        + "</p><p>Supplied factual values were checked against the immutable package and retain their measured, calculated or external provenance. Interpretations and possible causes remain unproven.</p>"
-    ]
-    for label, rows in sections:
-        out += ["<h2>" + label + "</h2>"]
-        for item in rows:
-            out += [
-                "<article><h3>Priority "
-                + str(item["priority"])
-                + ": "
-                + esc(item.get("title", item.get("action")))
-                + "</h3>"
-            ]
-            for field in ("interpretation", "check"):
-                if field in item:
-                    out += ["<p>" + esc(item[field]) + "</p>"]
-            if item.get("possible_causes"):
-                out += [
-                    "<p>Possible causes: "
-                    + esc("; ".join(item["possible_causes"]))
-                    + "</p>"
-                ]
-            q = urlencode(
-                dict(
-                    {k: v for k, v in item["telemetry"].items() if v is not None},
-                    profile=run["profile"],
-                )
-            )
-            out += [
-                '<a href="'
-                + esc(linkbase + "/telemetry?" + q + "#telemetry")
-                + '">Telemetry reference</a><h4>Validated package facts</h4><ul>'
-            ]
-            out += [
-                '<li title="'
-                + esc(e["fact_id"])
-                + '">'
-                + esc(e.get("label", fact_label(e["fact_id"], package)))
-                + ": "
-                + esc(e["value"])
-                + " ("
-                + esc(e["provenance"])
-                + ")</li>"
-                for e in item["evidence"]
-            ]
-            out += ["</ul></article>"]
-    out += (
-        ["<h2>Limitations</h2><ul>"]
-        + ["<li>" + esc(v) + "</li>" for v in report["limitations"]]
-        + [
-            "</ul><h2>Provenance</h2><pre>"
-            + esc(json.dumps(provenance, indent=2, ensure_ascii=False))
-            + "</pre></body></html>"
-        ]
-    )
-    return "\n".join(out)
+    import ai_report_view
+    return ai_report_view.render(run, package, kind, origin, fact_label)
 
 
 def delete_recording_analyses(profile_root, recording_id, recording_name=None):

@@ -12,7 +12,7 @@ both local interfaces and requires acknowledgement of an active AI analysis.
   local `.gt7rec` path here. In-progress captures remain protected from analysis/deletion.
 - **Analysis** shows reference A and analysed lap B in wide, aligned traces. Set a
   distance window for all charts; the distance slider also works with keyboard arrows.
-  **Map & sectors** reveals supporting geometry and timing. **Notes & context** opens
+  The numbered track map stays beside the graphs, follows the selected distance and retains that position when you move away. **Sectors & markers** opens the timing detail below the graphs. **Notes & context** opens
   recording annotations. Analysis profile selection never changes broadcast selection.
 - **Reports** shows saved AI runs, validated findings and exports. Links reopen the exact
   analysis profile and verify the recording identity.
@@ -41,6 +41,9 @@ shift targets remain recording/profile context snapshots.
 
 ![Telemetry context editor](images/cc-context.png)
 
+Direct links to Archive, Analysis, Reports and Data management keep their task
+on reload. Switching the analysis profile returns to Archive.
+
 The workspace reads the selected analysis profile's GT7 telemetry recordings
 (`runtime/<profile>/telemetry-recordings/`, see [Relay mode](Relay-Mode)) and needs no
 running relay.
@@ -51,6 +54,9 @@ running relay.
   tyre temperatures and the lap-time trend in driving order (the best lap green, laps that
   were not counted grey). Click a dot in the trend to make that lap lap B.
 - **Recordings and laps.** Pick a recording, newest first, to list its laps with time.
+  Duration comes from the first and last complete stored packet, so copying or
+  importing a recording does not change it. Listing scans record headers without
+  decoding telemetry or rebuilding indexes; unchanged files reuse a bounded cache.
   Recording labels show weekday, date, start time and lap count; hover for the file stem.
   **Compare: this recording** above the charts opens a scrollable list of recordings
   with the same track and car. Only the selected recording is included by default.
@@ -327,8 +333,9 @@ Choose **Prepare a new run** to deliberately inspect and start another package.
 
 ![Telemetry workspace: saved analysis](images/cc-ai-report.png)
 
-A completed report displays supplied facts with provenance, interpretations and
-possible causes as unproven, and three exercises with priorities 1, 2 and 3.
+A completed report displays supplied facts with provenance and separates measured
+observations from interpretations and possible causes. New reports contain up to
+five focused findings and up to three optional exercises; empty sections are omitted.
 Telemetry links open the referenced lap and metre position in the existing
 comparison view. Saved history is scoped to the analysis profile/recording; switching
 profiles clears the displayed selection and artifacts. Relevant source/context or
@@ -342,3 +349,29 @@ separately. HTML links require the Telemetry workspace at the recorded local add
 and the explicit analysis profile in the link. Recording deletion removes its owned analyses
 and input packages after the existing confirmation; machine agent settings remain.
 Private recordings and provider credentials are excluded from automated fixtures.
+
+
+### Visual driver reports
+
+Completed AI analyses offer **Open visual report**, which opens a profile-scoped
+HTML page directly in your browser. It includes a lap-time trend, measured racing
+lines and distance-aligned speed, throttle, brake input and steering charts where
+the saved package contains those channels. Technical notes and provenance expand
+on demand. Explicit downloads remain under **Exports and technical details**.
+New reports support English and German throughout the report. Older reports keep
+their original findings and frozen input; channels absent from an older package
+are shown as unavailable. Each new finding separates observation, interpretation,
+a practice attempt and a measurable check. Comparison differences are not promises
+of recoverable time.
+
+![Visual driver report with measured channel comparisons](images/cc-ai-visual-report.png)
+
+Turn numbers in report maps and the workspace use the saved marker definitions.
+`T` identifies reviewed turns; `P` identifies provisional geometry proposals.
+Passages show the turn number and metre position together. Missing numbering is
+stated explicitly. On smaller screens the map moves above the charts. The shared
+marker editor retains its numbered world anchors.
+
+![Numbered map and persistent telemetry position](images/telemetry-analysis.png)
+
+![Saved turn numbers on overview and detail racing lines](images/telemetry-ai-charts.png)

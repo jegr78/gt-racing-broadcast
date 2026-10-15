@@ -6,8 +6,10 @@ File: one JSON header line, then records of float64 wall ts, uint8 kind, uint16
 length and the payload. Kind 0x00 is a meta record carrying {"dropped": n}.
 """
 import datetime
+from functools import lru_cache
 import json
 import logging
+import math
 import os
 import queue
 import struct
@@ -319,16 +321,38 @@ def finalize_partials(rec_dir):
     return done
 
 
-def _started_ts(header):
-    try:
-        return datetime.datetime.fromisoformat(header.get("started", "")).timestamp()
-    except (TypeError, ValueError):
-        return None
+@lru_cache(maxsize=4096)
+def _capture_duration(path, offset, stamp):
+    """First-to-last complete packet time, without payload decoding or a lap index.
+
+    The size and filesystem identity/stamps bound this snapshot and invalidate the
+    cache after append, replacement or copy. A truncated final record is ignored.
+    """
+    size = stamp[0]
+    first = last = None
+    with open(path, "rb") as stream:
+        stream.seek(offset)
+        while stream.tell() + _REC.size <= size:
+            head = stream.read(_REC.size)
+            if len(head) != _REC.size:
+                break
+            wall_ts, kind, length = _REC.unpack(head)
+            if stream.tell() + length > size:
+                break
+            stream.seek(length, os.SEEK_CUR)
+            if kind == _META or length < _MIN_PAYLOAD or not math.isfinite(wall_ts):
+                continue
+            if first is None:
+                first = wall_ts
+            last = wall_ts
+    duration = last - first if first is not None else 0.0
+    return duration if math.isfinite(duration) and duration > 0 else 0.0
 
 
 def list_recordings(rec_dir, count_laps=False):
     """One dict per readable recording in rec_dir, sorted by name. count_laps replays
-    every packet through the engine and reports the laps gt7_export.export_csv would write."""
+    every packet through the engine and reports the laps gt7_export.export_csv would write.
+    The default only scans record headers for duration and memoizes unchanged files."""
     try:
         names = sorted(os.listdir(rec_dir))
     except OSError:
@@ -340,14 +364,16 @@ def list_recordings(rec_dir, count_laps=False):
         path = os.path.join(rec_dir, name)
         try:
             r = Recording(path)
-            size, mtime = os.path.getsize(path), os.path.getmtime(path)
+            size = os.path.getsize(path)
+            stamp = os.stat(path)
+            duration = _capture_duration(path, r.header_end,
+                                         (size, stamp.st_mtime_ns, stamp.st_ctime_ns, stamp.st_ino)) if not count_laps else None
         except (RecordingError, OSError):    # e.g. the relay finalised a .part meanwhile
             continue
         if not count_laps:
-            start = _started_ts(r.header)
             rows.append({"name": name, "path": path, "size": size,
                          "started": r.header.get("started", ""),
-                         "duration_s": max(0.0, mtime - start) if start else 0.0,
+                         "duration_s": duration,
                          "laps": None, "partial": name.endswith(PART)})
             continue
         laps, first, last = _replay(r)

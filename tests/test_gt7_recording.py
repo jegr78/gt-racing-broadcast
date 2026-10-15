@@ -292,8 +292,8 @@ def t_list_recordings_reports_duration_laps_partial():
         assert row["duration_s"] == 20.0 and row["partial"] is True, row
         assert row["laps"] == 2, f"laps 1 and 2 are finalised, lap 3 is still open: {row['laps']}"
         (fast,) = rec.list_recordings(d)
-        assert fast["laps"] is None and fast["partial"] is True, "the default reads only the header"
-        assert fast["duration_s"] >= 0.0
+        assert fast["laps"] is None and fast["partial"] is True, "the default does not decode packets"
+        assert fast["duration_s"] == 20.0
         assert rec.recording_stem(row["path"]) == os.path.basename(w.path)[:-len(".gt7rec")]
 
 
@@ -807,6 +807,58 @@ def t_nearest_station_picks_the_value_nearest_the_driven_distance():
     assert rec.nearest_station(3.0, 999.0, 1000.0) == 1003.0
     assert rec.nearest_station(500.0, 497.0, 1000.0) == 500.0
 
+
+def t_list_duration_uses_capture_timestamps_after_copy_without_an_index():
+    with tempfile.TemporaryDirectory() as d:
+        w = _write(d, [(10.0, 'A', _plain()), (30.0, 'A', _plain())])
+        os.utime(w.path, (2_000_000_000, 2_000_000_000))
+        (row,) = rec.list_recordings(d)
+        assert row['duration_s'] == 20.0, row
+        assert row['laps'] is None, 'Listing must not decode or build lap indexes'
+        with open(w.path, 'rb') as stream:
+            stream.readline()
+            packets = stream.read()
+        header = rec.Recording(w.path).header
+        header.pop('started')
+        with open(w.path, 'wb') as stream:
+            stream.write(json.dumps(header).encode() + b'\n' + packets)
+        assert rec.list_recordings(d)[0]['duration_s'] == 20.0
+
+
+def t_list_duration_ignores_incomplete_meta_and_nonfinite_records_and_refreshes():
+    with tempfile.TemporaryDirectory() as d:
+        w = _write(d, [(10.0, 'A', _plain()), (30.0, 'A', _plain())])
+        assert rec.list_recordings(d)[0]['duration_s'] == 20.0
+        with open(w.path, 'ab') as stream:
+            stream.write(rec._encode(700, ord('A'), b'short'))
+            stream.write(rec._encode(900, rec._META, b'{"dropped":1}' + b' ' * 300))
+            stream.write(rec._encode(float('nan'), ord('A'), _plain()))
+            stream.write(rec._REC.pack(1000, ord('A'), len(_plain())) + b'bad')
+        assert rec.list_recordings(d)[0]['duration_s'] == 20.0
+        with open(w.path, 'r+b') as stream:
+            stream.truncate(os.path.getsize(w.path) - rec._REC.size - 3)
+            stream.seek(0, os.SEEK_END)
+            stream.write(rec._encode(50.0, ord('A'), _plain()))
+        assert rec.list_recordings(d)[0]['duration_s'] == 40.0
+
+
+def t_list_duration_rejects_nonfinite_derived_spans():
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, 'overflow.gt7rec')
+        with open(path, 'wb') as stream:
+            stream.write(rec._header('demo', 'dev', 1000))
+            stream.write(rec._encode(-1e308, ord('A'), _plain()))
+            stream.write(rec._encode(1e308, ord('A'), _plain()))
+        assert rec.list_recordings(d)[0]['duration_s'] == 0.0
+
+
+def t_list_duration_is_zero_without_a_complete_packet():
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, 'empty.gt7rec.part')
+        with open(path, 'wb') as stream:
+            stream.write(rec._header('demo', 'dev', 1000))
+            stream.write(rec._REC.pack(1500, ord('A'), len(_plain())) + b'bad')
+        assert rec.list_recordings(d)[0]['duration_s'] == 0.0
 
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):

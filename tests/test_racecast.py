@@ -657,6 +657,20 @@ def t_telemetry_recordings_data_newest_first_with_cached_track():
         assert top["indexed"] is True and top["track"]["id"] == "ring01" and top["laps"] == 4
 
 
+def t_telemetry_duration_survives_copy_and_missing_or_valid_index():
+    import gt7_recording as gr
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        path = tgl.write_circle_recording(rec_dir)
+        times = [ts for ts, _kind, _payload in gr.Recording(path).packets()]
+        expected = round(times[-1] - times[0], 1)
+        os.utime(path, (2_000_000_000, 2_000_000_000))
+        row = m.telemetry_recordings_data()['recordings'][0]
+        assert not row['indexed'] and row['duration_s'] == expected, row
+        m.telemetry_laps_data(rec=_stem(path))
+        row = m.telemetry_recordings_data()['recordings'][0]
+        assert row['indexed'] and row['duration_s'] == expected, row
+
+
 def t_telemetry_recordings_data_marks_the_file_the_relay_writes():
     with _telemetry_sandbox() as (rec_dir, tgl):
         old = tgl.write_circle_recording(rec_dir)

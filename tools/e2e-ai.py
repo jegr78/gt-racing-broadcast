@@ -13,10 +13,10 @@ from ai_ui_fixture import Fixture,web_fixture
 async def verify_settings_toggle(page,fixture,port):
     original=fixture.settings.read()
     try:
-        await page.goto('http://127.0.0.1:'+str(port)+'/telemetry')
-        await page.wait_for_function('() => window.RacecastAI && tmState.profile === "profile"')
+        await page.goto('http://127.0.0.1:'+str(port)+'/telemetry#settings')
+        await page.wait_for_function('() => window.RacecastAI && tmState.profile === "profile" && tmState.lapB?.recording_id && currentView === "settings"')
         await page.reload()
-        await page.wait_for_function('() => window.RacecastAI && document.getElementById("ai-configs").options.length === 2')
+        await page.wait_for_function('() => window.RacecastAI && tmState.lapB?.recording_id && currentView === "settings" && document.getElementById("ai-configs").options.length === 2')
         await page.evaluate('() => showView("settings")')
         assert await page.locator('#ai-configs').input_value()==''
         assert await page.locator('#ai-save-enabled').count()==1,'machine toggle needs its own save action'
@@ -56,8 +56,8 @@ async def verify_settings_toggle(page,fixture,port):
 
 async def verify(page,fixture,port):
     errors=[];page.on('pageerror',lambda error:errors.append(error.stack))
-    await page.goto('http://127.0.0.1:'+str(port)+'/telemetry')
-    await page.wait_for_function('() => window.RacecastAI && tmState.profile === "profile"')
+    await page.goto('http://127.0.0.1:'+str(port)+'/telemetry#settings')
+    await page.wait_for_function('() => window.RacecastAI && tmState.profile === "profile" && tmState.lapB?.recording_id && currentView === "settings"')
     premature=[];page.on('request',lambda request:premature.append(request.url) if '/api/ai/' in request.url and 'profile=null' in request.url else None)
     await page.evaluate('() => {tmState.profile=null;RacecastAI.reset(null);workspaceAI();}')
     await asyncio.sleep(.2)
@@ -81,7 +81,7 @@ async def verify(page,fixture,port):
     before=fixture.control().history()['runs'];assert not before
     await page.locator('#ai-load-selection').click();await page.wait_for_selector('#ai-laps input')
     assert await page.locator('#ai-references input:checked').count()==0
-    await page.locator('#ai-language').fill('de')
+    await page.locator('#ai-language').select_option('de')
     async def preview():
         await page.evaluate('() => workspaceAI()')
         await page.locator('#ai-preview-button').click()
@@ -149,17 +149,33 @@ async def verify(page,fixture,port):
     except Exception as error:raise AssertionError('older completion discarded the newer completed job') from error
     assert await page.locator('#ai-report article').count()==4
     assert await page.evaluate('() => window.aiInjected') is None
-    assert 'Report language: de' in await page.locator('#ai-report').inner_text()
+    assert 'Zitierte Messwerte sind geprüft.' in await page.locator('#ai-report').inner_text()
+    await page.get_by_role('button',name='Reports',exact=True).click()
+    report_link=page.get_by_role('link',name='Visuellen Bericht öffnen')
+    assert '/api/ai/report?' in await report_link.get_attribute('href')
+    assert await report_link.get_attribute('target')=='_blank'
+    async with page.expect_popup() as opened:
+        await report_link.click()
+    visual=await opened.value
+    await visual.wait_for_load_state()
+    assert await visual.locator('html').get_attribute('lang')=='de'
+    assert await visual.get_by_role('heading',name='Fahrerbericht',exact=True).count()==1
+    assert await visual.locator('svg').count()>=1
+    assert await visual.evaluate('() => window.aiInjected') is None
+    await visual.reload()
+    assert await visual.get_by_role('heading',name='Fahrerbericht',exact=True).count()==1
+    await visual.close()
     await page.evaluate('() => showView("reports")')
     if '--shots' in sys.argv:
         await page.screenshot(path=str(ROOT/'src/docs/wiki/images/cc-ai-report.png'))
+    await page.get_by_text('Exporte und technische Details',exact=True).click()
     async with page.expect_download() as pending:
-        await page.get_by_role('button',name='Export html',exact=True).click()
+        await page.get_by_role('button',name='Herunterladen: html',exact=True).click()
     download=await pending.value
     html=Path(await download.path()).read_text(encoding="utf-8")
     assert '&lt;script&gt;' in html and '<script>window.aiInjected' not in html
     await page.evaluate('() => showView("reports")')
-    await page.locator('#ai-report').get_by_role('button',name='Compare with S1 lap 3').first.click()
+    await page.locator('#ai-report').get_by_role('button',name='Vergleich mit S1 Runde 3').first.click()
     await page.wait_for_function('() => tmState.lapA?.lap === 3 && tmState.lapB?.lap === 2')
     async def replaced_reference(route):
         response=await route.fetch();data=await response.json()
@@ -168,7 +184,7 @@ async def verify(page,fixture,port):
     await page.route('**/api/telemetry/lap?*',replaced_reference)
     await page.evaluate('() => tmLapCache.clear()')
     await page.evaluate('() => showView("reports")')
-    await page.locator('#ai-report').get_by_role('button',name='Compare with S1 lap 3').first.click()
+    await page.locator('#ai-report').get_by_role('button',name='Vergleich mit S1 Runde 3').first.click()
     for _ in range(40):
         if 'Comparison recording identity changed' in await page.locator('#tm-err').inner_text():break
         await asyncio.sleep(.05)
@@ -177,7 +193,7 @@ async def verify(page,fixture,port):
     await page.evaluate('() => tmLapCache.clear()')
     # Opening a report uses the real ordinary telemetry callbacks and exact identity.
     await page.evaluate('() => showView("reports")')
-    await page.locator('#ai-report').get_by_role('button',name='Open lap at 500 m').first.click()
+    await page.locator('#ai-report').get_by_role('button',name='Runde öffnen bei 500 m').first.click()
     await page.wait_for_function('() => tmState.lapB?.lap === 2 && tmState.lapB.recording_id')
     assert await page.evaluate('() => tmState.lapB.lap')==2
     fixture.invalid=True
@@ -227,7 +243,7 @@ async def main():
                 await verify_settings_toggle(page,fixture,port)
                 if '--shots' in sys.argv:
                     await page.reload()
-                    await page.wait_for_function('() => tmState.profile && window.RacecastAI')
+                    await page.wait_for_function('() => tmState.profile && window.RacecastAI && tmState.lapB?.recording_id && currentView === "settings"')
                     await page.evaluate('() => showView("settings")')
                     await page.evaluate('() => RacecastAI.settings()')
                     await page.screenshot(path=str(ROOT/'src/docs/wiki/images/cc-ai-settings.png'))

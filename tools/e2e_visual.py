@@ -274,11 +274,11 @@ SURFACES = [
             "!!document.querySelector('#tm-replay-recording option')", 30000),
     Surface("telemetry-archive", "ui_pov", "/telemetry", ("desktop", "phone"), None,
             "!!document.querySelector('.archive-card')", 30000),
-    Surface("telemetry-analysis", "ui_pov", "/telemetry", ("desktop", "phone"), "showView('telemetry')",
+    Surface("telemetry-analysis", "ui_pov", "/telemetry#telemetry", ("desktop", "phone"), None,
             TELEMETRY_READY, 30000),
-    Surface("telemetry-data", "ui_pov", "/telemetry", ("desktop",), "showView('settings')",
+    Surface("telemetry-data", "ui_pov", "/telemetry#settings", ("desktop",), None,
             "!!document.querySelector('#ai-settings')", 30000),
-    Surface("telemetry-reports", "ui_pov", "/telemetry", ("desktop",), "showView('reports')",
+    Surface("telemetry-reports", "ui_pov", "/telemetry#reports", ("desktop",), None,
             "!!document.querySelector('#ai-history')", 30000),
 ]
 

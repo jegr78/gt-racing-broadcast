@@ -10,8 +10,8 @@ body.workspace {height:100vh;overflow:hidden;--tm-a:var(--warn);--tm-b:var(--lin
 .workspace-header h1{font-size:20px;margin:0}.workspace-header label{display:flex;align-items:center;gap:8px}.workspace-header a{margin-left:auto;color:var(--link)}
 .workspace-nav{display:flex;gap:6px;padding:10px 24px;border-bottom:1px solid var(--line);flex-wrap:wrap}.workspace-nav .active{background:var(--accent-strong);border-color:var(--link)}
 .workspace main{overflow:auto;flex:1;padding:24px;min-width:0}.workspace .view{max-width:none;margin:0}.workspace .view[data-view="telemetry"]{max-width:none;--tm-a:var(--link);--tm-b:var(--warn)}
-.workspace .tmgrid{grid-template-columns:220px minmax(0,1fr);gap:16px}.workspace .tmgrid.has-inspector{grid-template-columns:220px minmax(0,1fr) 300px}
-.workspace .tmmain{min-width:0}.workspace .tmmap{min-width:0}.workspace .tmside .tmlist{max-height:28vh}
+.workspace .tmgrid{grid-template-columns:200px minmax(0,1fr) 300px;gap:16px}
+.workspace .tmmain{min-width:0}.workspace .tmmap{min-width:0;grid-column:3;grid-row:1;display:block;position:sticky;top:12px;align-self:start}.workspace #tm-map-position{font-weight:600;color:var(--txt)}.workspace #workspace-inspector{margin-top:16px}#tm-map .tm-corner-label{fill:var(--txt);stroke:var(--card);stroke-width:3px;paint-order:stroke;font-size:11px;font-weight:600}.workspace .tm-dot-b{stroke:var(--txt);stroke-width:1.5}.tm-corner-leader{stroke:var(--dim);stroke-width:.8;opacity:.65;fill:none}.workspace .tmside .tmlist{max-height:28vh}
 .workspace #tm-laps{max-height:60vh}.workspace .tmpick{display:flex;flex-wrap:wrap;gap:14px}.workspace .tmpick label{flex:1;min-width:180px}
 .workspace .row{border:0;padding:8px 0;background:transparent}
 .workspace .workspace-tools{margin:12px 0}.workspace-zoom{flex-wrap:wrap;margin-bottom:16px}.workspace-zoom label{display:flex;gap:8px;align-items:center}
@@ -23,8 +23,8 @@ body.workspace {height:100vh;overflow:hidden;--tm-a:var(--warn);--tm-b:var(--lin
 .workspace-empty{padding:30px;background:var(--card);border:1px dashed var(--line);border-radius:12px;grid-column:1/-1}.workspace #ai-analysis{margin-top:16px}
 .workspace .viewhead .vhbtns{flex-wrap:wrap}.workspace #tm-summary{margin-top:16px}.workspace .tmsum{max-height:220px;overflow:auto}
 .workspace #workspace-profile{min-width:140px;max-width:240px}.workspace .muted,.workspace .sub{color:var(--dim)}
-@media(max-width:1150px){.workspace .tmgrid,.workspace .tmgrid.has-inspector{grid-template-columns:190px minmax(0,1fr)}.workspace .tmmap{grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}}
-@media(max-width:700px){.workspace-header{padding:12px;gap:10px}.workspace-header a{margin-left:0}.workspace-nav{padding:8px 12px}.workspace main{padding:12px}.workspace .tmgrid,.workspace .tmgrid.has-inspector{grid-template-columns:minmax(0,1fr)}.workspace .tmside{display:grid;grid-template-columns:minmax(0,1fr)}.workspace .tmmap{grid-template-columns:minmax(0,1fr)}.workspace .tmpick label{min-width:0;flex:1 1 100%}.workspace .workspace-zoom label{flex-wrap:wrap}.workspace .viewhead{flex-wrap:wrap}.workspace .tmside .tmlist{max-height:230px}.workspace .archive-grid{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:1150px){.workspace .tmmap{grid-column:2;grid-row:2}.workspace .tmgrid{grid-template-columns:minmax(0,1fr) 270px}.workspace .tmside{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr}.workspace .tmside .tmlist,.workspace #tm-laps{max-height:220px}}
+@media(max-width:700px){.workspace-header{padding:12px;gap:10px}.workspace-header a{margin-left:0}.workspace-nav{padding:8px 12px}.workspace main{padding:12px}.workspace .tmgrid{grid-template-columns:minmax(0,1fr)}.workspace .tmside{display:grid;grid-template-columns:minmax(0,1fr)}.workspace .tmmap{grid-column:1;grid-row:2;top:0;z-index:2;background:var(--bg)}.workspace .tmmap section{padding:8px 10px}.workspace #tm-map{max-height:180px}.workspace #tm-map .tm-corner-label{font-size:18px}.workspace .tmmap .tmlegend{font-size:10px;gap:6px}.workspace #tm-map-numbering{font-size:11px;margin:4px 0}.workspace .tmpick label{min-width:0;flex:1 1 100%}.workspace .workspace-zoom label{flex-wrap:wrap}.workspace .viewhead{flex-wrap:wrap}.workspace .tmside .tmlist{max-height:230px}.workspace .archive-grid{grid-template-columns:minmax(0,1fr)}}
 </style></head><body class="workspace"><div class="workspace-shell">
 <header class="workspace-header"><h1>Telemetry</h1><span id="ver" class="ver"></span><span class="badge">Local workspace</span><label>Analysis profile <select id="workspace-profile" aria-label="Analysis profile" onchange="workspaceProfile(this.value)"></select></label><span id="workspace-broadcast" class="sub"></span><a href="/" target="_blank" rel="noopener">Control Center</a><button onclick="workspaceQuit()">Stop UI service</button></header>
 <nav class="workspace-nav" aria-label="Telemetry tasks"><button data-nav="archive" onclick="showView('archive')">Archive</button><button data-nav="telemetry" onclick="showView('telemetry')">Analysis</button><button data-nav="reports" onclick="showView('reports')">Reports</button><button data-nav="settings" onclick="showView('settings')">Data management</button></nav>
@@ -37,7 +37,7 @@ body.workspace {height:100vh;overflow:hidden;--tm-a:var(--warn);--tm-b:var(--lin
             <svg viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Refresh</button></span></div>
         <p class="enverr" id="tm-err" hidden></p>
         <details id="workspace-session-summary" hidden><summary>Session overview</summary><section class="tmsum" id="tm-summary" hidden></section></details>
-        <div class="row workspace-tools"><button onclick="workspaceInspector()" id="workspace-details" aria-expanded="false">Map &amp; sectors</button><button onclick="workspaceAI()">AI analysis</button><button onclick="tcOpen()">Notes &amp; context</button><button onclick="showView('settings')">Data management</button></div><div class="row workspace-zoom"><label>From (m)<input id="workspace-start" type="number" min="0" step="5"></label><label>To (m)<input id="workspace-end" type="number" min="0" step="5"></label><button onclick="workspaceZoom()">Apply zoom</button><button onclick="workspaceZoom(true)">Full lap</button><label class="cursor-control">Distance <input id="workspace-cursor" type="range" min="0" max="1" step="5" value="0" oninput="workspaceSeek(Number(this.value))"><output id="workspace-distance">0 m</output></label></div><div class="tmgrid">
+        <div class="row workspace-tools"><button onclick="workspaceInspector()" id="workspace-details" aria-expanded="false">Sectors &amp; markers</button><button onclick="workspaceAI()">AI analysis</button><button onclick="tcOpen()">Notes &amp; context</button><button onclick="showView('settings')">Data management</button></div><div class="row workspace-zoom"><label>From (m)<input id="workspace-start" type="number" min="0" step="5"></label><label>To (m)<input id="workspace-end" type="number" min="0" step="5"></label><button onclick="workspaceZoom()">Apply zoom</button><button onclick="workspaceZoom(true)">Full lap</button><label class="cursor-control">Distance <input id="workspace-cursor" type="range" min="0" max="1" step="5" value="0" oninput="workspaceSeek(Number(this.value))"><output id="workspace-distance">0 m</output></label></div><div class="tmgrid">
           <div class="tmside">
             <section><div class="viewhead"><h3>Recordings</h3>
                 <span class="vhbtns"><button class="danger" id="tm-del" onclick="tmDelete()" disabled
@@ -74,14 +74,7 @@ body.workspace {height:100vh;overflow:hidden;--tm-a:var(--warn);--tm-b:var(--lin
               <p id="tm-channel-status" class="sub" role="status"></p><div id="tm-channel-charts"></div>
             </details>
             <svg id="tm-charts" role="img" aria-label="Speed, throttle, brake, steering, gear and delta over lap distance"></svg>
-          </section>
-          <div class="tmmap" id="workspace-inspector" hidden>
-            <section><div class="viewhead"><h3>Track</h3><span class="sub" id="tm-map-sub"></span></div>
-              <svg id="tm-map" role="img" aria-label="Track map, mini-sectors green where lap B gains and red where it loses"></svg>
-              <div class="tmlegend" id="tm-map-legend" hidden>
-                <span><i class="gain"></i>B faster</span><span><i class="loss"></i>B slower</span>
-                <span><i class="even"></i>even</span><span><i class="a"></i>lap A line</span>
-                <span><i class="dot"></i>start/finish</span></div></section>
+            <div id="workspace-inspector" hidden>
             <section><div class="viewhead"><h3>Larger sectors</h3><button onclick="tmEditorOpen()">Edit markers / sectors</button></div>
               <select id="tm-sector-variant" aria-label="Larger-sector variant" onchange="tmSelectSectorVariant(this.value)"></select>
               <p class="sub" id="tm-large-status"></p><div id="tm-larger-sectors"></div></section>
@@ -90,7 +83,16 @@ body.workspace {height:100vh;overflow:hidden;--tm-a:var(--warn);--tm-b:var(--lin
               <div class="tmlegend" id="tm-sec-legend" hidden>
                 <span><i class="gain"></i>B faster than A</span><span><i class="loss"></i>B slower</span>
                 <span><i class="best"></i>best of all comparable laps</span></div></section>
-          </div>
+            </div>
+          </section>
+          <aside class="tmmap" id="workspace-trackpane" aria-label="Track position">
+            <section><div class="viewhead"><h3>Track</h3><span class="sub" id="tm-map-sub"></span></div>
+              <p id="tm-map-position" class="sub" aria-label="Selected track position">Choose a lap to show its position.</p><svg id="tm-map" role="img" aria-label="Track map, mini-sectors green where lap B gains and red where it loses"></svg>
+              <p id="tm-map-numbering" class="sub"></p><div class="tmlegend" id="tm-map-legend" hidden>
+                <span><i class="gain"></i>B faster</span><span><i class="loss"></i>B slower</span>
+                <span><i class="even"></i>even</span><span><i class="a"></i>lap A line</span>
+                <span><i class="dot"></i>start/finish</span></div></section>
+          </aside>
         </div>
       </div>
 

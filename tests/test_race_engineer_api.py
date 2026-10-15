@@ -292,7 +292,7 @@ def t_shared_pending_work_is_bounded_and_readers_do_not_block_ingestion():
             service = api.Service(store); entered, release = threading.Event(), threading.Event()
             original = service._prepare; calls = []
             def slow(rows):
-                calls.append(1); entered.set(); assert release.wait(5)
+                calls.append(1); entered.set(); release.wait()
                 return original(rows)
             service._prepare = slow
             try:
@@ -300,10 +300,18 @@ def t_shared_pending_work_is_bounded_and_readers_do_not_block_ingestion():
                 a, b = laps[0]['id'], laps[1]['id']
                 assert service.compare(a,b,lambda _id: None)['state'] == 'pending'
                 assert entered.wait(2)
-                started = time.monotonic()
-                with concurrent.futures.ThreadPoolExecutor(max_workers=8) as readers:
-                    results = list(readers.map(lambda _: service.compare(a,b,lambda _id: None), range(24)))
-                assert time.monotonic() - started < 1, 'HTTP readers waited for analysis'
+                readers = concurrent.futures.ThreadPoolExecutor(max_workers=8)
+                futures = []
+                try:
+                    futures = [readers.submit(service.compare,a,b,lambda _id: None) for _ in range(24)]
+                    _, pending = concurrent.futures.wait(futures, timeout=5)
+                    assert not pending, 'service readers waited for the blocked analysis worker'
+                    results = [future.result() for future in futures]
+                    assert not release.is_set(), 'analysis was released before readers completed'
+                finally:
+                    if any(not future.done() for future in futures):
+                        release.set()
+                    readers.shutdown(wait=True)
                 assert all(r['state'] == 'pending' for r in results) and len(calls) == 1
                 assert service.snapshot()['current'] and service.history(None)['laps']
                 assert len(service._pending) == 1 and service._queue.maxsize == 16

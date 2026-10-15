@@ -2372,7 +2372,7 @@ const vb = $('tm-map').attrs.viewBox.split(' ').map(Number);
 const wide = [tmState.map.P({x: 0, z: 0}), tmState.map.P({x: 64, z: 8})];
 console.log([pair, top, Math.round(xs[0] + xs[1]) === W,
              wide[0][0] === 12, Math.round(wide[1][0]) === W - 12,
-             wide[0][1] === 12, Math.round(wide[1][1]) === vb[3] - 12].join('|'));""")
+             Math.round(wide[0][1]+wide[1][1]) === vb[3], wide[0][1]>=12 && wide[1][1]<=vb[3]-12].join('|'));""")
     if out is not None:
         assert out.strip() == "1,1,1,2,0|true|true|true|true|true|true", \
             f"A lies on top, a sector past A's end is even, the layout sits centred: {out!r}"

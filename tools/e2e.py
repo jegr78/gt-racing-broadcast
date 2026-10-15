@@ -437,6 +437,8 @@ def _visual_one(browser, surface, viewport, urls, outdir, probe, allow, used):
         page.goto(V.surface_url(surface, urls), wait_until="domcontentloaded")
         if surface.path.startswith("/telemetry"):
             page.wait_for_function("() => tmState.loaded && !!tmState.profile", timeout=30000)
+            task = surface.path.partition("#")[2] or "archive"
+            page.wait_for_function("task => currentView === task", arg=task, timeout=30000)
         if surface.prep:
             page.evaluate(surface.prep)
         _wait_until(page, surface.ready, surface.timeout_ms)
