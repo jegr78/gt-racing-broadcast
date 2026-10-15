@@ -214,8 +214,8 @@ def t_slow_old_report_cannot_replace_a_newer_completed_run():
   await status();
   release({...run('X', 'completed', REPORT), requested_model: 'OLD'});
   await older;
-  console.log($id('ai-report').children.some(c => c.textContent.includes('NEW')),
-              $id('ai-report').children.some(c => c.textContent.includes('OLD')), state.job);
+  const contains = (element, value) => element.textContent.includes(value) || element.children.some(child => contains(child,value));
+  console.log(contains($id('ai-report'),'NEW'), contains($id('ai-report'),'OLD'), state.job);
 })();
 """)
     if out is not None:
@@ -251,6 +251,25 @@ def t_releasing_the_machine_slot_reenables_a_reviewed_preview():
 """)
     if out is not None:
         assert out.strip().splitlines() == ['true', 'false'], out
+
+
+def t_driver_report_localizes_chrome_and_opens_profile_scoped_html():
+    out = _run_js(_harness() + r"""
+(async () => {
+  const report = {...REPORT, version:2, language:'de', summary:'Kontrollierter Fahrversuch.', technical_notes:['Kontext beachten.'],
+    findings:REPORT.findings.map(item=>({...item,observation:'Gemessener Bremsverlauf.',action:'Bremse gleichmäßig lösen.',check:'Ausfahrt vergleichen.'}))};
+  replies.job={current:{...run('current','completed',report),profile:'solo-pov'}};
+  await openRun('current');
+  const all = element => [element,...element.children.flatMap(all)];
+  const elements=all($id('ai-report')), text=elements.map(e=>e.textContent).join(' ');
+  const link=elements.find(e=>e.tag==='a');
+  console.log(text.includes('Beobachtung: Gemessener Bremsverlauf.'),text.includes('So prüfst du es: Ausfahrt vergleichen.'),
+              text.includes('Validated package facts'),text.includes('Possible causes'),link.href,
+              link.target,link.rel,$id('ai-feedback-title').textContent,$id('ai-view-report').textContent);
+})();
+""")
+    if out is not None:
+        assert out.strip()=='true true false false /api/ai/report?id=current&profile=solo-pov _blank noopener Bericht bereit Bericht ansehen', out
 
 
 if __name__ == "__main__":

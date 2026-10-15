@@ -13,7 +13,7 @@ supplied factual values and existing telemetry identities are deterministic.
 | Recording lifecycle | guarded deletion | associated analyses removed | deletion during job, foreign paths | existing delete flow and confirmation |
 
 
-The result schema is version 1. Findings have priorities 1–3, interpretation,
+The original result schema is version 1. Findings have priorities 1–3, interpretation,
 possible causes, a selected lap ID, optional trace-bounded metre position and
 supplied evidence. Exactly three exercises have distinct priorities 1, 2 and 3.
 Schema/type/unknown-field checks reject unsupported measurement fields. Evidence
@@ -96,3 +96,54 @@ These runs exposed unreadable single-line detail JSON and an insufficiently
 specified evidence/lap association in the prompt. Detail serialization and the
 summary evidence catalogue now support bounded reads and explicit evidence IDs;
 the validator still rejects missing, changed and unrelated facts.
+
+
+## Driver review version 2
+
+New packages request report schema 2 and template version 2. Saved schema-1 output
+is still validated with its original contract, before any display enrichment.
+A calculation-version change marks an older snapshot stale without rewriting it.
+
+| Requirement | Production | Positive test | Negative test | Runtime evidence |
+| --- | --- | --- | --- | --- |
+| Driver-first findings with action/check | versioned result schema + templates + validators | v2 concrete observation/action/check and declared reference | missing action, mismatched reference, invalid technical topic rejected; v1 retained | real Claude/Codex session reviewed against usefulness rubric |
+| Frozen channel insights | package TRACE_KEYS + driver channels/focus | steering degrees, measured pedal transitions and matched same-stint pair | missing channels/partial transition never become zero or optimal targets; contrary stint/goal excluded | three raw recordings contain steering samples |
+| Visual report | SVG chart renderer + report HTML | trend, equal-scale line, speed/pedal/steering overlays | gaps/unavailable channels and no compatible pair explicit; injection escaped | desktop/mobile/print browser inspection |
+| Direct browser HTML | profile-scoped local route + app link | completed report HTML inline, stable reloadable URL | invalid ID/profile/origin/incomplete run semantic errors; CSP/nosniff | real saved and new reports opened without download |
+| Provenance and historical reports | frozen store/render dispatch | v1 historical reports and exports remain readable | tampered snapshot still rejected | old report515 reused with original facts, new reports usev2 |
+| Full de/en report presentation | language admission + localized report text and UI | German/English HTML/Markdown, labels, charts and feedback | unsupported language rejected, no English system chrome in German report | real de/en provider reports and browser review |
+
+A finding names its driving topic, observation, interpretation, one next attempt
+and a measurable check. Technique findings require a position. Reports allow zero
+to five findings and zero to three distinct exercises; insufficient evidence must
+not produce filler. A declared reference must be a direct, eligible comparison,
+with matching car, track, compound, known stint and objective. The validator rejects
+transitive references for schema 2. Historical schema-1 evidence rules are retained.
+Only cited numeric facts are mechanically verified. Narrative correctness and
+usefulness still require review; provider hypotheses do not become measured causes.
+
+The package preserves `steer_deg` without a second conversion. Per-corner channel
+metrics describe measured samples: input thresholds of 5% brake and 95% throttle
+are diagnostics, not optimal targets. Incomplete channels do not become zero.
+The bounded driver-focus catalogue combines compatible frozen corner and pedal/
+steering facts. Internal reference selection stays within a known stint.
+
+HTML contains script-free SVG lap-time trends, equal-scale position overlays,
+speed, throttle, brake input and steering over distance for up to three locations.
+Missing channels and sparse samples are explicit. Position overlays show measured
+lines, never an ideal line. Full-session summary statistics may mix driving phases.
+The charts use immutable input values, not model-generated coordinates. Desktop,
+mobile and print layouts keep findings, actions and checks ahead of technical data.
+Technical notes, limitations and full provenance are collapsed but inspectable.
+
+New reports support `de` and `en`; other language requests fail admission. Report
+headings, fact labels, charts, automatic limitations and report feedback follow the
+selected language. Common racing terms and original technical identifiers in
+provenance remain unchanged. Both HTML and Markdown escape provider text, including
+the summary, and HTML escapes manual context captions.
+
+GET `/api/ai/report?id=...&profile=...` reuses the completed-report export validation
+and returns HTML inline. It uses the selected analysis-profile scope and the same
+origin/Host checks as other analysis routes. The response is not cached, cannot be
+framed and carries CSP and nosniff headers. The app links to this stable URL in a
+new tab; HTML/Markdown/input-package downloads remain explicit secondary actions.

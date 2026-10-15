@@ -47,6 +47,10 @@ from pathlib import Path
 sys.stdin.read();p=json.loads(Path('detail.json').read_text());lap=p['laps'][0]
 e=[{'fact_id':lap['id']+'/time_s','value':lap['metrics']['time_s']}];ref={'lap_id':lap['id'],'location_m':500,'evidence':e}
 result={'version':1,'findings':[dict(priority=1,title='<script>window.aiInjected=true</script>',interpretation='Observed lap time; exit variation is a hypothesis.',possible_causes=['Unproven throttle timing'],**ref)],'exercises':[dict(priority=n,action='Practice smooth exits '+str(n),check='Compare supplied lap times',**ref) for n in (1,2,3)],'limitations':['Synthetic telemetry and controlled CLI; no provider account used.']}
+result.update(version=2,summary='Practice a measured exit transition.',technical_notes=[])
+partner=next((c['reference_id'] for c in p['comparisons'] if c['lap_id']==lap['id'] and c['reference_id']!=lap['id']),None)
+for item in result['findings']+result['exercises']:item['reference_id']=partner
+result['findings'][0].update(topic='throttle',observation='Measured throttle varies.',action='Repeat the exit smoothly.',check='Compare the next exit trace.')
 """
         code=code.replace(repr('<script>window.aiInjected=true</script>'),repr(self.title))
         code+='time.sleep('+repr(self.delay)+')\n'

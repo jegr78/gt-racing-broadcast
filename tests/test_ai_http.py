@@ -46,5 +46,35 @@ def t_route_and_foreign_origin():
     finally:server.shutdown();server.server_close()
 
 
+def t_inline_report_has_browser_headers_and_semantic_errors():
+    import base64
+    calls=[];ctx=fixtures._ctx()
+    def callback(op,payload):
+        calls.append((op,payload))
+        if payload.get('id')!='a'*32:
+            return dict(ok=False,error=dict(code='invalid_job',message='Invalid analysis ID'))
+        return dict(ok=True,encoding='base64',content=base64.b64encode(b'<!doctype html><html lang="de">report</html>').decode())
+    ctx['ai_request']=callback
+    server,port=fixtures._serve(ctx)
+    try:
+        with fixtures._urlopen('http://127.0.0.1:'+str(port)+'/api/ai/report?id='+'a'*32+'&profile=solo') as response:
+            assert response.status==200 and response.headers['Content-Type']=='text/html; charset=utf-8'
+            assert response.headers['Content-Disposition']=='inline'
+            assert response.headers['Cache-Control']=='no-store'
+            assert response.headers['X-Content-Type-Options']=='nosniff'
+            assert "frame-ancestors 'none'" in response.headers['Content-Security-Policy']
+            assert b'<html lang="de">' in response.read()
+        assert calls[-1]==('export',dict(id='a'*32,profile='solo',format='html',origin='http://127.0.0.1:'+str(port)))
+        code,doc=request(port,'/api/ai/report?id=../outside&profile=solo')
+        assert code==400 and doc['error']['code']=='invalid_job'
+        before=len(calls)
+        code,doc=request(port,'/api/ai/report?id='+'a'*32,headers={'Origin':'https://foreign.example.test'})
+        assert code==403 and doc['error']['code']=='foreign_origin' and len(calls)==before
+        code,doc=request(port,'/api/ai/report?id='+'a'*32+'&profile=solo&profile=other')
+        assert code==400 and doc['error']['code']=='invalid_profile' and len(calls)==before
+    finally:server.shutdown();server.server_close()
+
+
 if __name__=='__main__':
     t_route_and_foreign_origin();print('PASS t_route_and_foreign_origin')
+    t_inline_report_has_browser_headers_and_semantic_errors();print('PASS t_inline_report_has_browser_headers_and_semantic_errors')

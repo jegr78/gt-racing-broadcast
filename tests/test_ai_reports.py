@@ -22,8 +22,15 @@ import test_ai_jobs as jobs
 def result(package):
     lap=package['laps'][0];evidence=[dict(fact_id=lap['id']+'/time_s',value=lap['metrics']['time_s'])]
     reference=dict(lap_id=lap['id'],location_m=500,evidence=evidence)
-    return dict(version=1,findings=[dict(priority=1,title='<script>alert(1)</script>',interpretation='Observed time; possible exit variation',possible_causes=['Unproven throttle timing'],**copy.deepcopy(reference))],
+    value = dict(version=1,findings=[dict(priority=1,title='<script>alert(1)</script>',interpretation='Observed time; possible exit variation',possible_causes=['Unproven throttle timing'],**copy.deepcopy(reference))],
                 exercises=[dict(priority=n,action='Practice exit '+str(n),check='Compare measured lap times',**copy.deepcopy(reference)) for n in (1,2,3)],limitations=['![untrusted](https://example.invalid/track)'])
+    if package.get('report_schema_version',1)==2:
+        value.update(version=2,summary='Practice the measured exit transition.',technical_notes=[])
+        partner=next((c['reference_id'] for c in package['comparisons'] if c['lap_id']==lap['id'] and c['reference_id']!=lap['id']),None)
+        for item in value['findings']+value['exercises']: item['reference_id']=partner
+        value['findings'][0].update(topic='throttle',observation='Throttle input varies.',action='Repeat the exit smoothly.',check='Compare the next exit trace.')
+    return value
+
 
 
 def fail(fn,code='invalid_report'):
@@ -129,7 +136,7 @@ def t_full_session_package_survives_snapshot_history_and_export():
 
 def t_schema_measurement_reference_and_priorities():
     with tempfile.TemporaryDirectory() as d:
-        s=fixtures.source(Path(d)/'telemetry-recordings');p=ai_package.build(s,1);valid=result(p)
+        s=fixtures.source(Path(d)/'telemetry-recordings');p=ai_package.build(s,1);p['report_schema_version']=1;valid=result(p)
         report=r.validate(valid,p)
         assert report['findings'][0]['telemetry']['lap']==p['laps'][0]['lap']
         assert report['findings'][0]['evidence'][0]['provenance']
@@ -160,7 +167,7 @@ def t_schema_measurement_reference_and_priorities():
 def t_comparable_lap_evidence_can_follow_the_shared_reference():
     with tempfile.TemporaryDirectory() as d:
         source=fixtures.source(Path(d)/'telemetry-recordings',[fixtures.row(2,time=101),fixtures.row(3,time=100),fixtures.row(4,time=102)])
-        package=ai_package.build(source,1);output=result(package)
+        package=ai_package.build(source,1);package['report_schema_version']=1;output=result(package)
         output['findings'][0]['evidence'].append(dict(fact_id=package['laps'][2]['id']+'/time_s',value=102))
         assert r.validate(output,package)['findings'][0]['evidence'][-1]['value']==102
         package['comparisons']=[]
@@ -188,10 +195,10 @@ def t_history_provenance_exports_and_profile_scope():
         assert 'profile=profile' in document and 'recording_id=' in document
         fail(lambda:store.export(run['id'],'html',origin='https://foreign.example.test'),'invalid_selection')
         assert '<script>alert(1)</script>' not in document and '&lt;script&gt;' in document
-        assert 'Validated package facts' in document and 'Provenance' in document and 'unproven' in document
+        assert 'Zitierte Messwerte' in document and 'Datenherkunft' in document and 'Hypothesen' in document
         assert 'requested_model' in document and 'time_s' in document and 'location_m=500' in document
         markdown=store.export(run['id'],'markdown')['bytes'].decode()
-        assert '\\!\\[untrusted' in markdown and '## Limitations' in markdown and 'package_fingerprint' in markdown
+        assert '\\!\\[untrusted' in markdown and '## Grenzen der Auswertung' in markdown and 'package_fingerprint' in markdown
         data=store.export(run['id'],'package')['bytes']
         with zipfile.ZipFile(io.BytesIO(data)) as z:
             assert set(z.namelist())=={'detail.json','summary.md','manifest.json','result-schema.json'}

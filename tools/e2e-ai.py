@@ -81,7 +81,7 @@ async def verify(page,fixture,port):
     before=fixture.control().history()['runs'];assert not before
     await page.locator('#ai-load-selection').click();await page.wait_for_selector('#ai-laps input')
     assert await page.locator('#ai-references input:checked').count()==0
-    await page.locator('#ai-language').fill('de')
+    await page.locator('#ai-language').select_option('de')
     async def preview():
         await page.evaluate('() => workspaceAI()')
         await page.locator('#ai-preview-button').click()
@@ -149,17 +149,21 @@ async def verify(page,fixture,port):
     except Exception as error:raise AssertionError('older completion discarded the newer completed job') from error
     assert await page.locator('#ai-report article').count()==4
     assert await page.evaluate('() => window.aiInjected') is None
-    assert 'Report language: de' in await page.locator('#ai-report').inner_text()
+    assert 'Zitierte Messwerte sind geprüft.' in await page.locator('#ai-report').inner_text()
+    report_link=page.get_by_role('link',name='Visuellen Bericht öffnen')
+    assert '/api/ai/report?' in await report_link.get_attribute('href')
+    assert await report_link.get_attribute('target')=='_blank'
     await page.evaluate('() => showView("reports")')
     if '--shots' in sys.argv:
         await page.screenshot(path=str(ROOT/'src/docs/wiki/images/cc-ai-report.png'))
+    await page.get_by_text('Exporte und technische Details',exact=True).click()
     async with page.expect_download() as pending:
-        await page.get_by_role('button',name='Export html',exact=True).click()
+        await page.get_by_role('button',name='Herunterladen: html',exact=True).click()
     download=await pending.value
     html=Path(await download.path()).read_text(encoding="utf-8")
     assert '&lt;script&gt;' in html and '<script>window.aiInjected' not in html
     await page.evaluate('() => showView("reports")')
-    await page.locator('#ai-report').get_by_role('button',name='Compare with S1 lap 3').first.click()
+    await page.locator('#ai-report').get_by_role('button',name='Vergleich mit S1 Runde 3').first.click()
     await page.wait_for_function('() => tmState.lapA?.lap === 3 && tmState.lapB?.lap === 2')
     async def replaced_reference(route):
         response=await route.fetch();data=await response.json()
@@ -168,7 +172,7 @@ async def verify(page,fixture,port):
     await page.route('**/api/telemetry/lap?*',replaced_reference)
     await page.evaluate('() => tmLapCache.clear()')
     await page.evaluate('() => showView("reports")')
-    await page.locator('#ai-report').get_by_role('button',name='Compare with S1 lap 3').first.click()
+    await page.locator('#ai-report').get_by_role('button',name='Vergleich mit S1 Runde 3').first.click()
     for _ in range(40):
         if 'Comparison recording identity changed' in await page.locator('#tm-err').inner_text():break
         await asyncio.sleep(.05)
@@ -177,7 +181,7 @@ async def verify(page,fixture,port):
     await page.evaluate('() => tmLapCache.clear()')
     # Opening a report uses the real ordinary telemetry callbacks and exact identity.
     await page.evaluate('() => showView("reports")')
-    await page.locator('#ai-report').get_by_role('button',name='Open lap at 500 m').first.click()
+    await page.locator('#ai-report').get_by_role('button',name='Runde öffnen bei 500 m').first.click()
     await page.wait_for_function('() => tmState.lapB?.lap === 2 && tmState.lapB.recording_id')
     assert await page.evaluate('() => tmState.lapB.lap')==2
     fixture.invalid=True

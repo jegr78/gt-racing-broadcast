@@ -135,7 +135,7 @@ def t_templates_preview_and_package_limits():
             p=a.build(s,1,template=template,ui_language='de')
             assert p['language']=='de'
             prompt=a.prompt(p)
-            assert 'three prioritized exercises' in prompt and 'measured' in prompt
+            assert '0-3 distinct practice exercises' in prompt and 'measured' in prompt
             assert 'optimal braking' in prompt and 'unknown' in prompt
             preview=a.preview(p,'codex')
             assert preview['provider']=='codex' and preview['transmission']
@@ -144,7 +144,7 @@ def t_templates_preview_and_package_limits():
         dest=Path(d)/'package';a.write(p,dest,'claude')
         assert json.loads((dest/'manifest.json').read_text())['references']==[]
         assert (dest/'detail.json').is_file() and (dest/'summary.md').is_file()
-        assert json.loads((dest/'result-schema.json').read_text())['properties']['exercises']['minItems']==3
+        assert json.loads((dest/'result-schema.json').read_text())['properties']['exercises']['minItems']==0
         assert str(Path(d)) not in (dest/'detail.json').read_text()
         expect(lambda:a.preview(p,'other'),'invalid_selection')
         huge=copy.deepcopy(p);huge['context']['data']['notes'][0]['text']='x'*a.LIMITS['codex']['detail_bytes']

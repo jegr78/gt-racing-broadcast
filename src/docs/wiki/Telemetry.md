@@ -348,3 +348,19 @@ separately. HTML links require the Telemetry workspace at the recorded local add
 and the explicit analysis profile in the link. Recording deletion removes its owned analyses
 and input packages after the existing confirmation; machine agent settings remain.
 Private recordings and provider credentials are excluded from automated fixtures.
+
+
+### Visual driver reports
+
+Completed AI analyses offer **Open visual report**, which opens a profile-scoped
+HTML page directly in your browser. It includes a lap-time trend, measured racing
+lines and distance-aligned speed, throttle, brake input and steering charts where
+the saved package contains those channels. Technical notes and provenance expand
+on demand. Explicit downloads remain under **Exports and technical details**.
+New reports support English and German throughout the report. Older reports keep
+their original findings and frozen input; channels absent from an older package
+are shown as unavailable. Each new finding separates observation, interpretation,
+a practice attempt and a measurable check. Comparison differences are not promises
+of recoverable time.
+
+![Visual driver report with measured channel comparisons](images/cc-ai-visual-report.png)
