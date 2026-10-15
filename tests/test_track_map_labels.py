@@ -29,6 +29,8 @@ def t_invalid_marker_numbers_and_projection_are_omitted():
     valid=dict(number=7,apex=dict(x=50,z=50))
     invalid=[dict(valid,number=n) for n in (0,-1,True,'7',None)]
     assert track_map_labels.render(invalid,project,320,320)==''
+    for value in (None,float('nan'),float('inf'),True):
+        assert track_map_labels.render([dict(valid,apex=dict(x=value,z=50))],lambda p:(50,50),320,320)==''
     assert track_map_labels.render([valid,valid],project,320,320).count('class="turn-label"')==1
     for value in (float('nan'),float('inf'),-1,321):
         assert track_map_labels.render([valid],lambda p:(value,50),320,320)==''
