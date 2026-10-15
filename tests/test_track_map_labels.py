@@ -33,7 +33,7 @@ def t_invalid_marker_numbers_and_projection_are_omitted():
         assert track_map_labels.render([dict(valid,apex=dict(x=value,z=50))],lambda p:(50,50),320,320)==''
     assert track_map_labels.render([valid,valid],project,320,320).count('class="turn-label"')==1
     for value in (float('nan'),float('inf'),-1,321):
-        assert track_map_labels.render([valid],lambda p:(value,50),320,320)==''
+        assert track_map_labels.render([valid],lambda p,value=value:(value,50),320,320)==''
 
 
 def t_ai_maps_use_saved_markers_and_positive_z_down():
