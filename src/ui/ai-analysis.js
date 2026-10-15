@@ -208,11 +208,16 @@ async function status(){
  // The runner keeps a finished run's terminal state in the active record until its cleanup
  // ends: show that run's own result instead of a terminal status above the previous report.
  const active=result.active,finished=active&&!active.foreign&&FINISHED.has(active.state);$id('ai-cancel').disabled=!result.busy||!!active?.foreign||state.cancelJob===active?.id;
- if(result.busy)$id('ai-start').disabled=true;
+ $id('ai-start').disabled=!!result.busy||!!state.startBusy||!!state.job||!state.preview?.result.can_start;
  if(active&&!finished){if(!active.foreign&&state.job!==active.id)say('ai-report','');state.job=active.foreign?null:active.id;state.lastJob=active.foreign?state.lastJob:active.id;if(active.foreign)feedback('running','Another profile is analysing','An analysis is running in another profile. Its data remain hidden.');else runFeedback(active);}
  else if(state.job){const id=state.job;await openRun(id,true);if(generation===state.generation&&state.job===id)state.job=null;await history();}
 }
-async function cancel(){if(!state.job)return;$id('ai-cancel').disabled=true;const result=await request('cancel',{id:state.job});if(result.ok)state.cancelJob=state.job;feedback(result.ok?'cancelling':'error',result.ok?'Stopping analysis':'Cancellation failed',result.ok?'Waiting for the provider process to exit. Already consumed subscription quota cannot be recovered.':error(result),state.run);}
+async function cancel(){
+ if(!state.job)return;const id=state.job,generation=state.generation;$id('ai-cancel').disabled=true;
+ const result=await request('cancel',{id});if(generation!==state.generation||state.job!==id)return;
+ if(result.ok)state.cancelJob=id;
+ feedback(result.ok?'cancelling':'error',result.ok?'Stopping analysis':'Cancellation failed',result.ok?'Waiting for the provider process to exit. Already consumed subscription quota cannot be recovered.':error(result),state.run);
+}
 async function history(){
  const generation=state.generation,result=await request('history',{query:state.selection?.rec?{rec:state.selection.rec}:{}});
  if(generation!==state.generation)return;const box=$id('ai-history');box.textContent='';if(!result.ok){node('p',error(result),box);return;}

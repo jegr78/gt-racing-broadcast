@@ -222,6 +222,37 @@ def t_slow_old_report_cannot_replace_a_newer_completed_run():
         assert out.strip() == 'true false null', out
 
 
+def t_late_cancel_response_does_not_overwrite_another_job():
+    out = _run_js(_harness() + _func_src(_src(), 'cancel') + r"""
+(async () => {
+  let release;
+  state.job = 'X';
+  replies.cancel = new Promise(resolve => {release = resolve;});
+  const pending = cancel();
+  state.job = 'Y'; state.generation++;
+  runFeedback(run('Y', 'running', null));
+  release({ok: true}); await pending;
+  console.log($id('ai-feedback-title').textContent, state.cancelJob);
+})();
+""")
+    if out is not None:
+        assert out.strip() == 'Analysing selected laps undefined', out
+
+
+def t_releasing_the_machine_slot_reenables_a_reviewed_preview():
+    out = _run_js(_harness() + r"""
+(async () => {
+  state.preview = {result: {can_start: true}};
+  replies.status = {ok: true, busy: true, active: {foreign: true, state: 'running'}};
+  await status(); console.log($id('ai-start').disabled);
+  replies.status = {ok: true, busy: false, active: null};
+  await status(); console.log($id('ai-start').disabled);
+})();
+""")
+    if out is not None:
+        assert out.strip().splitlines() == ['true', 'false'], out
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
