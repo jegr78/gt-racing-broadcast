@@ -552,10 +552,6 @@ def export_package(package, provider):
         })
 
 
-def _markdown(value):
-    return re.sub(r"([\\`*_{}\[\]()<>#+!|])", r"\\\1", str(value))
-
-
 def render(run, package, kind, origin=None):
     import ai_report_view
     return ai_report_view.render(run, package, kind, origin, fact_label)

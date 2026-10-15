@@ -2,11 +2,17 @@
 
 import html
 import json
+import re
 from urllib.parse import urlencode
 
 import ai_driver_review as driver
 import ai_report_charts as charts
 import ai_report_text as text
+
+
+def _markdown(value):
+    return re.sub(r"([\\`*_{}\[\]()<>#+!|])", r"\\\1", str(value))
+
 
 STRINGS = {
     "title": ("Fahrerbericht", "Driver review"),
@@ -113,7 +119,7 @@ def render(run, package, kind, origin, fact_label):
     # Legacy content is preserved. System boilerplate receives the current translation.
     limits = [text.limitation(v, package) for v in report.get("limitations", [])]
     if kind == "markdown":
-        from ai_reports import _markdown as md
+        md = _markdown
 
         out = [
             "# Racecast · " + tr("title"),
