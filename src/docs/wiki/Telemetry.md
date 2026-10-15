@@ -333,8 +333,9 @@ Choose **Prepare a new run** to deliberately inspect and start another package.
 
 ![Telemetry workspace: saved analysis](images/cc-ai-report.png)
 
-A completed report displays supplied facts with provenance, interpretations and
-possible causes as unproven, and three exercises with priorities 1, 2 and 3.
+A completed report displays supplied facts with provenance and separates measured
+observations from interpretations and possible causes. New reports contain up to
+five focused findings and up to three optional exercises; empty sections are omitted.
 Telemetry links open the referenced lap and metre position in the existing
 comparison view. Saved history is scoped to the analysis profile/recording; switching
 profiles clears the displayed selection and artifacts. Relevant source/context or
@@ -372,3 +373,5 @@ stated explicitly. On smaller screens the map moves above the charts. The shared
 marker editor retains its numbered world anchors.
 
 ![Numbered map and persistent telemetry position](images/telemetry-analysis.png)
+
+![Saved turn numbers on overview and detail racing lines](images/telemetry-ai-charts.png)
