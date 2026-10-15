@@ -25,6 +25,8 @@ def t_driver_schema_and_channel_preservation():
         for change in ('action', 'observation', 'check'):
             bad = copy.deepcopy(valid); del bad['findings'][0][change]
             report_fixture.fail(lambda bad=bad: reports.validate(bad, package))
+        bad = copy.deepcopy(valid); bad['findings'][0]['location_m'] = None
+        report_fixture.fail(lambda: reports.validate(bad, package))
         bad = copy.deepcopy(valid); bad['findings'][0]['topic'] = 'data-quality'
         report_fixture.fail(lambda bad=bad: reports.validate(bad, package))
         valid['findings'] = []; valid['exercises'] = []
@@ -43,6 +45,8 @@ def t_measured_channels_and_pair_boundaries():
     row = driver.channels(points,[corner])[0]
     assert row['brake_first_m'] == 10 and row['brake_last_m'] == 20
     assert row['peak_abs_steering_deg'] == 8
+    invalid=copy.deepcopy(points);invalid[1]['steer_deg']=float('nan')
+    assert driver.channels(invalid,[corner])[0]['peak_abs_steering_deg'] is None
     incomplete = copy.deepcopy(points); incomplete[0]['brake'] = 70; incomplete[1].pop('steer_deg')
     incomplete[2].pop('throttle')
     changed = driver.channels(incomplete,[corner])[0]
