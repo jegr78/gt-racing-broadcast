@@ -13,10 +13,10 @@ from ai_ui_fixture import Fixture,web_fixture
 async def verify_settings_toggle(page,fixture,port):
     original=fixture.settings.read()
     try:
-        await page.goto('http://127.0.0.1:'+str(port)+'/telemetry')
-        await page.wait_for_function('() => window.RacecastAI && tmState.profile === "profile"')
+        await page.goto('http://127.0.0.1:'+str(port)+'/telemetry#settings')
+        await page.wait_for_function('() => window.RacecastAI && tmState.profile === "profile" && tmState.lapB?.recording_id && currentView === "settings"')
         await page.reload()
-        await page.wait_for_function('() => window.RacecastAI && document.getElementById("ai-configs").options.length === 2')
+        await page.wait_for_function('() => window.RacecastAI && tmState.lapB?.recording_id && currentView === "settings" && document.getElementById("ai-configs").options.length === 2')
         await page.evaluate('() => showView("settings")')
         assert await page.locator('#ai-configs').input_value()==''
         assert await page.locator('#ai-save-enabled').count()==1,'machine toggle needs its own save action'
@@ -56,8 +56,8 @@ async def verify_settings_toggle(page,fixture,port):
 
 async def verify(page,fixture,port):
     errors=[];page.on('pageerror',lambda error:errors.append(error.stack))
-    await page.goto('http://127.0.0.1:'+str(port)+'/telemetry')
-    await page.wait_for_function('() => window.RacecastAI && tmState.profile === "profile"')
+    await page.goto('http://127.0.0.1:'+str(port)+'/telemetry#settings')
+    await page.wait_for_function('() => window.RacecastAI && tmState.profile === "profile" && tmState.lapB?.recording_id && currentView === "settings"')
     premature=[];page.on('request',lambda request:premature.append(request.url) if '/api/ai/' in request.url and 'profile=null' in request.url else None)
     await page.evaluate('() => {tmState.profile=null;RacecastAI.reset(null);workspaceAI();}')
     await asyncio.sleep(.2)
@@ -242,7 +242,7 @@ async def main():
                 await verify_settings_toggle(page,fixture,port)
                 if '--shots' in sys.argv:
                     await page.reload()
-                    await page.wait_for_function('() => tmState.profile && window.RacecastAI')
+                    await page.wait_for_function('() => tmState.profile && window.RacecastAI && tmState.lapB?.recording_id && currentView === "settings"')
                     await page.evaluate('() => showView("settings")')
                     await page.evaluate('() => RacecastAI.settings()')
                     await page.screenshot(path=str(ROOT/'src/docs/wiki/images/cc-ai-settings.png'))
