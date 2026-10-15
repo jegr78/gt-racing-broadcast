@@ -31,6 +31,9 @@ def t_driver_schema_and_channel_preservation():
         report_fixture.fail(lambda bad=bad: reports.validate(bad, package))
         valid['findings'] = []; valid['exercises'] = []
         assert reports.validate(valid, package)['findings'] == []
+        document=reports.render(dict(report=reports.validate(valid, package),profile='profile'), package, 'html')
+        assert 'id="practice"' not in document and 'href="#practice"' not in document
+        assert 'Die Daten tragen derzeit keinen konkreten Fahrhinweis.' in document
         report_fixture.fail(lambda: reports.validate(report_fixture.result(dict(package, report_schema_version=1)), package))
         try: packages.build(source, 1, language='fr')
         except packages.PackageError as error: assert error.code == 'invalid_selection'

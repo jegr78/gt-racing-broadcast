@@ -264,12 +264,12 @@ def t_driver_report_localizes_chrome_and_opens_profile_scoped_html():
   const elements=all($id('ai-report')), text=elements.map(e=>e.textContent).join(' ');
   const link=elements.find(e=>e.tag==='a');
   console.log(text.includes('Beobachtung: Gemessener Bremsverlauf.'),text.includes('So prüfst du es: Ausfahrt vergleichen.'),
-              text.includes('Validated package facts'),text.includes('Possible causes'),link.href,
+              text.includes('Validated package facts'),text.includes('Possible causes'),text.includes('Übungen für den nächsten Stint'),link.href,
               link.target,link.rel,$id('ai-feedback-title').textContent,$id('ai-view-report').textContent);
 })();
 """)
     if out is not None:
-        assert out.strip()=='true true false false /api/ai/report?id=current&profile=solo-pov _blank noopener Bericht bereit Bericht ansehen', out
+        assert out.strip()=='true true false false false /api/ai/report?id=current&profile=solo-pov _blank noopener Bericht bereit Bericht ansehen', out
 
 
 if __name__ == "__main__":

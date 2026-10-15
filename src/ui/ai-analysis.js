@@ -242,7 +242,7 @@ async function openRun(id,followJob=false){
   if(result.report.summary)node('p',result.report.summary,box);
   node('p',t('Zitierte Messwerte sind geprüft. Erklärungen und mögliche Ursachen bleiben Hypothesen.','Cited measurements were checked. Interpretations and possible causes remain hypotheses.'),box);
   for(const [label,items] of [[t('Deine nächsten Fahrthemen','Your next driving priorities'),result.report.findings],[t('Übungen für den nächsten Stint','Practice for the next stint'),result.report.exercises]]){
-   node('h3',label,box);items.forEach(item=>{const article=node('article',null,box);node('h4',t('Priorität ','Priority ')+item.priority+' · '+(item.title||item.action),article);
+   if(!items.length)continue;node('h3',label,box);items.forEach(item=>{const article=node('article',null,box);node('h4',t('Priorität ','Priority ')+item.priority+' · '+(item.title||item.action),article);
     for(const [field,label] of [['observation',t('Beobachtung','Observation')],['interpretation',t('Einordnung','Interpretation')],['action',t('Nächster Versuch','Next attempt')],['check',t('So prüfst du es','How to check')]]){if(item[field]&&(field!=='action'||item.title))node('p',label+': '+item[field],article);}
     if(item.possible_causes?.length)node('p',t('Mögliche Ursachen: ','Possible causes: ')+item.possible_causes.join('; '),article);
     const evidence=disclosure(article,t('Zitierte Messwerte','Cited measurements')+' · '+item.evidence.length);item.evidence.forEach(e=>node('p',(e.label||e.fact_id)+': '+(e.display_value??e.value),evidence));
