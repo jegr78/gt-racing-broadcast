@@ -51,10 +51,8 @@ def main():
             with sync_playwright() as pw:
                 browser=pw.chromium.launch(headless=True)
                 page=browser.new_page(viewport={'width':1440,'height':1000})
-                page.goto('http://127.0.0.1:'+str(port)+'/telemetry')
-                page.wait_for_function('() => tmState.profile === "solo"')
-                page.evaluate('() => showView("telemetry")')
-                page.wait_for_function('() => tmState.lapB')
+                page.goto('http://127.0.0.1:'+str(port)+'/telemetry#telemetry')
+                page.wait_for_function('() => tmState.profile === "solo" && tmState.lapB?.recording_id && currentView === "telemetry"')
                 assert page.locator('#tm-b optgroup').count()==1,'default must use only selected recording'
                 assert page.locator('#tm-b optgroup').first.get_attribute('label').startswith('Wed 15.11.'),'readable date label'
                 page.locator('#tm-recording-menu summary').click()
@@ -101,7 +99,8 @@ def main():
                     || (tmState.lapA && tmState.lapB && tmState.lapA.rec !== tmState.lapB.rec)''')
                 assert page.evaluate('() => tmState.lapA.rec !== tmState.lapB.rec'),'saved cross-recording comparison lost'
                 previous=page.evaluate('() => [tmState.a,tmState.b,[...tmState.included].sort()]')
-                page.reload();page.wait_for_function('() => tmState.loaded && !!tmState.lapB')
+                page.reload();page.wait_for_function('() => tmState.loaded && !!tmState.lapB && currentView === "telemetry"')
+                page.get_by_role('button',name='Archive',exact=True).click()
                 page.locator('#workspace-last').click()
                 page.wait_for_function('() => !!tmState.lapA && tmState.lapA.rec !== tmState.lapB.rec')
                 assert page.evaluate('() => [tmState.a,tmState.b,[...tmState.included].sort()]')==previous,'last comparison changed source or recording subset after reload'
