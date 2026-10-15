@@ -293,7 +293,9 @@ def t_telemetry_surface_uses_the_solo_pov_control_center():
     assert "#tm-replay-recording option" in tel[0].ready, "producer controls must wait for replay sources"
     for surface in v.SURFACES:
         if surface.name in workspace:
-            assert surface.path == "/telemetry", "analysis must render the dedicated workspace"
+            task = {"telemetry-analysis":"telemetry", "telemetry-data":"settings", "telemetry-reports":"reports"}.get(surface.name)
+            assert surface.path == "/telemetry" + ("#"+task if task else ""), "each workspace capture must request its actual task"
+            assert surface.prep is None, "workspace initialization owns the selected task"
     analysis = next(s for s in v.SURFACES if s.name == "telemetry-analysis")
     for sel in ("#tm-laps .tmitem", "#tm-charts path.tm-a", "#tm-sectors tbody tr", "#tm-err"):
         assert sel in analysis.ready, f"the ready check must wait for {sel}"
