@@ -841,6 +841,16 @@ def t_list_duration_ignores_incomplete_meta_and_nonfinite_records_and_refreshes(
         assert rec.list_recordings(d)[0]['duration_s'] == 40.0
 
 
+def t_list_duration_rejects_nonfinite_derived_spans():
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, 'overflow.gt7rec')
+        with open(path, 'wb') as stream:
+            stream.write(rec._header('demo', 'dev', 1000))
+            stream.write(rec._encode(-1e308, ord('A'), _plain()))
+            stream.write(rec._encode(1e308, ord('A'), _plain()))
+        assert rec.list_recordings(d)[0]['duration_s'] == 0.0
+
+
 def t_list_duration_is_zero_without_a_complete_packet():
     with tempfile.TemporaryDirectory() as d:
         path = os.path.join(d, 'empty.gt7rec.part')

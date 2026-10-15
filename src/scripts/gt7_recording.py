@@ -345,7 +345,8 @@ def _capture_duration(path, offset, stamp):
             if first is None:
                 first = wall_ts
             last = wall_ts
-    return max(0.0, last - first) if first is not None else 0.0
+    duration = last - first if first is not None else 0.0
+    return duration if math.isfinite(duration) and duration > 0 else 0.0
 
 
 def list_recordings(rec_dir, count_laps=False):
