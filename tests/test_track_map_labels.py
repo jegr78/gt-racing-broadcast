@@ -7,6 +7,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'src/scripts'))
 import ai_driver_review as driver
 import ai_report_charts as charts
 import report_telemetry
+import ai_reports
 import track_map_labels
 
 
@@ -76,6 +77,25 @@ def t_passage_matches_saved_corner_identity():
     lap['derived']['corner_metrics'][0]['number']=99
     assert driver.passage(package,lap,150)=='150 m'
     assert driver.passage(package,lap,float('nan'))==''
+
+
+def t_fact_labels_use_frozen_turn_number_instead_of_array_index():
+    identity='a'*32+'/session/1/lap/2'
+    corner=dict(id='one',number=7,entry_m=100,apex_m=150,exit_m=200)
+    lap=dict(id=identity,rec='recording',derived=dict(definition_fingerprint='saved',corner_metrics=[corner]))
+    definition=dict(reviewed=True,corners=[dict(id='one',number=7)])
+    package=dict(language='de',laps=[lap],references=[],track_definition_snapshots={'saved':definition})
+    fact=identity+'/derived/corner_metrics/0/time_s'
+    assert 'T7 · Abschnittszeit' in ai_reports.fact_label(fact,package)
+    assert 'Kurvenabschnitt 1' not in ai_reports.fact_label(fact,package)
+    definition['reviewed']=False
+    assert 'P7 · Abschnittszeit' in ai_reports.fact_label(fact,package)
+    definition['corners'][0]['number']=8
+    assert 'P7' not in ai_reports.fact_label(fact,package)
+    assert 'Kurvenabschnitt 1' not in ai_reports.fact_label(fact,package)
+    package['track_definition_snapshots']={}
+    assert 'T7' not in ai_reports.fact_label(fact,package)
+    assert 'Kurvenabschnitt 1' not in ai_reports.fact_label(fact,package)
 
 
 if __name__=='__main__':

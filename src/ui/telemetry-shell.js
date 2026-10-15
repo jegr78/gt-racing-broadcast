@@ -87,10 +87,10 @@ function workspaceSaved() {
   try {return JSON.parse(localStorage.getItem('racecast-telemetry-comparison:'+tmState.profile));}
   catch (_error) {return null;}
 }
-function workspaceSelection() {
+function workspaceSelection(persist=true) {
   const lap = tmState.lapB;
   $('workspace-selected').textContent = tmState.rec ? tmState.profile+' · '+tmState.rec+(lap ? ' · '+tmLapTrack(lap)+' · vehicle '+(lap.car_id || 'unknown') : '') : 'Choose a recording in Archive.';
-  if (currentView === 'telemetry' && lap?.recording_id) {
+  if (persist && currentView === 'telemetry' && lap?.recording_id) {
     const reference = tmState.lapA;
     try {localStorage.setItem('racecast-telemetry-comparison:'+tmState.profile, JSON.stringify({profile:tmState.profile, rec:lap.rec, session:lap.session, lap:lap.lap, recording_id:lap.recording_id,
       included:[...(tmState.included||[])],compare_all:$('tm-compare-all').checked,reference:reference?.recording_id ? {rec:reference.rec,session:reference.session,lap:reference.lap,recording_id:reference.recording_id}:null}));}

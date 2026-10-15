@@ -712,6 +712,7 @@ async function tmLoadPair() {
   tmState.lapA = a.lap || null;
   tmState.lapB = b.lap || null;
   tmRender();
+  workspaceSelection();
 }
 
 function tmRender() {
@@ -878,7 +879,7 @@ function tmRenderCharts() {
   }
   tmState.cursor = tmEl('line', {class: 'tm-cursor', x1: -10, x2: -10, y1: TM_PAD.t, y2: H - TM_PAD.b}, svg);
   tmState.chart = {X, minD, maxD:endD, W, panels};
-  workspaceSelection();
+  workspaceSelection(false);
 }
 
 function tmHover(ev) {

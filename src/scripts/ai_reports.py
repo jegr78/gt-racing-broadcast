@@ -128,12 +128,6 @@ def fact_label(fact_id, package=None):
         label = "Messwert · " + short
     if fact_id.endswith("/time_s") and "/derived/" in fact_id:
         label = "Abschnittszeit (s)" if de else "Section time (s)"
-    if "/corner_metrics/" in fact_id:
-        try:
-            index = int(fact_id.split("/corner_metrics/", 1)[1].split("/")[0])
-            label = ("Kurvenabschnitt " if de else "Corner section ") + str(index + 1) + " · " + label
-        except ValueError:
-            pass  # Unknown historic field keeps its general label.
     match = re.match(r"^([0-9a-f]+/session/([0-9]+)/lap/([0-9]+))/", fact_id)
     if match:
         lap = next(
@@ -145,6 +139,16 @@ def fact_label(fact_id, package=None):
             ),
             {},
         )
+        if "/corner_metrics/" in fact_id:
+            try:
+                index = int(fact_id.split("/corner_metrics/", 1)[1].split("/")[0])
+                derived = lap.get("derived", {})
+                row = derived.get("corner_metrics", [])[index] if index >= 0 else {}
+                definition = (package or {}).get("track_definition_snapshots", {}).get(derived.get("definition_fingerprint"), {})
+                if any(corner.get("id") == row.get("id") and corner.get("number") == row.get("number") for corner in definition.get("corners", [])):
+                    label = ("T" if definition.get("reviewed") else "P") + str(row["number"]) + " · " + label
+            except (ValueError, IndexError):
+                pass  # Missing historic marker identity keeps the generic metric label.
         return (
             lap.get("rec", "Ausgewählte Aufzeichnung" if de else "Selected recording")
             + " · S"

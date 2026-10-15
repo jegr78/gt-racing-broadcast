@@ -45,6 +45,30 @@ for(const missing of [null,{...lap('R',3,10,7),trace:[]}]){
         assert out.strip().splitlines()==['true|Position unavailable for this lap.||true']*2,out
 
 
+def t_redraw_preserves_saved_comparison_but_pair_changes_persist():
+    from pathlib import Path
+    shell=(Path(fixtures.ROOT)/'src/ui/telemetry-shell.js').read_text()
+    selection=shell[shell.index('function workspaceSelection('):shell.index('async function workspaceLast(')]
+    out=fixtures._tm_node("""
+let saved=JSON.stringify({rec:'saved-B',reference:{rec:'saved-A'}});
+const original=saved;global.localStorage={setItem(_key,value){saved=value;}};
+global.currentView='telemetry';
+workspaceSelection="""+selection+""";
+tmState.profile='profile';tmState.rec='B';tmState.included=new Set(['A','B']);
+tmState.lapA={...lap('A',2,10,7),recording_id:'a'.repeat(32),trace:[{d:0,t:0,x:0,z:0},{d:5,t:1,x:1,z:2}]};tmState.lapB={...lap('B',3,10,7),recording_id:'b'.repeat(32),trace:[{d:0,t:0,x:0,z:0},{d:5,t:1,x:1,z:2}]};
+tmRenderCharts();tmRefit();
+if(saved!==original)throw Error('redraw replaced the saved comparison');
+tmState.a='A';tmState.b='B';tmFetchLap=async key=>({lap:key==='A'?tmState.lapA:tmState.lapB});
+tmRender=()=>tmRenderCharts();await tmLoadPair();
+let updated=JSON.parse(saved);if(updated.rec!=='B'||updated.reference.rec!=='A')throw Error('pair selection was not saved');
+tmState.included=new Set(['B']);tmState.a=null;await tmLoadPair();updated=JSON.parse(saved);
+if(updated.included.join(',')!=='B'||updated.reference!==null)throw Error('subset or absent reference was not saved');
+console.log('saved comparison preserved; pair and subset changes persisted');
+""")
+    if out is not None:
+        assert out.strip()=='saved comparison preserved; pair and subset changes persisted',out
+
+
 if __name__=='__main__':
     for name,test in list(globals().items()):
         if name.startswith('t_'):test();print('PASS '+name)
