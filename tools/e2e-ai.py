@@ -153,6 +153,17 @@ async def verify(page,fixture,port):
     report_link=page.get_by_role('link',name='Visuellen Bericht öffnen')
     assert '/api/ai/report?' in await report_link.get_attribute('href')
     assert await report_link.get_attribute('target')=='_blank'
+    async with page.expect_popup() as opened:
+        await report_link.click()
+    visual=await opened.value
+    await visual.wait_for_load_state()
+    assert await visual.locator('html').get_attribute('lang')=='de'
+    assert await visual.get_by_role('heading',name='Fahrerbericht',exact=True).count()==1
+    assert await visual.locator('svg').count()>=1
+    assert await visual.evaluate('() => window.aiInjected') is None
+    await visual.reload()
+    assert await visual.get_by_role('heading',name='Fahrerbericht',exact=True).count()==1
+    await visual.close()
     await page.evaluate('() => showView("reports")')
     if '--shots' in sys.argv:
         await page.screenshot(path=str(ROOT/'src/docs/wiki/images/cc-ai-report.png'))
