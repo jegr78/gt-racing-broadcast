@@ -4,6 +4,7 @@ import copy
 import io
 import hashlib
 import json
+import os
 import shutil
 import sys
 import tempfile
@@ -46,6 +47,44 @@ def setup(root,reference=False):
         return ai_package.load_source(profile/'telemetry-recordings',candidate.name,candidate.index)
     store=r.Store(profile,'profile',root/'machine',factory)
     return s,p,run,store
+
+
+def t_failed_run_diagnostics_are_bounded_and_do_not_follow_symlinks():
+    with tempfile.TemporaryDirectory() as d:
+        _, _, run, store = setup(d)
+        directory = store.directory(run['id'])
+        saved = json.loads((directory / 'run.json').read_text())
+        saved.update(state='failed', report=None)
+        (directory / 'run.json').write_text(json.dumps(saved))
+        (directory / 'validation-error.log').write_text('Unknown evidence fact ID')
+        (directory / 'stderr.log').write_text('x' * 20000)
+        private = Path(d) / 'private.txt'
+        private.write_text('not a diagnostic')
+        try:
+            (directory / 'runner-error.log').symlink_to(private)
+        except OSError:
+            pass  # Symlinks may be unavailable on Windows.
+        reply = store.get(run['id'])
+        logs = {item['name']: item['text'] for item in reply['diagnostics']}
+        assert logs['validation-error.log'] == 'Unknown evidence fact ID'
+        assert logs['stderr.log'] == 'x' * 16384 + '\n[truncated]'
+        assert 'runner-error.log' not in logs
+        assert reply['report'] is None
+
+
+def t_failed_run_diagnostics_reject_hardlinks_and_missing_files():
+    with tempfile.TemporaryDirectory() as d:
+        _, _, run, store = setup(d)
+        directory = store.directory(run['id'])
+        saved = json.loads((directory / 'run.json').read_text())
+        saved.update(state='failed', report=None)
+        (directory / 'run.json').write_text(json.dumps(saved))
+        private = Path(d) / 'private.txt'
+        private.write_text('outside-profile secret')
+        os.link(private, directory / 'runner-error.log')
+        (directory / 'validation-error.log').mkdir()
+        (directory / 'stderr.log').unlink(missing_ok=True)
+        assert store.get(run['id'])['diagnostics'] == []
 
 
 def t_full_session_package_survives_snapshot_history_and_export():

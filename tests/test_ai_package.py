@@ -153,6 +153,40 @@ def t_templates_preview_and_package_limits():
         expect(lambda:a.write(huge,Path(d)/'too-large','codex'),'package_too_large')
 
 
+def t_full_session_with_context_fits_both_provider_summary_budgets():
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d) / 'telemetry-recordings'
+        s = source(root, [row(n) for n in range(1, 21)])
+        store = context.Store.for_recording(s.path)
+        data = store.read()['data']
+        data['sessions']['1']['settings']['conditions_note'] = 'Confirmed race conditions. ' * 70
+        data['sessions']['1']['stints'][0]['note'] = 'Intentional fuel-saving shifts. ' * 30
+        store.save(data, expected=1)
+        s = a.load_source(root, s.name, s.index)
+        package = a.build(s, 1)
+        size = len(a.summary_text(package).encode('utf-8'))
+        assert size > 48000, size
+        compact = json.loads(a.summary_text(package).split('\n\n', 1)[1])
+        for lap in package['laps']:
+            key = lap['id'] + '/time_s'
+            assert compact['evidence_catalog'][key] == package['facts'][key]['value']
+        for provider in a.LIMITS:
+            preview = a.preview(package, provider)
+            assert len(preview['laps']) == 20
+            assert preview['summary_bytes'] == size
+            oversized = copy.deepcopy(package)
+            oversized['goal'] = 'x' * a.LIMITS[provider]['summary_bytes']
+            assert len(a._json(oversized)) < a.LIMITS[provider]['detail_bytes']
+            expect(lambda oversized=oversized, provider=provider: a.preview(oversized, provider), 'package_too_large')
+        destination = Path(d) / 'readable-package'
+        manifest = a.write(package, destination, 'claude')
+        raw = (destination / 'detail.json').read_bytes()
+        assert json.loads(raw) == package
+        assert len(raw) == manifest['detail_bytes']
+        assert len(raw.splitlines()) > 1000
+        assert max(map(len, raw.splitlines())) < 2000
+
+
 def t_only_selected_context_and_complete_note_preview():
     with tempfile.TemporaryDirectory() as d:
         root=Path(d)/'telemetry-recordings';s=source(root)

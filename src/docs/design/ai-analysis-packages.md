@@ -56,12 +56,19 @@ eligibility. Strategy recommendations remain outside v1.
 
 Packages contain `detail.json`, `summary.md`, `manifest.json` and
 `result-schema.json`. They are immutable exports, created in fresh directories.
+The detail JSON has line breaks so read-only provider tools can inspect bounded
+line ranges without loading a multi-megabyte single line. The summary includes
+an exact numeric evidence catalogue for lap metrics, selection statistics and
+comparison summaries. The prompt requires each item's lap evidence to use its
+own lap identity; selection facts can apply to any selected lap. Deeper derived
+facts remain available in the detail file. Preview sizes count the actual
+serialized bytes, and canonical package fingerprints do not depend on whitespace.
 The preview includes selected IDs, references, all included primary/reference
 context and notes, goals/questions, limitations, byte counts and an explicit
 subscription-cloud transmission statement. It never starts an agent.
 
-Limits are 48 KB summary/8 MiB detail/40 laps for Codex and
-40 KB summary/8 MiB detail/30 laps for Claude, including references. All selected
+Both providers allow 128 KiB of summary text and 8 MiB of detailed data.
+The lap limits are 40 for Codex and 30 for Claude, including references. All selected
 trace points retain their original values; no downsampling or rounding is used
 to fit the package. Input snapshot, history and export readers use the same detail
 bound; provider output retains its separate 4 MiB bound. These are

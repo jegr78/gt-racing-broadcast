@@ -177,6 +177,32 @@ def t_codex_runtime_file_is_readable_without_exposing_parent():
      assert str(unrelated) not in permission
      assert json.dumps(str(binary.parent)) not in permission
 
+def t_codex_symlink_launch_uses_allowed_runtime_path():
+    with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        binary = root / 'installed' / 'codex'
+        binary.parent.mkdir()
+        binary.write_text('fixture')
+        launcher = root / 'codex'
+        try:
+            launcher.symlink_to(binary)
+        except OSError:
+            if sys.platform == 'win32':
+                return  # Windows may require a symlink privilege.
+            raise
+        package, output = root / 'package', root / 'output'
+        package.mkdir()
+        output.mkdir()
+        schema = package / 'schema.json'
+        schema.write_text('{}')
+        cli = a.Adapter(config(), which=lambda _: str(launcher))
+        invocation = cli.invocation(package, output, schema, cli.probe(run=Fake(), env={}))
+        assert invocation.argv[0] == str(binary.resolve())
+        permission = next(arg for arg in invocation.argv if arg.startswith('permissions.racecast='))
+        assert json.dumps(invocation.argv[0]) + '="read"' in permission
+        assert json.dumps(str(binary.parent)) not in permission
+
+
 def t_windows_codex_has_native_sandbox_and_runtime_environment():
     from unittest.mock import patch
     with tempfile.TemporaryDirectory() as d:

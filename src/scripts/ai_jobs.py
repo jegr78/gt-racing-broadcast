@@ -10,6 +10,7 @@ import re
 import shutil
 import stat
 import signal
+import sys
 import subprocess
 import tempfile
 import threading
@@ -332,6 +333,24 @@ def terminate_tree(proc, tree=None):
             os.killpg(proc.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass  # The owned group already exited.
+        except PermissionError as exc:
+            if sys.platform != "darwin":
+                raise JobError("cleanup_failed", "Could not terminate the owned analysis process group") from exc
+            # Darwin returns EPERM for a zombie-only group. Reap the owned
+            # leader, then accept only proven group absence. Never retry SIGKILL:
+            # a new process could have reused the released group identity.
+            try:
+                proc.wait(timeout=10)
+            except (OSError, subprocess.TimeoutExpired) as reap_error:
+                raise JobError("cleanup_failed", "Could not reap the owned analysis process") from reap_error
+            try:
+                os.killpg(proc.pid, 0)
+            except ProcessLookupError:
+                pass  # The non-destructive probe confirms the group disappeared.
+            except OSError as probe_error:
+                raise JobError("cleanup_failed", "Could not confirm analysis process group termination") from probe_error
+            else:
+                raise JobError("cleanup_failed", "The analysis process group remains after termination")
     try:
         proc.wait(timeout=10)
     except subprocess.TimeoutExpired:
@@ -380,7 +399,8 @@ def snapshot_package(prepared, destination, frozen):
         (destination / name).write_bytes(raw)
 
 
-def regular_output_bytes(path, *, max_bytes=MAX_OUTPUT_BYTES):
+def regular_output_bytes(path, *, max_bytes=MAX_OUTPUT_BYTES, prefix=False):
+    """Read a single-link regular file; prefix is only for truncated diagnostics."""
     path = Path(path)
     if path.is_symlink():
         raise JobError("invalid_output", "Provider result cannot be a symlink")
@@ -398,13 +418,13 @@ def regular_output_bytes(path, *, max_bytes=MAX_OUTPUT_BYTES):
         if (
             not stat.S_ISREG(st.st_mode)
             or st.st_nlink != 1
-            or st.st_size > max_bytes
+            or (not prefix and st.st_size > max_bytes)
         ):
             raise JobError(
                 "invalid_output",
                 "Provider result must be a bounded unlinked regular file",
             )
-        raw = f.read(max_bytes + 1)
+        raw = f.read(max_bytes if prefix else max_bytes + 1)
         if len(raw) > max_bytes:
             raise JobError("invalid_output", "Provider result exceeds the output bound")
         return raw
@@ -911,6 +931,7 @@ class Runner:
                             + stdout.read_text(encoding="utf-8", errors="replace")
                         )
                         raise JobError(code, message)
+                    self._update(directory, state, "validating", "Checking provider output against the frozen telemetry evidence")
                     result_path = Path(invocation.output)
                     if adapter.provider == "codex":
                         if (
@@ -958,7 +979,7 @@ class Runner:
                             )
                             raise JobError(
                                 "validation_failed",
-                                "Structured output did not validate; inspect saved local diagnostics",
+                                "Report evidence validation failed: " + str(e)[:400],
                             ) from e
                         state["report"] = report
                         self._update(

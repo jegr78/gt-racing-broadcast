@@ -24,6 +24,8 @@ function showView(name) {
   if($('workspace-status').className==='sub')workspaceStatus('');
   document.querySelectorAll('[data-view]').forEach(el => el.hidden = el.dataset.view !== name);
   document.querySelectorAll('[data-nav]').forEach(el => el.classList.toggle('active', el.dataset.nav === name));
+  const feedback=$('ai-feedback');
+  if(feedback){if(name==='reports')$('workspace-reports').prepend(feedback);else document.querySelector('#ai-analysis .rcai-steps')?.after(feedback);}
   if (name === 'telemetry') requestAnimationFrame(() => tmRefit());
   if (name === 'settings') window.RacecastAI?.settings();
   if (name === 'reports') {window.RacecastAI?.status(); window.RacecastAI?.history();}
@@ -130,6 +132,7 @@ function workspaceInspector() {
 }
 function workspaceAI() {
   showView('telemetry'); $('workspace-ai').open=true; $('workspace-ai').scrollIntoView({block:'start'});
+  window.RacecastAI?.ensureSelection();
 }
 function workspaceZoom(reset=false) {
   if (!tmState.lapB) return;
@@ -167,7 +170,9 @@ async function workspaceInit() {
   $('cmodal').addEventListener('close',()=>{const resolve=modalResolve;modalResolve=null;resolve?.($('cmodal').returnValue==='ok');});
   const ai=$('ai-analysis');
   if(ai){const details=document.createElement('details');details.id='workspace-ai';const summary=document.createElement('summary');summary.textContent='Post-session AI analysis';details.append(summary,ai);document.querySelector('[data-view="telemetry"]').append(details);
-    for(const id of ['ai-history','ai-report'])$('workspace-reports').append($(id));
+    const reports=$('workspace-reports');reports.classList.add('rcai');
+    const history=document.querySelector('.rcai-history');if(history){history.open=true;reports.append(history);}else reports.append($('ai-history'));
+    reports.append($('ai-report'));
   }
   const ping=await (await workspaceFetch('/api/ping')).json();$('ver').textContent=ping.version==='dev'?'dev build':ping.version;
   const query=new URLSearchParams(location.search),response=await workspaceFetch('/api/profiles'),data=await response.json();

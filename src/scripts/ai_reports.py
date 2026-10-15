@@ -164,12 +164,12 @@ def validate(result, package):
             _fail("Result location leaves the selected lap trace")
         for evidence in item["evidence"]:
             fact = package["facts"].get(evidence["fact_id"])
-            if (
-                fact is None
-                or evidence["value"] != fact["value"]
-                or not _related(evidence["fact_id"], item["lap_id"], package)
-            ):
-                _fail("Result measurement does not match the selected package fact")
+            if fact is None:
+                _fail("Unknown evidence fact ID: " + evidence["fact_id"][:160])
+            if evidence["value"] != fact["value"]:
+                _fail("Evidence value differs from the frozen package fact: " + evidence["fact_id"][:160])
+            if not _related(evidence["fact_id"], item["lap_id"], package):
+                _fail("Evidence refers to a lap outside this item's declared comparison: " + evidence["fact_id"][:160])
             evidence["provenance"] = fact["provenance"]
         item["telemetry"] = dict(
             rec=lap["rec"],
@@ -389,7 +389,18 @@ class Store:
                     ).values()
                     if lap["id"] in partners
                 ]
-        return dict(run, ok=True)
+        diagnostics = []
+        if run["state"] in ai_jobs.TERMINAL and run["state"] != "completed":
+            for name in ("validation-error.log", "runner-error.log", "stderr.log"):
+                path = directory / name
+                try:
+                    raw = ai_jobs.regular_output_bytes(path, max_bytes=16385, prefix=True)
+                except (ai_jobs.JobError, OSError):
+                    continue
+                if raw:
+                    diagnostics.append(dict(name=name, text=raw[:16384].decode("utf-8", "replace")
+                                            + ("\n[truncated]" if len(raw) > 16384 else "")))
+        return dict(run, diagnostics=diagnostics, ok=True)
 
     def history(self, rec=None):
         items = []
