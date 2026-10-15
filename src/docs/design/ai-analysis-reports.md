@@ -86,3 +86,13 @@ subscription-authenticated Linux Codex 0.162.1 run with gpt-6.1-sol completed th
 full package, strict validation, history and HTML/input-ZIP export pipeline.
 Separate native runs verified unavailable-model failure and cancellation without
 a completed report or a retained machine lease. All telemetry was synthetic.
+
+On 2026-10-15, local macOS subscription runs also exercised an actual 20-lap
+Grand Valley recording with saved race/stint context. Both Claude Code (`sonnet`,
+reported as `claude-sonnet-5-5`) and Codex (`gpt-6.1-sol`, no reported model
+metadata) completed with 18 usable selected laps. Both reports passed evidence
+validation after reopening, and HTML, Markdown and input-package exports succeeded.
+These runs exposed unreadable single-line detail JSON and an insufficiently
+specified evidence/lap association in the prompt. Detail serialization and the
+summary evidence catalogue now support bounded reads and explicit evidence IDs;
+the validator still rejects missing, changed and unrelated facts.

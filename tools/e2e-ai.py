@@ -182,13 +182,13 @@ async def verify(page,fixture,port):
     assert await page.evaluate('() => tmState.lapB.lap')==2
     fixture.invalid=True
     await preview();await page.locator('#ai-start').click()
-    await page.wait_for_function('() => document.getElementById("ai-run-status").textContent.startsWith("failed")',timeout=15000)
+    await page.wait_for_function('() => document.getElementById("ai-feedback").dataset.kind === "failed"',timeout=15000)
     assert await page.locator('#ai-report article').count()==0
     fixture.invalid=False;fixture.delay=3
     await preview();await page.locator('#ai-start').click()
     await page.wait_for_function('() => !document.getElementById("ai-cancel").disabled',timeout=10000)
     await page.locator('#ai-cancel').click()
-    await page.wait_for_function('() => document.getElementById("ai-run-status").textContent.startsWith("cancelled")',timeout=15000)
+    await page.wait_for_function('() => document.getElementById("ai-feedback").dataset.kind === "cancelled"',timeout=15000)
     assert await page.locator('#ai-report article').count()==0 and not fixture.control().status()['busy']
     # Another tab can change the server profile before this page has updated.
     from ai_ui_fixture import package_fixture

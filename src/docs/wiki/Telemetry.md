@@ -241,7 +241,12 @@ without either provider CLI. In **Data management**, enable the feature and save
 one or more named Codex or Claude Code configurations. Choose the executable if it
 is not on PATH, a default model, timeout and agent mode. **Check CLI / login** probes
 the installed tool and existing subscription login without model inference. Model
-suggestions depend on the installed CLI; you can enter an exact model name manually.
+suggestions use the installed Codex catalogue. Claude Code offers the documented
+`sonnet`, `opus` and `haiku` aliases immediately. Their resolved versions depend on
+the CLI and account settings; enter a full model ID to pin a version. Suggestions
+do not select a model automatically or verify account access.
+
+![Claude Code model suggestions](images/cc-ai-models.png)
 The same provider can have multiple configurations.
 
 For a new configuration, enter a name and click **Save new configuration**.
@@ -303,10 +308,21 @@ a new preview. An oversized package requires fewer laps/references or shorter no
 Stopping a recording never starts analysis automatically.
 
 One job can run on the machine, across the UI and `racecast telemetry analyze`.
+The status card above the selection shows package preparation, provider execution,
+evidence validation and the final result. Running jobs show provider, model and
+elapsed time without an invented completion percentage. Reopening the workspace
+reconnects to an active job. Reference choices are grouped by recording and
+collapsed; package notes, lap context and limitations expand separately.
+
+![Telemetry workspace: running analysis](images/cc-ai-running.png)
 The default timeout is ten minutes and is configurable per agent. Progress and
 **Cancel active analysis** operate on the spawned process tree. Cancellation cannot
 recover quota already consumed. There are no automatic retries or repair calls.
 CLI, login, model, quota, approval, timeout and validation failures show guidance.
+Failed reports expose bounded local logs under **Technical details**. A report
+that fails evidence validation is never displayed as a verified result.
+
+![Telemetry workspace: analysis failure details](images/cc-ai-error.png)
 Choose **Prepare a new run** to deliberately inspect and start another package.
 
 ![Telemetry workspace: saved analysis](images/cc-ai-report.png)

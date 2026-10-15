@@ -17,9 +17,10 @@ PACKAGE_VERSION = 1
 CALCULATION_VERSION = "selection-and-section-deltas-v1"
 TEMPLATES = ("driving-technique", "consistency", "session-overview")
 MAX_DETAIL_BYTES = 8 * 1024 * 1024
+MAX_SUMMARY_BYTES = 128 * 1024
 LIMITS = {
-    "codex": {"summary_bytes": 48000, "detail_bytes": MAX_DETAIL_BYTES, "laps": 40},
-    "claude": {"summary_bytes": 40000, "detail_bytes": MAX_DETAIL_BYTES, "laps": 30},
+    "codex": {"summary_bytes": MAX_SUMMARY_BYTES, "detail_bytes": MAX_DETAIL_BYTES, "laps": 40},
+    "claude": {"summary_bytes": MAX_SUMMARY_BYTES, "detail_bytes": MAX_DETAIL_BYTES, "laps": 30},
 }
 TRACE_KEYS = {"d", "t", "speed_kmh", "throttle", "brake", "steer", "gear", "x", "z"}
 METRICS = (
@@ -126,7 +127,7 @@ class PackageError(ValueError):
         super().__init__(message)
 
 
-def _json(doc):
+def _json(doc, *, readable=False):
     try:
         return json.dumps(
             doc,
@@ -134,6 +135,7 @@ def _json(doc):
             ensure_ascii=False,
             allow_nan=False,
             separators=(",", ":"),
+            indent=0 if readable else None,
         ).encode("utf-8")
     except (ValueError, TypeError, RecursionError) as e:
         raise PackageError("invalid_source", "Analysis data is not finite JSON") from e
@@ -759,9 +761,14 @@ def prompt(package):
         "session-overview": "Explain selection statistics, phase/context changes and data quality. Distinguish complete captured laps from suitable pace benchmarks. Do not advise race strategy.",
     }
     return (
-        "Analyze only this Racecast package. Read detail.json for the frozen metrics, facts, traces and context. "
+        "Analyze only this Racecast package. The summary includes an evidence_catalog mapping valid fact IDs to exact numeric values. "
+        "Use those IDs verbatim for metric and selection evidence; never invent IDs or use placeholders. "
+        "For deeper analysis, read detail.json in bounded line ranges, not the entire file at once: it can be several megabytes. "
+        "It contains the frozen metrics, facts, traces and context. Derived fact IDs are in its facts object. "
         "Return JSON conforming to result-schema.json with findings, limitations and three prioritized exercises grounded in selected evidence. "
         "Keep measured facts separate from possible causes and interpretations. Cite existing lap IDs and fact IDs with exact supplied values. "
+        "For each finding and exercise, lap-specific evidence must start with that item's exact lap_id plus '/'. "
+        "Facts starting with 'selection/' may be cited with any lap. Do not attach another lap's metric to the item's evidence, even when discussing it in prose. "
         "Never invent unknown channel meanings, tyre wear, setup, power, weather or driving-aid measurements. "
         "Without an external reference make no ideal-line or optimal braking point claims. "
         "Do not add mini-sector gains as guaranteed recoverable time or assume independent sector entry speeds. "
@@ -799,6 +806,14 @@ def summary_text(package):
         for r in package["laps"]
     ]
     compact["references"] = [r["id"] for r in package["references"]]
+    evidence_roots = {"selection"}
+    for lap in package["laps"] + package["references"]:
+        evidence_roots.update((lap["id"], lap["id"] + "/tyre_avg_c"))
+    evidence_roots.update("comparison/" + str(i) for i in range(len(package["comparisons"])))
+    compact["evidence_catalog"] = {
+        key: fact["value"] for key, fact in package["facts"].items()
+        if key.rsplit("/", 1)[0] in evidence_roots
+    }
     return prompt(package) + "\n\n" + _json(compact).decode("utf-8") + "\n"
 
 
@@ -835,7 +850,7 @@ def preview(package, provider):
     if provider not in LIMITS:
         raise PackageError("invalid_selection", "Unsupported analysis provider")
     detail_size, summary_size = (
-        len(_json(package)),
+        len(_json(package, readable=True)),
         len(summary_text(package).encode("utf-8")),
     )
     limits = LIMITS[provider]
@@ -898,7 +913,7 @@ def write(package, directory, provider):
             "Package directory already exists; never overwrite an analysis snapshot",
         )
     directory.mkdir(parents=True)
-    (directory / "detail.json").write_bytes(_json(package))
+    (directory / "detail.json").write_bytes(_json(package, readable=True))
     (directory / "summary.md").write_text(summary_text(package), encoding="utf-8")
     (directory / "manifest.json").write_bytes(_json(manifest))
     (directory / "result-schema.json").write_bytes(_json(RESULT_SCHEMA))

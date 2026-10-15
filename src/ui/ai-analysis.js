@@ -1,7 +1,7 @@
 /* Optional post-session analysis. Provider text is always displayed as text. */
 (() => {
 'use strict';
-const state={settings:null,settingsDirty:false,settingsBusy:false,models:{},profile:null,generation:0,preview:null,selection:null,job:null,lastJob:null};
+const state={settings:null,settingsDirty:false,settingsBusy:false,models:{},profile:null,generation:0,preview:null,selection:null,job:null,lastJob:null,previewRequest:null,startBusy:false,machineBusy:false,cancelJob:null,run:null};
 const $id=id=>document.getElementById(id);
 const node=(tag,text,parent)=>{const e=document.createElement(tag);if(text!=null)e.textContent=text;if(parent)parent.append(e);return e;};
 const error=doc=>doc?.error?.message||'Analysis operation failed';
@@ -15,15 +15,40 @@ async function request(operation,payload=null){
 }
 function say(id,text){$id(id).textContent=text||'';}
 function option(select,value,label){const o=new Option(label,value);select.append(o);}
+function feedback(kind,title,message,run=null){
+ const box=$id('ai-feedback');box.dataset.kind=kind;box.hidden=false;
+ say('ai-feedback-title',title);say('ai-run-status',message);
+ const busy=['queued','starting','running','validating','cancelling','preparing'].includes(kind);
+ $id('ai-progress').hidden=!busy;$id('ai-new-run').hidden=!FINISHED.has(kind)&&kind!=='interrupted';
+ $id('ai-view-report').hidden=!FINISHED.has(kind)&&kind!=='interrupted';$id('ai-view-report').textContent=kind==='completed'?'View report':'View details';
+ if(run){state.run=run;const start=Date.parse(run.started_at||run.created_at),end=Date.parse(run.finished_at)||Date.now();
+  const seconds=Number.isFinite(start)?Math.max(0,Math.floor((end-start)/1000)):null;
+  say('ai-run-meta',[run.agent?.name||run.agent?.provider,run.requested_model,seconds!=null?Math.floor(seconds/60)+':'+String(seconds%60).padStart(2,'0')+' elapsed':''].filter(Boolean).join(' · '));
+ }else say('ai-run-meta','');
+}
+function runFeedback(run){
+ const titles={queued:'Analysis queued',starting:'Checking provider',running:'Analysing selected laps',validating:'Checking report facts',completed:'Report ready',failed:'Analysis failed',timed_out:'Analysis timed out',cancelled:'Analysis cancelled',interrupted:'Analysis interrupted',awaiting_validation:'Report awaiting validation'};
+ const help={validation_failed:'The provider returned a report that failed the evidence checks. No verified report was saved. Choose View details, then open Technical details for the cause.',provider_failed:'The provider could not finish the analysis. Choose View details, then open Technical details before preparing another run.',timed_out:'The configured time limit was reached. You can adjust the timeout in Data management before preparing another run.',cancelled:'The analysis stopped. Its input package is retained.',interrupted:'The process ended without a verified report. Its input package is retained.'};
+ const code=run.error?.code||run.state;
+ const phases={running:'The provider is analysing your selected telemetry. This may take several minutes. You can leave this tab open or return later.',validating:'Matching report evidence to the frozen telemetry package before saving the result.',completed:'The report passed the evidence checks. '+(run.report?.findings.length||0)+' finding'+(run.report?.findings.length===1?'':'s')+' and '+(run.report?.exercises.length||0)+' practice exercises are ready. Choose View report to read them.'};
+ if(state.cancelJob===run.id&&!FINISHED.has(run.state))feedback('cancelling','Stopping analysis','Waiting for the provider process to exit. Already consumed subscription quota cannot be recovered.',run);
+ else feedback(run.state,titles[run.state]||run.state,help[code]||phases[run.state]||run.error?.message||run.progress||'',run);
+}
+function disclosure(parent,title){const box=node('details',null,parent);node('summary',title,box);return box;}
+function ensureSelection(){const rec=tmState.lapB?.rec||tmState.rec;if(rec&&(!state.selection||state.selection.rec!==rec))selection();}
+function prepareNewRun(){if(typeof workspaceAI==='function')workspaceAI();invalidate();selection();$id('ai-controls').scrollIntoView({block:'start',behavior:'smooth'});}
 function invalidate(){state.generation++;state.preview=null;$id('ai-start').disabled=true;$id('ai-export-preview').disabled=true;say('ai-preview','Selection changed. Prepare and inspect a new preview.');}
 function personal(){return {instructions:$id('ai-instructions').checked,skills:$id('ai-skills').checked,mcp:$id('ai-mcp').checked};}
 function modelSuggestions(){
- for(const [listId,agentId,provider] of [
-  ['ai-model-suggestions',$id('ai-configs').value,$id('ai-provider').value],
-  ['ai-run-model-suggestions',$id('ai-agent').value,state.settings?.agents.find(a=>a.id===$id('ai-agent').value)?.provider]
+ for(const [listId,inputId,agentId,provider] of [
+  ['ai-model-suggestions','ai-config-model',$id('ai-configs').value,$id('ai-provider').value],
+  ['ai-run-model-suggestions','ai-model',$id('ai-agent').value,state.settings?.agents.find(a=>a.id===$id('ai-agent').value)?.provider]
  ]){
   const list=$id(listId),cached=state.models[agentId];list.textContent='';
-  if(cached&&cached.provider===provider)cached.models.forEach(m=>option(list,m,m));
+  const models=provider==='claude'?['sonnet','opus','haiku']:cached&&cached.provider===provider?cached.models:[];
+  models.forEach(m=>option(list,m,provider==='claude'?m+' (Claude Code alias)':m));
+  $id(inputId).placeholder=provider==='claude'?'sonnet, opus, haiku or a full model ID':'Exact model name for this provider';
+  $id(inputId).title=provider==='claude'?'Claude Code aliases follow the CLI version and account settings. Enter a full model ID to pin a version.':'';
  }
 }
 function settingsStatus(text,kind='info'){
@@ -126,37 +151,47 @@ async function selection(){
 async function renderLaps(){
  if(!state.selection)return;
  const session=state.selection.sessions.find(s=>String(s.session)===$id('ai-session').value),box=$id('ai-laps');box.textContent='';invalidate();
- (session?.laps||[]).forEach(l=>{const label=node('label',null,box),input=node('input',null,label);input.type='checkbox';input.value=l.lap;input.checked=l.usable;input.onchange=invalidate;node('span',' Lap '+l.lap+(l.usable?'':' · excluded: '+l.reasons.join(', ')),label);});
+  (session?.laps||[]).forEach(l=>{const label=node('label',null,box),input=node('input',null,label);label.className=l.usable?'rcai-lap':'rcai-lap rcai-excluded';input.type='checkbox';input.value=l.lap;input.checked=l.usable;input.disabled=!l.usable;input.onchange=invalidate;node('span','Lap '+l.lap,label);if(!l.usable){label.title=l.reasons.join(', ');node('small','Excluded',label);}});
+ say('ai-lap-count',(session?.laps||[]).filter(l=>l.usable).length+' usable of '+(session?.laps||[]).length+' captured laps. Excluded laps remain available in Telemetry.');
  const generation=state.generation,chosen=$id('ai-session').value;const references=$id('ai-references');references.textContent='';
  if(!session)return;
  const result=await request('references',{query:{rec:state.selection.rec,session:chosen}});
  if(generation!==state.generation||chosen!==$id('ai-session').value)return;
  if(!result.ok){node('p',error(result),references);return;}
- result.suggestions.forEach(ref=>{const label=node('label',null,references),input=node('input',null,label);input.type='checkbox';input.dataset.reference=JSON.stringify(ref);input.onchange=invalidate;node('span',' '+ref.rec+' · S'+ref.session+' · lap '+ref.lap+' · '+ref.kind,label);});
+ const groups=new Map();result.suggestions.forEach(ref=>{const key=ref.rec+' · Session '+ref.session;if(!groups.has(key)){const group=node('fieldset',null,references);node('legend',key,group);groups.set(key,group);}const label=node('label',null,groups.get(key)),input=node('input',null,label);input.type='checkbox';input.dataset.reference=JSON.stringify(ref);input.onchange=invalidate;label.title=ref.kind;node('span','Lap '+ref.lap,label);});
  if(!result.suggestions.length)node('p','No compatible reference suggestions. Your selected session can still be analysed.',references);
 }
 function payload(){return {profile:state.profile,rec:state.selection?.rec,session:Number($id('ai-session').value),laps:[...$id('ai-laps').querySelectorAll('input:checked')].map(e=>Number(e.value)),references:[...$id('ai-references').querySelectorAll('input:checked')].map(e=>{const r=JSON.parse(e.dataset.reference);return {rec:r.rec,session:r.session,lap:r.lap};}),agent:$id('ai-agent').value,model:$id('ai-model').value,template:$id('ai-template').value,goal:$id('ai-goal').value,questions:$id('ai-questions').value,language:$id('ai-language').value,ui_language:document.documentElement.lang||'en'};}
 async function preview(){
- invalidate();const generation=state.generation;say('ai-preview','Preparing the selected data…');
- const selected=payload(),result=await request('preview',selected);if(generation!==state.generation)return;
- const box=$id('ai-preview');box.textContent='';if(!result.ok){node('p',error(result),box);return;}
+ if(state.previewRequest||state.startBusy)return;
+ invalidate();const generation=state.generation,owner={};state.previewRequest=owner;
+ $id('ai-preview-button').disabled=true;$id('ai-preview-button').textContent='Preparing package…';$id('ai-preview').setAttribute('aria-busy','true');say('ai-preview','Reading selected laps, context and reference data…');
+ if(!state.job)feedback('preparing','Preparing analysis package','Reading the selected telemetry locally. The provider has not been started.');
+ const selected=payload(),result=await request('preview',selected);
+ if(state.previewRequest===owner){state.previewRequest=null;$id('ai-preview-button').disabled=!state.selection?.sessions.length;$id('ai-preview-button').textContent='Preview selected data';$id('ai-preview').setAttribute('aria-busy','false');}
+ if(generation!==state.generation)return;
+ const box=$id('ai-preview');box.textContent='';if(!result.ok){feedback('error','Package could not be prepared',error(result));node('p','Adjust the selection and preview again. No provider was invoked.',box);return;}
  state.preview={result,payload:selected};const m=result.manifest;
- node('p',m.transmission,box);node('p',m.laps.length+' selected usable laps · '+m.references.length+' explicitly selected references · report language '+m.language,box);
- node('p',Math.ceil(m.detail_bytes/1024)+' KiB detailed telemetry · '+Math.ceil(m.summary_bytes/1024)+' KiB summary · one provider invocation',box);
- node('h4','Included context notes',box);if(!m.notes.length)node('p','No included notes.',box);
- m.notes.forEach(n=>node('p',typeof n==='string'?n:[n.scope==='recording'?'Recording':'Session '+n.session,n.lap!=null?'lap '+n.lap:'',n.text].filter(Boolean).join(' · '),box));
- node('h4','Selected comparison context',box);
- (m.lap_contexts||[]).forEach(c=>{node('p',c.rec+' · S'+c.session+' lap '+c.lap+' · '+c.car+' · '+c.layout+' · '+c.compound+' · '+c.role+' · '+(c.confirmed?'context confirmed':'context unconfirmed'),box);
-  const fields=Object.entries(c.settings||{});if(fields.length)node('p','Supplied conditions: '+fields.map(([k,v])=>k.replaceAll('_',' ')+' = '+String(v)).join(', '),box);const objective=Object.entries(c.objective||{});if(objective.length)node('p','Supplied driving objective: '+objective.map(([k,v])=>k.replaceAll('_',' ')+' = '+String(v)).join(', '),box);});
- node('h4','Limitations and comparability',box);m.limitations.forEach(v=>node('p',v,box));
- node('p',result.availability.guidance||'CLI ready. Subscription quota and model entitlement are not guaranteed.',box);
+ if(!state.job)feedback(result.can_start?'ready':'error',result.can_start?'Package ready for review':'Provider is not ready',result.can_start?'Review the package below, then start the analysis explicitly.':result.availability.guidance);
+ const metrics=node('div',null,box);metrics.className='rcai-package-metrics';
+ for(const [value,label] of [[m.laps.length,'usable laps'],[m.references.length,'reference laps'],[Math.ceil(m.detail_bytes/1024)+' KiB','detail data'],[Math.ceil(m.summary_bytes/1024)+' / '+Math.floor(m.limits.summary_bytes/1024)+' KiB','summary budget']]){const tile=node('div',null,metrics);node('strong',String(value),tile);node('span',label,tile);}
+ node('p',m.transmission,box);node('p','Provider: '+result.agent.provider+' · Model: '+result.requested_model+' · Report language: '+m.language+' · One invocation',box);
+ const notes=disclosure(box,'Included context notes · '+m.notes.length);if(!m.notes.length)node('p','No included notes.',notes);
+ m.notes.forEach(n=>node('p',typeof n==='string'?n:[n.scope==='recording'?'Recording':'Session '+n.session,n.lap!=null?'lap '+n.lap:'',n.text].filter(Boolean).join(' · '),notes));
+ const contexts=disclosure(box,'Selected comparison context · '+(m.lap_contexts||[]).length+' laps');
+ (m.lap_contexts||[]).forEach(c=>{const lap=disclosure(contexts,'Lap '+c.lap+' · '+c.compound+' · '+c.role+' · '+(c.confirmed?'confirmed':'unconfirmed'));node('p',c.rec+' · S'+c.session+' · '+c.car+' · '+c.layout,lap);
+  const fields=Object.entries(c.settings||{});if(fields.length)node('p','Supplied conditions: '+fields.map(([k,v])=>k.replaceAll('_',' ')+' = '+String(v)).join(', '),lap);const objective=Object.entries(c.objective||{});if(objective.length)node('p','Supplied driving objective: '+objective.map(([k,v])=>k.replaceAll('_',' ')+' = '+String(v)).join(', '),lap);});
+ const limitations=disclosure(box,'Limitations and comparability · '+m.limitations.length);m.limitations.forEach(v=>node('p',v,limitations));
+ if(result.availability.guidance)node('p',result.availability.guidance,box);
  if(result.agent?.mode==='personal')node('p','Personal instructions/skills may supply additional content through the CLI. Review that configuration externally; the telemetry preview does not enumerate its contents.',box);
- $id('ai-start').disabled=!result.can_start;$id('ai-export-preview').disabled=false;
+ $id('ai-start').disabled=!result.can_start||state.machineBusy||state.startBusy;$id('ai-export-preview').disabled=false;
 }
 async function start(){
- if(!state.preview)return;const selected={...state.preview.payload,confirm_preview:state.preview.result.confirm_preview};$id('ai-start').disabled=true;
- const result=await request('start',selected);say('ai-run-status',result.ok?'Analysis queued.':error(result));
+ if(!state.preview||state.startBusy||state.machineBusy||state.job)return;const selected={...state.preview.payload,confirm_preview:state.preview.result.confirm_preview},generation=state.generation;state.startBusy=true;$id('ai-start').disabled=true;
+ feedback('queued','Starting analysis','Reserving the local analysis slot and checking the reviewed package.');$id('ai-feedback').scrollIntoView({block:'center',behavior:'smooth'});say('ai-report','');
+ const result=await request('start',selected);state.startBusy=false;if(generation!==state.generation)return;
  if(result.ok){state.job=result.id;state.lastJob=result.id;state.preview=null;await status();}
+ else {feedback('error','Analysis could not start',error(result));$id('ai-start').disabled=!state.preview?.result.can_start;}
 }
 function download(result){
  if(!result.ok){say('ai-run-status',error(result));return;}
@@ -166,24 +201,28 @@ function download(result){
 async function exportPreview(){if(state.preview)download(await request('package-export',{...state.preview.payload,confirm_preview:state.preview.result.confirm_preview}));}
 async function exportRun(id,format){download(await request('export',{query:{id,format}}));}
 async function status(){
- const generation=state.generation,result=await request('status');if(generation!==state.generation||!result.ok)return;
+ const sequence=state.statusSequence=(state.statusSequence||0)+1;
+ const generation=state.generation,result=await request('status');if(generation!==state.generation||sequence!==state.statusSequence)return;
+ if(!result.ok){if(state.job)feedback('connection','Analysis status unavailable','Reconnecting to the local UI service. Wait for status recovery before starting another analysis.',state.run);return;}
+ state.machineBusy=result.busy;
  // The runner keeps a finished run's terminal state in the active record until its cleanup
  // ends: show that run's own result instead of a terminal status above the previous report.
- const active=result.active,finished=active&&!active.foreign&&FINISHED.has(active.state);$id('ai-cancel').disabled=!result.busy;
- if(active&&!finished){state.job=active.id;state.lastJob=active.id;say('ai-run-status',active.foreign?'An analysis is running in another profile. Its data remain hidden.':active.state+' · '+active.progress);}
- else if(state.job){const id=state.job;await openRun(id);if(generation===state.generation&&state.job===id)state.job=null;await history();}
+ const active=result.active,finished=active&&!active.foreign&&FINISHED.has(active.state);$id('ai-cancel').disabled=!result.busy||!!active?.foreign||state.cancelJob===active?.id;
+ if(result.busy)$id('ai-start').disabled=true;
+ if(active&&!finished){if(!active.foreign&&state.job!==active.id)say('ai-report','');state.job=active.foreign?null:active.id;state.lastJob=active.foreign?state.lastJob:active.id;if(active.foreign)feedback('running','Another profile is analysing','An analysis is running in another profile. Its data remain hidden.');else runFeedback(active);}
+ else if(state.job){const id=state.job;await openRun(id,true);if(generation===state.generation&&state.job===id)state.job=null;await history();}
 }
-async function cancel(){if(!state.job)return;const result=await request('cancel',{id:state.job});say('ai-run-status',result.ok?'Cancellation requested. Already consumed subscription quota cannot be recovered.':error(result));}
+async function cancel(){if(!state.job)return;$id('ai-cancel').disabled=true;const result=await request('cancel',{id:state.job});if(result.ok)state.cancelJob=state.job;feedback(result.ok?'cancelling':'error',result.ok?'Stopping analysis':'Cancellation failed',result.ok?'Waiting for the provider process to exit. Already consumed subscription quota cannot be recovered.':error(result),state.run);}
 async function history(){
  const generation=state.generation,result=await request('history',{query:state.selection?.rec?{rec:state.selection.rec}:{}});
  if(generation!==state.generation)return;const box=$id('ai-history');box.textContent='';if(!result.ok){node('p',error(result),box);return;}
  result.runs.forEach(run=>{const row=node('div',null,box),button=node('button',new Date(run.created_at).toLocaleString()+' · '+run.state+(run.stale?' · stale':'')+' · '+(run.requested_model||'model unavailable'),row);button.onclick=()=>openRun(run.id);});
  if(!result.runs.length)node('p','No saved analyses in this profile/recording.',box);
 }
-async function openRun(id){
- const generation=state.generation,result=await request('job',{query:{id}});if(generation!==state.generation)return;
+async function openRun(id,followJob=false){
+ const generation=state.generation,result=await request('job',{query:{id}});if(generation!==state.generation||followJob&&state.job!==id)return;
  const box=$id('ai-report');box.textContent='';if(!result.ok){node('p',error(result),box);return;}
- say('ai-run-status',result.state+' · '+(result.error?.message||result.progress||''));
+ if(!state.job||state.job===id)runFeedback(result);
  node('h3','Analysis · '+result.state+(result.stale?' · stale':''),box);
  if(result.stale)node('p',result.reason,box);
  node('p','Requested model: '+result.requested_model+' · reported model: '+(result.actual_model||'not reported'),box);
@@ -194,15 +233,16 @@ async function openRun(id){
    node('h3',label,box);items.forEach(item=>{const article=node('article',null,box);node('h4','Priority '+item.priority+' · '+(item.title||item.action),article);
     if(item.interpretation)node('p',item.interpretation,article);if(item.check)node('p','Check: '+item.check,article);
     if(item.possible_causes?.length)node('p','Possible causes: '+item.possible_causes.join('; '),article);
-    node('h5','Validated package facts',article);item.evidence.forEach(e=>node('p',(e.label||e.fact_id)+': '+e.value+' · '+e.provenance,article));
+    const evidence=disclosure(article,'Validated package facts · '+item.evidence.length);item.evidence.forEach(e=>node('p',(e.label||e.fact_id)+': '+e.value+' · '+e.provenance,evidence));
     const link=node('button','Open lap'+(item.location_m!=null?' at '+item.location_m+' m':''),article);link.onclick=()=>tmOpenReference({...item.telemetry,profile:result.profile});
     (item.comparisons||[]).forEach(ref=>{const compare=node('button','Compare with S'+ref.session+' lap '+ref.lap,article);compare.onclick=()=>openComparison(item,result.profile,ref);});
    });
   }
   node('h3','Limitations',box);result.report.limitations.forEach(v=>node('p',v,box));
  }
- const details=node('details',null,box);node('summary','Run provenance',details);const provenance={...result};delete provenance.report;delete provenance.ok;node('pre',JSON.stringify(provenance,null,2),details);
- const retry=node('button','Prepare a new run',box);retry.onclick=()=>{invalidate();$id('ai-controls').scrollIntoView({block:'start'});};
+ if(result.diagnostics?.length){const diagnostics=disclosure(box,'Technical details');result.diagnostics.forEach(log=>{node('h4',log.name,diagnostics);node('pre',log.text,diagnostics);});}
+ const details=node('details',null,box);node('summary','Run provenance',details);const provenance={...result};delete provenance.report;delete provenance.ok;delete provenance.diagnostics;node('pre',JSON.stringify(provenance,null,2),details);
+ const retry=node('button','Prepare a new run',box);retry.onclick=prepareNewRun;
 }
 async function openComparison(item,profile,reference){
  if(!await tmOpenReference({...item.telemetry,profile}))return;
@@ -221,7 +261,7 @@ async function openComparison(item,profile,reference){
  tmState.a=key;tmFillPickers(tmState.lapB);tmRenderLaps();await tmLoadPair();
  if(item.location_m!=null){const chart=tmState.chart;if(chart){const rect=$id('tm-charts').getBoundingClientRect();tmHover({clientX:rect.left+chart.X(Math.min(item.location_m,chart.maxD))/chart.W*rect.width});} }
 }
-function reset(profile){state.profile=profile;state.generation++;state.selection=null;state.preview=null;state.job=null;state.lastJob=null;['ai-report','ai-history','ai-preview','ai-laps','ai-references','ai-selection-status','ai-run-status'].forEach(id=>say(id,''));$id('ai-start').disabled=true;$id('ai-export-preview').disabled=true;$id('ai-preview-button').disabled=true;if(profile&&currentView==='telemetry'){status();history();}}
+function reset(profile){state.profile=profile;state.generation++;state.selection=null;state.preview=null;state.job=null;state.lastJob=null;state.run=null;state.previewRequest=null;state.startBusy=false;state.machineBusy=false;state.cancelJob=null;['ai-report','ai-history','ai-preview','ai-laps','ai-references','ai-selection-status','ai-run-status'].forEach(id=>say(id,''));$id('ai-start').disabled=true;$id('ai-export-preview').disabled=true;$id('ai-preview-button').disabled=true;$id('ai-preview-button').textContent='Preview selected data';feedback('idle','Select laps, review the package, then run','Preparation reads local telemetry. Only Start this analysis invokes the selected provider.');if(profile&&currentView==='telemetry'){status();history();}}
 function init(){
  const settingsCard=node('section',null,document.querySelector('[data-view="settings"]'));settingsCard.id='ai-settings';settingsCard.className='card rcai';
  settingsCard.innerHTML=`<h3>Optional AI telemetry analysis</h3><p>Uses your existing Codex or Claude Code subscription CLI. Install and sign in externally. Racecast never installs an agent or selects API billing.</p>
@@ -233,13 +273,17 @@ function init(){
  <label><input id="ai-instructions" type="checkbox"> Include personal instructions</label> <label><input id="ai-skills" type="checkbox"> Include personal skills</label> <label><input id="ai-mcp" type="checkbox"> Request personal MCP</label>
  <div class="row rcai-settings-actions"><button id="ai-save" disabled>Save new configuration</button><button id="ai-check" disabled>Check CLI / login</button><button id="ai-remove" disabled>Remove configuration</button><p id="ai-settings-status" role="status" aria-live="polite" aria-atomic="true"></p></div><p id="ai-probe" role="status"></p><datalist id="ai-model-suggestions"></datalist><datalist id="ai-run-model-suggestions"></datalist>`;
  const card=node('section',null,document.querySelector('[data-view="telemetry"]'));card.id='ai-analysis';card.className='card rcai';
- card.innerHTML=`<h3>Post-session AI analysis</h3><p id="ai-disabled"></p><div class="row"><button id="ai-load-selection">Prepare analysis selection</button><button id="ai-history-refresh">Refresh history</button></div><div id="ai-controls" hidden>
+ card.innerHTML=`<h3>Post-session AI analysis</h3><p id="ai-disabled"></p>
+ <ol class="rcai-steps" aria-label="Analysis workflow"><li>Select laps</li><li>Review package</li><li>Run & check report</li></ol>
+ <section id="ai-feedback" class="rcai-feedback" data-kind="idle" aria-label="Analysis progress"><div><h4 id="ai-feedback-title">Select laps, review the package, then run</h4><p id="ai-run-status" role="status" aria-live="polite">Preparation reads local telemetry. Only Start this analysis invokes the selected provider.</p><p id="ai-run-meta"></p><progress id="ai-progress" hidden aria-label="Analysis in progress"></progress></div><div class="row"><button id="ai-view-report" hidden>View report</button><button id="ai-new-run" hidden>Prepare a new run</button></div></section>
+ <div class="row"><button id="ai-load-selection">Prepare analysis selection</button><button id="ai-history-refresh">Refresh history</button><button id="ai-cancel" disabled>Cancel active analysis</button></div><div id="ai-controls" hidden>
  <p id="ai-selection-status" role="status"></p><div class="rcai-grid"><label>Completed GT7 session<select id="ai-session"></select></label><label>Template<select id="ai-template"><option value="session-overview">Session overview</option><option value="driving-technique">Driving technique</option><option value="consistency">Consistency</option></select></label><label>Agent<select id="ai-agent"></select></label><label>Model<input id="ai-model" list="ai-run-model-suggestions"></label><label>Report language<input id="ai-language" value="en" maxlength="40"></label></div>
- <h4>Completed laps</h4><div id="ai-laps" class="rcai-options"></div><h4>Optional compatible references · none selected automatically</h4><div id="ai-references" class="rcai-options"></div><div class="rcai-grid"><label>Practice goal<textarea id="ai-goal" maxlength="4000"></textarea></label><label>Additional questions<textarea id="ai-questions" maxlength="4000"></textarea></label></div>
- <div class="row"><button id="ai-preview-button" disabled>Preview selected data</button><button id="ai-export-preview" disabled>Export preview package</button><button id="ai-start" disabled>Start this analysis</button></div><div id="ai-preview"></div></div>
- <p>One analysis can run on this machine. Subscription quota/model availability are not guaranteed. Cancellation cannot recover already consumed quota.</p><div class="row"><button id="ai-cancel" disabled>Cancel active analysis</button></div><p id="ai-run-status" role="status"></p><h4>Saved analysis history</h4><div id="ai-history"></div><div id="ai-report"></div>`;
- const style=node('style',`.rcai{overflow-wrap:anywhere}.rcai-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:14px 0}.rcai-grid label{display:flex;flex-direction:column;gap:6px;min-width:0}.rcai input:not([type=checkbox]),.rcai select,.rcai textarea{width:100%;min-width:0;padding:8px;background:var(--card2);color:var(--txt);border:1px solid var(--line);border-radius:6px;font:inherit}.rcai textarea{min-height:80px}.rcai-options{display:flex;flex-wrap:wrap;gap:12px}.rcai pre{white-space:pre-wrap;font-size:12px}.rcai article{border-top:1px solid var(--line);padding-top:10px}.rcai button{margin:4px}`);document.head.append(style);
+ <h4>Completed laps</h4><p id="ai-lap-count" class="sub"></p><div id="ai-laps" class="rcai-options"></div><details class="rcai-references"><summary>Optional compatible references · none selected automatically</summary><div id="ai-references" class="rcai-options"></div></details><div class="rcai-grid"><label>Practice goal<textarea id="ai-goal" maxlength="4000"></textarea></label><label>Additional questions<textarea id="ai-questions" maxlength="4000"></textarea></label></div>
+ <div class="row rcai-actions"><button id="ai-preview-button" disabled>Preview selected data</button><button id="ai-start" disabled>Start this analysis</button><button id="ai-export-preview" disabled>Export preview package</button></div><div id="ai-preview" aria-busy="false"></div></div>
+ <p class="sub">One analysis at a time on this machine. Cancellation does not recover consumed subscription quota.</p><details class="rcai-history"><summary>Saved analysis history</summary><div id="ai-history"></div></details><div id="ai-report"></div>`;
+ const style=node('style',`#workspace-ai,#ai-controls,#ai-report,#ai-feedback{scroll-margin-top:140px}.rcai{overflow-wrap:anywhere}.rcai-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin:14px 0}.rcai-grid label{display:flex;flex-direction:column;gap:6px;min-width:0}.rcai input:not([type=checkbox]),.rcai select,.rcai textarea{width:100%;min-width:0;padding:8px;background:var(--card2);color:var(--txt);border:1px solid var(--line);border-radius:6px;font:inherit}.rcai textarea{min-height:80px}.rcai-options{display:flex;flex-wrap:wrap;gap:12px}.rcai pre{white-space:pre-wrap;font-size:12px}.rcai article{border-top:1px solid var(--line);padding-top:10px}.rcai button{margin:4px}`);document.head.append(style);
  node('style',`#ai-save{background:var(--accent-strong);border-color:var(--accent-strong);font-weight:600}.rcai-settings-actions #ai-settings-status{flex-basis:100%;margin:0 4px;padding:10px 12px;border:1px solid var(--line);border-radius:6px}.rcai-settings-actions [data-kind=error]{color:var(--bad-text);border-color:var(--bad)!important}.rcai-settings-actions [data-kind=success]{color:#4ADE80}.rcai-settings-actions [data-kind=pending]{color:#FCD34D}.rcai input:disabled{opacity:.5}`,document.head);
+ node('style',`.rcai-steps{display:flex;gap:32px;padding-left:24px;color:var(--muted);font-size:13px}.rcai-feedback{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 20px;margin:18px 0;border:1px solid var(--line);border-left:4px solid #73839f;border-radius:8px;background:var(--card2)}.rcai-feedback h4{font-size:18px;margin:0 0 6px}.rcai-feedback p{margin:4px 0;line-height:1.5}#ai-run-meta{color:var(--muted);font-size:13px}.rcai-feedback[data-kind=ready],.rcai-feedback[data-kind=completed]{border-left-color:#4ade80}.rcai-feedback[data-kind=failed],.rcai-feedback[data-kind=error],.rcai-feedback[data-kind=timed_out],.rcai-feedback[data-kind=interrupted]{border-left-color:#fb7185}.rcai-feedback[data-kind=running],.rcai-feedback[data-kind=preparing],.rcai-feedback[data-kind=validating],.rcai-feedback[data-kind=starting]{border-left-color:#60a5fa}#ai-progress{width:220px;max-width:100%;height:5px;margin-top:10px;accent-color:#60a5fa}.rcai #ai-laps{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:8px}.rcai-lap{display:flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:6px;padding:9px;font-size:13px}.rcai-lap input{margin:0}.rcai-excluded{opacity:.6;flex-wrap:wrap}.rcai-excluded small{flex-basis:100%;font-size:11px}.rcai details{margin:14px 0;border:1px solid var(--line);border-radius:6px;padding:12px}.rcai summary{cursor:pointer;font-weight:500}.rcai details p{line-height:1.55}.rcai #ai-references{display:block}.rcai fieldset{border:1px solid var(--line);margin:12px 0;display:flex;flex-wrap:wrap;gap:12px}.rcai fieldset label{display:flex;align-items:center;gap:6px}.rcai legend{font-size:12px;color:var(--muted);padding:0 6px}.rcai-package-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin:18px 0}.rcai-package-metrics>div{display:flex;flex-direction:column;gap:5px;padding:14px;border:1px solid var(--line);border-radius:6px;background:var(--card2)}.rcai-package-metrics strong{font-size:20px}.rcai-package-metrics span{color:var(--muted);font-size:12px}#ai-start{background:var(--accent-strong);border-color:var(--accent-strong);font-weight:600}#ai-start:disabled{opacity:.45}.rcai-actions{padding:8px 0}.rcai pre{max-height:380px;overflow:auto;padding:12px;background:var(--card2);border-radius:6px}.rcai article{padding:16px;margin:12px 0;background:var(--card2);border:1px solid var(--line);border-radius:8px}@media(max-width:600px){.rcai-steps{gap:18px;font-size:11px}.rcai-feedback{align-items:flex-start;flex-direction:column}.rcai-feedback h4{font-size:16px}.rcai-actions{display:grid;gap:6px}.rcai-actions button{margin:0}}`,document.head);
  $id('ai-settings').querySelectorAll('input,select').forEach(e=>{if(!['ai-configs','ai-enabled'].includes(e.id))e.addEventListener(e.tagName==='SELECT'||e.type==='checkbox'?'change':'input',settingsChanged);});
  $id('ai-enabled').onchange=()=>{settingsControls();settingsStatus('Unsaved enable setting. Click Save enable / disable.','pending');};
  $id('ai-save-enabled').onclick=()=>saveSettings(false,true);
@@ -247,9 +291,10 @@ function init(){
  $id('ai-configs').onchange=()=>{state.settingsDirty=false;populateConfig(state.settings?.agents.find(a=>a.id===$id('ai-configs').value));settingsStatus($id('ai-configs').value?'Saved configuration loaded.':'Enter a name, choose a provider, then save the configuration.');};
  $id('ai-save').onclick=()=>saveSettings();$id('ai-remove').onclick=()=>saveSettings(true);$id('ai-check').onclick=probe;
  $id('ai-load-selection').onclick=selection;$id('ai-session').onchange=renderLaps;$id('ai-preview-button').onclick=preview;$id('ai-start').onclick=start;$id('ai-export-preview').onclick=exportPreview;$id('ai-cancel').onclick=cancel;$id('ai-history-refresh').onclick=history;
+ $id('ai-new-run').onclick=prepareNewRun;$id('ai-view-report').onclick=()=>{if(typeof showView==='function')showView('reports');$id('ai-report').scrollIntoView({block:'start',behavior:'smooth'});};
  ['ai-model','ai-template','ai-goal','ai-questions','ai-language'].forEach(id=>$id(id).oninput=invalidate);
  $id('ai-agent').onchange=()=>{const a=state.settings?.agents.find(a=>a.id===$id('ai-agent').value);$id('ai-model').value=a?.model||'';modelSuggestions();invalidate();};
- window.RacecastAI={settings,selection,reset,status,history};settings().then(()=>{if(tmState.profile&&currentView==='telemetry'){status();history();}});
+ window.RacecastAI={settings,selection,ensureSelection,reset,status,history};settings().then(()=>{if(tmState.profile&&currentView==='telemetry'){ensureSelection();status();history();}});
  setInterval(()=>{if(currentView==='telemetry'||currentView==='reports')status();},1500);
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();

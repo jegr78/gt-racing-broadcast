@@ -911,6 +911,7 @@ class Runner:
                             + stdout.read_text(encoding="utf-8", errors="replace")
                         )
                         raise JobError(code, message)
+                    self._update(directory, state, "validating", "Checking provider output against the frozen telemetry evidence")
                     result_path = Path(invocation.output)
                     if adapter.provider == "codex":
                         if (
@@ -958,7 +959,7 @@ class Runner:
                             )
                             raise JobError(
                                 "validation_failed",
-                                "Structured output did not validate; inspect saved local diagnostics",
+                                "Report evidence validation failed: " + str(e)[:400],
                             ) from e
                         state["report"] = report
                         self._update(

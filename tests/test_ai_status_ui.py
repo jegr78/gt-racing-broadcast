@@ -19,7 +19,8 @@ def _src():
 
 def _func_src(src, name):
     """A function: its first line plus the indented lines and its closing brace."""
-    i = src.index(f"\nasync function {name}(") + 1
+    marker = f"\nasync function {name}(" if f"\nasync function {name}(" in src else f"\nfunction {name}("
+    i = src.index(marker) + 1
     lines = src[i:].split("\n")
     out = [lines[0]]
     for line in lines[1:]:
@@ -47,10 +48,11 @@ def _run_js(src):
 
 _HARNESS = r"""
 class El {
-  constructor(tag) { this.tag = tag; this.children = []; this._text = ''; this.disabled = false; }
+  constructor(tag) { this.tag = tag; this.children = []; this._text = ''; this.disabled = false; this.dataset = {}; }
   set textContent(v) { this._text = v; this.children = []; }
   get textContent() { return this._text; }
   append(c) { this.children.push(c); }
+  setAttribute(k, v) { this[k] = v; }
   count(tag) { return this.children.reduce((n, c) => n + (c.tag === tag) + c.count(tag), 0); }
   scrollIntoView() {}
 }
@@ -60,10 +62,10 @@ const node = (tag, text, parent) => { const e = document.createElement(tag); if 
 const say = (id, text) => { $id(id).textContent = text || ''; };
 const error = doc => doc?.error?.message || 'Analysis operation failed';
 const state = {generation: 0, job: null, lastJob: null};
-const replies = {}, opened = [];
-const request = async (op, payload) => { if (op === 'job') opened.push(payload.query.id);
+const replies = {}, opened = [], requests = [];
+const request = async (op, payload) => { requests.push(op); if (op === 'job') opened.push(payload.query.id);
   return op === 'job' ? replies.job[payload.query.id] : replies[op]; };
-const history = async () => {}, invalidate = () => {}, tmOpenReference = async () => true;
+const history = async () => {}, invalidate = () => {}, prepareNewRun = () => {}, tmOpenReference = async () => true;
 const run = (id, st, report) => ({ok: true, id, state: st, profile: 'a', requested_model: 'm',
   progress: st, error: st === 'failed' ? {message: 'Analysis execution failed'} : null, report});
 const REPORT = {language: 'en', limitations: [], exercises: [],
@@ -74,7 +76,7 @@ const REPORT = {language: 'en', limitations: [], exercises: [],
 def _harness():
     s = _src()
     consts = "".join(_const_src(s, n) + "\n" for n in ("FINISHED",) if f"\nconst {n}=" in s)
-    return _HARNESS + consts + _func_src(s, "openRun") + "\n" + _func_src(s, "status") + "\n"
+    return _HARNESS + consts + '\n'.join(_func_src(s, name) for name in ('feedback', 'runFeedback', 'disclosure', 'openRun', 'status')) + '\n'
 
 
 def t_a_finished_run_replaces_the_previous_report():
@@ -87,7 +89,7 @@ def t_a_finished_run_replaces_the_previous_report():
   state.job = 'Y';                                       // a new run fails; cleanup still runs
   replies.status = {ok: true, busy: true, active: {...run('Y', 'failed', null), directory: 'd'}};
   await status();
-  console.log([before, $id('ai-report').count('article'), $id('ai-run-status').textContent.split(' ')[0],
+  console.log([before, $id('ai-report').count('article'), $id('ai-feedback').dataset.kind,
                opened.join(',')].join('|'));
 })();""")
     if out is not None:
@@ -100,13 +102,35 @@ def t_a_running_or_foreign_run_still_only_reports_progress():
   replies.job = {};
   state.job = 'Y';
   replies.status = {ok: true, busy: true, active: {id: 'Y', state: 'running', progress: 'Provider running'}};
-  await status(); const running = $id('ai-run-status').textContent;
+  await status(); const running = $id('ai-feedback-title').textContent;
   replies.status = {ok: true, busy: true, active: {id: 'Z', state: 'failed', foreign: true}};
   await status(); const foreign = $id('ai-run-status').textContent;
   console.log([running, foreign.startsWith('An analysis is running in another profile'), opened.length].join('|'));
 })();""")
     if out is not None:
-        assert out.strip() == "running · Provider running|true|0", out
+        assert out.strip() == "Analysing selected laps|true|0", out
+
+
+def t_model_suggestions_work_before_probe_and_do_not_choose_a_model():
+    src = _src()
+    function = src[src.index('function modelSuggestions(){'):src.index('\nfunction settingsStatus(')]
+    out = _run_js(_HARNESS + function + r"""
+const option = (select, value) => select.append({value});
+state.models = {};
+modelSuggestions(); // Settings have not loaded yet.
+state.settings = {agents: [{id: 'claude', provider: 'claude'}, {id: 'codex', provider: 'codex'}]};
+$id('ai-agent').value = 'claude';
+$id('ai-model').value = 'pinned-model';
+modelSuggestions();
+console.log($id('ai-run-model-suggestions').children.map(o => o.value).join(','));
+console.log($id('ai-model').value);
+state.models.codex = {provider: 'codex', models: ['catalogue-model']};
+$id('ai-agent').value = 'codex';
+modelSuggestions();
+console.log($id('ai-run-model-suggestions').children.map(o => o.value).join(','));
+""")
+    if out is not None:
+        assert out.strip().splitlines() == ['sonnet,opus,haiku', 'pinned-model', 'catalogue-model'], out
 
 
 def t_finished_states_match_the_runner():
@@ -118,6 +142,84 @@ def t_finished_states_match_the_runner():
     page = set(json.loads(re.search(r"new Set\((\[[^\]]*\])\)", _const_src(_src(), "FINISHED"))
                           .group(1).replace("'", '"')))
     assert page == ai_jobs.TERMINAL, f"page {sorted(page)} vs runner {sorted(ai_jobs.TERMINAL)}"
+
+
+def t_repeated_start_is_blocked_and_start_failure_allows_reviewed_retry():
+    out = _run_js(_harness() + _func_src(_src(), 'start') + r"""
+(async () => {
+  state.preview = {payload: {model: 'chosen'}, result: {confirm_preview: 'reviewed', can_start: true}};
+  let release;
+  replies.start = new Promise(resolve => { release = resolve; });
+  const pending = start();
+  await start();
+  console.log(requests.filter(x => x === 'start').length, $id('ai-start').disabled);
+  release({ok: false, error: {message: 'CLI unavailable'}});
+  await pending;
+  console.log($id('ai-feedback-title').textContent, $id('ai-start').disabled, state.job);
+})();
+""")
+    if out is not None:
+        assert out.strip().splitlines() == ['1 true', 'Analysis could not start false null'], out
+
+
+def t_changed_inputs_discard_pending_preview_and_restore_preparation_control():
+    out = _run_js(_harness() + 'const payload = () => ({});\n' + _func_src(_src(), 'preview') + r"""
+(async () => {
+  state.selection = {sessions: [{}]};
+  let release;
+  replies.preview = new Promise(resolve => { release = resolve; });
+  const pending = preview();
+  await preview();
+  console.log(requests.filter(x => x === 'preview').length, $id('ai-preview-button').disabled);
+  state.generation++;
+  release({ok: true});
+  await pending;
+  console.log(state.previewRequest, $id('ai-preview-button').disabled, state.preview);
+})();
+""")
+    if out is not None:
+        assert out.strip().splitlines() == ['1 true', 'null false undefined'], out
+
+
+def t_cancellation_and_connection_errors_keep_the_current_job_identity():
+    out = _run_js(_harness() + _func_src(_src(), 'cancel') + r"""
+(async () => {
+  state.job = 'Y';
+  replies.cancel = {ok: true};
+  await cancel();
+  replies.status = {ok: true, busy: true, active: {id: 'Y', state: 'running'}};
+  await status();
+  console.log($id('ai-feedback-title').textContent, $id('ai-cancel').disabled);
+  replies.status = {ok: false};
+  await status();
+  console.log($id('ai-feedback-title').textContent, state.job);
+})();
+""")
+    if out is not None:
+        assert out.strip().splitlines() == ['Stopping analysis true', 'Analysis status unavailable Y'], out
+
+
+def t_slow_old_report_cannot_replace_a_newer_completed_run():
+    out = _run_js(_harness() + r"""
+(async () => {
+  let release;
+  replies.job = {X: new Promise(resolve => {release = resolve;}), Y: {...run('Y', 'completed', REPORT), requested_model: 'NEW'}};
+  state.job = 'X';
+  replies.status = {ok: true, busy: false, active: null};
+  const older = status();
+  await new Promise(resolve => setImmediate(resolve));
+  replies.status = {ok: true, busy: true, active: {id: 'Y', state: 'running'}};
+  await status();
+  replies.status = {ok: true, busy: false, active: null};
+  await status();
+  release({...run('X', 'completed', REPORT), requested_model: 'OLD'});
+  await older;
+  console.log($id('ai-report').children.some(c => c.textContent.includes('NEW')),
+              $id('ai-report').children.some(c => c.textContent.includes('OLD')), state.job);
+})();
+""")
+    if out is not None:
+        assert out.strip() == 'true false null', out
 
 
 if __name__ == "__main__":

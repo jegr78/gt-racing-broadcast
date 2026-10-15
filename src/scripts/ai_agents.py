@@ -497,8 +497,11 @@ class Adapter:
         personal = self.config["personal"]
         result = output / "result.json"
         if self.provider == "codex":
+            # Seatbelt permits the resolved runtime file, but cannot launch it
+            # through a symlink outside that exact allow rule (e.g. Homebrew).
+            executable = str(Path(self.executable).resolve())
             argv = [
-                self.executable,
+                executable,
                 "exec",
                 "--ignore-user-config",
                 "--ignore-rules",
