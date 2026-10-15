@@ -150,6 +150,7 @@ async def verify(page,fixture,port):
     assert await page.locator('#ai-report article').count()==4
     assert await page.evaluate('() => window.aiInjected') is None
     assert 'Zitierte Messwerte sind geprüft.' in await page.locator('#ai-report').inner_text()
+    await page.get_by_role('button',name='Reports',exact=True).click()
     report_link=page.get_by_role('link',name='Visuellen Bericht öffnen')
     assert '/api/ai/report?' in await report_link.get_attribute('href')
     assert await report_link.get_attribute('target')=='_blank'
