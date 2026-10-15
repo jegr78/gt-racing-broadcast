@@ -67,7 +67,7 @@ def t_measured_channels_and_pair_boundaries():
 def t_references_stay_within_the_known_stint():
     import gt7_context
     with tempfile.TemporaryDirectory() as directory:
-        source=fixture.source(Path(directory)/'telemetry-recordings',[fixture.row(2,time=104),fixture.row(3,time=103),fixture.row(4,time=100)])
+        source=fixture.source(Path(directory)/'telemetry-recordings',[fixture.row(2,time=104),fixture.row(3,time=103),fixture.row(5,time=100)])
         store=gt7_context.Store.for_recording(source.path)
         context=store.read(); data=context['data']
         data['sessions']['1']['stints'].append(dict(id='second',start_lap=4,compound='RM',confirmed=True,warmup_laps=0))
@@ -75,7 +75,7 @@ def t_references_stay_within_the_known_stint():
         source=packages.load_source(source.root,source.name,source.index)
         package=packages.build(source,1)
         pairs=[(c['lap_id'].split('/')[-1],c['reference_id'].split('/')[-1]) for c in package['comparisons']]
-        assert ('2','3') in pairs and ('2','4') not in pairs, pairs
+        assert ('2','3') in pairs and ('2','5') not in pairs, pairs
 
 
 def t_explicit_reference_and_legacy_validation():
