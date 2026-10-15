@@ -711,6 +711,8 @@ async function tmLoadPair() {
   tmState.sectorM = a.sectorM || b.sectorM || tmState.sectorM;
   tmState.lapA = a.lap || null;
   tmState.lapB = b.lap || null;
+  $('tm-a').value = tmState.a || '';
+  $('tm-b').value = tmState.b || '';
   tmRender();
   workspaceSelection();
 }

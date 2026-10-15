@@ -61,6 +61,8 @@ if(saved!==original)throw Error('redraw replaced the saved comparison');
 tmState.a='A';tmState.b='B';tmFetchLap=async key=>({lap:key==='A'?tmState.lapA:tmState.lapB});
 tmRender=()=>tmRenderCharts();await tmLoadPair();
 let updated=JSON.parse(saved);if(updated.rec!=='B'||updated.reference.rec!=='A')throw Error('pair selection was not saved');
+$('tm-a').value='other';await tmPick('a','A');
+if($('tm-a').value!=='A')throw Error('reference selector differs from loaded pair');
 tmState.included=new Set(['B']);tmState.a=null;await tmLoadPair();updated=JSON.parse(saved);
 if(updated.included.join(',')!=='B'||updated.reference!==null)throw Error('subset or absent reference was not saved');
 console.log('saved comparison preserved; pair and subset changes persisted');
