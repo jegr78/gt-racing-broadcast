@@ -104,6 +104,7 @@ def main():
                 page.locator('#workspace-last').click()
                 page.wait_for_function('() => !!tmState.lapA && tmState.lapA.rec !== tmState.lapB.rec')
                 assert page.evaluate('() => [tmState.a,tmState.b,[...tmState.included].sort()]')==previous,'last comparison changed source or recording subset after reload'
+                assert [page.locator('#tm-a').input_value(),page.locator('#tm-b').input_value()]==previous[:2], 'restored selectors differ from the loaded comparison'
                 page.evaluate("""async () => {
                     window.savedComparison=workspaceSaved();
                     const changed={...window.savedComparison,reference:{...window.savedComparison.reference,recording_id:'0'.repeat(32)}};
