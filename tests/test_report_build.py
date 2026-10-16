@@ -424,6 +424,10 @@ def t_on_air_edges_do_not_hide_red_states_or_large_sampling_gaps():
     report = rb.build_report([_sample(300, live_stint=1), _sample(330, live_stint=1)], events, {1: 'Alice'}, 'Q', (115, 555), 600)
     assert report['header']['uptime_pct'] == 6.8, report['header']
     assert report['on_air']['commentators'][0]['seconds'] == 30
+    missing_edges = rb.build_report([_sample(t, live_stint=1, health_level='red') for t in (300, 330)],
+                                    events, {1: 'Alice'}, 'Q', (115, 555), 600)
+    assert missing_edges['incidents'][0]['ts'] == 300, missing_edges['incidents']
+    assert missing_edges['incidents'][-1]['end'] < 555, missing_edges['incidents']
     # A window without a health observation cannot be credited as green.
     report = rb.build_report([_sample(0)], events, {}, 'Q', (115, 555), 600)
     assert report['header']['uptime_pct'] == 0 and report['on_air']['commentators'] == []
