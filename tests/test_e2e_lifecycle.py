@@ -84,11 +84,12 @@ while True:time.sleep(.1)
             while time.monotonic() < until:
                 with socket.socket() as probe:
                     probe.settimeout(.1)
-                    if probe.connect_ex(('127.0.0.1', port)) == errno.ECONNREFUSED:
+                    result = probe.connect_ex(('127.0.0.1', port))
+                    if result in (errno.ECONNREFUSED, getattr(errno, 'WSAECONNREFUSED', errno.ECONNREFUSED)):
                         break
                 time.sleep(.02)
             else:
-                raise AssertionError('grandchild still holds its socket after teardown')
+                raise AssertionError(f'grandchild socket did not refuse connections after teardown: {result}')
             assert proc.poll() is not None and proc._logfh.closed
         finally:
             # The old implementation leaks this deliberately stubborn process.
