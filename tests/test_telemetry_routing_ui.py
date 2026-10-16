@@ -24,6 +24,8 @@ const window={RacecastAI:{reset(){},settings(){events.push('settings');},status(
 const Option=function(label,value){return {label,value};};
 const tmEditorClose=()=>{},tmReset=()=>{tmState.profile=null;},tmLoad=async()=>{},workspaceSelection=()=>{},workspaceStatus=()=>{};
 const requestAnimationFrame=fn=>fn(),tmRefit=()=>{};
+const tmShiftRef={loaded:false};
+const tmShiftRefSearch=()=>{tmShiftRef.loaded=true;events.push('shift-search');};
 const tmOpenReference=async ref=>{events.push(ref);if(ref.recording_id!=='valid')return false;showView('telemetry');return true;};
 const workspaceFetch=async url=>({json:async()=>url==='/api/ping'?{version:'dev'}:{ok:true,active:'alpha',profiles:[{name:'alpha'},{name:'beta'}]}});
 ''' + show + profile + init
@@ -44,6 +46,12 @@ def t_startup_preserves_each_supported_view_and_shows_its_section():
         out = run("location.hash='#" + view + "';workspaceInit().then(()=>console.log(currentView,location.hash,views.filter(v=>!v.hidden).map(v=>v.dataset.view).join(',')));")
         if out is not None:
             assert out == f'{view} #{view} {view}', out
+
+
+def t_settings_loads_shift_references_once_and_other_views_do_not():
+    out = run("location.hash='#archive';workspaceInit().then(()=>{console.log(events.filter(e=>e==='shift-search').length);showView('settings');showView('archive');showView('settings');console.log(events.filter(e=>e==='shift-search').length);});")
+    if out is not None:
+        assert out.splitlines() == ['0', '1'], out
 
 
 def t_unknown_view_falls_back_to_archive():

@@ -27,7 +27,7 @@ function showView(name) {
   const feedback=$('ai-feedback');
   if(feedback){if(name==='reports')$('workspace-reports').prepend(feedback);else document.querySelector('#ai-analysis .rcai-steps')?.after(feedback);}
   if (name === 'telemetry') requestAnimationFrame(() => tmRefit());
-  if (name === 'settings') window.RacecastAI?.settings();
+  if (name === 'settings') {window.RacecastAI?.settings();if(!tmShiftRef.loaded)tmShiftRefSearch();}
   if (name === 'reports') {window.RacecastAI?.status(); window.RacecastAI?.history();}
   history.replaceState(null, '', '/telemetry?'+new URLSearchParams({profile: tmState.profile || ''})+'#'+name);
 }

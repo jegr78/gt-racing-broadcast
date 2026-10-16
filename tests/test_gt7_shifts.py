@@ -341,6 +341,86 @@ def t_excel_shift_export_uses_the_existing_decimal_comma_convention():
         assert float(rows[0]['acceleration_target_rpm'].replace(',', '.')) == 5500.75
 
 
+
+def live_pkt(row, lap=3, car=42, ratios=(2.0, 1.0), paused=False):
+    from types import SimpleNamespace
+    return SimpleNamespace(car_id=car, lap=lap, on_track=True, paused=paused, loading=False,
+                           rpm=row['rpm'], gear=row['gear'], throttle=round(row['throttle_pct']*255/100),
+                           clutch_engagement=row['clutch_engagement'],
+                           gear_ratios=tuple(ratios)+(0.0,)*(8-len(ratios)))
+
+def live_tail(start, n=60):
+    return [{'t':start+i*.02,'rpm':4450+i,'gear':3,'throttle_pct':100,'clutch_engagement':1} for i in range(n)]
+
+def t_live_observer_reports_current_lap_upshifts_against_the_vehicle_reference():
+    reads=[]
+    def reader(car):
+        reads.append(car)
+        return {'car_id':car,'curve':curve(),'ratios':[3,1],'revbar_rpm':5800}
+    live=shifts.LiveObserver(reader)
+    for row in rows()+live_tail(.2):
+        live.feed(live_pkt(row),row['t'])
+    snap=live.snapshot()
+    assert snap['car_id']==42 and snap['lap']==3
+    ref=snap['reference']
+    assert ref['ratio_source']=='decoded transmission', 'live packet ratios win over cached stock ratios'
+    assert abs(ref['targets'][0]['rpm']-5600)<1e-6 and ref['targets'][0]['gear']==2-1
+    [event]=snap['upshifts']
+    assert (event['from_gear'],event['to_gear'],event['pre_cut_rpm'])==(2,3,5660)
+    assert event['reference_rpm'] is None, 'gear 2 has no target with a two-gear box'
+    assert live.snapshot()['upshifts']==[event], 'a repeated snapshot must not duplicate upshifts'
+    assert reads==[42], 'the reference is read once per vehicle, not per packet'
+
+def t_live_observer_deviation_uses_the_from_gear_target():
+    live=shifts.LiveObserver(lambda car:{'car_id':car,'curve':curve(),'ratios':[2,1]})
+    for row in rows()+live_tail(.2):
+        live.feed(live_pkt(row,ratios=(3.0,2.0,1.0)),row['t'])
+    snap=live.snapshot()
+    targets={t['gear']:t['rpm'] for t in snap['reference']['targets']}
+    [event]=snap['upshifts']
+    assert event['reference_rpm']==targets[2]
+    assert event['deviation_rpm']==event['pre_cut_rpm']-targets[2]
+
+def t_live_observer_resets_per_lap_and_vehicle_and_ignores_paused_packets():
+    reads=[]
+    def reader(car):
+        reads.append(car)
+        if car==7:
+            raise ValueError('shift cache identity or format mismatch')
+        return None
+    live=shifts.LiveObserver(reader)
+    for row in rows()+live_tail(.2):
+        live.feed(live_pkt(row),row['t'])
+    assert len(live.snapshot()['upshifts'])==1
+    live.feed(live_pkt(live_tail(5,1)[0],lap=4),5)
+    snap=live.snapshot()
+    assert snap['lap']==4 and snap['upshifts']==[], 'a new lap starts an empty observation'
+    assert snap['reference']['kind']=='unavailable' and snap['reference']['targets']==[]
+    for row in rows():
+        live.feed(live_pkt(dict(row,t=row['t']+10),lap=4,paused=True),row['t']+10)
+    assert live.snapshot()['upshifts']==[], 'paused packets are no driving observation'
+    live.feed(live_pkt(live_tail(20,1)[0],car=7),20)
+    snap=live.snapshot()
+    assert reads==[42,7] and snap['car_id']==7
+    assert snap['reference']['kind']=='unavailable' and 'unreadable' in ' '.join(snap['reference']['warnings'])
+    assert shifts.LiveObserver(reader).snapshot() is None, 'no packet, no shift panel'
+
+def t_live_packet_decodes_clutch_and_gearbox_ratios():
+    import struct
+    sys.path.insert(0, os.path.join(ROOT, 'tests'))
+    import gt7_telemetry as tm
+    from test_gt7_laps import _pkt
+    raw = bytearray(_pkt(1, 50, 0))
+    struct.pack_into('<f', raw, 0xF8, .75)
+    for i, r in enumerate((3.2, 2.1, 1.5, 0.0)):
+        struct.pack_into('<f', raw, 0x104+4*i, r)
+    pkt = tm.parse_packet(bytes(raw))
+    assert pkt.clutch_engagement == .75
+    assert shifts._live_ratios(pkt) == [struct.unpack('<f', struct.pack('<f', r))[0] for r in (3.2, 2.1, 1.5)]
+    struct.pack_into('<f', raw, 0xF8, float('nan'))
+    assert tm._sanitize(tm.parse_packet(bytes(raw)), None).clutch_engagement is None
+    assert tm.GT7Packet(*[0]*14).gear_ratios is None, 'short packets carry no gearbox'
+
 if __name__ == '__main__':
     for name, fn in sorted(globals().items()):
         if name.startswith('t_') and callable(fn):
