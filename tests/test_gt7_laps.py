@@ -238,7 +238,7 @@ def t_old_normalized_coverage_cache_is_rebuilt():
         _index(path)
         old = gl._load_cache(path)
         old['version'] = 8
-        gl._write_cache(path, old)
+        gl._write_cache(gl.cache_path(path), old)
         with _data_version('v1'):
             assert gl.cached(path, directory) is None, 'old invented-coverage indexes must be invalidated'
         assert _index(path)['laps'], 'a legacy cache must rebuild from its recording'
