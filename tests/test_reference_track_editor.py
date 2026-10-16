@@ -59,9 +59,9 @@ def t_reference_editor_applies_before_any_recording_and_later_analysis_uses_it()
                            source_id=read['source_id'], expected_revision=read['revision'], definition=draft)
             saved = m.telemetry_track_definition_write_data(payload)
             assert saved['ok'] and saved['revision'] == 1 and saved['definition']['reviewed'], saved
-            assert m.telemetry_track_definition_write_data(payload)['conflict']
+            assert m.telemetry_track_definition_write_data(payload).get('conflict')
             foreign = dict(payload, expected_revision=1, profile='another-profile')
-            assert m.telemetry_track_definition_write_data(foreign)['conflict']
+            assert m.telemetry_track_definition_write_data(foreign).get('conflict')
             wrong = dict(payload, expected_revision=1, reverse=True)
             assert not m.telemetry_track_definition_write_data(wrong)['ok']
             path = laps_fixture.write_circle_recording(recdir)
@@ -72,7 +72,7 @@ def t_reference_editor_applies_before_any_recording_and_later_analysis_uses_it()
             assert again['source'] == 'override' and again['revision'] == 1
             changed = tracks_fixture.gt._Line([(x+5, z) for x, z in db._shipped['ring01']['line'].pts])
             db._shipped['ring01']['line'] = changed
-            assert m.telemetry_track_definition_write_data(dict(payload, expected_revision=1))['conflict']
+            assert m.telemetry_track_definition_write_data(dict(payload, expected_revision=1)).get('conflict')
             for oid, reverse in [('learn01', False), ('missing', False), ('ring01', True), ('../ring01', False)]:
                 answer = m.telemetry_track_definition_read_data(layout_id=oid, reverse=reverse)
                 assert not answer['ok'], (oid, answer)
