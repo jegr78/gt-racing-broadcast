@@ -43,6 +43,18 @@ def t_confirmed_matches_offline_and_provisional_stays_observed():
             assert not current['pace_eligible']
             assert current['trace'][-1]['d'] <= current['distance_m']
             assert snap['best_s'] == 16.0
+            assert snap['fuel_avg_laps'] == 0 and snap['fuel_avg_l'] is None, 'zero-use laps are no fuel measurement'
+
+
+def t_average_fuel_uses_completed_eligible_laps_of_the_live_session():
+    def lap(n, fuel, sid='A', state='confirmed', eligible=True):
+        return {'lap': n, 'session_id': sid, 'state': state, 'comparison_eligible': eligible, 'fuel_used_l': fuel}
+    rows = [lap(1, 1.0, eligible=False),            # out lap
+            lap(2, 3.0), lap(3, 3.2), lap(4, None),  # missing measurement is not zero
+            lap(5, 2.9, state='unconfirmed'), lap(6, 9.0, sid='B'), lap(7, 0.0)]
+    assert live.fuel_average(rows, 'A') == (3.1, 2)
+    assert live.fuel_average(rows, None) == (None, 0)
+    assert live.fuel_average([lap(1, 3.0, eligible=False)], 'A') == (None, 0)
 
 
 def t_stale_pause_generation_and_collection_switch():
