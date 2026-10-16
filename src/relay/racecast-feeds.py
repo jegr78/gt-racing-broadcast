@@ -12605,8 +12605,8 @@ def engineer_live_for(access, telemetry, rec_dir, runtime_base, bundled):
     return store
 
 
-def _telemetry_loop(store, ps_ip, stop_evt, clock=time.monotonic):
-    """Bind 33740, heartbeat per gt7_telemetry.HeartbeatPolicy (the extended '~'
+def _telemetry_loop(store, ps_ip, stop_evt, clock=time.monotonic, listen=("0.0.0.0", GT7_RECV_PORT)):
+    """Bind the receive endpoint, heartbeat per gt7_telemetry.HeartbeatPolicy (the extended '~'
     format, #711), decrypt+parse+feed each packet. Best-effort: any error logs and
     the loop keeps running; no console -> idle."""
     tlog = logging.getLogger("racecast.relay.telemetry")
@@ -12620,7 +12620,7 @@ def _telemetry_loop(store, ps_ip, stop_evt, clock=time.monotonic):
                 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-                sock.bind(("0.0.0.0", GT7_RECV_PORT))
+                sock.bind(listen)
                 sock.settimeout(1.0)
             beat = heartbeat.due(clock())
             if beat is not None:
@@ -12848,6 +12848,10 @@ def main():
     ap.add_argument("--gt7-ps-ip", default=os.environ.get("RACECAST_GT7_PS_IP"),
                     help="PS4/PS5 IP for GT7 UDP telemetry (solo/POV). Empty -> "
                          "subnet-broadcast discovery.")
+    ap.add_argument("--gt7-bind", default="0.0.0.0",
+                    help="GT7 UDP receive address (default: all interfaces).")
+    ap.add_argument("--gt7-port", type=int, default=GT7_RECV_PORT,
+                    help="GT7 UDP receive port (default: 33740; 0 selects a free port).")
     ap.add_argument("--runtime-base", default=None,
                     help="machine runtime dir (shared GT7 data); default: parent of "
                          "--runtime-dir")
@@ -13383,9 +13387,10 @@ def main():
         for name in gt7_recording.finalize_partials(rec_dir):
             LOG.info("telemetry recording %s finalised (left open by the previous relay)", name)
         threading.Thread(target=_telemetry_loop,
-                         args=(telemetry_store, args.gt7_ps_ip, stop_evt), daemon=True).start()
-        LOG.info("GT7 telemetry listener started (bind 0.0.0.0:33740, ps_ip=%s)",
-                 args.gt7_ps_ip or "<discovery>")
+                         args=(telemetry_store, args.gt7_ps_ip, stop_evt),
+                         kwargs={"listen": (args.gt7_bind, args.gt7_port)}, daemon=True).start()
+        LOG.info("GT7 telemetry listener started (bind %s:%s, ps_ip=%s)",
+                 args.gt7_bind, args.gt7_port, args.gt7_ps_ip or "<discovery>")
         LOG.info("GT7 telemetry recording %s",
                  "on" if telemetry_store.recorder.status()["active"] else "off")
         threading.Thread(target=_gt7_data_watch,

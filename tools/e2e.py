@@ -43,7 +43,12 @@ def _spawn(argv, env, log, cwd=ROOT):
     kw = {}
     if os.name == "posix":
         kw["start_new_session"] = True
-    p = subprocess.Popen(argv, cwd=cwd, env=env, stdout=fh, stderr=subprocess.STDOUT, **kw)
+    try:
+        p = subprocess.Popen(argv, cwd=cwd, env=env, stdout=fh, stderr=subprocess.STDOUT, **kw)
+    except BaseException:
+        fh.close()
+        raise
+    p._group = p.pid if os.name == "posix" else None
     p._logfh = fh  # keep the handle so teardown can close it
     return p
 
@@ -76,19 +81,57 @@ def _resolve_binary(args, tmp):
 
 
 def _kill(p):
-    if not p or p.poll() is not None:
-        with contextlib.suppress(Exception):
-            if getattr(p, "_logfh", None): p._logfh.close()
+    """Stop only our owned process tree, then reap the leader and close its log."""
+    if p is None:
         return
-    with contextlib.suppress(Exception):
-        if os.name == "posix":
-            os.killpg(os.getpgid(p.pid), signal.SIGTERM)
-        else:
-            p.terminate()
-    with contextlib.suppress(Exception):
-        p.wait(timeout=10)
-    with contextlib.suppress(Exception):
-        if getattr(p, "_logfh", None): p._logfh.close()
+    group = getattr(p, "_group", None)
+    try:
+        if os.name == "posix" and group is not None:
+            # The leader can already have exited while descendants still hold sockets.
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(group, signal.SIGTERM)
+        elif p.poll() is None:
+            if os.name == "nt":
+                # A venv python.exe can be a redirector whose child owns the relay.
+                # Kill the tree while its leader still exists, before waiting on it.
+                result = subprocess.run(["taskkill", "/PID", str(p.pid), "/T", "/F"],
+                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                        timeout=10, check=False)
+                if result.returncode and p.poll() is None:
+                    raise RuntimeError("taskkill could not stop the owned process tree")
+            else:
+                p.terminate()
+        try:
+            p.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            p.wait(timeout=5)
+    finally:
+        if os.name == "posix" and group is not None:
+            # SIGTERM may end the leader before a stubborn grandchild releases ports.
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(group, signal.SIGKILL)
+        if getattr(p, "_logfh", None):
+            p._logfh.close()
+
+
+def _cleanup(procs, servers, tmp):
+    """Attempt every owner's teardown, retaining diagnostics if any stop failed."""
+    failures = []
+    for proc in reversed(procs):
+        try:
+            _kill(proc)
+        except Exception as exc:  # one failed stop must not leak the remaining trees
+            failures.append(type(exc).__name__ + ": " + str(exc))
+    for server in servers:
+        try:
+            server.shutdown()
+            server.server_close()
+        except Exception as exc:  # still try the remaining owned servers
+            failures.append(type(exc).__name__ + ": " + str(exc))
+    if failures:
+        raise RuntimeError("e2e teardown failed; logs retained at " + str(tmp) + ": " + "; ".join(failures))
+    shutil.rmtree(tmp, ignore_errors=True)
 
 
 def _wait_ready(url, timeout, proc=None, log=None):
@@ -525,6 +568,22 @@ def _seed_telemetry(home):
                start=V.DEMO_REC_START, profile=POV_PROFILE)
 
 
+def _free_feed_ports():
+    ports = []
+    while len(ports) < 3:
+        port = E.free_port()
+        if port not in ports and port not in (53001, 53002, 53003):
+            ports.append(port)
+    return ports
+
+
+def _synthetic_relay_args():
+    """Each synthetic relay owns ephemeral feed sockets and loopback-only GT7 UDP."""
+    ports = _free_feed_ports()
+    return ["--ports", ",".join(map(str, ports[:2])), "--pov-port", str(ports[2]),
+            "--gt7-bind", "127.0.0.1", "--gt7-port", "0", "--gt7-ps-ip", "127.0.0.1"]
+
+
 def _check_relay_replay(launcher, env, tmp, cookies, run_cwd, procs, servers, timeout):
     """Real solo relay, synthetic capture, signed Engineer and advancing consumers."""
     from pathlib import Path
@@ -543,7 +602,7 @@ def _check_relay_replay(launcher, env, tmp, cookies, run_cwd, procs, servers, ti
     local_env = dict(env, RACECAST_TEMPLATE="pov", RACECAST_TELEMETRY="1",
                      RACECAST_TELEMETRY_RECORD="0", RACECAST_GT7_DATA_UPDATE="0", RACECAST_GT7_PS_IP="127.0.0.1")
     log = os.path.join(tmp, "relay-replay.log")
-    proc = _spawn(launcher + ["relay", "run", "--solo", "--bind", "127.0.0.1",
+    proc = _spawn(launcher + ["relay", "run"] + _synthetic_relay_args() + ["--solo", "--bind", "127.0.0.1",
                               "--http-port", str(port), "--cookies", cookies,
                               "--sheet-csv-url", crew_base + "/schedule.csv",
                               "--crew-csv-url", crew_base + "/crew.csv",
@@ -699,7 +758,7 @@ def run_synthetic(args):
                    RACECAST_OBS_WS_PORT=str(obs_port), RACECAST_OBS_WS_PASSWORD="")
         env["PATH"] = stub_bin + os.pathsep + env.get("PATH", "")
         relay_log = os.path.join(tmp, "relay.log")
-        relay = _spawn(launcher + ["relay", "run", "--bind", "127.0.0.1",
+        relay = _spawn(launcher + ["relay", "run"] + _synthetic_relay_args() + ["--bind", "127.0.0.1",
                         "--http-port", str(relay_port), "--sheet-csv-url", csv_url,
                         "--crew-csv-url", crew_url,
                         "--cookies", dummy_cookies, "--runtime-dir", relay_runtime],
@@ -716,7 +775,7 @@ def run_synthetic(args):
         env2.pop("RACECAST_CONSOLE_SECRET", None)
         env2["PATH"] = stub_bin + os.pathsep + env2.get("PATH", "")
         dis_log = os.path.join(tmp, "relay-disabled.log")
-        dis = _spawn(launcher + ["relay", "run", "--bind", "127.0.0.1",
+        dis = _spawn(launcher + ["relay", "run"] + _synthetic_relay_args() + ["--bind", "127.0.0.1",
                       "--http-port", str(dis_port), "--sheet-csv-url", csv_url,
                       "--cookies", dummy_cookies,
                       "--runtime-dir", os.path.join(tmp, "runtime-disabled")],
@@ -738,16 +797,14 @@ def run_synthetic(args):
         #    free feed ports. In fan-out mode the relay itself binds the feed ports,
         #    so once /status is up the feed-A port is already serving HTTP. The two
         #    relays above never bind feed ports, so fresh free ports cannot collide.
-        fanout_feed_a = E.free_port()
-        fanout_feed_b = E.free_port()
-        fanout_pov = E.free_port()
+        fanout_feed_a, fanout_feed_b, fanout_pov = _free_feed_ports()
         fanout_http = E.free_port()
         fanout_runtime = os.path.join(tmp, "runtime-fanout")
         os.makedirs(fanout_runtime, exist_ok=True)
         env4 = dict(env); env4["RACECAST_FEED_FANOUT"] = "1"
         fanout_log = os.path.join(tmp, "relay-fanout.log")
         fanout_relay = _spawn(
-            launcher + ["relay", "run", "--bind", "127.0.0.1",
+            launcher + ["relay", "run"] + _synthetic_relay_args() + ["--bind", "127.0.0.1",
                         "--http-port", str(fanout_http),
                         "--sheet-csv-url", csv_url,
                         "--cookies", dummy_cookies,
@@ -794,10 +851,7 @@ def run_synthetic(args):
         return code
     finally:
         if not args.keep:
-            for p in procs: _kill(p)
-            for s in servers:
-                with contextlib.suppress(Exception): s.shutdown()
-            shutil.rmtree(tmp, ignore_errors=True)
+            _cleanup(procs, servers, tmp)
         else:
             print(f"--keep: left tmp at {tmp}")
 
@@ -902,9 +956,7 @@ def run_real_league(args):
         return code
     finally:
         if not args.keep:
-            for p in procs:
-                _kill(p)
-            shutil.rmtree(tmp, ignore_errors=True)
+            _cleanup(procs, [], tmp)
         else:
             print(f"--keep: left tmp at {tmp}")
 

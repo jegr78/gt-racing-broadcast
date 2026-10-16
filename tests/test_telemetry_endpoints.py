@@ -197,6 +197,28 @@ def t_status_and_data_name_the_car():
         srv.shutdown()
 
 
+def t_telemetry_loop_uses_an_isolated_receive_endpoint():
+    import threading
+    from unittest import mock
+    from test_gt7_fixture import PKT_THROTTLE_HEX
+    stop = threading.Event()
+    store = m.gt7_telemetry.TelemetryStore(None)
+    bound = []
+    class FakeSock:
+        def setsockopt(self, *args): pass
+        def bind(self, address): bound.append(address)
+        def settimeout(self, timeout): pass
+        def sendto(self, data, address): pass
+        def close(self): pass
+        def recvfrom(self, size):
+            stop.set()
+            return bytes.fromhex(PKT_THROTTLE_HEX), ('127.0.0.1', 33739)
+    with mock.patch.object(m.socket, 'socket', return_value=FakeSock()):
+        m._telemetry_loop(store, '127.0.0.1', stop, listen=('127.0.0.1', 0))
+    assert bound == [('127.0.0.1', 0)], bound
+    assert store.data()['speed'] > 0, 'isolating UDP stopped telemetry ingestion'
+
+
 def t_telemetry_loop_requests_extended_format_and_switches_once():
     """The relay loop sends the '~' heartbeat. Fed a base 'A' stream it goes silent
     until the stream lapses, then requests '~' again, exactly one pause. (#711)"""
