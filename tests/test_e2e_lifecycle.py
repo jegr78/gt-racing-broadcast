@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Synthetic harness process-tree cleanup and isolated relay sockets."""
-import errno
 import importlib.util
 import os
 from pathlib import Path
@@ -63,7 +62,8 @@ def t_teardown_releases_a_stubborn_grandchild_socket():
 from pathlib import Path
 signal.signal(signal.SIGTERM, signal.SIG_IGN)
 s=socket.socket();s.bind(('127.0.0.1',0));s.listen()
-Path(sys.argv[1]).write_text(str(s.getsockname()[1])+' '+str(os.getpid()))
+ready=Path(sys.argv[1]);temporary=ready.with_suffix('.tmp')
+temporary.write_text(str(s.getsockname()[1])+' '+str(os.getpid()));temporary.replace(ready)
 while True:time.sleep(.1)
 ''', encoding='utf-8')
         parent = root / 'parent.py'
@@ -82,14 +82,18 @@ while True:time.sleep(.1)
             harness._kill(proc)
             until = time.monotonic() + 3
             while time.monotonic() < until:
-                with socket.socket() as probe:
-                    probe.settimeout(.1)
-                    result = probe.connect_ex(('127.0.0.1', port))
-                    if result in (errno.ECONNREFUSED, getattr(errno, 'WSAECONNREFUSED', errno.ECONNREFUSED)):
-                        break
+                try:
+                    with socket.socket() as probe:
+                        if hasattr(socket, 'SO_EXCLUSIVEADDRUSE'):
+                            probe.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+                        probe.bind(('127.0.0.1', port))
+                    break
+                except OSError:
+                    # A descendant still owns the listener; wait for tree teardown.
+                    pass
                 time.sleep(.02)
             else:
-                raise AssertionError(f'grandchild socket did not refuse connections after teardown: {result}')
+                raise AssertionError('grandchild socket cannot be rebound after teardown')
             assert proc.poll() is not None and proc._logfh.closed
         finally:
             # The old implementation leaks this deliberately stubborn process.
