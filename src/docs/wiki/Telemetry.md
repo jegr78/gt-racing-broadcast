@@ -210,6 +210,13 @@ The illustration uses authored synthetic reference values; no external curve is 
   supported number of boundaries. Changes remain drafts until **Apply shared
   definition**. Definitions are shared across profiles on this machine; overrides
   remain separate from the supplied base. A stale edit requires reloading.
+- **Prepare a layout before recording.** In **Data management**, open **Track
+  definitions without a recording**, choose a downloaded layout and driving direction,
+  then **Edit shared definition**. The downloaded reference racing line supplies the
+  map and unreviewed proposals; check turn numbers, anchors and sectors manually.
+  Apply saves the shared definition for later recordings and analyses. Learned layouts
+  still need a recorded lap. If the list is empty, run `racecast gt7-data update` and
+  refresh layouts. A changed reference line or a newer saved revision requires reloading.
 - **Sector definition.** Select a named division for this session. Verified reviewed
   game splits take precedence by default when available; an explicit choice is kept.
   Larger-sector bests show their source recording, session, lap and compound. A
@@ -220,6 +227,8 @@ The illustration uses authored synthetic reference values; no external curve is 
   later edits do not move spatial notes or rewrite saved outputs.
 
 ![Telemetry workspace: shared track marker editor](images/cc-track-editor.png)
+
+![Track definition prepared before the first recording](images/telemetry-reference-track-editor.png)
 - **Set track.** When racecast does not recognise the layout of a recording, or two
   layouts fit, pick it from the list. racecast assigns the recording to that layout. For
   a layout with a downloaded racing line, or the reverse of one, that is all. For any

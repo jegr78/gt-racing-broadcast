@@ -261,6 +261,7 @@ function tmClear(msg) {
   $('tm-settrack').hidden = true;
 }
 function tmReset() {
+  tmReferenceLayoutsReset();
   Object.keys(tmSeq).forEach(k => { tmSeq[k]++; });
   tmState.included = null; tmState.available = []; tmState.anchor = null;
   tmState.loaded = false; tmState.rec = null; tmState.recs = []; tmState.recLaps = [];
@@ -1209,12 +1210,29 @@ function tmChannelRender() {
 const tmEditor = {open:false,generation:0,reply:null,draft:null,mode:'apex',corner:0,boundary:1};
 function tmEditorStatus(text,error=false){$('tm-editor-status').textContent=text;$('tm-editor-status').className=error?'enverr':'sub';}
 function tmEditorClone(v){return JSON.parse(JSON.stringify(v));}
-async function tmEditorOpen(){
- const B=tmState.lapB;if(!B)return;
- const gen=++tmEditor.generation,key=tmKey(B),profile=tmState.profile;
+const tmReferenceLayouts={generation:0,rows:[]};
+function tmReferenceLayoutsReset(){
+ tmReferenceLayouts.generation++;tmReferenceLayouts.rows=[];
+ $('tm-reference-layouts').open=false;$('tm-reference-layout').textContent='';$('tm-reference-edit').disabled=true;
+}
+async function tmReferenceLayoutsLoad(){
+ if(!$('tm-reference-layouts').open)return;
+ const gen=++tmReferenceLayouts.generation,profile=tmState.profile;
+ $('tm-reference-edit').disabled=true;$('tm-reference-status').textContent='Reading downloaded layouts…';
+ const d=await tmGet('/api/telemetry/definition-layouts');
+ if(gen!==tmReferenceLayouts.generation||profile!==tmState.profile)return;
+ const select=$('tm-reference-layout');select.textContent='';tmReferenceLayouts.rows=d.ok?d.tracks:[];
+ for(const [i,row] of tmReferenceLayouts.rows.entries()){const option=document.createElement('option');option.value=String(i);option.textContent=row.track+' · '+row.layout+' · '+(row.reverse?'reverse':'forward');select.append(option);}
+ $('tm-reference-edit').disabled=!tmReferenceLayouts.rows.length;
+ $('tm-reference-status').textContent=!d.ok?(d.error||'Could not read layouts'):tmReferenceLayouts.rows.length?'Downloaded reference lines supply unreviewed proposals. Review markers and sectors before applying.':'No downloaded reference lines. Run racecast gt7-data update, then refresh layouts.';
+}
+function tmEditorOpenLayout(){const row=tmReferenceLayouts.rows[Number($('tm-reference-layout').value)];if(row)tmEditorOpen({layout_id:row.id,reverse:row.reverse});}
+async function tmEditorOpen(layout=null){
+ const B=tmState.lapB;if(!layout&&!B)return;
+ const gen=++tmEditor.generation,key=B?tmKey(B):null,profile=tmState.profile;
  tmEditor.open=true;tmEditor.reply=null;tmEditor.draft=null;$('tm-editor-fields').textContent='';$('tm-editor-map').textContent='';$('tm-editor-modal').hidden=false;const owner=tmEditorLock();tmEditorStatus('Loading shared track definition…');
- let d;try{d=await tmGet('/api/telemetry/definition?'+new URLSearchParams({rec:B.rec,session:B.session,lap:B.lap}));}catch(_e){d={ok:false,error:'Could not load the shared definition'};}finally{tmEditorRelease(owner);}
- if(gen!==tmEditor.generation||!tmEditor.open||!tmState.lapB||tmKey(tmState.lapB)!==key||tmState.profile!==profile)return;
+ let d;try{d=await tmGet('/api/telemetry/definition?'+new URLSearchParams(layout||{rec:B.rec,session:B.session,lap:B.lap}));}catch(_e){d={ok:false,error:'Could not load the shared definition'};}finally{tmEditorRelease(owner);}
+ if(gen!==tmEditor.generation||!tmEditor.open||(!layout&&(!tmState.lapB||tmKey(tmState.lapB)!==key))||tmState.profile!==profile)return;
  if(!d.ok){tmEditorStatus(d.error||'Track definition unavailable',true);return;}
  tmEditor.reply=d;tmEditor.draft=tmEditorClone(d.definition);tmEditor.corner=0;tmEditor.boundary=1;tmEditorRender();
  if(d.projection_error)tmEditorStatus('Cannot apply yet: '+d.projection_error+'. Move the anchor on the map, then Apply.',true);
@@ -1319,7 +1337,7 @@ function tmEditorAddCombination(){if(!tmEditor.draft||!tmEditor.draft.corners.le
 async function tmEditorApply(){
  const d=tmEditor.reply;if(!d||!tmEditor.draft)return;
  const gen=tmEditor.generation, draft=tmEditorClone(tmEditor.draft);
- const payload={rec:d.rec,session:d.session,lap:d.lap,profile:d.profile,source_id:d.source_id,expected_revision:d.revision,definition:draft};
+ const payload={scope:d.scope,layout_id:d.layout_id,reverse:d.reverse,rec:d.rec,session:d.session,lap:d.lap,profile:d.profile,source_id:d.source_id,expected_revision:d.revision,definition:draft};
  const owner=tmEditorLock();tmEditorStatus('Applying shared definition…');
  let answer;try{const r=await fetch('/api/telemetry/definition',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});answer=await r.json();}
  catch(_e){if(gen===tmEditor.generation)tmEditorStatus('Could not apply; draft remains in this editor',true);return;}
@@ -1327,7 +1345,8 @@ async function tmEditorApply(){
  if(gen!==tmEditor.generation||!tmEditor.open)return;
  if(!answer.ok){tmEditorStatus(answer.error||'Could not apply definition',true);return;}
  tmEditor.reply=answer;tmEditor.draft=tmEditorClone(answer.definition);tmEditorRender();tmEditorStatus('Applied shared definition · revision '+answer.revision);
- await tmRefreshContext(d.rec);
+ if(d.rec)await tmRefreshContext(d.rec);
+ else if(tmState.lapB)await tmRefreshContext(tmState.lapB.rec);
 }
 async function tmSelectSectorVariant(value){
  const B=tmState.lapB;if(!B)return;
