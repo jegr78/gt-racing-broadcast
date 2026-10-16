@@ -121,6 +121,11 @@ def t_cleanup_attempts_every_owned_process_when_one_stop_fails():
         assert Path(directory).exists(), 'failed cleanup removed its diagnostic logs'
 
 
+def t_feed_port_selection_rejects_production_and_duplicate_ports():
+    with mock.patch.object(harness.E, 'free_port', side_effect=[53001, 53002, 53003, 41001, 41001, 41002, 41003]):
+        assert harness._free_feed_ports() == [41001, 41002, 41003]
+
+
 def t_synthetic_relay_arguments_isolate_every_socket():
     args = harness._synthetic_relay_args()
     options = dict(zip(args[::2], args[1::2], strict=True))
