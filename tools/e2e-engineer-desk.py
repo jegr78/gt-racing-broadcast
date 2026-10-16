@@ -317,8 +317,8 @@ async def main():
                 await page.route('**/race-engineer/reference?*',held_reference)
                 await asyncio.wait_for(ref_captured.wait(),timeout=5)
                 before=await page.evaluate('() => EngineerDesk.state.received')
-                await asyncio.sleep(.6)
-                assert await page.evaluate('() => EngineerDesk.state.received') > before, 'detail request blocked current-value refresh'
+                await page.wait_for_function('(before) => EngineerDesk.state.received > before', arg=before)
+                assert not ref_release.is_set(), 'reference response was released before current-value refresh'
                 fixture.access().update(revoke=source,expected=2)
                 await page.wait_for_function('() => EngineerDesk.state.refSource === "" && document.getElementById("notice").textContent.includes("revoked")')
                 ref_release.set();await page.unroute_all(behavior='wait')
