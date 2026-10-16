@@ -25,6 +25,8 @@ _SILENT.disabled = True
 OFF_MAGIC = 0x00
 OFF_POS = 0x04          # car position x/y/z, metres (float x3)
 OFF_RPM = 0x3C          # engine rpm (float)
+OFF_CLUTCH_ENGAGEMENT = 0xF8  # clutch engagement 0..1 (float)
+OFF_GEAR_RATIOS = 0x104       # forward gear ratios 1..8 (float x8, 0 = no gear)
 OFF_GEAR = 0x90         # low nibble = current gear (uint8)
 OFF_SPEED = 0x4C        # metres/second (float)
 OFF_FUEL_LEVEL = 0x44   # litres in tank (float)
@@ -104,7 +106,8 @@ GT7Packet = namedtuple("GT7Packet", [
     "car_id",
     "steer_rad", "sway", "heave", "surge", "throttle_input", "brake_input",
     "gear", "rpm", "pos_x", "pos_y", "pos_z", "race_position", "car_count",
-], defaults=(None,) * 14)   # None when the packet is too short to carry the field
+    "clutch_engagement", "gear_ratios",
+], defaults=(None,) * 16)   # None when the packet is too short to carry the field
 
 
 def _opt_float(plain, off):
@@ -159,6 +162,9 @@ def parse_packet(plain):
         pos_y=struct.unpack_from("<f", plain, OFF_POS + 4)[0],
         pos_z=struct.unpack_from("<f", plain, OFF_POS + 8)[0],
         race_position=position, car_count=cars,
+        clutch_engagement=_opt_float(plain, OFF_CLUTCH_ENGAGEMENT),
+        gear_ratios=tuple(_opt_float(plain, OFF_GEAR_RATIOS + 4 * i) for i in range(8))
+        if len(plain) >= OFF_GEAR_RATIOS + 32 else None,
     )
 
 
@@ -244,6 +250,7 @@ def _sanitize(pkt, last):
         heave=keep("heave", None),
         surge=keep("surge", None),
         rpm=keep("rpm", 0.0),
+        clutch_engagement=keep("clutch_engagement", None),
         pos_x=keep("pos_x", 0.0),
         pos_y=keep("pos_y", 0.0),
         pos_z=keep("pos_z", 0.0),

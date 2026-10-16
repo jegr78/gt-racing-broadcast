@@ -4612,6 +4612,41 @@ def telemetry_shifts_data(rec, session, lap):
         return _telemetry_context_error(exc)
 
 
+def telemetry_shift_references_data(query=None):
+    """Machine-local shift reference cache per vehicle, independent of any recording.
+    An empty query lists the vehicles with a local entry; nothing here touches the network."""
+    import gt7_shifts
+    try:
+        _tracks, cars = _telemetry_dbs()
+        cache = gt7_shifts.Cache(_runtime_base_dir())
+        query = (query or '').strip()[:80]
+        if query:
+            rows = cars.search(query, limit=25)
+        else:
+            try:
+                names = os.listdir(cache.root)
+            except FileNotFoundError:
+                names = []
+            ids = sorted(int(n[:-5]) for n in names if n.endswith('.json') and n[:-5].isdigit())
+            rows = [cars.lookup(i) or {'id': i, 'maker': None, 'name': f'Car #{i}', 'group': None}
+                    for i in ids[:200]]
+        out = []
+        for row in rows:
+            entry = dict(row, cached=False, fetched_at=None, curve=False, ratios=False, error=None)
+            try:
+                value = cache.read(row['id'])
+            except (OSError, ValueError, TypeError) as exc:
+                entry['error'] = 'local entry unreadable: '+type(exc).__name__
+            else:
+                if value is not None:
+                    entry.update(cached=True, fetched_at=value['source'].get('fetched_at'),
+                                 curve=value.get('curve') is not None, ratios=value.get('ratios') is not None)
+            out.append(entry)
+        return {'ok': True, 'query': query, 'cars': out}
+    except Exception as exc:
+        return _telemetry_context_error(exc)
+
+
 def _telemetry_with_shifts(index, path):
     """Explicit report/export snapshot; optional shift failures do not erase other data."""
     import copy
@@ -8838,6 +8873,7 @@ def run_ui(rest, fail=sys.exit, open_browser=True, destination="/"):
         'telemetry_definition_read': telemetry_track_definition_read_data,
         'telemetry_definition_write': telemetry_track_definition_write_data,
         "telemetry_shifts": telemetry_shifts_data,
+        "telemetry_shift_references": telemetry_shift_references_data,
         "telemetry_tracks": telemetry_tracks_data,
         "telemetry_learn": telemetry_learn_data,
         "telemetry_delete": telemetry_delete_data,

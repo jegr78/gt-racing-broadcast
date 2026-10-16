@@ -108,6 +108,15 @@ def t_fetch_tool_writes_through_gt7_data():
         assert sorted(os.listdir(d)) == sorted(tool.BUNDLED), f"no temp file is left: {os.listdir(d)}"
 
 
+
+def t_search_matches_name_maker_and_id_in_a_bounded_list():
+    db = gc.CarDB(_db("ID,ShortName,Maker\n3424,Lancer Evolution IX MR GSR '06,25\n"
+                      "365,155 2.5 V6 TI '93,7\n366,Corvette C7,7\n"))
+    assert [c["id"] for c in db.search("lancer")] == [3424]
+    assert [c["id"] for c in db.search("CHEVROLET")] == [365, 366]
+    assert [c["id"] for c in db.search("366")] == [366]
+    assert len(db.search("", limit=2)) == 2 and db.search("nothing") == []
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

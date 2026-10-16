@@ -166,6 +166,11 @@ running relay.
   source curves, ratios and revbar data into machine-local runtime. Ordinary lookup is
   offline and an update failure preserves the previous cache. Unsupported or malformed
   data show unavailable components. External curves and code are not bundled.
+- **Shift references by car.** In **Data management**, search a car by name, maker or
+  GT7 ID and fetch or refresh its reference without a recording of it, for example
+  before the first session in a new car. **Show local entries** lists every car with a
+  machine-local entry, its update time and which components the source supplied. The
+  [Race Engineer desk](Race-Engineer) reads the same local entries.
 - **Acceleration reference.** The independent piecewise-linear calculation compares
   normalized power before and after the adjacent ratio change at equal road speed.
   It assumes full throttle, sufficient grip and instantaneous shifts. Decoded gearbox

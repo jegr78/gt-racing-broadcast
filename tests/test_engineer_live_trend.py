@@ -127,6 +127,33 @@ console.log(seen.join('|'));""")
         assert out.strip() == "3.06/12 eligible laps · this session|Unavailable/No eligible lap with fuel use", out
 
 
+def t_shift_points_compare_the_lap_in_progress_with_the_vehicle_reference():
+    h = _html()
+    assert h.index('id="input-trace"') < h.index('id="shift-table"') < h.index('id="live-side"')
+    harness = _HARNESS + """
+const rowsOut = []; const table = {tBodies: [{replaceChildren() { rowsOut.length = 0; },
+  insertRow() { const r = []; rowsOut.push(r); return {insertCell() { const c = {textContent: '', className: ''}; r.push(c); return c; }}; }}]};
+els['shift-table'] = table;
+const signed = (v, d = 3) => (Number.isFinite(v) && v > 0 ? '+' : '') + num(v, d);
+"""
+    out = _run_js(harness + _func_src(h, "renderShifts") + """
+const show = () => rowsOut.map(r => r.map(c => c.textContent).join(',')).join(' / ') + ' | ' + $('shift-note').textContent;
+renderShifts({shifts: {car_id: 1, lap: 3, reference: {kind: 'external', ratio_source: 'decoded transmission', warnings: [],
+  targets: [{gear: 1, rpm: 6800.4}, {gear: 2, rpm: 7012}, {gear: 3, rpm: null}]},
+  upshifts: [{from_gear: 2, to_gear: 3, pre_cut_rpm: 6950, deviation_rpm: -62, phase_status: 'measured'},
+             {from_gear: 1, to_gear: 2, pre_cut_rpm: null, deviation_rpm: null, phase_status: 'ambiguous/missing'},
+             {from_gear: 2, to_gear: 3, pre_cut_rpm: 7100, deviation_rpm: 88, phase_status: 'measured'}]}});
+console.log(show());
+renderShifts({shifts: {car_id: 1, lap: 4, reference: {kind: 'unavailable', targets: [], warnings: []}, upshifts: []}});
+console.log(show());
+renderShifts({shifts: null}); console.log(show());""")
+    if out is not None:
+        first, missing, none = out.strip().split("\n")
+        assert first.startswith("1,6800,Unknown,—,1 / 2,7012,7100,+88,2 / 3,Unavailable,—,—,0"), first
+        assert "Telemetry" in missing and "Data management" in missing and missing.startswith(" |"), missing
+        assert none.endswith("Waiting for a car"), none
+
+
 def t_input_trace_sits_with_the_live_values_and_uses_the_gated_route():
     h = _html()
     i, steer, trace, pgm = (h.index('id="instruments"'), h.index('id="steer"'),
