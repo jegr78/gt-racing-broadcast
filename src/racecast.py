@@ -4494,8 +4494,8 @@ def _telemetry_definition_scope(rec, session, lap):
     identity = tracks.name(row['track_id']) if row.get('track_id') else None
     if not identity:
         raise ValueError('set the track layout before editing shared markers')
-    geometry = max((r for r in index['laps'] if r.get('track_id') == row['track_id'] and r.get('trace')),
-                   key=lambda r: r.get('length_m') or 0, default=row)
+    import gt7_track_definitions as td
+    geometry = td.geometry_lap(index['laps'], row['track_id'], tracks) or row
     return path, row, identity, tracks, geometry, gt7_context.source_identity(path)
 
 
@@ -4505,7 +4505,11 @@ def telemetry_track_definition_read_data(rec, session, lap):
         _path, row, identity, tracks, geometry, source_id = _telemetry_definition_scope(rec, session, lap)
         stored = _telemetry_definition_store().read(row['track_id'], identity['reverse'])
         definition = stored['definition'] or td.proposals(geometry['trace'], row['track_id'], identity['reverse'])
-        return {'ok': True, **stored, 'definition': definition, 'projection': td.project_definition(definition, tracks),
+        try:
+            projection, problem = td.project_definition(definition, tracks), None
+        except ValueError as exc:
+            projection, problem = None, str(exc)  # keep the map so the anchor can be moved back
+        return {'ok': True, **stored, 'definition': definition, 'projection': projection, 'projection_error': problem,
                 'geometry': [{'d': p['d'], 'x': p['x'], 'z': p['z']} for p in geometry.get('trace', [])],
                 'profile': _active_profile_name(), 'source_id': source_id,
                 'rec': rec, 'session': row['session'], 'lap': row['lap']}

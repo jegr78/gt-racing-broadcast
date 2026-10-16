@@ -237,6 +237,44 @@ def t_csv_export_freezes_applied_sector_and_definition_snapshots():
             assert json.load(f) == snapshot, 'later map edits cannot rewrite an exported definition'
 
 
+def joined_trace(start_d):
+    """Lap-normalized like a counted lap: d runs 0..1000 although the car joined at start_d."""
+    radius = fixture.R
+    return [{'d': float(d), 't': d/50, 'x': radius*math.cos((start_d+d*(1000-start_d)/1000)/radius),
+             'z': radius*math.sin((start_d+d*(1000-start_d)/1000)/radius)} for d in range(0, 1001, 5)]
+
+
+def joined_laps():
+    out_lap = {'session': 1, 'lap': 1, 'track_id': 'ring01', 'lap_role': 'first', 'trace_complete': True,
+               'length_m': 1000.0, 'trace': joined_trace(300)}
+    regular = {'session': 1, 'lap': 2, 'track_id': 'ring01', 'lap_role': 'regular', 'trace_complete': True,
+               'length_m': 1000.0, 'trace': joined_trace(0)}
+    return out_lap, regular
+
+
+def t_proposal_geometry_skips_an_out_lap_that_starts_past_start_finish():
+    trace = joined_trace
+    out_lap, regular = joined_laps()
+    tracks = fixture.FakeTracks()
+    chosen = td.geometry_lap([out_lap, regular], 'ring01', tracks)
+    assert chosen is regular, 'an equal-length out-lap must not supply the start/finish anchor'
+    td.project_definition(td.proposals(chosen['trace'], 'ring01', False), tracks)
+    regular_late = dict(regular, lap_role='regular', trace=trace(300))
+    assert td.geometry_lap([regular_late], 'ring01', tracks) is regular_late, \
+        'without a lap starting at start/finish the longest trace still supplies the map'
+    assert td.geometry_lap([], 'ring01', tracks) is None
+
+
+
+def t_analysis_proposal_skips_an_out_lap_that_starts_past_start_finish():
+    with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as bundle:
+        analysed = td.annotate_index({'rec': 'R', 'laps': list(joined_laps()), 'open_lap': None}, {},
+                                     td.Store(root, bundle), fixture.FakeTracks())
+        for row in analysed['laps']:
+            assert not row['track_definition_warnings'] or 'unavailable' not in row['track_definition_warnings'][0],                 row['track_definition_warnings']
+            assert row['larger_sectors'], 'an out-lap must not void the proposal for every lap of the layout'
+
+
 if __name__ == '__main__':
     for name, fn in sorted(globals().items()):
         if name.startswith('t_') and callable(fn):
