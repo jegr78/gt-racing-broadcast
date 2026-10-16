@@ -10,6 +10,13 @@ shared page, the same `hud.html` for every league. A league can **restyle** it: 
 elements, change fonts and colors: **without forking** the page, by shipping a small CSS
 override (and optional fonts) in its profile.
 
+Team names shrink between the slot's maximum and minimum font sizes to fit its
+content width, including left, center and right alignment. Text that cannot fit at
+the minimum remains clipped. The example below uses the same long name in all
+three alignments.
+
+![Team names fitted in left, center and right aligned slots](images/hud-team-name-fit.png)
+
 ## Where it lives
 
 A league's overlay styling sits in its profile folder:
