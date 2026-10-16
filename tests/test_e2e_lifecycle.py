@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Synthetic harness process-tree cleanup and isolated relay sockets."""
+import errno
 import importlib.util
 import os
 from pathlib import Path
@@ -82,7 +83,8 @@ while True:time.sleep(.1)
             until = time.monotonic() + 3
             while time.monotonic() < until:
                 with socket.socket() as probe:
-                    if probe.connect_ex(('127.0.0.1', port)) != 0:
+                    probe.settimeout(.1)
+                    if probe.connect_ex(('127.0.0.1', port)) == errno.ECONNREFUSED:
                         break
                 time.sleep(.02)
             else:
