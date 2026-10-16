@@ -154,3 +154,6 @@ notes, shared references and Crew chat follow the analysis on every screen.
 
 See [Control Center activation and sharing](Control-Center#race-engineer-activation-and-reference-sharing)
 and the [Console access mechanism](Console#race-engineer-access).
+
+Live shift phases use packet timestamps, including accelerated replay. A new GT7
+session clears its lap observations even when the car and lap number stay the same.

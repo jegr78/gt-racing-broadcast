@@ -594,7 +594,7 @@ class Store:
         )
         self._values = instruments(pkt)
         self._record_inputs(pkt, mono)
-        self._shifts.feed(pkt, mono)
+        self._shifts.feed(pkt, wall, session=replay.eng.session)
         if self._dropped != self._seen_drops:
             if replay.eng._acc is not None:
                 replay.eng._acc._reject("Engineer preparation queue overflow")

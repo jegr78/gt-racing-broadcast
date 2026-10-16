@@ -251,7 +251,7 @@ class LiveObserver:
         self._rows, self._events = [], []
         self._scanned_t = None
 
-    def feed(self, pkt, t):
+    def feed(self, pkt, t, session=None):
         car, lap = getattr(pkt, 'car_id', None), getattr(pkt, 'lap', None)
         if car != self._car:
             self._car, self._ratios, self._reference = car, None, None
@@ -261,8 +261,8 @@ class LiveObserver:
                     self._external = self._reader(car)
                 except (OSError, ValueError, TypeError) as exc:
                     self._warnings = ['Shift reference cache unreadable: '+type(exc).__name__]
-        if (car, lap) != self._key:
-            self._key, self._rows, self._events, self._scanned_t = (car, lap), [], [], None
+        if (car, lap, session) != self._key:
+            self._key, self._rows, self._events, self._scanned_t = (car, lap, session), [], [], None
         ratios = _live_ratios(pkt)
         if ratios is not None and ratios != self._ratios:
             self._ratios, self._reference = ratios, None
