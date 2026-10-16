@@ -274,6 +274,26 @@ def corner_metrics(lap, definition):
     return out
 
 
+def geometry_lap(laps, layout, tracks):
+    """The lap whose trace seeds proposals and the editor map.
+
+    An out-lap or a lap joined after the line is lap-normalized to full length, so its
+    first point lies past start/finish. Prefer a regular complete lap that starts at the
+    reference start/finish; otherwise fall back to the longest trace."""
+    rows = [r for r in laps if r.get('track_id') == layout and r.get('trace')]
+    if not rows:
+        return None
+    length = tracks.line_length(layout)
+    def at_start(row):
+        if row.get('lap_role') in {'first', 'pit', 'warmup', 'partial'} or not row.get('trace_complete'):
+            return False
+        first = row['trace'][0]
+        station = (tracks.project([(first['x'], first['z'])], layout) or [None])[0]
+        return (length is not None and station is not None and math.isfinite(station)
+                and min(station, length-station) <= gt7_laps.STEP_M*10)
+    return max(rows, key=lambda r: (at_start(r), r.get('length_m') or 0))
+
+
 def proposals(trace, layout, reverse):
     """Geometry-only candidates; identities and review are decided by explicit editing."""
     def at(d):
@@ -337,8 +357,7 @@ def annotate_index(index, context, store, tracks, full_index=None):
             saved = store.read(*key)
             definition = saved['definition']
             if definition is None:
-                source = max((r for r in full_rows if r.get('track_id') == layout and r.get('trace')),
-                             key=lambda r: r.get('length_m') or 0, default=None)
+                source = geometry_lap(full_rows, layout, tracks)
                 if source is None:
                     continue
                 definition = proposals(source['trace'], *key)

@@ -1033,6 +1033,20 @@ def t_track_definition_editor_apply_is_explicit_scoped_and_revisioned():
         assert current['definition']['reviewed'] and current['revision'] == 1
 
 
+def t_track_definition_editor_keeps_its_map_when_the_draft_does_not_project():
+    with _telemetry_sandbox() as (rec_dir, tgl):
+        stem = _stem(tgl.write_circle_recording(rec_dir))
+        m.telemetry_lap_data(stem, '1', '3')
+        draft = m.telemetry_track_definition_read_data(stem, '1', '3')['definition']
+        off = draft['variants'][0]['boundaries'][1]
+        draft['variants'][0]['boundaries'][0] = dict(off)
+        draft['variants'][0]['boundaries'][-1] = dict(off)
+        m._telemetry_definition_store().save(draft, 0)
+        read = m.telemetry_track_definition_read_data(stem, '1', '3')
+        assert read['ok'] and read['geometry'] and read['projection'] is None, read
+        assert 'start/finish' in read['projection_error'], 'the editor must stay usable to move the boundary back'
+
+
 def t_sector_variant_selection_is_session_scoped_and_preserves_notes_and_drafts():
     with _telemetry_sandbox() as (rec_dir, tgl):
         path = tgl.write_circle_recording(rec_dir)
