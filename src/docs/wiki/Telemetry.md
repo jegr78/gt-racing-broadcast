@@ -116,6 +116,10 @@ running relay.
   partial segment before the first lap and the unfinished segment after the last lap.
   An unfinished segment shows captured seconds, not an invented completed lap time.
   Capture completeness, distance-trace coverage and pace eligibility are separate.
+  For a known layout, a full lap must cover the reference length within the track
+  match tolerance and begin near start/finish before its trace is normalized.
+  A capture joined farther into the lap remains partial and cannot establish a
+  pace reference. Older cached indexes rebuild with this coverage check.
   Both `reference` and `counted` admit a regular lap; **best so far** marks a historical
   live reference, not a stronger data-quality verdict. Pit laps show all detected
   reasons. **After inferred service; tyres unconfirmed** identifies the next lap without

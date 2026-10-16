@@ -59,8 +59,11 @@ Loaded when working under `src/ui/`.
   Generate runs `racecast report generate` as the `report-generate` job and reads the
   written file through `GET /api/report/read?name=`. A counted lap's trace closes at
   the full lap length with a common zero-based, lap-normalized receiver clock, so its
-  sectors add up without a backwards closing point. Index version 7 retains sparse recording seek offsets and separates capture
+  sectors add up without a backwards closing point. Index version 9 retains sparse recording seek offsets and separates capture
   completeness, trace coverage, roles, pace eligibility and historical reference status.
+  Known-layout completeness is checked against original driven coverage and the
+  first projected station before trace normalization. Incomplete captures cannot
+  become pace or historical references; usable laps determine historical improvements.
   The unfinished tail is `open_lap`, not an extra completed lap; API lists expose it
   separately and the single-lap endpoint can retrieve its trace. Data functions
   `telemetry_*_data` in `src/racecast.py`; routes `/api/telemetry/recordings`,
