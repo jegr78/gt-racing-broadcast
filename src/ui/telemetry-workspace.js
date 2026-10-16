@@ -1217,7 +1217,8 @@ async function tmEditorOpen(){
  if(gen!==tmEditor.generation||!tmEditor.open||!tmState.lapB||tmKey(tmState.lapB)!==key||tmState.profile!==profile)return;
  if(!d.ok){tmEditorStatus(d.error||'Track definition unavailable',true);return;}
  tmEditor.reply=d;tmEditor.draft=tmEditorClone(d.definition);tmEditor.corner=0;tmEditor.boundary=1;tmEditorRender();
- tmEditorStatus('Shared on this machine. Draft edits do not change analysis until Apply.');
+ if(d.projection_error)tmEditorStatus('Cannot apply yet: '+d.projection_error+'. Move the anchor on the map, then Apply.',true);
+ else tmEditorStatus('Shared on this machine. Draft edits do not change analysis until Apply.');
 }
 function tmEditorRelease(owner=tmEditor.controls){if(!owner||owner!==tmEditor.controls)return;for(const [element,disabled] of owner)element.disabled=disabled;tmEditor.controls=null;tmEditor.busy=false;}
 function tmEditorLock(){tmEditorRelease();const owner=[...$('tm-editor-modal').querySelectorAll('button,input,select,textarea')].filter(e=>e.id!=='tm-editor-close').map(e=>[e,e.disabled]);tmEditor.controls=owner;tmEditor.busy=true;for(const [e] of owner)e.disabled=true;return owner;}

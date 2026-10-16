@@ -142,6 +142,16 @@ def _finite(value):
     return value if isinstance(value, (int, float)) and math.isfinite(value) else None
 
 
+def fuel_average(laps, session_id):
+    """(mean litres per lap, lap count) over the live session's completed eligible laps.
+    A missing or zero use is no measurement (no fuel use / refuel), never a zero average."""
+    used = [r["fuel_used_l"] for r in laps
+            if session_id is not None and r.get("session_id") == session_id
+            and r.get("state") == "confirmed" and r.get("comparison_eligible")
+            and _finite(r.get("fuel_used_l")) is not None and r["fuel_used_l"] > 0]
+    return (round(sum(used) / len(used), 3), len(used)) if used else (None, 0)
+
+
 def instruments(pkt):
     """Only measured channels; a missing/nonfinite channel stays unavailable."""
     x, z = _finite(pkt.pos_x), _finite(pkt.pos_z)
@@ -430,6 +440,8 @@ class Store:
             "laps": [],
             "best_s": None,
             "shifts": None,
+            "fuel_avg_l": None,
+            "fuel_avg_laps": 0,
             "theoretical_s": None,
             "history": (
                 "recording-backed"
@@ -859,6 +871,7 @@ class Store:
             and r["state"] == "confirmed"
             and gt7_context.compatible(current or {}, r)
         ]
+        fuel_avg, fuel_laps = fuel_average(self._summaries.values(), sid)
         doc.update(
             revision=self._revision,
             current=current,
@@ -869,6 +882,8 @@ class Store:
             laps=list(self._summaries.values()),
             best_s=min((r["time_s"] for r in eligible), default=None),
             shifts=self._shifts.snapshot(),
+            fuel_avg_l=fuel_avg,
+            fuel_avg_laps=fuel_laps,
             theoretical_s=gt7_laps.theoretical_best(pool),
             warnings=[self._context_error] if self._context_error else [],
         )
