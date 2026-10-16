@@ -1699,6 +1699,8 @@ def _report_telemetry(frm, to):
 def _build_report_file(frm=None, to=None, gap=None, out=None):
     """Core generator. Returns {'path','html','summary'}. Raises ValueError when the
     selected window has no samples."""
+    auto_start, auto_end = frm is None, to is None
+    session_floor = _read_session_start() if auto_start or auto_end else None
     gap = rbuild.SESSION_GAP_S if gap is None else gap
     conn = hsmod.open_db(_health_db_path())
     hsmod.migrate(conn)
@@ -1708,17 +1710,30 @@ def _build_report_file(frm=None, to=None, gap=None, out=None):
                       conn.execute("SELECT ts FROM samples ORDER BY ts ASC").fetchall()]
             # Floor the window at THIS event's start so a quick restart within
             # SESSION_GAP_S no longer merges the previous event's samples.
-            s, e = rbuild.select_session(all_ts, gap, floor=_read_session_start())
+            s, e = rbuild.select_session(all_ts, gap, floor=session_floor)
             frm = s if frm is None else frm
             to = e if to is None else to
         if frm is None or to is None:
             raise ValueError("no health data for that window")
+        sample_end = to
+        # A known part/stream stop can follow the final periodic sample. Do not
+        # absorb a later start, even if its first health sample has not arrived.
+        event_from = max(frm-hsmod.GAP_S, session_floor if session_floor is not None else frm-hsmod.GAP_S) if auto_start else frm
+        events = hsmod.query_events(conn, event_from, to + gap if auto_end else to)
+        have_parts = any(event.get('type') == 'part_start' and event['ts'] <= sample_end for event in events)
+        next_start = min((event['ts'] for event in events
+                          if event['ts'] > sample_end and (event.get('type') == 'part_start'
+                              or not have_parts and event.get('type') == 'obs_stream_start')),
+                         default=None)
+        if next_start is not None:
+            events = [event for event in events if event['ts'] < next_start]
+        live_start, live_end = rbuild.session_window(events, (frm, to))
+        if auto_start:
+            frm = live_start
+        if auto_end:
+            to = live_end
+        events = [event for event in events if frm <= event['ts'] <= to]
         samples = hsmod.query_range(conn, frm, to)
-        # Events (part_end, obs_stream_stop) are recorded during teardown, a few
-        # seconds AFTER the last health sample that sets `to`. Query the event tail
-        # up to `to + gap` so they still land in the timeline. The next session is
-        # >= gap away by construction, so this can't pull in a later session's events.
-        events = hsmod.query_events(conn, frm, to + gap)
     finally:
         conn.close()
     if not samples:

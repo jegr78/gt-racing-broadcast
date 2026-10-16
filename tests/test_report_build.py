@@ -394,6 +394,41 @@ def t_build_report_excludes_off_air():
     assert ">On air<" in html
 
 
+def t_on_air_sample_edges_belong_to_the_known_window():
+    samples = [_sample(t, live_stint=1) for t in (120, 150, 180, 210)]
+    events = [{'ts': 115, 'type': 'part_start'}, {'ts': 225, 'type': 'part_end'}]
+    report = rb.build_report(samples, events, {1: 'Alice'}, 'Q', (115, 225), 300)
+    assert report['header']['uptime_pct'] == 100.0, report['header']
+    assert report['on_air']['commentators'][0]['seconds'] == report['header']['on_air_s'] == 110
+    assert report['incidents'] == [] and all(feed['drops'] == 0 for feed in report['feeds'])
+    assert report['health_bands'] == [{'from': 115, 'to': 225, 'state': 'green'}]
+
+
+def t_on_air_edges_do_not_hide_red_states_or_large_sampling_gaps():
+    events = [{'ts': 115, 'type': 'part_start'}, {'ts': 225, 'type': 'part_end'}]
+    samples = [_sample(120, live_stint=1, health_level='red', feed_a_down=1),
+               _sample(150, live_stint=1), _sample(180, live_stint=1), _sample(210, live_stint=1)]
+    report = rb.build_report(samples, events, {1: 'Alice'}, 'Q', (115, 225), 300)
+    assert report['header']['uptime_pct'] == 68.2, report['header']
+    assert report['feeds'][0]['downtime_s'] == 35 and report['incidents'][0]['duration_s'] == 35
+    all_red = rb.build_report([_sample(t, live_stint=1, health_level='red') for t in (120, 150, 180, 210)],
+                              events, {1: 'Alice'}, 'Q', (115, 225), 300)
+    assert all_red['header']['uptime_pct'] == 0
+    assert all_red['incidents'][0]['end'] == 225 and all_red['incidents'][0]['duration_s'] == 110
+    samples = [_sample(120, live_stint=1), _sample(150, live_stint=1),
+               _sample(510, live_stint=1), _sample(540, live_stint=1)]
+    events[-1]['ts'] = 555
+    report = rb.build_report(samples, events, {1: 'Alice'}, 'Q', (115, 555), 600)
+    assert report['header']['uptime_pct'] == 18.2, report['header']
+    assert report['on_air']['commentators'][0]['seconds'] == 80
+    report = rb.build_report([_sample(300, live_stint=1), _sample(330, live_stint=1)], events, {1: 'Alice'}, 'Q', (115, 555), 600)
+    assert report['header']['uptime_pct'] == 6.8, report['header']
+    assert report['on_air']['commentators'][0]['seconds'] == 30
+    # A window without a health observation cannot be credited as green.
+    report = rb.build_report([_sample(0)], events, {}, 'Q', (115, 555), 600)
+    assert report['header']['uptime_pct'] == 0 and report['on_air']['commentators'] == []
+
+
 def t_build_report_multi_window_uptime_not_over_100():
     # A stop and restart splits the session into two on-air windows with an off-air
     # gap shorter than GAP_S between them. Health is green throughout on air, and the

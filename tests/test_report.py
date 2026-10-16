@@ -350,6 +350,60 @@ def t_report_includes_teardown_events_after_last_sample():
             "part_end recorded after the last sample must still appear in the timeline"
 
 
+def t_auto_report_window_uses_part_boundaries_and_honors_explicit_limits():
+    from unittest import mock
+    with tempfile.TemporaryDirectory() as directory:
+        db = os.path.join(directory, 'health-history.db')
+        conn = hs.open_db(db)
+        hs.migrate(conn)
+        base = 1700000000.0
+        for seconds in range(0, 211, 30):
+            hs.record(conn, {'ts': base+seconds, 'health_level': 'green', 'health_reasons': [],
+                             'feed_a_down': 0, 'feed_b_down': 0, 'live_stint': 1}, 'periodic')
+        for seconds, kind in ((115, 'part_start'), (225, 'part_end'), (260, 'part_start'), (300, 'part_end')):
+            hs.record_event(conn, base+seconds, kind)
+        conn.close()
+        with mock.patch.object(rc, '_health_db_path', return_value=db), \
+             mock.patch.object(rc, '_runtime_dir', return_value=directory), \
+             mock.patch.object(rc, '_read_session_start', return_value=None), \
+             mock.patch.object(rc, '_report_name_map', return_value={1: 'Alice'}), \
+             mock.patch.object(rc, '_report_event_title', return_value='Q'), \
+             mock.patch.object(rc, '_profile_has_telemetry', return_value=False):
+            result = rc._build_report_file()
+            header = result['report']['header']
+            assert (header['start'], header['end']) == (base+115, base+225), header
+            assert result['window'] == (base+115, base+225)
+            assert header['duration_s'] == header['on_air_s'] == 110 and header['uptime_pct'] == 100
+            assert max(event['ts'] for event in result['report']['broadcast_timeline']) == header['end']
+            explicit = rc._build_report_file(frm=base+90, to=base+200)
+            assert explicit['window'] == (base+90, base+200)
+            assert explicit['report']['header']['end'] == base+200
+            assert all(event['ts'] <= base+200 for event in explicit['report']['broadcast_timeline'])
+
+
+def t_report_finds_the_start_just_before_the_first_health_sample():
+    from unittest import mock
+    with tempfile.TemporaryDirectory() as directory:
+        db = os.path.join(directory, 'health-history.db')
+        conn = hs.open_db(db)
+        hs.migrate(conn)
+        for stamp in (120, 150, 180, 210):
+            hs.record(conn, {'ts': stamp, 'health_level': 'green', 'health_reasons': [],
+                             'feed_a_down': 0, 'feed_b_down': 0, 'live_stint': 1}, 'periodic')
+        hs.record_event(conn, 115, 'part_start')
+        hs.record_event(conn, 225, 'part_end')
+        conn.close()
+        with mock.patch.object(rc, '_health_db_path', return_value=db), \
+             mock.patch.object(rc, '_runtime_dir', return_value=directory), \
+             mock.patch.object(rc, '_read_session_start', return_value=None), \
+             mock.patch.object(rc, '_report_name_map', return_value={1: 'Alice'}), \
+             mock.patch.object(rc, '_report_event_title', return_value='Q'), \
+             mock.patch.object(rc, '_profile_has_telemetry', return_value=False):
+            result = rc._build_report_file()
+            assert result['window'] == (115, 225), result['window']
+            assert result['report']['header']['uptime_pct'] == 100
+
+
 def t_recordings_in_window_by_start_and_duration():
     t0 = datetime.datetime(2026, 10, 7, 20, 0, tzinfo=datetime.timezone.utc)
     base = t0.timestamp()
