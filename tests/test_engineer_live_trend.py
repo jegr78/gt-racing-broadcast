@@ -114,6 +114,19 @@ console.log(seen.join('|'));""")
         assert out.strip() == "11° L|11° R|0°|Unavailable", out
 
 
+def t_average_fuel_shows_the_session_value_and_its_lap_count():
+    h = _html()
+    assert 'id="fuel-avg"' in h and h.index('id="instruments"') < h.index('id="fuel-avg"') < h.index('id="input-trace"')
+    out = _run_js(_HARNESS + _func_src(h, "instruments") + """
+const seen = [];
+for (const [avg, laps] of [[3.0612, 12], [null, 0]]) {
+  instruments({instruments: {}, fuel_avg_l: avg, fuel_avg_laps: laps});
+  seen.push($('fuel-avg').textContent + '/' + $('fuel-avg-note').textContent); }
+console.log(seen.join('|'));""")
+    if out is not None:
+        assert out.strip() == "3.06/12 eligible laps · this session|Unavailable/No eligible lap with fuel use", out
+
+
 def t_input_trace_sits_with_the_live_values_and_uses_the_gated_route():
     h = _html()
     i, steer, trace, pgm = (h.index('id="instruments"'), h.index('id="steer"'),
