@@ -237,6 +237,26 @@ def t_csv_export_freezes_applied_sector_and_definition_snapshots():
             assert json.load(f) == snapshot, 'later map edits cannot rewrite an exported definition'
 
 
+def t_proposal_geometry_skips_an_out_lap_that_starts_past_start_finish():
+    radius = fixture.R
+    def trace(start_d):
+        # Lap-normalized like a counted lap: d runs 0..1000 although the car joined later.
+        return [{'d': float(d), 'x': radius*math.cos((start_d+d*(1000-start_d)/1000)/radius),
+                 'z': radius*math.sin((start_d+d*(1000-start_d)/1000)/radius)} for d in range(0, 1001, 5)]
+    out_lap = {'lap': 1, 'track_id': 'ring01', 'lap_role': 'first', 'trace_complete': True,
+               'length_m': 1000.0, 'trace': trace(300)}
+    regular = {'lap': 2, 'track_id': 'ring01', 'lap_role': 'regular', 'trace_complete': True,
+               'length_m': 1000.0, 'trace': trace(0)}
+    tracks = fixture.FakeTracks()
+    chosen = td.geometry_lap([out_lap, regular], 'ring01', tracks)
+    assert chosen is regular, 'an equal-length out-lap must not supply the start/finish anchor'
+    td.project_definition(td.proposals(chosen['trace'], 'ring01', False), tracks)
+    regular_late = dict(regular, lap_role='regular', trace=trace(300))
+    assert td.geometry_lap([regular_late], 'ring01', tracks) is regular_late, \
+        'without a lap starting at start/finish the longest trace still supplies the map'
+    assert td.geometry_lap([], 'ring01', tracks) is None
+
+
 if __name__ == '__main__':
     for name, fn in sorted(globals().items()):
         if name.startswith('t_') and callable(fn):
