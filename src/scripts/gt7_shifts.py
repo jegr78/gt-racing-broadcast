@@ -216,6 +216,98 @@ def analyse(rows, lap, external=None, manual=None, session_confirmed=False, obse
                      economy_deviation_rpm=pre-economy if pre is not None and economy is not None else None)
     return {'reference': ref, 'shifts': events}
 
+LIVE_ROWS = 60*60*20      # 20 min of 60 Hz packets: longer laps keep their latest part
+LIVE_UPSHIFTS = 60
+LIVE_SETTLE_S = .7        # detect_shifts looks .6 s past the edge for the engaged phase
+LIVE_OVERLAP_S = 1.0      # rescan overlap: the pre-cut window reaches .4 s back
+
+
+def _live_ratios(pkt):
+    """Decoded forward ratios of a live packet, or None (sentinel 0 ends the box)."""
+    values = []
+    for r in getattr(pkt, 'gear_ratios', None) or ():
+        if not isinstance(r, (int, float)) or not math.isfinite(r) or r == 0:
+            break
+        values.append(r)
+    try:
+        return validate_ratios(values) if len(values) >= 2 else None
+    except ValueError:
+        return None
+
+
+class LiveObserver:
+    """Upshifts of the lap in progress against the vehicle's power-equality reference.
+
+    Fed one packet at a time on one thread; `reader(car_id)` returns the machine-local
+    cached source (Cache.read) and is called once per vehicle. Never accesses the network."""
+
+    def __init__(self, reader):
+        self._reader = reader
+        self._key = None
+        self._car = None
+        self._external, self._warnings = None, []
+        self._ratios = None
+        self._reference = None
+        self._rows, self._events = [], []
+        self._scanned_t = None
+
+    def feed(self, pkt, t):
+        car, lap = getattr(pkt, 'car_id', None), getattr(pkt, 'lap', None)
+        if car != self._car:
+            self._car, self._ratios, self._reference = car, None, None
+            self._external, self._warnings = None, []
+            if isinstance(car, int) and car > 0:
+                try:
+                    self._external = self._reader(car)
+                except (OSError, ValueError, TypeError) as exc:
+                    self._warnings = ['Shift reference cache unreadable: '+type(exc).__name__]
+        if (car, lap) != self._key:
+            self._key, self._rows, self._events, self._scanned_t = (car, lap), [], [], None
+        ratios = _live_ratios(pkt)
+        if ratios is not None and ratios != self._ratios:
+            self._ratios, self._reference = ratios, None
+        if not pkt.on_track or pkt.paused or pkt.loading or pkt.rpm is None:
+            return
+        self._rows.append({'t': t, 'rpm': pkt.rpm, 'gear': pkt.gear,
+                           'throttle_pct': pkt.throttle/255*100,
+                           'clutch_engagement': getattr(pkt, 'clutch_engagement', None)})
+        if len(self._rows) > LIVE_ROWS:
+            del self._rows[:len(self._rows)-LIVE_ROWS]
+
+    def _reference_doc(self):
+        if self._reference is None:
+            try:
+                ref = reference(self._external, None, self._car, False, self._ratios)
+            except ValueError:
+                ref = reference(None, None, self._car, False, None)
+            self._reference = {'kind': ref['kind'], 'targets': ref['targets'],
+                               'ratio_source': ref['ratio_source'], 'revbar_rpm': ref.get('revbar_rpm'),
+                               'support': ref.get('support'), 'warnings': self._warnings+ref['warnings']}
+        return self._reference
+
+    def snapshot(self):
+        if self._key is None:
+            return None
+        if self._rows:
+            settled = self._rows[-1]['t']-LIVE_SETTLE_S
+            start = -math.inf if self._scanned_t is None else self._scanned_t-LIVE_OVERLAP_S
+            part = [r for r in self._rows if r['t'] >= start]
+            last = self._events[-1]['gear_change_t_s'] if self._events else -math.inf
+            ref = {t['gear']: t['rpm'] for t in self._reference_doc()['targets']}
+            for event in detect_shifts(part[-MAX_ROWS:]):
+                t = event['gear_change_t_s']
+                if last < t <= settled:
+                    target, pre = ref.get(event['from_gear']), event['pre_cut_rpm']
+                    self._events.append({k: event[k] for k in ('from_gear', 'to_gear', 'gear_change_t_s',
+                                                                'pre_cut_rpm', 'post_rpm', 'phase_status')}
+                                        | {'reference_rpm': target,
+                                           'deviation_rpm': pre-target if pre is not None and target is not None else None})
+                    last = t
+            del self._events[:-LIVE_UPSHIFTS]
+            self._scanned_t = settled
+        return {'car_id': self._car, 'lap': self._key[1], 'reference': copy.deepcopy(self._reference_doc()),
+                'upshifts': copy.deepcopy(self._events)}
+
 SOURCE = 'https://github.com/theRTB/GT7ShiftTone'
 SOURCE_API = 'https://api.github.com/repos/theRTB/GT7ShiftTone/commits/main'
 SOURCE_RAW = 'https://raw.githubusercontent.com/theRTB/GT7ShiftTone/'

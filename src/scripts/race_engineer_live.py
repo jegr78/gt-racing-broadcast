@@ -15,6 +15,7 @@ import gt7_context
 import gt7_track_definitions
 import gt7_laps
 import gt7_recording
+import gt7_shifts
 import gt7_telemetry
 
 PACKETS_MAX = 2048
@@ -375,6 +376,7 @@ class Store:
         self._last_packet = None
         self._values = {}
         self._inputs = collections.deque()
+        self._shifts = self._new_shifts()
         self._last_publish = None
         self._recording = None
         self._recording_current = recording_source is None
@@ -403,6 +405,11 @@ class Store:
         self._worker.start()
         self._reader.start()
 
+    def _new_shifts(self):
+        base = self._runtime_base
+        reader = gt7_shifts.Cache(base).read if base else (lambda _car: None)
+        return gt7_shifts.LiveObserver(reader)
+
     def _new_replay(self):
         replay = gt7_laps._Replay()
         replay.eng.track_db = self._tracks
@@ -422,6 +429,7 @@ class Store:
             "sessions": [],
             "laps": [],
             "best_s": None,
+            "shifts": None,
             "theoretical_s": None,
             "history": (
                 "recording-backed"
@@ -468,6 +476,7 @@ class Store:
         self._receipt = None
         self._last_packet = None
         self._values = {}
+        self._shifts = self._new_shifts()
         with self._lock:
             self._inputs.clear()
         self._revision += 1
@@ -573,6 +582,7 @@ class Store:
         )
         self._values = instruments(pkt)
         self._record_inputs(pkt, mono)
+        self._shifts.feed(pkt, mono)
         if self._dropped != self._seen_drops:
             if replay.eng._acc is not None:
                 replay.eng._acc._reject("Engineer preparation queue overflow")
@@ -858,6 +868,7 @@ class Store:
             sessions=list(self._sessions.values()),
             laps=list(self._summaries.values()),
             best_s=min((r["time_s"] for r in eligible), default=None),
+            shifts=self._shifts.snapshot(),
             theoretical_s=gt7_laps.theoretical_best(pool),
             warnings=[self._context_error] if self._context_error else [],
         )
