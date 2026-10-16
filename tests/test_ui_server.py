@@ -2817,6 +2817,27 @@ def t_shift_route_keeps_domain_errors_and_blocks_foreign_origins():
         httpd.server_close()
 
 
+def t_shift_reference_search_route_passes_the_query_and_blocks_foreign_origins():
+    seen = []
+    ctx = _ctx()
+    ctx['telemetry_shift_references'] = lambda q: seen.append(q) or {'ok': True, 'cars': [{'id': 485}]}
+    httpd, port = _serve(ctx)
+    try:
+        status, raw = _get(port, '/api/telemetry/shift-references?q=supra')
+        assert status == 200 and json.loads(raw)['cars'] == [{'id': 485}] and seen == ['supra']
+        request = urllib.request.Request(f'http://127.0.0.1:{port}/api/telemetry/shift-references?q=x', headers={'Origin': 'null'})
+        try:
+            _urlopen(request)
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 403
+        else:
+            raise AssertionError('foreign shift reference reads must be refused')
+        assert seen == ['supra']
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
 def t_telemetry_context_routes_keep_domain_errors_and_reject_foreign_origins():
     seen = []
     ctx = _ctx()

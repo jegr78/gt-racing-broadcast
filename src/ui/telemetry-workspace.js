@@ -1392,6 +1392,41 @@ async function tmShiftLoad(){
  if(!answer.ok){tmShiftStatus(answer.error||'Shift lookup unavailable',true);return;}
  tmShiftState.analysis=answer.analysis;tmShiftRender();tmShiftStatus((answer.analysis.warnings||[]).join(' · ')||answer.analysis.time_basis||'Local reference');
 }
+// Vehicle shift references by car, independent of a recording (Data management).
+const tmShiftRef={loaded:false,generation:0,busy:new Set()};
+function tmShiftRefStatus(text,error=false){$('tm-shiftref-status').textContent=text;$('tm-shiftref-status').className=error?'enverr':'sub';}
+async function tmShiftRefSearch(){
+ const q=$('tm-shiftref-q').value.trim(),gen=++tmShiftRef.generation;tmShiftRef.loaded=true;
+ tmShiftRefStatus(q?'Searching…':'Reading local entries…');
+ const d=await tmGet('/api/telemetry/shift-references?'+new URLSearchParams({q}));
+ if(gen!==tmShiftRef.generation)return;
+ if(!d.ok){tmShiftRefStatus(d.error||'Shift references unavailable',true);return;}
+ tmShiftRefRender(d.cars||[]);
+ tmShiftRefStatus(d.cars?.length?(q?d.cars.length+' matching car'+(d.cars.length===1?'':'s')+(d.cars.length>=25?' (first 25)':''):d.cars.length+' local entr'+(d.cars.length===1?'y':'ies')):(q?'No matching car':'No local entries yet. Search a car to fetch its reference.'));
+}
+function tmShiftRefRender(cars){
+ const root=$('tm-shiftref-list');root.textContent='';if(!cars.length)return;
+ const wrap=document.createElement('div');wrap.className='tmsecwrap';const table=document.createElement('table');table.className='prodtable tmsec';
+ const head=table.createTHead().insertRow();for(const h of ['Car','ID','Local entry','Power curve','Gear ratios',''])head.append(Object.assign(document.createElement('th'),{textContent:h}));
+ const body=table.createTBody();
+ for(const car of cars){const row=body.insertRow();
+  row.insertCell().textContent=[car.maker,car.name].filter(Boolean).join(' ');row.insertCell().textContent=String(car.id);
+  row.insertCell().textContent=car.error||(car.cached?'Updated '+(car.fetched_at?new Date(car.fetched_at).toLocaleString():'(time unknown)'):'None');
+  row.insertCell().textContent=car.cached?(car.curve?'Yes':'Not in source'):'—';row.insertCell().textContent=car.cached?(car.ratios?'Yes':'Not in source'):'—';
+  const button=document.createElement('button');button.textContent=car.cached?'Refresh':'Fetch reference';button.disabled=tmShiftRef.busy.has(car.id);
+  button.onclick=()=>tmShiftRefUpdate(car,button);row.insertCell().append(button);}
+ wrap.append(table);root.append(wrap);
+}
+async function tmShiftRefUpdate(car,button){
+ if(tmShiftRef.busy.has(car.id))return;tmShiftRef.busy.add(car.id);button.disabled=true;
+ const label=[car.maker,car.name].filter(Boolean).join(' ')||'Car '+car.id;tmShiftRefStatus('Fetching the reference for '+label+'…');
+ try{const job=await startJob('shift-reference-update',{car_id:car.id}),answer=job.error?job:await jobResult(job.job_id,60);
+  if(answer.error||answer.code!==0){tmShiftRefStatus(answer.error||(answer.lines||[]).join(' · ')||'Update failed; previous entry retained',true);return;}
+  await tmShiftRefSearch();tmShiftRefStatus('Updated '+label+'.');
+  if(tmState.lapB?.car_id===car.id&&$('tm-shift-box')?.open)tmShiftLoad();
+ }catch(_e){tmShiftRefStatus('Update failed; previous entry retained',true);}
+ finally{tmShiftRef.busy.delete(car.id);button.disabled=false;}
+}
 function tmShiftTable(root,headers,rows){
  const wrap=document.createElement('div');wrap.className='tmsecwrap';const table=document.createElement('table');table.className='prodtable tmsec';
  const head=table.createTHead().insertRow();headers.forEach(h=>{const th=document.createElement('th');th.textContent=h;head.append(th);});
