@@ -397,9 +397,13 @@
     const cs = getComputedStyle(el);
     const max = parseFloat(cs.getPropertyValue("--team-name-max")) || 30;
     const min = parseFloat(cs.getPropertyValue("--team-name-min")) || 16;
+    const text = document.createRange();
+    text.selectNodeContents(el);
+    const width = el.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
     let size = max;
     el.style.fontSize = size + "px";
-    while (size > min && el.scrollWidth > el.clientWidth) {
+    // A right-aligned flex item overflows to the left, outside scrollWidth.
+    while (size > min && text.getBoundingClientRect().width > width) {
       size -= 1;
       el.style.fontSize = size + "px";
     }
