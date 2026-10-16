@@ -33,6 +33,15 @@ def _input_trace():
 
 
 INPUT_TRACE = _input_trace()
+SHIFTS = {'car_id': 3424, 'lap': 5,
+          'reference': {'kind': 'external', 'ratio_source': 'decoded transmission', 'revbar_rpm': None,
+                        'support': None, 'warnings': [],
+                        'targets': [{'gear': g, 'rpm': rpm, 'status': 'crossing'} for g, rpm in
+                                    ((1, 7420), (2, 7380), (3, 7310), (4, 7240), (5, 7150))]},
+          'upshifts': [{'from_gear': g, 'to_gear': g+1, 'gear_change_t_s': t, 'pre_cut_rpm': pre,
+                        'post_rpm': None, 'phase_status': 'measured' if pre else 'ambiguous/missing',
+                        'reference_rpm': ref, 'deviation_rpm': pre-ref if pre else None}
+                       for g, t, pre, ref in ((1, 2.1, 7350, 7420), (2, 4.9, 7110, 7380), (3, 8.6, None, 7310))]}
 
 
 async def main():
@@ -184,6 +193,13 @@ async def main():
                     await page.wait_for_function('() => EngineerDesk.trc.rows.length > 100')
                     # The live delta grows between the fixture's two samples: losing time now.
                     await page.wait_for_function('() => document.getElementById("delta-trend").textContent === "\\u25b2"')
+                    # No cached vehicle source in the fixture: a synthetic reference and upshifts.
+                    async def shift_points(route):
+                        response = await route.fetch(); data = await response.json()
+                        data['shifts'] = SHIFTS
+                        await route.fulfill(json=data)
+                    await page.route('**/race-engineer/snapshot', shift_points)
+                    await page.wait_for_function('() => document.querySelectorAll("#shift-table tbody tr").length === 5')
                     for width,height,name in [(1440,1050,'desktop'),(1024,1100,'tablet'),(390,900,'phone')]:
                         await page.set_viewport_size({'width':width,'height':height})
                         await page.screenshot(path=str(ROOT/f'src/docs/wiki/images/console-race-engineer-{name}.png'),full_page=True)

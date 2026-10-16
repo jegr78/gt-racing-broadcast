@@ -35,6 +35,16 @@ HUD, an arrow next to the delta shows the trend over the last 1.5 s: **▲** the
 grows (losing time now), **▼** it shrinks (gaining time now). Changes below 0.02 s
 show no arrow, and a new reference or a new live lap starts the trend over.
 
+**Shift points · lap in progress** lists each gear's reference RPM for the current car
+next to the pre-cut RPM of its last upshift in the running lap, the difference and how
+many upshifts were seen. The reference is the same full-throttle power-equality
+estimate as in the Telemetry workspace, from the machine-local entry for the car;
+ratios decoded from the car win over the stock source. It is not verified for the
+event, and an early shift can be intentional (fuel, traction). An upshift whose phase
+was not measurable reads **Unknown**, never a number. Without a local entry the desk
+names no target and points to **Telemetry → Data management → Shift references by
+car**; the desk itself never downloads anything.
+
 Beside the live values (below them on narrower screens) the **Track map** shows the
 complete reference outline with the live car marker, and the **Program · OBS** tile
 below it shows a still of the running OBS

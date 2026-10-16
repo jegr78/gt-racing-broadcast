@@ -44,7 +44,8 @@ def t_confirmed_matches_offline_and_provisional_stays_observed():
             assert current['trace'][-1]['d'] <= current['distance_m']
             assert snap['best_s'] == 16.0
             shifts = snap['shifts']
-            assert shifts['lap'] == snap['current']['lap'] and shifts['reference']['kind'] == 'unavailable',                 'without a cached vehicle source the desk names no shift target'
+            assert shifts['lap'] == snap['current']['lap'] and shifts['reference']['kind'] == 'unavailable', \
+                'without a cached vehicle source the desk names no shift target'
             assert snap['fuel_avg_laps'] == 0 and snap['fuel_avg_l'] is None, 'zero-use laps are no fuel measurement'
 
 
