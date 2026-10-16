@@ -21,8 +21,11 @@ driven during replay are absent from the live pool. With recording enabled their
 details remain recoverable from the recording through the existing shared-reference
 workflow. Without recording, those laps are lost. The desk states this limitation.
 
-Current lap, live delta, best completed time and race position lead the desk.
-Fuel, theoretical best and tyres follow, with compact speed/gear/RPM/pedal values.
+Current lap, live delta, best completed time, race position and average fuel use lead
+the desk. **Avg fuel · L/lap** averages the completed, comparison-eligible laps of the
+live session (out, pit and partial laps excluded) and names how many laps it uses; a lap
+without a fuel reading is left out, never counted as zero. Fuel, theoretical best and
+tyres follow, then large speed/gear/RPM/throttle/brake/steering values.
 Select the comparison before inspecting the charts; channel and distance controls
 are attached to the chart. One line below the selection reports the comparison:
 the distance the delta covers, the lap time difference, or why none is shown yet.
@@ -32,7 +35,9 @@ HUD, an arrow next to the delta shows the trend over the last 1.5 s: **▲** the
 grows (losing time now), **▼** it shrinks (gaining time now). Changes below 0.02 s
 show no arrow, and a new reference or a new live lap starts the trend over.
 
-The **Program · OBS** tile beside the live values (below them on narrower screens) shows a still of the running OBS
+Beside the live values (below them on narrower screens) the **Track map** shows the
+complete reference outline with the live car marker, and the **Program · OBS** tile
+below it shows a still of the running OBS
 program, refreshed about every 1.5 s, the same still Race Control shows. **Hide**
 folds it to a small bar and the browser remembers the choice. The still is only
 fetched while the tile is open and the tab is visible, and it stops with the access.

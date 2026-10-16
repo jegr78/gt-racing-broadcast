@@ -36,6 +36,15 @@ def t_program_card_sits_beside_the_live_instruments():
     assert 'id="program-toggle"' in h and 'aria-controls="program-frame"' in h
 
 
+def t_track_map_leads_the_live_side_column_above_the_program():
+    h = _html()
+    trace, side, track, pgm, compare = (h.index('id="input-trace"'), h.index('id="live-side"'),
+                                        h.index('id="map"'), h.index('id="program-card"'),
+                                        h.index("Compare B with A"))
+    assert trace < side < track < pgm < compare, "map sits in the live area, the program below it"
+    assert track < h.index('id="plots"'), "the map left the comparison plots"
+
+
 def t_program_still_uses_the_any_tier_cockpit_endpoint():
     # /cockpit/program is open to every console role, the engineer included; the
     # director-only /preview/* routes are not.

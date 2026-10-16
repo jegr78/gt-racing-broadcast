@@ -104,7 +104,7 @@ async def main():
                 # paused above; in-flight work must finish before any measurement.
                 await settle_analysis(page)
                 await page.unroute('**/race-engineer/compare?*', slow_compare)
-                for width,height in ((1440,1050),(1024,1100),(390,900)):
+                for width,height in ((1440,1050),(1100,1100),(1024,1100),(390,900)):
                     await page.set_viewport_size(dict(width=width,height=height))
                     await settle_analysis(page)
                     assert await page.evaluate('() => document.documentElement.scrollWidth<=innerWidth'), 'approved layout overflowed'
@@ -145,16 +145,27 @@ async def main():
 
                     if width==390:
                         await page.locator('#best').evaluate('(el)=>{el.previousElementSibling.replaceChildren(document.createTextNode("Best"),document.createElement("br"),document.createTextNode("completed · s"));}')
-                    positions=await page.evaluate('() => ["lap-time","delta","best","race-position"].map(id=>{const r=document.getElementById(id).getBoundingClientRect();return {x:r.x,y:r.y};})')
-                    # The program still sits beside the headline only where four tiles keep
-                    # their width; narrower, it stacks below so the labels never wrap.
-                    program=await page.evaluate('() => {const p=document.getElementById("program-card").getBoundingClientRect(),h=document.getElementById("instruments").getBoundingClientRect();return {beside:p.left>=h.right,below:p.top>=h.bottom};}')
-                    assert program['beside'] if width>1100 else program['below'], f'{width}: program still placement {program}'
-                    if width>600:
-                        assert max(p['y'] for p in positions)-min(p['y'] for p in positions)<2, 'headline metrics were not one row'
-                        assert all(a['x']<b['x'] for a,b in zip(positions,positions[1:],strict=False)), 'headline metric order differs from the approved draft'
-                    else:
-                        assert abs(positions[0]['y']-positions[1]['y'])<2 and abs(positions[2]['y']-positions[3]['y'])<2, 'phone headline did not use two rows'
+                    positions=await page.evaluate('() => ["lap-time","delta","best","race-position","fuel-avg"].map(id=>{const r=document.getElementById(id).closest(".tile").getBoundingClientRect();return {x:r.x,y:r.y,width:r.width};})')
+                    # Five headline tiles use 5, 3+2, and 2+2+1 columns.
+                    columns = 5 if width > 1100 else 3 if width > 600 else 2
+                    rows = [positions[i:i+columns] for i in range(0, len(positions), columns)]
+                    for row in rows:
+                        assert max(p['y'] for p in row)-min(p['y'] for p in row)<2, f'{width}: headline row misaligned: {positions}'
+                        assert all(a['x']<b['x'] for a,b in zip(row,row[1:],strict=False)), f'{width}: headline order differs: {positions}'
+                    assert all(a[0]['y'] < b[0]['y'] for a,b in zip(rows,rows[1:],strict=False)), f'{width}: headline rows overlap: {positions}'
+                    if width <= 600:
+                        assert positions[-1]['width'] > positions[0]['width'] * 1.9, 'phone fuel tile did not span the headline'
+                    assert await page.locator('#fuel-avg').inner_text() == 'Unavailable', 'synthetic laps without consumption invented a fuel average'
+                    placement=await page.evaluate('''() => {
+                        const box=id=>document.getElementById(id).getBoundingClientRect();
+                        const p=box('program-card'),m=document.querySelector('.map-card').getBoundingClientRect(),h=box('instruments');
+                        return {beside:m.left>=h.right,below:m.top>=h.bottom,mapBeforeProgram:m.bottom<=p.top,
+                            sideBySide:m.right<=p.left,mapVisible:m.top<innerHeight};
+                    }''')
+                    assert placement['beside'] if width>1100 else placement['below'], f'{width}: live side placement {placement}'
+                    assert placement['sideBySide'] if 600<width<=1100 else placement['mapBeforeProgram'], f'{width}: map/program order {placement}'
+                    if width >= 1100:
+                        assert placement['mapVisible'], f'{width}: live map requires scrolling'
                     assert await page.locator('#channel').evaluate('(el)=>!!el.closest(".plot-card")'), 'chart controls were separated from charts'
                     await page.locator('.mini-details summary').click()
                     assert await page.locator('#sectors').is_visible(), 'diagnostic sectors could not be expanded'
