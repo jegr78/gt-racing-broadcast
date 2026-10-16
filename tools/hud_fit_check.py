@@ -9,19 +9,19 @@ import e2e_visual as V
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def check(browser, base, outdir, source=None):
+def check(browser, outdir):
     page = browser.new_page(viewport={'width': 1920, 'height': 1080})
     shot = 'hud-name-fit.png'
     try:
-        if source is not None:
-            page.route('**/*', lambda route: route.fulfill(
-                body=source if route.request.url.endswith('/hud') else '{}',
-                status=200 if route.request.url.endswith(('/hud', '.css')) else 404,
-                content_type='text/html' if route.request.url.endswith('/hud') else 'text/css' if route.request.url.endswith('.css') else 'application/json'))
+        source = (ROOT / 'src/obs/hud.html').read_text(encoding='utf-8')
+        page.route('**/*', lambda route: route.fulfill(
+            body=source if route.request.url.endswith('/hud') else '{}',
+            status=200 if route.request.url.endswith(('/hud', '.css')) else 404,
+            content_type='text/html' if route.request.url.endswith('/hud') else 'text/css' if route.request.url.endswith('.css') else 'application/json'))
         payload = {'teams': [{'name': 'CLOCKWORK MOTORSPORTS', 'number': str(i+1)} for i in range(3)]}
         page.route('**/hud/data', lambda route: route.fulfill(json=payload))
         page.add_init_script('window.setInterval=()=>0;')
-        page.goto(base + '/hud')
+        page.goto('http://hud.test/hud')
         page.wait_for_function('() => document.getElementById("team3-name").textContent.length > 0')
         page.evaluate('() => document.fonts.ready')
         page.add_style_tag(content='body{background:#0b1018}')
@@ -69,8 +69,7 @@ def main():
     with sync_playwright() as pw:
         browser = pw.chromium.launch()
         try:
-            result = check(browser, 'http://fixture.test', out,
-                           (ROOT / 'src/obs/hud.html').read_text(encoding='utf-8'))
+            result = check(browser, out)
         finally:
             browser.close()
     if result.error:
