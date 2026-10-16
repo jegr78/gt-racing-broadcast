@@ -139,6 +139,19 @@ def drive_confirm_url(url, data):
     return None
 
 
+def _label_value(row, i):
+    """Next non-empty cell right of the label at `i`, or None. The Assets tab's
+    'Internal' checkbox exports as TRUE/FALSE in the gviz CSV: it is never a link,
+    so an intentionally empty URL cell stays empty instead of yielding 'TRUE'."""
+    for nxt in row[i + 1:]:
+        v = (nxt or "").strip()
+        if v.upper() in ("TRUE", "FALSE"):
+            return None
+        if v:
+            return v
+    return None
+
+
 def media_urls_from_csv(rows):
     """Assets-tab rows -> {'intro': url, 'outro': url} (only found keys).
     Located by label cell so column positions can move: a cell equal (trimmed,
@@ -150,11 +163,9 @@ def media_urls_from_csv(rows):
             key = MEDIA_LABELS.get((cell or "").strip().lower())
             if not key:
                 continue
-            for nxt in row[i + 1:]:
-                v = (nxt or "").strip()
-                if v:
-                    out[key] = v
-                    break
+            v = _label_value(row, i)
+            if v:
+                out[key] = v
     return out
 
 
@@ -166,10 +177,9 @@ def music_url_from_csv(rows):
         for i, cell in enumerate(row):
             if (cell or "").strip().lower() != MUSIC_LABEL:
                 continue
-            for nxt in row[i + 1:]:
-                v = (nxt or "").strip()
-                if v:
-                    return v
+            v = _label_value(row, i)
+            if v:
+                return v
     return None
 
 

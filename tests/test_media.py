@@ -246,6 +246,17 @@ def t_music_url_from_csv_picks_value():
     assert media.music_url_from_csv(rows) == DRIVE
 
 
+def t_internal_checkbox_is_not_a_media_link():
+    # Assets tab: Label | URL | Internal checkbox. An intentionally empty URL
+    # must not pick up the checkbox's gviz value as the link.
+    rows = [["Intro Video", YT, "TRUE"],
+            ["Trailer Video", "", "TRUE"],
+            ["Outro Video", "", "false"],
+            ["Intermission Music", "", "TRUE"]]
+    assert m.media_urls_from_csv(rows) == {"intro": YT}
+    assert media.music_url_from_csv(rows) is None
+
+
 def t_music_download_kind():
     assert media.music_download_kind(DRIVE) == "drive"
     assert media.music_download_kind(YT) == "ytdlp"
