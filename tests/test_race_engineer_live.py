@@ -43,6 +43,9 @@ def t_confirmed_matches_offline_and_provisional_stays_observed():
             assert not current['pace_eligible']
             assert current['trace'][-1]['d'] <= current['distance_m']
             assert snap['best_s'] == 16.0
+            shifts = snap['shifts']
+            assert shifts['lap'] == snap['current']['lap'] and shifts['reference']['kind'] == 'unavailable', \
+                'without a cached vehicle source the desk names no shift target'
             assert snap['fuel_avg_laps'] == 0 and snap['fuel_avg_l'] is None, 'zero-use laps are no fuel measurement'
 
 
@@ -55,6 +58,42 @@ def t_average_fuel_uses_completed_eligible_laps_of_the_live_session():
     assert live.fuel_average(rows, 'A') == (3.1, 2)
     assert live.fuel_average(rows, None) == (None, 0)
     assert live.fuel_average([lap(1, 3.0, eligible=False)], 'A') == (None, 0)
+
+
+def _shift_packets():
+    from test_gt7_laps import _pkt
+    from test_gt7_shifts import rows, live_tail
+    base = tm.parse_packet(_pkt(3, 50, 0))
+    for row in rows() + live_tail(.2):
+        yield row['t'], base._replace(rpm=row['rpm'], gear=row['gear'],
+            throttle=round(row['throttle_pct'] * 255 / 100),
+            clutch_engagement=row['clutch_engagement'], best_ms=20000)
+
+
+def t_shift_phases_use_packet_time_during_accelerated_replay():
+    with live.Store(lambda: True, clock=lambda: 100.0) as store:
+        for stamp, packet in _shift_packets():
+            assert store.put(packet, 1700000000.0 + stamp)
+        assert store.flush()
+        [event] = store.snapshot()['shifts']['upshifts']
+        assert event['pre_cut_rpm'] == 5660 and event['phase_status'] == 'measured'
+        assert (event['from_gear'], event['to_gear']) == (2, 3)
+
+
+def t_new_session_clears_shifts_even_with_the_same_car_and_lap_number():
+    clock = [100.0]
+    with live.Store(lambda: True, clock=lambda: clock[0]) as store:
+        for stamp, packet in _shift_packets():
+            clock[0] = 100 + stamp
+            assert store.put(packet, 1700000000.0 + stamp)
+        assert store.flush()
+        assert len(store.snapshot()['shifts']['upshifts']) == 1
+        previous_session = store._replay.eng.session
+        clock[0] += .1
+        assert store.put(packet._replace(best_ms=-1), 1700000000.0 + stamp + .1)
+        assert store.flush()
+        assert store._replay.eng.session == previous_session + 1, 'fixture must reset the GT7 session'
+        assert store.snapshot()['shifts']['upshifts'] == [], 'new session inherited old lap upshifts'
 
 
 def t_stale_pause_generation_and_collection_switch():
