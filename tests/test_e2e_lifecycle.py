@@ -123,6 +123,24 @@ def t_cleanup_attempts_every_owned_process_when_one_stop_fails():
         assert Path(directory).exists(), 'failed cleanup removed its diagnostic logs'
 
 
+def t_pov_ui_readiness_failure_stops_the_unreturned_child():
+    child = mock.Mock()
+    with tempfile.TemporaryDirectory() as home, \
+         mock.patch.object(harness, '_pov_home', return_value=(['python'], home)), \
+         mock.patch.object(harness, '_seed_telemetry'), \
+         mock.patch.object(harness.subprocess, 'run', return_value=SimpleNamespace(returncode=0)), \
+         mock.patch.object(harness, '_spawn', return_value=child), \
+         mock.patch.object(harness, '_wait_ready', side_effect=RuntimeError('not ready')), \
+         mock.patch.object(harness, '_kill') as kill:
+        try:
+            harness._start_pov_ui(None, home, {}, 1)
+        except RuntimeError as exc:
+            assert str(exc) == 'not ready'
+        else:
+            raise AssertionError('readiness failure hidden')
+        kill.assert_called_once_with(child)
+
+
 def t_feed_port_selection_rejects_production_and_duplicate_ports():
     with mock.patch.object(harness.E, 'free_port', side_effect=[53001, 53002, 53003, 41001, 41001, 41002, 41003]):
         assert harness._free_feed_ports() == [41001, 41002, 41003]

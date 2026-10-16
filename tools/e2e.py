@@ -657,7 +657,11 @@ def _start_pov_ui(binary, tmp, env, timeout):
     log = os.path.join(tmp, "ui-pov.log")
     proc = _spawn(launcher + ["ui", "--no-browser"], envp, log, cwd=home)
     url = f"http://127.0.0.1:{port}"
-    _wait_ready(url + "/api/ping", timeout, proc, log)
+    try:
+        _wait_ready(url + "/api/ping", timeout, proc, log)
+    except BaseException:
+        _kill(proc)
+        raise
     return proc, url
 
 
