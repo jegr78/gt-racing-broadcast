@@ -357,8 +357,7 @@ def annotate_index(index, context, store, tracks, full_index=None):
             saved = store.read(*key)
             definition = saved['definition']
             if definition is None:
-                source = max((r for r in full_rows if r.get('track_id') == layout and r.get('trace')),
-                             key=lambda r: r.get('length_m') or 0, default=None)
+                source = geometry_lap(full_rows, layout, tracks)
                 if source is None:
                     continue
                 definition = proposals(source['trace'], *key)
