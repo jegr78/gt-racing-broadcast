@@ -56,6 +56,7 @@ async def verify(base, home, shots):
         assert not list((home / 'runtime').glob('*/telemetry-recordings/*.gt7rec'))
         await browser.close()
     print('PASS reference editor: no recording, both directions, unreviewed proposals, apply and reopen')
+    return None
 
 
 async def main(shots=False):
@@ -80,6 +81,7 @@ async def main(shots=False):
             raise
         finally:
             e2e._kill(proc)
+    return None
 
 
 if __name__ == '__main__':
