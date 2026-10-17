@@ -1,6 +1,6 @@
-# Feed signal hold and ultra-low-latency hint: design
+# Feed covers, signal hold and ultra-low-latency hint: design
 
-Date: 2026-10-17. Status: approved in conversation, awaiting spec review.
+Date: 2026-10-17. Status: approved in conversation (revision 2: covers replace the byte hold, Splitscreen included).
 
 ## Problem
 
@@ -14,99 +14,140 @@ Feed A's playlist had **1 s segments**. Streamlink positions 5856 (20:21:34) and
 
 The producer host was not the cause: 0 % dropped frames, a steady ~6.2 Mbit/s upload, and Feed A inbound only 1-2 Mbit/s during the stall against 7-9 Mbit/s normally, with a 10 ms ping.
 
+A second, older defect has the same cure. **Every time OBS (re)opens a feed source it shows black** until its demuxer has the first decoded frame. This happens in three cases:
+
+- the Splitscreen at every handover: `close_when_inactive` reopens the incoming feed;
+- every automatic OBS input rebuild: the post-event report itself calls each one "a short black dropout";
+- the director's RESET.
+
 ### What the relay does today
 
 OBS is served up to a trailing mark `RACECAST_FEED_PREBUFFER_S` (3 s) behind the newest byte in the fan-out ring. That reserve is the same for every source, whatever `--hls-live-edge` prefetches. An inbound gap longer than the reserve drains it. OBS then gets the stream in bursts, which shows as stutter with audio re-syncs. The `robust` tier (720p, live edge 6) steps in automatically only after two consecutive dead serves, so stalls without a restart never trigger it.
 
 ## Goals
 
-1. Viewers never watch a stuttering feed. When a feed cannot keep the picture smooth, they see a clean frozen frame with the sound muted and a short notice, and the live picture returns when the source is steady again.
-2. The producer and director learn **before** a stint goes on air that a commentator streams in ultra-low latency, so it can be fixed at the source. The crew setting the producer wants is YouTube "Low latency": normal latency adds too much offset, ultra-low is too fragile. Whether that becomes a crew rule is the team's decision; the relay only reports what it sees.
+1. **No black when a feed source (re)opens.** Viewers see a current still of that feed until OBS plays it.
+2. **No stutter on air.** When a feed cannot keep the picture smooth, viewers see a frozen still of it, with the sound muted and a short notice from the Sheet, and the live picture returns when the source is steady again.
+3. **Know about ultra-low latency before air.** The producer and director learn **before** a stint goes on air that a commentator streams in ultra-low latency, so it can be fixed at the source. The crew setting the producer wants is YouTube "Low latency": normal latency adds too much offset, ultra-low is too fragile. Whether that becomes a crew rule is the team's decision; the relay only reports what it sees.
 
 ## Non-goals
 
 - **No extra delay and no quality step-down to absorb gaps.** The producer decided this in #619 (2026-10-03) and confirmed it again for this design. The 3 s reserve, the live-edge counts and the tier logic stay as they are.
-- No signal hold in the Splitscreen scene in this version (two feeds on air at once). Stint scene only.
+- No cover or hold for the POV feed.
+- No signal hold for a local capture stint. Its reserve is 0.5 s and the commentary mic is part of its audio. Local stints still get covers.
 - No change to the 20 s stall watchdog, the drop/recovery path or the backlog shed, beyond coordinating with them (see "Interactions").
 
 ## Part A: ultra-low-latency hint
 
-**Detection.** When a remote HLS stint starts serving (YouTube or Twitch), the relay fetches the media playlist once and reads `#EXT-X-TARGETDURATION`. The resolved URL from `yt-dlp -g` is the HLS manifest; a master playlist is followed to its first variant. Both are plain HTTP GETs with the relay's own User-Agent (the relay is a self-contained script and keeps its own HTTP code, per the root CLAUDE.md exception). The value is stored per serve and published read-only in `/status` as `feeds.<X>.target_duration_s` (`null` for local capture, a failed fetch or no tag). A fetch failure never blocks or delays the serve. It is a background read with a short timeout.
+**Detection.** When a YouTube stint starts serving, the relay fetches the media playlist once and reads `#EXT-X-TARGETDURATION`. The resolved URL from `yt-dlp -g` is the HLS manifest; a master playlist is followed to its first variant. Both are plain HTTP GETs with the relay's own User-Agent (the relay is a self-contained script and keeps its own HTTP code, per the root CLAUDE.md exception). Twitch is served by token through streamlink, with no manifest URL in the relay, so it keeps `null`. The value is stored per serve and published read-only in `/status` as `feeds.<X>.target_duration_s` (`null` for local capture, a failed fetch or no tag). A fetch failure never blocks or delays the serve. It is a background read with a short timeout.
 
-**Threshold.** `ULL_TARGET_DURATION_S = 1`: a feed with `target_duration_s <= 1` is flagged `ultra_low_latency: true` in `/status`. Before implementation, measure what YouTube "Low latency" reports with `tools/prefetch-burst-probe.py` or a one-off playlist fetch against a real Low-latency test stream (expected ~2 s). Record the value in this spec and in the constant's comment. If Low latency also reports 1 s, the hint cannot tell the two apart. Stop and come back to the producer then.
+**Threshold.** `ULL_TARGET_DURATION_S = 1`: a feed with `target_duration_s <= 1` is flagged `ultra_low_latency: true` in `/status`. Before implementation, measure what YouTube "Low latency" reports with a one-off playlist fetch against a real Low-latency test stream (expected ~2 s). Record the value in this spec and in the constant's comment. If Low latency also reports 1 s, the hint cannot tell the two apart. Stop and come back to the producer then.
 
-**Panel.** The Director Panel's feed card shows a yellow badge `ULTRA-LOW LATENCY` with the hint text "Ask the commentator to switch to Low latency". It shows on the off-air feed too, because ARM serves the next stint minutes before the handover, which is exactly when there is time to ask. The badge is informational: no paging and no health level change.
+**Panel.** The Director Panel's feed pill for that feed turns amber and gets the suffix `ULL`, with the hint "Ultra-low latency: ask the commentator to switch to Low latency" as its tooltip. It shows on the off-air feed too, because ARM serves the next stint minutes before the handover, which is exactly when there is time to ask. The hint is informational: no paging and no health level change.
 
-## Part B: signal hold
+## Part C: feed covers (shared by the Splitscreen and the signal hold)
 
-### State machine (per on-air feed)
+**OBS sources.** For each feed there is one image input, `Feed A Cover` and `Feed B Cover`. Each one is added as a scene item directly above its feed's item in the `Stint` and `Splitscreen` scenes, with the same transform. The relay creates these on start when they are missing: `CreateInput` in the first scene, `CreateSceneItem` in the second, then index directly above the feed item and copy the feed item's transform. Existing installs therefore need no collection re-import. A scene without the feed item gets no cover. The input's `file` is `runtime/<profile>/covers/feed-<x>.jpg` (an absolute runtime path, like the localized import's paths).
 
-`LIVE -> HOLD -> LIVE`, decided by one pure function so the rules are unit-testable:
+**The still.** A `FeedCoverTap` per fan-out feed reads the feed's ring from the live edge into one ffmpeg process that decodes **keyframes only** (`-skip_frame nokey`, about one every 2 s on YouTube, so the CPU cost is low). It emits 1920-wide JPEGs and writes each one atomically (temp file + `os.replace`) to the cover file. It runs whenever the feed serves, on-air and off-air. The relay re-points the image input (`SetInputSettings` with the same file, which makes OBS reload it) at most every `COVER_REFRESH_S` (5 s) while the cover is shown or about to be, so the still is never more than a few seconds old.
+
+**Visibility rule.** Decided by one pure function per feed, evaluated every second:
 
 ```
-signal_hold_step(state, now, *, reserve_s, last_byte_age_s, steady_s,
+cover_visible(*, serving, consumer_flowing_s, hold_active, enabled) -> bool
+```
+
+The cover is **shown** unless OBS is demonstrably playing the feed: the feed serves, an OBS consumer has received bytes continuously for `COVER_READY_S` (1.5 s), and no signal hold is active. Otherwise it stays up, so it is already in place **before** OBS opens the source, including scene switches made by hand in OBS. `consumer_flowing_s` comes from `FeedFanoutServer`. Per consumer it tracks when the first byte was sent and when the last one was. It is `None` without a consumer, or when the last send is older than `COVER_FLOW_GAP_S` (1.0 s).
+
+The relay applies a change with `SetSceneItemEnabled` on every scene that has the cover. It applies a state only on change, and re-asserts it every 30 s to heal a lost request. In the `Stint` scene the feed-state intents hide the off-air feed's item, and a cover above a hidden feed item would still show. **A cover item is therefore never shown while its feed item is hidden in that scene.** The feed-state intents hide or show the cover together with its feed, and the relay's apply step reads the feed item's enabled state (`GetSceneItemEnabled`) before it shows a cover.
+
+**Switch.** `RACECAST_FEED_COVERS` (machine `.env`, default on, `0` disables and hides any shown cover).
+
+## Part B: signal hold (uses the covers)
+
+### State machine (per on-air remote feed)
+
+`LIVE -> HOLD -> LIVE`, decided by one pure function:
+
+```
+signal_hold_step(state, *, reserve_s, last_byte_age_s, steady_s, cancel,
                  engage_idle_s=1.0, release_steady_s=5.0) -> (state, action)
 ```
 
-- **Engage** (`LIVE -> HOLD`): the feed is the on-air feed in the Stint scene, an OBS consumer is attached, the reserve is used up (`reserve_s <= RESERVE_EMPTY_S`, 0.25 s) **and** no byte has arrived for `engage_idle_s` (1.0 s). Gaps the 3 s reserve absorbs never engage.
+- **Engage** (`LIVE -> HOLD`): the feed is the on-air feed, remote, serving, with an OBS consumer, the reserve is used up (`reserve_s <= RESERVE_EMPTY_S`, 0.25 s) **and** no byte has arrived for `engage_idle_s` (1.0 s). Gaps the 3 s reserve absorbs never engage.
 - **Release** (`HOLD -> LIVE`): bytes have arrived steadily for `release_steady_s` (5.0 s). Steady means no inbound gap above `STEADY_GAP_S` (1.5 s) inside that window. A single burst after a stall therefore does not release, which avoids flicker.
-- **Cancel** (`HOLD -> LIVE` without a rejoin): the stint changes (handover, `/next`, ARM of the on-air feed), the director presses RESET (`/obs/feed-reset`), the scene leaves Stint, or the feature is switched off. The existing action of each trigger then owns the OBS input.
+- **Cancel** (`HOLD -> LIVE` without a rejoin): the stint changes (handover, `/next`, ARM of the on-air feed), the director presses RESET, or the feature is switched off. The existing action of each trigger then owns the OBS input.
 
-`reserve_s` is the ring's `consumer_backlog` (seconds between OBS's read position and the newest byte). `last_byte_age_s` comes from `last_byte_ts`. `steady_s` is tracked by the monitor from the byte arrivals.
+`reserve_s` is the fan-out server's `consumer_backlog` (seconds between OBS's read position and the newest byte; it drains to 0 during a stall). `last_byte_age_s` comes from `last_byte_ts`. `steady_s` is tracked from the byte arrivals: each arrival with a gap above `STEADY_GAP_S` restarts it.
 
-**Monitor.** A relay thread evaluates the function once per second (`SIGNAL_HOLD_TICK_S = 1.0`). The 30 s health heartbeat is far too coarse for this. The thread only reads ring state and calls the actions below. It never blocks the serve loop.
-
-The defaults reflect the producer's choice ("engage when the reserve is empty and 1 s without data, release after 5 s steady"). They are module constants first. Tune them against the 2026-10-17 health history and feed logs before release, and expose them as env knobs only if tuning shows that one value does not fit all leagues.
+The defaults reflect the producer's choice ("engage when the reserve is empty and 1 s without data, release after 5 s steady"). Tune them against the 2026-10-17 health history and feed logs before release.
 
 ### Actions
 
 **On engage:**
 
-1. **Freeze.** The ring stops advancing OBS's serve cap: `FeedRing` gets a `hold()` that pins the trailing mark at OBS's current read position, so OBS receives no more bytes and keeps showing its last decoded frame (`is_clear_on_media_end: no`, set in the collection). Bytes keep flowing into the ring from streamlink, so recovery is measured on real data.
-2. **Mute.** `obs_ws.get_input_mute` remembers the feed input's current state, then `set_input_mute(<Feed X>, True)`. Best effort: when OBS is unreachable, the freeze still applies.
-3. **Notice.** `/hud/data` `raceControl` is overridden in the relay with the Signal Hold text (see below). No Sheet write, because a Sheet push takes 10-20 s and is unreliable on event nights (repeated timeouts on 2026-10-16/17). The Sheet's own Race Control value stays untouched and is shown again after the hold. The HUD polls `/hud/data` every 2.5 s, so the notice appears within that time. That is acceptable and needs no HUD change.
-4. **Record.** A `signal_hold` event goes to the health store with the feed, the stint and the start time.
+1. **Freeze.** Refresh the feed's cover still and force the cover visible (`hold_active` in the visibility rule). The cover tap's latest keyframe is the picture before the stall. What OBS does beneath the cover is invisible.
+2. **Mute.** `get_input_mute` remembers the feed input's state, then `set_input_mute(<Feed X>, True)`. Best effort: when OBS is unreachable, the cover still applies.
+3. **Notice.** `/hud/data` `raceControl` is overridden in the relay with the Signal Hold text (see below). No Sheet write, because a Sheet push takes 10-20 s and is unreliable on event nights (repeated timeouts on 2026-10-16/17). The Sheet's own Race Control value stays untouched and is shown again after the hold. The HUD polls every 2.5 s, which is acceptable.
+4. **Record** a `signal_hold` health event (feed, stint, start).
 
 **On release:**
 
-1. **Rejoin at the live edge.** `_obs_reconnect()` rebuilds the feed's OBS input, which rejoins `RACECAST_FEED_PREBUFFER_S` behind the newest byte. The time spent in the hold is skipped, not replayed, so the offset after the hold is the same as before it. The rebuild runs through `RebuildGuard` with the reason tag `signal_hold` and registers a splice via `_note_obs_splice`, so the A/V detector does not count the relay's own remedy as unexplained.
-2. **Unmute** only if engage muted it (the remembered state), so a director's own mute survives.
-3. **Clear the notice override**, so the HUD shows the Sheet's Race Control value again.
-4. **Record** the end time and duration on the `signal_hold` event.
+1. **Rejoin at the live edge.** `_obs_reconnect()` rebuilds the feed's OBS input, which rejoins `RACECAST_FEED_PREBUFFER_S` behind the newest byte. The hold time is skipped, not replayed, so the offset after the hold equals the offset before it. The rebuild is registered via `_note_obs_splice` so the A/V detector does not count it, and it claims the shared rebuild cooldown.
+2. **Clear `hold_active`.** The cover then lowers by the normal visibility rule once the rebuilt consumer has flowed for 1.5 s, so the rebuild's black is never seen.
+3. **Unmute**, only if engage muted it, at the moment the cover lowers.
+4. **Clear the notice override** and **record** the end and duration on the event (`signal_hold_end`).
 
-**On cancel:** remove the ring hold, restore the mute state and clear the override. No rejoin of its own.
+**On cancel:** clear `hold_active`, restore the mute state, clear the override. No rejoin of its own.
 
 ### Notice text (Sheet)
 
-The Configuration tab gets a new column `Signal Hold`, located by header like the other Configuration columns (`parse_config_vocab` precedent, case-insensitive). The first non-blank value is the text; the team words it. When the column is missing or empty, the hold shows no text (freeze and mute only). The relay does not invent a default notice. The value is read on the normal Sheet poll and cached like the Race Control vocabulary. The text is shown in the HUD's existing `#race-control` slot, so it uses the league's overlay styling like "Driver Swaps" does.
+The Configuration tab gets a new column `Signal Hold`, located by header like the other Configuration columns (case-insensitive). The first non-blank value is the text; the team words it. When the column is missing or empty, the hold shows no text (cover and mute only). The relay does not invent a default notice. It is read on the normal Sheet poll and shown in the HUD's existing `#race-control` slot, so it uses the league's overlay styling like "Driver Swaps".
 
 ### Interactions with existing automation
 
-- **Stall watchdog (20 s).** A source silent for 20 s is killed and restarted by the existing path. The hold stays engaged across the restart, because the freeze and the notice remain the clean picture. It releases only once the new serve has delivered `release_steady_s` steadily. The release rejoin replaces the recovery path's own rejoin (one rebuild, not two).
-- **Backlog shed and freeze detector.** They share `RebuildGuard`. While a hold is engaged, the shed and the freeze detector stand down for that feed, because a held feed is not behind live by design.
-- **A/V re-sync detector.** The hold's freeze and rejoin register as splices, so they do not add "unexplained" audio re-syncs.
-- **Feature switch.** `RACECAST_FEED_SIGNAL_HOLD` in the machine `.env`, default on, `0` disables it. Switching it off while a hold is engaged cancels it.
+- **Stall watchdog (20 s).** The source is killed and restarted by the existing path. The hold stays engaged across the restart and releases only once the new serve has delivered `release_steady_s` steadily. The serve's own rejoin (`_obs_rejoin_after_prefetch`) happens under the cover.
+- **Backlog shed and freeze detector.** While a hold is engaged they stand down for that feed, because a held feed is not behind live by design.
+- **Handover.** A handover cancels a hold on the outgoing feed. The covers then do their normal job for the Splitscreen and Stint switch.
+- **Feature switch.** `RACECAST_FEED_SIGNAL_HOLD` (machine `.env`, default on, `0` disables; switching it off cancels an engaged hold). It needs covers: with `RACECAST_FEED_COVERS=0`, the hold does mute and notice only.
 
 ### Visibility
 
-- `/status` `feeds.<X>.signal_hold`: `{active, since, stint}`.
-- Director Panel: a `SIGNAL HOLD` pill on the feed card and in the header while engaged, next to `BEHIND LIVE`.
-- Post-event report: a section "Signal holds" with the time, feed, stint, commentator and duration of each hold. Hold time is excluded from the "behind live" finding. It stays inside the incident window that the stall itself raises.
+- `/status`: `feeds.<X>.signal_hold` `{active, since}` and `feeds.<X>.cover` (`shown` / `hidden` / `missing`).
+- Director Panel: a `SIGNAL HOLD` pill in the status strip while engaged. When the OBS sources are missing, the panel shows an OBS note, like other OBS notes.
+- Post-event report: a section "Signal holds" with the time, feed, stint, commentator and duration of each hold.
 
 ## Testing
 
-- **Unit (pure).** `signal_hold_step` gets a table of cases: a short gap absorbed by the reserve (no engage), the reserve empty plus 1 s idle (engage), a single burst after a stall (no release), 5 s steady (release), a cancel on handover, RESET and scene change, and the feature switched off mid-hold. Cases are replayed from the 2026-10-17 readings (inbound gaps 1.67 -> 5.72 s, backlog floor 0.8 s).
-- **Unit.** `FeedRing.hold()` pins the serve cap while writes continue. Parsing `#EXT-X-TARGETDURATION` from master and media playlists, and a failed fetch returning `None`. The `Signal Hold` column parse (missing, empty, value). The `/hud/data` override and restore.
-- **e2e.** Extend the synthetic relay harness: a local feed source pauses for 6 s and then resumes. Assert that the HUD race-control slot shows the configured text, that obs-sim receives the mute and later the unmute plus one rebuild, and that `/status` shows the hold.
-- **Manual, real OBS, not live.** The open risk below.
+- **Unit (pure).**
+  - `signal_hold_step` gets a table of cases: a short gap absorbed by the reserve, the reserve empty plus 1 s idle, a burst after a stall, 5 s steady, and each cancel. Cases are replayed from the 2026-10-17 readings.
+  - `cover_visible` gets a table of cases.
+  - `parse_target_duration` (master and media playlists).
+  - `parse_signal_hold_text`.
+  - The `cover_ffmpeg_cmd` argv.
+- **Unit (classes with fakes).**
+  - `FeedFanoutServer.consumer_flowing_s` with a scripted consumer.
+  - `FeedCoverTap` writing atomically from a fake ffmpeg.
+  - `Relay` hold/cover ticks against a fake obs_ws: mute, unmute, enable/disable calls in order, the notice override in `/hud/data`.
+- **e2e.** Extend obs-sim to answer `GetInputMute`, `GetSceneItemList` and `GetSceneItemId`, and to record mute and enable calls. CI has no real remote stream to stall, so the hold is driven through the tick methods with injected readings (clock, reserve, byte ages) against obs-sim, and the e2e asserts the `/status` fields, the `/hud/data` override and the recorded OBS calls.
+- **Manual, real OBS, not live:**
+  1. A Splitscreen handover shows a still, not black.
+  2. A RESET shows a still, not black.
+  3. A forced hold (kill the feed's network for 6 s) shows the still, the muted audio and the notice, then returns without black.
 
 ## Risks and open points
 
-1. **Black flash on release.** Rebuilding the media input may show black for about 1 s (reconnects on 2026-10-16 took ~1 s) instead of holding the frame. Test it in the producer's OBS before release. If it flashes, fall back to grabbing a frame of the feed source when the hold engages (`GetSourceScreenshot`) and showing it above the feed until the first new frame arrives.
-2. **Low-latency target duration** must be measured before Part A's threshold is final (see Part A).
-3. **HUD notice latency** of up to 2.5 s (HUD poll). Accepted for now. A faster poll is out of scope.
-4. **Splitscreen** has no hold in this version. If both feeds stall in Splitscreen, the existing behaviour stays.
+1. **Low-latency target duration** must be measured before Part A's threshold is final.
+2. **Cover lag.** The still is up to ~2 s (keyframe interval) plus `COVER_REFRESH_S` old. For a cover lasting about 1.5 s that is invisible. During a long hold it is the last good picture, which is the goal.
+3. **OBS image reload.** OBS must reload the image file on `SetInputSettings` with an unchanged path. If a real OBS caches it, write to two alternating file names instead.
+4. **HUD notice latency** of up to 2.5 s (HUD poll). Accepted.
 
 ## Rollout
 
-Ship Part A and Part B as separate PRs (Part A is small and independent). Part B is on by default, with the env switch as the instant fallback. Update the wiki operator pages (Director Panel, Troubleshooting) and the relay `CLAUDE.md` alongside the code. The Panel badge and pill need a refreshed `director-panel.png`.
+Three PRs:
+
+1. Part A (#918, "Part of").
+2. Part C covers (own issue; fixes the Splitscreen and RESET black on its own).
+3. Part B hold (closes #918).
+
+Covers and hold are on by default, with env switches as the instant fallback. Update the wiki operator pages (Director Panel, Troubleshooting) and `src/relay/CLAUDE.md` alongside the code. The panel pill changes need a refreshed `director-panel.png`.
