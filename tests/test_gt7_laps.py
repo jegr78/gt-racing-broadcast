@@ -209,6 +209,61 @@ def t_geometric_trace_coverage_is_separate_from_clock_validity():
         assert not row['time_valid'] and not row['pace_eligible']
 
 
+def t_lap_coverage_precedes_trace_normalization():
+    with tempfile.TemporaryDirectory() as directory:
+        replay = gl._Replay()
+        replay.run(gt7_recording.Recording(write_circle_recording(directory)))
+        raw = replay.laps[1]
+    found = {'id': 'ring01', 'track': 'Test Ring', 'layout': 'Full'}
+    for start, covered in ((300, 700), (60, 1000), (0, 900)):
+        distances = [covered * i / 100 for i in range(101)]
+        samples = _samples(distances, dt=.2, at=[start + d for d in distances])
+        lap = dict(raw, status='reference', capture_complete=True, distance_m=covered)
+        row = gl._indexed_lap('test', lap, samples, [0, 0, 0, 0, 0], 0,
+                              FakeTracks(), FakeCars(), found)
+        assert not row['trace_complete'], (start, covered, 'normalization invented coverage')
+        assert not row['capture_complete'] and not row['pace_eligible'] and not row['is_reference']
+        assert row['status'] != 'reference' and row['lap_role'] == 'partial'
+    for start, covered in ((0, 1000), (5, 995), (995, 1000)):
+        distances = [covered * i / 100 for i in range(101)]
+        row = gl._indexed_lap('test', dict(raw, distance_m=covered),
+            _samples(distances, dt=.2, at=[start+d for d in distances]), [0, 0, 0, 0, 0], 0,
+            FakeTracks(), FakeCars(), found)
+        assert row['capture_complete'] and row['trace_complete'] and row['pace_eligible'], (start, covered)
+
+
+def t_old_normalized_coverage_cache_is_rebuilt():
+    with tempfile.TemporaryDirectory() as directory:
+        path = write_circle_recording(directory)
+        _index(path)
+        old = gl._load_cache(path)
+        old['version'] = 8
+        gl._write_cache(gl.cache_path(path), old)
+        with _data_version('v1'):
+            assert gl.cached(path, directory) is None, 'old invented-coverage indexes must be invalidated'
+        assert _index(path)['laps'], 'a legacy cache must rebuild from its recording'
+
+
+def t_joined_lap_is_not_a_reference_and_the_next_complete_lap_can_be_one():
+    real_packet = globals()['_pkt']
+    def joined_packet(lap, speed, angle, last_ms=-1):
+        if lap == 2:
+            speed, angle = speed * .7, .3 * 2 * math.pi + angle * .7
+        return real_packet(lap, speed, angle, last_ms)
+    globals()['_pkt'] = joined_packet
+    try:
+        with tempfile.TemporaryDirectory() as directory:
+            index = _index(write_circle_recording(directory, lap_secs=(20, 16, 20, 22)))
+    finally:
+        globals()['_pkt'] = real_packet
+    joined, complete = _lap(index, 2), _lap(index, 3)
+    assert abs(joined['distance_m']-700) < 5, joined['distance_m']
+    assert not joined['trace_complete'] and not joined['pace_eligible'] and not joined['is_reference']
+    assert joined['status'] == 'not counted' and joined['lap_role'] == 'partial'
+    assert complete['is_reference'] and complete['status'] == 'reference'
+    assert [lap['lap'] for lap in gl.pool([index], 'ring01', CAR)] == [3, 4]
+
+
 def t_possible_tyre_service_is_an_unconfirmed_timestamped_proposal():
     real = globals()['_pkt']
     def tyres(lap, speed, angle, last_ms=-1):

@@ -14,12 +14,13 @@ import tempfile
 import gt7_data
 import gt7_recording
 import gt7_telemetry
+import gt7_tracks
 
 STEP_M = 5.0
 SECTOR_M = 200.0
 MAX_TRACE_M = gt7_telemetry.MAX_SAMPLES * gt7_telemetry.SAMPLE_MIN_DIST
 COUNTED = ("reference", "counted")
-INDEX_VERSION = 8
+INDEX_VERSION = 9
 CACHE_SUFFIX = ".laps.json"
 DECIMATE_M = 2.0              # finer samples add nothing to a 5 m trace
 RESUME_CHECK = 64             # bytes before a resume point that must be unchanged to continue there
@@ -439,6 +440,38 @@ class _Replay:
                     started=rec.header.get("started", ""), check=check.hex())
 
 
+def _coverage_problem(samples, track_db, track_id, length):
+    """Check original observations before normalization can manufacture endpoints."""
+    if not track_id or not length or not samples:
+        return None
+    # Include the actual closing boundary packet retained by _Replay. The raw
+    # accumulator ends at the preceding packet and omits that final interval.
+    covered = samples[-1][1] - samples[0][1]
+    if covered < length * (1 - gt7_tracks.LENGTH_TOL):
+        return 'Incomplete driven lap coverage'
+    projected = track_db.project([(samples[0][7], samples[0][8])], track_id)
+    station = projected[0] if projected else None
+    if station is not None and math.isfinite(station):
+        station %= length
+        if min(station, length-station) > gt7_recording.PROJECT_TOL_M:
+            return 'Capture starts past start/finish'
+    return None
+
+
+def _reference_laps(rows):
+    """Historical improvements among usable laps, excluding incomplete captures."""
+    best = {}
+    for row in rows:
+        if not row.get('pace_eligible'):
+            row['is_reference'] = False
+            continue
+        key = (row['session'], row.get('car_id'))
+        previous = best.get(key, math.inf)
+        row['is_reference'] = row['time_s'] < previous
+        row['status'] = 'reference' if row['is_reference'] else 'counted'
+        best[key] = min(previous, row['time_s'])
+
+
 def _indexed_lap(stem, lap, samples, tyres, first, track_db, cars, found, open_lap=False,
                  after_service=False):
     track_id = found["id"] if found and "id" in found else None
@@ -446,8 +479,10 @@ def _indexed_lap(stem, lap, samples, tyres, first, track_db, cars, found, open_l
     relay = round(lap["elapsed"], 3)
     gt7_s = lap.get("gt7_time_s")
     time_s = None if open_lap else (gt7_s if gt7_s is not None else relay)
+    problem = _coverage_problem(samples, track_db, track_id, length)
+    capture_complete = lap["capture_complete"] and problem is None
     close = (length or (samples[-1][1] if samples else lap.get("distance_m")), time_s) \
-        if lap["status"] in COUNTED else None
+        if lap["status"] in COUNTED and problem is None else None
     trace = _trace(samples, track_db, track_id, length, close)
     row = {
         "rec": stem, "session": lap["session"], "lap": lap["lap"],
@@ -475,12 +510,15 @@ def _indexed_lap(stem, lap, samples, tyres, first, track_db, cars, found, open_l
                       and trace[-1]["t"] == round(close[1], 3)
                       and all(math.isfinite(p["t"]) for p in trace)
                       and all(a["t"] <= b["t"] for a, b in zip(trace, trace[1:], strict=False)))
-    row.update(capture_complete=lap["capture_complete"], trace_complete=complete_trace,
+    eligible = lap["status"] in COUNTED and complete_trace and time_valid
+    if problem:
+        row.update(status="not counted", reason=problem)
+    row.update(capture_complete=capture_complete, trace_complete=complete_trace,
                time_valid=time_valid,
-               data_quality=lap["data_quality"], reasons=lap["reasons"],
-               pace_eligible=lap["status"] in COUNTED and complete_trace and time_valid,
-               is_reference=lap["status"] == "reference", after_service=after_service,
-               lap_role=("pit" if lap["pit"] else "partial" if not lap["capture_complete"]
+               data_quality=lap["data_quality"], reasons=list(dict.fromkeys(lap["reasons"] + ([problem] if problem else []))),
+               pace_eligible=eligible,
+               is_reference=eligible and lap["status"] == "reference", after_service=after_service,
+               lap_role=("pit" if lap["pit"] else "partial" if not capture_complete
                          else "first" if lap["lap"] == 1 else "regular"),
                time_basis="lap-normalized receiver clock" if time_valid else "receiver clock")
     return row
@@ -508,6 +546,7 @@ def _build(path, track_db, cars, key, old=None):
                                 track_db, cars, by_session.get(lap["session"]),
                                 after_service=bool(previous and previous["pit"]
                                                    and previous["session"] == lap["session"])))
+    _reference_laps(out)
     unfinished = replay.eng.open_lap_record()
     if unfinished is not None:
         unfinished['service_events'] = list(replay.cur_events)

@@ -101,8 +101,17 @@ def main():
                 previous=page.evaluate('() => [tmState.a,tmState.b,[...tmState.included].sort()]')
                 page.reload();page.wait_for_function('() => tmState.loaded && !!tmState.lapB && currentView === "telemetry"')
                 page.get_by_role('button',name='Archive',exact=True).click()
+                page.evaluate('''() => {
+                    window.restoreOriginal=workspaceLast;window.restoreSettled=false;
+                    workspaceLast=async()=>{try{return await window.restoreOriginal();}
+                        finally{window.restoreSettled=true;}};
+                }''')
                 page.locator('#workspace-last').click()
-                page.wait_for_function('() => !!tmState.lapA && tmState.lapA.rec !== tmState.lapB.rec')
+                page.wait_for_function('() => window.restoreSettled')
+                page.evaluate('''() => {
+                    workspaceLast=window.restoreOriginal;
+                    delete window.restoreOriginal;delete window.restoreSettled;
+                }''')
                 assert page.evaluate('() => [tmState.a,tmState.b,[...tmState.included].sort()]')==previous,'last comparison changed source or recording subset after reload'
                 assert [page.locator('#tm-a').input_value(),page.locator('#tm-b').input_value()]==previous[:2], 'restored selectors differ from the loaded comparison'
                 page.evaluate("""async () => {

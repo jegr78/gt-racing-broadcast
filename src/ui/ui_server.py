@@ -842,6 +842,15 @@ def make_handler(ctx):
                 except Exception as exc:
                     result = {'ok': False, 'error': 'could not read track definition: '+type(exc).__name__}
                 return self._context_result(result)
+            if path == '/api/telemetry/shift-references':
+                if not self._context_allowed():
+                    return None
+                q = parse_qs(urlparse(self.path).query or '', keep_blank_values=True)
+                try:
+                    result = ctx['telemetry_shift_references']((q.get('q') or [''])[0])
+                except Exception as exc:
+                    result = {'ok': False, 'error': 'could not read shift references: '+type(exc).__name__}
+                return self._context_result(result)
             if path == '/api/telemetry/shifts':
                 if not self._context_allowed():
                     return None

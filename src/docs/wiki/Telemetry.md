@@ -116,6 +116,10 @@ running relay.
   partial segment before the first lap and the unfinished segment after the last lap.
   An unfinished segment shows captured seconds, not an invented completed lap time.
   Capture completeness, distance-trace coverage and pace eligibility are separate.
+  For a known layout, a full lap must cover the reference length within the track
+  match tolerance and begin near start/finish before its trace is normalized.
+  A capture joined farther into the lap remains partial and cannot establish a
+  pace reference. Older cached indexes rebuild with this coverage check.
   Both `reference` and `counted` admit a regular lap; **best so far** marks a historical
   live reference, not a stronger data-quality verdict. Pit laps show all detected
   reasons. **After inferred service; tyres unconfirmed** identifies the next lap without
@@ -162,6 +166,11 @@ running relay.
   source curves, ratios and revbar data into machine-local runtime. Ordinary lookup is
   offline and an update failure preserves the previous cache. Unsupported or malformed
   data show unavailable components. External curves and code are not bundled.
+- **Shift references by car.** In **Data management**, search a car by name, maker or
+  GT7 ID and fetch or refresh its reference without a recording of it, for example
+  before the first session in a new car. **Show local entries** lists every car with a
+  machine-local entry, its update time and which components the source supplied. The
+  [Race Engineer desk](Race-Engineer) reads the same local entries.
 - **Acceleration reference.** The independent piecewise-linear calculation compares
   normalized power before and after the adjacent ratio change at equal road speed.
   It assumes full throttle, sufficient grip and instantaneous shifts. Decoded gearbox

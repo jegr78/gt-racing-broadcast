@@ -103,6 +103,9 @@ body.workspace {height:100vh;overflow:hidden;--tm-a:var(--warn);--tm-b:var(--lin
               <div class="row"><label>Layout <select id="tm-reference-layout" aria-label="Reference track layout"></select></label><button id="tm-reference-edit" onclick="tmEditorOpenLayout()" disabled>Edit shared definition</button><button onclick="tmReferenceLayoutsLoad()">Refresh layouts</button></div>
               <p id="tm-reference-status" class="sub" role="status"></p>
             </details>
+<section id="tm-shiftref"><h3>Shift references by car</h3><p class="sub">Machine-local power-curve references per car, used by lap analysis and the Race Engineer desk. Update fetches one car from the fixed source; nothing updates automatically. Works without a recording of the car.</p>
+<div class="row"><input id="tm-shiftref-q" type="search" maxlength="80" placeholder="Car, maker or ID" aria-label="Search vehicle" onkeydown="if(event.key==='Enter')tmShiftRefSearch()"><button onclick="tmShiftRefSearch()">Search</button><button onclick="$('tm-shiftref-q').value='';tmShiftRefSearch()">Show local entries</button></div>
+<p id="tm-shiftref-status" class="sub" role="status"></p><div id="tm-shiftref-list"></div></section>
             <details id="tm-shift-box" ontoggle="tmShiftLoad()"><summary>Vehicle shift references &amp; observed upshifts</summary>
               <div class="row"><button onclick="tmShiftLoad()">Read local lookup</button><button id="tm-shift-update" onclick="tmShiftUpdate()">Update external reference for this car</button>
                 <button id="tm-shift-copy" onclick="tmShiftCopy()" disabled>Copy targets to event table</button></div>

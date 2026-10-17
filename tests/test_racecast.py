@@ -1006,6 +1006,39 @@ def t_channel_api_rejects_boolean_bounds_and_fractional_session_numbers():
         assert not response['ok'] and 'boolean' in response['error'], 'boolean bounds must not become measured time values'
 
 
+def t_shift_reference_search_reports_the_local_cache_without_a_recording():
+    import gt7_shifts
+
+    class Cars:
+        rows = [{'id': 485, 'maker': 'Toyota', 'name': "Supra GT500 '97", 'group': 'Gr.2'},
+                {'id': 486, 'maker': 'Toyota', 'name': 'Supra RZ', 'group': None}]
+
+        def search(self, query, limit=25):
+            return [dict(r) for r in self.rows if query.lower() in (r['maker']+' '+r['name']).lower()][:limit]
+
+        def lookup(self, car_id):
+            return next((dict(r) for r in self.rows if r['id'] == car_id), None)
+
+    with _telemetry_sandbox() as (_rec_dir, tgl):
+        m._telemetry_dbs = lambda: (tgl.FakeTracks(), Cars())
+        cache = gt7_shifts.Cache(m._runtime_base_dir())
+        os.makedirs(cache.root)
+        with open(cache.path(485), 'w', encoding='utf-8') as fh:
+            json.dump({'format': 'racecast-shift-source', 'version': 1, 'car_id': 485, 'curve': None,
+                       'ratios': [2.0, 1.0], 'revbar_rpm': None,
+                       'source': {'identity': gt7_shifts.SOURCE, 'commit': 'a'*40,
+                                  'fetched_at': '2026-10-16T10:00:00+00:00'}}, fh)
+        with open(cache.path(486), 'w', encoding='utf-8') as fh:
+            fh.write('{"format": "other"}')
+        found = m.telemetry_shift_references_data('supra')
+        assert found['ok'] and [c['id'] for c in found['cars']] == [485, 486]
+        first, second = found['cars']
+        assert first['cached'] and first['ratios'] and not first['curve'] and first['fetched_at'].startswith('2026-10-16')
+        assert not second['cached'] and second['error'], 'an unreadable cache entry is reported, not hidden'
+        cached = m.telemetry_shift_references_data('')
+        assert [c['id'] for c in cached['cars']] == [485, 486], 'an empty query lists the cars with local entries'
+
+
 def t_track_definition_editor_apply_is_explicit_scoped_and_revisioned():
     with _telemetry_sandbox() as (rec_dir, tgl):
         path = tgl.write_circle_recording(rec_dir)

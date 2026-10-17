@@ -63,6 +63,14 @@ class CarDB:
     def __len__(self):
         return len(self._cars)
 
+    def search(self, query, limit=25):
+        """Cars whose maker, name or ID contains `query` (case-insensitive), by maker/name."""
+        needle = (query or "").strip().lower()
+        hits = [c for c in self._cars.values()
+                if needle in f"{c['maker'] or ''} {c['name']} {c['id']}".lower()]
+        hits.sort(key=lambda c: ((c["maker"] or "").lower(), c["name"].lower(), c["id"]))
+        return [dict(c) for c in hits[:max(0, int(limit))]]
+
     def lookup(self, car_id):
         """The car as {id, maker, name, group}; None when the packet names no car."""
         if car_id is None or car_id <= 0:
