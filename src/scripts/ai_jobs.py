@@ -541,8 +541,58 @@ def _diagnostic_code(text):
     )
 
 
+class BackgroundJobs:
+    """Own this UI process's workers, independently of machine-wide CLI jobs."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.workers = {}
+        self.closed = False
+
+    def start(self, target, args, kwargs):
+        stopped = threading.Event()
+
+        def work():
+            try:
+                target(*args, **kwargs, stopped=stopped)
+            finally:
+                with self.lock:
+                    self.workers.pop(threading.current_thread(), None)
+
+        worker = threading.Thread(target=work, daemon=True)
+        with self.lock:
+            if self.closed:
+                raise JobError("shutting_down", "The UI service is stopping")
+            self.workers[worker] = stopped
+            try:
+                worker.start()
+            except BaseException:
+                self.workers.pop(worker, None)
+                raise
+
+    def close(self):
+        with self.lock:
+            self.closed = True
+            workers = list(self.workers)
+            for stopped in self.workers.values():
+                stopped.set()
+        # run() owns process-tree termination and releases its lease only afterwards.
+        for worker in workers:
+            worker.join()
+
+
+_BACKGROUND = BackgroundJobs()
+
+
+def shutdown_background():
+    """Stop and join only analyses started in this interpreter."""
+    _BACKGROUND.close()
+
+
 class Runner:
-    def __init__(self, machine_runtime, profile_runtime, profile, timeout_scale=1):
+    def __init__(self, machine_runtime, profile_runtime, profile, timeout_scale=1,
+                 background_jobs=None):
+        self.background_jobs = _BACKGROUND if background_jobs is None else background_jobs
         self.machine = Path(machine_runtime).resolve()
         self.profile_root = Path(profile_runtime).resolve()
         self.profile = profile
@@ -583,6 +633,7 @@ class Runner:
         if (
             not active
             or active.get("id") != job_id
+            or active.get("profile") != self.profile
             or not self.status(self.profile)["busy"]
         ):
             return False
@@ -709,6 +760,7 @@ class Runner:
         model=None,
         validate=None,
         claimed=None,
+        stopped=None,
     ):
         frozen = copy.deepcopy(package)
         lease, directory, state = claimed or self._claim(frozen, adapter, model)
@@ -719,6 +771,10 @@ class Runner:
         overflow = threading.Event()
         events = []
         reader_errors = []
+
+        def cancelled():
+            return ((stopped is not None and stopped.is_set())
+                    or (_load(self.cancel_path) or {}).get("id") == state["id"])
 
         def cleanup_tree():
             nonlocal clean_attempted
@@ -750,7 +806,7 @@ class Runner:
             )
             probe = adapter.probe(env=dict(os.environ))
             state["provider_version"] = probe.get("version")
-            if (_load(self.cancel_path) or {}).get("id") == state["id"]:
+            if cancelled():
                 raise JobError(
                     "cancelled", "Analysis cancelled before provider invocation"
                 )
@@ -778,7 +834,7 @@ class Runner:
                         model=state["requested_model"],
                     )
                     save_manual_invocation(directory, invocation, pkg, out)
-                    if (_load(self.cancel_path) or {}).get("id") == state["id"]:
+                    if cancelled():
                         raise JobError(
                             "cancelled", "Analysis cancelled before provider invocation"
                         )
@@ -875,7 +931,7 @@ class Runner:
                     )
                     reason = None
                     while True:
-                        if (_load(self.cancel_path) or {}).get("id") == state["id"]:
+                        if cancelled():
                             reason = JobError(
                                 "cancelled",
                                 "Analysis cancelled; consumed subscription quota is not recoverable",
@@ -1047,15 +1103,15 @@ class Runner:
                 claimed[0].close()
             raise
         prepared_package = claimed[1] / "package"
-        worker = threading.Thread(
-            target=self.run,
-            args=(copy.deepcopy(package), prepared_package, adapter),
-            kwargs={"model": model, "validate": validate, "claimed": claimed},
-            daemon=True,
-        )
         try:
-            worker.start()
+            self.background_jobs.start(
+                self.run, (frozen, prepared_package, adapter),
+                {"model": model, "validate": validate, "claimed": claimed},
+            )
         except BaseException:
-            claimed[0].close()
+            try:
+                _remove_state(self.active_path)
+            finally:
+                claimed[0].close()
             raise
         return claimed[2]["id"]

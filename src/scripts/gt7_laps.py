@@ -20,7 +20,7 @@ STEP_M = 5.0
 SECTOR_M = 200.0
 MAX_TRACE_M = gt7_telemetry.MAX_SAMPLES * gt7_telemetry.SAMPLE_MIN_DIST
 COUNTED = ("reference", "counted")
-INDEX_VERSION = 9
+INDEX_VERSION = 10
 CACHE_SUFFIX = ".laps.json"
 DECIMATE_M = 2.0              # finer samples add nothing to a 5 m trace
 RESUME_CHECK = 64             # bytes before a resume point that must be unchanged to continue there
@@ -98,6 +98,7 @@ def cache_path(path):
 def _stamp(path, runtime_base, bundled):
     st = os.stat(path)
     return {"version": INDEX_VERSION, "size": st.st_size, "mtime": st.st_mtime,
+            "source_file": list(gt7_recording.file_signature(path)),
             "data_version": gt7_data.data_version(runtime_base, bundled)}
 
 
@@ -135,10 +136,14 @@ def _resumable(path, data, stamp):
     if not isinstance(point, dict):
         return False
     try:
+        if (data.get("source_file", [])[:2] != stamp["source_file"][:2]
+                or data.get("size", 0) >= stamp["size"]):
+            return False
         rec = gt7_recording.Recording(path)
         offset, check = point["offset"], bytes.fromhex(point["check"])
         n = point["laps"]
         if (not isinstance(offset, int) or not rec.header_end <= offset <= stamp["size"]
+                or point.get("header") != rec.header
                 or point["started"] != rec.header.get("started", "")
                 or not isinstance(n, int) or n != len(point["raw_laps"])
                 or len(data["laps"]) < n or len(check) > offset):
@@ -437,6 +442,7 @@ class _Replay:
             fh.seek(max(0, offset - RESUME_CHECK))
             check = fh.read(offset - fh.tell())
         return dict(self.point, raw_laps=self.laps[:self.point["laps"]],
+                    header=rec.header,
                     started=rec.header.get("started", ""), check=check.hex())
 
 

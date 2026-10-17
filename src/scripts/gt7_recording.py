@@ -26,6 +26,8 @@ FORMAT = "racecast-gt7rec"
 VERSION = 1
 SUFFIX = ".gt7rec"
 PART = ".part"
+
+
 QUEUE_MAX = 600               # about 10 s of packets at 60 Hz
 FLUSH_S = 1.0
 RENAME_TRIES = 3
@@ -34,6 +36,46 @@ _REC = struct.Struct("<dBH")
 _META = 0x00
 _MIN_PAYLOAD = gt7_telemetry.OFF_BRAKE + 1    # the shortest payload parse_packet can read
 _DONE = object()              # close() sentinel: wakes the writer without waiting FLUSH_S
+
+
+def file_signature(path):
+    """Detect replacement and in-place rewrites, including preserved size/mtime."""
+    st = os.stat(path)
+    # On Windows Python 3.12, st_ctime is creation time, not NTFS ChangeTime.
+    changed = _windows_change_time(path) if os.name == 'nt' else st.st_ctime_ns
+    return (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, changed)
+
+
+def _windows_change_time(path):
+    """Read metadata ChangeTime while permitting concurrent readers/writers/rename."""
+    import ctypes as ct
+    from ctypes import wintypes as wt
+
+    class BasicInfo(ct.Structure):
+        _fields_ = [(name, ct.c_int64) for name in
+                    ('CreationTime', 'LastAccessTime', 'LastWriteTime', 'ChangeTime')]
+        _fields_.append(('FileAttributes', wt.DWORD))
+
+    kernel = ct.WinDLL('kernel32', use_last_error=True)
+    kernel.CreateFileW.argtypes = [wt.LPCWSTR, wt.DWORD, wt.DWORD, wt.LPVOID,
+                                  wt.DWORD, wt.DWORD, wt.HANDLE]
+    kernel.CreateFileW.restype = wt.HANDLE
+    kernel.GetFileInformationByHandleEx.argtypes = [wt.HANDLE, ct.c_int, wt.LPVOID, wt.DWORD]
+    kernel.GetFileInformationByHandleEx.restype = wt.BOOL
+    kernel.CloseHandle.argtypes = [wt.HANDLE]
+    kernel.CloseHandle.restype = wt.BOOL
+    # FILE_READ_ATTRIBUTES, shared read/write/delete, OPEN_EXISTING.
+    handle = kernel.CreateFileW(os.fsdecode(path), 0x80, 0x7, None, 3, 0, None)
+    if handle == ct.c_void_p(-1).value:
+        raise ct.WinError(ct.get_last_error())
+    try:
+        info = BasicInfo()
+        # FileBasicInfo is class 0. Failure must invalidate rather than reuse a cache.
+        if not kernel.GetFileInformationByHandleEx(handle, 0, ct.byref(info), ct.sizeof(info)):
+            raise ct.WinError(ct.get_last_error())
+        return info.ChangeTime * 100  # FILETIME ticks are 100 ns.
+    finally:
+        kernel.CloseHandle(handle)
 
 
 class RecordingError(Exception):

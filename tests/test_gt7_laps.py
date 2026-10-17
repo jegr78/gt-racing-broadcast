@@ -406,7 +406,7 @@ def _grow(src, part, upto):
 
 
 def _without_stamp(idx):
-    return {k: v for k, v in idx.items() if k not in ("size", "mtime")}
+    return {k: v for k, v in idx.items() if k not in ("size", "mtime", "source_file")}
 
 
 @contextlib.contextmanager
@@ -463,6 +463,8 @@ def t_resume_falls_back_to_a_full_build_when_it_cannot_continue():
         live = os.path.join(d, "live")
         part = os.path.join(live, os.path.basename(src) + gt7_recording.PART)
         spoils = {"blob": lambda r, data: r.update(eng={"garbage": True}),
+                  "invalid file identity": lambda r, data: data.update(source_file=None),
+                  "invalid size": lambda r, data: data.update(size=None),
                   "inside the header": lambda r, data: r.update(offset=0, check=""),
                   "fewer cached laps": lambda r, data: data.update(laps=data["laps"][:1]),
                   "lap count": lambda r, data: r.update(laps=r["laps"] + 1),
