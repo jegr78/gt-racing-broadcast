@@ -26,6 +26,8 @@ async def verify(base, home, shots):
         await page.locator('#tm-reference-layouts summary').click()
         await page.wait_for_function('() => !document.getElementById("tm-reference-edit").disabled')
         assert await page.locator('#tm-reference-layout option').count() == 2
+        if shots:
+            await page.screenshot(path=str(ROOT / 'src/docs/wiki/images/telemetry-reference-data-management.png'))
         for reverse in (True, False):
             value = await page.evaluate('(reverse) => String(tmReferenceLayouts.rows.findIndex(r => r.reverse === reverse))', reverse)
             await page.locator('#tm-reference-layout').select_option(value)

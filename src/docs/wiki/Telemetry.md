@@ -237,6 +237,8 @@ The illustration uses authored synthetic reference values; no external curve is 
 
 ![Telemetry workspace: shared track marker editor](images/cc-track-editor.png)
 
+![Data management: choose a reference layout before recording](images/telemetry-reference-data-management.png)
+
 ![Track definition prepared before the first recording](images/telemetry-reference-track-editor.png)
 - **Set track.** When racecast does not recognise the layout of a recording, or two
   layouts fit, pick it from the list. racecast assigns the recording to that layout. For
