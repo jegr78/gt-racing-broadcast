@@ -13,6 +13,8 @@
     overflow: hidden; white-space: nowrap; box-sizing: border-box;
     font-weight: 700; line-height: 1; }
   .el.empty { display: none; }
+  /* .el's display above beats the UA [hidden] rule (the telemetry REPLAY badge). */
+  .el[hidden] { display: none; }
   .white { color: #ffffff; text-shadow: 0 2px 4px rgba(0,0,0,.55); }
   .black { color: #111111; }
 

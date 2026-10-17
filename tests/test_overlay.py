@@ -1388,6 +1388,17 @@ def t_slot_visibility_leaves_feed_pov_to_the_live_toggle():
     # The director's /pov/toggle owns Feed POV; the CSS must never drive it.
     assert "pov" not in ob.slot_visibility("#pov { display: none; }")
 
+
+def t_hud_hidden_attribute_beats_the_el_display():
+    """`.el { display: flex }` beats the UA `[hidden]` rule, so a hidden `.el` (the
+    telemetry REPLAY badge) stayed on screen unless the page re-asserts it."""
+    with open(os.path.join(ROOT, "src", "obs", "hud.html"), encoding="utf-8") as f:
+        html = f.read()
+    style = html[html.index("<style>"):html.index("</style>")]
+    assert re.search(r"\.el\[hidden\]\s*\{\s*display:\s*none", style), "missing .el[hidden] rule"
+    hidden_els = re.findall(r'<[^>]*class="el[ "][^>]*\shidden[\s>]', html)
+    assert any('id="tele-replay"' in tag for tag in hidden_els), hidden_els
+
 if __name__ == "__main__":
     for n, fn in sorted(globals().items()):
         if n.startswith("t_") and callable(fn):

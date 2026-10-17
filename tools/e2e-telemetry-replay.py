@@ -89,16 +89,16 @@ async def main():
                 assert await panel.locator("#stReplay").inner_text() == "REPLAY"
                 hud = await browser.new_page(viewport={"width":1920,"height":1080})
                 await hud.goto(f"http://127.0.0.1:{relay.server_port}/hud")
-                await hud.locator("#tele-replay:not([hidden])").wait_for()
+                await hud.locator("#tele-replay").wait_for(state="visible")
                 await hud.add_style_tag(content="body {background:#152131}")
                 if "--shots" in sys.argv:
                     await panel.screenshot(path=str(ROOT / "src/docs/wiki/images/director-panel-solo.png"), full_page=True)
                     await hud.screenshot(path=str(ROOT / "src/docs/wiki/images/hud-telemetry-replay.png"))
                 await panel.evaluate("() => teleMarkerBtn.click()")
-                await hud.wait_for_function("() => document.getElementById('tele-replay').hidden")
+                await hud.locator("#tele-replay").wait_for(state="hidden")   # rendered, not just the attribute
                 assert not fixture.telemetry._replay_marker
                 await panel.evaluate("() => teleMarkerBtn.click()")
-                await hud.wait_for_function("() => !document.getElementById('tele-replay').hidden")
+                await hud.locator("#tele-replay").wait_for(state="visible")
                 await page.locator("#tm-replay-stop").click()
                 await page.wait_for_function("() => document.getElementById('tm-replay-status').textContent.includes('Live UDP')")
                 await desk.wait_for_function("() => !EngineerDesk.state.snapshot.replay.active")
