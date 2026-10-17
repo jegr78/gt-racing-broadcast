@@ -197,9 +197,12 @@ async def main():
                     async def shift_points(route):
                         response = await route.fetch(); data = await response.json()
                         data['shifts'] = SHIFTS
+                        # No completed lap with fuel use either: a session average for the tile.
+                        data['fuel_avg_l'], data['fuel_avg_laps'] = 3.06, 4
                         await route.fulfill(json=data)
                     await page.route('**/race-engineer/snapshot', shift_points)
                     await page.wait_for_function('() => document.querySelectorAll("#shift-table tbody tr").length === 5')
+                    await page.wait_for_function('() => /laps left|Fuel level unavailable/.test(document.getElementById("fuel-avg-note").textContent)')
                     for width,height,name in [(1440,1050,'desktop'),(1024,1100,'tablet'),(390,900,'phone')]:
                         await page.set_viewport_size({'width':width,'height':height})
                         await page.screenshot(path=str(ROOT/f'src/docs/wiki/images/console-race-engineer-{name}.png'),full_page=True)
