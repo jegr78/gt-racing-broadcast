@@ -114,17 +114,18 @@ console.log(seen.join('|'));""")
         assert out.strip() == "11° L|11° R|0°|Unavailable", out
 
 
-def t_average_fuel_shows_the_session_value_and_its_lap_count():
+def t_average_fuel_estimates_the_laps_left_on_the_current_fuel():
     h = _html()
     assert 'id="fuel-avg"' in h and h.index('id="instruments"') < h.index('id="fuel-avg"') < h.index('id="input-trace"')
     out = _run_js(_HARNESS + _func_src(h, "instruments") + """
 const seen = [];
-for (const [avg, laps] of [[3.0612, 12], [null, 0]]) {
-  instruments({instruments: {}, fuel_avg_l: avg, fuel_avg_laps: laps});
+for (const [avg, laps, fuel] of [[3.0612, 12, 85.7], [3.0612, 12, null], [null, 0, 40], [2.5, 3, 0]]) {
+  instruments({instruments: {fuel_l: fuel}, fuel_avg_l: avg, fuel_avg_laps: laps});
   seen.push($('fuel-avg').textContent + '/' + $('fuel-avg-note').textContent); }
 console.log(seen.join('|'));""")
     if out is not None:
-        assert out.strip() == "3.06/12 eligible laps · this session|Unavailable/No eligible lap with fuel use", out
+        assert out.strip() == ("3.06/≈ 28.0 laps left|3.06/Fuel level unavailable|"
+                               "Unavailable/No eligible lap with fuel use|2.50/≈ 0.0 laps left"), out
 
 
 def t_shift_points_compare_the_lap_in_progress_with_the_vehicle_reference():

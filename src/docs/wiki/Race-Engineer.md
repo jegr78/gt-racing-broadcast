@@ -23,8 +23,9 @@ workflow. Without recording, those laps are lost. The desk states this limitatio
 
 Current lap, live delta, best completed time, race position and average fuel use lead
 the desk. **Avg fuel · L/lap** averages the completed, comparison-eligible laps of the
-live session (out, pit and partial laps excluded) and names how many laps it uses; a lap
-without a fuel reading is left out, never counted as zero. Fuel, theoretical best and
+live session (out, pit and partial laps excluded); a lap without a fuel reading is left
+out, never counted as zero. Below it, the tile estimates the laps left: the current fuel
+level divided by that average. Fuel, theoretical best and
 tyres follow, then large speed/gear/RPM/throttle/brake/steering values.
 Select the comparison before inspecting the charts; channel and distance controls
 are attached to the chart. One line below the selection reports the comparison:
