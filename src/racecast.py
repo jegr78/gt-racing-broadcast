@@ -4514,12 +4514,52 @@ def _telemetry_definition_scope(rec, session, lap):
     return path, row, identity, tracks, geometry, gt7_context.source_identity(path)
 
 
-def telemetry_track_definition_read_data(rec, session, lap):
+def telemetry_definition_layouts_data():
+    """Layouts with a downloaded reference line, including their reverse directions."""
+    try:
+        tracks, _cars = _telemetry_dbs()
+        return {'ok': True, 'tracks': [{key: row[key] for key in ('id', 'track', 'layout', 'reverse')}
+                for row in tracks.layouts() if tracks.has_downloaded_line(row['id'])]}
+    except Exception as exc:
+        return _telemetry_context_error(exc)
+
+
+def _telemetry_reference_definition_scope(layout_id, reverse):
+    import hashlib
+    import gt7_track_definitions as td
+    layout_id = td.token(layout_id)
+    if isinstance(reverse, str) and reverse in ('true', 'false'):
+        reverse = reverse == 'true'
+    if not isinstance(reverse, bool):
+        raise ValueError('driving direction must be true or false')
+    tracks, _cars = _telemetry_dbs()
+    identity = tracks.name(layout_id)
+    if not identity or identity['reverse'] != reverse:
+        raise ValueError('unknown layout or driving direction')
+    geometry = tracks.reference_trace(layout_id)
+    if not geometry:
+        raise ValueError('a downloaded reference racing line is required; learned layouts need a recording')
+    fingerprint = hashlib.sha256(json.dumps({'layout_id': layout_id, 'reverse': reverse, 'geometry': geometry},
+                               sort_keys=True, separators=(',', ':'), allow_nan=False).encode()).hexdigest()
+    return identity, tracks, {'trace': geometry}, 'reference-line:'+fingerprint
+
+
+def telemetry_track_definition_read_data(rec=None, session=None, lap=None, layout_id=None, reverse=None):
     import gt7_track_definitions as td
     try:
-        _path, row, identity, tracks, geometry, source_id = _telemetry_definition_scope(rec, session, lap)
-        stored = _telemetry_definition_store().read(row['track_id'], identity['reverse'])
-        definition = stored['definition'] or td.proposals(geometry['trace'], row['track_id'], identity['reverse'])
+        if layout_id is not None:
+            if any(value is not None for value in (rec, session, lap)):
+                raise ValueError('choose a layout or a recording, not both')
+            identity, tracks, geometry, source_id = _telemetry_reference_definition_scope(layout_id, reverse)
+            scope = {'scope': 'layout', 'layout_id': identity['id'], 'reverse': identity['reverse']}
+        else:
+            _path, row, identity, tracks, geometry, source_id = _telemetry_definition_scope(rec, session, lap)
+            scope = {'scope': 'recording', 'rec': rec, 'session': row['session'], 'lap': row['lap']}
+        stored = _telemetry_definition_store().read(identity['id'], identity['reverse'])
+        definition = stored['definition'] or td.proposals(geometry['trace'], identity['id'], identity['reverse'])
+        if layout_id is not None and stored['definition'] is None:
+            definition['numbering_scheme'] = 'Unreviewed reference-line candidates'
+            definition['provenance'].append('Candidates from the downloaded reference racing line; manual review required')
         try:
             projection, problem = td.project_definition(definition, tracks), None
         except ValueError as exc:
@@ -4527,7 +4567,7 @@ def telemetry_track_definition_read_data(rec, session, lap):
         return {'ok': True, **stored, 'definition': definition, 'projection': projection, 'projection_error': problem,
                 'geometry': [{'d': p['d'], 'x': p['x'], 'z': p['z']} for p in geometry.get('trace', [])],
                 'profile': _active_profile_name(), 'source_id': source_id,
-                'rec': rec, 'session': row['session'], 'lap': row['lap']}
+                **scope}
     except Exception as exc:
         return _telemetry_context_error(exc)
 
@@ -4539,15 +4579,20 @@ def telemetry_track_definition_write_data(payload):
         gc._object(payload)
         if payload.get('profile') != _active_profile_name():
             raise gc.Conflict('active profile changed; reload before applying map edits')
-        _path, row, identity, tracks, _geometry, source_id = _telemetry_definition_scope(
-            payload.get('rec'), payload.get('session'), payload.get('lap'))
+        if payload.get('scope') == 'layout':
+            identity, tracks, _geometry, source_id = _telemetry_reference_definition_scope(payload.get('layout_id'), payload.get('reverse'))
+        else:
+            _path, row, identity, tracks, _geometry, source_id = _telemetry_definition_scope(
+                payload.get('rec'), payload.get('session'), payload.get('lap'))
         if payload.get('source_id') != source_id:
-            raise gc.Conflict('recording identity changed; reload before applying map edits')
+            raise gc.Conflict('source identity changed; reload before applying map edits')
         definition = td.validate_definition(payload.get('definition'))
-        if definition['layout_id'] != row['track_id'] or definition['reverse'] != identity['reverse']:
+        if definition['layout_id'] != identity['id'] or definition['reverse'] != identity['reverse']:
             raise ValueError('map edits belong to another layout or driving direction')
         td.project_definition(definition, tracks)
         _telemetry_definition_store().save(definition, payload.get('expected_revision'))
+        if payload.get('scope') == 'layout':
+            return telemetry_track_definition_read_data(layout_id=identity['id'], reverse=identity['reverse'])
         return telemetry_track_definition_read_data(payload['rec'], payload['session'], payload['lap'])
     except Exception as exc:
         return _telemetry_context_error(exc)
@@ -8886,6 +8931,7 @@ def run_ui(rest, fail=sys.exit, open_browser=True, destination="/"):
         "telemetry_lap": telemetry_lap_data,
         "telemetry_channels": telemetry_channels_data,
         'telemetry_definition_read': telemetry_track_definition_read_data,
+        'telemetry_definition_layouts': telemetry_definition_layouts_data,
         'telemetry_definition_write': telemetry_track_definition_write_data,
         "telemetry_shifts": telemetry_shifts_data,
         "telemetry_shift_references": telemetry_shift_references_data,

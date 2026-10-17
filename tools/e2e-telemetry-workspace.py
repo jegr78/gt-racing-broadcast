@@ -185,6 +185,8 @@ async def main():
             raise
         finally:
             e2e._kill(proc)
+    import reference_editor_check
+    await reference_editor_check.main('--shots' in sys.argv)
     return None
 
 

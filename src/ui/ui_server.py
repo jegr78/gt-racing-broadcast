@@ -821,12 +821,24 @@ def make_handler(ctx):
                 if not self._context_allowed(structured=True):return None
                 query=parse_qs(urlparse(self.path).query or '',keep_blank_values=True)
                 return self._ai_call(path.rsplit('/',1)[1],{k:v[0] for k,v in query.items()})
+            if path == '/api/telemetry/definition-layouts':
+                if not self._context_allowed():
+                    return None
+                try:
+                    result = ctx['telemetry_definition_layouts']()
+                except Exception as exc:
+                    result = {'ok': False, 'error': 'could not read reference layouts: '+type(exc).__name__}
+                return self._context_result(result)
             if path == '/api/telemetry/definition':
                 if not self._context_allowed():
                     return None
                 q = parse_qs(urlparse(self.path).query or '', keep_blank_values=True)
                 try:
-                    result = ctx['telemetry_definition_read'](*[(q.get(k) or [None])[0] for k in ('rec', 'session', 'lap')])
+                    if 'layout_id' in q:
+                        result = ctx['telemetry_definition_read'](**{key: (q.get(key) or [None])[0]
+                            for key in ('rec', 'session', 'lap', 'layout_id', 'reverse')})
+                    else:
+                        result = ctx['telemetry_definition_read'](*[(q.get(k) or [None])[0] for k in ('rec', 'session', 'lap')])
                 except Exception as exc:
                     result = {'ok': False, 'error': 'could not read track definition: '+type(exc).__name__}
                 return self._context_result(result)

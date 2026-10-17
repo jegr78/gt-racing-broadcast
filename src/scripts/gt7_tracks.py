@@ -208,6 +208,25 @@ class TrackDB:
         line, _rev = self._line_for(official_id)
         return line.length if line is not None else None
 
+    def reference_trace(self, official_id):
+        """Closed d/x/z geometry in the layout's direction, downloaded lines only."""
+        if not self.has_downloaded_line(official_id):
+            return None
+        line, reverse = self._line_for(official_id)
+        if line is None:
+            return None
+        indices = [0] + list(range(len(line.pts)-1, 0, -1)) if reverse else range(len(line.pts))
+        trace = []
+        for i in indices:
+            distance = (line.length-line.cum[i]) if reverse and i else line.cum[i]
+            if trace and distance <= trace[-1]['d']:
+                continue
+            x, z = line.pts[i]
+            trace.append({'d': distance, 'x': x, 'z': z})
+        if trace[-1]['d'] < line.length:
+            trace.append(dict(trace[0], d=line.length))
+        return trace
+
     def project(self, points, official_id):
         line, rev = self._line_for(official_id)
         if line is None:
