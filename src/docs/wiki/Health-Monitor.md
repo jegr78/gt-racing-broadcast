@@ -239,6 +239,14 @@ racecast report               # generate the report for the last session into ru
 racecast report send [FILE]   # send the newest (or given) report to the league Discord as an attachment
 ```
 
+When part or OBS stream events are available, the automatic report window starts
+at the first on-air event and ends at the last corresponding stop, including a
+stop recorded after the final health sample. Explicit `--from` and `--to` limits
+remain fixed. Normal sampling offsets at the window edges use the nearest health
+observation for uptime and commentator duration; longer data gaps remain uncovered.
+A later part's start is excluded from the previous session's teardown tail.
+
+
 **The finding.** The report opens with one verdict line, before any table. It leads with
 what the audience saw, then gives the reason:
 

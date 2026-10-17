@@ -370,6 +370,43 @@ def _sample_groups(samples, windows):
             for (lo, hi) in windows]
 
 
+def _window_edge_samples(groups, windows):
+    """Extend nearest observations to known on-air edges within the normal gap bound.
+
+    Only band durations use these copies; sampled quality averages remain untouched.
+    Missing windows and holes larger than GAP_S receive no inferred coverage.
+    """
+    if not windows:
+        return groups
+    extended = []
+    for samples, (start, end) in zip(groups, windows, strict=True):
+        rows = list(samples)
+        if rows:
+            if 0 < rows[0]['ts']-start <= hs.GAP_S:
+                rows.insert(0, dict(rows[0], ts=start))
+            if 0 < end-rows[-1]['ts'] <= hs.GAP_S:
+                rows.append(dict(rows[-1], ts=end))
+        extended.append(rows)
+    return extended
+
+
+def _window_incidents(groups, windows):
+    incidents = []
+    for i, group in enumerate(groups):
+        for incident in hs.derive_incidents(group):
+            if windows:
+                incident['end'] = min(incident['end'], windows[i][1])
+                incident['duration_s'] = max(0.0, incident['end']-incident['ts'])
+            incidents.append(incident)
+    return incidents
+
+
+def session_window(events, fallback):
+    """Use the first on-air start through the last end; legacy data retains its window."""
+    windows = on_air_windows(events, fallback[1])
+    return (min(start for start, _end in windows), max(end for _start, end in windows)) if windows else fallback
+
+
 # Consumer-side events on the OBS read path (#582): the ring lapping OBS, the automatic
 # OBS-input rebuild, and its effectiveness guard standing down / re-arming.
 _OBS_CONSUMER_EVENTS = {
@@ -420,20 +457,22 @@ def build_report(samples, events, name_for_stint, event_title, window, now,
     duration_s = max(0.0, (to or 0) - (frm or 0))
     windows = on_air_windows(events, to)
     groups = _sample_groups(samples, windows)
+    band_groups = _window_edge_samples(groups, windows)
     metric_samples = [s for g in groups for s in g]
     on_air_s = windows_total_s(windows) if windows else duration_s
     # Full-session health bands drive the SVG strip (off-air visible as context);
     # the metric bands (on-air only, built PER WINDOW) drive Uptime; a band that
     # spanned the off-air gap between two windows would push uptime over 100%.
+    display_samples = _window_edge_samples([samples], [(frm, to)])[0] if windows else samples
     health_bands = _fill_gaps(hs.collapse_bands(
-        [(s["ts"], s.get("health_level")) for s in samples]))
-    metric_bands = [b for g in groups
+        [(s["ts"], s.get("health_level")) for s in display_samples]))
+    metric_bands = [b for g in band_groups
                     for b in _fill_gaps(hs.collapse_bands(
                         [(s["ts"], s.get("health_level")) for s in g]))]
-    on_air = _on_air(groups, name_for_stint)
+    on_air = _on_air(band_groups, name_for_stint)
     on_air["resolved_at"] = now
-    feeds = [{"feed": "A", **_feed_stats(groups, "feed_a_down")},
-             {"feed": "B", **_feed_stats(groups, "feed_b_down")}]
+    feeds = [{"feed": "A", **_feed_stats(band_groups, "feed_a_down")},
+             {"feed": "B", **_feed_stats(band_groups, "feed_b_down")}]
     handovers = []
     substitutions = []
     recoveries = []
@@ -471,7 +510,7 @@ def build_report(samples, events, name_for_stint, event_title, window, now,
                    "uptime_pct": _uptime_pct(metric_bands, on_air_s)},
         "on_air": on_air,
         "feeds": feeds,
-        "incidents": [inc for g in groups for inc in hs.derive_incidents(g)],
+        "incidents": _window_incidents(band_groups, windows),
         "quality": quality,
         "backlog": backlog,
         "finding": _finding(backlog, quality, on_air_s, on_air["stint_handovers"],
