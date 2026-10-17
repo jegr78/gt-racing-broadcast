@@ -409,8 +409,8 @@ def t_live_packet_decodes_clutch_and_gearbox_ratios():
     import struct
     sys.path.insert(0, os.path.join(ROOT, 'tests'))
     import gt7_telemetry as tm
-    from test_gt7_laps import _pkt
-    raw = bytearray(_pkt(1, 50, 0))
+    import test_gt7_laps as fixture
+    raw = bytearray(fixture._pkt(1, 50, 0))
     struct.pack_into('<f', raw, 0xF8, .75)
     for i, r in enumerate((3.2, 2.1, 1.5, 0.0)):
         struct.pack_into('<f', raw, 0x104+4*i, r)
