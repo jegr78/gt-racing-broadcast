@@ -1,5 +1,71 @@
 # Changelog
 
+## [1.13.0](https://github.com/jegr78/gt-racing-broadcast/compare/v1.12.1...v1.13.0) (2026-10-17)
+
+
+### Features
+
+* choose recordings for telemetry lap comparison ([#845](https://github.com/jegr78/gt-racing-broadcast/issues/845)) ([d57d8c0](https://github.com/jegr78/gt-racing-broadcast/commit/d57d8c0cc176c3c14a22e991188618c08f8922d1))
+* **console:** add Race Engineer roles and reference access grants ([#839](https://github.com/jegr78/gt-racing-broadcast/issues/839)) ([74921cd](https://github.com/jegr78/gt-racing-broadcast/commit/74921cdeaabdc7afe399dddfa8160145780294cf))
+* **console:** add the live Race Engineer analysis desk ([#842](https://github.com/jegr78/gt-racing-broadcast/issues/842)) ([f3f1551](https://github.com/jegr78/gt-racing-broadcast/commit/f3f1551faa38a7b947865535750c4dc90993fe15)), closes [#826](https://github.com/jegr78/gt-racing-broadcast/issues/826)
+* **console:** Engineer desk layout with track map up top and average fuel per lap ([#903](https://github.com/jegr78/gt-racing-broadcast/issues/903)) ([efb3234](https://github.com/jegr78/gt-racing-broadcast/commit/efb32344b1282ef587e789f38674d21e846cfce9))
+* **console:** estimate the laps left on the Engineer fuel tile ([#915](https://github.com/jegr78/gt-racing-broadcast/issues/915)) ([86f0797](https://github.com/jegr78/gt-racing-broadcast/commit/86f079764e8344420abcbf5b66b813a1137859f2))
+* **console:** expose authorized Race Engineer analysis endpoints ([#841](https://github.com/jegr78/gt-racing-broadcast/issues/841)) ([07f3407](https://github.com/jegr78/gt-racing-broadcast/commit/07f34077dd49d43c8af64a35565222cd09c38348)), closes [#825](https://github.com/jegr78/gt-racing-broadcast/issues/825)
+* **console:** live delta trend, lap-by-lap reference and input trace on the Engineer desk ([#881](https://github.com/jegr78/gt-racing-broadcast/issues/881)) ([58b5653](https://github.com/jegr78/gt-racing-broadcast/commit/58b565333b44c18ae65f775c1594f9b944c9616a))
+* **console:** live shift points on the Engineer desk ([#904](https://github.com/jegr78/gt-racing-broadcast/issues/904)) ([b9bd566](https://github.com/jegr78/gt-racing-broadcast/commit/b9bd566d25702a44252eb45d7a23db6724529805))
+* **console:** show the OBS program still on the Race Engineer desk ([#875](https://github.com/jegr78/gt-racing-broadcast/issues/875)) ([0332194](https://github.com/jegr78/gt-racing-broadcast/commit/0332194b549a4620edb53a75a65849631f115090))
+* reorganize the Race Engineer desk for live analysis ([#859](https://github.com/jegr78/gt-racing-broadcast/issues/859)) ([dae4dd8](https://github.com/jegr78/gt-racing-broadcast/commit/dae4dd873281d7fe300e64fac2a25a44b018c0dd))
+* replay recordings through an isolated Engineer desk ([#860](https://github.com/jegr78/gt-racing-broadcast/issues/860)) ([d1fd160](https://github.com/jegr78/gt-racing-broadcast/commit/d1fd1607e99d1b2da1889026852ec2dcfba3ac47))
+* show measured GT7 race and lap-line position ([#862](https://github.com/jegr78/gt-racing-broadcast/issues/862)) ([11d8611](https://github.com/jegr78/gt-racing-broadcast/commit/11d861170f051eb71298b266b5b2ce3dae33557c))
+* **telemetry:** add editable session context and notes ([#827](https://github.com/jegr78/gt-racing-broadcast/issues/827)) ([e71051d](https://github.com/jegr78/gt-racing-broadcast/commit/e71051d579d70f4430a567bc006b3799c35d008d))
+* **telemetry:** add optional AI analysis Control Center workflow ([#838](https://github.com/jegr78/gt-racing-broadcast/issues/838)) ([2768dda](https://github.com/jegr78/gt-racing-broadcast/commit/2768dda8ac75442722d89f9531a47434340b5b9d)), closes [#821](https://github.com/jegr78/gt-racing-broadcast/issues/821)
+* **telemetry:** add reviewed corners, larger sectors and a shared track editor ([#831](https://github.com/jegr78/gt-racing-broadcast/issues/831)) ([36f2f52](https://github.com/jegr78/gt-racing-broadcast/commit/36f2f52e2ee246057b5cc8890f2b37e0912c66ea))
+* **telemetry:** add subscription CLI agent adapters ([#833](https://github.com/jegr78/gt-racing-broadcast/issues/833)) ([e7ac632](https://github.com/jegr78/gt-racing-broadcast/commit/e7ac632e9b94a8b96c4caea0b3ecab97735520ef))
+* **telemetry:** add vehicle shift references and recorded upshift comparisons ([#832](https://github.com/jegr78/gt-racing-broadcast/issues/832)) ([2c9c08c](https://github.com/jegr78/gt-racing-broadcast/commit/2c9c08c57d8897bc72e63115458bbc80f19b7e4c))
+* **telemetry:** add visual driver reports and numbered track maps ([#895](https://github.com/jegr78/gt-racing-broadcast/issues/895)) ([49358bc](https://github.com/jegr78/gt-racing-broadcast/commit/49358bcb26b218f1a59918430d08ae378b37fa08))
+* **telemetry:** build AI analysis packages and evidence templates ([#834](https://github.com/jegr78/gt-racing-broadcast/issues/834)) ([5138c0b](https://github.com/jegr78/gt-racing-broadcast/commit/5138c0b1e6ee15917c7d2d5a6fa5bbf992e8a543))
+* **telemetry:** expose recorded channels and raw time detail ([#828](https://github.com/jegr78/gt-racing-broadcast/issues/828)) ([eea9d8f](https://github.com/jegr78/gt-racing-broadcast/commit/eea9d8f19e7b2020c9e488b6f27767c5072b2b60))
+* **telemetry:** GT7 telemetry recording, track recognition and lap analysis ([#785](https://github.com/jegr78/gt-racing-broadcast/issues/785)) ([#802](https://github.com/jegr78/gt-racing-broadcast/issues/802)) ([a2f64e1](https://github.com/jegr78/gt-racing-broadcast/commit/a2f64e13eb55900d15f8b24fd67157f29715a1b8))
+* **telemetry:** move archive analysis into a dedicated local workspace ([#888](https://github.com/jegr78/gt-racing-broadcast/issues/888)) ([da494f2](https://github.com/jegr78/gt-racing-broadcast/commit/da494f2a376c97accefb37a86828884e12d90e7f)), closes [#887](https://github.com/jegr78/gt-racing-broadcast/issues/887)
+* **telemetry:** prepare bounded shared Race Engineer live analysis ([#840](https://github.com/jegr78/gt-racing-broadcast/issues/840)) ([c1d3419](https://github.com/jegr78/gt-racing-broadcast/commit/c1d3419e9b345efd0a2caefc5367befff928beb5)), closes [#824](https://github.com/jegr78/gt-racing-broadcast/issues/824)
+* **telemetry:** prepare track definitions before recording ([#912](https://github.com/jegr78/gt-racing-broadcast/issues/912)) ([cd3a365](https://github.com/jegr78/gt-racing-broadcast/commit/cd3a3653a094e8055f0c8a8de115ad48638d68b6))
+* **telemetry:** replay recordings through the running relay ([#866](https://github.com/jegr78/gt-racing-broadcast/issues/866)) ([76b6f63](https://github.com/jegr78/gt-racing-broadcast/commit/76b6f6371c811778eb87b401805a9d82678d92ba))
+* **telemetry:** run explicitly confirmed AI analysis jobs ([#836](https://github.com/jegr78/gt-racing-broadcast/issues/836)) ([6293d6f](https://github.com/jegr78/gt-racing-broadcast/commit/6293d6fbd018fcaf051783334d7b4b7651c51556))
+* **telemetry:** validate and retain AI analysis reports ([#837](https://github.com/jegr78/gt-racing-broadcast/issues/837)) ([c73266b](https://github.com/jegr78/gt-racing-broadcast/commit/c73266b11b6f1e1c4ca2aa5b12af8abe3c6ac833))
+* **ui:** delete a telemetry recording from the Telemetry view ([#808](https://github.com/jegr78/gt-racing-broadcast/issues/808)) ([f1841d0](https://github.com/jegr78/gt-racing-broadcast/commit/f1841d03ca45518044bdc5bf4014ebac9920a7d4))
+
+
+### Bug Fixes
+
+* **ai:** clarify telemetry setup and fix full-session analysis failures ([#876](https://github.com/jegr78/gt-racing-broadcast/issues/876)) ([9cec7cf](https://github.com/jegr78/gt-racing-broadcast/commit/9cec7cf9a2264b554b3e2b7964190c56313a99cf))
+* **ai:** make analysis execution and feedback reliable ([#892](https://github.com/jegr78/gt-racing-broadcast/issues/892)) ([6909e51](https://github.com/jegr78/gt-racing-broadcast/commit/6909e512458826136ac830ff8d73e6e154cba1c3))
+* **ai:** show a finished run's own result instead of the previous report ([#886](https://github.com/jegr78/gt-racing-broadcast/issues/886)) ([63bf0f4](https://github.com/jegr78/gt-racing-broadcast/commit/63bf0f48331bee63d5609da9cb74a6f956de2187)), closes [#885](https://github.com/jegr78/gt-racing-broadcast/issues/885)
+* align Engineer replay output with GT7 lap times and the comparable pool ([#868](https://github.com/jegr78/gt-racing-broadcast/issues/868)) ([7b99103](https://github.com/jegr78/gt-racing-broadcast/commit/7b99103f3d2ec45c23d7d6a8afc38986419efbc7))
+* clarify Engineer analysis values and sector displays ([#863](https://github.com/jegr78/gt-racing-broadcast/issues/863)) ([062e7a5](https://github.com/jegr78/gt-racing-broadcast/commit/062e7a5a66bee4331765461b2cc6e5b4dd9affbf))
+* clarify Engineer selections and show the live car position ([#861](https://github.com/jegr78/gt-racing-broadcast/issues/861)) ([4da667b](https://github.com/jegr78/gt-racing-broadcast/commit/4da667b44588c832ff1fab91e40bd593f00575fd))
+* **console:** align the Engineer desk with approved layout A ([#864](https://github.com/jegr78/gt-racing-broadcast/issues/864)) ([7ecf172](https://github.com/jegr78/gt-racing-broadcast/commit/7ecf1726c6abc400d567a02933e572c32a750783))
+* **director:** make the preview HIDE actually hide and stop polling ([#874](https://github.com/jegr78/gt-racing-broadcast/issues/874)) ([7884491](https://github.com/jegr78/gt-racing-broadcast/commit/788449179cc22dc7216c4b15dacc2a23feb496e9))
+* harden release inputs and retire cloud provisioning ([#849](https://github.com/jegr78/gt-racing-broadcast/issues/849)) ([6c7bf95](https://github.com/jegr78/gt-racing-broadcast/commit/6c7bf957938cc21b96b28c769923b7829565128e))
+* **hud:** fit right-aligned team names to their slots ([#909](https://github.com/jegr78/gt-racing-broadcast/issues/909)) ([72ba73c](https://github.com/jegr78/gt-racing-broadcast/commit/72ba73c54de07e8119f9e75af7c828bb3d2d91cc))
+* **hud:** keep the hidden telemetry REPLAY badge off screen ([#914](https://github.com/jegr78/gt-racing-broadcast/issues/914)) ([959c73a](https://github.com/jegr78/gt-racing-broadcast/commit/959c73adbfb2fcbc8bb3c7614687a68bdca36aaf))
+* invalidate replaced Race Engineer definitions ([#848](https://github.com/jegr78/gt-racing-broadcast/issues/848)) ([1389d91](https://github.com/jegr78/gt-racing-broadcast/commit/1389d91deeffbfaa255b5319784cc82d279b07d6))
+* keep live Engineer comparisons available while refreshing ([#858](https://github.com/jegr78/gt-racing-broadcast/issues/858)) ([5e369c2](https://github.com/jegr78/gt-racing-broadcast/commit/5e369c285665cec097758d0041db0285b407913a))
+* **media:** do not read the Internal checkbox as a clip link ([#900](https://github.com/jegr78/gt-racing-broadcast/issues/900)) ([cf02be3](https://github.com/jegr78/gt-racing-broadcast/commit/cf02be344c30ba5d95d609b11f2aa9e8347ed2e7))
+* **obs:** scale the Standby thumbnail and the Intro/Outro/Trailer clips to the canvas ([#872](https://github.com/jegr78/gt-racing-broadcast/issues/872)) ([c7c72c7](https://github.com/jegr78/gt-racing-broadcast/commit/c7c72c774bf327a74711a437ff60f9150ee139b1)), closes [#871](https://github.com/jegr78/gt-racing-broadcast/issues/871)
+* **profile:** prefill DISCORD_WEBHOOK_URL in new solo profiles ([#873](https://github.com/jegr78/gt-racing-broadcast/issues/873)) ([c998de5](https://github.com/jegr78/gt-racing-broadcast/commit/c998de5fdbc384e2fbd3dc61b2766bbc0b39f007))
+* **report:** honor on-air session edges in uptime and header ([#911](https://github.com/jegr78/gt-racing-broadcast/issues/911)) ([f498e16](https://github.com/jegr78/gt-racing-broadcast/commit/f498e163f9eb9212670de2ca7043508f0afed183))
+* **speedtest:** decode the Ookla CLI output as UTF-8 ([#870](https://github.com/jegr78/gt-racing-broadcast/issues/870)) ([0008020](https://github.com/jegr78/gt-racing-broadcast/commit/00080203abe4c79db531eeb58348330b95890ef5)), closes [#869](https://github.com/jegr78/gt-racing-broadcast/issues/869)
+* **telemetry:** exclude laps with missing start coverage ([#910](https://github.com/jegr78/gt-racing-broadcast/issues/910)) ([df0e208](https://github.com/jegr78/gt-racing-broadcast/commit/df0e2085b9eafaf830e1ae480d7e49c3cf8ad3a3))
+* **telemetry:** preserve live identity in recorded analysis ([#843](https://github.com/jegr78/gt-racing-broadcast/issues/843)) ([10f7faf](https://github.com/jegr78/gt-racing-broadcast/commit/10f7faf93ae9cd25442b0ca3001344507d60ea69)), closes [#825](https://github.com/jegr78/gt-racing-broadcast/issues/825)
+* **telemetry:** reconcile lap timing and distinguish capture quality ([#815](https://github.com/jegr78/gt-racing-broadcast/issues/815)) ([ed7f7af](https://github.com/jegr78/gt-racing-broadcast/commit/ed7f7afc8df3e11de4a00d0bc55d2b3c2b7a7ac4))
+* **telemetry:** seed the track editor from a lap that starts at start/finish ([#898](https://github.com/jegr78/gt-racing-broadcast/issues/898)) ([12be07c](https://github.com/jegr78/gt-racing-broadcast/commit/12be07c917d920338ba1dd3d3a7ecc8135df903e))
+* **test:** measure the Engineer layout after analysis settles ([#884](https://github.com/jegr78/gt-racing-broadcast/issues/884)) ([f22c235](https://github.com/jegr78/gt-racing-broadcast/commit/f22c23525d1d20d5a3f0cc5430c67c85b303a99e))
+* **test:** wait for the Engineer crew save round trip ([#883](https://github.com/jegr78/gt-racing-broadcast/issues/883)) ([ec2df76](https://github.com/jegr78/gt-racing-broadcast/commit/ec2df763293b4c99730b8be9d4bffcf7d852850a))
+* **tools:** isolate synthetic relay ports and stop owned process trees ([#908](https://github.com/jegr78/gt-racing-broadcast/issues/908)) ([95b5ca2](https://github.com/jegr78/gt-racing-broadcast/commit/95b5ca2c5fa499a67a8743a7d1e8ce14cabd8bfa))
+* **tools:** use explicit UTF-8 for maintainer text files ([#882](https://github.com/jegr78/gt-racing-broadcast/issues/882)) ([4a19a62](https://github.com/jegr78/gt-racing-broadcast/commit/4a19a62d4f9040f5a629d1cd2fb7386ac32ade4b))
+* **ui:** make the Telemetry view readable and show the report's figures ([#806](https://github.com/jegr78/gt-racing-broadcast/issues/806)) ([e1073d0](https://github.com/jegr78/gt-racing-broadcast/commit/e1073d022cd86524fc544be5afedc6f85f82c9e9))
+* wait for OBS process exit before restarting ([#844](https://github.com/jegr78/gt-racing-broadcast/issues/844)) ([cfd5754](https://github.com/jegr78/gt-racing-broadcast/commit/cfd5754d3743a3dcbeef6312b58ef77134d10291))
+
 ## [1.12.1](https://github.com/jegr78/gt-racing-broadcast/compare/v1.12.0...v1.12.1) (2026-10-08)
 
 
