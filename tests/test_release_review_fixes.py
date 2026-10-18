@@ -54,12 +54,13 @@ def t_foreign_profile_cannot_cancel_another_profiles_job_over_http():
         owner = ai_jobs.BackgroundJobs()
         runner.background_jobs = owner
         adapter = jobs.FakeAdapter(root, 'tree')
-        job = runner.start(jobs.package(), jobs.prepared(root), adapter)
         ctx = web._ctx()
         ctx.update(telemetry_profile_scope=m.telemetry_profile_scope,
                    ai_request=m.ai_request_data)
         server, port = web._serve(ctx)
         try:
+            # Server startup must not consume the synthetic provider's timeout.
+            job = runner.start(jobs.package(), jobs.prepared(root), adapter)
             jobs.wait_for(lambda: hasattr(adapter, 'scratch_output') and
                           (adapter.scratch_output / 'child.pid').exists())
             code, status = http.request(port, '/api/ai/status?profile=beta')
@@ -265,12 +266,14 @@ def child_service(root, interrupt=False):
     with workspace.profiles():
         machine = Path(m._runtime_base_dir())
         runner = ai_jobs.Runner(machine, machine / 'alpha', 'alpha')
-        job = runner.start(jobs.package(), jobs.prepared(root), adapter)
-        jobs.wait_for(lambda: hasattr(adapter, 'scratch_output') and
-                      (adapter.scratch_output / 'child.pid').exists())
+        prepared = jobs.prepared(root)
         serve = web.us.serve
         def ready(ctx, host, port):
             server = serve(ctx, host, port)
+            # Start the timed fixture only once the real UI is ready to serve.
+            job = runner.start(jobs.package(), prepared, adapter)
+            jobs.wait_for(lambda: hasattr(adapter, 'scratch_output') and
+                          (adapter.scratch_output / 'child.pid').exists())
             print('READY ' + json.dumps({'port': server.server_address[1], 'job': job,
                   'machine': str(machine), 'provider': int((root / 'provider.pid').read_text()),
                   'child': int((adapter.scratch_output / 'child.pid').read_text())}), flush=True)
