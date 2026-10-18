@@ -212,13 +212,29 @@ the feed serves, so for the next stint it already appears after ARM, while there
 still time to ask the commentator to switch the stream's latency setting. Twitch and
 local stints never show it.
 
+**SIGNAL HOLD** (amber, e.g. `SIGNAL HOLD A`) appears while the relay covers the on-air
+feed because the commentator's source stalled long enough for OBS to stop playing it
+(OBS bridges short gaps from its own buffer, which you never see). Instead of a
+stuttering picture, viewers see the feed's last good picture, the feed's sound is
+muted, and the HUD's Race Control slot shows the text from the **Signal Hold** column of
+the Sheet's Configuration tab (no text when that column is empty). Once the source
+delivers steadily again, the relay rejoins the feed at the live edge and keeps the still
+until OBS plays the new picture smoothly; then picture, sound and the HUD text return
+together and the pill disappears. The stalled seconds are skipped, so the delay stays
+what it was. A hold ends after at most one minute. A handover or a RESET ends it at once.
+Each hold is listed in the post-event report under *Signal holds*. A mute you set
+yourself stays: the relay only undoes its own. If you listen to the feed through OBS's
+own audio monitoring, you may hear OBS catching up the stalled audio during the hold;
+that never reaches the stream or a recording.
+
 **BEHIND LIVE** shows how far OBS is behind the live edge of the feeds it plays, worst
 feed first (`A 3.1 s`; hover for every feed). It appears once a feed is serving OBS. About 3 s is normal: the relay holds that
 reserve on purpose. The pill turns amber when OBS falls more than 5 s behind that,
 which means OBS plays the feed slower than real time and the audience sees a growing
 delay with stuttering picture and distorted sound. The health pill then names the
 feed and the next step, e.g. `Feed A output 12 s behind live. OBS reads slower than real
-time; RESET A → LIVE drops it with a short black dropout` (POV has no reset, so its line
+time; RESET A → LIVE drops it with a short black dropout` (with feed covers on, viewers
+see a brief still of the feed instead of black; POV has no reset, so its line
 states only the delay). A handover clears the delay because the incoming feed
 starts fresh; a single-feed session (qualifying, solo) keeps it until the cause is
 fixed. Nothing acts on this value automatically. The full runbook, including why the

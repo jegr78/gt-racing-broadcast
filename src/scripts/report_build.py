@@ -477,6 +477,8 @@ def build_report(samples, events, name_for_stint, event_title, window, now,
     substitutions = []
     recoveries = []
     obs_consumer = []
+    signal_holds = []
+    open_holds = {}                         # feed -> its signal_holds row awaiting the end
     for e in events:
         if e.get("type") == "takeover":
             md = e.get("metadata") or {}
@@ -488,6 +490,18 @@ def build_report(samples, events, name_for_stint, event_title, window, now,
                                   "stint": md.get("stint"),
                                   "streamer": name_for_stint.get(md.get("stint")) or "",
                                   "reason": md.get("reason") or ""})
+        elif e.get("type") == "signal_hold":
+            md = e.get("metadata") or {}
+            row = {"ts": e.get("ts"), "feed": md.get("feed") or "", "stint": md.get("stint"),
+                   "streamer": name_for_stint.get(md.get("stint")) or "",
+                   "duration_s": None, "how": None}
+            signal_holds.append(row)
+            open_holds[row["feed"]] = row
+        elif e.get("type") == "signal_hold_end":
+            md = e.get("metadata") or {}
+            row = open_holds.pop(md.get("feed") or "", None)
+            if row is not None:
+                row["duration_s"], row["how"] = md.get("duration_s"), md.get("how")
         elif e.get("type") == "feed_recovery":
             md = e.get("metadata") or {}
             recoveries.append({"ts": e.get("ts"), "feed": md.get("feed") or "",
@@ -518,6 +532,7 @@ def build_report(samples, events, name_for_stint, event_title, window, now,
         "producer_handovers": handovers,
         "substitutions": substitutions,
         "recoveries": recoveries,
+        "signal_holds": signal_holds,
         "obs_consumer": obs_consumer,
         # #721: the relay found the OBS mic live while the mic was in the local feed.
         "mic_remutes": sum(1 for e in events if e.get("type") == "mic_remuted"),
@@ -853,6 +868,21 @@ def render_html(report):
                   r["streamer"], _fmt_dur(r["downtime_s"]))
                  for r in report["recoveries"]]
         parts.append(_table(["Time", "Feed", "Stint", "Commentator", "Degraded"], rrows))
+
+    # Signal holds (spec 2026-10-17): the relay covered a stalled on-air feed with its last
+    # picture, muted, instead of letting viewers watch it stutter.
+    if report.get("signal_holds"):
+        parts.append("<h2>Signal holds</h2>")
+        parts.append("<p class='note'>The relay covered the on-air feed with its last good "
+                     "picture, muted, while the commentator's source stalled past the "
+                     "reserve, and returned to the live picture once the source was steady. "
+                     "A blank duration means the hold had not ended when the report was "
+                     "built.</p>")
+        hrows = [(_fmt_clock(h["ts"]), h["feed"],
+                  h["stint"] if h["stint"] is not None else "—",
+                  h["streamer"], _fmt_dur(h["duration_s"]) if h["duration_s"] is not None else "—")
+                 for h in report["signal_holds"]]
+        parts.append(_table(["Time", "Feed", "Stint", "Commentator", "Duration"], hrows))
 
     # OBS consumer events (#582): the relay could not keep OBS fed in real time, or had to
     # rebuild OBS's input. A stood-down auto-rebuild means OBS itself could not keep up.

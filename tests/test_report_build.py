@@ -336,6 +336,29 @@ def t_report_collects_and_renders_recoveries():
     assert "Feed auto-recoveries" not in rb.render_html(rep0)
 
 
+def t_report_lists_signal_holds_with_their_duration():
+    # Spec 2026-10-17 Part B: every time the relay covered a stalled on-air feed.
+    samples = [_sample(100.0), _sample(200.0)]
+    events = [
+        {"ts": 120.0, "type": "signal_hold", "metadata": {"feed": "A", "stint": 3}},
+        {"ts": 143.0, "type": "signal_hold_end",
+         "metadata": {"feed": "A", "stint": 3, "how": "release", "duration_s": 23.0}},
+        {"ts": 150.0, "type": "signal_hold", "metadata": {"feed": "B", "stint": 4}},
+        {"ts": 151.0, "type": "signal_hold", "metadata": {"feed": "A", "stint": 3}},
+    ]
+    names = {3: "GT", 4: "Pony"}
+    rep = rb.build_report(samples, events, names, "6h Suzuka", (100.0, 200.0), now=300.0)
+    holds = rep["signal_holds"]
+    assert holds[0] == {"ts": 120.0, "feed": "A", "stint": 3, "streamer": "GT",
+                        "duration_s": 23.0, "how": "release"}
+    assert holds[1]["feed"] == "B" and holds[1]["duration_s"] is None     # still open
+    assert len(holds) == 3
+    html = rb.render_html(rep)
+    assert "<h2>Signal holds</h2>" in html and "GT" in html and "Pony" in html
+    rep0 = rb.build_report(samples, [], {}, "", (100.0, 200.0), now=300.0)
+    assert rep0["signal_holds"] == [] and "Signal holds" not in rb.render_html(rep0)
+
+
 def t_build_report_no_mutation_on_repeated_call():
     # build_report must not mutate shared state: two calls on the same samples must
     # yield identical health_bands.

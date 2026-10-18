@@ -68,40 +68,46 @@ The cover is **shown** unless OBS demonstrably plays the feed: its `GetMediaInpu
 
 ## Part B: signal hold (uses the covers)
 
-### State machine (per on-air remote feed)
+### State machine (per on-air remote feed), as live-tested 2026-10-18
 
-`LIVE -> HOLD -> LIVE`, decided by one pure function:
+`LIVE -> HOLD -> (settle) -> LIVE`, decided by one pure function:
 
 ```
-signal_hold_step(state, *, reserve_s, last_byte_age_s, steady_s, cancel,
-                 engage_idle_s=1.0, release_steady_s=5.0) -> (state, action)
+signal_hold_step(state, *, starved, obs_stalled_s, last_byte_age_s, steady_s,
+                 cancel, held_s, segment_s) -> (state, action)
 ```
 
-- **Engage** (`LIVE -> HOLD`): the feed is the on-air feed, remote, serving, with an OBS consumer, the reserve is used up (`reserve_s <= RESERVE_EMPTY_S`, 0.25 s) **and** no byte has arrived for `engage_idle_s` (1.0 s). Gaps the 3 s reserve absorbs never engage.
-- **Release** (`HOLD -> LIVE`): bytes have arrived steadily for `release_steady_s` (5.0 s). Steady means no inbound gap above `STEADY_GAP_S` (1.5 s) inside that window. A single burst after a stall therefore does not release, which avoids flicker.
-- **Cancel** (`HOLD -> LIVE` without a rejoin): the stint changes (handover, `/next`, ARM of the on-air feed), the director presses RESET, or the feature is switched off. The existing action of each trigger then owns the OBS input.
+The first design engaged on "reserve empty and 1 s without bytes". Live OBS tests disproved it:
 
-`reserve_s` is the fan-out server's `consumer_backlog` (seconds between OBS's read position and the newest byte; it drains to 0 during a stall). `last_byte_age_s` comes from `last_byte_ts`. `steady_s` is tracked from the byte arrivals: each arrival with a gap above `STEADY_GAP_S` restarts it.
+- OBS played a 7 s source stall out of its own buffer, unseen.
+- The ring backlog is the age of OBS's read position, so it grows during a stall instead of draining.
+- YouTube's 5 s segments make 2-5 s byte gaps normal.
 
-The defaults reflect the producer's choice ("engage when the reserve is empty and 1 s without data, release after 5 s steady"). Tune them against the 2026-10-17 health history and feed logs before release.
+The tested rules:
+
+- **Engage:** OBS has stopped advancing a feed it **had played** for `SIGNAL_HOLD_ENGAGE_IDLE_S` (1 s). Opening or reopening a source is never a stall (`media_play_update`'s `played`). The source must also be the cause, in one of two ways:
+  - OBS has read up to the newest byte (`FeedFanoutServer.consumer_starved`);
+  - the source has been silent past its own cadence, `source_silent_s(segment) = max(2, 1.5 x segment)`, where segment is `#EXT-X-TARGETDURATION` from Part A, 5 s when unknown.
+
+  OBS freezing on flowing data stays the freeze detector's case.
+- **Release:** steady inbound bytes for `release_steady_s(segment) = max(5, 2 x segment)`, with no gap beyond `source_silent_s` (`Feed.steady_gap_s`).
+- **Ceiling:** a hold never outlives `HOLD_MAX_S` (60 s). It then releases with a WARNING (`timeout`).
+- **Cancel:** a stint change, a stopped feed, a local stint, or RESET. A running hold **survives** OBS dropping its socket and the 20 s watchdog restarting the serve.
 
 ### Actions
 
-**On engage:**
+**On engage:** force the cover up, keeping the still viewers already see. Mute the feed input only if OBS reported it unmuted (`muted_by_us`). Override `/hud/data` `raceControl` with the Signal Hold text (no Sheet write). Record `signal_hold`.
 
-1. **Freeze.** Refresh the feed's cover still and force the cover visible (`hold_active` in the visibility rule). The cover tap's latest keyframe is the picture before the stall. What OBS does beneath the cover is invisible.
-2. **Mute.** `get_input_mute` remembers the feed input's state, then `set_input_mute(<Feed X>, True)`. Best effort: when OBS is unreachable, the cover still applies.
-3. **Notice.** `/hud/data` `raceControl` is overridden in the relay with the Signal Hold text (see below). No Sheet write, because a Sheet push takes 10-20 s and is unreliable on event nights (repeated timeouts on 2026-10-16/17). The Sheet's own Race Control value stays untouched and is shown again after the hold. The HUD polls every 2.5 s, which is acceptable.
-4. **Record** a `signal_hold` health event (feed, stint, start).
+**While held:** the hold owns OBS's rejoin. A serve restart's own prefetch rejoin is deferred (`Feed.defer_rejoin`), because two rejoins made OBS catch up and then resync audibly.
 
-**On release:**
+**On release:** rebuild once at the live edge under the cover (`_obs_reconnect`, splice registered, shared cooldown claimed) and record `signal_hold_end`. Then **settle**: cover, mute and notice stay until OBS demonstrably plays for `HOLD_SETTLE_S` (3 s). Playing needs both of these:
 
-1. **Rejoin at the live edge.** `_obs_reconnect()` rebuilds the feed's OBS input, which rejoins `RACECAST_FEED_PREBUFFER_S` behind the newest byte. The hold time is skipped, not replayed, so the offset after the hold equals the offset before it. The rebuild is registered via `_note_obs_splice` so the A/V detector does not count it, and it claims the shared rebuild cooldown.
-2. **Clear `hold_active`.** The cover then lowers by the normal visibility rule once the rebuilt consumer has flowed for 1.5 s, so the rebuild's black is never seen.
-3. **Unmute**, only if engage muted it, at the moment the cover lowers.
-4. **Clear the notice override** and **record** the end and duration on the event (`signal_hold_end`).
+- the mediaCursor advancing at 0.8-1.25x real time, because a crawl or a catch-up is not stable;
+- the source thumbnail changing (`motion_update`), because the cursor ran on the audio while the picture still stood.
 
-**On cancel:** clear `hold_active`, restore the mute state, clear the override. No rejoin of its own.
+`HOLD_SETTLE_MAX_S` (30 s) bounds the settle. Then all three lift together.
+
+**Live result** (OBS recording, 18 s stall that also triggered the watchdog restart): freeze and silence, then picture and sound back in the same frame, with no freeze of 0.1 s or more and no silence in the 20 s after. The producer's local OBS audio monitoring still played the catch-up audio while the input was muted. The program output was clean, so this was accepted.
 
 ### Notice text (Sheet)
 
