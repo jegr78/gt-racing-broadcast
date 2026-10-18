@@ -213,14 +213,19 @@ still time to ask the commentator to switch the stream's latency setting. Twitch
 local stints never show it.
 
 **SIGNAL HOLD** (amber, e.g. `SIGNAL HOLD A`) appears while the relay covers the on-air
-feed because the commentator's source stalled for longer than the relay's 3 s reserve.
-Instead of a stuttering picture, viewers see the feed's last good picture, the feed's
-sound is muted, and the HUD's Race Control slot shows the text from the **Signal Hold**
-column of the Sheet's Configuration tab (no text when that column is empty). Once the
-source has delivered steadily for 5 s, the relay rejoins the feed at the live edge and
-the pill disappears; the stalled seconds are skipped, so the delay stays what it was. A
-handover or a RESET ends a hold at once. Each hold is listed in the post-event report
-under *Signal holds*. A mute you set yourself stays: the relay only undoes its own.
+feed because the commentator's source stalled long enough for OBS to stop playing it
+(OBS bridges short gaps from its own buffer, which you never see). Instead of a
+stuttering picture, viewers see the feed's last good picture, the feed's sound is
+muted, and the HUD's Race Control slot shows the text from the **Signal Hold** column of
+the Sheet's Configuration tab (no text when that column is empty). Once the source
+delivers steadily again, the relay rejoins the feed at the live edge and keeps the still
+until OBS plays the new picture smoothly; then picture, sound and the HUD text return
+together and the pill disappears. The stalled seconds are skipped, so the delay stays
+what it was. A hold ends after at most one minute. A handover or a RESET ends it at once.
+Each hold is listed in the post-event report under *Signal holds*. A mute you set
+yourself stays: the relay only undoes its own. If you listen to the feed through OBS's
+own audio monitoring, you may hear OBS catching up the stalled audio during the hold;
+that never reaches the stream or a recording.
 
 **BEHIND LIVE** shows how far OBS is behind the live edge of the feeds it plays, worst
 feed first (`A 3.1 s`; hover for every feed). It appears once a feed is serving OBS. About 3 s is normal: the relay holds that
