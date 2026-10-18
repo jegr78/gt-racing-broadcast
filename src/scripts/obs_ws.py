@@ -588,6 +588,7 @@ _ROUTED_FNS = _SHOT_FNS | frozenset({
     "release_feed_inputs", "feed_media_cursors", "get_scene_collection",
     "set_scene_collection", "ensure_mic_device",
     "ensure_cover_items", "get_scene_item_enabled", "set_input_file", "get_media_status",
+    "get_scene_items",
 })
 
 
@@ -1683,6 +1684,17 @@ def get_media_status(input_name, host="127.0.0.1", port=None,
         return st.get("mediaState"), st.get("mediaCursor")
     value, note = _session_call(session, host, port, password, timeout, run)
     return (value if value is not None else (None, None)), note
+
+
+def get_scene_items(scene, host="127.0.0.1", port=None, password=None, timeout=2.0,
+                    session=None):
+    """({source name: enabled}, note) for every item of `scene` in ONE request; ({}, reason)
+    on any failure, never an exception. Cheaper than get_scene_item_enabled per item."""
+    def run(sess):
+        items = sess.request("GetSceneItemList", {"sceneName": scene}).get("sceneItems", [])
+        return {i.get("sourceName"): bool(i.get("sceneItemEnabled")) for i in items}
+    value, note = _session_call(session, host, port, password, timeout, run)
+    return (value or {}), note
 
 
 def set_input_file(input_name, path, host="127.0.0.1", port=None,

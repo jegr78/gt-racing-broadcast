@@ -332,8 +332,17 @@ class FakeObs:
         return (("OBS_MEDIA_STATE_PLAYING", c) if c is not None else (None, None)), ""
 
     def get_scene_item_enabled(self, scene, source):
+        getattr(self, "reads", []).append("item_enabled")
         shown = self.feed_shown(scene, source) if callable(self.feed_shown) else self.feed_shown
         return shown, ""
+
+    def get_scene_items(self, scene):
+        getattr(self, "reads", []).append("scene_items")
+        out = {}
+        for src in ("Feed A", "Feed B", "Feed A Cover", "Feed B Cover"):
+            shown = self.feed_shown(scene, src) if callable(self.feed_shown) else self.feed_shown
+            out[src] = bool(shown)
+        return out, ""
 
     def set_scene_item_enabled(self, scene, source, enabled):
         self.calls.append(("enable", scene, source, enabled))
@@ -953,6 +962,87 @@ def t_relay_start_registers_every_fanout_server():
     assert 0 < j - i < 200 and src.index("if self._covers:") > j, src[i:j + 40]
 
 
+# --- #923: follow-ups from the final review -------------------------------------------
+
+def _released(r, t=107.1):
+    r._hold_tick(101.5)
+    f = r.feeds["A"]
+    f.last_byte_ts, f.steady_since = t - 0.1, 101.9
+    r._hold_tick(t)
+    r._play["A"] = None                                    # the rejoin reopened OBS
+    return f
+
+
+def t_settle_polls_obs_itself_when_covers_are_off():
+    r, obs = _hold_relay()
+    r._covers = False
+    r._play["A"] = None                                    # only OBS's own samples count
+    for t, c in ((98.0, 1000), (99.0, 2000), (100.0, 3000), (100.5, 3000), (101.6, 3000)):
+        obs.cursor["Feed A"] = c                           # played, then froze at 100.5
+        r._hold_tick(t)
+    assert r._hold_active("A")
+    f = r.feeds["A"]
+    f.last_byte_ts, f.steady_since = 107.0, 101.9
+    r._hold_tick(107.1)                                    # release
+    r._play["A"] = None
+    for i in range(1, 8):
+        obs.cursor["Feed A"] = 1000 * i
+        r._hold_tick(107.1 + i)
+    assert ("mute", "Feed A", False) in obs.calls and not r._hold_active("A")
+
+
+def t_cover_tick_reads_each_scene_once():
+    obs = FakeObs(program="Stint")
+    r = _relay_for_covers(obs)
+    r._cover_tick(100.0)
+    obs.calls.clear()
+    obs.reads = []
+    r._cover_tick(101.0)
+    assert obs.reads.count("scene_items") == 2 and "item_enabled" not in obs.reads
+
+
+def t_director_mute_during_a_hold_is_left_alone():
+    r, obs = _hold_relay()
+    r._hold_tick(101.5)
+    r.note_director_mute("Feed A", True)                   # the director mutes on purpose
+    _released(r)
+    r._play["A"] = {"cursor": 5000, "since": 107.5, "played": True}
+    r._motion["A"] = {"digest": "x", "since": 107.5}
+    r._hold_tick(107.5 + m.HOLD_SETTLE_S)
+    assert ("mute", "Feed A", False) not in obs.calls
+
+
+def t_director_unmute_during_a_hold_is_not_redone():
+    r, obs = _hold_relay()
+    r._hold_tick(101.5)
+    r.note_director_mute("Feed A", False)                  # the director wants the sound
+    obs.calls.clear()
+    _released(r)
+    r._play["A"] = {"cursor": 5000, "since": 107.5, "played": True}
+    r._motion["A"] = {"digest": "x", "since": 107.5}
+    r._hold_tick(107.5 + m.HOLD_SETTLE_S)
+    assert not [c for c in obs.calls if c[0] == "mute"]
+
+
+def t_a_static_picture_counts_as_playing_after_the_fallback():
+    obs = FakeObs(program="Stint")
+    r = _relay_for_covers(obs)
+    r._play["A"] = {"cursor": 9000, "since": 100.0, "played": True}
+    r._motion["A"] = {"digest": "x", "since": None}        # the picture never changes
+    assert r._obs_playing_s("A", 100.0 + m.MOTION_FALLBACK_S - 1) is None
+    assert r._obs_playing_s("A", 100.0 + m.MOTION_FALLBACK_S) is not None
+
+
+def t_status_reports_the_settle_phase():
+    r, obs = _hold_relay()
+    assert r.signal_hold_status("A")["phase"] is None
+    r._hold_tick(101.5)
+    assert r.signal_hold_status("A")["phase"] == "hold"
+    _released(r)
+    st = r.signal_hold_status("A")
+    assert st["active"] is True and st["phase"] == "settling"
+
+
 def t_hold_times_out_and_warns():
     r, obs = _hold_relay()
     r._hold_tick(101.5)
@@ -1074,7 +1164,7 @@ def t_hud_source_carries_the_signal_hold_text():
 
 def t_signal_hold_status():
     r, obs = _hold_relay()
-    assert r.signal_hold_status("A") == {"active": False, "since": None}
+    assert r.signal_hold_status("A") == {"active": False, "since": None, "phase": None}
     r._hold_tick(101.5)
     st = r.signal_hold_status("A")
     assert st["active"] is True and st["since"] is not None

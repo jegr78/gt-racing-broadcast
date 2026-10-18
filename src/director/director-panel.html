@@ -2055,7 +2055,13 @@ function holdPill(d){
     ? ["A", "B"].filter(k => d.feeds[k] && d.feeds[k].signal_hold && d.feeds[k].signal_hold.active)
     : [];
   el.hidden = !held.length;
-  if (held.length) el.querySelector("b").textContent = held.join(" ");
+  if (!held.length) return;
+  el.querySelector("b").textContent = held.join(" ");
+  // #923: after its rejoin the relay keeps the still until OBS plays smoothly again.
+  const settling = held.every(k => d.feeds[k].signal_hold.phase === "settling");
+  el.title = settling
+    ? "Source is back: returning to the live picture once OBS plays it smoothly"
+    : "The on-air feed's source stalled: covered with its last picture and muted until the source is steady";
 }
 
 function behindPill(d){
