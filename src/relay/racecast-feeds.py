@@ -5262,6 +5262,106 @@ class _PreviewRingTap:
         self._kill()
 
 
+COVER_WIDTH = 1920   # full-frame cover still (spec 2026-10-17 Part C)
+
+
+def cover_ffmpeg_cmd(width=COVER_WIDTH):
+    """Argv: ring bytes on stdin -> one full-width JPEG per KEYFRAME on stdout. Decoding
+    keyframes only keeps an always-on tap cheap (about one frame every 2 s on YouTube)."""
+    return ["ffmpeg", "-nostdin", "-loglevel", "error", "-skip_frame", "nokey",
+            "-i", "pipe:0", "-map", "0:v:0", "-fps_mode", "passthrough",
+            "-vf", f"scale={width}:-2", "-q:v", "3",
+            "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1"]
+
+
+class FeedCoverTap:
+    """Keeps `path` holding a current still of one feed (spec 2026-10-17 Part C): ring
+    bytes -> ffmpeg (keyframes only) -> each JPEG written atomically (temp file +
+    os.replace), so OBS never loads a half-written file. Best effort: a spawn or read
+    failure only stops the writing, the feed is never touched. `spawn(tap) -> (proc,
+    stdin, stdout)` is injectable for tests."""
+
+    def __init__(self, ring, path, log, spawn=None):
+        self.ring, self.path, self.log = ring, path, log
+        self._spawn = spawn or self._spawn_real
+        self._proc = None
+        self._stop = threading.Event()
+        self.last_write_ts = None        # monotonic time of the last written still
+
+    def start(self):
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        threading.Thread(target=self._run, daemon=True).start()
+        return self
+
+    def _spawn_real(self, _tap):
+        ff = subprocess.Popen(cover_ffmpeg_cmd(), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                              stderr=subprocess.DEVNULL, env=external_tool_env(),
+                              **_no_window_kwargs())
+        return ff, ff.stdin, ff.stdout
+
+    def _run(self):
+        try:
+            self._proc, stdin, video = self._spawn(self)
+        except Exception as e:                       # noqa: BLE001 best-effort
+            self.log.info("cover tap %s spawn error: %s", os.path.basename(self.path), e)
+            return
+        threading.Thread(target=self._feed_stdin, args=(stdin,), daemon=True).start()
+        buf = b""
+        while not self._stop.is_set():
+            chunk = video.read(65536)
+            if not chunk:
+                break
+            frames, buf = split_mjpeg_frames(buf + chunk)
+            if frames:
+                self._write(frames[-1])
+        self._kill()
+
+    def _write(self, jpeg):
+        tmp = self.path + ".tmp"
+        try:
+            with open(tmp, "wb") as fh:
+                fh.write(jpeg)
+            os.replace(tmp, self.path)
+            self.last_write_ts = time.monotonic()
+        except OSError as e:
+            self.log.debug("cover write %s failed: %s", os.path.basename(self.path), e)
+
+    def _feed_stdin(self, stdin):
+        """Pump ring bytes into ffmpeg from the live edge, fMP4 init segment first (#577);
+        the same pump as _PreviewRingTap."""
+        cursor = self.ring.live_offset() if hasattr(self.ring, "live_offset") else 0
+        join = ring_join(self.ring)
+        try:
+            if join.init:
+                stdin.write(join.init)
+                stdin.flush()
+            while not self._stop.is_set() and not self.ring.closed:
+                data, cursor = self.ring.read(cursor, 1.0)
+                data = join.take(data)
+                if data:
+                    stdin.write(data)
+                    stdin.flush()
+        except OSError:
+            pass  # ffmpeg stdin closed (process gone); the pump exits cleanly
+        finally:
+            try:
+                stdin.close()
+            except OSError:
+                pass  # already closed
+
+    def _kill(self):
+        p = self._proc
+        try:
+            if p and p.poll() is None:
+                p.kill()
+        except Exception:                            # noqa: BLE001
+            pass
+
+    def stop(self):
+        self._stop.set()
+        self._kill()
+
+
 PREVIEW_FEEDS = ("A", "B", "POV")        # tiles the Director Panel can request
 # Solo tiles (#730): OBS inputs the panel may preview, per solo template.
 SOLO_PREVIEW_SOURCES = {"capture": "Solo Capture Device", "webcam": "Solo Webcam Device",

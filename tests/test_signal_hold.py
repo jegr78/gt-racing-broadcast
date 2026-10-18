@@ -94,6 +94,89 @@ def t_get_manifest_sends_the_cookie_jar_and_browser_agent():
         srv.shutdown()
 
 
+# --- Part C: feed covers -------------------------------------------------------------
+
+def t_cover_ffmpeg_cmd_decodes_keyframes_only():
+    cmd = m.cover_ffmpeg_cmd(1920)
+    assert cmd[cmd.index("-skip_frame") + 1] == "nokey"
+    assert cmd.index("-skip_frame") < cmd.index("-i")          # decoder option, before input
+    assert "scale=1920:-2" in cmd and cmd[-1] == "pipe:1" and "mjpeg" in cmd
+
+
+class _Pipe:
+    def __init__(self, chunks):
+        self._c = list(chunks)
+
+    def read(self, _n):
+        return self._c.pop(0) if self._c else b""
+
+
+class _IdleRing:
+    closed = False
+
+    def live_offset(self):
+        return 0
+
+    def head(self):
+        return b""
+
+    def read(self, cursor, timeout, high=None):
+        import time
+        time.sleep(0.01)
+        return b"", cursor
+
+
+def _fake_ffmpeg(stdout_chunks):
+    class P:
+        def poll(self):
+            return None
+
+        def kill(self):
+            pass
+
+    class In:
+        def write(self, _b):
+            pass
+
+        def flush(self):
+            pass
+
+        def close(self):
+            pass
+    return lambda _tap: (P(), In(), _Pipe(stdout_chunks))
+
+
+def t_cover_tap_writes_the_latest_frame_atomically():
+    import tempfile, time
+    jpeg1, jpeg2 = b"\xff\xd8one\xff\xd9", b"\xff\xd8two\xff\xd9"
+    path = os.path.join(tempfile.mkdtemp(), "covers", "feed-a.jpg")
+    tap = m.FeedCoverTap(_IdleRing(), path, LOG,
+                         spawn=_fake_ffmpeg([jpeg1 + jpeg2[:4], jpeg2[4:]])).start()
+    def written():
+        with open(path, "rb") as fh:
+            return fh.read()
+    for _ in range(200):
+        if tap.last_write_ts is not None and written() == jpeg2:
+            break
+        time.sleep(0.02)
+    tap.stop()
+    with open(path, "rb") as fh:
+        assert fh.read() == jpeg2
+    assert not [f for f in os.listdir(os.path.dirname(path)) if f.endswith(".tmp")]
+
+
+def t_cover_tap_spawn_failure_is_quiet():
+    import tempfile, time
+
+    def boom(_tap):
+        raise OSError("no ffmpeg")
+    path = os.path.join(tempfile.mkdtemp(), "covers", "feed-b.jpg")
+    tap = m.FeedCoverTap(_IdleRing(), path, LOG, spawn=boom).start()
+    time.sleep(0.1)
+    tap.stop()
+    assert tap.last_write_ts is None and not os.path.exists(path)
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
