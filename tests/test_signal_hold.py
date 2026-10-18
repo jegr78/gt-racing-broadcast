@@ -266,6 +266,7 @@ def _relay_for_covers(obs, serving=True, stills=True):
     r._covers = True
     r._cover = {}
     r._play = {}
+    r._hold = {}
     r._cover_dir = tempfile.mkdtemp()
     r._cover_ensured_ts = None
 
@@ -485,6 +486,195 @@ def t_stint_cut_pre_shows_the_picked_feed():
     r = _CutRelay()
     m.apply_stint_state(r, _OkObs(), "B")
     assert r.pre == [("B", "Stint")]
+
+
+# --- Part B: signal hold -------------------------------------------------------------
+
+S = m.signal_hold_step
+
+
+def t_hold_short_gap_absorbed_by_reserve_never_engages():
+    assert S("live", reserve_s=1.2, last_byte_age_s=1.6, steady_s=0.0, cancel=False) == ("live", None)
+
+
+def t_hold_engages_when_reserve_empty_and_idle():
+    assert S("live", reserve_s=0.1, last_byte_age_s=1.1, steady_s=0.0, cancel=False) == ("hold", "engage")
+    assert S("live", reserve_s=0.1, last_byte_age_s=0.5, steady_s=0.0, cancel=False) == ("live", None)
+    assert S("live", reserve_s=None, last_byte_age_s=9.0, steady_s=0.0, cancel=False) == ("live", None)
+
+
+def t_hold_single_burst_does_not_release():
+    assert S("hold", reserve_s=2.0, last_byte_age_s=0.1, steady_s=1.0, cancel=False) == ("hold", None)
+
+
+def t_hold_releases_after_steady_window():
+    assert S("hold", reserve_s=3.0, last_byte_age_s=0.1, steady_s=5.0, cancel=False) == ("live", "release")
+
+
+def t_hold_cancel_wins():
+    assert S("hold", reserve_s=0.0, last_byte_age_s=9.0, steady_s=0.0, cancel=True) == ("live", "cancel")
+    assert S("live", reserve_s=0.0, last_byte_age_s=9.0, steady_s=0.0, cancel=True) == ("live", None)
+
+
+def t_hold_suzuka_2026_10_17_sequence():
+    """21:07: gaps 4.03 -> 5.72 s, backlog floor 0.8 s: engages, no release mid-stall."""
+    st, seen = "live", []
+    for reserve, age, steady in [(3.9, 0.2, 30), (0.8, 0.4, 30), (0.1, 1.2, 0),
+                                 (0.0, 4.0, 0), (1.9, 0.1, 0.5), (0.2, 1.5, 0),
+                                 (2.5, 0.1, 2.0), (3.0, 0.1, 5.2)]:
+        st, a = S(st, reserve_s=reserve, last_byte_age_s=age, steady_s=steady, cancel=False)
+        seen.append(a)
+    assert seen == [None, None, "engage", None, None, None, None, "release"], seen
+
+
+def t_steady_since_update():
+    assert m.steady_since_update(None, None, 10.0) == 10.0
+    assert m.steady_since_update(5.0, 9.5, 10.0) == 5.0       # 0.5 s gap: still steady
+    assert m.steady_since_update(5.0, 8.0, 10.0) == 10.0      # 2.0 s gap: restart
+
+
+def t_signal_hold_enabled_env():
+    assert m.signal_hold_enabled({}) is True
+    assert m.signal_hold_enabled({"RACECAST_FEED_SIGNAL_HOLD": "0"}) is False
+
+
+def _hold_relay(director_muted=False, url="https://www.youtube.com/watch?v=x"):
+    obs = FakeObs(program="Stint")
+    obs.director_muted = director_muted
+    r = _relay_for_covers(obs)
+    r._signal_hold, r._hold, r._rebuilds = True, {}, []
+    r._rebuild_lock, r._last_freeze_ts = m.threading.Lock(), None
+    r.live_feed = lambda: "A"
+    r._note_obs_splice = lambda feed: None
+    r._record_event = lambda now, typ, label, md: obs.calls.append(("event", typ))
+
+    class Srv:
+        def consumer_backlog(self, now):
+            return 0.0
+
+        def consumer_attached(self):
+            return True
+    f = r.feeds["A"]
+    f.fanout_server = Srv()
+    f.last_byte_ts, f.steady_since = 100.0, 100.0
+    f.current_channel = lambda: (url, 2)
+    f._obs_reconnect = lambda: r._rebuilds.append("A")
+    return r, obs
+
+
+def t_hold_engage_mutes_and_records():
+    r, obs = _hold_relay()
+    r._hold_tick(101.5)                          # 1.5 s without bytes, reserve 0
+    assert r._hold_active("A") and ("mute", "Feed A", True) in obs.calls
+    assert ("event", "signal_hold") in obs.calls
+
+
+def t_hold_release_rebuilds_and_unmutes_once_obs_plays():
+    r, obs = _hold_relay()
+    r._hold_tick(101.5)
+    f = r.feeds["A"]
+    f.last_byte_ts, f.steady_since = 107.0, 101.9
+    r._hold_tick(107.1)
+    assert r._rebuilds == ["A"] and not r._hold_active("A")
+    assert ("mute", "Feed A", False) not in obs.calls     # still under the cover
+    assert r._last_freeze_ts is not None                    # claimed the rebuild cooldown
+    r._play["A"] = {"cursor": 5000, "since": 107.5}         # OBS plays again
+    r._hold_tick(109.0)
+    assert ("mute", "Feed A", False) in obs.calls
+    assert ("event", "signal_hold_end") in obs.calls
+
+
+def t_hold_release_keeps_director_mute():
+    r, obs = _hold_relay(director_muted=True)
+    r._hold_tick(101.5)
+    assert ("mute", "Feed A", True) not in obs.calls      # already muted: not ours
+    f = r.feeds["A"]
+    f.last_byte_ts, f.steady_since = 107.0, 101.9
+    r._play["A"] = {"cursor": 5000, "since": 100.0}
+    r._hold_tick(107.1)
+    r._hold_tick(109.0)
+    assert ("mute", "Feed A", False) not in obs.calls
+
+
+def t_hold_cancel_restores_only_our_mute():
+    r, obs = _hold_relay()
+    r._hold_tick(101.5)
+    r.cancel_signal_hold("A", "reset")
+    assert not r._hold_active("A") and ("mute", "Feed A", False) in obs.calls
+    assert r._rebuilds == []
+
+
+def t_hold_cancels_when_the_stint_changes():
+    r, obs = _hold_relay()
+    r._hold_tick(101.5)
+    r.feeds["A"].current_channel = lambda: ("https://www.youtube.com/watch?v=y", 4)
+    r._hold_tick(102.0)
+    assert not r._hold_active("A") and ("mute", "Feed A", False) in obs.calls
+
+
+def t_hold_never_for_a_local_stint():
+    r, obs = _hold_relay(url="local:")
+    r._hold_tick(101.5)
+    assert not r._hold_active("A")
+
+
+def t_hold_keeps_the_cover_up():
+    r, obs = _hold_relay()
+    r._play["A"] = {"cursor": 9000, "since": 90.0}          # OBS still decodes old frames
+    r._hold_tick(101.5)
+    assert r._hold_active("A")
+    obs.calls.clear()
+    r._cover_tick(101.6)
+    assert _enables(obs, scene="Stint", source="Feed A Cover", on=True)
+
+
+def t_forced_pre_show_resets_the_play_proof():
+    # The rebuild runs on a thread: the next tick must not lower the cover on the
+    # pre-rebuild play position before OBS has reopened the feed.
+    obs = FakeObs(program="Stint")
+    r = _relay_for_covers(obs)
+    _play(obs, r, "Feed A", m.COVER_PLAY_S, 100.0)
+    r._pre_show_cover("A", force=True)
+    assert r._obs_playing_s("A", 104.0) is None
+
+
+def _held_relay_without_the_rest():
+    r, _obs = _hold_relay()
+    r._hold_tick(101.5)
+    assert r._hold_active("A")
+    return r
+
+
+def t_backlog_shed_stands_down_during_a_hold():
+    r = _held_relay_without_the_rest()
+    r._backlog_shed = True                     # anything past the hold check would need
+    r._backlog_shed_tick(200.0)                # attributes this bare relay does not have
+
+
+def t_freeze_detector_stands_down_during_a_hold():
+    r = _held_relay_without_the_rest()
+    r._freeze_detect = True
+    r._freeze_tick(200.0)
+
+
+def t_director_reset_cancels_the_hold_and_raises_the_cover_first():
+    r, obs = _hold_relay()
+    r._hold_tick(101.5)
+    order = []
+    r.feeds["A"].port = 53001
+    r.feeds["A"].before_obs_reconnect = lambda: order.append("cover")
+    obs.release_feed_inputs = lambda ports=None: (order.append(("rebuild", ports)) or (["Feed A"], ""))
+    assert r.obs_feed_reset("A") == (["Feed A"], "")
+    assert order == ["cover", ("rebuild", [53001])]
+    assert not r._hold_active("A") and ("mute", "Feed A", False) in obs.calls
+
+
+def t_signal_hold_status():
+    r, obs = _hold_relay()
+    assert r.signal_hold_status("A") == {"active": False, "since": None}
+    r._hold_tick(101.5)
+    st = r.signal_hold_status("A")
+    assert st["active"] is True and st["since"] is not None
 
 
 if __name__ == "__main__":
