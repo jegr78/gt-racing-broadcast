@@ -974,6 +974,20 @@ console.log(JSON.stringify(seen));""")
         assert json.loads(out) == [[False, "A"], [True, "A"], [True]], out
 
 
+def t_signal_hold_pill_stays_through_the_settle_and_names_it():
+    # #923: the relay keeps the still up after its rejoin until OBS plays smoothly;
+    # the pill must not clear while viewers still see the still.
+    html = _html()
+    out = _run_js(_func_src(html, "holdPill") + "\n}\n" + """
+const el = {hidden: true, title: '', b: {textContent: ''}, querySelector() { return this.b; }};
+const $ = () => el;
+holdPill({feeds: {A: {signal_hold: {active: true, phase: "settling"}}, B: {}}});
+console.log(JSON.stringify([el.hidden, el.b.textContent, el.title]));""")
+    if out is not None:
+        hidden, text, title = json.loads(out)
+        assert hidden is False and text == "A" and "returning" in title.lower(), (hidden, text, title)
+
+
 def _const_line(html, name):
     i = html.index(f"const {name} =")
     return html[i:html.index(";", i) + 1]

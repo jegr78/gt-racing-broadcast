@@ -223,7 +223,10 @@ until OBS plays the new picture smoothly; then picture, sound and the HUD text r
 together and the pill disappears. The stalled seconds are skipped, so the delay stays
 what it was. A hold ends after at most one minute. A handover or a RESET ends it at once.
 Each hold is listed in the post-event report under *Signal holds*. A mute you set
-yourself stays: the relay only undoes its own. If you listen to the feed through OBS's
+yourself stays: the relay only undoes its own, and if you mute or unmute the feed from
+the panel while a hold runs, the relay leaves its sound to you (a click directly in OBS
+is not seen by the relay). The pill stays until the live picture is back; its tooltip
+says when the source has returned and the relay waits for a smooth picture. If you listen to the feed through OBS's
 own audio monitoring, you may hear OBS catching up the stalled audio during the hold;
 that never reaches the stream or a recording.
 

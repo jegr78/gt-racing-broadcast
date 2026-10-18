@@ -2848,9 +2848,22 @@ def t_get_media_status_reads_state_and_cursor():
     assert m.get_media_status("Feed A", session=Boom()) == ((None, None), "no such input")
 
 
+def t_get_scene_items_reads_a_scene_in_one_request():
+    s = _FakeSession({"GetSceneItemList": {"sceneItems": [
+        {"sourceName": "Feed A", "sceneItemEnabled": True},
+        {"sourceName": "Feed A Cover", "sceneItemEnabled": False}]}})
+    assert m.get_scene_items("Stint", session=s) == ({"Feed A": True, "Feed A Cover": False}, "")
+    assert [k for k, _ in s.sent if k != "close"] == ["GetSceneItemList"]
+
+    class Boom(_FakeSession):
+        def request(self, request_type, request_data=None):
+            raise RuntimeError("no such scene")
+    assert m.get_scene_items("Stint", session=Boom()) == ({}, "no such scene")
+
+
 def t_cover_helpers_are_routed_and_named():
     for fn in ("ensure_cover_items", "get_scene_item_enabled", "set_input_file",
-               "get_media_status"):
+               "get_media_status", "get_scene_items"):
         assert m.route_kind(fn) == "ctrl", fn
     assert m.COVER_SOURCES == {"A": "Feed A Cover", "B": "Feed B Cover"}
     assert m.COVER_SCENES == (m.STINT_SCENE, m.SPLIT_SCENE)

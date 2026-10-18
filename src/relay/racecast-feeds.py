@@ -737,6 +737,10 @@ def media_playing_s(st, now):
 
 
 MOTION_SHOT_WIDTH = 64   # a thumbnail is enough to tell a running picture from a frozen one
+# A picture that never changes (a slate, a paused replay) cannot prove motion; real-time
+# play this long counts on its own. Above the ~10 s a picture stood after a rejoin while
+# the cursor already ran (live test 2026-10-18).
+MOTION_FALLBACK_S = 15.0
 
 
 def motion_update(st, frame, now):
@@ -9864,8 +9868,10 @@ class Relay:
         return st.get("state") == "hold" or bool(st.get("settling"))
 
     def signal_hold_status(self, feed):
+        """/status: active through the hold AND its settle; `phase` hold | settling."""
         st = self._hold.get(feed, {})
-        return {"active": st.get("state") == "hold", "since": st.get("since")}
+        phase = "hold" if st.get("state") == "hold" else ("settling" if st.get("settling") else None)
+        return {"active": phase is not None, "since": st.get("since"), "phase": phase}
 
     def signal_hold_notice(self, text_source):
         """The HUD race-control override while the ON-AIR feed is held: the Sheet's
@@ -9882,6 +9888,8 @@ class Relay:
 
     def _hold_tick_locked(self, now):
         live = self.live_feed()
+        if not self._covers and self._signal_hold and _obs_ws is not None:
+            self._poll_play(now)              # the cover tick polls otherwise; a settle needs it
         for k in list(self._hold):
             if k != live and self._hold_active(k):
                 # A handover moved the held feed off air: end it, or its frozen still
@@ -9916,8 +9924,6 @@ class Relay:
                                             or st.get("stint") != idx)
         if st["state"] == "live" and not eligible:
             return
-        if not self._covers:
-            self._poll_play(now)              # otherwise the cover tick samples it
         starved = srv.consumer_starved() if srv is not None else None
         age = None if f.last_byte_ts is None else now - f.last_byte_ts
         steady = None if f.steady_since is None else now - f.steady_since
@@ -10001,6 +10007,19 @@ class Relay:
                 LOG.debug("cover before RESET on %s failed: %s", feed, exc)
         return self._obs.release_feed_inputs(ports=[f.port])
 
+    def note_director_mute(self, input_name, muted):
+        """A director (un)muted `input_name` through the relay: if a hold or its settle runs
+        on that feed, the audio is the director's now and the release leaves it alone. A
+        click directly in OBS bypasses the relay and cannot be seen here."""
+        with self._lock_state():
+            for k, src in _obs_ws.FEED_SOURCES.items():
+                st = self._hold.get(k, {})
+                if src == input_name and self._hold_active(k):
+                    st["muted_by_us"] = False
+                    st["unmute_pending"] = False
+                    LOG.info("signal hold on %s: the director %s the feed, the relay leaves "
+                             "its audio alone", k, "muted" if muted else "unmuted")
+
     def cancel_signal_hold(self, feed, reason):
         """End a hold without its own rejoin: the caller (RESET, a handover) owns OBS."""
         with self._lock_state():
@@ -10062,8 +10081,12 @@ class Relay:
         """Seconds OBS has demonstrably played the feed: its position advancing in real
         time AND its picture changing; None unless both hold."""
         played = media_playing_s(self._play.get(feed), now)
+        if played is None:
+            return None
         moving = motion_s(self._motion.get(feed), now)
-        return None if played is None or moving is None else min(played, moving)
+        if moving is None:
+            return played if played >= MOTION_FALLBACK_S else None
+        return min(played, moving)
 
     def _poll_play(self, now):
         """Sample OBS's play position of both feeds and, while it advances, a thumbnail
@@ -10099,6 +10122,9 @@ class Relay:
         self._ensure_covers(now)
         program, _note = self._obs.get_current_program_scene()
         self._poll_play(now)
+        # One GetSceneItemList per scene, fresh every tick: a cached visibility could put
+        # an off-air feed's cover over the on-air feed (review 2026-10-18).
+        items = {sc: self._obs.get_scene_items(sc)[0] for sc in _obs_ws.COVER_SCENES}
         for k, f in self.feeds.items():
             st = self._cover.get(k)
             if st is None or st.get("status") == "missing":
@@ -10107,7 +10133,7 @@ class Relay:
             want = {}
             pinned = st.get("pinned_until") is not None and now < st["pinned_until"]
             for scene in _obs_ws.COVER_SCENES:
-                shown, _note = self._obs.get_scene_item_enabled(scene, _obs_ws.FEED_SOURCES[k])
+                shown = items[scene].get(_obs_ws.FEED_SOURCES[k])
                 want[scene] = cover_visible(enabled=True, serving=serving,
                                             obs_playing_s=self._obs_playing_s(k, now),
                                             hold_active=self._hold_active(k),
@@ -13090,6 +13116,9 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     inp = body.get("input")
                     if "mute" in body:
                         ok, note = relay._obs.set_input_mute(inp, bool(body.get("mute")))
+                        note_mute = getattr(relay, "note_director_mute", None)
+                        if ok and note_mute is not None:
+                            note_mute(inp, bool(body.get("mute")))
                     elif "db" in body:
                         ok, note = relay._obs.set_input_volume(inp, body.get("db"))
                     else:
