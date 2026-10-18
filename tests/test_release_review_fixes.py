@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import types
 from unittest.mock import Mock, patch
 
@@ -140,10 +141,13 @@ def t_native_windows_change_time_tracks_preserved_mtime_writes():
         path.write_bytes(b'old')
         before = os.stat(path)
         signature = gt7_recording.file_signature(path)
+        # FILETIME's 100 ns units do not imply a new kernel clock tick per write.
+        time.sleep(.05)
         path.write_bytes(b'new')
         os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
         current = gt7_recording.file_signature(path)
-        assert current[:4] == signature[:4] and current[4] != signature[4]
+        assert current[:4] == signature[:4], (signature, current)
+        assert current[4] != signature[4], (signature, current)
 
 
 def t_windows_metadata_query_closes_handle_on_success_and_error():
