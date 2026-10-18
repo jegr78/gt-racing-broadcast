@@ -23,6 +23,16 @@ async def main():
                 await page.goto(f'http://127.0.0.1:{server.server_port}/console/race-engineer?t={token}')
                 await page.wait_for_function('() => EngineerDesk.state.pair?.state === "ready" && !EngineerDesk.state.analysisBusy')
                 await page.evaluate('() => {clearInterval(timer);state.savedB=structuredClone(state.detail);state.savedPair=structuredClone(state.pair);}')
+                await page.evaluate('() => instruments({...state.snapshot,current:{...state.snapshot.current,elapsed_s:125.678},best_s:62.345,theoretical_s:59.9996})')
+                assert await page.locator('#lap-time').inner_text() == '2:05.678'
+                assert await page.locator('#best').inner_text() == '1:02.345'
+                assert await page.locator('#theory').inner_text() == '1:00.000', 'round milliseconds before splitting minutes'
+                assert '1:02.345' in await page.evaluate('() => lapLabel({lap:2,state:"confirmed",time_s:62.345,comparison_eligible:true})')
+                assert await page.evaluate('() => {const td=document.createElement("td");cellValue(td,4.125);return td.textContent;}') == '0:04.125'
+                assert await page.evaluate('() => {const td=document.createElement("td");cellValue(td,-.125,false,"Unavailable",true);return td.textContent;}') == '-0.125'
+                assert await page.evaluate('() => [0,.004,3599.9996,null,NaN,Infinity,-1].map(lapTime)') == [
+                    '0:00.000','0:00.004','60:00.000','Unavailable','Unavailable','Unavailable','Unavailable']
+                await page.evaluate('() => instruments(state.snapshot)')
                 await page.evaluate('() => {state.savedLaps=state.laps;state.laps=[{session_id:"previous",comparison_eligible:true}];instruments({...state.snapshot,current:{...state.snapshot.current,session_id:"new"},best_s:null,theoretical_s:null});}')
                 assert await page.locator('#best').inner_text() == 'No eligible lap', 'previous session hid the empty best state'
                 assert await page.locator('#theory').inner_text() == 'No eligible lap', 'previous session hid the empty theoretical state'
@@ -55,8 +65,8 @@ async def main():
                 # The display groups the 3 m tail with the preceding 200 m block.
                 await page.evaluate('''() => {state.detail={...state.savedB,state:"confirmed",trace_complete:true,length_m:1003,trace:[{d:0,t:0,x:0,z:0},{d:1003,t:16,x:1,z:1}],sectors:[3,3,3,3,3,.02]};state.pair={compatible:true,b:state.detail,a:{...state.detail,id:"other",sectors:[3,3,3,3,3,.01]},delta:[],mini_sectors:{a:[3,3,3,3,3,.01],b:[3,3,3,3,3,.02],delta:[0,0,0,0,0,.01]}};render();}''')
                 assert await page.locator('#sectors tbody tr').count() == 5, 'tiny trailing mini-sector remained separate'
-                last=await page.locator('#sectors tbody tr').last.inner_text()
-                assert '3.010' in last and '3.020' in last and '0.010' in last, 'grouped tail lost measured times'
+                last=await page.locator('#sectors tbody tr').last.locator('td').all_text_contents()
+                assert last == ['5–6','0:03.010','0:03.020','+0.010'], 'grouped tail lost formatted times or signed delta'
                 await page.evaluate('() => {state.pair.mini_sectors.b[5]=null;render();}')
                 assert await page.locator('#sectors tbody tr').last.locator('td').nth(2).inner_text() == 'Unavailable', 'missing tail produced a summed time'
                 # Only matching reviewed definitions may show a larger-sector delta.
@@ -65,6 +75,7 @@ async def main():
                 assert await table.locator('[data-section]').count() == 3, 'reviewed sections were not structured'
                 text=await table.inner_text()
                 assert 'Opening' in text and '-1.000' in text and '1.000' in text, 'reviewed sections lost gain/loss'
+                assert 'A 0:04.000 · B 0:03.000' in text, 'reviewed section times lost the lap-clock format'
                 boxes=await page.locator('#map text[data-turn]').evaluate_all('(nodes) => nodes.map(n=>{const r=n.getBBox();return {x:r.x,y:r.y,w:r.width,h:r.height};})')
                 assert len(boxes) == 8, 'adjacent turn labels disappeared'
                 assert all(a['x']+a['w']<=b['x'] or b['x']+b['w']<=a['x'] or a['y']+a['h']<=b['y'] or b['y']+b['h']<=a['y'] for i,a in enumerate(boxes) for b in boxes[i+1:]), 'turn labels overlapped'
