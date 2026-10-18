@@ -21,6 +21,10 @@ driven during replay are absent from the live pool. With recording enabled their
 details remain recoverable from the recording through the existing shared-reference
 workflow. Without recording, those laps are lost. The desk states this limitation.
 
+Lap and sector times use **m:ss.SSS** throughout the desk and Telemetry workspace
+(for example, **2:05.678**). Time differences stay in seconds with a sign
+(for example, **+0.125 s**).
+
 Current lap, live delta, best completed time, race position and average fuel use lead
 the desk. **Avg fuel · L/lap** averages the completed, comparison-eligible laps of the
 live session (out, pit and partial laps excluded); a lap without a fuel reading is left

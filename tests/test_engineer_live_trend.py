@@ -63,10 +63,25 @@ const live = n => ({id: 'L' + n, session_id: 'S', lap: n, state: 'provisional',
 """
 
 
+def t_lap_clocks_use_minutes_and_round_across_boundaries():
+    h = _html()
+    src = "\n".join(_func_src(h, name) for name in ("lapTime", "instruments", "lapLabel"))
+    out = _run_js(_HARNESS + src + """
+instruments({current: {lap: 2, elapsed_s: 125.678}, best_s: 62.345, theoretical_s: 59.9996});
+console.log(['lap-time', 'best', 'theory'].map(id => $(id).textContent).join('|'));
+console.log(lapLabel(lap(2, 62.345)));
+console.log([0, .004, 3599.9996, null, NaN, Infinity, -1].map(lapTime).join('|'));
+""")
+    if out is not None:
+        assert out.splitlines() == [
+            '2:05.678|1:02.345|1:00.000', 'Lap 2 · 1:02.345',
+            '0:00.000|0:00.004|60:00.000|Unavailable|Unavailable|Unavailable|Unavailable']
+
+
 def t_follow_live_compares_each_lap_with_the_lap_just_completed():
     h = _html()
     src = "\n".join([_const_src(h, "AUTO_A_WAIT_MS")] + [_func_src(h, n) for n in
-                    ("lapLabel", "sameCohort", "comparable", "selections")])
+                    ("lapTime", "lapLabel", "sameCohort", "comparable", "selections")])
     out = _run_js(_HARNESS + src + """
 const seen = [];
 state.laps = [lap(3, 90), lap(4, 92)]; state.snapshot = {current: live(5)};
@@ -105,7 +120,7 @@ console.log(seen.join('|') + '|' + $('delta-trend').attrs['aria-label']);""")
 
 def t_steering_reads_degrees_with_direction():
     h = _html()
-    out = _run_js(_HARNESS + _func_src(h, "instruments") + """
+    out = _run_js(_HARNESS + _func_src(h, "lapTime") + _func_src(h, "instruments") + """
 const seen = [];
 for (const steer_rad of [0.2, -0.2, 0.001, null]) {
   instruments({instruments: {steer_rad}}); seen.push($('steer').textContent); }
@@ -117,7 +132,7 @@ console.log(seen.join('|'));""")
 def t_average_fuel_estimates_the_laps_left_on_the_current_fuel():
     h = _html()
     assert 'id="fuel-avg"' in h and h.index('id="instruments"') < h.index('id="fuel-avg"') < h.index('id="input-trace"')
-    out = _run_js(_HARNESS + _func_src(h, "instruments") + """
+    out = _run_js(_HARNESS + _func_src(h, "lapTime") + _func_src(h, "instruments") + """
 const seen = [];
 for (const [avg, laps, fuel] of [[3.0612, 12, 85.7], [3.0612, 12, null], [null, 0, 40], [2.5, 3, 0]]) {
   instruments({instruments: {fuel_l: fuel}, fuel_avg_l: avg, fuel_avg_laps: laps});
