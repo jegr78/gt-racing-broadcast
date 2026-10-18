@@ -66,7 +66,7 @@ Controls (HTTP, for Companion Generic-HTTP / browser / curl):
   Stop: Ctrl+C
 """
 
-import argparse, collections, csv, datetime, hmac, html, io, ipaddress, json, logging, math, os, random, re, secrets, shutil, signal, socket, ssl, subprocess, sys, threading, time
+import argparse, collections, csv, datetime, hashlib, hmac, html, io, ipaddress, json, logging, math, os, random, re, secrets, shutil, signal, socket, ssl, subprocess, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, quote, unquote, parse_qs, urlencode, urljoin
 from urllib.request import Request, urlopen
@@ -689,26 +689,80 @@ def auto_cover_enabled(environ):
 # cover lowers. Bytes reaching OBS are not enough: the picture waits for a keyframe
 # (live test 2026-10-18), so the proof is OBS's own play position.
 COVER_PLAY_S = 1.0
+# A cursor that moves slower than this share of real time is a stutter, not playback
+# (live test 2026-10-18: 2-3 s of stutter right after a rejoin).
+PLAY_RATE_MIN = 0.8
+PLAY_RATE_MAX = 1.25                # faster than this: OBS is catching up, not settled
 _MEDIA_PLAYING = "OBS_MEDIA_STATE_PLAYING"
 
 
 def media_play_update(st, status, now):
-    """Fold one GetMediaInputStatus sample into {"cursor", "since"}: `since` is when the
-    cursor started advancing on every sample, None while it does not (first sample,
-    frozen, restarted on a reopen, not playing, OBS unreachable). Pure."""
+    """Fold one GetMediaInputStatus sample into {"cursor", "since", "stalled_since",
+    "played"}. `since`: when the cursor started advancing on every sample, else None.
+    `played`: OBS has advanced the feed since it last (re)opened it; a cursor that goes
+    back is a reopen and clears it. `stalled_since`: when OBS stopped advancing a feed it
+    HAD played (frozen, or a known non-playing state); opening a source is never a stall
+    (live test 2026-10-18). An unreachable OBS proves nothing either way. Pure."""
+    st = st or {}
     state, cursor = status if status else (None, None)
-    prev = (st or {}).get("cursor")
+    prev, stalled, played = st.get("cursor"), st.get("stalled_since"), bool(st.get("played"))
+    prev_t = st.get("t")
+    if state is None:
+        return {"cursor": None, "since": None, "stalled_since": None, "played": False, "t": now}
     if state != _MEDIA_PLAYING or cursor is None:
-        return {"cursor": None, "since": None}
-    if prev is None or cursor <= prev:
-        return {"cursor": cursor, "since": None}
-    since = (st or {}).get("since")
-    return {"cursor": cursor, "since": now if since is None else since}
+        return {"cursor": None, "since": None, "played": played, "t": now,
+                "stalled_since": (now if stalled is None else stalled) if played else None}
+    if prev is None or cursor < prev:                        # first sample or a reopen
+        return {"cursor": cursor, "since": None, "stalled_since": None, "played": False,
+                "t": now}
+    if cursor == prev:
+        return {"cursor": cursor, "since": None, "played": played, "t": now,
+                "stalled_since": (now if stalled is None else stalled) if played else None}
+    rate = ((cursor - prev) / 1000.0 / (now - prev_t)
+            if prev_t is not None and now > prev_t else 1.0)
+    if not PLAY_RATE_MIN <= rate <= PLAY_RATE_MAX:
+        # moving, but not in real time: a stutter or a catch-up, neither stable playback
+        # nor a freeze
+        return {"cursor": cursor, "since": None, "stalled_since": None, "played": played,
+                "t": now}
+    since = st.get("since")
+    return {"cursor": cursor, "since": now if since is None else since,
+            "stalled_since": None, "played": True, "t": now}
 
 
 def media_playing_s(st, now):
     """Seconds OBS has demonstrably been playing, or None. Pure."""
     since = (st or {}).get("since")
+    return None if since is None else max(0.0, now - since)
+
+
+MOTION_SHOT_WIDTH = 64   # a thumbnail is enough to tell a running picture from a frozen one
+
+
+def motion_update(st, frame, now):
+    """Fold one source thumbnail into {"digest", "since"}: `since` is when consecutive
+    thumbnails started to differ, None on a repeat, a missing shot or the first one.
+    OBS's mediaCursor can run in real time on the audio while the picture still stands
+    after a rejoin (live test 2026-10-18), so a changing picture is the video proof."""
+    if frame is None:
+        return {"digest": None, "since": None}
+    digest = hashlib.sha1(frame).hexdigest()
+    prev = (st or {}).get("digest")
+    if prev is None or digest == prev:
+        return {"digest": digest, "since": None}
+    since = (st or {}).get("since")
+    return {"digest": digest, "since": now if since is None else since}
+
+
+def motion_s(st, now):
+    """Seconds the picture has kept changing, or None. Pure."""
+    since = (st or {}).get("since")
+    return None if since is None else max(0.0, now - since)
+
+
+def media_stalled_s(st, now):
+    """Seconds OBS has demonstrably NOT been advancing the feed, or None. Pure."""
+    since = (st or {}).get("stalled_since")
     return None if since is None else max(0.0, now - since)
 
 
@@ -725,10 +779,25 @@ def cover_visible(*, enabled, serving, obs_playing_s, hold_active, feed_item_sho
 
 # Signal hold (spec 2026-10-17 Part B): cover + mute the on-air feed while its source
 # stalls past the reserve. No extra delay: the hold skips the stall, never replays it.
-SIGNAL_HOLD_ENGAGE_IDLE_S = 1.0     # reserve empty AND no byte for this long -> hold
+SIGNAL_HOLD_ENGAGE_IDLE_S = 1.0     # OBS starved AND stopped this long -> hold
 SIGNAL_HOLD_RELEASE_STEADY_S = 5.0  # bytes steady this long -> rejoin at the live edge
-RESERVE_EMPTY_S = 0.25              # OBS within this of the newest byte: nothing left
-STEADY_GAP_S = 1.5                  # an inbound gap above this restarts "steady"
+STEADY_GAP_S = 1.5                  # floor for "a gap that restarts steady"
+HOLD_MAX_S = 60.0                   # a hold never outlives this: release + warn
+HOLD_SETTLE_S = 3.0                 # after the rejoin: real-time play before cover/mute lift
+HOLD_SETTLE_MAX_S = 30.0            # ... but never longer than this
+DEFAULT_SEGMENT_S = 5.0             # YouTube normal latency, when the probe found nothing
+
+
+def source_silent_s(segment_s):
+    """Seconds without a byte that count as a silent source. YouTube delivers whole
+    segments, so 2-5 s between bytes is normal at 5 s segments (live test 2026-10-18);
+    silence is half a segment beyond the cadence, never below 2 s. Pure."""
+    return max(2.0, 1.5 * (segment_s or DEFAULT_SEGMENT_S))
+
+
+def release_steady_s(segment_s):
+    """Seconds of steady inbound bytes before a hold releases: two segments, at least 5 s."""
+    return max(SIGNAL_HOLD_RELEASE_STEADY_S, 2.0 * (segment_s or DEFAULT_SEGMENT_S))
 
 
 def signal_hold_enabled(environ):
@@ -743,21 +812,30 @@ def steady_since_update(prev_since, last_ts, now, gap_s=STEADY_GAP_S):
     return prev_since
 
 
-def signal_hold_step(state, *, reserve_s, last_byte_age_s, steady_s, cancel,
-                     engage_idle_s=SIGNAL_HOLD_ENGAGE_IDLE_S,
-                     release_steady_s=SIGNAL_HOLD_RELEASE_STEADY_S):
+def signal_hold_step(state, *, starved, obs_stalled_s, last_byte_age_s, steady_s, cancel,
+                     held_s=0.0, segment_s=None, engage_idle_s=SIGNAL_HOLD_ENGAGE_IDLE_S):
     """LIVE <-> HOLD for one on-air feed: (new state, action), action None | "engage" |
-    "release" | "cancel". A gap the reserve absorbs never engages; a single burst after
-    a stall never releases. Pure."""
+    "release" | "cancel". Engages only when viewers would see it: OBS's play position
+    has stopped for engage_idle_s AND the source is the cause: OBS has read up to the
+    newest byte (`starved`), or the source has been silent past its own segment cadence
+    (source_silent_s; OBS may stop reading while it stalls, live test 2026-10-18). OBS
+    freezing on flowing data is the freeze detector's case, not a hold. A hold releases
+    after release_steady_s of steady bytes, and never outlives HOLD_MAX_S ("timeout"). A source gap OBS bridges from its own buffer
+    never engages (live test 2026-10-18: a 7 s stall played on unseen). A single burst
+    after a stall never releases. Pure."""
     if cancel:
         return ("live", "cancel") if state == "hold" else ("live", None)
     if state == "live":
-        if (reserve_s is not None and reserve_s <= RESERVE_EMPTY_S
-                and last_byte_age_s is not None and last_byte_age_s >= engage_idle_s):
+        silent = source_silent_s(segment_s)
+        source_silent = last_byte_age_s is not None and last_byte_age_s >= silent
+        if ((starved or source_silent)
+                and obs_stalled_s is not None and obs_stalled_s >= engage_idle_s):
             return "hold", "engage"
         return "live", None
-    if (steady_s is not None and steady_s >= release_steady_s
-            and last_byte_age_s is not None and last_byte_age_s < STEADY_GAP_S):
+    if held_s is not None and held_s >= HOLD_MAX_S:
+        return "live", "timeout"
+    if (steady_s is not None and steady_s >= release_steady_s(segment_s)
+            and last_byte_age_s is not None and last_byte_age_s < source_silent_s(segment_s)):
         return "live", "release"
     return "hold", None
 
@@ -5841,6 +5919,16 @@ class FeedFanoutServer:
                 st["cursor"] = cursor
                 st["floor"] = fold_backlog_floor(st.get("floor"), age)
 
+    def consumer_starved(self):
+        """True when OBS has read up to the newest byte, so the relay has nothing left to
+        give it; None without a consumer. The backlog cannot say this: it is the AGE of
+        OBS's position, which grows during a source stall (live test 2026-10-18)."""
+        with self._consumers_lock:
+            cursors = [st["cursor"] for st in self._consumers.values() if "cursor" in st]
+        if not cursors or not hasattr(self.ring, "live_offset"):
+            return None
+        return max(cursors) >= self.ring.live_offset()
+
     def consumer_backlog(self, now):
         """Seconds the worst consumer is behind the live edge right now, from its last
         accepted position (#583). Grows while a consumer is blocked in sendall. None when
@@ -8046,6 +8134,7 @@ class Feed:
         self.fanout_server = None     # its FeedFanoutServer (fan-out on); the freeze detector reads its snap count (#488)
         self.cover_tap = None         # FeedCoverTap writing this feed's cover still (spec 2026-10-17)
         self.before_obs_reconnect = None   # relay-set: raise the cover before a rebuild reopens OBS
+        self.defer_rejoin = None           # relay-set: True while a signal hold owns OBS's rejoin
         self.serve_generation = 0     # #614: bumped per fan-out serve, so a scheduled rejoin can tell it was superseded
         self.last_byte_ts = None      # monotonic ts of the last byte pumped into the ring (fan-out health)
         self.steady_since = None      # start of the current steady inbound run (signal hold)
@@ -8064,6 +8153,10 @@ class Feed:
         else:
             self.offline_since = None
         self.source_state = st
+
+    def steady_gap_s(self):
+        """The inbound gap that breaks a steady run for this serve's segment cadence."""
+        return source_silent_s(getattr(self, "target_duration_s", None))
 
     def take_max_inbound_gap(self):
         """Return the largest inter-arrival gap seen since the last call, and reset (#535).
@@ -8292,6 +8385,12 @@ class Feed:
                 sleep(max(0.0, prebuffer_s))       # let the burst age past the join mark
             if _stale():
                 return self._log_rejoin_skipped(gen)
+            defer = getattr(self, "defer_rejoin", None)
+            if defer is not None and defer():
+                # A signal hold covers this feed and rejoins OBS once, at its release; a
+                # second rejoin here made OBS catch up, then resync (live test 2026-10-18).
+                self.log.info("fan-out rejoin on %s left to the signal hold", self.name)
+                return None
             self._obs_reconnect_now()
             return None
         t = threading.Thread(target=_run, daemon=True)
@@ -8397,7 +8496,8 @@ class Feed:
                 first = self.last_byte_ts is None
                 _now = time.monotonic()
                 self._max_inbound_gap = update_max_gap(self._max_inbound_gap, self.last_byte_ts, _now)
-                self.steady_since = steady_since_update(self.steady_since, self.last_byte_ts, _now)
+                self.steady_since = steady_since_update(self.steady_since, self.last_byte_ts, _now,
+                                                        gap_s=self.steady_gap_s())
                 self.ring.write(chunk)
                 self.last_byte_ts = _now
                 if first and on_first_byte is not None:
@@ -8870,6 +8970,7 @@ class Relay:
         self._covers = covers_enabled(os.environ) and self.fanout and not self.solo
         self._cover = {}                  # feed -> {"status", "refreshed", "last_/applied_<scene>"}
         self._play = {}                   # feed -> media_play_update state (OBS play position)
+        self._motion = {}                 # feed -> motion_update state (OBS picture changing)
         self._cover_dir = os.path.join(os.path.dirname(os.path.abspath(logdir)), "covers")
         self._cover_ensured_ts = None
         # Signal hold (spec 2026-10-17 Part B): needs the fan-out reserve to measure.
@@ -8929,6 +9030,9 @@ class Relay:
                     f.cover_tap = FeedCoverTap(f.ring, self._cover_latest_path(k),
                                                logging.getLogger("racecast.cover." + k)).start()
                     f.before_obs_reconnect = (lambda key=k: self._pre_show_cover(key, None, True))
+            if self._signal_hold:
+                for k, f in self.feeds.items():
+                    f.defer_rejoin = (lambda key=k: self._hold.get(key, {}).get("state") == "hold")
                 self._fanout_servers.append(srv)
         for f in self.feeds.values():
             threading.Thread(target=f.run, daemon=True).start()
@@ -9741,8 +9845,10 @@ class Relay:
         self._obs.set_input_file(_obs_ws.COVER_SOURCES[feed], shown)
 
     def _hold_active(self, feed):
-        """True while a signal hold covers this feed (spec 2026-10-17 Part B)."""
-        return self._hold.get(feed, {}).get("state") == "hold"
+        """True while a signal hold covers this feed (spec 2026-10-17 Part B), including
+        the settle after its rejoin: OBS stutters for a few seconds right after it."""
+        st = self._hold.get(feed, {})
+        return st.get("state") == "hold" or bool(st.get("settling"))
 
     def signal_hold_status(self, feed):
         st = self._hold.get(feed, {})
@@ -9759,11 +9865,14 @@ class Relay:
         """One signal-hold step for the on-air feed, plus the deferred unmute of a just
         released feed, which waits until OBS plays it again (its cover is still up)."""
         for k, st in list(self._hold.items()):
-            if st.get("unmute_pending"):
+            if st.get("settling"):
                 playing = self._obs_playing_s(k, now)
-                if playing is not None and playing >= COVER_PLAY_S:
-                    self._obs.set_input_mute(_obs_ws.FEED_SOURCES[k], False)
-                    st["unmute_pending"] = False
+                settled = playing is not None and playing >= HOLD_SETTLE_S
+                if settled or now - st["settle_started"] >= HOLD_SETTLE_MAX_S:
+                    if not settled:
+                        LOG.warning("signal hold on %s: OBS did not settle within %.0f s, "
+                                    "lifting the cover anyway", k, HOLD_SETTLE_MAX_S)
+                    self._hold_unsettle(k)
         if not self._signal_hold or _obs_ws is None:
             return
         live = self.live_feed()
@@ -9773,20 +9882,37 @@ class Relay:
         st = self._hold.setdefault(live, {"state": "live"})
         url, idx = f.current_channel()
         srv = f.fanout_server
+        # Engaging needs OBS on a serving feed. A running hold survives OBS dropping its
+        # socket and the stall watchdog restarting the serve (live test 2026-10-18: OBS
+        # closed it after ~5 s of an 18 s stall); only a stint change, a stopped feed or
+        # a local stint ends it here.
         eligible = (not f.paused and f.phase == "serving" and not is_local_source(url)
-                    and srv is not None and srv.consumer_attached())
-        cancel = st["state"] == "hold" and (not eligible or st.get("stint") != idx)
+                    and srv is not None and f.consumer_attached())
+        if st.get("settling") and (f.paused or st.get("stint") != idx):
+            self._hold_unsettle(live)
+        cancel = st["state"] == "hold" and (f.paused or is_local_source(url)
+                                            or st.get("stint") != idx)
         if st["state"] == "live" and not eligible:
             return
-        reserve = srv.consumer_backlog(now) if srv is not None else None
+        if not self._covers:
+            self._poll_play(now)              # otherwise the cover tick samples it
+        starved = srv.consumer_starved() if srv is not None else None
         age = None if f.last_byte_ts is None else now - f.last_byte_ts
         steady = None if f.steady_since is None else now - f.steady_since
-        state, action = signal_hold_step(st["state"], reserve_s=reserve, last_byte_age_s=age,
-                                         steady_s=steady, cancel=cancel)
+        held = now - st["held_mono"] if st.get("held_mono") is not None else None
+        state, action = signal_hold_step(st["state"], starved=starved,
+                                         obs_stalled_s=media_stalled_s(self._play.get(live), now),
+                                         last_byte_age_s=age, steady_s=steady, cancel=cancel,
+                                         held_s=held, segment_s=f.target_duration_s)
         if action == "engage":
             self._hold_engage(live, idx)
+            st["held_mono"] = now
         elif action == "release":
-            self._hold_release(live, f)
+            self._hold_release(live, f, now)
+        elif action == "timeout":
+            LOG.warning("signal hold on %s: no steady source after %.0f s, returning to the "
+                        "live picture anyway", live, HOLD_MAX_S)
+            self._hold_release(live, f, now, how="timeout")
         elif action == "cancel":
             self._hold_end(live, "cancel")
         st["state"] = state
@@ -9803,13 +9929,22 @@ class Relay:
         self._record_event(time.time(), "signal_hold", f"Feed {feed} signal hold",
                            {"feed": feed, "stint": idx + 1})
 
-    def _hold_release(self, feed, f):
+    def _hold_unsettle(self, feed):
+        """End the post-rejoin settle: lift our mute; the cover follows its own rule."""
+        st = self._hold.get(feed, {})
+        st["settling"] = False
+        if st.get("unmute_pending"):
+            self._obs.set_input_mute(_obs_ws.FEED_SOURCES[feed], False)
+            st["unmute_pending"] = False
+
+    def _hold_release(self, feed, f, now, how="release"):
         self._hold[feed]["state"] = "live"      # the rebuild's pre-show must see no hold
         f._obs_reconnect()                      # rejoin at the live edge, under the cover
         self._note_obs_splice(feed)
         with self._rebuild_lock:
             self._last_freeze_ts = time.time()  # claim the shared rebuild cooldown
-        self._hold_end(feed, "release", unmute_later=True)
+        self._hold_end(feed, how, unmute_later=True)
+        self._hold[feed].update(settling=True, settle_started=now)
 
     def _hold_end(self, feed, how, unmute_later=False):
         st = self._hold.setdefault(feed, {})
@@ -9826,6 +9961,7 @@ class Relay:
                            {"feed": feed, "how": how, "duration_s": dur,
                             "stint": (st.get("stint") or 0) + 1})
         st["since"] = None
+        st["held_mono"] = None
 
     def obs_feed_reset(self, feed):
         """The director's RESET of one feed's OBS input (#587): end a signal hold on it,
@@ -9843,8 +9979,11 @@ class Relay:
 
     def cancel_signal_hold(self, feed, reason):
         """End a hold without its own rejoin: the caller (RESET, a handover) owns OBS."""
-        if self._hold_active(feed):
+        st = self._hold.get(feed, {})
+        if st.get("state") == "hold":
             self._hold_end(feed, reason)
+        if st.get("settling"):
+            self._hold_unsettle(feed)
 
     def cover_status(self, feed):
         """/status value: off | missing | shown | hidden."""
@@ -9856,15 +9995,21 @@ class Relay:
         """1 s tick that keeps every feed's cover in line with cover_visible. Separate
         from the 30 s heartbeat: a cover must be up before OBS opens the feed."""
         while not self._hb_stop.is_set():
-            try:
-                self._hold_tick(time.monotonic())
-            except Exception as exc:  # noqa: BLE001  best-effort; never break the loop
-                LOG.debug("signal hold tick error (ignored): %s", exc, exc_info=True)
-            try:
-                self._cover_tick(time.monotonic())
-            except Exception as exc:  # noqa: BLE001  best-effort; never break the loop
-                LOG.debug("cover tick error (ignored): %s", exc, exc_info=True)
+            for name, tick in (("signal hold", self._hold_tick), ("cover", self._cover_tick)):
+                try:
+                    tick(time.monotonic())
+                except Exception as exc:  # noqa: BLE001  best-effort; never break the loop
+                    self._warn_tick_error(name, exc)
             self._hb_stop.wait(COVER_TICK_S)
+
+    def _warn_tick_error(self, name, exc):
+        """A failing 1 s tick logs a WARNING once per distinct error, not every second:
+        a debug-only log once hid a hold that never could engage (live test 2026-10-18)."""
+        msg = f"{type(exc).__name__}: {exc}"
+        seen = self.__dict__.setdefault("_tick_errors", {})
+        if seen.get(name) != msg:
+            seen[name] = msg
+            LOG.warning("%s tick failed (it keeps running): %s", name, msg, exc_info=True)
 
     def _ensure_covers(self, now):
         """Create missing cover items: on the first tick, then every COVER_REASSERT_S
@@ -9889,16 +10034,31 @@ class Relay:
                 self.obs_note = note
 
     def _obs_playing_s(self, feed, now):
-        return media_playing_s(self._play.get(feed), now)
+        """Seconds OBS has demonstrably played the feed: its position advancing in real
+        time AND its picture changing; None unless both hold."""
+        played = media_playing_s(self._play.get(feed), now)
+        moving = motion_s(self._motion.get(feed), now)
+        return None if played is None or moving is None else min(played, moving)
+
+    def _poll_play(self, now):
+        """Sample OBS's play position of both feeds and, while it advances, a thumbnail
+        of the source (covers and the signal hold use both)."""
+        for k in self.feeds:
+            status, _note = self._obs.get_media_status(_obs_ws.FEED_SOURCES[k])
+            self._play[k] = media_play_update(self._play.get(k), status, now)
+            frame = None
+            if media_playing_s(self._play[k], now) is not None:
+                frame, _note = self._obs.get_source_screenshot(_obs_ws.FEED_SOURCES[k],
+                                                               width=MOTION_SHOT_WIDTH)
+            self._motion[k] = motion_update(self._motion.get(k), frame, now)
 
     def _cover_tick(self, now):
         if not self._covers or _obs_ws is None:
             return
         self._ensure_covers(now)
         program, _note = self._obs.get_current_program_scene()
+        self._poll_play(now)
         for k, f in self.feeds.items():
-            status, _note = self._obs.get_media_status(_obs_ws.FEED_SOURCES[k])
-            self._play[k] = media_play_update(self._play.get(k), status, now)
             st = self._cover.get(k)
             if st is None or st.get("status") == "missing":
                 continue
@@ -9954,14 +10114,18 @@ class Relay:
                 return
         else:
             self._play[feed] = None           # a rebuild reopens the feed: re-earn the proof
+            self._motion[feed] = None
         scenes = [scene] if scene else [
             sc for sc in _obs_ws.COVER_SCENES
             if self._obs.get_scene_item_enabled(sc, _obs_ws.FEED_SOURCES[feed])[0]]
         if not scenes:
             return
-        self._snapshot_cover(feed)
         st = self._cover.setdefault(feed, {})
-        st["refreshed"] = time.monotonic()
+        if not all(st.get("last_" + sc) is True for sc in scenes):
+            # Only a cover being raised gets a fresh still; one viewers already see keeps
+            # its picture (live test 2026-10-18: a release rejoin swapped the hold's still).
+            self._snapshot_cover(feed)
+            st["refreshed"] = time.monotonic()
         for sc in scenes:
             self._obs.set_scene_item_enabled(sc, _obs_ws.COVER_SOURCES[feed], True)
             st["last_" + sc], st["applied_" + sc] = True, time.monotonic()
