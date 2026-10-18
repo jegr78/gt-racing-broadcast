@@ -1310,6 +1310,8 @@ def make_handler(ctx):
                     result = {'ok': False, 'error': 'could not save context: ' + type(exc).__name__}
                 return self._context_result(result)
             if path == "/api/telemetry/delete":
+                if not self._context_allowed(mutation=True):
+                    return None
                 body = self._body_json()
                 if body is None:
                     return self._json({"ok": False, "error": self._body_error},
@@ -1323,6 +1325,8 @@ def make_handler(ctx):
                                       code=500)
                 return self._json(result, code=200 if result.get("ok") else 400)
             if path == "/api/telemetry/learn":
+                if not self._context_allowed(mutation=True):
+                    return None
                 body = self._body_json()
                 if body is None:
                     return self._json({"ok": False, "error": self._body_error},

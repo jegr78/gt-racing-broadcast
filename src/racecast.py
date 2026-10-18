@@ -4009,6 +4009,7 @@ def _telemetry_definition_dbs():
 
 def _telemetry_with_definitions(result, data, path):
     import copy
+    import gt7_recording
     import gt7_track_definitions as td
     tracks = _telemetry_definition_dbs()[0]
     store = _telemetry_definition_store()
@@ -4020,8 +4021,7 @@ def _telemetry_with_definitions(result, data, path):
         override = store.path(layout, identity['reverse'])
         for candidate in (override, os.path.join(store.bundled, os.path.basename(override))):
             try:
-                st = os.stat(candidate)
-                files.append((candidate, st.st_mtime_ns, st.st_size))
+                files.append((candidate, *gt7_recording.file_signature(candidate)))
             except FileNotFoundError:
                 files.append((candidate, None, None))
     stamp = _telemetry_stamp(path)
@@ -4105,8 +4105,8 @@ def _telemetry_data_version():
 
 
 def _telemetry_stamp(path, version=None):
-    st = os.stat(path)
-    return (st.st_size, st.st_mtime_ns,
+    import gt7_recording
+    return (*gt7_recording.file_signature(path),
             _telemetry_data_version() if version is None else version)
 
 
@@ -8965,7 +8965,11 @@ def run_ui(rest, fail=sys.exit, open_browser=True, destination="/"):
     except KeyboardInterrupt:
         pass                    # Ctrl+C is the intended way to stop the server
     finally:
-        httpd.server_close()
+        try:
+            import ai_jobs
+            ai_jobs.shutdown_background()
+        finally:
+            httpd.server_close()
     print("Control Center stopped: relay/companion/streams keep running.")
     return None
 

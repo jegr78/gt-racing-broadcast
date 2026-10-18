@@ -57,6 +57,7 @@ SUMMARY_FIELDS = frozenset((
     "layout",
     "distance_m",
     "length_m",
+    "sectors",
     "fuel_used_l",
     "top_speed_kmh",
     "line_position",
@@ -222,6 +223,12 @@ def _bounded_recording(
     context = gt7_context.Store.for_recording(path).read()
     summaries, details = collections.OrderedDict(), collections.OrderedDict()
     previous = collections.OrderedDict()
+    boundary_keys = {
+        (int(session), stint["start_lap"])
+        for session, declared in context["data"].get("sessions", {}).items()
+        for stint in declared.get("stints", [])
+    }
+    boundaries = {}
     sizes = {}
 
     def drain(wall, final=False):
@@ -230,7 +237,7 @@ def _bounded_recording(
             if (
                 not final
                 and raw.get("gt7_time_s") is None
-                and wall < raw["end"] + gt7_recording.GT7_TIME_WINDOW_S
+                and replay.times.waiting(raw, wall)
                 and len(replay.laps) <= PENDING_MAX
             ):
                 break
@@ -251,12 +258,21 @@ def _bounded_recording(
                 found,
                 after_service=previous.get(raw["session"], (None, False))[1],
             )
+            preceding = previous.get(raw["session"], (None, False))[0]
             previous[raw["session"]] = (raw["lap"], raw["pit"])
             while len(previous) > SESSIONS_MAX:
                 previous.popitem(last=False)
             row["measurement_hash"] = _measurement_hash(row)
+            key = (row["session"], row["lap"])
+            if key in boundary_keys:
+                # Retain only declared service boundaries, independently of the
+                # bounded summary/detail caches. Later warmup laps need them.
+                boundaries[key] = {
+                    k: row[k] for k in ("start_t_s", "end_t_s", "capture_complete")
+                }
             row = dict(
-                gt7_context.annotate(context["data"], row),
+                gt7_context.annotate(context["data"], row, lap_lookup=boundaries,
+                                     previous_lap=preceding),
                 context_revision=context["revision"],
             )
             row = _decorate(row, context["data"], definitions, tracks)
@@ -616,7 +632,7 @@ class Store:
             lap = replay.laps[0]
             if (
                 lap.get("gt7_time_s") is None
-                and wall < lap["end"] + gt7_recording.GT7_TIME_WINDOW_S
+                and replay.times.waiting(lap, wall)
             ):
                 if len(replay.laps) <= PENDING_MAX:
                     break
@@ -855,14 +871,6 @@ class Store:
         self._revision += 1
         doc = self._empty()
         sid = current["session_id"] if current else None
-        pool = [
-            r
-            for r in self._details.values()
-            if r["session_id"] == sid
-            and r.get("comparison_eligible")
-            and r["state"] == "confirmed"
-            and gt7_context.compatible(current or {}, r)
-        ]
         eligible = [
             r
             for r in self._summaries.values()
@@ -884,7 +892,7 @@ class Store:
             shifts=self._shifts.snapshot(),
             fuel_avg_l=fuel_avg,
             fuel_avg_laps=fuel_laps,
-            theoretical_s=gt7_laps.theoretical_best(pool),
+            theoretical_s=gt7_laps.theoretical_best(eligible),
             warnings=[self._context_error] if self._context_error else [],
         )
         digest = hashlib.sha256(

@@ -37,7 +37,8 @@ Loaded when working under `src/ui/`.
   `src/docs/design/telemetry-workspace.md`. Lap comparison uses the selected
   analysis profile's GT7 recordings. `src/scripts/gt7_laps.py` builds a lap
   index per recording (5 m traces, 200 m sectors), cached as `<stem>.laps.json` and
-  rebuilt when the recording's size/mtime or `gt7_data.data_version` change; the data
+  rebuilt when the recording's file identity, size, nanosecond mtime/ctime or
+  `gt7_data.data_version` change; the data
   layer also memoises up to 4096 index summaries per process (`_telemetry_index`). One
   Set track changes `data_version` (it stats `learned-tracks.json`), so every index of the
   profile needs a rebuild, about 16 s per 3 h recording. No request builds an index: the
@@ -59,7 +60,8 @@ Loaded when working under `src/ui/`.
   Generate runs `racecast report generate` as the `report-generate` job and reads the
   written file through `GET /api/report/read?name=`. A counted lap's trace closes at
   the full lap length with a common zero-based, lap-normalized receiver clock, so its
-  sectors add up without a backwards closing point. Index version 9 retains sparse recording seek offsets and separates capture
+  sectors add up without a backwards closing point. Index version 10 binds sparse
+  recording seek offsets to the original file and complete recording header, and separates capture
   completeness, trace coverage, roles, pace eligibility and historical reference status.
   Known-layout completeness is checked against original driven coverage and the
   first projected station before trace normalization. Incomplete captures cannot

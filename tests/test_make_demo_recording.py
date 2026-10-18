@@ -69,7 +69,11 @@ def t_demo_recording_is_recognised_and_laps_trade_sectors():
         timed = [lap for lap in idx["laps"] if lap["status"] in gt7_laps.COUNTED]
         assert len(timed) == 3, [(lap["lap"], lap["status"], lap["reason"]) for lap in idx["laps"]]
         assert {lap["track_id"] for lap in timed} == {row["official_id"]}, idx["sessions"]
-        assert len({lap["time_s"] for lap in timed}) == 3, "every lap has its own time"
+        expected = [round(seconds, 3) for seconds in out["lap_times"]]
+        assert [lap["gt7_time_s"] for lap in timed] == expected, \
+            "preserve the generated official times, including consecutive ties"
+        assert [lap["time_s"] for lap in timed] == expected, \
+            "a tie must not fall back to a different receiver-clock duration"
         a, b = timed[0]["sectors"], timed[1]["sectors"]
         diffs = [y - x for x, y in zip(a, b, strict=False) if x is not None and y is not None]
         assert any(v < 0 for v in diffs) and any(v > 0 for v in diffs), \
