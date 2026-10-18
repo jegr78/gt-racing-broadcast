@@ -1969,10 +1969,16 @@ function healthLine(name, f){
   }
   return "";
 }
-function statePill(el, label, stint, n, state, down){
+function statePill(el, label, stint, n, state, down, feed){
   let [txt, cls, short] = FEED_STATE[state] || ["", "", ""];
+  // Spec 2026-10-17: an ultra-low-latency source is stall-prone; amber + ULL tag so it
+  // is fixed before air. A lost serve (red) outranks the hint.
+  const ull = !!(feed && feed.ultra_low_latency) && !down;
+  if (ull){ txt += " · ULL"; short += " ULL"; cls = "warn"; }
   if (down){ txt = short = "DOWN"; cls = "air"; }     // lost live serve -> red pill
   el.className = "st" + (cls ? " " + cls : "");
+  el.title = ull ? "Ultra-low latency (" + feed.target_duration_s + " s segments): stall-prone. "
+    + "Ask the commentator to switch to Low latency." : "";
   el.innerHTML = label + " <b>" + stint + "</b>"
     + '<span class="stl">' + (n ? "/" + n : "") + (txt ? " · " + txt : "") + "</span>"
     + (short ? '<span class="sts">' + short + "</span>" : "");
@@ -2114,8 +2120,8 @@ async function relayPoll(){
     resetLabel(d);
     const n = d.schedule_len;
     if (!solo){
-      statePill($("#stA"), "A", "S" + d.feeds.A.stint, n, d.feeds.A.state, d.feeds.A.down);
-      statePill($("#stB"), "B", "S" + d.feeds.B.stint, n, d.feeds.B.state, d.feeds.B.down);
+      statePill($("#stA"), "A", "S" + d.feeds.A.stint, n, d.feeds.A.state, d.feeds.A.down, d.feeds.A);
+      statePill($("#stB"), "B", "S" + d.feeds.B.stint, n, d.feeds.B.state, d.feeds.B.down, d.feeds.B);
       // ARM/STOP live in each feed row: show them only in manual-arm mode, and
       // green-highlight the ARM button of a feed that is currently armed. (#492)
       document.querySelectorAll("#feedQuality .armbtn").forEach(b => {

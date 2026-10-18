@@ -205,6 +205,13 @@ been connecting for more than ~30 seconds the line turns amber and warns
 the exact error from the producer's machine is appended when there is one.
 The POV feed joins the line while it is connecting or serving.
 
+A feed pill turns amber with **`ULL`** (`A S3 · LIVE · ULL`) when the commentator's
+YouTube stream runs in *ultra-low latency*: its HLS segments are 1 s long, and such
+streams drop and stall more often (hover the pill for the details). It shows as soon as
+the feed serves, so for the next stint it already appears after ARM, while there is
+still time to ask the commentator to switch the stream's latency setting. Twitch and
+local stints never show it.
+
 **BEHIND LIVE** shows how far OBS is behind the live edge of the feeds it plays, worst
 feed first (`A 3.1 s`; hover for every feed). It appears once a feed is serving OBS. About 3 s is normal: the relay holds that
 reserve on purpose. The pill turns amber when OBS falls more than 5 s behind that,

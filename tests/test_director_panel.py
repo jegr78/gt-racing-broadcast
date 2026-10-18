@@ -934,6 +934,32 @@ def t_strip_refits_when_adjacent_content_changes_its_available_width():
             browser.close()
 
 
+def t_state_pill_flags_an_ultra_low_latency_feed():
+    # Spec 2026-10-17 Part A: an ultra-low-latency source turns its feed pill amber
+    # with a ULL tag and a tooltip that says what to ask the commentator. A DOWN
+    # feed stays red: the outage outranks the hint.
+    html = _html()
+    src = _const_line(html, "FEED_STATE") + "\n" + _func_src(html, "statePill") + "\n}\n"
+    out = _run_js(src + """
+const mk = () => ({className: '', innerHTML: '', title: ''});
+const a = mk(), b = mk(), c = mk();
+statePill(a, "A", "S3", 3, "serving", false, {ultra_low_latency: true, target_duration_s: 1});
+statePill(b, "B", "S4", 3, "serving", false, {ultra_low_latency: false});
+statePill(c, "A", "S3", 3, "serving", true, {ultra_low_latency: true, target_duration_s: 1});
+console.log(JSON.stringify([a, b, c]));""")
+    if out is not None:
+        a, b, c = json.loads(out)
+        assert a["className"] == "st warn" and "ULL" in a["innerHTML"], a
+        assert "Low latency" in a["title"], a
+        assert b["className"] == "st ok" and "ULL" not in b["innerHTML"] and b["title"] == "", b
+        assert c["className"] == "st air", c
+
+
+def _const_line(html, name):
+    i = html.index(f"const {name} =")
+    return html[i:html.index(";", i) + 1]
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
