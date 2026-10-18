@@ -495,15 +495,30 @@ class LapTimeMatcher:
     def lap_closed(self, lap, wall_ts):
         """Register a lap the engine closed on this packet; call before update()."""
         lap["gt7_time_s"] = None
-        self._waiting.append((lap, wall_ts + GT7_TIME_WINDOW_S, self._prev_last_ms))
+        gap = max(lap.get("max_packet_gap_s", 0.0), wall_ts - lap["end"])
+        repeated = (lap.get("capture_complete") and lap.get("data_quality") == "ok"
+                    and gt7_telemetry.repeated_time_matches(
+                        self._prev_last_ms, wall_ts - lap["start"], gap))
+        self._waiting.append((lap, wall_ts + GT7_TIME_WINDOW_S, self._prev_last_ms, repeated))
+
+    def waiting(self, lap, wall_ts):
+        """Keep a closed lap pending through its actual publication deadline."""
+        # The idle worker must not evict a compatible tie just before its next
+        # packet arrives. Actual packets still expire changed/invalid values at
+        # the publication deadline; the grace is bounded by the packet-gap rule.
+        return any(item[0] is lap and wall_ts < item[1] + (
+            gt7_telemetry.MAX_PACKET_GAP_S if item[3] else 0.0)
+            for item in self._waiting)
 
     def update(self, pkt, wall_ts):
         for item in list(self._waiting):
-            lap, deadline, before = item
-            if pkt.last_ms > 0 and pkt.last_ms != before:
-                lap["gt7_time_s"] = pkt.last_ms / 1000.0
+            lap, deadline, before, repeated = item
+            value = gt7_telemetry.reported_lap_time(
+                pkt, before, deadline, wall_ts, lap["lap"] + 1, lap["car_id"], repeated)
+            if value is not None:
+                lap["gt7_time_s"] = value
                 self._waiting.remove(item)
-            elif wall_ts > deadline:
+            elif wall_ts >= deadline:
                 self._waiting.remove(item)
         self._prev_last_ms = pkt.last_ms
 

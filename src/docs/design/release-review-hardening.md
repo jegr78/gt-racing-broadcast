@@ -48,3 +48,31 @@ through `GetFileInformationByHandleEx`. Native-query failures propagate rather
 than silently reverting to a creation-time signature. A native Windows regression
 checks timestamp-preserving writes; modeled metadata and error/handle-cleanup
 tests run on every platform.
+
+## Further v1.13.0 analysis corrections
+
+The subsequent release review selected three more corrections. Regressions in
+`tests/test_release_analysis_fixes.py` exercise recorded packets, the live/HUD
+consumers and the public Engineer service without private captures.
+
+| Finding | Required behavior | Verification |
+| --- | --- | --- |
+| R1, equal consecutive lap times | Preserve tied reported times in archive, live preparation and HUD, without accepting the previous time at the line | Equal-time packet recording, delayed publication, stale/different times, incomplete captures and changed lap/car/state |
+| R2, recovered context | Recovered references use the same service-boundary and warmup rules as archive analysis | Public reference recovery after summary eviction, with a timed stint boundary |
+| R3, theoretical time retention | Evicting full traces does not discard eligible historical mini-sector times | Default 16-detail eviction and a separate multi-lap sector composition below the actual best lap |
+
+An unchanged `last_ms` field alone does not identify a new official time. A tie
+waits for the full existing three-second publication window, requires a clean
+complete capture and a packet from the next lap in the same car, on track and
+neither paused nor loading. The reported duration must fit the receiver-clock
+lap duration within two observed packet intervals plus millisecond rounding.
+This conservative boundary check can leave a timing-ambiguous tie unconfirmed;
+it does not independently measure simulation time. Changed values arriving after
+the publication deadline remain unavailable. Index version 11 rebuilds old lap
+indexes and carries the observed packet interval through incremental resume.
+
+Reference recovery retains only the recorded start/end/completeness of explicitly
+declared stint boundary laps, independently of its bounded summary/detail caches.
+Live summaries retain mini-sector times alongside lap length; best and theoretical
+figures use the same eligible, context-compatible summary pool. Public thin
+responses continue to omit sector arrays and traces.

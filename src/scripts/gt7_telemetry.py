@@ -88,6 +88,7 @@ SESSION_JUMP_M = 500.0    # metres between on-track positions that only a new tr
 POINT_STEP_M = 20.0       # metres between kept positions (track recognition)
 MIN_TRACK_POINTS = 10     # fewest points a lap needs to name or learn a track
 GT7_TIME_WINDOW_S = 3.0   # GT7 updates last_ms shortly after the line
+MAX_PACKET_GAP_S = 2.0
 MAX_POINTS = int(MAX_SAMPLES * SAMPLE_MIN_DIST / POINT_STEP_M)  # same distance ceiling as samples
 
 # A pit (in/out) lap is not representative: its time is inflated by the pit-lane
@@ -98,6 +99,33 @@ MAX_POINTS = int(MAX_SAMPLES * SAMPLE_MIN_DIST / POINT_STEP_M)  # same distance 
 STOPPED_SPEED_MPS = 0.5   # at/below this the car counts as stationary
 PIT_STOP_MIN_S = 2.0      # cumulative standstill (s) that marks a pit lap
 FUEL_RISE_L = 0.05        # litres; fuel_end above fuel_start by this = a refuel
+
+
+def repeated_time_matches(last_ms, duration, packet_gap):
+    """A tied reported time must fit the observed lap's two sampled boundaries.
+
+    This is a conservative receiver-clock check, not an independent GT7 timer.
+    Each boundary can be uncertain by one observed packet interval, plus the
+    reported timer's millisecond rounding. A stale, different lap stays unknown.
+    """
+    return (isinstance(last_ms, int) and last_ms > 0
+            and math.isfinite(duration) and math.isfinite(packet_gap)
+            and 0 < packet_gap <= MAX_PACKET_GAP_S
+            and abs(last_ms / 1000.0 - duration) <= 2 * packet_gap + .001)
+
+
+def reported_lap_time(pkt, before, deadline, now, next_lap, car_id, repeated):
+    """Changed values settle immediately; compatible ties wait the whole window."""
+    if pkt.last_ms <= 0:
+        return None
+    if pkt.last_ms != before:
+        return pkt.last_ms / 1000.0 if now <= deadline else None
+    if (repeated and deadline <= now <= deadline + MAX_PACKET_GAP_S
+            and pkt.lap == next_lap and pkt.car_id == car_id
+            and pkt.on_track and not pkt.paused and not pkt.loading):
+        return pkt.last_ms / 1000.0
+    return None
+
 
 GT7Packet = namedtuple("GT7Packet", [
     "speed_mps", "fuel_level", "fuel_capacity", "tyre_temp",
@@ -265,7 +293,7 @@ class _LapAccumulator:
     Only the latter may become a completed/reference lap (see _finalise_lap)."""
     __slots__ = ("t0", "elapsed", "distance", "samples", "clean", "last_t",
                  "fuel_start", "fuel_end", "started_at_boundary", "pit", "stopped_s",
-                 "why", "reasons", "top_speed", "points", "next_point_m")
+                 "why", "reasons", "top_speed", "points", "next_point_m", "max_packet_gap_s")
 
     def __init__(self, now, started_at_boundary=False):
         self.t0 = now
@@ -284,6 +312,7 @@ class _LapAccumulator:
         self.top_speed = 0.0
         self.points = []              # (x, z) every POINT_STEP_M (track recognition)
         self.next_point_m = 0.0
+        self.max_packet_gap_s = 0.0
 
     def _reject(self, why, pit=False):
         if pit:
@@ -300,9 +329,10 @@ class _LapAccumulator:
         self.last_t = now
         if dt <= 0:
             return
-        if dt > 2.0:                  # a long gap (stall/menu) makes the lap time unreliable
+        if dt > MAX_PACKET_GAP_S:     # a long gap makes the lap time unreliable
             self._reject("data gap over 2 s")
             return
+        self.max_packet_gap_s = max(self.max_packet_gap_s, dt)
         if pkt.paused or pkt.loading or not pkt.on_track:
             self._reject("paused, loading or off track")
             return
@@ -425,9 +455,9 @@ class TelemetryEngine:
         elif (boundary := self._session_boundary(pkt)) is not None:
             self._reset_session(now, pkt, at_line=boundary == "line")
         elif pkt.lap != self._lap_num:    # lap-change edge: this new lap starts at the line
-            if self._acc is not None and now - self._acc.last_t > 2.0:
+            if self._acc is not None and now - self._acc.last_t > MAX_PACKET_GAP_S:
                 self._acc._reject("data gap over 2 s")
-            self._finalise_lap(pkt)
+            self._finalise_lap(pkt, now)
             if self._acc is not None:     # bank the closing lap's driven distance
                 self._session_dist_m += self._acc.distance
             self._lap_num = pkt.lap
@@ -518,6 +548,7 @@ class TelemetryEngine:
                   "points": list(acc.points), "distance_m": acc.distance,
                   "capture_complete": bool(closed and acc.started_at_boundary),
                   "data_quality": "ok" if acc.clean else "interrupted",
+                  "max_packet_gap_s": acc.max_packet_gap_s,
                   "pit": acc.pit,
                   "reasons": list(dict.fromkeys(acc.reasons + ([reason] if reason else [])))}
         return record
@@ -557,7 +588,7 @@ class TelemetryEngine:
         except Exception as e:  # noqa: BLE001  bad track data must not stop the telemetry
             LOG.warning("GT7 track recognition failed: %s", e)
 
-    def _finalise_lap(self, line_packet=None):
+    def _finalise_lap(self, line_packet=None, closed_at=None):
         acc = self._acc
         if acc is None:
             return
@@ -579,7 +610,13 @@ class TelemetryEngine:
             return
         new_ref = self._ref is None or acc.elapsed < self._ref["time"]
         before = self._last.last_ms if self._last is not None else None
-        self._official["pending"] = (new_ref, acc.elapsed, before, acc.last_t + GT7_TIME_WINDOW_S)
+        edge = acc.last_t if closed_at is None else closed_at
+        repeated = repeated_time_matches(before, edge - acc.t0,
+                                         max(acc.max_packet_gap_s, edge - acc.last_t))
+        self._official["pending"] = (
+            new_ref, acc.elapsed, before, edge + GT7_TIME_WINDOW_S,
+            line_packet.lap if line_packet is not None else None,
+            self._last.car_id if self._last is not None else None, repeated)
         if new_ref:
             self._ref = {"time": acc.elapsed, "samples": acc.samples}
             self._official["ref"] = None
@@ -629,16 +666,16 @@ class TelemetryEngine:
         official = self._official
         if official["pending"] is None:
             return
-        is_ref, elapsed, before, deadline = official["pending"]
-        if now > deadline:
-            official["pending"] = None
-        elif pkt.last_ms > 0 and pkt.last_ms != before:
-            t = pkt.last_ms / 1000.0
+        is_ref, elapsed, before, deadline, next_lap, car_id, repeated = official["pending"]
+        t = reported_lap_time(pkt, before, deadline, now, next_lap, car_id, repeated)
+        if t is not None:
             official["pending"] = None
             official["correction"] += t - elapsed
             official["best"] = t if official["best"] is None else min(official["best"], t)
             if is_ref:
                 official["ref"] = t
+        elif now >= deadline:
+            official["pending"] = None
 
     def _avg_lap_s(self):
         """Session mean of the admitted clean laps (s), GT7's time where known; None before any lap."""
