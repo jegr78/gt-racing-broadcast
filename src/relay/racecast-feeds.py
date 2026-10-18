@@ -701,6 +701,16 @@ def cover_visible(*, enabled, serving, consumer_flowing_s, hold_active, feed_ite
                 and consumer_flowing_s >= COVER_READY_S)
 
 
+COVER_TICK_S = 1.0         # the cover (and signal-hold) loop cadence
+COVER_REFRESH_S = 5.0      # re-point the image input at most this often while shown
+COVER_REASSERT_S = 30.0    # re-send an unchanged state to heal a lost request; retry ensure
+
+
+def covers_enabled(environ):
+    """Feed covers (spec 2026-10-17 Part C), default ON; RACECAST_FEED_COVERS=0 disables."""
+    return (environ.get("RACECAST_FEED_COVERS") or "").strip().lower() not in _FANOUT_FALSEY
+
+
 def auto_cover_action(enabled, source_state, offline_since, now, settle_s,
                       cover_shown, auto_owned, cover_fired,
                       program_scene, on_air_scene="Stint"):
@@ -4724,6 +4734,8 @@ def _apply_split_intents(relay, obs_ws, audio_only):
                                                  extra_mute=extra_mute)
     if audio_only:
         intents = [(v, t) for v, t in intents if v in ("mute", "unmute")]
+    else:
+        _pre_show_covers(relay, ("A", "B"), _OBS_WS_MODULE.SPLIT_SCENE)
     payload, status = _apply_obs_intents(obs_ws, _OBS_WS_MODULE.SPLIT_SCENE, intents)
     payload["live"] = live
     if audio_only:
@@ -4732,6 +4744,20 @@ def _apply_split_intents(relay, obs_ws, audio_only):
     else:
         payload.pop("hide", None)                 # a Splitscreen hides nothing
     return payload, status
+
+
+def _pre_show_covers(relay, feeds, scene):
+    """Raise the feeds' covers in `scene` before a cut shows them (spec 2026-10-17 Part
+    C), so OBS's black while it opens a source is never seen. Best effort: a relay
+    without covers (or a test double) is skipped, and a failure never blocks the cut."""
+    pre = getattr(relay, "_pre_show_cover", None)
+    if pre is None:
+        return
+    for feed in feeds:
+        try:
+            pre(feed, scene)
+        except Exception as exc:              # noqa: BLE001  never block the cut
+            LOG.debug("cover pre-show %s/%s failed: %s", feed, scene, exc)
 
 
 def _apply_obs_intents(obs_ws, scene, intents):
@@ -4804,6 +4830,7 @@ def apply_stint_state(relay, obs_ws, feed, take=False):
     intents = _OBS_WS_MODULE.feed_state_intents(
         feed, False, audio=audio,
         extra_mute=list(extra_mute) + [_OBS_WS_MODULE.SPLIT_DISCORD_INPUT])
+    _pre_show_covers(relay, (feed,), _OBS_WS_MODULE.STINT_SCENE)
     payload, status = _apply_obs_intents(obs_ws, _OBS_WS_MODULE.STINT_SCENE, intents)
     payload["feed"] = feed
     if take and status == 200:
@@ -7955,6 +7982,7 @@ class Feed:
         self.target_duration_s = None     # HLS #EXT-X-TARGETDURATION of the current serve (spec 2026-10-17)
         self.ring = None              # set by the relay when fan-out is enabled (#358); None → direct-serve
         self.fanout_server = None     # its FeedFanoutServer (fan-out on); the freeze detector reads its snap count (#488)
+        self.cover_tap = None         # FeedCoverTap writing this feed's cover still (spec 2026-10-17)
         self.serve_generation = 0     # #614: bumped per fan-out serve, so a scheduled rejoin can tell it was superseded
         self.last_byte_ts = None      # monotonic ts of the last byte pumped into the ring (fan-out health)
         self._max_inbound_gap = 0.0   # #535: largest inter-arrival gap this heartbeat interval
@@ -8767,6 +8795,11 @@ class Relay:
         self._fz_prev_cursor = None
         self._fz_ratios = []
         self._rebuild_guard = RebuildGuard()   # #582 effectiveness guard for that rebuild
+        # Feed covers (spec 2026-10-17 Part C): a still over each feed while OBS (re)opens it.
+        self._covers = covers_enabled(os.environ) and self.fanout and not self.solo
+        self._cover = {}                  # feed -> {"status", "refreshed", "last_/applied_<scene>"}
+        self._cover_dir = os.path.join(os.path.dirname(os.path.abspath(logdir)), "covers")
+        self._cover_ensured_ts = None
         self._rebuild_stood_down_feed = None   # the feed the guard stood down on
         self._rebuild_lock = threading.Lock()  # sampler thread vs. the director's re-arm
         self._prev_snaps = {}             # feed_key -> last consumer cursor-snap count
@@ -8816,6 +8849,10 @@ class Relay:
                                        prebuffer_s=self.feed_prebuffer_s)
                 srv.start()
                 f.fanout_server = srv          # #488: the freeze detector reads its consumer snap count
+            if self._covers:
+                for k, f in self.feeds.items():
+                    f.cover_tap = FeedCoverTap(f.ring, self._cover_path(k),
+                                               logging.getLogger("racecast.cover." + k)).start()
                 self._fanout_servers.append(srv)
         for f in self.feeds.values():
             threading.Thread(target=f.run, daemon=True).start()
@@ -8824,6 +8861,8 @@ class Relay:
         threading.Thread(target=self._heartbeat_loop, daemon=True).start()
         self._net_floor.start()
         threading.Thread(target=self._auto_cover_loop, daemon=True).start()
+        if self._covers:
+            threading.Thread(target=self._cover_loop, daemon=True).start()
         self._start_av_watcher()
         if self.fanout:                   # #488 freeze detector only applies to the fan-out demuxer
             threading.Thread(target=self._freeze_sampler_loop, daemon=True).start()
@@ -9594,6 +9633,101 @@ class Relay:
         if ss is None:
             self._cover_auto_owned = False
 
+    # --- Feed covers (spec 2026-10-17 Part C) -------------------------------------------
+    def _cover_path(self, feed):
+        return os.path.join(self._cover_dir, f"feed-{feed.lower()}.jpg")
+
+    def _hold_active(self, feed):
+        """True while a signal hold covers this feed (spec 2026-10-17 Part B)."""
+        return False
+
+    def cover_status(self, feed):
+        """/status value: off | missing | shown | hidden."""
+        if not self._covers:
+            return "off"
+        return self._cover.get(feed, {}).get("status", "missing")
+
+    def _cover_loop(self):
+        """1 s tick that keeps every feed's cover in line with cover_visible. Separate
+        from the 30 s heartbeat: a cover must be up before OBS opens the feed."""
+        while not self._hb_stop.is_set():
+            try:
+                self._cover_tick(time.monotonic())
+            except Exception as exc:  # noqa: BLE001  best-effort; never break the loop
+                LOG.debug("cover tick error (ignored): %s", exc, exc_info=True)
+            self._hb_stop.wait(COVER_TICK_S)
+
+    def _ensure_covers(self, now):
+        """Create missing cover items: on the first tick, then every COVER_REASSERT_S
+        while any feed's cover is still missing (OBS started late, an old collection)."""
+        if self._cover_ensured_ts is not None and (
+                now - self._cover_ensured_ts < COVER_REASSERT_S
+                or all(self.cover_status(k) != "missing" for k in self.feeds)):
+            return
+        self._cover_ensured_ts = now
+        for k in self.feeds:
+            report, note = self._obs.ensure_cover_items(
+                _obs_ws.FEED_SOURCES[k], _obs_ws.COVER_SOURCES[k], self._cover_path(k),
+                scenes=_obs_ws.COVER_SCENES)
+            st = self._cover.setdefault(k, {"refreshed": None})
+            if not any(v in ("ok", "created") for v in report.values()):
+                st["status"] = "missing"
+            elif st.get("status") in (None, "missing"):
+                st["status"] = "hidden"       # found or created; the tick decides from here
+                if "created" in report.values():
+                    LOG.info("Feed %s cover created in OBS (%s)", k, report)
+            if note:
+                self.obs_note = note
+
+    def _cover_tick(self, now):
+        if not self._covers or _obs_ws is None:
+            return
+        self._ensure_covers(now)
+        for k, f in self.feeds.items():
+            st = self._cover.get(k)
+            if st is None or st.get("status") == "missing":
+                continue
+            srv = f.fanout_server
+            flowing = srv.consumer_flowing_s(now) if srv is not None else None
+            serving = not f.paused and f.phase == "serving"
+            for scene in _obs_ws.COVER_SCENES:
+                shown, _note = self._obs.get_scene_item_enabled(scene, _obs_ws.FEED_SOURCES[k])
+                want = cover_visible(enabled=True, serving=serving, consumer_flowing_s=flowing,
+                                     hold_active=self._hold_active(k),
+                                     feed_item_shown=bool(shown))
+                self._apply_cover(k, scene, want, now, st)
+
+    def _apply_cover(self, feed, scene, want, now, st):
+        """Send one scene's cover state, only on a change or every COVER_REASSERT_S, and
+        reload the still (at most every COVER_REFRESH_S) before showing it."""
+        applied = st.get("applied_" + scene)
+        if st.get("last_" + scene) == want and applied is not None and now - applied < COVER_REASSERT_S:
+            return
+        if want and (st.get("refreshed") is None or now - st["refreshed"] >= COVER_REFRESH_S):
+            self._obs.set_input_file(_obs_ws.COVER_SOURCES[feed], self._cover_path(feed))
+            st["refreshed"] = now
+        ok, note = self._obs.set_scene_item_enabled(scene, _obs_ws.COVER_SOURCES[feed], want)
+        if not ok:
+            self.obs_note = note or self.obs_note
+            return
+        st["last_" + scene], st["applied_" + scene] = want, now
+        st["status"] = ("shown" if any(st.get("last_" + s) for s in _obs_ws.COVER_SCENES)
+                        else "hidden")
+
+    def _pre_show_cover(self, feed, scene):
+        """Before a cut makes `feed` visible in `scene`, raise its cover there so OBS's
+        first black frames are never seen. Skipped when OBS already plays the feed (a
+        Splitscreen -> Stint cut keeps the input open). Best effort; the tick lowers it."""
+        if not self._covers or _obs_ws is None or self.cover_status(feed) == "missing":
+            return
+        f = self.feeds.get(feed)
+        srv = f.fanout_server if f is not None else None
+        flowing = srv.consumer_flowing_s(time.monotonic()) if srv is not None else None
+        if flowing is not None and flowing >= COVER_READY_S:
+            return
+        self._obs.set_input_file(_obs_ws.COVER_SOURCES[feed], self._cover_path(feed))
+        self._obs.set_scene_item_enabled(scene, _obs_ws.COVER_SOURCES[feed], True)
+
     def status(self):
         now = time.time()
         self._maybe_probe_obs(now)
@@ -9625,6 +9759,7 @@ class Relay:
                                "profile": f.quality_tier,
                                "pinned": f.quality_pinned,
                                **latency_status_fields(f.target_duration_s),
+                               "cover": self.cover_status(k),
                                "quality": getattr(f, "quality", None),
                                **self._backlog_status(k, f)}
         if self.pov:
@@ -9929,6 +10064,7 @@ class Relay:
         audio, extra_mute = self.obs_audio_plan()
 
         def run():
+            _pre_show_covers(self, (live,), _OBS_WS_MODULE.STINT_SCENE)
             _applied, note = self._obs.reflect_feed_state(
                 live, cut, audio=audio, extra_mute=extra_mute,
                 transition=transition, duration_ms=duration_ms)

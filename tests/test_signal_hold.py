@@ -221,6 +221,174 @@ def t_note_send_starts_and_extends_the_flow():
     assert 99 not in srv._consumers
 
 
+class FakeObs:
+    """The obs_ws calls the cover and hold ticks make, recorded; never a socket."""
+
+    def __init__(self, missing=False, feed_shown=True):
+        self.calls, self.missing, self.feed_shown = [], missing, feed_shown
+        self.director_muted = False
+
+    def ensure_cover_items(self, feed, cover, path, scenes=None):
+        self.calls.append(("ensure", cover))
+        state = "no-feed" if self.missing else "ok"
+        return {s: state for s in (scenes or ("Stint", "Splitscreen"))}, ""
+
+    def get_scene_item_enabled(self, scene, source):
+        shown = self.feed_shown(scene, source) if callable(self.feed_shown) else self.feed_shown
+        return shown, ""
+
+    def set_scene_item_enabled(self, scene, source, enabled):
+        self.calls.append(("enable", scene, source, enabled))
+        return True, ""
+
+    def set_input_file(self, name, path):
+        self.calls.append(("file", name))
+        return True, ""
+
+    def get_input_mute(self, name):
+        return self.director_muted, ""
+
+    def set_input_mute(self, name, muted):
+        self.calls.append(("mute", name, muted))
+        return True, ""
+
+
+def _relay_for_covers(obs, flowing=None, serving=True):
+    import tempfile
+    r = m.Relay.__new__(m.Relay)            # no network, no threads
+    r._obs, r.obs_note, r.fanout, r.solo = obs, "", True, False
+    r._covers = True
+    r._cover = {}
+    r._cover_dir = tempfile.mkdtemp()
+    r._cover_ensured_ts = None
+
+    class Srv:
+        def __init__(self):
+            self.flowing = flowing
+
+        def consumer_flowing_s(self, now):
+            return self.flowing
+
+    class F:
+        def __init__(self, name):
+            self.name, self.paused = name, False
+            self.phase = "serving" if serving else "idle"
+            self.fanout_server, self.cover_tap = Srv(), None
+    r.feeds = {"A": F("A"), "B": F("B")}
+    return r
+
+
+def _enables(obs, **match):
+    return [c for c in obs.calls if c[0] == "enable"
+            and all(c[{"scene": 1, "source": 2, "on": 3}[k]] == v for k, v in match.items())]
+
+
+def t_cover_tick_shows_until_flowing_then_hides():
+    obs = FakeObs()
+    r = _relay_for_covers(obs, flowing=0.5)
+    r._cover_tick(100.0)
+    assert _enables(obs, scene="Stint", source="Feed A Cover", on=True)
+    assert ("file", "Feed A Cover") in obs.calls             # fresh still before showing
+    r.feeds["A"].fanout_server.flowing = 2.0
+    obs.calls.clear()
+    r._cover_tick(101.0)
+    assert _enables(obs, scene="Stint", source="Feed A Cover", on=False)
+    assert ("file", "Feed A Cover") not in obs.calls         # no reload just to hide
+
+
+def t_cover_tick_applies_only_on_change_and_reasserts():
+    obs = FakeObs()
+    r = _relay_for_covers(obs, flowing=None)
+    r._cover_tick(100.0)
+    obs.calls.clear()
+    r._cover_tick(101.0)
+    assert not _enables(obs)
+    r._cover_tick(100.0 + m.COVER_REASSERT_S + 1)
+    assert _enables(obs)
+
+
+def t_cover_tick_missing_items_never_raise():
+    obs = FakeObs(missing=True)
+    r = _relay_for_covers(obs)
+    r._cover_tick(100.0)
+    assert r._cover["A"]["status"] == "missing" and not _enables(obs)
+    r._cover_tick(101.0)                                      # retried only after 30 s
+    assert [c for c in obs.calls if c[0] == "ensure"].count(("ensure", "Feed A Cover")) == 1
+
+
+def t_cover_tick_hides_a_cover_whose_feed_item_is_hidden():
+    obs = FakeObs(feed_shown=lambda scene, src: not (scene == "Stint" and src == "Feed B"))
+    r = _relay_for_covers(obs, flowing=None)
+    r._cover_tick(100.0)
+    assert _enables(obs, scene="Stint", source="Feed B Cover", on=False)
+    assert _enables(obs, scene="Splitscreen", source="Feed B Cover", on=True)
+
+
+def t_pre_show_cover_only_when_the_feed_is_not_already_playing():
+    obs = FakeObs()
+    r = _relay_for_covers(obs, flowing=None)
+    r._cover_tick(100.0)
+    obs.calls.clear()
+    r._pre_show_cover("A", "Stint")
+    assert _enables(obs, scene="Stint", source="Feed A Cover", on=True)
+    obs.calls.clear()
+    r.feeds["A"].fanout_server.flowing = 3.0               # already live in Splitscreen
+    r._pre_show_cover("A", "Stint")
+    assert not obs.calls
+
+
+def t_covers_enabled_env():
+    assert m.covers_enabled({}) is True
+    assert m.covers_enabled({"RACECAST_FEED_COVERS": "0"}) is False
+
+
+def t_cover_status_field():
+    obs = FakeObs()
+    r = _relay_for_covers(obs, flowing=None)
+    assert r.cover_status("A") == "missing"
+    r._cover_tick(100.0)
+    assert r.cover_status("A") == "shown"
+    r._covers = False
+    assert r.cover_status("A") == "off"
+
+
+class _CutRelay:
+    """The relay surface the split/stint appliers use, plus a recorded pre-show."""
+    solo = False
+
+    def __init__(self):
+        self.pre = []
+
+    def live_feed(self):
+        return "A"
+
+    def _pre_show_cover(self, feed, scene):
+        self.pre.append((feed, scene))
+
+
+class _OkObs:
+    def set_scene_item_enabled(self, scene, target, enabled):
+        return True, ""
+
+    def set_input_mute(self, target, muted):
+        return True, ""
+
+
+def t_split_cut_pre_shows_both_covers_before_the_intents():
+    r = _CutRelay()
+    m.apply_split_state(r, _OkObs())
+    assert sorted(r.pre) == [("A", "Splitscreen"), ("B", "Splitscreen")]
+    r.pre.clear()
+    m.apply_split_audio(r, _OkObs())                         # audio only: no cut, no cover
+    assert r.pre == []
+
+
+def t_stint_cut_pre_shows_the_picked_feed():
+    r = _CutRelay()
+    m.apply_stint_state(r, _OkObs(), "B")
+    assert r.pre == [("B", "Stint")]
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
