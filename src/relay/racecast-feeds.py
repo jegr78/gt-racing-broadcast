@@ -685,6 +685,22 @@ def auto_cover_enabled(environ):
     return str(environ.get("RACECAST_OBS_AUTO_COVER", "")).strip().lower() not in _AUTO_COVER_FALSEY
 
 
+COVER_READY_S = 1.5       # OBS must have received bytes this long before a cover lowers
+COVER_FLOW_GAP_S = 1.0    # a consumer silent for longer than this is not "flowing"
+
+
+def cover_visible(*, enabled, serving, consumer_flowing_s, hold_active, feed_item_shown):
+    """Whether a feed's cover still should be shown (spec 2026-10-17 Part C): shown unless
+    OBS is demonstrably playing the feed, and never over a hidden feed item, where it
+    would cover the other, on-air feed. Pure."""
+    if not enabled or not feed_item_shown:
+        return False
+    if hold_active:
+        return True
+    return not (serving and consumer_flowing_s is not None
+                and consumer_flowing_s >= COVER_READY_S)
+
+
 def auto_cover_action(enabled, source_state, offline_since, now, settle_s,
                       cover_shown, auto_owned, cover_fired,
                       program_scene, on_air_scene="Stint"):
@@ -5695,6 +5711,7 @@ class FeedFanoutServer:
                         st = self._consumers.get(cid)
                         if st is not None:
                             st["cycle_ts"] = time.monotonic()  # send completed
+                    self._note_send(cid, time.monotonic())
         except OSError:
             pass                                # consumer went away / slow send aborted
         finally:
@@ -5716,6 +5733,31 @@ class FeedFanoutServer:
             if st is not None:
                 st["cursor"] = cursor
                 st["floor"] = fold_backlog_floor(st.get("floor"), age)
+
+    def _note_send(self, cid, now):
+        """Record a completed send for the cover rule (spec 2026-10-17 Part C): the first
+        send of the current run and the latest one. A consumer already gone is a no-op."""
+        with self._consumers_lock:
+            st = self._consumers.get(cid)
+            if st is not None:
+                st.setdefault("first_send_ts", now)
+                st["last_send_ts"] = now
+
+    def consumer_flowing_s(self, now):
+        """Seconds the longest-flowing consumer has received bytes without a gap over
+        COVER_FLOW_GAP_S, or None. A gap restarts the count, so a consumer resuming after
+        a stall must flow COVER_READY_S again. `now` is monotonic."""
+        best = None
+        with self._consumers_lock:
+            for st in self._consumers.values():
+                first, last = st.get("first_send_ts"), st.get("last_send_ts")
+                if first is None or last is None:
+                    continue
+                if now - last > COVER_FLOW_GAP_S:
+                    st.pop("first_send_ts", None)       # gap: the next send starts a new run
+                    continue
+                best = max(best or 0.0, now - first)
+        return best
 
     def consumer_backlog(self, now):
         """Seconds the worst consumer is behind the live edge right now, from its last

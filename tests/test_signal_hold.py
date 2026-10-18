@@ -177,6 +177,50 @@ def t_cover_tap_spawn_failure_is_quiet():
     assert tap.last_write_ts is None and not os.path.exists(path)
 
 
+def t_cover_visible_table():
+    base = dict(enabled=True, serving=True, consumer_flowing_s=2.0,
+                hold_active=False, feed_item_shown=True)
+    assert m.cover_visible(**base) is False                                   # playing: down
+    assert m.cover_visible(**{**base, "consumer_flowing_s": 1.0}) is True     # not ready yet
+    assert m.cover_visible(**{**base, "consumer_flowing_s": None}) is True    # no consumer
+    assert m.cover_visible(**{**base, "serving": False}) is True
+    assert m.cover_visible(**{**base, "hold_active": True}) is True
+
+
+def t_cover_hidden_when_feed_item_hidden():
+    # A cover above a hidden feed item would cover the on-air feed in the Stint scene.
+    assert m.cover_visible(enabled=True, serving=False, consumer_flowing_s=None,
+                           hold_active=True, feed_item_shown=False) is False
+
+
+def t_cover_disabled_is_never_shown():
+    assert m.cover_visible(enabled=False, serving=False, consumer_flowing_s=None,
+                           hold_active=True, feed_item_shown=True) is False
+
+
+def t_consumer_flowing_s_tracks_first_and_last_send():
+    srv = m.FeedFanoutServer("127.0.0.1", 0, ring=None, log=LOG)
+    assert srv.consumer_flowing_s(100.0) is None
+    srv._consumers[1] = {"first_send_ts": 98.0, "last_send_ts": 99.8}
+    assert srv.consumer_flowing_s(100.0) == 2.0
+    srv._consumers[1]["last_send_ts"] = 98.5            # silent for 1.5 s: not flowing
+    assert srv.consumer_flowing_s(100.0) is None
+    srv._consumers[1]["last_send_ts"] = 100.4           # resumes: the count restarts
+    assert srv.consumer_flowing_s(100.5) is None
+    srv._note_send(1, 100.5)
+    assert srv.consumer_flowing_s(101.0) == 0.5
+
+
+def t_note_send_starts_and_extends_the_flow():
+    srv = m.FeedFanoutServer("127.0.0.1", 0, ring=None, log=LOG)
+    srv._consumers[7] = {}
+    srv._note_send(7, 10.0)
+    srv._note_send(7, 10.5)
+    assert srv._consumers[7]["first_send_ts"] == 10.0 and srv._consumers[7]["last_send_ts"] == 10.5
+    srv._note_send(99, 11.0)                             # a consumer already gone: no-op
+    assert 99 not in srv._consumers
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
