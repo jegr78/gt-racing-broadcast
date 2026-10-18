@@ -1,6 +1,6 @@
 # Feed covers, signal hold and ultra-low-latency hint: design
 
-Date: 2026-10-17. Status: approved in conversation (revision 2: covers replace the byte hold, Splitscreen included).
+Date: 2026-10-17. Status: approved in conversation (revision 2: covers replace the byte hold, Splitscreen included; Part C rule revised after the live OBS test 2026-10-18).
 
 ## Problem
 
@@ -49,17 +49,20 @@ OBS is served up to a trailing mark `RACECAST_FEED_PREBUFFER_S` (3 s) behind the
 
 **OBS sources.** For each feed there is one image input, `Feed A Cover` and `Feed B Cover`. Each one is added as a scene item directly above its feed's item in the `Stint` and `Splitscreen` scenes, with the same transform. The relay creates these on start when they are missing: `CreateInput` in the first scene, `CreateSceneItem` in the second, then index directly above the feed item and copy the feed item's transform. Existing installs therefore need no collection re-import. A scene without the feed item gets no cover. The input's `file` is `runtime/<profile>/covers/feed-<x>.jpg` (an absolute runtime path, like the localized import's paths).
 
-**The still.** A `FeedCoverTap` per fan-out feed reads the feed's ring from the live edge into one ffmpeg process that decodes **keyframes only** (`-skip_frame nokey`, about one every 2 s on YouTube, so the CPU cost is low). It emits 1920-wide JPEGs and writes each one atomically (temp file + `os.replace`) to the cover file. It runs whenever the feed serves, on-air and off-air. The relay re-points the image input (`SetInputSettings` with the same file, which makes OBS reload it) at most every `COVER_REFRESH_S` (5 s) while the cover is shown or about to be, so the still is never more than a few seconds old.
+**The still.** A `FeedCoverTap` per fan-out feed reads the feed's ring from the live edge into one ffmpeg process that decodes **keyframes only** (`-skip_frame nokey`, about one every 2 s on YouTube, so the CPU cost is low). It writes each 1920-wide JPEG atomically to `covers/feed-<x>.latest.jpg`. OBS shows a different file, `covers/feed-<x>.jpg`, because OBS reloads an image source by itself whenever its file changes; a tap writing the shown file made the visible still flicker every ~2 s (live test 2026-10-18). The relay copies latest over shown (`_snapshot_cover`) once when the cover is raised on the program scene, and every `COVER_REFRESH_S` (5 s) only while the cover is not visible on the program. Viewers therefore always see a frozen still.
 
 **Visibility rule.** Decided by one pure function per feed, evaluated every second:
 
 ```
-cover_visible(*, serving, consumer_flowing_s, hold_active, enabled) -> bool
+cover_visible(*, enabled, serving, obs_playing_s, hold_active, feed_item_shown) -> bool
 ```
 
-The cover is **shown** unless OBS is demonstrably playing the feed: the feed serves, an OBS consumer has received bytes continuously for `COVER_READY_S` (1.5 s), and no signal hold is active. Otherwise it stays up, so it is already in place **before** OBS opens the source, including scene switches made by hand in OBS. `consumer_flowing_s` comes from `FeedFanoutServer`. Per consumer it tracks when the first byte was sent and when the last one was. It is `None` without a consumer, or when the last send is older than `COVER_FLOW_GAP_S` (1.0 s).
+The cover is **shown** unless OBS demonstrably plays the feed: its `GetMediaInputStatus` mediaCursor has advanced on every sample for `COVER_PLAY_S` (1.0 s), and no signal hold is active. Bytes reaching OBS are not proof. YouTube's 5 s segments reach OBS in bursts, and the picture waits for a keyframe; both were measured live, where a byte-based rule first never lowered the cover and then lowered it onto black. The cover stays up otherwise, so it is already in place **before** OBS opens the source, including scene switches made by hand in OBS.
 
-The relay applies a change with `SetSceneItemEnabled` on every scene that has the cover. It applies a state only on change, and re-asserts it every 30 s to heal a lost request. In the `Stint` scene the feed-state intents hide the off-air feed's item, and a cover above a hidden feed item would still show. **A cover item is therefore never shown while its feed item is hidden in that scene.** The feed-state intents hide or show the cover together with its feed, and the relay's apply step reads the feed item's enabled state (`GetSceneItemEnabled`) before it shows a cover.
+**A cover item is never shown while its feed item is hidden in that scene.** In the `Stint` scene the off-air feed's item is hidden, and a cover above it would still show over the on-air feed. The tick reads the feed item's enabled state (`GetSceneItemEnabled`), and pre-shows target only scenes where the feed item is visible. The relay applies a state only on change, and re-asserts it every 30 s to heal a lost request. It raises the cover ahead of OBS at three moments:
+
+- the three cut sites (Splitscreen, stint pick, the handover reflect), unless OBS already plays that feed;
+- every input rebuild (`Feed.before_obs_reconnect`, forced: RESET, freeze detector, backlog shed and prefetch rejoin all reopen a feed OBS was playing).
 
 **Switch.** `RACECAST_FEED_COVERS` (machine `.env`, default on, `0` disables and hides any shown cover).
 
@@ -126,7 +129,7 @@ The Configuration tab gets a new column `Signal Hold`, located by header like th
   - `parse_signal_hold_text`.
   - The `cover_ffmpeg_cmd` argv.
 - **Unit (classes with fakes).**
-  - `FeedFanoutServer.consumer_flowing_s` with a scripted consumer.
+  - `media_play_update`/`media_playing_s` over scripted OBS cursor samples.
   - `FeedCoverTap` writing atomically from a fake ffmpeg.
   - `Relay` hold/cover ticks against a fake obs_ws: mute, unmute, enable/disable calls in order, the notice override in `/hud/data`.
 - **e2e.** Extend obs-sim to answer `GetInputMute`, `GetSceneItemList` and `GetSceneItemId`, and to record mute and enable calls. CI has no real remote stream to stall, so the hold is driven through the tick methods with injected readings (clock, reserve, byte ages) against obs-sim, and the e2e asserts the `/status` fields, the `/hud/data` override and the recorded OBS calls.

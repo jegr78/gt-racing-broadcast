@@ -685,11 +685,34 @@ def auto_cover_enabled(environ):
     return str(environ.get("RACECAST_OBS_AUTO_COVER", "")).strip().lower() not in _AUTO_COVER_FALSEY
 
 
-COVER_READY_S = 1.5       # OBS must have received bytes this long before a cover lowers
-COVER_FLOW_GAP_S = 1.0    # a consumer silent for longer than this is not "flowing"
+# OBS must have been decoding the feed (its mediaCursor advancing) this long before a
+# cover lowers. Bytes reaching OBS are not enough: the picture waits for a keyframe
+# (live test 2026-10-18), so the proof is OBS's own play position.
+COVER_PLAY_S = 1.0
+_MEDIA_PLAYING = "OBS_MEDIA_STATE_PLAYING"
 
 
-def cover_visible(*, enabled, serving, consumer_flowing_s, hold_active, feed_item_shown):
+def media_play_update(st, status, now):
+    """Fold one GetMediaInputStatus sample into {"cursor", "since"}: `since` is when the
+    cursor started advancing on every sample, None while it does not (first sample,
+    frozen, restarted on a reopen, not playing, OBS unreachable). Pure."""
+    state, cursor = status if status else (None, None)
+    prev = (st or {}).get("cursor")
+    if state != _MEDIA_PLAYING or cursor is None:
+        return {"cursor": None, "since": None}
+    if prev is None or cursor <= prev:
+        return {"cursor": cursor, "since": None}
+    since = (st or {}).get("since")
+    return {"cursor": cursor, "since": now if since is None else since}
+
+
+def media_playing_s(st, now):
+    """Seconds OBS has demonstrably been playing, or None. Pure."""
+    since = (st or {}).get("since")
+    return None if since is None else max(0.0, now - since)
+
+
+def cover_visible(*, enabled, serving, obs_playing_s, hold_active, feed_item_shown):
     """Whether a feed's cover still should be shown (spec 2026-10-17 Part C): shown unless
     OBS is demonstrably playing the feed, and never over a hidden feed item, where it
     would cover the other, on-air feed. Pure."""
@@ -697,8 +720,7 @@ def cover_visible(*, enabled, serving, consumer_flowing_s, hold_active, feed_ite
         return False
     if hold_active:
         return True
-    return not (serving and consumer_flowing_s is not None
-                and consumer_flowing_s >= COVER_READY_S)
+    return not (serving and obs_playing_s is not None and obs_playing_s >= COVER_PLAY_S)
 
 
 COVER_TICK_S = 1.0         # the cover (and signal-hold) loop cadence
@@ -5738,7 +5760,6 @@ class FeedFanoutServer:
                         st = self._consumers.get(cid)
                         if st is not None:
                             st["cycle_ts"] = time.monotonic()  # send completed
-                    self._note_send(cid, time.monotonic())
         except OSError:
             pass                                # consumer went away / slow send aborted
         finally:
@@ -5760,31 +5781,6 @@ class FeedFanoutServer:
             if st is not None:
                 st["cursor"] = cursor
                 st["floor"] = fold_backlog_floor(st.get("floor"), age)
-
-    def _note_send(self, cid, now):
-        """Record a completed send for the cover rule (spec 2026-10-17 Part C): the first
-        send of the current run and the latest one. A consumer already gone is a no-op."""
-        with self._consumers_lock:
-            st = self._consumers.get(cid)
-            if st is not None:
-                st.setdefault("first_send_ts", now)
-                st["last_send_ts"] = now
-
-    def consumer_flowing_s(self, now):
-        """Seconds the longest-flowing consumer has received bytes without a gap over
-        COVER_FLOW_GAP_S, or None. A gap restarts the count, so a consumer resuming after
-        a stall must flow COVER_READY_S again. `now` is monotonic."""
-        best = None
-        with self._consumers_lock:
-            for st in self._consumers.values():
-                first, last = st.get("first_send_ts"), st.get("last_send_ts")
-                if first is None or last is None:
-                    continue
-                if now - last > COVER_FLOW_GAP_S:
-                    st.pop("first_send_ts", None)       # gap: the next send starts a new run
-                    continue
-                best = max(best or 0.0, now - first)
-        return best
 
     def consumer_backlog(self, now):
         """Seconds the worst consumer is behind the live edge right now, from its last
@@ -7983,6 +7979,7 @@ class Feed:
         self.ring = None              # set by the relay when fan-out is enabled (#358); None → direct-serve
         self.fanout_server = None     # its FeedFanoutServer (fan-out on); the freeze detector reads its snap count (#488)
         self.cover_tap = None         # FeedCoverTap writing this feed's cover still (spec 2026-10-17)
+        self.before_obs_reconnect = None   # relay-set: raise the cover before a rebuild reopens OBS
         self.serve_generation = 0     # #614: bumped per fan-out serve, so a scheduled rejoin can tell it was superseded
         self.last_byte_ts = None      # monotonic ts of the last byte pumped into the ring (fan-out health)
         self._max_inbound_gap = 0.0   # #535: largest inter-arrival gap this heartbeat interval
@@ -8138,6 +8135,12 @@ class Feed:
         Exactly what a direct-serve streamlink restart does for free. Callers: the
         re-serve hook (_obs_rejoin_hook), the freeze detector and the director's RESET.
         Best-effort + synchronous; returns the rebuilt input names (for the log + tests)."""
+        hook = getattr(self, "before_obs_reconnect", None)
+        if hook is not None:
+            try:
+                hook()                        # cover first: the rebuild shows black (#919)
+            except Exception as exc:          # noqa: BLE001  a cover must never block a rebuild
+                self.log.debug("cover before rebuild on %s failed: %s", self.name, exc)
         if _obs_ws is None:
             return []
         try:
@@ -8798,6 +8801,7 @@ class Relay:
         # Feed covers (spec 2026-10-17 Part C): a still over each feed while OBS (re)opens it.
         self._covers = covers_enabled(os.environ) and self.fanout and not self.solo
         self._cover = {}                  # feed -> {"status", "refreshed", "last_/applied_<scene>"}
+        self._play = {}                   # feed -> media_play_update state (OBS play position)
         self._cover_dir = os.path.join(os.path.dirname(os.path.abspath(logdir)), "covers")
         self._cover_ensured_ts = None
         self._rebuild_stood_down_feed = None   # the feed the guard stood down on
@@ -8851,8 +8855,9 @@ class Relay:
                 f.fanout_server = srv          # #488: the freeze detector reads its consumer snap count
             if self._covers:
                 for k, f in self.feeds.items():
-                    f.cover_tap = FeedCoverTap(f.ring, self._cover_path(k),
+                    f.cover_tap = FeedCoverTap(f.ring, self._cover_latest_path(k),
                                                logging.getLogger("racecast.cover." + k)).start()
+                    f.before_obs_reconnect = (lambda key=k: self._pre_show_cover(key, None, True))
                 self._fanout_servers.append(srv)
         for f in self.feeds.values():
             threading.Thread(target=f.run, daemon=True).start()
@@ -9635,7 +9640,30 @@ class Relay:
 
     # --- Feed covers (spec 2026-10-17 Part C) -------------------------------------------
     def _cover_path(self, feed):
+        """The file OBS shows. Only _snapshot_cover writes it: OBS reloads an image
+        source by itself whenever its file changes (live test 2026-10-18)."""
         return os.path.join(self._cover_dir, f"feed-{feed.lower()}.jpg")
+
+    def _cover_latest_path(self, feed):
+        """The tap's always-current still, never shown directly."""
+        return os.path.join(self._cover_dir, f"feed-{feed.lower()}.latest.jpg")
+
+    def _snapshot_cover(self, feed):
+        """Copy the latest still over the shown file (atomically) and point OBS at it.
+        No still yet: nothing to show, the cover keeps its previous picture."""
+        latest, shown = self._cover_latest_path(feed), self._cover_path(feed)
+        try:
+            with open(latest, "rb") as fh:
+                data = fh.read()
+            if not data:
+                return
+            os.makedirs(os.path.dirname(shown), exist_ok=True)
+            with open(shown + ".tmp", "wb") as fh:
+                fh.write(data)
+            os.replace(shown + ".tmp", shown)
+        except OSError:
+            return
+        self._obs.set_input_file(_obs_ws.COVER_SOURCES[feed], shown)
 
     def _hold_active(self, feed):
         """True while a signal hold covers this feed (spec 2026-10-17 Part B)."""
@@ -9679,33 +9707,49 @@ class Relay:
             if note:
                 self.obs_note = note
 
+    def _obs_playing_s(self, feed, now):
+        return media_playing_s(self._play.get(feed), now)
+
     def _cover_tick(self, now):
         if not self._covers or _obs_ws is None:
             return
         self._ensure_covers(now)
+        program, _note = self._obs.get_current_program_scene()
         for k, f in self.feeds.items():
+            status, _note = self._obs.get_media_status(_obs_ws.FEED_SOURCES[k])
+            self._play[k] = media_play_update(self._play.get(k), status, now)
             st = self._cover.get(k)
             if st is None or st.get("status") == "missing":
                 continue
-            srv = f.fanout_server
-            flowing = srv.consumer_flowing_s(now) if srv is not None else None
             serving = not f.paused and f.phase == "serving"
+            want = {}
             for scene in _obs_ws.COVER_SCENES:
                 shown, _note = self._obs.get_scene_item_enabled(scene, _obs_ws.FEED_SOURCES[k])
-                want = cover_visible(enabled=True, serving=serving, consumer_flowing_s=flowing,
-                                     hold_active=self._hold_active(k),
-                                     feed_item_shown=bool(shown))
-                self._apply_cover(k, scene, want, now, st)
+                want[scene] = cover_visible(enabled=True, serving=serving,
+                                            obs_playing_s=self._obs_playing_s(k, now),
+                                            hold_active=self._hold_active(k),
+                                            feed_item_shown=bool(shown))
+            self._refresh_cover(k, st, want, program, now)
+            for scene, w in want.items():
+                self._apply_cover(k, scene, w, now, st)
+
+    def _refresh_cover(self, feed, st, want, program, now):
+        """Reload the still: once when the cover is raised on the program scene, and
+        every COVER_REFRESH_S while it is not visible on the program. Never while viewers
+        see it: a still that changes every few seconds reads as stutter (live test
+        2026-10-18)."""
+        on_program = program in want and st.get("last_" + program) is True
+        raising = program in want and want[program] and not on_program
+        stale = st.get("refreshed") is None or now - st["refreshed"] >= COVER_REFRESH_S
+        if raising or (not on_program and stale):
+            self._snapshot_cover(feed)
+            st["refreshed"] = now
 
     def _apply_cover(self, feed, scene, want, now, st):
-        """Send one scene's cover state, only on a change or every COVER_REASSERT_S, and
-        reload the still (at most every COVER_REFRESH_S) before showing it."""
+        """Send one scene's cover state, only on a change or every COVER_REASSERT_S."""
         applied = st.get("applied_" + scene)
         if st.get("last_" + scene) == want and applied is not None and now - applied < COVER_REASSERT_S:
             return
-        if want and (st.get("refreshed") is None or now - st["refreshed"] >= COVER_REFRESH_S):
-            self._obs.set_input_file(_obs_ws.COVER_SOURCES[feed], self._cover_path(feed))
-            st["refreshed"] = now
         ok, note = self._obs.set_scene_item_enabled(scene, _obs_ws.COVER_SOURCES[feed], want)
         if not ok:
             self.obs_note = note or self.obs_note
@@ -9714,19 +9758,31 @@ class Relay:
         st["status"] = ("shown" if any(st.get("last_" + s) for s in _obs_ws.COVER_SCENES)
                         else "hidden")
 
-    def _pre_show_cover(self, feed, scene):
-        """Before a cut makes `feed` visible in `scene`, raise its cover there so OBS's
-        first black frames are never seen. Skipped when OBS already plays the feed (a
-        Splitscreen -> Stint cut keeps the input open). Best effort; the tick lowers it."""
+    def _pre_show_cover(self, feed, scene=None, force=False):
+        """Raise `feed`'s cover before OBS (re)opens it, so its black is never seen: in
+        `scene` before a cut shows the feed there, or (scene None) in every scene where
+        the feed item is visible before a rebuild. Without `force` it is skipped while
+        OBS already plays the feed (a Splitscreen -> Stint cut keeps the input open); a
+        rebuild reopens even a playing feed, hence `force`. Best effort; the tick lowers
+        the cover once OBS plays again."""
         if not self._covers or _obs_ws is None or self.cover_status(feed) == "missing":
             return
-        f = self.feeds.get(feed)
-        srv = f.fanout_server if f is not None else None
-        flowing = srv.consumer_flowing_s(time.monotonic()) if srv is not None else None
-        if flowing is not None and flowing >= COVER_READY_S:
+        if not force:
+            playing = self._obs_playing_s(feed, time.monotonic())
+            if playing is not None and playing >= COVER_PLAY_S:
+                return
+        scenes = [scene] if scene else [
+            sc for sc in _obs_ws.COVER_SCENES
+            if self._obs.get_scene_item_enabled(sc, _obs_ws.FEED_SOURCES[feed])[0]]
+        if not scenes:
             return
-        self._obs.set_input_file(_obs_ws.COVER_SOURCES[feed], self._cover_path(feed))
-        self._obs.set_scene_item_enabled(scene, _obs_ws.COVER_SOURCES[feed], True)
+        self._snapshot_cover(feed)
+        st = self._cover.setdefault(feed, {})
+        st["refreshed"] = time.monotonic()
+        for sc in scenes:
+            self._obs.set_scene_item_enabled(sc, _obs_ws.COVER_SOURCES[feed], True)
+            st["last_" + sc], st["applied_" + sc] = True, time.monotonic()
+        st["status"] = "shown"
 
     def status(self):
         now = time.time()

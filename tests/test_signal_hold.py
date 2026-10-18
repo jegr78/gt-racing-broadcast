@@ -178,60 +178,66 @@ def t_cover_tap_spawn_failure_is_quiet():
 
 
 def t_cover_visible_table():
-    base = dict(enabled=True, serving=True, consumer_flowing_s=2.0,
+    base = dict(enabled=True, serving=True, obs_playing_s=m.COVER_PLAY_S,
                 hold_active=False, feed_item_shown=True)
-    assert m.cover_visible(**base) is False                                   # playing: down
-    assert m.cover_visible(**{**base, "consumer_flowing_s": 1.0}) is True     # not ready yet
-    assert m.cover_visible(**{**base, "consumer_flowing_s": None}) is True    # no consumer
+    assert m.cover_visible(**base) is False                                 # playing: down
+    assert m.cover_visible(**{**base, "obs_playing_s": 0.5}) is True        # not yet
+    assert m.cover_visible(**{**base, "obs_playing_s": None}) is True       # OBS not playing
     assert m.cover_visible(**{**base, "serving": False}) is True
     assert m.cover_visible(**{**base, "hold_active": True}) is True
 
 
 def t_cover_hidden_when_feed_item_hidden():
     # A cover above a hidden feed item would cover the on-air feed in the Stint scene.
-    assert m.cover_visible(enabled=True, serving=False, consumer_flowing_s=None,
+    assert m.cover_visible(enabled=True, serving=False, obs_playing_s=None,
                            hold_active=True, feed_item_shown=False) is False
 
 
 def t_cover_disabled_is_never_shown():
-    assert m.cover_visible(enabled=False, serving=False, consumer_flowing_s=None,
+    assert m.cover_visible(enabled=False, serving=False, obs_playing_s=None,
                            hold_active=True, feed_item_shown=True) is False
 
 
-def t_consumer_flowing_s_tracks_first_and_last_send():
-    srv = m.FeedFanoutServer("127.0.0.1", 0, ring=None, log=LOG)
-    assert srv.consumer_flowing_s(100.0) is None
-    srv._consumers[1] = {"first_send_ts": 98.0, "last_send_ts": 99.8}
-    assert srv.consumer_flowing_s(100.0) == 2.0
-    srv._consumers[1]["last_send_ts"] = 98.5            # silent for 1.5 s: not flowing
-    assert srv.consumer_flowing_s(100.0) is None
-    srv._consumers[1]["last_send_ts"] = 100.4           # resumes: the count restarts
-    assert srv.consumer_flowing_s(100.5) is None
-    srv._note_send(1, 100.5)
-    assert srv.consumer_flowing_s(101.0) == 0.5
-
-
-def t_note_send_starts_and_extends_the_flow():
-    srv = m.FeedFanoutServer("127.0.0.1", 0, ring=None, log=LOG)
-    srv._consumers[7] = {}
-    srv._note_send(7, 10.0)
-    srv._note_send(7, 10.5)
-    assert srv._consumers[7]["first_send_ts"] == 10.0 and srv._consumers[7]["last_send_ts"] == 10.5
-    srv._note_send(99, 11.0)                             # a consumer already gone: no-op
-    assert 99 not in srv._consumers
+def t_media_play_update_needs_an_advancing_cursor():
+    # OBS's mediaCursor advances only while it decodes frames (live test 2026-10-18:
+    # bytes arriving is not enough, the picture waits for a keyframe).
+    U = m.media_play_update
+    st = U(None, ("OBS_MEDIA_STATE_PLAYING", 1000), 10.0)
+    assert m.media_playing_s(st, 10.0) is None                 # first sample: no proof yet
+    st = U(st, ("OBS_MEDIA_STATE_PLAYING", 1400), 11.0)
+    assert m.media_playing_s(st, 11.0) == 0.0                  # advanced: playing since now
+    st = U(st, ("OBS_MEDIA_STATE_PLAYING", 2400), 12.0)
+    assert m.media_playing_s(st, 12.0) == 1.0
+    st = U(st, ("OBS_MEDIA_STATE_PLAYING", 2400), 13.0)        # frozen
+    assert m.media_playing_s(st, 13.0) is None
+    st = U(st, ("OBS_MEDIA_STATE_PLAYING", 300), 14.0)         # reopened: cursor restarted
+    assert m.media_playing_s(st, 14.0) is None
+    st = U(st, ("OBS_MEDIA_STATE_STOPPED", 900), 15.0)
+    assert m.media_playing_s(st, 15.0) is None
+    st = U(st, (None, None), 16.0)                             # OBS unreachable
+    assert m.media_playing_s(st, 16.0) is None
 
 
 class FakeObs:
     """The obs_ws calls the cover and hold ticks make, recorded; never a socket."""
 
-    def __init__(self, missing=False, feed_shown=True):
+    def __init__(self, missing=False, feed_shown=True, program="Stint"):
         self.calls, self.missing, self.feed_shown = [], missing, feed_shown
         self.director_muted = False
+        self.program = program
+        self.cursor = {"Feed A": None, "Feed B": None}
 
     def ensure_cover_items(self, feed, cover, path, scenes=None):
         self.calls.append(("ensure", cover))
         state = "no-feed" if self.missing else "ok"
         return {s: state for s in (scenes or ("Stint", "Splitscreen"))}, ""
+
+    def get_current_program_scene(self):
+        return self.program, ""
+
+    def get_media_status(self, name):
+        c = self.cursor.get(name)
+        return (("OBS_MEDIA_STATE_PLAYING", c) if c is not None else (None, None)), ""
 
     def get_scene_item_enabled(self, scene, source):
         shown = self.feed_shown(scene, source) if callable(self.feed_shown) else self.feed_shown
@@ -253,29 +259,34 @@ class FakeObs:
         return True, ""
 
 
-def _relay_for_covers(obs, flowing=None, serving=True):
+def _relay_for_covers(obs, serving=True, stills=True):
     import tempfile
     r = m.Relay.__new__(m.Relay)            # no network, no threads
     r._obs, r.obs_note, r.fanout, r.solo = obs, "", True, False
     r._covers = True
     r._cover = {}
+    r._play = {}
     r._cover_dir = tempfile.mkdtemp()
     r._cover_ensured_ts = None
-
-    class Srv:
-        def __init__(self):
-            self.flowing = flowing
-
-        def consumer_flowing_s(self, now):
-            return self.flowing
 
     class F:
         def __init__(self, name):
             self.name, self.paused = name, False
             self.phase = "serving" if serving else "idle"
-            self.fanout_server, self.cover_tap = Srv(), None
+            self.fanout_server, self.cover_tap = None, None
     r.feeds = {"A": F("A"), "B": F("B")}
+    if stills:                              # the taps have written a still already
+        for k in r.feeds:
+            with open(r._cover_latest_path(k), "wb") as fh:
+                fh.write(b"\xff\xd8" + k.encode() + b"\xff\xd9")
     return r
+
+
+def _play(obs, r, feed_input, start_s, t0):
+    """Advance OBS's cursor for `feed_input` over ticks t0, t0+1, ..., as if playing."""
+    for i in range(int(start_s) + 2):
+        obs.cursor[feed_input] = 1000 * (i + 1)
+        r._cover_tick(t0 + i)
 
 
 def _enables(obs, **match):
@@ -283,22 +294,48 @@ def _enables(obs, **match):
             and all(c[{"scene": 1, "source": 2, "on": 3}[k]] == v for k, v in match.items())]
 
 
-def t_cover_tick_shows_until_flowing_then_hides():
+def t_cover_tick_shows_until_obs_plays_then_hides():
     obs = FakeObs()
-    r = _relay_for_covers(obs, flowing=0.5)
+    r = _relay_for_covers(obs)
     r._cover_tick(100.0)
     assert _enables(obs, scene="Stint", source="Feed A Cover", on=True)
-    assert ("file", "Feed A Cover") in obs.calls             # fresh still before showing
-    r.feeds["A"].fanout_server.flowing = 2.0
     obs.calls.clear()
-    r._cover_tick(101.0)
+    _play(obs, r, "Feed A", m.COVER_PLAY_S, 101.0)
     assert _enables(obs, scene="Stint", source="Feed A Cover", on=False)
-    assert ("file", "Feed A Cover") not in obs.calls         # no reload just to hide
+
+
+def t_cover_still_is_frozen_while_its_scene_is_on_program():
+    # Live test 2026-10-18: reloading a visible still every few seconds looks like stutter.
+    obs = FakeObs(program="Splitscreen")
+    r = _relay_for_covers(obs)
+    for t in range(0, 30):
+        r._cover_tick(100.0 + t)
+    assert obs.calls.count(("file", "Feed B Cover")) <= 1      # at most the raise itself
+
+
+def t_cover_still_refreshes_while_off_program():
+    obs = FakeObs(program="Standby")
+    r = _relay_for_covers(obs)
+    for t in range(0, 12):
+        r._cover_tick(100.0 + t)
+    assert obs.calls.count(("file", "Feed B Cover")) >= 2
+
+
+def t_cover_raise_on_program_loads_one_fresh_still():
+    obs = FakeObs(program="Stint")
+    r = _relay_for_covers(obs)
+    _play(obs, r, "Feed A", m.COVER_PLAY_S, 100.0)              # A playing, cover down
+    obs.calls.clear()
+    obs.cursor["Feed A"] = obs.cursor["Feed A"]                 # freeze: OBS reopens / stalls
+    for t in range(5):
+        r._cover_tick(110.0 + t)
+    assert _enables(obs, scene="Stint", source="Feed A Cover", on=True)
+    assert obs.calls.count(("file", "Feed A Cover")) == 1
 
 
 def t_cover_tick_applies_only_on_change_and_reasserts():
-    obs = FakeObs()
-    r = _relay_for_covers(obs, flowing=None)
+    obs = FakeObs(program="Standby")
+    r = _relay_for_covers(obs)
     r._cover_tick(100.0)
     obs.calls.clear()
     r._cover_tick(101.0)
@@ -313,28 +350,89 @@ def t_cover_tick_missing_items_never_raise():
     r._cover_tick(100.0)
     assert r._cover["A"]["status"] == "missing" and not _enables(obs)
     r._cover_tick(101.0)                                      # retried only after 30 s
-    assert [c for c in obs.calls if c[0] == "ensure"].count(("ensure", "Feed A Cover")) == 1
+    assert obs.calls.count(("ensure", "Feed A Cover")) == 1
 
 
 def t_cover_tick_hides_a_cover_whose_feed_item_is_hidden():
     obs = FakeObs(feed_shown=lambda scene, src: not (scene == "Stint" and src == "Feed B"))
-    r = _relay_for_covers(obs, flowing=None)
+    r = _relay_for_covers(obs)
     r._cover_tick(100.0)
     assert _enables(obs, scene="Stint", source="Feed B Cover", on=False)
     assert _enables(obs, scene="Splitscreen", source="Feed B Cover", on=True)
 
 
 def t_pre_show_cover_only_when_the_feed_is_not_already_playing():
-    obs = FakeObs()
-    r = _relay_for_covers(obs, flowing=None)
+    obs = FakeObs(program="Standby")
+    r = _relay_for_covers(obs)
     r._cover_tick(100.0)
     obs.calls.clear()
     r._pre_show_cover("A", "Stint")
     assert _enables(obs, scene="Stint", source="Feed A Cover", on=True)
+    _play(obs, r, "Feed A", m.COVER_PLAY_S, 101.0)            # already live in Splitscreen
     obs.calls.clear()
-    r.feeds["A"].fanout_server.flowing = 3.0               # already live in Splitscreen
     r._pre_show_cover("A", "Stint")
     assert not obs.calls
+
+
+def t_obs_file_changes_only_on_refresh():
+    # OBS reloads an image source by itself whenever its file changes (live test
+    # 2026-10-18), so the tap must never write the file OBS shows: the relay copies the
+    # tap's latest still over only when it refreshes.
+    obs = FakeObs(program="Splitscreen")
+    r = _relay_for_covers(obs)
+    shown, latest = r._cover_path("B"), r._cover_latest_path("B")
+    assert shown != latest
+    with open(latest, "wb") as fh:
+        fh.write(b"\xff\xd8one\xff\xd9")
+    r._cover_tick(100.0)                                       # raise on program: one copy
+    with open(shown, "rb") as fh:
+        assert fh.read() == b"\xff\xd8one\xff\xd9"
+    with open(latest, "wb") as fh:
+        fh.write(b"\xff\xd8two\xff\xd9")                        # the tap moves on
+    for t in range(1, 20):
+        r._cover_tick(100.0 + t)
+    with open(shown, "rb") as fh:
+        assert fh.read() == b"\xff\xd8one\xff\xd9"               # frozen while on program
+
+
+def t_refresh_without_a_still_yet_is_quiet():
+    obs = FakeObs(program="Standby")
+    r = _relay_for_covers(obs, stills=False)
+    r._cover_tick(100.0)                                       # no tap output yet
+    assert not os.path.exists(r._cover_path("A"))
+
+
+def t_forced_pre_show_raises_even_a_playing_feed_but_only_where_it_is_visible():
+    # A rebuild (RESET, reconnect, backlog shed) reopens a feed OBS was playing.
+    obs = FakeObs(program="Stint",
+                  feed_shown=lambda scene, src: not (scene == "Splitscreen"))
+    r = _relay_for_covers(obs)
+    _play(obs, r, "Feed A", m.COVER_PLAY_S, 100.0)
+    obs.calls.clear()
+    r._pre_show_cover("A", force=True)
+    assert _enables(obs, scene="Stint", source="Feed A Cover", on=True)
+    assert not _enables(obs, scene="Splitscreen")             # feed item hidden there
+    assert r.cover_status("A") == "shown"                     # /status at once, not next tick
+
+
+def t_feed_rebuild_raises_the_cover_first():
+    order = []
+
+    class FakeWs:
+        @staticmethod
+        def release_feed_inputs(ports=None):
+            order.append("rebuild")
+            return ["Feed A"], ""
+    f = m.Feed.__new__(m.Feed)
+    f.name, f.port, f.log = "A", 53001, LOG
+    f.before_obs_reconnect = lambda: order.append("cover")
+    real = m._obs_ws
+    m._obs_ws = FakeWs
+    try:
+        assert f._obs_reconnect_now() == ["Feed A"]
+    finally:
+        m._obs_ws = real
+    assert order == ["cover", "rebuild"]
 
 
 def t_covers_enabled_env():
@@ -343,8 +441,8 @@ def t_covers_enabled_env():
 
 
 def t_cover_status_field():
-    obs = FakeObs()
-    r = _relay_for_covers(obs, flowing=None)
+    obs = FakeObs(program="Standby")
+    r = _relay_for_covers(obs)
     assert r.cover_status("A") == "missing"
     r._cover_tick(100.0)
     assert r.cover_status("A") == "shown"

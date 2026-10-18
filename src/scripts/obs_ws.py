@@ -587,7 +587,7 @@ _ROUTED_FNS = _SHOT_FNS | frozenset({
     "set_stream_service", "reflect_feed_state", "refresh_browser_inputs",
     "release_feed_inputs", "feed_media_cursors", "get_scene_collection",
     "set_scene_collection", "ensure_mic_device",
-    "ensure_cover_items", "get_scene_item_enabled", "set_input_file",
+    "ensure_cover_items", "get_scene_item_enabled", "set_input_file", "get_media_status",
 })
 
 
@@ -1671,6 +1671,18 @@ def get_scene_item_enabled(scene, source, host="127.0.0.1", port=None,
         return bool(s.request("GetSceneItemEnabled",
                               {"sceneName": scene, "sceneItemId": sid}).get("sceneItemEnabled"))
     return _session_call(session, host, port, password, timeout, run)
+
+
+def get_media_status(input_name, host="127.0.0.1", port=None,
+                     password=None, timeout=2.0, session=None):
+    """((mediaState, mediaCursor ms), note) of a media input; ((None, None), reason) on
+    any failure, never an exception. The cursor advances only while OBS decodes frames,
+    which is what tells a playing feed from one OBS has opened but not yet shown."""
+    def run(sess):
+        st = sess.request("GetMediaInputStatus", {"inputName": input_name})
+        return st.get("mediaState"), st.get("mediaCursor")
+    value, note = _session_call(session, host, port, password, timeout, run)
+    return (value if value is not None else (None, None)), note
 
 
 def set_input_file(input_name, path, host="127.0.0.1", port=None,

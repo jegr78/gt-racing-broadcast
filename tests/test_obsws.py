@@ -2836,8 +2836,21 @@ def t_get_scene_item_enabled_and_set_input_file():
     assert val is None and "not found" in note
 
 
+def t_get_media_status_reads_state_and_cursor():
+    s = _FakeSession({"GetMediaInputStatus": {"mediaState": "OBS_MEDIA_STATE_PLAYING",
+                                              "mediaCursor": 4200, "mediaDuration": None}})
+    assert m.get_media_status("Feed A", session=s) == (("OBS_MEDIA_STATE_PLAYING", 4200), "")
+    assert ("GetMediaInputStatus", {"inputName": "Feed A"}) in s.sent
+
+    class Boom(_FakeSession):
+        def request(self, request_type, request_data=None):
+            raise RuntimeError("no such input")
+    assert m.get_media_status("Feed A", session=Boom()) == ((None, None), "no such input")
+
+
 def t_cover_helpers_are_routed_and_named():
-    for fn in ("ensure_cover_items", "get_scene_item_enabled", "set_input_file"):
+    for fn in ("ensure_cover_items", "get_scene_item_enabled", "set_input_file",
+               "get_media_status"):
         assert m.route_kind(fn) == "ctrl", fn
     assert m.COVER_SOURCES == {"A": "Feed A Cover", "B": "Feed B Cover"}
     assert m.COVER_SCENES == (m.STINT_SCENE, m.SPLIT_SCENE)
