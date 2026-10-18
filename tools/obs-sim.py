@@ -96,6 +96,16 @@ def _serve_one(conn, image_data_uri, scene):
             resp = {"currentProgramSceneName": scene, "sceneName": scene}
         elif rtype == "GetSourceScreenshot":
             resp = {"imageData": image_data_uri}
+        elif rtype == "GetInputMute":
+            resp = {"inputMuted": False}
+        elif rtype == "GetSceneItemId":
+            resp = {"sceneItemId": 1}
+        elif rtype == "GetSceneItemEnabled":
+            resp = {"sceneItemEnabled": True}
+        elif rtype == "GetInputList":                  # no feed items: covers report no-feed
+            resp = {"inputs": []}
+        elif rtype == "GetSceneItemList":
+            resp = {"sceneItems": []}
         elif rtype == "GetStreamStatus":
             resp = {"outputActive": False, "outputReconnecting": False,
                     "outputDuration": 0, "outputBytes": 0}
