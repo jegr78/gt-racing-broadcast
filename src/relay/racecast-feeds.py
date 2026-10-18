@@ -2283,6 +2283,26 @@ def parse_rc_note_presets(text):
     return _parse_preset_column(text, RC_NOTE_PRESET_HEADERS)
 
 
+# Configuration-tab column with the HUD notice shown during a feed signal hold (spec
+# 2026-10-17): the first non-blank value. None means no notice; the relay never makes
+# one up.
+SIGNAL_HOLD_HEADERS = ("signal hold",)
+
+
+def parse_signal_hold_text(text):
+    """Configuration tab CSV -> the Signal Hold notice text, or None."""
+    presets = _parse_preset_column(text, SIGNAL_HOLD_HEADERS)
+    return presets[0] if presets else None
+
+
+def apply_signal_hold_notice(data, notice):
+    """/hud/data with the race-control slot showing `notice` while a hold runs; the
+    Sheet's own Race Control value is untouched and returns with the next poll. Pure."""
+    if notice:
+        data["raceControl"] = notice
+    return data
+
+
 def _parse_preset_column(text, headers):
     """Shared: first matching header column -> de-duped, non-blank values in order."""
     rows = list(csv.reader(io.StringIO(text)))
@@ -7211,6 +7231,7 @@ class HudSource:
         self._vocab = {k: [] for k in VOCAB_COLUMNS}
         self._cue_presets = []
         self._rc_note_presets = []
+        self._signal_hold_text = None    # Configuration "Signal Hold" (spec 2026-10-17)
         self._roster = {}
         self._roster_full = {}   # stripped team name -> verbatim Configuration label
         self._quali = {}
@@ -7284,6 +7305,7 @@ class HudSource:
             vocab = parse_config_vocab(config_text)
             cue_presets = parse_cue_presets(config_text)
             rc_note_presets = parse_rc_note_presets(config_text)
+            signal_hold_text = parse_signal_hold_text(config_text)
             data = build_hud_data(overlay, roster, quali)
         except Exception as e:
             self.last_error = f"{type(e).__name__}: {e}"
@@ -7295,6 +7317,7 @@ class HudSource:
             self._vocab = vocab
             self._cue_presets = cue_presets
             self._rc_note_presets = rc_note_presets
+            self._signal_hold_text = signal_hold_text
             self._roster = roster
             self._roster_full = roster_full
             # a sheet poll that already shows the pushed value = confirmation
@@ -7359,6 +7382,10 @@ class HudSource:
     def rc_note_presets(self):
         with self.lock:
             return list(self._rc_note_presets)
+
+    def signal_hold_text(self):
+        with self.lock:
+            return self._signal_hold_text
 
     def roster_names(self):
         """Team names from the Configuration roster, in sheet order (panel vocab)."""
@@ -11961,6 +11988,10 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     if not hud_source:
                         return self._send({"error": "hud disabled"}, 404)
                     data = hud_source.data()           # already a shallow copy
+                    # A feed signal hold shows the Sheet's notice in the race-control slot,
+                    # relay-side: a Sheet push takes 10-20 s and fails on event nights.
+                    notice = getattr(relay, "signal_hold_notice", None)
+                    data = apply_signal_hold_notice(data, notice(hud_source) if notice else None)
                     data["povActive"] = relay.pov_active()
                     data["povName"] = relay.pov_name()
                     # Race vs qualifying, so a profile's overlay CSS can gate on

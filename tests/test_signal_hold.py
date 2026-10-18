@@ -669,6 +669,54 @@ def t_director_reset_cancels_the_hold_and_raises_the_cover_first():
     assert not r._hold_active("A") and ("mute", "Feed A", False) in obs.calls
 
 
+CONFIG = ("Team,Number,Race Control,Signal Hold\n"
+          "A,1,Driver Swaps,Signal is being restored\nB,2,,\n")
+
+
+def t_parse_signal_hold_text():
+    assert m.parse_signal_hold_text(CONFIG) == "Signal is being restored"
+    assert m.parse_signal_hold_text("Team,Signal Hold\nA,\n") is None
+    assert m.parse_signal_hold_text("Team\nA\n") is None
+    assert m.parse_signal_hold_text("") is None
+
+
+class _Texts:
+    def __init__(self, text):
+        self.text = text
+
+    def signal_hold_text(self):
+        return self.text
+
+
+def t_hud_notice_only_while_the_on_air_feed_holds():
+    r, _obs = _hold_relay()
+    texts = _Texts("Signal is being restored")
+    assert r.signal_hold_notice(texts) is None
+    r._hold_tick(101.5)
+    assert r.signal_hold_notice(texts) == "Signal is being restored"
+    assert r.signal_hold_notice(None) is None
+
+
+def t_hud_notice_absent_text_keeps_sheet_value():
+    r, _obs = _hold_relay()
+    r._hold_tick(101.5)
+    assert r.signal_hold_notice(_Texts(None)) is None
+
+
+def t_hud_data_override_applies_the_notice():
+    data = {"raceControl": "Driver Swaps", "stint": "S3"}
+    assert m.apply_signal_hold_notice(dict(data), "Signal is being restored")["raceControl"] \
+        == "Signal is being restored"
+    assert m.apply_signal_hold_notice(dict(data), None) == data
+
+
+def t_hud_source_carries_the_signal_hold_text():
+    h = m.HudSource.__new__(m.HudSource)
+    h.lock = m.threading.Lock()
+    h._signal_hold_text = "Signal is being restored"
+    assert h.signal_hold_text() == "Signal is being restored"
+
+
 def t_signal_hold_status():
     r, obs = _hold_relay()
     assert r.signal_hold_status("A") == {"active": False, "since": None}
