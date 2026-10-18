@@ -540,6 +540,57 @@ def t_feed_rebuild_raises_the_cover_first():
     assert order == ["cover", "rebuild"]
 
 
+def t_a_cut_pre_show_is_not_undone_by_the_next_tick():
+    # Review 2026-10-18: the cut raises the cover before the feed item is enabled; a tick
+    # in between saw the item hidden and lowered the cover again.
+    obs = FakeObs(program="Stint", feed_shown=lambda scene, src: src != "Feed B")
+    r = _relay_for_covers(obs)
+    r._cover_tick(100.0)
+    obs.calls.clear()
+    r._pre_show_cover("B", "Stint")
+    r._cover_tick(time_now := m.time.monotonic())
+    assert not _enables(obs, scene="Stint", source="Feed B Cover", on=False)
+    r._cover_tick(time_now + m.COVER_PIN_S + 0.1)          # pin over: the rule applies
+    assert _enables(obs, scene="Stint", source="Feed B Cover", on=False)
+
+
+def t_a_poll_racing_a_rebuild_does_not_restore_the_old_play_proof():
+    # Review 2026-10-18: a poll that started before a forced pre-show wrote the
+    # pre-rebuild play state back after it.
+    obs = FakeObs(program="Stint")
+    r = _relay_for_covers(obs)
+    _play(obs, r, "Feed A", m.COVER_PLAY_S, 100.0)
+    real = obs.get_media_status
+
+    def status_then_rebuild(name):
+        out = real(name)
+        if name == "Feed A":
+            r._pre_show_cover("A", force=True)
+        return out
+    obs.get_media_status = status_then_rebuild
+    obs.cursor["Feed A"] += 1000
+    r._poll_play(110.0)
+    assert r._obs_playing_s("A", 110.0) is None
+
+
+def t_cover_tap_respawns_after_ffmpeg_exits():
+    import tempfile, time
+    path = os.path.join(tempfile.mkdtemp(), "covers", "feed-a.latest.jpg")
+    spawns = []
+
+    def spawn(tap):
+        spawns.append(1)
+        chunks = [] if len(spawns) == 1 else [b"\xff\xd8two\xff\xd9"]
+        return _fake_ffmpeg(chunks)(tap)
+    tap = m.FeedCoverTap(_IdleRing(), path, LOG, spawn=spawn, respawn_s=0.05).start()
+    for _ in range(200):
+        if tap.last_write_ts is not None:
+            break
+        time.sleep(0.02)
+    tap.stop()
+    assert len(spawns) >= 2 and tap.last_write_ts is not None
+
+
 def t_covers_enabled_env():
     assert m.covers_enabled({}) is True
     assert m.covers_enabled({"RACECAST_FEED_COVERS": "0"}) is False
@@ -845,6 +896,61 @@ def t_hold_survives_obs_dropping_its_connection():
     f.paused = True                             # the director stopped the feed: cancel
     r._hold_tick(108.0)
     assert not r._hold_active("A")
+
+
+def _make_like_a(r, key, url="https://www.youtube.com/watch?v=b", idx=3):
+    a, f = r.feeds["A"], r.feeds[key]
+    f.fanout_server, f.consumer_attached = a.fanout_server, a.consumer_attached
+    f.last_byte_ts, f.steady_since, f.target_duration_s = 200.0, 200.0, 1.0
+    f.current_channel = lambda: (url, idx)
+    f._obs_reconnect = lambda: r._rebuilds.append(key)
+
+
+def t_handover_ends_a_hold_on_the_outgoing_feed():
+    # Review 2026-10-18: after NEXT the held feed is off air and nothing ended its hold,
+    # so its frozen still stayed up in the next Splitscreen.
+    r, obs = _hold_relay()
+    r._hold_tick(101.5)
+    assert r._hold_active("A")
+    _make_like_a(r, "B")
+    r.live_feed = lambda: "B"
+    r._hold_tick(102.0)
+    assert not r._hold_active("A") and ("mute", "Feed A", False) in obs.calls
+
+
+def t_handover_ends_a_settle_on_the_outgoing_feed():
+    r, obs = _hold_relay()
+    r._hold_tick(101.5)
+    f = r.feeds["A"]
+    f.last_byte_ts, f.steady_since = 107.0, 101.9
+    r._hold_tick(107.1)                                    # released, settling
+    _make_like_a(r, "B")
+    r.live_feed = lambda: "B"
+    r._hold_tick(108.0)
+    assert not r._hold_active("A") and ("mute", "Feed A", False) in obs.calls
+
+
+def t_a_reset_during_engage_is_not_undone():
+    # Review 2026-10-18: the tick wrote the hold state after the engage's OBS calls, so a
+    # RESET landing in between was overwritten and the hold came back without a clock.
+    r, obs = _hold_relay()
+    real = obs.get_input_mute
+
+    def mute_then_reset(name):
+        r.cancel_signal_hold("A", "reset")
+        return real(name)
+    obs.get_input_mute = mute_then_reset
+    r._hold_tick(101.5)
+    assert r._hold["A"]["state"] == "live" or r._hold["A"].get("held_mono") is not None
+
+
+def t_relay_start_registers_every_fanout_server():
+    # Review 2026-10-18: an edit moved the append under `if self._signal_hold:`.
+    import inspect
+    src = inspect.getsource(m.Relay.start)
+    i = src.index("f.fanout_server = srv")
+    j = src.index("self._fanout_servers.append(srv)")
+    assert 0 < j - i < 200 and src.index("if self._covers:") > j, src[i:j + 40]
 
 
 def t_hold_times_out_and_warns():
