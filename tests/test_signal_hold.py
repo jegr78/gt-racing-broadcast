@@ -62,6 +62,38 @@ def t_latency_status_fields():
     assert m.latency_status_fields(None) == {"target_duration_s": None, "ultra_low_latency": False}
 
 
+def t_get_manifest_sends_the_cookie_jar_and_browser_agent():
+    """YouTube 403s a manifest fetch without the session cookies and a browser UA
+    (measured 2026-10-18), so the probe must send what streamlink sends."""
+    import http.server, tempfile, threading
+    seen = {}
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            seen["ua"], seen["cookie"] = self.headers.get("User-Agent"), self.headers.get("Cookie")
+            ok = seen["ua"] == m.STREAMLINK_YT_UA and "SID=abc" in (seen["cookie"] or "")
+            self.send_response(200 if ok else 403)
+            self.end_headers()
+            if ok:
+                self.wfile.write(MEDIA_ULL.encode())
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    jar = os.path.join(tempfile.mkdtemp(), "yt-cookies.txt")
+    with open(jar, "w", encoding="utf-8") as fh:
+        fh.write("# Netscape HTTP Cookie File\n"
+                 "127.0.0.1\tFALSE\t/\tFALSE\t4102444800\tSID\tabc\n")
+    url = f"http://127.0.0.1:{srv.server_port}/manifest.m3u8"
+    try:
+        assert m.probe_manifest(url, LOG, cookies=jar) == (None, 1.0), seen
+        assert m.probe_manifest(url, LOG) == (None, None)        # no jar: 403, quiet
+    finally:
+        srv.shutdown()
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

@@ -3726,8 +3726,8 @@ def manifest_has_ssai_markers(text):
     return bool(text) and bool(_SSAI_RE.search(text))
 
 
-# Ultra-low-latency YouTube streams cut 1 s HLS segments; normal latency measured 5 s
-# (2026-09-21). Spec docs/superpowers/specs/2026-10-17-feed-signal-hold-design.md.
+# Ultra-low-latency YouTube streams cut 1 s HLS segments; Low latency measured 2 s
+# (2026-10-18) and normal latency 5 s (2026-09-21). Spec docs/superpowers/specs/2026-10-17-feed-signal-hold-design.md.
 ULL_TARGET_DURATION_S = 1.0
 _TARGET_RE = re.compile(r"^#EXT-X-TARGETDURATION:\s*([0-9.]+)\s*$", re.M)
 
@@ -3764,16 +3764,27 @@ def latency_status_fields(target_s):
     return {"target_duration_s": target_s, "ultra_low_latency": is_ultra_low_latency(target_s)}
 
 
-def _get_manifest(url):
-    with urlopen(url, timeout=10) as r:   # noqa: S310  https HLS only
+def _get_manifest(url, cookies=None):
+    """GET a manifest the way streamlink does: the browser User-Agent and the cookie
+    jar. Without them YouTube answers 403 (measured 2026-10-18)."""
+    import http.cookiejar
+    import urllib.request
+    handlers = []
+    if cookies:
+        jar = http.cookiejar.MozillaCookieJar(cookies)
+        jar.load(ignore_discard=True, ignore_expires=True)
+        handlers.append(urllib.request.HTTPCookieProcessor(jar))
+    req = Request(url, headers={"User-Agent": STREAMLINK_YT_UA})
+    with urllib.request.build_opener(*handlers).open(req, timeout=10) as r:   # noqa: S310  https HLS only
         return r.read(65536).decode("utf-8", errors="replace")
 
 
-def probe_manifest(hls_url, logger, get=None):
+def probe_manifest(hls_url, logger, get=None, cookies=None):
     """Fetch the resolved manifest once (following one master hop) and return
     (SSAI warning or None, target duration s or None) for /status. Best effort: any
-    network/parse failure returns (None, None), so the feed is never blocked by it."""
-    get = get or _get_manifest
+    network/parse failure returns (None, None), so the feed is never blocked by it.
+    `cookies` is the jar streamlink uses for the same URL."""
+    get = get or (lambda url: _get_manifest(url, cookies))
     try:
         body = get(hls_url)
         target, variant = parse_target_duration(body, hls_url)
@@ -8208,7 +8219,8 @@ class Feed:
                     self.last_error = err
                     self._set_source_state(classify_source_state(err))
                     time.sleep(RESOLVE_RETRY); continue
-                self.last_error, self.target_duration_s = probe_manifest(hls, self.log)  # warn, never block
+                self.last_error, self.target_duration_s = probe_manifest(  # warn, never block
+                    hls, self.log, cookies=self.cookies)
                 token, target, serve_platform = None, hls, "youtube"
                 # The actually-served resolution comes from yt-dlp (streamlink only reports the
                 # single-variant HLS name "live"); _observe_streamlink_line won't overwrite it.
