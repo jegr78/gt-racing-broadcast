@@ -68,7 +68,7 @@ Controls (HTTP, for Companion Generic-HTTP / browser / curl):
 
 import argparse, collections, csv, datetime, hmac, html, io, ipaddress, json, logging, math, os, random, re, secrets, shutil, signal, socket, ssl, subprocess, sys, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse, quote, unquote, parse_qs, urlencode
+from urllib.parse import urlparse, quote, unquote, parse_qs, urlencode, urljoin
 from urllib.request import Request, urlopen
 
 # OBS reflection (best effort). obs_ws lives in src/scripts (repo) or the
@@ -3726,20 +3726,69 @@ def manifest_has_ssai_markers(text):
     return bool(text) and bool(_SSAI_RE.search(text))
 
 
-def ssai_warning(hls_url, logger):
-    """Fetch the resolved manifest once and, if it carries SSAI markers, return a
-    short warning string for /status (else None). Best-effort: any network/parse
-    failure returns None so the feed is never blocked by the probe."""
+# Ultra-low-latency YouTube streams cut 1 s HLS segments; normal latency measured 5 s
+# (2026-09-21). Spec docs/superpowers/specs/2026-10-17-feed-signal-hold-design.md.
+ULL_TARGET_DURATION_S = 1.0
+_TARGET_RE = re.compile(r"^#EXT-X-TARGETDURATION:\s*([0-9.]+)\s*$", re.M)
+
+
+def parse_target_duration(text, base_url):
+    """HLS playlist text -> (target duration s, None) for a media playlist, or
+    (None, first variant URL) for a master playlist. (None, None) for anything else.
+    Pure."""
+    if not text:
+        return None, None
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if line.startswith("#EXT-X-STREAM-INF"):
+            for nxt in lines[i + 1:]:
+                if nxt.strip() and not nxt.startswith("#"):
+                    return None, urljoin(base_url, nxt.strip())
+            return None, None
+    mt = _TARGET_RE.search(text)
+    if not mt:
+        return None, None
     try:
-        import urllib.request
-        with urllib.request.urlopen(hls_url, timeout=10) as r:   # noqa: S310  https HLS only
-            body = r.read(65536).decode("utf-8", errors="replace")
+        return float(mt.group(1)), None
+    except ValueError:
+        return None, None
+
+
+def is_ultra_low_latency(target_s):
+    """True for an HLS target duration at or below the ultra-low-latency cut. Pure."""
+    return target_s is not None and target_s <= ULL_TARGET_DURATION_S
+
+
+def latency_status_fields(target_s):
+    """The per-feed /status fields for the ultra-low-latency hint. Pure."""
+    return {"target_duration_s": target_s, "ultra_low_latency": is_ultra_low_latency(target_s)}
+
+
+def _get_manifest(url):
+    with urlopen(url, timeout=10) as r:   # noqa: S310  https HLS only
+        return r.read(65536).decode("utf-8", errors="replace")
+
+
+def probe_manifest(hls_url, logger, get=None):
+    """Fetch the resolved manifest once (following one master hop) and return
+    (SSAI warning or None, target duration s or None) for /status. Best effort: any
+    network/parse failure returns (None, None), so the feed is never blocked by it."""
+    get = get or _get_manifest
+    try:
+        body = get(hls_url)
+        target, variant = parse_target_duration(body, hls_url)
+        if variant:
+            body = get(variant)
+            target, _ = parse_target_duration(body, variant)
     except Exception:
-        return None   # probe is a bonus signal; never fail the resolve on it
+        return None, None   # the probe is a bonus signal; never fail the resolve on it
+    warning = None
     if manifest_has_ssai_markers(body):
         logger.warning("source manifest carries server-side ads (cannot strip)")
-        return "source has server-side ads (not a clean broadcast feed)"
-    return None
+        warning = "source has server-side ads (not a clean broadcast feed)"
+    if is_ultra_low_latency(target):
+        logger.warning("source is ultra-low latency (%.0f s segments): stall-prone", target)
+    return warning, target
 
 
 # --- Per-platform cookie / ad-detection helpers (used by the Feed pull loop) ---
@@ -7750,6 +7799,7 @@ class Feed:
         self.quality_pinned = False       # True = operator pinned; suppresses auto-step-down
         self.on_step_down = None          # relay-set callback(feed, stint, from_tier, to_tier)
         self.quality = None               # last streamlink-selected quality (e.g. "720p")
+        self.target_duration_s = None     # HLS #EXT-X-TARGETDURATION of the current serve (spec 2026-10-17)
         self.ring = None              # set by the relay when fan-out is enabled (#358); None → direct-serve
         self.fanout_server = None     # its FeedFanoutServer (fan-out on); the freeze detector reads its snap count (#488)
         self.serve_generation = 0     # #614: bumped per fan-out serve, so a scheduled rejoin can tell it was superseded
@@ -8141,8 +8191,10 @@ class Feed:
                     self.log.warning("%s", local_note)
                 self.last_error = local_note     # picture-only is shown, never silent
                 self.quality = None          # no stale remote resolution on the panel
+                self.target_duration_s = None
                 token, target, serve_platform = None, None, "local"
             elif plat == "twitch":
+                self.target_duration_s = None    # served by token: no manifest URL to probe
                 token = twitch_oauth_from_cookies(
                     cookies_for("twitch", self.cookie_dir))      # None for public Twitch (no auth file)
                 target, serve_platform = url, "twitch"           # no yt-dlp hop
@@ -8156,7 +8208,7 @@ class Feed:
                     self.last_error = err
                     self._set_source_state(classify_source_state(err))
                     time.sleep(RESOLVE_RETRY); continue
-                self.last_error = ssai_warning(hls, self.log)  # warn, never block
+                self.last_error, self.target_duration_s = probe_manifest(hls, self.log)  # warn, never block
                 token, target, serve_platform = None, hls, "youtube"
                 # The actually-served resolution comes from yt-dlp (streamlink only reports the
                 # single-variant HLS name "live"); _observe_streamlink_line won't overwrite it.
@@ -8208,7 +8260,7 @@ class Feed:
                         kwargs={"on_line": self._observe_streamlink_line},
                         daemon=True)
                     pump.start()
-                    if serve_platform != "youtube":   # YouTube keeps ssai_warning() result as last_error
+                    if serve_platform != "youtube":   # YouTube keeps probe_manifest() result as last_error
                         self.last_error = None
                     self._set_phase("serving")
                     self._clear_drop_health()     # live picture -> any prior alarm clears; re-earn served_ok
@@ -9418,6 +9470,7 @@ class Relay:
                                "source_state": f.source_state,
                                "profile": f.quality_tier,
                                "pinned": f.quality_pinned,
+                               **latency_status_fields(f.target_duration_s),
                                "quality": getattr(f, "quality", None),
                                **self._backlog_status(k, f)}
         if self.pov:
