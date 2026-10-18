@@ -43,6 +43,13 @@ INTERMISSION_SCENE = "Intermission"          # the safe holding scene and auto-f
 POV_SOURCE = "Feed POV"                      # the Stint-scene driver-POV PiP scene item
 FEED_SOURCES = {"A": "Feed A", "B": "Feed B"}   # scene-item name == audio input name
 SPLIT_SCENE = "Splitscreen"                  # the handover layout: outgoing + incoming stint
+# Per-feed cover stills (spec 2026-10-17 Part C): an image input directly above each
+# feed item, shown while OBS (re)opens the feed or during a signal hold. Never part of
+# the feed-state intents: reflect_feed_state aborts on a missing item.
+COVER_SOURCES = {"A": "Feed A Cover", "B": "Feed B Cover"}
+COVER_SCENES = (STINT_SCENE, SPLIT_SCENE)
+# sceneItemTransform keys OBS reports but rejects on Set.
+_TRANSFORM_READ_ONLY = ("sourceWidth", "sourceHeight", "width", "height")
 SOLO_PROGRAM_SCENE = "Program"               # the solo collections' single program scene
 # Full-screen graphics a board may toggle through the relay (#706): in Stint for
 # endurance, in Program for solo.
@@ -580,6 +587,8 @@ _ROUTED_FNS = _SHOT_FNS | frozenset({
     "set_stream_service", "reflect_feed_state", "refresh_browser_inputs",
     "release_feed_inputs", "feed_media_cursors", "get_scene_collection",
     "set_scene_collection", "ensure_mic_device",
+    "ensure_cover_items", "get_scene_item_enabled", "set_input_file", "get_media_status",
+    "get_scene_items",
 })
 
 
@@ -1633,6 +1642,118 @@ def set_scene_item_transform(scene, source, transform, host="127.0.0.1", port=No
     finally:
         if own:
             session.close()
+
+
+def _session_call(session, host, port, password, timeout, fn):
+    """Run fn(session) on the given or a fresh session. (value, note); never raises."""
+    note = ""
+    own = session is None
+    if own:
+        session, note = _connect(host, port, password, timeout)
+    if session is None:
+        return None, note
+    try:
+        return fn(session), ""
+    except Exception as exc:                         # noqa: BLE001  best-effort contract
+        return None, str(exc) or exc.__class__.__name__
+    finally:
+        if own:
+            session.close()
+
+
+def get_scene_item_enabled(scene, source, host="127.0.0.1", port=None,
+                           password=None, timeout=2.0, session=None):
+    """Whether a scene item is enabled. (True/False, "") or (None, reason); never raises."""
+    def run(s):
+        sid = s.request("GetSceneItemId",
+                        {"sceneName": scene, "sourceName": source}).get("sceneItemId")
+        if sid is None:
+            raise ValueError(f"scene item '{source}' not found in scene '{scene}'")
+        return bool(s.request("GetSceneItemEnabled",
+                              {"sceneName": scene, "sceneItemId": sid}).get("sceneItemEnabled"))
+    return _session_call(session, host, port, password, timeout, run)
+
+
+def get_media_status(input_name, host="127.0.0.1", port=None,
+                     password=None, timeout=2.0, session=None):
+    """((mediaState, mediaCursor ms), note) of a media input; ((None, None), reason) on
+    any failure, never an exception. The cursor advances only while OBS decodes frames,
+    which is what tells a playing feed from one OBS has opened but not yet shown."""
+    def run(sess):
+        st = sess.request("GetMediaInputStatus", {"inputName": input_name})
+        return st.get("mediaState"), st.get("mediaCursor")
+    value, note = _session_call(session, host, port, password, timeout, run)
+    return (value if value is not None else (None, None)), note
+
+
+def get_scene_items(scene, host="127.0.0.1", port=None, password=None, timeout=2.0,
+                    session=None):
+    """({source name: enabled}, note) for every item of `scene` in ONE request; ({}, reason)
+    on any failure, never an exception. Cheaper than get_scene_item_enabled per item."""
+    def run(sess):
+        items = sess.request("GetSceneItemList", {"sceneName": scene}).get("sceneItems", [])
+        return {i.get("sourceName"): bool(i.get("sceneItemEnabled")) for i in items}
+    value, note = _session_call(session, host, port, password, timeout, run)
+    return (value or {}), note
+
+
+def set_input_file(input_name, path, host="127.0.0.1", port=None,
+                   password=None, timeout=2.0, session=None):
+    """Point an image input at `path`. Re-sending the same path makes OBS reload the
+    file. (ok, note); never raises."""
+    def run(s):
+        s.request("SetInputSettings", {"inputName": input_name, "inputSettings": {"file": path}})
+        return True
+    ok, note = _session_call(session, host, port, password, timeout, run)
+    return bool(ok), note
+
+
+def ensure_cover_items(feed_source, cover_source, cover_file, scenes=COVER_SCENES,
+                       host="127.0.0.1", port=None, password=None, timeout=3.0, session=None):
+    """Create the cover input and a scene item for it directly above `feed_source`, with
+    that item's transform, in every scene that has the feed item; created disabled.
+    Idempotent: an existing cover item is left alone. Returns ({scene: "ok" | "created" |
+    "no-feed" | "error: <reason>"}, note); one failing scene never stops the others."""
+    def run(s):
+        inputs = {i.get("inputName") for i in s.request("GetInputList", {}).get("inputs", [])}
+        have_input = cover_source in inputs
+        report = {}
+        for scene in scenes:
+            try:
+                items = s.request("GetSceneItemList", {"sceneName": scene}).get("sceneItems", [])
+                feed = next((i for i in items if i.get("sourceName") == feed_source), None)
+                if feed is None:
+                    report[scene] = "no-feed"
+                    continue
+                if any(i.get("sourceName") == cover_source for i in items):
+                    report[scene] = "ok"
+                    continue
+                if have_input:
+                    sid = s.request("CreateSceneItem", {
+                        "sceneName": scene, "sourceName": cover_source,
+                        "sceneItemEnabled": False}).get("sceneItemId")
+                else:
+                    sid = s.request("CreateInput", {
+                        "sceneName": scene, "inputName": cover_source,
+                        "inputKind": "image_source", "inputSettings": {"file": cover_file},
+                        "sceneItemEnabled": False}).get("sceneItemId")
+                    have_input = True
+                # obs-websocket v5 counts the index from the bottom: +1 is directly above.
+                s.request("SetSceneItemIndex", {"sceneName": scene, "sceneItemId": sid,
+                                                "sceneItemIndex": feed["sceneItemIndex"] + 1})
+                tr = s.request("GetSceneItemTransform", {
+                    "sceneName": scene, "sceneItemId": feed["sceneItemId"]}
+                ).get("sceneItemTransform") or {}
+                tr = {k: v for k, v in tr.items() if k not in _TRANSFORM_READ_ONLY}
+                if tr:
+                    s.request("SetSceneItemTransform", {"sceneName": scene, "sceneItemId": sid,
+                                                        "sceneItemTransform": tr})
+                report[scene] = "created"
+            except Exception as exc:                  # noqa: BLE001  one scene, not all
+                report[scene] = f"error: {str(exc) or exc.__class__.__name__}"
+        return report
+    report, note = _session_call(session, host, port, password, timeout, run)
+    return report or {}, note
 
 
 OBS_NOT_READY_CODE = 207

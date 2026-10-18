@@ -4,7 +4,7 @@ error propagation, Feed phases, Relay.status() contract.
 Run: python3 tests/test_health.py"""
 import importlib.util, logging, os, tempfile, time
 
-# resolve_hls/ssai_warning take a logger, not a path. A plain logging.Logger with no
+# resolve_hls/probe_manifest take a logger, not a path. A plain logging.Logger with no
 # handlers is the stand-in: its calls are no-ops without a handler.
 _LOG = logging.getLogger("test_health.resolve")
 

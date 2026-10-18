@@ -336,6 +336,77 @@ def t_report_collects_and_renders_recoveries():
     assert "Feed auto-recoveries" not in rb.render_html(rep0)
 
 
+def t_report_lists_signal_holds_with_their_duration():
+    # Spec 2026-10-17 Part B: every time the relay covered a stalled on-air feed.
+    samples = [_sample(100.0), _sample(200.0)]
+    events = [
+        {"ts": 120.0, "type": "signal_hold", "metadata": {"feed": "A", "stint": 3}},
+        {"ts": 143.0, "type": "signal_hold_end",
+         "metadata": {"feed": "A", "stint": 3, "how": "release", "duration_s": 23.0}},
+        {"ts": 150.0, "type": "signal_hold", "metadata": {"feed": "B", "stint": 4}},
+        {"ts": 151.0, "type": "signal_hold", "metadata": {"feed": "A", "stint": 3}},
+    ]
+    names = {3: "GT", 4: "Pony"}
+    rep = rb.build_report(samples, events, names, "6h Suzuka", (100.0, 200.0), now=300.0)
+    holds = rep["signal_holds"]
+    assert holds[0] == {"ts": 120.0, "feed": "A", "stint": 3, "streamer": "GT",
+                        "duration_s": 23.0, "how": "release"}
+    assert holds[1]["feed"] == "B" and holds[1]["duration_s"] is None     # still open
+    assert len(holds) == 3
+    html = rb.render_html(rep)
+    assert "<h2>Signal holds</h2>" in html and "GT" in html and "Pony" in html
+    rep0 = rb.build_report(samples, [], {}, "", (100.0, 200.0), now=300.0)
+    assert rep0["signal_holds"] == [] and "Signal holds" not in rb.render_html(rep0)
+
+
+def _suzuka_end(program_events=True):
+    """The Suzuka 2026-10-17 ending (#917): Feed A stalls from 21:04:49 (here 1000),
+    the Outro goes on program at 21:07:36 (1167), Feed A drops at 21:08:47 (1238) and
+    recovers at 21:09:03 (1254), the part ends at 21:09:09 (1260)."""
+    stall = ["Feed A inbound stall. A gap exceeded the fan-out reserve (stutter risk)"]
+    samples = [_sample(t, live_feed="A", live_stint=3) for t in (900.0, 930.0, 960.0)]
+    samples += [_sample(t, live_feed="A", live_stint=3, health_level="yellow",
+                        health_reasons=stall) for t in (1000.0, 1030.0, 1060.0, 1090.0,
+                                                         1120.0, 1150.0, 1180.0, 1210.0)]
+    samples += [_sample(t, live_feed="A", live_stint=3, health_level="yellow",
+                        health_reasons=stall, feed_a_down=1) for t in (1240.0,)]
+    samples += [_sample(1260.0, live_feed="A", live_stint=3)]
+    events = [{"ts": 800.0, "type": "part_start"}, {"ts": 1260.0, "type": "part_end"},
+              {"ts": 1254.0, "type": "feed_recovery",
+               "metadata": {"feed": "A", "stint": 3, "downtime_s": 16.0}}]
+    if program_events:
+        events += [{"ts": 805.0, "type": "program_scene",
+                    "metadata": {"scene": "Stint", "feeds": True}},
+                   {"ts": 1167.0, "type": "program_scene",
+                    "metadata": {"scene": "Outro", "feeds": False}}]
+    return samples, events
+
+
+def t_feed_problems_after_the_outro_are_not_on_air():
+    samples, events = _suzuka_end()
+    rep = rb.build_report(samples, events, {3: "GT"}, "6h Suzuka", (800.0, 1260.0), now=1300.0)
+    feed_a = next(f for f in rep["feeds"] if f["feed"] == "A")
+    assert feed_a["drops"] == 0 and feed_a["downtime_s"] == 0, feed_a
+    assert rep["recoveries"] == [], rep["recoveries"]
+    stalls = [i for i in rep["incidents"] if i["label"].startswith("Feed A")]
+    assert stalls and all(i["end"] <= 1167.0 for i in stalls), stalls   # cut at the Outro
+
+
+def t_without_program_scene_events_the_report_is_unchanged():
+    samples, events = _suzuka_end(program_events=False)
+    rep = rb.build_report(samples, events, {3: "GT"}, "6h Suzuka", (800.0, 1260.0), now=1300.0)
+    feed_a = next(f for f in rep["feeds"] if f["feed"] == "A")
+    assert feed_a["drops"] == 1 and len(rep["recoveries"]) == 1
+
+
+def t_non_feed_incidents_during_the_outro_still_count():
+    samples, events = _suzuka_end()
+    samples = [dict(s, health_level="red", health_reasons=["OBS dropped frames"])
+               if s["ts"] == 1240.0 else s for s in samples]
+    rep = rb.build_report(samples, events, {3: "GT"}, "6h Suzuka", (800.0, 1260.0), now=1300.0)
+    assert any(i["label"] == "OBS dropped frames" for i in rep["incidents"]), rep["incidents"]
+
+
 def t_build_report_no_mutation_on_repeated_call():
     # build_report must not mutate shared state: two calls on the same samples must
     # yield identical health_bands.

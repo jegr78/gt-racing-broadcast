@@ -246,6 +246,14 @@ remain fixed. Normal sampling offsets at the window edges use the nearest health
 observation for uptime and commentator duration; longer data gaps remain uncovered.
 A later part's start is excluded from the previous session's teardown tail.
 
+Feed figures (drops, downtime, auto-recoveries and feed incidents) count only the time
+a feed was on program. While OBS shows a scene without a feed, such as the Outro or
+Intermission, a commentator's stream that ends or stalls is not an on-air interruption,
+and a feed incident that runs into such a scene ends at the switch. The relay records
+each program-scene change for this. Data recorded before that, or without OBS, keeps
+counting the whole on-air window. Incidents of OBS, the stream or the host count in
+every scene.
+
 
 **The finding.** The report opens with one verdict line, before any table. It leads with
 what the audience saw, then gives the reason:

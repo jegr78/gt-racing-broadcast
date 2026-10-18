@@ -206,6 +206,13 @@ def rate_from_delta(prev, cur, dt):
     return (cur - prev) / dt
 
 
+def bits_per_s(bytes_per_s):
+    """bytes/s -> bits/s. Every *_bps value the sampler hands out is BITS per second:
+    the health store keeps kbps, the report and the Control Center show Mbps (#916:
+    they once showed bytes/s under those labels, 8x too low)."""
+    return None if bytes_per_s is None else bytes_per_s * 8.0
+
+
 def cpu_level(pct):
     if pct is None:
         return None
@@ -373,8 +380,8 @@ class ResourceSampler:
             cur = (reading[1], reading[2])            # (rx, tx)
             dt = (now - self._prev_ts) if self._prev_ts is not None else 0
             prev = self._prev_net
-            down = rate_from_delta(prev[0] if prev else None, cur[0], dt)
-            up = rate_from_delta(prev[1] if prev else None, cur[1], dt)
+            down = bits_per_s(rate_from_delta(prev[0] if prev else None, cur[0], dt))
+            up = bits_per_s(rate_from_delta(prev[1] if prev else None, cur[1], dt))
             self._prev_net = cur
             return (up, down)
         return (None, None)
@@ -472,7 +479,7 @@ class NetDownFloor:
         prev, self._prev = self._prev, (reading[1], now)
         if prev is None:
             return
-        down = rate_from_delta(prev[0], reading[1], now - prev[1])
+        down = bits_per_s(rate_from_delta(prev[0], reading[1], now - prev[1]))
         if down is None:
             return
         with self._lock:
@@ -480,7 +487,7 @@ class NetDownFloor:
                 self._floor = down
 
     def take(self):
-        """The smallest download rate (bytes/s) since the last call, or None."""
+        """The smallest download rate (bits/s) since the last call, or None."""
         with self._lock:
             floor, self._floor = self._floor, None
         return floor
