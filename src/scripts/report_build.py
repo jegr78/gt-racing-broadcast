@@ -345,6 +345,59 @@ def on_air_windows(events, session_end):
     return None
 
 
+def feed_program_windows(events, windows):
+    """The parts of the on-air `windows` in which a feed was on program, from the
+    relay's `program_scene` events (#917). None when no such event exists (older data,
+    solo), and then feed statistics keep using the on-air windows. Before the first
+    scene event a feed counts as on program, the conservative reading. Pure."""
+    changes = sorted((e for e in events if e.get("type") == "program_scene"
+                      and e.get("ts") is not None), key=lambda e: e["ts"])
+    if not changes or not windows:
+        return None
+    off, start = [], None
+    for e in changes:
+        feeds = bool((e.get("metadata") or {}).get("feeds"))
+        if not feeds and start is None:
+            start = e["ts"]
+        elif feeds and start is not None:
+            off.append((start, e["ts"]))
+            start = None
+    if start is not None:
+        off.append((start, float("inf")))
+    out = []
+    for lo, hi in windows:
+        cur = lo
+        for a, b in off:
+            if b <= cur or a >= hi:
+                continue
+            if a > cur:
+                out.append((cur, a))
+            cur = max(cur, b)
+        if cur < hi:
+            out.append((cur, hi))
+    return out
+
+
+def _clip_feed_incidents(incidents, feed_windows):
+    """Feed incidents count only while a feed was on program (#917): one that starts
+    off program is dropped, one that runs past the switch ends there. Other incidents
+    (OBS, stream, host) stay, they reach viewers whatever the scene. Pure."""
+    if feed_windows is None:
+        return incidents
+    out = []
+    for inc in incidents:
+        if not str(inc.get("label") or "").startswith("Feed "):
+            out.append(inc)
+            continue
+        win = next(((lo, hi) for lo, hi in feed_windows if lo <= inc["ts"] < hi), None)
+        if win is None:
+            continue
+        inc = dict(inc, end=min(inc["end"], win[1]))
+        inc["duration_s"] = max(0.0, inc["end"] - inc["ts"])
+        out.append(inc)
+    return out
+
+
 def windows_total_s(windows):
     return sum(max(0.0, e - s) for s, e in windows)
 
@@ -471,8 +524,13 @@ def build_report(samples, events, name_for_stint, event_title, window, now,
                         [(s["ts"], s.get("health_level")) for s in g]))]
     on_air = _on_air(band_groups, name_for_stint)
     on_air["resolved_at"] = now
-    feeds = [{"feed": "A", **_feed_stats(band_groups, "feed_a_down")},
-             {"feed": "B", **_feed_stats(band_groups, "feed_b_down")}]
+    # #917: a feed that drops while OBS shows the Outro (or any feed-less scene) is not
+    # an on-air interruption; feed figures use the time a feed was on program.
+    feed_windows = feed_program_windows(events, windows)
+    feed_groups = (_window_edge_samples(_sample_groups(samples, feed_windows), feed_windows)
+                   if feed_windows is not None else band_groups)
+    feeds = [{"feed": "A", **_feed_stats(feed_groups, "feed_a_down")},
+             {"feed": "B", **_feed_stats(feed_groups, "feed_b_down")}]
     handovers = []
     substitutions = []
     recoveries = []
@@ -504,6 +562,8 @@ def build_report(samples, events, name_for_stint, event_title, window, now,
                 row["duration_s"], row["how"] = md.get("duration_s"), md.get("how")
         elif e.get("type") == "feed_recovery":
             md = e.get("metadata") or {}
+            if feed_windows is not None and not _in_windows(e.get("ts") or 0, feed_windows):
+                continue                     # recovered while no feed was on program
             recoveries.append({"ts": e.get("ts"), "feed": md.get("feed") or "",
                                "stint": md.get("stint"),
                                "streamer": name_for_stint.get(md.get("stint")) or "",
@@ -524,7 +584,8 @@ def build_report(samples, events, name_for_stint, event_title, window, now,
                    "uptime_pct": _uptime_pct(metric_bands, on_air_s)},
         "on_air": on_air,
         "feeds": feeds,
-        "incidents": _window_incidents(band_groups, windows),
+        "incidents": _clip_feed_incidents(_window_incidents(band_groups, windows),
+                                          feed_windows),
         "quality": quality,
         "backlog": backlog,
         "finding": _finding(backlog, quality, on_air_s, on_air["stint_handovers"],

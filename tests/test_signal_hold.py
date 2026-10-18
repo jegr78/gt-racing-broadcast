@@ -365,6 +365,7 @@ def _relay_for_covers(obs, serving=True, stills=True):
     r = m.Relay.__new__(m.Relay)            # no network, no threads
     r._obs, r.obs_note, r.fanout, r.solo = obs, "", True, False
     r._covers = True
+    r.health_store = None                   # events go nowhere unless a test hooks them
     r._cover = {}
     r._play = {}
     r._motion = {}
@@ -598,6 +599,23 @@ def t_cover_tap_respawns_after_ffmpeg_exits():
         time.sleep(0.02)
     tap.stop()
     assert len(spawns) >= 2 and tap.last_write_ts is not None
+
+
+def t_cover_tick_records_program_scene_changes_for_the_report():
+    # #917: the report must know when a feed was on program; the cover tick already
+    # reads the program scene every second, so it records each change once.
+    obs = FakeObs(program="Stint")
+    r = _relay_for_covers(obs)
+    events = []
+    r._record_event = lambda now, typ, label, md: events.append((typ, md))
+    r._cover_tick(100.0)
+    r._cover_tick(101.0)
+    obs.program = "Outro"
+    r._cover_tick(102.0)
+    obs.program = None                                       # OBS unreachable: no event
+    r._cover_tick(103.0)
+    assert events == [("program_scene", {"scene": "Stint", "feeds": True}),
+                      ("program_scene", {"scene": "Outro", "feeds": False})], events
 
 
 def t_covers_enabled_env():

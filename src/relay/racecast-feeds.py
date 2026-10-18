@@ -10077,6 +10077,17 @@ class Relay:
             if note:
                 self.obs_note = note
 
+    def _note_program_scene(self, scene):
+        """Record each program-scene change as a health event (#917), so the post-event
+        report counts feed drops only while a feed was on program, not under the Outro.
+        `feeds` says whether the scene shows a feed. No OBS answer, no event."""
+        if not scene or scene == getattr(self, "_last_program_scene", None):
+            return
+        self._last_program_scene = scene
+        feeds = scene in _obs_ws.COVER_SCENES
+        self._record_event(time.time(), "program_scene", f"Program scene: {scene}",
+                           {"scene": scene, "feeds": feeds})
+
     def _obs_playing_s(self, feed, now):
         """Seconds OBS has demonstrably played the feed: its position advancing in real
         time AND its picture changing; None unless both hold."""
@@ -10121,6 +10132,7 @@ class Relay:
             return
         self._ensure_covers(now)
         program, _note = self._obs.get_current_program_scene()
+        self._note_program_scene(program)
         self._poll_play(now)
         # One GetSceneItemList per scene, fresh every tick: a cached visibility could put
         # an off-air feed's cover over the on-air feed (review 2026-10-18).
