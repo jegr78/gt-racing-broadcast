@@ -955,6 +955,25 @@ console.log(JSON.stringify([a, b, c]));""")
         assert c["className"] == "st air", c
 
 
+def t_signal_hold_pill_names_the_held_feed():
+    # Spec 2026-10-17 Part B: the director sees when the relay covers a stalled feed.
+    html = _html()
+    _order(html, 'id="stBehind"', 'id="stHold"', 'id="stA"')
+    out = _run_js(_func_src(html, "holdPill") + "\n}\n" + """
+const el = {hidden: false, b: {textContent: ''}, querySelector() { return this.b; }};
+const $ = () => el;
+const seen = [];
+holdPill({feeds: {A: {signal_hold: {active: true}}, B: {signal_hold: {active: false}}}});
+seen.push([el.hidden, el.b.textContent]);
+holdPill({feeds: {A: {signal_hold: {active: false}}, B: {}}});
+seen.push([el.hidden, el.b.textContent]);
+holdPill({solo: true});
+seen.push([el.hidden]);
+console.log(JSON.stringify(seen));""")
+    if out is not None:
+        assert json.loads(out) == [[False, "A"], [True, "A"], [True]], out
+
+
 def _const_line(html, name):
     i = html.index(f"const {name} =")
     return html[i:html.index(";", i) + 1]

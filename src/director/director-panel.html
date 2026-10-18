@@ -666,6 +666,7 @@
       <span class="st" id="stHealth" title="">HEALTH <b>—</b></span>
       <span class="st air" id="stAir">ON AIR <b>—</b></span>
       <span class="st" id="stBehind" hidden title="How far OBS is behind the live edge of each fan-out feed">BEHIND LIVE <b>—</b></span>
+      <span class="st warn" id="stHold" hidden title="The on-air feed's source stalled past the reserve: the relay covers it with its last picture, muted, until the source is steady again">SIGNAL HOLD <b>—</b></span>
       <span class="st" id="stA">A <b>—</b></span>
       <span class="st" id="stB">B <b>—</b></span>
       <span class="st" id="stPov">POV <b>—</b></span>
@@ -2046,6 +2047,17 @@ $("#brandSubInput").addEventListener("blur", ()=>{ if (editingTitle) stopEditTit
 // (#533, 3 s by default) is the healthy baseline; it goes amber only while the relay
 // reports the feed backlogged. Shown only while a serving feed has a value, because
 // a seventh pill wraps the strip to a third row; an older relay never shows it. (#583)
+// Spec 2026-10-17: the relay covers a stalled on-air feed (still + mute + notice) and
+// returns to the live picture by itself. The pill only tells the director it is happening.
+function holdPill(d){
+  const el = $("#stHold");
+  const held = !d.solo && d.feeds
+    ? ["A", "B"].filter(k => d.feeds[k] && d.feeds[k].signal_hold && d.feeds[k].signal_hold.active)
+    : [];
+  el.hidden = !held.length;
+  if (held.length) el.querySelector("b").textContent = held.join(" ");
+}
+
 function behindPill(d){
   const el = $("#stBehind");
   const rows = [["A", d.feeds && d.feeds.A], ["B", d.feeds && d.feeds.B], ["POV", d.pov]]
@@ -2117,6 +2129,7 @@ async function relayPoll(){
     $("#stHealth").title = (d.health && d.health.reasons && d.health.reasons.length)
       ? d.health.reasons.join(" · ") : "all systems green";
     behindPill(d);
+    holdPill(d);
     resetLabel(d);
     const n = d.schedule_len;
     if (!solo){
