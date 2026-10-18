@@ -167,8 +167,9 @@ def t_sampler_counter_deltas():
     assert first["mem_pct"] == 50.0 and first["disk_free"] == 100 * 1024**3
     second = s.sample(now=1002.0)                                     # dt=2s
     assert second["cpu_pct"] == 50.0, second                          # db=100 dt=200
-    # rx 1000->3000 over 2s = 1000/s (down); tx 2000->6000 over 2s = 2000/s (up)
-    assert second["net_down_bps"] == 1000.0 and second["net_up_bps"] == 2000.0, second
+    # rx 1000->3000 bytes over 2s = 1000 B/s = 8000 bit/s (down); tx 2000 B/s = 16000 bit/s
+    # (#916: the counters are bytes, every consumer reads *_bps as BITS per second)
+    assert second["net_down_bps"] == 8000.0 and second["net_up_bps"] == 16000.0, second
 
 
 def t_sampler_percent_passthrough():
@@ -221,10 +222,10 @@ def t_net_down_floor_keeps_the_smallest_rate_until_taken():
                [0.0, 2.0, 4.0, 6.0, 8.0])
     for _ in range(4):
         f.tick()
-    assert f.take() == 500.0, "rates 2000, 500, 2000 bytes/s: the floor is the dip"
+    assert f.take() == 4000.0, "rates 2000, 500, 2000 bytes/s = 16000, 4000, 16000 bit/s: the dip"
     assert f.take() is None, "take() resets the floor"
     f.tick()
-    assert f.take() == 3000.0, "the previous counter survives take(), so the next tick has a rate"
+    assert f.take() == 24000.0, "the previous counter survives take(), so the next tick has a rate"
 
 
 def t_net_down_floor_restarts_after_a_failed_read():
@@ -232,7 +233,7 @@ def t_net_down_floor_restarts_after_a_failed_read():
                [0.0, 2.0, 4.0, 6.0])
     for _ in range(4):
         f.tick()
-    assert f.take() == 4000.0, "a failed read drops the baseline instead of spanning the gap"
+    assert f.take() == 32000.0, "a failed read drops the baseline instead of spanning the gap"
 
 
 def t_net_down_floor_ignores_a_counter_reset():
@@ -240,7 +241,7 @@ def t_net_down_floor_ignores_a_counter_reset():
                [0.0, 2.0, 4.0])
     for _ in range(3):
         f.tick()
-    assert f.take() == 1000.0, "a counter that went backwards yields no rate, not a zero floor"
+    assert f.take() == 8000.0, "a counter that went backwards yields no rate, not a zero floor"
 
 
 def t_to_health_fields_carries_the_down_floor():
@@ -275,6 +276,26 @@ def run():
             fn()
             print("ok", name)
     print("ALL PASS")
+
+
+
+def t_a_6_mbit_upload_reads_6_mbps_on_every_surface():
+    # #916: Suzuka 2026-10-17 showed "Net up 0.8 Mbps" while OBS streamed 6172 kbps.
+    import importlib.util
+    readers = _fake_readers([
+        {"cpu": None, "net": ("counter", 0, 0), "mem": None, "disk": None},
+        {"cpu": None, "net": ("counter", 750_000, 750_000), "mem": None, "disk": None},
+    ])
+    s = r.ResourceSampler(readers=readers)
+    s.sample(now=0.0)
+    snap = s.sample(now=1.0)                       # 750 000 bytes in 1 s = 6 Mbit/s
+    f = r.to_health_fields(snap)
+    assert f["sys_net_up_kbps"] == 6000.0 and f["sys_net_down_kbps"] == 6000.0, f
+    spec = importlib.util.spec_from_file_location(
+        "report_build", os.path.join(ROOT, "src", "scripts", "report_build.py"))
+    rb = importlib.util.module_from_spec(spec); spec.loader.exec_module(rb)
+    q = rb._quality([dict(f, ts=1.0)])
+    assert q["net_up_avg"] == 6.0 and q["net_down_peak"] == 6.0, q
 
 
 if __name__ == "__main__":
