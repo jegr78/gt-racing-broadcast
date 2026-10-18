@@ -2766,6 +2766,83 @@ def t_tune_feed_inputs_changes_only_differing_sources_on_the_port():
     assert m.tune_feed_inputs(m.feed_obs_tuning(False), ports=[53002], session=s3) == ([], "")
 
 
+# Feed covers (spec 2026-10-17 Part C): the relay creates one image input per feed and
+# places it directly above the feed item in Stint and Splitscreen.
+def t_ensure_cover_items_creates_input_and_items_above_the_feed():
+    s = _FakeSession({
+        "GetInputList": {"inputs": [{"inputName": "Feed A"}]},
+        "GetSceneItemList": {"sceneItems": [
+            {"sourceName": "Feed A", "sceneItemId": 3, "sceneItemIndex": 1},
+            {"sourceName": "Overlay", "sceneItemId": 9, "sceneItemIndex": 2}]},
+        "GetSceneItemTransform": {"sceneItemTransform": {
+            "positionX": 0.0, "positionY": 0.0, "boundsType": "OBS_BOUNDS_SCALE_INNER",
+            "boundsWidth": 960.0, "boundsHeight": 540.0, "alignment": 5, "boundsAlignment": 0,
+            "sourceWidth": 1920.0, "sourceHeight": 1080.0, "width": 960.0, "height": 540.0}},
+        "CreateInput": {"sceneItemId": 11}, "CreateSceneItem": {"sceneItemId": 12}})
+    report, note = m.ensure_cover_items("Feed A", "Feed A Cover", "/tmp/a.jpg",
+                                        scenes=("Stint", "Splitscreen"), session=s)
+    kinds = [k for k, _ in s.sent]
+    assert report == {"Stint": "created", "Splitscreen": "created"}, (report, note)
+    assert kinds.count("CreateInput") == 1 and kinds.count("CreateSceneItem") == 1
+    created = [d for k, d in s.sent if k == "CreateInput"][0]
+    assert created["inputKind"] == "image_source" and created["sceneItemEnabled"] is False
+    assert created["inputSettings"] == {"file": "/tmp/a.jpg"}
+    idx = [d for k, d in s.sent if k == "SetSceneItemIndex"]
+    assert len(idx) == 2 and all(d["sceneItemIndex"] == 2 for d in idx)   # directly above Feed A
+    tr = [d["sceneItemTransform"] for k, d in s.sent if k == "SetSceneItemTransform"]
+    assert tr and all(k not in tr[0] for k in ("sourceWidth", "sourceHeight", "width", "height"))
+    assert tr[0]["boundsWidth"] == 960.0
+
+
+def t_ensure_cover_items_existing_is_ok_and_no_feed_is_skipped():
+    s = _FakeSession({
+        "GetInputList": {"inputs": [{"inputName": "Feed A"}, {"inputName": "Feed A Cover"}]},
+        "GetSceneItemList": {"sceneItems": [
+            {"sourceName": "Feed A", "sceneItemId": 3, "sceneItemIndex": 1},
+            {"sourceName": "Feed A Cover", "sceneItemId": 4, "sceneItemIndex": 2}]}})
+    report, _ = m.ensure_cover_items("Feed A", "Feed A Cover", "/tmp/a.jpg",
+                                     scenes=("Stint",), session=s)
+    assert report == {"Stint": "ok"}
+    assert not [k for k, _ in s.sent if k.startswith("Create")]
+    s2 = _FakeSession({"GetInputList": {"inputs": []}, "GetSceneItemList": {"sceneItems": []}})
+    assert m.ensure_cover_items("Feed A", "Feed A Cover", "/x", scenes=("Stint",),
+                                session=s2)[0] == {"Stint": "no-feed"}
+
+
+def t_ensure_cover_items_one_scene_error_does_not_stop_the_other():
+    class Boom(_FakeSession):
+        def request(self, request_type, request_data=None):
+            if request_type == "GetSceneItemList" and request_data["sceneName"] == "Stint":
+                raise RuntimeError("no such scene")
+            return super().request(request_type, request_data)
+    s = Boom({"GetInputList": {"inputs": []},
+              "GetSceneItemList": {"sceneItems": [
+                  {"sourceName": "Feed A", "sceneItemId": 3, "sceneItemIndex": 0}]},
+              "CreateInput": {"sceneItemId": 5}})
+    report, _ = m.ensure_cover_items("Feed A", "Feed A Cover", "/x",
+                                     scenes=("Stint", "Splitscreen"), session=s)
+    assert report["Stint"].startswith("error") and report["Splitscreen"] == "created"
+
+
+def t_get_scene_item_enabled_and_set_input_file():
+    s = _FakeSession({"GetSceneItemId": {"sceneItemId": 5},
+                      "GetSceneItemEnabled": {"sceneItemEnabled": False}})
+    assert m.get_scene_item_enabled("Stint", "Feed B", session=s) == (False, "")
+    assert m.set_input_file("Feed A Cover", "/tmp/a.jpg", session=s) == (True, "")
+    assert ("SetInputSettings", {"inputName": "Feed A Cover",
+                                 "inputSettings": {"file": "/tmp/a.jpg"}}) in s.sent
+    missing = _FakeSession({"GetSceneItemId": {}})
+    val, note = m.get_scene_item_enabled("Stint", "Feed B", session=missing)
+    assert val is None and "not found" in note
+
+
+def t_cover_helpers_are_routed_and_named():
+    for fn in ("ensure_cover_items", "get_scene_item_enabled", "set_input_file"):
+        assert m.route_kind(fn) == "ctrl", fn
+    assert m.COVER_SOURCES == {"A": "Feed A Cover", "B": "Feed B Cover"}
+    assert m.COVER_SCENES == (m.STINT_SCENE, m.SPLIT_SCENE)
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
