@@ -33,7 +33,7 @@ const tmSeq = {load: 0, rec: 0, b: 0, pair: 0};   // only the newest call of eac
 
 function tmKey(l) { return l.rec + '|' + l.session + '|' + l.lap; }
 function tmTime(s) {
-  if (s == null) return '—';
+  if (!Number.isFinite(s) || s < 0) return '—';
   const ms = Math.round(s * 1000), m = Math.floor(ms / 60000), r = (ms % 60000) / 1000;
   return m + ':' + (r < 10 ? '0' : '') + r.toFixed(3);
 }
@@ -486,7 +486,7 @@ function tmRenderLaps() {
                  l.tyre_age_laps != null ? 'Tyre age: '+l.tyre_age_laps+' lap boundaries since declared initial stint / tyre service' : 'Tyre age unknown',
                  ...(l.context_warnings || []),
                  l.after_service && !l.compound ? 'After inferred service; tyres unconfirmed' : '',
-                 l.time_s == null && l.relay_time_s != null ? l.relay_time_s.toFixed(3) + ' s captured' : '',
+                 l.time_s == null && l.relay_time_s != null ? tmTime(l.relay_time_s) + ' captured' : '',
                  nc ? (l.reasons || [l.reason]).filter(Boolean).join('; ') : '',
                  l.trace_complete === false && l.capture_complete ? 'Partial distance trace' : '',
                  l.trace_complete && l.time_valid === false ? 'Invalid comparison clock' : '',
@@ -743,7 +743,7 @@ function tmRenderSectors() {
     const th = document.createElement('th'); th.textContent = h; head.appendChild(th);
   });
   const body = t.createTBody();
-  const f = v => (v == null ? '—' : v.toFixed(3));
+  const f = tmTime;
   const sm = tmState.sectorM || 200, n = Math.max(sa.length, sb.length);
   // The last sector runs to the end of lap B, which is rarely a whole sector length.
   const trB = tmTrace(B), endM = trB.length ? trB[trB.length - 1].d : n * sm;

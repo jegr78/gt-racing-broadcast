@@ -2732,7 +2732,7 @@ const cells = sec => sec.kids.map(r => r.kids.map(c => c.textContent).join(' '))
 console.log([cleared, shown, cells(t.kids[0])[0], cells(t.kids[1])[1]].join('|'));""")
     if out is not None:
         assert out.strip() == ("true,true|false,false|Sector km A B B-A Best|"
-                               "2 0.2–0.4 11.000 11.200 +0.200 11.000"), \
+                               "2 0.2–0.4 0:11.000 0:11.200 +0.200 0:11.000"), \
             f"legends follow the drawn lap and each sector names its distance: {out!r}"
 
 
@@ -2758,7 +2758,7 @@ console.log($('tm-laps').kids.map(r => r.textContent).join('|'));
             'paused, loading or off track', 'pit lap: standstill', 'pit lap: refuel'))
         assert 'Partial distance trace' in rows[1], 'a complete capture need not have a complete course trace'
         assert 'Lap 14pace' in rows[2] and 'After inferred service; tyres unconfirmed' in rows[2]
-        assert 'Lap 21partial' in rows[3] and '4.071 s captured' in rows[3]
+        assert 'Lap 21partial' in rows[3] and '0:04.071 captured' in rows[3]
 
 
 def t_telemetry_summary_shows_the_report_figures_and_a_clickable_trend():
