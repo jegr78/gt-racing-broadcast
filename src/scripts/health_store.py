@@ -14,7 +14,12 @@ import math
 import sqlite3
 import time
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
+
+# v13 (#916): the sys_net_* columns hold kbps of BITS. Older rows (and JSONL exported by
+# an older relay) hold bytes/s / 1000 under the same label, 8x too low.
+NET_RATE_COLUMNS = ("sys_net_up_kbps", "sys_net_down_kbps", "sys_net_down_min_kbps")
+NET_BITS_SINCE_VERSION = 13
 
 SAMPLE_INTERVAL_S = 30          # heartbeat tick = sample cadence
 LIVE_WINDOW_S = 900            # default range when no from/to given (15 min)
@@ -222,13 +227,18 @@ def open_db(path):
 
 def migrate(conn):
     """Create the schema, add any missing v3 and v5-v12 columns as a lossless
-    upgrade, and stamp user_version. Idempotent and version-agnostic."""
+    upgrade, convert pre-v13 network rates to bits (#916), and stamp user_version.
+    Idempotent: the conversion runs once, keyed on the stored version."""
+    before = conn.execute("PRAGMA user_version").fetchone()[0]
     conn.executescript(_CREATE)
     have = {r["name"] for r in conn.execute("PRAGMA table_info(samples)").fetchall()}
     for name, decl in (_V3_COLUMNS + _V5_COLUMNS + _V6_COLUMNS + _V7_COLUMNS + _V8_COLUMNS + _V9_COLUMNS
                        + _V10_COLUMNS + _V11_COLUMNS + _V12_COLUMNS):
         if name not in have:
             conn.execute(f"ALTER TABLE samples ADD COLUMN {name} {decl}")
+    if 0 < before < NET_BITS_SINCE_VERSION:
+        for col in NET_RATE_COLUMNS:
+            conn.execute(f"UPDATE samples SET {col} = {col} * 8 WHERE {col} IS NOT NULL")
     conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
     conn.commit()
 
@@ -403,6 +413,7 @@ def export_jsonl_line(row):
     r["kind"] = row.get("kind")
     reasons = row.get("health_reasons")
     r["health_reasons"] = reasons if isinstance(reasons, list) else []
+    r["_net_bits"] = True              # #916: the import converts lines without it
     return json.dumps(r, ensure_ascii=False)
 
 
@@ -470,6 +481,10 @@ def import_jsonl(conn, lines):
         if dup:
             continue
         s = dict(obj)
+        if not s.get("_net_bits"):          # exported by a relay before #916: bytes-based
+            for col in NET_RATE_COLUMNS:
+                if isinstance(s.get(col), (int, float)):
+                    s[col] = s[col] * 8
         s["health_reasons"] = json.dumps(s.get("health_reasons") or [])
         values = [s.get(col) for col in COLUMNS]
         conn.execute(f"INSERT INTO samples ({','.join(COLUMNS)}) VALUES ({placeholders})",

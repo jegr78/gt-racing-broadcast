@@ -694,9 +694,10 @@ def t_migrate_adds_net_down_floor_v12_lossless():
     conn = hs.open_db(path)
     try:
         hs.migrate(conn)
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == hs.SCHEMA_VERSION == 12
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == hs.SCHEMA_VERSION
         row = conn.execute("SELECT sys_net_down_kbps, sys_net_down_min_kbps FROM samples").fetchone()
-        assert tuple(row) == (8000.0, None), "the old row survives with a NULL floor"
+        # the old row survives with a NULL floor; its bytes-based rate becomes bits (#916)
+        assert tuple(row) == (64000.0, None), tuple(row)
     finally:
         conn.close()
     assert "sys_net_down_min_kbps" in hs.COLUMNS and "sys_net_down_min_kbps" in hs.NUMERIC_FIELDS
@@ -807,6 +808,56 @@ def t_backlog_rule_is_shared_with_the_relay_definition():
     assert hs.feed_prebuffer_s({}) == hs.DEFAULT_FEED_PREBUFFER_S == 3.0
     assert hs.feed_backlog_warn_s({"RACECAST_FEED_BACKLOG_WARN_S": "8"}) == 8.0
     assert hs.feed_backlog_warn_s({}) == hs.FEED_BACKLOG_WARN_S == 5.0
+
+
+NET_COLS = ("sys_net_up_kbps", "sys_net_down_kbps", "sys_net_down_min_kbps")
+
+
+def _old_db_with_net_row(path):
+    """A v12 DB (before #916) holding one sample in the old bytes-based unit."""
+    conn = hs.open_db(path)
+    hs.migrate(conn)
+    conn.execute("PRAGMA user_version=12")
+    conn.execute("INSERT INTO samples (ts, kind, sys_net_up_kbps, sys_net_down_kbps, "
+                 "sys_net_down_min_kbps) VALUES (1.0, 'tick', 750.0, 875.0, NULL)")
+    conn.commit()
+    return conn
+
+
+def t_migrate_converts_old_net_rates_to_bits_once():
+    # #916: rows written before the fix hold bytes/s / 1000 under a kbps label.
+    path = os.path.join(tempfile.mkdtemp(), "h.db")
+    conn = _old_db_with_net_row(path)
+    hs.migrate(conn)
+    hs.migrate(conn)                                       # idempotent: no second x8
+    row = conn.execute("SELECT " + ",".join(NET_COLS) + " FROM samples").fetchone()
+    assert tuple(row) == (6000.0, 7000.0, None), tuple(row)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == hs.SCHEMA_VERSION
+    conn.close()
+
+
+def t_fresh_db_and_new_rows_are_not_converted():
+    path = os.path.join(tempfile.mkdtemp(), "h.db")
+    conn = hs.open_db(path)
+    hs.migrate(conn)
+    conn.execute("INSERT INTO samples (ts, kind, sys_net_up_kbps) VALUES (1.0, 'tick', 6000.0)")
+    conn.commit()
+    hs.migrate(conn)
+    assert conn.execute("SELECT sys_net_up_kbps FROM samples").fetchone()[0] == 6000.0
+    conn.close()
+
+
+def t_import_converts_lines_from_an_older_relay():
+    import json
+    conn = hs.open_db(os.path.join(tempfile.mkdtemp(), "h.db"))
+    hs.migrate(conn)
+    old = json.dumps({"ts": 1.0, "kind": "tick", "sys_net_up_kbps": 750.0})
+    new = hs.export_jsonl_line({"ts": 2.0, "kind": "tick", "sys_net_up_kbps": 6000.0})
+    assert '"_net_bits": true' in new
+    hs.import_jsonl(conn, [old, new])
+    vals = [r[0] for r in conn.execute("SELECT sys_net_up_kbps FROM samples ORDER BY ts")]
+    assert vals == [6000.0, 6000.0], vals
+    conn.close()
 
 
 if __name__ == "__main__":
