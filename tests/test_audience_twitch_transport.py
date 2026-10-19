@@ -43,7 +43,7 @@ def t_transport_bounds_success_and_errors_and_closes_error_streams():
             assert 0 < size <= 1024 * 1024 + 1, size
             return super().read(size)
 
-    for data in (b"x" * (1024 * 1024 + 1), b"[]", b"bad", b"\xff"):
+    for data in (b"{}" + b" " * (1024 * 1024), b"[]", b"bad", b"\xff"):
         try:
             tw.request(
                 "viewers",
