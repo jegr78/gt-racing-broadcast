@@ -589,6 +589,23 @@ def t_failed_durable_disconnect_warning_survives_status_reads_until_cleanup():
         assert service.status()["error"] == "" and service.files.load() is None
 
 
+def t_disconnecting_an_unconfigured_provider_restarts_without_a_target_error():
+    with fixture() as (service, _clock, api, _cache, _definitions):
+        command(service, "disconnect")
+        restarted = connection.Service(
+            service.files.public.parent, service.files.secret.parent, fetch=api
+        )
+        try:
+            status = restarted.status()
+            assert not status["connected"] and status["error"] == "", (
+                "Empty disabled connection became an invalid target after restart"
+            )
+            restarted.tick()
+            assert not api.calls
+        finally:
+            restarted.close()
+
+
 if __name__ == "__main__":
     for name, fn in tuple(globals().items()):
         if name.startswith("t_"):

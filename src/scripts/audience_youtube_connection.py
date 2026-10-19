@@ -85,7 +85,11 @@ class Service:
         self.due = {"videos": 0, "channels": 0}
         self.backoff, self.auth_failed = 0, False
         public = self.files.read_public()
-        if public:
+        if public and (
+            public.get("enabled") is True
+            or public.get("video") is not None
+            or public.get("channel") is not None
+        ):
             try:
                 self.targets = _targets(public)
                 if public.get("enabled") is True:
