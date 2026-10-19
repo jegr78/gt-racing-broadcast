@@ -3352,17 +3352,10 @@ function ovFillSample() {
     } else if (typeof v === 'string' && !img) {    // text slot
       el.textContent = v;
       el.classList.toggle('empty', !v);
-      // Mirror hud.html's auto-fits: team names always, other slots (#944, the round
-      // title) when they offer fitMax; ovFitText leaves the CSS size while it is unset.
-      const fit = /^team\d-name$/.test(s.id) ? ovFitName
-        : ((el.dataset && el.dataset.editProps || '').split(',').includes('fitMax') ? ovFitText : null);
-      if (fit) {
-        fit(el);
-        // Filled while the canvas is hidden, the text measures 0 wide; fit once laid out.
-        if (!el._fitObserver) {
-          el._fitObserver = new ResizeObserver(() => fit(el));
-          el._fitObserver.observe(el);
-        }
+      // Filled while the canvas is hidden, the text measures 0 wide; fit once laid out.
+      if (ovRefit(s.id, el) && !el._fitObserver) {
+        el._fitObserver = new ResizeObserver(() => ovRefit(s.id, el));
+        el._fitObserver.observe(el);
       }
     } else {
       el.classList.remove('empty');
@@ -3384,10 +3377,19 @@ function ovFillSample() {
   // every poll, the canvas once more here.
   document.fonts.ready.then(() => ovState.slots.forEach(s => {
     const el = ovState.shadow.getElementById(s.id);
-    if (!el) return;
-    if (/^team\d-name$/.test(s.id)) ovFitName(el);
-    else if ((el.dataset && el.dataset.editProps || '').split(',').includes('fitMax')) ovFitText(el);
+    if (el) ovRefit(s.id, el);
   }));
+}
+
+// Mirror hud.html's auto-fits: team names always, other slots (#944, the round title)
+// when they offer fitMax; ovFitText leaves the CSS size while it is unset. Returns
+// whether the slot has a fit at all.
+function ovRefit(id, el) {
+  if (!el) return false;
+  if (/^team\d-name$/.test(id)) { ovFitName(el); return true; }
+  if (!(el.dataset && el.dataset.editProps || '').split(',').includes('fitMax')) return false;
+  ovFitText(el);
+  return true;
 }
 
 // Mirrors of hud.html::fitName/fitText/shrinkToFit, so the canvas previews a long text
@@ -3412,7 +3414,7 @@ function ovShrinkToFit(el, cs, max, min) {
   const width = el.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
   // The canvas is zoomed with a CSS transform: client rects are scaled, layout widths not.
   const zoom = (el.getBoundingClientRect().width / el.offsetWidth) || 1;
-  let size = max;
+  let size = Math.min(max, 500);     // hud.html's cap (overlay_build.FIT_SIZE_MAX)
   el.style.fontSize = size + 'px';
   while (size > min && text.getBoundingClientRect().width / zoom > width) { size -= 1; el.style.fontSize = size + 'px'; }
 }
@@ -3639,6 +3641,8 @@ function ovSetProp(id, prop, value) {
   else slot[prop] = value;
   if (id.startsWith('audience-')) ovStyleSlot(id);
   else ovApplyProp(ovState.shadow.getElementById(id), prop, slot[prop]);
+  // A fitted slot carries an inline size from its last fit: refit on every edit.
+  ovRefit(id, ovState.shadow.getElementById(id));
   if (ovState.fields[prop]) ovState.fields[prop].value = (slot[prop] !== undefined ? slot[prop] : '');
   ovPositionSel();
 }

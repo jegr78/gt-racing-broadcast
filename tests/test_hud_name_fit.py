@@ -57,15 +57,19 @@ fitText(el); out.push(parseFloat(el.style.fontSize));
 el.textContent='Round 2'; fitText(el); out.push(parseFloat(el.style.fontSize));
 el.textContent='X'.repeat(200); fitText(el); out.push(parseFloat(el.style.fontSize));
 vars={}; fitText(el); out.push(el.style.fontSize||'css');
+// A hand-written --fit-max: 1e300px must not spin (1e300 - 1 == 1e300).
+vars={'--fit-max':'1e300','--fit-min':'26'}; el.textContent='X'; fitText(el);
+out.push(parseFloat(el.style.fontSize));
 console.log(out.join(','));
 '''
     result = subprocess.run([node, '-'], input=script, capture_output=True, text=True,
-                            encoding='utf-8', errors='replace', check=True)
-    plain, long_, short, huge, back = result.stdout.strip().split(',')
+                            encoding='utf-8', errors='replace', check=True, timeout=20)
+    plain, long_, short, huge, back, capped = result.stdout.strip().split(',')
     assert plain == 'css', 'without --fit-max the profile font size stays'
     assert 26 <= float(long_) < 40, long_
     assert float(short) == 40 and float(huge) == 26, (short, huge)
     assert back == 'css', 'turning the fit off hands the size back to the CSS'
+    assert float(capped) == 500, capped
 
 
 def t_round_title_is_wired_to_the_fit():

@@ -417,7 +417,9 @@
     const text = document.createRange();
     text.selectNodeContents(el);
     const width = el.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
-    let size = max;
+    // A hand-written huge max would never step down (1e300 - 1 == 1e300); the compiler
+    // drops such bounds, the page caps them (overlay_build.FIT_SIZE_MAX).
+    let size = Math.min(max, 500);
     el.style.fontSize = size + "px";
     while (size > min && text.getBoundingClientRect().width > width) {
       size -= 1;

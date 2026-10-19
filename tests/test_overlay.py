@@ -1407,6 +1407,13 @@ def t_round_title_offers_and_compiles_the_fit_bounds():
     assert by_id["round-top"]["props"][-2:] == ["fitMax", "fitMin"], by_id["round-top"]["props"]
     css = ob.compile_overlay_css({"slots": {"round-top": {"fitMax": 40, "fitMin": 26}}}, slots)
     assert "--fit-max: 40px" in css and "--fit-min: 26px" in css, css
+    # The fit loop steps 1px from max: a huge max (1e300 - 1 == 1e300) never ends and
+    # hangs the browser source, so every fit bound is dropped outside 1..500 px.
+    for prop, name in (("fitMax", "--fit-max"), ("teamNameMax", "--team-name-max")):
+        slot = "round-top" if prop == "fitMax" else "team1-name"
+        for bad in (1e300, 0, -5, 501):
+            css = ob.compile_overlay_css({"slots": {slot: {prop: bad}}}, slots)
+            assert name not in css, (prop, bad, css)
 
 
 def t_builder_canvas_mirrors_the_fit_with_the_text_measure():
@@ -1416,7 +1423,7 @@ def t_builder_canvas_mirrors_the_fit_with_the_text_measure():
     with open(os.path.join(ROOT, "src", "ui", "control-center.html"), encoding="utf-8") as f:
         html = f.read()
     fill = html[html.index("function ovFillSample()"):html.index("function ovFitName(")]
-    assert "ovFitText(el)" in fill and "fitMax" in fill, "the canvas must fit opted-in slots"
+    assert "ovRefit(" in fill, "the canvas must fit opted-in slots"
     fns = html[html.index("function ovFitName("):html.index("// Session-only preview model")]
     assert "scrollWidth" not in fns, "measure the text, not scrollWidth"
     node = shutil.which("node")
@@ -1443,6 +1450,22 @@ console.log(off + ',' + full + ',' + parseFloat(el.style.fontSize));"""
     off, fitted, zoomed = out.split(",")
     assert off == "css" and 26 <= float(fitted) < 40, out
     assert zoomed == fitted, "a zoomed canvas must fit to the same size as OBS: " + out
+
+
+def t_builder_field_edit_refits_the_canvas_text():
+    # An inline font size from the last fit outranks the CSS variable, so typing an
+    # Auto-fit/Name max or min (or any style that changes the text width) must refit at
+    # once; otherwise the canvas shows the old size until the next sample fill.
+    with open(os.path.join(ROOT, "src", "ui", "control-center.html"), encoding="utf-8") as f:
+        html = f.read()
+    set_prop = html[html.index("function ovSetProp("):]
+    set_prop = set_prop[:set_prop.index("\n}\n")]
+    assert "ovRefit(" in set_prop, "ovSetProp must refit the edited slot"
+    refit = html[html.index("function ovRefit("):]
+    refit = refit[:refit.index("\n}\n")]
+    assert "ovFitName" in refit and "ovFitText" in refit and "fitMax" in refit, refit
+    fill = html[html.index("function ovFillSample()"):html.index("function ovFitName(")]
+    assert fill.count("ovRefit(") >= 2, "fill and the webfont pass share the same refit"
 
 
 def t_builder_property_map_matches_the_compiler():
