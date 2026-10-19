@@ -50,7 +50,7 @@ def t_transport_bounds_success_and_errors_and_closes_error_streams():
                 CLIENT,
                 access=SECRET,
                 channel="123",
-                open_url=lambda *a, data=data, **k: Bounded(data),
+                open_url=lambda *a, payload=data, **k: Bounded(payload),
             )
         except tw.APIError as error:
             assert (
