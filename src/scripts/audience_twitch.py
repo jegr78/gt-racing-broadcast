@@ -327,15 +327,20 @@ def failure(operation, status, payload, headers, now=None):
         delay = 60
         normalized = {str(k).lower(): v for k, v in headers.items()}
         value = normalized.get("retry-after")
+        if value is not None and (not isinstance(value, str) or len(value) > 128):
+            value = "invalid"
         try:
             if value is not None:
                 try:
                     delay = int(value)
                 except (ValueError, TypeError):
-                    delay = int(parsedate_to_datetime(value).timestamp() - now)
+                    parsed = parsedate_to_datetime(value)
+                    if parsed.tzinfo is None:
+                        raise ValueError("Retry date needs a timezone")
+                    delay = int(parsed.timestamp() - now)
             elif "ratelimit-reset" in normalized:
                 delay = int(float(normalized["ratelimit-reset"]) - now)
-        except (ValueError, TypeError, OverflowError, AttributeError):
+        except (ValueError, TypeError, OverflowError, AttributeError, OSError):
             delay = 60
         return APIError(
             "rate_limit", "Twitch rate limit reached", True, max(1, min(900, delay))
@@ -372,7 +377,7 @@ def request(operation, client, *, open_url=None, **values):
         try:
             try:
                 payload = json.loads(error.read(8192).decode("utf-8"))
-            except (ValueError, UnicodeError, OSError):
+            except (ValueError, UnicodeError, OSError, RecursionError):
                 payload = {}
             result = failure(operation, error.code, payload, error.headers or {})
         finally:
@@ -380,5 +385,5 @@ def request(operation, client, *, open_url=None, **values):
         raise result from None
     except (OSError, TimeoutError):
         raise APIError("temporary", "Twitch connection unavailable", True, 60) from None
-    except (ValueError, UnicodeError):
+    except (ValueError, UnicodeError, RecursionError):
         raise APIError("temporary", "Invalid Twitch response", True, 60) from None

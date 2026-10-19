@@ -255,6 +255,28 @@ def t_oauth_and_helix_errors_are_safe_and_rate_limits_have_bounded_delays():
         ), (headers, error.retry_after)
 
 
+def t_retry_header_dates_are_aware_bounded_and_safe_on_platform_errors():
+    from unittest.mock import patch
+
+    for value in ("Thu, 01 Jan 1970 00:16:50", "9" * 5000):
+        error = tw.failure("viewers", 429, {}, {"Retry-After": value}, now=1000)
+        assert error.retry_after == 60, (
+            "Malformed Retry-After date or size was accepted"
+        )
+    with patch.object(
+        tw, "parsedate_to_datetime", side_effect=OSError("fixture-private-time-error")
+    ):
+        error = tw.failure(
+            "viewers",
+            429,
+            {},
+            {"Retry-After": "Thu, 01 Jan 1970 00:16:50 GMT"},
+            now=1000,
+        )
+        assert error.code == "rate_limit" and error.retry_after == 60
+        assert "fixture-private" not in str(error)
+
+
 if __name__ == "__main__":
     for name, fn in tuple(globals().items()):
         if name.startswith("t_"):
