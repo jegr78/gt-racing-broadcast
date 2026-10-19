@@ -722,6 +722,31 @@ def t_rotated_token_validation_honors_retry_after_without_repeating_exchange():
         )
 
 
+def t_token_expiring_during_validation_can_refresh_after_reactive_401():
+    with fixture() as (service, clock, api, _cache, _definitions):
+        api.expires = 10
+        connect(service, clock)
+        original = service.fetch
+
+        def delayed(operation, client, **values):
+            if operation == "validate" and values["access"] == ACCESS:
+                clock.advance(15)
+                raise tw.APIError("auth", "Fixture token expired during validation")
+            return original(operation, client, **values)
+
+        service.fetch = delayed
+        service.validation_due = 0
+        service.tick()
+        assert service.status()["phase"] == "refreshing", (
+            "Expiry during validation incorrectly required manual reconnection"
+        )
+        service.tick()
+        assert (
+            service.status()["connected"]
+            and len([call for call in api.calls if call[0] == "refresh"]) == 1
+        )
+
+
 if __name__ == "__main__":
     for name, fn in tuple(globals().items()):
         if name.startswith("t_"):

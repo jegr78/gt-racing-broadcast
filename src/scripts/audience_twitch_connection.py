@@ -361,7 +361,6 @@ class Service:
                     self.client,
                     self.account["id"],
                 )
-                expired = self.monotonic() >= self.account["expiresAtMono"]
             else:
                 generation = self.generation
         if rotation:
@@ -421,6 +420,7 @@ class Service:
             if not self._current(generation):
                 return
             if failure:
+                expired = self.monotonic() >= self.account["expiresAtMono"]
                 if failure.code == "auth" and expired:
                     self._new_rotation()
                     self.retry_due = 0
