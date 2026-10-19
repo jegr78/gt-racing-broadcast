@@ -44,7 +44,7 @@ def parse(rows, strict=False):
         raise ValueError("Assets response is not CSV")
     header = [norm(cell) for cell in rows[0]]
     has_header = (
-        header[0] in NAME_HEADERS
+        (header[0] in NAME_HEADERS or any(cell in INTERNAL_HEADERS for cell in header))
         and any(
             cell in URL_HEADERS | INTERNAL_HEADERS | {"alias"} for cell in header[1:]
         )

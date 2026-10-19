@@ -465,6 +465,46 @@ def t_headerless_media_labels_keep_legacy_moved_columns_during_refresh():
         assert am.read(td)["aliases"] == {}
 
 
+def t_legacy_internal_header_with_unrecognized_name_caption_stays_private():
+    import asset_metadata as am
+    import test_console_gate as gate
+    import tempfile
+
+    rows = [
+        ["Asset Name", "URL", "Internal", "Alias"],
+        ["Private graphic", DRIVE, "TRUE", "private-caption-sentinel"],
+    ]
+    assert graphics.m.internal_from_csv(rows) == {"Private graphic"}
+    for metadata_only in (False, True):
+        from unittest.mock import patch
+        import csv, io
+
+        with tempfile.TemporaryDirectory() as td:
+            (Path(td) / "Private graphic.png").write_bytes(b"cached-private-image")
+            am.write(td, {"internal": ["Private graphic"]})
+            out = io.StringIO()
+            csv.writer(out).writerows(rows)
+            argv = ["tool", "--out", td, "--sheet-id", "fixture"] + (
+                ["--metadata-only"] if metadata_only else []
+            )
+            with (
+                patch.object(sys, "argv", argv),
+                patch.object(graphics.m, "load_dotenv"),
+                patch.object(
+                    graphics.m, "fetch_assets_csv", return_value=out.getvalue()
+                ),
+                patch.object(graphics.m, "download"),
+                patch.object(graphics.m, "reset_unlinked_graphics", return_value=[]),
+                patch.object(graphics.m, "seed_missing_graphics", return_value=[]),
+            ):
+                graphics.m.main()
+            assert am.read(td)["internal"] == ["Private graphic"]
+            assert gate.m.list_graphics(td) == []
+            assert (
+                am.display_name(td, "Private graphic", public=True) == "Private graphic"
+            )
+
+
 if __name__ == "__main__":
     for name, fn in tuple(globals().items()):
         if name.startswith("t_"):
