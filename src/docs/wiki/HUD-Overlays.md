@@ -283,3 +283,55 @@ naming convention is **`GT Racing Endurance: <league>`** (set via the profile's
 > This page is generated from `src/docs/wiki/` in the
 > [main repository](https://github.com/jegr78/gt-racing-broadcast): don't edit it
 > here by hand. See [Build & maintenance](Build-and-maintenance).
+
+## Audience counters and goals
+
+Open **Profile → Overlay Builder → Audience widgets**. Create a named manual
+counter, optionally with a unit, range start, target and decimal places. For
+example, use `Community challenge`, value `18`, unit `hours`, target `24`.
+Manual widgets work without a platform account or Google Sheet.
+
+![Shared audience widget editor](images/cc-audience-widgets.png)
+
+Creating a widget places it in the current scene draft. Select it on the canvas
+or in **Jump to slot** to choose **Number**, **Number with target** or **Labeled
+progress bar**, then adjust its position, size, font, colors, border and number /
+percentage visibility. Use **Save**, then **Apply in OBS** to activate the saved
+placement and style. The Intermission builder works in Solo and Endurance;
+Splitscreen is available in Endurance.
+
+To reuse a value, select another scene and choose **Audience widgets → Place in
+this scene** beside the existing widget. Each placement has its own design.
+**Remove from this scene** edits that scene's draft and retains the shared
+widget. **Delete shared widget** removes its definition for every scene; the
+confirmation lists saved placements. Shared deletion hides existing live widgets
+immediately. Undo covers scene design changes, not shared live data edits.
+
+**Manual value (live)**, label, unit, target and formatting edits update all
+already placed live widgets without a browser reload. They do not move the
+placements. Builder preview fields are samples and never change these live
+values. A newly placed widget needs Save and Apply before it appears on air.
+
+A **Total** reset sets the manual value to its range start. **Net since captured
+baseline** requires an explicit **Capture baseline / reset** action. It keeps the
+raw manual value and target, and displays the change since that captured value.
+Reloading a browser or restarting the relay never captures a new baseline.
+Reaching a target does not raise the target or reset a value. Values above the
+target remain visible; the bar stops at 100%. Without a target, the widget shows
+its number and hides the target, bar and percentage.
+
+Automatic platform values use the same data contract; connection and fetching
+are handled by the platform integrations. Unknown or unavailable values are
+never shown as zero. A transiently stale last-good automatic value can remain
+visible for at most 120 seconds after its last successful update. It then hides,
+including when the relay cannot be reached. Manual values retain their last
+known value when the relay is briefly unavailable.
+
+Shared definitions, manual values and captured baselines are stored in
+`profiles/<name>/audience.json`. A **profile export/import** carries them to
+another machine. A **Look backup/restore** restores scene designs only, so it
+cannot rewind a live value or resurrect a deleted shared widget. Producer
+handover does not transfer this local file automatically; transfer the profile
+bundle when the receiving producer needs the same audience state. Credentials
+for future platform connections belong to machine runtime state, outside this
+file and Look backups.

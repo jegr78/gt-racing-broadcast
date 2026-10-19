@@ -10,6 +10,7 @@ markers from the base page (src/obs/hud.html), so the markup is the single sourc
 of truth and a new marked element becomes editable automatically.
 """
 import html
+from html import unescape
 import re
 
 # Font name and type whitelist, DUPLICATED from src/relay/racecast-feeds.py and
@@ -52,7 +53,8 @@ PROP_ORDER = ("left", "top", "offsetRight", "offsetTop", "width", "height", "pad
               "teamNameMax", "teamNameMin", "fontFamily", "fontWeight",
               "fontStyle", "color", "background", "borderColor", "borderStyle",
               "align", "valign", "textTransform", "opacity",
-              "rotation", "shear", "textShadow", "visible")
+              "rotation", "shear", "textShadow", "visible", "presentation",
+              "showNumber", "showPercent", "barColor", "trackColor")
 
 # Slot kinds: the single source for which properties a slot offers. extract_slots
 # derives slot["props"] from the element's data-edit-kind. `text` is a strict
@@ -311,7 +313,7 @@ def extract_slots(html):
         mid = re.search(r"\bid=\"([^\"]+)\"", text)
         if not mid:
             continue
-        label = re.search(r"\bdata-edit=\"([^\"]*)\"", text).group(1)
+        label = unescape(re.search(r"\bdata-edit=\"([^\"]*)\"", text).group(1))
         mk = re.search(r"\bdata-edit-kind=\"([^\"]*)\"", text)
         mp = re.search(r"\bdata-edit-props=\"([^\"]*)\"", text)
         extras = [p.strip() for p in mp.group(1).split(",") if p.strip()] if mp else []
@@ -557,6 +559,19 @@ def _slant_decl(value):
 def _declaration(prop, value):
     """CSS 'name: value' for one (prop, value), or None when it is unsupported or
     unsafe."""
+    if prop == "presentation":
+        return {"number": "--audience-target: none; --audience-track: none; --audience-percent-mode: none",
+                "target": "--audience-target: inline; --audience-track: none; --audience-percent-mode: none",
+                "bar": "--audience-target: inline; --audience-track: block; --audience-percent-mode: block"}.get(value) if isinstance(value, str) else None
+    if prop in ("showNumber", "showPercent"):
+        if not isinstance(value, bool):
+            return None
+        name = "number" if prop == "showNumber" else "percent"
+        return f"--audience-{name}: {'block' if value else 'none'}"
+    if prop in ("barColor", "trackColor"):
+        safe = _safe_value(value)
+        name = "bar" if prop == "barColor" else "track"
+        return f"--audience-{name}-color: {safe}" if isinstance(safe, str) else None
     if prop == "textShadow":
         return _text_shadow_decl(value)
     if prop == "visible":

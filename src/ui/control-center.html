@@ -320,6 +320,7 @@
               title="Jump to a slot (pick the placeholder to deselect)" aria-label="Jump to slot"></select>
             <button id="overlay-undo" onclick="ovUndo()" disabled title="Undo (Ctrl/Cmd-Z)">↶ Undo</button>
             <button id="overlay-redo" onclick="ovRedo()" disabled title="Redo (Ctrl/Cmd-Shift-Z)">↷ Redo</button>
+            <button id="audience-open" onclick="audienceOpen()">Audience widgets</button>
             <button id="overlay-save" onclick="saveOverlay()">
               <svg viewBox="0 0 24 24"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>Save</button>
             <button id="overlay-apply" onclick="applyOverlay()" title="Reload the relay-served HUD/timer browser sources in OBS (needs the relay up + obs-websocket)">
@@ -809,6 +810,39 @@
   </div>
 </div>
 
+<style>
+#audience-dialog::backdrop{background:rgba(0,0,0,.65)}
+#audience-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 20px}
+#audience-fields label{display:flex;flex-direction:column;gap:6px}
+#audience-fields input,#audience-fields select{width:100%;box-sizing:border-box}
+#audience-list p{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:12px 0;border-bottom:1px solid #344358}
+#audience-actions{display:flex;flex-wrap:wrap;gap:8px}
+@media(max-width:600px){#audience-fields{grid-template-columns:1fr}}
+</style>
+<dialog id="audience-dialog" style="width:min(760px,90vw);max-height:85vh;overflow:auto;background:#172030;color:#fff;border:1px solid #52647f;border-radius:12px;padding:24px">
+  <h3>Audience widgets</h3>
+  <p>Shared labels and values update live in every placed scene. Placement and style use Save, then Apply in OBS.</p>
+  <div id="audience-list"></div>
+  <form id="audience-form" onsubmit="audienceSave(event)">
+    <h4 id="audience-edit-title">New shared widget</h4>
+    <div id="audience-fields">
+    <label>Label <input id="audience-label" required maxlength="120"></label>
+    <label>Unit <input id="audience-unit" maxlength="32"></label>
+    <label>Manual value (live) <input id="audience-value" type="number" step="any" required value="0"></label>
+    <label>Goal mode <select id="audience-mode"><option value="total">Total</option><option value="net">Net since captured baseline</option></select></label>
+    <label>Range start <input id="audience-start" type="number" step="any" required value="0"></label>
+    <label>Target (optional) <input id="audience-target" type="number" step="any"></label>
+    <label>Decimal places <input id="audience-decimals" type="number" min="0" max="6" required value="0"></label>
+    </div>
+    <p id="audience-status" role="status"></p>
+    <div id="audience-actions">
+    <button id="audience-submit" type="submit">Create and place</button>
+    <button type="button" onclick="audienceEdit(null)">New widget</button>
+    <button type="button" onclick="document.getElementById('audience-dialog').close()">Close</button>
+    </div>
+  </form>
+</dialog>
+<script src="/audience.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 let jobES = null, logES = null;
@@ -2899,7 +2933,7 @@ const OV_SHADOW_CSS =
   '[data-solo]::before,[data-video]::before{position:absolute;inset:0;background:rgba(25,40,60,.8);display:flex;align-items:center;justify-content:center;' +
   'content:attr(data-edit) " preview";font:32px system-ui;color:#fff}';
 
-async function loadOverlay() {
+async function loadOverlay(retry = 0) {
   const sequence = ++ovLoadSequence;
   const requestedPage = overlayPage;
   $('overlay-err').hidden = true;
@@ -2913,11 +2947,17 @@ async function loadOverlay() {
   if (sequence !== ovLoadSequence || requestedPage !== overlayPage) return;
   if (!slotsR.ok) { showProfileErr('overlay-err', slotsR.error || 'could not load slots'); return; }
   if (!layoutR.ok) { showProfileErr('overlay-err', layoutR.error || 'no active profile'); return; }
+  if (slotsR.audience?.ok && slotsR.audience.active !== layoutR.active) {
+    if (retry < 1) return loadOverlay(retry + 1);
+    showProfileErr('overlay-err', 'Profile changed while loading. Reload the builder.'); return;
+  }
   ovGridLoad();
   const splitOption = $('ov-scene').querySelector('option[value=splitscreen]');
   splitOption.hidden = splitOption.disabled = !!slotsR.solo;
   ovState.page = overlayPage;
-  ovState.slots = slotsR.slots || [];
+  ovState.allSlots = slotsR.slots || [];
+  ovState.slots = ovState.allSlots;
+  ovState.audience = slotsR.audience || {widgets: []};
   ovState.sample = slotsR.sample || {};
   ovState.flagPresets = slotsR.flagPresets || [];
   ovState.templates = slotsR.templates || [];
@@ -2991,6 +3031,90 @@ function ovPopulateSlotPicker() {
   sp.value = ovState.sel || '';
 }
 
+// Shared goal edits are explicit live operations; Undo covers scene design only.
+let audienceSession = null;
+function audienceOpen(id) {
+  audienceSession = {profile: ovState.active, page: ovState.page, sequence: ovLoadSequence, edit: null};
+  audienceList(); audienceEdit(id || null);
+  if (ovState.audience.ok === false) $('audience-status').textContent = ovState.audience.error;
+  $('audience-dialog').showModal();
+}
+function audienceCurrent(session) {
+  return session === audienceSession && session.profile === ovState.active &&
+    session.page === ovState.page && session.sequence === ovLoadSequence;
+}
+function audienceEdit(id) {
+  const widget = (ovState.audience.widgets || []).find(w => w.id === id);
+  audienceSession.edit = widget ? id : null;
+  const fields = {label:'',unit:'',manualValue:0,mode:'total',start:0,target:null,decimals:0};
+  const ids = {manualValue:'value'};
+  Object.entries(Object.assign(fields,widget || {})).forEach(([key,value]) => {
+    const input = $('audience-'+(ids[key] || key));
+    if (input && 'value' in input) input.value = value === null ? '' : value;
+  });
+  $('audience-edit-title').textContent = widget ? 'Edit shared widget (live)' : 'New shared widget';
+  $('audience-submit').textContent = widget ? 'Save shared value' : 'Create and place';
+  $('audience-status').textContent = widget && widget.mode === 'net' && !widget.baseline
+    ? 'Capture a baseline before this net goal can go on air. Preview uses sample values.' : '';
+}
+function audienceList() {
+  const list = $('audience-list'); list.replaceChildren();
+  (ovState.audience.widgets || []).forEach(widget => {
+    const row = document.createElement('p');
+    const title = document.createElement('span'); title.textContent = widget.label + ' · ' + widget.source + ' ';
+    row.appendChild(title);
+    const button = (label,fn) => { const b = document.createElement('button'); b.type='button'; b.textContent=label; b.onclick=fn; row.appendChild(b); };
+    button('Edit',() => audienceEdit(widget.id));
+    const placed = Object.prototype.hasOwnProperty.call(ovState.layout.slots,widget.id);
+    button(placed ? 'Remove from this scene' : 'Place in this scene',() => audiencePlace(widget.id,!placed));
+    button(widget.mode === 'net' ? 'Capture baseline / reset' : 'Reset value to start',() => audienceMutate('reset',widget.id));
+    button('Delete shared widget',() => {
+      const scenes = Object.entries(ovState.audience.placements || {}).filter(([,ids]) => ids.includes(widget.id)).map(([scene]) => scene);
+      if (confirm('Delete "'+widget.label+'" from all scenes? Saved placements: '+(scenes.join(', ') || 'none')))
+        audienceMutate('delete',widget.id);
+    });
+    if (widget.source !== 'manual') row.appendChild(document.createTextNode(' Provider not connected; automatic values unavailable.'));
+    list.appendChild(row);
+  });
+}
+function audiencePlace(id, place) {
+  if (place) ovState.layout.slots[id] = {left:1400,top:70,width:420,height:140,presentation:'bar'};
+  else delete ovState.layout.slots[id];
+  ovReloadCanvasFromLayout(); ovCommit(); audienceList();
+}
+async function audienceSave(event) {
+  event.preventDefault();
+  const fields = {label:$('audience-label').value, unit:$('audience-unit').value,
+    manualValue:Number($('audience-value').value), mode:$('audience-mode').value,
+    start:Number($('audience-start').value), target:$('audience-target').value.trim() === '' ? null : Number($('audience-target').value),
+    decimals:Number($('audience-decimals').value)};
+  await audienceMutate(audienceSession.edit ? 'update' : 'create',audienceSession.edit,fields);
+}
+async function audienceMutate(action,id,fields) {
+  const session = audienceSession;
+  if (!session || !audienceCurrent(session)) return;
+  $('audience-status').textContent = 'Saving…';
+  try {
+    const result = await (await fetch('/api/audience',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({expectedProfile:session.profile,action,id,fields})})).json();
+    if (!audienceCurrent(session)) return;
+    if (!result.ok) throw new Error(result.error || 'Could not save audience widget');
+    const slots = await (await fetch('/api/overlay/slots?page='+session.page,{cache:'no-store'})).json();
+    if (!audienceCurrent(session)) return;
+    if (!slots.ok || !slots.audience.ok) throw new Error('Saved, but could not reload audience definitions');
+    if (slots.audience.active !== session.profile) throw new Error('Active profile changed; reload the builder.');
+    ovState.allSlots = slots.slots; ovState.audience = slots.audience;
+    ovState.body = slots.body;
+    ovState.baseCss = slots.css.replace(/:root/g,':host').replace(/html\s*,\s*body/g,':host');
+    if (action === 'create') audiencePlace(result.widget.id,true);
+    else if (action === 'delete') { delete ovState.layout.slots[id]; ovReloadCanvasFromLayout(); ovCommit(); }
+    else ovReloadCanvasFromLayout();
+    audienceList();
+    audienceEdit(result.widget ? result.widget.id : null);
+    $('audience-status').textContent = action === 'create' ? 'Created. Save and Apply to place on air.' : 'Shared data saved.';
+  } catch (error) { if (audienceCurrent(session)) $('audience-status').textContent = error.message; }
+}
+
 // Self-hosted font cuts, mirroring overlay_build.font_cut and _font_faces. Keep them
 // in sync. A downloaded Google family lands as up to four files: <Stem>.woff2 plus
 // -Bold, -Italic and -BoldItalic. They group under the base family with style and
@@ -3051,6 +3175,9 @@ function ovFontFaceCss() {
 }
 
 function ovBuildCanvas() {
+  ovState.slots = (ovState.allSlots || ovState.slots).filter(s => !s.id.startsWith('audience-') ||
+    Object.prototype.hasOwnProperty.call(ovState.layout.slots, s.id));
+  ovPopulateSlotPicker();
   const host = $('ov-stage');
   if (!host.shadowRoot) host.attachShadow({mode: 'open'});
   const sh = host.shadowRoot;
@@ -3062,6 +3189,9 @@ function ovBuildCanvas() {
   sh.innerHTML = '<style>' + ovState.baseCss + '\n' + ovFontFaceCss() + '</style>' +
     '<style id="ov-slot-css"></style><style id="ov-custom-css"></style>' +
     '<style>' + OV_SHADOW_CSS + '</style>' + ovState.body;
+  sh.querySelectorAll('[data-audience-widget]').forEach(el => {
+    if (!Object.prototype.hasOwnProperty.call(ovState.layout.slots, el.id)) el.remove();
+  });
   ovState.slotRules = {};
   sh.getElementById('ov-custom-css').textContent = $('overlayCss').value;
   // Reference grid: inserted right after <style> (before the slots) + pointer-events
@@ -3163,6 +3293,7 @@ function ovFillSample() {
   ovState.slots.forEach(s => {
     const el = ovState.shadow.getElementById(s.id);
     if (!el) return;
+    if (s.id.startsWith('audience-')) return;
     if (s.id === 'chat' || s.id === 'ichat') { ovFillChat(el, vals[s.id]); return; }
     const img = el.querySelector('img');
     // Flag status: colour from the picked state (data-state), text from its label.
@@ -3202,6 +3333,18 @@ function ovFillSample() {
       el.classList.remove('empty');
     }
   });
+  const rows = (ovState.audience.widgets || []).map(widget => {
+    const numeric = vals[widget.id];
+    const value = typeof numeric === 'string' && numeric.trim() !== '' ? Number(numeric) : 18;
+    const start = widget.start || 0, target = widget.target;
+    const scale = Math.max(Math.abs(value), Math.abs(start), Math.abs(target || 0), 1);
+    const percentage = target === null ? null : (value/scale-start/scale)*100/(target/scale-start/scale);
+    return Object.assign({}, widget, {available: Number.isFinite(value), value,
+      percentage: Number.isFinite(percentage) ? percentage : null,
+      fill: percentage === null ? null : Math.max(0,Math.min(100,percentage)),
+      precision: {exact: true}, holdFor: null});
+  });
+  RacecastAudience.render(ovState.shadow, {widgets: rows});
   // A webfont that loads after this pass widens the names again; the live HUD refits on
   // every poll, the canvas once more here.
   document.fonts.ready.then(() => ovState.slots.forEach(s => {
@@ -3372,6 +3515,25 @@ function ovApplyProp(el, prop, value) {
     // textShadow is a compound prop and not in OV_CSSNAME, so set and clear it before
     // the generic unset path, which would no-op on removeProperty(undefined) and leave
     // a stale shadow on the canvas.
+    if (prop === 'presentation') {
+      const options = {number: ['none','none','none'], target: ['inline','none','none'], bar: ['inline','block','block']};
+      ['target','track','percent-mode'].forEach((key,i) => {
+        if (options[value]) st.setProperty('--audience-'+key,options[value][i]);
+        else st.removeProperty('--audience-'+key);
+      });
+      return;
+    }
+    if (prop === 'showNumber' || prop === 'showPercent') {
+      const name = '--audience-' + (prop === 'showNumber' ? 'number' : 'percent');
+      if (typeof value === 'boolean') st.setProperty(name, value ? 'block' : 'none');
+      else st.removeProperty(name);
+      return;
+    }
+    if (prop === 'barColor' || prop === 'trackColor') {
+      const name = '--audience-' + (prop === 'barColor' ? 'bar' : 'track') + '-color';
+      if (value) st.setProperty(name,value); else st.removeProperty(name);
+      return;
+    }
     if (prop === 'textShadow') {
       st.textShadow = (value && value.color)
         ? ((value.x || 0) + 'px ' + (value.y || 0) + 'px ' + (value.blur || 0) + 'px ' + value.color)
@@ -3409,6 +3571,7 @@ function ovStyleSlot(id) {
   if (!el) return;
   const ov = (ovState.layout.slots && ovState.layout.slots[id]) || {};
   Object.keys(OV_CSSNAME).forEach(p => ovApplyProp(el, p, ov[p]));
+  if (id.startsWith('audience-')) ['presentation','showNumber','showPercent','barColor','trackColor'].forEach(p => ovApplyProp(el,p,ov[p]));
   ovApplyProp(el, 'textShadow', ov.textShadow);
   ovApplyProp(el, 'visible', ov.visible);
   ovApplyProp(el, 'slant', ov.slant);
@@ -3422,7 +3585,8 @@ function ovSetProp(id, prop, value) {
   if ((prop === 'width' || prop === 'height') && typeof value === 'number' && value <= 0) value = '';
   if (value === '' || value === undefined || value === null) delete slot[prop];
   else slot[prop] = value;
-  ovApplyProp(ovState.shadow.getElementById(id), prop, slot[prop]);
+  if (id.startsWith('audience-')) ovStyleSlot(id);
+  else ovApplyProp(ovState.shadow.getElementById(id), prop, slot[prop]);
   if (ovState.fields[prop]) ovState.fields[prop].value = (slot[prop] !== undefined ? slot[prop] : '');
   ovPositionSel();
 }
@@ -4001,6 +4165,24 @@ function ovRenderPanel() {
     if (has('padding')) g.appendChild(ovNumField('padding', 'Padding (px)', view));
     panel.appendChild(g);
   }
+  if (has('presentation')) {
+    panel.appendChild(ovSelectField('presentation', 'Presentation',
+      [{v:'bar',t:'Labeled progress bar'},{v:'number',t:'Number'},{v:'target',t:'Number with target'}],
+      Object.assign({presentation:'bar'},ov)));
+    ['showNumber','showPercent'].forEach(prop => {
+      const label = document.createElement('label');
+      const input = document.createElement('input'); input.type = 'checkbox'; input.checked = ov[prop] !== false;
+      input.onchange = () => { ovSetProp(id,prop,input.checked); ovCommit(); };
+      label.append(input,document.createTextNode(prop === 'showNumber' ? 'Show number' : 'Show percentage'));
+      panel.appendChild(label);
+    });
+    panel.appendChild(ovColorField('barColor','Bar color',view));
+    panel.appendChild(ovColorField('trackColor','Track color',view));
+    const remove = document.createElement('button'); remove.textContent = 'Remove from this scene';
+    remove.onclick = () => audiencePlace(id,false); panel.appendChild(remove);
+    const edit = document.createElement('button'); edit.textContent = 'Edit shared value';
+    edit.onclick = () => audienceOpen(id); panel.appendChild(edit);
+  }
   if (has('fontSize')) panel.appendChild(ovNumField('fontSize', 'Font size (px)', view));
   if (has('lineHeight') || has('letterSpacing')) {
     const g = grid();
@@ -4090,6 +4272,9 @@ function ovRenderPanel() {
 }
 
 function ovResetSlot(id) {
+  if (id.startsWith('audience-')) {
+    ovState.layout.slots[id] = {}; ovReloadCanvasFromLayout(); ovCommit(); return;
+  }
   if (ovState.layout.slots) delete ovState.layout.slots[id];
   // Empty the slot's #id rule so the base look shows, then re-apply (now empty).
   if (ovState.shadow.getElementById(id)) ovSlotStyle(id).cssText = '';

@@ -378,3 +378,12 @@ it serves `splitscreen.css`, independently of subsequent HUD edits. Both new rou
 are part of `OBS_PAGE_PATHS`. `/splitscreen/data` and live split/audio intents are
 unchanged. Labels retain their legacy coordinate space inside feed-linked planes;
 current/next polling changes only text and the inactive-NEXT hidden attribute.
+
+**Audience widgets (#932).** The relay owns one `audience_widgets.Runtime` and
+central `MetricCache` per handler factory. `/audience/data` reads local atomic
+profile definitions and normalizes cached samples; it never fetches a provider.
+Only saved placements are injected at HTML load into HUD, Intermission and the
+independent Split HUD, never the Split label page. One `audience.js` poll per
+live page updates text/values, with relative 120-second automatic stale expiry.
+An empty scene returns its original HTML without widget polling. Shared editing
+stays in the local Control Center; `/console` exposes no audience mutation.

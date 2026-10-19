@@ -233,3 +233,8 @@ profile and recording identity before opening the existing lap comparison.
 Recording deletion shares machine admission with jobs and removes owned artifacts;
 references are revalidated under that lease before a new run can begin. Machine
 agent settings survive deletion. See `src/docs/design/ai-analysis-reports.md`.
+
+Audience definitions/manual values/explicit baselines live in the profile's
+`audience.json`, outside `overlay/`. `audience_widgets` validates bounded stable
+identities and finite ranges, merges edits under a per-path lock and atomically
+replaces the file. Profile bundles include it; Look restore deliberately does not.

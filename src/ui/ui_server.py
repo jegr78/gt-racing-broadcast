@@ -149,7 +149,7 @@ def make_handler(ctx):
     )
     _workspace = os.path.join(os.path.dirname(ctx["page_path"]), "telemetry.html")
     _workspace_script = os.path.join(os.path.dirname(ctx["page_path"]), "telemetry-workspace.js")
-    _shared_assets = {"/ui-base.css": ("ui-base.css", "text/css; charset=utf-8"),
+    _shared_assets = {"/audience.js": ("audience.js", "application/javascript; charset=utf-8"),"/ui-base.css": ("ui-base.css", "text/css; charset=utf-8"),
                       "/telemetry-shell.js": ("telemetry-shell.js", "application/javascript; charset=utf-8")}
     _pages.prewarm([ctx["page_path"], _context_script, _ai_script, _engineer_script, _workspace, _workspace_script]
                    + [os.path.join(os.path.dirname(ctx["page_path"]), filename) for filename, _ctype in _shared_assets.values()])
@@ -716,6 +716,10 @@ def make_handler(ctx):
                     return self._json({"ok": False,
                                        "error": f"console status failed: {exc}"},
                                       code=500)
+            if path == "/api/audience":
+                if not self._context_allowed():
+                    return
+                return self._json(ctx["audience_read"]())
             if path == "/api/overlay":
                 try:
                     page = (parse_qs(urlparse(self.path).query or "").get(
@@ -1162,6 +1166,14 @@ def make_handler(ctx):
                 return self._json(result, code=200 if result.get("ok") else 400)
             if path == "/api/console/post-link":
                 result = ctx["console_post_link"]()
+                return self._json(result, code=200 if result.get("ok") else 400)
+            if path == "/api/audience":
+                if not self._context_allowed(mutation=True):
+                    return
+                body = self._body_json()
+                if not isinstance(body, dict):
+                    return self._json({"ok": False, "error": "Audience edit must be an object"}, code=400)
+                result = ctx["audience_write"](body)
                 return self._json(result, code=200 if result.get("ok") else 400)
             if path == "/api/overlay":
                 body = self._body_json()
