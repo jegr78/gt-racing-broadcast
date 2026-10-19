@@ -69,6 +69,10 @@ def main():
             asset_files=lambda: cli.m.assets_files_data(
                 roots={"graphics": str(graphics), "media": str(media)}, profile="demo"
             ),
+            overlay_slots=cli.m.overlay_slots_data,
+            overlay_layout_read=cli.m.overlay_layout_read_data,
+            overlay_fonts=cli.m.overlay_fonts_list_data,
+            overlay_asset_serve=cli.m.overlay_asset_serve,
             asset_roots=lambda: {"graphics": str(graphics), "media": str(media)},
             update_check=lambda force=False: {"ok": True},
             profiles=lambda: {
@@ -106,6 +110,38 @@ def main():
                 assert (
                     "League presentation" in page.locator("#media-gallery").inner_text()
                 )
+                gallery_before = page.locator("#gfx-gallery").inner_text()
+                def wrong_profile(route):
+                    data = cli.m.assets_files_data(
+                        roots={"graphics": str(graphics), "media": str(media)},
+                        profile="other",
+                    )
+                    data["graphics"][0]["displayName"] = "Foreign profile sentinel"
+                    route.fulfill(json=data)
+
+                page.route("**/api/assets/files", wrong_profile)
+                page.evaluate("fetchAssetFiles()")
+                assert page.locator("#gfx-gallery").inner_text() == gallery_before, (
+                    "Foreign profile metadata must not replace the active gallery"
+                )
+                page.unroute("**/api/assets/files", wrong_profile)
+
+                def switched_profile(route):
+                    data = cli.m.assets_files_data(
+                        roots={"graphics": str(graphics), "media": str(media)},
+                        profile="other",
+                    )
+                    page.evaluate("activeProfile = 'other'")
+                    data["graphics"][0]["displayName"] = "Stale response sentinel"
+                    route.fulfill(json=data)
+
+                page.route("**/api/assets/files", switched_profile)
+                page.evaluate("fetchAssetFiles()")
+                assert page.locator("#gfx-gallery").inner_text() == gallery_before, (
+                    "A response started under a different active profile must be ignored"
+                )
+                page.unroute("**/api/assets/files", switched_profile)
+                page.evaluate("activeProfile = 'demo'")
                 page.locator("#gfx-gallery .thumb").filter(
                     has_text="Community standings"
                 ).click()
@@ -128,6 +164,15 @@ def main():
                     page.screenshot(
                         path=str(ROOT / "src/docs/wiki/images/cc-profile.png")
                     )
+                page.evaluate("loadOverlay()")
+                assert page.locator("#ov-frame-label").inner_text() == "Frame: League frame"
+                assert page.locator("#ov-frame-label").get_attribute("title") == "Overlay.png"
+                if args.shots:
+                    page.locator("#overlay-popout").click()
+                    page.locator("#ov-modal .ovmodal-card").screenshot(
+                        path=str(ROOT / "src/docs/wiki/images/cc-overlay-builder.png")
+                    )
+                    page.evaluate("closeBuilderModal()")
                 for who, path, image in [
                     ("alice", "/console/cockpit", "console-cockpit.png"),
                     ("dave", "/console/race-control", "console-race-control.png"),
@@ -311,6 +356,15 @@ def main():
                         td,
                         args.shots,
                     )
+                if args.shots:
+                    for name in (
+                        "cc-profile.png", "cc-overlay-builder.png",
+                        "console-cockpit.png", "console-race-control.png",
+                        "director-panel.png",
+                    ):
+                        target = ROOT / "src/docs/slides/assets/img" / name
+                        if target.exists():
+                            shutil.copy2(ROOT / "src/docs/wiki/images" / name, target)
                 print(
                     "PASS actual local/crew/Director aliases, live rename, canonical actions, inert text"
                 )
