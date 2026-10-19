@@ -155,6 +155,54 @@ def t_covered_files_have_no_bare_urllib():
             assert banned not in text, f"{'/'.join(parts)} still uses {banned!r}"
 
 
+def t_no_redirect_policy_never_forwards_credential_headers():
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    received = []
+
+    class Sink(BaseHTTPRequestHandler):
+        def do_GET(self):
+            received.append(self.headers.get("x-goog-api-key"))
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, *_args):
+            return
+
+    sink = ThreadingHTTPServer(("127.0.0.1", 0), Sink)
+
+    class Redirect(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(302)
+            self.send_header("Location", "http://127.0.0.1:%d/other" % sink.server_port)
+            self.end_headers()
+
+        def log_message(self, *_args):
+            return
+
+    source = ThreadingHTTPServer(("127.0.0.1", 0), Redirect)
+    for server in (source, sink):
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = "http://127.0.0.1:%d/api" % source.server_port
+    try:
+        try:
+            with h.open_url(url, headers={"x-goog-api-key": "fixture-key"},
+                            allow_redirects=False, timeout=2) as response:
+                response.read(1)
+        except h.HTTPError as error:
+            assert error.code == 302
+            error.close()
+        assert not received, "Credential header reached a redirected endpoint"
+        with h.open_url(url, timeout=2) as response:
+            response.read(1)
+        assert received == [None], "Default redirect compatibility changed"
+    finally:
+        for server in (source, sink):
+            server.shutdown()
+            server.server_close()
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):

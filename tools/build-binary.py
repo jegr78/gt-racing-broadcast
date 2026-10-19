@@ -92,6 +92,11 @@ def build_target(launcher, workdir, version_file, sep, entry, name, windowed):
            "--hidden-import", "install_apps", "--hidden-import", "obs_ws",
            "--hidden-import", "overlay_build",
            "--hidden-import", "audience_widgets",
+           "--hidden-import", "audience_admin",
+           "--hidden-import", "audience_connections",
+           "--hidden-import", "audience_proxy",
+           "--hidden-import", "audience_youtube",
+           "--hidden-import", "audience_youtube_connection",
            # Imported by src/ui/ui_server.py, which is itself loaded by path, so
            # PyInstaller's scan never sees it. Guarded by
            # tests/test_racecast.py::t_path_loaded_module_imports_are_frozen.

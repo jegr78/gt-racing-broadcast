@@ -1,6 +1,6 @@
 """Shared audience definitions, durable baselines and normalized metric samples."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal, localcontext
 import math
 import html
@@ -23,6 +23,8 @@ class Sample:
     identity: str = ""
     supports_net: bool = True
     reason: str = ""
+    age_seconds: float | None = None
+    significant_digits: int | None = None
 
 
 def finite(value):
@@ -43,7 +45,9 @@ def normalize(widget, sample=None, now=0, hold_seconds=120):
             widget.get("updatedAt"),
             identity="manual:" + widget["id"],
         )
-    sample = sample or Sample()
+    sample = with_capabilities(
+        sample or Sample(), widget["source"], widget.get("metric", "value")
+    )
     status = (
         sample.availability
         if sample.availability in ("available", "stale", "unknown", "unavailable")
@@ -61,13 +65,21 @@ def normalize(widget, sample=None, now=0, hold_seconds=120):
             status = "unknown"
             reason = "No successful metric update"
         else:
-            age = max(0, now - sample.last_success)
+            age = sample.age_seconds
+            if age is not None and (not finite(age) or age < 0):
+                available = False
+                status = "unknown"
+                reason = "Invalid metric age"
+                age = hold_seconds
+            if age is None:
+                age = max(0, now - sample.last_success)
             hold = max(0, hold_seconds - age)
-            if age >= hold_seconds:
+            if available and age >= hold_seconds:
                 available = False
                 status = "stale"
                 reason = "Last successful update is too old"
     source_available = available and status == "available"
+    source_status = status
     value = raw if available else None
     if available and widget["mode"] == "net":
         baseline = widget.get("baseline")
@@ -126,7 +138,7 @@ def normalize(widget, sample=None, now=0, hold_seconds=120):
             )
         },
         "sourceAvailable": source_available,
-        "sourceAvailability": sample.availability,
+        "sourceAvailability": source_status,
         "sourceIdentity": sample.identity,
         "supportsNet": sample.supports_net,
         "available": available,
@@ -137,7 +149,15 @@ def normalize(widget, sample=None, now=0, hold_seconds=120):
         "availability": status,
         "reason": reason,
         "holdFor": hold,
-        "precision": {"exact": sample.exact},
+        "precision": {
+            "exact": sample.exact,
+            **(
+                {"significantDigits": sample.significant_digits}
+                if type(sample.significant_digits) is int
+                and 1 <= sample.significant_digits <= 15
+                else {}
+            ),
+        },
         "lastSuccess": sample.last_success if finite(sample.last_success) else None,
     }
 
@@ -149,6 +169,27 @@ METRICS = {
     "twitch": ("viewers", "subscriptions"),
 }
 NET_METRICS = {("manual", "value"), ("youtube", "likes"), ("twitch", "subscriptions")}
+
+
+def metric_capabilities(source, metric):
+    rounded = source == "youtube" and metric == "subscribers"
+    return {
+        "exact": not rounded,
+        "supportsNet": (source, metric) in NET_METRICS,
+        **({"significantDigits": 3} if rounded else {}),
+    }
+
+
+def with_capabilities(sample, source, metric):
+    info = metric_capabilities(source, metric)
+    return replace(
+        sample,
+        exact=sample.exact and info["exact"],
+        supports_net=sample.supports_net and info["supportsNet"],
+        significant_digits=info.get("significantDigits", sample.significant_digits),
+    )
+
+
 FIELDS = frozenset((
     "id",
     "label",
@@ -375,14 +416,17 @@ class Store:
             del data["widgets"][self._index(data, ident)]
             self._write(data)
 
-    def capture(self, ident, sample=None):
+    def capture(self, ident, sample=None, expected_source=None):
         with self.lock:
             data = self._read()
             index = self._index(data, ident)
             widget = data["widgets"][index]
+            if expected_source is not None and (widget["source"], widget["metric"]) != expected_source:
+                raise ValueError("Audience source changed; capture the current source again")
             if widget["mode"] != "net":
                 raise ValueError("Choose net mode before capturing a baseline")
-            normalized = normalize(widget, sample, now=self.clock())
+            observed = sample() if callable(sample) else sample
+            normalized = normalize(widget, observed, now=self.clock())
             if (
                 not normalized["sourceAvailable"]
                 or not normalized["precision"]["exact"]
@@ -402,24 +446,56 @@ class Store:
 
 
 class MetricCache:
-    """One relay-owned snapshot per source metric; browser reads never fetch providers."""
+    """One relay-owned snapshot per metric; monotonic observation bounds freshness."""
 
-    def __init__(self, clock=time.time):
+    def __init__(self, clock=time.time, monotonic=time.monotonic):
         self.clock = clock
+        self.monotonic = monotonic
         self._samples = {}
         self._lock = threading.RLock()
 
     def publish(self, source, metric, sample):
         if not isinstance(sample, Sample):
             raise ValueError("Invalid metric sample")
+        observed = self.monotonic()
+        age = sample.age_seconds
+        if age is not None and (not finite(age) or age < 0):
+            raise ValueError("Invalid metric age")
+        if age is None:
+            age = (
+                max(0, self.clock() - sample.last_success)
+                if finite(sample.last_success)
+                else 0
+            )
         with self._lock:
-            self._samples[(source, metric)] = sample
+            self._samples[(source, metric)] = (sample, observed - age)
+
+    def fail(self, source, metric, reason):
+        with self._lock:
+            sample, observed = self._samples.get(
+                (source, metric), (Sample(), self.monotonic())
+            )
+            status = (
+                "stale"
+                if sample.availability in ("available", "stale")
+                else sample.availability
+            )
+            self._samples[(source, metric)] = (
+                replace(sample, availability=status, reason=reason),
+                observed,
+            )
 
     def read(self, source, metric):
         with self._lock:
-            return self._samples.get(
-                (source, metric), Sample(reason="Provider not connected")
-            )
+            row = self._samples.get((source, metric))
+            if row is None:
+                sample = Sample(reason="Provider not connected")
+            else:
+                sample, observed = row
+                sample = replace(
+                    sample, age_seconds=max(0, self.monotonic() - observed)
+                )
+            return with_capabilities(sample, source, metric)
 
 
 class Runtime:

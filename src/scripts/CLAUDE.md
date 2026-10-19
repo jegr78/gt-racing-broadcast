@@ -248,3 +248,34 @@ column fallback even for unrecognized header captions. Each downloader owns
 its kind's entries in its local manifest; atomic unique temporary writes retain
 unknown and other-kind fields. Failed Sheet reads never clear metadata.
 No alias may become a filename, URL, source, action or executable expression.
+
+
+## Audience provider connections
+
+`audience_youtube.py` parses concrete output targets and calls only fixed official
+YouTube Data API endpoints through `http_util` with redirects disabled. API keys
+are headers, never URLs. Public subscriber totals always carry three-significant-
+figure approximate precision and cannot support exact net goals.
+
+`audience_youtube_connection.Service` is relay-owned. Construction is offline;
+main starts its one worker only after the mandatory control-server bind succeeds.
+Pending verification remains RAM-only until explicit activation. Separate setup
+and active generations fence cancellation, replacement and disconnect. Fetches
+run outside state locks. Snapshot readers never fetch. Used video metrics poll
+at 30 seconds, channel subscribers at 60 seconds, with quota/rate/error backoff.
+Observation age includes response parsing, state/cache lock waits and local RPC
+transit. Repeated failures cannot extend the shared 120-second hold deadline.
+
+`audience_connections.ConnectionFiles` pairs public profile-root targets with
+private runtime-profile credentials using a connection identity. Atomic private
+writes use mode 0600; failed public commits roll back the private file. A mismatch
+requires reconnection on restart. Disconnect invalidates RAM before storage work
+and reports partial cleanup, including the restart risk if both writes fail.
+Look snapshots do not own this state. Profile bundles carry public targets only.
+
+`audience_admin` requires the actual loopback peer, exact server Host port,
+matching Origin/Referer and acceptable Fetch Metadata. Provider administration is
+outside Console/Funnel routing. `audience_proxy.Client` checks the relay protocol
+and owned profile slug before credential POSTs. The UI preflight also checks the
+local PID/profile stamp. Automatic net baseline capture reads only a cached raw
+Sample, rechecks profile after RPC, and checks source under the definition lock.
