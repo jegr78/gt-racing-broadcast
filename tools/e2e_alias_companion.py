@@ -152,16 +152,19 @@ def run(pw, url, relay_port, rename, obs, directory, shots=False):
                 page.goto(url + f"/tablet?pages={number}")
                 page.locator(".button-control.clickable").first.wait_for()
                 page.wait_for_timeout(400)
+                row_count = max(int(row) for row in config["pages"][str(number)]["controls"]) + 1
                 boxes = page.locator(".button-control").evaluate_all(
-                    "(es)=>es.map(e=>{const r=e.getBoundingClientRect();return {x:r.x,y:r.y,right:r.right,bottom:r.bottom};})"
+                    "(es,rows)=>es.filter(e=>{const t=e.querySelector('.button-border')?.title;"
+                    "const row=t?.split('/')[1];return row!==undefined && Number(row)<rows;})"
+                    ".map(e=>{const r=e.getBoundingClientRect();return {y:r.y,bottom:r.bottom};})",
+                    row_count,
                 )
-                left = min(b["x"] for b in boxes)
                 top = min(b["y"] for b in boxes)
                 clip = {
-                    "x": left,
-                    "y": top,
-                    "width": max(b["right"] for b in boxes) - left,
-                    "height": max(b["bottom"] for b in boxes) - top,
+                    "x": 0,
+                    "y": top - 2,
+                    "width": 1280,
+                    "height": max(b["bottom"] for b in boxes) - top + 4,
                 }
                 destination = ROOT / "src/docs/wiki/images" / name
                 page.screenshot(path=str(destination), clip=clip)
