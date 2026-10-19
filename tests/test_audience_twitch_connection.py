@@ -589,6 +589,31 @@ def t_metric_401_revalidates_immediately_without_refreshing_revoked_unexpired_to
         )
 
 
+def t_foreign_profile_commands_fail_before_setup_or_storage():
+    with fixture() as (service, _clock, api, _cache, _definitions):
+        for body in (
+            {
+                "action": "verify",
+                "expectedProfile": "other",
+                "clientId": CLIENT,
+                "channel": "racing",
+            },
+            {"action": "disconnect"},
+            [],
+        ):
+            try:
+                service.command(body)
+            except ValueError:
+                pass  # Profile rejection must precede provider and storage work.
+            else:
+                raise AssertionError("Foreign profile command accepted")
+        assert (
+            not api.calls
+            and service.setup is None
+            and not service.files.secret.exists()
+        )
+
+
 if __name__ == "__main__":
     for name, fn in tuple(globals().items()):
         if name.startswith("t_"):

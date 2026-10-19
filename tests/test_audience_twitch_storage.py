@@ -48,7 +48,7 @@ def t_mismatched_disabled_or_already_staged_pair_is_rejected_before_any_write():
             try:
                 files.stage_refresh(ident)
             except StorageError:
-                pass
+                pass  # Rejected staging must leave private credentials unchanged.
             else:
                 raise AssertionError("Mismatched stage accepted")
             assert files.secret.read_bytes() == before
@@ -56,7 +56,7 @@ def t_mismatched_disabled_or_already_staged_pair_is_rejected_before_any_write():
         try:
             files.stage_refresh(public["connectionId"])
         except StorageError:
-            pass
+            pass  # A consumed refresh phase cannot be staged again.
         else:
             raise AssertionError("Already staged one-use refresh accepted twice")
 

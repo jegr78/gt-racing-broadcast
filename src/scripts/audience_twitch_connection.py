@@ -503,6 +503,7 @@ class Service:
                     else "Twitch stream is offline or the count is unavailable",
                 ),
             )
+        return False
 
     def tick(self):
         if not self.work.acquire(blocking=False):
