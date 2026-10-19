@@ -64,7 +64,12 @@ def t_metadata_refresh_preserves_unknown_fields_and_clears_removed_alias():
         assert am.display_name(td, "Standings", "STANDINGS") == "Tabelle ä"
         assert am.display_name(td, "Standings", "STANDINGS", public=True) == "STANDINGS"
         before = p.read_bytes()
-        for bad in ([], [["<!DOCTYPE html>"], ["error"]], [["Access denied"]]):
+        for bad in (
+            [],
+            [["<!DOCTYPE html>"], ["error"]],
+            [["<!DOCTYPE html>", DRIVE]],
+            [["Access denied"]],
+        ):
             try:
                 am.refresh(td, bad, "graphics")
             except ValueError:
