@@ -364,7 +364,9 @@ current connection.
 minutes. Leave the key field blank to reuse the current local key when changing
 targets. **Disconnect and remove key** hides automatic values immediately and
 removes the local key. Storage failures appear as errors; if disconnection cannot
-be saved, fix permissions and retry before restarting the relay.
+be saved, fix permissions and retry before restarting the relay. A failed activation
+keeps the verified candidate in RAM; retry activation after fixing storage without
+re-entering the key or repeating verification before the candidate expires.
 
 ![Verified YouTube output targets](images/cc-audience-youtube.png)
 

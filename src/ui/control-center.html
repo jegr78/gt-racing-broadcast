@@ -3184,6 +3184,7 @@ async function youtubePoll(session,initial=false) {
     }
     if (result.videoState && result.videoState !== 'unknown') lines.push('Broadcast: '+result.videoState);
     if (setup.error || result.error) lines.push(setup.error || result.error);
+    if (session.actionError && !lines.includes(session.actionError)) lines.push(session.actionError);
     $('youtube-status').textContent = lines.join('\n');
     $('youtube-activate').disabled = setup.phase !== 'verified' || session.busy || session.changed;
     if (initial && !session.dirty) {
@@ -3200,6 +3201,7 @@ async function youtubeAction(action,event) {
   const session = youtubeSession;
   if (!session || !youtubeCurrent(session) || session.busy) return;
   if (action === 'activate' && session.changed) { $('youtube-status').textContent = 'Verify the edited targets before activation.'; return; }
+  session.actionError = '';
   const body = {expectedProfile:session.profile,action,attempt:session.attempt};
   if (action === 'verify') {
     body.video = $('youtube-video').value;
@@ -3220,7 +3222,11 @@ async function youtubeAction(action,event) {
     session.busy = false;
     await youtubePoll(session);
   } catch (error) {
-    if (youtubeCurrent(session)) $('youtube-status').textContent = error.message;
+    if (youtubeCurrent(session)) {
+      session.actionError = error.message;
+      session.busy = false;
+      await youtubePoll(session);
+    }
   } finally {
     session.busy = false;
     if (youtubeCurrent(session)) $('youtube-verify').disabled = false;
