@@ -294,6 +294,23 @@ def t_split_internal_profile_gates_are_independent():
             m._env_base, m._runtime_base_dir = original
 
 
+def t_legacy_label_css_does_not_reset_existing_obs_video_bounds():
+    with tempfile.TemporaryDirectory() as td:
+        original = cli._mk_active_profile(td)
+        overlay = Path(td) / 'profiles/demo/overlay'
+        overlay.mkdir()
+        (overlay / 'splitscreen.css').write_text('#split-left{color:gold}', encoding='utf-8')
+        calls = []
+        try:
+            with patch.object(m, '_profile_is_solo', return_value=False):
+                result = m._sync_scene_layouts(page='splitscreen',
+                    set_transform=lambda *args: (calls.append(args) or (True, '')),
+                    set_enabled=lambda *args: (calls.append(args) or (True, '')))
+            assert result['ok'] and not calls, 'Label-only legacy CSS must never reset live video geometry'
+        finally:
+            m._env_base, m._runtime_base_dir = original
+
+
 if __name__ == '__main__':
     for name in sorted(globals()):
         if name.startswith('t_'):
