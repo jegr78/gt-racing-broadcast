@@ -416,14 +416,17 @@ class Store:
             del data["widgets"][self._index(data, ident)]
             self._write(data)
 
-    def capture(self, ident, sample=None):
+    def capture(self, ident, sample=None, expected_source=None):
         with self.lock:
             data = self._read()
             index = self._index(data, ident)
             widget = data["widgets"][index]
+            if expected_source is not None and (widget["source"], widget["metric"]) != expected_source:
+                raise ValueError("Audience source changed; capture the current source again")
             if widget["mode"] != "net":
                 raise ValueError("Choose net mode before capturing a baseline")
-            normalized = normalize(widget, sample, now=self.clock())
+            observed = sample() if callable(sample) else sample
+            normalized = normalize(widget, observed, now=self.clock())
             if (
                 not normalized["sourceAvailable"]
                 or not normalized["precision"]["exact"]

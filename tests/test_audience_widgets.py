@@ -567,6 +567,21 @@ def t_publication_lock_wait_cannot_refresh_an_old_observation():
     assert row["available"] and row["holdFor"] == 1, row
 
 
+
+def t_capture_checks_expected_source_under_the_definition_lock():
+    with tempfile.TemporaryDirectory() as td:
+        store = aw.Store(Path(td) / "audience.json", clock=lambda: 100)
+        goal = store.create({"label": "Likes", "source": "youtube", "metric": "likes", "mode": "net"})
+        store.update(goal["id"], {"source": "twitch", "metric": "subscriptions"})
+        try:
+            store.capture(goal["id"], Sample(12, "available", 100, identity="youtube:video:one:likes"),
+                          expected_source=("youtube", "likes"))
+        except ValueError:
+            pass  # The forbidden operation must reject before any write.
+        else:
+            raise AssertionError("A source changed during capture accepted another metric's baseline")
+        assert store.read()["widgets"][0]["baseline"] is None
+
 if __name__ == "__main__":
     for name, fn in tuple(globals().items()):
         if name.startswith("t_"):

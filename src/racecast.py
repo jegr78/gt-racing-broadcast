@@ -82,6 +82,7 @@ import overlay_build as ob
 import intermission_live
 import split_layout
 import audience_widgets
+import audience_proxy
 import fonts_bundle as fb
 import ports as pt
 import app_version as _app_version
@@ -7601,6 +7602,34 @@ def audience_read_data():
         return {"ok": False, "error": "Could not read audience configuration"}
 
 
+def _audience_provider_client(active):
+    # The profile stamp and owned process are checked before any localhost I/O.
+    pid = sv.read_pid(_relay_pid_path())
+    if not active or _running_relay_profile() != active or not pid or not sv.pid_is_relay(pid):
+        raise ValueError("Start the relay for this profile before connecting audience metrics")
+    return audience_proxy.Client(active, RELAY_PORT)
+
+
+def audience_youtube_data(body=None):
+    try:
+        active = _active_profile_name()
+        if body is not None and (not isinstance(body, dict) or body.get("expectedProfile") != active):
+            raise ValueError("Active profile changed; reopen connection settings")
+        client = _audience_provider_client(active)
+        result = client.status() if body is None else client.command(body)
+        if _active_profile_name() != active:
+            raise ValueError("Active profile changed; reopen connection settings")
+        return result
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+def _audience_provider_sample(active, widget):
+    if widget["source"] != "youtube":
+        raise ValueError("Audience provider is not connected")
+    return _audience_provider_client(active).sample(widget["metric"])
+
+
 def audience_write_data(body):
     try:
         active = _active_profile_name()
@@ -7616,10 +7645,22 @@ def audience_write_data(body):
             widget = store.create(body.get("fields"))
         elif action == "update":
             widget = store.update(ident, body.get("fields"))
-        elif action == "reset":
-            widget = store.reset(ident)
-        elif action == "capture":
-            widget = store.capture(ident)
+        elif action in ("reset", "capture"):
+            current = next((w for w in store.read()["widgets"] if w["id"] == ident), None)
+            if current is None:
+                raise ValueError("Unknown audience identity")
+            if current["source"] == "manual":
+                widget = store.reset(ident) if action == "reset" else store.capture(ident)
+            else:
+                sample = _audience_provider_sample(active, current)
+                received = time.monotonic()
+                # Source/cache RPC can race a profile switch. Do not write after it.
+                if _active_profile_name() != active:
+                    raise ValueError("Active profile changed; reopen audience widgets")
+                from dataclasses import replace
+                def observed_sample():
+                    return replace(sample, age_seconds=(sample.age_seconds or 0) + max(0, time.monotonic() - received))
+                widget = store.capture(ident, observed_sample, expected_source=(current["source"], current["metric"]))
         elif action == "delete":
             store.delete(ident)
             widget = None
@@ -9108,6 +9149,7 @@ def run_ui(rest, fail=sys.exit, open_browser=True, destination="/"):
         "overlay_read": overlay_read_data,
         "overlay_write": overlay_write_data,
         "audience_read": audience_read_data,
+        "audience_youtube": audience_youtube_data,
         "audience_write": audience_write_data,
         "overlay_slots": overlay_slots_data,
         "overlay_layout_read": overlay_layout_read_data,

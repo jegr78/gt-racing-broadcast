@@ -330,7 +330,7 @@ def t_candidate_expiry_cancel_profile_guard_and_closed_service():
             try:
                 service.command({"expectedProfile": "different", "action": action})
             except ValueError:
-                pass
+                pass  # Rejected state must leave the saved connection unchanged.
             else:
                 raise AssertionError("Foreign profile command accepted")
         pending = command(service, "verify", video=OTHER_VIDEO, apiKey="")
@@ -339,7 +339,7 @@ def t_candidate_expiry_cancel_profile_guard_and_closed_service():
         try:
             command(service, "activate", attempt=pending["attempt"])
         except ValueError:
-            pass
+            pass  # The forbidden operation must reject before any write.
         else:
             raise AssertionError("Expired candidate activated")
         assert service.status()["targets"] == original
@@ -347,7 +347,7 @@ def t_candidate_expiry_cancel_profile_guard_and_closed_service():
         try:
             command(service, "verify", video=VIDEO, apiKey=KEY)
         except ValueError:
-            pass
+            pass  # The forbidden operation must reject before any write.
         else:
             raise AssertionError("Stopped service retained a new credential")
 
