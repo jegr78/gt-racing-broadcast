@@ -5,7 +5,7 @@ import urllib.request
 import urllib.error
 import tempfile
 import test_racecast as cli
-import test_console_gate as gate  # noqa: F401  installs the real OBS tripwire
+import test_console_gate as gate  # installs the real OBS tripwire
 import test_ui_server as ui
 
 m = cli.m
@@ -218,6 +218,81 @@ def t_profile_write_path_uses_checked_profile_snapshot():
             assert not (Path(td) / "profiles/other/audience.json").exists()
         finally:
             m._env_base, m._runtime_base_dir = original
+
+
+def t_relay_pages_share_cached_samples_without_outbound_requests():
+    from pathlib import Path
+    from unittest.mock import patch
+    import audience_widgets as aw
+
+    with tempfile.TemporaryDirectory() as td:
+        directory = Path(td) / "profile/overlay"
+        directory.mkdir(parents=True)
+        store = aw.Store(directory.parent / "audience.json")
+        manual = store.create({"label": "Offline manual", "manualValue": 18})
+        automatic = store.create({
+            "label": "Likes",
+            "source": "youtube",
+            "metric": "likes",
+            "target": 750,
+        })
+        now = [100]
+        cache = aw.MetricCache(clock=lambda: now[0])
+        cache.publish(
+            "youtube", "likes", aw.Sample(0, "available", 100, identity="video:fixture")
+        )
+        runtime = aw.Runtime(store.path, cache=cache, clock=lambda: now[0])
+        original = gate.m.make_handler
+
+        def factory(*args, **kwargs):
+            kwargs.update(audience_runtime=runtime, overlay_dir=str(directory))
+            return original(*args, **kwargs)
+
+        with patch.object(gate.m, "make_handler", side_effect=factory):
+            relay = gate._serve()
+
+        def data():
+            with ui._urlopen(
+                f"http://127.0.0.1:{relay.server_address[1]}/audience/data"
+            ) as response:
+                assert response.status == 200
+                return json.load(response)
+
+        try:
+            with patch.object(
+                m.http_util,
+                "open_url",
+                side_effect=AssertionError("Audience data must not fetch providers"),
+            ):
+                for _ in range(3):
+                    rows = {row["id"]: row for row in data()["widgets"]}
+                    assert (
+                        rows[manual["id"]]["value"] == 18
+                        and rows[automatic["id"]]["value"] == 0
+                    )
+                cache.publish(
+                    "youtube",
+                    "likes",
+                    aw.Sample(761, "available", 100, identity="video:fixture"),
+                )
+                rows = {row["id"]: row for row in data()["widgets"]}
+                assert (
+                    rows[automatic["id"]]["value"] == 761
+                    and rows[automatic["id"]]["fill"] == 100
+                )
+                now[0] = 220
+                rows = {row["id"]: row for row in data()["widgets"]}
+                assert (
+                    rows[automatic["id"]]["availability"] == "stale"
+                    and not rows[automatic["id"]]["available"]
+                )
+                assert (
+                    rows[manual["id"]]["available"]
+                    and rows[manual["id"]]["value"] == 18
+                )
+        finally:
+            relay.shutdown()
+            relay.server_close()
 
 
 if __name__ == "__main__":
