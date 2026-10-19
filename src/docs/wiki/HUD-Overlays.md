@@ -137,12 +137,12 @@ scene; HUD chat and Program video geometry stay independent. Existing
 `intermission.css` imports into advanced CSS unchanged and keeps precedence over
 the generated fields. Remove a conflicting advanced rule to let a field control it.
 
-**Apply in OBS** applies saved Intermission video positions and visibility and
-refreshes its browser source. It does not switch scenes or change audio mutes.
+**Apply in OBS** applies saved Intermission video positions and visibility,
+restores its saved chat visibility and refreshes its browser source. It does not switch scenes or change audio mutes.
 Showing capture video does not unmute game audio. If OBS reports a missing source,
 update/re-import the profile's scene collection. Automatic relay startup and
-`racecast obs refresh` only hide profile-hidden video items; they never reveal a
-camera an operator hid. **Preview** opens `/intermission` for a live chat check;
+`racecast obs refresh` respect live visibility overrides and only hide video items;
+they never reveal a camera an operator hid. **Preview** opens `/intermission` for a live chat check;
 the complete video composition is visible in OBS.
 
 Layouts travel with profile export/import and Look backups. Existing profiles
@@ -150,6 +150,27 @@ retain their appearance until edited: Solo POV initially shows webcam, Solo
 commentary hides it, and capture starts hidden in both.
 
 ![Intermission builder with independent chat and Solo video frames](images/cc-intermission-builder.png)
+
+The **Starter layout** picker offers **Background + chat** and **Break + goals**
+in both profile kinds. Solo also offers **Webcam + chat** and
+**Capture + webcam + chat**. Selection changes editable slot geometry/visibility
+only and supports Undo. It preserves fonts, advanced CSS, profile assets and goal
+values. Save the result, then use **Apply in OBS**. A conflicting advanced CSS
+rule still wins over a template's fields. **Break + goals** hides chat and video;
+it also works as a plain background when no goals are configured.
+
+The Director Panel's **Intermission** area and Companion's **BREAK** buttons
+change live visibility separately from this design. These overrides survive
+scene changes, browser reloads and relay restarts on the same producer machine,
+until **Restore saved defaults** or an explicit layout Apply. They live in
+`runtime/<profile>/intermission-live.json`, outside profile exports and Look
+backups. OBS remains the truth for video, including manual OBS edits. Automatic
+refresh never turns a source on; a live show override prevents a hidden design
+default from turning that video off. After a manually hidden source, a saved live
+show override does not turn it back on. Manual OBS changes appear immediately in
+the panel; automatic refresh still honors the last relay override. Explicit restore may reveal a camera
+enabled in the saved design. Disconnected/missing sources report unknown instead
+of a guessed enabled state. Chat hiding leaves the browser's video frames intact.
 
 The canvas renders the real base page with **sample data** over your league's
 `Overlay.png` frame, so you position against the actual broadcast graphic. The per-slot
@@ -183,11 +204,9 @@ the cascade still holds. A profile's existing **hand-written** `<page>.css` is i
 verbatim into the advanced-CSS box the first time you open the builder (nothing is lost),
 and your visual changes compile **above** it.
 
-> **First-override caveat.** The relay only watches a profile's `overlay/` directory when
-> that directory **existed at the moment the relay started** (the relay is launched with
-> `--overlay-dir` only when the dir is present). So the **very first** override on a profile
-> whose `overlay/` did not exist yet needs **one `racecast relay restart`** to activate.
-> After that, later edits apply live via **Apply in OBS**, no restart.
+The relay keeps the profile's overlay path even before the first Save creates
+the directory. Save and **Apply in OBS** therefore work on a new profile without
+a relay restart.
 
 > **CLI alternative:** edit `profiles/<name>/overlay/hud.css` in any text editor,
 > drop fonts in `profiles/<name>/overlay/fonts/`, then `racecast obs refresh`. (Editing the

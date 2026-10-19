@@ -2882,6 +2882,254 @@
        }
       },
       "localVariables": []
+     },
+     "4": {
+      "type": "button",
+      "style": {
+       "text": "BREAK\nCHAT",
+       "textExpression": false,
+       "size": "14",
+       "png64": null,
+       "alignment": "center:center",
+       "pngalignment": "center:center",
+       "color": 16777215,
+       "bgcolor": 1400414,
+       "show_topbar": "default"
+      },
+      "options": {
+       "stepProgression": "auto",
+       "stepExpression": "",
+       "rotaryActions": false
+      },
+      "feedbacks": [],
+      "steps": {
+       "0": {
+        "action_sets": {
+         "down": [
+          {
+           "id": "npXMauUYlvHNnoxHUp7FS",
+           "definitionId": "get",
+           "connectionId": "BB0jmLMxj_0YwbhwslOiw",
+           "options": {
+            "url": {
+             "value": "http://127.0.0.1:8088/obs/intermission/toggle/chat",
+             "isExpression": false
+            },
+            "header": {
+             "isExpression": false,
+             "value": ""
+            },
+            "jsonResultDataVariable": {
+             "isExpression": false,
+             "value": ""
+            },
+            "result_stringify": {
+             "isExpression": false,
+             "value": true
+            },
+            "statusCodeVariable": {
+             "isExpression": false,
+             "value": ""
+            }
+           },
+           "upgradeIndex": 1,
+           "type": "action"
+          }
+         ],
+         "up": []
+        },
+        "options": {
+         "runWhileHeld": []
+        }
+       }
+      },
+      "localVariables": []
+     },
+     "5": {
+      "type": "button",
+      "style": {
+       "text": "BREAK\nWEBCAM",
+       "textExpression": false,
+       "size": "14",
+       "png64": null,
+       "alignment": "center:center",
+       "pngalignment": "center:center",
+       "color": 16777215,
+       "bgcolor": 1400414,
+       "show_topbar": "default"
+      },
+      "options": {
+       "stepProgression": "auto",
+       "stepExpression": "",
+       "rotaryActions": false
+      },
+      "feedbacks": [],
+      "steps": {
+       "0": {
+        "action_sets": {
+         "down": [
+          {
+           "id": "sERx2UNDAiYwKA5sBdXHN",
+           "definitionId": "get",
+           "connectionId": "BB0jmLMxj_0YwbhwslOiw",
+           "options": {
+            "url": {
+             "value": "http://127.0.0.1:8088/obs/intermission/toggle/webcam",
+             "isExpression": false
+            },
+            "header": {
+             "isExpression": false,
+             "value": ""
+            },
+            "jsonResultDataVariable": {
+             "isExpression": false,
+             "value": ""
+            },
+            "result_stringify": {
+             "isExpression": false,
+             "value": true
+            },
+            "statusCodeVariable": {
+             "isExpression": false,
+             "value": ""
+            }
+           },
+           "upgradeIndex": 1,
+           "type": "action"
+          }
+         ],
+         "up": []
+        },
+        "options": {
+         "runWhileHeld": []
+        }
+       }
+      },
+      "localVariables": []
+     },
+     "6": {
+      "type": "button",
+      "style": {
+       "text": "BREAK\nCAPTURE",
+       "textExpression": false,
+       "size": "14",
+       "png64": null,
+       "alignment": "center:center",
+       "pngalignment": "center:center",
+       "color": 16777215,
+       "bgcolor": 1400414,
+       "show_topbar": "default"
+      },
+      "options": {
+       "stepProgression": "auto",
+       "stepExpression": "",
+       "rotaryActions": false
+      },
+      "feedbacks": [],
+      "steps": {
+       "0": {
+        "action_sets": {
+         "down": [
+          {
+           "id": "QvcSjt8MWCKMlY0er965N",
+           "definitionId": "get",
+           "connectionId": "BB0jmLMxj_0YwbhwslOiw",
+           "options": {
+            "url": {
+             "value": "http://127.0.0.1:8088/obs/intermission/toggle/capture",
+             "isExpression": false
+            },
+            "header": {
+             "isExpression": false,
+             "value": ""
+            },
+            "jsonResultDataVariable": {
+             "isExpression": false,
+             "value": ""
+            },
+            "result_stringify": {
+             "isExpression": false,
+             "value": true
+            },
+            "statusCodeVariable": {
+             "isExpression": false,
+             "value": ""
+            }
+           },
+           "upgradeIndex": 1,
+           "type": "action"
+          }
+         ],
+         "up": []
+        },
+        "options": {
+         "runWhileHeld": []
+        }
+       }
+      },
+      "localVariables": []
+     },
+     "7": {
+      "type": "button",
+      "style": {
+       "text": "BREAK\nDEFAULTS",
+       "textExpression": false,
+       "size": "12",
+       "png64": null,
+       "alignment": "center:center",
+       "pngalignment": "center:center",
+       "color": 16777215,
+       "bgcolor": 1400414,
+       "show_topbar": "default"
+      },
+      "options": {
+       "stepProgression": "auto",
+       "stepExpression": "",
+       "rotaryActions": false
+      },
+      "feedbacks": [],
+      "steps": {
+       "0": {
+        "action_sets": {
+         "down": [
+          {
+           "id": "eoyxQxiRClDpmQ_eixdgF",
+           "definitionId": "get",
+           "connectionId": "BB0jmLMxj_0YwbhwslOiw",
+           "options": {
+            "url": {
+             "value": "http://127.0.0.1:8088/obs/intermission/restore",
+             "isExpression": false
+            },
+            "header": {
+             "isExpression": false,
+             "value": ""
+            },
+            "jsonResultDataVariable": {
+             "isExpression": false,
+             "value": ""
+            },
+            "result_stringify": {
+             "isExpression": false,
+             "value": true
+            },
+            "statusCodeVariable": {
+             "isExpression": false,
+             "value": ""
+            }
+           },
+           "upgradeIndex": 1,
+           "type": "action"
+          }
+         ],
+         "up": []
+        },
+        "options": {
+         "runWhileHeld": []
+        }
+       }
+      },
+      "localVariables": []
      }
     }
    },

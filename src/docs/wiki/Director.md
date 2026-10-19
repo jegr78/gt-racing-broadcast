@@ -69,6 +69,7 @@ Where each bus lives:
 | **PGM** (live column) | one-press program looks: `STINT`, `SPLIT`, `INTERVIEW`, `STANDBY`, `INTRO`, `OUTRO`, `TRAILER`, `INTERMISSION`, `RED FLAG` (same behavior as the Companion combos below) |
 | **FEEDS** (Troubleshoot) | **`ARM A/B` / `STOP A/B`** per feed, per-feed reloads, `RESET A/B → LIVE` (reconnect OBS to one feed, see [Dropping a backlog](#dropping-a-backlog)), POV reload/stop, `FEEDS → STINT…` |
 | **HUD** (HUD area) | the Stint label, Streamer, Session and Race Control dropdowns, they update the HUD live and write back to the Setup tab |
+| **Intermission** | live Chat visibility in Endurance and Solo, Webcam/Capture in Solo, and **Restore saved defaults**. Reads actual OBS item state and targets Intermission even while another scene is on air. Audio and Program PiP stay unchanged |
 | **Overlays** (live column) | picture-in-picture toggles: `POV`; in solo also `WEBCAM` and, for a POV profile, `TELEMETRY`, plus the `REC` recording key (solo POV) |
 | **Raw scenes** (Troubleshoot) | scene switches without audio (the audio stays as it is) |
 | **TRANS** (live column) | transition selector for the next scene switch. **Cut**, **Fade** (default), or **Stinger** |
@@ -86,6 +87,17 @@ key; two or more for the same stint point to the Schedule area, where each link 
 graphics library, **Broadcast** the stream key and the substitution card, and
 **Troubleshoot** the raw feed controls, the emergency feed switch, the raw scenes and the OBS
 page refresh.
+
+The **Intermission** area shows **shown**, **hidden** or **unknown** for each
+supported source. Unknown controls are disabled; start/reconnect OBS or update an
+older scene collection when the item is missing. Live choices are retained across
+scene changes, browser reloads and relay restart on this machine. **Restore saved
+defaults** and the builder's **Apply in OBS** return to the saved profile design
+and may reveal a camera enabled there. Showing capture does not unmute game audio;
+existing scene macros and music controls keep their audio behavior. See
+[Intermission layouts](HUD-Overlays#intermission-layouts) for persistence and templates.
+
+![Solo Intermission controls with separate live Chat, Webcam and Capture state](images/director-intermission.png)
 
 ### Graphic requests
 
@@ -509,6 +521,7 @@ Scenes, feeds and per-feed quality: the live production controls.
 | **Scenes + relay** | `Stint Scene`, `Split Scene`, `Interview Scene`, `Standby Scene`, `Feeds Next` (the handover), `Feeds Reload` |
 | **Feeds & reloads** | `Feed A Toggle`, `Feed B Toggle`, `POV Toggle`, `Telemetry Toggle` (solo POV: shows or hides the HUD's GT7 telemetry block → `/telemetry/toggle`; the button does not light, the panel's `TELEMETRY` key shows the state), `Feed A Reload` (reconnect only Feed A → `/reload/A`), `Feed B Reload` (→ `/reload/B`), `POV Reload`, `POV Stop` |
 | **Feed quality** | `FEED A ROBUST` / `FEED A AUTO`, `FEED B ROBUST` / `FEED B AUTO`: a per-feed **quality profile** for a struggling source: **ROBUST** drops that feed to a sustainable 720p; **AUTO** releases it back to the managed default (full quality, with the relay's automatic step-down re-armed). The sub-720p **Emergency** profile and the per-feed **Preview** stay Director-Panel-only, the deck keeps the two most-used switches. The same control lives on the panel's **Feeds** card |
+| **Intermission visibility** | `BREAK CHAT`, `BREAK WEBCAM`, `BREAK CAPTURE` toggle only the corresponding Intermission item. `BREAK DEFAULTS` restores saved visibility and may reveal a saved camera. No scene cut or audio change. Endurance profile exports omit Webcam/Capture. These static buttons do not display live state; use the Director Panel for that state and error details |
 
 ![Companion page 1, show control: combos, scene switches, feeds & reloads, and the per-feed ROBUST / AUTO quality switches](images/companion-page1-show-control.png)
 

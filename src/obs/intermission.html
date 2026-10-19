@@ -61,6 +61,8 @@
   #intermission-webcam{position:absolute;left:64px;top:336px;width:1152px;height:648px;box-sizing:border-box}
   #intermission-capture{position:absolute;left:64px;top:96px;width:1152px;height:648px;box-sizing:border-box}
   #ichat{z-index:10}
+  body:not([data-live-ready]) #ichat,
+  body:not([data-live-ready]) [data-solo]{visibility:hidden}
 </style>
 <link rel="stylesheet" href="/intermission/override.css">
 </head>
@@ -130,6 +132,25 @@
     setTimeout(poll, POLL_MS);
   }
   poll();
+  async function pollVisibility() {
+    try {
+      const res = await fetch('/intermission/data', {cache:'no-store'});
+      if (res.ok) {
+        const state = await res.json();
+        const chat = document.getElementById('ichat');
+        if (typeof state.chatOverride === 'boolean')
+          chat.style.setProperty('display', state.chatOverride ? 'flex' : 'none', 'important');
+        else chat.style.removeProperty('display');
+        ['webcam', 'capture'].forEach(function (key) {
+          document.getElementById('intermission-' + key).style.setProperty(
+            'display', state.video && state.video[key] === true ? 'block' : 'none', 'important');
+        });
+        document.body.dataset.liveReady = 'true';
+      }
+    } catch (e) { /* keep the last confirmed visibility on transient failures */ }
+    setTimeout(pollVisibility, 1000);
+  }
+  pollVisibility();
 </script>
 </body>
 </html>

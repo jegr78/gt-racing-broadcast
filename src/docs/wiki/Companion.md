@@ -43,13 +43,22 @@ password: nothing to do.)
 
 ## The button board
 
+Export with the intended profile selected. Page 1 includes **BREAK CHAT** and
+**BREAK DEFAULTS**; Solo exports also include **BREAK WEBCAM** and **BREAK CAPTURE**.
+These use the relay's `/obs/intermission/toggle/<key>` and
+`/obs/intermission/restore` GET actions. They affect only Intermission visibility,
+without switching scenes or changing audio. **BREAK DEFAULTS** may show a camera
+enabled in the saved layout. The static buttons do not indicate current state or
+errors; the Director Panel's Intermission area does. Re-export and re-import after
+changing profile kind to obtain the matching button set.
+
 The board has three pages: **show control** (scenes & feeds), **race timer & audio**,
 and **flags & graphics**. The full layout, what each
 button does, and the screenshots live in the [Director guide](Director#the-companion-web-buttons-board),
 that's the operator's reference for actually using the board.
 
 This page covers only how the board is wired up. The relay buttons (`Feeds Next`,
-`Feeds Reload`, `Feed A Reload`, `Feed B Reload`, `POV Reload`, `POV Stop`,
+`Feeds Reload`, `Feed A Reload`, `Feed B Reload`, `POV Reload`, `POV Stop`, the **BREAK** visibility/defaults buttons,
 `POV Toggle` → `/pov/toggle`, `Telemetry Toggle` → `/telemetry/toggle` (solo POV only; elsewhere the relay answers 404 and the press does nothing), and the `FEED A/B ROBUST/AUTO` quality switches → `/feed/<A|B>/quality/<tier>`)
 use the **Generic HTTP Requests**
 connection: see [Relay Mode §4](Relay-Mode#4-control-it-companion--relay). Everything else
