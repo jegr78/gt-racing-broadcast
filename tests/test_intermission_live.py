@@ -187,6 +187,18 @@ def t_templates_are_profile_aware_and_only_patch_scene_slots():
     assert solo[-1]['slots']['ichat']['visible'] is False
 
 
+def t_browser_origin_accepts_funnel_and_refuses_invalid_authorities():
+    good = {'Host': 'broadcast.example', 'X-Forwarded-Proto': 'https',
+            'Origin': 'https://broadcast.example', 'Referer': 'https://broadcast.example/console/panel',
+            'Sec-Fetch-Site': 'same-origin'}
+    assert live.allow_control_origin(good)
+    assert live.allow_control_origin({'Host': '127.0.0.1:8088'})
+    for value in ('null', 'https://broadcast.example:bad', 'file:///tmp/page',
+                  'https://user@broadcast.example', 'https://other.example'):
+        assert not live.allow_control_origin(dict(good, Origin=value)), value
+    assert not live.allow_control_origin(dict(good, Referer='https://foreign.example/page'))
+
+
 def t_companion_export_offers_only_supported_intermission_controls():
     import json
     root = Path(__file__).resolve().parents[1]

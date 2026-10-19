@@ -66,6 +66,12 @@ def main():
                 page.select_option('#ov-scene', 'intermission')
                 page.wait_for_function("() => ovState.page === 'intermission' && ovState.slots.length === 3")
                 assert page.locator('#ov-template option').count() == 5
+                initial = page.evaluate('JSON.stringify(ovState.layout)')
+                assert page.evaluate("() => { try { ovUseTemplate('unsupported'); return true; } catch(e) { return false; } }")
+                page.evaluate("() => { overlayPage='hud'; ovUseTemplate('webcam-chat'); overlayPage='intermission'; }")
+                assert page.evaluate('JSON.stringify(ovState.layout)') == initial, 'A stale scene must not accept a starter layout'
+                page.evaluate("() => { ovState.templates.push({id:'invalid-slot',slots:{'not-a-scene-slot':{visible:true}}}); ovUseTemplate('invalid-slot'); ovState.templates.pop(); ovHistInit(); }")
+                assert page.evaluate('JSON.stringify(ovState.layout)') == initial, 'Templates must patch only supported slots'
                 page.select_option('#ov-template', 'capture-webcam-chat')
                 assert page.evaluate("ovState.layout.slots['intermission-capture'].visible") is True
                 assert page.evaluate("ovState.layout.slots.ichat.top") == 400
