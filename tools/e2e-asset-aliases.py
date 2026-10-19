@@ -74,7 +74,7 @@ def main():
             overlay_fonts=cli.m.overlay_fonts_list_data,
             overlay_asset_serve=cli.m.overlay_asset_serve,
             asset_roots=lambda: {"graphics": str(graphics), "media": str(media)},
-            update_check=lambda force=False: {"ok": True},
+            update_check=lambda force=False: {"ok": True, "note": "development build"},
             profiles=lambda: {
                 "ok": True,
                 "active": "demo",
