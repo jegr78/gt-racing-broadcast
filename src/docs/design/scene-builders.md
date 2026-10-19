@@ -2,7 +2,8 @@
 
 The Control Center edits each scene independently. The existing HUD layout remains
 `layout-hud.json` and `hud.css`; Intermission uses `layout-intermission.json` and
-`intermission.css`. Both live under the active profile's `overlay/` directory, so
+`intermission.css`. Endurance Splitscreen uses `layout-splitscreen.json` and
+`splitscreen.css`. All live under the active profile's `overlay/` directory, so
 profile bundles and look backups carry the complete design. Existing CSS migrates
 verbatim into the layout's advanced CSS and retains cascade precedence.
 
@@ -32,8 +33,8 @@ placement and visibility remain intact until a layout is saved.
 | Background and offline editing | Background API, labeled canvas placeholders | Correct graphic per scene | Missing asset/OBS leaves usable editor and diagnostic | Browser preview with no OBS/devices |
 | Portable design and compatibility | Profile bundle and backup workflows | Scene CSS/layout survive export and restore | Older collection missing items reports a useful status | Synthetic round trip; existing profile default screenshot |
 
-Splitscreen will reuse the scene-selection contract in #935. Live controls and
-profile-aware starter templates are tracked separately in #931.
+Splitscreen shares the scene-selection contract in #935. Intermission live controls
+and profile-aware starter templates are delivered in #931.
 
 ## Verification record
 
@@ -122,3 +123,33 @@ Labels retain their existing screen-sized coordinate space inside a feed-linked 
 Extra right/vertical offsets use margins, preserving legacy top/right CSS and rotation.
 A browser probe verified identical default positions for three legacy stylesheets,
 then verified feed movement/resizing and independent label offsets.
+
+### Verification record for #935
+
+`tests/test_split_layouts.py` exercises independent profile persistence, HTTP error
+shapes, legacy stylesheet fallback, collection graph/import, profile/Look roundtrips
+and scene-scoped live feed/cover geometry. A disabled feed remains disabled when
+its import geometry changes. Label-only legacy CSS never resets video geometry.
+`tools/e2e-splitscreen.py` uses the shipped UI and relay pages with temporary
+profiles: real drag/resize/numeric/template/Undo events, save/reload, current/next
+changes, qualifying, operator-hidden labels and profile switching. It records only
+two Splitscreen feed transforms and zero browser exceptions; cover cases are
+covered separately with recording OBS sessions. Existing scene-builder, overlay
+and Solo collection contracts remain green. No test uses live OBS or devices.
+
+All 21 new guards were falsified independently after committing the correct
+implementation, then restored. The cases cover file/base/slot/sync profile gates,
+scene/source scope, live/import visibility preservation, disabled-cover geometry,
+legacy geometry preservation, missing browser preflight, stylesheet fallback,
+Solo markup/source pruning, geometry-only video properties, nested drag/offsets,
+nested selection outlines, label stacking and leaving Split on a Solo switch.
+Each failed at its intended assertion. A forced overlap with the timer prevents
+legacy font/position changes from masking the stacking regression. Each mutant
+runs with an isolated Python bytecode cache to avoid timestamp/size collisions.
+
+Self-review fixed label selection behind the HUD in the combined canvas and
+strengthened profile/disabled-feed coverage. An independent read-only security
+review of the production diff found no actionable findings; subsequent changes
+were tests and documentation only. The screenshot shows the asymmetric starter
+layout from the actual development UI. Save feedback clears the one-time migration
+hint after the scene becomes independent.

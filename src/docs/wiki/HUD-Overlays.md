@@ -24,6 +24,7 @@ A league's overlay styling sits in its profile folder:
 ```
 profiles/<name>/overlay/hud.css           # restyle the HUD (incl. the race timer)
 profiles/<name>/overlay/intermission.css  # restyle the Intermission broadcast-chat panel
+profiles/<name>/overlay/splitscreen.css   # independent Endurance feeds, labels and HUD
 profiles/<name>/overlay/fonts/            # optional custom font files
 ```
 
@@ -37,6 +38,8 @@ league's CSS at fixed paths:
 
 - **`/hud/override.css`** ← `profiles/<name>/overlay/hud.css`
 - **`/intermission/override.css`** ← `profiles/<name>/overlay/intermission.css`
+- **`/splitscreen/override.css`** and **`/splitscreen/hud/override.css`** use the saved
+  Split stylesheet; before its first save, the dedicated Split HUD inherits `hud.css`.
 
 Each base page links its override **last** in `<head>`, so any rule in the league CSS
 **wins the cascade** over the page's own styles. The CSS is read **per request**, so editor
