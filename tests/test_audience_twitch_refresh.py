@@ -154,6 +154,22 @@ def t_disconnect_during_exchange_discards_late_pair_without_persistence():
     assert rotation.current() is None and rotation.status()["phase"] == "disconnected"
 
 
+def t_expired_pending_credentials_require_reconnect_instead_of_endless_storage_retry():
+    backend = Backend()
+    rotation = manager(backend)
+
+    def expired(pair, identity):
+        raise tw.APIError("auth", "Pending credentials expired")
+
+    rotation.persist = expired
+    assert not rotation.step()
+    assert rotation.status()["phase"] == "reconnect", (
+        "Expired credentials were treated as a retryable disk error"
+    )
+    assert rotation.current() is None
+    assert not rotation.step() and backend.events.count("exchange") == 1
+
+
 if __name__ == "__main__":
     for name, fn in tuple(globals().items()):
         if name.startswith("t_"):

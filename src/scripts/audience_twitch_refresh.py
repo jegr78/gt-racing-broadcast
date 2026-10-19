@@ -141,6 +141,16 @@ class Rotation:
                 return False
             try:
                 self.persist(dict(pair), deepcopy(identity))
+            except tw.APIError as error:
+                if not error.transient:
+                    return self._reconnect(
+                        generation, "Rotated Twitch authorization expired; reconnect"
+                    )
+                self._phase, self._error = (
+                    "validating",
+                    "Could not validate rotated Twitch authorization; retrying",
+                )
+                return False
             except Exception:
                 self._phase, self._error = (
                     "storage_error",
