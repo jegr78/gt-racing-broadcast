@@ -9,6 +9,11 @@ control surface; Companion mirrors the same show controls as a hardware-style bu
 board (the layout a Stream Deck uses) for directors who prefer physical buttons.
 Install it first per [Set up the broadcast PC](Set-up-the-broadcast-PC).
 
+Optional [asset aliases](Sheet-Template#optional-display-aliases) change captions
+without changing button actions. A page-only upgrade also needs the custom
+variable and polling trigger described there; without them, buttons retain their
+previous captions. Keep existing connections when updating an installed board.
+
 ## Import the button board
 
 1. Start Companion: `racecast companion start` (Windows/macOS: the first run just
