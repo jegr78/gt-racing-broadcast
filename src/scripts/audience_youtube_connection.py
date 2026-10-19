@@ -294,6 +294,7 @@ class Service:
         failure = None
         try:
             payload = self.fetch(resource, {"id": target["id"]}, key)
+            observed, success_wall = self.monotonic(), self.clock()
             if resource == "videos":
                 state, values = yt.video_snapshot(payload, target["id"])
             else:
@@ -350,9 +351,9 @@ class Service:
                         availability="available"
                         if value is not None
                         else "unavailable",
-                        last_success=self.clock(),
+                        last_success=success_wall,
                         identity=identity,
-                        age_seconds=0,
+                        age_seconds=max(0, self.monotonic() - observed),
                         reason=""
                         if value is not None
                         else "YouTube count is unavailable",

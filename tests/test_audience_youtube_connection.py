@@ -168,7 +168,9 @@ def t_verify_is_pending_then_requires_explicit_activation_and_never_echoes_key()
         command(service, "activate", attempt=pending["attempt"])
         assert service.status()["connected"] and len(api.calls) == 2
         persisted = service.files.load()
-        assert persisted and persisted[1] == {"key": KEY}, "Activated connection was not persisted"
+        assert persisted and persisted[1] == {"key": KEY}, (
+            "Activated connection was not persisted"
+        )
         service.tick()
         assert metric(cache, "likes")["value"] == 0
         subs = metric(cache, "subscribers")
@@ -512,6 +514,42 @@ def t_superseded_verification_cannot_overwrite_the_new_candidate():
         service.tick()
         assert service.status()["setup"]["attempt"] == current["attempt"]
         assert service.status()["setup"]["targets"]["video"]["id"] == OTHER_VIDEO
+
+
+def t_response_processing_and_service_lock_wait_cannot_refresh_observation_age():
+    with fixture() as (service, clock, _api, cache, _definitions):
+        connect(service)
+        observed, release = threading.Event(), threading.Event()
+        original = yt.video_snapshot
+
+        def delayed(payload, ident):
+            result = original(payload, ident)
+            observed.set()
+            assert release.wait(3), "Fixture parser was not released"
+            return result
+
+        with patch.object(yt, "video_snapshot", side_effect=delayed):
+            with service.lock:
+                worker = threading.Thread(
+                    target=service._poll,
+                    args=(
+                        "videos",
+                        service.generation,
+                        service.targets["video"],
+                        service.key,
+                    ),
+                )
+                worker.start()
+                try:
+                    assert observed.wait(2)
+                    clock.advance(119)
+                finally:
+                    release.set()
+            worker.join(3)
+        assert not worker.is_alive()
+        assert metric(cache, "likes")["holdFor"] == 1, (
+            "Response processing or lock wait extended the last-good deadline"
+        )
 
 
 if __name__ == "__main__":
