@@ -336,7 +336,7 @@ def failure(operation, status, payload, headers, now=None):
                 except (ValueError, TypeError):
                     parsed = parsedate_to_datetime(value)
                     if parsed.tzinfo is None:
-                        raise ValueError("Retry date needs a timezone")
+                        raise ValueError("Retry date needs a timezone") from None
                     delay = int(parsed.timestamp() - now)
             elif "ratelimit-reset" in normalized:
                 delay = int(float(normalized["ratelimit-reset"]) - now)
