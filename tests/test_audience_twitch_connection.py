@@ -488,7 +488,20 @@ def t_poll_transit_expiry_never_publishes_or_starts_another_metric():
 
         service.fetch = delayed
         before = len(api.calls)
-        service.tick()
+        published = []
+        original_publish = cache.publish
+
+        def record(source, name, sample):
+            if source == "twitch" and sample.availability == "available":
+                published.append((name, clock.mono()))
+            return original_publish(source, name, sample)
+
+        with patch.object(cache, "publish", side_effect=record):
+            service.tick()
+        assert not published, (
+            "An available sample escaped briefly after expiry before a later gate invalidated it"
+        )
+
         assert cache.read("twitch", "viewers").availability == "unavailable", (
             "Poll result was published after authorization expiry"
         )
