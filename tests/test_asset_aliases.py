@@ -450,6 +450,21 @@ def t_headers_are_case_bom_and_order_tolerant_and_alias_is_literal_text():
             assert am.display_name(td, "Standings") == "<html> literal ä"
 
 
+def t_headerless_media_labels_keep_legacy_moved_columns_during_refresh():
+    import asset_metadata as am
+    import tempfile
+
+    rows = [
+        ["", "Intro Video", "https://youtu.be/fixture"],
+        ["note", "", "Intermission Music", "https://example.invalid/music"],
+    ]
+    assert media.m.media_urls_from_csv(rows) == {"intro": "https://youtu.be/fixture"}
+    assert media.m.music_url_from_csv(rows) == "https://example.invalid/music"
+    with tempfile.TemporaryDirectory() as td:
+        am.refresh(td, rows, "media")
+        assert am.read(td)["aliases"] == {}
+
+
 if __name__ == "__main__":
     for name, fn in tuple(globals().items()):
         if name.startswith("t_"):

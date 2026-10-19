@@ -92,7 +92,9 @@ def parse(rows, strict=False):
     if (
         strict
         and not has_header
-        and not any(_url(r["url"]) or norm(r["name"]) in MEDIA for r in records)
+        and not any(
+            _url(str(cell)) or norm(cell) in MEDIA for row in rows for cell in row
+        )
     ):
         raise ValueError("Unrecognized Assets CSV; metadata retained")
     return has_header, records
