@@ -168,6 +168,18 @@ def t_intermission_layout_survives_bundle_and_backup_roundtrips():
             m._env_base, m._runtime_base_dir = original
 
 
+def t_apply_refuses_a_foreign_running_profile_before_obs_mutation():
+    calls = []
+    with patch.object(m, '_active_profile_name', return_value='demo'), \
+            patch.object(m, '_foreign_relay_profile', return_value='another-league'):
+        result = m.overlay_apply_data('intermission',
+            set_transform=lambda *a: calls.append(a),
+            set_enabled=lambda *a: calls.append(a),
+            refresh=lambda **kw: calls.append(kw))
+    assert result['ok'] is False and 'another-league' in result['error']
+    assert not calls
+
+
 if __name__ == '__main__':
     for name, fn in sorted(globals().copy().items()):
         if name.startswith('t_') and callable(fn):

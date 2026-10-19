@@ -69,7 +69,10 @@ def main():
                 if args.shots:
                     page.locator('#ov-modal .ovmodal-card').screenshot(
                         path=str(ROOT / 'src/docs/wiki/images/cc-intermission-builder.png'))
-                page.evaluate("ovState.layout.slots.ichat={left:120,top:100,width:480,height:600}; ovBuildCanvas(); ovSelect('ichat')")
+                page.evaluate("ovSelect('ichat')")
+                for prop, value in [('left', '120'), ('top', '100'), ('width', '480'), ('height', '600')]:
+                    page.evaluate("([prop,value]) => { const input=ovState.fields[prop]; input.value=value; input.dispatchEvent(new Event('input')); input.dispatchEvent(new Event('change')); }", [prop, value])
+                assert page.evaluate('ovState.layout.slots.ichat.left') == 120, errors
                 page.evaluate('saveOverlay()')
                 page.wait_for_function("() => document.getElementById('overlay-save').textContent.includes('Saved')")
                 css_path = Path(td) / 'profiles/demo/overlay/intermission.css'

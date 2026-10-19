@@ -7897,6 +7897,9 @@ def overlay_apply_data(page, set_transform=None, set_enabled=None, refresh=None)
     """Explicit producer action: apply one saved scene without a cut/audio change."""
     if page not in ("hud", "intermission") or not _active_profile_name():
         return {"ok": False, "error": "no active profile or invalid page"}
+    foreign = _foreign_relay_profile()
+    if foreign:
+        return {"ok": False, "error": f"Relay runs profile {foreign!r}; restart it for the active profile before Apply"}
     import obs_ws
     if refresh is None and not _relay_http_ok():
         return {"ok": False, "error": "Relay not responding; start the relay before Apply in OBS"}

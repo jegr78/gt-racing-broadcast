@@ -3390,12 +3390,7 @@ function ovStyleSlot(id) {
 }
 
 function ovSetProp(id, prop, value) {
-  ovState.layout = ovDrafts.get(ovState.active + ':' + requestedPage) || ovState.layout;
   if (!ovState.layout.slots) ovState.layout.slots = {};
-  Object.entries(slotsR.defaults || {}).forEach(([id, defaults]) => {
-    if (!ovState.layout.slots[id]) ovState.layout.slots[id] = Object.assign({}, defaults);
-  });
-  $('ov-scene').value = requestedPage;
   const slot = ovState.layout.slots[id] || (ovState.layout.slots[id] = {});
   // A width/height <= 0 is unset: the compiler drops it, so the canvas must too.
   if ((prop === 'width' || prop === 'height') && typeof value === 'number' && value <= 0) value = '';
@@ -3769,12 +3764,7 @@ function ovSelectField(prop, label, opts, ov) {
 }
 
 function ovSetShadow(id, key, raw) {
-  ovState.layout = ovDrafts.get(ovState.active + ':' + requestedPage) || ovState.layout;
   if (!ovState.layout.slots) ovState.layout.slots = {};
-  Object.entries(slotsR.defaults || {}).forEach(([id, defaults]) => {
-    if (!ovState.layout.slots[id]) ovState.layout.slots[id] = Object.assign({}, defaults);
-  });
-  $('ov-scene').value = requestedPage;
   const slot = ovState.layout.slots[id] || (ovState.layout.slots[id] = {});
   const s = Object.assign({x: 0, y: 0, blur: 0, color: ''}, slot.textShadow || {});
   s[key] = (key === 'color') ? raw : (raw === '' ? 0 : Number(raw));
