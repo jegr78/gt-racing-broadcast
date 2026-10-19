@@ -556,6 +556,32 @@ def t_take_view_does_not_attach_aliases_to_controls_without_rights():
     )
 
 
+def t_duplicate_aliases_keep_distinct_canonical_requests_and_bad_cache_falls_back():
+    import asset_metadata as am
+    import test_console_gate as gate
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as td:
+        for bad in ("not json", "[]", '{"aliases": null}', '{"aliases":{"Standings":7}}'):
+            (Path(td) / "manifest.json").write_text(bad, encoding="utf-8")
+            assert am.display_name(td, "Standings", "Default") == "Default"
+        for name in ("Standings", "Schedule"):
+            (Path(td) / (name + ".png")).write_bytes(b"fixture-graphic")
+        am.refresh(td, [
+            ["Name", "URL", "Alias"],
+            ["Standings", "", "Same human label"],
+            ["Schedule", "", "Same human label"],
+        ], "graphics")
+        rows = gate.m.list_graphics(td)
+        assert {r["name"] for r in rows} == {"Standings", "Schedule"}
+        assert {r["displayName"] for r in rows} == {"Same human label"}
+        requests = gate.m.graphic_takes.Requests()
+        first, _ = requests.add("Standings", "alice", "Alice", 1, "Same human label")
+        second, merged = requests.add("Schedule", "alice", "Alice", 2, "Same human label")
+        assert not merged and first["id"] != second["id"]
+        assert second["source"] == "Schedule" and first["source"] == "Standings"
+
+
 def t_authorized_take_errors_keep_alias_and_canonical_identity():
     import test_console_gate as gate
     from unittest.mock import patch
