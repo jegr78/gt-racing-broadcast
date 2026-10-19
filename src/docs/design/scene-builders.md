@@ -75,3 +75,30 @@ Implementation decisions:
 - Templates preserve unrelated slots/fonts/custom CSS/assets. They change the editor model only; Save and Apply stay explicit.
 - The optional controller runtime path is injected by relay bootstrap; test handlers may use an in-memory controller. No tests connect to a real OBS or read machine runtime.
 - Companion page 1 uses the four remaining fourth-row cells for Chat, Webcam, Capture and Defaults. Profile-aware export omits Solo video controls from Endurance; existing static buttons require re-export/import to change.
+
+### Verification record for #931
+
+Controller and live HTTP fixtures cover actual item reads, repeated and concurrent
+toggles, absent sources, disconnected OBS, disk-write failure, corrupt runtime
+state, restore, profile gating and refresh reconciliation. The shipped Director
+and overlay pages run in `tools/e2e-intermission.py`; it also holds an older poll
+response until after a newer action to verify that it cannot overwrite the UI.
+The scene-builder browser scenario exercises actual template selection, Undo,
+invalid/stale selection and profile-specific choices without OBS writes.
+
+Nineteen guards were separately broken and observed red at their behavior
+assertions, then restored: scene scope, source/profile allowlists, missing-source
+refusal, action serialization, corrupt-state hiding, persistence before publish,
+live override reconciliation, Companion/template profile filtering, Fetch Metadata,
+origin matching and parsing, both HTTP method gates, stale/unsupported template
+refusal, slot filtering and stale poll responses. A first negative test allowed
+the Endurance guard to mask the source guard; Solo negative cases now isolate it.
+
+Self-review corrected visibility-only video defaults and the first-save overlay
+path. The independent security pass found foreign-browser control requests could
+enable video. Both mutating routes now reject cross-origin browser metadata while
+retaining headerless Companion access under the existing trusted-network model.
+The correction pass found no remaining actionable security issue. HTTP fixtures
+prove refusal leaves OBS and persisted overrides unchanged. Real buttons in an
+isolated Companion instance were imported and clicked successfully. Changed wiki
+screenshots and the reused slide image were captured from shipped pages.
