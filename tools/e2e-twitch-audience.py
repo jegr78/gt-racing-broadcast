@@ -267,7 +267,10 @@ def main():
                     row.get_by_role(
                         "button", name="Place in this scene", exact=True
                     ).click()
-                    page.wait_for_timeout(50)
+                    page.wait_for_function(
+                        "(id) => Object.hasOwn(ovState.layout.slots,id)",
+                        arg=subscription if label == "Active subscriptions" else viewer,
+                    )
                 page.locator("#audience-dialog").get_by_role(
                     "button", name="Close", exact=True
                 ).click()

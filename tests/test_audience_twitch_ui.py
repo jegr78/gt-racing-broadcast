@@ -107,6 +107,8 @@ def t_actual_ui_twitch_route_rejects_foreign_origins_before_callbacks():
             {"Origin": "http://evil.invalid"},
             {"Referer": "http://evil.invalid/x"},
             {"Sec-Fetch-Site": "cross-site"},
+            {"Origin": f"http://127.0.0.1:{port + 1}"},
+            {"Host": f"127.0.0.1:{port + 1}"},
         ):
             for body in (None, {"action": "disconnect", "expectedProfile": "demo"}):
                 code, result = request(body, headers)
