@@ -170,6 +170,7 @@ import split_layout
 import audience_widgets
 import audience_admin
 import audience_youtube_connection
+import audience_twitch_connection
 from dataclasses import asdict
 from audience_connections import StorageError
 import overlay_build
@@ -11303,7 +11304,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                  flag_graphic_store=None, graphics_take="off", app_version="dev",
                  channel_source=None, producer_source=None, part_store=None,
                  channel_csv_url=None, push_url=None, telemetry_store=None, engineer_access=None, engineer_page_path=None,
-                 intermission_runtime_path=None, audience_runtime=None, youtube_service=None):
+                 intermission_runtime_path=None, audience_runtime=None, youtube_service=None, twitch_service=None):
     audience_runtime = audience_runtime or audience_widgets.Runtime(
         os.path.join(os.path.dirname(overlay_dir), "audience.json") if overlay_dir else None)
     audience_script = os.path.join(_SRC_BASE, "ui", "audience.js")
@@ -11395,16 +11396,17 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             self.send_header("Cache-Control", "no-store")
             self.end_headers(); self.wfile.write(body)
             return None
-        def _audience_admin(self, mutation=False):
-            send = lambda obj, code=200: self._send({**obj, "protocol": audience_admin.PROTOCOL, "profile": youtube_service.owner if youtube_service else None}, code, no_store=True)
+        def _audience_admin(self, mutation=False, provider="youtube"):
+            provider_service = {"youtube": youtube_service, "twitch": twitch_service}.get(provider)
+            send = lambda obj, code=200: self._send({**obj, "protocol": audience_admin.PROTOCOL, "profile": provider_service.owner if provider_service else None, "provider": provider}, code, no_store=True)
             if not audience_admin.allowed(self.client_address[0], self.server.server_address[1], self.headers):
                 if mutation:
                     self._drain_body()
                 return send({"ok": False, "error": "Provider setup requires the local server origin"}, 403)
-            if youtube_service is None:
+            if provider_service is None:
                 if mutation:
                     self._drain_body()
-                return send({"ok": False, "error": "YouTube connection is unavailable"}, 503)
+                return send({"ok": False, "error": "Provider connection is unavailable"}, 503)
             try:
                 if mutation:
                     if self.headers.get_content_type() != "application/json" or self.headers.get("Transfer-Encoding"):
@@ -11418,18 +11420,18 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         return send({"ok": False, "error": "Provider command is too large or empty"}, 413)
                     self.connection.settimeout(5)
                     body = json.loads(self.rfile.read(length))
-                    return send(youtube_service.command(body))
-                status = youtube_service.status()
+                    return send(provider_service.command(body))
+                status = provider_service.status()
                 query = parse_qs(urlparse(self.path).query)
                 if "metric" in query:
-                    status["sample"] = asdict(youtube_service.sample(query["metric"][0]))
+                    status["sample"] = asdict(provider_service.sample(query["metric"][0]))
                 return send({**status, "ok": True, "protocol": audience_admin.PROTOCOL})
             except StorageError as exc:
                 return send({"ok": False, "error": str(exc)}, 500)
             except (ValueError, TypeError):
-                return send({"ok": False, "error": "Invalid YouTube command, target or profile; check connection settings"}, 400)
+                return send({"ok": False, "error": "Invalid provider command, target or profile; check connection settings"}, 400)
             except Exception:
-                return send({"ok": False, "error": "Could not update local YouTube connection; check storage and retry"}, 500)
+                return send({"ok": False, "error": "Could not update local provider connection; check storage and retry"}, 500)
 
         def _send_audience_page(self, path, page):
             try:
@@ -12285,8 +12287,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             /status is unaffected."""
             return redact_console_status(self._status_payload(), roles)
         def do_GET(self):
-            if urlparse(self.path).path == "/audience/admin/youtube":
-                return self._audience_admin()
+            if urlparse(self.path).path in ("/audience/admin/youtube", "/audience/admin/twitch"):
+                return self._audience_admin(provider=urlparse(self.path).path.rsplit("/", 1)[1])
             p = [x for x in urlparse(self.path).path.split("/") if x]
             try:
                 if p and p[0] == "console":
@@ -12994,8 +12996,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 self.rfile.read(length)
 
         def do_POST(self):
-            if urlparse(self.path).path == "/audience/admin/youtube":
-                return self._audience_admin(mutation=True)
+            if urlparse(self.path).path in ("/audience/admin/youtube", "/audience/admin/twitch"):
+                return self._audience_admin(mutation=True, provider=urlparse(self.path).path.rsplit("/", 1)[1])
             p = [x for x in urlparse(self.path).path.split("/") if x]
             self._body_consumed = False
             try:
@@ -14309,6 +14311,9 @@ def main():
     youtube_service = (audience_youtube_connection.Service(
         os.path.dirname(os.path.abspath(args.overlay_dir)), runtime, audience_runtime.cache)
         if args.overlay_dir else None)
+    twitch_service = (audience_twitch_connection.Service(
+        os.path.dirname(os.path.abspath(args.overlay_dir)), runtime, audience_runtime.cache)
+        if args.overlay_dir else None)
     handler = make_handler(
         relay,
         panel_path,
@@ -14327,6 +14332,7 @@ def main():
         intermission_runtime_path=os.path.join(runtime, "intermission-live.json"),
         audience_runtime=audience_runtime,
         youtube_service=youtube_service,
+        twitch_service=twitch_service,
         cockpit_page_path=cockpit_page_path,
         console_secret=console_secret,
         discord_client_id=discord_client_id,
@@ -14383,6 +14389,8 @@ def main():
 
     if youtube_service is not None:
         youtube_service.start()
+    if twitch_service is not None:
+        twitch_service.start()
 
     # Only a relay that owns the control port may touch the recordings, UDP 33740 and
     # the GT7 data; a losing second start would rename the live relay's open file.
@@ -14417,6 +14425,8 @@ def main():
             engineer_live.close()
         if youtube_service is not None:
             youtube_service.close()
+        if twitch_service is not None:
+            twitch_service.close()
         stop_evt.set(); relay.shutdown(); os._exit(0)
     signal.signal(signal.SIGINT, shutdown)
     signal.signal(signal.SIGTERM, shutdown)

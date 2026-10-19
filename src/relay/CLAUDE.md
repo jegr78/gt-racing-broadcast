@@ -396,3 +396,12 @@ Take views attach labels only to allowed controls. Requests retain the first
 server-resolved displayName while canonical source controls rights, deduplication
 and OBS routing. Request views carry requestDisplayName for the pending snapshot;
 direct takes use current labels. No API request fetches the Sheet.
+
+
+**Audience providers (#933, #934).** Relay-owned YouTube and Twitch workers start
+only after successful mandatory control-port binding. `/audience/admin/youtube`
+and `/audience/admin/twitch` are exact producer-loopback routes before Console
+routing, with socket/Host/Origin/Referer/Fetch Metadata checks and bounded JSON.
+Console roles cannot access them. Public `/audience/data` reads only cached
+samples and never provider setup or credentials. Provider failures cannot call
+OBS, switch inputs, clear manual goals or require anonymous chat authorization.

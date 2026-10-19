@@ -1,10 +1,9 @@
 # Twitch desktop authorization and audience metrics
 
-Issue #934 follows the shared widget foundation #932. The finished YouTube PR
-#943 is awaiting remote CI; it is owned work, with no competing provider branch.
-This branch starts from current main and implements independent pure Twitch
-adapters first. Incorporate YouTube's merged common provider infrastructure before
-service/UI integration and final verification. Merge YouTube before this delivery.
+Issue #934 extends shared counters/goals from #932 and uses the local provider
+administration, credential pairing and monotonic cache contracts delivered with
+YouTube #933. Twitch owns its device approval and one-use refresh state. No
+provider credential passes through the browser or public overlay data.
 
 ## Authorization decision
 
@@ -138,3 +137,27 @@ target/client-ID selection; preserve baselines and connection targets outside
 Look snapshots. An imported profile needs local authorization. Connection status
 shows cached metric availability, granted capability and durable storage errors
 without overwriting edited fields or a new profile's form.
+
+
+## Verification entry points
+
+`tests/test_audience_twitch.py` and `test_audience_twitch_transport.py` cover local
+selection, documented request forms, scope/count semantics, bounded transport,
+redirect refusal and safe rate-limit diagnostics. Device/rotation/storage tests
+exercise one-use exchanges, cancellation, expiry, permission and phase contracts.
+`test_audience_twitch_connection.py` adds real-file restart, rollback, refresh
+backoff, cache age, public bundle import and concurrent generation fixtures.
+
+`test_audience_twitch_http.py` uses actual loopback HTTP and valid Console roles;
+`test_audience_twitch_ui.py` checks producer callbacks, origin refusal and cached
+baseline capture. Shared proxy fixtures check protocol/profile/provider before
+credential forwarding and on command replies. No provider credential or real OBS
+instance is needed.
+
+`runtime/pw-venv/bin/python tools/e2e-twitch-audience.py` drives the shipped manager,
+public approval link, edited-selection guards, explicit activation, failed-save
+retry without OAuth repetition, cached baseline and actual HUD/Intermission
+pages. It checks live zero, offline transitions, negative active change,
+disconnect and late profile replies. Add `--shots` only to regenerate the inspected
+development-build wiki and identical slide images. The existing YouTube browser
+and shared manual-widget flows remain part of final verification.

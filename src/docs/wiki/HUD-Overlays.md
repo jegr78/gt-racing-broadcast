@@ -391,3 +391,65 @@ profile export. The API key stays in that producer's runtime profile directory;
 profile bundles and Look backups exclude it. An imported profile retains its
 selected output but requires a local key and verification on the receiving
 machine. Look restore does not rewind targets, credentials or captured baselines.
+
+### Twitch output metrics
+
+Choose **Twitch concurrent viewers** or **Twitch active paid subscriptions** in
+**Audience widgets**. Open **Twitch connection** with the relay running for the
+active profile. In the [Twitch developer console](https://dev.twitch.tv/console),
+register an application with client type **Public**, then enter its client ID.
+The ID is public. Do not enter a client secret. This desktop flow uses Twitch's
+hosted activation page and does not start a local callback server.
+
+Enter the output channel URL, login or numeric channel ID. A numeric login can
+be entered with `@`, for example `@123`. This selection stays fixed when
+Endurance switches input feeds. Choose **Start Twitch authorization**, open
+**Approve on Twitch**, and enter the displayed approval code. Approve access
+with the account that owns the selected channel to enable subscription totals.
+The only requested scope is `channel:read:subscriptions`.
+
+![Twitch hosted approval code](images/cc-audience-twitch-approval.png)
+
+Check the resolved **Output channel**, **Authorized account** and **Granted
+scopes**. The dialog shows whether each metric is permitted. Choose **Activate
+verified channel** explicitly. Approval alone preserves the active connection.
+Editing the client ID or channel requires authorization again. **Cancel
+authorization** discards the candidate. Codes expire according to Twitch's
+approval lifetime; a verified candidate expires after five minutes or when its
+authorization expires, whichever comes first.
+
+![Verified Twitch output and permissions](images/cc-audience-twitch.png)
+
+Viewers refresh every 30 seconds and active subscriptions every 60 seconds when
+used by saved widgets. Additional browser sources and status reads share the
+relay cache. An offline channel has no live viewer value. A live stream reporting
+zero viewers displays zero. Missing subscription scope or authorization for a
+different broadcaster leaves viewers usable and subscriptions unavailable.
+Anonymous public chat, capture and feed ingest need no new OAuth connection.
+
+The subscription metric is the endpoint's active paid subscription **total**,
+including funded subscription types as reported by Twitch. It is neither the
+length of one results page nor subscription points or followers. **Net since
+captured baseline** measures active change, including decreases when existing
+subscriptions lapse. It does not count all new-sub events during the session.
+Choose **Capture baseline / reset** to record a fresh exact cached total; stale
+or missing data cannot become a baseline. Reconnect and restart preserve source
+identity and do not recapture the baseline. Changing the target channel requires
+a new baseline.
+
+Rate limits and temporary failures back off. A last-good transiently stale value
+hides at its original 120-second deadline. Offline, missing permission, revoked
+authorization and disconnect hide affected values immediately. Tokens are
+validated on startup and at least hourly, including when no widget is using
+Twitch. Expired tokens can rotate locally. Interrupted or ambiguous one-use token
+exchanges require authorization again. If saving a new pair fails, the relay
+retries local storage without reusing the consumed refresh token. Fix reported
+storage errors before restarting.
+
+**Disconnect and remove tokens** immediately disables Twitch values and removes
+local credentials without resetting manual goals. Durable cleanup failures are
+reported; fix permissions and retry. Public client ID and target selection live
+in `profiles/<name>/audience-twitch.json` and travel with profile bundles. Tokens
+stay in the producer's runtime profile directory and are excluded from profile
+exports and Look backups. An imported profile requires authorization on its new
+producer machine. Look restore cannot rewind targets, credentials or baselines.

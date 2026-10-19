@@ -7602,20 +7602,21 @@ def audience_read_data():
         return {"ok": False, "error": "Could not read audience configuration"}
 
 
-def _audience_provider_client(active):
+def _audience_provider_client(active, provider="youtube"):
     # The profile stamp and owned process are checked before any localhost I/O.
     pid = sv.read_pid(_relay_pid_path())
     if not active or _running_relay_profile() != active or not pid or not sv.pid_is_relay(pid):
         raise ValueError("Start the relay for this profile before connecting audience metrics")
-    return audience_proxy.Client(active, RELAY_PORT)
+    return audience_proxy.Client(active, RELAY_PORT, provider=provider)
 
 
-def audience_youtube_data(body=None):
+def _audience_connection_data(provider, body=None):
     try:
         active = _active_profile_name()
         if body is not None and (not isinstance(body, dict) or body.get("expectedProfile") != active):
             raise ValueError("Active profile changed; reopen connection settings")
-        client = _audience_provider_client(active)
+        client = (_audience_provider_client(active) if provider == "youtube"
+                  else _audience_provider_client(active, provider))
         result = client.status() if body is None else client.command(body)
         if _active_profile_name() != active:
             raise ValueError("Active profile changed; reopen connection settings")
@@ -7624,10 +7625,20 @@ def audience_youtube_data(body=None):
         return {"ok": False, "error": str(exc)}
 
 
+def audience_youtube_data(body=None):
+    return _audience_connection_data("youtube", body)
+
+
+def audience_twitch_data(body=None):
+    return _audience_connection_data("twitch", body)
+
+
 def _audience_provider_sample(active, widget):
-    if widget["source"] != "youtube":
+    if widget["source"] not in ("youtube", "twitch"):
         raise ValueError("Audience provider is not connected")
-    return _audience_provider_client(active).sample(widget["metric"])
+    client = (_audience_provider_client(active) if widget["source"] == "youtube"
+              else _audience_provider_client(active, "twitch"))
+    return client.sample(widget["metric"])
 
 
 def audience_write_data(body):
@@ -9150,6 +9161,7 @@ def run_ui(rest, fail=sys.exit, open_browser=True, destination="/"):
         "overlay_write": overlay_write_data,
         "audience_read": audience_read_data,
         "audience_youtube": audience_youtube_data,
+        "audience_twitch": audience_twitch_data,
         "audience_write": audience_write_data,
         "overlay_slots": overlay_slots_data,
         "overlay_layout_read": overlay_layout_read_data,
