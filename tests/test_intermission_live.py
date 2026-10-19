@@ -169,12 +169,15 @@ def t_corrupt_override_is_hidden_until_explicit_restore():
 
 def t_profile_and_action_allowlists_reject_before_any_write():
     obs = Obs()
-    ctl = control(obs, solo=False)
-    assert set(ctl.state()[0]['items']) == {'chat'}
-    for verb, key in [('show', 'webcam'), ('toggle', 'capture'), ('show', '../chat'),
-                      ('unmute', 'chat'), ('show', []), ('show', {})]:
-        value, status = ctl.apply(verb, key)
-        assert status == 400 and value['ok'] is False and value['error'], value
+    for solo in (False, True):
+        ctl = control(obs, solo=solo)
+        assert set(ctl.state()[0]['items']) == (set(live.SOURCES) if solo else {'chat'})
+        cases = [('show', '../chat'), ('unmute', 'chat'), ('show', []), ('show', {})]
+        if not solo:
+            cases += [('show', 'webcam'), ('toggle', 'capture')]
+        for verb, key in cases:
+            value, status = ctl.apply(verb, key)
+            assert status == 400 and value['ok'] is False and value['error'], value
     assert obs.calls == []
 
 
