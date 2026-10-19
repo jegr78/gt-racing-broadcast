@@ -477,6 +477,96 @@ def t_scene_presentation_flags_and_colors_are_bounded():
         assert "--audience-" not in css, css
 
 
+def t_monotonic_freshness_survives_wall_rollback_and_repeated_failures():
+    wall, ticks = [1000], [0]
+    cache = aw.MetricCache(clock=lambda: wall[0], monotonic=lambda: ticks[0])
+    goal = widget(source="youtube", metric="likes")
+    cache.publish(
+        "youtube", "likes", Sample(0, "available", 1000, identity="video:one")
+    )
+    wall[0], ticks[0] = -5000, 119
+    row = normalize(goal, cache.read("youtube", "likes"), now=wall[0])
+    assert row["available"] and row["holdFor"] == 1, row
+    cache.fail("youtube", "likes", "Temporary error")
+    ticks[0] = 120
+    cache.fail("youtube", "likes", "Still temporarily unavailable")
+    row = normalize(goal, cache.read("youtube", "likes"), now=wall[0])
+    assert not row["available"] and row["holdFor"] == 0, row
+    assert row["sourceAvailability"] == "stale", row
+    cache.publish(
+        "youtube", "likes", Sample(0, "available", -5000, identity="video:one")
+    )
+    row = normalize(goal, cache.read("youtube", "likes"), now=wall[0])
+    assert row["available"] and row["holdFor"] == 120 and row["value"] == 0, row
+    ticks[0] = 180
+    cache.fail("youtube", "likes", "Temporary error")
+    assert normalize(goal, cache.read("youtube", "likes"), now=wall[0])["holdFor"] == 60
+    cache.publish(
+        "youtube", "likes", Sample(0, "available", -5000, identity="video:one")
+    )
+    assert (
+        normalize(goal, cache.read("youtube", "likes"), now=wall[0])["holdFor"] == 120
+    )
+
+
+def t_disconnected_subscriber_precision_and_net_capability_are_honest():
+    row = normalize(widget(source="youtube", metric="subscribers"), now=1000)
+    assert not row["available"]
+    assert row["precision"] == {"exact": False, "significantDigits": 3}, row
+    assert row["supportsNet"] is False, row
+    sample = aw.MetricCache().read("youtube", "subscribers")
+    assert (
+        not sample.exact and not sample.supports_net and sample.significant_digits == 3
+    )
+
+
+def t_invalid_observed_age_is_unknown_and_rejected_by_cache():
+    for age in (-1, float("nan"), float("inf")):
+        sample = Sample(0, "available", 100, identity="video:one", age_seconds=age)
+        row = normalize(widget(source="youtube", metric="likes"), sample, now=100)
+        assert not row["available"] and row["availability"] == "unknown", row
+        try:
+            aw.MetricCache().publish("youtube", "likes", sample)
+        except ValueError:
+            pass  # Invalid observation age must not be normalized into fresh data.
+        else:
+            raise AssertionError("Invalid age entered the central cache")
+
+
+def t_publication_lock_wait_cannot_refresh_an_old_observation():
+    import threading
+
+    ticks, entered, errors = [0], threading.Event(), []
+
+    def wall():
+        entered.set()
+        return 1000
+
+    cache = aw.MetricCache(clock=wall, monotonic=lambda: ticks[0])
+
+    def publish():
+        try:
+            cache.publish(
+                "youtube", "likes", Sample(0, "available", 1000, identity="video:one")
+            )
+        except Exception as error:
+            errors.append(error)
+
+    with cache._lock:
+        worker = threading.Thread(target=publish, daemon=True)
+        worker.start()
+        assert entered.wait(2), "Publisher did not capture the observation"
+        ticks[0] = 119
+    worker.join(3)
+    assert not worker.is_alive() and not errors, errors
+    row = normalize(
+        widget(source="youtube", metric="likes"),
+        cache.read("youtube", "likes"),
+        now=1000,
+    )
+    assert row["available"] and row["holdFor"] == 1, row
+
+
 if __name__ == "__main__":
     for name, fn in tuple(globals().items()):
         if name.startswith("t_"):
