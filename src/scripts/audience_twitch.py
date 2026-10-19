@@ -1,6 +1,8 @@
 """Twitch output targets, OAuth metadata and Helix counts."""
 
 import re
+import json
+import http_util
 import time
 from email.utils import parsedate_to_datetime
 from urllib.parse import urlparse, parse_qs, urlencode
@@ -351,3 +353,32 @@ def failure(operation, status, payload, headers, now=None):
     if status >= 500 or 300 <= status < 400:
         return APIError("temporary", "Twitch temporarily unavailable", True, 60)
     return APIError("denied", "Twitch did not authorize this request")
+
+
+def request(operation, client, *, open_url=None, **values):
+    plan = request_plan(operation, client, **values)
+    url = plan.pop("url")
+    opener = open_url or http_util.open_url
+    try:
+        with opener(url, **plan) as response:
+            body = response.read(1024 * 1024 + 1)
+        if len(body) > 1024 * 1024:
+            raise ValueError("Oversized response")
+        data = json.loads(body.decode("utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("Invalid response")
+        return data
+    except http_util.HTTPError as error:
+        try:
+            try:
+                payload = json.loads(error.read(8192).decode("utf-8"))
+            except (ValueError, UnicodeError, OSError):
+                payload = {}
+            result = failure(operation, error.code, payload, error.headers or {})
+        finally:
+            error.close()
+        raise result from None
+    except (OSError, TimeoutError):
+        raise APIError("temporary", "Twitch connection unavailable", True, 60) from None
+    except (ValueError, UnicodeError):
+        raise APIError("temporary", "Invalid Twitch response", True, 60) from None
