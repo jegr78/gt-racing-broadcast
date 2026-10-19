@@ -551,6 +551,68 @@ def t_take_view_does_not_attach_aliases_to_controls_without_rights():
     )
 
 
+def t_concurrent_metadata_refresh_keeps_both_downloaders_entries():
+    import asset_metadata as am
+    import tempfile, threading
+    from unittest.mock import patch
+
+    entered, release, second_read = (
+        threading.Event(),
+        threading.Event(),
+        threading.Event(),
+    )
+    errors = []
+    original_dump, original_read = am.json.dump, am.read
+
+    def dump(*args, **kwargs):
+        if threading.current_thread().name == "alias-graphics":
+            entered.set()
+            assert release.wait(3), "Fixture writer was not released"
+        return original_dump(*args, **kwargs)
+
+    def read(*args, **kwargs):
+        if threading.current_thread().name == "alias-media":
+            second_read.set()
+        return original_read(*args, **kwargs)
+
+    with tempfile.TemporaryDirectory() as td:
+
+        def refresh(kind, name, alias):
+            try:
+                am.refresh(td, [["Name", "URL", "Alias"], [name, "", alias]], kind)
+            except Exception as exc:
+                errors.append(exc)
+
+        with (
+            patch.object(am.json, "dump", side_effect=dump),
+            patch.object(am, "read", side_effect=read),
+        ):
+            first = threading.Thread(
+                name="alias-graphics",
+                target=refresh,
+                args=("graphics", "Standings", "Board"),
+            )
+            second = threading.Thread(
+                name="alias-media",
+                target=refresh,
+                args=("media", "Trailer Video", "Film"),
+            )
+            first.start()
+            try:
+                assert entered.wait(2), "First writer did not reach its atomic write"
+                second.start()
+                assert not second_read.wait(0.05), (
+                    "Concurrent refresh read a stale manifest before the first writer committed"
+                )
+            finally:
+                release.set()
+                first.join(3)
+                if second.ident is not None:
+                    second.join(3)
+            assert not first.is_alive() and not second.is_alive() and not errors, errors
+        assert am.read(td)["aliases"] == {"Standings": "Board", "Trailer Video": "Film"}
+
+
 if __name__ == "__main__":
     for name, fn in tuple(globals().items()):
         if name.startswith("t_"):
