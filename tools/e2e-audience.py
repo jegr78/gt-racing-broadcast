@@ -185,6 +185,26 @@ def main():
                 )
                 assert page.evaluate("ovState.audience.active === ovState.active")
                 page.unroute("**/api/overlay/slots?page=*", stale_profile_once)
+                persistent_mismatch = []
+
+                def stale_profile_always(route):
+                    response = route.fetch()
+                    data = response.json()
+                    data["audience"]["active"] = "other"
+                    persistent_mismatch.append(data)
+                    route.fulfill(response=response, json=data)
+
+                page.route("**/api/overlay/slots?page=*", stale_profile_always)
+                page.evaluate("loadOverlay()")
+                assert len(persistent_mismatch) == 2, (
+                    "Profile mismatch retry must be bounded"
+                )
+                assert (
+                    "Profile changed while loading"
+                    in page.locator("#overlay-err").inner_text()
+                )
+                page.unroute("**/api/overlay/slots?page=*", stale_profile_always)
+                page.evaluate("loadOverlay()")
                 assert not page.evaluate(
                     "ovState.slots.some(s=>s.id.startsWith('audience-'))"
                 )
