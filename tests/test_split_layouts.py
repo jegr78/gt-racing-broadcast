@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 import test_racecast as cli
 import test_solo_obs
+import test_console_gate as gate  # installs the real-OBS tripwire before any test
 import obs_ws
 
 m = cli.m
@@ -187,7 +188,6 @@ def t_split_layout_survives_profile_bundle_and_look_restore():
 
 def t_split_http_keeps_shared_hud_data_and_falls_back_until_first_save():
     import urllib.request
-    import test_console_gate as gate
     with tempfile.TemporaryDirectory() as td:
         overlay = Path(td)
         hud_css = '#clock{color:gold}'

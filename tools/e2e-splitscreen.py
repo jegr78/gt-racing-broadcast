@@ -108,6 +108,19 @@ def main():
                 page.select_option('#ov-slotpick', 'split-left')
                 for prop, value in [('offsetRight', 24), ('offsetTop', -40)]:
                     page.evaluate("([p,v]) => { const f=ovState.fields[p]; f.value=v; f.dispatchEvent(new Event('input')); f.dispatchEvent(new Event('change')); }", [prop, value])
+                # Force an overlap with another editable HUD slot. A different
+                # legacy font/position must not accidentally mask the layer test.
+                overlap = page.evaluate("""() => {
+                  const id='split-left', s=ovState.shadow;
+                  const saved=Object.assign({},ovState.layout.slots[id]);
+                  const l=s.getElementById(id).getBoundingClientRect(), c=s.getElementById('clock').getBoundingClientRect();
+                  ovSetProp(id,'offsetRight',saved.offsetRight+(l.x+l.width/2-c.x-c.width/2)/ovState.scale);
+                  ovSetProp(id,'offsetTop',saved.offsetTop+(c.y+c.height/2-l.y-l.height/2)/ovState.scale);
+                  const hit=s.elementFromPoint(c.x+c.width/2,c.y+c.height/2)?.id;
+                  ovState.layout.slots[id]=saved; ovReloadCanvasFromLayout();
+                  return hit;
+                }""")
+                assert overlap == 'split-left', 'Labels must remain selectable above overlapping HUD content'
                 # Real nested pointer events must move the label only. Inverting
                 # the x delta preserves its right anchor when the feed resizes.
                 before = page.evaluate("JSON.stringify(ovState.layout.slots['split-feed-a'])")
