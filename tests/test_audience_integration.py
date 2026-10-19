@@ -237,7 +237,7 @@ def t_relay_pages_share_cached_samples_without_outbound_requests():
             "target": 750,
         })
         now = [100]
-        cache = aw.MetricCache(clock=lambda: now[0])
+        cache = aw.MetricCache(clock=lambda: now[0], monotonic=lambda: now[0])
         cache.publish(
             "youtube", "likes", aw.Sample(0, "available", 100, identity="video:fixture")
         )

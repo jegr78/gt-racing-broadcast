@@ -53,10 +53,10 @@ def renderer_contracts():
         )
         page.add_script_tag(path=str(ROOT / "src/ui/audience.js"))
 
-        def render(rows, now=0):
+        def render(rows, now=0, transit_ms=0):
             return page.evaluate(
-                "([widgets,now])=>RacecastAudience.render(document,{widgets},now)",
-                [rows, now],
+                "([widgets,now,transit])=>RacecastAudience.render(document,{widgets},now,transit)",
+                [rows, now, transit_ms],
             )
 
         assert render([row()]) is True
@@ -76,6 +76,16 @@ def renderer_contracts():
         )
         render([row(value=29500, target=30000, precision={"exact": False})])
         assert page.locator("#" + A + " .audience-value").text_content() == "≈29,500"
+        render([
+            row(
+                value=29500,
+                decimals=6,
+                precision={"exact": False, "significantDigits": 3},
+            )
+        ])
+        assert page.locator("#" + A + " .audience-value").text_content() == "≈29,500", (
+            "Rounded subscriber counts must not gain invented decimal precision"
+        )
         page.locator("#" + A).evaluate("el=>el.style.display='none'")
         render([row()])
         assert not page.locator("#" + A).is_visible(), (
@@ -88,6 +98,11 @@ def renderer_contracts():
             not page.locator("#" + A).is_visible()
             and page.locator("#" + B).is_visible()
         )
+        render([row(holdFor=1), row(B, holdFor=None)], now=100, transit_ms=2000)
+        assert (
+            not page.locator("#" + A).is_visible()
+            and page.locator("#" + B).is_visible()
+        ), "Time spent receiving an automatic sample must not extend its freshness"
         assert not page.evaluate(
             'RacecastAudience.render(document,{error:"offline"},1200)'
         )
@@ -97,6 +112,42 @@ def renderer_contracts():
             "Deleting shared definition must remove old on-air data"
         )
         assert not errors, errors
+        page.close()
+        slow = browser.new_page()
+        calls = []
+        script = (ROOT / "src/ui/audience.js").read_text(encoding="utf-8")
+
+        def serve_slow(route):
+            if route.request.url.endswith("/audience/data"):
+                import time
+
+                calls.append(route.request.url)
+                time.sleep(1.2)
+                route.fulfill(json={"widgets": [row(holdFor=1), row(B, holdFor=None)]})
+            elif route.request.url.endswith("/"):
+                route.fulfill(
+                    content_type="text/html",
+                    body=markup(A)
+                    + markup(B)
+                    + "<script data-audience-live>"
+                    + script
+                    + "</script>",
+                )
+            else:
+                route.fulfill(status=404, body="")
+
+        slow.route("http://audience.invalid/**", serve_slow)
+        slow.goto("http://audience.invalid/")
+        slow.wait_for_function(
+            "id => document.querySelector('#'+id+' .audience-value').textContent === '0'",
+            arg=A,
+        )
+        assert calls and not slow.locator("#" + A).is_visible(), (
+            "The real polling path must deduct response transit time"
+        )
+        assert slow.locator("#" + B).is_visible(), (
+            "Manual widgets must survive slow polling"
+        )
         browser.close()
     print(
         "PASS actual renderer: zero/exceeded/clamped bar/XSS/precision/CSS visibility/deadline/invalid data/delete"
