@@ -2933,14 +2933,15 @@ const OV_CSSNAME = {left: 'left', top: 'top', offsetRight: 'margin-right', offse
   padding: 'padding', fontSize: 'font-size', lineHeight: 'line-height',
   letterSpacing: 'letter-spacing', borderWidth: 'border-width',
   borderRadius: 'border-radius', teamNameMax: '--team-name-max',
-  teamNameMin: '--team-name-min', color: 'color', background: 'background',
+  teamNameMin: '--team-name-min', fitMax: '--fit-max', fitMin: '--fit-min',
+  color: 'color', background: 'background',
   borderColor: 'border-color', borderStyle: 'border-style',
   fontFamily: 'font-family', fontWeight: 'font-weight', fontStyle: 'font-style',
   align: 'justify-content', valign: 'align-items',
   textTransform: 'text-transform', opacity: 'opacity'};
 const OV_PX = new Set(['left', 'top', 'offsetRight', 'offsetTop', 'width', 'height', 'padding', 'fontSize',
                        'letterSpacing', 'borderWidth', 'borderRadius',
-                       'teamNameMax', 'teamNameMin']);
+                       'teamNameMax', 'teamNameMin', 'fitMax', 'fitMin']);
 const OV_ALIGN = {left: 'flex-start', center: 'center', right: 'flex-end'};
 const OV_VALIGN = {top: 'flex-start', middle: 'center', bottom: 'flex-end'};
 const OV_SHADOW_CSS =
@@ -3351,11 +3352,15 @@ function ovFillSample() {
     } else if (typeof v === 'string' && !img) {    // text slot
       el.textContent = v;
       el.classList.toggle('empty', !v);
-      if (/^team\d-name$/.test(s.id)) {              // mirror hud.html auto-fit
-        ovFitName(el);
-        // Filled while the canvas is hidden, the name measures 0 wide; fit once laid out.
+      // Mirror hud.html's auto-fits: team names always, other slots (#944, the round
+      // title) when they offer fitMax; ovFitText leaves the CSS size while it is unset.
+      const fit = /^team\d-name$/.test(s.id) ? ovFitName
+        : ((el.dataset && el.dataset.editProps || '').split(',').includes('fitMax') ? ovFitText : null);
+      if (fit) {
+        fit(el);
+        // Filled while the canvas is hidden, the text measures 0 wide; fit once laid out.
         if (!el._fitObserver) {
-          el._fitObserver = new ResizeObserver(() => ovFitName(el));
+          el._fitObserver = new ResizeObserver(() => fit(el));
           el._fitObserver.observe(el);
         }
       }
@@ -3378,21 +3383,36 @@ function ovFillSample() {
   // A webfont that loads after this pass widens the names again; the live HUD refits on
   // every poll, the canvas once more here.
   document.fonts.ready.then(() => ovState.slots.forEach(s => {
-    const el = /^team\d-name$/.test(s.id) && ovState.shadow.getElementById(s.id);
-    if (el) ovFitName(el);
+    const el = ovState.shadow.getElementById(s.id);
+    if (!el) return;
+    if (/^team\d-name$/.test(s.id)) ovFitName(el);
+    else if ((el.dataset && el.dataset.editProps || '').split(',').includes('fitMax')) ovFitText(el);
   }));
 }
 
-// Mirror of hud.html::fitName: shrink a team name from --team-name-max toward
-// --team-name-min until it fits, so the canvas previews a long name the way the live
-// overlay renders it rather than as raw overflow.
+// Mirrors of hud.html::fitName/fitText/shrinkToFit, so the canvas previews a long text
+// the way the live overlay renders it rather than as raw overflow.
 function ovFitName(el) {
   const cs = getComputedStyle(el);
   const max = parseFloat(cs.getPropertyValue('--team-name-max')) || 30;
   const min = parseFloat(cs.getPropertyValue('--team-name-min')) || 16;
+  ovShrinkToFit(el, cs, max, min);
+}
+function ovFitText(el) {
+  const cs = getComputedStyle(el);
+  const max = parseFloat(cs.getPropertyValue('--fit-max'));
+  if (!max) { el.style.fontSize = ''; return; }
+  ovShrinkToFit(el, cs, max, parseFloat(cs.getPropertyValue('--fit-min')) || Math.min(max, 12));
+}
+// Measures the text itself: a centred or right-aligned flex item overflows outside
+// the scroll width, which once let the canvas show a clipped name as fitting.
+function ovShrinkToFit(el, cs, max, min) {
+  const text = document.createRange();
+  text.selectNodeContents(el);
+  const width = el.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
   let size = max;
   el.style.fontSize = size + 'px';
-  while (size > min && el.scrollWidth > el.clientWidth) { size -= 1; el.style.fontSize = size + 'px'; }
+  while (size > min && text.getBoundingClientRect().width > width) { size -= 1; el.style.fontSize = size + 'px'; }
 }
 
 // Session-only preview model: an editable copy of the server SAMPLE defaults,
@@ -4224,6 +4244,13 @@ function ovRenderPanel() {
     const g = grid();
     if (has('teamNameMax')) g.appendChild(ovNumField('teamNameMax', 'Name max (px)', ov));
     if (has('teamNameMin')) g.appendChild(ovNumField('teamNameMin', 'Name min (px)', ov));
+    panel.appendChild(g);
+  }
+  if (has('fitMax') || has('fitMin')) {
+    // #944: empty max = fixed font size; set = shrink a long text down to min.
+    const g = grid();
+    if (has('fitMax')) g.appendChild(ovNumField('fitMax', 'Auto-fit max (px)', ov));
+    if (has('fitMin')) g.appendChild(ovNumField('fitMin', 'Auto-fit min (px)', ov));
     panel.appendChild(g);
   }
   if (has('fontFamily')) {

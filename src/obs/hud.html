@@ -268,7 +268,7 @@
   <div id="stint" class="el white" data-edit="Stint banner" data-edit-kind="text"></div>
   <div id="session" class="el black" data-edit="Session" data-edit-kind="text"></div>
   <div id="streamer" class="el black" data-edit="Streamer" data-edit-kind="text"></div>
-  <div id="round-top" class="el white" data-edit="Round title" data-edit-kind="text"></div>
+  <div id="round-top" class="el white" data-edit="Round title" data-edit-kind="text" data-edit-props="fitMax,fitMin"></div>
   <div id="round-flag" class="el" data-edit="Round flag" data-edit-kind="box"><img alt=""></div>
   <div id="round-country" class="el white" data-edit="Round country" data-edit-kind="text"></div>
   <div id="team1-bar" class="el team-bar" data-edit="Team 1 bar" data-edit-kind="box"></div>
@@ -399,12 +399,26 @@
     const cs = getComputedStyle(el);
     const max = parseFloat(cs.getPropertyValue("--team-name-max")) || 30;
     const min = parseFloat(cs.getPropertyValue("--team-name-min")) || 16;
+    shrinkToFit(el, cs, max, min);
+  }
+  // Optional auto-fit of any other text slot (#944, the round title): opt-in through
+  // the profile's --fit-max/--fit-min. Without --fit-max the slot keeps the font size
+  // its CSS sets, so profiles without the builder props render as before.
+  function fitText(el) {
+    const cs = getComputedStyle(el);
+    const max = parseFloat(cs.getPropertyValue("--fit-max"));
+    if (!max) { el.style.fontSize = ""; return; }
+    const min = parseFloat(cs.getPropertyValue("--fit-min")) || Math.min(max, 12);
+    shrinkToFit(el, cs, max, min);
+  }
+  // Largest size in [min, max] at which the text fits the slot's inner width. Measures
+  // the text itself: a centred or right-aligned flex item overflows outside scrollWidth.
+  function shrinkToFit(el, cs, max, min) {
     const text = document.createRange();
     text.selectNodeContents(el);
     const width = el.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
     let size = max;
     el.style.fontSize = size + "px";
-    // A right-aligned flex item overflows to the left, outside scrollWidth.
     while (size > min && text.getBoundingClientRect().width > width) {
       size -= 1;
       el.style.fontSize = size + "px";
@@ -642,6 +656,7 @@
       setText("session", d.session);
       setText("streamer", d.streamer);
       setText("round-top", d.round && d.round.top);
+      fitText(document.getElementById("round-top"));
       setText("round-country", d.round && d.round.country);
       setImg("round-flag", d.round && d.round.flagKey, "flags");
       // Always process all three team slots, not just the present ones: an absent

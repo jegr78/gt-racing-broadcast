@@ -28,6 +28,7 @@ _PX_PROPS = {
     "offsetRight": "margin-right", "offsetTop": "margin-top",
     "fontSize": "font-size", "borderWidth": "border-width",
     "teamNameMax": "--team-name-max", "teamNameMin": "--team-name-min",
+    "fitMax": "--fit-max", "fitMin": "--fit-min",
     "padding": "padding", "borderRadius": "border-radius",
     "letterSpacing": "letter-spacing",
 }
@@ -50,7 +51,7 @@ PROP_ORDER = ("left", "top", "offsetRight", "offsetTop", "width", "height", "pad
               # slant (clip-path) emits after the border props and before the
               # text-sizing vars; shear rides with rotation in one transform.
               "borderWidth", "borderRadius", "slant",
-              "teamNameMax", "teamNameMin", "fontFamily", "fontWeight",
+              "teamNameMax", "teamNameMin", "fitMax", "fitMin", "fontFamily", "fontWeight",
               "fontStyle", "color", "background", "borderColor", "borderStyle",
               "align", "valign", "textTransform", "opacity",
               "rotation", "shear", "textShadow", "visible", "presentation",
