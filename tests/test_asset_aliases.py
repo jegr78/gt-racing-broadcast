@@ -68,7 +68,7 @@ def t_metadata_refresh_preserves_unknown_fields_and_clears_removed_alias():
             try:
                 am.refresh(td, bad, "graphics")
             except ValueError:
-                pass
+                pass  # Expected invalid Sheet response must retain the previous bytes.
             else:
                 raise AssertionError("Unrecognized Sheet response accepted")
             assert p.read_bytes() == before
@@ -98,7 +98,7 @@ def t_atomic_failure_preserves_previous_metadata_and_cleans_temp():
                     "graphics",
                 )
             except OSError:
-                pass
+                pass  # Injected replacement failure must leave the old file intact.
             else:
                 raise AssertionError("Replacement failure swallowed")
         assert p.read_bytes() == before
@@ -503,6 +503,52 @@ def t_legacy_internal_header_with_unrecognized_name_caption_stays_private():
             assert (
                 am.display_name(td, "Private graphic", public=True) == "Private graphic"
             )
+
+
+def t_metadata_columns_cannot_become_urls_without_a_known_url_header():
+    rows = [
+        ["Name", "Alias", "Internal", "Graphic"],
+        ["Standings", "https://drive.google.com/file/d/ALIAS/view", "FALSE", DRIVE],
+    ]
+    assert graphics.m.graphics_from_csv(rows) == {"Standings": DRIVE}
+    assert (
+        graphics.m.graphics_from_csv([
+            ["Name", "Alias", "Internal"],
+            ["Standings", DRIVE, "FALSE"],
+        ])
+        == {}
+    )
+
+
+def t_take_view_does_not_attach_aliases_to_controls_without_rights():
+    import test_console_gate as gate
+    import types
+
+    relay = types.SimpleNamespace(solo=False)
+    flags = types.SimpleNamespace(available=lambda: ["yellow"], get=lambda: "")
+    modes = {"commentator": "direct", "race_control": "direct"}
+
+    def view(roles, modes=modes):
+        return gate.m.graphic_takes_view(
+            relay,
+            None,
+            modes,
+            roles,
+            gate.m.graphic_takes.CrewTakes(),
+            flags,
+            labels={"Standings": "Allowed board", "Flag Yellow": "RC-only caption"},
+        )
+
+    crew = view({"commentator"})
+    assert "RC-only caption" not in str(crew)
+    assert (
+        next(r for r in crew["graphics"] if r["source"] == "Standings")["displayName"]
+        == "Allowed board"
+    )
+    assert "RC-only caption" in str(view({"race_control"}))
+    assert "Allowed board" not in str(
+        view({"commentator"}, {"commentator": "off", "race_control": "direct"})
+    )
 
 
 if __name__ == "__main__":

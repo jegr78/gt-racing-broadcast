@@ -32,3 +32,15 @@ Pending graphic requests retain their first server-resolved human label while
 canonical source identity continues to drive authorization, merging and actions.
 A newly initiated direct take uses the current label. Alias text is never parsed
 as a URL, filename, source name, HTML or Companion expression.
+
+## Companion delivery
+
+The native board renders captions into PNGs, so aliases use its own expression
+renderer rather than a browser text overlay. Canonical constant lookups use a
+guarded custom-variable object and each button's exact legacy caption fallback.
+The three-second generic-HTTP trigger and custom-variable schema were created
+and exported from an isolated real Companion instance. The variable starts as
+an empty object and is not persisted. Returning a string never invokes nested
+variable evaluation. Page-only upgrades require adding the variable and trigger
+without replacing user connections; the operator guide lists those steps.
+Canonical actions remain discoverable in Companion's button editor.

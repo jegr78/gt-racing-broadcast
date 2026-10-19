@@ -186,3 +186,15 @@ updates existing nodes from `/audience/data`; Save alone never creates live node
 The common renderer also fills the isolated sample canvas without live polling.
 Look restore cannot rewind shared state. `tools/e2e-audience.py` drives the actual
 manager, scene callbacks, live pages and fake-clock rendering without services.
+
+### Asset aliases (#936)
+
+The local producer asset API retains filename identities and adds optional
+displayName from the active profile's runtime manifests, including private local
+labels. Profile galleries poll every three seconds without rebuilding unchanged
+media players. Refresh labels runs the fixed graphics/media --metadata-only jobs.
+Builder background metadata identifies Overlay.png or Intermission.png explicitly;
+scene/role names are not globally substituted. Shared crew and Director captions
+use text nodes, and preview identity is stored separately from displayed text.
+`tools/e2e-asset-aliases.py` exercises real UI/HTTP callbacks; its optional
+--companion argument full-imports only into a supplied disposable native instance.

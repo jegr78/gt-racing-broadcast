@@ -20,6 +20,9 @@ import asset_metadata as metadata  # noqa: E402
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--shots", action="store_true")
+    parser.add_argument(
+        "--companion", help="Full-import into this disposable local Companion URL only"
+    )
     args = parser.parse_args()
     from playwright.sync_api import sync_playwright
 
@@ -109,6 +112,16 @@ def main():
                 assert (
                     page.locator("#lightbox-cap").inner_text() == "Community standings"
                 )
+                rename("Producer preview rename")
+                page.evaluate("fetchAssetFiles()")
+                assert (
+                    page.locator("#lightbox-cap").inner_text()
+                    == "Producer preview rename"
+                ), (
+                    "An open producer preview must follow the same canonical asset after a rename"
+                )
+                rename()
+                page.evaluate("fetchAssetFiles()")
                 page.evaluate("closeLightbox()")
                 if args.shots:
                     page.locator("#gfx-gallery").scroll_into_view_if_needed()
@@ -226,6 +239,29 @@ def main():
                 director.locator("#gfxBus button").filter(
                     has_text="Community standings"
                 ).wait_for()
+                director.locator(".navbtn[data-area=setup]").click()
+                director.locator("#gfxList a").filter(
+                    has_text="Community standings"
+                ).click()
+                assert director.locator("#asset-preview[open]").count() == 1, (
+                    "Director preview must identify the aliased asset"
+                )
+                assert (
+                    director.locator("#asset-preview .asset-caption").inner_text()
+                    == "Community standings"
+                )
+                rename("Preview rename")
+                director.locator("#asset-preview .asset-caption").filter(
+                    has_text="Preview rename"
+                ).wait_for()
+                director.locator("#asset-preview").get_by_role(
+                    "button", name="Close", exact=True
+                ).click()
+                rename()
+                director.locator(".navbtn[data-area=graphics]").click()
+                director.locator("#gfxBus button").filter(
+                    has_text="Community standings"
+                ).wait_for()
                 assert (
                     director
                     .locator("#pgmBus button")
@@ -263,6 +299,18 @@ def main():
                     )
                 assert not errors, errors
                 browser.close()
+                if args.companion:
+                    from e2e_alias_companion import run as companion_run
+
+                    companion_run(
+                        pw,
+                        args.companion.rstrip("/"),
+                        relay_port,
+                        rename,
+                        fake_obs,
+                        td,
+                        args.shots,
+                    )
                 print(
                     "PASS actual local/crew/Director aliases, live rename, canonical actions, inert text"
                 )

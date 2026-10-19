@@ -935,8 +935,8 @@
      "5": {
       "type": "button",
       "style": {
-       "text": "INTRO",
-       "textExpression": false,
+       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Intro Video\"]) || \"INTRO\"",
+       "textExpression": true,
        "size": "18",
        "png64": null,
        "alignment": "center:center",
@@ -1058,8 +1058,8 @@
      "6": {
       "type": "button",
       "style": {
-       "text": "OUTRO",
-       "textExpression": false,
+       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Outro Video\"]) || \"OUTRO\"",
+       "textExpression": true,
        "size": "18",
        "png64": null,
        "alignment": "center:center",
@@ -1181,8 +1181,8 @@
      "7": {
       "type": "button",
       "style": {
-       "text": "TRAILER",
-       "textExpression": false,
+       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Trailer Video\"]) || \"TRAILER\"",
+       "textExpression": true,
        "size": "14",
        "png64": null,
        "alignment": "center:center",
@@ -1741,8 +1741,8 @@
      "7": {
       "type": "button",
       "style": {
-       "text": "RED\nFLAG",
-       "textExpression": false,
+       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Standby Cover\"]) || \"RED\\nFLAG\"",
+       "textExpression": true,
        "size": "18",
        "png64": null,
        "alignment": "center:center",
@@ -4816,8 +4816,8 @@
      "0": {
       "type": "button",
       "style": {
-       "text": "GFX\nGREEN",
-       "textExpression": false,
+       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Flag Green\"]) || \"GFX\\nGREEN\"",
+       "textExpression": true,
        "size": "14",
        "png64": null,
        "alignment": "center:center",
@@ -4875,8 +4875,8 @@
      "1": {
       "type": "button",
       "style": {
-       "text": "GFX\nYELLOW",
-       "textExpression": false,
+       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Flag Yellow\"]) || \"GFX\\nYELLOW\"",
+       "textExpression": true,
        "size": "14",
        "png64": null,
        "alignment": "center:center",
@@ -4934,8 +4934,8 @@
      "2": {
       "type": "button",
       "style": {
-       "text": "GFX\nSC",
-       "textExpression": false,
+       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Flag Safety Car\"]) || \"GFX\\nSC\"",
+       "textExpression": true,
        "size": "14",
        "png64": null,
        "alignment": "center:center",
@@ -4993,8 +4993,8 @@
      "3": {
       "type": "button",
       "style": {
-       "text": "GFX\nVSC",
-       "textExpression": false,
+       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Flag Virtual Safety Car\"]) || \"GFX\\nVSC\"",
+       "textExpression": true,
        "size": "14",
        "png64": null,
        "alignment": "center:center",
@@ -5052,8 +5052,8 @@
      "4": {
       "type": "button",
       "style": {
-       "text": "GFX\nRED",
-       "textExpression": false,
+       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Flag Red\"]) || \"GFX\\nRED\"",
+       "textExpression": true,
        "size": "14",
        "png64": null,
        "alignment": "center:center",
@@ -5172,8 +5172,8 @@
      "0": {
       "type": "button",
       "style": {
-       "text": "Weekend\nInfo\nToggle",
-       "textExpression": false,
+       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Weekend Info\"]) || \"Weekend\\nInfo\\nToggle\"",
+       "textExpression": true,
        "size": "14",
        "png64": null,
        "alignment": "center:center",
@@ -5307,8 +5307,8 @@
      "1": {
       "type": "button",
       "style": {
-       "text": "Race Info\nToggle",
-       "textExpression": false,
+       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Race Info\"]) || \"Race Info\\nToggle\"",
+       "textExpression": true,
        "size": "14",
        "png64": null,
        "alignment": "center:center",
@@ -5442,8 +5442,8 @@
      "2": {
       "type": "button",
       "style": {
-       "text": "Next Event\nToggle",
-       "textExpression": false,
+       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Next Event\"]) || \"Next Event\\nToggle\"",
+       "textExpression": true,
        "size": "14",
        "png64": null,
        "alignment": "center:center",
@@ -5577,8 +5577,8 @@
      "3": {
       "type": "button",
       "style": {
-       "text": "Starting\nGrid\nToggle",
-       "textExpression": false,
+       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Starting Grid\"]) || \"Starting\\nGrid\\nToggle\"",
+       "textExpression": true,
        "size": "14",
        "png64": null,
        "alignment": "center:center",
@@ -5714,8 +5714,8 @@
      "0": {
       "type": "button",
       "style": {
-       "text": "Standings Toggle",
-       "textExpression": false,
+       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Standings\"]) || \"Standings Toggle\"",
+       "textExpression": true,
        "size": "14",
        "png64": null,
        "alignment": "center:center",
@@ -5849,8 +5849,8 @@
      "1": {
       "type": "button",
       "style": {
-       "text": "Schedule Toggle",
-       "textExpression": false,
+       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Schedule\"]) || \"Schedule Toggle\"",
+       "textExpression": true,
        "size": "14",
        "png64": null,
        "alignment": "center:center",
@@ -5984,8 +5984,8 @@
      "2": {
       "type": "button",
       "style": {
-       "text": "Race Results Toggle",
-       "textExpression": false,
+       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Race Results\"]) || \"Race Results Toggle\"",
+       "textExpression": true,
        "size": "14",
        "png64": null,
        "alignment": "center:center",
@@ -6119,8 +6119,8 @@
      "3": {
       "type": "button",
       "style": {
-       "text": "Quali Results Toggle",
-       "textExpression": false,
+       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Quali Results\"]) || \"Quali Results Toggle\"",
+       "textExpression": true,
        "size": "14",
        "png64": null,
        "alignment": "center:center",
@@ -6254,8 +6254,8 @@
      "4": {
       "type": "button",
       "style": {
-       "text": "Standby Toggle",
-       "textExpression": false,
+       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Standby Cover\"]) || \"Standby Toggle\"",
+       "textExpression": true,
        "size": "14",
        "png64": null,
        "alignment": "center:center",
@@ -6389,8 +6389,8 @@
      "5": {
       "type": "button",
       "style": {
-       "text": "Weather\nRace (1)\nToggle",
-       "textExpression": false,
+       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Race Weather 1\"]) || \"Weather\\nRace (1)\\nToggle\"",
+       "textExpression": true,
        "size": "14",
        "png64": null,
        "alignment": "center:center",
@@ -6524,8 +6524,8 @@
      "6": {
       "type": "button",
       "style": {
-       "text": "Weather\nRace (2)\nToggle",
-       "textExpression": false,
+       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Race Weather 2\"]) || \"Weather\\nRace (2)\\nToggle\"",
+       "textExpression": true,
        "size": "14",
        "png64": null,
        "alignment": "center:center",
@@ -6659,8 +6659,8 @@
      "7": {
       "type": "button",
       "style": {
-       "text": "Weather\nQuali\nToggle",
-       "textExpression": false,
+       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Quali Weather\"]) || \"Weather\\nQuali\\nToggle\"",
+       "textExpression": true,
        "size": "14",
        "png64": null,
        "alignment": "center:center",
@@ -6796,8 +6796,8 @@
      "0": {
       "type": "button",
       "style": {
-       "text": "Grid R1",
-       "textExpression": false,
+       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Grid Row 1\"]) || \"Grid R1\"",
+       "textExpression": true,
        "size": "14",
        "png64": null,
        "alignment": "center:center",
@@ -6931,8 +6931,8 @@
      "1": {
       "type": "button",
       "style": {
-       "text": "Grid R2",
-       "textExpression": false,
+       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Grid Row 2\"]) || \"Grid R2\"",
+       "textExpression": true,
        "size": "14",
        "png64": null,
        "alignment": "center:center",
@@ -7066,8 +7066,8 @@
      "2": {
       "type": "button",
       "style": {
-       "text": "Grid R3",
-       "textExpression": false,
+       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Grid Row 3\"]) || \"Grid R3\"",
+       "textExpression": true,
        "size": "14",
        "png64": null,
        "alignment": "center:center",
@@ -7201,8 +7201,8 @@
      "3": {
       "type": "button",
       "style": {
-       "text": "Grid R4",
-       "textExpression": false,
+       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Grid Row 4\"]) || \"Grid R4\"",
+       "textExpression": true,
        "size": "14",
        "png64": null,
        "alignment": "center:center",
@@ -7336,8 +7336,8 @@
      "4": {
       "type": "button",
       "style": {
-       "text": "Grid R5",
-       "textExpression": false,
+       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Grid Row 5\"]) || \"Grid R5\"",
+       "textExpression": true,
        "size": "14",
        "png64": null,
        "alignment": "center:center",
@@ -7471,8 +7471,8 @@
      "5": {
       "type": "button",
       "style": {
-       "text": "Grid R6",
-       "textExpression": false,
+       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Grid Row 6\"]) || \"Grid R6\"",
+       "textExpression": true,
        "size": "14",
        "png64": null,
        "alignment": "center:center",
@@ -7606,8 +7606,8 @@
      "6": {
       "type": "button",
       "style": {
-       "text": "Grid R7",
-       "textExpression": false,
+       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Grid Row 7\"]) || \"Grid R7\"",
+       "textExpression": true,
        "size": "14",
        "png64": null,
        "alignment": "center:center",
@@ -7741,8 +7741,8 @@
      "7": {
       "type": "button",
       "style": {
-       "text": "Grid R8",
-       "textExpression": false,
+       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Grid Row 8\"]) || \"Grid R8\"",
+       "textExpression": true,
        "size": "14",
        "png64": null,
        "alignment": "center:center",
@@ -7883,9 +7883,69 @@
    }
   }
  },
- "triggers": {},
+ "triggers": {
+  "trigger:5LYMkkU70adQXkC_lXeUu": {
+   "type": "trigger",
+   "options": {
+    "name": "Racecast asset labels",
+    "enabled": true,
+    "sortOrder": 0,
+    "notes": "Refresh cached public asset aliases every 3 seconds. Does not control OBS."
+   },
+   "actions": [
+    {
+     "id": "GvLiPvdxOTGnVT3BY-DIg",
+     "definitionId": "get",
+     "connectionId": "BB0jmLMxj_0YwbhwslOiw",
+     "options": {
+      "url": {
+       "value": "http://127.0.0.1:8088/obs/asset-labels",
+       "isExpression": false
+      },
+      "header": {
+       "isExpression": false,
+       "value": ""
+      },
+      "jsonResultDataVariable": {
+       "value": "racecast_asset_labels",
+       "isExpression": false
+      },
+      "result_stringify": {
+       "value": false,
+       "isExpression": false
+      },
+      "statusCodeVariable": {
+       "value": "",
+       "isExpression": false
+      }
+     },
+     "upgradeIndex": 1,
+     "type": "action"
+    }
+   ],
+   "condition": [],
+   "events": [
+    {
+     "id": "4HKGX4YhZWkOuBMbKL5iY",
+     "type": "interval",
+     "enabled": true,
+     "options": {
+      "seconds": 3
+     }
+    }
+   ],
+   "localVariables": []
+  }
+ },
  "triggerCollections": [],
- "custom_variables": {},
+ "custom_variables": {
+  "racecast_asset_labels": {
+   "description": "Cached Sheet asset aliases; updated by the Racecast asset labels trigger",
+   "defaultValue": {},
+   "persistCurrentValue": false,
+   "sortOrder": 0
+  }
+ },
  "customVariablesCollections": [],
  "expressionVariables": {},
  "expressionVariablesCollections": [],
