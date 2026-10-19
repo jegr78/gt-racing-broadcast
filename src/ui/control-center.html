@@ -3137,7 +3137,7 @@ function ovFillSample() {
   ovState.slots.forEach(s => {
     const el = ovState.shadow.getElementById(s.id);
     if (!el) return;
-    if (s.id === 'chat' || s.id === 'ichat') { ovFillChat(el, vals[s.id] || 'RaceFan: Welcome back!\nPitWall: Ready for the next stint'); return; }
+    if (s.id === 'chat' || s.id === 'ichat') { ovFillChat(el, vals[s.id]); return; }
     const img = el.querySelector('img');
     // Flag status: colour from the picked state (data-state), text from its label.
     if (s.id === 'flag-status') {

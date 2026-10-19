@@ -66,6 +66,9 @@ def main():
                 page.wait_for_function("() => ovState.page === 'intermission' && ovState.slots.length === 3")
                 assert page.evaluate("ovState.shadow.getElementById('ichat').getBoundingClientRect().width") > 100
                 assert page.evaluate("ovState.shadow.getElementById('ichat-log').textContent.includes('RaceFan')")
+                page.evaluate("ovPreviewText('ichat', '')")
+                assert page.evaluate("ovState.shadow.getElementById('ichat-log').textContent") == ''
+                page.evaluate('ovPreviewReset()')
                 if args.shots:
                     page.locator('#ov-modal .ovmodal-card').screenshot(
                         path=str(ROOT / 'src/docs/wiki/images/cc-intermission-builder.png'))
