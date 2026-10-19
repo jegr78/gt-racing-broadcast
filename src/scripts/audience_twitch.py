@@ -1,6 +1,8 @@
 """Twitch output targets, OAuth metadata and Helix counts."""
 
 import re
+import time
+from email.utils import parsedate_to_datetime
 from urllib.parse import urlparse, parse_qs, urlencode
 
 ID = re.compile(r"[0-9]{1,25}\Z")
@@ -299,3 +301,53 @@ def request_plan(operation, client, **values):
         "timeout": 5,
         "allow_redirects": False,
     }
+
+
+def failure(operation, status, payload, headers, now=None):
+    hints = (
+        {
+            payload.get(key)
+            for key in ("error", "message")
+            if isinstance(payload, dict)
+            and isinstance(payload.get(key), str)
+            and len(payload[key]) <= 128
+        }
+        if isinstance(payload, dict)
+        else set()
+    )
+    if operation == "exchange" and status == 400:
+        if "authorization_pending" in hints:
+            return APIError("pending", "Waiting for Twitch authorization", True)
+        if "slow_down" in hints:
+            return APIError("slow_down", "Wait before checking Twitch again", True)
+    if status == 429:
+        now = time.time() if now is None else now
+        delay = 60
+        normalized = {str(k).lower(): v for k, v in headers.items()}
+        value = normalized.get("retry-after")
+        try:
+            if value is not None:
+                try:
+                    delay = int(value)
+                except (ValueError, TypeError):
+                    delay = int(parsedate_to_datetime(value).timestamp() - now)
+            elif "ratelimit-reset" in normalized:
+                delay = int(float(normalized["ratelimit-reset"]) - now)
+        except (ValueError, TypeError, OverflowError, AttributeError):
+            delay = 60
+        return APIError(
+            "rate_limit", "Twitch rate limit reached", True, max(1, min(900, delay))
+        )
+    if status == 401 or operation == "refresh" and status in (400, 403):
+        return APIError("auth", "Reconnect the Twitch account")
+    if status == 403:
+        return APIError(
+            "permission", "Twitch permission is unavailable for this metric"
+        )
+    if operation == "device" and status == 400:
+        return APIError("setup", "Check the public Twitch application client ID")
+    if status == 404:
+        return APIError("inaccessible", "Twitch resource is unavailable")
+    if status >= 500 or 300 <= status < 400:
+        return APIError("temporary", "Twitch temporarily unavailable", True, 60)
+    return APIError("denied", "Twitch did not authorize this request")

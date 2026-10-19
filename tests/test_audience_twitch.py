@@ -220,6 +220,41 @@ def t_request_plans_fix_destinations_keep_credentials_out_of_urls_and_minimize_s
             raise AssertionError("Unsafe Twitch request plan accepted")
 
 
+def t_oauth_and_helix_errors_are_safe_and_rate_limits_have_bounded_delays():
+    secret = "fixture-private-error-token"
+    cases = [
+        (
+            "exchange",
+            400,
+            {"error": "Bad Request", "message": "authorization_pending"},
+            "pending",
+        ),
+        ("exchange", 400, {"message": "slow_down"}, "slow_down"),
+        ("refresh", 400, {"message": "Invalid refresh token"}, "auth"),
+        ("validate", 401, {"message": secret}, "auth"),
+        ("subscriptions", 403, {"message": secret}, "permission"),
+        ("device", 400, {"message": secret}, "setup"),
+        ("viewers", 503, {"message": secret}, "temporary"),
+    ]
+    for operation, status, payload, code in cases:
+        error = tw.failure(operation, status, payload, {})
+        assert error.code == code, (operation, error.code)
+        assert secret not in str(error) and "Invalid refresh token" not in str(error)
+    for headers, expected in (
+        ({"Retry-After": "17"}, 17),
+        ({"Ratelimit-Reset": "1030"}, 30),
+        ({"Retry-After": "-4"}, 1),
+        ({"Retry-After": "999999"}, 900),
+        ({"Ratelimit-Reset": "not a time"}, 60),
+    ):
+        error = tw.failure("viewers", 429, {"message": secret}, headers, now=1000)
+        assert (
+            error.code == "rate_limit"
+            and error.transient
+            and error.retry_after == expected
+        ), (headers, error.retry_after)
+
+
 if __name__ == "__main__":
     for name, fn in tuple(globals().items()):
         if name.startswith("t_"):
