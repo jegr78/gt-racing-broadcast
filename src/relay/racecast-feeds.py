@@ -166,6 +166,7 @@ from contextlib import nullcontext
 import telemetry_replay
 import intermission_live
 import split_layout
+import audience_widgets
 import overlay_build
 import gt7_recording   # GT7 telemetry recording to disk (solo/POV only)
 import race_engineer_access
@@ -11266,7 +11267,11 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                  flag_graphic_store=None, graphics_take="off", app_version="dev",
                  channel_source=None, producer_source=None, part_store=None,
                  channel_csv_url=None, push_url=None, telemetry_store=None, engineer_access=None, engineer_page_path=None,
-                 intermission_runtime_path=None):
+                 intermission_runtime_path=None, audience_runtime=None):
+    audience_runtime = audience_runtime or audience_widgets.Runtime(
+        os.path.join(os.path.dirname(overlay_dir), "audience.json") if overlay_dir else None)
+    audience_script = os.path.join(_SRC_BASE, "ui", "audience.js")
+
     # Shared across all H instances (one limiter per relay). The CHAT limiter is
     # keyed on the authenticated streamer (per-commentator). The AUTH-FAILURE
     # limiter is keyed on the source IP, which behind Tailscale Funnel collapses to
@@ -11352,6 +11357,13 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             self.send_header("Cache-Control", "no-store")
             self.end_headers(); self.wfile.write(body)
             return None
+        def _send_audience_page(self, path, page):
+            try:
+                with open(path, encoding="utf-8") as source:
+                    return self._send_html(audience_widgets.live_html(source.read(), overlay_dir, page))
+            except OSError:
+                return self._send({"error": "overlay page unavailable"}, 404)
+
         def _send_css(self, body):
             self.send_response(200)
             self.send_header("Content-Type", "text/css; charset=utf-8")
@@ -12253,10 +12265,14 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 if p == ["panel"]:
                     if not panel_path: return self._send({"error":"panel disabled"}, 404)
                     return self._send_page(panel_path, "")
+                if p == ["audience", "data"]:
+                    return self._send(audience_runtime.data())
+                if p == ["audience.js"]:
+                    return self._send_file(audience_script, "application/javascript; charset=utf-8")
                 if p == ["hud"]:
                     if not (hud_source and hud_path):
                         return self._send({"error": "hud disabled"}, 404)
-                    return self._send_file(hud_path, "text/html; charset=utf-8")
+                    return self._send_audience_page(hud_path, "hud")
                 if p == ["hud", "data"]:
                     if not hud_source:
                         return self._send({"error": "hud disabled"}, 404)
@@ -12359,7 +12375,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         return self._send({"error": "hud disabled"}, 404)
                     try:
                         with open(hud_path, encoding="utf-8") as fh:
-                            return self._send_html(split_layout.hud_html(fh.read()))
+                            return self._send_html(audience_widgets.live_html(split_layout.hud_html(fh.read()), overlay_dir, "splitscreen"))
                     except OSError:
                         return self._send({"error": "hud page unavailable"}, 404)
                 if p == ["splitscreen", "hud", "override.css"]:
@@ -12376,7 +12392,7 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 if p == ["intermission"]:
                     if not intermission_path:
                         return self._send({"error": "intermission page not found"}, 404)
-                    return self._send_file(intermission_path, "text/html; charset=utf-8")
+                    return self._send_audience_page(intermission_path, "intermission")
                 if p == ["intermission", "override.css"]:
                     return self._send_css(read_overlay_css(overlay_dir, "intermission"))
                 if p == ["intermission", "data"]:

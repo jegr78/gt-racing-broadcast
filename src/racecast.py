@@ -81,6 +81,7 @@ import notify   # pure Discord payload builders for producer events (#317)
 import overlay_build as ob
 import intermission_live
 import split_layout
+import audience_widgets
 import fonts_bundle as fb
 import ports as pt
 import app_version as _app_version
@@ -7563,17 +7564,74 @@ def _atomic_write_text(path, text):
     os.replace(tmp, path)
 
 
-def _overlay_base_html(page):
+def _overlay_raw_html(page):
     """Text of the base overlay page (src/obs/<page>.html), or '' on error."""
     if page not in ("hud", "intermission", "splitscreen") or (page == "splitscreen" and _profile_is_solo()):
         return ""
     try:
         with open(resource_path(f"obs/{page}.html"), encoding="utf-8") as fh:
             html = fh.read()
-        return (split_layout.builder_html(_overlay_base_html("hud"), html)
+        return (split_layout.builder_html(_overlay_raw_html("hud"), html)
                 if page == "splitscreen" else html)
     except OSError:
         return ""
+
+
+def audience_read_data():
+    try:
+        directory = _active_overlay_dir()
+        if not directory:
+            return {"ok": False, "error": "No active profile"}
+        widgets = audience_widgets.Store(os.path.join(os.path.dirname(directory), "audience.json")).read()["widgets"]
+        placements = {}
+        for page in ("hud", "intermission", "splitscreen"):
+            path = os.path.join(directory, f"layout-{page}.json")
+            if os.path.isfile(path):
+                with open(path, encoding="utf-8") as source:
+                    placements[page] = list(json.load(source).get("slots", {}))
+        return {"ok": True, "active": _active_profile_name(), "widgets": widgets, "placements": placements}
+    except (OSError, ValueError, TypeError, AttributeError):
+        return {"ok": False, "error": "Could not read audience configuration"}
+
+
+def audience_write_data(body):
+    try:
+        active = _active_profile_name()
+        if not isinstance(body, dict) or body.get("expectedProfile") != active:
+            return {"ok": False, "error": "Active profile changed; reopen audience widgets"}
+        root = _env_base(IS_FROZEN, _real_executable(), HERE)
+        directory = os.path.join(pcfg.profiles_dir(root), active, "overlay") if active else None
+        if not directory:
+            return {"ok": False, "error": "No active profile"}
+        store = audience_widgets.Store(os.path.join(os.path.dirname(directory), "audience.json"))
+        action, ident = body.get("action"), body.get("id")
+        if action == "create":
+            widget = store.create(body.get("fields"))
+        elif action == "update":
+            widget = store.update(ident, body.get("fields"))
+        elif action == "reset":
+            widget = store.reset(ident)
+        elif action == "capture":
+            widget = store.capture(ident)
+        elif action == "delete":
+            store.delete(ident)
+            widget = None
+        else:
+            raise ValueError("Unknown audience action")
+        return {"ok": True, "widget": widget}
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    except OSError:
+        return {"ok": False, "error": "Could not save audience configuration"}
+
+
+def _overlay_base_html(page):
+    base = _overlay_raw_html(page)
+    if not base:
+        return base
+    data = audience_read_data()
+    widgets = data.get("widgets", []) if data.get("ok") else []
+    return audience_widgets.enhance_html(base, widgets, {widget["id"]: {} for widget in widgets})
 
 
 def _overlay_layout_path(page):
@@ -7631,7 +7689,8 @@ def overlay_slots_data(page):
                 if active and profile_logo() else None)
         return {"ok": True, "page": page, "slots": [slot for slot in ob.extract_slots(html)
                           if page != "intermission" or _profile_is_solo()
-                          or slot["id"] == "ichat"],
+                          or slot["id"] == "ichat" or slot["id"].startswith("audience-")],
+                "audience": audience_read_data(),
                 "css": ob.base_style(html), "body": ob.canvas_logo(
                     re.sub(r'<div[^>]*data-solo="true"[^>]*></div>', '', ob.base_body(html))
                     if page == "intermission" and not _profile_is_solo() else ob.base_body(html), logo),
@@ -9035,6 +9094,8 @@ def run_ui(rest, fail=sys.exit, open_browser=True, destination="/"):
         "console_post_link": console_post_link_data,
         "overlay_read": overlay_read_data,
         "overlay_write": overlay_write_data,
+        "audience_read": audience_read_data,
+        "audience_write": audience_write_data,
         "overlay_slots": overlay_slots_data,
         "overlay_layout_read": overlay_layout_read_data,
         "overlay_layout_write": overlay_layout_write_data,

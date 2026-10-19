@@ -173,3 +173,16 @@ legacy coordinate plane; selection outlines sum nested offsets to the stage.
 Templates patch draft geometry with Undo. `tools/e2e-splitscreen.py --shots` covers
 real pointer/numeric/template events, legacy CSS, live labels and profile gating.
 The dedicated image is `cc-splitscreen-builder.png`.
+
+### Shared audience widgets (#932)
+
+`audience_widgets.Store` owns `profiles/<name>/audience.json`, outside `overlay/`.
+Local `/api/audience` edits require a checked expectedProfile and same origin.
+Definitions/manual values/baselines are shared; scene models store placement and
+style only. Compiler/editor HTML includes all definitions as an allowlist, while
+the canvas filters to current draft placements. The relay injects saved placements
+once into HUD, Intermission or the dedicated Split HUD. Shared `audience.js`
+updates existing nodes from `/audience/data`; Save alone never creates live nodes.
+The common renderer also fills the isolated sample canvas without live polling.
+Look restore cannot rewind shared state. `tools/e2e-audience.py` drives the actual
+manager, scene callbacks, live pages and fake-clock rendering without services.
