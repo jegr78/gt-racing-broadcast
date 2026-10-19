@@ -23,8 +23,13 @@ class Client:
             raise ValueError("Provider command is too large")
         try:
             try:
-                response = http_util.open_url(self.url + query, data=data,
-                    headers={"Content-Type": "application/json"}, timeout=3, allow_redirects=False)
+                response = http_util.open_url(
+                    self.url + query,
+                    data=data,
+                    headers={"Content-Type": "application/json"},
+                    timeout=3,
+                    allow_redirects=False,
+                )
             except http_util.HTTPError as error:
                 response = error
             with response:
@@ -33,15 +38,22 @@ class Client:
                     raise ValueError("Local provider response is too large")
                 result = json.loads(raw)
         except Exception:
-            raise ValueError("Local provider connection unavailable; start the relay for this profile") from None
+            raise ValueError(
+                "Local provider connection unavailable; start the relay for this profile"
+            ) from None
         if not isinstance(result, dict):
             raise ValueError("Invalid local provider response")
         if result.get("ok") is not True:
-            if result.get("protocol") == audience_admin.PROTOCOL and result.get("profile") == self.profile:
+            if (
+                result.get("protocol") == audience_admin.PROTOCOL
+                and result.get("profile") == self.profile
+            ):
                 message = result.get("error")
                 if isinstance(message, str) and len(message) <= 512:
                     raise ValueError(message)
-            raise ValueError("Local provider command failed; reopen connection settings")
+            raise ValueError(
+                "Local provider command failed; reopen connection settings"
+            )
         return result
 
     def status(self, metric=None):

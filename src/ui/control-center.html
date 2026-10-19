@@ -824,12 +824,15 @@
 <dialog id="audience-dialog" style="width:min(760px,90vw);max-height:85vh;overflow:auto;background:#172030;color:#fff;border:1px solid #52647f;border-radius:12px;padding:24px">
   <h3>Audience widgets</h3>
   <p>Shared labels and values update live in every placed scene. Placement and style use Save, then Apply in OBS.</p>
+  <button id="youtube-open" type="button" onclick="youtubeOpen()">YouTube connection</button>
   <div id="audience-list"></div>
   <form id="audience-form" onsubmit="audienceSave(event)">
     <h4 id="audience-edit-title">New shared widget</h4>
     <div id="audience-fields">
     <label>Label <input id="audience-label" required maxlength="120"></label>
     <label>Unit <input id="audience-unit" maxlength="32"></label>
+    <label>Source <select id="audience-source" onchange="audienceSourceChanged()"><option value="manual:value">Manual</option><option value="youtube:likes">YouTube video likes</option><option value="youtube:viewers">YouTube concurrent viewers</option><option value="youtube:subscribers">YouTube channel subscribers (approximate)</option></select></label>
+    <p id="audience-source-note"></p>
     <label>Manual value (live) <input id="audience-value" type="number" step="any" required value="0"></label>
     <label>Goal mode <select id="audience-mode"><option value="total">Total</option><option value="net">Net since captured baseline</option></select></label>
     <label>Range start <input id="audience-start" type="number" step="any" required value="0"></label>
@@ -842,6 +845,23 @@
     <button type="button" onclick="audienceEdit(null)">New widget</button>
     <button type="button" onclick="document.getElementById('audience-dialog').close()">Close</button>
     </div>
+  </form>
+</dialog>
+<dialog id="youtube-dialog" style="width:min(700px,90vw);max-height:85vh;overflow:auto;background:#172030;color:#fff;border:1px solid #52647f;border-radius:12px;padding:24px">
+  <h3>YouTube audience connection</h3>
+  <p>Select your broadcast output explicitly. Incoming commentator feeds do not change this selection.</p>
+  <form onsubmit="youtubeAction('verify',event)">
+    <p><label>Output video URL or ID <input id="youtube-video" maxlength="2048" style="width:100%"></label></p>
+    <p><label>Subscriber channel URL, ID or @handle <input id="youtube-channel" maxlength="2048" style="width:100%"></label></p>
+    <p><label>YouTube Data API key <input id="youtube-key" type="password" autocomplete="off" maxlength="256" style="width:100%"></label></p>
+    <p>The key stays on this producer machine. Leave it blank to reuse the active connection's key. Enable YouTube Data API v3 in your Google Cloud project.</p>
+    <p>Video likes and concurrent viewers refresh every 30 seconds when used. Channel subscribers refresh every 60 seconds and are rounded to three significant figures. Temporary failures retain the last good value for at most 120 seconds.</p>
+    <p id="youtube-status" role="status" style="white-space:pre-wrap"></p>
+    <button id="youtube-verify" type="submit">Verify selected targets</button>
+    <button id="youtube-activate" type="button" onclick="youtubeAction('activate')" disabled>Activate verified targets</button>
+    <button id="youtube-cancel" type="button" onclick="youtubeAction('cancel')">Cancel verification</button>
+    <button id="youtube-disconnect" type="button" onclick="youtubeAction('disconnect')">Disconnect and remove key</button>
+    <button id="youtube-close" type="button" onclick="document.getElementById('youtube-dialog').close()">Close</button>
   </form>
 </dialog>
 <script src="/audience.js"></script>
@@ -3076,17 +3096,111 @@ function audienceCurrent(session) {
 function audienceEdit(id) {
   const widget = (ovState.audience.widgets || []).find(w => w.id === id);
   audienceSession.edit = widget ? id : null;
-  const fields = {label:'',unit:'',manualValue:0,mode:'total',start:0,target:null,decimals:0};
+  const fields = {label:'',unit:'',manualValue:0,source:'manual',metric:'value',mode:'total',start:0,target:null,decimals:0};
   const ids = {manualValue:'value'};
   Object.entries(Object.assign(fields,widget || {})).forEach(([key,value]) => {
     const input = $('audience-'+(ids[key] || key));
     if (input && 'value' in input) input.value = value === null ? '' : value;
   });
+  $('audience-source').value = (widget ? widget.source + ':' + widget.metric : 'manual:value');
+  audienceSourceChanged();
   $('audience-edit-title').textContent = widget ? 'Edit shared widget (live)' : 'New shared widget';
   $('audience-submit').textContent = widget ? 'Save shared value' : 'Create and place';
   $('audience-status').textContent = widget && widget.mode === 'net' && !widget.baseline
     ? 'Capture a baseline before this net goal can go on air. Preview uses sample values.' : '';
 }
+function audienceSourceChanged() {
+  const value = $('audience-source').value;
+  const exactNet = value === 'manual:value' || value === 'youtube:likes';
+  $('audience-mode').querySelector('option[value="net"]').disabled = !exactNet;
+  if (!exactNet) $('audience-mode').value = 'total';
+  $('audience-value').disabled = value !== 'manual:value';
+  $('audience-source-note').textContent = value === 'youtube:subscribers'
+    ? 'Approximate public subscriber total, rounded to three significant figures. Exact net goals are unavailable.'
+    : value === 'youtube:viewers' ? 'Concurrent viewers while the selected broadcast is live. Upcoming, ended and unavailable counts stay hidden.'
+    : value === 'youtube:likes' ? 'Likes on the selected output video. Net goals require an explicit fresh baseline.' : '';
+}
+let youtubeSession = null;
+let youtubeTimer = null;
+function youtubeCurrent(session) {
+  return session === youtubeSession && audienceCurrent(session.audience) && $('youtube-dialog').open;
+}
+function youtubeOpen() {
+  clearTimeout(youtubeTimer);
+  const session = {audience:audienceSession, profile:ovState.active, attempt:null, busy:false, request:0, dirty:false};
+  youtubeSession = session;
+  $('youtube-key').value = '';
+  $('youtube-video').value = '';
+  $('youtube-channel').value = '';
+  $('youtube-verify').disabled = false;
+  $('youtube-status').textContent = 'Loading local connection…';
+  $('youtube-activate').disabled = true;
+  $('youtube-dialog').showModal();
+  youtubePoll(session,true);
+}
+async function youtubePoll(session,initial=false) {
+  if (!youtubeCurrent(session)) return;
+  const request = ++session.request;
+  try {
+    const result = await (await fetch('/api/audience/youtube',{cache:'no-store'})).json();
+    if (!youtubeCurrent(session) || request !== session.request) return;
+    if (!result.ok) throw new Error(result.error || 'Could not read YouTube connection');
+    if (result.profile !== session.profile) throw new Error('Active profile changed; reopen connection settings.');
+    const setup = result.setup || {phase:'idle'};
+    session.attempt = setup.attempt || null;
+    const targets = setup.phase === 'verified' ? setup.targets : result.targets;
+    const lines = [result.connected ? 'Connected' : 'Disconnected', 'Setup: '+setup.phase];
+    for (const kind of ['video','channel']) {
+      if (targets && targets[kind]) lines.push(kind + ': ' + targets[kind].title + ' [' + targets[kind].id + ']');
+    }
+    if (result.videoState && result.videoState !== 'unknown') lines.push('Broadcast: '+result.videoState);
+    if (setup.error || result.error) lines.push(setup.error || result.error);
+    $('youtube-status').textContent = lines.join('\n');
+    $('youtube-activate').disabled = setup.phase !== 'verified' || session.busy;
+    if (initial && !session.dirty) {
+      $('youtube-video').value = result.targets?.video?.id || '';
+      $('youtube-channel').value = result.targets?.channel?.id || '';
+    }
+  } catch (error) {
+    if (youtubeCurrent(session)) $('youtube-status').textContent = error.message;
+  }
+  if (youtubeCurrent(session) && request === session.request) youtubeTimer = setTimeout(() => youtubePoll(session),1000);
+}
+async function youtubeAction(action,event) {
+  if (event) event.preventDefault();
+  const session = youtubeSession;
+  if (!session || !youtubeCurrent(session) || session.busy) return;
+  const body = {expectedProfile:session.profile,action,attempt:session.attempt};
+  if (action === 'verify') {
+    body.video = $('youtube-video').value;
+    body.channel = $('youtube-channel').value;
+    body.apiKey = $('youtube-key').value;
+  }
+  $('youtube-key').value = '';
+  session.busy = true;
+  session.request++;
+  clearTimeout(youtubeTimer);
+  $('youtube-verify').disabled = true;
+  $('youtube-activate').disabled = true;
+  try {
+    const result = await (await fetch('/api/audience/youtube',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+    if (!youtubeCurrent(session)) return;
+    if (!result.ok) throw new Error(result.error || 'Could not update YouTube connection');
+    session.busy = false;
+    await youtubePoll(session);
+  } catch (error) {
+    if (youtubeCurrent(session)) $('youtube-status').textContent = error.message;
+  } finally {
+    session.busy = false;
+    if (youtubeCurrent(session)) $('youtube-verify').disabled = false;
+  }
+}
+for (const field of ['youtube-video','youtube-channel']) $(field).addEventListener('input',() => { if (youtubeSession) youtubeSession.dirty = true; });
+$('youtube-dialog').addEventListener('close',() => {
+  clearTimeout(youtubeTimer);
+  $('youtube-key').value = '';
+  youtubeSession = null;
+});
 function audienceList() {
   const list = $('audience-list'); list.replaceChildren();
   (ovState.audience.widgets || []).forEach(widget => {
@@ -3103,7 +3217,7 @@ function audienceList() {
       if (confirm('Delete "'+widget.label+'" from all scenes? Saved placements: '+(scenes.join(', ') || 'none')))
         audienceMutate('delete',widget.id);
     });
-    if (widget.source !== 'manual') row.appendChild(document.createTextNode(' Provider not connected; automatic values unavailable.'));
+    if (widget.source !== 'manual') row.appendChild(document.createTextNode(' Cached provider value; use connection settings to inspect the selected output.'));
     list.appendChild(row);
   });
 }
@@ -3114,7 +3228,8 @@ function audiencePlace(id, place) {
 }
 async function audienceSave(event) {
   event.preventDefault();
-  const fields = {label:$('audience-label').value, unit:$('audience-unit').value,
+  const [source,metric] = $('audience-source').value.split(':');
+  const fields = {source,metric,label:$('audience-label').value, unit:$('audience-unit').value,
     manualValue:Number($('audience-value').value), mode:$('audience-mode').value,
     start:Number($('audience-start').value), target:$('audience-target').value.trim() === '' ? null : Number($('audience-target').value),
     decimals:Number($('audience-decimals').value)};
@@ -3372,7 +3487,7 @@ function ovFillSample() {
     return Object.assign({}, widget, {available: Number.isFinite(value), value,
       percentage: Number.isFinite(percentage) ? percentage : null,
       fill: percentage === null ? null : Math.max(0,Math.min(100,percentage)),
-      precision: {exact: true}, holdFor: null});
+      precision: widget.source === 'youtube' && widget.metric === 'subscribers' ? {exact:false,significantDigits:3} : {exact:true}, holdFor: null});
   });
   RacecastAudience.render(ovState.shadow, {widgets: rows});
   // A webfont that loads after this pass widens the names again; the live HUD refits on

@@ -83,6 +83,14 @@ class Service:
         )
         self.due = {"videos": 0, "channels": 0}
         self.backoff, self.auth_failed = 0, False
+        public = self.files.read_public()
+        if public:
+            try:
+                self.targets = _targets(public)
+                if public.get("enabled") is True:
+                    self.error = "Enter a local API key to reconnect these imported or unpaired targets"
+            except ValueError:
+                self.error = "Saved targets are invalid; select them again"
         loaded = self.files.load()
         if loaded:
             try:
@@ -92,6 +100,7 @@ class Service:
                 self.error = "Saved connection is invalid; reconnect"
             else:
                 self.targets, self.key, self.connected = targets, key, True
+                self.error = ""
 
     def _invalidate(self, reason):
         for metric in METRICS:

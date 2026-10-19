@@ -333,5 +333,58 @@ another machine. A **Look backup/restore** restores scene designs only, so it
 cannot rewind a live value or resurrect a deleted shared widget. Producer
 handover does not transfer this local file automatically; transfer the profile
 bundle when the receiving producer needs the same audience state. Credentials
-for future platform connections belong to machine runtime state, outside this
+for platform connections belong to machine runtime state, outside this
 file and Look backups.
+
+
+### YouTube output metrics
+
+In **Audience widgets**, choose a source: **YouTube video likes**, **YouTube
+concurrent viewers** or **YouTube channel subscribers**. Manual widgets continue
+to work without a connection. The builder shows sample values, including the
+approximate marker for rounded subscribers.
+
+Open **YouTube connection** while the relay is running for the active profile.
+Enable **YouTube Data API v3** in your Google Cloud project and enter its API key.
+This reads public video/channel counts; you do not need to log in with a Google
+account or provide a client secret. Keep API restrictions compatible with the
+producer's local application and network.
+
+Paste a concrete output video ID or URL for likes/viewers. For subscribers,
+select a channel ID, channel URL or `@handle` separately. The video and subscriber
+channel are explicit choices; incoming commentator feeds never change them.
+A channel's dynamic `/live` shortcut is not a concrete video selection.
+
+Choose **Verify selected targets**, check the resolved titles and IDs, then
+**Activate verified targets**. Verification alone keeps the current connection.
+**Cancel verification** discards the candidate. A candidate expires after five
+minutes. Leave the key field blank to reuse the current local key when changing
+targets. **Disconnect and remove key** hides automatic values immediately and
+removes the local key. Storage failures appear as errors; if disconnection cannot
+be saved, fix permissions and retry before restarting the relay.
+
+![Verified YouTube output targets](images/cc-audience-youtube.png)
+
+Only metrics used by saved widget definitions are polled. One relay request reads
+video likes and concurrent viewers every 30 seconds; channel subscribers refresh
+every 60 seconds. Opening more browser sources or reading connection status does
+not add provider requests. Quota/rate errors back off. A transient failure can
+hold a last-good automatic value for at most 120 seconds from its successful
+observation. The value then hides, including when the relay is unavailable.
+Invalid authorization, disconnect, changed targets and missing/hidden counts hide
+values immediately. A real zero remains visible.
+
+Concurrent viewers are available only while the selected broadcast is live.
+Upcoming, ended and inaccessible broadcasts have no viewer count, even if an old
+API field remains. Likes can remain available after the broadcast ends. YouTube
+public subscriber counts are rounded to three significant figures and display
+`≈`. They do not support exact net goals. Video likes support **Net since
+captured baseline** after **Capture baseline / reset** deliberately captures a
+fresh exact cached value. A stale, missing or approximate value cannot become a
+baseline. Restarting does not recapture it.
+
+Public targets live in `profiles/<name>/audience-youtube.json` and travel with a
+profile export. The API key stays in that producer's runtime profile directory;
+profile bundles and Look backups exclude it. An imported profile retains its
+selected output but requires a local key and verification on the receiving
+machine. Look restore does not rewind targets, credentials or captured baselines.

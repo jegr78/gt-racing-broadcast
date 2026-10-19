@@ -407,6 +407,60 @@ def t_poll_disconnect_fences_late_success_and_restart_uses_only_paired_credentia
             loaded.close()
 
 
+def t_portable_targets_survive_look_and_import_requires_a_local_key():
+    import backup_admin
+    import profile_io
+    import zipfile
+
+    with fixture() as (service, _clock, api, _cache, _definitions):
+        connect(service)
+        profile = service.files.public.parent
+        (profile / "profile.env").write_text("NAME=Demo Racing\n", encoding="utf-8")
+        overlay = profile / "overlay"
+        overlay.mkdir()
+        (overlay / "hud.css").write_text("body {}", encoding="utf-8")
+        sources = {
+            "overlay": str(overlay),
+            "backups": str(profile.parent.parent / "backups"),
+        }
+        look = backup_admin.create_backup("look", sources, "demo")
+        connect(service, video=OTHER_VIDEO)
+        backup_admin.restore_backup(look, sources)
+        assert service.files.load()[0]["video"]["id"] == OTHER_VIDEO
+        before = len(api.calls)
+        bundle = profile_io.export_profile(
+            "demo",
+            {"profile_dir": str(profile)},
+            True,
+            str(profile.parent.parent / "bundle.zip"),
+        )
+        with zipfile.ZipFile(bundle) as archive:
+            assert all(
+                KEY.encode() not in archive.read(name) for name in archive.namelist()
+            )
+        destination = profile.parent.parent / "receiving"
+        profile_io.import_profile(
+            bundle,
+            {
+                "profiles_root": str(destination / "profiles"),
+                "runtime_root": str(destination / "runtime"),
+            },
+        )
+        imported = connection.Service(
+            destination / "profiles/demo", destination / "runtime/demo", fetch=api
+        )
+        try:
+            assert not imported.status()["connected"]
+            assert (
+                imported.status()["targets"]["video"]
+                == service.status()["targets"]["video"]
+            ), "Imported selection was lost instead of asking for a local key"
+            imported.tick()
+            assert len(api.calls) == before
+        finally:
+            imported.close()
+
+
 if __name__ == "__main__":
     for name, fn in tuple(globals().items()):
         if name.startswith("t_"):
