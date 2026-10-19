@@ -1,7 +1,7 @@
 """Twitch output targets, OAuth metadata and Helix counts."""
 
 import re
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, urlencode
 
 ID = re.compile(r"[0-9]{1,25}\Z")
 LOGIN = re.compile(r"[A-Za-z0-9_]{1,25}\Z")
@@ -217,4 +217,85 @@ def token_snapshot(payload):
         "access": _opaque(payload.get("access_token")),
         "refresh": _opaque(payload.get("refresh_token")),
         "expires": _seconds(payload.get("expires_in")),
+    }
+
+
+def client_id(value):
+    value = _text(value, 128)
+    if not CLIENT.fullmatch(value):
+        raise ValueError("Enter a public Twitch application client ID")
+    return value
+
+
+def request_plan(operation, client, **values):
+    client = client_id(client)
+    schemas = {
+        "device": set(),
+        "exchange": {"device"},
+        "refresh": {"refresh"},
+        "validate": {"access"},
+        "user": {"access", "target"},
+        "viewers": {"access", "channel"},
+        "subscriptions": {"access", "channel"},
+    }
+    if operation not in schemas or set(values) != schemas[operation]:
+        raise ValueError("Unsupported Twitch request")
+    headers, data, method = {"Accept": "application/json"}, None, "GET"
+    if operation in ("device", "exchange", "refresh"):
+        endpoint = "device" if operation == "device" else "token"
+        url = "https://id.twitch.tv/oauth2/" + endpoint
+        form = {"client_id": client}
+        if operation == "refresh":
+            form.update(
+                grant_type="refresh_token", refresh_token=_opaque(values["refresh"])
+            )
+        else:
+            form["scopes"] = SCOPE
+            if operation == "exchange":
+                form.update(
+                    grant_type="urn:ietf:params:oauth:grant-type:device_code",
+                    device_code=_opaque(values["device"]),
+                )
+        headers["Content-Type"] = "application/x-www-form-urlencoded"
+        data, method = urlencode(form).encode("utf-8"), "POST"
+    elif operation == "validate":
+        url = "https://id.twitch.tv/oauth2/validate"
+        headers["Authorization"] = "OAuth " + _opaque(values["access"])
+    else:
+        headers.update({
+            "Authorization": "Bearer " + _opaque(values["access"]),
+            "Client-Id": client,
+        })
+        if operation == "user":
+            target = values["target"]
+            if (
+                not isinstance(target, dict)
+                or len(target) != 1
+                or set(target) - {"id", "login"}
+            ):
+                raise ValueError("Select one explicit Twitch channel")
+            name, value = next(iter(target.items()))
+            if not isinstance(value, str) or not (
+                ID if name == "id" else LOGIN
+            ).fullmatch(value):
+                raise ValueError("Invalid Twitch channel")
+            endpoint, query = "users", {name: value}
+        else:
+            channel = values["channel"]
+            if not isinstance(channel, str) or not ID.fullmatch(channel):
+                raise ValueError("Invalid Twitch channel")
+            endpoint = "streams" if operation == "viewers" else "subscriptions"
+            query = (
+                {"user_id": channel}
+                if operation == "viewers"
+                else {"broadcaster_id": channel, "first": 1}
+            )
+        url = "https://api.twitch.tv/helix/" + endpoint + "?" + urlencode(query)
+    return {
+        "url": url,
+        "headers": headers,
+        "data": data,
+        "method": method,
+        "timeout": 5,
+        "allow_redirects": False,
     }

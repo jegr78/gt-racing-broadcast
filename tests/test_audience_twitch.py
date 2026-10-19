@@ -174,6 +174,52 @@ def t_complete_opaque_token_pair_is_required_before_any_activation():
         rejects(tw.token_snapshot, {**data, **changes})
 
 
+def t_request_plans_fix_destinations_keep_credentials_out_of_urls_and_minimize_scope():
+    from urllib.parse import parse_qs
+
+    plan = tw.request_plan("device", CLIENT)
+    assert plan and plan["url"] == "https://id.twitch.tv/oauth2/device", plan
+    assert plan["allow_redirects"] is False and plan["timeout"] == 5
+    assert parse_qs(plan["data"].decode()) == {
+        "client_id": [CLIENT],
+        "scopes": [tw.SCOPE],
+    }
+    plan = tw.request_plan("exchange", CLIENT, device=DEVICE)
+    assert DEVICE not in plan["url"]
+    fields = parse_qs(plan["data"].decode())
+    assert fields["device_code"] == [DEVICE] and fields["scopes"] == [tw.SCOPE]
+    assert fields["grant_type"] == ["urn:ietf:params:oauth:grant-type:device_code"]
+    plan = tw.request_plan("refresh", CLIENT, refresh=REFRESH)
+    assert REFRESH not in plan["url"]
+    assert parse_qs(plan["data"].decode()) == {
+        "client_id": [CLIENT],
+        "grant_type": ["refresh_token"],
+        "refresh_token": [REFRESH],
+    }
+    plan = tw.request_plan("validate", CLIENT, access=ACCESS)
+    assert (
+        plan["headers"]["Authorization"] == "OAuth " + ACCESS
+        and ACCESS not in plan["url"]
+    )
+    plan = tw.request_plan("viewers", CLIENT, access=ACCESS, channel=CHANNEL)
+    assert plan["url"] == "https://api.twitch.tv/helix/streams?user_id=" + CHANNEL
+    assert plan["headers"]["Authorization"] == "Bearer " + ACCESS
+    assert plan["headers"]["Client-Id"] == CLIENT and plan["data"] is None
+    plan = tw.request_plan("subscriptions", CLIENT, access=ACCESS, channel=CHANNEL)
+    assert plan["url"].endswith("subscriptions?broadcaster_id=" + CHANNEL + "&first=1")
+    for operation, values in (
+        ("https://evil.invalid", {}),
+        ("viewers", {"access": ACCESS, "channel": "https://evil.invalid"}),
+        ("user", {"access": ACCESS, "target": {"id": CHANNEL, "login": "other"}}),
+    ):
+        try:
+            tw.request_plan(operation, CLIENT, **values)
+        except ValueError:
+            pass  # Unsafe plans must fail before the transport can issue them.
+        else:
+            raise AssertionError("Unsafe Twitch request plan accepted")
+
+
 if __name__ == "__main__":
     for name, fn in tuple(globals().items()):
         if name.startswith("t_"):
