@@ -139,6 +139,21 @@ def main():
                 assert not service.status()["connected"], (
                     "Verification activated without confirmation"
                 )
+                page.fill("#youtube-video", fixtures.OTHER_VIDEO)
+                assert page.locator("#youtube-activate").is_disabled(), (
+                    "Editing a verified target left old activation enabled"
+                )
+                page.fill("#youtube-video", fixtures.VIDEO)
+                page.fill("#youtube-key", fixtures.KEY)
+                page.click("#youtube-verify")
+                page.wait_for_function(
+                    "() => document.getElementById('youtube-status').textContent.includes('pending')"
+                )
+                service.tick()
+                page.wait_for_function(
+                    "() => !document.getElementById('youtube-activate').disabled"
+                )
+                assert "Video channel:" in page.locator("#youtube-status").inner_text()
                 if args.shots:
                     shot(page, "cc-audience-youtube")
                 page.click("#youtube-activate")
@@ -202,6 +217,23 @@ def main():
                 assert fixtures.KEY not in page.content(), (
                     "Credential leaked into rendered markup"
                 )
+
+                def stale_profile(route):
+                    response = route.fetch()
+                    page.evaluate(
+                        "() => { ovState.active='other'; document.getElementById('youtube-video').value='New profile draft'; document.getElementById('youtube-status').textContent='New profile selected'; }"
+                    )
+                    route.fulfill(response=response)
+
+                page.route("**/api/audience/youtube", stale_profile)
+                page.evaluate("() => youtubePoll(youtubeSession)")
+                assert page.input_value("#youtube-video") == "New profile draft"
+                assert (
+                    page.locator("#youtube-status").inner_text()
+                    == "New profile selected"
+                ), "Old profile response overwrote the new form"
+                page.unroute("**/api/audience/youtube", stale_profile)
+                page.evaluate("ovState.active='demo'")
                 assert not errors, errors
                 browser.close()
                 print(

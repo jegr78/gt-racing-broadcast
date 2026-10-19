@@ -356,7 +356,10 @@ channel are explicit choices; incoming commentator feeds never change them.
 A channel's dynamic `/live` shortcut is not a concrete video selection.
 
 Choose **Verify selected targets**, check the resolved titles and IDs, then
-**Activate verified targets**. Verification alone keeps the current connection.
+**Activate verified targets**. The dialog shows the video owner and subscriber
+channel separately, plus cached availability and errors per metric. Editing a
+verified target or key requires verification again. Verification alone keeps the
+current connection.
 **Cancel verification** discards the candidate. A candidate expires after five
 minutes. Leave the key field blank to reuse the current local key when changing
 targets. **Disconnect and remove key** hides automatic values immediately and

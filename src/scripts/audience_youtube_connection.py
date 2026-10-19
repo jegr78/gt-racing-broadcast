@@ -5,8 +5,8 @@ import threading
 import time
 import uuid
 
-from audience_connections import ConnectionFiles
-from audience_widgets import MetricCache, Sample, Store
+from audience_connections import ConnectionFiles, StorageError
+from audience_widgets import MetricCache, Sample, Store, normalize
 import audience_youtube as yt
 
 METRICS = ("likes", "viewers", "subscribers")
@@ -81,6 +81,7 @@ class Service:
             "",
             "unknown",
         )
+        self.storage_error = ""
         self.due = {"videos": 0, "channels": 0}
         self.backoff, self.auth_failed = 0, False
         public = self.files.read_public()
@@ -133,7 +134,15 @@ class Service:
                     for kind, value in self.targets.items()
                 },
                 "videoState": self.video_state,
-                "error": self.error,
+                "error": self.storage_error or self.error,
+                "metrics": {
+                    metric: normalize(
+                        {"source": "youtube", "metric": metric, "mode": "total"},
+                        self.sample(metric),
+                        now=self.clock(),
+                    )
+                    for metric in METRICS
+                },
                 "setup": {
                     **setup,
                     **(
@@ -194,7 +203,14 @@ class Service:
                 ):
                     raise ValueError("Verify the selected targets before activation")
                 # Commit both files before replacing the working RAM connection.
-                self.files.activate(self.setup["targets"], {"key": self.setup["key"]})
+                try:
+                    self.files.activate(
+                        self.setup["targets"], {"key": self.setup["key"]}
+                    )
+                except StorageError as error:
+                    self.storage_error = str(error)
+                    raise
+                self.storage_error = ""
                 self.targets, self.key = self.setup["targets"], self.setup["key"]
                 self.connected, self.auth_failed = True, False
                 self.generation += 1
@@ -210,7 +226,12 @@ class Service:
                 self.key, self.connected, self.setup = None, False, None
                 self.error, self.video_state = "", "unknown"
                 self._invalidate("YouTube disconnected")
-                self.files.disconnect()
+                try:
+                    self.files.disconnect()
+                except StorageError as error:
+                    self.storage_error = str(error)
+                    raise
+                self.storage_error = ""
             else:
                 raise ValueError("Unsupported YouTube connection action")
             return {"ok": True}

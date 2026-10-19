@@ -3130,7 +3130,7 @@ function youtubeCurrent(session) {
 }
 function youtubeOpen() {
   clearTimeout(youtubeTimer);
-  const session = {audience:audienceSession, profile:ovState.active, attempt:null, busy:false, request:0, dirty:false};
+  const session = {audience:audienceSession, profile:ovState.active, attempt:null, busy:false, request:0, dirty:false, changed:false};
   youtubeSession = session;
   $('youtube-key').value = '';
   $('youtube-video').value = '';
@@ -3156,13 +3156,18 @@ async function youtubePoll(session,initial=false) {
     for (const kind of ['video','channel']) {
       if (targets && targets[kind]) lines.push(kind + ': ' + targets[kind].title + ' [' + targets[kind].id + ']');
     }
+    if (targets?.video) lines.push('Video channel: '+targets.video.channelTitle+' ['+targets.video.channelId+']');
+    if (result.connected) for (const [metric,row] of Object.entries(result.metrics || {})) {
+      const number = row.available ? ' · '+(row.precision?.exact === false ? '≈' : '')+new Intl.NumberFormat('en-US', row.precision?.significantDigits ? {maximumSignificantDigits:row.precision.significantDigits} : {maximumFractionDigits:0}).format(row.value) : '';
+      lines.push(metric+': '+row.availability+number+(row.reason ? ' · '+row.reason : ''));
+    }
     if (result.videoState && result.videoState !== 'unknown') lines.push('Broadcast: '+result.videoState);
     if (setup.error || result.error) lines.push(setup.error || result.error);
     $('youtube-status').textContent = lines.join('\n');
-    $('youtube-activate').disabled = setup.phase !== 'verified' || session.busy;
+    $('youtube-activate').disabled = setup.phase !== 'verified' || session.busy || session.changed;
     if (initial && !session.dirty) {
-      $('youtube-video').value = result.targets?.video?.id || '';
-      $('youtube-channel').value = result.targets?.channel?.id || '';
+      $('youtube-video').value = targets?.video?.id || '';
+      $('youtube-channel').value = targets?.channel?.id || '';
     }
   } catch (error) {
     if (youtubeCurrent(session)) $('youtube-status').textContent = error.message;
@@ -3173,11 +3178,13 @@ async function youtubeAction(action,event) {
   if (event) event.preventDefault();
   const session = youtubeSession;
   if (!session || !youtubeCurrent(session) || session.busy) return;
+  if (action === 'activate' && session.changed) { $('youtube-status').textContent = 'Verify the edited targets before activation.'; return; }
   const body = {expectedProfile:session.profile,action,attempt:session.attempt};
   if (action === 'verify') {
     body.video = $('youtube-video').value;
     body.channel = $('youtube-channel').value;
     body.apiKey = $('youtube-key').value;
+    session.changed = false;
   }
   $('youtube-key').value = '';
   session.busy = true;
@@ -3198,7 +3205,9 @@ async function youtubeAction(action,event) {
     if (youtubeCurrent(session)) $('youtube-verify').disabled = false;
   }
 }
-for (const field of ['youtube-video','youtube-channel']) $(field).addEventListener('input',() => { if (youtubeSession) youtubeSession.dirty = true; });
+for (const field of ['youtube-video','youtube-channel','youtube-key']) $(field).addEventListener('input',() => {
+  if (youtubeSession) { youtubeSession.dirty = true; youtubeSession.changed = true; $('youtube-activate').disabled = true; }
+});
 $('youtube-dialog').addEventListener('close',() => {
   clearTimeout(youtubeTimer);
   $('youtube-key').value = '';

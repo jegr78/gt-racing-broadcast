@@ -52,6 +52,31 @@ def t_automatic_capture_uses_fresh_cache_and_rejects_profile_change_during_rpc()
             m._env_base, m._runtime_base_dir = original
 
 
+def t_provider_preflight_rejects_absent_process_and_display_name_as_profile_slug():
+    with tempfile.TemporaryDirectory() as td:
+        original = cli._mk_active_profile(td)
+        try:
+            for pid, stamp in ((None, "demo"), (123, "Demo Racing")):
+                with (
+                    patch.object(m.sv, "read_pid", return_value=pid),
+                    patch.object(m, "_running_relay_profile", return_value=stamp),
+                    patch.object(
+                        m.http_util,
+                        "open_url",
+                        side_effect=AssertionError(
+                            "Rejected preflight contacted a port"
+                        ),
+                    ),
+                ):
+                    result = m.audience_youtube_data()
+                    assert not result["ok"] and "profile" in result["error"].lower(), (
+                        result
+                    )
+        finally:
+            m._env_base, m._runtime_base_dir = original
+
+
 if __name__ == "__main__":
     t_automatic_capture_uses_fresh_cache_and_rejects_profile_change_during_rpc()
-    print("PASS automatic cached baseline callback")
+    t_provider_preflight_rejects_absent_process_and_display_name_as_profile_slug()
+    print("PASS automatic cached baseline and provider preflight callbacks")

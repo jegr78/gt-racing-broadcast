@@ -364,6 +364,11 @@ def t_resource_denial_is_independent_but_auth_failure_invalidates_all_metrics():
         service.tick()
         assert not metric(cache, "likes")["available"]
         assert metric(cache, "subscribers")["available"]
+        metrics = service.status().get("metrics", {})
+        assert metrics.get("likes", {}).get("reason") == "Selected video denied", (
+            "Channel success hid the video error"
+        )
+        assert metrics["subscribers"]["available"]
         api.failures["videos"] = yt.APIError("auth", "Invalid API key")
         clock.advance(30)
         service.tick()
@@ -550,6 +555,38 @@ def t_response_processing_and_service_lock_wait_cannot_refresh_observation_age()
         assert metric(cache, "likes")["holdFor"] == 1, (
             "Response processing or lock wait extended the last-good deadline"
         )
+
+
+def t_failed_durable_disconnect_warning_survives_status_reads_until_cleanup():
+    import audience_connections as ac
+
+    with fixture() as (service, _clock, _api, cache, _definitions):
+        connect(service)
+        writer = service.files.writer
+
+        def fail_write(*_args, **_kwargs):
+            raise OSError(KEY)
+
+        service.files.writer = fail_write
+        with patch.object(Path, "unlink", side_effect=OSError(KEY)):
+            try:
+                command(service, "disconnect")
+            except ac.StorageError as error:
+                assert not error.durable and KEY not in str(error)
+            else:
+                raise AssertionError(
+                    "Failed durable disconnection was reported as saved"
+                )
+        assert (
+            not service.status()["connected"]
+            and not metric(cache, "likes")["available"]
+        )
+        assert "restart" in service.status()["error"].lower(), (
+            "Settings hid the restart warning after failed storage"
+        )
+        service.files.writer = writer
+        command(service, "disconnect")
+        assert service.status()["error"] == "" and service.files.load() is None
 
 
 if __name__ == "__main__":
