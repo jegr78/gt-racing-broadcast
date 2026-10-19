@@ -67,6 +67,22 @@ def t_relay_admin_keeps_credentials_outside_console_and_overlay_reads():
                 and result["ok"] is False
                 and "profile" in result["error"].lower()
             ), result
+            for body, headers, expected in (
+                ([], {}, 400),
+                ({"action": "unknown", "expectedProfile": "demo"}, {}, 400),
+                (
+                    {"action": "disconnect", "expectedProfile": "demo"},
+                    {"Content-Type": "text/plain"},
+                    400,
+                ),
+            ):
+                code, result = request(body=body, headers=headers)
+                assert (
+                    code == expected
+                    and result.get("ok") is False
+                    and isinstance(result.get("error"), str)
+                ), (code, result)
+                assert not api.calls, "Rejected setup performed provider I/O"
             code, result = request(
                 "/console/audience/admin/youtube", body={"action": "disconnect"}
             )
