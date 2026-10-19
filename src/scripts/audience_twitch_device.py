@@ -65,6 +65,8 @@ class Attempt:
                 }
             return {
                 "phase": self._phase,
+                "clientId": self.client,
+                "selection": dict(self.selection),
                 "attempt": self.attempt,
                 "error": self._error,
                 "expiresIn": max(0, self._expires - self.monotonic()),

@@ -101,6 +101,7 @@ def t_device_polling_obeys_pending_slow_down_and_only_public_status_is_exposed()
     attempt.step()
     assert [c[0] for c in api.calls] == ["device"]
     status = attempt.status()
+    assert status["clientId"] == CLIENT and status["selection"] == {"login": "racing"}
     assert status["phase"] == "pending" and status["userCode"] == USER
     assert status["verificationUri"].endswith(
         "device-code=" + USER
