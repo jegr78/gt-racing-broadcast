@@ -76,6 +76,7 @@ _UNSAFE_VALUE = re.compile(r"[;{}<>]|/\*|\*/")
 # logo, carries a {"flag"/"brand": key} entry so the offline canvas previews it
 # from bundled src/assets/, served at /api/overlay/asset/{flags,brands}/<key>.
 SAMPLE = {
+    "intermission": {"ichat": "RaceFan: Welcome back!\nPitWall: Ready for the next stint"},
     "hud": {
         "stint": "STINT 3", "session": "Race",
         "streamer": "twitch.tv/commentary",
@@ -362,6 +363,20 @@ OVERLAY_SLOT_OBS_SOURCES = {
     "tyres-capture": {"scene": "Program", "source": "Solo Tyres/Fuel Capture",
                        "export_scene": "Program"},
 }
+
+SCENE_SLOT_OBS_SOURCES = {
+    "intermission": {
+        "intermission-webcam": "Solo Webcam",
+        "intermission-capture": "Solo Capture",
+    },
+}
+
+
+def scene_boxes(page, base_css, override_css):
+    """Video bounds for one scene; scene-local slot ids cannot affect the HUD."""
+    return {sid: {**box_from_css(base_css, sid), **box_from_css(override_css, sid)}
+            for sid in SCENE_SLOT_OBS_SOURCES.get(page, {})
+            if box_from_css(base_css, sid)}
 
 def slot_scene(slot_id, solo):
     """The scene the live sync targets for *slot_id*; `solo_scene` overrides it in a

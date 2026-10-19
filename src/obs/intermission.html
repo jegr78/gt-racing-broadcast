@@ -35,6 +35,7 @@
     backdrop-filter: blur(6px);
     -webkit-backdrop-filter: blur(6px);
     color: var(--ichat-fg);
+    font-size:19px;
     overflow: hidden;                 /* never a scrollbar */
     display: flex;
     flex-direction: column;
@@ -51,16 +52,22 @@
     display: flex; flex-direction: column; justify-content: flex-end;
     overflow: hidden;
   }
-  #ichat-log .msg { margin-top: 6px; line-height: 1.32; font-size: 19px; overflow-wrap: anywhere; }
+  #ichat-log .msg { margin-top: 6px; line-height: 1.32; font-size: inherit; overflow-wrap: anywhere; }
   #ichat-log .ts  { color: var(--ichat-meta); font-size: 12px; margin-right: 6px; }
   #ichat-log .u   { font-weight: 700; color: var(--ichat-author); margin-right: 6px; }
   #ichat-log .src { color: var(--ichat-meta); font-size: 12px; margin-left: 6px; }
   #ichat-log .emote { height: 1.2em; width: auto; vertical-align: -0.2em; }
+  /* Transparent frames sit above reused OBS video scenes, below chat. */
+  #intermission-webcam{position:absolute;left:64px;top:336px;width:1152px;height:648px;box-sizing:border-box}
+  #intermission-capture{position:absolute;left:64px;top:96px;width:1152px;height:648px;box-sizing:border-box}
+  #ichat{z-index:10}
 </style>
 <link rel="stylesheet" href="/intermission/override.css">
 </head>
 <body>
-  <div id="ichat">
+  <div id="intermission-capture" data-edit="Capture" data-edit-props="left,top,width,height,background,borderWidth,borderStyle,borderColor,borderRadius,visible" data-solo="true"></div>
+  <div id="intermission-webcam" data-edit="Webcam" data-edit-props="left,top,width,height,background,borderWidth,borderStyle,borderColor,borderRadius,visible" data-solo="true"></div>
+  <div id="ichat" data-edit="Broadcast chat" data-edit-kind="text">
     <div id="ichat-head">Live Chat</div>
     <div id="ichat-log"></div>
   </div>

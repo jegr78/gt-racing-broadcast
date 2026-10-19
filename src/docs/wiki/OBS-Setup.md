@@ -62,8 +62,12 @@ collection.
   collection the scene also shows the driver's webcam (the **Solo Webcam** scene) to the
   left of the chat panel: 1152×648 (60% of the frame width), its bottom edge flush with
   the panel's. It sits above the background and below the chat. That alignment
-  assumes the default panel geometry: if `intermission.css` moves or resizes the
-  panel, reposition the webcam in OBS to match.
+  can be changed in the Control Center's Intermission builder. Endurance exposes
+  the chat panel; both Solo collections additionally provide webcam and capture
+  slots. Solo commentary starts with webcam hidden, and capture starts hidden in
+  both Solo templates. Save and Apply synchronizes each video slot with its OBS
+  item, independently of Program. Existing collections need an updated import to
+  add the newly available hidden sources. See [Intermission layouts](HUD-Overlays#intermission-layouts).
 
 > **Broadcast graphics are local files.** The still-graphics image sources. Overlay,
 > Standings, Schedule, Race Results, Quali Results, Standby, Standby Cover, the three

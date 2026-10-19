@@ -116,6 +116,14 @@ Loaded when working under `src/ui/`.
   migration), `tests/test_ui_server.py` + `tests/test_racecast.py` (routes + data layer).
 
 ## Wiki screenshots for UI changes (full rule, moved from the root CLAUDE.md)
+
+The scene selector also exposes Intermission in both profile kinds (#930).
+`layout-intermission.json` compiles to `intermission.css` through the same APIs;
+scene-scoped `/api/overlay/apply` explicitly sets the saved Intermission video
+geometry/visibility and refreshes only its browser source. Automatic refresh only
+hides scene items. `tools/e2e-scene-layouts.py --shots` exercises the production
+builder and callbacks with temporary synthetic profiles and refreshes both builder
+screenshots; it never uses real devices, OBS or league state.
 - **Changed a UI surface? Refresh its wiki screenshot in the SAME change.** This
   is the step that keeps getting forgotten. Any visible change to the **Control
   Center** (`src/ui/`), the **Director Panel** (`/panel`), or the **Companion /

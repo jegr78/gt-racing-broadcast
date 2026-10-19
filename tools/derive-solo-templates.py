@@ -259,18 +259,21 @@ def derive(with_tyres=False, intermission_webcam=False):
     other_targets = [n for n in MIC_TARGET_SCENES if n != "Program"]
     mic_targets = {name: _add_mic_reference(by[name], discord_ref_item, U["mic_scene"])
                    for name in other_targets}
-    if intermission_webcam:
-        inter = mic_targets["Intermission"]
-        cam_id = int(inter["settings"].get("id_counter", 0)) + 1
-        inter_cam = _program_item(pov_item, "Solo Webcam", U["cam_scene"],
-                                  INTERMISSION_WEBCAM_POS, INTERMISSION_WEBCAM_BOUNDS,
-                                  item_id=cam_id)
-        inter_items = inter["settings"]["items"]
-        # Above the background, below the chat panel, so the chat stays on top.
+    inter = mic_targets["Intermission"]
+    inter_items = inter["settings"]["items"]
+    # Reuse nested scenes, never reopen a physical device. Capture stays below
+    # webcam and both stay below the public chat overlay.
+    for name, uuid, pos, visible in (
+            ("Solo Capture", U["cap_scene"], (64.0, 96.0), False),
+            ("Solo Webcam", U["cam_scene"], INTERMISSION_WEBCAM_POS, intermission_webcam)):
+        item_id = max((it["id"] for it in inter_items), default=0) + 1
+        item = _program_item(pov_item, name, uuid, pos,
+                             INTERMISSION_WEBCAM_BOUNDS, item_id=item_id)
+        item["visible"] = visible
         at = next(i for i, it in enumerate(inter_items)
                   if it.get("name") == "Intermission Chat")
-        inter_items.insert(at, inter_cam)
-        inter["settings"]["id_counter"] = cam_id
+        inter_items.insert(at, item)
+        inter["settings"]["id_counter"] = item_id
 
     # Remove the endurance-only scenes and sources, substitute the mic-wired scenes,
     # then append the solo additions.

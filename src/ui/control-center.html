@@ -308,9 +308,12 @@
 
         <section id="overlay-section">
           <div class="viewhead"><h3>Overlay Builder</h3>
-            <span class="sub">drag &amp; style the HUD + Timer slots</span><span class="spacer"></span>
+            <span class="sub">scene layouts, chat &amp; video frames</span><span class="spacer"></span>
             <button id="overlay-popout" onclick="openBuilderModal()" title="Open the builder in a larger pop-out modal for more room to work">
               <svg viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>Pop out ↗</button>
+            <select id="ov-scene" aria-label="Scene layout" onchange="ovChangeScene(this.value)">
+              <option value="hud">HUD / Program</option><option value="intermission">Intermission</option>
+            </select>
             <select id="ov-slotpick" class="ov-slotpick" onchange="ovSelect(this.value || null)"
               title="Jump to a slot (pick the placeholder to deselect)" aria-label="Jump to slot"></select>
             <button id="overlay-undo" onclick="ovUndo()" disabled title="Undo (Ctrl/Cmd-Z)">↶ Undo</button>
@@ -374,9 +377,9 @@
           </details>
           <p class="envhint ovhint">The builder writes the generated <b>profiles/&lt;active&gt;/overlay/&lt;page&gt;.css</b>
             plus a <b>layout-&lt;page&gt;.json</b> it owns. <b>Save</b> writes both; <b>Apply in OBS</b> reloads the
-            HUD/Timer browser sources (needs the relay up + obs-websocket). First override on a profile that had no
+            selected scene browser sources (needs the relay up + obs-websocket). First override on a profile that had no
             overlay yet? Restart the relay once (<b>racecast relay restart</b>) to activate it; later edits apply
-            live via Apply in OBS. The canvas shows your editable <b>Preview data</b> over your <b>Overlay.png</b> frame. Verify live in OBS with Preview.</p>
+            live via Apply in OBS. The canvas shows your editable <b>Preview data</b> over the selected scene background. Verify live in OBS with Preview.</p>
         </section>
 
         <section>
@@ -795,7 +798,7 @@
   <div class="ovmodal-card">
     <div class="ovmodal-head">
       <b>Overlay Builder</b>
-      <span class="dim">more room to position the HUD &amp; Timer slots</span>
+      <span class="dim">more room to position the selected scene</span>
       <span class="spacer"></span>
       <button onclick="closeBuilderModal()">
         <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>Close</button>
@@ -2839,6 +2842,14 @@ async function saveProfileEnv() {
 // because the repo ships no JS libraries. Loads with the Profile view (via
 // loadProfiles) and on every profile switch.
 let overlayPage = 'hud';
+let ovLoadSequence = 0;
+const ovDrafts = new Map();
+function ovChangeScene(page) {
+  if (ovState.layout) ovDrafts.set(ovState.active + ':' + ovState.page,
+    Object.assign({}, ovState.layout, {customCss: $('overlayCss').value}));
+  overlayPage = page;
+  loadOverlay();
+}
 // The canvas is a fixed 1920x1080 design space with the origin top-left, and the
 // single source for the align toolbar and the snap grid.
 const OV_CANVAS_W = 1920, OV_CANVAS_H = 1080;
@@ -2879,17 +2890,22 @@ const OV_SHADOW_CSS =
   '.ov-hidden{opacity:.32!important;outline:2px dashed #f59e0b!important;outline-offset:-1px}' +
   '.ov-hidden::after{content:"hidden";position:absolute;top:0;left:0;z-index:60;' +
   'font:700 9px/1.4 system-ui,sans-serif;background:#f59e0b;color:#111;padding:0 3px;border-radius:2px}' +
-  '.ov-grid{position:absolute;inset:0;pointer-events:none}';
+  '.ov-grid{position:absolute;inset:0;pointer-events:none}' +
+  '[data-solo]::before{position:absolute;inset:0;background:rgba(25,40,60,.8);display:flex;align-items:center;justify-content:center;' +
+  'content:attr(data-edit) " preview";font:32px system-ui;color:#fff}';
 
 async function loadOverlay() {
+  const sequence = ++ovLoadSequence;
+  const requestedPage = overlayPage;
   $('overlay-err').hidden = true;
   $('overlay-migrated').hidden = true;
   let slotsR, layoutR, fontsR;
   try {
-    slotsR = await (await fetch('/api/overlay/slots?page=' + overlayPage, {cache: 'no-store'})).json();
-    layoutR = await (await fetch('/api/overlay/layout?page=' + overlayPage, {cache: 'no-store'})).json();
+    slotsR = await (await fetch('/api/overlay/slots?page=' + requestedPage, {cache: 'no-store'})).json();
+    layoutR = await (await fetch('/api/overlay/layout?page=' + requestedPage, {cache: 'no-store'})).json();
     fontsR = await (await fetch('/api/overlay/fonts', {cache: 'no-store'})).json();
   } catch (e) { showProfileErr('overlay-err', 'Control Center not reachable.'); return; }
+  if (sequence !== ovLoadSequence || requestedPage !== overlayPage) return;
   if (!slotsR.ok) { showProfileErr('overlay-err', slotsR.error || 'could not load slots'); return; }
   if (!layoutR.ok) { showProfileErr('overlay-err', layoutR.error || 'no active profile'); return; }
   ovGridLoad();
@@ -2899,11 +2915,16 @@ async function loadOverlay() {
   ovState.flagPresets = slotsR.flagPresets || [];
   ovState.active = layoutR.active || '';
   ovPreviewInit();
-  ovState.baseCss = slotsR.css || '';
+  ovState.baseCss = (slotsR.css || '').replace(/:root/g, ':host').replace(/html\s*,\s*body/g, ':host');
   ovState.body = slotsR.body || '';
   ovState.telemetry = !!slotsR.telemetry;
   ovState.layout = layoutR.layout || {version: 1, page: overlayPage, slots: {}, fonts: [], customCss: ''};
+  ovState.layout = ovDrafts.get(ovState.active + ':' + requestedPage) || ovState.layout;
   if (!ovState.layout.slots) ovState.layout.slots = {};
+  Object.entries(slotsR.defaults || {}).forEach(([id, defaults]) => {
+    if (!ovState.layout.slots[id]) ovState.layout.slots[id] = Object.assign({}, defaults);
+  });
+  $('ov-scene').value = requestedPage;
   ovDropZeroSizes(ovState.layout.slots);
   ovState.fonts = (fontsR && fontsR.ok && fontsR.fonts) || [];
   ovState.library = (fontsR && fontsR.ok && fontsR.library) || [];
@@ -2916,7 +2937,7 @@ async function loadOverlay() {
     e.textContent = 'Imported your existing hand-written CSS into “Fonts & advanced CSS” below — slots start from the base look on top of it.';
     e.hidden = false;
   }
-  $('ov-stage').style.backgroundImage = "url('/api/overlay/bg?t=" + Date.now() + "')";
+  $('ov-stage').style.backgroundImage = "url('/api/overlay/bg?page=" + encodeURIComponent(requestedPage) + "&t=" + Date.now() + "')";
   ovBuildCanvas();
   ovRenderPanel();
   ovRenderPreviewPanel();
@@ -3093,7 +3114,7 @@ function ovInTele(id) {
 // Mirror of hud.html's chat rows: one .msg per "user: text" line, the name in .u.
 // A line without "name: " is shown as plain text.
 function ovFillChat(el, text) {
-  const log = el.querySelector('#chat-log');
+  const log = el.querySelector('#chat-log, #ichat-log');
   if (!log) return;
   log.textContent = '';
   String(text || '').split('\n').filter(ln => ln.trim()).forEach(ln => {
@@ -3116,7 +3137,7 @@ function ovFillSample() {
   ovState.slots.forEach(s => {
     const el = ovState.shadow.getElementById(s.id);
     if (!el) return;
-    if (s.id === 'chat') { ovFillChat(el, vals.chat); return; }
+    if (s.id === 'chat' || s.id === 'ichat') { ovFillChat(el, vals[s.id] || 'RaceFan: Welcome back!\nPitWall: Ready for the next stint'); return; }
     const img = el.querySelector('img');
     // Flag status: colour from the picked state (data-state), text from its label.
     if (s.id === 'flag-status') {
@@ -3236,7 +3257,7 @@ function ovRenderPreviewPanel() {
   const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!pv.povActive;
   cb.onchange = () => ovPreviewPov(cb.checked);
   povRow.appendChild(cb); povRow.appendChild(document.createTextNode('POV active'));
-  sc.appendChild(povRow);
+  if (ovState.slots.some(s => s.id === 'pov')) sc.appendChild(povRow);
 
   const ff = $('ov-preview-fields'); ff.textContent = '';
   // One text field per text slot (those with the text-only fontSize prop), except
@@ -3245,7 +3266,7 @@ function ovRenderPreviewPanel() {
   // static sample string, so letting the operator set it helps them fit the slot.
   // Telemetry slots are left out where the canvas keeps #tele hidden.
   ovState.slots.filter(s => s.props.indexOf('fontSize') !== -1
-      && s.id !== 'flag-status'
+      && s.id !== 'flag-status' && s.id !== 'ichat'
       && (ovState.telemetry || !ovInTele(s.id))).forEach(s => {
     const row = document.createElement('label'); row.className = 'ovprev-row';
     row.appendChild(document.createTextNode(s.label));
@@ -3256,14 +3277,14 @@ function ovRenderPreviewPanel() {
     row.appendChild(inp); ff.appendChild(row);
   });
   // The stream chat is a message list, not a text slot: one "user: text" per line.
-  const chat = ovState.slots.find(s => s.id === 'chat');
+  const chat = ovState.slots.find(s => s.id === 'chat' || s.id === 'ichat');
   if (chat) {
     const row = document.createElement('label'); row.className = 'ovprev-row';
     row.appendChild(document.createTextNode(chat.label));
     const ta = document.createElement('textarea'); ta.rows = 4;
     ta.placeholder = 'user: message, one per line';
-    ta.value = (typeof pv.values.chat === 'string') ? pv.values.chat : '';
-    ta.oninput = () => ovPreviewText('chat', ta.value);
+    ta.value = (typeof pv.values[chat.id] === 'string') ? pv.values[chat.id] : '';
+    ta.oninput = () => ovPreviewText(chat.id, ta.value);
     row.appendChild(ta); ff.appendChild(row);
   }
 }
@@ -3369,7 +3390,12 @@ function ovStyleSlot(id) {
 }
 
 function ovSetProp(id, prop, value) {
+  ovState.layout = ovDrafts.get(ovState.active + ':' + requestedPage) || ovState.layout;
   if (!ovState.layout.slots) ovState.layout.slots = {};
+  Object.entries(slotsR.defaults || {}).forEach(([id, defaults]) => {
+    if (!ovState.layout.slots[id]) ovState.layout.slots[id] = Object.assign({}, defaults);
+  });
+  $('ov-scene').value = requestedPage;
   const slot = ovState.layout.slots[id] || (ovState.layout.slots[id] = {});
   // A width/height <= 0 is unset: the compiler drops it, so the canvas must too.
   if ((prop === 'width' || prop === 'height') && typeof value === 'number' && value <= 0) value = '';
@@ -3743,7 +3769,12 @@ function ovSelectField(prop, label, opts, ov) {
 }
 
 function ovSetShadow(id, key, raw) {
+  ovState.layout = ovDrafts.get(ovState.active + ':' + requestedPage) || ovState.layout;
   if (!ovState.layout.slots) ovState.layout.slots = {};
+  Object.entries(slotsR.defaults || {}).forEach(([id, defaults]) => {
+    if (!ovState.layout.slots[id]) ovState.layout.slots[id] = Object.assign({}, defaults);
+  });
+  $('ov-scene').value = requestedPage;
   const slot = ovState.layout.slots[id] || (ovState.layout.slots[id] = {});
   const s = Object.assign({x: 0, y: 0, blur: 0, color: ''}, slot.textShadow || {});
   s[key] = (key === 'color') ? raw : (raw === '' ? 0 : Number(raw));
@@ -4076,6 +4107,7 @@ async function ovUploadFont(input) {
 async function saveOverlay() {
   $('overlay-err').hidden = true;
   const b = $('overlay-save');
+  const savedPage = overlayPage, savedActive = ovState.active;
   if (!ovState.layout) return;
   b.disabled = true;
   // Save-all: persist each slot's full effective values (base + edits), so the
@@ -4093,16 +4125,18 @@ async function saveOverlay() {
     if (Object.keys(merged).length) fullSlots[s.id] = merged;
   });
   const layout = Object.assign({}, ovState.layout, {
-    version: 1, page: 'hud', slots: fullSlots, fonts: ovState.fonts.slice(),
+    version: 1, page: savedPage, slots: fullSlots, fonts: ovState.fonts.slice(),
     customCss: $('overlayCss').value});
   let d;
   try {
     d = await (await fetch('/api/overlay/layout', {method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({page: overlayPage, layout})})).json();
+        body: JSON.stringify({page: savedPage, layout})})).json();
   } catch (e) { showProfileErr('overlay-err', 'Control Center not reachable.'); b.disabled = false; return; }
+  if (savedPage !== overlayPage || savedActive !== ovState.active) { b.disabled = false; return; }
   if (!d.ok) { showProfileErr('overlay-err', d.error || 'could not save overlay'); b.disabled = false; return; }
   ovState.layout = layout;
+  ovDrafts.delete(savedActive + ':' + savedPage);
   if (d.path) $('overlay-path').textContent = d.path;
   const orig = b.innerHTML;
   b.textContent = 'Saved ✓ — Apply in OBS';
@@ -4174,7 +4208,15 @@ window.addEventListener('keydown', e => {
 // same as `racecast obs refresh`): it reloads the relay-served overlay pages so a
 // saved CSS change shows. Best-effort, needing the relay and obs-websocket up; the
 // job console surfaces the result.
-function applyOverlay() { op('obs-refresh'); }
+async function applyOverlay() {
+  if (overlayPage === 'hud') { op('obs-refresh'); return; }
+  $('overlay-err').hidden = true;
+  try {
+    const d = await (await fetch('/api/overlay/apply', {method:'POST',
+      headers:{'Content-Type':'application/json'}, body:JSON.stringify({page:overlayPage})})).json();
+    if (!d.ok) showProfileErr('overlay-err', d.error || 'Could not apply scene.');
+  } catch(e) { showProfileErr('overlay-err', 'Control Center not reachable.'); }
+}
 
 function importHealth() {
   const path = prompt('Path to health history file (.jsonl):');
@@ -4187,7 +4229,7 @@ function importHealth() {
 // be running; if it is down the new tab shows the relay's own error page.
 function openHudPreview() {
   const port = (lastStatus && lastStatus.relay && lastStatus.relay.port) || 8088;
-  window.open('http://127.0.0.1:' + port + '/hud/preview', '_blank', 'noopener');
+  window.open('http://127.0.0.1:' + port + (overlayPage === 'hud' ? '/hud/preview' : '/' + overlayPage), '_blank', 'noopener');
 }
 
 // Crew editor card (issue #216)

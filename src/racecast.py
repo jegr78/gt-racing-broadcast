@@ -2730,6 +2730,7 @@ def _refresh_obs_pages(wait=0):
     print(f"obs: refreshed browser sources {', '.join(names)}." if names
           else "obs: no relay browser sources in OBS. Nothing to refresh.")
     _sync_pov_transform()              # live POV-box position sibling (best effort)
+    _sync_scene_layouts()
     # Feed A/B ship close_when_inactive=False; fan-out needs True so OBS disconnects
     # off-air and no stale backlog forms. Track the flag unconditionally, so a
     # fallback to direct-serve reverts A/B to False. POV ships True, correct in both
@@ -6327,6 +6328,8 @@ def _oneshot_code(command, rest):
     extra = _oneshot_extra(command, rest, _runtime_dir(), _runtime_base_dir(),
                            overlay_css=os.path.join(_od, "hud.css") if _od else None,
                            profile_graphics=_active_profile_graphics_dir())
+    if command == "setup" and _od and "--overlay-dir" not in rest:
+        extra += ["--overlay-dir", _od]
     if command == "update" and "--current" not in rest:
         extra += ["--current", version()]
     return _run_script(ONESHOT_MAP[command], list(rest) + extra)
@@ -7494,7 +7497,7 @@ def _active_profile_overlay_path(page):
     """(active, abs path to overlay/<page>.css) for the active profile, or
     (None, None) when no profile resolves or `page` is not an overlay page.
     Server-resolved; never a client path. Mirrors _active_profile_env_strict."""
-    if page != "hud":
+    if page not in ("hud", "intermission"):
         return None, None
     active = _active_profile_name()
     if not active:
@@ -7554,7 +7557,7 @@ def _atomic_write_text(path, text):
 
 def _overlay_base_html(page):
     """Text of the base overlay page (src/obs/<page>.html), or '' on error."""
-    if page != "hud":
+    if page not in ("hud", "intermission"):
         return ""
     try:
         with open(resource_path(f"obs/{page}.html"), encoding="utf-8") as fh:
@@ -7607,7 +7610,7 @@ def overlay_slots_data(page):
     whether the canvas should show the telemetry block the live HUD self-gates.
     {ok, page, slots, css, body, sample, flagPresets, telemetry} or {ok:false, error}."""
     try:
-        if page != "hud":
+        if page not in ("hud", "intermission"):
             return {"ok": False, "error": "invalid page"}
         html = _overlay_base_html(page)
         if not html:
@@ -7616,11 +7619,19 @@ def overlay_slots_data(page):
         from urllib.parse import quote
         logo = (f"/api/profile/logo?p={quote(active, safe='')}"
                 if active and profile_logo() else None)
-        return {"ok": True, "page": page, "slots": ob.extract_slots(html),
-                "css": ob.base_style(html), "body": ob.canvas_logo(ob.base_body(html), logo),
+        return {"ok": True, "page": page, "slots": [slot for slot in ob.extract_slots(html)
+                          if page != "intermission" or _profile_is_solo()
+                          or slot["id"] == "ichat"],
+                "css": ob.base_style(html), "body": ob.canvas_logo(
+                    re.sub(r'<div[^>]*data-solo="true"[^>]*></div>', '', ob.base_body(html))
+                    if page == "intermission" and not _profile_is_solo() else ob.base_body(html), logo),
                 "sample": ob.SAMPLE.get(page, {}),
-                "flagPresets": [dict(p) for p in ob.FLAG_PRESETS],
-                "telemetry": _profile_has_telemetry()}
+                "flagPresets": [dict(p) for p in ob.FLAG_PRESETS] if page == "hud" else [],
+                "telemetry": page == "hud" and _profile_has_telemetry(),
+                "solo": _profile_is_solo(),
+                "defaults": ({"intermission-capture": {"visible": False},
+                              "intermission-webcam": {"visible": _profile_has_telemetry()}}
+                             if page == "intermission" else {})}
     except Exception as exc:
         return {"ok": False, "error": f"could not read overlay slots: {exc}"}
 
@@ -7830,11 +7841,78 @@ def overlay_font_upload_data(name, data):
         return {"ok": False, "error": f"could not upload font: {exc}"}
 
 
-def overlay_bg_path():
+def overlay_bg_path(page="hud"):
     """The active profile's Overlay.png (canvas background), or None if absent."""
     g_dir, _ = _asset_dirs()
-    path = os.path.join(g_dir, "Overlay.png")
+    name = {"hud": "Overlay.png", "intermission": "Intermission.png"}.get(page)
+    if not name:
+        return None
+    path = os.path.join(g_dir, name)
     return path if os.path.isfile(path) else None
+
+
+def _sync_scene_layouts(set_transform=None, set_enabled=None, solo=None,
+                        page="intermission", explicit=False):
+    """Sync only the selected scene. Automatic refresh never reveals a camera."""
+    import obs_ws
+    if solo is None:
+        solo = _profile_is_solo()
+    result = {"ok": True, "page": page, "applied": [], "warnings": []}
+    if not solo:
+        return result
+    od = _active_overlay_dir()
+    css_path = os.path.join(od, page + ".css") if od else None
+    if not css_path or not os.path.isfile(css_path):
+        return result
+    try:
+        with open(css_path, encoding="utf-8") as fh:
+            css = fh.read()
+        base_css = ob.base_style(_overlay_base_html(page))
+        set_transform = set_transform or obs_ws.set_scene_item_transform
+        set_enabled = set_enabled or obs_ws.set_scene_item_enabled
+        for sid, box in ob.scene_boxes(page, base_css, css).items():
+            source = ob.SCENE_SLOT_OBS_SOURCES[page][sid]
+            scene = "Intermission"
+            # Unedited legacy CSS must not change the template's video defaults.
+            if not ob.box_from_css(css, sid) and not ob.slot_hidden(css, sid):
+                continue
+            ok, note = set_transform(scene, source, obs_ws.pov_scene_item_transform(box))
+            if not ok:
+                result["warnings"].append(f"{source}: {note or 'item unavailable; update the OBS collection'}")
+                continue
+            visible = not ob.slot_hidden(css, sid)
+            if explicit or not visible:
+                ok, note = set_enabled(scene, source, visible)
+                if not ok:
+                    result["warnings"].append(f"{source}: {note or 'visibility unavailable'}")
+            result["applied"].append(source)
+    except Exception as exc:  # noqa: BLE001  automatic refresh is best effort
+        result["warnings"].append(str(exc))
+    if result["warnings"]:
+        result.update(ok=False, error="; ".join(result["warnings"]))
+    return result
+
+
+def overlay_apply_data(page, set_transform=None, set_enabled=None, refresh=None):
+    """Explicit producer action: apply one saved scene without a cut/audio change."""
+    if page not in ("hud", "intermission") or not _active_profile_name():
+        return {"ok": False, "error": "no active profile or invalid page"}
+    import obs_ws
+    if refresh is None and not _relay_http_ok():
+        return {"ok": False, "error": "Relay not responding; start the relay before Apply in OBS"}
+    refresh = refresh or obs_ws.refresh_browser_inputs
+    try:
+        if page == "hud":
+            _refresh_obs_pages()
+            return {"ok": True, "page": page}
+        result = _sync_scene_layouts(set_transform, set_enabled, page=page, explicit=True)
+        names, note = refresh(needle=f"127.0.0.1:{RELAY_PORT}/intermission")
+        result["refreshed"] = names
+        if note or not names:
+            result.update(ok=False, error=note or "Intermission browser source missing; update the OBS collection")
+        return result
+    except Exception as exc:  # noqa: BLE001  return a usable operator diagnostic
+        return {"ok": False, "error": f"could not apply scene: {exc}"}
 
 
 def overlay_font_serve(name):
@@ -8906,6 +8984,7 @@ def run_ui(rest, fail=sys.exit, open_browser=True, destination="/"):
         "overlay_fonts": overlay_fonts_list_data,
         "overlay_font_upload": overlay_font_upload_data,
         "overlay_bg": overlay_bg_path,
+        "overlay_apply": overlay_apply_data,
         "overlay_font_serve": overlay_font_serve,
         "overlay_asset_serve": overlay_asset_serve,
         "machine_fonts": machine_fonts_list_data,

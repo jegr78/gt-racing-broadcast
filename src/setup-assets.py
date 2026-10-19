@@ -339,6 +339,23 @@ def bake_overlay_visibility(collection, override_css=""):
     return applied
 
 
+def bake_scene_layout(collection, page, base_html, override_css):
+    """Bake saved scene geometry without touching other instances of its sources."""
+    mappings = overlay_build.SCENE_SLOT_OBS_SOURCES.get(page, {})
+    boxes = overlay_build.scene_boxes(page, overlay_build.base_style(base_html), override_css)
+    for src in collection.get("sources", []):
+        if src.get("name") != "Intermission" or src.get("id") != "scene":
+            continue
+        for item in src.get("settings", {}).get("items", []):
+            for sid, source in mappings.items():
+                if item.get("name") != source:
+                    continue
+                if not overlay_build.box_from_css(override_css, sid) and not overlay_build.slot_hidden(override_css, sid):
+                    continue
+                apply_box_transform(collection, source, boxes[sid], scene="Intermission")
+                item["visible"] = not overlay_build.slot_hidden(override_css, sid)
+
+
 def _has_box_item(collection, source_name, scene=None):
     """True when apply_box_transform would find an item to move."""
     def found(node):
@@ -481,6 +498,8 @@ def main():
     ap.add_argument("--overlay-css", default=None,
                     help="Profile overlay hud.css whose #pov box position/size is "
                          "synced onto the OBS 'Feed POV' scene item. Default: none.")
+    ap.add_argument("--overlay-dir", default=None,
+                    help="Profile overlay directory containing saved scene CSS.")
     ap.add_argument("--kind", default=os.environ.get("RACECAST_KIND", "endurance"),
                     help="Profile kind (endurance|solo); selects the OBS template "
                          "when --template is not an explicit file. Default: env "
@@ -565,6 +584,15 @@ def main():
     for slot_id, source, scene, visible in bake_overlay_visibility(localized, css_text):
         print(f"  {slot_id}: OBS '{source}' (scene '{scene}') "
               f"{'shown' if visible else 'hidden'} as the profile CSS says")
+    overlay_dir = a.overlay_dir or (os.path.dirname(a.overlay_css) if a.overlay_css else None)
+    if overlay_dir:
+        scene_css = os.path.join(overlay_dir, "intermission.css")
+        scene_html = os.path.join(base, "obs", "intermission.html")
+        if os.path.isfile(scene_css) and os.path.isfile(scene_html):
+            with open(scene_css, encoding="utf-8") as fh:
+                scene_style = fh.read()
+            with open(scene_html, encoding="utf-8") as fh:
+                bake_scene_layout(localized, "intermission", fh.read(), scene_style)
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     with open(a.out, "w", encoding="utf-8") as fh:
         json.dump(localized, fh, ensure_ascii=False, indent=4)

@@ -765,7 +765,8 @@ def make_handler(ctx):
                                        "error": f"could not load font catalog: {exc}"},
                                       code=500)
             if path == "/api/overlay/bg":
-                p = ctx["overlay_bg"]()
+                page = (parse_qs(urlparse(self.path).query or "").get("page") or ["hud"])[0]
+                p = ctx["overlay_bg"]() if page == "hud" else ctx["overlay_bg"](page)
                 return self._serve_file(p) if p else self._not_found("no overlay frame")
             if path.startswith("/api/overlay/font/"):
                 name = unquote(path[len("/api/overlay/font/"):])
@@ -1173,6 +1174,15 @@ def make_handler(ctx):
                     return self._json({"ok": False,
                                        "error": f"could not write overlay css: {exc}"},
                                       code=500)
+                return self._json(result, code=200 if result.get("ok") else 400)
+            if path == "/api/overlay/apply":
+                body = self._body_json()
+                if body is None:
+                    return self._json({"ok": False, "error": self._body_error}, code=400)
+                try:
+                    result = ctx["overlay_apply"](body.get("page"))
+                except Exception as exc:
+                    return self._json({"ok": False, "error": f"could not apply scene: {exc}"}, code=500)
                 return self._json(result, code=200 if result.get("ok") else 400)
             if path == "/api/overlay/layout":
                 body = self._body_json()
