@@ -220,6 +220,30 @@ def t_expired_or_ambiguous_device_exchange_is_not_polled_again():
     assert len(api.calls) == 2
 
 
+def t_validation_transit_expiry_stops_before_resolving_the_channel():
+    api = API()
+    api.answers = ["approved"]
+    now = [0]
+
+    def fetch(operation, client, **values):
+        result = api(operation, client, **values)
+        if operation == "validate":
+            result["expires_in"] = 1
+            now[0] += 5
+        return result
+
+    attempt = device.Attempt(CLIENT, "racing", fetch=fetch, monotonic=lambda: now[0])
+    attempt.step()
+    now[0] = 5
+    attempt.step()
+    attempt.step()
+    assert attempt.status()["phase"] == "expired", (
+        "Validation transit extended an expired token into channel resolution"
+    )
+    attempt.step()
+    assert [c[0] for c in api.calls] == ["device", "exchange", "validate"]
+
+
 if __name__ == "__main__":
     for name, fn in tuple(globals().items()):
         if name.startswith("t_"):

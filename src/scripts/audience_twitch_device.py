@@ -184,6 +184,7 @@ class Attempt:
                     self._phase = "validating"
                 elif operation == "validate":
                     deadline = min(self._token_deadline, started + result["expires"])
+                    self._expires = min(self._expires, deadline)
                     self._account = {
                         **result,
                         "expiresAtMono": deadline,
