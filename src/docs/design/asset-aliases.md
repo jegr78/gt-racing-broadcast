@@ -37,7 +37,7 @@ as a URL, filename, source name, HTML or Companion expression.
 
 The native board renders captions into PNGs, so aliases use its own expression
 renderer rather than a browser text overlay. Canonical constant lookups use a
-guarded custom-variable object and each button's exact legacy caption fallback.
+custom-variable object and each button's exact legacy caption fallback.
 The three-second generic-HTTP trigger and custom-variable schema were created
 and exported from an isolated real Companion instance. The variable starts as
 an empty object and is not persisted. Returning a string never invokes nested

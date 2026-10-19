@@ -935,7 +935,7 @@
      "5": {
       "type": "button",
       "style": {
-       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Intro Video\"]) || \"INTRO\"",
+       "text": "($(custom:racecast_asset_labels)[\"Intro Video\"]) || \"INTRO\"",
        "textExpression": true,
        "size": "18",
        "png64": null,
@@ -1058,7 +1058,7 @@
      "6": {
       "type": "button",
       "style": {
-       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Outro Video\"]) || \"OUTRO\"",
+       "text": "($(custom:racecast_asset_labels)[\"Outro Video\"]) || \"OUTRO\"",
        "textExpression": true,
        "size": "18",
        "png64": null,
@@ -1181,7 +1181,7 @@
      "7": {
       "type": "button",
       "style": {
-       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Trailer Video\"]) || \"TRAILER\"",
+       "text": "($(custom:racecast_asset_labels)[\"Trailer Video\"]) || \"TRAILER\"",
        "textExpression": true,
        "size": "14",
        "png64": null,
@@ -1741,7 +1741,7 @@
      "7": {
       "type": "button",
       "style": {
-       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Standby Cover\"]) || \"RED\\nFLAG\"",
+       "text": "($(custom:racecast_asset_labels)[\"Standby Cover\"]) || \"RED\\nFLAG\"",
        "textExpression": true,
        "size": "18",
        "png64": null,
@@ -4816,7 +4816,7 @@
      "0": {
       "type": "button",
       "style": {
-       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Flag Green\"]) || \"GFX\\nGREEN\"",
+       "text": "($(custom:racecast_asset_labels)[\"Flag Green\"]) || \"GFX\\nGREEN\"",
        "textExpression": true,
        "size": "14",
        "png64": null,
@@ -4875,7 +4875,7 @@
      "1": {
       "type": "button",
       "style": {
-       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Flag Yellow\"]) || \"GFX\\nYELLOW\"",
+       "text": "($(custom:racecast_asset_labels)[\"Flag Yellow\"]) || \"GFX\\nYELLOW\"",
        "textExpression": true,
        "size": "14",
        "png64": null,
@@ -4934,7 +4934,7 @@
      "2": {
       "type": "button",
       "style": {
-       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Flag Safety Car\"]) || \"GFX\\nSC\"",
+       "text": "($(custom:racecast_asset_labels)[\"Flag Safety Car\"]) || \"GFX\\nSC\"",
        "textExpression": true,
        "size": "14",
        "png64": null,
@@ -4993,7 +4993,7 @@
      "3": {
       "type": "button",
       "style": {
-       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Flag Virtual Safety Car\"]) || \"GFX\\nVSC\"",
+       "text": "($(custom:racecast_asset_labels)[\"Flag Virtual Safety Car\"]) || \"GFX\\nVSC\"",
        "textExpression": true,
        "size": "14",
        "png64": null,
@@ -5052,7 +5052,7 @@
      "4": {
       "type": "button",
       "style": {
-       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Flag Red\"]) || \"GFX\\nRED\"",
+       "text": "($(custom:racecast_asset_labels)[\"Flag Red\"]) || \"GFX\\nRED\"",
        "textExpression": true,
        "size": "14",
        "png64": null,
@@ -5172,7 +5172,7 @@
      "0": {
       "type": "button",
       "style": {
-       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Weekend Info\"]) || \"Weekend\\nInfo\\nToggle\"",
+       "text": "($(custom:racecast_asset_labels)[\"Weekend Info\"]) || \"Weekend\\nInfo\\nToggle\"",
        "textExpression": true,
        "size": "14",
        "png64": null,
@@ -5307,7 +5307,7 @@
      "1": {
       "type": "button",
       "style": {
-       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Race Info\"]) || \"Race Info\\nToggle\"",
+       "text": "($(custom:racecast_asset_labels)[\"Race Info\"]) || \"Race Info\\nToggle\"",
        "textExpression": true,
        "size": "14",
        "png64": null,
@@ -5442,7 +5442,7 @@
      "2": {
       "type": "button",
       "style": {
-       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Next Event\"]) || \"Next Event\\nToggle\"",
+       "text": "($(custom:racecast_asset_labels)[\"Next Event\"]) || \"Next Event\\nToggle\"",
        "textExpression": true,
        "size": "14",
        "png64": null,
@@ -5577,7 +5577,7 @@
      "3": {
       "type": "button",
       "style": {
-       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Starting Grid\"]) || \"Starting\\nGrid\\nToggle\"",
+       "text": "($(custom:racecast_asset_labels)[\"Starting Grid\"]) || \"Starting\\nGrid\\nToggle\"",
        "textExpression": true,
        "size": "14",
        "png64": null,
@@ -5714,7 +5714,7 @@
      "0": {
       "type": "button",
       "style": {
-       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Standings\"]) || \"Standings Toggle\"",
+       "text": "($(custom:racecast_asset_labels)[\"Standings\"]) || \"Standings Toggle\"",
        "textExpression": true,
        "size": "14",
        "png64": null,
@@ -5849,7 +5849,7 @@
      "1": {
       "type": "button",
       "style": {
-       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Schedule\"]) || \"Schedule Toggle\"",
+       "text": "($(custom:racecast_asset_labels)[\"Schedule\"]) || \"Schedule Toggle\"",
        "textExpression": true,
        "size": "14",
        "png64": null,
@@ -5984,7 +5984,7 @@
      "2": {
       "type": "button",
       "style": {
-       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Race Results\"]) || \"Race Results Toggle\"",
+       "text": "($(custom:racecast_asset_labels)[\"Race Results\"]) || \"Race Results Toggle\"",
        "textExpression": true,
        "size": "14",
        "png64": null,
@@ -6119,7 +6119,7 @@
      "3": {
       "type": "button",
       "style": {
-       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Quali Results\"]) || \"Quali Results Toggle\"",
+       "text": "($(custom:racecast_asset_labels)[\"Quali Results\"]) || \"Quali Results Toggle\"",
        "textExpression": true,
        "size": "14",
        "png64": null,
@@ -6254,7 +6254,7 @@
      "4": {
       "type": "button",
       "style": {
-       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Standby Cover\"]) || \"Standby Toggle\"",
+       "text": "($(custom:racecast_asset_labels)[\"Standby Cover\"]) || \"Standby Toggle\"",
        "textExpression": true,
        "size": "14",
        "png64": null,
@@ -6389,7 +6389,7 @@
      "5": {
       "type": "button",
       "style": {
-       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Race Weather 1\"]) || \"Weather\\nRace (1)\\nToggle\"",
+       "text": "($(custom:racecast_asset_labels)[\"Race Weather 1\"]) || \"Weather\\nRace (1)\\nToggle\"",
        "textExpression": true,
        "size": "14",
        "png64": null,
@@ -6524,7 +6524,7 @@
      "6": {
       "type": "button",
       "style": {
-       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Race Weather 2\"]) || \"Weather\\nRace (2)\\nToggle\"",
+       "text": "($(custom:racecast_asset_labels)[\"Race Weather 2\"]) || \"Weather\\nRace (2)\\nToggle\"",
        "textExpression": true,
        "size": "14",
        "png64": null,
@@ -6659,7 +6659,7 @@
      "7": {
       "type": "button",
       "style": {
-       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Quali Weather\"]) || \"Weather\\nQuali\\nToggle\"",
+       "text": "($(custom:racecast_asset_labels)[\"Quali Weather\"]) || \"Weather\\nQuali\\nToggle\"",
        "textExpression": true,
        "size": "14",
        "png64": null,
@@ -6796,7 +6796,7 @@
      "0": {
       "type": "button",
       "style": {
-       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Grid Row 1\"]) || \"Grid R1\"",
+       "text": "($(custom:racecast_asset_labels)[\"Grid Row 1\"]) || \"Grid R1\"",
        "textExpression": true,
        "size": "14",
        "png64": null,
@@ -6931,7 +6931,7 @@
      "1": {
       "type": "button",
       "style": {
-       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Grid Row 2\"]) || \"Grid R2\"",
+       "text": "($(custom:racecast_asset_labels)[\"Grid Row 2\"]) || \"Grid R2\"",
        "textExpression": true,
        "size": "14",
        "png64": null,
@@ -7066,7 +7066,7 @@
      "2": {
       "type": "button",
       "style": {
-       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Grid Row 3\"]) || \"Grid R3\"",
+       "text": "($(custom:racecast_asset_labels)[\"Grid Row 3\"]) || \"Grid R3\"",
        "textExpression": true,
        "size": "14",
        "png64": null,
@@ -7201,7 +7201,7 @@
      "3": {
       "type": "button",
       "style": {
-       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Grid Row 4\"]) || \"Grid R4\"",
+       "text": "($(custom:racecast_asset_labels)[\"Grid Row 4\"]) || \"Grid R4\"",
        "textExpression": true,
        "size": "14",
        "png64": null,
@@ -7336,7 +7336,7 @@
      "4": {
       "type": "button",
       "style": {
-       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Grid Row 5\"]) || \"Grid R5\"",
+       "text": "($(custom:racecast_asset_labels)[\"Grid Row 5\"]) || \"Grid R5\"",
        "textExpression": true,
        "size": "14",
        "png64": null,
@@ -7471,7 +7471,7 @@
      "5": {
       "type": "button",
       "style": {
-       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Grid Row 6\"]) || \"Grid R6\"",
+       "text": "($(custom:racecast_asset_labels)[\"Grid Row 6\"]) || \"Grid R6\"",
        "textExpression": true,
        "size": "14",
        "png64": null,
@@ -7606,7 +7606,7 @@
      "6": {
       "type": "button",
       "style": {
-       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Grid Row 7\"]) || \"Grid R7\"",
+       "text": "($(custom:racecast_asset_labels)[\"Grid Row 7\"]) || \"Grid R7\"",
        "textExpression": true,
        "size": "14",
        "png64": null,
@@ -7741,7 +7741,7 @@
      "7": {
       "type": "button",
       "style": {
-       "text": "($(custom:racecast_asset_labels) && $(custom:racecast_asset_labels)[\"Grid Row 8\"]) || \"Grid R8\"",
+       "text": "($(custom:racecast_asset_labels)[\"Grid Row 8\"]) || \"Grid R8\"",
        "textExpression": true,
        "size": "14",
        "png64": null,
