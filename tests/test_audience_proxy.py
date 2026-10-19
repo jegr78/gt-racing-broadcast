@@ -43,6 +43,7 @@ def t_identity_is_checked_before_secret_post_and_again_after_response():
         }
         for metadata in (
             {"profile": "foreign", "protocol": "other-service"},
+            {"profile": "demo", "protocol": "other-service"},
             {"profile": "foreign", "protocol": "racecast-audience-admin-v1"},
         ):
             state.update(metadata)

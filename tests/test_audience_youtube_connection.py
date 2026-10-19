@@ -167,7 +167,8 @@ def t_verify_is_pending_then_requires_explicit_activation_and_never_echoes_key()
         assert KEY not in str(status) and service.files.load() is None
         command(service, "activate", attempt=pending["attempt"])
         assert service.status()["connected"] and len(api.calls) == 2
-        assert service.files.load()[1] == {"key": KEY}
+        persisted = service.files.load()
+        assert persisted and persisted[1] == {"key": KEY}, "Activated connection was not persisted"
         service.tick()
         assert metric(cache, "likes")["value"] == 0
         subs = metric(cache, "subscribers")
