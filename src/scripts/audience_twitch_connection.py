@@ -486,7 +486,7 @@ class Service:
                         "Twitch metric permission is unavailable", (metric,)
                     )
                 self.error = "Twitch metric request failed; check metric availability and permissions"
-                return
+                return failure.code == "auth"
             if state is not None:
                 self.stream_state = state
             self.cache.publish(
@@ -540,7 +540,9 @@ class Service:
                         deepcopy(self.target),
                     )
                     self.due[metric] = now + cadence
-                self._poll(metric, generation, client, pair, target)
+                if self._poll(metric, generation, client, pair, target):
+                    self._maintain()
+                    break
         finally:
             self.work.release()
 

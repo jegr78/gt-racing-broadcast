@@ -476,19 +476,117 @@ def t_failed_stage_never_exchanges_and_late_metric_after_disconnect_is_discarded
 
 def t_poll_transit_expiry_never_publishes_or_starts_another_metric():
     with fixture() as (service, clock, api, cache, _definitions):
-        api.expires=10
-        connect(service,clock)
-        original=service.fetch
-        def delayed(operation,client,**values):
-            payload=original(operation,client,**values)
-            if operation=='viewers':clock.advance(20)
+        api.expires = 10
+        connect(service, clock)
+        original = service.fetch
+
+        def delayed(operation, client, **values):
+            payload = original(operation, client, **values)
+            if operation == "viewers":
+                clock.advance(20)
             return payload
-        service.fetch=delayed
-        before=len(api.calls)
+
+        service.fetch = delayed
+        before = len(api.calls)
         service.tick()
-        assert cache.read('twitch','viewers').availability=='unavailable', 'Poll result was published after authorization expiry'
-        assert not [call for call in api.calls[before:] if call[0]=='subscriptions'], 'Second metric started with expired authorization'
-        assert not service.status()['connected']
+        assert cache.read("twitch", "viewers").availability == "unavailable", (
+            "Poll result was published after authorization expiry"
+        )
+        assert not [
+            call for call in api.calls[before:] if call[0] == "subscriptions"
+        ], "Second metric started with expired authorization"
+        assert not service.status()["connected"]
+
+
+def t_profile_bundle_contains_selection_and_baseline_without_local_credentials():
+    import profile_io
+    import zipfile
+
+    with fixture() as (service, clock, _api, _cache, _definitions):
+        connect(service, clock)
+        service.tick()
+        profile = service.files.public.parent
+        (profile / "profile.env").write_text(
+            "NAME=Demo Racing\nKIND=endurance\n", encoding="utf-8"
+        )
+        store = aw.Store(profile / "audience.json")
+        widget = store.create({
+            "label": "Net active subscriptions",
+            "source": "twitch",
+            "metric": "subscriptions",
+            "mode": "net",
+        })
+        store.capture(widget["id"], service.sample("subscriptions"))
+        with tempfile.TemporaryDirectory() as td:
+            bundle = profile_io.export_profile(
+                "demo", {"profile_dir": str(profile)}, True, td
+            )
+            with zipfile.ZipFile(bundle) as archive:
+                contents = b"".join(archive.read(name) for name in archive.namelist())
+                assert all(
+                    secret.encode() not in contents
+                    for secret in (ACCESS, REFRESH, PRIVATE)
+                ), "Export included Twitch credentials"
+                assert b"clientId" in contents and b"Racing League" in contents
+                assert b"baseline" in archive.read("profile/audience.json")
+            imported = Path(td) / "imported"
+            profile_io.import_profile(
+                bundle,
+                {
+                    "profiles_root": str(imported / "profiles"),
+                    "runtime_root": str(imported / "runtime"),
+                },
+            )
+            other = connection.Service(
+                imported / "profiles/demo",
+                imported / "runtime/demo",
+                fetch=service.fetch,
+                clock=clock.time,
+                monotonic=clock.mono,
+            )
+            try:
+                assert (
+                    not other.status()["connected"]
+                    and other.status()["target"]["id"] == "12345"
+                )
+                assert "reconnect" in other.status()["error"].lower()
+                restored = aw.Store(imported / "profiles/demo/audience.json").read()[
+                    "widgets"
+                ][0]
+                assert restored["baseline"]["value"] == 761
+            finally:
+                other.close()
+
+
+def t_metric_401_revalidates_immediately_without_refreshing_revoked_unexpired_tokens():
+    with fixture() as (service, clock, api, cache, _definitions):
+        connect(service, clock)
+        api.failures["viewers"] = tw.APIError("auth", "fixture-private")
+        api.failures["validate"] = tw.APIError("auth", "fixture-private")
+        before = len(api.calls)
+        service.tick()
+        assert service.status()["phase"] == "reconnect", (
+            "Metric authorization failure was not immediately revalidated"
+        )
+        assert not [
+            call
+            for call in api.calls[before:]
+            if call[0] in ("refresh", "subscriptions")
+        ]
+        assert all(
+            cache.read("twitch", name).availability == "unavailable"
+            for name in connection.METRICS
+        )
+    with fixture() as (service, clock, api, _cache, _definitions):
+        connect(service, clock)
+        api.failures["subscriptions"] = tw.APIError("auth", "fixture-private")
+        api.scopes = []
+        service.tick()
+        assert service.status()["connected"] and metric(service, "viewers")["available"]
+        assert (
+            not metric(service, "subscriptions")["available"]
+            and not service.status()["permissions"]["subscriptions"]
+        )
 
 
 if __name__ == "__main__":
