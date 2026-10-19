@@ -412,9 +412,10 @@ def t_pov_intermission_shows_the_webcam_beside_the_chat():
     assert ids.count(cam["id"]) == 1, ids
 
 
-def t_commentary_intermission_has_no_webcam():
+def t_commentary_intermission_camera_is_available_but_hidden():
     _, items = _intermission_items("GT_Racing_Solo_Commentary.json")
-    assert "Solo Webcam" not in [it["name"] for it in items]
+    camera = next(it for it in items if it["name"] == "Solo Webcam")
+    assert camera["visible"] is False
 
 
 def t_seed_committed_graphics_rejects_traversal():

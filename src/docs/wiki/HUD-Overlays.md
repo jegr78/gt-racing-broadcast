@@ -123,6 +123,34 @@ live Sheet data over your `Overlay.png` frame).
 
 ![Control Center. Overlay Builder modal: drag/resize the HUD slots on a canvas over the Overlay.png frame, style them in the property panel](images/cc-overlay-builder.png)
 
+### Intermission layouts
+
+Choose **Intermission** in the builder's scene selector. In Endurance, position,
+resize, style or hide the public broadcast-chat panel over `Intermission.png`.
+Solo POV and Solo commentary also offer **Webcam** and **Capture** frames. These
+reuse the configured OBS sources; the editor displays labeled placeholders and
+does not open the camera. Capture is below webcam, and chat stays above both.
+
+Each scene has its own CSS and `layout-<page>.json`. Switching scenes preserves
+unsaved drafts in the current browser session. **Save** persists only the selected
+scene; HUD chat and Program video geometry stay independent. Existing
+`intermission.css` imports into advanced CSS unchanged and keeps precedence over
+the generated fields. Remove a conflicting advanced rule to let a field control it.
+
+**Apply in OBS** applies saved Intermission video positions and visibility and
+refreshes its browser source. It does not switch scenes or change audio mutes.
+Showing capture video does not unmute game audio. If OBS reports a missing source,
+update/re-import the profile's scene collection. Automatic relay startup and
+`racecast obs refresh` only hide profile-hidden video items; they never reveal a
+camera an operator hid. **Preview** opens `/intermission` for a live chat check;
+the complete video composition is visible in OBS.
+
+Layouts travel with profile export/import and Look backups. Existing profiles
+retain their appearance until edited: Solo POV initially shows webcam, Solo
+commentary hides it, and capture starts hidden in both.
+
+![Intermission builder with independent chat and Solo video frames](images/cc-intermission-builder.png)
+
 The canvas renders the real base page with **sample data** over your league's
 `Overlay.png` frame, so you position against the actual broadcast graphic. The per-slot
 **font** dropdown (and a global body font) offers the league's own uploaded fonts plus the
