@@ -14,6 +14,29 @@ SCENE = "Intermission"
 SOURCES = {"chat": "Intermission Chat", "webcam": "Solo Webcam", "capture": "Solo Capture"}
 
 
+def allow_control_origin(headers):
+    """Refuse foreign browser requests while retaining headerless Companion GETs."""
+    site = headers.get("Sec-Fetch-Site", "").lower()
+    if site and site not in ("same-origin", "none"):
+        return False
+    origins = [headers.get(k) for k in ("Origin", "Referer") if headers.get(k)]
+    if not origins:
+        return True
+
+    def origin(value):
+        parsed = urlsplit(value)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password:
+            raise ValueError("invalid control origin")
+        return parsed.scheme, parsed.hostname.lower(), parsed.port or (443 if parsed.scheme == "https" else 80)
+
+    try:
+        scheme = "https" if headers.get("X-Forwarded-Proto") == "https" else "http"
+        expected = origin(scheme + "://" + headers.get("Host", ""))
+        return all(origin(value) == expected for value in origins)
+    except ValueError:
+        return False
+
+
 def read_overrides(path):
     """Missing means design defaults. Unreadable state never reveals video/chat."""
     if not path:

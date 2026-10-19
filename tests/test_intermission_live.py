@@ -280,6 +280,53 @@ def t_live_http_routes_and_director_gate():
         srv.server_close()
 
 
+def t_foreign_browser_controls_cannot_change_obs_or_persisted_overrides():
+    import json
+    import urllib.request
+    import urllib.error
+    import test_console_gate as gate
+    obs = Obs()
+    with tempfile.TemporaryDirectory() as td:
+        path = Path(td) / 'live.json'
+        original = gate.m.make_handler
+        def handler(*args, **kwargs):
+            return original(*args, **kwargs, intermission_runtime_path=str(path))
+        with patch.object(gate.m, 'make_handler', side_effect=handler):
+            srv = gate._serve(solo=True)
+        port = srv.server_address[1]
+        try:
+            with patch.object(gate.m, '_obs_ws', obs):
+                assert gate._get(port, '/obs/intermission/hide/chat')[0] == 200
+                before = path.read_bytes()
+                for headers in ({'Sec-Fetch-Site': 'cross-site'}, {'Sec-Fetch-Site': 'same-site'},
+                                {'Origin': 'https://foreign.example'}, {'Origin': 'null'},
+                                {'Referer': 'https://foreign.example/page'}):
+                    for method in ('GET', 'POST'):
+                        url = f'http://127.0.0.1:{port}/obs/intermission'
+                        body = None
+                        if method == 'GET':
+                            url += '/show/webcam'
+                        else:
+                            body = json.dumps({'action': 'show', 'key': 'webcam'}).encode()
+                        req = urllib.request.Request(url, data=body, method=method,
+                            headers=dict(headers, **{'Content-Type': 'application/json'}))
+                        try:
+                            with urllib.request.urlopen(req, timeout=5) as response:
+                                status, raw = response.status, response.read()
+                        except urllib.error.HTTPError as exc:
+                            status, raw = exc.code, exc.read()
+                        payload = json.loads(raw)
+                        assert status == 403 and payload['ok'] is False and payload['error'], (method, headers, status, payload)
+                        assert obs.calls == [] and obs.items['Solo Webcam'] is False
+                        assert path.read_bytes() == before
+                code, raw = gate._get(port, '/obs/intermission/show/webcam', headers={
+                    'Origin': f'http://127.0.0.1:{port}', 'Sec-Fetch-Site': 'same-origin'})
+                assert code == 200 and json.loads(raw)['items']['webcam'] is True, raw
+        finally:
+            srv.shutdown()
+            srv.server_close()
+
+
 if __name__ == '__main__':
     for name in sorted(globals()):
         if name.startswith('t_'):

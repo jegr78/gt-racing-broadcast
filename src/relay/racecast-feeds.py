@@ -12495,12 +12495,15 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 if p[:2] == ["obs", "intermission"]:
                     if p == ["obs", "intermission", "data"]:
                         payload, status = _intermission.state()
-                    elif p == ["obs", "intermission", "restore"]:
-                        payload, status = _intermission.apply("restore")
-                    elif len(p) == 4:
-                        payload, status = _intermission.apply(p[2], p[3])
                     else:
-                        payload, status = {"ok": False, "error": "Invalid Intermission action."}, 400
+                        if not intermission_live.allow_control_origin(self.headers):
+                            return self._send({"ok": False, "error": "Cross-origin Intermission control refused."}, 403)
+                        if p == ["obs", "intermission", "restore"]:
+                            payload, status = _intermission.apply("restore")
+                        elif len(p) == 4:
+                            payload, status = _intermission.apply(p[2], p[3])
+                        else:
+                            payload, status = {"ok": False, "error": "Invalid Intermission action."}, 400
                     return self._send(payload, status)
                 if p == ["obs", "split"]:
                     payload, status = apply_split_state(relay, relay._obs)
@@ -13106,6 +13109,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     title = event_store.set(body.get("title"))
                     return self._send({"ok": True, "title": title})
                 if p == ["obs", "intermission"]:
+                    if not intermission_live.allow_control_origin(self.headers):
+                        return self._send({"ok": False, "error": "Cross-origin Intermission control refused."}, 403)
                     payload, status = _intermission.apply(body.get("action"), body.get("key"))
                     return self._send(payload, status)
                 if p == ["obs", "scene"]:
