@@ -144,9 +144,13 @@ def main():
                     "Editing a verified target left old activation enabled"
                 )
                 page.evaluate("() => youtubeAction('activate')")
-                assert not service.status()["connected"], "Edited target was activated through the action callback"
+                assert not service.status()["connected"], (
+                    "Edited target was activated through the action callback"
+                )
                 page.evaluate("() => youtubePoll(youtubeSession)")
-                assert page.locator("#youtube-activate").is_disabled(), "Status polling revived activation for edited targets"
+                assert page.locator("#youtube-activate").is_disabled(), (
+                    "Status polling revived activation for edited targets"
+                )
                 page.fill("#youtube-video", fixtures.VIDEO)
                 page.fill("#youtube-key", fixtures.KEY)
                 page.click("#youtube-verify")

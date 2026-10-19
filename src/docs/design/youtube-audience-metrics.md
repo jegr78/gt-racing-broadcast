@@ -75,3 +75,22 @@ locks; active and setup generations reject late results. Readers never fetch.
 - [Channel statistics](https://developers.google.com/youtube/data/reference/rest/v3/channels)
 - [Channels list](https://developers.google.com/youtube/data/reference/rest/v3/channels/list)
 - [API key headers](https://docs.cloud.google.com/docs/authentication/api-keys-use)
+
+
+## Operator state consistency
+
+Connection status includes normalized cache-only availability and diagnostics per
+metric. A successful channel read cannot hide an independent video error. Storage
+warnings have separate state, so polling or reopening the dialog cannot erase a
+failed durable-disconnection warning. Successful cleanup clears it.
+
+The verification view shows both the video's owning channel and the separately
+selected subscriber channel. Editing a verified target or key disables activation
+until verification runs again. Status polling cannot re-enable an edited
+candidate, and the activation callback independently rejects it. Late responses
+from a previous profile cannot overwrite the current connection form.
+
+Provider observation time is captured immediately after the response, before
+parsing or acquiring the service/cache locks. Publishing includes elapsed time.
+A blocked parser fixture advances the clock by 119 seconds and must leave only
+one second of the automatic hold interval, rather than granting another 120.
