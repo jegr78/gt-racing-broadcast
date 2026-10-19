@@ -178,6 +178,11 @@ def main():
                     ("dave", "/console/race-control", "console-race-control.png"),
                 ]:
                     desk = browser.new_page(viewport={"width": 1440, "height": 1000})
+                    if args.shots:
+                        desk.route("**/cockpit/program?*", lambda route: route.fulfill(
+                            path=str(ROOT / "src/assets/preview-bg.jpg"),
+                            content_type="image/jpeg",
+                        ))
                     desk.on("pageerror", lambda error: errors.append(error.stack))
                     desk.goto(f"http://127.0.0.1:{relay_port}{path}?t={gate._tok(who)}")
                     tile = desk.locator(".gtile").filter(has_text="Community standings")
@@ -277,6 +282,11 @@ def main():
                     desk.close()
                 director = browser.new_page(viewport={"width": 1600, "height": 1100})
                 director.on("pageerror", lambda error: errors.append(error.stack))
+                if args.shots:
+                    director.route("**/preview/program?*", lambda route: route.fulfill(
+                        path=str(ROOT / "src/assets/preview-bg.jpg"),
+                        content_type="image/jpeg",
+                    ))
                 director.goto(
                     f"http://127.0.0.1:{relay_port}/console/panel?t={gate._tok('bob')}"
                 )
