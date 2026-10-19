@@ -123,6 +123,49 @@ live Sheet data over your `Overlay.png` frame).
 
 ![Control Center. Overlay Builder modal: drag/resize the HUD slots on a canvas over the Overlay.png frame, style them in the property panel](images/cc-overlay-builder.png)
 
+### Splitscreen layouts
+
+Endurance profiles also offer **Splitscreen** in the scene selector. Move and
+resize **Feed A video** and **Feed B video** with the mouse or numeric bounds.
+OBS fits each video inside its box while preserving its aspect ratio. The canvas
+uses labeled placeholders and the profile's existing `Overlay.png` as a reference,
+so you can design without feeds or OBS. Solo profiles keep their single-feed areas.
+
+Each feed carries its own CURRENT/NEXT label. Select **Feed A label** or **Feed B
+label** to style or hide it. **Right offset** moves a label left for positive values;
+**Vertical offset** moves it down. Both start at zero relative to its existing
+anchor. Moving or resizing a feed keeps that anchor at the feed's top-right edge.
+The labels keep their usual slight overhang above the video.
+
+Choose **Equal side by side** to restore the standard boxes, or **Large A +
+secondary B** for an asymmetric starting point. Templates affect the draft and
+support Undo. You choose the A/B geometry; CURRENT/NEXT updates change label text
+and hide inactive NEXT, while retaining the chosen positions. Hiding a label
+never hides its video.
+
+The first edit copies your current HUD design and retains existing Splitscreen
+CSS. **Save** writes `layout-splitscreen.json` and `splitscreen.css`; subsequent HUD
+edits are independent. Existing label CSS stays verbatim and retains precedence
+over generated styles. Its old top/right coordinates keep their meaning; the new
+label offsets add to that anchor. The editor warns when advanced CSS overrides a
+property. Profile export/import and Look backup/restore include the saved design.
+
+**Apply in OBS** refreshes the two Splitscreen browser sources and updates only
+that scene's A/B bounds, plus existing feed-cover bounds. It keeps the current
+scene, feed visibility, ingest, handover state and audio routing. Stint and
+Intermission keep their own layouts. Ordinary OBS refresh/startup also synchronizes
+the saved Split geometry; the existing SPLIT live controls still own visibility
+and audible commentary.
+
+An older collection needs an updated import containing **Splitscreen HUD Overlay**
+in the Split HUD group. Use Setup to export the updated collection, then import it
+in OBS when appropriate for your production. Apply reports a missing browser/source
+or disconnected OBS instead of claiming success. The additional browser shares the
+existing race/timer data and introduces no extra video ingest. Before your first
+Split save, it uses the existing HUD stylesheet to preserve the old appearance.
+
+![Endurance Splitscreen builder with independent video bounds, labels and HUD](images/cc-splitscreen-builder.png)
+
 ### Intermission layouts
 
 Choose **Intermission** in the builder's scene selector. In Endurance, position,

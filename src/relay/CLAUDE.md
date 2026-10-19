@@ -369,3 +369,12 @@ Synthetic relay checks pass `--gt7-bind 127.0.0.1 --gt7-port 0` and a loopback
 `--gt7-ps-ip`, so the real UDP listener uses an ephemeral local socket without
 receiving or discovering a producer's console. Operator defaults remain all
 interfaces on UDP 33740 with the existing console discovery.
+
+**Independent Split HUD (#935).** `/splitscreen/hud` serves the same HUD page with
+only its stylesheet link replaced by `/splitscreen/hud/override.css`. Race/timer
+polls and asset URLs remain shared; this creates no provider fetch or feed ingest.
+Before the first saved Split layout, that CSS route serves `hud.css`; afterwards
+it serves `splitscreen.css`, independently of subsequent HUD edits. Both new routes
+are part of `OBS_PAGE_PATHS`. `/splitscreen/data` and live split/audio intents are
+unchanged. Labels retain their legacy coordinate space inside feed-linked planes;
+current/next polling changes only text and the inactive-NEXT hidden attribute.

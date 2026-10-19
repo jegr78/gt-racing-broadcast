@@ -344,7 +344,7 @@ def bake_scene_layout(collection, page, base_html, override_css):
     mappings = overlay_build.SCENE_SLOT_OBS_SOURCES.get(page, {})
     boxes = overlay_build.scene_boxes(page, overlay_build.base_style(base_html), override_css)
     for src in collection.get("sources", []):
-        if src.get("name") != "Intermission" or src.get("id") != "scene":
+        if src.get("name") != overlay_build.SCENE_NAMES.get(page) or src.get("id") != "scene":
             continue
         for item in src.get("settings", {}).get("items", []):
             for sid, source in mappings.items():
@@ -352,8 +352,13 @@ def bake_scene_layout(collection, page, base_html, override_css):
                     continue
                 if not overlay_build.slot_has_rule(override_css, sid):
                     continue
-                apply_box_transform(collection, source, boxes[sid], scene="Intermission")
-                item["visible"] = not overlay_build.slot_hidden(override_css, sid)
+                scene = overlay_build.SCENE_NAMES[page]
+                apply_box_transform(collection, source, boxes[sid], scene=scene)
+                if page == "intermission":
+                    item["visible"] = not overlay_build.slot_hidden(override_css, sid)
+                else:
+                    item.update(bounds_type=2, bounds_align=0, align=5)
+                    apply_box_transform(collection, source + " Cover", boxes[sid], scene=scene)
 
 
 def _has_box_item(collection, source_name, scene=None):
@@ -586,13 +591,14 @@ def main():
               f"{'shown' if visible else 'hidden'} as the profile CSS says")
     overlay_dir = a.overlay_dir or (os.path.dirname(a.overlay_css) if a.overlay_css else None)
     if overlay_dir:
-        scene_css = os.path.join(overlay_dir, "intermission.css")
-        scene_html = os.path.join(base, "obs", "intermission.html")
-        if os.path.isfile(scene_css) and os.path.isfile(scene_html):
-            with open(scene_css, encoding="utf-8") as fh:
-                scene_style = fh.read()
-            with open(scene_html, encoding="utf-8") as fh:
-                bake_scene_layout(localized, "intermission", fh.read(), scene_style)
+        for page in ("intermission", "splitscreen"):
+            scene_css = os.path.join(overlay_dir, page + ".css")
+            scene_html = os.path.join(base, "obs", page + ".html")
+            if os.path.isfile(scene_css) and os.path.isfile(scene_html):
+                with open(scene_css, encoding="utf-8") as fh:
+                    scene_style = fh.read()
+                with open(scene_html, encoding="utf-8") as fh:
+                    bake_scene_layout(localized, page, fh.read(), scene_style)
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     with open(a.out, "w", encoding="utf-8") as fh:
         json.dump(localized, fh, ensure_ascii=False, indent=4)

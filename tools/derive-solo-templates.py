@@ -303,7 +303,7 @@ def derive(with_tyres=False, intermission_webcam=False):
 
     # The Splitscreen scene was dropped above, leaving its "Split HUD" group and
     # "Splitscreen Labels" leaf referenced by nothing (#304).
-    col["sources"] = [s for s in col["sources"] if s.get("name") != "Splitscreen Labels"]
+    col["sources"] = [s for s in col["sources"] if s.get("name") not in ("Splitscreen Labels", "Splitscreen HUD Overlay")]
     if col.get("groups"):
         col["groups"] = [g for g in col["groups"] if g.get("name") != "Split HUD"]
 

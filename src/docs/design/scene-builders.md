@@ -102,3 +102,23 @@ The correction pass found no remaining actionable security issue. HTTP fixtures
 prove refusal leaves OBS and persisted overrides unchanged. Real buttons in an
 isolated Companion instance were imported and clicked successfully. Changed wiki
 screenshots and the reused slide image were captured from shipped pages.
+
+## Splitscreen builder, #935 requirement matrix
+
+| Requirement | Production path | Positive test | Failure-path test | Runtime evidence |
+| --- | --- | --- | --- | --- |
+| Endurance-only editor | Scene slots/layout APIs and scene picker | FeedA/B, labels and actual HUD slots exposed | Solo refuses Split layout read/write/Apply without mutations | Actual profile-switch browser scenario |
+| Independent render and persistence | Split HUD browser input, CSS route and layout-splitscreen.json | Existing HUD model seeds first edit; subsequent Split save independent | Invalid page/model leaves files unchanged | Separate HUD and Split browser pages after reload |
+| Aspect-preserving video geometry | Shared scene mapping, setup bake and live Apply | Numeric/drag bounds match import and OBS intents | Missing OBS/source returns actionable error | Recording fake shows only Splitscreen transforms |
+| Feed-linked labels | Feed-linked legacy coordinate planes and explicit offset props | Move/resize feed preserves label alignment and offset | Hidden labels stay hidden after current/next updates | Live browser A/B and next_active fixtures |
+| Templates and useful offline preview | Scene template metadata and placeholder canvas | Equal/reset and asymmetric editable layouts; Undo | Unsupported template/profile does not change model | Actual picker, drag, resize and numeric events |
+| Preserve live production state | No feed enable/audio/scene/data mutations | Complete trace only feed and existing cover geometry | Attempts to hide feed via design cannot change OBS visibility | Assert ingest URLs/on-air/feed states and audio unchanged |
+| Signal-cover geometry | Existing cover transform synchronization | Existing cover follows resized feed, future cover creation copies current feed | Missing/off cover does not fail feed layout Apply | Synthetic missing/existing cover cases |
+| Compatibility and older collections | HUD CSS fallback before explicit Split save; verbatim legacy label CSS compatibility | Existing profiles render old geometry and HUD style | Missing dedicated HUD input asks for collection update | Actual relay CSS fallback and explicit Apply diagnostics |
+| Portability and docs | Existing profile bundle and Look snapshot flow | Split layout/CSS/fonts survive roundtrip | Cross-profile saved files stay isolated | Existing bundle/backup behavioral fixtures plus refreshed builder screenshot |
+
+
+Labels retain their existing screen-sized coordinate space inside a feed-linked plane.
+Extra right/vertical offsets use margins, preserving legacy top/right CSS and rotation.
+A browser probe verified identical default positions for three legacy stylesheets,
+then verified feed movement/resizing and independent label offsets.

@@ -24,6 +24,7 @@ FONT_EXTS = tuple(FONT_CTYPES)
 # canvas applies the same standard properties inline, so nothing drifts.
 _PX_PROPS = {
     "left": "left", "top": "top", "width": "width", "height": "height",
+    "offsetRight": "margin-right", "offsetTop": "margin-top",
     "fontSize": "font-size", "borderWidth": "border-width",
     "teamNameMax": "--team-name-max", "teamNameMin": "--team-name-min",
     "padding": "padding", "borderRadius": "border-radius",
@@ -43,7 +44,7 @@ DEFAULT_PROPS = ("left", "top", "width", "height", "fontSize",
                  "fontFamily", "color", "background", "align")
 
 # Stable emit order within a slot rule, independent of dict insertion order.
-PROP_ORDER = ("left", "top", "width", "height", "padding",
+PROP_ORDER = ("left", "top", "offsetRight", "offsetTop", "width", "height", "padding",
               "fontSize", "lineHeight", "letterSpacing",
               # slant (clip-path) emits after the border props and before the
               # text-sizing vars; shear rides with rotation in one transform.
@@ -364,7 +365,10 @@ OVERLAY_SLOT_OBS_SOURCES = {
                        "export_scene": "Program"},
 }
 
+SCENE_NAMES = {"intermission": "Intermission", "splitscreen": "Splitscreen"}
+
 SCENE_SLOT_OBS_SOURCES = {
+    "splitscreen": {"split-feed-a": "Feed A", "split-feed-b": "Feed B"},
     "intermission": {
         "intermission-webcam": "Solo Webcam",
         "intermission-capture": "Solo Capture",

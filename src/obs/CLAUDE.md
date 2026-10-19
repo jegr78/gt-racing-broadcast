@@ -76,3 +76,19 @@ keeps the rules. The per-league overlay override and the visual builder are in
 - **Companion.** Export the config into the gitignored `incoming/` folder, then
   `tools/strip_companion_pass.py` blanks the WebSocket password and writes
   `src/companion/racecast-buttons.companionconfig`. `build.py` re-strips defensively.
+
+## Scene-specific Splitscreen layout (#935)
+
+`Split HUD` uses its own `Splitscreen HUD Overlay` browser at `/splitscreen/hud`,
+including its scene's group-item backup references. `Stint HUD` retains `HUD Overlay`.
+Both browser pages share `/hud/data` and `/timer/data`. The dedicated Split HUD CSS
+route falls back to `hud.css` until `layout-splitscreen.json` exists, then uses the
+independent `splitscreen.css`. The label page uses that same Split stylesheet.
+
+Split feed slots map only to Feed A/B items in `Splitscreen`, using SCALE_INNER
+bounds. Setup bake and live refresh/Apply preserve enabled state, ingest and audio.
+Existing Split feed covers follow edited bounds without visibility writes; future
+cover creation already copies the current feed transform. The Solo derivation
+removes the unused new browser along with the Split group and label browser.
+Legacy label IDs/CSS keep screen coordinates within feed-linked coordinate planes;
+explicit margin offsets compose with that anchor and existing rotation styles.
