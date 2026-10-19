@@ -461,6 +461,58 @@ def t_portable_targets_survive_look_and_import_requires_a_local_key():
             imported.close()
 
 
+def t_replacement_generation_discards_an_old_success_while_new_connection_is_active():
+    with fixture() as (service, clock, api, cache, _definitions):
+        connect(service)
+        service.tick()
+        candidate = command(
+            service, "verify", video=OTHER_VIDEO, channel=CHANNEL, apiKey=""
+        )
+        service.tick()
+        assert service.status()["setup"]["phase"] == "verified"
+        api.block = True
+        clock.advance(30)
+        worker = threading.Thread(target=service.tick)
+        worker.start()
+        try:
+            assert api.entered.wait(2)
+            command(service, "activate", attempt=candidate["attempt"])
+            assert service.status()["connected"]
+        finally:
+            api.release.set()
+            worker.join(3)
+        assert not worker.is_alive()
+        assert not metric(cache, "likes")["available"], (
+            "Old target published after a new connection activated"
+        )
+        service.tick()
+        assert OTHER_VIDEO in cache.read("youtube", "likes").identity
+
+
+def t_superseded_verification_cannot_overwrite_the_new_candidate():
+    with fixture() as (service, _clock, api, _cache, _definitions):
+        api.block = True
+        command(service, "verify", video=VIDEO, channel=CHANNEL, apiKey=KEY)
+        worker = threading.Thread(target=service.tick)
+        worker.start()
+        try:
+            assert api.entered.wait(2)
+            current = command(
+                service, "verify", video=OTHER_VIDEO, channel=CHANNEL, apiKey=KEY
+            )
+        finally:
+            api.release.set()
+            worker.join(3)
+        assert not worker.is_alive()
+        assert service.status()["setup"]["phase"] == "pending", (
+            "Superseded request overwrote the new attempt"
+        )
+        assert len(api.calls) == 1, "Superseded request fetched another target"
+        service.tick()
+        assert service.status()["setup"]["attempt"] == current["attempt"]
+        assert service.status()["setup"]["targets"]["video"]["id"] == OTHER_VIDEO
+
+
 if __name__ == "__main__":
     for name, fn in tuple(globals().items()):
         if name.startswith("t_"):

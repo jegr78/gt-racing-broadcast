@@ -187,6 +187,7 @@ def main():
                     "Offline preview invented decimal precision"
                 )
                 page.click("#audience-open")
+                page.evaluate("audienceEdit(ovState.audience.widgets[1].id)")
                 if args.shots:
                     shot(page, "cc-audience-widgets")
                 page.click("#youtube-open")

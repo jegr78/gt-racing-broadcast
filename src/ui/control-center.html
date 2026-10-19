@@ -817,6 +817,9 @@
 #audience-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 20px}
 #audience-fields label{display:flex;flex-direction:column;gap:6px}
 #audience-fields input,#audience-fields select{width:100%;box-sizing:border-box}
+#audience-source-note{grid-column:1/-1;margin:0}
+#audience-source-note:empty{display:none}
+#youtube-key{background:#232C42;color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:7px 10px;font:13px var(--mono);min-height:34px;box-sizing:border-box}
 #audience-list p{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:12px 0;border-bottom:1px solid #344358}
 #audience-actions{display:flex;flex-wrap:wrap;gap:8px}
 @media(max-width:600px){#audience-fields{grid-template-columns:1fr}}
@@ -3211,7 +3214,7 @@ function audienceList() {
     button('Edit',() => audienceEdit(widget.id));
     const placed = Object.prototype.hasOwnProperty.call(ovState.layout.slots,widget.id);
     button(placed ? 'Remove from this scene' : 'Place in this scene',() => audiencePlace(widget.id,!placed));
-    button(widget.mode === 'net' ? 'Capture baseline / reset' : 'Reset value to start',() => audienceMutate('reset',widget.id));
+    if (widget.source === 'manual' || widget.mode === 'net') button(widget.mode === 'net' ? 'Capture baseline / reset' : 'Reset value to start',() => audienceMutate('reset',widget.id));
     button('Delete shared widget',() => {
       const scenes = Object.entries(ovState.audience.placements || {}).filter(([,ids]) => ids.includes(widget.id)).map(([scene]) => scene);
       if (confirm('Delete "'+widget.label+'" from all scenes? Saved placements: '+(scenes.join(', ') || 'none')))
