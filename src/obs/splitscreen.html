@@ -17,12 +17,25 @@
   #split-left{right:960px}    /* flush to the centre seam */
   #split-right{right:0}       /* flush to the screen edge */
   .split-label[hidden]{display:none}
+  /* Each feed carries a legacy screen-sized coordinate plane. At the
+     default bounds this is pixel-identical to old viewport-relative labels;
+     moving/resizing a feed keeps its label anchored to that feed's top/right. */
+  .split-feed{position:absolute;width:960px;height:540px;overflow:visible}
+  #split-feed-a{left:0;top:270px}
+  #split-feed-b{left:960px;top:270px}
+  .split-label-plane{position:absolute;top:-270px;right:0;width:1920px;height:1080px;pointer-events:none}
+  #split-feed-a .split-label-plane{right:-960px}
+  .split-label{pointer-events:auto;z-index:3}
 </style>
 <link rel="stylesheet" href="/splitscreen/override.css">
 </head>
 <body>
-  <div id="split-left" class="split-label" hidden></div>
-  <div id="split-right" class="split-label" hidden></div>
+  <div id="split-feed-a" class="split-feed" data-video="true" data-edit="Feed A video" data-edit-props="left,top,width,height">
+    <div class="split-label-plane"><div id="split-left" class="split-label" data-edit="Feed A label" data-edit-props="offsetRight,offsetTop,width,height,padding,background,borderWidth,borderStyle,borderColor,borderRadius,slant,opacity,rotation,shear,visible,fontSize,lineHeight,letterSpacing,fontFamily,fontWeight,fontStyle,color,align,valign,textTransform,textShadow" hidden></div></div>
+  </div>
+  <div id="split-feed-b" class="split-feed" data-video="true" data-edit="Feed B video" data-edit-props="left,top,width,height">
+    <div class="split-label-plane"><div id="split-right" class="split-label" data-edit="Feed B label" data-edit-props="offsetRight,offsetTop,width,height,padding,background,borderWidth,borderStyle,borderColor,borderRadius,slant,opacity,rotation,shear,visible,fontSize,lineHeight,letterSpacing,fontFamily,fontWeight,fontStyle,color,align,valign,textTransform,textShadow" hidden></div></div>
+  </div>
 <script>
   // Feed A renders on the left box, Feed B on the right. The relay reports which
   // feed is on air; that box reads CURRENT, the other NEXT. NEXT hides when the

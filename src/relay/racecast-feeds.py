@@ -165,6 +165,7 @@ import gt7_telemetry   # GT7 UDP telemetry: packet parser + TelemetryStore (solo
 from contextlib import nullcontext
 import telemetry_replay
 import intermission_live
+import split_layout
 import overlay_build
 import gt7_recording   # GT7 telemetry recording to disk (solo/POV only)
 import race_engineer_access
@@ -1813,6 +1814,7 @@ OVERLAY_PAGES = ("hud", "splitscreen", "intermission")
 # the relay-up probe before the OBS auto-refresh; keep in sync).
 OBS_PAGE_PATHS = ("/hud", "/hud/override.css",
                   "/splitscreen", "/splitscreen/override.css",
+                  "/splitscreen/hud", "/splitscreen/hud/override.css",
                   "/intermission", "/intermission/override.css")
 FONT_CTYPES = {"woff2": "font/woff2", "woff": "font/woff",
                "ttf": "font/ttf", "otf": "font/otf"}
@@ -12352,6 +12354,17 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     if preview_manager is None:
                         return self._send({"error": "preview disabled"}, 404)
                     return self._send(preview_manager.levels())
+                if p == ["splitscreen", "hud"]:
+                    if not hud_path:
+                        return self._send({"error": "hud disabled"}, 404)
+                    try:
+                        with open(hud_path, encoding="utf-8") as fh:
+                            return self._send_html(split_layout.hud_html(fh.read()))
+                    except OSError:
+                        return self._send({"error": "hud page unavailable"}, 404)
+                if p == ["splitscreen", "hud", "override.css"]:
+                    saved = overlay_dir and os.path.isfile(os.path.join(overlay_dir, "layout-splitscreen.json"))
+                    return self._send_css(read_overlay_css(overlay_dir, "splitscreen" if saved else "hud"))
                 if p == ["splitscreen"]:
                     if not splitscreen_path:
                         return self._send({"error": "splitscreen page not found"}, 404)

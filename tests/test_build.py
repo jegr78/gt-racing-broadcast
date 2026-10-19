@@ -150,10 +150,10 @@ def t_no_orphaned_group_item_backup():
 
 
 # The per-scene HUD groups are separate so the Splitscreen group can carry the
-# CURRENT/NEXT labels and the Stint one cannot.
+# CURRENT/NEXT labels and its own HUD renderer without changing Stint.
 HUD_GROUPS = {
     "Stint HUD": {"Overlay", "HUD Overlay"},
-    "Split HUD": {"Overlay", "HUD Overlay", "Splitscreen Labels"},
+    "Split HUD": {"Overlay", "Splitscreen HUD Overlay", "Splitscreen Labels"},
 }
 
 

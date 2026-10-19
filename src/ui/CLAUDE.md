@@ -161,3 +161,15 @@ preview/start, progress/cancel/history and text-only reports remain profile-boun
 Selection/profile changes invalidate pending previews and discard asynchronous old
 responses. `tools/e2e-ai.py` exercises the real callbacks with a synthetic provider
 process and no credentials; the visual CI job runs it alongside normal views.
+
+### Splitscreen builder (#935)
+
+Endurance adds `splitscreen` to the scene selector and layout/read/write/Apply APIs;
+Solo rejects it before filesystem or OBS mutations. `split_layout.builder_html`
+combines the existing Endurance HUD markup with the real Split feed/label markup,
+excluding Solo telemetry/capture slots. Feed slots expose bounds only. Label
+`offsetRight`/`offsetTop` map to margins and drag independently inside a feed-linked
+legacy coordinate plane; selection outlines sum nested offsets to the stage.
+Templates patch draft geometry with Undo. `tools/e2e-splitscreen.py --shots` covers
+real pointer/numeric/template events, legacy CSS, live labels and profile gating.
+The dedicated image is `cc-splitscreen-builder.png`.

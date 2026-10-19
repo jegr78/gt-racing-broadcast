@@ -313,6 +313,7 @@
               <svg viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>Pop out ↗</button>
             <select id="ov-scene" aria-label="Scene layout" onchange="ovChangeScene(this.value)">
               <option value="hud">HUD / Program</option><option value="intermission">Intermission</option>
+              <option value="splitscreen">Splitscreen</option>
             </select>
             <select id="ov-template" aria-label="Starter layout" onchange="ovUseTemplate(this.value)" hidden></select>
             <select id="ov-slotpick" class="ov-slotpick" onchange="ovSelect(this.value || null)"
@@ -2646,6 +2647,9 @@ function applyKindGating(data) {
     if (a && a.template) template = a.template;
   }
   document.body.classList.toggle('solo', kind === 'solo');
+  const splitOption = $('ov-scene').querySelector('option[value=splitscreen]');
+  splitOption.hidden = splitOption.disabled = kind === 'solo';
+  if (kind === 'solo' && overlayPage === 'splitscreen') ovChangeScene('hud');
   document.body.classList.toggle('tpl-pov', kind === 'solo' && template === 'pov');
   document.body.classList.toggle('tpl-commentary', kind === 'solo' && template !== 'pov');
   if (data && data.ok && data.active !== tmState.profile) {   // every switch path, import included
@@ -2865,7 +2869,7 @@ const ovState = {page: 'hud', active: '', slots: [], sample: {}, flagPresets: []
                  zoom: 'fit'};
 
 // prop -> CSS property; mirrors src/scripts/overlay_build.py (the canonical map).
-const OV_CSSNAME = {left: 'left', top: 'top', width: 'width', height: 'height',
+const OV_CSSNAME = {left: 'left', top: 'top', offsetRight: 'margin-right', offsetTop: 'margin-top', width: 'width', height: 'height',
   padding: 'padding', fontSize: 'font-size', lineHeight: 'line-height',
   letterSpacing: 'letter-spacing', borderWidth: 'border-width',
   borderRadius: 'border-radius', teamNameMax: '--team-name-max',
@@ -2874,7 +2878,7 @@ const OV_CSSNAME = {left: 'left', top: 'top', width: 'width', height: 'height',
   fontFamily: 'font-family', fontWeight: 'font-weight', fontStyle: 'font-style',
   align: 'justify-content', valign: 'align-items',
   textTransform: 'text-transform', opacity: 'opacity'};
-const OV_PX = new Set(['left', 'top', 'width', 'height', 'padding', 'fontSize',
+const OV_PX = new Set(['left', 'top', 'offsetRight', 'offsetTop', 'width', 'height', 'padding', 'fontSize',
                        'letterSpacing', 'borderWidth', 'borderRadius',
                        'teamNameMax', 'teamNameMin']);
 const OV_ALIGN = {left: 'flex-start', center: 'center', right: 'flex-end'};
@@ -2892,7 +2896,7 @@ const OV_SHADOW_CSS =
   '.ov-hidden::after{content:"hidden";position:absolute;top:0;left:0;z-index:60;' +
   'font:700 9px/1.4 system-ui,sans-serif;background:#f59e0b;color:#111;padding:0 3px;border-radius:2px}' +
   '.ov-grid{position:absolute;inset:0;pointer-events:none}' +
-  '[data-solo]::before{position:absolute;inset:0;background:rgba(25,40,60,.8);display:flex;align-items:center;justify-content:center;' +
+  '[data-solo]::before,[data-video]::before{position:absolute;inset:0;background:rgba(25,40,60,.8);display:flex;align-items:center;justify-content:center;' +
   'content:attr(data-edit) " preview";font:32px system-ui;color:#fff}';
 
 async function loadOverlay() {
@@ -2910,6 +2914,8 @@ async function loadOverlay() {
   if (!slotsR.ok) { showProfileErr('overlay-err', slotsR.error || 'could not load slots'); return; }
   if (!layoutR.ok) { showProfileErr('overlay-err', layoutR.error || 'no active profile'); return; }
   ovGridLoad();
+  const splitOption = $('ov-scene').querySelector('option[value=splitscreen]');
+  splitOption.hidden = splitOption.disabled = !!slotsR.solo;
   ovState.page = overlayPage;
   ovState.slots = slotsR.slots || [];
   ovState.sample = slotsR.sample || {};
@@ -2940,7 +2946,9 @@ async function loadOverlay() {
   $('overlay-path').textContent = '';
   if (layoutR.migrated) {
     const e = $('overlay-migrated');
-    e.textContent = 'Imported your existing hand-written CSS into “Fonts & advanced CSS” below — slots start from the base look on top of it.';
+    e.textContent = requestedPage === 'splitscreen'
+      ? 'Copied the current HUD design and kept existing Splitscreen styles. Save to give this scene its own design.'
+      : 'Imported your existing hand-written CSS into “Fonts & advanced CSS” below — slots start from the base look on top of it.';
     e.hidden = false;
   }
   $('ov-stage').style.backgroundImage = "url('/api/overlay/bg?page=" + encodeURIComponent(requestedPage) + "&t=" + Date.now() + "')";
@@ -3569,8 +3577,12 @@ function ovPositionSel() {
   const el = ovState.sel && ovState.shadow.getElementById(ovState.sel);
   if (!el) { sel.style.display = 'none'; return; }
   sel.style.display = 'block';
-  sel.style.left = el.offsetLeft + 'px';
-  sel.style.top = el.offsetTop + 'px';
+  let left = 0, top = 0;
+  for (let node = el; node && node !== $('ov-stage'); node = node.offsetParent) {
+    left += node.offsetLeft; top += node.offsetTop;
+  }
+  sel.style.left = left + 'px';
+  sel.style.top = top + 'px';
   sel.style.width = el.offsetWidth + 'px';
   sel.style.height = el.offsetHeight + 'px';
 }
@@ -3607,15 +3619,25 @@ function ovSlotJson(id) {
 
 function ovStartDrag(e) {
   e.preventDefault();
+  e.stopPropagation();
   const el = e.currentTarget, id = el.id;
   ovSelect(id);
   // Start from the builder's own position, not a customCss one: dragging a slot
   // that customCss moves must not copy the custom value into the slot.
   const box = ovBuilderBox(el), before = ovSlotJson(id);
-  const sx = e.clientX, sy = e.clientY, sl = box.left, st = box.top;
+  const props = (ovState.slots.find(s => s.id === id) || {}).props || [];
+  const offset = props.includes('offsetRight');
+  const margins = ovWithoutCustom(() => {
+    const cs = getComputedStyle(el);
+    return [parseFloat(cs.marginRight) || 0, parseFloat(cs.marginTop) || 0];
+  });
+  const sx = e.clientX, sy = e.clientY;
+  const sl = offset ? margins[0] : box.left, st = offset ? margins[1] : box.top;
   function move(ev) {
-    ovSetProp(id, 'left', ovSnap(sl + Math.round((ev.clientX - sx) / ovState.scale)));
-    ovSetProp(id, 'top', ovSnap(st + Math.round((ev.clientY - sy) / ovState.scale)));
+    const dx = Math.round((ev.clientX - sx) / ovState.scale);
+    const dy = Math.round((ev.clientY - sy) / ovState.scale);
+    ovSetProp(id, offset ? 'offsetRight' : 'left', ovSnap(sl + (offset ? -dx : dx)));
+    ovSetProp(id, offset ? 'offsetTop' : 'top', ovSnap(st + dy));
   }
   function up() {
     window.removeEventListener('pointermove', move);
@@ -3853,6 +3875,7 @@ function ovBaseValues(id) {
     const px = n => { const f = parseFloat(n); return isNaN(f) ? undefined : Math.round(f); };
     const size = n => { const f = px(n); return f > 0 ? f : undefined; };
     const v = {
+      offsetRight: px(cs.marginRight), offsetTop: px(cs.marginTop),
       left: px(cs.left), top: px(cs.top), width: size(cs.width), height: size(cs.height),
       fontSize: px(cs.fontSize),
       color: ovRgbToHex(cs.color), background: ovRgbToHex(cs.backgroundColor),
@@ -3871,7 +3894,7 @@ function ovBaseValues(id) {
 
 // The computed properties that show each builder prop's effect, compared with
 // and without customCss to find what customCss overrides on air.
-const OV_COMPUTED = {left: ['left'], top: ['top'], width: ['width'], height: ['height'],
+const OV_COMPUTED = {left: ['left'], top: ['top'], offsetRight: ['margin-right'], offsetTop: ['margin-top'], width: ['width'], height: ['height'],
   padding: ['padding-top', 'padding-right', 'padding-bottom', 'padding-left'],
   background: ['background-color', 'background-image'],
   borderWidth: ['border-top-width'], borderStyle: ['border-top-style'],
@@ -3958,6 +3981,12 @@ function ovRenderPanel() {
     wrap.append(cb, lab); panel.appendChild(wrap);
   }
   const grid = () => { const g = document.createElement('div'); g.className = 'ovgrid2'; return g; };
+  if (has('offsetRight') || has('offsetTop')) {
+    const g = grid();
+    if (has('offsetRight')) g.appendChild(ovNumField('offsetRight', 'Right offset (px)', view));
+    if (has('offsetTop')) g.appendChild(ovNumField('offsetTop', 'Vertical offset (px)', view));
+    panel.appendChild(g);
+  }
   if (has('left') || has('top')) {
     const g = grid();
     if (has('left')) g.appendChild(ovNumField('left', 'Left (px)', view));
@@ -4148,6 +4177,7 @@ async function saveOverlay() {
   if (d.path) $('overlay-path').textContent = d.path;
   const orig = b.innerHTML;
   b.textContent = 'Saved ✓ — Apply in OBS';
+  $('overlay-migrated').hidden = true;
   setTimeout(() => { b.innerHTML = orig; b.disabled = false; }, 1800);
 }
 

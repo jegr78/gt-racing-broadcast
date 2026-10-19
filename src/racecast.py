@@ -80,6 +80,7 @@ import resources
 import notify   # pure Discord payload builders for producer events (#317)
 import overlay_build as ob
 import intermission_live
+import split_layout
 import fonts_bundle as fb
 import ports as pt
 import app_version as _app_version
@@ -972,6 +973,7 @@ STANDBY_SCENE = "Standby"   # canonical scene name in src/obs/GT_Racing_Enduranc
 # The relay-served pages OBS renders as browser sources (panel is tablet-only).
 OBS_PAGE_PATHS = ("/hud", "/hud/override.css",
                   "/splitscreen", "/splitscreen/override.css",
+                  "/splitscreen/hud", "/splitscreen/hud/override.css",
                   "/intermission", "/intermission/override.css")
 
 
@@ -2732,6 +2734,7 @@ def _refresh_obs_pages(wait=0):
           else "obs: no relay browser sources in OBS. Nothing to refresh.")
     _sync_pov_transform()              # live POV-box position sibling (best effort)
     _sync_scene_layouts()
+    _sync_scene_layouts(page="splitscreen")
     # Feed A/B ship close_when_inactive=False; fan-out needs True so OBS disconnects
     # off-air and no stale backlog forms. Track the flag unconditionally, so a
     # fallback to direct-serve reverts A/B to False. POV ships True, correct in both
@@ -7502,7 +7505,7 @@ def _active_profile_overlay_path(page):
     """(active, abs path to overlay/<page>.css) for the active profile, or
     (None, None) when no profile resolves or `page` is not an overlay page.
     Server-resolved; never a client path. Mirrors _active_profile_env_strict."""
-    if page not in ("hud", "intermission"):
+    if page not in ("hud", "intermission", "splitscreen") or (page == "splitscreen" and _profile_is_solo()):
         return None, None
     active = _active_profile_name()
     if not active:
@@ -7562,11 +7565,13 @@ def _atomic_write_text(path, text):
 
 def _overlay_base_html(page):
     """Text of the base overlay page (src/obs/<page>.html), or '' on error."""
-    if page not in ("hud", "intermission"):
+    if page not in ("hud", "intermission", "splitscreen") or (page == "splitscreen" and _profile_is_solo()):
         return ""
     try:
         with open(resource_path(f"obs/{page}.html"), encoding="utf-8") as fh:
-            return fh.read()
+            html = fh.read()
+        return (split_layout.builder_html(_overlay_base_html("hud"), html)
+                if page == "splitscreen" else html)
     except OSError:
         return ""
 
@@ -7615,7 +7620,7 @@ def overlay_slots_data(page):
     whether the canvas should show the telemetry block the live HUD self-gates.
     {ok, page, slots, css, body, sample, flagPresets, telemetry} or {ok:false, error}."""
     try:
-        if page not in ("hud", "intermission"):
+        if page not in ("hud", "intermission", "splitscreen") or (page == "splitscreen" and _profile_is_solo()):
             return {"ok": False, "error": "invalid page"}
         html = _overlay_base_html(page)
         if not html:
@@ -7630,12 +7635,14 @@ def overlay_slots_data(page):
                 "css": ob.base_style(html), "body": ob.canvas_logo(
                     re.sub(r'<div[^>]*data-solo="true"[^>]*></div>', '', ob.base_body(html))
                     if page == "intermission" and not _profile_is_solo() else ob.base_body(html), logo),
-                "sample": ob.SAMPLE.get(page, {}),
-                "flagPresets": [dict(p) for p in ob.FLAG_PRESETS] if page == "hud" else [],
+                "sample": ({**ob.SAMPLE["hud"], "split-left": "Current", "split-right": "Next"}
+                           if page == "splitscreen" else ob.SAMPLE.get(page, {})),
+                "flagPresets": [dict(p) for p in ob.FLAG_PRESETS] if page in ("hud", "splitscreen") else [],
                 "telemetry": page == "hud" and _profile_has_telemetry(),
                 "solo": _profile_is_solo(),
                 "templates": (intermission_live.starter_layouts(_profile_is_solo())
-                              if page == "intermission" else []),
+                              if page == "intermission" else split_layout.starter_layouts()
+                              if page == "splitscreen" else []),
                 "defaults": ({"intermission-capture": {"visible": False},
                               "intermission-webcam": {"visible": _profile_has_telemetry()}}
                              if page == "intermission" else {})}
@@ -7666,6 +7673,15 @@ def overlay_layout_read_data(page):
             migrated = bool(existing.strip())
             layout = (ob.migrate_layout(page, existing) if migrated
                       else ob.empty_layout(page))
+            if page == "splitscreen":
+                seed = overlay_layout_read_data("hud")
+                if not seed.get("ok"):
+                    return seed
+                layout = json.loads(json.dumps(seed["layout"]))
+                layout["page"] = page
+                prior = layout.get("customCss") or ""
+                layout["customCss"] = prior + ("\n" if prior and existing else "") + existing
+                migrated = migrated or bool(layout.get("slots") or prior or layout.get("fonts"))
             result = {"ok": True, "page": page, "active": active,
                       "layout": layout, "migrated": migrated}
         # Fold a legacy timer.css into the HUD layout's customCss so a
@@ -7851,7 +7867,8 @@ def overlay_font_upload_data(name, data):
 def overlay_bg_path(page="hud"):
     """The active profile's Overlay.png (canvas background), or None if absent."""
     g_dir, _ = _asset_dirs()
-    name = {"hud": "Overlay.png", "intermission": "Intermission.png"}.get(page)
+    name = {"hud": "Overlay.png", "splitscreen": "Overlay.png",
+            "intermission": "Intermission.png"}.get(page)
     if not name:
         return None
     path = os.path.join(g_dir, name)
@@ -7865,7 +7882,7 @@ def _sync_scene_layouts(set_transform=None, set_enabled=None, solo=None,
     if solo is None:
         solo = _profile_is_solo()
     result = {"ok": True, "page": page, "applied": [], "warnings": []}
-    if not solo:
+    if page not in ob.SCENE_NAMES or (page == "intermission" and not solo) or (page == "splitscreen" and solo):
         return result
     od = _active_overlay_dir()
     css_path = os.path.join(od, page + ".css") if od else None
@@ -7879,15 +7896,28 @@ def _sync_scene_layouts(set_transform=None, set_enabled=None, solo=None,
         set_enabled = set_enabled or obs_ws.set_scene_item_enabled
         _, live_video, _ = intermission_live.read_overrides(
             os.path.join(_runtime_dir(), "intermission-live.json"))
+        scene = ob.SCENE_NAMES[page]
+        covers = None
         for sid, box in ob.scene_boxes(page, base_css, css).items():
             source = ob.SCENE_SLOT_OBS_SOURCES[page][sid]
-            scene = "Intermission"
             # Unedited legacy CSS must not change the template's video defaults.
             if not ob.slot_has_rule(css, sid):
                 continue
             ok, note = set_transform(scene, source, obs_ws.pov_scene_item_transform(box))
             if not ok:
                 result["warnings"].append(f"{source}: {note or 'item unavailable; update the OBS collection'}")
+                continue
+            if page == "splitscreen":
+                result["applied"].append(source)
+                if covers is None:
+                    covers, cover_note = obs_ws.get_scene_items(scene)
+                    if cover_note:
+                        result["warnings"].append(cover_note)
+                cover = source + " Cover"
+                if cover in (covers or {}):
+                    ok, note = set_transform(scene, cover, obs_ws.pov_scene_item_transform(box))
+                    if not ok:
+                        result["warnings"].append(f"{cover}: {note or 'cover geometry unavailable'}")
                 continue
             visible = not ob.slot_hidden(css, sid)
             if not explicit and sid.removeprefix("intermission-") in live_video:
@@ -7906,7 +7936,7 @@ def _sync_scene_layouts(set_transform=None, set_enabled=None, solo=None,
 
 def overlay_apply_data(page, set_transform=None, set_enabled=None, refresh=None, restore=None):
     """Explicit producer action: apply one saved scene without a cut/audio change."""
-    if page not in ("hud", "intermission") or not _active_profile_name():
+    if not _active_profile_overlay_path(page)[0]:
         return {"ok": False, "error": "no active profile or invalid page"}
     foreign = _foreign_relay_profile()
     if foreign:
@@ -7919,6 +7949,14 @@ def overlay_apply_data(page, set_transform=None, set_enabled=None, refresh=None,
         if page == "hud":
             _refresh_obs_pages()
             return {"ok": True, "page": page}
+        if page == "splitscreen":
+            names, note = refresh(needle=f"127.0.0.1:{RELAY_PORT}/splitscreen")
+            if note or not {"Splitscreen Labels", split_layout.HUD_SOURCE} <= set(names):
+                return {"ok": False, "page": page, "refreshed": names,
+                        "error": note or "Splitscreen browser sources missing; update the OBS collection"}
+            result = _sync_scene_layouts(set_transform, set_enabled, page=page, explicit=True)
+            result["refreshed"] = names
+            return result
         result = _sync_scene_layouts(set_transform, set_enabled, page=page, explicit=True)
         names, note = refresh(needle=f"127.0.0.1:{RELAY_PORT}/intermission")
         result["refreshed"] = names
