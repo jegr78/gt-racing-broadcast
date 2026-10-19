@@ -5162,8 +5162,9 @@ def apply_graphic_take(relay, obs_ws, modes, roles, name, source, on, crew_takes
 def _take_graphic(obs_ws, entry, defs, name, source, on, crew_takes, flag_store,
                   chat_store, display_name=None):
     """The OBS side of a crew take or hide, after the rights check."""
+    identity = {"source": source, "displayName": display_name or source}
     if obs_ws is None:
-        return {"ok": False, "error": "obs unavailable"}, 503
+        return {"ok": False, "error": "obs unavailable", **identity}, 503
     items = []
     if entry["flag"] is None:
         prev = graphic_takes.find(defs, crew_takes.snapshot()[0])
@@ -5171,10 +5172,10 @@ def _take_graphic(obs_ws, entry, defs, name, source, on, crew_takes, flag_store,
             items += [(sc, d["source"]) for sc in d["scenes"]]
     state, note = obs_ws.read_obs_state(items, [])
     if state is None:
-        return {"ok": False, "error": note or "obs unreachable"}, 503
+        return {"ok": False, "error": note or "obs unreachable", **identity}, 503
     if on and not graphic_takes.scene_ok(entry, state.get("scene")):
         return {"ok": False, "error": f"{' / '.join(entry['scenes'])} is not on air",
-                "program_scene": state.get("scene")}, 409
+                "program_scene": state.get("scene"), **identity}, 409
     failed = []
     if entry["flag"]:
         active = flag_store.get()

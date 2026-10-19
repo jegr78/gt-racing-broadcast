@@ -556,6 +556,33 @@ def t_take_view_does_not_attach_aliases_to_controls_without_rights():
     )
 
 
+def t_authorized_take_errors_keep_alias_and_canonical_identity():
+    import test_console_gate as gate
+    from unittest.mock import patch
+
+    definitions = gate.m.graphic_takes.definitions(False)
+    entry = gate.m.graphic_takes.find(definitions, "Standings")
+    for obs, status, error in (
+        (None, 503, "obs unavailable"),
+        (gate._TakeFakeObs(scene="Intermission"), 409, "is not on air"),
+    ):
+        data, code = gate.m._take_graphic(
+            obs, entry, definitions, "Alice", "Standings", True,
+            gate.m.graphic_takes.CrewTakes(), None, None, "Community board",
+        )
+        assert code == status and error in data["error"], data
+        assert data.get("source") == "Standings", data
+        assert data.get("displayName") == "Community board", data
+    fake = gate._TakeFakeObs()
+    with patch.object(fake, "read_obs_state", return_value=(None, "fixture offline")):
+        data, code = gate.m._take_graphic(
+            fake, entry, definitions, "Alice", "Standings", True,
+            gate.m.graphic_takes.CrewTakes(), None, None, "Community board",
+        )
+        assert code == 503 and data["error"] == "fixture offline", data
+        assert data.get("displayName") == "Community board", data
+
+
 def t_concurrent_metadata_refresh_keeps_both_downloaders_entries():
     import asset_metadata as am
     import tempfile, threading
