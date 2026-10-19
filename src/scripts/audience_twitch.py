@@ -10,6 +10,12 @@ HOSTS = {"twitch.tv", "www.twitch.tv", "m.twitch.tv"}
 SCOPE = "channel:read:subscriptions"
 
 
+class APIError(Exception):
+    def __init__(self, code, message, transient=False, retry_after=0):
+        super().__init__(message)
+        self.code, self.transient, self.retry_after = code, transient, retry_after
+
+
 def _text(value, limit=2048):
     if (
         not isinstance(value, str)
