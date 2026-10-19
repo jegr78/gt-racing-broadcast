@@ -249,7 +249,7 @@ def t_disk_failure_and_invalid_definition_preserve_exact_file():
             try:
                 store.update(goal["id"], bad)
             except ValueError:
-                pass
+                pass  # rejection is the expected contract
             else:
                 raise AssertionError("Invalid update accepted")
             assert path.read_bytes() == before
@@ -257,7 +257,7 @@ def t_disk_failure_and_invalid_definition_preserve_exact_file():
             try:
                 store.update(goal["id"], {"manualValue": 761})
             except OSError:
-                pass
+                pass  # injected disk failure must be reported
             else:
                 raise AssertionError("Disk error not reported")
         assert path.read_bytes() == before
@@ -318,7 +318,7 @@ def t_explicit_capture_delete_and_bounded_definition_count():
             try:
                 store.capture(goal["id"], sample)
             except ValueError:
-                pass
+                pass  # rejection is the expected contract
             else:
                 raise AssertionError("Captured unavailable or inexact source")
         captured = store.capture(
@@ -338,7 +338,7 @@ def t_explicit_capture_delete_and_bounded_definition_count():
         try:
             store.create({"label": "one too many"})
         except ValueError:
-            pass
+            pass  # limit rejection is expected
         else:
             raise AssertionError("Unbounded widgets accepted")
         assert store.path.read_bytes() == before
