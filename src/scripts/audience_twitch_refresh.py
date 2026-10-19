@@ -44,6 +44,7 @@ class Rotation:
         self._owner = identity["id"]
         self._pending, self._validated = None, None
         self._phase, self._error, self._generation = "ready", "", 0
+        self._retry_after = 5
 
     def current(self):
         with self.lock:
@@ -51,7 +52,11 @@ class Rotation:
 
     def status(self):
         with self.lock:
-            return {"phase": self._phase, "error": self._error}
+            return {
+                "phase": self._phase,
+                "error": self._error,
+                "retryAfter": self._retry_after,
+            }
 
     def cancel(self):
         with self.lock:
@@ -119,6 +124,7 @@ class Rotation:
                 if error.transient:
                     with self.lock:
                         if generation == self._generation:
+                            self._retry_after = max(5, min(900, error.retry_after))
                             self._phase, self._error = (
                                 "validating",
                                 "Could not validate refreshed authorization; retrying",
@@ -146,12 +152,14 @@ class Rotation:
                     return self._reconnect(
                         generation, "Rotated Twitch authorization expired; reconnect"
                     )
+                self._retry_after = max(5, min(900, error.retry_after))
                 self._phase, self._error = (
                     "validating",
                     "Could not validate rotated Twitch authorization; retrying",
                 )
                 return False
             except Exception:
+                self._retry_after = 5
                 self._phase, self._error = (
                     "storage_error",
                     "Could not save rotated authorization; retry local storage",

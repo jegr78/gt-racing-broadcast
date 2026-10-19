@@ -627,6 +627,101 @@ def t_foreign_profile_commands_fail_before_setup_or_storage():
         )
 
 
+def t_disconnect_during_refresh_cannot_recreate_private_files_after_exchange_returns():
+    with fixture() as (service, clock, api, cache, _definitions):
+        api.expires = 10
+        connect(service, clock)
+        api.expires = 0
+        clock.advance(10)
+        service.tick()
+        api.block = "refresh"
+        worker = threading.Thread(target=service.tick)
+        worker.start()
+        try:
+            assert api.entered.wait(2)
+            assert service.files.load()[1] == {"phase": "refreshing"}
+            command(service, "disconnect")
+            assert not service.files.secret.exists()
+        finally:
+            api.release.set()
+            worker.join(3)
+        assert not worker.is_alive()
+        assert not service.files.secret.exists(), (
+            "Late refresh recreated disconnected credentials"
+        )
+        assert not service.files.read_public()["enabled"]
+        assert (
+            service.status()["phase"] == "disconnected"
+            and not service.status()["connected"]
+        )
+        assert not [
+            call
+            for call in api.calls
+            if call[0] == "validate" and call[1].get("access") == NEWACCESS
+        ]
+        assert cache.read("twitch", "viewers").availability == "unavailable"
+
+
+def t_replaced_connection_drops_late_previous_generation_sample():
+    with fixture() as (service, clock, api, cache, _definitions):
+        connect(service, clock)
+        api.block = "viewers"
+        worker = threading.Thread(target=service.tick)
+        worker.start()
+        try:
+            assert api.entered.wait(2)
+            candidate = command(service, "verify", clientId=CLIENT, channel="racing")
+            setup = service.setup
+            setup.step()
+            clock.advance(5)
+            setup.step()
+            setup.step()
+            setup.step()
+            assert setup.status()["phase"] == "verified"
+            command(service, "activate", attempt=candidate["attempt"])
+        finally:
+            api.release.set()
+            worker.join(3)
+        assert not worker.is_alive() and service.status()["connected"]
+        assert cache.read("twitch", "viewers").availability == "unavailable", (
+            "Old generation overwrote the replacement connection cache"
+        )
+
+
+def t_rotated_token_validation_honors_retry_after_without_repeating_exchange():
+    with fixture() as (service, clock, api, _cache, _definitions):
+        api.expires = 10
+        connect(service, clock)
+        original = service.fetch
+        limited = [True]
+
+        def fetch(operation, client, **values):
+            if operation == "validate" and values["access"] == NEWACCESS and limited[0]:
+                api.calls.append((operation, dict(values)))
+                raise tw.APIError("rate_limit", "fixture-private", True, 90)
+            return original(operation, client, **values)
+
+        service.fetch = fetch
+        api.expires = 0
+        clock.advance(10)
+        service.tick()
+        service.tick()
+        assert service.status()["phase"] == "validating"
+        before = len(api.calls)
+        clock.advance(89)
+        service.tick()
+        assert len(api.calls) == before, (
+            "Rotated token validation ignored provider Retry-After"
+        )
+        limited[0] = False
+        clock.advance(1)
+        service.tick()
+        assert (
+            service.status()["connected"]
+            and len([call for call in api.calls if call[0] == "refresh"]) == 1
+        )
+
+
 if __name__ == "__main__":
     for name, fn in tuple(globals().items()):
         if name.startswith("t_"):

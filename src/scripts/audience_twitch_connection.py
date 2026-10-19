@@ -392,7 +392,9 @@ class Service:
                     self.phase, self.error = state["phase"], state["error"]
                     if state["phase"] == "storage_error":
                         self.storage_error = state["error"]
-                    self.retry_due = self.monotonic() + 5
+                    self.retry_due = self.monotonic() + max(
+                        5, min(900, state["retryAfter"])
+                    )
             return
         started = self.monotonic()
         failure = None
