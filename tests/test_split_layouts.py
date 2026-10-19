@@ -77,7 +77,7 @@ def t_split_collection_uses_an_independent_hud_browser_and_scoped_video_bounds()
         html = m._overlay_base_html('splitscreen')
     scene = next(x for x in collection['sources'] if x['name'] == 'Splitscreen')
     feed = next(x for x in scene['settings']['items'] if x['name'] == 'Feed A')
-    feed.update(bounds_type=0, align=0, bounds_align=5)
+    feed.update(bounds_type=0, align=0, bounds_align=5, visible=False)
     css = '#split-feed-a{left:80px;top:100px;width:1200px;height:675px}'
     test_solo_obs.sa.bake_scene_layout(collection, 'splitscreen', html, css)
     for before, after in zip(original['sources'], collection['sources'], strict=True):
@@ -87,7 +87,7 @@ def t_split_collection_uses_an_independent_hud_browser_and_scoped_video_bounds()
     feed = next(i for i in scene['settings']['items'] if i['name'] == 'Feed A')
     assert feed['pos'] == {'x': 80, 'y': 100}
     assert feed['bounds'] == {'x': 1200, 'y': 675}
-    assert feed['bounds_type'] == 2 and feed['visible'] is True
+    assert feed['bounds_type'] == 2 and feed['visible'] is False
     assert feed['align'] == 5 and feed['bounds_align'] == 0
 
 
@@ -269,6 +269,29 @@ def t_new_cover_uses_current_customized_split_feed_transform():
     assert writes == [{'sceneName': 'Splitscreen', 'sceneItemId': 11, 'sceneItemTransform': transform}]
     assert not any(kind in ('SetCurrentProgramScene', 'SetInputMute', 'SetSceneItemEnabled')
                    for kind, _ in session.sent)
+
+
+def t_split_internal_profile_gates_are_independent():
+    html = (ROOT / 'src/obs/splitscreen.html').read_text(encoding='utf-8')
+    with patch.object(m, '_profile_is_solo', return_value=True):
+        assert m._overlay_base_html('splitscreen') == '', 'Solo has no Split builder base'
+        with patch.object(m, '_overlay_base_html', return_value=html):
+            result = m.overlay_slots_data('splitscreen')
+            assert result == {'ok': False, 'error': 'invalid page'}, result
+    with tempfile.TemporaryDirectory() as td:
+        original = cli._mk_active_profile(td)
+        overlay = Path(td) / 'profiles/demo/overlay'
+        overlay.mkdir()
+        (overlay / 'splitscreen.css').write_text('#split-feed-a{left:80px}', encoding='utf-8')
+        calls = []
+        try:
+            with patch.object(m, '_profile_is_solo', return_value=False):
+                result = m._sync_scene_layouts(page='splitscreen', solo=True,
+                    set_transform=lambda *args: (calls.append(args) or (True, '')),
+                    set_enabled=lambda *args: (calls.append(args) or (True, '')))
+            assert result['ok'] and not calls, 'Explicit Solo sync must refuse Split video geometry'
+        finally:
+            m._env_base, m._runtime_base_dir = original
 
 
 if __name__ == '__main__':

@@ -175,7 +175,8 @@ def main():
                 page.select_option('#ov-scene', 'splitscreen')
                 page.wait_for_function("() => ovState.page === 'splitscreen' && ovState.layout.slots['split-feed-a'].width === 1200")
                 profile.write_text('NAME=Demo Racing\nKIND=solo\nTEMPLATE=pov\n', encoding='utf-8')
-                page.select_option('#ov-scene', 'hud')
+                changed = page.evaluate("() => { applyKindGating({ok:true,active:'demo',profiles:[{name:'demo',kind:'solo',template:'pov'}]}); return overlayPage; }")
+                assert changed == 'hud', 'Changing to Solo must leave unsupported Split editor'
                 page.wait_for_function("() => ovState.page === 'hud'")
                 assert not page.locator('#ov-scene option[value=splitscreen]').is_visible()
                 assert not errors, errors

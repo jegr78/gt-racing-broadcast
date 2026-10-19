@@ -217,6 +217,7 @@ def t_solo_templates_have_own_name_and_no_splitscreen_leftovers():
         assert d["name"] == "GT Racing Solo", fn
         src_names = {s.get("name") for s in d["sources"]}
         assert "Splitscreen Labels" not in src_names, fn
+        assert "Splitscreen HUD Overlay" not in src_names, fn
         group_names = {g.get("name") for g in d.get("groups", [])}
         assert "Split HUD" not in group_names, fn
 
