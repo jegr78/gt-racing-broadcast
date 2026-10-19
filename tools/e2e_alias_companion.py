@@ -94,6 +94,9 @@ def run(pw, url, relay_port, rename, obs, directory, shots=False):
         target.wait_for()
         style = config["pages"]["3"]["controls"]["3"]["0"]["style"]
         _wait_caption(page, style, "Community standings")
+        trailer_style = config["pages"]["1"]["controls"]["0"]["7"]["style"]
+        red_flag_style = config["pages"]["1"]["controls"]["1"]["7"]["style"]
+        _wait_caption(page, trailer_style, "League presentation")
         before = target.evaluate("(e)=>getComputedStyle(e).backgroundImage")
         rename("Sponsor board")
         _wait_caption(page, style, "Sponsor board")
@@ -113,6 +116,8 @@ def run(pw, url, relay_port, rename, obs, directory, shots=False):
             ["mutation", "customVariables.delete", {"name": "racecast_asset_labels"}],
         )
         _wait_caption(page, style, "Standings Toggle")
+        _wait_caption(page, trailer_style, "TRAILER")
+        _wait_caption(page, red_flag_style, "RED\nFLAG")
         page.evaluate(
             RPC,
             [

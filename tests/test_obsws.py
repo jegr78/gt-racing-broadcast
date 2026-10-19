@@ -2175,9 +2175,10 @@ def t_companion_graphic_toggles_call_the_relay_and_light_in_both_scenes():
 
 
 def t_companion_red_flag_shows_and_hides_the_cover_through_the_relay():
-    [btn] = [b for label, b in _companion_buttons() if label == "RED\nFLAG"
-             and any("racecontrol" in (a["options"].get("url") or {}).get("value", "")
-                     for a in _actions(b) if a.get("definitionId") == "get")]
+    [btn] = [b for _label, b in _companion_buttons()
+             if any((a["options"].get("url") or {}).get("value", "")
+                    == "http://127.0.0.1:8088/obs/graphic/show/Standby%20Cover"
+                    for a in _actions(b) if a.get("definitionId") == "get")]
     steps = [[a["options"]["url"]["value"] for a in s["action_sets"]["down"]]
              for _, s in sorted(btn["steps"].items())]
     assert steps == [

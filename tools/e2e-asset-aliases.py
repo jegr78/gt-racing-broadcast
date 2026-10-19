@@ -105,7 +105,7 @@ def main():
                     .locator("#gfx-gallery .cap")
                     .filter(has_text="Community standings")
                     .get_attribute("title")
-                    == "Standings.png"
+                    == "Community standings (Standings.png)"
                 )
                 assert (
                     "League presentation" in page.locator("#media-gallery").inner_text()

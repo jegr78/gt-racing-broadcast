@@ -2010,7 +2010,7 @@ function renderGallery(containerId, kind, items, isVideo) {
     const cap = document.createElement('div');
     cap.className = 'cap';
     cap.textContent = displayName;
-    cap.title = name;   // the caption ellipsizes long names
+    cap.title = cap.textContent + ' (' + name + ')';   // keep full human and canonical labels
     t.appendChild(cap);
     c.appendChild(t);
   });
