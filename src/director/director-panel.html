@@ -708,6 +708,7 @@
         <button type="button" class="navbtn" data-area="handover" data-short="H"><span class="ndot"></span><span class="nlbl">Handover<small class="nwhy"></small></span></button>
         <button type="button" class="navbtn" data-area="graphics" data-short="G"><span class="ndot"></span><span class="nlbl">Graphics<small class="nwhy"></small></span></button>
         <button type="button" class="navbtn" data-area="hud" data-short="U"><span class="ndot"></span><span class="nlbl">HUD<small class="nwhy"></small></span></button>
+        <button type="button" class="navbtn" data-area="intermission" data-short="I"><span class="ndot"></span><span class="nlbl">Intermission<small class="nwhy"></small></span></button>
         <button type="button" class="navbtn" data-area="cues" data-short="C"><span class="ndot"></span><span class="nlbl">Cues<small class="nwhy"></small></span></button>
         <button type="button" class="navbtn" data-area="audio" data-short="A"><span class="ndot"></span><span class="nlbl">Audio<small class="nwhy"></small></span></button>
       </div>
@@ -811,6 +812,16 @@
           <div class="body">
             <div class="keys" id="timerBus"></div>
             <div class="hint" id="timerInfo">Timer: connecting to relay…</div>
+          </div>
+        </section>
+      </div>
+      <div class="area" data-area="intermission">
+        <section class="bus"><div class="cap">Intermission visibility</div>
+          <div class="body">
+            <div class="keys" id="intermissionBus"></div>
+            <p class="hint" id="intermissionInfo">Waiting for OBS…</p>
+            <button type="button" id="intermissionRestore" class="k" disabled onclick="intermissionAction('restore')">Restore saved defaults</button>
+            <p class="hint">Targets Intermission only, including while another scene is live. Audio stays unchanged. Restore may reveal a camera enabled in the saved layout.</p>
           </div>
         </section>
       </div>
@@ -1580,6 +1591,61 @@ async function obsPost(path, body){
   return d;
 }
 let activeTransition = "fade";
+let intermissionSequence = 0, intermissionPending = false, intermissionState = null;
+function renderIntermission(state){
+  intermissionState = state;
+  const keys = state.solo ? ['chat', 'webcam', 'capture'] : ['chat'];
+  const bus = $('#intermissionBus');
+  if (bus.children.length !== keys.length){
+    bus.replaceChildren();
+    keys.forEach(key => {
+      const button = mkKey('', 'vis', () => intermissionAction('toggle', key));
+      button.dataset.intermission = key;
+      bus.appendChild(button);
+    });
+  }
+  keys.forEach(key => {
+    const button = bus.querySelector('[data-intermission="' + key + '"]');
+    const enabled = (state.items || {})[key];
+    const known = typeof enabled === 'boolean';
+    const name = {chat:'Chat', webcam:'Webcam', capture:'Capture'}[key];
+    button.textContent = name + ': ' + (known ? (enabled ? 'shown' : 'hidden') : 'unknown');
+    button.classList.toggle('on', enabled === true);
+    button.disabled = intermissionPending || !known;
+    button.setAttribute('aria-pressed', known ? String(enabled) : 'mixed');
+    button.title = (state.notes || {})[key] || 'Toggle only in Intermission';
+  });
+  $('#intermissionRestore').disabled = intermissionPending || !state.ok || keys.some(k => typeof (state.items || {})[k] !== 'boolean');
+  $('#intermissionInfo').textContent = state.error || Object.values(state.notes || {}).join(' ') || 'Live choice retained until you restore defaults or apply a saved layout.';
+}
+async function intermissionPoll(){
+  if (intermissionPending) return;
+  const sequence = ++intermissionSequence;
+  try {
+    const response = await fetch(RC_API('/obs/intermission/data'), {cache:'no-store'});
+    const state = await response.json();
+    if (sequence === intermissionSequence) renderIntermission(state);
+  } catch (e) {
+    if (sequence === intermissionSequence) renderIntermission({ok:false, solo:document.body.classList.contains('solo'), error:'Relay unavailable; visibility unknown.'});
+  }
+}
+async function intermissionAction(action, key){
+  if (intermissionPending) return;
+  ++intermissionSequence;
+  intermissionPending = true;
+  if (intermissionState) renderIntermission(intermissionState);
+  try {
+    const result = await obsPost('intermission', {action, key});
+    if (result.error) toast(result.error);
+    if (result.items) intermissionState = result;
+  } catch (e) {
+    intermissionState = {ok:false, solo:document.body.classList.contains('solo'), error:'Relay unavailable; visibility unknown.'};
+  } finally {
+    intermissionPending = false;
+    if (intermissionState) renderIntermission(intermissionState);
+    intermissionPoll();
+  }
+}
 let activeDuration = 300;
 
 function renderTxBar(){
@@ -3401,7 +3467,7 @@ var PHONE_MQ = matchMedia("(max-width:899px)");
 function store(k, v){ try{ localStorage.setItem(k, v); }catch(e){ /* private mode */ } }
 function recall(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
 
-var AREAS = ["handover", "graphics", "hud", "cues", "audio", "broadcast", "schedule", "setup", "fault"];
+var AREAS = ["handover", "graphics", "hud", "intermission", "cues", "audio", "broadcast", "schedule", "setup", "fault"];
 function areaAvailable(name){
   if (!AREAS.includes(name)) return false;   // a stale stored value never reaches the selector
   const b = document.querySelector(`.navbtn[data-area="${name}"]`);
@@ -3728,6 +3794,7 @@ $("#obsStreamBtn").addEventListener("click", async ()=>{
   obsStatePoll(); flagGfxPoll();
 });
 obsStatePoll(); setInterval(obsStatePoll, 2000);
+intermissionPoll(); setInterval(intermissionPoll, 2000);
 $("#partActionBtn").addEventListener("click", () => {
   if (partsState && partsState.action) openPartModal(partsState);
 });

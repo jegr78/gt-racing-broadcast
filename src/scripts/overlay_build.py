@@ -414,6 +414,13 @@ def _top_level_rules(css):
     return rules
 
 
+def slot_has_rule(css_text, slot_id):
+    """Whether CSS explicitly configures this plain ID, including visibility only."""
+    return any("#" + slot_id in (s.strip() for s in selectors.split(","))
+               for selectors, body in _top_level_rules(_CSS_COMMENT_RE.sub("", css_text))
+               if body.strip())
+
+
 def slot_hidden(css_text, slot_id):
     """True when the effective `display` of the plain `#<slot_id>` selector is
     `none`. Only rules whose selector list holds `#<slot_id>` as a whole item
@@ -630,6 +637,9 @@ def _slot_rule(slot_id, overrides, allowed):
     rotation and shear are emitted together as one combined transform by
     _transform_decl, so they are skipped in the per-prop loop."""
     decls = []
+    if (slot_id in SCENE_SLOT_OBS_SOURCES.get("intermission", {})
+            and "visible" in allowed and overrides.get("visible") is True):
+        decls.append("display: block")
     for prop in PROP_ORDER:
         if prop in ("rotation", "shear"):
             continue

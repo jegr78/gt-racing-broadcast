@@ -45,7 +45,8 @@ def main():
             overlay_apply=lambda page: m.overlay_apply_data(page,
                 set_transform=lambda *a: (calls.append(('transform', a)) or (True, '')),
                 set_enabled=lambda *a: (calls.append(('visibility', a)) or (True, '')),
-                refresh=lambda **kw: (['Intermission Chat'], '')))
+                refresh=lambda **kw: (['Intermission Chat'], ''),
+                restore=lambda: {'ok': True}))
         server, port = ui._serve(ctx)
         try:
             with sync_playwright() as pw:
@@ -64,6 +65,19 @@ def main():
                                  ROOT / 'src/docs/slides/assets/img/cc-overlay-builder.png')
                 page.select_option('#ov-scene', 'intermission')
                 page.wait_for_function("() => ovState.page === 'intermission' && ovState.slots.length === 3")
+                assert page.locator('#ov-template option').count() == 5
+                initial = page.evaluate('JSON.stringify(ovState.layout)')
+                assert page.evaluate("() => { try { ovUseTemplate('unsupported'); return true; } catch(e) { return false; } }")
+                page.evaluate("() => { overlayPage='hud'; ovUseTemplate('webcam-chat'); overlayPage='intermission'; }")
+                assert page.evaluate('JSON.stringify(ovState.layout)') == initial, 'A stale scene must not accept a starter layout'
+                page.evaluate("() => { ovState.templates.push({id:'invalid-slot',slots:{'not-a-scene-slot':{visible:true}}}); ovUseTemplate('invalid-slot'); ovState.templates.pop(); ovHistInit(); }")
+                assert page.evaluate('JSON.stringify(ovState.layout)') == initial, 'Templates must patch only supported slots'
+                page.select_option('#ov-template', 'capture-webcam-chat')
+                assert page.evaluate("ovState.layout.slots['intermission-capture'].visible") is True
+                assert page.evaluate("ovState.layout.slots.ichat.top") == 400
+                assert calls == [], 'Selecting a starter layout must not touch OBS'
+                page.click('#overlay-undo')
+                assert page.evaluate("ovState.layout.slots['intermission-capture'].visible") is False
                 assert page.evaluate("ovState.shadow.getElementById('ichat').getBoundingClientRect().width") > 100
                 assert page.evaluate("ovState.shadow.getElementById('ichat-log').textContent.includes('RaceFan')")
                 page.evaluate("ovPreviewText('ichat', '')")
@@ -103,6 +117,8 @@ def main():
                     page.evaluate('loadOverlay()')
                     page.wait_for_function("() => ovState.slots.length === 1")
                     assert page.evaluate('ovState.slots[0].id') == 'ichat'
+                    assert page.locator('#ov-template option').count() == 3
+                    assert not page.locator('#ov-template option[value=webcam-chat]').count()
                     assert not page.evaluate("!!ovState.shadow.getElementById('intermission-webcam')")
                 assert not errors, errors
                 browser.close()

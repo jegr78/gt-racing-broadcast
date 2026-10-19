@@ -314,6 +314,7 @@
             <select id="ov-scene" aria-label="Scene layout" onchange="ovChangeScene(this.value)">
               <option value="hud">HUD / Program</option><option value="intermission">Intermission</option>
             </select>
+            <select id="ov-template" aria-label="Starter layout" onchange="ovUseTemplate(this.value)" hidden></select>
             <select id="ov-slotpick" class="ov-slotpick" onchange="ovSelect(this.value || null)"
               title="Jump to a slot (pick the placeholder to deselect)" aria-label="Jump to slot"></select>
             <button id="overlay-undo" onclick="ovUndo()" disabled title="Undo (Ctrl/Cmd-Z)">↶ Undo</button>
@@ -2913,6 +2914,11 @@ async function loadOverlay() {
   ovState.slots = slotsR.slots || [];
   ovState.sample = slotsR.sample || {};
   ovState.flagPresets = slotsR.flagPresets || [];
+  ovState.templates = slotsR.templates || [];
+  const templatePicker = $('ov-template');
+  templatePicker.replaceChildren(new Option('Starter layout…', ''));
+  ovState.templates.forEach(t => templatePicker.add(new Option(t.label, t.id)));
+  templatePicker.hidden = !ovState.templates.length;
   ovState.active = layoutR.active || '';
   ovPreviewInit();
   ovState.baseCss = (slotsR.css || '').replace(/:root/g, ':host').replace(/html\s*,\s*body/g, ':host');
@@ -2950,6 +2956,18 @@ async function loadOverlay() {
 // Populate the "jump to slot" dropdown (issue #140) from the page's slot list,
 // so an operator can select a hard-to-click slot by name instead of hunting on
 // the canvas. Selection stays in sync with canvas clicks via ovSelect().
+function ovUseTemplate(id) {
+  const template = (ovState.templates || []).find(t => t.id === id);
+  if (!template || ovState.page !== overlayPage) return;
+  Object.entries(template.slots).forEach(([slot, patch]) => {
+    if (ovState.slots.some(s => s.id === slot))
+      ovState.layout.slots[slot] = Object.assign({}, ovState.layout.slots[slot] || {}, patch);
+  });
+  ovReloadCanvasFromLayout();
+  ovCommit();
+  $('ov-template').value = '';
+}
+
 function ovPopulateSlotPicker() {
   const sp = $('ov-slotpick');
   if (!sp) return;

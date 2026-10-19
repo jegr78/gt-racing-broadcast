@@ -100,7 +100,7 @@ Loaded when working under `src/ui/`.
   `/splitscreen/override.css`, and
   `/overlay/fonts/<file>` (each read per request from the `--overlay-dir`; empty body
   when the file is absent). The CLI passes `--overlay-dir profiles/<active>/overlay`
-  whenever that dir exists (`_overlay_relay_args` in `src/racecast.py`). The two
+  even before that directory exists (`_overlay_relay_args` in `src/racecast.py`). The two
   override.css are part of `OBS_PAGE_PATHS`, so every `relay start`/`event start`
   reloads them in OBS. Editable in the Control Center, a **visual overlay
   builder** (issue #114): the slots' `data-edit` markers in `hud.html`
@@ -110,9 +110,9 @@ Loaded when working under `src/ui/`.
   layout's `customCss` (the pro escape hatch, appended last) on first use, so the
   relay serves the generated file unchanged. Spec:
   `docs/superpowers/specs/2026-06-13-visual-overlay-builder-design.md`. The **first**
-  override on a profile whose `overlay/` did not exist when the relay started needs one
-  `racecast relay restart` (the `--overlay-dir` flag is decided at launch), but later
-  edits apply live. Tests: `tests/test_overlay.py` (compiler + slot extraction +
+  override works without restarting the relay because its overlay path is retained
+  before the directory exists. Edits apply through **Apply in OBS**. Tests:
+  `tests/test_overlay.py` (compiler + slot extraction +
   migration), `tests/test_ui_server.py` + `tests/test_racecast.py` (routes + data layer).
 
 ## Wiki screenshots for UI changes (full rule, moved from the root CLAUDE.md)
@@ -124,6 +124,11 @@ geometry/visibility and refreshes only its browser source. Automatic refresh onl
 hides scene items. `tools/e2e-scene-layouts.py --shots` exercises the production
 builder and callbacks with temporary synthetic profiles and refreshes both builder
 screenshots; it never uses real devices, OBS or league state.
+Starter layouts are profile-aware slot patches from `intermission_live.starter_layouts`.
+Selection only changes the editor model and Undo history. Intermission Apply also
+restores saved visibility through the relay controller; automatic refresh honors
+runtime overrides and never enables a video item. The Director Panel reads actual
+OBS state through `/obs/intermission/data`; chat uses a separate browser override.
 - **Changed a UI surface? Refresh its wiki screenshot in the SAME change.** This
   is the step that keeps getting forgotten. Any visible change to the **Control
   Center** (`src/ui/`), the **Director Panel** (`/panel`), or the **Companion /

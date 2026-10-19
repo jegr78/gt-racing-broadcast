@@ -79,6 +79,7 @@ import report_build as rbuild
 import resources
 import notify   # pure Discord payload builders for producer events (#317)
 import overlay_build as ob
+import intermission_live
 import fonts_bundle as fb
 import ports as pt
 import app_version as _app_version
@@ -951,15 +952,15 @@ def _active_profile_graphics_dir():
     return os.path.join(pcfg.profiles_dir(root), active, "graphics")
 
 def _overlay_relay_args(overlay_dir):
-    """['--overlay-dir', DIR] when DIR exists, else [] (pure for tests)."""
-    if overlay_dir and os.path.isdir(overlay_dir):
+    """Keep the profile path even before its first Save creates the directory."""
+    if overlay_dir:
         return ["--overlay-dir", overlay_dir]
     return []
 
 def _relay_runtime_args():
     """Runtime args every relay invocation gets: its profile-scoped runtime dir
-    plus the shared cookie jar (see _cookies_path), and --overlay-dir when the
-    active profile ships an overlay/ dir. Placed before the caller's rest so an
+    plus the shared cookie jar (see _cookies_path), and the active profile's
+    overlay path, including before its first Save. Placed before the caller's rest so an
     explicit flag in rest still wins."""
     return (["--runtime-dir", _runtime_dir(), "--runtime-base", _runtime_base_dir(),
              "--cookies", _cookies_path()]
@@ -6425,7 +6426,11 @@ def export_companion(rest):
     if os.path.isdir(dst):
         dst = os.path.join(dst, "racecast-buttons.companionconfig")
     os.makedirs(os.path.dirname(os.path.abspath(dst)), exist_ok=True)
-    shutil.copyfile(resource_path("companion/racecast-buttons.companionconfig"), dst)
+    with open(resource_path("companion/racecast-buttons.companionconfig"), encoding="utf-8") as fh:
+        config = intermission_live.companion_config(json.load(fh), _profile_is_solo())
+    with open(dst, "w", encoding="utf-8") as fh:
+        json.dump(config, fh, indent=1)
+        fh.write("\n")
     print(f"Wrote {dst}: import it in Companion (Import / Export -> Import).")
 
 
@@ -7629,6 +7634,8 @@ def overlay_slots_data(page):
                 "flagPresets": [dict(p) for p in ob.FLAG_PRESETS] if page == "hud" else [],
                 "telemetry": page == "hud" and _profile_has_telemetry(),
                 "solo": _profile_is_solo(),
+                "templates": (intermission_live.starter_layouts(_profile_is_solo())
+                              if page == "intermission" else []),
                 "defaults": ({"intermission-capture": {"visible": False},
                               "intermission-webcam": {"visible": _profile_has_telemetry()}}
                              if page == "intermission" else {})}
@@ -7870,17 +7877,21 @@ def _sync_scene_layouts(set_transform=None, set_enabled=None, solo=None,
         base_css = ob.base_style(_overlay_base_html(page))
         set_transform = set_transform or obs_ws.set_scene_item_transform
         set_enabled = set_enabled or obs_ws.set_scene_item_enabled
+        _, live_video, _ = intermission_live.read_overrides(
+            os.path.join(_runtime_dir(), "intermission-live.json"))
         for sid, box in ob.scene_boxes(page, base_css, css).items():
             source = ob.SCENE_SLOT_OBS_SOURCES[page][sid]
             scene = "Intermission"
             # Unedited legacy CSS must not change the template's video defaults.
-            if not ob.box_from_css(css, sid) and not ob.slot_hidden(css, sid):
+            if not ob.slot_has_rule(css, sid):
                 continue
             ok, note = set_transform(scene, source, obs_ws.pov_scene_item_transform(box))
             if not ok:
                 result["warnings"].append(f"{source}: {note or 'item unavailable; update the OBS collection'}")
                 continue
             visible = not ob.slot_hidden(css, sid)
+            if not explicit and sid.removeprefix("intermission-") in live_video:
+                visible = live_video[sid.removeprefix("intermission-")]
             if explicit or not visible:
                 ok, note = set_enabled(scene, source, visible)
                 if not ok:
@@ -7893,7 +7904,7 @@ def _sync_scene_layouts(set_transform=None, set_enabled=None, solo=None,
     return result
 
 
-def overlay_apply_data(page, set_transform=None, set_enabled=None, refresh=None):
+def overlay_apply_data(page, set_transform=None, set_enabled=None, refresh=None, restore=None):
     """Explicit producer action: apply one saved scene without a cut/audio change."""
     if page not in ("hud", "intermission") or not _active_profile_name():
         return {"ok": False, "error": "no active profile or invalid page"}
@@ -7913,6 +7924,11 @@ def overlay_apply_data(page, set_transform=None, set_enabled=None, refresh=None)
         result["refreshed"] = names
         if note or not names:
             result.update(ok=False, error=note or "Intermission browser source missing; update the OBS collection")
+        if result["ok"]:
+            restored = (restore or (lambda: _relay_post_json(
+                f"http://127.0.0.1:{RELAY_PORT}/obs/intermission", {"action": "restore"})))()
+            if not restored.get("ok"):
+                result.update(ok=False, error=restored.get("error") or "Could not restore Intermission defaults")
         return result
     except Exception as exc:  # noqa: BLE001  return a usable operator diagnostic
         return {"ok": False, "error": f"could not apply scene: {exc}"}

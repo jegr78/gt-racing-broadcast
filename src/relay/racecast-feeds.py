@@ -164,6 +164,8 @@ import gt7_crypto      # GT7 UDP telemetry: Salsa20 decrypt (solo/POV only, #324
 import gt7_telemetry   # GT7 UDP telemetry: packet parser + TelemetryStore (solo/POV only, #324)
 from contextlib import nullcontext
 import telemetry_replay
+import intermission_live
+import overlay_build
 import gt7_recording   # GT7 telemetry recording to disk (solo/POV only)
 import race_engineer_access
 import race_engineer_live
@@ -11261,7 +11263,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                  preview_manager=None, program_audio_service=None, brands_dir=None,
                  flag_graphic_store=None, graphics_take="off", app_version="dev",
                  channel_source=None, producer_source=None, part_store=None,
-                 channel_csv_url=None, push_url=None, telemetry_store=None, engineer_access=None, engineer_page_path=None):
+                 channel_csv_url=None, push_url=None, telemetry_store=None, engineer_access=None, engineer_page_path=None,
+                 intermission_runtime_path=None):
     # Shared across all H instances (one limiter per relay). The CHAT limiter is
     # keyed on the authenticated streamer (per-commentator). The AUTH-FAILURE
     # limiter is keyed on the source IP, which behind Tailscale Funnel collapses to
@@ -11296,6 +11299,20 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
             return value
     _take_modes = graphic_takes.TakeModes(graphics_take)
     _graphic_requests = graphic_takes.Requests()
+
+    def _intermission_defaults():
+        css = read_overlay_css(overlay_dir, "intermission").decode("utf-8", errors="replace")
+        defaults = {"chat": not overlay_build.slot_hidden(css, "ichat"),
+                    "webcam": solo_template(os.environ) == "pov", "capture": False}
+        for key in ("webcam", "capture"):
+            slot = "intermission-" + key
+            if overlay_build.slot_has_rule(css, slot):
+                defaults[key] = not overlay_build.slot_hidden(css, slot)
+        return defaults
+
+    _intermission = intermission_live.IntermissionControl(
+        lambda: relay._obs, getattr(relay, "solo", False),
+        _intermission_defaults, intermission_runtime_path)
     # Shared tab bar and live strip of the cockpit and the Race Control desk.
     crew_frame_path = (os.path.join(os.path.dirname(console_page_path), "crew-frame.html")
                        if console_page_path else None)
@@ -12349,6 +12366,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     return self._send_file(intermission_path, "text/html; charset=utf-8")
                 if p == ["intermission", "override.css"]:
                     return self._send_css(read_overlay_css(overlay_dir, "intermission"))
+                if p == ["intermission", "data"]:
+                    return self._send(_intermission.overlay_state())
                 if p == ["telemetry", "data"]:
                     if telemetry_store is None:
                         return self._send({"error": "telemetry disabled"}, 404)
@@ -12472,6 +12491,19 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     return self._send({"error": "unknown", "path": self.path}, 404)
                 if p == ["obs", "split-audio"]:
                     payload, status = apply_split_audio(relay, relay._obs)
+                    return self._send(payload, status)
+                if p[:2] == ["obs", "intermission"]:
+                    if p == ["obs", "intermission", "data"]:
+                        payload, status = _intermission.state()
+                    else:
+                        if not intermission_live.allow_control_origin(self.headers):
+                            return self._send({"ok": False, "error": "Cross-origin Intermission control refused."}, 403)
+                        if p == ["obs", "intermission", "restore"]:
+                            payload, status = _intermission.apply("restore")
+                        elif len(p) == 4:
+                            payload, status = _intermission.apply(p[2], p[3])
+                        else:
+                            payload, status = {"ok": False, "error": "Invalid Intermission action."}, 400
                     return self._send(payload, status)
                 if p == ["obs", "split"]:
                     payload, status = apply_split_state(relay, relay._obs)
@@ -13076,6 +13108,11 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                         return self._send({"error": "event title disabled"}, 404)
                     title = event_store.set(body.get("title"))
                     return self._send({"ok": True, "title": title})
+                if p == ["obs", "intermission"]:
+                    if not intermission_live.allow_control_origin(self.headers):
+                        return self._send({"ok": False, "error": "Cross-origin Intermission control refused."}, 403)
+                    payload, status = _intermission.apply(body.get("action"), body.get("key"))
+                    return self._send(payload, status)
                 if p == ["obs", "scene"]:
                     if _obs_ws is None:
                         return self._send({"error": "obs unavailable"}, 503)
@@ -14171,6 +14208,7 @@ def main():
         graphics_dir=graphics_dir,
         splitscreen_path=splitscreen_path,
         intermission_path=intermission_path,
+        intermission_runtime_path=os.path.join(runtime, "intermission-live.json"),
         cockpit_page_path=cockpit_page_path,
         console_secret=console_secret,
         discord_client_id=discord_client_id,

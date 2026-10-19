@@ -528,7 +528,7 @@ def t_graphic_requests_sit_in_the_live_column():
         ".bus sets display:flex, which beats the UA [hidden] rule on an empty queue"
 
 
-AREAS = ("handover", "graphics", "hud", "cues", "audio",
+AREAS = ("handover", "graphics", "hud", "intermission", "cues", "audio",
          "broadcast", "schedule", "setup", "fault")
 
 # Every id of the page before the frame (#728). Only the three layout wrappers the

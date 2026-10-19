@@ -350,7 +350,7 @@ def bake_scene_layout(collection, page, base_html, override_css):
             for sid, source in mappings.items():
                 if item.get("name") != source:
                     continue
-                if not overlay_build.box_from_css(override_css, sid) and not overlay_build.slot_hidden(override_css, sid):
+                if not overlay_build.slot_has_rule(override_css, sid):
                     continue
                 apply_box_transform(collection, source, boxes[sid], scene="Intermission")
                 item["visible"] = not overlay_build.slot_hidden(override_css, sid)

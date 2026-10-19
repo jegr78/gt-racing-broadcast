@@ -85,7 +85,7 @@ def t_explicit_apply_targets_scene_and_automatic_sync_never_shows_camera():
                 result = m.overlay_apply_data('intermission',
                     set_transform=lambda *a: (transforms.append(a) or (True, '')),
                     set_enabled=lambda *a: (visibility.append(a) or (True, '')),
-                    refresh=lambda **k: (['Intermission Chat'], ''))
+                    refresh=lambda **k: (['Intermission Chat'], ''), restore=lambda: {'ok': True})
                 assert result['ok'], result
                 assert all(a[0] == 'Intermission' for a in transforms + visibility)
                 assert ('Intermission', 'Solo Webcam', True) in visibility
@@ -196,7 +196,7 @@ def t_legacy_intermission_css_leaves_video_defaults_and_endurance_untouched():
                 result = m.overlay_apply_data('intermission',
                     set_transform=lambda *a: calls.append(a),
                     set_enabled=lambda *a: calls.append(a),
-                    refresh=lambda **kw: (['Intermission Chat'], ''))
+                    refresh=lambda **kw: (['Intermission Chat'], ''), restore=lambda: {'ok': True})
             assert result['ok'] and not calls
         finally:
             m._env_base, m._runtime_base_dir = original

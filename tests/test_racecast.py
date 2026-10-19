@@ -3872,9 +3872,14 @@ def t_relay_runtime_args_adds_overlay_when_dir_exists():
         assert m._overlay_relay_args(od) == ["--overlay-dir", od]
 
 
-def t_relay_runtime_args_omits_overlay_when_absent():
+def t_relay_runtime_args_omits_overlay_when_unresolved():
     assert m._overlay_relay_args(None) == []
-    assert m._overlay_relay_args("/no/such/overlay/dir") == []
+
+
+def t_relay_runtime_args_keeps_future_overlay_for_first_live_save():
+    with tempfile.TemporaryDirectory() as td:
+        future = os.path.join(td, 'overlay')
+        assert m._overlay_relay_args(future) == ['--overlay-dir', future]
 
 
 def t_servable_logo_path_allows_web_images_only():
