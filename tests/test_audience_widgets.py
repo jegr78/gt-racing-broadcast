@@ -412,6 +412,71 @@ def t_second_writer_cannot_read_until_first_write_commits():
         } == {"A": 11, "B": 22}
 
 
+def t_invalid_configuration_keeps_existing_overlay_and_last_good_client_contract():
+    with tempfile.TemporaryDirectory() as td:
+        directory = Path(td) / "overlay"
+        directory.mkdir()
+        store = Store(directory.parent / "audience.json")
+        goal = store.create({"label": "Likes", "manualValue": 0, "target": 750})
+        (directory / "layout-hud.json").write_text(
+            json.dumps({"slots": {goal["id"]: {}}}), encoding="utf-8"
+        )
+        runtime = aw.Runtime(store.path, clock=lambda: 100)
+        assert runtime.data()["widgets"][0]["value"] == 0
+        store.path.write_text("{broken", encoding="utf-8")
+        data = runtime.data()
+        assert data == {
+            "ok": False,
+            "error": "Could not read audience configuration",
+        }, data
+        base = "<html><style></style><body></body></html>"
+        assert aw.live_html(base, str(directory), "hud") == base
+        for raw_file in (
+            {"version": 1, "widgets": [goal, goal]},
+            {"version": 1, "widgets": [{"id": goal["id"]}]},
+        ):
+            store.path.write_text(json.dumps(raw_file), encoding="utf-8")
+            assert runtime.data()["ok"] is False
+
+
+def t_scene_presentation_flags_and_colors_are_bounded():
+    from overlay_build import compile_overlay_css, extract_slots
+
+    goal = clean(raw())
+    slots = extract_slots(aw.markup(goal))
+    data = {
+        "slots": {
+            ID: {
+                "presentation": "number",
+                "showNumber": False,
+                "showPercent": False,
+                "barColor": "#27d34d",
+                "trackColor": "#123456",
+                "madeUp": "bad",
+            }
+        }
+    }
+    css = compile_overlay_css(data, slots)
+    assert "--audience-target: none" in css and "--audience-track: none" in css
+    assert "--audience-percent-mode: none" in css and "--audience-percent: none" in css
+    assert "--audience-number: none" in css and "--audience-bar-color: #27d34d" in css
+    assert "--audience-track-color: #123456" in css and "madeUp" not in css
+    for value in ("bar; color:red", "bogus", True, [], {}):
+        css = compile_overlay_css(
+            {
+                "slots": {
+                    ID: {
+                        "presentation": value,
+                        "showPercent": "false",
+                        "barColor": "red;display:none",
+                    }
+                }
+            },
+            slots,
+        )
+        assert "--audience-" not in css, css
+
+
 if __name__ == "__main__":
     for name, fn in tuple(globals().items()):
         if name.startswith("t_"):
