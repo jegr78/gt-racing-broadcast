@@ -1425,19 +1425,24 @@ def t_builder_canvas_mirrors_the_fit_with_the_text_measure():
         return
     script = r"""
 let vars = {};
-const el = {style: {fontSize: ''}, clientWidth: 714, textContent: ''};
+let zoom = 1;  // the canvas is CSS-scaled: client rects shrink, offsetWidth does not
+const el = {style: {fontSize: ''}, clientWidth: 714, offsetWidth: 714, textContent: '',
+  getBoundingClientRect() { return {width: 714 * zoom}; }};
 const getComputedStyle = () => ({getPropertyValue: k => vars[k] || '', paddingLeft: '0px', paddingRight: '0px'});
 const document = {createRange: () => ({selectNodeContents() {}, getBoundingClientRect() {
-  return {width: el.textContent.length * parseFloat(el.style.fontSize || '40') * .567};}})};
+  return {width: el.textContent.length * parseFloat(el.style.fontSize || '40') * .567 * zoom};}})};
 """ + fns + r"""
 el.textContent = 'TEC 21 - Round 2 - Trial Mountain';
 ovFitText(el); const off = el.style.fontSize || 'css';
 vars = {'--fit-max': '40', '--fit-min': '26'}; ovFitText(el);
-console.log(off + ',' + parseFloat(el.style.fontSize));"""
+const full = parseFloat(el.style.fontSize);
+zoom = 0.5; ovFitText(el);
+console.log(off + ',' + full + ',' + parseFloat(el.style.fontSize));"""
     out = subprocess.run([node, "-"], input=script, capture_output=True, text=True,
                          encoding="utf-8", errors="replace", check=True).stdout.strip()
-    off, fitted = out.split(",")
+    off, fitted, zoomed = out.split(",")
     assert off == "css" and 26 <= float(fitted) < 40, out
+    assert zoomed == fitted, "a zoomed canvas must fit to the same size as OBS: " + out
 
 
 def t_builder_property_map_matches_the_compiler():

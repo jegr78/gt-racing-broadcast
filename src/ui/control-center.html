@@ -3410,9 +3410,11 @@ function ovShrinkToFit(el, cs, max, min) {
   const text = document.createRange();
   text.selectNodeContents(el);
   const width = el.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
+  // The canvas is zoomed with a CSS transform: client rects are scaled, layout widths not.
+  const zoom = (el.getBoundingClientRect().width / el.offsetWidth) || 1;
   let size = max;
   el.style.fontSize = size + 'px';
-  while (size > min && text.getBoundingClientRect().width > width) { size -= 1; el.style.fontSize = size + 'px'; }
+  while (size > min && text.getBoundingClientRect().width / zoom > width) { size -= 1; el.style.fontSize = size + 'px'; }
 }
 
 // Session-only preview model: an editable copy of the server SAMPLE defaults,

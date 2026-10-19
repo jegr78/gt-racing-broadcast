@@ -17,6 +17,11 @@ three alignments.
 
 ![Team names fitted in left, center and right aligned slots](images/hud-team-name-fit.png)
 
+The round title can fit the same way, but only when the league opts in: set
+**Auto-fit max (px)** and **Auto-fit min (px)** on the Round title in the overlay
+builder (`--fit-max` / `--fit-min` in `hud.css`). A long title then shrinks from max
+down to min; without an Auto-fit max the title keeps its fixed font size.
+
 ## Where it lives
 
 A league's overlay styling sits in its profile folder:
