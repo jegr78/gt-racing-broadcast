@@ -2933,7 +2933,7 @@ const OV_SHADOW_CSS =
   '[data-solo]::before,[data-video]::before{position:absolute;inset:0;background:rgba(25,40,60,.8);display:flex;align-items:center;justify-content:center;' +
   'content:attr(data-edit) " preview";font:32px system-ui;color:#fff}';
 
-async function loadOverlay() {
+async function loadOverlay(retry = 0) {
   const sequence = ++ovLoadSequence;
   const requestedPage = overlayPage;
   $('overlay-err').hidden = true;
@@ -2947,6 +2947,10 @@ async function loadOverlay() {
   if (sequence !== ovLoadSequence || requestedPage !== overlayPage) return;
   if (!slotsR.ok) { showProfileErr('overlay-err', slotsR.error || 'could not load slots'); return; }
   if (!layoutR.ok) { showProfileErr('overlay-err', layoutR.error || 'no active profile'); return; }
+  if (slotsR.audience?.ok && slotsR.audience.active !== layoutR.active) {
+    if (retry < 1) return loadOverlay(retry + 1);
+    showProfileErr('overlay-err', 'Profile changed while loading. Reload the builder.'); return;
+  }
   ovGridLoad();
   const splitOption = $('ov-scene').querySelector('option[value=splitscreen]');
   splitOption.hidden = splitOption.disabled = !!slotsR.solo;
@@ -3098,6 +3102,7 @@ async function audienceMutate(action,id,fields) {
     const slots = await (await fetch('/api/overlay/slots?page='+session.page,{cache:'no-store'})).json();
     if (!audienceCurrent(session)) return;
     if (!slots.ok || !slots.audience.ok) throw new Error('Saved, but could not reload audience definitions');
+    if (slots.audience.active !== session.profile) throw new Error('Active profile changed; reload the builder.');
     ovState.allSlots = slots.slots; ovState.audience = slots.audience;
     ovState.body = slots.body;
     ovState.baseCss = slots.css.replace(/:root/g,':host').replace(/html\s*,\s*body/g,':host');

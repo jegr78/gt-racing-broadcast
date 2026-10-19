@@ -295,6 +295,51 @@ def t_relay_pages_share_cached_samples_without_outbound_requests():
             relay.server_close()
 
 
+def t_audience_read_returns_the_profile_snapshot_it_actually_read():
+    from pathlib import Path
+    from unittest.mock import patch
+    import audience_widgets as aw
+
+    with tempfile.TemporaryDirectory() as td:
+        original = cli._mk_active_profile(td)
+        try:
+            aw.Store(Path(td) / "profiles/demo/audience.json").create({
+                "label": "Demo goal",
+                "manualValue": 18,
+            })
+            with patch.object(
+                m, "_active_profile_name", side_effect=["demo", "other", "other"]
+            ):
+                data = m.audience_read_data()
+            assert (
+                data["ok"]
+                and data["active"] == "demo"
+                and data["widgets"][0]["label"] == "Demo goal"
+            ), data
+        finally:
+            m._env_base, m._runtime_base_dir = original
+
+
+def t_slot_markup_and_audience_metadata_use_one_profile_snapshot():
+    from unittest.mock import patch
+    import audience_widgets as aw
+
+    one = aw.clean({"id": "audience-" + "a" * 32, "label": "Demo goal"})
+    other = aw.clean({"id": "audience-" + "b" * 32, "label": "Other goal"})
+    snapshots = [
+        {"ok": True, "active": "demo", "widgets": [one]},
+        {"ok": True, "active": "other", "widgets": [other]},
+    ]
+    with patch.object(m, "audience_read_data", side_effect=snapshots):
+        data = m.overlay_slots_data("hud")
+    assert data["ok"], data
+    assert data["audience"]["active"] == "demo" and data["audience"]["widgets"] == [
+        one
+    ], data["audience"]
+    ids = {slot["id"] for slot in data["slots"]}
+    assert one["id"] in ids and other["id"] not in ids
+
+
 if __name__ == "__main__":
     for name, fn in tuple(globals().items()):
         if name.startswith("t_"):

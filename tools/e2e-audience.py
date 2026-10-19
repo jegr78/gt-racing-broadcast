@@ -168,6 +168,23 @@ def main():
                 page.wait_for_function(
                     "() => ovState.layout && ovState.slots.length > 0"
                 )
+                reload_requests = []
+
+                def stale_profile_once(route):
+                    response = route.fetch()
+                    data = response.json()
+                    reload_requests.append(data)
+                    if len(reload_requests) == 1:
+                        data["audience"]["active"] = "other"
+                    route.fulfill(response=response, json=data)
+
+                page.route("**/api/overlay/slots?page=*", stale_profile_once)
+                page.evaluate("loadOverlay()")
+                assert len(reload_requests) == 2, (
+                    "Mixed-profile slot/layout reads must retry before rendering"
+                )
+                assert page.evaluate("ovState.audience.active === ovState.active")
+                page.unroute("**/api/overlay/slots?page=*", stale_profile_once)
                 assert not page.evaluate(
                     "ovState.slots.some(s=>s.id.startsWith('audience-'))"
                 )
@@ -339,6 +356,24 @@ def main():
                 page.locator("#audience-dialog").get_by_role(
                     "button", name="Close", exact=True
                 ).click()
+                page.click("#audience-open")
+                page.locator("#audience-list p").filter(
+                    has_text="Community likes"
+                ).get_by_role("button", name="Edit", exact=True).click()
+
+                def switched_after_write(route):
+                    response = route.fetch()
+                    data = response.json()
+                    data["audience"]["active"] = "other"
+                    route.fulfill(response=response, json=data)
+
+                page.route("**/api/overlay/slots?page=*", switched_after_write)
+                page.click("#audience-submit")
+                page.wait_for_function(
+                    "() => document.getElementById('audience-status').textContent === 'Active profile changed; reload the builder.'"
+                )
+                assert page.evaluate("ovState.audience.active") == "demo"
+                page.unroute("**/api/overlay/slots?page=*", switched_after_write)
                 assert not errors, errors
                 browser.close()
                 print(

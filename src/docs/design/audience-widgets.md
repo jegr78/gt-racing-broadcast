@@ -49,3 +49,8 @@ are separate delivery issues, while the shared contract can be tested offline.
 All labels/units are text. Dynamic IDs are generated and validated separately.
 Preview values belong to the editor session and cannot write live manual values,
 baselines or provider data. Shared edits and scene placement actions are distinct.
+
+Audience reads capture the profile once and return that identity with the data.
+Slot markup and metadata share one audience snapshot. The builder retries a
+profile mismatch once during loading and rejects a mismatched post-save reload
+before replacing the current editor state.

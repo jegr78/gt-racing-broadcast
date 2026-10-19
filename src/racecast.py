@@ -7579,7 +7579,9 @@ def _overlay_raw_html(page):
 
 def audience_read_data():
     try:
-        directory = _active_overlay_dir()
+        active = _active_profile_name()
+        root = _env_base(IS_FROZEN, _real_executable(), HERE)
+        directory = os.path.join(pcfg.profiles_dir(root), active, "overlay") if active else None
         if not directory:
             return {"ok": False, "error": "No active profile"}
         widgets = audience_widgets.Store(os.path.join(os.path.dirname(directory), "audience.json")).read()["widgets"]
@@ -7589,7 +7591,7 @@ def audience_read_data():
             if os.path.isfile(path):
                 with open(path, encoding="utf-8") as source:
                     placements[page] = list(json.load(source).get("slots", {}))
-        return {"ok": True, "active": _active_profile_name(), "widgets": widgets, "placements": placements}
+        return {"ok": True, "active": active, "widgets": widgets, "placements": placements}
     except (OSError, ValueError, TypeError, AttributeError):
         return {"ok": False, "error": "Could not read audience configuration"}
 
@@ -7625,11 +7627,11 @@ def audience_write_data(body):
         return {"ok": False, "error": "Could not save audience configuration"}
 
 
-def _overlay_base_html(page):
+def _overlay_base_html(page, audience=None):
     base = _overlay_raw_html(page)
     if not base:
         return base
-    data = audience_read_data()
+    data = audience_read_data() if audience is None else audience
     widgets = data.get("widgets", []) if data.get("ok") else []
     return audience_widgets.enhance_html(base, widgets, {widget["id"]: {} for widget in widgets})
 
@@ -7680,7 +7682,8 @@ def overlay_slots_data(page):
     try:
         if page not in ("hud", "intermission", "splitscreen") or (page == "splitscreen" and _profile_is_solo()):
             return {"ok": False, "error": "invalid page"}
-        html = _overlay_base_html(page)
+        audience = audience_read_data()
+        html = _overlay_base_html(page, audience)
         if not html:
             return {"ok": False, "error": "base page not bundled"}
         active = _active_profile_name()
@@ -7690,7 +7693,7 @@ def overlay_slots_data(page):
         return {"ok": True, "page": page, "slots": [slot for slot in ob.extract_slots(html)
                           if page != "intermission" or _profile_is_solo()
                           or slot["id"] == "ichat" or slot["id"].startswith("audience-")],
-                "audience": audience_read_data(),
+                "audience": audience,
                 "css": ob.base_style(html), "body": ob.canvas_logo(
                     re.sub(r'<div[^>]*data-solo="true"[^>]*></div>', '', ob.base_body(html))
                     if page == "intermission" and not _profile_is_solo() else ob.base_body(html), logo),
