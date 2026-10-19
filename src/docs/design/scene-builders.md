@@ -34,3 +34,20 @@ placement and visibility remain intact until a layout is saved.
 
 Splitscreen will reuse the scene-selection contract in #935. Live controls and
 profile-aware starter templates are tracked separately in #931.
+
+## Verification record
+
+`tests/test_scene_layouts.py` covers the data/API, OBS intent and bundle/backup
+contracts. `tools/e2e-scene-layouts.py --shots` exercises the actual numeric input
+handlers, saved geometry, browser reload, profile-aware slots and explicit Apply
+against temporary profiles. It records four Intermission-only OBS mutations and
+zero browser exceptions, without opening devices or using a real OBS instance.
+
+Before final verification, the scene target, automatic hide-only rule, explicit
+page allowlist and foreign-relay ownership guard were each deliberately broken
+separately. Each mutation failed at its behavioral assertion; the committed
+implementation was restored and the targeted suite passed again.
+
+Self-review corrected a loader block accidentally inserted into numeric/shadow
+handlers and added the foreign-profile Apply refusal. The independent read-only
+security pass and its correction delta found no actionable security issues.

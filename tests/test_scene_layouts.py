@@ -180,6 +180,28 @@ def t_apply_refuses_a_foreign_running_profile_before_obs_mutation():
     assert not calls
 
 
+def t_legacy_intermission_css_leaves_video_defaults_and_endurance_untouched():
+    with tempfile.TemporaryDirectory() as td:
+        original = cli._mk_active_profile(td)
+        od = Path(td) / 'profiles/demo/overlay'
+        od.mkdir()
+        (od / 'intermission.css').write_text('#ichat{right:20px;width:500px}')
+        calls = []
+        try:
+            result = m._sync_scene_layouts(solo=True, explicit=True,
+                set_transform=lambda *a: calls.append(a),
+                set_enabled=lambda *a: calls.append(a))
+            assert result['ok'] and not calls
+            with patch.object(m, '_profile_is_solo', return_value=False):
+                result = m.overlay_apply_data('intermission',
+                    set_transform=lambda *a: calls.append(a),
+                    set_enabled=lambda *a: calls.append(a),
+                    refresh=lambda **kw: (['Intermission Chat'], ''))
+            assert result['ok'] and not calls
+        finally:
+            m._env_base, m._runtime_base_dir = original
+
+
 if __name__ == '__main__':
     for name, fn in sorted(globals().copy().items()):
         if name.startswith('t_') and callable(fn):
