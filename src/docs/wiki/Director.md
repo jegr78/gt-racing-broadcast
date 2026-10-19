@@ -23,6 +23,12 @@ practical differences:
 | Needs | nothing beyond the tailnet (or Funnel `/console/panel` link): no OBS IP, port, or password; the relay talks to the producer's local OBS on your behalf | nothing, the OBS connection lives on the producer's machine |
 | Strengths | one-tab overview; shows problems early (banners, feed health); works fully over Funnel | muscle memory; very large touch targets |
 
+Asset buttons and previews can use a league's optional Sheet **Alias** instead of
+these default names. The tooltip or Companion button editor retains the fixed
+asset identity, and clicks keep their original action. Open crew requests keep
+the label used when first requested. See [Asset aliases](Sheet-Template#optional-display-aliases)
+for setup and refresh behavior.
+
 ## The director panel
 
 **Open it the way the producer set you up:**

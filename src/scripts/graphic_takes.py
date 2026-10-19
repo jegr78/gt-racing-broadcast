@@ -237,7 +237,7 @@ class Requests:
         self.items = [i for i in self.items
                       if i["state"] == "pending" or now - i["done_at"] <= REQUEST_TTL_S]
 
-    def add(self, source, key, name, now):
+    def add(self, source, key, name, now, display_name=None):
         """(request, merged) for a crew member asking for *source*."""
         with self.lock:
             self._prune(now)
@@ -247,7 +247,7 @@ class Requests:
                         item["keys"].append(key)
                         item["by"].append(name)
                     return self._copy(item), True
-            item = {"id": next(self._ids), "source": source, "keys": [key],
+            item = {"id": next(self._ids), "source": source, "displayName": display_name or source, "keys": [key],
                     "by": [name], "at": now, "state": "pending", "done_at": None}
             self.items.append(item)
             return self._copy(item), False
@@ -281,6 +281,12 @@ class Requests:
         with self.lock:
             self._prune(now)
             return {i["source"]: i["state"] for i in self.items if key in i["keys"]}
+
+    def labels_for(self, key, now):
+        """The first server-resolved label, alongside legacy state-only responses."""
+        with self.lock:
+            self._prune(now)
+            return {i["source"]: i["displayName"] for i in self.items if key in i["keys"]}
 
     def drop_pending(self):
         with self.lock:

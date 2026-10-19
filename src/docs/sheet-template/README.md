@@ -28,3 +28,10 @@ The Crew template includes an additive **Race Engineer** checkbox. Redeploy the
 current Sheet webhook before editing it. A Producer inherits Engineer access;
 other roles require explicit assignment plus the producer's solo POV profile
 opt-in. Existing columns keep their header-based meaning.
+
+The Assets sample has optional header-based Internal and Alias columns. Leave an
+alias blank to keep the current labels. Column A remains the canonical asset
+identifier. Refresh labels with `racecast graphics --metadata-only` and
+`racecast media --metadata-only`, or the Profile view's Refresh labels buttons.
+See [the Sheet template guide](../wiki/Sheet-Template.md#optional-display-aliases)
+for visibility, portability and the Companion upgrade.

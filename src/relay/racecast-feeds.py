@@ -128,6 +128,7 @@ import event_notes   # noqa: E402  (pure Event Notes tab parser)
 import resources  # noqa: E402, F401 - machine resource sampler (health history)
 import cue_admin   # director text-cue channel (#243)
 import flag_graphic   # flag-status graphics: value->source + persisted store (#flag-graphic)
+import asset_metadata
 import graphic_takes   # crew graphic takes: allowlist + take rules (#744)
 import pending_saves   # pending Director Panel sheet saves (src/scripts on sys.path)
 import health_store  # health-history SQLite store (task 7; src/scripts on sys.path)
@@ -1754,9 +1755,29 @@ def list_graphics(graphics_dir):
                 continue
             if placeholders.is_graphic_placeholder(os.path.join(graphics_dir, fn)):
                 continue
-            out.append({"name": name, "file": fn})
+            item = {"name": name, "file": fn}
+            label = asset_metadata.display_name(graphics_dir, name, public=True)
+            if label != name:
+                item["displayName"] = label
+            out.append(item)
     out.sort(key=lambda e: e["name"].lower())
     return out
+
+
+def asset_labels(graphics_dir, media_dir=None):
+    """Public display-only map, after graphic visibility and placeholder filtering."""
+    labels = {row["name"]: row["displayName"] for row in list_graphics(graphics_dir)
+              if "displayName" in row}
+    if media_dir is None and graphics_dir:
+        media_dir = os.path.join(os.path.dirname(graphics_dir), "media")
+    if media_dir:
+        for filename, canonical in asset_metadata.MEDIA_NAMES.items():
+            if not os.path.isfile(os.path.join(media_dir, filename)):
+                continue
+            label = asset_metadata.display_name(media_dir, canonical, public=True)
+            if label != canonical:
+                labels[canonical] = label
+    return labels
 
 
 def resolve_graphic(graphics_dir, name):
@@ -5062,7 +5083,7 @@ def _takeable_definitions(relay, flag_store):
 
 
 def graphic_takes_view(relay, obs_ws, modes, roles, crew_takes, flag_store, read_state=None,
-                       own_requests=None):
+                       own_requests=None, labels=None, own_request_labels=None):
     """The takeable graphics with their live state. *modes* maps a crew role to its
     take mode. *roles* None is the director's view, which also carries the panel's
     graphic buses; a role set adds the caller's rights per graphic and, from
@@ -5098,6 +5119,11 @@ def graphic_takes_view(relay, obs_ws, modes, roles, crew_takes, flag_store, read
             item["can_request"] = graphic_takes.may_request(d, roles, modes)
             item["can_hide"] = graphic_takes.may_hide(d, roles, modes, current)
             item["request"] = (own_requests or {}).get(d["source"])
+        if roles is None or any(item.get(key) for key in ("can_take", "can_request", "can_hide")):
+            if d["source"] in (labels or {}):
+                item["displayName"] = labels[d["source"]]
+            if d["source"] in (own_request_labels or {}):
+                item["requestDisplayName"] = own_request_labels[d["source"]]
         out.append(item)
     if roles is None:
         payload = {"modes": modes, "program_scene": scene, "graphics": out,
@@ -5106,13 +5132,18 @@ def graphic_takes_view(relay, obs_ws, modes, roles, crew_takes, flag_store, read
         mine = [modes.get(r) for r in graphic_takes.ROLES if r in roles]
         mode = max(mine or ["off"], key=graphic_takes.MODES.index)
         payload = {"mode": mode, "program_scene": scene, "graphics": out}
+    if roles is None:
+        payload["assetLabels"] = labels or {}
+        for entries in payload["panel"].values():
+            for item in entries:
+                item["label"] = (labels or {}).get(item["source"], item["label"])
     if note:
         payload["note"] = str(note)
     return payload
 
 
 def apply_graphic_take(relay, obs_ws, modes, roles, name, source, on, crew_takes,
-                       flag_store, chat_store):
+                       flag_store, chat_store, display_name=None):
     """POST /cockpit/graphic-takes: a commentator or Race Control puts a graphic on
     air or takes it off. Returns (payload, status). A request that changes nothing
     posts no chat line. Best effort, never raises."""
@@ -5125,14 +5156,15 @@ def apply_graphic_take(relay, obs_ws, modes, roles, name, source, on, crew_takes
     if not allowed:
         return {"ok": False, "error": "graphic takes are not allowed for you"}, 403
     return _take_graphic(obs_ws, entry, defs, name, source, on, crew_takes, flag_store,
-                         chat_store)
+                         chat_store, display_name)
 
 
 def _take_graphic(obs_ws, entry, defs, name, source, on, crew_takes, flag_store,
-                  chat_store):
+                  chat_store, display_name=None):
     """The OBS side of a crew take or hide, after the rights check."""
+    identity = {"source": source, "displayName": display_name or source}
     if obs_ws is None:
-        return {"ok": False, "error": "obs unavailable"}, 503
+        return {"ok": False, "error": "obs unavailable", **identity}, 503
     items = []
     if entry["flag"] is None:
         prev = graphic_takes.find(defs, crew_takes.snapshot()[0])
@@ -5140,10 +5172,10 @@ def _take_graphic(obs_ws, entry, defs, name, source, on, crew_takes, flag_store,
             items += [(sc, d["source"]) for sc in d["scenes"]]
     state, note = obs_ws.read_obs_state(items, [])
     if state is None:
-        return {"ok": False, "error": note or "obs unreachable"}, 503
+        return {"ok": False, "error": note or "obs unreachable", **identity}, 503
     if on and not graphic_takes.scene_ok(entry, state.get("scene")):
         return {"ok": False, "error": f"{' / '.join(entry['scenes'])} is not on air",
-                "program_scene": state.get("scene")}, 409
+                "program_scene": state.get("scene"), **identity}, 409
     failed = []
     if entry["flag"]:
         active = flag_store.get()
@@ -5160,18 +5192,18 @@ def _take_graphic(obs_ws, entry, defs, name, source, on, crew_takes, flag_store,
                                            obs_ws.set_scene_item_enabled)
         changed = bool(intents) and not failed
     if changed:
-        line = graphic_takes.chat_line(name, source, on)
+        line = graphic_takes.chat_line(name, display_name or source, on)
         LOG.info("graphic take: %s", line)
         if chat_store:
             chat_store.add(user="racecast", text=line)
-    payload = {"ok": not failed, "source": source, "on": bool(on), "changed": changed}
+    payload = {"ok": not failed, "source": source, "on": bool(on), "changed": changed, "displayName": display_name or source}
     if failed:
         payload["error"] = "; ".join(failed)
     return payload, (503 if failed else 200)
 
 
 def request_graphic_take(relay, modes, roles, key, name, source, requests, chat_store,
-                         now):
+                         now, display_name=None):
     """POST /cockpit/graphic-takes/request: a crew member asks the director to put
     a graphic on air. Allowed while its scene is off air; the director decides."""
     entry = graphic_takes.find(graphic_takes.definitions(getattr(relay, "solo", False)),
@@ -5180,12 +5212,12 @@ def request_graphic_take(relay, modes, roles, key, name, source, requests, chat_
         return {"ok": False, "error": f"not a takeable graphic: {source!r}"}, 404
     if not graphic_takes.may_request(entry, roles, modes):
         return {"ok": False, "error": "graphic requests are not allowed for you"}, 403
-    req, merged = requests.add(source, key, name, now)
-    line = graphic_takes.request_line(name, source)
+    req, merged = requests.add(source, key, name, now, display_name=display_name)
+    line = graphic_takes.request_line(name, req["displayName"])
     LOG.info("graphic take: %s", line)
     if chat_store:
         chat_store.add(user="racecast", text=line)
-    return {"ok": True, "id": req["id"], "source": source, "merged": merged}, 200
+    return {"ok": True, "id": req["id"], "source": source, "merged": merged, "displayName": req["displayName"]}, 200
 
 
 def answer_graphic_request(relay, obs_ws, rid, action, requests, crew_takes, flag_store,
@@ -5200,7 +5232,7 @@ def answer_graphic_request(relay, obs_ws, rid, action, requests, crew_takes, fla
         return {"ok": False, "error": "no open request with that id"}, 404
     if action == "decline":
         requests.resolve(rid, "declined", now)
-        line = graphic_takes.decline_line(req["source"])
+        line = graphic_takes.decline_line(req["displayName"])
         LOG.info("graphic take: %s", line)
         if chat_store:
             chat_store.add(user="racecast", text=line)
@@ -5209,7 +5241,7 @@ def answer_graphic_request(relay, obs_ws, rid, action, requests, crew_takes, fla
     entry = graphic_takes.find(defs, req["source"])
     payload, status = _take_graphic(obs_ws, entry, defs, ", ".join(req["by"]),
                                     req["source"], True, crew_takes, flag_store,
-                                    chat_store)
+                                    chat_store, req["displayName"])
     if status == 200:
         requests.resolve(rid, "taken", now)
         payload.update(id=rid, state="taken")
@@ -12489,18 +12521,20 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                     if len(p) == 3 and p[1] == "clear":
                         return self._send(setup_ctl.set_field(p[2].lower(), ""))
                     return self._send({"error": "unknown", "path": self.path}, 404)
+                if p == ["obs", "asset-labels"]:
+                    return self._send(asset_labels(graphics_dir))
                 if p == ["obs", "graphics"]:
                     # The panel's graphic list; director-gated under /console.
                     return self._send(graphic_takes_view(
                         relay, relay._obs if _obs_ws is not None else None,
                         _take_modes.snapshot(), None, _crew_takes, flag_graphic_store,
-                        _takes_read_state))
+                        _takes_read_state, labels=asset_labels(graphics_dir)))
                 if p == ["obs", "graphics", "requests"]:
                     # The panel's request queue and modes, without an OBS read.
                     now = time.time()
                     return self._send({
                         "modes": _take_modes.snapshot(), "league_mode": _take_modes.league,
-                        "requests": [{"id": r["id"], "source": r["source"], "by": r["by"],
+                        "requests": [{"id": r["id"], "source": r["source"], "displayName": r["displayName"], "by": r["by"],
                                       "left_s": max(0, round(graphic_takes.REQUEST_TTL_S
                                                              - (now - r["at"])))}
                                      for r in _graphic_requests.pending(now)]})
@@ -12703,7 +12737,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                             relay, relay._obs if _obs_ws is not None else None,
                             _take_modes.snapshot(), self._console_roles(me), _crew_takes,
                             flag_graphic_store, _takes_read_state,
-                            _graphic_requests.states_for(me, time.time())))
+                            _graphic_requests.states_for(me, time.time()), labels=asset_labels(graphics_dir),
+                            own_request_labels=_graphic_requests.labels_for(me, time.time())))
                     if p == ["cockpit", "rc-notes"]:
                         # RC -> commentator notes (#376): identity-scoped rolling
                         # window for the cockpit's "Race Control" card.
@@ -13018,13 +13053,14 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                             payload, status = request_graphic_take(
                                 relay, _take_modes.snapshot(), self._console_roles(me),
                                 me, name, source, _graphic_requests, chat_store,
-                                time.time())
+                                time.time(), display_name=asset_labels(graphics_dir).get(source))
                             return self._send(payload, status)
                         payload, status = apply_graphic_take(
                             relay, relay._obs if _obs_ws is not None else None,
                             _take_modes.snapshot(), self._console_roles(me), name,
                             source, body.get("on") is not False,
-                            _crew_takes, flag_graphic_store, chat_store)
+                            _crew_takes, flag_graphic_store, chat_store,
+                            display_name=asset_labels(graphics_dir).get(source))
                         _takes_state["value"] = None
                         return self._send(payload, status)
                     if p == ["cockpit", "cue-back"]:

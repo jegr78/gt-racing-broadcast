@@ -387,3 +387,12 @@ independent Split HUD, never the Split label page. One `audience.js` poll per
 live page updates text/values, with relative 120-second automatic stale expiry.
 An empty scene returns its original HTML without widget polling. Shared editing
 stays in the local Control Center; `/console` exposes no audience mutation.
+
+**Asset aliases (#936).** `list_graphics` keeps canonical name/file fields and
+optionally adds displayName after Internal/placeholder filtering. `asset_labels`
+provides only public cached aliases; `/obs/asset-labels` is director-gated under
+the existing obs policy, and native Companion polls its trusted-network root.
+Take views attach labels only to allowed controls. Requests retain the first
+server-resolved displayName while canonical source controls rights, deduplication
+and OBS routing. Request views carry requestDisplayName for the pending snapshot;
+direct takes use current labels. No API request fetches the Sheet.

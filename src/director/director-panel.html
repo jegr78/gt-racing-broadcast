@@ -650,6 +650,12 @@
     #hoUpcoming .hrow{grid-template-columns:70px minmax(0,1fr) 110px}
     #hoUpcoming .hrow button{grid-column:1 / -1}
   }
+#asset-preview{width:min(940px,94vw);max-height:94vh;padding:0;border:1px solid #334155;border-radius:12px;background:#111827;color:#e5e7eb}
+#asset-preview::backdrop{background:#000b}
+#asset-preview img{display:block;width:100%;max-height:76vh;object-fit:contain;background:#000}
+#asset-preview .asset-bar{display:flex;align-items:center;gap:16px;padding:12px}
+#asset-preview .asset-caption{flex:1;overflow-wrap:anywhere}
+#asset-preview button{min-height:40px;padding:6px 16px}
 </style>
 </head>
 <body>
@@ -951,7 +957,7 @@
           <div class="body">
             <div id="gfxList" class="chatlog"><div class="bempty">Loading…</div></div>
             <div class="hint">Read-only: the broadcast still-graphics (Sheet Assets tab).
-              Click one to open it in a new tab. OBS-only assets are hidden.</div>
+              Click to preview. Ctrl/Cmd-click opens the file in a new tab. OBS-only assets are hidden.</div>
           </div>
         </details>
       </div>
@@ -1217,7 +1223,8 @@ function toast(msg){
 function mkKey(label, tag, onClick){
   const b = document.createElement("button");
   b.className = "k";
-  b.innerHTML = `<span class="tag">${tag}</span>${label}`;
+  const badge = document.createElement('span'); badge.className = 'tag'; badge.textContent = tag;
+  b._caption = document.createTextNode(label); b.append(badge, b._caption);
   b.addEventListener("click", onClick);
   return b;
 }
@@ -1256,6 +1263,15 @@ redFlagBtn._item = redFlagItem;
 let graphicCatalog = null;   // the relay's panel catalog, see loadGraphicCatalog()
 let activeConfig = CONFIG;   // the cfg buildControls last ran with. obsStatePoll
                              // reads this, not CONFIG, so a solo build stays in sync.
+let assetLabels = {};
+const MEDIA_SCENE_ASSETS = {Intro:'Intro Video', Outro:'Outro Video', Trailer:'Trailer Video'};
+function assetLabel(source, fallback) { return (source && assetLabels[source]) || fallback || source; }
+function relabelAssetControls() {
+  macroKeys.forEach(b => { const source = MEDIA_SCENE_ASSETS[b._m.scene]; if(source) { b._caption.nodeValue = assetLabel(source,b._m.label); b.title = source; } });
+  Object.entries(sceneKeys).forEach(([scene,b]) => { const source = MEDIA_SCENE_ASSETS[scene]; if(source) { b._caption.nodeValue = assetLabel(source,scene.toUpperCase()); b.title = source; } });
+  document.querySelectorAll('#audio .arow').forEach(row => { const input = row.querySelector('input').dataset.input; row.querySelector('.nm').textContent = assetLabel(input, row.dataset.defaultLabel); row.querySelector('.nm').title = input; });
+  redFlagBtn._caption.nodeValue = assetLabel('Standby Cover','RED FLAG'); redFlagBtn.title = 'Standby Cover';
+}
 function buildControls(cfg){
   activeConfig = cfg;
   $("#pgmBus").replaceChildren();
@@ -1309,7 +1325,7 @@ function buildControls(cfg){
   buildGraphicBuses();
 
   cfg.audio.forEach(a=>{
-    const row = document.createElement("div"); row.className = "arow";
+    const row = document.createElement("div"); row.className = "arow"; row.dataset.defaultLabel = a.label;
     row.innerHTML =
       `<span class="nm">${a.label}</span>
        <input type="range" min="-60" max="26" step="0.5" value="0" data-input="${a.input}">
@@ -1332,6 +1348,7 @@ function buildControls(cfg){
       await obsMute(a.input, muted); obsStatePoll();
     });
   });
+  relabelAssetControls();
 }
 buildControls(CONFIG);
 
@@ -1347,6 +1364,7 @@ function buildGraphicBuses(){
   }
   const add = (item, bus)=>{
     const b = mkKey(item.label, item.scene, ()=>toggleSource(item, b));
+    b.title = item.source;
     b._item = item; b._gfx = true; toggleKeys.push(b); $(bus).appendChild(b);
   };
   graphicCatalog.graphics.forEach(item=>add(item, "#gfxBus"));
@@ -1358,12 +1376,17 @@ async function loadGraphicCatalog(){
     const r = await fetch("/obs/graphics", {cache: "no-store"});
     const d = await r.json();
     if (!r.ok || !d.panel) throw new Error(r.status);
-    graphicCatalog = d.panel;
-    buildGraphicBuses();
+    const signature = JSON.stringify([d.panel,d.assetLabels]);
+    if(signature === loadGraphicCatalog.signature) return;
+    loadGraphicCatalog.signature = signature;
+    graphicCatalog = d.panel; assetLabels = d.assetLabels || {};
+    buildGraphicBuses(); relabelAssetControls();
+    flagGfxSig = null; flagGfxPoll();
     obsStatePoll();
   }catch(e){ setTimeout(loadGraphicCatalog, 3000); }
 }
 loadGraphicCatalog();
+setInterval(() => { if(!document.hidden) loadGraphicCatalog(); },3000);
 
 /* Crew graphic takes: the live mode per role and the requests waiting for the
    director. A mode change on the relay drops the open requests. */
@@ -1415,7 +1438,7 @@ function renderRequests(list){
   list.forEach(r=>{
     const li = document.createElement("li");
     const txt = document.createElement("div"); txt.className = "rq";
-    txt.textContent = r.source;
+    txt.textContent = r.displayName || r.source; txt.title = r.source;
     const by = document.createElement("small");
     by.textContent = `requested by ${r.by.join(", ")} · `;
     const left = document.createElement("span"); left.className = "left";
@@ -1425,7 +1448,7 @@ function renderRequests(list){
     const key = (label, action)=>{
       const b = document.createElement("button"); b.className = "k"; b.type = "button";
       b.textContent = label;
-      b.addEventListener("click", ()=>answerRequest(r.id, action, r.source));
+      b.addEventListener("click", ()=>answerRequest(r.id, action, r.displayName || r.source));
       return b;
     };
     li.append(txt, key("TAKE", "take"), key("DECLINE", "decline"));
@@ -1559,9 +1582,9 @@ function flagGfxBuild(available){
   bus.textContent = "";
   bus.parentElement.hidden = !available.length;   // no linked flag: no flag group
   available.forEach(({key, source})=>{
-    const label = FLAG_GFX_LABELS[key] || source.replace(/^Flag /, "").toUpperCase();
+    const label = assetLabel(source, FLAG_GFX_LABELS[key] || source.replace(/^Flag /, "").toUpperCase());
     const b = mkKey(label, "flaggfx", ()=>flagGfxSet(key));
-    flagGfxKeys[key] = b; bus.appendChild(b);
+    b.title = source; flagGfxKeys[key] = b; bus.appendChild(b);
   });
   bus.appendChild(mkKey("CLEAR", "stop", ()=>flagGfxSet("")));
 }
@@ -1825,7 +1848,7 @@ async function runMacro(m){
   ];
   for (const [what, fn] of steps){
     try{ await fn(); }
-    catch(e){ log(`${m.label}: ${what} failed: ${e.message||e}`, "err"); }
+    catch(e){ log(`${assetLabel(MEDIA_SCENE_ASSETS[m.scene],m.label)}: ${what} failed: ${e.message||e}`, "err"); }
   }
   if (m.rc !== undefined) setupSet("racecontrol", m.rc);
   obsStatePoll();
@@ -1837,7 +1860,7 @@ async function toggleSource(item, btn){
     const on = last ? !last.enabled : true;
     await obsSource(item.scene, item.source, on);
     btn.classList.toggle("on", on);
-  }catch(e){ log(`Toggle "${item.source}" in "${item.scene}" failed: ${e.message||e}`, "err"); }
+  }catch(e){ log(`Toggle "${assetLabel(item.source)}" in "${item.scene}" failed: ${e.message||e}`, "err"); }
 }
 
 /* Relay actions, no OBS needed */
@@ -3408,6 +3431,25 @@ if((localStorage.getItem(PV_KEY) || "1") === "1"){ pvStart(); }
 pgmAudioInit("/preview/program-audio");
 
 /* Graphics browser: a read-only list of the Sheet assets */
+const assetPreview = document.createElement('dialog'); assetPreview.id = 'asset-preview';
+const assetPreviewImage = document.createElement('img');
+const assetPreviewBar = document.createElement('div'); assetPreviewBar.className = 'asset-bar';
+const assetPreviewCaption = document.createElement('span'); assetPreviewCaption.className = 'asset-caption';
+const assetPreviewClose = document.createElement('button'); assetPreviewClose.type = 'button'; assetPreviewClose.textContent = 'Close';
+assetPreviewClose.addEventListener('click', () => assetPreview.close());
+assetPreview.addEventListener('click', e => { if(e.target === assetPreview) assetPreview.close(); });
+assetPreviewBar.append(assetPreviewCaption,assetPreviewClose); assetPreview.append(assetPreviewImage,assetPreviewBar); document.body.append(assetPreview);
+function assetPreviewName(g) {
+  const label = g.displayName || g.name;
+  assetPreview.dataset.source = g.name;
+  assetPreviewCaption.textContent = label; assetPreviewCaption.title = g.name;
+  assetPreviewImage.alt = label;
+}
+function previewAsset(g) {
+  assetPreviewName(g); assetPreviewImage.src = RC_API('/graphics/' + encodeURIComponent(g.file));
+  if(!assetPreview.open) assetPreview.showModal();
+}
+
 async function loadGraphics() {
   const box = document.getElementById('gfxList');
   if (!box) return;
@@ -3416,6 +3458,13 @@ async function loadGraphics() {
     if (!r.ok) throw new Error(r.status);
     const d = await r.json();
     const list = d.graphics || [];
+    const signature = JSON.stringify(list);
+    if(signature === loadGraphics.signature) return;
+    loadGraphics.signature = signature;
+    if(assetPreview.open) {
+      const current = list.find(g => g.name === assetPreview.dataset.source);
+      if(current) assetPreviewName(current); else assetPreview.close();
+    }
     box.textContent = '';
     if (!list.length) {
       const e = document.createElement('div');
@@ -3426,7 +3475,11 @@ async function loadGraphics() {
       const a = document.createElement('a');
       a.href = RC_API('/graphics/' + encodeURIComponent(g.file));
       a.target = '_blank'; a.rel = 'noopener';
-      a.textContent = g.name;                 // XSS-safe (Sheet label)
+      a.textContent = g.displayName || g.name; a.title = g.name;
+      a.addEventListener('click', event => {
+        if(event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+        event.preventDefault(); previewAsset(g);
+      });                 // XSS-safe (Sheet label)
       box.appendChild(a);
     });
   } catch (e) {
@@ -3781,7 +3834,7 @@ setInterval(timerPoll, 2000);
 setupPoll(); setInterval(setupPoll, 2000);
 chatPoll(); setInterval(chatPoll, 2000);
 bchatPoll(); bchatTimer = setInterval(bchatPoll, 4000);
-loadGraphics();
+loadGraphics(); setInterval(() => { if(!document.hidden) loadGraphics(); },3000);
 setInterval(schedPoll, 2000);
 setInterval(qualPoll, 2000);
 subsPoll(); setInterval(subsPoll, 2000);

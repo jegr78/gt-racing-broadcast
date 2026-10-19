@@ -238,3 +238,13 @@ Audience definitions/manual values/explicit baselines live in the profile's
 `audience.json`, outside `overlay/`. `audience_widgets` validates bounded stable
 identities and finite ranges, merges edits under a per-path lock and atomically
 replaces the file. Profile bundles include it; Look restore deliberately does not.
+
+## Asset display metadata (#936)
+
+`asset_metadata` parses optional header-based Alias/Internal fields separately
+from URLs and canonical column-A names. Headerless media retains its legacy
+any-column label search. Internal header recognition keeps the legacy first-
+column fallback even for unrecognized header captions. Each downloader owns
+its kind's entries in its local manifest; atomic unique temporary writes retain
+unknown and other-kind fields. Failed Sheet reads never clear metadata.
+No alias may become a filename, URL, source, action or executable expression.

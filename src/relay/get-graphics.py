@@ -10,7 +10,7 @@ those are handled by get-media.py. Never stored under src/, never committed.
 Usage: python3 get-graphics.py [--out DIR] [--sheet-id ID] [--assets-tab NAME]
        [--only "Label[,Label...]"]
 """
-import argparse, csv, io, json, os, re, sys
+import argparse, csv, io, os, re, sys
 from urllib.parse import quote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
@@ -22,6 +22,7 @@ for _cand in (os.path.join(_HERE, "..", "scripts"),
               os.path.join(getattr(sys, "_MEIPASS", _HERE), "src", "scripts")):
     if os.path.isdir(_cand) and _cand not in sys.path:
         sys.path.insert(0, _cand)
+import asset_metadata  # noqa: E402
 import placeholders  # noqa: E402
 
 
@@ -146,56 +147,26 @@ def internal_from_csv(rows):
     row with an ASSET_INTERNAL_HEADERS column; the label is read from the
     ASSET_NAME_HEADERS column (default col 0). Empty set when there is no header or no
     Internal column."""
-    if not rows:
-        return set()
-    header = [(h or "").strip().lower() for h in rows[0]]
-    ii = next((header.index(h) for h in ASSET_INTERNAL_HEADERS if h in header), None)
-    if ii is None:
-        return set()
-    ni = next((header.index(h) for h in ASSET_NAME_HEADERS if h in header), 0)
-    out = set()
-    for row in rows[1:]:
-        if len(row) <= ii or not _asset_truthy(row[ii]):
-            continue
-        label = (row[ni] if ni < len(row) else "").strip()
-        if label:
-            out.add(label)
-    return out
+    _, records = asset_metadata.parse(rows)
+    return {row["name"] for row in records if row["internal"]}
 
 
 def write_manifest(out_dir, internal_labels):
-    """Write <out_dir>/manifest.json = {"internal": [<sorted labels>]} recording the
-    OBS-only assets the console Graphics browser must hide. Best-effort: an IO error is a
-    warning, never fatal. Not a *.png, so list_graphics/resolve_graphic never touch it."""
-    path = os.path.join(out_dir, MANIFEST_NAME)
-    tmp = path + ".part"
+    """Update Internal visibility without erasing aliases or other metadata."""
     try:
-        with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump({"internal": sorted(internal_labels)}, fh, ensure_ascii=False, indent=2)
-        os.replace(tmp, path)
-    except OSError as e:
-        print(f"WARNING: could not write {MANIFEST_NAME}: {e}")
+        asset_metadata.write(out_dir, {"internal": sorted(internal_labels)})
+    except OSError as error:
+        print(f"WARNING: could not write {MANIFEST_NAME}: {error}")
 
 
 def graphics_from_csv(rows):
     """Assets-tab rows -> {label: drive_url} for every row whose first non-empty value
     cell is a Google-Drive link. YouTube / non-Drive rows and get-media.py's own
     MEDIA_LABELS rows are skipped. Label verbatim."""
-    out = {}
-    for row in rows:
-        if not row:
-            continue
-        label = (row[0] or "").strip()
-        if not label or label.lower() in MEDIA_LABELS:
-            continue
-        for cell in row[1:]:
-            v = (cell or "").strip()
-            if not v:
-                continue
-            if is_drive_url(v) and drive_id(v):
-                out[label] = v
-            break  # only the first non-empty value cell matters
-    return out
+    _, records = asset_metadata.parse(rows)
+    return {row["name"]: row["url"] for row in records
+            if row["name"].lower() not in MEDIA_LABELS
+            and is_drive_url(row["url"]) and drive_id(row["url"])}
 
 
 def graphics_dir(here):
@@ -305,6 +276,8 @@ def main():
     ap.add_argument("--assets-tab", default="Assets")
     ap.add_argument("--only", default=None,
                     help="Comma-separated labels to fetch (default: all graphic rows).")
+    ap.add_argument("--metadata-only", action="store_true",
+                    help="Refresh cached aliases and visibility without downloading asset bytes.")
     a = ap.parse_args()
 
     if not a.sheet_id:
@@ -315,9 +288,14 @@ def main():
         sys.exit(f"ERROR: could not read sheet Assets tab: {e}")
 
     rows = list(csv.reader(io.StringIO(csv_text)))
+    try:
+        asset_metadata.refresh(a.out, rows, "graphics")
+    except (ValueError, OSError) as error:
+        sys.exit(f"ERROR: could not refresh asset metadata: {error}")
+    if a.metadata_only:
+        print("Graphics metadata refreshed; asset bytes unchanged.")
+        return
     all_graphics = graphics_from_csv(rows)
-    if not all_graphics:
-        sys.exit("ERROR: no graphic (Drive-link) rows found in the Assets tab.")
     wanted = None
     graphics = all_graphics
     if a.only:
@@ -325,7 +303,6 @@ def main():
         graphics = {k: v for k, v in all_graphics.items() if k in wanted}
 
     os.makedirs(a.out, exist_ok=True)
-    write_manifest(a.out, internal_from_csv(rows))
     failed = []
     for label in sorted(graphics):
         fname = safe_filename(label)

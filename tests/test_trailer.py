@@ -54,7 +54,12 @@ def t_companion_has_trailer_button():
                                                  if isinstance(a, dict)):
                     target = btn
     assert target is not None, "no Companion button switches to the Trailer scene"
-    assert (target.get("style") or {}).get("text") == "TRAILER", target.get("style")
+    muted = {
+        a["options"]["source"]["value"] for a in downs(target)
+        if a.get("definitionId") == "set_source_mute"
+        and a["options"]["mute"]["value"] == "true"
+    }
+    assert {"Feed A", "Feed B", "Discord Audio Capture"} <= muted, muted
 
 
 def t_companion_red_flag_on_reachable_row():
@@ -62,9 +67,18 @@ def t_companion_red_flag_on_reachable_row():
     # 4/3 slot lived on an unreachable 5th row. TRAILER took the vacated 0/7.
     cfg = json.loads(_read(os.path.join("src", "companion", "racecast-buttons.companionconfig")))
     controls = cfg["pages"]["1"]["controls"]
-    assert controls["0"]["7"]["style"]["text"] == "TRAILER", "slot 0/7 should now be TRAILER"
+    trailer = controls["0"]["7"]
+    assert any(
+        a.get("definitionId") == "set_scene"
+        and a["options"]["scene"]["value"] == "Trailer"
+        for a in trailer["steps"]["0"]["action_sets"]["down"]
+    ), "slot 0/7 must still select the canonical Trailer scene"
     rf = controls["1"]["7"]
-    assert rf["style"]["text"] == "RED\nFLAG", "RED FLAG must sit at 1/7"
+    assert any(
+        (a.get("options", {}).get("url") or {}).get("value", "")
+        == "http://127.0.0.1:8088/obs/graphic/show/Standby%20Cover"
+        for a in rf["steps"]["0"]["action_sets"]["down"]
+    ), "RED FLAG action must sit at 1/7"
     assert set(rf.get("steps", {})) == {"0", "1"}, "RED FLAG must keep its 2-step toggle"
     assert "3" not in controls.get("4", {}), "old 4/3 RED FLAG slot must be freed"
 

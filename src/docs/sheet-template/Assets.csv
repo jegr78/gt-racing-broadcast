@@ -1,28 +1,29 @@
-Overlay,<paste a Google Drive share link>
-Standings,<paste a Google Drive share link>
-Schedule,<paste a Google Drive share link>
-Standby,<paste a Google Drive share link>
-Standby Cover,<paste a Google Drive share link>
-Race Results,<paste a Google Drive share link>
-Quali Results,<paste a Google Drive share link>
-Race Weather 1,<paste a Google Drive share link>
-Race Weather 2,<paste a Google Drive share link>
-Quali Weather,<paste a Google Drive share link>
-Weekend Info,<paste a Google Drive share link>
-Race Info,<paste a Google Drive share link>
-Next Event,<paste a Google Drive share link>
-Starting Grid,<paste a Google Drive share link>
-Grid Row 1,<paste a Google Drive share link>
-Grid Row 2,<paste a Google Drive share link>
-Grid Row 3,<paste a Google Drive share link>
-Grid Row 4,<paste a Google Drive share link>
-Grid Row 5,<paste a Google Drive share link>
-Grid Row 6,<paste a Google Drive share link>
-Grid Row 7,<paste a Google Drive share link>
-Grid Row 8,<paste a Google Drive share link>
-Post Race Interviews,<paste a Google Drive share link>
-Intermission,<paste a Google Drive share link>
-Intermission Music,<paste a Google Drive share link OR a YouTube/URL>
-Intro Video,https://www.youtube.com/watch?v=SAMPLE0INTRO
-Outro Video,https://www.youtube.com/watch?v=SAMPLE0OUTRO
-Trailer Video,https://www.youtube.com/watch?v=SAMPLE0TRAILER
+Name,Link,Internal,Alias
+Overlay,<paste a Google Drive share link>,FALSE,
+Standings,<paste a Google Drive share link>,FALSE,
+Schedule,<paste a Google Drive share link>,FALSE,
+Standby,<paste a Google Drive share link>,FALSE,
+Standby Cover,<paste a Google Drive share link>,FALSE,
+Race Results,<paste a Google Drive share link>,FALSE,
+Quali Results,<paste a Google Drive share link>,FALSE,
+Race Weather 1,<paste a Google Drive share link>,FALSE,
+Race Weather 2,<paste a Google Drive share link>,FALSE,
+Quali Weather,<paste a Google Drive share link>,FALSE,
+Weekend Info,<paste a Google Drive share link>,FALSE,
+Race Info,<paste a Google Drive share link>,FALSE,
+Next Event,<paste a Google Drive share link>,FALSE,
+Starting Grid,<paste a Google Drive share link>,FALSE,
+Grid Row 1,<paste a Google Drive share link>,FALSE,
+Grid Row 2,<paste a Google Drive share link>,FALSE,
+Grid Row 3,<paste a Google Drive share link>,FALSE,
+Grid Row 4,<paste a Google Drive share link>,FALSE,
+Grid Row 5,<paste a Google Drive share link>,FALSE,
+Grid Row 6,<paste a Google Drive share link>,FALSE,
+Grid Row 7,<paste a Google Drive share link>,FALSE,
+Grid Row 8,<paste a Google Drive share link>,FALSE,
+Post Race Interviews,<paste a Google Drive share link>,FALSE,
+Intermission,<paste a Google Drive share link>,FALSE,
+Intermission Music,<paste a Google Drive share link OR a YouTube/URL>,FALSE,
+Intro Video,https://www.youtube.com/watch?v=SAMPLE0INTRO,FALSE,
+Outro Video,https://www.youtube.com/watch?v=SAMPLE0OUTRO,FALSE,
+Trailer Video,https://www.youtube.com/watch?v=SAMPLE0TRAILER,FALSE,

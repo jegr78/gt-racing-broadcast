@@ -399,6 +399,90 @@ controls them from the panel's **Flag Gfx** row or the Companion **FLAGS** page'
 graphic row (see [Director](Director#the-companion-web-buttons-board)). A missing
 graphic file is non-fatal: OBS shows a transparent placeholder until you fetch it.
 
+### Optional display aliases
+
+Add an optional **Alias** column to the header-based Assets tab. Keep column A
+as the existing technical name. Alias, URL/Link and Internal columns may appear
+in any order after it. The downloadable sample includes blank aliases.
+
+| Name | Link | Internal | Alias |
+| --- | --- | --- | --- |
+| Standings | Drive link | FALSE | Championship standings |
+| Race Results | Drive link | FALSE | Sponsor board |
+| Trailer Video | Video URL | FALSE | League presentation |
+| Intermission Music | Audio URL | FALSE | Break playlist |
+
+A non-empty trimmed Alias becomes the displayed asset name. Missing columns,
+blank cells and spaces retain each control's previous label. Unicode and
+identical aliases are allowed. Tooltips and producer details retain the canonical
+name; Companion's button editor retains the canonical actions and source names.
+An alias never changes a filename, OBS source, request identity, permission or
+macro side effect. Renaming a flag graphic does not change what its flag control
+does. A music alias does not rename the Intermission scene.
+
+After editing the Sheet, use **Profile → Assets → Refresh labels** for graphics
+or media, or run:
+
+```text
+racecast graphics --metadata-only
+racecast media --metadata-only
+```
+
+Normal downloads refresh the same metadata. Label-only refreshes leave asset
+bytes untouched, including rows with blank links. The open crew desks, Director
+Panel and local Profile view read the updated local cache on their normal
+three-second poll. They need no Sheet access or relay restart. A blank/removed
+alias reverts to the old label. An unreadable Sheet or invalid HTML/error response
+retains the last good metadata. Internal assets keep their visibility rules;
+their private aliases are not distributed to crew controls.
+
+Open graphic requests retain their first human label even if an administrator
+renames the asset. Every requester and the director use that snapshot until the
+request is answered or expires. A new direct take uses the current label.
+
+The caches are `runtime/<profile>/graphics/manifest.json` and
+`runtime/<profile>/media/manifest.json`. Graphics-only and media-only refreshes
+retain metadata owned by the other downloader. Profile export **with assets**
+transfers the metadata; export without assets needs a metadata refresh at the
+receiving machine. A Look backup/restoration includes the metadata with its
+asset files. An older Look without manifests falls back to the original labels
+until refreshed. Producer takeover uses the receiving machine's existing asset
+cache; it does not transfer these files. Import an asset-inclusive profile bundle
+or refresh the new producer's labels before takeover when needed.
+
+#### Companion and Web Buttons
+
+The updated board uses one non-persistent custom variable,
+`racecast_asset_labels`, and a **Racecast asset labels** trigger. Its HTTP GET
+reads the relay's local `/obs/asset-labels` every three seconds, stores the parsed
+JSON object, and changes only button captions. The same captions appear on
+physical buttons and in the native Web Buttons iframe. Existing feedbacks,
+colors, actions and button locations remain intact. Alias values are literal
+text, including text resembling a Companion variable.
+
+For an existing installation, export the updated board and import only the
+required pages while preserving connections as described in [Director](Director).
+Page-only imports do not add custom variables or triggers. Add these separately
+in Companion's existing configuration:
+
+1. Create custom variable `racecast_asset_labels`. Set its startup value to an
+   empty JSON object `{}` and leave **Persist value** off.
+2. Create an enabled trigger named **Racecast asset labels**, with a fixed
+   three-second interval.
+3. Add the existing HTTP connection's **GET** action for
+   `http://127.0.0.1:8088/obs/asset-labels`. Select `racecast_asset_labels` as its
+   **JSON Response Data Variable**, turn **JSON Stringify Result** off, and leave
+   the response-status variable empty.
+
+This adds no OBS connection and does not replace existing connections or other
+triggers. A new disposable installation can import the full exported
+configuration instead. Without the variable/trigger, or before the first response,
+updated buttons keep their exact previous captions. Older imported static boards
+retain their static captions until their pages are re-imported. Cached captions
+remain during a relay interruption; restarting Companion begins with empty labels
+until a new response arrives. Button editor details identify the canonical asset
+if two aliases look the same.
+
 ### Hiding OBS-only assets from the crew Graphics browser (optional)
 
 The **cockpit**, **Director Panel**, and **Race Control** pages each show a read-only
@@ -427,9 +511,9 @@ Flag Green           | <Drive link>  | ☑
   (`Name`/`Label`).
 - Fully optional and backward compatible: an Assets tab with **no header row / no
   `Internal` column** shows **every** graphic in the browser (the previous behaviour).
-- Re-run `racecast graphics` after changing the column, the flag is captured into
-  `runtime/<profile>/graphics/manifest.json` at download time (the same cadence as the
-  graphics themselves).
+- Use `racecast graphics --metadata-only` after changing the column, or download
+  normally. The flag is captured into `runtime/<profile>/graphics/manifest.json`;
+  open desks pick up the local metadata on their normal poll.
 
 A missing graphic is non-fatal: `racecast setup` warns and OBS shows black until you
 run `racecast graphics`. The graphics/clips are **never committed**; they always come

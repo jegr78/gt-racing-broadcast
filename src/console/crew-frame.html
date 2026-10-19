@@ -168,6 +168,10 @@
     function takeOf(name) {
       return view ? (view.graphics || []).filter(function (g) { return g.source === name; })[0] : null;
     }
+    function human(g) {
+      var t = takeOf(g.name);
+      return (t && t.request === 'pending' && t.requestDisplayName) || g.displayName || (t && t.displayName) || g.name;
+    }
     // A take needs the graphic's scene on air; hiding it does not.
     function blockedReason(t) {
       if (t.visible || !view || !view.program_scene) return '';
@@ -208,7 +212,7 @@
       dlg.textContent = '';
       var img = imgFor(g.file, 'big');
       var bar = el('div', 'gpbar');
-      bar.appendChild(el('div', 'gname', g.name));
+      var title = el('div', 'gname', human(g)); title.dataset.source = g.name; title.title = g.name; bar.appendChild(title);
       var act = t && actionButton(t);
       if (act) bar.appendChild(act);
       var close = el('button', '', 'Close'); close.type = 'button';
@@ -223,7 +227,7 @@
       var names = list.map(function (g) { return g.name; });
       var extra = view ? (view.graphics || []).filter(function (t) {
         return t.group === 'editorial' && (t.can_take || t.can_request) && names.indexOf(t.source) < 0;
-      }).map(function (t) { return { name: t.source, file: null }; }) : [];
+      }).map(function (t) { return { name: t.source, displayName: t.displayName, file: null }; }) : [];
       return list.concat(extra);
     }
     function render() {
@@ -236,7 +240,7 @@
         var tile = el('div', 'gtile' + (t && t.visible ? ' onair' : asked ? ' asked' : ''));
         var thumb = el('button', 'gthumb'); thumb.type = 'button';
         if (g.file) {
-          thumb.setAttribute('aria-label', 'Preview ' + g.name);
+          thumb.setAttribute('aria-label', 'Preview ' + human(g));
           thumb.appendChild(imgFor(g.file, 'thumb'));
           thumb.addEventListener('click', function () { openPreview(g); });
         } else {
@@ -245,7 +249,7 @@
         }
         if (t && t.visible) thumb.appendChild(el('span', 'gbadge', 'ON AIR'));
         else if (asked) thumb.appendChild(el('span', 'gbadge asked', 'REQUESTED'));
-        tile.append(thumb, el('div', 'gname', g.name));
+        var caption = el('div', 'gname', human(g)); caption.title = g.name; tile.append(thumb, caption);
         if (t && t.visible && t.by) tile.appendChild(el('div', 'gby', 'by ' + t.by));
         var act = t && actionButton(t);
         if (act) tile.appendChild(act);
@@ -256,7 +260,7 @@
       renderFlags();
       if (dlg.open) {
         var name = dlg.querySelector('.gname');
-        var g = name && list.filter(function (x) { return x.name === name.textContent; })[0];
+        var g = name && list.filter(function (x) { return x.name === name.dataset.source; })[0];
         if (g) openPreview(g);
       }
     }
@@ -269,13 +273,13 @@
       flags.forEach(function (t) {
         var b = el('button', t.source === 'Flag Checkered' ? 'chk' : '');
         b.type = 'button';
-        b.appendChild(el('span', 'flab', t.source.replace(/^Flag /, '')));
+        b.appendChild(el('span', 'flab', t.displayName || t.source.replace(/^Flag /, '')));
         if (t.visible) b.appendChild(el('span', 'fon', 'ON AIR'));
         if (!b.className) b.style.background = FLAG_COLORS[t.source] || '#cdd3da';
         b.setAttribute('aria-pressed', t.visible ? 'true' : 'false');
         var why = blockedReason(t);
         b.disabled = busy || !!why;
-        b.title = why || (t.visible ? 'Take ' + t.source + ' off air' : 'Put ' + t.source + ' on air');
+        b.title = t.source + ': ' + (why || (t.visible ? 'Take ' + (t.displayName || t.source) + ' off air' : 'Put ' + (t.displayName || t.source) + ' on air'));
         b.addEventListener('click', function () { take(t.source, !t.visible); });
         fl.appendChild(b);
       });
@@ -283,10 +287,11 @@
     // The first requests of a page load sometimes meet a reset connection; one
     // quick retry saves a poll interval of empty card.
     function retryOnce(fn, retried) { if (!retried) setTimeout(function () { fn(true); }, 1000); }
+    var listSig = '';
     function loadList(retried) {
       return fetch('/graphics', { cache: 'no-store' })
         .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
-        .then(function (d) { list = d.graphics || []; imgs = {}; render(); })
+        .then(function (d) { var sig = JSON.stringify(d.graphics || []); if(sig === listSig) return; listSig = sig; list = d.graphics || []; render(); })
         .catch(function () {
           box.textContent = ''; box.appendChild(el('div', 'empty', 'Could not load graphics.'));
           retryOnce(loadList, retried);
@@ -307,7 +312,8 @@
       fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(body) })
         .then(function (r) { return r.json().catch(function () { return {}; }).then(function (d) {
-          if (!r.ok || !d.ok) msg.textContent = d.error || ('Failed (' + r.status + ')');
+          if (!r.ok || !d.ok) msg.textContent = (d.displayName ? d.displayName + ': ' : '') + (d.error || ('Failed (' + r.status + ')'));
+          else if (d.displayName) msg.textContent = d.displayName + (path.endsWith('/request') ? ': requested.' : body.on === false ? ': taken off air.' : ': put on air.');
         }); })
         .catch(function () { msg.textContent = 'Network error.'; })
         .then(function () { busy = false; return loadView(); });
@@ -315,8 +321,8 @@
     function take(source, on) { send('/cockpit/graphic-takes', { source: source, on: on }); }
     function ask(source) { send('/cockpit/graphic-takes/request', { source: source }); }
     var refresh = document.getElementById('gfxRefresh');
-    if (refresh) refresh.addEventListener('click', function () { loadList(true); loadView(true); });
+    if (refresh) refresh.addEventListener('click', function () { listSig = ''; imgs = {}; loadList(true); loadView(true); });
     loadList(); loadView();
-    setInterval(function () { if (!busy && !document.hidden) loadView(true); }, 3000);
+    setInterval(function () { if (!busy && !document.hidden) { loadList(true); loadView(true); } }, 3000);
   })();
 </script>

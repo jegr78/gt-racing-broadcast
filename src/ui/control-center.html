@@ -327,7 +327,7 @@
               <svg viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Apply in OBS</button>
             <button id="overlay-preview" onclick="openHudPreview()" title="Open the HUD design preview in a new tab. Live sheet data + your override CSS over a Gran Turismo backdrop (needs the relay running)">
               <svg viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>Preview ↗</button></div>
-          <div class="ovgridbar">
+          <div class="ovgridbar"><span class="dim" id="ov-frame-label"></span>
             <label><input type="checkbox" id="ov-grid-show" onchange="ovGridToggle(this.checked)"> Grid</label>
             <label>Size <input type="number" id="ov-grid-size" min="1" value="10" onchange="ovGridSetSize(this.value)"></label>
             <button type="button" class="ov-gpreset" onclick="ovGridSetSize(5)">5</button>
@@ -413,6 +413,7 @@
           <div class="row"><span class="name">Graphics</span>
             <span class="badge" id="b-graphics"><span class="dot"></span><span>…</span></span>
             <span class="dim grow" id="d-graphics"></span>
+            <button onclick="op('graphics-metadata')" title="Refresh Sheet aliases and visibility without downloading files">Refresh labels</button>
             <button onclick="op('graphics')">
               <svg viewBox="0 0 24 24"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg>Download</button></div>
           <div class="gallery" id="gfx-gallery"></div>
@@ -421,6 +422,7 @@
           <div class="row"><span class="name">Media</span>
             <span class="badge" id="b-media"><span class="dot"></span><span>…</span></span>
             <span class="dim grow" id="d-media"></span>
+            <button onclick="op('media-metadata')" title="Refresh Sheet aliases without downloading files">Refresh labels</button>
             <button onclick="op('media')">
               <svg viewBox="0 0 24 24"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg>Download</button></div>
           <div class="gallery" id="media-gallery"></div>
@@ -1370,6 +1372,7 @@ async function refresh() {
   // Home is open and the relay control server is answering.
   if (currentView === 'home' && relayUp && s.relay.http_ok) fetchRelayLive();
   if (currentView === 'home') fetchEventTitle();
+  if (currentView === 'profile') fetchAssetFiles();
 }
 
 // Setup wizard (on-demand /api/init/plan)
@@ -1691,7 +1694,7 @@ function watchJob(name, id, onDone) {
                                           : 'failed (exit ' + e.data + ')');
     jobES.close();
     refresh();
-    if (name === 'graphics' || name === 'media' || name === 'brands') fetchAssetFiles();
+    if (['graphics','media','brands','graphics-metadata','media-metadata'].includes(name)) fetchAssetFiles();
     if (name === 'install-tools' || name === 'install-apps') fetchSetup();
     if (name === 'obs-collection-set') fetchObsCollection();
     // wizard: record the outcome and re-render so the step's chip updates the
@@ -1929,16 +1932,36 @@ async function fetchObsCollection() {
   }
 }
 
+let assetFilesSignature = '';
 async function fetchAssetFiles() {
+  const profile = activeProfile;
   let d;
   try { d = await (await fetch('/api/assets/files', {cache: 'no-store'})).json(); }
   catch (e) { return; }                  // server gone, keep last state
-  if (!d.ok) return;
+  if (!d.ok || profile !== activeProfile || (d.profile && activeProfile && d.profile !== activeProfile)) return;
+  const signature = JSON.stringify(d);
+  if (signature === assetFilesSignature) return;
+  assetFilesSignature = signature;
+  const frameFile = overlayPage === 'intermission' ? 'Intermission.png' : 'Overlay.png';
+  const frame = d.graphics.find(row => row.name === frameFile);
+  if ($('ov-frame-label')) {
+    $('ov-frame-label').textContent = 'Frame: ' + (frame?.displayName || frameFile.replace(/\.png$/, ''));
+    $('ov-frame-label').title = frameFile;
+  }
   setCountBadge('graphics', d.graphics.length, d.graphics.length === 1 ? 'file' : 'files');
   setCountBadge('media', d.media.length, d.media.length === 1 ? 'file' : 'files');
   renderGallery('gfx-gallery', 'graphics', d.graphics, false);
   renderGallery('media-gallery', 'media', d.media, true);
   renderGallery('brands-gallery', 'brands', d.brands || [], false);
+  if (!$('lightbox').hidden) {
+    const box = $('lightbox');
+    const item = (d[box.dataset.kind] || []).find(row => row.name === box.dataset.file);
+    if (!item || (d.profile && box.dataset.profile !== d.profile)) closeLightbox();
+    else {
+      const name = item.displayName || item.name.replace(/\.[^.]+$/, '');
+      $('lightbox-cap').textContent = name; $('lightbox-img').alt = name;
+    }
+  }
   setTile('assets', d.graphics.length > 0 ? 'ok' : 'warn',
           d.graphics.length + ' graphics · ' + d.media.length + ' media');
 }
@@ -1960,6 +1983,7 @@ function renderGallery(containerId, kind, items, isVideo) {
     // is tolerated.
     const name = (typeof item === 'string') ? item : item.name;
     const ver = (typeof item === 'string') ? '' : item.v;
+    const displayName = item.displayName || name.replace(/\.[^.]+$/, '');
     let url = '/api/assets/file/' + kind + '/' + encodeURIComponent(name);
     if (ver) url += '?v=' + encodeURIComponent(ver);
     const t = document.createElement('div');
@@ -1979,22 +2003,24 @@ function renderGallery(containerId, kind, items, isVideo) {
       }
     } else {
       const img = document.createElement('img');
-      img.src = url; img.alt = name; img.loading = 'lazy';
+      img.src = url; img.alt = displayName; img.loading = 'lazy';
       t.appendChild(img);
-      t.onclick = () => openLightbox(url, name);
+      t.onclick = () => openLightbox(url, displayName, name, kind);
     }
     const cap = document.createElement('div');
     cap.className = 'cap';
-    cap.textContent = name.replace(/\.[^.]+$/, '');
-    cap.title = cap.textContent;   // the caption ellipsizes long names
+    cap.textContent = displayName;
+    cap.title = cap.textContent + ' (' + name + ')';   // keep full human and canonical labels
     t.appendChild(cap);
     c.appendChild(t);
   });
 }
 
-function openLightbox(url, name) {
-  $('lightbox-img').src = url;
-  $('lightbox-cap').textContent = name;
+function openLightbox(url, name, file, kind) {
+  $('lightbox-img').src = url; $('lightbox-img').alt = name;
+  $('lightbox-cap').textContent = name; $('lightbox-cap').title = file || name;
+  $('lightbox').dataset.file = file || ''; $('lightbox').dataset.kind = kind || '';
+  $('lightbox').dataset.profile = activeProfile || '';
   $('lightbox').hidden = false;
 }
 function closeLightbox() {
@@ -2955,6 +2981,10 @@ async function loadOverlay(retry = 0) {
   const splitOption = $('ov-scene').querySelector('option[value=splitscreen]');
   splitOption.hidden = splitOption.disabled = !!slotsR.solo;
   ovState.page = overlayPage;
+  if (slotsR.background) {
+    $('ov-frame-label').textContent = 'Frame: ' + slotsR.background.displayName;
+    $('ov-frame-label').title = slotsR.background.file;
+  }
   ovState.allSlots = slotsR.slots || [];
   ovState.slots = ovState.allSlots;
   ovState.audience = slotsR.audience || {widgets: []};
