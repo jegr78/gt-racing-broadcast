@@ -32,8 +32,8 @@ def t_intermission_layout_is_independent_and_migrates_legacy_css():
         original = cli._mk_active_profile(td)
         od = Path(td) / 'profiles/demo/overlay'
         od.mkdir()
-        (od / 'hud.css').write_text('#clock{left:30px}')
-        (od / 'intermission.css').write_text('#ichat{color:gold}')
+        (od / 'hud.css').write_text('#clock{left:30px}', encoding="utf-8")
+        (od / 'intermission.css').write_text('#ichat{color:gold}', encoding="utf-8")
         try:
             loaded = m.overlay_layout_read_data('intermission')
             assert loaded['ok'] and loaded['migrated'], loaded
@@ -43,10 +43,10 @@ def t_intermission_layout_is_independent_and_migrates_legacy_css():
                                                          'visible': False}},
                 'customCss': loaded['layout']['customCss']})
             assert saved['ok'], saved
-            css = (od / 'intermission.css').read_text()
+            css = (od / 'intermission.css').read_text(encoding="utf-8")
             assert 'left: 80px' in css and 'width: 500px' in css and 'display: none' in css
             assert css.endswith('#ichat{color:gold}')
-            assert (od / 'hud.css').read_text() == '#clock{left:30px}'
+            assert (od / 'hud.css').read_text(encoding="utf-8") == '#clock{left:30px}'
             assert m.overlay_layout_read_data('intermission')['layout']['slots']['ichat']['left'] == 80
             assert not m.overlay_layout_write_data('intermission', {'page': 'hud'})['ok']
             assert not m.overlay_layout_write_data('../intermission', {})['ok']
@@ -56,9 +56,9 @@ def t_intermission_layout_is_independent_and_migrates_legacy_css():
 
 def t_intermission_bake_changes_only_its_nested_video_items():
     path = ROOT / 'src/obs/GT_Racing_Solo_POV.json'
-    collection = json.loads(path.read_text())
-    original = json.loads(path.read_text())
-    html = (ROOT / 'src/obs/intermission.html').read_text()
+    collection = json.loads(path.read_text(encoding="utf-8"))
+    original = json.loads(path.read_text(encoding="utf-8"))
+    html = (ROOT / 'src/obs/intermission.html').read_text(encoding="utf-8")
     css = '#intermission-webcam{left:200px;top:100px;width:640px;height:360px;display:none}'
     solo_obs.sa.bake_scene_layout(collection, 'intermission', html, css)
     for before, after in zip(original['sources'], collection['sources'], strict=True):
@@ -78,7 +78,7 @@ def t_explicit_apply_targets_scene_and_automatic_sync_never_shows_camera():
         od.mkdir()
         (od / 'intermission.css').write_text(
             '#intermission-webcam{left:90px;top:100px;width:800px;height:450px}'
-            '#intermission-capture{display:none}')
+            '#intermission-capture{display:none}', encoding="utf-8")
         transforms, visibility = [], []
         try:
             with patch.object(m, '_profile_is_solo', return_value=True):
@@ -161,7 +161,7 @@ def t_intermission_layout_survives_bundle_and_backup_roundtrips():
             assert (dest / 'profiles/demo/overlay/intermission.css').read_bytes() == expected
             sources = {'overlay': str(profile / 'overlay'), 'backups': str(Path(td) / 'backups')}
             backup = backup_admin.create_backup('Scene', sources, 'demo')
-            (profile / 'overlay/intermission.css').write_text('changed')
+            (profile / 'overlay/intermission.css').write_text('changed', encoding="utf-8")
             backup_admin.restore_backup(backup, sources)
             assert (profile / 'overlay/intermission.css').read_bytes() == expected
         finally:
@@ -185,7 +185,7 @@ def t_legacy_intermission_css_leaves_video_defaults_and_endurance_untouched():
         original = cli._mk_active_profile(td)
         od = Path(td) / 'profiles/demo/overlay'
         od.mkdir()
-        (od / 'intermission.css').write_text('#ichat{right:20px;width:500px}')
+        (od / 'intermission.css').write_text('#ichat{right:20px;width:500px}', encoding="utf-8")
         calls = []
         try:
             result = m._sync_scene_layouts(solo=True, explicit=True,

@@ -27,7 +27,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='scene-builder-') as td:
         original = cli._mk_active_profile(td)
         profile = Path(td) / 'profiles/demo/profile.env'
-        profile.write_text('NAME=Demo Racing\nKIND=solo\nTEMPLATE=pov\n')
+        profile.write_text('NAME=Demo Racing\nKIND=solo\nTEMPLATE=pov\n', encoding="utf-8")
         calls = []
         ctx = ui._ctx()
         ctx.update(version='dev build',
@@ -79,7 +79,7 @@ def main():
                 page.evaluate('saveOverlay()')
                 page.wait_for_function("() => document.getElementById('overlay-save').textContent.includes('Saved')")
                 css_path = Path(td) / 'profiles/demo/overlay/intermission.css'
-                css = css_path.read_text()
+                css = css_path.read_text(encoding="utf-8")
                 assert 'left: 120px' in css and 'width: 480px' in css
                 assert 'rgba(25,40,60' not in css, 'Preview placeholder leaked into saved style'
                 page.evaluate('applyOverlay()')
@@ -98,7 +98,7 @@ def main():
                 page.select_option('#ov-scene', 'intermission')
                 page.wait_for_function("() => ovState.page === 'intermission' && ovState.layout.slots.ichat.left===120")
                 # The same UI exposes just chat for an Endurance profile.
-                profile.write_text('NAME=Demo Racing\nKIND=endurance\n')
+                profile.write_text('NAME=Demo Racing\nKIND=endurance\n', encoding="utf-8")
                 with patch.object(m, '_profile_is_solo', return_value=False):
                     page.evaluate('loadOverlay()')
                     page.wait_for_function("() => ovState.slots.length === 1")
