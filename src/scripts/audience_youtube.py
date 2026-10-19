@@ -1,7 +1,11 @@
 """YouTube output metrics; pasted URLs are parsed locally, never fetched."""
 
 import re
-from urllib.parse import urlparse, parse_qs, unquote
+import json
+import time
+from email.utils import parsedate_to_datetime
+import http_util
+from urllib.parse import urlparse, parse_qs, unquote, urlencode
 
 VIDEO = re.compile(r"[A-Za-z0-9_-]{11}\Z")
 CHANNEL = re.compile(r"UC[A-Za-z0-9_-]{22}\Z")
@@ -148,3 +152,146 @@ def channel_snapshot(payload, expected):
         "supportsNet": False,
         "significantDigits": 3,
     }
+
+
+class APIError(Exception):
+    def __init__(self, code, message, transient=False, retry_after=0):
+        super().__init__(message)
+        self.code = code
+        self.transient = transient
+        self.retry_after = retry_after
+
+
+def api_key(value):
+    if not isinstance(value, str) or not re.fullmatch(
+        r"[A-Za-z0-9_-]{10,256}", value.strip()
+    ):
+        raise ValueError("Enter a valid YouTube Data API key")
+    return value.strip()
+
+
+def retry_after(headers, default):
+    value = headers.get("Retry-After", "") if headers else ""
+    if not isinstance(value, str) or not value or len(value) > 128:
+        return default
+    try:
+        seconds = int(value)
+    except ValueError:
+        try:
+            parsed = parsedate_to_datetime(value)
+            if parsed.tzinfo is None:
+                return default
+            seconds = parsed.timestamp() - time.time()
+        except (ValueError, TypeError, OSError, OverflowError):
+            return default
+    return max(1, min(900, seconds))
+
+
+def _failure(error):
+    reasons = set()
+    try:
+        data = json.loads(error.read(8192).decode("utf-8"))
+        detail = data.get("error", {})
+        rows = detail.get("errors", []) + detail.get("details", [])
+        reasons = {
+            r["reason"]
+            for r in rows
+            if isinstance(r, dict) and isinstance(r.get("reason"), str)
+        }
+    except (ValueError, TypeError, AttributeError, OSError):
+        pass  # Provider bodies and exception messages are never diagnostics.
+    if reasons & {"quotaExceeded", "dailyLimitExceeded"}:
+        return APIError(
+            "quota", "YouTube API quota exhausted; retrying later", True, 900
+        )
+    if error.code == 429 or reasons & {"rateLimitExceeded", "userRateLimitExceeded"}:
+        return APIError(
+            "rate_limit",
+            "YouTube API rate limited; retrying later",
+            True,
+            retry_after(error.headers, 60),
+        )
+    if error.code >= 500 or 300 <= error.code < 400:
+        return APIError(
+            "temporary",
+            "YouTube API temporarily unavailable",
+            True,
+            retry_after(error.headers, 60),
+        )
+    if error.code == 401 or reasons & {
+        "keyInvalid",
+        "apiKeyInvalid",
+        "accessNotConfigured",
+        "ipRefererBlocked",
+        "API_KEY_INVALID",
+        "API_KEY_SERVICE_BLOCKED",
+        "API_KEY_HTTP_REFERRER_BLOCKED",
+    }:
+        return APIError(
+            "auth", "Check the API key, restrictions and enabled YouTube Data API"
+        )
+    if error.code in (404, 410):
+        return APIError("inaccessible", "Selected YouTube target is inaccessible")
+    return APIError("denied", "YouTube denied access to the selected target")
+
+
+def request(resource, params, key, open_url=None):
+    """Call one fixed official resource; never follow redirects with the key."""
+    allowed = (
+        {"id": VIDEO}
+        if resource == "videos"
+        else {
+            "id": CHANNEL,
+            "forHandle": HANDLE,
+            "forUsername": re.compile(r"[\w.\-]{1,100}\Z"),
+        }
+    )
+    if (
+        resource not in ("videos", "channels")
+        or not isinstance(params, dict)
+        or len(params) != 1
+        or set(params) - set(allowed)
+    ):
+        raise ValueError("Select one supported YouTube target")
+    name, value = next(iter(params.items()))
+    if not isinstance(value, str) or not allowed[name].fullmatch(value):
+        raise ValueError("Invalid YouTube target")
+    key = api_key(key)
+    parts = (
+        "snippet,statistics,liveStreamingDetails"
+        if resource == "videos"
+        else "snippet,statistics"
+    )
+    url = (
+        "https://www.googleapis.com/youtube/v3/"
+        + resource
+        + "?"
+        + urlencode({"part": parts, **params})
+    )
+    opener = open_url or http_util.open_url
+    try:
+        with opener(
+            url,
+            headers={"x-goog-api-key": key, "Accept": "application/json"},
+            timeout=5,
+            allow_redirects=False,
+        ) as response:
+            body = response.read(1024 * 1024 + 1)
+        if len(body) > 1024 * 1024:
+            raise ValueError("Oversized provider response")
+        data = json.loads(body.decode("utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("Invalid provider response")
+        return data
+    except http_util.HTTPError as error:
+        try:
+            failure = _failure(error)
+        finally:
+            error.close()
+        raise failure from None
+    except (OSError, TimeoutError):
+        raise APIError(
+            "temporary", "YouTube API connection unavailable", True, 60
+        ) from None
+    except (ValueError, UnicodeError):
+        raise APIError("temporary", "Invalid YouTube API response", True, 60) from None
