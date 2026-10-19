@@ -6842,6 +6842,11 @@ def assets_files_data(roots=None, profile=None):
                     if media:
                         item["kind"] = ("audio" if f.lower().endswith(AUD)
                                         else "video")
+                    import asset_metadata
+                    canonical = asset_metadata.file_identity(f, "media" if media else "graphics")
+                    label = asset_metadata.display_name(d, canonical, os.path.splitext(f)[0])
+                    if label != os.path.splitext(f)[0]:
+                        item["displayName"] = label
                     out.append(item)
             return out
         return {"ok": True,
@@ -7687,10 +7692,15 @@ def overlay_slots_data(page):
         if not html:
             return {"ok": False, "error": "base page not bundled"}
         active = _active_profile_name()
+        import asset_metadata
+        background = "Intermission.png" if page == "intermission" else "Overlay.png"
+        graphics = os.path.join(_profile_runtime(_runtime_base_dir(), active), "graphics")
+        frame = {"file": background, "displayName": asset_metadata.display_name(
+            graphics, os.path.splitext(background)[0])}
         from urllib.parse import quote
         logo = (f"/api/profile/logo?p={quote(active, safe='')}"
                 if active and profile_logo() else None)
-        return {"ok": True, "page": page, "slots": [slot for slot in ob.extract_slots(html)
+        return {"ok": True, "page": page, "background": frame, "slots": [slot for slot in ob.extract_slots(html)
                           if page != "intermission" or _profile_is_solo()
                           or slot["id"] == "ichat" or slot["id"].startswith("audience-")],
                 "audience": audience,

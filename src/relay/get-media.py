@@ -33,6 +33,7 @@ for _cand in (os.path.join(_HERE, "..", "scripts"),
     if os.path.isdir(_cand) and _cand not in sys.path:
         sys.path.insert(0, _cand)
 from services import external_tool_env  # de-PyInstaller the env for the yt-dlp spawn
+import asset_metadata  # noqa: E402
 import placeholders  # noqa: E402  (pure stdlib helper, fills a missing clip)
 
 
@@ -157,6 +158,10 @@ def media_urls_from_csv(rows):
     Located by label cell so column positions can move: a cell equal (trimmed,
     case-insensitive) to a MEDIA_LABELS key marks the row; the value is the next
     non-empty cell to its right."""
+    header, records = asset_metadata.parse(rows)
+    if header:
+        return {MEDIA_LABELS[asset_metadata.norm(row["name"])]: row["url"]
+                for row in records if asset_metadata.norm(row["name"]) in MEDIA_LABELS and row["url"]}
     out = {}
     for row in rows:
         for i, cell in enumerate(row):
@@ -173,6 +178,10 @@ def music_url_from_csv(rows):
     """Assets-tab rows -> the Intermission-Music URL (Drive link OR YouTube/URL),
     located by a label cell == MUSIC_LABEL (trimmed, case-insensitive); value is
     the next non-empty cell. None if absent."""
+    header, records = asset_metadata.parse(rows)
+    if header:
+        return next((row["url"] for row in records
+                     if asset_metadata.norm(row["name"]) == MUSIC_LABEL and row["url"]), None)
     for row in rows:
         for i, cell in enumerate(row):
             if (cell or "").strip().lower() != MUSIC_LABEL:
@@ -385,6 +394,8 @@ def main():
                     help="Path to the YouTube cookie jar (yt-cookies.txt). Default: "
                          "resolved next to the runtime dir. The racecast CLI passes the "
                          "real path so a frozen binary does not 403 on Intro/Outro.")
+    ap.add_argument("--metadata-only", action="store_true",
+                    help="Refresh cached aliases without downloading asset bytes.")
     a = ap.parse_args()
 
     if a.which == "all":
@@ -399,17 +410,25 @@ def main():
 
     cli = {"intro": a.intro_url, "outro": a.outro_url, "trailer": a.trailer_url}
 
-    # Only hit the sheet if a CLI/env URL is missing for something we need.
+    # Even explicit media URLs may have Sheet aliases; refresh metadata once.
     csv_text = None
-    need_sheet = (
-        any(not (cli.get(k) or os.environ.get(f"RACECAST_{k.upper()}_URL")) for k in which)
-        or (want_music and not (a.music_url or os.environ.get("RACECAST_INTERMISSION_MUSIC_URL")))
-    )
-    if need_sheet and a.sheet_id:
+    if a.sheet_id:
         try:
             csv_text = fetch_assets_csv(a.sheet_id, a.assets_tab)
         except Exception as e:
+            if a.metadata_only:
+                sys.exit(f"ERROR: could not read sheet Assets tab: {e}")
             print(f"WARNING: could not read sheet Assets tab: {e}")
+    if csv_text is not None:
+        try:
+            asset_metadata.refresh(a.out, list(csv.reader(io.StringIO(csv_text))), "media")
+        except (ValueError, OSError) as error:
+            sys.exit(f"ERROR: could not refresh asset metadata: {error}")
+    elif a.metadata_only:
+        sys.exit("ERROR: metadata refresh requires a Sheet ID.")
+    if a.metadata_only:
+        print("Media metadata refreshed; asset bytes unchanged.")
+        return
 
     # Resolve music URL: CLI > env > sheet.
     music_url = (
