@@ -819,6 +819,7 @@
 #audience-fields input,#audience-fields select{width:100%;box-sizing:border-box}
 #audience-source-note{grid-column:1/-1;margin:0}
 #audience-source-note:empty{display:none}
+#twitch-approval-link{color:#9fd1ff}
 #youtube-key{background:#232C42;color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:7px 10px;font:13px var(--mono);min-height:34px;box-sizing:border-box}
 #audience-list p{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:12px 0;border-bottom:1px solid #344358}
 #audience-actions{display:flex;flex-wrap:wrap;gap:8px}
@@ -828,13 +829,14 @@
   <h3>Audience widgets</h3>
   <p>Shared labels and values update live in every placed scene. Placement and style use Save, then Apply in OBS.</p>
   <button id="youtube-open" type="button" onclick="youtubeOpen()">YouTube connection</button>
+  <button id="twitch-open" type="button" onclick="twitchOpen()">Twitch connection</button>
   <div id="audience-list"></div>
   <form id="audience-form" onsubmit="audienceSave(event)">
     <h4 id="audience-edit-title">New shared widget</h4>
     <div id="audience-fields">
     <label>Label <input id="audience-label" required maxlength="120"></label>
     <label>Unit <input id="audience-unit" maxlength="32"></label>
-    <label>Source <select id="audience-source" onchange="audienceSourceChanged()"><option value="manual:value">Manual</option><option value="youtube:likes">YouTube video likes</option><option value="youtube:viewers">YouTube concurrent viewers</option><option value="youtube:subscribers">YouTube channel subscribers (approximate)</option></select></label>
+    <label>Source <select id="audience-source" onchange="audienceSourceChanged()"><option value="manual:value">Manual</option><option value="youtube:likes">YouTube video likes</option><option value="youtube:viewers">YouTube concurrent viewers</option><option value="youtube:subscribers">YouTube channel subscribers (approximate)</option><option value="twitch:viewers">Twitch concurrent viewers</option><option value="twitch:subscriptions">Twitch active paid subscriptions</option></select></label>
     <p id="audience-source-note"></p>
     <label>Manual value (live) <input id="audience-value" type="number" step="any" required value="0"></label>
     <label>Goal mode <select id="audience-mode"><option value="total">Total</option><option value="net">Net since captured baseline</option></select></label>
@@ -865,6 +867,23 @@
     <button id="youtube-cancel" type="button" onclick="youtubeAction('cancel')">Cancel verification</button>
     <button id="youtube-disconnect" type="button" onclick="youtubeAction('disconnect')">Disconnect and remove key</button>
     <button id="youtube-close" type="button" onclick="document.getElementById('youtube-dialog').close()">Close</button>
+  </form>
+</dialog>
+<dialog id="twitch-dialog" style="width:min(700px,90vw);max-height:85vh;overflow:auto;background:#172030;color:#fff;border:1px solid #52647f;border-radius:12px;padding:24px">
+  <h3>Twitch audience connection</h3>
+  <p>Select the broadcast output explicitly. Incoming commentator feeds do not change this channel.</p>
+  <form onsubmit="twitchAction('verify',event)">
+    <p><label>Public Twitch application client ID <input id="twitch-client" maxlength="128" autocomplete="off" style="width:100%"></label></p>
+    <p><label>Output channel URL, login or numeric ID <input id="twitch-channel" maxlength="2048" style="width:100%"></label></p>
+    <p>Register a Public application in the Twitch developer console. Approve on Twitch with the code below. No client secret or callback server is needed. Access and refresh tokens stay on this producer machine.</p>
+    <p id="twitch-approval" hidden>Approval code: <strong id="twitch-code"></strong> · <a id="twitch-approval-link" target="_blank" rel="noopener noreferrer">Approve on Twitch</a></p>
+    <p>Viewers refresh every 30 seconds when used. Active paid subscriptions refresh every 60 seconds and need channel:read:subscriptions for the selected channel's owner. Net active change can be negative and does not count all new-sub events. Followers and subscription points are separate.</p>
+    <p id="twitch-status" role="status" style="white-space:pre-wrap"></p>
+    <button id="twitch-verify" type="submit">Start Twitch authorization</button>
+    <button id="twitch-activate" type="button" onclick="twitchAction('activate')" disabled>Activate verified channel</button>
+    <button id="twitch-cancel" type="button" onclick="twitchAction('cancel')">Cancel authorization</button>
+    <button id="twitch-disconnect" type="button" onclick="twitchAction('disconnect')">Disconnect and remove tokens</button>
+    <button id="twitch-close" type="button" onclick="document.getElementById('twitch-dialog').close()">Close</button>
   </form>
 </dialog>
 <script src="/audience.js"></script>
@@ -3114,14 +3133,16 @@ function audienceEdit(id) {
 }
 function audienceSourceChanged() {
   const value = $('audience-source').value;
-  const exactNet = value === 'manual:value' || value === 'youtube:likes';
+  const exactNet = value === 'manual:value' || value === 'youtube:likes' || value === 'twitch:subscriptions';
   $('audience-mode').querySelector('option[value="net"]').disabled = !exactNet;
   if (!exactNet) $('audience-mode').value = 'total';
   $('audience-value').disabled = value !== 'manual:value';
   $('audience-source-note').textContent = value === 'youtube:subscribers'
     ? 'Approximate public subscriber total, rounded to three significant figures. Exact net goals are unavailable.'
     : value === 'youtube:viewers' ? 'Concurrent viewers while the selected broadcast is live. Upcoming, ended and unavailable counts stay hidden.'
-    : value === 'youtube:likes' ? 'Likes on the selected output video. Net goals require an explicit fresh baseline.' : '';
+    : value === 'youtube:likes' ? 'Likes on the selected output video. Net goals require an explicit fresh baseline.'
+    : value === 'twitch:viewers' ? 'Current concurrent viewers on the selected output channel. Offline is unavailable; live zero is a real value.'
+    : value === 'twitch:subscriptions' ? 'Current active paid subscriptions. Net means active change since your baseline, including decreases. It does not count all new-sub events.' : '';
 }
 let youtubeSession = null;
 let youtubeTimer = null;
@@ -3163,6 +3184,7 @@ async function youtubePoll(session,initial=false) {
     }
     if (result.videoState && result.videoState !== 'unknown') lines.push('Broadcast: '+result.videoState);
     if (setup.error || result.error) lines.push(setup.error || result.error);
+    if (session.actionError && !lines.includes(session.actionError)) lines.push(session.actionError);
     $('youtube-status').textContent = lines.join('\n');
     $('youtube-activate').disabled = setup.phase !== 'verified' || session.busy || session.changed;
     if (initial && !session.dirty) {
@@ -3179,6 +3201,7 @@ async function youtubeAction(action,event) {
   const session = youtubeSession;
   if (!session || !youtubeCurrent(session) || session.busy) return;
   if (action === 'activate' && session.changed) { $('youtube-status').textContent = 'Verify the edited targets before activation.'; return; }
+  session.actionError = '';
   const body = {expectedProfile:session.profile,action,attempt:session.attempt};
   if (action === 'verify') {
     body.video = $('youtube-video').value;
@@ -3199,7 +3222,11 @@ async function youtubeAction(action,event) {
     session.busy = false;
     await youtubePoll(session);
   } catch (error) {
-    if (youtubeCurrent(session)) $('youtube-status').textContent = error.message;
+    if (youtubeCurrent(session)) {
+      session.actionError = error.message;
+      session.busy = false;
+      await youtubePoll(session);
+    }
   } finally {
     session.busy = false;
     if (youtubeCurrent(session)) $('youtube-verify').disabled = false;
@@ -3213,6 +3240,123 @@ $('youtube-dialog').addEventListener('close',() => {
   $('youtube-key').value = '';
   youtubeSession = null;
 });
+let twitchSession = null;
+let twitchTimer = null;
+function twitchCurrent(session) {
+  return session === twitchSession && audienceCurrent(session.audience) && $('twitch-dialog').open;
+}
+function twitchOpen() {
+  clearTimeout(twitchTimer);
+  const session = {audience:audienceSession,profile:ovState.active,attempt:null,busy:false,request:0,dirty:false,changed:false};
+  twitchSession = session;
+  $('twitch-client').value = '';
+  $('twitch-channel').value = '';
+  $('twitch-verify').disabled = false;
+  $('twitch-activate').disabled = true;
+  $('twitch-approval').hidden = true;
+  $('twitch-approval-link').removeAttribute('href');
+  $('twitch-code').textContent = '';
+  $('twitch-status').textContent = 'Loading local connection…';
+  $('twitch-dialog').showModal();
+  twitchPoll(session,true);
+}
+async function twitchPoll(session,initial=false) {
+  if (!twitchCurrent(session)) return;
+  const request = ++session.request;
+  try {
+    const result = await (await fetch('/api/audience/twitch',{cache:'no-store'})).json();
+    if (!twitchCurrent(session) || request !== session.request) return;
+    if (!result.ok) throw new Error(result.error || 'Could not read Twitch connection');
+    if (result.profile !== session.profile) throw new Error('Active profile changed; reopen Twitch settings.');
+    const setup = result.setup || {phase:'idle'};
+    session.attempt = setup.attempt || null;
+    const verified = setup.phase === 'verified';
+    const target = verified ? setup.target : result.target;
+    const account = verified ? setup.account : result.account;
+    const permissions = verified ? setup.permissions : result.permissions;
+    const lines = [result.connected ? 'Connected' : 'Disconnected', 'Authorization: '+(result.phase || 'unknown'), 'Setup: '+setup.phase];
+    if (target) lines.push('Output channel: '+target.title+' ['+target.id+']');
+    if (account) {
+      lines.push('Authorized account: '+account.login+' ['+account.id+']');
+      lines.push('Granted scopes: '+(account.scopes || []).join(', '));
+    }
+    if (permissions) {
+      lines.push('Viewers: '+(permissions.viewers ? 'permitted' : 'unavailable'));
+      lines.push('Active subscriptions: '+(permissions.subscriptions ? 'permitted' : 'requires selected broadcaster ownership and subscription scope'));
+    }
+    if (result.connected) for (const [metric,row] of Object.entries(result.metrics || {})) {
+      lines.push(metric+': '+row.availability+(row.available ? ' · '+new Intl.NumberFormat('en-US').format(row.value) : '')+(row.reason ? ' · '+row.reason : ''));
+    }
+    if (result.streamState && result.streamState !== 'unknown') lines.push('Broadcast: '+result.streamState);
+    if (setup.phase === 'pending') lines.push('Approve on Twitch. Code expires in '+Math.ceil(setup.expiresIn || 0)+' seconds.');
+    if (setup.error || result.error) lines.push(setup.error || result.error);
+    if (session.actionError && !lines.includes(session.actionError)) lines.push(session.actionError);
+    $('twitch-status').textContent = lines.join('\n');
+    $('twitch-activate').disabled = !verified || session.busy || session.changed;
+    $('twitch-approval').hidden = true;
+    $('twitch-approval-link').removeAttribute('href');
+    $('twitch-code').textContent = '';
+    if (setup.phase === 'pending' && setup.userCode && setup.verificationUri) {
+      const url = new URL(setup.verificationUri);
+      if (url.origin !== 'https://www.twitch.tv' || url.pathname !== '/activate' || url.username || url.password) throw new Error('Invalid Twitch approval URL');
+      $('twitch-approval-link').href = url.href;
+      $('twitch-code').textContent = setup.userCode;
+      $('twitch-approval').hidden = false;
+    }
+    if (initial && !session.dirty) {
+      $('twitch-client').value = setup.clientId || result.clientId || '';
+      $('twitch-channel').value = setup.selection?.id || setup.selection?.login || target?.id || '';
+    }
+  } catch (error) {
+    if (twitchCurrent(session)) $('twitch-status').textContent = error.message;
+  }
+  if (twitchCurrent(session) && request === session.request) twitchTimer = setTimeout(() => twitchPoll(session),1000);
+}
+async function twitchAction(action,event) {
+  if (event) event.preventDefault();
+  const session = twitchSession;
+  if (!session || !twitchCurrent(session) || session.busy) return;
+  if (action === 'activate' && session.changed) { $('twitch-status').textContent = 'Authorize the edited channel and client ID before activation.'; return; }
+  session.actionError = '';
+  const body = {expectedProfile:session.profile,action,attempt:session.attempt};
+  if (action === 'verify') {
+    body.clientId = $('twitch-client').value;
+    body.channel = $('twitch-channel').value;
+    session.changed = false;
+  }
+  session.busy = true;
+  session.request++;
+  clearTimeout(twitchTimer);
+  $('twitch-verify').disabled = true;
+  $('twitch-activate').disabled = true;
+  try {
+    const result = await (await fetch('/api/audience/twitch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+    if (!twitchCurrent(session)) return;
+    if (!result.ok) throw new Error(result.error || 'Could not update Twitch connection');
+    session.busy = false;
+    await twitchPoll(session);
+  } catch (error) {
+    if (twitchCurrent(session)) {
+      session.actionError = error.message;
+      session.busy = false;
+      await twitchPoll(session);
+    }
+  } finally {
+    session.busy = false;
+    if (twitchCurrent(session)) $('twitch-verify').disabled = false;
+  }
+}
+for (const field of ['twitch-client','twitch-channel']) $(field).addEventListener('input',() => {
+  if (twitchSession) { twitchSession.dirty = true; twitchSession.changed = true; $('twitch-activate').disabled = true; }
+});
+$('twitch-dialog').addEventListener('close',() => {
+  clearTimeout(twitchTimer);
+  twitchSession = null;
+  $('twitch-code').textContent = '';
+  $('twitch-approval-link').removeAttribute('href');
+  $('twitch-approval').hidden = true;
+});
+
 function audienceList() {
   const list = $('audience-list'); list.replaceChildren();
   (ovState.audience.widgets || []).forEach(widget => {

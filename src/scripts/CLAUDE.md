@@ -279,3 +279,19 @@ outside Console/Funnel routing. `audience_proxy.Client` checks the relay protoco
 and owned profile slug before credential POSTs. The UI preflight also checks the
 local PID/profile stamp. Automatic net baseline capture reads only a cached raw
 Sample, rechecks profile after RPC, and checks source under the definition lock.
+
+
+`audience_twitch_connection.Service` owns a separate bounded worker using the
+shared cache and provider admin/proxy. `audience_twitch_device.Attempt` keeps
+public approval and private device codes separate and requires explicit
+activation after account/target validation. `audience_twitch_refresh.Rotation`
+serializes one-use exchanges; `audience_twitch_storage.CredentialFiles` atomically
+writes a connection-bound refreshing phase before exchange, removing old saved
+tokens. Failed persistence retries the new RAM pair without repeating exchange;
+interrupted/lost exchanges require reconnect. Validation is startup/hourly even
+when unused; all scheduling, expiry and backoff use monotonic time. Viewers need
+valid authorization; subscriptions additionally require the granted scope and
+selected broadcaster ownership. Count subscriptions.total, never page length or
+points. Source identities contain canonical channel ID/metric only. Provider
+proxy replies verify protocol, profile and provider before use. Details and
+fixture coverage: `src/docs/design/twitch-audience-metrics.md`.

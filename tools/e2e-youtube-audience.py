@@ -164,6 +164,26 @@ def main():
                 assert "Video channel:" in page.locator("#youtube-status").inner_text()
                 if args.shots:
                     shot(page, "cc-audience-youtube")
+                original_writer = service.files.writer
+
+                def failed_public(path, body, **kwargs):
+                    if Path(path) == service.files.public:
+                        raise OSError("fixture-private-disk")
+                    return original_writer(path, body, **kwargs)
+
+                service.files.writer = failed_public
+                before = len(api.calls)
+                page.click("#youtube-activate")
+                page.wait_for_function(
+                    "() => document.getElementById('youtube-status').textContent.includes('Could not save')"
+                )
+                assert not page.locator("#youtube-activate").is_disabled(), (
+                    "YouTube storage failure prevented retrying the verified RAM candidate"
+                )
+                assert not service.status()["connected"] and len(api.calls) == before, (
+                    "YouTube failed activation repeated verification"
+                )
+                service.files.writer = original_writer
                 page.click("#youtube-activate")
                 page.wait_for_function(
                     "() => document.getElementById('youtube-status').textContent.includes('Connected')"

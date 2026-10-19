@@ -717,10 +717,10 @@ def make_handler(ctx):
                     return self._json({"ok": False,
                                        "error": f"console status failed: {exc}"},
                                       code=500)
-            if path == "/api/audience/youtube":
+            if path in ("/api/audience/youtube", "/api/audience/twitch"):
                 if not audience_admin.allowed(self.client_address[0], self.server.server_address[1], self.headers):
                     return self._json({"ok": False, "error": "Provider setup requires the local server origin"}, code=403)
-                return self._json(ctx["audience_youtube"]())
+                return self._json(ctx["audience_" + path.rsplit("/", 1)[1]]())
             if path == "/api/audience":
                 if not self._context_allowed():
                     return
@@ -1172,14 +1172,14 @@ def make_handler(ctx):
             if path == "/api/console/post-link":
                 result = ctx["console_post_link"]()
                 return self._json(result, code=200 if result.get("ok") else 400)
-            if path == "/api/audience/youtube":
+            if path in ("/api/audience/youtube", "/api/audience/twitch"):
                 if not audience_admin.allowed(self.client_address[0], self.server.server_address[1], self.headers):
                     self._drain_refused_body()
                     return self._json({"ok": False, "error": "Provider setup requires the local server origin"}, code=403)
                 body = self._body_json()
                 if not isinstance(body, dict):
                     return self._json({"ok": False, "error": "Provider command must be an object"}, code=400)
-                result = ctx["audience_youtube"](body)
+                result = ctx["audience_" + path.rsplit("/", 1)[1]](body)
                 return self._json(result, code=200 if result.get("ok") else 400)
             if path == "/api/audience":
                 if not self._context_allowed(mutation=True):
