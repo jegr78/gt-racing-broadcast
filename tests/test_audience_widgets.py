@@ -243,6 +243,8 @@ def t_disk_failure_and_invalid_definition_preserve_exact_file():
             {"target": 0},
             {"manualValue": float("nan")},
             {"id": "audience-" + "b" * 32},
+            {"baseline": {"value": 1, "identity": "x", "capturedAt": 0}},
+            {"updatedAt": 0},
         ):
             try:
                 store.update(goal["id"], bad)
