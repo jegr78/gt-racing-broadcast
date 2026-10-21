@@ -149,7 +149,7 @@ import parts as parts_mod         # noqa: E402  pure Part view-model + validator
 _SRC_BASE = (os.path.join(sys._MEIPASS, "src") if getattr(sys, "frozen", False)
              else os.path.join(_REL_HERE, ".."))
 APP_VERSION = app_version.read_version(_SRC_BASE)
-VERSION_LABEL = ("v" + APP_VERSION) if APP_VERSION != "dev" else "dev"
+VERSION_LABEL = app_version.label(APP_VERSION)
 import cockpit_submissions  # commentator stream-link submission store (#193)
 import notify   # pure Discord payload builders for producer events (#317)
 import console_policy  # /console authorization matrix + decision (#216)
