@@ -311,6 +311,86 @@ def t_legacy_label_css_does_not_reset_existing_obs_video_bounds():
             m._env_base, m._runtime_base_dir = original
 
 
+def t_split_base_feed_boxes_are_complete_so_a_move_only_edit_keeps_its_size():
+    # A saved splitscreen.css that only moves a feed must still yield a full box:
+    # obs_ws.pov_scene_item_transform needs left/top/width/height.
+    import overlay_build as ob
+    with patch.object(m, '_profile_is_solo', return_value=False):
+        base = ob.base_style(m._overlay_base_html('splitscreen'))
+    for sid, box in ob.scene_boxes('splitscreen', base, '').items():
+        assert set(box) == {'left', 'top', 'width', 'height'}, (sid, box)
+    moved = ob.scene_boxes('splitscreen', base, '#split-feed-a{left:80px;top:100px}')
+    assert moved['split-feed-a'] == {'left': 80, 'top': 100, 'width': 960, 'height': 540}, moved
+    assert moved['split-feed-b'] == {'left': 960, 'top': 270, 'width': 960, 'height': 540}, moved
+
+
+def t_split_apply_of_a_move_only_feed_succeeds_with_the_default_size():
+    with tempfile.TemporaryDirectory() as td:
+        original = cli._mk_active_profile(td)
+        overlay = Path(td) / 'profiles/demo/overlay'
+        overlay.mkdir()
+        (overlay / 'splitscreen.css').write_text('#split-feed-a{left:80px;top:100px}', encoding='utf-8')
+        transforms = []
+        try:
+            with patch.object(m, '_profile_is_solo', return_value=False), patch.object(
+                    obs_ws, 'get_scene_items', return_value=({}, '')):
+                result = m.overlay_apply_data('splitscreen',
+                    set_transform=lambda *args: (transforms.append(args) or (True, '')),
+                    set_enabled=lambda *args: (True, ''),
+                    refresh=lambda **kw: (['Splitscreen Labels', 'Splitscreen HUD Overlay'], ''))
+            assert result['ok'], result
+            assert [(a[0], a[1]) for a in transforms] == [('Splitscreen', 'Feed A')], transforms
+            t = transforms[0][2]
+            assert (t['positionX'], t['positionY'], t['boundsWidth'], t['boundsHeight']) == (80, 100, 960, 540), t
+        finally:
+            m._env_base, m._runtime_base_dir = original
+
+
+def t_split_apply_does_not_refresh_pages_when_the_geometry_sync_fails():
+    # Apply must not leave OBS half-updated: pages reloaded with the new design while
+    # the feed geometry stayed old. A failed sync reports and refreshes nothing.
+    with tempfile.TemporaryDirectory() as td:
+        original = cli._mk_active_profile(td)
+        overlay = Path(td) / 'profiles/demo/overlay'
+        overlay.mkdir()
+        (overlay / 'splitscreen.css').write_text(
+            '#split-feed-a{left:80px;top:100px;width:1200px;height:675px}', encoding='utf-8')
+        pressed = []
+
+        def refresh(**kw):
+            if kw.get('press', True):
+                pressed.append(kw)
+            return ['Splitscreen Labels', 'Splitscreen HUD Overlay'], ''
+        try:
+            with patch.object(m, '_profile_is_solo', return_value=False):
+                result = m.overlay_apply_data('splitscreen',
+                    set_transform=lambda *args: (False, 'transform rejected'),
+                    set_enabled=lambda *args: (True, ''), refresh=refresh)
+            assert not result['ok'] and 'transform rejected' in result['error'], result
+            assert pressed == [], 'A failed geometry sync must not reload the Split pages'
+            with patch.object(m, '_profile_is_solo', return_value=False), patch.object(
+                    obs_ws, 'get_scene_items', return_value=({}, '')):
+                result = m.overlay_apply_data('splitscreen',
+                    set_transform=lambda *args: (True, ''),
+                    set_enabled=lambda *args: (True, ''), refresh=refresh)
+            assert result['ok'] and len(pressed) == 1, (result, pressed)
+        finally:
+            m._env_base, m._runtime_base_dir = original
+
+
+def t_hud_browser_sources_stay_alive_across_scene_cuts():
+    # restart_when_active reloads a browser page whenever its source becomes active.
+    # Stint and Split each carry their own HUD browser since #940, so the flag would
+    # reload the HUD on every STINT<->SPLIT handover.
+    for path in sorted((ROOT / 'src/obs').glob('GT_Racing_*.json')):
+        collection = json.loads(path.read_text(encoding='utf-8'))
+        huds = {s['name']: s['settings'] for s in collection['sources']
+                if s.get('id') == 'browser_source' and s['name'] in ('HUD Overlay', 'Splitscreen HUD Overlay')}
+        assert 'HUD Overlay' in huds, path.name
+        for name, settings in huds.items():
+            assert settings.get('restart_when_active') is False, (path.name, name)
+
+
 if __name__ == '__main__':
     for name in sorted(globals()):
         if name.startswith('t_'):

@@ -578,6 +578,24 @@ def t_refresh_browser_inputs_end_to_end_against_fake_server():
     server_sock.close()
 
 
+def t_refresh_browser_inputs_press_false_only_lists():
+    # The Split Apply preflight lists the relay browser sources without reloading them.
+    server_sock = socket.socket()
+    server_sock.bind(("127.0.0.1", 0))
+    server_sock.listen(1)
+    port = server_sock.getsockname()[1]
+    state = {"released": [], "refreshed": []}
+    thread = threading.Thread(target=_fake_obs_server,
+                              args=(server_sock, "supersecret", state), daemon=True)
+    thread.start()
+    names, note = m.refresh_browser_inputs(port=port, password="supersecret",
+                                           timeout=5, press=False)
+    assert note == "", note
+    assert names == ["HUD Lower Third", "HUD Race Timer"]
+    assert state["refreshed"] == [], state
+    server_sock.close()
+
+
 def t_refresh_browser_inputs_unreachable_is_quiet():
     sock = socket.socket()
     sock.bind(("127.0.0.1", 0))
