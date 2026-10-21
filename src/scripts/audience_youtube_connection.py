@@ -5,6 +5,7 @@ import threading
 import time
 import uuid
 
+from audience_admin import UserError
 from audience_connections import ConnectionFiles, StorageError
 from audience_widgets import MetricCache, Sample, Store, normalize
 import audience_youtube as yt
@@ -35,7 +36,7 @@ def _targets(data):
                 channelId=channel, channelTitle=_title(value.get("channelTitle"))
             )
     if not any(result.values()):
-        raise ValueError("Select a video or channel")
+        raise UserError("Select a video or channel")
     return result
 
 
@@ -169,17 +170,17 @@ class Service:
 
     def command(self, body):
         if not isinstance(body, dict) or body.get("expectedProfile") != self.owner:
-            raise ValueError("Active profile changed; reopen the connection settings")
+            raise UserError("Active profile changed; reopen the connection settings")
         with self.lock:
             if self.stop.is_set():
-                raise ValueError("YouTube service is stopping")
+                raise UserError("YouTube service is stopping")
             self._expire()
             action = body.get("action")
             if action == "verify":
                 video = yt.video_target(body.get("video", ""))
                 channel = yt.channel_target(body.get("channel", ""))
                 if not video and not channel:
-                    raise ValueError("Select a video or channel")
+                    raise UserError("Select a video or channel")
                 key = body.get("apiKey", "")
                 key = yt.api_key(self.key if key == "" else key)
                 self.setup_generation += 1
@@ -205,7 +206,7 @@ class Service:
                     or self.setup["phase"] != "verified"
                     or body.get("attempt") != self.setup["attempt"]
                 ):
-                    raise ValueError("Verify the selected targets before activation")
+                    raise UserError("Verify the selected targets before activation")
                 # Commit both files before replacing the working RAM connection.
                 try:
                     self.files.activate(
@@ -237,7 +238,7 @@ class Service:
                     raise
                 self.storage_error = ""
             else:
-                raise ValueError("Unsupported YouTube connection action")
+                raise UserError("Unsupported YouTube connection action")
             return {"ok": True}
 
     def _setup_current(self, generation):

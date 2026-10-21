@@ -48,6 +48,8 @@ class Backend:
             assert self.release.wait(3), "Fixture exchange was not released"
         if self.fail == "exchange":
             raise TimeoutError("fixture-private-token")
+        if isinstance(self.fail, Exception):
+            raise self.fail
         return dict(NEW)
 
     def validate(self, pair):
@@ -168,6 +170,44 @@ def t_expired_pending_credentials_require_reconnect_instead_of_endless_storage_r
     )
     assert rotation.current() is None
     assert not rotation.step() and backend.events.count("exchange") == 1
+
+
+def t_refused_or_unsent_exchange_keeps_the_unconsumed_pair_and_retries_later():
+    for code in ("rate_limit", "unsent"):
+        backend = Backend()
+        backend.fail = tw.APIError(code, "fixture-private-token", True, 120)
+        rotation = manager(backend)
+        assert rotation.step() is False
+        state = rotation.status()
+        assert state["phase"] == "refreshing" and state["retryAfter"] == 120, state
+        assert "retry" in state["error"].lower() and "fixture-private" not in str(state)
+        assert rotation.current() == (OLD, META), (
+            "A refresh token Twitch never processed was discarded"
+        )
+        backend.fail = ""
+        assert rotation.step() is True and rotation.current() == (NEW, META)
+        assert backend.events == [
+            "stage",
+            "exchange",
+            "exchange",
+            "validate",
+            "persist",
+        ], backend.events  # The durable refreshing phase is staged once.
+
+
+def t_ambiguous_exchange_failures_still_require_reconnect():
+    for failure in (
+        tw.APIError("temporary", "fixture-private-token", True, 60),
+        tw.APIError("auth", "fixture-private-token"),
+        ValueError("fixture-private-token"),
+    ):
+        backend = Backend()
+        backend.fail = failure
+        rotation = manager(backend)
+        assert rotation.step() is False
+        assert rotation.status()["phase"] == "reconnect", (failure, rotation.status())
+        assert rotation.current() is None
+        assert rotation.step() is False and backend.events.count("exchange") == 1
 
 
 if __name__ == "__main__":

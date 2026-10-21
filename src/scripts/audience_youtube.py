@@ -5,6 +5,7 @@ import json
 import time
 from email.utils import parsedate_to_datetime
 import http_util
+from audience_admin import UserError
 from urllib.parse import urlparse, parse_qs, unquote, urlencode
 
 VIDEO = re.compile(r"[A-Za-z0-9_-]{11}\Z")
@@ -19,7 +20,7 @@ def text(value):
         or len(value) > 2048
         or any(ord(c) < 32 for c in value)
     ):
-        raise ValueError("Paste a YouTube URL or ID")
+        raise UserError("Paste a YouTube URL or ID")
     return value.strip()
 
 
@@ -35,9 +36,9 @@ def parsed(value):
             or url.password is not None
             or url.port is not None
         ):
-            raise ValueError("Unsupported YouTube target URL")
+            raise UserError("Unsupported YouTube target URL")
     except ValueError:
-        raise ValueError("Unsupported YouTube target URL") from None
+        raise UserError("Unsupported YouTube target URL") from None
     return url
 
 
@@ -62,7 +63,7 @@ def video_target(value):
             else ""
         )
     if not VIDEO.fullmatch(candidate):
-        raise ValueError("Select a concrete video, not a channel/live shortcut")
+        raise UserError("Select a concrete video, not a channel/live shortcut")
     return candidate
 
 
@@ -76,7 +77,7 @@ def channel_target(value):
         return {"forHandle": value}
     url = parsed(value)
     if url.hostname in ("youtu.be", "www.youtu.be"):
-        raise ValueError("Paste a channel ID or @handle")
+        raise UserError("Paste a channel ID or @handle")
     path = unquote(url.path.strip("/"))
     if path.startswith("channel/") and CHANNEL.fullmatch(path[8:]):
         return {"id": path[8:]}
@@ -84,7 +85,7 @@ def channel_target(value):
         return {"forHandle": path}
     if path.startswith("user/") and re.fullmatch(r"[\w.\-]{1,100}", path[5:]):
         return {"forUsername": path[5:]}
-    raise ValueError("Paste a channel ID or @handle")
+    raise UserError("Paste a channel ID or @handle")
 
 
 def count(value):
@@ -166,7 +167,7 @@ def api_key(value):
     if not isinstance(value, str) or not re.fullmatch(
         r"[A-Za-z0-9_-]{10,256}", value.strip()
     ):
-        raise ValueError("Enter a valid YouTube Data API key")
+        raise UserError("Enter a valid YouTube Data API key")
     return value.strip()
 
 

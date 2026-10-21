@@ -2,7 +2,9 @@
 
 import re
 import json
+import socket
 import http_util
+from audience_admin import UserError
 import time
 from email.utils import parsedate_to_datetime
 from urllib.parse import urlparse, parse_qs, urlencode
@@ -27,7 +29,7 @@ def _text(value, limit=2048):
         or len(value) > limit
         or any(ord(c) < 32 for c in value)
     ):
-        raise ValueError("Invalid Twitch target or metadata")
+        raise UserError("Invalid Twitch target or metadata")
     return value.strip()
 
 
@@ -56,12 +58,12 @@ def channel_target(value):
             or url.password is not None
             or url.port is not None
         ):
-            raise ValueError("Unsupported Twitch channel URL")
+            raise UserError("Unsupported Twitch channel URL")
     except ValueError:
-        raise ValueError("Unsupported Twitch channel URL") from None
+        raise UserError("Unsupported Twitch channel URL") from None
     login = url.path.strip("/")
     if not LOGIN.fullmatch(login):
-        raise ValueError("Select a concrete Twitch channel URL, login or ID")
+        raise UserError("Select a concrete Twitch channel URL, login or ID")
     return {"login": login.lower()}
 
 
@@ -227,7 +229,7 @@ def token_snapshot(payload):
 def client_id(value):
     value = _text(value, 128)
     if not CLIENT.fullmatch(value):
-        raise ValueError("Enter a public Twitch application client ID")
+        raise UserError("Enter a public Twitch application client ID")
     return value
 
 
@@ -383,7 +385,12 @@ def request(operation, client, *, open_url=None, **values):
         finally:
             error.close()
         raise result from None
-    except (OSError, TimeoutError):
+    except (OSError, TimeoutError) as error:
+        reason = error.reason if isinstance(error, http_util.URLError) else error
+        if isinstance(reason, (socket.gaierror, ConnectionRefusedError)):
+            # Name resolution or the TCP connect failed: no request byte reached
+            # Twitch, so a one-use refresh token in the body was not consumed.
+            raise APIError("unsent", "Twitch connection unavailable", True, 60) from None
         raise APIError("temporary", "Twitch connection unavailable", True, 60) from None
     except (ValueError, UnicodeError, RecursionError):
         raise APIError("temporary", "Invalid Twitch response", True, 60) from None

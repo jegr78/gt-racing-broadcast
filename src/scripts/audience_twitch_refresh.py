@@ -4,6 +4,12 @@ from copy import deepcopy
 import threading
 import audience_twitch as tw
 
+# Exchange failures that prove the one-use refresh token was NOT consumed:
+# a 429 is rejected before processing, "unsent" failed before any byte left
+# (DNS / refused connect). Everything else (5xx, timeouts, resets, malformed
+# bodies) may have spent the token and so still requires reconnecting.
+UNCONSUMED = ("rate_limit", "unsent")
+
 
 def _pair(value):
     if not isinstance(value, dict):
@@ -45,6 +51,7 @@ class Rotation:
         self._pending, self._validated = None, None
         self._phase, self._error, self._generation = "ready", "", 0
         self._retry_after = 5
+        self._staged = False  # refreshing phase already durable for this pair
 
     def current(self):
         with self.lock:
@@ -71,6 +78,19 @@ class Rotation:
                 self._phase, self._error = "reconnect", message
         return False
 
+    def _retry(self, generation, pair, identity, error):
+        # Twitch provably never processed the exchange, so the refresh token
+        # is unspent: restore the pair and retry after the provider's delay.
+        with self.lock:
+            if generation == self._generation:
+                self._current = (pair, identity)
+                self._retry_after = max(5, min(900, error.retry_after))
+                self._phase, self._error = (
+                    "refreshing",
+                    "Twitch did not accept the token refresh yet; retrying",
+                )
+        return False
+
     def step(self):
         if not self.work.acquire(blocking=False):
             return False
@@ -81,21 +101,30 @@ class Rotation:
                 if needs_exchange:
                     if self._current is None:
                         return False
-                    pair, _identity_data = self._current
+                    pair, identity = self._current
                     try:
-                        self.stage()  # Must persist refreshing BEFORE the one-use POST.
+                        if not self._staged:
+                            self.stage()  # Persist refreshing BEFORE the one-use POST.
                     except Exception:
                         self._phase, self._error = (
                             "storage_error",
                             "Could not mark token refresh; retry local storage",
                         )
                         return False
+                    self._staged = True
                     self._current = None
                     self._phase, self._error = "refreshing", ""
                     token = pair["refresh"]
             if needs_exchange:
                 try:
                     pair = _pair(self.exchange(token))
+                except tw.APIError as error:
+                    if error.code in UNCONSUMED:
+                        return self._retry(generation, pair, identity, error)
+                    return self._reconnect(
+                        generation,
+                        "Token refresh failed or its response was lost; reconnect",
+                    )
                 except Exception:
                     return self._reconnect(
                         generation,

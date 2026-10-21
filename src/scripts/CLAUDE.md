@@ -277,6 +277,8 @@ requires reconnection on restart. Disconnect invalidates RAM before storage work
 and reports partial cleanup, including the restart risk if both writes fail.
 Look snapshots do not own this state. Profile bundles carry public targets only.
 
+`audience_admin.UserError` marks fixed operator-safe setup messages that the relay
+admin route passes through verbatim; other ValueErrors keep a generic rejection.
 `audience_admin` requires the actual loopback peer, exact server Host port,
 matching Origin/Referer and acceptable Fetch Metadata. Provider administration is
 outside Console/Funnel routing. `audience_proxy.Client` checks the relay protocol
@@ -292,8 +294,10 @@ activation after account/target validation. `audience_twitch_refresh.Rotation`
 serializes one-use exchanges; `audience_twitch_storage.CredentialFiles` atomically
 writes a connection-bound refreshing phase before exchange, removing old saved
 tokens. Failed persistence retries the new RAM pair without repeating exchange;
-interrupted/lost exchanges require reconnect. Validation is startup/hourly even
-when unused; all scheduling, expiry and backoff use monotonic time. Viewers need
+interrupted/lost exchanges require reconnect, while refused (429) or unsent
+(DNS/refused connect) exchanges keep the unspent pair and retry. Ready tokens
+rotate proactively before expiry without blanking cached samples. Validation is
+startup/hourly even when unused; all scheduling, expiry and backoff use monotonic time. Viewers need
 valid authorization; subscriptions additionally require the granted scope and
 selected broadcaster ownership. Count subscriptions.total, never page length or
 points. Source identities contain canonical channel ID/metric only. Provider

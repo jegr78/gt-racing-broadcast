@@ -1,6 +1,9 @@
 """Profile-safe Control Center callbacks consume relay cache only."""
 
+import json
 from pathlib import Path
+import shutil
+import subprocess
 import tempfile
 from unittest.mock import patch
 import test_racecast as cli
@@ -125,6 +128,75 @@ def t_actual_ui_twitch_route_rejects_foreign_origins_before_callbacks():
     finally:
         server.shutdown()
         server.server_close()
+
+
+
+_TWITCH_POLL_HARNESS = r"""
+class El {
+  constructor() { this.hidden = false; this.textContent = ''; this.disabled = false; this.value = ''; this.attrs = {}; }
+  removeAttribute(name) { delete this[name]; }
+}
+const els = {};
+const $ = id => els[id] || (els[id] = new El());
+let twitchTimer = null;
+const setTimeout = () => 0;
+const twitchCurrent = () => true;
+let reply = null;
+const fetch = async () => ({json: async () => reply});
+"""
+
+
+def _twitch_poll_source():
+    src = (Path(__file__).resolve().parents[1] / "src/ui/control-center.html").read_text(
+        encoding="utf-8"
+    )
+    start = src.index("async function twitchPoll(")
+    return src[start : src.index("\nasync function twitchAction(", start)]
+
+
+def t_twitch_approval_code_stays_visible_while_the_exchange_is_in_flight():
+    node = shutil.which("node")
+    if not node:
+        print("  (node not installed, JS check skipped)")
+        return
+    script = (
+        _TWITCH_POLL_HARNESS
+        + _twitch_poll_source()
+        + r"""
+(async () => {
+  const out = {};
+  for (const phase of ['pending', 'exchanging', 'validating']) {
+    reply = {ok: true, profile: 'demo', connected: false, phase: 'disconnected',
+      setup: {phase, attempt: 'a1', userCode: 'ABCDEFGH', expiresIn: 120,
+        verificationUri: 'https://www.twitch.tv/activate?public=true&device-code=ABCDEFGH'}};
+    await twitchPoll({profile: 'demo', request: 0});
+    out[phase] = {hidden: $('twitch-approval').hidden, code: $('twitch-code').textContent,
+      href: $('twitch-approval-link').href || '', status: $('twitch-status').textContent};
+  }
+  console.log(JSON.stringify(out));
+})();
+"""
+    )
+    result = subprocess.run(
+        [node, "-"],
+        input=script,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=True,
+        timeout=30,
+    )
+    shown = json.loads(result.stdout)
+    for phase in ("pending", "exchanging"):
+        row = shown[phase]
+        assert not row["hidden"] and row["code"] == "ABCDEFGH", (
+            "Approval code flickered away during " + phase,
+            row,
+        )
+        assert row["href"].startswith("https://www.twitch.tv/activate")
+        assert "Approve on Twitch" in row["status"], row
+    assert shown["validating"]["hidden"] and not shown["validating"]["code"]
 
 
 if __name__ == "__main__":
