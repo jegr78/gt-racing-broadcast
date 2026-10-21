@@ -723,7 +723,7 @@ def make_handler(ctx):
                 return self._json(ctx["audience_" + path.rsplit("/", 1)[1]]())
             if path == "/api/audience":
                 if not self._context_allowed():
-                    return
+                    return None
                 return self._json(ctx["audience_read"]())
             if path == "/api/overlay":
                 try:
@@ -1183,7 +1183,7 @@ def make_handler(ctx):
                 return self._json(result, code=200 if result.get("ok") else 400)
             if path == "/api/audience":
                 if not self._context_allowed(mutation=True):
-                    return
+                    return None
                 body = self._body_json()
                 if not isinstance(body, dict):
                     return self._json({"ok": False, "error": "Audience edit must be an object"}, code=400)
