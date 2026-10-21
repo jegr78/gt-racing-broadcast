@@ -16,6 +16,7 @@ import tempfile
 import threading
 import time
 
+import atomic_replace
 import gt7_recording
 
 FORMAT = 'racecast-telemetry-context'
@@ -305,21 +306,8 @@ def _load(path, compressed=False):
         raise ValueError('context is not readable JSON') from exc
 
 
-def _retry_windows_file_operation(operation):
-    """Windows readers can briefly deny replacement/deletion of an open file."""
-    deadline = time.monotonic() + 2.0
-    delay = .01
-    while True:
-        try:
-            return operation()
-        except OSError as exc:
-            if os.name != 'nt' or getattr(exc, 'winerror', None) not in (5, 32, 33):
-                raise
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise
-            time.sleep(min(delay, remaining))
-            delay = min(delay * 2, .1)
+# Shared with the asset/audience writers (#877): one bounded Windows retry.
+_retry_windows_file_operation = atomic_replace.retry_windows_file_operation
 
 
 def _unlink(path, missing_ok=False):

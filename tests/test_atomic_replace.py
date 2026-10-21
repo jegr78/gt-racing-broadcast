@@ -4,7 +4,8 @@
 On Windows, os.replace() onto a file another process holds open fails with
 PermissionError, because Python opens files without FILE_SHARE_DELETE. The relay
 reads the asset manifests and audience files constantly, so every writer of those
-files retries briefly. Run: python3 tests/test_atomic_replace.py"""
+files retries briefly, with the helper #877 introduced for the context files.
+Run: python3 tests/test_atomic_replace.py"""
 
 import os
 from pathlib import Path
@@ -23,81 +24,103 @@ import audience_widgets  # noqa: E402
 REAL_REPLACE = os.replace
 
 
-def _flaky_replace(failures):
-    """os.replace stand-in that raises PermissionError `failures` times first."""
+def _conflict(winerror=5):
+    """The PermissionError Windows raises while a reader holds the target open."""
+    error = PermissionError(13, "fixture: target is open in another process")
+    error.winerror = winerror
+    return error
+
+
+def _flaky_replace(failures, winerror=5):
+    """os.replace stand-in that raises a Windows conflict `failures` times first."""
     calls = []
 
     def fake(source, target):
         calls.append((source, target))
         if len(calls) <= failures:
-            raise PermissionError(13, "fixture: target is open in another process")
+            raise _conflict(winerror)
         return REAL_REPLACE(source, target)
 
     return fake, calls
 
 
-def _no_sleep(_seconds):
-    return None
+def _windows(fake, clock=None, sleeps=None):
+    """Patch the helper onto a simulated Windows with a fake clock and sleep."""
+    clock = clock if clock is not None else [0.0]
+    sleeps = sleeps if sleeps is not None else []
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        clock[0] += seconds
+
+    return (patch.object(atomic_replace.os, "replace", fake),
+            patch.object(atomic_replace.os, "name", "nt"),
+            patch.object(atomic_replace.time, "monotonic", lambda: clock[0]),
+            patch.object(atomic_replace.time, "sleep", sleep))
 
 
-def t_helper_retries_permission_error_then_succeeds():
+def t_helper_retries_a_windows_conflict_then_succeeds():
     with tempfile.TemporaryDirectory() as td:
         source, target = Path(td) / "a.tmp", Path(td) / "a.json"
         source.write_text("new", encoding="utf-8")
         target.write_text("old", encoding="utf-8")
-        fake, calls = _flaky_replace(3)
-        with patch.object(atomic_replace.os, "replace", fake):
-            atomic_replace.replace(source, target, sleep=_no_sleep)
-        assert len(calls) == 4, calls
-        assert target.read_text(encoding="utf-8") == "new"
-        assert not source.exists()
+        for code in (5, 32, 33):  # access denied, sharing and lock violation
+            source.write_text("new", encoding="utf-8")
+            fake, calls = _flaky_replace(3, code)
+            p1, p2, p3, p4 = _windows(fake)
+            with p1, p2, p3, p4:
+                try:
+                    atomic_replace.replace(source, target)
+                except PermissionError:
+                    raise AssertionError(f"WinError {code} was not retried") from None
+            assert len(calls) == 4, (code, calls)
+            assert target.read_text(encoding="utf-8") == "new"
+            assert not source.exists()
 
 
-def t_helper_gives_up_after_bounded_attempts():
+def t_helper_gives_up_at_the_deadline():
     with tempfile.TemporaryDirectory() as td:
         source, target = Path(td) / "a.tmp", Path(td) / "a.json"
         source.write_text("new", encoding="utf-8")
-        fake, calls = _flaky_replace(1000)
-        with patch.object(atomic_replace.os, "replace", fake):
+        fake, calls = _flaky_replace(10**6)
+        sleeps = []
+        p1, p2, p3, p4 = _windows(fake, sleeps=sleeps)
+        with p1, p2, p3, p4:
             try:
-                atomic_replace.replace(source, target, sleep=_no_sleep)
+                atomic_replace.replace(source, target)
             except PermissionError:
                 pass  # expected: the error must surface
             else:
-                raise AssertionError("a persistent PermissionError must surface")
-        assert len(calls) == atomic_replace.ATTEMPTS, len(calls)
+                raise AssertionError("a persistent conflict must surface")
+        assert abs(sum(sleeps) - atomic_replace.DEADLINE_S) < 1e-9, sum(sleeps)
+        assert max(sleeps) <= atomic_replace.MAX_DELAY_S, sleeps
+        assert len(calls) == len(sleeps) + 1, (len(calls), len(sleeps))
 
 
-def t_helper_total_wait_stays_well_under_a_second():
-    waits = []
-    with tempfile.TemporaryDirectory() as td:
-        source, target = Path(td) / "a.tmp", Path(td) / "a.json"
-        source.write_text("new", encoding="utf-8")
-        fake, _ = _flaky_replace(1000)
-        with patch.object(atomic_replace.os, "replace", fake):
+def t_helper_does_not_retry_other_errors_or_platforms():
+    for platform, code in (("nt", 2), ("nt", None), ("posix", 5)):
+        calls = []
+
+        def fake(source, target, calls=calls, code=code):
+            calls.append(source)
+            raise _conflict(code)
+
+        with (patch.object(atomic_replace.os, "replace", fake),
+              patch.object(atomic_replace.os, "name", platform),
+              patch.object(atomic_replace.time, "sleep", lambda _s: None)):
             try:
-                atomic_replace.replace(source, target, sleep=waits.append)
+                atomic_replace.replace("a", "b")
             except PermissionError:
-                pass  # expected: the error must surface
-    assert len(waits) == atomic_replace.ATTEMPTS - 1, waits
-    assert 0 < sum(waits) < 0.6, sum(waits)
+                pass  # expected: the error must surface unretried
+            else:
+                raise AssertionError("the error must surface")
+        assert len(calls) == 1, (platform, code, calls)
 
 
-def t_helper_does_not_retry_other_errors():
-    calls = []
-
-    def fake(source, target):
-        calls.append(source)
-        raise FileNotFoundError(2, "fixture")
-
-    with patch.object(atomic_replace.os, "replace", fake):
-        try:
-            atomic_replace.replace("a", "b", sleep=_no_sleep)
-        except FileNotFoundError:
-            pass  # expected: the error must surface
-        else:
-            raise AssertionError("FileNotFoundError must surface")
-    assert len(calls) == 1, calls
+def t_gt7_context_shares_the_helper():
+    # #877 fixed the same race for the Race Engineer/context files; one helper only.
+    import gt7_context
+    assert gt7_context._retry_windows_file_operation is         atomic_replace.retry_windows_file_operation
 
 
 def _writers(directory):
@@ -123,10 +146,8 @@ def t_writers_retry_a_transient_permission_error():
         with tempfile.TemporaryDirectory() as td:
             name, write, target = _writers(td)[index]
             fake, calls = _flaky_replace(4)
-            with (
-                patch.object(atomic_replace.os, "replace", fake),
-                patch.object(atomic_replace.time, "sleep", _no_sleep),
-            ):
+            p1, p2, p3, p4 = _windows(fake)
+            with p1, p2, p3, p4:
                 write()
             assert len(calls) == 5, (name, calls)
             assert target.exists(), name
@@ -138,11 +159,9 @@ def t_writers_clean_temp_file_when_retries_run_out():
     for index in range(3):
         with tempfile.TemporaryDirectory() as td:
             name, write, target = _writers(td)[index]
-            fake, _ = _flaky_replace(1000)
-            with (
-                patch.object(atomic_replace.os, "replace", fake),
-                patch.object(atomic_replace.time, "sleep", _no_sleep),
-            ):
+            fake, _ = _flaky_replace(10**6)
+            p1, p2, p3, p4 = _windows(fake)
+            with p1, p2, p3, p4:
                 try:
                     write()
                 except PermissionError:
