@@ -3289,7 +3289,9 @@ async function twitchPoll(session,initial=false) {
       lines.push(metric+': '+row.availability+(row.available ? ' · '+new Intl.NumberFormat('en-US').format(row.value) : '')+(row.reason ? ' · '+row.reason : ''));
     }
     if (result.streamState && result.streamState !== 'unknown') lines.push('Broadcast: '+result.streamState);
-    if (setup.phase === 'pending') lines.push('Approve on Twitch. Code expires in '+Math.ceil(setup.expiresIn || 0)+' seconds.');
+    // The device exchange polls briefly as 'exchanging'; the code stays valid, so keep it shown.
+    const awaitingApproval = setup.phase === 'pending' || setup.phase === 'exchanging';
+    if (awaitingApproval) lines.push('Approve on Twitch. Code expires in '+Math.ceil(setup.expiresIn || 0)+' seconds.');
     if (setup.error || result.error) lines.push(setup.error || result.error);
     if (session.actionError && !lines.includes(session.actionError)) lines.push(session.actionError);
     $('twitch-status').textContent = lines.join('\n');
@@ -3297,7 +3299,7 @@ async function twitchPoll(session,initial=false) {
     $('twitch-approval').hidden = true;
     $('twitch-approval-link').removeAttribute('href');
     $('twitch-code').textContent = '';
-    if (setup.phase === 'pending' && setup.userCode && setup.verificationUri) {
+    if (awaitingApproval && setup.userCode && setup.verificationUri) {
       const url = new URL(setup.verificationUri);
       if (url.origin !== 'https://www.twitch.tv' || url.pathname !== '/activate' || url.username || url.password) throw new Error('Invalid Twitch approval URL');
       $('twitch-approval-link').href = url.href;

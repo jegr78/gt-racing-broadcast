@@ -5,6 +5,7 @@ import threading
 import time
 import uuid
 import audience_twitch as tw
+from audience_admin import UserError
 
 
 class Attempt:
@@ -81,7 +82,7 @@ class Attempt:
         with self.lock:
             self._expire()
             if self._phase != "verified":
-                raise ValueError("Finish Twitch verification before activation")
+                raise UserError("Finish Twitch verification before activation")
             return deepcopy((self._pair, self._account, self._target))
 
     def _failure(self, generation, operation, error):

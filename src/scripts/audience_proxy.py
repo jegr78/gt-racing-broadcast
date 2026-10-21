@@ -1,12 +1,12 @@
 """Bounded local provider proxy with explicit relay protocol/profile checks."""
 
-from dataclasses import fields
+from dataclasses import fields, replace
 import json
 import time
 from urllib.parse import urlencode
 
 import audience_admin
-from audience_widgets import Sample
+from audience_widgets import Sample, finite
 import http_util
 
 
@@ -82,10 +82,14 @@ class Client:
         if not isinstance(raw, dict) or set(raw) != allowed:
             raise ValueError("Invalid local provider sample")
         sample = Sample(**raw)
+        if sample.age_seconds is None and sample.availability not in (
+            "available",
+            "stale",
+        ):
+            # Never polled: no observation to age. Consumers reject it as not
+            # connected / needing a fresh value, like any unavailable sample.
+            return sample
         # RPC time is part of sample age, including time awaiting the response.
-        from dataclasses import replace
-        from audience_widgets import finite
-
         if not finite(sample.age_seconds) or sample.age_seconds < 0:
             raise ValueError("Invalid local provider sample age")
         return replace(

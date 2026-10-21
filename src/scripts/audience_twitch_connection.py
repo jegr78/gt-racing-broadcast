@@ -5,6 +5,7 @@ from pathlib import Path
 import threading
 import time
 
+from audience_admin import UserError
 from audience_connections import StorageError
 from audience_twitch_storage import CredentialFiles
 from audience_widgets import MetricCache, Sample, Store, normalize
@@ -13,6 +14,17 @@ from audience_twitch_refresh import Rotation
 import audience_twitch as tw
 
 METRICS = ("viewers", "subscriptions")
+METRIC_ERROR = (
+    "Twitch metric request failed; check metric availability and permissions"
+)
+
+
+def refresh_lead(pair):
+    """Seconds before local expiry to rotate a ready token pair proactively.
+
+    Five minutes for normal multi-hour Twitch tokens, a tenth of the issued
+    lifetime for unusually short ones, so a fresh token never rotates at once."""
+    return min(300, pair["expires"] / 10)
 
 
 def selection(value):
@@ -83,8 +95,10 @@ class Service:
         self.error = self.storage_error = ""
         self.phase = "disconnected"
         self.stream_state = "unknown"
-        self.validation_due = self.retry_due = self.backoff = 0
+        self.validation_due = self.retry_due = 0
         self.due = {metric: 0 for metric in METRICS}
+        self.backoff = {metric: 0 for metric in METRICS}
+        self.metric_failed = set()
         public = self.files.read_public()
         if public and public.get("target") is not None:
             try:
@@ -194,7 +208,9 @@ class Service:
                 else None,
                 "permissions": self._permissions(),
                 "streamState": self.stream_state,
-                "error": self.storage_error or self.error,
+                "error": self.storage_error
+                or self.error
+                or (METRIC_ERROR if self.metric_failed else ""),
                 "metrics": {
                     metric: normalize(
                         {"source": "twitch", "metric": metric, "mode": "total"},
@@ -208,10 +224,10 @@ class Service:
 
     def command(self, body):
         if not isinstance(body, dict) or body.get("expectedProfile") != self.owner:
-            raise ValueError("Active profile changed; reopen Twitch settings")
+            raise UserError("Active profile changed; reopen Twitch settings")
         with self.lock:
             if self.stop.is_set():
-                raise ValueError("Twitch service is stopping")
+                raise UserError("Twitch service is stopping")
             action = body.get("action")
             if action == "verify":
                 candidate = Attempt(
@@ -233,7 +249,7 @@ class Service:
                 self.setup = None
             elif action == "activate":
                 if not self.setup or body.get("attempt") != self.setup.attempt:
-                    raise ValueError("Verify this Twitch selection before activation")
+                    raise UserError("Verify this Twitch selection before activation")
                 pair, account, target = self.setup.approved()
                 client = self.setup.client
                 try:
@@ -276,7 +292,7 @@ class Service:
                     raise
                 self.storage_error = ""
             else:
-                raise ValueError("Unsupported Twitch connection action")
+                raise UserError("Unsupported Twitch connection action")
             return {"ok": True}
 
     def _cancel_active(self):
@@ -287,7 +303,9 @@ class Service:
         self.pair = self.account = None
         self.ready = False
         self.due = {metric: 0 for metric in METRICS}
-        self.retry_due = self.backoff = self.validation_due = 0
+        self.backoff = {metric: 0 for metric in METRICS}
+        self.metric_failed = set()
+        self.retry_due = self.validation_due = 0
         self.stream_state = "unknown"
 
     def _current(self, generation):
@@ -298,7 +316,7 @@ class Service:
         self.phase, self.error = "reconnect", reason
         self._invalidate(reason)
 
-    def _new_rotation(self):
+    def _new_rotation(self, proactive=False):
         client, target = self.client, deepcopy(self.target)
         deadline = [0]
 
@@ -344,7 +362,10 @@ class Service:
         )
         self.ready = False
         self.phase = "refreshing"
-        self._invalidate("Refreshing Twitch authorization")
+        if not proactive:
+            self._invalidate("Refreshing Twitch authorization")
+        # A routine rollover keeps the cached samples: the shared stale hold
+        # bridges the pause, so widgets on air do not blank for a token swap.
 
     def _maintain(self):
         with self.lock:
@@ -353,7 +374,14 @@ class Service:
                 return
             rotation = self.rotation
             if rotation is None:
-                if self.pair is None or self.monotonic() < self.validation_due:
+                if self.pair is None:
+                    return
+                if self.ready and self.monotonic() >= self.account[
+                    "expiresAtMono"
+                ] - refresh_lead(self.pair):
+                    self._new_rotation(proactive=True)
+                    return
+                if self.monotonic() < self.validation_due:
                     return
                 generation = self.generation
                 pair, client, owner = (
@@ -391,6 +419,11 @@ class Service:
                     self.phase, self.error = state["phase"], state["error"]
                     if state["phase"] == "storage_error":
                         self.storage_error = state["error"]
+                    if current and current[1]["expiresAtMono"] > self.monotonic():
+                        # Rotation still holds the old pair only while its refresh
+                        # token is unspent (refused/unsent exchange, failed stage);
+                        # its access token is valid, so keep serving metrics.
+                        self.ready = True
                     self.retry_due = self.monotonic() + max(
                         5, min(900, state["retryAfter"])
                     )
@@ -476,10 +509,12 @@ class Service:
                     self._invalidate("Twitch authorization needs validation", (metric,))
                     self.validation_due = 0
                 elif failure.transient:
-                    self.backoff = max(
-                        self.backoff,
-                        self.monotonic() + max(30, min(900, failure.retry_after)),
-                    )
+                    # Helix rate limits are one bucket per client/token, so a 429
+                    # pauses every metric; other transient failures (5xx, invalid
+                    # body) only back off the endpoint that failed.
+                    until = self.monotonic() + max(30, min(900, failure.retry_after))
+                    for name in METRICS if failure.code == "rate_limit" else (metric,):
+                        self.backoff[name] = max(self.backoff[name], until)
                     self.cache.fail(
                         "twitch", metric, "Twitch metric temporarily unavailable"
                     )
@@ -487,8 +522,9 @@ class Service:
                     self._invalidate(
                         "Twitch metric permission is unavailable", (metric,)
                     )
-                self.error = "Twitch metric request failed; check metric availability and permissions"
+                self.metric_failed.add(metric)
                 return failure.code == "auth"
+            self.metric_failed.discard(metric)
             if state is not None:
                 self.stream_state = state
             self.cache.publish(
@@ -533,7 +569,7 @@ class Service:
                         or not self.ready
                         or metric not in wanted
                         or not self._permissions()[metric]
-                        or now < max(self.backoff, self.due[metric])
+                        or now < max(self.backoff[metric], self.due[metric])
                     ):
                         continue
                     generation, client, pair, target = (

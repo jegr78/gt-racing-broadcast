@@ -11428,6 +11428,8 @@ def make_handler(relay, panel_path=None, hud_source=None, hud_path=None, assets_
                 return send({**status, "ok": True, "protocol": audience_admin.PROTOCOL})
             except StorageError as exc:
                 return send({"ok": False, "error": str(exc)}, 500)
+            except audience_admin.UserError as exc:  # fixed, operator-safe setup message
+                return send({"ok": False, "error": str(exc)}, 400)
             except (ValueError, TypeError):
                 return send({"ok": False, "error": "Invalid provider command, target or profile; check connection settings"}, 400)
             except Exception:

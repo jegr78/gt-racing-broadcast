@@ -102,6 +102,19 @@ process encountering this phase requires authorization again. A lost exchange
 response is ambiguous and likewise requires reconnecting. Generation checks drop
 late responses after disconnect, cancellation or replacement.
 
+Exchange failures are classified by whether Twitch can have consumed the token:
+
+| Failure | Token consumed? | Handling |
+| --- | --- | --- |
+| HTTP 429 (`rate_limit`) | No, rejected before processing | Keep the pair, stay `refreshing`, retry after Retry-After |
+| DNS failure or refused TCP connect (`unsent`) | No, no request byte was sent | Keep the pair, stay `refreshing`, retry after 60 s |
+| 5xx, timeout, reset, malformed or lost body | Possibly | Reconnect |
+| 400/401/403 | Rejected or revoked | Reconnect |
+
+While a retry waits, the unspent pair keeps serving metrics until its own expiry;
+the durable `refreshing` phase is written once and not staged again, so a restart
+during the wait still requires reconnecting.
+
 A separate temporary-file experiment exercised phase-before-exchange, failed
 public commit/rollback, no exchange after a failed phase write, RAM-only persistence
 retry and restart without reusing a consumed refresh token. These experiments
@@ -110,9 +123,16 @@ inform repository TDD and are not final delivery evidence.
 ## Timing and permission policy
 
 Validate saved authorization before use and at least hourly while maintaining a
-session, including when no widget needs provider metrics. Follow Twitch's reactive
-401 guidance for refresh; distinguish expired authorization from revoked sessions
-and metric-specific permission failures. Use monotonic deadlines for polling,
+session, including when no widget needs provider metrics. A ready connection
+rotates proactively shortly before its local expiry (five minutes, or a tenth of
+the issued lifetime for short tokens). Routine rollover keeps cached samples, so
+the shared stale hold bridges the brief polling pause and widgets on air do not
+blank. Twitch's reactive 401 guidance remains the fallback for refresh; a 401
+before local expiry still means a revoked session and requires reconnecting.
+Distinguish expired authorization from revoked sessions and metric-specific
+permission failures. Helix 429s pause both metrics (one rate-limit bucket); other
+transient metric failures back off only the failing metric, and a later success
+clears that metric's status error. Use monotonic deadlines for polling,
 approval expiry, validation and backoff, and include response/RPC/lock time in
 sample age. No failed read or refresh can extend the original cache deadline.
 

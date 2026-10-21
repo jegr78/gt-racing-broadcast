@@ -4,9 +4,14 @@ import json
 import threading
 import urllib.request
 import urllib.error
+from unittest.mock import patch
 import test_console_gate as gate
 import test_audience_twitch_connection as fixture
 import audience_widgets as aw
+import audience_proxy
+import http_util
+
+REAL_OPEN = http_util.open_url  # The provider fixture blocks it; the local proxy needs it.
 
 
 def t_relay_provider_boundary_and_cached_overlay_reads():
@@ -175,6 +180,53 @@ def t_relay_provider_boundary_and_cached_overlay_reads():
             server.server_close()
 
 
+def t_bounded_twitch_setup_errors_reach_the_operator_through_the_proxy():
+    with fixture.fixture() as (service, _clock, api, cache, _definitions):
+        relay = gate.m.Relay(
+            gate._FakeSource(gate._URLS8, []), [53001, 53002], gate.LOGDIR
+        )
+        handler = gate.m.make_handler(
+            relay,
+            console_secret=gate.SECRET,
+            twitch_service=service,
+            audience_runtime=aw.Runtime(None, cache=cache),
+        )
+        server = gate.m.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        client = audience_proxy.Client(
+            "demo", server.server_address[1], provider="twitch"
+        )
+        try:
+            for fields, expected in (
+                (
+                    {"clientId": "not a client!", "channel": "racing"},
+                    "Enter a public Twitch application client ID",
+                ),
+                (
+                    {"clientId": fixture.CLIENT, "channel": "https://evil.invalid/x"},
+                    "Unsupported Twitch channel URL",
+                ),
+                (
+                    {"action": "activate", "attempt": "stale"},
+                    "Verify this Twitch selection before activation",
+                ),
+            ):
+                body = {"action": "verify", "expectedProfile": "demo", **fields}
+                with patch.object(http_util, "open_url", REAL_OPEN):
+                    try:
+                        client.command(body)
+                    except ValueError as error:
+                        assert str(error) == expected, (str(error), expected)
+                    else:
+                        raise AssertionError("Invalid setup accepted")
+            assert not api.calls
+        finally:
+            server.shutdown()
+            server.server_close()
+
+
 if __name__ == "__main__":
     t_relay_provider_boundary_and_cached_overlay_reads()
     print("PASS actual Twitch admin, Console roles and cached overlay boundary")
+    t_bounded_twitch_setup_errors_reach_the_operator_through_the_proxy()
+    print("PASS bounded Twitch setup errors reach the operator")

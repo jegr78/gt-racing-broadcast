@@ -747,6 +747,118 @@ def t_token_expiring_during_validation_can_refresh_after_reactive_401():
         )
 
 
+
+def _near_expiry(service, clock, seconds):
+    # Late in a token's life: validation would report the remaining lifetime.
+    service.account["expiresAtMono"] = clock.mono() + seconds
+
+
+def t_routine_rollover_rotates_before_expiry_without_blanking_samples():
+    with fixture() as (service, clock, api, _cache, _definitions):
+        connect(service, clock)
+        service.tick()
+        _near_expiry(service, clock, 400)
+        clock.advance(1)
+        service.tick()
+        assert not [call for call in api.calls if call[0] == "refresh"], (
+            "Refresh started long before the rollover window"
+        )
+        _near_expiry(service, clock, 290)
+        for _ in range(3):
+            clock.advance(1)
+            service.tick()
+            for name in connection.METRICS:
+                assert metric(service, name)["available"], (
+                    name + " blanked during a routine token rollover"
+                )
+        assert [call[1]["refresh"] for call in api.calls if call[0] == "refresh"] == [
+            REFRESH
+        ]
+        assert service.status()["connected"] and service.pair["refresh"] == NEWREFRESH
+        clock.advance(30)
+        service.tick()
+        assert ("viewers", {"access": NEWACCESS, "channel": "12345"}) in api.calls
+        assert metric(service, "viewers")["availability"] == "available"
+
+
+def t_rate_limited_refresh_retries_after_retry_after_with_the_unconsumed_token():
+    with fixture() as (service, clock, api, _cache, _definitions):
+        connect(service, clock)
+        service.tick()
+        api.failures["refresh"] = tw.APIError(
+            "rate_limit", "fixture-private-error", True, 120
+        )
+        _near_expiry(service, clock, 290)
+        clock.advance(1)
+        service.tick()
+        service.tick()
+        status = service.status()
+        assert status["phase"] == "refreshing" and status["connected"], status
+        assert "fixture-private" not in str(status)
+        refreshes = len([call for call in api.calls if call[0] == "refresh"])
+        assert refreshes == 1
+        clock.advance(30)
+        service.tick()
+        assert metric(service, "viewers")["availability"] == "available", (
+            "The still-valid pair stopped serving metrics while refresh waited"
+        )
+        clock.advance(88)
+        service.tick()
+        assert len([call for call in api.calls if call[0] == "refresh"]) == refreshes, (
+            "Refresh retry ignored Retry-After"
+        )
+        del api.failures["refresh"]
+        clock.advance(2)
+        service.tick()
+        assert service.status()["connected"] and service.pair["refresh"] == NEWREFRESH
+        assert service.status()["phase"] == "ready"
+    with fixture() as (service, clock, api, _cache, _definitions):
+        connect(service, clock)
+        service.tick()
+        api.failures["refresh"] = tw.APIError(
+            "temporary", "fixture-private-error", True, 60
+        )
+        _near_expiry(service, clock, 290)
+        clock.advance(1)
+        service.tick()
+        service.tick()
+        assert service.status()["phase"] == "reconnect", (
+            "An ambiguous lost refresh response reused a possibly consumed token"
+        )
+
+
+def t_metric_failure_message_clears_after_a_successful_poll():
+    with fixture() as (service, clock, api, _cache, _definitions):
+        connect(service, clock)
+        service.tick()
+        api.failures["viewers"] = tw.APIError("temporary", "fixture", True, 30)
+        clock.advance(30)
+        service.tick()
+        assert "metric" in service.status()["error"].lower()
+        del api.failures["viewers"]
+        clock.advance(30)
+        service.tick()
+        assert service.status()["error"] == "", service.status()["error"]
+
+
+def t_metric_backoff_is_independent_per_metric():
+    with fixture() as (service, clock, api, _cache, _definitions):
+        connect(service, clock)
+        service.tick()
+        api.failures["subscriptions"] = tw.APIError(
+            "temporary", "fixture", True, 300
+        )
+        clock.advance(60)
+        service.tick()
+        before = len([call for call in api.calls if call[0] == "viewers"])
+        clock.advance(30)
+        service.tick()
+        assert len([call for call in api.calls if call[0] == "viewers"]) == before + 1, (
+            "A subscriptions failure paused viewer polling"
+        )
+        assert metric(service, "viewers")["availability"] == "available"
+
+
 if __name__ == "__main__":
     for name, fn in tuple(globals().items()):
         if name.startswith("t_"):
