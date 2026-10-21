@@ -15,6 +15,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen  
 RACECAST_UA = "racecast/1.0"
 DEFAULT_TIMEOUT = 10
 HTTPError = urllib.error.HTTPError            # re-export: callers never import urllib to catch
+URLError = urllib.error.URLError              # re-export: connection failures before a response
 
 
 class _NoRedirect(HTTPRedirectHandler):

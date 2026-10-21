@@ -6,6 +6,13 @@ from urllib.parse import urlparse
 PROTOCOL = "racecast-audience-admin-v1"
 
 
+class UserError(ValueError):
+    """A fixed, bounded setup message that is safe to show the operator verbatim.
+
+    The relay's provider admin route passes these through; any other ValueError
+    (malformed JSON, unexpected types) keeps the generic rejection text."""
+
+
 def allowed(peer, port, headers):
     try:
         if not ipaddress.ip_address(peer).is_loopback:

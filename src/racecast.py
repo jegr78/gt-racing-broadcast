@@ -64,6 +64,7 @@ import python_runtime
 python_runtime.ensure_supported()
 import subprocess
 from contextlib import contextmanager
+from dataclasses import replace as dc_replace
 from contextvars import ContextVar
 import services as sv
 import init_setup as ins
@@ -7617,8 +7618,7 @@ def _audience_connection_data(provider, body=None):
         active = _active_profile_name()
         if body is not None and (not isinstance(body, dict) or body.get("expectedProfile") != active):
             raise ValueError("Active profile changed; reopen connection settings")
-        client = (_audience_provider_client(active) if provider == "youtube"
-                  else _audience_provider_client(active, provider))
+        client = _audience_provider_client(active, provider)
         result = client.status() if body is None else client.command(body)
         if _active_profile_name() != active:
             raise ValueError("Active profile changed; reopen connection settings")
@@ -7638,8 +7638,7 @@ def audience_twitch_data(body=None):
 def _audience_provider_sample(active, widget):
     if widget["source"] not in ("youtube", "twitch"):
         raise ValueError("Audience provider is not connected")
-    client = (_audience_provider_client(active) if widget["source"] == "youtube"
-              else _audience_provider_client(active, "twitch"))
+    client = _audience_provider_client(active, widget["source"])
     return client.sample(widget["metric"])
 
 
@@ -7670,9 +7669,10 @@ def audience_write_data(body):
                 # Source/cache RPC can race a profile switch. Do not write after it.
                 if _active_profile_name() != active:
                     raise ValueError("Active profile changed; reopen audience widgets")
-                from dataclasses import replace
                 def observed_sample():
-                    return replace(sample, age_seconds=(sample.age_seconds or 0) + max(0, time.monotonic() - received))
+                    if sample.age_seconds is None:
+                        return sample  # never polled: capture rejects it as not fresh
+                    return dc_replace(sample, age_seconds=sample.age_seconds + max(0, time.monotonic() - received))
                 widget = store.capture(ident, observed_sample, expected_source=(current["source"], current["metric"]))
         elif action == "delete":
             store.delete(ident)

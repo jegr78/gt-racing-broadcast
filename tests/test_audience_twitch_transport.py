@@ -86,6 +86,30 @@ def t_transport_bounds_success_and_errors_and_closes_error_streams():
         raise AssertionError("Network error accepted")
 
 
+def t_only_provably_unsent_connection_failures_are_marked_unsent():
+    import socket
+    import urllib.error
+
+    for reason, code in (
+        (ConnectionRefusedError(SECRET), "unsent"),
+        (socket.gaierror(SECRET), "unsent"),
+        (TimeoutError(SECRET), "temporary"),
+        (ConnectionResetError(SECRET), "temporary"),
+    ):
+        for raised in (urllib.error.URLError(reason), reason):
+
+            def broken(*args, error=raised, **kwargs):
+                raise error
+
+            try:
+                tw.request("refresh", CLIENT, refresh=SECRET, open_url=broken)
+            except tw.APIError as error:
+                assert error.code == code and error.transient, (raised, error.code)
+                assert SECRET not in str(error)
+            else:
+                raise AssertionError("Network error accepted")
+
+
 if __name__ == "__main__":
     for name, fn in tuple(globals().items()):
         if name.startswith("t_"):
