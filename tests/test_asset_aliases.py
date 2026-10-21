@@ -479,7 +479,7 @@ def t_legacy_internal_header_with_unrecognized_name_caption_stays_private():
         ["Asset Name", "URL", "Internal", "Alias"],
         ["Private graphic", DRIVE, "TRUE", "private-caption-sentinel"],
     ]
-    assert graphics.m.internal_from_csv(rows) == {"Private graphic"}
+    assert graphics.internal_from_csv(rows) == {"Private graphic"}
     for metadata_only in (False, True):
         from unittest.mock import patch
         import csv, io

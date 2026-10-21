@@ -14,9 +14,9 @@ import argparse, csv, io, os, re, sys
 from urllib.parse import quote, urlencode, urlparse
 from urllib.request import Request, urlopen
 
-# Stdlib-only placeholder helper from src/scripts, resolved both from source and
-# from the frozen bundle. It is not config.py, so the dependency-light contract
-# holds.
+# Stdlib-only helpers from src/scripts (asset_metadata owns the Assets-tab parser
+# and the graphics manifest incl. Internal visibility), resolved both from source
+# and from the frozen bundle. Not config.py, so the dependency-light contract holds.
 _HERE = os.path.dirname(os.path.abspath(__file__))
 for _cand in (os.path.join(_HERE, "..", "scripts"),
               os.path.join(getattr(sys, "_MEIPASS", _HERE), "src", "scripts")):
@@ -121,42 +121,6 @@ def safe_filename(label):
 # 'Intermission Music.png' and fail the PNG signature check.
 # KEEP IN SYNC with MEDIA_LABELS + MUSIC_LABEL in get-media.py.
 MEDIA_LABELS = {"intro video", "outro video", "trailer video", "intermission music"}
-
-# Assets tab "Internal" checkbox: OBS-only assets hidden from the console Graphics
-# browser. Located by header name; the truthy tokens mirror racecast-feeds.py's
-# CREW_TRUTHY, and a Google-Sheets checkbox exports as TRUE/FALSE in the gviz CSV.
-# Parsed independently of the download link, so a ticked row without a link is still
-# marked. With no header or no Internal column the set is empty and the browser
-# shows everything.
-ASSET_NAME_HEADERS = ("name", "label", "asset")
-ASSET_INTERNAL_HEADERS = ("internal", "obs only", "obs-only")
-ASSET_TRUTHY = frozenset({"x", "yes", "true", "1", "y", "✓"})
-
-# Sidecar manifest the relay's list_graphics() reads to hide internal assets. The
-# filename is a shared contract with racecast-feeds.py, which cannot import this
-# dependency-light script, so keep the literal in sync.
-MANIFEST_NAME = "manifest.json"
-
-
-def _asset_truthy(v):
-    return (v or "").strip().lower() in ASSET_TRUTHY
-
-
-def internal_from_csv(rows):
-    """Set of Assets-tab labels whose 'Internal' checkbox is ticked. Requires a header
-    row with an ASSET_INTERNAL_HEADERS column; the label is read from the
-    ASSET_NAME_HEADERS column (default col 0). Empty set when there is no header or no
-    Internal column."""
-    _, records = asset_metadata.parse(rows)
-    return {row["name"] for row in records if row["internal"]}
-
-
-def write_manifest(out_dir, internal_labels):
-    """Update Internal visibility without erasing aliases or other metadata."""
-    try:
-        asset_metadata.write(out_dir, {"internal": sorted(internal_labels)})
-    except OSError as error:
-        print(f"WARNING: could not write {MANIFEST_NAME}: {error}")
 
 
 def graphics_from_csv(rows):

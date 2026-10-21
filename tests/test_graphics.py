@@ -7,6 +7,13 @@ ROOT = os.path.dirname(HERE)
 spec = importlib.util.spec_from_file_location(
     "getgraphics", os.path.join(ROOT, "src", "relay", "get-graphics.py"))
 m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+import asset_metadata  # noqa: E402  (on sys.path once get-graphics.py is loaded)
+
+
+def internal_from_csv(rows):
+    """Labels whose Internal checkbox is ticked, as get-graphics.py stores them."""
+    _, records = asset_metadata.parse(rows)
+    return {row["name"] for row in records if row["internal"]}
 
 
 def t_drive_id_file_form():
@@ -106,31 +113,34 @@ def t_internal_from_csv_checkbox_true():
             ["Standings", "https://drive.google.com/file/d/S/view", "FALSE"],
             ["Standby", "https://drive.google.com/file/d/B/view", "TRUE"],
             ["Weather Rain", "", "TRUE"]]   # ticked, no link -> still internal
-    assert m.internal_from_csv(rows) == {"Standby", "Weather Rain"}, m.internal_from_csv(rows)
+    assert internal_from_csv(rows) == {"Standby", "Weather Rain"}, internal_from_csv(rows)
 
 
 def t_internal_from_csv_various_truthy_and_header_aliases():
     rows = [["Label", "Link", "OBS only"],
             ["A", "x", "x"], ["B", "x", "✓"], ["C", "x", "yes"],
             ["D", "x", ""], ["E", "x", "false"]]
-    assert m.internal_from_csv(rows) == {"A", "B", "C"}, m.internal_from_csv(rows)
+    assert internal_from_csv(rows) == {"A", "B", "C"}, internal_from_csv(rows)
 
 
 def t_internal_from_csv_no_header_or_no_column_is_empty():
-    assert m.internal_from_csv([["Standings", "https://drive.google.com/file/d/S/view"]]) == set(), \
+    assert internal_from_csv([["Standings", "https://drive.google.com/file/d/S/view"]]) == set(), \
         "a header-less sheet has no Internal column"
     # Header present, Internal column absent.
-    assert m.internal_from_csv([["Name", "Link"], ["Standings", "x"]]) == set()
-    assert m.internal_from_csv([]) == set()
+    assert internal_from_csv([["Name", "Link"], ["Standings", "x"]]) == set()
+    assert internal_from_csv([]) == set()
 
 
 def t_write_manifest_shape():
     import json as _json, tempfile, os as _os
     with tempfile.TemporaryDirectory() as d:
-        m.write_manifest(d, {"Standby", "Weather Rain"})
+        asset_metadata.refresh(d, [["Name", "Link", "Internal"],
+                                   ["Weather Rain", "", "TRUE"],
+                                   ["Standby", "", "TRUE"],
+                                   ["Standings", "", "FALSE"]], "graphics")
         with open(_os.path.join(d, "manifest.json"), encoding="utf-8") as fh:
             data = _json.load(fh)
-        assert data == {"internal": ["Standby", "Weather Rain"]}, data  # sorted
+        assert data == {"aliases": {}, "internal": ["Standby", "Weather Rain"]}, data
 
 
 def t_graphics_from_csv_ignores_header_row():

@@ -31,7 +31,9 @@ no package manager); external runtime deps are `yt-dlp`, `streamlink`, `ffmpeg`,
   call silently fails. `tests/test_http_util.py` enforces this, it fails if a
   covered file uses `urlopen`/`urllib.request` directly. Exceptions, each
   already setting its own UA: the self-contained relay/`get-*`/`setup-assets`
-  scripts (deliberately dependency-light, must not import shared modules) and
+  scripts (deliberately dependency-light: they never import `config.py` or
+  `http_util`, only stdlib-only helper modules from `src/scripts` that
+  `tools/build-binary.py` bundles, e.g. `asset_metadata`, `placeholders`) and
   `src/scripts/update.py` (needs its own HTTPS-only redirect opener + test seam).
 - **Removing/renaming a CLI flag? Grep the whole repo: including `tools/` and
   `.github/`.** Those callers run only in the build/release pipeline, not in the
