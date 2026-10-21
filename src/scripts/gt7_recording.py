@@ -49,7 +49,7 @@ def file_signature(path):
 def _windows_change_time(path):
     """Read metadata ChangeTime while permitting concurrent readers/writers/rename."""
     import ctypes as ct
-    from ctypes import wintypes as wt
+    import ctypes.wintypes as wt
 
     class BasicInfo(ct.Structure):
         _fields_ = [(name, ct.c_int64) for name in

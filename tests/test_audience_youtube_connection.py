@@ -325,7 +325,7 @@ def t_candidate_expiry_cancel_profile_guard_and_closed_service():
     with fixture() as (service, clock, api, _cache, _definitions):
         connect(service)
         original = service.status()["targets"]
-        pending = command(service, "verify", video=OTHER_VIDEO, apiKey="")
+        command(service, "verify", video=OTHER_VIDEO, apiKey="")
         command(service, "cancel")
         service.tick()
         assert service.status()["targets"] == original

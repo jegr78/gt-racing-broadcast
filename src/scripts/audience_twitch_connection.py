@@ -470,7 +470,7 @@ class Service:
         with self.lock:
             self._expire_authorization()
             if not self._current(generation) or not self.ready:
-                return
+                return False
             if failure:
                 if failure.code == "auth":
                     self._invalidate("Twitch authorization needs validation", (metric,))
