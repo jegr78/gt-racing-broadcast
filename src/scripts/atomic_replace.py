@@ -17,6 +17,12 @@ MAX_DELAY_S = 0.1
 TRANSIENT_WINERRORS = (5, 32, 33)
 
 
+def _on_windows():
+    """The platform check, a seam so tests can simulate Windows without patching
+    os.name globally (which turns every pathlib.Path into an unusable WindowsPath)."""
+    return os.name == "nt"
+
+
 def retry_windows_file_operation(operation):
     """Run `operation`, retrying a transient Windows file-access conflict until
     DEADLINE_S. Any other error, any error off Windows, or a conflict that outlasts
@@ -27,7 +33,7 @@ def retry_windows_file_operation(operation):
         try:
             return operation()
         except OSError as exc:
-            if os.name != "nt" or getattr(exc, "winerror", None) not in TRANSIENT_WINERRORS:
+            if not _on_windows() or getattr(exc, "winerror", None) not in TRANSIENT_WINERRORS:
                 raise
             remaining = deadline - time.monotonic()
             if remaining <= 0:

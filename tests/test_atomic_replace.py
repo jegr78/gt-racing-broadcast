@@ -54,7 +54,7 @@ def _windows(fake, clock=None, sleeps=None):
         clock[0] += seconds
 
     return (patch.object(atomic_replace.os, "replace", fake),
-            patch.object(atomic_replace.os, "name", "nt"),
+            patch.object(atomic_replace, "_on_windows", lambda: True),
             patch.object(atomic_replace.time, "monotonic", lambda: clock[0]),
             patch.object(atomic_replace.time, "sleep", sleep))
 
@@ -106,7 +106,7 @@ def t_helper_does_not_retry_other_errors_or_platforms():
             raise _conflict(code)
 
         with (patch.object(atomic_replace.os, "replace", fake),
-              patch.object(atomic_replace.os, "name", platform),
+              patch.object(atomic_replace, "_on_windows", lambda on=platform == "nt": on),
               patch.object(atomic_replace.time, "sleep", lambda _s: None)):
             try:
                 atomic_replace.replace("a", "b")
