@@ -1713,24 +1713,18 @@ def resolve_brand_override(brands_dir, key):
     return None
 
 
-# Shared contract with get-graphics.py's MANIFEST_NAME (it writes this file). The two
-# cannot share code; the relay's downloaders are deliberately dependency-light, so keep
-# the literal "manifest.json" in sync.
-GRAPHICS_MANIFEST_NAME = "manifest.json"
 TAKES_STATE_TTL_S = 2.0   # shared OBS read behind the crew graphic-take view
 
 
-def _internal_graphic_labels(graphics_dir):
+def _internal_graphic_labels(graphics_dir, data=None):
     """Lowercased set of asset labels marked OBS-only (internal) in the graphics manifest
-    get-graphics.py writes. Best-effort: missing/unreadable/malformed/wrong-shape ->
+    get-graphics.py writes (asset_metadata). Pass `data` (an asset_metadata.read()
+    result) to reuse one read. Best-effort: missing/unreadable/malformed/wrong-shape ->
     empty set (the browser shows everything; backward compatible)."""
     if not graphics_dir:
         return set()
-    try:
-        with open(os.path.join(graphics_dir, GRAPHICS_MANIFEST_NAME), encoding="utf-8") as fh:
-            data = json.load(fh)
-    except (OSError, ValueError):
-        return set()
+    if data is None:
+        data = asset_metadata.read(graphics_dir)
     internal = data.get("internal") if isinstance(data, dict) else None
     if not isinstance(internal, list):
         return set()
@@ -1751,7 +1745,10 @@ def list_graphics(graphics_dir):
         names = os.listdir(graphics_dir)
     except OSError:
         return []
-    internal = _internal_graphic_labels(graphics_dir)
+    # One manifest read per listing: the downloaders replace it while the relay
+    # polls, and on Windows every open handle can delay that replacement.
+    meta = asset_metadata.read(graphics_dir)
+    internal = _internal_graphic_labels(graphics_dir, meta)
     out = []
     for fn in names:
         if fn.lower().endswith(".png") and os.path.isfile(os.path.join(graphics_dir, fn)):
@@ -1761,7 +1758,8 @@ def list_graphics(graphics_dir):
             if placeholders.is_graphic_placeholder(os.path.join(graphics_dir, fn)):
                 continue
             item = {"name": name, "file": fn}
-            label = asset_metadata.display_name(graphics_dir, name, public=True)
+            label = asset_metadata.display_name(graphics_dir, name, public=True,
+                                                data=meta)
             if label != name:
                 item["displayName"] = label
             out.append(item)
@@ -1776,10 +1774,14 @@ def asset_labels(graphics_dir, media_dir=None):
     if media_dir is None and graphics_dir:
         media_dir = os.path.join(os.path.dirname(graphics_dir), "media")
     if media_dir:
+        meta = None
         for filename, canonical in asset_metadata.MEDIA_NAMES.items():
             if not os.path.isfile(os.path.join(media_dir, filename)):
                 continue
-            label = asset_metadata.display_name(media_dir, canonical, public=True)
+            if meta is None:
+                meta = asset_metadata.read(media_dir)
+            label = asset_metadata.display_name(media_dir, canonical, public=True,
+                                                data=meta)
             if label != canonical:
                 labels[canonical] = label
     return labels

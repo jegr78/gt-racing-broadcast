@@ -248,6 +248,10 @@ column fallback even for unrecognized header captions. Each downloader owns
 its kind's entries in its local manifest; atomic unique temporary writes retain
 unknown and other-kind fields. Failed Sheet reads never clear metadata.
 No alias may become a filename, URL, source, action or executable expression.
+The manifest and audience writers replace through `atomic_replace.replace`: on
+Windows `os.replace` fails with WinError 5 while the relay has the target open.
+`atomic_replace.retry_windows_file_operation` (moved from `gt7_context`, #877) retries
+only WinError 5/32/33 on Windows, with a 2 s deadline; one helper for every writer.
 
 
 ## Audience provider connections

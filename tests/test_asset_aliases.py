@@ -479,7 +479,7 @@ def t_legacy_internal_header_with_unrecognized_name_caption_stays_private():
         ["Asset Name", "URL", "Internal", "Alias"],
         ["Private graphic", DRIVE, "TRUE", "private-caption-sentinel"],
     ]
-    assert graphics.m.internal_from_csv(rows) == {"Private graphic"}
+    assert graphics.internal_from_csv(rows) == {"Private graphic"}
     for metadata_only in (False, True):
         from unittest.mock import patch
         import csv, io
@@ -669,6 +669,171 @@ def t_concurrent_metadata_refresh_keeps_both_downloaders_entries():
                     second.join(3)
             assert not first.is_alive() and not second.is_alive() and not errors, errors
         assert am.read(td)["aliases"] == {"Standings": "Board", "Trailer Video": "Film"}
+
+
+
+def _run_main(module, argv, csv_text, **patches):
+    """Run a downloader main() with a fixture Sheet; return (exit code, stdout)."""
+    import contextlib
+    import io
+    from unittest.mock import patch
+
+    out = io.StringIO()
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(patch.object(sys, "argv", ["tool"] + argv))
+        stack.enter_context(patch.object(module, "load_dotenv"))
+        stack.enter_context(patch.dict(module.os.environ, {}, clear=True))
+        stack.enter_context(
+            patch.object(module, "fetch_assets_csv", return_value=csv_text))
+        for name, value in patches.items():
+            stack.enter_context(patch.object(module, name, value))
+        stack.enter_context(contextlib.redirect_stdout(out))
+        try:
+            module.main()
+        except SystemExit as exc:
+            code = exc.code
+        else:
+            code = 0
+    return code, out.getvalue()
+
+
+def t_graphics_download_continues_when_metadata_write_fails():
+    import asset_metadata as am
+    import tempfile
+    from unittest.mock import MagicMock, patch
+
+    with tempfile.TemporaryDirectory() as td:
+        am.write(td, {"aliases": {"Standings": "Old board"}})
+        before = (Path(td) / "manifest.json").read_bytes()
+        download = MagicMock()
+        csv_text = "Name,Alias,URL\nStandings,New board," + DRIVE + "\n"
+        with patch.object(am.atomic_replace, "replace",
+                          side_effect=PermissionError(13, "fixture: open")):
+            code, out = _run_main(
+                graphics.m, ["--out", td, "--sheet-id", "fixture"], csv_text,
+                download=download,
+                reset_unlinked_graphics=MagicMock(return_value=[]),
+                seed_missing_graphics=MagicMock(return_value=[]))
+        assert code in (0, None), (code, out)
+        assert download.call_count == 1, out
+        assert "WARNING" in out and "metadata" in out, out
+        assert (Path(td) / "manifest.json").read_bytes() == before
+        assert not [p for p in Path(td).iterdir() if p.suffix == ".tmp"]
+
+
+def t_graphics_unusable_sheet_response_changes_nothing():
+    import asset_metadata as am
+    import tempfile
+    from unittest.mock import MagicMock
+
+    for csv_text in ("", "<!DOCTYPE html><html><body>Sign in</body></html>\n"):
+        with tempfile.TemporaryDirectory() as td:
+            am.write(td, {"aliases": {"Standings": "Old board"}})
+            before = (Path(td) / "manifest.json").read_bytes()
+            download, reset = MagicMock(), MagicMock(return_value=[])
+            code, out = _run_main(
+                graphics.m, ["--out", td, "--sheet-id", "fixture"], csv_text,
+                download=download, reset_unlinked_graphics=reset,
+                seed_missing_graphics=MagicMock(return_value=[]))
+            assert code not in (0, None), (csv_text, out)
+            assert download.call_count == 0 and reset.call_count == 0, out
+            assert (Path(td) / "manifest.json").read_bytes() == before
+
+
+def t_media_explicit_url_survives_unusable_assets_response():
+    import asset_metadata as am
+    import tempfile
+    from unittest.mock import MagicMock
+
+    for csv_text in ("", "<!DOCTYPE html><html><body>Sign in</body></html>\n"):
+        with tempfile.TemporaryDirectory() as td:
+            am.write(td, {"aliases": {"Intro Video": "Opening titles"}})
+            before = (Path(td) / "manifest.json").read_bytes()
+            download = MagicMock()
+            code, out = _run_main(
+                media.m,
+                ["--out", td, "--sheet-id", "fixture", "--which", "intro",
+                 "--intro-url", "https://youtu.be/abc"],
+                csv_text,
+                download=download,
+                reset_unlinked_media=MagicMock(return_value=[]),
+                seed_missing_media=MagicMock(return_value=[]))
+            assert code in (0, None), (csv_text, code, out)
+            assert [c.args[0] for c in download.call_args_list] == [
+                "https://youtu.be/abc"], out
+            assert "WARNING" in out, out
+            assert (Path(td) / "manifest.json").read_bytes() == before
+
+
+def t_media_unusable_assets_response_never_resets_clips_to_placeholder():
+    import tempfile
+    from unittest.mock import MagicMock
+
+    for csv_text in ("", "<!DOCTYPE html><html></html>" + chr(10)):
+        with tempfile.TemporaryDirectory() as td:
+            reset = MagicMock(return_value=[])
+            code, out = _run_main(
+                media.m, ["--out", td, "--sheet-id", "fixture", "--which", "all"],
+                csv_text, download=MagicMock(), download_music=MagicMock(),
+                reset_unlinked_media=reset,
+                seed_missing_media=MagicMock(return_value=[]))
+            assert reset.call_count == 1, out
+            assert reset.call_args.args[1] == set(), reset.call_args
+            assert reset.call_args.kwargs.get("want_music") is False, reset.call_args
+
+
+def t_media_metadata_only_still_fails_on_unusable_assets_response():
+    import asset_metadata as am
+    import tempfile
+    from unittest.mock import MagicMock
+
+    with tempfile.TemporaryDirectory() as td:
+        am.write(td, {"aliases": {"Intro Video": "Opening titles"}})
+        before = (Path(td) / "manifest.json").read_bytes()
+        download = MagicMock()
+        code, out = _run_main(
+            media.m, ["--out", td, "--sheet-id", "fixture", "--metadata-only"],
+            "<!DOCTYPE html><html></html>\n", download=download)
+        assert code not in (0, None), out
+        assert download.call_count == 0
+        assert (Path(td) / "manifest.json").read_bytes() == before
+
+
+def t_gallery_reads_each_manifest_once_per_call():
+    import asset_metadata as am
+    import test_console_gate as gate
+    import tempfile
+    from unittest.mock import patch
+
+    with tempfile.TemporaryDirectory() as td:
+        graphics_dir, media_dir = Path(td) / "graphics", Path(td) / "media"
+        graphics_dir.mkdir()
+        media_dir.mkdir()
+        for name in ("Standings", "Schedule", "Race Results", "Grid"):
+            (graphics_dir / (name + ".png")).write_bytes(b"real-graphic-fixture")
+        for filename in am.MEDIA_NAMES:
+            (media_dir / filename).write_bytes(b"clip")
+        am.write(graphics_dir, {"aliases": {"Standings": "Board"},
+                                "internal": ["Grid"]})
+        am.write(media_dir, {"aliases": {"Intro Video": "Opening titles"}})
+        real_read = am.read
+        calls = []
+
+        def counting(directory):
+            calls.append(str(directory))
+            return real_read(directory)
+
+        with patch.object(am, "read", counting):
+            rows = gate.m.list_graphics(str(graphics_dir))
+            assert len(calls) == 1, calls
+            assert [r["name"] for r in rows] == ["Race Results", "Schedule",
+                                                 "Standings"], rows
+            assert rows[2]["displayName"] == "Board", rows
+            calls.clear()
+            labels = gate.m.asset_labels(str(graphics_dir), str(media_dir))
+            assert len(calls) == 2, calls
+            assert labels == {"Standings": "Board",
+                              "Intro Video": "Opening titles"}, labels
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ from decimal import Decimal, localcontext
 import math
 import html
 import re
+import atomic_replace
 import json
 import os
 from pathlib import Path
@@ -341,7 +342,7 @@ class Store:
                 json.dump(data, target, ensure_ascii=False, allow_nan=False, indent=2)
                 target.flush()
                 os.fsync(target.fileno())
-            os.replace(name, self.path)
+            atomic_replace.replace(name, self.path)
         finally:
             if name:
                 try:

@@ -1,5 +1,6 @@
 """Header-aware Assets metadata. Human labels never become technical identities."""
 
+import atomic_replace
 import json
 import os
 from pathlib import Path
@@ -130,7 +131,7 @@ def write(directory, fields):
                 json.dump(data, output, ensure_ascii=False, indent=2)
                 output.flush()
                 os.fsync(output.fileno())
-            os.replace(temporary, directory / "manifest.json")
+            atomic_replace.replace(temporary, directory / "manifest.json")
         finally:
             if temporary and os.path.exists(temporary):
                 os.unlink(temporary)
@@ -170,9 +171,11 @@ def refresh(directory, rows, kind):
         write(directory, fields)
 
 
-def display_name(directory, canonical, fallback=None, public=False):
+def display_name(directory, canonical, fallback=None, public=False, data=None):
+    """Human label for one canonical asset. Pass `data` (a read() result) when
+    labelling many assets, so the manifest is read once per listing."""
     fallback = canonical if fallback is None else fallback
-    data = read(directory)
+    data = read(directory) if data is None else data
     internal = data.get("internal")
     if (
         public
