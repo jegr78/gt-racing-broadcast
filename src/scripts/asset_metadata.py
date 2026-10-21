@@ -171,9 +171,11 @@ def refresh(directory, rows, kind):
         write(directory, fields)
 
 
-def display_name(directory, canonical, fallback=None, public=False):
+def display_name(directory, canonical, fallback=None, public=False, data=None):
+    """Human label for one canonical asset. Pass `data` (a read() result) when
+    labelling many assets, so the manifest is read once per listing."""
     fallback = canonical if fallback is None else fallback
-    data = read(directory)
+    data = read(directory) if data is None else data
     internal = data.get("internal")
     if (
         public

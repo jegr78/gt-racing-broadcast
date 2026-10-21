@@ -410,8 +410,11 @@ def main():
 
     cli = {"intro": a.intro_url, "outro": a.outro_url, "trailer": a.trailer_url}
 
-    # Even explicit media URLs may have Sheet aliases; refresh metadata once.
+    # Even explicit media URLs may have Sheet aliases; refresh metadata once. A
+    # failed or unusable Sheet response leaves the metadata intact; outside
+    # --metadata-only it is a warning and the CLI/env URLs still download.
     csv_text = None
+    sheet_failed = False   # a configured Sheet could not be used this run
     if a.sheet_id:
         try:
             csv_text = fetch_assets_csv(a.sheet_id, a.assets_tab)
@@ -419,11 +422,22 @@ def main():
             if a.metadata_only:
                 sys.exit(f"ERROR: could not read sheet Assets tab: {e}")
             print(f"WARNING: could not read sheet Assets tab: {e}")
+            sheet_failed = True
     if csv_text is not None:
         try:
             asset_metadata.refresh(a.out, list(csv.reader(io.StringIO(csv_text))), "media")
-        except (ValueError, OSError) as error:
-            sys.exit(f"ERROR: could not refresh asset metadata: {error}")
+        except ValueError as error:
+            if a.metadata_only:
+                sys.exit(f"ERROR: could not refresh asset metadata: {error}")
+            # Empty/HTML/unrecognized: its rows must not resolve or reset any clip.
+            print(f"WARNING: unusable Assets tab response, keeping the previous "
+                  f"metadata: {error}")
+            csv_text, sheet_failed = None, True
+        except OSError as error:
+            if a.metadata_only:
+                sys.exit(f"ERROR: could not refresh asset metadata: {error}")
+            print(f"WARNING: could not refresh asset metadata, keeping the previous "
+                  f"aliases: {error}")
     elif a.metadata_only:
         sys.exit("ERROR: metadata refresh requires a Sheet ID.")
     if a.metadata_only:
@@ -448,6 +462,10 @@ def main():
     unlinked = set()   # clips the Sheet has no link for -> reset to placeholder (#387)
     for key in sorted(which):
         url = urls.get(key)
+        if not url and sheet_failed:
+            print(f"No URL for {key} and the Assets tab was unusable; "
+                  f"leaving {key}.mp4 unchanged.")
+            continue
         if not url:
             print(f"No URL for {key} "
                   f"(sheet label '{key.title()} Video' / --{key}-url / "
@@ -472,7 +490,10 @@ def main():
     music_unlinked = False
     if want_music:
         out_music = os.path.join(a.out, "intermission.mp3")
-        if not music_url:
+        if not music_url and sheet_failed:
+            print("No Intermission Music URL and the Assets tab was unusable; "
+                  "leaving intermission.mp3 unchanged.")
+        elif not music_url:
             print("No Intermission Music URL "
                   "(sheet label 'Intermission Music' / --music-url / "
                   "RACECAST_INTERMISSION_MUSIC_URL); resetting to placeholder.")

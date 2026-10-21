@@ -290,8 +290,18 @@ def main():
     rows = list(csv.reader(io.StringIO(csv_text)))
     try:
         asset_metadata.refresh(a.out, rows, "graphics")
-    except (ValueError, OSError) as error:
-        sys.exit(f"ERROR: could not refresh asset metadata: {error}")
+    except ValueError as error:
+        # Empty, HTML or unrecognized response: no row is trustworthy, so neither
+        # metadata nor graphics change (a reset would blank every linked graphic).
+        sys.exit(f"ERROR: unusable Assets tab response, graphics and metadata "
+                 f"left unchanged: {error}")
+    except OSError as error:
+        if a.metadata_only:
+            sys.exit(f"ERROR: could not refresh asset metadata: {error}")
+        # The Sheet rows are valid; only the manifest write failed (e.g. a reader
+        # held it open). Keep the previous metadata and still download graphics.
+        print(f"WARNING: could not refresh asset metadata, keeping the previous "
+              f"aliases: {error}")
     if a.metadata_only:
         print("Graphics metadata refreshed; asset bytes unchanged.")
         return
