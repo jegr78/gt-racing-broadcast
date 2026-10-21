@@ -19,10 +19,13 @@
   .split-label[hidden]{display:none}
   /* Each feed carries a legacy screen-sized coordinate plane. At the
      default bounds this is pixel-identical to old viewport-relative labels;
-     moving/resizing a feed keeps its label anchored to that feed's top/right. */
+     moving/resizing a feed keeps its label anchored to that feed's top/right.
+     Each feed id rule carries its full px box: it is the base the OBS sync merges a
+     saved splitscreen.css over (overlay_build.scene_boxes), so a move-only edit
+     still yields width/height. */
   .split-feed{position:absolute;width:960px;height:540px;overflow:visible}
-  #split-feed-a{left:0;top:270px}
-  #split-feed-b{left:960px;top:270px}
+  #split-feed-a{left:0px;top:270px;width:960px;height:540px}
+  #split-feed-b{left:960px;top:270px;width:960px;height:540px}
   .split-label-plane{position:absolute;top:-270px;right:0;width:1920px;height:1080px;pointer-events:none}
   #split-feed-a .split-label-plane{right:-960px}
   .split-label{pointer-events:auto;z-index:3}

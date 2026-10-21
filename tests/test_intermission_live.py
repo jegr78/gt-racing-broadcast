@@ -342,6 +342,41 @@ def t_foreign_browser_controls_cannot_change_obs_or_persisted_overrides():
             srv.server_close()
 
 
+def t_endurance_overlay_poll_never_touches_obs():
+    # /intermission/data polls once a second; Endurance only needs chatOverride, so a
+    # poll must not queue on the relay's shared OBS control connection.
+    reads = []
+    ctl = live.IntermissionControl(lambda: reads.append(1) or Obs(), False,
+        lambda: {'chat': True}, None)
+    ctl.chat = False
+    for _ in range(3):
+        state = ctl.overlay_state()
+    assert reads == [], 'Endurance overlay polls must not read OBS'
+    assert state == {'chatOverride': False, 'video': {'webcam': False, 'capture': False}}, state
+
+
+def t_solo_overlay_poll_reuses_a_short_lived_obs_snapshot():
+    obs = Obs()
+    reads = []
+    original = obs.get_scene_items
+    obs.get_scene_items = lambda scene: reads.append(scene) or original(scene)
+    now = [100.0]
+    ctl = live.IntermissionControl(lambda: obs, True,
+        lambda: {'chat': True, 'webcam': False, 'capture': False}, None, clock=lambda: now[0])
+    assert ctl.overlay_state()['video'] == {'webcam': False, 'capture': False}
+    obs.items['Solo Webcam'] = True                    # a manual OBS change
+    now[0] += 1
+    assert ctl.overlay_state()['video']['webcam'] is False, 'within the interval the snapshot is reused'
+    assert len(reads) == 1, reads
+    now[0] += live.OVERLAY_STATE_TTL_S
+    assert ctl.overlay_state()['video']['webcam'] is True, 'an expired snapshot reads OBS again'
+    assert len(reads) == 2, reads
+    ctl.apply('hide', 'webcam')
+    reads.clear()
+    assert ctl.overlay_state()['video']['webcam'] is False, 'an action must not serve a stale snapshot'
+    assert len(reads) == 1, reads
+
+
 if __name__ == '__main__':
     for name in sorted(globals()):
         if name.startswith('t_'):

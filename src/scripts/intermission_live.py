@@ -7,11 +7,15 @@ import json
 import os
 import tempfile
 import threading
+import time
 import copy
 from urllib.parse import urlsplit
 
 SCENE = "Intermission"
 SOURCES = {"chat": "Intermission Chat", "webcam": "Solo Webcam", "capture": "Solo Capture"}
+# How long a Solo overlay poll reuses its OBS item snapshot. A manual OBS change
+# reaches the page within this; a Director/Companion action invalidates it at once.
+OVERLAY_STATE_TTL_S = 2.5
 
 
 def allow_control_origin(headers):
@@ -97,11 +101,13 @@ def starter_layouts(solo):
 
 class IntermissionControl:
     """Serialize read/modify/write actions; never call a scene or audio command."""
-    def __init__(self, obs_getter, solo, defaults_getter, runtime_path=None):
+    def __init__(self, obs_getter, solo, defaults_getter, runtime_path=None, clock=None):
         self.obs_getter = obs_getter
         self.solo = bool(solo)
         self.defaults_getter = defaults_getter
         self.path = runtime_path
+        self.clock = clock or time.monotonic
+        self._overlay_cache = None      # (taken_at, video) for overlay_state()
         self.lock = threading.RLock()
         self.chat, self.video, self.load_note = read_overrides(self.path)
 
@@ -156,6 +162,7 @@ class IntermissionControl:
                                        or not self.solo and key != "chat")):
             return {"ok": False, "error": "Unsupported Intermission action or source."}, 400
         with self.lock:
+            self._overlay_cache = None   # the next overlay poll sees this action
             before, status, items = self._snapshot()
             if status != 200:
                 return before, status
@@ -185,7 +192,16 @@ class IntermissionControl:
             return self.state()
 
     def overlay_state(self):
+        """The overlay page's 1/s poll. Endurance has no video controls, so it never
+        reads OBS; Solo reuses one OBS snapshot for OVERLAY_STATE_TTL_S instead of
+        queueing a GetSceneItemList on the shared control connection every poll."""
         with self.lock:
-            state, _ = self.state()
-            return {"chatOverride": self.chat,
-                    "video": {k: state["items"].get(k) is True for k in ("webcam", "capture")}}
+            if not self.solo:
+                return {"chatOverride": self.chat,
+                        "video": {"webcam": False, "capture": False}}
+            now = self.clock()
+            if self._overlay_cache is None or now - self._overlay_cache[0] >= OVERLAY_STATE_TTL_S:
+                state, _ = self.state()
+                video = {k: state["items"].get(k) is True for k in ("webcam", "capture")}
+                self._overlay_cache = (now, video)
+            return {"chatOverride": self.chat, "video": dict(self._overlay_cache[1])}

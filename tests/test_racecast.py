@@ -2660,6 +2660,41 @@ def t_refresh_obs_pages_reloads_even_when_pages_are_unchanged():
     assert len(reloads) == 2, f"both starts must reload OBS, got {len(reloads)}"
 
 
+def t_refresh_obs_pages_reports_scene_layout_sync_warnings():
+    # The automatic scene-layout sync must not fail silently: its warnings are
+    # printed like the POV box sync's, in ASCII for the cp1252 producer console.
+    fake_ws = type(sys)("obs_ws")
+    fake_ws.refresh_browser_inputs = lambda needle: (["HUD Overlay"], "")
+    fake_ws.set_feed_close_when_inactive = lambda names, on: ""
+
+    def sync(page="intermission", **kw):
+        return {"ok": False, "page": page, "applied": [],
+                "warnings": [f"{page} item unavailable; update the OBS collection"]}
+    saved = (m._relay_http_ok, m.relay_serves_pages, m._sync_pov_transform,
+             m._sync_scene_layouts, sys.modules.get("obs_ws"))
+    m._relay_http_ok = lambda: True
+    m.relay_serves_pages = lambda: True
+    m._sync_pov_transform = lambda: None
+    m._sync_scene_layouts = sync
+    sys.modules["obs_ws"] = fake_ws
+    out = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(out):
+            m._refresh_obs_pages()
+    finally:
+        (m._relay_http_ok, m.relay_serves_pages, m._sync_pov_transform,
+         m._sync_scene_layouts) = saved[:4]
+        if saved[4] is None:
+            sys.modules.pop("obs_ws", None)
+        else:
+            sys.modules["obs_ws"] = saved[4]
+    text = out.getvalue()
+    for page in ("intermission", "splitscreen"):
+        line = next((x for x in text.splitlines()
+                     if f"{page} item unavailable" in x), None)
+        assert line and line.startswith("obs: ") and line.isascii(), text
+
+
 def t_wait_for_polls_until_deadline():
     ticks = iter([0, 1, 2, 3, 4, 5])
     slept = []
