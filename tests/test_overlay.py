@@ -1399,6 +1399,90 @@ def t_hud_hidden_attribute_beats_the_el_display():
     hidden_els = re.findall(r'<[^>]*class="el[ "][^>]*\shidden[\s>]', html)
     assert any('id="tele-replay"' in tag for tag in hidden_els), hidden_els
 
+def t_round_title_offers_and_compiles_the_fit_bounds():
+    # #944: the round title's auto-fit bounds, like the team names'.
+    with open(os.path.join(ROOT, "src", "obs", "hud.html"), encoding="utf-8") as f:
+        slots = ob.extract_slots(f.read())
+    by_id = {s["id"]: s for s in slots}
+    assert by_id["round-top"]["props"][-2:] == ["fitMax", "fitMin"], by_id["round-top"]["props"]
+    css = ob.compile_overlay_css({"slots": {"round-top": {"fitMax": 40, "fitMin": 26}}}, slots)
+    assert "--fit-max: 40px" in css and "--fit-min: 26px" in css, css
+    # The fit loop steps 1px from max: a huge max (1e300 - 1 == 1e300) never ends and
+    # hangs the browser source, so every fit bound is dropped outside 1..500 px.
+    for prop, name in (("fitMax", "--fit-max"), ("teamNameMax", "--team-name-max")):
+        slot = "round-top" if prop == "fitMax" else "team1-name"
+        for bad in (1e300, 0, -5, 501):
+            css = ob.compile_overlay_css({"slots": {slot: {prop: bad}}}, slots)
+            assert name not in css, (prop, bad, css)
+
+
+def t_builder_canvas_mirrors_the_fit_with_the_text_measure():
+    # #944: the canvas previews what OBS renders: the round title fits there too, and
+    # both fits measure the text (a centred/right-aligned overflow is outside scrollWidth).
+    import shutil, subprocess
+    with open(os.path.join(ROOT, "src", "ui", "control-center.html"), encoding="utf-8") as f:
+        html = f.read()
+    fill = html[html.index("function ovFillSample()"):html.index("function ovFitName(")]
+    assert "ovRefit(" in fill, "the canvas must fit opted-in slots"
+    fns = html[html.index("function ovFitName("):html.index("// Session-only preview model")]
+    assert "scrollWidth" not in fns, "measure the text, not scrollWidth"
+    node = shutil.which("node")
+    if not node:
+        print("  (node not installed, JS check skipped)")
+        return
+    script = r"""
+let vars = {};
+let zoom = 1;  // the canvas is CSS-scaled: client rects shrink, offsetWidth does not
+const el = {style: {fontSize: ''}, clientWidth: 714, offsetWidth: 714, textContent: '',
+  getBoundingClientRect() { return {width: 714 * zoom}; }};
+const getComputedStyle = () => ({getPropertyValue: k => vars[k] || '', paddingLeft: '0px', paddingRight: '0px'});
+const document = {createRange: () => ({selectNodeContents() {}, getBoundingClientRect() {
+  return {width: el.textContent.length * parseFloat(el.style.fontSize || '40') * .567 * zoom};}})};
+""" + fns + r"""
+el.textContent = 'TEC 21 - Round 2 - Trial Mountain';
+ovFitText(el); const off = el.style.fontSize || 'css';
+vars = {'--fit-max': '40', '--fit-min': '26'}; ovFitText(el);
+const full = parseFloat(el.style.fontSize);
+zoom = 0.5; ovFitText(el);
+console.log(off + ',' + full + ',' + parseFloat(el.style.fontSize));"""
+    out = subprocess.run([node, "-"], input=script, capture_output=True, text=True,
+                         encoding="utf-8", errors="replace", check=True).stdout.strip()
+    off, fitted, zoomed = out.split(",")
+    assert off == "css" and 26 <= float(fitted) < 40, out
+    assert zoomed == fitted, "a zoomed canvas must fit to the same size as OBS: " + out
+
+
+def t_builder_field_edit_refits_the_canvas_text():
+    # An inline font size from the last fit outranks the CSS variable, so typing an
+    # Auto-fit/Name max or min (or any style that changes the text width) must refit at
+    # once; otherwise the canvas shows the old size until the next sample fill.
+    with open(os.path.join(ROOT, "src", "ui", "control-center.html"), encoding="utf-8") as f:
+        html = f.read()
+    set_prop = html[html.index("function ovSetProp("):]
+    set_prop = set_prop[:set_prop.index("\n}\n")]
+    assert "ovRefit(" in set_prop, "ovSetProp must refit the edited slot"
+    refit = html[html.index("function ovRefit("):]
+    refit = refit[:refit.index("\n}\n")]
+    assert "ovFitName" in refit and "ovFitText" in refit and "fitMax" in refit, refit
+    fill = html[html.index("function ovFillSample()"):html.index("function ovFitName(")]
+    assert fill.count("ovRefit(") >= 2, "fill and the webfont pass share the same refit"
+
+
+def t_builder_property_map_matches_the_compiler():
+    # The builder canvas (JS) and the compiler (Python) keep the same prop -> CSS map;
+    # a prop missing on one side previews differently from what OBS shows.
+    with open(os.path.join(ROOT, "src", "ui", "control-center.html"), encoding="utf-8") as f:
+        html = f.read()
+    block = html[html.index("const OV_CSSNAME = {"):]
+    block = block[:block.index("};")]
+    js = dict(re.findall(r"(\w+):\s*'([^']+)'", block))
+    for prop, css_name in ob._PX_PROPS.items():
+        assert js.get(prop) == css_name, (prop, css_name, js.get(prop))
+    px = html[html.index("const OV_PX = new Set(["):]
+    px = set(re.findall(r"'(\w+)'", px[:px.index("]);")]))
+    assert {"fitMax", "fitMin", "teamNameMax", "teamNameMin"} <= px, px
+
+
 if __name__ == "__main__":
     for n, fn in sorted(globals().items()):
         if n.startswith("t_") and callable(fn):

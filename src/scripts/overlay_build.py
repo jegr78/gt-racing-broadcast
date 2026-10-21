@@ -28,9 +28,14 @@ _PX_PROPS = {
     "offsetRight": "margin-right", "offsetTop": "margin-top",
     "fontSize": "font-size", "borderWidth": "border-width",
     "teamNameMax": "--team-name-max", "teamNameMin": "--team-name-min",
+    "fitMax": "--fit-max", "fitMin": "--fit-min",
     "padding": "padding", "borderRadius": "border-radius",
     "letterSpacing": "letter-spacing",
 }
+# Auto-fit bounds (team names, #944 opt-in text slots). hud.html shrinks 1px per step
+# from max, so a huge max would never finish; the page caps at the same FIT_SIZE_MAX.
+_FIT_BOUND_PROPS = frozenset({"teamNameMax", "teamNameMin", "fitMax", "fitMin"})
+FIT_SIZE_MAX = 500
 _TEXT_PROPS = {"color": "color", "background": "background",
                "borderColor": "border-color", "borderStyle": "border-style"}
 _ALIGN = {"left": "flex-start", "center": "center", "right": "flex-end"}
@@ -50,7 +55,7 @@ PROP_ORDER = ("left", "top", "offsetRight", "offsetTop", "width", "height", "pad
               # slant (clip-path) emits after the border props and before the
               # text-sizing vars; shear rides with rotation in one transform.
               "borderWidth", "borderRadius", "slant",
-              "teamNameMax", "teamNameMin", "fontFamily", "fontWeight",
+              "teamNameMax", "teamNameMin", "fitMax", "fitMin", "fontFamily", "fontWeight",
               "fontStyle", "color", "background", "borderColor", "borderStyle",
               "align", "valign", "textTransform", "opacity",
               "rotation", "shear", "textShadow", "visible", "presentation",
@@ -589,6 +594,8 @@ def _declaration(prop, value):
             return None                         # px props take numbers only
         if prop in ("width", "height") and value <= 0:
             return None                         # a 0px box only erases the slot
+        if prop in _FIT_BOUND_PROPS and _num_in_range(value, 1, FIT_SIZE_MAX) is None:
+            return None                         # the fit steps 1px from max: keep it finite
         num = int(value) if float(value).is_integer() else value
         return f"{_PX_PROPS[prop]}: {num}px"
     if prop in _TEXT_PROPS:
