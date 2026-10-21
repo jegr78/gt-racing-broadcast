@@ -27,6 +27,20 @@ def t_missing_file_is_dev():
         assert av.read_version(d) == "dev"
 
 
+def t_label_has_exactly_one_v():
+    # The release workflow stamps the tag (`v1.13.0`); the badge once read "vv1.13.0".
+    assert av.label("v1.13.0") == "v1.13.0"
+    assert av.label("1.13.0") == "v1.13.0"
+    assert av.label("dev") == "dev"
+
+
+def t_relay_badge_uses_the_label():
+    relay = os.path.join(os.path.dirname(__file__), "..", "src", "relay", "racecast-feeds.py")
+    with open(relay, encoding="utf-8") as fh:
+        src = fh.read()
+    assert "VERSION_LABEL = app_version.label(APP_VERSION)" in src
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("t_") and callable(fn):
