@@ -107,7 +107,7 @@ def build_target(launcher, workdir, version_file, sep, entry, name, windowed):
            # tests/test_racecast.py::t_path_loaded_module_imports_are_frozen.
            "--hidden-import", "bundle_cache",
            "--hidden-import", "placeholders",
-           "--hidden-import", "asset_metadata",
+           "--hidden-import", "asset_metadata", "--hidden-import", "atomic_replace",
            "--hidden-import", "tailscale", "--hidden-import", "init_setup",
            "--hidden-import", "native_dialog",
            "--hidden-import", "backup_admin", "--hidden-import", "profile_io",

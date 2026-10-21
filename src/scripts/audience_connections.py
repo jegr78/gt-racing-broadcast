@@ -1,5 +1,6 @@
 """Atomic local provider credentials paired with portable public targets."""
 
+import atomic_replace
 import json
 import os
 from pathlib import Path
@@ -30,7 +31,7 @@ def write_atomic(path, body, private=False):
             output.write(body)
             output.flush()
             os.fsync(output.fileno())
-        os.replace(temporary, path)
+        atomic_replace.replace(temporary, path)
     finally:
         if temporary and os.path.exists(temporary):
             os.unlink(temporary)

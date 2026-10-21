@@ -1,5 +1,6 @@
 """Header-aware Assets metadata. Human labels never become technical identities."""
 
+import atomic_replace
 import json
 import os
 from pathlib import Path
@@ -130,7 +131,7 @@ def write(directory, fields):
                 json.dump(data, output, ensure_ascii=False, indent=2)
                 output.flush()
                 os.fsync(output.fileno())
-            os.replace(temporary, directory / "manifest.json")
+            atomic_replace.replace(temporary, directory / "manifest.json")
         finally:
             if temporary and os.path.exists(temporary):
                 os.unlink(temporary)
