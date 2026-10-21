@@ -1119,11 +1119,11 @@ def feed_media_cursors(ports=RELAY_PORTS, host="127.0.0.1", port=None,
 
 
 def refresh_browser_inputs(needle="127.0.0.1:8088", host="127.0.0.1", port=None,
-                           password=None, timeout=2.0, session=None):
+                           password=None, timeout=2.0, session=None, press=True):
     """Press 'Refresh cache of current page' (refreshnocache) on every browser
     source whose URL points at the relay, the programmatic right-click -> Refresh,
     used after a shipped overlay page changed. OBS's CEF caches the page JS until
-    then.
+    then. press=False only lists the matching sources (an Apply preflight).
 
     Returns (refreshed_input_names, note). Best effort like release_feed_inputs():
     any failure yields ([], reason), never an exception.
@@ -1143,7 +1143,7 @@ def refresh_browser_inputs(needle="127.0.0.1:8088", host="127.0.0.1", port=None,
                                    {"inputName": name}).get("inputSettings", {})
 
         names = browser_input_names(inputs, get_settings, needle)
-        for name in names:
+        for name in names if press else ():
             session.request("PressInputPropertiesButton",
                             {"inputName": name, "propertyName": "refreshnocache"})
         return names, ""
