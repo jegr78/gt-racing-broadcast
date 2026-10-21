@@ -198,3 +198,16 @@ scene/role names are not globally substituted. Shared crew and Director captions
 use text nodes, and preview identity is stored separately from displayed text.
 `tools/e2e-asset-aliases.py` exercises real UI/HTTP callbacks; its optional
 --companion argument full-imports only into a supplied disposable native instance.
+
+
+### Audience provider connections (#933, #934)
+
+The shared manager offers separate YouTube and Twitch dialogs and source choices.
+Profile/page/load/request identities reject late replies. Edited verification
+inputs disable activation until verified again. Twitch shows only the public
+approval code/validated hosted URL, account, output and granted capabilities.
+Tokens and private device codes never reach the UI. Explicit activation remains
+retryable after a storage error without repeating OAuth exchange. Twitch net
+subscription goals measure active change, including decreases, not all new-sub
+events. `tools/e2e-twitch-audience.py` uses actual loopback UI/admin/overlay pages
+with injected provider fixtures and writes matching wiki/slide shots via --shots.

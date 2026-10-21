@@ -97,6 +97,11 @@ def build_target(launcher, workdir, version_file, sep, entry, name, windowed):
            "--hidden-import", "audience_proxy",
            "--hidden-import", "audience_youtube",
            "--hidden-import", "audience_youtube_connection",
+           "--hidden-import", "audience_twitch",
+           "--hidden-import", "audience_twitch_device",
+           "--hidden-import", "audience_twitch_refresh",
+           "--hidden-import", "audience_twitch_storage",
+           "--hidden-import", "audience_twitch_connection",
            # Imported by src/ui/ui_server.py, which is itself loaded by path, so
            # PyInstaller's scan never sees it. Guarded by
            # tests/test_racecast.py::t_path_loaded_module_imports_are_frozen.
