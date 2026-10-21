@@ -2735,8 +2735,10 @@ def _refresh_obs_pages(wait=0):
     print(f"obs: refreshed browser sources {', '.join(names)}." if names
           else "obs: no relay browser sources in OBS. Nothing to refresh.")
     _sync_pov_transform()              # live POV-box position sibling (best effort)
-    _sync_scene_layouts()
-    _sync_scene_layouts(page="splitscreen")
+    for page in ("intermission", "splitscreen"):
+        synced = _sync_scene_layouts(page=page)
+        for warning in synced.get("warnings") or ():
+            print(f"obs: {page} layout sync failed. {warning}")
     # Feed A/B ship close_when_inactive=False; fan-out needs True so OBS disconnects
     # off-air and no stale backlog forms. Track the flag unconditionally, so a
     # fallback to direct-serve reverts A/B to False. POV ships True, correct in both
@@ -8074,12 +8076,21 @@ def overlay_apply_data(page, set_transform=None, set_enabled=None, refresh=None,
             _refresh_obs_pages()
             return {"ok": True, "page": page}
         if page == "splitscreen":
-            names, note = refresh(needle=f"127.0.0.1:{RELAY_PORT}/splitscreen")
+            # Preflight (list only), then geometry, then reload: a failed sync must
+            # not leave OBS half-updated with new pages over old feed bounds.
+            needle = f"127.0.0.1:{RELAY_PORT}/splitscreen"
+            names, note = refresh(needle=needle, press=False)
             if note or not {"Splitscreen Labels", split_layout.HUD_SOURCE} <= set(names):
-                return {"ok": False, "page": page, "refreshed": names,
+                return {"ok": False, "page": page, "refreshed": [],
                         "error": note or "Splitscreen browser sources missing; update the OBS collection"}
             result = _sync_scene_layouts(set_transform, set_enabled, page=page, explicit=True)
+            result["refreshed"] = []
+            if not result["ok"]:
+                return result
+            names, note = refresh(needle=needle)
             result["refreshed"] = names
+            if note:
+                result.update(ok=False, error=f"Layout applied, but the page refresh failed: {note}")
             return result
         result = _sync_scene_layouts(set_transform, set_enabled, page=page, explicit=True)
         names, note = refresh(needle=f"127.0.0.1:{RELAY_PORT}/intermission")
