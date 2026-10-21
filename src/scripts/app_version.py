@@ -19,3 +19,14 @@ def read_version(src_base):
             return fh.read().strip() or "dev"
     except OSError:
         return "dev"
+
+
+def label(version):
+    """Display form of `version`: 'dev', or the version with exactly one leading 'v'.
+
+    Release builds stamp the git tag (`v1.13.0`) while a manual build may stamp a bare
+    `1.13.0`; both show as `v1.13.0`.
+    """
+    if version == "dev":
+        return "dev"
+    return "v" + version.removeprefix("v")
