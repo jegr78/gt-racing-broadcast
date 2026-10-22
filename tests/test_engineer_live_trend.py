@@ -246,6 +246,7 @@ def t_desk_shows_na_for_every_missing_value():
     assert "Unavailable" not in h.replace("SourceUnavailable", ""), "a missing value still reads Unavailable"
     assert h.count(">N/A<") >= 14, h.count(">N/A<")
     assert "const NA='N/A'" in h
+    assert "#fuel-avg-note,#fuel-time-note{display:block}" in h, "the fuel notes must stack on two lines"
     for stale in ("Unknown track", "Unknown car", "'unknown'", "'Not timed'"):
         assert stale not in h, f"{stale} stands in for a missing value"
     assert "button:disabled{opacity:.5;cursor:default}" in h, "a disabled button must look disabled"
