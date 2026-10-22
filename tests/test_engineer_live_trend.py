@@ -56,7 +56,7 @@ const NA = 'N/A';
 const num = (v, d = 1) => typeof v === 'number' && Number.isFinite(v) ? v.toFixed(d) : NA;
 const state = {follow: true, snapshot: null, laps: [], sessions: [], refs: [], refLaps: [],
   refSource: '', a: '', b: '', session: '', rejected: new Set(), newLaps: 0,
-  pick: null, aKind: '', trend: {key: '', rows: []}};
+  pick: null, aKind: '', historyRevision: 1, trend: {key: '', rows: []}};
 const lap = (n, time, eligible = true) => ({id: 'L' + n, session_id: 'S', lap: n, state: 'confirmed',
   time_s: time, comparison_eligible: eligible, car_id: 1, track_id: 'T'});
 const live = n => ({id: 'L' + n, session_id: 'S', lap: n, state: 'provisional',
@@ -156,6 +156,57 @@ console.log(seen.join('|'));""")
     if out is not None:
         assert out.strip() == ("Against pinned · Lap 17 · through 430 m|Against best · Lap 23|"
                                "Against ref · Lap 3"), out
+
+
+def t_pin_note_waits_for_the_first_history():
+    h = _html()
+    out = _run_js(_HARNESS + _reference_src(h) + """
+state.historyRevision = null; state.snapshot = {current: live(5), pin: {lap_id: 'L3', session_id: 'S', lap: 3, by: 'Alex'}, pin_revision: 1};
+selections(); console.log(state.a + '/' + state.aKind + '|' + $('pin-note').textContent + '|');""")
+    if out is not None:
+        assert out.strip() == "L3/pinned||", out
+
+
+def t_incompatible_pinned_reference_is_kept_not_rejected():
+    h = _html()
+    src = _func_src(h.replace("\nasync function selection(", "\nfunction selection("), "selection")
+    out = _run_js(_HARNESS + _func_src(h, "comparable") + "\n" + """
+const notices = []; const say = t => notices.push(t); const recognising = () => false; const render = () => {};
+const clearPlots = () => {};
+const B = {...live(5), id: 'L5'}, A = lap(3, 90);
+let request = async (route, q) => route === '/race-engineer/compare'
+  ? {state: 'ready', compatible: false, a: A, b: B, delta: []} : {state: 'ready', lap: route === '/race-engineer/lap' && q.id === 'L5' ? B : A};
+""" + "async " + src + """
+(async () => {
+  state.laps = [A]; state.session = 'S'; state.b = 'L5'; state.a = 'L3'; state.aKind = 'pinned';
+  await selection();
+  const pinned = [state.a, state.rejected.size, notices.length, state.pair?.compatible].join('/');
+  state.aKind = 'best'; state.pair = null; await selection();
+  console.log(pinned + '|' + [state.a || '-', state.rejected.size, notices.length].join('/'));
+})();""")
+    if out is not None:
+        assert out.strip() == "L3/0/0/false|-/1/1", out
+
+
+def t_render_drops_a_pair_for_another_reference():
+    h = _html()
+    src = "\n".join([_const_src(h, "TREND_S")] + [_func_src(h, n) for n in (
+        "comparable", "trend", "referenceText", "showDelta", "render")])
+    out = _run_js(_HARNESS + """
+const signed = (v, d = 3) => (Number.isFinite(v) && v > 0 ? '+' : '') + num(v, d);
+const clearPlots = () => {}, graph = () => {}, renderMarker = () => {}, renderSections = () => {};
+const miniRows = () => [], fullSectors = () => ({}), readableContext = () => '', cellValue = () => {};
+for (const id of ['sectors']) els[id] = {tBodies: [{insertRow() {}}]};
+els.notes = {replaceChildren() {}, append() {}};
+""" + src + """
+const B = {...live(5), trace: [{d: 400}]}, pair = {compatible: true, a: {...lap(3, 90)}, b: B, delta: [{d: 400, delta: 0.5}]};
+state.snapshot = {current: live(5)}; state.laps = [lap(3, 90), lap(4, 88)]; state.detail = B;
+state.pair = pair; state.a = 'L3'; state.aKind = 'best'; render();
+const fresh = $('delta').textContent;
+state.pair = pair; state.a = 'L4'; render();
+console.log(fresh + '|' + $('delta').textContent + '|' + $('delta-note').textContent + '|' + (state.pair === null));""")
+    if out is not None:
+        assert out.strip() == "+0.500|N/A|Against best · Lap 4|true", out
 
 
 def t_delta_trend_arrow_follows_the_hud_rule():

@@ -127,7 +127,7 @@ function referenceText(){const k=state.aKind,row=state.laps.concat(state.refLaps
 // Pinning takes the lap shown as A; only a completed eligible lap of the live session qualifies.
 function pinControls(){const snap=state.snapshot,pin=snap?.pin,b=$('pin-toggle'),row=state.laps.find(r=>r.id===state.a),kept=pin&&state.laps.find(r=>r.id===pin.lap_id)?.detail_state==='ready';
  b.textContent=pin?`Unpin lap ${pin.lap}`:'Pin lap A';b.disabled=!pin&&!(row&&row.state==='confirmed'&&row.comparison_eligible&&row.session_id===snap?.session_id);
- $('pin-note').textContent=state.pinFail===(snap?.pin_revision||0)?'Pin could not be saved':!pin?'':kept?`Pinned by ${pin.by} · Lap ${pin.lap}`:'Pinned lap detail no longer kept';}
+ $('pin-note').textContent=state.pinFail===(snap?.pin_revision||0)?'Pin could not be saved':!pin?'':kept?`Pinned by ${pin.by} · Lap ${pin.lap}`:state.historyRevision==null?'':'Pinned lap detail no longer kept';}
 function renderShifts(snap){const s=snap.shifts,body=$('shift-table').tBodies[0];body.replaceChildren();
  if(!s){$('shift-note').textContent='Waiting for a car';return;}
  const ref=s.reference||{},targets=new Map((ref.targets||[]).map(t=>[t.gear,t.rpm])),ups=s.upshifts||[],gears=[...new Set([...targets.keys(),...ups.map(u=>u.from_gear)])].sort((a,b)=>a-b);
@@ -175,7 +175,8 @@ function renderSections(B,A,pair,observed){const el=$('larger-sectors');el.repla
 function turnLabel(map,occupied,x,y,label){const text=svg('text',{'data-turn':'true'},label);map.append(text);for(let step=0;step<40;step++){const candidateY=Math.min(402,Math.max(18,y+(step%2?1:-1)*Math.ceil(step/2)*16)),candidateX=Math.min(438,Math.max(8,x+5));text.setAttribute('x',candidateX);text.setAttribute('y',candidateY);const b=text.getBBox(),box={x:candidateX,y:candidateY-14,w:b.width||label.length*8,h:16};if(!occupied.some(a=>box.x<a.x+a.w+4&&a.x<box.x+box.w+4&&box.y<a.y+a.h+2&&a.y<box.y+box.h+2)){occupied.push(box);return;}}text.remove();}
 
 function renderMarker(){const map=$('map');for(const node of map.querySelectorAll('[data-live-car]'))node.remove();const frame=state.mapFrame,position=state.snapshot?.instruments?.position,current=state.snapshot?.current,plane=frame?.plane,sameTrack=current&&plane&&(plane.track_id&&plane.track_id===current.track_id||plane.session_id===current.session_id);if(frame&&position&&sameTrack&&Number.isFinite(position.x)&&Number.isFinite(position.z))map.append(svg('circle',{cx:30+(position.x-frame.xmin)*frame.scale,cy:30+(position.z-frame.zmin)*frame.scale,r:5,fill:'#ffd08a','data-live-car':'true','aria-label':'Live car position'}));}
-function render(){const B=state.detail,pair=state.pair,outline=pair?.a?.trace_complete?pair.a:state.outline,A=pair?.a||(state.outline?.id===state.a?state.outline:null);clearPlots(false);state.detail=B;state.pair=pair;if(!B&&!outline)return;
+// A pair for another A is stale (A changed automatically): never show its delta under the new label.
+function render(){const B=state.detail,pair=state.pair?.a?.id===state.a?state.pair:null,outline=pair?.a?.trace_complete?pair.a:state.outline,A=pair?.a||(state.outline?.id===state.a?state.outline:null);clearPlots(false);state.detail=B;state.pair=pair;if(!B&&!outline)return;
  const trace=B?.trace||[],length=Math.max(1,outline?.length_m||outline?.trace?.at(-1)?.d||B?.length_m||trace.at(-1)?.d||0);if(!state.zoom&&!['zoom-from','zoom-to'].includes(document.activeElement?.id)){$('zoom-from').value=0;$('zoom-to').value=Math.round(length);}
  graph('chart',[{rows:A?.trace||[],color:'#8ab4ff'},{rows:trace,color:'#ffd08a'}],$('channel').value,300,length);
  graph('delta-chart',[{rows:pair?.delta||[],color:'#a8dfbd'}],'delta',170,length);
@@ -207,7 +208,7 @@ async function selection(){const epoch=state.epoch,a=state.a,b=state.b;if(!b)ret
  const result=await request('/race-engineer/lap',{id:b});if(epoch!==state.epoch||b!==state.b||a!==state.a)return;
  if(result.state!=='ready'){state.note=result.state==='pending'?'Preparing selected lap detail':'Selected lap detail unavailable';clearPlots(false);render();$('context').textContent=state.note;$('notes').replaceChildren();return;}state.detail=result.lap;state.pair=null;
  if(a){const pair=await request('/race-engineer/compare',{a,b});if(epoch!==state.epoch||b!==state.b||a!==state.a)return;
-  if(pair.state==='ready'){if(!pair.compatible&&!comparable(pair.b)){state.detail=pair.b||state.detail;}else if(!pair.compatible&&recognising(pair.b)&&pair.a?.track_id){state.detail=pair.b;state.note='Lap B is not comparable yet: the track is recognised when this lap completes';}else if(!pair.compatible&&state.follow){state.rejected.add(a+'|'+b);state.a='';say('Reference cleared because the live lap changed to an incompatible pool.');}else{state.pair=pair;state.detail=pair.b;}}
+  if(pair.state==='ready'){if(!pair.compatible&&!comparable(pair.b)){state.detail=pair.b||state.detail;}else if(!pair.compatible&&recognising(pair.b)&&pair.a?.track_id){state.detail=pair.b;state.note='Lap B is not comparable yet: the track is recognised when this lap completes';}else if(!pair.compatible&&state.follow&&state.aKind!=='pinned'){state.rejected.add(a+'|'+b);state.a='';say('Reference cleared because the live lap changed to an incompatible pool.');}else{state.pair=pair;state.detail=pair.b;}}
   else if(pair.state==='unavailable')state.note='Comparison unavailable';
  }render();
 }
