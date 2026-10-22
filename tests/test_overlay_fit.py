@@ -175,7 +175,9 @@ function mk(id, o) {
   o = o || {};
   return {id, textContent: o.text || '', clientWidth: o.w === undefined ? 200 : o.w,
     vars: o.vars || {}, visible: o.visible !== false,
-    style: {fontSize: o.font || ''}, getClientRects() { return this.visible ? [{}] : []; }};
+    style: {fontSize: o.font || ''}, getClientRects() { return this.visible ? [{}] : []; },
+    nodeType: 1, closest(sel) { return sel === '[data-edit]' ? this : null; },
+    querySelectorAll() { return o.kids || []; }};
 }
 const els = {};
 global.window = global;
@@ -294,7 +296,7 @@ out.target = o && o.target && o.target.tag;
 out.opts = o && o.opts;
 els.s.textContent = 'X'.repeat(20);
 const before = o.took;
-o.cb([{type: 'childList'}]);
+o.cb([{type: 'childList', target: els.s}]);
 out.size = parseFloat(els.s.style.fontSize);
 out.took = o.took - before;
 console.log(JSON.stringify(out));""")
@@ -306,6 +308,29 @@ console.log(JSON.stringify(out));""")
     assert {"hidden", "class", "style"} <= set(opts["attributeFilter"]), opts
     assert out["size"] == 16, out
     assert out["took"] == 1, "own style writes are dropped, or the observer loops"
+
+
+def t_fit_refits_only_the_slots_a_change_touches():
+    # The Solo HUD rewrites its telemetry text every 100 ms: refitting every slot on
+    # each mutation would run every fitted slot's shrink loop ten times a second.
+    out = _run(r"""
+els.a = mk('a', {text: 'XY', vars: {'--fit-max': '40px', '--fit-min': '12px'}});
+els.b = mk('b', {text: 'XY', vars: {'--fit-max': '40px', '--fit-min': '12px'}});
+const kid = mk('kid', {text: 'XY', vars: {'--fit-max': '40px', '--fit-min': '12px'}});
+els.box = mk('box', {kids: [kid]});
+const o = observers[0];
+RacecastFit.fitAll(document);
+els.a.textContent = els.b.textContent = kid.textContent = 'X'.repeat(20);
+o.cb([{type: 'characterData', target: {nodeType: 3, parentElement: els.a}}]);
+out.a = parseFloat(els.a.style.fontSize); out.b = parseFloat(els.b.style.fontSize);
+o.cb([{type: 'attributes', target: els.box}]);
+out.kid = parseFloat(kid.style.fontSize);
+console.log(JSON.stringify(out));""")
+    if out is None:
+        return
+    assert out["a"] == 16, "the slot whose text changed is refit"
+    assert out["b"] == 40, "an untouched slot is left alone"
+    assert out["kid"] == 16, "showing a container refits the slots inside it"
 
 
 # ---- serving + canvas -----------------------------------------------------------

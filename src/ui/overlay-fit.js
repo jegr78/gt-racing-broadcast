@@ -59,11 +59,29 @@
     (root || document).querySelectorAll('[data-edit]').forEach(el => fit(el, opts));
   }
 
-  // Live pages: refit after every DOM change the page's data render makes (text,
-  // added rows, shown/hidden slots) and when a webfont arrives. Our own font-size
+  // The slots a batch of mutations touched: the slot around each changed node, and
+  // every slot inside a changed element (a container shown, hidden or restyled).
+  function touched(records) {
+    const slots = new Set();
+    for (const r of records) {
+      const node = r.target && r.target.nodeType === 1 ? r.target : r.target && r.target.parentElement;
+      if (!node) continue;
+      const own = node.closest && node.closest('[data-edit]');
+      if (own) slots.add(own);
+      if (node.querySelectorAll) node.querySelectorAll('[data-edit]').forEach(el => slots.add(el));
+    }
+    return slots;
+  }
+
+  // Live pages: refit what each DOM change of the page's data render touched (text,
+  // added rows, shown/hidden slots), and everything when a webfont arrives. Only the
+  // touched slots: the Solo HUD rewrites its telemetry every 100 ms. Our own font-size
   // writes are style mutations too; takeRecords drops them, so the observer settles.
   function watch() {
-    const observer = new MutationObserver(() => { fitAll(document); observer.takeRecords(); });
+    const observer = new MutationObserver(records => {
+      touched(records).forEach(el => fit(el));
+      observer.takeRecords();
+    });
     observer.observe(document.body, {childList: true, subtree: true, characterData: true,
       attributes: true, attributeFilter: ['hidden', 'class', 'style']});
     const refit = () => { fitAll(document); observer.takeRecords(); };
