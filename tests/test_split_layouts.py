@@ -378,17 +378,19 @@ def t_split_apply_does_not_refresh_pages_when_the_geometry_sync_fails():
             m._env_base, m._runtime_base_dir = original
 
 
-def t_hud_browser_sources_stay_alive_across_scene_cuts():
-    # restart_when_active reloads a browser page whenever its source becomes active.
-    # Stint and Split each carry their own HUD browser since #940, so the flag would
-    # reload the HUD on every STINT<->SPLIT handover.
+def t_relay_browser_sources_stay_alive_across_scene_cuts():
+    # restart_when_active reloads a browser page whenever its scene goes live: the page
+    # blanks on air and rebuilds its state. Every relay page polls the relay for its data
+    # and relay/event start reloads them all (refreshnocache), so no relay-served source
+    # needs it (#956). Stint and Split each carry their own HUD browser since #940.
     for path in sorted((ROOT / 'src/obs').glob('GT_Racing_*.json')):
         collection = json.loads(path.read_text(encoding='utf-8'))
-        huds = {s['name']: s['settings'] for s in collection['sources']
-                if s.get('id') == 'browser_source' and s['name'] in ('HUD Overlay', 'Splitscreen HUD Overlay')}
-        assert 'HUD Overlay' in huds, path.name
-        for name, settings in huds.items():
-            assert settings.get('restart_when_active') is False, (path.name, name)
+        relay = {s['name']: s['settings'] for s in collection['sources']
+                 if s.get('id') == 'browser_source'
+                 and '127.0.0.1:8088' in s.get('settings', {}).get('url', '')}
+        assert 'HUD Overlay' in relay and 'Intermission Chat' in relay, (path.name, sorted(relay))
+        reloading = sorted(n for n, st in relay.items() if st.get('restart_when_active') is not False)
+        assert reloading == [], (path.name, reloading)
 
 
 if __name__ == '__main__':
