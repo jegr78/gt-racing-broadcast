@@ -81,10 +81,13 @@ keeps the rules. The per-league overlay override and the visual builder are in
 
 `Split HUD` uses its own `Splitscreen HUD Overlay` browser at `/splitscreen/hud`,
 including its scene's group-item backup references. `Stint HUD` retains `HUD Overlay`.
-Both browser pages share `/hud/data` and `/timer/data`. Both HUD browsers ship
-`restart_when_active: false` (so do the derived Solo collections): with two HUD sources,
-`true` would reload the HUD on every STINT/SPLIT cut. The relay's `refreshnocache`
-hook on relay/event start still reloads them. The dedicated Split HUD CSS
+Both browser pages share `/hud/data` and `/timer/data`. **No relay-served browser
+source reloads on scene activation:** every one ships `restart_when_active: false`, in
+all collections (#956, guarded by `tests/test_split_layouts.py`). `true` blanks the page
+on air and rebuilds its state at each cut (with two HUD sources, on every STINT/SPLIT
+handover). The pages poll the relay for their data, and the relay's `refreshnocache`
+hook on relay/event start (and `racecast obs refresh`) reloads them all, which also
+heals a page OBS loaded before the relay was up. The dedicated Split HUD CSS
 route falls back to `hud.css` until `layout-splitscreen.json` exists, then uses the
 independent `splitscreen.css`. The label page uses that same Split stylesheet.
 
