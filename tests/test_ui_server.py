@@ -4383,7 +4383,7 @@ def t_every_button_icon_is_styled():
     assert re.search(r"\.viewhead button\s*\{[^}]*white-space:\s*nowrap", style), \
         "a crowded header must wrap its buttons to a new line, not squeeze their labels"
     assert re.search(r"\.viewhead\s*\{[^}]*flex-wrap:\s*wrap", style), "the header row must be allowed to wrap"
-    fill = html[html.index("function ovFillSample()"):html.index("function ovFitName(")]
+    fill = html[html.index("function ovFillSample()"):html.index("function ovRefit(")]
     assert "document.fonts.ready" in fill, "team names must be fitted again once the webfont has loaded"
     assert "ResizeObserver" in fill, "a name filled while the canvas is hidden must be fitted once it is laid out"
     assert ".cplinks .cprow { display:contents; }" in style, "crew link rows must share their columns"

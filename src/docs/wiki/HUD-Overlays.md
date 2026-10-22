@@ -17,10 +17,18 @@ three alignments.
 
 ![Team names fitted in left, center and right aligned slots](images/hud-team-name-fit.png)
 
-The round title can fit the same way, but only when the league opts in: set
-**Auto-fit max (px)** and **Auto-fit min (px)** on the Round title in the overlay
-builder (`--fit-max` / `--fit-min` in `hud.css`). A long title then shrinks from max
-down to min; without an Auto-fit max the title keeps its fixed font size.
+Every other text box can fit the same way when the league opts in: set
+**Auto-fit max (px)** and **Auto-fit min (px)** on the box in the overlay builder
+(`--fit-max` / `--fit-min` in the page's CSS). This works on every page the builder
+edits: the HUD, the Splitscreen labels and Split HUD, and the Intermission chat
+panel. A long text then shrinks from max down to min whenever its content changes;
+without an Auto-fit max the box keeps its fixed font size. The fit measures the width
+of one line, so it suits single-line boxes (names, titles, labels). A hidden box keeps
+its last size until it shows again. Picture and frame boxes (logos, flags, the POV
+frame) have no font and no auto-fit.
+
+Team names always fit and keep their own **Name max (px)** / **Name min (px)** pair
+(defaults 30 / 16), so their box offers no separate Auto-fit pair.
 
 ## Where it lives
 
@@ -129,7 +137,7 @@ opens the builder in a larger modal over the Control Center; **Save** writes the
 **Preview ↗** opens the live HUD preview at `/hud/preview` (the real base page with
 live Sheet data over your `Overlay.png` frame).
 
-![Control Center. Overlay Builder modal: drag/resize the HUD slots on a canvas over the Overlay.png frame, style them in the property panel](images/cc-overlay-builder.png)
+![Control Center. Overlay Builder modal: drag/resize the HUD slots on a canvas over the Overlay.png frame, style them in the property panel, here the Streamer box with its Auto-fit max/min](images/cc-overlay-builder.png)
 
 ### Splitscreen layouts
 

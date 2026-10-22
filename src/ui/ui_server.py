@@ -150,7 +150,8 @@ def make_handler(ctx):
     )
     _workspace = os.path.join(os.path.dirname(ctx["page_path"]), "telemetry.html")
     _workspace_script = os.path.join(os.path.dirname(ctx["page_path"]), "telemetry-workspace.js")
-    _shared_assets = {"/audience.js": ("audience.js", "application/javascript; charset=utf-8"),"/ui-base.css": ("ui-base.css", "text/css; charset=utf-8"),
+    _shared_assets = {"/audience.js": ("audience.js", "application/javascript; charset=utf-8"),
+                      "/overlay-fit.js": ("overlay-fit.js", "application/javascript; charset=utf-8"),"/ui-base.css": ("ui-base.css", "text/css; charset=utf-8"),
                       "/telemetry-shell.js": ("telemetry-shell.js", "application/javascript; charset=utf-8")}
     _pages.prewarm([ctx["page_path"], _context_script, _ai_script, _engineer_script, _workspace, _workspace_script]
                    + [os.path.join(os.path.dirname(ctx["page_path"]), filename) for filename, _ctype in _shared_assets.values()])

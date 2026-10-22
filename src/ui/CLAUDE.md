@@ -114,6 +114,16 @@ Loaded when working under `src/ui/`.
   before the directory exists. Edits apply through **Apply in OBS**. Tests:
   `tests/test_overlay.py` (compiler + slot extraction +
   migration), `tests/test_ui_server.py` + `tests/test_racecast.py` (routes + data layer).
+- **Text auto-fit (#957).** Every text slot (one offering `fontSize`) gets
+  `fitMax`/`fitMin` from `extract_slots` (`_with_fit`); box slots never do. The team
+  names keep `teamNameMax`/`teamNameMin` instead (`FIT_ALIASES`, no second pair); their
+  `hud.html` rule maps them onto `--fit-max`/`--fit-min`. The shared
+  `src/ui/overlay-fit.js` (relay `/overlay-fit.js`, Control Center `/overlay-fit.js`)
+  registers both properties non-inheriting (a value on a slot never makes its children
+  fit), and on the live pages (`data-fit-live`) refits every `[data-edit]` slot after
+  each DOM change via a MutationObserver; hidden or zero-width slots keep their size.
+  The canvas calls the same `RacecastFit.fit` with its zoom. Tests:
+  `tests/test_overlay_fit.py`.
 
 ## Wiki screenshots for UI changes (full rule, moved from the root CLAUDE.md)
 
