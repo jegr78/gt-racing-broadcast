@@ -63,14 +63,14 @@ async def main():
                 middle=(float(points[0][1])+float(points[-1][1]))/2
                 assert abs(float(zero.split()[1].split('H')[0])-middle)<.01, 'zero line did not cross zero delta' 
                 # The display groups the 3 m tail with the preceding 200 m block.
-                await page.evaluate('''() => {state.detail={...state.savedB,state:"confirmed",trace_complete:true,length_m:1003,trace:[{d:0,t:0,x:0,z:0},{d:1003,t:16,x:1,z:1}],sectors:[3,3,3,3,3,.02]};state.pair={compatible:true,b:state.detail,a:{...state.detail,id:"other",sectors:[3,3,3,3,3,.01]},delta:[],mini_sectors:{a:[3,3,3,3,3,.01],b:[3,3,3,3,3,.02],delta:[0,0,0,0,0,.01]}};render();}''')
+                await page.evaluate('''() => {state.detail={...state.savedB,state:"confirmed",trace_complete:true,length_m:1003,trace:[{d:0,t:0,x:0,z:0},{d:1003,t:16,x:1,z:1}],sectors:[3,3,3,3,3,.02]};state.pair={compatible:true,b:state.detail,a:{...state.detail,id:"other",sectors:[3,3,3,3,3,.01]},delta:[],mini_sectors:{a:[3,3,3,3,3,.01],b:[3,3,3,3,3,.02],delta:[0,0,0,0,0,.01]}};state.a="other";render();}''')
                 assert await page.locator('#sectors tbody tr').count() == 5, 'tiny trailing mini-sector remained separate'
                 last=await page.locator('#sectors tbody tr').last.locator('td').all_text_contents()
                 assert last == ['5–6','0:03.010','0:03.020','+0.010'], 'grouped tail lost formatted times or signed delta'
                 await page.evaluate('() => {state.pair.mini_sectors.b[5]=null;render();}')
                 assert await page.locator('#sectors tbody tr').last.locator('td').nth(2).inner_text() == 'N/A', 'missing tail produced a summed time'
                 # Only matching reviewed definitions may show a larger-sector delta.
-                await page.evaluate('''() => {const sections={reviewed:true,name:"Three race sections",names:["Opening","Middle","Closing"],bounds_m:[0,300,700,1003],times_s:[3,7,6],variant_id:"three"};state.detail={...state.detail,larger_sectors:sections,definition_fingerprint:"same",sector_variant_id:"three",corner_metrics:Array.from({length:8},(_,i)=>({number:i+1,apex_m:1003}))};state.pair={...state.pair,b:state.detail,a:{...state.detail,larger_sectors:{...sections,times_s:[4,6,6]}},definition_compatible:true};render();}''')
+                await page.evaluate('''() => {const sections={reviewed:true,name:"Three race sections",names:["Opening","Middle","Closing"],bounds_m:[0,300,700,1003],times_s:[3,7,6],variant_id:"three"};state.detail={...state.detail,larger_sectors:sections,definition_fingerprint:"same",sector_variant_id:"three",corner_metrics:Array.from({length:8},(_,i)=>({number:i+1,apex_m:1003}))};state.pair={...state.pair,b:state.detail,a:{...state.detail,id:state.a,larger_sectors:{...sections,times_s:[4,6,6]}},definition_compatible:true};render();}''')
                 table=page.locator('#larger-sectors')
                 assert await table.locator('[data-section]').count() == 3, 'reviewed sections were not structured'
                 text=await table.inner_text()
