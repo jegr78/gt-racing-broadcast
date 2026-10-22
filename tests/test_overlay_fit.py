@@ -293,9 +293,10 @@ const o = observers[0];
 out.target = o && o.target && o.target.tag;
 out.opts = o && o.opts;
 els.s.textContent = 'X'.repeat(20);
+const before = o.took;
 o.cb([{type: 'childList'}]);
 out.size = parseFloat(els.s.style.fontSize);
-out.took = o.took;
+out.took = o.took - before;
 console.log(JSON.stringify(out));""")
     if out is None:
         return
@@ -304,7 +305,7 @@ console.log(JSON.stringify(out));""")
     assert opts["childList"] and opts["subtree"] and opts["characterData"], opts
     assert {"hidden", "class", "style"} <= set(opts["attributeFilter"]), opts
     assert out["size"] == 16, out
-    assert out["took"] >= 1, "own style writes are dropped, or the observer loops"
+    assert out["took"] == 1, "own style writes are dropped, or the observer loops"
 
 
 # ---- serving + canvas -----------------------------------------------------------
