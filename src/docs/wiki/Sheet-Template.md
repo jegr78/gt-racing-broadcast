@@ -433,8 +433,9 @@ bytes untouched, including rows with blank links. The open crew desks, Director
 Panel and local Profile view read the updated local cache on their normal
 three-second poll. They need no Sheet access or relay restart. A blank/removed
 alias reverts to the old label. An unreadable Sheet or invalid HTML/error response
-retains the last good metadata. Internal assets keep their visibility rules;
-their private aliases are not distributed to crew controls.
+retains the last good metadata. Internal assets keep their visibility rules:
+the Director Panel and Companion show their alias too, but their aliases are not
+distributed to crew controls or the crew Graphics browser.
 
 Open graphic requests retain their first human label even if an administrator
 renames the asset. Every requester and the director use that snapshot until the
