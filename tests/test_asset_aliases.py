@@ -245,6 +245,9 @@ def t_director_labels_include_internal_assets_crew_labels_do_not():
                                 ("/console/obs/asset-labels", gate._tok("bob"))):
                 code, body = gate._get(port, path, token)
                 assert code == 200 and json.loads(body) == director, (path, code, body)
+            for crew in ("alice", "dave"):       # commentator, race_control desk
+                code, body = gate._get(port, "/console/obs/asset-labels", gate._tok(crew))
+                assert code == 403 and "League frame" not in body, (crew, code, body)
             code, body = gate._get(port, "/console/graphics", gate._tok("alice"))
             assert code == 200 and "League frame" not in body, body
             # The Director Panel's take list gets the director map; the crew take
